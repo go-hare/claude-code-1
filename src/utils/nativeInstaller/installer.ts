@@ -10,6 +10,7 @@
  * - Support for both JS and native builds
  */
 
+import { feature } from 'bun:bundle'
 import { randomBytes } from 'crypto'
 import { constants as fsConstants, type Stats } from 'fs'
 import {
@@ -35,7 +36,13 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { getMaxVersion, shouldSkipVersion } from '../autoUpdater.js'
+import {
+  getMaxVersion,
+  isForceDowngradeEnabled,
+  isForceDowngradeEnabledAsync,
+  shouldForceDowngrade,
+  shouldSkipVersion,
+} from '../autoUpdater.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
@@ -43,7 +50,13 @@ import { getCurrentInstallationType } from '../doctorDiagnostic.js'
 import { env } from '../env.js'
 import { envDynamic } from '../envDynamic.js'
 import { isEnvTruthy } from '../envUtils.js'
-import { errorMessage, getErrnoCode, isENOENT, toError } from '../errors.js'
+import {
+  ClaudeError,
+  errorMessage,
+  getErrnoCode,
+  isENOENT,
+  toError,
+} from '../errors.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getShellType } from '../localInstaller.js'
 import * as lockfile from '../lockfile.js'
@@ -65,11 +78,20 @@ import {
 import {
   downloadVersion,
   getLatestVersion,
+  hashFileSha256,
+  isOfflineNetworkError,
   isRegistrySessionRefusedError,
+  ManifestSignatureError,
   RegistrySessionRefusedError,
+  reverifyRetainedVersion,
+  verifyFileSha256,
 } from './download.js'
 
-export { isRegistrySessionRefusedError, RegistrySessionRefusedError }
+export {
+  isRegistrySessionRefusedError,
+  ManifestSignatureError,
+  RegistrySessionRefusedError,
+}
 import {
   acquireProcessLifetimeLock,
   cleanupStaleLocks,
@@ -386,9 +408,20 @@ async function tryWithVersionLock(
   }
 }
 
+/** Official 2.1.328 `r9n`: raised when a staged binary fails SHA-256 check at install time. */
+export class StagedBinaryChecksumMismatchError extends ClaudeError {
+  constructor() {
+    super(
+      'Staged binary no longer matches the verified checksum; refusing to install',
+    )
+    this.name = 'StagedBinaryChecksumMismatchError'
+  }
+}
+
 async function atomicMoveToInstallPath(
   stagedBinaryPath: string,
   installPath: string,
+  expectedChecksum?: string,
 ) {
   // Create installation directory if it doesn't exist
   await mkdir(dirname(installPath), { recursive: true })
@@ -401,6 +434,13 @@ async function atomicMoveToInstallPath(
     // would fail with EXDEV if staging and install are on different filesystems.
     await copyFile(stagedBinaryPath, tempInstallPath)
     await chmod(tempInstallPath, 0o755)
+    // Official 2.1.328 `kn`: re-verify staged binary hash before atomic rename
+    if (
+      expectedChecksum !== undefined &&
+      (await hashFileSha256(tempInstallPath)) !== expectedChecksum
+    ) {
+      throw new StagedBinaryChecksumMismatchError()
+    }
     await rename(tempInstallPath, installPath)
     logForDebugging(`Atomically installed binary to ${installPath}`)
   } catch (error) {
@@ -417,6 +457,7 @@ async function atomicMoveToInstallPath(
 async function installVersionFromPackage(
   stagingPath: string,
   installPath: string,
+  expectedChecksum?: string,
 ) {
   try {
     // Extract binary from npm package structure in staging
@@ -448,7 +489,11 @@ async function installVersionFromPackage(
       throw error
     }
 
-    await atomicMoveToInstallPath(stagedBinaryPath, installPath)
+    await atomicMoveToInstallPath(
+      stagedBinaryPath,
+      installPath,
+      expectedChecksum,
+    )
 
     // Clean up staging directory
     await rm(stagingPath, { recursive: true, force: true })
@@ -474,6 +519,7 @@ async function installVersionFromPackage(
 async function installVersionFromBinary(
   stagingPath: string,
   installPath: string,
+  expectedChecksum?: string,
 ) {
   try {
     // For direct binary downloads (GCS, generic bucket), the binary is directly in staging
@@ -492,14 +538,23 @@ async function installVersionFromBinary(
       throw error
     }
 
-    await atomicMoveToInstallPath(stagedBinaryPath, installPath)
+    await atomicMoveToInstallPath(
+      stagedBinaryPath,
+      installPath,
+      expectedChecksum,
+    )
 
     // Clean up staging directory
     await rm(stagingPath, { recursive: true, force: true })
 
     logEvent('tengu_native_install_binary_success', {})
   } catch (error) {
-    if (!errorMessage(error).includes('Staged binary not found')) {
+    if (error instanceof StagedBinaryChecksumMismatchError) {
+      logEvent('tengu_native_install_binary_failure', {
+        stage_atomic_move: true,
+        error_checksum_mismatch: true,
+      })
+    } else if (!errorMessage(error).includes('Staged binary not found')) {
       logEvent('tengu_native_install_binary_failure', {
         stage_atomic_move: true,
         error_move_failed: true,
@@ -514,49 +569,167 @@ async function installVersion(
   stagingPath: string,
   installPath: string,
   downloadType: 'npm' | 'binary',
+  expectedChecksum?: string,
 ) {
   // Use the explicit download type instead of guessing
   if (downloadType === 'npm') {
-    await installVersionFromPackage(stagingPath, installPath)
+    await installVersionFromPackage(stagingPath, installPath, expectedChecksum)
   } else {
-    await installVersionFromBinary(stagingPath, installPath)
+    await installVersionFromBinary(stagingPath, installPath, expectedChecksum)
   }
 }
 
 /**
+ * Official 2.1.328 `Xr`: in-process cache of manifest-signature-verified
+ * versions and their certified SHA-256 checksums.
+ */
+const retainedSignatureVerificationCache = new Map<
+  string,
+  { enforcingRelease: boolean; checksum?: string }
+>()
+
+/**
  * Performs the core update operation: download (if needed), install, and update symlink.
- * Returns whether a new install was performed (vs just updating symlink).
+ * Official 2.1.328 `dn`: also enforces manifest signature re-verification for
+ * retained versions and returns `skippedUnverifiedRelease: true` when a channel
+ * update resolves to a version that predates manifest-signature enforcement.
  */
 async function performVersionUpdate(
   version: string,
-  forceReinstall: boolean,
-): Promise<boolean> {
+  opts: {
+    forceReinstall: boolean
+    explicitVersionRequested: boolean
+    requireEnforcingRelease: boolean
+  },
+): Promise<{
+  wasNewInstall: boolean
+  skippedUnverifiedRelease: boolean
+}> {
+  const { forceReinstall, explicitVersionRequested, requireEnforcingRelease } =
+    opts
   const { stagingPath: baseStagingPath, installPath } =
     await getVersionPaths(version)
   const { executable: executablePath } = getBaseDirectories()
 
   // For lockless updates, use a unique staging path to avoid conflicts between concurrent downloads
-  const stagingPath = isEnvTruthy(process.env.ENABLE_LOCKLESS_UPDATES)
-    ? `${baseStagingPath}.${process.pid}.${Date.now()}`
+  const lockless = isEnvTruthy(process.env.ENABLE_LOCKLESS_UPDATES)
+  const stagingPath = lockless
+    ? `${baseStagingPath}.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}`
     : baseStagingPath
 
+  const isTestFixtureVersion = feature('ALLOW_TEST_VERSIONS')
+    ? /^99\.99\./.test(version)
+    : false
+  const isOfficialGcsPath =
+    process.env.USER_TYPE !== 'ant' && !isTestFixtureVersion
+
+  const cachedSig = retainedSignatureVerificationCache.get(version)
+  const needsSignatureReverify = !(
+    cachedSig &&
+    (cachedSig.enforcingRelease || !requireEnforcingRelease)
+  )
+  let expectedChecksum: string | undefined = needsSignatureReverify
+    ? undefined
+    : cachedSig?.checksum
+
   // Only download if not already installed (or if force reinstall)
-  const needsInstall = !(await versionIsAvailable(version)) || forceReinstall
+  let needsInstall = !(await versionIsAvailable(version)) || forceReinstall
+
+  if (!needsInstall && isOfficialGcsPath) {
+    if (needsSignatureReverify) {
+      try {
+        const reverified = await reverifyRetainedVersion(version, installPath, {
+          explicitVersionRequested,
+          requireEnforcingRelease,
+        })
+        expectedChecksum = reverified.expectedChecksum
+        if (!reverified.binaryMatches) {
+          needsInstall = true
+        } else if (reverified.signatureVerified) {
+          retainedSignatureVerificationCache.set(version, {
+            enforcingRelease: requireEnforcingRelease,
+            checksum: expectedChecksum,
+          })
+        }
+      } catch (err) {
+        if (err instanceof ManifestSignatureError) {
+          if (
+            requireEnforcingRelease &&
+            err.reason === 'release_predates_enforcement'
+          ) {
+            return { wasNewInstall: false, skippedUnverifiedRelease: true }
+          }
+          throw err
+        }
+        if (
+          !explicitVersionRequested ||
+          requireEnforcingRelease ||
+          !isOfflineNetworkError(err)
+        ) {
+          throw err
+        }
+        logForDebugging(
+          `Could not re-verify retained ${version} (${toError(err).name}); offline, activating as requested`,
+          { level: 'warn' },
+        )
+      }
+    } else if (cachedSig?.checksum !== undefined) {
+      if (!(await verifyFileSha256(installPath, cachedSig.checksum))) {
+        logForDebugging(
+          `Retained ${version} no longer matches the checksum verified earlier in this process; re-downloading`,
+          { level: 'warn' },
+        )
+        retainedSignatureVerificationCache.delete(version)
+        needsInstall = true
+      }
+    }
+  }
+
   if (needsInstall) {
     logForDebugging(
       forceReinstall
         ? `Force reinstalling native installer version ${version}`
         : `Downloading native installer version ${version}`,
     )
-    const downloadType = await downloadVersion(version, stagingPath)
-    await installVersion(stagingPath, installPath, downloadType)
+    try {
+      const downloadResult = await downloadVersion(version, stagingPath, {
+        explicitVersionRequested,
+        requireEnforcingRelease,
+      })
+      expectedChecksum = downloadResult.expectedChecksum
+      await installVersion(
+        stagingPath,
+        installPath,
+        downloadResult.downloadType,
+        expectedChecksum,
+      )
+      if (downloadResult.signatureVerified) {
+        retainedSignatureVerificationCache.set(version, {
+          enforcingRelease: requireEnforcingRelease,
+          checksum: expectedChecksum,
+        })
+      }
+    } catch (err) {
+      if (
+        requireEnforcingRelease &&
+        err instanceof ManifestSignatureError &&
+        err.reason === 'release_predates_enforcement'
+      ) {
+        return { wasNewInstall: false, skippedUnverifiedRelease: true }
+      }
+      throw err
+    } finally {
+      if (lockless) {
+        await rm(stagingPath, { recursive: true, force: true }).catch(() => {})
+      }
+    }
   } else {
     logForDebugging(`Version ${version} already installed, updating symlink`)
   }
 
-  // Create direct symlink from ~/.local/bin/claude to the version binary
+  // Create direct symlink (or verified copy on Windows) from ~/.local/bin/claude to the version binary
   await removeDirectoryIfEmpty(executablePath)
-  await updateSymlink(executablePath, installPath)
+  await updateSymlink(executablePath, installPath, { expectedChecksum })
 
   // Verify the executable was actually created/updated
   if (!(await isPossibleClaudeBinary(executablePath))) {
@@ -573,7 +746,7 @@ async function performVersionUpdate(
         `Check write permissions to ${executablePath}.`,
     )
   }
-  return needsInstall
+  return { wasNewInstall: needsInstall, skippedUnverifiedRelease: false }
 }
 
 /**
@@ -588,6 +761,7 @@ const verifiedVersionsCache = new Map<
 
 export function clearVerifiedVersionsCacheForTesting(): void {
   verifiedVersionsCache.clear()
+  retainedSignatureVerificationCache.clear()
 }
 
 export async function isVersionBinaryVerifiedCached(
@@ -632,6 +806,54 @@ async function versionIsAvailable(version: string): Promise<boolean> {
   return isVersionBinaryVerifiedCached(version, installPath)
 }
 
+/** Official 2.1.328 `Jr`: checks whether `execPath` is inside the native install dirs. */
+function isExecPathInNativeInstall(
+  execPath: string,
+  dirs: { versions: string; executable: string; isWindows: boolean },
+): boolean {
+  const norm = (p: string) =>
+    dirs.isWindows ? p.replaceAll('\\', '/').toLowerCase() : p
+  const normalizedExec = norm(execPath)
+  const normalizedVersions = `${norm(dirs.versions).replace(/\/+$/, '')}/`
+  return (
+    normalizedExec.startsWith(normalizedVersions) ||
+    normalizedExec === norm(dirs.executable)
+  )
+}
+
+/** Official 2.1.328 `c1o`: whether the current process is executing from the native install. */
+async function isRunningFromNativeInstall(): Promise<boolean> {
+  const { versions, executable } = getBaseDirectories()
+  const isWindows = getPlatform().startsWith('win32')
+  const candidates = [{ versions, executable }]
+  const [realVersions, realExecDir] = await Promise.all([
+    realpath(versions).catch(() => versions),
+    realpath(dirname(executable)).catch(() => dirname(executable)),
+  ])
+  const realExecutable = join(realExecDir, basename(executable))
+  if (realVersions !== versions || realExecutable !== executable) {
+    candidates.push({ versions: realVersions, executable: realExecutable })
+  }
+  return candidates.some(c =>
+    isExecPathInNativeInstall(process.execPath, { ...c, isWindows }),
+  )
+}
+
+/**
+ * Official 2.1.328 `Zr`: channel updates on an existing native install require
+ * an enforcing signed release (refusing downgrades to pre-signing releases).
+ */
+async function shouldRequireEnforcingRelease(): Promise<boolean> {
+  if (await isRunningFromNativeInstall()) {
+    return true
+  }
+  const { executable } = getBaseDirectories()
+  return (
+    (await isPossibleClaudeBinary(executable)) &&
+    !(await isNpmShimLauncher(executable).catch(() => false))
+  )
+}
+
 async function updateLatest(
   channelOrVersion: string,
   forceReinstall: boolean = false,
@@ -644,34 +866,56 @@ async function updateLatest(
   skippedUnverifiedRelease?: boolean
 }> {
   const startTime = Date.now()
-  let version = await getLatestVersion(channelOrVersion)
   const { executable: executablePath } = getBaseDirectories()
+  const isChannel = !/^v?\d+\.\d+\.\d+(-\S+)?$/.test(channelOrVersion)
+
+  // Official 2.1.328 `ti`: fetch maxVersion + external_force_downgrade BEFORE
+  // resolving the channel pointer so forced downgrades directly target maxVersion.
+  const maxVersion = await getMaxVersion()
+  const forceDowngradeEnabled =
+    maxVersion !== undefined &&
+    (isForceDowngradeEnabled() || (await isForceDowngradeEnabledAsync()))
+  const isForcedDowngrade =
+    forceDowngradeEnabled &&
+    !forceReinstall &&
+    isChannel &&
+    Boolean(maxVersion) &&
+    shouldForceDowngrade(MACRO.VERSION, maxVersion!, 'native_update')
+
+  let version = isForcedDowngrade
+    ? maxVersion!
+    : await getLatestVersion(channelOrVersion)
 
   logForDebugging(`Checking for native installer update to version ${version}`)
 
+  const requireEnforcingRelease =
+    isChannel && (await shouldRequireEnforcingRelease())
+
   // Check if max version is set (server-side kill switch for auto-updates)
-  if (!forceReinstall) {
-    const maxVersion = await getMaxVersion()
-    if (maxVersion && gt(version, maxVersion)) {
+  if (
+    !isForcedDowngrade &&
+    !forceReinstall &&
+    maxVersion &&
+    gt(version, maxVersion)
+  ) {
+    logForDebugging(
+      `Native installer: maxVersion ${maxVersion} is set, capping update from ${version} to ${maxVersion}`,
+    )
+    // If we're already at or above maxVersion, skip the update entirely
+    if (gte(MACRO.VERSION, maxVersion)) {
       logForDebugging(
-        `Native installer: maxVersion ${maxVersion} is set, capping update from ${version} to ${maxVersion}`,
+        `Native installer: current version ${MACRO.VERSION} is already at or above maxVersion ${maxVersion}, skipping update`,
       )
-      // If we're already at or above maxVersion, skip the update entirely
-      if (gte(MACRO.VERSION, maxVersion)) {
-        logForDebugging(
-          `Native installer: current version ${MACRO.VERSION} is already at or above maxVersion ${maxVersion}, skipping update`,
-        )
-        logEvent('tengu_native_update_skipped_max_version', {
-          latency_ms: Date.now() - startTime,
-          max_version:
-            maxVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          available_version:
-            version as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        return { success: true, wasSkipped: true, latestVersion: version }
-      }
-      version = maxVersion
+      logEvent('tengu_native_update_skipped_max_version', {
+        latency_ms: Date.now() - startTime,
+        max_version:
+          maxVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        available_version:
+          version as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return { success: true, wasSkipped: true, latestVersion: version }
     }
+    version = maxVersion
   }
 
   // Early exit: if we're already running this exact version AND both the version binary
@@ -703,13 +947,31 @@ async function updateLatest(
     return { success: true, wasSkipped: true, latestVersion: version }
   }
 
+  if (isForcedDowngrade) {
+    logEvent('tengu_native_update_forced_downgrade', {
+      from_version:
+        MACRO.VERSION as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      to_version:
+        version as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
+
   // Track if we're actually installing or just symlinking
   let wasNewInstall = false
+  let skippedUnverifiedRelease = false
   let latencyMs: number
+
+  const updateOpts = {
+    forceReinstall,
+    explicitVersionRequested: !isChannel,
+    requireEnforcingRelease,
+  }
 
   if (isEnvTruthy(process.env.ENABLE_LOCKLESS_UPDATES)) {
     // Lockless: rely on atomic operations, errors propagate
-    wasNewInstall = await performVersionUpdate(version, forceReinstall)
+    const result = await performVersionUpdate(version, updateOpts)
+    wasNewInstall = result.wasNewInstall
+    skippedUnverifiedRelease = result.skippedUnverifiedRelease
     latencyMs = Date.now() - startTime
   } else {
     // Lock-based updates
@@ -722,7 +984,9 @@ async function updateLatest(
     const lockAcquired = await tryWithVersionLock(
       installPath,
       async () => {
-        wasNewInstall = await performVersionUpdate(version, forceReinstall)
+        const result = await performVersionUpdate(version, updateOpts)
+        wasNewInstall = result.wasNewInstall
+        skippedUnverifiedRelease = result.skippedUnverifiedRelease
       },
       3, // retries
     )
@@ -749,6 +1013,24 @@ async function updateLatest(
         lockFailed: true,
         lockHolderPid,
       }
+    }
+  }
+
+  if (skippedUnverifiedRelease) {
+    logEvent('tengu_native_update_skipped_unverified_release', {
+      latency_ms: latencyMs,
+      target_version:
+        version as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    logForDebugging(
+      `Native installer: resolved ${version} predates manifest signature enforcement; staying on ${MACRO.VERSION}`,
+      { level: 'warn' },
+    )
+    return {
+      success: true,
+      wasSkipped: true,
+      skippedUnverifiedRelease: true,
+      latestVersion: version,
     }
   }
 
@@ -781,21 +1063,23 @@ export async function removeDirectoryIfEmpty(path: string): Promise<void> {
 export async function updateSymlink(
   symlinkPath: string,
   targetPath: string,
+  options?: { expectedChecksum?: string },
 ): Promise<boolean> {
+  const expectedChecksum = options?.expectedChecksum
   const platform = getPlatform()
   const isWindows = platform.startsWith('win32')
 
-  // On Windows, stage the copy into a temporary sibling file FIRST, then swap
-  // via fast metadata renames so interrupting `claude update` (e.g. Ctrl+C)
-  // during the binary copy never leaves `claude` removed (official 2.1.323 #2091,
-  // `ni` @294578196).
+  // On Windows, stage the copy into a temporary sibling file FIRST, verify its
+  // SHA-256 against the certified version checksum, then swap via fast metadata
+  // renames so interrupting `claude update` never leaves `claude` removed or
+  // corrupted (official 2.1.328 `ri`).
   if (isWindows) {
     try {
       // Ensure parent directory exists
       const parentDir = dirname(symlinkPath)
       await mkdir(parentDir, { recursive: true })
 
-      // Check if file already exists and has same content
+      // Check if file already exists and has same content (verified by SHA-256)
       let existingStats: Stats | undefined
       try {
         existingStats = await stat(symlinkPath)
@@ -806,8 +1090,11 @@ export async function updateSymlink(
       if (existingStats) {
         try {
           const targetStats = await stat(targetPath)
-          // If sizes match, assume files are the same (avoid reading large files)
-          if (existingStats.size === targetStats.size) {
+          if (
+            existingStats.size === targetStats.size &&
+            (expectedChecksum === undefined ||
+              (await verifyFileSha256(symlinkPath, expectedChecksum)))
+          ) {
             return false
           }
         } catch {
@@ -825,6 +1112,26 @@ export async function updateSymlink(
           throw new Error(`Source file does not exist: ${targetPath}`)
         }
         throw e
+      }
+
+      // Official 2.1.328 `ri`: verify staged copy SHA-256 before atomic swap.
+      let checksumOk: boolean
+      try {
+        checksumOk =
+          expectedChecksum === undefined ||
+          (await hashFileSha256(stagedNewPath)) === expectedChecksum
+      } catch (hashErr) {
+        await unlink(stagedNewPath).catch(() => {})
+        throw hashErr
+      }
+      if (!checksumOk) {
+        await unlink(stagedNewPath).catch(() => {})
+        logError(
+          new Error(
+            `Refusing to install a launcher copy of ${targetPath} that does not match its signed checksum`,
+          ),
+        )
+        return false
       }
 
       try {
@@ -1167,6 +1474,16 @@ async function installLatestImpl(
       wasUpdated: false,
       lockFailed: updateResult.lockFailed,
       lockHolderPid: updateResult.lockHolderPid,
+    }
+  }
+
+  if (updateResult.skippedUnverifiedRelease) {
+    return {
+      latestVersion: updateResult.latestVersion,
+      wasUpdated: false,
+      wasSkipped: true,
+      skippedUnverifiedRelease: true,
+      lockFailed: false,
     }
   }
 

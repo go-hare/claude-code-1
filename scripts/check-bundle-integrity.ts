@@ -133,8 +133,6 @@ const NATIVE_FRAMEWORKS = new Set([
 const STATIC_IMPORT_RE = /(?:from\s+|import\s+)"(\.\/[^"]+\.js)"/g
 // 匹配 __require("xxx")
 const REQUIRE_RE = /__require\("([^"]+)"\)/g
-// 匹配动态 import("xxx")，排除 ./chunk-xxx.js 的内部引用
-const DYNAMIC_IMPORT_RE = /import\("([^"]+)"\)/g
 // 匹配 createRequire(...) 绑定的别名（如 var require2 = createRequire(import.meta.url)、req = createRequire(...)、nodeRequire = createRequire(...)）
 const CREATE_REQUIRE_ALIAS_DEF_RE =
   /\b([A-Za-z_$][\w$]*)\s*=\s*(?:[\w$]+\.)?createRequire\s*\(/g
@@ -156,6 +154,15 @@ function buildNodeRequireRe(content: string): RegExp {
 function findImportLine(lines: string[], mod: string): number {
   const escaped = mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const re = new RegExp(`(?:from\\s+|import\\s+)["']${escaped}["']`)
+  for (let idx = 0; idx < lines.length; idx++) {
+    if (re.test(lines[idx]!)) return idx + 1
+  }
+  return 1
+}
+
+function findDynamicImportLine(lines: string[], mod: string): number {
+  const escaped = mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`import\\s*\\(\\s*["']${escaped}["']\\s*\\)`)
   for (let idx = 0; idx < lines.length; idx++) {
     if (re.test(lines[idx]!)) return idx + 1
   }
@@ -208,20 +215,61 @@ async function main() {
     for (const dependency of transpiler.scanImports(
       content.replace(/^#![^\r\n]*/, ''),
     )) {
-      if (dependency.kind !== 'import-statement') continue
       const mod = dependency.path
-      if (mod.startsWith('.') || isNodeBuiltin(mod) || PKG_DEPS.has(mod)) {
+      if (dependency.kind === 'import-statement') {
+        if (mod.startsWith('.') || isNodeBuiltin(mod) || PKG_DEPS.has(mod)) {
+          continue
+        }
+        const bunOnly = isBunOnlyModule(mod)
+        findings.push({
+          type: bunOnly ? 'bun-runtime-only' : 'third-party-static-import',
+          severity: bunOnly ? 'warning' : 'error',
+          file,
+          line: findImportLine(lines, mod),
+          module: mod,
+          snippet: mod,
+        })
         continue
       }
-      const bunOnly = isBunOnlyModule(mod)
-      findings.push({
-        type: bunOnly ? 'bun-runtime-only' : 'third-party-static-import',
-        severity: bunOnly ? 'warning' : 'error',
-        file,
-        line: findImportLine(lines, mod),
-        module: mod,
-        snippet: mod,
-      })
+      // 2c. AST-level check for dynamic import("...") — avoids false positives
+      // on diagnostic/template strings like `import("{0}")` inside bundled tools.
+      if (dependency.kind === 'dynamic-import') {
+        if (mod.startsWith('./') || mod.startsWith('../')) continue
+        if (NATIVE_FRAMEWORKS.has(mod)) continue
+        if (isNodeBuiltin(mod) || PKG_DEPS.has(mod)) continue
+        const lineNum = findDynamicImportLine(lines, mod)
+        const snippet = (lines[lineNum - 1] ?? mod).trim().slice(0, 120)
+        if (isBunOnlyModule(mod)) {
+          findings.push({
+            type: 'bun-runtime-only',
+            severity: 'warning',
+            file,
+            line: lineNum,
+            module: mod,
+            snippet,
+          })
+          continue
+        }
+        if (mod === '@napi-rs/keyring') {
+          findings.push({
+            type: 'optional-native-import',
+            severity: 'warning',
+            file,
+            line: lineNum,
+            module: mod,
+            snippet,
+          })
+          continue
+        }
+        findings.push({
+          type: 'third-party-import',
+          severity: 'error',
+          file,
+          line: lineNum,
+          module: mod,
+          snippet,
+        })
+      }
     }
 
     for (let i = 0; i < lines.length; i++) {
@@ -267,50 +315,6 @@ async function main() {
         // 第三方模块 — 在生产环境（全局 npm install）中找不到
         findings.push({
           type: 'third-party-require',
-          severity: 'error',
-          file,
-          line: lineNum,
-          module: mod,
-          snippet: line.trim().slice(0, 120),
-        })
-      }
-
-      // 2c. 检查动态 import() 中的第三方模块
-      const dynImportMatches = line.matchAll(DYNAMIC_IMPORT_RE)
-      for (const m of dynImportMatches) {
-        const mod = m[1]
-        // 跳过内部 chunk 引用和相对路径
-        if (mod.startsWith('./') || mod.startsWith('../')) continue
-        // 跳过 ObjC.import
-        if (NATIVE_FRAMEWORKS.has(mod)) continue
-        if (isNodeBuiltin(mod) || PKG_DEPS.has(mod)) continue
-        if (isBunOnlyModule(mod)) {
-          // bun:test 等只在 Bun 运行时可用，Node.js 运行时会失败
-          findings.push({
-            type: 'bun-runtime-only',
-            severity: 'warning',
-            file,
-            line: lineNum,
-            module: mod,
-            snippet: line.trim().slice(0, 120),
-          })
-          continue
-        }
-        // keychain.ts catches this optional addon and uses encrypted file storage.
-        if (mod === '@napi-rs/keyring') {
-          findings.push({
-            type: 'optional-native-import',
-            severity: 'warning',
-            file,
-            line: lineNum,
-            module: mod,
-            snippet: line.trim().slice(0, 120),
-          })
-          continue
-        }
-        // 第三方动态 import
-        findings.push({
-          type: 'third-party-import',
           severity: 'error',
           file,
           line: lineNum,

@@ -8,16 +8,20 @@
 
 import { feature } from 'bun:bundle'
 import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
-import { createHash } from 'crypto'
-import { createWriteStream } from 'fs'
+import { createHash, createPublicKey, verify } from 'crypto'
+import { createReadStream, createWriteStream } from 'fs'
 import { chmod, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { Readable, Transform } from 'stream'
 import { pipeline } from 'stream/promises'
-import { logEvent } from 'src/services/analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
 import type { ReleaseChannel } from '../config.js'
 import { logForDebugging } from '../debug.js'
-import { ClaudeError, toError } from '../errors.js'
+import { ClaudeError, getErrnoCode, toError } from '../errors.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getFsImplementation } from '../fsOperations.js'
 import {
@@ -25,17 +29,321 @@ import {
   isZstdDecompressError,
 } from '../http.js'
 import { logError } from '../log.js'
-import { sleep } from '../sleep.js'
-import { jsonStringify, writeFileSync_DEPRECATED } from '../slowOperations.js'
 import {
   resolveDownloadDeadlineMsForTesting,
   resolveStallTimeoutMsForTesting,
 } from '../residualFinalEnvGates.js'
+import { lt } from '../semver.js'
+import { sleep } from '../sleep.js'
+import {
+  jsonParse,
+  jsonStringify,
+  writeFileSync_DEPRECATED,
+} from '../slowOperations.js'
 import { getBinaryName, getPlatform } from './installer.js'
 
 const GCS_BUCKET_URL = 'https://downloads.claude.ai/claude-code-releases'
 export const ARTIFACTORY_REGISTRY_URL =
   'https://artifactory.infra.ant.dev/artifactory/api/npm/npm-all/'
+
+/** Official 2.1.328 `Ze()`: pinned RSA-4096 public key for release manifest signatures. */
+export const MANIFEST_SIGNING_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAp28rSV5I8HmK8CK9GixB
+UZR/gtJxeOCsRXO4EJiej40jzBmQA3cWXGosVO82ZfFsRKVTtMC5iB/HH9sxjncr
+mYNWGroJNbx29m/FgYQBgkCXT4AfFl6rnnXqRGLZOerj/4AqE4yQ1GZbhBgR55Z7
+ro0ieKK8RHYUspBKAFHyWRhCCz6THW6YRbf0p/hG/08TOY6Sj3cJ7/AEoTRf9ZmV
+NX1k0KvbUSiVGpGY9OIHWgxRJUF2pArU4o/hk+sqGAgEUh8Bjvjwvz6+quLXPg+y
+0Y8Ugb1Fg6BUppam/zydYY/Q/+yNjnuF154gD1jEeeir8R5czs6zUHSbo2yXUpAs
+IdWYo5End8vGsluVmFExnUWm/fTVMGoM5Wm3v1VRepMydEnJ+atz4oQdmPQcKNAi
+p5GJO2uyk++xFr9CpKvlR5jral92toYV/m+mur3va8ydamWBo/qG7/wt0sdS81Iw
+H6lcu0SQ39rgKD+bdoPLv05EqVMYTFRI2QZEsWGYTMs0DOrfCIJFH50qyD0x4sWw
+1gEWeG3jDgY8cj2StZz+zjqzUd05CibcCzEAGm1EQg5y9D40tIsAU1OI7bpgQ9V0
+lC8lrqE7zJY66UK9Z1daA8jrdDi6migNjHFrXfT3V4QvMthCIO05q05SS3x2G3Zp
+IgmI+CePUPB1pDf+lhPkU1MCAwEAAQ==
+-----END PUBLIC KEY-----
+`
+
+/** Official 2.1.328 `Et` / `Je` / `bt` / `Nn` / `In` manifest signature constants. */
+export const MANIFEST_SIGNATURE_DOMAIN_PREFIX = Buffer.from(
+  'claude-code-manifest-v1\x00',
+)
+export const FIRST_SIGNED_VERSION = '2.1.207'
+export const MANIFEST_SIGNATURE_CLIENT_ENFORCEMENT = 'flag'
+const MANIFEST_SIGNATURE_SCHEMA = 1
+const MANIFEST_SIGNATURE_ALGORITHM = 'RSASSA-PKCS1-v1_5-SHA512'
+const SIDECAR_FETCH_MAX_ATTEMPTS = 5
+const SIDECAR_FETCH_DEADLINE_MS = 33_000
+const SIDECAR_FETCH_INTERRUPTED_THRESHOLD_MS = 2 * SIDECAR_FETCH_DEADLINE_MS
+
+export type ManifestSignatureErrorReason =
+  | 'sidecar_missing'
+  | 'sidecar_malformed'
+  | 'sidecar_fetch_http_error'
+  | 'sidecar_fetch_interrupted'
+  | 'sidecar_fetch_timeout'
+  | 'sidecar_fetch_connection_error'
+  | 'key_mismatch'
+  | 'signature_invalid'
+  | 'version_mismatch'
+  | 'binary_name_mismatch'
+  | 'release_predates_enforcement'
+
+/** Official 2.1.328 `ZM`: error raised on release manifest signature verification failure. */
+export class ManifestSignatureError extends ClaudeError {
+  readonly reason: ManifestSignatureErrorReason
+  readonly verifyThrew?: boolean
+
+  constructor(
+    version: string,
+    reason: ManifestSignatureErrorReason,
+    context: 'update' | 'app_bundle' = 'update',
+    opts?: { verifyThrew?: boolean },
+  ) {
+    super(
+      context === 'update'
+        ? `Release verification failed for Claude Code ${version} (${reason}). The update was not installed.`
+        : `Release verification failed for the macOS app bundle of Claude Code ${version} (${reason}).`,
+    )
+    this.name = 'ManifestSignatureError'
+    this.reason = reason
+    this.verifyThrew = opts?.verifyThrew
+  }
+}
+
+export type ReleaseManifestPlatformEntry = {
+  checksum: string
+  size?: number
+  binary?: string
+  [key: string]: unknown
+}
+
+export type ReleaseManifest = {
+  version: string
+  manifestSignatureEnforcement?: string
+  platforms: Record<string, ReleaseManifestPlatformEntry>
+  [key: string]: unknown
+}
+
+export type ManifestSignatureSidecar = {
+  schema: 1
+  algorithm: 'RSASSA-PKCS1-v1_5-SHA512'
+  signature: string
+  publicKeySha256: string
+}
+
+export type ManifestSignaturePolicy =
+  | 'skip'
+  | 'require'
+  | 'allow-unsigned-legacy'
+  | 'require-enforcing-release'
+
+function getManifestSignatureFlag(): boolean | null {
+  return getFeatureValue_CACHED_MAY_BE_STALE<boolean | null>(
+    'tengu_elegant_pancake',
+    null,
+  )
+}
+
+/** Official 2.1.328 `lt()`: whether manifest signature enforcement is active on this client. */
+export function isManifestSignatureEnforced(
+  enforcement: string = MANIFEST_SIGNATURE_CLIENT_ENFORCEMENT,
+  flag: boolean | null = getManifestSignatureFlag(),
+): boolean {
+  return enforcement === 'always' ? flag !== false : flag === true
+}
+
+/** Official 2.1.328 `gr()`: whether a release's manifest declares signature enforcement. */
+export function isReleaseEnforcingManifestSignature(
+  releaseEnforcement: string | undefined,
+  flag: boolean | null = getManifestSignatureFlag(),
+): boolean {
+  return (
+    releaseEnforcement === 'always' ||
+    (releaseEnforcement === 'flag' && isManifestSignatureEnforced('flag', flag))
+  )
+}
+
+/** Official 2.1.328 `zt()`: selects the manifest signature verification policy. */
+export function getManifestSignaturePolicy(
+  version: string,
+  opts: {
+    explicitVersionRequested: boolean
+    requireEnforcingRelease: boolean
+  },
+): ManifestSignaturePolicy {
+  return opts.requireEnforcingRelease
+    ? 'require-enforcing-release'
+    : opts.explicitVersionRequested && lt(version, FIRST_SIGNED_VERSION)
+      ? 'allow-unsigned-legacy'
+      : 'require'
+}
+
+function parseReleaseManifest(raw: unknown): ReleaseManifest | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+  const obj = raw as Record<string, unknown>
+  if (typeof obj.version !== 'string') {
+    return null
+  }
+  if (
+    obj.manifestSignatureEnforcement !== undefined &&
+    typeof obj.manifestSignatureEnforcement !== 'string'
+  ) {
+    return null
+  }
+  if (
+    obj.platforms === null ||
+    typeof obj.platforms !== 'object' ||
+    Array.isArray(obj.platforms)
+  ) {
+    return null
+  }
+  const platforms = obj.platforms as Record<string, unknown>
+  for (const entry of Object.values(platforms)) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      return null
+    }
+    const plat = entry as Record<string, unknown>
+    if (typeof plat.checksum !== 'string') {
+      return null
+    }
+    if (plat.size !== undefined && typeof plat.size !== 'number') {
+      return null
+    }
+    if (plat.binary !== undefined && typeof plat.binary !== 'string') {
+      return null
+    }
+  }
+  return obj as ReleaseManifest
+}
+
+function parseSignatureSidecar(raw: unknown): ManifestSignatureSidecar | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+  const obj = raw as Record<string, unknown>
+  if (
+    obj.schema !== MANIFEST_SIGNATURE_SCHEMA ||
+    obj.algorithm !== MANIFEST_SIGNATURE_ALGORITHM ||
+    typeof obj.signature !== 'string' ||
+    obj.signature.length === 0 ||
+    typeof obj.publicKeySha256 !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(obj.publicKeySha256)
+  ) {
+    return null
+  }
+  return {
+    schema: 1,
+    algorithm: 'RSASSA-PKCS1-v1_5-SHA512',
+    signature: obj.signature,
+    publicKeySha256: obj.publicKeySha256,
+  }
+}
+
+/**
+ * Official 2.1.328 `tt()`: verifies a release manifest's detached RSA-SHA512
+ * signature sidecar against the pinned SPKI public key and expected version.
+ */
+export function verifyReleaseManifestSignature({
+  manifestBytes,
+  sidecar,
+  expectedVersion,
+  publicKeyPem = MANIFEST_SIGNING_PUBLIC_KEY_PEM,
+}: {
+  manifestBytes: Buffer
+  sidecar: unknown
+  expectedVersion: string
+  publicKeyPem?: string
+}): ReleaseManifest {
+  const parsedSidecar = parseSignatureSidecar(sidecar)
+  if (!parsedSidecar) {
+    throw new ManifestSignatureError(expectedVersion, 'sidecar_malformed')
+  }
+  const { signature, publicKeySha256 } = parsedSidecar
+  if (Buffer.from(signature, 'base64').toString('base64') !== signature) {
+    throw new ManifestSignatureError(expectedVersion, 'sidecar_malformed')
+  }
+
+  let publicKey: ReturnType<typeof createPublicKey>
+  try {
+    publicKey = createPublicKey(publicKeyPem)
+  } catch {
+    throw new ManifestSignatureError(expectedVersion, 'key_mismatch')
+  }
+
+  const expectedKeySha256 = createHash('sha256')
+    .update(publicKey.export({ type: 'spki', format: 'der' }))
+    .digest('hex')
+  if (publicKeySha256 !== expectedKeySha256) {
+    throw new ManifestSignatureError(expectedVersion, 'key_mismatch')
+  }
+
+  let valid = false
+  let verifyThrew = false
+  try {
+    valid = verify(
+      'sha512',
+      Buffer.concat([MANIFEST_SIGNATURE_DOMAIN_PREFIX, manifestBytes]),
+      publicKey,
+      Buffer.from(signature, 'base64'),
+    )
+  } catch {
+    valid = false
+    verifyThrew = true
+  }
+  if (!valid) {
+    throw new ManifestSignatureError(
+      expectedVersion,
+      'signature_invalid',
+      'update',
+      { verifyThrew },
+    )
+  }
+
+  let parsedManifest: ReleaseManifest | null = null
+  try {
+    parsedManifest = parseReleaseManifest(
+      jsonParse(manifestBytes.toString('utf8')),
+    )
+  } catch {
+    parsedManifest = null
+  }
+  if (!parsedManifest || parsedManifest.version !== expectedVersion) {
+    throw new ManifestSignatureError(expectedVersion, 'version_mismatch')
+  }
+  return parsedManifest
+}
+
+/** Official 2.1.328 `ze()`: streams a file and returns its SHA-256 hex digest. */
+export async function hashFileSha256(filePath: string): Promise<string> {
+  const hash = createHash('sha256')
+  await pipeline(createReadStream(filePath), hash)
+  return hash.digest('hex')
+}
+
+/** Official 2.1.328 `We()`: returns true iff `filePath` matches `expectedChecksum`. */
+export async function verifyFileSha256(
+  filePath: string,
+  expectedChecksum: string,
+): Promise<boolean> {
+  try {
+    return (await hashFileSha256(filePath)) === expectedChecksum
+  } catch (error) {
+    logForDebugging(
+      `Could not hash ${filePath} (${getErrnoCode(error) ?? toError(error).name}); treating as mismatched`,
+    )
+    return false
+  }
+}
+
+/** Official 2.1.328 `Gt()`: detects offline/transient network errors during re-verification. */
+export function isOfflineNetworkError(error: unknown): boolean {
+  if (getHttpStatus(error) !== undefined) {
+    return false
+  }
+  return isNetworkOrTimeoutError(error)
+}
 
 /** Official 2.1.328 `S6s`: raised when the release server refuses the session. */
 export class RegistrySessionRefusedError extends ClaudeError {
@@ -641,6 +949,318 @@ async function downloadAndVerifyBinary(
   throw lastError ?? new Error('Download failed after all retries')
 }
 
+function toBuffer(data: unknown): Buffer {
+  if (Buffer.isBuffer(data)) {
+    return data
+  }
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data)
+  }
+  if (ArrayBuffer.isView(data)) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+  }
+  if (typeof data === 'string') {
+    return Buffer.from(data, 'utf8')
+  }
+  return Buffer.from(jsonStringify(data), 'utf8')
+}
+
+function getAttemptNumber(error: unknown): number | undefined {
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'attempt' in error &&
+    typeof (error as { attempt?: unknown }).attempt === 'number'
+  ) {
+    return (error as { attempt: number }).attempt
+  }
+  return undefined
+}
+
+function isTimeoutFailure(error: unknown): boolean {
+  if (error instanceof StallTimeoutError || axios.isCancel(error)) {
+    return true
+  }
+  const code = getErrnoCode(error)
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+    return true
+  }
+  const msg = (
+    error instanceof Error ? error.message : String(error)
+  ).toLowerCase()
+  return msg.includes('timeout') || msg.includes('timed out')
+}
+
+/**
+ * Official 2.1.328 `Ut()`: fetches `manifest.json` and verifies its detached
+ * `.raw-sig.json` signature sidecar according to `signaturePolicy` and client
+ * enforcement flag (`tengu_elegant_pancake`).
+ */
+export async function fetchAndVerifyReleaseManifest(
+  baseUrl: string,
+  version: string,
+  opts: {
+    authConfig?: {
+      auth?: { username: string; password: string }
+      headers?: Record<string, string>
+    }
+    signaturePolicy: ManifestSignaturePolicy
+    platform: string
+    startTime: number
+    purpose?: 'download' | 'reverify'
+    publicKeyPem?: string
+  },
+): Promise<{
+  manifest: ReleaseManifest
+  manifestAuthenticated: boolean
+  signatureVerified: boolean
+}> {
+  const {
+    authConfig,
+    signaturePolicy,
+    platform,
+    startTime,
+    purpose = 'download',
+    publicKeyPem = MANIFEST_SIGNING_PUBLIC_KEY_PEM,
+  } = opts
+  const expectedBinaryName = getBinaryName(platform)
+
+  let manifestBytes: Buffer
+  let manifest: ReleaseManifest
+  try {
+    const { data } = await fetchReleaseWithRetry(
+      `${baseUrl}/${version}/manifest.json`,
+      {
+        timeout: 10_000,
+        maxContentLength: 1024 * 1024,
+        ...authConfig,
+        responseType: 'arraybuffer',
+      },
+    )
+    manifestBytes = toBuffer(data)
+    const parsed = parseReleaseManifest(
+      jsonParse(manifestBytes.toString('utf8')),
+    )
+    if (!parsed) {
+      throw new ClaudeError(
+        `Manifest for ${version} is not a valid release manifest`,
+      )
+    }
+    manifest = parsed
+  } catch (error) {
+    const latencyMs = Date.now() - startTime
+    const errMsg = error instanceof Error ? error.message : String(error)
+    const httpStatus = getHttpStatus(error)
+
+    logEvent('tengu_binary_manifest_fetch_failure', {
+      latency_ms: latencyMs,
+      http_status: httpStatus,
+      is_timeout: errMsg.includes('timeout'),
+    })
+    logError(
+      new Error(
+        `Failed to fetch manifest from ${baseUrl}/${version}/manifest.json: ${errMsg}`,
+      ),
+    )
+    throw error
+  }
+
+  let manifestAuthenticated = false
+  let signatureVerified = false
+
+  if (signaturePolicy !== 'skip') {
+    const sidecarUrl = `${baseUrl}/${version}/manifest.json.raw-sig.json`
+    const sigStartTime = Date.now()
+    let sidecarHttpStatus: number | undefined
+    let sidecarAttempts = 1
+    let capturedFlag: { flag: boolean | null } | undefined
+    let sidecarData: unknown
+
+    try {
+      let unsignedLegacy = false
+      try {
+        const res = await fetchReleaseWithRetry(
+          sidecarUrl,
+          {
+            timeout: 10_000,
+            responseType: 'json',
+            maxContentLength: 65_536,
+            ...authConfig,
+          },
+          {
+            maxAttempts: SIDECAR_FETCH_MAX_ATTEMPTS,
+            alsoRetry: isRetryableReleaseFetchError,
+            deadline: AbortSignal.timeout(SIDECAR_FETCH_DEADLINE_MS),
+          },
+        )
+        sidecarAttempts = res.attempt
+        sidecarData = res.data
+      } catch (err) {
+        sidecarHttpStatus = getHttpStatus(err)
+        sidecarAttempts = getAttemptNumber(err) ?? 1
+        if (sidecarHttpStatus !== 404) {
+          const reason: ManifestSignatureErrorReason =
+            sidecarHttpStatus !== undefined
+              ? 'sidecar_fetch_http_error'
+              : Date.now() - sigStartTime >
+                  SIDECAR_FETCH_INTERRUPTED_THRESHOLD_MS
+                ? 'sidecar_fetch_interrupted'
+                : isTimeoutFailure(err)
+                  ? 'sidecar_fetch_timeout'
+                  : 'sidecar_fetch_connection_error'
+          throw new ManifestSignatureError(version, reason)
+        }
+        if (signaturePolicy !== 'allow-unsigned-legacy') {
+          throw new ManifestSignatureError(version, 'sidecar_missing')
+        }
+        unsignedLegacy = true
+      }
+
+      if (unsignedLegacy) {
+        logForDebugging(
+          `No manifest signature published for ${version} (predates ${FIRST_SIGNED_VERSION}); continuing with checksum-only verification`,
+          { level: 'warn' },
+        )
+      } else {
+        const verified = verifyReleaseManifestSignature({
+          manifestBytes,
+          sidecar: sidecarData,
+          expectedVersion: version,
+          publicKeyPem,
+        })
+        logForDebugging(`Verified manifest signature for ${version}`)
+
+        const platformEntry = verified.platforms[platform]
+        if (platformEntry && platformEntry.binary !== expectedBinaryName) {
+          throw new ManifestSignatureError(version, 'binary_name_mismatch')
+        }
+
+        manifest = verified
+        manifestAuthenticated = true
+
+        if (signaturePolicy === 'require-enforcing-release') {
+          capturedFlag = { flag: getManifestSignatureFlag() }
+          if (
+            !isReleaseEnforcingManifestSignature(
+              verified.manifestSignatureEnforcement,
+              capturedFlag.flag,
+            )
+          ) {
+            throw new ManifestSignatureError(
+              version,
+              'release_predates_enforcement',
+            )
+          }
+        }
+        signatureVerified = true
+      }
+    } catch (err) {
+      if (!(err instanceof ManifestSignatureError)) {
+        throw err
+      }
+      const sigLatencyMs = Date.now() - sigStartTime
+      const enforced = capturedFlag
+        ? isManifestSignatureEnforced(
+            MANIFEST_SIGNATURE_CLIENT_ENFORCEMENT,
+            capturedFlag.flag,
+          )
+        : isManifestSignatureEnforced()
+
+      logEvent('tengu_binary_manifest_signature_failed', {
+        reason:
+          err.reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        http_status: sidecarHttpStatus,
+        attempt: sidecarAttempts,
+        enforced,
+        latency_ms: sigLatencyMs,
+        purpose:
+          purpose as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        target_version:
+          version as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        verify_threw: err.verifyThrew,
+      })
+
+      if (enforced) {
+        if (err.reason === 'release_predates_enforcement') {
+          logForDebugging(
+            `${version} is signed but predates manifest-signature enforcement; not eligible as a channel target for this client`,
+            { level: 'warn' },
+          )
+        } else if (err.reason === 'sidecar_fetch_interrupted') {
+          logForDebugging(
+            `Signature sidecar fetch for ${version} was interrupted (process suspended mid-request); will retry on the next update check`,
+            { level: 'warn' },
+          )
+        } else {
+          logForDebugging(
+            `Manifest signature check failed for ${sidecarUrl}: ${err.reason}`,
+            { level: 'error' },
+          )
+        }
+        throw err
+      }
+
+      logForDebugging(
+        `Manifest signature check failed for ${sidecarUrl}: ${err.reason} (enforcement disabled; continuing)`,
+        { level: 'warn' },
+      )
+    }
+  }
+
+  return { manifest, manifestAuthenticated, signatureVerified }
+}
+
+/**
+ * Official 2.1.328 `Wt()`: re-verifies a retained on-disk version binary
+ * against its signed release manifest before re-activating it.
+ */
+export async function reverifyRetainedVersion(
+  version: string,
+  installPath: string,
+  opts: {
+    explicitVersionRequested: boolean
+    requireEnforcingRelease: boolean
+    publicKeyPem?: string
+  },
+): Promise<{
+  signatureVerified: boolean
+  binaryMatches: boolean
+  expectedChecksum?: string
+}> {
+  const platform = getPlatform()
+  const { manifest, manifestAuthenticated, signatureVerified } =
+    await fetchAndVerifyReleaseManifest(GCS_BUCKET_URL, version, {
+      signaturePolicy: getManifestSignaturePolicy(version, opts),
+      platform,
+      startTime: Date.now(),
+      purpose: 'reverify',
+      publicKeyPem: opts.publicKeyPem,
+    })
+
+  if (!manifestAuthenticated) {
+    logForDebugging(
+      `Manifest for retained ${version} is unauthenticated; activating the retained copy without a checksum comparison`,
+      { level: 'warn' },
+    )
+    return {
+      signatureVerified: false,
+      binaryMatches: true,
+      expectedChecksum: undefined,
+    }
+  }
+
+  const expectedChecksum = manifest.platforms[platform]?.checksum
+  const binaryMatches =
+    expectedChecksum !== undefined &&
+    (await verifyFileSha256(installPath, expectedChecksum))
+  if (!binaryMatches) {
+    logForDebugging(
+      `Retained ${version} does not match its signed manifest checksum; re-downloading`,
+    )
+  }
+  return { signatureVerified, binaryMatches, expectedChecksum }
+}
+
 export async function downloadVersionFromBinaryRepo(
   version: string,
   stagingPath: string,
@@ -649,7 +1269,14 @@ export async function downloadVersionFromBinaryRepo(
     auth?: { username: string; password: string }
     headers?: Record<string, string>
   },
-) {
+  options?: {
+    signaturePolicy?: ManifestSignaturePolicy
+    publicKeyPem?: string
+  },
+): Promise<{
+  signatureVerified: boolean
+  expectedChecksum: string
+}> {
   const fs = getFsImplementation()
 
   // If we get here, we own the lock and can delete a partial download
@@ -662,39 +1289,22 @@ export async function downloadVersionFromBinaryRepo(
   // Log download attempt start
   logEvent('tengu_binary_download_attempt', {})
 
-  // Fetch manifest to get checksum
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let manifest: any
-  try {
-    const { data } = await fetchReleaseWithRetry(
-      `${baseUrl}/${version}/manifest.json`,
-      {
-        timeout: 10000,
-        responseType: 'json',
-        ...authConfig,
-      },
-    )
-    manifest = data
-  } catch (error) {
-    const latencyMs = Date.now() - startTime
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    let httpStatus: number | undefined
-    if (axios.isAxiosError(error) && error.response) {
-      httpStatus = error.response.status
-    }
-
-    logEvent('tengu_binary_manifest_fetch_failure', {
-      latency_ms: latencyMs,
-      http_status: httpStatus,
-      is_timeout: errorMessage.includes('timeout'),
-    })
-    logError(
-      new Error(
-        `Failed to fetch manifest from ${baseUrl}/${version}/manifest.json: ${errorMessage}`,
-      ),
-    )
-    throw error
-  }
+  // Fetch & verify manifest (official 2.1.328 `Ut`)
+  const signaturePolicy =
+    options?.signaturePolicy ??
+    (baseUrl === GCS_BUCKET_URL ? 'require' : 'skip')
+  const { manifest, signatureVerified } = await fetchAndVerifyReleaseManifest(
+    baseUrl,
+    version,
+    {
+      authConfig,
+      signaturePolicy,
+      platform,
+      startTime,
+      purpose: 'download',
+      publicKeyPem: options?.publicKeyPem,
+    },
+  )
 
   const platformInfo = manifest.platforms[platform]
 
@@ -726,6 +1336,7 @@ export async function downloadVersionFromBinaryRepo(
     logEvent('tengu_binary_download_success', {
       latency_ms: latencyMs,
     })
+    return { signatureVerified, expectedChecksum }
   } catch (error) {
     const latencyMs = Date.now() - startTime
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -747,10 +1358,21 @@ export async function downloadVersionFromBinaryRepo(
   }
 }
 
+export type DownloadVersionResult = {
+  downloadType: 'npm' | 'binary'
+  signatureVerified: boolean
+  expectedChecksum?: string
+}
+
 export async function downloadVersion(
   version: string,
   stagingPath: string,
-): Promise<'npm' | 'binary'> {
+  opts?: {
+    explicitVersionRequested?: boolean
+    requireEnforcingRelease?: boolean
+    publicKeyPem?: string
+  },
+): Promise<DownloadVersionResult> {
   // Test-fixture versions route to the private sentinel bucket. DCE'd in all
   // shipped builds — the string 'claude-code-ci-sentinel' and the gcloud call
   // never exist in compiled binaries. Same gcloud-token pattern as
@@ -760,24 +1382,40 @@ export async function downloadVersion(
       'auth',
       'print-access-token',
     ])
-    await downloadVersionFromBinaryRepo(
-      version,
-      stagingPath,
-      'https://storage.googleapis.com/claude-code-ci-sentinel',
-      { headers: { Authorization: `Bearer ${stdout.trim()}` } },
-    )
-    return 'binary'
+    const { signatureVerified, expectedChecksum } =
+      await downloadVersionFromBinaryRepo(
+        version,
+        stagingPath,
+        'https://storage.googleapis.com/claude-code-ci-sentinel',
+        { headers: { Authorization: `Bearer ${stdout.trim()}` } },
+        { signaturePolicy: 'skip' },
+      )
+    return { downloadType: 'binary', signatureVerified, expectedChecksum }
   }
 
   if (process.env.USER_TYPE === 'ant') {
     // Use Artifactory for ant users
     await downloadVersionFromArtifactory(version, stagingPath)
-    return 'npm'
+    return { downloadType: 'npm', signatureVerified: false }
   }
 
-  // Use GCS for external users
-  await downloadVersionFromBinaryRepo(version, stagingPath, GCS_BUCKET_URL)
-  return 'binary'
+  // Use GCS for external users with official manifest signature verification
+  const signaturePolicy = getManifestSignaturePolicy(version, {
+    explicitVersionRequested: opts?.explicitVersionRequested ?? false,
+    requireEnforcingRelease: opts?.requireEnforcingRelease ?? false,
+  })
+  const { signatureVerified, expectedChecksum } =
+    await downloadVersionFromBinaryRepo(
+      version,
+      stagingPath,
+      GCS_BUCKET_URL,
+      undefined,
+      {
+        signaturePolicy,
+        publicKeyPem: opts?.publicKeyPem,
+      },
+    )
+  return { downloadType: 'binary', signatureVerified, expectedChecksum }
 }
 
 // Exported for testing

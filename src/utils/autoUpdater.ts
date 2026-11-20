@@ -1,8 +1,18 @@
 import axios from 'axios'
-import { constants as fsConstants } from 'fs'
-import { access, copyFile, rename, unlink, writeFile } from 'fs/promises'
+import { constants as fsConstants, realpathSync } from 'fs'
+import {
+  access,
+  copyFile,
+  mkdir,
+  readdir,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from 'fs/promises'
 import { homedir } from 'os'
-import { join } from 'path'
+import { basename, dirname, join } from 'path'
 import semver from 'semver'
 import {
   getDynamicConfig_BLOCKS_ON_INIT,
@@ -75,7 +85,12 @@ export const EXE_LOCK_FAILURE_DAMP_THRESHOLD = 2
 export type InstallOutcome = {
   status: InstallStatus
   failureHint?: AutoUpdateFailureHint
+  probeDurationMs?: number
 }
+
+/** Official 2.1.328 `l9n` / `d9n`: placeholder stub detection thresholds. */
+export const PLACEHOLDER_STUB_MAX_BYTES = 65536
+export const PLACEHOLDER_STUB_SENTINEL = 'claude native binary not installed'
 
 export type AutoUpdaterResult = {
   version: string | null
@@ -231,6 +246,15 @@ export function isForceDowngradeEnabled(): boolean {
 }
 
 /**
+ * Async version reading `tengu_max_version_config.external_force_downgrade`
+ * via `getDynamicConfig_BLOCKS_ON_INIT`, matching official 2.1.328 `Ldt`.
+ */
+export async function isForceDowngradeEnabledAsync(): Promise<boolean> {
+  const config = await getMaxVersionConfig()
+  return config.external_force_downgrade === true
+}
+
+/**
  * Official 2.1.328 `bRt`: returns true when force-downgrade is active and
  * currentVersion is strictly greater than maxVersion.
  */
@@ -337,7 +361,21 @@ export async function getMaxVersion(): Promise<string | undefined> {
   if (process.env.USER_TYPE === 'ant') {
     return config.ant || undefined
   }
-  return config.external || undefined
+  // Official 2.1.328 `Ldt` (@300384756): external is normalized through
+  // semver.parse before use — "v2.1.300" is accepted, invalid values are
+  // logged and ignored so they can never reach the download path.
+  const raw = config.external || undefined
+  const parsed = raw !== undefined ? semver.parse(raw)?.version : undefined
+  if (raw !== undefined && parsed === undefined) {
+    logForDebugging(
+      `tengu_max_version_config has invalid version '${raw}' — ignoring`,
+      { level: 'error' },
+    )
+    logEvent('tengu_max_version_config_invalid', {
+      raw_value: raw.slice(0, 300),
+    })
+  }
+  return parsed
 }
 
 /**
@@ -528,26 +566,286 @@ async function releaseLock(): Promise<void> {
   }
 }
 
-async function getInstallationPrefix(): Promise<string | null> {
-  // Run from home directory to avoid reading project-level .npmrc/.bunfig.toml
-  const isBun = env.isRunningWithBun()
-  let prefixResult = null
-  if (isBun) {
-    prefixResult = await execFileNoThrowWithCwd('bun', ['pm', 'bin', '-g'], {
-      cwd: homedir(),
-    })
-  } else {
-    prefixResult = await execFileNoThrowWithCwd(
-      'npm',
-      ['-g', 'config', 'get', 'prefix'],
-      { cwd: homedir() },
-    )
+/**
+ * Checks whether a path resides inside Bun's global installation directory
+ * (`/.bun/install/global/` or `${BUN_INSTALL}/install/global/`).
+ */
+export function isPathInBunGlobalInstall(
+  candidatePath: string | undefined,
+  bunInstallDir: string | undefined = process.env.BUN_INSTALL,
+): boolean {
+  if (!candidatePath) {
+    return false
   }
+  const normalizedPath = candidatePath.replace(/\\/g, '/')
+  const normalizedBunInstall = (bunInstallDir ?? '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+  return (
+    normalizedPath.includes('/.bun/install/global/') ||
+    normalizedPath.endsWith('/.bun/install/global') ||
+    (normalizedBunInstall.length > 0 &&
+      (normalizedPath.startsWith(`${normalizedBunInstall}/install/global/`) ||
+        normalizedPath === `${normalizedBunInstall}/install/global`))
+  )
+}
+
+function tryRealpath(p: string | undefined): string | undefined {
+  if (!p) return undefined
+  try {
+    return realpathSync(p)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Determines which global package manager (`bun` or `npm`) manages this install.
+ * Selects `bun` when the actual binary/entrypoint path is inside Bun's global
+ * install directory, or when running the script with Bun outside bundled mode —
+ * never solely because the runtime is Bun for an npm-installed binary, and never
+ * downgraded to npm just because the `bun` CLI is absent from PATH (official
+ * `oe()` @300388719 keeps the install's ownership and lets the missing CLI fail
+ * naturally at install time).
+ */
+export function getGlobalPackageManager(opts?: {
+  execPath?: string
+  argv1?: string
+  bunInstallDir?: string
+  /** Test seam: pretend the entrypoint is a Bun-compiled binary (`vh()`). */
+  isBundledBinary?: boolean
+}): 'bun' | 'npm' {
+  const execPath = opts?.execPath ?? process.execPath
+  const argv1 = opts?.argv1 ?? process.argv[1]
+  const bunInstallDir = opts?.bunInstallDir ?? process.env.BUN_INSTALL
+
+  const candidates = [execPath, argv1]
+  // Also follow symlinks for real paths (e.g. ~/.bun/bin/claude -> ~/.bun/install/global/...)
+  if (opts?.execPath === undefined) {
+    const resolvedExec = tryRealpath(execPath)
+    if (resolvedExec && resolvedExec !== execPath) {
+      candidates.push(resolvedExec)
+    }
+  }
+  if (opts?.argv1 === undefined) {
+    const resolvedArgv1 = tryRealpath(argv1)
+    if (resolvedArgv1 && resolvedArgv1 !== argv1) {
+      candidates.push(resolvedArgv1)
+    }
+  }
+
+  const inBunGlobal = candidates.some(p =>
+    isPathInBunGlobalInstall(p, bunInstallDir),
+  )
+  if (inBunGlobal) {
+    return 'bun'
+  }
+
+  // Official `oe`: running the JS with Bun while NOT a compiled binary (`vh`)
+  // belongs to the Bun package manager; a Bun-compiled binary installed via
+  // npm still belongs to npm.
+  const bundled = opts?.isBundledBinary ?? isInBundledMode()
+  if (env.isRunningWithBun() && !bundled) {
+    return 'bun'
+  }
+  return 'npm'
+}
+
+export type GlobalInstalledBinaryPaths = {
+  execPaths: string[]
+  imagePath: string
+}
+
+export type GlobalBinaryProbeResult =
+  | { outcome: 'landed'; version: string; durationMs: number }
+  | { outcome: 'placeholder_stub'; durationMs: number }
+  | { outcome: 'inconclusive'; durationMs: number }
+
+async function getInstallationPrefix(
+  packageManager: 'bun' | 'npm' = getGlobalPackageManager(),
+): Promise<string | null> {
+  // Run from home directory to avoid reading project-level .npmrc/.bunfig.toml
+  const isBun = packageManager === 'bun'
+  const prefixResult = isBun
+    ? await execFileNoThrowWithCwd('bun', ['pm', 'bin', '-g'], {
+        cwd: homedir(),
+      })
+    : await execFileNoThrowWithCwd('npm', ['-g', 'config', 'get', 'prefix'], {
+        cwd: homedir(),
+      })
   if (prefixResult.code !== 0) {
-    logError(new Error(`Failed to check ${isBun ? 'bun' : 'npm'} permissions`))
+    logError(
+      new Error(
+        `Failed to check ${isBun ? 'bun' : 'npm'} permissions (exit ${prefixResult.code}): ${prefixResult.stderr.trim()}`,
+      ),
+    )
     return null
   }
-  return prefixResult.stdout.trim()
+  return prefixResult.stdout.trim() || null
+}
+
+/**
+ * Official 2.1.328 `Rt()`: resolves candidate executable paths and image path
+ * in the active global prefix for post-install `--version` probing.
+ */
+export async function getGlobalInstalledBinaryPaths(
+  knownPrefix?: string | null,
+  packageManager: 'bun' | 'npm' = getGlobalPackageManager(),
+  platform: NodeJS.Platform = process.platform,
+): Promise<GlobalInstalledBinaryPaths | null> {
+  const prefix =
+    knownPrefix !== undefined
+      ? knownPrefix
+      : await getInstallationPrefix(packageManager)
+  if (!prefix) {
+    return null
+  }
+  if (packageManager === 'bun') {
+    const binPath = join(prefix, 'claude')
+    return { execPaths: [binPath], imagePath: binPath }
+  }
+  if (platform === 'win32') {
+    return {
+      execPaths: [join(prefix, 'claude.cmd'), join(prefix, 'claude.exe')],
+      imagePath: join(
+        prefix,
+        'node_modules',
+        MACRO.PACKAGE_URL,
+        'bin',
+        'claude.exe',
+      ),
+    }
+  }
+  const binPath = join(prefix, 'bin', 'claude')
+  return { execPaths: [binPath], imagePath: binPath }
+}
+
+/**
+ * Official 2.1.328 `Fe()`: probes the globally installed `claude --version`
+ * after `npm/bun install -g` to distinguish real installs, placeholder stubs,
+ * and inconclusive outcomes.
+ */
+export async function probeInstalledGlobalBinary(
+  targetVersion?: string | null,
+  knownPrefix?: string | null,
+  packageManager: 'bun' | 'npm' = getGlobalPackageManager(),
+): Promise<GlobalBinaryProbeResult> {
+  const startTime = Date.now()
+  const paths = await getGlobalInstalledBinaryPaths(knownPrefix, packageManager)
+  const expectedVersion = targetVersion
+    ? semver.parse(targetVersion)?.version
+    : undefined
+  let hadNonZero = false
+  let sawPlaceholderSentinel = false
+
+  for (const execPath of paths?.execPaths ?? []) {
+    const result = await execFileNoThrowWithCwd(execPath, ['--version'], {
+      abortSignal: AbortSignal.timeout(45_000),
+      cwd: homedir(),
+    })
+    const probedVersion = semver.parse(
+      result.stdout.trim().split(/\s+/)[0] ?? '',
+    )?.version
+    if (
+      result.code === 0 &&
+      probedVersion != null &&
+      (expectedVersion != null
+        ? probedVersion === expectedVersion
+        : gt(probedVersion, MACRO.VERSION))
+    ) {
+      return {
+        outcome: 'landed',
+        version: probedVersion,
+        durationMs: Date.now() - startTime,
+      }
+    }
+    if (result.code !== 0) {
+      hadNonZero = true
+      sawPlaceholderSentinel ||= `${result.stdout}\n${result.stderr}`.includes(
+        PLACEHOLDER_STUB_SENTINEL,
+      )
+    }
+  }
+
+  const isSmallStub =
+    hadNonZero &&
+    paths !== null &&
+    (await stat(paths.imagePath).then(
+      st => st.isFile() && st.size < PLACEHOLDER_STUB_MAX_BYTES,
+      () => false,
+    ))
+
+  return {
+    outcome:
+      sawPlaceholderSentinel || isSmallStub
+        ? 'placeholder_stub'
+        : 'inconclusive',
+    durationMs: Date.now() - startTime,
+  }
+}
+
+/**
+ * Official 2.1.328 `Mt()`: classifies npm/bun install stderr output, including
+ * identifying `warning_only` non-zero exits that may still have landed.
+ */
+export function classifyNpmStderrSignature(combinedOutput: string): string {
+  if (/\b(EACCES|EPERM|permission denied)\b/i.test(combinedOutput)) {
+    return 'eacces_eperm'
+  }
+  if (/postinstall\] Native package "[^"]*" not found/.test(combinedOutput)) {
+    return 'native_package_missing'
+  }
+  if (/\bENOTEMPTY\b/i.test(combinedOutput)) {
+    return 'enotempty'
+  }
+  if (/\bETARGET\b/i.test(combinedOutput)) {
+    return 'etarget'
+  }
+  if (
+    /\bE403\b/i.test(combinedOutput) ||
+    /\b403 forbidden\b/i.test(combinedOutput)
+  ) {
+    return 'e403_forbidden'
+  }
+  if (/\bENOENT\b/i.test(combinedOutput)) {
+    return 'enoent'
+  }
+  if (
+    /\bE5\d\d\b/i.test(combinedOutput) ||
+    /\b5\d\d\s+(internal server error|bad gateway|service unavailable|gateway time-?out)\b/i.test(
+      combinedOutput,
+    )
+  ) {
+    return 'registry_5xx'
+  }
+  if (
+    /\b(ETIMEDOUT|ESOCKETTIMEDOUT)\b/i.test(combinedOutput) ||
+    /\btimed[\s-]?out\b/i.test(combinedOutput) ||
+    /\btimeout\b/i.test(combinedOutput)
+  ) {
+    return 'network_timeout'
+  }
+  if (/\bENOSPC\b/i.test(combinedOutput)) {
+    return 'disk_full'
+  }
+  if (
+    /\bEBUSY\b/i.test(combinedOutput) ||
+    /\bresource busy or locked\b/i.test(combinedOutput)
+  ) {
+    return 'ebusy'
+  }
+  const hasWarning =
+    /npm warn/i.test(combinedOutput) ||
+    /unknown user config/i.test(combinedOutput) ||
+    /npm notice/i.test(combinedOutput)
+  const hasError =
+    /npm err/i.test(combinedOutput) ||
+    /\b(EACCES|EPERM|ETARGET)\b/i.test(combinedOutput) ||
+    /code E/i.test(combinedOutput)
+  if (hasWarning && !hasError) {
+    return 'warning_only'
+  }
+  return 'unknown'
 }
 
 export async function checkGlobalInstallPermissions(): Promise<{
@@ -590,6 +888,17 @@ export async function getLatestVersion(
     { abortSignal: AbortSignal.timeout(5000), cwd: homedir() },
   )
   if (result.code !== 0) {
+    // Official 2.1.328 `YKt`: accept non-zero exit when stdout cleanly parses as semver
+    const trimmedStdout = result.stdout.trim()
+    if (trimmedStdout && semver.parse(trimmedStdout)) {
+      logForDebugging(
+        `npm view exited ${result.code} but printed a valid version (${trimmedStdout}) — treating stderr as a warning`,
+      )
+      if (result.stderr) {
+        logForDebugging(`npm stderr: ${result.stderr.trim()}`)
+      }
+      return trimmedStdout
+    }
     logForDebugging(`npm view failed with code ${result.code}`)
     if (result.stderr) {
       logForDebugging(`npm stderr: ${result.stderr.trim()}`)
@@ -597,11 +906,23 @@ export async function getLatestVersion(
       logForDebugging('npm stderr: (empty)')
     }
     if (result.stdout) {
-      logForDebugging(`npm stdout: ${result.stdout.trim()}`)
+      logForDebugging(
+        `npm stdout (first 300 chars, JSON-encoded): ${JSON.stringify(result.stdout.trim().slice(0, 300))}`,
+      )
     }
     return null
   }
-  return result.stdout.trim()
+  const trimmedStdout = result.stdout.trim()
+  if (trimmedStdout && !semver.parse(trimmedStdout)) {
+    logForDebugging(
+      'npm view exited 0 but stdout is not a valid semver version — treating as no result',
+    )
+    logForDebugging(
+      `npm stdout (first 300 chars, JSON-encoded): ${JSON.stringify(trimmedStdout.slice(0, 300))}`,
+    )
+    return null
+  }
+  return trimmedStdout || null
 }
 
 export type NpmDistTags = {
@@ -714,6 +1035,85 @@ export async function getVersionHistory(limit: number): Promise<string[]> {
   }
 }
 
+// ─── Windows self-rename backup tracking (official 2.1.328 `XKt`/`Ve`/`Be`/`ee`/`We`) ───
+
+/**
+ * Inodes of `.old.<ts>` backups this process minted before `npm/bun install -g`.
+ * npm moves the whole package dir into a `.`-prefixed retired directory on
+ * rename conflict; tracking the inode lets restore locate the moved backup.
+ * Process-lifetime only, matching official `n.mintedPreservedInodes`.
+ */
+const mintedPreservedInodes = new Set<bigint>()
+
+/**
+ * Official `Ve`: candidate "retired dir" parent roots — the two directories
+ * above the running executable's package dir (e.g. `.../node_modules` and its
+ * parent scope dir).
+ */
+function getRetiredDirSearchRoots(): string[] {
+  const packageDir = join(dirname(process.execPath), '..', '..')
+  return [join(packageDir, '..'), packageDir]
+}
+
+/**
+ * Official `Be`: retired directories are `.`-prefixed dirs inside each root.
+ */
+async function listRetiredDirs(): Promise<string[]> {
+  const out: string[] = []
+  for (const root of getRetiredDirSearchRoots()) {
+    try {
+      for (const entry of await readdir(root, { withFileTypes: true })) {
+        if (entry.isDirectory() && entry.name.startsWith('.')) {
+          out.push(join(root, entry.name))
+        }
+      }
+    } catch {
+      // Root unreadable — skip
+    }
+  }
+  return out
+}
+
+async function isPreservedInode(filePath: string): Promise<boolean> {
+  const ino = await stat(filePath, { bigint: true })
+    .then(s => s.ino)
+    .catch(() => 0n)
+  return ino !== 0n && mintedPreservedInodes.has(ino)
+}
+
+/**
+ * Official `We`: find where a `.old.<ts>` backup ended up — same name in the
+ * original dir, else under a retired dir (or its `bin/`).
+ */
+export async function locatePreservedBackupForTests(
+  backupPath: string,
+): Promise<string | null> {
+  return locatePreservedBackup(backupPath)
+}
+
+/**
+ * Test seam for `mintedPreservedInodes` — production code only adds entries in
+ * the Windows self-rename path of `installGlobalPackage`.
+ */
+export function mintPreservedInodeForTests(ino: bigint): void {
+  mintedPreservedInodes.add(ino)
+}
+
+async function locatePreservedBackup(
+  backupPath: string,
+): Promise<string | null> {
+  if (await isPreservedInode(backupPath)) return backupPath
+  const name = basename(backupPath)
+  const candidates = (await listRetiredDirs()).flatMap(dir => [
+    join(dir, name),
+    join(dir, 'bin', name),
+  ])
+  for (const candidate of candidates) {
+    if (await isPreservedInode(candidate)) return candidate
+  }
+  return null
+}
+
 export async function installGlobalPackage(
   targetVersion?: string | null,
 ): Promise<InstallOutcome> {
@@ -732,8 +1132,9 @@ export async function installGlobalPackage(
 
   try {
     await removeClaudeAliasesFromShellConfigs()
+    const packageManager = getGlobalPackageManager()
     // Check if we're using npm from Windows path in WSL
-    if (!env.isRunningWithBun() && env.isNpmFromWindowsPath()) {
+    if (packageManager === 'npm' && env.isNpmFromWindowsPath()) {
       logError(new Error('Windows NPM detected in WSL environment'))
       logEvent('tengu_auto_updater_windows_npm_in_wsl', {
         currentVersion:
@@ -753,7 +1154,7 @@ To fix this issue:
       return { status: 'install_failed' }
     }
 
-    const { hasPermissions } = await checkGlobalInstallPermissions()
+    const { hasPermissions, npmPrefix } = await checkGlobalInstallPermissions()
     if (!hasPermissions) {
       return { status: 'no_permissions' }
     }
@@ -766,26 +1167,64 @@ To fix this issue:
     // Official 2.1.328 `XKt`: on Windows bundled npm installs, rename the running
     // executable aside before `npm/bun install -g` so the new binary can land,
     // and restore it if the install fails.
+    const normalizedExecPath = process.execPath.replace(/\\/g, '/')
+    const packageScope = MACRO.PACKAGE_URL.startsWith('@')
+      ? MACRO.PACKAGE_URL.split('/')[0]
+      : null
     const shouldSelfRenameOnWindows =
       process.platform === 'win32' &&
       isInBundledMode() &&
-      process.execPath
-        .replace(/\\/g, '/')
-        .includes('/node_modules/@anthropic-ai/')
+      (normalizedExecPath.includes('/node_modules/@anthropic-ai/') ||
+        (packageScope !== null &&
+          normalizedExecPath.includes(`/node_modules/${packageScope}/`)))
     const renamedBackups: Array<[originalPath: string, backupPath: string]> = []
     if (shouldSelfRenameOnWindows) {
-      const backupPath = `${process.execPath}.old.${Date.now()}`
+      // Official `XKt`: enumerate every claude.exe/cli.exe inside sibling
+      // package dirs of the executable's scope directory that shares the running
+      // executable's inode — npm postinstalls lay down hardlinks across the
+      // platform package and wrapper bin (see install.cjs linkSync), so
+      // renaming only process.execPath leaves locked siblings → EBUSY.
+      const execIno = await stat(process.execPath, { bigint: true })
+        .then(s => s.ino)
+        .catch(() => 0n)
+      const selfRenameTargets = [process.execPath]
+      // Ve()[1]: two levels up from dirname(execPath) = the scope dir
+      // (e.g. .../node_modules/@go-hare or .../node_modules for unscoped pkgs).
+      const scopeDir = join(dirname(process.execPath), '..', '..')
       try {
-        await rename(process.execPath, backupPath)
-        renamedBackups.push([process.execPath, backupPath])
+        for (const pkgDir of await readdir(scopeDir)) {
+          for (const name of ['claude.exe', 'cli.exe']) {
+            const candidate = join(scopeDir, pkgDir, name)
+            if (candidate === process.execPath) continue
+            const ino = await stat(candidate, { bigint: true })
+              .then(s => s.ino)
+              .catch(() => -1n)
+            if (execIno !== 0n && ino === execIno) {
+              selfRenameTargets.push(candidate)
+            }
+          }
+        }
       } catch {
-        // Proceed without self-rename if OS refused
+        // Scope dir unreadable — rename just the running executable
+      }
+      const mintedAt = Date.now()
+      for (const target of selfRenameTargets) {
+        const backupPath = `${target}.old.${mintedAt}`
+        try {
+          await rename(target, backupPath)
+          renamedBackups.push([target, backupPath])
+          const backupIno = await stat(backupPath, { bigint: true })
+            .then(s => s.ino)
+            .catch(() => 0n)
+          if (backupIno !== 0n) mintedPreservedInodes.add(backupIno)
+        } catch {
+          // Rename refused for this alias — leave it and proceed.
+        }
       }
     }
 
     // Run from home directory to avoid reading project-level .npmrc/.bunfig.toml
     // which could be maliciously crafted to redirect to an attacker's registry
-    const packageManager = env.isRunningWithBun() ? 'bun' : 'npm'
     const installResult = await execFileNoThrowWithCwd(
       packageManager,
       ['install', '-g', packageSpec],
@@ -808,22 +1247,45 @@ To fix this issue:
               ),
             )
           } catch (copyErr) {
-            const preservedExists = await access(
-              backupPath,
-              fsConstants.F_OK,
-            ).then(
-              () => true,
-              () => false,
-            )
-            const failure: UpdateRestoreFailure = preservedExists
-              ? { originalPath, preservedPath: backupPath }
-              : { originalPath }
+            // Official `XKt` → `We`: npm may have already moved the package
+            // dir (and our `.old.<ts>` backup with it) into a `.`-prefixed
+            // retired directory. Locate it by minted inode and restore from
+            // there before declaring the original launch path lost.
+            const relocated = await locatePreservedBackup(backupPath)
+            let preservedPath: string | undefined
+            if (relocated !== null && relocated !== backupPath) {
+              try {
+                await copyFile(relocated, originalPath)
+                logForDebugging(
+                  `Restored ${originalPath} from retired-dir copy ${relocated} after rename (${renameErr}) and copy (${copyErr}) both failed`,
+                )
+                continue
+              } catch (relocateErr) {
+                logForDebugging(
+                  `Failed to restore ${originalPath} from retired-dir copy ${relocated}: ${relocateErr}`,
+                )
+                preservedPath = relocated
+              }
+            } else {
+              const preservedExists = await access(
+                backupPath,
+                fsConstants.F_OK,
+              ).then(
+                () => true,
+                () => false,
+              )
+              preservedPath = preservedExists ? backupPath : undefined
+            }
+            const failure: UpdateRestoreFailure = {
+              originalPath,
+              preservedPath,
+            }
             if (!firstRestoreFailure) {
               firstRestoreFailure = failure
             }
             logError(
               new AutoUpdaterError(
-                `Failed to restore ${originalPath} after install failure: rename: ${renameErr}; copy: ${copyErr}`,
+                `Failed to restore ${originalPath} after install failure: rename: ${renameErr}; copy: ${copyErr}; preserved copy: ${preservedPath ?? 'not found'}`,
               ),
             )
           }
@@ -836,16 +1298,86 @@ To fix this issue:
 
     if (installResult.code !== 0) {
       const combined = `${installResult.stdout} ${installResult.stderr}`
+      const stderrSig = classifyNpmStderrSignature(combined)
+      // Official 2.1.328 `XKt`: when exit is non-zero with warnings only,
+      // re-probe the installed binary before declaring failure.
+      if (stderrSig === 'warning_only') {
+        const probe = await probeInstalledGlobalBinary(
+          targetVersion,
+          npmPrefix,
+          packageManager,
+        )
+        if (probe.outcome === 'landed') {
+          saveGlobalConfig(current => ({
+            ...current,
+            installMethod: 'global',
+          }))
+          updateRestoreFailure = null
+          logForDebugging(
+            `npm/bun exited ${installResult.code} with only warnings on stderr but the install-prefix re-probe confirms the install landed (now ${probe.version}): ${combined}`,
+          )
+          return { status: 'success', probeDurationMs: probe.durationMs }
+        }
+      }
+
       const outcome = classifyNpmInstallFailure(combined)
       const error = new AutoUpdaterError(
         outcome.failureHint === 'windows_running_exe_lock'
           ? `Failed to install new version of claude (running executable is locked): ${combined}`
           : outcome.failureHint === 'native_binary_missing'
             ? `Failed to install new version of claude (platform-native package missing): ${combined}`
-            : `Failed to install new version of claude: ${combined}`,
+            : stderrSig === 'warning_only'
+              ? `npm/bun exited ${installResult.code} with only warnings on stderr but the re-probe did not confirm an advance: ${combined}`
+              : `Failed to install new version of claude: ${combined}`,
       )
       logError(error)
       return outcome
+    }
+
+    // Official 2.1.328 `XKt`: probe installed target binary `--version` even on
+    // exit 0 to catch broken placeholder stubs left behind when the native
+    // platform package was not installed.
+    const probe = await probeInstalledGlobalBinary(
+      targetVersion,
+      npmPrefix,
+      packageManager,
+    )
+    switch (probe.outcome) {
+      case 'placeholder_stub': {
+        const ignoreScriptsResult =
+          packageManager === 'npm'
+            ? await execFileNoThrowWithCwd(
+                'npm',
+                ['config', 'get', 'ignore-scripts'],
+                { abortSignal: AbortSignal.timeout(10_000), cwd: homedir() },
+              )
+            : null
+        if (
+          ignoreScriptsResult?.code === 0 &&
+          ignoreScriptsResult.stdout.trim() === 'true'
+        ) {
+          logForDebugging(
+            `${packageManager} exited 0 and the installed claude is the placeholder stub, but npm install scripts are disabled on purpose; trusting the exit code`,
+          )
+          break
+        }
+        logError(
+          new AutoUpdaterError(
+            `${packageManager} exited 0 but the installed claude is still the placeholder stub: the platform-native package was not installed`,
+          ),
+        )
+        return {
+          status: 'install_failed',
+          failureHint: 'native_binary_missing',
+        }
+      }
+      case 'inconclusive':
+        logForDebugging(
+          `${packageManager} exited 0; the install-prefix --version probe was inconclusive, trusting the exit code`,
+        )
+        break
+      case 'landed':
+        break
     }
 
     // Set installMethod to 'global' to track npm global installations
@@ -855,7 +1387,7 @@ To fix this issue:
     }))
     updateRestoreFailure = null
 
-    return { status: 'success' }
+    return { status: 'success', probeDurationMs: probe.durationMs }
   } finally {
     // Ensure we always release the lock
     await releaseLock()
