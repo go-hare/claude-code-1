@@ -11,7 +11,15 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useVirtualScroll } from '../hooks/useVirtualScroll.js';
-import { Box, instances, useApp, type DOMElement, type ScrollBoxHandle, type MatchPosition } from '@anthropic/ink';
+import {
+  Box,
+  instances,
+  useApp,
+  type DOMElement,
+  type ScrollBoxHandle,
+  type ScrollViewport,
+  type MatchPosition,
+} from '@anthropic/ink';
 import { TextHoverColorContext } from './design-system/ThemedText.js';
 import { ScrollChromeContext } from './FullscreenLayout.js';
 
@@ -233,7 +241,8 @@ export type JumpHandle = {
 
 type Props = {
   messages: RenderableMessage[];
-  scrollRef: RefObject<ScrollBoxHandle | null>;
+  /** Official 2.1.328 subscribable ScrollViewport proxy. */
+  scrollViewport: ScrollViewport;
   /** Invalidates heightCache on change — cached heights from a different
    *  width are wrong (text rewrap → black screen on scroll-up after widen). */
   columns: number;
@@ -246,12 +255,6 @@ type Props = {
   isItemClickable?: (msg: RenderableMessage) => boolean;
   /** Expanded items get a persistent grey bg (not just on hover). */
   isItemExpanded?: (msg: RenderableMessage) => boolean;
-  /**
-   * Bumped when a message's verbose/expand state flips (click-to-expand).
-   * Forces useVirtualScroll to drop stale heights + clear scrollHeightHwm so
-   * collapse does not leave a permanent blank under the summary line.
-   */
-  layoutEpoch?: number;
   /** PRE-LOWERED search text. Messages.tsx caches the lowered result
    *  once at warm time so setSearchQuery's per-keystroke loop does
    *  only indexOf (zero toLowerCase alloc). Falls back to a lowering
@@ -419,22 +422,7 @@ function VirtualItem({
   );
 }
 
-/**
- * Official 2.1.321 (#1908): when a mounted item (e.g. a collapsed/shortened
- * tool result) shrinks by more than one viewport height, trigger a compensating
- * re-render so spacer heights and scroll clamp bounds update before the item
- * scrolls off the top of the screen.
- */
-export function shouldCompensateHeightShrinkage(
-  prevHeight: number | undefined,
-  nextHeight: number,
-  viewportHeight: number,
-): boolean {
-  if (prevHeight === undefined || prevHeight <= 0 || viewportHeight <= 0) {
-    return false;
-  }
-  return prevHeight - nextHeight > viewportHeight;
-}
+export { shouldCompensateHeightShrinkage } from '../hooks/useVirtualScroll.js';
 
 /**
  * Official 2.1.327 (#458): transcript search anchor keyed by message key +
@@ -488,14 +476,13 @@ export function resolveSearchAnchorScrollTop(
 
 export function VirtualMessageList({
   messages,
-  scrollRef,
+  scrollViewport,
   columns,
   itemKey,
   renderItem,
   onItemClick,
   isItemClickable,
   isItemExpanded,
-  layoutEpoch = 0,
   extractSearchText = defaultExtractSearchText,
   trackStickyPrompt,
   selectedIndex,
@@ -506,6 +493,14 @@ export function VirtualMessageList({
   scanElement,
   setPositions,
 }: Props): React.ReactNode {
+  const scrollRef = useMemo<RefObject<ScrollBoxHandle | null>>(
+    () => ({
+      get current() {
+        return scrollViewport.handle;
+      },
+    }),
+    [scrollViewport],
+  );
   // densable mfT — incremental itemKeys with #N suffix on sibling collisions.
   // Streaming appends one message at a time; rebuilding the full string array
   // on every commit allocates O(n) per message (~1MB churn at 27k messages).
@@ -530,7 +525,7 @@ export function VirtualMessageList({
     getItemHeight,
     onLayout: onVirtualLayout,
     scrollToIndex,
-  } = useVirtualScroll(scrollRef, keys, columns, layoutEpoch);
+  } = useVirtualScroll(scrollViewport, keys, columns);
   const [rawStart, rawEnd] = range;
   const end = Math.min(rawEnd, messages.length);
   const start = Math.min(rawStart, end);
@@ -962,7 +957,13 @@ export function VirtualMessageList({
     const el = getItemElement(idx);
     const h = el?.yogaNode?.getComputedHeight() ?? 0;
     const skipNext = () => {
-      if (skipped + 1 < Math.min(20, searchState.current.matches.length)) {
+      const next = advanceSearchMatchPointer(
+        searchState.current.ptr,
+        wantLast ? -1 : 1,
+        searchState.current.matches.length,
+        skipped,
+      );
+      if (next?.canSkipMore) {
         stepRef.current(wantLast ? -1 : 1, skipped + 1);
       }
     };
@@ -1064,7 +1065,9 @@ export function VirtualMessageList({
     }
 
     // Exhausted visible. Advance ptr → jump → re-scan.
-    const ptr = (st.ptr + delta + matches.length) % matches.length;
+    const advanced = advanceSearchMatchPointer(st.ptr, delta, matches.length, skipped);
+    if (!advanced) return;
+    const ptr = advanced.nextPtr;
     st.ptr = ptr;
     st.screenOrd = 0; // resolved after scan (wantLast → length-1)
     jump(matches[ptr]!, delta < 0, skipped);
@@ -1480,7 +1483,7 @@ export function VirtualMessageList({
           offsets={offsets}
           getItemTop={getItemTop}
           getItemElement={getItemElement}
-          scrollRef={scrollRef}
+          scrollViewport={scrollViewport}
           releaseReveal={releaseReveal}
         />
       )}
@@ -1574,7 +1577,7 @@ function StickyTracker({
   offsets,
   getItemTop,
   getItemElement,
-  scrollRef,
+  scrollViewport,
   releaseReveal,
 }: {
   messages: RenderableMessage[];
@@ -1583,28 +1586,21 @@ function StickyTracker({
   offsets: ArrayLike<number>;
   getItemTop: (index: number) => number;
   getItemElement: (index: number) => DOMElement | null;
-  scrollRef: RefObject<ScrollBoxHandle | null>;
+  scrollViewport: ScrollViewport;
   releaseReveal: () => void;
 }): null {
   const { setStickyPrompt } = useContext(ScrollChromeContext);
-  // Fine-grained subscription — snapshot is unquantized scrollTop+delta so
-  // every scroll action (wheel tick, PgUp, drag) triggers a re-render of
-  // THIS component only. Sticky bit folded into the sign so sticky→broken
-  // also triggers (scrollToBottom sets sticky without moving scrollTop).
-  const subscribe = useCallback(
-    (listener: () => void) => scrollRef.current?.subscribe(listener) ?? NOOP_UNSUB,
-    [scrollRef],
-  );
-  useSyncExternalStore(subscribe, () => {
-    const s = scrollRef.current;
+  useSyncExternalStore(scrollViewport.subscribe, () => {
+    const s = scrollViewport.handle;
     if (!s) return NaN;
     const t = s.getScrollTop() + s.getPendingDelta();
     return s.isSticky() ? -1 - t : t;
   });
 
   // Read live scroll state on every render.
-  const isSticky = scrollRef.current?.isSticky() ?? true;
-  const target = Math.max(0, (scrollRef.current?.getScrollTop() ?? 0) + (scrollRef.current?.getPendingDelta() ?? 0));
+  const handle = scrollViewport.handle;
+  const isSticky = handle?.isSticky() ?? true;
+  const target = Math.max(0, (handle?.getScrollTop() ?? 0) + (handle?.getPendingDelta() ?? 0));
 
   const { firstVisible, firstVisibleTop, idx, text } = computeStickyPromptScan({
     start,
@@ -1689,10 +1685,11 @@ function StickyTracker({
         setStickyPrompt('clicked');
         suppress.current = 'armed';
         const el = getItemElement(capturedIdx);
+        const h = scrollViewport.handle;
         if (el) {
-          scrollRef.current?.scrollToElement(el, 1);
+          h?.scrollToElement(el, 1);
         } else {
-          scrollRef.current?.scrollTo(capturedEstimate);
+          h?.scrollTo(capturedEstimate);
           pending.current = { idx: capturedIdx, tries: 0 };
         }
       },
@@ -1709,7 +1706,7 @@ function StickyTracker({
     if (pending.current.idx < 0) return;
     const el = getItemElement(pending.current.idx);
     if (el) {
-      scrollRef.current?.scrollToElement(el, 1);
+      scrollViewport.handle?.scrollToElement(el, 1);
       pending.current = { idx: -1, tries: 0 };
     } else if (++pending.current.tries > 5) {
       pending.current = { idx: -1, tries: 0 };

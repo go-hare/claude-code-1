@@ -65,7 +65,9 @@ function useViewportFrozenValue<T>(value: T): [(node: DOMElement | null) => void
 }
 
 export function UserToolResultMessage(props: Props): React.ReactNode {
-  const toolUse = useGetToolFromMessages(props.param.tool_use_id, props.tools, props.lookups);
+  const toolUse = useGetToolFromMessages(props.param.tool_use_id, props.tools, props.lookups, {
+    isErrored: props.param.is_error === true,
+  });
   if (!toolUse) {
     return null;
   }

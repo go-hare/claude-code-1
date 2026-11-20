@@ -21,7 +21,6 @@ import {
 import type { DOMElement } from '../core/dom.js'
 import type { Frame } from '../core/frame.js'
 import instances from '../core/instances.js'
-import { nodeCache } from '../core/node-cache.js'
 import type { StylePool } from '../core/screen.js'
 import type { ScrollBoxHandle } from '../components/ScrollBox.js'
 import { useTerminalSize } from '../hooks/useTerminalSize.js'
@@ -86,9 +85,8 @@ export function useAxcFrameSink(refs: AxcFrameSinkRefs): void {
       const layout = S.computeLayout(bottomLines, overlayLines)
       const scrollEl = scrollRef.current?.getDomElement() ?? null
       if (scrollEl) {
-        // densable xxc: I = x.cachedLayout. Tip maps cachedLayout ↔ nodeCache.
-        // No Yoga fallback — missing cache or height<=0 yields empty lines.
-        const layoutBox = nodeCache.get(scrollEl)
+        // Official 2.1.328 `xxc`: read `scrollEl.cachedLayout` directly.
+        const layoutBox = scrollEl.cachedLayout
         const lines: string[] = []
         if (layoutBox && layoutBox.height > 0) {
           const end = Math.min(

@@ -1,16 +1,18 @@
 /** Debug logger — no-op placeholder until proper logger injection is added */
 const logForDebugging = (_message: string, _opts?: { level?: string }) => {}
-import { type DOMElement, markDirty } from './dom.js'
+import {
+  consumeAbsoluteRemovedFlag,
+  type DOMElement,
+  markDirty,
+} from './dom.js'
 import type { Frame } from './frame.js'
-import { consumeAbsoluteRemovedFlag } from './node-cache.js'
+import { IncrementalPainter } from './incremental-painter.js'
 import Output from './output.js'
 import renderNodeToOutput, {
-  getAbsolutePaintCut,
-  getScrollDrainNode,
-  getScrollHint,
-  leftoverGsSetOverlayActive,
-  resetRenderFrameContext,
-  vanishedOverflowingAbsoluteBlit,
+  createRenderFrameContext,
+  resetRenderFrameContextState,
+  runWithRenderFrameContext,
+  vanishedOverflowingAbsoluteBlitFor,
 } from './render-node-to-output.js'
 import {
   clipRightEdgeWideGraphemes,
@@ -35,6 +37,11 @@ export type RenderOptions = {
    * Kt misses DECSTBM when true.
    */
   overlayActive?: boolean
+  /**
+   * Official 2.1.328 `firstRow` — when supplied, selects the row-level
+   * `IncrementalPainter` (`Lm`) for slicing tall main-screen trees.
+   */
+  firstRow?: (contentHeight: number) => number
 }
 
 export type Renderer = (options: RenderOptions) => Frame
@@ -46,6 +53,10 @@ export default function createRenderer(
   // Reuse Output across frames so charCache (tokenize + grapheme clustering)
   // persists — most lines don't change between renders.
   let output: Output | undefined
+  let incrementalPainter: IncrementalPainter | undefined
+  let prevMarkRightEdge: boolean | undefined
+  // Official 2.1.328 `H = hc()` — per-renderer frame context (no cross-instance bleed).
+  const frameCtx = createRenderFrameContext()
   return options => {
     const { frontFrame, backFrame, isTTY, terminalWidth, terminalRows } =
       options
@@ -101,18 +112,11 @@ export default function createRenderer(
 
     const width = Math.floor(node.yogaNode.getComputedWidth())
     const yogaHeight = Math.floor(node.yogaNode.getComputedHeight())
-    // Alt-screen: the screen buffer IS the alt buffer — always exactly
-    // terminalRows tall. <AlternateScreen> wraps children in <Box
-    // height={rows} flexShrink={0}>, so yogaHeight should equal
-    // terminalRows. But if something renders as a SIBLING of that Box
-    // (bug: MessageSelector was outside <FullscreenLayout>), yogaHeight
-    // exceeds rows and every assumption below (viewport +1 hack, cursor.y
-    // clamp, log-update's heightDelta===0 fast path) breaks, desyncing
-    // virtual/physical cursors. Clamping here enforces the invariant:
-    // overflow writes land at y >= screen.height and setCellAt drops
-    // them. The sibling is invisible (obvious, easy to find) instead of
-    // corrupting the whole terminal.
-    const height = options.altScreen ? terminalRows : yogaHeight
+    const top = Math.max(
+      0,
+      Math.min(options.firstRow?.(yogaHeight) ?? 0, yogaHeight),
+    )
+    const height = options.altScreen ? terminalRows : yogaHeight - top
     if (options.altScreen && yogaHeight > terminalRows) {
       logForDebugging(
         `alt-screen: yoga height ${yogaHeight} > terminalRows ${terminalRows} — ` +
@@ -129,46 +133,61 @@ export default function createRenderer(
       output = new Output({ width, height, stylePool, screen })
     }
 
-    resetRenderFrameContext()
-    leftoverGsSetOverlayActive(options.overlayActive === true)
+    resetRenderFrameContextState(frameCtx)
+    frameCtx.overlayActive = options.overlayActive === true
 
-    // prevFrameContaminated: selection overlay mutated the returned screen
-    // buffer post-render (in ink.tsx), resetFramesForAltScreen() replaced it
-    // with blanks, or forceRedraw() reset it to 0×0. Blit on the NEXT frame
-    // would copy stale inverted cells / blanks / nothing. When clean, blit
-    // restores the O(unchanged) fast path for steady-state frames (spinner
-    // tick, text stream).
-    // Removing an absolute-positioned node poisons prevScreen: it may
-    // have painted over non-siblings (e.g. an overlay over a ScrollBox
-    // earlier in tree order), so their blits would restore the removed
-    // node's pixels. hasRemovedChild only shields direct siblings.
-    // Normal-flow removals don't paint cross-subtree and are fine.
-    const absoluteRemoved = consumeAbsoluteRemovedFlag()
+    const absoluteRemoved = consumeAbsoluteRemovedFlag(node)
+    const markRightEdge = isTTY && width === terminalWidth
     const blitPrevScreen =
-      absoluteRemoved || options.prevFrameContaminated ? undefined : prevScreen
-    renderNodeToOutput(node, output, {
-      prevScreen: blitPrevScreen,
-    })
+      absoluteRemoved ||
+      options.prevFrameContaminated ||
+      incrementalPainter !== undefined ||
+      prevMarkRightEdge === !markRightEdge
+        ? undefined
+        : prevScreen
+    prevMarkRightEdge = markRightEdge
 
-    const renderedScreen = output.get()
-    if (isTTY && renderedScreen.width === terminalWidth) {
-      clipRightEdgeWideGraphemes(renderedScreen)
-    }
+    const renderedScreen = runWithRenderFrameContext(frameCtx, () => {
+      if (options.firstRow) {
+        incrementalPainter ??= new IncrementalPainter(
+          output!,
+          frameCtx,
+          stylePool,
+        )
+        incrementalPainter.paint(node, screen, top, markRightEdge)
+        screen.damage = { x: 0, y: 0, width, height }
+        return screen
+      }
+      incrementalPainter = undefined
+      renderNodeToOutput(node, output!, {
+        prevScreen: blitPrevScreen,
+      })
+      const outScreen = output!.get()
+      if (markRightEdge) {
+        clipRightEdgeWideGraphemes(outScreen, output!.rowsAtRightEdge)
+      }
+      return outScreen
+    })
 
     // Drain continuation: render cleared scrollbox.dirty, so next frame's
     // root blit would skip the subtree. markDirty walks ancestors so the
     // next frame descends. Done AFTER render so the clear-dirty at the end
     // of renderNodeToOutput doesn't overwrite this.
-    const drainNode = getScrollDrainNode()
+    const drainNode = frameCtx.scrollDrainNode
     if (drainNode) markDirty(drainNode)
 
     return {
-      scrollHint: options.altScreen ? getScrollHint() : null,
+      scrollHint: options.altScreen ? frameCtx.scrollHint : null,
       scrollDrainPending: drainNode !== null,
+      followScroll: frameCtx.followScroll,
+      layoutShifted: frameCtx.layoutShifted,
       staleAbsolutePaint:
+        incrementalPainter === undefined &&
         blitPrevScreen !== undefined &&
-        (getAbsolutePaintCut() || vanishedOverflowingAbsoluteBlit(output)),
+        (frameCtx.absolutePaintCut ||
+          vanishedOverflowingAbsoluteBlitFor(frameCtx, output)),
       screen: renderedScreen,
+      top,
       viewport: {
         width: terminalWidth,
         // Alt screen: fake viewport.height = rows + 1 so that

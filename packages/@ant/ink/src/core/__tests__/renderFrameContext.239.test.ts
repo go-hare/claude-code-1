@@ -14,10 +14,9 @@ import { describe, expect, test } from 'bun:test'
 import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
 import { serializeGapBackfill } from '../axcScreenSerialize.js'
-import { createNode } from '../dom.js'
+import { addPendingClear, createNode } from '../dom.js'
 import Ink from '../ink.js'
 import instances from '../instances.js'
-import { addPendingClear, pendingClears } from '../node-cache.js'
 import Output from '../output.js'
 import renderNodeToOutput, {
   consumeFollowScroll,
@@ -174,7 +173,7 @@ describe('pendingClears offscreen isolation', () => {
   test('a consuming pass deletes the entry after painting it', () => {
     const node = createNode('ink-box')
     addPendingClear(node, { x: 0, y: 0, width: 4, height: 2 }, false)
-    expect(pendingClears.get(node)).toBeDefined()
+    expect(node.pendingClears).toBeDefined()
 
     const output = makeOutput(40, 10)
     runWithRenderFrameContext(createRenderFrameContext(), () => {
@@ -182,7 +181,7 @@ describe('pendingClears offscreen isolation', () => {
       expect(didLayoutShift()).toBe(true)
     })
 
-    expect(pendingClears.get(node)).toBeUndefined()
+    expect(node.pendingClears).toBeUndefined()
   })
 
   test('a non-consuming pass paints the entry and leaves it', () => {
@@ -198,7 +197,7 @@ describe('pendingClears offscreen isolation', () => {
       },
     )
 
-    expect(pendingClears.get(node)).toBeDefined()
+    expect(node.pendingClears).toBeDefined()
   })
 
   test('gap backfill leaves the live frame its pendingClears', () => {
@@ -215,7 +214,7 @@ describe('pendingClears offscreen isolation', () => {
 
       // Consuming here would leave the removed child's cells on screen: the
       // live frame is the only pass whose Output reaches the terminal.
-      expect(pendingClears.get(content)).toBeDefined()
+      expect(content.pendingClears).toBeDefined()
     })
   })
 })

@@ -21,12 +21,17 @@ export function resolveToolFromMessages(
   tools: Tools,
   toolUseByToolUseID: Map<string, ToolUseBlockParam>,
   baseTools: Tools = [],
+  options?: { isErrored?: boolean },
 ): { tool?: Tool; toolUse: ToolUseBlockParam } | null {
   const toolUse = toolUseByToolUseID.get(toolUseID);
   if (!toolUse) {
     return null;
   }
-  const tool = findToolByName(tools, toolUse.name) ?? getDisplayOnlyMcpTool(toolUse.name);
+  const tool =
+    findToolByName(tools, toolUse.name) ??
+    getDisplayOnlyMcpTool(toolUse.name, {
+      isErrored: options?.isErrored ?? true,
+    });
   if (tool) {
     return { tool, toolUse };
   }
@@ -46,12 +51,16 @@ export function useGetToolFromMessages(
   toolUseID: string,
   tools: Tools,
   lookups: ReturnType<typeof buildMessageLookups>,
+  options?: { isErrored?: boolean },
 ): { tool?: Tool; toolUse: ToolUseBlockParam } | null {
+  const isErrored = options?.isErrored;
   return useMemo(() => {
     // Lazy require avoids pulling tools.ts into pure unit-test import graphs.
     // densable rft() → ePu base registry (getAllBaseTools).
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getAllBaseTools } = require('../../../tools.js') as typeof import('../../../tools.js');
-    return resolveToolFromMessages(toolUseID, tools, lookups.toolUseByToolUseID, getAllBaseTools());
-  }, [toolUseID, lookups, tools]);
+    return resolveToolFromMessages(toolUseID, tools, lookups.toolUseByToolUseID, getAllBaseTools(), {
+      isErrored,
+    });
+  }, [toolUseID, lookups, tools, isErrored]);
 }

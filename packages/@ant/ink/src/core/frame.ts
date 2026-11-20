@@ -1,6 +1,6 @@
 import type { Cursor } from './cursor.js'
 import type { Size } from './layout/geometry.js'
-import type { ScrollHint } from './render-node-to-output.js'
+import type { FollowScroll, ScrollHint } from './render-node-to-output.js'
 import {
   type CharPool,
   createScreen,
@@ -13,10 +13,16 @@ export type Frame = {
   readonly screen: Screen
   readonly viewport: Size
   readonly cursor: Cursor
+  /** Official 2.1.328 `top` — first row index of the painted slice (0 when unclipped). */
+  readonly top?: number
   /** DECSTBM scroll optimization hint (alt-screen only, null otherwise). */
   readonly scrollHint?: ScrollHint | null
   /** A ScrollBox has remaining pendingScrollDelta — schedule another frame. */
   readonly scrollDrainPending?: boolean
+  /** Official 2.1.328 `followScroll` — per-frame scroll delta for selection tracking. */
+  readonly followScroll?: FollowScroll | null
+  /** Official 2.1.328 `layoutShifted` — per-frame layout shift indicator. */
+  readonly layoutShifted?: boolean
   /**
    * densable `staleAbsolutePaint` — prevScreen blit + overlay cut or
    * vanished overflowing absolute. Next frame must not blit.

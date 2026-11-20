@@ -94,6 +94,7 @@ import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.j
 import { LatestTurnDurationContext } from './messages/SystemTextMessage.js';
 import { OffscreenFreeze } from './OffscreenFreeze.js';
 import { StatusNotices } from './StatusNotices.js';
+import type { ScrollViewport } from '@anthropic/ink';
 import type { JumpHandle } from './VirtualMessageList.js';
 
 // Memoed logo header: this box is the FIRST sibling before all MessageRows
@@ -437,7 +438,7 @@ type Props = {
    *  prefix that deriveUUID preserves). */
   unseenDivider?: UnseenDivider;
   /** Fullscreen-mode ScrollBox handle. Enables React-level virtualization when present. */
-  scrollRef?: RefObject<ScrollBoxHandle | null>;
+  scrollViewport?: ScrollViewport;
   /** Fullscreen-mode: enable sticky-prompt tracking (writes via ScrollChromeContext). */
   trackStickyPrompt?: boolean;
   /** Transcript search: jump-to-index + setSearchQuery/nextMatch/prevMatch. */
@@ -1172,7 +1173,7 @@ const MessagesImpl = ({
   streamingDisplayStore,
   isBriefOnly = false,
   unseenDivider,
-  scrollRef,
+  scrollViewport,
   trackStickyPrompt,
   jumpRef,
   onSearchMatchesChange,
@@ -1285,7 +1286,7 @@ const MessagesImpl = ({
   // memory is bounded by the mounted-item count, not the total. scrollRef is
   // only passed when isFullscreenEnvEnabled() is true (REPL.tsx gates it),
   // so scrollRef's presence is the signal.
-  const virtualScrollRuntimeGate = scrollRef != null && !disableVirtualScroll;
+  const virtualScrollRuntimeGate = scrollViewport != null && !disableVirtualScroll;
   const shouldTruncate = isTranscriptMode && !showAllInTranscript && !virtualScrollRuntimeGate;
 
   // Anchor for the first rendered message in the non-virtualized cap slice.
@@ -1543,16 +1544,11 @@ const MessagesImpl = ({
   // rows) expand together; falls back to uuid for groups/thinking. Stale keys
   // are harmless — they never match anything in renderableMessages.
   const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(() => new Set());
-  // Bumped on each expand/collapse so VirtualMessageList can invalidate
-  // heightCache + clear scrollHeightHwm (stale expand heights leave blank
-  // spacer after collapse when not sticky).
-  const [layoutEpoch, setLayoutEpoch] = useState(0);
   const prevExpandConversationIdRef = useRef(conversationId);
   if (prevExpandConversationIdRef.current !== conversationId) {
     prevExpandConversationIdRef.current = conversationId;
     if (expandedKeys.size > 0) {
       setExpandedKeys(new Set());
-      setLayoutEpoch(n => n + 1);
     }
   }
   const onItemClick = useCallback((msg: RenderableMessage) => {
@@ -1563,7 +1559,6 @@ const MessagesImpl = ({
       else next.add(k);
       return next;
     });
-    setLayoutEpoch(n => n + 1);
   }, []);
   const isItemExpanded = useCallback(
     (msg: RenderableMessage) => expandedKeys.size > 0 && expandedKeys.has(expandKey(msg)),
@@ -1904,18 +1899,17 @@ const MessagesImpl = ({
           each row - React Compiler pins props in the fiber's memoCache, so
           passing the array would accumulate every historical version
           (~1-2MB over a 7-turn session). */}
-        {virtualScrollRuntimeGate ? (
+        {virtualScrollRuntimeGate && scrollViewport ? (
           <InVirtualListContext.Provider value={true}>
             <VirtualMessageList
               messages={renderableMessages}
-              scrollRef={scrollRef}
+              scrollViewport={scrollViewport}
               columns={columns}
               itemKey={messageKey}
               renderItem={renderMessageRow}
               onItemClick={onItemClick}
               isItemClickable={isItemClickable}
               isItemExpanded={isItemExpanded}
-              layoutEpoch={layoutEpoch}
               trackStickyPrompt={trackStickyPrompt}
               selectedIndex={selectedIdx >= 0 ? selectedIdx : undefined}
               cursorNavRef={cursorNavRef}
@@ -2077,7 +2071,7 @@ export const Messages = React.memo(MessagesImpl, (prev, next) => {
   for (const key of keys) {
     if (
       key === 'onOpenRateLimitOptions' ||
-      key === 'scrollRef' ||
+      key === 'scrollViewport' ||
       key === 'trackStickyPrompt' ||
       key === 'setCursor' ||
       key === 'cursorNavRef' ||

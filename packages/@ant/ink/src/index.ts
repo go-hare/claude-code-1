@@ -492,11 +492,12 @@ export {
 export { Tabs, Tab, useTabsWidth, useTabHeaderFocus } from './theme/Tabs.js'
 // Single ModalContext instance — FullscreenLayout provides; Pane/Tabs consume.
 // Do not re-create this context in app code (double-divider bug).
+export { ScrollViewport } from './core/scroll-viewport.js'
 export {
   ModalContext,
   useIsInsideModal,
   useModalOrTerminalSize,
-  useModalScrollRef,
+  useModalScrollViewport,
   useModalClaimScrollBox,
 } from './theme/modalContext.js'
 export { Byline } from './theme/Byline.js'

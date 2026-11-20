@@ -199,6 +199,16 @@ function applyProp(node: DOMElement, key: string, value: unknown): void {
     return
   }
 
+  // Official 2.1.328 (`InputGate` / `vSe`): wait & no gate metadata live on DOMElement.
+  if (key === 'wait') {
+    node.wait = value as DOMElement['wait']
+    return
+  }
+  if (key === 'no') {
+    node.no = value as DOMElement['no']
+    return
+  }
+
   if (EVENT_HANDLER_PROPS.has(key)) {
     setEventHandler(
       node,

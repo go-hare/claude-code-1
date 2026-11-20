@@ -319,13 +319,10 @@ function rawBaseWidth(str: string): number {
 }
 
 function computeCalibrationExtra(str: string): number {
-  const calibrator = getActiveEmojiCalibrator()
-  if (
-    !CALIBRATION_NEEDED_RE.test(str) &&
-    !(calibrator !== undefined && JOINED_OR_MODIFIER_EMOJI_RE.test(str))
-  ) {
+  if (!needsWidthCalibration(str)) {
     return 0
   }
+  const calibrator = getActiveEmojiCalibrator()
   const plain = str.includes('\x1b') ? stripAnsi(str) : str
   let extra = 0
   for (const { segment } of getGraphemeSegmenter().segment(plain)) {

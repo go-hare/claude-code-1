@@ -13,13 +13,13 @@
  * useIsInsideModal() always false → double top border on /permissions etc.
  */
 
-import { createContext, type RefObject, useContext } from 'react'
-import type { ScrollBoxHandle } from '../components/ScrollBox.js'
+import { createContext, useContext } from 'react'
+import type { ScrollViewport } from '../core/scroll-viewport.js'
 
 type ModalCtx = {
   rows: number
   columns: number
-  scrollRef: RefObject<ScrollBoxHandle | null> | null
+  scrollViewport: ScrollViewport | null
   /**
    * densable lRc claimScrollBox. Outer Tyn Bxc passes null; inner lRc
    * provides a setter so a descendant (Tabs) can claim the scroller.
@@ -47,8 +47,9 @@ export function useModalOrTerminalSize(fallback: {
   return ctx ? { rows: ctx.rows, columns: ctx.columns } : fallback
 }
 
-export function useModalScrollRef(): RefObject<ScrollBoxHandle | null> | null {
-  return useContext(ModalContext)?.scrollRef ?? null
+/** Official 2.1.328 `BC()` — ModalContext scrollViewport. */
+export function useModalScrollViewport(): ScrollViewport | null {
+  return useContext(ModalContext)?.scrollViewport ?? null
 }
 
 /** densable lRc claimScrollBox from inner ModalContext. */

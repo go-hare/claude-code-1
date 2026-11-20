@@ -1,5 +1,4 @@
 import type { DOMElement } from '../dom.js'
-import { nodeCache } from '../node-cache.js'
 import { Event } from './event.js'
 import type { EventTarget } from './terminal-event.js'
 
@@ -68,8 +67,7 @@ export class MouseActionEvent extends Event {
    * is parent-relative and wrong when nested.
    */
   prepareForTarget(target: EventTarget): void {
-    const rect =
-      (target as DOMElement).cachedLayout ?? nodeCache.get(target as DOMElement)
+    const rect = (target as DOMElement).cachedLayout
     if (rect) {
       const originX = Math.floor(rect.x)
       const originY = Math.floor(rect.y)

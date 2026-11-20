@@ -14,7 +14,6 @@ import type { DOMElement } from './dom.js'
 import { hitTest } from './hit-test.js'
 import { clamp } from './layout/geometry.js'
 import { LayoutEdge } from './layout/node.js'
-import { nodeCache } from './node-cache.js'
 import type { Screen, StylePool } from './screen.js'
 import { CellWidth, cellAt, cellAtIndex, setCellStyleId } from './screen.js'
 import {
@@ -41,7 +40,7 @@ export function selectionScopeAt(
   let node: DOMElement | undefined = hitTest(root, col, row) ?? undefined
   let scope: SelectionScope | undefined
   while (node) {
-    const layout = nodeCache.get(node)
+    const layout = node.cachedLayout
     if (layout) {
       const x1 = Math.floor(layout.x)
       const x2 = Math.floor(layout.x + layout.width)

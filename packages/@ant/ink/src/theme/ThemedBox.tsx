@@ -70,6 +70,10 @@ export type Props = BaseStylesWithoutColors &
     elementPlugin?: string;
     drawPending?: boolean;
     hotkey?: string;
+    /** Official 2.1.328 (`InputGate`): early-key wait gate on this Box subtree. */
+    wait?: DOMElement['wait'];
+    /** Official 2.1.328 (`InputGate`): no-option metadata for early-key handling. */
+    no?: DOMElement['no'];
   };
 
 /**

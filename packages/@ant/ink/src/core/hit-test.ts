@@ -3,27 +3,22 @@ import { ClickEvent } from './events/click-event.js'
 import type { EventHandlerProps } from './events/event-handlers.js'
 import { MouseActionEvent } from './events/mouse-action-event.js'
 import { MAX_TREE_DEPTH, warnTreeDepthExceeded } from './maxTreeDepth.js'
-import { nodeCache } from './node-cache.js'
 import { isEmptyCellAt, type Screen } from './screen.js'
 
 /**
  * Find the deepest DOM element whose rendered rect contains (col, row).
  *
- * Uses the nodeCache populated by renderNodeToOutput — rects are in screen
+ * Uses `node.cachedLayout` populated by renderNodeToOutput — rects are in screen
  * coordinates with all offsets (including scrollTop translation) already
  * applied. Children are traversed in reverse so later siblings (painted on
- * top) win. Nodes not in nodeCache (not rendered this frame, or lacking a
- * yogaNode) are skipped along with their subtrees.
+ * top) win.
  *
  * densable 2.1.218 `bir` / `Zlt`: depth-capped to avoid call-stack overflow.
- *
- * Returns the hit node even if it has no onClick — dispatchClick walks up
- * via parentNode to find handlers.
  */
 function layoutRect(
   node: DOMElement,
 ): { x: number; y: number; width: number; height: number } | undefined {
-  return node.cachedLayout ?? nodeCache.get(node)
+  return node.cachedLayout
 }
 
 function hasAbsoluteDescendant(node: DOMElement): boolean {

@@ -5,7 +5,6 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { createNode, type DOMElement } from '../dom.js'
-import { nodeCache } from '../node-cache.js'
 import {
   createSelectionState,
   isCellSelected,
@@ -28,7 +27,7 @@ function box(
   node.style = style
   node.parentNode = parent
   if (parent) parent.childNodes.push(node)
-  nodeCache.set(node, layout)
+  node.cachedLayout = layout
   return node
 }
 

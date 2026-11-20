@@ -21,7 +21,6 @@ import {
   leftoverGsOverlayActive,
   leftoverGsRewriteRawAnsiBg,
   leftoverGsSkipBlitMiss,
-  leftoverGsStaleWipe,
   leftoverGsZl,
 } from '../render-node-to-output.js'
 
@@ -157,36 +156,6 @@ describe('leftoverGsHint gold Yt/hn/pe', () => {
     expect(win.blitHeight).toBe(18)
     expect(win.edgeTop).toBe(18)
     expect(win.edgeBottom).toBe(19)
-  })
-
-  test('stale wipe is [max(shifted,hintTop), min(shifted+h, firstRepaint??hintBottom+1))', () => {
-    expect(
-      leftoverGsStaleWipe({
-        shiftedY: 4,
-        cachedHeight: 10,
-        hintTop: 0,
-        hintBottom: 19,
-        firstRepaintY: undefined,
-      }),
-    ).toEqual({ y: 4, height: 10 })
-    expect(
-      leftoverGsStaleWipe({
-        shiftedY: 4,
-        cachedHeight: 10,
-        hintTop: 0,
-        hintBottom: 19,
-        firstRepaintY: 8,
-      }),
-    ).toEqual({ y: 4, height: 4 })
-    expect(
-      leftoverGsStaleWipe({
-        shiftedY: 8,
-        cachedHeight: 2,
-        hintTop: 0,
-        hintBottom: 19,
-        firstRepaintY: 8,
-      }),
-    ).toBeNull()
   })
 })
 

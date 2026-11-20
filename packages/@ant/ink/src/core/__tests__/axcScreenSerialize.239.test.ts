@@ -4,7 +4,6 @@
 import { describe, expect, test } from 'bun:test'
 import { serializeNodeRows } from '../axcScreenSerialize.js'
 import { createNode } from '../dom.js'
-import { nodeCache } from '../node-cache.js'
 import { CharPool, createScreen, HyperlinkPool, StylePool } from '../screen.js'
 
 function makeFrame(width: number, height: number) {
@@ -48,7 +47,7 @@ describe('serializeNodeRows (gold wTg)', () => {
     node.yogaNode?.setWidth(8)
     node.yogaNode?.setHeight(5)
     node.yogaNode?.calculateLayout(8, 5)
-    nodeCache.set(node, { x: 0, y: 2, width: 8, height: 2 })
+    node.cachedLayout = { x: 0, y: 2, width: 8, height: 2 }
     const rows = serializeNodeRows(frame, stylePool, node)
     expect(rows).toHaveLength(2)
   })
@@ -56,7 +55,7 @@ describe('serializeNodeRows (gold wTg)', () => {
   test('height<=0 cache → []', () => {
     const { frame, stylePool } = makeFrame(8, 6)
     const node = createNode('ink-box')
-    nodeCache.set(node, { x: 0, y: 0, width: 8, height: 0 })
+    node.cachedLayout = { x: 0, y: 0, width: 8, height: 0 }
     expect(serializeNodeRows(frame, stylePool, node)).toEqual([])
   })
 })

@@ -969,7 +969,36 @@ function isMultiCodepointGrapheme(char: string): boolean {
   return char.length > 2
 }
 
-export function clipRightEdgeWideGraphemes(screen: Screen): void {
+export function clipRightEdgeWideGraphemes(
+  screen: Screen,
+  rows?: Iterable<number>,
+): void {
+  if (rows !== undefined) {
+    for (const y of rows) {
+      if (y < 0 || y >= screen.height) continue
+      for (let x = 0; x <= screen.width - 2; x++) {
+        if (
+          (screen.cells[((y * screen.width + x) << 1) + 1]! & WIDTH_MASK) !==
+          CellWidth.Wide
+        ) {
+          continue
+        }
+        const cell = cellAt(screen, x, y)
+        if (!cell || !isMultiCodepointGrapheme(cell.char)) continue
+        const charWidth = Math.max(2, stringWidth(cell.char))
+        if (x + charWidth < screen.width) continue
+        for (let col = x; col < screen.width; col++) {
+          setCellAt(screen, col, y, {
+            char: col === x ? '…' : ' ',
+            styleId: cell.styleId,
+            width: CellWidth.Narrow,
+            hyperlink: cell.hyperlink,
+          })
+        }
+      }
+    }
+    return
+  }
   const damage = screen.damage
   if (!damage) return
   const maxCol = Math.min(screen.width - 2, damage.x + damage.width - 1)
@@ -996,6 +1025,25 @@ export function clipRightEdgeWideGraphemes(screen: Screen): void {
       }
     }
   }
+}
+
+/**
+ * Official 2.1.328 `oi(dst, dstRow, src, srcRow, count)`: bulk-copy full rows
+ * (cells, noSelect, softWrap) between same-width screens.
+ */
+export function copyRows(
+  dst: Screen,
+  dstRow: number,
+  src: Screen,
+  srcRow: number,
+  count: number,
+): void {
+  if (count <= 0) return
+  const w = dst.width
+  const endRow = srcRow + count
+  dst.cells64.set(src.cells64.subarray(srcRow * w, endRow * w), dstRow * w)
+  dst.noSelect.set(src.noSelect.subarray(srcRow * w, endRow * w), dstRow * w)
+  dst.softWrap.set(src.softWrap.subarray(srcRow, endRow), dstRow)
 }
 
 /**

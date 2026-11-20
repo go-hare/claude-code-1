@@ -1,5 +1,4 @@
 import type { DOMElement } from '../dom.js'
-import { nodeCache } from '../node-cache.js'
 import { TerminalEvent } from './terminal-event.js'
 import type { EventTarget } from './terminal-event.js'
 
@@ -42,7 +41,7 @@ export class WheelEvent extends TerminalEvent {
 
   override _prepareForTarget(target: EventTarget): void {
     // densable dEe: cachedLayout screen origin (same rect bubbleClick uses).
-    const rect = nodeCache.get(target as DOMElement)
+    const rect = (target as DOMElement).cachedLayout
     if (rect && this.col !== undefined && this.row !== undefined) {
       this.localCol = this.col - rect.x
       this.localRow = this.row - rect.y

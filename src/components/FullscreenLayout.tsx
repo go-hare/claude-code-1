@@ -30,6 +30,7 @@ import {
   NoSelect,
   ScrollBox,
   type ScrollBoxHandle,
+  type ScrollViewport,
   TerminalSizeContext,
   Text,
   instances,
@@ -1495,8 +1496,16 @@ function useMeasured(read: () => number): number {
   const { subscribeLayout } = useApp();
   const snapshot = useSyncExternalStore(subscribeLayout, read, read);
   const [, bump] = useReducer((n: number) => n + 1, 0);
+  const consecutiveBumpsRef = useRef(0);
   useLayoutEffect(() => {
-    if (!Object.is(read(), snapshot)) bump();
+    if (!Object.is(read(), snapshot)) {
+      if (consecutiveBumpsRef.current < 8) {
+        consecutiveBumpsRef.current += 1;
+        bump();
+      }
+    } else {
+      consecutiveBumpsRef.current = 0;
+    }
   });
   return snapshot;
 }
@@ -1534,12 +1543,10 @@ export type FullscreenLayoutProps = {
    * sibling (not absolute). `visible` drives Uxc/Bxc display.
    */
   modal?: { content: ReactNode; visible: boolean };
-  /** Ref passed via ModalContext so Tabs (or any scroll-owning descendant)
-   *  can attach it to their own ScrollBox for tall content. */
-  modalScrollRef?: React.RefObject<ScrollBoxHandle | null>;
-  /** Ref to the scroll box for keyboard scrolling. RefObject (not Ref) so
-   *  pillVisible's useSyncExternalStore can subscribe to scroll changes. */
-  scrollRef?: RefObject<ScrollBoxHandle | null>;
+  /** Official 2.1.328 subscribable ScrollViewport proxy for the modal ScrollBox. */
+  modalScrollViewport?: ScrollViewport;
+  /** Official 2.1.328 subscribable ScrollViewport proxy for the main ScrollBox. */
+  scrollViewport?: ScrollViewport;
   /** Y-position (scrollHeight at snapshot) of the unseen-divider. Pill
    *  shows while viewport bottom hasn't reached this. Ref so REPL doesn't
    *  re-render on the one-shot snapshot write. */
@@ -1790,8 +1797,8 @@ export function FullscreenLayout({
   abovePrompt,
   transcriptOverlay,
   modal,
-  modalScrollRef,
-  scrollRef,
+  modalScrollViewport,
+  scrollViewport,
   dividerYRef,
   hidePill = false,
   hideSticky = false,
@@ -1868,20 +1875,20 @@ export function FullscreenLayout({
   const { subscribeFrames } = useApp();
   const subscribe = useCallback(
     (listener: () => void) => {
-      const unsubScroll = scrollRef?.current?.subscribe(listener) ?? (() => {});
+      const unsubScroll = scrollViewport?.subscribe(listener) ?? (() => {});
       const unsubFrames = subscribeFrames?.(listener) ?? (() => {});
       return () => {
         unsubScroll();
         unsubFrames();
       };
     },
-    [scrollRef, subscribeFrames],
+    [scrollViewport, subscribeFrames],
   );
   const pillVisible = useSyncExternalStore(subscribe, () => {
     // 2.1.326 #191 / #197 / 2.1.328 `Uo`: sticky never shows the pill;
     // when scrolled up and content extends below viewportBottom, show pill if
     // unread divider exists, auto-scroll is disabled, or Claude awaits an answer.
-    const s = scrollRef?.current;
+    const s = scrollViewport?.handle;
     if (!s) return false;
     if (s.isSticky()) return false;
     const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
@@ -1889,7 +1896,7 @@ export function FullscreenLayout({
     return (hasDivider || !getAutoScrollEnabled() || askBelow) && viewportBottom < s.getScrollHeight();
   });
   const showUnreadCount = useSyncExternalStore(subscribe, () => {
-    const s = scrollRef?.current;
+    const s = scrollViewport?.handle;
     const dividerY = dividerYRef?.current;
     if (!s || dividerY == null) return false;
     const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
@@ -2016,7 +2023,7 @@ export function FullscreenLayout({
                       <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />
                     )}
                     <ScrollBox
-                      ref={scrollRef}
+                      ref={scrollViewport?.attach}
                       flexGrow={1}
                       flexDirection="column"
                       paddingTop={padCollapsed ? 0 : 1}
@@ -2106,7 +2113,7 @@ export function FullscreenLayout({
               value={{
                 rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
                 columns: columns - 4,
-                scrollRef: modalScrollRef ?? null,
+                scrollViewport: modalScrollViewport ?? null,
                 claimScrollBox: null,
               }}
             >
@@ -2126,7 +2133,10 @@ export function FullscreenLayout({
                     </Box>
                     <ModalDividerTail />
                   </Box>
-                  <ModalScroller scrollRef={modalScrollRef} maxRows={terminalRows - MODAL_TRANSCRIPT_PEEK - 1}>
+                  <ModalScroller
+                    scrollViewport={modalScrollViewport}
+                    maxRows={terminalRows - MODAL_TRANSCRIPT_PEEK - 1}
+                  >
                     {modal.content}
                   </ModalScroller>
                 </Box>
@@ -2145,7 +2155,7 @@ export function FullscreenLayout({
   // xxc overlay slot is absolute+opaque (owned by AxcStickyHost). No Ob/▔, no
   // lRc, no pushUp, no sidebar. Qvt() body is not in the 239 dump — keep
   // CLAUDE_CODE_AXC_STICKY_MAIN opt-in (do not product-default ON).
-  const axcSticky = isAxcStickyMainEnabled() && scrollRef != null;
+  const axcSticky = isAxcStickyMainEnabled() && scrollViewport != null;
   if (axcSticky) {
     // Match Vs ozs: only mount opaque overlay when RPs visible (not suppressed).
     const overlayNode =
@@ -2154,7 +2164,7 @@ export function FullscreenLayout({
           value={{
             rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
             columns: columns - 4,
-            scrollRef: modalScrollRef ?? null,
+            scrollViewport: modalScrollViewport ?? null,
             claimScrollBox: null,
           }}
         >
@@ -2168,7 +2178,7 @@ export function FullscreenLayout({
     return (
       <PromptOverlayProvider container={promptContainerRef}>
         <AxcStickyHost
-          scrollRef={scrollRef}
+          scrollViewport={scrollViewport}
           scrollable={
             <ScrollChromeContext value={chromeCtx}>
               {scrollable}

@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -175,13 +176,15 @@ export function useDiffInIDE({
   // densable: when requestDialog/doo owns idm/Mrf, React must not open a second
   // diff tab — only drive ShowInIDEPrompt UI. closeTab goes through racer registry.
   const dooOwnsIdeDiff = toolUseContext.requestDialog != null
-  const dooRacerActive = useSyncExternalStore(
-    onStoreChange => {
+  const subscribeDooRacer = useCallback(
+    (onStoreChange: () => void) => {
       if (!dooOwnsIdeDiff || !toolUseID) return () => {}
       return subscribeIdeDiffRacers(onStoreChange)
     },
-    () =>
-      dooOwnsIdeDiff && toolUseID != null ? hasIdeDiffRacer(toolUseID) : false,
+    [dooOwnsIdeDiff, toolUseID],
+  )
+  const dooRacerActive = useSyncExternalStore(subscribeDooRacer, () =>
+    dooOwnsIdeDiff && toolUseID != null ? hasIdeDiffRacer(toolUseID) : false,
   )
 
   // densable L4n onReprompt teardown+rebuild: when hook rewrites input,

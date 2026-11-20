@@ -100,6 +100,10 @@ export type Props = Except<Styles, 'textWrap'> & {
   drawPending?: boolean;
   /** densable button hotkey stamped for yoga-window digit visibility. */
   hotkey?: string;
+  /** Official 2.1.328 (`InputGate`): early-key wait gate on this Box subtree. */
+  wait?: DOMElement['wait'];
+  /** Official 2.1.328 (`InputGate`): keys exempted from early-key dropping on this Box. */
+  no?: DOMElement['no'];
 };
 
 /**
@@ -141,6 +145,8 @@ function Box({
   elementPlugin,
   drawPending,
   hotkey,
+  wait,
+  no,
   ...style
 }: PropsWithChildren<Props>): React.ReactNode {
   // Warn if spacing values are not integers to prevent fractional layout dimensions
@@ -211,6 +217,8 @@ function Box({
       {...(elementPlugin !== undefined && { elementPlugin })}
       {...(drawPending ? { drawPending: true } : {})}
       {...(hotkey !== undefined && { hotkey })}
+      {...(wait !== undefined && { wait })}
+      {...(no !== undefined && { no })}
       style={{
         flexWrap,
         flexDirection,

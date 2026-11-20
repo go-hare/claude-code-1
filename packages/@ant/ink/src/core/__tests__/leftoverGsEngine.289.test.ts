@@ -6,7 +6,6 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { appendChildNode, createNode, setStyle } from '../dom.js'
 import { hitTest } from '../hit-test.js'
-import { nodeCache } from '../node-cache.js'
 import Output from '../output.js'
 import applyStyles from '../styles.js'
 import { CharPool, createScreen, HyperlinkPool, StylePool } from '../screen.js'
@@ -115,14 +114,12 @@ describe('leftoverGs SC unpainted / lst cull', () => {
     )
   })
 
-  test('lst drops cachedLayout and WeakMap', () => {
+  test('lst drops cachedLayout', () => {
     const node = createNode('ink-box')
     const rect = { x: 0, y: 0, width: 8, height: 4, unpainted: true }
     node.cachedLayout = rect
-    nodeCache.set(node, rect)
     leftoverGsDropCachedLayout(node)
     expect(node.cachedLayout).toBeUndefined()
-    expect(nodeCache.get(node)).toBeUndefined()
   })
 
   test('height===0 walks SC; cull walks lst', () => {
@@ -159,16 +156,14 @@ describe('leftoverGs SC unpainted / lst cull', () => {
       expect.objectContaining({ x: 0, y: 0, width: 20, height: 4 }),
     )
     expect(hitTest(root, 1, 1)).toBe(box)
-    expect(nodeCache.get(root)).toBe(root.cachedLayout)
   })
 
-  test('stampLayout is gold one object; Gs skip-blit reads cachedLayout', () => {
+  test('stampLayout writes cachedLayout directly; Gs skip-blit reads cachedLayout', () => {
     expect(render).toContain('node.cachedLayout = rect')
-    expect(render).toContain('nodeCache.set(node, rect)')
     expect(render).toContain('const cached = node.cachedLayout')
     expect(render).toContain('const contentCached = content.cachedLayout')
     expect(render).toContain('const cached = childElem.cachedLayout')
-    expect(render).not.toContain('node.cachedLayout ?? nodeCache.get(node)')
+    expect(render).not.toContain('nodeCache')
   })
 
   test('sf leftoverGsWidthUnchanged is gold _t; fast-path clips void 0', () => {
@@ -176,7 +171,9 @@ describe('leftoverGs SC unpainted / lst cull', () => {
     expect(render).toContain(
       'contentCached.width === contentYoga.getComputedWidth()',
     )
-    expect(render).toContain('leftoverGsWidthUnchanged &&')
+    // Official 2.1.328 `Rm` replaced the 2.1.289 cached.top skip shortcut with
+    // direct Yoga top/height reads (`cy.getComputedTop()` / `cy.getComputedHeight()`).
+    expect(render).toContain('const top = cy.getComputedTop()')
     expect(render).toContain('depth + 2')
   })
 })
@@ -189,7 +186,9 @@ describe('leftoverGs Kt overlayActive / Ze wire', () => {
     expect(ink).toContain('leftoverGsSelectionBothEndsOff')
     expect(ink).toContain('overlayActive: leftoverGsOverlay')
     expect(ink).toContain('prevFrameContaminated: leftoverGsContaminated')
-    expect(renderer).toContain('leftoverGsSetOverlayActive')
+    expect(renderer).toContain(
+      'frameCtx.overlayActive = options.overlayActive === true',
+    )
     expect(renderer).toContain('options.overlayActive === true')
     expect(selection).toContain(
       'export function leftoverGsSelectionBothEndsOff',

@@ -3,17 +3,7 @@
  * Gold: docs/upstream-extraction/v2.1.239/snippets/gold-fullscreen-modal-layout.txt
  */
 import figures from 'figures';
-import React, {
-  type ReactNode,
-  type RefObject,
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   type DOMElement,
@@ -21,6 +11,7 @@ import {
   ModalContext,
   ScrollBox,
   type ScrollBoxHandle,
+  type ScrollViewport,
   Text,
   useApp,
 } from '@anthropic/ink';
@@ -45,12 +36,12 @@ const EMPTY_OVERFLOW: OverflowState = {
 };
 
 type Props = {
-  scrollRef?: RefObject<ScrollBoxHandle | null> | null;
+  scrollViewport?: ScrollViewport | null;
   maxRows: number;
   children: ReactNode;
 };
 
-export function ModalScroller({ scrollRef: vJ, maxRows, children }: Props): React.ReactNode {
+export function ModalScroller({ scrollViewport, maxRows, children }: Props): React.ReactNode {
   const zxc = useContext(ModalContext);
   const claimedHeightRef = useRef<number | null>(null);
   const [claimedHeight, setClaimedHeight] = useState<number | null>(null);
@@ -62,22 +53,10 @@ export function ModalScroller({ scrollRef: vJ, maxRows, children }: Props): Reac
   const remainingRows = maxRows - (claimedHeight ?? 0);
   const innerScrollRef = useRef<ScrollBoxHandle | null>(null);
 
-  useLayoutEffect(() => {
-    if (vJ && claimedHeightRef.current === null) {
-      vJ.current = innerScrollRef.current;
-      return () => {
-        if (vJ.current === innerScrollRef.current) {
-          vJ.current = null;
-        }
-      };
-    }
-    return undefined;
-  }, [vJ]);
-
   const [overflow, setOverflow] = useState<OverflowState>(EMPTY_OVERFLOW);
 
   const measure = useCallback(() => {
-    const handle = vJ?.current;
+    const handle = scrollViewport?.handle;
     if (!handle) {
       return;
     }
@@ -102,7 +81,7 @@ export function ModalScroller({ scrollRef: vJ, maxRows, children }: Props): Reac
         ? prev
         : { overflows, above, below, hintTop, hintBottom },
     );
-  }, [remainingRows, vJ]);
+  }, [remainingRows, scrollViewport]);
 
   const wrapRef = useRef<DOMElement | null>(null);
   const savedFocusRef = useRef<DOMElement | null>(null);
@@ -136,33 +115,23 @@ export function ModalScroller({ scrollRef: vJ, maxRows, children }: Props): Reac
     reclaimFocus();
   }, [reclaimFocus]);
 
-  const subscribedHandleRef = useRef<ScrollBoxHandle | null>(null);
-  const unsubscribeRef = useRef<(() => void) | undefined>(undefined);
-
   useEffect(() => {
     measure();
-    subscribedHandleRef.current = vJ?.current ?? null;
-    unsubscribeRef.current = subscribedHandleRef.current?.subscribe(measure);
+    const unsub = scrollViewport?.subscribe(measure);
     return () => {
-      unsubscribeRef.current?.();
+      unsub?.();
     };
-  }, [measure, vJ]);
+  }, [measure, scrollViewport]);
 
   useEffect(() => {
     const id = setInterval(() => {
-      const current = vJ?.current ?? null;
-      if (current !== subscribedHandleRef.current) {
-        unsubscribeRef.current?.();
-        subscribedHandleRef.current = current;
-        unsubscribeRef.current = current?.subscribe(measure);
-      }
       measure();
       reclaimFocus();
     }, 50);
     return () => {
       clearInterval(id);
     };
-  }, [measure, reclaimFocus, vJ]);
+  }, [measure, reclaimFocus]);
 
   const innerRows = zxc?.rows ?? maxRows;
   const innerColumns = zxc?.columns ?? 0;
@@ -170,10 +139,10 @@ export function ModalScroller({ scrollRef: vJ, maxRows, children }: Props): Reac
     () => ({
       rows: innerRows,
       columns: innerColumns,
-      scrollRef: vJ ?? null,
+      scrollViewport: scrollViewport ?? null,
       claimScrollBox,
     }),
-    [innerRows, innerColumns, vJ, claimScrollBox],
+    [innerRows, innerColumns, scrollViewport, claimScrollBox],
   );
 
   const onKeyDown = useCallback(
@@ -181,7 +150,7 @@ export function ModalScroller({ scrollRef: vJ, maxRows, children }: Props): Reac
       if (event.defaultPrevented || event.ctrl || event.meta || event.shift) {
         return;
       }
-      const handle = vJ?.current;
+      const handle = scrollViewport?.handle;
       if (!handle) {
         return;
       }
@@ -212,16 +181,30 @@ export function ModalScroller({ scrollRef: vJ, maxRows, children }: Props): Reac
         event.preventDefault();
       }
     },
-    [remainingRows, vJ],
+    [remainingRows, scrollViewport],
   );
 
   const scrollBoxHeight = !claimed && overflow.overflows ? remainingRows : undefined;
+  const attachInnerScroll = useCallback(
+    (handle: ScrollBoxHandle | null) => {
+      innerScrollRef.current = handle;
+      if (!claimed && scrollViewport) {
+        const detach = scrollViewport.attach(handle);
+        return () => {
+          detach();
+          innerScrollRef.current = null;
+        };
+      }
+      return undefined;
+    },
+    [claimed, scrollViewport],
+  );
 
   return (
     <ModalContext value={innerValue}>
       <Box ref={wrapRef} flexDirection="column" flexShrink={0} onKeyDown={onKeyDown}>
         <ScrollBox
-          ref={innerScrollRef}
+          ref={attachInnerScroll}
           flexDirection="column"
           flexShrink={0}
           height={scrollBoxHeight}

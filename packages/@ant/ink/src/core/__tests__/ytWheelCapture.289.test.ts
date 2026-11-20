@@ -7,7 +7,6 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DOMElement } from '../dom.js'
 import { hitTest, wheelCaptureOwnedByDescendant } from '../hit-test.js'
-import { nodeCache } from '../node-cache.js'
 
 function makeBox(
   rect: { x: number; y: number; width: number; height: number },
@@ -20,9 +19,9 @@ function makeBox(
     style: {},
     dirty: false,
     parentNode: parent,
+    cachedLayout: rect,
   } as DOMElement
   if (parent) parent.childNodes.push(node)
-  nodeCache.set(node, rect)
   return node
 }
 
@@ -41,7 +40,7 @@ describe('densable 2.1.289 Yt eo wheel capture', () => {
     const sidebar = makeBox({ x: 60, y: 0, width: 40, height: 40 }, root)
     const pane = makeBox({ x: 60, y: 0, width: 40, height: 40 }, sidebar)
     pane._eventHandlers = { onWheel: () => {} }
-    nodeCache.delete(sidebar)
+    sidebar.cachedLayout = undefined
     expect(hitTest(root, 70, 10)).toBe(root)
     expect(hitTest(sidebar, 70, 10)).toBeNull()
   })
@@ -51,7 +50,7 @@ describe('densable 2.1.289 Yt eo wheel capture', () => {
     const right = makeBox({ x: 60, y: 0, width: 40, height: 8 }, root)
     right._eventHandlers = { onWheel: () => {} }
     expect(wheelCaptureOwnedByDescendant(right, root, 70, 20)).toBe(false)
-    nodeCache.delete(right)
+    right.cachedLayout = undefined
     expect(wheelCaptureOwnedByDescendant(right, root, 70, 10)).toBe(false)
   })
 

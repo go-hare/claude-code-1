@@ -5,7 +5,6 @@ import type { DOMElement, DOMNode } from './dom.js'
 import getMaxWidth from './get-max-width.js'
 import type { Rectangle } from './layout/geometry.js'
 import { LayoutDisplay, LayoutEdge, type LayoutNode } from './layout/node.js'
-import { nodeCache, pendingClears } from './node-cache.js'
 import type Output from './output.js'
 import type { Clip } from './output.js'
 import renderBorder from './render-border.js'
@@ -48,8 +47,8 @@ function isXtermJsHost(): boolean {
 }
 
 /**
- * densable `jd.cachedLayout` stamp — gold `R6`/`Wl`/`tv` read `n.cachedLayout`.
- * WeakMap `nodeCache` stays for local dirty/prevScreen blit.
+ * Official 2.1.328 `cachedLayout` stamp — `hitTest` / `MouseActionEvent` / `Tree`
+ * all read `node.cachedLayout` directly.
  */
 function stampLayout(
   node: DOMElement,
@@ -64,12 +63,7 @@ function stampLayout(
     unpainted?: boolean
   },
 ): void {
-  // gold Gs: `n.cachedLayout={x,y,width,height,top,...}` is ONE object.
-  // DualInk WeakMap skip-blit extra must alias that object so sf `K.top=X`
-  // (renderScrolledChildren) mutates the same stamp skip-blit / second-pass
-  // read. Copying here left cachedLayout.top stale vs nodeCache.top.
   node.cachedLayout = rect
-  nodeCache.set(node, rect)
 }
 
 /**
@@ -203,29 +197,6 @@ export function leftoverGsBlitWindow(input: {
     clearY: delta < 0 ? top : edgeTop,
     paintEdge: edgeTop <= edgeBottom,
   }
-}
-
-/**
- * densable Gs second-pass stale wipe. Gold:
- *   Tn = floor(Pt.y)-Yt
- *   if (Tn===ri) continue
- *   vi=max(Tn,Jt.top), qo=min(Tn+Pt.height, bo??Jt.bottom+1)
- *   if (vi<qo) write spaces
- */
-export function leftoverGsStaleWipe(input: {
-  shiftedY: number
-  cachedHeight: number
-  hintTop: number
-  hintBottom: number
-  firstRepaintY: number | undefined
-}): { y: number; height: number } | null {
-  const y1 = Math.max(input.shiftedY, input.hintTop)
-  const y2 = Math.min(
-    input.shiftedY + input.cachedHeight,
-    input.firstRepaintY ?? input.hintBottom + 1,
-  )
-  if (y1 >= y2) return null
-  return { y: y1, height: y2 - y1 }
 }
 
 export type FollowScroll = {
@@ -531,7 +502,7 @@ export function leftoverGsEscapingDirtyPoisons(
     const stack: [DOMElement, number, number][] = [[child, childX, childY]]
     for (let item = stack.pop(); item !== undefined; item = stack.pop()) {
       const [cur, curX, curY] = item
-      for (const rect of pendingClears.get(cur) ?? []) {
+      for (const rect of cur.pendingClears ?? []) {
         poisoned = leftoverGsPoisonOverlappingSiblings(
           siblings,
           i,
@@ -581,15 +552,17 @@ export function leftoverGsEscapingDirtyPoisons(
  * Hide + cull. Gold 0: SC is height===0, not cull.
  */
 export function leftoverGsDropCachedLayout(node: DOMElement): void {
-  if (node.cachedLayout === undefined && !nodeCache.has(node)) return
+  if (node.cachedLayout === undefined) return
   const stack: { node: DOMElement; depth: number }[] = [{ node, depth: 0 }]
   for (let item = stack.pop(); item !== undefined; item = stack.pop()) {
     if (item.depth >= MAX_TREE_DEPTH) {
       warnTreeDepthExceeded('dropSubtreeCache', item.node.nodeName)
       continue
     }
-    nodeCache.delete(item.node)
     item.node.cachedLayout = undefined
+    if (item.node.paintCache) {
+      item.node.paintCache.lines = undefined
+    }
     const children = item.node.childNodes
     for (let i = children.length - 1; i >= 0; i--) {
       const child = children[i]
@@ -696,9 +669,46 @@ export function leftoverGsOverlayActive(input: {
   )
 }
 
+const HARD_BREAK_SW: SoftWrapKindValue[] = [SoftWrapKind.HardBreak]
+
+/**
+ * Official 2.1.328 `iS(h, m)`: shift a visible ScrollBox child subtree's
+ * cachedLayout.y (plus clip and scrollViewportTop) by `dy` and stamp
+ * `shifted = true` so hitTest, clean-subtree blit checks, and subsequent
+ * fast-path scroll passes stay aligned with actual screen coordinates.
+ */
+export function shiftCachedLayoutSubtree(node: DOMElement, dy: number): void {
+  const stack: DOMElement[] = [node]
+  for (let cur = stack.pop(); cur !== undefined; cur = stack.pop()) {
+    const cached = cur.cachedLayout
+    if (cached === undefined) continue
+    cached.y += dy
+    cached.shifted = true
+    if (cur.scrollViewportTop !== undefined) {
+      cur.scrollViewportTop += dy
+    }
+    const clip = cached.clip
+    if (clip) {
+      cached.clip = {
+        x1: clip.x1,
+        x2: clip.x2,
+        y1: clip.y1 === undefined ? undefined : clip.y1 + dy,
+        y2: clip.y2 === undefined ? undefined : clip.y2 + dy,
+      }
+    }
+    const children = cur.childNodes
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i]
+      if (child && child.nodeName !== '#text') {
+        stack.push(child as DOMElement)
+      }
+    }
+  }
+}
+
 /**
  * densable Kt extras after Bi / g / background / gC:
- *   !overlayActive && !Ze
+ *   !overlayActive && !Ze && !Vn
  */
 export function leftoverGsDecstbmOk(input: {
   prevScreen: boolean
@@ -706,13 +716,15 @@ export function leftoverGsDecstbmOk(input: {
   overlayActive: boolean
   absPrevInContent: boolean
   backgroundOk: boolean
+  paintsPastRect?: boolean
 }): boolean {
   return (
     input.prevScreen &&
     input.heightDeltaOk &&
     !input.overlayActive &&
     !input.absPrevInContent &&
-    input.backgroundOk
+    input.backgroundOk &&
+    !input.paintsPastRect
   )
 }
 
@@ -828,16 +840,21 @@ export function runWithRenderFrameContext<T>(
   }
 }
 
+/** Official 2.1.328 `eS(H)` — reset a specific RenderFrameContext instance. */
+export function resetRenderFrameContextState(state: RenderFrameContext): void {
+  state.overlayActive = false
+  state.layoutShifted = false
+  state.scrollHint = null
+  state.scrollDrainNode = null
+  state.followScroll = null
+  state.absolutePaintCut = false
+  state.absoluteRectsPrev = state.absoluteRectsCur
+  state.absoluteRectsCur = []
+}
+
 /** densable `oSf(e)` — one reset for every per-paint field. */
 export function resetRenderFrameContext(): void {
-  ctx.overlayActive = false
-  ctx.layoutShifted = false
-  ctx.scrollHint = null
-  ctx.scrollDrainNode = null
-  ctx.followScroll = null
-  ctx.absolutePaintCut = false
-  ctx.absoluteRectsPrev = ctx.absoluteRectsCur
-  ctx.absoluteRectsCur = []
+  resetRenderFrameContextState(ctx)
 }
 
 export function resetLayoutShifted(): void {
@@ -1445,13 +1462,12 @@ export function getAbsolutePaintCut(): boolean {
   return ctx.absolutePaintCut
 }
 
-/**
- * densable `Nv` — a prev overflowing absolute vanished and a blit still
- * covers that rect.
- */
-export function vanishedOverflowingAbsoluteBlit(output: Output): boolean {
-  const cur = ctx.absoluteRectsCur
-  return ctx.absoluteRectsPrev.some(
+export function vanishedOverflowingAbsoluteBlitFor(
+  state: RenderFrameContext,
+  output: Output,
+): boolean {
+  const cur = state.absoluteRectsCur
+  return state.absoluteRectsPrev.some(
     prev =>
       !prev.withinParent &&
       !cur.some(
@@ -1463,6 +1479,14 @@ export function vanishedOverflowingAbsoluteBlit(output: Output): boolean {
       ) &&
       output.blitsOver(prev),
   )
+}
+
+/**
+ * densable `Nv` — a prev overflowing absolute vanished and a blit still
+ * covers that rect.
+ */
+export function vanishedOverflowingAbsoluteBlit(output: Output): boolean {
+  return vanishedOverflowingAbsoluteBlitFor(ctx, output)
 }
 
 // If parent container is `<Box>`, text nodes will be treated as separate nodes in
@@ -1543,7 +1567,7 @@ function renderNodeToOutput(
             height: Math.floor(cached.height),
           })
           // Drop descendants' cache too — hideInstance's markDirty walks UP
-          // only, so descendants' .dirty stays false. Their nodeCache entries
+          // only, so descendants' .dirty stays false. Their cachedLayout entries
           // survive with pre-hide rects. On unhide, if position didn't shift,
           // the blit check at line ~432 passes and copies EMPTY cells from
           // prevScreen (cleared here) → content vanishes.
@@ -1633,7 +1657,7 @@ function renderNodeToOutput(
 
     // Read before deleting — hasRemovedChild disables prevScreen blitting
     // for siblings to prevent stale overflow content from being restored.
-    const clears = pendingClears.get(node)
+    const clears = node.pendingClears
     const hasRemovedChild = clears !== undefined
     if (hasRemovedChild) {
       ctx.layoutShifted = true
@@ -1645,7 +1669,9 @@ function renderNodeToOutput(
           height: Math.floor(rect.height),
         })
       }
-      if (ctx.consumeClears) pendingClears.delete(node)
+      if (ctx.consumeClears) {
+        node.pendingClears = undefined
+      }
     }
 
     // Yoga squeezed this node to zero height (overflow in a height-constrained
@@ -2206,6 +2232,14 @@ function renderNodeToOutput(
               width,
               height,
             })
+          const childPaintsPastRect =
+            hint !== null &&
+            content.childNodes.some(
+              c =>
+                c.nodeName !== '#text' &&
+                (c as DOMElement).paintsPastRect === true &&
+                (c as DOMElement).cachedLayout !== undefined,
+            )
           const leftoverGsKt = leftoverGsDecstbmOk({
             prevScreen: Boolean(prevScreen),
             heightDeltaOk: safeForFastPath,
@@ -2215,12 +2249,15 @@ function renderNodeToOutput(
               content,
             ),
             backgroundOk: leftoverGsBackgroundOk,
+            paintsPastRect: childPaintsPastRect,
           })
           // Gold: if (Jt && !Kt) f.scrollHint = null
           if (hint && !leftoverGsKt) ctx.scrollHint = null
           if (hint && prevScreen && leftoverGsKt) {
             const { top, bottom, delta } = hint
             const w = Math.floor(width)
+            const spaces = ' '.repeat(w)
+            const absBeforeRepair = ctx.absoluteRectsCur.length
             const leftoverViewportTop = Math.floor(node.scrollViewportTop ?? y)
             let leftoverGsOverlap = 0
             if (delta > 0 && leftoverViewportTop > top) {
@@ -2259,23 +2296,74 @@ function renderNodeToOutput(
             output.shift(top, bottom, delta)
             const edgeTop = leftoverGsWin.edgeTop
             const edgeBottom = leftoverGsWin.edgeBottom
-            // Snapshot dirty children and pre-edge cachedLayouts before the
-            // first pass — the first pass clears dirty flags and stamps new
-            // cachedLayout.y/height on edge-straddling children, which would
-            // corrupt cumHeightShift and shiftedY in the second pass.
-            const dirtyChildren = content.dirty
-              ? new Set(content.childNodes.filter(c => (c as DOMElement).dirty))
-              : null
-            const preEdgeCachedLayouts = dirtyChildren
-              ? new Map(
-                  content.childNodes.map(c => [
-                    c as DOMElement,
-                    (c as DOMElement).cachedLayout
-                      ? { ...(c as DOMElement).cachedLayout! }
-                      : undefined,
-                  ]),
-                )
-              : null
+            // Official 2.1.328 fast-path classification pass:
+            //   1. Drop cache for culled children.
+            //   2. Shift every visible child subtree's cachedLayout.y by -delta
+            //      and mark `shifted = true` (keeps hitTest & future frames aligned).
+            //   3. Track rows covered by clean, in-place shifted children in
+            //      `coveredRows` when `content.dirty`, wiping uncovered rows
+            //      before edge & repaint passes so removed/shrunk/shifted children
+            //      never leave stale blitted pixels or overwrite live rows.
+            //   4. Collect dirty/shifted/uncached children spanning stable rows
+            //      into `repaintList` (`On`) and clean repainted ones into
+            //      `cleanRepainted` (`Mr`).
+            let repaintList: DOMElement[] | undefined
+            let cleanRepainted: DOMElement[] | undefined
+            const coveredRows = content.dirty
+              ? new Uint8Array(bottom - top + 1)
+              : undefined
+            for (const childNode of content.childNodes) {
+              const childElem = childNode as DOMElement
+              const cy = childElem.yogaNode
+              if (!cy) continue
+              const cached = childElem.cachedLayout
+              const childTop = cy.getComputedTop()
+              const childH = cy.getComputedHeight()
+              const childBottom = childTop + childH
+              if (
+                childBottom <= scrollTop ||
+                childTop >= scrollTop + innerHeight
+              ) {
+                leftoverGsDropCachedLayout(childElem)
+                continue
+              }
+              if (cached) {
+                const inPlace =
+                  Math.floor(cached.y) - delta ===
+                    Math.floor(contentY + childTop) && cached.height === childH
+                shiftCachedLayoutSubtree(childElem, -delta)
+                if (inPlace && !childElem.dirty) {
+                  const rowOffset = Math.floor(cached.y) - top
+                  coveredRows?.fill(
+                    1,
+                    Math.max(rowOffset, 0),
+                    Math.max(rowOffset + childH, 0),
+                  )
+                  continue
+                }
+              }
+              if (
+                childH > 0 &&
+                Math.max(childTop, scrollTop) >= edgeTop - contentY &&
+                Math.min(childBottom, scrollTop + innerHeight) <=
+                  edgeBottom + 1 - contentY
+              ) {
+                continue
+              }
+              if (repaintList === undefined) repaintList = [childElem]
+              else repaintList.push(childElem)
+              if (!childElem.dirty) {
+                if (cleanRepainted === undefined) cleanRepainted = [childElem]
+                else cleanRepainted.push(childElem)
+              }
+            }
+            if (coveredRows) {
+              for (let r = 0; r < coveredRows.length; r++) {
+                if (coveredRows[r] === 0) {
+                  output.write(Math.floor(x), top + r, spaces, HARD_BREAK_SW)
+                }
+              }
+            }
             if (leftoverGsWin.paintEdge) {
               output.clear({
                 x: Math.floor(x),
@@ -2308,131 +2396,45 @@ function renderNodeToOutput(
               output.unclip()
             }
 
-            // Second pass: re-render children in stable rows whose screen
-            // position doesn't match where the shift put their old pixels.
-            // Covers TWO cases:
-            //   1. Dirty children — their content changed, blitted pixels are
-            //      stale regardless of position.
-            //   2. Clean children BELOW a middle-growth point — when a dirty
-            //      sibling above them grows, their yogaTop increases but
-            //      scrollTop increases by the same amount (sticky), so their
-            //      screenY is CONSTANT. The shift moved their old pixels to
-            //      screenY-delta (wrong); they should stay at screenY. Without
-            //      this, the spinner/tmux-monitor ghost at shifted positions
-            //      during streaming (e.g. triple spinner, pill duplication).
-            //   For bottom-append (the common case), all clean children are
-            //   ABOVE the growth point; their screenY decreased by delta and
-            //   the shift put them at the right place — skipped here, fast
-            //   path preserved.
-            if (dirtyChildren) {
-              const edgeTopLocal = edgeTop - contentY
-              const edgeBottomLocal = edgeBottom + 1 - contentY
-              const spaces = ' '.repeat(w)
-              // Track cumulative height change of children iterated so far.
-              // A clean child's yogaTop is unchanged iff this is zero (no
-              // sibling above it grew/shrank/mounted). When zero, the skip
-              // check cached.y−delta === screenY reduces to delta === delta
-              // (tautology) → skip without yoga reads. Restores O(dirty)
-              // that #24536 traded away: for bottom-append the dirty child
-              // is last (all clean children skip); for virtual-scroll range
-              // shift the topSpacer shrink + new-item heights self-balance
-              // to zero before reaching the clean block. Middle-growth
-              // leaves shift non-zero → clean children after the growth
-              // point fall through to yoga + the fine-grained check below,
-              // preserving the ghost-box fix.
-              let cumHeightShift = 0
-              let leftoverGsFirstRepaintY: number | undefined
-              for (const childNode of content.childNodes) {
-                const childElem = childNode as DOMElement
-                const isDirty = dirtyChildren.has(childNode)
-                if (!isDirty && !hasRemovedChild && cumHeightShift === 0) {
-                  if (childElem.cachedLayout !== undefined) continue
-                  // Uncached = culled last frame, now re-entering. blit
-                  // never painted it → fall through to yoga + render.
-                  // Height unchanged (clean), so cumHeightShift stays 0.
-                }
+            // Second pass: repaint dirty/shifted/uncached children strictly
+            // clipped to stable (non-edge) rows so edge rows aren't overwritten.
+            if (repaintList) {
+              const viewportBottom = Math.floor(
+                (y1 ?? y) + padTop + innerHeight,
+              )
+              for (const childElem of repaintList) {
                 const cy = childElem.yogaNode
                 if (!cy) continue
                 const childTop = cy.getComputedTop()
-                const childH = cy.getComputedHeight()
-                const childBottom = childTop + childH
-                if (isDirty) {
-                  const prev =
-                    preEdgeCachedLayouts?.get(childElem) ??
-                    childElem.cachedLayout
-                  if (prev !== undefined) {
-                    cumHeightShift += childH - prev.height
-                  }
-                }
-                // Skip culled children (outside viewport) and drop stale cache
-                if (
-                  childBottom <= scrollTop ||
-                  childTop >= scrollTop + innerHeight
-                ) {
-                  leftoverGsDropCachedLayout(childElem)
-                  continue
-                }
-                // Skip children entirely within edge rows (already rendered)
-                if (childTop >= edgeTopLocal && childBottom <= edgeBottomLocal)
-                  continue
-                const screenY = Math.floor(contentY + childTop)
-                // Clean children reaching here have cumHeightShift ≠ 0 OR
-                // no cache. Re-check precisely: cached.y − delta is where
-                // the shift left old pixels; if it equals new screenY the
-                // blit is correct (shift re-balanced at this child, or
-                // yogaTop happens to net out). No cache → blit never
-                // painted it → render.
-                if (!isDirty) {
-                  const childCached =
-                    preEdgeCachedLayouts?.get(childElem) ??
-                    childElem.cachedLayout
-                  if (childCached) {
-                    const shiftedY = Math.floor(childCached.y) - delta
-                    if (shiftedY === screenY) continue
-                    const stale = leftoverGsStaleWipe({
-                      shiftedY,
-                      cachedHeight: childCached.height,
-                      hintTop: top,
-                      hintBottom: bottom,
-                      firstRepaintY: leftoverGsFirstRepaintY,
-                    })
-                    if (stale) {
-                      output.write(
-                        Math.floor(x),
-                        stale.y,
-                        Array(stale.height).fill(spaces).join('\n'),
-                      )
-                    }
-                  }
-                }
-                // Wipe this child's region with spaces to overwrite stale
-                // blitted content — output.clear() only expands damage and
-                // cannot zero cells that the blit already wrote.
-                const screenBottom = Math.min(
-                  Math.floor(contentY + childBottom),
-                  Math.floor((y1 ?? y) + padTop + innerHeight),
+                const stableTop = Math.max(
+                  Math.floor(contentY + childTop),
+                  delta < 0 ? edgeBottom + 1 : -Infinity,
                 )
-                if (screenY < screenBottom) {
-                  leftoverGsFirstRepaintY ??= screenY
-                  const fill = Array(screenBottom - screenY)
+                const stableBottom = Math.min(
+                  Math.floor(contentY + childTop + cy.getComputedHeight()),
+                  viewportBottom,
+                  delta > 0 ? edgeTop : Infinity,
+                )
+                if (stableTop < stableBottom) {
+                  const fill = Array(stableBottom - stableTop)
                     .fill(spaces)
                     .join('\n')
-                  output.write(Math.floor(x), screenY, fill)
-                  output.clip({
-                    x1: undefined,
-                    x2: undefined,
-                    y1: screenY,
-                    y2: screenBottom,
-                  })
-                  renderNodeToOutput(childElem, output, {
-                    offsetX: contentX,
-                    offsetY: contentY,
-                    prevScreen: undefined,
-                    inheritedBackgroundColor: boxBackgroundColor,
-                    depth: depth + 1,
-                  })
-                  output.unclip()
+                  output.write(Math.floor(x), stableTop, fill, HARD_BREAK_SW)
                 }
+                output.clip({
+                  x1: undefined,
+                  x2: undefined,
+                  y1: stableTop,
+                  y2: Math.max(stableTop, stableBottom),
+                })
+                renderNodeToOutput(childElem, output, {
+                  offsetX: contentX,
+                  offsetY: contentY,
+                  prevScreen: undefined,
+                  inheritedBackgroundColor: boxBackgroundColor,
+                  depth: depth + 2,
+                })
+                output.unclip()
               }
             }
 
@@ -2443,8 +2445,6 @@ function renderNodeToOutput(
             // pixels sit at (rect.y - delta) — neither edge render nor the
             // overlay's own re-render covers them. Wipe and re-render
             // ScrollBox content so the diff writes correct cells.
-            const spaces = ctx.absoluteRectsPrev.length ? ' '.repeat(w) : ''
-            const absBeforeRepair = ctx.absoluteRectsCur.length
             for (const r of ctx.absoluteRectsPrev) {
               if (r.y >= bottom + 1 || r.y + r.height <= top) continue
               const shiftedTop = Math.max(top, Math.floor(r.y) - delta)
@@ -2459,7 +2459,7 @@ function renderNodeToOutput(
               const fill = Array(shiftedBottom - shiftedTop)
                 .fill(spaces)
                 .join('\n')
-              output.write(Math.floor(x), shiftedTop, fill)
+              output.write(Math.floor(x), shiftedTop, fill, HARD_BREAK_SW)
               output.clip({
                 x1: undefined,
                 x2: undefined,
@@ -2482,6 +2482,11 @@ function renderNodeToOutput(
                 depth + 2,
               )
               output.unclip()
+            }
+            if (cleanRepainted) {
+              for (const childElem of cleanRepainted) {
+                shiftCachedLayoutSubtree(childElem, 0)
+              }
             }
             for (
               let i = absBeforeRepair;
@@ -2846,7 +2851,7 @@ function leftoverGsSkipBlitOverlay(
 // Render children of a scroll container with viewport culling.
 // scrollTopY..scrollBottomY are the visible window in CHILD-LOCAL Yoga coords
 // (i.e. what getComputedTop() returns). Children entirely outside this window
-// are skipped; their nodeCache entry is deleted so if they re-enter the
+// are skipped; their cachedLayout entry is cleared so if they re-enter the
 // viewport later they don't emit a stale clear for a position now occupied
 // by a sibling.
 function renderScrolledChildren(
@@ -2860,56 +2865,23 @@ function renderScrolledChildren(
   scrollBottomY: number,
   inheritedBackgroundColor: Color | undefined,
   clips: LeftoverClipNest | undefined,
-  // densable sf `_t` — content wrap width unchanged. Gold:
-  //   if (F && K?.top !== void 0 && !Z.dirty && B===0) use cache
-  leftoverGsWidthUnchanged: boolean,
+  _leftoverGsWidthUnchanged: boolean,
   // When true (DECSTBM fast path), culled children keep their cache —
   // the blit+shift put stable rows in next.screen so stale cache is
   // never read. Avoids walking O(total_children * subtree_depth) per frame.
   preserveCulledCache = false,
   depth = 0,
 ): void {
+  // Official 2.1.328 `Rm`: read Yoga computed top/height directly for culling
+  // (no cached.top / cumHeightShift shortcut that can drift after shifts).
   let seenDirtyChild = false
-  // Track cumulative height shift of dirty children iterated so far. When
-  // zero, a clean child's yogaTop is unchanged (no sibling above it grew),
-  // so cached.top is fresh and the cull check skips yoga. Bottom-append
-  // has the dirty child last → all prior clean children hit cache →
-  // O(dirty) not O(mounted). Middle-growth leaves shift non-zero after
-  // the dirty child → subsequent children yoga-read (needed for correct
-  // culling since their yogaTop shifted).
-  let cumHeightShift = 0
   for (const childNode of node.childNodes) {
     const childElem = childNode as DOMElement
     const cy = childElem.yogaNode
     if (cy) {
-      const cached = childElem.cachedLayout
-      let top: number
-      let height: number
-      if (
-        leftoverGsWidthUnchanged &&
-        !hasRemovedChild &&
-        cached?.top !== undefined &&
-        !cached.shifted &&
-        !childElem.dirty &&
-        cumHeightShift === 0
-      ) {
-        top = cached.top
-        height = cached.height
-      } else {
-        top = cy.getComputedTop()
-        height = cy.getComputedHeight()
-        if (childElem.dirty) {
-          cumHeightShift += height - (cached ? cached.height : 0)
-        }
-        // Refresh cached top so next frame's cumShift===0 path stays
-        // correct. For culled children with preserveCulledCache=true this
-        // is the ONLY refresh point — without it, a middle-growth frame
-        // leaves stale tops that misfire next frame.
-        if (cached) cached.top = top
-      }
-      const bottom = top + height
-      if (bottom <= scrollTopY || top >= scrollBottomY) {
-        // densable sf: if (!L) lst(Z). Gold 0: cull is lst, not SC.
+      const top = cy.getComputedTop()
+      const height = cy.getComputedHeight()
+      if (top + height <= scrollTopY || top >= scrollBottomY) {
         if (!preserveCulledCache) leftoverGsDropCachedLayout(childElem)
         continue
       }
@@ -2929,7 +2901,313 @@ function renderScrolledChildren(
   }
 }
 
-// Exported for testing
-export { buildCharToSegmentMap, applyStylesToWrappedText }
+/** Official 2.1.328 `lS` — true when node is a vertical scroll container. */
+export function isScrollContainer(node: DOMElement): boolean {
+  return (node.style.overflowY ?? node.style.overflow) === 'scroll'
+}
+
+/** Official 2.1.328 `aS` — first child with a yogaNode (ScrollBox content wrapper). */
+export function getScrollContent(node: DOMElement): DOMElement | undefined {
+  return node.childNodes.find(c => (c as DOMElement).yogaNode !== undefined) as
+    | DOMElement
+    | undefined
+}
+
+/** Official 2.1.328 `yc` — compute overflow clip rect for an ink-box, or undefined. */
+export function computeClipRect(
+  node: DOMElement,
+  yogaNode: LayoutNode,
+  x: number,
+  y: number,
+): Clip | undefined {
+  const overflowX = node.style.overflowX ?? node.style.overflow
+  const overflowY = node.style.overflowY ?? node.style.overflow
+  const clipHorizontally = overflowX === 'hidden' || overflowX === 'scroll'
+  const clipVertically = overflowY === 'hidden' || overflowY === 'scroll'
+  if (!clipHorizontally && !clipVertically) return undefined
+  return {
+    x1: clipHorizontally
+      ? x + yogaNode.getComputedBorder(LayoutEdge.Left)
+      : undefined,
+    x2: clipHorizontally
+      ? x +
+        yogaNode.getComputedWidth() -
+        yogaNode.getComputedBorder(LayoutEdge.Right)
+      : undefined,
+    y1: clipVertically
+      ? y + yogaNode.getComputedBorder(LayoutEdge.Top)
+      : undefined,
+    y2: clipVertically
+      ? y +
+        yogaNode.getComputedHeight() -
+        yogaNode.getComputedBorder(LayoutEdge.Bottom)
+      : undefined,
+  }
+}
+
+/** Official 2.1.328 `Dm` — paint backgroundColor / opaque fill on an ink-box. */
+export function paintBoxBackground(
+  node: DOMElement,
+  yogaNode: LayoutNode,
+  output: Output,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const ownBackgroundColor = node.style.backgroundColor
+  if (node.style.opaque) {
+    output.clearNoSelect({
+      x: Math.floor(x),
+      y: Math.floor(y),
+      width: Math.floor(width),
+      height: Math.floor(height),
+    })
+  }
+  const borderLeft = yogaNode.getComputedBorder(LayoutEdge.Left)
+  const borderRight = yogaNode.getComputedBorder(LayoutEdge.Right)
+  const borderTop = yogaNode.getComputedBorder(LayoutEdge.Top)
+  const borderBottom = yogaNode.getComputedBorder(LayoutEdge.Bottom)
+  const innerWidth = Math.floor(width) - borderLeft - borderRight
+  const innerHeight = Math.floor(height) - borderTop - borderBottom
+  if (innerWidth > 0 && innerHeight > 0) {
+    const spaces = ' '.repeat(innerWidth)
+    const fillLine = ownBackgroundColor
+      ? applyTextStyles(spaces, { backgroundColor: ownBackgroundColor })
+      : spaces
+    const fill = Array(innerHeight).fill(fillLine).join('\n')
+    output.write(x + borderLeft, y + borderTop, fill)
+  }
+}
+
+/** Official 2.1.328 `Nm` + padding — format an ink-text node into styled text + softWrap. */
+export function formatTextForPaint(
+  node: DOMElement,
+  yogaNode: LayoutNode,
+  maxWidth: number,
+  inheritedBackgroundColor: Color | undefined,
+): { text: string; softWrap?: SoftWrapKindValue[] } | null {
+  const segments = squashTextNodesToSegments(
+    node,
+    inheritedBackgroundColor
+      ? { backgroundColor: inheritedBackgroundColor }
+      : undefined,
+  )
+  const plainText = joinSegmentTexts(segments)
+  if (plainText.length === 0) return null
+  const textWrap = node.style.textWrap ?? 'wrap'
+  const expandedText =
+    textWrap === 'wrap' ||
+    textWrap === 'wrap-trim' ||
+    textWrap === 'wrap-stream'
+      ? plainText
+      : expandTabsForWrap(plainText)
+  const needsWrapping =
+    textWrap === 'wrap-stream' || widestLine(expandedText) > maxWidth
+  let text: string
+  let softWrap: SoftWrapKindValue[] | undefined
+  if (needsWrapping && segments.length === 1) {
+    const segment = segments[0]!
+    const w = wrapWithSoftWrap(plainText, maxWidth, textWrap)
+    softWrap = w.softWrap
+    text = w.wrapped
+      .split('\n')
+      .map(line => {
+        let styled = applyTextStyles(line, segment.styles)
+        if (segment.hyperlink) {
+          styled = wrapWithOsc8Link(styled, segment.hyperlink)
+        }
+        return styled
+      })
+      .join('\n')
+  } else if (
+    needsWrapping &&
+    (textWrap === 'truncate-start' ||
+      textWrap === 'truncate-middle' ||
+      textWrap === 'middle')
+  ) {
+    text = truncateStyledSegments(
+      plainText,
+      maxWidth,
+      segments,
+      buildCharToSegmentScratch(ctx, segments),
+      textWrap === 'truncate-start' ? 'start' : 'middle',
+    )
+  } else if (needsWrapping) {
+    const w = wrapWithSoftWrap(plainText, maxWidth, textWrap)
+    softWrap = w.softWrap
+    const charToSegment = buildCharToSegmentScratch(ctx, segments)
+    text = applyStylesToWrappedText(
+      w.wrapped,
+      segments,
+      charToSegment,
+      plainText,
+      textWrap === 'wrap-trim',
+      w.softWrap,
+      textWrap === 'truncate-rows' || textWrap === 'clip',
+    )
+  } else {
+    const expandedChanged = expandedText !== plainText
+    let rawOffset = 0
+    let expandedOffset = 0
+    text = segments
+      .map(segment => {
+        let segText = segment.text
+        if (expandedChanged) {
+          rawOffset += segment.text.length
+          const nextExpandedOffset = expandTabsForWrap(
+            plainText.slice(0, rawOffset),
+          ).length
+          segText = expandedText.slice(expandedOffset, nextExpandedOffset)
+          expandedOffset = nextExpandedOffset
+        }
+        let styledText = applyTextStyles(segText, segment.styles)
+        if (segment.hyperlink) {
+          styledText = wrapWithOsc8Link(styledText, segment.hyperlink)
+        }
+        return styledText
+      })
+      .join('')
+  }
+  text = applyPaddingToText(node, text, softWrap)
+  return { text, softWrap }
+}
+
+/** Official 2.1.328 `Om` — settle ScrollBox scrollTop / HWM / drain / followScroll. */
+export function settleScrollBoxPosition(
+  node: DOMElement,
+  state: RenderFrameContext,
+  x: number,
+  width: number,
+  scrollHeight: number,
+  prevScrollHeight: number,
+  innerHeight: number,
+  prevInnerHeight: number,
+  viewportTop: number,
+): number {
+  const maxScroll = Math.max(0, scrollHeight - innerHeight)
+  if (node.scrollAnchor) {
+    const anchorYoga = node.scrollAnchor.el.yogaNode
+    const anchorTop = anchorYoga?.getComputedTop()
+    if (anchorTop != null && anchorYoga) {
+      const offset = node.scrollAnchor.offset
+      const elH = anchorYoga.getComputedHeight()
+      const startTarget = anchorTop + offset
+      const endTarget = anchorTop + elH - innerHeight
+      const block =
+        node.scrollAnchor.block ??
+        (node.scrollAnchor.nearest ? 'nearest' : 'start')
+      const clampAnchor = (val: number): number =>
+        Math.max(0, Math.min(maxScroll, val))
+      if (block === 'nearest' || node.scrollAnchor.nearest) {
+        const cur = node.scrollTop ?? 0
+        node.scrollTop = clampAnchor(
+          Math.min(Math.max(cur, endTarget), startTarget),
+        )
+      } else if (block === 'end') {
+        node.scrollTop = clampAnchor(
+          Math.max(0, Math.min(endTarget, startTarget)),
+        )
+      } else if (block === 'center') {
+        node.scrollTop = clampAnchor(
+          Math.max(
+            0,
+            Math.min(Math.floor((endTarget + startTarget) / 2), startTarget),
+          ),
+        )
+      } else {
+        node.scrollTop = clampAnchor(startTarget)
+      }
+      node.pendingScrollDelta = undefined
+    }
+    node.scrollAnchor = undefined
+  }
+  const scrollTopBeforeFollow = node.scrollTop ?? 0
+  const stickyAttr = node.attributes['stickyScroll']
+  const sticky = node.stickyScroll ?? Boolean(stickyAttr)
+  const { referenceHeight, nextHwm } = updateScrollHeightHwm({
+    sticky,
+    prevScrollHeight,
+    scrollHeight,
+    scrollHeightHwm: node.scrollHeightHwm,
+  })
+  node.scrollHeightHwm = nextHwm
+  const prevMaxAgainstHwm = Math.max(0, referenceHeight - prevInnerHeight)
+  const grew = scrollHeight >= prevScrollHeight
+  const followGrowth = node.attributes['followGrowth'] !== false
+  const atBottom = shouldFollowScrollGrowth({
+    sticky,
+    stickyAttr,
+    followGrowth,
+    grew,
+    scrollTop: scrollTopBeforeFollow,
+    prevMaxAgainstHwm,
+  })
+  if (atBottom && (node.pendingScrollDelta ?? 0) >= 0) {
+    node.scrollTop = maxScroll
+    node.pendingScrollDelta = undefined
+    if (
+      node.stickyScroll === false &&
+      scrollTopBeforeFollow >= prevMaxAgainstHwm
+    ) {
+      node.stickyScroll = true
+    }
+  }
+  const liveSticky = node.stickyScroll ?? Boolean(stickyAttr)
+  let cur = node.scrollTop ?? 0
+  const pending = node.pendingScrollDelta
+  const cMin = node.scrollClampMin
+  const cMax = node.scrollClampMax
+  const haveClamp = cMin !== undefined && cMax !== undefined
+  if (pending !== undefined && pending !== 0) {
+    const pastClamp =
+      haveClamp && ((pending < 0 && cur < cMin) || (pending > 0 && cur > cMax))
+    const eff = pastClamp ? Math.min(4, innerHeight >> 3) : innerHeight
+    cur += isXtermJsHost()
+      ? drainAdaptive(node, pending, eff)
+      : drainProportional(node, pending, eff)
+  } else if (pending === 0) {
+    node.pendingScrollDelta = undefined
+  }
+  const storedScrollTop = clampStoredScrollTop(
+    cur,
+    maxScroll,
+    referenceHeight,
+    innerHeight,
+  )
+  let scrollTop = clampVisualScrollTop(storedScrollTop, maxScroll)
+  const clamped = applyVirtualScrollRangeClamp(
+    scrollTop,
+    cMin,
+    cMax,
+    liveSticky,
+  )
+  node.scrollTop = storedScrollTop
+  if (storedScrollTop !== cur) node.pendingScrollDelta = undefined
+  if (node.pendingScrollDelta !== undefined) state.scrollDrainNode = node
+  scrollTop = clamped
+  const delta = leftoverGsFollowDelta(scrollTop, node.scrollTopRendered)
+  if (delta !== 0) {
+    state.followScroll = {
+      delta,
+      viewportLeft: Math.floor(x),
+      viewportRight: Math.floor(x + width) - 1,
+      viewportTop,
+      viewportBottom: viewportTop + innerHeight - 1,
+    }
+  }
+  node.scrollTopRendered = scrollTop
+  return scrollTop
+}
+
+// Exported for testing & IncrementalPainter
+export {
+  buildCharToSegmentMap,
+  applyStylesToWrappedText,
+  siblingSharesY,
+  stampLayout,
+  getMaxWidth,
+  renderBorder,
+}
 
 export default renderNodeToOutput

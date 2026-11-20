@@ -13,7 +13,7 @@ import {
   type HistoryAuthCtx,
   type HistoryPage,
 } from '../assistant/sessionHistory.js'
-import type { ScrollBoxHandle } from '@anthropic/ink'
+import type { ScrollBoxHandle, ScrollViewport } from '@anthropic/ink'
 import type { RemoteSessionConfig } from '../remote/RemoteSessionManager.js'
 import { convertSDKMessage } from '../remote/sdkMessageAdapter.js'
 import type { Message, SystemInformationalMessage } from '../types/message.js'
@@ -23,7 +23,7 @@ type Props = {
   /** Gated on viewerOnly — non-viewer sessions have no remote history to page. */
   config: RemoteSessionConfig | undefined
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
-  scrollRef: RefObject<ScrollBoxHandle | null>
+  scrollViewport: ScrollViewport
   /** Called after prepend from the layout effect with message count + height
    *  delta. Lets useUnseenDivider shift dividerIndex + dividerYRef. */
   onPrepend?: (indexDelta: number, heightDelta: number) => void
@@ -72,7 +72,7 @@ function pageToMessages(page: HistoryPage): Message[] {
 export function useAssistantHistory({
   config,
   setMessages,
-  scrollRef,
+  scrollViewport,
   onPrepend,
 }: Props): Result {
   const enabled = config?.viewerOnly === true
@@ -118,7 +118,7 @@ export function useAssistantHistory({
       cursorRef.current = page.hasMore ? page.firstId : null
 
       if (!isInitial) {
-        const s = scrollRef.current
+        const s = scrollViewport.handle
         anchorRef.current = s
           ? { beforeHeight: s.getFreshScrollHeight(), count: msgs.length }
           : null
@@ -200,7 +200,7 @@ export function useAssistantHistory({
     const anchor = anchorRef.current
     if (anchor === null) return
     anchorRef.current = null
-    const s = scrollRef.current
+    const s = scrollViewport.handle
     if (!s || s.isSticky()) return // sticky = pinned bottom; prepend is invisible
     const delta = s.getFreshScrollHeight() - anchor.beforeHeight
     if (delta > 0) s.scrollBy(delta)
@@ -223,7 +223,7 @@ export function useAssistantHistory({
     ) {
       return
     }
-    const s = scrollRef.current
+    const s = scrollViewport.handle
     if (!s) return
     const contentH = s.getFreshScrollHeight()
     const viewH = s.getViewportHeight()

@@ -886,6 +886,7 @@ import { UltraplanChoiceDialog } from '../components/ultraplan/UltraplanChoiceDi
 import { UltraplanLaunchDialog } from '../components/ultraplan/UltraplanLaunchDialog.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
+import { ScrollViewport } from '@anthropic/ink';
 import { ToastStackView } from '../components/PromptInput/Notifications.js';
 import { formatPluginToastKey, getToasts, pushToast } from '../components/toastStore.js';
 import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
@@ -2526,16 +2527,17 @@ export function REPL({
   // defined, read in the onQuery finally block for auto-restore on interrupt.
   const restoreMessageSyncRef = useRef<(m: UserMessage) => void>(() => {});
 
-  // Ref to the fullscreen layout's scroll box for keyboard scrolling.
-  // Null when fullscreen mode is disabled (ref never attached).
-  const scrollRef = useRef<ScrollBoxHandle>(null);
-  // Separate ref for the modal slot's inner ScrollBox — passed through
-  // FullscreenLayout → ModalContext so Tabs can attach it to its own
-  // ScrollBox for tall content (e.g. /status's MCP-server list). NOT
-  // keyboard-driven — ScrollKeybindingHandler stays on the outer ref so
-  // PgUp/PgDn/wheel always scroll the transcript behind the modal.
-  // Plumbing kept for future modal-scroll wiring.
-  const modalScrollRef = useRef<ScrollBoxHandle>(null);
+  // Official 2.1.328 subscribable ScrollViewport proxies (oEt).
+  const scrollViewportRef = useRef<ScrollViewport | null>(null);
+  if (scrollViewportRef.current === null) {
+    scrollViewportRef.current = new ScrollViewport();
+  }
+  const scrollViewport = scrollViewportRef.current;
+  const modalScrollViewportRef = useRef<ScrollViewport | null>(null);
+  if (modalScrollViewportRef.current === null) {
+    modalScrollViewportRef.current = new ScrollViewport();
+  }
+  const modalScrollViewport = modalScrollViewportRef.current;
 
   // Subscribe to the guard — true during dispatching or running.
   // This is the single source of truth for "is a local query in flight".
@@ -3747,7 +3749,7 @@ export function REPL({
   const repinScroll = useCallback(
     (force = false, reason = '?') => {
       if (!force && !getAutoScrollEnabled()) return;
-      const handle = scrollRef.current;
+      const handle = scrollViewport.handle;
       if (handle && !handle.isSticky()) {
         logForDebugging(`repinScroll(${reason}, force=${force}): yanking from scrollTop=${handle.getScrollTop()}`);
       }
@@ -3756,7 +3758,7 @@ export function REPL({
       setCursor(null);
       scrolledAwayRef.current = false;
     },
-    [onRepin, setCursor],
+    [onRepin, scrollViewport, setCursor],
   );
   // Backstop for the submit-handler repin at onSubmit. If a buffered stdin
   // event (wheel/drag) races between handler-fire and state-commit, the
@@ -3783,7 +3785,7 @@ export function REPL({
   const assistantHistoryResult = useAssistantHistory({
     config: remoteSessionConfig,
     setMessages,
-    scrollRef,
+    scrollViewport,
     onPrepend: shiftDivider,
   });
   const { maybeLoadOlder } = feature('KAIROS') ? assistantHistoryResult : HISTORY_STUB;
@@ -5987,10 +5989,10 @@ export function REPL({
     const prev = prevBelowTranscriptSlotRef.current;
     prevBelowTranscriptSlotRef.current = belowTranscriptSlotOpen;
     if (prev === undefined || prev === belowTranscriptSlotOpen) return;
-    if (scrollRef.current?.isSticky() ?? true) {
+    if (scrollViewport.handle?.isSticky() ?? true) {
       repinScroll(false, `progressOrPanel→${belowTranscriptSlotOpen}`);
     }
-  }, [belowTranscriptSlotOpen, repinScroll]);
+  }, [belowTranscriptSlotOpen, repinScroll, scrollViewport]);
 
   // Transcript swap (enter/exit agent view): ScrollBox is shared — leftover
   // scrollTop / scrollHeightHwm from the leader (or previous agent) can pin
@@ -9145,7 +9147,8 @@ export function REPL({
     // scrollback, 30-cap + Ctrl+E. Reusing scrollRef is safe — normal-mode
     // and transcript-mode are mutually exclusive (this early return), so
     // only one ScrollBox is ever mounted at a time.
-    const transcriptScrollRef = isFullscreenEnvEnabled() && !disableVirtualScroll && !dumpMode ? scrollRef : undefined;
+    const transcriptScrollViewport =
+      isFullscreenEnvEnabled() && !disableVirtualScroll && !dumpMode ? scrollViewport : undefined;
     const transcriptMessagesElement = (
       <Messages
         messages={viewedAgentTask ? displayedMessages : transcriptMessages}
@@ -9164,7 +9167,7 @@ export function REPL({
         hideLogo={!!viewedAgentTask}
         isLoading={focusedIsLoading}
         hidePastThinking={true}
-        scrollRef={transcriptScrollRef}
+        scrollViewport={transcriptScrollViewport}
         jumpRef={jumpRef}
         onSearchMatchesChange={onSearchMatchesChange}
         scanElement={scanElement}
@@ -9195,13 +9198,13 @@ export function REPL({
           />
         ) : null}
         <CommandKeybindingHandlers onSubmit={onSubmit} isActive={!toolJSX?.isLocalJSXCommand} />
-        {transcriptScrollRef ? (
+        {transcriptScrollViewport ? (
           // ScrollKeybindingHandler must mount before CancelRequestHandler so
           // ctrl+c-with-selection copies instead of cancelling the active task.
           // Its raw useInput handler only stops propagation when a selection
           // exists — without one, ctrl+c falls through to CancelRequestHandler.
           <ScrollKeybindingHandler
-            scrollRef={scrollRef}
+            scrollViewport={scrollViewport}
             isActive={true}
             // g/G/j/k/ctrl+u/ctrl+d would eat keystrokes the search bar
             // wants. Off while searching.
@@ -9214,9 +9217,9 @@ export function REPL({
           />
         ) : null}
         <CancelRequestHandler {...cancelRequestProps} />
-        {transcriptScrollRef ? (
+        {transcriptScrollViewport ? (
           <FullscreenLayout
-            scrollRef={scrollRef}
+            scrollViewport={scrollViewport}
             scrollable={
               <>
                 {transcriptMessagesElement}
@@ -9318,8 +9321,8 @@ export function REPL({
     // normal mode's wrap below so React reconciles and the alt buffer
     // stays entered across toggle. The 30-cap dump branch stays
     // unwrapped — it wants native terminal scrollback.
-    if (transcriptScrollRef) {
-      // transcriptScrollRef is only set under fullscreen virtual-scroll —
+    if (transcriptScrollViewport) {
+      // transcriptScrollViewport is only set under fullscreen virtual-scroll —
       // gold Vs() / AlternateScreen. Qvt cannot apply (Axc suspends on alt).
       return <AlternateScreen mouseTracking={mouseTrackingProp()}>{transcriptReturn}</AlternateScreen>;
     }
@@ -9476,7 +9479,7 @@ export function REPL({
           densable vJ: when modalSlotActive (kZt) && !axcSticky, drive modalScrollRef
           and yield PgUp/PgDn when ModalScroller fits. */}
       <ScrollKeybindingHandler
-        scrollRef={kZt && !isAxcStickyMainEnabled() ? modalScrollRef : scrollRef}
+        scrollViewport={kZt && !isAxcStickyMainEnabled() ? modalScrollViewport : scrollViewport}
         isActive={
           isFullscreenEnvEnabled() && !ultraplanChoiceShowing && (kZt || !anyInputOverlay || hostPermissionOpen)
         }
@@ -9491,10 +9494,10 @@ export function REPL({
         <MCPConnectionManager key={remountKey} dynamicMcpConfig={dynamicMcpConfig} isStrictMcpConfig={strictMcpConfig}>
           <PermissionDialogHostProvider value={permissionDialogHostValue}>
             <FullscreenLayout
-              scrollRef={scrollRef}
+              scrollViewport={scrollViewport}
               transcriptOverlay={<ToastStackView />}
               modal={ozs}
-              modalScrollRef={modalScrollRef}
+              modalScrollViewport={modalScrollViewport}
               dividerYRef={dividerYRef}
               hidePill={!!viewedAgentTask}
               askBelow={Boolean(isWaitingForApproval || hostPermissionOpen || toolUseConfirmQueue.length > 0)}
@@ -9528,7 +9531,7 @@ export function REPL({
               }
               onPillClick={() => {
                 setCursor(null);
-                jumpToNew(scrollRef.current);
+                jumpToNew(scrollViewport.handle);
               }}
               onLinkNotOpened={url => {
                 const noticeText = `Couldn't open your browser. Open ${url} yourself.`;
@@ -9577,7 +9580,7 @@ export function REPL({
                     streamingDisplayStore={streamingDisplayStore}
                     isBriefOnly={viewedAgentTask ? false : isBriefOnly}
                     unseenDivider={viewedAgentTask ? undefined : unseenDivider}
-                    scrollRef={isFullscreenEnvEnabled() ? scrollRef : undefined}
+                    scrollViewport={isFullscreenEnvEnabled() ? scrollViewport : undefined}
                     trackStickyPrompt={isFullscreenEnvEnabled() ? true : undefined}
                     cursor={cursor}
                     setCursor={setCursor}

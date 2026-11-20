@@ -29,7 +29,7 @@ import {
   useIsInsideModal,
   useModalClaimScrollBox,
   useModalOrTerminalSize,
-  useModalScrollRef,
+  useModalScrollViewport,
 } from './modalContext.js';
 import type { Theme } from './theme-types.js';
 
@@ -160,7 +160,7 @@ export function Tabs({
   const selectedTabIndex = isControlled ? (controlledTabIndex !== -1 ? controlledTabIndex : 0) : internalSelectedTab;
 
   const modalContext = useContext(ModalContext);
-  const modalScrollRef = useModalScrollRef();
+  const modalScrollViewport = useModalScrollViewport();
   const claimScrollBox = useModalClaimScrollBox();
 
   const bannerRef = useRef<DOMElement>(null);
@@ -186,7 +186,7 @@ export function Tabs({
   }, [claimScrollBox, headerChromeRows]);
 
   const { rows: modalRows } = useModalOrTerminalSize(EMPTY_MODAL_FALLBACK);
-  const ownsModalScroll = claimScrollBox != null && modalScrollRef !== null;
+  const ownsModalScroll = claimScrollBox != null && modalScrollViewport !== null;
   const contentMaxRows = ownsModalScroll ? Math.max(0, modalRows - headerChromeRows) : undefined;
   const innerModalContext = useMemo(
     () => (modalContext && ownsModalScroll ? { ...modalContext, claimScrollBox: null } : null),
@@ -331,7 +331,7 @@ export function Tabs({
         // explicit height (grows to fit, maxHeight cap), so flexGrow=1 here
         // resolves to 0 on re-render and the body blanks on Down arrow.
         // See #23592. Outside modal, leave layout alone.
-        flexShrink={modalScrollRef ? 0 : undefined}
+        flexShrink={modalScrollViewport ? 0 : undefined}
       >
         {!hidden && (
           <Box
@@ -344,7 +344,7 @@ export function Tabs({
             flexDirection="row"
             flexWrap="wrap"
             columnGap={1}
-            flexShrink={modalScrollRef ? 0 : undefined}
+            flexShrink={modalScrollViewport ? 0 : undefined}
             alignSelf={!useFullWidth ? 'flex-start' : undefined}
           >
             {title !== undefined && (
@@ -381,7 +381,7 @@ export function Tabs({
           <Box ref={contentRef} width={contentWidth} marginTop={hidden ? 0 : 1} flexShrink={0}>
             <ScrollBox
               key={selectedTabIndex}
-              ref={modalScrollRef}
+              ref={modalScrollViewport?.attach}
               flexDirection="column"
               flexShrink={0}
               height={stableHeight ? contentMaxRows : undefined}
@@ -399,7 +399,7 @@ export function Tabs({
             height={stableHeight ? undefined : contentHeight}
             minHeight={stableHeight ? contentHeight : undefined}
             overflowY={contentHeight !== undefined && !stableHeight ? 'hidden' : undefined}
-            flexShrink={modalScrollRef ? 0 : undefined}
+            flexShrink={modalScrollViewport ? 0 : undefined}
           >
             {children}
           </Box>

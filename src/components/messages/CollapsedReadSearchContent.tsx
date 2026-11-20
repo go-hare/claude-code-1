@@ -26,7 +26,7 @@ import {
 import { getDisplayPath } from '../../utils/file.js';
 import { formatDuration, formatSecondsShort } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
-import { useAppState } from '../../state/AppState.js';
+import { useOptionalAppState } from '../../state/AppState.js';
 import { leftoverIhrThinkingStartedAt, useLeftoverIhrStore } from '../../state/leftoverIhrStore.js';
 import { getMainThreadAgentId } from '../../bootstrap/state.js';
 import {
@@ -643,12 +643,12 @@ export function CollapsedReadSearchContent({
   const toolUseIds = getToolUseIdsFromCollapsedGroup(message);
   // #111 (2.1.326): a stopped/failed/completed background agent's last command
   // must never remain stuck showing "Running…".
-  const isViewedAgentTerminal = useAppState(s => {
+  const isViewedAgentTerminal = useOptionalAppState(s => {
     const id = s.viewingAgentTaskId;
     if (!id) return false;
     const task = s.tasks[id];
     return task !== undefined && (task.status === 'killed' || task.status === 'failed' || task.status === 'completed');
-  });
+  }, false);
   const isActiveGroup = resolveCollapsedGroupActiveState({
     toolUseIds,
     inProgressToolUseIDs,

@@ -4,8 +4,28 @@ import {
   type RenderOptions,
   type Root,
 } from '@anthropic/ink'
+import { getIsNonInteractiveSession } from '../bootstrap/state.js'
 import { wrapWithSessionServices } from '../context/sessionServices.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { getPinnedStorageV5 } from './storageV5/index.js'
+
+/**
+ * Official 2.1.328 (`l1` @chunk@306863829.js): enables Ink's early-key
+ * InputGate press timing in interactive sessions unless disabled by
+ * `CLAUDE_CODE_DISABLE_EARLY_KEY_GUARD`, gated on `tengu_nifty_lemon`.
+ */
+export function isEarlyKeyGuardEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (getIsNonInteractiveSession()) return false
+  const raw = env.CLAUDE_CODE_DISABLE_EARLY_KEY_GUARD
+  if (raw !== undefined) {
+    if (isEnvDefinedFalsy(raw)) return true
+    return !isEnvTruthy(raw)
+  }
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_nifty_lemon', false)
+}
 
 /**
  * densable `h8` / `m8` / `H0`. Official:
@@ -27,7 +47,10 @@ export async function createRoot(
   const { storageV5: optionStorageV5, ...inkOptions } = options
   const storageV5 =
     'storageV5' in options ? optionStorageV5 : getPinnedStorageV5()
-  const root = await createInkRoot(inkOptions)
+  const root = await createInkRoot({
+    ...inkOptions,
+    timesPresses: inkOptions.timesPresses ?? isEarlyKeyGuardEnabled,
+  })
   return {
     render(node: ReactNode) {
       root.render(wrapWithSessionServices(node, storageV5))

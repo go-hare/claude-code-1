@@ -7,7 +7,6 @@ import type { DOMElement } from './dom.js'
 import type { Frame } from './frame.js'
 import instances from './instances.js'
 import { NATIVE_HISTORY_CAP } from './nativeHistoryPump.js'
-import { nodeCache } from './node-cache.js'
 import Output from './output.js'
 import renderNodeToOutput, {
   createRenderFrameContext,
@@ -31,7 +30,6 @@ function clearCachedLayoutSubtree(root: DOMElement): void {
   const stack: DOMElement[] = [root]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     node.cachedLayout = undefined
-    nodeCache.delete(node)
     const children = node.childNodes
     for (let i = children.length - 1; i >= 0; i--) {
       const child = children[i]
@@ -95,7 +93,7 @@ export function serializeNodeRows(
   node: DOMElement | null | undefined,
 ): string[] {
   if (!node) return []
-  const layout = nodeCache.get(node)
+  const layout = node.cachedLayout
   if (!layout || layout.height <= 0) return []
   const out: string[] = []
   const end = Math.min(layout.y + layout.height, frame.screen.height)
@@ -146,7 +144,7 @@ export function serializeGapBackfill(
     screen,
   })
   output.clip({ x1: undefined, x2: undefined, y1: 0, y2: height })
-  const prevCache = nodeCache.get(content)
+  const prevCache = content.cachedLayout
   // densable J$0: `v9r(i, p, b9r(), {offsetX:0, offsetY:-c, prevScreen:void 0})`.
   // Local renderNodeToOutput closes over module ctx; swap in a fresh b9r()
   // so offscreen backfill does not leak layoutShifted / absoluteRectsCur
@@ -170,7 +168,6 @@ export function serializeGapBackfill(
   clearCachedLayoutSubtree(content)
   if (prevCache) {
     content.cachedLayout = prevCache
-    nodeCache.set(content, prevCache)
   }
   const rendered = output.get()
   content.dirty = true

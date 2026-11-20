@@ -12,9 +12,10 @@
  * the tip-only install against a foreign Yoga tree — not the Qvt host.
  */
 
-import React, { createContext, type ReactNode, type RefObject, useContext, useRef } from 'react';
+import React, { createContext, type ReactNode, type RefObject, useContext, useMemo, useRef } from 'react';
 import type { DOMElement } from '../core/dom.js';
 import { NATIVE_HISTORY_BOTTOM_CHROME } from '../core/nativeHistoryPump.js';
+import type { ScrollViewport } from '../core/scroll-viewport.js';
 import { useAxcFrameSink } from '../hooks/useAxcFrameSink.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import Box from './Box.js';
@@ -29,31 +30,46 @@ export type AxcStickyHostProps = {
   /** densable `pushUp` — chrome above bottom slot (spinner / suggestions). */
   pushUp?: ReactNode;
   overlay?: ReactNode;
-  scrollRef?: RefObject<ScrollBoxHandle | null>;
+  scrollViewport?: ScrollViewport;
 };
 
 /**
- * densable `xxc({scrollable,bottom,pushUp,overlay,scrollRef})`.
+ * densable `xxc({scrollable,bottom,pushUp,overlay,scrollViewport})`.
  */
 export function AxcStickyHost({
   scrollable,
   bottom,
   pushUp,
   overlay,
-  scrollRef: externalScrollRef,
+  scrollViewport,
 }: AxcStickyHostProps): React.ReactNode {
   const { rows } = useTerminalSize();
   const bottomRef = useRef<DOMElement | null>(null);
   const overlayRef = useRef<DOMElement | null>(null);
   const anchorRef = useRef<DOMElement | null>(null);
   const localScrollRef = useRef<ScrollBoxHandle | null>(null);
-  const scrollRef = externalScrollRef ?? localScrollRef;
+  const scrollRef = useMemo<RefObject<ScrollBoxHandle | null>>(
+    () =>
+      scrollViewport
+        ? {
+            get current() {
+              return scrollViewport.handle;
+            },
+          }
+        : localScrollRef,
+    [scrollViewport],
+  );
 
   useAxcFrameSink({ scrollRef, bottomRef, overlayRef, anchorRef });
 
   return (
     <Box flexDirection="column" height={rows} width="100%" flexShrink={0}>
-      <ScrollBox ref={scrollRef} flexGrow={1} flexDirection="column" stickyScroll>
+      <ScrollBox
+        ref={scrollViewport ? scrollViewport.attach : localScrollRef}
+        flexGrow={1}
+        flexDirection="column"
+        stickyScroll
+      >
         <AxcScrollAnchorContext.Provider value={anchorRef}>{scrollable}</AxcScrollAnchorContext.Provider>
       </ScrollBox>
       <Box

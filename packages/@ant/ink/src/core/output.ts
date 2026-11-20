@@ -92,9 +92,9 @@ type WriteOperation = {
   type: 'write'
   x: number
   y: number
-  text: string
+  lines: string[]
   /**
-   * densable softWrap kinds parallel to text.split('\n'). HardBreak (0) /
+   * densable softWrap kinds parallel to lines. HardBreak (0) /
    * undefined = not a continuation; Continuation / ContinuationElidedSep
    * mark wrap joins. Undefined means the producer didn't track wrapping.
    */
@@ -200,6 +200,8 @@ export default class Output {
   private readonly lineCells: LineCells
 
   private readonly operations: Operation[] = []
+  /** Official 2.1.328 `rowsAtRightEdge` — screen rows written near the right edge for `Lu`. */
+  readonly rowsAtRightEdge: Set<number> = new Set()
 
   private charCache: Map<string, ClusteredChar[]> = new Map()
 
@@ -227,6 +229,7 @@ export default class Output {
     this.height = height
     this.screen = screen
     this.operations.length = 0
+    this.rowsAtRightEdge.clear()
     resetScreen(screen, width, height)
     if (this.charCache.size > 16384) this.charCache.clear()
   }
@@ -314,11 +317,24 @@ export default class Output {
       return
     }
 
+    this.writeLines(x, y, text.split('\n'), softWrap)
+  }
+
+  /** Official 2.1.328 `writeLines` — emit pre-split lines without re-splitting. */
+  writeLines(
+    x: number,
+    y: number,
+    lines: string[],
+    softWrap?: SoftWrapKindValue[],
+  ): void {
+    if (lines.length === 0) {
+      return
+    }
     this.operations.push({
       type: 'write',
       x,
       y,
-      text,
+      lines,
       softWrap,
     })
   }
@@ -489,9 +505,9 @@ export default class Output {
         }
 
         case 'write': {
-          const { text, softWrap } = operation
+          const { softWrap } = operation
           let { x, y } = operation
-          let lines = text.split('\n')
+          let lines = operation.lines
           let swFrom = 0
           // densable k — packed softWrap seed for the next continuation row
           let packedPrev = 0
@@ -613,6 +629,9 @@ export default class Output {
               this.stylePool,
               this.charCache,
             )
+            if (lineY >= 0 && contentEnd >= screenWidth - 1) {
+              this.rowsAtRightEdge.add(lineY)
+            }
             writeCells += contentEnd - x
             // densable write arm: HardBreak→0; Continuation→packedPrev;
             // ContinuationElidedSep→packedPrev|Ao; then seed next packedPrev.

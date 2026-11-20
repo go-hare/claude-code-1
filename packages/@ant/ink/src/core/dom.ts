@@ -1,10 +1,11 @@
 import type { EventHandlerProps } from './events/event-handlers.js'
 import type { FocusManager } from './focus.js'
 import { createLayoutNode } from './layout/engine.js'
+import type { Rectangle } from './layout/geometry.js'
 import type { LayoutNode, YogaNodeConfig } from './layout/node.js'
 import { LayoutDisplay, LayoutMeasureMode } from './layout/node.js'
 import measureText from './measure-text.js'
-import { addPendingClear, nodeCache } from './node-cache.js'
+import type { SoftWrapKind } from './softWrap.js'
 import squashTextNodes, {
   squashTextNodesToSegments,
 } from './squash-text-nodes.js'
@@ -118,6 +119,35 @@ export type DOMElement = {
     }
     unpainted?: boolean
   }
+  /**
+   * Official 2.1.328 `paintCache` — row-level incremental paint cache used by
+   * `IncrementalPainter` (`Lm`) when rendering with `firstRow`.
+   */
+  paintCache?: {
+    changed?: 'self' | 'child'
+    x: number
+    y: number
+    width: number
+    height: number
+    screenWidth: number
+    background?: Color
+    colorLevel: number
+    squeezed: boolean
+    top: number
+    bottom: number
+    shownTop: number
+    shownBottom: number
+    lines?: string[]
+    softWrap?: SoftWrapKind[]
+  }
+  /** Official 2.1.328 `pendingClears` — removed-child clear rects stored directly on DOMElement. */
+  pendingClears?: Rectangle[]
+  /** Official 2.1.328 `absoluteNodeRemoved` — root flag when an absolute descendant was removed. */
+  absoluteNodeRemoved?: boolean
+  /** Official 2.1.328 `childrenOverlap` — sibling overlap cache flag. */
+  childrenOverlap?: boolean
+  /** Official 2.1.328 `childrenPaintingPastRect` — child overflow flag. */
+  childrenPaintingPastRect?: boolean
   /**
    * densable `nd()` — walked up on insert of absolute (or abs-descendant)
    * children. yC skip-blit miss when clip grew.
@@ -403,6 +433,29 @@ export const removeChildNode = (
   markDirty(node)
 }
 
+export function addPendingClear(
+  parent: DOMElement,
+  rect: Rectangle,
+  isAbsolute: boolean,
+): void {
+  if (parent.pendingClears) {
+    parent.pendingClears.push(rect)
+  } else {
+    parent.pendingClears = [rect]
+  }
+  if (isAbsolute) {
+    let root: DOMElement = parent
+    while (root.parentNode) root = root.parentNode
+    root.absoluteNodeRemoved = true
+  }
+}
+
+export function consumeAbsoluteRemovedFlag(rootNode: DOMElement): boolean {
+  const had = rootNode.absoluteNodeRemoved === true
+  rootNode.absoluteNodeRemoved = undefined
+  return had
+}
+
 function collectRemovedRects(
   parent: DOMElement,
   removed: DOMNode,
@@ -410,15 +463,10 @@ function collectRemovedRects(
 ): void {
   if (removed.nodeName === '#text') return
   const elem = removed as DOMElement
-  // If this node or any ancestor in the removed subtree was absolute,
-  // its painted pixels may overlap non-siblings — flag for global blit
-  // disable. Normal-flow removals only affect direct siblings, which
-  // hasRemovedChild already handles.
   const isAbsolute = underAbsolute || elem.style.position === 'absolute'
-  const cached = nodeCache.get(elem)
+  const cached = elem.cachedLayout
   if (cached) {
     addPendingClear(parent, cached, isAbsolute)
-    nodeCache.delete(elem)
     elem.cachedLayout = undefined
   }
   for (const child of elem.childNodes) {
@@ -593,10 +641,20 @@ const measureRawAnsiNode = function (node: DOMElement): {
 export const markDirty = (node?: DOMNode): void => {
   let current: DOMNode | undefined = node
   let markedYoga = false
+  let propagatedToParent = false
 
   while (current) {
     if (current.nodeName !== '#text') {
-      ;(current as DOMElement).dirty = true
+      const elem = current as DOMElement
+      elem.dirty = true
+      // Official 2.1.328 `SF`: propagate paintCache invalidation up the tree
+      // ('self' on the mutated node, 'child' on ancestors unless already 'self').
+      const cache = elem.paintCache
+      if (cache) {
+        cache.changed =
+          propagatedToParent && cache.changed !== 'self' ? 'child' : 'self'
+      }
+      propagatedToParent = true
       // Only mark yoga dirty on leaf nodes that have measure functions
       if (
         !markedYoga &&

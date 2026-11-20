@@ -1,7 +1,7 @@
-import React, { type RefObject, useCallback, useEffect, useRef } from 'react';
+import React, { type RefObject, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNotifications } from '../context/notifications.js';
 import { useCopyOnSelect, useSelectionBgColor } from '../hooks/useCopyOnSelect.js';
-import type { ScrollBoxHandle, FocusMove, SelectionState } from '@anthropic/ink';
+import type { ScrollBoxHandle, ScrollViewport, FocusMove, SelectionState } from '@anthropic/ink';
 import {
   useSelection,
   type Key,
@@ -94,7 +94,7 @@ export function getNativeSelectionHoldKey(): string {
 }
 
 type Props = {
-  scrollRef: RefObject<ScrollBoxHandle | null>;
+  scrollViewport: ScrollViewport;
   isActive: boolean;
   /** Called after every scroll action with the resulting sticky state and
    *  the handle (for reading scrollTop/scrollHeight post-scroll). */
@@ -733,12 +733,20 @@ const AUTOSCROLL_MAX_TICKS = 200; // 10s @ 50ms
  * the bottom also re-enables sticky so new content follows naturally.
  */
 export function ScrollKeybindingHandler({
-  scrollRef,
+  scrollViewport,
   isActive,
   onScroll,
   isModal = false,
   yieldsPageKeysWhenContentFits = false,
 }: Props): React.ReactNode {
+  const scrollRef = useMemo<RefObject<ScrollBoxHandle | null>>(
+    () => ({
+      get current() {
+        return scrollViewport.handle;
+      },
+    }),
+    [scrollViewport],
+  );
   const selection = useSelection();
   const historySearchOpen = useAppState(s => s.activeOverlays.has('history-search'));
   const effectiveActive = isActive && !historySearchOpen;

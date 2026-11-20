@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import React, { useRef } from 'react';
+import React, { useMemo } from 'react';
 import { PassThrough } from 'node:stream';
-import { Box, ScrollBox, useInput, type ScrollBoxHandle } from '@anthropic/ink';
+import { Box, ScrollBox, ScrollViewport, useInput } from '@anthropic/ink';
 import Ink from '../../../packages/@ant/ink/src/core/ink.js';
 import { charInCellAt } from '../../../packages/@ant/ink/src/core/screen.js';
 import { Messages } from '../Messages.js';
@@ -26,10 +26,10 @@ const message: UserMessage = {
 
 function Harness({ isLoading }: { isLoading: boolean }) {
   useInput(() => {});
-  const scrollRef = useRef<ScrollBoxHandle>(null);
+  const scrollViewport = useMemo(() => new ScrollViewport(), []);
   return (
     <Box height={24} paddingTop={9} flexDirection="column">
-      <ScrollBox ref={scrollRef}>
+      <ScrollBox ref={scrollViewport.attach}>
         <Messages
           messages={[message]}
           tools={[]}
@@ -43,7 +43,7 @@ function Harness({ isLoading }: { isLoading: boolean }) {
           streamingToolUses={[]}
           hideLogo
           isLoading={isLoading}
-          scrollRef={scrollRef}
+          scrollViewport={scrollViewport}
         />
       </ScrollBox>
     </Box>
@@ -85,8 +85,9 @@ for (const isLoading of [false, true]) {
       ink.onRender();
       expect(painted).toContain('CLICK_BODY_SENTINEL');
       // A different column keeps these two fast events separate from word selection.
+      // Official 2.1.299 (#595) delays collapse of an expanded row by 250ms.
       stdin.write('\x1b[<0;12;11M\x1b[<0;12;11m');
-      await new Promise(resolve => setTimeout(resolve, 30));
+      await new Promise(resolve => setTimeout(resolve, 280));
       ink.onRender();
       expect(painted).not.toContain('CLICK_BODY_SENTINEL');
     } finally {

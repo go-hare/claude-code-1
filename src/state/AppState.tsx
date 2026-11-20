@@ -218,6 +218,18 @@ function useAppStore(): AppStateStore {
  * const { text, promptId } = useAppState(s => s.promptSuggestion) // good
  * ```
  */
+const noopAppStateSubscribe = (): (() => void) => () => {};
+
+/**
+ * Subscribe to a slice of AppState when inside `<AppStateProvider />`, or
+ * return `fallback` safely when rendered standalone without a provider.
+ */
+export function useOptionalAppState<T>(selector: (state: AppState) => T, fallback: T): T {
+  const store = useContext(AppStoreContext);
+  const get = () => (store ? selector(store.getState()) : fallback);
+  return useSyncExternalStore(store ? store.subscribe : noopAppStateSubscribe, get, get);
+}
+
 export function useAppState<T>(selector: (state: AppState) => T): T {
   const store = useAppStore();
 

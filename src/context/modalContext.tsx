@@ -14,6 +14,6 @@ export {
   ModalContext,
   useIsInsideModal,
   useModalOrTerminalSize,
-  useModalScrollRef,
+  useModalScrollViewport,
   useModalClaimScrollBox,
 } from '@anthropic/ink';

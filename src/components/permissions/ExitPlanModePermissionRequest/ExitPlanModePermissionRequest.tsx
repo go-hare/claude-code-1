@@ -28,7 +28,7 @@ import {
   Text,
   useModalClaimScrollBox,
   useModalOrTerminalSize,
-  useModalScrollRef,
+  useModalScrollViewport,
   useTerminalSize,
 } from '@anthropic/ink';
 import type { AppState } from '../../../state/AppStateStore.js';
@@ -717,12 +717,11 @@ export function ExitPlanModePermissionRequest({
   // densable teu: Qae()+tqe() — Select is a flexShrink:0 sibling of the plan
   // ScrollBox. tot.bottom sticky was analog; modal hides bottom so options
   // vanished and Enter was the only remaining key.
-  const modalScrollRef = useModalScrollRef();
+  const modalScrollViewport = useModalScrollViewport();
   const claimScrollBox = useModalClaimScrollBox();
   const terminalSize = useTerminalSize();
   const { rows: modalRows } = useModalOrTerminalSize(terminalSize);
   const selectRef = useRef<DOMElement | null>(null);
-  const planScrollRef = useRef<ScrollBoxHandle | null>(null);
   const [selectHeight, setSelectHeight] = useState(0);
   useLayoutEffect(() => {
     const height = selectRef.current?.yogaNode?.getComputedHeight() ?? 0;
@@ -733,18 +732,9 @@ export function ExitPlanModePermissionRequest({
     claimScrollBox(selectHeight);
     return () => claimScrollBox(null);
   }, [claimScrollBox, selectHeight]);
-  // densable kn?.attach — after tqe claims, lRc skips its inner ScrollBox
-  // and this DA owns vJ. Do not assign the shared ref until claimed.
-  const claimed = claimScrollBox != null && modalScrollRef != null;
-  useLayoutEffect(() => {
-    if (!claimed || !modalScrollRef) return;
-    modalScrollRef.current = planScrollRef.current;
-    return () => {
-      if (modalScrollRef.current === planScrollRef.current) {
-        modalScrollRef.current = null;
-      }
-    };
-  }, [claimed, modalScrollRef]);
+  // Official 2.1.328 `kn?.attach`: after claimScrollBox claims, ModalScroller
+  // skips its inner ScrollBox and this ScrollBox attaches directly to modalScrollViewport.
+  const claimed = claimScrollBox != null && modalScrollViewport != null;
   // leftover tot.bottom sticky — gold 0; clear if a prior session parked JSX.
   useLayoutEffect(() => {
     setStickyFooter?.(null);
@@ -832,7 +822,7 @@ export function ExitPlanModePermissionRequest({
   return (
     <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
       <ScrollBox
-        ref={planScrollRef}
+        ref={claimed ? modalScrollViewport?.attach : undefined}
         flexDirection="column"
         height={claimed ? planScrollHeight : undefined}
         stickyScroll={false}

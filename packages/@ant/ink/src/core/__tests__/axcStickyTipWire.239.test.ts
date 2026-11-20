@@ -52,7 +52,7 @@ describe('Axc sticky tip wire (Project C)', () => {
 
   test('FullscreenLayout Qvt arm mounts AxcStickyHost (gold xxc)', () => {
     expect(layout).toContain('<AxcStickyHost')
-    expect(layout).toContain('scrollRef={scrollRef}')
+    expect(layout).toContain('scrollViewport={scrollViewport}')
     expect(layout).toContain('overlay={overlayNode}')
     // RPs suppressed (modal.visible false) must not mount opaque cover
     expect(layout).toContain('modal != null && modal.visible')
@@ -82,12 +82,12 @@ describe('Axc sticky tip wire (Project C)', () => {
     expect(tyn).not.toContain('&& overlay == null')
   })
 
-  test('xxc viewport uses cachedLayout (nodeCache) not Yoga-sum first', () => {
-    expect(sink).toContain('nodeCache.get(scrollEl)')
+  test('xxc viewport uses cachedLayout not Yoga-sum first', () => {
+    expect(sink).toContain('scrollEl.cachedLayout')
     expect(sink).not.toContain('absoluteYogaLayout(scrollEl)')
   })
 
-  test('wTg serializeNodeRows reads nodeCache, no Yoga fallback', () => {
+  test('wTg serializeNodeRows reads cachedLayout, no Yoga fallback', () => {
     const ser = readFileSync(
       join(import.meta.dir, '../axcScreenSerialize.ts'),
       'utf8',
@@ -95,7 +95,7 @@ describe('Axc sticky tip wire (Project C)', () => {
     const start = ser.indexOf('export function serializeNodeRows')
     const end = ser.indexOf('export function serializeGapBackfill')
     const fn = ser.slice(start, end)
-    expect(fn).toContain('nodeCache.get(node)')
+    expect(fn).toContain('node.cachedLayout')
     expect(fn).not.toContain('absoluteYogaLayout')
   })
 

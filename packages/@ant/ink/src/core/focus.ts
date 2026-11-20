@@ -1,6 +1,5 @@
 import type { DOMElement } from './dom.js'
 import { FocusEvent } from './events/focus-event.js'
-import { nodeCache } from './node-cache.js'
 
 const MAX_FOCUS_STACK = 32
 
@@ -271,7 +270,7 @@ function spatialFocusDistance(
 function resolveFocusRect(
   node: DOMElement,
 ): { x: number; y: number; width: number; height: number } | undefined {
-  const cached = node.cachedLayout ?? nodeCache.get(node)
+  const cached = node.cachedLayout
   if (cached) return cached
   const yoga = node.yogaNode
   if (!yoga) return undefined
@@ -279,7 +278,7 @@ function resolveFocusRect(
   let y = yoga.getComputedTop()
   let parent = node.parentNode
   while (parent) {
-    const parentCached = parent.cachedLayout ?? nodeCache.get(parent)
+    const parentCached = parent.cachedLayout
     if (parentCached) {
       return {
         x: parentCached.x + x,

@@ -51,6 +51,8 @@ declare module 'react' {
         elementPlugin?: string
         drawPending?: boolean
         hotkey?: string
+        wait?: DOMElement['wait']
+        no?: DOMElement['no']
         style?: Styles
         stickyScroll?: boolean
         /** Official 2.1.207: default true; false disables non-sticky growth follow. */

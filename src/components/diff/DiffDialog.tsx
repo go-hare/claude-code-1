@@ -14,7 +14,7 @@ import {
   Tab,
   Tabs,
   Text,
-  useModalScrollRef,
+  useModalScrollViewport,
 } from '@anthropic/ink';
 import { useRegisterKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
@@ -184,13 +184,13 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
   }, [sources.length, sourceIndex]);
 
   useRegisterOverlay('diff-dialog');
-  const modalScrollRef = useModalScrollRef();
+  const modalScrollViewport = useModalScrollViewport();
 
   const scrollDetail = useCallback(
     (
       dir: 'up' | 'down' | 'pageUp' | 'pageDown' | 'fullPageUp' | 'fullPageDown' | 'top' | 'bottom',
     ): false | undefined => {
-      const handle = modalScrollRef?.current;
+      const handle = modalScrollViewport?.handle;
       if (viewMode !== 'detail' || !handle) {
         return false;
       }
@@ -223,7 +223,7 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
           break;
       }
     },
-    [modalScrollRef, viewMode],
+    [modalScrollViewport, viewMode],
   );
 
   useKeybindings(

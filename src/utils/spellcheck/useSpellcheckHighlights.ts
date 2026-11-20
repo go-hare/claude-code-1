@@ -157,10 +157,11 @@ export function useSpellcheckHighlights({
     () => (instance ? () => instance.verdicts : () => EMPTY_VERDICTS),
     [instance],
   )
-  const verdicts = useSyncExternalStore(
-    instance ? instance.changed.subscribe : () => () => {},
-    getVerdicts,
+  const subscribeVerdicts = useMemo(
+    () => (instance ? instance.changed.subscribe : () => () => {}),
+    [instance],
   )
+  const verdicts = useSyncExternalStore(subscribeVerdicts, getVerdicts)
 
   const screenReader = isScreenReaderModeEnabled()
 

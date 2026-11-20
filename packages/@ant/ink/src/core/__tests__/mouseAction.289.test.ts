@@ -7,7 +7,6 @@ import { join } from 'node:path'
 import { createNode } from '../dom.js'
 import { MouseActionEvent } from '../events/mouse-action-event.js'
 import { findPointerHoverTarget } from '../hit-test.js'
-import { nodeCache } from '../node-cache.js'
 import { DEC } from '../termio/dec.js'
 
 const app = readFileSync(
@@ -198,7 +197,6 @@ describe('densable 2.1.289 DualInk hover follow split', () => {
     expect(render).toContain('background: inheritedBackgroundColor')
     expect(render).toContain('background: boxBackgroundColor')
     expect(render).toContain('node.cachedLayout = rect')
-    expect(render).toContain('nodeCache.set(node, rect)')
     expect(render).toContain('leftoverGsBackgroundOk')
     expect(render).toContain('cached?.background === inheritedBackgroundColor')
     expect(render).toContain('leftoverGsHint')
@@ -206,8 +204,8 @@ describe('densable 2.1.289 DualInk hover follow split', () => {
     expect(render).toContain('leftoverGsBlitWindow')
     expect(render).toContain('leftoverGsJr')
     expect(render).toContain('unclipped: true')
-    expect(render).toContain('leftoverGsStaleWipe')
-    expect(render).toContain('leftoverGsFirstRepaintY')
+    expect(render).toContain('shiftCachedLayoutSubtree')
+    expect(render).toContain('coveredRows')
     expect(render).toContain('restoreNoSelect: node.style.opaque')
     expect(render).toContain('restoreNoSelect: cur.style.opaque')
     expect(render).toContain('leftoverGsSkipBlitMiss')
@@ -230,20 +228,17 @@ describe('densable Xd tabIndex stops DualInk so left press can select', () => {
     const root = createNode('ink-box')
     root._eventHandlers = { onPointer: () => {} }
     const rootRect = { x: 0, y: 0, width: 80, height: 20 }
-    nodeCache.set(root, rootRect)
     root.cachedLayout = rootRect
     const left = createNode('ink-box')
     left.attributes.tabIndex = -1
     left.parentNode = root
     root.childNodes.push(left)
     const leftRect = { x: 0, y: 0, width: 50, height: 20 }
-    nodeCache.set(left, leftRect)
     left.cachedLayout = leftRect
     const cell = createNode('ink-box')
     cell.parentNode = left
     left.childNodes.push(cell)
     const cellRect = { x: 2, y: 4, width: 20, height: 1 }
-    nodeCache.set(cell, cellRect)
     cell.cachedLayout = cellRect
     expect(findPointerHoverTarget(root, 5, 4)).toBeNull()
   })
@@ -269,11 +264,11 @@ describe('densable Xd tabIndex stops DualInk so left press can select', () => {
 })
 
 describe('densable 2.1.289 Wl onPointer local coords', () => {
-  test('prepareForTarget uses nodeCache screen rect not yoga parent-relative', () => {
+  test('prepareForTarget uses cachedLayout screen rect not yoga parent-relative', () => {
     const target = {
       yogaNode: { getComputedLeft: () => 2, getComputedTop: () => 3 },
+      cachedLayout: { x: 10, y: 20, width: 8, height: 4 },
     }
-    nodeCache.set(target as never, { x: 10, y: 20, width: 8, height: 4 })
     const event = new MouseActionEvent('mousedown', 12, 24, 0)
     event.prepareForTarget(target as never)
     expect(event.localCol).toBe(2)

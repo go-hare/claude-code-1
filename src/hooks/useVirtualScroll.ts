@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 import {
   useCallback,
+  useContext,
   useDeferredValue,
   useEffect,
   useLayoutEffect,
@@ -9,7 +10,8 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
-import { useApp, type DOMElement, type ScrollBoxHandle } from '@anthropic/ink'
+import { useApp, type DOMElement, type ScrollViewport } from '@anthropic/ink'
+import { RenderPacingContext } from '../context/renderPacingContext.js'
 import { recordStickyState } from '../utils/scrollTelemetry.js'
 
 /**
@@ -22,6 +24,23 @@ import { recordStickyState } from '../utils/scrollTelemetry.js'
  * densable `$a` — true when this node or a non-text descendant is still drawing.
  * A height of 0 in that state is not an empty row.
  */
+/**
+ * Official 2.1.321 (#1908): when a mounted item (e.g. a collapsed/shortened
+ * tool result) shrinks by more than one viewport height, trigger a compensating
+ * re-render so spacer heights and scroll clamp bounds update before the item
+ * scrolls off the top of the screen.
+ */
+export function shouldCompensateHeightShrinkage(
+  prevHeight: number | undefined,
+  nextHeight: number,
+  viewportHeight: number,
+): boolean {
+  if (prevHeight === undefined || prevHeight <= 0 || viewportHeight <= 0) {
+    return false
+  }
+  return prevHeight - nextHeight > viewportHeight
+}
+
 function subtreeDrawPending(node: DOMElement): boolean {
   if (node.attributes.drawPending === true) return true
   for (const child of node.childNodes) {
@@ -217,7 +236,7 @@ export type VirtualScrollResult = {
  * the last N items regardless of what scrollTop claims.
  */
 export function useVirtualScroll(
-  scrollRef: RefObject<ScrollBoxHandle | null>,
+  scrollViewport: ScrollViewport,
   itemKeys: readonly string[],
   /**
    * Terminal column count. On change, cached heights are stale (text
@@ -236,14 +255,6 @@ export function useVirtualScroll(
    * heights DOWN, keeping offsets roughly aligned with post-resize Yoga.
    */
   columns: number,
-  /**
-   * Bumped on intentional per-item content-size changes (click-to-expand /
-   * collapse verbose). Without this, the post-collapse useLayoutEffect still
-   * reads PRE-collapse Yoga into heightCache, bottomSpacer stays inflated,
-   * non-sticky scrollTop/HWM land in empty spacer, and the transcript shows
-   * only the summary line over a large blank ("Jump to bottom" still visible).
-   */
-  layoutEpoch = 0,
 ): VirtualScrollResult {
   const heightCache = useRef(new Map<string, number>())
   // Bump whenever heightCache mutates so offsets rebuild on next read. Ref
@@ -300,14 +311,10 @@ export function useVirtualScroll(
     sticky: boolean
     scrollTop: number
   } | null>(null)
-  // Force commits after expand/collapse so heightCache + offsets catch up.
-  // Measure normally avoids setState (flicker during streaming); intentional
-  // layout changes need the extra frames or blank spacer sticks forever.
+  // Force commits when listOrigin shifts, a large shrink occurs, or clamp
+  // recovery fires (official 2.1.328 `Ye`).
   const [remeasureTick, setRemeasureTick] = useState(0)
   void remeasureTick
-  const prevLayoutEpoch = useRef(layoutEpoch)
-  const pendingRemeasureRef = useRef(false)
-  const needsOffsetRebuildRef = useRef(false)
   // densable `Ye` — last non-sticky clamp written in layout effect; `onLayout`
   // (`ut`) widens max by the post-yoga reanchor delta.
   const clampBoundsRef = useRef<{ min: number; max: number } | null>(null)
@@ -354,30 +361,6 @@ export function useVirtualScroll(
     freezeRendersRef.current = 2
     freezeAnchorRef.current = lastRangeAnchorRef.current
   }
-  if (prevLayoutEpoch.current !== layoutEpoch) {
-    prevLayoutEpoch.current = layoutEpoch
-    // Drop mounted heights only — those are the rows whose verbose state
-    // just flipped. Prefer DEFAULT_ESTIMATE (low) over a stale expand height
-    // so bottomSpacer/range cannot leave a permanent blank after collapse.
-    for (const k of itemRefs.current.keys()) {
-      heightCache.current.delete(k)
-    }
-    offsetVersionRef.current++
-    // Same Yoga-staleness window as columns: this frame's measure would
-    // re-cache PRE-toggle heights; skip and remeasure after Ink layouts.
-    skipMeasurementRef.current = true
-    pendingRemeasureRef.current = true
-    needsOffsetRebuildRef.current = true
-    // Drop scroll anchor so reanchor preserveHwm cannot re-inflate HWM
-    // after an intentional collapse.
-    scrollAnchorRef.current = null
-    // Intentional shrink/grow is not a transient markdown freeze — clear
-    // HWM so stored scrollTop can fall with real content on the next paint.
-    const el = scrollRef.current?.getDomElement()
-    if (el) {
-      el.scrollHeightHwm = undefined
-    }
-  }
   // densable `F`: item tail identity — abort freeze + drop the pinned
   // range so a mid-resize append remounts the live tail (also disables
   // same-frame slide-cap against a stale mid-list range).
@@ -391,47 +374,20 @@ export function useVirtualScroll(
     prevRangeRef.current = null
   }
 
-  // densable `Pt(l.subscribe, …)`. Gold one subscribe. NaN when the
-  // ScrollBox handle is not attached yet — layoutStale / next notify remounts.
-  const subscribe = useCallback(
-    (listener: () => void) =>
-      scrollRef.current?.subscribe(listener) ?? (() => {}),
-    [scrollRef],
-  )
-  useSyncExternalStore(subscribe, () => {
-    const s = scrollRef.current
+  // Official 2.1.328 `It(m.subscribe, ...)` (densable `Pt(l.subscribe, …)`):
+  // subscribe directly to ScrollViewport. NaN when handle is not attached yet.
+  useSyncExternalStore(scrollViewport.subscribe, () => {
+    const s = scrollViewport.handle
     if (!s) return NaN
-    // Snapshot uses the TARGET (scrollTop + pendingDelta), not committed
-    // scrollTop. scrollBy only mutates pendingDelta (renderer drains it
-    // across frames); committed scrollTop lags. Using target means
-    // notify() on scrollBy actually changes the snapshot → React remounts
-    // children for the destination before Ink's drain frames need them.
     const target = s.getScrollTop() + s.getPendingDelta()
     const bin = Math.floor(target / SCROLL_QUANTUM)
     return s.isSticky() ? ~bin : bin
   })
-  // Read the REAL committed scrollTop (not quantized) for range math —
-  // quantization is only the re-render gate, not the position.
-  const scrollTop = scrollRef.current?.getScrollTop() ?? -1
-  // Range must span BOTH committed scrollTop (where Ink is rendering NOW)
-  // and target (where pending will drain to). During drain, intermediate
-  // frames render at scrollTops between the two — if we only mount for
-  // the target, those frames find no children (blank rows).
-  const pendingDelta = scrollRef.current?.getPendingDelta() ?? 0
-  const viewportH = scrollRef.current?.getViewportHeight() ?? 0
-  // True means the ScrollBox is pinned to the bottom. This is the ONLY
-  // stable "at bottom" signal: scrollTop/scrollHeight both reflect the
-  // PREVIOUS render's layout, which depends on what WE rendered (topSpacer +
-  // items), creating a feedback loop (range → layout → atBottom → range).
-  // stickyScroll is set by user action (scrollToBottom/scrollBy), the initial
-  // attribute, AND by render-node-to-output when its positional follow fires
-  // (scrollTop>=prevMax → pin to new max → set flag). The renderer write is
-  // feedback-safe: it only flips false→true, only when already at the
-  // positional bottom, and the flag being true here just means "tail-walk,
-  // clear clamp" — the same behavior as if we'd read scrollTop==maxScroll
-  // directly, minus the instability. Default true: before the ref attaches,
-  // assume bottom (sticky will pin us there on first Ink render).
-  const isSticky = scrollRef.current?.isSticky() ?? true
+  const currentHandle = scrollViewport.handle
+  const scrollTop = currentHandle?.getScrollTop() ?? -1
+  const pendingDelta = currentHandle?.getPendingDelta() ?? 0
+  const viewportH = currentHandle?.getViewportHeight() ?? 0
+  const isSticky = currentHandle?.isSticky() ?? true
   if (freezeRendersRef.current > 0) {
     const freezeAnchor = freezeAnchorRef.current
     if (
@@ -724,41 +680,33 @@ export function useVirtualScroll(
     itemTailRef.current = { count: n, lastKey: itemKeys.at(-1) }
     lastRangeAnchorRef.current = { sticky: isSticky, scrollTop }
   }
-  const dStart = useDeferredValue(start)
-  const dEnd = useDeferredValue(end)
-  const dCount = useDeferredValue(n)
+  // Official 2.1.328 `fb`: bypass useDeferredValue when inside RenderPacingContext
+  // and sticky; otherwise defer range growth with immediate fallback on empty/sticky
+  // or downward scroll (`pendingDelta > 0`) or passed tail.
+  const renderPacing = useContext(RenderPacingContext)
+  const deferRange = !(renderPacing !== null && isSticky)
+  const immediateTupleRef = useRef<readonly [number, number, number]>([
+    start,
+    end,
+    n,
+  ])
+  if (!deferRange) {
+    immediateTupleRef.current = [start, end, n]
+  }
+  const dStart =
+    useDeferredValue(deferRange ? start : null) ?? immediateTupleRef.current[0]
+  const dEnd =
+    useDeferredValue(deferRange ? end : null) ?? immediateTupleRef.current[1]
+  const dCount =
+    useDeferredValue(deferRange ? n : null) ?? immediateTupleRef.current[2]
   let effStart = start < dStart ? dStart : start
   let effEnd = end > dEnd ? dEnd : end
-  if (effStart > effEnd || isSticky) {
+  if (effStart >= effEnd || isSticky) {
     effStart = start
     effEnd = end
   }
   if (pendingDelta > 0) {
     effEnd = end
-  }
-  if (pendingDelta < 0) {
-    effStart = start
-  }
-  // Never let deferred effStart/effEnd expose topSpacer or bottomSpacer inside
-  // the visible viewport [viewLo, viewHi] (e.g. when a running script's 50ms
-  // urgent updates preempt React's useDeferredValue render, or on the frame
-  // after pendingDelta drains to 0 before dEnd/dStart catches up).
-  if (!isSticky && viewportH > 0 && scrollTop >= 0) {
-    const viewLo = Math.max(
-      0,
-      Math.min(scrollTop, scrollTop + pendingDelta) - listOriginRef.current,
-    )
-    const viewHi =
-      Math.max(
-        0,
-        Math.max(scrollTop, scrollTop + pendingDelta) - listOriginRef.current,
-      ) + viewportH
-    if (effStart > start && (offsets[effStart] ?? 0) > viewLo) {
-      effStart = start
-    }
-    if (effEnd < end && (offsets[effEnd] ?? 0) < viewHi) {
-      effEnd = end
-    }
   }
   // densable delayed window: deferred end still sitting on the previous
   // tail (dEnd >= dCount && dCount < n) while the viewport has already
@@ -830,7 +778,7 @@ export function useVirtualScroll(
   // top moved or its width changed (terminal resize), compensate scrollTop
   // proportionally with preserveHwm so reading position stays anchored.
   const applyReanchor = useCallback((): number => {
-    const handle = scrollRef.current
+    const handle = scrollViewport.handle
     let nextScrollTop = handle?.getScrollTop() ?? 0
     const pending = handle?.getPendingDelta() ?? 0
     const hasScrollAnchor = Boolean(handle?.getDomElement()?.scrollAnchor)
@@ -874,7 +822,7 @@ export function useVirtualScroll(
       dom.scrollHeight = Math.max(dom.scrollHeight ?? 0, fresh)
     }
     return nextScrollTop
-  }, [scrollRef])
+  }, [scrollViewport])
 
   // densable `Ke` + 2.1.326 #136: topmost mounted item at/above scrollY,
   // capturing width & height for resize-proportional scroll anchoring.
@@ -914,7 +862,7 @@ export function useVirtualScroll(
   // densable `ut` / `onLayout`. Gold sticky / getViewportHeight()===0
   // early-return — no setState. Do not invent 0→>0 remeasure.
   const onLayout = useCallback(() => {
-    const handle = scrollRef.current
+    const handle = scrollViewport.handle
     const vh = handle?.getViewportHeight() ?? 0
     if (!handle || handle.isSticky() || vh === 0) {
       scrollAnchorRef.current = null
@@ -929,7 +877,7 @@ export function useVirtualScroll(
       )
     }
     pickAnchor(next)
-  }, [scrollRef, applyReanchor, pickAnchor])
+  }, [scrollViewport, applyReanchor, pickAnchor])
 
   useLayoutEffect(() => {
     if (isSticky || scrollTop < 0 || viewportH === 0) {
@@ -956,7 +904,7 @@ export function useVirtualScroll(
     frozenTailBottomRef.current = null
     if (isSticky) {
       clampBoundsRef.current = null
-      scrollRef.current?.setClampBounds(undefined, undefined)
+      scrollViewport.handle?.setClampBounds(undefined, undefined)
     } else {
       const reanchor = reanchorDeltaRef.current
       const min = effStart === 0 ? 0 : effTopSpacer + origin
@@ -977,18 +925,11 @@ export function useVirtualScroll(
         max = Math.max(min, lastBottom - viewportH)
       }
       clampBoundsRef.current = { min, max }
-      scrollRef.current?.setClampBounds(min, max)
+      scrollViewport.handle?.setClampBounds(min, max)
     }
     reanchorDeltaRef.current = 0
     if (skipMeasurementRef.current) {
       skipMeasurementRef.current = false
-      // Expand/collapse: after this commit Ink lays out post-toggle content.
-      // Schedule a remeasure commit so the next useLayoutEffect sees real
-      // heights (skip above prevented re-caching pre-toggle Yoga).
-      if (pendingRemeasureRef.current) {
-        pendingRemeasureRef.current = false
-        queueMicrotask(() => setRemeasureTick(t => t + 1))
-      }
       return
     }
     let anyChanged = false
@@ -1007,7 +948,7 @@ export function useVirtualScroll(
       if (cacheable && prevH !== h) {
         heightCache.current.set(key, h)
         anyChanged = true
-        if (h > 0 && prevH !== undefined && prevH - h > viewportH) {
+        if (h > 0 && shouldCompensateHeightShrinkage(prevH, h, viewportH)) {
           largeShrink = true
         }
       }
@@ -1018,29 +959,6 @@ export function useVirtualScroll(
     if (largeShrink) {
       setRemeasureTick(t => t + 1)
     }
-    // Intentional layoutEpoch path only (not streaming markdown freeze):
-    // force a commit so offsets rebuild from freshly written heights, and
-    // clamp scrollTop to real maxScroll when non-sticky (collapse after
-    // scroll-up). Cache was cleared on epoch so prev heights are undefined —
-    // cannot detect shrink via prev>h; always reclamp after remeasure.
-    // Must NOT run for every measure — that would defeat scrollHeightHwm.
-    if (needsOffsetRebuildRef.current) {
-      needsOffsetRebuildRef.current = false
-      queueMicrotask(() => setRemeasureTick(t => t + 1))
-      if (!isSticky) {
-        const s = scrollRef.current
-        const el = s?.getDomElement()
-        if (el) el.scrollHeightHwm = undefined
-        if (s) {
-          const sh = s.getFreshScrollHeight()
-          const vh = s.getViewportHeight()
-          const max = Math.max(0, sh - vh)
-          if (s.getScrollTop() > max) {
-            s.scrollTo(max)
-          }
-        }
-      }
-    }
   })
 
   // 2.1.326 #137 / 2.1.328 frame-listener clamp recovery: if fast scroll hits
@@ -1049,7 +967,7 @@ export function useVirtualScroll(
   useEffect(() => {
     let lastTriggerSig: string | null = null
     return subscribeFrames?.(() => {
-      const handle = scrollRef.current
+      const handle = scrollViewport.handle
       const bounds = clampBoundsRef.current
       const curTop = handle?.getScrollTop() ?? 0
       const curTarget = curTop + (handle?.getPendingDelta() ?? 0)
@@ -1072,7 +990,7 @@ export function useVirtualScroll(
         queueMicrotask(() => setRemeasureTick(t => t + 1))
       }
     })
-  }, [subscribeFrames, scrollRef])
+  }, [subscribeFrames, scrollViewport])
 
   // Stable per-key callback refs. React's ref-swap dance (old(null) then
   // new(el)) is a no-op when the callback is identity-stable, avoiding
@@ -1135,9 +1053,9 @@ export function useVirtualScroll(
       // between renders; a render-time closure would be stale).
       const o = offsetsRef.current
       if (i < 0 || i >= o.n) return
-      scrollRef.current?.scrollTo(o.arr[i]! + listOriginRef.current)
+      scrollViewport.handle?.scrollTo(o.arr[i]! + listOriginRef.current)
     },
-    [scrollRef],
+    [scrollViewport],
   )
 
   const effBottomSpacer = totalHeight - offsets[effEnd]!

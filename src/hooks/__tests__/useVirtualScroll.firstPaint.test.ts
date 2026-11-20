@@ -48,9 +48,7 @@ describe('useVirtualScroll densable 2.1.289 onLayout (wb/Ab)', () => {
   test('source: gold Pt(l.subscribe) once — no 32× tryAttach', async () => {
     const src = await Bun.file(HOOK).text()
     expect(src).toContain('Pt(l.subscribe')
-    expect(src).toMatch(
-      /scrollRef\.current\?\.subscribe\(listener\) \?\? \(\(\) => \{\}\)/,
-    )
+    expect(src).toMatch(/useSyncExternalStore\(scrollViewport\.subscribe,/)
     expect(src).not.toMatch(/queueMicrotask\(tryAttach\)/)
     expect(src).not.toMatch(/attempts\s*<\s*32/)
   })

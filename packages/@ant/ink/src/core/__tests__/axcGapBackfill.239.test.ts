@@ -8,7 +8,6 @@ import { PassThrough } from 'stream'
 import { serializeGapBackfill } from '../axcScreenSerialize.js'
 import { createNode, type DOMElement } from '../dom.js'
 import instances from '../instances.js'
-import { nodeCache } from '../node-cache.js'
 import Ink from '../ink.js'
 import { NATIVE_HISTORY_CAP } from '../nativeHistoryPump.js'
 import {
@@ -146,13 +145,13 @@ describe('serializeGapBackfill (densable J$0)', () => {
 
       const rootLayout = { x: 1, y: 2, width: 3, height: 4 }
       const childLayout = { x: 5, y: 6, width: 7, height: 8 }
-      nodeCache.set(content, rootLayout)
-      nodeCache.set(grandchild, childLayout)
+      content.cachedLayout = rootLayout
+      grandchild.cachedLayout = childLayout
 
       serializeGapBackfill(scroll, 0, 5, 40, ink.getStylePool())
 
-      expect(nodeCache.get(grandchild)).toBeUndefined()
-      expect(nodeCache.get(content)).toEqual(rootLayout)
+      expect(grandchild.cachedLayout).toBeUndefined()
+      expect(content.cachedLayout).toEqual(rootLayout)
       expect(content.dirty).toBe(true)
     } finally {
       instances.delete(process.stdout)
@@ -178,7 +177,7 @@ describe('serializeGapBackfill (densable J$0)', () => {
       content.parentNode = scroll
       // Mismatched cache vs yoga computed rect → isolated paint sets
       // layoutShifted on the swapped b9r(), not the live ctx.
-      nodeCache.set(content, { x: 1, y: 2, width: 3, height: 4 })
+      content.cachedLayout = { x: 1, y: 2, width: 3, height: 4 }
 
       const live = createRenderFrameContext()
       live.layoutShifted = false

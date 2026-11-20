@@ -57,7 +57,6 @@ import {
 } from './hit-test.js';
 import instances, { Ns } from './instances.js';
 import { LogUpdate } from './log-update.js';
-import { nodeCache } from './node-cache.js';
 import { optimize } from './optimizer.js';
 import Output from './output.js';
 import type { ParsedKey } from './parse-keypress.js';
@@ -70,9 +69,7 @@ import reconciler, {
   resetProfileCounters,
 } from './reconciler.js';
 import renderNodeToOutput, {
-  consumeFollowScroll,
   createRenderFrameContext,
-  didLayoutShift,
   leftoverGsDropCachedLayout,
   leftoverGsFollowCapture,
   leftoverGsOverlayActive,
@@ -1790,7 +1787,7 @@ export default class Ink {
     // (screen-local) so only anchor shifts — selection grows toward the
     // mouse as the anchor walks up. After release, both ends are text-
     // anchored and move as a block.
-    const follow = consumeFollowScroll();
+    const follow = frame.followScroll ?? null;
     if (
       follow &&
       this.selection.anchor &&
@@ -1924,8 +1921,9 @@ export default class Ink {
     // track damage. prevFrameContaminated covers the cleanup frame.
     // densable: T.layoutShifted||F||L||R||this.altScreenFullRepaint&&altScreen
     // R = leftoverGsContaminated (flag || overlay-sig change), not the raw flag.
+    const frameLayoutShifted = frame.layoutShifted === true;
     if (
-      didLayoutShift() ||
+      frameLayoutShifted ||
       selActive ||
       hlActive ||
       hoveredLinkPainted ||
@@ -2078,7 +2076,7 @@ export default class Ink {
     // after remount, or scrolled out of view), it won't be in the cache
     // and no move is emitted.
     const decl = this.cursorDeclaration;
-    const rect = decl !== null ? (decl.node.cachedLayout ?? nodeCache.get(decl.node)) : undefined;
+    const rect = decl !== null ? decl.node.cachedLayout : undefined;
     const rawTarget =
       decl !== null && rect !== undefined ? { x: rect.x + decl.relativeX, y: rect.y + decl.relativeY } : null;
     const didFullReset = diff.some(patch => patch.type === 'clearTerminal');
@@ -2264,7 +2262,7 @@ export default class Ink {
       cacheHits: 0,
       live: 0,
     };
-    if (hasDiff || didLayoutShift()) this.followHover();
+    if (hasDiff || frameLayoutShifted) this.followHover();
     this.tellFrameListeners();
     this.options.onFrame?.({
       durationMs: performance.now() - renderStart,

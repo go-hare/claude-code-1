@@ -9,7 +9,6 @@ import {
   resetTreeDepthWarningsForTests,
   warnTreeDepthExceeded,
 } from '../maxTreeDepth.js'
-import { nodeCache } from '../node-cache.js'
 import {
   extractScreenReaderOutput,
   findScreenReaderNodeStartIndex,
@@ -59,7 +58,7 @@ describe('MAX_TREE_DEPTH densable Zlt', () => {
     let n: DOMElement | undefined = root
     let d = 0
     while (n) {
-      nodeCache.set(n, { x: 0, y: 0, width: 10, height: 1 })
+      n.cachedLayout = { x: 0, y: 0, width: 10, height: 1 }
       const child = n.childNodes.find(c => c.nodeName !== '#text') as
         | DOMElement
         | undefined

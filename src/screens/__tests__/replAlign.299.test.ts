@@ -27,7 +27,7 @@ describe('2.1.299 REPL alignment', () => {
     expect(replSrc).toContain("repinScroll(false, 'ownSubmitLanded')")
     expect(replSrc).toContain("repinScroll(false, 'lastMsgIsHuman')")
     expect(replSrc).toContain('belowTranscriptSlotOpen')
-    expect(replSrc).toContain('if (scrollRef.current?.isSticky() ?? true)')
+    expect(replSrc).toContain('if (scrollViewport.handle?.isSticky() ?? true)')
     expect(replSrc).toContain('`progressOrPanel→${belowTranscriptSlotOpen}`')
   })
 })
