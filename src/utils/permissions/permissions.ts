@@ -40,6 +40,7 @@ import { workflowNeedsUsageConsentPrompt } from './workflowUsageConsent.js'
 import { isSessionBypassClass } from './planBypass.js'
 import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
+import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js'
 import {
   recordSandboxStateAtHookRewrite,
   shouldUseSandbox,
@@ -62,6 +63,7 @@ import {
 import { plural } from '../stringUtils.js'
 import { type PermissionMode, permissionModeTitle } from './PermissionMode.js'
 import type {
+  PermissionAllowDecision,
   PermissionAskDecision,
   PermissionDecision,
   PermissionDecisionReason,
@@ -1440,10 +1442,32 @@ async function runPermissionRequestHooksForHeadlessAgent(
             },
           }
         }
+        // Official 2.1.328 `iSn`/`Zlt`: reject `__artifact*` reserved keys,
+        // strip unrecognized keys, validate schema, and re-run `tool.validateInput()`.
+        let validatedUpdatedInput = nonEmptyUpdatedInput
         if (nonEmptyUpdatedInput !== undefined) {
+          const { validatePermissionRequestUpdatedInput } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../services/tools/toolHooks.js') as typeof import('../../services/tools/toolHooks.js')
+          const hookCheck = await validatePermissionRequestUpdatedInput(
+            tool,
+            nonEmptyUpdatedInput,
+            input,
+            tool.validateInput
+              ? parsedInput =>
+                  tool.validateInput!(parsedInput as never, context)
+              : undefined,
+          )
+          if (hookCheck.deny !== undefined) {
+            return hookCheck.deny
+          }
+          validatedUpdatedInput = hookCheck.input
+        }
+        const checkedFinalInput = validatedUpdatedInput ?? input
+        if (validatedUpdatedInput !== undefined) {
           const objection = await checkRuleBasedPermissions(
             tool,
-            finalInput,
+            checkedFinalInput,
             context,
             { crashIsObjection: true },
           )
@@ -1465,13 +1489,13 @@ async function runPermissionRequestHooksForHeadlessAgent(
         // command to a sandbox-excluded command, record the rewritten sandbox
         // state so the command runs outside the sandbox.
         if (
-          nonEmptyUpdatedInput !== undefined &&
+          validatedUpdatedInput !== undefined &&
           (tool.name === BASH_TOOL_NAME || tool.name === POWERSHELL_TOOL_NAME)
         ) {
           const shellType =
             tool.name === POWERSHELL_TOOL_NAME ? 'powershell' : 'bash'
           const rewrittenSandboxInput = {
-            ...(finalInput as {
+            ...(checkedFinalInput as {
               command?: string
               dangerouslyDisableSandbox?: boolean
             }),
@@ -1496,7 +1520,7 @@ async function runPermissionRequestHooksForHeadlessAgent(
         }
         return {
           behavior: 'allow',
-          updatedInput: finalInput,
+          updatedInput: checkedFinalInput,
           decisionReason: {
             type: 'hook',
             hookName: 'PermissionRequest',
@@ -2349,6 +2373,42 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (...args) => {
   return finalResult
 }
 
+/**
+ * Official 2.1.328 `FYn` (`chunk@294254613.js @1687570`):
+ * True when a hook asked for a prompt (`hookAskFloor`) or the ask result
+ * itself requires a person (`personOnly === true`).
+ */
+export function mustAskPersonForPermission(
+  hookAskFloor: boolean,
+  result: PermissionResult,
+): boolean {
+  return (
+    hookAskFloor || (result.behavior === 'ask' && result.personOnly === true)
+  )
+}
+
+/**
+ * Official 2.1.328 `cNn` (`chunk@294254613.js @1709417`):
+ * Detect `\uXXXX` unicode escape sequences in Code Mode scripts.
+ */
+export function containsCodeModeUnicodeEscape(code: string): boolean {
+  return /\\u[0-9a-fA-F]{4}/.test(code)
+}
+
+const REPL_SCRIPT_ESCAPE_REFUSED_MESSAGE =
+  'This code was NOT run. Auto mode could not check it, because it contains a \\uXXXX escape. This is not a judgment that the code is unsafe. Write each such character another way, for example \\x1b or \\u{1b} in place of \\u001b, and send the code again.'
+
+const REPL_SCRIPT_REWRITE_REFUSED_MESSAGE =
+  "This code was NOT run. In Code Mode, auto mode doesn't run code after a hook changed its call from what you wrote. This also applies when a hook changed an earlier tool call in the same response. This is not a judgment that the code is unsafe. If this response had other tool calls, you may send this code once more, in a response with no other tool calls. Otherwise, don't send it again. Go on with work that doesn't need it, and tell the user that a hook (a PreToolUse hook, or a mod's) changes your code. They can turn that hook off (or ask their administrator, if their organization set it), or leave auto mode with Shift+Tab (for example for Manual mode), where they are asked about each of the code's tool calls that needs approval."
+
+function formatReplScriptSendMessageRefused(isInner: boolean): string {
+  return `This ${SEND_MESSAGE_TOOL_NAME} call was NOT run. Auto mode checks each piece of code as a whole before it starts, and that check does not cover this call. Your code can't send a message to an agent outside that check, because auto mode can't read the text that the code sends. This is not a judgment that the message is unsafe. ${isInner ? 'Tell the user that they can leave auto mode with Shift+Tab, for example for Manual mode, and then ask you to try again.' : 'You can send this step again in a new piece of code, which gets a check of its own.'}`
+}
+
+function formatReplScriptAgentRefused(isInner: boolean): string {
+  return `This ${AGENT_TOOL_NAME} call was NOT run. Auto mode checks each piece of code as a whole before it starts, and that check does not cover this call. Your code can't start a sub-agent outside that check, because auto mode can't read the task that the code gives the sub-agent. This is not a judgment that the task is unsafe. ${isInner ? 'Do the work yourself: one piece of code can make several calls at once with Promise.all. If the task really needs a sub-agent, tell the user that they can leave auto mode with Shift+Tab, for example for Manual mode, and then ask you to try again.' : 'You can send this step again in a new piece of code, which gets a check of its own.'}`
+}
+
 const evaluateToolPermission: CanUseToolFn = async (
   tool,
   input,
@@ -2447,6 +2507,76 @@ const evaluateToolPermission: CanUseToolFn = async (
       ) ||
         chromeAlwaysAllowAuto)
     ) {
+      // Official 2.1.328 `FYn` (`chunk@294254613.js @1687570, @3655850..3657200`):
+      // `mustAskPerson` is true whenever a hook raised `hookAskFloor` or the
+      // ask carries `personOnly: true`. Gate ALL auto-allow fast paths on
+      // `!mustAskPerson`, denying when `dontAsk`/non-interactive and returning
+      // `ask` otherwise.
+      const isFlagOnlyTool = tool.classifierOnly?.()?.onBlock === 'flag'
+      const mustAskPerson = mustAskPersonForPermission(
+        context.hookAskFloor === true,
+        result,
+      )
+      if (
+        mustAskPerson &&
+        !isFlagOnlyTool &&
+        (effectiveModeForAuto === 'dontAsk' ||
+          avoidsPromptsByNature(layeredPermissionContext))
+      ) {
+        if (effectiveModeForAuto === 'dontAsk') {
+          return {
+            behavior: 'deny',
+            decisionReason: { type: 'mode', mode: 'dontAsk' },
+            message: DONT_ASK_REJECT_MESSAGE(tool.name),
+          }
+        }
+        return {
+          behavior: 'deny',
+          message: formatNonInteractiveAskCauseMessage(result),
+          decisionReason: {
+            type: 'asyncAgent',
+            reason:
+              'Action requires interactive approval and permission prompts are not available in this context',
+          },
+        }
+      }
+      // Official `po`: convert any auto-allow fast-path or classifier verdict
+      // back to `ask` (or `deny` in `dontAsk`/non-interactive) when `mustAskPerson`.
+      const finalizeAutoAllow = (
+        allowDecision: PermissionAllowDecision,
+      ): PermissionDecision => {
+        if (isFlagOnlyTool) {
+          return allowDecision
+        }
+        if (mustAskPerson) {
+          if (effectiveModeForAuto === 'dontAsk') {
+            return {
+              behavior: 'deny',
+              decisionReason: { type: 'mode', mode: 'dontAsk' },
+              message: DONT_ASK_REJECT_MESSAGE(tool.name),
+            }
+          }
+          if (avoidsPromptsByNature(layeredPermissionContext)) {
+            return {
+              behavior: 'deny',
+              message: formatNonInteractiveAskCauseMessage(result),
+              decisionReason: {
+                type: 'asyncAgent',
+                reason:
+                  'Action requires interactive approval and permission prompts are not available in this context',
+              },
+            }
+          }
+          return {
+            ...result,
+            ...(allowDecision.updatedInput !== undefined
+              ? { updatedInput: allowDecision.updatedInput }
+              : {}),
+          }
+        }
+        return allowDecision
+      }
+
       // densable 2.1.218 W9 + ctn:
       //   v = W9(decisionReason, V => !V.classifierApprovable &&
       //         !(V.circuitBreaker !== undefined && ctn(context)))
@@ -2455,6 +2585,8 @@ const evaluateToolPermission: CanUseToolFn = async (
       // suspiciousWindowsPath) while auto mode is active — those go to the
       // classifier instead of opening a permission dialog (#26).
       const autoContext = isPermissionContextAutoMode(layeredPermissionContext)
+      const isSandboxOverride =
+        result.decisionReason?.type === 'sandboxOverride'
       const forcedSafetyCheck = findSafetyCheckDecision(
         result.decisionReason,
         check =>
@@ -2483,6 +2615,22 @@ const evaluateToolPermission: CanUseToolFn = async (
           toolName: sanitizeToolNameForAnalytics(tool.name),
         })
         return result
+      }
+      // Official `Eo` (`chunk@294254613.js @3658539`): sandboxOverride in
+      // non-interactive auto mode denies immediately (cannot auto-allow).
+      if (
+        isSandboxOverride &&
+        avoidsPromptsByNature(layeredPermissionContext)
+      ) {
+        return {
+          behavior: 'deny',
+          message: formatNonInteractiveAskCauseMessage(result),
+          decisionReason: {
+            type: 'asyncAgent',
+            reason:
+              'Action requires interactive approval and permission prompts are not available in this context',
+          },
+        }
       }
       // densable 2.1.218 fXd plan_mode_floor + #22 2.1.290 Ern/ekt:
       //   x = decisionReason?.type === 'mode' && mode === 'plan' && !OFo(tool, input)
@@ -2669,6 +2817,90 @@ const evaluateToolPermission: CanUseToolFn = async (
         return result
       }
 
+      // Official 2.1.328 Code Mode auto-mode refusal guards
+      // (`chunk@294254613.js @3674600-3675200`): must run BEFORE acceptEdits,
+      // pluginOrigin, allowlist (SendMessage is allowlisted!), and replScriptInner.
+      const isReplOrEvalTool =
+        tool.name === REPL_TOOL_NAME || tool.name === 'Eval'
+      const isReplScriptCall =
+        context.replScriptInner === true ||
+        (context as { replScriptCall?: boolean }).replScriptCall === true
+      if (
+        isReplScriptCall &&
+        (tool.name === AGENT_TOOL_NAME ||
+          tool.name === SEND_MESSAGE_TOOL_NAME) &&
+        !tool.mcpInfo
+      ) {
+        const isSendMessage = tool.name === SEND_MESSAGE_TOOL_NAME
+        logEvent('tengu_repl_script_spawn_refused', {
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+          isSubagent: context.agentId !== undefined,
+        })
+        return {
+          behavior: 'deny',
+          message: isSendMessage
+            ? formatReplScriptSendMessageRefused(
+                context.replScriptInner === true,
+              )
+            : formatReplScriptAgentRefused(context.replScriptInner === true),
+          decisionReason: {
+            type: 'other',
+            reason: isSendMessage
+              ? "Refused: auto mode's check of Claude's code doesn't cover this message to an agent"
+              : "Refused: auto mode's check of Claude's code doesn't cover this sub-agent",
+          },
+        }
+      }
+
+      if (isReplOrEvalTool && !tool.mcpInfo) {
+        const inputChangedByHook =
+          (context as { inputChangedByHook?: boolean }).inputChangedByHook ===
+            true ||
+          (assistantMessage as { serverClassifierInputRewritten?: boolean })
+            .serverClassifierInputRewritten === true
+        if (inputChangedByHook) {
+          logEvent('tengu_repl_script_rewrite_refused', {
+            replToolUseID:
+              toolUseID as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            isSubagent: context.agentId !== undefined,
+          })
+          return {
+            behavior: 'deny',
+            message: REPL_SCRIPT_REWRITE_REFUSED_MESSAGE,
+            decisionReason: {
+              type: 'other',
+              reason:
+                "Auto mode does not run code after a hook changed it, or changed an earlier tool call in the same response. Turn the hook off, or leave auto mode, where you are asked about each of the code's tool calls that needs approval.",
+            },
+          }
+        }
+        const rawCodeCandidates = [
+          (input as { code?: unknown }).code,
+          (result.updatedInput as { code?: unknown } | undefined)?.code,
+        ]
+        if (
+          rawCodeCandidates.some(
+            code =>
+              typeof code === 'string' && containsCodeModeUnicodeEscape(code),
+          )
+        ) {
+          logEvent('tengu_repl_script_escape_refused', {
+            replToolUseID:
+              toolUseID as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            isSubagent: context.agentId !== undefined,
+          })
+          return {
+            behavior: 'deny',
+            message: REPL_SCRIPT_ESCAPE_REFUSED_MESSAGE,
+            decisionReason: {
+              type: 'other',
+              reason:
+                'Auto mode cannot check code that contains a \\uXXXX escape',
+            },
+          }
+        }
+      }
+
       // Before running the auto mode classifier, check if acceptEdits mode would
       // allow this action. This avoids expensive classifier API calls for safe
       // operations like file edits in the working directory.
@@ -2684,17 +2916,15 @@ const evaluateToolPermission: CanUseToolFn = async (
       )
       // gold NHo br=xe==="plan"&&!hn — skip acceptEdits when effective plan
       // OR hn (E1t server-held classifier ask).
-      const isReplOrEvalTool =
-        tool.name === REPL_TOOL_NAME || tool.name === 'Eval'
       const skipAcceptEditsFastPathForPlan =
         effectiveModeForAuto === 'plan' || isServerHeldClassifierAsk(result)
       if (
         result.behavior === 'ask' &&
         !isReplOrEvalTool &&
+        !isSandboxOverride &&
         !classifierDecisionModule!.isAutoModeFastPathExcludedTool(tool.name) &&
         !editClassificationGated &&
-        !skipAcceptEditsFastPathForPlan &&
-        context.hookAskFloor !== true
+        !skipAcceptEditsFastPathForPlan
       ) {
         try {
           const parsedInput = tool.inputSchema.parse(input)
@@ -2732,14 +2962,14 @@ const evaluateToolPermission: CanUseToolFn = async (
                 'acceptEdits' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               hookAllowVouch: context.hookAllowVouched === true,
             })
-            return {
+            return finalizeAutoAllow({
               behavior: 'allow',
               updatedInput: acceptEditsResult.updatedInput ?? input,
               decisionReason: {
                 type: 'mode',
                 mode: 'auto',
               },
-            }
+            })
           }
         } catch (e) {
           if (e instanceof AbortError || e instanceof APIUserAbortError) {
@@ -2756,7 +2986,7 @@ const evaluateToolPermission: CanUseToolFn = async (
       const pluginOrigin = pluginOriginCaller(context)
       if (
         pluginOrigin !== undefined &&
-        context.hookAskFloor !== true &&
+        !mustAskPerson &&
         !isServerHeldClassifierAsk(result) &&
         !autoModeHasDenyRules() &&
         !hasClassifierRoutedSafetyCheck(result.decisionReason) &&
@@ -2770,21 +3000,20 @@ const evaluateToolPermission: CanUseToolFn = async (
         )
         const newDenialState = recordSuccess(denialState)
         persistDenialState(context, newDenialState)
-        return {
+        return finalizeAutoAllow({
           behavior: 'allow',
           updatedInput: input,
           decisionReason: {
             type: 'other',
             reason: `plugin-origin: ${pluginOrigin}`,
           },
-        }
+        })
       }
 
       // Allowlisted tools are safe and don't need YOLO classification.
       // Official: static safe builtins OR chrome MCP safe-for-auto (NDu).
       // Fast-path-excluded tools never auto-allow via this path.
       if (
-        context.hookAskFloor !== true &&
         !classifierDecisionModule!.isAutoModeFastPathExcludedTool(tool.name) &&
         (classifierDecisionModule!.isAutoModeAllowlistedTool(tool.name) ||
           isChromeMcpSafeForAutoMode(
@@ -2809,14 +3038,14 @@ const evaluateToolPermission: CanUseToolFn = async (
             'allowlist' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           hookAllowVouch: context.hookAllowVouched === true,
         })
-        return {
+        return finalizeAutoAllow({
           behavior: 'allow',
           updatedInput: input,
           decisionReason: {
             type: 'mode',
             mode: 'auto',
           },
-        }
+        })
       }
 
       // gold NHo desktop_forward: Qe producer is not invented; consume stamp only.
@@ -2869,11 +3098,11 @@ const evaluateToolPermission: CanUseToolFn = async (
             'desktop_forward' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           hookAllowVouch: context.hookAllowVouched === true,
         })
-        return {
+        return finalizeAutoAllow({
           behavior: 'allow',
           updatedInput: result.updatedInput ?? input,
           decisionReason: { type: 'mode', mode: 'auto' },
-        }
+        })
       }
 
       // Official 2.1.328 Code Mode auto-mode inner-call & deferred-script handling:
@@ -2895,13 +3124,59 @@ const evaluateToolPermission: CanUseToolFn = async (
 
       // 2) replScriptInner: inner tool call from a classified/allowed Code Mode
       //    script in auto mode rides the outer script verdict without re-invoking
-      //    the classifier, while still respecting explicit deny/ask rules,
-      //    hookAskFloor, sandbox_auto_allow_suspended, and safety circuit breakers.
+      //    the classifier, while refusing sandboxOverride & personOnly and
+      //    respecting explicit deny/ask rules, hookAskFloor, and safety circuit breakers.
+      if (context.replScriptInner === true && isSandboxOverride) {
+        logForDebugging(
+          `Refusing replScriptInner auto-allow for ${tool.name}: sandboxOverride cannot ride outer REPL script verdict`,
+        )
+        return {
+          behavior: 'deny',
+          message: `This ${tool.name} call was NOT run. Auto mode's check of Claude's code does not allow disabling the sandbox inside a script.`,
+          decisionReason: {
+            type: 'other',
+            reason:
+              "Refused: auto mode's check of Claude's code does not cover sandbox overrides",
+          },
+        }
+      }
       if (
         context.replScriptInner === true &&
         result.behavior === 'ask' &&
-        effectiveModeForAuto === 'auto' &&
-        context.hookAskFloor !== true &&
+        result.personOnly === true
+      ) {
+        logForDebugging(
+          `Refusing replScriptInner auto-allow for ${tool.name}: personOnly ask requires explicit human approval`,
+        )
+        if (effectiveModeForAuto === 'dontAsk') {
+          return {
+            behavior: 'deny',
+            decisionReason: { type: 'mode', mode: 'dontAsk' },
+            message: DONT_ASK_REJECT_MESSAGE(tool.name),
+          }
+        }
+        if (avoidsPromptsByNature(layeredPermissionContext)) {
+          return {
+            behavior: 'deny',
+            message: formatNonInteractiveAskCauseMessage(result),
+            decisionReason: {
+              type: 'asyncAgent',
+              reason:
+                'Action requires interactive approval and permission prompts are not available in this context',
+            },
+          }
+        }
+        return result
+      }
+      if (
+        context.replScriptInner === true &&
+        result.behavior === 'ask' &&
+        isAutoModeOrPlanActingAsAuto(layeredPermissionContext.mode) &&
+        isAutoModeOrPlanActingAsAuto(effectiveModeForAuto) &&
+        !mustAskPerson &&
+        !isSandboxOverride &&
+        !tool.requiresUserInteraction?.() &&
+        result.checkIncomplete !== true &&
         !isServerHeldClassifierAsk(result) &&
         !hasClassifierRoutedSafetyCheck(result.decisionReason)
       ) {
@@ -2911,11 +3186,11 @@ const evaluateToolPermission: CanUseToolFn = async (
         logForDebugging(
           `Skipping auto mode classifier for ${tool.name}: riding outer REPL script verdict (replScriptInner)`,
         )
-        return {
+        return finalizeAutoAllow({
           behavior: 'allow',
           updatedInput: result.updatedInput ?? input,
           decisionReason: { type: 'mode', mode: 'auto' },
-        }
+        })
       }
 
       // 3) Outer REPL/Eval in auto mode: when replScriptCheckNow !== true,
@@ -2926,7 +3201,8 @@ const evaluateToolPermission: CanUseToolFn = async (
         context.replScriptCheckNow !== true &&
         result.behavior === 'ask' &&
         effectiveModeForAuto === 'auto' &&
-        context.hookAskFloor !== true &&
+        !mustAskPerson &&
+        !isSandboxOverride &&
         !isServerHeldClassifierAsk(result) &&
         !hasClassifierRoutedSafetyCheck(result.decisionReason)
       ) {
@@ -3463,23 +3739,10 @@ const evaluateToolPermission: CanUseToolFn = async (
       const newDenialState = recordSuccess(denialState)
       persistDenialState(context, newDenialState)
 
-      // gold NHo tt @185579970: hookAskFloor — classifier allow re-surfaces
-      // as the original ask (dontAsk still denies).
-      if (context.hookAskFloor === true) {
-        if (effectiveModeForAuto === 'dontAsk') {
-          return {
-            behavior: 'deny',
-            decisionReason: {
-              type: 'mode',
-              mode: 'dontAsk',
-            },
-            message: DONT_ASK_REJECT_MESSAGE(tool.name),
-          }
-        }
-        return result
-      }
-
-      return {
+      // Official `FYn` / `po`: gate classifier allow on `!mustAskPerson`
+      // (`hookAskFloor` or `personOnly: true`) — deny in `dontAsk`/non-interactive,
+      // re-surface original `ask` otherwise.
+      return finalizeAutoAllow({
         behavior: 'allow',
         updatedInput: input,
         decisionReason: {
@@ -3487,7 +3750,7 @@ const evaluateToolPermission: CanUseToolFn = async (
           classifier: 'auto-mode',
           reason: classifierResult.reason,
         },
-      }
+      })
     }
 
     // When permission prompts should be avoided (e.g., background/headless agents,
@@ -4070,54 +4333,11 @@ async function hasPermissionsToUseToolInner(
     }
   }
 
-  // 1g. Non-classifier-approvable safety checks (e.g. suspicious Windows path
-  // tricks) are bypass-immune — they must prompt even in bypassPermissions.
-  // densable 2.1.218+: classifierApprovable safetyChecks (`.claude/**`,
-  // `.git/`, shell configs, etc.) fall through to step 2a so bypass mode
-  // can allow them without Host can_use_tool. auto mode still uses the
-  // classifier for those (see TRANSCRIPT_CLASSIFIER branch above).
-  // #1171: in bypassPermissions on host-card surfaces (Desktop/VS Code),
-  // deny dangerousRemoval at once with a rewrite hint instead of prompting.
-  if (
-    toolPermissionResult?.behavior === 'ask' &&
-    (findSafetyCheckDecision(
-      toolPermissionResult.decisionReason,
-      check => !check.classifierApprovable,
-    ) !== undefined ||
-      hasUnwaivableBypassImmuneSafetyCheck(toolPermissionResult.decisionReason))
-  ) {
-    const layeredNow = getToolPermissionContextFromLayers(context)
-    const modeNow = getEffectivePermissionMode(tool, layeredNow)
-    const splendid = applySplendidHorizonBypassDeny(
-      toolPermissionResult,
-      modeNow,
-    )
-    // Official 2.1.326 #311 / #253: unwaivable bypass-immune checks
-    // (`waivableInBypass: false`, e.g. `unfinishedCheck`, `outsideReadsBlocked`,
-    // `isolatePeerMachines`, `restrictedMode`, `connectorFileSend`) ask in
-    // bypassPermissions mode, and are denied with cause where no one can answer.
-    if (
-      splendid.behavior === 'ask' &&
-      modeNow === 'bypassPermissions' &&
-      (layeredNow.shouldAvoidPermissionPrompts ||
-        context.options?.isNonInteractiveSession) &&
-      hasUnwaivableBypassImmuneSafetyCheck(splendid.decisionReason)
-    ) {
-      return {
-        behavior: 'deny',
-        message: formatNonInteractiveAskCauseMessage(splendid),
-        decisionReason: {
-          type: 'asyncAgent',
-          reason:
-            'Safety check requires approval even in bypassPermissions mode and no approval surface is available',
-        },
-      }
-    }
-    return splendid
-  }
-
-  // 2a. Check if mode allows the tool to run
-  // IMPORTANT: Call getAppState() to get the latest value
+  // 1g / 2a / 2b. Official 2.1.328 `ZMt` (`chunk@294254613.js @3737750`):
+  // Refresh latest context and compute effective mode / bypass eligibility
+  // BEFORE checking guarded asks so whole-tool `alwaysAllowRules` can NEVER
+  // bypass `personOnly`, `safetyCheck` (including `classifierApprovable: true`
+  // like `.git/`, `.claude/`, `.bashrc`), `sandboxOverride`, or `mode === 'plan'`.
   appState = context.getAppState()
   // densable bn: re-materialize sticky layers after refresh
   toolPermissionContext = applyPluginToolListDenyRules(
@@ -4133,6 +4353,82 @@ async function hasPermissionsToUseToolInner(
     mode: effectiveMode,
     prePlanMode: toolPermissionContext.prePlanMode,
   })
+
+  if (toolPermissionResult?.behavior === 'ask') {
+    // `personOnly: true` asks (e.g. org new-artifact approval) MUST return
+    // before both bypassPermissions and whole-tool alwaysAllowRules.
+    if (toolPermissionResult.personOnly === true) {
+      return toolPermissionResult
+    }
+
+    // Bypass-immune safety checks (non-classifierApprovable or unwaivable
+    // circuit breakers) must prompt (or splendid-horizon / non-interactive deny)
+    // even in bypassPermissions mode.
+    const isBypassImmuneSafetyCheck =
+      findSafetyCheckDecision(
+        toolPermissionResult.decisionReason,
+        check => !check.classifierApprovable,
+      ) !== undefined ||
+      hasUnwaivableBypassImmuneSafetyCheck(toolPermissionResult.decisionReason)
+    if (isBypassImmuneSafetyCheck) {
+      const layeredNow = getToolPermissionContextFromLayers(context)
+      const modeNow = getEffectivePermissionMode(tool, layeredNow)
+      const splendid = applySplendidHorizonBypassDeny(
+        toolPermissionResult,
+        modeNow,
+      )
+      // Official 2.1.326 #311 / #253: unwaivable bypass-immune checks
+      // (`waivableInBypass: false`, e.g. `unfinishedCheck`, `outsideReadsBlocked`,
+      // `isolatePeerMachines`, `restrictedMode`, `connectorFileSend`) ask in
+      // bypassPermissions mode, and are denied with cause where no one can answer.
+      if (
+        splendid.behavior === 'ask' &&
+        modeNow === 'bypassPermissions' &&
+        (layeredNow.shouldAvoidPermissionPrompts ||
+          context.options?.isNonInteractiveSession) &&
+        hasUnwaivableBypassImmuneSafetyCheck(splendid.decisionReason)
+      ) {
+        return {
+          behavior: 'deny',
+          message: formatNonInteractiveAskCauseMessage(splendid),
+          decisionReason: {
+            type: 'asyncAgent',
+            reason:
+              'Safety check requires approval even in bypassPermissions mode and no approval surface is available',
+          },
+        }
+      }
+      return splendid
+    }
+
+    // Official `Je = I$t(decisionReason, y)` + `tt` (`hookAskFloor` + `sandboxOverride`):
+    // `sandboxOverride` under `blockReadsOutsideWorkingDirectories` or `hookAskFloor`
+    // must prompt even in bypassPermissions mode.
+    const isSandboxOverrideUnderReadBlockOrHookAsk =
+      toolPermissionResult.decisionReason?.type === 'sandboxOverride' &&
+      (toolPermissionContext.blockReadsOutsideWorkingDirectories === true ||
+        (shouldBypassPermissions && context.hookAskFloor === true))
+    if (isSandboxOverrideUnderReadBlockOrHookAsk) {
+      return toolPermissionResult
+    }
+
+    // Official `ZMt`: when NOT bypassing permissions, return `ask` BEFORE
+    // whole-tool `alwaysAllowRules` whenever the ask came from ANY `safetyCheck`
+    // (including `classifierApprovable: true` like `.git/`, `.claude/`, `.bashrc`),
+    // `sandboxOverride`, or `mode === 'plan'` (`VGe`).
+    if (
+      !shouldBypassPermissions &&
+      (findSafetyCheckDecision(toolPermissionResult.decisionReason) !==
+        undefined ||
+        toolPermissionResult.decisionReason?.type === 'sandboxOverride' ||
+        (toolPermissionResult.decisionReason?.type === 'mode' &&
+          toolPermissionResult.decisionReason.mode === 'plan'))
+    ) {
+      return toolPermissionResult
+    }
+  }
+
+  // 2a. Check if mode allows the tool to run
   if (shouldBypassPermissions) {
     return {
       behavior: 'allow',
@@ -4144,8 +4440,15 @@ async function hasPermissionsToUseToolInner(
     }
   }
 
-  // 2b. Entire tool is allowed (unless tool ignores whole-tool allow rules for this input, #2173)
-  const alwaysAllowedRule = toolAlwaysAllowedRule(toolPermissionContext, tool)
+  // 2b. Entire tool is allowed (unless tool ignores whole-tool allow rules for
+  // this input, #2173, or the ask marks `wholeToolRuleDoesNotCover`)
+  const wholeToolRuleDoesNotCover =
+    toolPermissionResult.behavior === 'ask' &&
+    (toolPermissionResult as { wholeToolRuleDoesNotCover?: boolean })
+      .wholeToolRuleDoesNotCover === true
+  const alwaysAllowedRule = wholeToolRuleDoesNotCover
+    ? null
+    : toolAlwaysAllowedRule(toolPermissionContext, tool)
   if (alwaysAllowedRule && tool.ignoresWholeToolAllowRule?.(input) !== true) {
     return {
       behavior: 'allow',
@@ -4285,7 +4588,10 @@ export function syncPermissionRulesFromDisk(
 ): ToolPermissionContext {
   let context = toolPermissionContext
 
-  // When allowManagedPermissionRulesOnly is enabled, clear all non-policy sources
+  // Official 2.1.328 `jYn` (`chunk@294254613.js @3740296`):
+  // When allowManagedPermissionRulesOnly is enabled, clear user/project/local
+  // rules for all behaviors, and clear ONLY `'allow'` for `'cliArg'`/`'session'`
+  // (preserving `'deny'`/`'ask'` so `--disallowedTools` is never wiped).
   if (shouldAllowManagedPermissionRulesOnly()) {
     const sourcesToClear: PermissionUpdateDestination[] = [
       'userSettings',
@@ -4298,6 +4604,12 @@ export function syncPermissionRulesFromDisk(
 
     for (const source of sourcesToClear) {
       for (const behavior of behaviors) {
+        if (
+          (source === 'cliArg' || source === 'session') &&
+          behavior !== 'allow'
+        ) {
+          continue
+        }
         context = applyPermissionUpdate(context, {
           type: 'replaceRules',
           rules: [],
@@ -4308,23 +4620,16 @@ export function syncPermissionRulesFromDisk(
     }
   }
 
-  // Clear all disk-based source:behavior combos before applying new rules.
-  // Without this, removing a rule from settings (e.g. deleting a deny entry)
-  // would leave the old rule in the context because convertRulesToUpdates
-  // only generates replaceRules for source:behavior pairs that have rules —
-  // an empty group produces no update, so stale rules persist.
-  const diskSources: PermissionUpdateDestination[] = [
-    'userSettings',
-    'projectSettings',
-    'localSettings',
-  ]
-  for (const diskSource of diskSources) {
+  // Clear all 5 SettingSource destinations (`Gs`: userSettings, projectSettings,
+  // localSettings, flagSettings, policySettings) across all behaviors before
+  // replaying updates so removed rules from any settings tier never persist.
+  for (const settingSource of SETTING_SOURCES) {
     for (const behavior of ['allow', 'deny', 'ask'] as PermissionBehavior[]) {
       context = applyPermissionUpdate(context, {
         type: 'replaceRules',
         rules: [],
         behavior,
-        destination: diskSource,
+        destination: settingSource as unknown as PermissionUpdateDestination,
       })
     }
   }

@@ -6,16 +6,26 @@
  * through the session's permission pipeline (`canUseTool`) inside a sandboxed
  * Node `vm` context.
  */
-import { isReplModeEnabled } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
+import {
+  isReplModeEnabled,
+  REPL_TOOL_NAME,
+} from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
 import type { REPLMediaBlock } from '@claude-code/builtin-tools/tools/REPLTool/REPLTool.js'
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import * as vm from 'node:vm'
-import { setCwdState } from '../../bootstrap/state.js'
+import { getMainThreadAgentId, setCwdState } from '../../bootstrap/state.js'
 import type { HostPermissionLayer } from '../../engine/hostPermissionLayers.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import type { Tool, ToolResult, ToolUseContext } from '../../Tool.js'
+import type {
+  Tool,
+  ToolPermissionContext,
+  ToolResult,
+  ToolUseContext,
+} from '../../Tool.js'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -28,6 +38,15 @@ import type {
   ToolCallManagedPass,
 } from '../../utils/hooks/toolCallManagedPass.js'
 import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
+import { getDenyRuleForTool } from '../../utils/permissions/permissions.js'
+import {
+  applyPluginToolListDenyRules,
+  applyPluginToolListFilter,
+} from '../../utils/plugins/pluginToolList.js'
+import {
+  restrictedAlwaysCodeRunningNames,
+  restrictedDenyToolNames,
+} from '../../utils/restricted.js'
 import { saveReplMode } from '../../utils/sessionStorage.js'
 import {
   buildCodeModeMcpStatusDelta,
@@ -36,6 +55,7 @@ import {
 import { McpAuthError } from '../mcp/connectionHelpers.js'
 import { mcpInfoFromString } from '../mcp/mcpStringUtils.js'
 import {
+  CODE_MODE_ENV_VAR,
   CODE_MODE_EXPERIMENTAL_NAME,
   CODE_MODE_NAME,
   REPL_DETACH_AFTER_MS,
@@ -54,12 +74,20 @@ import {
   codeModeRefusalReasonText,
   formatCodeModeCommand,
   getCodeModeOptInState,
+  hasCodeModeBeenUsed,
+  isCodeModeAccepted,
   isCodeModeEnabled,
   noteReplContextCreated,
   pinCodeMode,
   unpinCodeMode,
 } from './optIn.js'
-import { ASYNC_REPL_MAX_EVALS, getReplSessions } from './replSessions.js'
+import {
+  ASYNC_REPL_MAX_EVALS,
+  formatReplOutputEnvelope,
+  getReplSessions,
+  NO_EVALS,
+  type ReplEvalAccess,
+} from './replSessions.js'
 
 export type CodeModeExecutionResult = {
   result: string
@@ -239,6 +267,10 @@ export class CodeModeAutoVerdictTracker {
 
   hasUnclassifiedCodeRan(): boolean {
     return this.unclassifiedCodeRan
+  }
+
+  hasUnchecked(): boolean {
+    return this.unchecked.length > 0
   }
 
   addDeferredCheck(entry: DeferredAutoScriptCheckEntry): AutoScriptRecord {
@@ -1980,11 +2012,71 @@ const REALM_BRIDGE_INIT_SOURCE = `(() => {
   };
 })()`
 
+type CodeModeTurnState = {
+  bound: number
+  deadline: number
+  lastClock: number
+  stride: number
+  left: number
+  rest: number
+  budget: number
+  stopped: boolean
+  budgetStopped: boolean
+  clockStops: number
+  budgetStops: number
+}
+
+type CodeModeShellRunner = (
+  nothrow: boolean,
+  msOverride: number | undefined,
+  cwdVal: string | undefined,
+  envVal: unknown,
+) => Promise<Record<string, unknown>>
+
+type CodeModeEvalBinding = {
+  outside: boolean
+  ended: boolean
+  noMoreCalls: boolean
+  shellKind: 'bash' | 'powershell'
+  logs: string[]
+  turnState: CodeModeTurnState
+  clampedTimeout: number
+  timers: Set<number>
+  allowedTools: ReadonlySet<string> | undefined
+  exposedTools: string[]
+  toolDescriptors: ReadonlyArray<{ name: string; description: string }>
+  evalsAccess: ReplEvalAccess
+  isStopped: () => boolean
+  getStopMessage: () => string
+  guardedCall: (
+    toolName: string,
+    input?: Record<string, unknown>,
+  ) => Promise<unknown>
+  dispatchDollar: (first: unknown, values: unknown[]) => CodeModeShellRunner
+}
+
+type CodeModeTimerEntry = {
+  owner: CodeModeEvalBinding
+  clear: () => void
+}
+
 type PersistentCodeModeVmSession = {
   sandbox: Record<string, unknown>
   context: vm.Context
   bridge: RealmBridge
-  checkBudgetImpl: (() => void) | undefined
+  /** Official `Go`/`Tl` AsyncLocalStorage holding per-eval bindings so concurrent/detached evals never clobber shared sandbox globals. */
+  currentCall: AsyncLocalStorage<CodeModeEvalBinding>
+  /** Official `L` outside-eval fallback binding when no active eval store is present. */
+  outsideBinding: CodeModeEvalBinding
+  /** Session-wide timer table (per-eval timers tracked in `binding.timers`). */
+  timers: {
+    nextId: number
+    armed: Map<number, CodeModeTimerEntry>
+  }
+  /** Tool global names already sealed and bound onto `sandbox` once. */
+  boundToolNames: Set<string>
+  /** Clear every armed timer owned by any eval in this VM session. */
+  clearAllTimers: () => void
   /** Tracks `{ raw: "..." }` literals written directly in script source and their original string value. */
   rawLiteralValues: WeakMap<object, string>
   /** Per-session randomized non-enumerable identifier for marking script-authored `{ raw }` literals. */
@@ -1992,20 +2084,6 @@ type PersistentCodeModeVmSession = {
   /** Console ring buffer persisted across turns in this VM session. */
   consoleBuffer: string[]
   consoleDropped: number
-  /** Per-turn wall clock + step budget state (official `steps` object). */
-  turnState: {
-    bound: number
-    deadline: number
-    lastClock: number
-    stride: number
-    left: number
-    rest: number
-    budget: number
-    stopped: boolean
-    budgetStopped: boolean
-    clockStops: number
-    budgetStops: number
-  }
 }
 
 const MAX_PERSISTENT_VM_SESSIONS = 32
@@ -2052,7 +2130,7 @@ const CODE_MODE_STEP_BUDGET = 50_000_000
 const CODE_MODE_STRIDE_CLOCK_MS = 25
 const CODE_MODE_MAX_STRIDE = 1_000
 
-function makeTurnState(): PersistentCodeModeVmSession['turnState'] {
+function makeTurnState(): CodeModeTurnState {
   return {
     bound: 0,
     deadline: 0,
@@ -2073,10 +2151,10 @@ function makeTurnState(): PersistentCodeModeVmSession['turnState'] {
  * time, excluding time spent inside tool calls. `boundMs` is the wall clock.
  */
 function startCodeModeTurn(
-  session: PersistentCodeModeVmSession,
+  turnState: CodeModeTurnState,
   boundMs: number,
 ): void {
-  const s = session.turnState
+  const s = turnState
   const now = Date.now()
   s.bound = boundMs
   s.deadline = now + boundMs
@@ -2093,8 +2171,8 @@ function startCodeModeTurn(
  * step. Throws a RangeError when the turn's wall clock or step budget runs out.
  * Tool-call wait time is excluded because the turn is only re-armed on resume.
  */
-function chargeCodeModeStep(session: PersistentCodeModeVmSession): void {
-  const s = session.turnState
+function chargeCodeModeStep(turnState: CodeModeTurnState): void {
+  const s = turnState
   if (s.bound === 0) return
   s.left--
   if (s.left > 0) return
@@ -2135,26 +2213,106 @@ function chargeCodeModeStep(session: PersistentCodeModeVmSession): void {
 
 const CONSOLE_RING_BUFFER_MAX = 500
 
+function makeOutsideEvalBinding(): CodeModeEvalBinding {
+  const unavailable = async (toolName: string): Promise<never> => {
+    throw new Error(`${toolName} is not available outside a REPL eval`)
+  }
+  return {
+    outside: true,
+    ended: true,
+    noMoreCalls: true,
+    shellKind: 'bash',
+    logs: [],
+    turnState: makeTurnState(),
+    clampedTimeout: REPL_SYNC_RUN_MS,
+    timers: new Set(),
+    allowedTools: undefined,
+    exposedTools: [],
+    toolDescriptors: [],
+    evalsAccess: NO_EVALS,
+    isStopped: () => false,
+    getStopMessage: () => 'Code Mode script aborted',
+    guardedCall: toolName => unavailable(toolName),
+    dispatchDollar: () => async () => unavailable('Bash'),
+  }
+}
+
+function getCurrentEvalBinding(
+  session: PersistentCodeModeVmSession,
+): CodeModeEvalBinding {
+  return session.currentCall.getStore() ?? session.outsideBinding
+}
+
+function clearTimersForEvalBinding(
+  session: PersistentCodeModeVmSession,
+  binding: CodeModeEvalBinding,
+): void {
+  for (const id of binding.timers) {
+    const entry = session.timers.armed.get(id)
+    if (entry !== undefined) {
+      entry.clear()
+      session.timers.armed.delete(id)
+    }
+  }
+  binding.timers.clear()
+}
+
+function ensureToolGlobalBound(
+  session: PersistentCodeModeVmSession,
+  globalName: string,
+  canonicalToolName: string,
+): void {
+  if (session.boundToolNames.has(globalName)) return
+  session.boundToolNames.add(globalName)
+  session.sandbox[globalName] = sealAsyncForRealm(
+    session,
+    (input: Record<string, unknown> = {}) =>
+      getCurrentEvalBinding(session).guardedCall(canonicalToolName, input),
+  )
+}
+
 function createCodeModeVmSession(): PersistentCodeModeVmSession {
   // Official `Go`/`$c`/`Tl`: the realm starts from a null-prototype sandbox and
   // exposes ONLY realm-sealed bridge objects/functions — no host intrinsics.
+  // All per-eval globals are bound ONCE here and dispatch through
+  // `AsyncLocalStorage` (`session.currentCall.getStore() ?? outsideBinding`)
+  // so concurrent/detached evals sharing one VM never clobber each other.
   const sandbox: Record<string, unknown> = { __proto__: null } as Record<
     string,
     unknown
   >
   const rawLiteralValues = new WeakMap<object, string>()
   const rawLiteralMarkerName = `__cm_raw_${randomBytes(6).toString('hex')}`
+  const currentCall = new AsyncLocalStorage<CodeModeEvalBinding>()
+  const outsideBinding = makeOutsideEvalBinding()
+  const timers: PersistentCodeModeVmSession['timers'] = {
+    nextId: 1,
+    armed: new Map(),
+  }
+  const clearAllTimers = (): void => {
+    for (const entry of timers.armed.values()) {
+      entry.clear()
+      entry.owner.timers.clear()
+    }
+    timers.armed.clear()
+  }
+
   const session: PersistentCodeModeVmSession = {
     sandbox,
     context: undefined as unknown as vm.Context,
     bridge: undefined as unknown as RealmBridge,
-    checkBudgetImpl: undefined,
+    currentCall,
+    outsideBinding,
+    timers,
+    boundToolNames: new Set(),
+    clearAllTimers,
     rawLiteralValues,
     rawLiteralMarkerName,
     consoleBuffer: [],
     consoleDropped: 0,
-    turnState: makeTurnState(),
   }
+  const getBinding = (): CodeModeEvalBinding => getCurrentEvalBinding(session)
+
   // Official `kee({...},{codeGeneration:{strings:false}}): eval() and
   // `new Function()` are disabled inside the realm — script code can only run
   // through the instrumented transform, so it cannot bypass `__checkBudget`.
@@ -2167,11 +2325,14 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
   }).runInContext(session.context) as RealmBridge
 
   // Official `jc`/`Uc`: instrumented loops & functions call `__checkBudget` —
-  // expose it as a realm-sealed callable throwing realm-side Errors.
+  // expose it ONCE as a realm-sealed callable dispatching to the active eval.
   Object.defineProperty(sandbox, '__checkBudget', {
     value: session.bridge.wrapSyncHostFn(() => {
-      chargeCodeModeStep(session)
-      session.checkBudgetImpl?.()
+      const active = getBinding()
+      chargeCodeModeStep(active.turnState)
+      if (active.isStopped()) {
+        throw new Error(active.getStopMessage())
+      }
     }),
     writable: false,
     enumerable: false,
@@ -2180,9 +2341,6 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
 
   // Official `zc`/`fr`: mark single-key `{ raw: expr }` literals written directly
   // in script source so `$` can distinguish them from external/parsed objects.
-  // Uses a per-session randomized non-enumerable identifier and
-  // `wrapIdentityHostFn` so user scripts cannot trivially guess/invoke it and
-  // the exact same realm object is returned.
   Object.defineProperty(sandbox, rawLiteralMarkerName, {
     value: session.bridge.wrapIdentityHostFn((val: unknown) => {
       if (
@@ -2208,6 +2366,183 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
   sandbox.btoa = session.bridge.wrapSyncHostFn((input: unknown) =>
     Buffer.from(String(input), 'binary').toString('base64'),
   )
+
+  // Official `Tl`: timers bound ONCE, tracking ownership per eval binding and
+  // re-entering `currentCall.run(owner, ...)` when the timer fires.
+  const armTimer = (
+    cb: unknown,
+    delayMs: unknown,
+    args: unknown[],
+    repeat: boolean,
+  ): number => {
+    if (typeof cb !== 'function') {
+      throw new TypeError(
+        `${repeat ? 'setInterval' : 'setTimeout'} callback must be a function`,
+      )
+    }
+    const owner = getBinding()
+    if (owner.ended) return 0
+    const id = timers.nextId++
+    const ms = repeat
+      ? Math.max(10, Number(delayMs) || 10)
+      : Math.max(0, Number(delayMs) || 0)
+    const fire = (): void => {
+      if (!repeat) {
+        owner.timers.delete(id)
+        timers.armed.delete(id)
+      }
+      if (owner.ended || owner.isStopped()) {
+        if (repeat) {
+          const entry = timers.armed.get(id)
+          entry?.clear()
+          owner.timers.delete(id)
+          timers.armed.delete(id)
+        }
+        return
+      }
+      currentCall.run(owner, () => {
+        startCodeModeTurn(owner.turnState, owner.clampedTimeout)
+        try {
+          ;(cb as (...a: unknown[]) => unknown)(...args)
+        } catch {
+          // Unhandled timer errors must not crash host process
+        }
+      })
+    }
+    const handle = repeat ? setInterval(fire, ms) : setTimeout(fire, ms)
+    if (typeof handle.unref === 'function') handle.unref()
+    const clear = repeat
+      ? () => clearInterval(handle)
+      : () => clearTimeout(handle)
+    owner.timers.add(id)
+    timers.armed.set(id, { owner, clear })
+    return id
+  }
+  const clearTimerById = (id: unknown): void => {
+    const numId = typeof id === 'number' ? id : Number(id)
+    const entry = timers.armed.get(numId)
+    if (entry === undefined) return
+    entry.clear()
+    entry.owner.timers.delete(numId)
+    timers.armed.delete(numId)
+  }
+  sandbox.setTimeout = sealForRealm(
+    session,
+    (cb: unknown, delayMs?: unknown, ...args: unknown[]) =>
+      armTimer(cb, delayMs, args, false),
+  )
+  sandbox.clearTimeout = sealForRealm(session, clearTimerById)
+  sandbox.setInterval = sealForRealm(
+    session,
+    (cb: unknown, delayMs?: unknown, ...args: unknown[]) =>
+      armTimer(cb, delayMs, args, true),
+  )
+  sandbox.clearInterval = sealForRealm(session, clearTimerById)
+
+  // Official `Tl`/`St(e,"console",...)`: bound ONCE; writes to active eval's
+  // `logs` plus session-wide ring buffer.
+  const pushLog = (...args: unknown[]): void => {
+    const line = args.map(a => formatValueForOutput(a)).join(' ')
+    getBinding().logs.push(line)
+    session.consoleBuffer.push(line)
+    if (session.consoleBuffer.length > CONSOLE_RING_BUFFER_MAX) {
+      session.consoleBuffer.shift()
+      session.consoleDropped++
+    }
+  }
+  const sealedPushLog = sealForRealm(session, pushLog)
+  sandbox.console = session.bridge.createRealmObj([
+    ['log', sealedPushLog],
+    ['warn', sealedPushLog],
+    ['error', sealedPushLog],
+    ['info', sealedPushLog],
+    ['debug', sealedPushLog],
+    [
+      'tail',
+      sealForRealm(session, (n?: unknown) => {
+        const count =
+          typeof n === 'number' && Number.isFinite(n) && n >= 0
+            ? Math.floor(n)
+            : 20
+        return session.consoleBuffer.slice(-count)
+      }),
+    ],
+    ['buffer', sealForRealm(session, () => [...session.consoleBuffer])],
+    ['dropped', sealForRealm(session, () => session.consoleDropped)],
+  ])
+  sandbox.log = sealedPushLog
+
+  // Official `Tl`: realm-sealed `self.running()` bound ONCE, dispatching via ALS.
+  const sealedRunningHandle = session.bridge.createRealmObj([
+    ['list', sealForRealm(session, () => getBinding().evalsAccess.list())],
+    [
+      'abort',
+      sealForRealm(session, (targetId: unknown) =>
+        getBinding().evalsAccess.abort(Number(targetId)),
+      ),
+    ],
+  ])
+  sandbox.running = session.bridge.wrapIdentityHostFn(() => sealedRunningHandle)
+  sandbox.self = sandbox
+  sandbox.preview = sealForRealm(
+    session,
+    (value: unknown, maxChars: unknown = 2000) => {
+      const limit =
+        typeof maxChars === 'number' &&
+        Number.isFinite(maxChars) &&
+        maxChars > 0
+          ? Math.floor(maxChars)
+          : 2000
+      return elideReplOutputPart(formatValueForOutput(value), limit)
+    },
+  )
+
+  sandbox.callTool = sealAsyncForRealm(
+    session,
+    (toolName: string, input: Record<string, unknown> = {}) =>
+      getBinding().guardedCall(toolName, input),
+  )
+  sandbox.$ = session.bridge.createDollarFn(
+    (first: unknown, values: unknown[]) =>
+      getBinding().dispatchDollar(first, values),
+    (s: unknown) => quoteCodeModeShellArg(s, getBinding().shellKind),
+  )
+
+  sandbox.searchTools = sealForRealm(
+    session,
+    (query: unknown, limit: unknown = 10) => {
+      const q = String(query ?? '')
+        .toLowerCase()
+        .trim()
+      const max =
+        typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+          ? Math.floor(limit)
+          : 10
+      return getBinding()
+        .toolDescriptors.filter(
+          d =>
+            !q ||
+            d.name.toLowerCase().includes(q) ||
+            d.description.toLowerCase().includes(q),
+        )
+        .slice(0, max)
+        .map(d => ({ name: d.name, description: d.description }))
+    },
+  )
+  sandbox.describeTool = sealForRealm(session, (name: unknown) => {
+    const targetName = String(name ?? '')
+    const found = getBinding().toolDescriptors.find(d => d.name === targetName)
+    return found ? { name: found.name, description: found.description } : null
+  })
+  sandbox.tools = session.bridge.createRealmObj([
+    [
+      'list',
+      sealForRealm(session, () => {
+        const b = getBinding()
+        return b.allowedTools ? [...b.allowedTools] : [...b.exposedTools]
+      }),
+    ],
+  ])
 
   return session
 }
@@ -2246,12 +2581,14 @@ function getOrCreatePersistentVmSession(
   if (persistentVmSessionsByKey.size >= MAX_PERSISTENT_VM_SESSIONS) {
     const oldestKey = persistentVmSessionsByKey.keys().next().value
     if (oldestKey !== undefined) {
+      persistentVmSessionsByKey.get(oldestKey)?.clearAllTimers()
       persistentVmSessionsByKey.delete(oldestKey)
       sessionUnsetVarsByKey.delete(oldestKey)
     }
   }
   const created = createCodeModeVmSession()
   persistentVmSessionsByKey.set(sessionKey, created)
+  getReplSessions().set(sessionKey, created)
   return created
 }
 
@@ -2261,13 +2598,194 @@ function getOrCreatePersistentVmSession(
  */
 export function clearCodeModeVmSession(sessionKey?: string): void {
   if (sessionKey !== undefined) {
+    persistentVmSessionsByKey.get(sessionKey)?.clearAllTimers()
     persistentVmSessionsByKey.delete(sessionKey)
     sessionUnsetVarsByKey.delete(sessionKey)
-    getReplSessions().clear([sessionKey])
+    const sessions = getReplSessions()
+    sessions.clear([sessionKey])
+    sessions.release(sessionKey)
   } else {
+    for (const s of persistentVmSessionsByKey.values()) {
+      s.clearAllTimers()
+    }
     persistentVmSessionsByKey.clear()
     sessionUnsetVarsByKey.clear()
     getReplSessions().clear()
+  }
+}
+
+type PollEventQueueCommandLike = {
+  mode?: string
+  agentId?: string
+  pollEvent?: {
+    kind?: string
+    envelope?: string
+    settleDropped?: (err: Error) => void
+  }
+}
+
+function settleDroppedPollEvents(
+  removed: readonly PollEventQueueCommandLike[],
+  reason: string,
+): void {
+  for (const cmd of removed) {
+    cmd.pollEvent?.settleDropped?.(
+      new Error(`poll event discarded undelivered: ${reason}`),
+    )
+  }
+}
+
+function extractEvalIdFromPollEnvelope(
+  envelope: string | undefined,
+): number | undefined {
+  if (!envelope) return undefined
+  const m = /\beval="(\d+)"/.exec(envelope)
+  if (!m) return undefined
+  const id = Number(m[1])
+  return Number.isFinite(id) ? id : undefined
+}
+
+function isMainThreadPollCommand(cmd: PollEventQueueCommandLike): boolean {
+  if (cmd.agentId === undefined) return true
+  try {
+    return cmd.agentId === getMainThreadAgentId()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official `endMainThreadConversation` (`chunk@313694282.js @8309`):
+ * Clears ONLY the main-thread (`REPL_MAIN_THREAD_KEY`) Code Mode VM session
+ * and `ReplSessions` entry (preserving surviving background subagents' VMs!),
+ * removes main-thread Code Mode `poll-event` items from the message queue,
+ * and resets `codeModeAutoVerdictTracker`.
+ */
+export function endMainThreadConversation(
+  reason = 'the conversation was cleared',
+  keepToolUseIds: readonly string[] = [],
+  queueOverride?: {
+    removeByFilter: (
+      predicate: (cmd: PollEventQueueCommandLike) => boolean,
+    ) => PollEventQueueCommandLike[]
+  },
+): void {
+  const sessions = getReplSessions()
+  const hasMainState =
+    isCodeModeAccepted() ||
+    hasCodeModeBeenUsed() ||
+    persistentVmSessionsByKey.has(REPL_MAIN_THREAD_KEY) ||
+    sessions.has(REPL_MAIN_THREAD_KEY) ||
+    sessions.depth(REPL_MAIN_THREAD_KEY) > 0 ||
+    sessions.outstanding(REPL_MAIN_THREAD_KEY) > 0
+  if (!hasMainState) {
+    codeModeAutoVerdictTracker.reset()
+    return
+  }
+
+  const keptIds = sessions.evalIdsOf(REPL_MAIN_THREAD_KEY, keepToolUseIds)
+  const keptPred =
+    keptIds.size === 0 ? undefined : (id: number) => keptIds.has(id)
+  sessions.clear([REPL_MAIN_THREAD_KEY], keptPred)
+  sessions.release(REPL_MAIN_THREAD_KEY)
+  persistentVmSessionsByKey.get(REPL_MAIN_THREAD_KEY)?.clearAllTimers()
+  persistentVmSessionsByKey.delete(REPL_MAIN_THREAD_KEY)
+  sessionUnsetVarsByKey.delete(REPL_MAIN_THREAD_KEY)
+
+  const shouldRemove = (cmd: PollEventQueueCommandLike): boolean => {
+    if (cmd.mode !== 'poll-event') return false
+    const kind = cmd.pollEvent?.kind
+    if (kind !== 'repl-eval' && kind !== 'repl-status') return false
+    if (!isMainThreadPollCommand(cmd)) return false
+    if (keptPred !== undefined) {
+      const evalId = extractEvalIdFromPollEnvelope(cmd.pollEvent?.envelope)
+      if (evalId !== undefined && keptPred(evalId)) return false
+    }
+    return true
+  }
+
+  try {
+    if (queueOverride) {
+      settleDroppedPollEvents(
+        queueOverride.removeByFilter(shouldRemove),
+        reason,
+      )
+    } else {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const mqm =
+        require('../../utils/messageQueueManager.js') as typeof import('../../utils/messageQueueManager.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const removed = mqm.removeByFilter(cmd =>
+        shouldRemove(cmd as unknown as PollEventQueueCommandLike),
+      )
+      settleDroppedPollEvents(
+        removed as unknown as PollEventQueueCommandLike[],
+        reason,
+      )
+    }
+  } catch {
+    // Best-effort outside full message queue lifecycle
+  }
+
+  codeModeAutoVerdictTracker.reset()
+}
+
+/**
+ * Official `endSubagentRepl` (`chunk@313694282.js @8551`):
+ * Clears, releases, and forgets ONLY `agentId`'s Code Mode VM session and
+ * `ReplSessions` entry, and drops that subagent's queued `poll-event` items
+ * without disturbing the main thread or sibling subagents.
+ */
+export function endSubagentRepl(
+  agentId: string,
+  queueOverride?: {
+    removeByFilter: (
+      predicate: (cmd: PollEventQueueCommandLike) => boolean,
+    ) => PollEventQueueCommandLike[]
+  },
+): void {
+  const sessions = getReplSessions()
+  const hasAgentState =
+    isCodeModeAccepted() ||
+    hasCodeModeBeenUsed() ||
+    persistentVmSessionsByKey.has(agentId) ||
+    sessions.has(agentId) ||
+    sessions.depth(agentId) > 0 ||
+    sessions.outstanding(agentId) > 0
+  if (!hasAgentState) return
+
+  sessions.clear([agentId])
+  sessions.release(agentId)
+  sessions.forget(agentId)
+  persistentVmSessionsByKey.get(agentId)?.clearAllTimers()
+  persistentVmSessionsByKey.delete(agentId)
+  sessionUnsetVarsByKey.delete(agentId)
+
+  const shouldRemove = (cmd: PollEventQueueCommandLike): boolean =>
+    cmd.mode === 'poll-event' && cmd.agentId === agentId
+  const reason = 'the subagent that ran the script ended its run'
+
+  try {
+    if (queueOverride) {
+      settleDroppedPollEvents(
+        queueOverride.removeByFilter(shouldRemove),
+        reason,
+      )
+    } else {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const mqm =
+        require('../../utils/messageQueueManager.js') as typeof import('../../utils/messageQueueManager.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const removed = mqm.removeByFilter(cmd =>
+        shouldRemove(cmd as unknown as PollEventQueueCommandLike),
+      )
+      settleDroppedPollEvents(
+        removed as unknown as PollEventQueueCommandLike[],
+        reason,
+      )
+    }
+  } catch {
+    // Best-effort outside full message queue lifecycle
   }
 }
 
@@ -3519,11 +4037,19 @@ export async function executeCodeModeScript(
   const getStopMessage = () =>
     stopped ? stopMessage : 'Code Mode script aborted'
 
+  const vmSession =
+    sessionKey !== undefined
+      ? getOrCreatePersistentVmSession(sessionKey)
+      : createCodeModeVmSession()
+  const { sandbox, context } = vmSession
+
+  const evalTurnState = makeTurnState()
+
   let timerRef: PausableCodeModeTimer | undefined
   // Official `ft`/`startsNoMoreCalls`: after the script's deadline (or abort)
-  // the realm must refuse to start NEW tool calls. Set before `runInContext`
-  // so the check lives in guardedCall's entry path, not the timer.
-  let noMoreCalls = false
+  // the realm must refuse to start NEW tool calls. Stored per-eval on `binding`
+  // so concurrent detached evals never interfere with each other.
+  const evalTimers = new Set<number>()
 
   const guardedCall = async (
     toolName: string,
@@ -3532,7 +4058,7 @@ export async function executeCodeModeScript(
     // Official `ft` (`It.startsNoMoreCalls=!0`): once the turn deadline/abort
     // fires, zombie continuations cannot start new tool calls — they throw
     // the timeout message directly.
-    if (noMoreCalls) {
+    if (binding.noMoreCalls) {
       throw new Error(getStopMessage())
     }
     if (isStopped()) {
@@ -3568,7 +4094,7 @@ export async function executeCodeModeScript(
     // Official `Wl`/`Xo`/`Mr`: the step-budget turn only counts *script* code —
     // disarm it while inside a tool call. The elapsed deadline timer keeps
     // running so a tool that hangs still aborts the whole execution.
-    const turn = vmSession.turnState
+    const turn = binding.turnState
     const wasArmed = turn.bound !== 0
     turn.bound = 0
     const shouldPause = shouldPauseCodeModeTimerForTool(
@@ -3585,7 +4111,7 @@ export async function executeCodeModeScript(
       // Official `wl`/`Mr`: on resume, re-arm a fresh turn so a tool call that
       // consumed most of the wall clock doesn't falsely charge it to the script.
       if (wasArmed && !isStopped()) {
-        startCodeModeTurn(vmSession, clampedTimeout)
+        startCodeModeTurn(binding.turnState, clampedTimeout)
       }
       if (isStopped()) {
         throw new Error(getStopMessage())
@@ -3644,19 +4170,13 @@ export async function executeCodeModeScript(
     } finally {
       if (shouldPause) timerRef?.resume()
       if (wasArmed && !isStopped()) {
-        startCodeModeTurn(vmSession, clampedTimeout)
+        startCodeModeTurn(binding.turnState, clampedTimeout)
       }
       if (!stopped) {
         inFlightCalls.delete(callId)
       }
     }
   }
-
-  const vmSession =
-    sessionKey !== undefined
-      ? getOrCreatePersistentVmSession(sessionKey)
-      : createCodeModeVmSession()
-  const { sandbox, context, bridge } = vmSession
 
   // Official 2.1.326 #293 + 2.1.328 (`$c`/`zc`/`Fc`): `$` shell helper exposed
   // as a 100% realm-sealed callable with realm `$.escape` and realm Promise.
@@ -3665,7 +4185,10 @@ export async function executeCodeModeScript(
     Object.hasOwn(v, 'raw') &&
     vmSession.rawLiteralValues.get(v) === (v as { raw: unknown }).raw
 
-  const createShellRunner = (command: string, initialTimeout?: number) => {
+  const createShellRunner = (
+    command: string,
+    initialTimeout?: number,
+  ): CodeModeShellRunner => {
     return async (
       nothrow: boolean,
       msOverride: number | undefined,
@@ -3765,178 +4288,20 @@ export async function executeCodeModeScript(
     )
   }
 
-  // Track script timers so they are always cleared in `finally` and re-arm the
-  // turn clock on fire (official `Tl`).
-  const activeTimeouts = new Set<ReturnType<typeof setTimeout>>()
-  const activeIntervals = new Set<ReturnType<typeof setInterval>>()
-  const clearAllScriptTimers = () => {
-    for (const h of activeTimeouts) clearTimeout(h)
-    activeTimeouts.clear()
-    for (const h of activeIntervals) clearInterval(h)
-    activeIntervals.clear()
-  }
-
-  let nextTimerId = 1
-  const timeoutById = new Map<number, ReturnType<typeof setTimeout>>()
-  const intervalById = new Map<number, ReturnType<typeof setInterval>>()
-
-  sandbox.setTimeout = sealForRealm(
-    vmSession,
-    (cb: unknown, delayMs?: unknown, ...args: unknown[]) => {
-      if (typeof cb !== 'function') {
-        throw new TypeError('setTimeout callback must be a function')
-      }
-      const id = nextTimerId++
-      const ms = Math.max(0, Number(delayMs) || 0)
-      const handle = setTimeout(() => {
-        activeTimeouts.delete(handle)
-        timeoutById.delete(id)
-        if (isStopped()) return
-        startCodeModeTurn(vmSession, clampedTimeout)
-        try {
-          ;(cb as (...a: unknown[]) => unknown)(...args)
-        } catch {
-          // Unhandled timer errors must not crash host process
-        }
-      }, ms)
-      if (typeof handle.unref === 'function') handle.unref()
-      activeTimeouts.add(handle)
-      timeoutById.set(id, handle)
-      return id
-    },
-  )
-  sandbox.clearTimeout = sealForRealm(vmSession, (id: unknown) => {
-    const h = timeoutById.get(Number(id))
-    if (h !== undefined) {
-      clearTimeout(h)
-      activeTimeouts.delete(h)
-      timeoutById.delete(Number(id))
-    }
-  })
-  sandbox.setInterval = sealForRealm(
-    vmSession,
-    (cb: unknown, delayMs?: unknown, ...args: unknown[]) => {
-      if (typeof cb !== 'function') {
-        throw new TypeError('setInterval callback must be a function')
-      }
-      const id = nextTimerId++
-      const ms = Math.max(10, Number(delayMs) || 10)
-      const handle = setInterval(() => {
-        if (isStopped()) {
-          clearInterval(handle)
-          activeIntervals.delete(handle)
-          intervalById.delete(id)
-          return
-        }
-        startCodeModeTurn(vmSession, clampedTimeout)
-        try {
-          ;(cb as (...a: unknown[]) => unknown)(...args)
-        } catch {
-          // Unhandled interval errors must not crash host process
-        }
-      }, ms)
-      if (typeof handle.unref === 'function') handle.unref()
-      activeIntervals.add(handle)
-      intervalById.set(id, handle)
-      return id
-    },
-  )
-  sandbox.clearInterval = sealForRealm(vmSession, (id: unknown) => {
-    const h = intervalById.get(Number(id))
-    if (h !== undefined) {
-      clearInterval(h)
-      activeIntervals.delete(h)
-      intervalById.delete(Number(id))
-    }
-  })
-
-  // Official `Tl`/`St(e,"console",...)`: expose ONLY realm-sealed objects and
-  // callables so `.constructor` can never escape to host intrinsics.
-  const pushLog = (...args: unknown[]) => {
-    const line = args.map(a => formatValueForOutput(a)).join(' ')
-    logs.push(line)
-    vmSession.consoleBuffer.push(line)
-    if (vmSession.consoleBuffer.length > CONSOLE_RING_BUFFER_MAX) {
-      vmSession.consoleBuffer.shift()
-      vmSession.consoleDropped++
-    }
-  }
-  const sealedPushLog = sealForRealm(vmSession, pushLog)
-  sandbox.console = bridge.createRealmObj([
-    ['log', sealedPushLog],
-    ['warn', sealedPushLog],
-    ['error', sealedPushLog],
-    ['info', sealedPushLog],
-    ['debug', sealedPushLog],
-    [
-      'tail',
-      sealForRealm(vmSession, (n?: unknown) => {
-        const count =
-          typeof n === 'number' && Number.isFinite(n) && n >= 0
-            ? Math.floor(n)
-            : 20
-        return vmSession.consoleBuffer.slice(-count)
-      }),
-    ],
-    ['buffer', sealForRealm(vmSession, () => [...vmSession.consoleBuffer])],
-    ['dropped', sealForRealm(vmSession, () => vmSession.consoleDropped)],
-  ])
-  sandbox.log = sealedPushLog
-  // Official 2.1.328: expose realm-sealed `self.running()` returning `{ list, abort }`
-  // backed by `ReplSessions.access(...)`. Every returned value is cloned into the VM
-  // realm by `sealForRealm` (`bridge.wrapSyncHostFn`) so zero host escape is possible.
-  const evalsAccess = getReplSessions().access(
-    sessionKey ?? REPL_MAIN_THREAD_KEY,
-    () => evalId,
-  )
-  const sealedRunningList = sealForRealm(vmSession, () => evalsAccess.list())
-  const sealedRunningAbort = sealForRealm(vmSession, (targetId: unknown) =>
-    evalsAccess.abort(Number(targetId)),
-  )
-  const sealedRunningHandle = bridge.createRealmObj([
-    ['list', sealedRunningList],
-    ['abort', sealedRunningAbort],
-  ])
-  sandbox.running = bridge.wrapIdentityHostFn(() => sealedRunningHandle)
-  sandbox.self = sandbox
-  sandbox.preview = sealForRealm(
-    vmSession,
-    (value: unknown, maxChars: unknown = 2000) => {
-      const limit =
-        typeof maxChars === 'number' &&
-        Number.isFinite(maxChars) &&
-        maxChars > 0
-          ? Math.floor(maxChars)
-          : 2000
-      return elideReplOutputPart(formatValueForOutput(value), limit)
-    },
-  )
-
-  sandbox.callTool = sealAsyncForRealm(vmSession, guardedCall)
-  sandbox.$ = bridge.createDollarFn(dispatchDollar, (s: unknown) =>
-    quoteCodeModeShellArg(s, shellKind),
-  )
-
-  // Official 2.1.328 (#581 & `Tl`): expose both lowercase shorthands (for
-  // backward compatibility) AND PascalCase tool names (`Read`, `Write`, `Edit`,
-  // `Glob`, `Grep`, `Bash`, `PowerShell`, `NotebookEdit`, `Agent`, MCP tools,
-  // etc.), strictly respecting `allowedTools`.
+  // Official 2.1.328 (#581 & `Tl`/`Rl`): bind each allowed tool global AT MOST
+  // ONCE onto `vmSession.sandbox`, dispatching to the active eval via
+  // `AsyncLocalStorage` so concurrent/detached evals never overwrite or delete
+  // each other's bindings.
   const exposedTools: string[] = []
   const exposedToolSet = new Set<string>()
   for (const [fnName, toolName] of PRIMITIVE_SHORTHAND_MAP) {
     if (allowedTools && !allowedTools.has(toolName)) {
-      delete sandbox[fnName]
-      delete sandbox[toolName]
       continue
     }
     exposedTools.push(toolName)
     exposedToolSet.add(toolName)
-    const sealedTool = sealAsyncForRealm(
-      vmSession,
-      (input: Record<string, unknown> = {}) => guardedCall(toolName, input),
-    )
-    sandbox[fnName] = sealedTool
-    sandbox[toolName] = sealedTool
+    ensureToolGlobalBound(vmSession, fnName, toolName)
+    ensureToolGlobalBound(vmSession, toolName, toolName)
   }
   const extraToolNames = [
     ...(availableToolNames ?? []),
@@ -3956,62 +4321,37 @@ export async function executeCodeModeScript(
       !toolName.startsWith('mcp__') &&
       !allowedTools.has(toolName)
     ) {
-      delete sandbox[toolName]
       continue
     }
     exposedTools.push(toolName)
     exposedToolSet.add(toolName)
-    sandbox[toolName] = sealAsyncForRealm(
-      vmSession,
-      (input: Record<string, unknown> = {}) => guardedCall(toolName, input),
-    )
+    ensureToolGlobalBound(vmSession, toolName, toolName)
   }
 
   const descriptorList =
     toolDescriptors ?? exposedTools.map(name => ({ name, description: name }))
-  sandbox.searchTools = sealForRealm(
-    vmSession,
-    (query: unknown, limit: unknown = 10) => {
-      const q = String(query ?? '')
-        .toLowerCase()
-        .trim()
-      const max =
-        typeof limit === 'number' && Number.isFinite(limit) && limit > 0
-          ? Math.floor(limit)
-          : 10
-      return descriptorList
-        .filter(
-          d =>
-            !q ||
-            d.name.toLowerCase().includes(q) ||
-            d.description.toLowerCase().includes(q),
-        )
-        .slice(0, max)
-        .map(d => ({ name: d.name, description: d.description }))
-    },
+  const evalsAccess = getReplSessions().access(
+    sessionKey ?? REPL_MAIN_THREAD_KEY,
+    () => evalId,
   )
-  sandbox.describeTool = sealForRealm(vmSession, (name: unknown) => {
-    const targetName = String(name ?? '')
-    const found = descriptorList.find(d => d.name === targetName)
-    return found ? { name: found.name, description: found.description } : null
-  })
 
-  sandbox.tools = bridge.createRealmObj([
-    [
-      'list',
-      sealForRealm(vmSession, () =>
-        allowedTools ? [...allowedTools] : [...exposedTools],
-      ),
-    ],
-  ])
-
-  // Official `Uc`: instrumented loops call `__checkBudget` every step; the
-  // per-turn stride allocator in `chargeCodeModeStep` enforces the wall clock
-  // and step budget. Host-side, a stopped run also throws.
-  vmSession.checkBudgetImpl = () => {
-    if (isStopped()) {
-      throw new Error(getStopMessage())
-    }
+  const binding: CodeModeEvalBinding = {
+    outside: false,
+    ended: false,
+    noMoreCalls: false,
+    shellKind,
+    logs,
+    turnState: evalTurnState,
+    clampedTimeout,
+    timers: evalTimers,
+    allowedTools,
+    exposedTools,
+    toolDescriptors: descriptorList,
+    evalsAccess,
+    isStopped,
+    getStopMessage,
+    guardedCall,
+    dispatchDollar,
   }
 
   let onAbort: (() => void) | undefined
@@ -4020,7 +4360,7 @@ export async function executeCodeModeScript(
   // and async hangs. `runInContext` has no `timeout` so a single long tool call
   // doesn't count as script time; the step budget handles sync spin.
   timerRef = createPausableCodeModeTimer(clampedTimeout, () => {
-    noMoreCalls = true
+    binding.noMoreCalls = true
     triggerStop(`Code Mode script timed out after ${clampedTimeout}ms`)
   })
   const getAbortReasonMessage = (): string => {
@@ -4062,20 +4402,20 @@ export async function executeCodeModeScript(
     })
     let rawRun: unknown
     try {
-      // Official `Xo`/`El`: arm a fresh turn before the script starts — the
-      // wall clock only covers script code. Tool calls must ALSO be free of
-      // the runInContext `timeout` (a single call may legitimately take most
-      // of it), so we do NOT pass a vm timeout; step budget + pausable timer
-      // handle both sync spin and async hang.
-      startCodeModeTurn(vmSession, clampedTimeout)
-      rawRun = script.runInContext(context)
+      // Official `Xo`/`El` + `currentCall.run(this.binding, ...)`: arm a fresh
+      // per-eval turn and run inside `AsyncLocalStorage` so concurrent/detached
+      // evals remain completely isolated.
+      startCodeModeTurn(binding.turnState, clampedTimeout)
+      rawRun = vmSession.currentCall.run(binding, () =>
+        script.runInContext(context),
+      )
     } catch (syncErr) {
       if (
         syncErr &&
         typeof syncErr === 'object' &&
         (syncErr as { code?: unknown }).code === 'ERR_SCRIPT_EXECUTION_TIMEOUT'
       ) {
-        noMoreCalls = true
+        binding.noMoreCalls = true
         triggerStop(`Code Mode script timed out after ${clampedTimeout}ms`)
         throw new Error(getStopMessage())
       }
@@ -4086,7 +4426,7 @@ export async function executeCodeModeScript(
     void runPromise.catch(() => {})
 
     const raced = await Promise.race([runPromise, stopPromise])
-    noMoreCalls = true
+    binding.noMoreCalls = true
     const unwrapped = unwrapReplTransformValue(raced)
 
     const outputParts: string[] = logs.map(l => elideReplOutputPart(l))
@@ -4121,14 +4461,12 @@ export async function executeCodeModeScript(
       ...(unsetVariables.length > 0 ? { unsetVariables } : {}),
     }
   } finally {
-    clearAllScriptTimers()
+    binding.ended = true
+    clearTimersForEvalBinding(vmSession, binding)
     timerRef?.clear()
     timerRef = undefined
     if (onAbort !== undefined) {
       signal?.removeEventListener('abort', onAbort)
-    }
-    if (!stopped) {
-      vmSession.checkBudgetImpl = undefined
     }
   }
 }
@@ -4148,49 +4486,187 @@ export function getCodeModeAutoVerdictTracker(): CodeModeAutoVerdictTracker {
 }
 
 export function resetCodeModeRuntimeStateForTests(): void {
+  for (const s of persistentVmSessionsByKey.values()) {
+    s.clearAllTimers()
+  }
   persistentVmSessionsByKey.clear()
   sessionUnsetVarsByKey.clear()
   codeModeAutoVerdictTracker.reset()
   codeModeScriptSeq = 0
 }
 
-function getDeniedToolNamesFromPermissionContext(
-  toolPermissionContext: unknown,
+/**
+ * Official `cNn` (`chunk@294254613.js @1709417`): true when code contains a
+ * `\\uXXXX` unicode escape that auto mode refuses to classify.
+ */
+export function hasUnicodeHexEscape(code: string): boolean {
+  return /\\u[0-9a-fA-F]{4}/.test(code)
+}
+
+/**
+ * Official `alo()` (`chunk@294254613.js @5858237`): refusal message when a hook
+ * rewrote the REPL script or an earlier tool call in the same response under
+ * auto mode.
+ */
+export const CODE_MODE_HOOK_REWRITE_REFUSAL =
+  "This code was NOT run. In Code Mode, auto mode doesn't run code after a hook changed its call from what you wrote. This also applies when a hook changed an earlier tool call in the same response. This is not a judgment that the code is unsafe. If this response had other tool calls, you may send this code once more, in a response with no other tool calls. Otherwise, don't send it again. Go on with work that doesn't need it, and tell the user that a hook (a PreToolUse hook, or a mod's) changes your code. They can turn that hook off (or ask their administrator, if their organization set it), or leave auto mode with Shift+Tab (for example for Manual mode), where they are asked about each of the code's tool calls that needs approval."
+
+export const CODE_MODE_HOOK_REWRITE_REASON =
+  "Auto mode does not run code after a hook changed it, or changed an earlier tool call in the same response. Turn the hook off, or leave auto mode, where you are asked about each of the code's tool calls that needs approval."
+
+/**
+ * Official `ilo()` (`chunk@294254613.js @5857961`): refusal message when a REPL
+ * script contains a `\\uXXXX` escape under auto mode.
+ */
+export const CODE_MODE_UNICODE_ESCAPE_REFUSAL =
+  'This code was NOT run. Auto mode could not check it, because it contains a \\uXXXX escape. This is not a judgment that the code is unsafe. Write each such character another way, for example \\x1b or \\u{1b} in place of \\u001b, and send the code again.'
+
+export const CODE_MODE_UNICODE_ESCAPE_REASON =
+  'Auto mode cannot check code that contains a \\uXXXX escape'
+
+function isWithheldOutsideCodeModeLaunchList(
+  permissionContext: ToolPermissionContext,
+  tool: { name: string; mcpInfo?: unknown; isMcp?: boolean },
+): boolean {
+  const kept = permissionContext.toolsKeptByLaunchList
+  if (
+    kept === undefined ||
+    tool.name.startsWith('mcp__') ||
+    tool.isMcp === true ||
+    tool.mcpInfo !== undefined ||
+    tool.name === SYNTHETIC_OUTPUT_TOOL_NAME ||
+    kept.includes(tool.name)
+  ) {
+    return false
+  }
+  return true
+}
+
+function synthesizeCodeModeRestrictedDenyNames(
+  tools: readonly { name: string; enablesCodeExecution?: boolean }[],
+  permissionContext: ToolPermissionContext,
 ): Set<string> {
-  const denied = new Set<string>()
-  if (!toolPermissionContext || typeof toolPermissionContext !== 'object') {
-    return denied
+  if (
+    !(
+      permissionContext.restricted === true &&
+      permissionContext.toolsKeptByLaunchList === undefined
+    )
+  ) {
+    return new Set()
   }
-  const alwaysDenyRules = (
-    toolPermissionContext as {
-      alwaysDenyRules?: Record<string, readonly string[] | undefined>
-    }
-  ).alwaysDenyRules
-  if (!alwaysDenyRules || typeof alwaysDenyRules !== 'object') {
-    return denied
-  }
-  for (const rules of Object.values(alwaysDenyRules)) {
-    if (!Array.isArray(rules)) continue
-    for (const rule of rules) {
-      if (typeof rule !== 'string') continue
-      const trimmed = rule.trim()
-      if (trimmed.length > 0 && !trimmed.includes('(')) {
-        denied.add(trimmed)
+  const codeRunning = new Set([
+    ...tools.filter(t => t.enablesCodeExecution).map(t => t.name),
+    ...restrictedAlwaysCodeRunningNames(),
+  ])
+  return new Set(restrictedDenyToolNames(codeRunning, new Set()))
+}
+
+function parseSubagentDisallowedTools(
+  disallowedTools: readonly string[] | undefined,
+): {
+  bareDisallowed: Set<string>
+  disallowedMcpServers: Set<string>
+  disallowAllMcp: boolean
+} {
+  const bareDisallowed = new Set<string>()
+  const disallowedMcpServers = new Set<string>()
+  let disallowAllMcp = false
+  for (const rawSpec of disallowedTools ?? []) {
+    if (typeof rawSpec !== 'string') continue
+    const spec = rawSpec.trim()
+    if (!spec) continue
+    // Official `Clt` (`chunk@303112704.js @179720`): scoped rules like
+    // `"Bash(rm:*)"` carry ruleContent and are enforced at permission time —
+    // they MUST NOT ban the entire `Bash` tool from the subagent's tool pool.
+    if (spec.includes('(')) continue
+    bareDisallowed.add(spec)
+    if (spec === 'mcp__*' || spec === 'mcp__*__*') {
+      disallowAllMcp = true
+    } else if (spec.startsWith('mcp__')) {
+      const rest = spec.slice(5)
+      if (!rest.includes('__')) {
+        disallowedMcpServers.add(rest)
+      } else if (rest.endsWith('__*')) {
+        disallowedMcpServers.add(rest.slice(0, -3))
       }
     }
   }
-  return denied
+  return { bareDisallowed, disallowedMcpServers, disallowAllMcp }
 }
 
-function resolveCodeModeEffectiveTools(
+function isToolDisallowedForSubagent(
+  tool: Tool,
+  parsed: ReturnType<typeof parseSubagentDisallowedTools>,
+): boolean {
+  if (parsed.bareDisallowed.has(tool.name)) return true
+  const isMcp =
+    tool.isMcp === true ||
+    tool.mcpInfo !== undefined ||
+    tool.name.startsWith('mcp__')
+  if (!isMcp) return false
+  if (parsed.disallowAllMcp) return true
+  if (parsed.disallowedMcpServers.size > 0) {
+    const serverName =
+      tool.mcpInfo?.serverName ?? mcpInfoFromString(tool.name)?.serverName
+    if (
+      serverName !== undefined &&
+      parsed.disallowedMcpServers.has(serverName)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function matchesSubagentAllowList(
+  tool: Tool,
+  allowList: ReadonlySet<string>,
+): boolean {
+  if (allowList.has(tool.name)) return true
+  for (const entry of allowList) {
+    const trimmed = entry.trim()
+    const baseName = trimmed.includes('(')
+      ? trimmed.slice(0, trimmed.indexOf('(')).trim()
+      : trimmed
+    if (baseName === '*' || baseName === tool.name) return true
+    if (
+      baseName === 'mcp__*' &&
+      (tool.isMcp === true || tool.name.startsWith('mcp__'))
+    ) {
+      return true
+    }
+    if (baseName.startsWith('mcp__')) {
+      const prefix = baseName.endsWith('__*')
+        ? baseName.slice(0, -1)
+        : !baseName.slice(5).includes('__')
+          ? `${baseName}__`
+          : undefined
+      if (prefix !== undefined && tool.name.startsWith(prefix)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Resolve the effective tool pool callable from a Code Mode script, honoring:
+ * - explicit deny rules & MCP server-prefix deny rules (`getDenyRuleForTool`)
+ * - `--tools` launch list (`toolsKeptByLaunchList`)
+ * - `--restricted` mode (`synthesizeCodeModeRestrictedDenyNames`)
+ * - plugin `tool.list` removals & deny rules
+ * - org-blocked MCP tools (`effectiveMaxPermission === 'blocked'`)
+ * - subagent `tools` allowlist + blanket `disallowedTools` (without banning
+ *   whole tools on scoped rules like `"Bash(rm:*)"`) + live MCP tools.
+ */
+export function resolveCodeModeEffectiveTools(
   baseReplToolName: string,
   resolveAvailableTools: () => readonly Tool[],
   context: ToolUseContext,
 ): Tool[] {
   const appState = context.getAppState?.()
-  const deniedToolNames = getDeniedToolNamesFromPermissionContext(
-    appState?.toolPermissionContext,
-  )
+  const rawPermCtx = appState?.toolPermissionContext
+  const effectivePermCtx = rawPermCtx
+    ? applyPluginToolListDenyRules(rawPermCtx)
+    : undefined
   const contextTools = context.options?.tools
   const liveMcpTools = appState?.mcp?.tools ?? []
   const hasExplicitPrimitiveTools =
@@ -4199,6 +4675,11 @@ function resolveCodeModeEffectiveTools(
       t =>
         !CODE_MODE_VISIBLE_TOOL_NAMES.has(t.name) &&
         t.name !== baseReplToolName,
+    )
+
+  const enabledBaseTools = () =>
+    resolveAvailableTools().filter(
+      t => typeof t.isEnabled !== 'function' || t.isEnabled(),
     )
 
   let rawTools: readonly Tool[]
@@ -4217,21 +4698,22 @@ function resolveCodeModeEffectiveTools(
           ? activeAgents.find(a => a.agentType === subagentName)
           : undefined
       if (agentDef) {
-        const disallowed = new Set(
-          (agentDef.disallowedTools ?? []).map(spec => spec.split('(')[0]!),
+        const parsedDisallowed = parseSubagentDisallowedTools(
+          agentDef.disallowedTools,
         )
         const allowList =
           agentDef.tools &&
           !(agentDef.tools.length === 1 && agentDef.tools[0] === '*')
             ? new Set(agentDef.tools)
             : undefined
-        rawTools = resolveAvailableTools().filter(t => {
-          if (disallowed.has(t.name)) return false
-          if (allowList && !allowList.has(t.name)) return false
+        const candidates = [...enabledBaseTools(), ...liveMcpTools]
+        rawTools = candidates.filter(t => {
+          if (isToolDisallowedForSubagent(t, parsedDisallowed)) return false
+          if (allowList && !matchesSubagentAllowList(t, allowList)) return false
           return true
         })
       } else if (Array.isArray(contextTools)) {
-        rawTools = contextTools
+        rawTools = [...contextTools, ...liveMcpTools]
       } else {
         rawTools = []
       }
@@ -4241,17 +4723,30 @@ function resolveCodeModeEffectiveTools(
     rawTools = [...contextTools, ...liveMcpTools]
   } else {
     // Main thread with Code Mode hiding primitives from `context.options.tools`
-    rawTools = [
-      ...resolveAvailableTools(),
-      ...(contextTools ?? []),
-      ...liveMcpTools,
-    ]
+    rawTools = [...enabledBaseTools(), ...(contextTools ?? []), ...liveMcpTools]
   }
+
+  const pluginFiltered = applyPluginToolListFilter(rawTools)
+  const restrictedDenySet = effectivePermCtx
+    ? synthesizeCodeModeRestrictedDenyNames(pluginFiltered, effectivePermCtx)
+    : new Set<string>()
 
   const seen = new Set<string>()
   const deduped: Tool[] = []
-  for (const tool of rawTools) {
-    if (deniedToolNames.has(tool.name) || seen.has(tool.name)) continue
+  for (const tool of pluginFiltered) {
+    if (seen.has(tool.name)) continue
+    if (tool.name !== SYNTHETIC_OUTPUT_TOOL_NAME) {
+      if (tool.mcpInfo?.effectiveMaxPermission === 'blocked') continue
+      if (restrictedDenySet.has(tool.name)) continue
+      if (
+        effectivePermCtx &&
+        ((effectivePermCtx.alwaysDenyRules &&
+          getDenyRuleForTool(effectivePermCtx, tool)) ||
+          isWithheldOutsideCodeModeLaunchList(effectivePermCtx, tool))
+      ) {
+        continue
+      }
+    }
     seen.add(tool.name)
     deduped.push(tool)
   }
@@ -4299,7 +4794,7 @@ export function wrapReplToolForCodeMode(
 ): Tool {
   let prevConnectedMcpServers = new Set<string>()
 
-  return {
+  const wrappedTool: Tool = {
     ...baseReplTool,
     aliases: ['Eval'],
     isEnabled() {
@@ -4338,9 +4833,47 @@ export function wrapReplToolForCodeMode(
     async checkPermissions(input: unknown, context: ToolUseContext) {
       const mode = context.getAppState?.()?.toolPermissionContext?.mode
       if (mode === 'auto') {
+        const hookRewriteCtx = context as {
+          inputChangedByHook?: boolean
+          serverClassifierInputRewritten?: boolean
+        }
+        if (
+          isCodeModeEnabled() &&
+          (hookRewriteCtx.inputChangedByHook === true ||
+            hookRewriteCtx.serverClassifierInputRewritten === true)
+        ) {
+          return {
+            behavior: 'deny' as const,
+            message: CODE_MODE_HOOK_REWRITE_REFUSAL,
+            decisionReason: {
+              type: 'other' as const,
+              reason: CODE_MODE_HOOK_REWRITE_REASON,
+            },
+          }
+        }
+        const code =
+          input &&
+          typeof input === 'object' &&
+          typeof (input as { code?: unknown }).code === 'string'
+            ? (input as { code: string }).code
+            : undefined
+        if (
+          isCodeModeEnabled() &&
+          code !== undefined &&
+          hasUnicodeHexEscape(code)
+        ) {
+          return {
+            behavior: 'deny' as const,
+            message: CODE_MODE_UNICODE_ESCAPE_REFUSAL,
+            decisionReason: {
+              type: 'other' as const,
+              reason: CODE_MODE_UNICODE_ESCAPE_REASON,
+            },
+          }
+        }
         return {
           behavior: 'passthrough' as const,
-          message: `${CODE_MODE_NAME} script requires classifier review.`,
+          message: `${REPL_TOOL_NAME} script requires classifier review.`,
         }
       }
       return {
@@ -4411,6 +4944,35 @@ export function wrapReplToolForCodeMode(
       let activeScriptContext: ToolUseContext = context
       const currentPermissionMode =
         context.getAppState?.()?.toolPermissionContext?.mode
+      // Official `chunk@294254613.js @3674600-3675200`: defense-in-depth in
+      // auto mode — refuse hook-rewritten scripts and `\\uXXXX` escapes.
+      if (currentPermissionMode === 'auto') {
+        const hookRewriteCtx = context as {
+          inputChangedByHook?: boolean
+          serverClassifierInputRewritten?: boolean
+        }
+        const inputChangedByHook =
+          hookRewriteCtx.inputChangedByHook === true ||
+          hookRewriteCtx.serverClassifierInputRewritten === true ||
+          (parentMessage as { serverClassifierInputRewritten?: boolean })
+            ?.serverClassifierInputRewritten === true
+        if (inputChangedByHook) {
+          return {
+            data: {
+              result: `Error: ${CODE_MODE_HOOK_REWRITE_REFUSAL}`,
+              tool_calls: 0,
+            },
+          }
+        }
+        if (typeof input.code === 'string' && hasUnicodeHexEscape(input.code)) {
+          return {
+            data: {
+              result: `Error: ${CODE_MODE_UNICODE_ESCAPE_REFUSAL}`,
+              tool_calls: 0,
+            },
+          }
+        }
+      }
       const scriptId = context.toolUseId ?? `repl-${++codeModeScriptSeq}`
       const unsetKey = context.agentId ?? 'main'
       const priorUnsetVars = sessionUnsetVarsByKey.get(unsetKey)
@@ -4464,7 +5026,7 @@ export function wrapReplToolForCodeMode(
             toolUseId: scriptId,
             runCheck: async (combinedCode, checkCtx, checkCanUseTool) =>
               checkCanUseTool(
-                baseReplTool,
+                wrappedTool,
                 { ...input, code: combinedCode },
                 {
                   ...checkCtx,
@@ -5012,10 +5574,13 @@ export function wrapReplToolForCodeMode(
             }
 
             // Official 2.1.328 (`J.scriptChecks.awaitVerdict`): if this script
-            // has a deferred auto-mode check, run it before executing the inner
-            // tool and fire the stop chain if blocked.
+            // or any queued script in the batch has a deferred auto-mode check,
+            // run it before executing the inner tool and fire the stop chain if blocked.
             const scriptRecord = codeModeAutoVerdictTracker.getRecord(scriptId)
-            if (scriptRecord?.state === 'unchecked') {
+            if (
+              scriptRecord?.state === 'unchecked' ||
+              codeModeAutoVerdictTracker.hasUnchecked()
+            ) {
               const deferredVerdict =
                 await codeModeAutoVerdictTracker.awaitVerdict(
                   scriptId,
@@ -5420,7 +5985,19 @@ export function wrapReplToolForCodeMode(
             },
           }
         }
-        execution = raced.execution
+        const settledResult = raced.execution
+        const isSettledError = settledResult.result.startsWith('Error:')
+        execution = {
+          ...settledResult,
+          result: formatReplOutputEnvelope({
+            evalId: settledResult.evalId ?? handle.evalId,
+            ms: settledResult.ms ?? Math.max(0, Date.now() - evalStartMs),
+            result: isSettledError
+              ? settledResult.result.replace(/^Error:\s*/, '')
+              : settledResult.result,
+            isError: isSettledError,
+          }),
+        }
       } else {
         try {
           execution = await runScript(scriptAbortController.signal)
@@ -5558,6 +6135,7 @@ export function wrapReplToolForCodeMode(
       }
     },
   }
+  return wrappedTool
 }
 
 export type CodeModeResumePlan = {
@@ -5876,7 +6454,7 @@ export function planCodeModeFromSession(
         : undefined
     const resumeArg = resumeId ? `--resume ${resumeId}` : undefined
     const exitPrefix = session.withinSession === true ? 'exit and ' : ''
-    const envName = 'CLAUDE_CODE_REPL'
+    const envName = CODE_MODE_ENV_VAR
 
     if (optIn.state === 'refused') {
       const reason = codeModeRefusalReasonText(optIn.why)

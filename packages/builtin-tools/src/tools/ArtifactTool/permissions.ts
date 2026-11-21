@@ -2032,14 +2032,80 @@ async function captureApprovedPublishSourcePin(
 }
 
 /**
- * Official 2.1.327 (#420/#421/#514/#515): check whether the user's org
- * requires a person to approve each new artifact, reading from AppState first
- * and falling back to managed policy settings, merged settings, and GrowthBook.
+ * Official 2.1.328 `len()` (`chunk@288232181.js @43084`): read the org-level
+ * `artifact_create_notice.text` from policy limits (`policy-limits.json` /
+ * policy limits service cache) when eligible. Returns `null` when absent.
+ */
+export function getOrgNewArtifactCreateNotice(): string | null {
+  try {
+    const policyLimits =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/services/policyLimits/index.js') as typeof import('src/services/policyLimits/index.js') & {
+        getArtifactCreateNotice?: () => string | null
+      }
+    if (!policyLimits.isPolicyLimitsEligible()) {
+      return null
+    }
+    if (typeof policyLimits.getArtifactCreateNotice === 'function') {
+      const fromService = policyLimits.getArtifactCreateNotice()
+      if (typeof fromService === 'string' && fromService.trim().length > 0) {
+        return fromService.trim()
+      }
+      return null
+    }
+    const { leftoverPolicyLimitsHost } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/cli/leftoverTulip.js') as typeof import('src/cli/leftoverTulip.js')
+    const hostCache = leftoverPolicyLimitsHost().sessionCache as
+      | { artifact_create_notice?: { text?: unknown } | null }
+      | null
+      | undefined
+    const cachedText = hostCache?.artifact_create_notice?.text
+    if (typeof cachedText === 'string' && cachedText.trim().length > 0) {
+      return cachedText.trim().slice(0, 500)
+    }
+    const { readFileSync } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('fs') as typeof import('fs')
+    const { join } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('path') as typeof import('path')
+    const { getClaudeConfigHomeDir } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/envUtils.js') as typeof import('src/utils/envUtils.js')
+    const { safeParseJSON } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/json.js') as typeof import('src/utils/json.js')
+    const raw = readFileSync(
+      join(getClaudeConfigHomeDir(), 'policy-limits.json'),
+      'utf-8',
+    )
+    const parsed = safeParseJSON(raw, false) as
+      | { artifact_create_notice?: { text?: unknown } | null }
+      | null
+      | undefined
+    const fileText = parsed?.artifact_create_notice?.text
+    if (typeof fileText === 'string' && fileText.trim().length > 0) {
+      return fileText.trim().slice(0, 500)
+    }
+  } catch {
+    // ignore when policy-limits cache is absent or in isolated harnesses
+  }
+  return null
+}
+
+/**
+ * Official 2.1.328 (`len()` / `tir` / `nir` / `qZr`): check whether the user's
+ * org requires a person to approve each new artifact, checking AppState,
+ * policy-limits `artifact_create_notice` (`len()`), and managed/merged settings.
  */
 export function isOrgNewArtifactApprovalRequired(
   appState?: { orgRequiresNewArtifactApproval?: boolean } | null,
 ): boolean {
   if (appState?.orgRequiresNewArtifactApproval === true) {
+    return true
+  }
+  if (getOrgNewArtifactCreateNotice() !== null) {
     return true
   }
   try {
@@ -2064,21 +2130,6 @@ export function isOrgNewArtifactApprovalRequired(
     }
   } catch {
     // ignore in isolated harnesses
-  }
-  try {
-    const { getFeatureValue_CACHED_MAY_BE_STALE } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('src/services/analytics/growthbook.js') as typeof import('src/services/analytics/growthbook.js')
-    if (
-      getFeatureValue_CACHED_MAY_BE_STALE(
-        'tengu_org_requires_new_artifact_approval',
-        false,
-      ) === true
-    ) {
-      return true
-    }
-  } catch {
-    // ignore
   }
   return false
 }

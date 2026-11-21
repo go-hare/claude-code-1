@@ -552,20 +552,68 @@ function collectGitDirRelativeEntries(
   return out
 }
 
-function resolveUniqueGitDirs(
+function addUniqueGitDir(
+  candidate: string,
+  seen: Set<string>,
+  gitDirs: string[],
+  useCanonicalPath = false,
+): void {
+  const resolved = resolve(candidate)
+  let canonical = resolved
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
+    canonical = realpathSync(resolved)
+  } catch {
+    // keep resolved path when realpath fails
+  }
+  if (seen.has(canonical)) return
+  seen.add(canonical)
+  gitDirs.push(useCanonicalPath ? canonical : resolved)
+}
+
+export function resolveUniqueGitDirs(
   cwd: string,
   additionalWorkingDirectories?: readonly string[],
 ): string[] {
   const roots = [cwd, ...(additionalWorkingDirectories ?? [])]
   const seen = new Set<string>()
+  const visitedDirs = new Set<string>()
   const gitDirs: string[] = []
   for (const rawRoot of roots) {
     if (!rawRoot) continue
-    const expandedRoot = resolve(expandPath(rawRoot))
-    const gitDir = join(expandedRoot, '.git')
-    if (seen.has(gitDir)) continue
-    seen.add(gitDir)
-    gitDirs.push(gitDir)
+    let cur = resolve(expandPath(rawRoot))
+    for (;;) {
+      if (visitedDirs.has(cur)) break
+      visitedDirs.add(cur)
+      const dotGit = join(cur, '.git')
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
+        const st = lstatSync(dotGit)
+        if (st.isDirectory()) {
+          addUniqueGitDir(dotGit, seen, gitDirs)
+        } else if (st.isFile()) {
+          // Linked worktree `.git` file: resolve main repo's common `.git` dir
+          const commonDir = detectWorktreeMainRepoPath(cur)
+          if (commonDir) {
+            addUniqueGitDir(commonDir, seen, gitDirs)
+          }
+        } else if (st.isSymbolicLink()) {
+          try {
+            // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
+            if (statSync(dotGit).isDirectory()) {
+              addUniqueGitDir(dotGit, seen, gitDirs, true)
+            }
+          } catch {
+            // ignore broken or unreadable symlink
+          }
+        }
+      } catch {
+        // No .git entry at this directory level
+      }
+      const parent = dirname(cur)
+      if (parent === cur) break
+      cur = parent
+    }
   }
   return gitDirs
 }

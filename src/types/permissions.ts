@@ -284,6 +284,12 @@ export type PermissionAskDecision<
    * permission check could not finish and its safety checks did not run.
    */
   checkIncomplete?: boolean
+  /**
+   * Official 2.1.328: true when a whole-tool allow rule does not cover this
+   * specific ask (e.g. scoped/path-sensitive check), preventing an allow rule
+   * from silently bypassing the prompt.
+   */
+  wholeToolRuleDoesNotCover?: boolean
 }
 
 /**
@@ -377,6 +383,15 @@ export type PermissionDecisionReason =
        * distinct from a real auto-mode block.
        */
       noVerdict?: boolean
+      /**
+       * Official 2.1.328: host-facing stop code for headless/cloud turns
+       * (e.g. `auto_mode_stop_no_verdict`, `auto_mode_stop_consecutive`).
+       */
+      hostCode?: string
+      /**
+       * Official 2.1.328: true when a classifier stop ends the current turn.
+       */
+      endsTurn?: boolean
     }
   | {
       type: 'workingDir'

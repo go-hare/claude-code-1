@@ -1,6 +1,7 @@
 import { z } from 'zod/v4'
 import { setScheduledTasksEnabled } from 'src/bootstrap/state.js'
-import type { ValidationResult } from 'src/Tool.js'
+import { isBuiltinPluginId } from 'src/plugins/builtinPlugins.js'
+import type { ToolUseContext, ValidationResult } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { cronToHuman, parseCronExpression } from 'src/utils/cron.js'
 import { getCronJitterConfig } from 'src/utils/cronJitterConfig.js'
@@ -11,6 +12,7 @@ import {
   nextCronRunMs,
   nextScheduledFireAtMs,
 } from 'src/utils/cronTasks.js'
+import { logForDebugging } from 'src/utils/debug.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { semanticBoolean } from 'src/utils/semanticBoolean.js'
 import { getTeammateContext } from 'src/utils/teammateContext.js'
@@ -26,6 +28,76 @@ import {
 import { renderCreateResultMessage, renderCreateToolUseMessage } from './UI.js'
 
 const MAX_JOBS = 50
+
+export const UNNAMED_PLUGIN_SCHEDULE_REFUSED_MESSAGE =
+  'A plugin started or resumed this subagent, or the one that spawned it, and that plugin is not known in this session. It cannot schedule work: nothing would hold that work after a Stop.'
+
+type CronPluginContext = {
+  hookCaller?: string
+  hookServesModel?: boolean
+  pluginUnnamed?: boolean
+  scheduledByPlugin?: string
+}
+
+/**
+ * Official 2.1.328 `$le` (`chunk@294237838.js`): refuse CronCreate when a
+ * subagent was started or resumed by an unnamed/unknown plugin while non-builtin
+ * plugin hook modules are loaded or plugin hook registration is still in flight.
+ */
+export function isUnnamedPluginScheduleRefused(
+  context?: CronPluginContext,
+): boolean {
+  if (context === undefined) return false
+  if (context.hookCaller !== undefined || context.pluginUnnamed !== true) {
+    return false
+  }
+  const { getLoadedFunctionHooksModules } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('src/utils/plugins/functionHooksModules.js') as typeof import('src/utils/plugins/functionHooksModules.js')
+  const hasNonBuiltinMod = getLoadedFunctionHooksModules().some(
+    mod =>
+      mod.tier !== 'builtin' &&
+      mod.tier !== 'core' &&
+      mod.native !== true &&
+      !isBuiltinPluginId(mod.pluginStorageId ?? mod.name),
+  )
+  if (hasNonBuiltinMod) return true
+  const { getPluginHookRegistration } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('src/utils/plugins/loadPluginHooks.js') as typeof import('src/utils/plugins/loadPluginHooks.js')
+  return getPluginHookRegistration().hookRegistrationInFlight !== undefined
+}
+
+/**
+ * Official 2.1.328 `rrt` (`chunk@285257860.js`): resolve plugin provenance to
+ * forward to `addCronTask` (`hookCaller` unless `hookServesModel`, else
+ * `scheduledByPlugin`).
+ */
+export function resolveCronPluginProvenance(
+  context?: CronPluginContext,
+): string | undefined {
+  if (context?.hookCaller !== undefined && context.hookServesModel !== true) {
+    return context.hookCaller
+  }
+  return context?.scheduledByPlugin
+}
+
+/**
+ * Official 2.1.328 `lYe($8t(ms))` (`chunk@292664285.js` + `chunk@326350954.js`):
+ * round `nextFireAt` to the nearest minute and format as concise local time.
+ */
+export function formatCronNextRunTime(nextFireAtMs: number): string {
+  const rounded = new Date(Math.round(nextFireAtMs / 60_000) * 60_000)
+  return rounded
+    .toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+    .replace(/,? at |, (?=\d{1,2}:)/, ' ')
+    .replace(/[ \u202f]([AP]M)/i, (_, ampm: string) => ampm.toLowerCase())
+}
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -100,7 +172,22 @@ export const CronCreateTool = buildTool({
     }
     return { behavior: 'allow' as const, updatedInput: input }
   },
-  async validateInput(input): Promise<ValidationResult> {
+  async validateInput(
+    input,
+    context?: ToolUseContext,
+  ): Promise<ValidationResult> {
+    if (
+      isUnnamedPluginScheduleRefused(context as CronPluginContext | undefined)
+    ) {
+      logForDebugging(
+        `CronCreate refused: ${UNNAMED_PLUGIN_SCHEDULE_REFUSED_MESSAGE}`,
+      )
+      return {
+        result: false,
+        message: UNNAMED_PLUGIN_SCHEDULE_REFUSED_MESSAGE,
+        errorCode: 5,
+      }
+    }
     // ExecuteExtraTool passes raw params through without re-running this
     // tool's inputSchema, so when the model uses a wrong field name (e.g.
     // 'schedule' instead of 'cron'), input.cron is undefined. parseCronExpression
@@ -148,11 +235,17 @@ export const CronCreateTool = buildTool({
     }
     return { result: true }
   },
-  async call({ cron, prompt, recurring = true, durable = false }) {
+  async call(
+    { cron, prompt, recurring = true, durable = false },
+    context?: ToolUseContext,
+  ) {
     // Kill switch forces session-only; schema stays stable so the model sees
     // no validation errors when the gate flips mid-session.
     const effectiveDurable = durable && isDurableCronEnabled()
     const createdAt = Date.now()
+    const pluginProvenance = resolveCronPluginProvenance(
+      context as CronPluginContext | undefined,
+    )
     const id = await addCronTask(
       cron,
       prompt,
@@ -160,6 +253,7 @@ export const CronCreateTool = buildTool({
       effectiveDurable,
       getTeammateContext()?.agentId,
       createdAt,
+      pluginProvenance,
     )
     const nextFireAt = nextScheduledFireAtMs(
       { id, cron, createdAt, recurring },
@@ -185,12 +279,16 @@ export const CronCreateTool = buildTool({
     const where = output.durable
       ? 'Persisted to .claude/scheduled_tasks.json'
       : 'Session-only (not written to disk, dies when Claude exits)'
+    const nextRun =
+      output.nextFireAt === undefined
+        ? ''
+        : ` Next run: ${formatCronNextRunTime(output.nextFireAt)}.`
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
       content: output.recurring
-        ? `Scheduled recurring job ${output.id} (${output.humanSchedule}). ${where}. Auto-expires after ${DEFAULT_MAX_AGE_DAYS} days. Use CronDelete to cancel sooner.`
-        : `Scheduled one-shot task ${output.id} (${output.humanSchedule}). ${where}. It will fire once then auto-delete.`,
+        ? `Scheduled recurring job ${output.id} (${output.humanSchedule}).${nextRun} ${where}. Auto-expires after ${DEFAULT_MAX_AGE_DAYS} days. Use CronDelete to cancel sooner.`
+        : `Scheduled one-shot task ${output.id} (${output.humanSchedule}).${nextRun} ${where}. It will fire once then auto-delete.`,
     }
   },
   renderToolUseMessage: renderCreateToolUseMessage,

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import {
   resetCodeModeOptInStateForTests,
   setCodeModeAccepted,
+  setEngineCheckResultForTests,
   settleCodeModeOptIn,
 } from '../optIn.js'
 import {
@@ -18,6 +19,7 @@ import {
 } from '../../analytics/metadata.js'
 
 function enableCodeModeForTest(): void {
+  setEngineCheckResultForTests('passed')
   setCodeModeAccepted(true)
   settleCodeModeOptIn({ state: 'on', source: 'shell' })
 }

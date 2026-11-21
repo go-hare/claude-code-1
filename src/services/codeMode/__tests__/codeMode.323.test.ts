@@ -11,6 +11,8 @@ import {
   isCodeModeEnabled,
   planCodeModeFromSession,
   resetCodeModeOptInStateForTests,
+  runReplEngineRealmCheck,
+  setEngineCheckResultForTests,
   settleCodeModeOptInAtStartup,
   wrapReplToolForCodeMode,
 } from '../index.js'
@@ -22,6 +24,7 @@ describe('Wave 323 #1964: Experimental Code Mode', () => {
   })
 
   test('settles opt-in on when CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 and gates pass', async () => {
+    setEngineCheckResultForTests('passed')
     const decision = await settleCodeModeOptInAtStartup({
       env: { [CODE_MODE_ENV_VAR]: '1' },
       shellEnv: { [CODE_MODE_ENV_VAR]: '1' },
@@ -66,7 +69,9 @@ describe('Wave 323 #1964: Experimental Code Mode', () => {
     expect(CODE_MODE_DOCS_URL).toBe('https://code.claude.com/docs/en/code-mode')
   })
 
-  test('engine check passes and JS VM executor invokes primitive tools and enforces toolCallCap', async () => {
+  test('engine check reflects real probe and JS VM executor invokes primitive tools and enforces toolCallCap', async () => {
+    expect(engineCheckResult()).toBe(runReplEngineRealmCheck())
+    setEngineCheckResultForTests('passed')
     expect(engineCheckResult()).toBe('passed')
 
     const calls: Array<{ name: string; input: Record<string, unknown> }> = []
@@ -113,6 +118,7 @@ describe('Wave 323 #1964: Experimental Code Mode', () => {
     })
     expect(plan.refused).toContain('Code Mode')
 
+    setEngineCheckResultForTests('passed')
     await settleCodeModeOptInAtStartup({
       env: { [CODE_MODE_ENV_VAR]: '1' },
       shellEnv: { [CODE_MODE_ENV_VAR]: '1' },

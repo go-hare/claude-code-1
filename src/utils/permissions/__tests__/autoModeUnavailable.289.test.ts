@@ -234,7 +234,7 @@ describe('autoModeUnavailable 289', () => {
     expect(statuses.at(-1)).toBeNull()
   })
 
-  test('X7o deny endsTurn with gold stop reason even when unrecorded', () => {
+  test('X7o/Cao deny endsTurn with gold stop reason, hostCode, and endsTurn on decisionReason', () => {
     const result = denyAutoModeUnavailableStop(
       { name: 'Bash' } as Tool,
       {},
@@ -247,9 +247,33 @@ describe('autoModeUnavailable 289', () => {
         classifier: 'auto-mode',
         reason: AUTO_MODE_UNAVAILABLE_STOP_REASON,
         noVerdict: true,
+        hostCode: 'auto_mode_stop_no_verdict',
+        endsTurn: true,
       },
       message: autoModeUnavailableToolStopCopy('Bash'),
       endsTurn: true,
     })
+
+    const sessionStop = denyAutoModeUnavailableStop(
+      { name: 'Bash' } as Tool,
+      {},
+      false,
+      'no_classifier_for_session',
+    )
+    expect(sessionStop.decisionReason.hostCode).toBe(
+      'auto_mode_stop_no_check_in_session',
+    )
+    expect(sessionStop.decisionReason.endsTurn).toBe(true)
+
+    const callStop = denyAutoModeUnavailableStop(
+      { name: 'Bash' } as Tool,
+      {},
+      false,
+      'no_classifier_for_call',
+    )
+    expect(callStop.decisionReason.hostCode).toBe(
+      'auto_mode_stop_no_result_for_calls',
+    )
+    expect(callStop.decisionReason.endsTurn).toBe(true)
   })
 })

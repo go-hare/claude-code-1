@@ -18,6 +18,7 @@ import { getCwd } from '../cwd.js'
 import { isEnvTruthy } from '../envUtils.js'
 import type { SettingSource } from '../settings/constants.js'
 import {
+  getEnabledSettingSources,
   isSettingSourceEnabled,
   SETTING_SOURCES,
 } from '../settings/constants.js'
@@ -47,7 +48,10 @@ import {
 import { settingsHaveBlockReadsOutsideWorkingDirectories } from './outsideReads.js'
 import { emitPermissionRecheck } from './permissionRecheck.js'
 import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
-import { collectUngatedAdditionalDirectories } from './projectGrantsGate.js'
+import {
+  collectUngatedAdditionalDirectories,
+  getProjectGrantsGates,
+} from './projectGrantsGate.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
@@ -1502,9 +1506,58 @@ export async function initializeToolPermissionContext({
           ),
         )
       : addDirs
-  const allAdditionalDirectories = [
-    ...collectUngatedAdditionalDirectories(),
-    ...resolvedCliAddDirs,
+  // Official 2.1.328 (`chunk@303338446.js @18800` + `Hdr`):
+  // Tag settings-sourced `additionalDirectories` with `'projectSettings'`
+  // (when repo-only) or `'localSettings'`, reserving `'cliArg'` strictly for
+  // CLI `--add-dir` entries.
+  const normalizeAdditionalDir = (dir: string): string | null => {
+    try {
+      return resolve(expandPath(dir))
+    } catch {
+      return null
+    }
+  }
+  const { gateLocal } = getProjectGrantsGates()
+  const enabledSources = getEnabledSettingSources()
+  const repoSources: SettingSource[] = gateLocal
+    ? ['projectSettings', 'localSettings']
+    : ['projectSettings']
+  const nonRepoSources = enabledSources.filter(s => !repoSources.includes(s))
+  const repoOnlyAdditionalDirs = new Set<string>()
+  for (const source of repoSources) {
+    if (!enabledSources.includes(source)) continue
+    const dirs =
+      getSettingsForSource(source)?.permissions?.additionalDirectories ?? []
+    for (const dir of dirs) {
+      const normalized = normalizeAdditionalDir(dir)
+      if (normalized !== null) repoOnlyAdditionalDirs.add(normalized)
+    }
+  }
+  for (const source of nonRepoSources) {
+    const dirs =
+      getSettingsForSource(source)?.permissions?.additionalDirectories ?? []
+    for (const dir of dirs) {
+      const normalized = normalizeAdditionalDir(dir)
+      if (normalized !== null) repoOnlyAdditionalDirs.delete(normalized)
+    }
+  }
+  for (const dir of resolvedCliAddDirs) {
+    const normalized = normalizeAdditionalDir(dir)
+    if (normalized !== null) repoOnlyAdditionalDirs.delete(normalized)
+  }
+
+  const taggedAdditionalDirectories: Array<{
+    dir: string
+    destination: PermissionUpdateDestination
+  }> = [
+    ...collectUngatedAdditionalDirectories().map(dir => ({
+      dir,
+      destination: 'localSettings' as const,
+    })),
+    ...resolvedCliAddDirs.map(dir => ({
+      dir,
+      destination: 'cliArg' as const,
+    })),
   ]
   // Parallelize fs validation; apply updates serially (cumulative context).
   // validateDirectoryForWorkspace only reads permissionContext to check if the
@@ -1512,16 +1565,22 @@ export async function initializeToolPermissionContext({
   // (two overlapping --add-dirs both succeed instead of one being flagged
   // alreadyInWorkingDirectory, which was silently skipped anyway).
   const validationResults = await Promise.all(
-    allAdditionalDirectories.map(dir =>
-      validateDirectoryForWorkspace(dir, toolPermissionContext),
-    ),
+    taggedAdditionalDirectories.map(async ({ dir, destination }) => ({
+      destination,
+      result: await validateDirectoryForWorkspace(dir, toolPermissionContext),
+    })),
   )
-  for (const result of validationResults) {
+  for (const { result, destination } of validationResults) {
     if (result.resultType === 'success') {
+      const effectiveDestination: PermissionUpdateDestination =
+        destination === 'localSettings' &&
+        repoOnlyAdditionalDirs.has(result.absolutePath)
+          ? 'projectSettings'
+          : destination
       toolPermissionContext = applyPermissionUpdate(toolPermissionContext, {
         type: 'addDirectories',
         directories: [result.absolutePath],
-        destination: 'cliArg',
+        destination: effectiveDestination,
       })
     } else if (
       result.resultType !== 'alreadyInWorkingDirectory' &&

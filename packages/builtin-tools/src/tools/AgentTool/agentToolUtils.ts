@@ -42,8 +42,10 @@ import {
   type ProgressTracker,
   rebuildProgressFromMessages,
   scheduleDeferredAgentProgressRebuild,
+  type StreamTokenEstimateEvent,
   updateAgentProgress as updateAsyncAgentProgress,
   updateLocalAgentIsIdle,
+  updateProgressFromStreamTokenEstimate,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { asAgentId } from 'src/types/ids.js'
 import type { Message as MessageType, ContentItem } from 'src/types/message.js'
@@ -1472,6 +1474,8 @@ export async function runAsyncAgentLifecycle({
   abortController: AbortController
   makeStream: (
     onCacheSafeParams: ((p: CacheSafeParams) => void) | undefined,
+    onQueryProgress?: () => void,
+    onStreamTokenEstimate?: (event: StreamTokenEstimateEvent) => void,
   ) => AsyncGenerator<MessageType | RunAgentSpinnerMode, void>
   metadata: Parameters<typeof finalizeAgentTool>[2]
   description: string
@@ -1593,8 +1597,30 @@ export async function runAsyncAgentLifecycle({
       | { handbackReport?: { text: string; warning?: string } }
       | undefined
     const hadPriorHandbackReport = taskBeforeRun?.handbackReport !== undefined
+    // Official `chunk@303112704.js @210200-211434`: throttled `onQueryProgress`
+    // bumps `armStallWatchdog()` during long single-block streams (e.g. thinking),
+    // and `onStreamTokenEstimate` updates live streamed token progress.
+    const onQueryProgress = () => {
+      const nowMs = Date.now()
+      if (nowMs - lastStallBumpAt < stallBumpThrottleMs) return
+      lastStallBumpAt = nowMs
+      lastMessageType = 'query_progress'
+      armStallWatchdog()
+    }
+    const onStreamTokenEstimate = (event: StreamTokenEstimateEvent) => {
+      updateProgressFromStreamTokenEstimate(tracker, event)
+      updateAsyncAgentProgress(
+        taskId,
+        getProgressUpdate(tracker, agentMessages),
+        rootSetAppState,
+      )
+    }
     armStallWatchdog()
-    for await (const message of makeStream(onCacheSafeParams)) {
+    for await (const message of makeStream(
+      onCacheSafeParams,
+      onQueryProgress,
+      onStreamTokenEstimate,
+    )) {
       // densable Phn/Ohr — query yields spinner_mode for teammate Phn.setMode.
       // Do not retain control events in agentMessages / task.messages.
       if (isRunAgentSpinnerMode(message)) {

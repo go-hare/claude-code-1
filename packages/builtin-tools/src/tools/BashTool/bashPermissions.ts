@@ -3837,20 +3837,15 @@ export function checkDangerousRmInShellDashC(
   if (!hadShellDashC) return null
 
   if (unreadable && shouldPromptUnreadableShellDashC(command)) {
-    // Official 2.1.326 #13 / 2.1.328 `zOn` / `ZLe`: prompt on strict mode
-    // (`CLAUDE_CODE_STRICT_INLINE_SHELL_RM_PROMPT=1`) or when the command
-    // (including decoded `$'...'` ANSI-C escapes) may invoke `rm`.
-    if (
-      !isRelaxedInlineShellRmPromptEnabled() ||
-      mayContainRmInvocation(command)
-    ) {
-      return dangerousRemovalAsk(
-        'rm',
-        'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
-        'in a shell -c script that could not be checked',
-      )
-    }
-    return null
+    // Official 2.1.328 `ZLe` / `gmt`: prompt on strict mode
+    // (`CLAUDE_CODE_STRICT_INLINE_SHELL_RM_PROMPT=1`), when the command may
+    // invoke `rm`, or when it uses `$'...'` ANSI-C escape sequences (e.g.
+    // `bash -c $'a=\x72; ${a}m -rf /'`).
+    return dangerousRemovalAsk(
+      'rm',
+      'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
+      'in a shell -c script that could not be checked',
+    )
   }
 
   for (const script of scripts) {
@@ -3866,18 +3861,11 @@ export function checkDangerousRmInShellDashC(
         nested.unreadable &&
         shouldPromptUnreadableShellDashC(command, unit)
       ) {
-        if (
-          !isRelaxedInlineShellRmPromptEnabled() ||
-          mayContainRmInvocation(command) ||
-          mayContainRmInvocation(unit)
-        ) {
-          return dangerousRemovalAsk(
-            'rm',
-            'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
-            'in a shell -c script that could not be checked',
-          )
-        }
-        continue
+        return dangerousRemovalAsk(
+          'rm',
+          'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
+          'in a shell -c script that could not be checked',
+        )
       }
       const emptyVar = detectPossiblyEmptyVariableRm(unit)
       if (emptyVar) {

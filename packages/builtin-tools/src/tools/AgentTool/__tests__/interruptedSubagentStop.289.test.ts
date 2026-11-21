@@ -11,7 +11,7 @@ const runAgentSource = readFileSync(
 describe('runAgent SubagentStop on interrupt', () => {
   test('finally fires SubagentStop only when the query did not finish', () => {
     expect(runAgentSource).toContain('let queryCompleted = false')
-    const completedAt = runAgentSource.indexOf('queryCompleted = true')
+    const completedAt = runAgentSource.lastIndexOf('queryCompleted = true')
     const abortThrow = runAgentSource.indexOf('throw new AbortError()')
     const finallyAt = runAgentSource.indexOf('} finally {')
     expect(abortThrow).toBeGreaterThan(0)

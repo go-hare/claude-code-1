@@ -128,6 +128,8 @@ let replContextCreated = false
 let engineCheckDone = false
 let cachedEngineCheck: ReplEngineCheckResult | undefined
 let cachedRawEngineRealmCheck: ReplEngineCheckResult | undefined
+let engineCheckResultOverrideForTests: ReplEngineCheckResult | undefined
+let standaloneExecutableOverrideForTests: boolean | undefined
 let lastAskedIn: CodeModeOptInSource | undefined
 let sandboxCommandNetworkListsOffered = false
 let pollEventWiringMode: 'terminal' | 'print' | undefined
@@ -433,37 +435,65 @@ export function runReplEngineRealmCheck(): ReplEngineCheckResult {
 }
 
 /**
- * Official `Kmi(result)` (`doesEngineResultHold`): returns true when the engine
- * check result should hold Code Mode off.
+ * Official `vh()` (`chunk@283020243.js`): true when running as a standalone
+ * compiled Bun executable (`Bun.isStandaloneExecutable === true`).
  */
-export function doesEngineResultHold(result: ReplEngineCheckResult): boolean {
-  return result !== 'passed'
+export function isStandaloneBunExecutable(): boolean {
+  if (standaloneExecutableOverrideForTests !== undefined) {
+    return standaloneExecutableOverrideForTests
+  }
+  return (
+    typeof Bun !== 'undefined' &&
+    (Bun as { isStandaloneExecutable?: unknown }).isStandaloneExecutable ===
+      true
+  )
 }
 
 /**
- * Official `engineCheckResult` / `primeReplEngineCheck` / `doesEngineCheckAllowCodeMode`:
- * executes the 3 realm-isolation assertions + async thenable check in a null-proto
- * VM context with `codeGeneration: { strings: false, wasm: false }`.
- *
- * On stock Bun builds (without Anthropic's custom JSC VM realm patches), the VM
- * executes the realm-isolation probes cleanly without throwing; we preserve
- * `'passed'` for non-throwing stock Bun runs while recording the exact probe
- * outcome in `runReplEngineRealmCheck()`.
+ * Test-only override for `engineCheckResult()`. Reset by
+ * `resetCodeModeOptInStateForTests()`.
+ */
+export function setEngineCheckResultForTests(
+  result?: ReplEngineCheckResult,
+): void {
+  engineCheckResultOverrideForTests = result
+  cachedEngineCheck = undefined
+  engineCheckDone = result !== undefined
+  notifyCodeModeStateChanged()
+}
+
+/**
+ * Test-only override for `isStandaloneBunExecutable()` (official `vh()`).
+ * Reset by `resetCodeModeOptInStateForTests()`.
+ */
+export function setStandaloneExecutableForTests(value?: boolean): void {
+  standaloneExecutableOverrideForTests = value
+  notifyCodeModeStateChanged()
+}
+
+/**
+ * Official `Kmi(result)` (`chunk@314496433.js`, `doesEngineResultHold`):
+ * returns `result !== 'passed' && !vh()` — holds Code Mode off whenever the
+ * engine check fails on a non-standalone runtime.
+ */
+export function doesEngineResultHold(result: ReplEngineCheckResult): boolean {
+  return result !== 'passed' && !isStandaloneBunExecutable()
+}
+
+/**
+ * Official `YRn` (`chunk@314496433.js`, `engineCheckResult`): executes the 3
+ * JSC realm-isolation assertions + async thenable check in a null-proto VM
+ * context with `codeGeneration: { strings: false, wasm: false }`, without
+ * silently coercing failures to `'passed'`.
  */
 export function engineCheckResult(): ReplEngineCheckResult {
+  if (engineCheckResultOverrideForTests !== undefined) {
+    engineCheckDone = true
+    return engineCheckResultOverrideForTests
+  }
   if (cachedEngineCheck !== undefined) return cachedEngineCheck
   engineCheckDone = true
-  const raw = runReplEngineRealmCheck()
-  if (
-    raw === 'passed' ||
-    raw === 'both' ||
-    raw === 'rejected_definitions' ||
-    raw === 'thenable_after_await'
-  ) {
-    cachedEngineCheck = 'passed'
-  } else {
-    cachedEngineCheck = raw
-  }
+  cachedEngineCheck = runReplEngineRealmCheck()
   return cachedEngineCheck
 }
 
@@ -475,8 +505,12 @@ export function primeReplEngineCheck(): ReplEngineCheckResult {
   return engineCheckResult()
 }
 
+/**
+ * Official `Afi` (`chunk-x6whz6ke.js`, `doesEngineCheckAllowCodeMode`):
+ * returns `!doesEngineResultHold(engineCheckResult())`.
+ */
 export function doesEngineCheckAllowCodeMode(): boolean {
-  return engineCheckResult() === 'passed'
+  return !doesEngineResultHold(engineCheckResult())
 }
 
 /**
@@ -587,7 +621,11 @@ export function evaluateCodeModeEligibility(
   if (input.toolsLeaveReplOut) {
     return 'tools'
   }
-  if (runEngineCheck && !doesEngineCheckAllowCodeMode()) {
+  // Official `chunk@325033999.js @6097`: `(n || qmi()) && YRn() !== "passed"`
+  if (
+    (runEngineCheck || isEngineCheckDone()) &&
+    engineCheckResult() !== 'passed'
+  ) {
     return 'engine'
   }
   if (input.isFirstPartyProvider === false) {
@@ -1080,6 +1118,23 @@ export function hasCodeModeBeenUsed(): boolean {
   return replContextCreated || isCodeModeEnabled()
 }
 
+/**
+ * Official `SDt` (`chunk-x6whz6ke.js`, `mayReplScriptsRun`): true when REPL
+ * scripts may run in this session (including earlier in the run if accepted).
+ */
+export function mayReplScriptsRun(): boolean {
+  return accepted ? hasCodeModeBeenUsed() : isCodeModeEnabled()
+}
+
+/**
+ * Official `zG` (`chunk-x6whz6ke.js`, `codeModeHidesToolNamesFromApi`): true
+ * when Code Mode hides primitive/MCP tool names from the API tool list
+ * (official `willListHiddenToolNames` always returns `false` in 2.1.328).
+ */
+export function codeModeHidesToolNamesFromApi(): boolean {
+  return mayReplScriptsRun()
+}
+
 export function getReplPartCap(): number | undefined {
   return isCodeModeExperimentEnabled() ? REPL_PART_CAP : undefined
 }
@@ -1129,17 +1184,13 @@ export function setAsyncReplEnabledForTests(val?: boolean): void {
 }
 
 /**
- * Official `Tde` (`chunk@292318525.js`): true when Code Mode is active and
- * async REPL / poll-event wiring is enabled.
+ * Official `Tde` (`chunk-x6whz6ke.js`): true when Code Mode is active and
+ * async REPL / poll-event wiring (`wO`) is enabled.
  */
 export function isAsyncReplEnabled(): boolean {
   if (!isCodeModeEnabled()) return false
   if (asyncReplEnabledForTests !== undefined) return asyncReplEnabledForTests
-  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_ASYNC_REPL)) return false
-  return (
-    pollEventWiringMode !== undefined ||
-    isEnvTruthy(process.env.CLAUDE_CODE_ASYNC_REPL)
-  )
+  return pollEventWiringMode !== undefined
 }
 
 /**
@@ -1491,6 +1542,8 @@ export function resetCodeModeOptInStateForTests(): void {
   engineCheckDone = false
   cachedEngineCheck = undefined
   cachedRawEngineRealmCheck = undefined
+  engineCheckResultOverrideForTests = undefined
+  standaloneExecutableOverrideForTests = undefined
   lastAskedIn = undefined
   sandboxCommandNetworkListsOffered = false
   pollEventWiringMode = undefined

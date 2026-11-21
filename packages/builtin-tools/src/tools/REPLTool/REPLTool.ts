@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import type { ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { REPL_TOOL_NAME } from './constants.js'
@@ -80,6 +80,20 @@ The REPL runs in a VM context with tool APIs available as functions. Results fro
 
   toAutoClassifierInput(input: REPLInput) {
     return input.code
+  },
+
+  async checkPermissions(input: REPLInput, context: ToolUseContext) {
+    const mode = context.getAppState?.()?.toolPermissionContext?.mode
+    if (mode === 'auto') {
+      return {
+        behavior: 'passthrough' as const,
+        message: `${REPL_TOOL_NAME} script requires classifier review.`,
+      }
+    }
+    return {
+      behavior: 'allow' as const,
+      updatedInput: input,
+    }
   },
 
   getToolUseSummary(input: Partial<REPLInput> | undefined): string | null {

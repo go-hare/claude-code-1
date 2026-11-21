@@ -23,6 +23,7 @@ type FallbackOptionValue = 'yes' | 'yes-dont-ask-again' | 'no';
 
 export function FallbackPermissionRequest({
   toolUseConfirm,
+  toolUseContext,
   onDone,
   onReject,
   verbose: _verbose,
@@ -184,6 +185,9 @@ export function FallbackPermissionRequest({
     [toolUseConfirm.tool.name, toolUseConfirm.tool.isMcp],
   );
 
+  const permissionMode = toolUseContext?.getAppState?.()?.toolPermissionContext?.mode;
+  const permissionNote = toolUseConfirm.tool.permissionNote?.(toolUseConfirm.input, permissionMode);
+
   return (
     <PermissionDialog title="Tool use" workerBadge={workerBadge}>
       <Box flexDirection="column" paddingX={2} paddingY={1}>
@@ -197,6 +201,7 @@ export function FallbackPermissionRequest({
 
       <Box flexDirection="column">
         <PermissionRuleExplanation permissionResult={toolUseConfirm.permissionResult} toolType="tool" />
+        {permissionNote !== undefined && <Text>{permissionNote}</Text>}
         <PermissionPrompt
           options={options}
           onSelect={handleSelect}

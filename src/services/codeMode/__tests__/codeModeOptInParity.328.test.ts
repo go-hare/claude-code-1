@@ -31,7 +31,9 @@ import {
   runReplEngineRealmCheck,
   sandboxHostListsBlockCodeMode,
   setCodeModeAccepted,
+  setEngineCheckResultForTests,
   setSandboxCommandNetworkListsOffered,
+  setStandaloneExecutableForTests,
   settleCodeModeOptIn,
   subscribeCodeModeState,
   unpinCodeMode,
@@ -65,7 +67,7 @@ describe('Code Mode 2.1.328 1:1 parity', () => {
     ])
   })
 
-  test('engineCheckResult runs real realm-isolation + async thenable probes and passes on Bun', () => {
+  test('engineCheckResult runs real realm-isolation + async thenable probes without silent coercion, and honors standalone executable override (vh)', () => {
     const raw = runReplEngineRealmCheck()
     expect([
       'passed',
@@ -73,13 +75,26 @@ describe('Code Mode 2.1.328 1:1 parity', () => {
       'rejected_definitions',
       'thenable_after_await',
     ]).toContain(raw)
-    expect(engineCheckResult()).toBe('passed')
+    // Official YRn returns the raw probe outcome with no silent coercion
+    expect(engineCheckResult()).toBe(raw)
     expect(doesEngineResultHold('passed')).toBe(false)
     expect(doesEngineResultHold('both')).toBe(true)
     expect(doesEngineResultHold('threw_type_error')).toBe(true)
+
+    // Official Kmi: `return result !== 'passed' && !vh()`
+    setStandaloneExecutableForTests(true)
+    expect(doesEngineResultHold('both')).toBe(false)
+    expect(doesEngineResultHold('rejected_definitions')).toBe(false)
+    setStandaloneExecutableForTests(undefined)
+    expect(doesEngineResultHold('both')).toBe(true)
+
+    // Explicit test override for suites exercising Code Mode on stock Bun
+    setEngineCheckResultForTests('passed')
+    expect(engineCheckResult()).toBe('passed')
   })
 
   test('sandbox network host lists holdoff disables Code Mode and reports holdoff notice', () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     expect(isCodeModeEnabled()).toBe(true)
     expect(sandboxHostListsBlockCodeMode()).toBe(false)
@@ -194,6 +209,7 @@ describe('Code Mode 2.1.328 1:1 parity', () => {
       'exec failed',
     )
 
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     expect(chromeSectionForWire('original chrome section')).toContain(
       'Claude in Chrome and computer use are not available',

@@ -36,6 +36,7 @@ import {
 import {
   pinCodeMode,
   resetCodeModeOptInStateForTests,
+  setEngineCheckResultForTests,
   settleCodeModeOptIn,
 } from '../optIn.js'
 
@@ -135,6 +136,7 @@ describe('Deep Parity Fix 1 — All 7 Verified P1 Bugs (Official 2.1.328)', () =
     expect(rAfterClear.result).toContain('ReferenceError')
 
     // 2. End-to-end through wrapReplToolForCodeMode (including top-level return + await fallback)
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     const echoTool = {
       name: 'Echo',
@@ -319,6 +321,7 @@ describe('Deep Parity Fix 1 — All 7 Verified P1 Bugs (Official 2.1.328)', () =
   })
 
   test('P1 #4: inner Skill tool forwards body/output, newMessages, contextModifier, and contextLayers to outer REPLTool result', async () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
 
     const observedModelsInLaterTool: Array<string | undefined> = []
@@ -631,6 +634,7 @@ describe('Deep Parity Fix 1 — All 7 Verified P1 Bugs (Official 2.1.328)', () =
   })
 
   test('P1 #6b: auto mode uses deferred verdict + stop chain instead of unconditionally allowing unclassified scripts', async () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
 
     // 1. Unclassified auto script MUST NOT unconditionally ride auto verdict
@@ -794,6 +798,7 @@ describe('Deep Parity Fix 1 — All 7 Verified P1 Bugs (Official 2.1.328)', () =
   })
 
   test('P1 #7: replMode is inferred from historical successful REPL calls on resume AND persisted/restored via sessionStorage', async () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
 
     const replTranscript = [

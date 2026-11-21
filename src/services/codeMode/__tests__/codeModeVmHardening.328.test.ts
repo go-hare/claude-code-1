@@ -10,10 +10,16 @@ import {
   resetCodeModeRuntimeStateForTests,
   wrapReplToolForCodeMode,
 } from '../executor.js'
-import { pinCodeMode, unpinCodeMode } from '../optIn.js'
+import {
+  pinCodeMode,
+  resetCodeModeOptInStateForTests,
+  setEngineCheckResultForTests,
+  unpinCodeMode,
+} from '../optIn.js'
 
 afterEach(() => {
   resetCodeModeRuntimeStateForTests()
+  resetCodeModeOptInStateForTests()
   clearCodeModeVmSession()
   unpinCodeMode()
 })
@@ -165,6 +171,7 @@ await spin()`,
       }),
     ).toBe('await Bash({ command: "ls" })')
 
+    setEngineCheckResultForTests('passed')
     pinCodeMode(true)
     const wrapped = wrapReplToolForCodeMode(REPLTool, () => [])
     expect(wrapped.userFacingName?.({} as never)).toBe('Code')

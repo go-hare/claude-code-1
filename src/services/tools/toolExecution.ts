@@ -40,7 +40,10 @@ import { getPermissionConfirm } from '../../dialog/permissionConfirmRegistry.js'
 import { createAbortController } from '../../utils/abortController.js'
 import { registerForegroundToolCall } from '../../utils/foregroundToolCalls.js'
 import { areBackgroundTasksDisabled } from '../../utils/sessionBackgroundGates.js'
-import { isUserPromptWaiting } from '../../utils/sessionHost.js'
+import {
+  isDisklessLaunch,
+  isUserPromptWaiting,
+} from '../../utils/sessionHost.js'
 import { plural } from '../../utils/stringUtils.js'
 import { escapeXml } from '../../utils/xml.js'
 import {
@@ -2624,30 +2627,25 @@ function isEmptyRecord(value: unknown): boolean {
   )
 }
 
-/** densable Gyo @188820550 / kVn @188788636 — validate updatedInput ignoring unrecognized_keys. */
-function validateUpdatedInputAgainstSchema(
+/**
+ * Official 2.1.328 `G3s` (`chunk@294254613.js @4849870`): validate
+ * permission-handler `updatedInput` against `tool.inputSchema` while ignoring
+ * `unrecognized_keys` — MUST NOT strip trusted internal keys such as
+ * `_simulatedSedEdit` set by permission handlers.
+ */
+export function validateUpdatedInputAgainstSchema(
   tool: Tool,
   updatedInput: Record<string, unknown>,
-):
-  | { ok: true; strippedInput: Record<string, unknown> }
-  | { ok: false; formatted: string; issueCodes: string[] } {
+): { ok: true } | { ok: false; formatted: string; issueCodes: string[] } {
   const parsed = tool.inputSchema.safeParse(updatedInput)
   if (parsed.success) {
-    return { ok: true, strippedInput: updatedInput }
+    return { ok: true }
   }
   const remainingIssues = parsed.error.issues.filter(
     issue => issue.code !== 'unrecognized_keys',
   )
   if (remainingIssues.length === 0) {
-    const cleaned = { ...updatedInput }
-    for (const issue of parsed.error.issues) {
-      if (issue.code === 'unrecognized_keys' && 'keys' in issue) {
-        for (const key of issue.keys) {
-          delete cleaned[key]
-        }
-      }
-    }
-    return { ok: true, strippedInput: cleaned }
+    return { ok: true }
   }
   const issueCodes = Array.from(
     new Set(remainingIssues.map(issue => String(issue.code))),
@@ -2660,6 +2658,97 @@ function validateUpdatedInputAgainstSchema(
     ),
     issueCodes,
   }
+}
+
+const EXIT_PLAN_MODE_STRIP_KEYS = new Set(['plan', 'planFilePath'])
+
+/**
+ * Official 2.1.328 `XUo` (`chunk@294254613.js @1163532, @4868654`): preserve
+ * trusted permission-handler `updatedInput` (including internal keys like
+ * `_simulatedSedEdit`), only stripping unchanged `ExitPlanMode` `plan` /
+ * `planFilePath` fields when present identically on `originalInput`.
+ */
+export function applyPermissionUpdatedInput(
+  toolName: string,
+  updatedInput: Record<string, unknown>,
+  originalInput: Record<string, unknown>,
+): Record<string, unknown> {
+  if (
+    toolName !== 'ExitPlanMode' ||
+    (isDisklessLaunch() && !Object.hasOwn(originalInput, 'planFilePath'))
+  ) {
+    return updatedInput
+  }
+  let shouldStrip = false
+  for (const key of Object.keys(updatedInput)) {
+    if (
+      EXIT_PLAN_MODE_STRIP_KEYS.has(key) &&
+      key in originalInput &&
+      updatedInput[key] === originalInput[key]
+    ) {
+      shouldStrip = true
+      break
+    }
+  }
+  if (!shouldStrip) return updatedInput
+  const out: Record<string, unknown> = {}
+  for (const [key, val] of Object.entries(updatedInput)) {
+    if (
+      EXIT_PLAN_MODE_STRIP_KEYS.has(key) &&
+      key in originalInput &&
+      val === originalInput[key]
+    ) {
+      continue
+    }
+    out[key] = val
+  }
+  return out
+}
+
+function sanitizeHookUpdatedInputSync(
+  tool: Tool,
+  updatedInput: Record<string, unknown>,
+):
+  | { ok: true; input: Record<string, unknown> }
+  | { ok: false; message: string } {
+  const schemaCheck = validateUpdatedInputAgainstSchema(tool, updatedInput)
+  if (!schemaCheck.ok) {
+    return {
+      ok: false,
+      message: `PreToolUse hook for ${tool.name} returned updatedInput that failed schema validation: ${schemaCheck.formatted}`,
+    }
+  }
+  if (
+    Object.keys(updatedInput).some(k =>
+      k.toLowerCase().startsWith('__artifact'),
+    )
+  ) {
+    return {
+      ok: false,
+      message: `PreToolUse hook for ${tool.name} returned updatedInput with a key starting with "__artifact" (in any letter case). Only Claude Code sets such keys. Remove the key from updatedInput. The tool was not run.`,
+    }
+  }
+  const parsed = tool.inputSchema.safeParse(updatedInput)
+  if (parsed.success) {
+    return {
+      ok: true,
+      input:
+        parsed.data !== null &&
+        typeof parsed.data === 'object' &&
+        !Array.isArray(parsed.data)
+          ? (parsed.data as Record<string, unknown>)
+          : updatedInput,
+    }
+  }
+  const cleaned: Record<string, unknown> = { ...updatedInput }
+  for (const issue of parsed.error.issues) {
+    if (issue.code === 'unrecognized_keys' && 'keys' in issue) {
+      for (const key of issue.keys) {
+        delete cleaned[key]
+      }
+    }
+  }
+  return { ok: true, input: cleaned }
 }
 
 ;(runToolUse as unknown as Record<symbol, unknown>)[
@@ -2907,18 +2996,14 @@ function aggregateManagedPreToolPass(
       )
     }
     if (item.updatedInput !== undefined && !isEmptyRecord(item.updatedInput)) {
-      const schemaCheck = validateUpdatedInputAgainstSchema(
-        tool,
-        item.updatedInput,
-      )
-      if (!schemaCheck.ok) {
-        const validationMessage = `PreToolUse hook for ${tool.name} returned updatedInput that failed schema validation: ${schemaCheck.formatted}`
-        logForDebugging(validationMessage, { level: 'warn' })
+      const hookCheck = sanitizeHookUpdatedInputSync(tool, item.updatedInput)
+      if (!hookCheck.ok) {
+        logForDebugging(hookCheck.message, { level: 'warn' })
         kind = 'deny'
-        reason = validationMessage
+        reason = hookCheck.message
         continue
       }
-      updatedInput = schemaCheck.strippedInput
+      updatedInput = hookCheck.input
     }
     switch (item.permissionBehavior) {
       case 'deny':
@@ -3995,17 +4080,137 @@ export function buildSchemaNotSentHint(
 
 const MAX_NOT_LOADED_SCHEMA_CHARS = 8000
 
+export type NotLoadedMcpToolFamily =
+  | 'browser'
+  | 'computer_use'
+  | 'simulator'
+  | 'linked_computer'
+  | 'plugin'
+
+const BROWSER_MCP_TOOL_PREFIXES = [
+  'mcp__claude-in-chrome__',
+  'mcp__Claude_in_Chrome__',
+  'mcp__remote-devices__claude-in-chrome__',
+  'mcp__remote-devices__Claude_in_Chrome__',
+  'mcp__claude-device__chrome_',
+  'mcp__Claude_Preview__',
+  'mcp__Claude_Browser__',
+  'mcp__remote-devices__Claude_Browser__',
+  'mcp__remote-devices__Claude_Preview__',
+  'mcp__claude-for-chrome__',
+  'mcp__remote-devices__claude-for-chrome__',
+] as const
+
+const SIMULATOR_MCP_TOOL_PREFIXES = [
+  'mcp__Claude_Code_iOS_Simulator__',
+  'mcp__remote-devices__Claude_Code_iOS_Simulator__',
+  'mcp__Claude_Code_Android_Emulator__',
+  'mcp__remote-devices__Claude_Code_Android_Emulator__',
+] as const
+
+const LINKED_COMPUTER_MCP_TOOL_NAMES = new Set([
+  'mcp__remote-devices__device_commit_files',
+  'mcp__remote-devices__device_bash',
+  'mcp__remote-devices__create_artifact',
+  'mcp__remote-devices__list_artifacts',
+  'mcp__remote-devices__list_legacy_live_artifacts',
+  'mcp__remote-devices__update_artifact',
+])
+
+const REMOTE_DEVICES_PREFIX = 'mcp__remote-devices__'
+const REMOTE_DEVICES_PLUGIN_PREFIX = 'mcp__remote-devices__plugin_'
+
+function isBrowserMcpToolName(name: string): boolean {
+  return BROWSER_MCP_TOOL_PREFIXES.some(prefix => name.startsWith(prefix))
+}
+
+function isComputerUseMcpToolName(name: string): boolean {
+  if (name.startsWith('mcp__computer-use__')) return true
+  if (!name.startsWith(REMOTE_DEVICES_PREFIX)) return false
+  const rest = name.slice(REMOTE_DEVICES_PREFIX.length)
+  return (
+    rest.startsWith('computer_') &&
+    !rest.startsWith('computer__') &&
+    !rest.includes('__')
+  )
+}
+
+function isSimulatorMcpToolName(name: string): boolean {
+  return SIMULATOR_MCP_TOOL_PREFIXES.some(prefix => name.startsWith(prefix))
+}
+
+function isLinkedComputerMcpTool(tool: Tool): boolean {
+  if (tool.isMcp !== true) return false
+  const serverName = tool.mcpInfo?.serverName
+  if (serverName !== 'remote-devices') return false
+  return (
+    LINKED_COMPUTER_MCP_TOOL_NAMES.has(tool.name) ||
+    tool.name.startsWith(REMOTE_DEVICES_PLUGIN_PREFIX)
+  )
+}
+
+function isPluginMcpToolSurfacedInMessages(
+  toolName: string,
+  messages: Message[],
+): boolean {
+  return messages.some(msg => {
+    if (msg.type !== 'attachment') return false
+    const attachment = (msg as { attachment?: Record<string, unknown> })
+      .attachment
+    if (
+      !attachment ||
+      attachment.type !== 'deferred_tools_delta' ||
+      attachment.toolSearchAbsent === true
+    ) {
+      return false
+    }
+    const surfaced = attachment.surfacedNames
+    return Array.isArray(surfaced) && surfaced.includes(toolName)
+  })
+}
+
 /**
- * #1663 (official yTs / Uro): intercept deferred MCP tool calls before
- * validation/execution when the tool has not been loaded yet, and return its
- * inputSchema so the model can load it via ToolSearch or fix the arguments.
+ * Official 2.1.328 `EWe` + `rri` (`chunk@294254613.js @2828693, @4846960`):
+ * Classify an MCP tool into one of the 5 families subject to `TOOL_NOT_LOADED`
+ * enforcement (`browser`, `computer_use`, `simulator`, `linked_computer`,
+ * `plugin`). Ordinary third-party MCP tools return `undefined`.
+ */
+export function classifyNotLoadedMcpToolFamily(
+  tool: Tool,
+  messages: Message[] = [],
+): NotLoadedMcpToolFamily | undefined {
+  if (tool.isMcp !== true) return undefined
+  const name = tool.name
+  if (isBrowserMcpToolName(name)) return 'browser'
+  if (isComputerUseMcpToolName(name)) return 'computer_use'
+  if (isSimulatorMcpToolName(name)) return 'simulator'
+  if (isLinkedComputerMcpTool(tool)) return 'linked_computer'
+  const source = (tool.mcpInfo as { source?: string } | undefined)?.source
+  if (
+    source === 'plugin' &&
+    (tool.alwaysLoad === true ||
+      tool.shouldDefer === true ||
+      isPluginMcpToolSurfacedInMessages(name, messages))
+  ) {
+    return 'plugin'
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.328 `W3s` / `EWe` (`chunk@294254613.js @2828693, @4846960`):
+ * intercept unloaded MCP tool calls strictly for the 5 official `EWe` families
+ * (`browser`, `computer_use`, `simulator`, `linked_computer`, `plugin`),
+ * returning `TOOL_NOT_LOADED` guidance instead of blocking arbitrary user MCP
+ * servers.
  */
 export function checkMcpToolNotLoaded(
   tool: Tool,
   messages: Message[],
   tools: readonly { name: string }[],
-): { enforced: true; message: string } | null {
-  if (tool.isMcp !== true) return null
+): { enforced: true; family: NotLoadedMcpToolFamily; message: string } | null {
+  const family = classifyNotLoadedMcpToolFamily(tool, messages)
+  if (family === undefined) return null
   if (!isSearchExtraToolsEnabledOptimistic()) return null
   if (!isSearchExtraToolsToolAvailable(tools)) return null
   if (!isDeferredTool(tool)) return null
@@ -4025,6 +4230,7 @@ export function checkMcpToolNotLoaded(
   }
   return {
     enforced: true,
+    family,
     message: `Tool "${tool.name}" has not been loaded yet. Call ${SEARCH_EXTRA_TOOLS_TOOL_NAME} with query "select:${tool.name}" to load the tool, then call it again.${schemaHint}`,
   }
 }
@@ -4048,7 +4254,7 @@ async function checkPermissionsAndCallTool(
   ) => void,
   toolCallCapture?: ToolCallCoreCapture,
 ): Promise<MessageUpdateLazy[]> {
-  // #1663: intercept deferred MCP tool before validation/execution if not loaded
+  // Official 2.1.328 `W3s`/`EWe`: intercept unloaded EWe-family MCP tools before validation/execution
   const notLoaded = checkMcpToolNotLoaded(
     tool,
     toolUseContext.messages,
@@ -4057,6 +4263,8 @@ async function checkPermissionsAndCallTool(
   if (notLoaded?.enforced) {
     logEvent('tengu_tool_use_not_loaded', {
       enforced: true,
+      family:
+        notLoaded.family as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       toolName: sanitizeToolNameForAnalytics(tool.name),
       isMcp: true,
     })
@@ -4064,7 +4272,7 @@ async function checkPermissionsAndCallTool(
       error:
         'InputValidationError' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       errorCode:
-        'tool_not_loaded' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        'TOOL_NOT_LOADED' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       messageID:
         messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       toolName: sanitizeToolNameForAnalytics(tool.name),
@@ -4838,7 +5046,11 @@ async function checkPermissionsAndCallTool(
       )) {
         if (result.retry) hookSaysRetry = true
       }
-      if (hookSaysRetry && !permissionDecision.decisionReason.noVerdict) {
+      if (
+        hookSaysRetry &&
+        !permissionDecision.decisionReason.noVerdict &&
+        !(permissionDecision.behavior === 'deny' && permissionDecision.endsTurn)
+      ) {
         resultingMessages.push({
           message: createUserMessage({
             content:
@@ -4943,7 +5155,11 @@ async function checkPermissionsAndCallTool(
       )
       return resultingMessages
     }
-    processedInput = schemaCheck.strippedInput as typeof processedInput
+    processedInput = applyPermissionUpdatedInput(
+      tool.name,
+      permissionDecision.updatedInput,
+      processedInput,
+    ) as typeof processedInput
   }
 
   // Prepare tool parameters for logging in tool_result event.

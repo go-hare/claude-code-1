@@ -13,11 +13,15 @@ import type {
   AttachmentMessage,
   ProgressMessage,
 } from '../../types/message.js'
-import type { PermissionDecision } from '../../types/permissions.js'
+import type {
+  PermissionDecision,
+  PermissionDenyDecision,
+} from '../../types/permissions.js'
 import { createAttachmentMessage } from '../../utils/attachments.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
-import { isAbortError } from '../../utils/errors.js'
+import { errorMessage, isAbortError } from '../../utils/errors.js'
+import { isDisklessLaunch } from '../../utils/sessionHost.js'
 import {
   createAbortController,
   getAbortReasonMessage,
@@ -100,11 +104,305 @@ function isDocsConnectorTool(tool: Tool): boolean {
 
 function isDisklessOrCloudSession(): boolean {
   return (
-    isEnvTruthy(process.env.CLAUDE_CODE_DISKLESS) ||
+    isDisklessLaunch() ||
     isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
     isCoworkCloudSession() ||
     isCloudScheduledOrPersonalRestrictedSession()
   )
+}
+
+const RESERVED_ARTIFACT_KEY_PREFIX = '__artifact'
+const HOOK_REWRITE_NOTE =
+  "The tool input from the model was valid; the hook's rewrite of it was not."
+
+function isReservedArtifactKey(key: string): boolean {
+  return key.toLowerCase().startsWith(RESERVED_ARTIFACT_KEY_PREFIX)
+}
+
+function isKeyUnchangedFromShown(
+  key: string,
+  candidate: Record<string, unknown>,
+  shown: Record<string, unknown> | undefined,
+): boolean {
+  return (
+    shown !== undefined &&
+    key !== '__proto__' &&
+    Object.hasOwn(shown, key) &&
+    Object.hasOwn(candidate, key) &&
+    isDeepStrictEqual(candidate[key], shown[key])
+  )
+}
+
+/**
+ * Official 2.1.328 `nzr`/`tzr` (`chunk@294254613.js @1335500`): remove
+ * unrecognized keys at each issue path without mutating the input object.
+ */
+function stripUnrecognizedKeysFromInput(
+  input: Record<string, unknown>,
+  issues: readonly z.core.$ZodIssue[],
+): Record<string, unknown> {
+  const root: Record<string, unknown> = { ...input }
+  const cloned = new Set<object>([root])
+  for (const issue of issues) {
+    if (
+      issue.code !== 'unrecognized_keys' ||
+      !('keys' in issue) ||
+      !Array.isArray(issue.keys) ||
+      !Array.isArray(issue.path)
+    ) {
+      continue
+    }
+    let cur: unknown = root
+    for (const seg of issue.path) {
+      if (typeof cur !== 'object' || cur === null) {
+        cur = undefined
+        break
+      }
+      const rec = cur as Record<PropertyKey, unknown>
+      const next = rec[seg]
+      if (typeof next !== 'object' || next === null) {
+        cur = undefined
+        break
+      }
+      if (!cloned.has(next)) {
+        const copy = Array.isArray(next) ? [...next] : { ...next }
+        cloned.add(copy)
+        rec[seg] = copy
+      }
+      cur = rec[seg]
+    }
+    if (typeof cur === 'object' && cur !== null) {
+      const target = cur as Record<string, unknown>
+      for (const key of issue.keys) {
+        delete target[key]
+      }
+    }
+  }
+  return root
+}
+
+/** Official 2.1.328 `bBr`: preserve keys that were already unchanged on `shown`. */
+function restoreUnchangedShownKeys(
+  parsed: Record<string, unknown>,
+  candidate: Record<string, unknown>,
+  shown: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (shown === undefined) return parsed
+  const out: Record<string, unknown> = { ...parsed }
+  for (const key of Object.keys(shown)) {
+    if (
+      !Object.hasOwn(out, key) &&
+      isKeyUnchangedFromShown(key, candidate, shown)
+    ) {
+      out[key] = shown[key]
+    }
+  }
+  return out
+}
+
+function formatHookRewriteLabel(
+  toolName: string,
+  event: 'PreToolUse' | 'PermissionRequest',
+  source?: string,
+): string {
+  const srcPart =
+    source === undefined || source === 'settings' ? '' : ` (${source})`
+  return `${event} hook${srcPart} for ${toolName}`
+}
+
+function buildHookRewriteDeny(
+  tool: Tool,
+  event: 'PreToolUse' | 'PermissionRequest',
+  source: string | undefined,
+  message: string,
+): PermissionDenyDecision {
+  return {
+    behavior: 'deny',
+    message,
+    decisionReason: {
+      type: 'hook',
+      hookName:
+        event === 'PermissionRequest'
+          ? 'PermissionRequest'
+          : `PreToolUse:${tool.name}`,
+      ...(source !== undefined ? { hookSource: source } : {}),
+      reason: message,
+    },
+  }
+}
+
+/**
+ * Official 2.1.328 `Zlt` / `HCn` (`chunk@294254613.js @1332065, @1335977`):
+ * Validate hook-supplied `updatedInput` for PreToolUse and PermissionRequest:
+ * 1. Check schema issues (ignoring `unrecognized_keys` first).
+ * 2. Reject reserved `__artifact*` keys (case-insensitive) not unchanged on `shown`.
+ * 3. Strip unrecognized keys and re-parse against `tool.inputSchema`.
+ * 4. Re-run `tool.validateInput()` on the parsed input when `applies` is true.
+ */
+export async function validateHookUpdatedInput(
+  tool: Tool,
+  updatedInput: Record<string, unknown>,
+  opts: {
+    event: 'PreToolUse' | 'PermissionRequest'
+    source?: string
+    applies: boolean
+    shown?: Record<string, unknown>
+    validate?: (
+      parsedInput: Record<string, unknown>,
+    ) =>
+      | Promise<{ result: boolean; message?: string; errorCode?: number }>
+      | undefined
+  },
+): Promise<
+  | { ok: true; input: Record<string, unknown> }
+  | { ok: false; deny: PermissionDenyDecision }
+> {
+  const label = formatHookRewriteLabel(tool.name, opts.event, opts.source)
+  let parsed = tool.inputSchema.safeParse(updatedInput)
+  if (!parsed.success) {
+    const remainingIssues = parsed.error.issues.filter(
+      issue => issue.code !== 'unrecognized_keys',
+    )
+    if (remainingIssues.length > 0) {
+      const msg = `${label} returned updatedInput that failed schema validation: ${formatZodValidationError(tool.name, new z.ZodError(remainingIssues))}\n${HOOK_REWRITE_NOTE}`
+      logForDebugging(msg, { level: 'warn' })
+      return {
+        ok: false,
+        deny: buildHookRewriteDeny(tool, opts.event, opts.source, msg),
+      }
+    }
+  }
+
+  if (!opts.applies) {
+    return { ok: true, input: updatedInput }
+  }
+
+  // Official `HCn`/`zfe`/`ezr`: reject any `__artifact*` reserved key (case-insensitive)
+  // that was not already present with the exact same value on `shown`.
+  if (
+    Object.keys(updatedInput).some(
+      key =>
+        isReservedArtifactKey(key) &&
+        !isKeyUnchangedFromShown(key, updatedInput, opts.shown),
+    )
+  ) {
+    logForDebugging(
+      `${opts.event} hook's updatedInput for ${tool.name} was refused for a reserved key`,
+      { level: 'warn' },
+    )
+    const prefix = `${label} returned updatedInput with a key starting with "${RESERVED_ARTIFACT_KEY_PREFIX}" (in any letter case)`
+    if (opts.event === 'PermissionRequest') {
+      const msg = `${prefix} that Claude Code did not set, or did not set to that value. Only Claude Code sets such keys: send one back unchanged, and add none. The tool was not run.\n${HOOK_REWRITE_NOTE}`
+      return {
+        ok: false,
+        deny: buildHookRewriteDeny(tool, opts.event, opts.source, msg),
+      }
+    }
+    return {
+      ok: false,
+      deny: {
+        behavior: 'deny',
+        message: `${prefix}. Only Claude Code sets such keys. Remove the key from updatedInput. The tool was not run.`,
+        decisionReason: {
+          type: 'other',
+          reason: 'tool call carried a key only an artifact check mints',
+        },
+      },
+    }
+  }
+
+  // Official `nzr`: strip unrecognized keys and re-parse against `tool.inputSchema`.
+  if (!parsed.success) {
+    const stripped = stripUnrecognizedKeysFromInput(
+      updatedInput,
+      parsed.error.issues,
+    )
+    parsed = tool.inputSchema.safeParse(stripped)
+    if (!parsed.success) {
+      const msg = `${label} returned updatedInput that failed schema validation: ${formatZodValidationError(tool.name, new z.ZodError(parsed.error.issues))}\n${HOOK_REWRITE_NOTE}`
+      logForDebugging(msg, { level: 'warn' })
+      return {
+        ok: false,
+        deny: buildHookRewriteDeny(tool, opts.event, opts.source, msg),
+      }
+    }
+  }
+
+  const parsedData =
+    parsed.data !== null &&
+    typeof parsed.data === 'object' &&
+    !Array.isArray(parsed.data)
+      ? (parsed.data as Record<string, unknown>)
+      : updatedInput
+  const cleaned = restoreUnchangedShownKeys(
+    parsedData,
+    updatedInput,
+    opts.shown,
+  )
+
+  // Official `Zlt`: re-run `tool.validateInput()` on the hook-rewritten input.
+  if (opts.validate) {
+    try {
+      const validationRes = await opts.validate(parsedData)
+      if (validationRes?.result === false) {
+        logForDebugging(
+          `${opts.event} hook's updatedInput for ${tool.name} was refused by the tool (code=${validationRes.errorCode})`,
+          { level: 'warn' },
+        )
+        const msg = `${label} returned updatedInput that the tool refused: ${validationRes.message ?? 'Invalid input'}\n${HOOK_REWRITE_NOTE}`
+        return {
+          ok: false,
+          deny: buildHookRewriteDeny(tool, opts.event, opts.source, msg),
+        }
+      }
+    } catch (err) {
+      if (isAbortError(err)) throw err
+      const detail = errorMessage(err)
+      logForDebugging(
+        `${opts.event} hook's updatedInput for ${tool.name}: the tool's check threw ${detail}`,
+        { level: 'warn' },
+      )
+      const msg = `${label} returned updatedInput that the tool could not check: ${detail}\nThe tool input from the model was valid.`
+      return {
+        ok: false,
+        deny: buildHookRewriteDeny(tool, opts.event, opts.source, msg),
+      }
+    }
+  }
+
+  return { ok: true, input: cleaned }
+}
+
+/**
+ * Official 2.1.328 `iSn` (`chunk@294254613.js @1338927`): validate
+ * `PermissionRequest` hook `updatedInput`.
+ */
+export async function validatePermissionRequestUpdatedInput(
+  tool: Tool,
+  updatedInput: Record<string, unknown> | undefined,
+  shown: Record<string, unknown>,
+  validate?: (
+    parsedInput: Record<string, unknown>,
+  ) =>
+    | Promise<{ result: boolean; message?: string; errorCode?: number }>
+    | undefined,
+): Promise<
+  | { input: Record<string, unknown> | undefined; deny?: undefined }
+  | { input?: undefined; deny: PermissionDenyDecision }
+> {
+  if (updatedInput === undefined || Object.keys(updatedInput).length === 0) {
+    return { input: updatedInput }
+  }
+  if (isDeepStrictEqual(updatedInput, shown)) {
+    return { input: shown }
+  }
+  const checked = await validateHookUpdatedInput(tool, updatedInput, {
+    event: 'PermissionRequest',
+    applies: true,
+    shown,
+    validate,
+  })
+  return checked.ok ? { input: checked.input } : { deny: checked.deny }
 }
 
 function isInterruptOrPermissionStopAbort(signal: AbortSignal): boolean {
@@ -1223,34 +1521,34 @@ export async function* runPreToolUseHooks(
             hookPermissionResult: permissionResult,
           }
         }
-        // densable kVn @188788636: validate updatedInput against tool.inputSchema (ignore unrecognized_keys)
+        // Official 2.1.328 `Zlt` / `HCn`: reject reserved `__artifact*` keys,
+        // strip unrecognized keys, validate schema, and re-run `tool.validateInput()`.
         if (result.updatedInput !== undefined) {
-          const parsed = tool.inputSchema.safeParse(result.updatedInput)
-          const remainingIssues = parsed.success
-            ? []
-            : parsed.error.issues.filter(
-                issue => issue.code !== 'unrecognized_keys',
-              )
-          if (!parsed.success && remainingIssues.length > 0) {
-            const validationMessage = `PreToolUse hook for ${tool.name} returned updatedInput that failed schema validation: ${formatZodValidationError(tool.name, new z.ZodError(remainingIssues))}`
-            logForDebugging(validationMessage, { level: 'warn' })
-            const permissionResult: PermissionResult = {
-              behavior: 'deny',
-              message: validationMessage,
-              decisionReason: {
-                type: 'hook',
-                hookName: `PreToolUse:${tool.name}`,
-                hookSource: result.hookSource,
-                reason: validationMessage,
-              },
-            }
-            deniedPermissionResult = permissionResult
+          const applies =
+            result.permissionBehavior !== 'deny' &&
+            result.permissionBehavior !== 'defer'
+          const checked = await validateHookUpdatedInput(
+            tool,
+            result.updatedInput,
+            {
+              event: 'PreToolUse',
+              source: result.hookSource,
+              applies,
+              validate: tool.validateInput
+                ? parsedInput =>
+                    tool.validateInput!(parsedInput as never, toolUseContext)
+                : undefined,
+            },
+          )
+          if (!checked.ok) {
+            deniedPermissionResult = checked.deny
             yield {
               type: 'hookPermissionResult',
-              hookPermissionResult: permissionResult,
+              hookPermissionResult: checked.deny,
             }
             continue
           }
+          result.updatedInput = checked.input
         }
         // densable kVn: block Account Memory MCP input rewrite via ere/tre
         const accountMemoryBlocked =

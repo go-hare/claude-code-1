@@ -12,7 +12,14 @@ import type {
   ToolPermissionContext,
 } from '../../../types/permissions.js'
 import { REPL_TOOL_NAME } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
+import { REPLTool } from '@claude-code/builtin-tools/tools/REPLTool/REPLTool.js'
 import { getDefaultAppState } from '../../../state/AppStateStore.js'
+import { wrapReplToolForCodeMode } from '../executor.js'
+import {
+  resetCodeModeOptInStateForTests,
+  setEngineCheckResultForTests,
+  settleCodeModeOptIn,
+} from '../optIn.js'
 
 const hasTranscriptClassifier = feature('TRANSCRIPT_CLASSIFIER') ? true : false
 const classifierTest = test.skipIf(!hasTranscriptClassifier)
@@ -431,4 +438,49 @@ describe('Code Mode auto-mode permissions (2.1.328)', () => {
       { autoModeClassified: undefined, autoModeScriptCheckDeferred: undefined },
     ])
   })
+
+  classifierTest(
+    'P0-11: real REPLTool and wrapReplToolForCodeMode invoke auto-mode classifier via passthrough -> deferred -> replScriptCheckNow',
+    async () => {
+      classifyYoloActionMock.mockClear()
+      setEngineCheckResultForTests('passed')
+      settleCodeModeOptIn({ state: 'on', source: 'shell' })
+
+      try {
+        const input = { code: 'await Bash({ command: "echo hi" })' }
+        const wrapped = wrapReplToolForCodeMode(REPLTool, () => [])
+
+        for (const tool of [REPLTool, wrapped]) {
+          // Outer call defers script check (does NOT bypass classifier via allow)
+          const outerRes = await hasPermissionsToUseTool(
+            tool,
+            input,
+            makeToolUseContext({ mode: 'auto' }),
+            makeAssistantMessage(`msg_real_outer_${tool.name}`),
+            `toolu_real_outer_${tool.name}`,
+          )
+          expect(outerRes.behavior).toBe('allow')
+          expect(outerRes.decisionReason).toEqual({
+            type: 'other',
+            reason: 'deferred_repl_script_check',
+          })
+
+          // Deferred re-entry (`replScriptCheckNow: true`) invokes classifyYoloAction!
+          const beforeCalls = classifyYoloActionMock.mock.calls.length
+          const checkNowRes = await hasPermissionsToUseTool(
+            tool,
+            input,
+            makeToolUseContext({ mode: 'auto' }, { replScriptCheckNow: true }),
+            makeAssistantMessage(`msg_real_check_${tool.name}`),
+            `toolu_real_check_${tool.name}`,
+          )
+          expect(classifyYoloActionMock.mock.calls.length).toBe(beforeCalls + 1)
+          expect(checkNowRes.behavior).toBe('allow')
+          expect(checkNowRes.decisionReason?.type).toBe('classifier')
+        }
+      } finally {
+        resetCodeModeOptInStateForTests()
+      }
+    },
+  )
 })

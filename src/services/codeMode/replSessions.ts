@@ -13,6 +13,11 @@ import {
   REPL_MAIN_THREAD_KEY,
   REPL_SETTLE_WINDOW_MS,
 } from './constants.js'
+import {
+  isAsyncLaneMode,
+  isAsyncReplEnabled,
+  isCodeModeAccepted,
+} from './optIn.js'
 
 export const ASYNC_REPL_MAX_EVALS = 8
 
@@ -1102,8 +1107,24 @@ export function mainThreadStoppableWork(
 }
 
 /**
- * Official `AIl` (`chunk@314161648.js`): returns the async lane debounce
- * timing configuration (`debounceMs: 750`, `maxWaitMs: 3000`).
+ * Official `NFe` (`chunk@314161648.js` / `chunk@314162732.js`, `isReplSpliceWaitEnabled`):
+ * true when Code Mode opt-in is accepted and async REPL wiring is active.
+ */
+export function isReplSpliceWaitEnabled(): boolean {
+  return isCodeModeAccepted() && isAsyncReplEnabled()
+}
+
+/**
+ * Official `CIl` (`chunk@314161648.js` / `chunk@314162732.js`, `typedMessageJoinsRunningTurn`):
+ * true when splice-wait is enabled and the session is in an async-lane permission mode.
+ */
+export function typedMessageJoinsRunningTurn(permissionMode?: string): boolean {
+  return isReplSpliceWaitEnabled() && isAsyncLaneMode(permissionMode)
+}
+
+/**
+ * Official `AIl` (`chunk@314161648.js` / `chunk@314162732.js`, `replSpliceEventBatching`):
+ * returns the async lane debounce timing configuration (`debounceMs: 750`, `maxWaitMs: 3000`).
  */
 export function getAsyncLaneDebounceConfig(): {
   debounceMs: number
@@ -1115,10 +1136,13 @@ export function getAsyncLaneDebounceConfig(): {
   }
 }
 
+export const replSpliceEventBatching = getAsyncLaneDebounceConfig
+
 /**
- * Official `RIl` (`chunk@314161648.js`): waits for async lane news to debounce
- * (`debounceMs`) up to `maxWaitMs`, or resolves immediately if `signal` aborts
- * or `settled` has aborted while `nothingToLingerFor()` is true.
+ * Official `RIl` (`chunk@314161648.js` / `chunk@314162732.js`, `waitForNews`):
+ * waits for async lane news to debounce (`debounceMs`) up to `maxWaitMs`, or
+ * resolves immediately if `signal` aborts or `settled` has aborted while
+ * `nothingToLingerFor()` is true.
  */
 export function waitAsyncLaneLinger(opts: {
   hasNews: () => boolean
@@ -1188,18 +1212,145 @@ export function waitAsyncLaneLinger(opts: {
 }
 
 /**
+ * Official `waitForNews` (`chunk@314161648.js` / `chunk@314162732.js`) adapter
+ * accepting `news: () => readonly unknown[]` directly.
+ */
+export function waitForNews(opts: {
+  news: () => readonly unknown[]
+  subscribe: (fn: () => void) => () => void
+  signal: AbortSignal
+  settled?: AbortSignal
+  nothingToLingerFor?: () => boolean
+  debounceMs?: number
+  maxWaitMs?: number
+}): Promise<void> {
+  return waitAsyncLaneLinger({
+    hasNews: () => opts.news().length > 0,
+    subscribe: opts.subscribe,
+    signal: opts.signal,
+    settled: opts.settled,
+    nothingToLingerFor: opts.nothingToLingerFor,
+    debounceMs: opts.debounceMs,
+    maxWaitMs: opts.maxWaitMs,
+  })
+}
+
+/**
+ * Official `Hc` (`chunk@305854618.js @104576`): waits for detached/unwaited
+ * async REPL eval settles or queued news before ending the turn, debouncing
+ * bursts via `waitAsyncLaneLinger` (`750ms` / `3000ms`).
+ */
+export async function lingerForAsyncReplEvents(opts: {
+  key?: string
+  sessions?: ReplSessions
+  signal: AbortSignal
+  getNews: () => readonly unknown[]
+  subscribe: (fn: () => void) => () => void
+  isEvalSettleItem?: (item: unknown) => boolean
+  onPendingStatus?: (
+    pending: ReplEvalLedgerEntry[],
+    hasDetachedSettled: boolean,
+  ) => void
+  debounceMs?: number
+  maxWaitMs?: number
+}): Promise<void> {
+  const {
+    key = REPL_MAIN_THREAD_KEY,
+    sessions = getReplSessions(),
+    signal,
+    getNews,
+    subscribe,
+    isEvalSettleItem,
+    onPendingStatus,
+    debounceMs = ASYNC_LANE_DEBOUNCE_MS,
+    maxWaitMs = ASYNC_LANE_MAX_WAIT_MS,
+  } = opts
+  if (signal.aborted) return
+
+  const unwaited = sessions.takeUnwaited(key)
+  const statusLineGiven = sessions.takeStatusLineGiven(key)
+  if (unwaited.length === 0) {
+    const pending = sessions.pending(key)
+    if (!statusLineGiven && pending.some(e => e.state === 'detached')) {
+      onPendingStatus?.(pending, true)
+    }
+    return
+  }
+
+  const settled = new AbortController()
+  let sawLate = false
+  const checkSettled = (): void => {
+    sawLate ||= sessions
+      .ledger(key)
+      .some(e => e.state === 'late' && unwaited.includes(e.id))
+    const undelivered = sessions.undelivered(key)
+    if (!unwaited.some(id => undelivered.has(id))) {
+      settled.abort()
+    }
+  }
+  const unsubRunning = sessions.onRunningScriptsChange(checkSettled)
+  checkSettled()
+  try {
+    await waitAsyncLaneLinger({
+      hasNews: () => getNews().length > 0,
+      subscribe,
+      signal,
+      settled: settled.signal,
+      nothingToLingerFor: () => {
+        if (sawLate || sessions.undelivered(key).size > 0) return false
+        const items = getNews()
+        if (items.length === 0) return false
+        return isEvalSettleItem ? items.every(isEvalSettleItem) : true
+      },
+      debounceMs,
+      maxWaitMs,
+    })
+  } finally {
+    unsubRunning()
+  }
+
+  const remaining = sessions.pending(key)
+  if (remaining.length > 0 && !signal.aborted) {
+    const undelivered = sessions.undelivered(key)
+    const hasDetachedSettled =
+      remaining.some(e => e.state === 'detached') &&
+      unwaited.some(id => !undelivered.has(id))
+    onPendingStatus?.(remaining, hasDetachedSettled)
+  }
+}
+
+function escapeReplEnvelopeText(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+/**
  * Formats an async REPL evaluation's output in the official `<repl-output>` XML
  * envelope (`<repl-output eval="N" ms="..."><result>...</result></repl-output>`
- * or `<error>...</error>`).
+ * or `<error>...</error>`), matching `chunk@325321968.js @254201`.
  */
 export function formatReplOutputEnvelope(opts: {
   evalId: number
   ms: number
   result: string
   isError?: boolean
+  logs?: readonly string[]
 }): string {
-  const { evalId, ms, result, isError = false } = opts
+  const { evalId, ms, result, isError = false, logs } = opts
   const tag = isError ? 'error' : 'result'
   const roundedMs = Math.max(0, Math.round(ms))
-  return `<repl-output eval="${evalId}" ms="${roundedMs}">\n<${tag}>${result}</${tag}>\n</repl-output>`
+  const parts: string[] = []
+  if (logs && logs.length > 0) {
+    for (const line of logs) {
+      const escaped = escapeReplEnvelopeText(line)
+      parts.push(escaped === '' ? '<log/>' : `<log>${escaped}</log>`)
+    }
+  }
+  const escapedResult = escapeReplEnvelopeText(result)
+  parts.push(
+    escapedResult === '' ? `<${tag}/>` : `<${tag}>${escapedResult}</${tag}>`,
+  )
+  return `<repl-output eval="${evalId}" ms="${roundedMs}">\n${parts.join('\n')}\n</repl-output>`
 }

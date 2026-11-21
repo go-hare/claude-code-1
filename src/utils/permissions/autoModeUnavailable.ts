@@ -358,12 +358,35 @@ export async function holdOnAutoModeUnavailable(
 }
 
 /**
- * densable `X7o` — consecutive-unavailable stop denial.
+ * Official 2.1.328 `kLs` (`chunk@294254613.js @3717400` + `chunk@283886268.js @9666`):
+ * host-facing stop codes populated on `decisionReason.hostCode` for headless/cloud turns.
+ */
+export type AutoModeUnavailableStopReason =
+  | 'no_verdict'
+  | 'no_classifier_for_session'
+  | 'no_classifier_for_call'
+
+export type AutoModeUnavailableHostCode =
+  | 'auto_mode_stop_no_verdict'
+  | 'auto_mode_stop_no_check_in_session'
+  | 'auto_mode_stop_no_result_for_calls'
+
+export const AUTO_MODE_UNAVAILABLE_HOST_CODES: Readonly<
+  Record<AutoModeUnavailableStopReason, AutoModeUnavailableHostCode>
+> = {
+  no_verdict: 'auto_mode_stop_no_verdict',
+  no_classifier_for_session: 'auto_mode_stop_no_check_in_session',
+  no_classifier_for_call: 'auto_mode_stop_no_result_for_calls',
+}
+
+/**
+ * Official 2.1.328 `Cao` (formerly `X7o`) — consecutive-unavailable stop denial.
  */
 export function denyAutoModeUnavailableStop(
   tool: Tool,
   context: { agentId?: string },
   recorded: boolean,
+  stopReason: AutoModeUnavailableStopReason = 'no_verdict',
 ): {
   behavior: 'deny'
   decisionReason: {
@@ -371,6 +394,8 @@ export function denyAutoModeUnavailableStop(
     classifier: 'auto-mode'
     reason: string
     noVerdict: true
+    hostCode: AutoModeUnavailableHostCode
+    endsTurn: true
   }
   message: string
   endsTurn: true
@@ -378,6 +403,8 @@ export function denyAutoModeUnavailableStop(
   if (recorded) {
     const isSubagent = context.agentId !== undefined
     logEvent('tengu_auto_mode_unavailable_stop', {
+      reason:
+        stopReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       isSubagent,
       gatewayConfigured: describeClassifierGatewayHost() !== undefined,
     })
@@ -398,6 +425,8 @@ export function denyAutoModeUnavailableStop(
       classifier: 'auto-mode',
       reason: AUTO_MODE_UNAVAILABLE_STOP_REASON,
       noVerdict: true,
+      hostCode: AUTO_MODE_UNAVAILABLE_HOST_CODES[stopReason],
+      endsTurn: true,
     },
     message: autoModeUnavailableToolStopCopy(tool.name),
     endsTurn: true,

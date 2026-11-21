@@ -117,7 +117,11 @@ import {
   normalizeMessages,
   wrapInSystemReminder,
 } from 'src/utils/messages.js'
-import { isLocalAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import {
+  clearAgentPermissionWaitsForAgent,
+  isLocalAgentTask,
+  type StreamTokenEstimateEvent,
+} from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { leftoverIhrBind } from 'src/utils/collapseReadSearch.js'
 import { updateTaskState } from 'src/utils/task/framework.js'
 import {
@@ -578,6 +582,7 @@ export async function* runAgent({
   customAgentType,
   transcriptSubdir,
   onQueryProgress,
+  onStreamTokenEstimate,
   handbackOptIn,
   handbackTool,
   forkedSkillName,
@@ -685,6 +690,8 @@ export async function* runAgent({
    * during long single-block streams (e.g. thinking) where no assistant
    * message is yielded for >60s. */
   onQueryProgress?: () => void
+  /** Official `Ge` (`chunk@303112704.js @151785`): live streamed token estimate callback. */
+  onStreamTokenEstimate?: (event: StreamTokenEstimateEvent) => void
   /**
    * densable `St` handbackOptIn — AgentTool passes `!fork`. Observer / fork
    * leave this false so SubagentHandback is not armed.
@@ -1570,6 +1577,34 @@ export async function* runAgent({
       }
     ).hookOrigin,
   })
+  // Official `chunk@303112704.js @151785`: throttled stream token estimator so
+  // footer progress ticks live while a subagent streams long responses.
+  let pendingStreamTokens = 0
+  let lastStreamEstimateEmitAt = 0
+  const STREAM_TOKEN_ESTIMATE_THROTTLE_MS = 250
+  const flushStreamTokenEstimate = (force: boolean): void => {
+    if (!onStreamTokenEstimate) return
+    const now = Date.now()
+    if (
+      !force &&
+      now - lastStreamEstimateEmitAt < STREAM_TOKEN_ESTIMATE_THROTTLE_MS
+    ) {
+      return
+    }
+    const wholeTokens = Math.floor(pendingStreamTokens)
+    if (wholeTokens <= 0) return
+    pendingStreamTokens -= wholeTokens
+    lastStreamEstimateEmitAt = now
+    try {
+      onStreamTokenEstimate({
+        type: 'tokens',
+        estimatedTokensDelta: wholeTokens,
+      })
+    } catch {
+      // Never abort subagent stream due to progress listener error
+    }
+  }
+
   try {
     for await (const message of query({
       messages: initialMessages,
@@ -1609,19 +1644,56 @@ export async function* runAgent({
         queryCompleted = true
       }
       // Forward subagent API request starts to parent's metrics display
-      // so TTFT/OTPS update during subagent execution.
+      // so TTFT/OTPS update during subagent execution, and feed live streamed
+      // token estimates into `onStreamTokenEstimate`.
       if (message.type === 'stream_event') {
         const event = message.event
         const ttftMs = message.ttftMs
-        if (
-          event !== null &&
-          typeof event === 'object' &&
-          'type' in event &&
-          event.type === 'message_start' &&
-          typeof ttftMs === 'number'
-        ) {
-          toolUseContext.pushApiMetricsEntry?.(ttftMs)
-          continue
+        if (event !== null && typeof event === 'object' && 'type' in event) {
+          if (onStreamTokenEstimate) {
+            if (event.type === 'message_start') {
+              pendingStreamTokens = 0
+              lastStreamEstimateEmitAt = 0
+              try {
+                onStreamTokenEstimate({ type: 'response_start' })
+              } catch {
+                // ignore
+              }
+            } else if (
+              event.type === 'content_block_delta' &&
+              'delta' in event &&
+              event.delta !== null &&
+              typeof event.delta === 'object'
+            ) {
+              const delta = event.delta as {
+                type?: string
+                text?: string
+                thinking?: string
+                partial_json?: string
+                signature?: string
+              }
+              const chars =
+                typeof delta.text === 'string'
+                  ? delta.text.length
+                  : typeof delta.thinking === 'string'
+                    ? delta.thinking.length
+                    : typeof delta.partial_json === 'string'
+                      ? delta.partial_json.length
+                      : typeof delta.signature === 'string'
+                        ? delta.signature.length
+                        : 0
+              if (chars > 0) {
+                pendingStreamTokens += chars / 4
+                flushStreamTokenEstimate(false)
+              }
+            } else if (event.type === 'message_stop') {
+              flushStreamTokenEstimate(true)
+            }
+          }
+          if (event.type === 'message_start' && typeof ttftMs === 'number') {
+            toolUseContext.pushApiMetricsEntry?.(ttftMs)
+            continue
+          }
         }
       }
 
@@ -1752,243 +1824,329 @@ export async function* runAgent({
     queryError = err
     throw err
   } finally {
-    turnHookTracker.ended({
-      isAborted:
-        agentAbortController.signal.aborted ||
-        (!queryCompleted && queryError === undefined),
-      hasFailed: queryError !== undefined,
-    })
-    // densable cleanup stage "SubagentStop": when the query did not finish
-    // (Esc / abort), fire SubagentStop once. No permission mode, no parent
-    // signal (that signal is already aborted), 5000ms. Failures are logged.
-    if (!queryCompleted) {
-      try {
-        for await (const _hookResult of executeStopHooks(
-          undefined,
-          undefined,
-          5000,
-          false,
-          agentId,
-          agentToolUseContext,
-          undefined,
-          agentDefinition.agentType,
-        )) {
-          // drain; do not yield into the aborted parent stream
-        }
-      } catch (err) {
-        logForDebugging(
-          `[runAgent] SubagentStop on interrupted query failed: ${err}`,
-        )
-      }
-    }
-    // densable kbe (#1235) — drop delivery-map row only when agent is not
-    // holding live agent: or handback wait-kids (e.g. bash: own shell in auto mode).
+    // Official `chunk@303112704.js @158164-160150`: evaluate keepalive gating
+    // safely first, then run EVERY cleanup stage in an isolated `try/catch`
+    // so a failure in one stage (e.g. `mcpCleanup()`) never skips downstream
+    // teardown stages (REPL VM, hooks, cache tracking, todos, shells, monitors).
+    let allTasks: Record<string, import('src/tasks/types.js').TaskState> = {}
+    let liveAgentTask: import('src/tasks/types.js').TaskState | undefined
+    let keepaliveGated = false
     try {
-      const { clearHandbackDelivery } =
-        require('src/utils/subagentHandback.js') as typeof import('src/utils/subagentHandback.js')
-      const { hasHandbackWaitKids, hasLiveAgentKeepaliveChildren } =
-        require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
-      const { createTaskRegistry } =
-        require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
-      const registry =
-        toolUseContext.taskRegistry ??
-        createTaskRegistry(toolUseContext.getAppState, rootSetAppState)
-      if (
-        !hasLiveAgentKeepaliveChildren(agentId, registry) &&
-        !hasHandbackWaitKids(agentId, registry)
-      ) {
-        clearHandbackDelivery(agentId)
-      }
-    } catch {
-      // optional
-    }
-    // End Langfuse sub-agent trace (no-op if not configured)
-    endTrace(subTrace)
-    // Clean up agent-specific MCP servers (runs on normal completion, abort, or error)
-    await mcpCleanup()
-    // Clean up agent's session hooks
-    if (agentDefinition.hooks) {
-      clearSessionHooks(rootSetAppState, agentId)
-    }
-    // Clean up prompt cache tracking state for this agent
-    if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
-      cleanupAgentTracking(agentId)
-    }
-    // Official propagateNestedMemory cleanup: queue child-loaded CLAUDE.md
-    // paths onto the parent for the next root turn (coordinator + env gate).
-    try {
-      propagateNestedMemoryFromChild({
-        parent: toolUseContext,
-        childLoadedNestedMemoryPaths:
-          agentToolUseContext.loadedNestedMemoryPaths,
-        worktreePath,
-      })
-    } catch (err) {
-      logForDebugging(`propagateNestedMemory failed: ${err}`)
-    }
-    // Release cloned file state cache memory
-    agentToolUseContext.readFileState.clear()
-    // Release the cloned fork context messages
-    initialMessages.length = 0
-    // Release perfetto agent registry entry
-    unregisterPerfettoAgent(agentId)
-    // Release transcript subdir mapping
-    clearAgentTranscriptSubdir(agentId)
-    // Release this agent's todos entry. Without this, every subagent that
-    // called TodoWrite leaves a key in AppState.todos forever (even after all
-    // items complete, the value is [] but the key stays). Whale sessions
-    // spawn hundreds of agents; each orphaned key is a small leak that adds up.
-    rootSetAppState(prev => {
-      if (!(agentId in prev.todos)) return prev
-      const { [agentId]: _removed, ...todos } = prev.todos
-      return { ...prev, todos }
-    })
-    // densable MC @192520872 `x = g && eo && !ot.signal.aborted && (wHo(ge, n.taskRegistry) || GTe(ge, n.taskRegistry))`:
-    // Async subagents that finished cleanly while holding keepalive reasons
-    // (bash:<id>, monitor:<id>, agent:<id>, workflow:<id>) or owning running
-    // backgrounded bash / monitor tasks park so child events/exit notifications
-    // can wake them — do NOT reap their background shells/monitors!
-    const allTasks =
-      toolUseContext.taskRegistry?.all() ??
-      toolUseContext.getAppState().tasks ??
-      {}
-    const liveAgentTask = allTasks[agentId]
-    const hasKeepaliveReasons =
-      isLocalAgentTask(liveAgentTask) &&
-      (liveAgentTask.keepaliveReasons?.size ?? 0) > 0
-    const hasRunningOwnedBackgroundTasks = Object.values(allTasks).some(
-      task => {
-        const isBackgroundBash =
-          task.type === 'local_bash' && Boolean(task.isBackgrounded)
-        return (
-          task.status === 'running' &&
-          (isBackgroundBash ||
-            task.type === 'monitor_mcp' ||
-            task.type === 'monitor_ws') &&
-          'agentId' in task &&
-          task.agentId === agentId
-        )
-      },
-    )
-    const waitForOwnSubagents = shouldSubagentWaitForOwnSubagents({
-      isNonInteractive: getIsNonInteractiveSession(),
-    })
-    const hasRunningOwnedSubagents =
-      waitForOwnSubagents &&
-      Object.values(allTasks).some(
-        task =>
-          isLocalAgentTask(task) &&
-          task.status === 'running' &&
-          (task.ownerAgentId === agentId || task.parentAgentId === agentId),
-      )
-    const keepaliveGated = Boolean(
-      isAsync &&
-        queryCompleted &&
-        !agentAbortController.signal.aborted &&
-        (hasKeepaliveReasons ||
-          hasRunningOwnedBackgroundTasks ||
-          hasRunningOwnedSubagents),
-    )
-    // Official 2.1.328 (#670): when a subagent stays parked waiting on its own
-    // background subagents, share a single parent `backgroundWaitFirstIdle`
-    // ceiling timestamp across nested subagent waits so chained waits do not
-    // reset the wait budget.
-    if (keepaliveGated && isLocalAgentTask(liveAgentTask)) {
-      try {
-        /* eslint-disable @typescript-eslint/no-require-imports */
-        const { advanceSharedPrintBgWaitFirstIdle } =
-          require('src/cli/printBgWait.js') as typeof import('src/cli/printBgWait.js')
-        /* eslint-enable @typescript-eslint/no-require-imports */
-        const parentTask = liveAgentTask.parentAgentId
-          ? allTasks[liveAgentTask.parentAgentId]
-          : undefined
-        const inheritedFirstIdle =
-          isLocalAgentTask(parentTask) &&
-          parentTask.backgroundWaitFirstIdle != null
-            ? parentTask.backgroundWaitFirstIdle
-            : (liveAgentTask.backgroundWaitFirstIdle ?? null)
-        const sharedFirstIdle = advanceSharedPrintBgWaitFirstIdle({
-          firstIdleAt: inheritedFirstIdle,
-          hasRunningBgTasks: true,
-          now: Date.now(),
-        })
-        if (sharedFirstIdle !== null) {
-          updateTaskState<
-            import('src/tasks/LocalAgentTask/LocalAgentTask.js').LocalAgentTaskState
-          >(agentId, rootSetAppState, t =>
-            t.backgroundWaitFirstIdle === sharedFirstIdle
-              ? t
-              : { ...t, backgroundWaitFirstIdle: sharedFirstIdle },
+      allTasks =
+        toolUseContext.taskRegistry?.all() ??
+        toolUseContext.getAppState().tasks ??
+        {}
+      liveAgentTask = allTasks[agentId]
+      const hasKeepaliveReasons =
+        isLocalAgentTask(liveAgentTask) &&
+        (liveAgentTask.keepaliveReasons?.size ?? 0) > 0
+      const hasRunningOwnedBackgroundTasks = Object.values(allTasks).some(
+        task => {
+          const isBackgroundBash =
+            task.type === 'local_bash' && Boolean(task.isBackgrounded)
+          return (
+            task.status === 'running' &&
+            (isBackgroundBash ||
+              task.type === 'monitor_mcp' ||
+              task.type === 'monitor_ws') &&
+            'agentId' in task &&
+            task.agentId === agentId
           )
-          for (const task of Object.values(allTasks)) {
-            if (
-              isLocalAgentTask(task) &&
-              task.status === 'running' &&
-              (task.ownerAgentId === agentId ||
-                task.parentAgentId === agentId) &&
-              task.backgroundWaitFirstIdle !== sharedFirstIdle
-            ) {
-              updateTaskState<
-                import('src/tasks/LocalAgentTask/LocalAgentTask.js').LocalAgentTaskState
-              >(task.id, rootSetAppState, t => ({
-                ...t,
-                backgroundWaitFirstIdle: sharedFirstIdle,
-              }))
+        },
+      )
+      const waitForOwnSubagents = shouldSubagentWaitForOwnSubagents({
+        isNonInteractive: getIsNonInteractiveSession(),
+      })
+      const hasRunningOwnedSubagents =
+        waitForOwnSubagents &&
+        Object.values(allTasks).some(
+          task =>
+            isLocalAgentTask(task) &&
+            task.status === 'running' &&
+            (task.ownerAgentId === agentId || task.parentAgentId === agentId),
+        )
+      keepaliveGated = Boolean(
+        isAsync &&
+          queryCompleted &&
+          !agentAbortController.signal.aborted &&
+          (hasKeepaliveReasons ||
+            hasRunningOwnedBackgroundTasks ||
+            hasRunningOwnedSubagents),
+      )
+    } catch (err) {
+      logForDebugging(
+        `[runAgent cleanup] keepalive check failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+
+    const cleanupStages: Array<{
+      name: string
+      keepaliveGated?: boolean
+      run: () => void | Promise<void>
+    }> = [
+      {
+        name: 'turnHookTracker',
+        run: () => {
+          turnHookTracker.ended({
+            isAborted:
+              agentAbortController.signal.aborted ||
+              (!queryCompleted && queryError === undefined),
+            hasFailed: queryError !== undefined,
+          })
+        },
+      },
+      {
+        name: 'replContext',
+        keepaliveGated: true,
+        run: () => {
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          const { endSubagentRepl } =
+            require('src/services/codeMode/executor.js') as typeof import('src/services/codeMode/executor.js')
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          endSubagentRepl(agentId)
+        },
+      },
+      {
+        name: 'SubagentStop',
+        run: async () => {
+          if (!queryCompleted) {
+            try {
+              for await (const _hookResult of executeStopHooks(
+                undefined,
+                undefined,
+                5000,
+                false,
+                agentId,
+                agentToolUseContext,
+                undefined,
+                agentDefinition.agentType,
+              )) {
+                // drain; do not yield into the aborted parent stream
+              }
+            } catch (err) {
+              logForDebugging(
+                `[runAgent] SubagentStop on interrupted query failed: ${err}`,
+              )
             }
           }
-        }
-      } catch {
-        // Best-effort ceiling timestamp sharing
-      }
-    }
-    if (!keepaliveGated) {
-      // Official 2.1.327 (#425): if this subagent ended cleanly by itself
-      // without reading a background child agent's completion notification,
-      // rewire orphaned notifications to the main conversation.
-      if (!agentAbortController.signal.aborted) {
-        try {
+        },
+      },
+      {
+        name: 'handbackDelivery',
+        run: () => {
           /* eslint-disable @typescript-eslint/no-require-imports */
-          const { rewireOrphanedOwnerNotifications } =
-            require('src/tasks/LocalAgentTask/LocalAgentTask.js') as typeof import('src/tasks/LocalAgentTask/LocalAgentTask.js')
+          const { clearHandbackDelivery } =
+            require('src/utils/subagentHandback.js') as typeof import('src/utils/subagentHandback.js')
+          const { hasHandbackWaitKids, hasLiveAgentKeepaliveChildren } =
+            require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
           const { createTaskRegistry } =
             require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
-          rewireOrphanedOwnerNotifications(
-            agentId,
+          const registry =
             toolUseContext.taskRegistry ??
-              createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
-          )
-        } catch (err) {
-          logForDebugging(
-            `[runAgent] failed to rewire orphaned owner notifications for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
-          )
-        }
-      }
-      killShellTasksForAgent(
-        agentId,
-        toolUseContext.getAppState,
-        rootSetAppState,
-      )
-      /* eslint-disable @typescript-eslint/no-require-imports */
-      if (feature('MONITOR_TOOL')) {
-        const mcpMod =
-          require('src/tasks/MonitorMcpTask/MonitorMcpTask.js') as typeof import('src/tasks/MonitorMcpTask/MonitorMcpTask.js')
-        mcpMod.killMonitorMcpTasksForAgent(
-          agentId,
-          toolUseContext.getAppState,
-          rootSetAppState,
+            createTaskRegistry(toolUseContext.getAppState, rootSetAppState)
+          if (
+            !hasLiveAgentKeepaliveChildren(agentId, registry) &&
+            !hasHandbackWaitKids(agentId, registry)
+          ) {
+            clearHandbackDelivery(agentId)
+          }
+        },
+      },
+      {
+        name: 'langfuseTrace',
+        run: () => {
+          endTrace(subTrace)
+        },
+      },
+      {
+        name: 'mcp',
+        run: async () => {
+          await mcpCleanup()
+        },
+      },
+      {
+        name: 'sessionHooks',
+        run: () => {
+          if (agentDefinition.hooks) {
+            clearSessionHooks(rootSetAppState, agentId)
+          }
+        },
+      },
+      {
+        name: 'promptCacheTracking',
+        run: () => {
+          if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
+            cleanupAgentTracking(agentId)
+          }
+        },
+      },
+      {
+        name: 'propagateNestedMemory',
+        run: () => {
+          propagateNestedMemoryFromChild({
+            parent: toolUseContext,
+            childLoadedNestedMemoryPaths:
+              agentToolUseContext.loadedNestedMemoryPaths,
+            worktreePath,
+          })
+        },
+      },
+      {
+        name: 'readFileState',
+        run: () => {
+          agentToolUseContext.readFileState.clear()
+        },
+      },
+      {
+        name: 'initialMessages',
+        run: () => {
+          initialMessages.length = 0
+        },
+      },
+      {
+        name: 'perfetto',
+        run: () => {
+          unregisterPerfettoAgent(agentId)
+        },
+      },
+      {
+        name: 'transcriptSubdir',
+        run: () => {
+          clearAgentTranscriptSubdir(agentId)
+        },
+      },
+      {
+        name: 'todos',
+        run: () => {
+          rootSetAppState(prev => {
+            if (!(agentId in prev.todos)) return prev
+            const { [agentId]: _removed, ...todos } = prev.todos
+            return { ...prev, todos }
+          })
+        },
+      },
+      {
+        name: 'permissionWaits',
+        run: () => {
+          clearAgentPermissionWaitsForAgent(agentId)
+        },
+      },
+      {
+        name: 'keepaliveFirstIdle',
+        run: () => {
+          if (!keepaliveGated || !isLocalAgentTask(liveAgentTask)) return
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          const { advanceSharedPrintBgWaitFirstIdle } =
+            require('src/cli/printBgWait.js') as typeof import('src/cli/printBgWait.js')
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          const parentTask = liveAgentTask.parentAgentId
+            ? allTasks[liveAgentTask.parentAgentId]
+            : undefined
+          const inheritedFirstIdle =
+            isLocalAgentTask(parentTask) &&
+            parentTask.backgroundWaitFirstIdle != null
+              ? parentTask.backgroundWaitFirstIdle
+              : (liveAgentTask.backgroundWaitFirstIdle ?? null)
+          const sharedFirstIdle = advanceSharedPrintBgWaitFirstIdle({
+            firstIdleAt: inheritedFirstIdle,
+            hasRunningBgTasks: true,
+            now: Date.now(),
+          })
+          if (sharedFirstIdle !== null) {
+            updateTaskState<
+              import('src/tasks/LocalAgentTask/LocalAgentTask.js').LocalAgentTaskState
+            >(agentId, rootSetAppState, t =>
+              t.backgroundWaitFirstIdle === sharedFirstIdle
+                ? t
+                : { ...t, backgroundWaitFirstIdle: sharedFirstIdle },
+            )
+            for (const task of Object.values(allTasks)) {
+              if (
+                isLocalAgentTask(task) &&
+                task.status === 'running' &&
+                (task.ownerAgentId === agentId ||
+                  task.parentAgentId === agentId) &&
+                task.backgroundWaitFirstIdle !== sharedFirstIdle
+              ) {
+                updateTaskState<
+                  import('src/tasks/LocalAgentTask/LocalAgentTask.js').LocalAgentTaskState
+                >(task.id, rootSetAppState, t => ({
+                  ...t,
+                  backgroundWaitFirstIdle: sharedFirstIdle,
+                }))
+              }
+            }
+          }
+        },
+      },
+      {
+        name: 'nonShellMonitors',
+        keepaliveGated: true,
+        run: () => {
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          if (feature('MONITOR_TOOL')) {
+            const mcpMod =
+              require('src/tasks/MonitorMcpTask/MonitorMcpTask.js') as typeof import('src/tasks/MonitorMcpTask/MonitorMcpTask.js')
+            mcpMod.killMonitorMcpTasksForAgent(
+              agentId,
+              toolUseContext.getAppState,
+              rootSetAppState,
+            )
+            const wsMod =
+              require('src/tasks/MonitorWsTask/MonitorWsTask.js') as typeof import('src/tasks/MonitorWsTask/MonitorWsTask.js')
+            const { createTaskRegistry } =
+              require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
+            wsMod.killMonitorWsTasksForAgent(
+              agentId,
+              toolUseContext.taskRegistry ??
+                createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+            )
+          }
+          /* eslint-enable @typescript-eslint/no-require-imports */
+        },
+      },
+      {
+        name: 'shellTasks',
+        keepaliveGated: true,
+        run: () => {
+          try {
+            if (!agentAbortController.signal.aborted) {
+              /* eslint-disable @typescript-eslint/no-require-imports */
+              const { rewireOrphanedOwnerNotifications } =
+                require('src/tasks/LocalAgentTask/LocalAgentTask.js') as typeof import('src/tasks/LocalAgentTask/LocalAgentTask.js')
+              const { createTaskRegistry } =
+                require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
+              /* eslint-enable @typescript-eslint/no-require-imports */
+              rewireOrphanedOwnerNotifications(
+                agentId,
+                toolUseContext.taskRegistry ??
+                  createTaskRegistry(
+                    toolUseContext.getAppState,
+                    rootSetAppState,
+                  ),
+              )
+            }
+          } finally {
+            killShellTasksForAgent(
+              agentId,
+              toolUseContext.getAppState,
+              rootSetAppState,
+            )
+          }
+        },
+      },
+    ]
+
+    for (const stage of cleanupStages) {
+      if (keepaliveGated && stage.keepaliveGated) continue
+      try {
+        await stage.run()
+      } catch (err) {
+        logForDebugging(
+          `[runAgent cleanup] stage '${stage.name}' failed: ${err instanceof Error ? err.message : String(err)}`,
         )
-        const wsMod =
-          require('src/tasks/MonitorWsTask/MonitorWsTask.js') as typeof import('src/tasks/MonitorWsTask/MonitorWsTask.js')
-        const { createTaskRegistry } =
-          require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
-        wsMod.killMonitorWsTasksForAgent(
-          agentId,
-          toolUseContext.taskRegistry ??
-            createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
-        )
       }
-      /* eslint-enable @typescript-eslint/no-require-imports */
     }
   }
 }

@@ -42,6 +42,7 @@ import {
   scheduleDeferredAgentProgressRebuild,
   unregisterAgentForeground,
   updateAgentProgress as updateAsyncAgentProgress,
+  updateProgressFromStreamTokenEstimate,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import { addKeepaliveReason, agentKeepaliveReason } from 'src/utils/task/framework.js';
 import { createTaskRegistry } from 'src/utils/taskRegistry.js';
@@ -1670,7 +1671,7 @@ export const AgentTool = buildTool({
             await runAsyncAgentLifecycle({
               taskId: agentBackgroundTask.agentId,
               abortController: agentBackgroundTask.abortController!,
-              makeStream: onCacheSafeParams =>
+              makeStream: (onCacheSafeParams, onQueryProgress, onStreamTokenEstimate) =>
                 runAgent({
                   ...runAgentParams,
                   override: {
@@ -1679,6 +1680,8 @@ export const AgentTool = buildTool({
                     abortController: agentBackgroundTask.abortController!,
                   },
                   onCacheSafeParams,
+                  onQueryProgress,
+                  onStreamTokenEstimate,
                 }),
               metadata,
               description,
@@ -1840,6 +1843,16 @@ export const AgentTool = buildTool({
                       stopForegroundSummarization = stop;
                     }
                   : undefined,
+              onStreamTokenEstimate: summaryTaskId
+                ? event => {
+                    updateProgressFromStreamTokenEstimate(syncTracker, event);
+                    updateAsyncAgentProgress(
+                      summaryTaskId,
+                      getProgressUpdate(syncTracker, agentMessages),
+                      rootSetAppState,
+                    );
+                  }
+                : undefined,
             })[Symbol.asyncIterator]();
 
             // Track if an error occurred during iteration
@@ -1993,6 +2006,14 @@ export const AgentTool = buildTool({
                                 stopBackgroundedSummarization = stop;
                               }
                             : undefined,
+                          onStreamTokenEstimate: event => {
+                            updateProgressFromStreamTokenEstimate(tracker, event);
+                            updateAsyncAgentProgress(
+                              backgroundedTaskId,
+                              getProgressUpdate(tracker, agentMessages),
+                              rootSetAppState,
+                            );
+                          },
                         })) {
                           // densable Phn/Ohr — skip spinner_mode control events.
                           if (isRunAgentSpinnerMode(msg)) {

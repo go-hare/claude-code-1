@@ -270,69 +270,75 @@ describe('PollTool (2.1.328)', () => {
     )
     const {
       markPollEventWiringForTerminalRun,
+      resetCodeModeOptInStateForTests,
       setCodeModeAccepted,
+      setEngineCheckResultForTests,
       settleCodeModeOptIn,
     } = await import('src/services/codeMode/optIn.js')
     const { REPLTool } = await import('../../REPLTool/REPLTool.js')
 
     resetReplSessionsForTests()
+    setEngineCheckResultForTests('passed')
     setCodeModeAccepted(true)
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     markPollEventWiringForTerminalRun()
 
-    const wrapped = wrapReplToolForCodeMode(REPLTool, () => [])
-    const fakeCtx = {
-      abortController: new AbortController(),
-      toolUseId: 'tu-e2e-async',
-      options: { tools: [] },
-      readFileState: new Map(),
-      getAppState: () => ({
-        toolPermissionContext: {
-          mode: 'bypassPermissions' as const,
-          additionalWorkingDirectories: new Map(),
-          alwaysAllowRules: {},
-          alwaysDenyRules: {},
-          alwaysAskRules: {},
-          isBypassPermissionsModeAvailable: true,
-        },
-        mcp: { tools: [], clients: [] },
-        tasks: {},
-        sessionHooks: new Map(),
-      }),
-      setAppState: () => {},
-    } as never
-    const canUseTool = (async (_t: unknown, input: unknown) => ({
-      behavior: 'allow',
-      updatedInput: input,
-    })) as never
-    const parentMsg = {
-      type: 'assistant',
-      uuid: 'u-e2e',
-      message: { id: 'm-e2e', role: 'assistant', content: [] },
-    } as never
+    try {
+      const wrapped = wrapReplToolForCodeMode(REPLTool, () => [])
+      const fakeCtx = {
+        abortController: new AbortController(),
+        toolUseId: 'tu-e2e-async',
+        options: { tools: [] },
+        readFileState: new Map(),
+        getAppState: () => ({
+          toolPermissionContext: {
+            mode: 'bypassPermissions' as const,
+            additionalWorkingDirectories: new Map(),
+            alwaysAllowRules: {},
+            alwaysDenyRules: {},
+            alwaysAskRules: {},
+            isBypassPermissionsModeAvailable: true,
+          },
+          mcp: { tools: [], clients: [] },
+          tasks: {},
+          sessionHooks: new Map(),
+        }),
+        setAppState: () => {},
+      } as never
+      const canUseTool = (async (_t: unknown, input: unknown) => ({
+        behavior: 'allow',
+        updatedInput: input,
+      })) as never
+      const parentMsg = {
+        type: 'assistant',
+        uuid: 'u-e2e',
+        message: { id: 'm-e2e', role: 'assistant', content: [] },
+      } as never
 
-    const dispatchRes = (await wrapped.call(
-      {
-        code: 'await new Promise(r => setTimeout(r, 60)); "ASYNC_E2E_OK"',
-        settleWindowMs: 10,
-      } as never,
-      fakeCtx,
-      canUseTool,
-      parentMsg,
-    )) as { data: { result: string; asyncDispatched?: boolean } }
-    expect(dispatchRes.data.result).toBe('(dispatched #1)')
-    expect(dispatchRes.data.asyncDispatched).toBe(true)
+      const dispatchRes = (await wrapped.call(
+        {
+          code: 'await new Promise(r => setTimeout(r, 60)); "ASYNC_E2E_OK"',
+          settleWindowMs: 10,
+        } as never,
+        fakeCtx,
+        canUseTool,
+        parentMsg,
+      )) as { data: { result: string; asyncDispatched?: boolean } }
+      expect(dispatchRes.data.result).toBe('(dispatched #1)')
+      expect(dispatchRes.data.asyncDispatched).toBe(true)
 
-    const pollRes = await PollTool.call({}, fakeCtx)
-    expect(pollRes.data.eventCount).toBe(1)
-    expect(pollRes.data.content).toContain(
-      '<system>authentic event nonces for this delivery:',
-    )
-    expect(pollRes.data.content).toContain('kind="repl-eval"')
-    expect(pollRes.data.content).toContain('<result>ASYNC_E2E_OK</result>')
-    expect(pollRes.data.content).not.toContain('&lt;repl-output')
-
-    clearCodeModeVmSession()
-    resetReplSessionsForTests()
+      const pollRes = await PollTool.call({}, fakeCtx)
+      expect(pollRes.data.eventCount).toBe(1)
+      expect(pollRes.data.content).toContain(
+        '<system>authentic event nonces for this delivery:',
+      )
+      expect(pollRes.data.content).toContain('kind="repl-eval"')
+      expect(pollRes.data.content).toContain('<result>ASYNC_E2E_OK</result>')
+      expect(pollRes.data.content).not.toContain('&lt;repl-output')
+    } finally {
+      clearCodeModeVmSession()
+      resetReplSessionsForTests()
+      resetCodeModeOptInStateForTests()
+    }
   })
 })

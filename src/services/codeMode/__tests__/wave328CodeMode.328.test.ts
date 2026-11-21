@@ -34,6 +34,7 @@ import {
 } from '../executor.js'
 import {
   resetCodeModeOptInStateForTests,
+  setEngineCheckResultForTests,
   settleCodeModeOptIn,
   settleCodeModeOptInAtStartup,
 } from '../optIn.js'
@@ -71,6 +72,7 @@ describe('Wave 327-328 Group 3 — Code Mode (22 items)', () => {
   })
 
   test('#521: Code Mode no longer refuses startup when an installed mod hooks tool calls', async () => {
+    setEngineCheckResultForTests('passed')
     const decision = await settleCodeModeOptInAtStartup({
       env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1' },
       isFirstPartyProvider: true,
@@ -84,6 +86,7 @@ describe('Wave 327-328 Group 3 — Code Mode (22 items)', () => {
     expect(decision.state).toBe('on')
 
     resetCodeModeOptInStateForTests()
+    setEngineCheckResultForTests('passed')
     const decisionAfterThrow = await settleCodeModeOptInAtStartup({
       env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1' },
       isFirstPartyProvider: true,
@@ -139,6 +142,7 @@ describe('Wave 327-328 Group 3 — Code Mode (22 items)', () => {
   })
 
   test('#572: wrapReplToolForCodeMode merges live MCP tools connected mid-session', async () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     const called: string[] = []
     const liveMcpTool = {
@@ -174,6 +178,7 @@ describe('Wave 327-328 Group 3 — Code Mode (22 items)', () => {
   })
 
   test('#573 & #575: shouldRunCodeModeScriptInBackground and planCodeModeFromSession interrupted script notice', () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     expect(shouldRunCodeModeScriptInBackground('auto', true)).toBe(true)
     expect(shouldRunCodeModeScriptInBackground('bypassPermissions', true)).toBe(
@@ -501,6 +506,7 @@ describe('Wave 327-328 Group 3 — Code Mode (22 items)', () => {
   })
 
   test('#581 regression: wrapReplToolForCodeMode hides Write/Edit from read-only subagents even when resolveAvailableTools returns them', async () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     const makeTool = (name: string) => ({
       name,
@@ -561,6 +567,7 @@ describe('Wave 327-328 Group 3 — Code Mode (22 items)', () => {
   })
 
   test('#576/#649/#650/#651 regression: wrapReplToolForCodeMode wires unsetVars, onProgress, MCP status delta, and concise prompt', async () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     const bashTool = {
       name: 'Bash',

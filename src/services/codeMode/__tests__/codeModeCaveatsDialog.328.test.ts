@@ -28,6 +28,7 @@ import {
   resetCodeModeOptInStateForTests,
   reviewCodeModeOptInAfterInit,
   setAsyncReplEnabledForTests,
+  setEngineCheckResultForTests,
   settleCodeModeOptIn,
   settleCodeModeOptInAtStartup,
 } from '../optIn.js'
@@ -153,6 +154,7 @@ describe('Code Mode 2.1.328 caveats dialog, 2-phase opt-in & async/Poll gates', 
 
     // Currently on + refused by compliance -> restart_without_mode + sets restart env
     resetCodeModeOptInStateForTests()
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     const env2: Record<string, string | undefined> = {}
     expect(
@@ -171,6 +173,7 @@ describe('Code Mode 2.1.328 caveats dialog, 2-phase opt-in & async/Poll gates', 
       codeModeAutoModeCaveatAcceptedV1: false,
     }))
 
+    setEngineCheckResultForTests('passed')
     await settleCodeModeOptInAtStartup({
       env: { [CODE_MODE_ENV_VAR]: '1' },
       shellEnv: { [CODE_MODE_ENV_VAR]: '1' },
@@ -235,6 +238,7 @@ describe('Code Mode 2.1.328 caveats dialog, 2-phase opt-in & async/Poll gates', 
     expect(isPollToolEnabled()).toBe(false)
 
     // Code Mode ON without poll wiring -> still false by default
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     expect(isCodeModeEnabled()).toBe(true)
     expect(isAsyncReplEnabled()).toBe(false)
@@ -247,9 +251,9 @@ describe('Code Mode 2.1.328 caveats dialog, 2-phase opt-in & async/Poll gates', 
     expect(isAsyncLaneMode('auto')).toBe(true)
     expect(isAsyncLaneMode('bypassPermissions')).toBe(true)
 
-    // Explicit falsy env disables async REPL
+    // Official 2.1.328 has no CLAUDE_CODE_ASYNC_REPL env toggle
     process.env.CLAUDE_CODE_ASYNC_REPL = '0'
-    expect(isAsyncReplEnabled()).toBe(false)
+    expect(isAsyncReplEnabled()).toBe(true)
     delete process.env.CLAUDE_CODE_ASYNC_REPL
 
     // Test override helper works and resets cleanly
@@ -260,6 +264,7 @@ describe('Code Mode 2.1.328 caveats dialog, 2-phase opt-in & async/Poll gates', 
 
     // Print wiring also enables async REPL
     resetCodeModeOptInStateForTests()
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     markPollEventWiringForPrintRun()
     expect(isAsyncReplEnabled()).toBe(true)

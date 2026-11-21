@@ -17,7 +17,7 @@ describe('v2.1.299-300 hooks alignment (#698)', () => {
     expect(shouldBlockNoBashGuard(hook, 'PreToolUse', true, true)).toBe(false)
     // Not on non-Windows
     expect(shouldBlockNoBashGuard(hook, 'PreToolUse', false, false)).toBe(false)
-    // Not when shell is explicitly set
+    // Also applies when shell is explicitly set (official PDe / #1149)
     expect(
       shouldBlockNoBashGuard(
         { ...hook, shell: 'powershell' },
@@ -25,6 +25,10 @@ describe('v2.1.299-300 hooks alignment (#698)', () => {
         true,
         false,
       ),
+    ).toBe(true)
+    // Not when args is provided
+    expect(
+      shouldBlockNoBashGuard({ ...hook, args: [] }, 'PreToolUse', true, false),
     ).toBe(false)
     // Not when onFailure is continue
     expect(

@@ -1554,7 +1554,11 @@ async function resumeAgentBackgroundAfterClaim({
       runAsyncAgentLifecycle({
         taskId: agentBackgroundTask.agentId,
         abortController: agentBackgroundTask.abortController!,
-        makeStream: onCacheSafeParams =>
+        makeStream: (
+          onCacheSafeParams,
+          onQueryProgress,
+          onStreamTokenEstimate,
+        ) =>
           runAgent({
             ...runAgentParams,
             override: {
@@ -1563,6 +1567,8 @@ async function resumeAgentBackgroundAfterClaim({
               abortController: agentBackgroundTask.abortController!,
             },
             onCacheSafeParams,
+            onQueryProgress,
+            onStreamTokenEstimate,
           }),
         metadata,
         description: uiDescription,

@@ -14,6 +14,7 @@ import {
 } from '../executor.js'
 import {
   resetCodeModeOptInStateForTests,
+  setEngineCheckResultForTests,
   settleCodeModeOptIn,
 } from '../optIn.js'
 
@@ -56,6 +57,7 @@ function makeMockContext(sessionId: string, tools: unknown[]) {
 
 describe('Regression fixes — Code Mode P0 #1, P1 #8, P2 #9', () => {
   test('P0 #1: wrapReplToolForCodeMode runs PreToolUse (updatedInput, deny, continue:false halt), PostToolUse (updatedToolOutput), and PostToolUseFailure hooks on inner calls', async () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
 
     const receivedInputs: unknown[] = []
@@ -316,6 +318,7 @@ describe('Regression fixes — Code Mode P0 #1, P1 #8, P2 #9', () => {
   })
 
   test('BH2-P1-6: inner PostToolUse continue:false/stopReason, PreToolUse additionalContext, and PostToolUse hook_additional_context/hook_blocking_error surface on script result', async () => {
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
 
     let callCount = 0
@@ -521,6 +524,7 @@ describe('Regression fixes — Code Mode P0 #1, P1 #8, P2 #9', () => {
       extractAssignedVars('foo = 42;\n// bar = 1\nconst s = "baz = 2";'),
     ).toEqual(['foo'])
 
+    setEngineCheckResultForTests('passed')
     settleCodeModeOptIn({ state: 'on', source: 'shell' })
     const baseRepl = {
       name: 'REPL',

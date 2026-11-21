@@ -382,7 +382,9 @@ export function rebuildProgressFromMessages(
     }
   }
 
-  for (const usage of [...usageByResponseId.values(), ...anonymousUsages]) {
+  let latestResponseId: string | undefined;
+  for (const [respId, usage] of usageByResponseId.entries()) {
+    latestResponseId = respId;
     const inputTotal =
       (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
     if (inputTotal > 0) {
@@ -393,6 +395,25 @@ export function rebuildProgressFromMessages(
     if (typeof outputTokens === 'number' && outputTokens > 0) {
       tracker.cumulativeOutputTokens += outputTokens;
     }
+  }
+  for (const usage of anonymousUsages) {
+    const inputTotal =
+      (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+    if (inputTotal > 0) {
+      tracker.latestInputTokens = Math.max(tracker.latestInputTokens, inputTotal);
+    }
+    const outputTokens = usage.output_tokens as number;
+    if (typeof outputTokens === 'number' && outputTokens > 0) {
+      tracker.cumulativeOutputTokens += outputTokens;
+    }
+  }
+  if (latestResponseId !== undefined && latestResponseId !== tracker.lastStampedResponseId) {
+    tracker.lastStampedResponseId = latestResponseId;
+    tracker.streamedTokenEstimate = Math.max(
+      0,
+      tracker.streamedTokenEstimate - tracker.streamedTokenEstimateAtResponseStart,
+    );
+    tracker.streamedTokenEstimateAtResponseStart = 0;
   }
 }
 
@@ -778,6 +799,20 @@ export function clearAgentPermissionWaits(sessionKey?: string): void {
     return;
   }
   agentPermissionWaitsBySession.delete(sessionKey);
+}
+
+/** Remove all tracked permission waits belonging to a specific subagent on teardown. */
+export function clearAgentPermissionWaitsForAgent(agentId: string): void {
+  for (const [sessionKey, map] of agentPermissionWaitsBySession.entries()) {
+    for (const [reqId, entry] of map.entries()) {
+      if (entry.agentId === agentId) {
+        map.delete(reqId);
+      }
+    }
+    if (map.size === 0) {
+      agentPermissionWaitsBySession.delete(sessionKey);
+    }
+  }
 }
 
 function getLastAgentAskNoticeOpen(messages: readonly unknown[]): string[] {
@@ -1216,7 +1251,9 @@ export function forfeitChatPins(
 }
 
 /**
- * Official cqi — forfeit all chat pins in AppState and record agentIds.
+ * Official `ova` (`chunk@294254613.js @5694156`): forfeit all chat pins in
+ * AppState, record forfeited agentIds, and clear `waitingNoticeRecipient` on
+ * every local agent task so conversation switches/clears don't retain stale pins.
  */
 export function forfeitAllChatPins(setAppState: SetAppState, now: number = Date.now()): void {
   setAppState(prev => {
@@ -1225,7 +1262,15 @@ export function forfeitAllChatPins(setAppState: SetAppState, now: number = Date.
         chatPinForfeitedAgentIds.add(raw.agentId);
       }
     }
-    const nextTasks = forfeitChatPins(prev.tasks, now);
+    let nextTasks = forfeitChatPins(prev.tasks, now);
+    for (const [id, raw] of Object.entries(nextTasks)) {
+      if (isLocalAgentTask(raw) && raw.waitingNoticeRecipient !== undefined) {
+        nextTasks = {
+          ...nextTasks,
+          [id]: { ...raw, waitingNoticeRecipient: undefined },
+        };
+      }
+    }
     return nextTasks === prev.tasks ? prev : { ...prev, tasks: nextTasks };
   });
 }
@@ -2005,6 +2050,7 @@ export function killAsyncAgent(
   });
   if (killed) {
     clearDeferredAgentProgressRebuild(taskId);
+    clearAgentPermissionWaitsForAgent(taskId);
     resetImageRereadState(taskId);
     // Running kill: detach owner KA (local residual; densable pre-steps only
     // cover YC). Parked paths already handled tB/BRt above — avoid double tB.
@@ -2546,6 +2592,7 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
   });
   if (completed) {
     clearDeferredAgentProgressRebuild(taskId);
+    clearAgentPermissionWaitsForAgent(taskId);
     resetImageRereadState(taskId);
     evictAgentTaskOutputIfPersistent(taskId);
     // Official DSu: if (o && !i) ... Zeo(n,t) — registry required, never skip.
@@ -2603,6 +2650,7 @@ export function failAgentTask(taskId: string, error: string, registry: TaskRegis
   });
   if (failed) {
     clearDeferredAgentProgressRebuild(taskId);
+    clearAgentPermissionWaitsForAgent(taskId);
     resetImageRereadState(taskId);
     evictAgentTaskOutputIfPersistent(taskId);
     // Official eto: always Zeo after fail (no YC park)

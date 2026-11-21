@@ -602,20 +602,26 @@ export function getMergedTools(
 // Official 2.1.326 #74 / #75 / #76 (`Q3a(jTt)` / `gAa`):
 // Register the primitive tool resolver so Code Mode inline `!` handoffs,
 // background subagents, and mod `$.tool.call` / `$.tool.check` can resolve
-// built-in tools hidden behind `REPL` while honoring deny rules and grants.
+// built-in tools hidden behind `REPL` while honoring deny rules, `--tools`,
+// `--restricted`, plugin `tool.list`, org-blocked MCP tools, and grants.
 registerCodeModePrimitiveToolsResolver<Tool>(
   (currentTools, permissionContext, primitiveToolGrant) => {
-    const base = getAllBaseTools()
-    const allowed = permissionContext
-      ? filterToolsByDenyRules(base, permissionContext as ToolPermissionContext)
-      : base
+    const permCtx = permissionContext as ToolPermissionContext | undefined
+    const filterSet = (list: readonly Tool[]): Tool[] =>
+      permCtx
+        ? filterToolsByDenyRules(list, permCtx)
+        : applyPluginToolListFilter(list).filter(
+            t => t.mcpInfo?.effectiveMaxPermission !== 'blocked',
+          )
+    const allowedCurrent = filterSet(currentTools)
+    const allowedBase = filterSet(getAllBaseTools())
     const granted =
       primitiveToolGrant === undefined
-        ? allowed
-        : allowed.filter(t => primitiveToolGrant.has(t.name))
+        ? allowedBase
+        : allowedBase.filter(t => primitiveToolGrant.has(t.name))
     const seen = new Set<string>()
     const merged: Tool[] = []
-    for (const t of currentTools) {
+    for (const t of allowedCurrent) {
       if (!toolMatchesName(t, REPL_TOOL_NAME)) {
         seen.add(t.name)
         merged.push(t)

@@ -79,6 +79,8 @@ const LOADING_PROMISE_TIMEOUT_MS = 30000 // 30 seconds
 
 // Session-level cache for policy restrictions
 let sessionCache: PolicyLimitsResponse['restrictions'] | null = null
+let sessionArtifactCreateNotice: PolicyLimitsResponse['artifact_create_notice'] =
+  null
 
 /**
  * Test-only sync reset. clearPolicyLimitsCache() does file I/O and is too
@@ -88,8 +90,15 @@ let sessionCache: PolicyLimitsResponse['restrictions'] | null = null
 export function _resetPolicyLimitsForTesting(): void {
   stopBackgroundPolling()
   sessionCache = null
+  sessionArtifactCreateNotice = null
   loadingCompletePromise = null
   loadingCompleteResolve = null
+}
+
+export function _setArtifactCreateNoticeForTesting(
+  notice: NonNullable<PolicyLimitsResponse['artifact_create_notice']> | null,
+): void {
+  sessionArtifactCreateNotice = notice
 }
 
 /**
@@ -240,6 +249,7 @@ export async function primePolicyLimitsCache(
     )
     if (parsed.success) {
       sessionCache = parsed.data.restrictions
+      sessionArtifactCreateNotice = parsed.data.artifact_create_notice ?? null
       leftoverPolicyLimitsHost().sessionCache = parsed.data.restrictions
     }
   } catch (error) {
@@ -471,6 +481,7 @@ async function fetchPolicyLimits(
       return {
         success: true,
         restrictions: {},
+        artifactCreateNotice: null,
         etag: undefined,
         httpStatus: 404,
       }
@@ -502,6 +513,7 @@ async function fetchPolicyLimits(
     return {
       success: true,
       restrictions: parsed.data.restrictions,
+      artifactCreateNotice: parsed.data.artifact_create_notice ?? null,
       httpStatus: 200,
     }
   } catch (error) {
@@ -540,10 +552,10 @@ async function fetchPolicyLimits(
 }
 
 /**
- * Load restrictions from cache file
+ * Load policy limits payload from cache file
  */
 // sync IO: called from sync context (getRestrictionsFromCache -> isPolicyAllowed)
-function loadCachedRestrictions(): PolicyLimitsResponse['restrictions'] | null {
+function loadCachedPolicyLimits(): PolicyLimitsResponse | null {
   try {
     const content = fsReadFileSync(getCachePath(), 'utf-8')
     const data = safeParseJSON(content, false)
@@ -552,21 +564,27 @@ function loadCachedRestrictions(): PolicyLimitsResponse['restrictions'] | null {
       return null
     }
 
-    return parsed.data.restrictions
+    return parsed.data
   } catch {
     return null
   }
 }
 
 /**
- * Save restrictions to cache file
+ * Save restrictions (and optional artifact_create_notice) to cache file
  */
 async function saveCachedRestrictions(
   restrictions: PolicyLimitsResponse['restrictions'],
+  artifactCreateNotice?: PolicyLimitsResponse['artifact_create_notice'],
 ): Promise<void> {
   try {
     const path = getCachePath()
-    const data: PolicyLimitsResponse = { restrictions }
+    const data: PolicyLimitsResponse = {
+      restrictions,
+      ...(artifactCreateNotice
+        ? { artifact_create_notice: artifactCreateNotice }
+        : {}),
+    }
     await writeFile(path, jsonStringify(data, null, 2), {
       encoding: 'utf-8',
       mode: 0o600,
@@ -590,7 +608,9 @@ async function fetchAndLoadPolicyLimits(): Promise<
     return null
   }
 
-  const cachedRestrictions = loadCachedRestrictions()
+  const cachedPayload = loadCachedPolicyLimits()
+  const cachedRestrictions = cachedPayload?.restrictions ?? null
+  const cachedNotice = cachedPayload?.artifact_create_notice ?? null
 
   const cachedChecksum = cachedRestrictions
     ? computeChecksum(cachedRestrictions)
@@ -603,6 +623,7 @@ async function fetchAndLoadPolicyLimits(): Promise<
       if (cachedRestrictions) {
         logForDebugging('Policy limits: Using stale cache after fetch failure')
         sessionCache = cachedRestrictions
+        sessionArtifactCreateNotice = cachedNotice
         leftoverPolicyLimitsHost().sessionCache = cachedRestrictions
         leftoverPolicyLimitsHost().sessionFromServerFetch = false
         leftoverPolicyLimitsHost().sessionAttributed = true
@@ -615,6 +636,7 @@ async function fetchAndLoadPolicyLimits(): Promise<
     if (result.restrictions === null && cachedRestrictions) {
       logForDebugging('Policy limits: Cache still valid (304 Not Modified)')
       sessionCache = cachedRestrictions
+      sessionArtifactCreateNotice = cachedNotice
       leftoverPolicyLimitsHost().sessionCache = cachedRestrictions
       leftoverPolicyLimitsHost().sessionFromServerFetch = true
       leftoverPolicyLimitsHost().sessionAttributed = true
@@ -622,20 +644,24 @@ async function fetchAndLoadPolicyLimits(): Promise<
     }
 
     const newRestrictions = result.restrictions || {}
-    const hasContent = Object.keys(newRestrictions).length > 0
+    const newNotice = result.artifactCreateNotice ?? null
+    const hasContent =
+      Object.keys(newRestrictions).length > 0 || newNotice !== null
 
     if (hasContent) {
       sessionCache = newRestrictions
+      sessionArtifactCreateNotice = newNotice
       leftoverPolicyLimitsHost().sessionCache = newRestrictions
       leftoverPolicyLimitsHost().sessionFromServerFetch = true
       leftoverPolicyLimitsHost().sessionAttributed = true
-      await saveCachedRestrictions(newRestrictions)
+      await saveCachedRestrictions(newRestrictions, newNotice)
       logForDebugging('Policy limits: Applied new restrictions successfully')
       return newRestrictions
     }
 
     // Empty restrictions (404 response) - delete cached file if it exists
     sessionCache = newRestrictions
+    sessionArtifactCreateNotice = null
     leftoverPolicyLimitsHost().sessionCache = newRestrictions
     leftoverPolicyLimitsHost().sessionFromServerFetch = true
     leftoverPolicyLimitsHost().sessionAttributed = true
@@ -654,6 +680,7 @@ async function fetchAndLoadPolicyLimits(): Promise<
     if (cachedRestrictions) {
       logForDebugging('Policy limits: Using stale cache after error')
       sessionCache = cachedRestrictions
+      sessionArtifactCreateNotice = cachedNotice
       leftoverPolicyLimitsHost().sessionCache = cachedRestrictions
       leftoverPolicyLimitsHost().sessionFromServerFetch = false
       leftoverPolicyLimitsHost().sessionAttributed = true
@@ -794,15 +821,27 @@ function getRestrictionsFromCache():
     return leftover
   }
 
-  const cachedRestrictions = loadCachedRestrictions()
-  if (cachedRestrictions) {
-    sessionCache = cachedRestrictions
-    leftoverPolicyLimitsHost().sessionCache = cachedRestrictions
+  const cachedPayload = loadCachedPolicyLimits()
+  if (cachedPayload) {
+    sessionCache = cachedPayload.restrictions
+    sessionArtifactCreateNotice = cachedPayload.artifact_create_notice ?? null
+    leftoverPolicyLimitsHost().sessionCache = cachedPayload.restrictions
     leftoverPolicyLimitsHost().sessionAttributed = true
-    return cachedRestrictions
+    return cachedPayload.restrictions
   }
 
   return null
+}
+
+/**
+ * Official 2.1.328 `len()` (chunk@288232181.js @43131):
+ * `(yC() ?? a().sessionCache)?.artifact_create_notice?.text ?? null`
+ * Return the organization's `artifact_create_notice` text from eligible disk/memory
+ * cache, falling back to an already-populated in-memory session notice.
+ */
+export function getArtifactCreateNotice(): string | null {
+  getRestrictionsFromCache()
+  return sessionArtifactCreateNotice?.text ?? null
 }
 
 /**
@@ -853,6 +892,7 @@ export async function clearPolicyLimitsCache(): Promise<void> {
   stopBackgroundPolling()
 
   sessionCache = null
+  sessionArtifactCreateNotice = null
   leftoverPolicyLimitsHost().sessionCache = null
   leftoverPolicyLimitsHost().sessionFromServerFetch = false
   leftoverPolicyLimitsHost().sessionAttributed = false

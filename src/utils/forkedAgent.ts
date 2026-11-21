@@ -982,6 +982,49 @@ export async function runForkedAgent({
       }
     }
   } finally {
+    // Official `chunk@294254613.js @2826907`: tear down this forked agent's
+    // Code Mode REPL session, reap its shell tasks, and dequeue its agent-scoped
+    // messages in isolated try/catch blocks before releasing memory.
+    const cleanupAgentId = isolatedToolUseContext.agentId ?? agentId
+    if (cleanupAgentId) {
+      try {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const { endSubagentRepl } =
+          require('../services/codeMode/executor.js') as typeof import('../services/codeMode/executor.js')
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        endSubagentRepl(cleanupAgentId)
+      } catch (err) {
+        logForDebugging(
+          `[runForkedAgent] REPL session end failed (continuing teardown): ${err}`,
+        )
+      }
+      try {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const { killShellTasksForAgent } =
+          require('../tasks/LocalShellTask/killShellTasks.js') as typeof import('../tasks/LocalShellTask/killShellTasks.js')
+        const { dequeueAllMatching } =
+          require('./messageQueueManager.js') as typeof import('./messageQueueManager.js')
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        const rootSetAppState =
+          isolatedToolUseContext.setAppStateForTasks ??
+          isolatedToolUseContext.setAppState
+        if (
+          typeof isolatedToolUseContext.getAppState === 'function' &&
+          typeof rootSetAppState === 'function'
+        ) {
+          killShellTasksForAgent(
+            cleanupAgentId,
+            isolatedToolUseContext.getAppState,
+            rootSetAppState,
+          )
+        }
+        dequeueAllMatching(cmd => cmd.agentId === cleanupAgentId)
+      } catch (err) {
+        logForDebugging(
+          `[runForkedAgent] shell-task reap failed (continuing teardown): ${err}`,
+        )
+      }
+    }
     // Release cloned file state cache memory (same pattern as runAgent.ts)
     isolatedToolUseContext.readFileState.clear()
     // Release the cloned fork context messages

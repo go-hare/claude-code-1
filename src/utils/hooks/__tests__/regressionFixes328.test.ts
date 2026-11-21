@@ -15,6 +15,7 @@ import {
   runPreToolUseHooks,
 } from '../../../services/tools/toolHooks.js'
 import { pinValue } from '../../plugins/functionHooksHop.js'
+import { getBootstrapSessionHost } from '../../sessionHost.js'
 import { addSessionHook, clearSessionHooks } from '../sessionHooks.js'
 
 const origEnv: Record<string, string | undefined> = {}
@@ -27,6 +28,7 @@ function setEnv(key: string, value: string | undefined) {
 const spies: Array<{ mockRestore: () => void }> = []
 
 afterEach(() => {
+  getBootstrapSessionHost().launchOptions.replaceDiskless(false)
   while (spies.length > 0) {
     spies.pop()?.mockRestore()
   }
@@ -143,7 +145,7 @@ describe('Regression fixes — Hooks & ToolHooks (P0 #3, P1 #4, P2 #10)', () => 
     ).toBe(true)
 
     // SendUserFile / SendUserMessage protected in diskless/cloud sessions
-    setEnv('CLAUDE_CODE_DISKLESS', '1')
+    getBootstrapSessionHost().launchOptions.replaceDiskless(true)
     expect(
       isPostToolUseOutputRewriteProtected({ name: 'SendUserFile' } as never),
     ).toBe(true)

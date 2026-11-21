@@ -166,9 +166,23 @@ describe('Wave 326 Group 1 — Bash, PowerShell, Worktree, Shell & Monitor', () 
     })
   })
 
-  test('#13 unreadable shell -c command without rm returns null (not unfinishedCheck), while unreadable with rm still asks dangerousRemoval', () => {
-    const res = checkDangerousRmInShellDashC("bash -c $'echo \\x41' $(foo)")
+  test('#13 unreadable shell -c command without rm or ANSI-C escape returns null, while ANSI-C escape obfuscation and rm ask dangerousRemoval', () => {
+    const res = checkDangerousRmInShellDashC('bash -c "echo hi $(foo)"')
     expect(res).toBeNull()
+
+    const obfuscatedRes = checkDangerousRmInShellDashC(
+      "bash -c $'a=\\x72; ${a}m -rf /'",
+    )
+    expect(obfuscatedRes?.behavior).toBe('ask')
+    if (
+      obfuscatedRes?.behavior === 'ask' &&
+      obfuscatedRes.decisionReason?.type === 'safetyCheck'
+    ) {
+      expect(
+        (obfuscatedRes.decisionReason as { circuitBreaker?: string })
+          .circuitBreaker,
+      ).toBe('dangerousRemoval')
+    }
 
     const rmRes = checkDangerousRmInShellDashC("bash -c $'rm -rf /' $(foo)")
     expect(rmRes?.behavior).toBe('ask')
