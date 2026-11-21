@@ -29,10 +29,11 @@ describe('CLI Entrypoints & Plugin Handlers v2.1.292–v2.1.295 (#193, #296, #34
       join(import.meta.dir, '../../../entrypoints/cli.tsx'),
       'utf8',
     )
-    expect(cliSrc).toContain("args[0] === 'stop'")
-    expect(cliSrc).toContain("args[0] === 'logs'")
-    expect(cliSrc).toContain("args[0] === 'kill'")
-    expect(cliSrc).toContain("args[0] === 'rm'")
+    expect(cliSrc).toContain('backgroundSessionVerbIndex')
+    expect(cliSrc).toContain("'stop'")
+    expect(cliSrc).toContain("'logs'")
+    expect(cliSrc).toContain("'kill'")
+    expect(cliSrc).toContain("'rm'")
     expect(cliSrc).toContain("args[0] === 'daemon'")
   })
 

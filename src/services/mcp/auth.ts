@@ -2325,6 +2325,12 @@ export function wrapFetchWithStepUpDetection(
   }
 }
 
+type OAuthTokensWithIssuer = OAuthTokens & { issuer?: string }
+type OAuthClientInformationWithIssuer = OAuthClientInformation & {
+  issuer?: string
+}
+type OAuthProviderContext = { issuer?: string }
+
 export class ClaudeAuthProvider implements OAuthClientProvider {
   private serverName: string
   private serverConfig: McpSSEServerConfig | McpHTTPServerConfig
@@ -2337,7 +2343,8 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   private _metadata?: Awaited<
     ReturnType<typeof discoverAuthorizationServerMetadata>
   >
-  private _refreshInProgress?: Promise<OAuthTokens | undefined>
+  private _expectedIssuer?: string
+  private _refreshInProgress?: Promise<OAuthTokensWithIssuer | undefined>
   private _pendingStepUpScope?: string
   private _lastServedAccessToken?: string
   private onAuthorizationUrlCallback?: (url: string) => void
@@ -2412,6 +2419,19 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     metadata: Awaited<ReturnType<typeof discoverAuthorizationServerMetadata>>,
   ): void {
     this._metadata = metadata
+    if (metadata?.issuer) {
+      this._expectedIssuer = metadata.issuer
+    }
+  }
+
+  async saveAuthorizationServerUrl(url: string): Promise<void> {
+    this._expectedIssuer = url
+  }
+
+  private getExpectedIssuer(
+    context?: OAuthProviderContext,
+  ): string | undefined {
+    return context?.issuer ?? this._metadata?.issuer ?? this._expectedIssuer
   }
 
   /**
@@ -2476,7 +2496,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     return this._state
   }
 
-  async clientInformation(): Promise<OAuthClientInformation | undefined> {
+  async clientInformation(
+    context?: OAuthProviderContext,
+  ): Promise<OAuthClientInformationWithIssuer | undefined> {
     const data = await this.readCredentialStore()
     const serverKey = getServerKey(this.serverName, this.serverConfig)
 
@@ -2488,14 +2510,28 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
       | null
       | undefined
     if (storedInfo?.clientId) {
-      logMCPDebug(this.serverName, `Found client info`)
-      return {
+      const candidate: OAuthClientInformationWithIssuer = {
         client_id: storedInfo.clientId,
         client_secret: storedInfo.clientSecret,
         ...(storedInfo.issuer !== undefined
           ? { issuer: storedInfo.issuer }
           : {}),
-      } as OAuthClientInformation
+      }
+      const expectedIssuer = this.getExpectedIssuer(context)
+      if (expectedIssuer !== undefined) {
+        const validated = validateSep2352Issuer(candidate, expectedIssuer, {
+          canPersistStamp: true,
+        })
+        if (validated === undefined) {
+          logMCPDebug(
+            this.serverName,
+            `Stored client_id issuer mismatch; ignoring stored client info`,
+          )
+          return undefined
+        }
+      }
+      logMCPDebug(this.serverName, `Found client info`)
+      return candidate
     }
 
     // Fallback: pre-configured client ID from server config
@@ -2516,6 +2552,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
 
   async saveClientInformation(
     clientInformation: OAuthClientInformationFull & { issuer?: string },
+    context?: OAuthProviderContext,
   ): Promise<void> {
     const storage = getSecureStorage()
     const existingData = storage.read() || {}
@@ -2526,7 +2563,12 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         })
       | null
       | undefined
-    const persistedIssuer = clientInformation.issuer ?? prevEntry?.issuer
+    const persistedIssuer =
+      clientInformation.issuer ??
+      context?.issuer ??
+      this._metadata?.issuer ??
+      this._expectedIssuer ??
+      prevEntry?.issuer
 
     const updatedData: SecureStorageData = {
       ...existingData,
@@ -2553,7 +2595,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     storage.update(updatedData)
   }
 
-  async tokens(): Promise<OAuthTokens | undefined> {
+  async tokens(
+    context?: OAuthProviderContext,
+  ): Promise<OAuthTokensWithIssuer | undefined> {
     // Cross-process token changes (another CC instance refreshed or invalidated)
     // are picked up via the keychain cache TTL (see macOsKeychainStorage.ts).
     // In-process writes already invalidate the cache via storage.update().
@@ -2565,6 +2609,21 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     const serverKey = getServerKey(this.serverName, this.serverConfig)
 
     const tokenData = data?.mcpOAuth?.[serverKey]
+    const expectedIssuer = this.getExpectedIssuer(context)
+    if (
+      tokenData &&
+      expectedIssuer !== undefined &&
+      validateSep2352Issuer(tokenData, expectedIssuer, {
+        canPersistStamp: true,
+      }) === undefined
+    ) {
+      logMCPDebug(
+        this.serverName,
+        `Stored tokens issuer mismatch; refusing to serve credentials for different issuer`,
+      )
+      this.clearStepUpPendingOnCredentialGone()
+      return undefined
+    }
     if (
       tokenData?.accessToken &&
       rejectedStoredTokens.get(serverKey) === tokenData.accessToken
@@ -2623,7 +2682,13 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
       }
       try {
         const refreshed = await this._refreshInProgress
-        if (refreshed) return refreshed
+        if (refreshed) {
+          this._lastServedAccessToken = refreshed.access_token
+          return {
+            ...refreshed,
+            issuer: refreshed.issuer ?? tokenData?.issuer,
+          }
+        }
       } catch (e) {
         logMCPDebug(
           this.serverName,
@@ -2702,7 +2767,10 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         if (refreshed) {
           logMCPDebug(this.serverName, `Token refreshed successfully`)
           this._lastServedAccessToken = refreshed.access_token
-          return refreshed
+          return {
+            ...refreshed,
+            issuer: refreshed.issuer ?? tokenData.issuer,
+          }
         }
         logMCPDebug(
           this.serverName,
@@ -2717,12 +2785,13 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     }
 
     // Return current tokens (may be expired if refresh failed or not needed yet)
-    const tokens = {
+    const tokens: OAuthTokensWithIssuer = {
       access_token: tokenData.accessToken,
       refresh_token: needsStepUp ? undefined : tokenData.refreshToken,
       expires_in: expiresIn,
       scope: tokenData.scope,
       token_type: 'Bearer',
+      issuer: tokenData.issuer,
     }
 
     logMCPDebug(this.serverName, `Returning tokens`)
@@ -2733,7 +2802,10 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     return tokens
   }
 
-  async saveTokens(tokens: OAuthTokens): Promise<void> {
+  async saveTokens(
+    tokens: OAuthTokensWithIssuer,
+    context?: OAuthProviderContext,
+  ): Promise<void> {
     if (dialedWithoutOAuth.get(this.serverName) === this.serverConfig.url) {
       dialedWithoutOAuth.delete(this.serverName)
     }
@@ -2749,6 +2821,13 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     const storage = getSecureStorage()
     const existingData = storage.read() || {}
     const serverKey = getServerKey(this.serverName, this.serverConfig)
+    const existingEntry = existingData.mcpOAuth?.[serverKey]
+    const persistedIssuer =
+      tokens.issuer ??
+      context?.issuer ??
+      this._metadata?.issuer ??
+      this._expectedIssuer ??
+      existingEntry?.issuer
 
     logMCPDebug(this.serverName, `Saving tokens`)
     logMCPDebug(this.serverName, `Token expires in: ${tokens.expires_in}`)
@@ -2759,16 +2838,16 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
       mcpOAuth: {
         ...existingData.mcpOAuth,
         [serverKey]: {
-          ...existingData.mcpOAuth?.[serverKey],
+          ...existingEntry,
           serverName: this.serverName,
           serverUrl: this.serverConfig.url,
           accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
+          refreshToken: tokens.refresh_token ?? existingEntry?.refreshToken,
           expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
           scope: tokens.scope,
+          ...(persistedIssuer !== undefined ? { issuer: persistedIssuer } : {}),
           // Keep redirectUri across token refresh for densable port reuse
-          redirectUri:
-            existingData.mcpOAuth?.[serverKey]?.redirectUri ?? this.redirectUri,
+          redirectUri: existingEntry?.redirectUri ?? this.redirectUri,
         },
       },
     }
@@ -3059,6 +3138,12 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     const existingData = storage.read() || {}
     const serverKey = getServerKey(this.serverName, this.serverConfig)
 
+    const discoveredIssuer =
+      state.authorizationServerMetadata?.issuer ?? state.authorizationServerUrl
+    if (discoveredIssuer) {
+      this._expectedIssuer = discoveredIssuer
+    }
+
     logMCPDebug(
       this.serverName,
       `Saving discovery state (authServer: ${state.authorizationServerUrl})`,
@@ -3157,7 +3242,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
 
   async refreshAuthorization(
     refreshToken: string,
-  ): Promise<OAuthTokens | undefined> {
+  ): Promise<OAuthTokensWithIssuer | undefined> {
     const serverKey = getServerKey(this.serverName, this.serverConfig)
     const claudeDir = getClaudeConfigHomeDir()
     await mkdir(claudeDir, { recursive: true })
@@ -3228,6 +3313,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
             expires_in: expiresIn,
             scope: tokenData.scope,
             token_type: 'Bearer',
+            issuer: tokenData.issuer,
           }
         }
         // Use the freshest refresh token from storage
@@ -3255,7 +3341,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
    */
   private async readConcurrentRefreshWinner(): Promise<{
     tokenData: NonNullable<SecureStorageData['mcpOAuth']>[string] | undefined
-    freshTokens: OAuthTokens | undefined
+    freshTokens: OAuthTokensWithIssuer | undefined
   }> {
     clearKeychainCache()
     const storage = getSecureStorage()
@@ -3285,6 +3371,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           expires_in: expiresIn,
           scope: tokenData.scope,
           token_type: 'Bearer',
+          issuer: tokenData.issuer,
         },
       }
     }
@@ -3293,7 +3380,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
 
   private async _doRefresh(
     refreshToken: string,
-  ): Promise<OAuthTokens | undefined> {
+  ): Promise<OAuthTokensWithIssuer | undefined> {
     const MAX_ATTEMPTS = 3
 
     const mcpServerBaseUrl = getLoggingSafeMcpBaseUrl(this.serverConfig)
@@ -3405,12 +3492,16 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           const key = getServerKey(this.serverName, this.serverConfig)
           const wasTransient = hasRecentTransientMcpRefreshFailure(key)
           clearTransientMcpRefreshFailure(key)
-          await this.saveTokens(newTokens)
+          const stampedTokens: OAuthTokensWithIssuer = {
+            ...newTokens,
+            ...(metadata.issuer ? { issuer: metadata.issuer } : {}),
+          }
+          await this.saveTokens(stampedTokens)
           emitRefreshEvent('success')
           if (wasTransient) {
             emitMcpAuthRecovered(this.serverName, this.serverConfig)
           }
-          return newTokens
+          return stampedTokens
         }
 
         logMCPDebug(this.serverName, `Token refresh returned no tokens`)

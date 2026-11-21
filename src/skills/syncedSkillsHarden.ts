@@ -358,6 +358,10 @@ export function awaitPendingSkillDownload(
   })
 }
 
+export function hasPendingSkillDownload(skillName: string): boolean {
+  return pendingSkillDownloads.has(skillName)
+}
+
 export function clearPendingSkillDownloads(): void {
   for (const entry of pendingSkillDownloads.values()) {
     entry.controller.abort()

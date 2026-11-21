@@ -37,6 +37,8 @@ import {
 } from './cronTasks.js'
 import { getCronJitterConfig } from './cronJitterConfig.js'
 import { isEnvTruthy } from './envUtils.js'
+import { writePendingWakeup } from './orphanCronResume.js'
+import { getBgJobDirectory } from './sessionNameJobSidecar.js'
 
 /** densable loop.md sentinels (also in loopFire; inlined to avoid circular import). */
 const LOOP_FILE_SENTINEL = '<<loop.md>>'
@@ -223,6 +225,18 @@ export function markLoopEnded(
 }
 
 /**
+ * Official 2.1.328 `F()` (`KUn(void 0)` in chunk@303673735.js @4854):
+ * Remove `.pending-wakeup` sidecar when a dynamic loop wakeup fires or all
+ * pending loop wakeups are cancelled/stopped.
+ */
+export function clearPendingWakeupOnFire(
+  sessionDir: string | undefined = getBgJobDirectory(),
+): Promise<void> {
+  if (!sessionDir) return Promise.resolve()
+  return writePendingWakeup(sessionDir, undefined).catch(() => {})
+}
+
+/**
  * densable `BU_` — cancel all pending kind:"loop" session tasks; return count.
  */
 export function cancelPendingLoopWakeups(): number {
@@ -230,7 +244,9 @@ export function cancelPendingLoopWakeups(): number {
     .filter(t => t.kind === 'loop')
     .map(t => t.id)
   if (ids.length === 0) return 0
-  return removeSessionCronTasks(ids)
+  const removed = removeSessionCronTasks(ids)
+  void clearPendingWakeupOnFire()
+  return removed
 }
 
 /**
@@ -244,6 +260,8 @@ export function stopDynamicLoop(): number {
   setLoopTickInFlightPrompt(null)
   setLoopConsecutiveKeepalives(0)
   removeSessionCronTasks(pending.map(t => t.id))
+  // Official `Sca`: always clear persisted `.pending-wakeup` even if pending===0
+  void clearPendingWakeupOnFire()
   for (const t of pending) clearLoopChainStartedAt(t.prompt)
   if (inFlight !== null) clearLoopChainStartedAt(inFlight)
   if (alreadyEnded) {
@@ -271,6 +289,7 @@ export function scheduleDynamicWakeup(
     viaKeepalive?: boolean
     reason?: string
     nowMs?: number
+    toolUseId?: string
   } = {},
 ): ScheduleWakeupResult | null {
   const viaKeepalive = opts.viaKeepalive === true
@@ -336,6 +355,16 @@ export function scheduleDynamicWakeup(
   })
   setScheduledTasksEnabled(true)
   setLoopEnded(false)
+  if (opts.toolUseId !== undefined) {
+    const jobDir = getBgJobDirectory()
+    if (jobDir) {
+      void writePendingWakeup(jobDir, {
+        toolUseId: opts.toolUseId,
+        scheduledFor: targetMs,
+        chainStartedAt: startedAt,
+      }).catch(() => {})
+    }
+  }
 
   if (viaKeepalive) {
     setLoopConsecutiveKeepalives(getLoopConsecutiveKeepalives() + 1)
@@ -465,6 +494,8 @@ export function cancelLoopWakeupsOnUserAbort(
   const inFlight = getLoopTickInFlightPrompt()
   setLoopTickInFlightPrompt(null)
   setLoopConsecutiveKeepalives(0)
+  // Official `uHo`: clear persisted `.pending-wakeup` even when pending===0
+  void clearPendingWakeupOnFire()
   if (pending.length === 0 && inFlight === null) return 0
   removeSessionCronTasks(pending.map(t => t.id))
   for (const t of pending) clearLoopChainStartedAt(t.prompt)
@@ -483,6 +514,9 @@ export function cancelLoopWakeupsOnUserAbort(
   }
   return pending.length
 }
+
+/** Alias matching official `uHo` / cancelAllDynamicLoopWakeups naming. */
+export const cancelAllDynamicLoopWakeups = cancelLoopWakeupsOnUserAbort
 
 export type SettleLoopTickOptions = {
   /**
@@ -516,6 +550,9 @@ export function settleLoopTickAfterIdle(options: SettleLoopTickOptions = {}): {
     return { hadInFlight: false, keepalive: undefined }
   }
   setLoopTickInFlightPrompt(null)
+  if (!hasPendingLoopWakeups()) {
+    void clearPendingWakeupOnFire()
+  }
   if (
     armKeepalive &&
     isLoopKeepaliveGateEnabled() &&

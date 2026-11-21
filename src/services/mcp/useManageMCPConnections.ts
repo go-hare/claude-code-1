@@ -334,7 +334,13 @@ export function startSlowBackgroundReconnectForServer(
       slowAttempt += 1
       logMCPDebug(serverName, `Background reconnect attempt ${slowAttempt}`)
       try {
-        const result = await reconnect(serverName, serverConfig)
+        const result = await reconnect(
+          serverName,
+          serverConfig,
+          undefined,
+          undefined,
+          { keepConnectionInUse: true },
+        )
         if (!isStillValid(timer)) {
           disposeIfStaleConnected(result.client)
           if (deps.timers.get(serverName) === timer) {
@@ -342,9 +348,14 @@ export function startSlowBackgroundReconnectForServer(
           }
           return
         }
+        const keptToolsListFailed =
+          result.keptConnectionInUse === true &&
+          result.client.type === 'connected' &&
+          result.client.toolsListError !== undefined
         if (
-          result.client.type === 'connected' ||
-          result.client.type === 'needs-auth'
+          !keptToolsListFailed &&
+          (result.client.type === 'connected' ||
+            result.client.type === 'needs-auth')
         ) {
           deps.timers.delete(serverName)
           deps.onConnectionAttempt({ ...result, attemptEpoch })
@@ -530,7 +541,13 @@ export async function runReconnectWithBackoffForServer(
 
     const reconnectStartTime = Date.now()
     try {
-      const result = await reconnect(serverName, serverConfig)
+      const result = await reconnect(
+        serverName,
+        serverConfig,
+        undefined,
+        undefined,
+        { keepConnectionInUse: true },
+      )
       const elapsed = Date.now() - reconnectStartTime
 
       const inFlightSupersession = getSupersessionReason()
@@ -540,14 +557,27 @@ export async function runReconnectWithBackoffForServer(
           `Automatic reconnection attempt ${attempt} superseded while in flight (${inFlightSupersession}); discarding result`,
         )
         if (result.client.type === 'connected') {
-          void detachAndClose(result.client).catch(() => {})
+          const liveRow = deps.getLiveRow(serverName)
+          if (
+            !(
+              liveRow?.type === 'connected' &&
+              liveRow.client === result.client.client
+            )
+          ) {
+            void detachAndClose(result.client).catch(() => {})
+          }
         }
         settleIfPendingOnSupersession(inFlightSupersession)
         clearOwnedTimer()
         return
       }
 
-      if (result.client.type === 'connected') {
+      const keptToolsListFailed =
+        result.keptConnectionInUse === true &&
+        result.client.type === 'connected' &&
+        result.client.toolsListError !== undefined
+
+      if (result.client.type === 'connected' && !keptToolsListFailed) {
         logMCPDebug(
           serverName,
           `${transportType} reconnection successful after ${elapsed}ms (attempt ${attempt})`,
@@ -2070,7 +2100,13 @@ export function useManageMCPConnections(
         ) {
           return
         }
-        void reconnectMcpServerImpl(serverName, current.config)
+        void reconnectMcpServerImpl(
+          serverName,
+          current.config,
+          undefined,
+          undefined,
+          { keepConnectionInUse: true },
+        )
           .then(res => {
             if (res.client.type === 'connected') {
               onConnectionAttempt(res)

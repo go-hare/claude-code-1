@@ -1,9 +1,10 @@
+import { AsyncLocalStorage } from 'async_hooks'
 import type { StructuredPatchHunk } from 'diff'
 import { access, copyFile, lstat, mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { dirname, join, relative, sep } from 'path'
 import { getOriginalCwd, getSessionStartTime } from '../bootstrap/state.js'
-import { getCwd } from './cwd.js'
+import { getCwd, getCwdOverride } from './cwd.js'
 import { getCachedRepository } from './detectRepository.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { isFileWithinReadSizeLimit } from './file.js'
@@ -74,15 +75,29 @@ const MAX_FILES_FOR_DETAILS = 500 // Skip per-file details if more files than th
 /** densable `_t=500` — lstat cap before AzS filter. */
 const UNTRACKED_LSTAT_CAP = 500
 
+const privateGitIndexEnvStore = new AsyncLocalStorage<NodeJS.ProcessEnv>()
+
+function activeGitRoot(): string {
+  const override = getCwdOverride()
+  if (override !== undefined) return override
+  try {
+    return process.cwd()
+  } catch {
+    return diffRoot()
+  }
+}
+
 function gitOpts(abort?: AbortSignal, envOverride?: NodeJS.ProcessEnv) {
   return {
     timeout: GIT_TIMEOUT_MS,
     preserveOutputOnError: false,
+    useCwd: getCwdOverride() !== undefined,
     abortSignal: abort,
     env: {
       ...process.env,
       GIT_OPTIONAL_LOCKS: '0',
       GIT_TERMINAL_PROMPT: '0',
+      ...privateGitIndexEnvStore.getStore(),
       ...envOverride,
     },
   }
@@ -103,14 +118,27 @@ export async function withPrivateGitIndex<T>(
     await copyFile(join(gitDir, 'index'), privateIndex).catch(() => {
       // Missing index (e.g. unborn repo) is fine — git treats absent GIT_INDEX_FILE as empty
     })
-    return await fn({
+    const indexEnv: NodeJS.ProcessEnv = {
       GIT_INDEX_FILE: privateIndex,
       GIT_OPTIONAL_LOCKS: '0',
       GIT_TERMINAL_PROMPT: '0',
-    })
+    }
+    return await privateGitIndexEnvStore.run(indexEnv, () => fn(indexEnv))
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+async function runWithOptionalPrivateGitIndex<T>(
+  rootDir: string,
+  fn: (envOverride?: NodeJS.ProcessEnv) => Promise<T>,
+): Promise<T> {
+  if (privateGitIndexEnvStore.getStore() !== undefined) {
+    return fn(privateGitIndexEnvStore.getStore())
+  }
+  const gitDir = await getGitDir(rootDir)
+  if (!gitDir) return fn(undefined)
+  return withPrivateGitIndex(gitDir, env => fn(env))
 }
 
 /** densable `_zS` / `AzS` clock compare. */
@@ -186,6 +214,7 @@ export function nextHunksOnVFf(
 async function fetchDiffAgainstRef(
   ref: string,
   abort?: AbortSignal,
+  envOverride?: NodeJS.ProcessEnv,
 ): Promise<Omit<GitDiffResult, 'source' | 'hunks'> | null> {
   const { stdout: shortstatOut, code: shortstatCode } = await execFileNoThrow(
     gitExe(),
@@ -198,7 +227,7 @@ async function fetchDiffAgainstRef(
       ref,
       '--',
     ],
-    gitOpts(abort),
+    gitOpts(abort, envOverride),
   )
 
   if (shortstatCode === 0) {
@@ -220,7 +249,7 @@ async function fetchDiffAgainstRef(
       ref,
       '--',
     ],
-    gitOpts(abort),
+    gitOpts(abort, envOverride),
   )
 
   if (numstatCode !== 0) return null
@@ -307,11 +336,12 @@ export async function resolveBranchDiffBase(
  */
 async function fetchWorkingTreeNumstat(
   abort?: AbortSignal,
+  envOverride?: NodeJS.ProcessEnv,
 ): Promise<NumstatResult | null> {
   const { stdout, code } = await execFileNoThrow(
     gitExe(),
     ['--no-optional-locks', '-c', 'diff.relative=false', 'diff', '--numstat'],
-    gitOpts(abort),
+    gitOpts(abort, envOverride),
   )
   if (code !== 0) return null
   return parseGitNumstat(stdout)
@@ -348,11 +378,12 @@ export function foldEmptyRepoWorkingTreeStats(
  */
 async function emptyRepoDiff(
   abort?: AbortSignal,
+  envOverride?: NodeJS.ProcessEnv,
 ): Promise<GitDiffResult | null> {
   const { code } = await execFileNoThrow(
     gitExe(),
     ['--no-optional-locks', 'rev-parse', '--verify', '--quiet', 'HEAD'],
-    gitOpts(abort),
+    gitOpts(abort, envOverride),
   )
   if (code !== 1) return null
   const result: GitDiffResult = {
@@ -362,13 +393,13 @@ async function emptyRepoDiff(
     source: { kind: 'working-tree' },
     noCommits: true,
   }
-  const cached = await fetchDiffAgainstRef('--cached', abort)
+  const cached = await fetchDiffAgainstRef('--cached', abort, envOverride)
   if (cached) {
     result.stats = cached.stats
     result.perFileStats = cached.perFileStats
     if (cached.stats.filesCount > MAX_FILES_FOR_DETAILS) return result
     if (cached.stats.filesCount > 0) {
-      const working = await fetchWorkingTreeNumstat(abort)
+      const working = await fetchWorkingTreeNumstat(abort, envOverride)
       if (working) foldEmptyRepoWorkingTreeStats(result, working)
     }
   }
@@ -376,7 +407,9 @@ async function emptyRepoDiff(
     const remaining = MAX_FILES - result.perFileStats.size
     attachUntracked(
       result,
-      remaining > 0 ? await fetchUntrackedFiles(remaining, abort) : null,
+      remaining > 0
+        ? await fetchUntrackedFiles(remaining, abort, false, envOverride)
+        : null,
     )
   }
   return result
@@ -389,22 +422,23 @@ async function fetchBranchDiff(
   abort: AbortSignal | undefined,
   required: boolean,
   untracked?: Map<string, PerFileStats> | null,
+  envOverride?: NodeJS.ProcessEnv,
 ): Promise<GitDiffResult | null> {
   const resolved = await resolveBranchDiffBase(abort)
   if (resolved.kind === 'error') {
-    return required ? emptyRepoDiff(abort) : null
+    return required ? emptyRepoDiff(abort, envOverride) : null
   }
   let against: Omit<GitDiffResult, 'source' | 'hunks'> | null
   let source: DiffSource
   if (resolved.kind !== 'merge-base') {
     if (!required) return null
-    against = await fetchDiffAgainstRef('HEAD', abort)
+    against = await fetchDiffAgainstRef('HEAD', abort, envOverride)
     source =
       resolved.kind === 'head-is-base'
         ? { kind: 'branch', baseBranch: resolved.baseBranch, baseRef: 'HEAD' }
         : { kind: 'working-tree' }
   } else {
-    against = await fetchDiffAgainstRef(resolved.mergeBase, abort)
+    against = await fetchDiffAgainstRef(resolved.mergeBase, abort, envOverride)
     source = {
       kind: 'branch',
       baseBranch: resolved.baseBranch,
@@ -412,7 +446,9 @@ async function fetchBranchDiff(
     }
   }
   if (against === null) {
-    return resolved.kind === 'merge-base' ? null : emptyRepoDiff(abort)
+    return resolved.kind === 'merge-base'
+      ? null
+      : emptyRepoDiff(abort, envOverride)
   }
   const result: GitDiffResult = {
     ...against,
@@ -426,7 +462,7 @@ async function fetchBranchDiff(
       untracked !== undefined
         ? untracked
         : remaining > 0
-          ? await fetchUntrackedFiles(remaining, abort)
+          ? await fetchUntrackedFiles(remaining, abort, false, envOverride)
           : null,
     )
   }
@@ -448,52 +484,54 @@ export async function fetchGitDiff(
     return null
   }
 
-  if (mode === 'branch') {
-    return fetchBranchDiff(abort, true)
-  }
+  return runWithOptionalPrivateGitIndex(activeGitRoot(), async () => {
+    if (mode === 'branch') {
+      return fetchBranchDiff(abort, true)
+    }
 
-  const head = await fetchDiffAgainstRef('HEAD', abort)
-  if (head === null) return emptyRepoDiff(abort)
+    const head = await fetchDiffAgainstRef('HEAD', abort)
+    if (head === null) return emptyRepoDiff(abort)
 
-  if (head.stats.filesCount > MAX_FILES_FOR_DETAILS) {
-    return { ...head, hunks: new Map(), source: { kind: 'working-tree' } }
-  }
+    if (head.stats.filesCount > MAX_FILES_FOR_DETAILS) {
+      return { ...head, hunks: new Map(), source: { kind: 'working-tree' } }
+    }
 
-  if (mode === 'session') {
+    if (mode === 'session') {
+      const working: GitDiffResult = {
+        ...head,
+        hunks: new Map(),
+        source: { kind: 'working-tree' },
+      }
+      const remaining = MAX_FILES - working.perFileStats.size
+      await Promise.all([
+        markPreSessionFiles(working),
+        remaining > 0
+          ? fetchUntrackedFiles(remaining, abort, true).then(u =>
+              attachUntracked(working, u),
+            )
+          : Promise.resolve(),
+      ])
+      return working
+    }
+
+    const remaining = MAX_FILES - head.perFileStats.size
+    const untracked =
+      remaining > 0 ? await fetchUntrackedFiles(remaining, abort, false) : null
     const working: GitDiffResult = {
       ...head,
       hunks: new Map(),
       source: { kind: 'working-tree' },
     }
-    const remaining = MAX_FILES - working.perFileStats.size
-    await Promise.all([
-      markPreSessionFiles(working),
-      remaining > 0
-        ? fetchUntrackedFiles(remaining, abort, true).then(u =>
-            attachUntracked(working, u),
-          )
-        : Promise.resolve(),
-    ])
-    return working
-  }
+    attachUntracked(working, untracked)
 
-  const remaining = MAX_FILES - head.perFileStats.size
-  const untracked =
-    remaining > 0 ? await fetchUntrackedFiles(remaining, abort, false) : null
-  const working: GitDiffResult = {
-    ...head,
-    hunks: new Map(),
-    source: { kind: 'working-tree' },
-  }
-  attachUntracked(working, untracked)
+    if (mode === 'uncommitted' || working.stats.filesCount > 0) {
+      return working
+    }
 
-  if (mode === 'uncommitted' || working.stats.filesCount > 0) {
-    return working
-  }
-
-  const branch = await fetchBranchDiff(abort, false, untracked)
-  if (branch === null || branch.stats.filesCount === 0) return working
-  return branch
+    const branch = await fetchBranchDiff(abort, false, untracked)
+    if (branch === null || branch.stats.filesCount === 0) return working
+    return branch
+  })
 }
 
 /**
@@ -511,53 +549,55 @@ export async function fetchGitDiffHunks(
     return null
   }
 
-  const { stdout: shortstatOut, code: shortstatCode } = await execFileNoThrow(
-    gitExe(),
-    [
-      '--no-optional-locks',
-      '-c',
-      'diff.relative=false',
-      'diff',
-      '--shortstat',
-      ref,
-      '--',
-    ],
-    gitOpts(abort),
-  )
-  if (shortstatCode === 0) {
-    const quick = parseShortstat(shortstatOut)
-    if (quick && quick.filesCount > MAX_FILES_FOR_DETAILS) {
-      return emptyDiffHunks()
+  return runWithOptionalPrivateGitIndex(activeGitRoot(), async indexEnv => {
+    const { stdout: shortstatOut, code: shortstatCode } = await execFileNoThrow(
+      gitExe(),
+      [
+        '--no-optional-locks',
+        '-c',
+        'diff.relative=false',
+        'diff',
+        '--shortstat',
+        ref,
+        '--',
+      ],
+      gitOpts(abort, indexEnv),
+    )
+    if (shortstatCode === 0) {
+      const quick = parseShortstat(shortstatOut)
+      if (quick && quick.filesCount > MAX_FILES_FOR_DETAILS) {
+        return emptyDiffHunks()
+      }
     }
-  }
 
-  const { stdout: diffOut, code: diffCode } = await execFileNoThrow(
-    gitExe(),
-    [
-      '--no-optional-locks',
-      '-c',
-      'diff.relative=false',
-      'diff',
-      ...RAW_GIT_DIFF_FLAGS,
-      ref,
-      '--',
-    ],
-    gitOpts(abort),
-  )
+    const { stdout: diffOut, code: diffCode } = await execFileNoThrow(
+      gitExe(),
+      [
+        '--no-optional-locks',
+        '-c',
+        'diff.relative=false',
+        'diff',
+        ...RAW_GIT_DIFF_FLAGS,
+        ref,
+        '--',
+      ],
+      gitOpts(abort, indexEnv),
+    )
 
-  if (diffCode !== 0) {
-    return null
-  }
-
-  const parsed = parseGitDiff(diffOut)
-  if (ref === '--cached' && parsed.hunks.size > 0) {
-    const working = await fetchWorkingTreeNumstat(abort)
-    if (working === null) return null
-    for (const path of working.perFileStats.keys()) {
-      parsed.hunks.delete(path)
+    if (diffCode !== 0) {
+      return null
     }
-  }
-  return parsed
+
+    const parsed = parseGitDiff(diffOut)
+    if (ref === '--cached' && parsed.hunks.size > 0) {
+      const working = await fetchWorkingTreeNumstat(abort, indexEnv)
+      if (working === null) return null
+      for (const path of working.perFileStats.keys()) {
+        parsed.hunks.delete(path)
+      }
+    }
+    return parsed
+  })
 }
 
 export type NumstatResult = {
@@ -821,58 +861,68 @@ export async function fetchUntrackedFiles(
   maxFiles: number,
   abort?: AbortSignal,
   includePreSession = false,
+  envOverride?: NodeJS.ProcessEnv,
 ): Promise<Map<string, PerFileStats> | null> {
-  // Get list of untracked files (excludes gitignored)
-  const { stdout, code } = await execFileNoThrow(
-    gitExe(),
-    [
-      '--no-optional-locks',
-      'ls-files',
-      '--others',
-      '--exclude-standard',
-      '--full-name',
-    ],
-    gitOpts(abort),
-  )
+  const run = async (
+    effectiveEnv?: NodeJS.ProcessEnv,
+  ): Promise<Map<string, PerFileStats> | null> => {
+    // Get list of untracked files (excludes gitignored)
+    const { stdout, code } = await execFileNoThrow(
+      gitExe(),
+      [
+        '--no-optional-locks',
+        'ls-files',
+        '--others',
+        '--exclude-standard',
+        '--full-name',
+      ],
+      gitOpts(abort, effectiveEnv),
+    )
 
-  if (code !== 0) return null
+    if (code !== 0) return null
 
-  const untrackedPaths = stdout.split('\n').filter(p => p !== '')
-  if (untrackedPaths.length === 0) return null
+    const untrackedPaths = stdout.split('\n').filter(p => p !== '')
+    if (untrackedPaths.length === 0) return null
 
-  const root = diffRoot()
-  const sessionStart = getSessionStartTime()
-  const probed = await Promise.all(
-    untrackedPaths.slice(0, UNTRACKED_LSTAT_CAP).map(async filePath => {
-      try {
-        const st = await lstat(join(root, filePath))
-        return {
-          filePath,
-          preSession: isPreSessionStat(st.mtimeMs, st.ctimeMs, sessionStart),
+    const root = diffRoot()
+    const sessionStart = getSessionStartTime()
+    const probed = await Promise.all(
+      untrackedPaths.slice(0, UNTRACKED_LSTAT_CAP).map(async filePath => {
+        try {
+          const st = await lstat(join(root, filePath))
+          return {
+            filePath,
+            preSession: isPreSessionStat(st.mtimeMs, st.ctimeMs, sessionStart),
+          }
+        } catch {
+          return { filePath, preSession: false }
         }
-      } catch {
-        return { filePath, preSession: false }
-      }
-    }),
-  )
-  const kept = probed.filter(row => !row.preSession)
-  if (includePreSession) {
-    kept.push(...probed.filter(row => row.preSession))
-  }
-  if (kept.length === 0) return null
+      }),
+    )
+    const kept = probed.filter(row => !row.preSession)
+    if (includePreSession) {
+      kept.push(...probed.filter(row => row.preSession))
+    }
+    if (kept.length === 0) return null
 
-  const perFileStats = new Map<string, PerFileStats>()
-  for (const { filePath, preSession } of kept.slice(0, maxFiles)) {
-    perFileStats.set(filePath, {
-      added: 0,
-      removed: 0,
-      isBinary: false,
-      isUntracked: true,
-      ...(preSession ? { preSession: true } : {}),
-    })
+    const perFileStats = new Map<string, PerFileStats>()
+    for (const { filePath, preSession } of kept.slice(0, maxFiles)) {
+      perFileStats.set(filePath, {
+        added: 0,
+        removed: 0,
+        isBinary: false,
+        isUntracked: true,
+        ...(preSession ? { preSession: true } : {}),
+      })
+    }
+
+    return perFileStats
   }
 
-  return perFileStats
+  if (envOverride !== undefined) {
+    return run(envOverride)
+  }
+  return runWithOptionalPrivateGitIndex(activeGitRoot(), run)
 }
 
 /**
@@ -925,41 +975,45 @@ export async function fetchSingleFileGitDiff(
   const gitPath = relative(gitRoot, absoluteFilePath).split(sep).join('/')
   const repository = getCachedRepository()
 
-  // Check if the file is tracked by git
-  const { code: lsFilesCode } = await execFileNoThrowWithCwd(
-    gitExe(),
-    ['--no-optional-locks', 'ls-files', '--error-unmatch', gitPath],
-    { cwd: gitRoot, timeout: SINGLE_FILE_DIFF_TIMEOUT_MS },
-  )
+  return runWithOptionalPrivateGitIndex(gitRoot, async indexEnv => {
+    const env = indexEnv ? { ...process.env, ...indexEnv } : undefined
 
-  if (lsFilesCode === 0) {
-    // File is tracked - diff against merge base for PR-like view
-    // densable jRo: ["--no-optional-locks","diff",...gnr,s,"--",r]
-    const diffRef = await getDiffRef(gitRoot)
-    const { stdout, code } = await execFileNoThrowWithCwd(
+    // Check if the file is tracked by git
+    const { code: lsFilesCode } = await execFileNoThrowWithCwd(
       gitExe(),
-      [
-        '--no-optional-locks',
-        'diff',
-        ...RAW_GIT_DIFF_FLAGS,
-        diffRef,
-        '--',
-        gitPath,
-      ],
-      { cwd: gitRoot, timeout: SINGLE_FILE_DIFF_TIMEOUT_MS },
+      ['--no-optional-locks', 'ls-files', '--error-unmatch', gitPath],
+      { cwd: gitRoot, timeout: SINGLE_FILE_DIFF_TIMEOUT_MS, env },
     )
-    if (code !== 0) return null
-    if (!stdout) return null
-    return {
-      ...parseRawDiffToToolUseDiff(gitPath, stdout, 'modified'),
-      repository,
-    }
-  }
 
-  // File is untracked - generate synthetic diff
-  const syntheticDiff = await generateSyntheticDiff(gitPath, absoluteFilePath)
-  if (!syntheticDiff) return null
-  return { ...syntheticDiff, repository }
+    if (lsFilesCode === 0) {
+      // File is tracked - diff against merge base for PR-like view
+      // densable jRo: ["--no-optional-locks","diff",...gnr,s,"--",r]
+      const diffRef = await getDiffRef(gitRoot)
+      const { stdout, code } = await execFileNoThrowWithCwd(
+        gitExe(),
+        [
+          '--no-optional-locks',
+          'diff',
+          ...RAW_GIT_DIFF_FLAGS,
+          diffRef,
+          '--',
+          gitPath,
+        ],
+        { cwd: gitRoot, timeout: SINGLE_FILE_DIFF_TIMEOUT_MS, env },
+      )
+      if (code !== 0) return null
+      if (!stdout) return null
+      return {
+        ...parseRawDiffToToolUseDiff(gitPath, stdout, 'modified'),
+        repository,
+      }
+    }
+
+    // File is untracked - generate synthetic diff
+    const syntheticDiff = await generateSyntheticDiff(gitPath, absoluteFilePath)
+    if (!syntheticDiff) return null
+    return { ...syntheticDiff, repository }
+  })
 }
 
 /**

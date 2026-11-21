@@ -33,6 +33,7 @@ const SAFE_BRIDGE_STRING_KEYS = new Set([
   'bridge_status',
   'error_type',
   'tool_name',
+  'phase',
 ])
 
 const PERMISSION_MODES: readonly PermissionMode[] = [
@@ -169,11 +170,21 @@ export function createChromeContext(
       if (toolName === 'browser_batch') return 150_000
       return 30_000
     },
+    getCurrentUserId: () => {
+      return (
+        getGlobalConfig().oauthAccount?.accountUuid ||
+        process.env.CLAUDE_CODE_ACCOUNT_UUID ||
+        null
+      )
+    },
     ...(chromeBridgeUrl && {
       bridgeConfig: {
         url: chromeBridgeUrl,
         getUserId: async () => {
-          return getGlobalConfig().oauthAccount?.accountUuid
+          return (
+            getGlobalConfig().oauthAccount?.accountUuid ||
+            process.env.CLAUDE_CODE_ACCOUNT_UUID
+          )
         },
         getOAuthToken: async () => {
           return getClaudeAIOAuthTokens()?.accessToken ?? ''

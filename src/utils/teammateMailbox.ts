@@ -7,7 +7,16 @@
  * Note: Inboxes are keyed by agent name within a team.
  */
 
-import { randomBytes, randomUUID } from 'crypto'
+import {
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  type KeyObject,
+  randomBytes,
+  randomUUID,
+  sign as cryptoSign,
+  verify as cryptoVerify,
+} from 'crypto'
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { z } from 'zod/v4'
@@ -29,7 +38,12 @@ import { TEAM_LEAD_NAME } from './swarm/constants.js'
 import { sanitizePathComponent } from './tasks.js'
 import { scrubRelayEnvelopeBody } from './confusableTagScrub.js'
 import { escapeXmlAttr } from './xml.js'
-import { getAgentName, getTeammateColor, getTeamName } from './teammate.js'
+import {
+  getAgentName,
+  getDynamicTeamContext,
+  getTeammateColor,
+  getTeamName,
+} from './teammate.js'
 
 // Lock options: retry with backoff so concurrent callers (multiple Claudes
 // in a swarm) wait for the lock instead of failing immediately. The sync
@@ -92,6 +106,12 @@ export type TeammateMessage = {
   msgV?: number
   /** densable aqy — UUID assigned on successful writeToMailbox. */
   msg_id?: string
+  /** Official 2.1.328 — base64url Ed25519 signature written by the team lead. */
+  lead_sig?: string
+  /** Optional plugin identifier included in the canonical lead signing payload. */
+  from_plugin?: string
+  /** Runtime-only trust classification stamped on read when verification is active. */
+  provenance?: MailboxEntryTrust
 }
 
 /** densable sqy — mailbox message frame version. */
@@ -165,6 +185,12 @@ function toMailboxMessage(value: unknown): TeammateMessage {
     ...(typeof record.summary === 'string' ? { summary: record.summary } : {}),
     ...(typeof record.msgV === 'number' ? { msgV: record.msgV } : {}),
     ...(typeof record.msg_id === 'string' ? { msg_id: record.msg_id } : {}),
+    ...(typeof record.lead_sig === 'string'
+      ? { lead_sig: record.lead_sig }
+      : {}),
+    ...(typeof record.from_plugin === 'string'
+      ? { from_plugin: record.from_plugin }
+      : {}),
   }
   assertMailboxMessageSize(message)
   return message
@@ -356,6 +382,7 @@ async function ensureInboxDir(teamName?: string): Promise<void> {
 export async function readMailbox(
   agentName: string,
   teamName?: string,
+  verifyContext?: TeamLeadVerifyContext,
 ): Promise<TeammateMessage[]> {
   const inboxPath = getInboxPath(agentName, teamName)
   logForDebugging(`[TeammateMailbox] readMailbox: path=${inboxPath}`)
@@ -365,6 +392,35 @@ export async function readMailbox(
     logForDebugging(
       `[TeammateMailbox] readMailbox: read ${messages.length} message(s)`,
     )
+    const activeKey = verifyContext?.leadVerifyKey ?? getActiveLeadVerifyKey()
+    if (activeKey !== undefined) {
+      const ctx: TeamLeadVerifyContext = {
+        leadAlive: true,
+        ...verifyContext,
+        leadVerifyKey: activeKey,
+        inboxPath,
+      }
+      const unread = messages.filter(m => !m.read)
+      if (unread.length > 0) {
+        const classified = classifyTeammateMailboxEntries(unread, ctx)
+        for (const msg of unread) {
+          const trust = classified.get(msg)
+          if (trust !== undefined) {
+            msg.provenance = trust
+            if (trust === 'verified') {
+              const shutdownReq = isShutdownRequest(msg.text)
+              if (shutdownReq) {
+                recordPendingShutdownRequest(
+                  shutdownReq.requestId,
+                  agentName,
+                  true,
+                )
+              }
+            }
+          }
+        }
+      }
+    }
     return messages
   } catch (error) {
     const code = getErrnoCode(error)
@@ -386,8 +442,9 @@ export async function readMailbox(
 export async function readUnreadMessages(
   agentName: string,
   teamName?: string,
+  verifyContext?: TeamLeadVerifyContext,
 ): Promise<TeammateMessage[]> {
-  const messages = await readMailbox(agentName, teamName)
+  const messages = await readMailbox(agentName, teamName, verifyContext)
   const unread = messages.filter(m => !m.read)
   logForDebugging(
     `[TeammateMailbox] readUnreadMessages: ${unread.length} unread of ${messages.length} total`,
@@ -402,7 +459,7 @@ const pendingShutdownRequests = new Map<
 >()
 
 /**
- * Official `YLr` (#1556) — record an outbound `shutdown_request` so a
+ * Official `YLr` / `d7r` (#1556) — record an outbound `shutdown_request` so a
  * subsequent `shutdown_approved` can be verified against `requestId` and
  * `!entry.used` (preventing replay/forged removal).
  */
@@ -422,21 +479,51 @@ export function recordPendingShutdownRequest(
   }
 }
 
-/**
- * Official `S2t` (#1556) — validate and mark a `shutdown_approved` requestId
- * as used before removing the teammate. Returns false if unknown, mismatched
- * addressee, or already used.
- */
-export function consumePendingShutdownRequest(
+/** Official `cUa` — roll back a recorded shutdown request if mailbox write fails. */
+export function removePendingShutdownRequest(requestId: string): void {
+  pendingShutdownRequests.delete(requestId)
+}
+
+/** Official `g9o` — clear pending shutdown requests for a freshly spawned teammate. */
+export function clearPendingShutdownRequestsForAddressee(
+  addressee: string,
+): void {
+  for (const [id, entry] of pendingShutdownRequests) {
+    if (entry.addressee === addressee) {
+      pendingShutdownRequests.delete(id)
+    }
+  }
+}
+
+/** Official `uUa` — check whether an unused shutdown request for addressee exists. */
+export function hasPendingShutdownRequestForAddressee(
   requestId: string,
   addressee: string,
 ): boolean {
   const entry = pendingShutdownRequests.get(requestId)
-  if (!entry || entry.addressee !== addressee || entry.used) {
-    return false
+  return entry !== undefined && entry.addressee === addressee && !entry.used
+}
+
+/**
+ * Official `S2t` / `sYt` (#1556 / 2.1.328) — validate and mark a
+ * `shutdown_approved` requestId as used before removing the teammate. Accepts
+ * either a recorded unused lead shutdown request OR a cryptographically
+ * `verified` provenance.
+ */
+export function consumePendingShutdownRequest(
+  requestId: string,
+  addressee: string,
+  provenance?: MailboxEntryTrust,
+): boolean {
+  const entry = pendingShutdownRequests.get(requestId)
+  const matchesUnused =
+    entry !== undefined && entry.addressee === addressee && !entry.used
+  const allowed =
+    (matchesUnused && entry.byLead === true) || provenance === 'verified'
+  if (entry && matchesUnused && allowed) {
+    entry.used = true
   }
-  entry.used = true
-  return true
+  return allowed
 }
 
 export function resetPendingShutdownRequestsForTesting(): void {
@@ -578,13 +665,22 @@ export async function writeToMailbox(
       const messages = await readMailboxForMutation(recipientName, teamName)
 
       const ids = newMailboxMessageIds()
-      const newMessage = toMailboxMessage({
+      const draftMessage = toMailboxMessage({
         ...message,
         ...ids,
         read: false,
       })
+      const leadSig = signLeadEntryForInbox(inboxPath, {
+        ...draftMessage,
+        msg_id: ids.msg_id,
+      })
+      const newMessage: TeammateMessage =
+        leadSig !== undefined
+          ? { ...draftMessage, lead_sig: leadSig }
+          : draftMessage
 
       messages.push(newMessage)
+      recordProcessMailboxWrite(inboxPath, newMessage)
 
       await writeCompactedMailbox(inboxPath, messages, 'writeToMailbox')
       logForDebugging(
@@ -802,6 +898,7 @@ export async function markMessagesAsRead(
       for (const m of messages) m.read = true
 
       await writeCompactedMailbox(inboxPath, messages, 'markMessagesAsRead')
+      retainProcessMailboxWrites(inboxPath, [])
       logForDebugging(
         `[TeammateMailbox] markMessagesAsRead: WROTE ${unreadCount} message(s) as read to ${inboxPath}`,
       )
@@ -841,6 +938,7 @@ export async function clearMailbox(
     // flag 'r+' throws ENOENT if the file doesn't exist, so we don't
     // accidentally create an inbox file that wasn't there.
     await writeFile(inboxPath, '[]', { encoding: 'utf-8', flag: 'r+' })
+    forgetProcessMailboxWrites(inboxPath)
     logForDebugging(`[TeammateMailbox] Cleared inbox for ${agentName}`)
   } catch (error) {
     const code = getErrnoCode(error)
@@ -2312,21 +2410,138 @@ export function getLastPeerDmSummary(messages: Message[]): string | undefined {
   return undefined
 }
 
-// ── 2.1.323 #2195: Split-pane teammate team-lead cryptographic verification ──
-
-import {
-  createPrivateKey,
-  createPublicKey,
-  generateKeyPairSync,
-  sign as cryptoSign,
-  verify as cryptoVerify,
-} from 'node:crypto'
+// ── 2.1.323-328 #2195: Split-pane teammate team-lead cryptographic verification ──
 
 export const LEAD_MAILBOX_FRESHNESS_WINDOW_MS = 120_000
 
 const TEAM_LEAD_SENDER_NAMES = new Set(['team-lead', 'leader'])
+const LEAD_VERIFY_KEY_RE = /^(\d+)\.([\w-]+)$/
 const spentLeadMessageIds = new Set<string>()
 let leadSessionEpochStartMs = Date.now()
+
+/** Official `Bo().mailbox.leadEntryKeys` — Ed25519 private keys keyed by lowercased inbox path. */
+const leadEntryKeys = new Map<string, KeyObject>()
+
+/** Official `I()` write/verify ledger keyed by lowercased inbox path -> (msg_id -> canonical fingerprint). */
+const processMailboxWriteLedger = new Map<string, Map<string, string>>()
+
+let activeLeadVerifyKeyOverride: string | undefined
+
+function normalizeInboxKey(inboxPath: string): string {
+  return inboxPath.toLowerCase()
+}
+
+function recordProcessMailboxWrite(
+  inboxPath: string,
+  entry: TeammateMessage,
+): void {
+  if (!entry.msg_id) return
+  const key = normalizeInboxKey(inboxPath)
+  let bucket = processMailboxWriteLedger.get(key)
+  if (!bucket) {
+    bucket = new Map<string, string>()
+    processMailboxWriteLedger.set(key, bucket)
+  }
+  bucket.set(
+    entry.msg_id,
+    leadCanonicalPayload({
+      from: entry.from,
+      text: entry.text,
+      timestamp: entry.timestamp,
+      msg_id: entry.msg_id,
+      summary: entry.summary,
+      color: entry.color,
+      from_plugin: entry.from_plugin,
+    }).toString('utf8'),
+  )
+}
+
+function wroteByProcessMailboxLedger(
+  inboxPath: string | undefined,
+  entry: TeammateMessage,
+): boolean {
+  if (!inboxPath || !entry.msg_id) return false
+  const bucket = processMailboxWriteLedger.get(normalizeInboxKey(inboxPath))
+  if (!bucket) return false
+  const recorded = bucket.get(entry.msg_id)
+  if (recorded === undefined) return false
+  const current = leadCanonicalPayload({
+    from: entry.from,
+    text: entry.text,
+    timestamp: entry.timestamp,
+    msg_id: entry.msg_id,
+    summary: entry.summary,
+    color: entry.color,
+    from_plugin: entry.from_plugin,
+  }).toString('utf8')
+  return recorded === current
+}
+
+function retainProcessMailboxWrites(
+  inboxPath: string,
+  keepMsgIds: readonly string[],
+): void {
+  const key = normalizeInboxKey(inboxPath)
+  if (keepMsgIds.length === 0) {
+    processMailboxWriteLedger.delete(key)
+    return
+  }
+  const bucket = processMailboxWriteLedger.get(key)
+  if (!bucket) return
+  const keep = new Set(keepMsgIds)
+  for (const id of bucket.keys()) {
+    if (!keep.has(id)) bucket.delete(id)
+  }
+  if (bucket.size === 0) processMailboxWriteLedger.delete(key)
+}
+
+function forgetProcessMailboxWrites(inboxPath: string): void {
+  processMailboxWriteLedger.delete(normalizeInboxKey(inboxPath))
+}
+
+/**
+ * Sets (or clears) the active team-lead Ed25519 verify key for this teammate
+ * process (`<issuedAtMs>.<base64url-spki>` or bare `<base64url-spki>`).
+ */
+export function setActiveLeadVerifyKey(key: string | undefined): void {
+  activeLeadVerifyKeyOverride = key
+}
+
+/**
+ * Resolves the active team-lead verify key for the current process from:
+ * 1. Explicit runtime override (`setActiveLeadVerifyKey`)
+ * 2. `getDynamicTeamContext()?.leadVerifyKey`
+ * 3. `process.env.CLAUDE_CODE_LEAD_VERIFY_KEY`
+ * 4. `--lead-verify-key` CLI argument
+ */
+export function getActiveLeadVerifyKey(): string | undefined {
+  if (activeLeadVerifyKeyOverride !== undefined) {
+    return activeLeadVerifyKeyOverride
+  }
+  const dyn = getDynamicTeamContext() as
+    | (Record<string, unknown> & { leadVerifyKey?: unknown })
+    | null
+    | undefined
+  if (typeof dyn?.leadVerifyKey === 'string' && dyn.leadVerifyKey.length > 0) {
+    return dyn.leadVerifyKey
+  }
+  const envKey = process.env.CLAUDE_CODE_LEAD_VERIFY_KEY
+  if (envKey && envKey.length > 0) {
+    return envKey
+  }
+  const argv = process.argv
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--lead-verify-key' && typeof argv[i + 1] === 'string') {
+      return argv[i + 1]
+    }
+    if (arg?.startsWith('--lead-verify-key=')) {
+      const val = arg.slice('--lead-verify-key='.length)
+      if (val.length > 0) return val
+    }
+  }
+  return undefined
+}
 
 export type SignedTeamLeadMailboxEntry = TeammateMessage & {
   msg_id?: string
@@ -2334,18 +2549,65 @@ export type SignedTeamLeadMailboxEntry = TeammateMessage & {
 }
 
 export type TeamLeadVerifyContext = {
-  /** Base64-encoded SPKI Ed25519 public key of the active team lead, plus issue timestamp. */
+  /** Base64url-encoded SPKI Ed25519 public key (optionally prefixed with `<issuedAtMs>.`). */
   leadVerifyKey?: string
   /** Timestamp (ms) when the current team lead / session started; messages older than window are rejected. */
   leadIssuedAtMs?: number
   /** Whether the lead process is still alive (false if teammate outlived its lead). */
   leadAlive?: boolean
+  /** Inbox path associated with this read (enables idempotent re-read of already-verified unread entries). */
+  inboxPath?: string
 }
 
 export type MailboxEntryTrust = 'verified' | 'forged' | 'unverifiable'
 
+/**
+ * Official `joi` (`chunk@292058978.js @5017`): generates an Ed25519 keypair,
+ * registers its private key for `inboxPath` so subsequent `writeToMailbox`
+ * writes from the team lead are automatically signed, and returns the
+ * `<issuedAtMs>.<base64url-spki>` verify key for `--lead-verify-key`.
+ */
+export function createTeamLeadEntryKeyForInbox(inboxPath: string): string {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+  leadEntryKeys.set(normalizeInboxKey(inboxPath), privateKey)
+  const spkiBase64Url = (
+    publicKey.export({ type: 'spki', format: 'der' }) as Buffer
+  ).toString('base64url')
+  return `${Date.now()}.${spkiBase64Url}`
+}
+
+/** Registers an existing PEM private key for automatic signing of team-lead writes to `inboxPath`. */
+export function registerTeamLeadPrivateKeyForInbox(
+  inboxPath: string,
+  privateKeyPem: string,
+): void {
+  leadEntryKeys.set(
+    normalizeInboxKey(inboxPath),
+    createPrivateKey(privateKeyPem),
+  )
+}
+
+/** Official `Woi` — refresh the issued-at timestamp prefix on a leadVerifyKey. */
+export function refreshLeadVerifyKeyTimestamp(leadVerifyKey: string): string {
+  return leadVerifyKey.replace(/^\d+/, String(Date.now()))
+}
+
+/** Official `unr` — remove the lead signing private key for an inbox. */
+export function clearTeamLeadEntryKeyForInbox(inboxPath: string): void {
+  leadEntryKeys.delete(normalizeInboxKey(inboxPath))
+}
+
+/** Official `lUa` — whether this process holds a lead signing key for `inboxPath`. */
+export function hasTeamLeadEntryKeyForInbox(inboxPath: string): boolean {
+  return leadEntryKeys.has(normalizeInboxKey(inboxPath))
+}
+
 export function generateTeamLeadKeyPair(): {
+  /** Base64url-encoded SPKI DER public key (official 2.1.328 encoding). */
   publicKeyBase64: string
+  publicKeyBase64Url: string
+  /** Official `<issuedAtMs>.<base64url-spki>` verify token. */
+  leadVerifyKey: string
   privateKeyPem: string
 } {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519')
@@ -2354,31 +2616,73 @@ export function generateTeamLeadKeyPair(): {
     type: 'pkcs8',
     format: 'pem',
   }) as string
+  const spkiBase64Url = spkiDer.toString('base64url')
   return {
-    publicKeyBase64: spkiDer.toString('base64'),
+    publicKeyBase64: spkiBase64Url,
+    publicKeyBase64Url: spkiBase64Url,
+    leadVerifyKey: `${Date.now()}.${spkiBase64Url}`,
     privateKeyPem: pkcs8Pem,
   }
 }
 
+/** Official `Ke` (`chunk@292058978.js @4820`) — canonical Ed25519 signing payload. */
 function leadCanonicalPayload(entry: {
   from: string
   text: string
   timestamp: string
   msg_id: string
+  summary?: string
+  color?: string
+  from_plugin?: string
 }): Buffer {
   return Buffer.from(
-    JSON.stringify([entry.msg_id, entry.from, entry.timestamp, entry.text]),
+    JSON.stringify([
+      'claude-team-lead-entry-v1',
+      entry.msg_id,
+      entry.from,
+      entry.timestamp,
+      entry.text,
+      entry.summary ?? null,
+      entry.color ?? null,
+      entry.from_plugin ?? null,
+    ]),
     'utf8',
   )
 }
 
+/** Official `We` — sign a team-lead entry if this process holds a key for `inboxPath`. */
+export function signLeadEntryForInbox(
+  inboxPath: string,
+  entry: SignedTeamLeadMailboxEntry & { msg_id: string },
+): string | undefined {
+  if (!TEAM_LEAD_SENDER_NAMES.has(entry.from.toLowerCase())) {
+    return undefined
+  }
+  const privateKey = leadEntryKeys.get(normalizeInboxKey(inboxPath))
+  if (!privateKey) return undefined
+  return cryptoSign(
+    null,
+    leadCanonicalPayload({
+      from: entry.from,
+      text: entry.text,
+      timestamp: entry.timestamp,
+      msg_id: entry.msg_id,
+      summary: entry.summary,
+      color: entry.color,
+      from_plugin: entry.from_plugin,
+    }),
+    privateKey,
+  ).toString('base64url')
+}
+
 /**
- * Signs a team-lead mailbox message with the lead's Ed25519 private key.
+ * Signs a team-lead mailbox message with the lead's Ed25519 private key
+ * using base64url encoding (official 2.1.328 `We`).
  */
 export function signTeamLeadMailboxEntry(
   entry: TeammateMessage,
   privateKeyPem: string,
-  msgId: string = crypto.randomUUID(),
+  msgId: string = randomUUID(),
 ): SignedTeamLeadMailboxEntry {
   const key = createPrivateKey(privateKeyPem)
   const sig = cryptoSign(
@@ -2388,13 +2692,45 @@ export function signTeamLeadMailboxEntry(
       text: entry.text,
       timestamp: entry.timestamp,
       msg_id: msgId,
+      summary: entry.summary,
+      color: entry.color,
+      from_plugin: entry.from_plugin,
     }),
     key,
   )
   return {
     ...entry,
     msg_id: msgId,
-    lead_sig: sig.toString('base64'),
+    lead_sig: sig.toString('base64url'),
+  }
+}
+
+function parseLeadVerifyKey(raw: string): {
+  issuedAtMs?: number
+  pubKey: KeyObject
+} | null {
+  const match = LEAD_VERIFY_KEY_RE.exec(raw)
+  let issuedAtMs: number | undefined
+  let spkiBase64Url = raw
+  if (match) {
+    const parsedTs = Number(match[1])
+    if (Number.isSafeInteger(parsedTs)) {
+      issuedAtMs = parsedTs
+    }
+    spkiBase64Url = match[2]!
+  }
+  try {
+    const pubKey = createPublicKey({
+      key: Buffer.from(spkiBase64Url, 'base64url'),
+      format: 'der',
+      type: 'spki',
+    })
+    if (pubKey.asymmetricKeyType !== 'ed25519') {
+      return null
+    }
+    return { issuedAtMs, pubKey }
+  } catch {
+    return null
   }
 }
 
@@ -2406,13 +2742,15 @@ export function resetTeamLeadVerificationOnSessionBoundary(
   nowMs: number = Date.now(),
 ): void {
   spentLeadMessageIds.clear()
+  processMailboxWriteLedger.clear()
   leadSessionEpochStartMs = nowMs
 }
 
 /**
- * 2.1.323 #2195 (official `gn` / `P$e`): verifies that a mailbox entry claiming
- * to be from the team lead is validly signed by `leadVerifyKey`, fresh within
- * the active session epoch, not replayed, and the team lead has not exited.
+ * 2.1.323-328 #2195 (official `fn` / `Ge`): verifies that a mailbox entry
+ * claiming to be from the team lead is validly signed by `leadVerifyKey`
+ * (base64url Ed25519), fresh within the active session epoch, not replayed,
+ * and the team lead has not exited.
  */
 export function verifyTeamLeadMailboxEntry(
   entry: SignedTeamLeadMailboxEntry,
@@ -2421,25 +2759,26 @@ export function verifyTeamLeadMailboxEntry(
   if (ctx.leadAlive === false) return false
   if (!ctx.leadVerifyKey || !entry.msg_id || !entry.lead_sig) return false
   if (!TEAM_LEAD_SENDER_NAMES.has(entry.from.toLowerCase())) return false
-  if (spentLeadMessageIds.has(entry.msg_id)) return false
+  if (spentLeadMessageIds.has(entry.msg_id)) {
+    // Official `mn`: allow idempotent re-read of the exact same un-pruned
+    // message in the same inbox before markMessagesAsRead prunes it.
+    return wroteByProcessMailboxLedger(ctx.inboxPath, entry)
+  }
 
+  const parsedKey = parseLeadVerifyKey(ctx.leadVerifyKey)
+  if (!parsedKey) return false
+
+  const issuedAt = ctx.leadIssuedAtMs ?? parsedKey.issuedAtMs
   const msgTs = Date.parse(entry.timestamp)
   const minAcceptedTs = Math.max(
     leadSessionEpochStartMs,
-    ctx.leadIssuedAtMs !== undefined
-      ? ctx.leadIssuedAtMs - LEAD_MAILBOX_FRESHNESS_WINDOW_MS
-      : 0,
+    issuedAt !== undefined ? issuedAt - LEAD_MAILBOX_FRESHNESS_WINDOW_MS : 0,
   )
   if (!Number.isFinite(msgTs) || msgTs < minAcceptedTs) {
     return false
   }
 
   try {
-    const pubKey = createPublicKey({
-      key: Buffer.from(ctx.leadVerifyKey, 'base64'),
-      format: 'der',
-      type: 'spki',
-    })
     const ok = cryptoVerify(
       null,
       leadCanonicalPayload({
@@ -2447,12 +2786,18 @@ export function verifyTeamLeadMailboxEntry(
         text: entry.text,
         timestamp: entry.timestamp,
         msg_id: entry.msg_id,
+        summary: entry.summary,
+        color: entry.color,
+        from_plugin: entry.from_plugin,
       }),
-      pubKey,
-      Buffer.from(entry.lead_sig, 'base64'),
+      parsedKey.pubKey,
+      Buffer.from(entry.lead_sig, 'base64url'),
     )
     if (!ok) return false
     spentLeadMessageIds.add(entry.msg_id)
+    if (ctx.inboxPath) {
+      recordProcessMailboxWrite(ctx.inboxPath, entry)
+    }
     return true
   } catch {
     return false
@@ -2462,8 +2807,8 @@ export function verifyTeamLeadMailboxEntry(
 /**
  * Classifies a batch of mailbox entries for a split-pane teammate (`verified`,
  * `forged`, or `unverifiable`). Structured lead requests (including
- * `plan_approval_response`) that fail verification are marked `forged` and
- * refused.
+ * `shutdown_request` and `plan_approval_response`) that fail verification are
+ * marked `forged` and refused.
  */
 export function classifyTeammateMailboxEntries(
   entries: readonly SignedTeamLeadMailboxEntry[],
@@ -2490,4 +2835,26 @@ export function classifyTeammateMailboxEntries(
     }
   }
   return result
+}
+
+/**
+ * Returns the parsed `shutdown_request` payload only if the message is not
+ * classified as `forged`.
+ */
+export function isVerifiedShutdownRequest(
+  message: TeammateMessage,
+): ShutdownRequestMessage | null {
+  if (message.provenance === 'forged') return null
+  return isShutdownRequest(message.text)
+}
+
+/**
+ * Returns the parsed `plan_approval_response` payload only if the message is not
+ * classified as `forged`.
+ */
+export function isVerifiedPlanApprovalResponse(
+  message: TeammateMessage,
+): PlanApprovalResponseMessage | null {
+  if (message.provenance === 'forged') return null
+  return isPlanApprovalResponse(message.text)
 }

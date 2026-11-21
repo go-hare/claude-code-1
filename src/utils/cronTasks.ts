@@ -228,25 +228,23 @@ const STEP_MINUTES_CRON_RE = /^\*\/\d+ \* \* \* \*$/
 const PROMPT_CACHE_TTL_MS = 300_000
 
 /**
- * Official 2.1.328 `D8r`: durable scheduled tasks are unavailable when the
- * session was started with `--project-config-root` (unless an explicit `dir`
- * is passed by the caller or matches the project root).
+ * Official 2.1.328 `D8r` / `ds()` (`chunk@283138841.js @117694`): durable
+ * scheduled tasks are unavailable when the session was started with
+ * `--project-config-root` (unless an explicit `dir` is passed by the caller).
  */
 export function isBlockedByProjectConfigRoot(dir?: string): boolean {
   if (dir !== undefined) return false
-  let root: string | undefined = process.env.CLAUDE_PROJECT_CONFIG_ROOT
-  if (!root) {
-    const argv = process.argv
-    for (let i = 0; i < argv.length; i++) {
-      const arg = argv[i]
-      if (arg === '--project-config-root' && typeof argv[i + 1] === 'string') {
-        root = argv[i + 1]
-        break
-      }
-      if (arg?.startsWith('--project-config-root=')) {
-        root = arg.slice('--project-config-root='.length)
-        break
-      }
+  let root: string | undefined
+  const argv = process.argv
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--project-config-root' && typeof argv[i + 1] === 'string') {
+      root = argv[i + 1]
+      break
+    }
+    if (arg?.startsWith('--project-config-root=')) {
+      root = arg.slice('--project-config-root='.length)
+      break
     }
   }
   return typeof root === 'string' && root.length > 0

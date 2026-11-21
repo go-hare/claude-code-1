@@ -66,6 +66,11 @@ export type ChromeBridgeReconnectExhaustedMetadata = {
   total_attempts: number // 累计重连次数上限
 }
 
+/** Official 2.1.328: Bridge 账户身份不匹配遥测元数据（chrome_bridge_identity_mismatch）。 */
+export type ChromeBridgeIdentityMismatchMetadata = {
+  phase: 'connect' | 'use'
+}
+
 /**
  * trackEvent 回调的 metadata 联合类型。
  * 各变体对应 bridgeClient 内 chrome_bridge_* 事件；null 表示无附加字段。
@@ -77,6 +82,7 @@ export type ChromeBridgeTrackEventMetadata =
   | ChromeBridgeDisconnectedMetadata
   | ChromeBridgeConnectionSucceededMetadata
   | ChromeBridgeReconnectExhaustedMetadata
+  | ChromeBridgeIdentityMismatchMetadata
   | null // 无元数据（如 peer_connected / peer_disconnected）
 
 export type PermissionMode =
@@ -134,6 +140,10 @@ export interface ClaudeForChromeContext {
   onRemoteExtensionWarning?: (ext: ChromeExtensionInfo) => void
   /** Optional per-tool call timeout override in ms (e.g. 90s for browser_batch). */
   getToolCallTimeoutMs?: (toolName: string) => number
+  /** Returns currently signed-in user UUID, `null` when signed out, or `undefined` if unknown yet. */
+  getCurrentUserId?: () => string | null | undefined
+  /** Optional host override for enforcing cross-account relay checks (defaults to true). */
+  isAccountMismatchEnforced?: () => boolean
 }
 
 /**

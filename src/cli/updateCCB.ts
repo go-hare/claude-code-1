@@ -16,7 +16,7 @@ import {
   getMaxVersion,
   type InstallOutcome,
   installGlobalPackage,
-  isForceDowngradeEnabled,
+  isForceDowngradeEnabledAsync,
   shouldSkipVersion,
 } from '../utils/autoUpdater.js'
 import {
@@ -625,9 +625,11 @@ export async function updateCCB(deps?: UpdateCCBDeps): Promise<void> {
     return
   }
 
+  // Official 2.1.328 `Ldt()`: await async GrowthBook init before reading
+  // `external_force_downgrade` so cold CLI `claude update` never reads stale false.
   const [maxVersion, forceDowngradeEnabled] = await Promise.all([
     getMaxVersion(),
-    Promise.resolve(isForceDowngradeEnabled()),
+    isForceDowngradeEnabledAsync(),
   ])
 
   const plan = resolveNpmUpdatePlan({

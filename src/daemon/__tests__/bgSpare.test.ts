@@ -18,6 +18,9 @@ import {
   getBgLowMemThresholdBytes,
   getSpareBinaryArgv,
   sanitizeClaimEnv,
+  filterClaimEnv,
+  applySpareClaimAndRunMain,
+  SPARE_CLAIM_MAX_LINE_BYTES,
   SPARE_CLAIM_NONCE_ENV,
 } from '../bgSpare.js'
 import { getSpareDir, type DispatchRequest } from '../bgWorker.js'
@@ -345,31 +348,168 @@ describe('reapOrphanSpares (official f3q)', () => {
   })
 })
 
-describe('recvSpareClaim nonce (local product)', () => {
-  test('rejects claim when nonce mismatches', async () => {
+describe('recvSpareClaim nonce & 8MB cap (official 2.1.328 Ivr)', () => {
+  test('destroys mismatched client socket and keeps server listening for valid auth/nonce', async () => {
     if (process.platform === 'win32') return
     const dir = await mkdtemp(join(tmpdir(), 'bg-spare-nonce-'))
     const sock = join(dir, 'claim.sock')
     try {
-      const pending = recvSpareClaim(sock, undefined, 'expected-nonce')
-      await new Promise(r => setTimeout(r, 30))
+      let listeningResolve!: () => void
+      const listening = new Promise<void>(r => {
+        listeningResolve = r
+      })
+      const pending = recvSpareClaim(sock, listeningResolve, 'expected-nonce')
+      await listening
+
+      // 1. Wrong nonce should NOT kill the server.
       await sendClaim(sock, {
         cwd: dir,
         env: {},
-        argv: [],
+        argv: ['--bad'],
         nonce: 'wrong',
+      }).catch(() => {})
+
+      // 2. Malformed JSON should NOT kill the server.
+      await new Promise<void>(resolve => {
+        const c = createConnection(sock, () => {
+          c.end('not-json\n', () => resolve())
+        })
+        c.on('error', () => resolve())
       })
-      let threw = false
-      try {
-        await pending
-      } catch {
-        threw = true
-      }
-      expect(threw).toBe(true)
-    } catch {
-      // AF_UNIX unavailable
+
+      // 3. Subsequent valid claim using official `auth` field succeeds.
+      await sendClaim(sock, {
+        cwd: dir,
+        env: { CLAUDE_CODE_SESSION_KIND: 'bg' },
+        argv: ['--good'],
+        auth: 'expected-nonce',
+      })
+
+      const accepted = await pending
+      expect(accepted.argv).toEqual(['--good'])
     } finally {
       await unlink(sock).catch(() => {})
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('destroys client socket exceeding 8MB line cap and keeps server listening', async () => {
+    if (process.platform === 'win32') return
+    expect(SPARE_CLAIM_MAX_LINE_BYTES).toBe(8_388_608)
+    const dir = await mkdtemp(join(tmpdir(), 'bg-spare-cap-'))
+    const sock = join(dir, 'claim.sock')
+    try {
+      let listeningResolve!: () => void
+      const listening = new Promise<void>(r => {
+        listeningResolve = r
+      })
+      const pending = recvSpareClaim(sock, listeningResolve, 'cap-nonce')
+      await listening
+
+      // Oversized payload > 8MB without newline must be dropped without killing server.
+      const huge = 'x'.repeat(SPARE_CLAIM_MAX_LINE_BYTES + 1024)
+      await new Promise<void>(resolve => {
+        const c = createConnection(sock, () => {
+          c.write(huge)
+        })
+        c.on('close', () => resolve())
+        c.on('error', () => resolve())
+      })
+
+      await sendClaim(sock, {
+        cwd: dir,
+        env: {},
+        argv: ['--after-huge'],
+        nonce: 'cap-nonce',
+      })
+
+      const accepted = await pending
+      expect(accepted.argv).toEqual(['--after-huge'])
+    } finally {
+      await unlink(sock).catch(() => {})
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('filterClaimEnv drops NUL-in-value, invalid names, non-strings, and deny-list keys', () => {
+    const { kept, dropped } = filterClaimEnv({
+      GOOD_VAR: 'ok',
+      'BAD=NAME': 'v',
+      '': 'empty',
+      NUL_VAR: 'abc\0def',
+      NUM_VAR: 123,
+      LD_PRELOAD: '/evil.so',
+    })
+    expect(kept).toEqual({ GOOD_VAR: 'ok' })
+    expect(dropped).toEqual([
+      { name: 'BAD=NAME', problem: 'invalid-name' },
+      { name: '', problem: 'invalid-name' },
+      { name: 'NUL_VAR', problem: 'nul-in-value' },
+      { name: 'NUM_VAR', problem: 'non-string-value' },
+      { name: 'LD_PRELOAD', problem: 'denied-key' },
+    ])
+  })
+
+  test('applySpareClaimAndRunMain applies host-managed & federation strips and filters NUL env', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'bg-spare-apply-'))
+    const prevCwd = process.cwd()
+    const prevArgv = [...process.argv]
+    const savedKeys = [
+      'ANTHROPIC_BASE_URL',
+      'ANTHROPIC_CUSTOM_HEADERS',
+      'ANTHROPIC_FEDERATION_RULE_ID',
+      'ANTHROPIC_PROFILE',
+      'ANTHROPIC_CONFIG_DIR',
+      'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
+      'CLAUDE_BG_SESSION_CREDENTIAL',
+      'CLAUDE_TEST_GOOD',
+      'CLAUDE_TEST_NUL',
+    ]
+    const prevEnv: Record<string, string | undefined> = {}
+    for (const k of savedKeys) prevEnv[k] = process.env[k]
+
+    try {
+      process.env.ANTHROPIC_BASE_URL = 'https://stale.example'
+      process.env.ANTHROPIC_CUSTOM_HEADERS = 'x-stale: 1'
+      process.env.ANTHROPIC_FEDERATION_RULE_ID = 'rule-old'
+      process.env.ANTHROPIC_PROFILE = 'prof-old'
+      process.env.ANTHROPIC_CONFIG_DIR = '/tmp/old-cfg'
+
+      let mainCalled = false
+      await applySpareClaimAndRunMain(
+        {
+          cwd: dir,
+          argv: ['--from-claim'],
+          env: {
+            CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
+            CLAUDE_BG_SESSION_CREDENTIAL: 'cred-marker',
+            CLAUDE_TEST_GOOD: 'hello',
+            CLAUDE_TEST_NUL: 'bad\0value',
+          },
+        },
+        Promise.resolve({
+          main: async () => {
+            mainCalled = true
+          },
+        }),
+      )
+
+      expect(mainCalled).toBe(true)
+      expect(process.env.ANTHROPIC_BASE_URL).toBeUndefined()
+      expect(process.env.ANTHROPIC_CUSTOM_HEADERS).toBeUndefined()
+      expect(process.env.ANTHROPIC_FEDERATION_RULE_ID).toBeUndefined()
+      expect(process.env.ANTHROPIC_PROFILE).toBeUndefined()
+      expect(process.env.ANTHROPIC_CONFIG_DIR).toBeUndefined()
+      expect(process.env.CLAUDE_TEST_GOOD).toBe('hello')
+      expect(process.env.CLAUDE_TEST_NUL).toBeUndefined()
+      expect(process.argv.slice(2)).toEqual(['--from-claim'])
+    } finally {
+      process.chdir(prevCwd)
+      process.argv = prevArgv
+      for (const k of savedKeys) {
+        if (prevEnv[k] === undefined) delete process.env[k]
+        else process.env[k] = prevEnv[k]
+      }
       await rm(dir, { recursive: true, force: true })
     }
   })

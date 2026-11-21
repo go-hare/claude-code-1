@@ -16,6 +16,7 @@
  * unless-dispatch on the worker, unconditional on the spare.
  */
 
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { getConfiguredHostAuthEnvVarName } from '../utils/hostCredsFile.js'
 import {
@@ -874,11 +875,11 @@ export function isShellExportedGatewayEnv(
 }
 
 /**
- * #1782 / official `qkn()` — feature toggle for holding gateway-routed idle
- * background sessions during CLI updates (defaults to true).
+ * #1782 / official `SWe()` (`chunk@302114656.js`) — feature toggle for holding
+ * gateway-routed idle background sessions during CLI updates (defaults to true).
  */
 export function isBgGatewayMarkEnabled(): boolean {
-  const raw = process.env.CLAUDE_CODE_DISABLE_BG_GATEWAY_MARK
-  if (raw && isEnvTruthy(raw)) return false
-  return true
+  return Boolean(
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_bg_gateway_mark', true),
+  )
 }

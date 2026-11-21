@@ -9,11 +9,12 @@
  * by checking if the process is still alive.
  */
 
+import { lstat, readdir } from 'fs/promises'
 import { basename, join } from 'path'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
-import { isENOENT, toError } from '../errors.js'
+import { getErrnoCode, isENOENT, toError } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { getProcessCommand } from '../genericProcessUtils.js'
 import { logError } from '../log.js'
@@ -131,6 +132,21 @@ function isClaudeProcess(pid: number, expectedExecPath: string): boolean {
   }
 }
 
+export function parseLockContent(raw: string): VersionLockContent | null {
+  try {
+    if (!raw || raw.trim() === '') {
+      return null
+    }
+    const parsed = jsonParse(raw) as VersionLockContent
+    if (typeof parsed.pid !== 'number' || !parsed.version || !parsed.execPath) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
 /**
  * Read and parse a lock file's content
  */
@@ -141,18 +157,7 @@ export function readLockContent(
 
   try {
     const content = fs.readFileSync(lockFilePath, { encoding: 'utf8' })
-    if (!content || content.trim() === '') {
-      return null
-    }
-
-    const parsed = jsonParse(content) as VersionLockContent
-
-    // Validate required fields
-    if (typeof parsed.pid !== 'number' || !parsed.version || !parsed.execPath) {
-      return null
-    }
-
-    return parsed
+    return parseLockContent(content)
   } catch {
     return null
   }
@@ -161,8 +166,14 @@ export function readLockContent(
 /**
  * Check if a lock file represents an active lock (process still running)
  */
-export function isLockActive(lockFilePath: string): boolean {
-  const content = readLockContent(lockFilePath)
+export function isLockActive(
+  lockFilePath: string,
+  preReadContent?: VersionLockContent | null,
+): boolean {
+  const content =
+    preReadContent !== undefined
+      ? preReadContent
+      : readLockContent(lockFilePath)
 
   if (!content) {
     return false
@@ -388,7 +399,7 @@ export function getAllLockInfo(locksDir: string): LockInfo[] {
  * Returns the number of locks cleaned up
  *
  * Handles both:
- * - PID-based locks (files containing JSON with PID)
+ * - PID-based locks (shared `${version}.lock` and per-PID `${version}#${pid}.lock`)
  * - Legacy proper-lockfile locks (directories created by mtime-based locking)
  */
 export function cleanupStaleLocks(locksDir: string): number {
@@ -412,11 +423,28 @@ export function cleanupStaleLocks(locksDir: string): number {
           fs.rmSync(lockFilePath, { recursive: true, force: true })
           cleanedCount++
           logForDebugging(`Cleaned up legacy directory lock: ${lockEntry}`)
-        } else if (!isLockActive(lockFilePath)) {
-          // PID-based file lock with no running process
-          fs.unlinkSync(lockFilePath)
-          cleanedCount++
-          logForDebugging(`Cleaned up stale lock: ${lockEntry}`)
+        } else {
+          // Official `tn`: skip unreadable lock files rather than treating them
+          // as stale and unlinking a live process's lock.
+          let raw: string | null = null
+          let unreadable = false
+          try {
+            raw = fs.readFileSync(lockFilePath, { encoding: 'utf8' })
+          } catch (readErr) {
+            if (isENOENT(readErr)) continue
+            unreadable = true
+            logForDebugging(
+              `Skipping stale-lock sweep of unreadable lock ${lockEntry}: ${toError(readErr).message}`,
+            )
+          }
+          if (
+            !unreadable &&
+            !isLockActive(lockFilePath, parseLockContent(raw ?? ''))
+          ) {
+            fs.unlinkSync(lockFilePath)
+            cleanedCount++
+            logForDebugging(`Cleaned up stale lock: ${lockEntry}`)
+          }
         }
       } catch {
         // Ignore individual cleanup errors
@@ -430,4 +458,267 @@ export function cleanupStaleLocks(locksDir: string): number {
   }
 
   return cleanedCount
+}
+
+/** Async stale-lock sweep yielding between entries (official 2.1.328 `tn`). */
+export async function cleanupStaleLocksAsync(
+  locksDir: string,
+): Promise<number> {
+  const fs = getFsImplementation()
+  let cleanedCount = 0
+  let lockEntries: string[]
+  try {
+    lockEntries = (await readdir(locksDir)).filter(f => f.endsWith('.lock'))
+  } catch (error) {
+    if (isENOENT(error)) return 0
+    logForDebugging(
+      `Failed to readdir locks directory: ${toError(error).message}`,
+      { level: 'error' },
+    )
+    return 0
+  }
+
+  for (const lockEntry of lockEntries) {
+    const lockFilePath = join(locksDir, lockEntry)
+    try {
+      const stats = await lstat(lockFilePath)
+      if (stats.isDirectory()) {
+        fs.rmSync(lockFilePath, { recursive: true, force: true })
+        cleanedCount++
+        logForDebugging(`Cleaned up legacy directory lock: ${lockEntry}`)
+      } else {
+        let raw: string | null = null
+        let unreadable = false
+        try {
+          raw = fs.readFileSync(lockFilePath, { encoding: 'utf8' })
+        } catch (readErr) {
+          if (isENOENT(readErr)) continue
+          unreadable = true
+          logForDebugging(
+            `Skipping stale-lock sweep of unreadable lock ${lockEntry}: ${toError(readErr).message}`,
+          )
+        }
+        if (
+          !unreadable &&
+          !isLockActive(lockFilePath, parseLockContent(raw ?? ''))
+        ) {
+          fs.unlinkSync(lockFilePath)
+          cleanedCount++
+          logForDebugging(`Cleaned up stale lock: ${lockEntry}`)
+        }
+      }
+    } catch {
+      // Ignore individual cleanup errors
+    }
+    await new Promise(resolve => setImmediate(resolve))
+  }
+
+  return cleanedCount
+}
+
+const TRANSIENT_LOCK_ERRNOS = new Set([
+  'EMFILE',
+  'ENFILE',
+  'EAGAIN',
+  'EINTR',
+  'EBUSY',
+])
+
+function classifyLockReadError(
+  err: unknown,
+): 'transient' | 'directory' | 'permanent' {
+  const code = getErrnoCode(err)
+  if (code && TRANSIENT_LOCK_ERRNOS.has(code)) return 'transient'
+  if (code === 'EISDIR' || code === 'ENOTDIR') return 'directory'
+  return 'permanent'
+}
+
+/** Official 2.1.328 `nn` / `gt` / `Ir`: per-PID lock filename `${version}#${pid}.lock`. */
+export const PER_PID_LOCK_SEPARATOR = '#'
+
+export function getPerPidLockPath(
+  locksDir: string,
+  version: string,
+  pid: number = process.pid,
+): string {
+  return join(locksDir, `${version}${PER_PID_LOCK_SEPARATOR}${pid}.lock`)
+}
+
+export function matchesVersionLockFile(
+  filename: string,
+  version: string,
+): boolean {
+  return (
+    filename === `${version}.lock` ||
+    (filename.startsWith(`${version}${PER_PID_LOCK_SEPARATOR}`) &&
+      filename.endsWith('.lock'))
+  )
+}
+
+let activePerPidLockPath: string | null = null
+let perPidExitHandlerRegistered = false
+
+/**
+ * Official 2.1.328 `_t()`: write a non-contending per-PID lock file
+ * `${locksDir}/${version}#${process.pid}.lock` and unlink it on exit.
+ */
+export function writePerPidLock(
+  versionPath: string,
+  locksDir: string,
+): boolean {
+  const fs = getFsImplementation()
+  const versionName = basename(versionPath)
+  const lockPath = getPerPidLockPath(locksDir, versionName, process.pid)
+  try {
+    writeLockFile(lockPath, {
+      pid: process.pid,
+      version: versionName,
+      execPath: process.execPath,
+      acquiredAt: Date.now(),
+    })
+  } catch (err) {
+    logForDebugging(
+      `NON-FATAL: Failed to write per-PID lock for ${versionName}: ${err}`,
+    )
+    return false
+  }
+  activePerPidLockPath = lockPath
+  if (!perPidExitHandlerRegistered) {
+    perPidExitHandlerRegistered = true
+    process.on('exit', () => {
+      try {
+        if (activePerPidLockPath) {
+          fs.unlinkSync(activePerPidLockPath)
+          activePerPidLockPath = null
+        }
+      } catch {
+        // ignore exit cleanup failures
+      }
+    })
+  }
+  logForDebugging(`Wrote per-PID lock for ${versionName} (PID ${process.pid})`)
+  return true
+}
+
+let sharedMaintenanceRelease: (() => void) | null = null
+let sharedExitHandlerRegistered = false
+
+/**
+ * Official 2.1.328 `rn()`: acquire or refresh the shared `${version}.lock`
+ * without leaking additional `process.on('exit')` listeners across maintenance ticks.
+ */
+export async function acquireOrRefreshSharedLock(
+  versionPath: string,
+  lockFilePath: string,
+): Promise<boolean> {
+  const release = await tryAcquireLock(versionPath, lockFilePath)
+  if (!release) return false
+  sharedMaintenanceRelease = release
+  if (!sharedExitHandlerRegistered) {
+    sharedExitHandlerRegistered = true
+    process.on('exit', () => {
+      try {
+        sharedMaintenanceRelease?.()
+      } catch {
+        // ignore exit cleanup failures
+      }
+    })
+  }
+  return true
+}
+
+/**
+ * Official 2.1.328 `an()`: scan all `*.lock` files in `locksDir` (both shared
+ * `${version}.lock` and per-PID `${version}#${pid}.lock`) and return the set of
+ * versions locked by live Claude processes. Returns `null` if lock scanning
+ * failed (fail-safe so cleanup skips deletion rather than deleting live versions).
+ */
+export async function scanActiveLockedVersions(
+  locksDir: string,
+): Promise<Set<string> | null> {
+  const locked = new Set<string>()
+  let entries: string[]
+  try {
+    entries = (await readdir(locksDir)).filter(f => f.endsWith('.lock'))
+  } catch (err) {
+    if (isENOENT(err)) return locked
+    const transient = classifyLockReadError(err) === 'transient'
+    logForDebugging(
+      `Failed to readdir locks directory (${transient ? 'transient' : 'permanent'}): ${toError(err).message}`,
+      { level: 'error' },
+    )
+    if (!transient) {
+      logError(toError(err))
+    }
+    return null
+  }
+
+  const fs = getFsImplementation()
+  for (const entry of entries) {
+    const filePath = join(locksDir, entry)
+    let raw: string
+    try {
+      raw = fs.readFileSync(filePath, { encoding: 'utf8' })
+    } catch (err) {
+      if (isENOENT(err)) continue
+      const kind = classifyLockReadError(err)
+      if (kind === 'transient') return null
+      if (kind === 'permanent') logError(toError(err))
+      continue
+    }
+    const content = parseLockContent(raw)
+    if (content && !locked.has(content.version)) {
+      try {
+        if (isLockActive(filePath, content)) {
+          locked.add(content.version)
+        }
+      } catch {
+        // ignore per-entry errors
+      }
+    }
+    await new Promise(resolve => setImmediate(resolve))
+  }
+  return locked
+}
+
+/**
+ * Official 2.1.328 `on()`: synchronously check under the deletion lock whether
+ * any OTHER live process holds either `${version}.lock` or `${version}#<pid>.lock`.
+ * Fail-safe: returns `true` on transient read errors or unreadable directory.
+ */
+export function hasOtherLiveProcessLockForVersion(
+  locksDir: string,
+  version: string,
+): boolean {
+  const fs = getFsImplementation()
+  let matchingFiles: string[]
+  try {
+    matchingFiles = fs
+      .readdirStringSync(locksDir)
+      .filter((f: string) => matchesVersionLockFile(f, version))
+  } catch (err) {
+    return !isENOENT(err)
+  }
+
+  for (const file of matchingFiles) {
+    const filePath = join(locksDir, file)
+    let raw: string
+    try {
+      raw = fs.readFileSync(filePath, { encoding: 'utf8' })
+    } catch (err) {
+      if (isENOENT(err)) continue
+      if (classifyLockReadError(err) === 'transient') return true
+      continue
+    }
+    const content = parseLockContent(raw)
+    if (
+      content &&
+      content.version === version &&
+      content.pid !== process.pid &&
+      isLockActive(filePath, content)
+    ) {
+      return true
+    }
+  }
+  return false
 }

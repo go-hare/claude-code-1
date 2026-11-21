@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod/v4'
+import { getLoopChainStartedAt } from 'src/bootstrap/state.js'
 import type { ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
@@ -22,8 +23,12 @@ import {
   getMainLoopModel,
 } from 'src/utils/model/model.js'
 import { modelHasCatalogCapability } from 'src/utils/model/modelCatalogCapabilities.js'
+import {
+  type PendingWakeupRecord,
+  writePendingWakeup,
+} from 'src/utils/orphanCronResume.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
-import { isBriefEnabled } from '../BriefTool/BriefTool.js'
+import { getBgJobDirectory } from 'src/utils/sessionNameJobSidecar.js'
 import { BRIEF_TOOL_NAME } from '../BriefTool/prompt.js'
 import {
   CRON_CREATE_TOOL_NAME,
@@ -33,16 +38,66 @@ import { TASK_STOP_TOOL_NAME } from '../TaskStopTool/prompt.js'
 import {
   AUTONOMOUS_LOOP_DYNAMIC_SENTINEL,
   AUTONOMOUS_LOOP_SENTINEL,
-  buildLoopEndOutcomeGuidance,
-  buildScheduleWakeupPrompt,
-  buildScheduleWakeupSearchHint,
-  resolveScheduleWakeupCacheGuidance,
   SCHEDULE_WAKEUP_DESCRIPTION,
   SCHEDULE_WAKEUP_TOOL_NAME,
-} from './prompt.js'
+} from './constants.js'
+
+function getPromptHelpers(): typeof import('./prompt.js') {
+  return require('./prompt.js') as typeof import('./prompt.js')
+}
 
 /** densable `Tw` — Monitor tool wire name (no shared constant export). */
 const MONITOR_TOOL_NAME = 'Monitor'
+
+let lastArmedWakeupMeta:
+  | { scheduledFor: number; chainStartedAt: number; persisted: boolean }
+  | undefined
+
+function resolveWakeupToolUseId(
+  context?: { toolUseId?: string },
+  parentMessage?: { message?: { content?: unknown } },
+): string | undefined {
+  if (typeof context?.toolUseId === 'string' && context.toolUseId.length > 0) {
+    return context.toolUseId
+  }
+  const content = parentMessage?.message?.content
+  if (Array.isArray(content)) {
+    for (let i = content.length - 1; i >= 0; i--) {
+      const block = content[i]
+      if (
+        typeof block === 'object' &&
+        block !== null &&
+        (block as { type?: unknown }).type === 'tool_use' &&
+        (block as { name?: unknown }).name === SCHEDULE_WAKEUP_TOOL_NAME &&
+        typeof (block as { id?: unknown }).id === 'string'
+      ) {
+        return (block as { id: string }).id
+      }
+    }
+  }
+  return undefined
+}
+
+async function persistPendingWakeupBestEffort(
+  record: PendingWakeupRecord | undefined,
+): Promise<void> {
+  const jobDir = getBgJobDirectory()
+  if (!jobDir) return
+  try {
+    await writePendingWakeup(jobDir, record)
+  } catch {
+    // Best-effort persistence (matches official EWn ENOENT/write handling).
+  }
+}
+
+/**
+ * Clear `.pending-wakeup` when a scheduled wakeup fires or is cancelled outside
+ * `ScheduleWakeupTool.call`.
+ */
+export async function clearPendingWakeupOnFire(): Promise<void> {
+  lastArmedWakeupMeta = undefined
+  await persistPendingWakeupBestEffort(undefined)
+}
 
 function hasFable5Mitigations(canonical: string, raw?: string): boolean {
   const cap =
@@ -169,7 +224,7 @@ export type ScheduleWakeupOutput = z.infer<OutputSchema>
 export const ScheduleWakeupTool = buildTool({
   name: SCHEDULE_WAKEUP_TOOL_NAME,
   // densable searchHint via EU / CronDelete
-  searchHint: buildScheduleWakeupSearchHint(),
+  searchHint: `self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/cancel the dynamic loop with stop:true (a fixed-interval /loop is a recurring cron — cancel it with ${CRON_DELETE_TOOL_NAME})`,
   backgrounding: 'never',
   // densable maxResultSizeChars:1000
   maxResultSizeChars: 1000,
@@ -191,6 +246,8 @@ export const ScheduleWakeupTool = buildTool({
   async prompt() {
     // densable: FKu("noop"in QYs().shape, …) — use live Cfr (schema always
     // carries optional noop so sticky first-resolve cannot poison tests).
+    const { buildScheduleWakeupPrompt, resolveScheduleWakeupCacheGuidance } =
+      getPromptHelpers()
     return buildScheduleWakeupPrompt(
       isLoopNoopFoldEnabled(),
       resolveScheduleWakeupCacheGuidance(),
@@ -230,7 +287,13 @@ export const ScheduleWakeupTool = buildTool({
 
   async call(
     input: ScheduleWakeupInput,
-    context?: { hookCaller?: string; pluginUnnamed?: boolean },
+    context?: {
+      hookCaller?: string
+      pluginUnnamed?: boolean
+      toolUseId?: string
+    },
+    _canUseTool?: unknown,
+    parentMessage?: { message?: { content?: unknown } },
   ) {
     const { delaySeconds, reason, prompt, stop } = input
     const refusal =
@@ -250,13 +313,16 @@ export const ScheduleWakeupTool = buildTool({
     }
     // densable stop path → QKu
     if (stop === true) {
+      const cancelledWakeups = stopDynamicLoop()
+      lastArmedWakeupMeta = undefined
+      await persistPendingWakeupBestEffort(undefined)
       return {
         data: {
           scheduledFor: 0,
           clampedDelaySeconds: 0,
           wasClamped: false,
           stopped: true,
-          cancelledWakeups: stopDynamicLoop(),
+          cancelledWakeups,
         },
       }
     }
@@ -273,6 +339,8 @@ export const ScheduleWakeupTool = buildTool({
     // densable !jKe → $$t("gate_off") + zeros
     if (!isKairosLoopDynamicEnabled()) {
       markLoopEnded('gate_off')
+      lastArmedWakeupMeta = undefined
+      await persistPendingWakeupBestEffort(undefined)
       return {
         data: {
           scheduledFor: 0,
@@ -284,12 +352,35 @@ export const ScheduleWakeupTool = buildTool({
     // densable JKu(t,n,r)
     const scheduled = scheduleModelWakeup(delaySeconds, prompt, reason)
     if (scheduled === null) {
+      lastArmedWakeupMeta = undefined
+      await persistPendingWakeupBestEffort(undefined)
       return {
         data: {
           scheduledFor: 0,
           clampedDelaySeconds: 0,
           wasClamped: false,
         },
+      }
+    }
+    const chainStartedAt =
+      getLoopChainStartedAt(prompt)?.startedAt ?? Date.now()
+    const toolUseId = resolveWakeupToolUseId(context, parentMessage)
+    if (toolUseId !== undefined) {
+      lastArmedWakeupMeta = {
+        scheduledFor: scheduled.scheduledFor,
+        chainStartedAt,
+        persisted: true,
+      }
+      await persistPendingWakeupBestEffort({
+        toolUseId,
+        scheduledFor: scheduled.scheduledFor,
+        chainStartedAt,
+      })
+    } else {
+      lastArmedWakeupMeta = {
+        scheduledFor: scheduled.scheduledFor,
+        chainStartedAt,
+        persisted: false,
       }
     }
     return {
@@ -312,8 +403,24 @@ export const ScheduleWakeupTool = buildTool({
       stopped,
       cancelledWakeups,
     } = content
-    const briefMode = isBriefEnabled()
-    const outcomeHint = `Then ${buildLoopEndOutcomeGuidance({ briefMode })} — and end the turn.`
+    if (
+      stopped !== true &&
+      scheduledFor > 0 &&
+      lastArmedWakeupMeta &&
+      !lastArmedWakeupMeta.persisted &&
+      lastArmedWakeupMeta.scheduledFor === scheduledFor
+    ) {
+      lastArmedWakeupMeta.persisted = true
+      void persistPendingWakeupBestEffort({
+        toolUseId: toolUseID,
+        scheduledFor,
+        chainStartedAt: lastArmedWakeupMeta.chainStartedAt,
+      })
+    }
+    const briefMode = (
+      require('../BriefTool/BriefTool.js') as typeof import('../BriefTool/BriefTool.js')
+    ).isBriefEnabled()
+    const outcomeHint = `Then ${getPromptHelpers().buildLoopEndOutcomeGuidance({ briefMode })} — and end the turn.`
     if (stopped === true) {
       const monitorHint = `If you armed a ${MONITOR_TOOL_NAME} for this loop, ${TASK_STOP_TOOL_NAME} it now. ${outcomeHint}`
       if (cancelledWakeups === 0) {

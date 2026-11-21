@@ -197,11 +197,14 @@ function augmentScreenshot(
 // Executor
 // ---------------------------------------------------------------------------
 
-export function createCrossPlatformExecutor(_opts: {
+export function createCrossPlatformExecutor(opts: {
   getMouseAnimationEnabled: () => boolean
   getHideBeforeActionEnabled: () => boolean
+  getAllowSystemKeyCombos?: () => boolean
+  /** Optional test injection hook for platform input/display/screenshot backend. */
+  platformOverride?: ReturnType<typeof loadPlatform>
 }): ComputerExecutor {
-  const platform = loadPlatform()
+  const platform = opts.platformOverride ?? loadPlatform()
 
   logForDebugging(
     `[computer-use] cross-platform executor for ${process.platform}`,
@@ -296,32 +299,65 @@ export function createCrossPlatformExecutor(_opts: {
 
     async key(keySequence: string, repeat?: number): Promise<void> {
       const rawParts = keySequence.split('+').filter(p => p.length > 0)
-      const parts = assertSafeKeyChord(rawParts, 'Key chord')
-      const n = repeat ?? 1
-      for (let i = 0; i < n; i++) {
-        if (i > 0) await sleep(8)
-        await platform.input.keys(parts)
+      const parts = assertSafeKeyChord(rawParts, 'Key chord', {
+        platform: process.platform,
+        allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
+      })
+      const releaseTracking = trackHeldChord(parts)
+      try {
+        const n = repeat ?? 1
+        for (let i = 0; i < n; i++) {
+          if (i > 0) await sleep(8)
+          await platform.input.keys(parts)
+        }
+      } finally {
+        releaseTracking()
       }
     },
 
     async holdKey(keyNames: string[], durationMs: number): Promise<void> {
-      const safeKeyNames = assertSafeKeyChord(keyNames, 'Hold key')
+      const safeKeyNames = assertSafeKeyChord(keyNames, 'Hold key', {
+        platform: process.platform,
+        allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
+      })
       const releaseTracking = trackHeldChord(safeKeyNames)
+      const pressed: string[] = []
       try {
         for (const k of safeKeyNames) {
           await platform.input.key(k, 'press')
+          pressed.push(k)
         }
         await sleep(durationMs)
       } finally {
-        releaseTracking()
-        for (const k of [...safeKeyNames].reverse()) {
-          await platform.input.key(k, 'release')
+        try {
+          let k: string | undefined
+          while ((k = pressed.pop()) !== undefined) {
+            try {
+              await platform.input.key(k, 'release')
+            } catch {
+              // Swallow release errors so remaining keys & tracking still release.
+            }
+          }
+        } finally {
+          releaseTracking()
         }
       }
     },
 
     async type(text: string, _opts: { viaClipboard: boolean }): Promise<void> {
-      await platform.input.typeText(text)
+      const chars = [...text]
+      for (const ch of chars) {
+        assertSafeKeyChord([ch], 'Typed text', {
+          platform: process.platform,
+          allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
+        })
+      }
+      const releaseTracking = trackHeldChord(chars)
+      try {
+        await platform.input.typeText(text)
+      } finally {
+        releaseTracking()
+      }
     },
 
     async readClipboard(): Promise<string> {
@@ -373,8 +409,19 @@ export function createCrossPlatformExecutor(_opts: {
       y: number,
       button: 'left' | 'right' | 'middle',
       count: 1 | 2 | 3,
-      _modifiers?: string[],
+      modifiers?: string[],
     ): Promise<void> {
+      const safeMods =
+        modifiers !== undefined && modifiers.length > 0
+          ? assertSafeKeyChord(modifiers, 'Key chord', {
+              platform: process.platform,
+              allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
+            })
+          : undefined
+      const releaseTracking =
+        safeMods !== undefined ? trackHeldChord(safeMods) : undefined
+      const pressed: string[] = []
+
       let clickX = Math.round(x)
       let clickY = Math.round(y)
 
@@ -389,8 +436,29 @@ export function createCrossPlatformExecutor(_opts: {
         )
       }
 
-      for (let i = 0; i < count; i++) {
-        await platform.input.click(clickX, clickY, button)
+      try {
+        if (safeMods) {
+          for (const mod of safeMods) {
+            await platform.input.key(mod, 'press')
+            pressed.push(mod)
+          }
+        }
+        for (let i = 0; i < count; i++) {
+          await platform.input.click(clickX, clickY, button)
+        }
+      } finally {
+        try {
+          let mod: string | undefined
+          while ((mod = pressed.pop()) !== undefined) {
+            try {
+              await platform.input.key(mod, 'release')
+            } catch {
+              // Swallow release errors so remaining modifiers & tracking still release.
+            }
+          }
+        } finally {
+          releaseTracking?.()
+        }
       }
     },
 

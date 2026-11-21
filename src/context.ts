@@ -28,6 +28,10 @@ import {
   getPerforceModePromptAddendum,
   isPerforceModeEnabled,
 } from './utils/perforceMode.js'
+import {
+  buildGhStandinNoteTag,
+  formatGhStandinNote,
+} from './utils/agentProxy/ghStandin.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
 import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
@@ -46,6 +50,27 @@ export function setSystemPromptInjection(value: string | null): void {
   // Clear context caches immediately when injection changes
   getUserContext.cache.clear?.()
   getSystemContext.cache.clear?.()
+}
+
+/**
+ * Official 2.1.328 `oWr` / `x6t` (chunk@294254613.js @123449):
+ * Active agent-proxy `gh` stand-in tag (e.g. `builtin-api+runner+gh-only`).
+ */
+let activeGhStandinTag: string | undefined
+
+export function setGhStandinTag(tag: string | undefined): void {
+  activeGhStandinTag = tag
+  getSystemContext.cache.clear?.()
+}
+
+export function getGhStandinTag(): string | undefined {
+  if (activeGhStandinTag !== undefined) return activeGhStandinTag
+  const envTag = process.env.CLAUDE_CODE_GH_STANDIN_TAG?.trim()
+  if (envTag) return envTag
+  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_ANTHROPIC_GH)) {
+    return buildGhStandinNoteTag({ runner: true, ghOnly: true })
+  }
+  return undefined
 }
 
 /**
@@ -291,6 +316,10 @@ export const getSystemContext = memoize(
       has_injection: injection !== null,
     })
 
+    const ghStandinTag = getGhStandinTag()
+    const ghStandinNote =
+      ghStandinTag !== undefined ? formatGhStandinNote(ghStandinTag) : undefined
+
     return {
       ...(gitStatus && { gitStatus }),
       // Official CLAUDE_CODE_PERFORCE_MODE — system-context checkout hint.
@@ -301,6 +330,9 @@ export const getSystemContext = memoize(
             ),
           }
         : {}),
+      // Official 2.1.328 `W8e(x6t())` (chunk@294254613.js @123449, @133095):
+      // inject built-in `gh api` stand-in note when agent-proxy stand-in is active.
+      ...(ghStandinNote ? { ghStandin: ghStandinNote } : {}),
       ...(feature('BREAK_CACHE_COMMAND') && injection
         ? {
             cacheBreaker: `[CACHE_BREAKER: ${injection}]`,

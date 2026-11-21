@@ -233,3 +233,42 @@ export function selectOlderCompatibleVersionCandidates(
     .sort((a, b) => semver.rcompare(a, b))
     .slice(0, MAX_OLDER_VERSION_CANDIDATES)
 }
+
+/**
+ * Official 2.1.328 `j2o` (`chunk@294254613.js @5367460`) — verify that an
+ * older candidate tag's `plugin.json` matches the candidate version.
+ */
+export function verifyOlderCandidateManifestVersion(
+  candidate: { version: string; tag?: unknown },
+  manifest: { version?: string } | undefined,
+): string | undefined {
+  if (manifest === undefined && candidate.tag !== undefined) {
+    return 'its tag has no plugin.json'
+  }
+  if (
+    manifest?.version !== undefined &&
+    semver.valid(manifest.version) !== candidate.version
+  ) {
+    return `its plugin.json says version ${sanitizeRangeDisplay(manifest.version, 100)}`
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.328 `Gt` (`chunk@306660664.js @125000`) — format the update
+ * summary message when an older compatible version was installed because the
+ * marketplace's newest version requires a different Claude Code range.
+ */
+export function formatOlderCompatibleUpdateMessage(info: {
+  baseMessage: string
+  rejectedVersion?: string
+  miss: PluginEngineRangeMiss
+  refreshWarning?: string
+}): string {
+  const rejectedLabel = info.rejectedVersion
+    ? sanitizeRangeDisplay(info.rejectedVersion, 100)
+    : "the marketplace's version"
+  const warningSuffix =
+    info.refreshWarning === undefined ? '' : ` Warning: ${info.refreshWarning}.`
+  return `${info.baseMessage} It's the newest that works on your version: ${rejectedLabel} ${formatEngineRangeMiss(info.miss)}.${warningSuffix}`
+}

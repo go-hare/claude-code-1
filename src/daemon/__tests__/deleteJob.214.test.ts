@@ -69,7 +69,8 @@ describe('densable C2e / gJ_ source contract #28', () => {
 
   test('cli.tsx top-level rm + daemonMain case rm', () => {
     const cli = readFileSync(join(SRC_ROOT, 'entrypoints/cli.tsx'), 'utf8')
-    expect(cli).toContain("args[0] === 'rm'")
+    expect(cli).toContain('backgroundSessionVerbIndex')
+    expect(cli).toContain("bgVerb === 'rm'")
     expect(cli).toContain('bg.rmHandler')
     const main = readFileSync(join(ROOT, 'main.ts'), 'utf8')
     expect(main).toMatch(/case 'rm':/)

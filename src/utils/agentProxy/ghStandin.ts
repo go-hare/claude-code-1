@@ -14,6 +14,7 @@ export function buildGhStandinNoteTag(opts: {
   anyHost?: boolean
   noJq?: boolean
   runner?: boolean
+  ghOnly?: boolean
 }): string {
   return [
     GH_STANDIN_TAG,
@@ -21,6 +22,7 @@ export function buildGhStandinNoteTag(opts: {
     opts.anyHost && 'any-host',
     opts.noJq && 'no-jq',
     opts.runner && 'runner',
+    opts.ghOnly && 'gh-only',
   ]
     .filter(Boolean)
     .join('+')
@@ -33,13 +35,16 @@ export function formatGhStandinNote(tag: string): string | undefined {
   const anyHost = flags.includes('any-host')
   const noJq = flags.includes('no-jq')
   const runner = flags.includes('runner')
+  const ghOnly = flags.includes('gh-only')
   return (
     "`gh` here is Claude Code's built-in GitHub client, not the GitHub CLI (none was found on this machine when the session started). `gh api <REST endpoint>` works against github.com" +
     (enterprise
       ? " and, with `--hostname <host>`, the GitHub Enterprise Server hosts this session's GitHub proxy serves"
       : '') +
     (runner
-      ? ", already authenticated through this session's GitHub proxy (run `gh api --help` for its flags)."
+      ? ghOnly
+        ? ", through this session's GitHub proxy, which adds the session's GitHub sign-in if it has one (run `gh api --help` for its flags)."
+        : ", already authenticated through this session's GitHub proxy (run `gh api --help` for its flags)."
       : (anyHost
           ? ", or against the GitHub Enterprise host of this checkout's remote (or `--hostname <host>`), through this session's GitHub proxy, which supplies the credential for the hosts and repositories this session is connected to"
           : (enterprise

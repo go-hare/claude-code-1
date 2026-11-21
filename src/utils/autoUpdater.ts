@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { randomBytes } from 'crypto'
 import { constants as fsConstants, realpathSync } from 'fs'
 import {
   access,
@@ -32,7 +33,9 @@ import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { getFsImplementation } from './fsOperations.js'
 import { gracefulShutdownSync } from './gracefulShutdown.js'
 import { logError } from './log.js'
+import { isEssentialTrafficOnly } from './privacyLevel.js'
 import { gt, gte, lt, lte } from './semver.js'
+import { sleep } from './sleep.js'
 import {
   getInitialSettings,
   getSettingsForSource,
@@ -959,21 +962,72 @@ export async function getNpmDistTags(): Promise<NpmDistTags> {
   }
 }
 
+const GCS_VERSION_TIMEOUT_MS = 5000
+const GCS_VERSION_MAX_ATTEMPTS = 3
+const STRICT_SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/
+
+function isValidGcsVersion(version: string): boolean {
+  return STRICT_SEMVER_RE.test(version) && semver.parse(version) !== null
+}
+
 /**
  * Get the latest version from GCS bucket for a given release channel.
- * This is used by installations that don't have npm (e.g. package manager installs).
+ * Official 2.1.328 `S1o` (`chunk@300375138.js @18200`): skips when
+ * `isEssentialTrafficOnly()`, retries 3x with exponential backoff (`h1o`), and
+ * rejects non-semver bodies.
  */
 export async function getLatestVersionFromGcs(
   channel: ReleaseChannel,
+  opts?: { sleepFn?: (ms: number) => Promise<void> },
 ): Promise<string | null> {
+  if (isEssentialTrafficOnly()) {
+    return null
+  }
+  const sleepFn = opts?.sleepFn ?? sleep
+  let attempts = 0
+  let lastError: unknown
   try {
-    const response = await axios.get(`${GCS_BUCKET_URL}/${channel}`, {
-      timeout: 5000,
-      responseType: 'text',
-    })
-    return response.data.trim()
+    let responseData: string | undefined
+    for (let attempt = 1; attempt <= GCS_VERSION_MAX_ATTEMPTS; attempt++) {
+      attempts = attempt
+      try {
+        const response = await axios.get<string>(
+          `${GCS_BUCKET_URL}/${channel}`,
+          {
+            timeout: GCS_VERSION_TIMEOUT_MS,
+            responseType: 'text',
+            signal: AbortSignal.timeout(GCS_VERSION_TIMEOUT_MS),
+          },
+        )
+        responseData = response.data
+        break
+      } catch (err) {
+        lastError = err
+        if (attempt >= GCS_VERSION_MAX_ATTEMPTS) {
+          throw err
+        }
+        logForDebugging(
+          `Failed to fetch ${channel} from GCS on attempt ${attempt}/${GCS_VERSION_MAX_ATTEMPTS}, retrying: ${err}`,
+        )
+        const baseDelay = 500 * 3 ** (attempt - 1)
+        await sleepFn(Math.round(baseDelay * (0.75 + Math.random() * 0.5)))
+      }
+    }
+    const trimmed = String(responseData ?? '').trim()
+    if (!isValidGcsVersion(trimmed)) {
+      logForDebugging(
+        `GCS ${channel} version response is not a valid semver version — treating as no result`,
+      )
+      logForDebugging(
+        `GCS response body (first 300 chars, JSON-encoded): ${JSON.stringify(trimmed.slice(0, 300))}`,
+      )
+      return null
+    }
+    return trimmed
   } catch (error) {
-    logForDebugging(`Failed to fetch ${channel} from GCS: ${error}`)
+    logForDebugging(
+      `Failed to fetch ${channel} from GCS after ${attempts} attempt(s): ${error ?? lastError}`,
+    )
     return null
   }
 }
@@ -1114,6 +1168,169 @@ async function locatePreservedBackup(
   return null
 }
 
+const RESTORE_RENAME_FALLBACK_CODES = new Set([
+  'EXDEV',
+  'EPERM',
+  'EEXIST',
+  'EBUSY',
+])
+const RESTORE_COPY_CLEANUP_CODES = new Set(['ENOSPC', 'EIO', 'EDQUOT', 'EFBIG'])
+
+function pathExists(filePath: string): Promise<boolean> {
+  return access(filePath, fsConstants.F_OK).then(
+    () => true,
+    () => false,
+  )
+}
+
+/**
+ * Official 2.1.328 `te()` (`chunk@300375138.js @20500`): atomically restore an
+ * executable by recreating parent directories, staging to a sibling
+ * `.restoring.<hex>` temp file, and atomically renaming into place (with
+ * copy fallback when rename hits EXDEV/EPERM/EEXIST/EBUSY against an existing
+ * target).
+ */
+async function atomicRestoreExecutable(
+  srcPath: string,
+  targetPath: string,
+): Promise<void> {
+  const targetDir = dirname(targetPath)
+  await mkdir(targetDir, { recursive: true })
+  try {
+    const restoringPrefix = `${basename(targetPath)}.restoring.`
+    for (const entry of await readdir(targetDir)) {
+      if (entry.startsWith(restoringPrefix)) {
+        await unlink(join(targetDir, entry)).catch(() => {})
+      }
+    }
+  } catch {
+    // Best-effort cleanup of stale .restoring.* files
+  }
+
+  const tempPath = `${targetPath}.restoring.${randomBytes(4).toString('hex')}`
+  try {
+    await copyFile(srcPath, tempPath)
+    try {
+      await rename(tempPath, targetPath)
+    } catch (renameErr) {
+      const code = getErrnoCode(renameErr)
+      if (code === undefined || !RESTORE_RENAME_FALLBACK_CODES.has(code)) {
+        throw renameErr
+      }
+      if (!(await pathExists(targetPath))) {
+        throw renameErr
+      }
+      try {
+        await copyFile(tempPath, targetPath)
+      } catch (copyErr) {
+        if (RESTORE_COPY_CLEANUP_CODES.has(getErrnoCode(copyErr) ?? '')) {
+          await unlink(targetPath).catch(() => {})
+        }
+        throw copyErr
+      }
+      await unlink(tempPath).catch(() => {})
+    }
+  } catch (err) {
+    await unlink(tempPath).catch(() => {})
+    throw err
+  }
+}
+
+export async function atomicRestoreExecutableForTests(
+  srcPath: string,
+  targetPath: string,
+): Promise<void> {
+  return atomicRestoreExecutable(srcPath, targetPath)
+}
+
+/**
+ * Official 2.1.328 `Ct()` (`chunk@300375138.js @20900`): when `process.execPath`
+ * is missing before a Windows update attempt, sweep retired npm directories for
+ * the newest minted `<exec>.old.<ts>` copy and restore it atomically.
+ */
+async function sweepHealMissingExecutableFromRetiredDirs(
+  retiredDirs: readonly string[],
+): Promise<void> {
+  const execName = basename(process.execPath)
+  const escaped = execName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const oldBackupRe = new RegExp(`^${escaped}\\.old\\.(\\d+)$`)
+  const candidates = (
+    await Promise.all(
+      retiredDirs.flatMap(dir =>
+        [dir, join(dir, 'bin')].map(async subdir =>
+          (
+            await readdir(subdir).catch(() => [])
+          )
+            .map(entry => oldBackupRe.exec(entry))
+            .filter((m): m is RegExpExecArray => m !== null)
+            .map(m => ({ path: join(subdir, m[0]), ts: Number(m[1]) })),
+        ),
+      ),
+    )
+  ).flat()
+
+  const mintedMatches = (
+    await Promise.all(
+      candidates.map(async candidate =>
+        (await isPreservedInode(candidate.path)) ? [candidate] : [],
+      ),
+    )
+  ).flat()
+
+  const newest = mintedMatches.reduce<{ path: string; ts: number } | null>(
+    (best, cur) => (best === null || cur.ts > best.ts ? cur : best),
+    null,
+  )
+  if (!newest) {
+    logForDebugging(
+      `No preserved ${execName}.old.<ts> found in ${retiredDirs.length} retired dir(s) — sweep restore skipped`,
+    )
+    return
+  }
+  try {
+    await atomicRestoreExecutable(newest.path, process.execPath)
+    logForDebugging(
+      `Restored missing ${process.execPath} from preserved copy ${newest.path} before update attempt`,
+    )
+  } catch (err) {
+    logForDebugging(
+      `Failed to restore missing ${process.execPath} from preserved copy ${newest.path}: ${err}`,
+    )
+  }
+}
+
+export async function sweepHealMissingExecutableForTests(
+  retiredDirs: readonly string[],
+): Promise<void> {
+  return sweepHealMissingExecutableFromRetiredDirs(retiredDirs)
+}
+
+/**
+ * Official 2.1.328 `$t()` (`chunk@300375138.js @19600`): reconcile a lingering
+ * `updateRestoreFailure` in `finally` — clear it if `originalPath` has
+ * reappeared, or refresh `preservedPath` if npm relocated it into a retired dir.
+ */
+async function reconcileUpdateRestoreFailure(): Promise<void> {
+  if (!updateRestoreFailure) return
+  if (await pathExists(updateRestoreFailure.originalPath)) {
+    updateRestoreFailure = null
+    return
+  }
+  if (updateRestoreFailure.preservedPath !== undefined) {
+    const relocated = await locatePreservedBackup(
+      updateRestoreFailure.preservedPath,
+    )
+    updateRestoreFailure = {
+      originalPath: updateRestoreFailure.originalPath,
+      preservedPath: relocated ?? undefined,
+    }
+  }
+}
+
+export async function reconcileUpdateRestoreFailureForTests(): Promise<void> {
+  return reconcileUpdateRestoreFailure()
+}
+
 export async function installGlobalPackage(
   targetVersion?: string | null,
 ): Promise<InstallOutcome> {
@@ -1130,6 +1347,7 @@ export async function installGlobalPackage(
     return { status: 'in_progress' }
   }
 
+  const priorRestoreFailure = updateRestoreFailure
   try {
     await removeClaudeAliasesFromShellConfigs()
     const packageManager = getGlobalPackageManager()
@@ -1154,19 +1372,18 @@ To fix this issue:
       return { status: 'install_failed' }
     }
 
-    const { hasPermissions, npmPrefix } = await checkGlobalInstallPermissions()
-    if (!hasPermissions) {
-      return { status: 'no_permissions' }
-    }
+    // Official 2.1.328 `XKt`: do NOT pre-flight reject on prefix W_OK before
+    // running `npm/bun install -g` (permissions are diagnosed from install
+    // stderr EACCES/EPERM, avoiding false rejections under custom prefixes/ACLs).
 
     // Use specific version if provided, otherwise use latest
     const packageSpec = targetVersion
       ? `${MACRO.PACKAGE_URL}@${targetVersion}`
       : MACRO.PACKAGE_URL
 
-    // Official 2.1.328 `XKt`: on Windows bundled npm installs, rename the running
-    // executable aside before `npm/bun install -g` so the new binary can land,
-    // and restore it if the install fails.
+    // Official 2.1.328 `XKt`: on Windows bundled npm installs, sweep/heal
+    // retired dirs, rename the running executable aside before `npm/bun install -g`
+    // so the new binary can land, and restore it atomically if the install fails.
     const normalizedExecPath = process.execPath.replace(/\\/g, '/')
     const packageScope = MACRO.PACKAGE_URL.startsWith('@')
       ? MACRO.PACKAGE_URL.split('/')[0]
@@ -1179,6 +1396,39 @@ To fix this issue:
           normalizedExecPath.includes(`/node_modules/${packageScope}/`)))
     const renamedBackups: Array<[originalPath: string, backupPath: string]> = []
     if (shouldSelfRenameOnWindows) {
+      // Official `XKt` -> `Ct`: inspect retired dirs containing `.exe.old.<ts>`;
+      // remove them when process.execPath exists, or heal a missing execPath from
+      // the newest minted preserved copy before starting the new install.
+      const retiredDirsWithOldExe = (
+        await Promise.all(
+          (
+            await listRetiredDirs()
+          ).map(async dir => {
+            const [topEntries, binEntries] = await Promise.all([
+              readdir(dir).catch(() => []),
+              readdir(join(dir, 'bin')).catch(() => []),
+            ])
+            const hasOldExe = [...topEntries, ...binEntries].some(entry =>
+              /\.exe\.old\.\d+$/.test(entry),
+            )
+            return hasOldExe ? [dir] : []
+          }),
+        )
+      ).flat()
+      if (retiredDirsWithOldExe.length > 0) {
+        if (await pathExists(process.execPath)) {
+          await Promise.all(
+            retiredDirsWithOldExe.map(dir =>
+              rm(dir, { recursive: true, force: true }).catch(err =>
+                logForDebugging(`retired-dir cleanup failed: ${err}`),
+              ),
+            ),
+          )
+        } else {
+          await sweepHealMissingExecutableFromRetiredDirs(retiredDirsWithOldExe)
+        }
+      }
+
       // Official `XKt`: enumerate every claude.exe/cli.exe inside sibling
       // package dirs of the executable's scope directory that shares the running
       // executable's inode — npm postinstalls lay down hardlinks across the
@@ -1237,7 +1487,7 @@ To fix this issue:
           await rename(backupPath, originalPath)
         } catch (renameErr) {
           try {
-            await copyFile(backupPath, originalPath)
+            await atomicRestoreExecutable(backupPath, originalPath)
             logForDebugging(
               `Restored ${originalPath} by copy after rename failed: ${renameErr}`,
             )
@@ -1247,15 +1497,15 @@ To fix this issue:
               ),
             )
           } catch (copyErr) {
-            // Official `XKt` → `We`: npm may have already moved the package
-            // dir (and our `.old.<ts>` backup with it) into a `.`-prefixed
-            // retired directory. Locate it by minted inode and restore from
-            // there before declaring the original launch path lost.
+            // Official `XKt` → `We` → `te`: npm may have already moved the
+            // package dir (and our `.old.<ts>` backup with it) into a
+            // `.`-prefixed retired directory. Locate it by minted inode and
+            // atomically restore from there (recreating missing parent dirs).
             const relocated = await locatePreservedBackup(backupPath)
             let preservedPath: string | undefined
             if (relocated !== null && relocated !== backupPath) {
               try {
-                await copyFile(relocated, originalPath)
+                await atomicRestoreExecutable(relocated, originalPath)
                 logForDebugging(
                   `Restored ${originalPath} from retired-dir copy ${relocated} after rename (${renameErr}) and copy (${copyErr}) both failed`,
                 )
@@ -1267,14 +1517,7 @@ To fix this issue:
                 preservedPath = relocated
               }
             } else {
-              const preservedExists = await access(
-                backupPath,
-                fsConstants.F_OK,
-              ).then(
-                () => true,
-                () => false,
-              )
-              preservedPath = preservedExists ? backupPath : undefined
+              preservedPath = relocated ?? undefined
             }
             const failure: UpdateRestoreFailure = {
               originalPath,
@@ -1291,9 +1534,13 @@ To fix this issue:
           }
         }
       }
-      if (firstRestoreFailure) {
-        updateRestoreFailure = firstRestoreFailure
-      }
+      const renamedOriginals = new Set(renamedBackups.map(([orig]) => orig))
+      updateRestoreFailure =
+        firstRestoreFailure ??
+        (updateRestoreFailure &&
+        !renamedOriginals.has(updateRestoreFailure.originalPath)
+          ? updateRestoreFailure
+          : null)
     }
 
     if (installResult.code !== 0) {
@@ -1304,7 +1551,7 @@ To fix this issue:
       if (stderrSig === 'warning_only') {
         const probe = await probeInstalledGlobalBinary(
           targetVersion,
-          npmPrefix,
+          undefined,
           packageManager,
         )
         if (probe.outcome === 'landed') {
@@ -1339,7 +1586,7 @@ To fix this issue:
     // platform package was not installed.
     const probe = await probeInstalledGlobalBinary(
       targetVersion,
-      npmPrefix,
+      undefined,
       packageManager,
     )
     switch (probe.outcome) {
@@ -1389,6 +1636,12 @@ To fix this issue:
 
     return { status: 'success', probeDurationMs: probe.durationMs }
   } finally {
+    if (
+      updateRestoreFailure !== null &&
+      updateRestoreFailure === priorRestoreFailure
+    ) {
+      await reconcileUpdateRestoreFailure()
+    }
     // Ensure we always release the lock
     await releaseLock()
   }

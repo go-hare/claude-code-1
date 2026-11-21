@@ -27,11 +27,7 @@ import {
   countTokensWithAPI,
   roughTokenCountEstimationForFileType,
 } from 'src/services/tokenEstimation.js'
-import {
-  activateConditionalSkillsForPaths,
-  addSkillDirectories,
-  discoverSkillDirsForPaths,
-} from 'src/skills/loadSkillsDir.js'
+import { discoverAndActivateSkillsForFilePath } from 'src/skills/loadSkillsDir.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import {
@@ -878,22 +874,13 @@ export const FileReadTool = buildTool({
       }
     }
 
-    // Discover skills from this file's path (fire-and-forget, non-blocking)
-    // Skip in simple mode - no skills available
-    const cwd = getCwd()
+    // Discover skills from this file's path (official 2.1.328 BJ).
+    // Skip in bare mode - no skills available.
     if (!isBareMode()) {
-      const newSkillDirs = await discoverSkillDirsForPaths([fullFilePath], cwd)
-      if (newSkillDirs.length > 0) {
-        // Store discovered dirs for attachment display
-        for (const dir of newSkillDirs) {
-          context.dynamicSkillDirTriggers?.add(dir)
-        }
-        // Don't await - let skill loading happen in the background
-        addSkillDirectories(newSkillDirs).catch(() => {})
-      }
-
-      // Activate conditional skills whose path patterns match this file
-      activateConditionalSkillsForPaths([fullFilePath], cwd)
+      await discoverAndActivateSkillsForFilePath(
+        fullFilePath,
+        context.dynamicSkillDirTriggers,
+      )
     }
 
     try {

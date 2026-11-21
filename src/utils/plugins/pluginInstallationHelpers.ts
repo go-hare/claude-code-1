@@ -6,6 +6,9 @@
  */
 
 import { resolve, sep } from 'path'
+import * as semver from 'semver'
+import { execFileNoThrow } from '../execFileNoThrow.js'
+import { logForDebugging } from '../debug.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
@@ -70,6 +73,9 @@ import {
   PluginEngineRangeError,
   checkClaudeCodeEngineRange,
   extractClaudeCodeEngineRange,
+  formatOlderCompatibleInstallNote,
+  selectOlderCompatibleVersionCandidates,
+  verifyOlderCandidateManifestVersion,
 } from './pluginEngineRange.js'
 import {
   isOfficialMarketplaceName,
@@ -210,6 +216,219 @@ export async function resolveMarketplaceArchiveAuth(pluginId: string): Promise<{
  * @param localSourcePath - For local plugins, the resolved absolute path to the source directory
  * @returns The installation path
  */
+/**
+ * Official 2.1.328 `B2o` candidate shape (`chunk@294254613.js @5366860`).
+ */
+export type OlderPluginVersionCandidate = {
+  version: string
+  entry: PluginMarketplaceEntry
+  tag?: { ref: string; version: string }
+}
+
+/**
+ * Injectable version-lister hook for deterministic tests and custom registries.
+ */
+export type OlderPluginVersionLister = (args: {
+  entry: PluginMarketplaceEntry
+  marketplaceSource?: MarketplaceSource
+}) => Promise<readonly string[]>
+
+const OLDER_VERSION_LIST_TIMEOUT_MS = 10_000
+
+function getGitUrlForPluginSource(
+  source: PluginSource,
+  marketplaceSource?: MarketplaceSource,
+): string | null {
+  if (typeof source === 'string') {
+    if (!marketplaceSource) return null
+    if (marketplaceSource.source === 'github') {
+      return `https://github.com/${marketplaceSource.repo}.git`
+    }
+    if (marketplaceSource.source === 'git') {
+      return marketplaceSource.url
+    }
+    return null
+  }
+  switch (source.source) {
+    case 'github':
+      return `https://github.com/${source.repo}.git`
+    case 'url':
+    case 'git-subdir':
+      return source.url
+    default:
+      return null
+  }
+}
+
+/**
+ * Official 2.1.328 `rVr` (`chunk@294254613.js @5365033`):
+ * True when an `engines["claude-code"]` mismatch may fall back to an older
+ * published version (unpinned npm or git/github source, not `@inline`).
+ */
+export function isOlderVersionFallbackEligible(
+  pluginId: string,
+  entry: Pick<PluginMarketplaceEntry, 'source'>,
+  marketplaceSource?: MarketplaceSource,
+): boolean {
+  if (pluginId.endsWith('@inline')) return false
+  const { source } = entry
+  if (typeof source === 'string') {
+    if (!marketplaceSource) return false
+    if (
+      marketplaceSource.source !== 'github' &&
+      marketplaceSource.source !== 'git'
+    ) {
+      return false
+    }
+    return marketplaceSource.ref === undefined
+  }
+  switch (source.source) {
+    case 'npm':
+      return (
+        typeof source.package === 'string' &&
+        source.package.length > 0 &&
+        (source.version === undefined ||
+          semver.validRange(source.version) !== null)
+      )
+    case 'github':
+    case 'url':
+    case 'git-subdir':
+      return source.ref === undefined && source.sha === undefined
+    default:
+      return false
+  }
+}
+
+function parseGitTagVersions(
+  stdout: string,
+  pluginName: string,
+): Array<{ version: string; ref: string }> {
+  const prefixed = `${pluginName}--v`
+  const results: Array<{ version: string; ref: string }> = []
+  for (const line of stdout.split('\n')) {
+    const tab = line.indexOf('\t')
+    if (tab === -1) continue
+    const ref = line.slice(tab + 1).trim()
+    if (!ref.startsWith('refs/tags/')) continue
+    const tag = ref.slice('refs/tags/'.length)
+    let rawVersion: string | undefined
+    if (tag.startsWith(prefixed)) {
+      rawVersion = tag.slice(prefixed.length)
+    } else if (tag.startsWith('v')) {
+      rawVersion = tag.slice(1)
+    }
+    if (rawVersion && semver.valid(rawVersion) === rawVersion) {
+      results.push({ version: rawVersion, ref: tag })
+    }
+  }
+  return results
+}
+
+/**
+ * Official 2.1.328 `B2o` (`chunk@294254613.js @5366860`):
+ * Discover up to 5 older compatible version candidates (newest-first) using
+ * `selectOlderCompatibleVersionCandidates`.
+ */
+export async function listOlderCompatibleVersionCandidates(args: {
+  entry: PluginMarketplaceEntry
+  marketplaceSource?: MarketplaceSource
+  below?: string
+  above?: string
+  within?: string
+  listAvailableVersions?: OlderPluginVersionLister
+}): Promise<OlderPluginVersionCandidate[]> {
+  const { entry, marketplaceSource, below, above, within } = args
+  const { source, name } = entry
+  const npmSource =
+    typeof source === 'object' && source.source === 'npm' ? source : undefined
+  const tagByVersion = new Map<string, string>()
+  let rawVersions: string[] = []
+
+  try {
+    if (args.listAvailableVersions) {
+      rawVersions = [
+        ...(await args.listAvailableVersions({ entry, marketplaceSource })),
+      ]
+    } else if (npmSource) {
+      const npmArgs = ['view', npmSource.package, 'versions', '--json']
+      if (npmSource.registry) {
+        npmArgs.push('--registry', npmSource.registry)
+      }
+      const res = await execFileNoThrow('npm', npmArgs, {
+        timeout: OLDER_VERSION_LIST_TIMEOUT_MS,
+      })
+      if (res.code === 0 && res.stdout.trim()) {
+        const parsed = JSON.parse(res.stdout) as unknown
+        if (Array.isArray(parsed)) {
+          rawVersions = parsed.filter((v): v is string => typeof v === 'string')
+        } else if (typeof parsed === 'string') {
+          rawVersions = [parsed]
+        }
+      }
+    } else {
+      const gitUrl = getGitUrlForPluginSource(source, marketplaceSource)
+      if (gitUrl) {
+        const res = await execFileNoThrow(
+          'git',
+          ['ls-remote', '--tags', '--refs', '--', gitUrl],
+          {
+            timeout: OLDER_VERSION_LIST_TIMEOUT_MS,
+            env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+          },
+        )
+        if (res.code === 0 && res.stdout) {
+          for (const item of parseGitTagVersions(res.stdout, name)) {
+            rawVersions.push(item.version)
+            if (!tagByVersion.has(item.version)) {
+              tagByVersion.set(item.version, item.ref)
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logForDebugging(
+      `Could not list older versions of ${name}: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'warn' },
+    )
+    return []
+  }
+
+  const selected = selectOlderCompatibleVersionCandidates(rawVersions, {
+    below,
+    above,
+    within,
+    sourceRange: npmSource?.version,
+  })
+
+  return selected.map(version => {
+    const tagRef = tagByVersion.get(version)
+    let candidateSource: PluginSource = source
+    if (npmSource) {
+      candidateSource = { ...npmSource, version }
+    } else if (
+      typeof source === 'object' &&
+      (source.source === 'github' ||
+        source.source === 'url' ||
+        source.source === 'git-subdir')
+    ) {
+      candidateSource = {
+        ...source,
+        ref: tagRef ?? `${name}--v${version}`,
+      }
+    }
+    return {
+      version,
+      entry: {
+        ...entry,
+        version,
+        source: candidateSource,
+      },
+      ...(tagRef ? { tag: { ref: tagRef, version } } : {}),
+    }
+  })
+}
+
 export async function cacheAndRegisterPlugin(
   pluginId: string,
   entry: PluginMarketplaceEntry,
@@ -232,6 +451,8 @@ export async function cacheAndRegisterPlugin(
     consentedEntryHelper?: HeadersHelperPaneShown | null
     /** Official 2.1.323 #2044 & #2189: callback receiving exit-0 stderr from command source. */
     onCommandStderr?: (stderr: string) => void
+    /** Official 2.1.328 `j2o`: older compatible candidate metadata for manifest version verification. */
+    olderCandidate?: OlderPluginVersionCandidate
   },
 ): Promise<string> {
   // For local plugins, we need the resolved absolute path
@@ -336,6 +557,20 @@ export async function cacheAndRegisterPlugin(
       cacheResult.manifest.name || pluginName,
       manifestEngineCheck.miss,
     )
+  }
+
+  // Official 2.1.328 `j2o` (chunk@294254613.js @5367460): verify an older
+  // candidate's plugin.json version matches the selected candidate version.
+  if (options?.olderCandidate !== undefined) {
+    const versionMismatch = verifyOlderCandidateManifestVersion(
+      options.olderCandidate,
+      cacheResult.manifest,
+    )
+    if (versionMismatch !== undefined) {
+      throw new Error(
+        `Plugin "${pluginName}" candidate ${options.olderCandidate.version} rejected: ${versionMismatch}`,
+      )
+    }
   }
 
   // Official 2.1.323 #2044 & #2189: propagate exit-0 stderr printed by command source.
@@ -497,6 +732,8 @@ export type InstallCoreResult =
       depNote: string
       /** Official 2.1.323 #2044 & #2189: stderr printed on exit 0 by a command source */
       commandStderr?: string
+      /** Official 2.1.328 `W2o`: notes when an older compatible version was installed. */
+      olderVersionNotes?: string[]
     }
   | { ok: false; reason: 'local-source-no-location'; pluginName: string }
   | { ok: false; reason: 'settings-write-failed'; message: string }
@@ -570,6 +807,7 @@ export async function installResolvedPlugin({
   commandSourceConsent,
   runEntryHelper,
   consentedEntryHelper,
+  listAvailableVersions,
 }: {
   pluginId: string
   entry: PluginMarketplaceEntry
@@ -584,6 +822,8 @@ export async function installResolvedPlugin({
   runEntryHelper?: boolean
   /** SEA ayi `d.consented` — CLI shownEntryHelper / pane pinned snapshot. */
   consentedEntryHelper?: HeadersHelperPaneShown | null
+  /** Official 2.1.328 `B2o`: optional version-lister override for older-version fallback. */
+  listAvailableVersions?: OlderPluginVersionLister
 }): Promise<InstallCoreResult> {
   const settingSource = scopeToSettingSource(scope)
 
@@ -679,6 +919,8 @@ export async function installResolvedPlugin({
   // ── Materialize: cache each closure member ──
   const projectPath = scope !== 'user' ? getCwd() : undefined
   let rootCommandStderr: string | undefined
+  const olderVersionNotes: string[] = []
+  const knownMarketplaces = await loadKnownMarketplacesConfigSafe()
   for (const id of resolution.closure) {
     let info = depInfo.get(id)
     // Root wasn't pre-seeded (caller didn't pass marketplaceInstallLocation
@@ -697,31 +939,83 @@ export async function installResolvedPlugin({
         source,
       )
     }
-    // densable $Tn / ayi: only the install root gets explicit consent +
-    // entry helper; deps use recorded/none and runEntryHelper:!1.
-    await cacheAndRegisterPlugin(
-      id,
-      info.entry,
-      scope,
-      projectPath,
-      localSourcePath,
-      {
-        ...(id === pluginId && commandSourceConsent
-          ? { commandSourceConsent }
-          : {}),
-        runEntryHelper: id === pluginId && runEntryHelper !== false,
-        ...(id === pluginId && consentedEntryHelper
-          ? { consentedEntryHelper }
-          : {}),
-        ...(id === pluginId
-          ? {
-              onCommandStderr: stderr => {
-                rootCommandStderr = stderr
-              },
-            }
-          : {}),
-      },
-    )
+    const cacheOpts = {
+      ...(id === pluginId && commandSourceConsent
+        ? { commandSourceConsent }
+        : {}),
+      runEntryHelper: id === pluginId && runEntryHelper !== false,
+      ...(id === pluginId && consentedEntryHelper
+        ? { consentedEntryHelper }
+        : {}),
+      ...(id === pluginId
+        ? {
+            onCommandStderr: (stderr: string) => {
+              rootCommandStderr = stderr
+            },
+          }
+        : {}),
+    }
+    // densable $Tn / ayi + Official 2.1.328 `aXn` (`chunk@294254613.js @5397914`):
+    // if `engines["claude-code"]` excludes this Claude Code version, try older
+    // compatible published versions newest-first before failing.
+    try {
+      await cacheAndRegisterPlugin(
+        id,
+        info.entry,
+        scope,
+        projectPath,
+        localSourcePath,
+        cacheOpts,
+      )
+    } catch (err) {
+      const mktName = parsePluginIdentifier(id).marketplace
+      const mktSource = mktName ? knownMarketplaces[mktName]?.source : undefined
+      if (
+        !(err instanceof PluginEngineRangeError) ||
+        !isOlderVersionFallbackEligible(id, info.entry, mktSource)
+      ) {
+        throw err
+      }
+      const candidates = await listOlderCompatibleVersionCandidates({
+        entry: info.entry,
+        marketplaceSource: mktSource,
+        below: semver.valid(info.entry.version) ?? undefined,
+        listAvailableVersions,
+      })
+      let installedCandidate: OlderPluginVersionCandidate | undefined
+      for (const candidate of candidates) {
+        try {
+          await cacheAndRegisterPlugin(
+            id,
+            candidate.entry,
+            scope,
+            projectPath,
+            undefined,
+            { ...cacheOpts, olderCandidate: candidate },
+          )
+          installedCandidate = candidate
+          break
+        } catch (candidateErr) {
+          logForDebugging(
+            `${id} at ${candidate.version} was not installed: ${candidateErr instanceof Error ? candidateErr.message : String(candidateErr)}`,
+            { level: 'warn' },
+          )
+        }
+      }
+      if (!installedCandidate) {
+        throw err
+      }
+      olderVersionNotes.push(
+        formatOlderCompatibleInstallNote(
+          {
+            version: installedCandidate.version,
+            rejectedVersion: info.entry.version,
+            miss: err.miss,
+          },
+          id === pluginId ? undefined : info.entry.name,
+        ),
+      )
+    }
   }
 
   clearAllCaches()
@@ -734,6 +1028,7 @@ export async function installResolvedPlugin({
     closure: resolution.closure,
     depNote,
     ...(rootCommandStderr ? { commandStderr: rootCommandStderr } : {}),
+    ...(olderVersionNotes.length > 0 ? { olderVersionNotes } : {}),
   }
 }
 
@@ -890,12 +1185,16 @@ export async function installPluginFromMarketplace({
     // Pass full dependency closure so VQS can attribute load errors on deps.
     const ok = result as Extract<InstallCoreResult, { ok: true }>
     const commandPrinted = Boolean(ok.commandStderr)
+    const olderVersionSuffix =
+      ok.olderVersionNotes && ok.olderVersionNotes.length > 0
+        ? ` ${ok.olderVersionNotes.join(' ')}`
+        : ''
     const stderrDetails = ok.commandStderr
       ? `\n${formatCommandSourceStderrNote(ok.commandStderr)}\n${formatCommandSourceWarningHint(false)}`
       : ''
     return {
       success: true,
-      message: `${commandPrinted ? '⚠' : '✓'} Installed ${entry.name}${ok.depNote}.${stderrDetails}`,
+      message: `${commandPrinted ? '⚠' : '✓'} Installed ${entry.name}${ok.depNote}.${olderVersionSuffix}${stderrDetails}`,
       closure: ok.closure,
       ...(ok.commandStderr
         ? { commandStderr: ok.commandStderr, commandPrinted: true }

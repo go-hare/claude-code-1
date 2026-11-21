@@ -689,6 +689,7 @@ function splitPemCertificateBlocks(
 export function syncDefaultCACertificates(opts?: {
   caCerts?: string | string[]
   setDefaultCACertificates?: (certs: readonly string[]) => void
+  env?: NodeJS.ProcessEnv
 }): boolean {
   const caCerts = opts?.caCerts ?? getCACertificates()
   if (caCerts === undefined) return false
@@ -700,15 +701,74 @@ export function syncDefaultCACertificates(opts?: {
   const blocks = splitPemCertificateBlocks(caCerts)
   if (blocks.length === 0) return false
 
-  if (trySetDefaultCACertificates(blocks, setter)) {
-    lastSyncedDefaultCACertList = blocks
+  // Official `P0` (`chunk@284851610.js @193668`): probe cross-signed root pairs
+  // during CA bundle initialization so `droppedCrossCertificates` is populated
+  // in production, and omit unmatched conflicting cross-certs until a server
+  // chain selects them via `noteServerServedCertificates`.
+  const parsedEntries: Array<{ pem: string; cert?: X509Certificate }> =
+    blocks.map(pem => {
+      try {
+        return { pem, cert: new X509Certificate(pem) }
+      } catch {
+        return { pem }
+      }
+    })
+  const parsedCerts = parsedEntries
+    .map(e => e.cert)
+    .filter((c): c is X509Certificate => c !== undefined)
+  const env = opts?.env ?? process.env
+  const allCrossPairs = probeCrossSignedRootPairs(parsedCerts, env)
+  if (allCrossPairs.length > 0) {
+    servedCertificates = servedCertificates.filter(s =>
+      allCrossPairs.some(({ cross, root }) =>
+        matchesCrossRootPair(s, cross, root),
+      ),
+    )
+    const unmatchedPairs = allCrossPairs.filter(
+      ({ cross, root }) =>
+        !servedCertificates.some(s => matchesCrossRootPair(s, cross, root)),
+    )
+    droppedCrossCertificates = unmatchedPairs
+    const unsignedPairs = allCrossPairs.filter(
+      ({ cross }) =>
+        !parsedCerts.some(c => c !== cross && c.subject === cross.issuer),
+    )
+    servedCrossCertificateSignerMissing = servedCertificates.some(s =>
+      unsignedPairs.some(({ cross, root }) =>
+        matchesCrossRootPair(s, cross, root),
+      ),
+    )
+    if (servedCrossCertificateSignerMissing) {
+      logForDebugging(
+        'CA certs: A certificate that a server sent names a cross-certificate this list cut, and no certificate in the store issued that cross-certificate: a certificate error will say that its root is missing',
+      )
+    }
+  } else {
+    droppedCrossCertificates = []
+    servedCrossCertificateSignerMissing = false
+  }
+
+  const droppedCrossCertSet = new Set(
+    droppedCrossCertificates.map(p => p.cross),
+  )
+  const effectiveBlocks =
+    droppedCrossCertSet.size > 0
+      ? parsedEntries
+          .filter(e => !e.cert || !droppedCrossCertSet.has(e.cert))
+          .map(e => e.pem)
+      : blocks
+
+  if (effectiveBlocks.length === 0) return false
+
+  if (trySetDefaultCACertificates(effectiveBlocks, setter)) {
+    lastSyncedDefaultCACertList = effectiveBlocks
     return true
   }
 
-  const valid = blocks.filter(block =>
+  const valid = effectiveBlocks.filter(block =>
     trySetDefaultCACertificates([block], setter),
   )
-  const skipped = blocks.length - valid.length
+  const skipped = effectiveBlocks.length - valid.length
   if (skipped > 0) {
     logForDebugging(
       `CA certs: ${skipped} certificate(s) in the CA list could not be read and are skipped for connections that pass no CA. Check the NODE_EXTRA_CA_CERTS file, or the OS certificate store, for a damaged or cut-off certificate.`,
@@ -745,9 +805,23 @@ function matchesCrossRootPair(
   cross: X509Certificate,
   root: X509Certificate,
 ): boolean {
+  // Official `Bt(e, r, n)` (`chunk@284851610.js`): server-served cert issued by
+  // `cross` (distinct from self-signed `root`) and verified by `cross.publicKey`.
+  try {
+    if (
+      cert.issuer === cross.subject &&
+      cert.checkIssued(cross) &&
+      !cert.checkIssued(root) &&
+      cert.verify(cross.publicKey)
+    ) {
+      return true
+    }
+  } catch {
+    // Fall through to direct cross-certificate match.
+  }
   return (
     cert.subject === cross.subject &&
-    cert.issuer === root.subject &&
+    (cert.issuer === cross.issuer || cert.issuer === root.subject) &&
     cert.publicKey.equals(cross.publicKey)
   )
 }
@@ -798,6 +872,9 @@ export function noteServerServedCertificates(
   logForDebugging(
     `CA certs: Noted ${accepted.length} certificate(s) that a server sent; they only choose which system cross-certificates stay and are not added to the CA list`,
   )
+  // Official `RFi` -> `Hr(r)` (`chunk@284851610.js @195050`): clear CA certs
+  // cache immediately when a dropped cross-certificate is restored.
+  clearCACertsCache()
   return true
 }
 
@@ -1309,19 +1386,19 @@ export async function readPeerChainViaTlsHandshake(
       return
     }
     let settled = false
+    const sniOpt = net.isIP(host) === 0 ? { servername: host } : {}
     const socket = tunnelSocket
       ? tls.connect({
           socket: tunnelSocket,
-          servername: host,
+          ...sniOpt,
           rejectUnauthorized: false,
         })
       : tls.connect({
           host,
           port,
-          servername: host,
+          ...sniOpt,
           rejectUnauthorized: false,
         })
-    attachTlsHandshakeCrossCertHook(socket)
 
     const finish = (val: X509Certificate[] | null) => {
       if (settled) return

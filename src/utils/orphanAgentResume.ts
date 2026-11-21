@@ -1150,6 +1150,24 @@ export async function runOrphanAgentResumePass(input: {
   autoResumeEnabled?: boolean
   /** When false, skip official Pqb session-cron resurrection. Default true. */
   resurrectCrons?: boolean
+  /** When false, skip official Js pending-wakeup resurrection. Default true. */
+  resurrectPendingWakeup?: boolean
+  /** Optional session/job dir override for `.pending-wakeup` (defaults to `getBgJobDirectory()`). */
+  sessionDir?: string
+  /** Optional override for re-arming a future pending wakeup (defaults to `rearmResurrectedPendingWakeup`). */
+  rearmWakeup?: (args: {
+    scheduledFor: number
+    prompt: string
+    reason?: string
+    chainStartedAt: number
+    plugin?: string
+  }) => void
+  /** Optional override for past-due wakeup notification. */
+  onPastDueWakeupNotification?: (notification: {
+    toolUseId: string
+    summary: string
+    body: string
+  }) => void
 }): Promise<{
   scanned: number
   autoResume: OrphanAgentEntry[]
@@ -1158,6 +1176,7 @@ export async function runOrphanAgentResumePass(input: {
   shells: { notified: number; skippedLive: number }
   workflows: { notified: number; skippedLive: number }
   crons?: { scanned: number; resurrected: number; skipped: number }
+  pendingWakeup?: import('./orphanCronResume.js').ResurrectPendingWakeupOutcome
   deferred?: {
     resumed: number
     alreadyCompleted: number
@@ -1181,6 +1200,93 @@ export async function runOrphanAgentResumePass(input: {
   }
 
   const scanned = scanAsyncAgentsFromMessages(input.messages)
+
+  // Official Js (`chunk@318694944.js @18966`) — restore pending /loop wakeup after Pqb.
+  let pendingWakeup:
+    | import('./orphanCronResume.js').ResurrectPendingWakeupOutcome
+    | undefined
+  if (input.resurrectPendingWakeup !== false) {
+    try {
+      let sessionDir = input.sessionDir
+      if (sessionDir === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getBgJobDirectory } =
+          require('./sessionNameJobSidecar.js') as typeof import('./sessionNameJobSidecar.js')
+        sessionDir = getBgJobDirectory()
+      }
+      if (sessionDir) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const {
+          rearmResurrectedPendingWakeup,
+          resurrectPendingWakeupFromScan,
+          scanPendingWakeupsFromMessages,
+        } =
+          require('./orphanCronResume.js') as typeof import('./orphanCronResume.js')
+        const wakeupScan = scanPendingWakeupsFromMessages(input.messages)
+        let hasActiveLoop = false
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const state =
+            require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+          hasActiveLoop =
+            state.getSessionCronTasks().some(t => t.kind === 'loop') ||
+            state.getLoopTickInFlightPrompt() !== null
+        } catch {
+          hasActiveLoop = false
+        }
+        pendingWakeup = await resurrectPendingWakeupFromScan({
+          sessionDir,
+          wakeupCalls: wakeupScan.wakeupCalls,
+          wakeupCallsAtLastLoopFire: wakeupScan.wakeupCallsAtLastLoopFire,
+          results: wakeupScan.results,
+          notifiedTaskIds: scanned.notifiedTaskIds,
+          hasActiveLoop,
+          rearmWakeup: input.rearmWakeup ?? rearmResurrectedPendingWakeup,
+          onPastDueNotification:
+            input.onPastDueWakeupNotification ??
+            (input.notify !== false
+              ? ({ toolUseId, summary, body }) => {
+                  try {
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const { enqueuePendingNotification } =
+                      require('./messageQueueManager.js') as typeof import('./messageQueueManager.js')
+                    let targetAgentId: string | undefined
+                    try {
+                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                      const { getMainThreadAgentId } =
+                        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+                      targetAgentId = getMainThreadAgentId()
+                    } catch {
+                      targetAgentId = undefined
+                    }
+                    const value = `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(toolUseId)}</${TASK_ID_TAG}>
+<${STATUS_TAG}>stopped</${STATUS_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+<${NOTE_TAG}>${escapeXml(body)}</${NOTE_TAG}>
+</${TASK_NOTIFICATION_TAG}>`
+                    enqueuePendingNotification({
+                      value,
+                      mode: 'task-notification',
+                      agentId:
+                        targetAgentId !== undefined
+                          ? asAgentId(targetAgentId)
+                          : undefined,
+                      skipAttachments: true,
+                      priority: 'next',
+                      shouldQuery: false,
+                    })
+                  } catch {
+                    /* best-effort */
+                  }
+                }
+              : undefined),
+        })
+      }
+    } catch {
+      pendingWakeup = { kind: 'none' }
+    }
+  }
   const live =
     input.liveAgentIds instanceof Set
       ? input.liveAgentIds
@@ -1249,6 +1355,7 @@ export async function runOrphanAgentResumePass(input: {
       skippedLive: workflows.skippedLive.length,
     },
     crons,
+    ...(pendingWakeup !== undefined ? { pendingWakeup } : {}),
     deferred,
   }
 }

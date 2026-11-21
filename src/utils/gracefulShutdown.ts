@@ -856,23 +856,28 @@ export const BACKGROUND_EXIT_FAILSAFE_MIN_MS = 15000
 
 const pendingBackgroundShutdownWork = new Set<Promise<unknown>>()
 
-/** Official 325 `O6i` — track a background write/command promise to drain at exit (#765). */
+/** Official 325 `O6i` / `z_a` — track a background write/command promise to drain at exit (#765). */
 export function trackBackgroundShutdownWork(promise: Promise<unknown>): void {
   pendingBackgroundShutdownWork.add(promise)
-  void promise.finally(() => {
-    pendingBackgroundShutdownWork.delete(promise)
-  })
+  void promise
+    .finally(() => {
+      pendingBackgroundShutdownWork.delete(promise)
+    })
+    .catch(() => {
+      // Prevent unhandled rejection from the derived .finally() promise.
+    })
 }
 
-/** Official 325 `mqt()` — true when background writes/commands are pending at exit (#765). */
+/** Official 325 `mqt()` / `wZt()` — true when background writes/commands are pending at exit (#765). */
 export function hasPendingBackgroundShutdownWork(): boolean {
   return pendingBackgroundShutdownWork.size > 0
 }
 
-/** Official 325 `gqt()` — drain tracked background work before SessionEnd hooks (#765). */
+/** Official 325 `gqt()` / `TZt()` — drain tracked background work before SessionEnd hooks (#765). */
 export async function drainBackgroundShutdownWork(): Promise<void> {
-  if (pendingBackgroundShutdownWork.size === 0) return
-  await Promise.allSettled([...pendingBackgroundShutdownWork])
+  while (pendingBackgroundShutdownWork.size > 0) {
+    await Promise.allSettled([...pendingBackgroundShutdownWork])
+  }
 }
 
 /** Official 325 `V2e = 2000`, `MVa = 8500` — OAuth refresh lock wait constants (#860). */
@@ -1155,7 +1160,9 @@ export async function gracefulShutdown(
     const { flushPendingPrLinks } = await import(
       '@claude-code/builtin-tools/tools/shared/gitOperationTracking.js'
     )
-    await flushPendingPrLinks()
+    const prFlush = flushPendingPrLinks()
+    trackBackgroundShutdownWork(prFlush)
+    await prFlush
   } catch {
     // best-effort — do not block shutdown on PR-link flush failures
   }
@@ -1186,19 +1193,20 @@ export async function gracefulShutdown(
     clearTimeout(cleanupTimeoutId)
   }
 
-  // 2.1.300 #765 (SEA mqt/F6a/gqt): If background work is pending at exit,
-  // extend failsafe to at least 15s (or sessionEndBoundMs + 5s) and drain it
-  // before killing shell commands and running SessionEnd hooks.
+  // 2.1.300 #765 (SEA mqt/F6a/gqt, 2.1.328 wZt/Mbl/TZt): If background work is
+  // pending at exit, extend failsafe to at least 15s (or sessionEndBoundMs + 5s)
+  // and drain all tracked background work before killing shell commands and
+  // running SessionEnd hooks.
   if (hasPendingBackgroundShutdownWork()) {
     armShutdownFailsafe(
       Math.max(BACKGROUND_EXIT_FAILSAFE_MIN_MS, sessionEndBoundMs + 5000),
       exitCode,
     )
-    try {
-      await drainBackgroundShutdownWork()
-    } catch {
-      // best-effort
-    }
+  }
+  try {
+    await drainBackgroundShutdownWork()
+  } catch {
+    // best-effort
   }
 
   // Official 2.1.328 #644: in headless/non-interactive exit, wait (with
@@ -1209,7 +1217,9 @@ export async function gracefulShutdown(
       const { waitForHeadlessPluginInstallDrain } = await import(
         './plugins/headlessPluginInstall.js'
       )
-      await waitForHeadlessPluginInstallDrain()
+      const pluginDrain = waitForHeadlessPluginInstallDrain()
+      trackBackgroundShutdownWork(pluginDrain)
+      await pluginDrain
     } catch {
       // best-effort — never block shutdown
     }

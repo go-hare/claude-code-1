@@ -16,6 +16,7 @@ import {
   getOrInsertTracked,
   hasToken,
   refillTokens,
+  shouldSkipLocalHopCount,
 } from './udsOutboundPacer.js'
 
 /** Gold `y` / `zVt` — HMAC hex prefix and hop-chain cap. */
@@ -86,6 +87,8 @@ export type PeerAdmitInput = {
   body: string
   hopChain?: readonly string[]
   ownTokens: ReadonlySet<string>
+  /** Official 2.1.328 (`chunk@319503157.js`) — verified same-machine peer exempt from local hop counting when countLocalHops is false. */
+  verifiedLocal?: boolean
 }
 
 export type PeerAdmitResult =
@@ -100,6 +103,7 @@ export type PeerAdmissionGuard = {
   checkHopChain: (
     hopChain: readonly string[] | undefined,
     ownTokens: ReadonlySet<string>,
+    opts?: { verifiedLocal?: boolean },
   ) => PeerHopChainResult
   trackedSenderCount: () => number
   reset: () => void
@@ -161,8 +165,12 @@ export function createPeerAdmissionGuard(
   function checkHopChain(
     hopChain: readonly string[] | undefined,
     ownTokens: ReadonlySet<string>,
+    opts?: { verifiedLocal?: boolean },
   ): PeerHopChainResult {
     const lim = current()
+    if (shouldSkipLocalHopCount({ verifiedLocal: opts?.verifiedLocal }, lim)) {
+      return undefined
+    }
     if (hopChain !== undefined && hopChain.length > lim.maxChainLength) {
       return { admitted: false, reason: 'hop-runaway' }
     }
@@ -175,7 +183,9 @@ export function createPeerAdmissionGuard(
   function admit(input: PeerAdmitInput): PeerAdmitResult {
     const lim = current()
     const now = nowFn()
-    const hop = checkHopChain(input.hopChain, input.ownTokens)
+    const hop = checkHopChain(input.hopChain, input.ownTokens, {
+      verifiedLocal: input.verifiedLocal,
+    })
     if (hop) return hop
     const bucket = touch(input.senderKey, lim)
     if (
@@ -227,6 +237,68 @@ export function getPeerAdmissionGuard(): PeerAdmissionGuard {
 export function resetPeerAdmissionGuardForTests(): void {
   sharedGuard?.reset()
   sharedGuard = undefined
+}
+
+export type DesktopForwardCheckResult =
+  | { admitted: true }
+  | { admitted: false; reason: 'loop-paused'; forwards: number }
+
+export type DesktopForwardGuard = {
+  /** Official `Fea` (`chunk@305735424.js @1358`) — increment & enforce `maxDesktopForwards` per prompt index. */
+  checkForward: (promptIndex: number) => DesktopForwardCheckResult
+  /** Official `Nea` (`chunk@305735424.js @1358`) — reset counter when a human prompt starts a turn. */
+  resetForNewPrompt: () => void
+  getForwardsSincePrompt: () => number
+}
+
+/**
+ * Official 2.1.328 (`Fea` / `Nea` in `chunk@305735424.js @1358`) — bound
+ * desktop message forwards per user prompt using `maxDesktopForwards`.
+ */
+export function createDesktopForwardGuard(
+  limits?: () => Partial<PeerAdmissionLimits>,
+): DesktopForwardGuard {
+  let promptIndexSeen = -1
+  let forwardsSincePrompt = 0
+
+  const currentMax = (): number =>
+    limits?.().maxDesktopForwards ?? getPeerAdmissionLimits().maxDesktopForwards
+
+  return {
+    checkForward(promptIndex: number): DesktopForwardCheckResult {
+      if (promptIndex !== promptIndexSeen) {
+        promptIndexSeen = promptIndex
+        forwardsSincePrompt = 0
+      }
+      forwardsSincePrompt++
+      if (forwardsSincePrompt > currentMax()) {
+        return {
+          admitted: false,
+          reason: 'loop-paused',
+          forwards: forwardsSincePrompt - 1,
+        }
+      }
+      return { admitted: true }
+    },
+    resetForNewPrompt(): void {
+      forwardsSincePrompt = 0
+    },
+    getForwardsSincePrompt(): number {
+      return forwardsSincePrompt
+    },
+  }
+}
+
+let sharedDesktopForwardGuard: DesktopForwardGuard | undefined
+
+export function getDesktopForwardGuard(): DesktopForwardGuard {
+  return (sharedDesktopForwardGuard ??= createDesktopForwardGuard(
+    getPeerAdmissionLimits,
+  ))
+}
+
+export function resetDesktopForwardGuardForTests(): void {
+  sharedDesktopForwardGuard = undefined
 }
 
 /**

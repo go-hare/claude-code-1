@@ -12,7 +12,7 @@
  * Control op `ensure-spare` remains empty ack (official too).
  */
 
-import { randomBytes } from 'crypto'
+import { randomBytes, timingSafeEqual } from 'crypto'
 import { mkdir, readdir, unlink, writeFile } from 'fs/promises'
 import { createConnection, createServer, type Server } from 'net'
 import { join } from 'path'
@@ -35,17 +35,23 @@ import {
 } from './bgHostManagedEnv.js'
 import { logEvent } from '../services/analytics/index.js'
 import {
+  resetFdCredentialState,
   setCwdState,
   setOriginalCwd,
   setProjectRoot,
   switchSession,
 } from '../bootstrap/state.js'
 import { asSessionId } from '../types/ids.js'
+import { logForDebugging } from '../utils/debug.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
 import { errorMessage } from '../utils/errors.js'
 import { isInBundledMode } from '../utils/bundledMode.js'
 import { restrictedSpawnEnv } from '../utils/restricted.js'
 import { stripOAuthScopesIfTokenRemoved } from '../utils/subprocessEnv.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import {
+  getFeatureValue_CACHED_MAY_BE_STALE,
+  resetGrowthBook,
+} from '../services/analytics/growthbook.js'
 
 // ---------------------------------------------------------------------------
 // Claim frame (host side) — official b64
@@ -56,12 +62,62 @@ export type BgSpareClaimFrame = {
   env: Record<string, string>
   argv: string[]
   sessionId?: string
+  /** Official 2.1.328 (`Ivr`) claim auth token. */
+  auth?: string
   /**
-   * Local product: must match CLAUDE_BG_SPARE_CLAIM_NONCE on spare host.
-   * densable has no claim auth; this blocks casual cross-process claim.
+   * Local product alias for `auth`: must match CLAUDE_BG_SPARE_CLAIM_NONCE on
+   * spare host. Both `auth` and `nonce` are compared with timingSafeEqual.
    */
   nonce?: string
 }
+
+/** Official 2.1.328 (`Ivr` @302123668): 8 MiB line cap on claim socket. */
+export const SPARE_CLAIM_MAX_LINE_BYTES = 8_388_608
+
+/** Official 2.1.328 (`hpl` @283546038): invalid environment variable name check (`/^$|[=\x00-\x1f\x7f-\x9f]/`). */
+function isInvalidEnvName(name: string): boolean {
+  if (name.length === 0) return true
+  for (let i = 0; i < name.length; i++) {
+    const code = name.charCodeAt(i)
+    if (code === 0x3d || code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      return true
+    }
+  }
+  return false
+}
+
+export type ClaimEnvDropProblem =
+  | 'invalid-name'
+  | 'non-string-value'
+  | 'nul-in-value'
+  | 'denied-key'
+
+const CLAIM_ENV_DROP_REASONS: Record<ClaimEnvDropProblem, string> = {
+  'invalid-name': "it isn't a valid environment variable name",
+  'non-string-value': "its value isn't a string",
+  'nul-in-value': 'its value contains a NUL character',
+  'denied-key': 'it is a restricted loader/shell environment variable',
+}
+
+/** Official 2.1.328 (`vde` @289457561): profile/config env stripped on session-credential claim. */
+const SPARE_FEDERATION_STRIP_KEYS = [
+  'ANTHROPIC_FEDERATION_RULE_ID',
+  'ANTHROPIC_PROFILE',
+  'ANTHROPIC_CONFIG_DIR',
+] as const
+
+/** Host-managed network/cert/header keys cleared from spare env before applying claim env. */
+const HOST_MANAGED_EXTRA_STRIP_KEYS = [
+  'ANTHROPIC_CUSTOM_HEADERS',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'NODE_EXTRA_CA_CERTS',
+  'CLAUDE_CODE_CLIENT_CERT',
+  'CLAUDE_CODE_CLIENT_KEY',
+  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
+] as const
 
 /** Env injected into spare host so claim frames can prove supervisor origin. */
 export const SPARE_CLAIM_NONCE_ENV = 'CLAUDE_BG_SPARE_CLAIM_NONCE'
@@ -102,27 +158,67 @@ function isClaimFrame(v: unknown): v is BgSpareClaimFrame {
   )
 }
 
+/** Official 2.1.328 (`QB` @285083897): constant-time auth/nonce comparison. */
+function timingSafeTokenEqual(presented: unknown, expected: string): boolean {
+  if (typeof presented !== 'string' || !expected || presented.length === 0) {
+    return false
+  }
+  const a = Buffer.from(presented)
+  const b = Buffer.from(expected)
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
 /**
- * Filter claim.env before Object.assign — drop deny-list + non-string values.
- * densable assigns whole e.env after stripping host-managed auth; we keep that
- * shape for CLAUDE_* worker keys but refuse loader/shell injection keys.
+ * Official 2.1.328 (`sio` @288535088) + product deny-list: filter claim.env
+ * dropping invalid names, non-string values, NUL-containing values, and
+ * loader/shell injection keys.
+ */
+export function filterClaimEnv(env: Record<string, unknown>): {
+  kept: Record<string, string>
+  dropped: Array<{ name: string; problem: ClaimEnvDropProblem }>
+} {
+  const kept: Record<string, string> = {}
+  const dropped: Array<{ name: string; problem: ClaimEnvDropProblem }> = []
+  for (const [k, v] of Object.entries(env)) {
+    if (isInvalidEnvName(k)) {
+      dropped.push({ name: k, problem: 'invalid-name' })
+      continue
+    }
+    if (typeof v !== 'string') {
+      dropped.push({ name: k, problem: 'non-string-value' })
+      continue
+    }
+    if (v.includes('\0')) {
+      dropped.push({ name: k, problem: 'nul-in-value' })
+      continue
+    }
+    if (CLAIM_ENV_DENY.has(k) || k.startsWith('LD_') || k.startsWith('DYLD_')) {
+      dropped.push({ name: k, problem: 'denied-key' })
+      continue
+    }
+    kept[k] = v
+  }
+  return { kept, dropped }
+}
+
+/**
+ * Filter claim.env before Object.assign — drop invalid names, NUL values,
+ * non-string values, and loader/shell injection keys.
  */
 export function sanitizeClaimEnv(
   env: Record<string, string>,
 ): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(env)) {
-    if (typeof k !== 'string' || typeof v !== 'string') continue
-    if (CLAIM_ENV_DENY.has(k)) continue
-    if (k.startsWith('LD_') || k.startsWith('DYLD_')) continue
-    out[k] = v
-  }
-  return out
+  return filterClaimEnv(env).kept
 }
 
 /**
- * Listen once on claimSock; resolve with first newline-delimited JSON object.
- * Official b64 + local nonce check when expectedNonce is set.
+ * Listen on claimSock; resolve with first valid newline-delimited JSON claim.
+ * Official 2.1.328 (`Ivr` @302123668):
+ * - Caps per-connection buffer at 8 MiB (8_388_608 bytes).
+ * - Compares auth/nonce with `crypto.timingSafeEqual`.
+ * - On oversized/invalid/mismatched frames, destroys ONLY the client socket
+ *   and keeps the server listening for the legitimate claim.
  */
 export function recvSpareClaim(
   claimSockPath: string,
@@ -144,27 +240,46 @@ export function recvSpareClaim(
       socket.setEncoding('utf8')
       socket.on('data', (chunk: string) => {
         buf += chunk
+        if (buf.length > SPARE_CLAIM_MAX_LINE_BYTES) {
+          socket.destroy()
+          return
+        }
         const nl = buf.indexOf('\n')
         if (nl < 0) return
-        server.close()
-        try {
-          const parsed: unknown = JSON.parse(buf.slice(0, nl))
-          if (!isClaimFrame(parsed)) {
-            fail(new Error('invalid claim frame'))
+        if (expectedNonce) {
+          let parsed: unknown
+          try {
+            parsed = JSON.parse(buf.slice(0, nl))
+          } catch {
+            parsed = undefined
+          }
+          if (
+            !isClaimFrame(parsed) ||
+            !timingSafeTokenEqual(parsed.auth ?? parsed.nonce, expectedNonce)
+          ) {
+            socket.destroy()
             return
           }
-          if (expectedNonce) {
-            if (parsed.nonce !== expectedNonce) {
-              fail(new Error('claim nonce mismatch'))
-              return
-            }
-          }
+          server.close()
           resolve(parsed)
-        } catch (err) {
-          fail(err)
+          return
         }
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(buf.slice(0, nl))
+        } catch (err) {
+          socket.destroy()
+          fail(err)
+          return
+        }
+        if (!isClaimFrame(parsed)) {
+          socket.destroy()
+          return
+        }
+        server.close()
+        resolve(parsed)
       })
-      socket.on('error', fail)
+      socket.on('error', expectedNonce ? () => socket.destroy() : fail)
     })
     server.on('error', fail)
     if (onListening) {
@@ -180,8 +295,37 @@ export function recvSpareClaim(
   })
 }
 
+function logDroppedClaimEnv(
+  dropped: Array<{ name: string; problem: ClaimEnvDropProblem }>,
+): void {
+  const maxLogged = 8
+  for (const { name, problem } of dropped.slice(0, maxLogged)) {
+    logForDebugging(
+      `[bg-spare] environment variable ${JSON.stringify(name)} was not applied to this background session: ${CLAIM_ENV_DROP_REASONS[problem]}. Programs it starts will not see it.`,
+      { level: 'warn' },
+    )
+  }
+  if (dropped.length > maxLogged) {
+    const extra = dropped.length - maxLogged
+    logForDebugging(
+      `[bg-spare] \u2026and ${extra} more environment ${extra === 1 ? 'variable was' : 'variables were'} not applied.`,
+      { level: 'warn' },
+    )
+  }
+  logEvent('tengu_bg_claim_env_dropped', {
+    dropped: dropped.length,
+    nul_in_value: dropped.filter(d => d.problem === 'nul-in-value').length,
+    invalid_name: dropped.filter(d => d.problem === 'invalid-name').length,
+    non_string_value: dropped.filter(d => d.problem === 'non-string-value')
+      .length,
+  })
+}
+
 /**
- * Official x64 — apply claim frame then enter main().
+ * Official 2.1.328 (`Mvr` @302123668) — apply claim frame, clear pre-claim
+ * caches (settings, config, auth, GrowthBook, CA certs, mTLS, MDM), apply
+ * host-managed provider env & federation strips + NUL/invalid env filtering,
+ * then enter main().
  */
 export async function applySpareClaimAndRunMain(
   claim: BgSpareClaimFrame,
@@ -195,15 +339,90 @@ export async function applySpareClaimAndRunMain(
   if (claim.sessionId) {
     switchSession(asSessionId(claim.sessionId), null, 'spare_claim')
   }
-  // densable: strip host auth tokens then Object.assign(process.env, e.env).
-  // Product: also deny loader/shell injection keys from claim.env.
-  // Official 2.1.327 (#389): drop stale CLAUDE_CODE_OAUTH_SCOPES when OAuth token is stripped.
+
+  const [
+    { resetSettingsCache },
+    { clearMdmSettingsCache },
+    { getProjectPathForConfig, resetTrustDialogAcceptedCacheForTesting },
+    {
+      clearApiKeyHelperCache,
+      clearAwsCredentialExportCache,
+      clearAwsCredentialsCache,
+      clearGcpCredentialsCache,
+      clearOAuthTokenCache,
+      clearOtelHeadersCache,
+    },
+    { clearCACertsCache },
+    { clearMTLSCache },
+  ] = await Promise.all([
+    import('../utils/settings/settingsCache.js'),
+    import('../utils/settings/mdm/settings.js'),
+    import('../utils/config.js'),
+    import('../utils/auth.js'),
+    import('../utils/caCerts.js'),
+    import('../utils/mtls.js'),
+  ])
+
+  // Clear pre-claim settings/config caches before mutating process.env (Sr, cSt, Jhr).
+  resetSettingsCache()
+  getProjectPathForConfig.cache?.clear?.()
+  resetTrustDialogAcceptedCacheForTesting()
+
+  // Host-managed provider env strips when claim marks CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST.
+  const isHostManaged = isEnvTruthy(
+    claim.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,
+  )
+  if (isHostManaged) {
+    applyHostManagedSpareEnv(process.env)
+    applySpareProviderStrips(process.env)
+    for (const key of HOST_MANAGED_EXTRA_STRIP_KEYS) {
+      delete process.env[key]
+    }
+  }
+
+  // Always strip host auth tokens and drop stale OAuth scopes (#389).
   const prevEnv = { ...process.env }
   delete process.env.ANTHROPIC_AUTH_TOKEN
   delete process.env.ANTHROPIC_API_KEY
   delete process.env.CLAUDE_CODE_OAUTH_TOKEN
   stripOAuthScopesIfTokenRemoved(prevEnv, process.env)
-  Object.assign(process.env, sanitizeClaimEnv(claim.env))
+
+  // Federation/profile strips when session carries CLAUDE_BG_SESSION_CREDENTIAL.
+  if (claim.env.CLAUDE_BG_SESSION_CREDENTIAL) {
+    for (const key of SPARE_FEDERATION_STRIP_KEYS) {
+      delete process.env[key]
+    }
+  }
+
+  // Unset spare-only/host-only watch/event flags.
+  delete process.env.CLAUDE_CODE_CONFIG_WATCH_EVENTS
+  delete process.env.CLAUDE_CODE_WITHHOLD_PRODUCT_EVENTS
+  delete process.env.CLAUDE_BG_SOCK_ADMIT_SILENT_PEERS
+
+  // Filter NUL-in-value, invalid names, non-string values, and loader/shell injection keys.
+  const { kept, dropped } = filterClaimEnv(claim.env)
+  Object.assign(process.env, kept)
+  if (dropped.length > 0) {
+    logDroppedClaimEnv(dropped)
+  }
+
+  // Clear MDM, settings, auth, CA/mTLS, and GrowthBook caches after applying claimed env.
+  clearMdmSettingsCache()
+  resetSettingsCache()
+  resetFdCredentialState()
+  clearOAuthTokenCache()
+  clearApiKeyHelperCache()
+  clearAwsCredentialsCache()
+  clearAwsCredentialExportCache()
+  clearGcpCredentialsCache()
+  clearOtelHeadersCache()
+  clearMTLSCache({ clearFileCache: true })
+  clearCACertsCache()
+  resetGrowthBook({
+    preservePendingExposures: true,
+    preserveLoggedExposures: true,
+  })
+
   process.argv = [process.argv[0]!, process.argv[1]!, ...claim.argv]
   const { main } = await mainImport
   await main()

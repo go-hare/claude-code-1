@@ -41,6 +41,7 @@ export function setLeaderTeamName(teamName: string): void {
   // Changing the task list ID is a "tasks updated" event for subscribers —
   // they're now looking at a different directory.
   notifyTasksUpdated()
+  void persistSessionTaskListId()
 }
 
 /**
@@ -56,10 +57,16 @@ export function clearLeaderTeamName(): void {
 /**
  * Sets or clears the session-scoped task list ID (e.g. restored on resume/clear).
  */
-export function setSessionTaskListId(listId: string | undefined): void {
+export function setSessionTaskListId(
+  listId: string | undefined,
+  opts?: { persist?: boolean },
+): void {
   if (sessionTaskListId === listId) return
   sessionTaskListId = listId
   notifyTasksUpdated()
+  if (opts?.persist !== false && listId !== undefined) {
+    void persistSessionTaskListId()
+  }
 }
 
 export function getSessionTaskListId(): string | undefined {
@@ -141,7 +148,7 @@ export async function restoreSessionTaskListId(
       await readFile(join(teamTasksDir, SESSION_TASK_LIST_FILE), 'utf-8')
     ).trim()
     if (VALID_SESSION_TASK_LIST_ID_RE.test(saved)) {
-      setSessionTaskListId(saved)
+      setSessionTaskListId(saved, { persist: false })
       return saved
     }
   } catch {

@@ -10,8 +10,9 @@ import { feature } from 'bun:bundle'
 import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
 import { createHash, createPublicKey, verify } from 'crypto'
 import { createReadStream, createWriteStream } from 'fs'
-import { chmod, rm, writeFile } from 'fs/promises'
+import { chmod, rm } from 'fs/promises'
 import { join } from 'path'
+import semver from 'semver'
 import { Readable, Transform } from 'stream'
 import { pipeline } from 'stream/promises'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -499,12 +500,24 @@ export async function fetchReleaseWithRetry<T = unknown>(
   }
 }
 
+/** Official 2.1.328 `NU` / `DIe` (`chunk@286370035.js @134034`): strict semver validator. */
+const VALID_VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/
+
+export function isValidVersion(version: string): boolean {
+  return (
+    typeof version === 'string' &&
+    VALID_VERSION_RE.test(version) &&
+    semver.parse(version) !== null
+  )
+}
+
 export async function getLatestVersionFromBinaryRepo(
   channel: ReleaseChannel = 'latest',
   baseUrl: string,
   authConfig?: { auth: { username: string; password: string } },
 ): Promise<string> {
   const startTime = Date.now()
+  let responseData: string
   try {
     const { data } = await fetchReleaseWithRetry<string>(
       `${baseUrl}/${channel}`,
@@ -514,11 +527,7 @@ export async function getLatestVersionFromBinaryRepo(
         ...authConfig,
       },
     )
-    const latencyMs = Date.now() - startTime
-    logEvent('tengu_version_check_success', {
-      latency_ms: latencyMs,
-    })
-    return data.trim()
+    responseData = data
   } catch (error) {
     const latencyMs = Date.now() - startTime
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -538,6 +547,18 @@ export async function getLatestVersionFromBinaryRepo(
     logError(fetchError)
     throw fetchError
   }
+
+  const latencyMs = Date.now() - startTime
+  const trimmed = String(responseData).trim()
+  if (!isValidVersion(trimmed)) {
+    throw new ClaudeError(
+      `Version pointer for ${channel} did not return a version (got ${trimmed.length} bytes)`,
+    )
+  }
+  logEvent('tengu_version_check_success', {
+    latency_ms: latencyMs,
+  })
+  return trimmed
 }
 
 export async function getLatestVersion(
@@ -560,10 +581,15 @@ export async function getLatestVersion(
     return normalized
   }
 
-  // ReleaseChannel validation (official 2.1.328 `Wjr` allows 'stable' | 'latest' | 'rc')
+  // Official 2.1.328 `Wjr`: reject unknown channels and reject 'rc' on external builds.
   const channel = channelOrVersion as ReleaseChannel
   if (channel !== 'stable' && channel !== 'latest' && channel !== 'rc') {
-    throw new Error(
+    throw new ClaudeError(
+      `Invalid channel: ${channelOrVersion}. Use 'latest' or 'stable'`,
+    )
+  }
+  if (channel === 'rc' && process.env.USER_TYPE !== 'ant') {
+    throw new ClaudeError(
       `Invalid channel: ${channelOrVersion}. Use 'stable' or 'latest'`,
     )
   }
@@ -747,11 +773,64 @@ export type CompressedBinaryOptions = {
   decompressedSize: number
 }
 
+const TRANSIENT_CONNECTION_DROP_CODES = new Set([
+  'ECONNRESET',
+  'EPIPE',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ERR_NETWORK',
+  'ERR_SOCKET_CLOSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_SOCKET',
+])
+
+/** Official 2.1.328 `Ot()`: detects mid-stream / transient TCP connection drops. */
+function isTransientConnectionDropError(error: unknown): boolean {
+  if (getHttpStatus(error) !== undefined) {
+    return false
+  }
+  const code = getErrnoCode(error)
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+    return false
+  }
+  if (code !== undefined && TRANSIENT_CONNECTION_DROP_CODES.has(code)) {
+    return true
+  }
+  if (
+    error instanceof Error &&
+    error.message.toLowerCase().includes('aborted')
+  ) {
+    return true
+  }
+  return false
+}
+
+function isDeterministicChecksumError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === 'object' &&
+    'deterministic' in error &&
+    (error as { deterministic?: unknown }).deterministic === true
+  )
+}
+
+function isIntegrityFallbackError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error)
+  return (
+    msg.includes('Checksum mismatch') ||
+    msg.includes('exceeds the manifest size')
+  )
+}
+
 /**
- * Common logic for downloading and verifying a binary.
- * Includes stall detection (aborts if no bytes for 60s), retry logic, and
- * official 2.1.325 #2258 bounded zstd streaming decompression (checking wire
- * size, decompressed size against manifest, and ZSTD_error_* frames).
+ * Common logic for downloading and verifying a binary (official 2.1.328 `ot`).
+ * Streams BOTH compressed and uncompressed payloads directly to disk (never
+ * buffering 250MB in RAM), enforces separate `stall` and `deadline` timers,
+ * checks `signedWireSize` and decompressed size bounds, and retries on stall
+ * timeouts, transient mid-stream TCP drops, and non-deterministic checksum
+ * mismatches.
  */
 async function downloadAndVerifyBinary(
   binaryUrl: string,
@@ -760,192 +839,232 @@ async function downloadAndVerifyBinary(
   requestConfig: Record<string, unknown> = {},
   compressed?: CompressedBinaryOptions,
   signedWireSize?: number,
-) {
+  retryDelayMs = 1000,
+): Promise<{ checksumRetried: boolean; dropRetried: boolean }> {
   let lastError: Error | undefined
+  let checksumRetried = false
+  let dropRetried = false
 
   for (let attempt = 1; attempt <= MAX_DOWNLOAD_RETRIES; attempt++) {
     const controller = new AbortController()
-    let stallTimer: ReturnType<typeof setTimeout> | undefined
-    let writeStream: ReturnType<typeof createWriteStream> | undefined
+    let streamCompleted = false
     let writeSucceeded = false
+    let stallTimer: ReturnType<typeof setTimeout> | undefined
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+    let writeStream: ReturnType<typeof createWriteStream> | undefined
 
-    const clearStallTimer = () => {
+    const clearTimers = () => {
       if (stallTimer) {
         clearTimeout(stallTimer)
         stallTimer = undefined
       }
+      if (deadlineTimer) {
+        clearTimeout(deadlineTimer)
+        deadlineTimer = undefined
+      }
     }
 
     const resetStallTimer = () => {
-      clearStallTimer()
-      stallTimer = setTimeout(c => c.abort(), getStallTimeoutMs(), controller)
+      if (stallTimer) {
+        stallTimer.refresh()
+      } else {
+        stallTimer = setTimeout(
+          c => c.abort('stall'),
+          getStallTimeoutMs(),
+          controller,
+        )
+      }
     }
 
     try {
-      // Start the stall timer before the request
       resetStallTimer()
+      deadlineTimer = setTimeout(
+        c => c.abort('deadline'),
+        getDownloadDeadlineMs(),
+        controller,
+      )
+
+      const response = await axios.get(binaryUrl, {
+        timeout: getDownloadDeadlineMs(),
+        responseType: 'stream',
+        signal: controller.signal,
+        ...requestConfig,
+      })
+
+      const decompressedHash = createHash('sha256')
+      const compressedHash = compressed ? createHash('sha256') : undefined
+      const wireHash = compressedHash ?? decompressedHash
+      let wireBytes = 0
+
+      const wireTransform = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          resetStallTimer()
+          wireBytes += chunk.length
+          if (signedWireSize !== undefined && wireBytes > signedWireSize) {
+            callback(
+              new ClaudeError(
+                `Download exceeds the signed size of ${signedWireSize} bytes`,
+              ),
+            )
+            return
+          }
+          wireHash.update(chunk)
+          callback(null, chunk)
+        },
+      })
+
+      writeStream = createWriteStream(binaryPath, {
+        highWaterMark: 4 * 1024 * 1024,
+      })
+      writeStream.on('drain', resetStallTimer)
+
+      const sourceStream =
+        response.data instanceof Readable
+          ? response.data
+          : Readable.from([toBuffer(response.data)])
 
       if (compressed) {
-        const response = await axios.get(binaryUrl, {
-          timeout: getDownloadDeadlineMs(),
-          responseType: 'stream',
-          signal: controller.signal,
-          ...requestConfig,
-        })
-
-        const decompressedHash = createHash('sha256')
-        const compressedHash = createHash('sha256')
-        let wireBytes = 0
-        const wireTransform = new Transform({
-          transform(chunk: Buffer, _encoding, callback) {
-            resetStallTimer()
-            wireBytes += chunk.length
-            if (signedWireSize !== undefined && wireBytes > signedWireSize) {
-              callback(
-                new Error(
-                  `Download exceeds the signed size of ${signedWireSize} bytes`,
-                ),
-              )
-              return
-            }
-            compressedHash.update(chunk)
-            callback(null, chunk)
-          },
-        })
-
-        writeStream = createWriteStream(binaryPath, {
-          highWaterMark: 4 * 1024 * 1024,
-        })
-        writeStream.on('drain', resetStallTimer)
-
         const { decompress, guard } = createBoundedZstdDecompressStreams(
           compressed.decompressedSize,
           chunk => decompressedHash.update(chunk),
         )
-
-        const sourceStream =
-          response.data instanceof Readable
-            ? response.data
-            : Readable.from([Buffer.from(response.data)])
         await pipeline(
           sourceStream,
           wireTransform,
           decompress,
           guard,
           writeStream,
-          {
-            signal: controller.signal,
-          },
+          { signal: controller.signal },
         )
+      } else {
+        await pipeline(sourceStream, wireTransform, writeStream, {
+          signal: controller.signal,
+        })
+      }
 
-        clearStallTimer()
+      streamCompleted = true
+      clearTimers()
 
-        const actualCompressedChecksum = compressedHash.digest('hex')
+      if (compressed) {
+        const actualCompressedChecksum = compressedHash?.digest('hex')
         if (actualCompressedChecksum !== compressed.checksum) {
-          throw new Error(
+          throw new ClaudeError(
             `Checksum mismatch: expected ${compressed.checksum}, got ${actualCompressedChecksum} (compressed)`,
           )
         }
-
-        const actualChecksum = decompressedHash.digest('hex')
-        if (actualChecksum !== expectedChecksum) {
-          throw new Error(
-            `Checksum mismatch: expected ${expectedChecksum}, got ${actualChecksum}`,
-          )
-        }
-
-        writeSucceeded = true
-        await chmod(binaryPath, 0o755)
-        return
       }
 
-      const response = await axios.get(binaryUrl, {
-        // Official JJg densable: DOWNLOAD_DEADLINE_MS_FOR_TESTING || 5 min
-        timeout: getDownloadDeadlineMs(),
-        responseType: 'arraybuffer',
-        signal: controller.signal,
-        onDownloadProgress: () => {
-          // Reset stall timer on each chunk of data received
-          resetStallTimer()
-        },
-        ...requestConfig,
-      })
-
-      clearStallTimer()
-
-      const payload = Buffer.from(response.data)
-      if (signedWireSize !== undefined && payload.length > signedWireSize) {
-        throw new Error(
-          `Download exceeds the signed size of ${signedWireSize} bytes`,
-        )
-      }
-
-      // Verify checksum
-      const hash = createHash('sha256')
-      hash.update(payload)
-      const actualChecksum = hash.digest('hex')
-
+      const actualChecksum = decompressedHash.digest('hex')
       if (actualChecksum !== expectedChecksum) {
-        throw new Error(
-          `Checksum mismatch: expected ${expectedChecksum}, got ${actualChecksum}`,
+        throw Object.assign(
+          new ClaudeError(
+            `Checksum mismatch: expected ${expectedChecksum}, got ${actualChecksum}`,
+          ),
+          { deterministic: compressed !== undefined },
         )
       }
 
-      // Write binary to disk
-      await writeFile(binaryPath, payload)
       writeSucceeded = true
       await chmod(binaryPath, 0o755)
-
-      // Success - return early
-      return
+      return { checksumRetried, dropRetried }
     } catch (error) {
-      clearStallTimer()
+      clearTimers()
 
       const normalizedError = isZstdDecompressError(error)
         ? Object.assign(
-            new Error(
-              `Checksum mismatch: zstd decoder rejected the frame (${(error as NodeJS.ErrnoException).code})`,
+            new ClaudeError(
+              `Checksum mismatch: zstd decoder rejected the frame (${getErrnoCode(error)})`,
             ),
             { cause: error },
           )
         : error
 
+      if (
+        axios.isAxiosError(normalizedError) &&
+        normalizedError.response?.data instanceof Readable
+      ) {
+        normalizedError.response.data.destroy()
+      }
+
       if (writeStream && !writeSucceeded) {
         const ws = writeStream
         await new Promise<void>(resolve => ws.close(() => resolve()))
-        await rm(binaryPath, { force: true }).catch(() => {})
-      }
-
-      // Check if this was a stall timeout:
-      // - axios wraps abort signals in CanceledError
-      // - stream/promises pipeline() rejects with AbortError / ABORT_ERR on controller.abort()
-      const isStallTimeout = isDownloadStallAbortError(
-        normalizedError,
-        controller.signal.aborted,
-      )
-
-      if (isStallTimeout) {
-        lastError = new StallTimeoutError()
-      } else {
-        lastError = toError(normalizedError)
-      }
-
-      // Only retry on stall timeouts
-      if (isStallTimeout && attempt < MAX_DOWNLOAD_RETRIES) {
-        logForDebugging(
-          `Download stalled on attempt ${attempt}/${MAX_DOWNLOAD_RETRIES}, retrying...`,
+        await rm(binaryPath, { force: true }).catch(err =>
+          logForDebugging(
+            `Failed to remove partial download: ${err instanceof Error ? err.message : String(err)}`,
+            { level: 'error' },
+          ),
         )
-        // Brief pause before retry to let network recover
-        await sleep(1000)
+      }
+
+      const abortReason = controller.signal.aborted
+        ? controller.signal.reason
+        : undefined
+      const isDeadlineTimeout = abortReason === 'deadline'
+      const isStallTimeout =
+        !isDeadlineTimeout &&
+        (abortReason === 'stall' ||
+          isDownloadStallAbortError(normalizedError, controller.signal.aborted))
+
+      if (isDeadlineTimeout) {
+        throw Object.assign(
+          new ClaudeError('Download timed out: exceeded the total deadline'),
+          { attempt },
+        )
+      }
+
+      const isChecksumMismatch =
+        normalizedError instanceof Error &&
+        normalizedError.message.includes('Checksum mismatch')
+      const isConnectionDrop =
+        !streamCompleted &&
+        !isStallTimeout &&
+        (isTransientConnectionDropError(normalizedError) ||
+          getErrnoCode(normalizedError) === 'ERR_STREAM_PREMATURE_CLOSE')
+
+      const wrappedError = isStallTimeout
+        ? new StallTimeoutError()
+        : toError(normalizedError)
+      lastError = wrappedError
+
+      if (
+        (isStallTimeout || isChecksumMismatch || isConnectionDrop) &&
+        !isDeterministicChecksumError(normalizedError) &&
+        attempt < MAX_DOWNLOAD_RETRIES
+      ) {
+        if (isChecksumMismatch) {
+          checksumRetried = true
+        } else if (isConnectionDrop) {
+          dropRetried = true
+        }
+        logForDebugging(
+          `Download ${isChecksumMismatch ? 'checksum mismatch' : isStallTimeout ? 'stalled' : 'connection dropped'} on attempt ${attempt}/${MAX_DOWNLOAD_RETRIES}, retrying...`,
+        )
+        if (retryDelayMs > 0) {
+          await sleep(retryDelayMs)
+        }
         continue
       }
 
-      // Don't retry other errors (HTTP errors, checksum mismatches, etc.)
-      throw lastError
+      if (isConnectionDrop) {
+        const code = getErrnoCode(wrappedError)
+        throw Object.assign(
+          new ClaudeError(
+            `The connection dropped while downloading the update (attempt ${attempt}/${MAX_DOWNLOAD_RETRIES}: ${wrappedError.message}). Check your network — proxies sometimes cut off large downloads.`,
+          ),
+          {
+            attempt,
+            connectionDrop: true,
+            cause: wrappedError,
+            ...(code ? { code } : {}),
+          },
+        )
+      }
+
+      throw Object.assign(wrappedError, { attempt })
     }
   }
 
-  // Should not reach here, but just in case
   throw lastError ?? new Error('Download failed after all retries')
 }
 
@@ -1289,22 +1408,34 @@ export async function downloadVersionFromBinaryRepo(
   // Log download attempt start
   logEvent('tengu_binary_download_attempt', {})
 
-  // Fetch & verify manifest (official 2.1.328 `Ut`)
+  // Fetch & verify manifest + optional compressed manifest.zst.json in parallel (official 2.1.328 `hr`)
   const signaturePolicy =
     options?.signaturePolicy ??
     (baseUrl === GCS_BUCKET_URL ? 'require' : 'skip')
-  const { manifest, signatureVerified } = await fetchAndVerifyReleaseManifest(
-    baseUrl,
-    version,
-    {
+  const [{ manifest, signatureVerified }, zstManifestRes] = await Promise.all([
+    fetchAndVerifyReleaseManifest(baseUrl, version, {
       authConfig,
       signaturePolicy,
       platform,
       startTime,
       purpose: 'download',
       publicKeyPem: options?.publicKeyPem,
-    },
-  )
+    }),
+    fetchReleaseWithRetry<ReleaseManifest>(
+      `${baseUrl}/${version}/manifest.zst.json`,
+      {
+        timeout: 10_000,
+        ...authConfig,
+        responseType: 'json',
+        maxContentLength: 1024 * 1024,
+      },
+    ).catch(err => {
+      logForDebugging(
+        `No compressed manifest for ${version}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      return undefined
+    }),
+  ])
 
   const platformInfo = manifest.platforms[platform]
 
@@ -1316,6 +1447,16 @@ export async function downloadVersionFromBinaryRepo(
   }
 
   const expectedChecksum = platformInfo.checksum
+  const zstChecksum = zstManifestRes?.data?.platforms?.[platform]?.checksum
+  const decompressedSize = platformInfo.size
+  const compressedOpts: CompressedBinaryOptions | undefined =
+    typeof zstChecksum === 'string' &&
+    /^[a-f0-9]{64}$/.test(zstChecksum) &&
+    typeof decompressedSize === 'number' &&
+    Number.isInteger(decompressedSize) &&
+    decompressedSize > 0
+      ? { checksum: zstChecksum, decompressedSize }
+      : undefined
 
   // Both GCS and generic bucket use identical layout: ${baseUrl}/${version}/${platform}/${binaryName}
   const binaryName = getBinaryName(platform)
@@ -1325,16 +1466,50 @@ export async function downloadVersionFromBinaryRepo(
   await fs.mkdir(stagingPath)
   const binaryPath = join(stagingPath, binaryName)
 
+  let useCompressed = compressedOpts !== undefined
+  let activeDownloadUrl = useCompressed ? `${binaryUrl}.zst` : binaryUrl
+
   try {
-    await downloadAndVerifyBinary(
-      binaryUrl,
-      expectedChecksum,
-      binaryPath,
-      authConfig || {},
-    )
+    let downloadOutcome:
+      | { checksumRetried: boolean; dropRetried: boolean }
+      | undefined
+    if (compressedOpts) {
+      try {
+        downloadOutcome = await downloadAndVerifyBinary(
+          activeDownloadUrl,
+          expectedChecksum,
+          binaryPath,
+          authConfig || {},
+          compressedOpts,
+        )
+      } catch (zstErr) {
+        if (
+          getHttpStatus(zstErr) === undefined &&
+          !isIntegrityFallbackError(zstErr)
+        ) {
+          throw zstErr
+        }
+        useCompressed = false
+        activeDownloadUrl = binaryUrl
+        logForDebugging(
+          `Compressed binary unusable (${zstErr instanceof Error ? zstErr.message : String(zstErr)}), falling back to ${binaryUrl}`,
+        )
+      }
+    }
+    if (!downloadOutcome) {
+      await downloadAndVerifyBinary(
+        binaryUrl,
+        expectedChecksum,
+        binaryPath,
+        authConfig || {},
+        undefined,
+        platformInfo.size,
+      )
+    }
     const latencyMs = Date.now() - startTime
     logEvent('tengu_binary_download_success', {
       latency_ms: latencyMs,
+      compressed: useCompressed,
     })
     return { signatureVerified, expectedChecksum }
   } catch (error) {
@@ -1348,11 +1523,15 @@ export async function downloadVersionFromBinaryRepo(
     logEvent('tengu_binary_download_failure', {
       latency_ms: latencyMs,
       http_status: httpStatus,
-      is_timeout: errorMessage.includes('timeout'),
+      is_timeout: isTimeoutFailure(error),
       is_checksum_mismatch: errorMessage.includes('Checksum mismatch'),
+      attempt: getAttemptNumber(error),
+      compressed: useCompressed,
     })
     logError(
-      new Error(`Failed to download binary from ${binaryUrl}: ${errorMessage}`),
+      new Error(
+        `Failed to download binary from ${activeDownloadUrl}: ${errorMessage}`,
+      ),
     )
     throw error
   }

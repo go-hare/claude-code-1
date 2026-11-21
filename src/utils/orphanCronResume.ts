@@ -352,6 +352,110 @@ export async function writePendingWakeup(
   await writeFile(filePath, JSON.stringify(record), 'utf8')
 }
 
+export type ScannedPendingWakeups = {
+  wakeupCalls: PendingWakeupCall[]
+  wakeupCallsAtLastLoopFire: number
+  results: Map<string, PendingWakeupResult>
+}
+
+const SCHEDULE_WAKEUP_NAMES = new Set(['ScheduleWakeup'])
+
+/**
+ * Official `wfe` wakeup-subset (`chunk@318694944.js`) — collect ScheduleWakeup
+ * tool_use calls, tool_result payloads, and the index of the latest loop fire.
+ */
+export function scanPendingWakeupsFromMessages(
+  messages: readonly (ScanMsg & { origin?: { kind?: unknown } })[],
+): ScannedPendingWakeups {
+  const wakeupCalls: PendingWakeupCall[] = []
+  const results = new Map<string, PendingWakeupResult>()
+  let wakeupCallsAtLastLoopFire = 0
+
+  for (const d of messages) {
+    if (d.origin?.kind === 'cron' || d.origin?.kind === 'loop') {
+      wakeupCallsAtLastLoopFire = wakeupCalls.length
+    }
+    if (d.type === 'assistant') {
+      const content = d.message?.content
+      if (!Array.isArray(content)) continue
+      const parsedTs = Date.parse(d.timestamp ?? '')
+      const ts = Number.isFinite(parsedTs) ? parsedTs : Date.now()
+      for (const m of content) {
+        if (!isRecord(m) || m.type !== 'tool_use') continue
+        const name = typeof m.name === 'string' ? m.name : ''
+        const id = typeof m.id === 'string' ? m.id : ''
+        const input = isRecord(m.input) ? m.input : {}
+        if (id && SCHEDULE_WAKEUP_NAMES.has(name)) {
+          wakeupCalls.push({ toolUseId: id, createdAt: ts, input })
+        }
+      }
+      continue
+    }
+
+    if (d.type === 'user') {
+      const f = d.toolUseResult
+      if (!isRecord(f)) continue
+      const content = d.message?.content
+      if (!Array.isArray(content)) continue
+      for (const g of content) {
+        if (!isRecord(g) || g.type !== 'tool_result') continue
+        if (g.is_error) continue
+        const tuid = typeof g.tool_use_id === 'string' ? g.tool_use_id : ''
+        if (tuid) results.set(tuid, f as PendingWakeupResult)
+      }
+    }
+  }
+
+  return { wakeupCalls, wakeupCallsAtLastLoopFire, results }
+}
+
+/**
+ * Official `bca` (`chunk@303673735.js`) — re-arm a resurrected pending wakeup
+ * into bootstrap session cron state when its scheduled time is still in the future.
+ */
+export function rearmResurrectedPendingWakeup(args: {
+  scheduledFor: number
+  prompt: string
+  reason?: string
+  chainStartedAt: number
+  plugin?: string
+}): boolean {
+  const now = Date.now()
+  if (args.scheduledFor <= now) return false
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const state =
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    if (state.getSessionCronTasks().some(t => t.kind === 'loop')) {
+      return false
+    }
+    const target = new Date(args.scheduledFor)
+    const cron = `${target.getMinutes()} ${target.getHours()} * * *`
+    const id = Math.floor(Math.random() * 0xffffffff)
+      .toString(16)
+      .padStart(8, '0')
+    state.addSessionCronTask({
+      id,
+      cron,
+      prompt: args.prompt,
+      createdAt: Math.max(now, args.scheduledFor - 60_000),
+      kind: 'loop',
+      scheduledFor: args.scheduledFor,
+      reason: args.reason,
+      ...(args.plugin !== undefined ? { plugin: args.plugin } : {}),
+    })
+    state.setLoopChainStartedAt(args.prompt, {
+      startedAt: Math.min(args.chainStartedAt, now),
+      lastScheduledFor: args.scheduledFor,
+    })
+    state.setScheduledTasksEnabled(true)
+    state.setLoopEnded(false)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export type ResurrectPendingWakeupOutcome =
   | { kind: 'none' }
   | { kind: 'rearmed'; scheduledFor: number; prompt: string }

@@ -8,17 +8,12 @@ import { clearDeliveredDiagnosticsForFile } from 'src/services/lsp/LSPDiagnostic
 import { getLspServerManager } from 'src/services/lsp/manager.js'
 import { notifyVscodeFileUpdated } from 'src/services/mcp/vscodeSdkMcp.js'
 import { checkTeamMemSecrets } from 'src/services/teamMemorySync/teamMemSecretGuard.js'
-import {
-  activateConditionalSkillsForPaths,
-  addSkillDirectories,
-  discoverSkillDirsForPaths,
-} from 'src/skills/loadSkillsDir.js'
+import { discoverAndActivateSkillsForFilePath } from 'src/skills/loadSkillsDir.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
-import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from 'src/utils/diff.js'
-import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { isBareMode, isEnvTruthy } from 'src/utils/envUtils.js'
 import { isPerforceModeEnabled } from 'src/utils/perforceMode.js'
 import { isENOENT } from 'src/utils/errors.js'
 import { getFileModificationTime, writeTextContent } from 'src/utils/file.js'
@@ -639,20 +634,13 @@ export const FileWriteTool = buildTool({
       }
     }
 
-    // Discover skills from this file's path (fire-and-forget, non-blocking)
-    const cwd = getCwd()
-    const newSkillDirs = await discoverSkillDirsForPaths([fullFilePath], cwd)
-    if (newSkillDirs.length > 0) {
-      // Store discovered dirs for attachment display
-      for (const dir of newSkillDirs) {
-        dynamicSkillDirTriggers?.add(dir)
-      }
-      // Don't await - let skill loading happen in the background
-      addSkillDirectories(newSkillDirs).catch(() => {})
+    // Discover skills from this file's path (official 2.1.328 BJ).
+    if (!isBareMode()) {
+      await discoverAndActivateSkillsForFilePath(
+        fullFilePath,
+        dynamicSkillDirTriggers,
+      )
     }
-
-    // Activate conditional skills whose path patterns match this file
-    activateConditionalSkillsForPaths([fullFilePath], cwd)
 
     await diagnosticTracker.beforeFileEdited(fullFilePath)
 

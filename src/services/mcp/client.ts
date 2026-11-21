@@ -78,7 +78,9 @@ import mapValues from 'lodash-es/mapValues.js'
 import memoize from 'lodash-es/memoize.js'
 import zipObject from 'lodash-es/zipObject.js'
 import pMap from 'p-map'
+import { pathToFileURL } from 'url'
 import {
+  getAdditionalDirectoriesForClaudeMd,
   getOriginalCwd,
   getProjectRoot,
   getSessionId,
@@ -1030,13 +1032,7 @@ const connectToServerMemo = memoize(
         // densable: setRequestHandler("roots/list", ...)
         c.setRequestHandler('roots/list', async () => {
           logMCPDebug(name, `Received ListRoots request from server`)
-          return {
-            roots: [
-              {
-                uri: `file://${getOriginalCwd()}`,
-              },
-            ],
-          }
+          return buildMcpRootsList()
         })
         return c
       }
@@ -2234,9 +2230,11 @@ const connectToServerMemo = memoize(
 
       // Create the wrapped cleanup that includes unregistering
       const wrappedCleanup = async () => {
+        liveMcpClients.delete(client)
         cleanupUnregister?.()
         await cleanup()
       }
+      liveMcpClients.add(client)
 
       const connectionDurationMs = Date.now() - connectStartTime
       logEvent('tengu_mcp_server_connection_succeeded', {
@@ -2490,52 +2488,7 @@ export function markSupersededMcpDial(
   }
 }
 
-export async function clearServerCache(
-  name: string,
-  serverRef: ScopedMcpServerConfig,
-  keepAliveOut?: { connection?: ConnectedMCPServer },
-): Promise<void> {
-  const key = getServerCacheKey(name, serverRef)
-
-  // #2052: Mark any in-flight or cached dial as superseded before evicting
-  // so a late settlement or concurrent tool-call dial never clobbers a re-add.
-  const previousPending = connectToServer.cache?.get?.(key) as
-    | Promise<MCPServerConnection>
-    | undefined
-  if (previousPending !== undefined) {
-    supersededMcpDials.add(previousPending)
-  }
-
-  // lodash memoize Cache supports .has; avoid connectToServer when missing so
-  // disable paths do not race a brand-new Chrome native-host connect.
-  const alreadyCached =
-    typeof connectToServer.cache?.has === 'function'
-      ? connectToServer.cache.has(key)
-      : connectToServer.cache.get(key) !== undefined
-
-  if (alreadyCached) {
-    try {
-      const wrappedClient = await connectToServer(name, serverRef)
-
-      if (wrappedClient.type === 'connected') {
-        if (
-          keepAliveOut !== undefined &&
-          wrappedClient.client.transport !== undefined &&
-          (wrappedClient.transportErrorState?.activeCallWatchdogs.size ?? 0) > 0
-        ) {
-          keepAliveOut.connection = wrappedClient
-          return
-        }
-        await wrappedClient.cleanup()
-      }
-    } catch {
-      // Ignore errors - server might have failed to connect
-    }
-  }
-
-  // Clear from cache (both connection and fetch caches so reconnect
-  // fetches fresh tools/resources/commands instead of stale ones)
-  evictMcpMemoCaches(key, name)
+function clearPostReopenHandlersForServer(name: string): void {
   // densable xVa entry lifecycle — drop post-reopen list handlers with connection
   try {
     const { clearMcpListenPostReopenHandlers } =
@@ -2545,6 +2498,95 @@ export async function clearServerCache(
   } catch {
     // optional
   }
+}
+
+/**
+ * Official `en` — inspect a memoized connect promise without blocking on an
+ * unsettled in-flight dial (0ms race). Resolves to the connection if already
+ * settled, or undefined if still pending or rejected.
+ */
+async function peekSettledPromise(
+  pending: Promise<MCPServerConnection>,
+): Promise<MCPServerConnection | undefined> {
+  return Promise.race([
+    pending.catch(() => undefined),
+    new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 0)),
+  ])
+}
+
+export async function clearServerCache(
+  name: string,
+  serverRef: ScopedMcpServerConfig,
+  keepAliveOut?: { connection?: ConnectedMCPServer },
+): Promise<void> {
+  const key = getServerCacheKey(name, serverRef)
+
+  // lodash memoize Cache supports .get; avoid calling connectToServer when
+  // missing so disable paths do not race a brand-new Chrome native-host dial.
+  const previousPending = connectToServer.cache?.get?.(key) as
+    | Promise<MCPServerConnection>
+    | undefined
+
+  if (previousPending !== undefined) {
+    const settled = await peekSettledPromise(previousPending)
+    if (settled === undefined) {
+      // Official `cg(e, o, g)` — dial is still in flight (or rejected): mark
+      // superseded, evict memo caches synchronously, and close on settlement.
+      if (connectToServer.cache?.get?.(key) === previousPending) {
+        supersededMcpDials.add(previousPending)
+        evictMcpMemoCaches(key, name)
+        void previousPending.then(
+          conn => {
+            if (conn.type === 'connected') {
+              void detachAndCloseConnection(conn)
+            }
+          },
+          () => {},
+        )
+      }
+      clearPostReopenHandlersForServer(name)
+      return
+    }
+
+    if (settled.type === 'connected') {
+      if (
+        keepAliveOut !== undefined &&
+        connectToServer.cache?.get?.(key) === previousPending &&
+        settled.client.transport !== undefined &&
+        (settled.transportErrorState?.activeCallWatchdogs.size ?? 0) > 0
+      ) {
+        keepAliveOut.connection = settled
+        return
+      }
+      // Normal (non-kept) teardown: mark superseded and evict memo caches
+      // synchronously BEFORE awaiting close/cleanup so concurrent dials cannot
+      // observe the dying connection in the memo cache.
+      supersededMcpDials.add(previousPending)
+      if (connectToServer.cache?.get?.(key) === previousPending) {
+        evictMcpMemoCaches(key, name)
+      }
+      clearPostReopenHandlersForServer(name)
+      settled.client.onclose = undefined
+      try {
+        await settled.cleanup()
+      } catch {
+        // Ignore cleanup errors
+      }
+      return
+    }
+
+    // Settled as non-connected ('failed', 'needs-auth', etc.):
+    supersededMcpDials.add(previousPending)
+    const current = connectToServer.cache?.get?.(key)
+    if (current !== undefined && current !== previousPending) {
+      return
+    }
+  }
+
+  // Clear from cache (both connection and fetch caches so reconnect
+  // fetches fresh tools/resources/commands instead of stale ones)
+  evictMcpMemoCaches(key, name)
+  clearPostReopenHandlersForServer(name)
 }
 
 /** Official `l1` — settle a memoized connect promise; undefined on reject. */
@@ -2759,6 +2801,77 @@ export function invokeToolRaw(
   options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<unknown> {
   return client.callTool(params, options)
+}
+
+/**
+ * Official 2.1.328 `Ah` / `YP` (chunk@335138039.js @146201):
+ * Build `roots/list` entries from the original cwd plus any
+ * `additionalWorkingDirectories`, deduplicated by file:// URI, and broadcast
+ * `notifications/roots/list_changed` to all live MCP clients when roots change.
+ */
+const liveMcpClients = new Set<Client>()
+
+export function buildMcpRootsList(
+  primaryDir: string | null = getOriginalCwd(),
+  additionalDirs: readonly string[] = getAdditionalDirectoriesForClaudeMd(),
+): { roots: Array<{ uri: string }> } {
+  const seen = new Set<string>()
+  const roots: Array<{ uri: string }> = []
+  const candidates = [...(primaryDir ? [primaryDir] : []), ...additionalDirs]
+  for (const dir of candidates) {
+    if (!dir) continue
+    let uri: string
+    try {
+      uri = pathToFileURL(dir).href
+    } catch {
+      uri = `file://${dir}`
+    }
+    if (seen.has(uri)) continue
+    seen.add(uri)
+    roots.push({ uri })
+  }
+  return { roots }
+}
+
+export function notifyMcpRootsListChanged(
+  extraConnections?: ReadonlyArray<{
+    type: string
+    name?: string
+    client?: { sendRootsListChanged?: () => Promise<void> }
+  }>,
+): void {
+  const notified = new Set<unknown>()
+  for (const client of liveMcpClients) {
+    notified.add(client)
+    client.sendRootsListChanged().catch(err => {
+      logForDebugging(
+        `MCP: failed to send roots/list_changed: ${errorMessage(err)}`,
+      )
+    })
+  }
+  if (!Array.isArray(extraConnections)) return
+  for (const conn of extraConnections) {
+    if (
+      conn.type === 'connected' &&
+      conn.client &&
+      !notified.has(conn.client) &&
+      typeof conn.client.sendRootsListChanged === 'function'
+    ) {
+      notified.add(conn.client)
+      conn.client.sendRootsListChanged().catch((err: unknown) => {
+        logForDebugging(
+          `MCP: failed to send roots/list_changed to "${conn.name ?? 'unknown'}": ${errorMessage(err)}`,
+        )
+      })
+    }
+  }
+}
+
+export function _registerLiveMcpClientForTests(client: Client): () => void {
+  liveMcpClients.add(client)
+  return () => {
+    liveMcpClients.delete(client)
+  }
 }
 
 /**
@@ -4254,6 +4367,8 @@ export async function reconnectMcpServerImpl(
   const identityMoved = (): boolean =>
     identitySensitive && getMcpIdentityEpoch() !== identityEpoch
   let live: ConnectedMCPServer | undefined
+  const keepAliveOut: { connection?: ConnectedMCPServer } | undefined =
+    options?.keepConnectionInUse ? {} : undefined
   try {
     // Invalidate the keychain cache so we read fresh credentials from disk.
     // This is necessary when another process (e.g. the VS Code extension host)
@@ -4262,8 +4377,6 @@ export async function reconnectMcpServerImpl(
     // use stale cached data and never notice the tokens were removed.
     clearKeychainCache()
 
-    const keepAliveOut: { connection?: ConnectedMCPServer } | undefined =
-      options?.keepConnectionInUse ? {} : undefined
     await clearServerCache(name, config, keepAliveOut)
     if (identityMoved()) {
       if (keepAliveOut?.connection !== undefined) {
@@ -4271,9 +4384,17 @@ export async function reconnectMcpServerImpl(
       }
       return inertReconnectShape(name, config)
     }
+    let dialAttempt = 0
     let client = await dialWithSignedOutFallback(
       () => {
-        connectToServer.cache.delete(getServerCacheKey(name, config))
+        // Official `Ci`: do NOT evict connectToServer.cache when clearServerCache
+        // kept an in-use connection (keepAliveOut.connection !== undefined) or on
+        // the initial dial (clearServerCache already evicted on normal teardown).
+        // Only evict on a signed-out fallback retry (dialAttempt > 0).
+        if (dialAttempt > 0 && keepAliveOut?.connection === undefined) {
+          connectToServer.cache.delete(getServerCacheKey(name, config))
+        }
+        dialAttempt++
         return connectToServer(name, config)
       },
       () => !identityMoved(),
@@ -4378,7 +4499,7 @@ export async function reconnectMcpServerImpl(
   } catch (error) {
     // Handle errors gracefully - connection might have closed during fetch
     logMCPError(name, `Error during reconnection: ${errorMessage(error)}`)
-    if (live) {
+    if (live && keepAliveOut?.connection !== live) {
       await detachAndCloseConnection(live)
     }
 

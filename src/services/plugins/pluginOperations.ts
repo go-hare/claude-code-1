@@ -13,9 +13,15 @@
  */
 import { dirname, isAbsolute, join, relative, sep } from 'path'
 import { lstat, readdir, realpath } from 'fs/promises'
+import * as semver from 'semver'
 import { getOriginalCwd } from '../../bootstrap/state.js'
 import { isBuiltinPluginId } from '../../plugins/builtinPlugins.js'
-import type { LoadedPlugin, PluginManifest } from '../../types/plugin.js'
+import type {
+  LoadedPlugin,
+  PluginEngineRangeMiss,
+  PluginManifest,
+} from '../../types/plugin.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { isENOENT, toError } from '../../utils/errors.js'
 import { getFsImplementation } from '../../utils/fsOperations.js'
 import { logError } from '../../utils/log.js'
@@ -85,6 +91,10 @@ import {
 import {
   formatResolutionError,
   installResolvedPlugin,
+  isOlderVersionFallbackEligible,
+  listOlderCompatibleVersionCandidates,
+  type OlderPluginVersionCandidate,
+  type OlderPluginVersionLister,
   resolveMarketplaceArchiveAuth,
 } from '../../utils/plugins/pluginInstallationHelpers.js'
 import {
@@ -231,6 +241,10 @@ export type PluginUpdateResult = {
   dependencyNote?: string
   /** #1749/#1789: True if any post-update dependency could not be resolved/installed. */
   dependenciesUnresolved?: boolean
+  /** Official 2.1.328 `Gt`: engine range miss details when skipped or fell back to older version. */
+  claudeCodeRangeMiss?: PluginEngineRangeMiss
+  /** Official 2.1.328 `Gt`: newer marketplace version that was out of Claude Code range. */
+  versionOutOfRange?: string
 }
 
 // ============================================================================
@@ -638,13 +652,17 @@ export async function installPluginOp(
     : ''
   const okResult = result as Extract<typeof result, { ok: true }>
   const depNote = okResult.depNote
+  const olderVersionSuffix =
+    okResult.olderVersionNotes && okResult.olderVersionNotes.length > 0
+      ? ` ${okResult.olderVersionNotes.join(' ')}`
+      : ''
   const commandStderr = okResult.commandStderr
   const commandPrinted = Boolean(commandStderr)
 
   if (wasInstalled && wasEnabled) {
     return {
       success: true,
-      message: `Plugin "${re(pluginId)}" is already installed (scope: ${scope})${depNote}${staleInstallWarning}`,
+      message: `Plugin "${re(pluginId)}" is already installed (scope: ${scope})${depNote}${staleInstallWarning}${olderVersionSuffix}`,
       pluginId,
       pluginName: entry.name,
       scope,
@@ -655,7 +673,7 @@ export async function installPluginOp(
   if (wasInstalled) {
     return {
       success: true,
-      message: `Plugin "${re(pluginId)}" is already installed (scope: ${scope}). It was disabled, so it is enabled again.${depNote}${staleInstallWarning}`,
+      message: `Plugin "${re(pluginId)}" is already installed (scope: ${scope}). It was disabled, so it is enabled again.${depNote}${staleInstallWarning}${olderVersionSuffix}`,
       pluginId,
       pluginName: entry.name,
       scope,
@@ -665,7 +683,7 @@ export async function installPluginOp(
 
   return {
     success: true,
-    message: `Successfully installed plugin: ${re(pluginId)} (scope: ${scope})${depNote}${staleInstallWarning}`,
+    message: `Successfully installed plugin: ${re(pluginId)} (scope: ${scope})${depNote}${staleInstallWarning}${olderVersionSuffix}`,
     pluginId,
     pluginName: entry.name,
     scope,
@@ -1201,6 +1219,10 @@ export type PluginUpdateCommandSourceOptions = {
    * onEntryHelperDisclosure instead.
    */
   consentedEntryHelper?: HeadersHelperPaneShown | null
+  /** Official 2.1.328 `B2o`: optional version-lister override for older-version fallback. */
+  listAvailableVersions?: OlderPluginVersionLister
+  /** Internal recursion guard when testing an older compatible candidate version. */
+  _olderCandidate?: OlderPluginVersionCandidate
 }
 
 /**
@@ -1774,26 +1796,96 @@ export async function performPluginUpdate({
       }
     }
 
-    // Official 2.1.323 #1965: refuse/skip updating to a version whose
-    // engines["claude-code"] range excludes this Claude Code version.
+    // Official 2.1.323 #1965 + 2.1.328 `Gt` (`chunk@306660664.js @124677`):
+    // refuse/skip updating to a version whose engines["claude-code"] range
+    // excludes this Claude Code version, trying older compatible published
+    // versions newest-first when eligible.
     const {
       checkClaudeCodeEngineRange,
       extractClaudeCodeEngineRange,
       formatEngineRangeGuidance,
       formatEngineRangeMiss,
+      formatOlderCompatibleUpdateMessage,
+      verifyOlderCandidateManifestVersion,
     } = await import('../../utils/plugins/pluginEngineRange.js')
+    const tryFallbackToOlderCompatibleVersion = async (
+      miss: PluginEngineRangeMiss,
+      rejectedVersion: string | undefined,
+    ): Promise<PluginUpdateResult> => {
+      const skipped: PluginUpdateResult = {
+        success: false,
+        message: `Update for "${pluginName}" ${formatEngineRangeMiss(miss)}. ${formatEngineRangeGuidance(miss)}`,
+        pluginId,
+        oldVersion,
+        ...(rejectedVersion ? { newVersion: rejectedVersion } : {}),
+        scope,
+        skipReason: 'engine_range',
+        claudeCodeRangeMiss: miss,
+      }
+      const installedSemver = oldVersion ? semver.valid(oldVersion) : null
+      if (
+        options?._olderCandidate !== undefined ||
+        installedSemver === null ||
+        !isOlderVersionFallbackEligible(pluginId, entry, marketplaceSource)
+      ) {
+        return skipped
+      }
+      const candidates = await listOlderCompatibleVersionCandidates({
+        entry,
+        marketplaceSource,
+        below: rejectedVersion
+          ? (semver.valid(rejectedVersion) ?? undefined)
+          : undefined,
+        above: installedSemver,
+        listAvailableVersions: options?.listAvailableVersions,
+      })
+      for (const candidate of candidates) {
+        try {
+          const candidateResult = await performPluginUpdate({
+            pluginId,
+            pluginName,
+            entry: candidate.entry,
+            marketplaceInstallLocation,
+            installation,
+            scope,
+            projectPath,
+            options: { ...options, _olderCandidate: candidate },
+          })
+          if (candidateResult.success && !candidateResult.alreadyUpToDate) {
+            return {
+              ...candidateResult,
+              message: formatOlderCompatibleUpdateMessage({
+                baseMessage: candidateResult.message,
+                rejectedVersion,
+                miss,
+              }),
+              claudeCodeRangeMiss: miss,
+              ...(rejectedVersion
+                ? { versionOutOfRange: rejectedVersion }
+                : {}),
+            }
+          }
+          logForDebugging(
+            `${pluginId} at ${candidate.version} was not taken: ${candidateResult.message}`,
+          )
+        } catch (candidateErr) {
+          logForDebugging(
+            `${pluginId} at ${candidate.version} was not taken: ${candidateErr instanceof Error ? candidateErr.message : String(candidateErr)}`,
+            { level: 'warn' },
+          )
+        }
+      }
+      return skipped
+    }
+
     const entryEngineCheck = checkClaudeCodeEngineRange(
       extractClaudeCodeEngineRange((entry as { engines?: unknown }).engines),
     )
     if (entryEngineCheck.kind === 'outside') {
-      return {
-        success: false,
-        message: `Update for "${pluginName}" ${formatEngineRangeMiss(entryEngineCheck.miss)}. ${formatEngineRangeGuidance(entryEngineCheck.miss)}`,
-        pluginId,
-        oldVersion,
-        scope,
-        skipReason: 'engine_range',
-      }
+      return tryFallbackToOlderCompatibleVersion(
+        entryEngineCheck.miss,
+        entry.version,
+      )
     }
 
     const { marketplaceHeaders, marketplaceUrl } =
@@ -1811,6 +1903,29 @@ export async function performPluginUpdate({
       trustedSettingsEntryAuth,
     })
 
+    // Official 2.1.328 `j2o`: verify older candidate manifest version matches
+    // the selected candidate tag/version before accepting it.
+    if (options?._olderCandidate !== undefined) {
+      const versionMismatch = verifyOlderCandidateManifestVersion(
+        options._olderCandidate,
+        cacheResult.manifest as { version?: string } | undefined,
+      )
+      if (versionMismatch !== undefined) {
+        if (cacheResult.path && cacheResult.path !== installation.installPath) {
+          await fs
+            .rm(cacheResult.path, { recursive: true, force: true })
+            .catch(() => {})
+        }
+        return {
+          success: false,
+          message: `Skipped ${pluginName} ${options._olderCandidate.version}: ${versionMismatch}`,
+          pluginId,
+          oldVersion,
+          scope,
+        }
+      }
+    }
+
     // Official 2.1.323 #1965: also validate engines["claude-code"] from the
     // downloaded plugin.json manifest (marketplace entry may omit engines).
     const manifestEngineCheck = checkClaudeCodeEngineRange(
@@ -1824,14 +1939,13 @@ export async function performPluginUpdate({
           .rm(cacheResult.path, { recursive: true, force: true })
           .catch(() => {})
       }
-      return {
-        success: false,
-        message: `Update for "${pluginName}" ${formatEngineRangeMiss(manifestEngineCheck.miss)}. ${formatEngineRangeGuidance(manifestEngineCheck.miss)}`,
-        pluginId,
-        oldVersion,
-        scope,
-        skipReason: 'engine_range',
-      }
+      const rejectedVersion =
+        (cacheResult.manifest as { version?: string } | undefined)?.version ??
+        entry.version
+      return tryFallbackToOlderCompatibleVersion(
+        manifestEngineCheck.miss,
+        rejectedVersion,
+      )
     }
 
     sourcePath = cacheResult.path

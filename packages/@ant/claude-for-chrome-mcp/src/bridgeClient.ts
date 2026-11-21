@@ -9,6 +9,7 @@ import { SocketConnectionError } from './mcpSocketClient.js'
 import {
   localPlatformLabel,
   type BridgePermissionRequest,
+  type ChromeBridgeTrackEventMetadata,
   toLoggerDetail,
   type ChromeExtensionInfo,
   type ClaudeForChromeContext,
@@ -16,6 +17,31 @@ import {
   type PermissionOverrides,
   type SocketClient,
 } from './types.js'
+
+declare module './types.js' {
+  interface ClaudeForChromeContext {
+    /** Returns currently signed-in user UUID, `null` when signed out, or `undefined` if unknown yet. */
+    getCurrentUserId?: () => string | null | undefined
+    /** Optional host override for enforcing cross-account relay checks (defaults to true). */
+    isAccountMismatchEnforced?: () => boolean
+  }
+}
+
+export type BridgeIdentityStatus = 'ok' | 'other' | 'signed_out'
+
+const SIGNED_OUT_ALLOWED_MESSAGE_TYPES = new Set([
+  'paired',
+  'waiting',
+  'extensions_list',
+  'peer_connected',
+  'peer_disconnected',
+  'ping',
+  'pong',
+  'tool_result',
+  'routing_ack',
+  'external_message_result',
+  'permission_request',
+])
 
 /** Thrown when discovery finished with no Chrome extension connected. */
 /** Official 325 `tji` (#1793): wait up to 6s for previously selected browser to return. */
@@ -61,6 +87,10 @@ export class BridgeClient implements SocketClient {
   private connected = false
   private authenticated = false
   private connecting = false
+  private connectEpoch = 0
+  private socketUserId: string | undefined
+  private hostHasAnswered = false
+  private mismatchWaivedLogged = false
   private reconnectTimer: NodeJS.Timeout | null = null
   private reconnectAttempts = 0
   private pendingCalls = new Map<string, PendingToolCall>()
@@ -112,11 +142,125 @@ export class BridgeClient implements SocketClient {
     }
   }
 
+  /**
+   * Official 2.1.328 (`$Hs.identity` @334194212): compare the socket's user
+   * identity against the host's currently signed-in account.
+   */
+  public identity(
+    expectedUserId: string | undefined = this.socketUserId,
+  ): BridgeIdentityStatus {
+    const getCurrentUserId = this.context.getCurrentUserId
+    if (!getCurrentUserId || this.context.bridgeConfig?.devUserId) {
+      return 'ok'
+    }
+    let currentUserId: string | null | undefined
+    try {
+      currentUserId = getCurrentUserId()
+    } catch {
+      currentUserId = null
+    }
+    if (currentUserId === undefined) {
+      if (!this.hostHasAnswered) return 'ok'
+      currentUserId = null
+    }
+    this.hostHasAnswered = true
+    if (currentUserId === null) return 'signed_out'
+    if (
+      expectedUserId === undefined ||
+      currentUserId.toLowerCase() === expectedUserId.toLowerCase()
+    ) {
+      return 'ok'
+    }
+    let enforced = true
+    try {
+      enforced = this.context.isAccountMismatchEnforced?.() !== false
+    } catch {
+      // Keep default enforced = true
+    }
+    if (enforced) return 'other'
+    if (!this.mismatchWaivedLogged) {
+      this.mismatchWaivedLogged = true
+      this.context.logger.warn(
+        `[${this.context.serverName}] Using a relay connection made for a different account from the one signed in: the host has switched off the check that refuses it`,
+      )
+    }
+    return 'ok'
+  }
+
+  private canWrite(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN && this.identity() === 'ok'
+  }
+
+  private closedSince(epoch: number): boolean {
+    return (
+      this.context.getCurrentUserId !== undefined && epoch !== this.connectEpoch
+    )
+  }
+
+  public sendFrame(payload: string): boolean {
+    if (!this.ws || this.identity() !== 'ok') {
+      return false
+    }
+    this.ws.send(payload)
+    return true
+  }
+
+  public closeForOtherAccount(phase: 'connect' | 'use'): void {
+    const { logger, serverName, trackEvent } = this.context
+    logger.info(
+      `[${serverName}] Closing the bridge socket: it connected as a different account from the one signed in`,
+    )
+    trackEvent?.('chrome_bridge_identity_mismatch', {
+      phase,
+    } as unknown as ChromeBridgeTrackEventMetadata)
+    this.cleanup()
+  }
+
+  public refusedForIdentity(userId: string): boolean {
+    const status = this.identity(userId)
+    if (status === 'ok') return false
+    const { logger, serverName, trackEvent } = this.context
+    logger.info(
+      `[${serverName}] Not connecting: ${
+        status === 'other'
+          ? 'this connection was for a different account from the one signed in'
+          : 'nobody is signed in'
+      }`,
+    )
+    this.connecting = false
+    if (status === 'other') {
+      trackEvent?.('chrome_bridge_identity_mismatch', {
+        phase: 'connect',
+      } as unknown as ChromeBridgeTrackEventMetadata)
+      this.scheduleReconnect()
+    }
+    return true
+  }
+
+  public reconcileIdentity(): void {
+    if (this.identity() === 'other') {
+      this.closeForOtherAccount('use')
+    }
+  }
+
+  public connectedUserId(): string | undefined {
+    return this.context.bridgeConfig?.devUserId ? undefined : this.socketUserId
+  }
+
   public async ensureConnected(): Promise<boolean> {
     const { logger, serverName } = this.context
     logger.info(
       `[${serverName}] ensureConnected called, connected=${this.connected}, authenticated=${this.authenticated}, wsState=${this.ws?.readyState}`,
     )
+
+    const id = this.identity()
+    if (id === 'signed_out') {
+      logger.info(`[${serverName}] Not connecting: nobody is signed in`)
+      return false
+    }
+    if (id === 'other') {
+      this.closeForOtherAccount('use')
+    }
 
     if (
       this.connected &&
@@ -127,16 +271,20 @@ export class BridgeClient implements SocketClient {
       return true
     }
 
-    if (!this.connecting) {
+    if (!this.connecting && !this.reconnectTimer) {
       logger.info(`[${serverName}] Not connecting, starting connection...`)
       await this.connect()
     } else {
-      logger.info(`[${serverName}] Already connecting, waiting...`)
+      logger.info(
+        `[${serverName}] Connect in progress or reconnect scheduled, waiting...`,
+      )
     }
 
     // Wait for authentication with timeout
     return new Promise(resolve => {
+      let pollTimer: ReturnType<typeof setTimeout> | null = null
       const timeout = setTimeout(() => {
+        if (pollTimer) clearTimeout(pollTimer)
         logger.info(
           `[${serverName}] Connection timeout, connected=${this.connected}, authenticated=${this.authenticated}`,
         )
@@ -147,12 +295,12 @@ export class BridgeClient implements SocketClient {
           logger.info(`[${serverName}] Connection successful`)
           clearTimeout(timeout)
           resolve(true)
-        } else if (!this.connecting) {
+        } else if (!this.connecting && !this.reconnectTimer) {
           logger.info(`[${serverName}] No longer connecting, giving up`)
           clearTimeout(timeout)
           resolve(false)
         } else {
-          setTimeout(check, 200)
+          pollTimer = setTimeout(check, 200)
         }
       }
       check()
@@ -166,9 +314,10 @@ export class BridgeClient implements SocketClient {
   ): Promise<unknown> {
     const { logger, serverName, trackEvent } = this.context
 
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this.canWrite()) {
       throw new SocketConnectionError(`[${serverName}] Bridge not connected`)
     }
+    const epoch = this.connectEpoch
 
     // Lazy discovery: run on first tool call if no extension selected yet.
     // Use a shared promise so concurrent callers join the same discovery.
@@ -181,7 +330,7 @@ export class BridgeClient implements SocketClient {
       await this.discoveryPromise
     }
 
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this.canWrite() || this.closedSince(epoch)) {
       throw new SocketConnectionError(
         `[${serverName}] Bridge disconnected during discovery`,
       )
@@ -292,7 +441,7 @@ export class BridgeClient implements SocketClient {
         message.handle_permission_prompts = true
       }
 
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      if (!this.canWrite()) {
         clearTimeout(timer)
         this.pendingCalls.delete(toolUseId)
         reject(
@@ -304,7 +453,13 @@ export class BridgeClient implements SocketClient {
         `[${serverName}] Sending tool_call: ${name} (${toolUseId.slice(0, 8)})`,
       )
       try {
-        this.ws.send(JSON.stringify(message))
+        if (!this.sendFrame(JSON.stringify(message))) {
+          clearTimeout(timer)
+          this.pendingCalls.delete(toolUseId)
+          reject(
+            new SocketConnectionError(`[${serverName}] Bridge not connected`),
+          )
+        }
       } catch (err) {
         clearTimeout(timer)
         this.pendingCalls.delete(toolUseId)
@@ -323,7 +478,8 @@ export class BridgeClient implements SocketClient {
     return (
       this.connected &&
       this.authenticated &&
-      this.ws?.readyState === WebSocket.OPEN
+      this.ws?.readyState === WebSocket.OPEN &&
+      this.identity() === 'ok'
     )
   }
 
@@ -477,7 +633,14 @@ export class BridgeClient implements SocketClient {
       }, DISCOVERY_TIMEOUT_MS)
 
       this.pendingDiscovery = { resolve, timeout }
-      this.ws?.send(JSON.stringify({ type: 'list_extensions' }))
+      if (
+        !this.sendFrame(JSON.stringify({ type: 'list_extensions' })) &&
+        this.identity() !== 'ok'
+      ) {
+        clearTimeout(timeout)
+        this.pendingDiscovery = null
+        resolve([])
+      }
     })
 
     const byDeviceId = new Map<string, ChromeExtensionInfo>()
@@ -581,10 +744,11 @@ export class BridgeClient implements SocketClient {
    * Broadcast a pairing request to all connected extensions.
    * Non-blocking — the pairing_response handler will select the extension.
    */
-  private broadcastPairingRequest(): void {
+  private broadcastPairingRequest(): boolean {
+    if (this.identity() !== 'ok') return false
     const requestId = crypto.randomUUID()
     this.pendingPairingRequestId = requestId
-    this.ws?.send(
+    return this.sendFrame(
       JSON.stringify({
         type: 'pairing_request',
         request_id: requestId,
@@ -595,11 +759,12 @@ export class BridgeClient implements SocketClient {
 
   /** Official 2.1.328 (`hasActiveSelection` @334207956): true when a browser extension is actively selected. */
   public hasActiveSelection(): boolean {
-    return this.selectedDeviceId !== undefined
+    return this.selectedDeviceId !== undefined && this.identity() === 'ok'
   }
 
   /** Official 2.1.328 (`getSelectedDeviceId` @334207956): active or persisted device ID. */
   public getSelectedDeviceId(): string | undefined {
+    if (this.identity() !== 'ok') return undefined
     return (
       this.selectedDeviceId ??
       this.persistedDeviceId ??
@@ -638,10 +803,10 @@ export class BridgeClient implements SocketClient {
 
     const requestId = crypto.randomUUID()
     this.pendingPairingRequestId = requestId
-    if (this.ws?.readyState !== WebSocket.OPEN) {
+    if (!this.canWrite()) {
       return null
     }
-    this.ws.send(
+    this.sendFrame(
       JSON.stringify({
         type: 'pairing_request',
         request_id: requestId,
@@ -685,6 +850,8 @@ export class BridgeClient implements SocketClient {
     }
 
     this.connecting = true
+    const epoch = this.connectEpoch
+    const isStale = () => epoch !== this.connectEpoch
     this.authenticated = false
     this.connectionStartTime = Date.now()
     this.closeSocket()
@@ -699,6 +866,7 @@ export class BridgeClient implements SocketClient {
     } else {
       logger.debug(`[${serverName}] Fetching user ID for bridge connection`)
       const fetchedUserId = await bridgeConfig.getUserId()
+      if (isStale()) return
       if (!fetchedUserId) {
         const durationMs = Date.now() - this.connectionStartTime
         logger.error(
@@ -717,6 +885,7 @@ export class BridgeClient implements SocketClient {
 
       logger.debug(`[${serverName}] Fetching OAuth token for bridge connection`)
       token = await bridgeConfig.getOAuthToken()
+      if (isStale()) return
       if (!token) {
         const durationMs = Date.now() - this.connectionStartTime
         logger.error(
@@ -731,6 +900,10 @@ export class BridgeClient implements SocketClient {
         this.context.onAuthenticationError?.()
         return
       }
+    }
+
+    if (this.refusedForIdentity(userId)) {
+      return
     }
 
     // Connect to user-specific endpoint: /chrome/<user_id>
@@ -760,7 +933,13 @@ export class BridgeClient implements SocketClient {
       return
     }
 
+    this.socketUserId = userId
+
     this.ws.on('open', () => {
+      if (this.refusedForIdentity(userId)) {
+        this.closeSocket()
+        return
+      }
       logger.info(
         `[${serverName}] WebSocket connected, sending connect message`,
       )
@@ -810,6 +989,7 @@ export class BridgeClient implements SocketClient {
       this.connected = false
       this.authenticated = false
       this.connecting = false
+      this.socketUserId = undefined
       this.connectionEstablishedTime = null
       if (this.selectedDeviceId) {
         this.previousSelectedDeviceId = this.selectedDeviceId
@@ -842,6 +1022,17 @@ export class BridgeClient implements SocketClient {
 
   private handleMessage(message: Record<string, unknown>): void {
     const { logger, serverName, trackEvent } = this.context
+    const id = this.identity()
+    if (id === 'other') {
+      this.closeForOtherAccount('use')
+      return
+    }
+    if (
+      id === 'signed_out' &&
+      !SIGNED_OUT_ALLOWED_MESSAGE_TYPES.has(String(message.type))
+    ) {
+      return
+    }
 
     switch (message.type) {
       case 'paired': {
@@ -1057,7 +1248,7 @@ export class BridgeClient implements SocketClient {
       if (this.selectedDeviceId) {
         message.target_device_id = this.selectedDeviceId
       }
-      this.ws.send(JSON.stringify(message))
+      this.sendFrame(JSON.stringify(message))
     }
   }
 
@@ -1214,6 +1405,7 @@ export class BridgeClient implements SocketClient {
     const { logger, serverName, trackEvent } = this.context
 
     if (this.reconnectTimer) return
+    if (this.identity() === 'signed_out') return
 
     this.reconnectAttempts++
 
@@ -1243,6 +1435,7 @@ export class BridgeClient implements SocketClient {
   }
 
   private closeSocket(): void {
+    this.socketUserId = undefined
     if (this.ws) {
       this.ws.removeAllListeners()
       this.ws.close()
@@ -1291,6 +1484,8 @@ export class BridgeClient implements SocketClient {
   }
 
   private cleanup(): void {
+    this.connectEpoch++
+    this.connecting = false
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null

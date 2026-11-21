@@ -65,7 +65,12 @@ import {
   createShutdownApprovedMessage,
   createShutdownRejectedMessage,
   createShutdownRequestMessage,
+  getActiveLeadVerifyKey,
+  getInboxPath,
+  hasPendingShutdownRequestForAddressee,
+  hasTeamLeadEntryKeyForInbox,
   isStructuredProtocolMessage,
+  removePendingShutdownRequest,
   writeToMailbox,
 } from 'src/utils/teammateMailbox.js'
 import {
@@ -772,6 +777,7 @@ export type RequestOutput = {
   message: string
   request_id: string
   target: string
+  degradedClass?: string
   errorClass?: string
 }
 
@@ -1434,6 +1440,25 @@ async function handleShutdownRequest(
   const senderName = getAgentName() || TEAM_LEAD_NAME
   const requestId = generateRequestId('shutdown', targetName)
 
+  // Official 2.1.328 (`chunk@325838323.js @56050`): only the team lead may send
+  // shutdown_request when lead key verification is active for this session or
+  // the target inbox is lead-signed.
+  if (
+    getActiveLeadVerifyKey() !== undefined ||
+    (senderName !== TEAM_LEAD_NAME &&
+      hasTeamLeadEntryKeyForInbox(getInboxPath(targetName, teamName)))
+  ) {
+    return {
+      data: {
+        success: false,
+        message: `Only the team lead can ask a teammate to shut down. Nothing was sent to ${targetName}. Ask the team lead to do it.`,
+        request_id: requestId,
+        target: targetName,
+        degradedClass: 'shutdown_refused',
+      },
+    }
+  }
+
   const shutdownMessage = createShutdownRequestMessage({
     requestId,
     from: senderName,
@@ -1452,6 +1477,7 @@ async function handleShutdownRequest(
   )
 
   if (msgId === undefined) {
+    removePendingShutdownRequest(requestId)
     return {
       data: {
         success: false,
@@ -1491,6 +1517,27 @@ async function handleShutdownApproval(
   const teamName = getTeamName()
   const agentId = getAgentId()
   const agentName = getAgentName() || 'teammate'
+
+  // Official 2.1.328 (`chunk@325838323.js @57118`): split-pane teammates with
+  // an active lead verify key must only approve shutdown_request IDs verified
+  // from the team lead.
+  if (
+    getActiveLeadVerifyKey() !== undefined &&
+    !hasPendingShutdownRequestForAddressee(
+      requestId,
+      teammateContext?.agentName ?? agentName,
+    )
+  ) {
+    return {
+      data: {
+        success: false,
+        message:
+          'No shutdown request with that ID from your team lead has reached this session, so nothing was done and you keep running. If your team lead asked you to shut down, reply with the requestId copied exactly from its message.',
+        request_id: requestId,
+        degradedClass: 'shutdown_refused',
+      },
+    }
+  }
 
   logForDebugging(
     `[SendMessageTool] handleShutdownApproval: teamName=${teamName}, agentId=${agentId}, agentName=${agentName}`,

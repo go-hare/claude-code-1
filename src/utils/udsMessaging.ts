@@ -89,6 +89,8 @@ export type UdsMessage = {
   status_detail?: string
   drop_reason?: string
   dropped_msg_ids?: string[]
+  /** Official 2.1.328 (`chunk@319503157.js @6698`) — comma-separated local hop chain. */
+  local_chain?: string
 }
 
 export type UdsInboxEntry = {
@@ -102,6 +104,65 @@ export type UdsInboxEntry = {
    * fire when wire `from` is omitted. Never trust a wire pid field.
    */
   peerPid?: number
+  /** Official 2.1.328 (`chunk@319503157.js @6698`) — true for verified same-machine peer. */
+  verifiedLocal?: boolean
+  /** Populated when `countLocalHops` is true; subject to hop budget. */
+  hopChain?: string[]
+  /** Populated when `shouldSkipLocalHopCount` is true; exempt from hop budget. */
+  fullHopChain?: string[]
+}
+
+/** Official `Pgr` (`chunk@285257860.js @972715`) — valid UDS `from` sender shape. */
+const VALID_LOCAL_FROM_RE = /^[A-Za-z0-9%:_/.-]{1,300}$/
+/** Official `Eus` (`chunk@285257860.js @972644`) — 24-hex hop tokens, max 32 entries. */
+const LOCAL_CHAIN_RE = /^[0-9a-f]{24}(?:,[0-9a-f]{24}){0,31}$/
+
+/**
+ * Official 2.1.328 (`Qe` in `chunk@319503157.js @6698`) — classify whether an
+ * inbound UDS peer message is verified-local and route its `local_chain` into
+ * `fullHopChain` (exempt from hop counting when `shouldSkipLocalHopCount` is
+ * true) or `hopChain` (counted when `countLocalHops` is enabled).
+ */
+export function classifyInboundLocalHopChain(input: {
+  authRole?: 'peer' | 'child'
+  from?: string
+  localChain?: string
+  kernelPeerPid?: number
+  authRequired: boolean
+  countLocalHops?: boolean
+}): {
+  verifiedLocal?: true
+  hopChain?: string[]
+  fullHopChain?: string[]
+} {
+  const verifiedLocal =
+    input.authRole === 'peer' &&
+    typeof input.from === 'string' &&
+    VALID_LOCAL_FROM_RE.test(input.from) &&
+    (input.kernelPeerPid !== undefined || input.authRequired)
+  if (!verifiedLocal) return {}
+
+  const parsedChain =
+    typeof input.localChain === 'string' &&
+    LOCAL_CHAIN_RE.test(input.localChain)
+      ? input.localChain.split(',')
+      : undefined
+  if (parsedChain === undefined) {
+    return { verifiedLocal: true }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { shouldSkipLocalHopCount } =
+    require('./udsOutboundPacer.js') as typeof import('./udsOutboundPacer.js')
+  const skip = shouldSkipLocalHopCount(
+    { verifiedLocal: true },
+    input.countLocalHops !== undefined
+      ? { countLocalHops: input.countLocalHops }
+      : undefined,
+  )
+  return skip
+    ? { verifiedLocal: true, fullHopChain: parsedChain }
+    : { verifiedLocal: true, hopChain: parsedChain }
 }
 
 // ---------------------------------------------------------------------------
@@ -1547,6 +1608,13 @@ async function startUdsMessagingBody(
 
             // Enqueue into inbox
             const sanitizedMessage = stripAuthToken(msg)
+            const localHopMeta = classifyInboundLocalHopChain({
+              authRole,
+              from: sanitizedMessage.from,
+              localChain: sanitizedMessage.local_chain,
+              kernelPeerPid,
+              authRequired,
+            })
             const entry: UdsInboxEntry = {
               id: `uds-${nextId++}`,
               message: sanitizedMessage,
@@ -1555,6 +1623,7 @@ async function startUdsMessagingBody(
               ...(kernelPeerPid !== undefined
                 ? { peerPid: kernelPeerPid }
                 : {}),
+              ...localHopMeta,
             }
             if (!enqueueInboxEntry(entry)) {
               // densable 2.1.238 #30 — queue-full drop receipt; keep close string.

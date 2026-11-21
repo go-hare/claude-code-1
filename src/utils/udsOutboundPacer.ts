@@ -339,10 +339,15 @@ export function getHarborKiteLimits(): HarborKiteLimits {
  * Official 2.1.323 #2164 (`eFr`): verified same-machine peers skip hop-budget
  * counting when `countLocalHops` is false (default).
  */
-export function shouldSkipLocalHopCount(origin: {
-  verifiedLocal?: boolean
-}): boolean {
-  return origin.verifiedLocal === true && !getHarborKiteLimits().countLocalHops
+export function shouldSkipLocalHopCount(
+  origin: {
+    verifiedLocal?: boolean
+  },
+  limits?: Pick<HarborKiteLimits, 'countLocalHops'>,
+): boolean {
+  const countLocalHops =
+    limits?.countLocalHops ?? getHarborKiteLimits().countLocalHops
+  return origin.verifiedLocal === true && !countLocalHops
 }
 
 /**

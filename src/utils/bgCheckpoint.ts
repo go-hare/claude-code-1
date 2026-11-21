@@ -3655,7 +3655,7 @@ export async function writeExitHandoffAdopt(
     return null
   }
 
-  return writeAdoptJson(jobDir, {
+  const writePromise = writeAdoptJson(jobDir, {
     writtenAtMs: input.nowMs ?? Date.now(),
     origin: 'exit',
     shells,
@@ -3663,4 +3663,15 @@ export async function writeExitHandoffAdopt(
     ...(agents.length ? { agents } : {}),
     ...(workflows.length ? { workflows } : {}),
   })
+  // Official 2.1.328 `z_a(o)` (chunk@305329335.js @5882): track the exit
+  // handoff adopt.json write so graceful shutdown awaits it before exit.
+  try {
+    const { trackBackgroundShutdownWork } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./gracefulShutdown.js') as typeof import('./gracefulShutdown.js')
+    trackBackgroundShutdownWork(writePromise)
+  } catch {
+    // gracefulShutdown optional in isolated unit tests
+  }
+  return writePromise
 }

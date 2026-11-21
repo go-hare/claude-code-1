@@ -28,6 +28,7 @@ import {
   stat,
   symlink,
   unlink,
+  utimes,
   writeFile,
 } from 'fs/promises'
 import { homedir } from 'os'
@@ -81,6 +82,7 @@ import {
   hashFileSha256,
   isOfflineNetworkError,
   isRegistrySessionRefusedError,
+  isValidVersion,
   ManifestSignatureError,
   RegistrySessionRefusedError,
   reverifyRetainedVersion,
@@ -93,12 +95,18 @@ export {
   RegistrySessionRefusedError,
 }
 import {
+  acquireOrRefreshSharedLock,
   acquireProcessLifetimeLock,
-  cleanupStaleLocks,
+  cleanupStaleLocksAsync,
+  getPerPidLockPath,
+  hasOtherLiveProcessLockForVersion,
   isLockActive,
   isPidBasedLockingEnabled,
+  isProcessRunning,
   readLockContent,
+  scanActiveLockedVersions,
   withLock,
+  writePerPidLock,
 } from './pidLock.js'
 
 export const VERSION_RETENTION_COUNT = 2
@@ -263,7 +271,7 @@ async function isPossibleClaudeBinary(filePath: string): Promise<boolean> {
   }
 }
 
-async function getVersionPaths(version: string) {
+export async function getVersionPaths(version: string) {
   const dirs = getBaseDirectories()
 
   // Official 2.1.321 (#1923): create all required directories in one parallel batch.
@@ -275,13 +283,36 @@ async function getVersionPaths(version: string) {
   ]
   await Promise.all(dirsToCreate.map(dir => mkdir(dir, { recursive: true })))
 
+  // Official 2.1.328 `vt`: reject path traversal and path-unsafe version strings.
+  if (
+    !/^[a-zA-Z0-9._+-]+$/.test(version) ||
+    version.includes('..') ||
+    version === '.'
+  ) {
+    throw new Error(
+      `Invalid version string "${version}": contains path-unsafe characters`,
+    )
+  }
+
   const installPath = join(dirs.versions, version)
 
-  // Create an empty file if it doesn't exist
+  // Official 2.1.328 `vt`: create empty placeholder atomically with `flag: 'wx'`,
+  // and freshen mtime on an existing 0-byte placeholder so concurrent cleanup
+  // recognizes an active install.
   try {
-    await stat(installPath)
-  } catch {
-    await writeFile(installPath, '', { encoding: 'utf8' })
+    await writeFile(installPath, '', { encoding: 'utf8', flag: 'wx' })
+  } catch (err) {
+    if (getErrnoCode(err) !== 'EEXIST') {
+      throw err
+    }
+    try {
+      if ((await stat(installPath)).size === 0) {
+        const now = new Date()
+        await utimes(installPath, now, now)
+      }
+    } catch {
+      // Ignore freshening errors
+    }
   }
 
   return {
@@ -885,6 +916,13 @@ async function updateLatest(
   let version = isForcedDowngrade
     ? maxVersion!
     : await getLatestVersion(channelOrVersion)
+
+  // Official 2.1.328 `ti`: enforce strict semver format before touching paths/downloads.
+  if (!isValidVersion(version)) {
+    throw new ClaudeError(
+      `Invalid version string from ${isChannel ? 'version pointer' : 'argument'}: not a well-formed version (${version.length} characters)`,
+    )
+  }
 
   logForDebugging(`Checking for native installer update to version ${version}`)
 
@@ -1539,12 +1577,64 @@ function getLockFilePathFromVersionPath(
   return join(dirs.locks, `${versionName}.lock`)
 }
 
+const LOCK_MAINTENANCE_INTERVAL_MS = 300_000
+let versionLockMaintenanceTimer: ReturnType<typeof setInterval> | null = null
+
+/** Official 2.1.328 `si()`: periodic unref'd lock maintenance timer. */
+function startVersionLockMaintenance(): void {
+  if (versionLockMaintenanceTimer) return
+  const timer = setInterval(() => {
+    void maintainVersionLocksOnce()
+  }, LOCK_MAINTENANCE_INTERVAL_MS)
+  timer.unref?.()
+  versionLockMaintenanceTimer = timer
+}
+
+export function stopVersionLockMaintenanceForTesting(): void {
+  if (versionLockMaintenanceTimer) {
+    clearInterval(versionLockMaintenanceTimer)
+    versionLockMaintenanceTimer = null
+  }
+}
+
+/**
+ * Official 2.1.328 `ci()`: ensure this process's per-PID lock file still exists
+ * and re-acquire the legacy shared lock if its previous holder exited.
+ */
+export async function maintainVersionLocksOnce(): Promise<void> {
+  try {
+    if (!isPidBasedLockingEnabled()) return
+    const dirs = getBaseDirectories()
+    if (!process.execPath.includes(dirs.versions)) return
+    const versionPath = resolve(process.execPath)
+    await mkdir(dirs.locks, { recursive: true })
+    const perPidPath = getPerPidLockPath(
+      dirs.locks,
+      basename(versionPath),
+      process.pid,
+    )
+    if (readLockContent(perPidPath)?.pid !== process.pid) {
+      writePerPidLock(versionPath, dirs.locks)
+    }
+    const sharedLockPath = getLockFilePathFromVersionPath(dirs, versionPath)
+    const shared = readLockContent(sharedLockPath)
+    if (shared?.pid === process.pid) return
+    if (shared && isProcessRunning(shared.pid)) return
+    await acquireOrRefreshSharedLock(versionPath, sharedLockPath)
+  } catch (err) {
+    logForDebugging(
+      `NON-FATAL: version lock maintenance failed: ${errorMessage(err)}`,
+    )
+  }
+}
+
 /**
  * Acquire a lock on the current running version to prevent it from being deleted
  * This lock is held for the entire lifetime of the process
  *
- * Uses PID-based locking (when enabled) which can immediately detect crashed processes
- * (unlike mtime-based locking which requires a 30-day timeout)
+ * Official 2.1.328 `oGe`: writes a non-contending per-PID `${version}#${pid}.lock`,
+ * starts periodic maintenance, and also attempts the shared `${version}.lock`
+ * for backward compatibility with older running versions.
  */
 export async function lockCurrentVersion(): Promise<void> {
   const dirs = getBaseDirectories()
@@ -1562,9 +1652,10 @@ export async function lockCurrentVersion(): Promise<void> {
     await mkdir(dirs.locks, { recursive: true })
 
     if (isPidBasedLockingEnabled()) {
-      // Acquire PID-based lock and hold it for the process lifetime
-      // PID-based locking allows immediate detection of crashed processes
-      // while still surviving laptop sleep (process is suspended but PID exists)
+      const perPidWritten = writePerPidLock(versionPath, dirs.locks)
+      startVersionLockMaintenance()
+
+      // Also attempt legacy shared lock so older processes see us
       const acquired = await acquireProcessLifetimeLock(
         versionPath,
         lockfilePath,
@@ -1574,6 +1665,7 @@ export async function lockCurrentVersion(): Promise<void> {
         logEvent('tengu_version_lock_failed', {
           is_pid_based: true,
           is_lifetime_lock: true,
+          per_pid_lock_written: perPidWritten,
         })
         logLockAcquisitionError(
           versionPath,
@@ -1585,6 +1677,7 @@ export async function lockCurrentVersion(): Promise<void> {
       logEvent('tengu_version_lock_acquired', {
         is_pid_based: true,
         is_lifetime_lock: true,
+        per_pid_lock_written: perPidWritten,
       })
       logForDebugging(`Acquired PID lock on running version: ${versionPath}`)
     } else {
@@ -1752,9 +1845,9 @@ export async function cleanupOldVersions(): Promise<void> {
     }
   }
 
-  // Clean up stale PID locks (crashed processes) — cleanupStaleLocks handles ENOENT
+  // Clean up stale PID locks (crashed processes) — handles both shared and per-PID locks
   if (isPidBasedLockingEnabled()) {
-    const staleLocksCleaned = cleanupStaleLocks(dirs.locks)
+    const staleLocksCleaned = await cleanupStaleLocksAsync(dirs.locks)
     if (staleLocksCleaned > 0) {
       logForDebugging(`Cleaned up ${staleLocksCleaned} stale version locks`)
       logEvent('tengu_native_stale_locks_cleanup', {
@@ -1780,13 +1873,14 @@ export async function cleanupOldVersions(): Promise<void> {
     path: string
     resolvedPath: string
     mtime: Date
+    size: number
   }
   const versionFiles: VersionInfo[] = []
   let tempFilesCleanedCount = 0
 
   for (const entry of versionEntries) {
     const entryPath = join(dirs.versions, entry)
-    if (/\.tmp\.\d+\.\d+$/.test(entry)) {
+    if (/\.tmp\.\d+\.\d+(\.\d+)?$/.test(entry)) {
       // Orphaned temp install file — pattern: {version}.tmp.{pid}.{timestamp}
       try {
         const stats = await stat(entryPath)
@@ -1822,6 +1916,7 @@ export async function cleanupOldVersions(): Promise<void> {
         path: entryPath,
         resolvedPath: resolve(entryPath),
         mtime: stats.mtime,
+        size: stats.size,
       })
     } catch {
       // Skip files we can't stat
@@ -1874,14 +1969,31 @@ export async function cleanupOldVersions(): Promise<void> {
     }
 
     // Protect versions with active locks (running in other processes)
-    for (const v of versionFiles) {
-      if (protectedVersions.has(v.resolvedPath)) continue
+    if (isPidBasedLockingEnabled()) {
+      const lockedVersions = await scanActiveLockedVersions(dirs.locks)
+      if (lockedVersions === null) {
+        logForDebugging(
+          'Skipping version cleanup: could not read the locks, so lock protection is unavailable',
+          { level: 'error' },
+        )
+        return
+      }
+      for (const v of versionFiles) {
+        if (protectedVersions.has(v.resolvedPath)) continue
+        if (lockedVersions.has(v.name)) {
+          protectedVersions.add(v.resolvedPath)
+          logForDebugging(`Protecting locked version from cleanup: ${v.name}`)
+        }
+      }
+    } else {
+      for (const v of versionFiles) {
+        if (protectedVersions.has(v.resolvedPath)) continue
 
-      const lockFilePath = getLockFilePathFromVersionPath(dirs, v.resolvedPath)
-      let hasActiveLock = false
-      if (isPidBasedLockingEnabled()) {
-        hasActiveLock = isLockActive(lockFilePath)
-      } else {
+        const lockFilePath = getLockFilePathFromVersionPath(
+          dirs,
+          v.resolvedPath,
+        )
+        let hasActiveLock = false
         try {
           hasActiveLock = await lockfile.check(v.resolvedPath, {
             stale: LOCK_STALE_MS,
@@ -1890,19 +2002,29 @@ export async function cleanupOldVersions(): Promise<void> {
         } catch {
           hasActiveLock = false
         }
-      }
-      if (hasActiveLock) {
-        protectedVersions.add(v.resolvedPath)
-        logForDebugging(`Protecting locked version from cleanup: ${v.name}`)
+        if (hasActiveLock) {
+          protectedVersions.add(v.resolvedPath)
+          logForDebugging(`Protecting locked version from cleanup: ${v.name}`)
+        }
       }
     }
 
-    // Eligible versions: not protected, sorted newest first (reuse cached mtime)
+    // Eligible versions: not protected, sorted newest first (reuse cached mtime).
+    // Official 2.1.328 `u1o`: separate 0-byte placeholders from real binary
+    // retention slots so concurrent install placeholders never evict real
+    // retained binaries; only delete 0-byte placeholders older than 1 hour.
     const eligibleVersions = versionFiles
       .filter(v => !protectedVersions.has(v.resolvedPath))
       .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
-    const versionsToDelete = eligibleVersions.slice(VERSION_RETENTION_COUNT)
+    const versionsToDelete = [
+      ...eligibleVersions
+        .filter(v => v.size > 0)
+        .slice(VERSION_RETENTION_COUNT),
+      ...eligibleVersions.filter(
+        v => v.size === 0 && v.mtime.getTime() < oneHourAgo,
+      ),
+    ]
 
     if (versionsToDelete.length === 0) {
       logEvent('tengu_native_version_cleanup', {
@@ -1923,12 +2045,39 @@ export async function cleanupOldVersions(): Promise<void> {
     await Promise.all(
       versionsToDelete.map(async version => {
         try {
-          const deleted = await tryWithVersionLock(version.path, async () => {
-            await unlink(version.path)
-          })
-          if (deleted) {
+          let didDelete = true
+          let heldByLivePid = false
+          const lockAcquired = await tryWithVersionLock(
+            version.path,
+            async () => {
+              if (version.size === 0) {
+                const freshStats = await stat(version.path)
+                if (
+                  freshStats.size > 0 ||
+                  freshStats.mtime.getTime() >= oneHourAgo
+                ) {
+                  didDelete = false
+                  return
+                }
+              }
+              if (
+                isPidBasedLockingEnabled() &&
+                hasOtherLiveProcessLockForVersion(dirs.locks, version.name)
+              ) {
+                heldByLivePid = true
+                return
+              }
+              await unlink(version.path)
+            },
+          )
+          if (lockAcquired && heldByLivePid) {
+            lockFailedCount++
+            logForDebugging(
+              `Skipping deletion of ${version.name} - a live process may be using it`,
+            )
+          } else if (lockAcquired && didDelete) {
             deletedCount++
-          } else {
+          } else if (!lockAcquired) {
             lockFailedCount++
             logForDebugging(
               `Skipping deletion of ${version.name} - locked by another process`,

@@ -30,6 +30,12 @@ import {
   substituteArguments,
 } from '../utils/argumentSubstitution.js'
 import { logForDebugging } from '../utils/debug.js'
+import {
+  awaitPendingSkillDownload,
+  hasPendingSkillDownload,
+  type PendingSkillDownloadOutcome,
+  registerPendingSkillDownload,
+} from './syncedSkillsHarden.js'
 import { isValidSkillName, recordNameNotShown } from '../utils/sanitization.js'
 import { filterCompilableIgnorePatterns } from '../utils/ignorePatterns.js'
 import {
@@ -488,6 +494,16 @@ export function createSkillCommand({
         }
       : {}),
     async getPromptForCommand(args, toolUseContext) {
+      if (loadedFrom === 'syncedSkills' && hasPendingSkillDownload(skillName)) {
+        const outcome = await awaitPendingSkillDownload(
+          skillName,
+          toolUseContext.abortController?.signal,
+        )
+        if (!outcome.ok) {
+          return [{ type: 'text', text: outcome.reason }]
+        }
+      }
+
       let finalContent = baseDir
         ? `Base directory for this skill: ${baseDir}\n\n${markdownContent}`
         : markdownContent
@@ -675,7 +691,31 @@ async function loadSkillsFromSkillsDir(
     }),
   )
 
-  return results.filter((r): r is SkillWithPath => r !== null)
+  const loaded = results.filter((r): r is SkillWithPath => r !== null)
+  if (loadedFrom === 'syncedSkills') {
+    const nextRoots = new Set<string>()
+    for (const item of loaded) {
+      if (item.skill.type === 'prompt' && item.skill.skillRoot) {
+        nextRoots.add(item.skill.skillRoot)
+      }
+    }
+    const prevRoots = lastLoadedSyncedSkillRootsByDir.get(basePath)
+    if (prevRoots && prevRoots.size > 0) {
+      const removed = new Set<string>()
+      for (const root of prevRoots) {
+        if (!nextRoots.has(root)) removed.add(root)
+      }
+      if (removed.size > 0) {
+        pruneRemovedSyncedSkillHooks(
+          removed,
+          'skill_gone',
+          activeSyncedSkillHooksPruner,
+        )
+      }
+    }
+    lastLoadedSyncedSkillRootsByDir.set(basePath, nextRoots)
+  }
+  return loaded
 }
 
 // --- Legacy /commands/ loader ---
@@ -1751,7 +1791,7 @@ export function activateConditionalSkillsForPaths(
  */
 export async function discoverAndActivateSkillsForFilePath(
   filePath: string,
-  outDirs?: string[],
+  outDirs?: string[] | Set<string>,
 ): Promise<void> {
   const originalCwd = getOriginalCwd()
   const currentCwd = getCwd()
@@ -1777,8 +1817,14 @@ export async function discoverAndActivateSkillsForFilePath(
   )
   if (newDirs.length > 0) {
     if (outDirs) {
-      for (const d of newDirs) {
-        if (!outDirs.includes(d)) outDirs.push(d)
+      if (outDirs instanceof Set) {
+        for (const d of newDirs) {
+          outDirs.add(d)
+        }
+      } else {
+        for (const d of newDirs) {
+          if (!outDirs.includes(d)) outDirs.push(d)
+        }
       }
     }
     void addSkillDirectories(newDirs)
@@ -1909,24 +1955,69 @@ type FailedLandingRecord = {
 
 const inMemorySyncedSkills = new Map<string, Command>()
 const failedSyncedSkillLandings = new Map<string, FailedLandingRecord>()
+const lastLoadedSyncedSkillRootsByDir = new Map<string, Set<string>>()
+let activeSyncedSkillHooksPruner: (roots: ReadonlySet<string>) => number = () =>
+  0
+
+export function setSyncedSkillHooksPruner(
+  pruner: ((roots: ReadonlySet<string>) => number) | null,
+): void {
+  activeSyncedSkillHooksPruner = pruner ?? (() => 0)
+}
 
 export function retainInMemorySyncedSkill(
   skillId: string,
   command: Command,
-): void {
+  opts?: { pendingDownloadStart?: (signal?: AbortSignal) => void },
+): ((outcome: PendingSkillDownloadOutcome) => void) | undefined {
   inMemorySyncedSkills.set(skillId, command)
+  if (opts?.pendingDownloadStart !== undefined) {
+    return registerPendingSkillDownload(command.name, opts.pendingDownloadStart)
+  }
+  return undefined
 }
 
-export function removeInMemorySyncedSkill(skillId: string): boolean {
-  return inMemorySyncedSkills.delete(skillId)
+export function removeInMemorySyncedSkill(
+  skillId: string,
+  opts?: {
+    reason?: SkillHooksRemovalReason
+    removeHooksForRoots?: (roots: ReadonlySet<string>) => number
+  },
+): boolean {
+  const existing = inMemorySyncedSkills.get(skillId)
+  const deleted = inMemorySyncedSkills.delete(skillId)
+  if (deleted && existing?.type === 'prompt' && existing.skillRoot) {
+    pruneRemovedSyncedSkillHooks(
+      new Set([existing.skillRoot]),
+      opts?.reason ?? 'skill_gone',
+      opts?.removeHooksForRoots ?? activeSyncedSkillHooksPruner,
+    )
+  }
+  return deleted
 }
 
 export function getInMemorySyncedSkills(): Command[] {
   return [...inMemorySyncedSkills.values()]
 }
 
-export function clearInMemorySyncedSkills(): void {
+export function clearInMemorySyncedSkills(opts?: {
+  reason?: SkillHooksRemovalReason
+  removeHooksForRoots?: (roots: ReadonlySet<string>) => number
+}): void {
+  const roots = new Set<string>()
+  for (const cmd of inMemorySyncedSkills.values()) {
+    if (cmd.type === 'prompt' && cmd.skillRoot) {
+      roots.add(cmd.skillRoot)
+    }
+  }
   inMemorySyncedSkills.clear()
+  if (roots.size > 0) {
+    pruneRemovedSyncedSkillHooks(
+      roots,
+      opts?.reason ?? 'sync_off',
+      opts?.removeHooksForRoots ?? activeSyncedSkillHooksPruner,
+    )
+  }
 }
 
 export function recordFailedSyncedSkillLanding(

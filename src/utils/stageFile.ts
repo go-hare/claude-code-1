@@ -6,30 +6,36 @@
  * mapping; `stageFile` without `CLAUDE_CODE_REMOTE_SESSION_ID` matches gold
  * `Xcs` (`CLAUDE_CODE_REMOTE_SESSION_ID unset`).
  */
-import { randomBytes, createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import {
+  chmod,
   link,
   lstat,
   mkdir,
   readdir,
   readFile,
+  realpath,
   rename,
   rmdir,
+  stat,
   unlink,
   utimes,
   writeFile,
 } from 'node:fs/promises'
 import {
+  basename as nodeBasename,
   dirname as nodeDirname,
   isAbsolute as nodeIsAbsolute,
   join as nodeJoin,
+  relative as nodeRelative,
+  sep as nodeSep,
 } from 'node:path'
 import {
+  basename as posixBasename,
   isAbsolute as posixIsAbsolute,
   normalize as posixNormalize,
   relative as posixRelative,
-  basename as posixBasename,
-} from 'node:path'
+} from 'node:path/posix'
 import { DEFAULT_STAGE_FILE_ROOT } from './syncedFileSyncer.js'
 
 export const KEPT_FOLDER_PREFIX = '.kept-'
@@ -109,7 +115,7 @@ export async function publishStagedFileWithKeptProtection(
   uploadsDir: string,
   fileName: string,
   content: Buffer,
-  opts?: { maxKeptFolders?: number; maxTries?: number },
+  opts?: { maxKeptFolders?: number; maxTries?: number; mode?: number },
 ): Promise<StageWriteWithKeptResult> {
   const maxKept = opts?.maxKeptFolders ?? KEPT_FOLDER_MAX_COUNT
   const maxTries = opts?.maxTries ?? STAGE_MOVE_ASIDE_MAX_TRIES
@@ -155,8 +161,11 @@ export async function publishStagedFileWithKeptProtection(
   }
 
   try {
-    await writeFile(tmpPath, content)
+    await writeFile(tmpPath, content, { flag: 'wx' })
     tmpCreated = true
+    if (opts?.mode !== undefined) {
+      await chmod(tmpPath, opts.mode)
+    }
 
     for (let attempt = 1; ; attempt++) {
       let published = false
@@ -237,9 +246,14 @@ export async function publishStagedFileWithKeptProtection(
 
       const keptName = makeKeptFolderName()
       const keptDir = nodeJoin(uploadsDir, keptName)
+      const keptTarget = nodeJoin(keptDir, fileName)
       try {
         await mkdir(keptDir, { mode: 0o700 })
-        await rename(destPath, nodeJoin(keptDir, fileName))
+        const keptTargetParent = nodeDirname(keptTarget)
+        if (keptTargetParent !== keptDir) {
+          await mkdir(keptTargetParent, { recursive: true, mode: 0o700 })
+        }
+        await rename(destPath, keptTarget)
         movedAsideName = keptName
         movedCount++
       } catch (err) {
@@ -277,12 +291,45 @@ export const DEFAULT_STAGE_HOME_ROOT = '/home/claude'
 
 export const STAGE_OUTPUTS_UNSUPPORTED_RUNNER =
   'STAGE_OUTPUTS_UNSUPPORTED_RUNNER'
+export const STAGE_PARENT_ESCAPE = 'STAGE_PARENT_ESCAPE'
+const STAGE_FETCH_TIMEOUT_MS = 30_000
+const STAGE_STALL_TIMEOUT_MS = 60_000
 
 export type StageMount = {
   dest: string
   root: string
   readOnly: boolean
   neverReplace: boolean
+}
+
+export type StageFilestoreCredential = {
+  filestore_jwt?: string
+  filesystem_id?: string
+  filestore_url?: string
+}
+
+export type StageFileFetchResult =
+  | { ok: true; data: Buffer }
+  | {
+      ok: false
+      error: string
+      status?: number
+      notFound?: boolean
+      permanent?: boolean
+      errno?: string
+    }
+
+export type StageFileFetchFn = (
+  mountPath: string,
+  opts?: { signal?: AbortSignal },
+) => Promise<StageFileFetchResult>
+
+export type StageFileOptions = {
+  fetchContent?: StageFileFetchFn
+  sdkUrl?: string
+  signal?: AbortSignal
+  maxKeptFolders?: number
+  maxTries?: number
 }
 
 export type StageFileRequest = {
@@ -295,8 +342,8 @@ export type StageFileRequest = {
 }
 
 export type StageFileResult =
-  | { ok: true; noop?: string; outputPath?: string }
-  | { ok: false; error: string }
+  | { ok: true; noop?: string; outputPath?: string; movedAsideTo?: string }
+  | { ok: false; error: string; permanent?: boolean; notFound?: boolean }
 
 function posixRelUnder(root: string, abs: string): string | null {
   const rel = posixRelative(root, abs)
@@ -431,16 +478,307 @@ export function stageFileWireResult(result: { ok: true; noop?: string }): {
     : { ok: true, noop: result.noop }
 }
 
+function isReadOnlyFsError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as NodeJS.ErrnoException).code === 'EROFS'
+  )
+}
+
+function isPermanentHttpStatus(status: number): boolean {
+  return status < 500 && status !== 408 && status !== 429
+}
+
+function isNewerLocal(
+  st: { isFile(): boolean; mtimeMs: number; ctimeMs: number } | null,
+  startedAtMs: number,
+): boolean {
+  return (
+    st !== null &&
+    st.isFile() &&
+    (st.mtimeMs >= startedAtMs || st.ctimeMs >= startedAtMs)
+  )
+}
+
+function assertParentUnderStageRoot(
+  realRoot: string,
+  realParent: string,
+): void {
+  const rel = nodeRelative(realRoot, realParent)
+  if (
+    rel.startsWith('..') ||
+    rel.split(nodeSep).includes('..') ||
+    nodeIsAbsolute(rel)
+  ) {
+    const err = new Error('dest parent escaped stage root')
+    ;(err as Error & { code: string }).code = STAGE_PARENT_ESCAPE
+    throw err
+  }
+}
+
+async function cleanupStaleStageTmp(dir: string, stem: string): Promise<void> {
+  const cutoff = Date.now() - 2 * STAGE_STALL_TIMEOUT_MS
+  let entries: string[]
+  try {
+    entries = await readdir(dir)
+  } catch {
+    return
+  }
+  await Promise.all(
+    entries
+      .filter(name => name.startsWith(stem))
+      .map(async name => {
+        const full = nodeJoin(dir, name)
+        try {
+          if ((await stat(full)).mtimeMs < cutoff) {
+            await unlink(full)
+          }
+        } catch {
+          // Best-effort cleanup of stale temp files.
+        }
+      }),
+  )
+}
+
+function normalizeHttpBaseUrl(rawUrl: string): string {
+  const parsed = new URL(rawUrl)
+  if (parsed.protocol === 'ws:') parsed.protocol = 'http:'
+  else if (parsed.protocol === 'wss:') parsed.protocol = 'https:'
+  return parsed.href.replace(/\/$/, '')
+}
+
+type ValidatedStageCredential = {
+  filestoreJwt: string
+  filesystemId: string
+  filestoreUrl: string
+}
+
+async function resolveDefaultFilestoreBaseUrl(): Promise<string> {
+  const { getOauthConfig } = await import('../constants/oauth.js')
+  return getOauthConfig().BASE_API_URL
+}
+
+async function validateStageCredential(
+  cred: StageFilestoreCredential,
+): Promise<
+  | { ok: true; cred: ValidatedStageCredential }
+  | { ok: false; error: string; permanent?: boolean }
+> {
+  const jwt = cred.filestore_jwt
+  const fsId = cred.filesystem_id
+  if (!jwt || !fsId) {
+    return {
+      ok: false,
+      error: 'list returned incomplete credential',
+      permanent: true,
+    }
+  }
+  const baseUrl = cred.filestore_url
+    ? normalizeHttpBaseUrl(cred.filestore_url)
+    : await resolveDefaultFilestoreBaseUrl()
+  return {
+    ok: true,
+    cred: {
+      filestoreJwt: jwt,
+      filesystemId: fsId,
+      filestoreUrl: baseUrl,
+    },
+  }
+}
+
+async function fetchWorkerFilesCredential(
+  sdkUrl?: string,
+  signal?: AbortSignal,
+): Promise<
+  | { ok: true; cred: ValidatedStageCredential }
+  | { ok: false; error: string; status?: number; permanent?: boolean }
+> {
+  const rawSdkUrl =
+    sdkUrl ??
+    process.env.CLAUDE_CODE_SESSION_INGRESS_URL ??
+    process.env.CLAUDE_CODE_SDK_URL
+  if (!rawSdkUrl) {
+    return {
+      ok: false,
+      error: 'ccr-session host requires --sdk-url',
+      permanent: true,
+    }
+  }
+  let baseUrl: string
+  try {
+    baseUrl = normalizeHttpBaseUrl(rawSdkUrl)
+  } catch (err) {
+    return {
+      ok: false,
+      error: `invalid sdk url: ${err instanceof Error ? err.message : String(err)}`,
+      permanent: true,
+    }
+  }
+  const { default: axios } = await import('axios')
+  const { getSessionIngressAuthHeaders } = await import(
+    './sessionIngressAuth.js'
+  )
+  try {
+    const resp = await axios.get<StageFilestoreCredential>(
+      `${baseUrl}/worker/files`,
+      {
+        headers: {
+          ...getSessionIngressAuthHeaders(),
+          'anthropic-version': '2023-06-01',
+        },
+        timeout: STAGE_FETCH_TIMEOUT_MS,
+        signal,
+        validateStatus: () => true,
+      },
+    )
+    if (resp.status < 200 || resp.status >= 300) {
+      return {
+        ok: false,
+        error: `list failed: http ${resp.status}`,
+        status: resp.status,
+        ...(isPermanentHttpStatus(resp.status) ? { permanent: true } : {}),
+      }
+    }
+    return await validateStageCredential(resp.data ?? {})
+  } catch (err) {
+    return {
+      ok: false,
+      error: `list failed: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+}
+
+async function fetchFilestoreFileBytes(
+  mountPath: string,
+  credential: StageFilestoreCredential | undefined,
+  options?: StageFileOptions,
+): Promise<StageFileFetchResult> {
+  if (options?.fetchContent) {
+    return await options.fetchContent(mountPath, { signal: options.signal })
+  }
+
+  let credentialUsed = false
+  const acquireCred = async () => {
+    if (credential !== undefined) {
+      if (credentialUsed) {
+        return {
+          ok: false as const,
+          error: 'read failed: credential expired',
+        }
+      }
+      credentialUsed = true
+      return await validateStageCredential(credential)
+    }
+    return await fetchWorkerFilesCredential(options?.sdkUrl, options?.signal)
+  }
+
+  let credResult = await acquireCred()
+  if (!credResult.ok) return credResult
+  let cred = credResult.cred
+
+  const { default: axios } = await import('axios')
+
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    const controller = new AbortController()
+    const onExternalAbort = () => controller.abort(options?.signal?.reason)
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        controller.abort(options.signal.reason)
+      } else {
+        options.signal.addEventListener('abort', onExternalAbort, {
+          once: true,
+        })
+      }
+    }
+    const timer = setTimeout(() => {
+      controller.abort(new Error('readFile stall: no bytes for 60s'))
+    }, STAGE_STALL_TIMEOUT_MS)
+
+    try {
+      const resp = await axios.post<ArrayBuffer>(
+        `${cred.filestoreUrl}/v1/filestore/fs/readFile`,
+        {
+          filesystem_id: cred.filesystemId,
+          path: mountPath,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${cred.filestoreJwt}`,
+          },
+          responseType: 'arraybuffer',
+          timeout: 0,
+          signal: controller.signal,
+          validateStatus: () => true,
+        },
+      )
+      clearTimeout(timer)
+      if (resp.status === 401 && attempt === 0) {
+        credResult = await acquireCred()
+        if (!credResult.ok) return credResult
+        cred = credResult.cred
+        continue
+      }
+      if (resp.status < 200 || resp.status >= 300) {
+        return {
+          ok: false,
+          error: `read failed: http ${resp.status}`,
+          status: resp.status,
+          ...(isPermanentHttpStatus(resp.status) ? { permanent: true } : {}),
+          ...(resp.status === 404 ? { notFound: true } : {}),
+        }
+      }
+      const data = Buffer.from(resp.data)
+      const contentLengthHeader = resp.headers['content-length']
+      const expectedLength =
+        contentLengthHeader !== undefined ? Number(contentLengthHeader) : -1
+      if (
+        Number.isFinite(expectedLength) &&
+        expectedLength >= 0 &&
+        data.byteLength !== expectedLength
+      ) {
+        return {
+          ok: false,
+          error: `read truncated: got ${data.byteLength} of ${expectedLength} bytes`,
+        }
+      }
+      return { ok: true, data }
+    } catch (err) {
+      clearTimeout(timer)
+      if (controller.signal.aborted && !options?.signal?.aborted) {
+        return {
+          ok: false,
+          error: `read stalled: no bytes for ${STAGE_STALL_TIMEOUT_MS}ms`,
+        }
+      }
+      return {
+        ok: false,
+        error: `read failed: ${err instanceof Error ? err.message : String(err)}`,
+      }
+    } finally {
+      options?.signal?.removeEventListener('abort', onExternalAbort)
+    }
+  }
+
+  return { ok: false, error: 'read failed: retry loop exhausted' }
+}
+
 /**
- * densable `Xcs` / `stageFile` — local analog. Filestore fetch is CCR denser;
- * without a remote session id this matches gold's first return.
+ * Official 2.1.328 `nPl` / `Ve` + `Nn` (`stageFile`) — validate mount path,
+ * fetch file bytes from CCR filestore (or injected fetcher), write temp file,
+ * and atomically publish via `publishStagedFileWithKeptProtection()`.
  */
 export async function stageFile(
   request: StageFileRequest,
-  credential?: unknown,
-  _homeFilesFlag: string = 'off',
+  credential?: StageFilestoreCredential,
+  homeFilesFlag: string = 'off',
+  options?: StageFileOptions,
 ): Promise<StageFileResult> {
-  if (credential === undefined && !process.env.CLAUDE_CODE_REMOTE_SESSION_ID) {
+  if (
+    credential === undefined &&
+    !process.env.CLAUDE_CODE_REMOTE_SESSION_ID &&
+    !options?.fetchContent
+  ) {
     return { ok: false, error: 'CLAUDE_CODE_REMOTE_SESSION_ID unset' }
   }
   if (credential !== undefined && request.filestore_path) {
@@ -455,13 +793,184 @@ export async function stageFile(
       error: 'synced-file staging not supported on this runner kind',
     }
   }
+
+  let mount: StageMount
   try {
-    resolveStageMount(request.mount_path, credential !== undefined)
+    mount = resolveStageMount(request.mount_path, credential !== undefined)
   } catch (err) {
     return {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     }
   }
-  return { ok: false, error: 'CLAUDE_CODE_REMOTE_SESSION_ID unset' }
+
+  if (mount.neverReplace && homeFilesFlag === 'off') {
+    return { ok: true, noop: 'home_files_off' }
+  }
+  if (mount.neverReplace && request.resync !== undefined) {
+    return { ok: true, noop: 'resent_announcement' }
+  }
+  if (mount.neverReplace && request.force !== false) {
+    return { ok: true, noop: 'unchecked_announcement' }
+  }
+  if (mount.neverReplace && homeFilesFlag === 'not_loaded') {
+    return { ok: false, error: 'the flag for home files has not loaded' }
+  }
+
+  const isOutput = mount.root === outputsRoot()
+  const isDefaultUploadsRoot =
+    mount.readOnly && !mount.neverReplace && !process.env.CLAUDE_STAGE_FILE_ROOT
+
+  if (!request.force && !mount.neverReplace) {
+    try {
+      const existing = await stat(mount.dest)
+      if (existing.isFile()) {
+        return {
+          ok: true,
+          noop: 'already_present',
+          ...(isOutput ? { outputPath: mount.dest } : {}),
+        }
+      }
+    } catch {
+      // Destination absent; continue to fetch and stage.
+    }
+  }
+
+  const startedAtMs = Date.now()
+  const parentDir = nodeDirname(mount.dest)
+  const fileName = nodeBasename(mount.dest)
+
+  try {
+    await mkdir(mount.root, { recursive: true })
+    await mkdir(parentDir, { recursive: true })
+    const realRoot = await realpath(mount.root)
+    const realParent = await realpath(parentDir)
+    assertParentUnderStageRoot(realRoot, realParent)
+    await cleanupStaleStageTmp(parentDir, stageTmpStem(mount.dest))
+  } catch (err) {
+    if (isDefaultUploadsRoot && isReadOnlyFsError(err)) {
+      return { ok: true, noop: 'readonly_mount' }
+    }
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : 'unknown'
+    return {
+      ok: false,
+      error:
+        code === STAGE_PARENT_ESCAPE
+          ? 'dest parent escaped stage root'
+          : `mkdir failed: ${code}`,
+    }
+  }
+
+  const fetched = await fetchFilestoreFileBytes(
+    request.mount_path,
+    credential,
+    options,
+  )
+  if (!fetched.ok) {
+    if (isDefaultUploadsRoot && fetched.errno === 'EROFS') {
+      return { ok: true, noop: 'readonly_mount' }
+    }
+    return {
+      ok: false,
+      error: fetched.error,
+      ...(fetched.permanent ? { permanent: true } : {}),
+      ...(fetched.notFound ? { notFound: true } : {}),
+    }
+  }
+
+  if (mount.neverReplace) {
+    const existing = await inspectExistingStagedPath(mount.dest, fetched.data)
+    if (existing === 'same') {
+      return { ok: true, noop: 'already_present' }
+    }
+    if (existing !== 'absent') {
+      return { ok: true, noop: 'path_occupied' }
+    }
+    const tmpPath = nodeJoin(
+      parentDir,
+      `${STAGE_TMP_PREFIX}${randomBytes(8).toString('hex')}`,
+    )
+    let tmpCreated = false
+    try {
+      await writeFile(tmpPath, fetched.data, { flag: 'wx', mode: 0o644 })
+      tmpCreated = true
+      try {
+        await link(tmpPath, mount.dest)
+        await unlink(tmpPath).catch(() => {})
+        tmpCreated = false
+        return { ok: true, outputPath: mount.dest }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') {
+          const raced = await inspectExistingStagedPath(
+            mount.dest,
+            fetched.data,
+          )
+          return {
+            ok: true,
+            noop: raced === 'same' ? 'already_present' : 'path_occupied',
+          }
+        }
+        throw err
+      }
+    } catch (err) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : 'unknown'
+      return { ok: false, error: `write failed: ${code}` }
+    } finally {
+      if (tmpCreated) {
+        await unlink(tmpPath).catch(() => {})
+      }
+    }
+  }
+
+  if (isOutput) {
+    const current = await stat(mount.dest).catch(() => null)
+    if (isNewerLocal(current, startedAtMs)) {
+      return { ok: true, noop: 'newer_local' }
+    }
+  }
+
+  try {
+    const published = await publishStagedFileWithKeptProtection(
+      parentDir,
+      fileName,
+      fetched.data,
+      {
+        maxKeptFolders: options?.maxKeptFolders,
+        maxTries: options?.maxTries,
+        mode: mount.readOnly ? 0o444 : 0o644,
+      },
+    )
+    if (published.status === 'same') {
+      return {
+        ok: true,
+        noop: 'already_present',
+        ...(isOutput ? { outputPath: mount.dest } : {}),
+      }
+    }
+    if (published.status === 'refused') {
+      return { ok: false, error: published.why }
+    }
+    return {
+      ok: true,
+      ...(isOutput ? { outputPath: mount.dest } : {}),
+      ...(published.movedAsideTo
+        ? { movedAsideTo: published.movedAsideTo }
+        : {}),
+    }
+  } catch (err) {
+    if (isDefaultUploadsRoot && isReadOnlyFsError(err)) {
+      return { ok: true, noop: 'readonly_mount' }
+    }
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : 'unknown'
+    return { ok: false, error: `write failed: ${code}` }
+  }
 }
