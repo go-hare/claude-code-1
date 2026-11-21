@@ -5,6 +5,7 @@ import React, {
   type ReactNode,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -1484,6 +1485,35 @@ export function Select<T>({
     holdsFirstRow,
   });
   focusedValueRef.current = state.focusedValue;
+  // Official 2.1.328 (`Select` @308095034 @48887): attach InputGate `.no`
+  // metadata onto the Select container DOMElement so early-key dropping
+  // exempts the decline option shortcut key, respects decline-input typing,
+  // and redirects stray printable text to `declineValue`.
+  useLayoutEffect(() => {
+    const host = leftoverHostRef.current;
+    if (!host) return;
+    if (declineValue === undefined) {
+      host.no = undefined;
+      return;
+    }
+    const indexOf = (val: T): number =>
+      options.filter(opt => opt.marker === undefined).findIndex(opt => opt.value === val) + 1;
+    host.no = {
+      key: `"${indexOf(declineValue)}"`,
+      isBeingTyped: () =>
+        options.some(
+          opt => opt.type === 'input' && opt.value === declineValue && opt.value === state.getFocusedValue(),
+        ),
+      goTo() {
+        const prev = state.getFocusedValue();
+        state.focusOption(declineValue);
+        return () => state.focusOption(prev);
+      },
+    };
+    return () => {
+      host.no = undefined;
+    };
+  });
   useEffect(() => {
     inputVimModeRef.current = 'INSERT';
     setInputVimMode('INSERT');

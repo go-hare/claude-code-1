@@ -7,6 +7,24 @@ import { isVimModeEnabled } from './utils.js'
 
 export const TRUNCATE_INPUT_THRESHOLD = 10_000
 
+/**
+ * Official 2.1.328 (`OX.setValueTyped` / `OX.insertText` / `OX.#C` @581377..583550):
+ * Mark `keepsFullText = true` synchronously when user typing or cursor insertion
+ * crosses `TRUNCATE_INPUT_THRESHOLD` BEFORE `useMaybeTruncateInput`'s effect
+ * runs, so typing character #10,001 never collapses the prompt mid-typing.
+ * Reset to `false` when the prompt is cleared to `""`.
+ */
+export function noteUserEditForTruncation(
+  nextValue: string,
+  keepsFullTextRef: { current: boolean },
+): void {
+  if (nextValue === '') {
+    keepsFullTextRef.current = false
+  } else if (nextValue.length > TRUNCATE_INPUT_THRESHOLD) {
+    keepsFullTextRef.current = true
+  }
+}
+
 export type DraftKeepsFullText = {
   readonly keepsFullText: boolean
   keepFullText: () => void

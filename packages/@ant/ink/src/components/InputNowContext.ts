@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect } from 'react'
+import { createContext, useContext, useLayoutEffect } from 'react'
 
 /** Official 2.1.327 (#520) `jR = 150`: grace window after SIGCONT resume. */
 export const SIGCONT_RESUME_GRACE_MS = 150
@@ -71,14 +71,30 @@ export function useInputNow(): InputClock {
 }
 
 /**
- * Official 2.1.328 (#603) `DD`: opt the current interactive view into receiving
- * every keypress without rapid-input dropping.
+ * Official 2.1.328 `Nfe` (@307400470): active DialogHost entry id (null outside
+ * DialogHost). Shared by `useWantEveryKey` (`DD`) and `DialogWait` (`ene`).
  */
-export function useWantEveryKey(enabled = true, owner: unknown = null): void {
+export const DialogIdContext = createContext<string | null>(null)
+
+/**
+ * Official 2.1.328 `Ivt` (@307400470): whether dialogs rendered in this subtree
+ * are user-invoked menus (`isMenu = true` for InputGate).
+ */
+export const MenuWaitContext = createContext<boolean>(false)
+
+/**
+ * Official 2.1.328 (#603) `DD` (@307400470 @2681): opt the current interactive
+ * view into receiving every keypress without InputGate dropping. Uses
+ * `useLayoutEffect` so registration happens synchronously on commit before
+ * paint/input, and defaults `owner` to `DialogIdContext` (`Nfe`).
+ */
+export function useWantEveryKey(enabled = true, owner?: unknown): void {
   const clock = useInputNow()
   const register = clock.wantEveryKey
-  useEffect(() => {
+  const dialogId = useContext(DialogIdContext)
+  const effectiveOwner = owner === undefined ? dialogId : owner
+  useLayoutEffect(() => {
     if (!enabled || !register) return
-    return register(owner)
-  }, [enabled, register, owner])
+    return register(effectiveOwner)
+  }, [enabled, register, effectiveOwner])
 }

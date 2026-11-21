@@ -5,7 +5,7 @@ import React, { type ReactNode } from 'react';
 import type { FiberRoot } from 'react-reconciler';
 import { ConcurrentRoot } from 'react-reconciler/constants.js';
 import { onExit } from 'signal-exit';
-import Yoga, { getYogaCounters } from './yoga-layout/index.js';
+import Yoga from './yoga-layout/index.js';
 import { TerminalImages } from './terminalImages.js';
 import { isTmuxPaneFresh, Jk } from './terminalCapabilities.js';
 import { format } from 'util';
@@ -14,13 +14,7 @@ import AccessibilityContext from '../components/AccessibilityContext.js';
 import App from '../components/App.js';
 import TerminalModesContext from '../components/TerminalModesContext.js';
 import type { CursorDeclaration, CursorDeclarationSetter } from '../components/CursorDeclarationContext.js';
-import {
-  FRAME_INTERVAL_MS,
-  INPUT_PRIORITY_FRAME_MS,
-  OWED_REPLY_HOLD_MS,
-  STDOUT_BACKLOG_BYTES,
-  STDOUT_BACKLOG_RETRY_MS,
-} from './constants.js';
+import { OWED_REPLY_HOLD_MS } from './constants.js';
 import {
   installNonBlockingStdout,
   isNonBlockingStdoutInstalled,
@@ -64,6 +58,8 @@ import {
   frameToRenderTarget,
   getTerminalRenderCapabilities,
   type NewRendererBundle,
+  type RenderTargetFrame,
+  type TerminalRenderCapabilities,
 } from './new-renderer.js';
 import { optimize } from './optimizer.js';
 import Output from './output.js';
@@ -73,18 +69,12 @@ import type { ParsedKey } from './parse-keypress.js';
 import reconciler, {
   dispatcher,
   getLastCommitMs,
-  getLastYogaMs,
   isDebugRepaintsEnabled,
   recordYogaMs,
   resetProfileCounters,
 } from './reconciler.js';
-import renderNodeToOutput, {
-  createRenderFrameContext,
-  leftoverGsDropCachedLayout,
-  leftoverGsFollowCapture,
-  leftoverGsOverlayActive,
-} from './render-node-to-output.js';
-import { applyPositionedHighlight, type MatchPosition, scanPositions } from './render-to-screen.js';
+import renderNodeToOutput, { createRenderFrameContext, leftoverGsDropCachedLayout } from './render-node-to-output.js';
+import { type MatchPosition, scanPositions } from './render-to-screen.js';
 import createRenderer, { type Renderer } from './renderer.js';
 import {
   CellWidth,
@@ -97,29 +87,21 @@ import {
   type Screen,
   StylePool,
 } from './screen.js';
-import { applySearchHighlight } from './searchHighlight.js';
 import {
-  applySelectionOverlay,
   captureScrolledRows,
   clearSelection,
-  createSelectionState,
   extendSelection,
   type FocusMove,
   findPlainTextUrlAt,
   getSelectedText,
   hasSelection,
-  hyperlinkAt,
-  leftoverGsSelectionBothEndsOff,
-  type LinkSpan,
   moveFocus,
   type SelectionState,
   selectLineAt,
   selectWordAt,
-  shiftAnchor,
   shiftSelection,
   selectionScopeAt,
   startSelection,
-  underlineHoveredLink,
   updateSelection,
 } from './selection.js';
 import {
@@ -135,14 +117,14 @@ import {
 } from './screenReaderPark.js';
 import { expandTabsForWrap as r7 } from './tabstops.js';
 import { wrapAnsi } from './wrapAnsi.js';
-import { stringWidth } from './stringWidth.js';
+import { resetLineWidthCache } from './line-width-cache.js';
+import { createTerminalEmojiWidthCalibrator, setTerminalEmojiWidthCalibrator, stringWidth } from './stringWidth.js';
 import { isJediTermEnv } from './jediTermInput.js';
 import { eraseViewportInPlace } from './clearTerminal.js';
 import {
   getCellPixels,
   getMousePixelsSupported,
   isITerm2OrTmuxXtversion,
-  isNativeCursorEnabled,
   isSynchronizedOutputSupported,
   isXtermJs,
   subscribeMousePixelsSupported,
@@ -204,7 +186,7 @@ import {
   SHOW_CURSOR,
   type MouseTrackingMode,
 } from './termio/dec.js';
-import { setClipboard } from './termio/osc.js';
+import { LINK_END, printsUnknownSequences, setClipboard } from './termio/osc.js';
 import { TerminalWriteProvider } from '../hooks/useTerminalNotification.js';
 
 // Alt-screen: renderer.ts sets cursor.visible = !isTTY || screen.height===0,
@@ -320,9 +302,69 @@ function ZY(dx: number, dy: number): string {
   return r;
 }
 
-/** densable `Go` @193289819 — true when frame fills or exceeds viewport height. */
+/** densable `Go` / `Gn` — true when frame fills or exceeds viewport height. */
 function frameFillsViewport(frame: Frame): boolean {
-  return frame.screen.height >= frame.viewport.height;
+  return (frame.top ?? 0) + frame.screen.height >= frame.viewport.height;
+}
+
+/** Official 2.1.328 `yS` — collect combined bounding top & height of active popovers relative to `top`. */
+function collectPopoverBounds(root: dom.DOMElement, top: number): { top: number; height: number } | undefined {
+  let minTop = Infinity;
+  let totalHeight = 0;
+  for (const ref of root.popovers ?? []) {
+    const rect = ref.current?.cachedLayout;
+    if (rect?.height) {
+      minTop = Math.min(minTop, rect.y - top);
+      totalHeight += rect.height;
+    }
+  }
+  return totalHeight > 0 ? { top: minTop, height: totalHeight } : undefined;
+}
+
+const HYPERLINK_POOL_LIMIT = 4096; // jg
+const MAX_INLINE_LEAVE_CELLS = 134_217_728; // Jm
+const INPUT_RECOVERY_HOLD_MS = 150; // q2n
+const RESTORE_CURSOR = '\x1b8'; // fm
+
+/** Official 2.1.328 `uS` — decide whether periodic pool reset/compaction should run. */
+function shouldResetPools(elapsedMs: number, stylePool: StylePool, lastStyleLiveSize: number): boolean {
+  const minInterval = stylePool.isNearCapacity ? 1000 : 30_000;
+  return elapsedMs > minInterval && (elapsedMs > 300_000 || stylePool.needsCompaction(lastStyleLiveSize));
+}
+
+/** Official 2.1.328 `ES` — alt-screen cursor positioning callback for iTerm2 inline images. */
+function altScreenMoveTo(width: number, height: number): (col: number, row: number) => string | undefined {
+  return (col, row) =>
+    col >= 0 && row >= 0 && col < width && row < height ? cursorPosition(row + 1, col + 1) : undefined;
+}
+
+/** Official 2.1.328 `wS` — main-screen relative cursor positioning callback for iTerm2 inline images. */
+function mainScreenMoveTo(
+  frame: Frame,
+  cursor: { x: number; y: number },
+  rows: number,
+  scrolledOut: number,
+): (col: number, row: number) => string | undefined {
+  const total = Math.max(frame.screen.height, frame.cursor.y + 1);
+  const topVisible = Math.max(0, total - rows, scrolledOut);
+  const parkedY = Math.min(Math.max(cursor.y, topVisible), topVisible + rows - 1);
+  return (col, row) =>
+    col < 0 || row < topVisible || row >= frame.screen.height
+      ? undefined
+      : `${RESTORE_CURSOR}\r${cursorMove(col, row - parkedY)}`;
+}
+
+/** Official 2.1.328 `SS` — tmux pane-relative placement helper for iTerm2 inline images. */
+function tmuxPaneMoveTo(
+  pane: { top: number; left: number },
+  enabled: boolean,
+  width: number,
+  height: number,
+): (col: number, row: number) => { row: number; column: number } | undefined {
+  return (col, row) =>
+    enabled && col >= 0 && row >= 0 && col < width && row < height
+      ? { row: pane.top + row + 1, column: pane.left + col + 1 }
+      : undefined;
 }
 
 /** densable `Yv` @193398232 — move from parked cursor to frame cursor and erase up. */
@@ -472,25 +514,9 @@ export default class Ink {
    * the throttle (densable 2.1.217).
    */
   private lastAtlasResetAt = 0;
-  private lastYogaCounters: {
-    ms: number;
-    visited: number;
-    measured: number;
-    cacheHits: number;
-    live: number;
-  } = { ms: 0, visited: 0, measured: 0, cacheHits: 0, live: 0 };
-  /**
-   * densable 2.1.228 #1 layout fault recovery:
-   * layoutFailed / consecutiveLayoutFailures / report-once sets.
-   * fL_=16, Fwd=5, mL_=50
-   */
-  private layoutFailed = false;
-  private consecutiveLayoutFailures = 0;
-  private readonly reportedLayoutFaultMessages = new Set<string>();
-  private reportedLayoutFaultRecovered = false;
-  private reportedLayoutFaultDropped = false;
-  private reportedLayoutFaultPersisting = false;
-  private layoutFaultDebugLines = 0;
+  private lastStyleLiveSize = 0;
+  private isFrameOwed = false;
+  private takesInputFrom = 0;
   /** Official liveCountsEnabled from CLAUDE_CODE_BENCH_LIVE_COUNTS. */
   private readonly liveCountsEnabled: boolean;
   private lastLiveCountSampleAt = 0;
@@ -727,6 +753,7 @@ export default class Ink {
         tries: number;
         isLost: boolean;
         wasContaminated: boolean;
+        beingWritten: string | undefined;
         error: unknown;
         shown: {
           nativeCursorVisible: boolean;
@@ -809,6 +836,13 @@ export default class Ink {
     });
     this.renderers =
       options.newRenderer && !this.isScreenReaderEnabled ? createNewRenderers(this.stylePool) : undefined;
+    // Official 2.1.328 (`Ucl(DS()),Qf.reset()` @402924): calibrate terminal
+    // emoji widths and drop stale line-width cache entries when the new byte
+    // renderer drives a real TTY.
+    if (this.renderers && options.stdout.isTTY) {
+      setTerminalEmojiWidthCalibrator(createTerminalEmojiWidthCalibrator());
+      resetLineWidthCache();
+    }
 
     this.scheduler = new FrameScheduler(
       () => this.onRender(),
@@ -833,21 +867,31 @@ export default class Ink {
     this.layout = new LayoutController(this.rootNode, yogaConfig, {
       width: () => (this.options.stdout.isTTY || this.options.stdout.columns ? this.terminalColumns : undefined),
       onFailed: () => {
-        if (!this.isScreenReaderEnabled) this.prevFrameContaminated = true;
+        if (!this.isScreenReaderEnabled) {
+          this.isFrameOwed = true;
+          this.prevFrameContaminated = true;
+        }
       },
       invalidatePrevFrame: () => {
         this.prevFrameContaminated = true;
       },
-      onFaultMessage: msg => this.logger.debug(msg, { level: 'warn' }),
+      onFaultMessage: (msg, opts) => this.logger.debug(msg, opts ?? { level: 'warn' }),
+      onFaultError: err => this.logger.error(err),
+      onYogaMs: ms => recordYogaMs(ms),
     });
     this.overlays = new OverlayController(this.rootNode, this.stylePool, {
       screen: () => this.frontFrame.screen,
       isAltScreenActive: () => this.altScreenActive,
       scheduleRender: () => this.scheduleRender(),
     });
+    this.pointer.setHost({
+      isAltScreenActive: () => this.altScreenActive,
+      showsWhatInputAnswers: this.showsWhatInputAnswers,
+    });
     this.focusManager = new FocusManager((target, event) => dispatcher.dispatchDiscrete(target, event));
     this.rootNode.focusManager = this.focusManager;
     this.rootNode.nextFrame = { writtenAt: Number.POSITIVE_INFINITY };
+    this.rootNode.popovers = this.renderers ? new Set() : undefined;
     this.renderer = createRenderer(this.rootNode, this.stylePool);
     this.rootNode.onRender = this.scheduleRender;
     this.rootNode.onImmediateRender = this.onRender;
@@ -905,6 +949,7 @@ export default class Ink {
       return;
     }
 
+    dom.stampFirstFrame(this.rootNode);
     // densable: process.kill(pid, SIGWINCH) then alt: if modes.isSuspended
     // resetFrames+imagesStale+scheduleRender (App resume() reasserts DEC);
     // else reenter. Main: clear mainScreenBehindAlt, reset frames, imagesStale,
@@ -945,6 +990,7 @@ export default class Ink {
       this.hyperlinkPool,
     );
     this.log.reset();
+    this.renderers?.inline.reset();
     this.prevFrameContaminated = true;
     this.imagesStale = true;
     this.displayCursor = null;
@@ -1027,8 +1073,9 @@ export default class Ink {
     if (!this.syncTerminalSize()) return;
     this.appRef.current?.reprobeCellPixels();
     if (this.currentNode !== null) {
+      this.rootNode.layoutStale ||= Boolean(this.renderers);
       this.render(this.currentNode);
-      return;
+      if (!this.renderers || !this.rootNode.layoutStale) return;
     }
     this.rootNode.layoutStale = false;
     this.rootNode.onComputeLayout?.();
@@ -1043,6 +1090,13 @@ export default class Ink {
   private syncTerminalSize(): boolean {
     if (!this.hasStaleTerminalSize()) return false;
     const { columns, rows } = this.stdoutSize();
+    if (
+      !this.altScreenActive &&
+      this.frontFrame.screen.height > 0 &&
+      (rows < this.terminalRows || columns !== this.terminalColumns)
+    ) {
+      this.renderers?.inline.invalidate();
+    }
     this.terminalColumns = columns;
     this.terminalRows = rows;
     this.altScreenParkPatch = makeAltScreenParkPatch(this.terminalRows);
@@ -1053,6 +1107,7 @@ export default class Ink {
       }
       this.resetFramesForAltScreen();
       this.needsEraseBeforePaint = true;
+      this.renderers?.fullscreen.invalidate('resize');
     }
     return true;
   }
@@ -1100,6 +1155,10 @@ export default class Ink {
    */
   enterAlternateScreen(): void {
     this.pause();
+    const uncovered = this.uncover();
+    if (uncovered !== '') {
+      this.options.stdout.write(uncovered);
+    }
     this.forgetPointer();
     // densable: modes.suspend("altScreen") + (already-alt?"":1049h+kittyPop) + SGR0 + show + 2J + H
     this.options.stdout.write(
@@ -1139,8 +1198,9 @@ export default class Ink {
       this.resetFramesForAltScreen();
       this.imagesStale = true;
     } else if (!this.isScreenReaderEnabled) {
-      if (frameFillsViewport(this.frontFrame)) {
+      if (frameFillsViewport(this.frontFrame) || this.renderers?.inline.mustRedraw) {
         this.log.forceFullReset();
+        this.renderers?.inline.invalidate();
         this.prevFrameContaminated = true;
         this.imagesStale = true;
       } else {
@@ -1152,153 +1212,10 @@ export default class Ink {
   }
 
   /**
-   * densable runLayoutPass — try calculateYogaLayout; on throw, relayoutFromScratch.
+   * Delegate layout execution and fault recovery to `this.layout` (`LayoutController`).
    */
-  private runLayoutPass(yogaNode: NonNullable<typeof this.rootNode.yogaNode>): void {
-    try {
-      this.calculateYogaLayout(yogaNode);
-      this.layoutFailed = false;
-      this.consecutiveLayoutFailures = 0;
-    } catch (err) {
-      const result = this.relayoutFromScratch(yogaNode);
-      this.layoutFailed = !result.recovered;
-      this.consecutiveLayoutFailures = result.recovered ? 0 : this.consecutiveLayoutFailures + 1;
-      const fault = Ink.describeLayoutFault(err);
-      const retryFault =
-        result.recovered || result.retryFault === undefined ? undefined : Ink.describeLayoutFault(result.retryFault);
-      this.reportLayoutFaultToErrorTracking(fault, retryFault);
-      this.logLayoutFaultForDebugging(fault, retryFault);
-    }
-  }
-
-  /** densable calculateYogaLayout — set width + calculateLayout + counters. */
-  private calculateYogaLayout(yogaNode: NonNullable<typeof this.rootNode.yogaNode>): void {
-    const t0 = performance.now();
-    // densable: if TTY or columns known, set fixed width; else auto then cap.
-    if (this.options.stdout.isTTY || this.options.stdout.columns) {
-      yogaNode.setWidth(this.terminalColumns);
-      yogaNode.calculateLayout(this.terminalColumns);
-    } else {
-      yogaNode.setWidthAuto();
-      yogaNode.calculateLayout();
-      if (yogaNode.getComputedWidth() > MAX_TERMINAL_COLUMNS) {
-        yogaNode.setWidth(MAX_TERMINAL_COLUMNS);
-        yogaNode.calculateLayout(MAX_TERMINAL_COLUMNS);
-      }
-    }
-    const ms = performance.now() - t0;
-    recordYogaMs(ms);
-    const c = getYogaCounters();
-    this.lastYogaCounters = { ms, ...c };
-  }
-
-  /**
-   * densable relayoutFromScratch + Official 2.1.327 (#404/#557)
-   * `replaceLayoutNodes`: clearLayoutCacheRecursive and re-layout; if the
-   * Yoga tree itself is damaged, rebuild fresh Yoga nodes for the DOM tree
-   * and invalidate the previous frame so the screen recovers instead of
-   * freezing.
-   */
-  private relayoutFromScratch(
-    yogaNode: NonNullable<typeof this.rootNode.yogaNode>,
-  ): { recovered: true } | { recovered: false; retryFault: unknown } {
-    try {
-      yogaNode.clearLayoutCacheRecursive?.();
-      this.calculateYogaLayout(yogaNode);
-      return { recovered: true };
-    } catch {
-      // Fall through to full Yoga node replacement below.
-    }
-    try {
-      const rebuilt = dom.rebuildYogaSubtree(this.rootNode, Yoga.Config.create());
-      this.calculateYogaLayout(rebuilt.rootYoga);
-      rebuilt.commit();
-      this.prevFrameContaminated = true;
-      return { recovered: true };
-    } catch (retryFault) {
-      try {
-        yogaNode.clearLayoutCacheRecursive?.();
-      } catch {
-        // ignore secondary clear failures
-      }
-      return { recovered: false, retryFault };
-    }
-  }
-
-  /** densable retryFailedLayout — one more recover attempt before paint. */
-  private retryFailedLayout(): boolean {
-    const yoga = this.rootNode.yogaNode;
-    if (!yoga || !this.relayoutFromScratch(yoga).recovered) {
-      return false;
-    }
-    this.layoutFailed = false;
-    this.consecutiveLayoutFailures = 0;
-    return true;
-  }
-
-  /** densable describeLayoutFault — normalize thrown value to Error. */
-  private static describeLayoutFault(value: unknown): Error {
-    try {
-      if (value instanceof Error && typeof value.message === 'string') {
-        return value;
-      }
-      if (
-        value &&
-        typeof value === 'object' &&
-        typeof (value as { message?: unknown }).message === 'string' &&
-        typeof (value as { name?: unknown }).name === 'string'
-      ) {
-        return value as Error;
-      }
-    } catch {
-      // fall through
-    }
-    return new Error('ink layout pass threw a value that cannot be described');
-  }
-
-  private reportLayoutFaultToErrorTracking(fault: Error, retryFault: Error | undefined): void {
-    try {
-      this.reportLayoutFaultErrorOnce(fault);
-      if (retryFault === undefined) {
-        if (!this.reportedLayoutFaultRecovered) {
-          this.reportedLayoutFaultRecovered = true;
-          this.reportLayoutFaultRecovered();
-        }
-        return;
-      }
-      this.reportLayoutFaultErrorOnce(retryFault);
-      if (!this.reportedLayoutFaultDropped) {
-        this.reportedLayoutFaultDropped = true;
-        this.reportLayoutFaultDropped();
-      }
-      // densable mL_=50
-      if (!this.reportedLayoutFaultPersisting && this.consecutiveLayoutFailures >= 50) {
-        this.reportedLayoutFaultPersisting = true;
-        this.reportLayoutFaultPersisting();
-      }
-    } catch {
-      // never throw from reporting
-    }
-  }
-
-  /** densable fL_=16 message cap */
-  private reportLayoutFaultErrorOnce(error: Error): void {
-    const messages = this.reportedLayoutFaultMessages;
-    if (messages.has(error.message) || messages.size >= 16) return;
-    messages.add(error.message);
-    this.logger.error(error);
-  }
-
-  private reportLayoutFaultRecovered(): void {
-    this.logger.error(new Error('ink layout pass threw; recovered by immediate re-layout'));
-  }
-
-  private reportLayoutFaultDropped(): void {
-    this.logger.error(new Error('ink layout pass threw; immediate re-layout also threw, frame dropped'));
-  }
-
-  private reportLayoutFaultPersisting(): void {
-    this.logger.error(new Error('ink layout pass still throwing after many consecutive commits, frames dropped'));
+  private runLayoutPass(_yogaNode?: NonNullable<typeof this.rootNode.yogaNode>): void {
+    this.layout.runLayoutPass();
   }
 
   /**
@@ -1364,38 +1281,23 @@ export default class Ink {
     this.layout.notifyLayoutListeners();
   }
 
-  /** densable Fwd=5 debug log cap */
-  private logLayoutFaultForDebugging(fault: Error, retryFault: Error | undefined): void {
-    try {
-      if (this.layoutFaultDebugLines >= 5) return;
-      this.layoutFaultDebugLines++;
-      const outcome =
-        retryFault === undefined
-          ? 'recovered by immediate re-layout'
-          : `immediate re-layout also threw (${retryFault.name}: ${retryFault.message}); frame dropped`;
-      const capNote = this.layoutFaultDebugLines >= 5 ? ' — further layout faults in this session are not logged' : '';
-      this.logger.debug(`ink layout pass threw (${fault.name}: ${fault.message}); ${outcome}${capNote}`, {
-        level: 'error',
-      });
-    } catch {
-      // ignore
-    }
-  }
-
   private static readonly MAX_UNWRITTEN_RETRIES = 3;
 
   /**
-   * Official 2.1.327 (#403) `beginFrame`: snapshot displayed state before
-   * painting so a failed frame (e.g. transient OOM / RangeError) can be rolled
+   * Official 2.1.327/328 `beginFrame`: snapshot displayed state (and inline /
+   * covering renderer state) before painting so a failed frame can be rolled
    * back and retried cleanly instead of leaving the screen blank or frozen.
    */
   private beginFrame(): void {
     if (!this.options.stdout.isTTY) return;
+    this.renderers?.inline.frameBegins();
+    this.renderers?.covering.frameBegins();
     this.unwritten = {
       tries: 0,
       isLost: false,
       wasContaminated: this.prevFrameContaminated,
       ...this.unwritten,
+      beingWritten: undefined,
       error: undefined,
       shown: {
         nativeCursorVisible: this.nativeCursorVisible,
@@ -1414,8 +1316,42 @@ export default class Ink {
     this.frontFrame = snapshot.shown.frontFrame;
     this.backFrame = snapshot.shown.backFrame;
     this.mainScreenBehindAlt = snapshot.shown.mainScreenBehindAlt;
-    this.log.reset();
+    this.renderers?.inline.frameWasLost();
+    this.renderers?.covering.frameWasLost();
+    if (!this.renderers) {
+      this.forgetWhatIsShown();
+    }
+    if (snapshot.beingWritten !== undefined) {
+      this.keptForNextFrame = `\x1b[m${printsUnknownSequences() ? '' : LINK_END}${snapshot.beingWritten}${this.keptForNextFrame}`;
+      this.renderers?.inline.invalidate();
+    }
   }
+
+  /**
+   * Official 2.1.328 `showsWhatInputAnswers()` (@410863) — ensure the terminal
+   * actually shows the current frame before accepting input. Retries a lost or
+   * owed frame synchronously; holds input for `INPUT_RECOVERY_HOLD_MS` if it
+   * still fails or just recovered.
+   */
+  showsWhatInputAnswers = (): boolean => {
+    if (this.unwritten) {
+      try {
+        this.onRender();
+      } catch (err) {
+        this.logger.debug(`A lost frame still can't be drawn: ${String(err)}`);
+      }
+    } else if (this.layout.layoutDamaged || this.isFrameOwed) {
+      try {
+        this.onRender();
+      } catch (err) {
+        this.logger.error(err);
+        this.invalidatePrevFrame();
+        this.scheduleRender();
+        this.takesInputFrom = this.pressClock() + INPUT_RECOVERY_HOLD_MS;
+      }
+    }
+    return !this.unwritten && !this.isFrameOwed && this.pressClock() >= this.takesInputFrom;
+  };
 
   onRender() {
     if (this.isUnmounted || this.isHandedOff) {
@@ -1461,7 +1397,7 @@ export default class Ink {
     }
   }
 
-  private drawFrame() {
+  private drawFrame(retrying = false): void {
     if (this.isUnmounted || this.isHandedOff) {
       return;
     }
@@ -1489,6 +1425,15 @@ export default class Ink {
       if (this.isUnmounted || this.isHandedOff) {
         return;
       }
+    } else if (this.renderers && this.options.stdout.isTTY && this.hasStaleTerminalSize()) {
+      this.handleResize();
+      if (this.isUnmounted || this.isHandedOff) {
+        return;
+      }
+    }
+
+    if (this.layout.failedLayouts > 0 || this.layout.layoutDamaged) {
+      this.layout.runLayoutPass();
     }
 
     // Flush deferred interaction-time update before rendering so we call
@@ -1497,19 +1442,20 @@ export default class Ink {
     // an extra React re-render cycle.
     this.options.onBeforeRender?.();
 
-    // Official: if (this.isScreenReaderEnabled) { this.onRenderScreenReader(); return }
+    // Screen reader plain-text frame write path
     if (this.isScreenReaderEnabled) {
       this.writeKeptForNextFrame();
       this.leftAltScreenSinceFrame = false;
       this.onRenderScreenReader();
+      this.noteFrameWritten();
       this.unwritten = undefined;
       return;
     }
 
-    // densable 2.1.228 #1: if(layoutFailed&&!retryFailedLayout())return
-    if (this.layoutFailed && !this.retryFailedLayout()) {
+    if (this.layout.failedLayouts > 0) {
       return;
     }
+    this.beginFrame();
 
     const renderStart = performance.now();
     const { columns: terminalWidth, rows: terminalRows } = this.stdoutSize();
@@ -1525,31 +1471,43 @@ export default class Ink {
     // biome-ignore lint/complexity/noCommaOperator: gold imagesStale consume is comma-operator
     if (this.imagesStale) (this.imagesStale = false), this.terminalImages.retransmitAll();
 
+    const tmuxHost = Jk();
+    const tmuxPane = process.env.TMUX ? tmuxHost.tmuxPane : undefined;
+    const isTmuxPassthrough = tmuxPane !== undefined && tmuxPane.passthrough !== 'off';
+    this.terminalImages.isTmuxPassthrough = isTmuxPassthrough;
+
     // 2.1.326 #48: degrade gracefully on memory allocation failure (RangeError)
     // during screen allocation or rendering instead of crashing the session.
     const activeRenderers = this.options.stdout.isTTY ? this.renderers : undefined;
+    let damagedDuringPaint = false;
     const frame = (() => {
       try {
-        const frame = this.renderer({
-          frontFrame: this.frontFrame,
-          backFrame: this.backFrame,
-          isTTY: this.options.stdout.isTTY,
-          terminalWidth,
-          terminalRows,
-          altScreen: this.altScreenActive,
-          prevFrameContaminated: leftoverGsContaminated,
-          overlayActive: leftoverGsOverlay,
-          firstRow: activeRenderers
-            ? contentHeight =>
-                this.altScreenActive
-                  ? 0
-                  : activeRenderers.covering.firstRow(this.frontFrame, contentHeight, {
-                      width: terminalWidth,
-                      height: terminalRows,
-                    })
-            : undefined,
+        const painted = this.layout.paint(retrying, () => {
+          const frame = this.renderer({
+            frontFrame: this.frontFrame,
+            backFrame: this.backFrame,
+            isTTY: this.options.stdout.isTTY,
+            terminalWidth,
+            terminalRows,
+            altScreen: this.altScreenActive,
+            prevFrameContaminated: leftoverGsContaminated,
+            overlayActive: leftoverGsOverlay,
+            firstRow: activeRenderers
+              ? contentHeight =>
+                  this.altScreenActive
+                    ? 0
+                    : activeRenderers.covering.firstRow(this.shownOnMainScreen(), contentHeight, {
+                        width: terminalWidth,
+                        height: terminalRows,
+                      })
+              : undefined,
+          });
+          return frame;
         });
-        return frame;
+        if (painted === undefined) {
+          damagedDuringPaint = true;
+        }
+        return painted;
       } catch (err) {
         if (err instanceof RangeError && !this.unwritten) {
           this.handleRenderAllocationFailure('renderer', err);
@@ -1558,24 +1516,101 @@ export default class Ink {
         throw err;
       }
     })();
+    if (damagedDuringPaint) {
+      return this.drawFrame(true);
+    }
     if (frame === undefined) return;
     const rendererMs = performance.now() - renderStart;
 
-    // Sticky/auto-follow scrolled the ScrollBox this frame. Translate the
-    // selection by the same delta so the highlight stays anchored to the
-    // TEXT (native terminal behavior — the selection walks up the screen
-    // as content scrolls, eventually clipping at the top). frontFrame
-    // still holds the PREVIOUS frame's screen (swap is at ~500 below), so
-    // captureScrolledRows reads the rows that are about to scroll out
-    // before they're overwritten — the text stays copyable until the
-    // selection scrolls entirely off. During drag, focus tracks the mouse
-    // (screen-local) so only anchor shifts — selection grows toward the
-    // mouse as the anchor walks up. After release, both ends are text-
-    // anchored and move as a block.
     this.overlays.followScroll(frame.followScroll ?? null);
     const overlayPainted =
       this.altScreenActive && this.overlays.paint(frame.screen, this.pointer.hoverCol, this.pointer.hoverRow);
     const frameLayoutShifted = frame.layoutShifted === true;
+
+    // densable: no height-0 / visually-empty early return here — LogUpdate
+    // still receives the frame. (Local empty-skips after external 2J remount
+    // left the physical alt buffer black until a later content frame.)
+    if (activeRenderers) {
+      let rendered: ReturnType<Ink['renderToBytes']> | undefined;
+      try {
+        rendered = this.renderToBytes(frame, terminalWidth, terminalRows, activeRenderers);
+      } catch (err) {
+        this.leaveNewRenderer(err instanceof Error ? err.message : String(err));
+      }
+      if (rendered !== undefined) {
+        if (rendered.hasDiff) {
+          this.maybeProactiveAtlasReset(rendered.patches);
+        }
+        const itermSeq = this.placeItermForFrame(
+          frame,
+          rendered.before,
+          activeRenderers.inline.scrolledOutRows + activeRenderers.covering.countIn(frame) - (frame.top ?? 0),
+          terminalWidth,
+          terminalRows,
+          tmuxHost,
+          tmuxPane,
+          isTmuxPassthrough,
+        );
+        if (itermSeq !== '') {
+          rendered.patches.push({ type: 'stdout', content: itermSeq });
+        }
+        const pendingImages = this.terminalImages.drain();
+        if (pendingImages !== '') {
+          rendered.patches.unshift({ type: 'stdout', content: pendingImages });
+        }
+        const writeStart = performance.now();
+        this.leftAltScreenSinceFrame = false;
+        const kept = this.takeKeptForNextFrame();
+        if (this.unwritten) {
+          this.unwritten.beingWritten = kept + pendingImages;
+        }
+        const skipSync =
+          this.skipSyncMarkers() ||
+          (!rendered.mayTear && pendingImages === '' && itermSeq === '') ||
+          (isTmuxPassthrough && (this.terminalImages.size > 0 || pendingImages !== ''));
+        writeDiffToTerminal(this.terminal, rendered.patches, skipSync, terminalRows, kept);
+        if (this.isFrameOwed || (this.unwritten?.isLost && !this.isRedrawingAtOnce)) {
+          dom.stampFirstFrame(this.rootNode);
+          this.takesInputFrom = this.pressClock() + INPUT_RECOVERY_HOLD_MS;
+        }
+        this.unwritten = undefined;
+        this.isFrameOwed = false;
+        activeRenderers.fullscreen.frameWasWritten();
+        const writeMs = performance.now() - writeStart;
+        this.maybeResetPools(renderStart);
+        this.prevFrameContaminated = false;
+        this.repaintAfterStaleAbsolutePaint(frame);
+        if (frame.scrollDrainPending) {
+          this.scheduler.scheduleExtraFrame();
+        }
+        const yc = this.layout.takeYogaCounters();
+        const commitMs = this.rootNode.lastCommitMs ?? 0;
+        this.rootNode.lastCommitMs = 0;
+        this.rootNode.scrollCommitStartedAt = undefined;
+        resetProfileCounters();
+        if (rendered.hasDiff || frameLayoutShifted) this.followHover();
+        this.tellFrameListeners();
+        this.options.onFrame?.({
+          durationMs: performance.now() - renderStart,
+          flickers: rendered.flickers,
+          phases: {
+            renderer: rendererMs,
+            diff: rendered.diffMs,
+            optimize: 0,
+            write: writeMs,
+            patches: rendered.patches.length,
+            yoga: yc.ms,
+            commit: commitMs,
+            yogaVisited: yc.visited,
+            yogaMeasured: yc.measured,
+            yogaCacheHits: yc.cacheHits,
+            yogaLive: yc.live,
+          },
+        });
+        return;
+      }
+    }
+
     if (
       frameLayoutShifted ||
       overlayPainted ||
@@ -1603,17 +1638,7 @@ export default class Ink {
     // densable altScreenFullRepaint: replace prev.screen with a spacer
     // sentinel so every next cell differs and LogUpdate rewrites all
     // glyphs (ConPTY incremental-diff corruption on Windows FleetView).
-    const behindAlt = this.altScreenActive ? undefined : this.mainScreenBehindAlt;
-    if (behindAlt !== undefined) {
-      this.mainScreenBehindAlt = undefined;
-      this.frontFrame = emptyFrame(
-        behindAlt.viewport.height,
-        behindAlt.viewport.width,
-        this.stylePool,
-        this.charPool,
-        this.hyperlinkPool,
-      );
-    }
+    const behindAltErase = this.returnToMainScreen();
 
     let prevFrame = this.frontFrame;
     if (this.altScreenActive) {
@@ -1631,62 +1656,6 @@ export default class Ink {
           fillFullRepaintSentinel(this.fullRepaintSentinelScreen);
         }
         prevFrame = { ...prevFrame, screen: this.fullRepaintSentinelScreen };
-      }
-    }
-
-    // densable: no height-0 / visually-empty early return here — LogUpdate
-    // still receives the frame. (Local empty-skips after external 2J remount
-    // left the physical alt buffer black until a later content frame.)
-    if (activeRenderers) {
-      let rendered: ReturnType<Ink['renderToBytes']> | undefined;
-      try {
-        rendered = this.renderToBytes(frame, terminalWidth, terminalRows, activeRenderers);
-      } catch (err) {
-        this.fallbackToOldRenderer(err instanceof Error ? err.message : String(err));
-      }
-      if (rendered !== undefined) {
-        if (rendered.hasDiff) {
-          this.maybeProactiveAtlasReset(rendered.patches);
-        }
-        const pendingImages = this.terminalImages.drain();
-        if (pendingImages !== '') {
-          rendered.patches.unshift({ type: 'stdout', content: pendingImages });
-        }
-        const writeStart = performance.now();
-        this.leftAltScreenSinceFrame = false;
-        if (rendered.patches.length > 0) {
-          const skipSync = this.skipSyncMarkers() || (!rendered.mayTear && pendingImages === '');
-          writeDiffToTerminal(this.terminal, rendered.patches, skipSync, terminalRows, this.takeKeptForNextFrame());
-        }
-        activeRenderers.fullscreen.frameWasWritten();
-        const writeMs = performance.now() - writeStart;
-        this.maybeResetPools(renderStart);
-        this.prevFrameContaminated = false;
-        this.repaintAfterStaleAbsolutePaint(frame);
-        if (frame.scrollDrainPending) {
-          this.scheduler.scheduleExtraFrame();
-        }
-        if (rendered.hasDiff || frameLayoutShifted) this.followHover();
-        this.tellFrameListeners();
-        this.options.onFrame?.({
-          durationMs: performance.now() - renderStart,
-          flickers: rendered.flickers,
-          phases: {
-            renderer: rendererMs,
-            diff: rendered.diffMs,
-            optimize: 0,
-            write: writeMs,
-            patches: rendered.patches.length,
-            yoga: this.lastYogaCounters.ms,
-            commit: this.rootNode.lastCommitMs ?? 0,
-            yogaVisited: this.lastYogaCounters.visited,
-            yogaMeasured: this.lastYogaCounters.measured,
-            yogaCacheHits: this.lastYogaCounters.cacheHits,
-            yogaLive: this.lastYogaCounters.live,
-          },
-        });
-        this.unwritten = undefined;
-        return;
       }
     }
 
@@ -1769,8 +1738,8 @@ export default class Ink {
       }
       optimized.push(this.altScreenParkPatch);
     }
-    if (behindAlt !== undefined && behindAlt.erase !== '') {
-      optimized.unshift({ type: 'stdout', content: behindAlt.erase });
+    if (behindAltErase !== '') {
+      optimized.unshift({ type: 'stdout', content: behindAltErase });
     }
 
     // Native cursor positioning: park the terminal cursor at the declared
@@ -1892,29 +1861,15 @@ export default class Ink {
     }
     // Official 2.1.305 (#1054) + 2.1.310 (#1206): emit iTerm2 inline images (OSC 1337)
     // with tmux DCS passthrough + pane-relative placement when inside tmux.
-    const tmuxHost = Jk();
-    const tmuxPane = tmuxHost.tmuxPane;
-    const isTmux = Boolean(process.env.TMUX);
-    const isTmuxPassthrough = Boolean(isTmux && tmuxPane && tmuxPane.passthrough !== 'off');
-    this.terminalImages.isTmuxPassthrough = isTmuxPassthrough;
-    const allowDraw = isTmuxPaneFresh(isTmux, tmuxHost.tmuxPaneAnsweredAt, performance.now());
-    const tmuxMoveTo = tmuxPane
-      ? (col: number, row: number) =>
-          col < 0 || row < 0 || col >= terminalWidth || row >= terminalRows
-            ? undefined
-            : { row: tmuxPane.top + row + 1, column: tmuxPane.left + col + 1 }
-      : undefined;
-    const itermSeq = this.terminalImages.placeIterm(
-      frame.screen,
-      prevFrame.screen,
-      (col, row) => {
-        if (col < 0 || row < 0 || col >= terminalWidth || row >= terminalRows) {
-          return undefined;
-        }
-        return `\x1b[${row + 1};${col + 1}H`;
-      },
-      tmuxMoveTo,
-      allowDraw,
+    const itermSeq = this.placeItermForFrame(
+      frame,
+      didFullReset ? undefined : prevFrame.screen,
+      this.log.scrolledOutRowsOf(frame) ?? 0,
+      terminalWidth,
+      terminalRows,
+      tmuxHost,
+      tmuxPane,
+      isTmuxPassthrough,
     );
     if (itermSeq !== '') {
       optimized.push({ type: 'stdout', content: itermSeq });
@@ -1927,15 +1882,24 @@ export default class Ink {
 
     const tWrite = performance.now();
     this.leftAltScreenSinceFrame = false;
+    const kept = this.takeKeptForNextFrame();
+    if (this.unwritten) {
+      this.unwritten.beingWritten = kept + imageSeq;
+    }
     // Official 2.1.327 (#452): skip BSU/ESU sync markers when tmux
     // allow-passthrough is enabled and passthrough images are active/draining,
     // so tmux and the outer kitty/Ghostty/iTerm2 terminal do not desync and
     // garble rows.
     const skipSync = this.skipSyncMarkers() || (isTmuxPassthrough && (this.terminalImages.size > 0 || imageSeq !== ''));
     // densable dyr(this.terminal,X,skipSyncMarkers(),f,this.takeKeptForNextFrame())
-    writeDiffToTerminal(this.terminal, optimized, skipSync, terminalRows, this.takeKeptForNextFrame());
+    writeDiffToTerminal(this.terminal, optimized, skipSync, terminalRows, kept);
+    if (this.isFrameOwed || (this.unwritten?.isLost && !this.isRedrawingAtOnce)) {
+      dom.stampFirstFrame(this.rootNode);
+      this.takesInputFrom = this.pressClock() + INPUT_RECOVERY_HOLD_MS;
+    }
     const writeMs = performance.now() - tWrite;
     this.unwritten = undefined;
+    this.isFrameOwed = false;
 
     // densable: this.prevFrameContaminated=!1 then repaintAfterStaleAbsolutePaint.
     // Gold does not keep selActive/hlActive on the flag — F||L already full-damage
@@ -1955,18 +1919,13 @@ export default class Ink {
       this.scheduler.scheduleExtraFrame();
     }
 
-    const yogaMs = getLastYogaMs();
-    const commitMs = getLastCommitMs();
-    const yc = this.lastYogaCounters;
+    const yc = this.layout.takeYogaCounters();
+    const yogaMs = yc.ms;
+    const commitMs = this.rootNode.lastCommitMs ?? getLastCommitMs();
+    this.rootNode.lastCommitMs = 0;
+    this.rootNode.scrollCommitStartedAt = undefined;
     // Reset so drain-only frames (no React commit) don't repeat stale values.
     resetProfileCounters();
-    this.lastYogaCounters = {
-      ms: 0,
-      visited: 0,
-      measured: 0,
-      cacheHits: 0,
-      live: 0,
-    };
     if (hasDiff || frameLayoutShifted) this.followHover();
     this.tellFrameListeners();
     this.options.onFrame?.({
@@ -1993,6 +1952,35 @@ export default class Ink {
       },
       flickers,
     });
+  }
+
+  private placeItermForFrame(
+    frame: Frame,
+    prevScreen: Screen | undefined,
+    scrolledOutRows: number,
+    terminalWidth: number,
+    terminalRows: number,
+    tmuxHost: ReturnType<typeof Jk>,
+    tmuxPane: ReturnType<typeof Jk>['tmuxPane'],
+    isTmuxPassthrough: boolean,
+  ): string {
+    const allowDraw = isTmuxPaneFresh(isTmuxPassthrough, tmuxHost.tmuxPaneAnsweredAt, performance.now());
+    return this.terminalImages.placeIterm(
+      frame.screen,
+      prevScreen,
+      this.altScreenActive
+        ? altScreenMoveTo(terminalWidth, terminalRows)
+        : mainScreenMoveTo(frame, this.displayCursor ?? frame.cursor, terminalRows, scrolledOutRows),
+      isTmuxPassthrough && tmuxPane
+        ? tmuxPaneMoveTo(
+            tmuxPane,
+            this.altScreenActive && tmuxPane.isPlaced && !tmuxHost.isTmuxPaneAsked,
+            terminalWidth,
+            terminalRows,
+          )
+        : undefined,
+      allowDraw,
+    );
   }
 
   /**
@@ -2332,6 +2320,7 @@ export default class Ink {
     // Flush pending React updates and render before pausing.
     reconciler.flushSyncFromReconciler();
     this.onRender();
+    this.finishWrites();
 
     this.isPaused = true;
   }
@@ -2359,6 +2348,7 @@ export default class Ink {
 
   resume(): void {
     this.isPaused = false;
+    dom.stampFirstFrame(this.rootNode);
     this.onRender();
   }
 
@@ -2368,6 +2358,7 @@ export default class Ink {
    * an external process (e.g. tmux, shell, full-screen TUI).
    */
   repaint(): void {
+    this.renderers?.fullscreen.invalidate();
     this.mainScreenBehindAlt = undefined;
     this.frontFrame = emptyFrame(
       this.frontFrame.viewport.height,
@@ -2384,14 +2375,13 @@ export default class Ink {
       this.hyperlinkPool,
     );
     this.log.reset();
+    this.renderers?.inline.reset();
     // Physical cursor position is unknown after external terminal corruption.
     // Clear displayCursor so the cursor preamble doesn't emit a stale
     // relative move from where we last parked it.
     this.displayCursor = null;
     // densable: this.prevFrameContaminated=!0 — emptyFrame is 0×0; next
     // paint must full-render, not blit from the discarded prev screen.
-    this.renderers?.fullscreen.invalidate();
-    this.renderers?.inline.reset();
     this.prevFrameContaminated = true;
     // Official repaint also resets screen-reader diff state
     this.resetScreenReaderDiffState();
@@ -2399,15 +2389,143 @@ export default class Ink {
   }
 
   /**
-   * Official 2.1.328 `Back to the old renderer` — disables `this.renderers`
-   * on unexpected byte-renderer fault and resets `LogUpdate` for a clean recovery.
+   * Official 2.1.328 `shownOnMainScreen()` (@419520) — returns the currently
+   * displayed main-screen frame preserving `frontFrame.viewport` (never
+   * overwriting it with the new size) and merging `displayCursor`.
+   */
+  private shownOnMainScreen(): RenderTargetFrame {
+    const { frontFrame, displayCursor } = this;
+    return {
+      screen: frontFrame.screen,
+      top: frontFrame.top ?? 0,
+      viewport: frontFrame.viewport,
+      cursor: displayCursor ? { ...frontFrame.cursor, x: displayCursor.x, y: displayCursor.y } : frontFrame.cursor,
+    };
+  }
+
+  private getRenderCaps(): TerminalRenderCapabilities {
+    return getTerminalRenderCapabilities({
+      synchronizedOutput: this.decstbmSafe(),
+      repaintsEveryCell: this.altScreenFullRepaint && this.altScreenActive,
+      clearSavesToScrollback: isITerm2OrTmuxXtversion() && process.env.CLAUDE_BG_BACKEND !== 'daemon',
+      printsUnknownSequences: printsUnknownSequences(),
+    });
+  }
+
+  /**
+   * Official 2.1.328 `uncover()` (@419600) — reveal rows hidden behind a
+   * covering popover before alt-screen entry, cursor parking, or unmount.
+   */
+  private uncover(): string {
+    if (!this.renderers || this.altScreenActive || this.unwritten?.beingWritten !== undefined) {
+      return '';
+    }
+    const { encoder, inline, covering } = this.renderers;
+    const caps = this.getRenderCaps();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      inline.frameBegins();
+      covering.frameBegins();
+      try {
+        encoder.isCursorVisible = this.nativeCursorVisible;
+        const bytes = covering.uncover(this.shownOnMainScreen(), caps);
+        this.nativeCursorVisible = encoder.isCursorVisible;
+        return bytes;
+      } catch (err) {
+        inline.frameWasLost();
+        covering.frameWasLost();
+        this.logger.error(err);
+      }
+    }
+    return '';
+  }
+
+  /** Official 2.1.328 `returnToMainScreen()` — consume `mainScreenBehindAlt` erase sequence. */
+  private returnToMainScreen(): string {
+    const behind = this.mainScreenBehindAlt;
+    if (this.altScreenActive || behind === undefined) return '';
+    this.mainScreenBehindAlt = undefined;
+    this.frontFrame = emptyFrame(
+      behind.viewport.height,
+      behind.viewport.width,
+      this.stylePool,
+      this.charPool,
+      this.hyperlinkPool,
+    );
+    return behind.erase;
+  }
+
+  /** Official 2.1.328 `rowsAboveScreenOf(frame)` — rows above the active inline slice. */
+  private rowsAboveScreenOf(frame: Frame): number {
+    return (frame.top ?? 0) - (this.renderers?.covering.countIn(frame) ?? 0);
+  }
+
+  /**
+   * Official 2.1.328 `leaveNewRenderer(reason)` (@425801) — disable the new
+   * byte renderer, inflate `frontFrame` height and cursor Y by top-sliced rows
+   * so `LogUpdate` stays vertically aligned, and force redraw when required.
+   */
+  leaveNewRenderer(reason: string): boolean {
+    const above = this.rowsAboveScreenOf(this.frontFrame);
+    if (above * this.terminalColumns >= MAX_INLINE_LEAVE_CELLS) {
+      return false;
+    }
+    let nextFront = this.frontFrame;
+    if (above !== 0) {
+      const { screen, cursor, viewport } = nextFront;
+      try {
+        nextFront = {
+          viewport,
+          screen: createScreen(
+            screen.width,
+            Math.max(0, above + screen.height),
+            this.stylePool,
+            this.charPool,
+            this.hyperlinkPool,
+          ),
+          cursor: { ...cursor, y: Math.max(0, above + cursor.y) },
+        };
+      } catch (err) {
+        this.logger.debug(`No memory for the old renderer: ${String(err)}`, { level: 'warn' });
+        return false;
+      }
+    }
+    this.logger.debug(`Back to the old renderer: ${reason}`, { level: 'warn' });
+    const needsFullRedraw =
+      reason === 'cursor_misplaced' ||
+      reason === 'widths_differ' ||
+      this.altScreenActive ||
+      Boolean(this.unwritten) ||
+      frameFillsViewport(this.frontFrame);
+    this.renderers = undefined;
+    this.rootNode.popovers = undefined;
+    this.frontFrame = nextFront;
+    if (this.unwritten) {
+      this.unwritten.wasContaminated = true;
+    }
+    if (this.displayCursor) {
+      this.displayCursor = { ...this.displayCursor, y: Math.max(0, above + this.displayCursor.y) };
+    }
+    this.log.reset();
+    this.prevFrameContaminated = true;
+    if (needsFullRedraw) {
+      this.log.forceFullReset();
+      this.forceRedraw();
+    }
+    return true;
+  }
+
+  /**
+   * Back-compat alias for `leaveNewRenderer(reason)` — always disables
+   * `this.renderers` and clears `rootNode.popovers`.
    */
   fallbackToOldRenderer(reason: string): void {
-    this.logger.debug(`Back to the old renderer: ${reason}`, { level: 'warn' });
-    this.renderers = undefined;
-    this.log.reset();
-    this.log.forceFullReset();
-    this.prevFrameContaminated = true;
+    if (!this.leaveNewRenderer(reason)) {
+      this.renderers = undefined;
+      this.rootNode.popovers = undefined;
+      this.log.reset();
+      this.log.forceFullReset();
+      this.prevFrameContaminated = true;
+    }
   }
 
   /**
@@ -2423,6 +2541,7 @@ export default class Ink {
   ): {
     patches: Diff;
     hasDiff: boolean;
+    before: Screen | undefined;
     mayTear: boolean;
     flickers: FrameEvent['flickers'];
     diffMs: number;
@@ -2434,6 +2553,7 @@ export default class Ink {
     const declaredPos =
       decl && declRect ? { x: declRect.x + decl.relativeX, y: declRect.y + decl.relativeY - top } : null;
     renderers.encoder.isCursorVisible = this.nativeCursorVisible;
+    const popover = this.terminalImages.hasItermImages ? undefined : collectPopoverBounds(this.rootNode, top);
     const target = frameToRenderTarget(
       frame,
       { width, height },
@@ -2445,15 +2565,19 @@ export default class Ink {
             (this.bgWorkerForceShowCursor || (Boolean(this.options.nativeCursor) && Boolean(decl?.visible)))),
         staysVisible: this.accessibilityMode,
       },
+      popover,
     );
-    const caps = getTerminalRenderCapabilities({
-      synchronizedOutput: this.decstbmSafe(),
-      repaintsEveryCell: this.altScreenFullRepaint && this.altScreenActive,
-    });
-    const prevTarget = frameToRenderTarget(this.frontFrame, { width, height });
+    const caps = this.getRenderCaps();
+    const prefixBytes = this.returnToMainScreen();
     const res = this.altScreenActive
       ? renderers.fullscreen.render(target, caps)
-      : renderers.covering.render(prevTarget, target, caps);
+      : renderers.covering.render(this.shownOnMainScreen(), target, caps, prefixBytes);
+    if (isDebugRepaintsEnabled() && res.changedRow !== undefined) {
+      const chain = dom.findOwnerChainAtRow(this.rootNode, res.changedRow);
+      this.logger.debug(`[REPAINT] full reset · row ${res.changedRow} · culprit: ${chain.join(' < ')}`, {
+        level: 'warn',
+      });
+    }
     this.nativeCursorVisible = renderers.encoder.isCursorVisible;
     this.displayCursor = declaredPos ? { ...declaredPos, emittedRows: height } : null;
     this.backFrame = this.frontFrame;
@@ -2461,6 +2585,7 @@ export default class Ink {
     return {
       patches: res.bytes === '' ? [] : [{ type: 'stdout', content: res.bytes }],
       hasDiff: res.hasChanges,
+      before: this.terminalImages.hasItermImages ? renderers.rows.withoutWrittenCells(frame.screen) : undefined,
       mayTear: res.mayTear,
       flickers: res.cleared
         ? [{ desiredHeight: top + frame.screen.height, availableHeight: height, reason: res.cleared }]
@@ -2491,22 +2616,33 @@ export default class Ink {
       this.emitAtlasReset();
     }
     if (this.hasStaleTerminalSize()) {
+      this.renderers?.inline.invalidate();
       this.handleResize();
+      if (this.unwritten?.isLost) {
+        this.renderers?.inline.invalidate();
+        return false;
+      }
       return true;
     }
+    this.forgetWhatIsShown();
+    this.onRender();
+    return !this.unwritten?.isLost;
+  }
+
+  private forgetWhatIsShown(): void {
     if (this.altScreenActive) {
       this.needsEraseBeforePaint = true;
       this.displayCursor = null;
       this.resetFramesForAltScreen();
+      this.renderers?.fullscreen.invalidate('clear');
       this.imagesStale = true;
     } else {
       this.log.forceFullReset();
+      this.renderers?.inline.invalidate();
       this.prevFrameContaminated = true;
       this.imagesStale = true;
     }
     this.resetScreenReaderDiffState();
-    this.onRender();
-    return true;
   }
 
   /**
@@ -2744,6 +2880,10 @@ export default class Ink {
       this.leftAltScreenSinceFrame = true;
     }
     if (this.altScreenActive === active) return '';
+    if (active && this.keptForNextFrame !== '') {
+      this.keptForNextFrame =
+        this.uncover() + (this.isHandedOff ? '' : this.moveCursorBelowFrame()) + this.keptForNextFrame;
+    }
     this.altScreenActive = active;
     const mode: MouseTrackingMode = !active
       ? 'off'
@@ -2753,7 +2893,10 @@ export default class Ink {
           ? 'off'
           : mouseTracking;
     this.altScreenMouseTracking = mode;
-    if (!active) this.forgetPointer();
+    if (!active) {
+      this.forgetPointer();
+      this.overlays.clearLinkUnderline();
+    }
     queueMicrotask(() => {
       if (this.isUnmounted) return;
       for (const listener of this.hoverTrackedListeners) listener();
@@ -2762,7 +2905,7 @@ export default class Ink {
     if (active) {
       this.ensureInteractive();
       const candidate =
-        this.isHandedOff || this.isScreenReaderEnabled || O() === 'windows'
+        this.isHandedOff || this.isScreenReaderEnabled || this.renderers?.inline.mustRedraw || O() === 'windows'
           ? undefined
           : (this.mainScreenBehindAlt ??
             (this.options.stdout.isTTY && !frameFillsViewport(this.frontFrame)
@@ -2943,7 +3086,7 @@ export default class Ink {
     mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
     fine?: { col: number; row: number },
   ): boolean => {
-    if (!this.altScreenActive) return false;
+    if (!this.pointer.canAcceptPointerPress(this.altScreenActive)) return false;
     this.releasePointerCapture(col, row, mods, fine);
     const target = findPointerHoverTarget(this.rootNode, col, row);
     if (!target) return false;
@@ -3155,13 +3298,14 @@ export default class Ink {
    */
   moveCursorBelowFrame = (): string => {
     const prev = this.displayCursor;
+    const uncovered = this.isHandedOff ? '' : this.uncover();
     if (prev === null || this.altScreenActive || !this.options.stdout.isTTY) {
-      return '';
+      return uncovered;
     }
     this.displayCursor = null;
     const dx = this.frontFrame.cursor.x - prev.x;
     const dy = this.frontFrame.cursor.y - prev.y;
-    return dx !== 0 || dy !== 0 ? cursorMove(dx, dy) : '';
+    return uncovered + (dx !== 0 || dy !== 0 ? cursorMove(dx, dy) : '');
   };
 
   /**
@@ -3269,7 +3413,9 @@ export default class Ink {
       }
       throw err;
     }
+    this.renderers?.fullscreen.invalidate();
     this.log.reset();
+    this.renderers?.inline.reset();
     // Defense-in-depth: alt-screen skips the cursor preamble anyway (CSI H
     // resets), but a stale displayCursor would be misleading if we later
     // exit to main-screen without an intervening render.
@@ -3528,14 +3674,21 @@ export default class Ink {
     return this.dispatchMouseClick(col, row, false) !== 'unhandled';
   }
 
-  dispatchMouseClick(col: number, row: number, isWindowActivation = false, mods?: ClickMods): MouseClickResult {
+  dispatchMouseClick(
+    col: number,
+    row: number,
+    isWindowActivation = false,
+    mods?: ClickMods,
+    pressedAt?: number,
+  ): MouseClickResult {
+    if (!this.showsWhatInputAnswers()) return 'stray';
     if (!this.altScreenActive) return 'unhandled';
     const hit = hitTest(this.rootNode, col, row);
-    if (hit && this.dropsInput(hit, 'click', this.pressClock())) return 'stray';
     const blank =
       cellIsBlankForHover(this.rootNode, this.frontFrame.screen, hit, col, row) && !this.litWhereClicked(hit, col, row);
     const hyperlinkUrl = this.getHyperlinkAt(col, row);
     const event = new ClickEvent(col, row, blank, hyperlinkUrl, isWindowActivation, mods ?? EMPTY_CLICK_MODS);
+    if (hit && !isWindowActivation && this.dropsInput(hit, 'click', pressedAt)) return 'stray';
     this.pointer.notifyClicks(hit, event);
     const handled = bubbleClick(this.rootNode, event, hit);
     if (event.droppedAsStray) return 'stray';
@@ -3563,12 +3716,7 @@ export default class Ink {
 
   dispatchHover(col: number, row: number): void {
     if (!this.altScreenActive) return;
-    const link = this.isHoverTracked() ? hyperlinkAt(this.frontFrame.screen, col, row) : undefined;
-    const inSpans = this.overlays.hoveredLinkSpans.some(span => span.row === row && col >= span.from && col <= span.to);
-    if (link !== this.overlays.hoveredLink || (link !== undefined && !inSpans)) {
-      this.overlays.hoveredLink = link;
-      this.scheduleRender();
-    }
+    this.overlays.hoverLinkAt(col, row, this.isHoverTracked());
     this.pointer.hoverCol = col;
     this.pointer.hoverRow = row;
     this.pointer.hoverFollowStreak = 0;
@@ -3578,10 +3726,7 @@ export default class Ink {
 
   forgetPointer(): void {
     this.pointer.clearHoverCoords();
-    if (this.overlays.hoveredLink !== undefined) {
-      this.overlays.hoveredLink = undefined;
-      this.scheduleRender();
-    }
+    this.overlays.clearHoveredLink();
     const app = this.appRef.current;
     if (app !== null) {
       app.lastHoverCol = -1;
@@ -3629,6 +3774,9 @@ export default class Ink {
     if (hasInput && this.dropsInput(target, inputTag, extras?.pressedAt, detail)) {
       return event.isReadAsEscapeThenKey;
     }
+    if (!this.showsWhatInputAnswers() && !isWayOut) {
+      return false;
+    }
 
     dispatcher.dispatchDiscrete(target, event);
     if (isPrintable) {
@@ -3670,10 +3818,11 @@ export default class Ink {
    */
   dispatchPasteEvent(text: string, pressedAt?: number): void {
     const target = this.focusManager.activeElement ?? this.rootNode;
-    if (this.dropsInput(target, 'paste', pressedAt)) return;
-    const event = new PasteEvent(text);
-    dispatcher.dispatchDiscrete(target, event);
-    this.noteIfStray(event, target);
+    if (!this.dropsInput(target, 'paste', pressedAt) && this.showsWhatInputAnswers()) {
+      const event = new PasteEvent(text);
+      dispatcher.dispatchDiscrete(target, event);
+      this.noteIfStray(event, target);
+    }
   }
 
   /**
@@ -3683,6 +3832,7 @@ export default class Ink {
    */
   dispatchWheelEvent = (parsed: ParsedKey): void => {
     if (this.pointer.capture) return;
+    if (!this.showsWhatInputAnswers()) return;
     const seq = parsed.sequence ?? '';
     const payload = seq.startsWith('\x1b') ? seq.slice(1) : seq;
     const match = payload.match(/^\[<(\d+);(\d+);(\d+)[Mm]$/);
@@ -4003,7 +4153,13 @@ export default class Ink {
     }
 
     this.finishWrites();
-    this.onRender();
+    this.writeKeptForNextFrame();
+    try {
+      this.onRender();
+    } catch (renderErr) {
+      if (!this.unwritten) throw renderErr;
+      this.logger.error(renderErr);
+    }
     this.unsubscribeExit();
     this.restoreConsolePatches();
     this.unsubscribeTTYHandlers?.();
@@ -4013,6 +4169,10 @@ export default class Ink {
     // densable: if(this.renderCalled&&!this.isHandedOff) dyr(..., skipSync, stdoutSize().rows)
     if (this.renderCalled && !this.isHandedOff) {
       const diff = this.log.renderPreviousOutput_DEPRECATED(this.frontFrame);
+      const uncovered = this.uncover();
+      if (uncovered !== '') {
+        diff.unshift({ type: 'stdout', content: uncovered });
+      }
       writeDiffToTerminal(this.terminal, optimize(diff), this.skipSyncMarkers(), this.stdoutSize().rows);
     }
 
@@ -4020,6 +4180,12 @@ export default class Ink {
     if (this.options.stdout.isTTY) {
       const wasMouseTracking = this.altScreenMouseTracking !== 'off';
       try {
+        if (!this.isHandedOff) {
+          const moveSeq = this.moveCursorBelowFrame();
+          if (moveSeq !== '') {
+            this.writeBeforeExit(moveSeq);
+          }
+        }
         if (wasMouseTracking) {
           const mouseOff = this.modes.reset('mousePixels') + this.modes.reset('mouse');
           if (mouseOff !== '') {
@@ -4100,33 +4266,39 @@ export default class Ink {
   }
 
   /**
-   * densable `maybeResetPools(e)` — 5-minute char/hyperlink pool recycle.
-   * Gold Z2t.onRender calls this on the frameSink early-return and the
-   * cell-diff path. `renderStart` is the same clock sample as gold.
+   * Official 2.1.328 `maybeResetPools` (`uS` @338364) — compacts `stylePool`
+   * when near capacity or over budget and recycles `hyperlinkPool` on cap.
    */
   maybeResetPools(renderStart: number): void {
-    if (renderStart - this.lastPoolResetTime > 5 * 60 * 1000) {
-      this.resetPools();
-      this.lastPoolResetTime = renderStart;
+    const elapsed = renderStart - this.lastPoolResetTime;
+    if (!shouldResetPools(elapsed, this.stylePool, this.lastStyleLiveSize)) {
+      return;
     }
+    this.lastPoolResetTime = renderStart;
+    this.resetPools();
   }
 
   /**
-   * Replace char/hyperlink pools with fresh instances to prevent unbounded
-   * growth during long sessions. Migrates the front frame's screen IDs into
-   * the new pools so diffing remains correct. The back frame doesn't need
-   * migration — resetScreen zeros it before any reads.
-   *
-   * Call between conversation turns or periodically.
+   * Official 2.1.328 `Ts.resetPools()` (@444781) — keeps `charPool` intact,
+   * replaces `hyperlinkPool` only when `size > HYPERLINK_POOL_LIMIT`, and
+   * compacts `stylePool` only when `needsCompaction(lastStyleLiveSize)`.
    */
   resetPools(): void {
-    this.charPool = new CharPool();
-    this.hyperlinkPool = new HyperlinkPool();
-    migrateScreenPools(this.frontFrame.screen, this.charPool, this.hyperlinkPool);
-    // Back frame's data is zeroed by resetScreen before reads, but its pool
-    // references are used by the renderer to intern new characters. Point
-    // them at the new pools so the next frame's IDs are comparable.
-    this.backFrame.screen.charPool = this.charPool;
+    const resetLinks = this.hyperlinkPool.size > HYPERLINK_POOL_LIMIT;
+    const compactStyles = this.stylePool.needsCompaction(this.lastStyleLiveSize);
+    if (!resetLinks && !compactStyles) return;
+    if (resetLinks) {
+      this.hyperlinkPool = new HyperlinkPool();
+    }
+    migrateScreenPools(
+      this.frontFrame.screen,
+      this.charPool,
+      this.hyperlinkPool,
+      compactStyles ? this.stylePool.compact() : undefined,
+    );
+    if (compactStyles) {
+      this.lastStyleLiveSize = this.stylePool.size;
+    }
     this.backFrame.screen.hyperlinkPool = this.hyperlinkPool;
     this.fullRepaintSentinelScreen = undefined;
   }

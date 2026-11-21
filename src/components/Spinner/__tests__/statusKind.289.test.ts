@@ -272,11 +272,11 @@ describe('densable 2.1.289 Je extras', () => {
     expect(repl.slice(above, bottom)).toContain(
       '<DialogHost variant="bottom" suppressReason={dialogSuppressReason} />',
     )
-    expect(repl.slice(above, bottom)).not.toContain(
-      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
-    )
+    expect(repl.slice(above, bottom)).not.toContain('variant="inline"')
+    expect(repl.slice(scrollable, above)).toContain('<DialogHost')
+    expect(repl.slice(scrollable, above)).toContain('variant="inline"')
     expect(repl.slice(scrollable, above)).toContain(
-      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
+      'suppressReason={dialogSuppressReason}',
     )
     expect(repl.slice(bottom)).not.toContain('<DialogHost')
     expect(repl.slice(bottom)).not.toContain('<SpinnerWithVerb')

@@ -81,6 +81,8 @@ export type DOMElement = {
   wait?: InputGateWait
   no?: InputGateNoOption
   wantEveryKey?: unknown[]
+  /** Official 2.1.328 `popovers` — registered popover element refs on ink-root when newRenderer is active. */
+  popovers?: Set<{ current: DOMElement | null }>
 
   // Internal properties
   onComputeLayout?: () => void
@@ -469,6 +471,12 @@ function collectRemovedRects(
     addPendingClear(parent, cached, isAbsolute)
     elem.cachedLayout = undefined
   }
+  if (elem.pendingClears) {
+    for (const rect of elem.pendingClears) {
+      addPendingClear(parent, rect, false)
+    }
+    elem.pendingClears = undefined
+  }
   for (const child of elem.childNodes) {
     collectRemovedRects(parent, child, isAbsolute)
   }
@@ -508,6 +516,11 @@ export const setStyle = (node: DOMNode, style: Styles): void => {
     return
   }
   const wasAbsolute = node.style.position === 'absolute'
+  // Official 2.1.328 `nR`: transitioning out of display:none stamps firstFrame
+  // so InputGate treats the newly revealed subtree as fresh on the next frame.
+  if (node.style.display === 'none') {
+    stampFirstFrame(node)
+  }
   node.style = style
   if (!wasAbsolute && style.position === 'absolute' && node.parentNode) {
     leftoverGsStampAbsoluteDescendant(node.parentNode)
@@ -648,13 +661,16 @@ export const markDirty = (node?: DOMNode): void => {
       const elem = current as DOMElement
       elem.dirty = true
       // Official 2.1.328 `SF`: propagate paintCache invalidation up the tree
-      // ('self' on the mutated node, 'child' on ancestors unless already 'self').
+      // ('self' on the first ancestor with paintCache, 'child' above unless
+      // already 'self'). Must only flip propagatedToParent inside `if (cache)`
+      // so paintCache-less nodes (ink-virtual-text / ink-link) still mark
+      // their enclosing ink-text as 'self'.
       const cache = elem.paintCache
       if (cache) {
         cache.changed =
           propagatedToParent && cache.changed !== 'self' ? 'child' : 'self'
+        propagatedToParent = true
       }
-      propagatedToParent = true
       // Only mark yoga dirty on leaf nodes that have measure functions
       if (
         !markedYoga &&
@@ -762,6 +778,7 @@ export function rebuildYogaSubtree(
       for (const [el, fresh] of built) {
         el.yogaNode = fresh
         el.cachedLayout = undefined
+        el.paintCache = undefined
         el.dirty = true
       }
     },

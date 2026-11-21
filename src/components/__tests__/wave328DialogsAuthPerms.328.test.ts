@@ -8,7 +8,6 @@ import {
 } from '../../commands/terminalSetup/terminalSetup.js'
 import { formatApiKeyProfileConflictWarning } from '../../utils/anthropicProfile.js'
 import { planModelSupportsAutoMode } from '../../utils/betas.js'
-import { computeTextOverflowIndicator } from '../BaseTextInput.js'
 import {
   formatConsoleNonConsoleAccountError,
   formatConsoleSavedSignInError,
@@ -78,39 +77,13 @@ describe('Wave 327-328 Dialogs / Auth / Permissions / Terminal Setup', () => {
     expect(wrapped).toContain('configuration')
   })
 
-  test('#464: BaseTextInput overflow indicator flags hidden lines and clipped single-line pastes', () => {
-    const multilineValue = 'line1\nline2\nline3\nline4\nline5'
-    const clipped = computeTextOverflowIndicator({
-      value: multilineValue,
-      columns: 40,
-      multiline: true,
-      maxVisibleLines: 2,
-      viewportCharOffset: 6,
-      viewportCharEnd: 18,
-    })
-    expect(clipped.above).toBe(true)
-    expect(clipped.below).toBe(true)
-    expect(clipped.indicator).toContain('hidden')
-
-    const singleLineOverflow = computeTextOverflowIndicator({
-      value: 'a'.repeat(50),
-      columns: 20,
-      multiline: false,
-      maxVisibleLines: 1,
-      viewportCharOffset: 0,
-      viewportCharEnd: 50,
-    })
-    expect(singleLineOverflow.below).toBe(true)
-    expect(singleLineOverflow.indicator).toContain('+30 more chars')
-
-    const fits = computeTextOverflowIndicator({
-      value: 'short',
-      columns: 40,
-      multiline: false,
-      viewportCharOffset: 0,
-      viewportCharEnd: 5,
-    })
-    expect(fits.indicator).toBeNull()
+  test('#464: BaseTextInput matches official I2n without fabricated overflowBadge extra row', async () => {
+    const btiSrc = await readFile(
+      join(import.meta.dir, '../BaseTextInput.tsx'),
+      'utf8',
+    )
+    expect(btiSrc).not.toContain('computeTextOverflowIndicator')
+    expect(btiSrc).not.toContain('overflowBadge')
   })
 
   test('#467: screen-reader early digit + Enter clears refusal latch so next number is not dropped', () => {
@@ -431,13 +404,16 @@ describe('Wave 327-328 Dialogs / Auth / Permissions / Terminal Setup', () => {
     )
     expect(cuSrc).toContain("tier: a.proposedTier ?? 'full'")
 
-    // #464: BaseTextInput renders overflowBadge as a flexShrink={0} sibling outside truncate-end Text
+    // #464 / 2.1.328 I2n: BaseTextInput renders Input children directly without
+    // a fabricated overflowBadge extra row wrapper
     const btiSrc = await readFile(
       join(import.meta.dir, '../BaseTextInput.tsx'),
       'utf8',
     )
-    expect(btiSrc).toContain('const overflowBadge = overflowInfo.indicator')
-    expect(btiSrc).toContain('<Box flexShrink={0}>')
+    expect(btiSrc).not.toContain('overflowBadge')
+    expect(btiSrc).toContain(
+      '<Text wrap="truncate-end" dimColor={props.dimColor}>',
+    )
 
     // #466: /chrome adds select-browser option and passes isCancelActive={!inBrowserList}
     const chromeSrc = await readFile(

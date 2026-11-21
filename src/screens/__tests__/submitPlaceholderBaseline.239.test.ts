@@ -11,36 +11,45 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const replSrc = readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8')
+const messagesSrc = readFileSync(
+  join(import.meta.dir, '../../components/Messages.tsx'),
+  'utf8',
+)
 
-describe('densable PKe submit placeholder baseline', () => {
-  test('snapshots baseline at setUserInputOnProcessing, not userMessagePending', () => {
+describe('densable PKe / 2.1.328 Tje submit placeholder baseline', () => {
+  test('snapshots baseline at setUserInputOnProcessing and evaluates against deferred snapshot in Messages', () => {
     expect(replSrc).toContain(
       'setPlaceholderBaseline(messagesRef.current.length)',
     )
-    expect(replSrc).toContain('placeholderBaseline !== undefined')
-    expect(replSrc).toContain('displayedMessages.length <= placeholderBaseline')
+    expect(replSrc).toContain('placeholderBaseline={')
+    expect(replSrc).toContain('placeholderText={')
+    expect(messagesSrc).toContain('placeholderBaseline !== undefined')
+    expect(messagesSrc).toContain(
+      'renderedMessages.length <= placeholderBaseline',
+    )
     expect(replSrc).not.toContain('setUserMessagePending')
     expect(replSrc).not.toContain('userMessagePendingRef')
   })
 
-  test('forces sync Messages while placeholder bridge active (Windows deferred)', () => {
-    expect(replSrc).toContain('placeholderBridgeActive')
-    // 2.1.150 deferMessages = !viewingAgent && !previewEnabled && isLoading.
-    // preview on (showStreamingText) → sync, same as not-loading or the bridge.
-    expect(replSrc).toContain(
-      'showStreamingText || !isLoading || placeholderBridgeActive',
+  test('applies useDeferredValue inside Messages (Tje) without passing redundant messages prop on live source', () => {
+    expect(messagesSrc).toContain('useDeferredValue(sourceMessages)')
+    expect(messagesSrc).toContain(
+      'selectDeferredMessages(deferredMessages, sourceMessages, shouldDefer)',
     )
-    expect(replSrc).toContain('placeholderBridgePendingRef')
-    expect(replSrc).toContain('deferredMessages !== messages')
-    // 2.1.150 defers the full list. formatDeferCap* is a different left-arrow toast.
+    expect(messagesSrc).toContain(
+      'isMainPrompt && !showStreamingText && innerProps.isLoading',
+    )
+    // 2.1.150 / 2.1.328 defers the full list without a 500-message cap.
     expect(replSrc).not.toContain('const DEFERRED_CAP')
     expect(replSrc).not.toContain('cappedMessages')
   })
 
   test('latches echo dismissed after first past-baseline render (compact-safe)', () => {
-    expect(replSrc).toContain('placeholderEchoDismissedRef')
-    expect(replSrc).toContain('!placeholderEchoDismissedRef.current')
-    expect(replSrc).toContain('displayedMessages.length > placeholderBaseline')
+    expect(messagesSrc).toContain('placeholderDismissedRef')
+    expect(messagesSrc).toContain('!placeholderDismissedRef.current')
+    expect(messagesSrc).toContain(
+      'renderedMessages.length > placeholderBaseline',
+    )
   })
 
   test('swarm mailbox soft-fail uses FRr asker, not tip sandbox queue', () => {

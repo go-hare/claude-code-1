@@ -134,6 +134,9 @@ export function wrapHighlightWithCacheAndBudget(
       if (!skipHighlightCache) {
         const hit = highlightCache.get(cacheKey);
         if (hit !== undefined && hit.code === code && hit.variant === variant) {
+          if (fenceObj) {
+            byFence.set(fenceObj, hit.highlighted);
+          }
           return hit.highlighted;
         }
       }
@@ -158,6 +161,51 @@ export function wrapHighlightWithCacheAndBudget(
 
 export function _clearHighlightCacheForTest(): void {
   highlightCache.clear();
+}
+
+/**
+ * Official 2.1.328 `JTs` (@302008315) — return direct nested child tokens of
+ * any marked Token (list items, table header/body cells, or `.tokens` arrays).
+ */
+function childTokensOf(token: Token): Token[] {
+  if (token.type === 'list') {
+    return (token as Tokens.List).items as unknown as Token[];
+  }
+  if (token.type === 'table') {
+    const table = token as Tokens.Table;
+    return [...table.header, ...table.rows.flat()].flatMap(cell => cell.tokens ?? []);
+  }
+  if ('tokens' in token && Array.isArray((token as { tokens?: Token[] }).tokens)) {
+    return (token as { tokens: Token[] }).tokens;
+  }
+  return [];
+}
+
+/**
+ * Official 2.1.328 `Ot` (@307751817) — recursively collect all `code` tokens
+ * in strict top-to-bottom document order across blockquotes, tables, and lists.
+ */
+export function collectCodeTokensInDocumentOrder(tokens: readonly Token[]): Tokens.Code[] {
+  return tokens.flatMap(token =>
+    token.type === 'code' ? [token as Tokens.Code] : collectCodeTokensInDocumentOrder(childTokensOf(token)),
+  );
+}
+
+/**
+ * Official 2.1.328 `qn` (@307751817) — pre-highlight every code fence token in
+ * strict document order before child components (MarkdownBlockquote,
+ * MarkdownTable) render so `byFence` is populated and budget exhaustion always
+ * happens strictly top-to-bottom.
+ */
+export function prehighlightCodeTokens(
+  tokens: readonly Token[],
+  theme: ThemeName,
+  highlight: CliHighlight | null,
+): void {
+  if (highlight === null) return;
+  for (const codeToken of collectCodeTokensInDocumentOrder(tokens)) {
+    formatToken(codeToken, theme, 0, null, null, highlight, { windowed: false });
+  }
 }
 
 // densable 2.1.289 an: CRLF blank lines, `N)` / `+` lists, setext `=`.
@@ -507,10 +555,11 @@ function MarkdownBody({
     const source = stripRawOsc8Sequences(rawSource);
     const tokens = lexMarkdown(source, skipTokenCache !== true, promptMode);
     // Official 2.1.328 (`Cr`/`qn` @307762583): allocate a fresh per-render
-    // highlight budget inside the content-dependent memo so streaming chunks
-    // never cumulatively drain the budget across renders while still sharing
-    // the module-level LRU highlight cache.
+    // highlight budget inside the content-dependent memo and pre-highlight all
+    // code fences in strict document order so nested blockquotes/tables/lists
+    // never exhaust the budget out of order or re-highlight on resize.
     const highlight = wrapHighlightWithCacheAndBudget(rawHighlight, theme, skipHighlightCache);
+    prehighlightCodeTokens(tokens, theme, highlight);
     const elements: React.ReactNode[] = [];
     let nonTableContent = '';
     let prevKind: BlockKind = 'none';

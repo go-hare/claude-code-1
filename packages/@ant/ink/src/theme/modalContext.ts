@@ -25,6 +25,8 @@ type ModalCtx = {
    * provides a setter so a descendant (Tabs) can claim the scroller.
    */
   claimScrollBox?: ((height: number | null) => void) | null
+  /** Official 2.1.328 Xc revealEnd — snap to bottom & suppress top ↑ hint. */
+  revealEnd?: () => () => void
 }
 
 export const ModalContext = createContext<ModalCtx | null>(null)

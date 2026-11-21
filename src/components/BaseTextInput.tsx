@@ -8,7 +8,7 @@ import {
   insertInputFromKeyboardEvent,
   keyFromKeyboardEvent,
 } from '../utils/keyboardEventInput.js';
-import { Ansi, Box, Input, stringWidth, Text, isNativeCursorEnabled, useFocusReclaim, useInput } from '@anthropic/ink';
+import { Ansi, Box, Input, Text, isNativeCursorEnabled, useFocusReclaim, useInput } from '@anthropic/ink';
 import type { DOMElement, KeyboardEvent, PasteEvent } from '@anthropic/ink';
 import type { BaseInputState, BaseTextInputProps, PromptInputMode } from '../types/textInputTypes.js';
 import { leftoverXy } from '../utils/leftoverXy.js';
@@ -81,46 +81,12 @@ type BaseTextInputComponentProps = BaseTextInputProps & {
 };
 
 /**
- * Official densable 2.1.210 BaseTextInput (`rfo`):
+ * Official densable 2.1.210 / 2.1.328 BaseTextInput (`rfo` / `I2n`):
  * - tabIndex + autoFocus + onKeyDown + onPaste when focused
  * - nR focus reclaim (useFocusReclaim) so KeyboardEvent/PasteEvent target this node
  * - d7r paste wrapper (usePasteHandler) around handleKeyDown
  * - useInput only enables raw mode (fork keybindings still listen on EventEmitter)
  */
-/**
- * Official 2.1.327 (#464): detect when a text field clips long pasted text
- * outside its visible viewport or single-line column width so callers can show
- * a subtle overflow indicator instead of hiding text with no sign.
- */
-export function computeTextOverflowIndicator(params: {
-  value: string;
-  columns: number;
-  multiline?: boolean;
-  maxVisibleLines?: number;
-  viewportCharOffset: number;
-  viewportCharEnd: number;
-}): { above: boolean; below: boolean; indicator: string | null } {
-  const { value, columns, multiline, maxVisibleLines, viewportCharOffset, viewportCharEnd } = params;
-  if (!value) return { above: false, below: false, indicator: null };
-  const above = viewportCharOffset > 0;
-  const below = viewportCharEnd > 0 && viewportCharEnd < value.length;
-  if (above || below) {
-    const hiddenBefore = above ? value.slice(0, viewportCharOffset).split('\n').length : 0;
-    const hiddenAfter = below ? value.slice(viewportCharEnd).split('\n').length : 0;
-    const parts: string[] = [];
-    if (hiddenBefore > 0) parts.push(`↑ +${hiddenBefore} ${hiddenBefore === 1 ? 'line' : 'lines'}`);
-    if (hiddenAfter > 0) parts.push(`↓ +${hiddenAfter} ${hiddenAfter === 1 ? 'line' : 'lines'}`);
-    return { above, below, indicator: `… (${parts.join(', ')} hidden)` };
-  }
-  if (!multiline && maxVisibleLines === 1 && columns > 0 && stringWidth(value) > columns) {
-    const hiddenChars = [...value].length - Math.max(0, columns);
-    if (hiddenChars > 0) {
-      return { above: false, below: true, indicator: `… (+${hiddenChars} more chars)` };
-    }
-  }
-  return { above: false, below: false, indicator: null };
-}
-
 export function BaseTextInput({
   inputState,
   children,
@@ -272,16 +238,6 @@ export function BaseTextInput({
 
   const hasPlaceholderContent = showPlaceholder && Boolean(props.placeholderElement || renderedPlaceholder);
   const hasHighlights = Boolean(filteredHighlights && filteredHighlights.length > 0 && !hasPlaceholderContent);
-  const overflowInfo = hasPlaceholderContent
-    ? { above: false, below: false, indicator: null }
-    : computeTextOverflowIndicator({
-        value: props.value,
-        columns: props.columns,
-        multiline: props.multiline,
-        maxVisibleLines: props.maxVisibleLines,
-        viewportCharOffset,
-        viewportCharEnd,
-      });
 
   const inputProps = {
     ref: setBoxRef,
@@ -293,19 +249,11 @@ export function BaseTextInput({
     onPaste: isActive ? onPaste : undefined,
   };
 
-  const overflowBadge = overflowInfo.indicator ? (
-    <Box flexShrink={0}>
-      <Text dimColor>{overflowInfo.indicator}</Text>
-    </Box>
-  ) : null;
-
-  // densable UTt @202724600:
-  //   highlight: n7 children = [preserve Box(Z), se, i]
-  //   normal:    we = Text(wrap, [X, se, i]); n7 children = we
-  // argumentHint / children are siblings of the value node — not nested inside it,
-  // and not bare Input/Box row siblings (that flexes hint into a second column).
-  // densable 2.1.218 #13: aria-preserve-whitespace on the input value so
-  // trailing spaces (including the cursor cell) are not trimEnd'd in SR mode.
+  // Official 2.1.328 (`I2n` @307455579):
+  //   highlight: Input children = [preserve Box(HighlightedInput), highlightHint, children]
+  //   normal:    Input children = Text(wrap="truncate-end", [valueNode, argumentHint, children])
+  // Keep tree shape invariant across single-line/multiline overflow (no extra row
+  // wrapper that would unmount/remount or violate maxVisibleLines).
   if (hasHighlights && filteredHighlights) {
     // Gold highlight: se has wrap:"truncate-end".
     const highlightHint = showArgumentHint ? (
@@ -314,25 +262,13 @@ export function BaseTextInput({
         {props.argumentHint}
       </Text>
     ) : null;
-    const highlightContent = (
-      <>
+    return (
+      <Input {...inputProps}>
         <Box flexShrink={0} accessibility={{ preserveWhitespace: true }}>
           <HighlightedInput text={renderedValue} highlights={filteredHighlights} />
         </Box>
         {highlightHint}
         {children}
-      </>
-    );
-    return (
-      <Input {...inputProps}>
-        {overflowBadge ? (
-          <Box flexDirection="column" flexGrow={1}>
-            <Box flexDirection="row">{highlightContent}</Box>
-            {overflowBadge}
-          </Box>
-        ) : (
-          highlightContent
-        )}
       </Input>
     );
   }
@@ -356,24 +292,13 @@ export function BaseTextInput({
     </Text>
   );
 
-  const textNode = (
-    <Text wrap="truncate-end" dimColor={props.dimColor}>
-      {valueNode}
-      {argumentHint}
-      {children}
-    </Text>
-  );
-
   return (
     <Input {...inputProps}>
-      {overflowBadge ? (
-        <Box flexDirection="column" flexGrow={1}>
-          {textNode}
-          {overflowBadge}
-        </Box>
-      ) : (
-        textNode
-      )}
+      <Text wrap="truncate-end" dimColor={props.dimColor}>
+        {valueNode}
+        {argumentHint}
+        {children}
+      </Text>
     </Input>
   );
 }

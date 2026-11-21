@@ -236,7 +236,7 @@ import PromptInputFooter from './PromptInputFooter.js';
 import type { SuggestionItem } from './PromptInputFooterSuggestions.js';
 import { PromptInputModeIndicator } from './PromptInputModeIndicator.js';
 import { formatQueuedIdeSelection, PromptInputQueuedCommands } from './PromptInputQueuedCommands.js';
-import { useMaybeTruncateInput } from './useMaybeTruncateInput.js';
+import { noteUserEditForTruncation, TRUNCATE_INPUT_THRESHOLD, useMaybeTruncateInput } from './useMaybeTruncateInput.js';
 import { usePromptInputPlaceholder } from './usePromptInputPlaceholder.js';
 import { useShowFastIconHint } from './useShowFastIconHint.js';
 import {
@@ -489,6 +489,27 @@ export function applyPluginAutocompleteReplacement(
     text: nextText,
     cursor: from + replacementText.length,
   };
+}
+
+type PluginAutocompleteMetadata = {
+  __pluginAutocomplete: true;
+  autocompleteText: string;
+  start?: number;
+};
+
+function getPluginAutocompleteMetadata(item: SuggestionItem | undefined): PluginAutocompleteMetadata | null {
+  const meta = item?.metadata;
+  if (
+    meta &&
+    typeof meta === 'object' &&
+    '__pluginAutocomplete' in meta &&
+    (meta as { __pluginAutocomplete?: unknown }).__pluginAutocomplete === true &&
+    'autocompleteText' in meta &&
+    typeof (meta as { autocompleteText?: unknown }).autocompleteText === 'string'
+  ) {
+    return meta as PluginAutocompleteMetadata;
+  }
+  return null;
 }
 
 // #181 (2.1.326): session-level latch so remounting PromptInput (e.g. after a
@@ -755,9 +776,14 @@ function PromptInput({
     pastedContentsRef.current,
     liveInputRef.current,
   );
+  const keepsFullTextRef = useRef(false);
+
   // Wrap onInputChange to track internal changes before they trigger re-render
   const trackAndSetInput = React.useCallback(
     (value: string, key?: string, origin?: PromptChangeOrigin) => {
+      if (value === '') {
+        keepsFullTextRef.current = false;
+      }
       const before = { text: liveInputRef.current, cursor: cursorOffsetRef.current };
       lastInternalInputRef.current = value;
       liveInputRef.current = value;
@@ -1504,8 +1530,6 @@ function PromptInput({
     debounceMs: 1000,
   });
 
-  const keepsFullTextRef = useRef(false);
-
   useMaybeTruncateInput({
     input,
     pastedContents,
@@ -1523,8 +1547,8 @@ function PromptInput({
     nextStepHint,
   });
 
-  const onChange = useCallback(
-    (value: string) => {
+  const applyInputChange = useCallback(
+    (value: string, options?: { isKeystroke?: boolean }) => {
       if (value === '?') {
         logEvent('tengu_help_toggled', {});
         setHelpOpen(v => !v);
@@ -1538,6 +1562,8 @@ function PromptInput({
       // Cancel any pending prompt suggestion and speculation when user types
       abortPromptSuggestion();
       abortSpeculation(setAppState);
+
+      const isKeystroke = options?.isKeystroke !== false;
 
       // Check if this is a single character insertion at the start
       const isSingleCharInsertion = value.length === input.length + 1;
@@ -1555,6 +1581,9 @@ function PromptInput({
           onModeChange(mode);
           const valueWithoutMode = getValueFromInput(value).replaceAll('\t', '    ');
           pushToBuffer(input, cursorOffset, pastedContents);
+          if (isKeystroke) {
+            noteUserEditForTruncation(valueWithoutMode, keepsFullTextRef);
+          }
           trackAndSetInput(valueWithoutMode);
           setCursorOffset(valueWithoutMode.length);
           return;
@@ -1571,15 +1600,31 @@ function PromptInput({
       // Deselect footer items when user types
       setAppState(prev => (prev.footerSelection === null ? prev : { ...prev, footerSelection: null }));
 
+      // Official 2.1.328 (`OX.setValueTyped` @582526..583550): mark keepsFullText
+      // synchronously BEFORE useMaybeTruncateInput runs so typing char #10,001
+      // never collapses the prompt mid-typing.
+      if (isKeystroke) {
+        noteUserEditForTruncation(processedValue, keepsFullTextRef);
+      }
+
       trackAndSetInput(processedValue, undefined, { kind: 'composer' });
     },
     [trackAndSetInput, onModeChange, input, cursorOffset, pushToBuffer, pastedContents, dismissStashHint, setAppState],
   );
 
+  const onChange = useCallback(
+    (value: string) => {
+      applyInputChange(value, { isKeystroke: true });
+    },
+    [applyInputChange],
+  );
+
   const { resetHistory, onHistoryUp, onHistoryDown, dismissSearchHint, historyIndex, historyTotal, historyEdited } =
     useArrowKeyHistory(
       (value: string, historyMode: HistoryMode, historyPasted: Record<number, PastedContent>) => {
-        onChange(value);
+        // Official 2.1.328 (`wM` @999400): history recall is not a typed keystroke,
+        // so restored >10k prompts still truncate via useMaybeTruncateInput.
+        applyInputChange(value, { isKeystroke: false });
         onModeChange(historyMode);
         setPastedContents(historyPasted);
         // Keep dual-write in lockstep so Enter before parent re-render keeps images.
@@ -2395,7 +2440,7 @@ function PromptInput({
       if (ref) {
         const expanded = liveValue.slice(0, ref.index) + text + liveValue.slice(ref.index + ref.match.length);
         const nextCursor = ref.index + text.length;
-        if (maxVisibleLines !== undefined && expanded.length > 10_000) {
+        if (maxVisibleLines !== undefined && expanded.length > TRUNCATE_INPUT_THRESHOLD) {
           keepsFullTextRef.current = true;
         }
         trackAndSetInput(expanded);
@@ -2437,19 +2482,20 @@ function PromptInput({
         [pasteId]: newContent,
       };
 
+      // Official 2.1.328 (`IY` @1006650..1007280): track every collapsed paste
+      // unconditionally so paste-again-to-expand works for >10k pastes, while
+      // loading, on subsequent pastes, and after the 8s footer hint fades.
+      lastCollapsedPasteIdRef.current = pasteId;
       insertTextAtCursor(formatPastedTextRef(pasteId, numLines));
-      // #171 (2.1.326): show "paste again to expand" for expandable pastes (<= 10k)
-      // only when idle (!isLoading) and not on a subsequent paste, with automatic
-      // cleanup on delete/send/timeout so it never hides mode or `esc to interrupt`.
-      if (!hadExpandPasteHint && !isLoading && text.length <= 10_000) {
-        lastCollapsedPasteIdRef.current = pasteId;
+      // #171 (2.1.326): show "paste again to expand" footer hint for expandable
+      // pastes (<= 10k) only when idle (!isLoading) and not on a subsequent paste.
+      if (!hadExpandPasteHint && !isLoading && text.length <= TRUNCATE_INPUT_THRESHOLD) {
         setShowExpandPasteHint(true);
         if (expandPasteTimerRef.current !== null) {
           clearTimeout(expandPasteTimerRef.current);
         }
         expandPasteTimerRef.current = setTimeout(() => {
           expandPasteTimerRef.current = null;
-          lastCollapsedPasteIdRef.current = null;
           setShowExpandPasteHint(false);
         }, 8_000);
       }
@@ -2494,6 +2540,9 @@ function PromptInput({
     pushToBuffer(currentInput, currentOffset, pastedContentsRef.current);
 
     const { newInput, newOffset } = computeNfcInsertResult(currentInput, currentOffset, text);
+    // Official 2.1.328 (`OX.insertText` @583150..583550): mark keepsFullText
+    // synchronously BEFORE useMaybeTruncateInput runs when cursor insert >10k.
+    noteUserEditForTruncation(newInput, keepsFullTextRef);
     // Paste / N1 does not go through onChange, so footerSelection (e.g. "2 shells"
     // tasks pill) would stay set: TextInput focus=false and Enter maps to
     // footer:openSelected → bashes dialog, pill left in the box ("吞"). Clear
@@ -2592,6 +2641,7 @@ function PromptInput({
     pushToBuffer(input, cursorOffset, pastedContents);
     const newInput = input.slice(0, cursorOffset) + '\n' + input.slice(cursorOffset);
     const nextCursor = cursorOffset + 1;
+    noteUserEditForTruncation(newInput, keepsFullTextRef);
     setCursorOffset(nextCursor);
     cursorOffsetRef.current = nextCursor;
     trackAndSetInput(newInput, '\n');
@@ -3609,9 +3659,32 @@ function PromptInput({
     pendingClickSuggestionIndexRef.current = null;
     fireSuggestionReturnKey();
   }, [selectedSuggestion, fireSuggestionReturnKey]);
+  const acceptPluginAutocompleteItem = useCallback(
+    (item: SuggestionItem | undefined): boolean => {
+      const meta = getPluginAutocompleteMetadata(item);
+      if (!meta) return false;
+      const next = applyPluginAutocompleteReplacement(
+        { text: liveInputRef.current, cursor: cursorOffsetRef.current },
+        meta.autocompleteText,
+        meta.start,
+      );
+      noteUserEditForTruncation(next.text, keepsFullTextRef);
+      setPluginAutocompleteSuggestions([]);
+      setSuggestionsState(prev => (prev.selectedSuggestion === -1 ? prev : { ...prev, selectedSuggestion: -1 }));
+      trackAndSetInput(next.text, undefined, { kind: 'composer' });
+      cursorOffsetRef.current = next.cursor;
+      setCursorOffset(next.cursor);
+      return true;
+    },
+    [trackAndSetInput, setCursorOffset, setSuggestionsState],
+  );
+
   const handleSelectSuggestion = useCallback(
     (index: number, _id: string) => {
       setHoveredSuggestionId(null);
+      if (acceptPluginAutocompleteItem(suggestions[index])) {
+        return;
+      }
       if (index === selectedSuggestion) {
         fireSuggestionReturnKey();
         return;
@@ -3619,7 +3692,7 @@ function PromptInput({
       pendingClickSuggestionIndexRef.current = index;
       setSuggestionsState(prev => ({ ...prev, selectedSuggestion: index }));
     },
-    [selectedSuggestion, fireSuggestionReturnKey, setSuggestionsState],
+    [selectedSuggestion, fireSuggestionReturnKey, setSuggestionsState, acceptPluginAutocompleteItem, suggestions],
   );
 
   // densable UI(Bt): vo(history) then $F(typeahead); short-circuit on prevent/stopImmediate.
@@ -3648,9 +3721,62 @@ function PromptInput({
       }
       historyKeyDown(event);
       if (event.defaultPrevented || event.didStopImmediatePropagation()) return;
+      // Official 2.1.328 (`chunk@319736883 @603686`): accept/navigate merged
+      // prompt.autocomplete plugin suggestions via Tab, Enter, Up/Down, Escape.
+      if (pluginAutocompleteSuggestions.length > 0) {
+        const isPlainKey = !event.ctrl && !event.meta && !event.shift;
+        if (event.name === 'escape' && typeaheadSuggestions.length === 0) {
+          setPluginAutocompleteSuggestions([]);
+          setSuggestionsState(prev => (prev.selectedSuggestion === -1 ? prev : { ...prev, selectedSuggestion: -1 }));
+          event.preventDefault();
+          return;
+        }
+        if (event.name === 'tab' && isPlainKey) {
+          const target =
+            selectedSuggestion >= 0
+              ? suggestions[selectedSuggestion]
+              : typeaheadSuggestions.length === 0
+                ? pluginAutocompleteSuggestions[0]
+                : undefined;
+          if (acceptPluginAutocompleteItem(target)) {
+            event.preventDefault();
+            return;
+          }
+        }
+        if (event.name === 'return' && isPlainKey && selectedSuggestion >= 0) {
+          if (acceptPluginAutocompleteItem(suggestions[selectedSuggestion])) {
+            event.preventDefault();
+            return;
+          }
+        }
+        const isNavDown = event.name === 'down' || (event.ctrl && event.key === 'n');
+        const isNavUp = event.name === 'up' || (event.ctrl && event.key === 'p');
+        if (isNavDown || isNavUp) {
+          const total = suggestions.length;
+          if (total > 0) {
+            setSuggestionsState(prev => {
+              const cur = prev.selectedSuggestion;
+              const next = isNavDown ? (cur < 0 || cur >= total - 1 ? 0 : cur + 1) : cur <= 0 ? total - 1 : cur - 1;
+              return { ...prev, selectedSuggestion: next };
+            });
+            event.preventDefault();
+            return;
+          }
+        }
+      }
       typeaheadKeyDown(event);
     },
-    [historyKeyDown, typeaheadKeyDown, pushToBuffer],
+    [
+      historyKeyDown,
+      typeaheadKeyDown,
+      pushToBuffer,
+      pluginAutocompleteSuggestions,
+      typeaheadSuggestions.length,
+      suggestions,
+      selectedSuggestion,
+      acceptPluginAutocompleteItem,
+      setSuggestionsState,
+    ],
   );
 
   // TextInput/useTextInput submits via its own liveValueRef, which only syncs from

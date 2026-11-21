@@ -15,6 +15,7 @@ import {
   captureScrolledRows,
   createSelectionState,
   hasSelection,
+  hyperlinkAt,
   leftoverGsSelectionBothEndsOff,
   type SelectionState,
   shiftAnchor,
@@ -176,6 +177,37 @@ export class OverlayController {
       hlActive = hlActive || posApplied
     }
     return selActive || hlActive || hoveredLinkPainted
+  }
+
+  /**
+   * Official 2.1.328 `Fm.hoverLinkAt(col, row, isHoverTracked)` — resolve the
+   * OSC 8 hyperlink under `(col, row)` and schedule a render when the hovered
+   * URL or its active underline span changed.
+   */
+  hoverLinkAt(col: number, row: number, isHoverTracked: boolean): void {
+    const link = isHoverTracked
+      ? hyperlinkAt(this.host.screen(), col, row)
+      : undefined
+    const inSpans = this.hoveredLinkSpans.some(
+      span => span.row === row && col >= span.from && col <= span.to,
+    )
+    if (link !== this.hoveredLink || (link !== undefined && !inSpans)) {
+      this.hoveredLink = link
+      this.host.scheduleRender()
+    }
+  }
+
+  /** Official 2.1.328 `Fm.clearHoveredLink()` — drop hovered link & schedule repaint if active. */
+  clearHoveredLink(): void {
+    if (this.hoveredLink !== undefined) {
+      this.hoveredLink = undefined
+      this.host.scheduleRender()
+    }
+  }
+
+  /** Official 2.1.328 `Fm.clearLinkUnderline()` — clear cached underline spans on alt-screen exit. */
+  clearLinkUnderline(): void {
+    this.hoveredLinkSpans = []
   }
 
   subscribeToSelectionChange = (listener: () => void): (() => void) => {

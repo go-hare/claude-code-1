@@ -159,7 +159,7 @@ describe('Regression Fix Agent 5 — UI / REPL / History', () => {
     expect(bti).toContain(
       "keepsImagePaths: () => props.getInputMode?.() === 'bash'",
     )
-    expect(bti).toContain('<Box flexDirection="column" flexGrow={1}>')
+    expect(bti).not.toContain('computeTextOverflowIndicator')
 
     const msgs = readFileSync(join(import.meta.dir, '../Messages.tsx'), 'utf8')
     expect(msgs).toContain('useContext(TerminalWriteContext)')

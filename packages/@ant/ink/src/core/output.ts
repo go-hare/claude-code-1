@@ -404,6 +404,12 @@ export default class Output {
     })
   }
 
+  private checkRightEdgeOf(fromRow: number, toRow: number): void {
+    for (let y = Math.max(0, fromRow); y < Math.min(toRow, this.height); y++) {
+      this.rowsAtRightEdge.add(y)
+    }
+  }
+
   get(): Screen {
     const screen = this.screen
     const screenWidth = this.width
@@ -507,6 +513,9 @@ export default class Output {
             clip?.x2 ?? Infinity,
           )
           if (startX >= maxX || startY >= maxY) continue
+          if (src.width !== screenWidth) {
+            this.checkRightEdgeOf(startY, maxY)
+          }
           // Skip rows covered by an absolute-positioned node's clear.
           // Absolute nodes overlay normal-flow siblings, so prevScreen in
           // that region holds the absolute node's stale paint — blitting
@@ -553,11 +562,12 @@ export default class Output {
 
         case 'shift': {
           shiftRows(screen, operation.top, operation.bottom, operation.n)
+          this.checkRightEdgeOf(operation.top, operation.bottom + 1)
           continue
         }
 
         case 'write': {
-          const { softWrap } = operation
+          const { softWrap, direction } = operation
           let { x, y } = operation
           let lines = operation.lines
           let swFrom = 0
@@ -565,6 +575,9 @@ export default class Output {
           let packedPrev = 0
 
           const clip = clips.at(-1)
+          const applyDirection =
+            direction !== undefined && isSoftwareBidiNeeded()
+          let directedClipX: { x1: number; x2: number } | undefined
 
           if (clip) {
             const clipHorizontally =
@@ -591,42 +604,53 @@ export default class Output {
             }
 
             if (clipHorizontally) {
-              // densable: Ya + lineCells.width from column x; skip lines
-              // outside the vertical slice (`fe<he-1||fe>=ce`).
-              let sliceStart = 0
-              let sliceEnd = lines.length
-              let sliceY = y
-              if (clipVertically) {
-                sliceStart = y < clip.y1! ? clip.y1! - y : 0
-                sliceEnd = y + lines.length > clip.y2! ? clip.y2! - y : sliceEnd
-                sliceY = y < clip.y1! ? clip.y1! : y
-              }
-              sliceEnd = Math.min(sliceEnd, sliceStart + (this.height - sliceY))
-              const reorder = isSoftwareBidiNeeded()
-              let intersects = false
-              lines = lines.map((line, index) => {
-                if (index < sliceStart - 1 || index >= sliceEnd) return line
-                const from = x < clip.x1! ? clip.x1! - x : 0
-                const lineWidth = this.lineCells.width(line, x, reorder)
-                if (x + lineWidth >= clip.x1!) intersects = true
-                if (from === 0 && x + lineWidth <= clip.x2!) return line
-                const sanitized = sanitizeBidiControls(line)
-                let to = clip.x2! - x
-                let sliced = sliceAnsi(sanitized, from, to)
-                const placedX = Math.max(x, clip.x1!)
-                const maxCells = clip.x2! - placedX
-                while (
-                  to > from &&
-                  this.lineCells.width(sliced, placedX, reorder) > maxCells
-                ) {
-                  to--
-                  sliced = sliceAnsi(sanitized, from, to)
+              if (applyDirection) {
+                // Official 2.1.328 `paintWrite` (`ie = Q && gm(M) ? m : void 0`):
+                // when explicit direction + software bidi are active, reorder the
+                // full line visually first and clip columns at placement time.
+                directedClipX = { x1: clip.x1!, x2: clip.x2! }
+              } else {
+                // densable: Ya + lineCells.width from column x; skip lines
+                // outside the vertical slice (`fe<he-1||fe>=ce`).
+                let sliceStart = 0
+                let sliceEnd = lines.length
+                let sliceY = y
+                if (clipVertically) {
+                  sliceStart = y < clip.y1! ? clip.y1! - y : 0
+                  sliceEnd =
+                    y + lines.length > clip.y2! ? clip.y2! - y : sliceEnd
+                  sliceY = y < clip.y1! ? clip.y1! : y
                 }
-                return sliced
-              })
-              if (!intersects) continue
-              if (x < clip.x1!) {
-                x = clip.x1!
+                sliceEnd = Math.min(
+                  sliceEnd,
+                  sliceStart + (this.height - sliceY),
+                )
+                const reorder = isSoftwareBidiNeeded()
+                let intersects = false
+                lines = lines.map((line, index) => {
+                  if (index < sliceStart - 1 || index >= sliceEnd) return line
+                  const from = x < clip.x1! ? clip.x1! - x : 0
+                  const lineWidth = this.lineCells.width(line, x, reorder)
+                  if (x + lineWidth >= clip.x1!) intersects = true
+                  if (from === 0 && x + lineWidth <= clip.x2!) return line
+                  const sanitized = sanitizeBidiControls(line)
+                  let to = clip.x2! - x
+                  let sliced = sliceAnsi(sanitized, from, to)
+                  const placedX = Math.max(x, clip.x1!)
+                  const maxCells = clip.x2! - placedX
+                  while (
+                    to > from &&
+                    this.lineCells.width(sliced, placedX, reorder) > maxCells
+                  ) {
+                    to--
+                    sliced = sliceAnsi(sanitized, from, to)
+                  }
+                  return sliced
+                })
+                if (!intersects) continue
+                if (x < clip.x1!) {
+                  x = clip.x1!
+                }
               }
             }
 
@@ -643,14 +667,17 @@ export default class Output {
                 from > 0 &&
                 kindAtFrom !== SoftWrapKind.HardBreak
               ) {
+                const startCol = directedClipX
+                  ? Math.max(x, directedClipX.x1)
+                  : x
                 packedPrev = packSoftWrap(
-                  x +
+                  startCol +
                     this.lineCells.width(
                       lines[from - 1]!,
-                      x,
+                      startCol,
                       isSoftwareBidiNeeded(),
                     ),
-                  x,
+                  startCol,
                 )
               }
 
@@ -664,6 +691,10 @@ export default class Output {
           }
 
           const swBits = screen.softWrap
+          const swStartCol = directedClipX ? Math.max(x, directedClipX.x1) : x
+          const dirPrefix = applyDirection
+            ? BIDI_DIRECTION_PREFIX[direction]
+            : ''
           let offsetY = 0
 
           for (const line of lines) {
@@ -674,17 +705,18 @@ export default class Output {
             }
             const contentEnd = writeLineToScreen(
               screen,
-              line,
+              dirPrefix ? dirPrefix + line : line,
               x,
               lineY,
               screenWidth,
               this.stylePool,
               this.charCache,
+              directedClipX,
             )
             if (lineY >= 0 && contentEnd >= screenWidth - 1) {
               this.rowsAtRightEdge.add(lineY)
             }
-            writeCells += contentEnd - x
+            writeCells += contentEnd - swStartCol
             // densable write arm: HardBreak→0; Continuation→packedPrev;
             // ContinuationElidedSep→packedPrev|Ao; then seed next packedPrev.
             if (softWrap) {
@@ -695,7 +727,7 @@ export default class Output {
                   : kind === SoftWrapKind.ContinuationElidedSep
                     ? packedPrev | SW_ELIDED_SEP
                     : packedPrev
-              packedPrev = packSoftWrap(contentEnd, x)
+              packedPrev = packSoftWrap(contentEnd, swStartCol)
             }
             offsetY++
           }
@@ -911,6 +943,13 @@ function flushBuffer(
  * the caller can record it in screen.softWrap without re-walking the
  * line via stringWidth(). Caller computes the debug cell-count as end-x.
  */
+// Official 2.1.328 `Lv` — strong directional marks prepended when software bidi
+// reorders a line with an explicit `WriteOperation.direction`.
+const BIDI_DIRECTION_PREFIX = {
+  ltr: '\u200E',
+  rtl: '\u200F',
+} as const
+
 function writeLineToScreen(
   screen: Screen,
   line: string,
@@ -919,6 +958,7 @@ function writeLineToScreen(
   screenWidth: number,
   stylePool: StylePool,
   charCache: Map<string, ClusteredChar[]>,
+  clipX?: { x1: number; x2: number },
 ): number {
   let characters = charCache.get(line)
   if (!characters) {
@@ -932,6 +972,7 @@ function writeLineToScreen(
   }
 
   let offsetX = x
+  let placedEnd = clipX ? Math.max(x, clipX.x1) : x
 
   for (let charIdx = 0; charIdx < characters.length; charIdx++) {
     const character = characters[charIdx]!
@@ -946,12 +987,15 @@ function writeLineToScreen(
         const tabWidth = 8
         const spacesToNextStop = tabWidth - (offsetX % tabWidth)
         for (let i = 0; i < spacesToNextStop && offsetX < screenWidth; i++) {
-          setCellAt(screen, offsetX, y, {
-            char: ' ',
-            styleId: stylePool.none,
-            width: CellWidth.Narrow,
-            hyperlink: undefined,
-          })
+          if (!clipX || (offsetX >= clipX.x1 && offsetX + 1 <= clipX.x2)) {
+            setCellAt(screen, offsetX, y, {
+              char: ' ',
+              styleId: stylePool.none,
+              width: CellWidth.Narrow,
+              hyperlink: undefined,
+            })
+            placedEnd = offsetX + 1
+          }
           offsetX++
         }
       }
@@ -1047,17 +1091,21 @@ function writeLineToScreen(
     }
 
     const isWideCharacter = charWidth >= 2
+    const step = isWideCharacter ? 2 : 1
 
     // Wide char at last column can't fit — terminal would wrap it to
     // the next line, desyncing our cursor model. Place a SpacerHead
     // to mark the blank column, matching terminal behavior.
     if (isWideCharacter && offsetX + 2 > screenWidth) {
-      setCellAt(screen, offsetX, y, {
-        char: ' ',
-        styleId: stylePool.none,
-        width: CellWidth.SpacerHead,
-        hyperlink: undefined,
-      })
+      if (!clipX || (offsetX >= clipX.x1 && offsetX + 1 <= clipX.x2)) {
+        setCellAt(screen, offsetX, y, {
+          char: ' ',
+          styleId: stylePool.none,
+          width: CellWidth.SpacerHead,
+          hyperlink: undefined,
+        })
+        placedEnd = offsetX + 1
+      }
       offsetX++
       continue
     }
@@ -1065,14 +1113,17 @@ function writeLineToScreen(
     // styleId + hyperlink were precomputed during clustering (once per
     // style run, cached via charCache). Hot loop is now just property
     // reads — no intern, no extract, no filter per frame.
-    setCellAt(screen, offsetX, y, {
-      char: character.value,
-      styleId: character.styleId,
-      width: isWideCharacter ? CellWidth.Wide : CellWidth.Narrow,
-      hyperlink: character.hyperlink,
-    })
-    offsetX += isWideCharacter ? 2 : 1
+    if (!clipX || (offsetX >= clipX.x1 && offsetX + step <= clipX.x2)) {
+      setCellAt(screen, offsetX, y, {
+        char: character.value,
+        styleId: character.styleId,
+        width: isWideCharacter ? CellWidth.Wide : CellWidth.Narrow,
+        hyperlink: character.hyperlink,
+      })
+      placedEnd = offsetX + step
+    }
+    offsetX += step
   }
 
-  return offsetX
+  return clipX ? placedEnd : offsetX
 }

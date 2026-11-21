@@ -4,7 +4,30 @@ import type { Message } from '../types/message.js'
 import { getAutoScrollEnabled } from './config.js'
 import { logForDebugging } from './debug.js'
 import { isHumanTurn } from './messagePredicates.js'
-import type { TranscriptStore } from './transcriptStore.js'
+import type { SubscribableTranscript } from './transcriptStore.js'
+
+/**
+ * Official 2.1.328 `KEs` (@318476113 @18650): true when an assistant message
+ * contains at least one non-whitespace text block (tool-use-only rows return
+ * false so they neither increment unseen turn counts nor advance `#w`).
+ */
+export function assistantHasVisibleText(m: Message): boolean {
+  if (m.type !== 'assistant') return false
+  const content = m.message?.content
+  if (!Array.isArray(content)) return false
+  for (const block of content) {
+    if (
+      typeof block === 'object' &&
+      block !== null &&
+      block.type === 'text' &&
+      typeof block.text === 'string' &&
+      block.text.trim() !== ''
+    ) {
+      return true
+    }
+  }
+  return false
+}
 
 export type UnseenDivider = {
   firstUnseenUuid: UUID
@@ -82,7 +105,7 @@ export class ScrollPin {
   private prevBelowTranscriptSlot: boolean | undefined = undefined
 
   constructor(opts: {
-    transcript?: TranscriptStore
+    transcript?: SubscribableTranscript
     computeDivider: (
       messages: readonly Message[],
       dividerIndex: number | null,
@@ -351,7 +374,11 @@ export class ScrollPin {
           m => 'uuid' in m && m.uuid === candidate,
         )
         const msg = idx >= 0 ? messages[idx] : undefined
-        if (msg?.type === 'assistant' && !msg.isApiErrorMessage) {
+        if (
+          msg?.type === 'assistant' &&
+          !msg.isApiErrorMessage &&
+          assistantHasVisibleText(msg)
+        ) {
           this.dividerIndex = idx + 1
         }
       }

@@ -235,11 +235,11 @@ const MAX_INDIC_VOWEL_EXTRA = 8
 
 export type EmojiWidthCalibrator = (grapheme: string) => number | undefined
 
-let customEmojiWidthCalibrator: EmojiWidthCalibrator | undefined
+let customEmojiWidthCalibrator: EmojiWidthCalibrator | null | undefined
 
-/** Official 2.1.326 `Ucl` (#222/#223): register a terminal-specific emoji width calibrator. */
+/** Official 2.1.326/328 `Ucl` (#222/#223): register a terminal-specific emoji width calibrator. */
 export function setTerminalEmojiWidthCalibrator(
-  calibrator: EmojiWidthCalibrator | undefined,
+  calibrator: EmojiWidthCalibrator | null | undefined,
 ): void {
   customEmojiWidthCalibrator = calibrator
 }
@@ -257,15 +257,20 @@ export function isGnuScreenEnv(
   return (env['TERM'] ?? '').startsWith('screen')
 }
 
-function gnuScreenJoinedEmojiWidth(grapheme: string): number {
+const FORMAT_OR_TAG_RE = /^(?:[\p{Cf}\u2065]|[\u{e0020}-\u{e007f}])$/u
+
+function summedJoinedEmojiWidth(
+  grapheme: string,
+  countFormatAsOne: boolean,
+): number {
   let total = 0
   for (const ch of grapheme) {
     const cp = ch.codePointAt(0)!
-    if (
-      cp === 0x200d ||
-      (cp >= 0xfe00 && cp <= 0xfe0f) ||
-      (cp >= 0xe0020 && cp <= 0xe007f)
-    ) {
+    if (cp >= 0xfe00 && cp <= 0xfe0f) {
+      continue
+    }
+    if (FORMAT_OR_TAG_RE.test(ch)) {
+      if (countFormatAsOne) total += 1
       continue
     }
     if (cp >= 0x1f3fb && cp <= 0x1f3ff) {
@@ -277,7 +282,107 @@ function gnuScreenJoinedEmojiWidth(grapheme: string): number {
   return Math.max(total, 2)
 }
 
+function gnuScreenJoinedEmojiWidth(grapheme: string): number {
+  return summedJoinedEmojiWidth(grapheme, false)
+}
+
+// Official 2.1.328 `MA` / `Ql` / `DS` joined-emoji width profiles keyed by
+// lowercase terminal name.
+const JOINED_EMOJI_COLLAPSED_2 = new Set([
+  'ghostty',
+  'xterm-ghostty',
+  'konsole',
+  'wezterm',
+  'foot',
+  'foot-extra',
+])
+const JOINED_EMOJI_SUM_11 = new Set([
+  'vscode',
+  'codium',
+  'cursor',
+  'windsurf',
+  'antigravity',
+  'vte',
+  'vte-based',
+  'gnome-terminal',
+  'terminator',
+  'tilix',
+  'alacritty',
+  'zellij',
+  'rxvt',
+  'rxvt-unicode-256color',
+  'st-256color',
+  'eterm-color',
+])
+const JOINED_EMOJI_SUM_14 = new Set(['apple_terminal', 'mlterm'])
+const JOINED_EMOJI_UNCERTAIN = new Set([
+  'tmux',
+  'tmux-256color',
+  'kitty',
+  'xterm-kitty',
+  'xterm',
+  'xterm.js',
+])
+
+/**
+ * Official 2.1.328 `DS()` — create a terminal-specific emoji width calibrator
+ * for the new renderer (`Ucl(DS())`), returning `null` when the terminal is
+ * unknown or uncalibrated (daemon, Windows, JetBrains).
+ */
+export function createTerminalEmojiWidthCalibrator(
+  env: Record<string, string | undefined> = process.env,
+  versionReply?: string,
+  platform: NodeJS.Platform = process.platform,
+): EmojiWidthCalibrator | null {
+  if (
+    env['CLAUDE_CODE_BG_BACKEND'] === 'daemon' ||
+    platform === 'win32' ||
+    env['TERMINAL_EMULATOR'] === 'JetBrains-JediTerm'
+  ) {
+    return null
+  }
+  const replyName = versionReply?.split(/[ (]/)[0]?.toLowerCase()
+  const mux = env['TMUX']
+    ? 'tmux'
+    : env['STY']
+      ? 'screen'
+      : env['ZELLIJ']
+        ? 'zellij'
+        : undefined
+  const termProgram = env['TERM_PROGRAM']?.toLowerCase()
+  const term = env['TERM']?.toLowerCase()
+  const candidates =
+    replyName !== undefined
+      ? [replyName, termProgram]
+      : term === 'xterm'
+        ? [mux]
+        : term === 'screen'
+          ? [mux, termProgram]
+          : [term, mux, termProgram]
+
+  for (const raw of candidates) {
+    if (!raw) continue
+    if (raw === 'screen') return gnuScreenJoinedEmojiWidth
+    if (JOINED_EMOJI_SUM_14.has(raw)) {
+      return grapheme => summedJoinedEmojiWidth(grapheme, true)
+    }
+    if (JOINED_EMOJI_SUM_11.has(raw)) {
+      return grapheme => summedJoinedEmojiWidth(grapheme, false)
+    }
+    if (JOINED_EMOJI_COLLAPSED_2.has(raw)) {
+      return () => 2
+    }
+    if (JOINED_EMOJI_UNCERTAIN.has(raw)) {
+      return () => undefined
+    }
+  }
+  return null
+}
+
 function getActiveEmojiCalibrator(): EmojiWidthCalibrator | undefined {
+  if (customEmojiWidthCalibrator === null) {
+    return undefined
+  }
   if (customEmojiWidthCalibrator !== undefined) {
     return customEmojiWidthCalibrator
   }

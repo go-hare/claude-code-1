@@ -15,6 +15,7 @@ import {
   getIsNonInteractiveSession,
   getIsRemoteMode,
   getPromptRenderEpoch,
+  isMainThreadQueuedCommand,
 } from '../bootstrap/state.js';
 import { parseTokenBudget } from '../utils/tokenBudget.js';
 import { count } from '../utils/array.js';
@@ -34,8 +35,10 @@ import { TRANSCRIPT_FOOTER_RIGHT_BADGE } from '../utils/transcriptFooterHints.js
 import { writeFile } from 'fs/promises';
 import {
   type TabStatusKind,
+  AccessibilityContext,
   Box,
   Byline,
+  MenuWaitContext,
   Text,
   formatShortcutString,
   stringWidth,
@@ -53,7 +56,6 @@ import {
   useRef,
   useState,
   useCallback,
-  useDeferredValue,
   useLayoutEffect,
   useSyncExternalStore,
   type RefObject,
@@ -164,13 +166,24 @@ import {
 } from '../services/codeMode/optIn.js';
 import {
   applyCodeModePlan,
-  clearCodeModeVmSession,
   cloudMoveRefusal,
   didSessionEndDuringCodeModeScript,
+  endMainThreadConversation,
   mergeCodeModeReplySideEffects,
   planCodeModeFromSession,
   shouldAutoStartCodeModeTurnAfterCommand,
 } from '../services/codeMode/executor.js';
+import { REPL_MAIN_THREAD_KEY } from '../services/codeMode/constants.js';
+import {
+  getReplSessions,
+  isReplSpliceWaitEnabled,
+  lingerForAsyncReplEvents,
+  replSpliceEventBatching,
+} from '../services/codeMode/replSessions.js';
+import {
+  POLL_EVENT_KIND_REPL_EVAL,
+  POLL_EVENT_KIND_REPL_STATUS,
+} from '@claude-code/builtin-tools/tools/PollTool/constants.js';
 import {
   type ElicitationRequestEvent,
   getElicitationCueBehindDraft,
@@ -360,7 +373,26 @@ import {
 import { createPromptDraftController, type PromptDraftController } from '../utils/promptDraftController.js';
 import { SandboxNetworkAccessAsker } from '../dialog/sandboxNetworkAccess.js';
 import type { PromptRequest, PromptResponse } from '../types/hooks.js';
+import stripAnsi from 'strip-ansi';
 import PromptInput from '../components/PromptInput/PromptInput.js';
+import {
+  hideSessionTitleFromTasks,
+  swarmBannerFillColumns,
+  swarmBannerGradientSegments,
+  useSwarmBanner,
+} from '../components/PromptInput/useSwarmBanner.js';
+import {
+  PERMISSION_ASK_USER_QUESTION_KIND,
+  PERMISSION_BASH_KIND,
+  PERMISSION_ENTER_PLAN_MODE_KIND,
+  PERMISSION_EXIT_PLAN_MODE_V2_KIND,
+  PERMISSION_FILE_KIND,
+  PERMISSION_MONITOR_KIND,
+  PERMISSION_POWERSHELL_KIND,
+  PERMISSION_PROMPT_KIND,
+  PERMISSION_SKILL_KIND,
+  PERMISSION_WEBFETCH_KIND,
+} from '../dialog/specs/permissionKinds.js';
 import { viewedAgentForInput } from '../components/PromptInput/viewedAgent.js';
 import { createTaskRegistry } from '../utils/taskRegistry.js';
 import { LivePromptDraft } from '../components/PromptInput/LivePromptDraft.js';
@@ -534,7 +566,12 @@ import type { QueryParams } from '../query.js';
 import { resolveModelFacts } from '../utils/model/modelFacts.js';
 import type { Terminal as QueryTerminal } from '../query/transitions.js';
 import { clearGoalOnUnrecoverableError } from '../services/goal/goalUnrecoverableClear.js';
-import { createHostEngine, type HostEngine } from '../engine/hostEngine.js';
+import {
+  createHostEngine,
+  isErrorClassTerminalReason,
+  isUserAbortTerminalReason,
+  type HostEngine,
+} from '../engine/hostEngine.js';
 import { runHostEngineTurn } from '../engine/hostEngineTurn.js';
 import { preferLiveMcpClients, useMergedClients } from '../hooks/useMergedClients.js';
 import { getQuerySourceForREPL } from '../utils/promptCategory.js';
@@ -543,7 +580,7 @@ import { mergeAndFilterTools } from '../utils/toolPool.js';
 import { useMergedCommands } from '../hooks/useMergedCommands.js';
 import { useSkillsChange } from '../hooks/useSkillsChange.js';
 import { useManagePlugins } from '../hooks/useManagePlugins.js';
-import { Messages } from '../components/Messages.js';
+import { Messages, type MessagesSource } from '../components/Messages.js';
 import { WaitingTranscriptMessages } from '../components/messages/WaitingTranscriptMessages.js';
 import { TaskListV2 } from '../components/TaskListV2.js';
 import { TeammateViewHeader } from '../components/TeammateViewHeader.js';
@@ -658,11 +695,24 @@ export class RewindBackupsStillCopyingError extends Error {
 const REWIND_COPY_WAIT_MS = 2000;
 
 /**
- * Official `FDe` (2.1.321 #1876): panel / dialog overlay layout state so that
- * when a dialog mounted over a command's panel closes (`dialogHostUnmounted` /
- * `dialogOverPanel`), the panel restores immediately without waiting for a redraw.
+ * Official 2.1.328 `Ize` (@319736883 @401578) + `VBe` (@319736883 @1787003):
+ * blocking dialog kinds that hide the prompt input and carry the session/swarm
+ * banner (`JBn`) either inside `modal.footer` (`inPane`) or at the top of
+ * `abovePrompt`.
  */
-const IN_PANE_BLOCKING_DIALOG_KINDS: readonly string[] = ['permission', 'elicitation', 'sandbox-permission'];
+const IN_PANE_BLOCKING_DIALOG_KINDS: readonly string[] = [
+  PERMISSION_ASK_USER_QUESTION_KIND,
+  PERMISSION_PROMPT_KIND,
+  PERMISSION_BASH_KIND,
+  PERMISSION_FILE_KIND,
+  PERMISSION_POWERSHELL_KIND,
+  PERMISSION_WEBFETCH_KIND,
+  PERMISSION_SKILL_KIND,
+  PERMISSION_MONITOR_KIND,
+  SANDBOX_NETWORK_ACCESS_KIND,
+  PERMISSION_ENTER_PLAN_MODE_KIND,
+  PERMISSION_EXIT_PLAN_MODE_V2_KIND,
+];
 
 export function computeDialogPanelVisibility(opts: {
   onScreenBlockingKind: string | null;
@@ -672,15 +722,65 @@ export function computeDialogPanelVisibility(opts: {
   dialogOverPanel: boolean;
   fullscreen: boolean;
 }): { inPane: boolean; abovePrompt: boolean; drawn: boolean } {
-  const inPane =
-    opts.onScreenBlockingKind !== null &&
-    IN_PANE_BLOCKING_DIALOG_KINDS.includes(opts.onScreenBlockingKind) &&
-    opts.modalSlotActive;
+  const isBlockingKind =
+    opts.onScreenBlockingKind !== null && IN_PANE_BLOCKING_DIALOG_KINDS.includes(opts.onScreenBlockingKind);
+  const inPane = isBlockingKind && opts.modalSlotActive;
   const abovePrompt =
-    !inPane &&
-    (opts.panelHidesPrompt || opts.pinnedConsentShowing || opts.onScreenBlockingKind !== null || opts.dialogOverPanel);
+    !inPane && (opts.panelHidesPrompt || opts.pinnedConsentShowing || isBlockingKind || opts.dialogOverPanel);
   const drawn = inPane || (abovePrompt && !(opts.fullscreen && opts.modalSlotActive));
   return { inPane, abovePrompt, drawn };
+}
+
+/**
+ * Official 2.1.328 `JBn` (`chunk@318885035.js @23263`): renders the swarm /
+ * session-title top banner when the prompt input is hidden behind a blocking
+ * dialog or modal (`dialogPanelVis.inPane` → `modal.footer`,
+ * `dialogPanelVis.abovePrompt` → top of `abovePrompt`).
+ */
+function PromptBannerFooter({ hideSessionTitle = false }: { hideSessionTitle?: boolean }): React.ReactNode {
+  const { columns } = useTerminalSize();
+  const isScreenReader = React.useContext(AccessibilityContext);
+  const banner = useSwarmBanner({ hideSessionTitle });
+  if (!banner) return null;
+  const cleanedText = stripAnsi(banner.text).trim();
+  if (!cleanedText) return null;
+  if (isScreenReader) {
+    return (
+      <Text color={banner.bgColor}>
+        <Text backgroundColor={banner.bgColor === 'promptBorder' ? undefined : banner.bgColor} color="inverseText">
+          {' '}
+          {truncateToWidth(cleanedText, Math.max(1, columns - 2))}{' '}
+        </Text>
+      </Text>
+    );
+  }
+  const maxBannerCols = columns - 3;
+  const bannerText = maxBannerCols > 0 ? truncateToWidth(cleanedText, maxBannerCols) : '';
+  const bannerTextWidth = stringWidth(bannerText);
+  const fill = swarmBannerFillColumns(columns, bannerTextWidth);
+  const fillEl =
+    banner.gradient && banner.gradient.length > 0
+      ? swarmBannerGradientSegments(fill, banner.gradient).map((seg, i) => (
+          <Text key={i} color={seg.color as keyof Theme}>
+            {'─'.repeat(seg.dashes)}
+          </Text>
+        ))
+      : '─'.repeat(fill);
+  const badgeBg =
+    (banner.gradient?.at(-1) as keyof Theme | undefined) ??
+    (banner.bgColor === 'promptBorder' ? undefined : banner.bgColor);
+  return (
+    <Text color={(banner.gradient?.at(-1) as keyof Theme | undefined) ?? banner.bgColor}>
+      {fillEl}
+      {bannerText ? (
+        <Text backgroundColor={badgeBg} color="inverseText">
+          {' '}
+          {bannerText}{' '}
+        </Text>
+      ) : null}
+      {bannerText ? '─' : null}
+    </Text>
+  );
 }
 
 const PROACTIVE_NO_OP_SUBSCRIBE = (_cb: () => void) => () => {};
@@ -754,8 +854,10 @@ import {
 } from '../utils/leftArrowVia.js';
 import { getCurrentWorktreeSession, resolveWorktreeExitTargetDir } from '../utils/worktree.js';
 import {
+  type MessageQueueInstance,
   type SetAppState,
   collapseBacklogTaskNotifications,
+  enqueueReplStatusPollEvent,
   isPoppableEditableCommand,
 } from '../utils/messageQueueManager.js';
 import { isVimModeEnabled } from '../components/PromptInput/utils.js';
@@ -786,7 +888,7 @@ const UndercoverAutoCallout =
   process.env.USER_TYPE === 'ant' ? require('../components/UndercoverAutoCallout.js').UndercoverAutoCallout : null;
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { activityManager } from '../utils/activityManager.js';
-import { createAbortController } from '../utils/abortController.js';
+import { createAbortController, getAbortReasonMessage } from '../utils/abortController.js';
 import { createStore } from '../state/store.js';
 import { MCPConnectionManager } from 'src/services/mcp/MCPConnectionManager.js';
 import { useFeedbackSurvey } from 'src/components/FeedbackSurvey/useFeedbackSurvey.js';
@@ -841,7 +943,6 @@ import { shouldShowFullscreenUpsell } from '../utils/fullscreenUpsellGate.js';
 import { usePluginInstallationStatus } from 'src/hooks/notifs/usePluginInstallationStatus.js';
 import { usePluginAutoupdateNotification } from 'src/hooks/notifs/usePluginAutoupdateNotification.js';
 import { performStartupChecks } from 'src/utils/plugins/performStartupChecks.js';
-import { UserTextMessage } from 'src/components/messages/UserTextMessage.js';
 import { AwsAuthStatusBox } from '../components/AwsAuthStatusBox.js';
 import { useRateLimitWarningNotification } from 'src/hooks/notifs/useRateLimitWarningNotification.js';
 import { useQuotaAutoResume } from 'src/hooks/notifs/useQuotaAutoResume.js';
@@ -887,7 +988,6 @@ import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, computeUnseenDivider } from '../components/FullscreenLayout.js';
 import { type RenderPacing, RenderPacingContext } from '../context/renderPacingContext.js';
 import { ScrollPin } from '../utils/scrollPin.js';
-import { TranscriptStore } from '../utils/transcriptStore.js';
 import { ToastStackView } from '../components/PromptInput/Notifications.js';
 import { formatPluginToastKey, getToasts, pushToast } from '../components/toastStore.js';
 import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
@@ -933,6 +1033,7 @@ const EMPTY_MCP_CLIENTS: MCPServerConnection[] = [];
 const HISTORY_STUB = { maybeLoadOlder: (_: ScrollBoxHandle) => {} };
 const EMPTY_STRING_SET = new Set<string>();
 const EMPTY_STREAMING_TOOL_USES: StreamingToolUse[] = [];
+const EMPTY_MESSAGES: MessageType[] = [];
 
 // Use LRU cache to prevent unbounded memory growth
 // 100 files should be sufficient for most coding sessions while preventing
@@ -1721,6 +1822,123 @@ function isForkBoilerplateMessage(message: MessageType): boolean {
   return message.message.content.some(isForkBoilerplateTextBlock);
 }
 
+/** Official 2.1.328 `toolUseIdsIn` (chunk@339792394.js @6827). */
+function extractResumedToolUseIds(messages: readonly MessageType[]): Set<string> {
+  const ids = new Set<string>();
+  for (const msg of messages) {
+    if (msg.type !== 'assistant' || !Array.isArray(msg.message?.content)) continue;
+    for (const block of msg.message.content) {
+      if (block && typeof block === 'object' && block.type === 'tool_use' && typeof block.id === 'string') {
+        ids.add(block.id);
+      }
+    }
+  }
+  return ids;
+}
+
+function extractEvalIdsFromText(text: string): number[] {
+  const ids: number[] = [];
+  const attrRe = /\beval="(\d+)"/g;
+  for (const m of text.matchAll(attrRe)) {
+    const id = Number(m[1]);
+    if (Number.isFinite(id)) ids.push(id);
+  }
+  if (ids.length === 0) {
+    const hashRe = /\beval #(\d+)\b/g;
+    for (const m of text.matchAll(hashRe)) {
+      const id = Number(m[1]);
+      if (Number.isFinite(id)) ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function extractEvalIdFromToolUseResult(toolUseResult: unknown): number | undefined {
+  if (toolUseResult === null || toolUseResult === undefined) return undefined;
+  if (typeof toolUseResult === 'string') {
+    return extractEvalIdsFromText(toolUseResult)[0];
+  }
+  if (typeof toolUseResult === 'object') {
+    const rec = toolUseResult as Record<string, unknown>;
+    if (typeof rec.evalId === 'number' && Number.isFinite(rec.evalId)) {
+      return rec.evalId;
+    }
+    if (typeof rec.content === 'string') {
+      return extractEvalIdsFromText(rec.content)[0];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Official 2.1.328 `danglingReceipts(Gt).map(r => r.toolUseId)`
+ * (chunk@328404352.js @2183, chunk@319736883.js @475488):
+ * returns unresolved Code Mode REPL tool_use IDs carried by the resumed transcript.
+ */
+function extractResumedDanglingReplToolUseIds(messages: readonly MessageType[]): string[] {
+  const replToolUseIds = new Set<string>();
+  const pollToolUseIds = new Set<string>();
+  const pending: Array<{ toolUseId: string; evalId: number }> = [];
+  const settleEvalId = (evalId: number): void => {
+    const idx = pending.findLastIndex(entry => entry.evalId === evalId);
+    if (idx !== -1) pending.splice(idx, 1);
+  };
+  for (const msg of messages) {
+    if (msg.type === 'attachment') {
+      const att = (msg as { attachment?: { type?: unknown; envelopes?: unknown } }).attachment;
+      if (att?.type === 'poll_events' && Array.isArray(att.envelopes)) {
+        for (const env of att.envelopes) {
+          if (typeof env === 'string') {
+            for (const id of extractEvalIdsFromText(env)) settleEvalId(id);
+          }
+        }
+      }
+      continue;
+    }
+    if (msg.type === 'assistant' && !('isVirtual' in msg && msg.isVirtual)) {
+      if (!Array.isArray(msg.message?.content)) continue;
+      for (const block of msg.message.content) {
+        if (!block || typeof block !== 'object' || block.type !== 'tool_use' || typeof block.id !== 'string') {
+          continue;
+        }
+        if (block.name === 'REPL') replToolUseIds.add(block.id);
+        else if (block.name === 'Poll') pollToolUseIds.add(block.id);
+      }
+      continue;
+    }
+    if (msg.type !== 'user' || ('isVirtual' in msg && msg.isVirtual)) continue;
+    const content = msg.message?.content;
+    if (!Array.isArray(content)) continue;
+    const toolUseResult = (msg as { toolUseResult?: unknown }).toolUseResult;
+    for (const block of content) {
+      if (!block || typeof block !== 'object' || block.type !== 'tool_result') continue;
+      const toolUseId = (block as { tool_use_id?: unknown }).tool_use_id;
+      if (typeof toolUseId !== 'string') continue;
+      if (pollToolUseIds.has(toolUseId)) {
+        const resultText =
+          typeof toolUseResult === 'object' && toolUseResult !== null && 'content' in toolUseResult
+            ? typeof (toolUseResult as { content?: unknown }).content === 'string'
+              ? (toolUseResult as { content: string }).content
+              : ''
+            : typeof (block as { content?: unknown }).content === 'string'
+              ? (block as { content: string }).content
+              : '';
+        for (const id of extractEvalIdsFromText(resultText)) settleEvalId(id);
+      } else if (replToolUseIds.has(toolUseId)) {
+        const evalId =
+          extractEvalIdFromToolUseResult(toolUseResult) ??
+          (typeof (block as { content?: unknown }).content === 'string'
+            ? extractEvalIdsFromText((block as { content: string }).content)[0]
+            : undefined);
+        if (evalId !== undefined) {
+          pending.push({ toolUseId, evalId });
+        }
+      }
+    }
+  }
+  return pending.map(entry => entry.toolUseId);
+}
+
 /** Official 2.1.328 `Efn()` — initial render pacing context value (null). */
 function createInitialRenderPacing(): RenderPacing | null {
   return null;
@@ -1782,6 +2000,7 @@ function REPLInner({
   // Turn body (Sse) → query(); turn pump (HWf) → runHostEngineTurn.
   const hostEngineOwned = externalHostEngine === undefined;
   const turnControllerRef = useRef<TurnController | null>(null);
+  const messageQueueRef = useRef<MessageQueueInstance | null>(null);
   const [hostEngine] = useState<HostEngine>(() => {
     if (externalHostEngine) return externalHostEngine;
     return createHostEngine<QueryParams>({
@@ -1792,21 +2011,38 @@ function REPLInner({
         return turn.readPendingQueryParams();
       },
       runTurn: async function* (prepared, abortController) {
-        // densable Sse: engine AC is turn authority; link REPL AC if distinct.
+        // Official 2.1.328 HGt (chunk@306199530.js @73100-73350, @83300-84900):
+        // Preserve externalAc.signal.reason verbatim on engine abortController,
+        // back-propagate refusal-fallback-edit to externalAc, remove BOTH abort
+        // listeners in finally, and let hostEngine synthesize the result envelope
+        // AFTER runTurn exits and finally cleanup completes.
         const externalAc = prepared.toolUseContext.abortController;
-        if (externalAc && externalAc !== abortController) {
+        const hasDistinctExternalAc = Boolean(externalAc && externalAc !== abortController);
+        const onExternalAbort = () => {
+          if (!abortController.signal.aborted) {
+            abortController.abort(externalAc?.signal.reason);
+          }
+        };
+        const onEngineAbort = () => {
+          if (
+            getAbortReasonMessage(abortController.signal.reason) === 'refusal-fallback-edit' &&
+            externalAc &&
+            externalAc !== abortController &&
+            !externalAc.signal.aborted
+          ) {
+            externalAc.abort(abortController.signal.reason);
+          }
+        };
+        if (hasDistinctExternalAc && externalAc) {
           if (externalAc.signal.aborted) {
             abortController.abort(externalAc.signal.reason);
           } else {
-            externalAc.signal.addEventListener(
-              'abort',
-              () => {
-                if (!abortController.signal.aborted) {
-                  abortController.abort(externalAc.signal.reason);
-                }
-              },
-              { once: true },
-            );
+            externalAc.signal.addEventListener('abort', onExternalAbort, { once: true });
+          }
+          if (abortController.signal.aborted) {
+            onEngineAbort();
+          } else {
+            abortController.signal.addEventListener('abort', onEngineAbort, { once: true });
           }
         }
         const toolUseContext = {
@@ -1816,40 +2052,69 @@ function REPLInner({
         let terminal: QueryTerminal | undefined;
         let thrown: unknown;
         try {
-          terminal = yield* query({
-            ...prepared,
+          try {
+            terminal = yield* query({
+              ...prepared,
+              toolUseContext,
+            });
+          } catch (err) {
+            thrown = err;
+          }
+          // Official 2.1.328 Hc (chunk@305854618.js @104576):
+          // Linger briefly for detached/unwaited async Code Mode REPL eval
+          // events at turn end before reporting pending status.
+          if (
+            thrown === undefined &&
+            !abortController.signal.aborted &&
+            !isUserAbortTerminalReason(terminal?.reason) &&
+            !isErrorClassTerminalReason(terminal?.reason) &&
+            isCodeModeEnabled() &&
+            isReplSpliceWaitEnabled()
+          ) {
+            const mq = messageQueueRef.current;
+            if (mq) {
+              await lingerForAsyncReplEvents({
+                key: REPL_MAIN_THREAD_KEY,
+                signal: abortController.signal,
+                getNews: () =>
+                  mq
+                    .getCommands()
+                    .filter(
+                      cmd =>
+                        isMainThreadQueuedCommand(cmd) &&
+                        !(cmd.mode === 'poll-event' && cmd.pollEvent?.kind === POLL_EVENT_KIND_REPL_STATUS),
+                    ),
+                subscribe: fn => mq.subscribe(fn),
+                isEvalSettleItem: item => {
+                  const cmd = item as QueuedCommand;
+                  return cmd.mode === 'poll-event' && cmd.pollEvent?.kind === POLL_EVENT_KIND_REPL_EVAL;
+                },
+                onPendingStatus: pending => {
+                  enqueueReplStatusPollEvent({ ledger: pending });
+                },
+                ...replSpliceEventBatching(),
+              });
+            }
+          }
+          // densable Ebe finally: yield* pXp(activeGoal, toolUseContext, querySource, terminal)
+          const clearTerminal =
+            terminal ?? (thrown !== undefined ? ({ reason: 'api_error', error: thrown } as QueryTerminal) : undefined);
+          yield* clearGoalOnUnrecoverableError(
+            toolUseContext.getAppState().activeGoal,
             toolUseContext,
-          });
-        } catch (err) {
-          thrown = err;
+            prepared.querySource,
+            clearTerminal,
+          );
+          if (thrown !== undefined) {
+            throw thrown;
+          }
+          return terminal;
+        } finally {
+          if (hasDistinctExternalAc) {
+            externalAc?.signal.removeEventListener('abort', onExternalAbort);
+            abortController.signal.removeEventListener('abort', onEngineAbort);
+          }
         }
-        // densable Ebe finally: yield* pXp(activeGoal, toolUseContext, querySource, terminal)
-        const clearTerminal =
-          terminal ?? (thrown !== undefined ? ({ reason: 'api_error', error: thrown } as QueryTerminal) : undefined);
-        yield* clearGoalOnUnrecoverableError(
-          toolUseContext.getAppState().activeGoal,
-          toolUseContext,
-          prepared.querySource,
-          clearTerminal,
-        );
-        // densable HWf breaks on type:"result" — always emit terminal envelope.
-        const reason = terminal?.reason ?? (thrown !== undefined ? 'api_error' : 'completed');
-        yield {
-          type: 'result',
-          subtype: reason === 'completed' ? 'success' : 'error',
-          is_error: reason !== 'completed',
-          terminal_reason: reason,
-          result: reason,
-          ...(thrown !== undefined
-            ? {
-                errors: [thrown instanceof Error ? thrown.message : String(thrown)],
-              }
-            : {}),
-        };
-        if (thrown !== undefined) {
-          throw thrown;
-        }
-        return terminal;
       },
     });
   });
@@ -1904,6 +2169,7 @@ function REPLInner({
   const disableMessageActions = feature('MESSAGE_ACTIONS') ? disableMessageActionsRaw : false;
   const buddyEnabled = isBuddyEnabled();
   const messageQueue = useMessageQueue();
+  messageQueueRef.current = messageQueue;
 
   // Log REPL mount/unmount lifecycle
   useEffect(() => {
@@ -2500,6 +2766,7 @@ function REPLInner({
       if (ac && !ac.signal.aborted) {
         ac.abort(createAbortErrorReason('remote-cancel'));
       }
+      void hostEngine.interrupt('remote-cancel');
       try {
         const { cancelLoopWakeupsOnUserAbort } =
           require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js');
@@ -2509,7 +2776,7 @@ function REPLInner({
       }
     });
     return () => registerInteractiveShutdownAbort(null);
-  }, []);
+  }, [hostEngine, turnController]);
 
   // densable `_abortOnNowPriorityCommand` — `#k` promoteToNow aborts the live turn.
   useEffect(() => {
@@ -2538,17 +2805,16 @@ function REPLInner({
   // defined, read in the onQuery finally block for auto-restore on interrupt.
   const restoreMessageSyncRef = useRef<(m: UserMessage) => void>(() => {});
 
-  // Official 2.1.328 subscribable TranscriptStore + ScrollPin (`Zse`).
-  const transcriptStoreRef = useRef<TranscriptStore | null>(null);
-  if (transcriptStoreRef.current === null) {
-    transcriptStoreRef.current = new TranscriptStore();
-  }
-  const transcriptStore = transcriptStoreRef.current;
+  // Official 2.1.328 single-source subscribable transcript (`transcriptProjection`)
+  // + ScrollPin (`Zse`). ScrollPin subscribes directly to `transcriptProjection`
+  // with zero `useLayoutEffect` bridge or shadow copy.
+  const isBriefDividerModeRef = useRef(false);
+  isBriefDividerModeRef.current = Boolean(isBriefOnly || briefTranscript);
   const scrollPinRef = useRef<ScrollPin | null>(null);
   if (scrollPinRef.current === null) {
     scrollPinRef.current = new ScrollPin({
-      transcript: transcriptStore,
-      computeDivider: (msgs, idx) => computeUnseenDivider(msgs as MessageType[], idx),
+      transcript: transcriptProjection,
+      computeDivider: (msgs, idx) => computeUnseenDivider(msgs as MessageType[], idx, isBriefDividerModeRef.current),
     });
   }
   const scrollPin = scrollPinRef.current;
@@ -2559,18 +2825,11 @@ function REPLInner({
   // Elapsed time is computed by SpinnerWithVerb from these refs on each
   // animation frame, avoiding a useInterval that re-renders the entire REPL.
   const [userInputOnProcessing, setUserInputOnProcessingRaw] = React.useState<string | undefined>(undefined);
-  // densable PKe: show h9e while `displayed.length <= placeholderBaseline`.
-  // Snapshot messages.length at submit (before the user turn lands). Clearing
-  // the echo on setMessages alone is wrong on Windows (yank-bug → deferred
-  // Messages lag → one blank frame between echo hide and deferred catch-up).
-  // Once displayed has passed baseline, latch dismissed — mid-turn compact
-  // can shrink `messages.length` back under baseline and must not resurrect
-  // the echo. Bridge pending clears only after deferred has caught past the
-  // submit point (length compare under DEFERRED_CAP; ref equality over cap,
-  // where capped length stays ≤500 and cannot grow past baseline).
+  // Official 2.1.328 `Tje` + `PKe`: snapshot messages.length at submit (before
+  // the user turn lands). `<Messages>` evaluates placeholder visibility against
+  // the exact same deferred message snapshot it renders so the prompt is never
+  // echoed twice and never blanks during deferral.
   const [placeholderBaseline, setPlaceholderBaseline] = React.useState<number | undefined>(undefined);
-  const placeholderEchoDismissedRef = React.useRef(false);
-  const placeholderBridgePendingRef = React.useRef(false);
 
   // densable 2.1.218 #18: monotonic clock for turn duration (performance.now),
   // not Date.now wall clock — NTP / clock adjustments must not yield negative
@@ -3714,21 +3973,20 @@ function REPLInner({
   const setUserInputOnProcessing = useCallback((input: string | undefined) => {
     if (input !== undefined) {
       setPlaceholderBaseline(messagesRef.current.length);
-      placeholderEchoDismissedRef.current = false;
-      placeholderBridgePendingRef.current = true;
     } else {
       setPlaceholderBaseline(undefined);
-      placeholderBridgePendingRef.current = false;
     }
     setUserInputOnProcessingRaw(input);
   }, []);
-  scrollPin.setRenderedLength(messages.length);
+  // Official 2.1.328 `zse` -> `Tje` `onRowsDrawn`: track the actually drawn
+  // (possibly deferred) message length in ScrollPin.
+  const onMessagesRowsDrawn = useCallback(
+    (drawnMessages: readonly MessageType[]) => {
+      scrollPin.setRenderedLength(drawnMessages.length);
+    },
+    [scrollPin],
+  );
   scrollPin.setReplyStreaming(isLoading);
-  // Publish live messages into TranscriptStore so ScrollPin and Messages
-  // react via subscription without an effect bridge.
-  useLayoutEffect(() => {
-    transcriptStore.setMessages(messages);
-  }, [transcriptStore, messages]);
   const scrollPinSnapshot = React.useSyncExternalStore(scrollPin.subscribe, scrollPin.getSnapshot);
   const unseenDivider = scrollPinSnapshot.unseenDivider;
   if (feature('AWAY_SUMMARY')) {
@@ -3777,16 +4035,6 @@ function REPLInner({
   // must be called before the first API call so the model sees hook context.
   const awaitPendingHooks = useDeferredHookMessages(pendingHookMessages, setMessages);
   turnController.bindSessionStartHooks(awaitPendingHooks);
-
-  // Official 2.1.150 rEH: useDeferredValue(messages), the full list.
-  // No 500-message slice — while loading, older turns stay in the deferred tree.
-  const deferredMessages = useDeferredValue(messages);
-  const deferredBehind = messages.length - deferredMessages.length;
-  if (deferredBehind > 0) {
-    logForDebugging(
-      `[useDeferredValue] Messages deferred by ${deferredBehind} (${deferredMessages.length}→${messages.length})`,
-    );
-  }
 
   // Frozen state for transcript mode - stores lengths instead of cloning arrays for memory efficiency
   const [frozenTranscriptState, setFrozenTranscriptState] = useState<{
@@ -4144,6 +4392,7 @@ function REPLInner({
   // Ref instead of state to avoid triggering React re-renders on every
   // streaming text_delta. The spinner reads this via its animation timer.
   const responseLengthRef = useRef(0);
+  turnController.bindResponseLengthRef(responseLengthRef);
   const compactProgressActiveRef = useRef(false);
   const [compactingHint, setCompactingHint] = useState<string | null>(null);
   const [compactingStartTime, setCompactingStartTime] = useState<number | null>(null);
@@ -4980,6 +5229,7 @@ function REPLInner({
   const resume = useCallback(
     async (sessionId: UUID, log: LogOption, entrypoint: ResumeEntrypoint) => {
       const resumeStart = performance.now();
+      const prevSessionId = getSessionId();
       try {
         // Official 2.1.323 (#1964) & 2.1.325 (#2316) & 2.1.328 (#573/#574/#575/#582):
         // reconcile Code Mode opt-in state with resumed session, track
@@ -5015,8 +5265,6 @@ function REPLInner({
           throw new Error(codeModePlan.refused);
         }
         applyCodeModePlan(codeModePlan);
-        // Official 2.1.328: clear VM session state when switching sessions on /resume.
-        clearCodeModeVmSession();
         codeModeAutoBackgroundEligibleRef.current = codeModePlan.autoBackgroundEligible === true;
         const waitForNextPromptAfterCodeModeResume =
           codeModePlan.waitForNextPrompt === true ||
@@ -5073,6 +5321,26 @@ function REPLInner({
         // the unresumed message so the next turn does not chain onto it.
         if (turnInterruptionState.kind === 'interrupted_prompt') {
           stripUnresumedInterruptedMessages(messages, turnInterruptionState);
+        }
+
+        // Official 2.1.328 (chunk@319736883.js @475488): restore rewound REPL
+        // tool uses in the resumed transcript and clear ONLY the main-thread
+        // Code Mode conversation (preserving surviving subagents and any
+        // dangling eval receipts carried by the resumed conversation).
+        if (entrypoint !== 'fork') {
+          const resumedToolUseIds = extractResumedToolUseIds(messages);
+          getReplSessions().bringBackRewound(REPL_MAIN_THREAD_KEY, resumedToolUseIds);
+          if (sessionId !== prevSessionId) {
+            const keepToolUseIds = extractResumedDanglingReplToolUseIds(messages);
+            endMainThreadConversation('another conversation was resumed', keepToolUseIds, {
+              removeByFilter: predicate =>
+                messageQueue.removeByFilter(cmd =>
+                  predicate(cmd as unknown as Parameters<typeof predicate>[0]),
+                ) as unknown as ReturnType<
+                  NonNullable<Parameters<typeof endMainThreadConversation>[2]>['removeByFilter']
+                >,
+            });
+          }
         }
 
         // Match coordinator/normal mode to the resumed session
@@ -5271,7 +5539,7 @@ function REPLInner({
           planModeResumeLane: 'interactive',
         });
         const applyInteractivePlanModeRestore = await preparePlanModeRestoreOnInteractiveResume({
-          storedPermissionMode: log.mode,
+          storedPermissionMode: log.permissionMode,
           messages: log.messages as import('../utils/permissions/planModeResume.js').TranscriptPlanScanMessage[],
           forkSession: entrypoint === 'fork',
           permissionModeSuppliedOnInvocation: false,
@@ -5492,7 +5760,7 @@ function REPLInner({
         throw error;
       }
     },
-    [resetLoadingState, setAppState, offerResumeReturnIfNeeded, repinScroll],
+    [resetLoadingState, setAppState, offerResumeReturnIfNeeded, repinScroll, messageQueue],
   );
 
   // Lazy init: useRef(createX()) would call createX on every render and
@@ -6073,6 +6341,9 @@ function REPLInner({
     } else {
       abortController?.abort('user-cancel');
     }
+    if (!activeRemote.isRemoteMode) {
+      void hostEngine.interrupt('user-cancel');
+    }
     for (const [id, entry] of getDetachedToolCallSnapshot()) {
       if (entry.status === 'running' && !entry.stopRequested) {
         detachedToolCallAbort(id, 'user-cancel');
@@ -6615,6 +6886,7 @@ function REPLInner({
         throw new Error(`$.turn.abort: no turn is running (asked for ${turnId})`);
       }
       ac.abort('user-cancel');
+      void hostEngine.interrupt('user-cancel');
       return { aborted: turnId };
     });
     setSessionCompactHandler(async ({ instructions }) => {
@@ -8764,7 +9036,8 @@ function REPLInner({
           clearTimeout(editorTimerRef.current);
           setEditorStatus(s);
         };
-        setStatus(`rendering ${deferredMessages.length} messages…`);
+        const exportMessages = messagesRef.current;
+        setStatus(`rendering ${exportMessages.length} messages…`);
         void (async () => {
           try {
             // Width = terminal minus vim's line-number gutter (4 digits +
@@ -8773,7 +9046,7 @@ function REPLInner({
             // aligned timestamps still leave a flexbox spacer run at EOL.
             // eslint-disable-next-line custom-rules/prefer-use-terminal-size -- one-shot at keypress time, not a reactive render dep
             const w = Math.max(80, (process.stdout.columns ?? 80) - 6);
-            const raw = await renderMessagesToPlainText(deferredMessages, tools, w);
+            const raw = await renderMessagesToPlainText(exportMessages, tools, w);
             const text = raw.replace(/[ \t]+$/gm, '');
             const path = join(tmpdir(), `cc-transcript-${Date.now()}.txt`);
             await writeFile(path, text);
@@ -8839,9 +9112,7 @@ function REPLInner({
   };
 
   // Use frozen lengths to slice arrays, avoiding memory overhead of cloning
-  const transcriptMessages = frozenTranscriptState
-    ? deferredMessages.slice(0, frozenTranscriptState.messagesLength)
-    : deferredMessages;
+  const transcriptMessages = frozenTranscriptState ? messages.slice(0, frozenTranscriptState.messagesLength) : messages;
   const transcriptStreamingToolUses = frozenTranscriptState
     ? streamingToolUses.slice(0, frozenTranscriptState.streamingToolUsesLength)
     : streamingToolUses;
@@ -8870,23 +9141,6 @@ function REPLInner({
   const viewedTeammateTask = viewedTask && isInProcessTeammateTask(viewedTask) ? viewedTask : undefined;
   const viewedAgentTask = viewedTeammateTask ?? (viewedTask && isLocalAgentTask(viewedTask) ? viewedTask : undefined);
 
-  // Official 2.1.150: deferMessages = !viewingAgent && !previewEnabled && isLoading.
-  // previewEnabled is the default (no reduced motion, not Windows Terminal),
-  // so a normal turn passes messages through unsliced. Defer only when preview
-  // is off and the turn is still loading. Placeholder bridge still forces sync
-  // until deferred catches the submit, so the echoed input does not blank.
-  if (
-    placeholderBridgePendingRef.current &&
-    placeholderBaseline !== undefined &&
-    messages.length > placeholderBaseline
-  ) {
-    const deferredCaught = deferredMessages.length > placeholderBaseline;
-    if (deferredCaught) {
-      placeholderBridgePendingRef.current = false;
-    }
-  }
-  const placeholderBridgeActive = placeholderBridgePendingRef.current && deferredMessages !== messages;
-  const usesSyncMessages = showStreamingText || !isLoading || placeholderBridgeActive;
   // When viewing an agent, never fall through to leader — empty until
   // bootstrap/stream fills. Closes the see-leader-type-agent footgun.
   const rawAgentMessages = viewedAgentTask?.messages;
@@ -8964,12 +9218,17 @@ function REPLInner({
     });
     return [...stripped.slice(0, insertAt), synthetic, ...stripped.slice(insertAt)];
   }, [viewedAgentTask, rawAgentMessages]);
-  const displayedMessages = viewedAgentTask
-    ? (displayedAgentMessages ?? [])
-    : usesSyncMessages
-      ? messages
-      : deferredMessages;
+  const staticAgentMessages = viewedAgentTask ? (displayedAgentMessages ?? EMPTY_MESSAGES) : null;
   const focusedConversationId = viewedAgentTask ? viewedAgentTask.id : conversationId;
+  // Official 2.1.328 `zse` -> `Tje` memoized source: stable reference in main
+  // conversation so `<Messages>` React.memo is never busted by message updates.
+  const messagesSource: MessagesSource = useMemo(
+    () =>
+      staticAgentMessages !== null
+        ? { kind: 'static', messages: staticAgentMessages, conversationId: focusedConversationId }
+        : { kind: 'live', transcript: transcriptProjection, conversationId: focusedConversationId, isMain: true },
+    [staticAgentMessages, transcriptProjection, focusedConversationId],
+  );
   // Derive unresolved tool_use IDs for a running local_agent from its displayed
   // messages so active tool calls render their running indicator (matches
   // official 2.1.328 transcripts[z].inProgressToolUseIDs in C0a).
@@ -9105,7 +9364,7 @@ function REPLInner({
       isFullscreenEnvEnabled() && !disableVirtualScroll && !dumpMode ? scrollViewport : undefined;
     const transcriptMessagesElement = (
       <Messages
-        messages={viewedAgentTask ? displayedMessages : transcriptMessages}
+        messages={staticAgentMessages ?? transcriptMessages}
         tools={tools}
         commands={commands}
         verbose={true}
@@ -9132,7 +9391,11 @@ function REPLInner({
     );
     const transcriptToolJSX = toolJSX && (
       <Box flexDirection="column" width="100%">
-        {toolJSX.jsx}
+        {toolJSX.isLocalJSXCommand ? (
+          <MenuWaitContext.Provider value={true}>{toolJSX.jsx}</MenuWaitContext.Provider>
+        ) : (
+          toolJSX.jsx
+        )}
       </Box>
     );
     const transcriptReturn = (
@@ -9180,7 +9443,7 @@ function REPLInner({
                 {transcriptMessagesElement}
                 <WaitingTranscriptMessages
                   task={viewedAgentTask}
-                  messages={viewedAgentTask ? displayedMessages : transcriptMessages}
+                  messages={staticAgentMessages ?? transcriptMessages}
                   isLoading={focusedIsLoading}
                 />
                 {transcriptToolJSX}
@@ -9251,7 +9514,7 @@ function REPLInner({
             {transcriptMessagesElement}
             <WaitingTranscriptMessages
               task={viewedAgentTask}
-              messages={viewedAgentTask ? displayedMessages : transcriptMessages}
+              messages={staticAgentMessages ?? transcriptMessages}
               isLoading={focusedIsLoading}
             />
             {transcriptToolJSX}
@@ -9284,27 +9547,6 @@ function REPLInner({
     return transcriptReturn;
   }
 
-  // densable PKe: placeholderElement while displayed.length <= baseline.
-  // userInputOnProcessing (`go`) stays for the whole turn; baseline gate
-  // hides the echo once deferred/sync Messages includes the new turn.
-  // Latch dismissed after first past-baseline render so mid-turn compact
-  // cannot resurrect the echo when length drops again.
-  if (placeholderBaseline !== undefined && displayedMessages.length > placeholderBaseline) {
-    placeholderEchoDismissedRef.current = true;
-  }
-  const placeholderText =
-    userInputOnProcessing &&
-    !viewedAgentTask &&
-    placeholderBaseline !== undefined &&
-    !placeholderEchoDismissedRef.current &&
-    displayedMessages.length <= placeholderBaseline
-      ? userInputOnProcessing
-      : undefined;
-
-  // densable NMs owns permission UI (jsu → Iiu). Gold Tyn has no overlay
-  // slot — queue-only pushers must mirror into DialogStore
-  // (createPermissionQueueOps).
-
   // Narrow terminals: companion collapses to a one-liner that REPL stacks
   // on its own row (above input in fullscreen, below in scrollback) instead
   // of row-beside. Wide terminals keep the row layout with sprite on the right.
@@ -9320,34 +9562,36 @@ function REPLInner({
   const companionVisible =
     !toolJSX?.shouldHidePromptInput && !anyInputOverlay && !showBashesDialog && !hidePromptForHardNms;
 
-  const dialogPanelVis = computeDialogPanelVisibility({
-    onScreenBlockingKind: topDialogKind ?? null,
-    modalSlotActive: isFullscreenModalChromeActive({
-      toolJsxCentered,
-      topDialogKind,
-      modalChrome,
-    }),
-    panelHidesPrompt: Boolean(toolJSX?.shouldHidePromptInput),
-    pinnedConsentShowing: false,
-    dialogOverPanel,
-    fullscreen: isFullscreenEnvEnabled(),
-  });
-  // densable ozs: KA ? {content:NMs(modal), visible:wi==="visible"}
-  //            : PCn ? {content:PCn, visible:true} : undefined
+  const hideSessionTitle = hideSessionTitleFromTasks(tasksV2);
   // densable kZt = KA&&wi==="visible"||PCn — not bare occupy (KA||PCn)
   const kZt = isFullscreenModalChromeActive({
     toolJsxCentered,
     topDialogKind,
     modalChrome,
   });
+  const dialogPanelVis = computeDialogPanelVisibility({
+    onScreenBlockingKind: topDialogKind ?? null,
+    modalSlotActive: kZt,
+    panelHidesPrompt: Boolean(toolJSX?.shouldHidePromptInput),
+    pinnedConsentShowing: false,
+    dialogOverPanel,
+    fullscreen: isFullscreenEnvEnabled(),
+  });
+  // Official 2.1.328 `qS` (@319736883 @2059313): wire `dialogPanelVis.inPane`
+  // into `modal.footer` (PromptBannerFooter / `JBn`) and wrap local-jsx modal
+  // overlays in `MenuWaitContext.Provider value={true}` (`Ivt`).
   const ozs = topDialogIsModal
     ? {
         content: <DialogHost variant="modal" suppressReason={dialogSuppressReason} />,
-        footer: undefined as React.ReactNode,
+        footer: dialogPanelVis.inPane ? <PromptBannerFooter hideSessionTitle={hideSessionTitle} /> : undefined,
         visible: modalChrome === 'visible',
       }
     : toolJsxCentered && (!dialogHostUnmounted || dialogPanelVis.drawn)
-      ? { content: toolJSX!.jsx, visible: true, footer: undefined as React.ReactNode }
+      ? {
+          content: <MenuWaitContext.Provider value={true}>{toolJSX!.jsx}</MenuWaitContext.Provider>,
+          visible: true,
+          footer: dialogPanelVis.inPane ? <PromptBannerFooter hideSessionTitle={hideSessionTitle} /> : undefined,
+        }
       : undefined;
   const promptOwnsEscape =
     (isVimModeEnabled() && vimMode !== 'NORMAL') ||
@@ -9506,12 +9750,7 @@ function REPLInner({
                 <>
                   <TeammateViewHeader />
                   <Messages
-                    source={
-                      viewedAgentTask
-                        ? { kind: 'static', messages: displayedMessages, conversationId: focusedConversationId }
-                        : { kind: 'live', transcript: transcriptStore, conversationId: focusedConversationId }
-                    }
-                    messages={displayedMessages}
+                    source={messagesSource}
                     tools={tools}
                     commands={commands}
                     verbose={verbose}
@@ -9535,8 +9774,13 @@ function REPLInner({
                     hideLogo={!!viewedAgentTask}
                     isLoading={focusedIsLoading}
                     isStopHookRunning={Boolean(stopHookSpinnerSuffix)}
+                    showStreamingText={showStreamingText}
                     hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText && !focusFoldHoldsPreview}
                     streamingDisplayStore={streamingDisplayStore}
+                    placeholderText={viewedAgentTask ? undefined : userInputOnProcessing}
+                    placeholderBaseline={viewedAgentTask ? undefined : placeholderBaseline}
+                    hidePlaceholder={disabled || kZt}
+                    onRowsDrawn={onMessagesRowsDrawn}
                     isBriefOnly={viewedAgentTask ? false : isBriefOnly}
                     unseenDivider={viewedAgentTask ? undefined : unseenDivider}
                     scrollViewport={isFullscreenEnvEnabled() ? scrollViewport : undefined}
@@ -9547,31 +9791,25 @@ function REPLInner({
                     cursorNavRef={cursorNavRef}
                   />
                   <AwsAuthStatusBox />
-                  {/* Hide the processing placeholder while a modal is showing —
-                  it would sit at the last visible transcript row right above
-                  the ▔ divider, showing "❯ /config" as redundant clutter
-                  (the modal IS the /config UI). Outside modals it stays so
-                  the user sees their input echoed while Claude processes. */}
-                  {!disabled && placeholderText && !kZt && (
-                    <UserTextMessage
-                      param={{ text: placeholderText, type: 'text' }}
-                      addMargin={true}
-                      verbose={verbose}
-                    />
-                  )}
                   {toolJSX && !(toolJSX.isLocalJSXCommand && toolJSX.isImmediate) && !toolJsxCentered && (
                     <Box flexDirection="column" width="100%">
-                      {toolJSX.jsx}
+                      {toolJSX.isLocalJSXCommand ? (
+                        <MenuWaitContext.Provider value={true}>{toolJSX.jsx}</MenuWaitContext.Provider>
+                      ) : (
+                        toolJSX.jsx
+                      )}
                     </Box>
                   )}
                   {process.env.USER_TYPE === 'ant' && <TungstenLiveMonitor />}
                   {isFullscreenEnvEnabled() && (
                     <PromptInputQueuedCommands abortController={abortController} mcpClients={mcpClients} />
                   )}
-                  {/* densable bJ: e(yv,{}), e(s,{flexGrow:1}), e(hJ,{showSpinner}).
-                    Gold default-inline yv (Ask/Bash) is tot.scrollable, not Qv.
-                    DualInk DA is gold DA — grow pins hJ to viewport bottom. */}
-                  <DialogHost variant="inline" suppressReason={dialogSuppressReason} />
+                  {/* densable bJ / official zse: e(kT,{scrollRegion:qt?C:void 0}), flexGrow, spinner. */}
+                  <DialogHost
+                    variant="inline"
+                    suppressReason={dialogSuppressReason}
+                    scrollRegion={isFullscreenEnvEnabled() ? scrollPin : undefined}
+                  />
                   {/* WebBrowserPanel removed — browser-lite, no panel */}
                   <Box flexGrow={1} />
                   {/* densable hJ So: isLoading && !showSpinner && e(dJ). XOR
@@ -9612,9 +9850,10 @@ function REPLInner({
                 </>
               }
               abovePrompt={
-                // densable tot `vh` — yv({variant:"bottom"}) + todos + Az (InlinePanes + Survey + AbovePromptSite).
+                // densable tot `vh` / official 2.1.328 `xw`: JBn banner (when abovePrompt) + yv({variant:"bottom"}) + todos + Az.
                 // Band is measured as pt; prompt gets max(0, Ne - pt).
                 <>
+                  {dialogPanelVis.abovePrompt && <PromptBannerFooter hideSessionTitle={hideSessionTitle} />}
                   <DialogHost variant="bottom" suppressReason={dialogSuppressReason} />
                   {!showSpinner &&
                     !toolJSX?.isLocalJSXCommand &&
@@ -9800,7 +10039,7 @@ function REPLInner({
                   lines with no internal scroll) needs the outer ScrollBox. */}
                       {toolJSX?.isLocalJSXCommand && toolJSX.isImmediate && !toolJsxCentered && (
                         <Box flexDirection="column" width="100%">
-                          {toolJSX.jsx}
+                          <MenuWaitContext.Provider value={true}>{toolJSX.jsx}</MenuWaitContext.Provider>
                         </Box>
                       )}
                       {tipOverlay === 'prompt' && (

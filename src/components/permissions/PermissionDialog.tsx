@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useContext, useSyncExternalStore } from 'react';
-import { Box, useModalOrTerminalSize, useTerminalSize } from '@anthropic/ink';
+import { Box, DialogWait, useModalOrTerminalSize, useTerminalSize } from '@anthropic/ink';
 import { CurrentDialogIdContext } from '../../dialog/DialogHost.js';
 import { DialogStoreContext } from '../../dialog/DialogStoreContext.js';
 import type { PermissionRequestSource } from '../../dialog/permissionRequestSource.js';
@@ -91,6 +91,7 @@ export function PermissionDialog({
       <Box flexDirection="column" paddingX={innerPaddingX}>
         {children}
       </Box>
+      <DialogWait />
     </Box>
   );
 }

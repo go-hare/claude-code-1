@@ -202,13 +202,16 @@ describe('REPL densable ozs / RPs wiring', () => {
     expect(replSrc).toContain('isTopDialogModalLayout')
     expect(replSrc).toContain("visible: modalChrome === 'visible'")
     expect(replSrc).toContain('toolJsxCentered')
-    expect(replSrc).toContain('{ content: toolJSX!.jsx, visible: true')
+    expect(replSrc).toContain(
+      '<MenuWaitContext.Provider value={true}>{toolJSX!.jsx}</MenuWaitContext.Provider>',
+    )
+    expect(replSrc).toContain('visible: true')
     expect(replSrc).toContain('suppressReason={dialogSuppressReason}')
   })
 
   test('placeholder/scroll gate on densable kZt (not bare occupyModalSlot)', () => {
     expect(replSrc).toContain('isFullscreenModalChromeActive')
-    expect(replSrc).toContain('placeholderText && !kZt')
+    expect(replSrc).toContain('hidePlaceholder={disabled || kZt}')
     expect(replSrc).toContain('kZt || !anyInputOverlay || hostPermissionOpen')
     expect(replSrc).toContain(
       'onScroll={kZt ? undefined : viewedAgentTask ? scrollPin.onUserScrollWithoutDivider : composedOnScroll}',
@@ -244,9 +247,7 @@ describe('REPL densable ozs / RPs wiring', () => {
     const scrollable = replSrc.lastIndexOf('scrollable={')
     const above = replSrc.lastIndexOf('abovePrompt={')
     const totBottom = replSrc.lastIndexOf('bottom={')
-    const inlineHost = replSrc.indexOf(
-      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
-    )
+    const inlineHost = replSrc.indexOf('variant="inline"')
     const grow = replSrc.lastIndexOf('<Box flexGrow={1} />')
     expect(scrollable).toBeGreaterThan(-1)
     expect(above).toBeGreaterThan(scrollable)
@@ -254,9 +255,10 @@ describe('REPL densable ozs / RPs wiring', () => {
     expect(inlineHost).toBeGreaterThan(scrollable)
     expect(inlineHost).toBeLessThan(grow)
     expect(grow).toBeLessThan(above)
-    expect(replSrc.slice(above, totBottom)).not.toContain(
-      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
+    expect(replSrc.slice(scrollable, grow)).toContain(
+      'scrollRegion={isFullscreenEnvEnabled() ? scrollPin : undefined}',
     )
+    expect(replSrc.slice(above, totBottom)).not.toContain('variant="inline"')
     expect(replSrc.slice(above, totBottom)).toContain(
       '<DialogHost variant="bottom" suppressReason={dialogSuppressReason} />',
     )
@@ -300,7 +302,10 @@ describe('FullscreenLayout densable Tyn visible gate', () => {
 
   test('Tyn jg wraps transcript column so Ec/Qa use mainColumns not full terminal', () => {
     expect(layoutSrc).toContain(
-      '<TerminalSizeContext value={{ columns: mainColumns, rows: terminalRows }}>',
+      'const mainTerminalSize = useMemo(() => ({ columns: mainColumns, rows: terminalRows }), [mainColumns, terminalRows]);',
+    )
+    expect(layoutSrc).toContain(
+      '<TerminalSizeContext value={mainTerminalSize}>',
     )
     expect(layoutSrc).toContain(
       'position="absolute" bottom={0} left={0} right={0} justifyContent="center"',

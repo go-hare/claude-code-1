@@ -18,6 +18,7 @@ import {
   setStyle,
   setTextNodeValue,
   setTextStyles,
+  stampFirstFrame,
   type DOMAccessibility,
   type TextNode,
 } from './dom.js'
@@ -404,6 +405,7 @@ const reconciler = createReconciler<
   unhideInstance(node) {
     node.isHidden = false
     node.yogaNode?.setDisplay(LayoutDisplay.Flex)
+    stampFirstFrame(node)
     markDirty(node)
   },
   appendInitialChild: appendChildNode,
@@ -468,6 +470,17 @@ const reconciler = createReconciler<
 
         if (key === 'accessibility') {
           setAccessibility(node, value as DOMAccessibility | undefined)
+          continue
+        }
+
+        // Official 2.1.328 (`InputGate`): wait & no gate metadata live on
+        // DOMElement directly and must not fall through to setAttribute.
+        if (key === 'wait') {
+          node.wait = value as DOMElement['wait']
+          continue
+        }
+        if (key === 'no') {
+          node.no = value as DOMElement['no']
           continue
         }
 

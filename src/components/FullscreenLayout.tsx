@@ -45,7 +45,7 @@ import { openBrowser, openPath } from '../utils/browser.js';
 import { getAutoScrollEnabled } from '../utils/config.js';
 import { isFullscreenEnvEnabled, latchSessionTuiSetting, resolveMouseTrackingMode } from '../utils/fullscreen.js';
 import { getPlatform } from '../utils/platform.js';
-import type { ScrollPin } from '../utils/scrollPin.js';
+import { assistantHasVisibleText, type ScrollPin } from '../utils/scrollPin.js';
 import { useAppState } from '../state/AppState.js';
 import { createStore, type Store } from '../state/store.js';
 import { getBootstrapSessionHost } from '../utils/sessionHost.js';
@@ -1600,47 +1600,98 @@ export function countUnseenAssistantTurns(messages: readonly Message[], dividerI
   return count;
 }
 
-function assistantHasVisibleText(m: Message): boolean {
-  if (m.type !== 'assistant') return false;
-  if (!Array.isArray(m.message!.content)) return false;
-  for (const b of m.message!.content) {
-    if (typeof b !== 'string' && b.type === 'text' && b.text.trim() !== '') return true;
+function isBriefHiddenAttachment(attachment: { type?: string } | undefined): boolean {
+  return attachment?.type === 'skill_listing' || attachment?.type === 'agent_listing_delta';
+}
+
+function stripSimpleXmlTags(text: string): string {
+  return text.replace(/<[^>]*>/g, '').trim();
+}
+
+/**
+ * Official 2.1.328 `_s` (@318476113 @17400): rows that render nothing in the
+ * transcript (null-rendering attachments or assistant messages whose blocks are
+ * exclusively empty / XML-tag-only thinking blocks).
+ */
+function isNullRenderingForDivider(m: Message): boolean {
+  if (m.type === 'attachment') return isNullRenderingAttachment(m);
+  if (m.type === 'assistant') {
+    const content = m.message?.content;
+    if (!Array.isArray(content) || content.length === 0) return false;
+    for (const block of content) {
+      if (typeof block !== 'object' || block === null || block.type !== 'thinking') return false;
+      const text = 'thinking' in block && typeof block.thinking === 'string' ? block.thinking : '';
+      if (text !== '' && !(text.startsWith('<') && stripSimpleXmlTags(text) === '')) return false;
+    }
+    return true;
   }
   return false;
+}
+
+/**
+ * Official 2.1.328 `TT` (@318476113 @18700): assistant message carrying no
+ * visible text or tool_use blocks (only hidden thinking/redacted blocks).
+ */
+function isThinkingOnlyAssistant(m: Message): boolean {
+  if (m.type !== 'assistant') return false;
+  const content = m.message?.content;
+  if (!Array.isArray(content) || content.length === 0) return false;
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue;
+    if (block.type === 'text' || block.type === 'tool_use') return false;
+  }
+  return true;
 }
 
 export type UnseenDivider = { firstUnseenUuid: Message['uuid']; count: number };
 
 /**
- * Builds the unseenDivider object REPL passes to Messages + the pill.
- * Returns undefined only when no content has arrived past the divider
- * yet (messages[dividerIndex] doesn't exist). Once ANY message arrives
- * — including tool_use-only assistant entries and tool_result user entries
- * that countUnseenAssistantTurns skips — count floors at 1 so the pill
- * flips from "Jump to bottom" to "1 new message". Without the floor,
- * the pill stays "Jump to bottom" through an entire tool-call sequence
- * until Claude's text response lands.
+ * Official 2.1.328 `qEs` (@318476113 @18944): builds the unseenDivider object
+ * REPL passes to Messages + the pill.
+ *
+ * Skips progress rows, null-rendering attachments / empty thinking rows (`_s`),
+ * `turn_duration` system rows, and (when `briefMode` is active) brief-hidden
+ * attachments (`skill_listing`, `agent_listing_delta`) and thinking-only
+ * assistant rows (falling back to the first skipped thinking row if nothing
+ * renderable follows) so `firstUnseenUuid` always anchors on a rendered row.
  */
 export function computeUnseenDivider(
   messages: readonly Message[],
   dividerIndex: number | null,
+  briefMode = false,
 ): UnseenDivider | undefined {
   if (dividerIndex === null) return undefined;
-  // Skip progress and null-rendering attachments when picking the divider
-  // anchor — Messages.tsx filters these out of renderableMessages before the
-  // dividerBeforeIndex search, so their UUID wouldn't be found (CC-724).
-  // Hook attachments use randomUUID() so nothing shares their 24-char prefix.
   let anchorIdx = dividerIndex;
-  while (
-    anchorIdx < messages.length &&
-    (messages[anchorIdx]?.type === 'progress' || isNullRenderingAttachment(messages[anchorIdx]!))
-  ) {
-    anchorIdx++;
+  let fallbackThinkingIdx = -1;
+  while (anchorIdx < messages.length) {
+    const msg = messages[anchorIdx]!;
+    if (msg.type === 'progress' || isNullRenderingForDivider(msg)) {
+      anchorIdx++;
+      continue;
+    }
+    if (msg.type === 'system' && msg.subtype === 'turn_duration') {
+      anchorIdx++;
+      continue;
+    }
+    if (briefMode && msg.type === 'attachment' && isBriefHiddenAttachment(msg.attachment)) {
+      anchorIdx++;
+      continue;
+    }
+    if (briefMode && isThinkingOnlyAssistant(msg)) {
+      if (fallbackThinkingIdx === -1) fallbackThinkingIdx = anchorIdx;
+      anchorIdx++;
+      continue;
+    }
+    break;
   }
-  const uuid = messages[anchorIdx]?.uuid;
-  if (!uuid) return undefined;
+  if (anchorIdx >= messages.length && fallbackThinkingIdx !== -1) {
+    anchorIdx = fallbackThinkingIdx;
+  }
+  const anchor = messages[anchorIdx];
+  const anchorUuid = anchor && 'uuid' in anchor ? (anchor.uuid as string | undefined) : undefined;
+  if (typeof anchorUuid !== 'string' || anchorUuid === '') return undefined;
   const count = countUnseenAssistantTurns(messages, dividerIndex);
-  return { firstUnseenUuid: uuid, count: Math.max(1, count) };
+  return { firstUnseenUuid: anchor.uuid, count: Math.max(1, count) };
 }
 
 /**
@@ -1702,6 +1753,26 @@ export function FullscreenLayout({
     ? Math.max(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS)
     : Math.max(1, Math.floor(terminalRows / 2));
   const maxModalRows = terminalRows - MODAL_TRANSCRIPT_PEEK - 1;
+  // Official 2.1.328 `pdn` Ie[9..14, 124..131]: memoize nested TerminalSizeContext
+  // and ModalContext objects on primitive dimensions so stickyPrompt / pillVisible /
+  // unseenMessageCount updates never defeat Messages or MessageRow React.memo.
+  const mainColumns = Math.max(1, columns - sidebarWidth - dockWidth);
+  const mainTerminalSize = useMemo(() => ({ columns: mainColumns, rows: terminalRows }), [mainColumns, terminalRows]);
+  const abovePromptColumns = Math.max(1, columns - dockWidth);
+  const abovePromptTerminalSize = useMemo(
+    () => ({ columns: abovePromptColumns, rows: terminalRows }),
+    [abovePromptColumns, terminalRows],
+  );
+  const modalColumns = columns - 4;
+  const modalContextValue = useMemo(
+    () => ({
+      rows: maxModalRows,
+      columns: modalColumns,
+      scrollViewport: modalScrollViewport ?? null,
+      claimScrollBox: null,
+    }),
+    [maxModalRows, modalColumns, modalScrollViewport],
+  );
   const modalContentRef = useRef<DOMElement | null>(null);
   const modalFooterRef = useRef<DOMElement | null>(null);
   const [modalClaimedHeight, setModalClaimedHeight] = useState<number | null>(null);
@@ -1849,8 +1920,6 @@ export function FullscreenLayout({
     const sticky = hideSticky ? null : stickyPrompt;
     const headerPrompt = sticky != null && sticky !== 'clicked' ? sticky : null;
     const padCollapsed = sticky != null;
-    const mainColumns = Math.max(1, columns - sidebarWidth - dockWidth);
-    const abovePromptColumns = Math.max(1, columns - dockWidth);
     const dockVisible = dock != null && dockWidth > 0;
     const showPill = !hidePill && pillVisible;
     const pillNode = showPill ? (
@@ -1900,7 +1969,7 @@ export function FullscreenLayout({
                   {/* densable tot `jg`/`Me` — left column sees columns=mainColumns
                     so Ec Jump-to-bottom centers in the transcript, not the
                     full terminal (sidebar is a sibling outside this context). */}
-                  <TerminalSizeContext value={{ columns: mainColumns, rows: terminalRows }}>
+                  <TerminalSizeContext value={mainTerminalSize}>
                     <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
                       {top}
                       {headerPrompt != null && (
@@ -1938,9 +2007,7 @@ export function FullscreenLayout({
                     ))}
                 </Box>
                 {dockWidth > 0 ? (
-                  <TerminalSizeContext value={{ columns: abovePromptColumns, rows: terminalRows }}>
-                    {abovePromptBox}
-                  </TerminalSizeContext>
+                  <TerminalSizeContext value={abovePromptTerminalSize}>{abovePromptBox}</TerminalSizeContext>
                 ) : (
                   abovePromptBox
                 )}
@@ -1989,14 +2056,7 @@ export function FullscreenLayout({
             </PromptChromeBudgetContext>
             {/* Bxc — ozs pane */}
             {modal != null && (
-              <ModalContext
-                value={{
-                  rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
-                  columns: columns - 4,
-                  scrollViewport: modalScrollViewport ?? null,
-                  claimScrollBox: null,
-                }}
-              >
+              <ModalContext value={modalContextValue}>
                 <LeftoverModalHostContext value={leftoverModalHost}>
                   <Box
                     ref={leftoverModalBoxRef}

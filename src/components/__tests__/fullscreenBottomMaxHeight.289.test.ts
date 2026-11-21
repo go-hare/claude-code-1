@@ -87,11 +87,10 @@ describe('densable 2.1.289 tot Ne bottom chrome', () => {
     expect(src.slice(above, bottom)).toContain(
       '<DialogHost variant="bottom" suppressReason={dialogSuppressReason} />',
     )
-    expect(src.slice(above, bottom)).not.toContain(
-      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
-    )
+    expect(src.slice(above, bottom)).not.toContain('variant="inline"')
+    expect(src.slice(scrollable, above)).toContain('variant="inline"')
     expect(src.slice(scrollable, above)).toContain(
-      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
+      'scrollRegion={isFullscreenEnvEnabled() ? scrollPin : undefined}',
     )
     expect(src.slice(scrollable, above)).not.toContain(
       '<DialogHost variant="bottom" suppressReason={dialogSuppressReason} />',

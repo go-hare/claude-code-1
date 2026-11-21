@@ -951,7 +951,7 @@ export function formatToken(
           )
         }
       }
-      return highlight.highlight(token.text, { language }) + EOL
+      return highlight.highlight(token.text, { language, fence: token }) + EOL
     }
     case 'codespan': {
       // inline code

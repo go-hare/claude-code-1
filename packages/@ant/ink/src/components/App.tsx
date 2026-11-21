@@ -199,6 +199,7 @@ type Props = {
     row: number,
     isWindowActivation?: boolean,
     mods?: { shift: boolean; alt: boolean; ctrl: boolean },
+    pressedAt?: number,
   ) => MouseClickResult;
   // Dispatch hover (onMouseEnter/onMouseLeave) as the pointer moves over
   // DOM elements. Called for mode-1003 motion events with no button held.
@@ -483,8 +484,9 @@ export default class App extends PureComponent<Props, State> {
   incompleteEscapeTimer: NodeJS.Timeout | null = null;
   /** densable `readArrivedAt` — pin Date.now() around discreteUpdates(v1). */
   readArrivedAt: number | null = null;
-  /** Official 2.1.328 (`pressedAt`) — pressClock timestamp for InputGate. */
+  /** Official 2.1.328 (`pressedAt` / `mouseDownAt`) — pressClock timestamps for InputGate. */
   pressedAt = 0;
+  mouseDownAt = 0;
   /** densable `inputNow` — `()=>this.readArrivedAt??Date.now()`. */
   inputNow = (): number => this.readArrivedAt ?? Date.now();
   /** Official 2.1.327 (#520): timestamp of the latest SIGCONT resume. */
@@ -1351,6 +1353,8 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     // release, which meant (a) visible latency before the word highlights
     // and (b) double-click+drag fell through to char-mode selection.
     const now = Date.now();
+    // Official 2.1.328: latch press timestamp so release passes press time to InputGate.
+    app.mouseDownAt = app.pressedAt;
     // densable: pressIsWindowActivation = consumeLatch(now) && now-Jhf()<yvf
     app.pressIsWindowActivation =
       app.consumeWindowActivationLatch(now) && now - getTerminalFocusGainedAt() < WINDOW_ACTIVATION_GRACE_MS;
@@ -1425,7 +1429,13 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     // Single click: dispatch DOM click immediately (cursor repositioning
     // etc. are latency-sensitive). If no DOM handler consumed it, defer
     // the hyperlink check so a second click can cancel it.
-    const clickResult = app.props.onClickAt(col, row, app.pressIsWindowActivation, sgrButtonMods(m.button));
+    const clickResult = app.props.onClickAt(
+      col,
+      row,
+      app.pressIsWindowActivation,
+      sgrButtonMods(m.button),
+      app.mouseDownAt,
+    );
     if (clickResult === 'stray' || clickResult === 'repeat') {
       app.clickCount = 0;
       app.lastClickTime = 0;

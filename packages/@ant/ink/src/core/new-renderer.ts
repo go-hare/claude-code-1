@@ -1,3 +1,8 @@
+import {
+  eraseViewportInPlace,
+  eraseViewportInPlaceForGhostty,
+  isGhosttyErasedRowsStayJoined,
+} from './clearTerminal.js'
 import type { FlickerReason, Frame } from './frame.js'
 import {
   CellWidth,
@@ -8,9 +13,13 @@ import {
   resetScreen,
   type Screen,
   type StylePool,
-  shiftRows,
 } from './screen.js'
-import { CSI_PREFIX, CURSOR_HOME, ERASE_SCREEN } from './termio/csi.js'
+import {
+  CSI_PREFIX,
+  CURSOR_HOME,
+  cursorMove,
+  ERASE_SCREEN,
+} from './termio/csi.js'
 import { HIDE_CURSOR, SHOW_CURSOR } from './termio/dec.js'
 import { LINK_END, link } from './termio/osc.js'
 
@@ -46,6 +55,9 @@ export type TerminalRenderCapabilities = {
   clearSavesToScrollback: boolean
   printsUnknownSequences: boolean
   resizeDropsBlankRowsBelow: boolean
+  erasedRowsStayJoined?: boolean
+  reflows?: boolean
+  shorterWindowKeepsRowsBelowCursor?: boolean
 }
 
 export type RenderTargetFrame = {
@@ -77,6 +89,10 @@ export function getTerminalRenderCapabilities(opts?: {
   synchronizedOutput?: boolean
   repaintsEveryCell?: boolean
   printsUnknownSequences?: boolean
+  clearSavesToScrollback?: boolean
+  erasedRowsStayJoined?: boolean
+  reflows?: boolean
+  shorterWindowKeepsRowsBelowCursor?: boolean
 }): TerminalRenderCapabilities {
   return {
     synchronizedOutput: opts?.synchronizedOutput ?? true,
@@ -86,9 +102,14 @@ export function getTerminalRenderCapabilities(opts?: {
     eraseCharacters: true,
     insertDeleteLines: false,
     repaintsEveryCell: opts?.repaintsEveryCell ?? false,
-    clearSavesToScrollback: false,
+    clearSavesToScrollback: opts?.clearSavesToScrollback ?? false,
     printsUnknownSequences: opts?.printsUnknownSequences ?? false,
     resizeDropsBlankRowsBelow: false,
+    erasedRowsStayJoined:
+      opts?.erasedRowsStayJoined ?? isGhosttyErasedRowsStayJoined(),
+    reflows: opts?.reflows ?? true,
+    shorterWindowKeepsRowsBelowCursor:
+      opts?.shorterWindowKeepsRowsBelowCursor ?? true,
   }
 }
 
@@ -275,29 +296,54 @@ export class TerminalEncoder {
   }
 }
 
+// Official 2.1.328 `US` / `WS` / `Zl` / `zr`:
+// Packed word1 layout: styleId[31:17] | hyperlinkId[16:2] | width[1:0]
+// Bit 17 is bit 0 of styleId (visible-on-space flag); bits [16:2] are hyperlinkId.
+const CELL_VISIBLE_SPACE_OR_LINK_MASK = (0x7fff << 2) | (1 << 17)
+const CELL_WIDTH_MASK = 3
+const BLANK_CHAR_INDEX = 0 // WS = 0 (' ')
+const DIRTY_CHAR_INDEX = 1 // Zl = 1 (unmatchable dirty sentinel when word1 = 0)
+
+function isBlankCell(cells: Int32Array, ci: number): boolean {
+  const w0 = cells[ci]!
+  const w1 = cells[ci + 1]!
+  return (
+    (w1 & CELL_VISIBLE_SPACE_OR_LINK_MASK) === 0 &&
+    (w0 === BLANK_CHAR_INDEX ||
+      (w0 === DIRTY_CHAR_INDEX &&
+        (w1 & CELL_WIDTH_MASK) === CellWidth.SpacerHead))
+  )
+}
+
 function rowContentEnd(screen: Screen, row: number): number {
   if (row < 0 || row >= screen.height) return 0
   const w = screen.width
-  const cells64 = screen.cells64
-  const base = row * w
+  const cells = screen.cells
   let end = w
-  while (end > 0 && cells64[base + end - 1] === 0n) end--
+  while (end > 0 && isBlankCell(cells, (row * w + end - 1) * 2)) end--
   return end
 }
 
 function rowsDiffer(a: Screen, rowA: number, b: Screen, rowB: number): boolean {
-  const w = Math.min(a.width, b.width)
   const aValid = rowA >= 0 && rowA < a.height
   const bValid = rowB >= 0 && rowB < b.height
   if (!aValid && !bValid) return false
-  const aCells = a.cells64
-  const bCells = b.cells64
-  const aBase = rowA * a.width
-  const bBase = rowB * b.width
+  if (!aValid) return rowContentEnd(b, rowB) > 0
+  if (!bValid) return rowContentEnd(a, rowA) > 0
+  const w = Math.min(a.width, b.width)
+  const aCells = a.cells
+  const bCells = b.cells
+  const aBase = rowA * a.width * 2
+  const bBase = rowB * b.width * 2
   for (let x = 0; x < w; x++) {
-    const va = aValid ? aCells[aBase + x] : 0n
-    const vb = bValid ? bCells[bBase + x] : 0n
-    if (va !== vb) return true
+    const aCi = aBase + (x << 1)
+    const bCi = bBase + (x << 1)
+    if (
+      (aCells[aCi] !== bCells[bCi] || aCells[aCi + 1] !== bCells[bCi + 1]) &&
+      !(isBlankCell(aCells, aCi) && isBlankCell(bCells, bCi))
+    ) {
+      return true
+    }
   }
   return false
 }
@@ -320,14 +366,25 @@ function diffRowRange(
   return first < last ? [first, last] : [0, 0]
 }
 
-function clearScreenRows(screen: Screen, fromRow: number, toRow: number): void {
+/**
+ * Official 2.1.328 `No(screen, fromRow, toRow)` — fill rows `[fromRow, toRow)`
+ * with the unmatchable dirty sentinel `(charId = 1, word1 = 0)` (`1n` on LE)
+ * so both `diffRowRange` and `RowDrawer.draw` treat those cells as differing
+ * from blank `0n` and emit `EL` / spaces to erase stale terminal content.
+ */
+function invalidateScreenRows(
+  screen: Screen,
+  fromRow: number,
+  toRow: number,
+): void {
   const lo = Math.max(0, fromRow)
   const hi = Math.min(screen.height, toRow)
   if (lo >= hi) return
-  const w = screen.width
-  screen.cells64.fill(0n, lo * w, hi * w)
-  screen.noSelect.fill(0, lo * w, hi * w)
-  screen.softWrap.fill(0, lo, hi)
+  const { cells, width } = screen
+  for (let ci = lo * width * 2, end = hi * width * 2; ci < end; ci += 2) {
+    cells[ci] = DIRTY_CHAR_INDEX
+    cells[ci + 1] = 0
+  }
 }
 
 /**
@@ -354,12 +411,29 @@ export class RowDrawer {
     if (shownRow < 0 || shownRow >= shown.height) return
     const nextInBounds = nextRow >= 0 && nextRow < next.height
     const contentEnd = nextInBounds ? rowContentEnd(next, nextRow) : 0
+    const shownCells = shown.cells
+    const shownBase = shownRow * cols * 2
+    if (!nextInBounds && this.blankRow.length < cols * 2) {
+      this.blankRow = new Int32Array(cols * 2)
+    }
+    const nextCells = nextInBounds ? next.cells : this.blankRow
+    const nextBase = nextInBounds ? nextRow * next.width * 2 : 0
+
+    const cellsEqualAt = (col: number): boolean => {
+      const aCi = shownBase + (col << 1)
+      const bCi = nextBase + (col << 1)
+      if (
+        shownCells[aCi] === nextCells[bCi] &&
+        shownCells[aCi + 1] === nextCells[bCi + 1]
+      ) {
+        return true
+      }
+      return isBlankCell(shownCells, aCi) && isBlankCell(nextCells, bCi)
+    }
 
     let x = 0
     while (x < cols) {
-      const aVal = shown.cells64[shownRow * cols + x]
-      const bVal = nextInBounds ? next.cells64[nextRow * next.width + x] : 0n
-      if (aVal === bVal) {
+      if (cellsEqualAt(x)) {
         x++
         continue
       }
@@ -381,15 +455,14 @@ export class RowDrawer {
       const runStart = x
       this.encoder.moveTo(x, shownRow)
       while (x < contentEnd) {
-        const curA = shown.cells64[shownRow * cols + x]
-        const curB = next.cells64[nextRow * next.width + x]
-        if (x > runStart && curA === curB) break
-        if (curB === 0n) {
+        if (x > runStart && cellsEqualAt(x)) break
+        const bCi = nextBase + (x << 1)
+        if (isBlankCell(nextCells, bCi)) {
           let blanks = 1
           while (
             x + blanks < contentEnd &&
-            next.cells64[nextRow * next.width + x + blanks] === 0n &&
-            shown.cells64[shownRow * cols + x + blanks] !== 0n
+            isBlankCell(nextCells, nextBase + ((x + blanks) << 1)) &&
+            !isBlankCell(shownCells, shownBase + ((x + blanks) << 1))
           ) {
             blanks++
           }
@@ -417,6 +490,8 @@ export class RowDrawer {
           x++
           continue
         }
+        const curB0 = nextCells[bCi]!
+        const curB1 = nextCells[bCi + 1]!
         const linkId = cell.hyperlink
           ? next.hyperlinkPool.intern(cell.hyperlink)
           : 0
@@ -433,13 +508,15 @@ export class RowDrawer {
           advance === 1 &&
           cell.char.length === 1 &&
           x + 1 < contentEnd &&
-          next.cells64[nextRow * next.width + x + 1] === curB
+          nextCells[nextBase + ((x + 1) << 1)] === curB0 &&
+          nextCells[nextBase + ((x + 1) << 1) + 1] === curB1
         ) {
           let runEnd = x + 1
           const limit = Math.min(contentEnd, cols - 1)
           while (
             runEnd < limit &&
-            next.cells64[nextRow * next.width + runEnd] === curB
+            nextCells[nextBase + (runEnd << 1)] === curB0 &&
+            nextCells[nextBase + (runEnd << 1) + 1] === curB1
           ) {
             runEnd++
           }
@@ -470,11 +547,29 @@ export class RowDrawer {
         shown.cells64.fill(0n, dstBase + copyCols, dstBase + cols)
       }
     } else {
-      if (this.blankRow.length < cols * 2) {
-        this.blankRow = new Int32Array(cols * 2)
-      }
       shown.cells64.fill(0n, dstBase, dstBase + cols)
     }
+  }
+
+  /**
+   * Official 2.1.328 `rp.withoutWrittenCells(screen)` — clone screen with all
+   * written cell runs marked `-1` so `TerminalImages.placeIterm` re-draws any
+   * iTerm2 image whose underlying cells were overwritten this frame.
+   */
+  withoutWrittenCells(screen: Screen): Screen {
+    const { width, height } = screen
+    const cells = screen.cells.slice(0, width * height * 2)
+    for (let i = 0; i < this.written.length; i += 3) {
+      const row = this.written[i]!
+      if (row < 0 || row >= height) continue
+      const rowOffset = row * width
+      const fromCol = Math.max(0, this.written[i + 1]!)
+      const toCol = Math.min(width, this.written[i + 2]!)
+      if (fromCol < toCol) {
+        cells.fill(-1, (rowOffset + fromCol) * 2, (rowOffset + toCol) * 2)
+      }
+    }
+    return { ...screen, cells, cells64: new BigInt64Array(cells.buffer) }
   }
 }
 
@@ -537,8 +632,22 @@ function finalizeBytes(
   }
 }
 
+function clamp(value: number, min: number, max: number): number {
+  if (value < min) return min
+  if (value > max) return max
+  return value
+}
+
 function frameTotalRows(frame: { top?: number; screen: Screen }): number {
   return (frame.top ?? 0) + frame.screen.height
+}
+
+function frameFillsViewport(frame: {
+  top?: number
+  screen: Screen
+  viewport: { height: number }
+}): boolean {
+  return frameTotalRows(frame) >= frame.viewport.height
 }
 
 function frameScrollTop(frame: {
@@ -547,6 +656,59 @@ function frameScrollTop(frame: {
   viewport: { height: number }
 }): number {
   return Math.max(0, frameTotalRows(frame) - frame.viewport.height + 1)
+}
+
+function visualRowsForLogicalRow(
+  frame: { screen: Screen; top: number },
+  row: number,
+  width: number,
+  caps: TerminalRenderCapabilities,
+): number {
+  if (!caps.reflows || width <= 0) return 1
+  return Math.ceil(rowContentEnd(frame.screen, row - frame.top) / width) || 1
+}
+
+/** Official 2.1.328 `GA` — anchor row on inline redraw/resize. */
+function redrawAnchorRow(
+  prev: RenderTargetFrame,
+  next: RenderTargetFrame,
+  caps: TerminalRenderCapabilities,
+  scrolledOutRows: number,
+): number {
+  const { width, height } = next.viewport
+  let anchor =
+    Math.max(0, frameTotalRows(prev) - Math.min(prev.viewport.height, height)) +
+    (frameFillsViewport(prev) ? 1 : 0)
+  if (!caps.shorterWindowKeepsRowsBelowCursor) {
+    const floor = Math.max(frameScrollTop(prev), scrolledOutRows)
+    let cur = prev.top + prev.cursor.y
+    for (let budget = height - 1; cur > floor; cur--) {
+      budget -= visualRowsForLogicalRow(prev, cur - 1, width, caps)
+      if (budget < 0) break
+    }
+    anchor = Math.min(anchor, Math.max(floor, cur))
+  }
+  return Math.min(anchor, frameScrollTop(next))
+}
+
+function viewportGrew(
+  prev: RenderTargetFrame,
+  next: RenderTargetFrame,
+): boolean {
+  return (
+    prev.viewport.width === next.viewport.width &&
+    prev.viewport.height < next.viewport.height
+  )
+}
+
+function viewportChanged(
+  prev: RenderTargetFrame,
+  next: RenderTargetFrame,
+): boolean {
+  return (
+    prev.viewport.width !== next.viewport.width ||
+    prev.viewport.height !== next.viewport.height
+  )
 }
 
 /**
@@ -626,6 +788,8 @@ export class InlineRenderer {
     next: RenderTargetFrame,
     caps: TerminalRenderCapabilities,
     prefixBytes = '',
+    maxAnchorRow = Infinity,
+    returnRowsLimit = 0,
   ): ByteRenderResult {
     const { encoder, rows } = this
     const { width, height } = next.viewport
@@ -636,20 +800,14 @@ export class InlineRenderer {
     const nextTotal = frameTotalRows(next)
     const deltaRows = Math.max(nextTotal, 1) - Math.max(prevTotal, 1)
     const nextScrolledOut = Math.max(
-      deltaRows > 0
+      (deltaRows > 0
         ? prevTotal - prev.viewport.height
-        : Math.max(prevTotal, nextTotal) - height,
+        : Math.max(prevTotal, nextTotal) - height) +
+        (frameFillsViewport(prev) ? 1 : 0),
       this.scrolledOutRows,
     )
 
-    let cleared: FlickerReason | undefined
-    if (this.mustRedraw) cleared = 'clear'
-    else if (prev.viewport.width !== width && prev.viewport.width !== 0) {
-      cleared = 'resize'
-    } else if (next.top > nextScrolledOut && prevTotal > 0) {
-      cleared = 'offscreen'
-    }
-
+    let cleared: FlickerReason | undefined = this.reasonToRedraw(prev, next)
     const prevScreen = cleared
       ? nextScreen
       : normalizeScreenWidth(prev, this.stylePool)
@@ -660,28 +818,34 @@ export class InlineRenderer {
       deltaRows < 0 ? 0 : nextTotal - height + 1,
     )
     if (!cleared && checkFrom < nextScrolledOut) {
-      const checkCount = Math.min(
-        prevTotal - checkFrom,
-        nextTotal - checkFrom,
-        nextScrolledOut - checkFrom,
+      const checkCount = nextScrolledOut - checkFrom
+      const [firstDiff, lastDiff] = diffRowRange(
+        prevScreen,
+        checkFrom - prev.top,
+        nextScreen,
+        checkFrom - next.top,
+        checkCount,
       )
-      if (checkCount > 0) {
-        const [firstDiff, lastDiff] = diffRowRange(
-          prevScreen,
-          checkFrom - prev.top,
-          nextScreen,
-          checkFrom - next.top,
-          checkCount,
+      if (lastDiff > 0) {
+        const firstChanged = Math.min(
+          checkFrom + firstDiff,
+          deltaRows < 0 ? nextTotal : Infinity,
         )
-        if (lastDiff > 0) {
+        if (firstChanged < nextScrolledOut) {
           cleared = 'offscreen'
-          changedRow = checkFrom + firstDiff
+          changedRow = firstChanged
         }
       }
     }
+    if (next.top > nextScrolledOut && prevTotal > 0) {
+      cleared ??= 'offscreen'
+    }
 
     const anchorRow = cleared
-      ? Math.max(0, nextTotal - height)
+      ? Math.min(
+          redrawAnchorRow(prev, next, caps, this.scrolledOutRows),
+          maxAnchorRow,
+        )
       : nextScrolledOut
     const sliceStart = Math.max(next.top, anchorRow)
     const nextOffset = sliceStart - next.top
@@ -690,19 +854,38 @@ export class InlineRenderer {
 
     const bufRows = Math.max(prevVisibleRows, nextVisibleRows) + 2
     const front = this.blankFront(nextScreen, bufRows)
-    if (!cleared && prevVisibleRows > 0) {
-      copyRows(front, 0, prevScreen, sliceStart - prev.top, prevVisibleRows)
-      if (this.isCursorRowErased) {
-        const prevCursorLocal = Math.max(
-          0,
-          Math.min(prev.top + prev.cursor.y - sliceStart, prevVisibleRows),
+    const minCursorY = Math.max(0, nextVisibleRows - height + 1)
+    // Official `Re` / `ke`: physical cursor row from prev & target cursor row in local slice coords.
+    const prevCursorRow = clamp(
+      prev.top + prev.cursor.y - sliceStart,
+      0,
+      prevVisibleRows,
+    )
+    const targetY = clamp(
+      next.cursor.y - nextOffset,
+      minCursorY,
+      nextVisibleRows,
+    )
+    const returnSeq = cleared
+      ? this.returnRowsToScrollback(
+          prev,
+          next,
+          caps,
+          anchorRow,
+          returnRowsLimit,
         )
-        clearScreenRows(front, prevCursorLocal, prevVisibleRows + 1)
+      : ''
+
+    if (!cleared) {
+      if (prevVisibleRows > 0) {
+        copyRows(front, 0, prevScreen, sliceStart - prev.top, prevVisibleRows)
       }
-      clearScreenRows(front, nextVisibleRows, prevVisibleRows)
+      if (this.isCursorRowErased) {
+        invalidateScreenRows(front, prevCursorRow, prevVisibleRows + 1)
+      }
+      invalidateScreenRows(front, nextVisibleRows, prevVisibleRows)
     }
 
-    this.mustRedraw = false
     this.isCursorRowErased = false
     this.scrolledOutRows = cleared ? 0 : nextScrolledOut
 
@@ -711,7 +894,7 @@ export class InlineRenderer {
       0,
       nextScreen,
       nextOffset,
-      Math.max(prevVisibleRows, nextVisibleRows),
+      front.height,
     )
     const hasChanges =
       Boolean(cleared) || nextTotal !== prevTotal || diffEnd > 0
@@ -729,11 +912,23 @@ export class InlineRenderer {
     }
 
     if (cleared) {
-      encoder.raw(ERASE_SCREEN + CURSOR_HOME, 0, 0)
+      const eraseSeq = caps.erasedRowsStayJoined
+        ? eraseViewportInPlaceForGhostty(height)
+        : eraseViewportInPlace(height, false)
+      encoder.raw(returnSeq + eraseSeq, 0, 0)
       drawnHeight = 0
-    } else if (hasChanges && prevTotal > 0 && nextTotal !== prevTotal) {
-      encoder.moveTo(0, drawnHeight)
-      encoder.eraseToEndOfRow()
+    } else if (hasChanges) {
+      // Official `$m.render`: physical terminal cursor sits at `prevCursorRow` (Re),
+      // while encoder.y starts at `drawnHeight` (Se); emit preamble delta first.
+      encoder.bytes += cursorMove(0, drawnHeight - prevCursorRow)
+      if (prevTotal > 0 && nextTotal !== prevTotal) {
+        encoder.moveTo(0, drawnHeight)
+        encoder.eraseToEndOfRow()
+      }
+    }
+    if (sliceStart > anchorRow) {
+      const omitted = `... ${sliceStart - anchorRow} rows are not shown ...`
+      encoder.raw(`\r${omitted.slice(0, Math.max(0, width - 1))}\r\n`, 0, 0)
     }
 
     for (let r = diffStart; r < diffEnd; r++) {
@@ -745,23 +940,93 @@ export class InlineRenderer {
     ensureRow(nextVisibleRows)
     encoder.resetStyle()
 
-    const targetX = Math.max(0, Math.min(next.cursor.x, width - 1))
-    const minCursorY = Math.max(0, nextVisibleRows - height + 1)
-    const targetY = Math.max(
-      minCursorY,
-      Math.min(next.cursor.y - nextOffset, nextVisibleRows),
-    )
-    if (hasChanges || targetY !== prev.cursor.y || targetX !== prev.cursor.x) {
+    const targetX = clamp(next.cursor.x, 0, Math.max(0, width - 1))
+    if (hasChanges) {
       encoder.placeCursor(targetX, targetY)
+    } else if (targetY !== prevCursorRow || next.cursor.x !== prev.cursor.x) {
+      encoder.bytes += cursorMove(0, targetY - prevCursorRow)
+      encoder.placeCursor(targetX, encoder.y)
     }
 
-    return finalizeBytes(encoder, caps, next.cursor, {
-      hasChanges,
-      movedRows: false,
-      isRedraw: Boolean(cleared),
-      cleared,
-      changedRow,
-    })
+    const wantVisible =
+      next.cursor.visible ||
+      (!hasChanges && nextTotal === 0 && encoder.isCursorVisible)
+    return finalizeBytes(
+      encoder,
+      caps,
+      { ...next.cursor, visible: wantVisible },
+      {
+        hasChanges,
+        movedRows: false,
+        isRedraw: prevTotal === 0 && next.cursor.visible,
+        cleared,
+        changedRow,
+      },
+    )
+  }
+
+  /**
+   * Official 2.1.328 `$m.reasonToRedraw(prev, next)` — triggers full redraw on
+   * width change, height shrink, height growth while filling viewport, explicit
+   * `mustRedraw`, or content shrinking from overflowing down into the viewport.
+   */
+  private reasonToRedraw(
+    prev: RenderTargetFrame,
+    next: RenderTargetFrame,
+  ): FlickerReason | undefined {
+    const { mustRedraw } = this
+    this.mustRedraw = false
+    const prevVp = prev.viewport
+    const nextVp = next.viewport
+    if (
+      nextVp.height < prevVp.height ||
+      (nextVp.height > prevVp.height && frameFillsViewport(prev)) ||
+      (prevVp.width !== 0 && nextVp.width !== prevVp.width)
+    ) {
+      return 'resize'
+    }
+    if (mustRedraw) return 'clear'
+    return frameFillsViewport(prev) &&
+      frameTotalRows(next) < frameTotalRows(prev) &&
+      frameTotalRows(next) <= prevVp.height
+      ? 'offscreen'
+      : undefined
+  }
+
+  private returnRowsToScrollback(
+    prev: RenderTargetFrame,
+    next: RenderTargetFrame,
+    caps: TerminalRenderCapabilities,
+    anchorRow: number,
+    returnLimit: number,
+  ): string {
+    const { width, height } = next.viewport
+    const sameWidth = width === prev.viewport.width
+    const limit = anchorRow === 0 ? returnLimit : sameWidth ? Infinity : 0
+    if (height <= prev.viewport.height || limit === 0) return ''
+    const total = frameTotalRows(prev)
+    const visualRowsFrom = (from: number): number => {
+      let sum = 0
+      const end = Math.max(from, total)
+      for (let r = from; r < end; r++) {
+        sum += visualRowsForLogicalRow(prev, r, width, caps)
+      }
+      return sum
+    }
+    const pushDown = Math.min(height - 1 - visualRowsFrom(anchorRow), limit)
+    if (pushDown <= 0) return ''
+    const cursorRow = Math.max(
+      prev.top + prev.cursor.y,
+      frameScrollTop(prev),
+      this.scrolledOutRows,
+    )
+    const belowCursor = visualRowsFrom(cursorRow)
+    const firstFeed = Math.min(belowCursor, 1)
+    return (
+      cursorMove(0, belowCursor - firstFeed) +
+      '\r' +
+      '\n'.repeat(firstFeed + pushDown)
+    )
   }
 
   private blankFront(refScreen: Screen, rows: number): Screen {
@@ -838,6 +1103,7 @@ export class CoveringRenderer {
     prefixBytes = '',
   ): ByteRenderResult {
     if (prev.screen.height === 0) this.wouldHaveScrolledTo = 0
+    const nextHeight = next.viewport.height
     const nextTotal = next.top + next.screen.height
     let prevShown = this.asShown(prev)
     let scrollMin = Math.max(
@@ -846,21 +1112,66 @@ export class CoveringRenderer {
     )
     if (scrollMin >= this.wouldHaveScrolledTo) this.wouldHaveScrolledTo = 0
 
+    const coveredCount = this.countIn(prev)
+    let maxAnchorRow = Infinity
+    const heightDelta = nextHeight - prev.viewport.height
+    const spareRows = heightDelta - scrollMin - this.repeatedRows
+    let returnRowsLimit = Math.max(
+      0,
+      Math.min(spareRows, this.wouldHaveScrolledTo - scrollMin),
+    )
+    const keepWithoutRedraw =
+      !this.inline.mustRedraw && !caps.resizeDropsBlankRowsBelow
     let bytesPrefix = prefixBytes
-    if (this.hasLostRows(prev, next, scrollMin)) {
+
+    if (
+      coveredCount > 0 &&
+      scrollMin === 0 &&
+      viewportGrew(prev, next) &&
+      keepWithoutRedraw
+    ) {
+      prevShown = { ...prevShown, viewport: next.viewport }
+    } else if (coveredCount > 0 && viewportChanged(prev, next)) {
+      this.inline.invalidate()
+      this.repeatedRows =
+        spareRows >= 0 ? 0 : this.repeatedRows + Math.max(0, -heightDelta)
+      scrollMin = maxAnchorRow = Math.max(
+        next.top,
+        Math.min(
+          scrollMin - Math.max(0, heightDelta),
+          nextTotal + 1 - nextHeight - coveredCount,
+        ),
+      )
+    } else if (this.hasLostRows(prev, next, scrollMin)) {
       const extended = this.lengthened(prev)
       bytesPrefix += this.inline.render(prevShown, extended, caps).bytes
       prevShown = extended
+      returnRowsLimit = 0
+      if (!viewportChanged(prev, next)) {
+        maxAnchorRow = Math.max(
+          next.top,
+          prev.top + prev.screen.height - nextHeight + 1,
+        )
+      }
       scrollMin = this.wouldHaveScrolledTo
       this.wouldHaveScrolledTo = 0
     }
 
     this.covered = this.computeCover(next, scrollMin)
     this.wouldHaveScrolledTo = Math.max(
-      Math.min(this.wouldHaveScrolledTo, nextTotal),
+      viewportChanged(prev, next)
+        ? 0
+        : Math.min(this.wouldHaveScrolledTo, nextTotal),
       this.covered ? this.covered.from + this.covered.count : 0,
     )
-    return this.inline.render(prevShown, this.asShown(next), caps, bytesPrefix)
+    return this.inline.render(
+      prevShown,
+      this.asShown(next),
+      caps,
+      bytesPrefix,
+      maxAnchorRow,
+      returnRowsLimit,
+    )
   }
 
   private hasLostRows(
@@ -946,7 +1257,7 @@ export class FullscreenRenderer {
   readonly rows: RowDrawer
   readonly stylePool: StylePool
   private front: Screen | undefined
-  private cursor: { x: number; y: number } | undefined
+  cursor: { x: number; y: number } | undefined
   private styleGeneration = 0
   private unwritten: { cleared?: FlickerReason } | undefined
   private erasesFirst: FlickerReason | undefined
@@ -969,7 +1280,7 @@ export class FullscreenRenderer {
 
   cursorRowWasErased(): void {
     if (this.front && this.cursor) {
-      shiftRows(this.front, this.cursor.y, this.cursor.y, 1)
+      invalidateScreenRows(this.front, this.cursor.y, this.cursor.y + 1)
     }
     this.cursor = undefined
   }
@@ -1006,7 +1317,13 @@ export class FullscreenRenderer {
     this.unwritten = { cleared }
     if (cleared) {
       this.erasesFirst = undefined
-      encoder.raw(ERASE_SCREEN + CURSOR_HOME, 0, 0)
+      encoder.raw(
+        caps.clearSavesToScrollback
+          ? eraseViewportInPlace(height, caps.erasedRowsStayJoined)
+          : ERASE_SCREEN + CURSOR_HOME,
+        0,
+        0,
+      )
     }
 
     const poolsChanged =
@@ -1026,7 +1343,7 @@ export class FullscreenRenderer {
       nextScreen.hyperlinkPool,
     ))
     if (hadUnwritten || poolsChanged || caps.repaintsEveryCell) {
-      clearScreenRows(front, 0, height)
+      invalidateScreenRows(front, 0, height)
     }
 
     const [firstDiff, lastDiff] = diffRowRange(front, 0, nextScreen, 0, height)
@@ -1036,8 +1353,8 @@ export class FullscreenRenderer {
     encoder.resetStyle()
 
     const hasChanges = encoder.bytes !== ''
-    const cx = Math.max(0, Math.min(next.cursor.x, width - 1))
-    const cy = Math.max(0, Math.min(next.cursor.y, height - 1))
+    const cx = clamp(next.cursor.x, 0, Math.max(0, width - 1))
+    const cy = clamp(next.cursor.y, 0, Math.max(0, height - 1))
     if (hasChanges || cx !== this.cursor?.x || cy !== this.cursor?.y) {
       encoder.placeCursor(cx, cy)
       this.cursor = { x: cx, y: cy }
@@ -1082,6 +1399,7 @@ export function frameToRenderTarget(
   frame: Frame,
   viewport: { width: number; height: number },
   cursor?: RenderTargetFrame['cursor'],
+  popover?: RenderTargetFrame['popover'],
 ): RenderTargetFrame {
   return {
     screen: frame.screen,
@@ -1092,5 +1410,6 @@ export function frameToRenderTarget(
       y: frame.cursor.y,
       visible: frame.cursor.visible,
     },
+    ...(popover !== undefined ? { popover } : {}),
   }
 }

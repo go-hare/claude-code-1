@@ -131,6 +131,7 @@ export type {
   ElementNames,
   DOMNodeAttribute,
 } from './core/dom.js'
+export { stampFirstFrame } from './core/dom.js'
 export type {
   Styles,
   TextStyles,
@@ -350,6 +351,8 @@ export { setAppCallbacks } from './components/App.js'
 export { default as AccessibilityContext } from './components/AccessibilityContext.js'
 export {
   default as InputNowContext,
+  DialogIdContext,
+  MenuWaitContext,
   useInputNow,
   useWantEveryKey,
   noteResumed,
@@ -455,7 +458,7 @@ export { subscribeSystemTheme } from './theme/systemTheme.js'
 
 // Theme sub-components
 export { SearchBox } from './theme/SearchBox.js'
-export { Dialog } from './theme/Dialog.js'
+export { Dialog, DialogWait, type DialogWaitProps } from './theme/Dialog.js'
 export { Divider } from './theme/Divider.js'
 export { FuzzyPicker, type FuzzyPickerHandle } from './theme/FuzzyPicker.js'
 export { ListItem } from './theme/ListItem.js'

@@ -13,10 +13,15 @@ export type ClickListener = (
   event: ClickEvent | null,
 ) => void
 
+export type PointerControllerHost = {
+  isAltScreenActive: () => boolean
+  showsWhatInputAnswers: () => boolean
+}
+
 /**
- * Official 2.1.328 `this.pointer` controller — owns hover coordinates, hovered
- * node set, followHover backoff state, active pointer capture, and click
- * listeners.
+ * Official 2.1.328 `zm` (`this.pointer`) controller — owns hover coordinates,
+ * hovered node set, followHover backoff state, active pointer capture, click
+ * listeners, and input-readiness guards for click / pointer press.
  */
 export class PointerController {
   readonly hoveredNodes = new Set<DOMElement>()
@@ -26,6 +31,28 @@ export class PointerController {
   hoverFollowStreak = 0
   hoverFollowHeldUntil = 0
   capture: PointerCapture | null = null
+  private host: PointerControllerHost | undefined
+
+  constructor(host?: PointerControllerHost) {
+    this.host = host
+  }
+
+  setHost(host: PointerControllerHost): void {
+    this.host = host
+  }
+
+  showsWhatInputAnswers(): boolean {
+    return this.host ? this.host.showsWhatInputAnswers() : true
+  }
+
+  canAcceptPointerPress(isAltScreenActive?: boolean): boolean {
+    const alt = isAltScreenActive ?? this.host?.isAltScreenActive() ?? false
+    return alt && this.showsWhatInputAnswers()
+  }
+
+  isPointerCaptured(): boolean {
+    return this.capture !== null
+  }
 
   subscribeClicks = (listener: ClickListener): (() => void) => {
     this.clickListeners.add(listener)

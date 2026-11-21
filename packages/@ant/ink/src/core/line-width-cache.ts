@@ -22,3 +22,13 @@ export function lineWidth(line: string): number {
   cache.set(line, width)
   return width
 }
+
+/**
+ * Official 2.1.328 `Qf.reset()` (@306863829 @159503): clear cached line widths
+ * when terminal emoji width calibration is installed or updated.
+ */
+export function resetLineWidthCache(): void {
+  cache.clear()
+}
+
+export { resetLineWidthCache as reset }

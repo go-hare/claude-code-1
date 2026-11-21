@@ -1,5 +1,7 @@
-import React, { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { DOMElement } from '../core/dom.js';
+import React, { useContext, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { DialogIdContext, MenuWaitContext } from '../components/InputNowContext.js';
+import { type DOMElement, stampFirstFrame } from '../core/dom.js';
+import { getFocusManager } from '../core/focus.js';
 import { type ExitState, useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCD.js';
 import { Box, Text } from '../index.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
@@ -9,6 +11,106 @@ import { Byline } from './Byline.js';
 import { KeyboardShortcutHint } from './KeyboardShortcutHint.js';
 import { ModalContext } from './modalContext.js';
 import { Pane } from './Pane.js';
+
+function activeElementReachesBottom(el: DOMElement | null): boolean {
+  const parent = el?.parentNode;
+  if (!parent) return true;
+  let active: DOMElement = parent;
+  try {
+    active = getFocusManager(parent)?.activeElement ?? parent;
+  } catch {
+    active = parent;
+  }
+  let bottom = active.yogaNode?.getComputedHeight() ?? 0;
+  for (let cur: DOMElement = active; cur !== parent; cur = cur.parentNode ?? parent) {
+    bottom += cur.yogaNode?.getComputedTop() ?? 0;
+  }
+  return bottom >= (parent.yogaNode?.getComputedHeight() ?? 0);
+}
+
+export type DialogWaitProps = {
+  isMenu?: boolean;
+  shows?: unknown;
+  owner?: unknown;
+  onDropped?: (detail?: unknown) => void;
+};
+
+/**
+ * Official 2.1.328 `ene` (@307400470 @1470) — attaches InputGate `wait` metadata
+ * onto the enclosing parent `<Box>` so early accidental keypresses right after a
+ * dialog paints are dropped and show the `"Not answered yet"` guidance row.
+ */
+export function DialogWait({ isMenu, shows, owner, onDropped }: DialogWaitProps): React.ReactNode {
+  const resolvedOwner = owner === undefined ? null : owner;
+  const inDialogHost = useContext(DialogIdContext) !== null;
+  const menuCtx = useContext(MenuWaitContext);
+  const effectiveIsMenu = isMenu ?? (inDialogHost ? undefined : menuCtx);
+  const boxRef = useRef<DOMElement | null>(null);
+  const [droppedKind, setDroppedKind] = useState<'choose' | 'again' | null>(null);
+  const [overlayAtBottom, setOverlayAtBottom] = useState(false);
+
+  useLayoutEffect(() => {
+    if (effectiveIsMenu === undefined) return;
+    const parent = boxRef.current?.parentNode;
+    if (!parent) return;
+    parent.firstFrame = boxRef.current?.firstFrame ?? parent.firstFrame;
+    return () => {
+      parent.wait = undefined;
+    };
+  }, [effectiveIsMenu]);
+
+  useLayoutEffect(() => {
+    if (effectiveIsMenu === undefined) return;
+    const parent = boxRef.current?.parentNode;
+    if (!parent) return;
+    parent.wait = {
+      ...parent.wait,
+      isMenu: effectiveIsMenu,
+      owner: resolvedOwner,
+      onChange(dropped, detail) {
+        const nextKind: 'choose' | 'again' | null =
+          dropped === undefined ? null : dropped === null ? 'choose' : 'again';
+        const nextOverlay = droppedKind === null ? !activeElementReachesBottom(boxRef.current) : overlayAtBottom;
+        if (detail === 'click' && droppedKind === null && !nextOverlay) return;
+        setDroppedKind(nextKind);
+        setOverlayAtBottom(nextOverlay);
+        if (nextKind === null) return;
+        onDropped?.(detail === 'click' ? undefined : detail);
+      },
+    };
+  });
+
+  useInsertionEffect(() => {
+    let cur = boxRef.current?.parentNode;
+    while (cur && !cur.wait) cur = cur.parentNode;
+    if (cur) stampFirstFrame(cur);
+  }, [shows]);
+
+  if (droppedKind === null) {
+    return <Box ref={boxRef} display="none" />;
+  }
+
+  return (
+    <Box
+      ref={boxRef}
+      flexShrink={0}
+      paddingLeft={1}
+      {...(overlayAtBottom && {
+        position: 'absolute' as const,
+        bottom: 0,
+        width: '100%' as const,
+        opaque: true,
+      })}
+    >
+      <Text dimColor wrap="truncate">
+        <Byline>
+          <Text color="warning">Not answered yet</Text>
+          {droppedKind === 'choose' ? '↓ after a second' : 'wait a second, then press again'}
+        </Byline>
+      </Text>
+    </Box>
+  );
+}
 
 type DialogProps = {
   title: React.ReactNode;
@@ -112,12 +214,11 @@ export function Dialog({
       </Text>
     );
 
-  // densable nr (2.1.216): keyboard-hint footer is flexShrink:0 so yoga never
-  // collapses it when the dialog body is taller than the fullscreen modal
-  // panel. Title/body use minWidth:0 so long labels clamp inside the panel
-  // width instead of stretching past the right edge.
+  // densable nr (2.1.216) & official 2.1.328 `xe` (@308190350): wrap title/body,
+  // input guide, and `<DialogWait />` inside a column Box so InputGate `.wait`
+  // covers every descendant (including Select) for both bordered and borderless dialogs.
   const content = (
-    <>
+    <Box flexDirection="column" flexGrow={hideBorder || modalCtx ? 0 : 1} minWidth={0} width="100%">
       <Box flexDirection="column" gap={1} minWidth={0} width="100%">
         {(titleNode != null || subtitle != null) && (
           <Box ref={headerRef} flexDirection="column" minWidth={0}>
@@ -138,7 +239,8 @@ export function Dialog({
           </Text>
         </Box>
       )}
-    </>
+      <DialogWait />
+    </Box>
   );
 
   if (hideBorder) {

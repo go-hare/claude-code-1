@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
+import { marked } from 'marked'
 import { join } from 'path'
 import {
   type CliHighlight,
   HIGHLIGHT_MESSAGE_WORK_BUDGET,
   peekCliHighlight,
 } from '../../utils/cliHighlight.js'
+import { formatToken } from '../../utils/markdown.js'
 import {
   _clearHighlightCacheForTest,
+  collectCodeTokensInDocumentOrder,
+  prehighlightCodeTokens,
   wrapHighlightWithCacheAndBudget,
 } from '../Markdown.js'
 
@@ -156,5 +160,71 @@ describe('2.1.295 #398 & 2.1.296 #537 Markdown highlight cache & windowing', () 
     const second = wrapped.highlight('const z = 3', { language: 'ts' })
     expect(second).toBe('<hl:ts>const z = 3</hl>')
     expect(calls).toBe(2)
+  })
+
+  test('P1-#19: formatToken passes fence token so byFence reuses output across re-renders and prehighlightCodeTokens walks nested tokens in document order', () => {
+    const md = [
+      '> Quoted code first:',
+      '> ```ts',
+      '> const first = 1',
+      '> ```',
+      '',
+      '- List item with code second:',
+      '',
+      '  ```ts',
+      '  const second = 2',
+      '  ```',
+      '',
+      '```ts',
+      'const third = 3',
+      '```',
+    ].join('\n')
+    const tokens = marked.lexer(md)
+    const ordered = collectCodeTokensInDocumentOrder(tokens)
+    expect(ordered.map(t => t.text.trim())).toEqual([
+      'const first = 1',
+      'const second = 2',
+      'const third = 3',
+    ])
+
+    const seenOrder: string[] = []
+    const seenFences: unknown[] = []
+    const fakeHighlight: CliHighlight = {
+      supportsLanguage: () => true,
+      highlight(code, opts) {
+        seenOrder.push(code.trim())
+        seenFences.push(opts?.fence)
+        if (opts?.work) {
+          // Allow 1st and 2nd fences to highlight; exhaust budget on 2nd so 3rd stops
+          opts.work.left -= Math.ceil(HIGHLIGHT_MESSAGE_WORK_BUDGET * 0.6)
+        }
+        return `<hl>${code}</hl>`
+      },
+    }
+
+    const wrapped = wrapHighlightWithCacheAndBudget(
+      fakeHighlight,
+      'dark',
+      true,
+    )!
+    prehighlightCodeTokens(tokens, 'dark', wrapped)
+
+    // Strict top-to-bottom document order: blockquote -> list -> top-level
+    expect(seenOrder).toEqual(['const first = 1', 'const second = 2'])
+    expect(seenFences[0]).toBe(ordered[0])
+    expect(seenFences[1]).toBe(ordered[1])
+
+    // Rendering the 3rd (top-level) token later hits byFence — no extra highlight calls
+    // and preserves the over-budget output computed during document-order walk
+    const thirdOut = formatToken(ordered[2]!, 'dark', 0, null, null, wrapped)
+    expect(thirdOut).not.toContain('<hl>')
+    expect(thirdOut).toContain('const third = 3')
+    expect(seenOrder).toEqual(['const first = 1', 'const second = 2'])
+
+    // Re-rendering the 1st (blockquote) token on resize hits byFence directly —
+    // does NOT re-call rawHighlight and does NOT get stopped by the now-exhausted budget!
+    const firstAgain = formatToken(ordered[0]!, 'dark', 0, null, null, wrapped)
+    expect(firstAgain).toContain('<hl>const first = 1</hl>')
+    expect(seenOrder).toEqual(['const first = 1', 'const second = 2'])
   })
 })

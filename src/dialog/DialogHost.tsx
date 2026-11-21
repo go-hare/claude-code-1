@@ -4,10 +4,20 @@
  * layout default "inline"; variant filter matches densable LyN/MyN.
  * answer debounce densable c_y=150 after swap (swappedAt / suppress lift).
  */
-import React, { createContext, useEffect, useRef, useState } from 'react';
-import { Box, Text, useTerminalNotification } from '@anthropic/ink';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  Box,
+  DialogIdContext,
+  DialogWait,
+  type DOMElement,
+  stampFirstFrame,
+  Text,
+  useApp,
+  useTerminalNotification,
+} from '@anthropic/ink';
 import { useNotifyAfterTimeout } from '../hooks/useNotifyAfterTimeout.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
+import type { ScrollDialogBounds, ScrollPin } from '../utils/scrollPin.js';
 import { useDialogStore, useTopDialog } from './DialogStoreContext.js';
 import { AX_BELL_CLAIM_KEY, claimIfChanged, noteAxBellNow } from './dialogHostBell.js';
 import { HOST_PARKED_TYPING_QUESTION, HOST_PARKED_TYPING_SUGGESTION, type HostParkMode } from './hostPark.js';
@@ -59,11 +69,109 @@ import {
 } from './specs/permissionKinds.js';
 import { resolveHostWaitingFor } from './permissionWaiting.js';
 
-/** densable OVe — active dialog entry id inside DialogHost. */
-export const CurrentDialogIdContext = createContext<string | null>(null);
+/**
+ * Official 2.1.328 `Nfe` (@307400470): alias to `@anthropic/ink`'s shared
+ * `DialogIdContext` so `useWantEveryKey` (`DD`) and nested `<DialogWait />`
+ * (inside `<Dialog>` / `<PermissionDialog>`) see the active DialogHost id
+ * and avoid double-gating.
+ */
+export const CurrentDialogIdContext = DialogIdContext;
 
-/** densable c_y */
+/** densable c_y / jR */
 export const DIALOG_ANSWER_SWAP_DEBOUNCE_MS = 150;
+/** Official 2.1.328 `e4 = 600` (@319736883): grace window after scrolling an off-screen dialog into view. */
+export const DIALOG_SCROLL_REVEAL_GRACE_MS = 600;
+
+type VisibleRowRange = { first: number; last: number; of: number };
+
+/** Official `_1` (@306863829 @461095): locate enclosing scroll box and row offset. */
+function findEnclosingScrollBox(node: DOMElement | null):
+  | {
+      box: DOMElement;
+      row: number;
+      at: { top: number; itemTop: number; itemHeight: number };
+    }
+  | undefined {
+  let row = 0;
+  let cur: DOMElement | null = node;
+  while (cur) {
+    const parent = cur.parentNode;
+    if (!parent?.yogaNode || !cur.yogaNode) return undefined;
+    row += cur.yogaNode.getComputedTop();
+    const grand = parent.parentNode;
+    if (grand?.yogaNode !== undefined && (grand.style.overflowY ?? grand.style.overflow) === 'scroll') {
+      return {
+        box: grand,
+        row,
+        at: {
+          top: parent.yogaNode.getComputedTop() + row,
+          itemTop: parent.yogaNode.getComputedTop() + cur.yogaNode.getComputedTop(),
+          itemHeight: cur.yogaNode.getComputedHeight(),
+        },
+      };
+    }
+    cur = parent;
+  }
+  return undefined;
+}
+
+/** Official `Fvt` (@306863829 @460959): dialog bounds inside enclosing ScrollBox. */
+function getDialogScrollBounds(node: DOMElement | null): (ScrollDialogBounds & { viewportRows?: number }) | undefined {
+  const hit = node?.yogaNode ? findEnclosingScrollBox(node) : undefined;
+  if (!hit) return undefined;
+  return {
+    row: hit.row,
+    rows: node?.yogaNode?.getComputedHeight() ?? 0,
+    viewportRows: hit.box.scrollViewportHeight,
+  };
+}
+
+/** Official `nPr` + `CN` (@306863829 @460838): visible row range of dialog inside enclosing ScrollBox. */
+function getVisibleRowsInScroll(node: DOMElement | null): VisibleRowRange | null | undefined {
+  if (!node?.yogaNode) return undefined;
+  if (node.yogaNode.getDisplay() === 'none') return null;
+  const hit = findEnclosingScrollBox(node);
+  if (!hit) return undefined;
+  const { scrollTopRendered, yogaNode: boxYoga } = hit.box;
+  const height = node.yogaNode.getComputedHeight();
+  if (scrollTopRendered === undefined || !boxYoga || !height) return undefined;
+  const borderTop = boxYoga.getComputedBorder('top');
+  const innerBottom = boxYoga.getComputedHeight() - boxYoga.getComputedBorder('bottom');
+  const padTop = borderTop + boxYoga.getComputedPadding('top');
+  const padBottom = innerBottom - boxYoga.getComputedPadding('bottom');
+  const top = hit.at.top - scrollTopRendered;
+  const itemTop = hit.at.itemTop - scrollTopRendered;
+  const clippedOut = itemTop + hit.at.itemHeight <= padTop || itemTop >= padBottom;
+  const visStart = Math.max(top, borderTop);
+  const visEnd = Math.min(top + height, innerBottom);
+  return clippedOut || visStart >= visEnd ? null : { first: visStart - top, last: visEnd - top - 1, of: height };
+}
+
+/** Official `zOt` (@319736883 @1582600): trim top margin of leading unbordered column wrapper. */
+function trimLeadingWrapperOffset(
+  vis: VisibleRowRange | null | undefined,
+  box: DOMElement | null,
+): VisibleRowRange | null | undefined {
+  let offset = 0;
+  let cur = box;
+  while (cur?.yogaNode && cur.style.flexDirection === 'column' && cur.yogaNode.getComputedBorder('top') === 0) {
+    const firstChild = cur.childNodes.find(
+      (child): child is DOMElement => child.nodeName !== '#text' && child.yogaNode !== undefined,
+    );
+    if (!firstChild?.yogaNode) break;
+    offset += firstChild.yogaNode.getComputedTop();
+    cur = firstChild;
+  }
+  if (!vis || offset <= 0) return vis;
+  return vis.last < offset
+    ? null
+    : { first: Math.max(0, vis.first - offset), last: vis.last - offset, of: vis.of - offset };
+}
+
+/** Official `nU` (@319736883 @1582900): true when the dialog bottom is on-screen with full visible span. */
+function isDialogBottomVisible(vis: VisibleRowRange | null, viewportRows: number): boolean {
+  return vis !== null && vis.last === vis.of - 1 && vis.last - vis.first + 1 >= Math.min(vis.of, viewportRows);
+}
 
 export type DialogHostVariant = 'inline' | 'modal' | 'bottom';
 
@@ -352,16 +460,73 @@ type Props = {
    * When `'draft'` suppresses an engine dialog matching `variant`, paints the draft cue.
    */
   suppressReason?: HostParkMode;
+  /**
+   * Official 2.1.328 `kT.scrollRegion` (`ScrollPin`): wired on the inline host in
+   * fullscreen mode to call `showDialog`, `followDialog`, and `onDialogLeft`.
+   */
+  scrollRegion?: ScrollPin;
 };
 
 /**
- * densable yv / NMs / dQc host.
+ * densable yv / NMs / dQc / kT host.
  */
-export function DialogHost({ variant = 'inline', suppressReason = null }: Props): React.ReactNode {
+export function DialogHost({ variant = 'inline', suppressReason = null, scrollRegion }: Props): React.ReactNode {
   const store = useDialogStore();
   const top = useTopDialog();
+  const { subscribeFrames } = useApp();
   const [suppressLiftedAt, setSuppressLiftedAt] = useState(0);
   const wasSuppressed = useRef(suppressReason != null);
+  const boxRef = useRef<DOMElement | null>(null);
+  const visibleRangeRef = useRef<VisibleRowRange | null | undefined>(undefined);
+  const viewportRowsRef = useRef(0);
+  const waitingRevealRef = useRef(false);
+  const revealedAtRef = useRef<number | null>(null);
+
+  const activeLayout = top ? (DIALOG_LAYOUTS[top.kind] ?? 'inline') : null;
+  const activeRenderer = top ? DIALOG_COMPONENTS[top.kind] : undefined;
+  const isShowingDialog = suppressReason == null && top !== null && activeLayout === variant && Boolean(activeRenderer);
+
+  // Official 2.1.328 `kT` (@319736883 @1580344): restore scroll anchor when the inline dialog leaves.
+  useLayoutEffect(() => {
+    if (!isShowingDialog || !scrollRegion) return;
+    return () => {
+      scrollRegion.onDialogLeft();
+    };
+  }, [isShowingDialog, scrollRegion]);
+
+  // Official 2.1.328 `U0e` (@319736883 @1583615): track dialog visibility on each frame
+  // and keep scroll anchored via `scrollRegion.followDialog(bounds)`.
+  useLayoutEffect(() => {
+    if (!isShowingDialog || !scrollRegion) {
+      visibleRangeRef.current = undefined;
+      viewportRowsRef.current = 0;
+      waitingRevealRef.current = false;
+      revealedAtRef.current = null;
+      return;
+    }
+    let wasOffscreen = false;
+    const syncFrame = () => {
+      const box = boxRef.current;
+      visibleRangeRef.current = trimLeadingWrapperOffset(getVisibleRowsInScroll(box), box);
+      const bounds = getDialogScrollBounds(box);
+      viewportRowsRef.current = bounds?.viewportRows ?? 0;
+      if (
+        waitingRevealRef.current &&
+        visibleRangeRef.current !== undefined &&
+        isDialogBottomVisible(visibleRangeRef.current, viewportRowsRef.current)
+      ) {
+        waitingRevealRef.current = false;
+        revealedAtRef.current = Date.now();
+      }
+      if (wasOffscreen && visibleRangeRef.current && box) {
+        stampFirstFrame(box, 'lastFrame');
+      }
+      wasOffscreen = visibleRangeRef.current === null;
+      scrollRegion.followDialog(bounds);
+    };
+    syncFrame();
+    return subscribeFrames?.(syncFrame);
+  }, [isShowingDialog, scrollRegion, subscribeFrames, top?.id]);
 
   // densable rau — stamp time when suppress lifts (legacy→visible)
   useEffect(() => {
@@ -466,8 +631,32 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
     const entry = store.getState().open.find(d => d.id === top.id);
     if (!entry) return false;
     if (!(entry.payload === current.payload)) return false;
+    const now = Date.now();
     const swappedAt = Math.max(entry.swappedAt ?? 0, entry.userInvoked ? 0 : suppressLiftedAt);
-    return Date.now() - swappedAt >= DIALOG_ANSWER_SWAP_DEBOUNCE_MS;
+    if (now - swappedAt < DIALOG_ANSWER_SWAP_DEBOUNCE_MS) return false;
+    if (entry.userInvoked) return true;
+    // Official 2.1.328 `U0e` `Ho` (@319736883 @1585066): if an inline dialog is scrolled
+    // out of view, scroll it into view via `scrollRegion.showDialog(...)` and consume
+    // the triggering keypress rather than accepting an unseen answer.
+    if (scrollRegion !== undefined) {
+      const vis = visibleRangeRef.current;
+      const bounds = getDialogScrollBounds(boxRef.current);
+      const unmeasuredWithHeight = vis === undefined && (bounds?.rows ?? 0) > 0;
+      if (unmeasuredWithHeight || (vis !== undefined && !isDialogBottomVisible(vis, viewportRowsRef.current))) {
+        if (scrollRegion.showDialog(bounds, vis === null || unmeasuredWithHeight)) {
+          revealedAtRef.current = now;
+          waitingRevealRef.current = true;
+        } else if (revealedAtRef.current !== null && now - revealedAtRef.current < DIALOG_SCROLL_REVEAL_GRACE_MS) {
+          revealedAtRef.current = now;
+        }
+        return false;
+      }
+      if (revealedAtRef.current !== null && now - revealedAtRef.current < DIALOG_SCROLL_REVEAL_GRACE_MS) {
+        revealedAtRef.current = now;
+        return false;
+      }
+    }
+    return true;
   };
 
   const answer = (result: unknown): boolean => {
@@ -476,15 +665,24 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
     return true;
   };
 
+  // Official 2.1.328 `U0e` `Jo` (@319736883 @1585500): reveal off-screen inline dialog when InputGate drops a key.
+  const handleWaitDropped = (): void => {
+    const vis = visibleRangeRef.current;
+    if (vis !== undefined && !isDialogBottomVisible(vis, viewportRowsRef.current)) {
+      scrollRegion?.showDialog(getDialogScrollBounds(boxRef.current), vis === null);
+    }
+  };
+
   const notification = resolveDialogNotification(top.kind, payload);
 
   return (
     <CurrentDialogIdContext.Provider value={top.id} key={top.id}>
-      <Box flexDirection="column">
+      <Box ref={boxRef} flexDirection="column">
         {notification !== undefined ? (
           <DialogHostNotification dialogId={top.id} message={notification.text} notificationType={notification.type} />
         ) : null}
         <Renderer payload={payload} answer={answer} wouldTakeAnswer={wouldTakeAnswer} />
+        <DialogWait isMenu={top.userInvoked === true} shows={payload} owner={top.id} onDropped={handleWaitDropped} />
       </Box>
     </CurrentDialogIdContext.Provider>
   );

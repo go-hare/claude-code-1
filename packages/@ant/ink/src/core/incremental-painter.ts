@@ -284,6 +284,7 @@ export class IncrementalPainter {
         node,
         yogaNode,
         nextCache,
+        needsSubtreeVisit,
         clip?.y1 !== undefined,
         Math.max(viewTop, clip?.y1 ?? viewTop),
         Math.min(viewBottom, clip?.y2 ?? viewBottom),
@@ -336,6 +337,7 @@ export class IncrementalPainter {
     node: DOMElement,
     yogaNode: LayoutNode,
     cache: NodePaintCache,
+    needsSubtreeVisit: boolean,
     isVerticallyClipped: boolean,
     viewTop: number,
     viewBottom: number,
@@ -352,7 +354,13 @@ export class IncrementalPainter {
 
     if (isScrollContainer(node)) {
       const content = getScrollContent(node)
-      scrollMin = this.settle(node, yogaNode, cache, content?.yogaNode)
+      scrollMin = this.settle(
+        node,
+        yogaNode,
+        cache,
+        content?.yogaNode,
+        needsSubtreeVisit,
+      )
       scrollMax = scrollMin + (node.scrollViewportHeight ?? 0)
       if (node.pendingScrollDelta !== undefined) {
         this.scrolling.push(node)
@@ -414,6 +422,7 @@ export class IncrementalPainter {
     yogaNode: LayoutNode,
     cache: NodePaintCache,
     contentYoga: LayoutNode | undefined,
+    needsSubtreeVisit: boolean,
   ): number {
     const topInset =
       yogaNode.getComputedBorder(LayoutEdge.Top) +
@@ -428,7 +437,7 @@ export class IncrementalPainter {
     node.scrollHeight = scrollHeight
     node.scrollViewportHeight = innerHeight
     node.scrollViewportTop = cache.y + topInset
-    return contentYoga
+    return needsSubtreeVisit
       ? settleScrollBoxPosition(
           node,
           this.state,

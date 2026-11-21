@@ -618,6 +618,8 @@ export function leftoverGsStampUnpainted(
 /** densable `uf` — absolute overlay rect + whether it sits inside parent yoga. */
 export type AbsoluteRect = Rectangle & {
   withinParent: boolean
+  /** Official 2.1.328 `Mm.escapes` — absolute node paints past its own rect. */
+  escapes?: boolean
   /** densable `uf.node` — Ze walks this against the scroll content. */
   node: DOMElement
 }
@@ -1398,6 +1400,7 @@ function stampAbsoluteRect(
     width: rect.width,
     height: rect.height,
     withinParent,
+    escapes: node.paintsPastRect === true,
   }
 }
 
@@ -2539,7 +2542,7 @@ function renderNodeToOutput(
           ctx,
           x,
           y,
-          hasRemovedChild,
+          clears,
           // backgroundColor and opaque both disable child blit: the fill
           // overwrites the entire interior each render, so any child whose
           // layout position shifted would blit stale cells from prevScreen
@@ -2568,7 +2571,7 @@ function renderNodeToOutput(
         ctx,
         x,
         y,
-        hasRemovedChild,
+        clears,
         prevScreen,
         inheritedBackgroundColor,
         clips,
@@ -2623,30 +2626,241 @@ function renderNodeToOutput(
 // still passing prevScreen so opaque descendants can blit their narrower
 // rects (NewMessagesPill's inner Text with backgroundColor). Opaque
 // absolute siblings fill their entire rect — direct blit is safe.
+/** Official 2.1.328 `ZM` — a bordered box narrower than 2 cols or 0 rows paints past its rect. */
+function borderPaintsPastRect(
+  node: DOMElement,
+  width: number,
+  height: number,
+): boolean {
+  return (
+    node.style.borderStyle !== undefined &&
+    (Math.floor(width) < 2 || Math.floor(height) === 0)
+  )
+}
+
+/** Official 2.1.328 `Cm` — conservative vertical row span of a layout rect. */
+function rowSpanOf(rect: { y: number; height: number }): {
+  top: number
+  bottom: number
+} {
+  const top = Math.floor(rect.y)
+  if (rect.height > 0) return { top, bottom: Math.ceil(rect.y + rect.height) }
+  return { top: top - 1, bottom: top + 1 }
+}
+
+/** Official 2.1.328 `JM` — true if child's current layout overlaps the running sibling union rect. */
+function childOverlapsUnion(
+  child: DOMElement,
+  offsetX: number,
+  offsetY: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): boolean {
+  const yoga = child.yogaNode
+  if (yoga === undefined || yoga.getDisplay() === LayoutDisplay.None) {
+    return false
+  }
+  const cx = offsetX + yoga.getComputedLeft()
+  const cy = offsetY + yoga.getComputedTop()
+  return (
+    cx < maxX &&
+    minX < cx + yoga.getComputedWidth() &&
+    cy < maxY &&
+    minY < cy + yoga.getComputedHeight()
+  )
+}
+
+/** Official 2.1.328 `$M` — true if rect `a` fits completely inside rect `b`. */
+function rectInside(a: Rectangle, b: Rectangle): boolean {
+  return (
+    a.x >= b.x &&
+    a.y >= b.y &&
+    a.x + a.width <= b.x + b.width &&
+    a.y + a.height <= b.y + b.height
+  )
+}
+
+/** Official 2.1.328 `Qv` — true if any absolute overlay escapes or intersects `target`. */
+function rectHitsAbsoluteList(
+  rects: readonly AbsoluteRect[],
+  target: Rectangle,
+): boolean {
+  for (const r of rects) {
+    const pad = r.width > 0 && r.height > 0 ? 0 : 1
+    if (
+      r.escapes ||
+      (r.x - pad < target.x + target.width &&
+        target.x < r.x + r.width + pad &&
+        r.y - pad < target.y + target.height &&
+        target.y < r.y + r.height + pad)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Official 2.1.328 `eA` — true if child's cached rect intersects any prev/cur absolute overlay. */
+function overlapsAbsoluteRects(
+  node: DOMElement,
+  ctx: RenderFrameContext,
+): boolean {
+  const cached = node.cachedLayout
+  if (cached === undefined) return false
+  return (
+    rectHitsAbsoluteList(ctx.absoluteRectsPrev, cached) ||
+    rectHitsAbsoluteList(ctx.absoluteRectsCur, cached)
+  )
+}
+
+/**
+ * Official 2.1.328 `QM(node, offsetX, offsetY, clears)` — when a child was
+ * removed from `node`, compute the set of clean non-overlapping siblings above
+ * the topmost removed rect whose prevScreen blit can safely be preserved.
+ */
+function computeSafeBlitChildren(
+  node: DOMElement,
+  offsetX: number,
+  offsetY: number,
+  clears: readonly Rectangle[],
+): Set<DOMElement> {
+  const safe = new Set<DOMElement>()
+  const overflowAncestors: DOMElement[] = []
+  let cur = node
+  for (
+    let parent = node.parentNode;
+    parent !== undefined;
+    cur = parent, parent = parent.parentNode
+  ) {
+    const curOverflows =
+      cur.style.position !== 'absolute' && cur.paintsPastRect === true
+    if (
+      parent.childrenOverlap !== false ||
+      (parent.childrenPaintingPastRect ?? 0) > (curOverflows ? 1 : 0)
+    ) {
+      return safe
+    }
+    if (curOverflows) overflowAncestors.push(cur)
+  }
+
+  let clearMinTop = Infinity
+  for (const rect of clears) {
+    clearMinTop = Math.min(clearMinTop, rowSpanOf(rect).top)
+  }
+
+  const elems: DOMElement[] = []
+  for (const c of node.childNodes) {
+    if (c.nodeName !== '#text') elems.push(c)
+  }
+  const tops = new Array<number>(elems.length)
+  const bottoms = new Array<number>(elems.length)
+  for (let i = 0; i < elems.length; i++) {
+    const child = elems[i]!
+    const { cachedLayout: cached, yogaNode } = child
+    const visible =
+      yogaNode !== undefined && yogaNode.getDisplay() !== LayoutDisplay.None
+    const curY = visible ? offsetY + yogaNode.getComputedTop() : 0
+    const curSpan = visible
+      ? rowSpanOf({ y: curY, height: yogaNode.getComputedHeight() })
+      : undefined
+    if (
+      child.style.position !== 'absolute' &&
+      child.paintsPastRect === true &&
+      (child.dirty ||
+        cached === undefined ||
+        !visible ||
+        cached.x !== offsetX + yogaNode.getComputedLeft() ||
+        cached.y !== curY ||
+        cached.width !== yogaNode.getComputedWidth() ||
+        cached.height !== yogaNode.getComputedHeight())
+    ) {
+      return safe
+    }
+    let top = Infinity
+    let bottom = -Infinity
+    if (child.style.position !== 'absolute') {
+      if (cached !== undefined) {
+        ;({ top, bottom } = rowSpanOf(cached))
+      }
+      if (curSpan !== undefined) {
+        top = Math.min(top, curSpan.top)
+        bottom = Math.max(bottom, curSpan.bottom)
+      }
+    }
+    tops[i] = top
+    bottoms[i] = bottom
+  }
+
+  const suffixMinTop = new Array<number>(elems.length)
+  let minAfter = Infinity
+  for (let i = elems.length - 1; i >= 0; i--) {
+    suffixMinTop[i] = minAfter
+    minAfter = Math.min(minAfter, tops[i]!)
+  }
+
+  let maxBefore = -Infinity
+  for (let i = 0; i < elems.length; i++) {
+    const child = elems[i]!
+    const cached = child.cachedLayout
+    if (
+      child.style.position !== 'absolute' &&
+      !child.dirty &&
+      child.pendingScrollDelta === undefined &&
+      cached !== undefined &&
+      cached.height > 0 &&
+      child.yogaNode?.getComputedHeight() !== 0 &&
+      child.hasAbsoluteDescendant !== true &&
+      child.paintsPastRect !== true &&
+      bottoms[i]! <= clearMinTop &&
+      maxBefore <= tops[i]! &&
+      suffixMinTop[i]! >= bottoms[i]! &&
+      overflowAncestors.every(
+        anc =>
+          anc.cachedLayout !== undefined &&
+          rectInside(cached, anc.cachedLayout),
+      )
+    ) {
+      safe.add(child)
+    }
+    maxBefore = Math.max(maxBefore, bottoms[i]!)
+  }
+
+  return safe
+}
+
 function renderChildren(
   node: DOMElement,
   output: Output,
   ctx: RenderFrameContext,
   offsetX: number,
   offsetY: number,
-  hasRemovedChild: boolean,
+  removedClears: readonly Rectangle[] | undefined,
   prevScreen: Screen | undefined,
   inheritedBackgroundColor: Color | undefined,
   clips: LeftoverClipNest | undefined,
   depth = 0,
 ): boolean {
+  const safeToBlit =
+    removedClears === undefined || prevScreen === undefined
+      ? undefined
+      : computeSafeBlitChildren(node, offsetX, offsetY, removedClears)
   let seenDirtyChild = false
   let seenDirtyClipped = false
   let escaped = false
   let descendantPaintsPast = false
   let childrenOverlap = false
   let childrenPaintingPastRect = 0
+  const prevPaintingPast = node.childrenPaintingPastRect ?? 0
   let unionMinX = Infinity
   let unionMinY = Infinity
   let unionMaxX = -Infinity
   let unionMaxY = -Infinity
-  const parentRight = offsetX + (node.yogaNode?.getComputedWidth() ?? 0)
-  const parentBottom = offsetY + (node.yogaNode?.getComputedHeight() ?? 0)
+  const nodeWidth = node.yogaNode?.getComputedWidth() ?? 0
+  const nodeHeight = node.yogaNode?.getComputedHeight() ?? 0
+  const parentRight = offsetX + nodeWidth
+  const parentBottom = offsetY + nodeHeight
   const leftoverGsF =
     prevScreen !== undefined && leftoverGsAbsChildMoved(node, offsetX, offsetY)
   const leftoverGsL =
@@ -2658,11 +2872,28 @@ function renderChildren(
     // Capture dirty before rendering — renderNodeToOutput clears the flag
     const wasDirty = childElem.dirty
     const isAbsolute = childElem.style.position === 'absolute'
+    if (
+      wasDirty &&
+      !isAbsolute &&
+      childOverlapsUnion(
+        childElem,
+        offsetX,
+        offsetY,
+        unionMinX,
+        unionMinY,
+        unionMaxX,
+        unionMaxY,
+      )
+    ) {
+      node.childrenOverlap = true
+    }
     renderNodeToOutput(childElem, output, ctx, {
       offsetX,
       offsetY,
       prevScreen:
-        hasRemovedChild ||
+        (safeToBlit !== undefined &&
+          (!safeToBlit.has(childElem) ||
+            overlapsAbsoluteRects(childElem, ctx))) ||
         seenDirtyChild ||
         (leftoverGsF && !isAbsolute) ||
         leftoverGsL?.has(childElem) === true ||
@@ -2688,46 +2919,48 @@ function renderChildren(
       }
     }
     const layout = childElem.cachedLayout
-    if (!isAbsolute) {
+    if (
+      !escaped &&
+      (childElem.hasEscapingDescendant ||
+        (layout !== undefined &&
+          !isAbsolute &&
+          (layout.x < offsetX ||
+            layout.y < offsetY ||
+            layout.x + layout.width > parentRight ||
+            layout.y + layout.height > parentBottom)))
+    ) {
+      escaped = true
+    }
+    if (childElem.paintsPastRect === true) {
+      descendantPaintsPast = true
+    }
+    if (!isAbsolute && layout !== undefined) {
       if (childElem.paintsPastRect === true) {
-        descendantPaintsPast = true
         childrenPaintingPastRect++
+        node.childrenPaintingPastRect =
+          prevPaintingPast + childrenPaintingPastRect
       }
       if (
-        !escaped &&
-        (childElem.hasEscapingDescendant ||
-          (layout !== undefined &&
-            (layout.x < offsetX ||
-              layout.y < offsetY ||
-              layout.x + layout.width > parentRight ||
-              layout.y + layout.height > parentBottom)))
+        layout.x < unionMaxX &&
+        unionMinX < layout.x + layout.width &&
+        layout.y < unionMaxY &&
+        unionMinY < layout.y + layout.height
       ) {
-        escaped = true
+        childrenOverlap = true
       }
-      if (layout !== undefined) {
-        if (
-          layout.x < unionMaxX &&
-          unionMinX < layout.x + layout.width &&
-          layout.y < unionMaxY &&
-          unionMinY < layout.y + layout.height
-        ) {
-          childrenOverlap = true
-        }
-        if (layout.width > 0 && layout.height > 0) {
-          unionMinX = Math.min(unionMinX, layout.x)
-          unionMinY = Math.min(unionMinY, layout.y)
-          unionMaxX = Math.max(unionMaxX, layout.x + layout.width)
-          unionMaxY = Math.max(unionMaxY, layout.y + layout.height)
-        }
+      if (layout.width > 0 && layout.height > 0) {
+        unionMinX = Math.min(unionMinX, layout.x)
+        unionMinY = Math.min(unionMinY, layout.y)
+        unionMaxX = Math.max(unionMaxX, layout.x + layout.width)
+        unionMaxY = Math.max(unionMaxY, layout.y + layout.height)
       }
-    } else if (childElem.paintsPastRect === true) {
-      descendantPaintsPast = true
     }
   }
   node.childrenOverlap = childrenOverlap
   node.childrenPaintingPastRect = childrenPaintingPastRect
   node.paintsPastRect =
-    !clipsBothAxes(node) && (escaped || descendantPaintsPast)
+    (!clipsBothAxes(node) && (escaped || descendantPaintsPast)) ||
+    borderPaintsPastRect(node, nodeWidth, nodeHeight)
   return escaped
 }
 

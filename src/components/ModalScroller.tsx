@@ -14,6 +14,7 @@ import {
   type ScrollViewport,
   Text,
   useApp,
+  useInterval,
 } from '@anthropic/ink';
 
 /** densable Aee — horizontal padding on lRc children. */
@@ -60,6 +61,9 @@ export function ModalScroller({ scrollViewport, maxRows, onClaim, children }: Pr
   const innerScrollRef = useRef<ScrollBoxHandle | null>(null);
 
   const [overflow, setOverflow] = useState<OverflowState>(EMPTY_OVERFLOW);
+  // Official 2.1.328 `Xc` `Ye`: tracks an active revealEnd() hold so the top ↑
+  // scroll hint stays hidden while snapped to the end of the modal pane.
+  const revealingEndRef = useRef(false);
 
   const measure = useCallback(() => {
     const handle = scrollViewport?.handle;
@@ -76,8 +80,8 @@ export function ModalScroller({ scrollViewport, maxRows, onClaim, children }: Pr
     const overflows = contentHeight > page;
     const scrollTop = handle.getScrollTop() + handle.getPendingDelta();
     const canScroll = contentHeight - page > 2;
-    const above = canScroll && scrollTop > 0;
     const below = canScroll && scrollTop < contentHeight - viewportHeight;
+    const above = canScroll && scrollTop > 0 && (below || !revealingEndRef.current);
     setOverflow(prev =>
       prev.overflows === overflows &&
       prev.above === above &&
@@ -129,15 +133,23 @@ export function ModalScroller({ scrollViewport, maxRows, onClaim, children }: Pr
     };
   }, [measure, scrollViewport]);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      measure();
-      reclaimFocus();
-    }, 50);
+  // Official 2.1.328 `Xc` `vt` (@318476113 @31050): snap modal ScrollBox to
+  // the bottom and suppress the top ↑ hint until the returned cleanup runs.
+  const revealEnd = useCallback(() => {
+    revealingEndRef.current = true;
+    scrollViewport?.handle?.scrollTo(Number.MAX_SAFE_INTEGER);
     return () => {
-      clearInterval(id);
+      revealingEndRef.current = false;
     };
+  }, [scrollViewport]);
+
+  // Official 2.1.328 `Xc` `Tl(Pt, 50)`: use Ink's ClockContext-driven
+  // useInterval instead of raw setInterval so timers stay clock-managed.
+  const pollTick = useCallback(() => {
+    measure();
+    reclaimFocus();
   }, [measure, reclaimFocus]);
+  useInterval(pollTick, 50);
 
   const innerRows = zxc?.rows ?? maxRows;
   const innerColumns = zxc?.columns ?? 0;
@@ -147,8 +159,9 @@ export function ModalScroller({ scrollViewport, maxRows, onClaim, children }: Pr
       columns: innerColumns,
       scrollViewport: scrollViewport ?? null,
       claimScrollBox,
+      revealEnd,
     }),
-    [innerRows, innerColumns, scrollViewport, claimScrollBox],
+    [innerRows, innerColumns, scrollViewport, claimScrollBox, revealEnd],
   );
 
   const onKeyDown = useCallback(
@@ -194,6 +207,9 @@ export function ModalScroller({ scrollViewport, maxRows, onClaim, children }: Pr
   const attachInnerScroll = useCallback(
     (handle: ScrollBoxHandle | null) => {
       innerScrollRef.current = handle;
+      if (handle && revealingEndRef.current) {
+        handle.scrollTo(Number.MAX_SAFE_INTEGER);
+      }
       if (!claimed && scrollViewport) {
         const detach = scrollViewport.attach(handle);
         return () => {

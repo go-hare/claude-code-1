@@ -4,7 +4,17 @@ import { SentryErrorBoundary } from './SentryErrorBoundary.js';
 import { randomUUID, type UUID } from 'crypto';
 import type { RefObject } from 'react';
 import * as React from 'react';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useContext,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { every } from 'src/utils/set.js';
 import { getIsRemoteMode } from '../bootstrap/state.js';
 import { getBootstrapSession, getUserPromptWaitingFor, subscribeUserPromptWaiting } from '../utils/sessionHost.js';
@@ -92,11 +102,12 @@ import {
 } from './messageActions.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
 import { LatestTurnDurationContext } from './messages/SystemTextMessage.js';
+import { UserTextMessage } from './messages/UserTextMessage.js';
 import { OffscreenFreeze } from './OffscreenFreeze.js';
 import { StatusNotices } from './StatusNotices.js';
 import type { ScrollViewport } from '@anthropic/ink';
 import type { ScrollPinRevealHost } from '../utils/scrollPin.js';
-import type { TranscriptStore } from '../utils/transcriptStore.js';
+import type { SubscribableTranscript } from '../utils/transcriptStore.js';
 import type { JumpHandle } from './VirtualMessageList.js';
 
 // Memoed logo header: this box is the FIRST sibling before all MessageRows
@@ -401,19 +412,31 @@ export function collectLastThinkingIdsPerTurn(
 
 /**
  * Official 2.1.328 `Tje` structured message source: either a subscribable live
- * `TranscriptStore` or a static snapshot array.
+ * transcript (`TranscriptProjection` / `TranscriptStore`) or a static snapshot.
  */
 export type MessagesSource =
-  | { kind: 'live'; transcript: TranscriptStore; conversationId: string }
+  | { kind: 'live'; transcript: SubscribableTranscript; conversationId: string; isMain?: boolean }
   | { kind: 'static'; messages: readonly MessageType[]; conversationId: string };
 
 const NOOP_TRANSCRIPT_SUB = () => () => {};
 const EMPTY_MESSAGES_ARRAY: readonly MessageType[] = [];
+const getEmptyMessagesSnapshot = (): readonly MessageType[] => EMPTY_MESSAGES_ARRAY;
 
-type Props = {
-  /** Official 2.1.328 `Tje` source (`live` TranscriptStore or `static` snapshot). */
-  source?: MessagesSource;
-  messages?: MessageType[];
+/**
+ * Official 2.1.328 `kw` (@318476113 @183600): pick the deferred snapshot only
+ * while deferral is enabled AND the conversation head has not changed (clear /
+ * compact immediately switches to `live` instead of showing stale turns).
+ */
+export function selectDeferredMessages<T>(
+  deferred: readonly T[],
+  live: readonly T[],
+  shouldDefer: boolean,
+): readonly T[] {
+  return shouldDefer && deferred[0] === live[0] ? deferred : live;
+}
+
+type InnerProps = {
+  messages: MessageType[];
   tools: Tools;
   commands: Command[];
   verbose: boolean;
@@ -492,6 +515,23 @@ type Props = {
   renderRange?: readonly [start: number, end: number];
   /** Official 2.1.323 (#2032): report total post-collapse row count so chunked export never stops early on an empty chunk. */
   onRowCount?: (count: number) => void;
+};
+
+type Props = Omit<InnerProps, 'messages'> & {
+  /** Official 2.1.328 `Tje` source (`live` subscribable transcript or `static` snapshot). */
+  source?: MessagesSource;
+  /** Backwards-compat optional messages array for non-live callers/tests (ignored when `source.kind === 'live'`). */
+  messages?: MessageType[];
+  /** Official 2.1.328 `Tje`: when false while loading on main prompt, `useDeferredValue` defers transcript re-renders. */
+  showStreamingText?: boolean;
+  /** Official 2.1.328 `Tje` `Se`: submitted user prompt echoed until the deferred transcript snapshot advances past `placeholderBaseline`. */
+  placeholderText?: string;
+  /** Transcript length snapshot captured at submit before the real UserMessage lands. */
+  placeholderBaseline?: number;
+  /** Official 2.1.328 `Tje` `hidePlaceholder`: suppresses the processing placeholder (e.g. while modal chrome or disabled is active). */
+  hidePlaceholder?: boolean;
+  /** Official 2.1.328 `Tje` `onRowsDrawn`: fires in `useLayoutEffect` with the actually drawn (possibly deferred) message snapshot. */
+  onRowsDrawn?: (drawnMessages: readonly MessageType[]) => void;
 };
 
 const MAX_MESSAGES_TO_SHOW_IN_TRANSCRIPT_MODE = 30;
@@ -1168,8 +1208,7 @@ function isToolResultErrorTruncated(content: unknown): boolean {
 }
 
 const MessagesImpl = ({
-  source,
-  messages: propMessages,
+  messages,
   tools,
   commands,
   verbose,
@@ -1177,7 +1216,7 @@ const MessagesImpl = ({
   suppressMessageAnimation = false,
   inProgressToolUseIDs,
   isMessageSelectorVisible,
-  conversationId: propConversationId,
+  conversationId,
   screen,
   streamingToolUses,
   showAllInTranscript = false,
@@ -1204,20 +1243,7 @@ const MessagesImpl = ({
   cursorNavRef,
   renderRange,
   onRowCount,
-}: Props): React.ReactNode => {
-  const liveStore = source?.kind === 'live' ? source.transcript : null;
-  const liveMessages = useSyncExternalStore(
-    liveStore ? liveStore.subscribe : NOOP_TRANSCRIPT_SUB,
-    liveStore ? liveStore.getSnapshot : () => EMPTY_MESSAGES_ARRAY,
-  );
-  const messages = (
-    source?.kind === 'live'
-      ? liveMessages
-      : source?.kind === 'static'
-        ? source.messages
-        : (propMessages ?? EMPTY_MESSAGES_ARRAY)
-  ) as MessageType[];
-  const conversationId = source?.conversationId ?? propConversationId;
+}: InnerProps): React.ReactNode => {
   const { columns, rows } = useTerminalSize();
   const isFullscreen = isFullscreenEnvEnabled();
   const isTranscriptMode = screen === 'transcript';
@@ -2099,8 +2125,10 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   return true;
 }
 
-export const Messages = React.memo(MessagesImpl, (prev, next) => {
-  const keys = Object.keys(prev) as (keyof typeof prev)[];
+function compareCommonProps<T extends InnerProps | Props>(prev: T, next: T, skipLiveMessagesProp: boolean): boolean {
+  const prevKeys = Object.keys(prev) as (keyof T)[];
+  const nextKeys = Object.keys(next) as (keyof T)[];
+  const keys = prevKeys.length >= nextKeys.length ? prevKeys : nextKeys;
   for (const key of keys) {
     if (
       key === 'onOpenRateLimitOptions' ||
@@ -2112,20 +2140,25 @@ export const Messages = React.memo(MessagesImpl, (prev, next) => {
       key === 'revealRef' ||
       key === 'onSearchMatchesChange' ||
       key === 'scanElement' ||
-      key === 'setPositions'
-    )
+      key === 'setPositions' ||
+      key === 'onRowsDrawn'
+    ) {
       continue;
+    }
+    if (skipLiveMessagesProp && key === 'messages') {
+      continue;
+    }
     if (prev[key] !== next[key]) {
       if (key === 'source') {
-        const p = prev.source;
-        const n = next.source;
+        const p = (prev as Props).source;
+        const n = (next as Props).source;
         if (
           p !== undefined &&
           n !== undefined &&
           p.kind === n.kind &&
           p.conversationId === n.conversationId &&
           (p.kind === 'live' && n.kind === 'live'
-            ? p.transcript === n.transcript
+            ? p.transcript === n.transcript && (p.isMain ?? true) === (n.isMain ?? true)
             : p.kind === 'static' && n.kind === 'static' && p.messages === n.messages)
         ) {
           continue;
@@ -2161,7 +2194,98 @@ export const Messages = React.memo(MessagesImpl, (prev, next) => {
     }
   }
   return true;
-});
+}
+
+/** Official 2.1.328 `Cw` (@318476113 @183670): memoized transcript renderer behind `Tje`. */
+const MessagesInner = React.memo(MessagesImpl, (prev, next) => compareCommonProps(prev, next, false));
+
+/**
+ * Official 2.1.328 `Tje` (@318476113 @184022): single-source transcript host.
+ *
+ * Subscribes directly to `source.transcript` when `source.kind === 'live'`,
+ * applies `useDeferredValue` (`Kle`) + `selectDeferredMessages` (`kw`) internally,
+ * reports drawn length via `onRowsDrawn`, and synchronizes processing placeholder
+ * visibility against the EXACT SAME deferred message snapshot so the user's
+ * prompt is never rendered twice and never blanks during deferral.
+ */
+function MessagesHost({
+  source,
+  messages: propMessages,
+  showStreamingText = false,
+  placeholderText,
+  placeholderBaseline,
+  hidePlaceholder = false,
+  onRowsDrawn,
+  ...innerProps
+}: Props): React.ReactNode {
+  const liveStore = source?.kind === 'live' ? source.transcript : null;
+  const liveMessages = useSyncExternalStore(
+    liveStore ? liveStore.subscribe : NOOP_TRANSCRIPT_SUB,
+    liveStore ? liveStore.getSnapshot : getEmptyMessagesSnapshot,
+  );
+  const sourceMessages =
+    source?.kind === 'live'
+      ? liveMessages
+      : source?.kind === 'static'
+        ? source.messages
+        : (propMessages ?? EMPTY_MESSAGES_ARRAY);
+  const isMainPrompt = source?.kind === 'live' && (source.isMain ?? true) && innerProps.screen === 'prompt';
+  const shouldDefer = isMainPrompt && !showStreamingText && innerProps.isLoading;
+  const deferredMessages = useDeferredValue(sourceMessages);
+  const renderedMessages = selectDeferredMessages(deferredMessages, sourceMessages, shouldDefer);
+  const conversationId = source?.conversationId ?? innerProps.conversationId;
+
+  useLayoutEffect(() => {
+    if (isMainPrompt) {
+      onRowsDrawn?.(renderedMessages);
+    }
+  }, [renderedMessages, onRowsDrawn, isMainPrompt]);
+
+  // Synchronized placeholder echo: gated on the exact same `renderedMessages`
+  // snapshot passed to MessagesInner so real UserMessage and placeholderText
+  // can never render simultaneously. Latch dismissed once renderedMessages
+  // advances past baseline so mid-turn compaction cannot resurrect the echo.
+  const placeholderSessionRef = useRef<{ text: string | undefined; baseline: number | undefined }>({
+    text: undefined,
+    baseline: undefined,
+  });
+  const placeholderDismissedRef = useRef(false);
+  if (
+    placeholderSessionRef.current.text !== placeholderText ||
+    placeholderSessionRef.current.baseline !== placeholderBaseline
+  ) {
+    placeholderSessionRef.current = { text: placeholderText, baseline: placeholderBaseline };
+    placeholderDismissedRef.current = false;
+  }
+  if (placeholderBaseline !== undefined && renderedMessages.length > placeholderBaseline) {
+    placeholderDismissedRef.current = true;
+  }
+  const showPlaceholder =
+    !hidePlaceholder &&
+    isMainPrompt &&
+    placeholderText !== undefined &&
+    placeholderText !== '' &&
+    placeholderBaseline !== undefined &&
+    !placeholderDismissedRef.current &&
+    renderedMessages.length <= placeholderBaseline;
+
+  return (
+    <>
+      <MessagesInner {...innerProps} messages={renderedMessages as MessageType[]} conversationId={conversationId} />
+      {showPlaceholder && (
+        <UserTextMessage
+          param={{ text: placeholderText, type: 'text' }}
+          addMargin={true}
+          verbose={innerProps.verbose}
+        />
+      )}
+    </>
+  );
+}
+
+export const Messages = React.memo(MessagesHost, (prev, next) =>
+  compareCommonProps(prev, next, prev.source?.kind === 'live' && next.source?.kind === 'live'),
+);
 
 export function shouldRenderStatically(
   message: RenderableMessage,
