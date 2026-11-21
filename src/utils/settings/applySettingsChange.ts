@@ -1,33 +1,45 @@
+import {
+  getAdditionalDirectoriesForClaudeMd,
+  getOriginalCwd,
+} from '../../bootstrap/state.js'
+import {
+  getRepoScopedSettingSources,
+  latchBlockReadsOutsideWorkingDirectories,
+} from '../../memdir/paths.js'
 import type { AppState } from '../../state/AppState.js'
 import type { ToolPermissionContext } from '../../Tool.js'
+import { clearMemoryFileCaches } from '../claudemd.js'
 import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
-import {
-  getUltracodeEffortForModel,
-  INHERIT_SESSION_EFFORT,
-  pdSessionEffort,
-  teSettingsEffortTable,
-} from '../effort.js'
+import { getUltracodeEffortForModel, teSettingsEffortTable } from '../effort.js'
+import { isBareMode, isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
 import { updateHooksConfigSnapshot } from '../hooks/hooksConfigSnapshot.js'
 import { getMainLoopModel } from '../model/model.js'
 import { expandPath } from '../path.js'
+import { settingsHaveBlockWritesOutsideWorkingDirectories } from '../permissions/filesystem.js'
+import { settingsHaveBlockReadsOutsideWorkingDirectories } from '../permissions/outsideReads.js'
 import { applyPermissionUpdate } from '../permissions/PermissionUpdate.js'
 import {
+  applyBlockWritesOutsideWorkingDirectories,
+  applyManagedAutoModeExit,
   createDisabledBypassPermissionsContext,
   findOverlyBroadBashPermissions,
   isBypassPermissionsModeDisabled,
   removeDangerousPermissions,
-  applyManagedAutoModeExit,
   transitionPlanAutoMode,
 } from '../permissions/permissionSetup.js'
-import { syncPermissionRulesFromDisk } from '../permissions/permissions.js'
+import {
+  applyDenyInsteadOfPrompting,
+  syncPermissionRulesFromDisk,
+} from '../permissions/permissions.js'
 import { loadAllPermissionRulesFromDisk } from '../permissions/permissionsLoader.js'
 import { collectUngatedAdditionalDirectories } from '../permissions/projectGrantsGate.js'
 import { rewriteFlagSettingsTrustedNetworkDirectories } from '../permissions/trustedNetworkDirectories.js'
 import type { SettingsChangeExtra } from './changeDetector.js'
-import type { SettingSource } from './constants.js'
+import { getEnabledSettingSources, type SettingSource } from './constants.js'
 import { notifyStrictPluginOnlyPolicyIfChanged } from './pluginOnlyPolicy.js'
 import { getInitialSettings, getSettingsForSource } from './settings.js'
+import type { SettingsJson } from './types.js'
 
 /**
  * densable apply `C` — session-owned add-dir sources are not reconciled on
@@ -51,9 +63,63 @@ function resolveAdditionalDirectory(dir: string, cwd?: string): string[] {
 }
 
 /**
- * densable apply `be` — swap project additionalDirectories on `/cd` (`prevCwd`)
- * or after an explicit trust flip. Official flagSettings
- * `trustedNetworkDirectories` rewrite is gold `Ier` @190949411.
+ * Official 2.1.328 `Hdr` (chunk@288385318.js): partition declared
+ * `permissions.additionalDirectories` into `repoOnly` (only declared in
+ * repo-scoped setting sources, i.e. `projectSettings` or git-tracked
+ * `localSettings`) vs trusted sources (`userSettings`, `policySettings`,
+ * `flagSettings`, untracked `localSettings`, CLI `--add-dir`).
+ */
+function classifyDeclaredAdditionalDirectories(
+  expand: (dir: string) => string[],
+): { declared: Set<string>; repoOnly: Set<string> } {
+  const repoSources = getRepoScopedSettingSources()
+  const enabledSources = getEnabledSettingSources()
+  const collectFrom = (sources: readonly SettingSource[]): Set<string> =>
+    new Set(
+      sources.flatMap(s =>
+        enabledSources.includes(s)
+          ? (
+              getSettingsForSource(s)?.permissions?.additionalDirectories ?? []
+            ).flatMap(expand)
+          : [],
+      ),
+    )
+  const repoOnly = collectFrom(repoSources)
+  const nonRepo = new Set<string>([
+    ...collectFrom(
+      enabledSources.filter(
+        s => !(repoSources as readonly string[]).includes(s),
+      ),
+    ),
+    ...getAdditionalDirectoriesForClaudeMd().flatMap(expand),
+  ])
+  for (const dir of nonRepo) {
+    repoOnly.delete(dir)
+  }
+  return {
+    declared: new Set([...repoOnly, ...nonRepo]),
+    repoOnly,
+  }
+}
+
+/**
+ * Official 2.1.328 `s6t()` (chunk@305180987.js): recompute whether session
+ * away-summary recap is enabled after a settings change.
+ */
+function computeAwaySummaryEnabled(settings: SettingsJson): boolean {
+  const envVal = process.env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY
+  if (isEnvDefinedFalsy(envVal)) return false
+  if (isEnvTruthy(envVal)) return true
+  if (isBareMode()) return false
+  if (settings.awaySummaryEnabled === false) return false
+  return true
+}
+
+/**
+ * Official 2.1.328 `cCs` (chunk@306338118.js): reconcile `additionalDirectories`
+ * on settings change, `/cd` (`prevCwd`), or explicit trust flip, distinguishing
+ * repo-only `'projectSettings'` vs trusted `'localSettings'` provenance so
+ * repo-controlled directories cannot bypass the outside-read fence.
  */
 export function reconcileAdditionalDirectories(
   context: ToolPermissionContext,
@@ -84,14 +150,39 @@ export function reconcileAdditionalDirectories(
       (!previous.has(dir) || (trustFlip && !owned.has(dir))) &&
       !isSessionOwnedWorkingDirectorySource(owned.get(dir)?.source),
   )
+  const originalCwd = getOriginalCwd()
+  const { declared, repoOnly } = classifyDeclaredAdditionalDirectories(dir => [
+    ...(originalCwd ? resolveAdditionalDirectory(dir, originalCwd) : []),
+    ...resolveAdditionalDirectory(dir),
+  ])
+  const destinationFor = (dir: string): 'projectSettings' | 'localSettings' =>
+    repoOnly.has(dir) ? 'projectSettings' : 'localSettings'
+  const toReclassify = [...owned.entries()].filter(
+    ([dir, entry]) =>
+      !isSessionOwnedWorkingDirectorySource(entry.source) &&
+      !toRemove.includes(dir) &&
+      declared.has(dir) &&
+      entry.source !== destinationFor(dir),
+  )
   if (
     toRemove.length === 0 &&
     toAdd.length === 0 &&
+    toReclassify.length === 0 &&
     source !== 'flagSettings'
   ) {
     return context
   }
   let next = context
+  if (toReclassify.length > 0) {
+    const updatedDirs = new Map(owned)
+    for (const [dir, entry] of toReclassify) {
+      updatedDirs.set(dir, { ...entry, source: destinationFor(dir) })
+    }
+    next = {
+      ...next,
+      additionalWorkingDirectories: updatedDirs,
+    }
+  }
   if (source === 'flagSettings') {
     const flagDirs = new Set(
       (
@@ -119,11 +210,16 @@ export function reconcileAdditionalDirectories(
     })
   }
   if (toAdd.length > 0) {
-    next = applyPermissionUpdate(next, {
-      type: 'addDirectories',
-      directories: toAdd,
-      destination: 'localSettings',
-    })
+    for (const dest of ['projectSettings', 'localSettings'] as const) {
+      const dirsForDest = toAdd.filter(dir => destinationFor(dir) === dest)
+      if (dirsForDest.length > 0) {
+        next = applyPermissionUpdate(next, {
+          type: 'addDirectories',
+          directories: dirsForDest,
+          destination: dest,
+        })
+      }
+    }
   }
   return next
 }
@@ -221,6 +317,26 @@ export function applySettingsChange(
     newContext = transitionPlanAutoMode(newContext)
     newContext = applyManagedAutoModeExit(newContext)
 
+    // Official 2.1.328 `h2n` (chunk@306338118.js): latch outside-read block,
+    // enforce outside-write block, and update denyInsteadOfPrompting live.
+    if (
+      newContext.blockReadsOutsideWorkingDirectories !== true &&
+      settingsHaveBlockReadsOutsideWorkingDirectories()
+    ) {
+      newContext = {
+        ...newContext,
+        blockReadsOutsideWorkingDirectories: true,
+      }
+      latchBlockReadsOutsideWorkingDirectories()
+    }
+    if (settingsHaveBlockWritesOutsideWorkingDirectories()) {
+      newContext = applyBlockWritesOutsideWorkingDirectories(newContext)
+    }
+    newContext = applyDenyInsteadOfPrompting(newContext)
+
+    // Invalidate memory caches whenever permissions/settings change (official `kHt()`).
+    clearMemoryFileCaches()
+
     // densable 2.1.289: settingsEffortTable refreshes per-model/legacy settings
     // while leaving sessionEffort untouched (`{ kind: 'inherit' }` resolves
     // dynamically via pdSessionEffort; explicit session overrides stay intact).
@@ -243,12 +359,17 @@ export function applySettingsChange(
       }
     }
 
+    const nextAwaySummaryEnabled = computeAwaySummaryEnabled(newSettings)
+
     return {
       ...prev,
       settings: newSettings,
       settingsEffortTable: nextSettingsEffortTable,
       toolPermissionContext: newContext,
       ...ultracodePatch,
+      ...(prev.awaySummaryEnabled !== nextAwaySummaryEnabled
+        ? { awaySummaryEnabled: nextAwaySummaryEnabled }
+        : {}),
     }
   })
 }

@@ -9,6 +9,7 @@ import { AddWorkspaceDirectory } from '../../components/permissions/rules/AddWor
 import { Box, Dialog, Text } from '@anthropic/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { randomUUID } from 'crypto';
+import { clearMemoryFileCaches } from '../../utils/claudemd.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { persistHookOutput } from '../../utils/hooks/persistHookOutput.js';
 import { executeDirectoryAddedHooks } from '../../utils/hooks.js';
@@ -219,12 +220,11 @@ export async function call(
       destination,
     };
 
-    // Apply to session context
-    const latestAppState = context.getAppState();
-    const updatedContext = applyPermissionUpdate(latestAppState.toolPermissionContext, permissionUpdate);
+    // Apply to session context atomically inside setAppState updater so
+    // concurrent permission updates are never clobbered by a stale snapshot.
     context.setAppState(prev => ({
       ...prev,
-      toolPermissionContext: updatedContext,
+      toolPermissionContext: applyPermissionUpdate(prev.toolPermissionContext, permissionUpdate),
     }));
 
     // Update sandbox config so Bash commands can access the new directory.
@@ -235,6 +235,7 @@ export async function call(
     if (!currentDirs.includes(path)) {
       setAdditionalDirectoriesForClaudeMd([...currentDirs, path]);
     }
+    clearMemoryFileCaches();
     SandboxManager.refreshConfig();
 
     // densable 2.1.219 #3 s2t — DirectoryAdded after /add-dir (slash_command)

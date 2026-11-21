@@ -9,9 +9,13 @@ import {
   isOverageProvisioningAllowed,
 } from '../utils/auth.js'
 import { hasClaudeAiBillingAccess } from '../utils/billing.js'
-import { getIsNonInteractiveSession } from '../bootstrap/state.js'
+import {
+  getIsNonInteractiveSession,
+  isReplBridgeActive,
+} from '../bootstrap/state.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { formatResetTime } from '../utils/format.js'
+import { getSessionIngressAuthToken } from '../utils/sessionIngressAuth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from './analytics/growthbook.js'
 import type { ClaudeAILimits } from './claudeAiLimits.js'
 
@@ -182,15 +186,17 @@ const CONSUMER_USAGE_SETTINGS_URL =
   'https://claude.ai/settings/usage?from=cc_cli_limit_message'
 
 /**
- * Official 2.1.323 (#2204) `Byt()`: true in Anthropic-hosted cloud sessions
- * (`CLAUDE_CODE_REMOTE`) or under Remote Control (bridge mode). In these
- * environments, spend limit / 1M context errors and `/usage-credits` no longer
- * print external web addresses.
+ * Official 2.1.328 `Wze()` (`chunk@293569796.js @22251`): true under Remote
+ * Control (`isReplBridgeActive()` / `Xd()`), session-ingress token (`tU()`), or
+ * Anthropic-hosted cloud sessions (`CLAUDE_CODE_REMOTE`). In these
+ * environments, spend limit / 1M context errors and `/usage-credits` omit
+ * external web addresses and admin-ask hints.
  */
 export function isCloudOrRemoteControlSession(): boolean {
   if (
+    isReplBridgeActive() ||
+    getSessionIngressAuthToken() !== null ||
     isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_BRIDGE_MODE) ||
     process.env.CLAUDE_CODE_ENTRYPOINT === 'remote' ||
     process.env.CLAUDE_CODE_ENTRYPOINT === 'remote-control'
   ) {

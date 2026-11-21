@@ -31,7 +31,10 @@ import { getOauthAccountInfo, validateForceLoginOrg } from 'src/utils/auth.js'
 import { homedir, hostname } from 'os'
 import { randomUUID } from 'crypto'
 import { isDeepStrictEqual } from 'util'
-import { getOriginalCwd } from 'src/bootstrap/state.js'
+import {
+  getOriginalCwd,
+  setAutoCompactWindowSurface,
+} from 'src/bootstrap/state.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import { isEssentialTrafficOnly } from 'src/utils/privacyLevel.js'
@@ -5707,6 +5710,9 @@ export function headlessCloudFeatures(
     args.forwardHomeSettings ?? launch.mayForwardHomeSettings(),
   )
   applyHomeSettingsHostConsent(consent ?? null)
+  // Official 2.1.328 (chunk@283138841.js @78660, @142377): propagate
+  // autoCompactWindowSurface from cloud session host launchOptions into bootstrap state.
+  setAutoCompactWindowSurface(readAutoCompactWindowSurface(sessionHost))
   return [
     {
       kind: 'forwardHomeSettings',
@@ -6945,6 +6951,9 @@ export function runHeadlessCloudAttach(
   sessionHost: HeadlessCloudSessionHost,
   { serveOnly = false }: { serveOnly?: boolean } = {},
 ): Promise<void> {
+  if (serveOnly) {
+    setAutoCompactWindowSurface(readAutoCompactWindowSurface(sessionHost))
+  }
   return startHeadlessCloudSession(args, tools, {
     entry: 'attach',
     opener: () => openHeadlessCloudAttach(args, sessionId, serveOnly),

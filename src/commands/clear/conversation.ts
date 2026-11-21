@@ -21,10 +21,12 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js'
-import { clearCodeModeVmSession } from '../../services/codeMode/executor.js'
+import { endMainThreadConversation } from '../../services/codeMode/executor.js'
 import type { AppState } from '../../state/AppState.js'
 import { isInProcessTeammateTask } from '../../tasks/InProcessTeammateTask/types.js'
 import {
+  clearAgentPermissionWaits,
+  forfeitAllChatPins,
   isLocalAgentTask,
   type LocalAgentTaskState,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
@@ -339,8 +341,16 @@ export async function clearConversation({
   // tasks (invoked skills, pending permission callbacks, dump state, cache-break
   // tracking) is retained so those agents keep functioning.
   clearSessionCaches(preservedAgentIds)
-  // Official 2.1.328: clear Code Mode VM session state on /clear.
-  clearCodeModeVmSession()
+  // Official 2.1.328 (`chunk@313694282.js @8309`): end ONLY main-thread Code
+  // Mode conversation state on /clear so surviving background subagents keep
+  // their VM sessions and evals intact.
+  endMainThreadConversation('the conversation was cleared')
+  // Clear tracked permission waits for the outgoing session and forfeit chat
+  // pins on any surviving agents so stale pins/notices don't leak past /clear.
+  clearAgentPermissionWaits(getSessionId())
+  if (setAppState) {
+    forfeitAllChatPins(setAppState)
+  }
   // Official 2.1.325 #1929: reset unchanged-image re-read tracking on /clear.
   resetImageRereadState()
 

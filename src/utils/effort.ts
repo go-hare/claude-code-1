@@ -1471,8 +1471,16 @@ type SessionOrgEffortCapEntry = {
 
 const sessionOrgEffortCaps = new Map<string, SessionOrgEffortCapEntry>()
 
-export function _resetSessionOrgEffortCapsForTesting(): void {
+/**
+ * Official 2.1.328 (`S9e().clear()`): clear session-learned org effort caps
+ * when session effort changes (or on `/clear` / `/login`).
+ */
+export function clearSessionOrgEffortCaps(): void {
   sessionOrgEffortCaps.clear()
+}
+
+export function _resetSessionOrgEffortCapsForTesting(): void {
+  clearSessionOrgEffortCaps()
 }
 
 function getOrgEffortCapKey(model: string): string {

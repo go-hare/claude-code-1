@@ -34,6 +34,7 @@ import type {
   PersistedWorktreeSession,
 } from '../types/logs.js'
 import type { Message } from '../types/message.js'
+import type { PermissionMode } from '../types/permissions.js'
 import { renameRecordingForSession } from './asciicast.js'
 import { clearMemoryFileCaches } from './claudemd.js'
 import {
@@ -93,6 +94,8 @@ type ResumeResult = {
   attributionSnapshots?: AttributionSnapshotMessage[]
   contextCollapseCommits?: ContextCollapseCommitEntry[]
   contextCollapseSnapshot?: ContextCollapseSnapshotEntry
+  sessionModel?: string
+  permissionMode?: PermissionMode | string
 }
 
 /**
@@ -119,6 +122,92 @@ function extractTodosFromTranscript(messages: Message[]): TodoList {
 }
 
 /**
+ * Official 2.1.328 (`chunk@319736883.js @430550, @480074, @499088`):
+ * Shared transcript-derived resume hydration used by BOTH `/resume`
+ * (`restoreSessionStateFromLog`) and CLI `--resume`/`--continue`
+ * (`processResumedConversation`), eliminating split-brain restoration of
+ * artifact frame state, active goals, model/refusal-fallback state, and
+ * `agentNameRegistry`.
+ */
+function hydrateResumedTranscriptState(
+  result: Pick<ResumeResult, 'messages' | 'sessionModel'>,
+  setAppState: (f: (prev: AppState) => AppState) => void,
+  options?: {
+    forkSession?: boolean
+    respectExplicitModelOverride?: boolean
+  },
+): void {
+  // densable N9e @190201509 / Iun @190201339 — local resume walks XXt.
+  // seedEligible is DPe KEEP (no !g()&&A() host).
+  restoreResumedArtifactFrameState(
+    setAppState,
+    extractResumedArtifactFrameSeed(result.messages ?? [], {
+      origin: 'local',
+      seedEligible: isArtifactResumeSeedEligible(),
+    }),
+    { continuesConversation: true },
+  )
+
+  // densable 2.1.239 OMo: restoreGoalFromTranscript.
+  // Official always calls (undefined messages → clear leftover activeGoal).
+  {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    ;(
+      require('../services/goal/restoreGoalFromTranscript.js') as typeof import('../services/goal/restoreGoalFromTranscript.js')
+    ).restoreGoalFromTranscript(result.messages, setAppState)
+    /* eslint-enable @typescript-eslint/no-require-imports */
+  }
+
+  // Restore session model choice (from /model command), guarding refusal fallback on fork (#1392)
+  const sessionModel = result.sessionModel
+  const resumeEntries = (result.messages ?? []) as Parameters<
+    typeof restoreModelOnResume
+  >[0]
+  const restoredFallback = restoreModelOnResume(resumeEntries, {
+    isFork: !!options?.forkSession,
+  })
+  const hasExplicitCliModel =
+    options?.respectExplicitModelOverride === true &&
+    getMainLoopModelOverride() !== undefined
+  const effectiveSessionModel = hasExplicitCliModel
+    ? undefined
+    : sessionModel
+      ? (restoredFallback.model ??
+        resolveResumeRefusalFallbackModel(
+          resumeEntries,
+          sessionModel,
+          !!options?.forkSession,
+        ))
+      : restoredFallback.model
+  if (effectiveSessionModel) {
+    setAppState(prev => ({
+      ...prev,
+      mainLoopModel: effectiveSessionModel,
+    }))
+  }
+
+  // Official xpr (#688): rebuild agentNameRegistry from resumed transcript
+  // messages (skipped on fork so forked session doesn't inherit parent's names).
+  if (!options?.forkSession && result.messages && result.messages.length > 0) {
+    const messages = result.messages
+    try {
+      setAppState(prev => {
+        const next = rehydrateAgentNameRegistry(
+          messages,
+          prev.agentNameRegistry ?? new Map(),
+        )
+        return next === null ? prev : { ...prev, agentNameRegistry: next }
+      })
+    } catch (err) {
+      logForDebugging(
+        `session rehydration threw: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+        { level: 'error' },
+      )
+    }
+  }
+}
+
+/**
  * Restore session state (file history, attribution, todos) from log on resume.
  * Used by both SDK (print.ts) and interactive (REPL.tsx, main.tsx) resume paths.
  */
@@ -134,17 +223,6 @@ export function restoreSessionStateFromLog(
     planModeResumeLane?: 'interactive' | 'print' | 'sdk_url'
   },
 ): void {
-  // densable N9e @190201509 / Iun @190201339 — local resume walks XXt.
-  // seedEligible is DPe KEEP (no !g()&&A() host).
-  restoreResumedArtifactFrameState(
-    setAppState,
-    extractResumedArtifactFrameSeed(result.messages ?? [], {
-      origin: 'local',
-      seedEligible: isArtifactResumeSeedEligible(),
-    }),
-    { continuesConversation: true },
-  )
-
   // densable 2.1.214 Ern(Brt(ur), setAppState) — hydrate EndConversation lock
   const endedByModel = Boolean(
     (result as { endedByModel?: boolean }).endedByModel,
@@ -158,16 +236,6 @@ export function restoreSessionStateFromLog(
     fileHistoryRestoreStateFromLog(result.fileHistorySnapshots, newState => {
       setAppState(prev => ({ ...prev, fileHistory: newState }))
     })
-  }
-
-  // densable 2.1.239 OMo: restoreGoalFromTranscript after fileHistory.
-  // Official always calls (undefined messages → clear leftover activeGoal).
-  {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    ;(
-      require('../services/goal/restoreGoalFromTranscript.js') as typeof import('../services/goal/restoreGoalFromTranscript.js')
-    ).restoreGoalFromTranscript(result.messages, setAppState)
-    /* eslint-enable @typescript-eslint/no-require-imports */
   }
 
   // Restore attribution state (ant-only feature)
@@ -211,50 +279,11 @@ export function restoreSessionStateFromLog(
     }
   }
 
-  // Restore session model choice (from /model command), guarding refusal fallback on fork (#1392)
-  const sessionModel = (result as Record<string, unknown>).sessionModel as
-    | string
-    | undefined
-  const resumeEntries = (result.messages ?? []) as Parameters<
-    typeof restoreModelOnResume
-  >[0]
-  const restoredFallback = restoreModelOnResume(resumeEntries, {
-    isFork: !!options?.forkSession,
+  // Unified transcript-derived hydration: artifact frames, active goals,
+  // session model / refusal-fallback unwind, and agentNameRegistry.
+  hydrateResumedTranscriptState(result, setAppState, {
+    forkSession: options?.forkSession,
   })
-  const effectiveSessionModel = sessionModel
-    ? (restoredFallback.model ??
-      resolveResumeRefusalFallbackModel(
-        resumeEntries,
-        sessionModel,
-        !!options?.forkSession,
-      ))
-    : undefined
-  if (effectiveSessionModel) {
-    setAppState(prev => ({
-      ...prev,
-      mainLoopModel: effectiveSessionModel,
-    }))
-  }
-
-  // Official xpr (#688): rebuild agentNameRegistry from resumed transcript
-  // messages (skipped on fork so forked session doesn't inherit parent's names).
-  if (!options?.forkSession && result.messages && result.messages.length > 0) {
-    const messages = result.messages
-    try {
-      setAppState(prev => {
-        const next = rehydrateAgentNameRegistry(
-          messages,
-          prev.agentNameRegistry ?? new Map(),
-        )
-        return next === null ? prev : { ...prev, agentNameRegistry: next }
-      })
-    } catch (err) {
-      logForDebugging(
-        `session rehydration threw: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
-        { level: 'error' },
-      )
-    }
-  }
 
   // densable #13 y_u after OMo — interactive / resume only (never continue)
   if (options?.applyPlanModeResume) {
@@ -459,7 +488,9 @@ type ResumeLoadResult = {
    */
   bridgeSessionId?: string
   /** densable 2.1.290 #97 — persisted permissionMode from transcript/metadata. */
-  permissionMode?: string
+  permissionMode?: PermissionMode | string
+  /** Persisted user-selected model (`session-model` JSONL entry). */
+  sessionModel?: string
 }
 
 /**
@@ -721,7 +752,16 @@ export async function processResumedConversation(
   // would delete a worktree the original session still references — so
   // strip worktreeSession from the fork path so the cache stays unset.
   restoreSessionMetadata(
-    opts.forkSession ? { ...result, worktreeSession: undefined } : result,
+    opts.forkSession
+      ? {
+          ...result,
+          permissionMode: result.permissionMode as PermissionMode | undefined,
+          worktreeSession: undefined,
+        }
+      : {
+          ...result,
+          permissionMode: result.permissionMode as PermissionMode | undefined,
+        },
   )
 
   if (!opts.forkSession) {
@@ -847,6 +887,35 @@ export async function processResumedConversation(
     }
   }
 
+  let nextInitialState: AppState = {
+    ...planHydratedState,
+    initialMessage: seededInitialMessage,
+    // densable: ...e.endedByModel?{endedByModel:!0}:{}
+    ...(result.endedByModel ? { endedByModel: true } : {}),
+    ...(resumedAgentType && { agent: resumedAgentType }),
+    ...(restoredAttribution && { attribution: restoredAttribution }),
+    ...(standaloneAgentContext && { standaloneAgentContext }),
+    agentDefinitions: refreshedAgentDefs,
+    ...(forceRcOn
+      ? { replBridgeEnabled: true, replBridgeOutboundOnly: false }
+      : {}),
+  }
+
+  // Official 2.1.328 (`chunk@319736883.js @430550, @480074, @499088`):
+  // Unify CLI `--resume`/`--continue` with `/resume` (`restoreSessionStateFromLog`)
+  // so artifact frame state, active goals, model/refusal-fallback state, and
+  // `agentNameRegistry` are hydrated identically on CLI startup resume.
+  hydrateResumedTranscriptState(
+    result,
+    updater => {
+      nextInitialState = updater(nextInitialState)
+    },
+    {
+      forkSession: opts.forkSession,
+      respectExplicitModelOverride: true,
+    },
+  )
+
   return {
     messages: result.messages,
     fileHistorySnapshots: result.fileHistorySnapshots,
@@ -856,18 +925,6 @@ export async function processResumedConversation(
       ? undefined
       : result.agentColor) as AgentColorName | undefined,
     restoredAgentDef: restoredAgent,
-    initialState: {
-      ...planHydratedState,
-      initialMessage: seededInitialMessage,
-      // densable: ...e.endedByModel?{endedByModel:!0}:{}
-      ...(result.endedByModel ? { endedByModel: true } : {}),
-      ...(resumedAgentType && { agent: resumedAgentType }),
-      ...(restoredAttribution && { attribution: restoredAttribution }),
-      ...(standaloneAgentContext && { standaloneAgentContext }),
-      agentDefinitions: refreshedAgentDefs,
-      ...(forceRcOn
-        ? { replBridgeEnabled: true, replBridgeOutboundOnly: false }
-        : {}),
-    },
+    initialState: nextInitialState,
   }
 }

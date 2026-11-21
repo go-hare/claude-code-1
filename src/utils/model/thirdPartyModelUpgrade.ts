@@ -4,6 +4,11 @@
  */
 
 import { logEvent } from '../../services/analytics/index.js'
+import {
+  getGlobalConfig,
+  saveGlobalConfig,
+  type GlobalConfig,
+} from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
 import {
@@ -275,44 +280,80 @@ export async function findVertexUpgradeCandidates(opts?: {
   return findProviderUpgradeCandidates('vertex', opts)
 }
 
+export type ThirdPartyDeclinedUpgradesConfig = {
+  bedrockDeclinedUpgrades?: Record<string, string>
+  vertexDeclinedUpgrades?: Record<string, string>
+}
+
+type GlobalConfigWithDeclinedUpgrades = GlobalConfig &
+  ThirdPartyDeclinedUpgradesConfig
+
 /**
- * Filter upgrade candidates against previously declined upgrades in userSettings
- * and return actions to accept (update settings + process.env) or decline.
+ * Official 2.1.328 (`chunk@308207798.js @18373`):
+ * Filter upgrade candidates against previously declined upgrades persisted in
+ * GlobalConfig (`~/.claude.json`).
  */
 export function filterUndecidedUpgradeCandidates(
   provider: 'bedrock' | 'vertex',
   candidates: readonly ThirdPartyUpgradeCandidate[],
-  userSettings: {
-    bedrockDeclinedUpgrades?: Record<string, string>
-    vertexDeclinedUpgrades?: Record<string, string>
-  } = getSettingsForSource('userSettings') ?? {},
+  globalConfig: ThirdPartyDeclinedUpgradesConfig = getGlobalConfig() as unknown as ThirdPartyDeclinedUpgradesConfig,
 ): ThirdPartyUpgradeCandidate[] {
   const declined =
     (provider === 'bedrock'
-      ? userSettings.bedrockDeclinedUpgrades
-      : userSettings.vertexDeclinedUpgrades) ?? {}
+      ? globalConfig.bedrockDeclinedUpgrades
+      : globalConfig.vertexDeclinedUpgrades) ?? {}
   return candidates.filter(c => declined[c.tier] !== formatUpgradeKey(c))
 }
 
+/**
+ * Official 2.1.328 (`chunk@308207798.js @18373`):
+ * Persist declined upgrades in GlobalConfig (`~/.claude.json`) via
+ * `saveGlobalConfig`, and persist accepted upgrades in `settings.json` +
+ * `process.env`.
+ */
 export function applyThirdPartyUpgradeChoice(
   provider: 'bedrock' | 'vertex',
   candidate: ThirdPartyUpgradeCandidate,
   accepted: boolean,
   source: EditableSettingSource = 'userSettings',
-): void {
+): boolean {
+  const events =
+    provider === 'bedrock'
+      ? {
+          accepted: 'tengu_bedrock_upgrade_accepted',
+          declined: 'tengu_bedrock_upgrade_declined',
+          saveFailed: 'tengu_bedrock_upgrade_save_failed',
+        }
+      : {
+          accepted: 'tengu_vertex_upgrade_accepted',
+          declined: 'tengu_vertex_upgrade_declined',
+          saveFailed: 'tengu_vertex_upgrade_save_failed',
+        }
+
   if (!accepted) {
     const field =
       provider === 'bedrock'
         ? 'bedrockDeclinedUpgrades'
         : 'vertexDeclinedUpgrades'
-    const current = getSettingsForSource(source) ?? {}
-    updateSettingsForSource(source, {
-      [field]: {
-        ...(current[field] ?? {}),
-        [candidate.tier]: formatUpgradeKey(candidate),
-      },
+    saveGlobalConfig(current => {
+      const typed = current as unknown as GlobalConfigWithDeclinedUpgrades
+      return {
+        ...typed,
+        [field]: {
+          ...(typed[field] ?? {}),
+          [candidate.tier]: formatUpgradeKey(candidate),
+        },
+      } as unknown as GlobalConfig
     })
-    return
+    logEvent(
+      events.declined as never,
+      {
+        tier: candidate.tier,
+        from_key: candidate.fromKey,
+        to_key: candidate.toKey,
+      } as never,
+    )
+    return false
   }
   const envPatch: Record<string, string> =
     candidate.tier === 'haiku'
@@ -323,16 +364,59 @@ export function applyThirdPartyUpgradeChoice(
           }),
         }
       : { [candidate.envVar]: candidate.toModelId }
-  for (const [k, v] of Object.entries(envPatch)) {
-    process.env[k] = v
-  }
   const current = getSettingsForSource(source) ?? {}
-  updateSettingsForSource(source, {
+  const { error } = updateSettingsForSource(source, {
     env: {
       ...(current.env ?? {}),
       ...envPatch,
     },
   })
+  if (error) {
+    logEvent(events.saveFailed as never, { tier: candidate.tier } as never)
+    return false
+  }
+  for (const [k, v] of Object.entries(envPatch)) {
+    process.env[k] = v
+  }
+  logEvent(
+    events.accepted as never,
+    {
+      tier: candidate.tier,
+      from_key: candidate.fromKey,
+      to_key: candidate.toKey,
+    } as never,
+  )
+  return true
+}
+
+/**
+ * Official 2.1.328 (`chunk@308207798.js @18373`):
+ * Discover Bedrock / Vertex model upgrade candidates and filter out any
+ * previously declined in GlobalConfig (`~/.claude.json`).
+ */
+export async function discoverUndecidedThirdPartyUpgradeCandidates(
+  provider: 'bedrock' | 'vertex',
+  opts?: {
+    env?: NodeJS.ProcessEnv
+    policySettingsEnv?: Record<string, string | undefined>
+    probeModel?: (
+      modelId: string,
+      tier: ThirdPartyModelTier,
+    ) => Promise<boolean>
+    isModelDenied?: (modelId: string) => boolean
+    resolveProviderModelId?: (catalogKey: string) => string | undefined
+    globalConfig?: ThirdPartyDeclinedUpgradesConfig
+  },
+): Promise<ThirdPartyUpgradeCandidate[]> {
+  const candidates =
+    provider === 'bedrock'
+      ? await findBedrockUpgradeCandidates(opts)
+      : await findVertexUpgradeCandidates(opts)
+  return filterUndecidedUpgradeCandidates(
+    provider,
+    candidates,
+    opts?.globalConfig,
+  )
 }
 
 /**

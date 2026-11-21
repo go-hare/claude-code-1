@@ -28,6 +28,7 @@ import { AuthPlaneSummary } from './AuthPlaneSummary.js';
 import { getAuthStatus } from './getAuthStatus.js';
 import { WorkspaceKeyInputContainer } from './WorkspaceKeyInput.js';
 import { removeWorkspaceKey } from '../../services/auth/saveWorkspaceKey.js';
+import { clearSessionOrgEffortCaps } from '../../utils/effort.js';
 
 /** densable lnr */
 export const LOGIN_HANDOFF_SIGNED_IN = "Signed in. Review your organization's managed settings to continue.";
@@ -194,6 +195,8 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
             // Post-login refresh logic. Keep in sync with onboarding in src/interactiveHelpers.tsx
             // Reset cost state when switching accounts
             resetCostState();
+            // Official 2.1.328: clear session-scoped org effort caps on /login
+            clearSessionOrgEffortCaps();
             // Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
             resetUserCache();
             // Refresh GrowthBook after login to get updated feature flags (e.g., for claude.ai MCPs)

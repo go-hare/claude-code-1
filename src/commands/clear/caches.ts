@@ -33,6 +33,7 @@ import { clearRepositoryCaches } from '../../utils/detectRepository.js'
 import { clearResolveGitDirCache } from '../../utils/git/gitFilesystem.js'
 import { clearStoredImagePaths } from '../../utils/imageStore.js'
 import { clearSessionEnvVars } from '../../utils/sessionEnvVars.js'
+import { clearSessionOrgEffortCaps } from '../../utils/effort.js'
 
 /**
  * Clear all session-related caches.
@@ -159,4 +160,6 @@ export function clearSessionCaches(
     ({ clearCachedModelMaxTokensCeilings }) =>
       clearCachedModelMaxTokensCeilings(),
   )
+  // Official 2.1.328: clear session-scoped org effort caps on /clear.
+  clearSessionOrgEffortCaps()
 }

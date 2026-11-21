@@ -53,7 +53,11 @@ import {
   getOriginalCwd,
 } from '../bootstrap/state.js'
 import { truncateEntrypointContent } from '../memdir/memdir.js'
-import { getAutoMemEntrypoint, isAutoMemoryEnabled } from '../memdir/paths.js'
+import {
+  getAutoMemEntrypoint,
+  isAutoMemoryEnabled,
+  isAutoMemoryHeldByOutsideReadBlock,
+} from '../memdir/paths.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   getCurrentProjectConfig,
@@ -91,6 +95,7 @@ import {
   matchingRuleForInput,
   pathInOutsideReadFenceWorkingPath,
   pathInWorkingPath,
+  workingDirPathsForPermission,
 } from './permissions/filesystem.js'
 import {
   getEnabledSettingSources,
@@ -532,7 +537,10 @@ let getLiveClaudeMdPermissionContext:
 export function setClaudeMdPermissionContext(
   context: ToolPermissionContext | undefined,
 ): void {
-  claudeMdPermissionContext = context
+  if (claudeMdPermissionContext !== context) {
+    claudeMdPermissionContext = context
+    clearMemoryFileCaches()
+  }
 }
 
 /**
@@ -544,7 +552,10 @@ export function setClaudeMdPermissionContext(
 export function registerClaudeMdPermissionContextSource(
   getter: (() => ToolPermissionContext | undefined) | undefined,
 ): void {
-  getLiveClaudeMdPermissionContext = getter
+  if (getLiveClaudeMdPermissionContext !== getter) {
+    getLiveClaudeMdPermissionContext = getter
+    clearMemoryFileCaches()
+  }
 }
 
 function hasWholeToolReadDenyRule(context: ToolPermissionContext): boolean {
@@ -624,19 +635,75 @@ function resolveEffectiveMemoryPermissionContext():
 }
 
 /**
- * Official 2.1.328 (`Awl` / `ne` / `Jt`): creates a permission-controlled reader
- * that walks symlink hops via `walkPermissionPaths`, rejects unresolved symlinks,
- * refuses any path covered by a `Read(...)` deny rule, and (when `enforceOutsideBlock`
- * is enabled) refuses paths outside the outside-read fence working directories.
+ * Official 2.1.328 `zt` (chunk@293381675.js @45000): direct memory paths under
+ * an ancestor directory that `above(dir)` exempts from the outside-read block.
+ * Symlink targets and recursive `@include` files outside these direct paths
+ * remain subject to `enforceOutsideBlock`.
+ */
+const ANCESTOR_EXEMPT_MEMORY_PATHS: readonly (readonly string[])[] = [
+  ['CLAUDE.md'],
+  ['CLAUDE.local.md'],
+  ['AGENTS.md'],
+  ['.claude', 'CLAUDE.md'],
+  ['.claude', 'AGENTS.md'],
+  ['.claude', 'rules'],
+]
+
+/** Official 2.1.328 `Te` — check whether candidatePath falls under any exempt direct path of an ancestor dir. */
+function isPathUnderAncestorMemoryExempt(
+  candidatePath: string,
+  ancestorDirVariants: readonly string[],
+  exemptRelativePaths: readonly (readonly string[])[] = ANCESTOR_EXEMPT_MEMORY_PATHS,
+): boolean {
+  return ancestorDirVariants.some(dirVariant =>
+    exemptRelativePaths.some(parts =>
+      pathInWorkingPath(candidatePath, join(dirVariant, ...parts), {
+        caseFold: false,
+        uncShapeParity: true,
+      }),
+    ),
+  )
+}
+
+function isHeldOutsideForContext(
+  candidatePath: string,
+  context: ToolPermissionContext,
+): boolean {
+  if (
+    context.blockReadsOutsideWorkingDirectories !== true &&
+    context.restricted !== true
+  ) {
+    return false
+  }
+  return !pathInOutsideReadFenceWorkingPath(candidatePath, context, [
+    candidatePath,
+  ])
+}
+
+/**
+ * Official 2.1.328 (`Awl` / `we` / `ne` / `Re` / `Jt`): creates a
+ * permission-controlled reader that walks symlink hops via `walkPermissionPaths`,
+ * rejects unresolved symlinks, refuses any path covered by a `Read(...)` deny
+ * rule, refuses paths outside the outside-read fence working directories (except
+ * when `exemptAncestorDir` exempts that ancestor's own direct memory paths),
+ * and checks `stat()` (`isFile() && size <= maxBytes`) BEFORE calling `readFile`.
  */
 export function createMemoryPermissionReader(
   context: ToolPermissionContext,
   opts?: {
     enforceOutsideBlock?: boolean
+    exemptAncestorDir?: string
+    exemptRelativePaths?: readonly (readonly string[])[]
     onWithheld?: (filePath: string, why: WithheldMemoryWhy) => void
   },
 ): MemoryFilePermissionReader {
-  const enforceOutsideBlock = opts?.enforceOutsideBlock === true
+  const enforceOutsideBlock = opts?.enforceOutsideBlock ?? true
+  const ancestorDirVariants =
+    opts?.exemptAncestorDir !== undefined
+      ? workingDirPathsForPermission(opts.exemptAncestorDir)
+      : undefined
+  const exemptRelativePaths =
+    opts?.exemptRelativePaths ?? ANCESTOR_EXEMPT_MEMORY_PATHS
   const noteWithheldIfNonDirExists = async (
     filePath: string,
     why: WithheldMemoryWhy,
@@ -676,11 +743,25 @@ export function createMemoryPermissionReader(
       }
     }
 
+    // Official `we` + `Jt`: every path along the symlink walk must satisfy the
+    // outside-read fence unless exempted as a direct memory path of
+    // `exemptAncestorDir`. Symlink targets and recursive `@include` files that
+    // land outside both the working dirs and `exemptAncestorDir`'s direct memory
+    // paths are refused (`why: 'outside'`).
     if (
       enforceOutsideBlock &&
-      (context.blockReadsOutsideWorkingDirectories === true ||
-        context.restricted === true) &&
-      !pathInOutsideReadFenceWorkingPath(filePath, context, walked.paths)
+      walked.paths.some(
+        candidatePath =>
+          isHeldOutsideForContext(candidatePath, context) &&
+          !(
+            ancestorDirVariants !== undefined &&
+            isPathUnderAncestorMemoryExempt(
+              candidatePath,
+              ancestorDirVariants,
+              exemptRelativePaths,
+            )
+          ),
+      )
     ) {
       await noteWithheldIfNonDirExists(filePath, 'outside')
       return undefined
@@ -688,6 +769,11 @@ export function createMemoryPermissionReader(
 
     try {
       const fs = getFsImplementation()
+      // Official `Re`: stat before readFile so huge files/FIFOs cannot OOM or hang.
+      const stats = await fs.stat(filePath)
+      if (!stats.isFile() || stats.size > maxBytes) {
+        return undefined
+      }
       const rawContent = await fs.readFile(filePath, { encoding: 'utf-8' })
       if (Buffer.byteLength(rawContent, 'utf-8') > maxBytes) {
         return undefined
@@ -702,7 +788,10 @@ export function createMemoryPermissionReader(
 
 function getDefaultPermissionReaderForMemoryType(
   type: MemoryType,
-  opts?: { enforceOutsideBlock?: boolean },
+  opts?: {
+    enforceOutsideBlock?: boolean
+    exemptAncestorDir?: string
+  },
 ): MemoryFilePermissionReader | undefined {
   if (type === 'User' || type === 'Managed') {
     return undefined
@@ -718,7 +807,8 @@ function getDefaultPermissionReaderForMemoryType(
  * ENOENT). When includeBasePath is given, @include paths are resolved in
  * the same lex pass and returned alongside the parsed file.
  * Official 2.1.328 (`$ht`): when `permissionReader` (`held`) is provided,
- * reads through it so Read deny rules and outside-read checks apply uniformly.
+ * reads through it so Read deny rules and outside-read checks apply uniformly;
+ * otherwise still stats before readFile to prevent OOM on huge files/FIFOs.
  */
 async function safelyReadMemoryFileAsync(
   filePath: string,
@@ -735,7 +825,14 @@ async function safelyReadMemoryFileAsync(
       return parseMemoryFileContent(rawContent, filePath, type, includeBasePath)
     }
     const fs = getFsImplementation()
+    const stats = await fs.stat(filePath)
+    if (!stats.isFile() || stats.size > MAX_MEMORY_FILE_BYTES) {
+      return { info: null, includePaths: [] }
+    }
     const rawContent = await fs.readFile(filePath, { encoding: 'utf-8' })
+    if (Buffer.byteLength(rawContent, 'utf-8') > MAX_MEMORY_FILE_BYTES) {
+      return { info: null, includePaths: [] }
+    }
     return parseMemoryFileContent(rawContent, filePath, type, includeBasePath)
   } catch (error) {
     handleMemoryFileReadError(error, filePath)
@@ -1028,11 +1125,23 @@ export async function processMemoryFile(
 
   // Official 2.1.328 (`are` + `H`): resolve permission-controlled reader for
   // this file and pass it recursively to every `@include` target so nested
-  // files covered by `Read(...)` deny rules cannot enter context.
+  // files covered by `Read(...)` deny rules or outside-read blocks cannot enter
+  // context. For top-level non-symlink memory files called directly without an
+  // explicit reader, scope the exemption strictly to the file's ancestor dir's
+  // own direct memory paths (`above(baseDir)`).
+  const defaultExemptDir =
+    depth === 0 && !isSymlink
+      ? basename(dirname(filePath)) === '.claude'
+        ? dirname(dirname(filePath))
+        : dirname(filePath)
+      : undefined
   const effectivePermissionReader =
     permissionReader ??
     getDefaultPermissionReaderForMemoryType(type, {
-      enforceOutsideBlock: depth > 0 || isSymlink,
+      enforceOutsideBlock: true,
+      ...(defaultExemptDir !== undefined
+        ? { exemptAncestorDir: defaultExemptDir }
+        : {}),
     })
 
   processedPaths.add(normalizedPath)
@@ -1219,6 +1328,42 @@ export async function processMdRules({
   }
 }
 
+let lastMemoryHoldSignature: string | undefined
+
+/**
+ * Official 2.1.328 `qC` (`Dq()` hold signature): fingerprint permission hold
+ * state (Read deny rules, restricted/outside-read fence, additional working
+ * dirs, AutoMem hold) so `getMemoryFiles` invalidates its memo cache whenever
+ * the effective permission hold state changes.
+ */
+function getMemoryPermissionHoldSignature(): string {
+  const ctx = resolveEffectiveMemoryPermissionContext()
+  const autoMemHeld = isAutoMemoryHeldByOutsideReadBlock(ctx) ? '1' : '0'
+  if (!ctx) {
+    return `none|am:${autoMemHeld}`
+  }
+  const readDenies: string[] = []
+  for (const [source, rules] of Object.entries(ctx.alwaysDenyRules)) {
+    if (!rules) continue
+    for (const rule of rules) {
+      if (rule === 'Read' || rule.startsWith('Read(')) {
+        readDenies.push(`${source}:${rule}`)
+      }
+    }
+  }
+  const dirs: string[] = []
+  for (const [dir, entry] of ctx.additionalWorkingDirectories.entries()) {
+    dirs.push(`${dir}:${entry.source}`)
+  }
+  return [
+    ctx.restricted === true ? 'R1' : 'R0',
+    ctx.blockReadsOutsideWorkingDirectories === true ? 'B1' : 'B0',
+    `am:${autoMemHeld}`,
+    readDenies.sort().join(','),
+    dirs.sort().join(','),
+  ].join('|')
+}
+
 export const getMemoryFiles = memoize(
   async (forceIncludeExternal: boolean = false): Promise<MemoryFileInfo[]> => {
     const startTime = Date.now()
@@ -1306,19 +1451,22 @@ export const getMemoryFiles = memoize(
         normalizePathForComparison(canonicalRoot) &&
       pathInWorkingPath(gitRoot, canonicalRoot)
 
-    // Official 2.1.328 (`Hme` / `Pn`): build permission-controlled readers once
-    // for this load pass so Project/Local CLAUDE.md, rules, and recursive
-    // `@include` files all enforce `Read(...)` deny rules and outside-read bounds.
+    // Official 2.1.328 (`Awl` / `Hme` / `Pn`): build `within` and per-ancestor
+    // `above(dir)` permission-controlled readers so ancestor directories only
+    // exempt their own direct memory paths while keeping `enforceOutsideBlock`
+    // active for every recursive `@include` and symlink target.
     const memoryPermCtx = resolveEffectiveMemoryPermissionContext()
     const withinPermissionReader = memoryPermCtx
       ? createMemoryPermissionReader(memoryPermCtx, {
           enforceOutsideBlock: true,
         })
       : undefined
-    const abovePermissionReader = memoryPermCtx
-      ? createMemoryPermissionReader(memoryPermCtx, {
-          enforceOutsideBlock: false,
-        })
+    const abovePermissionReaderFor = memoryPermCtx
+      ? (ancestorDir: string) =>
+          createMemoryPermissionReader(memoryPermCtx, {
+            enforceOutsideBlock: true,
+            exemptAncestorDir: ancestorDir,
+          })
       : undefined
 
     // Process from root downward to CWD
@@ -1335,7 +1483,9 @@ export const getMemoryFiles = memoize(
         pathInWorkingPath(dir, canonicalRoot) &&
         !pathInWorkingPath(dir, gitRoot)
       const dirPermissionReader =
-        dir === originalCwd ? withinPermissionReader : abovePermissionReader
+        dir === originalCwd
+          ? withinPermissionReader
+          : abovePermissionReaderFor?.(dir)
 
       // Try reading CLAUDE.md (Project) - only if projectSettings is enabled
       if (isSettingSourceEnabled('projectSettings') && !skipProject) {
@@ -1458,8 +1608,12 @@ export const getMemoryFiles = memoize(
       }
     }
 
-    // Memdir entrypoint (memory.md) - only if feature is on and file exists
-    if (isAutoMemoryEnabled()) {
+    // Memdir entrypoint (memory.md) - only if feature is on, not held by
+    // outside-read block (official `DZr`: `v_() && !Rge()`), and file exists
+    if (
+      isAutoMemoryEnabled() &&
+      !isAutoMemoryHeldByOutsideReadBlock(memoryPermCtx)
+    ) {
       const { info: memdirEntry } = await safelyReadMemoryFileAsync(
         getAutoMemEntrypoint(),
         'AutoMem',
@@ -1554,6 +1708,17 @@ export const getMemoryFiles = memoize(
 
     return result
   },
+  (forceIncludeExternal: boolean = false): string => {
+    const hold = getMemoryPermissionHoldSignature()
+    if (
+      lastMemoryHoldSignature !== undefined &&
+      lastMemoryHoldSignature !== hold
+    ) {
+      getMemoryFiles.cache?.clear?.()
+    }
+    lastMemoryHoldSignature = hold
+    return `${forceIncludeExternal ? '1' : '0'}:${hold}`
+  },
 )
 
 function isInstructionsMemoryType(
@@ -1599,6 +1764,7 @@ function consumeNextEagerLoadReason(): InstructionsLoadReason | undefined {
  * compaction), use resetGetMemoryFilesCache() instead.
  */
 export function clearMemoryFileCaches(): void {
+  lastMemoryHoldSignature = undefined
   // ?.cache because tests spyOn this, which replaces the memoize wrapper.
   getMemoryFiles.cache?.clear?.()
 }

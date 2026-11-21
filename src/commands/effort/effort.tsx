@@ -14,7 +14,6 @@ import {
   type EffortLevel,
   type EffortValue,
   clampEffortForModel,
-  getDisplayedEffortLevel,
   getEffortEnvOverride,
   getEffortValueDescription,
   getOrgDefaultEffort,
@@ -285,35 +284,44 @@ function parseUltracodeSubcommand(normalized: string): boolean | undefined {
   return sub === 'off' ? false : undefined;
 }
 
+export type ParsedEffortCommand =
+  | { kind: 'auto' }
+  | { kind: 'ultracode'; enabled: boolean }
+  | { kind: 'level'; level: EffortLevel; orgClampedFrom?: EffortLevel }
+  | { kind: 'invalid'; message: string };
+
 /**
- * densable T / kAe — /effort + 2.1.289 ultracode [on|off].
- * @param args command args
- * @param model current main-loop model (required for ultracode catalog clamp + pin)
- * @param interactive densable oLy/sLy `t` — default getIsInteractive()
- * @param persistAsDefault EffortSlider s
- * @param currentEffort session effort for ultracode on/off "stays" copy
+ * Official 2.1.328 (chunk@319736883.js @1032600): pure parser/validator for
+ * `/effort <arg>` with zero side effects (no settings write, no pin unpin, no
+ * telemetry) so cache-miss confirmation can run before committing anything.
  */
-export function executeEffort(
-  args: string,
-  model = '',
-  interactive: boolean = getIsInteractive(),
-  persistAsDefault = true,
-  currentEffort?: EffortValue,
-): EffortCommandResult {
+export function parseEffortCommand(args: string, model = ''): ParsedEffortCommand {
   const normalized = args.toLowerCase().trim();
   if (normalized === 'auto' || normalized === 'unset') {
-    return unsetEffortLevel(interactive, model);
+    return { kind: 'auto' };
   }
 
   const ultracodeSub = parseUltracodeSubcommand(normalized);
   if (ultracodeSub !== undefined) {
-    return ultracodeSub
-      ? setUltracodeEffort(model, interactive, currentEffort)
-      : clearUltracodeFlag(currentEffort, model);
+    if (ultracodeSub && !isUltracodeOfferable(model)) {
+      const wire = getUltracodeEffortForModel(model);
+      if (wire === undefined) {
+        return {
+          kind: 'invalid',
+          message: `Ultracode isn't available on ${model || 'this model'}. Valid options are: ${validEffortArgsForModel(model)}`,
+        };
+      }
+      return {
+        kind: 'invalid',
+        message: `Ultracode needs dynamic workflows enabled (see /config). Valid options are: ${validEffortArgsForModel(model)}`,
+      };
+    }
+    return { kind: 'ultracode', enabled: ultracodeSub };
   }
 
   if (!isEffortLevel(normalized)) {
     return {
+      kind: 'invalid',
       message: `Invalid argument: ${args}. Valid options are: ${validEffortArgsForModel(model)}`,
     };
   }
@@ -338,11 +346,87 @@ export function executeEffort(
     }
   }
 
-  return setEffortValue(level, {
-    interactive,
+  return { kind: 'level', level, orgClampedFrom };
+}
+
+function commitParsedEffort(
+  parsed: ParsedEffortCommand,
+  opts: {
+    model?: string;
+    interactive?: boolean;
+    persistAsDefault?: boolean;
+    currentEffort?: EffortValue;
+  } = {},
+): EffortCommandResult {
+  const model = opts.model ?? '';
+  const interactive = opts.interactive ?? getIsInteractive();
+  const persistAsDefault = opts.persistAsDefault ?? true;
+
+  switch (parsed.kind) {
+    case 'invalid':
+      return { message: parsed.message };
+    case 'auto':
+      return unsetEffortLevel(interactive, model);
+    case 'ultracode':
+      return parsed.enabled
+        ? setUltracodeEffort(model, interactive, opts.currentEffort)
+        : clearUltracodeFlag(opts.currentEffort, model);
+    case 'level':
+      return setEffortValue(parsed.level, {
+        interactive,
+        model,
+        orgClampedFrom: parsed.orgClampedFrom,
+        persistAsDefault,
+      });
+  }
+}
+
+function needsEffortCacheConfirm(
+  parsed: ParsedEffortCommand,
+  opts: {
+    currentEffort: EffortValue | undefined;
+    model: string;
+    permissionMode: string | undefined;
+  },
+): boolean {
+  if (parsed.kind !== 'auto' && parsed.kind !== 'level') {
+    return false;
+  }
+  const targetEffort: EffortValue | undefined = parsed.kind === 'auto' ? undefined : parsed.level;
+  const totalOutputTokens = getTotalOutputTokens();
+  // Official 2.1.328 `XCe` (chunk@319736883.js @1031608): check across ALL
+  // permission modes (not restricted to `plan`).
+  return shouldWarnEffortCacheMiss({
+    target: targetEffort,
+    current: opts.currentEffort,
+    mainLoopModel: opts.model,
+    permissionMode: opts.permissionMode ?? 'default',
+    totalOutputTokens,
+    promptCacheMayBeWarm: totalOutputTokens > 0,
+  });
+}
+
+/**
+ * densable T / kAe — /effort + 2.1.289 ultracode [on|off].
+ * @param args command args
+ * @param model current main-loop model (required for ultracode catalog clamp + pin)
+ * @param interactive densable oLy/sLy `t` — default getIsInteractive()
+ * @param persistAsDefault EffortSlider s
+ * @param currentEffort session effort for ultracode on/off "stays" copy
+ */
+export function executeEffort(
+  args: string,
+  model = '',
+  interactive: boolean = getIsInteractive(),
+  persistAsDefault = true,
+  currentEffort?: EffortValue,
+): EffortCommandResult {
+  const parsed = parseEffortCommand(args, model);
+  return commitParsedEffort(parsed, {
     model,
-    orgClampedFrom,
+    interactive,
     persistAsDefault,
+    currentEffort,
   });
 }
 
@@ -388,16 +472,29 @@ function ShowCurrentEffort({ onDone }: { onDone: (result: string) => void }): Re
   return null;
 }
 
-function ApplyEffortAndClose({
-  result,
+function ApplyParsedEffortAndClose({
+  parsed,
+  model,
+  currentEffort,
   onDone,
 }: {
-  result: EffortCommandResult;
+  parsed: ParsedEffortCommand;
+  model: string;
+  currentEffort: EffortValue | undefined;
   onDone: (result: string) => void;
 }): React.ReactNode {
   const setAppState = useSetAppState();
-  const { effortUpdate, message } = result;
+  const committedRef = React.useRef(false);
   React.useEffect(() => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    const result = commitParsedEffort(parsed, {
+      model,
+      interactive: undefined,
+      persistAsDefault: true,
+      currentEffort,
+    });
+    const { effortUpdate, message } = result;
     if (effortUpdate) {
       setAppState(prev => ({
         ...prev,
@@ -414,7 +511,7 @@ function ApplyEffortAndClose({
       }));
     }
     onDone(message);
-  }, [setAppState, effortUpdate, message, onDone]);
+  }, [setAppState, parsed, model, currentEffort, onDone]);
   return null;
 }
 
@@ -493,20 +590,21 @@ export async function call(
     );
     const currentEffort = pdSessionEffort(appState, model);
     const permissionMode = appState.toolPermissionContext?.mode;
-    const result = executeEffort(args, model, undefined, true, currentEffort);
-    const targetEffort = result.effortUpdate?.value;
-    const needsCacheConfirm =
-      result.effortUpdate !== undefined &&
-      permissionMode === 'plan' &&
-      shouldWarnEffortCacheMiss({
-        target: targetEffort,
-        current: currentEffort,
-        mainLoopModel: model,
-        permissionMode,
-        totalOutputTokens: getTotalOutputTokens(),
-        promptCacheMayBeWarm: getTotalOutputTokens() > 0,
-      });
+    // Pure parse/validation first — zero settings write / pin unpin / telemetry
+    // before cache-miss confirmation is decided.
+    const parsed = parseEffortCommand(args, model);
+    const needsCacheConfirm = needsEffortCacheConfirm(parsed, {
+      currentEffort,
+      model,
+      permissionMode,
+    });
     if (!needsCacheConfirm) {
+      const result = commitParsedEffort(parsed, {
+        model,
+        interactive: undefined,
+        persistAsDefault: true,
+        currentEffort,
+      });
       if (result.effortUpdate) {
         const effortUpdate = result.effortUpdate;
         ctx.setAppState!(prev => ({
@@ -533,25 +631,17 @@ function ExecuteEffortWithModel({ args, onDone }: { args: string; onDone: (resul
   const currentEffort = useAppState(s => pdSessionEffort(s, model));
   const permissionMode = useAppState(s => s.toolPermissionContext.mode);
   const [confirmed, setConfirmed] = React.useState(false);
-  const result = React.useMemo(
-    () => executeEffort(args, model, undefined, true, currentEffort),
-    [args, model, currentEffort],
-  );
-  const targetEffort = result.effortUpdate?.value;
+  // Pure parse inside useMemo — never mutates settings/pins/telemetry during render.
+  const parsed = React.useMemo(() => parseEffortCommand(args, model), [args, model]);
   const needsCacheConfirm =
     !confirmed &&
-    result.effortUpdate !== undefined &&
-    permissionMode === 'plan' &&
-    shouldWarnEffortCacheMiss({
-      target: targetEffort,
-      current: currentEffort,
-      mainLoopModel: model,
+    needsEffortCacheConfirm(parsed, {
+      currentEffort,
+      model,
       permissionMode,
-      totalOutputTokens: getTotalOutputTokens(),
-      promptCacheMayBeWarm: getTotalOutputTokens() > 0,
     });
   if (needsCacheConfirm) {
-    const targetLabel = targetEffort !== undefined ? String(targetEffort) : 'auto';
+    const targetLabel = parsed.kind === 'level' ? String(parsed.level) : 'auto';
     return (
       <CacheMissConfirmDialog
         kind="effort"
@@ -561,7 +651,7 @@ function ExecuteEffortWithModel({ args, onDone }: { args: string; onDone: (resul
       />
     );
   }
-  return <ApplyEffortAndClose result={result} onDone={onDone} />;
+  return <ApplyParsedEffortAndClose parsed={parsed} model={model} currentEffort={currentEffort} onDone={onDone} />;
 }
 
 function EffortPanelWrapper({ onDone }: { onDone: (result: string) => void }): React.ReactNode {

@@ -4,6 +4,7 @@ import type { ContentReplacementRecord } from 'src/utils/toolResultStorage.js'
 import type { AgentId } from './ids.js'
 import type { Message } from './message.js'
 import type { QueueOperationMessage } from './messageQueueTypes.js'
+import type { PermissionMode } from './permissions.js'
 
 export type SerializedMessage = Message & {
   cwd: string
@@ -63,6 +64,10 @@ export type LogOption = {
   prRepository?: string // Repository in "owner/repo" format
   artifactCount?: number // Published artifact count shown in /resume
   mode?: 'coordinator' | 'normal' // Session mode for coordinator/normal detection
+  /** Official 2.1.328 (`chunk@294254613.js @491708`): persisted permission mode (`permission-mode` JSONL entry). */
+  permissionMode?: PermissionMode
+  /** Persisted user-selected model (`session-model` JSONL entry). */
+  sessionModel?: string
   sessionKind?: string // Session kind: 'interactive' | 'bg' | 'daemon' | 'daemon-worker'
   worktreeSession?: PersistedWorktreeSession | null // Worktree state at session end (null = exited, undefined = never entered)
   /** densable currentSessionDevModsFolder — last-wins `type:"dev-mods"`. */
@@ -206,6 +211,18 @@ export type ModeEntry = {
   type: 'mode'
   sessionId: UUID
   mode: 'coordinator' | 'normal'
+}
+
+export type PermissionModeEntry = {
+  type: 'permission-mode'
+  sessionId: UUID
+  permissionMode: PermissionMode
+}
+
+export type SessionModelEntry = {
+  type: 'session-model'
+  sessionId: UUID
+  model: string
 }
 
 /**
@@ -551,6 +568,8 @@ export type Entry =
   | QueueOperationMessage
   | SpeculationAcceptMessage
   | ModeEntry
+  | PermissionModeEntry
+  | SessionModelEntry
   | WorktreeStateEntry
   | DevModsFolderEntry
   | BridgeSessionEntry

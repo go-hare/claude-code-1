@@ -28,6 +28,11 @@ mock.module('src/utils/settings/mdm/rawRead.ts', () => ({
   },
   getMdmRawReadPromise: () => null,
   startMdmRawRead: () => {},
+  isRetryableMdmUnreadCause: (cause: string | undefined) =>
+    cause === 'timeout' ||
+    cause === 'killed' ||
+    cause === 'spawn_busy' ||
+    cause === 'lint_unfinished',
 }))
 
 const root = process.env.CLAUDE_CONFIG_DIR!

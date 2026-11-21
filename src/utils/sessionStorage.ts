@@ -91,6 +91,7 @@ import type {
   UserMessage,
 } from '../types/message.js'
 import type { QueueOperationMessage } from '../types/messageQueueTypes.js'
+import type { PermissionMode } from '../types/permissions.js'
 import { uniq } from './array.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { updateSessionName } from './concurrentSessions.js'
@@ -111,10 +112,14 @@ import {
 } from './sessionPersistenceStatus.js'
 import { repointTaskOutputSymlinks } from './task/diskOutput.js'
 import {
+  getTranscriptWriterDegraded,
   recordTranscriptWriteFailure,
   recordTranscriptWriteSuccess,
   remapTranscriptWriterPaths,
+  resetTranscriptWriterHealthForTest,
+  type TranscriptWriteSource,
 } from './transcriptWriterHealth.js'
+export { getTranscriptWriterDegraded }
 import {
   errorMessage,
   isAbortError,
@@ -304,7 +309,6 @@ function getEntrypoint(): string | undefined {
 let project: Project | null = null
 let cleanupRegistered = false
 let exitReStampRan = false
-let writerDegradedInfo: { code: string; source: string } | null = null
 const exitDrains = new Set<() => void | Promise<void>>()
 
 export function registerSessionExitDrain(
@@ -316,20 +320,25 @@ export function registerSessionExitDrain(
   }
 }
 
+/**
+ * Delegates to the single live writer-health tracker in
+ * `src/utils/transcriptWriterHealth.ts` (eliminating the split-brain copy).
+ */
 export function noteTranscriptWriterDegraded(
   code: string,
   source: string,
+  filePath?: string,
 ): void {
-  if (writerDegradedInfo === null) {
-    writerDegradedInfo = { code, source }
-  }
-}
-
-export function getTranscriptWriterDegraded(): {
-  code: string
-  source: string
-} | null {
-  return writerDegradedInfo
+  const mappedSource: TranscriptWriteSource =
+    source === 'drain' || source === 'materialize' || source === 'adopt'
+      ? source
+      : 'drain'
+  const err = Object.assign(new Error(code), { code })
+  recordTranscriptWriteFailure(
+    mappedSource,
+    err,
+    filePath ?? project?.sessionFile ?? '<session-transcript>',
+  )
 }
 
 /**
@@ -388,7 +397,7 @@ export async function flushSessionStorageAtExit(): Promise<void> {
     // Best-effort flush at exit
   } finally {
     syncExitReStamp()
-    const degraded = writerDegradedInfo
+    const degraded = getTranscriptWriterDegraded()
     if (degraded !== null) {
       logForDebugging(
         `flushSessionStorageAtExit: transcript writer degraded (${degraded.code} at ${degraded.source}) — entries since the failure window may be missing from the transcript`,
@@ -421,7 +430,7 @@ export function getProject(): Project {
 export function resetProjectFlushStateForTesting(): void {
   project?._resetFlushState()
   exitReStampRan = false
-  writerDegradedInfo = null
+  resetTranscriptWriterHealthForTest()
 }
 
 /**
@@ -432,7 +441,7 @@ export function resetProjectFlushStateForTesting(): void {
 export function resetProjectForTesting(): void {
   project = null
   exitReStampRan = false
-  writerDegradedInfo = null
+  resetTranscriptWriterHealthForTest()
 }
 
 export function setSessionFileForTesting(path: string): void {
@@ -1349,9 +1358,13 @@ class Project {
   currentSessionLastPrompt: string | undefined
   currentSessionAgentSetting: string | undefined
   currentSessionMode: 'coordinator' | 'normal' | undefined
+  /** Official 2.1.328 (`chunk@294254613.js @535149`): last-wins `type:"permission-mode"` session state. */
+  currentSessionPermissionMode: PermissionMode | undefined
   currentSessionModel: string | undefined
   /** Official 2.1.328: last-wins `type:"repl-mode"` Code Mode session state. */
   currentSessionCodeMode: boolean | undefined
+  /** Official 2.1.328 (`slimAppendedRow`): sliding tool_use window for slimming appended rows on disk. */
+  appendToolUseWindow: ToolUseNameWindow | undefined
   /** densable `currentSessionDevModsFolder` — consented mods folder (`iLr`). */
   currentSessionDevModsFolder: string | undefined
   // Tri-state: undefined = never touched (don't write), null = exited worktree,
@@ -1636,11 +1649,15 @@ class Project {
       const batch = queue.splice(0)
 
       let content = ''
+      let sawCompactBoundary = false
       const resolvers: Array<() => void> = []
       const mirrored: Entry[] | undefined =
         this.mirrors.length > 0 ? [] : undefined
 
       for (const { entry, resolve } of batch) {
+        if (isTranscriptMessage(entry) && isCompactBoundaryMessage(entry)) {
+          sawCompactBoundary = true
+        }
         const line = jsonStringify(entry) + '\n'
 
         if (content.length + line.length >= this.MAX_CHUNK_BYTES) {
@@ -1669,6 +1686,31 @@ class Project {
         }
         for (const r of resolvers) {
           r()
+        }
+      }
+
+      // Official 2.1.328 (`Pde`, `chunk@294254613.js @420598, @714199`):
+      // when a compact_boundary flushes to a transcript, refresh its
+      // `resume-head.jsonl` side-file if it meets the size gain threshold.
+      if (sawCompactBoundary) {
+        const headPath = getResumeHeadPath(filePath, dirname(dirname(filePath)))
+        if (headPath) {
+          void stat(filePath)
+            .then(async st => {
+              if (st.size <= SKIP_PRECOMPACT_THRESHOLD) return
+              const scan = await readTranscriptForLoad(filePath, st.size)
+              if (scan.boundaryStartOffset > 0) {
+                const planned = await planResumeHeadForTranscript(
+                  filePath,
+                  st.size,
+                  scan.boundaryStartOffset,
+                )
+                if (planned) {
+                  scheduleWriteResumeHead(headPath, planned)
+                }
+              }
+            })
+            .catch(() => {})
         }
       }
     }
@@ -1703,6 +1745,11 @@ class Project {
       if (fileStat.size < this.minCompactFileBytes) return
       const res = await compactTranscriptFileAtomic(filePath, shouldKeepLine)
       if (res.compacted) {
+        // Invalidate stale resume-head.jsonl side-file after transcript rewrite
+        const headPath = getResumeHeadPath(filePath, dirname(dirname(filePath)))
+        if (headPath) {
+          scheduleWriteResumeHead(headPath, null)
+        }
         logEvent('tengu_transcript_compact', {
           bytesBefore: res.bytesBefore,
           bytesAfter: res.bytesAfter,
@@ -1980,6 +2027,13 @@ class Project {
       entries.push({
         type: 'mode',
         mode: this.currentSessionMode,
+        sessionId,
+      })
+    }
+    if (this.currentSessionPermissionMode) {
+      entries.push({
+        type: 'permission-mode',
+        permissionMode: this.currentSessionPermissionMode,
         sessionId,
       })
     }
@@ -2459,6 +2513,12 @@ class Project {
     } else if (entry.type === 'mode') {
       // Mode entries can always be appended
       void this.enqueueWrite(sessionFile, entry)
+    } else if (entry.type === 'permission-mode') {
+      // Official 2.1.328 (`chunk@294254613.js @491708`): permission-mode entries always append
+      void this.enqueueWrite(sessionFile, entry)
+    } else if (entry.type === 'session-model') {
+      // Session model choice entries always append
+      void this.enqueueWrite(sessionFile, entry)
     } else if ((entry as { type?: string }).type === 'repl-mode') {
       // Official 2.1.328: repl-mode entries can always be appended
       void this.enqueueWrite(sessionFile, entry)
@@ -2537,8 +2597,19 @@ class Project {
         // exhausts retries → gracefulShutdownSync(1). See inc-4718.
         const isNewUuid = !messageSet.has(entry.uuid)
         if (isAgentSidechain || isNewUuid) {
+          // Official 2.1.328 (`slimAppendedRow`, `chunk@294254613.js @507332`):
+          // when disk toolResult copies mode is 'slim', strip duplicated
+          // toolUseResult payloads before enqueuing the local transcript write.
+          let entryToWrite: TranscriptMessage = entry
+          if (toolResultCopiesOnDiskState === 'slim') {
+            this.appendToolUseWindow ??= new ToolUseNameWindow()
+            entryToWrite = slimToolUseResultForResume(
+              entry,
+              this.appendToolUseWindow,
+            )
+          }
           // Enqueue write — appendToFile handles ENOENT by creating directories
-          void this.enqueueWrite(targetFile, entry)
+          void this.enqueueWrite(targetFile, entryToWrite)
 
           if (!isAgentSidechain) {
             // messageSet is main-file-authoritative. Sidechain entries go to a
@@ -3586,7 +3657,321 @@ const TRANSCRIPT_COMPACT_MIN_BYTES = 5_242_880 // SEA L9i (5 MiB)
 const TRANSCRIPT_COMPACT_BACKSTOP_BYTES = 20_971_520 // SEA O4 (20 MiB)
 const LOW_YIELD_COMPACT_RATIO = 0.1
 let localGcEnabledState = false
-let lowYieldCompactSkipEnabledState = false
+// Official 2.1.328 (`chunk@294254613.js @505802`): lowYieldCompactSkipEnabled defaults to true.
+let lowYieldCompactSkipEnabledState = true
+// Official 2.1.328 (`chunk@294254613.js @505802`): toolResultCopiesOnDisk defaults to 'whole'.
+let toolResultCopiesOnDiskState: 'whole' | 'slim' = 'whole'
+
+export function setToolResultCopiesOnDisk(mode: 'whole' | 'slim'): void {
+  toolResultCopiesOnDiskState = mode
+  if (project) {
+    project.appendToolUseWindow =
+      mode === 'slim' ? new ToolUseNameWindow() : undefined
+  }
+}
+
+export function getToolResultCopiesOnDisk(): 'whole' | 'slim' {
+  return toolResultCopiesOnDiskState
+}
+
+/**
+ * Official 2.1.328 `vsn` (`chunk@294254613.js @607248`): slim duplicated
+ * `toolUseResult` payloads across an array of resumed transcript entries when
+ * `toolResultCopiesOnDisk === 'slim'` (or forced via `force: true`).
+ */
+export function slimEntriesForResumeHydration<T extends TranscriptMessage>(
+  entries: readonly T[],
+  opts?: { force?: boolean },
+): T[] {
+  if (!opts?.force && toolResultCopiesOnDiskState !== 'slim') {
+    return entries as T[]
+  }
+  const window = new ToolUseNameWindow()
+  return entries.map(entry => slimToolUseResultForResume(entry, window))
+}
+
+/**
+ * Official 2.1.328 (`chunk@294254613.js @397500`, `Spr` / `BZe` / `WZe`):
+ * per-type retention policy for local transcript GC.
+ */
+type GcRowDisposition =
+  | 'transcript'
+  | 'boundary-cleared'
+  | 'accumulate'
+  | 'last-wins'
+
+const GC_ROW_DISPOSITION: Record<string, GcRowDisposition> = {
+  user: 'transcript',
+  assistant: 'transcript',
+  system: 'transcript',
+  attachment: 'transcript',
+  progress: 'boundary-cleared',
+  'file-history-snapshot': 'boundary-cleared',
+  'file-history-delta': 'boundary-cleared',
+  'last-prompt': 'boundary-cleared',
+  'continued-in': 'boundary-cleared',
+  'resume-head-vouch': 'boundary-cleared',
+  'api-request-shape': 'boundary-cleared',
+  'api-request-blob': 'boundary-cleared',
+  'api-request': 'boundary-cleared',
+  'api-request-resumed': 'boundary-cleared',
+  'content-replacement': 'accumulate',
+  'data-flow-records': 'accumulate',
+  'data-flow-incomplete': 'accumulate',
+  'fork-context-ref': 'accumulate',
+  'frame-link': 'accumulate',
+  'artifact-comment-monitor': 'accumulate',
+  'memory-mode': 'accumulate',
+  'derived-from': 'last-wins',
+  summary: 'last-wins',
+  'custom-title': 'last-wins',
+  'ended-by-model': 'last-wins',
+  'ai-title': 'last-wins',
+  tag: 'last-wins',
+  relocated: 'last-wins',
+  'agent-name': 'last-wins',
+  'agent-color': 'last-wins',
+  'agent-setting': 'last-wins',
+  'pr-link': 'last-wins',
+  'artifact-autoreact-ledger': 'last-wins',
+  'bridge-session': 'last-wins',
+  'history-suppression': 'last-wins',
+  'attribution-snapshot': 'last-wins',
+  mode: 'last-wins',
+  'permission-mode': 'last-wins',
+  'repl-mode': 'last-wins',
+  'session-model': 'last-wins',
+  'isolation-latch': 'last-wins',
+  'session-owner': 'last-wins',
+  'dev-mods': 'last-wins',
+  'atis-latch': 'last-wins',
+  'tools-used': 'last-wins',
+  'worktree-state': 'last-wins',
+  'cost-state': 'last-wins',
+  'queue-operation': 'last-wins',
+  'observer-ref': 'last-wins',
+}
+
+/**
+ * Official 2.1.328 `BZe`: large `last-wins` rows whose earlier occurrences are
+ * dropped even on the same side of the latest `compact_boundary`.
+ */
+const GC_DROP_SUPERSEDED_LAST_WINS = new Set([
+  'attribution-snapshot',
+  'artifact-autoreact-ledger',
+])
+
+function getGcRowDisposition(type: string): GcRowDisposition {
+  return GC_ROW_DISPOSITION[type] ?? 'accumulate'
+}
+
+/**
+ * Official 2.1.328 (`chunk@294254613.js @401746`, `WZe` / `Htn` / `ztn`):
+ * compute the set of line indices to retain during local transcript GC.
+ *
+ * Drops:
+ *   - `tombstone` rows
+ *   - pre-compact `transcript` and `boundary-cleared` rows before the latest
+ *     `compact_boundary` (except `preservedMessages`, `preservedSegment`, and
+ *     direct pre-boundary parents of post-boundary messages)
+ *   - superseded `last-wins` rows before the boundary, `attribution-snapshot`
+ *     rows at/before the latest non-preserved boundary, and superseded `BZe`
+ *     (`attribution-snapshot`, `artifact-autoreact-ledger`) rows everywhere
+ * while preserving `accumulate` metadata rows, the latest `last-wins` metadata
+ * rows, post-boundary rows, and unparseable lines.
+ */
+export function buildTranscriptGcKeepLineSet(
+  lines: readonly string[],
+): Set<number> {
+  type CompactMetaShape = {
+    preservedMessages?: { uuids?: string[] }
+    preservedSegment?: { headUuid?: string; tailUuid?: string }
+  }
+
+  let lastBoundaryIdx = -1
+  let lastNonPreservedBoundaryIdx = -1
+  let lastCompactMeta: CompactMetaShape | undefined
+
+  const transcriptByUuid = new Map<
+    string,
+    { parent?: string | null; idx: number }
+  >()
+  const snapshotByMsgId = new Map<string, number>()
+  const deltasByMsgId = new Map<string, number[]>()
+  const keepIdx = new Set<number>()
+  const lastMeta = new Map<string, { idx: number; type: string }>()
+  const supersededLastWins = new Set<number>()
+  const tombstoneIdx = new Set<number>()
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]
+    if (!raw) continue
+    let start = 0
+    while (start < raw.length && raw.charCodeAt(start) === 0) start++
+    const line = start > 0 ? raw.slice(start) : raw
+    let obj: Record<string, unknown> | null = null
+    try {
+      const parsed = jsonParse(line)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        obj = parsed as Record<string, unknown>
+      }
+    } catch {
+      obj = null
+    }
+    if (!obj) {
+      keepIdx.add(i)
+      continue
+    }
+    const type = typeof obj.type === 'string' ? obj.type : ''
+    if (!type) {
+      keepIdx.add(i)
+      continue
+    }
+    if (type === 'tombstone') {
+      tombstoneIdx.add(i)
+      continue
+    }
+    if (type === 'file-history-snapshot' && typeof obj.messageId === 'string') {
+      snapshotByMsgId.set(obj.messageId, i)
+    } else if (
+      type === 'file-history-delta' &&
+      typeof obj.messageId === 'string'
+    ) {
+      const arr = deltasByMsgId.get(obj.messageId)
+      if (arr) arr.push(i)
+      else deltasByMsgId.set(obj.messageId, [i])
+    }
+
+    const disposition = getGcRowDisposition(type)
+    if (disposition === 'transcript') {
+      if (typeof obj.uuid === 'string') {
+        const parent =
+          typeof obj.parentUuid === 'string'
+            ? obj.parentUuid
+            : obj.parentUuid === null
+              ? null
+              : undefined
+        transcriptByUuid.set(obj.uuid, { parent, idx: i })
+      }
+      if (type === 'system' && obj.subtype === 'compact_boundary') {
+        lastBoundaryIdx = i
+        const meta =
+          obj.compactMetadata &&
+          typeof obj.compactMetadata === 'object' &&
+          !Array.isArray(obj.compactMetadata)
+            ? (obj.compactMetadata as CompactMetaShape)
+            : undefined
+        lastCompactMeta = meta
+        if (!meta?.preservedSegment && !meta?.preservedMessages) {
+          lastNonPreservedBoundaryIdx = i
+        }
+      }
+    } else if (disposition === 'accumulate') {
+      keepIdx.add(i)
+    } else if (disposition === 'last-wins') {
+      const scopeId =
+        type === 'summary'
+          ? typeof obj.leafUuid === 'string'
+            ? obj.leafUuid
+            : ''
+          : typeof obj.sessionId === 'string'
+            ? obj.sessionId
+            : ''
+      const key = `${type}:${scopeId}`
+      const prev = lastMeta.get(key)
+      if (prev && GC_DROP_SUPERSEDED_LAST_WINS.has(type)) {
+        supersededLastWins.add(prev.idx)
+      }
+      lastMeta.set(key, { idx: i, type })
+    }
+  }
+
+  const buildFallbackAllNonTombstone = (): Set<number> => {
+    const fallback = new Set<number>()
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i]) continue
+      if (tombstoneIdx.has(i) || supersededLastWins.has(i)) continue
+      fallback.add(i)
+    }
+    return fallback
+  }
+
+  if (lastBoundaryIdx < 0) {
+    return buildFallbackAllNonTombstone()
+  }
+
+  // Preserve compactMetadata.preservedMessages or compactMetadata.preservedSegment
+  if (Array.isArray(lastCompactMeta?.preservedMessages?.uuids)) {
+    for (const uuid of lastCompactMeta.preservedMessages.uuids) {
+      const rec = transcriptByUuid.get(uuid)
+      if (!rec) {
+        return buildFallbackAllNonTombstone()
+      }
+      keepIdx.add(rec.idx)
+      const snapIdx = snapshotByMsgId.get(uuid)
+      if (snapIdx !== undefined) keepIdx.add(snapIdx)
+      const deltaIdxs = deltasByMsgId.get(uuid)
+      if (deltaIdxs) {
+        for (const d of deltaIdxs) keepIdx.add(d)
+      }
+    }
+  } else if (
+    lastCompactMeta?.preservedSegment?.headUuid &&
+    lastCompactMeta?.preservedSegment?.tailUuid
+  ) {
+    const { headUuid, tailUuid } = lastCompactMeta.preservedSegment
+    let cur: string | null | undefined = tailUuid
+    const seen = new Set<string>()
+    while (cur && !seen.has(cur)) {
+      seen.add(cur)
+      const rec = transcriptByUuid.get(cur)
+      if (rec) {
+        keepIdx.add(rec.idx)
+        const snapIdx = snapshotByMsgId.get(cur)
+        if (snapIdx !== undefined) keepIdx.add(snapIdx)
+        const deltaIdxs = deltasByMsgId.get(cur)
+        if (deltaIdxs) {
+          for (const d of deltaIdxs) keepIdx.add(d)
+        }
+        if (cur === headUuid) break
+      }
+      cur = rec?.parent
+    }
+    if (cur !== headUuid) {
+      return buildFallbackAllNonTombstone()
+    }
+  }
+
+  // Preserve direct pre-boundary parents of post-boundary transcript messages
+  for (const { parent, idx } of transcriptByUuid.values()) {
+    if (!parent || idx < lastBoundaryIdx) continue
+    const parentRec = transcriptByUuid.get(parent)
+    if (parentRec && parentRec.idx < lastBoundaryIdx) {
+      keepIdx.add(parentRec.idx)
+    }
+  }
+
+  // Retain the latest pre-boundary `last-wins` metadata rows (`ztn`), dropping
+  // `attribution-snapshot` rows at or before the latest non-preserved boundary.
+  for (const { idx, type } of lastMeta.values()) {
+    if (
+      idx < lastBoundaryIdx &&
+      (type !== 'attribution-snapshot' || idx > lastNonPreservedBoundaryIdx)
+    ) {
+      keepIdx.add(idx)
+    }
+  }
+
+  const result = new Set<number>()
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i]) continue
+    if (tombstoneIdx.has(i) || supersededLastWins.has(i)) continue
+    if (i >= lastBoundaryIdx || keepIdx.has(i)) {
+      result.add(i)
+    }
+  }
+  return result
+}
 
 function defaultTranscriptGcKeepLine(line: string): boolean {
   if (!line) return false
@@ -3676,7 +4061,10 @@ export function splitTranscriptJsonlLines(content: string): string[] {
  */
 export function compactTranscriptJsonl(
   content: string,
-  shouldKeepLine: (line: string, index: number) => boolean,
+  shouldKeepLine: (
+    line: string,
+    index: number,
+  ) => boolean = defaultTranscriptGcKeepLine,
 ): {
   compacted: string
   skippedLowYield: boolean
@@ -3685,16 +4073,31 @@ export function compactTranscriptJsonl(
 } {
   const bytesBefore = Buffer.byteLength(content, 'utf8')
   const lines = splitTranscriptJsonlLines(content)
+  const effectiveKeep: (line: string, index: number) => boolean =
+    shouldKeepLine === defaultTranscriptGcKeepLine
+      ? (() => {
+          const keepSet = buildTranscriptGcKeepLineSet(lines)
+          return (_line: string, index: number) => keepSet.has(index)
+        })()
+      : shouldKeepLine
   const kept: string[] = []
   let keptBytes = 0
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!
-    if (shouldKeepLine(line, i)) {
+    if (effectiveKeep(line, i)) {
       kept.push(line)
       keptBytes += Buffer.byteLength(line, 'utf8') + 1
     }
   }
   const reclaimableBytes = Math.max(0, bytesBefore - keptBytes)
+  if (reclaimableBytes === 0) {
+    return {
+      compacted: content,
+      skippedLowYield: false,
+      bytesBefore,
+      reclaimableBytes: 0,
+    }
+  }
   if (shouldSkipLowYieldCompact(bytesBefore, reclaimableBytes)) {
     return {
       compacted: content,
@@ -5938,6 +6341,9 @@ export async function loadTranscriptFromFile(
       contextCollapseSnapshot,
       leafUuids,
       contentReplacements,
+      modes,
+      permissionModes,
+      sessionModels,
       worktreeStates,
       replModes,
       devModsFolders,
@@ -6011,6 +6417,9 @@ export async function loadTranscriptFromFile(
     const log = {
       ...baseLog,
       aiTitle: aiTitles.get(sessionId),
+      mode: modes.get(sessionId) as LogOption['mode'],
+      permissionMode: permissionModes.get(sessionId),
+      sessionModel: sessionModels.get(sessionId),
       contextCollapseCommits: contextCollapseCommits.filter(
         e => e.sessionId === sessionId,
       ),
@@ -6878,6 +7287,8 @@ export function restoreSessionMetadata(meta: {
   agentColor?: string
   agentSetting?: string
   mode?: 'coordinator' | 'normal'
+  /** Official 2.1.328: restored permission mode (`permission-mode` JSONL entry). */
+  permissionMode?: PermissionMode
   /** Official 2.1.328: restored Code Mode (`repl-mode`) session flag. */
   replMode?: boolean
   sessionModel?: string
@@ -6925,6 +7336,8 @@ export function restoreSessionMetadata(meta: {
   if (meta.agentColor) project.currentSessionAgentColor = meta.agentColor
   if (meta.agentSetting) project.currentSessionAgentSetting = meta.agentSetting
   if (meta.mode) project.currentSessionMode = meta.mode
+  if (meta.permissionMode)
+    project.currentSessionPermissionMode = meta.permissionMode
   if (meta.replMode !== undefined)
     project.currentSessionCodeMode = meta.replMode
   if (meta.sessionModel) project.currentSessionModel = meta.sessionModel
@@ -6988,6 +7401,7 @@ export function clearSessionMetadata(
   project.currentSessionLastPrompt = undefined
   project.currentSessionAgentSetting = undefined
   project.currentSessionMode = undefined
+  project.currentSessionPermissionMode = undefined
   project.currentSessionCodeMode = undefined
   project.currentSessionModel = undefined
   project.currentSessionWorktree = undefined
@@ -7554,6 +7968,38 @@ export function saveMode(mode: 'coordinator' | 'normal'): void {
 }
 
 /**
+ * Official 2.1.328 (`chunk@294254613.js @491708, @535149`):
+ * Cache the session's permission mode and append `{ type: 'permission-mode',
+ * permissionMode, sessionId }` to the active transcript when available.
+ */
+export function savePermissionMode(
+  permissionMode: PermissionMode,
+  sessionId?: UUID,
+): void {
+  const proj = getProject()
+  const changed = proj.currentSessionPermissionMode !== permissionMode
+  proj.currentSessionPermissionMode = permissionMode
+  if (!changed) return
+  const sid = sessionId ?? (getSessionId() as UUID | undefined)
+  if (sid) {
+    void proj
+      .appendEntry(
+        {
+          type: 'permission-mode',
+          permissionMode,
+          sessionId: sid,
+        },
+        sid,
+      )
+      .catch(() => {})
+  }
+}
+
+export function getCurrentSessionPermissionMode(): PermissionMode | undefined {
+  return getProject().currentSessionPermissionMode
+}
+
+/**
  * Official 2.1.328 (`y`/`Gj`/`fJe` repl-mode persistence): record the session's
  * Code Mode (`replMode`) flag in project state and persist a `type: 'repl-mode'`
  * entry to the active session transcript when available.
@@ -7590,8 +8036,25 @@ export function getCurrentSessionReplMode(): boolean | undefined {
 /**
  * Record the model the user selected via /model so it survives resume.
  */
-export function saveSessionModel(model: string | null): void {
-  getProject().currentSessionModel = model ?? undefined
+export function saveSessionModel(model: string | null, sessionId?: UUID): void {
+  const proj = getProject()
+  const next = model ?? undefined
+  const changed = proj.currentSessionModel !== next
+  proj.currentSessionModel = next
+  if (!changed || !next) return
+  const sid = sessionId ?? (getSessionId() as UUID | undefined)
+  if (sid && proj.sessionFile !== null) {
+    void proj
+      .appendEntry(
+        {
+          type: 'session-model',
+          model: next,
+          sessionId: sid,
+        },
+        sid,
+      )
+      .catch(() => {})
+  }
 }
 
 /**
@@ -8018,6 +8481,8 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       prUrls,
       prRepositories,
       modes,
+      permissionModes,
+      sessionModels,
       worktreeStates,
       replModes,
       devModsFolders,
@@ -8105,6 +8570,12 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       agentColor: sessionId ? agentColors.get(sessionId) : log.agentColor,
       agentSetting: sessionId ? agentSettings.get(sessionId) : log.agentSetting,
       mode: sessionId ? (modes.get(sessionId) as LogOption['mode']) : log.mode,
+      permissionMode: sessionId
+        ? (permissionModes.get(sessionId) ?? log.permissionMode)
+        : log.permissionMode,
+      sessionModel: sessionId
+        ? (sessionModels.get(sessionId) ?? log.sessionModel)
+        : log.sessionModel,
       ...(sessionId && replModes.has(sessionId)
         ? { replMode: replModes.get(sessionId) }
         : (log as LogOption & { replMode?: boolean }).replMode !== undefined
@@ -8250,6 +8721,8 @@ const METADATA_TYPE_MARKERS = [
   '"type":"agent-color"',
   '"type":"agent-setting"',
   '"type":"mode"',
+  '"type":"permission-mode"',
+  '"type":"session-model"',
   '"type":"worktree-state"',
   '"type":"dev-mods"',
   '"type":"bridge-session"',
@@ -8258,8 +8731,8 @@ const METADATA_TYPE_MARKERS = [
   '"type":"pr-link"',
 ]
 const METADATA_MARKER_BUFS = METADATA_TYPE_MARKERS.map(m => Buffer.from(m))
-// Longest marker is 22 bytes; +1 for leading `{` = 23.
-const METADATA_PREFIX_BOUND = 25
+// Longest marker is 24 bytes (`"type":"permission-mode"`); +1 for leading `{` = 25.
+const METADATA_PREFIX_BOUND = 27
 
 // null = carry spans whole chunk. Skips concat when carry provably isn't
 // a metadata line (markers sit at byte 1 after `{`).
@@ -8809,6 +9282,8 @@ export async function loadTranscriptFile(
     lowMemoryMode?: boolean
     /** Official 2.1.328 (#479): internal flag preventing >1 retry when transcript read ends early. */
     afterEarlyEnd?: boolean
+    /** Official 2.1.328 (`vsn`): force slimming duplicated toolUseResult payloads during hydration. */
+    slimToolUseResults?: boolean
   },
 ): Promise<{
   messages: Map<UUID, TranscriptMessage>
@@ -8824,6 +9299,10 @@ export async function loadTranscriptFile(
   prUrls: Map<UUID, string>
   prRepositories: Map<UUID, string>
   modes: Map<UUID, string>
+  /** Official 2.1.328 (`chunk@294254613.js @491708`): last-wins `type:"permission-mode"` per sessionId. */
+  permissionModes: Map<UUID, PermissionMode>
+  /** Persisted `type:"session-model"` user model selection per sessionId. */
+  sessionModels: Map<UUID, string>
   replModes: Map<UUID, boolean>
   worktreeStates: Map<UUID, PersistedWorktreeSession | null>
   /** densable currentSessionDevModsFolder last-wins. */
@@ -8872,6 +9351,8 @@ export async function loadTranscriptFile(
   const prUrls = new Map<UUID, string>()
   const prRepositories = new Map<UUID, string>()
   const modes = new Map<UUID, string>()
+  const permissionModes = new Map<UUID, PermissionMode>()
+  const sessionModels = new Map<UUID, string>()
   const replModes = new Map<UUID, boolean>()
   const worktreeStates = new Map<UUID, PersistedWorktreeSession | null>()
   const devModsFolders = new Map<UUID, string>()
@@ -9024,6 +9505,25 @@ export async function loadTranscriptFile(
                   filePath,
                   scan.boundaryStartOffset,
                 )
+                // Official 2.1.328 (`Pde`, `chunk@294254613.js @420598, @714199`):
+                // persist `resume-head.jsonl` so subsequent loads skip pre-compact bytes.
+                const headPath = getResumeHeadPath(
+                  filePath,
+                  dirname(dirname(filePath)),
+                )
+                if (headPath) {
+                  void planResumeHeadForTranscript(
+                    filePath,
+                    size,
+                    scan.boundaryStartOffset,
+                  )
+                    .then(planned => {
+                      if (planned) {
+                        scheduleWriteResumeHead(headPath, planned)
+                      }
+                    })
+                    .catch(() => {})
+                }
               }
             }
           }
@@ -9117,6 +9617,10 @@ export async function loadTranscriptFile(
           agentSettings.set(entry.sessionId, entry.agentSetting)
         } else if (entry.type === 'mode' && entry.sessionId) {
           modes.set(entry.sessionId, entry.mode)
+        } else if (entry.type === 'permission-mode' && entry.sessionId) {
+          permissionModes.set(entry.sessionId, entry.permissionMode)
+        } else if (entry.type === 'session-model' && entry.sessionId) {
+          sessionModels.set(entry.sessionId, entry.model)
         } else if (
           (entry as { type?: string }).type === 'repl-mode' &&
           'sessionId' in entry &&
@@ -9176,6 +9680,11 @@ export async function loadTranscriptFile(
     }
 
     const progressBridge = new Map<UUID, UUID | null>()
+    const hydrateToolUseWindow =
+      opts?.slimToolUseResults === true ||
+      toolResultCopiesOnDiskState === 'slim'
+        ? new ToolUseNameWindow()
+        : undefined
 
     const processEntries = (entries: Entry[]): void => {
       for (const entry of entries) {
@@ -9236,12 +9745,15 @@ export async function loadTranscriptFile(
           const existing = isNewMessage
             ? undefined
             : messages.get(admittedTranscriptEntry.uuid)
-          const mergedEntry =
+          const mergedEntryRaw =
             existing &&
             existing.parentUuid &&
             !admittedTranscriptEntry.parentUuid
               ? { ...admittedTranscriptEntry, parentUuid: existing.parentUuid }
               : admittedTranscriptEntry
+          const mergedEntry = hydrateToolUseWindow
+            ? slimToolUseResultForResume(mergedEntryRaw, hydrateToolUseWindow)
+            : mergedEntryRaw
           messages.set(mergedEntry.uuid, mergedEntry)
           checkpoint.onMessage(mergedEntry, isNewMessage)
           if (!mergedEntry.isSidechain) {
@@ -9309,6 +9821,10 @@ export async function loadTranscriptFile(
           agentSettings.set(entry.sessionId, entry.agentSetting)
         } else if (entry.type === 'mode' && entry.sessionId) {
           modes.set(entry.sessionId, entry.mode)
+        } else if (entry.type === 'permission-mode' && entry.sessionId) {
+          permissionModes.set(entry.sessionId, entry.permissionMode)
+        } else if (entry.type === 'session-model' && entry.sessionId) {
+          sessionModels.set(entry.sessionId, entry.model)
         } else if (
           (entry as { type?: string }).type === 'repl-mode' &&
           'sessionId' in entry &&
@@ -9491,29 +10007,19 @@ export async function loadTranscriptFile(
         ? messages.get(current.parentUuid)
         : undefined
     }
-  } else if (
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_pebble_leaf_prune', false)
-  ) {
-    // Build a set of UUIDs that have user/assistant children
+  } else {
+    // Official 2.1.328 (`chunk@294254613.js @705342`): unconditionally build
+    // `hasUserAssistantChild` and pass it into `Jnn` (no invented GB gate).
     const hasUserAssistantChild = new Set<UUID>()
     for (const msg of allMessages) {
       if (msg.parentUuid && (msg.type === 'user' || msg.type === 'assistant')) {
         hasUserAssistantChild.add(msg.parentUuid)
       }
     }
-    // Official 2.1.328 (#645) `Jnn`: memoized O(N) terminal ancestor walk
     const resolved = resolveTerminalConversationalAncestors(
       terminalMessages,
       messages,
       hasUserAssistantChild,
-    )
-    leafUuids = resolved.leafUuids
-    hasCycle = resolved.hasCycle
-  } else {
-    // Official 2.1.328 (#645) `Jnn`: memoized O(N) terminal ancestor walk
-    const resolved = resolveTerminalConversationalAncestors(
-      terminalMessages,
-      messages,
     )
     leafUuids = resolved.leafUuids
     hasCycle = resolved.hasCycle
@@ -9546,6 +10052,8 @@ export async function loadTranscriptFile(
     prUrls,
     prRepositories,
     modes,
+    permissionModes,
+    sessionModels,
     worktreeStates,
     replModes,
     devModsFolders,
@@ -9698,6 +10206,9 @@ export async function getLastSessionLog(
     aiTitles,
     tags,
     agentSettings,
+    modes,
+    permissionModes,
+    sessionModels,
     worktreeStates,
     replModes,
     devModsFolders,
@@ -9753,6 +10264,9 @@ export async function getLastSessionLog(
       contentReplacements.get(sessionId) ?? [],
     ),
     aiTitle: aiTitles.get(sessionId),
+    mode: modes.get(sessionId) as LogOption['mode'],
+    permissionMode: permissionModes.get(sessionId),
+    sessionModel: sessionModels.get(sessionId),
     worktreeSession: worktreeStates.get(sessionId),
     ...(replModes.has(sessionId) ? { replMode: replModes.get(sessionId) } : {}),
     devModsFolder: devModsFolders.get(sessionId),
@@ -10536,6 +11050,8 @@ export async function loadAllLogsFromSessionFile(
     prUrls,
     prRepositories,
     modes,
+    permissionModes,
+    sessionModels,
     replModes,
     fileHistorySnapshots,
     attributionSnapshots,
@@ -10611,6 +11127,8 @@ export async function loadAllLogsFromSessionFile(
       agentColor: agentColors.get(sessionId),
       agentSetting: agentSettings.get(sessionId),
       mode: modes.get(sessionId) as LogOption['mode'],
+      permissionMode: permissionModes.get(sessionId),
+      sessionModel: sessionModels.get(sessionId),
       ...(replModes.has(sessionId)
         ? { replMode: replModes.get(sessionId) }
         : {}),
@@ -11734,6 +12252,200 @@ export async function tryLoadResumeHeadRows(
       postBoundaryBuf: finalTail,
       hasPreservedSegment: finalTail.includes('"preservedSegment"'),
       boundaryOffset: head.boundaryOffset,
+    }
+  } finally {
+    await fh.close().catch(() => {})
+  }
+}
+
+const resumeHeadWriteChains = new Map<string, Promise<void>>()
+
+/**
+ * Official 2.1.328 `Nmr` / `Lmr` (`chunk@294254613.js @420598`):
+ * Write or remove `<projectDir>/<sessionId>/resume-head.jsonl` using
+ * `serializeResumeHead()`.
+ */
+export async function writeResumeHeadFile(
+  headPath: string,
+  head: ResumeHeadData | null,
+  tableKey = 'v1',
+): Promise<void> {
+  const sessionDir = dirname(headPath)
+  const transcriptPath = `${sessionDir}.jsonl`
+  try {
+    if (head === null) {
+      await unlink(headPath).catch(() => {})
+      return
+    }
+    const transcriptExists = await stat(transcriptPath).then(
+      () => true,
+      () => false,
+    )
+    if (!transcriptExists) return
+    await mkdir(sessionDir, { recursive: true, mode: 0o700 })
+    const serialized = serializeResumeHead(head, tableKey)
+    await writeFile(headPath, serialized, { mode: 0o600 })
+  } catch (err) {
+    if (!isENOENT(err)) {
+      logForDebugging(
+        `Could not update resume-head.jsonl, the side file that speeds up loading this transcript. Loads still work, and may read the whole file: ${errorMessage(err)}`,
+      )
+    }
+  }
+}
+
+/**
+ * Official 2.1.328 `Pde` (`chunk@294254613.js @420598`):
+ * Serialize per-path writes/removals to `resume-head.jsonl`.
+ */
+export function scheduleWriteResumeHead(
+  headPath: string,
+  head: ResumeHeadData | null,
+  tableKey = 'v1',
+): Promise<void> {
+  const prev = resumeHeadWriteChains.get(headPath) ?? Promise.resolve()
+  const next = prev
+    .catch(() => {})
+    .then(() => writeResumeHeadFile(headPath, head, tableKey))
+  resumeHeadWriteChains.set(headPath, next)
+  void next.finally(() => {
+    if (resumeHeadWriteChains.get(headPath) === next) {
+      resumeHeadWriteChains.delete(headPath)
+    }
+  })
+  return next
+}
+
+/**
+ * Official 2.1.328 `_nn` (`chunk@294254613.js @420598, @714199`):
+ * Plan a `ResumeHeadData` payload from a transcript file and a known
+ * `compact_boundary` byte offset so subsequent loads hit `tryLoadResumeHeadRows`.
+ */
+export async function planResumeHeadForTranscript(
+  filePath: string,
+  fileSize: number,
+  boundaryOffset: number,
+  opts?: {
+    previousGeneration?: number
+    ignoreMinGain?: boolean
+  },
+): Promise<ResumeHeadData | null> {
+  if (boundaryOffset < 1 || boundaryOffset >= fileSize) return null
+  if (!opts?.ignoreMinGain && boundaryOffset < RESUME_HEAD_MIN_GAIN) {
+    return null
+  }
+  const generation =
+    opts?.previousGeneration !== undefined ? opts.previousGeneration + 1 : 0
+  if (generation > RESUME_HEAD_MAX_GENERATION) return null
+
+  const fh = await fsOpen(filePath, 'r')
+  try {
+    const maxBoundaryRead = Math.min(
+      RESUME_HEAD_MAX_BOUNDARY_LEN + 1,
+      fileSize - boundaryOffset,
+    )
+    const boundaryBuf = Buffer.allocUnsafe(maxBoundaryRead)
+    const { bytesRead } = await fh.read(
+      boundaryBuf,
+      0,
+      maxBoundaryRead,
+      boundaryOffset,
+    )
+    if (bytesRead <= 0) return null
+    const slice = boundaryBuf.subarray(0, bytesRead)
+    const nlIdx = slice.indexOf(0x0a)
+    const boundaryLength = nlIdx === -1 ? bytesRead : nlIdx
+    if (boundaryLength < 1 || boundaryLength > RESUME_HEAD_MAX_BOUNDARY_LEN) {
+      return null
+    }
+    const probe = resumeHeadSha256(slice.subarray(0, boundaryLength))
+
+    // Collect metadata row offsets/lengths strictly before windowStart.
+    const windowStart = resumeHeadWindowStart(boundaryOffset)
+    const rowOffsets: number[] = []
+    const rowLengths: number[] = []
+    let totalPreservedBytes = 0
+
+    if (windowStart > 0) {
+      const CHUNK_SIZE = 64 * 1024
+      const readBuf = Buffer.allocUnsafe(CHUNK_SIZE)
+      let filePos = 0
+      let lineStartOffset = 0
+      let lineBuf: Buffer = Buffer.alloc(0)
+      let skipOversizeLine = false
+
+      const inspectLine = (buf: Buffer, offset: number): void => {
+        if (buf.length === 0 || offset >= windowStart) return
+        if (offset + buf.length >= boundaryOffset) return
+        if (buf.length > RESUME_HEAD_MAX_PRESERVED_BYTES) return
+        for (const marker of METADATA_MARKER_BUFS) {
+          if (buf.includes(marker)) {
+            if (
+              totalPreservedBytes + buf.length + 1 <=
+              RESUME_HEAD_MAX_PRESERVED_BYTES
+            ) {
+              rowOffsets.push(offset)
+              rowLengths.push(buf.length)
+              totalPreservedBytes += buf.length + 1
+            }
+            break
+          }
+        }
+      }
+
+      while (filePos < windowStart) {
+        const toRead = Math.min(CHUNK_SIZE, windowStart - filePos)
+        const res = await fh.read(readBuf, 0, toRead, filePos)
+        if (res.bytesRead <= 0) break
+        const chunk = readBuf.subarray(0, res.bytesRead)
+        let cursor = 0
+        while (cursor < chunk.length) {
+          const nl = chunk.indexOf(0x0a, cursor)
+          if (nl === -1) {
+            if (!skipOversizeLine) {
+              const tail = chunk.subarray(cursor)
+              if (lineBuf.length + tail.length > 64 * 1024) {
+                skipOversizeLine = true
+                lineBuf = Buffer.alloc(0)
+              } else {
+                lineBuf =
+                  lineBuf.length === 0
+                    ? Buffer.from(tail)
+                    : Buffer.concat([lineBuf, tail])
+              }
+            }
+            break
+          }
+          if (!skipOversizeLine) {
+            const seg = chunk.subarray(cursor, nl)
+            const fullLine =
+              lineBuf.length === 0 ? seg : Buffer.concat([lineBuf, seg])
+            inspectLine(fullLine, lineStartOffset)
+          }
+          lineBuf = Buffer.alloc(0)
+          skipOversizeLine = false
+          cursor = nl + 1
+          lineStartOffset = filePos + cursor
+        }
+        filePos += res.bytesRead
+      }
+      if (!skipOversizeLine && lineBuf.length > 0) {
+        inspectLine(lineBuf, lineStartOffset)
+      }
+    }
+
+    if (
+      isResumeHeadTooScattered(rowOffsets, rowLengths, windowStart).tooScattered
+    ) {
+      return null
+    }
+    return {
+      boundaryOffset,
+      boundaryLength,
+      probe,
+      generation,
+      rowOffsets,
+      rowLengths,
     }
   } finally {
     await fh.close().catch(() => {})

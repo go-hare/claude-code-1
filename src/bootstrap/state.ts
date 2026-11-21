@@ -790,7 +790,14 @@ export function getInitialMainLoopModel(): ModelSetting {
 export function setMainLoopModelOverride(
   model: ModelSetting | undefined,
 ): void {
-  getBootstrapSession().modelSelection.overrideMainLoopModel(model)
+  const { modelSelection } = getBootstrapSession()
+  const latch = modelSelection.refusalFallbackModelLatch() as
+    | RefusalFallbackModelLatch
+    | undefined
+  if (latch?.carriedEffort !== undefined && model !== latch.fallbackModel) {
+    clearCarriedEffortFromLatch('model_change')
+  }
+  modelSelection.overrideMainLoopModel(model)
 }
 
 export function setInitialMainLoopModel(model: ModelSetting): void {
@@ -907,8 +914,8 @@ export function setRefusalFallbackModelLatch(
   replaceLatchWithCarriedEffortTracking(session.modelSelection, latch)
 }
 
-/** Official rke  - clear latch without restoring override. */
-export function clearRefusalFallbackModelLatch(reason = 'superseded'): void {
+/** Official $Be / rke  - clear latch without restoring override. */
+export function clearRefusalFallbackModelLatch(reason = 'model_pick'): void {
   replaceLatchWithCarriedEffortTracking(
     getBootstrapSession().modelSelection,
     undefined,
@@ -2399,7 +2406,10 @@ export function addSessionCronTask(task: SessionCronTask): void {
  * downstream work (e.g. the disk read in removeCronTasks) when all ids
  * were accounted for here.
  */
-export function removeSessionCronTasks(ids: readonly string[]): number {
+export function removeSessionCronTasks(
+  ids: readonly string[],
+  opts?: { handOff?: boolean },
+): number {
   if (ids.length === 0) return 0
   const idSet = new Set(ids)
   const cron = getBootstrapSession().sessionCron
@@ -2407,7 +2417,26 @@ export function removeSessionCronTasks(ids: readonly string[]): number {
   const remaining = current.filter(t => !idSet.has(t.id))
   const removed = current.length - remaining.length
   if (removed === 0) return 0
+  const removedLoop =
+    opts?.handOff !== true &&
+    current.some(t => t.kind === 'loop' && idSet.has(t.id))
   cron.replaceTasks(remaining)
+  if (removedLoop) {
+    try {
+      const { getBgJobDirectory } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/sessionNameJobSidecar.js') as typeof import('../utils/sessionNameJobSidecar.js')
+      const jobDir = getBgJobDirectory()
+      if (jobDir) {
+        const { writePendingWakeup } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/orphanCronResume.js') as typeof import('../utils/orphanCronResume.js')
+        void writePendingWakeup(jobDir, undefined).catch(() => {})
+      }
+    } catch {
+      // optional in isolated unit tests
+    }
+  }
   return removed
 }
 
@@ -3283,7 +3312,15 @@ export function resetRequestLatches(): void {
 const autoCompactWindowSurfaceByHost = new WeakMap<object, string | undefined>()
 
 export function getAutoCompactWindowSurface(): string | undefined {
-  return autoCompactWindowSurfaceByHost.get(getBootstrapSessionHost())
+  const host = getBootstrapSessionHost()
+  if (autoCompactWindowSurfaceByHost.has(host)) {
+    return autoCompactWindowSurfaceByHost.get(host)
+  }
+  return (
+    host.launchOptions as {
+      autoCompactWindowSurface?: () => string | undefined
+    }
+  ).autoCompactWindowSurface?.()
 }
 
 export function setAutoCompactWindowSurface(surface: string | undefined): void {

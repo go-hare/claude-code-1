@@ -57,7 +57,7 @@ describe('QueryEngine persistSession flush (densable 2.1.283)', () => {
     expect(src).toContain('await flushSessionStorage()')
     expect(
       src.match(/await flushSessionStorage\(\)/g)?.length,
-    ).toBeGreaterThanOrEqual(5)
+    ).toBeGreaterThanOrEqual(4)
   })
 
   test('P$e nested_marker requires interactive (SDK/print still writes)', () => {

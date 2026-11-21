@@ -43,7 +43,16 @@ import {
   getManagedFilePath,
   getManagedSettingsDropInDir,
 } from './managedPath.js'
-import { getHkcuSettings, getMdmSettings } from './mdm/settings.js'
+import {
+  isRetryableMdmUnreadCause,
+  type MdmUnreadCause,
+} from './mdm/rawRead.js'
+import {
+  getHkcuSettings,
+  getMdmSettings,
+  refreshMdmSettings,
+  setMdmSettingsCache,
+} from './mdm/settings.js'
 import {
   applyRemoteSettingsConsentFreeIfEligible,
   getActiveRemoteSettings,
@@ -2844,14 +2853,17 @@ export function rawSettingsContainsKey(key: string): boolean {
   return false
 }
 
-// #371 SEA oee/dz/uz: Coalesced async re-read of managed-settings.json and
-// managed-settings.d/*.json after startup / login refresh when an initial read
-// may have hit a transient error or raced with drop-in directory population.
+// #371 SEA aqe/i0 (chunk@286370035.js @152475): Coalesced async re-read of
+// OS MDM (when a prior read had a transient unread failure) and managed-settings
+// files (`managed-settings.json` + `managed-settings.d/*.json`).
 const MANAGED_REREAD_TIMEOUT_MS = 5000
 const MANAGED_REREAD_MAX_RETRIES = 2
+const MANAGED_MDM_REREAD_COOLDOWN_MS = 60_000
 
 let _managedRereadInFlight: Promise<boolean> | undefined
 let _managedRereadGivenUp = false
+let _managedMdmRereadFailedAt = 0
+let _managedMdmRereadFailedFor: object | undefined
 
 export function managedRereadInFlight(): Promise<boolean> | undefined {
   return _managedRereadInFlight
@@ -2878,6 +2890,24 @@ export function managedRereadGivenUp(): boolean {
 export function resetManagedRereadStateForTesting(): void {
   _managedRereadInFlight = undefined
   _managedRereadGivenUp = false
+  _managedMdmRereadFailedAt = 0
+  _managedMdmRereadFailedFor = undefined
+}
+
+/**
+ * Official 2.1.328 `ap()` (chunk@286370035.js @152475): returns the retryable
+ * unread cause when OS MDM did not load due to a transient subprocess failure.
+ */
+function getRetryableMdmUnreadCause(mdm: {
+  settings: SettingsJson
+  errors: ValidationError[]
+}): MdmUnreadCause | undefined {
+  if (Object.keys(mdm.settings).length > 0) {
+    return undefined
+  }
+  return mdm.errors.find(
+    e => e.severity !== 'warning' && isRetryableMdmUnreadCause(e.unreadCause),
+  )?.unreadCause
 }
 
 /**
@@ -2961,23 +2991,64 @@ export async function rereadManagedSettingsIfNeeded(
   if (_managedRereadGivenUp) {
     return false
   }
-  const prev = getSettingsForSource('policySettings')
-  let timedOut = false
   const run = (async (): Promise<boolean> => {
+    let changed = false
+
+    // Official 2.1.328 `aqe` + `i0` (chunk@286370035.js @152475):
+    // 1. Refresh OS MDM slice when prior MDM load had a transient unread failure,
+    // comparing equivalent MDM/HKCU slices rather than merged policySettings.
+    const prevMdm = getMdmSettings()
+    const prevHkcu = getHkcuSettings()
+    const retryableMdmCause = getRetryableMdmUnreadCause(prevMdm)
+    if (
+      retryableMdmCause !== undefined &&
+      !(
+        _managedMdmRereadFailedFor === prevMdm &&
+        Date.now() - _managedMdmRereadFailedAt < MANAGED_MDM_REREAD_COOLDOWN_MS
+      )
+    ) {
+      const startedAt = Date.now()
+      try {
+        const refreshed = await refreshMdmSettings()
+        if (getRetryableMdmUnreadCause(refreshed.mdm) === undefined) {
+          const mdmChanged =
+            JSON.stringify(prevMdm.settings) !==
+              JSON.stringify(refreshed.mdm.settings) ||
+            JSON.stringify(prevHkcu.settings) !==
+              JSON.stringify(refreshed.hkcu.settings) ||
+            prevMdm.errors.length !== refreshed.mdm.errors.length
+          setMdmSettingsCache(refreshed.mdm, refreshed.hkcu)
+          if (mdmChanged) {
+            resetSettingsCache()
+            changed = true
+          }
+        } else {
+          _managedMdmRereadFailedFor = prevMdm
+          _managedMdmRereadFailedAt = startedAt
+        }
+      } catch (e) {
+        logError(e)
+        _managedMdmRereadFailedFor = prevMdm
+        _managedMdmRereadFailedAt = startedAt
+      }
+    }
+
+    // 2. Compare equivalent managed FILE policy slices (cached file slice vs
+    // fresh disk read of managed-settings.json + managed-settings.d/*.json).
     const deadline = Date.now() + timeoutMs
-    const prevJson = JSON.stringify(prev ?? null)
+    const prevFileSettings = loadManagedFileSettings().settings
+    const prevFileJson = JSON.stringify(prevFileSettings ?? null)
     for (let attempt = 0; attempt <= MANAGED_REREAD_MAX_RETRIES; attempt++) {
       const remaining = Math.max(0, deadline - Date.now())
       if (remaining === 0 && attempt > 0) {
-        timedOut = true
         giveUpManagedReread()
-        return false
+        return changed
       }
       // Official 2.1.323 (#2058): read fresh from disk (not cached) so a file
       // that was being rewritten at startup is read a second time.
       const fresh = loadManagedFileSettingsFresh()
-      const nextJson = JSON.stringify(fresh.settings ?? null)
-      if (prevJson !== nextJson) {
+      const nextFileJson = JSON.stringify(fresh.settings ?? null)
+      if (prevFileJson !== nextFileJson) {
         resetSettingsCache()
         return true
       }
@@ -2989,18 +3060,16 @@ export async function rereadManagedSettingsIfNeeded(
         )
         continue
       }
-      return false
+      return changed
     }
-    return false
+    return changed
   })()
   beginManagedReread(run)
   try {
     return await run
   } finally {
-    if (timedOut && !_managedRereadGivenUp) {
-      releaseManagedReread(run)
-    } else if (_managedRereadInFlight === run) {
-      beginManagedReread(Promise.resolve(false))
-    }
+    // Official `aqe`: always clear in-flight promise once settled; never
+    // permanently latch `Promise.resolve(false)`.
+    releaseManagedReread(run)
   }
 }

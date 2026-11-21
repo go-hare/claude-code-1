@@ -30,7 +30,7 @@ describe('v2.1.291-296 sessionStorage alignment (#192, #437, #530, #543)', () =>
   afterEach(() => {
     resetProjectForTesting()
     setLocalGcEnabled(false)
-    setLowYieldCompactSkipEnabled(false)
+    setLowYieldCompactSkipEnabled(true)
     rmSync(tempDir, { recursive: true, force: true })
   })
 
@@ -38,10 +38,11 @@ describe('v2.1.291-296 sessionStorage alignment (#192, #437, #530, #543)', () =>
     getProject()
     expect(process.listeners('exit')).toContain(syncExitReStamp)
 
-    noteTranscriptWriterDegraded('ENOSPC', 'append')
+    noteTranscriptWriterDegraded('ENOSPC', 'drain', '/tmp/test.jsonl')
     expect(getTranscriptWriterDegraded()).toEqual({
       code: 'ENOSPC',
-      source: 'append',
+      source: 'drain',
+      filePath: '/tmp/test.jsonl',
     })
 
     await flushSessionStorageAtExit()

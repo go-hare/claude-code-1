@@ -15,6 +15,10 @@ import {
 import { findCanonicalGitRoot } from '../utils/git.js'
 import { sanitizePath } from '../utils/path.js'
 import {
+  getEnabledSettingSources,
+  isSettingSourceEnabled,
+} from '../utils/settings/constants.js'
+import {
   getInitialSettings,
   getSettingsForSource,
 } from '../utils/settings/settings.js'
@@ -183,6 +187,35 @@ function getAutoMemPathOverride(): string | undefined {
   )
 }
 
+const AUTO_MEM_SETTING_SOURCES = [
+  'policySettings',
+  'flagSettings',
+  'localSettings',
+  'userSettings',
+] as const
+
+export type AutoMemSettingSource = (typeof AUTO_MEM_SETTING_SOURCES)[number]
+
+/**
+ * Official 2.1.328 `Qy()` — resolves autoMemoryDirectory and which enabled
+ * setting source supplied it (trusted sources only: policy/flag/local/user).
+ */
+export function getAutoMemPathSettingEntry(): {
+  dir: string | undefined
+  source: AutoMemSettingSource | undefined
+} {
+  for (const source of AUTO_MEM_SETTING_SOURCES) {
+    if (!isSettingSourceEnabled(source)) {
+      continue
+    }
+    const dir = getSettingsForSource(source)?.autoMemoryDirectory
+    if (dir != null) {
+      return { dir, source }
+    }
+  }
+  return { dir: undefined, source: undefined }
+}
+
 /**
  * Settings.json override for the full auto-memory directory path.
  * Supports ~/ expansion for user convenience.
@@ -195,12 +228,146 @@ function getAutoMemPathOverride(): string | undefined {
  * the same pattern as hasSkipDangerousModePermissionPrompt() etc.
  */
 function getAutoMemPathSetting(): string | undefined {
-  const dir =
-    getSettingsForSource('policySettings')?.autoMemoryDirectory ??
-    getSettingsForSource('flagSettings')?.autoMemoryDirectory ??
-    getSettingsForSource('localSettings')?.autoMemoryDirectory ??
-    getSettingsForSource('userSettings')?.autoMemoryDirectory
-  return validateMemoryPath(dir, true)
+  return validateMemoryPath(getAutoMemPathSettingEntry().dir, true)
+}
+
+/**
+ * Official 2.1.328 `Url()` — returns the setting source that supplied the
+ * active validated `autoMemoryDirectory`, or undefined when using the env
+ * override or default path.
+ */
+export function getAutoMemPathSettingSource():
+  | AutoMemSettingSource
+  | undefined {
+  if (getAutoMemPathOverride() !== undefined) {
+    return undefined
+  }
+  const entry = getAutoMemPathSettingEntry()
+  if (validateMemoryPath(entry.dir, true) === undefined) {
+    return undefined
+  }
+  return entry.source
+}
+
+// Official 2.1.328 `Oe` / `Foo()` / `vHt()` (chunk@288398886.js @22541):
+// process-level latch once blockReadsOutsideWorkingDirectories is enabled.
+let outsideReadBlockLatched = false
+const seenGitTrackedLocalSettingsRoots = new Set<string>()
+
+/** Official `Foo()` — latch blockReadsOutsideWorkingDirectories for the process. */
+export function latchBlockReadsOutsideWorkingDirectories(): void {
+  outsideReadBlockLatched = true
+}
+
+/** Official `vHt()` — true once blockReadsOutsideWorkingDirectories is active or latched. */
+export function isBlockReadsOutsideWorkingDirectoriesLatched(): boolean {
+  if (
+    !outsideReadBlockLatched &&
+    getEnabledSettingSources().some(
+      source =>
+        getSettingsForSource(source)?.permissions
+          ?.blockReadsOutsideWorkingDirectories === true,
+    )
+  ) {
+    outsideReadBlockLatched = true
+  }
+  return outsideReadBlockLatched
+}
+
+function isFlagBlockFileToolReadsOutsideWorkingDirsActive(): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    return false
+  }
+  const flagPerms = getSettingsForSource('flagSettings')?.permissions as
+    | { blockFileToolReadsOutsideWorkingDirectories?: boolean }
+    | undefined
+  return flagPerms?.blockFileToolReadsOutsideWorkingDirectories === true
+}
+
+/**
+ * Official 2.1.328 `nOn()` (chunk@288385318.js): setting sources whose grants
+ * / paths are controlled by the repository (`projectSettings`, plus
+ * `localSettings` whenever `.claude/settings.local.json` is git-tracked,
+ * indeterminate, or previously observed git-tracked for this project).
+ */
+export function getRepoScopedSettingSources(): readonly (
+  | 'projectSettings'
+  | 'localSettings'
+)[] {
+  const root = getProjectRoot()
+  if (!root) {
+    return ['projectSettings', 'localSettings']
+  }
+  let trackedNow = false
+  try {
+    const { isLocalSettingsGitTracked } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/settings/localSettingsGitTracked.js') as typeof import('../utils/settings/localSettingsGitTracked.js')
+    trackedNow = isLocalSettingsGitTracked({ onIndeterminate: 'tracked' })
+    if (trackedNow) {
+      seenGitTrackedLocalSettingsRoots.add(root)
+    }
+  } catch {
+    // fallback if helper unavailable
+  }
+  let persistedTracked = false
+  try {
+    const { getGlobalConfig, getProjectPathForConfig } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/config.js') as typeof import('../utils/config.js')
+    persistedTracked =
+      (
+        getGlobalConfig().projects?.[getProjectPathForConfig()] as
+          | { localSettingsSeenGitTracked?: boolean }
+          | undefined
+      )?.localSettingsSeenGitTracked === true
+  } catch {
+    // config may not be enabled yet
+  }
+  return trackedNow ||
+    seenGitTrackedLocalSettingsRoots.has(root) ||
+    persistedTracked
+    ? ['projectSettings', 'localSettings']
+    : ['projectSettings']
+}
+
+/**
+ * Official 2.1.328 `Rge()` (chunk@288398886.js @22541): true when AutoMem
+ * (`MEMORY.md`) loading must be held because outside-read blocking is active
+ * and the resolved auto-memory location is controlled by a repo-scoped setting
+ * source (e.g. git-tracked `localSettings.autoMemoryDirectory`) or conflicts
+ * with `--settings` under `blockFileToolReadsOutsideWorkingDirectories`.
+ */
+export function isAutoMemoryHeldByOutsideReadBlock(context?: {
+  blockReadsOutsideWorkingDirectories?: boolean
+}): boolean {
+  const readBlockActive =
+    context?.blockReadsOutsideWorkingDirectories === true ||
+    isBlockReadsOutsideWorkingDirectoriesLatched()
+  const fileToolReadBlock = isFlagBlockFileToolReadsOutsideWorkingDirsActive()
+  if (!readBlockActive && !fileToolReadBlock) {
+    return false
+  }
+  const source = getAutoMemPathSettingSource()
+  if (
+    source !== undefined &&
+    (getRepoScopedSettingSources() as readonly string[]).includes(source)
+  ) {
+    return true
+  }
+  if (fileToolReadBlock) {
+    const entry = getAutoMemPathSettingEntry()
+    const flagDir = getSettingsForSource('flagSettings')?.autoMemoryDirectory
+    if (entry.dir !== undefined && flagDir !== entry.dir) {
+      return true
+    }
+  }
+  return false
+}
+
+export function _resetOutsideReadBlockLatchForTests(): void {
+  outsideReadBlockLatched = false
+  seenGitTrackedLocalSettingsRoots.clear()
 }
 
 /**

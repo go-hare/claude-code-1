@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from 'util'
-import { setMainLoopModelOverride } from '../bootstrap/state.js'
+import {
+  clearCarriedEffortFromLatch,
+  setMainLoopModelOverride,
+} from '../bootstrap/state.js'
+import { logForDebugging } from '../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
 import type { ToolPermissionContext } from '../Tool.js'
 import {
@@ -16,6 +20,11 @@ import {
   toExternalPermissionMode,
 } from '../utils/permissions/PermissionMode.js'
 import {
+  isBypassPermissionsModeDisabled,
+  stripDangerousPermissionsForAutoMode,
+  transitionPermissionMode,
+} from '../utils/permissions/permissionSetup.js'
+import {
   isWorkerPermissionModeRecordEnabled,
   notifyInternalMetadataChanged,
   notifyPermissionModeChanged,
@@ -23,7 +32,14 @@ import {
   notifyUltracodeActive,
   type SessionExternalMetadata,
 } from '../utils/sessionState.js'
-import { isUltracodeModeActive, pdSessionEffort } from '../utils/effort.js'
+import {
+  clearSessionOrgEffortCaps,
+  isEffortLevel,
+  isUltracodeModeActive,
+  pdSessionEffort,
+  sessionEffortEquals,
+  type SessionEffortTag,
+} from '../utils/effort.js'
 import {
   getMainLoopModel,
   getRuntimeMainLoopModel,
@@ -406,21 +422,148 @@ export function evaluateCcrKeepsSessionRules(
   return keeps
 }
 
+function syncBgRespawnFlag(
+  flag: string,
+  aliases: readonly string[],
+  value: string | null,
+): void {
+  try {
+    const { updateBgRespawnFlag } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/cliRelaunch.js') as typeof import('../utils/cliRelaunch.js')
+    updateBgRespawnFlag(flag, aliases, value)
+  } catch {
+    // optional
+  }
+}
+
+/** Official 2.1.328 `C(e, o)` (chunk@305200639.js): sync `--effort` respawn flag. */
+function syncEffortBgRespawnFlag(
+  sessionEffort: SessionEffortTag | undefined,
+): void {
+  if (!sessionEffort) return
+  switch (sessionEffort.kind) {
+    case 'inherit':
+    case 'default':
+      syncBgRespawnFlag('--effort', [], null)
+      return
+    case 'level': {
+      if (
+        typeof sessionEffort.value === 'string' &&
+        isEffortLevel(sessionEffort.value)
+      ) {
+        syncBgRespawnFlag('--effort', [], sessionEffort.value)
+      }
+      return
+    }
+  }
+}
+
+function additionalWorkingDirKeysChanged(
+  oldDirs: ToolPermissionContext['additionalWorkingDirectories'] | undefined,
+  newDirs: ToolPermissionContext['additionalWorkingDirectories'] | undefined,
+): boolean {
+  if (oldDirs === newDirs) return false
+  const oldSize = oldDirs?.size ?? 0
+  const newSize = newDirs?.size ?? 0
+  if (oldSize !== newSize) return true
+  if (!oldDirs || !newDirs) return false
+  for (const key of newDirs.keys()) {
+    if (!oldDirs.has(key)) return true
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 `notifyMcpRootsListChanged` (`YP` in chunk@335138039.js +
+ * `gIr` in chunk@305200639.js): notify live MCP servers when working directory
+ * roots change.
+ */
+function notifyMcpRootsListChangedForState(state: AppState): void {
+  try {
+    const mcpClientMod =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/mcp/client.js') as {
+        notifyMcpRootsListChanged?: (
+          extraConnections?: ReadonlyArray<{
+            type: string
+            name?: string
+            client?: { sendRootsListChanged?: () => Promise<void> }
+          }>,
+        ) => void
+      }
+    if (typeof mcpClientMod.notifyMcpRootsListChanged === 'function') {
+      mcpClientMod.notifyMcpRootsListChanged(
+        state.mcp?.clients as
+          | ReadonlyArray<{
+              type: string
+              name?: string
+              client?: { sendRootsListChanged?: () => Promise<void> }
+            }>
+          | undefined,
+      )
+      return
+    }
+  } catch {
+    // fall through to AppState connected MCP clients
+  }
+  const clients = state.mcp?.clients
+  if (!Array.isArray(clients)) return
+  for (const conn of clients) {
+    if (
+      conn.type === 'connected' &&
+      typeof conn.client?.sendRootsListChanged === 'function'
+    ) {
+      conn.client.sendRootsListChanged().catch((err: unknown) => {
+        logForDebugging(
+          `Failed to notify MCP server "${conn.name}" of roots change: ${toError(err).message}`,
+        )
+      })
+    }
+  }
+}
+
 // Inverse of the push below — restore on worker restart.
+// Official 2.1.328 `function B(e)` (chunk@305200639.js @2800):
+// refuse restored 'bypassPermissions' when disabled or unavailable, transition
+// via transitionPermissionMode, and strip dangerous allow rules in auto mode.
 export function externalMetadataToAppState(
   metadata: SessionExternalMetadata,
 ): (prev: AppState) => AppState {
-  return prev => ({
-    ...prev,
-    ...(typeof metadata.permission_mode === 'string'
-      ? {
-          toolPermissionContext: {
-            ...prev.toolPermissionContext,
-            mode: permissionModeFromString(metadata.permission_mode),
-          },
+  return prev => {
+    let ctx = prev.toolPermissionContext
+    if (typeof metadata.permission_mode === 'string') {
+      let mode = permissionModeFromString(metadata.permission_mode)
+      if (
+        mode === 'bypassPermissions' &&
+        (isBypassPermissionsModeDisabled() ||
+          !ctx.isBypassPermissionsModeAvailable)
+      ) {
+        logForDebugging(
+          "[externalMetadataToAppState] Refusing restored mode 'bypassPermissions' (disabled by settings/policy or session not launched with --dangerously-skip-permissions); falling back to 'default'",
+          { level: 'warn' },
+        )
+        mode = 'default'
+      }
+      try {
+        ctx = {
+          ...transitionPermissionMode(ctx.mode, mode, ctx),
+          mode,
         }
-      : {}),
-  })
+        if (mode === 'auto') {
+          ctx = stripDangerousPermissionsForAutoMode(ctx)
+        }
+      } catch (err) {
+        logForDebugging(
+          `[externalMetadataToAppState] transitionPermissionMode rejected restored mode '${mode}': ${toError(err).message}`,
+        )
+      }
+    }
+    return {
+      ...prev,
+      toolPermissionContext: ctx,
+    }
+  }
 }
 
 export function onChangeAppState({
@@ -467,18 +610,11 @@ export function onChangeAppState({
         })
       }
       // Official GN (#1578): keep bg session's respawnFlags --permission-mode in sync.
-      try {
-        const { updateBgRespawnFlag } =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('../utils/cliRelaunch.js') as typeof import('../utils/cliRelaunch.js')
-        updateBgRespawnFlag(
-          '--permission-mode',
-          ['--inherit-permission-mode'],
-          newExternal,
-        )
-      } catch {
-        // optional
-      }
+      syncBgRespawnFlag(
+        '--permission-mode',
+        ['--inherit-permission-mode'],
+        newExternal,
+      )
     }
     notifyPermissionModeChanged(newMode)
   }
@@ -487,6 +623,17 @@ export function onChangeAppState({
   // deny/ask/allow rules to CCR internal metadata when they change.
   const oldCtx = oldState.toolPermissionContext
   const newCtx = newState.toolPermissionContext
+
+  // Official 2.1.328 `gIr` (chunk@305200639.js): notify connected MCP servers
+  // when `additionalWorkingDirectories` changes.
+  if (
+    additionalWorkingDirKeysChanged(
+      oldCtx.additionalWorkingDirectories,
+      newCtx.additionalWorkingDirectories,
+    )
+  ) {
+    notifyMcpRootsListChangedForState(newState)
+  }
   if (
     oldCtx.alwaysAllowRules.session !== newCtx.alwaysAllowRules.session ||
     oldCtx.alwaysDenyRules.session !== newCtx.alwaysDenyRules.session ||
@@ -552,17 +699,41 @@ export function onChangeAppState({
   // model override in memory via setMainLoopModelOverride.
   if (newState.mainLoopModel !== oldState.mainLoopModel) {
     setMainLoopModelOverride(newState.mainLoopModel)
+    syncBgRespawnFlag('--model', ['-m'], newState.mainLoopModel)
+  }
+
+  // Official 2.1.328 `gIr` (chunk@305200639.js): when sessionEffort changes,
+  // clear carriedEffort latch (`boo()`), clear session org effort caps
+  // (`S9e().clear()`), and sync `--effort` respawn flag (`C()`).
+  const effortChanged = !sessionEffortEquals(
+    newState.sessionEffort,
+    oldState.sessionEffort,
+  )
+  if (effortChanged) {
+    clearCarriedEffortFromLatch('effort_change')
+    clearSessionOrgEffortCaps()
+    syncEffortBgRespawnFlag(newState.sessionEffort)
+  }
+
+  // Official 2.1.328 `gIr`: keep bg session `--advisor` respawn flag in sync.
+  if (newState.advisorModel !== oldState.advisorModel) {
+    syncBgRespawnFlag('--advisor', [], newState.advisorModel ?? null)
   }
 
   if (
     newState.ultracode !== oldState.ultracode ||
-    newState.sessionEffort !== oldState.sessionEffort ||
+    effortChanged ||
     newState.mainLoopModel !== oldState.mainLoopModel ||
+    newState.mainLoopModelForSession !== oldState.mainLoopModelForSession ||
+    newState.settings !== oldState.settings ||
     newState.toolPermissionContext.mode !== oldState.toolPermissionContext.mode
   ) {
     const runtimeModel = getRuntimeMainLoopModel({
       permissionMode: newState.toolPermissionContext.mode,
-      mainLoopModel: newState.mainLoopModel ?? getMainLoopModel(),
+      mainLoopModel:
+        newState.mainLoopModelForSession ??
+        newState.mainLoopModel ??
+        getMainLoopModel(),
     })
     const effortValue = pdSessionEffort({
       sessionEffort: newState.sessionEffort,
@@ -573,6 +744,14 @@ export function onChangeAppState({
     notifyUltracodeActive(
       isUltracodeModeActive(runtimeModel, effortValue, newState.ultracode),
     )
+    if (
+      oldState.ultracode === true &&
+      newState.ultracode !== true &&
+      !effortChanged &&
+      newState.sessionEffort?.kind === 'level'
+    ) {
+      syncEffortBgRespawnFlag(newState.sessionEffort)
+    }
   }
 
   // expandedView → persist as showExpandedTodos + showSpinnerTree for backwards compat

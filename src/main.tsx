@@ -117,6 +117,8 @@ import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js';
 import { count, uniq } from './utils/array.js';
 import { installAsciicastRecorder } from './utils/asciicast.js';
 import {
+  getOauthAccountInfo,
+  getRateLimitTier,
   getSubscriptionType,
   isClaudeAISubscriber,
   prefetchAwsCredentialsAndBedRockInfoIfSafe,
@@ -488,8 +490,11 @@ import {
   isCodeModeOptInDialogOpen,
   markPollEventWiringForPrintRun,
   markPollEventWiringForTerminalRun,
+  recordCodeModeSignedInAccount,
+  reviewCodeModeOptInAfterInit,
   settleCodeModeOptInAtStartup,
 } from './services/codeMode/optIn.js';
+import { emitClaudeAppsGatewayStartupWarnings } from './cli/handlers/claudeAppsGateway.js';
 import { migrateChangelogFromConfig } from './utils/releaseNotes.js';
 import { SandboxManager } from './utils/sandbox/sandbox-adapter.js';
 import { fetchSession, prepareApiRequest } from './utils/teleport/api.js';
@@ -2738,23 +2743,41 @@ async function run(): Promise<CommanderCommand> {
             })
           : Promise.resolve(Object.create(null) as Record<string, ScopedMcpServerConfig>);
 
-      // Official 2.1.325 (#1295 / `chunk@308207798`): kick off published 3P
-      // model catalog startup load on Bedrock / Vertex / Mantle / Foundry.
-      {
-        const startupProvider = getAPIProvider();
-        if (
-          startupProvider === 'bedrock' ||
-          startupProvider === 'vertex' ||
-          startupProvider === 'mantle' ||
-          startupProvider === 'foundry'
-        ) {
-          void import('./utils/model/thirdPartyModelUpgrade.js')
-            .then(mod =>
-              mod.initThirdPartyModelCatalogStartup({
-                headless: isNonInteractiveSession,
-              }),
-            )
-            .catch(() => {});
+      // Official 2.1.325 (#1295 / `chunk@308207798`) & 2.1.328 (`chunk@304812526.js @163947`):
+      // kick off published 3P model catalog startup load on Bedrock / Vertex / Mantle / Foundry
+      // and store the promise to await BEFORE startup model resolution.
+      const startupProvider = getAPIProvider();
+      let thirdPartyModelCatalogStartupPromise: Promise<unknown> | undefined;
+      if (
+        startupProvider === 'bedrock' ||
+        startupProvider === 'vertex' ||
+        startupProvider === 'mantle' ||
+        startupProvider === 'foundry'
+      ) {
+        thirdPartyModelCatalogStartupPromise = import('./utils/model/thirdPartyModelUpgrade.js')
+          .then(mod =>
+            mod.initThirdPartyModelCatalogStartup({
+              headless: isNonInteractiveSession,
+            }),
+          )
+          .catch(() => {});
+      }
+      // Official 2.1.328 (#547 / `chunk@316653146.js @997627`): emit Claude apps
+      // gateway startup validation warnings on gateway startup path.
+      if (startupProvider === 'gateway') {
+        const gatewayPolicySettings = getSettingsForSource('policySettings');
+        if (gatewayPolicySettings) {
+          emitClaudeAppsGatewayStartupWarnings(
+            {
+              managedPolicies: [{ payload: { settings: gatewayPolicySettings as Record<string, unknown> } }],
+            },
+            warning => {
+              logForDebugging(`[gateway-startup] ${warning}`, { level: 'warn' });
+              if (!isNonInteractiveSession || (outputFormat !== 'json' && outputFormat !== 'stream-json')) {
+                process.stderr.write(`Warning: ${warning}\n`);
+              }
+            },
+          );
         }
       }
 
@@ -2881,11 +2904,19 @@ async function run(): Promise<CommanderCommand> {
         markPollEventWiringForTerminalRun();
       }
 
-      // Official 2.1.328 (`IAl`): settle Code Mode opt-in BEFORE getTools()
-      // and BEFORE runHeadless() so both interactive and `-p` sessions build
-      // their tool pools with the settled Code Mode state.
+      // Official 2.1.328 (`IAl` / `F()` / `chunk@304812526.js @139429`):
+      // record signed-in account identity and settle Code Mode opt-in BEFORE
+      // getTools() and BEFORE runHeadless() so both interactive and `-p`
+      // sessions build their tool pools with the settled Code Mode state.
+      const startupOauthAccount = getOauthAccountInfo();
+      recordCodeModeSignedInAccount({
+        accountUuid: startupOauthAccount?.accountUuid,
+        organizationUuid: startupOauthAccount?.organizationUuid,
+        subscriptionType: getSubscriptionType(),
+        rateLimitTier: getRateLimitTier() ?? undefined,
+      });
       const startupModelForCodeMode = parseUserSpecifiedModel(options.model ?? getDefaultMainLoopModel());
-      let codeModeDecision = await settleCodeModeOptInAtStartup({
+      const buildCodeModeStartupInput = () => ({
         isNonInteractive: isNonInteractiveSession,
         isRemote: remote !== null || teleport !== null,
         isTeammate: Boolean(storedTeammateOpts?.agentId),
@@ -2917,6 +2948,17 @@ async function run(): Promise<CommanderCommand> {
           baseTools: Array.isArray(options.tools) ? options.tools : undefined,
         }),
       });
+      let codeModeDecision = await settleCodeModeOptInAtStartup(buildCodeModeStartupInput());
+      // Official 2.1.328 (`chunk@304812526.js @139429`): print refusal warning
+      // to stderr in headless `-p` mode unless structured output is requested.
+      if (
+        isNonInteractiveSession &&
+        codeModeDecision.state === 'refused' &&
+        outputFormat !== 'json' &&
+        outputFormat !== 'stream-json'
+      ) {
+        process.stderr.write(`Warning: ${codeModeWarningNotice(codeModeDecision.why)}\n`);
+      }
 
       let tools = getTools(toolPermissionContext);
 
@@ -3220,6 +3262,21 @@ async function run(): Promise<CommanderCommand> {
       if (agentSetting) {
         mainThreadAgentDefinition = agentDefinitions.activeAgents.find(agent => agent.agentType === agentSetting);
         if (!mainThreadAgentDefinition) {
+          // Official 2.1.328 (`chunk@304812526.js @162100`): when CLI `--agent <name>`
+          // is not found (and not stream-json, --resume, --continue, or bg respawn),
+          // exit with an explicit error listing available agents.
+          if (
+            agentCli &&
+            inputFormat !== 'stream-json' &&
+            agentCli !== 'general-purpose' &&
+            !options.resume &&
+            !options.continue &&
+            !isEnvTruthy(process.env.CLAUDE_BG_POST_CLEAR_RESPAWN)
+          ) {
+            const available = agentDefinitions.activeAgents.map(a => a.agentType).join(', ');
+            writeToStderr(`--agent '${agentCli}' not found. Available agents: ${available || '(none)'}`);
+            process.exit(1);
+          }
           logForDebugging(
             `Warning: agent "${agentSetting}" not found. ` +
               `Available agents: ${agentDefinitions.activeAgents.map(a => a.agentType).join(', ')}. ` +
@@ -3280,6 +3337,13 @@ async function run(): Promise<CommanderCommand> {
         }
       }
 
+      // Official 2.1.328 (`chunk@304812526.js @163947`): await 3P published model
+      // catalog load BEFORE resolving startup model defaults.
+      if (thirdPartyModelCatalogStartupPromise) {
+        await thirdPartyModelCatalogStartupPromise;
+      }
+      profileCheckpoint('action_model_catalog_decided');
+
       // Compute effective model early so hooks can run in parallel with MCP
       // If user didn't specify a model but agent has one, use the agent's model
       let effectiveModel = userSpecifiedModel;
@@ -3316,6 +3380,7 @@ async function run(): Promise<CommanderCommand> {
       }
       const initialMainLoopModel = getInitialMainLoopModel();
       const resolvedInitialModel = parseUserSpecifiedModel(initialMainLoopModel ?? getDefaultMainLoopModel());
+      profileCheckpoint('action_model_resolved');
 
       {
         // gold xso then Pso (SEA 191853774 / 191854295). Flag already copied
@@ -3564,19 +3629,6 @@ async function run(): Promise<CommanderCommand> {
           }
         }
 
-        // Official 2.1.328 (`CodeModeOptIn`): show caveats confirmation dialog
-        // when Code Mode opt-in was requested without prior caveat acceptance.
-        if (isCodeModeOptInDialogOpen()) {
-          const { CodeModeOptInDialog } = await import('./components/CodeModeOptInDialog.js');
-          const outcome = await showSetupDialog<'none' | 'restart_into_mode' | 'restart_without_mode'>(root, done => (
-            <CodeModeOptInDialog onDone={done} />
-          ));
-          if (outcome === 'restart_into_mode') {
-            await rebuildToolsForCodeModeSwitch();
-          }
-          codeModeDecision = getCodeModeOptInState();
-        }
-
         // Now that trust is established and GrowthBook has auth headers,
         // resolve the --remote-control / --rc entitlement gate.
         if (feature('BRIDGE_MODE') && remoteControlOption !== undefined) {
@@ -3639,6 +3691,48 @@ async function run(): Promise<CommanderCommand> {
         const orgValidation = await validateForceLoginOrg();
         if (!orgValidation.valid) {
           await exitWithError(root, (orgValidation as { valid: false; message: string }).message);
+        }
+
+        // Official 2.1.328 (`DAl` / Wave 1B): post-init 2-phase Code Mode opt-in
+        // review after auth/onboarding init so freshly loaded account/org policy
+        // is evaluated before launching the REPL.
+        const postInitAccount = getOauthAccountInfo();
+        recordCodeModeSignedInAccount({
+          accountUuid: postInitAccount?.accountUuid,
+          organizationUuid: postInitAccount?.organizationUuid,
+          subscriptionType: getSubscriptionType(),
+          rateLimitTier: getRateLimitTier() ?? undefined,
+        });
+        const codeModeReviewOutcome = await reviewCodeModeOptInAfterInit(buildCodeModeStartupInput());
+        if (codeModeReviewOutcome === 'restart_into_mode' || codeModeReviewOutcome === 'restart_without_mode') {
+          await rebuildToolsForCodeModeSwitch();
+          codeModeDecision = getCodeModeOptInState();
+        } else if (codeModeReviewOutcome === 'ask' && isCodeModeOptInDialogOpen()) {
+          const { CodeModeOptInDialog } = await import('./components/CodeModeOptInDialog.js');
+          const outcome = await showSetupDialog<'none' | 'restart_into_mode' | 'restart_without_mode'>(root, done => (
+            <CodeModeOptInDialog onDone={done} />
+          ));
+          if (outcome === 'restart_into_mode') {
+            await rebuildToolsForCodeModeSwitch();
+          }
+          codeModeDecision = getCodeModeOptInState();
+        } else {
+          codeModeDecision = getCodeModeOptInState();
+        }
+
+        // Official 2.1.328 (`chunk@308207798.js @18373`): discover undecided
+        // Bedrock / Vertex model upgrade candidates on interactive startup.
+        if (startupProvider === 'bedrock' || startupProvider === 'vertex') {
+          void import('./utils/model/thirdPartyModelUpgrade.js')
+            .then(async mod => {
+              const undecided = await mod.discoverUndecidedThirdPartyUpgradeCandidates(startupProvider);
+              if (undecided.length > 0) {
+                logForDebugging(
+                  `[${startupProvider}-upgrade] ${undecided.length} undecided model upgrade candidate(s): ${undecided.map(c => `${c.fromKey}->${c.toKey}`).join(', ')}`,
+                );
+              }
+            })
+            .catch(() => {});
         }
       }
 

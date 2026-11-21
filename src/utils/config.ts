@@ -941,6 +941,13 @@ export type GlobalConfig = {
   migrationVersion?: number
 
   /**
+   * Official 2.1.328 (`chunk@308207798.js @18373`): declined Bedrock/Vertex
+   * model upgrade keys per tier (`{ [tier]: "<fromKey>-><toKey>" }`).
+   */
+  bedrockDeclinedUpgrades?: Record<string, string>
+  vertexDeclinedUpgrades?: Record<string, string>
+
+  /**
    * densable `pluginPanes` — dock/inline room from pane grip `keepRoom` (`iL`/`T4`)
    * + asked latch soft persist (`mL` / `keepAsked` / `keptAsked`).
    */
@@ -2393,9 +2400,12 @@ export function enableConfigs(storageV5?: StorageV5): void {
   if (storageV5 === undefined) {
     oweReloadThroughStorage()
   } else if (isHoverRestOn()) {
-    void reloadThroughStorageOnce(() =>
-      refreshGlobalConfigFromStorage(storageV5),
-    )
+    // Official `WF` / `orn` (chunk@286370035.js @94979): when `storageV5` is
+    // already supplied on the initial `enableConfigs(storageV5)` call, refresh
+    // directly through storage instead of short-circuiting on `reloadThroughStorageOwed === false`.
+    reloadThroughStorageOwed = false
+    reloadThroughStoragePromise = refreshGlobalConfigFromStorage(storageV5)
+    void reloadThroughStoragePromise
   }
 
   logForDiagnosticsNoPII('info', 'enable_configs_completed', {
@@ -2501,6 +2511,12 @@ export function getGlobalConfigWriteFlagsForTesting(): {
     createRefusedThisProcess,
     lastGetConfigOutcome,
   }
+}
+
+export function resetEnableConfigsForTesting(): void {
+  configReadingAllowed = false
+  reloadThroughStorageOwed = false
+  reloadThroughStoragePromise = null
 }
 
 export function resetGlobalConfigWriteFlagsForTesting(): void {

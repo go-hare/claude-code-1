@@ -562,69 +562,76 @@ async function main(): Promise<void> {
 
   // densable emO top-level `claude rm <id>` (gJ_) — primary product path for #28.
   // Also keep deprecated ps/logs/attach/kill → daemon <sub>.
-  if (
-    feature('BG_SESSIONS') &&
-    (args[0] === 'ps' ||
-      args[0] === 'logs' ||
-      args[0] === 'stop' ||
-      args[0] === 'attach' ||
-      args[0] === 'kill' ||
-      args[0] === 'rm' ||
-      args[0] === 'respawn')
-  ) {
-    const { formatInitializeConflictError } = await import('../cli/promptAfterListOption.js');
-    const initConflict = formatInitializeConflictError(args);
-    if (initConflict) {
-      console.error(initConflict);
-      process.exit(1);
-    }
-    const isRm = args[0] === 'rm';
-    const isRespawn = args[0] === 'respawn';
-    if (!isRm && !isRespawn) {
-      const mapped = args[0] === 'ps' ? 'status' : args[0];
-      console.error(`[deprecated] Use: claude daemon ${mapped}${args[1] ? ' ' + args[1] : ''}`);
-    }
-    profileCheckpoint('cli_daemon_path');
-    // Official emO bg path: loadFastPathPolicy (warn-only for logs/stop/kill/rm style).
-    const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
-    {
-      const policyErr = await loadFastPathPolicy();
-      const warnOnly =
-        args[0] === 'logs' ||
-        args[0] === 'stop' ||
-        args[0] === 'kill' ||
-        args[0] === 'ps' ||
-        args[0] === 'rm' ||
-        args[0] === 'respawn';
-      if (policyErr) {
-        if (warnOnly) {
-          process.stderr.write(`${policyErr}\n`);
-        } else {
-          const { exitWithError } = await import('../utils/process.js');
-          exitWithError(policyErr);
+  // Official 2.1.328 ($zi / backgroundSessionVerbIndex): scan past leading root
+  // options so `claude --debug attach <id>` hits the bg fast-path.
+  if (feature('BG_SESSIONS')) {
+    const BG_VERB_CANDIDATES = new Set(['ps', 'logs', 'stop', 'attach', 'kill', 'rm', 'respawn']);
+    if (args.some(a => BG_VERB_CANDIDATES.has(a))) {
+      let verbIdx = args[0] === 'ps' ? 0 : -1;
+      if (verbIdx === -1) {
+        const { backgroundSessionVerbIndex } = await import('../cli/bg.js');
+        verbIdx = backgroundSessionVerbIndex(args, {
+          behindRootOptions: process.env.CLAUDE_CODE_SESSION_KIND !== 'bg',
+        });
+      }
+      if (verbIdx !== -1) {
+        const bgVerb = args[verbIdx]!;
+        const bgRestArgs = args.slice(verbIdx + 1);
+        const { formatInitializeConflictError } = await import('../cli/promptAfterListOption.js');
+        const initConflict = formatInitializeConflictError(args);
+        if (initConflict) {
+          console.error(initConflict);
+          process.exit(1);
         }
+        const isRm = bgVerb === 'rm';
+        const isRespawn = bgVerb === 'respawn';
+        if (!isRm && !isRespawn) {
+          const mapped = bgVerb === 'ps' ? 'status' : bgVerb;
+          console.error(`[deprecated] Use: claude daemon ${mapped}${bgRestArgs[0] ? ' ' + bgRestArgs[0] : ''}`);
+        }
+        profileCheckpoint('cli_daemon_path');
+        // Official emO bg path: loadFastPathPolicy (warn-only for logs/stop/kill/rm style).
+        const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
+        {
+          const policyErr = await loadFastPathPolicy();
+          const warnOnly =
+            bgVerb === 'logs' ||
+            bgVerb === 'stop' ||
+            bgVerb === 'kill' ||
+            bgVerb === 'ps' ||
+            bgVerb === 'rm' ||
+            bgVerb === 'respawn';
+          if (policyErr) {
+            if (warnOnly) {
+              process.stderr.write(`${policyErr}\n`);
+            } else {
+              const { exitWithError } = await import('../utils/process.js');
+              exitWithError(policyErr);
+            }
+          }
+        }
+        const { setShellIfWindows } = await import('../utils/windowsPaths.js');
+        setShellIfWindows();
+        const { initSinks } = await import('../utils/sinks.js');
+        initSinks();
+        if (isRm) {
+          // densable: y.rmHandler(t[1]) — top-level, not nested under daemon only
+          const bg = await import('../cli/bg.js');
+          await bg.rmHandler(bgRestArgs[0]);
+          // densable process.exit after analytics drain; exitCode already set by handler
+          process.exit(process.exitCode ?? 0);
+        }
+        if (isRespawn) {
+          // densable cEr — top-level `claude respawn <id>|--all` (not a second attach)
+          const bg = await import('../cli/bg.js');
+          await bg.respawnHandler(bgRestArgs[0]);
+          process.exit(process.exitCode ?? 0);
+        }
+        const { daemonMain } = await import('../daemon/main.js');
+        await daemonMain([bgVerb === 'ps' ? 'status' : bgVerb, ...bgRestArgs]);
+        return;
       }
     }
-    const { setShellIfWindows } = await import('../utils/windowsPaths.js');
-    setShellIfWindows();
-    const { initSinks } = await import('../utils/sinks.js');
-    initSinks();
-    if (isRm) {
-      // densable: y.rmHandler(t[1]) — top-level, not nested under daemon only
-      const bg = await import('../cli/bg.js');
-      await bg.rmHandler(args[1]);
-      // densable process.exit after analytics drain; exitCode already set by handler
-      process.exit(process.exitCode ?? 0);
-    }
-    if (isRespawn) {
-      // densable cEr — top-level `claude respawn <id>|--all` (not a second attach)
-      const bg = await import('../cli/bg.js');
-      await bg.respawnHandler(args[1]);
-      process.exit(process.exitCode ?? 0);
-    }
-    const { daemonMain } = await import('../daemon/main.js');
-    await daemonMain([args[0] === 'ps' ? 'status' : args[0]!, ...args.slice(1)]);
-    return;
   }
 
   // Fast-path for `claude job <subcommand>`: template jobs.
@@ -730,7 +737,6 @@ async function main(): Promise<void> {
   ]);
   if (
     !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_SHELL_HEAD_START) &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_NO_SHELL_SNAPSHOT) &&
     !isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE) &&
     !args.includes('--help') &&
     !args.includes('-h') &&

@@ -4017,7 +4017,7 @@ export function getAccountInformation() {
  */
 export type OrgValidationResult =
   | { valid: true }
-  | { valid: false; message: string }
+  | { valid: false; reason?: string; message: string }
 
 /**
  * densable J$'s `q$` — an Anthropic-issued credential that is NOT first-party
@@ -4055,12 +4055,28 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
   const policy = getSettingsForSource('policySettings')
   const configuredOrgUuid =
     policy?.forceLoginOrgUUID ?? prevPolicy?.forceLoginOrgUUID
-  const configuredLoginMethod =
-    policy?.forceLoginMethod ?? prevPolicy?.forceLoginMethod
   // densable J$ `r` — either key counts as "an auth pin is configured", and both
   // are read from policySettings only, never from merged settings.
   const pinConfigured =
-    configuredOrgUuid !== undefined || configuredLoginMethod !== undefined
+    configuredOrgUuid !== undefined ||
+    policy?.forceLoginMethod !== undefined ||
+    prevPolicy?.forceLoginMethod !== undefined
+
+  // Official 2.1.328 `euo` (chunk@286370035.js @647445): enforce managed
+  // `allowedProviders` at startup org/policy validation before skipping for
+  // host-managed / unix-socket / non-OAuth branches.
+  const providerCheck = validateAllowedProvider(getAPIProvider())
+  if (!providerCheck.valid) {
+    logEvent('tengu_auth_force_login_org', {
+      reason: 'provider_not_allowed' as never,
+      api_provider: getAPIProvider() as never,
+    })
+    return {
+      valid: false,
+      reason: 'provider_not_allowed',
+      message: providerCheck.message,
+    }
+  }
 
   // densable J$ — the host injects credentials, so the pin cannot apply here.
   // Mirrors validateForcedLoginMethod's host-managed branch.
