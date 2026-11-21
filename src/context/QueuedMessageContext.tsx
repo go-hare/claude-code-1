@@ -1,13 +1,11 @@
 import * as React from 'react';
-import { Box } from '@anthropic/ink';
 
 type QueuedMessageContextValue = {
   isQueued: boolean;
-  isFirst: boolean;
-  /** Width reduction for container padding (e.g., 4 for paddingX={2}) */
-  paddingWidth: number;
-  /** densable F3i `selectionHighlight` — ↑↓ still-queued edit (#20). */
+  /** Official 2.1.328 `CTo` — only set while queueEditIndex maps onto this row. */
   selectionHighlight?: 'on' | 'off';
+  /** Official 2.1.328 `CTo` — system-line flag inherited by queued notices. */
+  noticeSystemLines?: boolean;
 };
 
 const QueuedMessageContext = React.createContext<QueuedMessageContextValue | undefined>(undefined);
@@ -16,33 +14,18 @@ export function useQueuedMessage(): QueuedMessageContextValue | undefined {
   return React.useContext(QueuedMessageContext);
 }
 
-const PADDING_X = 2;
-
 type Props = {
-  isFirst: boolean;
-  useBriefLayout?: boolean;
-  /** densable F3i — only set while queueEditIndex maps onto this row. */
+  /** Official 2.1.328 `CTo` — only set while queueEditIndex maps onto this row. */
   selectionHighlight?: 'on' | 'off';
+  noticeSystemLines?: boolean;
   children: React.ReactNode;
 };
 
-export function QueuedMessageProvider({
-  isFirst,
-  useBriefLayout,
-  selectionHighlight,
-  children,
-}: Props): React.ReactNode {
-  // Brief mode already indents via paddingLeft in HighlightedThinkingText /
-  // BriefTool UI — adding paddingX here would double-indent the queue.
-  const padding = useBriefLayout ? 0 : PADDING_X;
+export function QueuedMessageProvider({ selectionHighlight, noticeSystemLines, children }: Props): React.ReactNode {
   const value = React.useMemo(
-    () => ({ isQueued: true, isFirst, paddingWidth: padding * 2, selectionHighlight }),
-    [isFirst, padding, selectionHighlight],
+    () => ({ isQueued: true, selectionHighlight, noticeSystemLines }),
+    [selectionHighlight, noticeSystemLines],
   );
 
-  return (
-    <QueuedMessageContext.Provider value={value}>
-      <Box paddingX={padding}>{children}</Box>
-    </QueuedMessageContext.Provider>
-  );
+  return <QueuedMessageContext.Provider value={value}>{children}</QueuedMessageContext.Provider>;
 }

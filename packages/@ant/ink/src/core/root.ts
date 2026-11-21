@@ -54,6 +54,8 @@ export type RenderOptions = {
   pressClock?: () => number
   /** Official 2.1.328 (`timesPresses`) — enables early-key InputGate dropping when true. */
   timesPresses?: () => boolean
+  /** Official 2.1.328 (`newRenderer`) — enables the covering/inline/fullscreen byte renderer + IncrementalPainter. */
+  newRenderer?: boolean
 }
 
 export type Instance = {
@@ -164,6 +166,7 @@ export async function createRoot({
   nativeCursor,
   pressClock,
   timesPresses,
+  newRenderer,
 }: RenderOptions = {}): Promise<Root> {
   // See wrappedRender — preserve microtask boundary from the old WASM await.
   await Promise.resolve()
@@ -182,6 +185,7 @@ export async function createRoot({
     nativeCursor: nativeCursor ?? isNativeCursorEnabled(),
     pressClock,
     timesPresses,
+    newRenderer,
   })
 
   // Register in the instances map so that code that looks up the Ink

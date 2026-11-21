@@ -41,6 +41,39 @@ export type SessionRenderOptions = RenderOptions & {
   storageV5?: unknown
 }
 
+/**
+ * Official 2.1.328 (`c1` / `cp` @chunk@306863829.js): enables Ink's new
+ * covering/inline/fullscreen byte renderer + IncrementalPainter when
+ * `CLAUDE_CODE_NEW_RENDERER` is set, or when GrowthBook `tengu_functional_pebble`
+ * allows the current terminal (`{ add: string[], remove: string[] }`).
+ */
+export function isNewRendererEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+  terminalName: string = env.TERM_PROGRAM ?? env.TERM ?? '',
+): boolean {
+  const raw = env.CLAUDE_CODE_NEW_RENDERER
+  if (raw !== undefined) {
+    if (isEnvDefinedFalsy(raw)) return false
+    return isEnvTruthy(raw)
+  }
+  const flag = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
+    'tengu_functional_pebble',
+    false,
+  )
+  if (typeof flag !== 'object' || flag === null) return false
+  const record = flag as { add?: unknown; remove?: unknown }
+  const add = Array.isArray(record.add)
+    ? record.add.filter((v): v is string => typeof v === 'string')
+    : []
+  const remove = Array.isArray(record.remove)
+    ? record.remove.filter((v): v is string => typeof v === 'string')
+    : []
+  const isTmuxCc = env.TMUX !== undefined && env.TERM_PROGRAM === 'iTerm.app'
+  const effectiveName = isTmuxCc ? 'tmux-cc' : terminalName
+  if (remove.includes(effectiveName)) return false
+  return add.includes(effectiveName)
+}
+
 export async function createRoot(
   options: SessionRenderOptions = {},
 ): Promise<Root> {
@@ -50,6 +83,7 @@ export async function createRoot(
   const root = await createInkRoot({
     ...inkOptions,
     timesPresses: inkOptions.timesPresses ?? isEarlyKeyGuardEnabled,
+    newRenderer: inkOptions.newRenderer ?? isNewRendererEnabled(),
   })
   return {
     render(node: ReactNode) {

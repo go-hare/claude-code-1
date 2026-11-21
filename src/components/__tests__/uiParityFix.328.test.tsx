@@ -1,7 +1,23 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
 import React, { useMemo, useState } from 'react';
-import { Box, ScrollBox, type ScrollBoxHandle, ScrollViewport, Text, wrappedRender as render } from '@anthropic/ink';
+import {
+  Box,
+  FrameScheduler,
+  LayoutController,
+  OverlayController,
+  PointerController,
+  ScrollBox,
+  type ScrollBoxHandle,
+  ScrollViewport,
+  Text,
+  wrappedRender as render,
+} from '@anthropic/ink';
+import Ink from '../../../packages/@ant/ink/src/core/ink.js';
+import Output from '../../../packages/@ant/ink/src/core/output.js';
+import { computeUnseenDivider } from '../FullscreenLayout.js';
+import { ScrollPin } from '../../utils/scrollPin.js';
+import { TranscriptStore } from '../../utils/transcriptStore.js';
 import {
   appendChildNode,
   createNode,
@@ -22,10 +38,11 @@ import {
 import createRenderer from '../../../packages/@ant/ink/src/core/renderer.js';
 import { CharPool, cellAt, HyperlinkPool, type Screen, StylePool } from '../../../packages/@ant/ink/src/core/screen.js';
 import { setIsInteractive } from '../../bootstrap/state.js';
+import { QueuedMessageProvider, useQueuedMessage } from '../../context/QueuedMessageContext.js';
 import { DEFAULT_RENDER_PACING, RenderPacingContext } from '../../context/renderPacingContext.js';
 import { useVirtualScroll } from '../../hooks/useVirtualScroll.js';
 import { useOptionalAppState } from '../../state/AppState.js';
-import { isEarlyKeyGuardEnabled } from '../../utils/inkRoot.js';
+import { isEarlyKeyGuardEnabled, isNewRendererEnabled } from '../../utils/inkRoot.js';
 
 describe('UI 2.1.328 1:1 alignment fixes', () => {
   const prevDisableGuard = process.env.CLAUDE_CODE_DISABLE_EARLY_KEY_GUARD;
@@ -463,5 +480,266 @@ describe('UI 2.1.328 1:1 alignment fixes', () => {
     expect(rangeSeen[0]).toBeLessThan(20);
     instance.unmount();
     expect(viewport.handle).toBeNull();
+  });
+
+  test('ScrollPin (Zse) tracks unseenDivider, repin rules, and dialog anchor restoration', () => {
+    const scrollEvents: Array<{ kind: string; y?: number }> = [];
+    let sticky = true;
+    const handle = {
+      isSticky: () => sticky,
+      getScrollTop: () => 20,
+      getPendingDelta: () => 0,
+      getScrollHeight: () => 100,
+      getViewportHeight: () => 20,
+      scrollToBottom: () => {
+        sticky = true;
+        scrollEvents.push({ kind: 'bottom' });
+      },
+      scrollTo: (y: number) => {
+        sticky = false;
+        scrollEvents.push({ kind: 'to', y });
+      },
+      subscribe: () => () => {},
+    } as unknown as ScrollBoxHandle;
+
+    const pin = new ScrollPin({
+      computeDivider: (msgs, idx) => computeUnseenDivider(msgs as never, idx),
+    });
+    const detach = pin.viewport.attach(handle);
+    const msg1 = {
+      type: 'assistant',
+      uuid: '00000000-0000-4000-8000-000000000001',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'first' }] },
+    };
+    const msg2 = {
+      type: 'assistant',
+      uuid: '00000000-0000-4000-8000-000000000002',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'second' }] },
+    };
+    pin.syncMessages([msg1 as never]);
+
+    // Scroll away captures dividerY and baseline index
+    sticky = false;
+    pin.onUserScroll(false, handle);
+    expect(pin.dividerY).toBe(100);
+
+    // New assistant message increments unseenDivider
+    pin.syncMessages([msg1 as never, msg2 as never]);
+    expect(pin.getSnapshot().unseenDivider?.count).toBe(1);
+
+    // Typing while scrolled away does NOT yank
+    pin.onPromptEdit('a', '');
+    expect(scrollEvents.length).toBe(0);
+
+    // Dialog show + leave restores prior scroll position
+    expect(pin.showDialog({ row: 40, rows: 10 }, true)).toBe(true);
+    expect(scrollEvents.at(-1)).toEqual({ kind: 'to', y: 30 });
+    pin.onDialogLeft();
+    expect(scrollEvents.at(-1)).toEqual({ kind: 'to', y: 20 });
+
+    // jumpToNew repins to bottom
+    pin.jumpToNew();
+    expect(scrollEvents.at(-1)).toEqual({ kind: 'bottom' });
+    detach();
+  });
+
+  test('Ink newRenderer=true wires LayoutController, OverlayController, and renderToBytes (inline + fullscreen)', async () => {
+    const written: string[] = [];
+    const stdout = Object.assign(new PassThrough(), {
+      columns: 40,
+      rows: 10,
+      isTTY: true,
+    }) as unknown as NodeJS.WriteStream;
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString('utf8')));
+    const stdin = Object.assign(new PassThrough(), {
+      isTTY: true,
+      setRawMode() {
+        return stdin;
+      },
+      ref() {
+        return stdin;
+      },
+      unref() {
+        return stdin;
+      },
+    }) as unknown as NodeJS.ReadStream;
+
+    const ink = new Ink({
+      stdout,
+      stdin,
+      stderr: new PassThrough() as unknown as NodeJS.WriteStream,
+      exitOnCtrlC: false,
+      patchConsole: false,
+      newRenderer: true,
+    });
+    expect(ink.renderers).toBeDefined();
+    expect(ink.layout).toBeInstanceOf(LayoutController);
+    expect(ink.overlays).toBeInstanceOf(OverlayController);
+
+    // Main-screen inline/covering byte render
+    ink.render(
+      <Box flexDirection="column">
+        <Text>NEW_RENDERER_LINE_1</Text>
+        <Text>NEW_RENDERER_LINE_2</Text>
+      </Box>,
+    );
+    await new Promise(r => setTimeout(r, 40));
+    ink.onRender();
+    expect(written.join('')).toContain('NEW_RENDERER_LINE_1');
+
+    // Alt-screen fullscreen byte render
+    written.length = 0;
+    ink.setAltScreenActive(true, 'full');
+    ink.render(
+      <Box flexDirection="column" height={10} width={40}>
+        <Text>FULLSCREEN_BYTE_OK</Text>
+      </Box>,
+    );
+    await new Promise(r => setTimeout(r, 40));
+    ink.onRender();
+    expect(written.join('')).toContain('FULLSCREEN_BYTE_OK');
+    ink.unmount();
+  });
+
+  test('Output.writeDirected right-aligns rtl lines within maxWidth', () => {
+    const stylePool = new StylePool();
+    const screen = {
+      width: 10,
+      height: 2,
+      stylePool,
+      charPool: new CharPool(),
+      hyperlinkPool: new HyperlinkPool(),
+    };
+    const out = new Output({
+      width: 10,
+      height: 2,
+      stylePool,
+      screen: emptyFrame(2, 10, stylePool, screen.charPool, screen.hyperlinkPool).screen,
+    });
+    out.writeDirected(0, 0, 'abc', undefined, 'rtl', 10);
+    const sc = out.get();
+    let line = '';
+    for (let x = 0; x < 10; x++) line += cellAt(sc, x, 0)?.char ?? ' ';
+    expect(line).toBe('       abc');
+  });
+
+  test('isNewRendererEnabled honors CLAUDE_CODE_NEW_RENDERER env override', () => {
+    expect(isNewRendererEnabled({ CLAUDE_CODE_NEW_RENDERER: '1' })).toBe(true);
+    expect(isNewRendererEnabled({ CLAUDE_CODE_NEW_RENDERER: '0' })).toBe(false);
+    expect(isNewRendererEnabled({ CLAUDE_CODE_NEW_RENDERER: 'false' })).toBe(false);
+  });
+
+  test('TranscriptStore drives ScrollPin directly without manual syncMessages and Ink delegates to controllers', () => {
+    const store = new TranscriptStore();
+    const pin = new ScrollPin({
+      transcript: store,
+      computeDivider: (msgs, idx) => computeUnseenDivider(msgs as never, idx),
+    });
+    const handle = {
+      isSticky: () => false,
+      getScrollTop: () => 0,
+      getPendingDelta: () => 0,
+      getScrollHeight: () => 80,
+      getViewportHeight: () => 20,
+      scrollToBottom: () => {},
+      scrollTo: () => {},
+      subscribe: () => () => {},
+    } as unknown as ScrollBoxHandle;
+    const detach = pin.viewport.attach(handle);
+    const m1 = {
+      type: 'assistant',
+      uuid: '00000000-0000-4000-8000-000000000011',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+    };
+    const m2 = {
+      type: 'assistant',
+      uuid: '00000000-0000-4000-8000-000000000012',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'b' }] },
+    };
+    store.setMessages([m1 as never]);
+    pin.onUserScroll(false, handle);
+    store.setMessages([m1 as never, m2 as never]);
+    expect(pin.getSnapshot().unseenDivider?.count).toBe(1);
+    pin.dispose();
+    detach();
+
+    const stdout = Object.assign(new PassThrough(), {
+      columns: 40,
+      rows: 10,
+      isTTY: true,
+    }) as unknown as NodeJS.WriteStream;
+    const stdin = Object.assign(new PassThrough(), {
+      isTTY: true,
+      setRawMode() {
+        return stdin;
+      },
+      ref() {
+        return stdin;
+      },
+      unref() {
+        return stdin;
+      },
+    }) as unknown as NodeJS.ReadStream;
+    const ink = new Ink({
+      stdout,
+      stdin,
+      stderr: new PassThrough() as unknown as NodeJS.WriteStream,
+      exitOnCtrlC: false,
+      patchConsole: false,
+      newRenderer: true,
+    });
+    expect(ink.pointer).toBeInstanceOf(PointerController);
+    expect(ink.scheduler).toBeInstanceOf(FrameScheduler);
+    expect(ink.selection).toBe(ink.overlays.selection);
+    ink.setSearchHighlight('needle');
+    expect(ink.overlays.searchHighlightQuery).toBe('needle');
+    ink.fallbackToOldRenderer('test_fault');
+    expect(ink.renderers).toBeUndefined();
+    ink.unmount();
+  });
+
+  test('QueuedMessageProvider (CTo) renders flush at column 0 without paddingX={2} wrapper', async () => {
+    let seenCtx: ReturnType<typeof useQueuedMessage>;
+    function Probe(): React.ReactNode {
+      seenCtx = useQueuedMessage();
+      return <Text>● Agent finished</Text>;
+    }
+    const stdout = Object.assign(new PassThrough(), {
+      columns: 40,
+      rows: 5,
+      isTTY: true,
+    }) as unknown as NodeJS.WriteStream;
+    const stdin = Object.assign(new PassThrough(), {
+      isTTY: true,
+      setRawMode() {
+        return stdin;
+      },
+      ref() {
+        return stdin;
+      },
+      unref() {
+        return stdin;
+      },
+    }) as unknown as NodeJS.ReadStream;
+
+    const instance = await render(
+      <QueuedMessageProvider selectionHighlight="on" noticeSystemLines={true}>
+        <Probe />
+      </QueuedMessageProvider>,
+      { stdout, stdin, patchConsole: false, exitOnCtrlC: false },
+    );
+    await new Promise(r => setTimeout(r, 40));
+    const ink = instances.get(stdout) as unknown as { frontFrame: { screen: Screen } };
+    let line0 = '';
+    for (let x = 0; x < ink.frontFrame.screen.width; x++) {
+      line0 += cellAt(ink.frontFrame.screen, x, 0)?.char ?? ' ';
+    }
+    expect(line0.trimEnd()).toBe('● Agent finished');
+    expect(seenCtx).toEqual({
+      isQueued: true,
+      selectionHighlight: 'on',
+      noticeSystemLines: true,
+    });
+    instance.unmount();
   });
 });

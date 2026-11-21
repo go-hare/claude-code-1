@@ -56,9 +56,19 @@ import {
   nodeHasWheelHandler,
 } from './hit-test.js';
 import instances, { Ns } from './instances.js';
+import { FrameScheduler } from './frame-scheduler.js';
+import { LayoutController } from './layout-controller.js';
 import { LogUpdate } from './log-update.js';
+import {
+  createNewRenderers,
+  frameToRenderTarget,
+  getTerminalRenderCapabilities,
+  type NewRendererBundle,
+} from './new-renderer.js';
 import { optimize } from './optimizer.js';
 import Output from './output.js';
+import { OverlayController } from './overlay-controller.js';
+import { PointerController } from './pointer-controller.js';
 import type { ParsedKey } from './parse-keypress.js';
 import reconciler, {
   dispatcher,
@@ -73,7 +83,6 @@ import renderNodeToOutput, {
   leftoverGsDropCachedLayout,
   leftoverGsFollowCapture,
   leftoverGsOverlayActive,
-  runWithRenderFrameContext,
 } from './render-node-to-output.js';
 import { applyPositionedHighlight, type MatchPosition, scanPositions } from './render-to-screen.js';
 import createRenderer, { type Renderer } from './renderer.js';
@@ -372,6 +381,8 @@ export type Options = {
   pressClock?: () => number;
   /** Official 2.1.328 (`timesPresses`) — enables early-key InputGate dropping when true. */
   timesPresses?: () => boolean;
+  /** Official 2.1.328 (`newRenderer`) — enables the covering/inline/fullscreen byte renderer + IncrementalPainter. */
+  newRenderer?: boolean;
 };
 
 /** No-op logger used when no logger is injected. */
@@ -382,6 +393,16 @@ const noopLogger: Logger = {
 
 export default class Ink {
   private readonly log: LogUpdate;
+  /** Official 2.1.328 `this.renderers` — covering/inline/fullscreen byte renderers when `newRenderer` is enabled. */
+  renderers: NewRendererBundle | undefined;
+  /** Official 2.1.328 `this.layout` (`Cs`) — Yoga layout & `subscribeLayout` controller. */
+  readonly layout: LayoutController;
+  /** Official 2.1.328 `this.overlays` (`Fm`) — selection / search / hoveredLink overlay controller. */
+  readonly overlays: OverlayController;
+  /** Official 2.1.328 `this.pointer` — hover / click / pointerCapture controller. */
+  readonly pointer: PointerController = new PointerController();
+  /** Official 2.1.328 `this.scheduler` (`xm`) — paced frame & backpressure scheduler. */
+  readonly scheduler: FrameScheduler;
   private readonly terminal: Terminal;
   private scheduleRender: (() => void) & { cancel?: () => void };
   // Ignore last render after unmounting a tree to prevent empty output before exit
@@ -407,18 +428,6 @@ export default class Ink {
   get isHandedOff(): boolean {
     return this.isPaused || this.modes.isSuspended || (this.ownTree !== undefined && Ns().has(this.options.stdout));
   }
-  // densable scheduleFrame pacer — Vh / SSo / lastPacedFrameAt / frameTimer.
-  private frameMicrotaskQueued = false;
-  /** Bumps on each onRender so a queued paced microtask from an earlier
-   *  scheduleFrame is a no-op once this paint already ran (frameSink tests
-   *  call onRender() synchronously after render()). */
-  private pacedFrameEpoch = 0;
-  private lastPacedFrameAt = Number.NEGATIVE_INFINITY;
-  private frameTimer: ReturnType<typeof setTimeout> | null = null;
-  private frameTimerDueAt = 0;
-  private inputPriorityUntil = 0;
-  /** densable `frameHeldForBacklog` — true while queuePacedFrame waits on bSo. */
-  private frameHeldForBacklog = false;
   private pacerNow = (): number => performance.now();
   /**
    * densable renderCalled — set true on first render(). unmount only writes
@@ -463,7 +472,6 @@ export default class Ink {
    * the throttle (densable 2.1.217).
    */
   private lastAtlasResetAt = 0;
-  private drainTimer: ReturnType<typeof setTimeout> | null = null;
   private lastYogaCounters: {
     ms: number;
     visited: number;
@@ -536,81 +544,14 @@ export default class Ink {
    */
   private prevScreenReaderParkDeclared = false;
   private altScreenParkPatch: Readonly<{ type: 'stdout'; content: string }>;
-  // Text selection state (alt-screen only). Owned here so the overlay
-  // pass in onRender can read it and App.tsx can update it from mouse
-  // events. Public so instances.get() callers can access.
-  readonly selection: SelectionState = createSelectionState();
-  // Search highlight query (alt-screen only). Setter below triggers
-  // scheduleRender; applySearchHighlight in onRender inverts matching cells.
-  private searchHighlightQuery = '';
-  // Position-based highlight. VML scans positions ONCE (via
-  // scanElementSubtree, when the target message is mounted), stores them
-  // message-relative, sets this for every-frame apply. rowOffset =
-  // message's current screen-top. currentIdx = which position is
-  // "current" (yellow). null clears. Positions are known upfront —
-  // navigation is index arithmetic, no scan-feedback loop.
-  private searchPositions: {
-    positions: MatchPosition[];
-    rowOffset: number;
-    currentIdx: number;
-  } | null = null;
-  // React-land subscribers for selection state changes (useHasSelection).
-  // Fired alongside the terminal repaint whenever the selection mutates
-  // so UI (e.g. footer hints) can react to selection appearing/clearing.
-  private readonly selectionListeners = new Set<() => void>();
-  /**
-   * densable `selectionTakeDown` bus — announce BEFORE Il/clearSelection.
-   * Gold `notifySelectionTakeDown`: altScreenActive && hasSelection then announce.
-   */
-  private readonly selectionTakeDown = {
-    listeners: new Set<() => void>(),
-    subscribe(n: () => void): () => void {
-      this.listeners.add(n);
-      return () => {
-        this.listeners.delete(n);
-      };
-    },
-    announce(): void {
-      for (const n of this.listeners) n();
-    },
-  };
-  /**
-   * densable `clickListeners` / `subscribeClicks` — ITt click-away bus.
-   * Notified on every alt-screen click *before* onClick bubble.
-   */
-  private readonly clickListeners = new Set<
-    (node: dom.DOMElement | null | undefined, event: ClickEvent | null) => void
-  >();
-  /**
-   * densable `subscribeClicks=(n)=>(this.clickListeners.add(n),()=>{...})`.
-   * Arrow so AppContext / ITt can pass it as a stable Twe field.
-   */
+  /** Single source of truth: delegates directly to `this.overlays.selection`. */
+  get selection(): SelectionState {
+    return this.overlays.selection;
+  }
   subscribeClicks = (
     listener: (node: dom.DOMElement | null | undefined, event: ClickEvent | null) => void,
-  ): (() => void) => {
-    this.clickListeners.add(listener);
-    return () => {
-      this.clickListeners.delete(listener);
-    };
-  };
-  /**
-   * densable `layoutListeners` / `subscribeLayout` — yoga-pass bus for `$l`.
-   * Notified after `runLayoutPass` in `onComputeLayout`.
-   */
-  private readonly layoutListeners = new Set<() => void>();
-  private layoutListenersPaused = false;
-  private reportedLayoutListenerFault = false;
-  private layoutListenerFaultDebugLines = 0;
-  /**
-   * densable `subscribeLayout=(n)=>(this.layoutListeners.add(n),()=>{...})`.
-   * Arrow so AppContext / `$l` can pass it as a stable Twe field.
-   */
-  subscribeLayout = (listener: () => void): (() => void) => {
-    this.layoutListeners.add(listener);
-    return () => {
-      this.layoutListeners.delete(listener);
-    };
-  };
+  ): (() => void) => this.pointer.subscribeClicks(listener);
+  subscribeLayout = (listener: () => void): (() => void) => this.layout.subscribeLayout(listener);
   /**
    * densable `hoverTrackedListeners` / `subscribeHoverTracked`.
    * Notified on `setAltScreenActive` via `queueMicrotask`.
@@ -700,39 +641,9 @@ export default class Ink {
    * on a microtask so ITt click-away can drop pane focus.
    */
   private tellClickedNowhere(): void {
-    const listeners = [...this.clickListeners];
-    queueMicrotask(() => {
-      for (const listener of listeners) {
-        if (this.clickListeners.has(listener)) listener(null, null);
-      }
-    });
+    this.pointer.tellClickedNowhere();
   }
-  // DOM nodes currently under the pointer (mode-1003 motion). Held here
-  // so App.tsx's handleMouseEvent is stateless — dispatchHover diffs
-  // against this set and mutates it in place.
-  private readonly hoveredNodes = new Set<dom.DOMElement>();
-  private hoverCol = -1;
-  private hoverRow = -1;
-  private hoverFollowStreak = 0;
-  private hoverFollowHeldUntil = 0;
-  /**
-   * densable `pointerCapture` — Xd node + button while a DualInk pointer
-   * press is held. Drag/release Wl the captured node, not a fresh hit.
-   */
-  private pointerCapture: {
-    node: dom.DOMElement;
-    button: number;
-    col: number;
-    row: number;
-  } | null = null;
   private readonly appRef = React.createRef<App>();
-  /**
-   * densable `frameSink` — installed by AxcStickyHost (`xxc`). When truthy
-   * (`true` | `"tick"`), onRender swaps frames and skips cell-diff write;
-   * `"tick"` re-arms drainTimer so Axc.tickPump drains. Falsy / absent →
-   * normal paint. Alt-screen suspend is inside the sink (returns false).
-   */
-  frameSink: ((frame: Frame, stylePool: StylePool) => 'tick' | true | false) | null = null;
   // Set by <AlternateScreen> via setAltScreenActive(). Controls the
   // renderer's cursor.y clamping (keeps cursor in-viewport to avoid
   // LF-induced scroll when screen.height === terminalRows) and gates
@@ -749,20 +660,12 @@ export default class Ink {
   // the blit + narrow-damage fast path.
   private prevFrameContaminated = false;
   /**
-   * densable `prevOverlaySig` — selection/search overlay fingerprint.
-   * Contaminates prevScreen when it changes so Kt does not DECSTBM-blit
-   * inverted cells.
-   */
-  private prevOverlaySig = '';
-  /**
    * densable `keptForNextFrame` / `leftAltScreenSinceFrame` — DEC sequences
    * coalesced into the next paint so AlternateScreen 1049h is not a separate
    * write from the first frame.
    */
   private keptForNextFrame = '';
   private leftAltScreenSinceFrame = false;
-  private hoveredLink: string | undefined = undefined;
-  private hoveredLinkSpans: LinkSpan[] = [];
   // Set by handleResize: prepend ERASE_SCREEN to the next onRender's patches
   // INSIDE the BSU/ESU block so clear+paint is atomic. Writing ERASE_SCREEN
   // synchronously in handleResize would leave the screen blank for the ~80ms
@@ -904,11 +807,18 @@ export default class Ink {
       isTTY: (options.stdout.isTTY as boolean | undefined) || false,
       stylePool: this.stylePool,
     });
+    this.renderers =
+      options.newRenderer && !this.isScreenReaderEnabled ? createNewRenderers(this.stylePool) : undefined;
 
+    this.scheduler = new FrameScheduler(
+      () => this.onRender(),
+      () => this.nonBlockingStdout?.queuedBytes() ?? 0,
+      () => this.pacerNow(),
+    );
     // densable: scheduleRender=Object.assign(()=>this.scheduleFrame(),{cancel:()=>this.cancelScheduledFrame()})
     // Test env uses onImmediateRender (direct onRender) so lastFrame() tests stay sync.
-    this.scheduleRender = Object.assign(() => this.scheduleFrame(), {
-      cancel: () => this.cancelScheduledFrame(),
+    this.scheduleRender = Object.assign(() => this.scheduler.scheduleFrame(), {
+      cancel: () => this.scheduler.cancelScheduledFrame(),
     });
 
     // Ignore last render after unmounting a tree to prevent empty output before exit
@@ -917,12 +827,24 @@ export default class Ink {
     // Unmount when process exits
     this.unsubscribeExit = onExit(this.unmount, { alwaysLast: false });
 
-    // densable: TTY handlers are attached lazily via ensureInteractive()
-    // (onRawModeEnter / setAltScreenActive / subsequent onRender), not in
-    // the constructor — keeps non-interactive short paths free of listeners.
-
     // densable: this.rootNode=_r("ink-root",hs.Config.create())
-    this.rootNode = dom.createNode('ink-root', Yoga.Config.create());
+    const yogaConfig = Yoga.Config.create();
+    this.rootNode = dom.createNode('ink-root', yogaConfig);
+    this.layout = new LayoutController(this.rootNode, yogaConfig, {
+      width: () => (this.options.stdout.isTTY || this.options.stdout.columns ? this.terminalColumns : undefined),
+      onFailed: () => {
+        if (!this.isScreenReaderEnabled) this.prevFrameContaminated = true;
+      },
+      invalidatePrevFrame: () => {
+        this.prevFrameContaminated = true;
+      },
+      onFaultMessage: msg => this.logger.debug(msg, { level: 'warn' }),
+    });
+    this.overlays = new OverlayController(this.rootNode, this.stylePool, {
+      screen: () => this.frontFrame.screen,
+      isAltScreenActive: () => this.altScreenActive,
+      scheduleRender: () => this.scheduleRender(),
+    });
     this.focusManager = new FocusManager((target, event) => dispatcher.dispatchDiscrete(target, event));
     this.rootNode.focusManager = this.focusManager;
     this.rootNode.nextFrame = { writtenAt: Number.POSITIVE_INFINITY };
@@ -1385,7 +1307,7 @@ export default class Ink {
    * announcements so the next paint is not stuck behind the timer.
    */
   requestInputPriorityFrame = (): void => {
-    this.inputPriorityUntil = this.pacerNow() + 50;
+    this.scheduler.prioritizeInput(this.pacerNow() + 50);
     let dirty = false;
     if (this.srAnnouncementHoldTimer !== null) {
       endScreenReaderHold();
@@ -1403,63 +1325,13 @@ export default class Ink {
    * microtask onRender; else a timeout to lastPacedFrameAt+interval.
    */
   private scheduleFrame(): void {
-    if (this.frameMicrotaskQueued) return;
-    const now = this.pacerNow();
-    const elapsed = now - this.lastPacedFrameAt;
-    const interval = now < this.inputPriorityUntil ? INPUT_PRIORITY_FRAME_MS : FRAME_INTERVAL_MS;
-    if (elapsed >= interval) {
-      this.queuePacedFrame();
-      return;
-    }
-    const due = this.lastPacedFrameAt + interval;
-    if (this.frameTimer === null || due < this.frameTimerDueAt) {
-      this.cancelScheduledFrame();
-      this.frameTimerDueAt = due;
-      this.frameTimer = setTimeout(
-        () => {
-          this.frameTimer = null;
-          this.queuePacedFrame();
-        },
-        Math.max(0, due - now),
-      );
-    }
-  }
-
-  /** densable queuePacedFrame — hold the frame while stdout backlog > bSo. */
-  private queuePacedFrame(): void {
-    this.cancelScheduledFrame();
-    if (this.nonBlockingStdout !== null && this.nonBlockingStdout.queuedBytes() > STDOUT_BACKLOG_BYTES) {
-      this.frameHeldForBacklog = true;
-      this.frameTimerDueAt = this.pacerNow() + STDOUT_BACKLOG_RETRY_MS;
-      this.frameTimer = setTimeout(() => {
-        this.frameTimer = null;
-        this.queuePacedFrame();
-      }, STDOUT_BACKLOG_RETRY_MS);
-      return;
-    }
-    this.frameHeldForBacklog = false;
-    this.frameMicrotaskQueued = true;
-    this.inputPriorityUntil = 0;
-    this.lastPacedFrameAt = this.pacerNow();
-    const epoch = this.pacedFrameEpoch;
-    queueMicrotask(() => {
-      this.frameMicrotaskQueued = false;
-      if (epoch !== this.pacedFrameEpoch) return;
-      this.onRender();
-    });
+    this.scheduler.scheduleFrame();
   }
 
   private cancelScheduledFrame(): void {
-    if (this.frameTimer !== null) {
-      clearTimeout(this.frameTimer);
-      this.frameTimer = null;
-    }
+    this.scheduler.cancelScheduledFrame();
   }
 
-  /**
-   * densable `handleStdoutBackpressure` — mbo episode end. Drain unblocks a
-   * held paced frame; dropped bytes force redraw / repaint.
-   */
   private handleStdoutBackpressure = (episode: StdoutBackpressureEpisode): void => {
     if (episode.droppedBytes > 0) {
       const probe = episode.endedBy === 'drain';
@@ -1473,9 +1345,8 @@ export default class Ink {
         }
       }
     }
-    if (this.frameHeldForBacklog && episode.endedBy === 'drain') {
-      this.frameHeldForBacklog = false;
-      this.scheduleFrame();
+    if (episode.endedBy === 'drain') {
+      this.scheduler.resumeFromBacklog();
     }
     if (episode.droppedBytes > 0 || episode.durationMs >= 1000) {
       this.logger.debug(
@@ -1489,55 +1360,8 @@ export default class Ink {
     return this.nativeCursorVisible ? SHOW_CURSOR : HIDE_CURSOR;
   }
 
-  /**
-   * densable notifyLayoutListeners — after yoga pass; one throw pauses until
-   * this flush unwinds (`queueMicrotask` unpause).
-   */
   private notifyLayoutListeners(): void {
-    if (this.layoutListenersPaused) return;
-    for (const listener of this.layoutListeners) {
-      try {
-        listener();
-      } catch (err) {
-        this.pauseLayoutListeners();
-        this.reportLayoutListenerFault(Ink.describeLayoutFault(err));
-        return;
-      }
-    }
-  }
-
-  private pauseLayoutListeners(): void {
-    this.layoutListenersPaused = true;
-    queueMicrotask(() => {
-      this.layoutListenersPaused = false;
-    });
-  }
-
-  private reportLayoutListenerFault(fault: Error): void {
-    try {
-      this.reportLayoutFaultErrorOnce(fault);
-      if (!this.reportedLayoutListenerFault) {
-        this.reportedLayoutListenerFault = true;
-        this.reportLayoutListenersPaused();
-      }
-      this.logLayoutListenerFaultForDebugging(fault);
-    } catch {
-      // never throw from reporting
-    }
-  }
-
-  private reportLayoutListenersPaused(): void {
-    this.logger.error(new Error('ink layout listener threw; layout listeners paused until this flush unwinds'));
-  }
-
-  private logLayoutListenerFaultForDebugging(fault: Error): void {
-    try {
-      if (this.layoutListenerFaultDebugLines >= 5) return;
-      this.layoutListenerFaultDebugLines++;
-      this.logger.debug(`ink layout listener threw (${fault.name}: ${fault.message})`, { level: 'error' });
-    } catch {
-      // ignore
-    }
+    this.layout.notifyLayoutListeners();
   }
 
   /** densable Fwd=5 debug log cap */
@@ -1648,17 +1472,9 @@ export default class Ink {
       this.ensureInteractive();
     }
     this.hasRendered = true;
-    this.pacedFrameEpoch++;
-    this.frameMicrotaskQueued = false;
-    // Entering a render cancels any pending drain tick AND the Vh pacer —
-    // this render will handle the drain (and re-schedule below if needed).
-    // Prevents a wheel-event-triggered render AND a drain-timer / 16ms
-    // frameTimer both firing.
-    if (this.drainTimer !== null) {
-      clearTimeout(this.drainTimer);
-      this.drainTimer = null;
-    }
-    this.cancelScheduledFrame();
+    this.scheduler.invalidatePendingMicrotask();
+    this.scheduler.cancelDrainFrame();
+    this.scheduler.cancelScheduledFrame();
 
     // densable: if(this.rootNode.layoutStale){ clear; stale winsize → handleResize
     // else onComputeLayout + flushSyncWork }. Re-layout after Ab subscribe.
@@ -1702,18 +1518,8 @@ export default class Ink {
     //   x=`${m?.row},${m?.col},${y?.row},${y?.col}|${query}|${g?.currentIdx},...`
     //   R=prevFrameContaminated||x!==prevOverlaySig
     //   M=m!==null&&y!==null&&!sqe||!!query||!!g
-    const { anchor: leftoverGsAnchor, focus: leftoverGsFocus } = this.selection;
-    const leftoverGsPos = this.searchPositions;
-    const leftoverGsOverlaySig = `${leftoverGsAnchor?.row},${leftoverGsAnchor?.col},${leftoverGsFocus?.row},${leftoverGsFocus?.col}|${this.searchHighlightQuery}|${leftoverGsPos?.currentIdx},${leftoverGsPos?.rowOffset},${leftoverGsPos?.positions.length}`;
-    const leftoverGsContaminated = this.prevFrameContaminated || leftoverGsOverlaySig !== this.prevOverlaySig;
-    this.prevOverlaySig = leftoverGsOverlaySig;
-    const leftoverGsOverlay = leftoverGsOverlayActive({
-      anchor: leftoverGsAnchor,
-      focus: leftoverGsFocus,
-      selectionBothEndsOff: leftoverGsSelectionBothEndsOff(this.selection),
-      searchHighlightQuery: this.searchHighlightQuery,
-      searchPositions: leftoverGsPos,
-    });
+    const leftoverGsContaminated = this.prevFrameContaminated || this.overlays.changedSinceLastFrame();
+    const leftoverGsOverlay = this.overlays.isActive();
 
     // densable: after overlay sig, before renderer — consume kitty dirty flag.
     // biome-ignore lint/complexity/noCommaOperator: gold imagesStale consume is comma-operator
@@ -1721,6 +1527,7 @@ export default class Ink {
 
     // 2.1.326 #48: degrade gracefully on memory allocation failure (RangeError)
     // during screen allocation or rendering instead of crashing the session.
+    const activeRenderers = this.options.stdout.isTTY ? this.renderers : undefined;
     const frame = (() => {
       try {
         const frame = this.renderer({
@@ -1732,6 +1539,15 @@ export default class Ink {
           altScreen: this.altScreenActive,
           prevFrameContaminated: leftoverGsContaminated,
           overlayActive: leftoverGsOverlay,
+          firstRow: activeRenderers
+            ? contentHeight =>
+                this.altScreenActive
+                  ? 0
+                  : activeRenderers.covering.firstRow(this.frontFrame, contentHeight, {
+                      width: terminalWidth,
+                      height: terminalRows,
+                    })
+            : undefined,
         });
         return frame;
       } catch (err) {
@@ -1745,37 +1561,6 @@ export default class Ink {
     if (frame === undefined) return;
     const rendererMs = performance.now() - renderStart;
 
-    // densable Z2t.onRender frameSink (xxc / AxcStickyHost). Gold:
-    //   if(W){ swap; if(W==="tick") drainTimer; onFrame; return }
-    // Truthy → swap frames, skip cell-diff; only `"tick"` re-arms drainTimer.
-    // `frame.scrollDrainPending` is NOT a gold field — cell-diff path below
-    // still honours it. Do not OR it into the sink arm (that invents gold).
-    if (this.frameSink) {
-      // densable: main-screen kitty drain before frameSink; alt skips.
-      const pendingImages = this.altScreenActive ? '' : this.terminalImages.drain();
-      if (pendingImages !== '') this.writeContent(pendingImages);
-      const sinkResult = this.frameSink(frame, this.stylePool);
-      if (sinkResult) {
-        this.leftAltScreenSinceFrame = false;
-        this.backFrame = this.frontFrame;
-        this.frontFrame = frame;
-        this.prevFrameContaminated = false;
-        this.mainScreenBehindAlt = undefined;
-        this.repaintAfterStaleAbsolutePaint(frame);
-        this.maybeResetPools(renderStart);
-        if (sinkResult === 'tick') {
-          this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
-        }
-        this.tellFrameListeners();
-        this.options.onFrame?.({
-          durationMs: performance.now() - renderStart,
-          flickers: [],
-        });
-        this.unwritten = undefined;
-        return;
-      }
-    }
-
     // Sticky/auto-follow scrolled the ScrollBox this frame. Translate the
     // selection by the same delta so the highlight stays anchored to the
     // TEXT (native terminal behavior — the selection walks up the screen
@@ -1787,146 +1572,13 @@ export default class Ink {
     // (screen-local) so only anchor shifts — selection grows toward the
     // mouse as the anchor walks up. After release, both ends are text-
     // anchored and move as a block.
-    const follow = frame.followScroll ?? null;
-    if (
-      follow &&
-      this.selection.anchor &&
-      // Only translate if the selection is ON scrollbox content. Selections
-      // in the footer/prompt/StickyPromptHeader are on static text — the
-      // scroll doesn't move what's under them. Without this guard, a
-      // footer selection would be shifted by -delta then clamped to
-      // viewportBottom, teleporting it into the scrollbox. Mirror the
-      // bounds check the deleted check() in ScrollKeybindingHandler had.
-      this.selection.anchor.row >= follow.viewportTop &&
-      this.selection.anchor.row <= follow.viewportBottom &&
-      (this.selection.virtualAnchorCol ?? this.selection.anchor.col) >= follow.viewportLeft &&
-      (this.selection.virtualAnchorCol ?? this.selection.anchor.col) <= follow.viewportRight
-    ) {
-      const { delta, viewportTop, viewportBottom, viewportLeft, viewportRight } = follow;
-      const leftoverGsCap = leftoverGsFollowCapture(delta, viewportTop, viewportBottom);
-      // captureScrolledRows and shift* are a pair: capture grabs rows about
-      // to scroll off, shift moves the selection endpoint so the same rows
-      // won't intersect again next frame. Capturing without shifting leaves
-      // the endpoint in place, so the SAME viewport rows re-intersect every
-      // frame and scrolledOffAbove grows without bound — getSelectedText
-      // then returns ever-growing text on each re-copy. Keep capture inside
-      // each shift branch so the pairing can't be broken by a new guard.
-      if (this.selection.isDragging) {
-        if (hasSelection(this.selection)) {
-          captureScrolledRows(
-            this.selection,
-            this.frontFrame.screen,
-            leftoverGsCap.firstRow,
-            leftoverGsCap.lastRow,
-            leftoverGsCap.side,
-          );
-        }
-        shiftAnchor(this.selection, -delta, viewportTop, viewportBottom);
-      } else if (
-        // Flag-3 guard: the anchor check above only proves ONE endpoint is
-        // on scrollbox content. A drag from row 3 (scrollbox) into the
-        // footer at row 6, then release, leaves focus outside the viewport
-        // — shiftSelectionForFollow would clamp it to viewportBottom,
-        // teleporting the highlight from static footer into the scrollbox.
-        // Symmetric check: require BOTH ends inside to translate. A
-        // straddling selection falls through to NEITHER shift NOR capture:
-        // the footer endpoint pins the selection, text scrolls away under
-        // the highlight, and getSelectedText reads the CURRENT screen
-        // contents — no accumulation. Dragging branch doesn't need this:
-        // shiftAnchor ignores focus, and the anchor DOES shift (so capture
-        // is correct there even when focus is in the footer).
-        !this.selection.focus ||
-        (this.selection.focus.row >= viewportTop &&
-          this.selection.focus.row <= viewportBottom &&
-          (this.selection.virtualFocusCol ?? this.selection.focus.col) >= viewportLeft &&
-          (this.selection.virtualFocusCol ?? this.selection.focus.col) <= viewportRight)
-      ) {
-        if (hasSelection(this.selection)) {
-          captureScrolledRows(
-            this.selection,
-            this.frontFrame.screen,
-            leftoverGsCap.firstRow,
-            leftoverGsCap.lastRow,
-            leftoverGsCap.side,
-          );
-        }
-        shiftSelection(this.selection, -delta, viewportTop, viewportBottom, this.frontFrame.screen.width);
-      }
-    }
-
-    // Selection overlay: invert cell styles in the screen buffer itself,
-    // so the diff picks up selection as ordinary cell changes and
-    // LogUpdate remains a pure diff engine.
-    //
-    // Full-screen damage (PR #20120) is a correctness backstop for the
-    // sibling-resize bleed: when flexbox siblings resize between frames
-    // (spinner appears → bottom grows → scrollbox shrinks), the
-    // cached-clear + clip-and-cull + setCellAt damage union can miss
-    // transition cells at the boundary. But that only happens when layout
-    // actually SHIFTS — didLayoutShift() tracks exactly this (any node's
-    // cached yoga position/size differs from current, or a child was
-    // removed). Steady-state frames (spinner rotate, clock tick, text
-    // stream into fixed-height box) don't shift layout, so normal damage
-    // bounds are correct and diffEach only compares the damaged region.
-    //
-    // Selection also requires full damage: overlay writes via setCellStyleId
-    // which doesn't track damage, and prev-frame overlay cells need to be
-    // compared when selection moves/clears. prevFrameContaminated covers
-    // the frame-after-selection-clears case.
-    let selActive = false;
-    let hlActive = false;
-    let hoveredLinkPainted = false;
-    if (this.altScreenActive) {
-      if (this.hoveredLink !== undefined || this.hoveredLinkSpans.length > 0) {
-        const hadSpans = this.hoveredLinkSpans.length > 0;
-        this.hoveredLinkSpans = underlineHoveredLink(
-          frame.screen,
-          this.hoverCol,
-          this.hoverRow,
-          this.hoveredLink,
-          this.stylePool,
-        );
-        if (this.hoveredLinkSpans.length === 0) {
-          this.hoveredLink = undefined;
-        }
-        hoveredLinkPainted = hadSpans || this.hoveredLinkSpans.length > 0;
-      }
-      selActive = hasSelection(this.selection) && !leftoverGsSelectionBothEndsOff(this.selection);
-      if (selActive) {
-        applySelectionOverlay(frame.screen, this.selection, this.stylePool);
-      }
-      // Scan-highlight: inverse on ALL visible matches (less/vim style).
-      // Position-highlight (below) overlays CURRENT (yellow) on top.
-      hlActive = applySearchHighlight(frame.screen, this.searchHighlightQuery, this.stylePool);
-      // Position-based CURRENT: write yellow at positions[currentIdx] +
-      // rowOffset. No scanning — positions came from a prior scan when
-      // the message first mounted. Message-relative + rowOffset = screen.
-      if (this.searchPositions) {
-        const sp = this.searchPositions;
-        const posApplied = applyPositionedHighlight(
-          frame.screen,
-          this.stylePool,
-          sp.positions,
-          sp.rowOffset,
-          sp.currentIdx,
-        );
-        hlActive = hlActive || posApplied;
-      }
-    }
-
-    // Full-damage backstop: applies on BOTH alt-screen and main-screen.
-    // Layout shifts (spinner appears, status line resizes) can leave stale
-    // cells at sibling boundaries that per-node damage tracking misses.
-    // Selection/highlight overlays write via setCellStyleId which doesn't
-    // track damage. prevFrameContaminated covers the cleanup frame.
-    // densable: T.layoutShifted||F||L||R||this.altScreenFullRepaint&&altScreen
-    // R = leftoverGsContaminated (flag || overlay-sig change), not the raw flag.
+    this.overlays.followScroll(frame.followScroll ?? null);
+    const overlayPainted =
+      this.altScreenActive && this.overlays.paint(frame.screen, this.pointer.hoverCol, this.pointer.hoverRow);
     const frameLayoutShifted = frame.layoutShifted === true;
     if (
       frameLayoutShifted ||
-      selActive ||
-      hlActive ||
-      hoveredLinkPainted ||
+      overlayPainted ||
       leftoverGsContaminated ||
       (this.altScreenFullRepaint && this.altScreenActive)
     ) {
@@ -1985,6 +1637,59 @@ export default class Ink {
     // densable: no height-0 / visually-empty early return here — LogUpdate
     // still receives the frame. (Local empty-skips after external 2J remount
     // left the physical alt buffer black until a later content frame.)
+    if (activeRenderers) {
+      let rendered: ReturnType<Ink['renderToBytes']> | undefined;
+      try {
+        rendered = this.renderToBytes(frame, terminalWidth, terminalRows, activeRenderers);
+      } catch (err) {
+        this.fallbackToOldRenderer(err instanceof Error ? err.message : String(err));
+      }
+      if (rendered !== undefined) {
+        if (rendered.hasDiff) {
+          this.maybeProactiveAtlasReset(rendered.patches);
+        }
+        const pendingImages = this.terminalImages.drain();
+        if (pendingImages !== '') {
+          rendered.patches.unshift({ type: 'stdout', content: pendingImages });
+        }
+        const writeStart = performance.now();
+        this.leftAltScreenSinceFrame = false;
+        if (rendered.patches.length > 0) {
+          const skipSync = this.skipSyncMarkers() || (!rendered.mayTear && pendingImages === '');
+          writeDiffToTerminal(this.terminal, rendered.patches, skipSync, terminalRows, this.takeKeptForNextFrame());
+        }
+        activeRenderers.fullscreen.frameWasWritten();
+        const writeMs = performance.now() - writeStart;
+        this.maybeResetPools(renderStart);
+        this.prevFrameContaminated = false;
+        this.repaintAfterStaleAbsolutePaint(frame);
+        if (frame.scrollDrainPending) {
+          this.scheduler.scheduleExtraFrame();
+        }
+        if (rendered.hasDiff || frameLayoutShifted) this.followHover();
+        this.tellFrameListeners();
+        this.options.onFrame?.({
+          durationMs: performance.now() - renderStart,
+          flickers: rendered.flickers,
+          phases: {
+            renderer: rendererMs,
+            diff: rendered.diffMs,
+            optimize: 0,
+            write: writeMs,
+            patches: rendered.patches.length,
+            yoga: this.lastYogaCounters.ms,
+            commit: this.rootNode.lastCommitMs ?? 0,
+            yogaVisited: this.lastYogaCounters.visited,
+            yogaMeasured: this.lastYogaCounters.measured,
+            yogaCacheHits: this.lastYogaCounters.cacheHits,
+            yogaLive: this.lastYogaCounters.live,
+          },
+        });
+        this.unwritten = undefined;
+        return;
+      }
+    }
+
     const tDiff = performance.now();
     let diff: Diff;
     try {
@@ -2247,7 +1952,7 @@ export default class Ink {
     //
     // Drain frames stay on a short timer; regular frames go through scheduleFrame.
     if (frame.scrollDrainPending) {
-      this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
+      this.scheduler.scheduleExtraFrame();
     }
 
     const yogaMs = getLastYogaMs();
@@ -2685,10 +2390,83 @@ export default class Ink {
     this.displayCursor = null;
     // densable: this.prevFrameContaminated=!0 — emptyFrame is 0×0; next
     // paint must full-render, not blit from the discarded prev screen.
+    this.renderers?.fullscreen.invalidate();
+    this.renderers?.inline.reset();
     this.prevFrameContaminated = true;
     // Official repaint also resets screen-reader diff state
     this.resetScreenReaderDiffState();
     this.imagesStale = true;
+  }
+
+  /**
+   * Official 2.1.328 `Back to the old renderer` — disables `this.renderers`
+   * on unexpected byte-renderer fault and resets `LogUpdate` for a clean recovery.
+   */
+  fallbackToOldRenderer(reason: string): void {
+    this.logger.debug(`Back to the old renderer: ${reason}`, { level: 'warn' });
+    this.renderers = undefined;
+    this.log.reset();
+    this.log.forceFullReset();
+    this.prevFrameContaminated = true;
+  }
+
+  /**
+   * Official 2.1.328 `renderToBytes(frame, width, height, renderers)` — encodes
+   * a rendered frame via `FullscreenRenderer` (alt-screen) or `CoveringRenderer`
+   * (main-screen), swapping `frontFrame` / `backFrame` and updating `displayCursor`.
+   */
+  private renderToBytes(
+    frame: Frame,
+    width: number,
+    height: number,
+    renderers: NewRendererBundle,
+  ): {
+    patches: Diff;
+    hasDiff: boolean;
+    mayTear: boolean;
+    flickers: FrameEvent['flickers'];
+    diffMs: number;
+  } {
+    const start = performance.now();
+    const decl = this.cursorDeclaration;
+    const declRect = decl?.node.cachedLayout;
+    const top = frame.top ?? 0;
+    const declaredPos =
+      decl && declRect ? { x: declRect.x + decl.relativeX, y: declRect.y + decl.relativeY - top } : null;
+    renderers.encoder.isCursorVisible = this.nativeCursorVisible;
+    const target = frameToRenderTarget(
+      frame,
+      { width, height },
+      {
+        ...(declaredPos ?? frame.cursor),
+        visible:
+          this.accessibilityMode ||
+          (declaredPos !== null &&
+            (this.bgWorkerForceShowCursor || (Boolean(this.options.nativeCursor) && Boolean(decl?.visible)))),
+        staysVisible: this.accessibilityMode,
+      },
+    );
+    const caps = getTerminalRenderCapabilities({
+      synchronizedOutput: this.decstbmSafe(),
+      repaintsEveryCell: this.altScreenFullRepaint && this.altScreenActive,
+    });
+    const prevTarget = frameToRenderTarget(this.frontFrame, { width, height });
+    const res = this.altScreenActive
+      ? renderers.fullscreen.render(target, caps)
+      : renderers.covering.render(prevTarget, target, caps);
+    this.nativeCursorVisible = renderers.encoder.isCursorVisible;
+    this.displayCursor = declaredPos ? { ...declaredPos, emittedRows: height } : null;
+    this.backFrame = this.frontFrame;
+    this.frontFrame = frame;
+    return {
+      patches: res.bytes === '' ? [] : [{ type: 'stdout', content: res.bytes }],
+      hasDiff: res.hasChanges,
+      mayTear: res.mayTear,
+      flickers: res.cleared
+        ? [{ desiredHeight: top + frame.screen.height, availableHeight: height, reason: res.cleared }]
+        : [],
+      diffMs: performance.now() - start,
+    };
   }
 
   /**
@@ -2987,7 +2765,7 @@ export default class Ink {
         this.isHandedOff || this.isScreenReaderEnabled || O() === 'windows'
           ? undefined
           : (this.mainScreenBehindAlt ??
-            (this.options.stdout.isTTY && this.frameSink === null && !frameFillsViewport(this.frontFrame)
+            (this.options.stdout.isTTY && !frameFillsViewport(this.frontFrame)
               ? {
                   viewport: this.frontFrame.viewport,
                   erase:
@@ -3026,7 +2804,7 @@ export default class Ink {
     if (this.leftAltScreenSinceFrame || this.isUnmounted) return false;
     if (this.keptForNextFrame === '' && seq !== '') {
       setImmediate(this.writeKeptForNextFrame);
-      if (!this.frameMicrotaskQueued) this.queuePacedFrame();
+      this.scheduler.promoteToMicrotask();
     }
     this.keptForNextFrame += seq;
     return true;
@@ -3148,9 +2926,8 @@ export default class Ink {
     mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
     fine?: { col: number; row: number },
   ): boolean {
-    const capture = this.pointerCapture;
+    const capture = this.pointer.endCapture();
     if (!capture) return false;
-    this.pointerCapture = null;
     dispatchPointer(capture.node, 'up', col, row, capture.button, mods, fine);
     return true;
   }
@@ -3170,7 +2947,7 @@ export default class Ink {
     this.releasePointerCapture(col, row, mods, fine);
     const target = findPointerHoverTarget(this.rootNode, col, row);
     if (!target) return false;
-    this.pointerCapture = { node: target, button, col, row };
+    this.pointer.capture = { node: target, button, col, row };
     dispatchPointer(target, 'down', col, row, button, mods, fine);
     return true;
   };
@@ -3184,7 +2961,7 @@ export default class Ink {
     mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
     fine?: { col: number; row: number },
   ): boolean => {
-    const capture = this.pointerCapture;
+    const capture = this.pointer.capture;
     if (!capture) return false;
     capture.col = col;
     capture.row = row;
@@ -3206,7 +2983,7 @@ export default class Ink {
 
   /** densable `isPointerCaptured` — DualInk capture is live. */
   isPointerCaptured(): boolean {
-    return this.pointerCapture !== null;
+    return this.pointer.capture !== null;
   }
 
   /**
@@ -3215,7 +2992,7 @@ export default class Ink {
    * does not drop capture).
    */
   endPointerCapture(): void {
-    const capture = this.pointerCapture;
+    const capture = this.pointer.capture;
     if (capture) {
       this.releasePointerCapture(capture.col, capture.row, {
         shift: false,
@@ -3557,28 +3334,16 @@ export default class Ink {
    * damage, so the overlay forces full-frame damage while active.
    */
   setSearchHighlight(query: string): void {
-    if (this.searchHighlightQuery === query) return;
-    this.searchHighlightQuery = query;
+    if (this.overlays.searchHighlightQuery === query) return;
+    this.overlays.searchHighlightQuery = query;
     this.scheduleRender();
   }
 
-  /** Paint an EXISTING DOM subtree to a fresh Screen at its natural
-   *  height, scan for query. Returns positions relative to the element's
-   *  bounding box (row 0 = element top).
-   *
-   *  The element comes from the MAIN tree — built with all real
-   *  providers, yoga already computed. We paint it to a fresh buffer
-   *  with offsets so it lands at (0,0). Same paint path as the main
-   *  render. Zero drift. No second React root, no context bridge.
-   *
-   *  ~1-2ms (paint only, no reconcile — the DOM is already built). */
   scanElementSubtree(el: dom.DOMElement): MatchPosition[] {
-    if (!this.searchHighlightQuery || !el.yogaNode) return [];
+    if (!this.overlays.searchHighlightQuery || !el.yogaNode) return [];
     const width = Math.ceil(el.yogaNode.getComputedWidth());
     const height = Math.ceil(el.yogaNode.getComputedHeight());
     if (width <= 0 || height <= 0) return [];
-    // renderNodeToOutput adds el's OWN computedLeft/Top to offsetX/Y.
-    // Passing -elLeft/-elTop nets to 0 → paints at (0,0) in our buffer.
     const elLeft = el.yogaNode.getComputedLeft();
     const elTop = el.yogaNode.getComputedTop();
     const screen = createScreen(width, height, this.stylePool, this.charPool, this.hyperlinkPool);
@@ -3588,23 +3353,17 @@ export default class Ink {
       stylePool: this.stylePool,
       screen,
     });
-    runWithRenderFrameContext(createRenderFrameContext({ consumeClears: false }), () => {
-      renderNodeToOutput(el, output, {
-        offsetX: -elLeft,
-        offsetY: -elTop,
-        prevScreen: undefined,
-      });
+    renderNodeToOutput(el, output, createRenderFrameContext({ consumeClears: false }), {
+      offsetX: -elLeft,
+      offsetY: -elTop,
+      prevScreen: undefined,
     });
     const rendered = output.get();
-    // renderNodeToOutput wrote our offset positions to nodeCache —
-    // corrupts the main render (it'd blit from wrong coords). Drop cached
-    // layouts and mark the subtree dirty so the next main render repaints
-    // + re-caches correctly.
     leftoverGsDropCachedLayout(el);
     dom.markDirty(el);
-    const positions = scanPositions(rendered, this.searchHighlightQuery);
+    const positions = scanPositions(rendered, this.overlays.searchHighlightQuery);
     this.logger.debug(
-      `scanElementSubtree: q='${this.searchHighlightQuery}' ` +
+      `scanElementSubtree: q='${this.overlays.searchHighlightQuery}' ` +
         `el=${width}x${height}@(${elLeft},${elTop}) n=${positions.length} ` +
         `[${positions
           .slice(0, 10)
@@ -3615,11 +3374,6 @@ export default class Ink {
     return positions;
   }
 
-  /** Set the position-based highlight state. Every frame, writes CURRENT
-   *  style at positions[currentIdx] + rowOffset. null clears. The scan-
-   *  highlight (inverse on all matches) still runs — this overlays yellow
-   *  on top. rowOffset changes as the user scrolls (= message's current
-   *  screen-top); positions stay stable (message-relative). */
   setSearchPositions(
     state: {
       positions: MatchPosition[];
@@ -3627,7 +3381,7 @@ export default class Ink {
       currentIdx: number;
     } | null,
   ): void {
-    this.searchPositions = state;
+    this.overlays.searchPositions = state;
     this.scheduleRender();
   }
 
@@ -3752,75 +3506,48 @@ export default class Ink {
    * is started, updated, cleared, or copied. Returns an unsubscribe fn.
    */
   subscribeToSelectionChange(cb: () => void): () => void {
-    this.selectionListeners.add(cb);
-    return () => this.selectionListeners.delete(cb);
+    return this.overlays.subscribeToSelectionChange(cb);
   }
 
   /** densable `subscribeToSelectionTakeDown(n){return this.selectionTakeDown.subscribe(n)}`. */
   subscribeToSelectionTakeDown(cb: () => void): () => void {
-    return this.selectionTakeDown.subscribe(cb);
+    return this.overlays.subscribeToSelectionTakeDown(cb);
   }
 
-  /**
-   * densable `notifySelectionTakeDown` — announce before Il/clearSelection.
-   * Gold: if (!altScreenActive || !hasSelection) return; then announce.
-   */
   private notifySelectionTakeDown(): void {
-    if (!this.altScreenActive || !hasSelection(this.selection)) return;
-    this.selectionTakeDown.announce();
+    this.overlays.notifySelectionTakeDown();
   }
 
   private notifySelectionChange(): void {
-    // Skip during/after unmount: AlternateScreen cleanup may clearTextSelection
-    // after 1049l. scheduleRender.cancel() already ran, but notifySelectionChange
-    // would re-arm the pacer and a late onRender can flash main-buffer frames
-    // on Windows Terminal (stacked-window look). Restored from 92e1ffdd.
     if (this.isUnmounted) return;
     this.scheduleRender();
-    for (const cb of this.selectionListeners) cb();
+    this.overlays.notifySelectionChange();
   }
 
-  /**
-   * Hit-test the rendered DOM tree at (col, row) and bubble a ClickEvent
-   * from the deepest hit node up through ancestors with onClick handlers.
-   * Returns true if a DOM handler consumed the click. Gated on
-   * altScreenActive — clicks only make sense with a fixed viewport where
-   * nodeCache rects map 1:1 to terminal cells (no scrollback offset).
-   */
   dispatchClick(col: number, row: number): boolean {
     return this.dispatchMouseClick(col, row, false) !== 'unhandled';
   }
 
-  /**
-   * densable `dispatchMouseClick` — stray | handled | unhandled | repeat.
-   * `stray` wins even if a handler fired (Button/Select dropAsStray).
-   * Gold: handled && endsClickChain → `"repeat"`.
-   */
   dispatchMouseClick(col: number, row: number, isWindowActivation = false, mods?: ClickMods): MouseClickResult {
     if (!this.altScreenActive) return 'unhandled';
     const hit = hitTest(this.rootNode, col, row);
     if (hit && this.dropsInput(hit, 'click', this.pressClock())) return 'stray';
-    // Gold: g=Ls(...)&&!litWhereClicked(y,n,u). Ls is cellIsBlankForHover.
     const blank =
       cellIsBlankForHover(this.rootNode, this.frontFrame.screen, hit, col, row) && !this.litWhereClicked(hit, col, row);
     const hyperlinkUrl = this.getHyperlinkAt(col, row);
     const event = new ClickEvent(col, row, blank, hyperlinkUrl, isWindowActivation, mods ?? EMPTY_CLICK_MODS);
-    for (const listener of this.clickListeners) listener(hit, event);
+    this.pointer.notifyClicks(hit, event);
     const handled = bubbleClick(this.rootNode, event, hit);
     if (event.droppedAsStray) return 'stray';
     if (handled && event.endsClickChain) return 'repeat';
     return handled ? 'handled' : 'unhandled';
   }
 
-  /**
-   * densable `litWhereClicked` — empty cell under a hoverIgnoresBlankCells
-   * ancestor that is already hovered is not blank for the click.
-   */
   private litWhereClicked(hit: dom.DOMElement | null, col: number, row: number): boolean {
-    if (col !== this.hoverCol || row !== this.hoverRow) return false;
+    if (col !== this.pointer.hoverCol || row !== this.pointer.hoverRow) return false;
     let node: dom.DOMElement | undefined = hit ?? undefined;
     while (node) {
-      if (node.attributes.hoverIgnoresBlankCells && this.hoveredNodes.has(node)) {
+      if (node.attributes.hoverIgnoresBlankCells && this.pointer.hoveredNodes.has(node)) {
         return true;
       }
       node = node.parentNode;
@@ -3828,10 +3555,6 @@ export default class Ink {
     return false;
   }
 
-  /**
-   * densable `repaintAfterStaleAbsolutePaint` — overlay blit poisoned
-   * prevScreen; contaminate the next frame and schedule.
-   */
   private repaintAfterStaleAbsolutePaint(frame: Frame): void {
     if (!frame.staleAbsolutePaint) return;
     this.prevFrameContaminated = true;
@@ -3841,25 +3564,22 @@ export default class Ink {
   dispatchHover(col: number, row: number): void {
     if (!this.altScreenActive) return;
     const link = this.isHoverTracked() ? hyperlinkAt(this.frontFrame.screen, col, row) : undefined;
-    const inSpans = this.hoveredLinkSpans.some(span => span.row === row && col >= span.from && col <= span.to);
-    if (link !== this.hoveredLink || (link !== undefined && !inSpans)) {
-      this.hoveredLink = link;
+    const inSpans = this.overlays.hoveredLinkSpans.some(span => span.row === row && col >= span.from && col <= span.to);
+    if (link !== this.overlays.hoveredLink || (link !== undefined && !inSpans)) {
+      this.overlays.hoveredLink = link;
       this.scheduleRender();
     }
-    this.hoverCol = col;
-    this.hoverRow = row;
-    this.hoverFollowStreak = 0;
-    this.hoverFollowHeldUntil = 0;
-    dispatchHover(this.rootNode, col, row, this.hoveredNodes, this.frontFrame.screen);
+    this.pointer.hoverCol = col;
+    this.pointer.hoverRow = row;
+    this.pointer.hoverFollowStreak = 0;
+    this.pointer.hoverFollowHeldUntil = 0;
+    dispatchHover(this.rootNode, col, row, this.pointer.hoveredNodes, this.frontFrame.screen);
   }
 
   forgetPointer(): void {
-    this.hoverCol = -1;
-    this.hoverRow = -1;
-    this.hoverFollowStreak = 0;
-    this.hoverFollowHeldUntil = 0;
-    if (this.hoveredLink !== undefined) {
-      this.hoveredLink = undefined;
+    this.pointer.clearHoverCoords();
+    if (this.overlays.hoveredLink !== undefined) {
+      this.overlays.hoveredLink = undefined;
       this.scheduleRender();
     }
     const app = this.appRef.current;
@@ -3871,18 +3591,20 @@ export default class Ink {
   }
 
   followHover(): void {
-    if (!this.altScreenActive || this.hoverCol < 0 || performance.now() < this.hoverFollowHeldUntil) return;
+    if (!this.altScreenActive || this.pointer.hoverCol < 0 || performance.now() < this.pointer.hoverFollowHeldUntil) {
+      return;
+    }
     const changed = applyFollowHover(
       this.rootNode,
-      this.hoverCol,
-      this.hoverRow,
-      this.hoveredNodes,
+      this.pointer.hoverCol,
+      this.pointer.hoverRow,
+      this.pointer.hoveredNodes,
       this.frontFrame.screen,
     );
-    this.hoverFollowStreak = changed ? this.hoverFollowStreak + 1 : 0;
-    if (this.hoverFollowStreak >= 4) {
-      this.hoverFollowStreak = 0;
-      this.hoverFollowHeldUntil = performance.now() + 1000;
+    this.pointer.hoverFollowStreak = changed ? this.pointer.hoverFollowStreak + 1 : 0;
+    if (this.pointer.hoverFollowStreak >= 4) {
+      this.pointer.hoverFollowStreak = 0;
+      this.pointer.hoverFollowHeldUntil = performance.now() + 1000;
     }
   }
 
@@ -3960,7 +3682,7 @@ export default class Ink {
    * `pointerCapture` skips. Yt `onWheelCapture` synthesizes keybindings.
    */
   dispatchWheelEvent = (parsed: ParsedKey): void => {
-    if (this.pointerCapture) return;
+    if (this.pointer.capture) return;
     const seq = parsed.sequence ?? '';
     const payload = seq.startsWith('\x1b') ? seq.slice(1) : seq;
     const match = payload.match(/^\[<(\d+);(\d+);(\d+)[Mm]$/);
@@ -4322,10 +4044,7 @@ export default class Ink {
 
     // Cancel any pending paced frames to prevent accessing freed Yoga nodes
     this.scheduleRender.cancel?.();
-    if (this.drainTimer !== null) {
-      clearTimeout(this.drainTimer);
-      this.drainTimer = null;
-    }
+    this.scheduler.cancelAll();
 
     reconciler.updateContainerSync(null, this.container, null, noop);
     reconciler.flushSyncWork();

@@ -5,16 +5,19 @@ const INK = join(import.meta.dir, '../ink.tsx')
 const CONSTANTS = join(import.meta.dir, '../constants.ts')
 
 describe('densable 2.1.289 scheduleFrame pacer', () => {
-  test('scheduleRender is scheduleFrame, not lodash throttle', async () => {
+  test('scheduleRender delegates to FrameScheduler, not lodash throttle', async () => {
     const src = await Bun.file(INK).text()
+    const schedSrc = await Bun.file(
+      join(import.meta.dir, '../frame-scheduler.ts'),
+    ).text()
     expect(src).toContain(
-      'this.scheduleRender = Object.assign(() => this.scheduleFrame(), {',
+      'this.scheduleRender = Object.assign(() => this.scheduler.scheduleFrame(), {',
     )
-    expect(src).toContain('cancel: () => this.cancelScheduledFrame()')
-    expect(src).toContain('private scheduleFrame()')
-    expect(src).toContain('private queuePacedFrame()')
-    expect(src).toContain('queueMicrotask(() => {')
-    expect(src).toContain('this.frameMicrotaskQueued = false')
+    expect(src).toContain('cancel: () => this.scheduler.cancelScheduledFrame()')
+    expect(schedSrc).toContain('scheduleFrame(): void')
+    expect(schedSrc).toContain('private queuePacedFrame(): void')
+    expect(schedSrc).toContain('queueMicrotask(() => {')
+    expect(schedSrc).toContain('this.frameMicrotaskQueued = false')
     expect(src).toContain('this.onRender()')
     expect(src).not.toContain("from 'lodash-es/throttle.js'")
     expect(src).not.toContain('throttle(deferredRender')
@@ -46,9 +49,12 @@ describe('densable 2.1.289 scheduleFrame pacer', () => {
     expect(src).toContain('export const FRAME_INTERVAL_MS = 16')
     expect(src).toContain('export const INPUT_PRIORITY_FRAME_MS = 4')
     const ink = await Bun.file(INK).text()
+    const schedSrc = await Bun.file(
+      join(import.meta.dir, '../frame-scheduler.ts'),
+    ).text()
     expect(ink).toContain('this.pacerNow() + 50')
-    expect(ink).toContain(
-      'now < this.inputPriorityUntil ? INPUT_PRIORITY_FRAME_MS : FRAME_INTERVAL_MS',
+    expect(schedSrc).toMatch(
+      /now < this\.inputPriorityUntil\s*\?\s*INPUT_PRIORITY_FRAME_MS\s*:\s*FRAME_INTERVAL_MS/,
     )
     expect(ink).toContain(
       'if (this.isScreenReaderEnabled && this.srHeldAnnouncements.length > 0)',
@@ -60,10 +66,12 @@ describe('densable 2.1.289 scheduleFrame pacer', () => {
 
   test('queuePacedFrame holds when nonBlockingStdout.queuedBytes > bSo', async () => {
     const src = await Bun.file(INK).text()
-    expect(src).toContain(
-      'this.nonBlockingStdout.queuedBytes() > STDOUT_BACKLOG_BYTES',
-    )
-    expect(src).toContain('this.frameHeldForBacklog = true')
+    const schedSrc = await Bun.file(
+      join(import.meta.dir, '../frame-scheduler.ts'),
+    ).text()
+    expect(src).toContain('this.nonBlockingStdout?.queuedBytes() ?? 0')
+    expect(schedSrc).toContain('this.queuedBytes() > STDOUT_BACKLOG_BYTES')
+    expect(schedSrc).toContain('this.frameHeldForBacklog = true')
     expect(src).toContain(
       'installNonBlockingStdout(this.handleStdoutBackpressure)',
     )
@@ -129,7 +137,8 @@ describe('densable 2.1.289 scheduleFrame pacer', () => {
     expect(src).not.toContain('export function Jd')
     expect(src).not.toContain('export class Jd')
     expect(src).toContain("from './terminalImages.js'")
-    expect(src).toContain("dom.createNode('ink-root', Yoga.Config.create())")
+    expect(src).toContain('Yoga.Config.create()')
+    expect(src).toContain("dom.createNode('ink-root', yogaConfig)")
     expect(src).toContain('get holdsRawMode(): boolean')
     expect(src).toContain('terminalImages={this.terminalImages}')
   })
@@ -152,9 +161,7 @@ describe('densable 2.1.289 scheduleFrame pacer', () => {
     const body = src.slice(start, end)
     expect(start).toBeGreaterThan(0)
     expect(body).toContain('setImmediate(this.writeKeptForNextFrame)')
-    expect(body).toContain(
-      'if (!this.frameMicrotaskQueued) this.queuePacedFrame()',
-    )
+    expect(body).toContain('this.scheduler.promoteToMicrotask()')
     expect(body).toContain('this.keptForNextFrame += seq')
     expect(src).toContain('this.takeKeptForNextFrame()')
     expect(src).toContain('this.skipSyncMarkers(),')

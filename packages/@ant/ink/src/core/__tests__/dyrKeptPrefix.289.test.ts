@@ -20,9 +20,7 @@ describe('densable 2.1.289 dyr keptPrefix 5th arg', () => {
     expect(src).toContain('this.takeKeptForNextFrame()')
     expect(src).toContain('this.skipSyncMarkers(),')
     expect(src).toContain('setImmediate(this.writeKeptForNextFrame)')
-    expect(src).toContain(
-      'if (!this.frameMicrotaskQueued) this.queuePacedFrame()',
-    )
+    expect(src).toContain('this.scheduler.promoteToMicrotask()')
   })
 
   test('unmount dyr is !isHandedOff + stdoutSize().rows', async () => {

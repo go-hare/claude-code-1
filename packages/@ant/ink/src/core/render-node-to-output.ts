@@ -769,6 +769,7 @@ function leftoverGsBgSequence(color: Color): string {
  * densable `EC(n,u,f,m)` — cache by node + text + color + chalk.level.
  */
 export function leftoverGsRawAnsiWrite(
+  ctx: RenderFrameContext,
   node: DOMElement,
   text: string,
   color: Color,
@@ -825,21 +826,6 @@ export function createRenderFrameContext(opts?: {
   }
 }
 
-let ctx: RenderFrameContext = createRenderFrameContext()
-
-export function runWithRenderFrameContext<T>(
-  next: RenderFrameContext,
-  fn: () => T,
-): T {
-  const prev = ctx
-  ctx = next
-  try {
-    return fn()
-  } finally {
-    ctx = prev
-  }
-}
-
 /** Official 2.1.328 `eS(H)` — reset a specific RenderFrameContext instance. */
 export function resetRenderFrameContextState(state: RenderFrameContext): void {
   state.overlayActive = false
@@ -850,49 +836,6 @@ export function resetRenderFrameContextState(state: RenderFrameContext): void {
   state.absolutePaintCut = false
   state.absoluteRectsPrev = state.absoluteRectsCur
   state.absoluteRectsCur = []
-}
-
-/** densable `oSf(e)` — one reset for every per-paint field. */
-export function resetRenderFrameContext(): void {
-  resetRenderFrameContextState(ctx)
-}
-
-export function resetLayoutShifted(): void {
-  ctx.layoutShifted = false
-}
-
-export function didLayoutShift(): boolean {
-  return ctx.layoutShifted
-}
-
-export function resetScrollHint(): void {
-  ctx.scrollHint = null
-  ctx.followScroll = null
-  ctx.absoluteRectsPrev = ctx.absoluteRectsCur
-  ctx.absoluteRectsCur = []
-}
-
-export function getScrollHint(): ScrollHint | null {
-  return ctx.scrollHint
-}
-
-export function resetScrollDrainNode(): void {
-  ctx.scrollDrainNode = null
-}
-
-export function getScrollDrainNode(): DOMElement | null {
-  return ctx.scrollDrainNode
-}
-
-export function consumeFollowScroll(): FollowScroll | null {
-  const f = ctx.followScroll
-  ctx.followScroll = null
-  return f
-}
-
-/** densable `m.overlayActive=y.overlayActive` after Av. */
-export function leftoverGsSetOverlayActive(active: boolean): void {
-  ctx.overlayActive = active
 }
 
 // ── Native terminal drain (iTerm2/Ghostty/etc. — proportional events) ──
@@ -1458,10 +1401,6 @@ function stampAbsoluteRect(
   }
 }
 
-export function getAbsolutePaintCut(): boolean {
-  return ctx.absolutePaintCut
-}
-
 export function vanishedOverflowingAbsoluteBlitFor(
   state: RenderFrameContext,
   output: Output,
@@ -1479,14 +1418,6 @@ export function vanishedOverflowingAbsoluteBlitFor(
       ) &&
       output.blitsOver(prev),
   )
-}
-
-/**
- * densable `Nv` — a prev overflowing absolute vanished and a blit still
- * covers that rect.
- */
-export function vanishedOverflowingAbsoluteBlit(output: Output): boolean {
-  return vanishedOverflowingAbsoluteBlitFor(ctx, output)
 }
 
 // If parent container is `<Box>`, text nodes will be treated as separate nodes in
@@ -1521,6 +1452,7 @@ function applyPaddingToText(
 function renderNodeToOutput(
   node: DOMElement,
   output: Output,
+  ctx: RenderFrameContext,
   {
     offsetX = 0,
     offsetY = 0,
@@ -1626,7 +1558,7 @@ function renderNodeToOutput(
           stampAbsoluteRect(node, cached, offsetX, offsetY),
         )
       }
-      leftoverGsSkipBlitOverlay(node, output, prevScreen, fx, fy, fw, fh)
+      leftoverGsSkipBlitOverlay(node, output, ctx, prevScreen, fx, fy, fw, fh)
       return
     }
 
@@ -1717,7 +1649,7 @@ function renderNodeToOutput(
           x,
           y,
           inheritedBackgroundColor
-            ? leftoverGsRawAnsiWrite(node, text, inheritedBackgroundColor)
+            ? leftoverGsRawAnsiWrite(ctx, node, text, inheritedBackgroundColor)
             : text,
         )
       }
@@ -1832,7 +1764,18 @@ function renderNodeToOutput(
 
         text = applyPaddingToText(node, text, softWrap)
 
-        output.write(x, y, text, softWrap)
+        if (node.style.textDirection !== undefined) {
+          output.writeDirected(
+            x,
+            y,
+            text,
+            softWrap,
+            node.style.textDirection,
+            maxWidth,
+          )
+        } else {
+          output.write(x, y, text, softWrap)
+        }
       }
     } else if (node.nodeName === 'ink-box') {
       const boxBackgroundColor =
@@ -2380,6 +2323,7 @@ function renderNodeToOutput(
               renderScrolledChildren(
                 content,
                 output,
+                ctx,
                 contentX,
                 contentY,
                 hasRemovedChild,
@@ -2427,7 +2371,7 @@ function renderNodeToOutput(
                   y1: stableTop,
                   y2: Math.max(stableTop, stableBottom),
                 })
-                renderNodeToOutput(childElem, output, {
+                renderNodeToOutput(childElem, output, ctx, {
                   offsetX: contentX,
                   offsetY: contentY,
                   prevScreen: undefined,
@@ -2469,6 +2413,7 @@ function renderNodeToOutput(
               renderScrolledChildren(
                 content,
                 output,
+                ctx,
                 contentX,
                 contentY,
                 hasRemovedChild,
@@ -2530,6 +2475,7 @@ function renderNodeToOutput(
             renderScrolledChildren(
               content,
               output,
+              ctx,
               contentX,
               contentY,
               hasRemovedChild,
@@ -2590,6 +2536,7 @@ function renderNodeToOutput(
         const escapedFromChildren = renderChildren(
           node,
           output,
+          ctx,
           x,
           y,
           hasRemovedChild,
@@ -2618,6 +2565,7 @@ function renderNodeToOutput(
       node.hasEscapingDescendant = renderChildren(
         node,
         output,
+        ctx,
         x,
         y,
         hasRemovedChild,
@@ -2678,6 +2626,7 @@ function renderNodeToOutput(
 function renderChildren(
   node: DOMElement,
   output: Output,
+  ctx: RenderFrameContext,
   offsetX: number,
   offsetY: number,
   hasRemovedChild: boolean,
@@ -2690,6 +2639,12 @@ function renderChildren(
   let seenDirtyClipped = false
   let escaped = false
   let descendantPaintsPast = false
+  let childrenOverlap = false
+  let childrenPaintingPastRect = 0
+  let unionMinX = Infinity
+  let unionMinY = Infinity
+  let unionMaxX = -Infinity
+  let unionMaxY = -Infinity
   const parentRight = offsetX + (node.yogaNode?.getComputedWidth() ?? 0)
   const parentBottom = offsetY + (node.yogaNode?.getComputedHeight() ?? 0)
   const leftoverGsF =
@@ -2703,7 +2658,7 @@ function renderChildren(
     // Capture dirty before rendering — renderNodeToOutput clears the flag
     const wasDirty = childElem.dirty
     const isAbsolute = childElem.style.position === 'absolute'
-    renderNodeToOutput(childElem, output, {
+    renderNodeToOutput(childElem, output, ctx, {
       offsetX,
       offsetY,
       prevScreen:
@@ -2732,22 +2687,45 @@ function renderChildren(
         seenDirtyClipped = true
       }
     }
-    if (!escaped) {
-      const layout = childElem.cachedLayout
+    const layout = childElem.cachedLayout
+    if (!isAbsolute) {
+      if (childElem.paintsPastRect === true) {
+        descendantPaintsPast = true
+        childrenPaintingPastRect++
+      }
       if (
-        childElem.hasEscapingDescendant ||
-        (layout !== undefined &&
-          !isAbsolute &&
-          (layout.x < offsetX ||
-            layout.y < offsetY ||
-            layout.x + layout.width > parentRight ||
-            layout.y + layout.height > parentBottom))
+        !escaped &&
+        (childElem.hasEscapingDescendant ||
+          (layout !== undefined &&
+            (layout.x < offsetX ||
+              layout.y < offsetY ||
+              layout.x + layout.width > parentRight ||
+              layout.y + layout.height > parentBottom)))
       ) {
         escaped = true
       }
+      if (layout !== undefined) {
+        if (
+          layout.x < unionMaxX &&
+          unionMinX < layout.x + layout.width &&
+          layout.y < unionMaxY &&
+          unionMinY < layout.y + layout.height
+        ) {
+          childrenOverlap = true
+        }
+        if (layout.width > 0 && layout.height > 0) {
+          unionMinX = Math.min(unionMinX, layout.x)
+          unionMinY = Math.min(unionMinY, layout.y)
+          unionMaxX = Math.max(unionMaxX, layout.x + layout.width)
+          unionMaxY = Math.max(unionMaxY, layout.y + layout.height)
+        }
+      }
+    } else if (childElem.paintsPastRect === true) {
+      descendantPaintsPast = true
     }
-    descendantPaintsPast ||= childElem.paintsPastRect === true
   }
+  node.childrenOverlap = childrenOverlap
+  node.childrenPaintingPastRect = childrenPaintingPastRect
   node.paintsPastRect =
     !clipsBothAxes(node) && (escaped || descendantPaintsPast)
   return escaped
@@ -2796,6 +2774,7 @@ function siblingSharesY(node: DOMElement, yogaNode: LayoutNode): boolean {
 function leftoverGsSkipBlitOverlay(
   node: DOMElement,
   output: Output,
+  ctx: RenderFrameContext,
   prevScreen: Screen,
   px: number,
   py: number,
@@ -2857,6 +2836,7 @@ function leftoverGsSkipBlitOverlay(
 function renderScrolledChildren(
   node: DOMElement,
   output: Output,
+  ctx: RenderFrameContext,
   offsetX: number,
   offsetY: number,
   hasRemovedChild: boolean,
@@ -2887,7 +2867,7 @@ function renderScrolledChildren(
       }
     }
     const wasDirty = childElem.dirty
-    renderNodeToOutput(childElem, output, {
+    renderNodeToOutput(childElem, output, ctx, {
       offsetX,
       offsetY,
       prevScreen: hasRemovedChild || seenDirtyChild ? undefined : prevScreen,
@@ -2982,6 +2962,7 @@ export function paintBoxBackground(
 
 /** Official 2.1.328 `Nm` + padding — format an ink-text node into styled text + softWrap. */
 export function formatTextForPaint(
+  ctx: RenderFrameContext,
   node: DOMElement,
   yogaNode: LayoutNode,
   maxWidth: number,

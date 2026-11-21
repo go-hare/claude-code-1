@@ -151,8 +151,8 @@ export function HighlightedThinkingText({
     );
   }
 
-  // densable Zkt: pointer gutter + body. Indent for Divider accounts for "❯ ".
-  const dividerIndent = 3 + (queued?.paddingWidth ?? 0);
+  // Official 2.1.328 `cWn`: pointer gutter + body. Indent for Divider accounts for "❯ ".
+  const dividerIndent = 3;
   const bodyColor: keyof Theme = isQueueSelected || isSelected ? 'suggestion' : isDimmed ? 'inactive' : 'text';
 
   let body: React.ReactNode;

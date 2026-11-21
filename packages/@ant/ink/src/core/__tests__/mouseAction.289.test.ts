@@ -130,9 +130,9 @@ describe('densable 2.1.289 Jhr mouse mods', () => {
       forgetStart,
       ink.indexOf('\n  followHover', forgetStart),
     )
-    expect(forgetBody).not.toContain('this.pointerCapture = null')
+    expect(forgetBody).not.toContain('this.pointer.capture = null')
     expect(ink).toContain('isPointerCaptured(): boolean')
-    expect(ink).toContain('return this.pointerCapture !== null')
+    expect(ink).toContain('return this.pointer.capture !== null')
     expect(ink).toContain('endPointerCapture(): void')
     expect(ink).toContain('this.endPointerCapture()')
     expect(ink).toContain('repaintAfterStaleAbsolutePaint')
@@ -470,7 +470,7 @@ describe('densable 2.1.289 onSelectionTakeDown before Il', () => {
     expect(change).toBeGreaterThan(clear)
     expect(ink).toContain('onSelectionTakeDown={this.notifySelectionTakeDown}')
     expect(ink).toContain('subscribeToSelectionTakeDown')
-    expect(ink).toContain('this.selectionTakeDown.announce()')
+    expect(ink).toContain('this.overlays.notifySelectionTakeDown()')
     const copy = ink.indexOf('copySelection(): string')
     const copyBody = ink.slice(copy, ink.indexOf('clearTextSelection()', copy))
     expect(copyBody.indexOf('this.notifySelectionTakeDown()')).toBeLessThan(

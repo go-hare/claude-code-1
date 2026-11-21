@@ -1,0 +1,372 @@
+import type { UUID } from 'node:crypto'
+import { type ScrollBoxHandle, ScrollViewport } from '@anthropic/ink'
+import type { Message } from '../types/message.js'
+import { getAutoScrollEnabled } from './config.js'
+import { logForDebugging } from './debug.js'
+import { isHumanTurn } from './messagePredicates.js'
+import type { TranscriptStore } from './transcriptStore.js'
+
+export type UnseenDivider = {
+  firstUnseenUuid: UUID
+  count: number
+}
+
+export type ScrollPinSnapshot = {
+  dividerY: number | null
+  unseenDivider: UnseenDivider | undefined
+}
+
+export type ScrollPinRevealHost = {
+  reveal: (
+    requestId: string,
+    block?: 'start' | 'center' | 'end' | 'nearest',
+  ) => Promise<boolean> | null
+  release: () => void
+  rowHolding: (selection: unknown) => string | undefined
+}
+
+export type ScrollDialogBounds = {
+  row: number
+  rows: number
+}
+
+const EMPTY_SNAPSHOT: ScrollPinSnapshot = {
+  dividerY: null,
+  unseenDivider: undefined,
+}
+
+function computeDialogTarget(
+  handle: ScrollBoxHandle,
+  bounds?: ScrollDialogBounds,
+): { top: number; bottom: number } {
+  const vh = handle.getViewportHeight()
+  const bottom = Math.max(0, handle.getScrollHeight() - vh)
+  const top =
+    bounds === undefined
+      ? bottom
+      : Math.min(bottom, Math.max(0, bounds.row + bounds.rows - vh))
+  return { top, bottom }
+}
+
+/**
+ * Official 2.1.328 `Zse` — centralized scroll pin & unseen-divider controller.
+ *
+ * Owns `viewport`, `modalViewport`, `revealRef`, unseen divider state,
+ * repin rules (`onPromptEdit`, `onUserRowLanded`, `onBelowTranscriptSlotChange`),
+ * and dialog scroll anchoring (`showDialog`, `followDialog`, `onDialogLeft`).
+ */
+export class ScrollPin {
+  readonly viewport = new ScrollViewport()
+  readonly modalViewport = new ScrollViewport()
+  readonly revealRef: { current: ScrollPinRevealHost | null } = {
+    current: null,
+  }
+
+  private readonly computeDivider: (
+    messages: readonly Message[],
+    dividerIndex: number | null,
+  ) => UnseenDivider | undefined
+  private readonly onUserScrolledHook?: () => void
+  private readonly transcriptUnsub: (() => void) | undefined
+  private readonly listeners = new Set<() => void>()
+  private snapshot: ScrollPinSnapshot = EMPTY_SNAPSHOT
+  private messages: readonly Message[] = []
+  private dividerIndex: number | null = null
+  private lastMessageCount = -1
+  private renderedLength: number | null = null
+  private replyStreaming = false
+  private wasStreamingAtScrollAway = false
+  private scrolledAway = false
+  private dialogReturnTarget: number | 'bottom' | null = null
+  private dialogPinnedTop: number | null = null
+  private prevBelowTranscriptSlot: boolean | undefined = undefined
+
+  constructor(opts: {
+    transcript?: TranscriptStore
+    computeDivider: (
+      messages: readonly Message[],
+      dividerIndex: number | null,
+    ) => UnseenDivider | undefined
+    onUserScrolled?: () => void
+  }) {
+    this.computeDivider = opts.computeDivider
+    this.onUserScrolledHook = opts.onUserScrolled
+    if (opts.transcript) {
+      const store = opts.transcript
+      this.messages = store.getSnapshot()
+      this.transcriptUnsub = store.subscribe(() => {
+        this.syncMessages(store.getSnapshot())
+      })
+    }
+  }
+
+  dispose(): void {
+    this.transcriptUnsub?.()
+  }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private emit(): void {
+    for (const listener of this.listeners) {
+      listener()
+    }
+  }
+
+  getSnapshot = (): ScrollPinSnapshot => this.snapshot
+
+  get dividerY(): number | null {
+    return this.snapshot.dividerY
+  }
+
+  setRenderedLength(len: number | null): void {
+    this.renderedLength = len
+  }
+
+  setReplyStreaming(streaming: boolean): void {
+    this.replyStreaming = streaming
+  }
+
+  syncMessages(messages: readonly Message[]): void {
+    this.messages = messages
+    if (this.dividerIndex === null) return
+    if (messages.length < this.dividerIndex) {
+      this.dividerIndex = null
+      this.updateSnapshot(null, messages)
+      return
+    }
+    if (messages.length !== this.lastMessageCount) {
+      this.updateSnapshot(this.snapshot.dividerY, messages)
+    }
+  }
+
+  shiftDivider = (indexDelta: number, heightDelta: number): void => {
+    if (this.dividerIndex !== null) {
+      this.dividerIndex += indexDelta
+    }
+    const nextY =
+      this.snapshot.dividerY !== null
+        ? this.snapshot.dividerY + heightDelta
+        : null
+    this.updateSnapshot(nextY, this.messages)
+  }
+
+  isAtBottom = (): boolean => this.viewport.handle?.isSticky() ?? true
+
+  repin = (force = false, reason = '?'): void => {
+    if (!force && !getAutoScrollEnabled()) return
+    const handle = this.viewport.handle
+    if (handle && !handle.isSticky()) {
+      const max = Math.max(
+        0,
+        handle.getScrollHeight() - handle.getViewportHeight(),
+      )
+      logForDebugging(
+        `repinScroll(${reason}, force=${force}): yanking from scrollTop=${handle.getScrollTop()} (max=${max})`,
+      )
+    }
+    this.clearRevealAndDialog()
+    handle?.scrollToBottom()
+    this.clearDividerDeferred()
+    this.scrolledAway = false
+  }
+
+  onPromptEdit(next: string, prev: string): void {
+    if (prev !== '' || next === '' || this.scrolledAway) return
+    this.repin(false, 'typedIntoEmpty')
+  }
+
+  onUserRowLanded(msg: Message): void {
+    const promptSource = (msg as { promptSource?: string }).promptSource
+    const ownSubmit =
+      (promptSource === 'typed' || promptSource === 'suggestion_accepted') &&
+      isHumanTurn(msg)
+    if (ownSubmit || !this.scrolledAway) {
+      this.repin(false, ownSubmit ? 'ownSubmitLanded' : 'rowLanded')
+    }
+  }
+
+  onBelowTranscriptSlotChange(open: boolean): void {
+    const prev = this.prevBelowTranscriptSlot
+    this.prevBelowTranscriptSlot = open
+    if (prev === undefined || prev === open) return
+    if (
+      this.dialogReturnTarget === null &&
+      (this.viewport.handle?.isSticky() ?? true)
+    ) {
+      this.repin(false, `progressOrPanel→${open}`)
+    }
+  }
+
+  onUserScroll = (sticky: boolean, handle: ScrollBoxHandle): void => {
+    this.clearRevealAndDialog()
+    this.onUserScrolledHook?.()
+    this.scrolledAway = !sticky
+    if (sticky) {
+      this.clearDividerDeferred()
+    } else {
+      this.snapshotDividerAtScrollAway(handle)
+    }
+  }
+
+  onUserScrollWithoutDivider = (sticky: boolean): void => {
+    this.clearRevealAndDialog()
+    this.scrolledAway = !sticky
+  }
+
+  reveal = async (
+    requestId: string,
+    block?: 'start' | 'center' | 'end' | 'nearest',
+  ): Promise<'unscrollable' | 'revealed' | 'unknown'> => {
+    const host = this.revealRef.current
+    if (!this.viewport.handle || !host) return 'unscrollable'
+    const promise = host.reveal(requestId, block)
+    if (!promise) return 'unknown'
+    this.scrolledAway = true
+    this.clearDialogPin()
+    return (await promise) ? 'revealed' : 'unknown'
+  }
+
+  rowHolding = (selection: unknown): string | undefined =>
+    this.revealRef.current?.rowHolding(selection)
+
+  releaseReveal = (): void => {
+    this.revealRef.current?.release()
+  }
+
+  jumpToNew = (): void => {
+    this.clearRevealAndDialog()
+    this.viewport.handle?.scrollToBottom()
+    this.scrolledAway = false
+  }
+
+  showDialog = (
+    bounds: ScrollDialogBounds | undefined,
+    restoreAfter: boolean,
+  ): boolean => {
+    const handle = this.viewport.handle
+    if (!handle) return false
+    const { top, bottom } = computeDialogTarget(handle, bounds)
+    const cur = handle.getScrollTop() + handle.getPendingDelta()
+    const sticky = handle.isSticky()
+    const autoFollow = sticky || getAutoScrollEnabled()
+    if (top < bottom || (!restoreAfter && !autoFollow)) {
+      if (cur === top && !sticky) return false
+      logForDebugging(`ScrollPin.showDialog: from scrollTop=${cur} to ${top}`)
+      this.releaseReveal()
+      this.dialogReturnTarget ??=
+        restoreAfter && !sticky ? cur : autoFollow ? 'bottom' : null
+      this.scrolledAway = true
+      this.dialogPinnedTop = top
+      handle.scrollTo(top)
+      return true
+    }
+    if (sticky) return false
+    if (!restoreAfter) {
+      this.repin(true, 'dialog')
+      return true
+    }
+    logForDebugging(`ScrollPin.showDialog: from scrollTop=${cur}`)
+    this.releaseReveal()
+    this.dialogReturnTarget ??= cur
+    handle.scrollToBottom()
+    return true
+  }
+
+  followDialog = (bounds: ScrollDialogBounds | undefined): void => {
+    const handle = this.viewport.handle
+    if (this.dialogPinnedTop === null || !handle || bounds === undefined) return
+    const cur = handle.getScrollTop() + handle.getPendingDelta()
+    const { top } = computeDialogTarget(handle, bounds)
+    if (cur !== this.dialogPinnedTop && cur !== top) {
+      this.clearDialogPin()
+      return
+    }
+    this.dialogPinnedTop = top
+    if (cur !== top) handle.scrollTo(top)
+  }
+
+  onDialogLeft = (): void => {
+    const target = this.dialogReturnTarget
+    this.clearDialogPin()
+    if (target === 'bottom') {
+      this.repin(true, 'dialogLeft')
+    } else if (target !== null) {
+      this.viewport.handle?.scrollTo(target)
+    }
+  }
+
+  private clearRevealAndDialog(): void {
+    this.releaseReveal()
+    this.clearDialogPin()
+  }
+
+  private clearDialogPin(): void {
+    this.dialogReturnTarget = null
+    this.dialogPinnedTop = null
+  }
+
+  private snapshotDividerAtScrollAway(handle: ScrollBoxHandle): void {
+    const max = Math.max(
+      0,
+      handle.getScrollHeight() - handle.getViewportHeight(),
+    )
+    if (handle.getScrollTop() + handle.getPendingDelta() >= max) return
+    if (this.snapshot.dividerY !== null) return
+    this.dividerIndex = this.renderedLength ?? this.messages.length
+    this.wasStreamingAtScrollAway = this.replyStreaming
+    this.updateSnapshot(handle.getScrollHeight(), this.messages)
+  }
+
+  private clearDividerDeferred(): void {
+    const prevY = this.snapshot.dividerY
+    if (prevY === null) return
+    this.dividerIndex = null
+    this.updateSnapshot(prevY, this.messages)
+    queueMicrotask(() => {
+      if (this.dividerIndex === null) {
+        this.updateSnapshot(null, this.messages)
+      }
+    })
+  }
+
+  private updateSnapshot(
+    dividerY: number | null,
+    messages: readonly Message[],
+  ): void {
+    this.lastMessageCount = messages.length
+    const prev = this.snapshot
+    if (this.wasStreamingAtScrollAway && this.dividerIndex !== null) {
+      const candidate = this.computeDivider(
+        messages,
+        this.dividerIndex,
+      )?.firstUnseenUuid
+      if (candidate !== undefined) {
+        this.wasStreamingAtScrollAway = false
+        const idx = messages.findLastIndex(
+          m => 'uuid' in m && m.uuid === candidate,
+        )
+        const msg = idx >= 0 ? messages[idx] : undefined
+        if (msg?.type === 'assistant' && !msg.isApiErrorMessage) {
+          this.dividerIndex = idx + 1
+        }
+      }
+    }
+    const nextRaw = this.computeDivider(messages, this.dividerIndex)
+    const nextDivider =
+      nextRaw?.firstUnseenUuid === prev.unseenDivider?.firstUnseenUuid &&
+      nextRaw?.count === prev.unseenDivider?.count
+        ? prev.unseenDivider
+        : nextRaw
+    if (dividerY === prev.dividerY && nextDivider === prev.unseenDivider) return
+    this.snapshot =
+      dividerY === null && nextDivider === undefined
+        ? EMPTY_SNAPSHOT
+        : { dividerY, unseenDivider: nextDivider }
+    this.emit()
+  }
+}

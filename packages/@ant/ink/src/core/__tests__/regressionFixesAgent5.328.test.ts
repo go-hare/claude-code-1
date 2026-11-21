@@ -8,7 +8,6 @@ import Output from '../output.js'
 import type { ParsedKey } from '../parse-keypress.js'
 import renderNodeToOutput, {
   createRenderFrameContext,
-  runWithRenderFrameContext,
 } from '../render-node-to-output.js'
 import {
   CharPool,
@@ -97,8 +96,8 @@ describe('Regression Fix Agent 5 — Ink Core', () => {
         new HyperlinkPool(),
       )
       const output = new Output({ width: 8, height: 4, stylePool, screen })
-      runWithRenderFrameContext(createRenderFrameContext(), () => {
-        renderNodeToOutput(root, output, { prevScreen: undefined })
+      renderNodeToOutput(root, output, createRenderFrameContext(), {
+        prevScreen: undefined,
       })
       const painted = output.get()
 
@@ -169,9 +168,9 @@ describe('Regression Fix Agent 5 — Ink Core', () => {
       'this.unwritten = undefined;',
     )
 
-    const sinkIdx = inkSrc.indexOf('if (sinkResult) {')
-    expect(sinkIdx).toBeGreaterThan(-1)
-    expect(inkSrc.slice(sinkIdx, sinkIdx + 700)).toContain(
+    const newRendererIdx = inkSrc.indexOf('if (activeRenderers) {')
+    expect(newRendererIdx).toBeGreaterThan(-1)
+    expect(inkSrc.slice(newRendererIdx, newRendererIdx + 2200)).toContain(
       'this.unwritten = undefined;',
     )
 

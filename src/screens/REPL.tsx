@@ -885,8 +885,10 @@ import { launchUltraplan } from '../commands/ultraplan.js';
 import { UltraplanChoiceDialog } from '../components/ultraplan/UltraplanChoiceDialog.js';
 import { UltraplanLaunchDialog } from '../components/ultraplan/UltraplanLaunchDialog.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
-import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
-import { ScrollViewport } from '@anthropic/ink';
+import { FullscreenLayout, computeUnseenDivider } from '../components/FullscreenLayout.js';
+import { type RenderPacing, RenderPacingContext } from '../context/renderPacingContext.js';
+import { ScrollPin } from '../utils/scrollPin.js';
+import { TranscriptStore } from '../utils/transcriptStore.js';
 import { ToastStackView } from '../components/PromptInput/Notifications.js';
 import { formatPluginToastKey, getToasts, pushToast } from '../components/toastStore.js';
 import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
@@ -908,8 +910,7 @@ import {
   resolveTuiJustSwitchedBanner,
 } from '../utils/fullscreen.js';
 import { isCommandImmediate } from '../utils/immediateCommand.js';
-import { AlternateScreen, MainScreenShell } from '@anthropic/ink';
-import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
+import { AlternateScreen } from '@anthropic/ink';
 import { ScrollKeybindingHandler } from '../components/ScrollKeybindingHandler.js';
 import {
   useMessageActions,
@@ -1721,7 +1722,25 @@ function isForkBoilerplateMessage(message: MessageType): boolean {
   return message.message.content.some(isForkBoilerplateTextBlock);
 }
 
-export function REPL({
+/** Official 2.1.328 `Efn()` — initial render pacing context value (null). */
+function createInitialRenderPacing(): RenderPacing | null {
+  return null;
+}
+
+/**
+ * Official 2.1.328 `yko` wrapper around `kje` (REPLInner): provides
+ * `RenderPacingContext` (`SY`) for `useVirtualScroll` sticky-range gating.
+ */
+export function REPL(props: Props): React.ReactNode {
+  const [renderPacing] = useState<RenderPacing | null>(createInitialRenderPacing);
+  return (
+    <RenderPacingContext.Provider value={renderPacing}>
+      <REPLInner {...props} />
+    </RenderPacingContext.Provider>
+  );
+}
+
+function REPLInner({
   commands: initialCommands,
   debug,
   initialTools,
@@ -2527,17 +2546,23 @@ export function REPL({
   // defined, read in the onQuery finally block for auto-restore on interrupt.
   const restoreMessageSyncRef = useRef<(m: UserMessage) => void>(() => {});
 
-  // Official 2.1.328 subscribable ScrollViewport proxies (oEt).
-  const scrollViewportRef = useRef<ScrollViewport | null>(null);
-  if (scrollViewportRef.current === null) {
-    scrollViewportRef.current = new ScrollViewport();
+  // Official 2.1.328 subscribable TranscriptStore + ScrollPin (`Zse`).
+  const transcriptStoreRef = useRef<TranscriptStore | null>(null);
+  if (transcriptStoreRef.current === null) {
+    transcriptStoreRef.current = new TranscriptStore();
   }
-  const scrollViewport = scrollViewportRef.current;
-  const modalScrollViewportRef = useRef<ScrollViewport | null>(null);
-  if (modalScrollViewportRef.current === null) {
-    modalScrollViewportRef.current = new ScrollViewport();
+  const transcriptStore = transcriptStoreRef.current;
+  const scrollPinRef = useRef<ScrollPin | null>(null);
+  if (scrollPinRef.current === null) {
+    scrollPinRef.current = new ScrollPin({
+      transcript: transcriptStore,
+      computeDivider: (msgs, idx) => computeUnseenDivider(msgs as MessageType[], idx),
+    });
   }
-  const modalScrollViewport = modalScrollViewportRef.current;
+  const scrollPin = scrollPinRef.current;
+  useEffect(() => () => scrollPin.dispose(), [scrollPin]);
+  const scrollViewport = scrollPin.viewport;
+  const modalScrollViewport = scrollPin.modalViewport;
 
   // Subscribe to the guard — true during dispatching or running.
   // This is the single source of truth for "is a local query in flight".
@@ -3721,13 +3746,15 @@ export function REPL({
     }
     setUserInputOnProcessingRaw(input);
   }, []);
-  // Fullscreen: track the unseen-divider position. dividerIndex changes
-  // only ~twice/scroll-session (first scroll-away + repin). pillVisible
-  // and stickyPrompt now live in FullscreenLayout — they subscribe to
-  // ScrollBox directly so per-frame scroll never re-renders REPL.
-  const { dividerIndex, dividerYRef, onScrollAway, onRepin, jumpToNew, shiftDivider } = useUnseenDivider(
-    messages.length,
-  );
+  scrollPin.setRenderedLength(messages.length);
+  scrollPin.setReplyStreaming(isLoading);
+  // Publish live messages into TranscriptStore so ScrollPin and Messages
+  // react via subscription without an effect bridge.
+  useLayoutEffect(() => {
+    transcriptStore.setMessages(messages);
+  }, [transcriptStore, messages]);
+  const scrollPinSnapshot = React.useSyncExternalStore(scrollPin.subscribe, scrollPin.getSnapshot);
+  const unseenDivider = scrollPinSnapshot.unseenDivider;
   if (feature('AWAY_SUMMARY')) {
     useAwaySummary(messages, setMessages, isLoading);
   }
@@ -3735,74 +3762,31 @@ export function REPL({
   useQuotaAutoResume({ isLoading, setMessages });
   const [cursor, setCursor] = useState<MessageActionsState | null>(null);
   const cursorNavRef = useRef<MessageActionsNav | null>(null);
-  // Memoized so Messages' React.memo holds.
-  const unseenDivider = useMemo(
-    () => computeUnseenDivider(messages, dividerIndex),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- length change covers appends; useUnseenDivider's count-drop guard clears dividerIndex on replace/rewind
-    [dividerIndex, messages.length],
-  );
-  // densable Hi.current — scrolled-away latch. Sticky → false; not-sticky → true.
-  // typedIntoEmpty only fires when still sticky (`!scrolledAwayRef.current`).
-  const scrolledAwayRef = useRef(false);
-  // densable uT(force, reason): skip when !force && !autoScrollEnabled.
-  // Overlay / agent-view / submit pass force=true so autoScroll-off still pins.
   const repinScroll = useCallback(
     (force = false, reason = '?') => {
-      if (!force && !getAutoScrollEnabled()) return;
-      const handle = scrollViewport.handle;
-      if (handle && !handle.isSticky()) {
-        logForDebugging(`repinScroll(${reason}, force=${force}): yanking from scrollTop=${handle.getScrollTop()}`);
-      }
-      handle?.scrollToBottom();
-      onRepin();
+      scrollPin.repin(force, reason);
       setCursor(null);
-      scrolledAwayRef.current = false;
     },
-    [onRepin, scrollViewport, setCursor],
+    [scrollPin, setCursor],
   );
-  // Backstop for the submit-handler repin at onSubmit. If a buffered stdin
-  // event (wheel/drag) races between handler-fire and state-commit, the
-  // handler's scrollToBottom can be undone. This effect fires on the render
-  // where the user's message actually lands — tied to React's commit cycle,
-  // so it can't race with stdin. Keyed on lastMsg identity (not messages.length)
-  // so useAssistantHistory's prepends don't spuriously repin.
   const lastMsg = messages.at(-1);
   const lastMsgIsHuman = lastMsg != null && isHumanTurn(lastMsg);
   useEffect(() => {
-    if (!lastMsgIsHuman) return;
-    const promptSource = (lastMsg as { promptSource?: string }).promptSource;
-    const ownSubmit = promptSource === 'typed' || promptSource === 'suggestion_accepted';
-    if (ownSubmit) {
-      repinScroll(false, 'ownSubmitLanded');
-    } else if (!scrolledAwayRef.current) {
-      repinScroll(false, 'lastMsgIsHuman');
-    }
-  }, [lastMsgIsHuman, lastMsg, repinScroll]);
-  // Assistant-chat: lazy-load remote history on scroll-up. No-op unless
-  // KAIROS build + config.viewerOnly. feature() is build-time constant so
-  // the branch is dead-code-eliminated in non-KAIROS builds (same pattern
-  // as useUnseenDivider above).
+    if (!lastMsgIsHuman || !lastMsg) return;
+    scrollPin.onUserRowLanded(lastMsg);
+  }, [lastMsgIsHuman, lastMsg, scrollPin]);
   const assistantHistoryResult = useAssistantHistory({
     config: remoteSessionConfig,
     setMessages,
     scrollViewport,
-    onPrepend: shiftDivider,
+    onPrepend: scrollPin.shiftDivider,
   });
   const { maybeLoadOlder } = feature('KAIROS') ? assistantHistoryResult : HISTORY_STUB;
-  // Compose useUnseenDivider's callbacks with the lazy-load trigger.
-  // densable $n: Hi.current = !sticky (scrolled-away latch). Timestamp exists
-  // on the official scroll path but is NOT used to gate typedIntoEmpty.
   const composedOnScroll = useCallback(
     (sticky: boolean, handle: ScrollBoxHandle) => {
-      scrolledAwayRef.current = !sticky;
-      if (sticky) {
-        onRepin();
-      } else {
-        onScrollAway(handle);
+      scrollPin.onUserScroll(sticky, handle);
+      if (!sticky) {
         if (feature('KAIROS')) maybeLoadOlder(handle);
-        // Dismiss the companion bubble on scroll — it's absolute-positioned
-        // at bottom-right and covers transcript content. Scrolling = user is
-        // trying to read something under it.
         if (buddyEnabled) {
           setAppState(prev =>
             prev.companionReaction === undefined ? prev : { ...prev, companionReaction: undefined },
@@ -3810,7 +3794,7 @@ export function REPL({
         }
       }
     },
-    [onRepin, onScrollAway, maybeLoadOlder, buddyEnabled, setAppState],
+    [scrollPin, maybeLoadOlder, buddyEnabled, setAppState],
   );
   // Deferred SessionStart hook messages — REPL renders immediately and
   // hook messages are injected when they resolve. awaitPendingHooks()
@@ -3853,14 +3837,7 @@ export function REPL({
         return next;
       },
       onEdit: (next, prev) => {
-        // densable typedIntoEmpty: empty→non-empty while still sticky
-        // (`!Hi.current`). Reading-up + typing must NOT yank. Gold
-        // scrollToBottom is stickyScroll=!0 + jR + notify + forceRender.
-        // Gate on `prev` (pre-write); inputValueRef may already equal next
-        // via the controller subscribe that fires from wLe before onEdit.
-        if (prev === '' && next !== '' && !scrolledAwayRef.current) {
-          repinScrollRef.current(false, 'typedIntoEmpty');
-        }
+        scrollPin.onPromptEdit(next, prev);
         inputValueRef.current = next;
       },
     });
@@ -5984,15 +5961,9 @@ export function REPL({
     Boolean(
       toolJSX?.isLocalJSXCommand && toolJSX.isImmediate && !(isFullscreenEnvEnabled() && toolJSX.isLocalJSXCommand),
     );
-  const prevBelowTranscriptSlotRef = useRef<boolean | undefined>(undefined);
   useLayoutEffect(() => {
-    const prev = prevBelowTranscriptSlotRef.current;
-    prevBelowTranscriptSlotRef.current = belowTranscriptSlotOpen;
-    if (prev === undefined || prev === belowTranscriptSlotOpen) return;
-    if (scrollViewport.handle?.isSticky() ?? true) {
-      repinScroll(false, `progressOrPanel→${belowTranscriptSlotOpen}`);
-    }
-  }, [belowTranscriptSlotOpen, repinScroll, scrollViewport]);
+    scrollPin.onBelowTranscriptSlotChange(belowTranscriptSlotOpen);
+  }, [belowTranscriptSlotOpen, scrollPin]);
 
   // Transcript swap (enter/exit agent view): ScrollBox is shared — leftover
   // scrollTop / scrollHeightHwm from the leader (or previous agent) can pin
@@ -9169,6 +9140,7 @@ export function REPL({
         hidePastThinking={true}
         scrollViewport={transcriptScrollViewport}
         jumpRef={jumpRef}
+        revealRef={scrollPin.revealRef}
         onSearchMatchesChange={onSearchMatchesChange}
         scanElement={scanElement}
         setPositions={setPositions}
@@ -9388,11 +9360,23 @@ export function REPL({
   const ozs = topDialogIsModal
     ? {
         content: <DialogHost variant="modal" suppressReason={dialogSuppressReason} />,
+        footer: undefined as React.ReactNode,
         visible: modalChrome === 'visible',
       }
     : toolJsxCentered && (!dialogHostUnmounted || dialogPanelVis.drawn)
-      ? { content: toolJSX!.jsx, visible: true }
+      ? { content: toolJSX!.jsx, visible: true, footer: undefined as React.ReactNode }
       : undefined;
+  const ozsVisible = ozs?.visible ?? false;
+  const prevOzsVisibleRef = useRef(false);
+  useLayoutEffect(() => {
+    const prev = prevOzsVisibleRef.current;
+    prevOzsVisibleRef.current = ozsVisible;
+    if (!prev && ozsVisible) {
+      scrollPin.showDialog(undefined, true);
+    } else if (prev && !ozsVisible) {
+      scrollPin.onDialogLeft();
+    }
+  }, [ozsVisible, scrollPin]);
   const promptOwnsEscape =
     (isVimModeEnabled() && vimMode !== 'NORMAL') ||
     isSearchingHistory ||
@@ -9479,12 +9463,12 @@ export function REPL({
           densable vJ: when modalSlotActive (kZt) && !axcSticky, drive modalScrollRef
           and yield PgUp/PgDn when ModalScroller fits. */}
       <ScrollKeybindingHandler
-        scrollViewport={kZt && !isAxcStickyMainEnabled() ? modalScrollViewport : scrollViewport}
+        scrollViewport={kZt ? modalScrollViewport : scrollViewport}
         isActive={
           isFullscreenEnvEnabled() && !ultraplanChoiceShowing && (kZt || !anyInputOverlay || hostPermissionOpen)
         }
-        onScroll={kZt || !!viewedAgentTask ? undefined : composedOnScroll}
-        yieldsPageKeysWhenContentFits={kZt && !isAxcStickyMainEnabled()}
+        onScroll={kZt ? undefined : viewedAgentTask ? scrollPin.onUserScrollWithoutDivider : composedOnScroll}
+        yieldsPageKeysWhenContentFits={kZt}
       />
       {feature('MESSAGE_ACTIONS') && isFullscreenEnvEnabled() && !disableMessageActions ? (
         <MessageActionsKeybindings handlers={messageActionHandlers} isActive={cursor !== null} />
@@ -9498,11 +9482,10 @@ export function REPL({
               transcriptOverlay={<ToastStackView />}
               modal={ozs}
               modalScrollViewport={modalScrollViewport}
-              dividerYRef={dividerYRef}
+              unseen={scrollPin}
               hidePill={!!viewedAgentTask}
               askBelow={Boolean(isWaitingForApproval || hostPermissionOpen || toolUseConfirmQueue.length > 0)}
               hideSticky={!!viewedTeammateTask}
-              newMessageCount={unseenDivider?.count ?? 0}
               sidebarWidth={replDiffSidebarWidth}
               sidebar={
                 <ReplDiffSidebarController
@@ -9531,7 +9514,6 @@ export function REPL({
               }
               onPillClick={() => {
                 setCursor(null);
-                jumpToNew(scrollViewport.handle);
               }}
               onLinkNotOpened={url => {
                 const noticeText = `Couldn't open your browser. Open ${url} yourself.`;
@@ -9552,6 +9534,11 @@ export function REPL({
                 <>
                   <TeammateViewHeader />
                   <Messages
+                    source={
+                      viewedAgentTask
+                        ? { kind: 'static', messages: displayedMessages, conversationId: focusedConversationId }
+                        : { kind: 'live', transcript: transcriptStore, conversationId: focusedConversationId }
+                    }
                     messages={displayedMessages}
                     tools={tools}
                     commands={commands}
@@ -9581,6 +9568,7 @@ export function REPL({
                     isBriefOnly={viewedAgentTask ? false : isBriefOnly}
                     unseenDivider={viewedAgentTask ? undefined : unseenDivider}
                     scrollViewport={isFullscreenEnvEnabled() ? scrollViewport : undefined}
+                    revealRef={scrollPin.revealRef}
                     trackStickyPrompt={isFullscreenEnvEnabled() ? true : undefined}
                     cursor={cursor}
                     setCursor={setCursor}
@@ -11037,13 +11025,7 @@ export function REPL({
     </KeybindingSetup>
   );
   if (isFullscreenEnvEnabled()) {
-    // Gold Tyn Vs() first — alt fullscreen. Qvt/xxc is the non-Vs sibling.
     return <AlternateScreen mouseTracking={mouseTrackingProp()}>{mainReturn}</AlternateScreen>;
-  }
-  if (isAxcStickyMainEnabled()) {
-    // MainScreenShell supplies height={rows} + mouse (AlternateScreen would
-    // suspend Axc). FullscreenLayout Qvt arm mounts AxcStickyHost (gold xxc).
-    return <MainScreenShell mouseTracking={mouseTrackingProp()}>{mainReturn}</MainScreenShell>;
   }
   return mainReturn;
 }

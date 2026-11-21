@@ -346,21 +346,6 @@ export { AlternateScreen } from './components/AlternateScreen.js'
 export { default as AlternateScreenHoverContext } from './components/AlternateScreenHoverContext.js'
 export { useHoverTracked } from './hooks/use-hover-tracked.js'
 export { MainScreenShell } from './components/MainScreenShell.js'
-export {
-  AxcStickyHost,
-  AxcFrameSinkBridge,
-  AxcScrollAnchor,
-  AxcScrollAnchorContext,
-  type AxcStickyHostProps,
-} from './components/AxcStickyHost.js'
-export { useAxcFrameSink } from './hooks/useAxcFrameSink.js'
-export { Axc } from './core/axc.js'
-export {
-  NativeHistoryPump,
-  NATIVE_HISTORY_BOTTOM_CHROME,
-  NATIVE_HISTORY_CAP,
-  NATIVE_HISTORY_PUMP_BATCH,
-} from './core/nativeHistoryPump.js'
 export { setAppCallbacks } from './components/App.js'
 export { default as AccessibilityContext } from './components/AccessibilityContext.js'
 export {
@@ -493,6 +478,21 @@ export { Tabs, Tab, useTabsWidth, useTabHeaderFocus } from './theme/Tabs.js'
 // Single ModalContext instance — FullscreenLayout provides; Pane/Tabs consume.
 // Do not re-create this context in app code (double-divider bug).
 export { ScrollViewport } from './core/scroll-viewport.js'
+export {
+  createNewRenderers,
+  getTerminalRenderCapabilities,
+  TerminalEncoder,
+  RowDrawer,
+  InlineRenderer,
+  CoveringRenderer,
+  FullscreenRenderer,
+  type NewRendererBundle,
+  type TerminalRenderCapabilities,
+} from './core/new-renderer.js'
+export { LayoutController } from './core/layout-controller.js'
+export { OverlayController } from './core/overlay-controller.js'
+export { PointerController } from './core/pointer-controller.js'
+export { FrameScheduler } from './core/frame-scheduler.js'
 export {
   ModalContext,
   useIsInsideModal,

@@ -82,20 +82,6 @@ export function isAlternateScreenDisabled(
   return isEnvTruthy(env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN)
 }
 
-/**
- * densable main-screen sticky compositor (Axc / xxc) opt-in.
- * Gold Tyn: Vs() (alt fullscreen) returns first; Qvt() is the sibling AFTER.
- * When CLAUDE_CODE_AXC_STICKY_MAIN is set AND fullscreen is OFF, REPL wraps
- * with MainScreenShell and FullscreenLayout takes the gold Qvt arm
- * (`AxcStickyHost` / `xxc`). Default OFF — Qvt() body is not in the 239 dump;
- * do not product-default.
- */
-export function isAxcStickyMainEnabled(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return isEnvTruthy(env.CLAUDE_CODE_AXC_STICKY_MAIN)
-}
-
 export function isWorkingSyncDisabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {

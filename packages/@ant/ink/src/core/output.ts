@@ -99,6 +99,8 @@ type WriteOperation = {
    * mark wrap joins. Undefined means the producer didn't track wrapping.
    */
   softWrap?: SoftWrapKindValue[]
+  /** Official 2.1.328 `direction` — explicit LTR/RTL write direction. */
+  direction?: 'ltr' | 'rtl'
 }
 
 type ClipOperation = {
@@ -326,6 +328,7 @@ export default class Output {
     y: number,
     lines: string[],
     softWrap?: SoftWrapKindValue[],
+    direction?: 'ltr' | 'rtl',
   ): void {
     if (lines.length === 0) {
       return
@@ -336,7 +339,56 @@ export default class Output {
       y,
       lines,
       softWrap,
+      direction,
     })
+  }
+
+  /**
+   * Official 2.1.328 `writeDirected(x, y, text, softWrap, direction, maxWidth)`:
+   * right-aligns RTL lines within `maxWidth` (trimming trailing wrap spaces)
+   * when `direction === 'rtl'`; passes LTR directly to `writeLines`.
+   */
+  writeDirected(
+    x: number,
+    y: number,
+    text: string,
+    softWrap: SoftWrapKindValue[] | undefined,
+    direction: 'ltr' | 'rtl' | undefined,
+    maxWidth: number,
+  ): void {
+    if (direction !== 'ltr' && direction !== 'rtl') {
+      this.write(x, y, text, softWrap)
+      return
+    }
+    if (direction === 'ltr') {
+      if (text) this.writeLines(x, y, text.split('\n'), softWrap, direction)
+      return
+    }
+    const lines = text.split('\n')
+    const limit = Math.min(lines.length, this.height - y)
+    for (let i = Math.max(0, -y); i < limit; i++) {
+      const line = lines[i]!
+      const width = this.lineCells.width(line, x, false)
+      const nextKind = softWrap?.[i + 1] ?? SoftWrapKind.HardBreak
+      const trailing =
+        nextKind === SoftWrapKind.HardBreak
+          ? 0
+          : line.length - line.trimEnd().length
+      const keepGap = nextKind === SoftWrapKind.Continuation && trailing < width
+      const trimmedWidth =
+        width - Math.min(trailing, Math.max(width - maxWidth, keepGap ? 1 : 0))
+      if (trimmedWidth > 0) {
+        const sliced =
+          trimmedWidth < width ? sliceAnsi(line, 0, trimmedWidth) : line
+        this.writeLines(
+          x + Math.max(0, maxWidth - trimmedWidth),
+          y + i,
+          [sliced],
+          undefined,
+          direction,
+        )
+      }
+    }
   }
 
   clip(clip: Clip) {

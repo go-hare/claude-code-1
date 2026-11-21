@@ -105,7 +105,6 @@ import {
   messagesEndWithSuccessfulTerminalMcpTool,
   shouldSuppressPushForUserPresence,
   isAlternateScreenDisabled,
-  isAxcStickyMainEnabled,
   isEagerFlushEnabled,
   isForceFullLogoEnabled,
   isForceFullscreenUpsellEnabled,
@@ -981,10 +980,6 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
     expect(
       isAlternateScreenDisabled({ CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: '1' }),
     ).toBe(true)
-    expect(isAxcStickyMainEnabled({})).toBe(false)
-    expect(isAxcStickyMainEnabled({ CLAUDE_CODE_AXC_STICKY_MAIN: '1' })).toBe(
-      true,
-    )
     expect(
       isWorkingSyncDisabled({ CLAUDE_CODE_DISABLE_WORKING_SYNC: '1' }),
     ).toBe(true)

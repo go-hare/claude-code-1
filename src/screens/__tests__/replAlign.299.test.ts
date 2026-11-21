@@ -21,13 +21,21 @@ describe('2.1.299 REPL alignment', () => {
   })
 
   test('#597 /btw does not jump transcript to bottom when scrolled up in fullscreen', () => {
-    expect(replSrc).toContain(
-      "const ownSubmit = promptSource === 'typed' || promptSource === 'suggestion_accepted'",
+    const scrollPinSrc = fs.readFileSync(
+      path.resolve(__dirname, '../../utils/scrollPin.ts'),
+      'utf8',
     )
-    expect(replSrc).toContain("repinScroll(false, 'ownSubmitLanded')")
-    expect(replSrc).toContain("repinScroll(false, 'lastMsgIsHuman')")
+    expect(scrollPinSrc).toContain(
+      "(promptSource === 'typed' || promptSource === 'suggestion_accepted')",
+    )
+    expect(scrollPinSrc).toContain(
+      "ownSubmit ? 'ownSubmitLanded' : 'rowLanded'",
+    )
     expect(replSrc).toContain('belowTranscriptSlotOpen')
-    expect(replSrc).toContain('if (scrollViewport.handle?.isSticky() ?? true)')
-    expect(replSrc).toContain('`progressOrPanel→${belowTranscriptSlotOpen}`')
+    expect(replSrc).toContain(
+      'scrollPin.onBelowTranscriptSlotChange(belowTranscriptSlotOpen)',
+    )
+    expect(scrollPinSrc).toContain('(this.viewport.handle?.isSticky() ?? true)')
+    expect(scrollPinSrc).toContain('`progressOrPanel→${open}`')
   })
 })

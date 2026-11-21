@@ -397,6 +397,8 @@ export type Styles = {
    * densable `selectionScope` — first ancestor with this set becomes the
    * Cy x-range for startSelection. Overflow hidden/scroll parents clamp it.
    */
+  /** Official 2.1.328 `textDirection` — bidirectional text direction for writeDirected. */
+  readonly textDirection?: 'ltr' | 'rtl'
   readonly selectionScope?: boolean
 
   /**

@@ -8,7 +8,6 @@ import { createNode, createTextNode, setStyle } from '../dom.js'
 import Output from '../output.js'
 import renderNodeToOutput, {
   createRenderFrameContext,
-  runWithRenderFrameContext,
 } from '../render-node-to-output.js'
 import { CharPool, createScreen, HyperlinkPool, StylePool } from '../screen.js'
 
@@ -497,8 +496,8 @@ describe('gold Sp column Text stretch', () => {
         new HyperlinkPool(),
       )
       const output = new Output({ width: 80, height: 8, stylePool, screen })
-      runWithRenderFrameContext(createRenderFrameContext(), () => {
-        renderNodeToOutput(tot, output, { prevScreen: undefined })
+      renderNodeToOutput(tot, output, createRenderFrameContext(), {
+        prevScreen: undefined,
       })
       const painted = output.get()
       const w = o3.ic.yogaNode!.getComputedWidth()

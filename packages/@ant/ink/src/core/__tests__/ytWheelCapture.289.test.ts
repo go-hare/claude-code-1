@@ -104,7 +104,7 @@ describe('densable 2.1.289 Yt eo wheel capture', () => {
     expect(app).not.toContain(
       "app.internal_eventEmitter.emit('input', event);\n    }",
     )
-    expect(ink).toContain('if (this.pointerCapture) return;')
+    expect(ink).toContain('if (this.pointer.capture) return;')
     expect(ink).not.toContain('findWheelEventTarget')
     expect(ink).not.toContain('return event.defaultPrevented;')
   })

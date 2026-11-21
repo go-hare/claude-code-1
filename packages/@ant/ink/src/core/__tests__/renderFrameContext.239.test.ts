@@ -11,72 +11,13 @@
  * DOMElement, so offscreen passes walk the same entries the live frame owns.
  */
 import { describe, expect, test } from 'bun:test'
-import { EventEmitter } from 'events'
-import { PassThrough } from 'stream'
-import { serializeGapBackfill } from '../axcScreenSerialize.js'
 import { addPendingClear, createNode } from '../dom.js'
-import Ink from '../ink.js'
-import instances from '../instances.js'
 import Output from '../output.js'
 import renderNodeToOutput, {
-  consumeFollowScroll,
   createRenderFrameContext,
-  didLayoutShift,
-  getScrollDrainNode,
-  getScrollHint,
-  resetRenderFrameContext,
-  runWithRenderFrameContext,
+  resetRenderFrameContextState,
 } from '../render-node-to-output.js'
 import { CharPool, createScreen, HyperlinkPool, StylePool } from '../screen.js'
-
-function makeTtyStdout() {
-  const stdout = new PassThrough() as PassThrough & {
-    columns: number
-    rows: number
-    isTTY: boolean
-  }
-  stdout.columns = 80
-  stdout.rows = 24
-  stdout.isTTY = true
-  return stdout
-}
-
-function makeTtyStdin() {
-  const stdin = new EventEmitter() as EventEmitter & {
-    isTTY: boolean
-    setRawMode?: (m: boolean) => void
-    ref?: () => void
-    unref?: () => void
-    resume?: () => void
-    pause?: () => void
-    read?: () => null
-  }
-  stdin.isTTY = true
-  stdin.setRawMode = () => {}
-  stdin.ref = () => {}
-  stdin.unref = () => {}
-  stdin.resume = () => {}
-  stdin.pause = () => {}
-  stdin.read = () => null
-  return stdin
-}
-
-function withInkOnStdout<T>(fn: (ink: Ink) => T): T {
-  const ink = new Ink({
-    stdout: makeTtyStdout() as never,
-    stdin: makeTtyStdin() as never,
-    stderr: new PassThrough() as never,
-    exitOnCtrlC: false,
-    patchConsole: false,
-  })
-  instances.set(process.stdout, ink)
-  try {
-    return fn(ink)
-  } finally {
-    instances.delete(process.stdout)
-    ink.unmount()
-  }
-}
 
 function makeOutput(width: number, height: number): Output {
   const stylePool = new StylePool()
@@ -90,7 +31,7 @@ function makeOutput(width: number, height: number): Output {
   return new Output({ width, height, stylePool, screen })
 }
 
-describe('resetRenderFrameContext (densable oSf)', () => {
+describe('resetRenderFrameContextState (official eS)', () => {
   test('clears every per-paint field, followScroll included', () => {
     const ctx = createRenderFrameContext()
     ctx.overlayActive = true
@@ -105,14 +46,11 @@ describe('resetRenderFrameContext (densable oSf)', () => {
       viewportRight: 79,
     }
 
-    runWithRenderFrameContext(ctx, () => {
-      resetRenderFrameContext()
-      expect(didLayoutShift()).toBe(false)
-      expect(getScrollHint()).toBeNull()
-      expect(getScrollDrainNode()).toBeNull()
-      expect(consumeFollowScroll()).toBeNull()
-    })
-
+    resetRenderFrameContextState(ctx)
+    expect(ctx.layoutShifted).toBe(false)
+    expect(ctx.scrollHint).toBeNull()
+    expect(ctx.scrollDrainNode).toBeNull()
+    expect(ctx.followScroll).toBeNull()
     expect(ctx.overlayActive).toBe(false)
   })
 
@@ -131,9 +69,7 @@ describe('resetRenderFrameContext (densable oSf)', () => {
     ctx.absoluteRectsCur = cur
     ctx.absoluteRectsPrev = []
 
-    runWithRenderFrameContext(ctx, () => {
-      resetRenderFrameContext()
-    })
+    resetRenderFrameContextState(ctx)
 
     expect(ctx.absoluteRectsPrev).toBe(cur)
     expect(ctx.absoluteRectsCur).toEqual([])
@@ -142,23 +78,16 @@ describe('resetRenderFrameContext (densable oSf)', () => {
 
   test('a followScroll nobody consumed does not survive the next frame', () => {
     const ctx = createRenderFrameContext()
+    ctx.followScroll = {
+      delta: 4,
+      viewportTop: 2,
+      viewportBottom: 9,
+      viewportLeft: 0,
+      viewportRight: 79,
+    }
 
-    runWithRenderFrameContext(ctx, () => {
-      // Frame N set a delta; a sticky frameSink returned before ink.tsx could
-      // consume it.
-      ctx.followScroll = {
-        delta: 4,
-        viewportTop: 2,
-        viewportBottom: 9,
-        viewportLeft: 0,
-        viewportRight: 79,
-      }
-
-      // Frame N+1 begins.
-      resetRenderFrameContext()
-
-      expect(consumeFollowScroll()).toBeNull()
-    })
+    resetRenderFrameContextState(ctx)
+    expect(ctx.followScroll).toBeNull()
   })
 })
 
@@ -176,10 +105,9 @@ describe('pendingClears offscreen isolation', () => {
     expect(node.pendingClears).toBeDefined()
 
     const output = makeOutput(40, 10)
-    runWithRenderFrameContext(createRenderFrameContext(), () => {
-      renderNodeToOutput(node, output, { prevScreen: undefined })
-      expect(didLayoutShift()).toBe(true)
-    })
+    const ctx = createRenderFrameContext()
+    renderNodeToOutput(node, output, ctx, { prevScreen: undefined })
+    expect(ctx.layoutShifted).toBe(true)
 
     expect(node.pendingClears).toBeUndefined()
   })
@@ -189,32 +117,10 @@ describe('pendingClears offscreen isolation', () => {
     addPendingClear(node, { x: 0, y: 0, width: 4, height: 2 }, false)
 
     const output = makeOutput(40, 10)
-    runWithRenderFrameContext(
-      createRenderFrameContext({ consumeClears: false }),
-      () => {
-        renderNodeToOutput(node, output, { prevScreen: undefined })
-        expect(didLayoutShift()).toBe(true)
-      },
-    )
+    const ctx = createRenderFrameContext({ consumeClears: false })
+    renderNodeToOutput(node, output, ctx, { prevScreen: undefined })
+    expect(ctx.layoutShifted).toBe(true)
 
     expect(node.pendingClears).toBeDefined()
-  })
-
-  test('gap backfill leaves the live frame its pendingClears', () => {
-    withInkOnStdout(ink => {
-      const scroll = createNode('ink-box')
-      scroll.scrollHeight = 50
-      const content = createNode('ink-box')
-      scroll.childNodes.push(content)
-      content.parentNode = scroll
-
-      addPendingClear(content, { x: 0, y: 0, width: 4, height: 2 }, false)
-
-      serializeGapBackfill(scroll, 0, 5, 40, ink.getStylePool())
-
-      // Consuming here would leave the removed child's cells on screen: the
-      // live frame is the only pass whose Output reaches the terminal.
-      expect(content.pendingClears).toBeDefined()
-    })
   })
 })

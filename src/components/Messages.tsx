@@ -95,6 +95,8 @@ import { LatestTurnDurationContext } from './messages/SystemTextMessage.js';
 import { OffscreenFreeze } from './OffscreenFreeze.js';
 import { StatusNotices } from './StatusNotices.js';
 import type { ScrollViewport } from '@anthropic/ink';
+import type { ScrollPinRevealHost } from '../utils/scrollPin.js';
+import type { TranscriptStore } from '../utils/transcriptStore.js';
 import type { JumpHandle } from './VirtualMessageList.js';
 
 // Memoed logo header: this box is the FIRST sibling before all MessageRows
@@ -397,8 +399,21 @@ export function collectLastThinkingIdsPerTurn(
   return perTurn;
 }
 
+/**
+ * Official 2.1.328 `Tje` structured message source: either a subscribable live
+ * `TranscriptStore` or a static snapshot array.
+ */
+export type MessagesSource =
+  | { kind: 'live'; transcript: TranscriptStore; conversationId: string }
+  | { kind: 'static'; messages: readonly MessageType[]; conversationId: string };
+
+const NOOP_TRANSCRIPT_SUB = () => () => {};
+const EMPTY_MESSAGES_ARRAY: readonly MessageType[] = [];
+
 type Props = {
-  messages: MessageType[];
+  /** Official 2.1.328 `Tje` source (`live` TranscriptStore or `static` snapshot). */
+  source?: MessagesSource;
+  messages?: MessageType[];
   tools: Tools;
   commands: Command[];
   verbose: boolean;
@@ -443,6 +458,8 @@ type Props = {
   trackStickyPrompt?: boolean;
   /** Transcript search: jump-to-index + setSearchQuery/nextMatch/prevMatch. */
   jumpRef?: RefObject<JumpHandle | null>;
+  /** Official 2.1.328 `ScrollPin.revealRef` — imperative reveal / release / rowHolding host. */
+  revealRef?: RefObject<ScrollPinRevealHost | null>;
   /** Transcript search: fires when match count/position changes. */
   onSearchMatchesChange?: (count: number, current: number) => void;
   /** Paint an existing DOM subtree to fresh Screen, scan. Element comes
@@ -1151,7 +1168,8 @@ function isToolResultErrorTruncated(content: unknown): boolean {
 }
 
 const MessagesImpl = ({
-  messages,
+  source,
+  messages: propMessages,
   tools,
   commands,
   verbose,
@@ -1159,7 +1177,7 @@ const MessagesImpl = ({
   suppressMessageAnimation = false,
   inProgressToolUseIDs,
   isMessageSelectorVisible,
-  conversationId,
+  conversationId: propConversationId,
   screen,
   streamingToolUses,
   showAllInTranscript = false,
@@ -1176,6 +1194,7 @@ const MessagesImpl = ({
   scrollViewport,
   trackStickyPrompt,
   jumpRef,
+  revealRef,
   onSearchMatchesChange,
   scanElement,
   setPositions,
@@ -1186,6 +1205,19 @@ const MessagesImpl = ({
   renderRange,
   onRowCount,
 }: Props): React.ReactNode => {
+  const liveStore = source?.kind === 'live' ? source.transcript : null;
+  const liveMessages = useSyncExternalStore(
+    liveStore ? liveStore.subscribe : NOOP_TRANSCRIPT_SUB,
+    liveStore ? liveStore.getSnapshot : () => EMPTY_MESSAGES_ARRAY,
+  );
+  const messages = (
+    source?.kind === 'live'
+      ? liveMessages
+      : source?.kind === 'static'
+        ? source.messages
+        : (propMessages ?? EMPTY_MESSAGES_ARRAY)
+  ) as MessageType[];
+  const conversationId = source?.conversationId ?? propConversationId;
   const { columns, rows } = useTerminalSize();
   const isFullscreen = isFullscreenEnvEnabled();
   const isTranscriptMode = screen === 'transcript';
@@ -1915,6 +1947,7 @@ const MessagesImpl = ({
               cursorNavRef={cursorNavRef}
               setCursor={setCursor}
               jumpRef={jumpRef}
+              revealRef={revealRef}
               onSearchMatchesChange={onSearchMatchesChange}
               scanElement={scanElement}
               setPositions={setPositions}
@@ -2076,12 +2109,28 @@ export const Messages = React.memo(MessagesImpl, (prev, next) => {
       key === 'setCursor' ||
       key === 'cursorNavRef' ||
       key === 'jumpRef' ||
+      key === 'revealRef' ||
       key === 'onSearchMatchesChange' ||
       key === 'scanElement' ||
       key === 'setPositions'
     )
       continue;
     if (prev[key] !== next[key]) {
+      if (key === 'source') {
+        const p = prev.source;
+        const n = next.source;
+        if (
+          p !== undefined &&
+          n !== undefined &&
+          p.kind === n.kind &&
+          p.conversationId === n.conversationId &&
+          (p.kind === 'live' && n.kind === 'live'
+            ? p.transcript === n.transcript
+            : p.kind === 'static' && n.kind === 'static' && p.messages === n.messages)
+        ) {
+          continue;
+        }
+      }
       if (key === 'streamingToolUses') {
         const p = prev.streamingToolUses;
         const n = next.streamingToolUses;

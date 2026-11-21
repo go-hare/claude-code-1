@@ -16,7 +16,6 @@ import renderNodeToOutput, {
   leftoverGsEscapingDirtyPoisons,
   leftoverGsSkipBlitMiss,
   leftoverGsStampUnpainted,
-  runWithRenderFrameContext,
 } from '../render-node-to-output.js'
 
 const render = readFileSync(
@@ -149,8 +148,8 @@ describe('leftoverGs SC unpainted / lst cull', () => {
       new HyperlinkPool(),
     )
     const output = new Output({ width: 20, height: 4, stylePool, screen })
-    runWithRenderFrameContext(createRenderFrameContext(), () => {
-      renderNodeToOutput(root, output, { prevScreen: undefined })
+    renderNodeToOutput(root, output, createRenderFrameContext(), {
+      prevScreen: undefined,
     })
     expect(root.cachedLayout).toEqual(
       expect.objectContaining({ x: 0, y: 0, width: 20, height: 4 }),
@@ -180,10 +179,15 @@ describe('leftoverGs SC unpainted / lst cull', () => {
 
 describe('leftoverGs Kt overlayActive / Ze wire', () => {
   test('ink stamps prevOverlaySig and overlayActive before renderer', () => {
-    expect(ink).toContain('leftoverGsOverlaySig')
+    const overlaySrc = readFileSync(
+      join(import.meta.dir, '../overlay-controller.ts'),
+      'utf8',
+    )
+    expect(ink).toContain('this.overlays.changedSinceLastFrame()')
+    expect(ink).toContain('this.overlays.isActive()')
     expect(ink).toContain('leftoverGsContaminated')
-    expect(ink).toContain('leftoverGsOverlayActive')
-    expect(ink).toContain('leftoverGsSelectionBothEndsOff')
+    expect(overlaySrc).toContain('leftoverGsOverlayActive')
+    expect(overlaySrc).toContain('leftoverGsSelectionBothEndsOff')
     expect(ink).toContain('overlayActive: leftoverGsOverlay')
     expect(ink).toContain('prevFrameContaminated: leftoverGsContaminated')
     expect(renderer).toContain(

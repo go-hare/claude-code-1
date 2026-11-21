@@ -23,9 +23,7 @@ import {
   CLEAR_TAB_STATUS,
   clearTerminalTitle,
   instances,
-  NATIVE_HISTORY_BOTTOM_CHROME,
   RESET_SCROLL_REGION,
-  cursorPosition,
   flushNonBlockingStdout,
   printsUnknownSequences,
   supportsTabStatus,
@@ -129,27 +127,14 @@ export function cleanupTerminalModes(): void {
     //      here first makes onRender() scribble a REPL frame onto main.
     // Calling unmount() now does the final render on the alt buffer,
     // unsubscribes from signal-exit, and writes 1049l exactly once.
-    // Sticky-main (Axc frameSink) is not alt-screen; still unmount so
-    // useAxcFrameSink cleanup / Axc.restore() can send RESET_SCROLL_REGION.
     let exitedAltScreenViaUnmount = false
-    if (inst?.isAltScreenActive || inst?.frameSink) {
-      const wasAlt = Boolean(inst.isAltScreenActive)
+    if (inst?.isAltScreenActive) {
       try {
         inst.unmount()
-        if (wasAlt) exitedAltScreenViaUnmount = true
+        exitedAltScreenViaUnmount = true
       } catch {
-        // Reconciler/render threw — fall back so printResumeHint still
-        // hits the main buffer / DECSTBM is cleared.
-        if (wasAlt) {
-          writeSync(1, exitAltScreenSequence())
-          exitedAltScreenViaUnmount = true
-        } else {
-          // densable Axc.restore sequence (sync). Bare CSI r homes the cursor.
-          const rows = process.stdout.rows || 24
-          const contentHeight = Math.max(2, rows - NATIVE_HISTORY_BOTTOM_CHROME)
-          writeSync(1, RESET_SCROLL_REGION)
-          writeSync(1, cursorPosition(contentHeight + 1, 1))
-        }
+        writeSync(1, exitAltScreenSequence())
+        exitedAltScreenViaUnmount = true
       }
     }
     // Catches events that arrived during the unmount tree-walk.

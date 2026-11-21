@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useMemo } from 'react';
 import { Box, formatShortcutString, KeyboardShortcutHint, stringWidth, Text } from '@anthropic/ink';
@@ -22,6 +21,7 @@ import {
 import { createUserMessage, EMPTY_LOOKUPS, normalizeMessages } from '../../utils/messages.js';
 import { jsonParse } from '../../utils/slowOperations.js';
 import { Message } from '../Message.js';
+import { isTranscriptV2RowsEnabled } from '../messages/TranscriptV2Row.js';
 
 /** densable `Dx` — Uye / CA prefix (U+29C9 + space). */
 export const QUEUED_IDE_SELECTION_PREFIX = '⧉ ';
@@ -221,12 +221,9 @@ function PromptInputQueuedCommandsImpl({
   const { status: ideStatus } = useIdeConnectionStatus(mcpClients);
   const queueEditIndex = useAppState(s => s.queueEditIndex);
   const viewingAgent = useAppState(s => !!s.viewingAgentTaskId);
-  // Brief layout: dim queue items + skip the paddingX (brief messages
-  // already indent themselves). Gate mirrors the brief-spinner/message
-  // check elsewhere — no teammate-view override needed since this
-  // component early-returns when viewing a teammate.
-  const isBriefOnlyState = useAppState(s => s.isBriefOnly);
-  const useBriefLayout = feature('KAIROS') || feature('KAIROS_BRIEF') ? isBriefOnlyState : false;
+  const verbose = useAppState(s => s.verbose);
+  // Official 2.1.328 `lKt` (`qx(verbose)`): system-line flag passed via `CTo`.
+  const noticeSystemLines = !verbose && isTranscriptV2RowsEnabled();
 
   // createUserMessage mints a fresh UUID per call; without memoization, streaming
   // re-renders defeat Message's areMessagePropsEqual (compares uuid) → flicker.
@@ -352,8 +349,7 @@ function PromptInputQueuedCommandsImpl({
         return (
           <QueuedMessageProvider
             key={i}
-            isFirst={i === 0}
-            useBriefLayout={useBriefLayout}
+            noticeSystemLines={noticeSystemLines}
             selectionHighlight={selecting ? (i === highlightRow ? 'on' : 'off') : undefined}
           >
             {classicMaxRows !== undefined && cmd?.mode === 'prompt' ? (

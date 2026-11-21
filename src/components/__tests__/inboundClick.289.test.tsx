@@ -62,12 +62,12 @@ for (const isLoading of [false, true]) {
       exitOnCtrlC: false,
       patchConsole: false,
     });
-    let painted = '';
-    ink.frameSink = frame => {
-      painted = Array.from({ length: frame.screen.height }, (_, y) =>
-        Array.from({ length: frame.screen.width }, (_, x) => charInCellAt(frame.screen, x, y) ?? '').join(''),
+    const readPainted = (): string => {
+      const screen = (ink as unknown as { frontFrame: { screen: { height: number; width: number } } }).frontFrame
+        .screen;
+      return Array.from({ length: screen.height }, (_, y) =>
+        Array.from({ length: screen.width }, (_, x) => charInCellAt(screen as never, x, y) ?? '').join(''),
       ).join('\n');
-      return false;
     };
     try {
       ink.setAltScreenActive(true, 'full');
@@ -78,18 +78,18 @@ for (const isLoading of [false, true]) {
       );
       await new Promise(resolve => setTimeout(resolve, 30));
       ink.onRender();
-      expect(painted).toContain('Message from @general-purpose');
-      expect(painted).not.toContain('CLICK_BODY_SENTINEL');
+      expect(readPainted()).toContain('Message from @general-purpose');
+      expect(readPainted()).not.toContain('CLICK_BODY_SENTINEL');
       stdin.write('\x1b[<0;6;11M\x1b[<0;6;11m');
       await new Promise(resolve => setTimeout(resolve, 30));
       ink.onRender();
-      expect(painted).toContain('CLICK_BODY_SENTINEL');
+      expect(readPainted()).toContain('CLICK_BODY_SENTINEL');
       // A different column keeps these two fast events separate from word selection.
       // Official 2.1.299 (#595) delays collapse of an expanded row by 250ms.
       stdin.write('\x1b[<0;12;11M\x1b[<0;12;11m');
       await new Promise(resolve => setTimeout(resolve, 280));
       ink.onRender();
-      expect(painted).not.toContain('CLICK_BODY_SENTINEL');
+      expect(readPainted()).not.toContain('CLICK_BODY_SENTINEL');
     } finally {
       ink.unmount();
     }

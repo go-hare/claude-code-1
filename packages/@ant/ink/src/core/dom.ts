@@ -146,8 +146,8 @@ export type DOMElement = {
   absoluteNodeRemoved?: boolean
   /** Official 2.1.328 `childrenOverlap` — sibling overlap cache flag. */
   childrenOverlap?: boolean
-  /** Official 2.1.328 `childrenPaintingPastRect` — child overflow flag. */
-  childrenPaintingPastRect?: boolean
+  /** Official 2.1.328 `childrenPaintingPastRect` — count of non-absolute children painting past rect. */
+  childrenPaintingPastRect?: number
   /**
    * densable `nd()` — walked up on insert of absolute (or abs-descendant)
    * children. yC skip-blit miss when clip grew.

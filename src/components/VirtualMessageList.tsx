@@ -42,6 +42,7 @@ import {
   UUID_PREFIX_LENGTH,
 } from '../utils/plugins/uiSelectionRowHolding.js';
 import { setTranscriptRevealHost, type TranscriptRevealBlock } from '../utils/plugins/transcriptReveal.js';
+import type { ScrollPinRevealHost } from '../utils/scrollPin.js';
 import {
   isNavigableMessage,
   type MessageActionsNav,
@@ -269,6 +270,8 @@ type Props = {
   cursorNavRef?: React.Ref<MessageActionsNav>;
   setCursor?: (c: MessageActionsState | null) => void;
   jumpRef?: RefObject<JumpHandle | null>;
+  /** Official 2.1.328 `ScrollPin.revealRef` — imperative reveal / release / rowHolding host. */
+  revealRef?: RefObject<ScrollPinRevealHost | null>;
   /** Fires when search matches change (query edit, n/N). current is
    *  1-based for "3/47" display; 0 means no matches. */
   onSearchMatchesChange?: (count: number, current: number) => void;
@@ -489,6 +492,7 @@ export function VirtualMessageList({
   cursorNavRef,
   setCursor,
   jumpRef,
+  revealRef,
   onSearchMatchesChange,
   scanElement,
   setPositions,
@@ -599,9 +603,8 @@ export function VirtualMessageList({
     scrollToIndex,
   };
 
-  // densable 2.1.289 VirtualMessageList `rowHolding` → FH `$.ui.selection` instance_id.
-  useEffect(() => {
-    setUiSelectionRowHolding(selection => {
+  const rowHolding = useCallback(
+    (selection: unknown): string | undefined => {
       const scroll = scrollRef.current;
       if (!scroll) return undefined;
       const node = scroll.getDomElement();
@@ -614,10 +617,15 @@ export function VirtualMessageList({
         const span = messageRowSpan(messageSelectionRequestId(msg), el);
         return span ? [span] : [];
       });
-      return requestIdHoldingSelection(selection, { node, first, last }, rows);
-    });
+      return requestIdHoldingSelection(selection as never, { node, first, last }, rows);
+    },
+    [scrollRef],
+  );
+
+  useEffect(() => {
+    setUiSelectionRowHolding(rowHolding);
     return () => setUiSelectionRowHolding(undefined);
-  }, [scrollRef]);
+  }, [rowHolding]);
 
   // densable 2.1.289 VML `reveal(requestId, block)` → FH vat / Xi.reveal.
   const revealPendingRef = useRef<{
@@ -735,56 +743,70 @@ export function VirtualMessageList({
     onVirtualLayout();
   }, [tickReveal, onVirtualLayout]);
 
+  const revealMessage = useCallback(
+    (requestId: string, block: TranscriptRevealBlock = 'nearest'): Promise<boolean> | null => {
+      releaseReveal();
+      revealBusyRef.current = true;
+      const { messages: msgs } = jumpState.current;
+      const idx = indexByRevealRequestId(msgs, requestId);
+      if (!scrollRef.current || idx < 0) {
+        revealBusyRef.current = false;
+        return null;
+      }
+      return new Promise<boolean>(resolve => {
+        let settled = false;
+        const done = (ok: boolean) => {
+          if (settled) return;
+          settled = true;
+          revealBusyRef.current = false;
+          resolve(ok);
+        };
+        const timeout = setTimeout(() => {
+          const cur = revealPendingRef.current;
+          if (cur) {
+            revealPendingRef.current = null;
+            revealBusyRef.current = false;
+            cur.done(false);
+          } else {
+            revealBusyRef.current = false;
+          }
+        }, REVEAL_GIVE_UP_MS);
+        revealPendingRef.current = {
+          requestId,
+          block,
+          idx,
+          messages: msgs,
+          landed: undefined,
+          done,
+          cancelGiveUp: () => clearTimeout(timeout),
+        };
+        setRevealEpoch(n => n + 1);
+        tickReveal(true);
+      });
+    },
+    [scrollRef, indexByRevealRequestId, releaseReveal, tickReveal],
+  );
+
+  useImperativeHandle(
+    revealRef,
+    () => ({
+      reveal: revealMessage,
+      release: releaseReveal,
+      rowHolding,
+    }),
+    [revealMessage, releaseReveal, rowHolding],
+  );
+
   useEffect(() => {
     setTranscriptRevealHost({
-      reveal: (requestId, block) => {
-        // Concurrent reveal: release prior pending Promise/timeout first.
-        releaseReveal();
-        revealBusyRef.current = true;
-        const { messages: msgs } = jumpState.current;
-        const idx = indexByRevealRequestId(msgs, requestId);
-        if (!scrollRef.current || idx < 0) {
-          revealBusyRef.current = false;
-          return null;
-        }
-        return new Promise<boolean>(resolve => {
-          let settled = false;
-          const done = (ok: boolean) => {
-            if (settled) return;
-            settled = true;
-            revealBusyRef.current = false;
-            resolve(ok);
-          };
-          const timeout = setTimeout(() => {
-            const cur = revealPendingRef.current;
-            if (cur) {
-              revealPendingRef.current = null;
-              revealBusyRef.current = false;
-              cur.done(false);
-            } else {
-              revealBusyRef.current = false;
-            }
-          }, REVEAL_GIVE_UP_MS);
-          revealPendingRef.current = {
-            requestId,
-            block,
-            idx,
-            messages: msgs,
-            landed: undefined,
-            done,
-            cancelGiveUp: () => clearTimeout(timeout),
-          };
-          setRevealEpoch(n => n + 1);
-          tickReveal(true);
-        });
-      },
+      reveal: revealMessage,
       release: releaseReveal,
     });
     return () => {
       releaseReveal();
       setTranscriptRevealHost(undefined);
     };
-  }, [scrollRef, indexByRevealRequestId, releaseReveal, tickReveal]);
+  }, [revealMessage, releaseReveal]);
 
   // densable paint tick — rAF while pending (not every React render).
   useEffect(() => {

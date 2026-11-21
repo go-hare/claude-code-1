@@ -38,17 +38,23 @@ const EMPTY_OVERFLOW: OverflowState = {
 type Props = {
   scrollViewport?: ScrollViewport | null;
   maxRows: number;
+  /** Official 2.1.328 `Xc` onClaim — notifies FullscreenLayout of child claimed height. */
+  onClaim?: (height: number | null) => void;
   children: ReactNode;
 };
 
-export function ModalScroller({ scrollViewport, maxRows, children }: Props): React.ReactNode {
+export function ModalScroller({ scrollViewport, maxRows, onClaim, children }: Props): React.ReactNode {
   const zxc = useContext(ModalContext);
   const claimedHeightRef = useRef<number | null>(null);
   const [claimedHeight, setClaimedHeight] = useState<number | null>(null);
-  const claimScrollBox = useCallback((height: number | null) => {
-    claimedHeightRef.current = height;
-    setClaimedHeight(height);
-  }, []);
+  const claimScrollBox = useCallback(
+    (height: number | null) => {
+      claimedHeightRef.current = height;
+      setClaimedHeight(height);
+      onClaim?.(height);
+    },
+    [onClaim],
+  );
   const claimed = claimedHeight !== null;
   const remainingRows = maxRows - (claimedHeight ?? 0);
   const innerScrollRef = useRef<ScrollBoxHandle | null>(null);

@@ -355,9 +355,13 @@ export function UserAgentNotificationMessage({
 }: Props): React.ReactNode {
   const { text } = param;
   const expanded = isExpanded ?? verbose;
-  // densable `wE(verbose)` (@203372180): `!verbose && !isTranscriptMode && !isQueued && MMn()`.
-  const isQueued = useQueuedMessage()?.isQueued === true;
-  const useV2Row = !verbose && !expanded && !isQueued && isTranscriptV2RowsEnabled();
+  // Official 2.1.328 `KTs(verbose)` (`chunk@307641741.js`): queued notices inherit
+  // `noticeSystemLines` from `QueuedMessageProvider` (`CTo`); live rows use `qx(verbose)`.
+  const queued = useQueuedMessage();
+  const useV2Row =
+    queued?.isQueued === true
+      ? queued.noticeSystemLines === true
+      : !verbose && !expanded && isTranscriptV2RowsEnabled();
   // gold As: zr(_, Dk) then KS — display-side amp/lt/gt only (not rie/quot).
   const summaryRaw = extractTag(text, 'summary');
   if (!summaryRaw) return null;

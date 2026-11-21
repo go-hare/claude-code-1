@@ -23,10 +23,9 @@ import {
 } from '../context/promptOverlayContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import {
-  AxcScrollAnchor,
-  AxcStickyHost,
   Box,
   Divider,
+  measureElement,
   NoSelect,
   ScrollBox,
   type ScrollBoxHandle,
@@ -45,8 +44,8 @@ import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { openBrowser, openPath } from '../utils/browser.js';
 import { getAutoScrollEnabled } from '../utils/config.js';
 import { isFullscreenEnvEnabled, latchSessionTuiSetting, resolveMouseTrackingMode } from '../utils/fullscreen.js';
-import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
 import { getPlatform } from '../utils/platform.js';
+import type { ScrollPin } from '../utils/scrollPin.js';
 import { useAppState } from '../state/AppState.js';
 import { createStore, type Store } from '../state/store.js';
 import { getBootstrapSessionHost } from '../utils/sessionHost.js';
@@ -64,6 +63,9 @@ import { getPanesState, subscribePanes } from '../utils/plugins/functionHooksMod
 
 /** Rows of transcript context kept visible above the modal pane's ▔ divider. */
 const MODAL_TRANSCRIPT_PEEK = 2;
+/** Official 2.1.328 `XWn` / `WTs` — minimum terminal rows & height deducted for `header`. */
+const HEADER_MIN_ROWS = 10;
+const HEADER_ROWS = 1;
 
 /**
  * densable tot `vkt` — sticky header occupies row 0, so overlay tops shift by 1.
@@ -1492,7 +1494,7 @@ export function useLeftoverChromeClaim(hostRef: RefObject<DOMElement | null>, ow
  * height — gold tot does not, and a float remainder tick re-renders tot every
  * yoga pass (spinner clock) then leftoverGs dirty-clears the flexGrow blank.
  */
-function useMeasured(read: () => number): number {
+function useMeasured<T>(read: () => T): T {
   const { subscribeLayout } = useApp();
   const snapshot = useSyncExternalStore(subscribeLayout, read, read);
   const [, bump] = useReducer((n: number) => n + 1, 0);
@@ -1528,6 +1530,8 @@ export type FullscreenLayoutProps = {
   bottom: ReactNode;
   /** Optional node rendered at the top of the main transcript column above StickyPromptHeader */
   top?: ReactNode;
+  /** Official 2.1.328 `pdn.header` — full-width top bar above the layout, deducting HEADER_ROWS from inner rows. */
+  header?: ReactNode;
   /**
    * densable abovePrompt (vh). Capped at Ne on its own; the prompt box
    * receives the leftover `max(0, Ne - measured height)`.
@@ -1539,27 +1543,24 @@ export type FullscreenLayoutProps = {
    */
   transcriptOverlay?: ReactNode;
   /**
-   * densable ozs / fCt — `{content, visible}`. Gold Tyn Bxc is a flex
-   * sibling (not absolute). `visible` drives Uxc/Bxc display.
+   * Official 2.1.328 `pdn.modal` — `{ content, footer?, visible }`.
+   * Flex sibling below transcript; content and footer heights are measured
+   * together so footer collapses (`height: 0`) when content + footer > maxModalRows.
    */
-  modal?: { content: ReactNode; visible: boolean };
+  modal?: { content: ReactNode; footer?: ReactNode; visible: boolean };
   /** Official 2.1.328 subscribable ScrollViewport proxy for the modal ScrollBox. */
   modalScrollViewport?: ScrollViewport;
   /** Official 2.1.328 subscribable ScrollViewport proxy for the main ScrollBox. */
   scrollViewport?: ScrollViewport;
-  /** Y-position (scrollHeight at snapshot) of the unseen-divider. Pill
-   *  shows while viewport bottom hasn't reached this. Ref so REPL doesn't
-   *  re-render on the one-shot snapshot write. */
-  dividerYRef?: RefObject<number | null>;
+  /** Official 2.1.328 `unseen: ScrollPin` — owns dividerY, unseenDivider count, and jumpToNew. */
+  unseen?: ScrollPin;
   /** Force-hide the pill (e.g. viewing a sub-agent task). */
   hidePill?: boolean;
   /** Force-hide the sticky prompt header (e.g. viewing a teammate task). */
   hideSticky?: boolean;
-  /** Count for the pill text. 0 → "Jump to bottom", >0 → "N new messages". */
-  newMessageCount?: number;
   /** 2.1.326 #191: true when Claude is waiting for the user's answer below the scrolled viewport. */
   askBelow?: boolean;
-  /** Called when the user clicks the "N new" pill. */
+  /** Optional extra click callback run alongside `unseen.jumpToNew()` when clicking the pill. */
   onPillClick?: () => void;
   /**
    * densable Tyn `sidebar` / `sidebarWidth`. Main column is
@@ -1582,134 +1583,6 @@ export type FullscreenLayoutProps = {
 };
 
 type Props = FullscreenLayoutProps;
-
-/**
- * Tracks the in-transcript "N new messages" divider position while the
- * user is scrolled up. Snapshots message count AND scrollHeight the first
- * time sticky breaks. scrollHeight ≈ the y-position of the divider in the
- * scroll content (it renders right after the last message that existed at
- * snapshot time).
- *
- * `pillVisible` lives in FullscreenLayout (not here) — it subscribes
- * directly to ScrollBox via useSyncExternalStore with a boolean snapshot
- * against `dividerYRef`, so per-frame scroll never re-renders REPL.
- * `dividerIndex` stays here because REPL needs it for computeUnseenDivider
- * → Messages' divider line; it changes only ~twice/scroll-session
- * (first scroll-away + repin), acceptable REPL re-render cost.
- *
- * `onScrollAway` must be called by every scroll-away action with the
- * handle; `onRepin` by submit/scroll-to-bottom.
- */
-export function useUnseenDivider(messageCount: number): {
-  /** Index into messages[] where the divider line renders. Cleared on
-   *  sticky-resume (scroll back to bottom) so the "N new" line doesn't
-   *  linger once everything is visible. */
-  dividerIndex: number | null;
-  /** scrollHeight snapshot at first scroll-away — the divider's y-position.
-   *  FullscreenLayout subscribes to ScrollBox and compares viewport bottom
-   *  against this for pillVisible. Ref so writes don't re-render REPL. */
-  dividerYRef: RefObject<number | null>;
-  onScrollAway: (handle: ScrollBoxHandle) => void;
-  onRepin: () => void;
-  /** Scroll the handle so the divider line is at the top of the viewport. */
-  jumpToNew: (handle: ScrollBoxHandle | null) => void;
-  /** Shift dividerIndex and dividerYRef when messages are prepended
-   *  (infinite scroll-back). indexDelta = number of messages prepended;
-   *  heightDelta = content height growth in rows. */
-  shiftDivider: (indexDelta: number, heightDelta: number) => void;
-} {
-  const [dividerIndex, setDividerIndex] = useState<number | null>(null);
-  // Ref holds the current count for onScrollAway to snapshot. Written in
-  // the render body (not useEffect) so wheel events arriving between a
-  // message-append render and its effect flush don't capture a stale
-  // count (off-by-one in the baseline). React Compiler bails out here —
-  // acceptable for a hook instantiated once in REPL.
-  const countRef = useRef(messageCount);
-  countRef.current = messageCount;
-  // scrollHeight snapshot — the divider's y in content coords. Ref-only:
-  // read synchronously in onScrollAway (setState is batched, can't
-  // read-then-write in the same callback) AND by FullscreenLayout's
-  // pillVisible subscription. null = pinned to bottom.
-  const dividerYRef = useRef<number | null>(null);
-
-  const onRepin = useCallback(() => {
-    // Don't clear dividerYRef here — a trackpad momentum wheel event
-    // racing in the same stdin batch would see null and re-snapshot,
-    // overriding the setDividerIndex(null) below. The useEffect below
-    // clears the ref after React commits the null dividerIndex, so the
-    // ref stays non-null until the state settles.
-    setDividerIndex(null);
-  }, []);
-
-  const onScrollAway = useCallback((handle: ScrollBoxHandle) => {
-    // Nothing below the viewport → nothing to jump to. Covers both:
-    // • empty/short session: scrollUp calls scrollTo(0) which breaks sticky
-    //   even at scrollTop=0 (wheel-up on fresh session showed the pill)
-    // • click-to-select at bottom: useDragToScroll.check() calls
-    //   scrollTo(current) to break sticky so streaming content doesn't shift
-    //   under the selection, then onScroll(false, …) — but scrollTop is still
-    //   at max (Sarah Deaton, #claude-code-feedback 2026-03-15)
-    // pendingDelta: scrollBy accumulates without updating scrollTop. Without
-    // it, wheeling up from max would see scrollTop==max and suppress the pill.
-    const max = Math.max(0, handle.getScrollHeight() - handle.getViewportHeight());
-    if (handle.getScrollTop() + handle.getPendingDelta() >= max) return;
-    // Snapshot only on the FIRST scroll-away. onScrollAway fires on EVERY
-    // scroll action (not just the initial break from sticky) — this guard
-    // preserves the original baseline so the count doesn't reset on the
-    // second PageUp. Subsequent calls are ref-only no-ops (no REPL re-render).
-    if (dividerYRef.current === null) {
-      dividerYRef.current = handle.getScrollHeight();
-      // New scroll-away session → move the divider here (replaces old one)
-      setDividerIndex(countRef.current);
-    }
-  }, []);
-
-  const jumpToNew = useCallback((handle: ScrollBoxHandle | null) => {
-    if (!handle) return;
-    // scrollToBottom (not scrollTo(dividerY)): sets stickyScroll=true so
-    // useVirtualScroll mounts the tail and render-node-to-output pins
-    // scrollTop=maxScroll. scrollTo sets stickyScroll=false → the clamp
-    // (still at top-range bounds before React re-renders) pins scrollTop
-    // back, stopping short. The divider stays rendered (dividerIndex
-    // unchanged) so users see where new messages started; the clear on
-    // next submit/explicit scroll-to-bottom handles cleanup.
-    handle.scrollToBottom();
-  }, []);
-
-  // Sync dividerYRef with dividerIndex. When onRepin fires (submit,
-  // scroll-to-bottom), it sets dividerIndex=null but leaves the ref
-  // non-null — a wheel event racing in the same stdin batch would
-  // otherwise see null and re-snapshot. Deferring the ref clear to
-  // useEffect guarantees the ref stays non-null until React has committed
-  // the null dividerIndex, blocking the if-null guard in onScrollAway.
-  //
-  // Also handles /clear, rewind, teammate-view swap — if the count drops
-  // below the divider index, the divider would point at nothing.
-  useEffect(() => {
-    if (dividerIndex === null) {
-      dividerYRef.current = null;
-    } else if (messageCount < dividerIndex) {
-      dividerYRef.current = null;
-      setDividerIndex(null);
-    }
-  }, [messageCount, dividerIndex]);
-
-  const shiftDivider = useCallback((indexDelta: number, heightDelta: number) => {
-    setDividerIndex(idx => (idx === null ? null : idx + indexDelta));
-    if (dividerYRef.current !== null) {
-      dividerYRef.current += heightDelta;
-    }
-  }, []);
-
-  return {
-    dividerIndex,
-    dividerYRef,
-    onScrollAway,
-    onRepin,
-    jumpToNew,
-    shiftDivider,
-  };
-}
 
 /**
  * Counts assistant turns in messages[dividerIndex..end). A "turn" is what
@@ -1799,10 +1672,9 @@ export function FullscreenLayout({
   modal,
   modalScrollViewport,
   scrollViewport,
-  dividerYRef,
+  unseen,
   hidePill = false,
   hideSticky = false,
-  newMessageCount = 0,
   askBelow = false,
   onPillClick,
   sidebar,
@@ -1811,9 +1683,17 @@ export function FullscreenLayout({
   dockWidth = 0,
   dockTail,
   top,
+  header,
   onLinkNotOpened,
 }: Props): React.ReactNode {
-  const { rows: terminalRows, columns } = useTerminalSize();
+  const terminalSize = useTerminalSize();
+  const { rows: rawTerminalRows, columns } = terminalSize;
+  const showHeader = header != null && rawTerminalRows >= HEADER_MIN_ROWS;
+  const terminalRows = rawTerminalRows - (showHeader ? HEADER_ROWS : 0);
+  const innerTerminalSize = useMemo(
+    () => (showHeader ? { columns, rows: terminalRows } : terminalSize),
+    [showHeader, columns, terminalRows, terminalSize],
+  );
   // 2.1.326 #140: latch the active session's fullscreen renderer choice on mount
   // so mid-session settings edits do not flip the running session's renderer.
   useEffect(() => {
@@ -1831,6 +1711,19 @@ export function FullscreenLayout({
   const bottomMaxHeight = expandBottomChrome
     ? Math.max(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS)
     : Math.max(1, Math.floor(terminalRows / 2));
+  const maxModalRows = terminalRows - MODAL_TRANSCRIPT_PEEK - 1;
+  const modalContentRef = useRef<DOMElement | null>(null);
+  const modalFooterRef = useRef<DOMElement | null>(null);
+  const [modalClaimedHeight, setModalClaimedHeight] = useState<number | null>(null);
+  const hasModalFooter = modal?.footer != null;
+  const showModalFooter = useMeasured(() => {
+    const contentEl = modalContentRef.current;
+    const footerEl = modalFooterRef.current;
+    if (!hasModalFooter || modalClaimedHeight === null || modalClaimedHeight <= 0 || !contentEl || !footerEl) {
+      return true;
+    }
+    return measureElement(contentEl).height + measureElement(footerEl).height <= maxModalRows;
+  });
   const abovePromptRef = useRef<DOMElement | null>(null);
   const aboveInnerRef = useRef<DOMElement | null>(null);
   const promptContainerRef = useRef<DOMElement | null>(null);
@@ -1839,9 +1732,9 @@ export function FullscreenLayout({
   const leftoverModalHost = useMemo(
     (): LeftoverModalHost => ({
       box: leftoverModalBoxRef,
-      rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
+      rows: maxModalRows,
     }),
-    [terminalRows],
+    [maxModalRows],
   );
   const abovePromptHeight = useYogaHeight(abovePromptRef);
   // 2.1.326 #198: protect prompt input height in short fullscreen windows when
@@ -1853,54 +1746,42 @@ export function FullscreenLayout({
     if (!modalVisible) return;
     return clearSelection;
   }, [modalVisible, clearSelection]);
-  // Scroll-derived chrome state lives HERE, not in REPL. StickyTracker
-  // writes via ScrollChromeContext; pillVisible subscribes directly to
-  // ScrollBox. Both change rarely (pill flips once per threshold crossing,
-  // sticky changes ~5-20×/transcript) — re-rendering FullscreenLayout on
-  // those is fine; re-rendering the 6966-line REPL + its 22+ useAppState
-  // selectors per-scroll-frame was not.
-  // densable 2.1.234 Wrn: raw useState setter in ScrollChromeContext (H9D).
-  // StickyTracker dedups on idx; no isSameStickyPrompt / null↔null wrapper.
   const [stickyPrompt, setStickyPrompt] = useState<StickyPrompt | null>(null);
   const chromeCtx = useMemo(() => ({ setStickyPrompt }), []);
-  // densable tot `yR` / `wt` — leftover chrome claims for Pe = Ye.reduce(SR).
   const [leftoverClaims, setLeftoverClaims] = useState<LeftoverChromeClaim[]>([]);
   const subscribeLeftoverChrome = useCallback((claim: LeftoverChromeClaim) => {
     setLeftoverClaims(prev => [...prev, claim]);
     return () => setLeftoverClaims(prev => prev.filter(row => row !== claim));
   }, []);
-  // 2.1.326 #197 / 2.1.328: subscribe to both ScrollBox and Ink frame paints
-  // (`subscribeFrames`) so streaming growth updates `scrollHeight` and keeps the
-  // jump-to-bottom pill visible whenever scrolled above the bottom of the transcript.
   const { subscribeFrames } = useApp();
   const subscribe = useCallback(
     (listener: () => void) => {
       const unsubScroll = scrollViewport?.subscribe(listener) ?? (() => {});
+      const unsubUnseen = unseen?.subscribe(listener) ?? (() => {});
       const unsubFrames = subscribeFrames?.(listener) ?? (() => {});
       return () => {
         unsubScroll();
+        unsubUnseen();
         unsubFrames();
       };
     },
-    [scrollViewport, subscribeFrames],
+    [scrollViewport, unseen, subscribeFrames],
   );
   const pillVisible = useSyncExternalStore(subscribe, () => {
-    // 2.1.326 #191 / #197 / 2.1.328 `Uo`: sticky never shows the pill;
-    // when scrolled up and content extends below viewportBottom, show pill if
-    // unread divider exists, auto-scroll is disabled, or Claude awaits an answer.
     const s = scrollViewport?.handle;
     if (!s) return false;
     if (s.isSticky()) return false;
     const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
-    const hasDivider = dividerYRef?.current != null;
+    const hasDivider = unseen?.dividerY != null;
     return (hasDivider || !getAutoScrollEnabled() || askBelow) && viewportBottom < s.getScrollHeight();
   });
-  const showUnreadCount = useSyncExternalStore(subscribe, () => {
+  const unreadMessageCount = useSyncExternalStore(subscribe, () => {
     const s = scrollViewport?.handle;
-    const dividerY = dividerYRef?.current;
-    if (!s || dividerY == null) return false;
+    const dividerY = unseen?.dividerY;
+    if (!s || dividerY == null) return 0;
     const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
-    return viewportBottom < dividerY;
+    if (viewportBottom >= dividerY) return 0;
+    return unseen?.getSnapshot().unseenDivider?.count ?? 0;
   });
   const onLinkNotOpenedRef = useRef(onLinkNotOpened);
   onLinkNotOpenedRef.current = onLinkNotOpened;
@@ -1962,12 +1843,11 @@ export function FullscreenLayout({
     const showPill = !hidePill && pillVisible;
     const pillNode = showPill ? (
       <NewMessagesPill
-        count={showUnreadCount ? newMessageCount : 0}
+        count={unreadMessageCount}
         askBelow={askBelow}
         onClick={() => {
-          // densable i8l: onClick={zxh} only — StickyTracker clears
-          // when scrollToBottom repins isSticky.
           onPillClick?.();
+          unseen?.jumpToNew();
         }}
       />
     ) : null;
@@ -2007,205 +1887,173 @@ export function FullscreenLayout({
     );
 
     return (
-      <PromptOverlayProvider container={promptContainerRef}>
-        <Box flexDirection="column" flexGrow={1} overflow="hidden" width="100%">
-          {/* $xc — scroll + sidebar row */}
-          <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
-            <Box flexDirection="column" flexGrow={1} overflow="hidden">
-              <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%" alignItems="stretch">
-                {/* densable tot `jg`/`Me` — left column sees columns=mainColumns
-                    so Ec Jump-to-bottom centers in the transcript, not the
-                    full terminal (sidebar is a sibling outside this context). */}
-                <TerminalSizeContext value={{ columns: mainColumns, rows: terminalRows }}>
-                  <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
-                    {top}
-                    {headerPrompt != null && (
-                      <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />
-                    )}
-                    <ScrollBox
-                      ref={scrollViewport?.attach}
-                      flexGrow={1}
-                      flexDirection="column"
-                      paddingTop={padCollapsed ? 0 : 1}
-                      stickyScroll
-                      followGrowth={getAutoScrollEnabled()}
-                    >
-                      {/* Vs() QW children = C9t{[b9t, pyn]} — no overlay-in-ScrollBox */}
-                      <ScrollChromeContext value={chromeCtx}>
-                        {scrollable}
-                        <AxcScrollAnchor />
-                      </ScrollChromeContext>
-                    </ScrollBox>
-                    {pillNode}
-                    <TranscriptOverlayPad collapsed={headerPrompt != null}>
-                      {transcriptOverlay ?? null}
-                    </TranscriptOverlayPad>
-                  </Box>
-                </TerminalSizeContext>
-                {sidebar != null &&
-                  (sidebarWidth > 0 ? (
-                    <Box
-                      flexDirection="column"
-                      width={sidebarWidth}
-                      flexShrink={0}
-                      overflow="hidden"
-                      backgroundColor="composerSidebarBackground"
-                    >
-                      {sidebar}
-                    </Box>
-                  ) : (
-                    sidebar
-                  ))}
-              </Box>
-              {dockWidth > 0 ? (
-                <TerminalSizeContext value={{ columns: abovePromptColumns, rows: terminalRows }}>
-                  {abovePromptBox}
-                </TerminalSizeContext>
-              ) : (
-                abovePromptBox
-              )}
-            </Box>
-            {dock != null && (
-              <Box
-                flexDirection="column"
-                width={dockWidth}
-                flexShrink={0}
-                overflow="hidden"
-                backgroundColor="composerSidebarBackground"
-                display={dockVisible ? 'flex' : 'none'}
-              >
-                {dock}
+      <TerminalSizeContext value={innerTerminalSize}>
+        <PromptOverlayProvider container={promptContainerRef}>
+          <Box flexDirection="column" flexGrow={1} overflow="hidden" width="100%">
+            {showHeader && (
+              <Box flexShrink={0} width="100%" height={HEADER_ROWS} overflow="hidden">
+                {header}
               </Box>
             )}
-          </Box>
-          {/* Uxc — prompt chrome (hidden while ozs visible). maxHeight is Ne minus measured abovePrompt. */}
-          <PromptChromeBudgetContext value={promptMaxHeight}>
-            <Box
-              ref={promptContainerRef}
-              flexDirection="column"
-              flexShrink={0}
-              width="100%"
-              maxHeight={promptMaxHeight}
-              display={modalVisible ? 'none' : 'flex'}
-            >
-              <Box
-                ref={promptInnerRef}
-                flexDirection="column"
-                width="100%"
-                flexGrow={1}
-                flexShrink={0}
-                overflowY="hidden"
-              >
-                <AbovePromptLeftoverContext value={leftoverYe}>
-                  <LeftoverChromeSubscribeContext value={subscribeLeftoverChrome}>
-                    <DockWidthContext value={dockVisible ? dockWidth : 0}>{bottom}</DockWidthContext>
-                  </LeftoverChromeSubscribeContext>
-                </AbovePromptLeftoverContext>
-              </Box>
-              {dockVisible && <DockTail width={dockWidth}>{dockTail}</DockTail>}
-              <SuggestionsOverlay rowsAbove={abovePromptHeight} />
-              <DialogOverlay rowsAbove={abovePromptHeight} />
-            </Box>
-          </PromptChromeBudgetContext>
-          {/* Bxc — ozs pane */}
-          {modal != null && (
-            <ModalContext
-              value={{
-                rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
-                columns: columns - 4,
-                scrollViewport: modalScrollViewport ?? null,
-                claimScrollBox: null,
-              }}
-            >
-              <LeftoverModalHostContext value={leftoverModalHost}>
-                <Box
-                  ref={leftoverModalBoxRef}
-                  flexShrink={0}
-                  width="100%"
-                  maxHeight={terminalRows - MODAL_TRANSCRIPT_PEEK}
-                  flexDirection="column"
-                  overflow="hidden"
-                  display={modalVisible ? 'flex' : 'none'}
-                >
-                  <Box flexShrink={0} flexDirection="row" height={1} overflow="hidden">
-                    <Box flexGrow={1} flexShrink={1} overflow="hidden">
-                      <Divider color="permission" char="▔" />
+            {/* $xc — scroll + sidebar row */}
+            <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
+              <Box flexDirection="column" flexGrow={1} overflow="hidden">
+                <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%" alignItems="stretch">
+                  {/* densable tot `jg`/`Me` — left column sees columns=mainColumns
+                    so Ec Jump-to-bottom centers in the transcript, not the
+                    full terminal (sidebar is a sibling outside this context). */}
+                  <TerminalSizeContext value={{ columns: mainColumns, rows: terminalRows }}>
+                    <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
+                      {top}
+                      {headerPrompt != null && (
+                        <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />
+                      )}
+                      <ScrollBox
+                        ref={scrollViewport?.attach}
+                        flexGrow={1}
+                        flexDirection="column"
+                        paddingTop={padCollapsed ? 0 : 1}
+                        stickyScroll
+                        followGrowth={getAutoScrollEnabled()}
+                      >
+                        <ScrollChromeContext value={chromeCtx}>{scrollable}</ScrollChromeContext>
+                      </ScrollBox>
+                      {pillNode}
+                      <TranscriptOverlayPad collapsed={headerPrompt != null}>
+                        {transcriptOverlay ?? null}
+                      </TranscriptOverlayPad>
                     </Box>
-                    <ModalDividerTail />
-                  </Box>
-                  <ModalScroller
-                    scrollViewport={modalScrollViewport}
-                    maxRows={terminalRows - MODAL_TRANSCRIPT_PEEK - 1}
-                  >
-                    {modal.content}
-                  </ModalScroller>
+                  </TerminalSizeContext>
+                  {sidebar != null &&
+                    (sidebarWidth > 0 ? (
+                      <Box
+                        flexDirection="column"
+                        width={sidebarWidth}
+                        flexShrink={0}
+                        overflow="hidden"
+                        backgroundColor="composerSidebarBackground"
+                      >
+                        {sidebar}
+                      </Box>
+                    ) : (
+                      sidebar
+                    ))}
                 </Box>
-              </LeftoverModalHostContext>
-            </ModalContext>
-          )}
-        </Box>
-      </PromptOverlayProvider>
+                {dockWidth > 0 ? (
+                  <TerminalSizeContext value={{ columns: abovePromptColumns, rows: terminalRows }}>
+                    {abovePromptBox}
+                  </TerminalSizeContext>
+                ) : (
+                  abovePromptBox
+                )}
+              </Box>
+              {dock != null && (
+                <Box
+                  flexDirection="column"
+                  width={dockWidth}
+                  flexShrink={0}
+                  overflow="hidden"
+                  backgroundColor="composerSidebarBackground"
+                  display={dockVisible ? 'flex' : 'none'}
+                >
+                  {dock}
+                </Box>
+              )}
+            </Box>
+            {/* Uxc — prompt chrome (hidden while ozs visible). maxHeight is Ne minus measured abovePrompt. */}
+            <PromptChromeBudgetContext value={promptMaxHeight}>
+              <Box
+                ref={promptContainerRef}
+                flexDirection="column"
+                flexShrink={0}
+                width="100%"
+                maxHeight={promptMaxHeight}
+                display={modalVisible ? 'none' : 'flex'}
+              >
+                <Box
+                  ref={promptInnerRef}
+                  flexDirection="column"
+                  width="100%"
+                  flexGrow={1}
+                  flexShrink={0}
+                  overflowY="hidden"
+                >
+                  <AbovePromptLeftoverContext value={leftoverYe}>
+                    <LeftoverChromeSubscribeContext value={subscribeLeftoverChrome}>
+                      <DockWidthContext value={dockVisible ? dockWidth : 0}>{bottom}</DockWidthContext>
+                    </LeftoverChromeSubscribeContext>
+                  </AbovePromptLeftoverContext>
+                </Box>
+                {dockVisible && <DockTail width={dockWidth}>{dockTail}</DockTail>}
+                <SuggestionsOverlay rowsAbove={abovePromptHeight} />
+                <DialogOverlay rowsAbove={abovePromptHeight} />
+              </Box>
+            </PromptChromeBudgetContext>
+            {/* Bxc — ozs pane */}
+            {modal != null && (
+              <ModalContext
+                value={{
+                  rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
+                  columns: columns - 4,
+                  scrollViewport: modalScrollViewport ?? null,
+                  claimScrollBox: null,
+                }}
+              >
+                <LeftoverModalHostContext value={leftoverModalHost}>
+                  <Box
+                    ref={leftoverModalBoxRef}
+                    flexShrink={0}
+                    width="100%"
+                    maxHeight={terminalRows - MODAL_TRANSCRIPT_PEEK}
+                    flexDirection="column"
+                    overflow="hidden"
+                    display={modalVisible ? 'flex' : 'none'}
+                  >
+                    <Box flexShrink={0} flexDirection="row" height={1} overflow="hidden">
+                      <Box flexGrow={1} flexShrink={1} overflow="hidden">
+                        <Divider color="permission" char="▔" />
+                      </Box>
+                      <ModalDividerTail />
+                    </Box>
+                    <Box flexDirection="column" flexShrink={1} overflow="hidden">
+                      <Box ref={modalContentRef} flexDirection="column" flexShrink={0}>
+                        <ModalScroller
+                          scrollViewport={modalScrollViewport}
+                          maxRows={maxModalRows}
+                          onClaim={setModalClaimedHeight}
+                        >
+                          {modal.content}
+                        </ModalScroller>
+                      </Box>
+                    </Box>
+                    <Box
+                      flexDirection="column"
+                      flexShrink={0}
+                      overflow="hidden"
+                      height={showModalFooter ? undefined : 0}
+                    >
+                      <Box ref={modalFooterRef} flexDirection="column" flexShrink={0}>
+                        {modal.footer}
+                      </Box>
+                    </Box>
+                  </Box>
+                </LeftoverModalHostContext>
+              </ModalContext>
+            )}
+          </Box>
+        </PromptOverlayProvider>
+      </TerminalSizeContext>
     );
   }
 
-  // densable Tyn `if (Qvt())` — sibling AFTER Vs return, not nested in it.
-  // Gold: xxc({scrollRef, scrollable:IKe, bottom:w9t, overlay:E9t})
-  // IKe = C9t{value:WTg, children:[b9t, pyn]} — pyn is kxc (AxcScrollAnchor).
-  // E9t = fCt!=null ? uN + H({flexDirection:"column", paddingX:Aee, children:fCt.content}) : null
-  // xxc overlay slot is absolute+opaque (owned by AxcStickyHost). No Ob/▔, no
-  // lRc, no pushUp, no sidebar. Qvt() body is not in the 239 dump — keep
-  // CLAUDE_CODE_AXC_STICKY_MAIN opt-in (do not product-default ON).
-  const axcSticky = isAxcStickyMainEnabled() && scrollViewport != null;
-  if (axcSticky) {
-    // Match Vs ozs: only mount opaque overlay when RPs visible (not suppressed).
-    const overlayNode =
-      modal != null && modal.visible ? (
-        <ModalContext
-          value={{
-            rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
-            columns: columns - 4,
-            scrollViewport: modalScrollViewport ?? null,
-            claimScrollBox: null,
-          }}
-        >
-          <LeftoverModalHostContext value={leftoverModalHost}>
-            <Box ref={leftoverModalBoxRef} flexDirection="column" paddingX={2}>
-              {modal.content}
-            </Box>
-          </LeftoverModalHostContext>
-        </ModalContext>
-      ) : null;
-    return (
-      <PromptOverlayProvider container={promptContainerRef}>
-        <AxcStickyHost
-          scrollViewport={scrollViewport}
-          scrollable={
-            <ScrollChromeContext value={chromeCtx}>
-              {scrollable}
-              <AxcScrollAnchor />
-            </ScrollChromeContext>
-          }
-          bottom={
-            <Box ref={promptContainerRef} flexDirection="column" width="100%">
-              {abovePrompt}
-              {bottom}
-              <SuggestionsOverlay />
-              <DialogOverlay />
-            </Box>
-          }
-          overlay={overlayNode}
-        />
-      </PromptOverlayProvider>
-    );
-  }
-
-  // Gold else: Fragment{[C9t{b9t}, T, M, E?.content]} — no overlay.
+  // Official 2.1.328 non-fullscreen fallback: Fragment{[ScrollChromeContext, abovePrompt, bottom, modal?.content, modal?.footer]}.
   return (
     <>
       <ScrollChromeContext value={chromeCtx}>{scrollable}</ScrollChromeContext>
       {abovePrompt}
       {bottom}
       {modal?.content}
+      {modal?.footer}
     </>
   );
 }

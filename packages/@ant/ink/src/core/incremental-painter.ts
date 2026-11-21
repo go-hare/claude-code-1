@@ -311,7 +311,13 @@ export class IncrementalPainter {
     let text = ''
     if (node.nodeName === 'ink-text') {
       const maxWidth = Math.min(getMaxWidth(yogaNode), this.output.width - x)
-      const formatted = formatTextForPaint(node, yogaNode, maxWidth, background)
+      const formatted = formatTextForPaint(
+        this.state,
+        node,
+        yogaNode,
+        maxWidth,
+        background,
+      )
       text = formatted?.text ?? ''
       cache.softWrap = formatted?.softWrap
     } else {
@@ -455,7 +461,18 @@ export class IncrementalPainter {
     const style = node.style
 
     if (lines !== undefined) {
-      output.writeLines(x, y, lines, softWrap)
+      if (node.nodeName === 'ink-text' && style.textDirection !== undefined) {
+        output.writeDirected(
+          x,
+          y,
+          lines.join('\n'),
+          softWrap,
+          style.textDirection,
+          Math.min(getMaxWidth(yogaNode), output.width - x),
+        )
+      } else {
+        output.writeLines(x, y, lines, softWrap)
+      }
       return
     }
 

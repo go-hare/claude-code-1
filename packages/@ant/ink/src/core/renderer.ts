@@ -11,12 +11,12 @@ import Output from './output.js'
 import renderNodeToOutput, {
   createRenderFrameContext,
   resetRenderFrameContextState,
-  runWithRenderFrameContext,
   vanishedOverflowingAbsoluteBlitFor,
 } from './render-node-to-output.js'
 import {
   clipRightEdgeWideGraphemes,
   createScreen,
+  type Screen,
   type StylePool,
 } from './screen.js'
 
@@ -147,27 +147,23 @@ export default function createRenderer(
         : prevScreen
     prevMarkRightEdge = markRightEdge
 
-    const renderedScreen = runWithRenderFrameContext(frameCtx, () => {
-      if (options.firstRow) {
-        incrementalPainter ??= new IncrementalPainter(
-          output!,
-          frameCtx,
-          stylePool,
-        )
-        incrementalPainter.paint(node, screen, top, markRightEdge)
-        screen.damage = { x: 0, y: 0, width, height }
-        return screen
-      }
+    let renderedScreen: Screen
+    if (options.firstRow) {
+      incrementalPainter ??= new IncrementalPainter(output, frameCtx, stylePool)
+      incrementalPainter.paint(node, screen, top, markRightEdge)
+      screen.damage = { x: 0, y: 0, width, height }
+      renderedScreen = screen
+    } else {
       incrementalPainter = undefined
-      renderNodeToOutput(node, output!, {
+      renderNodeToOutput(node, output, frameCtx, {
         prevScreen: blitPrevScreen,
       })
-      const outScreen = output!.get()
+      const outScreen = output.get()
       if (markRightEdge) {
-        clipRightEdgeWideGraphemes(outScreen, output!.rowsAtRightEdge)
+        clipRightEdgeWideGraphemes(outScreen, output.rowsAtRightEdge)
       }
-      return outScreen
-    })
+      renderedScreen = outScreen
+    }
 
     // Drain continuation: render cleared scrollbox.dirty, so next frame's
     // root blit would skip the subtree. markDirty walks ancestors so the
