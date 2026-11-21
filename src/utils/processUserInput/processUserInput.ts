@@ -611,6 +611,7 @@ export async function processUserInput({
   ideSelection,
   messages,
   setUserInputOnProcessing,
+  onQueryCommitted,
   uuid,
   isAlreadyProcessing,
   querySource,
@@ -658,6 +659,8 @@ export async function processUserInput({
   ideSelection?: IDESelection
   messages?: Message[]
   setUserInputOnProcessing?: (prompt?: string) => void
+  /** Official Jr: mark dispatch before screening an input that will query. */
+  onQueryCommitted?: () => void
   uuid?: string
   isAlreadyProcessing?: boolean
   querySource?: QuerySource
@@ -806,6 +809,7 @@ export async function processUserInput({
           if (context.abortController?.signal.aborted) {
             return { ran, rows, outcome: undefined }
           }
+          if (shouldQueryInput !== false) onQueryCommitted?.()
           const rawText = getContentText(input) || ''
           const lineText = rewriteSlashArgs(rawText, ran) ?? rawText
           const isStartInput =
@@ -963,6 +967,8 @@ export async function processUserInput({
     await deliverOwedAmbientAttachments(result, context, messages, querySource)
     return result
   }
+
+  if (lineCheck === undefined) onQueryCommitted?.()
 
   // Official 2.1.325 (#731): reuse lineCheck.outcome when UserPromptSubmit /
   // prompt.submit already ran before skill/slash expansion.

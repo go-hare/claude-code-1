@@ -18,18 +18,21 @@ const LAYOUT = join(
  *   inner bottom flexShrink:0
  */
 describe('FullscreenLayout Wrn 2.1.234 (empty-transcript chrome)', () => {
-  test('source: pill snapshot matches gold Ddw / 2.1.326 #197', async () => {
+  test('source: pill snapshots follow 2.1.328 pdn Uo/Wo and ScrollPin count selector', async () => {
     const src = await Bun.file(LAYOUT).text()
-    const idx = src.indexOf('const pillVisible = useSyncExternalStore')
+    const idx = src.indexOf('const getPillVisible = useCallback')
     expect(idx).toBeGreaterThan(0)
-    const slice = src.slice(idx, idx + 1200)
-    expect(slice).toMatch(/if \(s\.isSticky\(\)\) return false/)
-    expect(slice).toMatch(/dividerYRef/)
-    expect(slice).toMatch(
-      /\(hasDivider \|\| !getAutoScrollEnabled\(\) \|\| askBelow\) && viewportBottom < s\.getScrollHeight\(\)/,
+    const slice = src.slice(idx, idx + 1800)
+    expect(slice).toContain('if (!s || s.isSticky()) return false')
+    expect(slice).toContain('unseen?.getSnapshot().dividerY')
+    expect(slice).toContain(
+      '(hasDivider || !getAutoScrollEnabled()) && viewportBottom < s.getScrollHeight()',
     )
-    expect(slice).toMatch(/const showUnreadCount = useSyncExternalStore/)
-    expect(slice).toMatch(/return viewportBottom < dividerY/)
+    expect(slice).toContain(
+      'useSyncExternalStore(subscribe, getIsBeforeUnseenDivider)',
+    )
+    expect(slice).toContain('return viewportBottom < dividerY')
+    expect(slice).toContain('isBeforeUnseenDivider ? unseenMessageCount : 0')
   })
 
   test('source: ScrollBox followGrowth from getAutoScrollEnabled', async () => {

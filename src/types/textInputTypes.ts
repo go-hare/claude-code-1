@@ -552,6 +552,15 @@ export type QueuedCommand = {
   hearthRelayMessageIds?: unknown
   inlinedImagePaths?: string[]
   taskDelivery?: unknown
+  /** Official iie.run preserves these stamps when resurrecting a turn. */
+  scheduledTaskId?: string
+  scheduledFireId?: string
+  fromConnector?: boolean
+  textNotTyped?: boolean
+  noPersonArrived?: boolean
+  toolsUsed?: string[]
+  answeredPost?: unknown
+  emailSenderTurn?: unknown
   hostInitiator?: unknown
   localStdinOrigin?: boolean
   sessionChannelPersonTyped?: boolean

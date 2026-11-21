@@ -1612,12 +1612,13 @@ function StickyTracker({
   releaseReveal: () => void;
 }): null {
   const { setStickyPrompt } = useContext(ScrollChromeContext);
-  useSyncExternalStore(scrollViewport.subscribe, () => {
+  const getStickyScrollSnapshot = useCallback(() => {
     const s = scrollViewport.handle;
     if (!s) return NaN;
     const t = s.getScrollTop() + s.getPendingDelta();
     return s.isSticky() ? -1 - t : t;
-  });
+  }, [scrollViewport]);
+  useSyncExternalStore(scrollViewport.subscribe, getStickyScrollSnapshot);
 
   // Read live scroll state on every render.
   const handle = scrollViewport.handle;

@@ -119,7 +119,6 @@ export type SubmitPromptDeps = {
   pastedContents: Record<number, PastedContent>
   ideSelection: IDESelection | undefined
   stashedPrompt: StashedPrompt | undefined
-  abortController: AbortController | null
   getAbortController: () => AbortController | null
   getCurrentInput: () => string
   getMessages: () => Message[]
@@ -158,7 +157,6 @@ export type SubmitPromptDeps = {
   onQuery: HandlePromptSubmitParams['onQuery']
   onBeforeQuery: HandlePromptSubmitParams['onBeforeQuery']
   canUseTool: HandlePromptSubmitParams['canUseTool']
-  awaitPendingHooks: () => Promise<void>
   repinScroll: (force?: boolean, reason?: string) => void
   routeToSelectedPipes: (input: string) => boolean
   onClearSubmitted: () => void
@@ -197,7 +195,6 @@ export type ExecuteQueuedInputDeps = {
   onQuery: HandlePromptSubmitParams['onQuery']
   onBeforeQuery: HandlePromptSubmitParams['onBeforeQuery']
   canUseTool: HandlePromptSubmitParams['canUseTool']
-  awaitPendingHooks: () => Promise<void>
   consumeIdeSelection: (uuid: string | undefined) => void
   recordIdeSelectionConsumedBy: (
     uuid: string,
@@ -226,7 +223,6 @@ export class SubmitController {
   readonly #messageQueue: MessageQueueInstance
   readonly #queryGuard: QueryGuard
   #submitDepth = 0
-  #isDraining = false
   #disposed = false
 
   constructor(options: SubmitControllerOptions) {
@@ -238,10 +234,6 @@ export class SubmitController {
 
   get isSubmitting(): boolean {
     return this.#submitDepth > 0
-  }
-
-  get isDraining(): boolean {
-    return this.#isDraining
   }
 
   get isLoading(): boolean {
@@ -336,8 +328,7 @@ export class SubmitController {
         mode: 'prompt',
         isTurnRunning: () => this.#queryGuard.isRunning,
         isTurnActive: () => this.#queryGuard.isActive,
-        isDispatchingForModel: () =>
-          this.#queryGuard.isActive && !this.#queryGuard.isRunning,
+        isDispatchingForModel: () => this.#queryGuard.isDispatchingForModel,
         abortSignal: deps.getAbortController(),
         lowLatency: deps.queuedNowLowLatencyHost,
         interruptForSubmit,
@@ -497,8 +488,6 @@ export class SubmitController {
       return
     }
 
-    await deps.awaitPendingHooks()
-
     const abortBeforeSubmit = deps.getAbortController()
     await handlePromptSubmit({
       input,
@@ -517,7 +506,7 @@ export class SubmitController {
       ideSelection: deps.ideSelection,
       setUserInputOnProcessing: deps.setUserInputOnProcessing,
       setAbortController: deps.setAbortControllerForQuery,
-      abortController: deps.abortController,
+      abortController: abortBeforeSubmit,
       onQuery: deps.onQuery,
       setAppState: deps.setAppState,
       querySource: deps.querySource,
@@ -557,7 +546,7 @@ export class SubmitController {
       onPromptHandedBack: deps.restoreIdeSelectionConsumedBy,
       getCurrentInput: deps.getCurrentInput,
       restoreHandedBackPrompt: deps.restoreHandedBackPrompt,
-      awaitSessionStartHooks: deps.awaitPendingHooks,
+      awaitSessionStartHooks: this.#turnController.awaitSessionStartHooks,
     })
 
     const viewed = viewedAgentForInput({
@@ -578,8 +567,7 @@ export class SubmitController {
         mode: 'prompt',
         isTurnRunning: () => this.#queryGuard.isRunning,
         isTurnActive: () => this.#queryGuard.isActive,
-        isDispatchingForModel: () =>
-          this.#queryGuard.isActive && !this.#queryGuard.isRunning,
+        isDispatchingForModel: () => this.#queryGuard.isDispatchingForModel,
         abortSignal: currentAc,
         lowLatency: deps.queuedNowLowLatencyHost,
         interruptForSubmit,
@@ -990,60 +978,55 @@ export class SubmitController {
     queuedCommands: QueuedCommand[],
     deps: ExecuteQueuedInputDeps,
   ): Promise<void> {
-    if (this.#disposed || this.#isDraining) return
-    this.#isDraining = true
-    try {
-      const firstEditable = queuedCommands.find(isQueuedCommandEditable)
-      const consumeLive =
-        firstEditable !== undefined &&
-        firstEditable.ideSelection === undefined &&
-        (deps.ideSelection?.source !== 'diff' ||
-          (firstEditable.mode !== 'bash' &&
-            !(
-              typeof firstEditable.value === 'string' &&
-              firstEditable.value.trim().startsWith('/')
-            )))
-      if (consumeLive) {
-        deps.consumeIdeSelection(firstEditable.uuid)
-      } else if (firstEditable?.ideSelection && firstEditable.uuid) {
-        deps.recordIdeSelectionConsumedBy(
-          firstEditable.uuid,
-          firstEditable.ideSelection,
-        )
-      }
-      await handlePromptSubmit({
-        helpers: {
-          setCursorOffset: () => {},
-          clearBuffer: () => {},
-          resetHistory: () => {},
-        },
-        queryGuard: this.#queryGuard,
-        commands: deps.commands,
-        setPastedContents: deps.setPastedContents,
-        setToolJSX: deps.setToolJSX,
-        getToolUseContext: deps.getToolUseContext,
-        messages: deps.getMessages(),
-        mainLoopModel: deps.mainLoopModel,
-        ideSelection: consumeLive ? deps.ideSelection : undefined,
-        setUserInputOnProcessing: deps.setUserInputOnProcessing,
-        setAbortController: deps.setAbortControllerForQuery,
-        onQuery: deps.onQuery,
-        setAppState: deps.setAppState,
-        querySource: deps.querySource,
-        onBeforeQuery: deps.onBeforeQuery,
-        canUseTool: deps.canUseTool,
-        addNotification: deps.addNotification,
-        setMessages: deps.setMessages,
-        queuedCommands,
-        onPromptHandedBack: deps.restoreIdeSelectionConsumedBy,
-        onInputChange: deps.setInputValue,
-        getCurrentInput: deps.getCurrentInput,
-        restoreHandedBackPrompt: deps.restoreHandedBackPrompt,
-        awaitSessionStartHooks: deps.awaitPendingHooks,
-      })
-    } finally {
-      this.#isDraining = false
+    if (this.#disposed) return
+    const firstEditable = queuedCommands.find(isQueuedCommandEditable)
+    const consumeLive =
+      firstEditable !== undefined &&
+      firstEditable.ideSelection === undefined &&
+      (deps.ideSelection?.source !== 'diff' ||
+        (firstEditable.mode !== 'bash' &&
+          !(
+            typeof firstEditable.value === 'string' &&
+            firstEditable.value.trim().startsWith('/')
+          )))
+    if (consumeLive) {
+      deps.consumeIdeSelection(firstEditable.uuid)
+    } else if (firstEditable?.ideSelection && firstEditable.uuid) {
+      deps.recordIdeSelectionConsumedBy(
+        firstEditable.uuid,
+        firstEditable.ideSelection,
+      )
     }
+    await handlePromptSubmit({
+      helpers: {
+        setCursorOffset: () => {},
+        clearBuffer: () => {},
+        resetHistory: () => {},
+      },
+      queryGuard: this.#queryGuard,
+      commands: deps.commands,
+      setPastedContents: deps.setPastedContents,
+      setToolJSX: deps.setToolJSX,
+      getToolUseContext: deps.getToolUseContext,
+      messages: deps.getMessages(),
+      mainLoopModel: deps.mainLoopModel,
+      ideSelection: consumeLive ? deps.ideSelection : undefined,
+      setUserInputOnProcessing: deps.setUserInputOnProcessing,
+      setAbortController: deps.setAbortControllerForQuery,
+      onQuery: deps.onQuery,
+      setAppState: deps.setAppState,
+      querySource: deps.querySource,
+      onBeforeQuery: deps.onBeforeQuery,
+      canUseTool: deps.canUseTool,
+      addNotification: deps.addNotification,
+      setMessages: deps.setMessages,
+      queuedCommands,
+      onPromptHandedBack: deps.restoreIdeSelectionConsumedBy,
+      onInputChange: deps.setInputValue,
+      getCurrentInput: deps.getCurrentInput,
+      restoreHandedBackPrompt: deps.restoreHandedBackPrompt,
+      awaitSessionStartHooks: this.#turnController.awaitSessionStartHooks,
+    })
   }
 
   handleIncomingPrompt(
@@ -1051,7 +1034,7 @@ export class SubmitController {
     deps: IncomingPromptDeps,
     options?: { isMeta?: boolean },
   ): boolean {
-    if (this.#disposed || this.#queryGuard.isActive || this.#isDraining) {
+    if (this.#disposed || this.#queryGuard.isActive) {
       return false
     }
 

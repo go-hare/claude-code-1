@@ -34,8 +34,16 @@ import type { SpinnerMode } from '../../components/Spinner.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
 import { getSystemContext, getUserContext } from '../../context.js'
 import { clearCommandScopedAllowRules } from '../../utils/permissions/permissionSetup.js'
-import type { HostEngine } from '../../engine/hostEngine.js'
-import { runHostEngineTurn } from '../../engine/hostEngineTurn.js'
+import {
+  isErrorClassTerminalReason,
+  isUserAbortTerminalReason,
+  type HostEngine,
+} from '../../engine/hostEngine.js'
+import type { SDKResultMessage } from '../../entrypoints/sdk/coreTypes.generated.js'
+import {
+  runHostEngineTurn,
+  type HostEngineFeed,
+} from '../../engine/hostEngineTurn.js'
 import { removeLastFromHistory } from '../../history.js'
 import { preferLiveMcpClients } from '../../hooks/useMergedClients.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
@@ -47,6 +55,7 @@ import type { MCPServerConnection } from '../../services/mcp/types.js'
 import type { AppStateStore } from '../../state/AppStateStore.js'
 import { getAllInProcessTeammateTasks } from '../../tasks/InProcessTeammateTask/InProcessTeammateTask.js'
 import type { TaskState } from '../../tasks/types.js'
+import type { QueuedCommand } from '../../types/textInputTypes.js'
 import type {
   Message as MessageType,
   UserMessage,
@@ -113,7 +122,6 @@ import {
   generateSessionTitle,
   resolveSessionTitleInput,
 } from '../../utils/sessionTitle.js'
-import type { Stream } from '../../utils/stream.js'
 import { setMemberActive } from '../../utils/swarm/teamHelpers.js'
 import { buildEffectiveSystemPrompt } from '../../utils/systemPrompt.js'
 import { getAgentName, getTeamName } from '../../utils/teammate.js'
@@ -195,6 +203,7 @@ export type DispatchReplStreamEventDeps = {
   >
   responseLengthRef: { current: number }
   apiMetricsRef: { current: ApiMetricEntry[] }
+  onApiMetrics?: Parameters<typeof handleMessageFromStream>[7]
   onStreamingText: Parameters<typeof handleMessageFromStream>[8]
   displayTransform: Parameters<typeof handleMessageFromStream>[9]
   setInProgressToolUseIDs: React.Dispatch<React.SetStateAction<Set<string>>>
@@ -583,6 +592,7 @@ export function dispatchReplStreamEvent(
     },
     setStreamingThinking,
     metrics => {
+      deps.onApiMetrics?.(metrics)
       if (metrics && typeof metrics === 'object' && 'type' in metrics) {
         const nextLen = tokenCounter.onApiMetricsEvent(
           metrics as SpinnerApiMetricsEvent,
@@ -873,8 +883,11 @@ export type RunReplTurnDeps = {
   appendSystemPrompt?: string
   canUseTool: CanUseToolFn
   hostEngine: HostEngine
-  hostInputRef: { current: Stream<Record<string, unknown>> | null }
-  pendingQueryParamsRef: { current: Record<string, unknown>[] }
+  engineFeed: HostEngineFeed
+  awaitSessionStartHooks?: (signal: AbortSignal) => Promise<void> | undefined
+  onEngineRead?: () => void
+  onMainRequestStart?: () => void
+  onEngineStatus?: (compactResult: unknown) => void
   onQueryEvent: (event: Parameters<typeof handleMessageFromStream>[0]) => void
   addNotification: (n: {
     key: string
@@ -900,7 +913,10 @@ export type RunReplTurnDeps = {
     current: { tokens: number; limit: number; nudges: number } | undefined
   }
   backgroundWaitStartTimeRef: { current: number | null }
-  onTurnComplete?: (messages: MessageType[]) => Promise<void> | void
+  onTurnComplete?: (
+    messages: MessageType[],
+    terminalReason?: string,
+  ) => Promise<void> | void
   resetTimingRefs: () => void
   responseLengthRef: { current: number }
   setStreamingToolUses: React.Dispatch<React.SetStateAction<StreamingToolUse[]>>
@@ -929,7 +945,7 @@ async function executeReplTurnImpl(
   effort?: EffortValue,
   stopHookActive?: boolean,
   additionalDisallowedTools: string[] = [],
-): Promise<void> {
+): Promise<SDKResultMessage | undefined> {
   const {
     store,
     initialMcpClients,
@@ -954,8 +970,7 @@ async function executeReplTurnImpl(
     appendSystemPrompt,
     canUseTool,
     hostEngine,
-    hostInputRef,
-    pendingQueryParamsRef,
+    engineFeed,
     onQueryEvent,
     addNotification,
     leftArrowDeferRef,
@@ -1247,11 +1262,16 @@ async function executeReplTurnImpl(
   } else {
     abortController.signal.addEventListener('abort', onAbort, { once: true })
   }
+  let result: SDKResultMessage | undefined
   try {
-    await runHostEngineTurn({
+    result = await runHostEngineTurn({
       engine: hostEngine,
-      inputRef: hostInputRef,
-      pendingQueryParamsRef,
+      feed: engineFeed,
+      onRead: deps.onEngineRead,
+      onMainRequestStart: () => {
+        if (!abortController.signal.aborted) deps.onMainRequestStart?.()
+      },
+      onStatus: deps.onEngineStatus,
       turnInput,
       newMessages,
       onQueryEvent: event => {
@@ -1429,7 +1449,13 @@ async function executeReplTurnImpl(
 
   resetLoadingState()
   logQueryProfileReport()
-  await onTurnComplete?.(messagesRef.current)
+  await onTurnComplete?.(
+    messagesRef.current,
+    typeof result?.terminal_reason === 'string'
+      ? result.terminal_reason
+      : undefined,
+  )
+  return result
 }
 
 /**
@@ -1500,12 +1526,20 @@ export async function runReplTurn(
     let enqueued = false
     for (const m of newMessages) {
       if (m.type !== 'user') continue
-      if (
-        m.isMeta &&
-        !isMetaVisibleOrigin(
-          m.origin as { kind?: string; senderTaskId?: string } | undefined,
-        )
-      ) {
+      if (m.dispatchEcho === true) continue
+      const row = m as UserMessage &
+        Partial<QueuedCommand> & {
+          queueOrigin?: QueuedCommand['origin']
+          queueMode?: QueuedCommand['mode']
+          queueSkipAttachments?: boolean
+          queueSkipSlashCommands?: boolean
+          queueTranscriptOnly?: boolean
+        }
+      const origin = row.queueOrigin ?? row.origin
+      const mode =
+        row.queueMode ??
+        (origin?.kind === 'task-notification' ? 'task-notification' : 'prompt')
+      if (m.isMeta && !isMetaVisibleOrigin(origin)) {
         continue
       }
       if ((m as { stackedExpansion?: boolean }).stackedExpansion) {
@@ -1526,14 +1560,55 @@ export async function runReplTurn(
       const promptSource = (m as { promptSource?: string }).promptSource
       enqueue({
         value: textContent,
-        mode: 'prompt',
+        mode,
         agentId: getMainThreadAgentId(),
         uuid: m.uuid,
-        origin: m.origin,
+        admissionExempt: 'resurrected',
+        origin,
         isMeta: m.isMeta,
-        skipSlashCommands: isMetaVisibleOrigin(
-          m.origin as { kind?: string; senderTaskId?: string } | undefined,
-        ),
+        skipAttachments:
+          row.queueSkipAttachments === true || mode === 'task-notification'
+            ? true
+            : undefined,
+        skipSlashCommands:
+          isMetaVisibleOrigin(origin) ||
+          row.queueSkipSlashCommands === true ||
+          row.textNotTyped === true ||
+          row.handedOff === true,
+        ...(row.queueTranscriptOnly === true ? { shouldQuery: false } : {}),
+        ...(row.textNotTyped === true || row.handedOff === true
+          ? { textNotTyped: true, noPersonArrived: true, drainOnly: true }
+          : {}),
+        ...(row.taskDelivery !== undefined
+          ? { taskDelivery: row.taskDelivery }
+          : {}),
+        ...(row.scheduledTaskId !== undefined
+          ? { scheduledTaskId: row.scheduledTaskId }
+          : {}),
+        ...(row.scheduledFireId !== undefined
+          ? { scheduledFireId: row.scheduledFireId }
+          : {}),
+        ...(row.wakeupSource !== undefined
+          ? { wakeupSource: row.wakeupSource }
+          : {}),
+        ...(row.fromConnector === true ? { fromConnector: true } : {}),
+        ...(row.toolsUsed !== undefined ? { toolsUsed: row.toolsUsed } : {}),
+        ...(row.projectsUserTurn === true ? { projectsUserTurn: true } : {}),
+        ...(row.emailSenderTurn !== undefined
+          ? { emailSenderTurn: row.emailSenderTurn }
+          : {}),
+        ...(row.answeredPost !== undefined
+          ? { answeredPost: row.answeredPost }
+          : {}),
+        ...(row.hearthRelayRows !== undefined
+          ? { hearthRelayRows: row.hearthRelayRows }
+          : {}),
+        ...(row.hearthRelayMessageIds !== undefined
+          ? { hearthRelayMessageIds: row.hearthRelayMessageIds }
+          : {}),
+        ...(row.hearthRelayThreadTs !== undefined
+          ? { hearthRelayThreadTs: row.hearthRelayThreadTs }
+          : {}),
         ...(stopHookActive !== undefined ? { stopHookActive } : {}),
         ...(clientPlatform !== undefined ? { clientPlatform } : {}),
         ...(queuePriority !== undefined ? { priority: queuePriority } : {}),
@@ -1556,6 +1631,7 @@ export async function runReplTurn(
   }
 
   setMainLoopBusy(true)
+  let engineResult: SDKResultMessage | undefined
 
   try {
     pipeReturnHadErrorRef.current = false
@@ -1571,6 +1647,10 @@ export async function runReplTurn(
     clearStreamingText()
     displayTransform.newTurn()
 
+    const headHooks = shouldQuery
+      ? deps.awaitSessionStartHooks?.(abortController.signal)
+      : undefined
+    if (headHooks) await headHooks
     const latestMessages = messagesRef.current
 
     if (input) {
@@ -1611,7 +1691,7 @@ export async function runReplTurn(
     )
 
     try {
-      await executeReplTurnImpl(
+      engineResult = await executeReplTurnImpl(
         deps,
         effectiveLatestMessages,
         newMessages,
@@ -1696,7 +1776,17 @@ export async function runReplTurn(
         performance.now() -
         loadingStartTimeRef.current -
         totalPausedMsRef.current
-      if (!abortController.signal.aborted && !proactiveActive) {
+      const terminalReason =
+        typeof engineResult?.terminal_reason === 'string'
+          ? engineResult.terminal_reason
+          : undefined
+      if (
+        !abortController.signal.aborted &&
+        !proactiveActive &&
+        engineResult?.is_error !== true &&
+        !isUserAbortTerminalReason(terminalReason) &&
+        !isErrorClassTerminalReason(terminalReason)
+      ) {
         const hasRunningSwarmAgents = getAllInProcessTeammateTasks(
           store.getState().tasks,
         ).some(t => t.status === 'running')

@@ -620,18 +620,10 @@ export function usePluginFieldValuePrune(
  */
 export function useYogaMeasure(read: () => number): number {
   const { subscribeLayout } = useApp();
-  const snapshot = useSyncExternalStore(subscribeLayout, read, read);
+  const snapshot = useSyncExternalStore(subscribeLayout, read);
   const [, bump] = useReducer((n: number) => n + 1, 0);
-  const consecutiveBumpsRef = useRef(0);
   useLayoutEffect(() => {
-    if (!Object.is(read(), snapshot)) {
-      if (consecutiveBumpsRef.current < 8) {
-        consecutiveBumpsRef.current += 1;
-        bump();
-      }
-    } else {
-      consecutiveBumpsRef.current = 0;
-    }
+    if (!Object.is(read(), snapshot)) bump();
   });
   return snapshot;
 }

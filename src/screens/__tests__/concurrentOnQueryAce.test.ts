@@ -17,7 +17,8 @@ describe('REPL concurrent onquery densable Ace', () => {
   test('uses isMetaVisibleOrigin instead of blanket !isMeta drop', () => {
     expect(src).toContain('isMetaVisibleOrigin')
     expect(src).toContain('tengu_concurrent_onquery_detected')
-    expect(src).toContain('skipSlashCommands: isMetaVisibleOrigin')
+    expect(src).toContain('isMetaVisibleOrigin(origin)')
+    expect(src).toContain('row.queueSkipSlashCommands === true')
     // Must not use the old blanket filter that drops all meta
     expect(src).not.toContain(
       ".filter((m): m is UserMessage => m.type === 'user' && !m.isMeta)",
@@ -25,7 +26,8 @@ describe('REPL concurrent onquery densable Ace', () => {
   })
 
   test('re-queues with origin / isMeta / agentId', () => {
-    expect(src).toContain('origin: m.origin')
+    expect(src).toContain('const origin = row.queueOrigin ?? row.origin')
+    expect(src).toContain("admissionExempt: 'resurrected'")
     expect(src).toContain('isMeta: m.isMeta')
     expect(src).toContain('agentId: getMainThreadAgentId()')
   })

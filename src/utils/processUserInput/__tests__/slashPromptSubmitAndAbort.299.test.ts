@@ -55,6 +55,57 @@ function makeBaseContext(overrides?: {
 }
 
 describe('Official 2.1.325 #731 & #676: UserPromptSubmit before expansion + abort race before embedded shell', () => {
+  test.each([
+    { shouldQuery: undefined, skipSubmissionHooks: false, expected: 1 },
+    { shouldQuery: false, skipSubmissionHooks: false, expected: 0 },
+    { shouldQuery: undefined, skipSubmissionHooks: true, expected: 0 },
+  ])('model dispatch is committed only when input enters model submission screening: %j', async settings => {
+    let committed = 0
+    await processUserInput({
+      input: 'plain dispatch fixture',
+      mode: 'prompt',
+      context: makeBaseContext(),
+      setToolJSX: () => {},
+      skipAttachments: true,
+      ...settings,
+      onQueryCommitted: () => {
+        committed++
+      },
+    })
+    expect(committed).toBe(settings.expected)
+  })
+
+  test('skill dispatch commits once before prompt expansion', async () => {
+    let committed = 0
+    let committedAtExpansion = 0
+    const command = {
+      type: 'prompt',
+      name: 'dispatch-skill',
+      description: 'dispatch fixture',
+      isEnabled: () => true,
+      isHidden: false,
+      userInvocable: true,
+      progressMessage: 'running',
+      userFacingName: () => 'dispatch-skill',
+      getPromptForCommand: async () => {
+        committedAtExpansion = committed
+        return [{ type: 'text', text: 'expanded dispatch fixture' }]
+      },
+    } as unknown as Command
+    await processUserInput({
+      input: '/dispatch-skill',
+      mode: 'prompt',
+      context: makeBaseContext({ commands: [command] }),
+      setToolJSX: () => {},
+      skipAttachments: true,
+      onQueryCommitted: () => {
+        committed++
+      },
+    })
+    expect(committedAtExpansion).toBe(1)
+    expect(committed).toBe(1)
+  })
+
   test('#731: checkLine blocks before skill expansion (getPromptForCommand never runs)', async () => {
     let expanded = false
     const skillCmd = {

@@ -14,7 +14,7 @@ import { takeInitialUserMessage } from '../utils/sessionStart.js'
 export function useDeferredHookMessages(
   pendingHookMessages: Promise<HookResultMessage[]> | undefined,
   setMessages: (action: React.SetStateAction<Message[]>) => void,
-): () => Promise<void> {
+): () => Promise<void> | undefined {
   const messageQueue = useMessageQueue()
   const pendingRef = useRef(pendingHookMessages ?? null)
   const resolvedRef = useRef(!pendingHookMessages)
@@ -23,15 +23,45 @@ export function useDeferredHookMessages(
     const promise = pendingRef.current
     if (!promise) return
     let cancelled = false
-    promise.then(msgs => {
-      if (cancelled) return
+    promise.then(
+      msgs => {
+        if (cancelled) return
+        resolvedRef.current = true
+        pendingRef.current = null
+        if (msgs.length > 0) {
+          setMessages(prev => [...msgs, ...prev])
+        }
+        // densable LMr @206434438 — prepend SessionStart initialUserMessage onto
+        // the command queue so the REPL executes a real first-turn user prompt.
+        const initial = takeInitialUserMessage()
+        if (initial) {
+          messageQueue.enqueueReportingAdmission(
+            { mode: 'prompt', value: initial, priority: 'now' },
+            { ahead: true },
+          )
+        }
+      },
+      () => {
+        if (cancelled) return
+        // Official EJ._subscribeHookSet releases rejected runs too.
+        resolvedRef.current = true
+        pendingRef.current = null
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [setMessages, messageQueue])
+
+  return useCallback(() => {
+    if (resolvedRef.current || !pendingRef.current) return
+    return pendingRef.current.then(msgs => {
+      if (resolvedRef.current) return
       resolvedRef.current = true
       pendingRef.current = null
       if (msgs.length > 0) {
         setMessages(prev => [...msgs, ...prev])
       }
-      // densable LMr @206434438 — prepend SessionStart initialUserMessage onto
-      // the command queue so the REPL executes a real first-turn user prompt.
       const initial = takeInitialUserMessage()
       if (initial) {
         messageQueue.enqueueReportingAdmission(
@@ -40,26 +70,5 @@ export function useDeferredHookMessages(
         )
       }
     })
-    return () => {
-      cancelled = true
-    }
-  }, [setMessages, messageQueue])
-
-  return useCallback(async () => {
-    if (resolvedRef.current || !pendingRef.current) return
-    const msgs = await pendingRef.current
-    if (resolvedRef.current) return
-    resolvedRef.current = true
-    pendingRef.current = null
-    if (msgs.length > 0) {
-      setMessages(prev => [...msgs, ...prev])
-    }
-    const initial = takeInitialUserMessage()
-    if (initial) {
-      messageQueue.enqueueReportingAdmission(
-        { mode: 'prompt', value: initial, priority: 'now' },
-        { ahead: true },
-      )
-    }
   }, [setMessages, messageQueue])
 }

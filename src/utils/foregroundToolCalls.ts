@@ -574,7 +574,10 @@ export type QueuedNowLowLatencyHost = {
     }
     readonly abortController?: AbortController | null
     interruptForSubmit?: () => boolean | undefined
-    stream: { readonly isMainResponseStreaming: boolean }
+    stream: {
+      readonly isMainResponseStreaming: boolean
+      readonly isMainRequestAwaitingResponse?: boolean
+    }
   }
   store: {
     getState: () => {
@@ -677,7 +680,8 @@ export function readQueuedNowTurnEvidence(
       (inProgress?.size ?? 0) > 0 || spinner.mode === 'tool-input',
     isCompacting: spinner.isCompacting,
     isMainRequestAnnounced:
-      host.turn.stream.isMainResponseStreaming || spinner.mode === 'requesting',
+      host.turn.stream.isMainRequestAwaitingResponse === true ||
+      host.turn.stream.isMainResponseStreaming,
   }
 }
 

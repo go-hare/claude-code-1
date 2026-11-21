@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { Buffer } from 'node:buffer'
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import {
@@ -6,6 +8,7 @@ import {
   preferLiveMcpClients,
 } from '../../hooks/useMergedClients.js'
 import { McpSessionWiring } from '../sessionSlots.js'
+import { applyOnFailureBlockToAggregatedHookResult } from '../hooks.js'
 
 const transpiler = new Bun.Transpiler({ loader: 'ts' })
 const replSource = readFileSync(
@@ -54,6 +57,7 @@ function runtime() {
       )
       .replaceAll('export ', '') + '\nexecMcpToolHook',
     {
+      Buffer,
       getBootstrapSession: () => session,
       delay: async () => {
         poll?.()
@@ -85,9 +89,11 @@ function mountRepl(
   initialMcpClients: unknown[] | undefined,
   getClients: () => unknown[],
 ) {
-  const start = replSource.indexOf(
+  const start = replSource.lastIndexOf(
     '  useEffect(() => {',
-    replSource.indexOf('  const store = useAppStateStore();'),
+    replSource.indexOf(
+      'return getBootstrapSession().mcpSessionWiring.acquireClientsAccessor(',
+    ),
   )
   const end =
     replSource.indexOf('  }, [initialMcpClients, store]);', start) +
@@ -144,9 +150,11 @@ describe('MCP default clients accessor lifecycle', () => {
     const { PassThrough } = await import('node:stream')
     const env = runtime()
     let clients: unknown[] = [{ name: 'server', type: 'pending' }]
-    const start = replSource.indexOf(
+    const start = replSource.lastIndexOf(
       '  useEffect(() => {',
-      replSource.indexOf('  const store = useAppStateStore();'),
+      replSource.indexOf(
+        'return getBootstrapSession().mcpSessionWiring.acquireClientsAccessor(',
+      ),
     )
     const end =
       replSource.indexOf('  }, [initialMcpClients, store]);', start) +
@@ -305,6 +313,9 @@ describe('MCP default clients accessor lifecycle', () => {
       transpiler.transformSync(body) + '\nexecuteHooksOutsideREPL',
       {
         TOOL_HOOK_EXECUTION_TIMEOUT_MS: 600000,
+        randomUUID,
+        startHookHeartbeat: () => undefined,
+        applyOnFailureBlockToAggregatedHookResult,
         isEnvTruthy: () => false,
         process: { env: {} },
         shouldDisableAllHooksIncludingManaged: () => false,

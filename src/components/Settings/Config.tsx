@@ -1053,24 +1053,6 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
           ]
         : []),
       {
-        id: 'cacheWarningEnabled',
-        label: 'Cache warnings',
-        value: settingsData?.cacheWarningEnabled ?? true,
-        type: 'boolean' as const,
-        onChange(cacheWarningEnabled: boolean) {
-          updateSettingsForSource('localSettings', {
-            cacheWarningEnabled,
-          });
-          setSettingsData(prev => ({
-            ...prev,
-            cacheWarningEnabled,
-          }));
-          logEvent('tengu_cache_warning_setting_changed', {
-            enabled: cacheWarningEnabled,
-          });
-        },
-      },
-      {
         id: 'reduceMotion',
         label: 'Reduce motion',
         value: settingsData?.prefersReducedMotion ?? false,

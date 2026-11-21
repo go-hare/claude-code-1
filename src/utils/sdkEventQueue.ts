@@ -185,7 +185,10 @@ type SdkStatusEvent = {
   type: 'system'
   subtype: 'status'
   /** densable $Oi / nF — compacting | requesting | null */
-  status: 'compacting' | 'requesting' | null
+  status: string | null
+  permissionMode?: unknown
+  compact_result?: unknown
+  compact_error?: string
   uuid?: string
   session_id?: string
 }

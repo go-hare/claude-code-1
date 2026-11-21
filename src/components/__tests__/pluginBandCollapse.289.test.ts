@@ -1430,7 +1430,8 @@ describe('densable 2.1.289 Si panes semantic store (EMPTY_PANES-shaped)', () => 
     expect(fh).not.toMatch(/\bexport\s+function\s+placeWaitingRemote\b/)
     expect(fh).not.toMatch(/\bexport\s+function\s+oNo\b/)
     expect(fh).not.toMatch(/\bexport\s+function\s+i4n\b/)
-    expect(fh).not.toMatch(/\bnew\s+WeakSet\b/)
+    // Check the pane registry itself; depth/theme validators also use WeakSet.
+    expect(fh).toContain('const askedPanes: AskedPaneRef[] = []')
     // leave dialogStore.open alone — no minify Ide/Hde/QLt person-registry export
     expect(fh).not.toContain('dialogStore.open')
     expect(fh).not.toMatch(/\bexport\s+(?:const|function|let|class)\s+Ide\b/)
@@ -1570,7 +1571,7 @@ describe('densable 2.1.289 kL/yL/$l/g$ wrap', () => {
     expect(src).toContain("usePluginFieldValuePrune(focusables, 'Input'")
     expect(src).toContain("usePluginFieldValuePrune(focusables, 'Select'")
     expect(src).toContain('const { subscribeLayout } = useApp()')
-    expect(src).toContain('useSyncExternalStore(subscribeLayout, read, read)')
+    expect(src).toContain('useSyncExternalStore(subscribeLayout, read)')
     expect(src).toContain('if (!Object.is(read(), snapshot)) bump()')
     expect(src).toContain(
       'useYogaMeasure(() => measurePluginClientBox(boxRef.current).width)',

@@ -161,7 +161,8 @@ describe('Wave 2 2.1.302–2.1.309 alignment', () => {
       'utf8',
     )
     expect(src).toContain('isDispatchingForModel: () =>')
-    expect(src).toContain(
+    expect(src).toContain('this.#queryGuard.isDispatchingForModel')
+    expect(src).not.toContain(
       'this.#queryGuard.isActive && !this.#queryGuard.isRunning',
     )
   })

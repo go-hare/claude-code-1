@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Box,
   FrameScheduler,
@@ -16,6 +18,7 @@ import {
 import Ink from '../../../packages/@ant/ink/src/core/ink.js';
 import Output from '../../../packages/@ant/ink/src/core/output.js';
 import { computeUnseenDivider } from '../FullscreenLayout.js';
+import { useYogaMeasure } from '../PluginRasterPanes.js';
 import { ScrollPin } from '../../utils/scrollPin.js';
 import { TranscriptStore } from '../../utils/transcriptStore.js';
 import {
@@ -741,5 +744,97 @@ describe('UI 2.1.328 1:1 alignment fixes', () => {
       noticeSystemLines: true,
     });
     instance.unmount();
+  });
+
+  test('FullscreenLayout matches pdn cached readers and separate ScrollPin count subscription', () => {
+    const src = readFileSync(join(import.meta.dir, '../FullscreenLayout.tsx'), 'utf8');
+    expect(src).toContain('const getPillVisible = useCallback');
+    expect(src).toContain('useSyncExternalStore(subscribe, getPillVisible)');
+    expect(src).toContain('useSyncExternalStore(subscribe, getIsBeforeUnseenDivider)');
+    expect(src).toContain('isBeforeUnseenDivider ? unseenMessageCount : 0');
+    expect(src).toContain('unseen?.subscribe ?? NOOP_SUBSCRIBE_SELECTION, getUnseenMessageCount');
+    expect(src).toContain('const readShowModalFooter = useCallback');
+    expect(src).toContain('useMeasured(readShowModalFooter)');
+    expect(src).toContain('const leftoverYe = useCallback');
+    expect(src).toContain('const leftoverOf = useCallback');
+    expect(src).not.toContain('hasDivider || !getAutoScrollEnabled() || askBelow');
+  });
+
+  test('eo measures real Yoga layout through more than eight commits and converges', async () => {
+    let measuredHeight = 0;
+    let renders = 0;
+    function MeasuredBox(): React.ReactNode {
+      const ref = useRef<DOMElement | null>(null);
+      const height = useYogaMeasure(() => ref.current?.yogaNode?.getComputedHeight() ?? 0);
+      measuredHeight = height;
+      renders++;
+      return (
+        <Box ref={ref} height={Math.min(12, height + 1)} flexShrink={0}>
+          <Text>{`measured-${height}`}</Text>
+        </Box>
+      );
+    }
+    const stdout = Object.assign(new PassThrough(), { columns: 60, rows: 24, isTTY: true });
+    const stdin = Object.assign(new PassThrough(), {
+      isTTY: true,
+      setRawMode() {
+        return stdin;
+      },
+      ref() {
+        return stdin;
+      },
+      unref() {
+        return stdin;
+      },
+    });
+    const instance = await render(<MeasuredBox />, {
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      patchConsole: false,
+      exitOnCtrlC: false,
+    });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 80));
+      expect(measuredHeight).toBe(12);
+      expect(renders).toBeGreaterThan(8);
+      const settledRenders = renders;
+      await new Promise(resolve => setTimeout(resolve, 40));
+      expect(renders).toBe(settledRenders);
+    } finally {
+      instance.unmount();
+    }
+  });
+
+  test('all layout readers match official eo without a local retry limit', () => {
+    for (const file of [
+      '../FullscreenLayout.tsx',
+      '../PluginRasterPanes.tsx',
+      '../PromptInput/Notifications.tsx',
+      '../../context/promptOverlayContext.tsx',
+    ]) {
+      const src = readFileSync(join(import.meta.dir, file), 'utf8');
+      expect(src).toContain('useSyncExternalStore(subscribeLayout, read)');
+      expect(src).toContain('if (!Object.is(read(), snapshot)) bump()');
+      expect(src).not.toContain('consecutiveBumpsRef');
+    }
+  });
+
+  test('REPL modal construction follows kje without a conditional dialog-scroll effect', () => {
+    const repl = readFileSync(join(import.meta.dir, '../../screens/REPL.tsx'), 'utf8');
+    expect(repl).not.toContain('prevOzsVisibleRef');
+    expect(repl).not.toContain('scrollPin.showDialog(undefined, true)');
+    expect(repl).not.toContain('scrollPin.onDialogLeft()');
+  });
+
+  test('sampling follows upstream without cache warning injection or a config toggle', () => {
+    const query = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8');
+    expect(query).not.toContain('createCacheWarningMessage');
+    expect(query).not.toContain('shouldShowCacheWarning');
+    expect(query).not.toContain('cacheWarning.js');
+    const config = readFileSync(join(import.meta.dir, '../Settings/Config.tsx'), 'utf8');
+    expect(config).not.toContain('cacheWarningEnabled');
+    const utility = readFileSync(join(import.meta.dir, '../../utils/cacheWarning.ts'), 'utf8');
+    expect(utility).not.toContain('cache_warning');
+    expect(utility).not.toContain('cacheWarningStateBySource');
   });
 });

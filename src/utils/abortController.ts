@@ -5,6 +5,35 @@ import { setMaxListeners } from 'events'
  */
 const DEFAULT_MAX_LISTENERS = 50
 
+/** Official Un: stop waiting on abort without cancelling the shared promise. */
+export async function waitWithAbort<T>(
+  pending: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  const consumeRejection = () => {
+    void pending.catch(() => {})
+  }
+  if (signal.aborted) {
+    consumeRejection()
+    throw createAbortErrorReason('Aborted')
+  }
+  let onAbort = () => {}
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(createAbortErrorReason('Aborted'))
+        signal.addEventListener('abort', onAbort, { once: true })
+      }),
+    ])
+  } catch (error) {
+    consumeRejection()
+    throw error
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
+}
+
 /**
  * densable J0 — cache DOMException AbortError reasons for stable identity.
  * Prefer abort with string "background" or this helper so RT(reason)==="background".

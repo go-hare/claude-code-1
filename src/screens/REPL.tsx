@@ -132,7 +132,6 @@ import {
   subscribeSessionWorking,
   subscribeUserPromptWaiting,
 } from '../utils/sessionHost.js';
-import { QueryGuard } from '../utils/QueryGuard.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { truncateToWidth } from '../utils/format.js';
 import { tokenCountFromLastAPIResponse } from '../utils/tokens.js';
@@ -537,7 +536,6 @@ import type { Terminal as QueryTerminal } from '../query/transitions.js';
 import { clearGoalOnUnrecoverableError } from '../services/goal/goalUnrecoverableClear.js';
 import { createHostEngine, type HostEngine } from '../engine/hostEngine.js';
 import { runHostEngineTurn } from '../engine/hostEngineTurn.js';
-import { Stream } from '../utils/stream.js';
 import { preferLiveMcpClients, useMergedClients } from '../hooks/useMergedClients.js';
 import { getQuerySourceForREPL } from '../utils/promptCategory.js';
 import { useMergedTools } from '../hooks/useMergedTools.js';
@@ -789,6 +787,7 @@ const UndercoverAutoCallout =
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { activityManager } from '../utils/activityManager.js';
 import { createAbortController } from '../utils/abortController.js';
+import { createStore } from '../state/store.js';
 import { MCPConnectionManager } from 'src/services/mcp/MCPConnectionManager.js';
 import { useFeedbackSurvey } from 'src/components/FeedbackSurvey/useFeedbackSurvey.js';
 import { useMemorySurvey } from 'src/components/FeedbackSurvey/useMemorySurvey.js';
@@ -1609,7 +1608,7 @@ export type Props = {
   // Return false to prevent query execution
   onBeforeQuery?: (input: string, newMessages: MessageType[]) => Promise<boolean>;
   // Optional callback when a turn completes (model finishes responding)
-  onTurnComplete?: (messages: MessageType[]) => void | Promise<void>;
+  onTurnComplete?: (messages: MessageType[], terminalReason?: string) => void | Promise<void>;
   // When true, disables REPL input (hides prompt and prevents message selector)
   disabled?: boolean;
   // Optional agent definition to use for the main thread
@@ -1693,8 +1692,8 @@ export type Props = {
   engine?: HostEngine;
   /** densable onCommandsChange — Host/CCR command list push. */
   onCommandsChange?: (commands: Command[]) => void;
-  /** densable onQueryParamsChange — observe prepared turn params (ji). */
-  onQueryParamsChange?: (params: QueryParams) => void;
+  /** Official onQueryParamsChange supplies the feed reader to an external engine. */
+  onQueryParamsChange?: (readPendingQueryParams: () => QueryParams) => void;
   /** #1717: Restore persisted SEP-2663 MCP task sidecars once REPL has live setAppState. */
   resumeSep2663Tasks?: {
     sessionId: string;
@@ -1782,21 +1781,15 @@ function REPLInner({
   // densable Jul/LHr Host engine: P??S8o + unmount close when self-owned.
   // Turn body (Sse) → query(); turn pump (HWf) → runHostEngineTurn.
   const hostEngineOwned = externalHostEngine === undefined;
-  const hostInputRef = useRef<Stream<Record<string, unknown>> | null>(null);
-  const pendingQueryParamsRef = useRef<QueryParams[]>([]);
-  const onQueryParamsChangeRef = useRef(onQueryParamsChange);
-  onQueryParamsChangeRef.current = onQueryParamsChange;
+  const turnControllerRef = useRef<TurnController | null>(null);
   const [hostEngine] = useState<HostEngine>(() => {
     if (externalHostEngine) return externalHostEngine;
     return createHostEngine<QueryParams>({
       sessionId: getSessionId(),
       prepareTurn: async () => {
-        const next = pendingQueryParamsRef.current.shift();
-        if (!next) {
-          throw new Error('[engine] prepareTurn: no pending query params');
-        }
-        onQueryParamsChangeRef.current?.(next);
-        return next;
+        const turn = turnControllerRef.current;
+        if (!turn) throw new Error('engine: turn controller is not mounted');
+        return turn.readPendingQueryParams();
       },
       runTurn: async function* (prepared, abortController) {
         // densable Sse: engine AC is turn authority; link REPL AC if distinct.
@@ -1845,6 +1838,7 @@ function REPLInner({
           type: 'result',
           subtype: reason === 'completed' ? 'success' : 'error',
           is_error: reason !== 'completed',
+          terminal_reason: reason,
           result: reason,
           ...(thrown !== undefined
             ? {
@@ -1862,15 +1856,7 @@ function REPLInner({
   useEffect(() => {
     return () => {
       if (!hostEngineOwned) return;
-      // Drop any unconsumed HWf turn params so a closed engine cannot
-      // leave stale prepareTurn state for a future remount/external host.
-      pendingQueryParamsRef.current = [];
-      try {
-        hostInputRef.current?.done();
-      } catch {
-        // stream may already be closed
-      }
-      hostInputRef.current = null;
+      turnControllerRef.current?.dispose();
       try {
         hostEngine.close();
       } catch {
@@ -2045,14 +2031,20 @@ function REPLInner({
         mainThreadAgentDefinition,
       }),
   );
-  // Synchronous state machine for the query lifecycle. Replaces the
-  // error-prone dual-state pattern where isLoading (React state, async
-  // batched) and isQueryRunning (ref, sync) could desync. See QueryGuard.ts.
-  const queryGuard = React.useRef(new QueryGuard()).current;
-
   const [turnController] = useState(
-    () => new TurnController({ store, initialLoading: remoteSessionConfig?.hasInitialPrompt ?? false }),
+    () =>
+      new TurnController({
+        store,
+        initialLoading: remoteSessionConfig?.hasInitialPrompt ?? false,
+        ownsEngine: hostEngineOwned,
+      }),
   );
+  turnControllerRef.current = turnController;
+  useEffect(() => {
+    onQueryParamsChange?.(turnController.readPendingQueryParams);
+  }, [onQueryParamsChange, turnController]);
+  // Official 2.1.328 iie owns the guard and publishes loading on its signal.
+  const queryGuard = turnController.guard;
   const [submitController] = useState(() => new SubmitController({ store, turnController, messageQueue, queryGuard }));
   const [viewController] = useState(() => new ViewController());
   // Official 2.1.323 (#1981): when resuming a session without auto-replaying
@@ -2449,10 +2441,16 @@ function REPLInner({
   useIdeLogging(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients);
   useIdeSelection(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients, setIDESelection);
 
-  const { streamMode, streamingToolUses, streamingThinking } = useSyncExternalStore(
-    turnController.subscribe,
-    turnController.getSnapshot,
-  );
+  const {
+    abortController,
+    isQueryActive,
+    isExternalLoading,
+    isLoading,
+    streamMode,
+    streamingToolUses,
+    streamingThinking,
+  } = useSyncExternalStore(turnController.subscribe, turnController.getSnapshot);
+  const setAbortController = turnController.setAbortController;
   const setStreamingToolUses = turnController.setStreamingToolUses;
   const setStreamingThinking = turnController.setStreamingThinking;
   // densable fl / Ihr.outputLimitRecovery — "picking the thought back up"
@@ -2490,12 +2488,6 @@ function REPLInner({
   // never writes the store — X stays false. Keep the `N&&!X` conjunct.
   const [liveStateRowMounted] = useState(false);
 
-  const [abortController, setAbortController] = useState<AbortController | null>(null);
-  // Ref that always points to the current abort controller, used by the
-  // REPL bridge to abort the active query when a remote interrupt arrives.
-  const abortControllerRef = useRef<AbortController | null>(null);
-  abortControllerRef.current = abortController;
-
   // densable 236 #27: SIGTERM must abort in-flight query as remote-cancel
   // (print.ts owns its handlers; global gracefulShutdown calls this hook).
   useEffect(() => {
@@ -2504,7 +2496,7 @@ function REPLInner({
     const { createAbortErrorReason } =
       require('../utils/abortController.js') as typeof import('../utils/abortController.js');
     registerInteractiveShutdownAbort(() => {
-      const ac = abortControllerRef.current;
+      const ac = turnController.abortController;
       if (ac && !ac.signal.aborted) {
         ac.abort(createAbortErrorReason('remote-cancel'));
       }
@@ -2522,7 +2514,7 @@ function REPLInner({
   // densable `_abortOnNowPriorityCommand` — `#k` promoteToNow aborts the live turn.
   useEffect(() => {
     return messageQueue.subscribe(() => {
-      abortOnNowPriorityCommand(abortControllerRef.current);
+      abortOnNowPriorityCommand(turnController.abortController);
     });
   }, [messageQueue]);
 
@@ -2563,25 +2555,6 @@ function REPLInner({
   useEffect(() => () => scrollPin.dispose(), [scrollPin]);
   const scrollViewport = scrollPin.viewport;
   const modalScrollViewport = scrollPin.modalViewport;
-
-  // Subscribe to the guard — true during dispatching or running.
-  // This is the single source of truth for "is a local query in flight".
-  const isQueryActive = React.useSyncExternalStore(queryGuard.subscribe, queryGuard.getSnapshot);
-
-  // Separate loading flag for operations outside the local query guard:
-  // remote sessions (useRemoteSession / useDirectConnect) and foregrounded
-  // background tasks (useSessionBackgrounding). These don't route through
-  // onQuery / queryGuard, so they need their own spinner-visibility state.
-  // Initialize true if remote mode with initial prompt (CCR processing it).
-  const [isExternalLoading, setIsExternalLoadingRaw] = React.useState(remoteSessionConfig?.hasInitialPrompt ?? false);
-
-  // Derived: any loading source active. Read-only — no setter. Local query
-  // loading is driven by queryGuard (reserve/tryStart/end/cancelReservation),
-  // external loading by setIsExternalLoading.
-  const isLoading = isQueryActive || isExternalLoading;
-  useEffect(() => {
-    turnController.setLoading(isLoading);
-  }, [turnController, isLoading]);
 
   // Elapsed time is computed by SpinnerWithVerb from these refs on each
   // animation frame, avoiding a useInterval that re-renders the entire REPL.
@@ -2632,10 +2605,11 @@ function REPLInner({
   // session would show ~56 years elapsed (Date.now() - 0).
   const setIsExternalLoading = React.useCallback(
     (value: boolean) => {
-      setIsExternalLoadingRaw(value);
-      if (value) resetTimingRefs();
+      const wasLoading = turnController.getSnapshot().isLoading;
+      turnController.setExternalLoading(value);
+      if (value && !wasLoading) resetTimingRefs();
     },
-    [resetTimingRefs],
+    [turnController, resetTimingRefs],
   );
 
   // Start time of the first turn that had swarm teammates running
@@ -3358,17 +3332,20 @@ function REPLInner({
         turn: {
           guard: queryGuard,
           get abortController() {
-            return abortControllerRef.current;
+            return turnController.abortController;
           },
           interruptForSubmit: () => {
-            const ac = abortControllerRef.current;
+            const ac = turnController.abortController;
             if (!ac || ac.signal.aborted) return false;
             ac.abort('interrupt');
             return true;
           },
           stream: {
+            get isMainRequestAwaitingResponse() {
+              return turnController.isMainRequestAwaitingResponse;
+            },
             get isMainResponseStreaming() {
-              return queryGuard.isRunning;
+              return turnController.isMainResponseStreaming;
             },
           },
         },
@@ -3407,10 +3384,9 @@ function REPLInner({
   const setAbortControllerForQuery = useCallback(
     (ac: AbortController | null) => {
       if (ac) markTurnStart();
-      abortControllerRef.current = ac;
       setAbortController(ac);
     },
-    [markTurnStart],
+    [markTurnStart, setAbortController],
   );
   // Delegate transcript state updates, detached tool-call pruning, and
   // AppState.transcripts[mainAgentId] projection to TranscriptProjection,
@@ -3800,6 +3776,7 @@ function REPLInner({
   // hook messages are injected when they resolve. awaitPendingHooks()
   // must be called before the first API call so the model sees hook context.
   const awaitPendingHooks = useDeferredHookMessages(pendingHookMessages, setMessages);
+  turnController.bindSessionStartHooks(awaitPendingHooks);
 
   // Official 2.1.150 rEH: useDeferredValue(messages), the full list.
   // No 500-message slice — while loading, older turns stay in the deferred tree.
@@ -4635,6 +4612,7 @@ function REPLInner({
     // finally) have already transitioned the guard to idle by the time this runs.
     // External loading (remote/backgrounding) is reset separately by those hooks.
     setIsExternalLoading(false);
+    turnController.resetRequestState();
     setUserInputOnProcessing(undefined);
     responseLengthRef.current = 0;
     apiMetricsRef.current = [];
@@ -4660,7 +4638,7 @@ function REPLInner({
     // turn's commands — clear after each turn to avoid accumulating
     // Promise chains for unconsumed checks (denied/aborted paths).
     clearSpeculativeChecks();
-  }, [pickNewSpinnerTip, clearStreamingText]);
+  }, [turnController, pickNewSpinnerTip, clearStreamingText]);
 
   // Session backgrounding — hook is below, after getToolUseContext
 
@@ -5697,6 +5675,8 @@ function REPLInner({
   }, [addNotification]);
   // densable jpt — leftArrowToAgentsFired (qpe in flight / post-query latch)
   const leftArrowToAgentsFired = useRef(false);
+  // Official x2.handOverInFlight: active handoff blocks dequeue, not execution.
+  const [handOverInFlight] = useState(() => createStore(false));
   // densable _r — LAc confirm open (iHt/HUo). Gold syncs via useEffect on Tt.
   // densable HUo: jpt || Ki !== null || _r
   const leftArrowConfirmOpenRef = useRef(false);
@@ -5978,6 +5958,7 @@ function REPLInner({
   }, [viewingAgentTaskId, repinScroll]);
 
   function onCancel() {
+    const abortController = turnController.abortController;
     if (focusedInputDialog === 'elicitation') {
       // Elicitation dialog handles its own Escape, and closing it shouldn't affect any loading state.
       return;
@@ -6020,7 +6001,7 @@ function REPLInner({
     // Official 2.1.328 (#582): remember when Esc interrupts an active Code Mode
     // turn so subsequent local slash commands (e.g. `/model`) do not auto-start
     // a new model turn until the user submits a fresh prompt.
-    if (isCodeModeEnabled() && (isLoading || abortControllerRef.current)) {
+    if (isCodeModeEnabled() && (isLoading || turnController.abortController)) {
       codeModeInterruptedByEscRef.current = true;
     }
 
@@ -6629,7 +6610,7 @@ function REPLInner({
   useEffect(() => {
     setFunctionHooksTurnReader(() => getMainThreadTurn());
     setTurnAbortHandler(async ({ turnId }) => {
-      const ac = abortControllerRef.current;
+      const ac = turnController.abortController;
       if (!ac || ac.signal.aborted) {
         throw new Error(`$.turn.abort: no turn is running (asked for ${turnId})`);
       }
@@ -6751,6 +6732,7 @@ function REPLInner({
 
   // Session backgrounding (Ctrl+B to background/foreground)
   const handleBackgroundQuery = useCallback(() => {
+    const abortController = turnController.abortController;
     // Official 2.1.323 (#1964) & 2.1.328 (`lht`): Ctrl+B session backgrounding
     // is always refused when Code Mode is active (distinct from auto-mode
     // background scripts).
@@ -6853,7 +6835,7 @@ function REPLInner({
       });
     })();
   }, [
-    abortController,
+    turnController,
     mainLoopModel,
     toolPermissionContext,
     mainThreadAgentDefinition,
@@ -6921,7 +6903,7 @@ function REPLInner({
   // with no visible assistant text and only basic non-interactive tools.
   const turnStartMessageIndexRef = useRef(0);
   const handleTurnComplete = useCallback(
-    async (turnMessages: MessageType[]) => {
+    async (turnMessages: MessageType[], terminalReason?: string) => {
       if (process.env.CLAUDE_JOB_DIR || process.env.CLAUDE_CODE_SESSION_KIND === 'bg') {
         try {
           const { isBgJobSession, shouldSuppressTurnEndNeedsInput, clearBgNeedsInputOnReply } = await import(
@@ -6958,7 +6940,7 @@ function REPLInner({
           // Never throw into turn completion
         }
       }
-      await onTurnComplete?.(turnMessages);
+      await onTurnComplete?.(turnMessages, terminalReason);
     },
     [onTurnComplete, store],
   );
@@ -7164,8 +7146,10 @@ function REPLInner({
             appendSystemPrompt,
             canUseTool,
             hostEngine,
-            hostInputRef,
-            pendingQueryParamsRef,
+            engineFeed: turnController.engineFeed,
+            awaitSessionStartHooks: turnController.awaitSessionStartHooks,
+            onEngineRead: turnController.beginEngineRead,
+            onMainRequestStart: turnController.noteMainRequestAnnounced,
             onQueryEvent,
             addNotification,
             leftArrowDeferRef,
@@ -7272,7 +7256,6 @@ function REPLInner({
       // LVr strip → $co → optional mZ prefill → onQuery([], ac, true, [], model).
       if ('replay' in initialMsg) {
         setAppState(prev => (prev.initialMessage === null ? prev : { ...prev, initialMessage: null }));
-        await awaitPendingHooks();
         if (queryGuard.isActive) {
           // densable: guard active → skip (markReplayNoOp residual omitted)
           logForDebugging('[reply-on-resume] query already active — skip');
@@ -7435,10 +7418,8 @@ function REPLInner({
         }, initialMsg.message.uuid);
       }
 
-      // Ensure SessionStart hook context is available before the first API
-      // call. onSubmit calls this internally but the onQuery path below
-      // bypasses onSubmit — hoist here so both paths see hook messages.
-      await awaitPendingHooks();
+      // Both submit and direct onQuery wait through the turn controller so
+      // Esc can stop this turn without cancelling shared SessionStart hooks.
 
       // Route all initial prompts through onSubmit to ensure UserPromptSubmit hooks fire
       // TODO: Simplify by always routing through onSubmit once it supports
@@ -7538,8 +7519,7 @@ function REPLInner({
           pastedContents,
           ideSelection,
           stashedPrompt,
-          abortController,
-          getAbortController: () => abortControllerRef.current,
+          getAbortController: () => turnController.abortController,
           getCurrentInput: () => inputValueRef.current,
           getMessages: () => messagesRef.current,
           getStreamMode: () => streamModeRef.current,
@@ -7567,7 +7547,6 @@ function REPLInner({
           onQuery,
           onBeforeQuery,
           canUseTool,
-          awaitPendingHooks,
           repinScroll,
           routeToSelectedPipes,
           onClearSubmitted: () => {
@@ -7612,7 +7591,7 @@ function REPLInner({
       canUseTool,
       activeRemote,
       queuedNowLowLatencyHost,
-      abortController,
+      turnController,
       idleReturnController,
       resetTimingRefs,
       routeToSelectedPipes,
@@ -8164,7 +8143,15 @@ function REPLInner({
 
   // REPL Bridge: replicate user/assistant messages to the bridge session
   // for remote access via claude.ai. No-op in external builds or when not enabled.
-  const { sendBridgeResult } = useReplBridge(messages, setMessages, abortControllerRef, commands, mainLoopModel);
+  const bridgeAbortController = useMemo(
+    () => ({
+      get current() {
+        return turnController.abortController;
+      },
+    }),
+    [turnController],
+  );
+  const { sendBridgeResult } = useReplBridge(messages, setMessages, bridgeAbortController, commands, mainLoopModel);
   sendBridgeResultRef.current = () => {
     if (backgroundHold.holdsRunning()) {
       pendingBridgeResultForBackgroundHoldRef.current = true;
@@ -8280,11 +8267,6 @@ function REPLInner({
 
   const executeQueuedInput = useCallback(
     async (queuedCommands: QueuedCommand[]) => {
-      // Official 2.1.296 (#518): do not drain queued prompts in the foreground
-      // while a ← background handoff is in flight.
-      if (leftArrowToAgentsFired.current || leftArrowDeferRef.current !== null || leftArrowConfirmOpenRef.current) {
-        return;
-      }
       // Official 2.1.325 #2319: strip slash-command allowed-tools grants and guard
       // permission context on poll-event delivery so woken background agents cannot inherit them.
       if (queuedCommands.some(cmd => cmd.mode === 'poll-event')) {
@@ -8325,7 +8307,6 @@ function REPLInner({
           onQuery,
           onBeforeQuery,
           canUseTool,
-          awaitPendingHooks,
           consumeIdeSelection,
           recordIdeSelectionConsumedBy,
           restoreIdeSelectionConsumedBy,
@@ -8366,6 +8347,8 @@ function REPLInner({
     executeQueuedInput,
     hasActiveLocalJsxUI: isShowingLocalJSXCommand,
     queryGuard,
+    awaitSessionStartHooks: turnController.awaitSessionStartHooks,
+    handOverInFlight,
   });
 
   // We'll use the global lastInteractionTime from state.ts
@@ -8542,7 +8525,7 @@ function REPLInner({
   // (e.g. from a chat UI client via UDS).
   useEffect(() => {
     if (queuedCommands.some(cmd => cmd.priority === 'now')) {
-      abortControllerRef.current?.abort('interrupt');
+      turnController.abortController?.abort('interrupt');
     }
   }, [queuedCommands]);
 
@@ -9038,7 +9021,7 @@ function REPLInner({
     () => ({
       verbose,
       getToolUseContext: () =>
-        getToolUseContext(messages, messages, abortController ?? createAbortController(), mainLoopModel),
+        getToolUseContext(messages, messages, turnController.abortController ?? createAbortController(), mainLoopModel),
       onReject: handleQueuedCommandOnCancel,
       // densable Host does not dequeue; tip chrome → leader bridge (same as
       // pipe/doo opener callbacks).
@@ -9047,7 +9030,7 @@ function REPLInner({
       },
       setStickyFooter: isFullscreenEnvEnabled() ? setPermissionStickyFooter : undefined,
     }),
-    [verbose, getToolUseContext, messages, abortController, mainLoopModel, handleQueuedCommandOnCancel],
+    [verbose, getToolUseContext, messages, turnController, mainLoopModel, handleQueuedCommandOnCancel],
   );
   // densable BUo — willow crate sidebar width (0 when GB off / not main / no git)
   const replDiffSidebarWidth = computeDiffSidebarWidth({
@@ -9366,17 +9349,6 @@ function REPLInner({
     : toolJsxCentered && (!dialogHostUnmounted || dialogPanelVis.drawn)
       ? { content: toolJSX!.jsx, visible: true, footer: undefined as React.ReactNode }
       : undefined;
-  const ozsVisible = ozs?.visible ?? false;
-  const prevOzsVisibleRef = useRef(false);
-  useLayoutEffect(() => {
-    const prev = prevOzsVisibleRef.current;
-    prevOzsVisibleRef.current = ozsVisible;
-    if (!prev && ozsVisible) {
-      scrollPin.showDialog(undefined, true);
-    } else if (prev && !ozsVisible) {
-      scrollPin.onDialogLeft();
-    }
-  }, [ozsVisible, scrollPin]);
   const promptOwnsEscape =
     (isVimModeEnabled() && vimMode !== 'NORMAL') ||
     isSearchingHistory ||
@@ -10389,7 +10361,7 @@ function REPLInner({
                                         });
                                         return;
                                       }
-                                      const ac = abortControllerRef.current;
+                                      const ac = turnController.abortController;
                                       if (ac && !ac.signal.aborted && queryGuard.isActive) {
                                         deferArm.clearCapTimer();
                                         leftArrowDeferRef.current = null;
@@ -10540,7 +10512,7 @@ function REPLInner({
                                       // densable Mu: FE=dtn({isBg:false,isLoading:Si.isActive,...})
                                       // densable Ig = Er.abortController — YA uses strict nullish (!Ig),
                                       // not .signal.aborted. abortAfterFlush still prefers a live AC.
-                                      const ig = abortControllerRef.current;
+                                      const ig = turnController.abortController;
                                       const liveAc = ig && !ig.signal.aborted ? ig : undefined;
                                       const streamPeek = getStreamingTextRaw();
                                       // densable BWi(..., peekStreamingText() !== null)
@@ -10615,7 +10587,7 @@ function REPLInner({
                                             });
                                             return;
                                           }
-                                          const mre = abortControllerRef.current;
+                                          const mre = turnController.abortController;
                                           if (mre && !mre.signal.aborted && queryGuard.isActive) {
                                             if (inputValueRef.current.trim() !== '') {
                                               logEvent('tengu_defer_cap_cancelled_draft', {
@@ -10728,79 +10700,84 @@ function REPLInner({
                                       }
                                       // densable qpe: jpt.current=!0; return vHy(...)
                                       leftArrowToAgentsFired.current = true;
-                                      // Official 2.1.296 (#547): stop any turn or ! command started while
-                                      // the session moves to the background instead of finishing out of sight.
-                                      const lateAc = abortControllerRef.current;
-                                      if (lateAc && !lateAc.signal.aborted && lateAc !== abortAfterFlush) {
-                                        lateAc.abort('background');
-                                      }
-                                      // Official 2.1.296 (#519): save queued prompts' historyEntry (e.g.
-                                      // sent while SessionStart hooks were running) so ↑ brings them back.
-                                      for (const qCmd of messageQueue.getCommands()) {
-                                        if (qCmd.historyEntry) {
-                                          try {
-                                            addToHistory(qCmd.historyEntry);
-                                          } catch {
-                                            /* best-effort history save */
+                                      handOverInFlight.setState(() => true);
+                                      try {
+                                        // Official 2.1.296 (#547): stop any turn or ! command started while
+                                        // the session moves to the background instead of finishing out of sight.
+                                        const lateAc = turnController.abortController;
+                                        if (lateAc && !lateAc.signal.aborted && lateAc !== abortAfterFlush) {
+                                          lateAc.abort('background');
+                                        }
+                                        // Official 2.1.296 (#519): save queued prompts' historyEntry (e.g.
+                                        // sent while SessionStart hooks were running) so ↑ brings them back.
+                                        for (const qCmd of messageQueue.getCommands()) {
+                                          if (qCmd.historyEntry) {
+                                            try {
+                                              addToHistory(qCmd.historyEntry);
+                                            } catch {
+                                              /* best-effort history save */
+                                            }
                                           }
                                         }
-                                      }
-                                      const { isLeftArrowDaemonDetachOnly, openAgentsViaLeftArrow } = await import(
-                                        '../cli/bg/leftArrowAgents.js'
-                                      );
-                                      // daemon bg session: detach-only. Do not run vHy
-                                      // (would fork a nested left-arrow job). Stamp
-                                      // alreadyOpened so main skips the second fork.
-                                      if (isLeftArrowDaemonDetachOnly()) {
-                                        const sessionId = getSessionId();
-                                        openAgents({
-                                          ...agentsPayload,
-                                          alreadyOpened: {
-                                            ok: true,
-                                            short: sessionId.slice(0, 8),
-                                            sessionId,
-                                          },
-                                        });
-                                        return 'Detached — use `claude agents` to see background sessions.';
-                                      }
-                                      if (feature('BG_SESSIONS')) {
-                                        let opened: import('../cli/bg/leftArrowAgents.js').LeftArrowOpenResult;
-                                        try {
-                                          opened = await openAgentsViaLeftArrow(snap, {
-                                            via,
-                                            confirmedInterstitial,
-                                            deferWaitMs: opts?.deferWaitMs,
-                                            deferCapFired: opts?.deferCapFired,
-                                            inflightCount: handoffInFlight.count,
-                                            inflightKinds: handoffInFlight.kinds,
-                                            restartableCount: handoffInFlight.restartableCount,
-                                            partialChars: (partialForHandoff ?? '').length,
-                                            partialText: partialForHandoff,
-                                            boundaryUuid,
-                                            agentsCount: checkpoint?.agents?.length ?? 0,
-                                            checkpoint: agentsPayload.checkpoint,
-                                            liveMonitorSlugs: [...monitorsAtPress],
-                                            sessionPermissionRules,
-                                            memoryToggledOff,
-                                            replyOnResume,
-                                            abortAfterFlush,
+                                        const { isLeftArrowDaemonDetachOnly, openAgentsViaLeftArrow } = await import(
+                                          '../cli/bg/leftArrowAgents.js'
+                                        );
+                                        // daemon bg session: detach-only. Do not run vHy
+                                        // (would fork a nested left-arrow job). Stamp
+                                        // alreadyOpened so main skips the second fork.
+                                        if (isLeftArrowDaemonDetachOnly()) {
+                                          const sessionId = getSessionId();
+                                          openAgents({
+                                            ...agentsPayload,
+                                            alreadyOpened: {
+                                              ok: true,
+                                              short: sessionId.slice(0, 8),
+                                              sessionId,
+                                            },
                                           });
-                                        } catch {
-                                          // densable vHy catch → p("Couldn't background…")
-                                          return "Couldn't background this session (an internal error was logged)";
+                                          return 'Detached — use `claude agents` to see background sessions.';
                                         }
-                                        if (!opened.ok) {
-                                          return opened.error;
+                                        if (feature('BG_SESSIONS')) {
+                                          let opened: import('../cli/bg/leftArrowAgents.js').LeftArrowOpenResult;
+                                          try {
+                                            opened = await openAgentsViaLeftArrow(snap, {
+                                              via,
+                                              confirmedInterstitial,
+                                              deferWaitMs: opts?.deferWaitMs,
+                                              deferCapFired: opts?.deferCapFired,
+                                              inflightCount: handoffInFlight.count,
+                                              inflightKinds: handoffInFlight.kinds,
+                                              restartableCount: handoffInFlight.restartableCount,
+                                              partialChars: (partialForHandoff ?? '').length,
+                                              partialText: partialForHandoff,
+                                              boundaryUuid,
+                                              agentsCount: checkpoint?.agents?.length ?? 0,
+                                              checkpoint: agentsPayload.checkpoint,
+                                              liveMonitorSlugs: [...monitorsAtPress],
+                                              sessionPermissionRules,
+                                              memoryToggledOff,
+                                              replyOnResume,
+                                              abortAfterFlush,
+                                            });
+                                          } catch {
+                                            // densable vHy catch → p("Couldn't background…")
+                                            return "Couldn't background this session (an internal error was logged)";
+                                          }
+                                          if (!opened.ok) {
+                                            return opened.error;
+                                          }
+                                          // densable yHy analog — existing onOpenAgents unmounts into FleetView.
+                                          // Do not invent a remount. Success string does not settle (process.exit / unmount).
+                                          openAgents({ ...agentsPayload, alreadyOpened: opened });
+                                        } else {
+                                          openAgents(agentsPayload);
                                         }
-                                        // densable yHy analog — existing onOpenAgents unmounts into FleetView.
-                                        // Do not invent a remount. Success string does not settle (process.exit / unmount).
-                                        openAgents({ ...agentsPayload, alreadyOpened: opened });
-                                      } else {
-                                        openAgents(agentsPayload);
+                                        return await new Promise<string>(() => {
+                                          /* densable yHy: in-process fleet never returns to REPL */
+                                        });
+                                      } finally {
+                                        handOverInFlight.setState(() => false);
                                       }
-                                      return await new Promise<string>(() => {
-                                        /* densable yHy: in-process fleet never returns to REPL */
-                                      });
                                     }
                                   }
                                 : undefined

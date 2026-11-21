@@ -29,6 +29,7 @@ import { createSignal } from './signal.js'
 export class QueryGuard {
   private _status: 'idle' | 'dispatching' | 'running' = 'idle'
   private _generation = 0
+  private _isDispatchForModel = false
   private _changed = createSignal()
 
   /**
@@ -38,8 +39,16 @@ export class QueryGuard {
   reserve(): boolean {
     if (this._status !== 'idle') return false
     this._status = 'dispatching'
+    this._isDispatchForModel = false
     this._notify()
     return true
+  }
+
+  /** Official 2.1.328 _Be: commitment belongs to the reserved generation. */
+  markDispatchForModel(generation: number): void {
+    if (this._status === 'dispatching' && generation === this._generation) {
+      this._isDispatchForModel = true
+    }
   }
 
   /**
@@ -107,6 +116,10 @@ export class QueryGuard {
    */
   get isRunning(): boolean {
     return this._status === 'running'
+  }
+
+  get isDispatchingForModel(): boolean {
+    return this._status === 'dispatching' && this._isDispatchForModel
   }
 
   get generation(): number {

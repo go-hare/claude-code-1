@@ -1,41 +1,63 @@
 /**
- * densable 2.1.218 HWf — Host REPL turn pump over S8o engine.
- *
- * densable:
- *   async function HWf({engine:e, inputRef:t, pendingQueryParamsRef:r,
- *     turnInput:n, newMessages:o, onQueryEvent:i, addNotification:s}) {
- *     r.current.push(n)
- *     // ensure streamInput on YZ queue once
- *     t.current.enqueue({type:"user", message:a?.message??…, parent_tool_use_id:null})
- *     while (true) {
- *       const {value:l, done:c} = await e.next()
- *       if (c) break
- *       // map/filter engine frames → onQueryEvent / notifications
- *       if (l.type === "result") break
- *     }
- *   }
- *
- * Local: same closed-gate turn path. Engine frames that are already
- * Message-shaped (from runTurn → query()) are forwarded via onQueryEvent.
- * Lifecycle / system/init / result envelopes are filtered densable-style.
+ * Official 2.1.328 BLt: enqueue turns immediately, then hold the feed's read
+ * lock until that turn's result (including consumer-error draining). Esc can
+ * start another turn before the previous reader has consumed its final frames.
  */
 
-import type { HostEngine } from './hostEngine.js'
+import type { SDKResultMessage } from '../entrypoints/sdk/coreTypes.generated.js'
+import { enqueueSdkEvent } from '../utils/sdkEventQueue.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import {
+  isForeignSessionBinding,
+  isSessionHistorySuppressed,
+  isCompactPairWithheldFromRemote,
+  isCurrentSessionPrecautionarySuppressed,
+} from '../utils/sessionStorage.js'
+import { createAssistantMessage } from '../utils/messages.js'
+import { isUserAbortTerminalReason, type HostEngine } from './hostEngine.js'
 import { Stream } from '../utils/stream.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 
 export type HostEngineTurnInput = Record<string, unknown>
 
+export type HostEngineFeed<T = HostEngineTurnInput> = {
+  input: Stream<Record<string, unknown>> | null
+  pendingQueryParams: T[]
+  readLock: { acquire: () => Promise<() => void> }
+}
+
+/** Official iie.engineFeed + BJ promise-chain mutex. */
+export function createHostEngineFeed<
+  T = HostEngineTurnInput,
+>(): HostEngineFeed<T> {
+  let previous = Promise.resolve()
+  return {
+    input: null,
+    pendingQueryParams: [],
+    readLock: {
+      acquire() {
+        let release = () => {}
+        const next = new Promise<void>(resolve => {
+          release = resolve
+        })
+        const waiting = previous
+        previous = next
+        return waiting.then(() => release)
+      },
+    },
+  }
+}
+
 export type HostEngineTurnOptions = {
   engine: HostEngine
-  /** densable inputRef — YZ stream fed to engine.streamInput once. */
-  inputRef: { current: Stream<Record<string, unknown>> | null }
-  /** densable pendingQueryParamsRef — prepareTurn shifts from here. */
-  pendingQueryParamsRef: { current: HostEngineTurnInput[] }
+  feed: HostEngineFeed
   turnInput: HostEngineTurnInput
   newMessages: Array<{ type?: string; message?: unknown }>
   onQueryEvent: (event: unknown) => void
+  onRead?: () => void
+  onMainRequestStart?: () => void
+  onStatus?: (compactResult: unknown) => void
   addNotification?: (n: {
     key?: string
     text: string
@@ -50,23 +72,25 @@ export type HostEngineTurnOptions = {
  */
 export async function runHostEngineTurn(
   options: HostEngineTurnOptions,
-): Promise<void> {
+): Promise<SDKResultMessage | undefined> {
   const {
     engine,
-    inputRef,
-    pendingQueryParamsRef,
+    feed,
     turnInput,
     newMessages,
     onQueryEvent,
     addNotification,
+    onRead,
+    onMainRequestStart,
+    onStatus,
   } = options
 
-  pendingQueryParamsRef.current.push(turnInput)
+  feed.pendingQueryParams.push(turnInput)
 
-  const lastUser = [...newMessages].reverse().find(m => m.type === 'user')
-  if (inputRef.current === null) {
+  const lastUser = newMessages.findLast(m => m.type === 'user')
+  if (feed.input === null) {
     const queue = new Stream<Record<string, unknown>>()
-    inputRef.current = queue
+    feed.input = queue
     void engine.streamInput(queue).catch(err => {
       logForDebugging(`[engine] streamInput error: ${errorMessage(err)}`, {
         level: 'error',
@@ -74,13 +98,23 @@ export async function runHostEngineTurn(
     })
   }
 
-  inputRef.current.enqueue({
+  feed.input.enqueue({
     type: 'user',
     message: lastUser?.message ?? { role: 'user', content: '' },
     parent_tool_use_id: null,
   })
 
+  const readStartedAt = Date.now()
+  const release = await feed.readLock.acquire()
+  const waitedMs = Date.now() - readStartedAt
+  if (waitedMs >= 5) {
+    logForDebugging(
+      `[engine] turn read waited ${waitedMs}ms for the previous turn's result`,
+    )
+  }
+  let result: SDKResultMessage | undefined
   try {
+    onRead?.()
     while (true) {
       const { value: frame, done } = await engine.next()
       if (done) break
@@ -98,7 +132,42 @@ export async function runHostEngineTurn(
         if (subtype === 'api_retry') continue
         if (subtype === 'memory_recall') continue
         if (subtype === 'thinking_tokens') continue
-        if (subtype === 'status') continue
+        if (subtype === 'status') {
+          if (l.status === 'requesting') onMainRequestStart?.()
+          try {
+            if (
+              l.status !== 'requesting' &&
+              (typeof l.status === 'string' || l.status === null) &&
+              getFeatureValue_CACHED_MAY_BE_STALE('tengu_luminous_seal', true)
+            ) {
+              enqueueSdkEvent({
+                type: 'system',
+                subtype: 'status',
+                status: l.status,
+                ...(l.permissionMode !== undefined
+                  ? { permissionMode: l.permissionMode }
+                  : {}),
+                ...(l.compact_result !== undefined
+                  ? { compact_result: l.compact_result }
+                  : {}),
+                ...(typeof l.compact_error === 'string' &&
+                !isForeignSessionBinding() &&
+                !isSessionHistorySuppressed() &&
+                !isCompactPairWithheldFromRemote() &&
+                !isCurrentSessionPrecautionarySuppressed()
+                  ? { compact_error: l.compact_error }
+                  : {}),
+              })
+            }
+          } catch (error) {
+            logForDebugging(
+              `[engine] failed to forward status: ${errorMessage(error)}`,
+              { level: 'error' },
+            )
+          }
+          onStatus?.(l.compact_result)
+          continue
+        }
         if (subtype === 'permission_denied') continue
         if (subtype === 'init') continue
         if (subtype === 'notification') {
@@ -142,6 +211,7 @@ export async function runHostEngineTurn(
       }
 
       if (type === 'result') {
+        result = l as SDKResultMessage
         if (l.is_error) {
           const msg =
             l.subtype === 'success' && typeof l.result === 'string'
@@ -149,9 +219,26 @@ export async function runHostEngineTurn(
               : Array.isArray(l.errors)
                 ? (l.errors as string[]).join('; ')
                 : 'turn error'
-          logForDebugging(`[engine] turn ended in error: ${msg}`, {
-            level: 'error',
-          })
+          const stopped =
+            typeof l.terminal_reason === 'string' &&
+            isUserAbortTerminalReason(l.terminal_reason)
+          logForDebugging(
+            `[engine] turn ended in error: ${msg}`,
+            stopped ? undefined : { level: 'error' },
+          )
+          if (l.subtype === 'error_during_execution' && !stopped) {
+            try {
+              onQueryEvent({
+                ...createAssistantMessage({ content: msg }),
+                isApiErrorMessage: true,
+              })
+            } catch (error) {
+              logForDebugging(
+                `[engine] failed to render degraded-turn error: ${errorMessage(error)}`,
+                { level: 'error' },
+              )
+            }
+          }
         }
         break
       }
@@ -194,5 +281,8 @@ export async function runHostEngineTurn(
       step = await engine.next()
     }
     throw err
+  } finally {
+    release()
   }
+  return result
 }

@@ -13,8 +13,8 @@ const LAYOUT = join(import.meta.dir, '../FullscreenLayout.tsx')
 describe('densable tot $l / useMeasured (289)', () => {
   test('source: $l BODY + tot $e + ScrollBox yoga snapshot', () => {
     const src = readFileSync(LAYOUT, 'utf8')
-    expect(src).toContain('function useMeasured(read: () => number): number')
-    expect(src).toContain('useSyncExternalStore(subscribeLayout, read, read)')
+    expect(src).toContain('function useMeasured<T>(read: () => T): T')
+    expect(src).toContain('useSyncExternalStore(subscribeLayout, read)')
     expect(src).toContain('if (!Object.is(read(), snapshot)) bump()')
     expect(src).toContain('function useYogaHeight')
     expect(src).toContain('return useMeasured(read)')

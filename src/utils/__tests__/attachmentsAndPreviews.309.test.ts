@@ -9,6 +9,7 @@ import {
   truncateNestedMemoryToStart,
 } from '../attachments.js'
 import { QueuedNowCoordinator } from '../foregroundToolCalls.js'
+import { QueryGuard } from '../QueryGuard.js'
 import { generatePreview, sliceSurrogateSafe } from '../toolResultStorage.js'
 
 function makeSkill(name: string, description = 'desc'): Command {
@@ -115,15 +116,12 @@ describe('#988, #1129, #1130, #1133', () => {
         priority: 'next',
       },
     ]
+    const guard = new QueryGuard()
+    guard.reserve()
     const coord = new QueuedNowCoordinator({
       turn: {
         agentId: 'main',
-        guard: {
-          isActive: true,
-          isRunning: false,
-          isDispatchingForModel: true,
-          subscribe: () => () => {},
-        },
+        guard,
         abortController: new AbortController(),
         readEvidence: () => ({
           isHeldByDialog: false,
@@ -154,7 +152,12 @@ describe('#988, #1129, #1130, #1133', () => {
       featureName: 'test',
     })
 
+    expect(coord.sendQueuedNow()).toBe(false)
+    guard.markDispatchForModel(guard.generation)
     expect(coord.sendQueuedNow()).toBe(true)
+    guard.forceEnd()
+    guard.reserve()
+    expect(coord.sendQueuedNow()).toBe(false)
     coord.dispose()
   })
 

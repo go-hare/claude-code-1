@@ -62,7 +62,16 @@ describe('2.1.292-2.1.296 REPL / LeftArrow / Cancel / Config / PromptInput', () 
   })
 
   test('#518/#519/#547 LeftArrow handoff blocks foreground queue drain, saves queued history, aborts late turns', () => {
-    expect(replSrc).toContain(
+    const queueSrc = readFileSync(
+      join(import.meta.dir, '../../hooks/useQueueProcessor.ts'),
+      'utf8',
+    )
+    expect(replSrc).toContain('handOverInFlight.setState(() => true)')
+    expect(replSrc).toContain('handOverInFlight.setState(() => false)')
+    expect(queueSrc).toContain(
+      'if (handover || handOverInFlight.getSnapshot()) return',
+    )
+    expect(replSrc).not.toContain(
       'leftArrowToAgentsFired.current || leftArrowDeferRef.current !== null || leftArrowConfirmOpenRef.current',
     )
     expect(replSrc).toContain("lateAc.abort('background')")

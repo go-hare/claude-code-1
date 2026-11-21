@@ -2036,13 +2036,7 @@ export const SettingsSchema = lazySchema(() =>
         .max(100)
         .optional()
         .describe(
-          'Prompt cache hit rate threshold (0-100). Warnings shown when cache hit rate falls below this percentage. Default: 70.',
-        ),
-      cacheWarningEnabled: z
-        .boolean()
-        .optional()
-        .describe(
-          'Whether to show cache hit rate warnings in the message flow when the rate falls below cacheThreshold. Default: true.',
+          'Prompt cache hit rate threshold (0-100) for context analysis. Default: 70.',
         ),
       pluginTrustMessage: z
         .string()

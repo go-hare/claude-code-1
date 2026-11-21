@@ -236,7 +236,7 @@ type ExecuteUserInputParams = BaseExecutionParams & {
    * densable WZe `X.awaitSessionStartHooks`. After the wait, aborted
    * user-cancel restores drainable string cmds via Rt and returns.
    */
-  awaitSessionStartHooks?: () => Promise<void>
+  awaitSessionStartHooks?: (signal: AbortSignal) => Promise<void> | undefined
   /**
    * densable WZe `h.setPastedContents` — qLr merge on abort restore.
    */
@@ -481,7 +481,7 @@ export type HandlePromptSubmitParams = BaseExecutionParams & {
   /**
    * densable WZe `X.awaitSessionStartHooks`.
    */
-  awaitSessionStartHooks?: () => Promise<void>
+  awaitSessionStartHooks?: (signal: AbortSignal) => Promise<void> | undefined
 }
 
 export async function handlePromptSubmit(
@@ -1032,6 +1032,9 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     cmd.uuid === undefined ? [] : [cmd.uuid],
   )
   let turnClaim: QuotaTurnClaim | null = null
+  // Official 2.1.328 xLt vo: only this submission generation may release its
+  // reservation or placeholder. Esc can already have handed both to a new turn.
+  const reservedGeneration = queryGuard.generation
 
   // Wrap in try-finally so the guard is released even if processUserInput
   // throws or onQuery is skipped. onQuery's finally calls queryGuard.end(),
@@ -1075,19 +1078,21 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     }
 
     // densable WZe `Ln` wait then abort Rt. Gold skips known local slash.
-    const drainGeneration = queryGuard.generation
     const shouldWaitSessionStart = queuedCommandsNeedSessionStartWait(
       commands,
       params.commands,
     )
-    if (shouldWaitSessionStart && awaitSessionStartHooks) {
+    const sessionStartWait = shouldWaitSessionStart
+      ? awaitSessionStartHooks?.(abortController.signal)
+      : undefined
+    if (sessionStartWait) {
       try {
-        await awaitSessionStartHooks()
+        await sessionStartWait
       } catch (err) {
         logError(toError(err))
       }
       if (abortController.signal.aborted) {
-        const generationChanged = queryGuard.generation !== drainGeneration
+        const generationChanged = queryGuard.generation !== reservedGeneration
         const userCancel =
           generationChanged &&
           getAbortReasonMessage(abortController.signal.reason) === 'user-cancel'
@@ -1188,6 +1193,11 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               setUserInputOnProcessing: isFirst
                 ? setUserInputOnProcessing
                 : undefined,
+              onQueryCommitted: () => {
+                if (!abortController.signal.aborted) {
+                  queryGuard.markDispatchForModel(reservedGeneration)
+                }
+              },
               isAlreadyProcessing: !isFirst,
               querySource,
               canUseTool,
@@ -1201,6 +1211,8 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               modelScheduledOrigin: cmd.modelScheduledOrigin,
               wakeupSource: cmd.wakeupSource,
               isMeta: cmd.isMeta,
+              shouldQuery: cmd.shouldQuery,
+              queryHeldForNextTurn: cmd.queryHeldForNextTurn,
               skipAttachments:
                 cmd.skipAttachments === true ||
                 cmd.mode === 'poll-event' ||
@@ -1262,6 +1274,41 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
                     ? { ...cmd.historyEntry, display: rewrittenDisplay }
                     : cmd.historyEntry,
               })
+            }
+            for (const message of result.messages) {
+              if (message.type !== 'user' || message.uuid !== cmd.uuid) continue
+              if (
+                cmd.mode === 'task-notification' ||
+                cmd.origin?.kind === 'task-notification'
+              )
+                message.queueMode = cmd.mode
+              if (cmd.skipAttachments === true)
+                message.queueSkipAttachments = true
+              if (cmd.skipSlashCommands === true)
+                message.queueSkipSlashCommands = true
+              if (
+                cmd.shouldQuery === false &&
+                cmd.queryHeldForNextTurn !== true
+              )
+                message.queueTranscriptOnly = true
+              for (const key of [
+                'scheduledTaskId',
+                'scheduledFireId',
+                'taskDelivery',
+                'fromConnector',
+                'textNotTyped',
+                'noPersonArrived',
+                'toolsUsed',
+                'projectsUserTurn',
+                'emailSenderTurn',
+                'answeredPost',
+                'hearthRelayRows',
+                'hearthRelayMessageIds',
+                'hearthRelayThreadTs',
+                'wakeupSource',
+              ] as const) {
+                if (cmd[key] !== undefined) message[key] = cmd[key]
+              }
             }
             newMessages.push(...result.messages)
             if (isFirst) {
@@ -1451,11 +1498,9 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     // via end(), or running — cancelReservation only acts on dispatching).
     // This is the single source of truth for releasing the reservation;
     // useQueueProcessor no longer needs its own .finally().
-    queryGuard.cancelReservation()
-    // Safety net: clear the placeholder if processUserInput produced no
-    // messages or threw — otherwise it would stay visible until the next
-    // turn's resetLoadingState. Harmless when onQuery ran: setMessages grew
-    // displayedMessages past the baseline, so REPL.tsx already hid it.
-    setUserInputOnProcessing(undefined)
+    if (queryGuard.generation === reservedGeneration) {
+      queryGuard.cancelReservation()
+      setUserInputOnProcessing(undefined)
+    }
   }
 }

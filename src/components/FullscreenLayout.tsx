@@ -1488,26 +1488,16 @@ export function useLeftoverChromeClaim(hostRef: RefObject<DOMElement | null>, ow
 }
 
 /**
- * densable `$l(o)` / `useMeasured` — `Pt(subscribeLayout, o)` then
- * `Xt(() => { if (!Object.is(o(), l)) u() })`. Yoga-pass bus, not paint cache.
- * tot only `$l(qe)` (`$e` / abovePrompt height). Do not `$l` ScrollBox yoga
- * height — gold tot does not, and a float remainder tick re-renders tot every
- * yoga pass (spinner clock) then leftoverGs dirty-clears the flexGrow blank.
+ * Official 2.1.328 `eo`: subscribe to Yoga layout, then correct any change
+ * between the snapshot read and commit. pdn measures above-prompt height and
+ * modal-footer visibility; it does not measure the ScrollBox's Yoga height.
  */
 function useMeasured<T>(read: () => T): T {
   const { subscribeLayout } = useApp();
-  const snapshot = useSyncExternalStore(subscribeLayout, read, read);
+  const snapshot = useSyncExternalStore(subscribeLayout, read);
   const [, bump] = useReducer((n: number) => n + 1, 0);
-  const consecutiveBumpsRef = useRef(0);
   useLayoutEffect(() => {
-    if (!Object.is(read(), snapshot)) {
-      if (consecutiveBumpsRef.current < 8) {
-        consecutiveBumpsRef.current += 1;
-        bump();
-      }
-    } else {
-      consecutiveBumpsRef.current = 0;
-    }
+    if (!Object.is(read(), snapshot)) bump();
   });
   return snapshot;
 }
@@ -1716,14 +1706,16 @@ export function FullscreenLayout({
   const modalFooterRef = useRef<DOMElement | null>(null);
   const [modalClaimedHeight, setModalClaimedHeight] = useState<number | null>(null);
   const hasModalFooter = modal?.footer != null;
-  const showModalFooter = useMeasured(() => {
+  // Official 2.1.328 `pdn` caches the footer reader in slots Ie[5..8].
+  const readShowModalFooter = useCallback(() => {
     const contentEl = modalContentRef.current;
     const footerEl = modalFooterRef.current;
     if (!hasModalFooter || modalClaimedHeight === null || modalClaimedHeight <= 0 || !contentEl || !footerEl) {
       return true;
     }
     return measureElement(contentEl).height + measureElement(footerEl).height <= maxModalRows;
-  });
+  }, [hasModalFooter, modalClaimedHeight, maxModalRows]);
+  const showModalFooter = useMeasured(readShowModalFooter);
   const abovePromptRef = useRef<DOMElement | null>(null);
   const aboveInnerRef = useRef<DOMElement | null>(null);
   const promptContainerRef = useRef<DOMElement | null>(null);
@@ -1753,6 +1745,21 @@ export function FullscreenLayout({
     setLeftoverClaims(prev => [...prev, claim]);
     return () => setLeftoverClaims(prev => prev.filter(row => row !== claim));
   }, []);
+  // Official 2.1.328 `pdn` Ne/Ao: cache the remaining-height readers before
+  // publishing them through the prompt and above-prompt contexts.
+  const leftoverYe = useCallback((): number | null => {
+    if (modalVisible) return null;
+    const promptInner = promptInnerRef.current;
+    if (promptInner == null) return null;
+    const promptH = promptInner.yogaNode?.getComputedHeight() ?? 0;
+    const aboveH = aboveInnerRef.current?.yogaNode?.getComputedHeight() ?? 0;
+    return bottomMaxHeight - promptH - aboveH;
+  }, [modalVisible, bottomMaxHeight]);
+  const leftoverOf = useCallback((): number | null => {
+    const ye = leftoverYe();
+    if (ye === null) return null;
+    return leftoverClaims.reduce(leftoverChromeReduce, ye);
+  }, [leftoverYe, leftoverClaims]);
   const { subscribeFrames } = useApp();
   const subscribe = useCallback(
     (listener: () => void) => {
@@ -1767,22 +1774,27 @@ export function FullscreenLayout({
     },
     [scrollViewport, unseen, subscribeFrames],
   );
-  const pillVisible = useSyncExternalStore(subscribe, () => {
+  // Official 2.1.328 `pdn` Uo/Wo: frame snapshots are booleans; the count
+  // subscribes separately to ScrollPin (Le(X, Sf)). askBelow only changes text.
+  const getPillVisible = useCallback(() => {
     const s = scrollViewport?.handle;
-    if (!s) return false;
-    if (s.isSticky()) return false;
+    if (!s || s.isSticky()) return false;
     const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
-    const hasDivider = unseen?.dividerY != null;
-    return (hasDivider || !getAutoScrollEnabled() || askBelow) && viewportBottom < s.getScrollHeight();
-  });
-  const unreadMessageCount = useSyncExternalStore(subscribe, () => {
+    const hasDivider = unseen?.getSnapshot().dividerY != null;
+    return (hasDivider || !getAutoScrollEnabled()) && viewportBottom < s.getScrollHeight();
+  }, [scrollViewport?.handle, unseen]);
+  const pillVisible = useSyncExternalStore(subscribe, getPillVisible);
+  const getIsBeforeUnseenDivider = useCallback(() => {
     const s = scrollViewport?.handle;
-    const dividerY = unseen?.dividerY;
-    if (!s || dividerY == null) return 0;
+    const dividerY = unseen?.getSnapshot().dividerY;
+    if (!s || dividerY == null) return false;
     const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
-    if (viewportBottom >= dividerY) return 0;
-    return unseen?.getSnapshot().unseenDivider?.count ?? 0;
-  });
+    return viewportBottom < dividerY;
+  }, [scrollViewport?.handle, unseen]);
+  const isBeforeUnseenDivider = useSyncExternalStore(subscribe, getIsBeforeUnseenDivider);
+  const getUnseenMessageCount = useCallback(() => unseen?.getSnapshot().unseenDivider?.count ?? 0, [unseen]);
+  const unseenMessageCount = useSyncExternalStore(unseen?.subscribe ?? NOOP_SUBSCRIBE_SELECTION, getUnseenMessageCount);
+  const unreadMessageCount = isBeforeUnseenDivider ? unseenMessageCount : 0;
   const onLinkNotOpenedRef = useRef(onLinkNotOpened);
   onLinkNotOpenedRef.current = onLinkNotOpened;
 
@@ -1856,20 +1868,6 @@ export function FullscreenLayout({
     // (gold `Fe||We==null`).
     // densable tot `Ye` — leftover without chrome claims.
     // tot We wraps `f5({value:Ye})` so Lo `ke(f5)` sizes the list.
-    const leftoverYe = (): number | null => {
-      if (modalVisible) return null;
-      const promptInner = promptInnerRef.current;
-      if (promptInner == null) return null;
-      const promptH = promptInner.yogaNode?.getComputedHeight() ?? 0;
-      const aboveH = aboveInnerRef.current?.yogaNode?.getComputedHeight() ?? 0;
-      return bottomMaxHeight - promptH - aboveH;
-    };
-    // densable tot `Pe` — `Ye===null?null:ut.reduce(SR,Ye)`.
-    const leftoverOf = (): number | null => {
-      const ye = leftoverYe();
-      if (ye === null) return null;
-      return leftoverClaims.reduce(leftoverChromeReduce, ye);
-    };
     const abovePromptBox = (
       <Box
         ref={abovePromptRef}
