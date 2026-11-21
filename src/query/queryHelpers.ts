@@ -549,3 +549,186 @@ export function resolveRefusalFallbackCandidate(input: {
   }
   return undefined
 }
+
+const BRIEF_REPLIED_BLOCKING_ATTACHMENT_TYPES = new Set([
+  'queued_command',
+  'poll_events',
+  'teammate_mailbox',
+  'hook_blocking_error',
+])
+
+const BRIEF_NOT_DELIVERED_MARKER =
+  'NOT delivered to Remote Control (phone/web) viewers'
+const BRIEF_IMAGE_LIMIT_MARKER = 'because the server accepts images at most'
+
+function isUserMessageInterruptingBriefReply(msg: Message): boolean {
+  // Official `Enn(y)` for user messages: returns true when the message is a
+  // real user prompt rather than a tool_result carrier or compact summary.
+  const uMsg = msg as UserMessage
+  const content = uMsg.message?.content
+  const hasToolResultCarrier =
+    uMsg.toolUseResult !== undefined ||
+    uMsg.sourceToolAssistantUUID !== undefined ||
+    (Array.isArray(content) && content.some(b => b.type === 'tool_result'))
+  return !hasToolResultCarrier && uMsg.isCompactSummary !== true
+}
+
+/**
+ * Official 2.1.328 `Pf(e)` (`chunk@305854618.js @212416`, gated by
+ * `tengu_jazzy_wren` default true):
+ * Inspect the transcript to determine whether the immediately preceding
+ * assistant turn already delivered a successful `SendUserMessage` / `Brief`
+ * reply with no intervening user prompt, queued command, poll event, teammate
+ * mailbox, hook blocking error, non-brief tool call, or failed/undelivered
+ * brief result.
+ */
+export function hasBriefRepliedInTranscript(
+  messages: readonly Message[],
+  options?: { briefEnabled?: boolean },
+): boolean {
+  try {
+    let briefEnabled = options?.briefEnabled
+    if (briefEnabled === undefined) {
+      try {
+        const { isBriefEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js') as typeof import('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js')
+        briefEnabled = isBriefEnabled()
+      } catch {
+        briefEnabled = false
+      }
+    }
+    if (
+      !briefEnabled ||
+      !getFeatureValue_CACHED_MAY_BE_STALE('tengu_jazzy_wren', true)
+    ) {
+      return false
+    }
+    let lastAssistantIdx = -1
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.type === 'assistant') {
+        lastAssistantIdx = i
+        break
+      }
+    }
+    if (lastAssistantIdx === -1) return false
+
+    const deliveredToolUseIds = new Set<string>()
+    for (const msg of messages.slice(lastAssistantIdx + 1)) {
+      if (msg.type === 'attachment') {
+        const attType = msg.attachment?.type
+        if (
+          typeof attType === 'string' &&
+          BRIEF_REPLIED_BLOCKING_ATTACHMENT_TYPES.has(attType)
+        ) {
+          return false
+        }
+        continue
+      }
+      if (msg.type !== 'user') continue
+      if (isUserMessageInterruptingBriefReply(msg)) return false
+      const content = msg.message?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (block.type !== 'tool_result' || block.is_error) continue
+        const texts =
+          typeof block.content === 'string'
+            ? [block.content]
+            : (block.content ?? []).map(c => (c.type === 'text' ? c.text : ''))
+        if (
+          !texts.some(
+            t =>
+              t.includes(BRIEF_NOT_DELIVERED_MARKER) ||
+              t.includes(BRIEF_IMAGE_LIMIT_MARKER),
+          )
+        ) {
+          deliveredToolUseIds.add(block.tool_use_id)
+        }
+      }
+    }
+
+    let hasDeliveredBrief = false
+    for (let i = lastAssistantIdx; i >= 0; i--) {
+      const msg = messages[i]
+      if (!msg || msg.type !== 'assistant') break
+      const content = msg.message?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (block.type !== 'tool_use') continue
+        if (
+          (block.name !== 'SendUserMessage' && block.name !== 'Brief') ||
+          !deliveredToolUseIds.has(block.id)
+        ) {
+          return false
+        }
+        hasDeliveredBrief = true
+      }
+    }
+    if (hasDeliveredBrief) {
+      logForDebugging('query_thinking_only_response: nudge_skipped_brief_reply')
+    }
+    return hasDeliveredBrief
+  } catch (err) {
+    logError(err)
+    return false
+  }
+}
+
+const EMPTY_COMPLETION_ALLOWED_TURN_ORIGINS = new Set([
+  'human',
+  'sdk',
+  'auto_continuation',
+  'host_synthetic',
+  'peer',
+])
+
+/**
+ * Official 2.1.328 `DS(e)` / `FS(e)` (`chunk@305854618.js @215167`):
+ * Determine whether the trailing request turn is a direct user/host turn
+ * eligible for empty-completion resend/give-up under `tengu_calm_waffle`.
+ */
+export function isRequestEligibleForEmptyCompletionResend(
+  messages: readonly Message[],
+  options?: { gateOverride?: boolean },
+): boolean {
+  try {
+    const enabled =
+      options?.gateOverride ??
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_calm_waffle', false)
+    if (!enabled) return false
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (!msg) continue
+      if (msg.type === 'assistant') return false
+      if (msg.type !== 'user') continue
+      const content = msg.message?.content
+      if (
+        Array.isArray(content) &&
+        content.some(b => b.type === 'tool_result')
+      ) {
+        return false
+      }
+      if ((msg as { turnCompanion?: boolean }).turnCompanion) continue
+      if (
+        msg.isMeta ||
+        msg.isCompactSummary ||
+        (msg as { isVirtual?: boolean }).isVirtual
+      ) {
+        return false
+      }
+      const origin = (msg as { origin?: { kind?: string } }).origin
+      if (origin !== undefined && origin.kind !== 'human') {
+        return false
+      }
+      const turnOrigin = (msg as { turnOrigin?: string }).turnOrigin
+      return (
+        turnOrigin === undefined ||
+        EMPTY_COMPLETION_ALLOWED_TURN_ORIGINS.has(turnOrigin)
+      )
+    }
+    return false
+  } catch (err) {
+    logError(err)
+    return false
+  }
+}

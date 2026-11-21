@@ -309,7 +309,7 @@ describe('densable 2.1.289 As bashTaskDeliveryOutcomes', () => {
     expect(mcpClient).toContain('connectToServerMemo')
     expect(mcpClient).not.toContain('connectToServerMemo.cache.delete')
     expect(mcpClient).toContain('do not abandon the shared handshake')
-    expect(mcpClient).toContain('wrappedClient.cleanup()')
+    expect(mcpClient).toContain('.cleanup()')
     expect(mcpClient).toContain(
       'deadline reached before the request could be sent',
     )

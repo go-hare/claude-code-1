@@ -127,6 +127,16 @@ export type BridgeConfig = {
   sessionTimeoutMs?: number
   /** Forward --chrome / --no-chrome to spawned sessions when explicitly specified. */
   chrome?: boolean
+  /**
+   * Official 2.1.328 #1613 (`chunk@315298418.js @64847, @92427, @148549`):
+   * Extended bridge config fields carried across fast RC restarts (<60s / <15m).
+   */
+  environmentRevivedAt?: number
+  carriedSessionIds?: string[]
+  initialSessionRequeues?: string[]
+  initialSessionRequeuesPersistedAt?: number
+  boundedResumeSessionIds?: string[]
+  enqueuePointerWrite?: <T>(fn: () => Promise<T>) => Promise<T>
 }
 
 // --- Dependency interfaces (for testability) ---
@@ -238,6 +248,16 @@ export type SessionSpawnOpts = {
    * Attach stamps only under I7n(); spawn stamps the role without I7n.
    */
   artifact?: boolean
+  /**
+   * Official 2.1.328 #1613 (`chunk@315239844.js @5485`): bound resumed
+   * interrupted turns on workerEpoch > 1 (`RESUMED_TURN_BOUND_MAX_AGE_MS`).
+   */
+  boundResumedTurn?: boolean
+  /**
+   * Official 2.1.328 #1613 (`chunk@315239844.js @5485`): epoch-ms floor
+   * bounding resumed turns against `environmentRevivedAt`.
+   */
+  resumedTurnNotBefore?: number
   /**
    * Fires once with the text of the first real user message seen on the
    * child's stdout (via --replay-user-messages). Lets the caller derive a

@@ -24,6 +24,7 @@ import type {
 } from '../../utils/sessionState.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { logEvent } from '../../services/analytics/index.js'
+import { buildRetractedWireFields } from '../../query/queryHelpers.js'
 import { sleep } from '../../utils/sleep.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 import {
@@ -724,8 +725,10 @@ export class CCRClient {
   private streamTextAccumulator = createStreamAccumulator()
 
   private readonly workerState: CcrWorkerStateUploader
+  private readonly withholdsWholeFiles: boolean
   private loggedToolResultBlank = false
   private loggedMcpImageBlank = false
+  private loggedWholeFileWithheld = false
   private readonly eventUploader: SerialBatchEventUploader<ClientEvent>
   private readonly internalEventUploader: SerialBatchEventUploader<WorkerEvent>
   private readonly deliveryUploader: SerialBatchEventUploader<{
@@ -768,6 +771,12 @@ export class CCRClient {
       heartbeatIntervalMs?: number
       heartbeatJitterFraction?: number
       /**
+       * Official 2.1.328 `Gw()`: withhold whole-file fields (`originalFile`,
+       * `structuredPatch`, `original_file`, `updated_file`) on self-hosted
+       * runner uploads (`CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE === 'self_hosted'`).
+       */
+      withholdsWholeFiles?: boolean
+      /**
        * Per-instance auth header source. Omit to read the process-wide
        * CLAUDE_CODE_SESSION_ACCESS_TOKEN (single-session callers — REPL,
        * daemon). Required for concurrent multi-session callers.
@@ -784,6 +793,9 @@ export class CCRClient {
     this.heartbeatIntervalMs =
       opts?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
     this.heartbeatJitterFraction = opts?.heartbeatJitterFraction ?? 0
+    this.withholdsWholeFiles =
+      opts?.withholdsWholeFiles ??
+      process.env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE === 'self_hosted'
     this.getAuthHeaders = opts?.getAuthHeaders ?? getSessionIngressAuthHeaders
     // Session URL: https://host/v1/code/sessions/{id}
     if (sessionUrl.protocol !== 'http:' && sessionUrl.protocol !== 'https:') {
@@ -1570,19 +1582,28 @@ export class CCRClient {
     message: unknown,
     isVirtual: boolean,
   ): unknown {
-    if (isVirtual) return toolUseResult
-    const trim = this.currentUploadTrim()
-    const mediaTrimmed = trimMediaToolResult(toolUseResult, trim)
-    if (mediaTrimmed !== toolUseResult && !this.loggedToolResultBlank) {
-      this.loggedToolResultBlank = true
-      logEvent('ccr_tool_result_blank', {})
+    let result = toolUseResult
+    if (!isVirtual) {
+      const trim = this.currentUploadTrim()
+      const mediaTrimmed = trimMediaToolResult(toolUseResult, trim)
+      if (mediaTrimmed !== toolUseResult && !this.loggedToolResultBlank) {
+        this.loggedToolResultBlank = true
+        logEvent('ccr_tool_result_blank', {})
+      }
+      const mcpTrimmed = trimMcpImageToolResult(mediaTrimmed, message, trim)
+      if (mcpTrimmed !== mediaTrimmed && !this.loggedMcpImageBlank) {
+        this.loggedMcpImageBlank = true
+        logEvent('ccr_mcp_image_blank', {})
+      }
+      result = mcpTrimmed
     }
-    const mcpTrimmed = trimMcpImageToolResult(mediaTrimmed, message, trim)
-    if (mcpTrimmed !== mediaTrimmed && !this.loggedMcpImageBlank) {
-      this.loggedMcpImageBlank = true
-      logEvent('ccr_mcp_image_blank', {})
+    if (!this.withholdsWholeFiles) return result
+    const withheld = withholdWholeFileToolResult(result)
+    if (withheld !== result && !this.loggedWholeFileWithheld) {
+      this.loggedWholeFileWithheld = true
+      logEvent('ccr_whole_file_withheld', {})
     }
-    return mcpTrimmed
+    return withheld
   }
 
   /** Wrap a StdoutMessage as a ClientEvent, injecting a UUID if missing. */
@@ -1596,9 +1617,19 @@ export class CCRClient {
             msg.is_virtual === true,
           )
         : msg.tool_use_result
+    const retractedWireUuids = Array.isArray(msg.retractedWireUuids)
+      ? (msg.retractedWireUuids as readonly string[])
+      : Array.isArray(msg.retractedMessageUuids)
+        ? (msg.retractedMessageUuids as readonly string[])
+        : undefined
+    const retractedFields =
+      msg.retracted_message_uuids === undefined
+        ? buildRetractedWireFields({ retractedWireUuids })
+        : {}
     return {
       payload: {
         ...msg,
+        ...retractedFields,
         ...(trimmedResult !== msg.tool_use_result
           ? { tool_use_result: trimmedResult }
           : {}),

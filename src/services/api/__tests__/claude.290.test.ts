@@ -16,6 +16,7 @@ import {
   MEDIA_ITEM_LIMIT_STEPS,
   resolveCarriedEffortForModel,
   setSessionMediaItemCap,
+  takeCarriedEffortEndForMainQuery,
 } from '../claude.js'
 import {
   clearRefusalFallbackModelLatch,
@@ -194,5 +195,43 @@ describe('v2.1.290 #121 partial-messages abandoned_blocks message_stop', () => {
     expect(src).toContain('fromBlockIndex')
     expect(src).toContain('apiMessageId')
     expect(src).toContain('SUPPRESS_ABANDONED_BLOCK_STOP_TYPES')
+  })
+})
+
+describe('Wave 3D: takeCarriedEffortEnd telemetry wiring in claude.ts', () => {
+  test('takeCarriedEffortEndForMainQuery consumes only on main conversation queries', () => {
+    resetStateForTests()
+    setRefusalFallbackModelLatch({
+      fallbackModel: 'claude-sonnet-4-6',
+      previousOverride: 'claude-opus-4-7',
+      carriedEffort: 'max',
+    })
+    clearRefusalFallbackModelLatch('model_pick')
+
+    // Subagent / helper querySource must NOT consume the main-thread end reason.
+    expect(
+      takeCarriedEffortEndForMainQuery({ querySource: 'compact' }),
+    ).toBeUndefined()
+    expect(
+      takeCarriedEffortEndForMainQuery({
+        querySource: 'repl_main_thread',
+        agentContext: { agentId: 'sub-1' },
+      }),
+    ).toBeUndefined()
+
+    // Main conversation query consumes the one-shot reason.
+    expect(
+      takeCarriedEffortEndForMainQuery({ querySource: 'repl_main_thread' }),
+    ).toBe('model_pick')
+    expect(
+      takeCarriedEffortEndForMainQuery({ querySource: 'sdk' }),
+    ).toBeUndefined()
+    resetStateForTests()
+  })
+
+  test('claude.ts forwards carriedEffortEnded into logAPISuccessAndDuration', () => {
+    const src = readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8')
+    expect(src).toContain('takeCarriedEffortEndForMainQuery')
+    expect(src).toContain('carriedEffortEnded')
   })
 })

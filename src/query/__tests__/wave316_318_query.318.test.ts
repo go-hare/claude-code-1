@@ -24,11 +24,11 @@ describe('Wave 316-318 Group B: Query / TurnStepHooks / QueryEngine', () => {
     )
   })
 
-  test('#1493, #1632, #1633, #1653: QueryEngine.ts consumes stop notice, slash cmd stderr, and terminal failure', () => {
+  test('#1493, #1632, #1633, #1653: QueryEngine.ts consumes stop notice, slash cmd stderr, and result verdict', () => {
     const src = readFileSync(join(srcRoot, 'QueryEngine.ts'), 'utf8')
     expect(src).toContain('getAutoModeUnavailableStopNotice()')
     expect(src).toContain('localCommandFallbackText')
-    expect(src).toContain('TERMINAL_FAILURE_REASONS')
-    expect(src).toContain('terminatedWithFailure')
+    expect(src).toContain('resolveQueryEngineResultVerdict')
+    expect(src).toContain('api_error_status')
   })
 })

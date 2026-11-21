@@ -2,6 +2,8 @@ import { feature } from 'bun:bundle'
 import { pruneDetachedToolCalls } from './utils/detachedToolCallStore.js'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { randomUUID } from 'crypto'
+import { realpathSync } from 'fs'
+import { isAbsolute, relative, resolve as pathResolve } from 'path'
 import last from 'lodash-es/last.js'
 import {
   getPromptRenderEpoch,
@@ -9,6 +11,7 @@ import {
   isSessionPersistenceDisabled,
   getAutoModeUnavailableStopNotice,
   setAutoModeUnavailableStopNotice,
+  setCwdState,
 } from 'src/bootstrap/state.js'
 import { createSessionToolUseContext } from './engine/createSessionToolUseContext.js'
 import { clearCommandScopedAllowRules } from './utils/permissions/permissionSetup.js'
@@ -40,6 +43,10 @@ import type { CanUseToolFn } from './hooks/useCanUseTool.js'
 import { loadMemoryPrompt } from './memdir/memdir.js'
 import { hasAutoMemPathOverride } from './memdir/paths.js'
 import { query } from './query.js'
+import {
+  buildRetractedWireFields,
+  RetractedWireUuidTracker,
+} from './query/queryHelpers.js'
 import { categorizeRetryableAPIError } from './services/api/errors.js'
 import type { MCPServerConnection } from './services/mcp/types.js'
 import type { AppState } from './state/AppState.js'
@@ -704,6 +711,537 @@ export function formatNonInteractiveBgTimeoutGuidance(opts?: {
   return ` With \`run_in_background\` the timeout is instead how long the command may run in the background (default ${defaultMs}ms / ${Math.round(defaultMs / 60_000)} minutes, max ${maxMs}ms / ${maxLabel}); at that limit it is stopped.`
 }
 
+// ---------------------------------------------------------------------------
+// Official 2.1.328 #1492: decision_reason_code extraction (`eCe`, chunk@283886268.js)
+// ---------------------------------------------------------------------------
+
+const CLASSIFIER_TRANSCRIPT_TOO_LONG_FALLBACK =
+  'Auto mode classifier transcript exceeded context window \u2014 falling back to manual approval (try /compact to reduce conversation size)'
+const CLASSIFIER_TRANSCRIPT_TOO_LONG_COMPACT =
+  'Auto mode classifier transcript exceeded context window; will try to compact the conversation before the next request'
+const MEMORY_PAUSED_REASON =
+  'Memory is paused for this session; only the user can turn it back on.'
+const MEMORY_PAUSED_COMMAND_REASON = 'memory access blocked by /pause-memory'
+
+export const AUTO_MODE_NO_CHECK_HOST_CODES = new Set<string>([
+  'auto_mode_no_check_in_session',
+  'auto_mode_stop_no_check_in_session',
+  'auto_mode_stop_no_result_for_calls',
+  'auto_mode_stop_no_verdict',
+])
+
+export function extractDecisionReasonType(
+  decisionReason: unknown,
+): string | undefined {
+  if (!decisionReason || typeof decisionReason !== 'object') return undefined
+  const r = decisionReason as { type?: unknown; typeOnWire?: unknown }
+  if (r.type === 'subcommandResults' && typeof r.typeOnWire === 'string') {
+    return r.typeOnWire
+  }
+  return typeof r.type === 'string' ? r.type : undefined
+}
+
+/**
+ * Official 2.1.328 `eCe` (`chunk@283886268.js @9666`): map an internal
+ * PermissionDecisionReason onto the wire `decision_reason_code` string.
+ */
+export function extractDecisionReasonCode(
+  decisionReason: unknown,
+): string | undefined {
+  if (!decisionReason || typeof decisionReason !== 'object') return undefined
+  const r = decisionReason as {
+    type?: unknown
+    noVerdict?: unknown
+    reason?: unknown
+    hostCode?: unknown
+    circuitBreaker?: unknown
+    reasons?: Map<string, { decisionReason?: unknown }>
+  }
+  switch (r.type) {
+    case 'classifier':
+      if (
+        r.noVerdict === true &&
+        (r.reason === CLASSIFIER_TRANSCRIPT_TOO_LONG_FALLBACK ||
+          r.reason === CLASSIFIER_TRANSCRIPT_TOO_LONG_COMPACT)
+      ) {
+        return 'classifier_transcript_too_long'
+      }
+      return typeof r.hostCode === 'string' ? r.hostCode : undefined
+    case 'other':
+    case 'safetyCheck':
+      if (r.circuitBreaker === 'outsideReadsBlocked') {
+        return 'outside_reads_blocked'
+      }
+      switch (r.reason) {
+        case CLASSIFIER_TRANSCRIPT_TOO_LONG_FALLBACK:
+          return 'classifier_transcript_too_long'
+        case MEMORY_PAUSED_REASON:
+        case MEMORY_PAUSED_COMMAND_REASON:
+          return 'memory_paused'
+        default:
+          return typeof r.hostCode === 'string' ? r.hostCode : undefined
+      }
+    case 'subcommandResults': {
+      if (!(r.reasons instanceof Map)) return undefined
+      let first: string | undefined
+      for (const entry of r.reasons.values()) {
+        const code = extractDecisionReasonCode(entry.decisionReason)
+        if (code === 'outside_reads_blocked') return code
+        first ??= code
+      }
+      return first
+    }
+    default:
+      return undefined
+  }
+}
+
+export function isAutoModeNoVerdictDenialResult(result: {
+  behavior?: unknown
+  decisionReason?: unknown
+  endsTurn?: unknown
+}): boolean {
+  if (result.behavior !== 'deny') return false
+  const code = extractDecisionReasonCode(result.decisionReason)
+  if (
+    code !== undefined &&
+    (AUTO_MODE_NO_CHECK_HOST_CODES.has(code) ||
+      code.startsWith('auto_mode_stop_'))
+  ) {
+    return true
+  }
+  if (
+    result.endsTurn === true &&
+    result.decisionReason &&
+    typeof result.decisionReason === 'object'
+  ) {
+    const r = result.decisionReason as { type?: unknown; noVerdict?: unknown }
+    if (r.type === 'classifier' && r.noVerdict === true) {
+      return true
+    }
+  }
+  return false
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.328 #1640: Working-directory pin & approved-shell directory hold
+// (`t3t`, `Lzr`, `Oxt`, `call_directory_hold`, `shellNotInApprovedDirectory`)
+// ---------------------------------------------------------------------------
+
+/** Official `t3t` (`chunk@294254613.js @3843409`). */
+export class MissingWorkingDirectoryError extends Error {
+  readonly path: string
+  override name = 'MissingWorkingDirectoryError'
+
+  constructor(missingPath: string) {
+    super(`Path "${missingPath}" does not exist`)
+    this.path = missingPath
+  }
+}
+
+/** Official `Lzr` — per-session missing working directory pin state. */
+export const missingWorkingDirectoryPins = new WeakMap<
+  object,
+  { pinned: boolean }
+>()
+
+/** Official `Oxt` — per-session map of toolUseID -> realpath verified at permission check. */
+export const permissionCheckedCwds = new WeakMap<object, Map<string, string>>()
+
+export function getMissingWorkingDirectoryPin(sessionKey: object): {
+  pinned: boolean
+} {
+  let state = missingWorkingDirectoryPins.get(sessionKey)
+  if (!state) {
+    state = { pinned: false }
+    missingWorkingDirectoryPins.set(sessionKey, state)
+  }
+  return state
+}
+
+export function recordPermissionCheckedCwd(
+  sessionKey: object,
+  toolUseID: string,
+  cwdPath: string,
+): string | undefined {
+  let physical: string
+  try {
+    physical = realpathSync(cwdPath)
+  } catch {
+    return undefined
+  }
+  let map = permissionCheckedCwds.get(sessionKey)
+  if (!map) {
+    map = new Map<string, string>()
+    permissionCheckedCwds.set(sessionKey, map)
+  }
+  map.set(toolUseID, physical)
+  return physical
+}
+
+export function getPermissionCheckedCwd(
+  sessionKey: object,
+  toolUseID: string,
+): string | undefined {
+  return permissionCheckedCwds.get(sessionKey)?.get(toolUseID)
+}
+
+export type CallDirectoryHoldOutcome =
+  | { ok: true; physicalPath: string }
+  | {
+      ok: false
+      holdReason: 'changed_before_shell' | 'gone' | 'pinned_refusal'
+      message: string
+    }
+
+/**
+ * Official 2.1.328 #1640 (`chunk@294254613.js @3826200`): validate that the
+ * shell's current working directory still exists and still resolves to the
+ * same physical directory verified at permission-check time (or refuse when
+ * the session is pinned to a missing directory).
+ */
+export function checkCallDirectoryHold(opts: {
+  cwd: string
+  checkedPhysicalCwd?: string
+  sessionKey?: object
+  resolveRealpath?: (p: string) => string | null
+}): CallDirectoryHoldOutcome {
+  const resolvePath =
+    opts.resolveRealpath ??
+    ((p: string): string | null => {
+      try {
+        return realpathSync(p)
+      } catch {
+        return null
+      }
+    })
+  const currentPhysical = resolvePath(opts.cwd)
+  if (currentPhysical === null) {
+    if (
+      opts.sessionKey !== undefined &&
+      missingWorkingDirectoryPins.get(opts.sessionKey)?.pinned === true
+    ) {
+      logForDebugging(
+        `Shell CWD "${opts.cwd}" no longer exists and the session is pinned to it; refusing to run`,
+        { level: 'warn' },
+      )
+      logEvent('tengu_shell_set_cwd', {
+        success: false,
+        pinned_refusal: true,
+      })
+      logEvent('call_directory_hold', {
+        reason:
+          'pinned_refusal' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return {
+        ok: false,
+        holdReason: 'pinned_refusal',
+        message: `Working directory "${opts.cwd}" no longer exists, so shell commands cannot run until it is restored. File tools with absolute paths still work; recreate the directory (writing a file inside it recreates it), or start a new session from an existing directory.`,
+      }
+    }
+    logEvent('call_directory_hold', {
+      reason:
+        'gone' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return {
+      ok: false,
+      holdReason: 'gone',
+      message: `Working directory "${opts.cwd}" is gone (deleted, moved, replaced by a link, or unreadable), so this command was not run. Re-issue the command if it still makes sense where the session is now.`,
+    }
+  }
+  if (
+    opts.checkedPhysicalCwd !== undefined &&
+    currentPhysical !== opts.checkedPhysicalCwd
+  ) {
+    logForDebugging(
+      `Shell exec refused: working directory "${opts.cwd}" leads elsewhere than at the command's permission check`,
+      { level: 'warn' },
+    )
+    logEvent('call_directory_hold', {
+      reason:
+        'changed_before_shell' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return {
+      ok: false,
+      holdReason: 'changed_before_shell',
+      message: `Working directory "${opts.cwd}" no longer leads where it did when this command was permission-checked (a part of the path was replaced, or can't be examined), so this command was not run. Re-issue the command to have it checked afresh.`,
+    }
+  }
+  return { ok: true, physicalPath: currentPhysical }
+}
+
+/**
+ * Official 2.1.328 #1640 (`chunk@303112704.js @80605-85729`): when an approved
+ * shell call resumes after restart carrying `askedInDirectory`, confirm that
+ * the shell's current physical directory matches the approved directory under
+ * `projectRoot`; otherwise deny with `label: 'shellNotInApprovedDirectory'`.
+ */
+export function verifyApprovedShellDirectory(opts: {
+  askedInDirectory: string | undefined
+  projectRoot: string | undefined
+  currentCwd: string
+  toolUseID: string
+  resolveRealpath?: (p: string) => string | null
+}):
+  | { ok: true }
+  | {
+      ok: false
+      denial: {
+        behavior: 'deny'
+        toolUseID: string
+        message: string
+        decisionReason: {
+          type: 'other'
+          reason: string
+          label: 'shellNotInApprovedDirectory'
+        }
+      }
+    } {
+  if (opts.askedInDirectory === undefined) return { ok: true }
+  const resolvePath =
+    opts.resolveRealpath ??
+    ((p: string): string | null => {
+      try {
+        return realpathSync(p)
+      } catch {
+        return null
+      }
+    })
+  const deny = (noStart: boolean) => ({
+    ok: false as const,
+    denial: {
+      behavior: 'deny' as const,
+      toolUseID: opts.toolUseID,
+      message: `This call was not run. Claude Code could not confirm that the shell is back in the directory where it was approved. ${
+        noStart
+          ? 'It does not keep track of that directory across a restart in a session that has been in a worktree.'
+          : 'That directory may be gone or replaced, lie outside the directory where the session started, or be one that Claude Code needs approval to enter or is not allowed to examine.'
+      } The shell's directory is ${opts.currentCwd}. If the command still makes sense, cd to the directory it was meant for and make the call again; it may need approval again.`,
+      decisionReason: {
+        type: 'other' as const,
+        reason:
+          'the shell could not be confirmed in the directory where the call was approved',
+        label: 'shellNotInApprovedDirectory' as const,
+      },
+    },
+  })
+  if (!opts.projectRoot) {
+    return deny(true)
+  }
+  const rootPhysical = resolvePath(opts.projectRoot)
+  const expectedTarget = isAbsolute(opts.askedInDirectory)
+    ? opts.askedInDirectory
+    : pathResolve(rootPhysical ?? opts.projectRoot, opts.askedInDirectory)
+  const expectedPhysical = resolvePath(expectedTarget)
+  const currentPhysical = resolvePath(opts.currentCwd)
+  if (!rootPhysical || !expectedPhysical || !currentPhysical) {
+    return deny(false)
+  }
+  const relToRoot = relative(rootPhysical, expectedPhysical)
+  if (relToRoot.startsWith('..') || isAbsolute(relToRoot)) {
+    return deny(false)
+  }
+  if (currentPhysical !== expectedPhysical) {
+    return deny(false)
+  }
+  return { ok: true }
+}
+
+/**
+ * Official 2.1.328 `fa`/`ya` (`chunk@322707994.js @99356`): call `setCwd(cwd)`
+ * and on missing directory pin the session instead of crashing the turn,
+ * returning an informational warning SDK message on first pin.
+ */
+export function setCwdOrPinMissing(
+  cwd: string,
+  sessionKey: object,
+  setCwdFn: (dir: string) => void = setCwd,
+): SDKMessage | undefined {
+  try {
+    setCwdFn(cwd)
+    const pin = missingWorkingDirectoryPins.get(sessionKey)
+    if (pin !== undefined) {
+      pin.pinned = false
+    }
+    return undefined
+  } catch (err) {
+    const missingPath =
+      err instanceof MissingWorkingDirectoryError
+        ? err.path
+        : err instanceof Error
+          ? err.message.match(/^Path "(.+)" does not exist$/)?.[1]
+          : undefined
+    if (missingPath === undefined) {
+      throw err
+    }
+    setCwdState(missingPath)
+    logForDebugging(
+      `[headless] working directory ${missingPath} no longer exists; the turn starts pinned to it`,
+      { level: 'warn' },
+    )
+    const pin = getMissingWorkingDirectoryPin(sessionKey)
+    if (pin.pinned) {
+      return undefined
+    }
+    pin.pinned = true
+    try {
+      logEvent('tengu_shell_set_cwd', {
+        success: false,
+        missing_at_turn: true,
+      })
+    } catch {
+      // ignore telemetry failures
+    }
+    return {
+      type: 'system',
+      subtype: 'informational',
+      content: `The session's working directory ${missingPath} no longer exists; shell commands cannot start there and relative file paths that use it will fail until it is restored.`,
+      level: 'warning',
+      session_id: getSessionId(),
+      uuid: randomUUID(),
+    } as unknown as SDKMessage
+  }
+}
+
+export type QueryResultVerdictInput = {
+  result: Message | undefined
+  lastStopReason: string | null
+  terminalReason?: string
+  deferredThisTurn: boolean
+  maxTurnsReached?: { turnCount: number; maxTurns: number }
+  isApiErrorLatched: boolean
+  apiErrorStatus: number | null
+  apiErrorCode?: string
+  apiErrorType?: string
+  apiErrorOrigin?: string
+  apiErrorCategory?: string
+  apiErrorText: string
+  lastTurnAssistantText: string
+  structuredOutput: unknown
+  refusalDroppedStructuredOutput: boolean
+  stoppedByPermissionCheck: boolean
+  permissionStopMessage?: string
+}
+
+export type QueryResultVerdict =
+  | {
+      subtype: 'error_max_budget_usd'
+      isError: true
+    }
+  | {
+      subtype: 'error_max_turns'
+      isError: true
+      turnCount: number
+      maxTurns: number
+    }
+  | {
+      subtype: 'error_during_execution'
+      isError: true
+      stoppedByPermissionCheck: boolean
+      permissionStopMessage?: string
+    }
+  | {
+      subtype: 'success'
+      isError: boolean
+      resultText: string
+      structuredOutput: unknown
+      apiErrorStatus: number | null
+      apiErrorCode?: string
+      apiErrorType?: string
+      apiErrorOrigin?: string
+      apiError?: string
+    }
+
+/**
+ * Official 2.1.328 `HGt` (`chunk@306199530.js @83000-84400`, `sdkResultVerdict: true`):
+ * Compute the terminal SDK result envelope classification.
+ *
+ * Critically, assistant turns with `isApiErrorMessage: true` (401/429/413/500/PTL/
+ * billing) satisfy `isResultSuccessful(result, lastStopReason)` because they carry
+ * error text, so they emit `subtype: 'success'` with `is_error: true`, actual error
+ * text in `result`, and `api_error_*` metadata — NEVER `error_during_execution`.
+ * `error_during_execution` is reserved for `!isResultSuccessful(...)`, uncaught
+ * throws, or permission/auto-mode-no-verdict stops (`#1492`).
+ */
+export function resolveQueryEngineResultVerdict(
+  input: QueryResultVerdictInput,
+): QueryResultVerdict {
+  if (input.terminalReason === 'budget_exhausted') {
+    return { subtype: 'error_max_budget_usd', isError: true }
+  }
+  if (!input.deferredThisTurn && input.maxTurnsReached !== undefined) {
+    return {
+      subtype: 'error_max_turns',
+      isError: true,
+      turnCount: input.maxTurnsReached.turnCount,
+      maxTurns: input.maxTurnsReached.maxTurns,
+    }
+  }
+  if (
+    input.stoppedByPermissionCheck &&
+    input.permissionStopMessage !== undefined
+  ) {
+    return {
+      subtype: 'error_during_execution',
+      isError: true,
+      stoppedByPermissionCheck: true,
+      permissionStopMessage: input.permissionStopMessage,
+    }
+  }
+  if (
+    !input.deferredThisTurn &&
+    !isResultSuccessful(input.result, input.lastStopReason)
+  ) {
+    return {
+      subtype: 'error_during_execution',
+      isError: true,
+      stoppedByPermissionCheck: input.stoppedByPermissionCheck,
+    }
+  }
+  const isApiError =
+    input.isApiErrorLatched ||
+    (input.result?.type === 'assistant' &&
+      Boolean(input.result.isApiErrorMessage))
+  const effectiveStructuredOutput = input.refusalDroppedStructuredOutput
+    ? undefined
+    : input.structuredOutput
+  let textResult = isApiError ? input.apiErrorText : input.lastTurnAssistantText
+  if (!textResult && input.result?.type === 'assistant') {
+    const lastContent = last(
+      input.result.message!
+        .content as import('@anthropic-ai/sdk/resources/beta/messages/messages.js').BetaContentBlock[],
+    )
+    if (
+      lastContent?.type === 'text' &&
+      !SYNTHETIC_MESSAGES.has(lastContent.text)
+    ) {
+      textResult = stripAnsi(lastContent.text)
+    }
+  }
+  if (textResult === '' && effectiveStructuredOutput !== undefined) {
+    textResult = JSON.stringify(effectiveStructuredOutput)
+  }
+  return {
+    subtype: 'success',
+    isError: isApiError || input.refusalDroppedStructuredOutput,
+    resultText: input.deferredThisTurn ? '' : textResult,
+    structuredOutput: effectiveStructuredOutput,
+    apiErrorStatus: input.apiErrorStatus,
+    ...(input.apiErrorCode !== undefined
+      ? { apiErrorCode: input.apiErrorCode }
+      : {}),
+    ...(input.apiErrorType !== undefined
+      ? { apiErrorType: input.apiErrorType }
+      : {}),
+    ...(input.apiErrorOrigin !== undefined
+      ? { apiErrorOrigin: input.apiErrorOrigin }
+      : {}),
+    ...(isApiError && input.apiErrorCategory !== undefined
+      ? { apiError: input.apiErrorCategory }
+      : {}),
+  }
+}
+
 export type QueryEngineConfig = {
   cwd: string
   tools: Tools
@@ -955,11 +1493,20 @@ export class QueryEngine {
 
     this.discoveredSkillNames.clear()
     this.permissionDenials = []
-    setCwd(cwd)
+    const missingDirWarning = setCwdOrPinMissing(cwd, this)
+    if (missingDirWarning !== undefined) {
+      yield missingDirWarning
+    }
     const persistSession = !isSessionPersistenceDisabled()
     const startTime = Date.now()
 
-    // Wrap canUseTool to track permission denials
+    // Official 2.1.328 #1492: track auto-mode no-verdict stops and pre-ask
+    // system/permission_denied wire frames with decision_reason_code.
+    let autoModeNoVerdictStopMessage: string | undefined
+    const pendingPermissionDeniedEvents: SDKMessage[] = []
+
+    // Wrap canUseTool to track permission denials, propagate decision_reason_code,
+    // and enforce #1640 shell directory pin/hold checks.
     const wrappedCanUseTool: CanUseToolFn = async (
       tool,
       input,
@@ -968,6 +1515,37 @@ export class QueryEngine {
       toolUseID,
       forceDecision,
     ) => {
+      const isShellTool = tool.name === 'Bash' || tool.name === 'PowerShell'
+      if (isShellTool) {
+        const priorChecked = getPermissionCheckedCwd(this, toolUseID)
+        const isPinned = missingWorkingDirectoryPins.get(this)?.pinned === true
+        if (isPinned || priorChecked !== undefined) {
+          const hold = checkCallDirectoryHold({
+            cwd: getCwd(),
+            checkedPhysicalCwd: priorChecked,
+            sessionKey: this,
+          })
+          if (!hold.ok) {
+            const denial = {
+              behavior: 'deny' as const,
+              message: hold.message,
+              decisionReason: {
+                type: 'other' as const,
+                reason: hold.message,
+              },
+            }
+            this.permissionDenials.push({
+              type: 'permission_denial',
+              tool_name: sdkCompatToolName(tool.name),
+              tool_use_id: toolUseID,
+              tool_input: input,
+              decision_reason_type: 'other',
+            })
+            return denial
+          }
+        }
+      }
+
       const result = await canUseTool(
         tool,
         input,
@@ -977,14 +1555,89 @@ export class QueryEngine {
         forceDecision,
       )
 
-      // Track denials for SDK reporting
+      if (result.behavior === 'allow' && isShellTool) {
+        recordPermissionCheckedCwd(this, toolUseID, getCwd())
+      }
+
+      // Track denials for SDK reporting (including decision_reason_code for #1492)
       if (result.behavior !== 'allow') {
+        const resRec = result as {
+          behavior: string
+          message?: string
+          decisionReason?: unknown
+          decideLocation?: string
+          invalidInput?: boolean
+          endsTurn?: boolean
+        }
+        const decisionReasonType = extractDecisionReasonType(
+          resRec.decisionReason,
+        )
+        const decisionReasonCode = extractDecisionReasonCode(
+          resRec.decisionReason,
+        )
         this.permissionDenials.push({
           type: 'permission_denial',
           tool_name: sdkCompatToolName(tool.name),
           tool_use_id: toolUseID,
           tool_input: input,
+          ...(decisionReasonType !== undefined
+            ? { decision_reason_type: decisionReasonType }
+            : {}),
+          ...(decisionReasonCode !== undefined
+            ? { decision_reason_code: decisionReasonCode }
+            : {}),
         })
+
+        if (isAutoModeNoVerdictDenialResult(resRec)) {
+          const reasonText =
+            resRec.decisionReason &&
+            typeof resRec.decisionReason === 'object' &&
+            'reason' in resRec.decisionReason &&
+            typeof (resRec.decisionReason as { reason?: unknown }).reason ===
+              'string'
+              ? (resRec.decisionReason as { reason: string }).reason
+              : undefined
+          autoModeNoVerdictStopMessage =
+            resRec.message ||
+            reasonText ||
+            'Auto mode unavailable \u2014 stopped after repeated responses with no safety verdict'
+        }
+
+        if (
+          resRec.behavior === 'deny' &&
+          resRec.decideLocation === 'pre-ask' &&
+          resRec.invalidInput !== true
+        ) {
+          const humanReason =
+            resRec.decisionReason &&
+            typeof resRec.decisionReason === 'object' &&
+            'reason' in resRec.decisionReason &&
+            typeof (resRec.decisionReason as { reason?: unknown }).reason ===
+              'string'
+              ? (resRec.decisionReason as { reason: string }).reason
+              : undefined
+          pendingPermissionDeniedEvents.push({
+            type: 'system',
+            subtype: 'permission_denied',
+            tool_name: tool.name,
+            tool_use_id: toolUseID,
+            ...(toolUseContext.agentId !== undefined
+              ? { agent_id: toolUseContext.agentId }
+              : {}),
+            ...(decisionReasonType !== undefined
+              ? { decision_reason_type: decisionReasonType }
+              : {}),
+            ...(decisionReasonCode !== undefined
+              ? { decision_reason_code: decisionReasonCode }
+              : {}),
+            ...(humanReason !== undefined
+              ? { decision_reason: humanReason }
+              : {}),
+            message: resRec.message ?? '',
+            session_id: getSessionId(),
+            uuid: randomUUID(),
+          } as unknown as SDKMessage)
+        }
       }
 
       return result
@@ -1156,8 +1809,60 @@ export class QueryEngine {
         './utils/turnAttribution.js'
       )
       clearTurnAttributionKey()
+      // Official 2.1.328 #1640 (`chunk@303112704.js @80605`): if an approved
+      // orphaned shell call carries `askedInDirectory`, verify the shell is
+      // still in the approved directory before executing; otherwise deny with
+      // `shellNotInApprovedDirectory`.
+      let effectiveOrphanedPermission = orphanedPermission
+      const orphanExtra = orphanedPermission as OrphanedPermission & {
+        askedInDirectory?: string
+      }
+      const permResultRec = orphanedPermission.permissionResult as {
+        behavior?: string
+        toolUseID?: string
+      }
+      if (
+        orphanExtra.askedInDirectory !== undefined &&
+        permResultRec.behavior === 'allow' &&
+        typeof permResultRec.toolUseID === 'string'
+      ) {
+        const orphanToolUseId = permResultRec.toolUseID
+        const content = orphanedPermission.assistantMessage.message?.content
+        const matchedBlock = Array.isArray(content)
+          ? content.find(
+              b =>
+                typeof b === 'object' &&
+                b !== null &&
+                'type' in b &&
+                b.type === 'tool_use' &&
+                'id' in b &&
+                b.id === orphanToolUseId,
+            )
+          : undefined
+        const blockName =
+          matchedBlock &&
+          'name' in matchedBlock &&
+          typeof matchedBlock.name === 'string'
+            ? matchedBlock.name
+            : undefined
+        if (blockName === 'Bash' || blockName === 'PowerShell') {
+          const check = verifyApprovedShellDirectory({
+            askedInDirectory: orphanExtra.askedInDirectory,
+            projectRoot: cwd,
+            currentCwd: getCwd(),
+            toolUseID: orphanToolUseId,
+          })
+          if (!check.ok) {
+            effectiveOrphanedPermission = {
+              ...orphanedPermission,
+              permissionResult:
+                check.denial as unknown as OrphanedPermission['permissionResult'],
+            }
+          }
+        }
+      }
       for await (const message of handleOrphanedPermission(
-        orphanedPermission,
+        effectiveOrphanedPermission,
         tools,
         this.mutableMessages,
         processUserInputContext,
@@ -1753,6 +2458,29 @@ export class QueryEngine {
     // Official ke — only this ask's hook_deferred_tool, not the whole history.
     let deferredThisTurn: HookDeferredToolAttachment | undefined
     let terminalReason: string | undefined
+    let maxTurnsReached: { turnCount: number; maxTurns: number } | undefined
+    // Official `HGt` (`chunk@306199530.js @74400-74800`): per-turn API error
+    // metadata + retracted wire UUID tracking (`RetractedWireUuidTracker`).
+    let isApiErrorLatched = false
+    let apiErrorStatus: number | null = null
+    let apiErrorCode: string | undefined
+    let apiErrorType: string | undefined
+    let apiErrorOrigin: string | undefined
+    let apiErrorCategory: string | undefined
+    let apiErrorText = ''
+    let lastTurnAssistantText = ''
+    const retractedTracker = new RetractedWireUuidTracker()
+
+    const resetApiErrorLatch = (resetAssistantText: boolean): void => {
+      if (resetAssistantText) lastTurnAssistantText = ''
+      isApiErrorLatched = false
+      apiErrorStatus = null
+      apiErrorCode = undefined
+      apiErrorType = undefined
+      apiErrorOrigin = undefined
+      apiErrorCategory = undefined
+      apiErrorText = ''
+    }
 
     const queryGen = query({
       messages,
@@ -1920,6 +2648,7 @@ export class QueryEngine {
             // messages from in-memory conversation and persisted transcript.
             if (!tombstonePayload.displayOnly && tombstonedMsg?.uuid) {
               const targetUuid = tombstonedMsg.uuid
+              retractedTracker.add([{ uuid: targetUuid }])
               for (let i = this.mutableMessages.length - 1; i >= 0; i--) {
                 if (this.mutableMessages[i]?.uuid === targetUuid) {
                   this.mutableMessages.splice(i, 1)
@@ -1934,6 +2663,7 @@ export class QueryEngine {
                 await removeTranscriptMessage(targetUuid)
               }
             }
+            resetApiErrorLatch(true)
             if (
               tombstonedMsg?.type === 'assistant' &&
               Array.isArray(tombstonedMsg.message?.content)
@@ -1997,12 +2727,58 @@ export class QueryEngine {
             // streamed responses, this is null at content_block_stop time;
             // the real value arrives via message_delta (handled below).
             const msg = message as Message
+            const msgMeta = msg as Message & {
+              isVirtual?: boolean
+              isApiErrorMessage?: boolean
+              apiErrorStatus?: number
+              apiErrorCode?: string
+              apiErrorType?: string
+              apiErrorOrigin?: string
+              apiError?: string
+            }
             const stopReason = msg.message?.stop_reason as
               | string
               | null
               | undefined
             if (stopReason != null) {
               lastStopReason = stopReason
+            }
+            if (msgMeta.isVirtual !== true) {
+              isApiErrorLatched = msgMeta.isApiErrorMessage === true
+              apiErrorStatus =
+                typeof msgMeta.apiErrorStatus === 'number'
+                  ? msgMeta.apiErrorStatus
+                  : null
+              apiErrorCode =
+                typeof msgMeta.apiErrorCode === 'string'
+                  ? msgMeta.apiErrorCode
+                  : undefined
+              apiErrorType =
+                typeof msgMeta.apiErrorType === 'string'
+                  ? msgMeta.apiErrorType
+                  : undefined
+              apiErrorOrigin =
+                typeof msgMeta.apiErrorOrigin === 'string'
+                  ? msgMeta.apiErrorOrigin
+                  : undefined
+              apiErrorCategory =
+                isApiErrorLatched && typeof msgMeta.apiError === 'string'
+                  ? msgMeta.apiError
+                  : undefined
+              const lastBlock = last(
+                msg.message
+                  ?.content as import('@anthropic-ai/sdk/resources/beta/messages/messages.js').BetaContentBlock[],
+              )
+              const rawText = lastBlock?.type === 'text' ? lastBlock.text : ''
+              const cleanedText = SYNTHETIC_MESSAGES.has(rawText)
+                ? ''
+                : stripAnsi(rawText)
+              if (isApiErrorLatched) {
+                apiErrorText = cleanedText
+                lastTurnAssistantText = ''
+              } else {
+                lastTurnAssistantText = cleanedText
+              }
             }
             partialStreamCloser.onAssistantMessage(msg)
             this.mutableMessages.push(msg)
@@ -2022,7 +2798,17 @@ export class QueryEngine {
             } catch {
               // densable Tth optional on failure — emit original
             }
-            yield* normalizeMessage(yieldMsg)
+            const supersedes = retractedTracker.consumeForSupersedes()
+            for (const normalized of normalizeMessage(yieldMsg)) {
+              if (supersedes && normalized.type === 'assistant') {
+                yield {
+                  ...(normalized as Record<string, unknown>),
+                  supersedes,
+                } as unknown as SDKMessage
+              } else {
+                yield normalized
+              }
+            }
             break
           }
           case 'progress': {
@@ -2044,9 +2830,34 @@ export class QueryEngine {
             break
           }
           case 'user': {
-            const msg = message as Message
+            const msg = message as Message & {
+              retractedWireUuids?: readonly string[]
+              retractedMessageUuids?: readonly string[]
+            }
+            resetApiErrorLatch(msg.isCompactSummary !== true)
             this.mutableMessages.push(msg)
-            yield* normalizeMessage(msg)
+            const retractedFields = buildRetractedWireFields({
+              retractedWireUuids:
+                msg.retractedWireUuids ?? msg.retractedMessageUuids,
+            })
+            if (retractedFields.retracted_message_uuids?.length) {
+              retractedTracker.add(
+                retractedFields.retracted_message_uuids.map(uuid => ({ uuid })),
+              )
+            }
+            for (const normalized of normalizeMessage(msg)) {
+              if (
+                retractedFields.retracted_message_uuids &&
+                normalized.type === 'user'
+              ) {
+                yield {
+                  ...(normalized as Record<string, unknown>),
+                  ...retractedFields,
+                } as unknown as SDKMessage
+              } else {
+                yield normalized
+              }
+            }
             break
           }
           case 'stream_event': {
@@ -2174,34 +2985,15 @@ export class QueryEngine {
                 structuredOutputFromTool = attachment.data
               }
             }
-            // Handle max turns reached signal from query.ts
+            // Handle max turns reached signal from query.ts.
+            // Official 2.1.328 (`chunk@306199530.js @74850, @83900`): record
+            // maxTurnsReached and let control flow through closeAtTurnEnd +
+            // recordTranscript before yielding `error_max_turns`.
             else if (attachment.type === 'max_turns_reached') {
-              if (persistSession) {
-                await flushSessionStorage()
+              maxTurnsReached = {
+                turnCount: attachment.turnCount as number,
+                maxTurns: attachment.maxTurns as number,
               }
-              yield {
-                type: 'result',
-                subtype: 'error_max_turns',
-                duration_ms: Date.now() - startTime,
-                duration_api_ms: getTotalAPIDuration(),
-                is_error: true,
-                num_turns: attachment.turnCount as number,
-                stop_reason: lastStopReason,
-                session_id: getSessionId(),
-                total_cost_usd: getTotalCost(),
-                usage: this.totalUsage,
-                modelUsage: getModelUsage(),
-                permission_denials: this.permissionDenials,
-                fast_mode_state: getFastModeState(
-                  mainLoopModel,
-                  initialAppState.fastMode,
-                ),
-                uuid: randomUUID(),
-                errors: [
-                  `Reached maximum number of turns (${attachment.maxTurns})`,
-                ],
-              }
-              return
             }
             // Yield queued_command attachments as SDK user message replays
             else if (
@@ -2396,6 +3188,57 @@ export class QueryEngine {
                 uuid: msg.uuid,
               }
             }
+            // Official 2.1.328 (`chunk@306199530.js @79085`): emit
+            // system/model_refusal_fallback with retracted_message_uuids.
+            if (msg.subtype === 'model_refusal_fallback') {
+              const rf = msg as Message & {
+                subtype: 'model_refusal_fallback'
+                trigger?: string
+                direction?: string
+                scope?: string
+                originalModel?: string
+                fallbackModel?: string
+                requestId?: string | null
+                apiRefusalCategory?: string | null
+                apiRefusalExplanation?: string | null
+                apiRefusalCyberVerification?: unknown
+                retractedMessageUuids?: readonly string[]
+                retractedWireUuids?: readonly string[]
+                refusedUserMessageUuid?: string | null
+                content?: string
+                sawCyberRefusal?: boolean
+                provisional?: boolean
+              }
+              const retractedFields = buildRetractedWireFields({
+                retractedWireUuids:
+                  rf.retractedWireUuids ?? rf.retractedMessageUuids,
+              })
+              yield {
+                type: 'system' as const,
+                subtype: 'model_refusal_fallback' as const,
+                trigger: rf.trigger ?? 'refusal',
+                direction: rf.direction ?? 'retry',
+                ...(rf.scope !== undefined ? { scope: rf.scope } : {}),
+                original_model: rf.originalModel ?? '',
+                fallback_model: rf.fallbackModel ?? '',
+                request_id: rf.requestId ?? null,
+                api_refusal_category: rf.apiRefusalCategory ?? null,
+                api_refusal_explanation: rf.apiRefusalExplanation ?? null,
+                ...(rf.apiRefusalCyberVerification !== undefined
+                  ? {
+                      api_refusal_cyber_verification:
+                        rf.apiRefusalCyberVerification,
+                    }
+                  : {}),
+                ...retractedFields,
+                refused_user_message_uuid: rf.refusedUserMessageUuid ?? null,
+                content: rf.content ?? '',
+                ...(rf.sawCyberRefusal ? { saw_cyber_refusal: true } : {}),
+                ...(rf.provisional ? { provisional: rf.provisional } : {}),
+                session_id: getSessionId(),
+                uuid: msg.uuid,
+              } as unknown as SDKMessage
+            }
             // #1734: Normalize `informational` system messages for SDK clients
             // while preserving `content` text verbatim.
             if (msg.subtype === 'informational') {
@@ -2436,34 +3279,31 @@ export class QueryEngine {
           }
         }
 
-        // Check if USD budget has been exceeded
-        if (maxBudgetUsd !== undefined && getTotalCost() >= maxBudgetUsd) {
-          if (persistSession) {
-            await flushSessionStorage()
+        // Official 2.1.328 #1492: flush any pre-ask system/permission_denied
+        // wire frames recorded during tool permission checks.
+        if (pendingPermissionDeniedEvents.length > 0) {
+          for (const deniedEv of pendingPermissionDeniedEvents.splice(0)) {
+            yield deniedEv
           }
-          yield {
-            type: 'result',
-            subtype: 'error_max_budget_usd',
-            duration_ms: Date.now() - startTime,
-            duration_api_ms: getTotalAPIDuration(),
-            is_error: true,
-            num_turns: turnCount,
-            stop_reason: lastStopReason,
-            session_id: getSessionId(),
-            total_cost_usd: getTotalCost(),
-            usage: this.totalUsage,
-            modelUsage: getModelUsage(),
-            permission_denials: this.permissionDenials,
-            fast_mode_state: getFastModeState(
-              mainLoopModel,
-              initialAppState.fastMode,
-            ),
-            uuid: randomUUID(),
-            errors: [
-              `Reached maximum budget ($${maxBudgetUsd}). Increase the limit with --max-budget-usd or start a new session.`,
-            ],
-          }
-          return
+        }
+
+        // Check if USD budget has been exceeded.
+        // Official 2.1.328 (`chunk@306199530.js @81800`): gate budget checks off
+        // raw `stream_event` / status-only frames, and break out of the loop so
+        // `partialStreamCloser.closeAtTurnEnd` + `recordTranscript` always run!
+        const msgType = (message as { type?: string }).type
+        if (
+          maxTurnsReached === undefined &&
+          msgType !== 'stream_event' &&
+          msgType !== 'sdk_status' &&
+          msgType !== 'compact_progress' &&
+          msgType !== 'stream_mode' &&
+          msgType !== 'response_length' &&
+          maxBudgetUsd !== undefined &&
+          getTotalCost() >= maxBudgetUsd
+        ) {
+          terminalReason = 'budget_exhausted'
+          break
         }
 
         // Check if structured output retry limit exceeded (only on user messages)
@@ -2543,18 +3383,24 @@ export class QueryEngine {
           )?.type ?? 'none')
         : 'n/a'
 
-    // Official 2.1.323 #2145: close any open partial stream blocks BEFORE
-    // flushing transcript writes so streamed replies never drop text from the
-    // middle when the container shuts down partway through a reply.
+    // Official 2.1.323 #2145 & 2.1.328: close any open partial stream blocks
+    // BEFORE flushing transcript writes (including on max_turns_reached and
+    // maxBudgetUsd) so streamed replies never drop text from the middle.
     for (const ev of partialStreamCloser.closeAtTurnEnd(currentMessageUsage)) {
       yield ev as unknown as SDKMessage
+    }
+
+    if (pendingPermissionDeniedEvents.length > 0) {
+      for (const deniedEv of pendingPermissionDeniedEvents.splice(0)) {
+        yield deniedEv
+      }
     }
 
     // Flush buffered transcript writes before yielding result.
     // The desktop app kills the CLI process immediately after receiving the
     // result message, so any unflushed writes would be lost.
     if (persistSession) {
-      await recordTranscript(messages)
+      await recordTranscript(this.mutableMessages)
       await flushSessionStorage()
     }
 
@@ -2573,6 +3419,8 @@ export class QueryEngine {
 
     if (
       jsonSchema !== undefined &&
+      terminalReason !== 'budget_exhausted' &&
+      maxTurnsReached === undefined &&
       isResultSuccessful(result, lastStopReason) &&
       !deferredThisTurn &&
       survivingStructuredOutputs.length === 0 &&
@@ -2590,6 +3438,7 @@ export class QueryEngine {
         is_error: true,
         num_turns: turnCount,
         stop_reason: lastStopReason,
+        terminal_reason: 'structured_output_retry_exhausted',
         session_id: getSessionId(),
         total_cost_usd: getTotalCost(),
         usage: this.totalUsage,
@@ -2607,122 +3456,150 @@ export class QueryEngine {
       return
     }
 
-    const TERMINAL_FAILURE_REASONS = new Set([
-      'aborted_streaming',
-      'aborted_tools',
-      'api_error',
-      'blocking_limit',
-      'image_error',
-      'malformed_tool_use_exhausted',
-      'model_error',
-      'prompt_too_long',
-      'rapid_refill_breaker',
-      'turn_setup_failed',
-    ])
-    const terminatedWithFailure =
-      (terminalReason !== undefined &&
-        TERMINAL_FAILURE_REASONS.has(terminalReason)) ||
-      (this.abortController.signal.aborted && terminalReason !== 'completed')
+    const abortReasonObj = this.abortController.signal.reason
+    const abortReasonName =
+      abortReasonObj instanceof DOMException &&
+      abortReasonObj.name === 'AbortError'
+        ? abortReasonObj.message
+        : typeof abortReasonObj === 'string'
+          ? abortReasonObj
+          : undefined
+    const stoppedByPermissionCheck =
+      abortReasonName === 'permission-stop' ||
+      autoModeNoVerdictStopMessage !== undefined
+    const permissionStopMessage =
+      autoModeNoVerdictStopMessage ??
+      (abortReasonName === 'permission-stop' ? autoModeStopNotice : undefined)
 
-    if (!isResultSuccessful(result, lastStopReason) || terminatedWithFailure) {
-      yield {
-        type: 'result',
-        subtype: 'error_during_execution',
-        duration_ms: Date.now() - startTime,
-        duration_api_ms: getTotalAPIDuration(),
-        is_error: true,
-        num_turns: turnCount,
-        stop_reason: lastStopReason,
-        ...(terminalReason !== undefined
-          ? { terminal_reason: terminalReason }
-          : {}),
-        session_id: getSessionId(),
-        total_cost_usd: getTotalCost(),
-        usage: this.totalUsage,
-        modelUsage: getModelUsage(),
-        permission_denials: this.permissionDenials,
-        fast_mode_state: getFastModeState(
-          mainLoopModel,
-          initialAppState.fastMode,
-        ),
-        uuid: randomUUID(),
-        // Diagnostic prefix: these are what isResultSuccessful() checks — if
-        // the result type isn't assistant-with-text/thinking or user-with-
-        // tool_result, and stop_reason isn't end_turn, that's why this fired.
-        // errors[] is turn-scoped via the watermark; previously it dumped the
-        // entire process's logError buffer (ripgrep timeouts, ENOENT, etc).
-        errors: (() => {
-          const all = getInMemoryErrors()
-          const start = errorLogWatermark
-            ? all.lastIndexOf(errorLogWatermark) + 1
-            : 0
-          return [
-            `[ede_diagnostic] result_type=${edeResultType} last_content_type=${edeLastContentType} stop_reason=${lastStopReason}`,
-            ...all.slice(start).map(_ => _.error),
-          ]
-        })(),
-      }
-      return
-    }
-
-    // Extract the text result based on message type
-    let textResult = ''
-    let isApiError = false
-
-    if (result.type === 'assistant') {
-      isApiError = Boolean(result.isApiErrorMessage)
-      // densable 2.1.219 #7: when the terminal assistant is a mid-stream
-      // API-error salvage banner, prefer the last real (non-error) assistant
-      // text so `claude -p` / result.result keeps the partial response.
-      if (isApiError) {
-        const prior = messages.findLast(
-          m =>
-            m.type === 'assistant' &&
-            !m.isApiErrorMessage &&
-            Array.isArray(m.message?.content),
-        )
-        if (prior && prior.type === 'assistant') {
-          const blocks = prior.message!
-            .content as import('@anthropic-ai/sdk/resources/beta/messages/messages.js').BetaContentBlock[]
-          for (let i = blocks.length - 1; i >= 0; i--) {
-            const b = blocks[i]
-            if (b?.type === 'text' && !SYNTHETIC_MESSAGES.has(b.text)) {
-              textResult = b.text
-              break
-            }
-          }
-        }
-      }
-      if (!textResult) {
-        const lastContent = last(
-          result.message!
-            .content as import('@anthropic-ai/sdk/resources/beta/messages/messages.js').BetaContentBlock[],
-        )
-        if (
-          lastContent?.type === 'text' &&
-          !SYNTHETIC_MESSAGES.has(lastContent.text)
-        ) {
-          textResult = lastContent.text
-        }
-      }
-    }
-
+    const refusalDroppedStructuredOutput =
+      lastStopReason === 'refusal' && survivingStructuredOutputs.length > 0
     const deferredAtEnd = deferredThisTurn
-    yield {
-      type: 'result',
-      subtype: 'success',
-      is_error: isApiError,
+
+    const verdict = resolveQueryEngineResultVerdict({
+      result,
+      lastStopReason,
+      terminalReason,
+      deferredThisTurn: deferredAtEnd !== undefined,
+      maxTurnsReached,
+      isApiErrorLatched,
+      apiErrorStatus,
+      apiErrorCode,
+      apiErrorType,
+      apiErrorOrigin,
+      apiErrorCategory,
+      apiErrorText,
+      lastTurnAssistantText,
+      structuredOutput: structuredOutputFromTool,
+      refusalDroppedStructuredOutput,
+      stoppedByPermissionCheck,
+      permissionStopMessage,
+    })
+
+    const commonResultFields = {
       duration_ms: Date.now() - startTime,
       duration_api_ms: getTotalAPIDuration(),
-      num_turns: turnCount,
-      result: deferredAtEnd ? '' : textResult,
-      stop_reason: deferredAtEnd ? 'tool_deferred' : lastStopReason,
+      stop_reason: lastStopReason,
+      ...(terminalReason !== undefined
+        ? { terminal_reason: terminalReason }
+        : {}),
+      ...(stoppedByPermissionCheck
+        ? { stopped_by_permission_check: true }
+        : {}),
       session_id: getSessionId(),
       total_cost_usd: getTotalCost(),
       usage: this.totalUsage,
       modelUsage: getModelUsage(),
       permission_denials: this.permissionDenials,
-      structured_output: structuredOutputFromTool,
+      fast_mode_state: getFastModeState(
+        mainLoopModel,
+        initialAppState.fastMode,
+      ),
+      uuid: randomUUID(),
+    }
+
+    if (verdict.subtype === 'error_max_budget_usd') {
+      yield {
+        type: 'result',
+        subtype: 'error_max_budget_usd',
+        ...commonResultFields,
+        is_error: true,
+        num_turns: turnCount,
+        terminal_reason: 'budget_exhausted',
+        errors: [
+          `Reached maximum budget ($${maxBudgetUsd}). Increase the limit with --max-budget-usd or start a new session.`,
+        ],
+      }
+      return
+    }
+
+    if (verdict.subtype === 'error_max_turns') {
+      yield {
+        type: 'result',
+        subtype: 'error_max_turns',
+        ...commonResultFields,
+        is_error: true,
+        num_turns: verdict.turnCount,
+        terminal_reason: terminalReason ?? 'max_turns',
+        errors: [`Reached maximum number of turns (${verdict.maxTurns})`],
+      }
+      return
+    }
+
+    if (verdict.subtype === 'error_during_execution') {
+      const edeDiagnostic = `[ede_diagnostic] result_type=${edeResultType} last_content_type=${edeLastContentType} stop_reason=${lastStopReason}`
+      const errors =
+        verdict.permissionStopMessage !== undefined
+          ? [edeDiagnostic, verdict.permissionStopMessage]
+          : (() => {
+              const all = getInMemoryErrors()
+              const start = errorLogWatermark
+                ? all.lastIndexOf(errorLogWatermark) + 1
+                : 0
+              return [edeDiagnostic, ...all.slice(start).map(_ => _.error)]
+            })()
+      yield {
+        type: 'result',
+        subtype: 'error_during_execution',
+        ...commonResultFields,
+        is_error: true,
+        num_turns: turnCount,
+        errors,
+      }
+      return
+    }
+
+    if (refusalDroppedStructuredOutput) {
+      try {
+        logEvent('tengu_structured_output_refusal_dropped', {
+          api_error_latched: isApiErrorLatched,
+        })
+      } catch {
+        // ignore telemetry errors
+      }
+    }
+
+    yield {
+      type: 'result',
+      subtype: 'success',
+      ...commonResultFields,
+      is_error: verdict.isError,
+      num_turns: turnCount,
+      result: verdict.resultText,
+      stop_reason: deferredAtEnd ? 'tool_deferred' : lastStopReason,
+      api_error_status: verdict.apiErrorStatus,
+      ...(verdict.apiErrorCode !== undefined
+        ? { api_error_code: verdict.apiErrorCode }
+        : {}),
+      ...(verdict.apiErrorType !== undefined
+        ? { api_error_type: verdict.apiErrorType }
+        : {}),
+      ...(verdict.apiErrorOrigin !== undefined
+        ? { api_error_origin: verdict.apiErrorOrigin }
+        : {}),
+      ...(verdict.apiError !== undefined
+        ? { api_error: verdict.apiError }
+        : {}),
+      structured_output: verdict.structuredOutput,
       ...(deferredAtEnd
         ? {
             deferred_tool_use: {
@@ -2732,11 +3609,6 @@ export class QueryEngine {
             },
           }
         : {}),
-      fast_mode_state: getFastModeState(
-        mainLoopModel,
-        initialAppState.fastMode,
-      ),
-      uuid: randomUUID(),
     }
   }
 

@@ -61,6 +61,7 @@ import type {
   UserMessage,
 } from '../../types/message.js'
 import { count } from '../../utils/array.js'
+import { getAbortReasonMessage } from '../../utils/abortController.js'
 import { getGlobalConfigWriteCount } from '../../utils/config.js'
 import { levelSessionEffort, type EffortValue } from '../../utils/effort.js'
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js'
@@ -388,6 +389,15 @@ function getSpinnerTokenCounter(ref: { current: number }): SpinnerTokenCounter {
     counter.reset()
   }
   return counter
+}
+
+/**
+ * Official 2.1.328 `xBe.noteMainRequestAnnounced` -> `_keepReply()`:
+ * commits the current reply length into `keptLength` when a new main request
+ * is announced (including external engines emitting `system/status(requesting)`).
+ */
+export function keepSpinnerReply(ref: { current: number }): void {
+  getSpinnerTokenCounter(ref).keepReply()
 }
 
 /**
@@ -939,6 +949,7 @@ async function executeReplTurnImpl(
   messagesIncludingNewMessages: MessageType[],
   newMessages: MessageType[],
   abortController: AbortController,
+  thisGeneration: number,
   shouldQuery: boolean,
   additionalAllowedTools: string[],
   mainLoopModelParam: string,
@@ -1254,47 +1265,39 @@ async function executeReplTurnImpl(
       }
     },
   }
-  const onAbort = () => {
-    void hostEngine.interrupt('user-cancel')
-  }
-  if (abortController.signal.aborted) {
-    onAbort()
-  } else {
-    abortController.signal.addEventListener('abort', onAbort, { once: true })
-  }
-  let result: SDKResultMessage | undefined
-  try {
-    result = await runHostEngineTurn({
-      engine: hostEngine,
-      feed: engineFeed,
-      onRead: deps.onEngineRead,
-      onMainRequestStart: () => {
-        if (!abortController.signal.aborted) deps.onMainRequestStart?.()
-      },
-      onStatus: deps.onEngineStatus,
-      turnInput,
-      newMessages,
-      onQueryEvent: event => {
-        onQueryEvent(event as Parameters<typeof onQueryEvent>[0])
-      },
-      addNotification: n => {
-        addNotification({
-          key: n.key ?? 'engine-notification',
-          text: n.text,
-          priority:
-            n.priority === 'low' ||
-            n.priority === 'medium' ||
-            n.priority === 'high' ||
-            n.priority === 'immediate'
-              ? n.priority
-              : 'medium',
-          timeoutMs: n.timeoutMs,
-        })
-      },
-    })
-  } finally {
-    abortController.signal.removeEventListener('abort', onAbort)
-  }
+  // Official 2.1.328 iie._runImpl (chunk@319736883.js @1704300):
+  // Do NOT attach a blind abortController listener calling
+  // hostEngine.interrupt('user-cancel') — abort reason propagation is owned by
+  // the hostEngine turn wrapper (preserving 'background'/'interrupt'/etc.) and
+  // explicit cancel paths (onCancel, shutdown).
+  const result = await runHostEngineTurn({
+    engine: hostEngine,
+    feed: engineFeed,
+    onRead: deps.onEngineRead,
+    onMainRequestStart: () => {
+      if (!abortController.signal.aborted) deps.onMainRequestStart?.()
+    },
+    onStatus: deps.onEngineStatus,
+    turnInput,
+    newMessages,
+    onQueryEvent: event => {
+      onQueryEvent(event as Parameters<typeof onQueryEvent>[0])
+    },
+    addNotification: n => {
+      addNotification({
+        key: n.key ?? 'engine-notification',
+        text: n.text,
+        priority:
+          n.priority === 'low' ||
+          n.priority === 'medium' ||
+          n.priority === 'high' ||
+          n.priority === 'immediate'
+            ? n.priority
+            : 'medium',
+        timeoutMs: n.timeoutMs,
+      })
+    },
+  })
 
   {
     // densable _runImpl post-query
@@ -1302,7 +1305,14 @@ async function executeReplTurnImpl(
     if (arm) {
       arm.clearCapTimer()
       leftArrowDeferRef.current = null
-      if (!abortController.signal.aborted) {
+      if (
+        !abortController.signal.aborted &&
+        !isUserAbortTerminalReason(
+          typeof result?.terminal_reason === 'string'
+            ? result.terminal_reason
+            : undefined,
+        )
+      ) {
         const liveTasks = (store.getState().tasks ?? {}) as Record<
           string,
           TaskState
@@ -1366,7 +1376,10 @@ async function executeReplTurnImpl(
           setMessages(prev => [...prev, createSystemMessage($e, 'warning')])
           markIdleForkMidTurn()
         }
-      } else if (abortController.signal.reason !== 'background') {
+      } else if (
+        deps.queryGuard.generation === thisGeneration &&
+        getAbortReasonMessage(abortController.signal.reason) !== 'background'
+      ) {
         setMessages(prev => [
           ...prev,
           createSystemMessage(LEFT_ARROW_STOPPED_TURN_TOAST, 'warning'),
@@ -1696,6 +1709,7 @@ export async function runReplTurn(
         effectiveLatestMessages,
         newMessages,
         abortController,
+        thisGeneration,
         shouldQuery,
         additionalAllowedTools,
         mainLoopModelParam,
@@ -1836,8 +1850,10 @@ export async function runReplTurn(
       setAbortController(null)
     }
 
+    const abortReason = getAbortReasonMessage(abortController.signal.reason)
     if (
-      abortController.signal.reason === 'user-cancel' &&
+      (abortReason === 'user-cancel' ||
+        abortReason === 'refusal-fallback-edit') &&
       !queryGuard.isActive &&
       inputValueRef.current === '' &&
       getCommandQueueLength() === 0 &&

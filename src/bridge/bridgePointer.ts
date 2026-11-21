@@ -50,6 +50,19 @@ const MAX_WORKTREE_FANOUT = 50
 // keeps its computer identity when restarted in the same folder after >4 hours.
 export const BRIDGE_POINTER_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
+/**
+ * Official 2.1.328 #1613 (`IRs = 14400000`, `SAl = 900000`, `F = 120000`,
+ * `Eun = 64` in `chunk@315265945.js`): rolling base TTL (4h), persisted
+ * active-session resume window (15m), clock-skew tolerance (2m), and max
+ * carried session IDs (64).
+ */
+export const BRIDGE_POINTER_BASE_TTL_MS = 14_400_000
+export const PERSISTED_SESSION_RESUME_WINDOW_MS = 900_000
+export const PERSISTED_STAMP_FUTURE_SKEW_MS = 120_000
+export const MAX_PERSISTED_SESSION_IDS = 64
+
+const MAX_SAFE_EPOCH_MS = 8_640_000_000_000_000
+
 const BridgePointerSchema = lazySchema(() =>
   z.object({
     sessionId: z.string(),
@@ -57,8 +70,94 @@ const BridgePointerSchema = lazySchema(() =>
     source: z.enum(['standalone', 'repl']),
     pid: z.number().optional(),
     procStart: z.string().optional(),
+    environmentRevivedAt: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_SAFE_EPOCH_MS)
+      .optional(),
+    activeSessionIds: z
+      .array(z.string().max(256))
+      .max(MAX_PERSISTED_SESSION_IDS)
+      .optional(),
+    activeSessionIdsPersistedAt: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_SAFE_EPOCH_MS)
+      .optional(),
   }),
 )
+
+/**
+ * Official 2.1.328 `Vgl` (`chunk@315265945.js @2820`): check whether a
+ * persisted session-list timestamp is within `windowMs` (allowing up to 2m
+ * future clock skew).
+ */
+export function isPersistedStampFresh(
+  persistedAt: number,
+  nowMs: number = Date.now(),
+  windowMs: number = PERSISTED_SESSION_RESUME_WINDOW_MS,
+): boolean {
+  return (
+    nowMs - persistedAt <= windowMs &&
+    persistedAt - nowMs <= PERSISTED_STAMP_FUTURE_SKEW_MS
+  )
+}
+
+/**
+ * Official 2.1.328 `kAl` (`chunk@315265945.js @4630`): when reviving a pointer
+ * older than the 4h base TTL, stamp `nowMs` as `environmentRevivedAt`;
+ * otherwise preserve any existing `environmentRevivedAt`.
+ */
+export function environmentRevivedAtAfter(
+  pointer: BridgePointerWithAge,
+  nowMs: number = Date.now(),
+): number | undefined {
+  return pointer.ageMs > BRIDGE_POINTER_BASE_TTL_MS
+    ? nowMs
+    : pointer.environmentRevivedAt
+}
+
+/**
+ * Official 2.1.328 `wAl` (`chunk@315265945.js`): serialize asynchronous pointer
+ * updates so periodic refreshes and shutdown flushes never race.
+ */
+export function createBridgePointerWriteQueue(): <T>(
+  fn: () => Promise<T>,
+) => Promise<T> {
+  let chain: Promise<unknown> = Promise.resolve()
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    const next = chain.then(fn, fn)
+    chain = next
+    return next
+  }
+}
+
+/**
+ * Extract fresh `activeSessionIds` carried across an RC restart within
+ * `PERSISTED_SESSION_RESUME_WINDOW_MS`.
+ */
+export function getFreshActiveSessionIds(
+  pointer: BridgePointer | null | undefined,
+  nowMs: number = Date.now(),
+): { sessionIds: string[]; persistedAt?: number } {
+  if (
+    pointer?.activeSessionIds?.length &&
+    pointer.activeSessionIdsPersistedAt !== undefined &&
+    isPersistedStampFresh(
+      pointer.activeSessionIdsPersistedAt,
+      nowMs,
+      PERSISTED_SESSION_RESUME_WINDOW_MS,
+    )
+  ) {
+    return {
+      sessionIds: [...pointer.activeSessionIds],
+      persistedAt: pointer.activeSessionIdsPersistedAt,
+    }
+  }
+  return { sessionIds: [] }
+}
 
 export type BridgePointer = z.infer<ReturnType<typeof BridgePointerSchema>>
 

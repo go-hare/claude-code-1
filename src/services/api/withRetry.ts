@@ -197,7 +197,7 @@ const PERSISTENT_MAX_BACKOFF_MS = 5 * 60 * 1000
 const PERSISTENT_RESET_CAP_MS = 6 * 60 * 60 * 1000
 const HEARTBEAT_INTERVAL_MS = 30_000
 
-function isPersistentRetryEnabled(): boolean {
+function isUnattendedRetryEnabled(): boolean {
   if (!feature('UNATTENDED_RETRY')) return false
   // Official UNATTENDED_RETRY densable.
   try {
@@ -208,6 +208,40 @@ function isPersistentRetryEnabled(): boolean {
   } catch {
     return isEnvTruthy(process.env.CLAUDE_CODE_UNATTENDED_RETRY)
   }
+}
+
+/**
+ * Official 2.1.328 `Y1e(querySource)`:
+ * Enable `CLAUDE_CODE_OVERLOADED_RETRY_MAX_WAIT_MS` when `CLAUDE_CODE_RETRY_WATCHDOG`
+ * is UNSET, `CLAUDE_CODE_MAX_RETRIES === undefined`, on main-thread queries, and
+ * gated by `tengu_steady_heron` (default true).
+ */
+export function getOverloadedRetryMaxWaitMs(
+  querySource?: QuerySource,
+): number | undefined {
+  const maxWait = parseOptionalNonNegativeIntEnv(
+    'CLAUDE_CODE_OVERLOADED_RETRY_MAX_WAIT_MS',
+  )
+  if (
+    maxWait === undefined ||
+    process.env.CLAUDE_CODE_MAX_RETRIES !== undefined ||
+    isRetryWatchdogEnabled()
+  ) {
+    return undefined
+  }
+  let family: string | undefined
+  try {
+    const { getQuerySourceFamily } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/observerAgents.js') as typeof import('../../utils/observerAgents.js')
+    family = getQuerySourceFamily(querySource)
+  } catch {
+    family = undefined
+  }
+  if (family !== 'main') return undefined
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_steady_heron', true)
+    ? maxWait
+    : undefined
 }
 
 function isTransientCapacityError(error: unknown): boolean {
@@ -593,6 +627,10 @@ export type FallbackTriggeredReason =
   | 'overloaded'
   | 'model_not_found'
   | 'permission_denied'
+  | 'refusal'
+  | 'server_error'
+  | 'model_blocked'
+  | 'last_resort'
 
 export class FallbackTriggeredError extends Error {
   public readonly reason: FallbackTriggeredReason
@@ -819,6 +857,9 @@ export async function* withRetry<T>(
   let persistentAttempt = 0
   let watchdogSpentMs = 0
   let usageLimitSpentMs = 0
+  // Official 2.1.328 `Y1e(r.querySource)`: main-turn overload wait cap when
+  // CLAUDE_CODE_RETRY_WATCHDOG and CLAUDE_CODE_MAX_RETRIES are both unset.
+  const overloadWaitMaxMs = getOverloadedRetryMaxWaitMs(options.querySource)
   // densable 2.1.228 #14: cap GCP/AWS auth refresh retries (x6S/k6S = 2)
   let awsAuthRetryCount = 0
   let gcpAuthRetryCount = 0
@@ -1205,7 +1246,7 @@ export async function* withRetry<T>(
       // first, and refund the retry attempt (`attempt--`).
       if (
         wasFastModeActive &&
-        !isPersistentRetryEnabled() &&
+        !isUnattendedRetryEnabled() &&
         ((error instanceof APIError &&
           (error.status === 429 ||
             is529Error(error) ||
@@ -1299,13 +1340,29 @@ export async function* withRetry<T>(
 
       // Non-foreground sources bail immediately on 529 — no retry amplification
       // during capacity cascades. User never sees these fail.
-      if (is529Error(error) && !shouldRetry529(options.querySource)) {
+      // Official 2.1.328: `!h_e(r.querySource) && !ME()`.
+      if (
+        is529Error(error) &&
+        !shouldRetry529(options.querySource) &&
+        !isFullRetryWatchdogActive()
+      ) {
         logEvent('tengu_api_529_background_dropped', {
           query_source:
             options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
         throw new CannotRetryError(error, retryContext)
       }
+
+      // Official 2.1.328 `Hi`: overload wait active when Y1e(querySource)
+      // resolved CLAUDE_CODE_OVERLOADED_RETRY_MAX_WAIT_MS and error is 529.
+      const overloadWaitActive =
+        overloadWaitMaxMs !== undefined &&
+        is529Error(error) &&
+        !(
+          error instanceof APIError &&
+          error.status !== undefined &&
+          error.status < 500
+        )
 
       // Track consecutive 529 errors (Official #1880: only fall back to another
       // model when `!wasFastModeActive` — fast mode tries standard speed first).
@@ -1339,7 +1396,9 @@ export async function* withRetry<T>(
           if (
             process.env.USER_TYPE === 'external' &&
             !process.env.IS_SANDBOX &&
-            !isPersistentRetryEnabled()
+            !isRetryWatchdogEnabled() &&
+            !isUnattendedRetryEnabled() &&
+            !overloadWaitActive
           ) {
             logEvent('tengu_api_custom_529_overloaded_error', {})
             throw new CannotRetryError(
@@ -1359,9 +1418,13 @@ export async function* withRetry<T>(
         throw new CannotRetryError(error, retryContext)
       }
 
-      // Only retry if the error indicates we should
+      // Official 2.1.328 `Hs`: persistent capacity retry driven by
+      // `isRetryWatchdogEnabled() || isUnattendedRetryEnabled()` on 429/529
+      // OR `overloadWaitActive` (`Hi`) on main-turn 529.
       const persistent =
-        isPersistentRetryEnabled() && isTransientCapacityError(error)
+        overloadWaitActive ||
+        ((isRetryWatchdogEnabled() || isUnattendedRetryEnabled()) &&
+          isTransientCapacityError(error))
       if (refusedAfterDesktopOneOff401 && !persistent) {
         // Official 2.1.328 (`if (yo && !Hs && !wd) is--`): do not burn a retry
         // attempt when the one-shot Desktop OAuth resend is refused again with 401.
@@ -1503,19 +1566,23 @@ export async function* withRetry<T>(
       const overloadedMaxDelayMs = overloaded
         ? getOverloadedRetryMaxDelayMs()
         : undefined
-      const watchdogActive =
-        isRetryWatchdogActive() && isTransientCapacityError(error)
-      const maxWaitMs = watchdogActive
-        ? getRetryWatchdogMaxWaitMs(overloaded)
+      // Official 2.1.328 (`Hs` capacity wait cap):
+      // `($e ?? s.CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS ?? Infinity) - spentMs`.
+      const maxWaitMs = persistent
+        ? (overloadWaitMaxMs ??
+          parseOptionalNonNegativeIntEnv(
+            'CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS',
+          ))
         : undefined
       if (maxWaitMs !== undefined && maxWaitMs - watchdogSpentMs <= 0) {
         throw new CannotRetryError(error, retryContext)
       }
 
-      // Official 2.1.301 (#843): CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS
+      // Official 2.1.301 (#843) + 2.1.328 (`Hs` 429 usage-limit wait cap):
+      // Driven by `persistent` (`zHe()` ignores `CLAUDE_CODE_RETRY_WATCHDOG_SCOPE`).
       let isUsageLimit429 = false
       let usageLimitOverrideDelay: number | undefined
-      if (watchdogActive && error instanceof APIError && error.status === 429) {
+      if (persistent && error instanceof APIError && error.status === 429) {
         const resetDelay = getRateLimitResetDelayMs(error)
         if (
           resetDelay !== null &&
@@ -1553,7 +1620,6 @@ export async function* withRetry<T>(
       const oauthTokensNow = getClaudeAIOAuthTokens()
       const desktopOneOff401Token =
         !persistent &&
-        !watchdogActive &&
         desktopOneOff401State.state === 'unused' &&
         lastClientOAuthAccessToken !== undefined &&
         !oauth401ForcedRefreshDone &&
@@ -1599,6 +1665,21 @@ export async function* withRetry<T>(
         // Retry-After is a server directive and bypasses maxDelayMs inside
         // getRetryDelay (intentional — honoring it is correct). Cap at the
         // 6hr reset-cap here so a pathological header can't wait unbounded.
+        const retryAfterMs =
+          error instanceof APIError ? getRetryAfterMs(error) : null
+        if (
+          overloadWaitActive &&
+          maxWaitMs !== undefined &&
+          retryAfterMs !== null &&
+          retryAfterMs > maxWaitMs - watchdogSpentMs
+        ) {
+          logEvent('tengu_api_retry_after_too_long', {
+            delayMs: retryAfterMs,
+            status: (error as APIError).status,
+            provider: getAPIProviderForStatsig(),
+          })
+          throw new CannotRetryError(error, retryContext)
+        }
         delayMs = Math.min(
           getRetryDelay(
             persistentAttempt,
@@ -1623,7 +1704,7 @@ export async function* withRetry<T>(
         delayMs = Math.min(delayMs, Math.max(0, maxWaitMs - watchdogSpentMs))
         watchdogSpentMs += delayMs
       }
-      if (watchdogActive && isUsageLimit429) {
+      if (persistent && isUsageLimit429) {
         usageLimitSpentMs += delayMs
       }
 
@@ -1655,7 +1736,9 @@ export async function* withRetry<T>(
         })
       }
 
-      if (persistent) {
+      const useHeartbeatSleep =
+        persistent || (isFullRetryWatchdogActive() && delayMs > 60_000)
+      if (useHeartbeatSleep) {
         if (delayMs > 60_000) {
           logEvent('tengu_api_persistent_retry_wait', {
             status: (error as APIError).status,
@@ -1667,10 +1750,11 @@ export async function* withRetry<T>(
         // Chunk long sleeps so the host sees periodic stdout activity and
         // does not mark the session idle. Each yield surfaces as
         // {type:'system', subtype:'api_retry'} on stdout via QueryEngine.
-        // Official 2.1.305 (#1035): when CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS
-        // is set during a usage-limit wait, periodically check isUsageLimitLifted().
+        // Official 2.1.305 (#1035) + 2.1.328: when
+        // CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS is set during a
+        // usage-limit wait, periodically check isUsageLimitLifted().
         const recheckMs =
-          isUsageLimit429 && watchdogActive && options.isUsageLimitLifted
+          isUsageLimit429 && persistent && options.isUsageLimitLifted
             ? getRetryWatchdogUsageLimitRecheckMs()
             : undefined
         let recheckRemaining =
@@ -1713,9 +1797,10 @@ export async function* withRetry<T>(
             }
           }
         }
-        // Clamp so the for-loop never terminates. Backoff uses the separate
-        // persistentAttempt counter which keeps growing to the 5-min cap.
-        if (attempt >= maxRetries) attempt = maxRetries
+        // Clamp so the for-loop never terminates on persistent capacity waits.
+        // Backoff uses the separate persistentAttempt counter which keeps
+        // growing to the 5-min cap (bounded by maxWaitMs when configured).
+        if (persistent && attempt >= maxRetries) attempt = maxRetries
       } else {
         if (error instanceof APIError && !suppressRetryBanner) {
           yield createSystemAPIErrorMessage(error, delayMs, attempt, maxRetries)
@@ -1826,7 +1911,7 @@ export function getRetryDelay(
   return backoffMs
 }
 
-function parseMaxTokensContextOverflowError(error: APIError):
+export function parseMaxTokensContextOverflowError(error: APIError):
   | {
       inputTokens: number
       maxTokens: number
@@ -1876,7 +1961,7 @@ function parseMaxTokensContextOverflowError(error: APIError):
 // TODO: Replace with a response header check once the API adds a dedicated
 // header for fast-mode rejection (e.g., x-fast-mode-rejected). String-matching
 // the error message is fragile and will break if the API wording changes.
-function isFastModeNotEnabledError(error: unknown): boolean {
+export function isFastModeNotEnabledError(error: unknown): boolean {
   if (!(error instanceof APIError)) {
     return false
   }
@@ -1886,7 +1971,7 @@ function isFastModeNotEnabledError(error: unknown): boolean {
   )
 }
 
-function isSpeedParameterUnsupportedError(
+export function isSpeedParameterUnsupportedError(
   error: unknown,
   model: string,
 ): boolean {
@@ -2247,9 +2332,13 @@ export function shouldRetry(error: APIError): boolean {
     return false
   }
 
-  // Persistent mode: 429/529 always retryable, bypass subscriber gates and
-  // x-should-retry header.
-  if (isPersistentRetryEnabled() && isTransientCapacityError(error)) {
+  // Persistent / watchdog mode: 429/529 always retryable, bypass subscriber
+  // gates (x-should-retry: false was already respected above per densable vns).
+  // Official 2.1.328 `wMs`: `if (zHe() && fAt(e)) return true`.
+  if (
+    (isRetryWatchdogEnabled() || isUnattendedRetryEnabled()) &&
+    isTransientCapacityError(error)
+  ) {
     return true
   }
 
@@ -2407,22 +2496,44 @@ const DEFAULT_RETRY_WATCHDOG_MAX = 300
 const MAX_RETRIES_CLAMP = 15
 let maxRetriesClampWarned = false
 
-export function isRetryWatchdogActive(
+/**
+ * Official 2.1.328 `zHe()`: `CLAUDE_CODE_RETRY_WATCHDOG` is truthy/enabled,
+ * IGNORING `CLAUDE_CODE_RETRY_WATCHDOG_SCOPE`. Drives persistent 429/529
+ * capacity retries, subscriber 429 bypass, heartbeat, and usage-limit recheck.
+ */
+export function isRetryWatchdogEnabled(
   watchdog: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG,
-  scope: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG_SCOPE,
 ): boolean {
   if (watchdog === undefined || watchdog === '') return false
   if (watchdog === '0' || watchdog.toLowerCase() === 'false') return false
   const parsed = parseInt(watchdog, 10)
-  const truthyOrBudget =
+  return (
     (!Number.isNaN(parsed) && parsed > 1) ||
     isEnvTruthy(watchdog) ||
     Number.isNaN(parsed) ||
     parsed === 1
-  if (!truthyOrBudget) return false
-  // Official 2.1.328 ME() (#442): active when CLAUDE_CODE_RETRY_WATCHDOG is set
-  // and CLAUDE_CODE_RETRY_WATCHDOG_SCOPE !== 'capacity'.
+  )
+}
+
+/**
+ * Official 2.1.328 `ME()`: full retry watchdog (non-capacity behaviors such as
+ * 300-retry budget, >15 max-retry clamp lift, background 529 drop bypass) —
+ * active when `CLAUDE_CODE_RETRY_WATCHDOG` is enabled AND
+ * `CLAUDE_CODE_RETRY_WATCHDOG_SCOPE !== 'capacity'`.
+ */
+export function isFullRetryWatchdogActive(
+  watchdog: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG,
+  scope: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG_SCOPE,
+): boolean {
+  if (!isRetryWatchdogEnabled(watchdog)) return false
   return scope !== 'capacity'
+}
+
+export function isRetryWatchdogActive(
+  watchdog: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG,
+  scope: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG_SCOPE,
+): boolean {
+  return isFullRetryWatchdogActive(watchdog, scope)
 }
 
 export function getDefaultMaxRetries(): number {

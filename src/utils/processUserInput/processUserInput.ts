@@ -45,10 +45,12 @@ import {
   shouldMarkPastedContent,
   wrapPastedContentBlock,
 } from '../../history.js'
+import { getAbortReasonMessage } from '../abortController.js'
 import { storeImages } from '../imageStore.js'
 import {
   createCommandInputMessage,
   createSystemMessage,
+  createUserInterruptionMessage,
   createUserMessage,
 } from '../messages.js'
 import { logForDebugging } from '../debug.js'
@@ -144,6 +146,16 @@ export type ProcessUserInputBaseResult = {
    * UserPromptSubmit hooks before dispatch; skip duplicate runPromptSubmit.
    */
   forkDispatched?: boolean
+  /**
+   * Official 2.1.328 (`vn` in chunk@306199530.js @67673): true when
+   * prompt screening was cancelled under abort without a hook verdict.
+   */
+  interrupted?: boolean
+  /**
+   * Official 2.1.328 (chunk@306199530.js @48867, @50734): true when a
+   * hook verdict (block/stop/drop) ended the prompt while abort was set.
+   */
+  endedUnderAbort?: boolean
 }
 
 export type SlashLineCheckResult = {
@@ -462,6 +474,144 @@ const PROMPT_SUBMIT_MENTION_TYPES = new Set([
   'skill_mention',
   'nested_memory',
 ])
+
+const PROMPT_ABORT_INPUT_ATTACHMENT_TYPES = new Set([
+  ...PROMPT_SUBMIT_MENTION_TYPES,
+  'withheld_memory',
+])
+
+const PROMPT_ABORT_METADATA_ATTACHMENT_TYPES = new Set([
+  'ultrathink_effort',
+  'workflow_keyword_request',
+  'unknown_command_fallback',
+  'selected_lines_in_ide',
+  'selected_lines_in_diff',
+  'opened_file_in_ide',
+  'inlined_image_paths',
+  'thread_state',
+  'widget_context_hint',
+])
+
+const SILENT_PROMPT_INTERRUPT_REASONS = new Set([
+  'interrupt',
+  'turn-abort',
+  'refusal-fallback-edit',
+  'permission-stop',
+  'call-cut-by-plugin',
+])
+
+/** Official 2.1.328 `jRo` (chunk@306199530.js @52163). */
+function isNonPromptAttachment(
+  message: ProcessUserInputBaseResult['messages'][number],
+): boolean {
+  if (message.type !== 'attachment') return false
+  const att = message.attachment as { type?: string; hookEvent?: string }
+  if (
+    att.hookEvent === 'UserPromptSubmit' &&
+    att.type !== 'async_hook_response'
+  ) {
+    return false
+  }
+  return (
+    typeof att.type === 'string' &&
+    !PROMPT_ABORT_INPUT_ATTACHMENT_TYPES.has(att.type) &&
+    !PROMPT_ABORT_METADATA_ATTACHMENT_TYPES.has(att.type)
+  )
+}
+
+/** Official 2.1.328 `cIr` (chunk@306199530.js @52386). */
+function cleanupPromptAttachmentsForAbort(
+  messages: ProcessUserInputBaseResult['messages'],
+  context: ProcessUserInputContext,
+): ProcessUserInputBaseResult['messages'] {
+  for (const msg of messages) {
+    if (msg.type !== 'attachment') continue
+    const att = msg.attachment as {
+      type?: string
+      filename?: string
+      path?: string
+    }
+    if (att.type === 'file' && typeof att.filename === 'string') {
+      context.readFileState.delete(att.filename)
+    } else if (att.type === 'nested_memory' && typeof att.path === 'string') {
+      context.readFileState.delete(att.path)
+    }
+  }
+  return messages.filter(isNonPromptAttachment)
+}
+
+/** Official 2.1.328 `vn` + `mBo` (chunk@306199530.js @67673). */
+function buildInterruptedPromptResult(
+  result: ProcessUserInputBaseResult,
+  context: ProcessUserInputContext,
+  isQueuedByPlugin: boolean,
+): ProcessUserInputBaseResult {
+  const reason = getAbortReasonMessage(context.abortController?.signal.reason)
+  const kept = cleanupPromptAttachmentsForAbort(result.messages, context)
+  const isShutdown = reason === 'shutdown'
+  if (isShutdown) {
+    return { messages: [], shouldQuery: false, interrupted: true }
+  }
+  const suppressMarker =
+    isQueuedByPlugin ||
+    (reason !== undefined && SILENT_PROMPT_INTERRUPT_REASONS.has(reason))
+  if (suppressMarker) {
+    return { messages: kept, shouldQuery: false, interrupted: true }
+  }
+  return {
+    messages: [...kept, createUserInterruptionMessage({ toolUse: false })],
+    shouldQuery: false,
+    interrupted: true,
+  }
+}
+
+/**
+ * Official 2.1.328 (chunk@306199530.js @50734 & @67673): map a `runPromptSubmit`
+ * return outcome to explicit `interrupted` / `endedUnderAbort` flags when
+ * cancelled or ended while abort is active.
+ */
+function finalizePromptSubmitReturn(
+  outcome: Extract<
+    Awaited<ReturnType<typeof runPromptSubmit>>,
+    { kind: 'return' }
+  >,
+  result: ProcessUserInputBaseResult,
+  context: ProcessUserInputContext,
+  isQueuedByPlugin: boolean,
+  mergeStoppedIntoResult: boolean,
+): ProcessUserInputBaseResult {
+  const value = outcome.value
+  const hasEnded = value !== undefined && 'ended' in value
+  if (!hasEnded) {
+    return buildInterruptedPromptResult(result, context, isQueuedByPlugin)
+  }
+  const isStopped = value.stopped !== undefined
+  const aborted =
+    Boolean(context.abortController?.signal.aborted) ||
+    value.wasCancelled === true
+  if (isStopped) {
+    const stoppedResult = mergeStoppedIntoResult
+      ? (() => {
+          result.messages.push(...outcome.result.messages)
+          result.shouldQuery = false
+          result.resultText = outcome.result.resultText
+          return result
+        })()
+      : outcome.result
+    return aborted ? { ...stoppedResult, endedUnderAbort: true } : stoppedResult
+  }
+  if (!aborted) {
+    return outcome.result
+  }
+  return {
+    ...outcome.result,
+    messages: [
+      ...cleanupPromptAttachmentsForAbort(result.messages, context),
+      ...outcome.result.messages,
+    ],
+    endedUnderAbort: true,
+  }
+}
 
 const AT_MENTION_RE =
   /(?:^|[\s。、？！])@(?:"[^"]+"|\S+?\b(?=[ \t]*\[[0-9a-fA-F]{6,12}\])|\S+\b)(?:[ \t]*\[[0-9a-fA-F]{6,12}\])?/g
@@ -975,6 +1125,13 @@ export async function processUserInput({
   if (promptSubmitted === undefined && lineCheck !== undefined) {
     if (lineCheck.outcome === undefined) {
       queryCheckpoint('query_hooks_end')
+      if (context.abortController?.signal.aborted) {
+        return buildInterruptedPromptResult(
+          result,
+          context,
+          queuedSettle.origin !== undefined,
+        )
+      }
       return { messages: [], shouldQuery: false }
     }
     queryCheckpoint('query_hooks_start')
@@ -991,19 +1148,14 @@ export async function processUserInput({
         ? [...initialNestedMemoryTriggers, ...consumedNestedTriggers]
         : initialNestedMemoryTriggers
     if (lineCheck.outcome.kind === 'return') {
-      if (
-        lineCheck.outcome.value &&
-        'stopped' in lineCheck.outcome.value &&
-        lineCheck.outcome.value.stopped !== undefined
-      ) {
-        result.messages.push(...lineCheck.outcome.result.messages)
-        result.shouldQuery = false
-        result.resultText = lineCheck.outcome.result.resultText
-        queryCheckpoint('query_hooks_end')
-        return result
-      }
       queryCheckpoint('query_hooks_end')
-      return lineCheck.outcome.result
+      return finalizePromptSubmitReturn(
+        lineCheck.outcome,
+        result,
+        context,
+        queuedSettle.origin !== undefined,
+        true,
+      )
     }
     result.messages.push(...lineCheck.rows.messages)
     await applyPromptSubmitProceeds(
@@ -1083,7 +1235,13 @@ export async function processUserInput({
     })
     if (outcome.kind === 'return') {
       queryCheckpoint('query_hooks_end')
-      return outcome.result
+      return finalizePromptSubmitReturn(
+        outcome,
+        result,
+        context,
+        queuedSettle.origin !== undefined,
+        false,
+      )
     }
     await applyPromptSubmitProceeds(
       result,
@@ -1112,6 +1270,17 @@ export async function processUserInput({
     )
     if (replay.kind === 'blocking') {
       queryCheckpoint('query_hooks_end')
+      if (context.abortController?.signal.aborted) {
+        return {
+          messages: [
+            ...cleanupPromptAttachmentsForAbort(result.messages, context),
+            ...replay.messages,
+          ],
+          shouldQuery: false,
+          allowedTools: replay.allowedTools,
+          endedUnderAbort: true,
+        }
+      }
       return {
         messages: replay.messages,
         shouldQuery: false,
@@ -1120,7 +1289,22 @@ export async function processUserInput({
     }
     if (replay.kind === 'stop') {
       queryCheckpoint('query_hooks_end')
-      return result
+      return context.abortController?.signal.aborted
+        ? { ...result, endedUnderAbort: true }
+        : result
+    }
+    if (
+      context.abortController?.signal.aborted &&
+      result.messages.some(
+        m => m.type === 'attachment' && m.attachment.type === 'hook_cancelled',
+      )
+    ) {
+      queryCheckpoint('query_hooks_end')
+      return buildInterruptedPromptResult(
+        result,
+        context,
+        queuedSettle.origin !== undefined,
+      )
     }
     if (entries) {
       void registerPromptSubmitEntry(entries, result.messages).catch(error => {

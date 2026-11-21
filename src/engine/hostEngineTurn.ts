@@ -213,12 +213,13 @@ export async function runHostEngineTurn(
       if (type === 'result') {
         result = l as SDKResultMessage
         if (l.is_error) {
+          const joinedErrors = Array.isArray(l.errors)
+            ? (l.errors as string[]).join('; ')
+            : ''
           const msg =
             l.subtype === 'success' && typeof l.result === 'string'
               ? l.result
-              : Array.isArray(l.errors)
-                ? (l.errors as string[]).join('; ')
-                : 'turn error'
+              : joinedErrors || 'turn error'
           const stopped =
             typeof l.terminal_reason === 'string' &&
             isUserAbortTerminalReason(l.terminal_reason)

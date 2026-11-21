@@ -12,6 +12,7 @@ import { waitWithAbort } from '../../utils/abortController.js'
 import { createSignal } from '../../utils/signal.js'
 import {
   dispatchReplStreamEvent,
+  keepSpinnerReply,
   runReplTurn,
   type DispatchReplStreamEventDeps,
   type RunReplTurnArgs,
@@ -61,6 +62,7 @@ export class TurnController {
   #cancelThinkingHide: (() => void) | null = null
   #disposed = false
   #awaitPendingHooks: (() => Promise<void> | undefined) | undefined
+  #responseLengthRef: { current: number } | null = null
 
   readonly loading = {
     getSnapshot: (): boolean => this.#snapshot.isLoading,
@@ -94,6 +96,10 @@ export class TurnController {
 
   bindSessionStartHooks(read: () => Promise<void> | undefined): void {
     this.#awaitPendingHooks = read
+  }
+
+  bindResponseLengthRef(ref: { current: number }): void {
+    this.#responseLengthRef = ref
   }
 
   awaitSessionStartHooks = (signal: AbortSignal): Promise<void> | undefined => {
@@ -220,6 +226,9 @@ export class TurnController {
 
   noteMainRequestAnnounced = (): void => {
     this.#publish({ isMainRequestAwaitingResponse: true })
+    if (this.#responseLengthRef !== null) {
+      keepSpinnerReply(this.#responseLengthRef)
+    }
   }
 
   resetRequestState = (): void => {
@@ -236,6 +245,7 @@ export class TurnController {
 
   dispatchStreamEvent(deps: DispatchReplStreamEventDeps): void {
     if (this.#disposed) return
+    this.#responseLengthRef = deps.responseLengthRef
     const event = deps.event as {
       type?: string
       event?: { type?: string }
@@ -249,18 +259,27 @@ export class TurnController {
         this.#publish({ isMainResponseStreaming: false })
       }
     } else if (event.type === 'assistant') {
+      // Official 2.1.328 xBe (chunk@319736883.js @1656075, @1690026):
+      // assistant messages are emitted per block (e.g. after thinking while
+      // text is still streaming) — clear ONLY awaiting-response, NEVER
+      // isMainResponseStreaming!
       this.#publish({
         isMainRequestAwaitingResponse: false,
-        isMainResponseStreaming: false,
       })
     }
     dispatchReplStreamEvent({
       ...deps,
       onApiMetrics: metrics => {
-        if ('type' in metrics && metrics.type === 'start') {
-          this.#publish({ isMainResponseStreaming: true })
-        } else if ('type' in metrics && metrics.type === 'end') {
-          this.#publish({ isMainResponseStreaming: false })
+        // Gate main-response streaming state on main-thread metrics only
+        // (metrics.id == null); subagent api_metrics carry a non-null id.
+        const metricId =
+          'id' in metrics ? (metrics as { id?: unknown }).id : undefined
+        if (metricId == null) {
+          if ('type' in metrics && metrics.type === 'start') {
+            this.#publish({ isMainResponseStreaming: true })
+          } else if ('type' in metrics && metrics.type === 'end') {
+            this.#publish({ isMainResponseStreaming: false })
+          }
         }
         deps.onApiMetrics?.(metrics)
       },

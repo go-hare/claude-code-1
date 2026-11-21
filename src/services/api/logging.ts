@@ -464,6 +464,7 @@ function logAPISuccess({
   fastMode,
   previousRequestId,
   betas,
+  carriedEffortEnded,
 }: {
   model: string
   preNormalizedModel: string
@@ -490,6 +491,7 @@ function logAPISuccess({
   fastMode?: boolean
   previousRequestId?: string | null
   betas?: string[]
+  carriedEffortEnded?: string
 }): void {
   const isNonInteractiveSession = getIsNonInteractiveSession()
   const isPostCompaction = consumePostCompaction()
@@ -614,6 +616,12 @@ function logAPISuccess({
         }
       : {}),
     ...(isPostCompaction ? { isPostCompaction } : {}),
+    ...(carriedEffortEnded !== undefined
+      ? {
+          carried_effort_ended:
+            carriedEffortEnded as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }
+      : {}),
     ...getAnthropicEnvMetadata(),
     timeSinceLastApiCallMs,
   })
@@ -650,6 +658,7 @@ export function logAPISuccessAndDuration({
   betas,
   effort,
   attribution,
+  carriedEffortEnded,
 }: {
   model: string
   preNormalizedModel: string
@@ -688,6 +697,8 @@ export function logAPISuccessAndDuration({
   effort?: string
   /** Optional explicit attribution (agent/skill/plugin/mcp) for OTel api_request (#2126) */
   attribution?: OTelAttributionInput
+  /** Official 2.1.328 Eji: reason a refusal-fallback carried effort latch ended. */
+  carriedEffortEnded?: string
 }): void {
   const gateway = detectGateway({
     headers,
@@ -773,6 +784,7 @@ export function logAPISuccessAndDuration({
     fastMode,
     previousRequestId,
     betas,
+    carriedEffortEnded,
   })
   // Log API request event for OTLP (densable: client_request_id)
   const cacheCreationBreakdown = (

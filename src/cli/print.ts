@@ -3,7 +3,7 @@ import { feature } from 'bun:bundle'
 import { pruneDetachedToolCalls } from '../utils/detachedToolCallStore.js'
 import stripAnsi from 'strip-ansi'
 import { readdir, readFile, stat } from 'fs/promises'
-import { dirname, join } from 'path'
+import { dirname, join, posix as posixPath } from 'path'
 import { homedir } from 'os'
 import {
   downloadUserSettings,
@@ -228,11 +228,16 @@ import {
 import type { Stream } from 'src/utils/stream.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import {
+  type ApiErrorYieldKind,
   loadConversationForResume,
   type OverdueSessionStartHooks,
   rerunWouldLeavePlanMode,
   type TurnInterruptionState,
 } from 'src/utils/conversationRecovery.js'
+import {
+  buildRetractedWireFields,
+  RetractedWireUuidTracker,
+} from 'src/query/queryHelpers.js'
 import type { HookDeferredToolAttachment } from 'src/utils/attachments.js'
 import type {
   JSONRPCMessage,
@@ -1106,6 +1111,472 @@ export function normalizeInformationalSdkMessage<
     }
   }
   return message
+}
+
+/**
+ * Official 2.1.328 #1492 (`chunk@294254613.js @3717400`, `chunk@283886268.js @9666`):
+ * When an emitted SDK `result` frame carries an auto-mode no-check/no-verdict
+ * denial code (`auto_mode_stop_no_verdict`, `auto_mode_no_check_in_session`,
+ * `auto_mode_stop_no_check_in_session`, `auto_mode_stop_no_result_for_calls`),
+ * mark the result frame as failed (`is_error: true`, `subtype: 'error_during_execution'`)
+ * so cloud/headless callers never treat an unchecked stop as a successful turn.
+ */
+export function enforceAutoModeNoCheckResultFailure<
+  T extends Record<string, unknown>,
+>(message: T): T {
+  if (message.type !== 'result' || !hasAutoModeNoCheckDenial(message)) {
+    return message
+  }
+  if (
+    message.subtype === 'error_during_execution' &&
+    message.is_error === true
+  ) {
+    return message
+  }
+  const existingErrors = Array.isArray(message.errors)
+    ? message.errors
+    : undefined
+  return {
+    ...message,
+    subtype: 'error_during_execution',
+    is_error: true,
+    errors:
+      existingErrors && existingErrors.length > 0
+        ? existingErrors
+        : [
+            'Auto mode unavailable \u2014 stopped after repeated responses with no safety verdict',
+          ],
+  }
+}
+
+/**
+ * Official 2.1.328 P1-#44 (`chunk@285257860.js @331561`, `chunk@303112704.js @51145`):
+ * Wire-serialize outgoing print/SDK messages with normalized informational
+ * content, `retracted_message_uuids` via `buildRetractedWireFields`, and
+ * `supersedes` via `RetractedWireUuidTracker`.
+ */
+export function serializePrintWireMessage<T extends Record<string, unknown>>(
+  message: T,
+  retractedTracker?: RetractedWireUuidTracker,
+): T {
+  let out: Record<string, unknown> = normalizeInformationalSdkMessage(message)
+  if (out.type === 'result') {
+    out = enforceAutoModeNoCheckResultFailure(out)
+  }
+  const rawRetracted = Array.isArray(out.retractedWireUuids)
+    ? (out.retractedWireUuids as readonly string[])
+    : Array.isArray(out.retractedMessageUuids)
+      ? (out.retractedMessageUuids as readonly string[])
+      : undefined
+  const retractedFields =
+    out.retracted_message_uuids === undefined
+      ? buildRetractedWireFields({ retractedWireUuids: rawRetracted })
+      : {}
+  const wireRetracted =
+    (out.retracted_message_uuids as readonly string[] | undefined) ??
+    retractedFields.retracted_message_uuids
+  if (wireRetracted && wireRetracted.length > 0 && retractedTracker) {
+    retractedTracker.add(wireRetracted.map(uuid => ({ uuid })))
+  }
+  if (retractedFields.retracted_message_uuids) {
+    out = { ...out, ...retractedFields }
+  }
+  if (
+    out.type === 'assistant' &&
+    out.parent_tool_use_id === null &&
+    out.supersedes === undefined &&
+    retractedTracker
+  ) {
+    const supersedes = retractedTracker.consumeForSupersedes()
+    if (supersedes && supersedes.length > 0) {
+      out = { ...out, supersedes }
+    }
+  }
+  return out as T
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.328 #1645 & #1646 (`chunk@323105654.js @90000-93000, @129655`):
+// Yield an API-errored rescue re-run to a waiting human prompt instead of
+// re-sending the errored prompt ahead of a newer message.
+// ---------------------------------------------------------------------------
+
+const RESCUE_YIELD_OTHER_FLAG = 'tengu_giggly_oasis'
+const RESCUE_YIELD_HELD_PROMPT_FLAG = 'tengu_zippy_goose'
+const RESCUE_YIELD_COWORK_FLAG = 'tengu_gleaming_pony'
+const RESCUE_YIELD_PAST_CALLS_FLAG = 'tengu_mutable_goblet'
+
+export type RescueYieldCommandHead = {
+  yieldsToPersonPrompt?: ApiErrorYieldKind
+  wentPastOpenCalls?: boolean
+  drainOnly?: boolean
+}
+
+export type RescueQueuedItemLike = {
+  mode?: unknown
+  isMeta?: unknown
+  shouldQuery?: unknown
+  queryHeldForNextTurn?: unknown
+  pollEmptyDispatch?: unknown
+  origin?: { kind?: unknown }
+}
+
+function isQueuedPersonPrompt(item: RescueQueuedItemLike): boolean {
+  if (item.mode !== 'prompt' || item.isMeta === true) return false
+  if (item.shouldQuery === false && item.queryHeldForNextTurn !== true) {
+    return false
+  }
+  if (item.pollEmptyDispatch === true) return false
+  const originKind = item.origin?.kind
+  if (
+    originKind !== undefined &&
+    originKind !== 'human' &&
+    originKind !== 'user' &&
+    originKind !== 'cli' &&
+    originKind !== 'remote'
+  ) {
+    return false
+  }
+  return true
+}
+
+function resolveRescueYieldSwitch(
+  errorKind: ApiErrorYieldKind,
+  opts?: {
+    isRemote?: boolean
+    otherSwitch?: 'on' | 'off'
+    coworkSwitch?: 'on' | 'off'
+  },
+): 'on' | 'off' {
+  if (opts?.coworkSwitch !== undefined) return opts.coworkSwitch
+  switch (errorKind) {
+    case 'rate_limit':
+    case 'no_request_token':
+    case 'server_error':
+    case 'model_not_found':
+      return (opts?.isRemote ?? Boolean(process.env.CLAUDE_CODE_REMOTE))
+        ? 'on'
+        : 'off'
+    case 'other':
+      if (opts?.otherSwitch !== undefined) return opts.otherSwitch
+      return getFeatureValue_CACHED_MAY_BE_STALE(
+        RESCUE_YIELD_OTHER_FLAG,
+        false,
+      ) === true
+        ? 'on'
+        : 'off'
+  }
+}
+
+/** Official `BC` (`chunk@323105654.js @91838`). */
+export function resolveRescueYieldErrorKind(
+  head: RescueYieldCommandHead,
+  opts?: {
+    pastOpenCallsEnabled?: boolean
+    coworkSwitch?: 'on' | 'off'
+  },
+): ApiErrorYieldKind | undefined {
+  if (head.yieldsToPersonPrompt === undefined) return undefined
+  const pastOpenCallsOn =
+    opts?.pastOpenCallsEnabled ??
+    getFeatureValue_CACHED_MAY_BE_STALE(RESCUE_YIELD_PAST_CALLS_FLAG, false) ===
+      true
+  if (head.wentPastOpenCalls && !pastOpenCallsOn) {
+    return undefined
+  }
+  return head.yieldsToPersonPrompt
+}
+
+/**
+ * Official 2.1.328 `HC` (`chunk@323105654.js @91050`): decide whether an
+ * auto-resumed turn that ended on an API error should yield to a waiting
+ * person prompt, emitting `tengu_resume_rescue_yield` and
+ * `ccr_rescue_yields_to_prompt`.
+ */
+export function shouldRescueYieldToPersonPrompt(opts: {
+  head: RescueYieldCommandHead
+  queued: readonly RescueQueuedItemLike[]
+  promptHeld: boolean
+  stopLatched: boolean
+  decidedAt: 'before_start' | 'during_wait'
+  promptWait?: string
+  isRemote?: boolean
+  otherSwitch?: 'on' | 'off'
+  coworkSwitch?: 'on' | 'off'
+  pastOpenCallsEnabled?: boolean
+  heldPromptEnabled?: boolean
+}): boolean {
+  const errorKind = resolveRescueYieldErrorKind(opts.head, {
+    pastOpenCallsEnabled: opts.pastOpenCallsEnabled,
+    coworkSwitch: opts.coworkSwitch,
+  })
+  if (errorKind === undefined) return false
+
+  const heldFlagOn =
+    opts.heldPromptEnabled ??
+    getFeatureValue_CACHED_MAY_BE_STALE(
+      RESCUE_YIELD_HELD_PROMPT_FLAG,
+      false,
+    ) === true
+  const promptWaiting =
+    opts.queued.some(isQueuedPersonPrompt) ||
+    (opts.promptHeld && opts.decidedAt === 'before_start' && heldFlagOn)
+  const coworkSwitch =
+    opts.coworkSwitch ??
+    (getFeatureValue_CACHED_MAY_BE_STALE<string>(
+      RESCUE_YIELD_COWORK_FLAG,
+      '',
+    ) === 'on'
+      ? 'on'
+      : undefined)
+  const switchState = resolveRescueYieldSwitch(errorKind, {
+    isRemote: opts.isRemote,
+    otherSwitch: opts.otherSwitch,
+    coworkSwitch,
+  })
+  const yielded = promptWaiting && !opts.stopLatched && switchState === 'on'
+
+  if (yielded || opts.decidedAt === 'before_start') {
+    logEvent('tengu_resume_rescue_yield', {
+      outcome: (yielded
+        ? 'yielded'
+        : 'kept') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      decided_at:
+        opts.decidedAt as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      switch_state:
+        switchState as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      prompt_waiting: promptWaiting,
+      stop_latched: opts.stopLatched,
+      drain_only: opts.head.drainOnly === true,
+      ...(opts.promptWait !== undefined
+        ? {
+            prompt_wait:
+              opts.promptWait as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          }
+        : {}),
+      error_kind:
+        errorKind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...(coworkSwitch !== undefined ? { plain_cowork_switch: true } : {}),
+      ...(opts.head.wentPastOpenCalls ? { went_past_open_calls: true } : {}),
+    })
+    if (yielded) {
+      logEvent('ccr_rescue_yields_to_prompt', {
+        outcome:
+          'ok' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    } else if (promptWaiting && switchState === 'on') {
+      logEvent('ccr_rescue_yields_to_prompt', {
+        outcome:
+          'stop_latched' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    } else if (promptWaiting && !opts.stopLatched && errorKind === 'other') {
+      logEvent('ccr_rescue_yields_to_prompt', {
+        outcome:
+          'error_kind_other_switch_not_on' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+  }
+  return yielded
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.328 #1640 (`nw` / `tw` / `ccr_folder_restore` in
+// `chunk@323105654.js @350500-353400`): persist and restore added container
+// folders across cloud/CCR restarts.
+// ---------------------------------------------------------------------------
+
+const CCR_FOLDER_RESTORE_FLAG = 'tengu_twinkly_whale'
+const CCR_FOLDER_RESTORE_TIMEOUT_MS = 5_000
+const MAX_RESTORED_FOLDERS = 32
+
+function parseMountPathEntry(
+  raw: unknown,
+): { folder: string; mountPath: string } | undefined {
+  if (typeof raw !== 'string') return undefined
+  const trimmed = raw.trim()
+  if (trimmed === '' || trimmed.includes('\0')) return undefined
+  const folder = posixPath.dirname(trimmed) + posixPath.sep
+  return { folder, mountPath: trimmed }
+}
+
+export type CcrFolderStageDeps = {
+  stageFile: (opts: { mount_path: string; force: boolean }) => Promise<{
+    ok: boolean
+    error?: string
+    notFound?: boolean
+  }>
+  addDirectoryDestFromMountPath: (mountPath: string) => string
+  isAdditionalDirsEnabled?: () => boolean
+  onDirectoryAdded?: (stagedDir: string) => Promise<void> | void
+}
+
+export class CcrFolderRestorer {
+  hasRestoredAFolder = false
+  private isListRead = false
+  private readonly mountPaths = new Map<string, string>()
+  private readonly attachedHere = new Set<string>()
+  private readonly notifyInternalMetadata: (
+    metadata: Record<string, unknown>,
+  ) => void
+  private readonly isFeatureEnabled: () => boolean
+
+  constructor(opts?: {
+    notifyInternalMetadata?: (metadata: Record<string, unknown>) => void
+    isFeatureEnabled?: () => boolean
+  }) {
+    this.notifyInternalMetadata =
+      opts?.notifyInternalMetadata ?? notifyInternalMetadataChanged
+    this.isFeatureEnabled =
+      opts?.isFeatureEnabled ??
+      (() =>
+        getFeatureValue_CACHED_MAY_BE_STALE(CCR_FOLDER_RESTORE_FLAG, false) ===
+        true)
+  }
+
+  getListedMountPaths(): string[] {
+    return [...this.mountPaths.values()]
+  }
+
+  private hold(raw: unknown): boolean {
+    const parsed = parseMountPathEntry(raw)
+    if (
+      parsed === undefined ||
+      this.mountPaths.get(parsed.folder) === parsed.mountPath ||
+      (!this.mountPaths.has(parsed.folder) &&
+        this.mountPaths.size >= MAX_RESTORED_FOLDERS)
+    ) {
+      return false
+    }
+    this.mountPaths.set(parsed.folder, parsed.mountPath)
+    return true
+  }
+
+  private write(): void {
+    this.notifyInternalMetadata({
+      added_directories: [...this.mountPaths.values()],
+    })
+  }
+
+  attached(mountPath: string): void {
+    const parsed = parseMountPathEntry(mountPath)
+    if (parsed !== undefined) {
+      this.attachedHere.add(parsed.folder)
+    }
+    if (this.isListRead && this.hold(mountPath) && this.isFeatureEnabled()) {
+      this.write()
+    }
+  }
+
+  async restore(
+    restoredWorkerState: {
+      readFailed?: boolean
+      internal?: { added_directories?: unknown }
+    } | null,
+    getDeps: () => Promise<CcrFolderStageDeps>,
+    timeoutMs: number = CCR_FOLDER_RESTORE_TIMEOUT_MS,
+  ): Promise<void> {
+    if (
+      restoredWorkerState === null ||
+      restoredWorkerState.readFailed === true
+    ) {
+      return
+    }
+    this.isListRead = true
+    const listed = restoredWorkerState.internal?.added_directories
+    for (const item of Array.isArray(listed) ? listed : []) {
+      this.hold(item)
+    }
+    if (this.mountPaths.size === 0) return
+
+    const completed = await Promise.race([
+      this.attachListed(getDeps),
+      new Promise<undefined>(resolve => {
+        const timer = setTimeout(() => resolve(undefined), timeoutMs)
+        timer.unref?.()
+      }),
+    ])
+    if (completed === undefined) {
+      logEvent('ccr_folder_restore', {
+        outcome:
+          'timed_out' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+  }
+
+  private async attachListed(
+    getDeps: () => Promise<CcrFolderStageDeps>,
+  ): Promise<boolean> {
+    const entries = [...this.mountPaths]
+    let failedStep: string | undefined
+    let restoredCount = 0
+    let removedCount = 0
+    try {
+      if (!this.isFeatureEnabled()) return true
+      const deps = await getDeps()
+      for (const [folder, mountPath] of entries) {
+        let destPath: string
+        try {
+          destPath = deps.addDirectoryDestFromMountPath(mountPath)
+        } catch {
+          failedStep ??= 'dest'
+          continue
+        }
+        const envEnabled =
+          deps.isAdditionalDirsEnabled?.() ??
+          isEnvTruthy(process.env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD)
+        if (!envEnabled) {
+          failedStep ??= 'env'
+          continue
+        }
+        const staged = await deps.stageFile({
+          mount_path: mountPath,
+          force: true,
+        })
+        if (staged.ok) {
+          const stagedDir = posixPath.dirname(destPath)
+          const currentDirs = getAdditionalDirectoriesForClaudeMd()
+          if (!currentDirs.includes(stagedDir)) {
+            setAdditionalDirectoriesForClaudeMd([...currentDirs, stagedDir])
+          }
+          await deps.onDirectoryAdded?.(stagedDir)
+          restoredCount++
+          this.hasRestoredAFolder = true
+        } else if (staged.notFound && this.attachedHere.has(folder)) {
+          restoredCount++
+        } else if (staged.notFound) {
+          removedCount++
+          this.mountPaths.delete(folder)
+        } else {
+          failedStep ??= 'stage'
+        }
+      }
+      if (removedCount > 0) {
+        this.write()
+      }
+    } catch {
+      logError(
+        new Error(
+          "Could not attach the session's folders again at this start. They stay listed for the next start.",
+        ),
+      )
+      failedStep ??= 'threw'
+    }
+    const failedCount = entries.length - restoredCount - removedCount
+    if (failedStep === undefined) {
+      logEvent('ccr_folder_restore', {
+        outcome:
+          'ok' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        count: restoredCount,
+      })
+    } else {
+      logEvent('ccr_folder_restore', {
+        outcome:
+          failedStep as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        count: failedCount,
+      })
+    }
+    return true
+  }
 }
 
 /** #1774: Filter hidden commands out of cloud session slash command menus. */
@@ -3486,6 +3957,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   // Official 2.1.326 #95: track cut-off turn re-run so Stop arriving during
   // restart cancels it and persists an interruption marker over it.
   const cutOffReRunStopTracker = new CutOffReRunStopTracker()
+  // Official 2.1.328 P1-#44 & #1640: wire retraction UUID tracker + CCR folder restorer.
+  const wireRetractedTracker = new RetractedWireUuidTracker()
+  const ccrFolderRestorer = new CcrFolderRestorer()
   const takePendingDeferredToolUse = ():
     | HookDeferredToolAttachment
     | undefined => {
@@ -3893,7 +4367,18 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       interruptedMsg.seeded_summon === true
         ? { skipAttachments: true }
         : {}),
-    }
+      ...(turnInterruptionState.endedOnApiError !== undefined &&
+      recoveredToolUseIds.size === 0
+        ? { yieldsToPersonPrompt: turnInterruptionState.endedOnApiError }
+        : {}),
+      ...(turnInterruptionState.endedOnApiErrorPastCalls !== undefined
+        ? {
+            yieldsToPersonPrompt:
+              turnInterruptionState.endedOnApiErrorPastCalls,
+            wentPastOpenCalls: true,
+          }
+        : {}),
+    } as QueuedCommand & RescueYieldCommandHead
     pendingReRunSends.leaveItsSendsTo({
       uuid: reRunUuid,
       isMeta: interruptedMsg.isMeta === true,
@@ -5594,6 +6079,28 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           }
           lastDispatchAborted = false
 
+          // Official 2.1.328 #1645/#1646 (`chunk@323105654.js @91050, @129655`):
+          // if this dequeued command is an API-errored rescue re-run and a newer
+          // person prompt is already waiting in the queue, yield to the person
+          // prompt instead of re-sending the errored message ahead of it.
+          const rescueHead = command as QueuedCommand & RescueYieldCommandHead
+          if (
+            rescueHead.yieldsToPersonPrompt !== undefined &&
+            shouldRescueYieldToPersonPrompt({
+              head: rescueHead,
+              queued: getCommandQueue() as readonly RescueQueuedItemLike[],
+              promptHeld: false,
+              stopLatched: turnAbortedForShutdown || shuttingDownForPrint,
+              decidedAt: 'before_start',
+            })
+          ) {
+            if (command.uuid) {
+              cutOffReRunStopTracker.markStarted(command.uuid)
+              pendingReRunSends.clearAfterReRunEnded(command.uuid)
+            }
+            continue
+          }
+
           // densable Tl/Dm arming for this head (Kc.take):
           // - steal path already markAhead; normal path clearAhead above
           // - snapshot remaining queue for admits membership
@@ -6231,7 +6738,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     if (message.type === 'result') {
                       // Official 2.1.323 #1970: suppress hook heartbeats past result.
                       markHookHeartbeatTurnPastResult(currentHeartbeatTurn)
-                      const resultMsg = message as Record<string, unknown>
+                      const wireResult = serializePrintWireMessage(
+                        message as unknown as Record<string, unknown>,
+                        wireRetractedTracker,
+                      )
+                      const resultMsg = wireResult
                       if (
                         resultMsg.stop_reason === 'tool_deferred_unavailable' ||
                         resultMsg.terminal_reason ===
@@ -6243,7 +6754,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                         cutOffReRunStopTracker.markStarted(cmd.uuid)
                         pendingReRunSends.clearAfterReRunEnded(cmd.uuid)
                       }
-                      lastResultIsError = !!resultMsg.is_error
+                      lastResultIsError =
+                        !!resultMsg.is_error ||
+                        hasAutoModeNoCheckDenial(resultMsg)
                       lastResultNumTurns =
                         typeof resultMsg.num_turns === 'number'
                           ? resultMsg.num_turns
@@ -6265,14 +6778,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                             isBackgroundTask(t),
                         )
                       ) {
-                        heldBackResult = message as StdoutMessage
+                        heldBackResult = wireResult as unknown as StdoutMessage
                       } else {
                         heldBackResult = null
-                        output.enqueue(
-                          normalizeInformationalSdkMessage(
-                            message as unknown as Record<string, unknown>,
-                          ) as unknown as StdoutMessage,
-                        )
+                        output.enqueue(wireResult as unknown as StdoutMessage)
                       }
                     } else {
                       // Flush SDK events (task_started, task_progress) so background
@@ -6290,8 +6799,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                         },
                       )
                       output.enqueue(
-                        normalizeInformationalSdkMessage(
+                        serializePrintWireMessage(
                           message as unknown as Record<string, unknown>,
+                          wireRetractedTracker,
                         ) as unknown as StdoutMessage,
                       )
                     }
@@ -6743,6 +7253,33 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       } while (waitingForAgents)
 
       if (heldBackResult) {
+        // Official 2.1.328 `RP` / `WKi` (`chunk@323105654.js @313173`):
+        // on a non-shutdown abort with a held-back result, stop lingering
+        // background tasks before flushing the held result.
+        if (
+          shouldFlushHeldBackResultOnAbort({
+            aborted: abortController?.signal.aborted === true,
+            shuttingDown: shuttingDownForPrint || isShuttingDown(),
+            abortedForShutdown: turnAbortedForShutdown,
+            teardownRequested: inputClosed,
+            heldResultCount: 1,
+          })
+        ) {
+          for (const t of getRunningTasks(getAppState()).filter(task =>
+            isBackgroundTask(task),
+          )) {
+            try {
+              await stopTask(t.id, {
+                getAppState,
+                setAppState,
+                source: 'user',
+                killedBy: 'system',
+              })
+            } catch {
+              // best-effort background task stop on non-shutdown abort
+            }
+          }
+        }
         output.enqueue(
           finalizeHeldBackResultForShutdown(
             heldBackResult as StdoutMessage & { queued_turn_count?: number },
@@ -10496,6 +11033,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                   directory,
                   'register_repo_root',
                 )
+                ccrFolderRestorer.attached(mountPath)
                 logForDebugging(`add_directory staged: ${dest} (${directory})`)
                 sendControlResponseSuccess(msg, {
                   staged_path: dest,

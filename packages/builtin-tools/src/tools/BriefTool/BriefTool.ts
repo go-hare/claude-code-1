@@ -193,24 +193,28 @@ export function resolveBriefEnforceText(input?: {
 export { BRIEF_ENFORCE_SENTINEL }
 
 /**
- * Official 2.1.325 #2300: track turns that have already delivered a visible
- * `normal` brief reply so brief-mode sessions (such as Dispatch) do not send
- * a reply again after the turn had already replied.
+ * @deprecated Legacy AbortSignal-based brief reply tracker retained only for
+ * backwards compatibility with existing unit tests. Official 2.1.328 (`Pf(e)`
+ * under `tengu_jazzy_wren`) inspects the transcript in `query.ts`
+ * (`hasBriefRepliedInTranscript`) and never suppresses `BriefTool.call()`.
  */
 const repliedTurnsBySignal = new WeakSet<AbortSignal>()
 
+/** @deprecated Use `hasBriefRepliedInTranscript` in `src/query/queryHelpers.ts`. */
 export function hasBriefRepliedInTurn(
   signal: AbortSignal | undefined,
 ): boolean {
   return signal !== undefined && repliedTurnsBySignal.has(signal)
 }
 
+/** @deprecated Legacy helper — `BriefTool.call()` no longer marks/suppresses via AbortSignal. */
 export function markBriefRepliedInTurn(signal: AbortSignal | undefined): void {
   if (signal !== undefined) {
     repliedTurnsBySignal.add(signal)
   }
 }
 
+/** @deprecated Legacy helper — `BriefTool.call()` no longer suppresses replies. */
 export function shouldSuppressDuplicateBriefReply(
   status: 'normal' | 'proactive',
   signal: AbortSignal | undefined,
@@ -262,14 +266,6 @@ export const BriefTool = buildTool({
     return BRIEF_TOOL_PROMPT
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {
-    if ((output as { duplicateSuppressed?: boolean }).duplicateSuppressed) {
-      return {
-        tool_use_id: toolUseID,
-        type: 'tool_result',
-        content:
-          'Reply already delivered to the user earlier in this turn; duplicate reply suppressed.',
-      }
-    }
     const n = output.attachments?.length ?? 0
     const suffix = n === 0 ? '' : ` (${n} ${plural(n, 'attachment')} included)`
     return {
@@ -282,21 +278,6 @@ export const BriefTool = buildTool({
   renderToolResultMessage,
   async call({ message, attachments, status }, context) {
     const sentAt = new Date().toISOString()
-    // Official 2.1.325 #2300: prevent brief-mode sessions (e.g. Dispatch) from
-    // sending a second reply after the turn has already replied.
-    const turnSignal = context.abortController?.signal
-    if (shouldSuppressDuplicateBriefReply(status, turnSignal)) {
-      return {
-        data: {
-          message,
-          sentAt,
-          duplicateSuppressed: true,
-        } as Output,
-      }
-    }
-    if (status === 'normal') {
-      markBriefRepliedInTurn(turnSignal)
-    }
     logEvent('tengu_brief_send', {
       proactive: status === 'proactive',
       attachment_count: attachments?.length ?? 0,

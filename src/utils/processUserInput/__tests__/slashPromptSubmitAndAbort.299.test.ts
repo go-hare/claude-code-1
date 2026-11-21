@@ -1,4 +1,8 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
+import {
+  resetStateForTests,
+  setSessionTrustAccepted,
+} from 'src/bootstrap/state.js'
 import type { Command } from 'src/commands.js'
 import { processSlashCommand } from '../processSlashCommand.js'
 import { processUserInput } from '../processUserInput.js'
@@ -335,5 +339,190 @@ describe('Official 2.1.325 #731 & #676: UserPromptSubmit before expansion + abor
         JSON.stringify(m).includes('Request interrupted by user'),
       ),
     ).toBe(true)
+  })
+
+  test('Wave 3D: pre-aborted /skill lineCheck stamps interrupted: true without endedUnderAbort', async () => {
+    const skillCmd = {
+      type: 'prompt',
+      name: 'abort-flag-skill',
+      description: 'test skill',
+      isEnabled: () => true,
+      isHidden: false,
+      userInvocable: true,
+      progressMessage: 'running',
+      userFacingName: () => 'abort-flag-skill',
+      getPromptForCommand: async () => [{ type: 'text', text: 'body' }],
+    } as unknown as Command
+
+    const context = makeBaseContext({
+      aborted: true,
+      commands: [skillCmd],
+    })
+
+    const out = await processUserInput({
+      input: '/abort-flag-skill hello',
+      mode: 'prompt',
+      setToolJSX: () => {},
+      context,
+      uuid: '66666666-6666-4666-8666-666666666666',
+    })
+
+    expect(out.shouldQuery).toBe(false)
+    expect(out.interrupted).toBe(true)
+    expect(out.endedUnderAbort).toBeUndefined()
+  })
+
+  test('Wave 3D: aborted runPromptSubmit with active UserPromptSubmit hook stamps interrupted: true and cleans readFileState', async () => {
+    const context = makeBaseContext({ aborted: true })
+    const sessionId = '77777777-7777-4777-8777-777777777777'
+    context.agentId = sessionId
+    context.readFileState.set('/tmp/some-file.ts', {
+      content: 'x',
+      timestamp: 1,
+    })
+    context.getAppState().sessionHooks.set(sessionId, {
+      hooks: {
+        UserPromptSubmit: [
+          {
+            hooks: [
+              {
+                hook: {
+                  type: 'callback',
+                  callback: async () => ({}),
+                },
+              },
+            ],
+          },
+        ],
+      },
+    })
+
+    const out = await processUserInput({
+      input: 'hello under abort',
+      mode: 'prompt',
+      setToolJSX: () => {},
+      context,
+      skipAttachments: true,
+      uuid: '88888888-8888-4888-8888-888888888888',
+    })
+
+    expect(out.shouldQuery).toBe(false)
+    expect(out.interrupted).toBe(true)
+    expect(out.endedUnderAbort).toBeUndefined()
+  })
+
+  test('Wave 3D: hook stop verdict arriving under abort stamps endedUnderAbort: true without interrupted', async () => {
+    setSessionTrustAccepted(true)
+    try {
+      const context = makeBaseContext()
+      const sessionId = '99999999-9999-4999-8999-999999999999'
+      context.agentId = sessionId
+      context.getAppState().sessionHooks.set(sessionId, {
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                {
+                  hook: {
+                    type: 'callback',
+                    callback: async () => {
+                      context.abortController.abort()
+                      return {
+                        continue: false,
+                        stopReason: 'stopped under abort',
+                      }
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      const out = await processUserInput({
+        input: 'stopped prompt',
+        mode: 'prompt',
+        setToolJSX: () => {},
+        context,
+        skipAttachments: true,
+        promptSubmitted: {
+          text: 'stopped prompt',
+          under: {
+            permissionMode: 'default',
+            hooks: '',
+            plugins: '',
+            hooksSkippedByTrust: false,
+          },
+        },
+        uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      })
+
+      expect(out.shouldQuery).toBe(false)
+      expect(out.endedUnderAbort).toBe(true)
+      expect(out.interrupted).toBeUndefined()
+      expect(
+        out.messages.some(m =>
+          JSON.stringify(m).includes('stopped under abort'),
+        ),
+      ).toBe(true)
+    } finally {
+      resetStateForTests()
+    }
+  })
+
+  test('Wave 3D: replay UserPromptSubmit hook cancelled under abort stamps interrupted: true', async () => {
+    setSessionTrustAccepted(true)
+    try {
+      const context = makeBaseContext()
+      const sessionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+      context.agentId = sessionId
+      context.getAppState().sessionHooks.set(sessionId, {
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                {
+                  hook: {
+                    type: 'callback',
+                    callback: async () => {
+                      context.abortController.abort()
+                      return {
+                        decision: 'block',
+                        reason: 'aborted before verdict',
+                      }
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      const out = await processUserInput({
+        input: 'cancelled replay prompt',
+        mode: 'prompt',
+        setToolJSX: () => {},
+        context,
+        skipAttachments: true,
+        promptSubmitted: {
+          text: 'cancelled replay prompt',
+          under: {
+            permissionMode: 'default',
+            hooks: '',
+            plugins: '',
+            hooksSkippedByTrust: false,
+          },
+        },
+        uuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      })
+
+      expect(out.shouldQuery).toBe(false)
+      expect(out.interrupted).toBe(true)
+      expect(out.endedUnderAbort).toBeUndefined()
+    } finally {
+      resetStateForTests()
+    }
   })
 })

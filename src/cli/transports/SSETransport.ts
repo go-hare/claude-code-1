@@ -29,6 +29,22 @@ const RECONNECT_GIVE_UP_MS = 600_000
 /** Server sends keepalives every 15s; treat connection as dead after 45s of silence. */
 const LIVENESS_TIMEOUT_MS = 45_000
 /**
+ * Official 2.1.328 #1666 (`s_n = 1e4`, `Zs = 20`, `n1o`, `qzs` in
+ * `chunk@314581121.js @189198, @211151`): detect host sleep/pause from late
+ * liveness timer or stall detector and reopen at once on a fresh socket with
+ * zero backoff.
+ */
+export const SSE_SLEEP_LATE_THRESHOLD_MS = 10_000
+export const SSE_SLEEP_FRAME_WAIT_MS = 20
+const LIVENESS_OR_SLEEP_ABORT_REASON = new DOMException(
+  'no frame within the liveness timeout, or the process slept',
+  'AbortError',
+)
+const RENEWAL_ABORT_REASON = new DOMException(
+  'the connection is renewed',
+  'AbortError',
+)
+/**
  * Official 2.1.323 #2111: poll OS network interface addresses every 3s so
  * switching Wi-Fi or reconnecting a VPN triggers an immediate redial instead
  * of waiting 45–60s+ for liveness timeout or exponential backoff.
@@ -226,9 +242,21 @@ export class SSETransport implements Transport {
   private reconnectStartTime: number | null = null
   private reconnectTimer: NodeJS.Timeout | null = null
 
-  // Liveness detection
+  // Liveness & sleep detection (#1666)
   private livenessTimer: NodeJS.Timeout | null = null
   private lastActivityTime = 0
+  private lastLivenessEvidenceAtMs = 0
+  private lastLivenessEvidenceMonotonicMs = 0
+  private frameWaitTimer: NodeJS.Timeout | null = null
+  private redialsOnNewSocket = false
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: official 2.1.328 reopenAtOnce state
+  private quietRedial = false
+  private stopListeningForSleep?: () => void
+  private onDiagnostic?: (
+    message: string,
+    level: 'info' | 'warn' | 'error',
+    kind?: string,
+  ) => void
   // Network-change fast recovery (#2111)
   private networkCheckTimer: NodeJS.Timeout | null = null
   private lastNetworkFingerprint: string | null = null
@@ -262,6 +290,12 @@ export class SSETransport implements Transport {
     nonOrigin403?: {
       enabled?: boolean
       onRecover?: (streak: NonOrigin403Streak) => void
+      onProcessSlept?: (listener: (stalledMs: number) => void) => () => void
+      onDiagnostic?: (
+        message: string,
+        level: 'info' | 'warn' | 'error',
+        kind?: string,
+      ) => void
     },
   ) {
     this.headers = headers
@@ -270,6 +304,10 @@ export class SSETransport implements Transport {
     this.getAuthHeaders = getAuthHeaders ?? getSessionIngressAuthHeaders
     this.nonOrigin403Enabled = nonOrigin403?.enabled ?? true
     this.onNonOrigin403Recover = nonOrigin403?.onRecover
+    this.onDiagnostic = nonOrigin403?.onDiagnostic
+    this.stopListeningForSleep = nonOrigin403?.onProcessSlept?.(
+      this.onSleepNotice,
+    )
     this.postUrl = convertSSEUrlToPostUrl(url)
     // Seed with a caller-provided high-water mark so the first connect()
     // sends from_sequence_num / Last-Event-ID. Without this, a fresh
@@ -336,12 +374,14 @@ export class SSETransport implements Transport {
 
     const controller = new AbortController()
     this.abortController = controller
+    const freshSocket = this.redialsOnNewSocket
 
     try {
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
       const response = await fetch(sseUrl.href, {
         headers,
         signal: controller.signal,
+        ...(freshSocket ? { keepalive: false } : {}),
       })
 
       if (controller.signal.aborted || this.abortController !== controller) {
@@ -405,6 +445,7 @@ export class SSETransport implements Transport {
       })
 
       this.state = 'connected'
+      this.redialsOnNewSocket = false
       this.reconnectAttempts = 0
       this.reconnectStartTime = null
       this.resetLivenessTimer()
@@ -676,12 +717,135 @@ export class SSETransport implements Transport {
   }
 
   /**
+   * Official 2.1.328 #1666 (`chunk@314581121.js @207602`): immediately reopen
+   * the SSE connection with zero backoff. When `reason === 'sleep'`, sets
+   * `redialsOnNewSocket = true` so the next `fetch()` dials on a fresh socket
+   * (`keepalive: false`) instead of reusing a stale half-open pooled socket.
+   */
+  public reopenAtOnce(reason: 'renewal' | 'sleep' | 'long_poll'): void {
+    if (this.refreshHeaders) {
+      const freshHeaders = this.refreshHeaders()
+      Object.assign(this.headers, freshHeaders)
+    }
+    this.clearLivenessTimer()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (reason !== 'long_poll' && this.abortController !== null) {
+      this.abortController.abort(
+        reason === 'renewal'
+          ? RENEWAL_ABORT_REASON
+          : LIVENESS_OR_SLEEP_ABORT_REASON,
+      )
+    }
+    this.abortController = null
+    this.reconnectAttempts = 0
+    this.state = 'reconnecting'
+    this.quietRedial = reason === 'long_poll'
+    this.redialsOnNewSocket = reason === 'sleep'
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      void this.connect()
+    }, 0)
+  }
+
+  /**
+   * Official 2.1.328 #1666 (`chunk@314581121.js @211151`): reopen immediately
+   * with zero backoff after host sleep or process pause.
+   */
+  public reopenAfterSleep(
+    lateMs: number,
+    seenBy: 'liveness_timer' | 'stall_detector',
+  ): boolean {
+    if (this.state !== 'connected') return false
+    if (this.frameWaitTimer) {
+      clearTimeout(this.frameWaitTimer)
+      this.frameWaitTimer = null
+    }
+    try {
+      this.reopenAtOnce('sleep')
+    } catch (err) {
+      logForDebugging(
+        `SSETransport: Could not reconnect at once after a pause or sleep, so leaving it to the liveness timeout: ${errorMessage(err)}`,
+        { level: 'error' },
+      )
+      return false
+    }
+    logForDebugging(
+      `SSETransport: Reconnecting now with no backoff: the process was probably paused or asleep (the ${
+        seenBy === 'liveness_timer' ? 'liveness timer' : 'stall detector'
+      } ran at least ${Math.round(lateMs / 1000)}s late)`,
+    )
+    logForDiagnosticsNoPII('warn', 'cli_sse_reopened_after_sleep', {
+      late_ms: Math.round(lateMs),
+      seen_by: seenBy,
+    })
+    this.onDiagnostic?.(
+      `SSE: reconnecting at once: the process was probably paused or asleep (a check ran at least ${Math.round(lateMs / 1000)}s late)`,
+      'warn',
+      'sse_reopened_after_sleep',
+    )
+    return true
+  }
+
+  /**
+   * Official 2.1.328 #1666 (`chunk@314581121.js @211790`): called by an
+   * external stall/sleep detector when wall-clock jump or event-loop stall
+   * exceeds threshold. Gives the socket `SSE_SLEEP_FRAME_WAIT_MS` (20ms) to
+   * deliver a buffered frame before forcing a fresh-socket reopen.
+   */
+  public readonly onSleepNotice = (stalledMs: number): void => {
+    if (this.state !== 'connected' || this.frameWaitTimer !== null) return
+    if (this.silentForMs() < stalledMs) {
+      logForDebugging(
+        `SSETransport: Keeping the stream after a pause or stall of at least ${Math.round(stalledMs / 1000)}s: it has connected or delivered a frame since then`,
+      )
+      return
+    }
+    this.frameWaitTimer = setTimeout(
+      this.onFrameWaitEnd,
+      SSE_SLEEP_FRAME_WAIT_MS,
+      this.lastLivenessEvidenceMonotonicMs,
+      stalledMs,
+    )
+  }
+
+  private readonly onFrameWaitEnd = (
+    prevMonotonicMs: number,
+    stalledMs: number,
+  ): void => {
+    this.frameWaitTimer = null
+    if (this.lastLivenessEvidenceMonotonicMs !== prevMonotonicMs) {
+      logForDebugging(
+        `SSETransport: Keeping the stream after a pause or stall of at least ${Math.round(stalledMs / 1000)}s: it connected or delivered a frame within ${SSE_SLEEP_FRAME_WAIT_MS} ms of the notice`,
+      )
+      return
+    }
+    this.reopenAfterSleep(stalledMs, 'stall_detector')
+  }
+
+  public silentForMs(): number {
+    return Math.max(
+      Date.now() - this.lastLivenessEvidenceAtMs,
+      performance.now() - this.lastLivenessEvidenceMonotonicMs,
+    )
+  }
+
+  /**
    * Bound timeout callback. Hoisted from an inline closure so that
    * resetLivenessTimer (called per-frame) does not allocate a new closure
    * on every SSE frame.
    */
   private readonly onLivenessTimeout = (): void => {
     this.livenessTimer = null
+    const lateMs = this.silentForMs() - LIVENESS_TIMEOUT_MS
+    if (
+      (lateMs > SSE_SLEEP_LATE_THRESHOLD_MS || this.frameWaitTimer !== null) &&
+      this.reopenAfterSleep(lateMs, 'liveness_timer')
+    ) {
+      return
+    }
     rcLog(
       `SSE liveness timeout (${LIVENESS_TIMEOUT_MS}ms)` +
         ` lastSeqNum=${this.getLastSequenceNum()}` +
@@ -691,7 +855,7 @@ export class SSETransport implements Transport {
       level: 'error',
     })
     logForDiagnosticsNoPII('error', 'cli_sse_liveness_timeout')
-    this.abortController?.abort()
+    this.abortController?.abort(LIVENESS_OR_SLEEP_ABORT_REASON)
     this.handleConnectionError()
   }
 
@@ -700,6 +864,10 @@ export class SSETransport implements Transport {
    * treat the connection as dead and reconnect.
    */
   private resetLivenessTimer(): void {
+    const nowWall = Date.now()
+    this.lastActivityTime = nowWall
+    this.lastLivenessEvidenceAtMs = nowWall
+    this.lastLivenessEvidenceMonotonicMs = performance.now()
     this.clearLivenessTimer()
     this.livenessTimer = setTimeout(this.onLivenessTimeout, LIVENESS_TIMEOUT_MS)
   }
@@ -888,6 +1056,12 @@ export class SSETransport implements Transport {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
+    if (this.frameWaitTimer) {
+      clearTimeout(this.frameWaitTimer)
+      this.frameWaitTimer = null
+    }
+    this.stopListeningForSleep?.()
+    this.stopListeningForSleep = undefined
     this.clearLivenessTimer()
     this.stopNetworkChangeMonitor()
 

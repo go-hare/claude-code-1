@@ -21,6 +21,46 @@ const MAX_ACTIVITIES = 10
 const MAX_STDERR_LINES = 10
 
 /**
+ * Official 2.1.328 #1613 (`Me = 3600000`, `Ue = 21600000` in
+ * `chunk@315239844.js @1800, @5511`): bounds for
+ * `CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS` when spawning a worker on
+ * `workerEpoch > 1`.
+ */
+export const RESUMED_TURN_BOUND_MAX_AGE_MS = 3_600_000
+export const RESUMED_TURN_NOT_BEFORE_CAP_MS = 21_600_000
+
+export type BridgeSessionSpawnOpts = SessionSpawnOpts & {
+  boundResumedTurn?: boolean
+  resumedTurnNotBefore?: number
+}
+
+export function computeResumedTurnMaxAgeMs(
+  opts: {
+    workerEpoch?: number
+    boundResumedTurn?: boolean
+    resumedTurnNotBefore?: number
+  },
+  nowMs: number = Date.now(),
+): string | undefined {
+  if ((opts.workerEpoch ?? 0) <= 1) return undefined
+  const fromBound = opts.boundResumedTurn
+    ? RESUMED_TURN_BOUND_MAX_AGE_MS
+    : Number.POSITIVE_INFINITY
+  const fromNotBefore =
+    opts.resumedTurnNotBefore !== undefined
+      ? Math.max(
+          1,
+          Math.min(
+            nowMs - opts.resumedTurnNotBefore,
+            RESUMED_TURN_NOT_BEFORE_CAP_MS,
+          ),
+        )
+      : Number.POSITIVE_INFINITY
+  const bound = Math.min(fromBound, fromNotBefore)
+  return Number.isFinite(bound) ? String(bound) : undefined
+}
+
+/**
  * Sanitize a session ID for use in file names.
  * Strips any characters that could cause path traversal (e.g. `../`, `/`)
  * or other filesystem issues, replacing them with underscores.
@@ -424,6 +464,8 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
       // Tip extras POST_FOR_SESSION_INGRESS_V2 / USE_CCR_V2 overlay after NDl.
       // densable RQt spawn stamps (spawn-only; attach must not set these).
       // Gold sbr: if(a) AUTO_DEFAULT; if(f) ARTIFACT; if(b) MACHINE_SETTINGS.
+      const spawnOpts = opts as BridgeSessionSpawnOpts
+      const resumedTurnMaxAgeMs = computeResumedTurnMaxAgeMs(spawnOpts)
       const env: NodeJS.ProcessEnv = {
         ...buildSessionChildEnv(deps.env, {
           accessToken: opts.accessToken,
@@ -431,6 +473,12 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
           sandbox: deps.sandbox,
         }),
         CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2: '1',
+        ...(resumedTurnMaxAgeMs !== undefined
+          ? {
+              CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS:
+                resumedTurnMaxAgeMs,
+            }
+          : {}),
         ...(deps.settingsBinding
           ? { [BRIDGE_SETTINGS_BINDING_ENV]: deps.settingsBinding }
           : {}),

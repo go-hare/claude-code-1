@@ -397,7 +397,7 @@ export const tryReactiveCompact: (params: {
   aborted: boolean
   messages: Message[]
   cacheSafeParams: Record<string, unknown>
-  /** Optional token gap from PTL refusal (handled inside compactConversation) */
+  /** Optional token gap from PTL refusal (forwarded to compactConversation to seed initial trim) */
   tokenGap?: number
 }) => Promise<TryReactiveCompactOutcome> = async ({
   hasAttempted,
@@ -405,6 +405,7 @@ export const tryReactiveCompact: (params: {
   aborted,
   messages,
   cacheSafeParams,
+  tokenGap,
 }) => {
   // densable Jsa: withhold may already have happened; do not summarize when
   // ex()/Rhe()/source gates fail (return null → surface bare/Ysa PTL).
@@ -432,6 +433,9 @@ export const tryReactiveCompact: (params: {
         autoCompactThreshold: 0,
         querySource: 'compact',
       },
+      false,
+      undefined,
+      tokenGap,
     )
     return { result }
   } catch (finalError) {

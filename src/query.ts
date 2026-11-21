@@ -10,10 +10,10 @@ import {
   AUTOCOMPACT_THRASHING_MESSAGE,
   calculateTokenWarningState,
   checkRapidRefillBreaker,
-  estimateMaxTurnGrowth,
-  getClaudeMdGrowthTokens,
+  getAutoCompactThreshold,
   getEffectiveContextWindowSize,
   isAutoCompactEnabled,
+  isPrecomputeCompactionEnabled,
   recordSentClaudeMdTokens,
   type AutoCompactTrackingState,
 } from './services/compact/autoCompact.js'
@@ -140,7 +140,11 @@ import {
   consume as consumeFromQueue,
   getCommandsByMaxPriority,
   isSlashCommand,
+  registerFoldInFlight,
+  unregisterFoldInFlight,
+  isMidTurnFoldSuspended,
 } from './utils/messageQueueManager.js'
+import { addToHistory } from './history.js'
 import {
   bindMainThreadTurn,
   getMainThreadTurn,
@@ -194,10 +198,7 @@ import {
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
 import { recordContentReplacement } from './utils/sessionStorage.js'
 import { handleStopHooks, runTurnEndReactions } from './query/stopHooks.js'
-import {
-  BRIEF_ENFORCE_SENTINEL,
-  hasBriefRepliedInTurn,
-} from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
+import { BRIEF_ENFORCE_SENTINEL } from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
 import {
   getModelSwitchSession,
   takePostModelSwitchHooks,
@@ -245,6 +246,8 @@ import {
   announceOutputLimitRecovery,
   collectPostToolBatchCalls,
   getAutonomyTurnOutcome,
+  hasBriefRepliedInTranscript,
+  isRequestEligibleForEmptyCompletionResend,
   isTruncatedAfterOutputRecovery,
   isWithheldMaxOutputTokens,
   maybeHandbackBounce,
@@ -475,6 +478,76 @@ export function resolvePrecomputeBufferFraction(
   return { fraction: table.defaultEntry[kind], source: 'table_default' }
 }
 
+const DEFAULT_PRECOMPUTE_BUFFER_FRACTION = 0.2
+let precomputeArmTableMalformedLogged = false
+
+/** Official 2.1.328 `Pkt()` (`tengu_amber_rokovoko`, default `oBe = 0.2`). */
+export function getScalarPrecomputeBufferFraction(): number {
+  const val = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
+    'tengu_amber_rokovoko',
+    DEFAULT_PRECOMPUTE_BUFFER_FRACTION,
+  )
+  return typeof val === 'number' && Number.isFinite(val) && val >= 0 && val < 1
+    ? val
+    : DEFAULT_PRECOMPUTE_BUFFER_FRACTION
+}
+
+/**
+ * Official 2.1.328 `Okt` (`chunk@294254613.js @2075971`): resolve the live
+ * precompute buffer fraction from `tengu_amber_moleskin` (falling back to
+ * `tengu_amber_rokovoko` / `0.2`) and emit a one-shot malformed-table event.
+ */
+export function resolveLivePrecomputeBufferFraction(
+  model: string,
+  querySource: string | undefined,
+): ReturnType<typeof resolvePrecomputeBufferFraction> {
+  const rawTable = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
+    'tengu_amber_moleskin',
+    null,
+  )
+  const windowSize = getContextWindowForModel(model)
+  const resolved = resolvePrecomputeBufferFraction(
+    rawTable,
+    windowSize,
+    querySource,
+    getScalarPrecomputeBufferFraction(),
+  )
+  if (resolved.source === 'malformed' && !precomputeArmTableMalformedLogged) {
+    precomputeArmTableMalformedLogged = true
+    logEvent('tengu_precompute_arm_table_malformed', {
+      payloadType: (Array.isArray(rawTable)
+        ? 'array'
+        : typeof rawTable) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
+  return resolved
+}
+
+/**
+ * Official 2.1.328 `wWn` / `MWn` (`chunk@294254613.js @2068650`): compute the
+ * live precompute arming threshold in tokens from `resolvePrecomputeBufferFraction`.
+ */
+export function getPrecomputeArmThreshold(
+  model: string,
+  querySource: string | undefined,
+): ReturnType<typeof resolvePrecomputeBufferFraction> & {
+  threshold: number
+  effectiveWindow: number
+} {
+  const effectiveWindow = getEffectiveContextWindowSize(model)
+  const resolved = resolveLivePrecomputeBufferFraction(model, querySource)
+  const autoCompactThreshold = getAutoCompactThreshold(model, { querySource })
+  const threshold = Math.min(
+    effectiveWindow - Math.round(effectiveWindow * resolved.fraction),
+    autoCompactThreshold,
+  )
+  return {
+    ...resolved,
+    threshold,
+    effectiveWindow,
+  }
+}
+
 // -- query loop state
 
 // Mutable state carried between loop iterations
@@ -494,6 +567,11 @@ type State = {
    * a jlt nudge (gold-251-g #11). Not React AppState.
    */
   thinkingOnlyNudged: boolean
+  /**
+   * Official 2.1.328 `emptyCompletionResent` — one-shot latch on the continue
+   * bag after an empty completion was resent once before giving up.
+   */
+  emptyCompletionResent: boolean
   malformedToolUseRetryCount?: number
   // Why the previous iteration continued. Undefined on first iteration.
   // Lets tests assert recovery paths fired without inspecting message contents.
@@ -964,6 +1042,7 @@ async function* queryLoop(
     pendingToolUseSummary: undefined,
     // densable Pe.thinkingOnlyNudged — first iteration false.
     thinkingOnlyNudged: false,
+    emptyCompletionResent: false,
     malformedToolUseRetryCount: 0,
     transition: undefined,
   }
@@ -1109,6 +1188,7 @@ async function* queryLoop(
         stopHookBlockCount,
         turnCount,
         thinkingOnlyNudged,
+        emptyCompletionResent,
       } = state
       const malformedToolUseRetryCount = state.malformedToolUseRetryCount ?? 0
 
@@ -1679,6 +1759,27 @@ async function* queryLoop(
         }
       }
 
+      // Official 2.1.328 (`chunk@305854618.js @238400`, `Okt` in
+      // `chunk@294254613.js @2075695`): evaluate live precompute arm threshold
+      // from `tengu_amber_moleskin` when autocompact did not run.
+      if (
+        !compactionResult &&
+        !hasAttemptedReactiveCompact &&
+        isPrecomputeCompactionEnabled()
+      ) {
+        const precomputeCheck = getPrecomputeArmThreshold(
+          toolUseContext.options.mainLoopModel,
+          querySource,
+        )
+        const currentEstimate =
+          tokenCountWithEstimation(messagesForQuery) - snipTokensFreed
+        if (currentEstimate >= precomputeCheck.threshold) {
+          logForDebugging(
+            `[precompute] context estimate ${currentEstimate} reached threshold ${precomputeCheck.threshold} (fraction=${precomputeCheck.fraction}, source=${precomputeCheck.source})`,
+          )
+        }
+      }
+
       const rebuildSystemPromptIfNeeded = async (): Promise<void> => {
         if (
           !needsSystemPromptRebuild ||
@@ -1999,89 +2100,6 @@ async function* queryLoop(
         }
       }
 
-      // Predictive autocompact: estimate if this turn's growth will push
-      // us past the context window. Uses effectiveContextWindow directly
-      // (without the autocompact buffer) to avoid double-reserving with
-      // getAutoCompactThreshold which already subtracts buffer.
-      if (!compactionResult && isAutoCompactEnabled()) {
-        const model = layeredMainLoopModel
-        const claudeMdGrowth = await getClaudeMdGrowthTokens(
-          userContext.claudeMd,
-        )
-        const currentTokens =
-          tokenCountWithEstimation(messagesForQuery) -
-          snipTokensFreed +
-          claudeMdGrowth
-        const estimatedGrowth = estimateMaxTurnGrowth(model)
-        const predictiveThreshold =
-          getEffectiveContextWindowSize(model) - estimatedGrowth
-        if (currentTokens > predictiveThreshold) {
-          const predictiveResult = await deps.autocompact(
-            messagesForQuery,
-            toolUseContext,
-            {
-              systemPrompt,
-              userContext,
-              systemContext,
-              toolUseContext,
-              forkContextMessages: messagesForQuery,
-            },
-            querySource,
-            tracking,
-            snipTokensFreed,
-          )
-          if (
-            !predictiveResult.compactionResult &&
-            !predictiveResult.rapidRefillBreakerTripped &&
-            toolUseContext.abortController.signal.aborted
-          ) {
-            yield* leftoverDrainSpinnerModes()
-            return { reason: 'aborted_streaming' }
-          }
-          if (predictiveResult.rapidRefillBreakerTripped) {
-            yield createAssistantAPIErrorMessage({
-              content: AUTOCOMPACT_THRASHING_MESSAGE,
-              error: 'invalid_request',
-              apiError: 'autocompact_thrashing',
-            })
-            yield* leftoverDrainSpinnerModes()
-            return { reason: 'rapid_refill_breaker' }
-          }
-          if (predictiveResult.compactionResult) {
-            messagesForQuery = buildPostCompactMessages(
-              predictiveResult.compactionResult,
-            )
-            // Official 2.1.328 (#555): rebuild systemPrompt after predictive autocompact too.
-            needsSystemPromptRebuild = true
-            runPostCompactCleanup(querySource)
-            await rebuildSystemPromptIfNeeded()
-            // v2.1.311 (#1230): refresh userContext after auto-compact cleared caches
-            try {
-              const refreshed = await getUserContext()
-              if (
-                Object.keys(refreshed).length > 0 ||
-                Object.keys(userContext).length > 0
-              ) {
-                userContext = refreshed
-              }
-            } catch {
-              // Keep existing userContext if refresh fails
-            }
-            snipTokensFreed = 0
-            tracking = tracking
-              ? {
-                  ...tracking,
-                  compacted: true,
-                  consecutiveFailures:
-                    predictiveResult.consecutiveFailures ?? 0,
-                  consecutiveRapidRefills:
-                    predictiveResult.consecutiveRapidRefills ?? 0,
-                }
-              : tracking
-          }
-        }
-      }
-
       let attemptWithFallback = true
       // densable En — refusal_continuation begin active until end / land
       let refusalContinuationActive = false
@@ -2169,9 +2187,16 @@ async function* queryLoop(
       let lastBatchingReminderSent:
         | { afterUuid: string; text: string; model: string }
         | undefined
+      // Track models already attempted in this API loop so availability/refusal
+      // fallbacks never cycle indefinitely.
+      const triedFallbackModels = new Set<string>([currentModel])
+      // Official 2.1.328 `zr` (`chunk@305854618.js @275704`): last stop_reason
+      // observed in stream_event(message_delta) across the current API stream.
+      let lastDeltaStopReason: string | undefined
       try {
         while (attemptWithFallback) {
           attemptWithFallback = false
+          lastDeltaStopReason = undefined
           try {
             let streamingFallbackOccured = false
             // densable Ji — media-size (EFi) withheld AND buffered; flushed on
@@ -2486,6 +2511,20 @@ async function* queryLoop(
               if (message.type === 'tool_drain_tick') {
                 yield* drainStreamingTools()
                 continue
+              }
+              if (message.type === 'stream_event') {
+                const streamEv = message.event as
+                  | {
+                      type?: unknown
+                      delta?: { stop_reason?: unknown }
+                    }
+                  | undefined
+                if (
+                  streamEv?.type === 'message_delta' &&
+                  typeof streamEv.delta?.stop_reason === 'string'
+                ) {
+                  lastDeltaStopReason = streamEv.delta.stop_reason
+                }
               }
               yield* leftoverDrainSpinnerModes()
               // densable server_fallback consumer — retainedText/Messages + Gt seam gate
@@ -3170,7 +3209,10 @@ async function* queryLoop(
               }
             }
           } catch (innerError) {
-            if (innerError instanceof FallbackTriggeredError && fallbackModel) {
+            if (
+              innerError instanceof FallbackTriggeredError &&
+              (innerError.fallbackModel || fallbackModel)
+            ) {
               // densable qa cancelled/edit_prompt — do not switch. Gold
               // abort(_l("refusal-fallback-edit")) on pause.
               if (
@@ -3195,12 +3237,17 @@ async function* queryLoop(
                 needsFollowUp = false
               } else {
                 // Fallback was triggered - switch model and retry
-                // Prefer the error's fallback model (refusal path may route via g_i).
+                // Prefer the error's fallback model (refusal & availability paths
+                // supply target directly even when --fallback-model is unset).
                 const switchTo =
                   innerError.fallbackModel &&
                   typeof innerError.fallbackModel === 'string'
                     ? innerError.fallbackModel
-                    : fallbackModel
+                    : (fallbackModel as string)
+                if (triedFallbackModels.has(switchTo)) {
+                  throw innerError
+                }
+                triedFallbackModels.add(switchTo)
                 currentModel = switchTo
                 modelFacts = getModelFacts(currentModel)
                 leftoverStampTurnEffort(switchTo)
@@ -3303,6 +3350,15 @@ async function* queryLoop(
                 toolUseBlocks.length = 0
                 needsFollowUp = false
 
+                // Update tool use context with new model before recreating executor
+                toolUseContext = {
+                  ...toolUseContext,
+                  options: {
+                    ...toolUseContext.options,
+                    mainLoopModel: switchTo,
+                  },
+                }
+
                 // Discard pending results from the failed attempt and create a
                 // fresh executor. This prevents orphan tool_results (with old
                 // tool_use_ids) from leaking into the retry.
@@ -3320,38 +3376,45 @@ async function* queryLoop(
                   )
                 }
 
-                // Update tool use context with new model
-                toolUseContext.options.mainLoopModel = switchTo
-
-                // Thinking signatures are model-bound: replaying a protected-thinking
-                // block (e.g. capybara) to an unprotected fallback (e.g. opus) 400s.
-                // Strip before retry so the fallback model gets clean history.
-                if (process.env.USER_TYPE === 'ant') {
-                  messagesForQuery = stripSignatureBlocks(messagesForQuery)
-                }
+                // Thinking signatures are model-bound: replaying thinking blocks
+                // from one model to a different fallback model 400s across both
+                // internal and external tiers. Always strip before retry.
+                messagesForQuery = stripSignatureBlocks(messagesForQuery)
 
                 // Log the fallback event
-                logEvent('tengu_model_fallback_triggered', {
-                  original_model:
-                    innerError.originalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  fallback_model:
-                    switchTo as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  entrypoint:
-                    'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  queryChainId: queryChainIdForAnalytics,
-                  queryDepth: queryTracking.depth,
-                })
-
-                // Official densable (2.1.x): reason discriminates Host stream.
-                // - model_not_found → system/model_fallback (permanent switch)
-                // - overloaded / default → warning only (capacity 529 path)
                 const fallbackReason =
                   'reason' in innerError &&
                   typeof (innerError as { reason?: unknown }).reason ===
                     'string'
                     ? (innerError as { reason: string }).reason
                     : 'overloaded'
-                if (fallbackReason === 'model_not_found') {
+                logEvent('tengu_model_fallback_triggered', {
+                  original_model:
+                    innerError.originalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  fallback_model:
+                    switchTo as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  reason:
+                    fallbackReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  entrypoint:
+                    'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  queryChainId: queryChainIdForAnalytics,
+                  queryDepth: queryTracking.depth,
+                })
+
+                // Official 2.1.328 (`chunk@305854618.js @280706` & `@271554`):
+                // emit `query_model_change` on every model switch, followed by
+                // `system/model_fallback` for non-refusal fallbacks (refusal
+                // already emitted `model_refusal_fallback` on `fallback_request`).
+                yield {
+                  type: 'query_model_change' as const,
+                  toModel: switchTo,
+                } as unknown as Message
+
+                if (
+                  fallbackReason === 'model_not_found' ||
+                  fallbackReason === 'permission_denied' ||
+                  fallbackReason === 'model_blocked'
+                ) {
                   // Permanent primary-model failure: rebind session model (official
                   // BD + setAppState mainLoopModel) and emit Host model_fallback.
                   try {
@@ -3367,26 +3430,47 @@ async function* queryLoop(
                   } catch {
                     // optional
                   }
-                  // Official yields system/model_fallback once; QueryEngine maps
-                  // camelCase → snake_case Host wire. Do not also
-                  // emitModelFallbackSdk (would double on stream-json drain).
                   yield {
                     type: 'system' as const,
                     subtype: 'model_fallback' as const,
                     content: `Switched to ${renderModelName(switchTo)} because ${renderModelName(innerError.originalModel)} is not available`,
                     level: 'warning' as const,
-                    trigger: 'model_not_found' as const,
+                    trigger: fallbackReason,
                     originalModel: innerError.originalModel,
                     fallbackModel: switchTo,
                     isMeta: false as const,
                     timestamp: new Date().toISOString(),
                     uuid: randomUUID(),
-                  }
-                } else {
-                  yield createSystemMessage(
-                    `Switched to ${renderModelName(switchTo)} due to high demand for ${renderModelName(innerError.originalModel)}`,
-                    'warning',
-                  )
+                  } as unknown as Message
+                } else if (fallbackReason === 'last_resort') {
+                  yield {
+                    type: 'system' as const,
+                    subtype: 'model_fallback' as const,
+                    content: `Switched to ${renderModelName(switchTo)} because ${renderModelName(innerError.originalModel)} returned an error that could not be retried`,
+                    level: 'warning' as const,
+                    trigger: 'last_resort' as const,
+                    originalModel: innerError.originalModel,
+                    fallbackModel: switchTo,
+                    isMeta: false as const,
+                    timestamp: new Date().toISOString(),
+                    uuid: randomUUID(),
+                  } as unknown as Message
+                } else if (fallbackReason !== 'refusal') {
+                  yield {
+                    type: 'system' as const,
+                    subtype: 'model_fallback' as const,
+                    content: `Switched to ${renderModelName(switchTo)} due to high demand for ${renderModelName(innerError.originalModel)}`,
+                    level: 'warning' as const,
+                    trigger:
+                      fallbackReason === 'server_error'
+                        ? ('server_error' as const)
+                        : ('overloaded' as const),
+                    originalModel: innerError.originalModel,
+                    fallbackModel: switchTo,
+                    isMeta: false as const,
+                    timestamp: new Date().toISOString(),
+                    uuid: randomUUID(),
+                  } as unknown as Message
                 }
               }
             } else {
@@ -3707,6 +3791,7 @@ async function* queryLoop(
                 stopHookBlockCount: 0,
                 turnCount,
                 thinkingOnlyNudged,
+                emptyCompletionResent,
                 transition: {
                   reason: 'collapse_drain_retry',
                   committed: drained.committed,
@@ -3877,6 +3962,7 @@ async function* queryLoop(
               stopHookBlockCount: 0,
               turnCount,
               thinkingOnlyNudged,
+              emptyCompletionResent,
               transition: { reason: 'reactive_compact_retry' },
             }
             state = next
@@ -3998,6 +4084,7 @@ async function* queryLoop(
               stopHookBlockCount: 0,
               turnCount,
               thinkingOnlyNudged,
+              emptyCompletionResent,
               transition: { reason: 'max_output_tokens_escalate' },
             }
             state = next
@@ -4018,6 +4105,9 @@ async function* queryLoop(
               isMeta: true,
               turnCompanion: true,
             })
+            // Official 2.1.328 (`chunk@305854618.js @292000`): yield recovery
+            // nudge so REPL / QueryEngine / JSONL transcript stay in sync.
+            yield recoveryMessage
 
             const next: State = {
               messages: [
@@ -4035,6 +4125,7 @@ async function* queryLoop(
               stopHookBlockCount: 0,
               turnCount,
               thinkingOnlyNudged,
+              emptyCompletionResent,
               transition: {
                 reason: 'max_output_tokens_recovery',
                 attempt: nextCount,
@@ -4069,7 +4160,9 @@ async function* queryLoop(
               isMeta: true,
               turnCompanion: true,
             })
-            // densable lQn: the nudge is only the next request. Do not yield it.
+            // Official 2.1.328 (`chunk@305854618.js @292450`): yield recovery
+            // nudge so REPL / QueryEngine / JSONL transcript stay in sync.
+            yield recoveryMessage
             const next: State = {
               messages: [
                 ...messagesForQuery,
@@ -4086,6 +4179,7 @@ async function* queryLoop(
               stopHookBlockCount: 0,
               turnCount,
               thinkingOnlyNudged,
+              emptyCompletionResent,
               transition: {
                 reason: 'truncated_response_recovery',
                 attempt: maxOutputTokensRecoveryCount + 1,
@@ -4103,11 +4197,10 @@ async function* queryLoop(
           yield lastMessage
         }
 
-        // densable excerpt @186913600: (kn?.message.stop_reason??Bn)==="tool_use"
-        // && Ms.length===0 && !isApiErrorMessage. Bn body is not in gold-251-l/f
-        // — do not invent; nullish stop_reason is not "tool_use". Tombstone +
-        // Blt retry once. Exhausted: qo + x0e + OS(ct,A,Li).
-        const rawStopReason = lastMessage?.message.stop_reason
+        // Official 2.1.328 (`chunk@305854618.js @292900`):
+        // `(v?.message.stop_reason ?? zr) === "tool_use" && po.length === 0 && !v?.isApiErrorMessage`.
+        const rawStopReason =
+          lastMessage?.message.stop_reason ?? lastDeltaStopReason
         const parsedToolUseCount = toolUseBlocks.filter(
           b => !isUnparsedToolInput(b.input),
         ).length
@@ -4151,6 +4244,7 @@ async function* queryLoop(
             yield retryMessage
             state = {
               messages: [...messagesForQuery, retryMessage],
+              transition: { reason: 'malformed_tool_use_retry' },
               toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
               autoCompactTracking: tracking,
               maxOutputTokensRecoveryCount: 0,
@@ -4161,15 +4255,14 @@ async function* queryLoop(
               stopHookBlockCount: 0,
               turnCount,
               thinkingOnlyNudged,
-              transition: { reason: 'malformed_tool_use_retry' },
+              emptyCompletionResent,
               malformedToolUseRetryCount: malformedToolUseRetryCount + 1,
             }
             yield* leftoverDrainSpinnerModes()
             continue
           }
           if (malformedToolUse.action === 'exhausted') {
-            // v2.1.318 (#1620): do not yield tombstones on malformed_tool_use_exhausted
-            // (emitting tombstones broke --continue); keep retractedMessageUuids = [].
+            // #1620
             const retractedUuids: string[] = []
             const exhaustedMessage: AssistantMessage & {
               retractedMessageUuids?: string[]
@@ -4212,21 +4305,28 @@ async function* queryLoop(
           }
         }
 
-        // Official thinking-only densable: when the model ends the turn with no
-        // visible text (and not after a successful terminal-MCP tool), nudge once.
-        // Skip for compact / internal query sources that are not user-facing.
+        // Official 2.1.328 `Ff` (`chunk@305854618.js @213650, @293700`):
+        // when the model ends the turn with no visible text (including an empty
+        // completion with `assistantMessages.length === 0` whose stop_reason
+        // arrived on `message_delta`), nudge once, resend once if eligible,
+        // then give up with `empty_completion` API error.
+        const effectiveStopReason =
+          lastMessage?.message?.stop_reason ?? lastDeltaStopReason
         if (
-          lastMessage?.type === 'assistant' &&
-          !lastMessage.isApiErrorMessage &&
+          (effectiveStopReason === 'end_turn' ||
+            effectiveStopReason === 'stop_sequence') &&
+          !lastMessage?.isApiErrorMessage &&
           querySource !== 'compact' &&
           querySource !== 'prompt_suggestion' &&
           querySource !== 'away_summary' &&
           querySource !== 'agent_summary' &&
           querySource !== 'memdir_aki_extract' &&
           !messagesEndWithSuccessfulTerminalMcpTool(messagesForQuery) &&
-          // Official 2.1.325 #2300: never nudge a brief-mode session to reply
-          // again when the turn has already delivered a visible brief reply.
-          !hasBriefRepliedInTurn(toolUseContext.abortController?.signal) &&
+          // Official 2.1.328 `Pf(e)` (`tengu_jazzy_wren`): skip thinking-only
+          // nudge when the preceding assistant turn already replied via BriefTool.
+          (state.transition?.reason !== 'next_turn' ||
+            toolUseContext.agentId !== undefined ||
+            !hasBriefRepliedInTranscript(messagesForQuery)) &&
           !assistantMessages.some(
             m =>
               Array.isArray(m.message?.content) &&
@@ -4238,36 +4338,69 @@ async function* queryLoop(
               ),
           )
         ) {
-          const stopReason = lastMessage.message?.stop_reason
-          // Official: only end_turn | stop_sequence (not tool_use / max_tokens).
-          if (stopReason === 'end_turn' || stopReason === 'stop_sequence') {
-            if (!thinkingOnlyNudged) {
-              // densable Pe.thinkingOnlyNudged:!0 on the continue bag
-              logForDebugging('query_thinking_only_response: nudged')
-              const nudgeMessage = createUserMessage({
-                content: THINKING_ONLY_RETRY_PROMPT,
-                isMeta: true,
-                turnCompanion: true,
-              })
-              yield nudgeMessage
-              state = {
-                messages: [...messagesForQuery, nudgeMessage],
-                toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
-                autoCompactTracking: tracking,
-                maxOutputTokensRecoveryCount,
-                hasAttemptedReactiveCompact,
-                maxOutputTokensOverride: undefined,
-                pendingToolUseSummary: undefined,
-                stopHookActive,
-                stopHookBlockCount: 0,
-                turnCount,
-                thinkingOnlyNudged: true,
-                transition: { reason: 'thinking_only_retry' },
-              }
-              yield* leftoverDrainSpinnerModes()
-              continue
+          if (!thinkingOnlyNudged) {
+            // densable Pe.thinkingOnlyNudged:!0 on the continue bag
+            logForDebugging('query_thinking_only_response: nudged')
+            const nudgeMessage = createUserMessage({
+              content: THINKING_ONLY_RETRY_PROMPT,
+              isMeta: true,
+              turnCompanion: true,
+            })
+            yield nudgeMessage
+            state = {
+              messages: [...messagesForQuery, nudgeMessage],
+              toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
+              autoCompactTracking: tracking,
+              maxOutputTokensRecoveryCount,
+              hasAttemptedReactiveCompact,
+              maxOutputTokensOverride: undefined,
+              pendingToolUseSummary: undefined,
+              stopHookActive,
+              stopHookBlockCount: 0,
+              turnCount,
+              thinkingOnlyNudged: true,
+              emptyCompletionResent,
+              transition: { reason: 'thinking_only_retry' },
             }
-            logForDebugging('query_thinking_only_response: nudge_exhausted')
+            yield* leftoverDrainSpinnerModes()
+            continue
+          }
+          const isEmptyCompletion =
+            (assistantMessages.length === 0 || emptyCompletionResent) &&
+            toolUseContext.agentId === undefined &&
+            isRequestEligibleForEmptyCompletionResend(messagesForQuery)
+          if (isEmptyCompletion && !emptyCompletionResent) {
+            logForDebugging('query_thinking_only_response: empty_resent')
+            state = {
+              messages: messagesForQuery,
+              toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
+              autoCompactTracking: tracking,
+              maxOutputTokensRecoveryCount,
+              hasAttemptedReactiveCompact,
+              maxOutputTokensOverride: undefined,
+              pendingToolUseSummary: undefined,
+              stopHookActive,
+              stopHookBlockCount: 0,
+              turnCount,
+              thinkingOnlyNudged,
+              emptyCompletionResent: true,
+              transition: { reason: 'thinking_only_retry' },
+            }
+            yield* leftoverDrainSpinnerModes()
+            continue
+          }
+          logForDebugging('query_thinking_only_response: nudge_exhausted')
+          if (isEmptyCompletion) {
+            const emptyError = createAssistantAPIErrorMessage({
+              content:
+                'The model returned an empty response (retry also failed).',
+              apiError: 'empty_completion',
+            })
+            yield emptyError
+            void executeStopFailureHooks(emptyError, toolUseContext)
+            OS(toolUseContext, querySource, emptyError)
+            yield* leftoverDrainSpinnerModes()
+            return { reason: 'api_error', isTransient: false }
           }
         }
 
@@ -4301,12 +4434,12 @@ async function* queryLoop(
           stopHookActive,
         )
 
-        // Official 2.1.325 #2300: if this turn already sent a visible brief
-        // reply (`hasBriefRepliedInTurn`), strip any brief-mode enforce retry
-        // error so brief-mode sessions (e.g. Dispatch) never send a duplicate reply.
+        // Official 2.1.328 `Pf(e)` (`tengu_jazzy_wren`): if the transcript shows
+        // this turn already sent a visible brief reply, strip any brief-mode
+        // enforce retry error so brief-mode sessions do not send a duplicate reply.
         if (
           stopHookResult.blockingErrors.length > 0 &&
-          hasBriefRepliedInTurn(toolUseContext.abortController?.signal)
+          hasBriefRepliedInTranscript(messagesForQuery)
         ) {
           stopHookResult.blockingErrors = stopHookResult.blockingErrors.filter(
             msg => {
@@ -4453,6 +4586,7 @@ async function* queryLoop(
             stopHookBlockCount: nextBlockCount,
             turnCount,
             thinkingOnlyNudged,
+            emptyCompletionResent,
             transition: { reason: 'stop_hook_blocking' },
           }
           state = next
@@ -4492,6 +4626,7 @@ async function* queryLoop(
               stopHookBlockCount: 0,
               turnCount,
               thinkingOnlyNudged,
+              emptyCompletionResent,
               transition: { reason: 'token_budget_continuation' },
             }
             yield* leftoverDrainSpinnerModes()
@@ -4529,6 +4664,7 @@ async function* queryLoop(
             stopHookBlockCount: 0,
             turnCount,
             thinkingOnlyNudged,
+            emptyCompletionResent: false,
             transition: { reason: 'next_turn' },
           }
           yield* leftoverDrainSpinnerModes()
@@ -5047,24 +5183,25 @@ async function* queryLoop(
       const { keepQueuedCommandsUntilFirstDroppedPrompt, latchPromptScreen } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('./utils/processUserInput/promptSubmit.js') as typeof import('./utils/processUserInput/promptSubmit.js')
-      const queuedCommandsSnapshot = getCommandsByMaxPriority(
-        sleepRan ? 'later' : 'next',
-      )
-        .filter(cmd => {
-          if (isSlashCommand(cmd)) return false
-          if (isMainThread) return isMainThreadQueuedCommand(cmd)
-          // Subagents drain task-notifications and poll-events addressed to them —
-          // never user prompts, even if someone stamps an agentId on one.
-          return (
-            (cmd.mode === 'task-notification' || cmd.mode === 'poll-event') &&
-            cmd.agentId === currentAgentId
-          )
-        })
-        .filter(
-          keepQueuedCommandsUntilFirstDroppedPrompt(
-            latchPromptScreen(() => updatedToolUseContext, { latch: true }),
-          ),
-        )
+      const queuedCommandsSnapshot = isMidTurnFoldSuspended()
+        ? []
+        : getCommandsByMaxPriority(sleepRan ? 'later' : 'next')
+            .filter(cmd => {
+              if (isSlashCommand(cmd)) return false
+              if (isMainThread) return isMainThreadQueuedCommand(cmd)
+              // Subagents drain task-notifications and poll-events addressed to them —
+              // never user prompts, even if someone stamps an agentId on one.
+              return (
+                (cmd.mode === 'task-notification' ||
+                  cmd.mode === 'poll-event') &&
+                cmd.agentId === currentAgentId
+              )
+            })
+            .filter(
+              keepQueuedCommandsUntilFirstDroppedPrompt(
+                latchPromptScreen(() => updatedToolUseContext, { latch: true }),
+              ),
+            )
       const queuedAutonomyClaim = await claimConsumableQueuedAutonomyCommands(
         queuedCommandsSnapshot,
       )
@@ -5072,36 +5209,33 @@ async function* queryLoop(
         removeFromQueue(queuedAutonomyClaim.staleCommands)
       }
 
-      const claimedConsumedCommands =
-        queuedAutonomyClaim.claimedCommands.filter(
-          cmd =>
-            cmd.mode === 'prompt' ||
-            cmd.mode === 'task-notification' ||
-            cmd.mode === 'poll-event',
-        )
-      if (claimedConsumedCommands.length > 0) {
-        consumedAutonomyCommands.push(...claimedConsumedCommands)
-        for (const cmd of claimedConsumedCommands) {
-          if (cmd.uuid) {
-            consumedCommandUuids.push(cmd.uuid)
-            notifyCommandLifecycle(cmd.uuid, 'started')
-          }
-        }
-        consumeFromQueue(claimedConsumedCommands)
-        updateTurnAttributionFromCommands(claimedConsumedCommands)
+      const applyAbsorbedMidTurnEffects = (
+        commands: QueuedCommand[],
+      ): AttachmentMessage | undefined => {
+        updateTurnAttributionFromCommands(commands)
         // Official 2.1.325 #2317: emit OTel `user_prompt` event with
         // `delivery.mode: "mid_turn"` and the running turn's `prompt.id`.
         {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const { emitMidTurnUserPromptOTelEvents } =
             require('./utils/processUserInput/processTextPrompt.js') as typeof import('./utils/processUserInput/processTextPrompt.js')
-          emitMidTurnUserPromptOTelEvents(claimedConsumedCommands)
+          emitMidTurnUserPromptOTelEvents(commands)
+        }
+        // Official 2.1.328 `jNe(tt, ..., { armUndo: false })`: flush
+        // deferred historyEntry for absorbed mid-turn commands.
+        for (const cmd of commands) {
+          if (!cmd.historyEntry) continue
+          try {
+            addToHistory(cmd.historyEntry, { armUndo: false })
+          } catch {
+            // history persistence is best-effort
+          }
         }
         // densable 2.1.246 d9n — main-thread mid-turn human prompt resets the
         // idle check-in burst (Js=isMainThread && OY(origin)).
         if (
           isMainThread &&
-          claimedConsumedCommands.some(
+          commands.some(
             cmd =>
               cmd.mode === 'prompt' &&
               !cmd.isMeta &&
@@ -5114,7 +5248,7 @@ async function* queryLoop(
             require('./services/goal/goalIdleCheckin.js') as typeof import('./services/goal/goalIdleCheckin.js')
           clearGoalIdleCheckinCount(toolUseContext.setAppState)
         }
-        // Gold `Wu` (#1287): mid-turn typed `ultrathink` boosts turn effort to xhigh.
+        // Gold `Vc` / `Wu` (#1287): mid-turn typed `ultrathink` boosts turn effort to xhigh.
         {
           /* eslint-disable @typescript-eslint/no-require-imports */
           const { isTypedUltrathinkPrompt } =
@@ -5127,7 +5261,7 @@ async function* queryLoop(
           const model = updatedToolUseContext.options.mainLoopModel
           const appEffort = getEffortValueFromLayers(updatedToolUseContext)
           if (
-            claimedConsumedCommands.some(
+            commands.some(
               cmd =>
                 cmd.mode === 'prompt' &&
                 !cmd.isMeta &&
@@ -5159,39 +5293,115 @@ async function* queryLoop(
             updatedToolUseContext = applyContextLayers(updatedToolUseContext, [
               { kind: 'effort', effort: 'xhigh' },
             ])
-            const reminder = createAttachmentMessage({
+            return createAttachmentMessage({
               type: 'ultrathink_effort',
               level: 'xhigh',
             })
-            yield reminder
-            toolResults.push(reminder)
           }
         }
+        return undefined
       }
 
-      let pollEventsBuildAborted = false
+      const claimedConsumedCommands =
+        queuedAutonomyClaim.claimedCommands.filter(
+          cmd =>
+            cmd.mode === 'prompt' ||
+            cmd.mode === 'task-notification' ||
+            cmd.mode === 'poll-event',
+        )
+      const foldInFlightCommands = queuedAutonomyClaim.attachmentCommands
+      registerFoldInFlight(foldInFlightCommands)
       try {
-        for await (const attachment of getAttachmentMessages(
-          null,
-          updatedToolUseContext,
-          null,
-          queuedAutonomyClaim.attachmentCommands,
-          messagesForQuery.concat(assistantMessages, toolResults),
-          querySource,
-        )) {
-          yield attachment
-          toolResults.push(attachment)
+        if (claimedConsumedCommands.length > 0) {
+          if (
+            updatedToolUseContext.abortController.signal.aborted ||
+            isMidTurnFoldSuspended()
+          ) {
+            logForDebugging(
+              `[query] abort/suspension during mid-turn absorption — leaving ${claimedConsumedCommands.length} command(s) queued`,
+            )
+          } else {
+            consumedAutonomyCommands.push(...claimedConsumedCommands)
+            consumeFromQueue(claimedConsumedCommands)
+            const reminder = applyAbsorbedMidTurnEffects(
+              claimedConsumedCommands,
+            )
+            if (reminder) {
+              yield reminder
+              toolResults.push(reminder)
+            }
+            for (const cmd of claimedConsumedCommands) {
+              if (cmd.uuid) {
+                consumedCommandUuids.push(cmd.uuid)
+                notifyCommandLifecycle(cmd.uuid, 'started')
+              }
+            }
+          }
         }
-      } catch (err) {
-        if (isAbortError(err)) {
-          const { QUERY_TURN_START_POLL_EVENTS_ABORTED } = await import(
-            './cli/printControlExtras.js'
-          )
-          logForDebugging(QUERY_TURN_START_POLL_EVENTS_ABORTED)
-        } else {
-          logError(err)
+
+        let pollEventsBuildAborted = false
+        try {
+          for await (const attachment of getAttachmentMessages(
+            null,
+            updatedToolUseContext,
+            null,
+            queuedAutonomyClaim.attachmentCommands,
+            messagesForQuery.concat(assistantMessages, toolResults),
+            querySource,
+          )) {
+            yield attachment
+            toolResults.push(attachment)
+          }
+        } catch (err) {
+          if (isAbortError(err)) {
+            const { QUERY_TURN_START_POLL_EVENTS_ABORTED } = await import(
+              './cli/printControlExtras.js'
+            )
+            logForDebugging(QUERY_TURN_START_POLL_EVENTS_ABORTED)
+          } else {
+            logError(err)
+          }
+          pollEventsBuildAborted = true
         }
-        pollEventsBuildAborted = true
+
+        // Remove only commands that were actually consumed as attachments.
+        // Official 2.1.328 (`chunk@305854618.js @306200`): check abort or
+        // suspension BEFORE consuming from queue, and run attribution / OTel /
+        // historyEntry flush / idle check-in clear / ultrathink boost across
+        // ALL absorbed mid-turn commands (including normal human prompts).
+        const claimedCommandSet = new Set(claimedConsumedCommands)
+        const consumedCommands = queuedAutonomyClaim.attachmentCommands.filter(
+          cmd =>
+            (cmd.mode === 'prompt' ||
+              cmd.mode === 'task-notification' ||
+              (cmd.mode === 'poll-event' && !pollEventsBuildAborted)) &&
+            !claimedCommandSet.has(cmd),
+        )
+        if (consumedCommands.length > 0) {
+          if (
+            updatedToolUseContext.abortController.signal.aborted ||
+            isMidTurnFoldSuspended()
+          ) {
+            logForDebugging(
+              `[query] abort/suspension during mid-turn absorption — leaving ${consumedCommands.length} command(s) queued`,
+            )
+          } else {
+            consumeFromQueue(consumedCommands)
+            const reminder = applyAbsorbedMidTurnEffects(consumedCommands)
+            if (reminder) {
+              yield reminder
+              toolResults.push(reminder)
+            }
+            for (const cmd of consumedCommands) {
+              if (cmd.uuid) {
+                consumedCommandUuids.push(cmd.uuid)
+                notifyCommandLifecycle(cmd.uuid, 'started')
+              }
+            }
+          }
+        }
+      } finally {
+        unregisterFoldInFlight(foldInFlightCommands)
       }
 
       // Memory prefetch consume: only if settled and not already consumed on
@@ -5244,26 +5454,6 @@ async function* queryLoop(
           yield msg
           toolResults.push(msg)
         }
-      }
-
-      // Remove only commands that were actually consumed as attachments.
-      // Prompt and task-notification commands are converted to attachments above.
-      const claimedCommandSet = new Set(claimedConsumedCommands)
-      const consumedCommands = queuedAutonomyClaim.attachmentCommands.filter(
-        cmd =>
-          (cmd.mode === 'prompt' ||
-            cmd.mode === 'task-notification' ||
-            (cmd.mode === 'poll-event' && !pollEventsBuildAborted)) &&
-          !claimedCommandSet.has(cmd),
-      )
-      if (consumedCommands.length > 0) {
-        for (const cmd of consumedCommands) {
-          if (cmd.uuid) {
-            consumedCommandUuids.push(cmd.uuid)
-            notifyCommandLifecycle(cmd.uuid, 'started')
-          }
-        }
-        consumeFromQueue(consumedCommands)
       }
 
       // Instrumentation: Track file change attachments after they're added
@@ -5341,6 +5531,7 @@ async function* queryLoop(
         stopHookActive,
         stopHookBlockCount: 0,
         thinkingOnlyNudged,
+        emptyCompletionResent: false,
         transition: { reason: 'next_turn' },
       }
       yield* leftoverDrainSpinnerModes()

@@ -16,6 +16,7 @@
  * inventing a QueryEngine-only sham of Ye/Ke.
  */
 
+import { randomUUID } from 'crypto'
 import { logForDebugging } from '../utils/debug.js'
 import {
   notifyCommandLifecycle,
@@ -205,6 +206,44 @@ function extractTerminalReason(value: unknown): string | undefined {
   return undefined
 }
 
+function extractAssistantResultText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  for (let i = content.length - 1; i >= 0; i--) {
+    const block = content[i]
+    if (
+      block !== null &&
+      typeof block === 'object' &&
+      'type' in block &&
+      (block as { type?: unknown }).type === 'text' &&
+      'text' in block &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      return (block as { text: string }).text
+    }
+  }
+  return ''
+}
+
+type SynthesizedResultFrame = {
+  type: 'result'
+  subtype:
+    | 'success'
+    | 'error_during_execution'
+    | 'error_max_turns'
+    | 'error_max_budget_usd'
+  is_error: boolean
+  duration_ms: number
+  uuid: string
+  session_id?: string
+  terminal_reason?: string
+  stop_reason?: string | null
+  result?: string
+  errors?: string[]
+  num_turns?: number
+  deferred_tool_use?: { id: string; name: string; input: unknown }
+}
+
 function defaultLog(
   message: string,
   meta?: { level?: 'warn' | 'error' | 'info' | 'verbose' },
@@ -303,7 +342,7 @@ export function createHostEngine<TPrepared = HostTurnIntent>(
         break
       }
       case 'interrupt': {
-        if (q) {
+        if (q && !q.signal.aborted) {
           if (intent.reason !== undefined) {
             q.abort(
               typeof DOMException !== 'undefined'
@@ -356,6 +395,7 @@ export function createHostEngine<TPrepared = HostTurnIntent>(
     // densable for await (Ze of H)
     for await (const Ze of H) {
       yield* drainLifecycleOutbox()
+      const turnStartedAt = performance.now()
 
       let prepared: TPrepared
       try {
@@ -365,17 +405,31 @@ export function createHostEngine<TPrepared = HostTurnIntent>(
           prepared = Ze as unknown as TPrepared
         }
       } catch (err) {
-        // densable: L.shift(); Ae(uuid,"cancelled"); continue
+        // Official 2.1.328 HGt (chunk@306199530.js @72400-73000):
+        // emit cancelled lifecycle and yield an error_during_execution result
+        // with terminal_reason 'turn_setup_failed' BEFORE continuing so
+        // runHostEngineTurn never deadlocks feed.readLock.
         L.shift()
-        yield* drainLifecycleOutbox()
         if (Ze.uuid !== undefined) {
           emitLifecycle(Ze.uuid, 'cancelled')
         }
-        log(
-          `[engine] turn setup failed: ${err instanceof Error ? err.message : String(err)}`,
-          { level: 'error' },
-        )
+        const errMsg = err instanceof Error ? err.message : String(err)
+        log(`[engine] turn setup failed: ${errMsg}`, { level: 'error' })
         yield* drainLifecycleOutbox()
+        const setupErrorResult: SynthesizedResultFrame = {
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          terminal_reason: 'turn_setup_failed',
+          errors: [`queryParams builder failed: ${errMsg}`],
+          duration_ms: Math.max(
+            0,
+            Math.round(performance.now() - turnStartedAt),
+          ),
+          uuid: randomUUID(),
+          ...(sessionId ? { session_id: sessionId } : {}),
+        }
+        yield setupErrorResult
         continue
       }
 
@@ -406,13 +460,92 @@ export function createHostEngine<TPrepared = HostTurnIntent>(
       let Er: string | null = null
       let qr: string | undefined
       let Ur = false
+      let sawResult = false
+      let lastAssistantIsApiError = false
+      let lastStopReason: string | null = null
+      let lastResultText = ''
+      let maxTurnsAttachment:
+        | { turnCount: number; maxTurns: number }
+        | undefined
+      let deferredToolUse:
+        | { id: string; name: string; input: unknown }
+        | undefined
       const wr = options.runTurn(preparedWithSticky, yt, Ze)
       try {
         try {
           let step = await wr.next()
           while (!step.done) {
             yield* drainLifecycleOutbox()
-            yield step.value
+            const frame = step.value
+            if (frame !== null && typeof frame === 'object') {
+              const rec = frame as Record<string, unknown>
+              const frameType = rec.type
+              if (frameType === 'result') {
+                sawResult = true
+              } else if (
+                frameType === 'user' &&
+                !('parent_tool_use_id' in rec && rec.parent_tool_use_id)
+              ) {
+                lastAssistantIsApiError = false
+                lastResultText = ''
+              } else if (
+                frameType === 'assistant' &&
+                !('parent_tool_use_id' in rec && rec.parent_tool_use_id)
+              ) {
+                const msgObj =
+                  rec.message !== null && typeof rec.message === 'object'
+                    ? (rec.message as {
+                        stop_reason?: unknown
+                        content?: unknown
+                      })
+                    : undefined
+                if (typeof msgObj?.stop_reason === 'string') {
+                  lastStopReason = msgObj.stop_reason
+                }
+                lastAssistantIsApiError = rec.isApiErrorMessage === true
+                lastResultText = extractAssistantResultText(msgObj?.content)
+              } else if (frameType === 'stream_event') {
+                const ev =
+                  rec.event !== null && typeof rec.event === 'object'
+                    ? (rec.event as {
+                        type?: unknown
+                        delta?: { stop_reason?: unknown }
+                      })
+                    : undefined
+                if (
+                  ev?.type === 'message_delta' &&
+                  typeof ev.delta?.stop_reason === 'string'
+                ) {
+                  lastStopReason = ev.delta.stop_reason
+                }
+              } else if (frameType === 'attachment') {
+                const att =
+                  rec.attachment !== null && typeof rec.attachment === 'object'
+                    ? (rec.attachment as Record<string, unknown>)
+                    : undefined
+                if (
+                  att?.type === 'max_turns_reached' &&
+                  typeof att.turnCount === 'number' &&
+                  typeof att.maxTurns === 'number'
+                ) {
+                  maxTurnsAttachment = {
+                    turnCount: att.turnCount,
+                    maxTurns: att.maxTurns,
+                  }
+                } else if (
+                  att?.type === 'hook_deferred_tool' &&
+                  typeof att.toolUseID === 'string' &&
+                  typeof att.toolName === 'string'
+                ) {
+                  deferredToolUse = {
+                    id: att.toolUseID,
+                    name: att.toolName,
+                    input: att.toolInput,
+                  }
+                }
+              }
+            }
+            yield frame
             step = await wr.next()
           }
           // densable: qr=Wr.value?Wr.value.reason:void 0
@@ -440,6 +573,68 @@ export function createHostEngine<TPrepared = HostTurnIntent>(
         q = null
         log(`[engine] turn ${P} end`)
         yield* drainLifecycleOutbox()
+      }
+
+      // Official 2.1.328 HGt (chunk@306199530.js @83300-84900):
+      // Synthesize the terminal result envelope AFTER runTurn exits and its
+      // finally cleanup completes (so hostEngine is idle while waiting for the
+      // next turn). Non-error terminals (stop_hook_prevented, hook_stopped,
+      // background_requested, tool_deferred, user aborts) stay is_error: false.
+      if (!sawResult) {
+        const duration_ms = Math.max(
+          0,
+          Math.round(performance.now() - turnStartedAt),
+        )
+        const base = {
+          type: 'result' as const,
+          duration_ms,
+          uuid: randomUUID(),
+          ...(sessionId ? { session_id: sessionId } : {}),
+          ...(qr !== undefined ? { terminal_reason: qr } : {}),
+        }
+        let resultEnvelope: SynthesizedResultFrame
+        if (qr === 'budget_exhausted') {
+          resultEnvelope = {
+            ...base,
+            subtype: 'error_max_budget_usd',
+            is_error: true,
+            errors: ['Exceeded budget'],
+          }
+        } else if (
+          Er === null &&
+          deferredToolUse === undefined &&
+          maxTurnsAttachment !== undefined
+        ) {
+          resultEnvelope = {
+            ...base,
+            subtype: 'error_max_turns',
+            is_error: true,
+            num_turns: maxTurnsAttachment.turnCount,
+            errors: [
+              `Reached maximum number of turns (${maxTurnsAttachment.maxTurns})`,
+            ],
+          }
+        } else if (Er !== null) {
+          resultEnvelope = {
+            ...base,
+            subtype: 'error_during_execution',
+            is_error: true,
+            errors: [Er],
+          }
+        } else {
+          resultEnvelope = {
+            ...base,
+            subtype: 'success',
+            is_error: lastAssistantIsApiError || isErrorClassTerminalReason(qr),
+            stop_reason:
+              deferredToolUse !== undefined ? 'tool_deferred' : lastStopReason,
+            result: lastResultText,
+            ...(deferredToolUse !== undefined
+              ? { deferred_tool_use: deferredToolUse }
+              : {}),
+          }
+        }
+        yield resultEnvelope
       }
     }
     yield* drainLifecycleOutbox()

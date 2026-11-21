@@ -94,22 +94,42 @@ export function processQueueIfReady({
     return { processed: true }
   }
 
-  // Drain all non-slash-command items with the same mode at once.
-  // Official Cuy: skip passive wake/receipt rows (they are not a user turn).
-  // densable btt Pe: stop at screeningPending / later drainOnly — do not
-  // dequeue them or anything after.
+  // Official 2.1.328 t0t / cz (chunk@319736883.js @1829080-1830100):
+  // Drain all non-slash-command items matching mode, priority tier, and
+  // transcript-only (shouldQuery === false) polarity. Filtering to targetPriority
+  // before checking screeningPending / drainOnly ensures 'now' items are never
+  // blocked behind a screeningPending 'next' item, and breaking on a second item
+  // carrying ideSelection.text prevents dropping its selection.
   const targetMode = next.mode
+  const targetPriority = next.priority ?? 'next'
+  const targetTranscriptOnly = next.shouldQuery === false
   let stop = false
+  let batchCount = 0
   const commands = dequeueAllMatching(cmd => {
     if (stop) return false
-    if (!isMainThread(cmd) || isSlashCommand(cmd) || cmd.passive === true) {
+    if (!isMainThread(cmd) || cmd.passive === true) {
+      return false
+    }
+    if ((cmd.priority ?? 'next') !== targetPriority) {
       return false
     }
     if (cmd.screeningPending === true || cmd.drainOnly === true) {
       stop = true
       return false
     }
-    return cmd.mode === targetMode
+    if (
+      isSlashCommand(cmd) ||
+      cmd.mode !== targetMode ||
+      (cmd.shouldQuery === false) !== targetTranscriptOnly
+    ) {
+      return false
+    }
+    if (batchCount > 0 && cmd.ideSelection?.text) {
+      stop = true
+      return false
+    }
+    batchCount++
+    return true
   })
   if (commands.length === 0) {
     return { processed: false }

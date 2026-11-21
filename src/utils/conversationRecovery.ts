@@ -18,7 +18,7 @@ import type {
   NormalizedMessage,
   NormalizedUserMessage,
 } from '../types/message.js'
-import { PERMISSION_MODES } from '../types/permissions.js'
+import { PERMISSION_MODES, type PermissionMode } from '../types/permissions.js'
 import {
   type HookDeferredToolAttachment,
   suppressNextSkillDiscovery,
@@ -227,9 +227,25 @@ export type TeleportRemoteResponse = {
   branch?: string
 }
 
+export type ApiErrorYieldKind =
+  | 'no_request_token'
+  | 'rate_limit'
+  | 'model_not_found'
+  | 'server_error'
+  | 'other'
+
 export type TurnInterruptionState =
   | { kind: 'none' }
-  | { kind: 'interrupted_prompt'; message: NormalizedUserMessage }
+  | {
+      kind: 'interrupted_prompt'
+      message: NormalizedUserMessage
+      /** Official 2.1.328 #1645: set when the turn ended on an API error with no open tool calls. */
+      endedOnApiError?: ApiErrorYieldKind
+      /** Official 2.1.328 #1645/#1646: set when the turn ended on an API error past open tool calls. */
+      endedOnApiErrorPastCalls?: ApiErrorYieldKind
+      /** Official 2.1.328 #1645: set when a restored card sits behind a model refusal. */
+      behindRefusal?: boolean
+    }
 
 export type DeserializeResult = {
   messages: Message[]
@@ -394,6 +410,361 @@ function invokeRerunWouldLeaveMode(
 const RESUME_INTERRUPTED_TURN_FLAG = 'tengu_steady_scroll'
 const RESUME_INTERRUPTED_TURN_FLAG_MIN_MS = 5_400_000
 const RESUME_INTERRUPTED_TURN_FLAG_MAX_MS = 2_592_000_000
+
+export const API_ERROR_RESUME_DEFAULT_MAX_AGE_MS = 21_600_000
+const API_ERROR_RESUME_FLAG = 'tengu_shimmering_cherny'
+const API_ERROR_RESUME_FLAG_MIN_MS = 60_000
+const API_ERROR_RESUME_FLAG_MAX_MS = 2_592_000_000
+const RESUME_REFUSED_FOR_LATER_COMMAND_FLAG = 'tengu_wise_brook'
+const CCS_NO_REQUEST_TOKEN_CODE = 'ccs_no_request_token'
+
+export type ApiErrorRowLike = {
+  type?: unknown
+  uuid?: unknown
+  timestamp?: unknown
+  isApiErrorMessage?: unknown
+  apiError?: unknown
+  apiErrorCode?: unknown
+  apiErrorStatus?: unknown
+  error?: unknown
+  failedResponseHadNoToolCall?: unknown
+  retractedMessageUuids?: unknown
+  message?: {
+    id?: unknown
+    stop_reason?: unknown
+    content?: unknown
+  }
+}
+
+/** Official `whs` (`chunk@294254613.js @2429507`): terminal API errors that end the turn. */
+export function isTerminalApiErrorMessage(msg: ApiErrorRowLike): boolean {
+  return (
+    msg.message?.stop_reason === 'refusal' ||
+    msg.apiError === 'dlp_request_denied' ||
+    msg.apiError === 'safety_monitor_blocked' ||
+    msg.apiError === 'unattended_start_limit' ||
+    (msg.isApiErrorMessage === true && Array.isArray(msg.retractedMessageUuids))
+  )
+}
+
+/** Official `qGr` (`chunk@294254613.js @2429685`): non-terminal API errors stepped over by resume. */
+export function isSteppableApiErrorMessage(msg: ApiErrorRowLike): boolean {
+  return msg.isApiErrorMessage === true && !isTerminalApiErrorMessage(msg)
+}
+
+/** Official `$qt` (`chunk@294254613.js @2429740`): ignored API errors not counted as skippedApiErrorRow. */
+export function isIgnoredApiErrorForResume(msg: ApiErrorRowLike): boolean {
+  return (
+    msg.isApiErrorMessage === true &&
+    (msg.apiError === 'unattended_start_unconfirmed' ||
+      msg.apiError === 'message_over_context_limit')
+  )
+}
+
+/**
+ * Official 2.1.328 `Gqn` (`chunk@294254613.js @2392826`): classify a skipped
+ * API error assistant row into a yield kind for `#1645` / `#1646`.
+ */
+export function classifyApiErrorYieldKind(
+  row: ApiErrorRowLike | undefined,
+): ApiErrorYieldKind | undefined {
+  if (!row) return undefined
+  if (row.apiErrorCode === CCS_NO_REQUEST_TOKEN_CODE) return 'no_request_token'
+  if (row.error === 'rate_limit' || row.error === 'model_not_found') {
+    return row.error
+  }
+  if (typeof row.apiErrorStatus === 'number' && row.apiErrorStatus >= 500) {
+    return 'server_error'
+  }
+  if (row.failedResponseHadNoToolCall) return 'other'
+  return undefined
+}
+
+/** Official `rKn` (`chunk@294254613.js @2430105`): analytics bucket for skipped API error row. */
+function classifySkippedApiErrorBucket(
+  row: ApiErrorRowLike,
+): 'overloaded' | 'rate_limit' | 'server_error' | 'other' {
+  switch (row.error) {
+    case 'overloaded':
+    case 'rate_limit':
+    case 'server_error':
+      return row.error
+    default:
+      return 'other'
+  }
+}
+
+/** Official `fee` (`chunk@294254613.js @2388125`): max age for API-error resume recovery. */
+export function getApiErrorResumeMaxAge(env: NodeJS.ProcessEnv = process.env): {
+  maxAgeMs: number
+  source: 'env' | 'flag' | 'default'
+} {
+  const raw = env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS
+  if (raw) {
+    const parsed = Number(raw)
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return { maxAgeMs: parsed, source: 'env' }
+    }
+  }
+  const flagVal = getFeatureValue_CACHED_MAY_BE_STALE<number | null>(
+    API_ERROR_RESUME_FLAG,
+    null,
+  )
+  if (
+    typeof flagVal === 'number' &&
+    Number.isFinite(flagVal) &&
+    flagVal >= API_ERROR_RESUME_FLAG_MIN_MS &&
+    flagVal <= API_ERROR_RESUME_FLAG_MAX_MS
+  ) {
+    return { maxAgeMs: flagVal, source: 'flag' }
+  }
+  return { maxAgeMs: API_ERROR_RESUME_DEFAULT_MAX_AGE_MS, source: 'default' }
+}
+
+/** Official `t4` (`chunk@294254613.js @2388290`): true if timestamp is missing or >= maxAgeMs old. */
+export function isRowPastMaxAge(
+  row: { timestamp?: unknown },
+  maxAgeMs: number,
+  nowMs: number = Date.now(),
+): boolean {
+  const ts = Date.parse(typeof row.timestamp === 'string' ? row.timestamp : '')
+  return !Number.isFinite(ts) || Math.abs(nowMs - ts) >= maxAgeMs
+}
+
+/** Official `jgs` (`chunk@294254613.js @2388390`): pick the newer of two skipped API error rows. */
+export function pickNewerSkippedApiErrorRow<T extends { timestamp?: unknown }>(
+  a: T | undefined,
+  b: T | undefined,
+): T | undefined {
+  if (a === undefined || b === undefined) return a ?? b
+  const tsA = Date.parse(typeof a.timestamp === 'string' ? a.timestamp : '')
+  const tsB = Date.parse(typeof b.timestamp === 'string' ? b.timestamp : '')
+  if (!Number.isFinite(tsA)) return a
+  if (!Number.isFinite(tsB)) return b
+  return tsB > tsA ? b : a
+}
+
+function extractMatchingToolUseIds(
+  msg: Message,
+  unresolvedIds: ReadonlySet<string>,
+): string[] {
+  if (msg.type !== 'assistant' || !Array.isArray(msg.message?.content)) {
+    return []
+  }
+  const ids: string[] = []
+  for (const block of msg.message.content) {
+    if (block.type === 'tool_use' && unresolvedIds.has(block.id)) {
+      ids.push(block.id)
+    }
+  }
+  return ids
+}
+
+/**
+ * Official 2.1.328 `gje` (`chunk@294254613.js @2408400`): collect the trailing
+ * assistant response's unresolved `tool_use` IDs, resetting across
+ * `model_refusal_fallback` or API error rows when `allowApiErrorBoundary` is set.
+ */
+export function collectTrailingUnresolvedToolUseIds(
+  messages: readonly Message[],
+  unresolvedIds: ReadonlySet<string>,
+  allowApiErrorBoundary: boolean,
+): Set<string> {
+  const seenResponseIds = new Set<string>()
+  const endedMarker = Symbol('ended')
+  let activeResponseId: string | symbol = endedMarker
+  let trailingIds = new Set<string>()
+  let pendingUserBoundary:
+    | { toolResult: boolean; classified: boolean }
+    | undefined = { toolResult: false, classified: false }
+
+  const isToolResultUser = (m: Message): boolean =>
+    m.type === 'user' &&
+    Array.isArray(m.message?.content) &&
+    m.message.content.some(b => b.type === 'tool_result')
+
+  const isSidechain = (m: Message): boolean =>
+    'isSidechain' in m && (m as { isSidechain?: unknown }).isSidechain === true
+
+  for (const msg of messages) {
+    const isApiErr =
+      msg.type === 'assistant' &&
+      (msg as ApiErrorRowLike).isApiErrorMessage === true
+    const skipAssistant =
+      isSidechain(msg) || (!allowApiErrorBoundary && isApiErr)
+    if (msg.type === 'assistant' && !skipAssistant) {
+      if (allowApiErrorBoundary && isApiErr) {
+        activeResponseId = endedMarker
+        trailingIds = new Set<string>()
+        continue
+      }
+      if (pendingUserBoundary && !pendingUserBoundary.classified) {
+        if (!pendingUserBoundary.toolResult) {
+          seenResponseIds.clear()
+        }
+        pendingUserBoundary.classified = true
+      }
+      const responseId = msg.message?.id ?? msg.uuid
+      if (seenResponseIds.has(responseId)) {
+        if (responseId === activeResponseId) {
+          for (const id of extractMatchingToolUseIds(msg, unresolvedIds)) {
+            trailingIds.add(id)
+          }
+        }
+        continue
+      }
+      seenResponseIds.add(responseId)
+      activeResponseId = responseId
+      trailingIds = new Set(extractMatchingToolUseIds(msg, unresolvedIds))
+      pendingUserBoundary = undefined
+      continue
+    }
+    if (
+      (msg.type === 'user' && !isSidechain(msg)) ||
+      (msg.type === 'system' && msg.subtype === 'compact_boundary')
+    ) {
+      pendingUserBoundary ??= { toolResult: false, classified: false }
+      if (isToolResultUser(msg)) {
+        pendingUserBoundary.toolResult = true
+      }
+      continue
+    }
+    if (
+      allowApiErrorBoundary &&
+      msg.type === 'system' &&
+      msg.subtype === 'model_refusal_fallback'
+    ) {
+      activeResponseId = endedMarker
+      trailingIds = new Set<string>()
+    }
+  }
+  return trailingIds
+}
+
+/**
+ * Official 2.1.328 `hje` (`chunk@294254613.js @2409000`): synthesize
+ * `[Tool call interrupted: ...]` error `tool_result` messages (with
+ * `toolDenialKind: 'interrupted'` and optional `toolDenialEndsTurn`) for
+ * cut-off `tool_use` blocks.
+ */
+export function synthesizeCutOffToolResults(
+  messages: Message[],
+  preserveIds: Set<string> | undefined,
+  cutOffIds: ReadonlySet<string>,
+  synthIds: ReadonlySet<string>,
+  toolResultText: string = SESSION_ENDED_TOOL_RESULT_MESSAGE,
+  endsTurn = false,
+): Message[] {
+  const combinedPreserve = new Set<string>([
+    ...(preserveIds ?? []),
+    ...cutOffIds,
+  ])
+  const filtered = filterUnresolvedToolUses(
+    messages,
+    combinedPreserve,
+  ) as Message[]
+  const out = filtered.slice()
+  const synthRows: Message[] = []
+  for (const msg of out) {
+    if (msg.type !== 'assistant' || !Array.isArray(msg.message?.content)) {
+      continue
+    }
+    for (const block of msg.message.content) {
+      if (block.type !== 'tool_use' || !synthIds.has(block.id)) continue
+      const row = createUserMessage({
+        content: [
+          {
+            type: 'tool_result',
+            content: toolResultText,
+            is_error: true,
+            tool_use_id: block.id,
+          },
+        ],
+        toolUseResult: toolResultText,
+        sourceToolAssistantUUID: msg.uuid,
+      }) as Message & {
+        toolDenialKind?: string
+        toolDenialEndsTurn?: boolean
+      }
+      row.toolDenialKind = 'interrupted'
+      if (endsTurn) row.toolDenialEndsTurn = true
+      synthRows.push(row)
+    }
+  }
+  out.push(...synthRows)
+  return out
+}
+
+/**
+ * Official 2.1.328 `Lu` (`chunk@294254613.js @2403800`): refuse auto-resuming
+ * an API-errored prompt when a later system/slash command (`submitUuid`) sits
+ * at the end of the transcript (gated by `tengu_wise_brook`).
+ */
+export function shouldRefuseResumeForLaterCommand(opts: {
+  messages: readonly Message[]
+  endedOnApiError: ApiErrorYieldKind | undefined
+  resumeInterruptedTurn: boolean
+  hasPreservedOrRestoredCalls: boolean
+  flagEnabled?: boolean
+}): boolean {
+  if (
+    !opts.resumeInterruptedTurn ||
+    opts.endedOnApiError === undefined ||
+    opts.hasPreservedOrRestoredCalls
+  ) {
+    return false
+  }
+  const flagOn =
+    opts.flagEnabled ??
+    getFeatureValue_CACHED_MAY_BE_STALE(
+      RESUME_REFUSED_FOR_LATER_COMMAND_FLAG,
+      false,
+    ) === true
+  if (!flagOn) return false
+  const lastRelevant = opts.messages.findLast(m => {
+    if (m.type === 'user') return true
+    if (m.type === 'assistant') {
+      return !isSteppableApiErrorMessage(m as ApiErrorRowLike)
+    }
+    if (m.type === 'system') {
+      return typeof (m as { submitUuid?: unknown }).submitUuid === 'string'
+    }
+    return false
+  })
+  if (lastRelevant?.type === 'system') {
+    logEvent('resume_refused_for_later_command', {})
+    return true
+  }
+  return false
+}
+
+function findUnresolvedToolUseIds(
+  messages: readonly Message[],
+  preserveIds?: ReadonlySet<string>,
+): Set<string> {
+  const resolved = new Set<string>(preserveIds)
+  for (const msg of messages) {
+    if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
+      for (const block of msg.message.content) {
+        if (block.type === 'tool_result') {
+          resolved.add(block.tool_use_id)
+        }
+      }
+    }
+  }
+  const unresolved = new Set<string>()
+  for (const msg of messages) {
+    if (msg.type !== 'assistant' || !Array.isArray(msg.message?.content)) {
+      continue
+    }
+    for (const block of msg.message.content) {
+      if (block.type === 'tool_use' && !resolved.has(block.id)) {
+        unresolved.add(block.id)
+      }
+    }
+  }
+  return unresolved
+}
 
 /**
  * Official `zFt` (#1599) — synthetic assistant error emitted when an unattended
@@ -654,6 +1025,23 @@ export function deserializeMessagesWithInterruptDetection(
           SESSION_ENDED_TOOL_RESULT_MESSAGE,
         )
       : migratedMessages
+    // Official 2.1.328 #1645/#1646 (`gje` / `hje` / `_je` in
+    // `chunk@294254613.js @2403000-2410000`): capture trailing unresolved
+    // tool_use IDs BEFORE filtering so we distinguish `endedOnApiError` (no open
+    // calls) from `endedOnApiErrorPastCalls` (API error past open calls).
+    const preFilterUnresolvedIds = findUnresolvedToolUseIds(
+      afterShutdownRewrite,
+      preserveUnresolvedToolUseIds,
+    )
+    const trailingUnresolvedIds =
+      preFilterUnresolvedIds.size > 0
+        ? collectTrailingUnresolvedToolUseIds(
+            afterShutdownRewrite,
+            preFilterUnresolvedIds,
+            true,
+          )
+        : new Set<string>()
+
     const showsCutOffCalls =
       foamySpring &&
       !replyOnResume &&
@@ -663,10 +1051,19 @@ export function deserializeMessagesWithInterruptDetection(
         false,
       )
     const withCutOffToolResults = showsCutOffCalls
-      ? synthesizeInterruptedToolResultsForCutOffCalls(
-          afterShutdownRewrite,
-          preserveUnresolvedToolUseIds,
-        )
+      ? trailingUnresolvedIds.size > 0
+        ? synthesizeCutOffToolResults(
+            afterShutdownRewrite,
+            preserveUnresolvedToolUseIds,
+            trailingUnresolvedIds,
+            trailingUnresolvedIds,
+            SESSION_ENDED_TOOL_RESULT_MESSAGE,
+            false,
+          )
+        : synthesizeInterruptedToolResultsForCutOffCalls(
+            afterShutdownRewrite,
+            preserveUnresolvedToolUseIds,
+          )
       : afterShutdownRewrite
 
     // Filter out unresolved tool uses and any synthetic messages that follow them
@@ -696,12 +1093,70 @@ export function deserializeMessagesWithInterruptDetection(
     // densable Szu: age-out → force none (+ tengu_resume_stale_turn_suppressed).
     // #1736: rerunWouldLeaveMode → force none and mark rerunHeldForPlan so a
     // turn interrupted in plan mode is not re-run under a different mode.
+    // #1645/#1646: track skippedApiErrorRow (`_je`), `endedOnApiError`,
+    // `endedOnApiErrorPastCalls`, `behindRefusal`, and
+    // `resume_refused_for_later_command`.
     let turnInterruptionState: TurnInterruptionState
     let rerunHeldForPlan = false
     if (replyOnResume || (preserveUnresolvedToolUseIds?.size ?? 0) > 0) {
       turnInterruptionState = { kind: 'none' }
     } else {
-      const internalState = detectTurnInterruption(filteredMessages)
+      const classified = classifyTurnTailWithApiErrors(
+        filteredMessages,
+        preFilterUnresolvedIds.size > 0,
+      )
+      const internalState = classified.state
+      const rawClassified = classifyTurnTailWithApiErrors(
+        afterShutdownRewrite as NormalizedMessage[],
+        preFilterUnresolvedIds.size > 0,
+      )
+      const skippedApiErrorRow = pickNewerSkippedApiErrorRow(
+        classified.skippedApiErrorRow,
+        rawClassified.skippedApiErrorRow,
+      )
+      const resumeInterruptedTurn = Boolean(
+        process.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN,
+      )
+      const apiErrorAgeLimit = getApiErrorResumeMaxAge()
+      const apiErrorTooOld =
+        internalState.kind !== 'none' &&
+        skippedApiErrorRow !== undefined &&
+        skippedApiErrorRow.timestamp !== undefined &&
+        isRowPastMaxAge(skippedApiErrorRow, apiErrorAgeLimit.maxAgeMs)
+      const endedOnApiError =
+        preFilterUnresolvedIds.size === 0
+          ? classifyApiErrorYieldKind(skippedApiErrorRow)
+          : undefined
+      const skippedIdx =
+        skippedApiErrorRow?.uuid !== undefined
+          ? afterShutdownRewrite.findIndex(
+              m => m.uuid === skippedApiErrorRow.uuid,
+            )
+          : -1
+      const hasLaterTrailingCallAfterError =
+        skippedIdx !== -1 &&
+        afterShutdownRewrite
+          .slice(skippedIdx + 1)
+          .some(
+            m =>
+              extractMatchingToolUseIds(m, preFilterUnresolvedIds).length > 0,
+          )
+      const endedOnApiErrorPastCalls =
+        preFilterUnresolvedIds.size > 0 &&
+        skippedApiErrorRow?.failedResponseHadNoToolCall &&
+        !hasLaterTrailingCallAfterError
+          ? classifyApiErrorYieldKind(skippedApiErrorRow)
+          : undefined
+      const refusedForLaterCommand =
+        internalState.kind !== 'none' &&
+        !apiErrorTooOld &&
+        shouldRefuseResumeForLaterCommand({
+          messages: filteredMessages,
+          endedOnApiError,
+          resumeInterruptedTurn,
+          hasPreservedOrRestoredCalls:
+            (preserveUnresolvedToolUseIds?.size ?? 0) > 0,
+        })
 
       if (
         internalState.kind !== 'none' &&
@@ -714,11 +1169,37 @@ export function deserializeMessagesWithInterruptDetection(
         internalState.kind !== 'none' &&
         isResumeInterruptedTurnStale(filteredMessages)
       ) {
-        if (process.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN) {
+        if (resumeInterruptedTurn) {
           logEvent('tengu_resume_stale_turn_suppressed', {
             kind: internalState.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           })
         }
+        turnInterruptionState = { kind: 'none' }
+      } else if (apiErrorTooOld) {
+        if (resumeInterruptedTurn && skippedApiErrorRow !== undefined) {
+          const ageMs =
+            Date.now() -
+            Date.parse(
+              typeof skippedApiErrorRow.timestamp === 'string'
+                ? skippedApiErrorRow.timestamp
+                : '',
+            )
+          logEvent('tengu_resume_stale_turn_suppressed', {
+            kind: internalState.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            tail: 'api_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            error_kind: classifySkippedApiErrorBucket(
+              skippedApiErrorRow,
+            ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...(Number.isFinite(ageMs)
+              ? { age_min: Math.floor(ageMs / 60_000) }
+              : {}),
+            bound_source:
+              apiErrorAgeLimit.source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            bound_min: Math.floor(apiErrorAgeLimit.maxAgeMs / 60_000),
+          })
+        }
+        turnInterruptionState = { kind: 'none' }
+      } else if (refusedForLaterCommand) {
         turnInterruptionState = { kind: 'none' }
       } else if (internalState.kind === 'interrupted_turn') {
         // Transform mid-turn interruptions into interrupted_prompt by appending
@@ -734,6 +1215,19 @@ export function deserializeMessagesWithInterruptDetection(
         turnInterruptionState = {
           kind: 'interrupted_prompt',
           message: continuationMessage!,
+          ...(endedOnApiError !== undefined ? { endedOnApiError } : {}),
+          ...(endedOnApiErrorPastCalls !== undefined
+            ? { endedOnApiErrorPastCalls }
+            : {}),
+          ...(internalState.behindRefusal ? { behindRefusal: true } : {}),
+        }
+      } else if (internalState.kind === 'interrupted_prompt') {
+        turnInterruptionState = {
+          ...internalState,
+          ...(endedOnApiError !== undefined ? { endedOnApiError } : {}),
+          ...(endedOnApiErrorPastCalls !== undefined
+            ? { endedOnApiErrorPastCalls }
+            : {}),
         }
       } else {
         turnInterruptionState = internalState
@@ -781,18 +1275,13 @@ export function deserializeMessagesWithInterruptDetection(
  */
 type InternalInterruptionState =
   | TurnInterruptionState
-  | { kind: 'interrupted_turn' }
+  | { kind: 'interrupted_turn'; behindRefusal?: boolean }
 
-/**
- * Determines whether the conversation was interrupted mid-turn based on the
- * last message after filtering. An assistant as last message (after filtering
- * unresolved tool_uses) is treated as a completed turn because stop_reason is
- * always null on persisted messages in the streaming path.
- *
- * System and progress messages are skipped when finding the last turn-relevant
- * message — they are bookkeeping artifacts that should not mask a genuine
- * interruption. Attachments are kept as part of the turn.
- */
+export type ClassifiedTurnTail = {
+  state: InternalInterruptionState
+  skippedApiErrorRow?: ApiErrorRowLike
+}
+
 function findMessageBeforeContextRows(
   messages: NormalizedMessage[],
   lastIdx: number,
@@ -831,6 +1320,76 @@ function findMessageBeforeContextRows(
   return -1
 }
 
+/**
+ * Official 2.1.328 `_je` (`chunk@294254613.js @2409791`): classify the tail of
+ * a resumed transcript while tracking any stepped-over non-terminal API error
+ * assistant row (`skippedApiErrorRow`) and handling `behindRefusal` (`Kqn`).
+ */
+export function classifyTurnTailWithApiErrors(
+  messages: NormalizedMessage[],
+  hasTrailingUnresolvedCalls = false,
+  allowBehindRefusal = false,
+): ClassifiedTurnTail {
+  if (messages.length === 0) {
+    return { state: { kind: 'none' } }
+  }
+
+  const skippedApiErrors: ApiErrorRowLike[] = []
+  let lastMessageIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (m.type === 'system' || m.type === 'progress') continue
+    if (
+      m.type === 'assistant' &&
+      isSteppableApiErrorMessage(m as ApiErrorRowLike)
+    ) {
+      if (!isIgnoredApiErrorForResume(m as ApiErrorRowLike)) {
+        skippedApiErrors.push(m as ApiErrorRowLike)
+      }
+      continue
+    }
+    lastMessageIdx = i
+    break
+  }
+
+  const skippedApiErrorRow = skippedApiErrors[0]
+  const lastMessage =
+    lastMessageIdx !== -1 ? messages[lastMessageIdx] : undefined
+  if (!lastMessage) {
+    return { state: { kind: 'none' }, skippedApiErrorRow }
+  }
+
+  if (lastMessage.type === 'assistant') {
+    const rec = lastMessage as ApiErrorRowLike
+    if (rec.isApiErrorMessage === true) {
+      // Official `Kqn` (`chunk@294254613.js @2415342`): terminal API errors
+      // (refusal, dlp_request_denied, safety_monitor_blocked, etc.) end the turn
+      // unless a restored permission card sits behind a refusal.
+      if (allowBehindRefusal && rec.message?.stop_reason === 'refusal') {
+        return {
+          state: { kind: 'interrupted_turn', behindRefusal: true },
+          skippedApiErrorRow,
+        }
+      }
+      if (isTerminalApiErrorMessage(rec)) {
+        logEvent('tengu_refusal_turn_classified_complete', {
+          verdict: (rec.apiError === 'dlp_request_denied'
+            ? 'dlp_denied'
+            : typeof rec.apiError === 'string'
+              ? rec.apiError
+              : 'refusal') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+      }
+      return { state: { kind: 'none' }, skippedApiErrorRow }
+    }
+    void hasTrailingUnresolvedCalls
+    return { state: { kind: 'none' }, skippedApiErrorRow }
+  }
+
+  const state = detectTurnInterruption(messages.slice(0, lastMessageIdx + 1))
+  return { state, skippedApiErrorRow }
+}
+
 export function detectTurnInterruption(
   messages: NormalizedMessage[],
 ): InternalInterruptionState {
@@ -839,15 +1398,17 @@ export function detectTurnInterruption(
   }
 
   // Find the last turn-relevant message, skipping system/progress and
-  // synthetic API error assistants. Error assistants are already filtered
-  // before API send (normalizeMessagesForAPI) — skipping them here lets
-  // auto-resume fire after retry exhaustion instead of reading the error as
-  // a completed turn.
+  // steppable (non-terminal) synthetic API error assistants. Terminal API
+  // errors (refusal, dlp_request_denied, safety_monitor_blocked, etc.) are
+  // NOT stepped over so they classify as complete instead of auto-retrying.
   const lastMessageIdx = messages.findLastIndex(
     m =>
       m.type !== 'system' &&
       m.type !== 'progress' &&
-      !(m.type === 'assistant' && m.isApiErrorMessage),
+      !(
+        m.type === 'assistant' &&
+        isSteppableApiErrorMessage(m as ApiErrorRowLike)
+      ),
   )
   const lastMessage =
     lastMessageIdx !== -1 ? messages[lastMessageIdx] : undefined
@@ -1129,6 +1690,10 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
   aiTitle?: string
   /** densable currentSessionDevModsFolder last-wins. */
   devModsFolder?: string
+  /** Persisted permissionMode (`permission-mode` JSONL entry). */
+  permissionMode?: PermissionMode
+  /** Persisted user-selected model (`session-model` JSONL entry). */
+  sessionModel?: string
 }> {
   const {
     messages: byUuid,
@@ -1137,6 +1702,8 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
     bridgeSessionIds,
     aiTitles,
     devModsFolders,
+    permissionModes,
+    sessionModels,
   } = await loadTranscriptFile(path)
   let tip: (typeof byUuid extends Map<UUID, infer T> ? T : never) | null = null
   let tipTs = 0
@@ -1161,6 +1728,8 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
     bridgeSessionId: sessionId ? bridgeSessionIds.get(sessionId) : undefined,
     aiTitle: sessionId ? aiTitles.get(sessionId) : undefined,
     devModsFolder: sessionId ? devModsFolders.get(sessionId) : undefined,
+    permissionMode: sessionId ? permissionModes?.get(sessionId) : undefined,
+    sessionModel: sessionId ? sessionModels?.get(sessionId) : undefined,
   }
 }
 
@@ -1345,6 +1914,10 @@ export async function loadConversationForResume(
   deferredToolUse?: HookDeferredToolAttachment
   /** densable currentSessionDevModsFolder — last-wins `type:"dev-mods"`. */
   devModsFolder?: string
+  /** Persisted permissionMode (`permission-mode` JSONL entry). */
+  permissionMode?: PermissionMode
+  /** Persisted user-selected model (`session-model` JSONL entry). */
+  sessionModel?: string
   /** #520: SessionStart hooks still running after CLAUDE_CODE_RESUME_SESSIONSTART_HOOKS_WAIT_MS. */
   overdueSessionStartHooks?: OverdueSessionStartHooks
 } | null> {
@@ -1380,6 +1953,8 @@ export async function loadConversationForResume(
     let aiTitleFromJsonl: string | undefined
     /** densable iLr — from jsonl path branch when no LogOption. */
     let devModsFromJsonl: string | undefined
+    let permissionModeFromJsonl: PermissionMode | undefined
+    let sessionModelFromJsonl: string | undefined
 
     if (source === undefined) {
       // --continue: most recent session, skipping live --bg/daemon sessions
@@ -1418,6 +1993,8 @@ export async function loadConversationForResume(
       bridgeFromJsonl = loaded.bridgeSessionId
       aiTitleFromJsonl = loaded.aiTitle
       devModsFromJsonl = loaded.devModsFolder
+      permissionModeFromJsonl = loaded.permissionMode
+      sessionModelFromJsonl = loaded.sessionModel
       if (sessionId) {
         fireSessionResolved(sessionId, sourceJsonlFile)
         await resolvedHookPromise
@@ -1572,6 +2149,9 @@ export async function loadConversationForResume(
       bridgeSessionId: log?.bridgeSessionId ?? bridgeFromJsonl,
       // densable iLr — consented mods folder for restoreSessionMetadata / bOn
       devModsFolder: log?.devModsFolder ?? devModsFromJsonl,
+      // Persisted permissionMode & sessionModel for processResumedConversation
+      permissionMode: log?.permissionMode ?? permissionModeFromJsonl,
+      sessionModel: log?.sessionModel ?? sessionModelFromJsonl,
       deferredToolUse,
       overdueSessionStartHooks,
     }

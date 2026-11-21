@@ -92,6 +92,7 @@ import {
   markRelayThinkingStripRecorded,
   getRefusalFallbackModelLatch,
   getMainLoopModelOverride,
+  takeCarriedEffortEnd,
 } from '../../bootstrap/state.js'
 
 const declaredToolsByStickyBetas = new WeakMap<object, ReadonlySet<string>>()
@@ -356,6 +357,7 @@ import {
   isFastModeAvailable,
   isFastModeCooldown,
   isFastModeEnabled,
+  isFastModeRefusalError,
   isFastModeSupportedByModel,
 } from 'src/utils/fastMode.js'
 import { returnValue } from 'src/utils/generators.js'
@@ -388,7 +390,10 @@ import {
   isDeferredToolsDeltaEnabled,
   isSearchExtraToolsEnabled,
 } from 'src/utils/searchExtraTools.js'
-import { stripFoundryUnsupportedToolFields } from 'src/utils/foundryCapabilities.js'
+import {
+  extractFoundryUnsupportedFromError,
+  stripFoundryUnsupportedToolFields,
+} from 'src/utils/foundryCapabilities.js'
 import {
   ADVISOR_BETA_HEADER,
   CACHE_DIAGNOSIS_BETA_HEADER,
@@ -501,7 +506,11 @@ import {
   FallbackTriggeredError,
   getCachedModelMaxTokensCeiling,
   is529Error,
+  isFastModeNotEnabledError,
+  isSpeedParameterUnsupportedError,
   MidConvSystemRetryError,
+  parseApiMaxTokensCeilingError,
+  parseMaxTokensContextOverflowError,
   type RetryContext,
   withRetry,
 } from './withRetry.js'
@@ -660,6 +669,87 @@ export class ToolSearchRefusalError extends Error {
     super('the model call is made again', { cause })
     this.name = 'ToolSearchRefusalError'
   }
+}
+
+/**
+ * Official 2.1.328 `N9e` / `DTe` (`chunk@294254613.js @3354840`, `d4e` in
+ * `chunk@288788466.js @1084`): decide whether an HTTP 400/422 error on a
+ * request declaring deferred tools should fall back to sending the request
+ * again without deferred tools (`ToolSearchRefusalError`).
+ *
+ * - On direct 1P Anthropic (`isDirectAnthropicProvider`), ONLY fire when
+ *   `error.message` explicitly mentions `\bdefer_loading\b` (avoiding cache-
+ *   busting retries on unrelated 400s).
+ * - Exclude billing errors, prompt-too-long, and errors handled by `withRetry`
+ *   (`parseApiMaxTokensCeilingError`, `parseMaxTokensContextOverflowError`,
+ *   fast-mode refusal / speed-unsupported errors, Foundry capability errors).
+ */
+export function shouldTriggerToolSearchRefusal(params: {
+  error: unknown
+  useSearchExtraTools: boolean
+  alreadyRetried: boolean
+  isDirectAnthropicProvider: boolean
+  provider: string
+  model: string
+}): boolean {
+  const {
+    error,
+    useSearchExtraTools,
+    alreadyRetried,
+    isDirectAnthropicProvider,
+    provider,
+    model,
+  } = params
+  if (!useSearchExtraTools || alreadyRetried) return false
+  if (!(error instanceof APIError)) return false
+  if (error.status !== 400 && error.status !== 422) return false
+  if (isDirectAnthropicProvider && !/\bdefer_loading\b/.test(error.message)) {
+    return false
+  }
+  if (
+    (error.error as { type?: string } | undefined)?.type === 'billing_error'
+  ) {
+    return false
+  }
+  if (isPromptTooLongErrorMessage(error.message)) return false
+
+  // Official `wBe($n)`: normalize HTTP 422 to 400 for error-classifier checks.
+  const normalizedErr =
+    error.status === 422
+      ? new APIError(
+          400,
+          error.error,
+          error.message.replace(/^422 /, ''),
+          error.headers,
+        )
+      : error
+
+  if (parseApiMaxTokensCeilingError(normalizedErr) !== null) return false
+  if (parseMaxTokensContextOverflowError(normalizedErr) !== undefined) {
+    return false
+  }
+  if (
+    isFastModeRefusalError(normalizedErr) ||
+    isFastModeNotEnabledError(normalizedErr) ||
+    isSpeedParameterUnsupportedError(normalizedErr, model)
+  ) {
+    return false
+  }
+  if (
+    provider !== 'firstParty' &&
+    /fast mode|speed: extra inputs|`speed` parameter/i.test(
+      normalizedErr.message ?? '',
+    )
+  ) {
+    return false
+  }
+  if (
+    provider === 'foundry' &&
+    (extractFoundryUnsupportedFromError(normalizedErr)?.length ?? 0) > 0
+  ) {
+    return false
+  }
+  return true
 }
 
 export type Options = {
@@ -1220,6 +1310,23 @@ export function resolveCarriedEffortForModel(
     override.toLowerCase() === latch.fallbackModel.toLowerCase() &&
     resolvedModel.toLowerCase() === latch.fallbackModel.toLowerCase()
   return matches ? latch.carriedEffort : null
+}
+
+/**
+ * Official 2.1.328 `H9o = Ia ? Eji() : void 0` (chunk@294254613.js @3340188,
+ * @3474902): consume the one-shot `carriedEffortEnded` reason from the refusal
+ * fallback latch only on main-conversation API completions (`repl_main_thread*`
+ * or `sdk` outside subagent/background contexts).
+ */
+export function takeCarriedEffortEndForMainQuery(opts: {
+  agentContext?: unknown
+  querySource: string
+}): string | undefined {
+  const isMainConversation =
+    !(opts.agentContext ?? getAgentContext()) &&
+    (opts.querySource.startsWith('repl_main_thread') ||
+      opts.querySource === 'sdk')
+  return isMainConversation ? takeCarriedEffortEnd() : undefined
 }
 
 async function* queryModel(
@@ -2452,24 +2559,6 @@ async function* queryModel(
       return toolSchemaRetry
     }
 
-    // Official 2.1.304 (#1015) / 2.1.305 (#1036) — qZ / VZ: retry without
-    // tool search (defer_loading / tool-search beta) on 400 or 422 refusal.
-    if (
-      useSearchExtraTools &&
-      !options._toolSearchRefusalRetried &&
-      error instanceof APIError &&
-      (error.status === 400 || error.status === 422) &&
-      (error.error as { type?: string } | undefined)?.type !==
-        'billing_error' &&
-      !isPromptTooLongErrorMessage(error.message)
-    ) {
-      logForDebugging(
-        `[ToolSearch] HTTP ${error.status}; sending the request again without deferred tools`,
-        { level: 'warn' },
-      )
-      throw new ToolSearchRefusalError(error)
-    }
-
     // Official 2.1.323 (#1987): recover from mid-conversation role:"system" and
     // api_system cache_control rejections on non-streaming requests as well as
     // streaming requests via the shared `onError` handler.
@@ -2497,6 +2586,28 @@ async function* queryModel(
         )
         return 'retry:api-system-cache-demote'
       }
+    }
+
+    // Official 2.1.328 `DTe` / `N9e` (LAST in `N9o`, AFTER mid-conv-system and
+    // all targeted error recoveries): retry without deferred tools on 400/422
+    // refusal, gated on direct-1P `defer_loading` and excluding withRetry/Foundry
+    // errors.
+    if (
+      shouldTriggerToolSearchRefusal({
+        error,
+        useSearchExtraTools,
+        alreadyRetried: options._toolSearchRefusalRetried === true,
+        isDirectAnthropicProvider,
+        provider,
+        model: options.model,
+      })
+    ) {
+      const apiErr = error as APIError
+      logForDebugging(
+        `[ToolSearch] HTTP ${apiErr.status}; sending the request again without deferred tools`,
+        { level: 'warn' },
+      )
+      throw new ToolSearchRefusalError(error)
     }
 
     return undefined
@@ -4450,6 +4561,7 @@ async function* queryModel(
                         throw new FallbackTriggeredError(
                           options.model,
                           targetModel,
+                          'refusal',
                         )
                       } else {
                         const flow = await runRefusalFallbackDialogFlow({
@@ -4546,6 +4658,7 @@ async function* queryModel(
                           throw new FallbackTriggeredError(
                             options.model,
                             targetModel,
+                            'refusal',
                           )
                         }
                         // densable: dialog declined / cancelled → refusal_no_fallback
@@ -4859,6 +4972,13 @@ async function* queryModel(
         } catch (rawStreamingError) {
           // Clear the idle timeout watchdog on error path too
           clearStreamIdleTimers()
+          // Official 2.1.328 (`chunk@294254613.js @3469336`): FallbackTriggeredError
+          // must propagate immediately out of streaming to query.ts — NEVER fall
+          // back to non-streaming against the same refused/failed model.
+          if (rawStreamingError instanceof FallbackTriggeredError) {
+            yield* closeAbandonedStreamEnvelope({ responseUnfinished: true })
+            throw rawStreamingError
+          }
           // Official zC (#89) — substitute StreamSuspendedError when idle timer
           // aborted the stream across sleep/suspend (not a user abort).
           let streamingError: unknown =
@@ -5105,7 +5225,7 @@ async function* queryModel(
                 yield* closeAbandonedStreamEnvelope({
                   responseUnfinished: false,
                 })
-                return
+                break
               }
 
               const synthesizedStop = hasToolUse ? 'tool_use' : 'end_turn'
@@ -5155,7 +5275,7 @@ async function* queryModel(
                   hasOutput && !hasToolUse ? true : undefined,
               })
               // densable `break e` — exit streaming successfully with partial kept
-              return
+              break
             }
           }
 
@@ -5538,6 +5658,14 @@ async function* queryModel(
           clearStreamIdleTimers()
         }
       } catch (errorFromRetry) {
+        // Official 2.1.328 (`chunk@294254613.js @3469336`): FallbackTriggeredError
+        // MUST immediately propagate to query.ts so query.ts performs the model
+        // switch, thinking-block strip, streamingToolExecutor discard, mainLoopModel
+        // update, system/model_fallback + query_model_change emission, and cancel/edit
+        // dialog handling. Never recursively call queryModelWithStreaming here.
+        if (errorFromRetry instanceof FallbackTriggeredError) {
+          throw errorFromRetry
+        }
         // densable #26 thinking-only re-stream — bubble to streamAttempt loop.
         if (errorFromRetry instanceof ThinkingOnlyStreamRetryError) {
           throw errorFromRetry
@@ -5545,10 +5673,6 @@ async function* queryModel(
         if (errorFromRetry instanceof OutputFilteredStreamRetryError) {
           throw errorFromRetry
         }
-        // FallbackTriggeredError must propagate to query.ts, which performs the
-        // actual model switch. Swallowing it here would turn the fallback into a
-        // no-op — the user would just see "Model fallback triggered: X -> Y" as
-        // an error message with no actual retry on the fallback model.
         if (errorFromRetry instanceof ToolSearchRefusalError) {
           if (!options._toolSearchRefusalRetried) {
             yield* queryModelWithStreaming({
@@ -5567,32 +5691,10 @@ async function* queryModel(
           throw errorFromRetry.cause ?? errorFromRetry
         }
 
-        if (errorFromRetry instanceof FallbackTriggeredError) {
-          if (
-            !options.fallbackModel &&
-            !options._availabilityFallbackRetried &&
-            errorFromRetry.fallbackModel !== options.model
-          ) {
-            yield* queryModelWithStreaming({
-              messages,
-              systemPrompt,
-              thinkingConfig,
-              tools,
-              signal,
-              options: {
-                ...options,
-                model: errorFromRetry.fallbackModel,
-                fallbackModel: undefined,
-                _availabilityFallbackRetried: true,
-              },
-            })
-            return
-          }
-          throw errorFromRetry
-        }
-
         // Official 2.1.314 (#1361) — Foundry 404 DeploymentNotFound: fall back
-        // to an older model of the same family before 404 non-streaming fallback.
+        // to an older model of the same family via FallbackTriggeredError so
+        // query.ts handles the switch cleanly (thinking strip, executor reset,
+        // model_fallback notice).
         if (
           getAPIProvider() === 'foundry' &&
           !options._availabilityFallbackRetried &&
@@ -5613,20 +5715,11 @@ async function* queryModel(
                 `[foundry] deployment '${options.model}' not found (DeploymentNotFound); falling back to '${fallbackModel}'`,
                 { level: 'warn' },
               )
-              yield* queryModelWithStreaming({
-                messages,
-                systemPrompt,
-                thinkingConfig,
-                tools,
-                signal,
-                options: {
-                  ...options,
-                  model: fallbackModel,
-                  fallbackModel: undefined,
-                  _availabilityFallbackRetried: true,
-                },
-              })
-              return
+              throw new FallbackTriggeredError(
+                options.model,
+                fallbackModel,
+                'model_not_found',
+              )
             }
           }
         }
@@ -6093,8 +6186,15 @@ async function* queryModel(
     thinking: langfuseThinking,
   })
 
+  const carriedEffortEnded = takeCarriedEffortEndForMainQuery({
+    agentContext: options.agentContext,
+    querySource: options.querySource,
+  })
+
   void options.getToolPermissionContext().then(permissionContext => {
-    logAPISuccessAndDuration({
+    const apiSuccessLogArgs: Parameters<typeof logAPISuccessAndDuration>[0] & {
+      carriedEffortEnded?: string
+    } = {
       model:
         (newMessages[0]?.message.model as string | undefined) ??
         partialMessage?.model ??
@@ -6129,7 +6229,9 @@ async function* queryModel(
       effort:
         effortLevelForTranscript ??
         (typeof effort === 'string' ? effort : undefined),
-    })
+      ...(carriedEffortEnded !== undefined ? { carriedEffortEnded } : {}),
+    }
+    logAPISuccessAndDuration(apiSuccessLogArgs)
   })
 
   // Defensive: also release on normal completion (no-op if finally already ran).

@@ -497,13 +497,14 @@ export function buildSessionChildEnv(
     CLAUDE_CODE_RESUME_INTERRUPTED_TURN: opts.workerEpoch > 1 ? '1' : undefined,
     CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS: (() => {
       if (opts.workerEpoch <= 1) return undefined
-      const maxAgeCapMs = 3_600_000
-      const fromBound = opts.boundResumedTurn ? maxAgeCapMs : Infinity
+      const boundCapMs = 3_600_000
+      const notBeforeCapMs = 21_600_000
+      const fromBound = opts.boundResumedTurn ? boundCapMs : Infinity
       const fromNotBefore =
         opts.resumedTurnNotBefore !== undefined
           ? Math.max(
               1,
-              Math.min(Date.now() - opts.resumedTurnNotBefore, maxAgeCapMs),
+              Math.min(Date.now() - opts.resumedTurnNotBefore, notBeforeCapMs),
             )
           : Infinity
       const explicit =

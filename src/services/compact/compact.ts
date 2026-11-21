@@ -481,8 +481,9 @@ const PTL_RETRY_MARKER = '[earlier conversation truncated for compaction retry]'
  */
 export function truncateHeadForPTLRetry(
   messages: Message[],
-  ptlResponse: AssistantMessage,
+  ptlResponse: AssistantMessage | undefined,
   mediaStripped = false,
+  explicitTokenGap?: number,
 ): Message[] | null {
   // Strip our own synthetic marker from a previous retry before grouping.
   // Otherwise it becomes its own group 0 and the 20% fallback stalls
@@ -508,7 +509,12 @@ export function truncateHeadForPTLRetry(
     : groupMessagesByApiRound(input)
   if (groups.length < 2) return null
 
-  const tokenGap = getPromptTooLongTokenGap(ptlResponse)
+  const tokenGap =
+    explicitTokenGap !== undefined && explicitTokenGap > 0
+      ? explicitTokenGap
+      : ptlResponse !== undefined
+        ? getPromptTooLongTokenGap(ptlResponse)
+        : undefined
   let dropCount: number
   if (tokenGap !== undefined) {
     let acc = 0
@@ -1054,6 +1060,7 @@ export async function compactConversation(
   recompactionInfo?: RecompactionInfo,
   stripNonEssential: boolean = false,
   preCompactHookResult?: Awaited<ReturnType<typeof executePreCompactHooks>>,
+  initialTokenGap?: number,
 ): Promise<CompactionResult> {
   try {
     // densable 2.1.214: refuse compact when EndConversation ended the session
@@ -1127,6 +1134,54 @@ export async function compactConversation(
     let hasLeftOutToolResults =
       hasLeftOutToolResultPlaceholders(messagesToSummarize)
     let summaryBlockRetried = false
+    let retryCacheSafeParams = cacheSafeParams
+    let seededTokenGapTrimmed = false
+
+    // Official 2.1.328 (`chunk@294254613.js @2689000`): when invoked reactively
+    // after a PTL refusal with a known tokenGap, seed initial tool-result
+    // omission or head truncation before the first summary API call so we do
+    // not burn an extra guaranteed-413 round trip.
+    if (initialTokenGap !== undefined && initialTokenGap > 0) {
+      const canSeedLeaveOut =
+        isThirdPartyDesktopLargeToolResultOmissionEnabled() &&
+        groupMessagesByApiRound(messagesToSummarize).length < 3
+      const seededLeftOut = canSeedLeaveOut
+        ? omitLargestToolResultsForSummary(messagesToSummarize, {
+            tokenGap: initialTokenGap,
+          })
+        : null
+      if (seededLeftOut) {
+        messagesToSummarize = seededLeftOut.messages
+        hasLeftOutToolResults = true
+        seededTokenGapTrimmed = true
+        logForDebugging(
+          `Compact initial tokenGap=${initialTokenGap}: left out ${seededLeftOut.leftOutIds.length} large tool result(s) (~${seededLeftOut.tokensFreed} tokens)`,
+          { level: 'warn' },
+        )
+      } else {
+        const seededTruncated = truncateHeadForPTLRetry(
+          messagesToSummarize,
+          undefined,
+          false,
+          initialTokenGap,
+        )
+        if (seededTruncated) {
+          logForDebugging(
+            `Compact initial tokenGap=${initialTokenGap}: head-truncated ${messagesToSummarize.length - seededTruncated.length} message(s)`,
+            { level: 'warn' },
+          )
+          messagesToSummarize = seededTruncated
+          seededTokenGapTrimmed = true
+        }
+      }
+      if (seededTokenGapTrimmed) {
+        retryCacheSafeParams = {
+          ...retryCacheSafeParams,
+          forkContextMessages: messagesToSummarize,
+        }
+      }
+    }
+
     let summaryRequest = createUserMessage({
       content: buildCompactSummaryRequestContent({
         basePrompt: compactPrompt,
@@ -1135,7 +1190,6 @@ export async function compactConversation(
       }),
     })
 
-    let retryCacheSafeParams = cacheSafeParams
     let summaryResponse: AssistantMessage
     let summary: string | null
     let ptlAttempts = 0
@@ -1148,11 +1202,14 @@ export async function compactConversation(
         preCompactTokenCount,
         cacheSafeParams: retryCacheSafeParams,
         // densable Pqn/qjt: full compact does not pass thinking/advisor plans.
-        // Once head truncation triggers (ptlAttempts > 0), the prompt-cache
-        // prefix is already broken — enable stripNonEssential so retry skips
-        // the doomed cache-sharing fork and strips thinking/tool payloads.
+        // Once head truncation triggers (ptlAttempts > 0 or seeded trim), the
+        // prompt-cache prefix is already broken — enable stripNonEssential so
+        // retry skips the doomed cache-sharing fork and strips thinking/tool payloads.
         stripNonEssential:
-          stripNonEssential || ptlAttempts > 0 || summaryBlockRetried,
+          stripNonEssential ||
+          seededTokenGapTrimmed ||
+          ptlAttempts > 0 ||
+          summaryBlockRetried,
       })
       summaryResponse = streamResult.response
       summary = getAssistantMessageText(summaryResponse)
@@ -1227,10 +1284,12 @@ export async function compactConversation(
         continue
       }
 
-      // v2.1.311 (#1279): when the reply has no <summary> block, ask once more
-      // with COMPACT_REPLY_INSTRUCTIONS_TRAILER (SEA RIn) before giving up.
+      // v2.1.311 (#1279) + Official 2.1.328 (`chunk@294254613.js @3023250`):
+      // when the reply has no <summary> block (and is NOT an API error message),
+      // ask once more with COMPACT_REPLY_INSTRUCTIONS_TRAILER before giving up.
       if (
         summary &&
+        !summaryResponse.isApiErrorMessage &&
         !startsWithApiErrorPrefix(summary) &&
         !hasCompactSummaryTag(summary) &&
         !hasUnclosedCompactSummaryTag(summary)
@@ -1283,7 +1342,10 @@ export async function compactConversation(
       throw new Error(
         `Failed to generate conversation summary - response did not contain valid text content`,
       )
-    } else if (startsWithApiErrorPrefix(summary)) {
+    } else if (
+      summaryResponse.isApiErrorMessage ||
+      startsWithApiErrorPrefix(summary)
+    ) {
       logEvent('tengu_compact_failed', {
         reason:
           'api_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1874,9 +1936,11 @@ export async function partialCompactConversation(
         continue
       }
 
-      // #1630: reject non-summary replies before they can replace conversation
+      // #1630 + Official 2.1.328: reject non-summary replies (excluding API
+      // error messages) before they can replace conversation.
       if (
         summary &&
+        !summaryResponse.isApiErrorMessage &&
         !startsWithApiErrorPrefix(summary) &&
         !hasCompactSummaryTag(summary) &&
         !hasUnclosedCompactSummaryTag(summary)
@@ -1916,7 +1980,10 @@ export async function partialCompactConversation(
       throw new Error(
         'Failed to generate conversation summary - response did not contain valid text content',
       )
-    } else if (startsWithApiErrorPrefix(summary)) {
+    } else if (
+      summaryResponse.isApiErrorMessage ||
+      startsWithApiErrorPrefix(summary)
+    ) {
       logEvent('tengu_partial_compact_failed', {
         reason:
           'api_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

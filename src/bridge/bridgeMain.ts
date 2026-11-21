@@ -51,10 +51,19 @@ import { getPollIntervalConfig } from './pollConfig.js'
 import { toCompatSessionId, toInfraSessionId } from './sessionIdCompat.js'
 import { createTitleWriteScheduler } from './titleWriteScheduler.js'
 import {
+  type BridgeSessionSpawnOpts,
   computeBridgeSettingsBinding,
   createSessionSpawner,
   safeFilenameId,
 } from './sessionRunner.js'
+import {
+  createBridgePointerWriteQueue,
+  environmentRevivedAtAfter,
+  getFreshActiveSessionIds,
+  isPersistedStampFresh,
+  MAX_PERSISTED_SESSION_IDS,
+  PERSISTED_SESSION_RESUME_WINDOW_MS,
+} from './bridgePointer.js'
 import { deriveBridgeChildGrantRoles } from './bridgeChildGrants.js'
 import {
   parseSessionOriginRoles,
@@ -151,7 +160,7 @@ function spawnScriptArgs(): string[] {
 /** Attempt to spawn a session; returns error string if spawn throws. */
 function safeSpawn(
   spawner: SessionSpawner,
-  opts: SessionSpawnOpts,
+  opts: BridgeSessionSpawnOpts,
   dir: string,
 ): SessionHandle | string {
   try {
@@ -160,6 +169,150 @@ function safeSpawn(
     const errMsg = errorMessage(err)
     logError(new Error(`Session spawn failed: ${errMsg}`))
     return errMsg
+  }
+}
+
+/**
+ * Official 2.1.328 #1613 (`chunk@315298418.js @64847, @92427, @148549`):
+ * Extended bridge config fields carried across fast RC restarts (<60s / <15m).
+ */
+export type BridgeRestartConfig = BridgeConfig & {
+  environmentRevivedAt?: number
+  carriedSessionIds?: string[]
+  initialSessionRequeues?: string[]
+  initialSessionRequeuesPersistedAt?: number
+  boundedResumeSessionIds?: string[]
+  enqueuePointerWrite?: <T>(fn: () => Promise<T>) => Promise<T>
+}
+
+/**
+ * Official 2.1.328 #1613 (`chunk@315298418.js @148549`): attempt to re-queue
+ * active sessions carried across a shutdown when the same environment is reused.
+ * Emits `bridge_shutdown_requeue` when all requeues succeed or when env reuse
+ * was declined; returns remaining/retryable IDs for `initialSessionRequeues`.
+ */
+export async function requeueCarriedSessionsOnStart(opts: {
+  api: Pick<BridgeApiClient, 'reconnectSession'>
+  environmentId: string
+  reusedEnvironment: boolean
+  carriedSessionIds: readonly string[]
+  signal?: AbortSignal
+  log?: (msg: string) => void
+}): Promise<{
+  carriedSessionIds: string[]
+  initialSessionRequeues: string[]
+  abortedRemaining: string[]
+  retryLater: string[]
+}> {
+  const {
+    api,
+    environmentId,
+    reusedEnvironment,
+    carriedSessionIds,
+    signal,
+    log = logForDebugging,
+  } = opts
+  if (carriedSessionIds.length === 0) {
+    return {
+      carriedSessionIds: [],
+      initialSessionRequeues: [],
+      abortedRemaining: [],
+      retryLater: [],
+    }
+  }
+  if (!reusedEnvironment) {
+    logEvent('bridge_shutdown_requeue', {
+      outcome:
+        'env_reuse_declined' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return {
+      carriedSessionIds: [],
+      initialSessionRequeues: [],
+      abortedRemaining: [],
+      retryLater: [],
+    }
+  }
+  log(
+    `[bridge:init] re-queuing ${carriedSessionIds.length} session(s) interrupted by the previous shutdown`,
+  )
+  let aborted = false
+  let abortedRemaining: string[] = []
+  const retryLater: string[] = []
+  for (let idx = 0; idx < carriedSessionIds.length; idx++) {
+    const sid = carriedSessionIds[idx]!
+    if (signal?.aborted) {
+      aborted = true
+      abortedRemaining = carriedSessionIds.slice(idx)
+      break
+    }
+    try {
+      await api.reconnectSession(environmentId, toInfraSessionId(sid), signal)
+      log(`[bridge:init] re-queue ${sid}: ok`)
+    } catch (err) {
+      if (signal?.aborted) {
+        aborted = true
+        abortedRemaining = carriedSessionIds.slice(idx)
+        break
+      }
+      if (err instanceof BridgeFatalError) {
+        log(`[bridge:init] re-queue ${sid}: dropped (${errorMessage(err)})`)
+      } else {
+        log(`[bridge:init] re-queue ${sid}: retry (${errorMessage(err)})`)
+        retryLater.push(sid)
+      }
+    }
+  }
+  if (!aborted && retryLater.length === 0) {
+    logEvent('bridge_shutdown_requeue', {
+      outcome:
+        'ok' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
+  return {
+    carriedSessionIds: [...carriedSessionIds],
+    initialSessionRequeues: [...abortedRemaining, ...retryLater],
+    abortedRemaining,
+    retryLater,
+  }
+}
+
+/**
+ * Official 2.1.328 #1613 (`chunk@315298418.js @102188`): build the shutdown
+ * `activeSessionIds` snapshot ordered busy-first, then fresh pending requeues,
+ * then idle active sessions, capped at 64.
+ */
+export function buildShutdownActiveSessionsSnapshot(opts: {
+  activeSessionIds: readonly string[]
+  busySessionIds: ReadonlySet<string>
+  pendingInitialRequeues: readonly string[]
+  initialRequeuesPersistedAt?: number
+  nowMs?: number
+}): { activeSessionIds: string[]; activeSessionIdsPersistedAt: number } {
+  const nowMs = opts.nowMs ?? Date.now()
+  const activeSet = new Set(opts.activeSessionIds.map(toInfraSessionId))
+  const freshPending =
+    opts.initialRequeuesPersistedAt !== undefined &&
+    isPersistedStampFresh(
+      opts.initialRequeuesPersistedAt,
+      nowMs,
+      PERSISTED_SESSION_RESUME_WINDOW_MS,
+    )
+      ? opts.pendingInitialRequeues.filter(
+          id => !activeSet.has(toInfraSessionId(id)),
+        )
+      : []
+  const ordered = [
+    ...opts.activeSessionIds.filter(id => opts.busySessionIds.has(id)),
+    ...freshPending,
+    ...opts.activeSessionIds.filter(id => !opts.busySessionIds.has(id)),
+  ].slice(0, MAX_PERSISTED_SESSION_IDS)
+  const persistedAt =
+    freshPending.length > 0 && opts.initialRequeuesPersistedAt !== undefined
+      ? Math.min(nowMs, opts.initialRequeuesPersistedAt)
+      : nowMs
+  return {
+    activeSessionIds: ordered,
+    activeSessionIdsPersistedAt: persistedAt,
   }
 }
 
@@ -284,6 +437,43 @@ export async function runBridgeLoop(
   let reregisterAttempts = 0
   let envJustReregistered = false
   const pendingRequeues = new Map<string, number>()
+  const restartConfig = config as BridgeRestartConfig
+  // Official 2.1.328 #1613 (`chunk@315298418.js @64847`): track carried and
+  // initial-requeue sessions across restarts.
+  const initialPendingRequeues = new Map<string, number>(
+    (restartConfig.initialSessionRequeues ?? []).map(id => [id, 0]),
+  )
+  let anyInitialRequeueDropped = false
+  const settleInitialRequeue = (sid: string, dropped: boolean): void => {
+    const infra = toInfraSessionId(sid)
+    let matched = false
+    for (const key of [...initialPendingRequeues.keys()]) {
+      if (toInfraSessionId(key) === infra) {
+        initialPendingRequeues.delete(key)
+        matched = true
+      }
+    }
+    if (!matched) return
+    if (dropped) anyInitialRequeueDropped = true
+    if (initialPendingRequeues.size === 0) {
+      logEvent('bridge_shutdown_requeue', {
+        outcome: (anyInitialRequeueDropped
+          ? 'requeue_dropped'
+          : 'ok') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+  }
+  const carriedSessionIds = new Set<string>(
+    [
+      ...(restartConfig.boundedResumeSessionIds ?? []),
+      ...(restartConfig.initialSessionRequeues ?? []),
+      ...(restartConfig.carriedSessionIds ?? []),
+    ].map(toInfraSessionId),
+  )
+  const boundedResumeSessionIds = new Set<string>(
+    (restartConfig.boundedResumeSessionIds ?? []).map(toInfraSessionId),
+  )
+  const busySessionIds = new Set<string>()
   let sessionCrashed = false
   const crashedSessionIds = new Set<string>()
   const keptOfflineWorktrees = new Set<string>()
@@ -1377,6 +1567,9 @@ export async function runBridgeLoop(
               { level: 'warn' },
             )
           }
+          const boundResumedTurn = boundedResumeSessionIds.has(
+            toInfraSessionId(sessionId),
+          )
           const spawnResult = safeSpawn(
             spawner,
             {
@@ -1388,6 +1581,10 @@ export async function runBridgeLoop(
               autoDefault,
               artifact,
               machineSettings,
+              boundResumedTurn,
+              ...(restartConfig.environmentRevivedAt !== undefined
+                ? { resumedTurnNotBefore: restartConfig.environmentRevivedAt }
+                : {}),
               onFirstUserMessage: text => {
                 // Server-set titles (--name, web rename) win. fetchSessionTitle
                 // runs concurrently; if it already populated titledSessions,
@@ -1471,6 +1668,8 @@ export async function runBridgeLoop(
           })
 
           activeSessions.set(sessionId, handle)
+          carriedSessionIds.add(toInfraSessionId(sessionId))
+          settleInitialRequeue(sessionId, false)
           sessionWorkIds.set(sessionId, work.id)
           sessionIngressTokens.set(sessionId, secret.session_ingress_token)
           sessionCompatIds.set(sessionId, compatSessionId)
@@ -1868,6 +2067,52 @@ export async function runBridgeLoop(
   }
   // Snapshot before killing — onSessionDone clears sessionCompatIds.
   const compatIdSnapshot = new Map(sessionCompatIds)
+
+  // Official 2.1.328 #1613 (`chunk@315298418.js @102089`): persist active and
+  // still-pending carried session IDs into bridge-pointer.json before killing
+  // children so a restart within 15m immediately re-queues them.
+  if (
+    config.ownsPointer &&
+    config.preserveOnShutdown &&
+    (activeSessions.size > 0 || initialPendingRequeues.size > 0)
+  ) {
+    try {
+      const { readBridgePointer, writeBridgePointer } = await import(
+        './bridgePointer.js'
+      )
+      const snapshot = buildShutdownActiveSessionsSnapshot({
+        activeSessionIds: [...activeSessions.keys()],
+        busySessionIds,
+        pendingInitialRequeues: [...initialPendingRequeues.keys()],
+        initialRequeuesPersistedAt:
+          restartConfig.initialSessionRequeuesPersistedAt,
+      })
+      const runWrite =
+        restartConfig.enqueuePointerWrite ?? (<T>(fn: () => Promise<T>) => fn())
+      await raceDiskCleanupDeadline(
+        runWrite(async () => {
+          const existing = await readBridgePointer(config.dir, {
+            noClear: true,
+          })
+          if (!existing) return
+          const { ageMs: _age, ...rest } = existing
+          await writeBridgePointer(config.dir, {
+            ...rest,
+            ...snapshot,
+            ...(restartConfig.environmentRevivedAt !== undefined
+              ? { environmentRevivedAt: restartConfig.environmentRevivedAt }
+              : {}),
+          })
+        }),
+        'shutdown persist activeSessionIds',
+      )
+    } catch (err) {
+      logForDebugging(
+        `[bridge:shutdown] failed to persist activeSessionIds: ${errorMessage(err)}`,
+        { level: 'warn' },
+      )
+    }
+  }
 
   if (activeSessions.size > 0) {
     logForDebugging(
@@ -3037,6 +3282,9 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // clear the leftover pointer — that was the opposite of crash-reuse.
   let leftoverReuseEnvironmentId: string | undefined
   let leftoverSessionId: string | undefined
+  let leftoverEnvironmentRevivedAt: number | undefined
+  let carriedActiveSessionIds: string[] = []
+  let carriedActiveSessionIdsPersistedAt: number | undefined
   let deferPointerWrite = false
   let occupyingPointer: Awaited<
     ReturnType<typeof import('./bridgePointer.js').readBridgePointer>
@@ -3055,6 +3303,13 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     } else if (decision.kind === 'reuse') {
       leftoverReuseEnvironmentId = decision.environmentId
       leftoverSessionId = decision.sessionId
+      if (prior) {
+        const nowMs = Date.now()
+        leftoverEnvironmentRevivedAt = environmentRevivedAtAfter(prior, nowMs)
+        const fresh = getFreshActiveSessionIds(prior, nowMs)
+        carriedActiveSessionIds = fresh.sessionIds
+        carriedActiveSessionIdsPersistedAt = fresh.persistedAt
+      }
       logForDebugging(
         `[bridge:init] Found prior environment ${leftoverReuseEnvironmentId} in pointer (ageMs=${decision.ageMs}); requesting reuse on registration`,
       )
@@ -3197,7 +3452,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     )
   }
 
-  const config: BridgeConfig = {
+  const config: BridgeRestartConfig = {
     dir,
     machineName,
     branch,
@@ -3260,8 +3515,17 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // (no --session-id). Transient reconnect keeps the pointer; all-fatal
   // Hoe drops the adopted session and falls through to a fresh create.
   let adoptedSessionId: string | undefined
+  let unattemptedRequeueIds: string[] = []
   if (leftoverReuseEnvironmentId) {
     if (environmentId !== leftoverReuseEnvironmentId) {
+      if (carriedActiveSessionIds.length > 0) {
+        await requeueCarriedSessionsOnStart({
+          api,
+          environmentId,
+          reusedEnvironment: false,
+          carriedSessionIds: carriedActiveSessionIds,
+        })
+      }
       logForDebugging(
         `Bridge env reuse mismatch: requested ${leftoverReuseEnvironmentId}, backend returned ${environmentId}.`,
         { level: 'warn' },
@@ -3272,6 +3536,24 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
       const { clearBridgePointer } = await import('./bridgePointer.js')
       await clearBridgePointer(dir)
     } else {
+      if (leftoverEnvironmentRevivedAt !== undefined) {
+        config.environmentRevivedAt = leftoverEnvironmentRevivedAt
+      }
+      if (carriedActiveSessionIds.length > 0) {
+        const requeued = await requeueCarriedSessionsOnStart({
+          api,
+          environmentId,
+          reusedEnvironment: true,
+          carriedSessionIds: carriedActiveSessionIds,
+        })
+        config.carriedSessionIds = requeued.carriedSessionIds
+        if (requeued.initialSessionRequeues.length > 0) {
+          config.initialSessionRequeues = requeued.initialSessionRequeues
+          config.initialSessionRequeuesPersistedAt =
+            carriedActiveSessionIdsPersistedAt
+        }
+        unattemptedRequeueIds = requeued.abortedRemaining
+      }
       const { writeBridgePointer, readBridgePointer } = await import(
         './bridgePointer.js'
       )
@@ -3284,6 +3566,15 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
         source: 'standalone',
         pid: process.pid,
         procStart: await ownProcStartAsync(),
+        ...(config.environmentRevivedAt !== undefined
+          ? { environmentRevivedAt: config.environmentRevivedAt }
+          : {}),
+        ...(unattemptedRequeueIds.length > 0
+          ? {
+              activeSessionIds: unattemptedRequeueIds,
+              activeSessionIdsPersistedAt: carriedActiveSessionIdsPersistedAt,
+            }
+          : {}),
       })
       config.preserveOnShutdown = wrote
       config.ownsPointer = wrote
@@ -3551,12 +3842,10 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     null
   if (preCreateSession && !effectiveResumeSessionId && !adoptedSessionId) {
     const { createBridgeSession } = await import('./createSession.js')
-    const forkFromTitle = process.env.CLAUDE_BRIDGE_FORK_FROM_TITLE || undefined
     try {
       initialSessionId = await createBridgeSession({
         environmentId,
         title: name,
-        forkFromTitle,
         events: [],
         gitRepoUrl,
         branch,
@@ -3589,25 +3878,52 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     const { ownProcStartAsync } = await import(
       '../utils/genericProcessUtils.js'
     )
-    const pointerPayload = {
+    const pointerPayload: import('./bridgePointer.js').BridgePointer = {
       sessionId: pointerSessionId,
       environmentId,
       source: 'standalone' as const,
       pid: process.pid,
       procStart: await ownProcStartAsync(),
+      ...(config.environmentRevivedAt !== undefined
+        ? { environmentRevivedAt: config.environmentRevivedAt }
+        : {}),
+      ...(unattemptedRequeueIds.length > 0
+        ? {
+            activeSessionIds: unattemptedRequeueIds,
+            activeSessionIdsPersistedAt: carriedActiveSessionIdsPersistedAt,
+          }
+        : {}),
     }
     if (await writeBridgePointer(config.dir, pointerPayload)) {
       config.preserveOnShutdown = true
       config.ownsPointer = true
+      config.enqueuePointerWrite = createBridgePointerWriteQueue()
+      const enqueueWrite = config.enqueuePointerWrite
       pointerRefreshTimer = setInterval(
         (
           write: typeof writeBridgePointer,
           ownStart: typeof ownProcStartAsync,
           pointerDir: string,
-          payload: typeof pointerPayload,
+          payload: import('./bridgePointer.js').BridgePointer,
+          sig: AbortSignal,
         ) => {
           void ownStart().then(procStart =>
-            write(pointerDir, { ...payload, procStart }),
+            enqueueWrite(() => {
+              if (sig.aborted) return Promise.resolve(false)
+              if (
+                payload.activeSessionIds !== undefined &&
+                (payload.activeSessionIdsPersistedAt === undefined ||
+                  !isPersistedStampFresh(
+                    payload.activeSessionIdsPersistedAt,
+                    Date.now(),
+                    PERSISTED_SESSION_RESUME_WINDOW_MS,
+                  ))
+              ) {
+                delete payload.activeSessionIds
+                delete payload.activeSessionIdsPersistedAt
+              }
+              return write(pointerDir, { ...payload, procStart })
+            }),
           )
         },
         60 * 60 * 1000,
@@ -3615,6 +3931,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
         ownProcStartAsync,
         config.dir,
         pointerPayload,
+        controller.signal,
       )
       pointerRefreshTimer.unref?.()
     }
@@ -3803,7 +4120,36 @@ async function runBridgeHeadlessImpl(
   const machineName = hostname()
   const bridgeId = randomUUID()
 
-  const config: BridgeConfig = {
+  // Official 2.1.328 #1613 (`chunk@315298418.js @146500-150500`): read prior
+  // standalone pointer for env reuse, environmentRevivedAt, and carried active
+  // sessions on daemon headless restart.
+  let reuseEnvironmentId: string | undefined
+  let priorRevivedAt: number | undefined
+  let carriedActiveSessionIds: string[] = []
+  let carriedActiveSessionIdsPersistedAt: number | undefined
+  let deferPointerWrite = false
+  {
+    const { readBridgePointer, decideStandalonePointerReuse } = await import(
+      './bridgePointer.js'
+    )
+    const prior = await readBridgePointer(dir)
+    const decision = await decideStandalonePointerReuse(prior)
+    if (decision.kind === 'defer') {
+      deferPointerWrite = true
+      log(
+        `pointer writer pid ${decision.pid} still running; registering fresh env`,
+      )
+    } else if (decision.kind === 'reuse' && prior) {
+      const nowMs = Date.now()
+      reuseEnvironmentId = decision.environmentId
+      priorRevivedAt = environmentRevivedAtAfter(prior, nowMs)
+      const fresh = getFreshActiveSessionIds(prior, nowMs)
+      carriedActiveSessionIds = fresh.sessionIds
+      carriedActiveSessionIdsPersistedAt = fresh.persistedAt
+    }
+  }
+
+  const config: BridgeRestartConfig = {
     dir,
     machineName,
     branch,
@@ -3815,6 +4161,7 @@ async function runBridgeHeadlessImpl(
     bridgeId,
     workerType: 'claude_code',
     environmentId: randomUUID(),
+    reuseEnvironmentId,
     apiBaseUrl: baseUrl,
     sessionIngressUrl,
     sessionTimeoutMs: opts.sessionTimeoutMs,
@@ -3842,6 +4189,28 @@ async function runBridgeHeadlessImpl(
     throw new Error(`Bridge registration failed: ${errorMessage(err)}`)
   }
 
+  const reusedEnv =
+    reuseEnvironmentId !== undefined && environmentId === reuseEnvironmentId
+  if (reusedEnv && priorRevivedAt !== undefined) {
+    config.environmentRevivedAt = priorRevivedAt
+  }
+  const requeued = await requeueCarriedSessionsOnStart({
+    api,
+    environmentId,
+    reusedEnvironment: reusedEnv,
+    carriedSessionIds: carriedActiveSessionIds,
+    signal,
+    log,
+  })
+  if (requeued.carriedSessionIds.length > 0) {
+    config.carriedSessionIds = requeued.carriedSessionIds
+  }
+  if (requeued.initialSessionRequeues.length > 0) {
+    config.initialSessionRequeues = requeued.initialSessionRequeues
+    config.initialSessionRequeuesPersistedAt =
+      carriedActiveSessionIdsPersistedAt
+  }
+
   const spawner = createSessionSpawner({
     execPath: process.execPath,
     scriptArgs: spawnScriptArgs(),
@@ -3862,9 +4231,9 @@ async function runBridgeHeadlessImpl(
       const sid = await createBridgeSession({
         environmentId,
         title: opts.name,
-        forkFromTitle:
-          opts.forkFromTitle ??
-          (process.env.CLAUDE_BRIDGE_FORK_FROM_TITLE || undefined),
+        ...(opts.forkFromTitle !== undefined
+          ? { forkFromTitle: opts.forkFromTitle }
+          : {}),
         events: [],
         gitRepoUrl,
         branch,
@@ -3882,19 +4251,84 @@ async function runBridgeHeadlessImpl(
     }
   }
 
-  await runBridgeLoop(
-    config,
-    environmentId,
-    environmentSecret,
-    api,
-    spawner,
-    logger,
-    signal,
-    undefined,
-    initialSessionId,
-    async () => opts.getAccessToken(),
-    environmentSecretExpiresIn,
-  )
+  let pointerRefreshTimer: ReturnType<typeof setInterval> | null = null
+  if (!deferPointerWrite) {
+    if (reuseEnvironmentId && !reusedEnv) {
+      log(
+        `env reuse mismatch: requested ${reuseEnvironmentId}, backend returned ${environmentId}; existing sessions will not reconnect`,
+      )
+    }
+    const { writeBridgePointer } = await import('./bridgePointer.js')
+    const { ownProcStartAsync } = await import(
+      '../utils/genericProcessUtils.js'
+    )
+    const pointerPayload: import('./bridgePointer.js').BridgePointer = {
+      sessionId: initialSessionId ?? '',
+      environmentId,
+      source: 'standalone',
+      pid: process.pid,
+      procStart: await ownProcStartAsync(),
+      ...(config.environmentRevivedAt !== undefined
+        ? { environmentRevivedAt: config.environmentRevivedAt }
+        : {}),
+      ...(requeued.abortedRemaining.length > 0
+        ? {
+            activeSessionIds: requeued.abortedRemaining,
+            activeSessionIdsPersistedAt: carriedActiveSessionIdsPersistedAt,
+          }
+        : {}),
+    }
+    if (await writeBridgePointer(dir, pointerPayload)) {
+      config.preserveOnShutdown = true
+      config.ownsPointer = true
+      config.enqueuePointerWrite = createBridgePointerWriteQueue()
+      const enqueueWrite = config.enqueuePointerWrite
+      pointerRefreshTimer = setInterval(
+        () => {
+          void ownProcStartAsync().then(procStart =>
+            enqueueWrite(() => {
+              if (signal.aborted) return Promise.resolve(false)
+              if (
+                pointerPayload.activeSessionIds !== undefined &&
+                (pointerPayload.activeSessionIdsPersistedAt === undefined ||
+                  !isPersistedStampFresh(
+                    pointerPayload.activeSessionIdsPersistedAt,
+                    Date.now(),
+                    PERSISTED_SESSION_RESUME_WINDOW_MS,
+                  ))
+              ) {
+                delete pointerPayload.activeSessionIds
+                delete pointerPayload.activeSessionIdsPersistedAt
+              }
+              return writeBridgePointer(dir, { ...pointerPayload, procStart })
+            }),
+          )
+        },
+        60 * 60 * 1000,
+      )
+      pointerRefreshTimer.unref?.()
+    }
+  }
+
+  try {
+    await runBridgeLoop(
+      config,
+      environmentId,
+      environmentSecret,
+      api,
+      spawner,
+      logger,
+      signal,
+      undefined,
+      initialSessionId,
+      async () => opts.getAccessToken(),
+      environmentSecretExpiresIn,
+    )
+  } finally {
+    if (pointerRefreshTimer !== null) {
+      clearInterval(pointerRefreshTimer)
+    }
+  }
 }
 
 export async function bridgeMain(args: string[]): Promise<void> {

@@ -392,6 +392,107 @@ function flushQueuedHistoryEntries(
   }
 }
 
+/** Official 2.1.328 `Un` / `eo` / `jRo` / `cIr` — prompt attachment classification & readFileState rollback. */
+const PROMPT_INPUT_ATTACHMENT_TYPES = new Set([
+  'file',
+  'already_read_file',
+  'at_mention_reference',
+  'pdf_reference',
+  'directory',
+  'mcp_resource',
+  'agent_mention',
+  'peer_mention',
+  'skill_mention',
+  'nested_memory',
+  'withheld_memory',
+])
+
+const PROMPT_METADATA_ATTACHMENT_TYPES = new Set([
+  'ultrathink_effort',
+  'workflow_keyword_request',
+  'unknown_command_fallback',
+  'selected_lines_in_ide',
+  'selected_lines_in_diff',
+  'opened_file_in_ide',
+  'inlined_image_paths',
+  'thread_state',
+  'widget_context_hint',
+])
+
+function isNonPromptAttachment(msg: Message): boolean {
+  if (msg.type !== 'attachment') return false
+  const att = (msg as { attachment?: { type?: string; hookEvent?: string } })
+    .attachment
+  if (!att || typeof att.type !== 'string') return false
+  if (
+    att.hookEvent === 'UserPromptSubmit' &&
+    att.type !== 'async_hook_response'
+  ) {
+    return false
+  }
+  return (
+    !PROMPT_INPUT_ATTACHMENT_TYPES.has(att.type) &&
+    !PROMPT_METADATA_ATTACHMENT_TYPES.has(att.type)
+  )
+}
+
+function cleanupAttachmentReadFileState(
+  msgs: readonly Message[],
+  readFileState?: { delete: (path: string) => unknown },
+): void {
+  if (!readFileState) return
+  for (const msg of msgs) {
+    if (msg.type !== 'attachment') continue
+    const att = (
+      msg as {
+        attachment?: { type?: string; filename?: string; path?: string }
+      }
+    ).attachment
+    if (!att) continue
+    if (att.type === 'file' && typeof att.filename === 'string') {
+      readFileState.delete(att.filename)
+    } else if (att.type === 'nested_memory' && typeof att.path === 'string') {
+      readFileState.delete(att.path)
+    }
+  }
+}
+
+/** Official 2.1.328 `non(Dr)` — locally committed command (bash or slash). */
+function isLocallyCommittedCommand(cmd: QueuedCommand): boolean {
+  return (
+    cmd.mode === 'bash' ||
+    (!cmd.skipSlashCommands &&
+      typeof cmd.value === 'string' &&
+      cmd.value.trim().startsWith('/'))
+  )
+}
+
+/** Official 2.1.328: local non-prompt slash commands skip prompt.submit hooks and still record history. */
+function isLocalNonPromptSlashCommand(
+  cmd: QueuedCommand,
+  commands: Command[],
+): boolean {
+  if (
+    cmd.mode !== 'prompt' ||
+    cmd.skipSlashCommands ||
+    typeof cmd.value !== 'string' ||
+    !cmd.value.trim().startsWith('/')
+  ) {
+    return false
+  }
+  const found = findCommand(slashCommandName(cmd.value.trim()), commands)
+  return found !== undefined && found.type !== 'prompt'
+}
+
+/** Official 2.1.328 `fQn(e)` — human prompt eligible for composer hand-back. */
+function isHandBackEligibleHumanCommand(cmd: QueuedCommand): boolean {
+  return (
+    cmd.historyEntry !== undefined &&
+    isDrainableQueuedCommand(cmd) &&
+    typeof cmd.value === 'string'
+  )
+}
+
 export type PromptInputHelpers = {
   setCursorOffset: (offset: number) => void
   clearBuffer: () => void
@@ -1073,8 +1174,81 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
       // Clear the abort controller published a few lines above so this turn's
       // stale controller does not leak into the next turn when every claimed
       // autonomy command was skipped as non-consumable.
-      setAbortController(null)
+      if (queryGuard.generation === reservedGeneration) {
+        setAbortController(null)
+      }
       return
+    }
+
+    const handBackCommand = (cmd: QueuedCommand): void => {
+      restoreHandedBack(queuedCommandRestoreText(cmd), cmd)
+      const restoredPastes = queuedPastedContentsToRestore(cmd)
+      if (restoredPastes.length > 0) {
+        setPastedContents?.(prev =>
+          mergeHandedBackPastedContents(prev, restoredPastes),
+        )
+      }
+    }
+
+    /**
+     * Official 2.1.328 `sz()` (chunk@319736883.js @1640996):
+     * restores user-cancelled human prompts to the composer, appends
+     * interruption markers + flushes history on other generation-changing
+     * aborts, and resurrects remaining commands ahead of the queue.
+     */
+    const resurrectOrHandBackOnAbort = ({
+      cut,
+      stays,
+    }: {
+      cut: readonly QueuedCommand[]
+      stays: readonly Message[]
+    }): void => {
+      const generationChanged = queryGuard.generation !== reservedGeneration
+      const userCancel =
+        generationChanged &&
+        getAbortReasonMessage(abortController.signal.reason) === 'user-cancel'
+      if (stays.length > 0) {
+        setMessages?.(prev => [...prev, ...stays])
+      }
+      const historyInterrupted: QueuedCommand[] = []
+      const resurrect: QueuedCommand[] = []
+      for (const cmd of cut) {
+        if (
+          userCancel &&
+          isDrainableQueuedCommand(cmd) &&
+          typeof cmd.value === 'string'
+        ) {
+          handBackCommand(cmd)
+        } else if (
+          generationChanged &&
+          cmd.mode === 'prompt' &&
+          isDrainableQueuedCommand(cmd)
+        ) {
+          historyInterrupted.push(cmd)
+        } else {
+          resurrect.push(cmd)
+        }
+      }
+      for (let idx = resurrect.length - 1; idx >= 0; idx--) {
+        const cmd = resurrect[idx]
+        if (!cmd) continue
+        enqueueReportingAdmission(
+          { ...cmd, admissionExempt: 'resurrected' },
+          { ahead: true },
+        )
+      }
+      if (historyInterrupted.length > 0) {
+        setMessages?.(prev => [...prev, createUserInterruptionMessage({})])
+        flushQueuedHistoryEntries(
+          historyInterrupted.map(cmd => ({
+            ...cmd,
+            historyEntry: ensureQueuedCommandHistoryEntry(cmd),
+          })),
+        )
+      }
+      if (!generationChanged) {
+        setAbortController(null)
+      }
     }
 
     // densable WZe `Ln` wait then abort Rt. Gold skips known local slash.
@@ -1092,55 +1266,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
         logError(toError(err))
       }
       if (abortController.signal.aborted) {
-        const generationChanged = queryGuard.generation !== reservedGeneration
-        const userCancel =
-          generationChanged &&
-          getAbortReasonMessage(abortController.signal.reason) === 'user-cancel'
-        const historyInterrupted: QueuedCommand[] = []
-        const resurrect: QueuedCommand[] = []
-        for (const cmd of commands) {
-          if (
-            userCancel &&
-            isDrainableQueuedCommand(cmd) &&
-            typeof cmd.value === 'string'
-          ) {
-            restoreHandedBack(queuedCommandRestoreText(cmd), cmd)
-            const restoredPastes = queuedPastedContentsToRestore(cmd)
-            if (restoredPastes.length > 0) {
-              setPastedContents?.(prev =>
-                mergeHandedBackPastedContents(prev, restoredPastes),
-              )
-            }
-          } else if (
-            generationChanged &&
-            cmd.mode === 'prompt' &&
-            isDrainableQueuedCommand(cmd)
-          ) {
-            historyInterrupted.push(cmd)
-          } else {
-            resurrect.push(cmd)
-          }
-        }
-        for (let i = resurrect.length - 1; i >= 0; i--) {
-          const cmd = resurrect[i]
-          if (!cmd) continue
-          enqueueReportingAdmission(
-            { ...cmd, admissionExempt: 'resurrected' },
-            { ahead: true },
-          )
-        }
-        if (historyInterrupted.length > 0) {
-          setMessages?.(prev => [...prev, createUserInterruptionMessage({})])
-          flushQueuedHistoryEntries(
-            historyInterrupted.map(cmd => ({
-              ...cmd,
-              historyEntry: ensureQueuedCommandHistoryEntry(cmd),
-            })),
-          )
-        }
-        if (!generationChanged) {
-          setAbortController(null)
-        }
+        resurrectOrHandBackOnAbort({ cut: commands, stays: [] })
         return
       }
     }
@@ -1177,61 +1303,116 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
       await runWithWorkload(turnWorkload, () =>
         runWithTurnAttribution(turnAttributionKey, async () => {
           using _batch = batchPromptSubmitWaitGuard(commands)
+          const committedCommands = new Set<QueuedCommand>()
+          const committedMessages = new Set<Message>()
+          const flushedCommands = new Set<QueuedCommand>()
           for (let i = 0; i < commands.length; i++) {
             const cmd = commands[i]!
             const isFirst = i === 0
             const runId = cmd.autonomy?.runId
             using promptSubmitEntries = createPromptSubmitEntries()
-            const result = await processUserInput({
-              input: cmd.value,
-              preExpansionInput: cmd.preExpansionValue,
-              mode: cmd.mode,
-              setToolJSX,
-              context: makeContext(),
-              pastedContents: isFirst ? cmd.pastedContents : undefined,
-              messages,
-              setUserInputOnProcessing: isFirst
-                ? setUserInputOnProcessing
-                : undefined,
-              onQueryCommitted: () => {
-                if (!abortController.signal.aborted) {
-                  queryGuard.markDispatchForModel(reservedGeneration)
+            let ctx: ProcessUserInputContext | undefined
+            let result: Awaited<ReturnType<typeof processUserInput>>
+            try {
+              ctx = makeContext()
+              result = await processUserInput({
+                input: cmd.value,
+                preExpansionInput: cmd.preExpansionValue,
+                mode: cmd.mode,
+                setToolJSX,
+                context: ctx,
+                pastedContents: isFirst ? cmd.pastedContents : undefined,
+                messages,
+                setUserInputOnProcessing: isFirst
+                  ? setUserInputOnProcessing
+                  : undefined,
+                onQueryCommitted: () => {
+                  if (!abortController.signal.aborted) {
+                    queryGuard.markDispatchForModel(reservedGeneration)
+                  }
+                },
+                isAlreadyProcessing: !isFirst,
+                querySource,
+                canUseTool,
+                uuid: cmd.uuid,
+                ideSelection: isFirst
+                  ? (cmd.ideSelection ?? ideSelection)
+                  : undefined,
+                skipSlashCommands: cmd.skipSlashCommands,
+                bridgeOrigin: cmd.bridgeOrigin,
+                // densable 2.1.221 fire stamp: re-open model-invocable slash + /loop analytics gate
+                modelScheduledOrigin: cmd.modelScheduledOrigin,
+                wakeupSource: cmd.wakeupSource,
+                isMeta: cmd.isMeta,
+                shouldQuery: cmd.shouldQuery,
+                queryHeldForNextTurn: cmd.queryHeldForNextTurn,
+                skipAttachments:
+                  cmd.skipAttachments === true ||
+                  cmd.mode === 'poll-event' ||
+                  cmd.mode === 'task-notification' ||
+                  !isFirst,
+                skipSubmissionHooks: cmd.skipSubmissionHooks,
+                autonomy: cmd.autonomy,
+                // densable Dfr: origin + suppressWorkflowKeyword for p2y gate.
+                origin: cmd.origin,
+                suppressWorkflowKeyword: cmd.suppressWorkflowKeyword,
+                composerEnter: cmd.composerEnter,
+                wait: cmd.wait === true,
+                promptSubmitted: cmd.promptSubmitted as
+                  | PromptSubmittedStamp
+                  | undefined,
+                aheadOfSessionStart: cmd.orphanedPermission !== undefined,
+                entries: promptSubmitEntries,
+                taskDelivery: cmd.taskDelivery,
+              })
+            } catch (err) {
+              // Official 2.1.328 xLt (chunk@319736883.js @1636750):
+              // On throw, resurrect uncommitted non-human siblings ahead of
+              // the queue and hand back unwritten human prompts to the composer.
+              try {
+                for (let idx = commands.length - 1; idx >= 0; idx--) {
+                  const other = commands[idx]
+                  if (
+                    other !== undefined &&
+                    idx !== i &&
+                    !committedCommands.has(other) &&
+                    other.origin?.kind !== 'plugin' &&
+                    !isHandBackEligibleHumanCommand(other)
+                  ) {
+                    if (idx === 0 && idx < i) {
+                      cleanupAttachmentReadFileState(
+                        newMessages.filter(m => !committedMessages.has(m)),
+                        ctx?.readFileState,
+                      )
+                    }
+                    enqueueReportingAdmission(
+                      {
+                        ...other,
+                        ...(other.priority === 'now'
+                          ? { priority: 'next' as const }
+                          : {}),
+                        admissionExempt: 'resurrected',
+                      },
+                      { ahead: true },
+                    )
+                  }
                 }
-              },
-              isAlreadyProcessing: !isFirst,
-              querySource,
-              canUseTool,
-              uuid: cmd.uuid,
-              ideSelection: isFirst
-                ? (cmd.ideSelection ?? ideSelection)
-                : undefined,
-              skipSlashCommands: cmd.skipSlashCommands,
-              bridgeOrigin: cmd.bridgeOrigin,
-              // densable 2.1.221 fire stamp: re-open model-invocable slash + /loop analytics gate
-              modelScheduledOrigin: cmd.modelScheduledOrigin,
-              wakeupSource: cmd.wakeupSource,
-              isMeta: cmd.isMeta,
-              shouldQuery: cmd.shouldQuery,
-              queryHeldForNextTurn: cmd.queryHeldForNextTurn,
-              skipAttachments:
-                cmd.skipAttachments === true ||
-                cmd.mode === 'poll-event' ||
-                cmd.mode === 'task-notification' ||
-                !isFirst,
-              skipSubmissionHooks: cmd.skipSubmissionHooks,
-              autonomy: cmd.autonomy,
-              // densable Dfr: origin + suppressWorkflowKeyword for p2y gate.
-              origin: cmd.origin,
-              suppressWorkflowKeyword: cmd.suppressWorkflowKeyword,
-              composerEnter: cmd.composerEnter,
-              wait: cmd.wait === true,
-              promptSubmitted: cmd.promptSubmitted as
-                | PromptSubmittedStamp
-                | undefined,
-              aheadOfSessionStart: cmd.orphanedPermission !== undefined,
-              entries: promptSubmitEntries,
-              taskDelivery: cmd.taskDelivery,
-            })
+                for (const other of commands) {
+                  if (
+                    !committedCommands.has(other) &&
+                    !flushedCommands.has(other) &&
+                    isHandBackEligibleHumanCommand(other)
+                  ) {
+                    handBackCommand(other)
+                  }
+                }
+              } catch (resurrectErr) {
+                logForDebugging(
+                  `queueing again after a throw: ${resurrectErr instanceof Error ? resurrectErr.message : String(resurrectErr)}`,
+                )
+              }
+              throw err
+            }
             promptSubmitEntries.handedOff()
             if (runId && result.deferAutonomyCompletion) {
               deferredAutonomyRunIds.add(runId)
@@ -1262,7 +1443,50 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
                 }
               }
             }
-            if (cmd.historyEntry && result.shouldQuery !== false) {
+            // Official 2.1.328 xLt + sz (chunk@319736883.js @1638687):
+            // If Esc / abort interrupted processUserInput (e.g. a slow
+            // UserPromptSubmit hook), restore or resurrect instead of dropping.
+            const resultFlags = result as typeof result & {
+              interrupted?: boolean
+              endedUnderAbort?: boolean
+            }
+            const endedUnderAbort =
+              resultFlags.endedUnderAbort === true ||
+              (abortController.signal.aborted &&
+                resultFlags.interrupted !== true &&
+                result.shouldQuery === false &&
+                result.messages.length > 0)
+            const interrupted =
+              resultFlags.interrupted === true ||
+              (!endedUnderAbort && abortController.signal.aborted)
+            if (interrupted || endedUnderAbort) {
+              cleanupAttachmentReadFileState(
+                newMessages.filter(m => !committedMessages.has(m)),
+                ctx?.readFileState,
+              )
+              const cut = commands.filter(
+                (c, idx) =>
+                  idx > i ||
+                  (c.origin?.kind !== 'plugin' &&
+                    (idx < i ? !committedCommands.has(c) : !endedUnderAbort)),
+              )
+              const stays = [
+                ...newMessages.filter(
+                  m => committedMessages.has(m) || isNonPromptAttachment(m),
+                ),
+                ...(endedUnderAbort
+                  ? result.messages
+                  : result.messages.filter(isNonPromptAttachment)),
+              ]
+              resurrectOrHandBackOnAbort({ cut, stays })
+              return
+            }
+            if (
+              cmd.historyEntry &&
+              (result.shouldQuery !== false ||
+                cmd.mode === 'bash' ||
+                isLocalNonPromptSlashCommand(cmd, params.commands))
+            ) {
               const rewrittenDisplay =
                 typeof cmd.promptSubmitted?.text === 'string' &&
                 cmd.promptSubmitted.text !== cmd.historyEntry.display
@@ -1274,6 +1498,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
                     ? { ...cmd.historyEntry, display: rewrittenDisplay }
                     : cmd.historyEntry,
               })
+              flushedCommands.add(cmd)
             }
             for (const message of result.messages) {
               if (message.type !== 'user' || message.uuid !== cmd.uuid) continue
@@ -1311,6 +1536,12 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               }
             }
             newMessages.push(...result.messages)
+            if (isLocallyCommittedCommand(cmd) || !result.shouldQuery) {
+              committedCommands.add(cmd)
+              for (const m of result.messages) {
+                committedMessages.add(m)
+              }
+            }
             if (isFirst) {
               shouldQuery = result.shouldQuery
               allowedTools = result.allowedTools
@@ -1422,15 +1653,20 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             // Release the guard BEFORE clearing toolJSX to prevent spinner flash —
             // the spinner formula checks: (!toolJSX || showSpinner) && isLoading.
             // If we clear toolJSX while the guard is still reserved, spinner briefly
-            // shows. The finally below also calls cancelReservation (no-op if idle).
-            queryGuard.cancelReservation()
+            // shows. Guard with reservedGeneration so a cancelled turn cannot
+            // clear a newer turn's reservation or abort controller.
+            if (queryGuard.generation === reservedGeneration) {
+              queryGuard.cancelReservation()
+            }
             setToolJSX({
               jsx: null,
               shouldHidePromptInput: false,
               clearLocalJSX: true,
             })
             resetHistory()
-            setAbortController(null)
+            if (queryGuard.generation === reservedGeneration) {
+              setAbortController(null)
+            }
           }
 
           // densable WZe: submitNextInput enqueues; else Rt(nextInput, cmd).

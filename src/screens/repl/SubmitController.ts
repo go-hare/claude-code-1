@@ -388,11 +388,15 @@ export class SubmitController {
     }
 
     const isSlashCommand = !speculationAccept && input.trim().startsWith('/')
+    // Official 2.1.328 (chunk@319736883.js @1798750, @1801500):
+    // Read synchronous TurnController loading state instead of stale React
+    // closure deps.isLoading / deps.isExternalLoading.
+    const isLoadingNow = this.#turnController.isLoading
     const submitsNow = options?.queueSubmit
       ? false
       : options?.sendNow
-        ? !(deps.isLoading || this.#queryGuard.isActive)
-        : !deps.isLoading || speculationAccept || deps.activeRemote.isRemoteMode
+        ? !(isLoadingNow || this.#queryGuard.isActive)
+        : !isLoadingNow || speculationAccept || deps.activeRemote.isRemoteMode
     const historyEntry =
       options?.fromKeybinding || speculationAccept
         ? undefined
@@ -400,11 +404,11 @@ export class SubmitController {
             display: prependModeCharacterToInput(input, effectiveInputMode),
             pastedContents: effectivePastedContents,
           }
-    if (submitsNow && historyEntry) {
-      addToHistory(historyEntry)
-      if (effectiveInputMode === 'bash') {
-        prependToShellHistoryCache(input.trim())
-      }
+    // Local turns defer history write to handlePromptSubmit's post-hook flush
+    // (fixing Esc removeLastFromHistory() double-write and #426 hook redaction).
+    // Shell completion cache is updated eagerly on local bash submits.
+    if (submitsNow && historyEntry && effectiveInputMode === 'bash') {
+      prependToShellHistoryCache(input.trim())
     }
 
     if (deps.stashedPrompt !== undefined && !isSlashCommand && submitsNow) {
@@ -484,16 +488,20 @@ export class SubmitController {
         })?.type === 'local-jsx'
       )
     ) {
+      if (historyEntry) {
+        addToHistory(historyEntry)
+      }
       await this.#handleRemoteSubmit(input, effectivePastedContents, deps)
       return
     }
 
     const abortBeforeSubmit = deps.getAbortController()
+    const turnSnapshotBeforeSubmit = this.#turnController.getSnapshot()
     await handlePromptSubmit({
       input,
       helpers,
       queryGuard: this.#queryGuard,
-      isExternalLoading: deps.isExternalLoading,
+      isExternalLoading: turnSnapshotBeforeSubmit.isExternalLoading,
       mode: effectiveInputMode,
       commands: deps.commands,
       onInputChange: deps.setInputValue,
@@ -527,7 +535,8 @@ export class SubmitController {
           : undefined,
       forceQueue: Boolean(
         options?.queueSubmit ||
-          (options?.sendNow && (deps.isLoading || this.#queryGuard.isActive)),
+          (options?.sendNow &&
+            (turnSnapshotBeforeSubmit.isLoading || this.#queryGuard.isActive)),
       ),
       resumesStaleQuotaWait: options?.resumesStaleQuotaWait,
       composerEnter: options?.composerEnter,
@@ -577,7 +586,7 @@ export class SubmitController {
     }
 
     if (
-      (isSlashCommand || deps.isLoading) &&
+      (isSlashCommand || this.#turnController.isLoading) &&
       deps.stashedPrompt !== undefined
     ) {
       this.#restoreStashedPrompt(deps.stashedPrompt, helpers, deps)
@@ -662,6 +671,12 @@ export class SubmitController {
       helpers.clearBuffer()
       deps.setPastedContents({})
       clearHeldClearedDraft()
+    }
+    if (!options?.fromKeybinding) {
+      addToHistory({
+        display: prependModeCharacterToInput(input, 'prompt'),
+        pastedContents: effectivePastedContents,
+      })
     }
 
     const pastedTextRefs = parseReferences(input).filter(
