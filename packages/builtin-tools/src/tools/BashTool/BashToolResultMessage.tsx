@@ -33,7 +33,12 @@ const CONCURRENT_COMMAND_NOTE =
   '(another command ran in this repository at the same time; a change made by either may show under either result)';
 const TREE_MOVED_NOTE =
   '(a git step in this command can move the working tree, so these may be its changes, not edits)';
-let firstExplainedDiff: BashEditDiff | null = null;
+let firstExplainedDiffRef: WeakRef<BashEditDiff> | null = null;
+
+/** Clear the tracked first-explained diff (e.g. for tests or session reset). */
+export function resetFirstExplainedDiff(): void {
+  firstExplainedDiffRef = null;
+}
 
 function formatFileCount(n: number): string {
   return `${n} ${n === 1 ? 'file' : 'files'}`;
@@ -90,9 +95,13 @@ function BashEditDiffView({
       </MessageResponse>
     );
   }
-  firstExplainedDiff ??= diff;
+  let firstDiff = firstExplainedDiffRef?.deref();
+  if (firstDiff === undefined) {
+    firstExplainedDiffRef = new WeakRef(diff);
+    firstDiff = diff;
+  }
   const convenienceNote =
-    verbose || firstExplainedDiff === diff
+    verbose || firstDiff === diff
       ? '(files that changed while this command ran, by the command or by another process; a convenience view, not a review or audit of the command)'
       : null;
   const sharedNote = diff.shared ? CONCURRENT_COMMAND_NOTE : null;
@@ -119,7 +128,7 @@ function BashEditDiffView({
                 <StructuredDiffList
                   hunks={hunks}
                   dim={false}
-                  width={columns - 12}
+                  width={Math.max(0, columns - 12)}
                   filePath={file.filePath}
                   firstLine={null}
                 />

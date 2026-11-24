@@ -25,6 +25,53 @@ export type GroupingResult = {
 // every call. WeakMap lets old entries be GC'd when the array is replaced.
 const GROUPING_CACHE = new WeakMap<Tools, Set<string>>()
 
+// Official 2.1.328 `_y` / `$C` (@318476113): preserve stable GroupedToolUseMessage
+// object references keyed on the group's first assistant message when the
+// underlying member messages and collected results have not changed.
+const GROUPED_MESSAGE_CACHE = new WeakMap<
+  NormalizedAssistantMessage<BetaToolUseBlock>,
+  GroupedToolUseMessage
+>()
+
+function arraysRefEqual<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function getOrCreateGroupedToolUseMessage(
+  toolName: string,
+  messageId: string,
+  group: NormalizedAssistantMessage<BetaToolUseBlock>[],
+  results: NormalizedUserMessage[],
+): GroupedToolUseMessage {
+  const firstMsg = group[0]!
+  const cached = GROUPED_MESSAGE_CACHE.get(firstMsg)
+  if (
+    cached !== undefined &&
+    cached.toolName === toolName &&
+    cached.messageId === messageId &&
+    arraysRefEqual(cached.messages, group) &&
+    arraysRefEqual(cached.results, results)
+  ) {
+    return cached
+  }
+  const groupedMessage: GroupedToolUseMessage = {
+    type: 'grouped_tool_use',
+    toolName,
+    messages: group,
+    results,
+    displayMessage: firstMsg,
+    uuid: `grouped-${firstMsg.uuid}`,
+    timestamp: firstMsg.timestamp,
+    messageId,
+  }
+  GROUPED_MESSAGE_CACHE.set(firstMsg, groupedMessage)
+  return groupedMessage
+}
+
 function getToolsWithGrouping(tools: Tools): Set<string> {
   let cached = GROUPING_CACHE.get(tools)
   if (!cached) {
@@ -112,6 +159,10 @@ export function applyGrouping(
     }
   }
 
+  if (validGroups.size === 0) {
+    return { messages: messages as RenderableMessage[] }
+  }
+
   // Collect result messages for grouped tool_uses
   // Map from tool_use_id to the user message containing that result
   const resultsByToolUseId = new Map<string, NormalizedUserMessage>()
@@ -152,7 +203,6 @@ export function applyGrouping(
       if (group) {
         if (!emittedGroups.has(key)) {
           emittedGroups.add(key)
-          const firstMsg = group[0]!
 
           // Collect results for this group
           const results: NormalizedUserMessage[] = []
@@ -166,16 +216,12 @@ export function applyGrouping(
             }
           }
 
-          const groupedMessage: GroupedToolUseMessage = {
-            type: 'grouped_tool_use',
-            toolName: info.toolName,
-            messages: group,
+          const groupedMessage = getOrCreateGroupedToolUseMessage(
+            info.toolName,
+            info.messageId,
+            group,
             results,
-            displayMessage: firstMsg,
-            uuid: `grouped-${firstMsg.uuid}`,
-            timestamp: firstMsg.timestamp,
-            messageId: info.messageId,
-          }
+          )
           result.push(groupedMessage)
         }
         continue

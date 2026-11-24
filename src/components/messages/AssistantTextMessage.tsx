@@ -282,7 +282,7 @@ function ClientGeneratedErrorLine({
           {BLACK_CIRCLE}
         </Text>
       </Box>
-      <Box flexDirection="column" width={columns - 10}>
+      <Box flexDirection="column" width={Math.max(0, columns - 10)}>
         <LinkifiedWarningText text={shown} linkHref={linkHref} />
         {truncated && <CtrlOToExpand />}
       </Box>

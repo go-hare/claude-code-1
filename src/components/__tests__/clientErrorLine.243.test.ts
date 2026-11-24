@@ -35,7 +35,7 @@ describe('client error line 243', () => {
     expect(src).toContain('ClientGeneratedErrorLine')
     expect(src).toContain('color="warning"')
     expect(src).toContain('aria-label="error:"')
-    expect(src).toContain('width={columns - 10}')
+    expect(src).toContain('width={Math.max(0, columns - 10)}')
     expect(src).toContain('useTerminalSize')
   })
 

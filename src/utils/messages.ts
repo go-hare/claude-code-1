@@ -1387,6 +1387,452 @@ export function deriveUUID(parentUUID: UUID, index: number): UUID {
   return `${parentUUID.slice(0, 24)}${hex}` as UUID
 }
 
+function extractMutableBlockText(block: unknown): string | undefined {
+  if (typeof block !== 'object' || block === null) return undefined
+  if (
+    'text' in block &&
+    typeof (block as { text?: unknown }).text === 'string'
+  ) {
+    return (block as { text: string }).text
+  }
+  if (
+    'thinking' in block &&
+    typeof (block as { thinking?: unknown }).thinking === 'string'
+  ) {
+    return (block as { thinking: string }).thinking
+  }
+  return undefined
+}
+
+function normalizeSingleMessage(
+  message: Message,
+  prevIsNewChain: boolean,
+): { normalized: NormalizedMessage[]; nextIsNewChain: boolean } {
+  if (!message) {
+    return { normalized: [], nextIsNewChain: prevIsNewChain }
+  }
+  let isNewChain = prevIsNewChain
+  switch (message.type) {
+    case 'assistant': {
+      const aMsg = message as AssistantMessage
+      const assistantContent = Array.isArray(aMsg.message.content)
+        ? aMsg.message.content
+        : []
+      isNewChain = isNewChain || assistantContent.length > 1
+      const normalized = assistantContent.map((_, index) => {
+        const uuid = isNewChain ? deriveUUID(message.uuid, index) : message.uuid
+        return {
+          type: 'assistant' as const,
+          timestamp: message.timestamp,
+          message: {
+            ...aMsg.message,
+            content: [_],
+            context_management: aMsg.message.context_management ?? null,
+          },
+          isMeta: message.isMeta,
+          isVirtual: message.isVirtual,
+          requestId: message.requestId,
+          uuid,
+          error: message?.error,
+          isApiErrorMessage: message.isApiErrorMessage,
+          truncatedAfterOutput: message.truncatedAfterOutput,
+          advisorModel: message.advisorModel,
+        } as NormalizedAssistantMessage
+      })
+      return { normalized, nextIsNewChain: isNewChain }
+    }
+    case 'attachment':
+      return { normalized: [message], nextIsNewChain: isNewChain }
+    case 'progress':
+      return { normalized: [message], nextIsNewChain: isNewChain }
+    case 'system':
+      return { normalized: [message], nextIsNewChain: isNewChain }
+    case 'user': {
+      const uMsg = message as UserMessage
+      if (typeof uMsg.message.content === 'string') {
+        const uuid = isNewChain ? deriveUUID(uMsg.uuid, 0) : uMsg.uuid
+        return {
+          normalized: [
+            {
+              ...uMsg,
+              uuid,
+              message: {
+                ...uMsg.message,
+                content: [{ type: 'text', text: uMsg.message.content }],
+              },
+            } as NormalizedMessage,
+          ],
+          nextIsNewChain: isNewChain,
+        }
+      }
+      isNewChain = isNewChain || (uMsg.message.content?.length ?? 0) > 1
+      let imageIndex = 0
+      const normalized = (uMsg.message.content ?? []).map((_, index) => {
+        const isImage = _.type === 'image'
+        // For image content blocks, extract just the ID for this image
+        const imageId =
+          isImage && uMsg.imagePasteIds
+            ? (uMsg.imagePasteIds as number[])[imageIndex]
+            : undefined
+        if (isImage) imageIndex++
+        return {
+          ...createUserMessage({
+            content: [_],
+            toolUseResult: uMsg.toolUseResult,
+            mcpMeta: uMsg.mcpMeta as {
+              _meta?: Record<string, unknown>
+              structuredContent?: Record<string, unknown>
+            },
+            isMeta: uMsg.isMeta === true ? true : undefined,
+            isVisibleInTranscriptOnly:
+              uMsg.isVisibleInTranscriptOnly === true ? true : undefined,
+            isVirtual:
+              (uMsg.isVirtual as boolean | undefined) === true
+                ? true
+                : undefined,
+            timestamp: uMsg.timestamp as string | undefined,
+            imagePasteIds: imageId !== undefined ? [imageId] : undefined,
+            origin: uMsg.origin as MessageOrigin | undefined,
+            turnCompanion: uMsg.turnCompanion === true ? true : undefined,
+            replacesSpan: uMsg.replacesSpan === true ? true : undefined,
+            sourceToolUseID:
+              typeof uMsg.sourceToolUseID === 'string'
+                ? uMsg.sourceToolUseID
+                : undefined,
+          }),
+          uuid: isNewChain ? deriveUUID(uMsg.uuid, index) : uMsg.uuid,
+        } as NormalizedMessage
+      })
+      return { normalized, nextIsNewChain: isNewChain }
+    }
+    default:
+      return { normalized: [message], nextIsNewChain: isNewChain }
+  }
+}
+
+type SingleNormalizeCacheEntry = {
+  prevIsNewChain: boolean
+  nextIsNewChain: boolean
+  contentRef: unknown
+  contentLength: number
+  blocks: readonly unknown[] | null
+  blockTexts: readonly (string | undefined)[] | null
+  stopReason: unknown
+  uuid: unknown
+  error: unknown
+  isApiErrorMessage: unknown
+  normalized: NormalizedMessage[]
+  filteredNormalized?: NormalizedMessage[]
+}
+
+function isCacheEntryValid(
+  message: Message,
+  prevIsNewChain: boolean,
+  entry: SingleNormalizeCacheEntry,
+): boolean {
+  if (entry.prevIsNewChain !== prevIsNewChain) return false
+  if (message.type === 'assistant') {
+    const aMsg = message as AssistantMessage
+    if (
+      entry.uuid !== aMsg.uuid ||
+      entry.contentRef !== aMsg.message.content ||
+      entry.stopReason !== aMsg.message.stop_reason ||
+      entry.error !== aMsg.error ||
+      entry.isApiErrorMessage !== aMsg.isApiErrorMessage
+    ) {
+      return false
+    }
+    const content = Array.isArray(aMsg.message.content)
+      ? aMsg.message.content
+      : []
+    if (entry.contentLength !== content.length || entry.blocks === null) {
+      return false
+    }
+    for (let i = 0; i < content.length; i++) {
+      if (entry.blocks[i] !== content[i]) return false
+      if (
+        aMsg.message.stop_reason === null &&
+        entry.blockTexts !== null &&
+        entry.blockTexts[i] !== extractMutableBlockText(content[i])
+      ) {
+        return false
+      }
+    }
+    return true
+  }
+  if (message.type === 'user') {
+    const uMsg = message as UserMessage
+    if (entry.uuid !== uMsg.uuid || entry.contentRef !== uMsg.message.content) {
+      return false
+    }
+    if (Array.isArray(uMsg.message.content)) {
+      const content = uMsg.message.content
+      if (entry.contentLength !== content.length || entry.blocks === null) {
+        return false
+      }
+      for (let i = 0; i < content.length; i++) {
+        if (entry.blocks[i] !== content[i]) return false
+      }
+    }
+    return true
+  }
+  return false
+}
+
+function normalizeSingleMessageCached(
+  message: Message,
+  prevIsNewChain: boolean,
+  cache: WeakMap<Message, SingleNormalizeCacheEntry>,
+  filterEmpty: boolean,
+): { normalized: NormalizedMessage[]; nextIsNewChain: boolean } {
+  if (!message) {
+    return { normalized: [], nextIsNewChain: prevIsNewChain }
+  }
+  if (message.type !== 'assistant' && message.type !== 'user') {
+    if (filterEmpty && !isNotEmptyMessage(message)) {
+      return { normalized: [], nextIsNewChain: prevIsNewChain }
+    }
+    return { normalized: [message], nextIsNewChain: prevIsNewChain }
+  }
+
+  const cached = cache.get(message)
+  if (
+    cached !== undefined &&
+    isCacheEntryValid(message, prevIsNewChain, cached)
+  ) {
+    if (filterEmpty) {
+      cached.filteredNormalized ??= cached.normalized.filter(isNotEmptyMessage)
+      return {
+        normalized: cached.filteredNormalized,
+        nextIsNewChain: cached.nextIsNewChain,
+      }
+    }
+    return {
+      normalized: cached.normalized,
+      nextIsNewChain: cached.nextIsNewChain,
+    }
+  }
+
+  const { normalized, nextIsNewChain } = normalizeSingleMessage(
+    message,
+    prevIsNewChain,
+  )
+  const rawContent =
+    message.type === 'assistant'
+      ? (message as AssistantMessage).message.content
+      : (message as UserMessage).message.content
+  const blocks = Array.isArray(rawContent) ? rawContent.slice() : null
+  const stopReason =
+    message.type === 'assistant'
+      ? (message as AssistantMessage).message.stop_reason
+      : undefined
+  const blockTexts =
+    message.type === 'assistant' && stopReason === null && blocks !== null
+      ? blocks.map(extractMutableBlockText)
+      : null
+  const filteredNormalized = filterEmpty
+    ? normalized.filter(isNotEmptyMessage)
+    : undefined
+
+  cache.set(message, {
+    prevIsNewChain,
+    nextIsNewChain,
+    contentRef: rawContent,
+    contentLength: blocks !== null ? blocks.length : -1,
+    blocks,
+    blockTexts,
+    stopReason,
+    uuid: message.uuid,
+    error: message.type === 'assistant' ? message.error : undefined,
+    isApiErrorMessage:
+      message.type === 'assistant' ? message.isApiErrorMessage : undefined,
+    normalized,
+    filteredNormalized,
+  })
+
+  return {
+    normalized: filterEmpty ? filteredNormalized! : normalized,
+    nextIsNewChain,
+  }
+}
+
+export type IncrementalNormalizerOptions = {
+  /** When true, drops empty messages via `isNotEmptyMessage` inside the incremental pass. */
+  filterEmpty?: boolean
+  /** Optional WeakMap cache to share across calls (defaults to a fresh instance WeakMap). */
+  cache?: WeakMap<Message, SingleNormalizeCacheEntry>
+}
+
+/**
+ * Official 2.1.328 `Vr` (`IncrementalNormalizer`) — stateful normalizer that
+ * preserves exact `NormalizedMessage` object references across unchanged source
+ * message prefixes/suffixes and per-message WeakMap entries so downstream caches
+ * (`TranscriptProgressSplitter`, `LeftoverCollapseCache`, `applyGrouping`,
+ * `searchTextCache`, `VirtualMessageList.rowCacheRef`, `React.memo(MessageRow)`)
+ * hit cleanly on progress ticks and appended turns.
+ */
+export class IncrementalNormalizer {
+  static readonly RECENT = 4
+  static readonly PRUNE_PENDING_AT = 64
+
+  private readonly cache: WeakMap<Message, SingleNormalizeCacheEntry>
+  private readonly filterEmpty: boolean
+  private input: readonly Message[] = []
+  private inputLength = 0
+  private output: NormalizedMessage[] = []
+  private starts: number[] = [0]
+  private chainAt: boolean[] = [false]
+  private pending = new Map<Message, boolean>()
+  lastWalked = 0
+
+  constructor(options?: IncrementalNormalizerOptions) {
+    this.cache = options?.cache ?? new WeakMap()
+    this.filterEmpty = options?.filterEmpty ?? false
+  }
+
+  reset(): void {
+    this.input = []
+    this.inputLength = 0
+    this.output = []
+    this.starts = [0]
+    this.chainAt = [false]
+    this.pending.clear()
+    this.lastWalked = 0
+  }
+
+  private notePending(msg: Message | undefined, chain: boolean): void {
+    if (!msg || msg.type !== 'assistant') return
+    if ((msg as AssistantMessage).message.stop_reason === null) {
+      this.pending.set(msg, chain)
+    } else {
+      this.pending.delete(msg)
+    }
+  }
+
+  private prunePending(messages: readonly Message[]): void {
+    if (this.pending.size <= IncrementalNormalizer.PRUNE_PENDING_AT) return
+    const present = new Set(messages)
+    for (const msg of this.pending.keys()) {
+      if (!present.has(msg)) {
+        this.pending.delete(msg)
+      }
+    }
+  }
+
+  normalize(
+    messages: readonly Message[],
+    initialNewChain = false,
+  ): NormalizedMessage[] {
+    const prevInput = this.input
+    const intact =
+      prevInput.length === this.inputLength &&
+      this.starts.length === this.inputLength + 1 &&
+      this.chainAt.length === this.inputLength + 1 &&
+      this.starts[this.inputLength] === this.output.length
+    if (!intact) {
+      this.reset()
+    }
+
+    const recentCutoff = Math.max(
+      0,
+      messages.length - IncrementalNormalizer.RECENT,
+    )
+    let head = 0
+    let tail = 0
+    if (intact && this.chainAt[0] === initialNewChain) {
+      const maxHead = Math.min(prevInput.length, recentCutoff)
+      while (
+        head < maxHead &&
+        prevInput[head] === messages[head] &&
+        !this.pending.has(prevInput[head]!)
+      ) {
+        head++
+      }
+      const maxTail = Math.min(prevInput.length - head, recentCutoff - head)
+      while (
+        tail < maxTail &&
+        prevInput[prevInput.length - 1 - tail] ===
+          messages[messages.length - 1 - tail] &&
+        !this.pending.has(prevInput[prevInput.length - 1 - tail]!)
+      ) {
+        tail++
+      }
+    }
+
+    const headOutputEnd = this.starts[head] ?? 0
+    const nextOutput = this.output.slice(0, headOutputEnd)
+    const nextStarts = this.starts.slice(0, head + 1)
+    const nextChainAt = this.chainAt.slice(0, head + 1)
+    if (head === 0) {
+      nextChainAt[0] = initialNewChain
+    }
+
+    let chain = nextChainAt[head] ?? initialNewChain
+    let walked = 0
+    const walkRange = (from: number, to: number): void => {
+      for (let i = from; i < to; i++) {
+        const msg = messages[i]!
+        const { normalized, nextIsNewChain } = normalizeSingleMessageCached(
+          msg,
+          chain,
+          this.cache,
+          this.filterEmpty,
+        )
+        for (const item of normalized) {
+          nextOutput.push(item)
+        }
+        this.notePending(msg, chain)
+        chain = nextIsNewChain
+        nextStarts.push(nextOutput.length)
+        nextChainAt.push(chain)
+        walked++
+      }
+    }
+
+    const tailStartInNew = messages.length - tail
+    walkRange(head, tailStartInNew)
+
+    const tailStartInOld = prevInput.length - tail
+    if (tail > 0 && this.chainAt[tailStartInOld] === chain) {
+      const oldTailOutputStart = this.starts[tailStartInOld]!
+      const offset = nextOutput.length - oldTailOutputStart
+      for (let i = oldTailOutputStart; i < this.output.length; i++) {
+        nextOutput.push(this.output[i]!)
+      }
+      for (let i = tailStartInOld + 1; i <= prevInput.length; i++) {
+        nextStarts.push(this.starts[i]! + offset)
+        nextChainAt.push(this.chainAt[i]!)
+      }
+    } else {
+      walkRange(tailStartInNew, messages.length)
+    }
+
+    this.prunePending(messages)
+
+    let finalOutput = nextOutput
+    if (nextOutput.length === this.output.length) {
+      let allSame = true
+      for (let i = headOutputEnd; i < nextOutput.length; i++) {
+        if (nextOutput[i] !== this.output[i]) {
+          allSame = false
+          break
+        }
+      }
+      if (allSame) {
+        finalOutput = this.output
+      }
+    }
+
+    this.input = messages
+    this.inputLength = messages.length
+    this.output = finalOutput
+    this.starts = nextStarts
+    this.chainAt = nextChainAt
+    this.lastWalked = walked
+    return finalOutput
+  }
+}
+
 // Split messages, so each content block gets its own message
 export function normalizeMessages(
   messages: AssistantMessage[],
@@ -1406,102 +1852,18 @@ export function normalizeMessages(messages: Message[]): NormalizedMessage[] {
   // This flag is set to true once we encounter a message with multiple content blocks,
   // and remains true for all subsequent messages in the normalization process.
   let isNewChain = false
-  return messages.flatMap(message => {
-    if (!message) return []
-    switch (message.type) {
-      case 'assistant': {
-        const aMsg = message as AssistantMessage
-        const assistantContent = Array.isArray(aMsg.message.content)
-          ? aMsg.message.content
-          : []
-        isNewChain = isNewChain || assistantContent.length > 1
-        return assistantContent.map((_, index) => {
-          const uuid = isNewChain
-            ? deriveUUID(message.uuid, index)
-            : message.uuid
-          return {
-            type: 'assistant' as const,
-            timestamp: message.timestamp,
-            message: {
-              ...aMsg.message,
-              content: [_],
-              context_management: aMsg.message.context_management ?? null,
-            },
-            isMeta: message.isMeta,
-            isVirtual: message.isVirtual,
-            requestId: message.requestId,
-            uuid,
-            error: message?.error,
-            isApiErrorMessage: message.isApiErrorMessage,
-            truncatedAfterOutput: message.truncatedAfterOutput,
-            advisorModel: message.advisorModel,
-          } as NormalizedAssistantMessage
-        })
-      }
-      case 'attachment':
-        return [message]
-      case 'progress':
-        return [message]
-      case 'system':
-        return [message]
-      case 'user': {
-        const uMsg = message as UserMessage
-        if (typeof uMsg.message.content === 'string') {
-          const uuid = isNewChain ? deriveUUID(uMsg.uuid, 0) : uMsg.uuid
-          return [
-            {
-              ...uMsg,
-              uuid,
-              message: {
-                ...uMsg.message,
-                content: [{ type: 'text', text: uMsg.message.content }],
-              },
-            } as NormalizedMessage,
-          ]
-        }
-        isNewChain = isNewChain || (uMsg.message.content?.length ?? 0) > 1
-        let imageIndex = 0
-        return (uMsg.message.content ?? []).map((_, index) => {
-          const isImage = _.type === 'image'
-          // For image content blocks, extract just the ID for this image
-          const imageId =
-            isImage && uMsg.imagePasteIds
-              ? (uMsg.imagePasteIds as number[])[imageIndex]
-              : undefined
-          if (isImage) imageIndex++
-          return {
-            ...createUserMessage({
-              content: [_],
-              toolUseResult: uMsg.toolUseResult,
-              mcpMeta: uMsg.mcpMeta as {
-                _meta?: Record<string, unknown>
-                structuredContent?: Record<string, unknown>
-              },
-              isMeta: uMsg.isMeta === true ? true : undefined,
-              isVisibleInTranscriptOnly:
-                uMsg.isVisibleInTranscriptOnly === true ? true : undefined,
-              isVirtual:
-                (uMsg.isVirtual as boolean | undefined) === true
-                  ? true
-                  : undefined,
-              timestamp: uMsg.timestamp as string | undefined,
-              imagePasteIds: imageId !== undefined ? [imageId] : undefined,
-              origin: uMsg.origin as MessageOrigin | undefined,
-              turnCompanion: uMsg.turnCompanion === true ? true : undefined,
-              replacesSpan: uMsg.replacesSpan === true ? true : undefined,
-              sourceToolUseID:
-                typeof uMsg.sourceToolUseID === 'string'
-                  ? uMsg.sourceToolUseID
-                  : undefined,
-            }),
-            uuid: isNewChain ? deriveUUID(uMsg.uuid, index) : uMsg.uuid,
-          } as NormalizedMessage
-        })
-      }
-      default:
-        return [message]
+  const out: NormalizedMessage[] = []
+  for (const message of messages) {
+    const { normalized, nextIsNewChain } = normalizeSingleMessage(
+      message,
+      isNewChain,
+    )
+    isNewChain = nextIsNewChain
+    for (const item of normalized) {
+      out.push(item)
     }
-  })
+  }
+  return out
 }
 
 type ToolUseRequestMessage = NormalizedAssistantMessage & {
@@ -1871,6 +2233,11 @@ export type MessageLookups = {
   erroredToolUseIDs: Set<string>
 }
 
+const TOOL_USE_IDS_BY_MESSAGE_ID = new WeakMap<
+  MessageLookups,
+  Map<string, Set<string>>
+>()
+
 /**
  * Build pre-computed lookups for efficient O(1) access to message relationships.
  * Call once per render, then use the lookups for all messages.
@@ -2059,7 +2426,7 @@ export function buildMessageLookups(
     }
   }
 
-  return {
+  const result: MessageLookups = {
     siblingToolUseIDs,
     progressMessagesByToolUseID,
     inProgressHookCounts,
@@ -2072,12 +2439,24 @@ export function buildMessageLookups(
     resolvedToolUseIDs,
     erroredToolUseIDs,
   }
+  TOOL_USE_IDS_BY_MESSAGE_ID.set(result, toolUseIDsByMessageID)
+  return result
+}
+
+export type UpdateMessageLookupsOptions = {
+  /** Prior normalizedMessages snapshot to verify strict append-only prefix. */
+  previousNormalizedMessages?: readonly NormalizedMessage[]
+  /** Prior shown messages snapshot to detect mid-array reordering (e.g. reorderMessagesInUI). */
+  previousMessages?: readonly Message[]
 }
 
 /**
  * Incrementally update lookups by processing only newly appended messages.
- * Returns the same lookups object (mutated in place) if update succeeds,
- * or null if a full rebuild is needed (e.g., messages were removed).
+ * Never mutates `existing` or any of its Maps/Sets/arrays in place — clones
+ * modified collections on write and returns a new `MessageLookups` object
+ * reference when updates occur (returns `existing` when unchanged, or `null`
+ * when a full rebuild is required due to truncation, reordering, or progress
+ * tick replacement).
  */
 export function updateMessageLookupsIncremental(
   existing: MessageLookups,
@@ -2085,6 +2464,7 @@ export function updateMessageLookupsIncremental(
   previousMessageCount: number,
   normalizedMessages: NormalizedMessage[],
   messages: Message[],
+  options?: UpdateMessageLookupsOptions,
 ): MessageLookups | null {
   // Safety check: only handle append-only case
   if (
@@ -2092,6 +2472,23 @@ export function updateMessageLookupsIncremental(
     messages.length < previousMessageCount
   ) {
     return null
+  }
+
+  // Verify strict append-only prefix when prior arrays are supplied (detects
+  // mid-array insertions/reordering from reorderMessagesInUI or compaction).
+  if (options?.previousNormalizedMessages !== undefined) {
+    const prevNorm = options.previousNormalizedMessages
+    if (prevNorm.length < previousNormalizedCount) return null
+    for (let i = 0; i < previousNormalizedCount; i++) {
+      if (prevNorm[i] !== normalizedMessages[i]) return null
+    }
+  }
+  if (options?.previousMessages !== undefined) {
+    const prevMsgs = options.previousMessages
+    if (prevMsgs.length < previousMessageCount) return null
+    for (let i = 0; i < previousMessageCount; i++) {
+      if (prevMsgs[i] !== messages[i]) return null
+    }
   }
 
   // No new messages — nothing to do, UNLESS the trailing message is a
@@ -2112,29 +2509,184 @@ export function updateMessageLookupsIncremental(
     return existing
   }
 
+  // Copy-on-write handles so `existing` and its nested Maps/Sets/arrays are
+  // never mutated in place (safe under React 19 concurrent/deferred renders).
+  let siblingToolUseIDs = existing.siblingToolUseIDs
+  let progressMessagesByToolUseID = existing.progressMessagesByToolUseID
+  let inProgressHookCounts = existing.inProgressHookCounts
+  let resolvedHookNames = existing.resolvedHookNames
+  let resolvedHookCounts = existing.resolvedHookCounts
+  let toolResultByToolUseID = existing.toolResultByToolUseID
+  let toolUseByToolUseID = existing.toolUseByToolUseID
+  let firstTextBlockUuidByMessageID = existing.firstTextBlockUuidByMessageID
+  let resolvedToolUseIDs = existing.resolvedToolUseIDs
+  let erroredToolUseIDs = existing.erroredToolUseIDs
+
+  const baseToolUseIDsByMessageID = TOOL_USE_IDS_BY_MESSAGE_ID.get(existing)
+  let toolUseIDsByMessageID: Map<string, Set<string>> | undefined =
+    baseToolUseIDsByMessageID
+  const clonedProgressArrays = new Set<string>()
+  const clonedInProgressHookMaps = new Set<string>()
+  const clonedResolvedHookNameMaps = new Set<string>()
+  const clonedResolvedHookCountMaps = new Set<string>()
+  const clonedSiblingSetsByMessageId = new Set<string>()
+
+  const ensureToolUseIDsByMessageID = (): Map<string, Set<string>> => {
+    if (toolUseIDsByMessageID === undefined) {
+      // Fallback when `existing` was not created via buildMessageLookups:
+      // reconstruct messageId -> toolUseIDs from the prior prefix.
+      const seeded = new Map<string, Set<string>>()
+      const prefixEnd = Math.min(previousMessageCount, messages.length)
+      for (let j = 0; j < prefixEnd; j++) {
+        const prevMsg = messages[j]
+        if (prevMsg?.type !== 'assistant') continue
+        const aPrev = prevMsg as AssistantMessage
+        const apiId = aPrev.message?.id
+        if (!apiId || !Array.isArray(aPrev.message.content)) continue
+        for (const content of aPrev.message.content) {
+          if (typeof content !== 'string' && content.type === 'tool_use') {
+            const tuId = (content as ToolUseBlock).id
+            let set = seeded.get(apiId)
+            if (!set) {
+              set = new Set()
+              seeded.set(apiId, set)
+            }
+            set.add(tuId)
+          }
+        }
+      }
+      toolUseIDsByMessageID = seeded
+      return seeded
+    }
+    if (toolUseIDsByMessageID === baseToolUseIDsByMessageID) {
+      toolUseIDsByMessageID = new Map(baseToolUseIDsByMessageID)
+    }
+    return toolUseIDsByMessageID
+  }
+
+  const writableSiblingToolUseIDs = (): Map<string, Set<string>> => {
+    if (siblingToolUseIDs === existing.siblingToolUseIDs) {
+      siblingToolUseIDs = new Map(existing.siblingToolUseIDs)
+    }
+    return siblingToolUseIDs
+  }
+  const writableToolUseByToolUseID = (): Map<string, ToolUseBlockParam> => {
+    if (toolUseByToolUseID === existing.toolUseByToolUseID) {
+      toolUseByToolUseID = new Map(existing.toolUseByToolUseID)
+    }
+    return toolUseByToolUseID
+  }
+  const writableProgressByToolUseID = (): Map<string, ProgressMessage[]> => {
+    if (progressMessagesByToolUseID === existing.progressMessagesByToolUseID) {
+      progressMessagesByToolUseID = new Map(
+        existing.progressMessagesByToolUseID,
+      )
+    }
+    return progressMessagesByToolUseID
+  }
+  const writableInProgressHookCounts = (): Map<
+    string,
+    Map<HookEvent, number>
+  > => {
+    if (inProgressHookCounts === existing.inProgressHookCounts) {
+      inProgressHookCounts = new Map(existing.inProgressHookCounts)
+    }
+    return inProgressHookCounts
+  }
+  const writableResolvedHookNames = (): Map<
+    string,
+    Map<HookEvent, Set<string>>
+  > => {
+    if (resolvedHookNames === existing.resolvedHookNames) {
+      resolvedHookNames = new Map(existing.resolvedHookNames)
+    }
+    return resolvedHookNames
+  }
+  const writableResolvedHookCounts = (): Map<
+    string,
+    Map<HookEvent, number>
+  > => {
+    if (resolvedHookCounts === existing.resolvedHookCounts) {
+      resolvedHookCounts = new Map(existing.resolvedHookCounts)
+    }
+    return resolvedHookCounts
+  }
+  const writableToolResultByToolUseID = (): Map<string, NormalizedMessage> => {
+    if (toolResultByToolUseID === existing.toolResultByToolUseID) {
+      toolResultByToolUseID = new Map(existing.toolResultByToolUseID)
+    }
+    return toolResultByToolUseID
+  }
+  const writableFirstTextUuid = (): Map<string, string> => {
+    if (
+      firstTextBlockUuidByMessageID === existing.firstTextBlockUuidByMessageID
+    ) {
+      firstTextBlockUuidByMessageID = new Map(
+        existing.firstTextBlockUuidByMessageID,
+      )
+    }
+    return firstTextBlockUuidByMessageID
+  }
+  const writableResolvedToolUseIDs = (): Set<string> => {
+    if (resolvedToolUseIDs === existing.resolvedToolUseIDs) {
+      resolvedToolUseIDs = new Set(existing.resolvedToolUseIDs)
+    }
+    return resolvedToolUseIDs
+  }
+  const writableErroredToolUseIDs = (): Set<string> => {
+    if (erroredToolUseIDs === existing.erroredToolUseIDs) {
+      erroredToolUseIDs = new Set(existing.erroredToolUseIDs)
+    }
+    return erroredToolUseIDs
+  }
+
   // Process new messages entries (pass 1: assistant tool_use blocks)
   const newMessageStart = previousMessageCount
   for (let i = newMessageStart; i < messages.length; i++) {
     const msg = messages[i]!
     if (msg.type === 'assistant') {
       const aMsg = msg as AssistantMessage
-      const _id = aMsg.message.id!
+      const apiMessageId = aMsg.message.id!
       if (Array.isArray(aMsg.message.content)) {
         const newToolUseIDs: string[] = []
         for (const content of aMsg.message.content) {
           if (typeof content !== 'string' && content.type === 'tool_use') {
             const toolUseContent = content as ToolUseBlock
+            // A tool_use already registered in `existing` appearing at or past
+            // `previousMessageCount` means `messages` was reordered (not
+            // append-only) — fall back to a full rebuild so sibling sets and
+            // ordering stay exact.
+            if (existing.toolUseByToolUseID.has(toolUseContent.id)) {
+              return null
+            }
             newToolUseIDs.push(toolUseContent.id)
-            existing.toolUseByToolUseID.set(
+            writableToolUseByToolUseID().set(
               toolUseContent.id,
               content as ToolUseBlockParam,
             )
           }
         }
-        // Update sibling lookup: all tool_use IDs in this message share siblings
-        const allSiblings = new Set(newToolUseIDs)
-        for (const toolUseID of newToolUseIDs) {
-          existing.siblingToolUseIDs.set(toolUseID, allSiblings)
+        if (newToolUseIDs.length > 0) {
+          // Merge with any sibling tool_use IDs already recorded for this
+          // API message ID (across earlier normalized messages sharing the
+          // same `aMsg.message.id`) without mutating the previous Set.
+          const byMsgId = ensureToolUseIDsByMessageID()
+          let mergedSiblings = byMsgId.get(apiMessageId)
+          if (
+            mergedSiblings === undefined ||
+            !clonedSiblingSetsByMessageId.has(apiMessageId)
+          ) {
+            mergedSiblings = new Set(mergedSiblings)
+            byMsgId.set(apiMessageId, mergedSiblings)
+            clonedSiblingSetsByMessageId.add(apiMessageId)
+          }
+          for (const toolUseID of newToolUseIDs) {
+            mergedSiblings.add(toolUseID)
+          }
+          const sibMap = writableSiblingToolUseIDs()
+          for (const toolUseID of mergedSiblings) {
+            sibMap.set(toolUseID, mergedSiblings)
+          }
         }
       }
     }
@@ -2147,22 +2699,36 @@ export function updateMessageLookupsIncremental(
 
     if (msg.type === 'progress') {
       const toolUseID = msg.parentToolUseID as string
-      const existing2 = existing.progressMessagesByToolUseID.get(toolUseID)
-      if (existing2) {
-        existing2.push(msg as ProgressMessage)
+      const progressMap = writableProgressByToolUseID()
+      const existingProgress = progressMap.get(toolUseID)
+      if (existingProgress) {
+        if (clonedProgressArrays.has(toolUseID)) {
+          existingProgress.push(msg as ProgressMessage)
+        } else {
+          progressMap.set(toolUseID, [
+            ...existingProgress,
+            msg as ProgressMessage,
+          ])
+          clonedProgressArrays.add(toolUseID)
+        }
       } else {
-        existing.progressMessagesByToolUseID.set(toolUseID, [
-          msg as ProgressMessage,
-        ])
+        progressMap.set(toolUseID, [msg as ProgressMessage])
+        clonedProgressArrays.add(toolUseID)
       }
 
       const progressData = msg.data as { type: string; hookEvent: HookEvent }
       if (progressData.type === 'hook_progress') {
         const hookEvent = progressData.hookEvent
-        let byHookEvent = existing.inProgressHookCounts.get(toolUseID)
+        const inProgMap = writableInProgressHookCounts()
+        let byHookEvent = inProgMap.get(toolUseID)
         if (!byHookEvent) {
           byHookEvent = new Map()
-          existing.inProgressHookCounts.set(toolUseID, byHookEvent)
+          inProgMap.set(toolUseID, byHookEvent)
+          clonedInProgressHookMaps.add(toolUseID)
+        } else if (!clonedInProgressHookMaps.has(toolUseID)) {
+          byHookEvent = new Map(byHookEvent)
+          inProgMap.set(toolUseID, byHookEvent)
+          clonedInProgressHookMaps.add(toolUseID)
         }
         byHookEvent.set(hookEvent, (byHookEvent.get(hookEvent) ?? 0) + 1)
       }
@@ -2172,10 +2738,10 @@ export function updateMessageLookupsIncremental(
       for (const content of msg.message?.content ?? []) {
         if (typeof content !== 'string' && content.type === 'tool_result') {
           const tr = content as ToolResultBlockParam
-          existing.toolResultByToolUseID.set(tr.tool_use_id, msg)
-          existing.resolvedToolUseIDs.add(tr.tool_use_id)
+          writableToolResultByToolUseID().set(tr.tool_use_id, msg)
+          writableResolvedToolUseIDs().add(tr.tool_use_id)
           if (tr.is_error) {
-            existing.erroredToolUseIDs.add(tr.tool_use_id)
+            writableErroredToolUseIDs().add(tr.tool_use_id)
           }
         }
       }
@@ -2188,15 +2754,15 @@ export function updateMessageLookupsIncremental(
         if (
           content.type === 'text' &&
           apiMessageId &&
-          !existing.firstTextBlockUuidByMessageID.has(apiMessageId)
+          !firstTextBlockUuidByMessageID.has(apiMessageId)
         ) {
-          existing.firstTextBlockUuidByMessageID.set(apiMessageId, msg.uuid)
+          writableFirstTextUuid().set(apiMessageId, msg.uuid)
         }
         if (
           'tool_use_id' in content &&
           typeof (content as { tool_use_id: string }).tool_use_id === 'string'
         ) {
-          existing.resolvedToolUseIDs.add(
+          writableResolvedToolUseIDs().add(
             (content as { tool_use_id: string }).tool_use_id,
           )
         }
@@ -2206,7 +2772,7 @@ export function updateMessageLookupsIncremental(
             content: { type: string }
           }
           if (result.content.type === 'advisor_tool_result_error') {
-            existing.erroredToolUseIDs.add(result.tool_use_id)
+            writableErroredToolUseIDs().add(result.tool_use_id)
           }
         }
       }
@@ -2217,30 +2783,40 @@ export function updateMessageLookupsIncremental(
       const hookEvent = msg.attachment.hookEvent
       const hookName = (msg.attachment as HookAttachmentWithName).hookName
       if (hookName !== undefined) {
-        let byHookNames = existing.resolvedHookNames.get(toolUseID)
-        if (!byHookNames) {
-          byHookNames = new Map()
-          existing.resolvedHookNames.set(toolUseID, byHookNames)
-        }
-        let names = byHookNames.get(hookEvent)
-        if (!names) {
-          names = new Set()
-          byHookNames.set(hookEvent, names)
-        }
-        if (!names.has(hookName)) {
-          names.add(hookName)
-          let byHookEvent = existing.resolvedHookCounts.get(toolUseID)
+        const prevByHookNames = resolvedHookNames.get(toolUseID)
+        const prevNames = prevByHookNames?.get(hookEvent)
+        if (!prevNames?.has(hookName)) {
+          const namesOuter = writableResolvedHookNames()
+          let byHookNames = namesOuter.get(toolUseID)
+          if (!byHookNames) {
+            byHookNames = new Map()
+            namesOuter.set(toolUseID, byHookNames)
+            clonedResolvedHookNameMaps.add(toolUseID)
+          } else if (!clonedResolvedHookNameMaps.has(toolUseID)) {
+            byHookNames = new Map(byHookNames)
+            namesOuter.set(toolUseID, byHookNames)
+            clonedResolvedHookNameMaps.add(toolUseID)
+          }
+          const nextNames = new Set(byHookNames.get(hookEvent))
+          nextNames.add(hookName)
+          byHookNames.set(hookEvent, nextNames)
+
+          const countsOuter = writableResolvedHookCounts()
+          let byHookEvent = countsOuter.get(toolUseID)
           if (!byHookEvent) {
             byHookEvent = new Map()
-            existing.resolvedHookCounts.set(toolUseID, byHookEvent)
+            countsOuter.set(toolUseID, byHookEvent)
+            clonedResolvedHookCountMaps.add(toolUseID)
+          } else if (!clonedResolvedHookCountMaps.has(toolUseID)) {
+            byHookEvent = new Map(byHookEvent)
+            countsOuter.set(toolUseID, byHookEvent)
+            clonedResolvedHookCountMaps.add(toolUseID)
           }
-          byHookEvent.set(hookEvent, names.size)
+          byHookEvent.set(hookEvent, nextNames.size)
         }
       }
     }
   }
-
-  existing.normalizedMessageCount = normalizedMessages.length
 
   // Mark orphaned server_tool_use / mcp_tool_use blocks as errored.
   // Only scan the new normalizedMessages since the previous count —
@@ -2259,16 +2835,32 @@ export function updateMessageLookupsIncremental(
         typeof content !== 'string' &&
         ((content.type as string) === 'server_tool_use' ||
           (content.type as string) === 'mcp_tool_use') &&
-        !existing.resolvedToolUseIDs.has((content as { id: string }).id)
+        !resolvedToolUseIDs.has((content as { id: string }).id)
       ) {
         const id = (content as { id: string }).id
-        existing.resolvedToolUseIDs.add(id)
-        existing.erroredToolUseIDs.add(id)
+        writableResolvedToolUseIDs().add(id)
+        writableErroredToolUseIDs().add(id)
       }
     }
   }
 
-  return existing
+  const next: MessageLookups = {
+    siblingToolUseIDs,
+    progressMessagesByToolUseID,
+    inProgressHookCounts,
+    resolvedHookNames,
+    resolvedHookCounts,
+    toolResultByToolUseID,
+    toolUseByToolUseID,
+    firstTextBlockUuidByMessageID,
+    normalizedMessageCount: normalizedMessages.length,
+    resolvedToolUseIDs,
+    erroredToolUseIDs,
+  }
+  if (toolUseIDsByMessageID !== undefined) {
+    TOOL_USE_IDS_BY_MESSAGE_ID.set(next, toolUseIDsByMessageID)
+  }
+  return next
 }
 
 /**

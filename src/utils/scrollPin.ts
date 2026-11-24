@@ -58,6 +58,52 @@ const EMPTY_SNAPSHOT: ScrollPinSnapshot = {
   unseenDivider: undefined,
 }
 
+function messageUuid(msg: Message | undefined): string | null {
+  const uuid: unknown = msg && 'uuid' in msg ? msg.uuid : undefined
+  return typeof uuid === 'string' && uuid.length > 0 ? uuid : null
+}
+
+function headMessageUuid(messages: readonly Message[]): string | null {
+  return messageUuid(messages[0])
+}
+
+function hasMessageWithUuid(
+  messages: readonly Message[],
+  uuid: string,
+): boolean {
+  for (let i = 0; i < messages.length; i++) {
+    if (messageUuid(messages[i]) === uuid) return true
+  }
+  return false
+}
+
+/**
+ * Distinguish older-history prepends (`useAssistantHistory`: `[...older, ...prev]`,
+ * `[sentinel, ...prev]`, or replacing a leading `system/informational` loading
+ * sentinel with `[...older, ...prev.slice(1)]`) from full transcript replacements
+ * (compaction, `/clear`, `/resume`) where the prior head is gone.
+ */
+function isPrependOrSentinelSwap(
+  prevMessages: readonly Message[],
+  prevHeadUuid: string,
+  nextMessages: readonly Message[],
+): boolean {
+  if (hasMessageWithUuid(nextMessages, prevHeadUuid)) {
+    return true
+  }
+  const prevHead = prevMessages[0]
+  if (prevHead?.type === 'system' && prevHead.subtype === 'informational') {
+    const prevSecondUuid = messageUuid(prevMessages[1])
+    if (
+      prevSecondUuid !== null &&
+      hasMessageWithUuid(nextMessages, prevSecondUuid)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 function computeDialogTarget(
   handle: ScrollBoxHandle,
   bounds?: ScrollDialogBounds,
@@ -94,6 +140,7 @@ export class ScrollPin {
   private readonly listeners = new Set<() => void>()
   private snapshot: ScrollPinSnapshot = EMPTY_SNAPSHOT
   private messages: readonly Message[] = []
+  private firstMessageUuid: string | null = null
   private dividerIndex: number | null = null
   private lastMessageCount = -1
   private renderedLength: number | null = null
@@ -117,6 +164,7 @@ export class ScrollPin {
     if (opts.transcript) {
       const store = opts.transcript
       this.messages = store.getSnapshot()
+      this.firstMessageUuid = headMessageUuid(this.messages)
       this.transcriptUnsub = store.subscribe(() => {
         this.syncMessages(store.getSnapshot())
       })
@@ -146,6 +194,10 @@ export class ScrollPin {
     return this.snapshot.dividerY
   }
 
+  get isScrolledAway(): boolean {
+    return this.scrolledAway
+  }
+
   setRenderedLength(len: number | null): void {
     this.renderedLength = len
   }
@@ -155,16 +207,81 @@ export class ScrollPin {
   }
 
   syncMessages(messages: readonly Message[]): void {
+    const prevMessages = this.messages
+    const prevHeadUuid = this.firstMessageUuid
+    const nextHeadUuid = headMessageUuid(messages)
+    const headChanged = prevHeadUuid !== null && nextHeadUuid !== prevHeadUuid
     this.messages = messages
+
+    if (headChanged) {
+      if (isPrependOrSentinelSwap(prevMessages, prevHeadUuid, messages)) {
+        // Older history was prepended (or a transient loading sentinel at
+        // index 0 was inserted/replaced). Keep dividerIndex, dividerY,
+        // unseenDivider, renderedLength, scrolledAway, and reveal/dialog state
+        // intact so `useAssistantHistory`'s `shiftDivider` shifts cleanly.
+        this.firstMessageUuid = nextHeadUuid
+        this.lastMessageCount = messages.length
+        return
+      }
+      // Transcript head replaced (compaction, /clear, or /resume).
+      // Even when postCompact.length >= dividerIndex, the prior dividerY,
+      // dividerIndex, unseenDivider, and scrolledAway state belong to the old
+      // transcript and must be reset cleanly.
+      this.clearRevealAndDialog()
+      this.dividerIndex = null
+      this.wasStreamingAtScrollAway = false
+      this.scrolledAway = false
+      this.renderedLength = null
+      this.firstMessageUuid = nextHeadUuid
+      this.updateSnapshot(null, messages)
+      return
+    }
+
+    if (this.firstMessageUuid === null && nextHeadUuid !== null) {
+      this.firstMessageUuid = nextHeadUuid
+    }
+
     if (this.dividerIndex === null) return
     if (messages.length < this.dividerIndex) {
       this.dividerIndex = null
+      this.wasStreamingAtScrollAway = false
       this.updateSnapshot(null, messages)
       return
     }
     if (messages.length !== this.lastMessageCount) {
       this.updateSnapshot(this.snapshot.dividerY, messages)
     }
+  }
+
+  /**
+   * Explicitly reset unseen divider, scroll-away flag, and dialog pin state
+   * when conversation compaction replaces the transcript.
+   */
+  resetForCompaction = (nextMessages?: readonly Message[]): void => {
+    if (nextMessages !== undefined) {
+      this.messages = nextMessages
+    }
+    this.clearRevealAndDialog()
+    this.dividerIndex = null
+    this.wasStreamingAtScrollAway = false
+    this.scrolledAway = false
+    this.renderedLength = null
+    this.firstMessageUuid = headMessageUuid(this.messages)
+    this.updateSnapshot(null, this.messages)
+  }
+
+  /**
+   * Explicitly sync ScrollPin state when exiting `ctrl+o` transcript view back
+   * to prompt mode so stale scrolledAway / unseenDivider state cannot stick.
+   */
+  resetForTranscriptExit = (): void => {
+    this.clearRevealAndDialog()
+    this.dividerIndex = null
+    this.wasStreamingAtScrollAway = false
+    this.scrolledAway = false
+    this.prevBelowTranscriptSlot = undefined
+    this.updateSnapshot(null, this.messages)
+    this.viewport.handle?.scrollToBottom()
   }
 
   shiftDivider = (indexDelta: number, heightDelta: number): void => {

@@ -1533,11 +1533,11 @@ export type FullscreenLayoutProps = {
    */
   transcriptOverlay?: ReactNode;
   /**
-   * Official 2.1.328 `pdn.modal` — `{ content, footer?, visible }`.
+   * Official 2.1.328 `pdn.modal` — `{ content, footer?, visible, key? }`.
    * Flex sibling below transcript; content and footer heights are measured
    * together so footer collapses (`height: 0`) when content + footer > maxModalRows.
    */
-  modal?: { content: ReactNode; footer?: ReactNode; visible: boolean };
+  modal?: { key?: string | number; content: ReactNode; footer?: ReactNode; visible: boolean };
   /** Official 2.1.328 subscribable ScrollViewport proxy for the modal ScrollBox. */
   modalScrollViewport?: ScrollViewport;
   /** Official 2.1.328 subscribable ScrollViewport proxy for the main ScrollBox. */
@@ -1730,7 +1730,7 @@ export function FullscreenLayout({
   const terminalSize = useTerminalSize();
   const { rows: rawTerminalRows, columns } = terminalSize;
   const showHeader = header != null && rawTerminalRows >= HEADER_MIN_ROWS;
-  const terminalRows = rawTerminalRows - (showHeader ? HEADER_ROWS : 0);
+  const terminalRows = Math.max(0, rawTerminalRows - (showHeader ? HEADER_ROWS : 0));
   const innerTerminalSize = useMemo(
     () => (showHeader ? { columns, rows: terminalRows } : terminalSize),
     [showHeader, columns, terminalRows, terminalSize],
@@ -1752,7 +1752,7 @@ export function FullscreenLayout({
   const bottomMaxHeight = expandBottomChrome
     ? Math.max(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS)
     : Math.max(1, Math.floor(terminalRows / 2));
-  const maxModalRows = terminalRows - MODAL_TRANSCRIPT_PEEK - 1;
+  const maxModalRows = Math.max(0, terminalRows - MODAL_TRANSCRIPT_PEEK - 1);
   // Official 2.1.328 `pdn` Ie[9..14, 124..131]: memoize nested TerminalSizeContext
   // and ModalContext objects on primitive dimensions so stickyPrompt / pillVisible /
   // unseenMessageCount updates never defeat Messages or MessageRow React.memo.
@@ -1763,7 +1763,7 @@ export function FullscreenLayout({
     () => ({ columns: abovePromptColumns, rows: terminalRows }),
     [abovePromptColumns, terminalRows],
   );
-  const modalColumns = columns - 4;
+  const modalColumns = Math.max(0, columns - 4);
   const modalContextValue = useMemo(
     () => ({
       rows: maxModalRows,
@@ -2062,7 +2062,7 @@ export function FullscreenLayout({
                     ref={leftoverModalBoxRef}
                     flexShrink={0}
                     width="100%"
-                    maxHeight={terminalRows - MODAL_TRANSCRIPT_PEEK}
+                    maxHeight={Math.max(0, terminalRows - MODAL_TRANSCRIPT_PEEK)}
                     flexDirection="column"
                     overflow="hidden"
                     display={modalVisible ? 'flex' : 'none'}
@@ -2078,6 +2078,7 @@ export function FullscreenLayout({
                         <ModalScroller
                           scrollViewport={modalScrollViewport}
                           maxRows={maxModalRows}
+                          modalKey={modal.key}
                           onClaim={setModalClaimedHeight}
                         >
                           {modal.content}

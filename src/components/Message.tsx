@@ -677,6 +677,19 @@ export function hasThinkingContent(m: { type: string; message?: { content: Array
 /** Exported for testing */
 export function areMessagePropsEqual(prev: Props, next: Props): boolean {
   if (prev.message.uuid !== next.message.uuid) return false;
+  // Grouped tool uses and collapsed read/search groups keep the same synthetic
+  // `uuid` (`grouped-${first.uuid}` / `collapsed-${first.uuid}`) as inner
+  // messages/results grow. Do not silently bail out when the message object
+  // reference changes (unchanged groups reuse the same reference via cache).
+  if (
+    (prev.message.type === 'grouped_tool_use' ||
+      prev.message.type === 'collapsed_read_search' ||
+      next.message.type === 'grouped_tool_use' ||
+      next.message.type === 'collapsed_read_search') &&
+    prev.message !== next.message
+  ) {
+    return false;
+  }
   // Only re-render on lastThinkingBlockId change if this message actually
   // has thinking content — otherwise every message in scrollback re-renders
   // whenever hidePastThinking last-id changes (CC-941).

@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
-import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js';
@@ -35,7 +35,7 @@ import { statusLineRateLimits } from './statusLineRateLimits.js';
 import type { VimMode } from '../types/textInputTypes.js';
 import { checkHasTrustDialogAccepted } from '../utils/config.js';
 import { calculateContextPercentages, getContextWindowForModel } from '../utils/context.js';
-import { getCwd } from '../utils/cwd.js';
+import { getCwd, subscribeCwd } from '../utils/cwd.js';
 import { logForDebugging } from '../utils/debug.js';
 import {
   type EffortLevel,
@@ -78,25 +78,32 @@ function formatCountdown(remainingMs: number): string {
 
 type CachePillProps = {
   messages: Message[];
+  lastAssistantMessageId?: string | null;
 };
 
-function CachePill({ messages }: CachePillProps): React.ReactNode {
+function CachePill({ messages, lastAssistantMessageId }: CachePillProps): React.ReactNode {
   const [now, setNow] = useState(() => Date.now());
   const [isFlashOn, setIsFlashOn] = useState(true);
+  const [cacheState, setCacheState] = useState(() => getCacheStatsState());
 
-  const usage = getCurrentUsage(messages);
+  // Memoize message scan so 1s countdown ticks do not re-scan the full
+  // messages array when no new assistant response has arrived.
+  const usage = useMemo(
+    () => getCurrentUsage(messages),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messages array is read via ref in StatusLine; lastAssistantMessageId signals new assistant responses
+    [messages, lastAssistantMessageId],
+  );
+  const usageSig = useMemo(() => (usage !== null ? tokenSignature(usage) : null), [usage]);
 
-  // Feed new responses into the in-memory singleton
+  // Feed new responses into the in-memory singleton in an effect (never during render).
   const prevSigRef = useRef<string | null>(null);
-  if (usage !== null) {
-    const sig = tokenSignature(usage);
-    if (sig !== prevSigRef.current) {
-      prevSigRef.current = sig;
-      cacheOnResponse(usage);
-    }
-  }
+  useEffect(() => {
+    if (usage === null || usageSig === null) return;
+    if (usageSig === prevSigRef.current) return;
+    prevSigRef.current = usageSig;
+    setCacheState(cacheOnResponse(usage));
+  }, [usage, usageSig]);
 
-  const cacheState = getCacheStatsState();
   const { lastResetAt, lastHitRate } = cacheState;
 
   // Derived timing
@@ -127,8 +134,16 @@ function CachePill({ messages }: CachePillProps): React.ReactNode {
   useEffect(() => {
     if (initDoneRef.current) return;
     initDoneRef.current = true;
+    let cancelled = false;
     const sid = getSessionId();
-    void initCacheStatsState(sid);
+    void initCacheStatsState(sid).then(() => {
+      if (!cancelled) {
+        setCacheState(getCacheStatsState());
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const displayHitRate = usage !== null ? computeHitRate(usage) : lastHitRate;
@@ -382,9 +397,9 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
   const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const thinkingEnabled = useAppState(s => s.thinkingEnabled);
   const prStatus = useAppState(s => (s as { prStatus?: StatusLinePrStatus | null }).prStatus ?? null);
-  // Official 2.1.326 #200: refresh custom status line on terminal resize, /cd, and /rename.
+  // Official 2.1.326 #200: refresh status line on terminal resize, /cd, and /rename.
   const { columns } = useTerminalSize();
-  const currentCwd = getCwd();
+  const currentCwd = useSyncExternalStore(subscribeCwd, getCwd, getCwd);
   const sessionTitle = useSyncExternalStore(
     subscribeSessionTitleChanged,
     () => getCurrentSessionTitle(getSessionId()),
@@ -469,24 +484,25 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     const logResult = logNextResultRef.current;
     logNextResultRef.current = false;
 
+    // Recalculate exceeds200kTokens whenever messages changed — even when no
+    // custom shell statusLine.command is configured — so previousStateRef and
+    // built-in status metrics stay accurate past 200k tokens.
+    let exceeds200kTokens = previousStateRef.current.exceeds200kTokens;
+    const currentMessageId = getLastAssistantMessageId(msgs);
+    if (currentMessageId !== previousStateRef.current.messageId) {
+      exceeds200kTokens = doesMostRecentAssistantMessageExceed200k(msgs);
+      previousStateRef.current.messageId = currentMessageId;
+      previousStateRef.current.exceeds200kTokens = exceeds200kTokens;
+    }
+
     // Skip the shell command path entirely when no command is configured.
     // The top row (BuiltinStatusLine + CachePill) renders unconditionally, so
-    // there's nothing to update here when settings.statusLine is missing.
+    // there's nothing to execute here when settings.statusLine is missing.
     if (!settingsRef.current?.statusLine?.command) {
       return;
     }
 
     try {
-      let exceeds200kTokens = previousStateRef.current.exceeds200kTokens;
-
-      // Only recalculate 200k check if messages changed
-      const currentMessageId = getLastAssistantMessageId(msgs);
-      if (currentMessageId !== previousStateRef.current.messageId) {
-        exceeds200kTokens = doesMostRecentAssistantMessageExceed200k(msgs);
-        previousStateRef.current.messageId = currentMessageId;
-        previousStateRef.current.exceeds200kTokens = exceeds200kTokens;
-      }
-
       const statusInput = buildStatusLineCommandInput(
         permissionModeRef.current,
         exceeds200kTokens,
@@ -652,13 +668,25 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
   const paddingX = settings?.statusLine?.padding ?? 0;
 
   // ---- Top row data: feed BuiltinStatusLine (model + ctx + 5h + 7d + cost) ---
+  // Compute exceeds200kTokens reactively on lastAssistantMessageId even when no
+  // custom statusLine.command is configured so context window sizing past 200k
+  // tokens is always accurate for BuiltinStatusLine.
+  const builtinExceeds200kTokens = useMemo(
+    () => doesMostRecentAssistantMessageExceed200k(messagesRef.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messagesRef is stable; lastAssistantMessageId triggers recompute
+    [lastAssistantMessageId, messagesRef],
+  );
   const builtinRuntimeModel = getRuntimeMainLoopModel({
     permissionMode,
     mainLoopModel,
-    exceeds200kTokens: previousStateRef.current.exceeds200kTokens,
+    exceeds200kTokens: builtinExceeds200kTokens,
   });
   const builtinContextWindowSize = getContextWindowForModel(builtinRuntimeModel, getSdkBetas());
-  const builtinCurrentUsage = getCurrentUsage(messagesRef.current);
+  const builtinCurrentUsage = useMemo(
+    () => getCurrentUsage(messagesRef.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messagesRef is stable; lastAssistantMessageId triggers recompute
+    [lastAssistantMessageId, messagesRef],
+  );
   const builtinUsedTokens = builtinCurrentUsage
     ? builtinCurrentUsage.input_tokens +
       builtinCurrentUsage.cache_creation_input_tokens +
@@ -668,20 +696,29 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     ? Math.round(calculateContextPercentages(builtinCurrentUsage, builtinContextWindowSize).used ?? 0)
     : 0;
   const builtinRawUtil = getRawUtilization();
-  const builtinRateLimits = {
-    ...(builtinRawUtil.five_hour && {
-      five_hour: {
-        utilization: builtinRawUtil.five_hour.utilization,
-        resets_at: builtinRawUtil.five_hour.resets_at,
-      },
+  const fiveHourUtil = builtinRawUtil.five_hour?.utilization;
+  const fiveHourResetsAt = builtinRawUtil.five_hour?.resets_at;
+  const sevenDayUtil = builtinRawUtil.seven_day?.utilization;
+  const sevenDayResetsAt = builtinRawUtil.seven_day?.resets_at;
+  const builtinRateLimits = useMemo(
+    () => ({
+      ...(fiveHourUtil !== undefined &&
+        fiveHourResetsAt !== undefined && {
+          five_hour: {
+            utilization: fiveHourUtil,
+            resets_at: fiveHourResetsAt,
+          },
+        }),
+      ...(sevenDayUtil !== undefined &&
+        sevenDayResetsAt !== undefined && {
+          seven_day: {
+            utilization: sevenDayUtil,
+            resets_at: sevenDayResetsAt,
+          },
+        }),
     }),
-    ...(builtinRawUtil.seven_day && {
-      seven_day: {
-        utilization: builtinRawUtil.seven_day.utilization,
-        resets_at: builtinRawUtil.seven_day.resets_at,
-      },
-    }),
-  };
+    [fiveHourUtil, fiveHourResetsAt, sevenDayUtil, sevenDayResetsAt],
+  );
 
   // BuiltinStatusLine + CachePill: only when statusLineEnabled is explicitly true.
   // Shell command output: only when a statusLine.command is configured.
@@ -702,7 +739,7 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
             totalCostUsd={getTotalCost()}
             rateLimits={builtinRateLimits}
           />
-          <CachePill messages={messagesRef.current} />
+          <CachePill messages={messagesRef.current} lastAssistantMessageId={lastAssistantMessageId} />
         </Box>
       )}
       {/* Bottom: user-configured /statusline shell stdout (reserves row in fullscreen) */}

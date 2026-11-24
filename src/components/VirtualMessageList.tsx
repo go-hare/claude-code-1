@@ -477,6 +477,26 @@ export function resolveSearchAnchorScrollTop(
   return fallbackScrollTop;
 }
 
+/**
+ * Official 2.1.328 highlight scroll clamp: ScrollBox.scrollTo() writes raw y
+ * before paint clamps it to `[0, maxScroll]`. Clamping `scrollTop + pendingDelta`
+ * against `maxScroll = Math.max(0, scrollHeight - vpHeight)` keeps the yellow
+ * current-match overlay aligned with the actual painted row near the bottom.
+ */
+export function computeClampedHighlightRowOffset(params: {
+  top: number;
+  vpTop: number;
+  vpHeight: number;
+  scrollHeight: number;
+  scrollTop: number;
+  pendingDelta: number;
+}): { clampedScrollTop: number; lo: number; rowOffset: number } {
+  const maxScroll = Math.max(0, params.scrollHeight - params.vpHeight);
+  const clampedScrollTop = Math.max(0, Math.min(params.scrollTop + params.pendingDelta, maxScroll));
+  const lo = params.top - clampedScrollTop;
+  return { clampedScrollTop, lo, rowOffset: params.vpTop + lo };
+}
+
 export function VirtualMessageList({
   messages,
   scrollViewport,
@@ -919,14 +939,29 @@ export function VirtualMessageList({
     // 1+ without viewportTop (FullscreenLayout has paddingTop=1 on the
     // ScrollBox, plus any header above).
     const vpTop = s.getViewportTop();
-    let lo = top - (s.getScrollTop() + s.getPendingDelta());
     const vp = s.getViewportHeight();
+    let { lo } = computeClampedHighlightRowOffset({
+      top,
+      vpTop,
+      vpHeight: vp,
+      scrollHeight: s.getScrollHeight(),
+      scrollTop: s.getScrollTop(),
+      pendingDelta: s.getPendingDelta(),
+    });
     let screenRow = vpTop + lo + p.row;
     // Off viewport → scroll to bring it in (HEADROOM from top).
-    // scrollTo commits sync; read-back after gives fresh lo.
+    // scrollTo commits sync; clamp read-back against maxScroll so rowOffset
+    // matches the painted screen row even near the bottom of the transcript.
     if (screenRow < vpTop || screenRow >= vpTop + vp) {
       s.scrollTo(Math.max(0, top + p.row - HEADROOM));
-      lo = top - (s.getScrollTop() + s.getPendingDelta());
+      ({ lo } = computeClampedHighlightRowOffset({
+        top,
+        vpTop,
+        vpHeight: vp,
+        scrollHeight: s.getScrollHeight(),
+        scrollTop: s.getScrollTop(),
+        pendingDelta: s.getPendingDelta(),
+      }));
       screenRow = vpTop + lo + p.row;
     }
     setPositions?.({ positions, rowOffset: vpTop + lo, currentIdx: idx });

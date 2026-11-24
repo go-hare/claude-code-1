@@ -69,11 +69,11 @@ import {
   getToolUseID,
   getToolUseIDs,
   hasUnresolvedHooksFromLookup,
+  IncrementalNormalizer,
   interruptedCall,
   isHumanLikeOrigin,
   isMetaVisibleOrigin,
   isUserTextExpandClickable,
-  isNotEmptyMessage,
   normalizeMessages,
   REJECT_MESSAGE,
   REJECT_MESSAGE_WITH_REASON_PREFIX,
@@ -1262,9 +1262,10 @@ const MessagesImpl = ({
     () => (verbose || isTranscriptMode ? messages : filterFoldedLoopNoopMessages(messages)),
     [messages, verbose, isTranscriptMode],
   );
+  const [incrementalNormalizer] = useState(() => new IncrementalNormalizer({ filterEmpty: true }));
   const normalizedMessages = useMemo(
-    () => normalizeMessages(messagesBeforeLoopFold).filter(isNotEmptyMessage),
-    [messagesBeforeLoopFold],
+    () => incrementalNormalizer.normalize(messagesBeforeLoopFold),
+    [incrementalNormalizer, messagesBeforeLoopFold],
   );
 
   const [transcriptProgressSplitter] = useState(() => new TranscriptProgressSplitter());
@@ -1378,6 +1379,8 @@ const MessagesImpl = ({
     lookups: MessageLookups;
     normalizedCount: number;
     messageCount: number;
+    normalizedMessages: TranscriptMessage[];
+    messagesToShow: MessageType[];
     lastAssistantMsgId: string | undefined;
   } | null>(null);
 
@@ -1426,14 +1429,13 @@ const MessagesImpl = ({
 
     const hasTruncatedMessages = shouldTruncate && briefFiltered.length > MAX_MESSAGES_TO_SHOW_IN_TRANSCRIPT_MODE;
 
-    // densable 2.1.289 bd (@207950450) — hide messages folded by UXm loop noop-fold
-    // fire lines BEFORE applyGrouping and collapseReadSearchGroups; skip when verbose || isTranscriptMode.
-    const loopUnfolded =
-      verbose || isTranscriptMode
-        ? (messagesToShow as MessageType[])
-        : filterFoldedLoopNoopMessages(messagesToShow as MessageType[]);
-
-    const { messages: groupedMessages } = applyGrouping(loopUnfolded, tools, verbose);
+    // Loop noop-fold filtering already ran above before IncrementalNormalizer
+    // (messagesBeforeLoopFold), so pass messagesToShow directly to applyGrouping.
+    const { messages: groupedMessages } = applyGrouping(
+      messagesToShow as Parameters<typeof applyGrouping>[0],
+      tools,
+      verbose,
+    );
 
     const collapsedBase = collapseBackgroundBashNotifications(
       collapseHookSummaries(
@@ -1467,9 +1469,10 @@ const MessagesImpl = ({
         : collapsedBase;
     const collapsed = collapseDuplicateTurnDurationMessages(afterFocus, verbose || isTranscriptMode);
 
-    const lookupsKey = computeMessageStructureKey(transcript, messagesToShow as MessageType[]);
+    const shownMessages = messagesToShow as MessageType[];
+    const lookupsKey = computeMessageStructureKey(transcript, shownMessages);
     const currentLastAssistantMsgId = (() => {
-      const lastMsg = (messagesToShow as MessageType[]).at(-1);
+      const lastMsg = shownMessages.at(-1);
       return lastMsg?.type === 'assistant' ? (lastMsg as AssistantMessage).message?.id : undefined;
     })();
     let transcriptLookups: MessageLookups;
@@ -1478,18 +1481,23 @@ const MessagesImpl = ({
     } else if (
       lookupsCacheRef.current &&
       transcript.length >= lookupsCacheRef.current.normalizedCount &&
-      (messagesToShow as MessageType[]).length >= lookupsCacheRef.current.messageCount &&
+      shownMessages.length >= lookupsCacheRef.current.messageCount &&
       // If lastAssistantMsgId changed, previous "in-progress" assistant may
       // now be orphaned — force a full rebuild to pick up the new status.
       lookupsCacheRef.current.lastAssistantMsgId === currentLastAssistantMsgId
     ) {
-      // Try incremental update when only new messages were appended
+      // Try incremental update when only new messages were appended (passing
+      // previous arrays so mid-array reorders fall back to a full rebuild).
       const updated = updateMessageLookupsIncremental(
         lookupsCacheRef.current.lookups,
         lookupsCacheRef.current.normalizedCount,
         lookupsCacheRef.current.messageCount,
         transcript,
-        messagesToShow as MessageType[],
+        shownMessages,
+        {
+          previousNormalizedMessages: lookupsCacheRef.current.normalizedMessages,
+          previousMessages: lookupsCacheRef.current.messagesToShow,
+        },
       );
       if (updated) {
         transcriptLookups = updated;
@@ -1497,26 +1505,32 @@ const MessagesImpl = ({
           key: lookupsKey,
           lookups: transcriptLookups,
           normalizedCount: transcript.length,
-          messageCount: (messagesToShow as MessageType[]).length,
+          messageCount: shownMessages.length,
+          normalizedMessages: transcript,
+          messagesToShow: shownMessages,
           lastAssistantMsgId: currentLastAssistantMsgId,
         };
       } else {
-        transcriptLookups = buildMessageLookups(transcript, messagesToShow as MessageType[]);
+        transcriptLookups = buildMessageLookups(transcript, shownMessages);
         lookupsCacheRef.current = {
           key: lookupsKey,
           lookups: transcriptLookups,
           normalizedCount: transcript.length,
-          messageCount: (messagesToShow as MessageType[]).length,
+          messageCount: shownMessages.length,
+          normalizedMessages: transcript,
+          messagesToShow: shownMessages,
           lastAssistantMsgId: currentLastAssistantMsgId,
         };
       }
     } else {
-      transcriptLookups = buildMessageLookups(transcript, messagesToShow as MessageType[]);
+      transcriptLookups = buildMessageLookups(transcript, shownMessages);
       lookupsCacheRef.current = {
         key: lookupsKey,
         lookups: transcriptLookups,
         normalizedCount: transcript.length,
-        messageCount: (messagesToShow as MessageType[]).length,
+        messageCount: shownMessages.length,
+        normalizedMessages: transcript,
+        messagesToShow: shownMessages,
         lastAssistantMsgId: currentLastAssistantMsgId,
       };
     }
@@ -1629,10 +1643,33 @@ const MessagesImpl = ({
   // attaches after the mouse is already inside → hover never fires. tools is
   // session-stable; lookups and renderableMessages are read via ref so the
   // callback doesn't churn on every new message.
+  // Precompute the Set of renderable rows preceded by a speaker_label (or
+  // split-user continuation under an inbound speaker_label) once per
+  // renderableMessages change so isItemClickable runs in O(1) instead of O(N)
+  // renderableMessages.indexOf(msg) per mounted row.
+  const labelledRenderableRows = useMemo(() => {
+    const labelled = new Set<RenderableMessage>();
+    let lastSpeakerKind: string | undefined;
+    for (let i = 0; i < renderableMessages.length; i++) {
+      const m = renderableMessages[i]!;
+      const prev = i > 0 ? renderableMessages[i - 1] : undefined;
+      if (prev?.type === 'speaker_label') {
+        lastSpeakerKind = prev.speaker?.kind;
+        labelled.add(m);
+      } else if (isSplitUserRow(m, prev)) {
+        if (lastSpeakerKind === 'inbound') {
+          labelled.add(m);
+        }
+      } else {
+        lastSpeakerKind = undefined;
+      }
+    }
+    return labelled;
+  }, [renderableMessages]);
   const lookupsRef = useRef(lookups);
   lookupsRef.current = lookups;
-  const renderableMessagesRef = useRef(renderableMessages);
-  renderableMessagesRef.current = renderableMessages;
+  const labelledRowsRef = useRef(labelledRenderableRows);
+  labelledRowsRef.current = labelledRenderableRows;
   const bashOutputCacheRef = useRef(new WeakMap<object, { stdout: string; stderr: string }>());
   const isItemClickable = useCallback(
     (msg: RenderableMessage): boolean => {
@@ -1653,12 +1690,7 @@ const MessagesImpl = ({
                     .map(block => block.text ?? '')
                     .join('\n')
                 : '';
-          const currentMessages = renderableMessagesRef.current;
-          const idx = currentMessages.indexOf(msg);
-          const labelled =
-            idx > 0 &&
-            (currentMessages[idx - 1]?.type === 'speaker_label' ||
-              precedingSpeakerLabel(currentMessages, idx)?.speaker?.kind === 'inbound');
+          const labelled = labelledRowsRef.current.has(msg);
           return isUserTextExpandClickable(promptText, msg.attachment.origin as { kind?: string } | undefined, {
             labelled,
             columns,
@@ -1705,12 +1737,7 @@ const MessagesImpl = ({
       }
       if (b?.type === 'text' && typeof b.text === 'string') {
         if (verbose || isTranscriptMode) return false;
-        const currentMessages = renderableMessagesRef.current;
-        const idx = currentMessages.indexOf(msg);
-        const labelled =
-          idx > 0 &&
-          (currentMessages[idx - 1]?.type === 'speaker_label' ||
-            precedingSpeakerLabel(currentMessages, idx)?.speaker?.kind === 'inbound');
+        const labelled = labelledRowsRef.current.has(msg);
         return isUserTextExpandClickable(b.text, msg.origin, { labelled, columns });
       }
       if (b?.type !== 'tool_result') return false;
@@ -1885,7 +1912,7 @@ const MessagesImpl = ({
       if (msg.type === 'user' && msg.toolUseResult && Array.isArray(msg.message.content)) {
         const tr = msg.message.content.find(b => b.type === 'tool_result');
         if (tr && 'tool_use_id' in tr) {
-          const tu = lookups.toolUseByToolUseID.get(tr.tool_use_id);
+          const tu = transcriptLookups.toolUseByToolUseID.get(tr.tool_use_id);
           const tool = tu && findToolByName(tools, tu.name);
           const extracted = tool?.extractSearchText?.(msg.toolUseResult as never);
           // undefined = tool didn't implement → keep heuristic. Empty
@@ -1902,7 +1929,7 @@ const MessagesImpl = ({
       searchTextCache.current.set(msg, lowered);
       return lowered;
     },
-    [tools, lookups],
+    [tools, transcriptLookups],
   );
 
   // Official 2.1.326 #114 (`hasLaterTurn`): only the latest turn_duration (when
@@ -2295,9 +2322,6 @@ export function shouldRenderStatically(
   screen: Screen,
   lookups: ReturnType<typeof buildMessageLookups>,
 ): boolean {
-  if (screen === 'transcript') {
-    return true;
-  }
   switch (message.type) {
     case 'attachment':
     case 'user':
@@ -2330,19 +2354,33 @@ export function shouldRenderStatically(
     case 'system': {
       // api errors always render dynamically, since we hide
       // them as soon as we see another non-error message.
-      return message.subtype !== 'api_error';
+      return screen === 'transcript' || message.subtype !== 'api_error';
     }
     case 'grouped_tool_use': {
       const allResolved = message.messages.every(msg => {
         const content = (msg.message!.content as Array<{ type: string; id?: string }>)[0];
-        return content?.type === 'tool_use' && lookups.resolvedToolUseIDs.has(content.id!);
+        return (
+          content?.type === 'tool_use' &&
+          content.id !== undefined &&
+          !streamingToolUseIDs.has(content.id) &&
+          !inProgressToolUseIDs.has(content.id) &&
+          lookups.resolvedToolUseIDs.has(content.id)
+        );
       });
       return allResolved;
     }
     case 'collapsed_read_search': {
-      // In prompt mode, never mark as static to prevent flicker between API turns
-      // (In transcript mode, we already returned true at the top of this function)
-      return false;
+      if (screen !== 'transcript') {
+        // In prompt mode, never mark as static to prevent flicker between API turns
+        return false;
+      }
+      // In transcript (ctrl+o) mode, only mark static once all inner tools are
+      // resolved and no longer streaming/in-progress so live tools keep updating.
+      const toolIds = getToolUseIdsFromCollapsedGroup(message);
+      if (toolIds.length === 0) return true;
+      return toolIds.every(
+        id => !streamingToolUseIDs.has(id) && !inProgressToolUseIDs.has(id) && lookups.resolvedToolUseIDs.has(id),
+      );
     }
     default:
       return true;
