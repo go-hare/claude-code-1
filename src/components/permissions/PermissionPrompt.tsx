@@ -85,6 +85,10 @@ export type PermissionPromptProps<T extends string> = {
   isDisabled?: boolean;
   /** densable y8 requestSource — enables ctrl+x ctrl+k stoppable hint (`iXe`). */
   requestSource?: PermissionRequestSource;
+  /** Initial focused option value (e.g. `'no'` for high-risk `defaultToNo` prompts). */
+  defaultFocusValue?: T;
+  /** Hide numeric index shortcuts (e.g. when `defaultToNo` guards against accidental digit approval). */
+  hideIndexes?: boolean;
 };
 
 const DEFAULT_PLACEHOLDERS: Record<FeedbackType, string> = {
@@ -146,6 +150,8 @@ export function PermissionPrompt<T extends string>({
   onAmendHintChange,
   isDisabled = false,
   requestSource,
+  defaultFocusValue,
+  hideIndexes,
 }: PermissionPromptProps<T>): React.ReactNode {
   const setAppState = useSetAppState();
   const killAgentsHint = useKillAgentsHint(requestSource);
@@ -392,6 +398,8 @@ export function PermissionPrompt<T extends string>({
       options={selectOptions}
       inlineDescriptions
       isDisabled={isDisabled}
+      defaultFocusValue={defaultFocusValue}
+      hideIndexes={hideIndexes}
       declineValue={declineOptionValue}
       stopsAtLastRow={declineOptionValue !== undefined}
       onChange={handleSelect}

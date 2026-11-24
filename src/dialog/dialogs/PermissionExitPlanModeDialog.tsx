@@ -35,8 +35,8 @@ export function PermissionExitPlanModeDialog({ payload, answer }: DialogRenderer
   const finish = useCallback(
     (result: unknown) => {
       if (answered.current) return;
+      if (!answer(result)) return;
       answered.current = true;
-      answer(result);
     },
     [answer],
   );
@@ -62,18 +62,20 @@ export function PermissionExitPlanModeDialog({ payload, answer }: DialogRenderer
       onAbort() {
         finish({ behavior: 'deny' });
       },
-      onAllow(updatedInput, permissionUpdates, feedback) {
+      onAllow(updatedInput, permissionUpdates, feedback, contentBlocks) {
         finish({
           behavior: 'allow',
           updatedInput,
           permissionUpdates,
           ...(feedback ? { feedback } : {}),
+          ...(contentBlocks?.length ? { contentBlocks } : {}),
         });
       },
-      onReject(feedback) {
+      onReject(feedback, contentBlocks) {
         finish({
           behavior: 'deny',
           ...(feedback ? { feedback } : {}),
+          ...(contentBlocks?.length ? { contentBlocks } : {}),
         });
       },
       async recheckPermission() {},

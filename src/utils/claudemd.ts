@@ -527,6 +527,13 @@ let getLiveClaudeMdPermissionContext:
   | (() => ToolPermissionContext | undefined)
   | undefined
 
+type ClaudeMdPermissionContextSourceEntry = {
+  getter: () => ToolPermissionContext | undefined
+}
+
+const liveClaudeMdPermissionContextStack: ClaudeMdPermissionContextSourceEntry[] =
+  []
+
 /**
  * Official 2.1.328 (`Wut`): register the session's launch ToolPermissionContext
  * (`judgedBy`) so recursive CLAUDE.md / @include / rules loading checks Read
@@ -547,14 +554,43 @@ export function setClaudeMdPermissionContext(
  * Official 2.1.328 (`uZr` → `e.engineStore.current?.getState().toolPermissionContext`):
  * register a getter that returns the session's *current* ToolPermissionContext
  * so permission changes made mid-session (e.g. /permissions, settings sync)
- * apply to subsequent memory loads. Called once at session init.
+ * apply to subsequent memory loads. Returns an unregister callback that restores
+ * the previous source on unmount so ephemeral providers cannot clobber the live
+ * session's permission context.
  */
 export function registerClaudeMdPermissionContextSource(
   getter: (() => ToolPermissionContext | undefined) | undefined,
-): void {
+): () => void {
+  if (getter === undefined) {
+    liveClaudeMdPermissionContextStack.length = 0
+    if (getLiveClaudeMdPermissionContext !== undefined) {
+      getLiveClaudeMdPermissionContext = undefined
+      clearMemoryFileCaches()
+    }
+    return () => {}
+  }
+  const entry: ClaudeMdPermissionContextSourceEntry = { getter }
+  liveClaudeMdPermissionContextStack.push(entry)
   if (getLiveClaudeMdPermissionContext !== getter) {
     getLiveClaudeMdPermissionContext = getter
     clearMemoryFileCaches()
+  }
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    const idx = liveClaudeMdPermissionContextStack.lastIndexOf(entry)
+    if (idx !== -1) {
+      liveClaudeMdPermissionContextStack.splice(idx, 1)
+    }
+    const next =
+      liveClaudeMdPermissionContextStack[
+        liveClaudeMdPermissionContextStack.length - 1
+      ]?.getter
+    if (getLiveClaudeMdPermissionContext !== next) {
+      getLiveClaudeMdPermissionContext = next
+      clearMemoryFileCaches()
+    }
   }
 }
 

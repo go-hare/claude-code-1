@@ -802,13 +802,16 @@ export function clearPermissionConfirmQueue(
   dialogStore: DialogStore | null | undefined,
 ): void {
   setToolUseConfirmQueue(() => [])
-  clearPermissionConfirms()
-  if (!dialogStore) return
-  for (const d of [...dialogStore.getState().open]) {
-    if (d.id.startsWith('permission_prompt:')) {
-      dialogStore.dismiss(d.id)
+  // Dismiss permission_prompt mirrors BEFORE clearing permissionConfirmRegistry
+  // so settlePermissionMirror can locate each confirm handle and invoke onAbort().
+  if (dialogStore) {
+    for (const d of [...dialogStore.getState().open]) {
+      if (d.id.startsWith('permission_prompt:')) {
+        dialogStore.dismiss(d.id)
+      }
     }
   }
+  clearPermissionConfirms()
 }
 
 export { createPermissionContext, createPermissionQueueOps, createResolveOnce }

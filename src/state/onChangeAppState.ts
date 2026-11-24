@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'util'
 import {
   clearCarriedEffortFromLatch,
   setMainLoopModelOverride,
+  setSessionBypassPermissionsMode,
 } from '../bootstrap/state.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
@@ -591,6 +592,9 @@ export function onChangeAppState({
   const prevMode = oldState.toolPermissionContext.mode
   const newMode = newState.toolPermissionContext.mode
   if (prevMode !== newMode) {
+    // Keep bootstrap bypass-mode singleton in sync with live AppState mode so
+    // non-React consumers (Chrome MCP, teammate spawning) never see stale bypass state.
+    setSessionBypassPermissionsMode(newMode === 'bypassPermissions')
     // CCR external_metadata must not receive internal-only mode names
     // (bubble). Externalize first — and skip the CCR notify if the
     // EXTERNAL mode didn't change (e.g., default→bubble→default is noise

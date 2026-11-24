@@ -58,7 +58,18 @@ export function createStore<T>(
       const next = updater(prev)
       if (Object.is(next, prev)) return
       state = next
-      onChange?.({ newState: next, oldState: prev })
+      try {
+        onChange?.({ newState: next, oldState: prev })
+      } catch (error) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { logError } =
+            require('../utils/log.js') as typeof import('../utils/log.js')
+          logError(error)
+        } catch {
+          // Best-effort logging; keep store.ts usable without side-effect imports.
+        }
+      }
       for (const listener of listeners) listener()
     },
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import type { StatsStore } from './context/stats.js';
 import type { Root } from '@anthropic/ink';
+import { markSessionExiting } from './dialog/useDialogMailboxBridge.js';
 import type { Props as REPLProps } from './screens/REPL.js';
 import type { AppState } from './state/AppStateStore.js';
 import type { FpsMetrics } from './utils/fpsTracker.js';
@@ -140,11 +141,21 @@ export async function launchRepl(
     await startRendezvousServer();
   }
 
+  const stopRendezvousIfActive = async (): Promise<void> => {
+    if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg' || process.env.CLAUDE_BG_RENDEZVOUS_SOCK) {
+      const { stopRendezvousServer } = await import('./daemon/rendezvousServer.js');
+      stopRendezvousServer();
+    }
+  };
+
   const { startDeferredPrefetches } = await import('./main.js');
   startDeferredPrefetches();
   try {
     await root.waitUntilExit();
   } catch (err) {
+    // Official 2.1.326 #108: mark session exiting before teardown/shutdown so pending
+    // background-agent permission prompts are not treated as user refusals.
+    markSessionExiting();
     // densable A0r/$Ji — unrecoverable render while canary armed → died:render_error
     let canaryNote = '';
     try {
@@ -159,6 +170,7 @@ export async function launchRepl(
     const message = err instanceof Error ? err.message : String(err);
     // eslint-disable-next-line no-console -- surface fatal UI error after Ink crash
     console.error(`Claude Code exited after an unrecoverable interface error (${message}).${canaryNote}`);
+    await stopRendezvousIfActive();
     const { gracefulShutdown } = await import('./utils/gracefulShutdown.js');
     await gracefulShutdown(1);
     return { type: 'exit' };
@@ -172,11 +184,8 @@ export async function launchRepl(
     };
   }
 
-  // Stop rendezvous server before shutdown
-  if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') {
-    const { stopRendezvousServer } = await import('./daemon/rendezvousServer.js');
-    stopRendezvousServer();
-  }
+  markSessionExiting();
+  await stopRendezvousIfActive();
 
   const { gracefulShutdown } = await import('./utils/gracefulShutdown.js');
   await gracefulShutdown(0);

@@ -29,6 +29,7 @@ const HISTORY_SEARCH_SCOPES = ['session', 'project', 'everywhere'] as const;
 type HistorySearchScope = (typeof HISTORY_SEARCH_SCOPES)[number];
 
 type Item = {
+  index: number;
   entry: TimestampedHistoryEntry;
   display: string;
   lower: string;
@@ -54,6 +55,14 @@ export function HistorySearchDialog({ initialQuery, onSelect, onCancel }: Props)
   const [scope, setScope] = useState<HistorySearchScope>('everywhere');
   const [scan, setScan] = useState<Scan | null>(null);
   const [query, setQuery] = useState(initialQuery ?? '');
+  const unmountedRef = useRef(false);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +83,7 @@ export function HistorySearchDialog({ initialQuery, onSelect, onCancel }: Props)
             project?: string;
           };
           loaded.push({
+            index: loaded.length,
             entry,
             display,
             lower: display.toLowerCase(),
@@ -157,14 +167,23 @@ export function HistorySearchDialog({ initialQuery, onSelect, onCancel }: Props)
       placeholder="Filter history…"
       initialQuery={initialQuery}
       items={filtered}
-      getKey={item => String(item.entry.timestamp)}
+      getKey={item => `${item.entry.timestamp}-${item.index}`}
       onQueryChange={setQuery}
       onSelect={item => {
         logEvent('tengu_history_picker_select', {
           result_count: filtered.length,
           query_length: query.length,
         });
-        void item.entry.resolve().then(onSelect);
+        void item.entry
+          .resolve()
+          .then(entry => {
+            if (!unmountedRef.current) {
+              onSelect(entry);
+            }
+          })
+          .catch(() => {
+            // Entry resolution failed — ignore safely rather than crashing with unhandled rejection.
+          });
       }}
       onCancel={onCancel}
       resetKey={scope}

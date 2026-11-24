@@ -23,7 +23,7 @@ function textNotif(
 }
 
 describe('applyNonImmediateNotification', () => {
-  test('same key on current without fold: deduplicates and preserves timeout', () => {
+  test('same key on current without fold: replaces content and resets timeout', () => {
     const current = textNotif({
       key: 'effort-level',
       priority: 'high',
@@ -37,12 +37,12 @@ describe('applyNonImmediateNotification', () => {
 
     const applied = applyNonImmediateNotification(bucket(current), incoming)
 
-    expect(applied.timeoutAction).toBe('none')
-    expect(applied.notifications.current).toBe(current)
+    expect(applied.timeoutAction).toBe('reset')
+    expect(applied.notifications.current).toEqual(incoming)
     expect(applied.notifications.queue).toEqual([])
   })
 
-  test('same key in queue without fold: deduplicates without touching current', () => {
+  test('same key in queue without fold: replaces queued entry without touching current', () => {
     const current = textNotif({
       key: 'other',
       priority: 'medium',
@@ -66,7 +66,7 @@ describe('applyNonImmediateNotification', () => {
 
     expect(applied.timeoutAction).toBe('none')
     expect(applied.notifications.current).toBe(current)
-    expect(applied.notifications.queue).toEqual([queued])
+    expect(applied.notifications.queue).toEqual([incoming])
   })
 
   test('fold on current merges and resets timeout', () => {

@@ -32,9 +32,10 @@ export function usePluginAutoupdateNotification(): void {
 
   useEffect(() => {
     if (getIsRemoteMode()) return;
+    let cancelled = false;
 
     function showNotice(updatedPlugins: string[], outcome: PluginAutoupdateReloadOutcome): void {
-      if (getIsRemoteMode()) return;
+      if (cancelled || getIsRemoteMode()) return;
       if (updatedPlugins.length === 0) return;
 
       // Extract plugin names from plugin IDs (format: "name@marketplace")
@@ -111,11 +112,13 @@ export function usePluginAutoupdateNotification(): void {
     }
 
     const unsubscribe = onPluginsAutoUpdated(plugins => {
+      if (cancelled) return;
       logForDebugging(`Plugin autoupdate notification: ${plugins.length} plugin(s) updated`);
       if (plugins.length === 0) return;
 
       const gen = ++reloadGenRef.current;
       void trySafeInSessionReload().then(outcome => {
+        if (cancelled) return;
         if (gen !== reloadGenRef.current && (outcome === 'ok' || outcome === 'skipped')) {
           return;
         }
@@ -123,6 +126,9 @@ export function usePluginAutoupdateNotification(): void {
       });
     });
 
-    return unsubscribe;
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [appStateStore, setAppState]);
 }

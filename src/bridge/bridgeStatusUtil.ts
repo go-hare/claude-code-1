@@ -120,6 +120,23 @@ export type BridgeStatusInfo = {
   color: 'error' | 'warning' | 'success'
 }
 
+const BRIDGE_STATUS_FAILED: BridgeStatusInfo = Object.freeze({
+  label: '/rc failed',
+  color: 'error',
+})
+const BRIDGE_STATUS_RECONNECTING: BridgeStatusInfo = Object.freeze({
+  label: '/rc reconnecting',
+  color: 'warning',
+})
+const BRIDGE_STATUS_ACTIVE: BridgeStatusInfo = Object.freeze({
+  label: '/rc active',
+  color: 'success',
+})
+const BRIDGE_STATUS_CONNECTING: BridgeStatusInfo = Object.freeze({
+  label: '/rc connecting…',
+  color: 'warning',
+})
+
 /** Derive a status label and color from the bridge connection state. */
 export function getBridgeStatus({
   error,
@@ -132,11 +149,10 @@ export function getBridgeStatus({
   sessionActive: boolean
   reconnecting: boolean
 }): BridgeStatusInfo {
-  if (error) return { label: '/rc failed', color: 'error' }
-  if (reconnecting) return { label: '/rc reconnecting', color: 'warning' }
-  if (sessionActive || connected)
-    return { label: '/rc active', color: 'success' }
-  return { label: '/rc connecting…', color: 'warning' }
+  if (error) return BRIDGE_STATUS_FAILED
+  if (reconnecting) return BRIDGE_STATUS_RECONNECTING
+  if (sessionActive || connected) return BRIDGE_STATUS_ACTIVE
+  return BRIDGE_STATUS_CONNECTING
 }
 
 /** Footer text shown when bridge is idle (Ready state). */

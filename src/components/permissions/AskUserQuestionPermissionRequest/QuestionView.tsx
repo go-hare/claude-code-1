@@ -84,7 +84,7 @@ export function QuestionView({
   onRemoveImage,
   onExternalEditorClose,
 }: Props): React.ReactNode {
-  const isInPlanMode = useAppState(s => s.toolPermissionContext.mode) === 'plan';
+  const isInPlanMode = useAppState(s => s.toolPermissionContext.mode === 'plan');
   const isScreenReader = isScreenReaderModeEnabled();
   const [isFooterFocused, setIsFooterFocused] = useState(false);
   const [isOtherFocused, setIsOtherFocused] = useState(false);

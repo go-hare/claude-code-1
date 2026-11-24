@@ -449,6 +449,15 @@ export function useVoiceKeybindingHandler({
   const isHoldActiveRef = useRef(false);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Reset hold state as soon as we leave 'recording'. The physical hold
   // ends when key-repeat stops (state → 'processing'); keeping the ref
   // set through 'processing' swallows new space presses the user types

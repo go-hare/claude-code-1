@@ -2,11 +2,18 @@ import { feature } from 'bun:bundle'
 import { isIP } from 'net'
 import { hostname as osHostname } from 'os'
 import { basename } from 'path'
-import { useCallback, useContext, useEffect, useRef } from 'react'
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useSyncExternalStore,
+} from 'react'
 import {
   getIsNonInteractiveSession,
   getOriginalCwd,
   getSessionId,
+  onSessionSwitch,
 } from '../../bootstrap/state.js'
 import { getCwd } from '../../utils/cwd.js'
 import type { Command } from '../../commands.js'
@@ -977,6 +984,7 @@ export function useManageMCPConnections(
   }
   const pendingUpdatesRef = useRef<PendingUpdate[]>([])
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const unmountedRef = useRef(false)
 
   const flushPendingUpdates = useCallback(() => {
     flushTimerRef.current = null
@@ -1039,12 +1047,9 @@ export function useManageMCPConnections(
         const updatedResources =
           resources === undefined
             ? mcp.resources
-            : {
-                ...mcp.resources,
-                ...(resources.length > 0
-                  ? { [client.name]: resources }
-                  : omit(mcp.resources, client.name)),
-              }
+            : resources.length > 0
+              ? { ...mcp.resources, [client.name]: resources }
+              : omit(mcp.resources, client.name)
 
         mcp = {
           ...mcp,
@@ -1065,6 +1070,7 @@ export function useManageMCPConnections(
   // Updates are batched via setTimeout to coalesce updates arriving within MCP_BATCH_FLUSH_MS.
   const updateServer = useCallback(
     (update: PendingUpdate) => {
+      if (unmountedRef.current) return
       pendingUpdatesRef.current.push(update)
       if (flushTimerRef.current === null) {
         flushTimerRef.current = setTimeout(
@@ -1116,6 +1122,9 @@ export function useManageMCPConnections(
       resources?: ServerResource[]
       attemptEpoch?: number
     }) => {
+      if (unmountedRef.current) {
+        return
+      }
       // Official $Qr: drop late connection settlements superseded by an account
       // switch (sign-in / org change) so org-managed / previous-account servers
       // are never relisted under the new session.
@@ -1192,6 +1201,9 @@ export function useManageMCPConnections(
 
           client.client.onclose = () => {
             client.client.onclose = undefined
+            if (unmountedRef.current) {
+              return
+            }
             const liveRow = store
               .getState()
               .mcp.clients.find(c => c.name === client.name)
@@ -1775,12 +1787,19 @@ export function useManageMCPConnections(
   // that no longer appear in configs — prevents ghost tools from disabled plugins.
   // Skip claude.ai dedup here to avoid blocking on the network fetch; the connect
   // useEffect below runs immediately after and dedups before connecting.
-  const sessionId = getSessionId()
+  const sessionId = useSyncExternalStore(
+    onSessionSwitch,
+    getSessionId,
+    getSessionId,
+  )
   useEffect(() => {
+    let cancelled = false
+
     async function initializeServersAsPending() {
       const { servers: existingConfigs, errors: mcpErrors } = isStrictMcpConfig
         ? { servers: {}, errors: [] }
         : await getClaudeCodeMcpConfigs(dynamicMcpConfig)
+      if (cancelled) return
       // Official 2.1.325 #2302: preserve folder-owned (.mcp.json / local)
       // server scopes after folder move / pre-warmed start.
       const configs = mergeFolderOwnedMcpConfigs(
@@ -1859,11 +1878,16 @@ export function useManageMCPConnections(
     }
 
     void initializeServersAsPending().catch(error => {
+      if (cancelled) return
       logMCPError(
         'useManageMCPConnections',
         `Failed to initialize servers as pending: ${errorMessage(error)}`,
       )
     })
+
+    return () => {
+      cancelled = true
+    }
   }, [
     isStrictMcpConfig,
     dynamicMcpConfig,
@@ -1933,10 +1957,14 @@ export function useManageMCPConnections(
         ),
       )
       getMcpToolsCommandsAndResources(
-        onConnectionAttempt,
+        res => {
+          if (cancelled || unmountedRef.current) return
+          onConnectionAttempt(res)
+        },
         enabledConfigs,
         getIsNonInteractiveSession(),
       ).catch(error => {
+        if (cancelled || unmountedRef.current) return
         logMCPError(
           'useManageMcpConnections',
           `Failed to get MCP resources: ${errorMessage(error)}`,
@@ -2000,10 +2028,14 @@ export function useManageMCPConnections(
             ),
           )
           getMcpToolsCommandsAndResources(
-            onConnectionAttempt,
+            res => {
+              if (cancelled || unmountedRef.current) return
+              onConnectionAttempt(res)
+            },
             enabledClaudeaiConfigs,
             getIsNonInteractiveSession(),
           ).catch(error => {
+            if (cancelled || unmountedRef.current) return
             logMCPError(
               'useManageMcpConnections',
               `Failed to get claude.ai MCP resources: ${errorMessage(error)}`,
@@ -2108,6 +2140,7 @@ export function useManageMCPConnections(
           { keepConnectionInUse: true },
         )
           .then(res => {
+            if (unmountedRef.current) return
             if (res.client.type === 'connected') {
               onConnectionAttempt(res)
             }
@@ -2123,9 +2156,11 @@ export function useManageMCPConnections(
 
   // Cleanup all timers on unmount
   useEffect(() => {
+    unmountedRef.current = false
     const timers = reconnectTimersRef.current
     const generations = reconnectGenerationsRef.current
     return () => {
+      unmountedRef.current = true
       for (const timer of timers.values()) {
         clearTimeout(timer)
       }

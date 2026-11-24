@@ -14,10 +14,14 @@
  */
 import { useContext, useEffect, useLayoutEffect } from 'react';
 import { instances } from '@anthropic/ink';
-import { AppStoreContext, useAppState } from '../state/AppState.js';
+import { AppStoreContext, type AppStateStore, useAppState } from '../state/AppState.js';
 
 // Non-modal overlays that shouldn't disable TextInput focus
 const NON_MODAL_OVERLAYS = new Set(['autocomplete']);
+
+// Per-store refcounts so nested/concurrent overlays sharing an id (e.g. 'select')
+// only release activeOverlays when the last holder unmounts.
+const overlayRefCountsByStore = new WeakMap<AppStateStore, Map<string, number>>();
 
 /**
  * Hook to register a component as an active overlay.
@@ -38,24 +42,35 @@ export function useRegisterOverlay(id: string, enabled = true): void {
   // Use context directly so this is a no-op when rendered outside AppStateProvider
   // (e.g., in isolated component tests that don't need the full app state tree).
   const store = useContext(AppStoreContext);
-  const setAppState = store?.setState;
   useEffect(() => {
-    if (!enabled || !setAppState) return;
-    setAppState(prev => {
+    if (!enabled || !store) return;
+    let counts = overlayRefCountsByStore.get(store);
+    if (!counts) {
+      counts = new Map<string, number>();
+      overlayRefCountsByStore.set(store, counts);
+    }
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+    store.setState(prev => {
       if (prev.activeOverlays.has(id)) return prev;
       const next = new Set(prev.activeOverlays);
       next.add(id);
       return { ...prev, activeOverlays: next };
     });
     return () => {
-      setAppState(prev => {
+      const nextCount = (counts.get(id) ?? 1) - 1;
+      if (nextCount > 0) {
+        counts.set(id, nextCount);
+        return;
+      }
+      counts.delete(id);
+      store.setState(prev => {
         if (!prev.activeOverlays.has(id)) return prev;
         const next = new Set(prev.activeOverlays);
         next.delete(id);
         return { ...prev, activeOverlays: next };
       });
     };
-  }, [id, enabled, setAppState]);
+  }, [id, enabled, store]);
 
   // On overlay close, force the next render to full-damage diff instead
   // of blit. A tall overlay (e.g. FuzzyPicker with a 20-line preview)

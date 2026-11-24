@@ -1,6 +1,6 @@
 import type * as React from 'react';
 import { useCallback, useEffect } from 'react';
-import { useAppStateStore, useSetAppState } from '../state/AppState.js';
+import { type AppState, useAppStateStore, useSetAppState } from '../state/AppState.js';
 import { dismissToastItem, holdToastItem } from '../components/toastStore.js';
 import { notificationsHoldToasts } from '../utils/replDiffMouseHost.js';
 import type { Theme } from '../utils/theme.js';
@@ -80,9 +80,36 @@ type RemoveNotificationFn = (key: string) => void;
 export type Notification = TextNotification | JSXNotification | SegmentNotification;
 
 const DEFAULT_TIMEOUT_MS = 8000;
+/**
+ * Official 2.1.328 (`chunk@307329163.js`): long-lived / sticky notices
+ * (e.g. 24h quota-auto-resume or 24d idle upsell) yield to normal queued
+ * notifications and requeue underneath instead of starving the slot.
+ */
+export const STICKY_NOTIFICATION_TIMEOUT_MS = 3_600_000;
 
-// Track current timeout to clear it when immediate notifications arrive
+// Track current timeout to clear it when preempted or when the last consumer unmounts
 let currentTimeoutId: NodeJS.Timeout | null = null;
+let activeNotificationMounts = 0;
+
+function clearCurrentNotificationTimeout(): void {
+  if (currentTimeoutId) {
+    clearTimeout(currentTimeoutId);
+    currentTimeoutId = null;
+  }
+}
+
+function scheduleCurrentNotificationTimeout(timeoutMs: number, callback: () => void): void {
+  clearCurrentNotificationTimeout();
+  currentTimeoutId = setTimeout(() => {
+    currentTimeoutId = null;
+    callback();
+  }, timeoutMs);
+  currentTimeoutId.unref?.();
+}
+
+export function isStickyNotification(notice: Notification | null): boolean {
+  return notice !== null && (notice.timeoutMs ?? DEFAULT_TIMEOUT_MS) >= STICKY_NOTIFICATION_TIMEOUT_MS;
+}
 
 /** densable `che(u,r)` — notification visible unless held and not exempt. */
 export function isNotificationVisible(notice: Notification | null, hold: boolean): notice is Notification {
@@ -99,6 +126,112 @@ export function shouldRequeueOnPreempt(existing: Notification, incoming: Notific
   );
 }
 
+function processNotificationQueue(setAppState: (updater: (prev: AppState) => AppState) => void): void {
+  setAppState(prev => {
+    if (!prev?.notifications) return prev;
+    // densable `WJ` — while Obe is mounted, only exempt toasts dequeue.
+    const pool = notificationsHoldToasts(prev)
+      ? prev.notifications.queue.filter(n => n.exemptFromDiffPanelHold)
+      : prev.notifications.queue;
+    const nonStickyPool = pool.filter(n => !isStickyNotification(n));
+    const next = getNext(nonStickyPool) ?? getNext(pool);
+    if (!next) {
+      return prev;
+    }
+    const current = prev.notifications.current;
+    const canPreemptForHeldImmediate =
+      current !== null &&
+      next.priority === 'immediate' &&
+      next.heldDuringDiffPanel === true &&
+      current.priority !== 'immediate';
+    const canPreemptStickyCurrent = current !== null && isStickyNotification(current) && !isStickyNotification(next);
+    const requeueCurrent = canPreemptForHeldImmediate || canPreemptStickyCurrent ? current : null;
+    if (current !== null && requeueCurrent === null) {
+      return prev;
+    }
+
+    const nextKey = next.key;
+    scheduleCurrentNotificationTimeout(next.timeoutMs ?? DEFAULT_TIMEOUT_MS, () => {
+      setAppState(p => {
+        if (!p?.notifications) return p;
+        // Compare by key instead of reference to handle re-created notifications
+        if (p.notifications.current?.key !== nextKey) {
+          return p;
+        }
+        return {
+          ...p,
+          notifications: withPinned(p.notifications, {
+            queue: p.notifications.queue,
+            current: null,
+          }),
+        };
+      });
+      processNotificationQueue(setAppState);
+    });
+
+    return {
+      ...prev,
+      notifications: withPinned(prev.notifications, {
+        queue: [
+          ...(requeueCurrent !== null && shouldRequeueOnPreempt(requeueCurrent, next) ? [requeueCurrent] : []),
+          ...prev.notifications.queue.filter(_ => _ !== next),
+        ],
+        current: next.heldDuringDiffPanel ? { ...next, heldDuringDiffPanel: undefined } : next,
+      }),
+    };
+  });
+}
+
+/**
+ * Enqueue one or more non-immediate notifications from outside React (e.g.
+ * SessionEnd hook failure reporting in hooks.ts) and drain the queue with a
+ * proper dismissal timer so `notifications.current` is never frozen forever.
+ */
+export function enqueueNotificationsOutsideReact(
+  setAppState: (updater: (prev: AppState) => AppState) => void,
+  items: readonly Notification[],
+): void {
+  if (items.length === 0) return;
+  for (const notif of items) {
+    setAppState(prev => {
+      if (!prev?.notifications) return prev;
+      const applied = applyNonImmediateNotification(prev.notifications, notif);
+      if (applied.timeoutAction !== 'none') {
+        clearCurrentNotificationTimeout();
+        if (applied.timeoutAction === 'reset' && applied.notifications.current) {
+          const shown = applied.notifications.current;
+          scheduleCurrentNotificationTimeout(shown.timeoutMs ?? DEFAULT_TIMEOUT_MS, () => {
+            setAppState(p => {
+              if (!p?.notifications || p.notifications.current?.key !== shown.key) {
+                return p;
+              }
+              return {
+                ...p,
+                notifications: withPinned(p.notifications, {
+                  queue: p.notifications.queue,
+                  current: null,
+                }),
+              };
+            });
+            processNotificationQueue(setAppState);
+          });
+        }
+      }
+      if (
+        applied.notifications.current === prev.notifications.current &&
+        applied.notifications.queue === prev.notifications.queue
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        notifications: applied.notifications,
+      };
+    });
+  }
+  processNotificationQueue(setAppState);
+}
+
 export function useNotifications(): {
   addNotification: AddNotificationFn;
   removeNotification: RemoveNotificationFn;
@@ -112,61 +245,7 @@ export function useNotifications(): {
 
   // Process queue when current notification finishes or queue changes
   const processQueue = useCallback(() => {
-    setAppState(prev => {
-      // densable `WJ` — while Obe is mounted, only exempt toasts dequeue.
-      const pool = notificationsHoldToasts(prev)
-        ? prev.notifications.queue.filter(n => n.exemptFromDiffPanelHold)
-        : prev.notifications.queue;
-      const next = getNext(pool);
-      if (!next) {
-        return prev;
-      }
-      const requeueCurrent =
-        prev.notifications.current !== null &&
-        next.priority === 'immediate' &&
-        next.heldDuringDiffPanel === true &&
-        prev.notifications.current.priority !== 'immediate'
-          ? prev.notifications.current
-          : null;
-      if (prev.notifications.current !== null && requeueCurrent === null) {
-        return prev;
-      }
-
-      currentTimeoutId = setTimeout(
-        (setAppState, nextKey, processQueue) => {
-          currentTimeoutId = null;
-          setAppState(prev => {
-            // Compare by key instead of reference to handle re-created notifications
-            if (prev.notifications.current?.key !== nextKey) {
-              return prev;
-            }
-            return {
-              ...prev,
-              notifications: withPinned(prev.notifications, {
-                queue: prev.notifications.queue,
-                current: null,
-              }),
-            };
-          });
-          processQueue();
-        },
-        next.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        setAppState,
-        next.key,
-        processQueue,
-      );
-
-      return {
-        ...prev,
-        notifications: withPinned(prev.notifications, {
-          queue: [
-            ...(requeueCurrent !== null && shouldRequeueOnPreempt(requeueCurrent, next) ? [requeueCurrent] : []),
-            ...prev.notifications.queue.filter(_ => _ !== next),
-          ],
-          current: next.heldDuringDiffPanel ? { ...next, heldDuringDiffPanel: undefined } : next,
-        }),
-      };
-    });
+    processNotificationQueue(setAppState);
   }, [setAppState]);
 
   const addNotification = useCallback<AddNotificationFn>(
@@ -207,36 +286,23 @@ export function useNotifications(): {
           return;
         }
 
-        // Clear any existing timeout since we're showing a new immediate notification
-        if (currentTimeoutId) {
-          clearTimeout(currentTimeoutId);
-          currentTimeoutId = null;
-        }
-
-        // Set up timeout for the immediate notification
-        currentTimeoutId = setTimeout(
-          (setAppState, notif, processQueue) => {
-            currentTimeoutId = null;
-            setAppState(prev => {
-              // Compare by key instead of reference to handle re-created notifications
-              if (prev.notifications.current?.key !== notif.key) {
-                return prev;
-              }
-              return {
-                ...prev,
-                notifications: withPinned(prev.notifications, {
-                  queue: prev.notifications.queue.filter(_ => !notif.invalidates?.includes(_.key)),
-                  current: null,
-                }),
-              };
-            });
-            processQueue();
-          },
-          notif.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          setAppState,
-          notif,
-          processQueue,
-        );
+        // Clear any existing timeout and set up timeout for the immediate notification
+        scheduleCurrentNotificationTimeout(notif.timeoutMs ?? DEFAULT_TIMEOUT_MS, () => {
+          setAppState(prev => {
+            // Compare by key instead of reference to handle re-created notifications
+            if (prev.notifications.current?.key !== notif.key) {
+              return prev;
+            }
+            return {
+              ...prev,
+              notifications: withPinned(prev.notifications, {
+                queue: prev.notifications.queue.filter(_ => !notif.invalidates?.includes(_.key)),
+                current: null,
+              }),
+            };
+          });
+          processQueue();
+        });
 
         // Show the immediate notification right away
         setAppState(prev => ({
@@ -256,34 +322,24 @@ export function useNotifications(): {
       setAppState(prev => {
         const applied = applyNonImmediateNotification(prev.notifications, notif);
         if (applied.timeoutAction !== 'none') {
-          if (currentTimeoutId) {
-            clearTimeout(currentTimeoutId);
-            currentTimeoutId = null;
-          }
+          clearCurrentNotificationTimeout();
           if (applied.timeoutAction === 'reset' && applied.notifications.current) {
             const shown = applied.notifications.current;
-            currentTimeoutId = setTimeout(
-              (setAppState, key, processQueue) => {
-                currentTimeoutId = null;
-                setAppState(p => {
-                  if (p.notifications.current?.key !== key) {
-                    return p;
-                  }
-                  return {
-                    ...p,
-                    notifications: withPinned(p.notifications, {
-                      queue: p.notifications.queue,
-                      current: null,
-                    }),
-                  };
-                });
-                processQueue();
-              },
-              shown.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-              setAppState,
-              shown.key,
-              processQueue,
-            );
+            scheduleCurrentNotificationTimeout(shown.timeoutMs ?? DEFAULT_TIMEOUT_MS, () => {
+              setAppState(p => {
+                if (p.notifications.current?.key !== shown.key) {
+                  return p;
+                }
+                return {
+                  ...p,
+                  notifications: withPinned(p.notifications, {
+                    queue: p.notifications.queue,
+                    current: null,
+                  }),
+                };
+              });
+              processQueue();
+            });
           }
         }
         if (
@@ -315,9 +371,8 @@ export function useNotifications(): {
           return prev;
         }
 
-        if (isCurrent && currentTimeoutId) {
-          clearTimeout(currentTimeoutId);
-          currentTimeoutId = null;
+        if (isCurrent) {
+          clearCurrentNotificationTimeout();
         }
 
         return {
@@ -335,14 +390,22 @@ export function useNotifications(): {
     [setAppState, processQueue],
   );
 
-  // Process queue on mount if there are notifications in the initial state.
+  // Process queue on mount if there are notifications in the initial state,
+  // and clear the active dismissal timer when the last consumer unmounts.
   // Imperative read (not useAppState) — a subscription in a mount-only
   // effect would be vestigial and make every caller re-render on queue changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
+    activeNotificationMounts += 1;
     if (store.getState().notifications.queue.length > 0) {
       processQueue();
     }
+    return () => {
+      activeNotificationMounts = Math.max(0, activeNotificationMounts - 1);
+      if (activeNotificationMounts === 0) {
+        clearCurrentNotificationTimeout();
+      }
+    };
   }, []);
 
   const patchNotification = useCallback(
@@ -449,12 +512,27 @@ export function applyNonImmediateNotification(
     }
   }
 
-  // densable `yo`: non-immediate same-key without `fold` is deduplicated
-  // without replacing content or resetting the active timeout.
-  const existingKeys = new Set(state.queue.map(_ => _.key));
-  if (existingKeys.has(notif.key) || state.current?.key === notif.key) {
+  // Replace same-key notification with latest content (matching JSDoc above)
+  // so status toasts (quota-auto-resume, MCP connectivity, settings errors,
+  // effort/ultracode) reflect fresh copy instead of freezing on first emit.
+  if (state.current?.key === notif.key) {
     return {
-      notifications: state,
+      notifications: withPinned(state, {
+        current: notif,
+        queue: state.queue,
+      }),
+      timeoutAction: 'reset',
+    };
+  }
+  const existingIdx = state.queue.findIndex(_ => _.key === notif.key);
+  if (existingIdx !== -1) {
+    const newQueue = [...state.queue];
+    newQueue[existingIdx] = notif;
+    return {
+      notifications: withPinned(state, {
+        current: state.current,
+        queue: newQueue,
+      }),
       timeoutAction: 'none',
     };
   }

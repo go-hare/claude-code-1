@@ -17,8 +17,10 @@ export type FableConsentDialogProps = {
   organizationUuid?: string | null;
   accountUuid?: string | null;
   /** When no org/account key, accept sets session fallback via callback. */
-  onAccept: (result: { consentKey: string | null; sessionFallback: boolean }) => void;
-  onDecline: () => void;
+  onAccept:
+    | ((result: { consentKey: string | null; sessionFallback: boolean }) => boolean)
+    | ((result: { consentKey: string | null; sessionFallback: boolean }) => void);
+  onDecline: (() => boolean) | (() => void);
   copy?: Partial<FableConsentCopy>;
   creditsOff?: boolean;
   noCreditsYet?: boolean;
@@ -44,20 +46,22 @@ export function FableConsentDialog({
   }, [canBuy, copyOverride, creditsOff, noCreditsYet]);
 
   function handleSelect(value: Choice): void {
-    if (busy) return;
     if (value === 'decline') {
       onDecline();
       return;
     }
-    setBusy(true);
+    if (busy) return;
     const key = resolveFableConsentKey({ organizationUuid, accountUuid });
-    if (key) {
-      markFableOverageConsent(key);
-      onAccept({ consentKey: key, sessionFallback: false });
+    const accepted = onAccept(
+      key ? { consentKey: key, sessionFallback: false } : { consentKey: null, sessionFallback: true },
+    );
+    if (accepted === false) {
       return;
     }
-    // Official session fallback when no org/account identity.
-    onAccept({ consentKey: null, sessionFallback: true });
+    setBusy(true);
+    if (key) {
+      markFableOverageConsent(key);
+    }
   }
 
   return (
@@ -72,6 +76,7 @@ export function FableConsentDialog({
           { label: copy.declineLabel, value: 'decline' as const },
         ]}
         onChange={handleSelect}
+        onCancel={() => handleSelect('decline')}
       />
     </Dialog>
   );

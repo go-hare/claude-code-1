@@ -588,6 +588,7 @@ function leftoverListFrame({
       shouldDropWheel,
       scrollViewport,
       focusOn,
+      onKeyDown,
       onPaste,
       children,
     });
@@ -636,6 +637,7 @@ function leftoverDollarWt({
   shouldDropWheel,
   scrollViewport,
   focusOn,
+  onKeyDown,
   onPaste,
   children,
 }: {
@@ -649,6 +651,7 @@ function leftoverDollarWt({
   shouldDropWheel: () => boolean;
   scrollViewport: (delta: number) => boolean;
   focusOn: boolean;
+  onKeyDown?: (event: KeyboardEvent) => void;
   onPaste?: (event: PasteEvent) => void;
   children: React.ReactNode;
 }): React.ReactNode {
@@ -677,7 +680,7 @@ function leftoverDollarWt({
   return (
     <LeftoverIheWindowContext value={leftoverIheValue}>
       <LeftoverNnDtContext value={nnDt}>
-        <Box ref={hostRef} flexDirection="column" alignItems="stretch" onPaste={onPaste}>
+        <Box ref={hostRef} flexDirection="column" alignItems="stretch" onKeyDown={onKeyDown} onPaste={onPaste}>
           {optionCount === 0 ? (
             emptyMessage != null ? (
               <Text dimColor>{emptyMessage}</Text>
@@ -2527,6 +2530,7 @@ export function Select<T>({
     shouldDropWheel: leftoverShouldDropWheel,
     scrollViewport: state.scrollViewport,
     onKeyDown: leftoverBindKeyDown,
+    onPaste: handlePasteFromOtherRows,
     windowStart: state.visibleFromIndex,
     focusOn: leftoverFocusOn,
     screenReader: leftoverScreenReader,

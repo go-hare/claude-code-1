@@ -38,8 +38,10 @@ export function useIDEIntegration({
   const shownLatchRef = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     function addIde(ide: DetectedIDEInfo | null) {
-      if (!ide) {
+      if (cancelled || !ide) {
         return;
       }
 
@@ -88,6 +90,7 @@ export function useIDEIntegration({
       addIde,
       ideToInstallExtension,
       status => {
+        if (cancelled) return;
         if (getIsRemoteMode()) return;
         if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return;
         if (shownLatchRef.current) return;
@@ -99,10 +102,14 @@ export function useIDEIntegration({
           .current(ideOnboardingSpec, { installationStatus: status }, { queueBehind: true })
           .then(clear, clear);
       },
-      status => setIDEInstallationState(status),
+      status => {
+        if (cancelled) return;
+        setIDEInstallationState(status);
+      },
     );
 
     return () => {
+      cancelled = true;
       cancelCurrentIDESearch();
     };
   }, [autoConnectIdeFlag, ideToInstallExtension, setDynamicMcpConfig, setIDEInstallationState]);

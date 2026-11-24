@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNotifications } from 'src/context/notifications.js';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import { Text } from '@anthropic/ink';
@@ -19,7 +19,19 @@ const EMPTY_MCP_CLIENTS: MCPServerConnection[] = [];
  * over-counted.
  */
 export function useMcpConnectivityStatus({ mcpClients = EMPTY_MCP_CLIENTS }: Props): void {
-  const { addNotification } = useNotifications();
+  const { addNotification, removeNotification } = useNotifications();
+  const prevStateRef = useRef<{
+    failedLocal: number;
+    failedClaudeAi: number;
+    needsAuthKey: 'mcp-needs-auth' | 'mcp-claudeai-needs-auth' | null;
+    needsAuthCount: number;
+  }>({
+    failedLocal: 0,
+    failedClaudeAi: 0,
+    needsAuthKey: null,
+    needsAuthCount: 0,
+  });
+
   useEffect(() => {
     if (getIsRemoteMode()) return;
 
@@ -59,11 +71,13 @@ export function useMcpConnectivityStatus({ mcpClients = EMPTY_MCP_CLIENTS }: Pro
 
     // densable single-count path (Logo warning uses this total).
     const mcpNeedsAuthCount = countMcpNeedsAuth(mcpClients, ever, session);
+    const prev = prevStateRef.current;
 
-    if (failedLocalClients.length === 0 && failedClaudeAiClients.length === 0 && mcpNeedsAuthCount === 0) {
-      return;
-    }
-    if (failedLocalClients.length > 0) {
+    if (failedLocalClients.length === 0) {
+      if (prev.failedLocal > 0) {
+        removeNotification('mcp-failed');
+      }
+    } else if (failedLocalClients.length !== prev.failedLocal) {
       addNotification({
         key: 'mcp-failed',
         jsx: (
@@ -77,7 +91,12 @@ export function useMcpConnectivityStatus({ mcpClients = EMPTY_MCP_CLIENTS }: Pro
         priority: 'medium',
       });
     }
-    if (failedClaudeAiClients.length > 0) {
+
+    if (failedClaudeAiClients.length === 0) {
+      if (prev.failedClaudeAi > 0) {
+        removeNotification('mcp-claudeai-failed');
+      }
+    } else if (failedClaudeAiClients.length !== prev.failedClaudeAi) {
       addNotification({
         key: 'mcp-claudeai-failed',
         jsx: (
@@ -92,32 +111,40 @@ export function useMcpConnectivityStatus({ mcpClients = EMPTY_MCP_CLIENTS }: Pro
         priority: 'medium',
       });
     }
+
     // densable Logo warning: one "N MCP server(s) need authentication" line.
     // Keep split local/claude.ai notices when both present for richer copy;
     // when only one side, still match densable wording for the combined count.
+    let nextNeedsAuthKey: 'mcp-needs-auth' | 'mcp-claudeai-needs-auth' | null = null;
+    let nextNeedsAuthCount = 0;
     if (mcpNeedsAuthCount > 0) {
       if (needsAuthLocalServers.length > 0 && needsAuthClaudeAiServers.length === 0) {
-        addNotification({
-          key: 'mcp-needs-auth',
-          jsx: (
-            <>
-              <Text color="warning">
-                {needsAuthLocalServers.length} MCP{' '}
-                {needsAuthLocalServers.length === 1 ? 'server needs' : 'servers need'} authentication
-              </Text>
-              <Text dimColor> · /mcp</Text>
-            </>
-          ),
-          priority: 'medium',
-        });
+        nextNeedsAuthKey = 'mcp-needs-auth';
+        nextNeedsAuthCount = needsAuthLocalServers.length;
       } else if (needsAuthClaudeAiServers.length > 0 && needsAuthLocalServers.length === 0) {
+        nextNeedsAuthKey = 'mcp-claudeai-needs-auth';
+        nextNeedsAuthCount = needsAuthClaudeAiServers.length;
+      } else {
+        nextNeedsAuthKey = 'mcp-needs-auth';
+        nextNeedsAuthCount = mcpNeedsAuthCount;
+      }
+    }
+
+    if (nextNeedsAuthKey === null) {
+      if (prev.needsAuthKey !== null) {
+        removeNotification(prev.needsAuthKey);
+      }
+    } else if (nextNeedsAuthKey !== prev.needsAuthKey || nextNeedsAuthCount !== prev.needsAuthCount) {
+      if (prev.needsAuthKey !== null && prev.needsAuthKey !== nextNeedsAuthKey) {
+        removeNotification(prev.needsAuthKey);
+      }
+      if (nextNeedsAuthKey === 'mcp-claudeai-needs-auth') {
         addNotification({
           key: 'mcp-claudeai-needs-auth',
           jsx: (
             <>
               <Text color="warning">
-                {needsAuthClaudeAiServers.length} claude.ai{' '}
-                {needsAuthClaudeAiServers.length === 1 ? 'connector needs' : 'connectors need'} auth
+                {nextNeedsAuthCount} claude.ai {nextNeedsAuthCount === 1 ? 'connector needs' : 'connectors need'} auth
               </Text>
               <Text dimColor> · /mcp</Text>
             </>
@@ -125,13 +152,12 @@ export function useMcpConnectivityStatus({ mcpClients = EMPTY_MCP_CLIENTS }: Pro
           priority: 'medium',
         });
       } else {
-        // Both local + claude.ai: densable unified count wording
         addNotification({
           key: 'mcp-needs-auth',
           jsx: (
             <>
               <Text color="warning">
-                {mcpNeedsAuthCount} MCP {mcpNeedsAuthCount === 1 ? 'server needs' : 'servers need'} authentication
+                {nextNeedsAuthCount} MCP {nextNeedsAuthCount === 1 ? 'server needs' : 'servers need'} authentication
               </Text>
               <Text dimColor> · /mcp</Text>
             </>
@@ -140,5 +166,12 @@ export function useMcpConnectivityStatus({ mcpClients = EMPTY_MCP_CLIENTS }: Pro
         });
       }
     }
-  }, [addNotification, mcpClients]);
+
+    prevStateRef.current = {
+      failedLocal: failedLocalClients.length,
+      failedClaudeAi: failedClaudeAiClients.length,
+      needsAuthKey: nextNeedsAuthKey,
+      needsAuthCount: nextNeedsAuthCount,
+    };
+  }, [addNotification, removeNotification, mcpClients]);
 }

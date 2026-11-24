@@ -418,7 +418,7 @@ function handleInteractivePermission(
       if (isResolved()) return
       const freshResult = await hasPermissionsToUseTool(
         ctx.tool,
-        ctx.input,
+        displayInput,
         ctx.toolUseContext,
         ctx.assistantMessage,
         ctx.toolUseID,
@@ -433,7 +433,7 @@ function handleInteractivePermission(
         dismissPermissionDoo()
         ctx.removeFromQueue()
         ctx.logDecision({ decision: 'accept', source: 'config' })
-        resolveOnce(ctx.buildAllow(freshResult.updatedInput ?? ctx.input))
+        resolveOnce(ctx.buildAllow(freshResult.updatedInput ?? displayInput))
       }
     },
   }
@@ -547,10 +547,10 @@ function handleInteractivePermission(
           session.onReprompt(pendingDooReprompt)
           pendingDooReprompt = null
         }
-        void session.result.then(async result => {
+        void session.result.then(async dialogResult => {
           if (!claim()) return
           forgetPipePermission(
-            result.behavior === 'cancelled'
+            dialogResult.behavior === 'cancelled'
               ? 'Permission dialog cancelled'
               : 'Permission dialog resolved via requestDialog',
           )
@@ -559,7 +559,7 @@ function handleInteractivePermission(
           // cancelled is deny + "User aborted", not cancel-only.
           notifyBridgeFromDooResult(
             notifyBridge,
-            result,
+            dialogResult,
             displayInput as Record<string, unknown>,
           )
           clearClassifierChecking(ctx.toolUseID)
@@ -570,7 +570,7 @@ function handleInteractivePermission(
           const outsideReadPrompt = getOutsideReadPrompt()
           outsideReadPrompt.closeFor(ctx.toolUseID)
 
-          switch (result.behavior) {
+          switch (dialogResult.behavior) {
             case 'allow': {
               if (
                 toolUseConfirm.permissionResult.behavior === 'ask' &&
@@ -578,19 +578,24 @@ function handleInteractivePermission(
               ) {
                 // densable 2.1.289: one-off Yes sets askAgainOutsideReads and
                 // must not latch hasSeen / session answered.
-                if (result.askAgainOutsideReads !== true) {
+                if (dialogResult.askAgainOutsideReads !== true) {
                   outsideReadPrompt.markAnswered()
                   markSeenAutoModeOutsideReadPrompt()
                 }
               }
               resolveOnce(
                 await ctx.handleUserAllow(
-                  (result.updatedInput as Record<string, unknown>) ??
+                  (dialogResult.updatedInput as Record<string, unknown>) ??
                     displayInput,
-                  (result.permissionUpdates as never) ?? [],
-                  result.feedback,
+                  (dialogResult.permissionUpdates as never) ?? [],
+                  dialogResult.feedback,
                   permissionPromptStartTimeMs,
-                  result.contentBlocks as never,
+                  dialogResult.contentBlocks as never,
+                  result.decisionReason,
+                  {
+                    askSuppressesAlwaysAllowRule:
+                      result.suppressAlwaysAllowRule === true,
+                  },
                 ),
               )
               return
@@ -601,12 +606,12 @@ function handleInteractivePermission(
                   decision: 'reject',
                   source: {
                     type: 'user_reject',
-                    hasFeedback: !!result.feedback,
+                    hasFeedback: !!dialogResult.feedback,
                   },
                 },
                 { permissionPromptStartTimeMs, input: displayInput },
               )
-              if (result.blockOutsideReads === true) {
+              if (dialogResult.blockOutsideReads === true) {
                 popQueuedCommandsOnPermissionDeny()
                 const persisted = persistBlockReadsOutsideWorkingDirectories({
                   setSessionToolPermissionContext:
@@ -634,8 +639,8 @@ function handleInteractivePermission(
               ) {
                 resolveOnce(
                   outsideReadAskAgainDecision({
-                    feedback: result.feedback,
-                    contentBlocks: result.contentBlocks as never,
+                    feedback: dialogResult.feedback,
+                    contentBlocks: dialogResult.contentBlocks as never,
                   }),
                 )
                 return
@@ -643,9 +648,9 @@ function handleInteractivePermission(
               popQueuedCommandsOnPermissionDeny()
               resolveOnce(
                 ctx.cancelAndAbort(
-                  result.feedback,
+                  dialogResult.feedback,
                   undefined,
-                  result.contentBlocks as never,
+                  dialogResult.contentBlocks as never,
                 ),
               )
               return
@@ -1175,7 +1180,7 @@ function handleInteractivePermission(
             { decision: 'accept', source: { type: 'classifier' } },
             { permissionPromptStartTimeMs },
           )
-          resolveOnce(ctx.buildAllow(ctx.input, { decisionReason }))
+          resolveOnce(ctx.buildAllow(displayInput, { decisionReason }))
 
           // Keep checkmark visible, then remove dialog.
           // 3s if terminal is focused (user can see it), 1s if not.

@@ -1,5 +1,5 @@
 import React, { useSyncExternalStore } from 'react';
-import { wrapWithSessionServices } from '../context/sessionServices.js';
+import { useSessionServices, wrapWithSessionServices } from '../context/sessionServices.js';
 import { FpsMetricsProvider } from '../context/fpsMetrics.js';
 import { StatsProvider, type StatsStore } from '../context/stats.js';
 import { type AppState, AppStateProvider } from '../state/AppState.js';
@@ -36,6 +36,7 @@ export function App({
   storageV5 = getPinnedStorageV5(),
   children,
 }: Props): React.ReactNode {
+  const existingServices = useSessionServices();
   useSyncExternalStore(
     subscribeRenderInvalidation,
     () => getRenderVersion('ui.render'),
@@ -53,6 +54,9 @@ export function App({
       </StatsProvider>
     </FpsMetricsProvider>
   );
+  if (storageV5 === undefined || existingServices.storageV5 === storageV5) {
+    return tree;
+  }
   // densable Us: if hr===undefined return children; else z({...ce(hr), children})
   return wrapWithSessionServices(tree, storageV5);
 }

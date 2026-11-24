@@ -43,6 +43,7 @@ const PANEL_WINDOW_SIZE = 5;
 const PANEL_PADDING_RIGHT = 2;
 const PANEL_NAME_MIN = 4;
 const PANEL_NAME_MAX = 28;
+const EMPTY_TASK_DECORATIONS: NonNullable<AppState['taskDecorations']> = Object.freeze({});
 const TREE_BRANCH = '├';
 const TREE_LAST = '└';
 
@@ -282,7 +283,7 @@ export function CoordinatorTaskPanel({ showWorkflows = false }: { showWorkflows?
   const tasks = useAppState(s => s.tasks);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const agentNameRegistry = useAppState(s => s.agentNameRegistry);
-  const taskDecorations = useAppState(s => s.taskDecorations ?? {});
+  const taskDecorations = useAppState(s => s.taskDecorations ?? EMPTY_TASK_DECORATIONS);
   const coordinatorTaskIndex = useAppState(s => s.coordinatorTaskIndex);
   const tasksSelected = useAppState(s => s.footerSelection === 'tasks');
   const selectedIndex = tasksSelected ? coordinatorTaskIndex : undefined;
@@ -494,7 +495,7 @@ export function CoordinatorTaskPanel({ showWorkflows = false }: { showWorkflows?
  */
 export function useCoordinatorTaskCount(): number {
   const tasks = useAppState(s => s.tasks);
-  const taskDecorations = useAppState(s => s.taskDecorations ?? {});
+  const taskDecorations = useAppState(s => s.taskDecorations ?? EMPTY_TASK_DECORATIONS);
   const idleTeammatesExpanded = useAppState(s => s.idleTeammatesExpanded ?? false);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   return React.useMemo(() => {

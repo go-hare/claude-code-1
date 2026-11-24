@@ -58,6 +58,8 @@ export type FilePermissionPayload = {
   operationType: 'read' | 'write'
   symlinkTarget: string | null
   showAlwaysAllow?: boolean
+  oneTimeAnswersOnly?: boolean
+  inPlaceOfClassifier?: boolean
   isAskCappedByOrg?: boolean
   requestSource?: PermissionRequestSource
   isMcp?: boolean
@@ -104,6 +106,9 @@ export function isFileStandingRowVetoed(
   const reason = result?.behavior === 'ask' ? result.decisionReason : undefined
   return (
     (reason?.type === 'safetyCheck' && reason.classifierApprovable === false) ||
+    payload.showAlwaysAllow === false ||
+    payload.oneTimeAnswersOnly === true ||
+    payload.inPlaceOfClassifier === true ||
     payload.isAskCappedByOrg === true ||
     payload.requestSource?.type === 'remote-agent' ||
     payload.contentWithheld === true

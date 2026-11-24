@@ -644,9 +644,16 @@ export function restoreDangerousPermissions(
 }
 
 /**
- * #206 SEA `a5e`: Clear command-scoped allow rules (`alwaysAllowRules.command`
- * and `strippedDangerousRules.command`) so a skill/slash-command's `allowed-tools`
- * rule does not leak back in a later turn after leaving auto or plan mode.
+ * Official 2.1.328 `FOe` (@288422663 @260): Clear command-scoped allow rules
+ * (`alwaysAllowRules.command` and `strippedDangerousRules.command`) so a
+ * skill/slash-command's `allowed-tools` grants do not leak into later turns or
+ * background/async subagents.
+ *
+ * NEVER clears `alwaysDenyRules.command`: background/async subagents and forked
+ * skills call this via `stripCommandAllowedToolsForBackgroundAgent` on every
+ * permission check and rely on `alwaysDenyRules.command` to enforce
+ * `disallowedTools` and `frozenCommandDenies`. Turn boundaries (`runReplTurn`)
+ * explicitly replace `alwaysDenyRules.command` per turn.
  */
 export function clearCommandScopedAllowRules(
   context: ToolPermissionContext,

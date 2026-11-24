@@ -467,16 +467,21 @@ export function clearSessionHooks(
     registry.clearSession(sessionId)
   } else {
     setAppState(prev => {
-      if (!prev.sessionHooks.has(sessionId)) return prev
+      const bound = getSessionHooksRegistry(prev.sessionHooks)
+      const hadInMap = prev.sessionHooks.has(sessionId)
+      const hadInBound = bound?.sessions.has(sessionId) ?? false
+      if (!hadInMap && !hadInBound) return prev
+      if (bound) {
+        // Keep the bound Map identity so registryByStore lookup stays associated
+        // across subsequent add/get/clear calls (matches in-place Map mutation
+        // contract in addHookToSession / removeFunctionHook / removeSessionHook).
+        prev.sessionHooks.delete(sessionId)
+        bound.sessions.delete(sessionId)
+        bound.changed.emit()
+        return prev
+      }
       const next = new Map(prev.sessionHooks)
       next.delete(sessionId)
-      const bound = getSessionHooksRegistry(prev.sessionHooks)
-      if (bound) {
-        const hadBound = bound.sessions.delete(sessionId)
-        if (hadBound) {
-          bound.changed.emit()
-        }
-      }
       return { ...prev, sessionHooks: next }
     })
   }

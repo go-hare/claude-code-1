@@ -16,6 +16,7 @@ import {
   useTerminalNotification,
 } from '@anthropic/ink';
 import { useNotifyAfterTimeout } from '../hooks/useNotifyAfterTimeout.js';
+import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import type { ScrollDialogBounds, ScrollPin } from '../utils/scrollPin.js';
 import { useDialogStore, useTopDialog } from './DialogStoreContext.js';
@@ -467,6 +468,15 @@ type Props = {
   scrollRegion?: ScrollPin;
 };
 
+function MalformedDialogDismiss({ onDismiss }: { onDismiss: () => void }): React.ReactNode {
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  useEffect(() => {
+    onDismissRef.current();
+  }, []);
+  return null;
+}
+
 /**
  * densable yv / NMs / dQc / kT host.
  */
@@ -538,7 +548,11 @@ export function DialogHost({ variant = 'inline', suppressReason = null, scrollRe
   }, [suppressReason]);
 
   // densable P1u / msf permission needs — Host top owns emit (not tip queue).
+  // Gate on the owning variant (or default 'inline' when no dialog is open) so
+  // inline/modal/bottom DialogHost instances do not emit duplicate IPC updates.
   useEffect(() => {
+    const ownsEmit = activeLayout !== null ? activeLayout === variant : variant === 'inline';
+    if (!ownsEmit) return;
     let cancelled = false;
     const permissionToolUseID =
       top?.payload &&
@@ -578,7 +592,7 @@ export function DialogHost({ variant = 'inline', suppressReason = null, scrollRe
     return () => {
       cancelled = true;
     };
-  }, [suppressReason, top?.kind, top?.id, top?.payload]);
+  }, [activeLayout, variant, suppressReason, top?.kind, top?.id, top?.payload]);
 
   // densable Xye / yv draft suppression cue
   if (suppressReason != null) {
@@ -590,7 +604,14 @@ export function DialogHost({ variant = 'inline', suppressReason = null, scrollRe
           : (openList.findLast(d => d.userInvoked !== true && !isSuggestionDialogKind(d.kind)) ??
             openList.findLast(d => d.userInvoked !== true) ??
             null);
-      if (hiddenEngine && (DIALOG_LAYOUTS[hiddenEngine.kind] ?? 'inline') === variant) {
+      const hiddenLayout = hiddenEngine ? (DIALOG_LAYOUTS[hiddenEngine.kind] ?? 'inline') : null;
+      // In fullscreen mode, FullscreenLayout hides the 'modal' pane via
+      // display="none" whenever modalChrome !== 'visible' (including 'draft'
+      // parking). Route a draft-parked 'modal' dialog's cue and notification
+      // to the visible 'bottom' (abovePrompt) host so the user sees exactly one
+      // visible cue without duplicating notifications.
+      const effectiveCueVariant = hiddenLayout === 'modal' && isFullscreenEnvEnabled() ? 'bottom' : hiddenLayout;
+      if (hiddenEngine && effectiveCueVariant === variant) {
         const hiddenNotification = resolveDialogNotification(hiddenEngine.kind, hiddenEngine.payload);
         const cueText = isSuggestionDialogKind(hiddenEngine.kind)
           ? HOST_PARKED_TYPING_SUGGESTION
@@ -619,8 +640,7 @@ export function DialogHost({ variant = 'inline', suppressReason = null, scrollRe
 
   const Renderer = DIALOG_COMPONENTS[top.kind];
   if (!Renderer) {
-    store.dismiss(top.id);
-    return null;
+    return <MalformedDialogDismiss key={top.id} onDismiss={() => store.dismiss(top.id)} />;
   }
 
   // Live payload from store (updates may change settings)

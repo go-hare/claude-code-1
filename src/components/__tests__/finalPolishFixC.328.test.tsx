@@ -171,9 +171,11 @@ describe('Final Polish Fix C — UI Rules of Hooks & Config Search', () => {
     const { stdin, stdout } = makeTtyPair();
     const errors: Error[] = [];
     const instance = await render(
-      <ErrorBoundary onError={e => errors.push(e)}>
-        <ConsoleOAuthFlow onDone={() => {}} />
-      </ErrorBoundary>,
+      <AppStateProvider>
+        <ErrorBoundary onError={e => errors.push(e)}>
+          <ConsoleOAuthFlow onDone={() => {}} />
+        </ErrorBoundary>
+      </AppStateProvider>,
       {
         stdin: stdin as unknown as NodeJS.ReadStream,
         stdout: stdout as unknown as NodeJS.WriteStream,

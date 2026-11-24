@@ -1,7 +1,8 @@
 /**
  * densable jsu non-permission renderers — tip + pealed dialog bridges.
  */
-import React, { useMemo } from 'react';
+import React, { useContext, useEffect, useMemo, useRef } from 'react';
+import { DialogIdContext } from '@anthropic/ink';
 import { CostThresholdDialog } from '../components/CostThresholdDialog.js';
 import { FableConsentDialog } from '../components/FableConsentDialog.js';
 import { IdeOnboardingDialog } from '../components/IdeOnboardingDialog.js';
@@ -12,6 +13,7 @@ import { ComputerUseApproval } from '../components/permissions/ComputerUseApprov
 import { SandboxPermissionRequest } from '../components/permissions/SandboxPermissionRequest.js';
 import { It2SetupPrompt } from '../utils/swarm/It2SetupPrompt.js';
 import type { DialogRendererProps } from './DialogHost.js';
+import { DialogStoreContext } from './DialogStoreContext.js';
 import { AutoDefaultNudgeDialog } from './dialogs/AutoDefaultNudgeDialog.js';
 import { AutoModeServerFallbackNotice } from './dialogs/AutoModeServerFallbackNotice.js';
 import { AutoModeFlaggedAllowDialog, AutoModeSetupReviewDialog } from './dialogs/AutoModeSetupDialogs.js';
@@ -47,6 +49,26 @@ import {
 } from './specs/jsuKinds.js';
 
 type DialogRenderer = (props: DialogRendererProps) => React.ReactNode;
+
+/**
+ * Dismiss a dialog with a malformed payload inside an effect rather than
+ * synchronously during render, using unguarded `store.dismiss` so swap/scroll
+ * debounce never wedges the dialog open at `null`.
+ */
+function MalformedDialogDismiss({ onDismiss }: { onDismiss: () => void }): React.ReactNode {
+  const store = useContext(DialogStoreContext);
+  const dialogId = useContext(DialogIdContext);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  useEffect(() => {
+    if (store && dialogId != null) {
+      store.dismiss(dialogId);
+      return;
+    }
+    onDismissRef.current();
+  }, [store, dialogId]);
+  return null;
+}
 
 const costThresholdRenderer: DialogRenderer = ({ answer }) => (
   <CostThresholdDialog onDone={() => answer('acknowledged')} onCancel={() => answer('cancelled')} />
@@ -107,8 +129,7 @@ const peerInboundRenderer: DialogRenderer = ({ payload, answer }) => {
     preview?: string;
   };
   if (!p?.holdCause || typeof p.preview !== 'string') {
-    answer({ behavior: 'cancelled' });
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer({ behavior: 'cancelled' })} />;
   }
   return (
     <PeerInboundApprovalDialog
@@ -128,8 +149,7 @@ const peerInboundRenderer: DialogRenderer = ({ payload, answer }) => {
 const chromeInstallSetupRenderer: DialogRenderer = ({ payload, answer }) => {
   const p = (payload ?? {}) as ChromeInstallSetupPayload;
   if (!isChromeInstallSetupPhase(p.phase)) {
-    answer('cancelled');
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer('cancelled')} />;
   }
   return <ChromeInstallSetupDialog payload={p} onAnswer={result => answer(result)} />;
 };
@@ -205,8 +225,7 @@ function McpUrlElicitationRenderer({ payload, answer }: DialogRendererProps): Re
   const signal = useMemo(() => new AbortController().signal, []);
   const built = leftoverMcpElicitationEvent(payload, signal, { actionLabel: 'Retry now', showCancel: true }, false);
   if (!built) {
-    answer({ action: 'cancel' });
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer({ action: 'cancel' })} />;
   }
 
   return (
@@ -229,8 +248,7 @@ function leftoverMcpElicitationRenderer({ payload, answer, wouldTakeAnswer }: Di
   const signal = useMemo(() => new AbortController().signal, []);
   const built = leftoverMcpElicitationEvent(payload, signal, undefined, false);
   if (!built) {
-    answer({ action: 'cancel' });
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer({ action: 'cancel' })} />;
   }
 
   return (
@@ -256,8 +274,7 @@ function leftoverMcpElicitationWaitingRenderer({ payload, answer }: DialogRender
   const signal = useMemo(() => new AbortController().signal, []);
   const built = leftoverMcpElicitationEvent(payload, signal, { actionLabel: 'Skip confirmation' }, true);
   if (!built) {
-    answer('cancelled');
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer('cancelled')} />;
   }
 
   return (
@@ -281,8 +298,7 @@ const refusalFallbackRenderer: DialogRenderer = ({ payload, answer }) => {
     retractedMessageUuids?: string[];
   };
   if (!p?.originalModel || !p.fallbackModel) {
-    answer('cancelled');
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer('cancelled')} />;
   }
   return (
     <RefusalFallbackDialog
@@ -302,8 +318,7 @@ const refusalFallbackRenderer: DialogRenderer = ({ payload, answer }) => {
 const goalProposalRenderer: DialogRenderer = ({ payload, answer }) => {
   const p = payload as { condition?: string };
   if (typeof p?.condition !== 'string' || p.condition === '') {
-    answer({ approved: false });
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer({ approved: false })} />;
   }
   return <GoalProposalDialog payload={{ condition: p.condition }} onAnswer={result => answer(result)} />;
 };
@@ -323,8 +338,7 @@ const autoModeSetupReviewRenderer: DialogRenderer = ({ payload, answer }) => (
 const autoModeFlaggedAllowRenderer: DialogRenderer = ({ payload, answer }) => {
   const p = payload as { flagged?: string[]; runId?: string };
   if (!p?.runId || !Array.isArray(p.flagged)) {
-    answer('cancelled');
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer('cancelled')} />;
   }
   return (
     <AutoModeFlaggedAllowDialog payload={{ flagged: p.flagged, runId: p.runId }} onAnswer={result => answer(result)} />
@@ -335,8 +349,7 @@ const autoModeFlaggedAllowRenderer: DialogRenderer = ({ payload, answer }) => {
 const autoModeServerFallbackRenderer: DialogRenderer = ({ payload, answer }) => {
   const p = payload as { title?: string; paragraphs?: string[] } | null | undefined;
   if (!p?.title || !Array.isArray(p.paragraphs) || p.paragraphs.length === 0) {
-    answer('continue');
-    return null;
+    return <MalformedDialogDismiss onDismiss={() => answer('continue')} />;
   }
   return <AutoModeServerFallbackNotice title={p.title} paragraphs={p.paragraphs} onDone={result => answer(result)} />;
 };

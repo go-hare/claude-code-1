@@ -48,8 +48,9 @@ export function getHostParkMode(opts: HostParkInputs): HostParkMode {
 /** Map Vd onto the Host suppressReason the existing DialogHost accepts. */
 export function hostParkToSuppressReason(
   mode: HostParkMode,
-): DialogSuppressReason {
+): DialogSuppressReason | 'draft' {
   if (mode === 'legacy-dialog') return 'legacy-dialog'
+  if (mode === 'draft') return 'draft'
   if (mode === null) return null
   return 'typing'
 }

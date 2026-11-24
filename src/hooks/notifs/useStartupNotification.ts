@@ -27,15 +27,24 @@ export function useStartupNotification(
   useEffect(() => {
     if (getIsRemoteMode() || hasRunRef.current) return
     hasRunRef.current = true
+    let cancelled = false
 
     void Promise.resolve()
       .then(() => computeRef.current())
       .then(result => {
-        if (!result) return
+        if (cancelled || !result) return
         for (const n of Array.isArray(result) ? result : [result]) {
           addNotification(n)
         }
       })
-      .catch(logError)
+      .catch(err => {
+        if (!cancelled) {
+          logError(err)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [addNotification])
 }

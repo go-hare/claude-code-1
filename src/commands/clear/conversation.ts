@@ -454,6 +454,8 @@ export async function clearConversation({
         endedByModel: false,
         // densable session reset: clear MessageDisplay salvage map
         displayedMessageContent: {},
+        sendMessagePins: {},
+        pendingPlanVerification: undefined,
         // densable 2.1.243 #31: keep /rename name on the prompt bar when the
         // session title is still set (F=!clearedSessionTitle && ct()!==void 0).
         standaloneAgentContext: (() => {

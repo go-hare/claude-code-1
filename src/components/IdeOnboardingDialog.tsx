@@ -2,6 +2,7 @@ import figures from 'figures';
 import React from 'react';
 import { envDynamic } from 'src/utils/envDynamic.js';
 import { Box, Dialog, KeyboardShortcutHint, Text, type Theme } from '@anthropic/ink';
+import { useRegisterOverlay } from '../context/overlayContext.js';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { env } from '../utils/env.js';
@@ -52,6 +53,7 @@ function BulletItem({ children, color }: { children: React.ReactNode; color?: ke
 }
 
 export function IdeOnboardingDialog({ onDone, installationStatus }: Props): React.ReactNode {
+  useRegisterOverlay('ide-onboarding-dialog');
   markDialogAsShown();
 
   // Handle Enter/Escape to dismiss

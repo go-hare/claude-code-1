@@ -39,6 +39,12 @@ import type { SessionHooksState } from '../utils/hooks/sessionHooks.js'
 import type { ModelSetting } from '../utils/model/model.js'
 import type { DenialTrackingState } from '../utils/permissions/denialTracking.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
+import { getGlobalConfig } from '../utils/config.js'
+import {
+  isBareMode,
+  isEnvDefinedFalsy,
+  isEnvTruthy,
+} from '../utils/envUtils.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import type { SettingsJson } from '../utils/settings/types.js'
 import { shouldEnableThinkingByDefault } from '../utils/thinking.js'
@@ -799,8 +805,17 @@ export function getDefaultSessionAppState(): SessionAppState {
     },
     thinkingEnabled: shouldEnableThinkingByDefault(),
     promptSuggestionEnabled: shouldEnablePromptSuggestion(),
-    awaySummaryEnabled: getInitialSettings().awaySummaryEnabled !== false,
-    showMessageTimestamps: getInitialSettings().showMessageTimestamps === true,
+    awaySummaryEnabled: (() => {
+      const envVal = process.env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY
+      if (isEnvDefinedFalsy(envVal)) return false
+      if (isEnvTruthy(envVal)) return true
+      if (isBareMode()) return false
+      return getInitialSettings().awaySummaryEnabled !== false
+    })(),
+    showMessageTimestamps: Boolean(
+      getInitialSettings().showMessageTimestamps ??
+        getGlobalConfig().showMessageTimestamps,
+    ),
     sessionHooks: new Map() as SessionHooksState,
     inbox: {
       messages: [],

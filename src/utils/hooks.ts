@@ -8838,35 +8838,21 @@ export async function executeSessionEndHooks(
   const failureMessages = formatOutsideReplHookFailures('SessionEnd', results)
   if (failureMessages.length > 0) {
     if (setAppState && (reason === 'clear' || reason === 'resume')) {
-      setAppState(prev => {
-        if (!prev?.notifications) return prev
-        const queued = failureMessages.map((text, idx) => ({
-          key:
-            idx === 0
-              ? 'session-end-hook-error'
-              : `session-end-hook-error-${idx}`,
-          text,
-          color: 'error' as const,
-          priority: 'high' as const,
-        }))
-        if (!prev.notifications.current) {
-          return {
-            ...prev,
-            notifications: {
-              ...prev.notifications,
-              current: queued[0]!,
-              queue: [...queued.slice(1), ...prev.notifications.queue],
-            },
-          }
-        }
-        return {
-          ...prev,
-          notifications: {
-            ...prev.notifications,
-            queue: [...prev.notifications.queue, ...queued],
-          },
-        }
-      })
+      const queued = failureMessages.map((text, idx) => ({
+        key:
+          idx === 0
+            ? 'session-end-hook-error'
+            : `session-end-hook-error-${idx}`,
+        text,
+        color: 'error' as const,
+        priority: 'high' as const,
+      }))
+      // Route through the notification queue helper so a dismissal timer is
+      // armed instead of writing notifications.current without a timeout.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { enqueueNotificationsOutsideReact } =
+        require('../context/notifications.js') as typeof import('../context/notifications.js')
+      enqueueNotificationsOutsideReact(setAppState, queued)
     } else {
       // During shutdown, Ink is unmounted so we can write directly to stderr
       for (const errMsg of failureMessages) {

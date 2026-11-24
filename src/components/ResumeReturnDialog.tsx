@@ -4,6 +4,7 @@
  */
 import { Box, Dialog, Text } from '@anthropic/ink';
 import React from 'react';
+import { useRegisterOverlay } from '../context/overlayContext.js';
 import {
   formatResumeReturnBanner,
   getResumeReturnWarning,
@@ -25,11 +26,10 @@ export function ResumeReturnDialog({
   onChoice,
   onCancel,
 }: ResumeReturnDialogProps): React.ReactNode {
+  useRegisterOverlay('resume-return-dialog');
+  const handleCancel = () => (onCancel !== undefined ? onCancel() : onChoice('continue'));
   return (
-    <Dialog
-      title={formatResumeReturnBanner(sessionAgeMinutes, estimatedTokens)}
-      onCancel={() => (onCancel !== undefined ? onCancel() : onChoice('continue'))}
-    >
+    <Dialog title={formatResumeReturnBanner(sessionAgeMinutes, estimatedTokens)} onCancel={handleCancel}>
       <Box flexDirection="column">
         <Text>{getResumeReturnWarning()}</Text>
       </Box>
@@ -39,6 +39,7 @@ export function ResumeReturnDialog({
           value: o.value,
         }))}
         onChange={(value: ResumeReturnChoice) => onChoice(value)}
+        onCancel={handleCancel}
       />
     </Dialog>
   );

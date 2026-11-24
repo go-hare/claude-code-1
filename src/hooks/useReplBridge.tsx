@@ -632,6 +632,7 @@ export function useReplBridge(
       }
 
       let cancelled = false;
+      pendingResultAfterFlushRef.current = false;
       // Capture messages.length now so we don't re-send initial messages
       // through writeMessages after the bridge connects.
       const initialMessageCount = messages.length;
@@ -2204,7 +2205,9 @@ export function useReplBridge(
     if (feature('BRIDGE_MODE')) {
       const handle = handleRef.current;
       if (!handle) {
-        pendingResultAfterFlushRef.current = true;
+        if (store.getState().replBridgeEnabled) {
+          pendingResultAfterFlushRef.current = true;
+        }
         return;
       }
 

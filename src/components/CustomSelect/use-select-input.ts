@@ -423,6 +423,7 @@ export const useSelectInput = <T>({
       // Handle Tab key for input mode toggling
       if (key.tab && onInputModeToggle && liveFocused !== undefined) {
         onInputModeToggle(liveFocused)
+        event.stopImmediatePropagation()
         return
       }
 
@@ -515,10 +516,12 @@ export const useSelectInput = <T>({
             const lastOption = options[options.length - 1]
             if (lastOption && state.getFocusedValue() === lastOption.value) {
               onDownFromLastItem()
+              event.stopImmediatePropagation()
               return
             }
           }
           state.focusNextOption()
+          event.stopImmediatePropagation()
           return
         }
         if (key.upArrow || (key.ctrl && input === 'p')) {
@@ -526,10 +529,12 @@ export const useSelectInput = <T>({
             const firstOption = options[0]
             if (firstOption && state.getFocusedValue() === firstOption.value) {
               onUpFromFirstItem()
+              event.stopImmediatePropagation()
               return
             }
           }
           state.focusPreviousOption()
+          event.stopImmediatePropagation()
           return
         }
         // Ignore printable characters; move focus to declineValue if provided (#29, #315, #343)
@@ -550,21 +555,27 @@ export const useSelectInput = <T>({
       if (key.home) {
         const firstOption = options[0]
         if (firstOption) state.focusOption(firstOption.value)
+        event.stopImmediatePropagation()
         return
       }
 
       if (key.end) {
         const lastOption = options[options.length - 1]
         if (lastOption) state.focusOption(lastOption.value)
+        event.stopImmediatePropagation()
         return
       }
 
       if (key.pageDown) {
         state.focusNextPage()
+        event.stopImmediatePropagation()
+        return
       }
 
       if (key.pageUp) {
         state.focusPreviousPage()
+        event.stopImmediatePropagation()
+        return
       }
 
       if (disableSelection !== true) {

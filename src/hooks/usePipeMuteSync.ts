@@ -32,6 +32,8 @@ type UsePipeMuteSyncDeps = {
   ) => void
 }
 
+const EMPTY_PIPES: string[] = []
+
 export function usePipeMuteSync({
   setToolUseConfirmQueue,
 }: UsePipeMuteSyncDeps): void {
@@ -41,7 +43,7 @@ export function usePipeMuteSync({
     s => (getPipeIpc(s).routeMode as 'selected' | 'local') ?? 'selected',
   )
   const selectedPipes: string[] = useAppState(
-    s => (getPipeIpc(s).selectedPipes as string[]) ?? [],
+    s => (getPipeIpc(s).selectedPipes as string[]) ?? EMPTY_PIPES,
   )
 
   // Subscribe to slave client registry changes

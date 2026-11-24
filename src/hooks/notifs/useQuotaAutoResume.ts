@@ -66,6 +66,12 @@ export function useQuotaAutoResume({ isLoading, setMessages }: Props): void {
   }, [state, addNotification, removeNotification])
 
   useEffect(() => {
+    return () => {
+      removeNotification(PINNED_KEY)
+    }
+  }, [removeNotification])
+
+  useEffect(() => {
     return subscribeQuotaAutoResumeEvents((event: QuotaAutoResumeEvent) => {
       if (event === 'armed' || event === 'rearmed') {
         removeNotification(CAP_KEY)

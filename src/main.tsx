@@ -64,6 +64,7 @@ import {
   runVersionedPluginStartup,
 } from './cli/startupAssembly.js';
 import { launchRepl } from './replLauncher.js';
+import { computeAwaySummaryEnabled, computeShowMessageTimestamps } from './utils/settings/applySettingsChange.js';
 import {
   awaitGrowthBookBeforePermissionMode,
   hasGrowthBookEnvOverride,
@@ -4677,8 +4678,9 @@ async function run(): Promise<CommanderCommand> {
         ccrMirrorEnabled = isCcrMirrorEnabled();
       }
 
+      const initialSettings = getInitialSettings();
       const initialState: AppState = {
-        settings: getInitialSettings(),
+        settings: initialSettings,
         tasks: {},
         transcripts: {},
         runningSubagents: 0,
@@ -4795,6 +4797,8 @@ async function run(): Promise<CommanderCommand> {
         attribution: createEmptyAttributionState(),
         thinkingEnabled,
         promptSuggestionEnabled: shouldEnablePromptSuggestion(),
+        awaySummaryEnabled: computeAwaySummaryEnabled(initialSettings),
+        showMessageTimestamps: computeShowMessageTimestamps(initialSettings),
         sessionHooks: new Map(),
         inbox: {
           messages: [],
@@ -4973,6 +4977,99 @@ async function run(): Promise<CommanderCommand> {
           },
         };
       };
+      const handleAgentsHandoffResult = async (replResult: Awaited<ReturnType<typeof launchRepl>>): Promise<void> => {
+        // Official Sj4: left-arrow → seed (Vy6) + A8q job dir + ky6 spawn → FleetView.
+        if (replResult.type === 'agents') {
+          if (feature('BG_SESSIONS')) {
+            // Official Lj_: unmount REPL ink → setImmediate → createRoot/mountFleetView.
+            // Yield so AlternateScreen cleanup / instance map settle before next root.
+            await new Promise<void>(resolve => setImmediate(resolve));
+            // Official AgentView open→attach: after handoff unmount, Windows re-asserts
+            // raw mode + stdin.ref (App teardown still unrefs even with handoffRawMode).
+            if (process.platform === 'win32' && process.stdin.isTTY) {
+              process.stdin.setRawMode(true);
+              process.stdin.ref();
+            }
+            const { openAgentsViaLeftArrow, clearBridgeSessionMetaAfterQpeHandoff } = await import(
+              './cli/bg/leftArrowAgents.js'
+            );
+            // Official aAf: forward full left-arrow payload
+            // (via/partial/boundary/checkpoint/replyOnResume/abortAfterFlush).
+            // densable qpe already ran vHy → skip second fork; yHy analog mounts fleet.
+            const handoff =
+              replResult.alreadyOpened ??
+              (await openAgentsViaLeftArrow(replResult.messages, {
+                via: replResult.via,
+                confirmedInterstitial: replResult.confirmedInterstitial,
+                deferWaitMs: replResult.deferWaitMs,
+                deferCapFired: replResult.deferCapFired,
+                inflightCount: replResult.inflightCount,
+                inflightKinds: replResult.inflightKinds,
+                restartableCount: replResult.restartableCount,
+                partialChars: replResult.partialChars,
+                partialText: replResult.partialText,
+                boundaryUuid: replResult.boundaryUuid,
+                agentsCount: replResult.agentsCount,
+                checkpoint: replResult.checkpoint,
+                liveMonitorSlugs: replResult.liveMonitorSlugs,
+                sessionPermissionRules: replResult.sessionPermissionRules,
+                memoryToggledOff: replResult.memoryToggledOff,
+                replyOnResume: replResult.replyOnResume,
+                abortAfterFlush: replResult.abortAfterFlush,
+              }));
+            // densable kEo: qpe vHy already cleared wXr; unmount cleanup may
+            // have rewritten it. Re-clear before FleetView so the parent cannot
+            // reattach the child's rit session (228 #5).
+            clearBridgeSessionMetaAfterQpeHandoff(replResult.alreadyOpened);
+            const { renderAgentView } = await import('./screens/AgentView.js');
+            const { formatLeftArrowResumeHint } = await import('./screens/fleetView/helpers.js');
+            // densable Rdt(M) — demote session permission mode into inherited bag for Fleet.
+            const { demoteInheritedPermissionMode } = await import('./screens/fleetView/fleetDispatchDefaults.js');
+            const leftArrowDispatchDefaults = demoteInheritedPermissionMode(permissionMode);
+            let fleetResult: { resumeHintRequested?: boolean; forkSessionId?: string } = {};
+            if (!handoff.ok) {
+              process.stderr.write(`${handoff.error}\n`);
+              // Still open fleet view without origin (matches empty-open fallback).
+              // Daemon may not have been ensured (spawn fail path) — let AgentView ensure.
+              fleetResult = await renderAgentView({
+                enteredViaLeftArrow: true,
+                dispatchDefaults: leftArrowDispatchDefaults,
+              });
+            } else {
+              // Official CLAUDE_AGENTS_SELECT / initialJobId = short; isOrigin uses it.
+              process.env.CLAUDE_AGENTS_SELECT = handoff.short;
+              // openAgentsViaLeftArrow already ran ensureDaemonRunning.
+              // Skip second ensure (densable agentsMain pattern; no dual KF).
+              fleetResult = await renderAgentView({
+                enteredViaLeftArrow: true,
+                currentSessionId: handoff.sessionId,
+                restoreSessionId: handoff.short,
+                daemonAlreadyEnsured: true,
+                dispatchDefaults: leftArrowDispatchDefaults,
+              });
+            }
+            // densable: originSpawn.resumeHintRequested + transcriptMaterialized → stderr resume line
+            if (fleetResult.resumeHintRequested && fleetResult.forkSessionId) {
+              process.stderr.write(`${formatLeftArrowResumeHint(fleetResult.forkSessionId)}\n`);
+            }
+            // Left-arrow REPL → Agents is a one-way handoff (REPL already unmounted).
+            // Force exit so Ink refresh intervals / raw-mode handles cannot hang the TTY.
+            // eslint-disable-next-line custom-rules/no-process-exit
+            process.exit(0);
+          }
+          await gracefulShutdown(0);
+        }
+      };
+      const launchReplWithAgentsHandoff = async (
+        targetRoot: Parameters<typeof launchRepl>[0],
+        appProps: Parameters<typeof launchRepl>[1],
+        replProps: Parameters<typeof launchRepl>[2],
+        runner: Parameters<typeof launchRepl>[3],
+      ): Promise<void> => {
+        const replResult = await launchRepl(targetRoot, appProps, replProps, runner);
+        await handleAgentsHandoffResult(replResult);
+      };
+
       const launchMode = determineMainLaunchMode({
         isNonInteractiveSession,
         continueRequested: !!options.continue,
@@ -5083,7 +5180,7 @@ async function run(): Promise<CommanderCommand> {
           });
           resumeSucceeded = true;
 
-          await launchRepl(
+          await launchReplWithAgentsHandoff(
             root,
             {
               getFpsMetrics,
@@ -5137,7 +5234,7 @@ async function run(): Promise<CommanderCommand> {
           'info',
         );
 
-        await launchRepl(
+        await launchReplWithAgentsHandoff(
           root,
           { getFpsMetrics, stats, initialState },
           {
@@ -5215,7 +5312,7 @@ async function run(): Promise<CommanderCommand> {
           'info',
         );
 
-        await launchRepl(
+        await launchReplWithAgentsHandoff(
           root,
           { getFpsMetrics, stats, initialState },
           {
@@ -5338,7 +5435,7 @@ async function run(): Promise<CommanderCommand> {
         };
 
         const remoteCommands = filterCommandsForRemoteMode(commands);
-        await launchRepl(
+        await launchReplWithAgentsHandoff(
           root,
           {
             getFpsMetrics,
@@ -5491,7 +5588,7 @@ async function run(): Promise<CommanderCommand> {
               remoteSessionUrl: attachUrl,
             };
             const attachCommands = filterCommandsForRemoteMode(commands);
-            await launchRepl(
+            await launchReplWithAgentsHandoff(
               root,
               {
                 getFpsMetrics,
@@ -5628,7 +5725,7 @@ async function run(): Promise<CommanderCommand> {
           // Pre-filter commands to only include remote-safe ones.
           // CCR's init response may further refine the list (via handleRemoteInit in REPL).
           const remoteCommands = filterCommandsForRemoteMode(commands);
-          await launchRepl(
+          await launchReplWithAgentsHandoff(
             root,
             {
               getFpsMetrics,
@@ -6001,7 +6098,7 @@ async function run(): Promise<CommanderCommand> {
                 }
               : undefined;
 
-          await launchRepl(
+          await launchReplWithAgentsHandoff(
             root,
             {
               getFpsMetrics,
@@ -6023,12 +6120,18 @@ async function run(): Promise<CommanderCommand> {
         } else {
           // Show interactive selector (includes same-repo worktrees)
           // Note: ResumeConversation loads logs internally to ensure proper GC after selection
-          await launchResumeChooser(root, { getFpsMetrics, stats, initialState }, getWorktreePaths(getOriginalCwd()), {
-            ...sessionConfig,
-            initialSearchQuery: searchTerm,
-            forkSession: options.forkSession,
-            filterByPr,
-          });
+          const resumeChooserResult = await launchResumeChooser(
+            root,
+            { getFpsMetrics, stats, initialState },
+            getWorktreePaths(getOriginalCwd()),
+            {
+              ...sessionConfig,
+              initialSearchQuery: searchTerm,
+              forkSession: options.forkSession,
+              filterByPr,
+            },
+          );
+          await handleAgentsHandoffResult(resumeChooserResult);
         }
       } else {
         // densable 2.1.289: defaultToAgentsView → mount Fleet (entryChannel default_home)
@@ -6105,7 +6208,7 @@ async function run(): Promise<CommanderCommand> {
             ? hookMessages
             : undefined;
 
-        const replResult = await launchRepl(
+        await launchReplWithAgentsHandoff(
           root,
           { getFpsMetrics, stats, initialState },
           {
@@ -6115,85 +6218,6 @@ async function run(): Promise<CommanderCommand> {
           },
           renderAndRun,
         );
-
-        // Official Sj4: left-arrow → seed (Vy6) + A8q job dir + ky6 spawn → FleetView.
-        if (replResult.type === 'agents' && feature('BG_SESSIONS')) {
-          // Official Lj_: unmount REPL ink → setImmediate → createRoot/mountFleetView.
-          // Yield so AlternateScreen cleanup / instance map settle before next root.
-          await new Promise<void>(resolve => setImmediate(resolve));
-          // Official AgentView open→attach: after handoff unmount, Windows re-asserts
-          // raw mode + stdin.ref (App teardown still unrefs even with handoffRawMode).
-          if (process.platform === 'win32' && process.stdin.isTTY) {
-            process.stdin.setRawMode(true);
-            process.stdin.ref();
-          }
-          const { openAgentsViaLeftArrow, clearBridgeSessionMetaAfterQpeHandoff } = await import(
-            './cli/bg/leftArrowAgents.js'
-          );
-          // Official aAf: forward full left-arrow payload
-          // (via/partial/boundary/checkpoint/replyOnResume/abortAfterFlush).
-          // densable qpe already ran vHy → skip second fork; yHy analog mounts fleet.
-          const handoff =
-            replResult.alreadyOpened ??
-            (await openAgentsViaLeftArrow(replResult.messages, {
-              via: replResult.via,
-              confirmedInterstitial: replResult.confirmedInterstitial,
-              deferWaitMs: replResult.deferWaitMs,
-              deferCapFired: replResult.deferCapFired,
-              inflightCount: replResult.inflightCount,
-              inflightKinds: replResult.inflightKinds,
-              restartableCount: replResult.restartableCount,
-              partialChars: replResult.partialChars,
-              partialText: replResult.partialText,
-              boundaryUuid: replResult.boundaryUuid,
-              agentsCount: replResult.agentsCount,
-              checkpoint: replResult.checkpoint,
-              liveMonitorSlugs: replResult.liveMonitorSlugs,
-              sessionPermissionRules: replResult.sessionPermissionRules,
-              memoryToggledOff: replResult.memoryToggledOff,
-              replyOnResume: replResult.replyOnResume,
-              abortAfterFlush: replResult.abortAfterFlush,
-            }));
-          // densable kEo: qpe vHy already cleared wXr; unmount cleanup may
-          // have rewritten it. Re-clear before FleetView so the parent cannot
-          // reattach the child's rit session (228 #5).
-          clearBridgeSessionMetaAfterQpeHandoff(replResult.alreadyOpened);
-          const { renderAgentView } = await import('./screens/AgentView.js');
-          const { formatLeftArrowResumeHint } = await import('./screens/fleetView/helpers.js');
-          // densable Rdt(M) — demote session permission mode into inherited bag for Fleet.
-          const { demoteInheritedPermissionMode } = await import('./screens/fleetView/fleetDispatchDefaults.js');
-          const leftArrowDispatchDefaults = demoteInheritedPermissionMode(permissionMode);
-          let fleetResult: { resumeHintRequested?: boolean; forkSessionId?: string } = {};
-          if (!handoff.ok) {
-            process.stderr.write(`${handoff.error}\n`);
-            // Still open fleet view without origin (matches empty-open fallback).
-            // Daemon may not have been ensured (spawn fail path) — let AgentView ensure.
-            fleetResult = await renderAgentView({
-              enteredViaLeftArrow: true,
-              dispatchDefaults: leftArrowDispatchDefaults,
-            });
-          } else {
-            // Official CLAUDE_AGENTS_SELECT / initialJobId = short; isOrigin uses it.
-            process.env.CLAUDE_AGENTS_SELECT = handoff.short;
-            // openAgentsViaLeftArrow already ran ensureDaemonRunning.
-            // Skip second ensure (densable agentsMain pattern; no dual KF).
-            fleetResult = await renderAgentView({
-              enteredViaLeftArrow: true,
-              currentSessionId: handoff.sessionId,
-              restoreSessionId: handoff.short,
-              daemonAlreadyEnsured: true,
-              dispatchDefaults: leftArrowDispatchDefaults,
-            });
-          }
-          // densable: originSpawn.resumeHintRequested + transcriptMaterialized → stderr resume line
-          if (fleetResult.resumeHintRequested && fleetResult.forkSessionId) {
-            process.stderr.write(`${formatLeftArrowResumeHint(fleetResult.forkSessionId)}\n`);
-          }
-          // Left-arrow REPL → Agents is a one-way handoff (REPL already unmounted).
-          // Force exit so Ink refresh intervals / raw-mode handles cannot hang the TTY.
-          // eslint-disable-next-line custom-rules/no-process-exit
-          process.exit(0);
-        }
       }
     })
     .version(`${MACRO.VERSION} (Claude Code)`, '-v, --version', 'Output the version number');

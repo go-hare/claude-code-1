@@ -20,6 +20,8 @@ export function useIDEStatusIndicator({ ideSelection, mcpClients, ideInstallatio
   const { addNotification, removeNotification } = useNotifications();
   const { status: ideStatus, ideName } = useIdeConnectionStatus(mcpClients);
   const hasShownHintRef = useRef(false);
+  const ideStatusRef = useRef(ideStatus);
+  ideStatusRef.current = ideStatus;
 
   const isJetBrains = ideInstallationStatus ? isJetBrainsIde(ideInstallationStatus?.ideType) : false;
   const showIDEInstallErrorOrJetBrainsInfo = ideInstallationStatus?.error || isJetBrains;
@@ -48,33 +50,40 @@ export function useIDEStatusIndicator({ ideSelection, mcpClients, ideInstallatio
     if (hasShownHintRef.current || (getGlobalConfig().ideHintShownCount ?? 0) >= MAX_IDE_HINT_SHOW_COUNT) {
       return;
     }
+    let cancelled = false;
     const timeoutId = setTimeout(
       (hasShownHintRef, addNotification) => {
-        void detectIDEs(true).then(infos => {
-          const ideName = infos[0]?.name;
-          if (ideName && !hasShownHintRef.current) {
-            hasShownHintRef.current = true;
-            saveGlobalConfig(current => ({
-              ...current,
-              ideHintShownCount: (current.ideHintShownCount ?? 0) + 1,
-            }));
-            addNotification({
-              key: 'ide-status-hint',
-              jsx: (
-                <Text dimColor>
-                  /ide for <Text color="ide">{ideName}</Text>
-                </Text>
-              ),
-              priority: 'low',
-            });
-          }
-        });
+        void detectIDEs(true)
+          .then(infos => {
+            if (cancelled || ideStatusRef.current !== null) return;
+            const ideName = infos[0]?.name;
+            if (ideName && !hasShownHintRef.current) {
+              hasShownHintRef.current = true;
+              saveGlobalConfig(current => ({
+                ...current,
+                ideHintShownCount: (current.ideHintShownCount ?? 0) + 1,
+              }));
+              addNotification({
+                key: 'ide-status-hint',
+                jsx: (
+                  <Text dimColor>
+                    /ide for <Text color="ide">{ideName}</Text>
+                  </Text>
+                ),
+                priority: 'low',
+              });
+            }
+          })
+          .catch(() => {});
       },
       3000,
       hasShownHintRef,
       addNotification,
     );
-    return () => clearTimeout(timeoutId);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [addNotification, removeNotification, ideStatus, showJetBrainsInfo]);
 
   // Show IDE disconnected/failed notification when status is disconnected

@@ -18,11 +18,7 @@ import {
   dontAskAgainMaxLabelWidthFromTracked,
   initialDontAskAgainSelectWidth,
 } from '../../components/permissions/dontAskAgainLabel.js';
-import {
-  PermissionPrompt as BasePermissionPrompt,
-  type PermissionPromptOption,
-  type PermissionPromptProps,
-} from '../../components/permissions/PermissionPrompt.js';
+import { PermissionPrompt, type PermissionPromptOption } from '../../components/permissions/PermissionPrompt.js';
 import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
 import type { DialogRendererProps } from '../DialogHost.js';
@@ -52,13 +48,6 @@ import {
 const PROMPT_DESCRIPTION_ROOMY_MAX_LINES = 16;
 const PROMPT_DESCRIPTION_ROOMY_ROW_OVERHEAD = 24;
 const PROMPT_DESCRIPTION_ROOMY_MIN_COLUMNS = 80;
-
-const PermissionPrompt = BasePermissionPrompt as React.ComponentType<
-  PermissionPromptProps<PromptPermissionChoice> & {
-    defaultFocusValue?: PromptPermissionChoice;
-    hideIndexes?: boolean;
-  }
->;
 
 function getPromptDescriptionLineCap(roomyDescription: boolean, size: { columns: number; rows: number }): number {
   return roomyDescription && size.columns >= PROMPT_DESCRIPTION_ROOMY_MIN_COLUMNS

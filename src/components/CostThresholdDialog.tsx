@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Dialog, Link, Text } from '@anthropic/ink';
+import { useRegisterOverlay } from '../context/overlayContext.js';
 import { Select } from './CustomSelect/index.js';
 
 type Props = {
@@ -9,8 +10,10 @@ type Props = {
 };
 
 export function CostThresholdDialog({ onDone, onCancel }: Props): React.ReactNode {
+  useRegisterOverlay('cost-threshold-dialog');
+  const handleCancel = onCancel ?? onDone;
   return (
-    <Dialog title="You've spent $5 on the Anthropic API this session." onCancel={onCancel ?? onDone}>
+    <Dialog title="You've spent $5 on the Anthropic API this session." onCancel={handleCancel}>
       <Box flexDirection="column">
         <Text>Learn more about how to monitor your spending:</Text>
         <Link url="https://code.claude.com/docs/en/costs" />
@@ -23,6 +26,7 @@ export function CostThresholdDialog({ onDone, onCancel }: Props): React.ReactNod
           },
         ]}
         onChange={onDone}
+        onCancel={handleCancel}
       />
     </Dialog>
   );

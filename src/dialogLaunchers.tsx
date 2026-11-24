@@ -10,8 +10,10 @@ import React from 'react';
 import type { AssistantSession } from './assistant/sessionDiscovery.js';
 import type { StatsStore } from './context/stats.js';
 import type { Root } from '@anthropic/ink';
-import { renderAndRun, showSetupDialog } from './interactiveHelpers.js';
+import { markSessionExiting } from './dialog/useDialogMailboxBridge.js';
+import { showSetupDialog } from './interactiveHelpers.js';
 import { KeybindingSetup } from './keybindings/KeybindingProviderSetup.js';
+import type { LaunchReplResult, LeftArrowAgentsHandoff } from './replLauncher.js';
 import type { AppState } from './state/AppStateStore.js';
 import type { AgentMemoryScope } from '@claude-code/builtin-tools/tools/AgentTool/agentMemory.js';
 import type { TeleportRemoteResponse } from './utils/conversationRecovery.js';
@@ -134,19 +136,22 @@ export async function launchAssistantSessionChooser(
 export async function launchAssistantInstallWizard(root: Root): Promise<string | null> {
   const { NewInstallWizard, computeDefaultInstallDir } = await import('./commands/assistant/assistant.js');
   const defaultDir = await computeDefaultInstallDir();
-  let rejectWithError: (reason: Error) => void;
-  const errorPromise = new Promise<never>((_, reject) => {
-    rejectWithError = reject;
-  });
-  const resultPromise = showSetupDialog<string | null>(root, done => (
+  let installError: Error | null = null;
+  const result = await showSetupDialog<string | null>(root, done => (
     <NewInstallWizard
       defaultDir={defaultDir}
       onInstalled={dir => done(dir)}
       onCancel={() => done(null)}
-      onError={message => rejectWithError(new Error(`Installation failed: ${message}`))}
+      onError={message => {
+        installError = new Error(`Installation failed: ${message}`);
+        done(null);
+      }}
     />
   ));
-  return Promise.race([resultPromise, errorPromise]);
+  if (installError) {
+    throw installError;
+  }
+  return result;
 }
 
 /**
@@ -184,8 +189,9 @@ export async function launchTeleportRepoMismatchDialog(
 
 /**
  * Site ~4903: ResumeConversation mount (interactive session picker).
- * Wraps in <App><KeybindingSetup> and uses renderAndRun.
- * Preserves original Promise.all parallelism between getWorktreePaths and imports.
+ * Wraps in <App><KeybindingSetup>, wires onOpenAgents for ← AgentView handoff
+ * identically to launchRepl, and preserves Promise.all parallelism between
+ * getWorktreePaths and imports.
  */
 export async function launchResumeChooser(
   root: Root,
@@ -196,18 +202,126 @@ export async function launchResumeChooser(
   },
   worktreePathsPromise: Promise<string[]>,
   resumeProps: Omit<ResumeConversationProps, 'worktreePaths'>,
-): Promise<void> {
+): Promise<LaunchReplResult> {
   const [worktreePaths, { ResumeConversation }, { App }] = await Promise.all([
     worktreePathsPromise,
     import('./screens/ResumeConversation.js'),
     import('./components/App.js'),
   ]);
-  await renderAndRun(
-    root,
+
+  let switchToAgents = false;
+  let agentsHandoff: LeftArrowAgentsHandoff = { messages: [] };
+  const defaultOnOpenAgents =
+    process.env.CLAUDE_BG_BACKEND === 'daemon'
+      ? undefined
+      : (payload?: LeftArrowAgentsHandoff) => {
+          void import('./utils/fleetNeedsInputNudge.js').then(m => {
+            m.recordFleetOpenViaLeft();
+          });
+          agentsHandoff = {
+            messages: payload?.messages ?? [],
+            via: payload?.via,
+            confirmedInterstitial: payload?.confirmedInterstitial,
+            deferWaitMs: payload?.deferWaitMs,
+            deferCapFired: payload?.deferCapFired,
+            inflightCount: payload?.inflightCount,
+            inflightKinds: payload?.inflightKinds,
+            restartableCount: payload?.restartableCount,
+            partialChars: payload?.partialChars,
+            partialText: payload?.partialText,
+            boundaryUuid: payload?.boundaryUuid,
+            agentsCount: payload?.agentsCount,
+            checkpoint: payload?.checkpoint,
+            liveMonitorSlugs: payload?.liveMonitorSlugs,
+            sessionPermissionRules: payload?.sessionPermissionRules,
+            memoryToggledOff: payload?.memoryToggledOff,
+            replyOnResume: payload?.replyOnResume,
+            abortAfterFlush: payload?.abortAfterFlush,
+            alreadyOpened: payload?.alreadyOpened,
+          };
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { getReplBridgeHandle, stashLeftArrowBridgeHandle } =
+              require('./bridge/replBridgeHandle.js') as typeof import('./bridge/replBridgeHandle.js');
+            const bridge = getReplBridgeHandle();
+            if (bridge) {
+              stashLeftArrowBridgeHandle(bridge);
+              void bridge.teardown({ skipArchive: true }).catch(() => {
+                /* join/latch best-effort — openAgents will retry teardown */
+              });
+            }
+          } catch {
+            /* bridge module optional at this edge */
+          }
+          switchToAgents = true;
+          root.handoffAltScreen();
+          if (process.platform === 'win32') {
+            root.handoffRawMode();
+          }
+          root.unmount();
+        };
+
+  root.render(
     <App getFpsMetrics={appProps.getFpsMetrics} stats={appProps.stats} initialState={appProps.initialState}>
       <KeybindingSetup>
-        <ResumeConversation {...resumeProps} worktreePaths={worktreePaths} />
+        <ResumeConversation
+          {...resumeProps}
+          worktreePaths={worktreePaths}
+          onOpenAgents={resumeProps.onOpenAgents ?? defaultOnOpenAgents}
+        />
       </KeybindingSetup>
     </App>,
   );
+
+  if (process.env.CLAUDE_BG_RENDEZVOUS_SOCK) {
+    const { startRendezvousServer } = await import('./daemon/rendezvousServer.js');
+    await startRendezvousServer();
+  }
+
+  const stopRendezvousIfActive = async (): Promise<void> => {
+    if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg' || process.env.CLAUDE_BG_RENDEZVOUS_SOCK) {
+      const { stopRendezvousServer } = await import('./daemon/rendezvousServer.js');
+      stopRendezvousServer();
+    }
+  };
+
+  const { startDeferredPrefetches } = await import('./main.js');
+  startDeferredPrefetches();
+  try {
+    await root.waitUntilExit();
+  } catch (err) {
+    markSessionExiting();
+    let canaryNote = '';
+    try {
+      const { markFullscreenBootRenderError } = await import('./utils/fullscreen.js');
+      if (await markFullscreenBootRenderError().catch(() => false)) {
+        canaryNote =
+          ' It happened while the fullscreen renderer was starting, so the next launch will use the classic renderer (CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 forces that any time).';
+      }
+    } catch {
+      // optional
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console -- surface fatal UI error after Ink crash
+    console.error(`Claude Code exited after an unrecoverable interface error (${message}).${canaryNote}`);
+    await stopRendezvousIfActive();
+    const { gracefulShutdown } = await import('./utils/gracefulShutdown.js');
+    await gracefulShutdown(1);
+    return { type: 'exit' };
+  }
+
+  if (switchToAgents) {
+    return {
+      type: 'agents',
+      ...agentsHandoff,
+      messages: agentsHandoff.messages ?? [],
+    };
+  }
+
+  markSessionExiting();
+  await stopRendezvousIfActive();
+
+  const { gracefulShutdown } = await import('./utils/gracefulShutdown.js');
+  await gracefulShutdown(0);
+  return { type: 'exit' };
 }

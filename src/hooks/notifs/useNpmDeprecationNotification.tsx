@@ -7,7 +7,7 @@ const NPM_DEPRECATION_MESSAGE = '';
 
 export function useNpmDeprecationNotification(): void {
   useStartupNotification(async () => {
-    if (isInBundledMode() || isEnvTruthy(process.env.DISABLE_INSTALLATION_CHECKS)) {
+    if (!NPM_DEPRECATION_MESSAGE || isInBundledMode() || isEnvTruthy(process.env.DISABLE_INSTALLATION_CHECKS)) {
       return null;
     }
     const installationType = await getCurrentInstallationType();

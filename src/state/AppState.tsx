@@ -14,6 +14,7 @@ import { applySettingsChange } from '../utils/settings/applySettingsChange.js';
 import type { SettingsChangeExtra } from '../utils/settings/changeDetector.js';
 import type { SettingSource } from '../utils/settings/constants.js';
 import type { SettingsJson } from '../utils/settings/types.js';
+import { StaticRenderContext } from '../utils/staticRender.js';
 import { ActivePluginsFacade, McpConnectionsFacade } from './appStateFacades.js';
 import { createSessionHooksRegistry, type SessionHooksRegistry } from './sessionHooksRegistry.js';
 import { createStore, updateAppState } from './store.js';
@@ -113,13 +114,16 @@ export function AppStateProvider({
   // Official 2.1.328 `uZr` engineStore.current — point memory permission reads
   // at this live store so mid-session permission changes apply to CLAUDE.md /
   // @include / .claude/rules loads (registered at launch by main.tsx for
-  // entrypoints without an AppStateProvider).
+  // entrypoints without an AppStateProvider). Skip inside StaticRenderContext
+  // (e.g. /export / ANSI stringify) and restore the previous source on unmount.
+  const isStaticRender = useContext(StaticRenderContext);
   useEffect(() => {
+    if (isStaticRender) return;
     const { registerClaudeMdPermissionContextSource } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../utils/claudemd.js') as typeof import('../utils/claudemd.js');
-    registerClaudeMdPermissionContextSource(() => store.getState().toolPermissionContext);
-  }, [store]);
+    return registerClaudeMdPermissionContextSource(() => store.getState().toolPermissionContext);
+  }, [store, isStaticRender]);
   const [session] = useState(() => providedSession ?? getBootstrapSession());
   const [sessionHooks] = useState(() => {
     const registry = providedSessionHooks ?? createSessionHooksRegistry();

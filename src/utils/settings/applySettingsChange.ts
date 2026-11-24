@@ -9,6 +9,7 @@ import {
 import type { AppState } from '../../state/AppState.js'
 import type { ToolPermissionContext } from '../../Tool.js'
 import { clearMemoryFileCaches } from '../claudemd.js'
+import { getGlobalConfig } from '../config.js'
 import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
 import { getUltracodeEffortForModel, teSettingsEffortTable } from '../effort.js'
@@ -106,13 +107,23 @@ function classifyDeclaredAdditionalDirectories(
  * Official 2.1.328 `s6t()` (chunk@305180987.js): recompute whether session
  * away-summary recap is enabled after a settings change.
  */
-function computeAwaySummaryEnabled(settings: SettingsJson): boolean {
+export function computeAwaySummaryEnabled(settings: SettingsJson): boolean {
   const envVal = process.env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY
   if (isEnvDefinedFalsy(envVal)) return false
   if (isEnvTruthy(envVal)) return true
   if (isBareMode()) return false
   if (settings.awaySummaryEnabled === false) return false
   return true
+}
+
+/**
+ * Resolve showMessageTimestamps consistently across initial state and live
+ * settings reloads: explicit settings.json value wins over global config.
+ */
+export function computeShowMessageTimestamps(settings: SettingsJson): boolean {
+  return Boolean(
+    settings.showMessageTimestamps ?? getGlobalConfig().showMessageTimestamps,
+  )
 }
 
 /**
@@ -360,6 +371,7 @@ export function applySettingsChange(
     }
 
     const nextAwaySummaryEnabled = computeAwaySummaryEnabled(newSettings)
+    const nextShowMessageTimestamps = computeShowMessageTimestamps(newSettings)
 
     return {
       ...prev,
@@ -369,6 +381,9 @@ export function applySettingsChange(
       ...ultracodePatch,
       ...(prev.awaySummaryEnabled !== nextAwaySummaryEnabled
         ? { awaySummaryEnabled: nextAwaySummaryEnabled }
+        : {}),
+      ...(prev.showMessageTimestamps !== nextShowMessageTimestamps
+        ? { showMessageTimestamps: nextShowMessageTimestamps }
         : {}),
     }
   })

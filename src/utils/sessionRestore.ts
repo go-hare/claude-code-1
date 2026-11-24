@@ -40,6 +40,7 @@ import { clearMemoryFileCaches } from './claudemd.js'
 import {
   type AttributionState,
   attributionRestoreStateFromLog,
+  createEmptyAttributionState,
   restoreAttributionStateFromSnapshots,
 } from './commitAttribution.js'
 import { updateSessionName } from './concurrentSessions.js'
@@ -121,6 +122,8 @@ function extractTodosFromTranscript(messages: Message[]): TodoList {
   return []
 }
 
+let pendingRestoredAgentModel: string | undefined
+
 /**
  * Official 2.1.328 (`chunk@319736883.js @430550, @480074, @499088`):
  * Shared transcript-derived resume hydration used by BOTH `/resume`
@@ -179,24 +182,34 @@ function hydrateResumedTranscriptState(
           !!options?.forkSession,
         ))
       : restoredFallback.model
-  if (effectiveSessionModel) {
-    setAppState(prev => ({
-      ...prev,
-      mainLoopModel: effectiveSessionModel,
-    }))
+  const agentModelToSync = pendingRestoredAgentModel
+  pendingRestoredAgentModel = undefined
+  const targetModel = effectiveSessionModel ?? agentModelToSync
+  if (targetModel) {
+    setAppState(prev =>
+      prev.mainLoopModel === targetModel
+        ? prev
+        : {
+            ...prev,
+            mainLoopModel: targetModel,
+          },
+    )
   }
 
   // Official xpr (#688): rebuild agentNameRegistry from resumed transcript
   // messages (skipped on fork so forked session doesn't inherit parent's names).
+  // Always start from a fresh Map so prior session names never leak across /resume.
   if (!options?.forkSession && result.messages && result.messages.length > 0) {
     const messages = result.messages
     try {
       setAppState(prev => {
-        const next = rehydrateAgentNameRegistry(
-          messages,
-          prev.agentNameRegistry ?? new Map(),
-        )
-        return next === null ? prev : { ...prev, agentNameRegistry: next }
+        const next = rehydrateAgentNameRegistry(messages, new Map())
+        if (next !== null) {
+          return { ...prev, agentNameRegistry: next }
+        }
+        return prev.agentNameRegistry && prev.agentNameRegistry.size > 0
+          ? { ...prev, agentNameRegistry: new Map() }
+          : prev
       })
     } catch (err) {
       logForDebugging(
@@ -204,6 +217,12 @@ function hydrateResumedTranscriptState(
         { level: 'error' },
       )
     }
+  } else {
+    setAppState(prev =>
+      prev.agentNameRegistry && prev.agentNameRegistry.size > 0
+        ? { ...prev, agentNameRegistry: new Map() }
+        : prev,
+    )
   }
 }
 
@@ -224,29 +243,48 @@ export function restoreSessionStateFromLog(
   },
 ): void {
   // densable 2.1.214 Ern(Brt(ur), setAppState) — hydrate EndConversation lock
+  // and clear per-session ephemeral UI state so prior session records never leak.
   const endedByModel = Boolean(
     (result as { endedByModel?: boolean }).endedByModel,
   )
-  setAppState(prev =>
-    prev.endedByModel === endedByModel ? prev : { ...prev, endedByModel },
-  )
+  setAppState(prev => ({
+    ...prev,
+    endedByModel,
+    storedImagePaths: new Map(),
+    displayedMessageContent: {},
+    ultrareviewOverageConfirmed: false,
+    sendMessagePins: {},
+    pendingPlanVerification: undefined,
+  }))
 
-  // Restore file history state
+  // Restore file history state (always reset to empty default when snapshots are absent)
   if (result.fileHistorySnapshots && result.fileHistorySnapshots.length > 0) {
     fileHistoryRestoreStateFromLog(result.fileHistorySnapshots, newState => {
       setAppState(prev => ({ ...prev, fileHistory: newState }))
     })
+  } else {
+    setAppState(prev => ({
+      ...prev,
+      fileHistory: {
+        snapshots: [],
+        trackedFiles: new Set(),
+        snapshotSequence: 0,
+      },
+    }))
   }
 
-  // Restore attribution state (ant-only feature)
-  if (
-    feature('COMMIT_ATTRIBUTION') &&
-    result.attributionSnapshots &&
-    result.attributionSnapshots.length > 0
-  ) {
-    attributionRestoreStateFromLog(result.attributionSnapshots, newState => {
-      setAppState(prev => ({ ...prev, attribution: newState }))
-    })
+  // Restore attribution state (ant-only feature; always reset when snapshots are absent)
+  if (feature('COMMIT_ATTRIBUTION')) {
+    if (result.attributionSnapshots && result.attributionSnapshots.length > 0) {
+      attributionRestoreStateFromLog(result.attributionSnapshots, newState => {
+        setAppState(prev => ({ ...prev, attribution: newState }))
+      })
+    } else {
+      setAppState(prev => ({
+        ...prev,
+        attribution: createEmptyAttributionState(),
+      }))
+    }
   }
 
   // Restore context-collapse commit log + staged snapshot. Must run before
@@ -360,10 +398,14 @@ export function restoreAgentFromSession(
   agentSetting: string | undefined,
   currentAgentDefinition: AgentDefinition | undefined,
   agentDefinitions: AgentDefinitionsResult,
+  setAppState?: (f: (prev: AppState) => AppState) => void,
 ): {
   agentDefinition: AgentDefinition | undefined
   agentType: string | undefined
+  restoredModel?: string
 } {
+  pendingRestoredAgentModel = undefined
+
   // If user already specified --agent on CLI, keep that definition
   if (currentAgentDefinition) {
     return { agentDefinition: currentAgentDefinition, agentType: undefined }
@@ -392,16 +434,33 @@ export function restoreAgentFromSession(
   // densable NQe → QEt: re-apply origin-trust gate on resume
   applyMainThreadAgentHooks(resumedAgent)
 
-  // Apply agent's model if user didn't specify one
+  // Apply agent's model if user didn't specify one, and propagate to AppState
+  // (directly when setAppState is provided, or deferred to restoreSessionStateFromLog).
+  let restoredModel: string | undefined
   if (
     !getMainLoopModelOverride() &&
     resumedAgent.model &&
     resumedAgent.model !== 'inherit'
   ) {
-    setMainLoopModelOverride(parseUserSpecifiedModel(resumedAgent.model))
+    const resolvedModel = parseUserSpecifiedModel(resumedAgent.model)
+    restoredModel = resolvedModel
+    setMainLoopModelOverride(resolvedModel)
+    if (setAppState) {
+      setAppState(prev =>
+        prev.mainLoopModel === resolvedModel
+          ? prev
+          : { ...prev, mainLoopModel: resolvedModel },
+      )
+    } else {
+      pendingRestoredAgentModel = resolvedModel
+    }
   }
 
-  return { agentDefinition: resumedAgent, agentType: resumedAgent.agentType }
+  return {
+    agentDefinition: resumedAgent,
+    agentType: resumedAgent.agentType,
+    ...(restoredModel ? { restoredModel } : {}),
+  }
 }
 
 /**
@@ -796,12 +855,18 @@ export async function processResumedConversation(
   }
 
   // Restore agent setting from resumed session
-  const { agentDefinition: restoredAgent, agentType: resumedAgentType } =
-    restoreAgentFromSession(
-      result.agentSetting,
-      context.mainThreadAgentDefinition,
-      context.agentDefinitions,
-    )
+  const {
+    agentDefinition: restoredAgent,
+    agentType: resumedAgentType,
+    restoredModel: resumedAgentModel,
+  } = restoreAgentFromSession(
+    result.agentSetting,
+    context.mainThreadAgentDefinition,
+    context.agentDefinitions,
+  )
+  if (resumedAgentModel) {
+    pendingRestoredAgentModel = undefined
+  }
 
   // Persist the current mode so future resumes know what mode this session was in.
   // Prefer result.mode (transcript) so a null modeApi that skipped matchSessionMode
@@ -893,6 +958,7 @@ export async function processResumedConversation(
     // densable: ...e.endedByModel?{endedByModel:!0}:{}
     ...(result.endedByModel ? { endedByModel: true } : {}),
     ...(resumedAgentType && { agent: resumedAgentType }),
+    ...(resumedAgentModel && { mainLoopModel: resumedAgentModel }),
     ...(restoredAttribution && { attribution: restoredAttribution }),
     ...(standaloneAgentContext && { standaloneAgentContext }),
     agentDefinitions: refreshedAgentDefs,
