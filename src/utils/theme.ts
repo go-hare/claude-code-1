@@ -121,7 +121,7 @@ export type ThemeSetting =
   | (typeof THEME_SETTINGS)[number]
   | `${typeof CUSTOM_THEME_PREFIX}${string}`
 
-/** densable X1p — named ANSI colors accepted after `ansi:`. */
+/** Official 2.1.328 `u` (@290073923:488) — 16 standard ANSI colors accepted after `ansi:`. */
 const ANSI_COLOR_NAMES = new Set([
   'black',
   'red',
@@ -131,8 +131,6 @@ const ANSI_COLOR_NAMES = new Set([
   'magenta',
   'cyan',
   'white',
-  'gray',
-  'grey',
   'blackBright',
   'redBright',
   'greenBright',

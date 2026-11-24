@@ -203,7 +203,7 @@ function SkillDoctorRedirectBanner(): React.ReactNode {
   return (
     <Box marginTop={1}>
       <StatusIcon status="info" withSpace />
-      <Text>/skill-doctor moved — skill usage and context costs now live in this Stats tab.</Text>
+      <Text>/skill-doctor moved. Skill usage and context costs are in this Stats tab.</Text>
     </Box>
   );
 }
@@ -1467,12 +1467,12 @@ export function PluginSettings({
 
   // Render tabbed interface using the design system Tabs component
   return (
-    <Pane color="suggestion">
+    <Pane color="permission">
       <Tabs
         title="Plugins"
         selectedTab={activeTab}
         onTabChange={handleTabChange}
-        color="suggestion"
+        color="permission"
         disableNavigation={childSearchActive}
         banner={banner}
       >

@@ -8,7 +8,7 @@ import { formatClientApiErrorLine } from '../messages/AssistantTextMessage.js'
 describe('client error line 243', () => {
   test('bare API Error prefix gets the official wait hint', () => {
     expect(formatClientApiErrorLine(API_ERROR_MESSAGE_PREFIX)).toBe(
-      `${API_ERROR_MESSAGE_PREFIX}: Please wait a moment and try again.`,
+      `${API_ERROR_MESSAGE_PREFIX}: Wait a moment and try again.`,
     )
   })
 

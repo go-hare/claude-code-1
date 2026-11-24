@@ -1,6 +1,15 @@
 import figures from 'figures';
 import React, { useCallback, useRef, useState } from 'react';
-import { type KeyboardEvent, Box, Byline, Divider, KeyboardShortcutHint, stringWidth, Text } from '@anthropic/ink';
+import {
+  type KeyboardEvent,
+  Box,
+  Byline,
+  Divider,
+  KeyboardShortcutHint,
+  stringWidth,
+  Text,
+  useInput,
+} from '@anthropic/ink';
 import { useAppState } from '../../../state/AppState.js';
 import type {
   Question,
@@ -17,6 +26,7 @@ import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
 import { ConfigurableShortcutHint } from '../../ConfigurableShortcutHint.js';
 import { type OptionWithDescription, Select, SelectMulti } from '../../CustomSelect/index.js';
 import { FilePathLink } from '../../FilePathLink.js';
+import { isVimModeEnabled } from '../../PromptInput/utils.js';
 import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';
 import { PreviewQuestionView } from './PreviewQuestionView.js';
@@ -86,9 +96,25 @@ export function QuestionView({
 }: Props): React.ReactNode {
   const isInPlanMode = useAppState(s => s.toolPermissionContext.mode === 'plan');
   const isScreenReader = isScreenReaderModeEnabled();
+  const isVimEnabled = isVimModeEnabled();
   const [isFooterFocused, setIsFooterFocused] = useState(false);
-  const [isOtherFocused, setIsOtherFocused] = useState(false);
+  const initialIsOther = questionStates[question.question]?.selectedValue === '__other__';
+  const [isOtherFocused, setIsOtherFocused] = useState(initialIsOther);
+  const [vimState, setVimState] = useState<{
+    mode: 'INSERT' | 'NORMAL' | 'VISUAL' | 'VISUAL LINE';
+    takesEscape: boolean;
+  } | null>(() => (isVimEnabled && initialIsOther ? { mode: 'INSERT', takesEscape: true } : null));
+  const vimTakesEscape = vimState?.takesEscape ?? false;
   const latestOtherInputRef = useRef<{ question: string; value: string } | null>(null);
+  const prevQuestionKeyRef = useRef(question.question);
+  if (prevQuestionKeyRef.current !== question.question) {
+    prevQuestionKeyRef.current = question.question;
+    const nextIsOther = questionStates[question.question]?.selectedValue === '__other__';
+    if (nextIsOther !== isOtherFocused) {
+      setIsOtherFocused(nextIsOther);
+    }
+    setVimState(isVimEnabled && nextIsOther ? { mode: 'INSERT', takesEscape: true } : null);
+  }
 
   const editor = getExternalEditor();
   const editorName = editor ? toIDEDisplayName(editor) : null;
@@ -97,18 +123,44 @@ export function QuestionView({
     (value: string) => {
       const isOther = value === '__other__';
       setIsOtherFocused(isOther);
+      setVimState(isOther && isVimEnabled ? { mode: 'INSERT', takesEscape: true } : null);
       onTextInputFocus(isOther);
     },
-    [onTextInputFocus],
+    [onTextInputFocus, isVimEnabled],
   );
 
   const handleDownFromLastItem = useCallback(() => {
     setIsFooterFocused(true);
+    setVimState(null);
   }, []);
 
   const handleUpFromFooter = useCallback(() => {
     setIsFooterFocused(false);
-  }, []);
+    if (isOtherFocused && isVimEnabled) {
+      setVimState({ mode: 'INSERT', takesEscape: true });
+    }
+  }, [isOtherFocused, isVimEnabled]);
+
+  const handleSelectCancel = useCallback(() => {
+    if (vimTakesEscape) {
+      setVimState({ mode: 'NORMAL', takesEscape: false });
+      return;
+    }
+    onCancel();
+  }, [vimTakesEscape, onCancel]);
+
+  // Mirror Select's vim INSERT -> NORMAL Escape transition (official Zoe `go`/`tn` @1399130):
+  // Select handles first Esc internally when vimModeEnabled && input focused (without
+  // calling onCancel), so observe Esc before Select stops propagation to keep the
+  // `-- INSERT --` indicator and `Esc to cancel` hint in lockstep.
+  useInput(
+    (_input, key) => {
+      if (key.escape && vimTakesEscape) {
+        setVimState({ mode: 'NORMAL', takesEscape: false });
+      }
+    },
+    { isActive: isOtherFocused && isVimEnabled && !isFooterFocused, prepend: true },
+  );
 
   const chatAboutOptionNumber = question.options.length + 2;
 
@@ -196,6 +248,11 @@ export function QuestionView({
     takesPasteFromOtherRows: true,
     onChange: (value: string) => {
       latestOtherInputRef.current = { question: questionText, value };
+      if (isVimEnabled) {
+        setVimState(prev =>
+          prev?.mode === 'INSERT' && prev.takesEscape ? prev : { mode: 'INSERT', takesEscape: true },
+        );
+      }
       onUpdateQuestionState(questionText, { textInputValue: value }, question.multiSelect ?? false);
     },
   };
@@ -296,7 +353,7 @@ export function QuestionView({
                   onAnswer(questionText, finalValues, undefined, false);
                 }}
                 onFocus={handleFocus}
-                onCancel={onCancel}
+                onCancel={handleSelectCancel}
                 submitButtonText={currentQuestionIndex === questions.length - 1 ? 'Submit' : 'Next'}
                 onSubmit={onSubmit}
                 onDownFromLastItem={handleDownFromLastItem}
@@ -327,7 +384,7 @@ export function QuestionView({
                   onAnswer(questionText, value, textInput);
                 }}
                 onFocus={handleFocus}
-                onCancel={onCancel}
+                onCancel={handleSelectCancel}
                 onDownFromLastItem={isScreenReader ? undefined : handleDownFromLastItem}
                 isDisabled={isFooterFocused}
                 layout="compact-vertical"
@@ -351,6 +408,7 @@ export function QuestionView({
               <Box marginTop={1}>
                 <Text color="inactive" dimColor>
                   <Byline>
+                    {vimState && vimState.mode !== 'NORMAL' && <>-- {vimState.mode} --</>}
                     <KeyboardShortcutHint shortcut="Enter" action="select" />
                     {questions.length === 1 ? (
                       <KeyboardShortcutHint shortcut={`${figures.arrowUp}/${figures.arrowDown}`} action="navigate" />
@@ -365,7 +423,7 @@ export function QuestionView({
                         description={`edit in ${editorName}`}
                       />
                     )}
-                    <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+                    {!vimTakesEscape && <KeyboardShortcutHint shortcut="Esc" action="cancel" />}
                   </Byline>
                 </Text>
               </Box>

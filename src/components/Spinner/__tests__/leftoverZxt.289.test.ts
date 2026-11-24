@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { remainingRetryMs } from '../../../utils/advisorNetworkStall.js'
-import { formatDuration } from '../../../utils/format.js'
+import { formatResetTime } from '../../../utils/format.js'
 import {
   leftoverBhrConnLabel,
   leftoverBhrIdleBudget,
@@ -47,11 +47,12 @@ describe('densable 2.1.289 zXt / bhr leftover', () => {
     expect(leftoverZxtRateLimitLabel(undefined)).toBe('usage limit')
   })
 
-  test('zXt resetsAt suffix is duration until unix-seconds reset', () => {
+  test('zXt resetsAt suffix uses wall-clock formatResetTime (official 2.1.328 Y0)', () => {
     const now = 1_700_000_000_000
+    const resetsAt = now / 1000 + 90
     expect(leftoverZxtResetsAtSuffix(undefined, now)).toBe('')
-    expect(leftoverZxtResetsAtSuffix(now / 1000 + 90, now)).toBe(
-      ` (${formatDuration(90_000, { mostSignificantOnly: true })})`,
+    expect(leftoverZxtResetsAtSuffix(resetsAt, now)).toBe(
+      ` (${formatResetTime(resetsAt)})`,
     )
   })
 

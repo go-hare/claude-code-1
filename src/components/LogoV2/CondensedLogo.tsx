@@ -28,7 +28,8 @@ import {
   logEvent,
 } from '../../services/analytics/index.js';
 import { useAppState } from '../../state/AppState.js';
-import { type GlobalConfig, getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
+import { getOauthAccountInfo, getSubscriptionType } from '../../utils/auth.js';
+import { type AccountInfo, type GlobalConfig, getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { type EffortValue, getEffortSuffix, isUltracodeModeActive, pdSessionEffort } from '../../utils/effort.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { truncate } from '../../utils/format.js';
@@ -379,8 +380,8 @@ function useRcHeaderStatus(enabled: boolean): RcPillStatus | null {
   return raw !== null && isBridgeEnabled() ? raw : null;
 }
 
-function compactRcPillLabel(status: RcPillStatus): string {
-  return chalk.level === 0 && status.label !== '/rc active' ? status.label : '/rc';
+export function compactRcPillLabel(status: RcPillStatus): string {
+  return chalk.level === 0 && status.label !== '/rc active' ? status.label.replace(/^\/rc/, 'rc') : 'rc';
 }
 
 function RemoteControlStatusPill({
@@ -428,12 +429,12 @@ function RemoteControlStatusPill({
   );
 }
 
-function getTuiJustSwitchedMode(): 'fullscreen' | 'default' | undefined {
+export function getTuiJustSwitchedMode(): 'fullscreen' | 'default' | undefined {
   switch (process.env.CLAUDE_CODE_TUI_JUST_SWITCHED) {
     case 'fullscreen':
       return isFullscreenEnvEnabled() ? 'fullscreen' : undefined;
     case 'default':
-      return 'default';
+      return !isFullscreenEnvEnabled() ? 'default' : undefined;
     default:
       return undefined;
   }
@@ -447,7 +448,7 @@ function TuiJustSwitchedNotice(): ReactNode {
           <Text>
             <StatusIcon status="success" withSpace />
             <Text color="success">Using flicker-free rendering</Text>
-            <Text dimColor> · if you want to go back, use /tui default</Text>
+            <Text dimColor> · if you want to go back, use /tui classic</Text>
           </Text>
           <Text dimColor>{'  '}· Click to move your cursor in the text input</Text>
           <Text dimColor>{'  '}· Click to expand collapsed tool results</Text>
@@ -467,6 +468,61 @@ function TuiJustSwitchedNotice(): ReactNode {
 type Props = {
   oneShotsAllowed?: boolean;
 };
+
+type ProTrialOauthFields = {
+  ccOnboardingFlags?: { e10?: boolean } | null;
+  claudeCodeTrialEndsAt?: string | null;
+};
+
+export type ProTrialState =
+  | { status: 'ineligible' | 'not_started'; daysRemaining: null }
+  | { status: 'active' | 'expired'; daysRemaining: number };
+
+const PRO_TRIAL_INELIGIBLE: ProTrialState = { status: 'ineligible', daysRemaining: null };
+
+/**
+ * Official 2.1.328 `o` (@308205810:1418): compute Pro trial state from eligibility flag and ISO expiry.
+ */
+export function computeProTrialState(
+  eligible: boolean,
+  endsAt: string | null | undefined,
+  nowMs: number = Date.now(),
+): ProTrialState {
+  if (!eligible) return PRO_TRIAL_INELIGIBLE;
+  if (!endsAt) return { status: 'not_started', daysRemaining: null };
+  const parsed = new Date(endsAt);
+  if (Number.isNaN(parsed.getTime())) return PRO_TRIAL_INELIGIBLE;
+  const remainingMs = parsed.getTime() - nowMs;
+  if (remainingMs <= 0) return { status: 'expired', daysRemaining: 0 };
+  return { status: 'active', daysRemaining: Math.ceil(remainingMs / 86_400_000) };
+}
+
+/**
+ * Official 2.1.328 `_dn` (@308205810:420): resolve current user's Pro trial state from OAuth account metadata.
+ */
+export function getProTrialState(nowMs: number = Date.now()): ProTrialState {
+  const account = getOauthAccountInfo() as (AccountInfo & ProTrialOauthFields) | undefined;
+  if (!account || getSubscriptionType() !== 'pro') return PRO_TRIAL_INELIGIBLE;
+  const eligible = account.ccOnboardingFlags?.e10 === true;
+  return computeProTrialState(eligible, account.claudeCodeTrialEndsAt ?? null, nowMs);
+}
+
+/**
+ * Official 2.1.328 `evs` (@308205810:1263): trailing Pro trial / usage-credits badge label for line 2.
+ */
+export function formatProTrialBadgeLabel(state: ProTrialState): string | null {
+  switch (state.status) {
+    case 'active': {
+      const days = state.daysRemaining ?? 0;
+      return `Trial: ${days} ${days === 1 ? 'day' : 'days'} left`;
+    }
+    case 'expired':
+      return 'Usage credits';
+    case 'ineligible':
+    case 'not_started':
+      return null;
+  }
+}
 
 export function resolveWelcomeHeaderModel(args: {
   sessionModel: string;
@@ -571,10 +627,25 @@ export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode
   const versionPrefix = 'Claude Code v';
   const truncatedVersion = screenReader ? version : truncate(version, Math.max(textWidth - versionPrefix.length, 6));
 
+  // Official 2.1.328 `BWt` (@318440442:10424): trailing Pro trial / usage-credits badge on line 2.
+  const trialState = getProTrialState();
+  const trialBadgeLabel = formatProTrialBadgeLabel(trialState);
+  let trialBadge: ReactNode = null;
+  let trialBadgeWidth = 0;
+  if (trialBadgeLabel) {
+    trialBadgeWidth = stringWidth(` · ${trialBadgeLabel}`);
+    trialBadge = (
+      <Text>
+        {' · '}
+        <Text color={trialState.status === 'expired' ? 'suggestion' : 'warning'}>{trialBadgeLabel}</Text>
+      </Text>
+    );
+  }
+
   const effortSuffix = getEffortSuffix(resolvedModel, effortValue, effectiveUltracode);
   const { shouldSplit, truncatedModel, truncatedBilling } = screenReader
     ? { shouldSplit: false, truncatedModel: modelDisplayName + effortSuffix, truncatedBilling: billingType }
-    : formatModelAndBilling(modelDisplayName + effortSuffix, billingType, textWidth);
+    : formatModelAndBilling(modelDisplayName + effortSuffix, billingType, Math.max(0, textWidth - trialBadgeWidth));
 
   const rcWidthReserve = rcStatus ? 3 + stringWidth(formatRcPillLabel(rcStatus.label)) : 0;
   const separator = ' · ';
@@ -598,11 +669,15 @@ export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode
           {shouldSplit ? (
             <>
               <Text dimColor>{truncatedModel}</Text>
-              <Text dimColor>{truncatedBilling}</Text>
+              <Text dimColor>
+                {truncatedBilling}
+                {trialBadge}
+              </Text>
             </>
           ) : (
             <Text dimColor>
               {truncatedModel} · {truncatedBilling}
+              {trialBadge}
             </Text>
           )}
           {rcStatus ? (

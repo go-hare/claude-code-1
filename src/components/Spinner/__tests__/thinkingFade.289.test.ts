@@ -95,7 +95,7 @@ describe('densable 2.1.289 Ye/ze/no spinner color', () => {
       glimmer.indexOf('stalledIntensity > 0'),
     )
     expect(glyph).toContain('thinkingIntensity')
-    expect(glyph).toContain('theme.warning')
+    expect(glyph).toContain("'warning'")
     expect(glyph).toContain('thinkingIntensity >= 0.5')
     expect(glyph).toContain('flexWrap="wrap"')
     expect(glyph).toContain('width={2}')

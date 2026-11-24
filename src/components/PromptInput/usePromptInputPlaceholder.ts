@@ -24,6 +24,8 @@ type Props = {
   viewingAgentName?: string
   /** #7 (2.1.326, official yTe/Kge): actionable hint after a failed request. */
   nextStepHint?: string
+  /** Official 2.1.328 yTe: true while taking a sent cloud/queued message back. */
+  isTakingBack?: boolean
 }
 
 export type FailedRequestAction =
@@ -173,10 +175,15 @@ export function usePromptInputPlaceholder({
   hasMessages = false,
   viewingAgentName,
   nextStepHint,
+  isTakingBack,
 }: Props): string | undefined {
   const queuedCommands = useCommandQueue()
   const promptSuggestionEnabled = useAppState(s => s.promptSuggestionEnabled)
   const queueEditIndex = useAppState(s => s.queueEditIndex)
+  const takeBackNotificationActive = useAppState(
+    s => s.notifications.current?.key === 'cloud-line-take-back-pending',
+  )
+  const takingBack = isTakingBack ?? takeBackNotificationActive
   const placeholder = useMemo(() => {
     if (input !== '') {
       return
@@ -186,6 +193,11 @@ export function usePromptInputPlaceholder({
     // truncated; gold still concatenates another … after ko. KEEP that BODY.
     if (viewingAgentName) {
       return `Message @${truncate(viewingAgentName, MAX_TEAMMATE_NAME_WIDTH)}…`
+    }
+
+    // Official 2.1.328 yTe (chunk@319736883.js:1028795): takeback placeholder.
+    if (takingBack) {
+      return 'Taking your message back…'
     }
 
     // densable qle: X.some(uf) then queueEditIndex / EE / UGn / hintCount.
@@ -205,7 +217,7 @@ export function usePromptInputPlaceholder({
       if (leftoverQleJigglyMochi()) {
         return kbCohesion
           ? 'Press up to select a queued message to edit, or Enter to send them now'
-          : 'Press up to edit queued messages, Enter to send them immediately'
+          : 'Press up to edit queued messages, Enter to send them now'
       }
       if (
         (getGlobalConfig().queuedCommandUpHintCount || 0) <
@@ -234,6 +246,7 @@ export function usePromptInputPlaceholder({
   }, [
     input,
     queuedCommands,
+    takingBack,
     queueEditIndex,
     nextStepHint,
     submitCount,

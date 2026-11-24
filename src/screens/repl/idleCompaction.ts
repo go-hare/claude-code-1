@@ -1,5 +1,6 @@
 import { summarizePromptCache } from '../../commands/cost/promptCacheTracker.js'
 import { logEvent } from '../../services/analytics/index.js'
+import { currentLimits } from '../../services/claudeAiLimits.js'
 import { isAutoCompactEnabled } from '../../services/compact/autoCompact.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { logError } from '../../utils/log.js'
@@ -83,10 +84,18 @@ export type IdleCompactionEligibilityContext = {
   cacheWarm?: boolean
   lastRequestAt?: number | null
   rateLimitStatus?: string
+  /**
+   * Official 2.1.328 (`chunk@294254613.js:2206365` `QRe(y)`): fixed-load window
+   * baseline tokens (`autoCompactWindow.loadTokens`). When present, idle
+   * compaction requires `contextTokens - loadTokens >= 100_000`.
+   */
+  autoCompactWindow?: { loadTokens?: number }
+  autoCompactWindowLoadTokens?: number
 }
 
 /**
- * Official 2.1.325 `d1r(isPrecompute, lateMs, contextTokens, turnEndMs, prefixIntact)` (#1446).
+ * Official 2.1.328 `Wus(isPrecompute, lateMs, contextTokens, turnEndMs, prefixIntact)`
+ * (`chunk@294254613.js:2206350-2206420`).
  */
 export function checkIdleCompactionEligibility(
   isPrecompute: boolean,
@@ -119,12 +128,23 @@ export function checkIdleCompactionEligibility(
   const warm = ctx.cacheWarm ?? cache.warm
   if (!warm || lateMs > IDLE_COMPACT_MAX_LATE_MS) return 'lapsed'
 
-  if (contextTokens < getIdleCompactMinTokens()) return 'small'
+  const loadTokens =
+    ctx.autoCompactWindowLoadTokens ?? ctx.autoCompactWindow?.loadTokens
+  if (
+    contextTokens < getIdleCompactMinTokens() ||
+    (typeof loadTokens === 'number' &&
+      Number.isFinite(loadTokens) &&
+      contextTokens - loadTokens < IDLE_COMPACT_FLOOR_MIN_TOKENS)
+  ) {
+    return 'small'
+  }
 
   const lastReqAt = ctx.lastRequestAt ?? cache.lastRequest?.at ?? 0
   if (lastReqAt > turnEndMs) return 'newer_request'
 
-  const limitStatus = ctx.rateLimitStatus ?? 'allowed'
+  // Official 2.1.328 (`chunk@294254613.js:2206410`): read live rate-limit status
+  // from `currentLimits.status` instead of hardcoding `'allowed'`.
+  const limitStatus = ctx.rateLimitStatus ?? currentLimits.status ?? 'allowed'
   if (limitStatus !== 'allowed') return 'near_limit'
 
   return null
@@ -285,7 +305,11 @@ export class IdleCompactionRunner {
   arm(
     turnEndMs: number,
     getPrefixToken: () => unknown | null,
-    options?: { isInteractive?: boolean; getContextTokens?: () => number },
+    options?: {
+      isInteractive?: boolean
+      getContextTokens?: () => number
+      getAutoCompactWindowLoadTokens?: () => number | undefined
+    },
   ): void {
     this.lastTurnEnd = turnEndMs
     void runSafe(() => {
@@ -298,7 +322,11 @@ export class IdleCompactionRunner {
   private schedule(
     turnEndMs: number,
     getPrefixToken: () => unknown | null,
-    options?: { isInteractive?: boolean; getContextTokens?: () => number },
+    options?: {
+      isInteractive?: boolean
+      getContextTokens?: () => number
+      getAutoCompactWindowLoadTokens?: () => number | undefined
+    },
   ): 'unattended' | 'no_cache_record' | 'not_one_hour' | 'pending' {
     this.clear()
     if (options?.isInteractive === false) return 'unattended'
@@ -320,6 +348,7 @@ export class IdleCompactionRunner {
           fireAtMs,
           getPrefixToken,
           options?.getContextTokens,
+          options?.getAutoCompactWindowLoadTokens,
         ),
       )
     }, delayMs)
@@ -332,6 +361,7 @@ export class IdleCompactionRunner {
     fireAtMs: number,
     getPrefixToken: () => unknown | null,
     getContextTokens?: () => number,
+    getAutoCompactWindowLoadTokens?: () => number | undefined,
   ): Promise<void> {
     this.timer = null
     const now = Date.now()
@@ -345,12 +375,23 @@ export class IdleCompactionRunner {
     const hasAction =
       hostRef !== null || (this.summarize !== null && prefixToken !== null)
 
+    const tokenLoad =
+      getAutoCompactWindowLoadTokens?.() ??
+      (prefixToken &&
+      typeof prefixToken === 'object' &&
+      'autoCompactWindow' in prefixToken
+        ? (prefixToken as { autoCompactWindow?: { loadTokens?: number } })
+            .autoCompactWindow?.loadTokens
+        : undefined)
     const skip = checkIdleCompactionEligibility(
       isPrecompute,
       lateMs,
       contextTokens,
       turnEndMs,
       prefixToken !== null,
+      tokenLoad !== undefined
+        ? { autoCompactWindowLoadTokens: tokenLoad }
+        : undefined,
     )
     const outcome =
       skip ??

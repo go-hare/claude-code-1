@@ -54,7 +54,7 @@ describe('densable 2.1.289 Slo jee qle Ye', () => {
       'Press Enter to edit the selected message, or up again for history',
     )
     expect(qle).toContain(
-      'Press up to edit queued messages, Enter to send them immediately',
+      'Press up to edit queued messages, Enter to send them now',
     )
     expect(qle).not.toContain('isFullscreenEnvEnabled')
     expect(qle).toContain('truncate(viewingAgentName, MAX_TEAMMATE_NAME_WIDTH)')

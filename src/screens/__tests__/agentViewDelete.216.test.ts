@@ -41,7 +41,7 @@ describe('agent list Ctrl+X delete tombstone (2.1.216 #14)', () => {
         runningCount: 0,
         helpOpen: false,
       }),
-    ).toBe('stopped \u00b7 ctrl+x again to delete \u00b7 esc to keep')
+    ).toBe('stopped \u00b7 ctrl+x again to remove \u00b7 esc to keep')
 
     expect(
       buildFleetFooterHints({
@@ -58,7 +58,7 @@ describe('agent list Ctrl+X delete tombstone (2.1.216 #14)', () => {
         runningCount: 0,
         helpOpen: false,
       }),
-    ).toBe('ctrl+x again to delete \u00b7 esc to keep')
+    ).toBe('ctrl+x again to remove \u00b7 esc to keep')
 
     expect(
       buildFleetFooterHints({
@@ -92,8 +92,8 @@ describe('agent list Ctrl+X delete tombstone (2.1.216 #14)', () => {
     // refresh filter
     expect(src).toContain('deletedJobIdsRef.current.has(short)')
     expect(src).toContain('deletedSessionIdsRef.current.has(s.sessionId)')
-    // UI strings
-    expect(src).toContain('stopped \\u00b7 ctrl+x again to delete')
+    // UI strings (official 2.1.328 Co(backend) -> "remove")
+    expect(src).toContain('stopped \\u00b7 ctrl+x again to ${deleteAction}')
     expect(src).toContain('isJustKilled')
     // densable active/blocked first X path
     expect(src).toMatch(/band === 'blocked' \|\| band === 'active'/)

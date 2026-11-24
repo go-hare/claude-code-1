@@ -218,6 +218,7 @@ import { parseCustomThemeRef } from '../../utils/customThemes.js';
 import { getDisplayPath } from '../../utils/file.js';
 import { isSafeModeEnabled, safeModeDisableHint } from '../../utils/safeMode.js';
 import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
+import { ItemList } from '../ItemList.js';
 import TextInput from '../TextInput.js';
 import { useNotifications } from '../../context/notifications.js';
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
@@ -835,6 +836,30 @@ export function getConfigOverrideNotice(rowIdOrKey: string): string | undefined 
   return source ? `${getSettingSourceDisplayNameCapitalized(source)} override what you save here` : undefined;
 }
 
+export const NOTIF_CHANNEL_OPTIONS: ReadonlyArray<GlobalConfig['preferredNotifChannel']> = [
+  'auto',
+  'iterm2',
+  'terminal_bell',
+  'iterm2_with_bell',
+  'kitty',
+  'ghostty',
+  'notifications_disabled',
+];
+
+/** Official 2.1.328 `pLo` (`chunk@312293526.js:4891`) — compact notification channel label. */
+export function formatShortNotifChannel(channel: string): string {
+  switch (channel) {
+    case 'terminal_bell':
+      return 'bell';
+    case 'iterm2_with_bell':
+      return 'iterm2+bell';
+    case 'notifications_disabled':
+      return 'none';
+    default:
+      return channel;
+  }
+}
+
 type SubMenu =
   | 'Theme'
   | 'Model'
@@ -844,6 +869,7 @@ type SubMenu =
   | 'ChannelDowngrade'
   | 'Language'
   | 'AgentsView'
+  | 'Notifications'
   | 'EnableAutoUpdates'
   | 'EnumPicker'
   | 'TextEdit';
@@ -1581,7 +1607,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
       },
       {
         id: 'copyFullResponse',
-        label: 'Always copy full response (skip /copy picker)',
+        label: 'Skip the /copy picker',
         value: globalConfig.copyFullResponse,
         type: 'boolean' as const,
         onChange(copyFullResponse: boolean) {
@@ -1678,8 +1704,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             ? [
                 {
                   id: 'defaultToAgentsView',
-                  // densable 2.1.289 bvr catalog label (SEA "Start in agent view")
-                  label: 'Start in agent view',
+                  // Official 2.1.328 label (`chunk@312293526.js:12914`)
+                  label: 'Open agents view by default',
                   value: globalConfig.defaultToAgentsView ?? false,
                   type: 'boolean' as const,
                   onChange(defaultToAgentsView: boolean) {
@@ -1736,89 +1762,113 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         type: 'managedEnum',
         onChange: setTheme,
       },
-      {
-        id: 'notifChannel',
-        label: feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION') ? 'Local notifications' : 'Notifications',
-        value: globalConfig.preferredNotifChannel,
-        options: ['auto', 'iterm2', 'terminal_bell', 'iterm2_with_bell', 'kitty', 'ghostty', 'notifications_disabled'],
-        type: 'enum',
-        onChange(notifChannel: GlobalConfig['preferredNotifChannel']) {
-          W(current => ({
-            ...current,
-            preferredNotifChannel: notifChannel,
-          }));
-          setGlobalConfig({
-            ...getGlobalConfig(),
-            preferredNotifChannel: notifChannel,
-          });
-        },
-      },
-      ...(feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION')
+      ...(mapleSundial
         ? [
             {
-              id: 'taskCompleteNotifEnabled',
-              label: 'Push when idle',
-              value: globalConfig.taskCompleteNotifEnabled ?? false,
-              type: 'boolean' as const,
-              onChange(taskCompleteNotifEnabled: boolean) {
+              id: 'notifChannel',
+              label: 'Notifications',
+              value: formatShortNotifChannel(globalConfig.preferredNotifChannel),
+              options: [...NOTIF_CHANNEL_OPTIONS],
+              type: 'managedEnum' as const,
+              onChange(notifChannel: string) {
+                const nextChannel = NOTIF_CHANNEL_OPTIONS.find(opt => opt === notifChannel);
+                if (!nextChannel) return;
                 W(current => ({
                   ...current,
-                  taskCompleteNotifEnabled,
+                  preferredNotifChannel: nextChannel,
                 }));
                 setGlobalConfig({
                   ...getGlobalConfig(),
-                  taskCompleteNotifEnabled,
-                });
-              },
-            },
-            {
-              id: 'inputNeededNotifEnabled',
-              label: 'Push when input needed',
-              value: globalConfig.inputNeededNotifEnabled ?? false,
-              type: 'boolean' as const,
-              onChange(inputNeededNotifEnabled: boolean) {
-                W(current => ({
-                  ...current,
-                  inputNeededNotifEnabled,
-                }));
-                setGlobalConfig({
-                  ...getGlobalConfig(),
-                  inputNeededNotifEnabled,
-                });
-                void syncPushNotificationPreferences({ inputNeededNotifEnabled }).catch(err => {
-                  logError(err instanceof Error ? err : new Error(String(err)));
-                });
-                logEvent('tengu_push_notif_pref_changed', {
-                  key: 'inputNeededNotifEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  value: inputNeededNotifEnabled,
-                });
-              },
-            },
-            {
-              id: 'agentPushNotifEnabled',
-              label: 'Push when Claude decides',
-              value: globalConfig.agentPushNotifEnabled ?? false,
-              type: 'boolean' as const,
-              onChange(agentPushNotifEnabled: boolean) {
-                W(current => ({
-                  ...current,
-                  agentPushNotifEnabled,
-                }));
-                setGlobalConfig({
-                  ...getGlobalConfig(),
-                  agentPushNotifEnabled,
-                });
-                void syncPushNotificationPreferences({ agentPushNotifEnabled }).catch(err => {
-                  logError(err instanceof Error ? err : new Error(String(err)));
-                });
-                logEvent('tengu_push_notif_pref_changed', {
-                  key: 'agentPushNotifEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  value: agentPushNotifEnabled,
+                  preferredNotifChannel: nextChannel,
                 });
               },
             },
           ]
-        : []),
+        : [
+            {
+              id: 'notifChannel',
+              label: feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION') ? 'Local notifications' : 'Notifications',
+              value: globalConfig.preferredNotifChannel,
+              options: [...NOTIF_CHANNEL_OPTIONS],
+              type: 'enum' as const,
+              onChange(notifChannel: GlobalConfig['preferredNotifChannel']) {
+                W(current => ({
+                  ...current,
+                  preferredNotifChannel: notifChannel,
+                }));
+                setGlobalConfig({
+                  ...getGlobalConfig(),
+                  preferredNotifChannel: notifChannel,
+                });
+              },
+            },
+            ...(feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION')
+              ? [
+                  {
+                    id: 'taskCompleteNotifEnabled',
+                    label: 'Push when idle',
+                    value: globalConfig.taskCompleteNotifEnabled ?? false,
+                    type: 'boolean' as const,
+                    onChange(taskCompleteNotifEnabled: boolean) {
+                      W(current => ({
+                        ...current,
+                        taskCompleteNotifEnabled,
+                      }));
+                      setGlobalConfig({
+                        ...getGlobalConfig(),
+                        taskCompleteNotifEnabled,
+                      });
+                    },
+                  },
+                  {
+                    id: 'inputNeededNotifEnabled',
+                    label: 'Push when actions required',
+                    value: globalConfig.inputNeededNotifEnabled ?? false,
+                    type: 'boolean' as const,
+                    onChange(inputNeededNotifEnabled: boolean) {
+                      W(current => ({
+                        ...current,
+                        inputNeededNotifEnabled,
+                      }));
+                      setGlobalConfig({
+                        ...getGlobalConfig(),
+                        inputNeededNotifEnabled,
+                      });
+                      void syncPushNotificationPreferences({ inputNeededNotifEnabled }).catch(err => {
+                        logError(err instanceof Error ? err : new Error(String(err)));
+                      });
+                      logEvent('tengu_push_notif_pref_changed', {
+                        key: 'inputNeededNotifEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        value: inputNeededNotifEnabled,
+                      });
+                    },
+                  },
+                  {
+                    id: 'agentPushNotifEnabled',
+                    label: 'Push when Claude decides',
+                    value: globalConfig.agentPushNotifEnabled ?? false,
+                    type: 'boolean' as const,
+                    onChange(agentPushNotifEnabled: boolean) {
+                      W(current => ({
+                        ...current,
+                        agentPushNotifEnabled,
+                      }));
+                      setGlobalConfig({
+                        ...getGlobalConfig(),
+                        agentPushNotifEnabled,
+                      });
+                      void syncPushNotificationPreferences({ agentPushNotifEnabled }).catch(err => {
+                        logError(err instanceof Error ? err : new Error(String(err)));
+                      });
+                      logEvent('tengu_push_notif_pref_changed', {
+                        key: 'agentPushNotifEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        value: agentPushNotifEnabled,
+                      });
+                    },
+                  },
+                ]
+              : []),
+          ]),
       {
         id: 'outputStyle',
         label: 'Output style',
@@ -1830,7 +1880,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         ? [
             {
               id: 'defaultView',
-              label: 'What you see by default',
+              label: 'Default view',
               // 'default' means the setting is unset — currently resolves to
               // transcript (main.tsx falls through when defaultView !== 'chat').
               // String() narrows the conditional-schema-spread union to string.
@@ -2899,13 +2949,85 @@ export function Config({
         ? [
             {
               id: 'defaultToAgentsView' as const,
-              label: 'Start in agent view',
+              label: 'Open agents view by default',
               value: globalConfig.defaultToAgentsView ?? false,
             },
           ]
         : []),
     ],
     [globalConfig.leftArrowOpensAgents, globalConfig.defaultToAgentsView],
+  );
+
+  // Official 2.1.328 `Hs` (`chunk@336694628.js:10638`) — dedicated Notifications submenu rows & handlers.
+  const notificationsSubmenuItems = React.useMemo(
+    () => [
+      {
+        value: 'channel' as const,
+        label: 'Channel',
+        facts: [formatShortNotifChannel(globalConfig.preferredNotifChannel)],
+      },
+      ...(feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION')
+        ? [
+            {
+              value: 'inputNeeded' as const,
+              label: 'Notify when Claude needs you',
+              facts: [formatConfigOnOffValue(globalConfig.inputNeededNotifEnabled ?? false)],
+            },
+            {
+              value: 'done' as const,
+              label: 'Notify when Claude is done',
+              facts: [formatConfigOnOffValue(globalConfig.agentPushNotifEnabled ?? false)],
+            },
+          ]
+        : []),
+    ],
+    [globalConfig.preferredNotifChannel, globalConfig.inputNeededNotifEnabled, globalConfig.agentPushNotifEnabled],
+  );
+
+  const handleNotificationsSubmenuSelect = useCallback(
+    (index: number) => {
+      const item = notificationsSubmenuItems[index];
+      if (!item) return;
+      isDirty.current = true;
+      if (item.value === 'channel') {
+        const currentIdx = NOTIF_CHANNEL_OPTIONS.indexOf(globalConfig.preferredNotifChannel);
+        const nextChannel = NOTIF_CHANNEL_OPTIONS[(currentIdx + 1) % NOTIF_CHANNEL_OPTIONS.length]!;
+        W(current => ({ ...current, preferredNotifChannel: nextChannel }));
+        setGlobalConfig(prev => ({ ...prev, preferredNotifChannel: nextChannel }));
+        logEvent('tengu_config_changed', {
+          setting: 'notifChannel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          value: nextChannel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+      } else if (item.value === 'inputNeeded') {
+        const nextVal = !(globalConfig.inputNeededNotifEnabled ?? false);
+        W(current => ({ ...current, inputNeededNotifEnabled: nextVal }));
+        setGlobalConfig(prev => ({ ...prev, inputNeededNotifEnabled: nextVal }));
+        void syncPushNotificationPreferences({ inputNeededNotifEnabled: nextVal }).catch(err => {
+          logError(err instanceof Error ? err : new Error(String(err)));
+        });
+        logEvent('tengu_config_changed', {
+          setting: 'inputNeededNotifEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          value: nextVal,
+        });
+      } else if (item.value === 'done') {
+        const nextVal = !(globalConfig.agentPushNotifEnabled ?? false);
+        W(current => ({ ...current, agentPushNotifEnabled: nextVal }));
+        setGlobalConfig(prev => ({ ...prev, agentPushNotifEnabled: nextVal }));
+        void syncPushNotificationPreferences({ agentPushNotifEnabled: nextVal }).catch(err => {
+          logError(err instanceof Error ? err : new Error(String(err)));
+        });
+        logEvent('tengu_config_changed', {
+          setting: 'agentPushNotifEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          value: nextVal,
+        });
+      }
+    },
+    [
+      notificationsSubmenuItems,
+      globalConfig.preferredNotifChannel,
+      globalConfig.inputNeededNotifEnabled,
+      globalConfig.agentPushNotifEnabled,
+    ],
   );
 
   const handleAgentsViewChange = useCallback((id: 'leftArrowOpensAgents' | 'defaultToAgentsView', value: boolean) => {
@@ -3317,6 +3439,12 @@ export function Config({
 
     if (setting.id === 'agentsView') {
       setShowSubmenu('AgentsView');
+      setTabsHidden(true);
+      return;
+    }
+
+    if (mapleSundial && setting.id === 'notifChannel') {
+      setShowSubmenu('Notifications');
       setTabsHidden(true);
       return;
     }
@@ -3809,12 +3937,47 @@ export function Config({
               setTabsHidden(false);
             }}
           />
-          <Text dimColor>
+          <Text dimColor italic>
             <Byline>
               <KeyboardShortcutHint shortcut="Enter/Space" action="toggle" />
-              <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="close" />
+              <ConfigurableShortcutHint
+                action="confirm:no"
+                context="Confirmation"
+                fallback="Esc"
+                description="go back"
+              />
             </Byline>
           </Text>
+        </Dialog>
+      ) : showSubmenu === 'Notifications' ? (
+        <Dialog
+          title="Notifications"
+          onCancel={() => {
+            setShowSubmenu(null);
+            setTabsHidden(false);
+          }}
+          hideBorder
+          inputGuide={
+            <Byline>
+              <KeyboardShortcutHint shortcut="Enter" action="change" />
+              <ConfigurableShortcutHint
+                action="confirm:no"
+                context="Confirmation"
+                fallback="Esc"
+                description="go back"
+              />
+            </Byline>
+          }
+        >
+          <ItemList
+            options={notificationsSubmenuItems}
+            visibleOptionCount={6}
+            onSelect={handleNotificationsSubmenuSelect}
+            onCancel={() => {
+              setShowSubmenu(null);
+              setTabsHidden(false);
+            }}
+          />
         </Dialog>
       ) : showSubmenu === 'EnumPicker' && enumPickerSetting ? (
         <>
@@ -4102,7 +4265,7 @@ export function Config({
                               {showThinkingWarning && setting.id === 'thinking' && (
                                 <Text color="warning" wrap="truncate-end">
                                   {' '}
-                                  Changing thinking mode mid-conversation will increase latency and may reduce quality.
+                                  Changing thinking mode mid-conversation slows responses and may lower quality.
                                 </Text>
                               )}
                               {setting.id === 'remoteHomeSettings' && remoteHomeSettingsNotice !== null && (
@@ -4115,7 +4278,7 @@ export function Config({
                             <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
                               {THEME_LABELS[setting.value.toString()] ?? setting.value.toString()}
                             </Text>
-                          ) : setting.id === 'notifChannel' ? (
+                          ) : setting.id === 'notifChannel' && !mapleSundial ? (
                             <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
                               <NotifChannelLabel value={setting.value.toString()} />
                             </Text>
@@ -4180,7 +4343,7 @@ export function Config({
               </Text>
             ) : null}
             {headerFocused ? (
-              <Text dimColor wrap="truncate-end">
+              <Text dimColor italic wrap="truncate-end">
                 <Byline>
                   <KeyboardShortcutHint shortcut="←/→ tab" action="switch" />
                   <KeyboardShortcutHint shortcut="↓" action="return" />
@@ -4188,7 +4351,7 @@ export function Config({
                 </Byline>
               </Text>
             ) : isSearchMode ? (
-              <Text dimColor wrap="truncate-end">
+              <Text dimColor italic wrap="truncate-end">
                 <Byline>
                   <Text>Type to filter</Text>
                   <KeyboardShortcutHint shortcut="Enter/↓" action="select" />
@@ -4197,7 +4360,7 @@ export function Config({
                 </Byline>
               </Text>
             ) : (
-              <Text dimColor wrap="truncate-end">
+              <Text dimColor italic wrap="truncate-end">
                 <Byline>
                   <KeyboardShortcutHint shortcut="enter/space" action="change" />
                   <ConfigurableShortcutHint
@@ -4240,7 +4403,7 @@ function NotifChannelLabel({ value }: { value: string }): React.ReactNode {
     case 'terminal_bell':
       return (
         <Text>
-          Terminal Bell <Text dimColor>(\a)</Text>
+          Terminal bell <Text dimColor>(\a)</Text>
         </Text>
       );
     case 'kitty':
@@ -4256,7 +4419,7 @@ function NotifChannelLabel({ value }: { value: string }): React.ReactNode {
         </Text>
       );
     case 'iterm2_with_bell':
-      return 'iTerm2 w/ Bell';
+      return 'iTerm2 with bell';
     case 'notifications_disabled':
       return 'Disabled';
     default:

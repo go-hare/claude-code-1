@@ -16,13 +16,13 @@ export type HostParkMode =
   | 'typing'
   | null
 
-/** densable YTe — Host parked while the prompt has unsent text. */
+/** densable YTe / official VOt — Host parked while the prompt has unsent text. */
 export const HOST_PARKED_TYPING_QUESTION =
-  "Claude has a question for you — it shows once you send or clear what you're typing."
+  "Claude has a question for you. It shows once you send or clear what you're typing."
 
-/** densable JTe */
+/** densable JTe / official KOt */
 export const HOST_PARKED_TYPING_SUGGESTION =
-  "Claude has a suggestion for you — it shows once you send or clear what you're typing."
+  "Claude has a suggestion for you. It shows once you send or clear what you're typing."
 
 export type HostParkInputs = {
   hasLegacyDialog: boolean

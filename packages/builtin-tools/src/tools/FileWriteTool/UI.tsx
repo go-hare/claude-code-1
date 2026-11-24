@@ -57,7 +57,7 @@ function isCollapsedWritePath(filePath: string): boolean {
 }
 
 function ReplacedUndiffedNotice(): React.ReactNode {
-  return <Text dimColor> — previous content replaced (no diff shown)</Text>;
+  return <Text dimColor> (previous content replaced, no diff shown)</Text>;
 }
 
 /** densable ae — large file overwrite that omitted structuredPatch and originalFile. */
@@ -147,14 +147,17 @@ function FileWriteToolCreatedMessage({
         .join(EOL)
         .slice(0, MAX_LINES_TO_RENDER * (codeWidth + 1));
   const { hiddenLines, hiddenChars } = computePreviewHiddenMetrics(content, preview, codeWidth, verbose);
-  const kbHint = hiddenChars !== undefined && hiddenChars >= 1000 ? ` (~${Math.round(hiddenChars / 1024)} KB)` : '';
+  const kbHint =
+    hiddenChars !== undefined && hiddenChars >= 1000 ? ` (~${Math.max(1, Math.round(hiddenChars / 1000))} KB)` : '';
 
   return (
     <MessageResponse>
       <Box flexDirection="column">
         <Text>
           Wrote <Text bold>{numLines}</Text> {plural(numLines, 'line')} to{' '}
-          <Text bold>{verbose ? filePath : getDisplayPath(filePath)}</Text>
+          <Text bold>
+            <FilePathLink filePath={filePath}>{verbose ? filePath : getDisplayPath(filePath)}</FilePathLink>
+          </Text>
           {replacedUndiffedContent && <ReplacedUndiffedNotice />}
         </Text>
         <Box
@@ -166,10 +169,10 @@ function FileWriteToolCreatedMessage({
             <HighlightedCode code={preview} filePath={filePath} width={codeWidth} />
           </Box>
         </Box>
-        {!verbose && (hiddenLines > 0 || hiddenChars !== undefined) && (
+        {!verbose && hiddenLines > 0 && (
           <Text dimColor>
             … +{hiddenLines} {plural(hiddenLines, 'line')}
-            {kbHint} {numLines > 0 && <CtrlOToExpand />}
+            {kbHint} <CtrlOToExpand />
           </Text>
         )}
       </Box>
@@ -250,12 +253,17 @@ export function renderToolUseRejectedMessage(
 
 export function renderToolUseErrorMessage(
   result: ToolResultBlockParam['content'],
-  { verbose }: { verbose: boolean },
+  { verbose, toolDenialKind }: { verbose: boolean; toolDenialKind?: string },
 ): React.ReactNode {
-  if (!verbose && typeof result === 'string' && extractTag(result, 'tool_use_error')) {
+  if (
+    !verbose &&
+    toolDenialKind !== 'permission-rule' &&
+    typeof result === 'string' &&
+    extractTag(result, 'tool_use_error')
+  ) {
     return (
       <MessageResponse>
-        <Text color="error">Error writing file</Text>
+        <Text color="error">Couldn&apos;t write file</Text>
       </MessageResponse>
     );
   }
@@ -313,12 +321,14 @@ function renderFileWriteResult(
           );
         }
       } else if (style === 'condensed' && !verbose) {
-        // Official densable: "Wrote N line(s) to <relpath>"
+        // Official densable: "Wrote N line(s) to <FilePathLink>"
         const numLines = countLines(content);
         return (
           <Text>
             Wrote <Text bold>{numLines}</Text> {numLines === 1 ? 'line' : 'lines'} to{' '}
-            <Text bold>{getDisplayPath(filePath)}</Text>
+            <Text bold>
+              <FilePathLink filePath={filePath}>{getDisplayPath(filePath)}</FilePathLink>
+            </Text>
             {replacedUndiffedContent && <ReplacedUndiffedNotice />}
           </Text>
         );

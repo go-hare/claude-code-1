@@ -1975,6 +1975,14 @@ export function buildCustomGroupModeFlatRows(input: {
  * Build footer chord hints aligned with official FleetView footer.
  * Help mode mirrors official n_k/Swf: include "@ to mention" when canMention.
  */
+/**
+ * Official 2.1.328 `Co(backend)` (`chunk@307833918.js:17102`) — delete verb
+ * for backend-specific `ctrl+x` copy (`"remove"`).
+ */
+export function fleetDeleteActionForBackend(_backend?: string): string {
+  return 'remove'
+}
+
 export function buildFleetFooterHints(input: {
   focusArea: 'list' | 'dispatch'
   viewMode: 'list' | 'rename' | 'reply' | 'group'
@@ -1982,6 +1990,14 @@ export function buildFleetFooterHints(input: {
   ungroupPending: boolean
   /** densable cy.justKilled — first X stopped the worker. */
   justKilled?: boolean
+  /** Official 2.1.328 `Co(b.state.backend)` — backend for delete verb lookup. */
+  backend?: string
+  /** Optional explicit delete verb override (defaults to `fleetDeleteActionForBackend(backend)`). */
+  deleteAction?: string
+  /** Official 2.1.328 `za` `canDelete` — e.g. `"remove"` or `"stop"` in `?` help overlay. */
+  canDelete?: string
+  /** Official 2.1.328 `za` `canGoBack` — shows `← to go back` in `?` help overlay. */
+  canGoBack?: boolean
   rowKind?: FleetFlatRow['kind']
   band?: StatusBand
   canPin: boolean
@@ -2044,8 +2060,14 @@ export function buildFleetFooterHints(input: {
           : `alt+1-${Math.min(input.openSlots, 9)} to open`,
       )
     }
+    if (input.canDelete) {
+      parts.push(`ctrl+x to ${input.canDelete}`)
+    }
+    if (input.canGoBack) {
+      parts.push('← to go back')
+    }
     parts.push(
-      canSwitchViews ? 'esc to quit' : 'esc to close · esc again quits',
+      canSwitchViews ? 'esc to quit' : 'esc to close · esc again to quit',
     )
     parts.push('? to close')
     return parts.join(' · ')
@@ -2070,11 +2092,13 @@ export function buildFleetFooterHints(input: {
   }
   if (input.deletePending) {
     if (input.ungroupPending) return 'ctrl+x again to ungroup'
-    // densable footer: justKilled → "stopped · ctrl+x again to delete · esc to keep"
+    const action =
+      input.deleteAction ?? fleetDeleteActionForBackend(input.backend)
+    // Official 2.1.328 (`chunk@307833918.js:128712`): backend-specific delete verb via Co(backend).
     if (input.justKilled) {
-      return 'stopped · ctrl+x again to delete · esc to keep'
+      return `stopped · ctrl+x again to ${action} · esc to keep`
     }
-    return 'ctrl+x again to delete · esc to keep'
+    return `ctrl+x again to ${action} · esc to keep`
   }
   if (input.focusArea === 'dispatch') {
     if (input.bashMode) {

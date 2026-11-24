@@ -14,6 +14,7 @@ import {
 import { APIError } from '@anthropic-ai/sdk'
 import {
   getInferenceProfileBackingModelCached,
+  getServedModelsForRequestedModel,
   getThinkingResumptionRefused,
   getThinkingTypeOverride,
   isStickyBetaSentActive,
@@ -305,6 +306,7 @@ export type ThinkingDisplayRetryToken =
   | 'retry:effort-unsupported'
   | `retry:prefix-lock-strip-${number}`
   | `retry:prefix-lock-strip-all-${number}`
+  | 'retry:thinking-signature-strip'
   | 'retry:safeguards'
   | 'retry:safeguards-unclaimed'
 
@@ -346,16 +348,24 @@ export type ThinkingRetryContext = {
    * effort unsupported globally for the model across the session.
    */
   leavesEffortSupportAlone?: boolean
+  /** Query source for telemetry on thinking strip retries (official `I9o`). */
+  querySource?: string
 }
 
 function isHttp400(error: unknown): error is APIError {
   return error instanceof APIError && error.status === 400
 }
 
-/** densable `QE` @183946200 — thinking signature 400 (prefix-lock sibling). */
+/**
+ * Official 2.1.328 `BN` / `L7s` (`chunk@294254613.js:2119074`, `chunk@293569796.js:5891`) —
+ * thinking signature / redacted_thinking 400 rejection.
+ */
 export function isThinkingSignatureRejected(error: unknown): boolean {
   if (!isHttp400(error)) return false
-  const n = error.message.toLowerCase().replaceAll('`', '')
+  if (messageHasCapabilityRejectedToken(error.message, 'thinking_signature')) {
+    return true
+  }
+  const n = error.message.toLowerCase().replace(/[`']/g, '')
   if (n.includes('signature in thinking block')) return true
   if (n.includes('invalid data in redacted_thinking block')) return true
   if (n.includes('thinking.signature') && n.includes('field required')) {
@@ -963,6 +973,203 @@ export function stripAllThinkingBlocks(messages: Message[]): Message[] {
   return n ? r : messages
 }
 
+/** Official 2.1.328 `fio` / `DAt` keepForeignThinking policy. */
+export type KeepForeignThinkingMode = 'none' | 'upgrade' | 'all'
+
+const SYNTHETIC_THINKING_MODEL = '<synthetic>'
+
+/**
+ * Official 2.1.328 `g4r` (`chunk@294254613.js:6063870`) — returns true for
+ * `redacted_thinking` blocks or `thinking` blocks that carry a non-empty signature.
+ */
+export function isSignedOrRedactedThinkingBlock(block: unknown): boolean {
+  if (!block || typeof block !== 'object') return false
+  const candidate = block as { type?: unknown; signature?: unknown }
+  if (candidate.type === 'redacted_thinking') return true
+  if (
+    candidate.type === 'thinking' &&
+    'signature' in candidate &&
+    Boolean(candidate.signature)
+  ) {
+    return true
+  }
+  return false
+}
+
+function parseModelFamilyVersion(model: string): {
+  family: string
+  major: number
+  minor: number
+} | null {
+  const canonical = densableLoCanonical(model)
+  const match = /^claude-([a-z]+)-(\d{1,2})(?!\d)(?:-(\d{1,2})(?!\d))?/.exec(
+    canonical,
+  )
+  if (!match) return null
+  return {
+    family: match[1] ?? '',
+    major: Number(match[2]),
+    minor: match[3] === undefined ? 0 : Number(match[3]),
+  }
+}
+
+function modelFamilyTier(family: string): number | undefined {
+  switch (family) {
+    case 'haiku':
+      return 0
+    case 'sonnet':
+      return 1
+    case 'opus':
+      return 2
+    case 'fable':
+    case 'mythos':
+      return 3
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Official 2.1.328 `bbr` (`chunk@283908380.js:2798`) — returns true when
+ * `targetModel` is a same-or-higher family tier and version than `sourceModel`.
+ */
+export function isModelUpgradeCompatible(
+  sourceModel: unknown,
+  targetModel: string,
+): boolean {
+  if (typeof sourceModel !== 'string') return false
+  const src = parseModelFamilyVersion(sourceModel)
+  const dst = parseModelFamilyVersion(targetModel)
+  if (!src || !dst) return false
+  const srcTier = modelFamilyTier(src.family)
+  const dstTier = modelFamilyTier(dst.family)
+  if (srcTier === undefined || dstTier === undefined) return false
+  const effectiveDst =
+    (dst.family === 'fable' || dst.family === 'mythos') &&
+    dst.major === 5 &&
+    dst.minor === 2
+      ? { major: 5, minor: 5 }
+      : dst
+  const versionDiff =
+    effectiveDst.major !== src.major
+      ? effectiveDst.major - src.major
+      : effectiveDst.minor - src.minor
+  return dstTier >= srcTier && versionDiff >= 0
+}
+
+/**
+ * Official 2.1.328 `Lze` (`chunk@294254613.js:6070360`) — returns true when an
+ * assistant message's model is foreign/incompatible with `targetModel`.
+ * Preserves synthetic messages, exact/normalized matches, canonical identity
+ * matches, and served aliases latched for `targetModel`.
+ */
+export function isForeignThinkingModel(
+  messageModel: unknown,
+  targetModel: string,
+): boolean {
+  if (typeof messageModel !== 'string' || messageModel.length === 0) return true
+  if (messageModel === SYNTHETIC_THINKING_MODEL) return false
+  const normalizedTarget = targetModel.replace(/\[1m\]/gi, '').trim()
+  const normalizedMsg = messageModel.replace(/\[1m\]/gi, '').trim()
+  if (messageModel === targetModel || normalizedMsg === normalizedTarget) {
+    return false
+  }
+  if (
+    densableLoCanonical(normalizedMsg) === densableLoCanonical(normalizedTarget)
+  ) {
+    return false
+  }
+  const served = getServedModelsForRequestedModel(normalizedTarget)
+  if (served instanceof Set && served.has(messageModel)) {
+    return false
+  }
+  const servedRaw =
+    normalizedTarget !== targetModel
+      ? getServedModelsForRequestedModel(targetModel)
+      : undefined
+  if (servedRaw instanceof Set && servedRaw.has(messageModel)) {
+    return false
+  }
+  return true
+}
+
+/**
+ * Official 2.1.328 `fio` / `Bqi` / `IAt` / `DAt` (`chunk@294254613.js:6069470-6070400`) —
+ * strip BOTH signed `thinking` AND `redacted_thinking` (`g4r`) ONLY from assistant
+ * messages whose `message.model` is foreign/incompatible with `targetModel`,
+ * preserving thinking blocks on same-model turns so prompt caching and multi-turn
+ * extended thinking continuity stay intact.
+ */
+export function stripForeignThinkingBlocks<T extends Message>(
+  messages: T[],
+  targetModel: string,
+  options?: { keepForeignThinking?: KeepForeignThinkingMode },
+): T[] {
+  const mode: KeepForeignThinkingMode = options?.keepForeignThinking ?? 'none'
+  const foreignCache = new Map<unknown, boolean>()
+  const keepCache = new Map<unknown, boolean>()
+
+  const isForeign = (msg: AssistantMessage): boolean => {
+    const model = msg.message?.model
+    let cached = foreignCache.get(model)
+    if (cached === undefined) {
+      cached = isForeignThinkingModel(model, targetModel)
+      foreignCache.set(model, cached)
+    }
+    return cached
+  }
+
+  const shouldKeepForeign = (msg: AssistantMessage): boolean => {
+    const model = msg.message?.model
+    let cached = keepCache.get(model)
+    if (cached === undefined) {
+      switch (mode) {
+        case 'all':
+          cached = typeof model === 'string' && model.length > 0
+          break
+        case 'upgrade':
+          cached = isModelUpgradeCompatible(model, targetModel)
+          break
+        case 'none':
+          cached = false
+          break
+      }
+      keepCache.set(model, cached)
+    }
+    return cached
+  }
+
+  const shouldStrip = (msg: Message): boolean => {
+    if (msg.type !== 'assistant') return false
+    const assistant = msg as AssistantMessage
+    return isForeign(assistant) && !shouldKeepForeign(assistant)
+  }
+
+  if (!messages.some(shouldStrip)) {
+    return messages
+  }
+
+  let changed = false
+  const next = messages.map(msg => {
+    if (!shouldStrip(msg) || msg.type !== 'assistant') return msg
+    const content = msg.message?.content
+    if (!Array.isArray(content)) return msg
+    const filtered = content.filter(
+      block => !isSignedOrRedactedThinkingBlock(block),
+    )
+    if (filtered.length === content.length) return msg
+    changed = true
+    return {
+      ...msg,
+      message: {
+        ...msg.message,
+        content: filtered,
+      },
+    } as T
+  })
+  return changed ? next : messages
+}
+
 /** densable `nIe` @186788885 — strip from messageIndex/thinkingIndex onward. */
 export function stripThinkingBlocksFrom(
   messages: Message[],
@@ -1198,7 +1405,7 @@ export function classifyThinkingRetryExtras(
   const gue = classifySafeguardsUnclaimedRetry(error, ctx)
   if (gue !== null) return gue
 
-  return classifyPrefixLockStripRetry(
+  const prefixLock = classifyPrefixLockStripRetry(
     error,
     ctx.messages,
     ctx.onMessagesHealed,
@@ -1206,6 +1413,70 @@ export function classifyThinkingRetryExtras(
     ctx.prefixLockAttempt ?? 1,
     ctx.onThinkingStripped,
   )
+  if (prefixLock !== null) return prefixLock
+
+  return classifyThinkingSignatureStripRetry(error, ctx)
+}
+
+/**
+ * Official 2.1.328 `I9o` (`chunk@294254613.js:3419400-3420220`) — after
+ * prefix-lock (`h9o`), if `!resumeIncompleteThinking && BN(error)`, strip all
+ * thinking blocks (`rqe`), log `tengu_thinking_signature_strip_retry`, and
+ * retry once with `'retry:thinking-signature-strip'`.
+ */
+export function classifyThinkingSignatureStripRetry(
+  error: unknown,
+  ctx: Pick<
+    ThinkingRetryContext,
+    | 'model'
+    | 'resumeIncompleteThinking'
+    | 'messages'
+    | 'onMessagesHealed'
+    | 'onThinkingStripped'
+    | 'querySource'
+  >,
+): ThinkingDisplayRetryToken | null {
+  if (ctx.resumeIncompleteThinking === true) return null
+  if (!isThinkingSignatureRejected(error)) return null
+  const messages = ctx.messages
+  if (!messages) return null
+  let strippedSignedCount = 0
+  let strippedUnsignedCount = 0
+  for (const msg of messages) {
+    if (msg.type !== 'assistant' || !Array.isArray(msg.message?.content)) {
+      continue
+    }
+    for (const block of msg.message.content) {
+      if (block.type === 'redacted_thinking') {
+        strippedSignedCount++
+      } else if (block.type === 'thinking') {
+        if ('signature' in block && block.signature) {
+          strippedSignedCount++
+        } else {
+          strippedUnsignedCount++
+        }
+      }
+    }
+  }
+  const stripped = stripAllThinkingBlocks(messages)
+  if (stripped === messages) return null
+  ctx.onMessagesHealed?.(stripped, 'error_recovery')
+  ctx.onThinkingStripped?.(thinkingStrippedAttachment('all'))
+  logForDebugging(
+    '[thinking] server rejected a thinking block; stripping all thinking blocks and retrying.',
+    { level: 'warn' },
+  )
+  logEvent('tengu_thinking_signature_strip_retry', {
+    ...(ctx.querySource !== undefined && {
+      query_source:
+        ctx.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    }),
+    model:
+      ctx.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    stripped_signed_count: strippedSignedCount,
+    stripped_unsigned_count: strippedUnsignedCount,
+  })
+  return 'retry:thinking-signature-strip'
 }
 
 /**

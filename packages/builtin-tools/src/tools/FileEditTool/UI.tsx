@@ -183,10 +183,16 @@ export function renderToolUseErrorMessage(
     progressMessagesForMessage: ProgressMessage[];
     tools: Tools;
     verbose: boolean;
+    toolDenialKind?: string;
   },
 ): React.ReactElement {
-  const { verbose } = options;
-  if (!verbose && typeof result === 'string' && extractTag(result, 'tool_use_error')) {
+  const { verbose, toolDenialKind } = options;
+  if (
+    !verbose &&
+    toolDenialKind !== 'permission-rule' &&
+    typeof result === 'string' &&
+    extractTag(result, 'tool_use_error')
+  ) {
     const errorMessage = extractTag(result, 'tool_use_error');
     if (errorMessage?.includes('File has not been read yet')) {
       return (
@@ -204,7 +210,7 @@ export function renderToolUseErrorMessage(
     }
     return (
       <MessageResponse>
-        <Text color="error">Error editing file</Text>
+        <Text color="error">Couldn&apos;t edit file</Text>
       </MessageResponse>
     );
   }

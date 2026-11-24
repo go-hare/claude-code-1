@@ -19,19 +19,15 @@ describe('densable 2.1.289 Cn Next: line', () => {
 
   test('Next: trims subject and uses truncate-end', () => {
     expect(spinnerSrc).toContain(
-      "`Next: ${nextTask.subject.replace(/\\s+/g, ' ').trim()}`",
+      "`Next: ${opts.nextTaskSubject.replace(/\\s+/g, ' ').trim()}`",
     )
     expect(spinnerSrc).toContain("wrap={nextTask ? 'truncate-end' : 'wrap'}")
   })
 
-  test('teammate tree does not XOR Next: away', () => {
-    expect(spinnerSrc).toContain('{showSpinnerTree && hasRunningTeammates ? (')
+  test('teammate tree is removed in 2.1.328 so Next: is never hidden by it', () => {
+    expect(spinnerSrc).not.toContain('<TeammateSpinnerTree')
     expect(spinnerSrc).toContain(
-      ') : null}\n      {isMainSession && showExpandedTodos && tasksV2 && tasksV2.length > 0',
-    )
-    // The XOR that hid Next: was `tree ? tree : showExpandedTodos ? list : nextTask`.
-    expect(spinnerSrc).not.toMatch(
-      /showSpinnerTree && hasRunningTeammates \? \(\s*<TeammateSpinnerTree[\s\S]*?\) : showExpandedTodos/,
+      '{isMainSession && showExpandedTodos && tasksV2 && tasksV2.length > 0',
     )
   })
 })

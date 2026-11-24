@@ -125,7 +125,7 @@ export function renderToolResultMessage(
   const estimatedTokens = getContentSizeEstimate(mcpOutput);
   const showWarning = estimatedTokens > MCP_OUTPUT_WARNING_THRESHOLD_TOKENS;
   const warningMessage = showWarning
-    ? `${figures.warning} Large MCP response (~${formatNumber(estimatedTokens)} tokens), this can fill up context quickly`
+    ? `${figures.warning} Large MCP response (~${formatNumber(estimatedTokens)} tokens) · can fill context quickly`
     : null;
 
   let contentElement: React.ReactNode;

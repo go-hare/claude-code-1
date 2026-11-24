@@ -1,6 +1,7 @@
 import chalk from 'chalk';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import Fuse from 'fuse.js';
-import { basename, sep } from 'path';
+import { basename, dirname, join, sep } from 'path';
 import React from 'react';
 import { getOriginalCwd, getSessionId } from '../bootstrap/state.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../context/modalContext.js';
@@ -26,6 +27,7 @@ import {
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { logEvent } from '../services/analytics/index.js';
 import type { LogOption, SerializedMessage } from '../types/logs.js';
+import { logForDebugging } from '../utils/debug.js';
 import { formatLogMetadata, truncateToWidth } from '../utils/format.js';
 import { getWorktreePaths } from '../utils/getWorktreePaths.js';
 import { getBranch } from '../utils/git.js';
@@ -64,7 +66,63 @@ export type LogSelectorProps = {
   hasMore?: boolean;
   reloadGeneration?: number;
   currentSessionId?: string;
+  /** Official 2.1.328 `ujn`: enable Ctrl+E archive/unarchive and Ctrl+S show/hide archived. */
+  canArchive?: boolean;
 };
+
+const SESSION_ARCHIVE_MAX_BYTES = 4096;
+
+/** Official 2.1.328 `g(fullPath, sessionId)` (`chunk@292548255.js:2500`). */
+export function getSessionArchiveFilePath(fullPath: string, sessionId: string): string {
+  return join(dirname(fullPath), sessionId, 'archived.json');
+}
+
+/** Official 2.1.328 `RKo` (`chunk@292548255.js:2560`) — read archived sidecar flag. */
+export async function readSessionArchivedState(fullPath: string, sessionId: string): Promise<boolean | undefined> {
+  try {
+    const filePath = getSessionArchiveFilePath(fullPath, sessionId);
+    const raw = await readFile(filePath, 'utf8');
+    if (Buffer.byteLength(raw, 'utf8') > SESSION_ARCHIVE_MAX_BYTES) {
+      return undefined;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      'archived' in parsed &&
+      typeof (parsed as { archived: unknown }).archived === 'boolean'
+    ) {
+      return (parsed as { archived: boolean }).archived;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Official 2.1.328 `YQn` / `_r` (`chunk@292548255.js:4823`) — persist archived sidecar flag. */
+export async function writeSessionArchivedState(
+  fullPath: string,
+  sessionId: string,
+  archived: boolean,
+): Promise<boolean> {
+  try {
+    const filePath = getSessionArchiveFilePath(fullPath, sessionId);
+    const payload = JSON.stringify({
+      archived,
+      at: new Date().toISOString(),
+      by: 'cli',
+    });
+    await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
+    await writeFile(filePath, payload, { mode: 0o600 });
+    return true;
+  } catch (err) {
+    logForDebugging(`session archive: ${err instanceof Error ? err.message : String(err)}`, {
+      level: 'error',
+    });
+    return false;
+  }
+}
 
 type LogTreeNode = TreeNode<{ log: LogOption; indexInFiltered: number }>;
 
@@ -148,14 +206,15 @@ function buildLogLabel(
 
 export function buildLogMetadata(
   log: LogOption,
-  options?: { isChild?: boolean; showProjectPath?: boolean; maxWidth?: number },
+  options?: { isChild?: boolean; showProjectPath?: boolean; maxWidth?: number; isArchived?: boolean },
 ): string {
-  const { isChild = false, showProjectPath = false, maxWidth } = options || {};
+  const { isChild = false, showProjectPath = false, maxWidth, isArchived = false } = options || {};
   // Match the child prefix width for proper alignment
   const childPadding = isChild ? '    ' : ''; // 4 spaces to match '  ▸ '
   const baseMetadata = formatLogMetadata(log);
   const projectSuffix = showProjectPath && log.projectPath ? ` · ${log.projectPath}` : '';
-  const combined = childPadding + baseMetadata + projectSuffix;
+  const archivedSuffix = isArchived ? ' · archived' : '';
+  const combined = childPadding + baseMetadata + projectSuffix + archivedSuffix;
   // Official 2.1.327 (#461): truncate long branch/projectPath metadata to one
   // line so wide rows never wrap and push the selected session off-screen.
   if (maxWidth !== undefined && maxWidth > 0) {
@@ -197,6 +256,7 @@ export function LogSelector({
   hasMore = false,
   reloadGeneration = 0,
   currentSessionId: currentSessionIdProp,
+  canArchive = true,
 }: LogSelectorProps): React.ReactNode {
   const terminalSize = useTerminalSize();
   // Prefer modal inner size when hosted in FullscreenLayout's bottom pane so
@@ -235,6 +295,36 @@ export function LogSelector({
   );
   const [previewLog, setPreviewLog] = React.useState<LogOption | null>(null);
   const prevFocusedIdRef = React.useRef<string | null>(null);
+  const [showArchived, setShowArchived] = React.useState(false);
+  const [archiveOverrides, setArchiveOverrides] = React.useState<Map<LogOption, boolean>>(() => new Map());
+  const [diskArchivedIds, setDiskArchivedIds] = React.useState<Set<string>>(() => new Set());
+  const [archiveError, setArchiveError] = React.useState<string | null>(null);
+  const archiveQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const interactionSeqRef = React.useRef(0);
+
+  // Hydrate persisted archived.json sidecar states for logs when archive support is active.
+  React.useEffect(() => {
+    if (!canArchive || logs.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      logs.map(async log => {
+        const sid = getSessionIdFromLog(log);
+        if (!sid || !log.fullPath) return null;
+        const archived = await readSessionArchivedState(log.fullPath, sid);
+        return archived ? sid : null;
+      }),
+    ).then(results => {
+      if (cancelled) return;
+      const archivedSet = new Set<string>();
+      for (const sid of results) {
+        if (sid) archivedSet.add(sid);
+      }
+      setDiskArchivedIds(archivedSet);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canArchive, logs]);
 
   const {
     query: searchQuery,
@@ -252,7 +342,13 @@ export function LogSelector({
       setViewMode('list');
       logEvent('tengu_session_search_toggled', { enabled: false });
     },
-    passthroughCtrlKeys: logs.length === 0 ? ['n', 'a'] : ['n'],
+    passthroughCtrlKeys: canArchive
+      ? logs.length === 0
+        ? ['n', 'a', 's']
+        : ['n', 's']
+      : logs.length === 0
+        ? ['n', 'a']
+        : ['n'],
     initialQuery: initialSearchQuery || '',
   });
 
@@ -405,20 +501,39 @@ export function LogSelector({
     allWorktreePaths,
   ]);
 
+  const archivedLogs = React.useMemo(() => {
+    if (!canArchive) return new Set<LogOption>();
+    return new Set(
+      baseFilteredLogs.filter(log => {
+        const override = archiveOverrides.get(log);
+        if (override !== undefined) return override;
+        const flag = (log as { archived?: boolean }).archived;
+        if (flag !== undefined) return flag;
+        const sid = getSessionIdFromLog(log);
+        return sid !== undefined && diskArchivedIds.has(sid);
+      }),
+    );
+  }, [baseFilteredLogs, canArchive, archiveOverrides, diskArchivedIds]);
+
+  const visibleBaseLogs = React.useMemo(
+    () => (showArchived ? baseFilteredLogs : baseFilteredLogs.filter(log => !archivedLogs.has(log))),
+    [baseFilteredLogs, archivedLogs, showArchived],
+  );
+
   // Instant title/branch/tag/PR filtering (runs on every keystroke, but is fast)
   const titleFilteredLogs = React.useMemo(() => {
     if (!normalizedSearchQuery) {
-      return baseFilteredLogs;
+      return visibleBaseLogs;
     }
     const query = normalizedSearchQuery.toLowerCase();
-    return baseFilteredLogs.filter(log => {
+    return visibleBaseLogs.filter(log => {
       const displayedTitle = getLogDisplayTitle(log).toLowerCase();
       const branch = (log.gitBranch || '').toLowerCase();
       const tag = (log.tag || '').toLowerCase();
       const prInfo = log.prNumber ? `pr #${log.prNumber} ${log.prRepository || ''}`.toLowerCase() : '';
       return displayedTitle.includes(query) || branch.includes(query) || tag.includes(query) || prInfo.includes(query);
     });
-  }, [baseFilteredLogs, normalizedSearchQuery]);
+  }, [visibleBaseLogs, normalizedSearchQuery]);
 
   // Show searching indicator when query is pending debounce
   React.useEffect(() => {
@@ -495,7 +610,7 @@ export function LogSelector({
 
       // Add transcript-only matches (not already in title matches)
       const titleMatchIds = new Set(filtered.map(log => log.messages[0]?.uuid));
-      const baseSet = new Set(baseFilteredLogs);
+      const baseSet = new Set(visibleBaseLogs);
       const transcriptOnlyMatches = deepSearchResults.results
         .map(r => r.log)
         .filter(log => !titleMatchIds.has(log.messages[0]?.uuid) && baseSet.has(log));
@@ -503,7 +618,7 @@ export function LogSelector({
     }
 
     return { filteredLogs: filtered, snippets: snippetMap };
-  }, [titleFilteredLogs, deepSearchResults, debouncedDeepSearchQuery, baseFilteredLogs]);
+  }, [titleFilteredLogs, deepSearchResults, debouncedDeepSearchQuery, visibleBaseLogs]);
 
   const displayedLogs = filteredLogs;
 
@@ -531,6 +646,7 @@ export function LogSelector({
         const metadata = buildLogMetadata(latestLog, {
           showProjectPath: showAllProjects,
           maxWidth: maxMetadataWidth,
+          isArchived: archivedLogs.has(latestLog),
         });
         return {
           id: `log:${sessionId}:0`,
@@ -551,6 +667,7 @@ export function LogSelector({
           isChild: true,
           showProjectPath: showAllProjects,
           maxWidth: maxMetadataWidth,
+          isArchived: archivedLogs.has(log),
         });
         return {
           id: `log:${sessionId}:${index + 1}`,
@@ -564,6 +681,7 @@ export function LogSelector({
       const parentMetadata = buildLogMetadata(latestLog, {
         showProjectPath: showAllProjects,
         maxWidth: maxMetadataWidth,
+        isArchived: archivedLogs.has(latestLog),
       });
       return {
         id: `group:${sessionId}`,
@@ -585,6 +703,7 @@ export function LogSelector({
     showAllProjects,
     snippets,
     highlightColor,
+    archivedLogs,
   ]);
 
   // Build options for old flat list view
@@ -601,6 +720,7 @@ export function LogSelector({
       const metadata = buildLogMetadata(log, {
         showProjectPath: showAllProjects,
         maxWidth: maxMetadataWidth,
+        isArchived: archivedLogs.has(log),
       });
       const snippet = snippets.get(log);
       const snippetStr = snippet ? formatSnippet(snippet, highlightColor) : null;
@@ -620,10 +740,64 @@ export function LogSelector({
     maxMetadataWidth,
     showAllProjects,
     snippets,
+    archivedLogs,
   ]);
 
-  // Derive the focused log from focusedNode
-  const focusedLog = focusedNode?.value.log ?? null;
+  // Derive the live focused node/log (re-sync against treeNodes when archiving removes a row).
+  const activeFocusedNode = React.useMemo(() => {
+    if (!focusedNode) return null;
+    if (!canArchive || !isResumeWithRenameEnabled) return focusedNode;
+    return treeNodes.flatMap(n => [n, ...(n.children ?? [])]).find(n => n.id === focusedNode.id) ?? null;
+  }, [canArchive, isResumeWithRenameEnabled, treeNodes, focusedNode]);
+
+  const focusedLog = activeFocusedNode?.value.log ?? null;
+
+  const handleToggleArchive = React.useCallback(
+    (targetNode: LogTreeNode) => {
+      const targetLog = targetNode.value.log;
+      const fullPath = targetLog.fullPath;
+      const sessionId = getSessionIdFromLog(targetLog);
+      if (!sessionId || fullPath === undefined) return;
+
+      const isCurrentlyArchived = (log: LogOption): boolean => {
+        const override = archiveOverrides.get(log);
+        if (override !== undefined) return override;
+        const flag = (log as { archived?: boolean }).archived;
+        if (flag !== undefined) return flag;
+        const sid = getSessionIdFromLog(log);
+        return sid !== undefined && diskArchivedIds.has(sid);
+      };
+
+      const nextArchived = !isCurrentlyArchived(targetLog);
+      setArchiveOverrides(prev => new Map(prev).set(targetLog, nextArchived));
+      setArchiveError(null);
+
+      const idx = treeNodes.findIndex(n => n.id === targetNode.id);
+      const nextFocus =
+        nextArchived && !showArchived
+          ? [...treeNodes.slice(idx + 1), ...treeNodes.slice(0, Math.max(idx, 0)).reverse()].find(
+              n => !isCurrentlyArchived(n.value.log),
+            )
+          : undefined;
+      if (nextFocus) {
+        setFocusedNode(nextFocus);
+      }
+
+      const seq = interactionSeqRef.current;
+      archiveQueueRef.current = archiveQueueRef.current.then(async () => {
+        const ok = await writeSessionArchivedState(fullPath, sessionId, nextArchived);
+        if (ok) return;
+        setArchiveOverrides(prev => new Map(prev).set(targetLog, !nextArchived));
+        if (nextFocus && interactionSeqRef.current === seq) {
+          setFocusedNode(prev => (prev?.id === nextFocus.id ? targetNode : prev));
+        }
+        setArchiveError(
+          nextArchived ? "Couldn't archive the session. Try again." : "Couldn't unarchive the session. Try again.",
+        );
+      });
+    },
+    [archiveOverrides, diskArchivedIds, treeNodes, showArchived],
+  );
 
   const renderExpandCollapseHint = (): React.ReactNode => {
     if (!isResumeWithRenameEnabled || !focusedLog) return '';
@@ -695,7 +869,12 @@ export function LogSelector({
 
   const handleTreeSelectFocus = React.useCallback(
     (node: LogTreeNode) => {
-      setFocusedNode(node);
+      setFocusedNode(prev => {
+        if (node.id !== prev?.id) {
+          setArchiveError(null);
+        }
+        return node;
+      });
       // Update focused index for scroll position display
       const index = displayedLogs.findIndex(log => getSessionIdFromLog(log) === getSessionIdFromLog(node.value.log));
       if (index >= 0) {
@@ -722,8 +901,16 @@ export function LogSelector({
   // Handle non-escape input
   useInput(
     (input, key) => {
+      interactionSeqRef.current++;
+      setArchiveError(null);
       if (viewMode === 'preview') {
         // Preview mode handles its own input
+        return;
+      }
+
+      const lowerInput = input.toLowerCase();
+      if (canArchive && viewMode !== 'rename' && key.ctrl && lowerInput === 's') {
+        setShowArchived(prev => !prev);
         return;
       }
 
@@ -731,9 +918,9 @@ export function LogSelector({
         // Rename mode escape is handled via keybinding; text input via TextInput
       } else if (viewMode === 'search') {
         // Text input and Enter/Down/Esc are handled by useSearchInput hook
-        if (input.toLowerCase() === 'n' && key.ctrl) {
+        if (lowerInput === 'n' && key.ctrl) {
           exitSearchMode();
-        } else if (input.toLowerCase() === 'a' && key.ctrl && onToggleAllProjects && logs.length === 0) {
+        } else if (lowerInput === 'a' && key.ctrl && onToggleAllProjects && logs.length === 0) {
           onToggleAllProjects();
           logEvent('tengu_session_all_projects_toggled', {
             enabled: showAllProjects,
@@ -746,7 +933,6 @@ export function LogSelector({
         }
 
         const keyIsNotCtrlOrMeta = !key.ctrl && !key.meta;
-        const lowerInput = input.toLowerCase();
         // Ctrl+letter shortcuts for actions (freeing up plain letters for type-to-search)
         if (lowerInput === 'a' && key.ctrl && onToggleAllProjects) {
           onToggleAllProjects();
@@ -765,6 +951,10 @@ export function LogSelector({
           logEvent('tengu_session_worktree_filter_toggled', {
             enabled: !newValue,
           });
+        } else if (canArchive && lowerInput === 'e' && key.ctrl) {
+          if (activeFocusedNode) {
+            handleToggleArchive(activeFocusedNode);
+          }
         } else if (lowerInput === '/' && keyIsNotCtrlOrMeta) {
           setViewMode('search');
           logEvent('tengu_session_search_toggled', { enabled: true });
@@ -813,10 +1003,15 @@ export function LogSelector({
       if (viewMode === 'preview' || viewMode === 'rename') {
         return;
       }
+      const lowerKey = event.key.toLowerCase();
+      if (canArchive && event.ctrl && lowerKey === 's') {
+        event.preventDefault();
+        return;
+      }
       if (viewMode === 'search') {
-        if (event.ctrl && event.key === 'n') {
+        if (event.ctrl && lowerKey === 'n') {
           event.preventDefault();
-        } else if (event.ctrl && event.key === 'a' && onToggleAllProjects && logs.length === 0) {
+        } else if (event.ctrl && lowerKey === 'a' && onToggleAllProjects && logs.length === 0) {
           event.preventDefault();
         }
         return;
@@ -827,7 +1022,6 @@ export function LogSelector({
         return;
       }
       const keyIsNotCtrlOrMeta = !event.ctrl && !event.meta;
-      const lowerKey = event.key.toLowerCase();
       const isPrintableMulti =
         !event.defaultPrevented &&
         keyIsNotCtrlOrMeta &&
@@ -851,6 +1045,7 @@ export function LogSelector({
         (event.ctrl && lowerKey === 'a' && onToggleAllProjects) ||
         (event.ctrl && lowerKey === 'b') ||
         (event.ctrl && lowerKey === 'w' && hasMultipleWorktrees) ||
+        (canArchive && event.ctrl && lowerKey === 'e') ||
         (lowerKey === '/' && keyIsNotCtrlOrMeta) ||
         (event.ctrl && lowerKey === 'r' && focusedLog) ||
         (((event.key === ' ' && keyIsNotCtrlOrMeta) || (event.ctrl && lowerKey === 'v')) && focusedLog) ||
@@ -859,7 +1054,7 @@ export function LogSelector({
         event.preventDefault();
       }
     },
-    [viewMode, displayedLogs.length, onToggleAllProjects, logs.length, hasMultipleWorktrees, focusedLog],
+    [canArchive, viewMode, displayedLogs.length, onToggleAllProjects, logs.length, hasMultipleWorktrees, focusedLog],
   );
 
   // densable iYt Pe / Rt / Mt / Tn / Ot
@@ -937,11 +1132,21 @@ export function LogSelector({
   }
 
   const expandCollapseHintNode = renderExpandCollapseHint();
+  const nearEnd = focusedIndex + visibleCount * 2 >= displayedLogs.length;
+  const isSearchingOlder = hasMore && !isLoading && nearEnd && Boolean(searchQuery.trim());
+  const archivedToggleHintNode =
+    archivedLogs.size > 0 ? (
+      <KeyboardShortcutHint
+        shortcut="ctrl+s"
+        action={showArchived ? 'hide archived' : 'show archived'}
+        format={{ modCase: 'title', charCase: 'upper' }}
+      />
+    ) : null;
 
   const body = (
-    <Pane color="suggestion">
+    <Pane color="permission">
       <Box flexShrink={0}>
-        <Text bold color="suggestion">
+        <Text bold color="permission">
           Resume session
           {viewMode === 'list' && displayedLogs.length > visibleCount && (
             <Text dimColor>
@@ -949,6 +1154,8 @@ export function LogSelector({
               ({focusedIndex} of {displayedLogs.length})
             </Text>
           )}
+          {isLoading && <Text dimColor> · Refreshing…</Text>}
+          {isSearchingOlder && displayedLogs.length > 0 && <Text dimColor> · searching…</Text>}
         </Text>
       </Box>
       <SearchBox
@@ -978,10 +1185,20 @@ export function LogSelector({
         Boolean(searchQuery.trim()) &&
         displayedLogs.length === 0 &&
         !isSearching &&
-        !isLoading &&
-        !hasMore && (
+        !isLoading && (
           <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
-            <EmptyState>No sessions match &quot;{searchQuery}&quot;.</EmptyState>
+            <EmptyState>
+              {isSearchingOlder ? 'Searching older sessions…' : `No sessions match "${searchQuery}".`}
+            </EmptyState>
+          </Box>
+        )}
+      {archivedLogs.size > 0 &&
+        viewMode === 'list' &&
+        !isLoading &&
+        !searchQuery.trim() &&
+        displayedLogs.length === 0 && (
+          <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
+            <EmptyState>Archived sessions are hidden.</EmptyState>
           </Box>
         )}
       {logs.length === 0 && viewMode === 'list' && !isLoading && !searchQuery.trim() && (
@@ -997,13 +1214,13 @@ export function LogSelector({
               )
             }
           >
-            {showAllProjects ? 'No conversations found.' : 'No conversations found in this project.'}
+            {showAllProjects ? 'No sessions yet' : 'No sessions in this project yet'}
           </EmptyState>
         </Box>
       )}
       {viewMode === 'rename' && focusedLog ? (
         <Box paddingLeft={2} flexDirection="column">
-          <Text bold>Rename session:</Text>
+          <Text bold>New session name</Text>
           <Box paddingTop={1}>
             <TextInput
               value={renameValue}
@@ -1085,9 +1302,13 @@ export function LogSelector({
       )}
       <Box paddingLeft={2} flexShrink={0}>
         {exitState.pending ? (
-          <Text dimColor>Press {exitState.keyName} again to exit</Text>
+          <Text dimColor italic>
+            Press {exitState.keyName} again to exit
+          </Text>
+        ) : archiveError !== null ? (
+          <Text color="error">{archiveError}</Text>
         ) : viewMode === 'rename' ? (
-          <Text dimColor>
+          <Text dimColor italic>
             <Byline>
               <KeyboardShortcutHint shortcut="enter" action="save" />
               <ConfigurableShortcutHint
@@ -1099,9 +1320,9 @@ export function LogSelector({
             </Byline>
           </Text>
         ) : viewMode === 'search' ? (
-          <Text dimColor>
+          <Text dimColor italic>
             <Byline>
-              <Text>{isSearching && isDeepSearchEnabled ? 'Searching…' : 'Type to Search'}</Text>
+              <Text>{isSearching && isDeepSearchEnabled ? 'Searching…' : 'Type to search'}</Text>
               {logs.length === 0 && onToggleAllProjects && (
                 <KeyboardShortcutHint
                   shortcut="ctrl+a"
@@ -1109,12 +1330,13 @@ export function LogSelector({
                   format={{ modCase: 'title', charCase: 'upper' }}
                 />
               )}
-              <KeyboardShortcutHint shortcut="enter" action="select" />
+              {archivedToggleHintNode}
+              {displayedLogs.length > 0 && <KeyboardShortcutHint shortcut="enter" action="select" />}
               <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="clear" />
             </Byline>
           </Text>
         ) : (
-          <Text dimColor>
+          <Text dimColor italic>
             <Byline>
               {onToggleAllProjects && (
                 <KeyboardShortcutHint
@@ -1145,13 +1367,19 @@ export function LogSelector({
                   format={{ modCase: 'title', charCase: 'upper' }}
                 />
               )}
-              <Text>Type to search</Text>
-              <ConfigurableShortcutHint
-                action="confirm:no"
-                context="Confirmation"
-                fallback="Esc"
-                description="cancel"
-              />
+              {canArchive && focusedLog && (
+                <KeyboardShortcutHint
+                  shortcut="ctrl+e"
+                  action={archivedLogs.has(focusedLog) ? 'unarchive' : 'archive'}
+                  format={{ modCase: 'title', charCase: 'upper' }}
+                />
+              )}
+              {archivedToggleHintNode}
+              {logs.length > 0 && <Text>Type to search</Text>}
+              {displayedLogs.length > 0 && innerPaneWidth >= 60 && (
+                <KeyboardShortcutHint shortcut="enter" action="resume" />
+              )}
+              <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="close" />
               {expandCollapseHintNode}
             </Byline>
           </Text>

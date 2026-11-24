@@ -31,7 +31,7 @@ export function SubmitQuestionsView({
   return (
     <Box flexDirection="column" marginTop={1}>
       <Divider color="inactive" />
-      <Box flexDirection="column" borderTop borderColor="inactive" paddingTop={0}>
+      <Box flexDirection="column" paddingTop={0}>
         <QuestionNavigationBar questions={questions} currentQuestionIndex={currentQuestionIndex} answers={answers} />
         <PermissionRequestTitle title="Review your answers" color="text" />
         {/* densable ZT4/GT4: no minHeight on review body. */}
@@ -40,7 +40,7 @@ export function SubmitQuestionsView({
             <Box marginBottom={1}>
               <Text color="warning">
                 <StatusIcon status="warning" withSpace />
-                You have not answered all questions
+                Some questions are unanswered
               </Text>
             </Box>
           )}

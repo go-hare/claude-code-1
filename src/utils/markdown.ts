@@ -938,20 +938,29 @@ export function formatToken(
       )
     }
     case 'code': {
+      const lang = token.lang ?? ''
+      if (!lang && token.codeBlockStyle !== 'indented') {
+        return (
+          token.text.replace(/\S(?:.*\S)?/g, color('permission', theme)) + EOL
+        )
+      }
+      const leadingLang = lang.match(/^[\w.+#-]+/)?.[0] ?? ''
+      const language =
+        highlight && lang && highlight.supportsLanguage(lang)
+          ? lang
+          : highlight && leadingLang && highlight.supportsLanguage(leadingLang)
+            ? leadingLang
+            : 'plaintext'
+      const header =
+        lang && !highlight?.supportsLanguage(lang) ? chalk.dim(lang) + EOL : ''
       if (!highlight) {
-        return token.text + EOL
+        return header + token.text + EOL
       }
-      let language = 'plaintext'
-      if (token.lang) {
-        if (highlight.supportsLanguage(token.lang)) {
-          language = token.lang
-        } else {
-          logForDebugging(
-            `Language not supported while highlighting code, falling back to plaintext: ${token.lang}`,
-          )
-        }
-      }
-      return highlight.highlight(token.text, { language, fence: token }) + EOL
+      return (
+        header +
+        highlight.highlight(token.text, { language, fence: token }) +
+        EOL
+      )
     }
     case 'codespan': {
       // inline code
@@ -1035,14 +1044,34 @@ export function formatToken(
       // densable 2.1.234 #16 / SEA `jG` case"hr": `"---"+AY` (AY=`\n`) so the
       // rule does not run into the next line. Heading already appends AY+AY.
       return '---' + EOL
-    case 'image':
-      return token.href
+    case 'image': {
+      const afterStyleReset =
+        'afterStyle' in token && token.afterStyle === true
+          ? HYPERLINK_STYLE_RESET
+          : ''
+      const cleanHref = stripMarkdownHrefInvisibles(token.href)
+      if (!token.text && !token.title) {
+        return `${afterStyleReset}${cleanHref}`
+      }
+      const titlePart = token.title ? ` "${token.title}"` : ''
+      const urlPart = `${afterStyleReset} (${cleanHref}${titlePart})`
+      return token.text ? `${token.text}${urlPart}` : urlPart.replace(' (', '(')
+    }
     case 'link': {
+      const afterStyleReset =
+        'afterStyle' in token && token.afterStyle === true
+          ? HYPERLINK_STYLE_RESET
+          : ''
+      const titleSuffix = token.title ? ` ("${token.title}")` : ''
       // Prevent mailto links from being displayed as clickable links
-      if (token.href.startsWith('mailto:')) {
-        // Extract email from mailto: link and display as plain text
-        const email = token.href.replace(/^mailto:/, '')
-        return email
+      if (/^mailto:/i.test(token.href)) {
+        const email = token.href.replace(/^mailto:/i, '')
+        const cleanEmail = stripMarkdownHrefInvisibles(email)
+        return (
+          (token.text && token.text !== cleanEmail
+            ? `${token.text}${afterStyleReset} (${cleanEmail})`
+            : `${afterStyleReset}${cleanEmail}`) + titleSuffix
+        )
       }
       // densable jG link: 247 `pt` gates OSC8; `d0l` still sanitizes the
       // allowed target (234 display / unusual-Unicode href).
@@ -1054,7 +1083,7 @@ export function formatToken(
         .join('')
       const plainLinkText = stripAnsi(linkText)
       if (target === null) {
-        return plainLinkText || href
+        return (plainLinkText || href) + titleSuffix
       }
       // If the link has meaningful display text (different from the URL),
       // show it as a clickable hyperlink. In terminals that support OSC 8,
@@ -1072,21 +1101,31 @@ export function formatToken(
         plainLinkText !== href
       ) {
         if (!linkCap && !windowed && mayWriteRawUrlHyperlink(href)) {
-          return `${stripRawOsc8Sequences(linkText)}${HYPERLINK_STYLE_RESET} (${wrapFallbackUrl(href)})`
+          return `${stripRawOsc8Sequences(linkText)}${HYPERLINK_STYLE_RESET} (${wrapFallbackUrl(href)})${titleSuffix}`
         }
-        return createHyperlink(href, stripRawOsc8Sequences(linkText), {
-          supportsHyperlinks: linkCap,
-          shownUrlStart: HYPERLINK_STYLE_RESET,
-        })
+        const rendered = createHyperlink(
+          href,
+          stripRawOsc8Sequences(linkText),
+          {
+            supportsHyperlinks: linkCap,
+            shownUrlStart: HYPERLINK_STYLE_RESET,
+          },
+        )
+        if (linkCap && token.title) {
+          return `${rendered}${HYPERLINK_STYLE_RESET} (${href})${titleSuffix}`
+        }
+        return `${rendered}${titleSuffix}`
       }
       // When the display text matches the URL (or is empty), just show the URL
       if (!linkCap && !windowed && mayWriteRawUrlHyperlink(href)) {
-        return `${HYPERLINK_STYLE_RESET}${wrapFallbackUrl(href)}`
+        return `${HYPERLINK_STYLE_RESET}${wrapFallbackUrl(href)}${titleSuffix}`
       }
-      return createHyperlink(href, undefined, {
-        supportsHyperlinks: linkCap,
-        shownUrlStart: HYPERLINK_STYLE_RESET,
-      })
+      return (
+        createHyperlink(href, undefined, {
+          supportsHyperlinks: linkCap,
+          shownUrlStart: HYPERLINK_STYLE_RESET,
+        }) + titleSuffix
+      )
     }
     case 'list': {
       return token.items

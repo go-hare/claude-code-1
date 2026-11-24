@@ -1,8 +1,7 @@
 import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useRef } from 'react';
-import { Box, Text, useAnimationFrame, stringWidth, Byline, useTheme } from '@anthropic/ink';
-import { toInkColor } from '../../utils/ink.js';
+import { Box, Text, useAnimationFrame, stringWidth, Byline, useTheme, type RGBColor } from '@anthropic/ink';
 import type { InProcessTeammateTaskState } from '../../tasks/InProcessTeammateTask/types.js';
 import type { RetryStatus } from '../../utils/advisorNetworkStall.js';
 import { formatDuration, formatNumber } from '../../utils/format.js';
@@ -41,13 +40,31 @@ function quantizeEighth(value: number): number {
   return Math.round(value * 8) / 8;
 }
 
-// Thinking shimmer constants. Previously lived in a separate ThinkingShimmerText
-// component with its own useAnimationFrame(50) — inlined here to reuse our
-// existing 50ms clock and eliminate the redundant subscriber.
-const THINKING_INACTIVE = { r: 153, g: 153, b: 153 };
-const THINKING_INACTIVE_SHIMMER = { r: 185, g: 185, b: 185 };
+// Official 2.1.328 `$n` (`chunk@307641741.js:14612`): derive thinking shimmer
+// from theme.inactive / theme.inactiveShimmer / theme.warning with safe RGB
+// parsing + ANSI theme fallback.
 const THINKING_DELAY_MS = 3000;
 const THINKING_GLOW_PERIOD_S = 2;
+
+export function resolveThinkingShimmerColor(
+  time: number,
+  thinkingIntensity: number,
+  theme: Theme,
+): keyof Theme | RGBColor | undefined {
+  const inactiveRGB = theme.inactive ? parseRGB(theme.inactive) : null;
+  const shimmerRGB = theme.inactiveShimmer ? parseRGB(theme.inactiveShimmer) : null;
+  const warningRGB = theme.warning ? parseRGB(theme.warning) : null;
+  if (!inactiveRGB || !shimmerRGB || !warningRGB) {
+    return thinkingIntensity > 0.5 ? 'warning' : undefined;
+  }
+  const elapsedSec = (time - THINKING_DELAY_MS) / 1000;
+  const opacity =
+    time < THINKING_DELAY_MS ? 0 : (Math.sin((elapsedSec * Math.PI * 2) / THINKING_GLOW_PERIOD_S) + 1) / 2;
+  const base = interpolateColor(inactiveRGB, shimmerRGB, quantizeEighth(opacity));
+  return toRGBColor(
+    thinkingIntensity > 0 ? interpolateColor(base, warningRGB, quantizeEighth(thinkingIntensity)) : base,
+  );
+}
 
 export type SpinnerAnimationRowProps = {
   // Animation inputs
@@ -399,25 +416,8 @@ export function SpinnerAnimationRow({
 
   const thinkingOnly = showThinking && statusKind.kind === 'thinking' && !spinnerSuffix && !showTimer && !showTokens;
 
-  // === Thinking shimmer color (formerly ThinkingShimmerText's own timer) ===
-  // Same sine-wave opacity, but derived from our shared `time` instead of a
-  // second useAnimationFrame(50) subscription.
-  const thinkingElapsedSec = (time - THINKING_DELAY_MS) / 1000;
-  const thinkingOpacity =
-    time < THINKING_DELAY_MS ? 0 : (Math.sin((thinkingElapsedSec * Math.PI * 2) / THINKING_GLOW_PERIOD_S) + 1) / 2;
-  const thinkingShimmerBase = interpolateColor(
-    THINKING_INACTIVE,
-    THINKING_INACTIVE_SHIMMER,
-    quantizeEighth(thinkingOpacity),
-  );
-  const warningRGB = theme.warning ? parseRGB(theme.warning) : null;
-  // densable mo: lerp the gray shimmer toward warning as thinkingIntensity rises.
-  const thinkingShimmerColor = toRGBColor(
-    warningRGB && thinkingIntensity > 0
-      ? interpolateColor(thinkingShimmerBase, warningRGB, quantizeEighth(thinkingIntensity))
-      : thinkingShimmerBase,
-  );
-  const thinkingLabelColor = !warningRGB && thinkingIntensity > 0.5 ? 'warning' : undefined;
+  // === Thinking shimmer color (theme-derived per official 2.1.328 `$n`) ===
+  const thinkingShimmerColor = resolveThinkingShimmerColor(time, thinkingIntensity, theme);
   const thoughtForColor = thinkingIntensity > 0 ? 'warning' : undefined;
   const isScreenReader = isScreenReaderModeEnabled();
 
@@ -448,7 +448,7 @@ export function SpinnerAnimationRow({
     ...(!isScreenReader && showThinking && thinkingText
       ? [
           statusKind.kind === 'thinking' && !reducedMotion ? (
-            <Text key="thinking" color={thinkingLabelColor ?? thinkingShimmerColor}>
+            <Text dimColor={!thinkingShimmerColor} key="thinking" color={thinkingShimmerColor}>
               {thinkingOnly ? `(${thinkingText})` : thinkingText}
             </Text>
           ) : (
@@ -460,18 +460,10 @@ export function SpinnerAnimationRow({
       : []),
   ];
 
-  // gold mn ht: Ct.length>0 ? (Et ? Byline : Fragment[(, Byline, )]) : null
-  const teammateActive = Boolean(foregroundedTeammate && !foregroundedTeammate.isIdle);
+  // Official 2.1.328 `Y5i` (`chunk@307641741.js:16150`): render status parts
+  // directly (removed foregrounded-teammate `esc to interrupt <name>` row).
   let ht: React.ReactNode = null;
-  if (teammateActive && foregroundedTeammate) {
-    ht = (
-      <>
-        <Text dimColor>(esc to interrupt </Text>
-        <Text color={toInkColor(foregroundedTeammate.identity.color)}>{foregroundedTeammate.identity.agentName}</Text>
-        <Text dimColor>)</Text>
-      </>
-    );
-  } else if (parts.length > 0) {
+  if (parts.length > 0) {
     ht = thinkingOnly ? (
       <Byline>{parts}</Byline>
     ) : (

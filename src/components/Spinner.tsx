@@ -1,5 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Ansi, Box, Text, stringWidth } from '@anthropic/ink';
 import { leftoverBhrConnLabel, leftoverBhrIdleBudget } from './Spinner/leftoverZxt.js';
 import * as React from 'react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -9,6 +9,10 @@ import { getKairosActive, getMainThreadAgentId, getUserMsgOptIn } from '../boots
 import { leftoverIhrGet, leftoverIhrHas, leftoverIhrSubscribe } from '../utils/collapseReadSearch.js';
 import { leftoverIhrSlice, useLeftoverIhrStore } from '../state/leftoverIhrStore.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { count } from '../utils/array.js';
 import sample from 'lodash-es/sample.js';
@@ -39,13 +43,67 @@ import { TEARDROP_ASTERISK } from '../constants/figures.js';
 import figures from 'figures';
 import { getCurrentTurnTokenBudget, getTurnOutputTokens } from '../bootstrap/state.js';
 
-import { TeammateSpinnerTree } from './Spinner/TeammateSpinnerTree.js';
 import { useAnimationFrame } from '@anthropic/ink';
 import { getGlobalConfig } from '../utils/config.js';
 import { FOCUS_TIP_ACTIVE, FOCUS_TIP_INVITE } from '../utils/focusView.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { truncateToWidth } from '../utils/truncate.js';
 export type { SpinnerMode } from './Spinner/index.js';
+
+const EXPLANATORY_TIP_PREFIX = 'Want Claude to teach as it works?';
+const EXPLANATORY_TIP_COMMAND = 'config';
+const EXPLANATORY_TIP_ARGS = 'outputStyle=explanatory';
+export const EXPLANATORY_TIP_FULL = `${EXPLANATORY_TIP_PREFIX} · /${EXPLANATORY_TIP_COMMAND} ${EXPLANATORY_TIP_ARGS}`;
+export const BTW_SPINNER_TIP = 'Use /btw to ask a side question without interrupting Claude';
+
+type SlashCommandLinkHandler = (fullCommand: string, origin: { kind: 'human' }) => void;
+let registeredSlashLinkHandler: SlashCommandLinkHandler | null = null;
+
+/** Official 2.1.328 `OJt`/`tkn` (`chunk@294254613.js:297820`): register slash-link runner. */
+export function registerSlashCommandLinkHandler(handler: SlashCommandLinkHandler | null): void {
+  registeredSlashLinkHandler = handler;
+}
+
+/**
+ * Official 2.1.328 `rcn` (`chunk@307641741.js:2097`): clickable slash command
+ * link with hover highlight and `tengu_slash_link_clicked` telemetry.
+ */
+export function SlashCommandLink({
+  command,
+  args,
+  color,
+}: {
+  command: string;
+  args?: string;
+  color?: keyof Theme;
+}): React.ReactNode {
+  const full = args === undefined ? command : `${command} ${args}`;
+  const [hovered, setHovered] = useState(false);
+  const runner = registeredSlashLinkHandler;
+  if (!runner) {
+    return (
+      <Text underline color={color}>
+        /{full}
+      </Text>
+    );
+  }
+  return (
+    <Box
+      onClick={() => {
+        logEvent('tengu_slash_link_clicked', {
+          command: command as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+        runner(full, { kind: 'human' });
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <Text underline bold={hovered} color={color}>
+        /{full}
+      </Text>
+    </Box>
+  );
+}
 
 const STATUS_CLAUDE = 'https://status.claude.com';
 
@@ -358,9 +416,6 @@ function SpinnerWithVerbInner({
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const expandedView = useAppState(s => s.expandedView);
   const showExpandedTodos = expandedView === 'tasks';
-  const showSpinnerTree = expandedView === 'teammates';
-  const selectedIPAgentIndex = useAppState(s => s.selectedIPAgentIndex);
-  const viewSelectionMode = useAppState(s => s.viewSelectionMode);
   // Get foregrounded teammate (if viewing a teammate's transcript)
   const foregroundedTeammate = viewingAgentTaskId ? getViewedTeammateTask({ viewingAgentTaskId, tasks }) : undefined;
   const { columns } = useTerminalSize();
@@ -437,9 +492,6 @@ function SpinnerWithVerbInner({
     .find((text): text is string => Boolean(text));
   const truncatedTodo = todoVerb !== undefined ? truncateSpinnerVerb(todoVerb, columns) : undefined;
 
-  // Leader's own verb (always the leader's, regardless of who is foregrounded)
-  const leaderVerb = overrideMessage ?? currentTodo?.activeForm ?? currentTodo?.subject ?? randomVerb;
-
   const effectiveVerb =
     foregroundedTeammate && !foregroundedTeammate.isIdle
       ? (foregroundedTeammate.spinnerVerb ?? randomVerb)
@@ -478,14 +530,11 @@ function SpinnerWithVerbInner({
   const allIdle = hasRunningTeammates && runningTeammates.every(t => t.isIdle);
 
   // Gather aggregate token stats from all running agents.
-  // In spinner-tree mode, skip in-process teammates (they have their own
-  // per-teammate lines in the tree) but still count local-agent tasks
-  // (background agents) which have no dedicated tree rows.
   let teammateTokens = 0;
   for (const task of Object.values(tasks)) {
     if (task.status !== 'running') continue;
     if (isInProcessTeammateTask(task)) {
-      if (!showSpinnerTree && task.progress?.tokenCount) {
+      if (task.progress?.tokenCount) {
         teammateTokens += task.progress.tokenCount;
       }
       continue;
@@ -505,11 +554,6 @@ function SpinnerWithVerbInner({
     pauseStartTimeRef.current !== null
       ? pauseStartTimeRef.current - loadingStartTimeRef.current - totalPausedMsRef.current
       : performance.now() - loadingStartTimeRef.current - totalPausedMsRef.current;
-
-  // Leader token count for TeammateSpinnerTree — read raw (non-animated) from
-  // the ref. The tree is only shown when teammates are running; teammate
-  // progress updates to s.tasks trigger re-renders that keep this fresh.
-  const leaderTokenCount = Math.round(responseLengthRef.current / 4);
 
   const defaultColor: keyof Theme = 'claude';
   const defaultShimmerColor = 'claudeShimmer';
@@ -540,16 +584,6 @@ function SpinnerWithVerbInner({
         <Box flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">
           <Text dimColor>{idleText}</Text>
         </Box>
-        {showSpinnerTree && hasRunningTeammates && (
-          <TeammateSpinnerTree
-            selectedIndex={selectedIPAgentIndex}
-            isInSelectionMode={viewSelectionMode === 'selecting-agent'}
-            allIdle={allIdle}
-            leaderVerb={leaderIsIdle ? undefined : leaderVerb}
-            leaderIdleText={leaderIsIdle ? 'Idle' : undefined}
-            leaderTokenCount={leaderTokenCount}
-          />
-        )}
       </Box>
     );
   }
@@ -562,11 +596,8 @@ function SpinnerWithVerbInner({
   const tipsEnabled = settings.spinnerTipsEnabled !== false;
   const showBtwTip = tipsEnabled && elapsedSnapshot > 30_000 && !getGlobalConfig().btwUseCount;
 
-  const effectiveTip = customTipsActive
-    ? spinnerTip
-    : showBtwTip && !nextTask
-      ? "Use /btw to ask a quick side question without interrupting Claude's current work"
-      : spinnerTip;
+  const effectiveTip = customTipsActive ? spinnerTip : showBtwTip && !nextTask ? BTW_SPINNER_TIP : spinnerTip;
+  const tipLabel = resolveSpinnerTipLabel(effectiveTip, spinnerTip, spinnerTipLabel);
 
   // Budget text (ant-only) — shown above the tip line
   let budgetText: string | null = null;
@@ -625,16 +656,6 @@ function SpinnerWithVerbInner({
         outputLimitRecovery={outputLimitRecovery}
         agentId={agentId}
       />
-      {showSpinnerTree && hasRunningTeammates ? (
-        <TeammateSpinnerTree
-          selectedIndex={selectedIPAgentIndex}
-          isInSelectionMode={viewSelectionMode === 'selecting-agent'}
-          allIdle={allIdle}
-          leaderVerb={leaderIsIdle ? undefined : leaderVerb}
-          leaderIdleText={leaderIsIdle ? 'Idle' : undefined}
-          leaderTokenCount={leaderTokenCount}
-        />
-      ) : null}
       {isMainSession && showExpandedTodos && tasksV2 && tasksV2.length > 0 ? (
         <Box width="100%" flexDirection="column">
           <MessageResponse>
@@ -669,9 +690,24 @@ function SpinnerWithVerbInner({
           )}
           {tipLineText && !hideTipAfterReplyText && (
             <MessageResponse>
-              <Text dimColor wrap={nextTask ? 'truncate-end' : 'wrap'}>
-                {tipLineText}
-              </Text>
+              {!nextTask && effectiveTip === EXPLANATORY_TIP_FULL ? (
+                <Box flexDirection="row" flexWrap="wrap">
+                  <Text dimColor>
+                    {tipLabel}: {EXPLANATORY_TIP_PREFIX} ·{' '}
+                  </Text>
+                  <Box flexShrink={0}>
+                    <SlashCommandLink
+                      command={EXPLANATORY_TIP_COMMAND}
+                      args={EXPLANATORY_TIP_ARGS}
+                      color="suggestion"
+                    />
+                  </Box>
+                </Box>
+              ) : (
+                <Text dimColor wrap={nextTask ? 'truncate-end' : 'wrap'}>
+                  {nextTask ? tipLineText : <Ansi>{tipLineText}</Ansi>}
+                </Text>
+              )}
             </MessageResponse>
           )}
         </Box>

@@ -3,7 +3,14 @@ import { getMainThreadAgentId } from '../../bootstrap/state.js'
 import type { AppStateStore } from '../../state/AppStateStore.js'
 import type { Message } from '../../types/message.js'
 import { pruneDetachedToolCalls } from '../../utils/detachedToolCallStore.js'
+import {
+  applyMessageStoreAction,
+  type MessageStoreAction,
+} from '../../utils/messageStore.js'
 import { createSignal } from '../../utils/signal.js'
+
+export type TranscriptMessageOp = MessageStoreAction
+export type TranscriptOpHoldMode = false | true | 'held'
 
 export type TranscriptProjectionOptions = {
   store: AppStateStore
@@ -50,6 +57,8 @@ export class TranscriptProjection {
   readonly #nonProgressChanged = createSignal()
   #messages: Message[]
   #nonProgressSnapshot: Message[]
+  #publishedSnapshot: Message[] | undefined = undefined
+  #dirty = false
 
   constructor(options: TranscriptProjectionOptions) {
     this.#store = options.store
@@ -76,6 +85,9 @@ export class TranscriptProjection {
 
   getCurrent = (): Message[] => this.#messages
 
+  /** Official 2.1.328 `gie.getPublished` (`chunk@319736883.js:1835100`). */
+  getPublished = (): Message[] => this.#publishedSnapshot ?? this.#messages
+
   subscribe = (listener: () => void): (() => void) =>
     this.#changed.subscribe(listener)
 
@@ -84,16 +96,72 @@ export class TranscriptProjection {
   subscribeNonProgress = (listener: () => void): (() => void) =>
     this.#nonProgressChanged.subscribe(listener)
 
-  setMessages = (action: React.SetStateAction<Message[]>): void => {
+  /**
+   * Official 2.1.328 `gie.apply` / `son` (`chunk@319736883.js:1642851, 1834821`):
+   * applies a structured `MessageStoreAction` (including `insert-after-uuid`,
+   * `replace-by-uuid`, `append`, `update`, etc.) with optional `'held'` or
+   * deferred (`true`) publication mode.
+   */
+  applyMessageOp = (
+    op: TranscriptMessageOp,
+    holdMode: TranscriptOpHoldMode = false,
+  ): void => {
+    this.replace(prev => applyMessageStoreAction(prev, op), holdMode)
+  }
+
+  /**
+   * Official 2.1.328 `gie.replace(action, holdMode)` (`chunk@319736883.js:1834760`).
+   * When `holdMode` is `'held'` or `true`, updates the live transcript buffer
+   * immediately without notifying subscribers until a subsequent unheld update
+   * or `flush()` commits it.
+   */
+  replace = (
+    action: React.SetStateAction<Message[]>,
+    holdMode: TranscriptOpHoldMode = false,
+  ): void => {
     const prev = this.#messages
     const next = typeof action === 'function' ? action(prev) : action
     pruneDetachedToolCalls(prev, next)
-    if (Object.is(next, prev)) return
+    if (Object.is(next, prev)) {
+      if (!holdMode && this.#publishedSnapshot !== undefined) {
+        this.#publish(this.#publishedSnapshot)
+      }
+      return
+    }
+    this.#messages = next
+    if (holdMode) {
+      this.#publishedSnapshot ??= prev
+      if (holdMode !== 'held') {
+        this.#dirty = true
+      }
+      return
+    }
+    this.#publish(this.#publishedSnapshot ?? prev)
+  }
+
+  /**
+   * Official 2.1.328 `gie.flush` (`chunk@319736883.js:1835120`):
+   * publishes deferred updates when dirty (or unconditionally when `force` is true).
+   */
+  flush = (force = false): void => {
+    if (this.#publishedSnapshot !== undefined && (force || this.#dirty)) {
+      this.#publish(this.#publishedSnapshot)
+    }
+  }
+
+  setMessages = (action: React.SetStateAction<Message[]>): void => {
+    this.replace(action, false)
+  }
+
+  #publish(previousPublished: Message[]): void {
+    this.#publishedSnapshot = undefined
+    this.#dirty = false
+    const next = this.#messages
+    if (Object.is(next, previousPublished)) return
     const nonProgressDidChange = hasNonProgressChange(
       this.#nonProgressSnapshot,
       next,
     )
-    this.#messages = next
     if (nonProgressDidChange) {
       this.#nonProgressSnapshot = next
     }

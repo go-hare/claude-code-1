@@ -2,10 +2,21 @@ import figures from 'figures';
 import * as React from 'react';
 import { useContext } from 'react';
 import { useQueuedMessage } from '../../context/QueuedMessageContext.js';
-import { AccessibilityContext, Box, Divider, Text, type Theme } from '@anthropic/ink';
+import {
+  AccessibilityContext,
+  Ansi,
+  Box,
+  Divider,
+  supportsHyperlinks,
+  Text,
+  type Theme,
+  useTheme,
+} from '@anthropic/ink';
 import { formatBriefTimestamp } from '../../utils/formatBriefTimestamp.js';
+import { OSC8_END, OSC8_START } from '../../utils/hyperlink.js';
+import { formatToken, lexMarkdownSafely, stripRawOsc8Sequences } from '../../utils/markdown.js';
 import { findThinkingTriggerPositions, getRainbowColor, isUltrathinkEnabled } from '../../utils/thinking.js';
-import { Markdown } from '../Markdown.js';
+import { Markdown, promptModeMarked } from '../Markdown.js';
 import { MessageActionsSelectedContext } from '../messageActions.js';
 import {
   formatHiddenLinesTitle,
@@ -20,7 +31,54 @@ type Props = {
   timestamp?: string;
   bodyOnly?: boolean;
   awaitingModel?: boolean;
+  /** Official 2.1.328 `markLinks` — OSC 8 file:// targets for `[Image #N]` refs. */
+  markLinks?: ReadonlyMap<string, string>;
 };
+
+const PROMPT_SGR_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional CSI SGR sequence match
+  /\x1b\[([0-9;]*)m/g;
+
+function stripForegroundSgr(input: string): string {
+  return input.replace(PROMPT_SGR_RE, (full, params: string) => {
+    if (params === '') return full;
+    const codes = params.split(';').map(Number);
+    const kept: number[] = [];
+    for (let i = 0; i < codes.length; i++) {
+      const code = codes[i]!;
+      if (code === 38) {
+        const mode = codes[i + 1];
+        if (mode === 5) i += 2;
+        else if (mode === 2) i += 4;
+        continue;
+      }
+      if ((code >= 30 && code <= 37) || code === 39 || (code >= 90 && code <= 97)) {
+        continue;
+      }
+      kept.push(code);
+    }
+    return kept.length > 0 ? `\x1b[${kept.join(';')}m` : '';
+  });
+}
+
+/**
+ * Official 2.1.328 `Jr` (`chunk@307751817.js:21120`) markLinks post-pass:
+ * wrap matching `[Image #N]` placeholders in OSC 8 hyperlinks when supported.
+ */
+export function applyPromptMarkLinks(
+  text: string,
+  markLinks: ReadonlyMap<string, string> | undefined,
+  enableHyperlinks = supportsHyperlinks(),
+): string {
+  if (!enableHyperlinks || !markLinks || markLinks.size === 0) {
+    return text;
+  }
+  let out = text;
+  for (const [label, url] of markLinks) {
+    out = out.replaceAll(label, `${OSC8_START}${url}${OSC8_END}${label}${OSC8_START}${OSC8_END}`);
+  }
+  return out;
+}
 
 /** densable Gfr — plain / ultrathink rainbow text (no Markdown). */
 function RainbowOrPlainText({ text, color }: { text: string; color: keyof Theme }): React.ReactNode {
@@ -87,10 +145,12 @@ export function HighlightedThinkingText({
   timestamp,
   bodyOnly = false,
   awaitingModel = false,
+  markLinks,
 }: Props): React.ReactNode {
   // Brief/assistant mode: chat-style "You" label instead of the ❯ highlight.
   // Parent drops its backgroundColor when this is true, so no grey shows
   // through. No manual wrap needed — Ink wraps inside the parent Box.
+  const [theme] = useTheme();
   const queued = useQueuedMessage();
   const isQueued = queued?.isQueued ?? false;
   const isSelected = useContext(MessageActionsSelectedContext);
@@ -108,8 +168,8 @@ export function HighlightedThinkingText({
 
   if (useBriefLayout || bodyOnly) {
     const ts = timestamp ? formatBriefTimestamp(timestamp) : '';
-    const bodyColor: keyof Theme = isQueueSelected || isSelected ? 'suggestion' : isDimmed ? 'subtle' : 'text';
-    const youColor: keyof Theme = isQueueSelected ? 'suggestion' : isDimmed ? 'subtle' : 'briefLabelYou';
+    const bodyColor: keyof Theme = isQueueSelected || isSelected ? 'suggestion' : isDimmed ? 'inactive' : 'text';
+    const youColor: keyof Theme = isQueueSelected ? 'suggestion' : isDimmed ? 'inactive' : 'briefLabelYou';
     const paddingLeft = bodyOnly ? 0 : 2;
     let body: React.ReactNode;
     if (isObj) {
@@ -125,11 +185,31 @@ export function HighlightedThinkingText({
         </>
       );
     } else if (useMarkdown) {
-      body = (
-        <Markdown promptMode color={bodyColor} monochrome={isDimmed}>
-          {text}
-        </Markdown>
-      );
+      const canApplyMarkLinks = Boolean(markLinks && markLinks.size > 0 && supportsHyperlinks());
+      if (canApplyMarkLinks) {
+        const safeSource = stripRawOsc8Sequences(text);
+        const tokens = lexMarkdownSafely(promptModeMarked, safeSource);
+        const formatted = tokens
+          .map(tok => formatToken(tok, theme, 0, null, null, null, true))
+          .join('')
+          .replace(/^\n+/, '')
+          .trimEnd();
+        const base = formatted || safeSource;
+        const linked = applyPromptMarkLinks(isDimmed ? stripForegroundSgr(base) : base, markLinks, true);
+        body = (
+          <Box flexDirection="column">
+            <Text color={bodyColor}>
+              <Ansi>{linked}</Ansi>
+            </Text>
+          </Box>
+        );
+      } else {
+        body = (
+          <Markdown promptMode color={bodyColor} monochrome={isDimmed}>
+            {text}
+          </Markdown>
+        );
+      }
     } else {
       body = <Text color={bodyColor}>{text}</Text>;
     }

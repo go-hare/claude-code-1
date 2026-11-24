@@ -46,7 +46,7 @@ import { getAutoScrollEnabled } from '../utils/config.js';
 import { isFullscreenEnvEnabled, latchSessionTuiSetting, resolveMouseTrackingMode } from '../utils/fullscreen.js';
 import { getPlatform } from '../utils/platform.js';
 import { assistantHasVisibleText, type ScrollPin } from '../utils/scrollPin.js';
-import { useAppState } from '../state/AppState.js';
+import { useAppState, useOptionalAppState } from '../state/AppState.js';
 import { createStore, type Store } from '../state/store.js';
 import { getBootstrapSessionHost } from '../utils/sessionHost.js';
 import { isNotificationVisible } from '../context/notifications.js';
@@ -66,6 +66,8 @@ const MODAL_TRANSCRIPT_PEEK = 2;
 /** Official 2.1.328 `XWn` / `WTs` — minimum terminal rows & height deducted for `header`. */
 const HEADER_MIN_ROWS = 10;
 const HEADER_ROWS = 1;
+/** Official 2.1.328 `TDe` (@307641741) — optional transcript left gutter width passed to StickyPromptHeader. */
+const STICKY_PROMPT_LEFT_MARGIN = 0;
 
 /**
  * densable tot `vkt` — sticky header occupies row 0, so overlay tops shift by 1.
@@ -1811,6 +1813,9 @@ export function FullscreenLayout({
   }, [modalVisible, clearSelection]);
   const [stickyPrompt, setStickyPrompt] = useState<StickyPrompt | null>(null);
   const chromeCtx = useMemo(() => ({ setStickyPrompt }), []);
+  // Official 2.1.328 `pdn` (@318476113 @21404 & @23151): `Fe = xs(zx) ?? false; Ge = qx(Fe) ? TDe : 0`.
+  const verbose = useOptionalAppState(s => s.verbose, false);
+  const stickyLeftMargin = !verbose ? STICKY_PROMPT_LEFT_MARGIN : 0;
   const [leftoverClaims, setLeftoverClaims] = useState<LeftoverChromeClaim[]>([]);
   const subscribeLeftoverChrome = useCallback((claim: LeftoverChromeClaim) => {
     setLeftoverClaims(prev => [...prev, claim]);
@@ -1973,7 +1978,11 @@ export function FullscreenLayout({
                     <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
                       {top}
                       {headerPrompt != null && (
-                        <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />
+                        <StickyPromptHeader
+                          text={headerPrompt.text}
+                          onClick={headerPrompt.scrollTo}
+                          leftMargin={stickyLeftMargin}
+                        />
                       )}
                       <ScrollBox
                         ref={scrollViewport?.attach}
@@ -2018,7 +2027,6 @@ export function FullscreenLayout({
                   width={dockWidth}
                   flexShrink={0}
                   overflow="hidden"
-                  backgroundColor="composerSidebarBackground"
                   display={dockVisible ? 'flex' : 'none'}
                 >
                   {dock}
@@ -2240,7 +2248,7 @@ function StickyPromptHeader({
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
       >
-        <Text color="subtle" wrap="truncate-end">
+        <Text color="text" wrap="truncate-end">
           {figures.pointer} {text}
         </Text>
       </Box>

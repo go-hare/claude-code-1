@@ -34,7 +34,7 @@ describe('densable 2.1.228 #15 SpinnerAnimationRow retry vs compact', () => {
     expect(zxt).toContain("t.kind === 'stalled'")
     expect(zxt).toContain('will retry in')
     expect(zxt).toContain('check your network')
-    expect(zxt).toContain('Retrying in')
+    expect(zxt).toContain('retrying in')
     expect(zxt).toContain('low_priority_waiting')
     expect(zxt).toContain('auto_mode_unavailable')
     expect(zxt).toContain('noResponse')

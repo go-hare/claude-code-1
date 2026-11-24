@@ -164,7 +164,7 @@ export function DlpBlockedGuidanceLine(): React.ReactNode {
  * densable 2.1.243 `Kx` display text: bare "API Error" gets the wait hint.
  */
 export function formatClientApiErrorLine(text: string): string {
-  return text === API_ERROR_MESSAGE_PREFIX ? `${API_ERROR_MESSAGE_PREFIX}: Please wait a moment and try again.` : text;
+  return text === API_ERROR_MESSAGE_PREFIX ? `${API_ERROR_MESSAGE_PREFIX}: Wait a moment and try again.` : text;
 }
 
 const ERROR_URL_RE =

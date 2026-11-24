@@ -41,7 +41,7 @@ export function AssistantThinkingMessage({
   return (
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} width="100%">
       <NoSelect fromLeftEdge minWidth={2}>
-        <Text aria-label="thinking:" dimColor italic>
+        <Text aria-label="thinking:" dimColor>
           {THEREFORE}
         </Text>
       </NoSelect>

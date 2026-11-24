@@ -1,10 +1,14 @@
 import React from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
+import { LEFTOVER_ZXT_API_ERROR, RetryBanner } from 'src/components/Spinner/leftoverZxt.js';
 import { TOOL_SUMMARY_MAX_LENGTH } from 'src/constants/toolLimits.js';
-import { Box, Text } from '@anthropic/ink';
+import { Text } from '@anthropic/ink';
 import type { ProgressMessage } from 'src/types/message.js';
-import { truncate } from 'src/utils/format.js';
+import { formatDuration, truncate } from 'src/utils/format.js';
+import { plural } from 'src/utils/stringUtils.js';
 import type { Output, SearchResult, WebSearchProgress } from './WebSearchTool.js';
+
+const WEB_SEARCH_RETRY_INDENT = 5;
 
 function getSearchSummary(results: (SearchResult | string | null | undefined)[]): {
   searchCount: number;
@@ -21,6 +25,52 @@ function getSearchSummary(results: (SearchResult | string | null | undefined)[])
   }
 
   return { searchCount, totalResultCount };
+}
+
+/**
+ * Official 2.1.328 `tCo` (`chunk@307352331.js`): validate/normalize a retry
+ * status before handing it to the unified retry banner (`b2t`).
+ */
+function sanitizeSearchRetryStatus(status: unknown): Record<string, unknown> | null {
+  if (status === null || typeof status !== 'object') return null;
+  const candidate = status as Record<string, unknown>;
+  if (
+    candidate.kind !== 'retrying' &&
+    candidate.kind !== 'stalled' &&
+    candidate.kind !== 'auto_mode_unavailable' &&
+    candidate.kind !== 'low_priority_waiting'
+  ) {
+    return null;
+  }
+  if (candidate.kind !== 'retrying') return candidate;
+  if (
+    typeof candidate.attempt !== 'number' ||
+    !Number.isFinite(candidate.attempt) ||
+    typeof candidate.maxRetries !== 'number' ||
+    !Number.isFinite(candidate.maxRetries) ||
+    typeof candidate.deadline !== 'number' ||
+    !Number.isFinite(candidate.deadline)
+  ) {
+    return null;
+  }
+  const err = candidate.error;
+  if (err !== null && typeof err === 'object' && typeof (err as { formatted?: unknown }).formatted === 'string') {
+    return candidate;
+  }
+  const rawStatus =
+    err !== null && typeof err === 'object' && 'status' in err ? (err as { status?: unknown }).status : undefined;
+  return {
+    ...candidate,
+    error: {
+      message: LEFTOVER_ZXT_API_ERROR,
+      status: typeof rawStatus === 'number' && Number.isFinite(rawStatus) ? rawStatus : undefined,
+      formatted: LEFTOVER_ZXT_API_ERROR,
+      connection: null,
+      isNetworkDown: false,
+      rateLimits: null,
+      noResponse: null,
+    },
+  };
 }
 
 export function renderToolUseMessage(
@@ -58,19 +108,31 @@ export function renderToolUseMessage(
   return message;
 }
 
-export function renderToolUseProgressMessage(progressMessages: ProgressMessage<WebSearchProgress>[]): React.ReactNode {
+export function renderToolUseProgressMessage(
+  progressMessages: ProgressMessage<WebSearchProgress>[],
+  options?: { terminalSize?: { columns?: number } },
+): React.ReactNode {
   if (progressMessages.length === 0) {
     return null;
   }
 
-  const lastProgress = progressMessages[progressMessages.length - 1];
-  if (!lastProgress?.data) {
+  const lastRetry = progressMessages.findLast(msg => msg?.data?.type === 'search_retry')?.data;
+  const retryStatus = sanitizeSearchRetryStatus(lastRetry?.type === 'search_retry' ? lastRetry.status : null);
+  if (retryStatus) {
+    return (
+      <MessageResponse>
+        <RetryBanner status={retryStatus} columns={(options?.terminalSize?.columns ?? 80) - WEB_SEARCH_RETRY_INDENT} />
+      </MessageResponse>
+    );
+  }
+
+  const data = progressMessages.findLast(msg => msg?.data?.type !== 'search_retry')?.data ?? lastRetry;
+  if (!data) {
     return null;
   }
 
-  const data = lastProgress.data;
-
   switch (data.type) {
+    case 'search_retry':
     case 'query_update':
       return (
         <MessageResponse>
@@ -81,35 +143,10 @@ export function renderToolUseProgressMessage(progressMessages: ProgressMessage<W
       return (
         <MessageResponse>
           <Text dimColor>
-            Found {data.resultCount} results for &quot;{data.query}&quot;
+            Found {data.resultCount} {plural(data.resultCount, 'result')} for &quot;{data.query}&quot;
           </Text>
         </MessageResponse>
       );
-    case 'search_retry': {
-      const status = data.status;
-      if (status && status.kind === 'retrying') {
-        const remainingMs = typeof status.deadline === 'number' ? status.deadline - Date.now() : undefined;
-        const delaySeconds = remainingMs !== undefined ? Math.max(1, Math.round(remainingMs / 1000)) : undefined;
-        const attemptPart =
-          typeof status.attempt === 'number' && typeof status.maxRetries === 'number'
-            ? ` (attempt ${status.attempt}/${status.maxRetries})`
-            : '';
-        const waitPart = delaySeconds !== undefined ? ` in ${delaySeconds}s` : '';
-        return (
-          <MessageResponse>
-            <Text dimColor>
-              Retrying search{attemptPart}
-              {waitPart}: {data.query}
-            </Text>
-          </MessageResponse>
-        );
-      }
-      return (
-        <MessageResponse>
-          <Text dimColor>Searching: {data.query}</Text>
-        </MessageResponse>
-      );
-    }
     default:
       return null;
   }
@@ -118,20 +155,18 @@ export function renderToolUseProgressMessage(progressMessages: ProgressMessage<W
 export function renderToolResultMessage(output: Output): React.ReactNode {
   const searchCount =
     (output as { searchCount?: number }).searchCount ?? getSearchSummary(output.results ?? []).searchCount;
-  const timeDisplay =
+  const durationPart =
     output.durationSeconds >= 1
-      ? `${Math.round(output.durationSeconds)}s`
-      : `${Math.round(output.durationSeconds * 1000)}ms`;
+      ? ` in ${formatDuration(output.durationSeconds * 1000, { hideTrailingZeros: true })}`
+      : '';
 
   return (
-    <Box justifyContent="space-between" width="100%">
-      <MessageResponse height={1}>
-        <Text>
-          Did {searchCount} search
-          {searchCount !== 1 ? 'es' : ''} in {timeDisplay}
-        </Text>
-      </MessageResponse>
-    </Box>
+    <MessageResponse height={1}>
+      <Text>
+        Did {searchCount > 0 ? searchCount : 'no'} {searchCount === 1 ? 'search' : 'searches'}
+        {durationPart}
+      </Text>
+    </MessageResponse>
   );
 }
 

@@ -4,11 +4,15 @@ import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import figures from 'figures';
 import {
   Box,
+  MODAL_LAYOUT_PADDING_X,
+  PANE_PADDING_X_INLINE,
+  PANE_PADDING_X_MODAL,
   StatusIcon,
   Text,
   stringWidth,
   useApp,
   useInput,
+  useIsInsideModal,
   usePreviewTheme,
   useTheme,
   useThemeSetting,
@@ -52,6 +56,11 @@ export type ThemePickerProps = {
    * /theme passes a handler so the extra item is listed (create UI may no-op).
    */
   onCustomTheme?: (theme?: CustomTheme) => void;
+  /**
+   * Official 2.1.328 `iat.isTitledByHost` (@330240895:1989,5835) — suppress the
+   * duplicate `"Theme"` heading and subtitle when rendered inside a titled host.
+   */
+  isTitledByHost?: boolean;
 };
 
 export function ThemePicker({
@@ -63,10 +72,13 @@ export function ThemePicker({
   skipExitHandling = false,
   onCancel: onCancelProp,
   onCustomTheme,
+  isTitledByHost = false,
 }: ThemePickerProps): React.ReactNode {
   const [theme] = useTheme();
   const themeSetting = useThemeSetting();
   const { columns, rows } = useTerminalSize();
+  // Official 2.1.328 `iat` (@330240895:2106,7118): go = useIsInsideModal() ? vQ + Fk : gm (= 2), width = columns - 2 * go.
+  const horizontalPadding = useIsInsideModal() ? MODAL_LAYOUT_PADDING_X + PANE_PADDING_X_MODAL : PANE_PADDING_X_INLINE;
   const colorModuleUnavailableReason = getColorModuleUnavailableReason();
   const syntaxTheme = colorModuleUnavailableReason === null ? getSyntaxTheme(theme) : null;
   const { setPreviewTheme, savePreview, cancelPreview } = usePreviewTheme();
@@ -227,17 +239,25 @@ export function ThemePicker({
   const content = (
     <Box ref={measureRef} flexDirection="column" gap={1}>
       <Box flexDirection="column" gap={1}>
-        {showIntroText ? (
-          <Text>Let&apos;s get started.</Text>
+        {isTitledByHost ? (
+          helpText && !showHelpTextBelow ? (
+            <Text dimColor>{helpText}</Text>
+          ) : null
         ) : (
-          <Text bold color="permission">
-            Theme
-          </Text>
+          <>
+            {showIntroText ? (
+              <Text>Let&apos;s get started.</Text>
+            ) : (
+              <Text bold color="permission">
+                Theme
+              </Text>
+            )}
+            <Box flexDirection="column">
+              <Text bold>Choose the text style that looks best with your terminal</Text>
+              {helpText && !showHelpTextBelow && <Text dimColor>{helpText}</Text>}
+            </Box>
+          </>
         )}
-        <Box flexDirection="column">
-          <Text bold>Choose the text style that looks best with your terminal</Text>
-          {helpText && !showHelpTextBelow && <Text dimColor>{helpText}</Text>}
-        </Box>
         {/* hideIndexes: nn.Item has no index column. Gold nn does not pass visibleCount. */}
         <ItemList
           key={listKey}
@@ -288,7 +308,7 @@ export function ThemePicker({
             dim={false}
             filePath="demo.js"
             firstLine={null}
-            width={Math.max(0, columns - 6)}
+            width={Math.max(0, columns - 2 * horizontalPadding)}
           />
         </PermissionOverflowBox>
         <Text dimColor>

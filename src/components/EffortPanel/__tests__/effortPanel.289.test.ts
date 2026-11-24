@@ -28,12 +28,13 @@ describe('densable 2.1.289 EffortPanel copy', () => {
     expect(geom.width).toBe(42)
   })
 
-  test('footer has Enter to confirm and separate Ultracode boolean toggle', () => {
-    expect(panelSrc).toContain('Enter to confirm')
-    expect(panelSrc).toContain('shortcut="Enter" action="confirm"')
+  test('footer has official 2.1.328 session-only/save hints and separate Ultracode boolean toggle', () => {
+    expect(panelSrc).toContain('s to use this session only · Enter to save')
+    expect(panelSrc).toContain(
+      "action={isSessionOnlyConfirm ? 'use this session only' : 'save'}",
+    )
     expect(panelSrc).toContain('Ultracode  on')
     expect(panelSrc).toContain('action="toggle"')
-    expect(panelSrc).not.toContain('Enter to save')
   })
 
   test('Esc writes Cancelled (CANCEL_MESSAGE)', () => {

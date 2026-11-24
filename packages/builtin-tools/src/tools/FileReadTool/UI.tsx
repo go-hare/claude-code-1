@@ -148,9 +148,9 @@ export function renderToolResultMessage(output: Output): React.ReactNode {
 
 export function renderToolUseErrorMessage(
   result: ToolResultBlockParam['content'],
-  { verbose }: { verbose: boolean },
+  { verbose, toolDenialKind }: { verbose: boolean; toolDenialKind?: string },
 ): React.ReactNode {
-  if (!verbose && typeof result === 'string') {
+  if (!verbose && toolDenialKind !== 'permission-rule' && typeof result === 'string') {
     // FileReadTool throws from call() so errors lack <tool_use_error> wrapping —
     // check the raw string directly for the cwd note marker.
     if (result.includes(FILE_NOT_FOUND_CWD_NOTE)) {
@@ -163,7 +163,7 @@ export function renderToolUseErrorMessage(
     if (extractTag(result, 'tool_use_error')) {
       return (
         <MessageResponse>
-          <Text color="error">Error reading file</Text>
+          <Text color="error">Couldn&apos;t read file</Text>
         </MessageResponse>
       );
     }

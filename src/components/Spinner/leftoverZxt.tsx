@@ -2,14 +2,16 @@
  * densable `zXt` retry row + `Zt`/`bhr` idle chrome.
  * DualInk press `baseButton` omitted from 审查差异.
  */
-import figures from 'figures';
 import * as React from 'react';
 import { Box, KeyboardShortcutHint, Text, stringWidth } from '@anthropic/ink';
+import { TEARDROP_ASTERISK } from '../../constants/figures.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { remainingRetryMs } from '../../utils/advisorNetworkStall.js';
-import { formatDuration } from '../../utils/format.js';
+import { formatDuration, formatResetTime } from '../../utils/format.js';
 import { truncateToWidth } from '../../utils/truncate.js';
 
 export const LEFTOVER_ZXT_API_ERROR = 'API error';
+export const DEFAULT_LOW_PRIORITY_WAIT_BANNER = 'Working at lower priority · waiting for capacity';
 export const LEFTOVER_BHR_PAD_LEFT = 2;
 export const LEFTOVER_BHR_GAP = 3;
 export const LEFTOVER_BHR_CONN_MIN = 12;
@@ -51,16 +53,23 @@ function leftoverZxtCountdown(deadline: number, now = Date.now()): string {
   return formatDuration(remainMs, { mostSignificantOnly: remainMs >= 300_000 });
 }
 
-/** densable `S3().waitBanner` analog — DualInk has no wait-banner host. */
+/** Official 2.1.328 `Eke().waitBanner` (`chunk@289476641.js:231536`). */
 export function leftoverLowPriorityWaitBanner(): string {
-  return '';
+  const cfg = getFeatureValue_CACHED_MAY_BE_STALE<Record<string, unknown>>('tengu_toasty_breeze', {});
+  if (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) {
+    const raw = cfg.waitBanner;
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      return raw;
+    }
+  }
+  return DEFAULT_LOW_PRIORITY_WAIT_BANNER;
 }
 
-/** densable `vu(j.resetsAt)` analog — DualInk duration until unix-seconds reset. */
-export function leftoverZxtResetsAtSuffix(resetsAt: number | undefined, now = Date.now()): string {
+/** Official 2.1.328 `Y0(X.resetsAt)` (`chunk@307641741.js:20053`): wall-clock reset time. */
+export function leftoverZxtResetsAtSuffix(resetsAt: number | undefined, _now?: number): string {
   if (resetsAt == null) return '';
-  const ms = Math.max(0, resetsAt * 1000 - now);
-  return ` (${formatDuration(ms, { mostSignificantOnly: true })})`;
+  const formatted = formatResetTime(resetsAt);
+  return formatted ? ` (${formatted})` : '';
 }
 
 /** densable `gdt` analog — identity, fallback "usage limit". */
@@ -90,7 +99,7 @@ export function leftoverZxtRetryTitle(input: {
 function leftoverZxtMark(color: 'error' | 'warning'): React.ReactNode {
   return (
     <Box aria-hidden flexWrap="wrap" height={1} width={2}>
-      <Text color={color}>{figures.cross}</Text>
+      <Text color={color}>{TEARDROP_ASTERISK}</Text>
     </Box>
   );
 }
@@ -187,12 +196,12 @@ export function leftoverZxt(input: { status: unknown; columns: number; now?: num
 
   const rateLimits = err.rateLimits;
   const resetsSuffix = leftoverZxtResetsAtSuffix(rateLimits?.resetsAt, now);
-  // Official 2.1.326 #132 (`b2t`): show "retrying…" when countdown reaches 0s instead of "Retrying in 0s".
+  // Official 2.1.328 (`b2t` @chunk@307641741.js:20070): lowercase "retrying in …" and "retrying…" at 0s.
   const remainMs = remainingRetryMs(Number(t.deadline) || 0, now);
   const suffix =
     remainMs === 0
       ? ` · retrying… · attempt ${attempt}/${maxRetries}`
-      : ` · Retrying in ${countdown}${resetsSuffix} · attempt ${attempt}/${maxRetries}`;
+      : ` · retrying in ${countdown}${resetsSuffix} · attempt ${attempt}/${maxRetries}`;
   const title = leftoverZxtTruncate(
     leftoverZxtRetryTitle({
       attempt,
@@ -213,6 +222,25 @@ export function leftoverZxt(input: { status: unknown; columns: number; now?: num
         <Text dimColor>{suffix}</Text>
       </Box>
     </>
+  );
+}
+
+/**
+ * Official 2.1.328 `b2t` (`chunk@307641741.js:17352`) unified retry banner
+ * component for spinner and tool-progress (e.g. WebSearch) retry states.
+ */
+export function RetryBanner({ status, columns }: { status: unknown; columns: number }): React.ReactNode {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const content = leftoverZxt({ status, columns, now });
+  if (!content) return null;
+  return (
+    <Box flexDirection="row" flexWrap="wrap">
+      {content}
+    </Box>
   );
 }
 

@@ -68,8 +68,8 @@ describe('densable 2.1.239 bvr persist wrappers', () => {
     expect(config).toContain("label: 'Time format'")
     expect(config).toContain("id: 'agentsView'")
     expect(config).toContain("id: 'defaultToAgentsView'")
-    // densable 2.1.289 bvr catalog — SEA label "Start in agent view"
-    expect(config).toContain("label: 'Start in agent view'")
+    // Official 2.1.328 bvr catalog — label updated to "Open agents view by default"
+    expect(config).toContain("label: 'Open agents view by default'")
     expect(config).toContain("id: 'leftArrowOpensAgents'")
     expect(config).toContain("id: 'remoteHomeSettings'")
     expect(config).toContain(

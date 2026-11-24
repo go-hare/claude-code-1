@@ -328,12 +328,12 @@ function ModalScrollerInner({ scrollViewport, maxRows, onClaim, children }: Inne
           </Box>
         </ScrollBox>
         {overflow.above && (
-          <Box position="absolute" top={overflow.hintTop} right={1}>
+          <Box position="absolute" top={overflow.hintTop} right={0}>
             <Text dimColor>{figures.arrowUp}</Text>
           </Box>
         )}
         {overflow.below && (
-          <Box position="absolute" bottom={overflow.hintBottom} right={1}>
+          <Box position="absolute" bottom={overflow.hintBottom} right={0}>
             <Text dimColor>{figures.arrowDown}</Text>
           </Box>
         )}

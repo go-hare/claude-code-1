@@ -3,61 +3,98 @@ import * as React from 'react';
 import { stripUnderlineAnsi } from 'src/components/shell/OutputLine.js';
 import { extractTag } from 'src/utils/messages.js';
 import { removeSandboxViolationTags } from 'src/utils/sandbox/sandbox-ui-utils.js';
-import { Box, Text } from '@anthropic/ink';
-import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
+import { Ansi, Box, Text } from '@anthropic/ink';
 import { countCharInString } from '../utils/stringUtils.js';
+import { CtrlOToExpand } from './CtrlOToExpand.js';
 import { MessageResponse } from './MessageResponse.js';
 
 const MAX_RENDERED_LINES = 10;
+const ARTIFACT_AUTHORED_BY_OTHERS_PREFIX = '<artifact-content-authored-by-others/>\n';
+const WHOLE_TOOL_USE_ERROR_RE = /^\s*<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/i;
+const NESTED_TOOL_USE_ERROR_RE = /<\/?tool_use_error\b/i;
 
 type Props = {
   result: ToolResultBlockParam['content'];
   verbose: boolean;
+  verbatim?: boolean;
 };
 
-export function FallbackToolUseErrorMessage({ result, verbose }: Props): React.ReactNode {
-  const transcriptShortcut = useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
+function isTextBlock(block: unknown): block is { type: 'text'; text: string } {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    'type' in block &&
+    (block as { type?: unknown }).type === 'text' &&
+    'text' in block &&
+    typeof (block as { text?: unknown }).text === 'string'
+  );
+}
+
+function unwrapSingleToolUseError(text: string): string | undefined {
+  const inner = WHOLE_TOOL_USE_ERROR_RE.exec(text)?.[1];
+  return inner !== undefined && !NESTED_TOOL_USE_ERROR_RE.test(inner) ? inner : undefined;
+}
+
+function extractArrayErrorText(blocks: readonly unknown[]): string | undefined {
+  const joined = blocks
+    .flatMap(block => {
+      if (!isTextBlock(block)) return [];
+      const cleaned = stripUnderlineAnsi(block.text);
+      return [unwrapSingleToolUseError(cleaned) ?? cleaned];
+    })
+    .join('\n');
+  return joined.trim() === '' ? undefined : joined;
+}
+
+function stripArtifactAuthoredByOthersPrefix(text: string): string {
+  return text.startsWith(ARTIFACT_AUTHORED_BY_OTHERS_PREFIX)
+    ? text.slice(ARTIFACT_AUTHORED_BY_OTHERS_PREFIX.length)
+    : text;
+}
+
+/**
+ * Official 2.1.328 `OS` (`chunk@318082579.js:1180..1920`) & `Dd` (`chunk@308092713.js:1032`).
+ */
+export function FallbackToolUseErrorMessage({ result, verbose, verbatim = false }: Props): React.ReactNode {
+  const isArray = Array.isArray(result);
+  const raw = typeof result === 'string' ? result : isArray ? extractArrayErrorText(result) : undefined;
+  const isVerbatim = verbatim || isArray;
   let error: string;
 
-  if (typeof result !== 'string') {
+  if (raw === undefined) {
     error = 'Tool execution failed';
   } else {
-    const extractedError = extractTag(result, 'tool_use_error') ?? result;
-    // Remove sandbox_violations tags from error display (Claude still sees them in the tool result)
-    const withoutSandboxViolations = removeSandboxViolationTags(extractedError);
-    // Strip <error> tags but keep their content (tags are for the model, not the UI)
-    const withoutErrorTags = withoutSandboxViolations.replace(/<\/?error>/g, '');
-    const trimmed = withoutErrorTags.trim();
-    if (!verbose && trimmed.includes('InputValidationError: ')) {
+    const cleaned = (
+      isVerbatim
+        ? stripUnderlineAnsi(raw)
+        : removeSandboxViolationTags(stripUnderlineAnsi(extractTag(raw, 'tool_use_error') ?? raw)).replace(
+            /<\/?error>/g,
+            '',
+          )
+    ).trim();
+    const visible = verbose ? cleaned : stripArtifactAuthoredByOthersPrefix(cleaned);
+    if (!verbose && !isVerbatim && visible.startsWith('InputValidationError: ')) {
       error = 'Invalid tool parameters';
-    } else if (trimmed.startsWith('Error: ') || trimmed.startsWith('Cancelled: ')) {
-      error = trimmed;
+    } else if (visible.startsWith('Error: ') || visible.startsWith('Cancelled: ')) {
+      error = visible;
     } else {
-      error = `Error: ${trimmed}`;
+      error = `Error: ${visible}`;
     }
   }
 
   const plusLines = countCharInString(error, '\n') + 1 - MAX_RENDERED_LINES;
+  const shown = verbose ? error : error.split('\n').slice(0, MAX_RENDERED_LINES).join('\n');
 
   return (
     <MessageResponse>
       <Box flexDirection="column">
         <Text color="error">
-          {stripUnderlineAnsi(verbose ? error : error.split('\n').slice(0, MAX_RENDERED_LINES).join('\n'))}
+          <Ansi>{shown}</Ansi>
         </Text>
         {!verbose && plusLines > 0 && (
-          // The careful <Text> layout is a workaround for the dim-bold
-          // rendering bug
-          <Box>
-            <Text dimColor>
-              … +{plusLines} {plusLines === 1 ? 'line' : 'lines'} (
-            </Text>
-            <Text dimColor bold>
-              {transcriptShortcut}
-            </Text>
-            <Text> </Text>
-            <Text dimColor>to see all)</Text>
-          </Box>
+          <Text dimColor>
+            … +{plusLines} {plusLines === 1 ? 'line' : 'lines'} <CtrlOToExpand />
+          </Text>
         )}
       </Box>
     </MessageResponse>

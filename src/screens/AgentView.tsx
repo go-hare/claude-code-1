@@ -82,6 +82,7 @@ import {
   buildDirectoryModeFlatRows,
   buildCustomGroupModeFlatRows,
   buildFleetFooterHints,
+  fleetDeleteActionForBackend,
   computeFleetColumnWidths,
   sessionArtifactLabel,
   formatAttachError,
@@ -429,18 +430,49 @@ type ResumePickerState = {
 };
 const AUTO_RELAUNCH_MIN_INTERVAL_MS = 30_000;
 
-const EMPTY_STATE_HINT =
-  'Type a task below to start a background session. It keeps running even after you close this terminal.';
-const EMPTY_STATE_EXAMPLES =
-  'Try: paste a PR or issue URL \u00b7 "investigate why test/auth.test.ts is flaky" \u00b7 "address the review comments on #1234"';
+export const AGENT_VIEW_EMPTY_HEADING = 'Nothing running in the background.';
+export const AGENT_VIEW_EMPTY_SUBTITLE =
+  'Hand off a task and it keeps working while you do something else \u2014 even if you close this terminal.';
 /** Official P9H when origin session is in the list (arrowRight, not left). */
 const REPL_HINT =
   'Press \u2192 to return to your session anytime. Type a task below to dispatch a session alongside it. Sessions keep running even after you close the terminal';
 const REPL_HINT_VIA_LEFT_SUFFIX = ' \u2014 run `claude agents` to manage them';
 const ORIGIN_MOVED_BANNER =
   'Your conversation moved to the background — enter opens it · esc returns to it · ctrl+c twice quits';
-const EMPTY_STATE_BANNER =
-  'A different way to work with Claude: hand off a bigger task than you would chat through, and Claude organizes it in the sections above so you know when it needs you.';
+
+/** Official 2.1.328 empty state (`chunk@307833918.js:121121..121550`). */
+export function AgentViewEmptyState({
+  hasCredentials,
+  paddingLeft = 2,
+}: {
+  hasCredentials: boolean;
+  paddingLeft?: number;
+}): React.ReactElement {
+  return (
+    <Box paddingLeft={paddingLeft} marginTop={1} flexDirection="column">
+      <Box flexDirection="column">
+        <Text bold>{AGENT_VIEW_EMPTY_HEADING}</Text>
+        <Text dimColor>{AGENT_VIEW_EMPTY_SUBTITLE}</Text>
+      </Box>
+      {!hasCredentials && (
+        <Text color="warning" wrap={'truncate' as never}>
+          Not signed in. Press <Text bold>l</Text> to sign in, or run <Text bold>claude /login</Text>.
+        </Text>
+      )}
+      <Box marginTop={1} flexDirection="column">
+        <Text dimColor>
+          Start one with <Text color={'suggestion' as never}>+ new session</Text> above,
+        </Text>
+        <Text dimColor>
+          or run <Text color={'suggestion' as never}>{'claude --bg "task"'}</Text> from any terminal,
+        </Text>
+        <Text dimColor>
+          or <Text color={'suggestion' as never}>/fork</Text> a session you&apos;re already in.
+        </Text>
+      </Box>
+    </Box>
+  );
+}
 const RESERVED_GROUP_NAMES = new Set(['pinned', '(ungrouped)', 'ungrouped', 'earlier', 'past']);
 const DISPATCH_PLACEHOLDER = 'describe a task for a new session';
 /** Official Hre — custom-group bucket for jobs with no group. */
@@ -753,13 +785,13 @@ function SessionRow({
   const age = formatFleetRowWhen(session.startedAt, loopNextAt);
   const artifact = sessionArtifactLabel(session);
 
-  // Official xhO detail: "→ to return" only when origin session is focused.
-  // densable Z3e: ungroup | justKilled → "stopped · ctrl+x again to delete" | delete.
+  // Official 2.1.328 (`chunk@307833918.js:109695`): ungroup | justKilled → "stopped · ctrl+x again to <action>" | "ctrl+x again to <action>".
+  const deleteAction = fleetDeleteActionForBackend(session.engine);
   let detail = '';
   if (isUngroupPending) {
     detail = 'ctrl+x again to ungroup';
   } else if (isDeletePending) {
-    detail = isJustKilled ? 'stopped \u00b7 ctrl+x again to delete' : 'ctrl+x again to remove from the list';
+    detail = isJustKilled ? `stopped \u00b7 ctrl+x again to ${deleteAction}` : `ctrl+x again to ${deleteAction}`;
   } else if (shouldShowDeleteRefusal({ state: session.daemonState, tempo: session.tempo }, deleteRefused)) {
     detail = '';
   } else if (heldInTerminal) {
@@ -2679,14 +2711,24 @@ function AgentViewApp({
     .map(r => r.session);
   // Gold canDispatchAndOpen: cm==="local" && EHt(). AgentView is the local tab.
   const canDispatchAndOpen = canFleetDispatchAndOpen('local', supportsExtendedKeys());
+  const selectedBand = selectedSession ? deriveBand(selectedSession) : undefined;
+  const selectedIsTerminal = selectedBand === 'completed' || selectedBand === 'review';
   const footerHints = buildFleetFooterHints({
     focusArea,
     viewMode,
     deletePending: !!deleteConfirmSessionId || !!ungroupConfirmSessionId,
     ungroupPending: !!ungroupConfirmSessionId,
     justKilled: !!justKilledSessionId && justKilledSessionId === deleteConfirmSessionId,
+    backend: selectedSession?.engine,
+    canDelete: selectedSession
+      ? selectedIsTerminal
+        ? fleetDeleteActionForBackend(selectedSession.engine)
+        : 'stop'
+      : undefined,
+    canGoBack: Boolean(currentSessionId),
+    canSwitchViews: !simpleView,
     rowKind: currentRow?.kind,
-    band: selectedSession ? deriveBand(selectedSession) : undefined,
+    band: selectedBand,
     canPin: !!selectedSession,
     canGroup: !!selectedSession,
     canRename: !!selectedSession,
@@ -5249,31 +5291,35 @@ function AgentViewApp({
               }
               if (row.kind === 'newsession') {
                 return (
-                  <Box
-                    key="newsession"
-                    ref={isRowSelected ? focusedRowRef : undefined}
-                    backgroundColor={showSelectionBg ? 'userMessageBackground' : undefined}
-                    onMouseEnter={() => {
-                      selectRowByMouse(idx);
-                    }}
-                    onClick={() => {
-                      selectRowByMouse(idx);
-                      // Gold `mf(Ke.origin)` @192210383 — spawn, do not attach older.
-                      void openNewSessionRow(fleetNewSessionRowOrigin(row, getCwd()));
-                    }}
-                  >
-                    <Text
-                      color={'suggestion' as never}
-                      aria-label={isRowSelected ? 'selected, new session:' : undefined}
+                  <Box key="newsession" flexDirection="column">
+                    <Box
+                      ref={isRowSelected ? focusedRowRef : undefined}
+                      backgroundColor={showSelectionBg ? 'userMessageBackground' : undefined}
+                      onMouseEnter={() => {
+                        selectRowByMouse(idx);
+                      }}
+                      onClick={() => {
+                        selectRowByMouse(idx);
+                        // Gold `mf(Ke.origin)` @192210383 — spawn, do not attach older.
+                        void openNewSessionRow(fleetNewSessionRowOrigin(row, getCwd()));
+                      }}
                     >
-                      {isRowSelected ? '\u276F' : ' '}
-                      {'+  '}
-                      <Text underline={isRowSelected}>new session</Text>
-                    </Text>
-                    {newSessionOpening && (
-                      <Text dimColor wrap={'truncate' as never}>
-                        {'  opening… · esc to cancel'}
+                      <Text
+                        color={'suggestion' as never}
+                        aria-label={isRowSelected ? 'selected, new session:' : undefined}
+                      >
+                        {isRowSelected ? '\u276F' : ' '}
+                        {'+  '}
+                        <Text underline={isRowSelected}>new session</Text>
                       </Text>
+                      {newSessionOpening && (
+                        <Text dimColor wrap={'truncate' as never}>
+                          {'  opening… · esc to cancel'}
+                        </Text>
+                      )}
+                    </Box>
+                    {overlaidLoadLanded && !error && !flatRows.some(r => r.kind === 'job') && (
+                      <AgentViewEmptyState hasCredentials={hasCredentials} />
                     )}
                   </Box>
                 );
@@ -5464,12 +5510,12 @@ function AgentViewApp({
 
         {/* Bottom: fixed input area (2.1.289 Bl + Ml) */}
         <Box flexShrink={0} flexDirection="column" marginTop={1}>
-          {/* Official Bl (@197670280) onboarding / empty banner */}
+          {/* Official 2.1.328 empty state (`chunk@307833918.js:121121`) */}
           {((sessions.length === 0 && overlaidLoadLanded && !error && !simpleView) ||
             (onlyOrigin && overlaidLoadLanded && !error && !simpleView)) &&
             !dispatchInput && (
-              <Box paddingLeft={1} marginBottom={1}>
-                <Text dimColor>{EMPTY_STATE_BANNER}</Text>
+              <Box marginBottom={1}>
+                <AgentViewEmptyState hasCredentials={hasCredentials} paddingLeft={1} />
               </Box>
             )}
           {!simpleView &&

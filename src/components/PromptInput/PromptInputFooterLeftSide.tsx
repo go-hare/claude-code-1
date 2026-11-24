@@ -1,6 +1,19 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle';
-import { Box, Text } from '@anthropic/ink';
+import {
+  AccessibilityContext,
+  Box,
+  Byline,
+  formatShortcutString,
+  getTerminalFocusState,
+  isXtermJs,
+  KeyboardShortcutHint,
+  stringWidth,
+  subscribeTerminalFocus,
+  Text,
+  useHasSelection,
+  useSelection,
+} from '@anthropic/ink';
 import * as React from 'react';
 import figures from 'figures';
 import { memo, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -28,7 +41,6 @@ import { AppStoreContext, useAppState } from 'src/state/AppState.js';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import HistorySearchInput from './HistorySearchInput.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTasksV2 } from '../../hooks/useTasksV2.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
@@ -37,7 +49,6 @@ import { VoiceWarmupHint } from './VoiceIndicator.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
 import { useVoiceState } from '../../context/voice.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
-import { isXtermJs, useHasSelection, useSelection } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { getPlatform } from '../../utils/platform.js';
 import { PrBadge } from '../PrBadge.js';
@@ -50,7 +61,6 @@ import { FeedbackDraftFooter } from '../FeedbackDraftFooter.js';
 import { useSessionDraftCount } from '../../utils/feedbackDrafts/useSessionDraftCount.js';
 import { plural } from '../../utils/stringUtils.js';
 import { isBgSession } from '../../utils/concurrentSessions.js';
-import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink';
 
 // Dead code elimination: conditional import for proactive mode
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -114,23 +124,25 @@ export function setAgentsHintExpiredForTest(expired: boolean): void {
 }
 
 /**
- * densable K2e / FFe — fleet/agents entry hint.
- * - Default / GB off / zero needs: "← for agents" (or "← again for agents"), hidden after 10s
- * - needs===0 + succeeded delta (fpf>0): pulse "← N done" (success on N) for Ozo=2500ms
- * - needsInput > 0: "← N agent(s)" with warning/success flash on change (always shown)
+ * Official 2.1.328 `yV` (chunk@319736883.js:907484) — fleet/agents entry hint
+ * hook returning `React.ReactNode | null` so callers know when the hint is
+ * absent (unavailable or 10s resting timer expired) and never emit dangling
+ * ` · ` separators.
  */
-export function AgentsFooterHint({
+function useAgentsFooterHint({
+  available,
   leftArrowAgain,
   restingHintExpired: restingHintExpiredProp,
 }: {
+  available: boolean;
   leftArrowAgain?: boolean;
   restingHintExpired?: boolean;
-}): React.ReactNode {
+}): React.ReactNode | null {
   useEffect(() => {
-    if (restingHintExpiredProp === undefined) {
+    if (available && restingHintExpiredProp === undefined) {
       ensureAgentsHintTimer();
     }
-  }, [restingHintExpiredProp]);
+  }, [available, restingHintExpiredProp]);
   const storeExpired = useSyncExternalStore(
     subscribeAgentsHintExpired,
     getAgentsHintExpiredSnapshot,
@@ -138,19 +150,20 @@ export function AgentsFooterHint({
   );
   const restingHintExpired = restingHintExpiredProp ?? storeExpired;
   const nudgeEnabled = isFleetNeedsInputNudgeEnabled();
-  const store = useMemo(() => getFleetNudgeExternalStore(nudgeEnabled), [nudgeEnabled]);
+  const activeNudge = available && nudgeEnabled;
+  const store = useMemo(() => getFleetNudgeExternalStore(activeNudge), [activeNudge]);
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 
   // Official eAa(ftt() !== "blurred") — pause sweep when terminal blurred.
   useEffect(() => {
-    if (!nudgeEnabled) return;
+    if (!activeNudge) return;
     const apply = () => {
       const state = getTerminalFocusState();
       setFleetNeedsInputNudgeFocused(state !== 'blurred');
     };
     apply();
     return subscribeTerminalFocus(apply);
-  }, [nudgeEnabled]);
+  }, [activeNudge]);
 
   const needsInput = snap?.needsInput;
   const succeeded = snap?.succeeded;
@@ -229,6 +242,8 @@ export function AgentsFooterHint({
     }, FLEET_NUDGE_FLASH_MS);
   }, [needsInput, succeeded, reducedMotion]);
 
+  if (!available) return null;
+
   // densable: zAr && (needs===0|void) && fpf>0 → "← N done"
   if (nudgeEnabled && (needsInput === 0 || needsInput === undefined) && donePulse > 0) {
     const countLabel = donePulse > 99 ? '99+' : String(donePulse);
@@ -266,6 +281,23 @@ export function AgentsFooterHint({
   );
 }
 
+/**
+ * densable K2e / FFe — fleet/agents entry hint component wrapper around `useAgentsFooterHint`.
+ */
+export function AgentsFooterHint({
+  leftArrowAgain,
+  restingHintExpired,
+}: {
+  leftArrowAgain?: boolean;
+  restingHintExpired?: boolean;
+}): React.ReactNode {
+  return useAgentsFooterHint({
+    available: true,
+    leftArrowAgain,
+    restingHintExpired,
+  });
+}
+
 type Props = {
   exitMessage: {
     show: boolean;
@@ -292,6 +324,10 @@ type Props = {
   historyFailedMatch: boolean;
   onOpenTasksDialog?: (taskId?: string) => void;
   leftArrowAgain?: boolean;
+  /** Official 2.1.328 Prt `wrappedRowWidth`: classic row budget for `sc` cycle hint fit. */
+  wrappedRowWidth?: number;
+  /** Official 2.1.328 Prt `leftArrowDetachAvailable`: optional override (defaults to BG_SESSIONS gate). */
+  leftArrowDetachAvailable?: boolean;
 };
 
 type StatusLineWithHideVim = {
@@ -349,6 +385,8 @@ export function PromptInputFooterLeftSide({
   historyFailedMatch,
   onOpenTasksDialog,
   leftArrowAgain,
+  wrappedRowWidth,
+  leftArrowDetachAvailable,
 }: Props): React.ReactNode {
   const store = useContext(AppStoreContext);
   const settingsHideVim = useSyncExternalStore(
@@ -405,6 +443,8 @@ export function PromptInputFooterLeftSide({
         tmuxSelected={tmuxSelected}
         onOpenTasksDialog={onOpenTasksDialog}
         leftArrowAgain={leftArrowAgain}
+        wrappedRowWidth={isSearching ? undefined : wrappedRowWidth}
+        leftArrowDetachAvailable={leftArrowDetachAvailable}
       />
     </Box>
   );
@@ -451,6 +491,10 @@ type ModeIndicatorProps = {
   teammateFooterIndex?: number;
   onOpenTasksDialog?: (taskId?: string) => void;
   leftArrowAgain?: boolean;
+  /** Official 2.1.328 Prt `wrappedRowWidth`: classic row budget for `sc` cycle hint fit. */
+  wrappedRowWidth?: number;
+  /** Official 2.1.328 Prt `leftArrowDetachAvailable`: optional override (defaults to BG_SESSIONS gate). */
+  leftArrowDetachAvailable?: boolean;
 };
 
 /**
@@ -489,6 +533,109 @@ export function isViewingStoppableSubagent(
   return viewed?.type === 'local_agent' && viewed.status === 'running';
 }
 
+/**
+ * Official 2.1.328 `Frt` (chunk@319736883.js:941792) — fullscreen background
+ * tasks summary pill for `>= 2` running background tasks (`↳ N background`).
+ */
+export const BackgroundCountPill = memo(function BackgroundCountPill({
+  count: taskCount,
+  selected,
+  onClick,
+}: {
+  count: number;
+  selected: boolean;
+  onClick?: () => void;
+}): React.ReactNode {
+  const [hover, setHover] = useState(false);
+  const highlighted = selected || hover;
+  const label = (
+    <Text color="background" inverse={highlighted}>
+      <Text aria-hidden>{'\u21B3'} </Text>
+      {taskCount} background
+    </Text>
+  );
+  if (!onClick) return label;
+  return (
+    <Box onClick={() => onClick()} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      {label}
+    </Box>
+  );
+});
+
+export type FullscreenFooterHint =
+  | 'none'
+  | 'warmup'
+  | 'interrupt'
+  | 'interrupt_agents'
+  | 'artifacts'
+  | 'manage'
+  | 'ctrl_t'
+  | 'agents'
+  | 'voice'
+  | 'cycle'
+  | 'shortcuts';
+
+export type ResolveFullscreenFooterHintParams = {
+  voiceWarmingUp: boolean;
+  forceInterrupt: boolean;
+  showHint: boolean;
+  allowInterruptHint: boolean;
+  canShowEscInterrupt: boolean;
+  isArtifactsSelected: boolean;
+  hasManageableTasks: boolean;
+  isPanelRowSelected: boolean;
+  hasTaskItems: boolean;
+  agentsAvailable: boolean;
+  hasAgentsHintContent: boolean;
+  isScreenReader: boolean;
+  hasParkedSubagentsHint: boolean;
+  canShowVoiceHint: boolean;
+  canShowCycleHint: boolean;
+};
+
+/**
+ * Official 2.1.328 `jl` single-winner footer priority slot
+ * (chunk@319736883.js:934480):
+ * warmup -> interrupt/interrupt_agents -> artifacts -> manage -> ctrl_t ->
+ * agents -> parked-subagents -> voice -> cycle -> shortcuts.
+ */
+export function resolveFullscreenFooterHint(p: ResolveFullscreenFooterHintParams): FullscreenFooterHint {
+  if (p.voiceWarmingUp) return 'warmup';
+  if (p.forceInterrupt) return 'interrupt';
+  if (!p.showHint) {
+    if (p.allowInterruptHint && p.canShowEscInterrupt) {
+      return 'interrupt';
+    }
+    return 'none';
+  }
+  if (p.canShowEscInterrupt) {
+    return p.agentsAvailable && p.hasAgentsHintContent && !p.isScreenReader ? 'interrupt_agents' : 'interrupt';
+  }
+  if (p.isArtifactsSelected) return 'artifacts';
+  if (p.hasManageableTasks && !p.isPanelRowSelected) return 'manage';
+  if (p.hasTaskItems) return 'ctrl_t';
+  if (p.agentsAvailable && !p.isScreenReader) {
+    return p.hasAgentsHintContent ? 'agents' : 'none';
+  }
+  if (p.hasParkedSubagentsHint) return 'none';
+  if (p.canShowVoiceHint) return 'voice';
+  if (p.canShowCycleHint) return 'cycle';
+  return !p.isScreenReader ? 'shortcuts' : 'none';
+}
+
+/**
+ * Official 2.1.328 `sc` (chunk@319736883.js:938430): in classic mode only
+ * attach `(shift+tab to cycle)` to the mode pill when the composed row fits
+ * within the row width budget.
+ */
+export function doesClassicCycleHintFitRow(
+  rowPreview: string,
+  rowBudget: number | undefined,
+  isScreenReader: boolean,
+): boolean {
+  return isScreenReader || rowBudget === undefined || stringWidth(rowPreview) <= rowBudget;
+}
+
 function ModeIndicator({
   mode,
   toolPermissionContext,
@@ -501,13 +648,19 @@ function ModeIndicator({
   teammateFooterIndex,
   onOpenTasksDialog,
   leftArrowAgain,
+  wrappedRowWidth,
+  leftArrowDetachAvailable,
 }: ModeIndicatorProps): React.ReactNode {
   const { columns } = useTerminalSize();
+  const isScreenReader = useContext(AccessibilityContext);
   const feedbackDraftCount = useSessionDraftCount();
   const modeCycleShortcut = useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
+  const openSelectedShortcut = useShortcutDisplay('footer:openSelected', 'Footer', 'enter');
   const tasks = useAppState(s => s.tasks);
   const taskDecorations = useAppState(s => s.taskDecorations);
   const footerSelection = useAppState(s => s.footerSelection);
+  const coordinatorTaskIndex = useAppState(s => s.coordinatorTaskIndex);
+  const frameUrlCount = useAppState(s => (s.frameUrls ? Object.keys(s.frameUrls).length : 0));
   const teamContext = useAppState(s => s.teamContext);
   const viewSelectionMode = useAppState(s => s.viewSelectionMode);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
@@ -538,7 +691,10 @@ function ModeIndicator({
     () =>
       count(
         Object.values(tasks),
-        t => isBackgroundTask(t) && !(process.env.USER_TYPE === 'ant' && isPanelAgentTask(t)),
+        t =>
+          isBackgroundTask(t) &&
+          !(t.type === 'monitor_ws' && t.ambient === true && t.frameLive?.explicit !== true) &&
+          !(process.env.USER_TYPE === 'ant' && isPanelAgentTask(t)),
       ),
     [tasks],
   );
@@ -546,7 +702,6 @@ function ModeIndicator({
   const hasTaskItems = tasksV2 !== undefined && tasksV2.length > 0;
   const escShortcut = useShortcutDisplay('chat:cancel', 'Chat', 'esc').toLowerCase();
   const todosShortcut = useShortcutDisplay('app:toggleTodos', 'Global', 'ctrl+t');
-  const killAgentsShortcut = useShortcutDisplay('chat:killAgents', 'Chat', 'ctrl+x ctrl+k');
   const voiceKeyShortcutRaw = useShortcutDisplay('voice:pushToTalk', 'Chat', 'Space');
   const voiceKeyShortcut = feature('VOICE_MODE') ? voiceKeyShortcutRaw : '';
   // Captured at mount so the hint doesn't flicker mid-session if another
@@ -570,7 +725,23 @@ function ModeIndicator({
       });
     }
   }, [voiceEnabled, voiceHintUnderCap, voiceKeyShortcut]);
-  const isKillAgentsConfirmShowing = useAppState(s => s.notifications.current?.key === 'kill-agents-confirm');
+
+  const viewedTask = viewingAgentTaskId ? tasks[viewingAgentTaskId] : undefined;
+  const isViewingTeammate = viewSelectionMode === 'viewing-agent' && viewedTask?.type === 'in_process_teammate';
+  const isViewingCompletedTeammate = isViewingTeammate && viewedTask != null && viewedTask.status !== 'running';
+  const isFooterSelected = footerSelection !== null || tasksSelected || teamsSelected || tmuxSelected;
+
+  // Official lfb: BG_SESSIONS fleet entry (not remote, not viewing teammate).
+  // feature() must be a direct if/ternary condition (bun:bundle restriction).
+  const defaultAgentsEntryEnabled = feature('BG_SESSIONS')
+    ? !getIsRemoteMode() && !isViewingTeammate && !isViewingCompletedTeammate
+    : false;
+  const agentsEntryEnabled = leftArrowDetachAvailable ?? defaultAgentsEntryEnabled;
+  const agentsAvailable = agentsEntryEnabled && !isViewingTeammate && !isFooterSelected;
+  const agentsHintNode = useAgentsFooterHint({
+    available: agentsAvailable && !isScreenReader,
+    leftArrowAgain,
+  });
 
   // Derive team info from teamContext (no filesystem I/O needed)
   // Match the same logic as TeamStatus to avoid trailing separator
@@ -585,12 +756,10 @@ function ModeIndicator({
     return <Text color="bashBorder">! for shell mode</Text>;
   }
 
+  const isFullscreen = isFullscreenEnvEnabled();
   const currentMode = toolPermissionContext?.mode;
   // Gold footer paints default as `manual mode` (`DL`). Do not hide default.
   const hasActiveMode = currentMode !== undefined;
-  const viewedTask = viewingAgentTaskId ? tasks[viewingAgentTaskId] : undefined;
-  const isViewingTeammate = viewSelectionMode === 'viewing-agent' && viewedTask?.type === 'in_process_teammate';
-  const isViewingCompletedTeammate = isViewingTeammate && viewedTask != null && viewedTask.status !== 'running';
   const hasBackgroundTasks = runningTaskCount > 0 || isViewingTeammate;
   // Official mt = !fl() && ary(T, I). fl = InternalAccessibilityContext (SR).
   const hasParkedSubagentsHint = !isScreenReaderModeEnabled() && hasParkedSubagentsForFooter(tasks, viewingAgentTaskId);
@@ -601,7 +770,7 @@ function ModeIndicator({
     !hasParkedSubagentsHint &&
     !isScreenReaderModeEnabled() &&
     viewingAgentTaskId === undefined &&
-    isFullscreenEnvEnabled() &&
+    isFullscreen &&
     !getIsRemoteMode();
 
   // Count primary items (permission mode or coordinator mode, background tasks, and teams)
@@ -619,17 +788,106 @@ function ModeIndicator({
     primaryItemCount < 2 &&
     (primaryItemCount === 0 || columns >= 80);
 
-  // Hide the shift+tab hint when there are 2 primary items. densable dHe
-  // `bs&&(Gn||as)&&Nt!==""` — manual (default) mode never gets the cycle hint
-  // and falls through to "? for shortcuts".
-  const shouldShowModeHint = primaryItemCount < 2;
-  const showModeCycleHint = shouldShowModeHint && currentMode !== 'default' && modeCycleShortcut !== '';
-
   // Check if we have in-process teammates (showing pills)
   // In spinner-tree mode, pills are disabled - teammates appear in the spinner tree instead
   const hasInProcessTeammates =
     !showSpinnerTree && hasBackgroundTasks && Object.values(tasks).some(t => t.type === 'in_process_teammate');
   const hasTeammatePills = hasInProcessTeammates || (!showSpinnerTree && isViewingTeammate);
+
+  // Check if any in-process teammates exist (for hint text cycling)
+  const hasAnyInProcessTeammates = Object.values(tasks).some(
+    t => t.type === 'in_process_teammate' && t.status === 'running',
+  );
+
+  const showEscToStopSubagent =
+    isViewingStoppableSubagent(viewSelectionMode, viewingAgentTaskId, tasks) && !isFooterSelected;
+  const hasResumableStoppedSubagent = hasResumableStoppedSubagentInFooter(tasks, taskDecorations, viewingAgentTaskId);
+  const hasCoordinatorTasks = process.env.USER_TYPE === 'ant' && getVisibleAgentTasks(tasks).length > 0;
+  const isPanelRowSelected = footerSelection === 'tasks' && coordinatorTaskIndex >= 0;
+  const isArtifactsSelected = (footerSelection as string | null) === 'frame';
+  const artifactsAction = getIsRemoteMode() && frameUrlCount === 1 ? 'open in browser' : 'view artifacts';
+  const hasVisibleBgPill = runningTaskCount >= 1 && !hasTeammatePills && !shouldHideTasksFooter(tasks, showSpinnerTree);
+  const hasManageTarget = hasCoordinatorTasks || hasResumableStoppedSubagent;
+
+  // #201 (2.1.326): suppress `esc to interrupt` when Esc would go to a footer
+  // item or panel; allow `esc to interrupt` beside a custom status line via
+  // `allowInterruptHint`. #8 (2.1.326): show `esc to stop` in a running
+  // subagent view where Esc stops it.
+  const canShowEscInterrupt = isLoading && !isFooterSelected && !showEscToStopSubagent;
+  const hintParts = showHint
+    ? getSpinnerHintParts(
+        canShowEscInterrupt,
+        escShortcut,
+        todosShortcut,
+        hasTaskItems,
+        expandedView,
+        hasAnyInProcessTeammates,
+      )
+    : allowInterruptHint && canShowEscInterrupt
+      ? [
+          <Text dimColor key="esc">
+            <KeyboardShortcutHint shortcut={escShortcut} action="interrupt" format={{ keyCase: 'lower' }} />
+          </Text>,
+        ]
+      : [];
+
+  const canShowVoiceHint = feature('VOICE_MODE')
+    ? voiceEnabled && voiceState === 'idle' && voiceHintUnderCap && showHint && voiceKeyShortcut !== ''
+    : false;
+  const canShowModeCycleInFullscreen =
+    hasActiveMode && !getIsRemoteMode() && currentMode !== 'default' && modeCycleShortcut !== '';
+
+  const fullscreenHint: FullscreenFooterHint = isFullscreen
+    ? resolveFullscreenFooterHint({
+        voiceWarmingUp: feature('VOICE_MODE') ? voiceEnabled && voiceWarmingUp : false,
+        forceInterrupt: !isScreenReader && (isViewingCompletedTeammate || showEscToStopSubagent),
+        showHint,
+        allowInterruptHint,
+        canShowEscInterrupt,
+        isArtifactsSelected,
+        hasManageableTasks: (hasVisibleBgPill || hasManageTarget) && !hasTeams,
+        isPanelRowSelected,
+        hasTaskItems,
+        agentsAvailable,
+        hasAgentsHintContent: agentsHintNode !== null,
+        isScreenReader,
+        hasParkedSubagentsHint,
+        canShowVoiceHint,
+        canShowCycleHint: canShowModeCycleInFullscreen,
+      })
+    : 'none';
+
+  // Classic mode cycle-hint width check (`sc` @ chunk@319736883.js:938430):
+  // hide the shift+tab hint when there are 2 primary items, in manual (default)
+  // mode, or when the row with `(shift+tab to cycle)` would overflow rowWidth.
+  const shouldShowModeHint = primaryItemCount < 2;
+  const hasEscInterruptInClassic = hintParts.some(p => p.key === 'esc');
+  const cycleHintPreview =
+    modeCycleShortcut !== '' ? `(${formatShortcutString(modeCycleShortcut, { keyCase: 'lower' })} to cycle)` : '';
+  const classicAgentsShown =
+    !isLoading && showHint && agentsAvailable && !hasVisibleBgPill && !hasCoordinatorTasks && agentsHintNode !== null;
+  const classicCycleFitRow = [
+    currentMode &&
+      `${permissionModeSymbol(currentMode)} ${permissionModeIndicator(currentMode)} on ${cycleHintPreview}`,
+    classicAgentsShown ? `${figures.arrowLeft} for agents` : undefined,
+    shouldShowPrStatus && prStatus.number !== null ? `PR #${prStatus.number}` : undefined,
+    hasEscInterruptInClassic && hasParkedSubagentsHint ? '/tasks to see subagents' : undefined,
+    hasEscInterruptInClassic ? `${escShortcut} to interrupt…` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const classicRowBudget = wrappedRowWidth ?? Math.max(0, columns - 4);
+  const cycleHintFitsRow = doesClassicCycleHintFitRow(classicCycleFitRow, classicRowBudget, isScreenReader);
+  const showModeCycleHint =
+    shouldShowModeHint && currentMode !== 'default' && modeCycleShortcut !== '' && cycleHintFitsRow;
+
+  const effectiveCycleShortcut = isFullscreen
+    ? fullscreenHint === 'cycle'
+      ? modeCycleShortcut
+      : undefined
+    : showModeCycleHint
+      ? modeCycleShortcut
+      : undefined;
 
   // In remote mode (`claude assistant`, --teleport) the agent runs elsewhere;
   // the local permission mode shown here doesn't reflect the agent's state.
@@ -640,7 +898,7 @@ function ModeIndicator({
   // clips instead of wrapping `(shift+tab to cycle)` onto a second row.
   const modePart =
     currentMode && !getIsRemoteMode() ? (
-      <ModePill key="mode" mode={currentMode} cycleShortcut={showModeCycleHint ? modeCycleShortcut : undefined} />
+      <ModePill key="mode" mode={currentMode} cycleShortcut={effectiveCycleShortcut} />
     ) : null;
 
   // Build parts array - exclude BackgroundTaskStatus when we have teammate pills
@@ -658,84 +916,28 @@ function ModeIndicator({
       ? [<PrBadge key="pr-status" number={prStatus.number!} url={prStatus.url!} reviewState={prStatus.reviewState!} />]
       : []),
   ];
-  // Check if any in-process teammates exist (for hint text cycling)
-  const hasAnyInProcessTeammates = Object.values(tasks).some(
-    t => t.type === 'in_process_teammate' && t.status === 'running',
-  );
-  const hasRunningAgentTasks = Object.values(tasks).some(t => t.type === 'local_agent' && t.status === 'running');
-
-  const isFooterSelected = footerSelection !== null || tasksSelected || teamsSelected || tmuxSelected;
-  const showEscToStopSubagent =
-    isViewingStoppableSubagent(viewSelectionMode, viewingAgentTaskId, tasks) && !isFooterSelected;
-  const hasResumableStoppedSubagent = hasResumableStoppedSubagentInFooter(tasks, taskDecorations, viewingAgentTaskId);
-
-  // Get hint parts separately for potential second-line rendering.
-  // #201 (2.1.326): suppress `esc to interrupt` when Esc would go to a footer
-  // item or panel; allow `esc to interrupt` beside a custom status line via
-  // `allowInterruptHint`. #8 (2.1.326): show `esc to stop` in a running
-  // subagent view where Esc stops it.
-  const canShowEscInterrupt = isLoading && !isFooterSelected && !showEscToStopSubagent;
-  const hintParts = showHint
-    ? getSpinnerHintParts(
-        canShowEscInterrupt,
-        escShortcut,
-        todosShortcut,
-        killAgentsShortcut,
-        hasTaskItems,
-        expandedView,
-        hasAnyInProcessTeammates,
-        hasRunningAgentTasks,
-        isKillAgentsConfirmShowing,
-      )
-    : allowInterruptHint && canShowEscInterrupt
-      ? [
-          <Text dimColor key="esc">
-            <KeyboardShortcutHint shortcut={escShortcut} action="interrupt" />
-          </Text>,
-        ]
-      : [];
-
-  // Official lfb: BG_SESSIONS fleet entry (not remote, not viewing teammate).
-  // feature() must be a direct if/ternary condition (bun:bundle restriction).
-  const agentsEntryEnabled = feature('BG_SESSIONS')
-    ? !getIsRemoteMode() && !isViewingTeammate && !isViewingCompletedTeammate
-    : false;
-
-  if (isViewingCompletedTeammate) {
-    parts.push(
-      <Text dimColor key="esc-return">
-        <KeyboardShortcutHint shortcut={escShortcut} action="return to team lead" />
-      </Text>,
-    );
-  } else if (showEscToStopSubagent && (showHint || allowInterruptHint)) {
-    parts.push(
-      <Text dimColor key="esc-stop">
-        <KeyboardShortcutHint shortcut={escShortcut} action="stop" />
-      </Text>,
-    );
-    if (showHint && !hasTeammatePills) {
-      parts.push(...hintParts);
-    }
-  } else if ((feature('PROACTIVE') || feature('KAIROS')) && hasNextTick) {
-    parts.push(<ProactiveCountdown key="proactive" />);
-  } else if (!hasTeammatePills && (showHint || allowInterruptHint)) {
-    parts.push(...hintParts);
-    // Official interrupt_agents: loading + fleet → esc · FFe
-    if (isLoading && showHint && agentsEntryEnabled) {
-      parts.push(<AgentsFooterHint key="agents-hint" leftArrowAgain={leftArrowAgain} />);
-    }
-  }
 
   // When we have teammate pills, always render them on their own line above other parts
   if (hasTeammatePills) {
     // Don't append spinner hints when viewing a completed teammate —
     // the "esc to return to team lead" hint already replaces "esc to interrupt"
     const teammateHintParts = isViewingCompletedTeammate
-      ? []
+      ? [
+          <Text dimColor key="esc-return">
+            <KeyboardShortcutHint shortcut={escShortcut} action="return to team lead" format={{ keyCase: 'lower' }} />
+          </Text>,
+        ]
       : [
+          ...(showEscToStopSubagent && (showHint || allowInterruptHint)
+            ? [
+                <Text dimColor key="esc-stop">
+                  <KeyboardShortcutHint shortcut="esc" action="stop" format={{ keyCase: 'lower' }} />
+                </Text>,
+              ]
+            : []),
           ...hintParts,
-          ...(isLoading && agentsEntryEnabled
-            ? [<AgentsFooterHint key="agents-hint-teammate" leftArrowAgain={leftArrowAgain} />]
+          ...(isLoading && agentsHintNode !== null
+            ? [<React.Fragment key="agents-hint-teammate">{agentsHintNode}</React.Fragment>]
             : []),
         ];
     const otherParts = [
@@ -777,45 +979,231 @@ function ModeIndicator({
     );
   }
 
-  // Add "↓ to manage tasks" hint when panel has visible rows
-  const hasCoordinatorTasks = process.env.USER_TYPE === 'ant' && getVisibleAgentTasks(tasks).length > 0;
+  // Official 2.1.328 fullscreen single-winner `jl` branch (chunk@319736883.js:934340..936400).
+  if (isFullscreen) {
+    const bgPill = hasVisibleBgPill ? (
+      runningTaskCount >= 2 ? (
+        <BackgroundCountPill count={runningTaskCount} selected={tasksSelected} onClick={onOpenTasksDialog} />
+      ) : (
+        <BackgroundTaskStatus
+          tasksSelected={tasksSelected}
+          isViewingTeammate={isViewingTeammate}
+          teammateFooterIndex={teammateFooterIndex}
+          isLeaderIdle={!isLoading}
+          onOpenDialog={onOpenTasksDialog}
+        />
+      )
+    ) : null;
+
+    const inlineManage = hasVisibleBgPill && (tasksSelected || !hasResumableStoppedSubagent);
+    const inlineManageSuffix =
+      fullscreenHint === 'manage' && inlineManage && (!tasksSelected || openSelectedShortcut !== '') ? (
+        <Box flexShrink={0}>
+          <Text dimColor>
+            {' '}
+            {tasksSelected ? (
+              <KeyboardShortcutHint
+                shortcut={openSelectedShortcut}
+                action="view tasks"
+                parens
+                format={{ keyCase: 'lower' }}
+              />
+            ) : (
+              <KeyboardShortcutHint shortcut="↓" action="manage" parens />
+            )}
+          </Text>
+        </Box>
+      ) : null;
+
+    let winnerHint: React.ReactNode = null;
+    if (
+      (feature('PROACTIVE') || feature('KAIROS')) &&
+      hasNextTick &&
+      fullscreenHint !== 'warmup' &&
+      fullscreenHint !== 'interrupt' &&
+      fullscreenHint !== 'interrupt_agents'
+    ) {
+      winnerHint = <ProactiveCountdown key="proactive" />;
+    } else if (fullscreenHint === 'warmup') {
+      winnerHint = <VoiceWarmupHint key="voice-warmup" />;
+    } else if (fullscreenHint === 'manage' && !inlineManage && (!tasksSelected || openSelectedShortcut !== '')) {
+      winnerHint = (
+        <Text dimColor key="manage-tasks">
+          {tasksSelected ? (
+            <KeyboardShortcutHint shortcut={openSelectedShortcut} action="view tasks" format={{ keyCase: 'lower' }} />
+          ) : (
+            <KeyboardShortcutHint shortcut="↓" action={hasResumableStoppedSubagent ? 'resume subagent' : 'manage'} />
+          )}
+        </Text>
+      );
+    } else if (fullscreenHint === 'artifacts' && openSelectedShortcut !== '') {
+      winnerHint = (
+        <Text dimColor key="view-artifacts">
+          <KeyboardShortcutHint
+            shortcut={openSelectedShortcut}
+            action={artifactsAction}
+            format={{ keyCase: 'lower' }}
+          />
+        </Text>
+      );
+    } else if (fullscreenHint === 'interrupt' || fullscreenHint === 'interrupt_agents') {
+      winnerHint = (
+        <>
+          <Text dimColor>
+            <Byline>
+              <KeyboardShortcutHint
+                shortcut={showEscToStopSubagent ? 'esc' : escShortcut}
+                action={
+                  showEscToStopSubagent ? 'stop' : isViewingCompletedTeammate ? 'return to team lead' : 'interrupt'
+                }
+                format={{ keyCase: 'lower' }}
+              />
+              {showEscToStopSubagent && hasManageTarget && (
+                <KeyboardShortcutHint
+                  shortcut="↓"
+                  action={hasResumableStoppedSubagent ? 'resume subagent' : 'manage'}
+                />
+              )}
+            </Byline>
+            {fullscreenHint === 'interrupt_agents' && ' · '}
+          </Text>
+          {fullscreenHint === 'interrupt_agents' && agentsHintNode}
+        </>
+      );
+    } else if (fullscreenHint === 'ctrl_t') {
+      winnerHint = (
+        <Text dimColor key="toggle-tasks">
+          <KeyboardShortcutHint
+            shortcut={todosShortcut}
+            action={expandedView === 'tasks' ? 'hide tasks' : 'show tasks'}
+            format={{ keyCase: 'lower' }}
+          />
+        </Text>
+      );
+    } else if (fullscreenHint === 'agents') {
+      winnerHint = agentsHintNode;
+    } else if (fullscreenHint === 'voice') {
+      winnerHint = (
+        <Text dimColor key="voice-hint">
+          hold {voiceKeyShortcut} to speak
+        </Text>
+      );
+    } else if (fullscreenHint === 'shortcuts') {
+      winnerHint = (
+        <Text dimColor key="shortcuts-hint">
+          ? for shortcuts
+        </Text>
+      );
+    }
+
+    const hasStaticBadges = parts.length > 0;
+    const hasLeftPrimary = Boolean(modePart || hasStaticBadges || bgPill);
+    const hasTailBeforeDiff = hasLeftPrimary || hasParkedSubagentsHint;
+    const hasTailBeforeWinner = hasTailBeforeDiff || hideDiffHint;
+    const hasTailBeforeDrafts = hasTailBeforeWinner || Boolean(winnerHint);
+
+    if (!hasLeftPrimary && !hasParkedSubagentsHint && !hideDiffHint && !winnerHint && feedbackDraftCount === 0) {
+      return <Text> </Text>;
+    }
+
+    const sep = <Text dimColor> · </Text>;
+    return (
+      <Box height={1} overflow="hidden">
+        {modePart && <Box flexShrink={0}>{modePart}</Box>}
+        {modePart && (hasStaticBadges || bgPill) && <Box flexShrink={0}>{sep}</Box>}
+        {hasStaticBadges && (
+          <Box flexShrink={0}>
+            <Byline>{parts}</Byline>
+            {bgPill && sep}
+          </Box>
+        )}
+        {bgPill && (
+          <Box flexShrink={0}>
+            {bgPill}
+            {inlineManageSuffix}
+          </Box>
+        )}
+        {hasParkedSubagentsHint && (
+          <Text wrap="truncate" key="tasks-subagents">
+            {hasLeftPrimary && sep}
+            <Text dimColor>/tasks to see subagents</Text>
+          </Text>
+        )}
+        {hideDiffHint && (
+          <Text wrap="truncate" key="diff-panel">
+            {hasTailBeforeDiff && sep}
+            <Text dimColor>/diff to hide diff</Text>
+          </Text>
+        )}
+        {winnerHint && (
+          <Text wrap="truncate">
+            {hasTailBeforeWinner && sep}
+            {winnerHint}
+          </Text>
+        )}
+        {feedbackDraftCount > 0 && (
+          <Text wrap="truncate">
+            {hasTailBeforeDrafts && sep}
+            <FeedbackDraftFooter key="feedback-drafts" count={feedbackDraftCount} />
+          </Text>
+        )}
+      </Box>
+    );
+  }
+
+  // Classic (non-fullscreen) branch — official chunk@319736883.js:936700..939500.
+  if (isViewingCompletedTeammate) {
+    parts.push(
+      <Text dimColor key="esc-return">
+        <KeyboardShortcutHint shortcut={escShortcut} action="return to team lead" format={{ keyCase: 'lower' }} />
+      </Text>,
+    );
+  } else if (showEscToStopSubagent && (showHint || allowInterruptHint)) {
+    parts.push(
+      <Text dimColor key="esc-stop">
+        <KeyboardShortcutHint shortcut="esc" action="stop" format={{ keyCase: 'lower' }} />
+      </Text>,
+    );
+    if (showHint) {
+      parts.push(...hintParts);
+    }
+  } else if ((feature('PROACTIVE') || feature('KAIROS')) && hasNextTick) {
+    parts.push(<ProactiveCountdown key="proactive" />);
+  } else if (showHint || allowInterruptHint) {
+    parts.push(...hintParts);
+    // Official interrupt_agents: loading + fleet → esc · FFe
+    if (isLoading && showHint && agentsHintNode !== null) {
+      parts.push(<React.Fragment key="agents-hint">{agentsHintNode}</React.Fragment>);
+    }
+  }
 
   // Tasks pill renders as a Box sibling (not a parts entry) so its
   // click-target Box isn't nested inside <Text wrap="truncate"> — the
   // reconciler throws on Box-in-Text. Computed here so the empty-checks
   // below still treat "pill present" as non-empty.
-  const tasksPart =
-    hasBackgroundTasks && !hasTeammatePills && !shouldHideTasksFooter(tasks, showSpinnerTree) ? (
-      <BackgroundTaskStatus
-        tasksSelected={tasksSelected}
-        isViewingTeammate={isViewingTeammate}
-        teammateFooterIndex={teammateFooterIndex}
-        isLeaderIdle={!isLoading}
-        onOpenDialog={onOpenTasksDialog}
-      />
-    ) : null;
+  const tasksPart = hasVisibleBgPill ? (
+    <BackgroundTaskStatus
+      tasksSelected={tasksSelected}
+      isViewingTeammate={isViewingTeammate}
+      teammateFooterIndex={teammateFooterIndex}
+      isLeaderIdle={!isLoading}
+      onOpenDialog={onOpenTasksDialog}
+    />
+  ) : null;
 
-  // Official Yx priority (after interrupt/manage): agents (FFe) before shortcuts.
-  // Idle + no bg tasks → FFe alone; without BG_SESSIONS → "? for shortcuts".
-  // Loading already appended FFe above with interrupt.
-  // Note: when idle + tasks, manage wins (official) — no FFe on that row.
-  if (!isLoading && showHint && agentsEntryEnabled && !tasksPart && !hasCoordinatorTasks) {
-    if (modePart && !showModeCycleHint && parts.length === 0 && !hasParkedSubagentsHint) {
-      parts.push(
-        <Text dimColor key="shortcuts-hint">
-          ? for shortcuts
-        </Text>,
-      );
-    }
+  // Official classic priority (chunk@319736883.js:937400..937600):
+  // NEVER stack "? for shortcuts · ← for agents" together.
+  if (!isLoading && showHint && agentsAvailable && !tasksPart && !hasCoordinatorTasks && agentsHintNode !== null) {
     if (!parts.some(p => React.isValidElement(p) && p.key === 'agents-hint')) {
-      parts.push(<AgentsFooterHint key="agents-hint" leftArrowAgain={leftArrowAgain} />);
+      parts.push(<React.Fragment key="agents-hint">{agentsHintNode}</React.Fragment>);
     }
   } else if (
     parts.length === 0 &&
     !tasksPart &&
     (!modePart || !showModeCycleHint) &&
     showHint &&
-    !hasParkedSubagentsHint
+    !hasParkedSubagentsHint &&
+    !isScreenReader
   ) {
     parts.push(
       <Text dimColor key="shortcuts-hint">
@@ -835,17 +1223,7 @@ function ModeIndicator({
   // the activation key, show feedback regardless of other hints.
   if (feature('VOICE_MODE') && voiceEnabled && voiceWarmingUp) {
     parts.push(<VoiceWarmupHint key="voice-warmup" />);
-  } else if (isFullscreenEnvEnabled() && selectionHintHasContent) {
-    // xterm.js (VS Code/Cursor/Windsurf) force-selection modifier is
-    // platform-specific and gated on macOS (SelectionService.shouldForceSelection):
-    //   macOS:     altKey && macOptionClickForcesSelection (VS Code default: false)
-    //   non-macOS: shiftKey
-    // On macOS, if we RECEIVED an alt+click (lastPressHadAlt), the VS Code
-    // setting is off — xterm.js would have consumed the event otherwise.
-    // Tell the user the exact setting to flip instead of repeating the
-    // option+click hint they just tried.
-    // Non-reactive getState() read is safe: lastPressHadAlt is immutable
-    // while hasSelection is true (set pre-drag, cleared with selection).
+  } else if (isFullscreen && selectionHintHasContent) {
     const isMac = getPlatform() === 'macos';
     const altClickFailed = isMac && (selGetState()?.lastPressHadAlt ?? false);
     parts.push(
@@ -902,11 +1280,16 @@ function ModeIndicator({
     parts.push(<FeedbackDraftFooter key="feedback-drafts" count={feedbackDraftCount} />);
   }
 
-  if ((tasksPart || hasCoordinatorTasks || hasResumableStoppedSubagent) && showHint && !hasTeams) {
+  if (
+    (tasksPart || hasCoordinatorTasks || hasResumableStoppedSubagent) &&
+    showHint &&
+    !hasTeams &&
+    !isArtifactsSelected
+  ) {
     parts.push(
       <Text dimColor key="manage-tasks">
         {tasksSelected ? (
-          <KeyboardShortcutHint shortcut="Enter" action="view tasks" />
+          <KeyboardShortcutHint shortcut={openSelectedShortcut} action="view tasks" format={{ keyCase: 'lower' }} />
         ) : (
           <KeyboardShortcutHint shortcut="↓" action={hasResumableStoppedSubagent ? 'resume subagent' : 'manage'} />
         )}
@@ -914,16 +1297,16 @@ function ModeIndicator({
     );
   }
 
-  // In fullscreen the bottom section is flexShrink:0 — every row here
-  // is a row stolen from the ScrollBox. This component must have a STABLE
-  // height so the footer never grows/shrinks and shifts scroll content.
-  // Returning null when parts is empty (e.g. StatusLine on → suppressHint
-  // → showHint=false → no "? for shortcuts") would let a later-added
-  // part (e.g. the selection copy/native-select hints) grow the column
-  // from 0→1 row. Always render 1 row in fullscreen; return a space when
-  // empty so Yoga reserves the row without painting anything visible.
+  if (isArtifactsSelected && showHint && openSelectedShortcut !== '') {
+    parts.push(
+      <Text dimColor key="view-artifacts">
+        <KeyboardShortcutHint shortcut={openSelectedShortcut} action={artifactsAction} format={{ keyCase: 'lower' }} />
+      </Text>,
+    );
+  }
+
   if (parts.length === 0 && !tasksPart && !modePart) {
-    return isFullscreenEnvEnabled() ? <Text> </Text> : null;
+    return null;
   }
 
   // Gold dHe: `r(s,{height:1,overflow:"hidden",children:[es, ·, …]})`.
@@ -950,16 +1333,17 @@ function ModeIndicator({
   );
 }
 
+/**
+ * Official 2.1.328 `abo` (chunk@319736883.js:942455) — interrupt & task toggle
+ * hints only (stale `ctrl+x ctrl+k to stop agents` removed).
+ */
 function getSpinnerHintParts(
   isLoading: boolean,
   escShortcut: string,
   todosShortcut: string,
-  killAgentsShortcut: string,
   hasTaskItems: boolean,
   expandedView: 'none' | 'tasks' | 'teammates',
   hasTeammates: boolean,
-  hasRunningAgentTasks: boolean,
-  isKillAgentsConfirmShowing: boolean,
 ): React.ReactElement[] {
   let toggleAction: string;
   if (hasTeammates) {
@@ -987,21 +1371,14 @@ function getSpinnerHintParts(
     ...(isLoading
       ? [
           <Text dimColor key="esc">
-            <KeyboardShortcutHint shortcut={escShortcut} action="interrupt" />
-          </Text>,
-        ]
-      : []),
-    ...(!isLoading && hasRunningAgentTasks && !isKillAgentsConfirmShowing
-      ? [
-          <Text dimColor key="kill-agents">
-            <KeyboardShortcutHint shortcut={killAgentsShortcut} action="stop agents" />
+            <KeyboardShortcutHint shortcut={escShortcut} action="interrupt" format={{ keyCase: 'lower' }} />
           </Text>,
         ]
       : []),
     ...(showToggleHint
       ? [
           <Text dimColor key="toggle-tasks">
-            <KeyboardShortcutHint shortcut={todosShortcut} action={toggleAction} />
+            <KeyboardShortcutHint shortcut={todosShortcut} action={toggleAction} format={{ keyCase: 'lower' }} />
           </Text>,
         ]
       : []),

@@ -77,6 +77,7 @@ import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTypeahead } from '../../hooks/useTypeahead.js';
 import {
   AccessibilityContext,
+  Ansi,
   Box,
   type BorderTextOptions,
   type ClickEvent,
@@ -86,6 +87,7 @@ import {
   instances,
   stringWidth,
   Text,
+  useAnimationFrame,
   useApp,
   useInput,
   useProbeExternalClear,
@@ -143,7 +145,16 @@ import {
   type PromptChangeOrigin,
 } from '../../utils/plugins/functionHooksModules.js';
 import { parseDirectMemberMessage, sendDirectMemberMessage } from '../../utils/directMemberMessage.js';
-import { type EffortLevel, isUltracodeModeActive, modelSupportsEffort, pdSessionEffort } from '../../utils/effort.js';
+import {
+  convertEffortValueToLevel,
+  type EffortLevel,
+  type EffortValue,
+  getDefaultEffortForModel,
+  isUltracodeModeActive,
+  modelSupportsEffort,
+  pdSessionEffort,
+  resolveAppliedEffort,
+} from '../../utils/effort.js';
 import { leftoverIhrSubscribe } from '../../utils/collapseReadSearch.js';
 import { leftoverIhrSlice } from '../../state/leftoverIhrStore.js';
 import { env } from '../../utils/env.js';
@@ -214,7 +225,7 @@ import {
   remapPanelSelectionIndex,
   wouldCollapseIdlePanelRows,
 } from '../../utils/panelIdleSummary.js';
-import { getEffortNotificationText } from '../EffortIndicator.js';
+import { formatEffortIndicatorText, getEffortNotificationText } from '../EffortIndicator.js';
 import { getFastIconString } from '../FastIcon.js';
 import { GlobalSearchDialog } from '../GlobalSearchDialog.js';
 import { HistorySearchDialog } from '../HistorySearchDialog.js';
@@ -3557,6 +3568,17 @@ function PromptInput({
   useBuddyNotification();
 
   const isScreenReader = useContext(AccessibilityContext);
+  const appliedEffortForBorder = useMemo((): EffortLevel | undefined => {
+    if (briefOwnsGap || viewingAgentTaskId !== undefined) return undefined;
+    const applied = resolveAppliedEffort(mainLoopModel, effortValue);
+    return applied !== undefined ? convertEffortValueToLevel(applied) : undefined;
+  }, [briefOwnsGap, viewingAgentTaskId, mainLoopModel, effortValue]);
+  const steppedEffortTag = useSteppedEffortTag({
+    level: appliedEffortForBorder,
+    model: mainLoopModel,
+    isScreenReader,
+  });
+  const ultracodeShimmerIdx = useUltracodeShimmerIndex(ultracodeActive && !isScreenReader);
   const [dismissedIdeSig, setDismissedIdeSig] = useState<string | null>(null);
   const activeIdeSelection =
     ideSelection && ideSelectionSignature(ideSelection) !== dismissedIdeSig ? ideSelection : undefined;
@@ -4230,7 +4252,7 @@ function PromptInput({
         width={promptInputColumns}
       >
         <Text dimColor italic>
-          Save and close editor to continue...
+          Save and close the editor to continue…
         </Text>
       </Box>
     );
@@ -4250,9 +4272,7 @@ function PromptInput({
     <TextInput {...baseProps} allowPrintableKeybindings leadingPill={leadingPill} getInputMode={getInputMode} />
   );
 
-  const ultraEffortTag = ultracodeActive
-    ? color('effortUltra', resolveThemeSetting(getThemeSetting()))('ultracode')
-    : undefined;
+  const ultraEffortTag = formatUltracodeTag(ultracodeActive, ultracodeShimmerIdx);
   const fastModeTag = showFastIcon
     ? isScreenReader
       ? fastModeCooldown
@@ -4288,6 +4308,7 @@ function PromptInput({
     showFastIconHint,
     fastModeCooldown,
     ultracodeActive,
+    { ultracodeShimmerIdx, steppedEffortTag },
   );
 
   const hasStash = stashedPrompt !== undefined;
@@ -4309,87 +4330,52 @@ function PromptInput({
         </Box>
       )}
       {swarmBanner ? (
-        <>
-          {isScreenReader ? (
-            swarmBanner.text || fastModeTag ? (
-              <Text color={swarmBanner.bgColor}>
-                {swarmBanner.text ? (
-                  <Text
-                    backgroundColor={swarmBanner.bgColor === 'promptBorder' ? undefined : swarmBanner.bgColor}
-                    color="inverseText"
-                  >
-                    {' '}
-                    {swarmBanner.text}{' '}
-                  </Text>
-                ) : null}
-                {fastModeTag ? <Text color="fastMode"> {fastModeTag}</Text> : null}
-              </Text>
-            ) : null
-          ) : (
-            <Text color={(swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ?? swarmBanner.bgColor}>
-              {(() => {
-                const fastTagWidth = fastModeTag ? stringWidth(fastModeTag) + 2 : 0;
-                const maxBannerCols = promptInputColumns - fastTagWidth - 3;
-                const bannerText = swarmBanner.text
-                  ? maxBannerCols > 0
-                    ? truncateToWidth(stripAnsi(swarmBanner.text).trim(), maxBannerCols)
-                    : ''
-                  : '';
-                const bannerTextWidth = stringWidth(bannerText);
-                const fill =
-                  bannerTextWidth > 0
-                    ? swarmBannerFillColumns(promptInputColumns - fastTagWidth, bannerTextWidth)
-                    : fastTagWidth > 0
-                      ? Math.max(0, promptInputColumns - fastTagWidth - 1)
-                      : swarmBannerFillColumns(promptInputColumns, 0);
-                const fillEl =
-                  swarmBanner.gradient && swarmBanner.gradient.length > 0
-                    ? swarmBannerGradientSegments(fill, swarmBanner.gradient).map((seg, i) => (
-                        <Text key={i} color={seg.color as keyof Theme}>
-                          {'─'.repeat(seg.dashes)}
-                        </Text>
-                      ))
-                    : '─'.repeat(fill);
-                if (!bannerText && !fastModeTag) return fillEl;
-                const badgeBg =
-                  (swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ??
-                  (swarmBanner.bgColor === 'promptBorder' ? undefined : swarmBanner.bgColor);
-                return (
-                  <>
-                    {fillEl}
-                    {fastModeTag ? ` ${fastModeTag} ` : null}
-                    {bannerText ? (
-                      <Text backgroundColor={badgeBg} color="inverseText">
-                        {' '}
-                        {bannerText}{' '}
-                      </Text>
-                    ) : null}
-                    {'─'}
-                  </>
-                );
-              })()}
-            </Text>
-          )}
-          <Box flexDirection="row" width={promptInputColumns}>
-            {linesAbove > 0 && mode !== 'bash' ? (
-              <Box width={2} flexShrink={0} />
-            ) : (
-              <PromptInputModeIndicator
-                mode={mode}
-                isLoading={isLoading}
-                viewingAgentName={viewingAgentName}
-                viewingAgentColor={viewingAgentColor}
+        (() => {
+          const combinedSwarmTags = [fastModeTag, ultraEffortTag].filter(Boolean).join('  ');
+          const swarmStartWidth = topStartLabel ? stringWidth(topStartLabel) + 5 : 0;
+          const fitsCombinedSwarmTags =
+            !isScreenReader &&
+            swarmStartWidth + stringWidth(combinedSwarmTags) + stringWidth(swarmBanner.text) + 5 <= promptInputColumns;
+          const topSwarmTag = fitsCombinedSwarmTags ? combinedSwarmTags || undefined : fastModeTag;
+          const bottomStartLabel = linesBelow > 0 ? `↓ ${linesBelow} more` : undefined;
+          return (
+            <>
+              {isScreenReader && ultraEffortTag ? <Ansi>{ultraEffortTag}</Ansi> : null}
+              <SwarmBannerBorder
+                banner={swarmBanner}
+                columns={promptInputColumns}
+                fastModeTag={topSwarmTag}
+                startLabel={topStartLabel || undefined}
               />
-            )}
-            <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
-              {textInputElement}
-            </Box>
-          </Box>
-          {!isScreenReader ? <Text color={swarmBanner.bgColor}>{'─'.repeat(promptInputColumns)}</Text> : null}
-        </>
+              <Box flexDirection="row" width={promptInputColumns}>
+                {linesAbove > 0 && mode !== 'bash' ? (
+                  <Box width={2} flexShrink={0} />
+                ) : (
+                  <PromptInputModeIndicator
+                    mode={mode}
+                    isLoading={isLoading}
+                    viewingAgentName={viewingAgentName}
+                    viewingAgentColor={viewingAgentColor}
+                  />
+                )}
+                <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
+                  {textInputElement}
+                </Box>
+              </Box>
+              <SwarmBannerBorder
+                banner={swarmBanner}
+                columns={promptInputColumns}
+                fastModeTag={fastModeTag}
+                startLabel={bottomStartLabel}
+                borderOnly
+              />
+            </>
+          );
+        })()
       ) : (
         <>
-          {isScreenReader && ultraEffortTag ? <Text>{ultraEffortTag}</Text> : null}
+          {isScreenReader && ultraEffortTag ? <Ansi>{ultraEffortTag}</Ansi> : null}
+          {isScreenReader && steppedEffortTag ? <Ansi>{steppedEffortTag}</Ansi> : null}
           {isScreenReader && fastModeTag ? (
             <Text color="fastMode" dimColor={fastModeCooldown}>
               {fastModeTag}
@@ -4595,21 +4581,246 @@ function getInitialPasteId(messages: Message[]): number {
   return maxId + 1;
 }
 
+export const ULTRACODE_TAG_TEXT = 'ultracode';
+export const ULTRACODE_SHIMMER_HEX = '#d0b4ff';
+export const ULTRACODE_SHIMMER_INTERVAL_MS = 120;
+const ULTRACODE_SHIMMER_FRAMES = ULTRACODE_TAG_TEXT.length + 2;
+
 /**
- * densable tbp([Yie, WI]) — top-right border chip.
- * Ultracode: effortUltra-colored "ultracode" (ebp).
- * Fast: lightning / /fast hint. Both may appear, joined by two spaces.
+ * Official 2.1.328 `aue` (chunk@319736883.js:193087) — render "ultracode"
+ * in `effortUltra`, optionally applying the `#d0b4ff` bold shimmer wave
+ * centered on `shimmerIdx`.
  */
-function buildBorderText(
+export function formatUltracodeTag(active: boolean, shimmerIdx?: number): string | undefined {
+  if (!active) return undefined;
+  const themeName = resolveThemeSetting(getThemeSetting());
+  const paintUltra = color('effortUltra', themeName);
+  if (shimmerIdx === undefined) {
+    return paintUltra(ULTRACODE_TAG_TEXT);
+  }
+  return [...ULTRACODE_TAG_TEXT]
+    .map((ch, idx) =>
+      idx === shimmerIdx
+        ? chalk.hex(ULTRACODE_SHIMMER_HEX).bold(ch)
+        : idx === shimmerIdx - 1 || idx === shimmerIdx + 1
+          ? chalk.bold(paintUltra(ch))
+          : paintUltra(ch),
+    )
+    .join('');
+}
+
+/**
+ * Official 2.1.328 `lue` (chunk@319736883.js:193280) — 120ms shimmer highlight
+ * sweep across "ultracode" on activation (disabled under reduced motion).
+ */
+function useUltracodeShimmerIndex(active: boolean): number | undefined {
+  const reducedMotion = useAppState(s => Boolean(s.settings.prefersReducedMotion));
+  const [animating, setAnimating] = useState(false);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (active && !reducedMotion) {
+      startRef.current = null;
+      setAnimating(true);
+    } else {
+      setAnimating(false);
+    }
+  }, [active, reducedMotion]);
+  const [, time] = useAnimationFrame(animating ? ULTRACODE_SHIMMER_INTERVAL_MS : null);
+  if (animating && startRef.current === null) {
+    startRef.current = time;
+  }
+  const step =
+    animating && startRef.current !== null ? Math.floor((time - startRef.current) / ULTRACODE_SHIMMER_INTERVAL_MS) : 0;
+  const done = animating && step >= ULTRACODE_SHIMMER_FRAMES;
+  useEffect(() => {
+    if (done) setAnimating(false);
+  }, [done]);
+  if (!animating || done) return undefined;
+  return step - 1;
+}
+
+/**
+ * Official 2.1.328 `NTe` (chunk@319736883.js:1036908) — dimmed top-right
+ * effort chip when session effort is stepped off baseline default, suppressed
+ * while the `effort-level` toast is visible.
+ */
+function useSteppedEffortTag({
+  level,
+  model,
+  isScreenReader,
+}: {
+  level: EffortLevel | undefined;
+  model: string;
+  isScreenReader: boolean;
+}): string | undefined {
+  const sessionEffort = useAppState(s => s.sessionEffort);
+  const steppedFrom =
+    sessionEffort.kind === 'level' && 'steppedFrom' in sessionEffort
+      ? (sessionEffort as { kind: 'level'; value: EffortValue; steppedFrom?: EffortValue }).steppedFrom
+      : undefined;
+  const rawText = useMemo(() => {
+    if (level === undefined || !modelSupportsEffort(model)) return undefined;
+    let isSteppedOffBaseline = false;
+    if (steppedFrom !== undefined) {
+      const baseline = resolveAppliedEffort(model, steppedFrom);
+      const baselineLevel = baseline !== undefined ? convertEffortValueToLevel(baseline) : 'high';
+      isSteppedOffBaseline = level !== baselineLevel;
+    } else if (sessionEffort.kind === 'level') {
+      const defaultEffort = getDefaultEffortForModel(model);
+      const defaultLevel = defaultEffort !== undefined ? convertEffortValueToLevel(defaultEffort) : 'high';
+      isSteppedOffBaseline = level !== defaultLevel;
+    }
+    return isSteppedOffBaseline ? formatEffortIndicatorText(level, false, isScreenReader) : undefined;
+  }, [level, model, sessionEffort, steppedFrom, isScreenReader]);
+
+  const [settledText, setSettledText] = useState(rawText);
+  useEffect(() => {
+    setSettledText(rawText);
+  }, [rawText]);
+
+  const isEffortToastShowing = useAppState(s => {
+    const { current } = s.notifications;
+    return settledText !== undefined && current?.key === 'effort-level';
+  });
+
+  if (level === undefined || settledText === undefined || isEffortToastShowing) {
+    return undefined;
+  }
+  return chalk.reset.dim(settledText);
+}
+
+export type SwarmBannerBorderProps = {
+  banner: {
+    text: string;
+    bgColor: keyof Theme;
+    gradient?: string[];
+  };
+  columns: number;
+  fastModeTag?: string;
+  borderOnly?: boolean;
+  startLabel?: string;
+};
+
+/**
+ * Official 2.1.328 `EEt` (chunk@318885035.js:13565) — swarm top/bottom
+ * prompt border embedding optional `─── <dim>startLabel</dim> ` while
+ * preserving the fork's optional `banner.gradient` support.
+ */
+export const SwarmBannerBorder = React.memo(function SwarmBannerBorder({
+  banner,
+  columns,
+  fastModeTag,
+  borderOnly = false,
+  startLabel,
+}: SwarmBannerBorderProps): React.ReactNode {
+  const isScreenReader = useContext(AccessibilityContext);
+  const cleanBannerText = stripAnsi(banner.text).trim();
+  const badgeBg =
+    (banner.gradient?.at(-1) as keyof Theme | undefined) ??
+    (banner.bgColor === 'promptBorder' ? undefined : banner.bgColor);
+
+  if (isScreenReader) {
+    if (borderOnly || (!cleanBannerText && !fastModeTag)) return null;
+    return (
+      <Text color={banner.bgColor}>
+        {cleanBannerText ? (
+          <Text backgroundColor={badgeBg} color="inverseText">
+            {' '}
+            {cleanBannerText}{' '}
+          </Text>
+        ) : null}
+        {fastModeTag ? <Ansi>{` ${fastModeTag}`}</Ansi> : null}
+      </Text>
+    );
+  }
+
+  const fastTagWidth = fastModeTag ? stringWidth(fastModeTag) + 2 : 0;
+  const rawStartWidth = startLabel ? stringWidth(startLabel) + 5 : 0;
+  const startWidth = rawStartWidth + fastTagWidth + 1 <= columns ? rawStartWidth : 0;
+  const maxBannerCols = columns - startWidth - fastTagWidth - 3;
+  const bannerText = cleanBannerText && maxBannerCols > 0 ? truncateToWidth(cleanBannerText, maxBannerCols) : '';
+  const bannerTextWidth = stringWidth(bannerText);
+  const bannerChipWidth = bannerTextWidth > 0 ? bannerTextWidth + 2 : 0;
+  const trailingDash = fastTagWidth > 0 || bannerChipWidth > 0 ? '─' : '';
+  const fill =
+    bannerTextWidth > 0
+      ? swarmBannerFillColumns(columns - startWidth - fastTagWidth, bannerTextWidth)
+      : fastTagWidth > 0
+        ? Math.max(0, columns - startWidth - fastTagWidth - 1)
+        : swarmBannerFillColumns(columns - startWidth, 0);
+
+  const startPrefix =
+    startWidth > 0 ? (
+      <>
+        {'─── '}
+        <Text dimColor>{startLabel}</Text>{' '}
+      </>
+    ) : null;
+
+  const borderColor = (banner.gradient?.at(-1) as keyof Theme | undefined) ?? banner.bgColor;
+
+  if (borderOnly) {
+    const rightDashes = Math.max(0, columns - startWidth);
+    return (
+      <Text color={banner.bgColor}>
+        {startPrefix}
+        {'─'.repeat(rightDashes)}
+      </Text>
+    );
+  }
+
+  const fillEl =
+    banner.gradient && banner.gradient.length > 0
+      ? swarmBannerGradientSegments(fill, banner.gradient).map((seg, i) => (
+          <Text key={i} color={seg.color as keyof Theme}>
+            {'─'.repeat(seg.dashes)}
+          </Text>
+        ))
+      : '─'.repeat(fill);
+
+  return (
+    <Text>
+      <Text color={borderColor}>
+        {startPrefix}
+        {fillEl}
+      </Text>
+      {fastModeTag ? <Ansi>{` ${fastModeTag} `}</Ansi> : null}
+      {bannerText || trailingDash ? (
+        <Text color={borderColor}>
+          {bannerText ? (
+            <Text backgroundColor={badgeBg} color="inverseText">
+              {' '}
+              {bannerText}{' '}
+            </Text>
+          ) : null}
+          {trailingDash}
+        </Text>
+      ) : null}
+    </Text>
+  );
+});
+
+/**
+ * Official 2.1.328 `cue` (chunk@319736883.js:1074396) — top-right border chip.
+ * Ultracode: effortUltra-colored "ultracode" with optional `#d0b4ff` shimmer (`aue`).
+ * Fast: lightning / /fast hint.
+ * Stepped effort: dimmed effort indicator when stepped off baseline (`NTe`).
+ * Present tags are joined by two spaces.
+ */
+export function buildBorderText(
   showFastIcon: boolean,
   showFastIconHint: boolean,
   fastModeCooldown: boolean,
   ultracodeActive = false,
+  options?: {
+    ultracodeShimmerIdx?: number;
+    steppedEffortTag?: string;
+  },
 ): BorderTextOptions | undefined {
   const parts: string[] = [];
-  if (ultracodeActive) {
-    const themeName = resolveThemeSetting(getThemeSetting());
-    parts.push(color('effortUltra', themeName)('ultracode'));
+  const ultraTag = formatUltracodeTag(ultracodeActive, options?.ultracodeShimmerIdx);
+  if (ultraTag) {
+    parts.push(ultraTag);
   }
   if (showFastIcon) {
     parts.push(
@@ -4617,6 +4828,9 @@ function buildBorderText(
         ? `${getFastIconString(true, fastModeCooldown)} ${chalk.dim('/fast')}`
         : getFastIconString(true, fastModeCooldown),
     );
+  }
+  if (options?.steppedEffortTag) {
+    parts.push(options.steppedEffortTag);
   }
   if (parts.length === 0) return undefined;
   return {

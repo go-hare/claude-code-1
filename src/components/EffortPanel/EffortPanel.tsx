@@ -11,9 +11,12 @@ import {
   type Theme,
   stringWidth,
   useAnimationFrame,
+  useModalOrTerminalSize,
   useTerminalSize,
 } from '@anthropic/ink';
 import { executeEffort } from '../../commands/effort/effort.js';
+import { CacheMissConfirmDialog } from '../../commands/model/model.js';
+import { getTotalOutputTokens } from '../../cost-tracker.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
@@ -29,6 +32,8 @@ import {
   isUltracodeOfferable,
   modelSupportsMaxEffort,
   pdSessionEffort,
+  readUserSettingsEffortForModel,
+  shouldWarnEffortCacheMiss,
   teSettingsEffortTable,
 } from '../../utils/effort.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
@@ -49,10 +54,21 @@ import {
 
 const SIDE_BY_SIDE_MIN_COLS = 70;
 const TOGGLE_GAP = 6;
+/** Official 2.1.328 `yn = 2 * (Fk + vQ) = 4`: horizontal chrome inset for full slider fit check. */
+const NARROW_CHROME_INSET = 4;
 const MIN_TOGGLE_WIDTH = 14;
 const DEFAULT_FALLBACK_INDEX = 2;
 const SHIMMER_HIGHLIGHT_HEX: Color = '#d0b4ff';
 const ULTRACODE_SR_TOGGLE_VALUE = 'ultracode-toggle';
+const CAROUSEL_LEFT_CHEVRON = '\u2039';
+const CAROUSEL_RIGHT_CHEVRON = '\u203A';
+
+let effortCacheMissAckedAtOutputTokens = -1;
+
+/** @internal Reset warm-cache acknowledgement state between unit tests. */
+export function resetEffortCacheMissAckForTest(): void {
+  effortCacheMissAckedAtOutputTokens = -1;
+}
 
 const RAINBOW_THEME_KEYS: readonly (keyof Theme)[] = [
   'rainbow_red',
@@ -210,6 +226,16 @@ function UltracodeToggle({
 type Props = {
   appStateEffort: EffortValue | undefined;
   onDone: (message: string) => void;
+  /** Optional override for prompt cache warmth (defaults to `getTotalOutputTokens() > 0`). */
+  promptCacheMayBeWarm?: boolean;
+};
+
+type PendingEffortConfirm = {
+  selectedLevel: EffortLevel;
+  levelChanged: boolean;
+  ultracodeOn: boolean;
+  ultracodeChanged: boolean;
+  persistAsDefault: boolean;
 };
 
 export function EffortPanel(props: Props): React.ReactNode {
@@ -220,13 +246,14 @@ export function EffortPanel(props: Props): React.ReactNode {
   return <VisualEffortPanel {...props} />;
 }
 
-function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
+function VisualEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const ultracodeState = useAppState(s => s.ultracode);
   const sessionEffort = useAppState(s => s.sessionEffort);
   const settingsEffortTable = useAppState(s => s.settingsEffortTable);
+  const permissionMode = useAppState(s => s.toolPermissionContext.mode);
   const model = useMainLoopModel();
-  const { columns } = useTerminalSize();
+  const { columns } = useModalOrTerminalSize(useTerminalSize());
 
   const resolvedSessionEffort = React.useMemo(
     () => pdSessionEffort({ sessionEffort, effortValue: appStateEffort, settingsEffortTable }, model),
@@ -243,31 +270,45 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   const ultracodeOfferable = React.useMemo(() => isUltracodeOfferable(model), [model]);
   const initialUltracode = ultracodeState === true && ultracodeOfferable;
   const [ultracodeOn, setUltracodeOn] = React.useState(initialUltracode);
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingEffortConfirm | null>(null);
 
   const toggleChord = useShortcutDisplay('effortSlider:toggleUltracode', 'EffortSlider', 'tab');
   const toggleHintWidth = stringWidth(`${toggleChord} to toggle`);
   const toggleWidth = Math.max(MIN_TOGGLE_WIDTH, toggleHintWidth);
   const isWide = columns >= SIDE_BY_SIDE_MIN_COLS + toggleWidth - MIN_TOGGLE_WIDTH;
+  const fitsFullSlider = columns >= geometry.width + NARROW_CHROME_INSET;
+
+  const envOverride = getEffortEnvOverride();
+  const envActive = envOverride !== null && envOverride !== undefined;
+  const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
+
+  const selectedLevel = geometry.levels[selectedIdx]!.value;
+  const levelChanged = selectedIdx !== initialIdx;
+  const ultracodeChanged = ultracodeOn !== initialUltracode;
+  // Official 2.1.328 `Qe` (chunk@339097697.js @37800): suppress `s` and label
+  // Enter as "use this session only" when on max, env override, ultracode-only toggle,
+  // or confirming unchanged default when settings already has a persisted value.
+  const isSessionOnlyConfirm =
+    selectedLevel === 'max' ||
+    envActive ||
+    (!levelChanged && ultracodeChanged) ||
+    (!levelChanged && resolvedSessionEffort === undefined && readUserSettingsEffortForModel(model) !== undefined);
 
   const doneRef = React.useRef(false);
 
-  const handleConfirm = React.useCallback(
-    (persistAsDefault = true) => {
+  const commitConfirm = React.useCallback(
+    (choice: PendingEffortConfirm) => {
       if (doneRef.current) return;
       doneRef.current = true;
 
-      const selectedLevel = geometry.levels[selectedIdx]!.value;
-      const levelChanged = selectedIdx !== initialIdx;
-      const ultracodeChanged = ultracodeOn !== initialUltracode;
-      const shouldApplyLevel = levelChanged || !ultracodeChanged;
-
+      const shouldApplyLevel = choice.levelChanged || !choice.ultracodeChanged;
       const messages: string[] = [];
       let nextEffort = resolvedSessionEffort;
       let hasEffortUpdate = false;
 
       if (shouldApplyLevel) {
-        const outcome = computeConfirmOutcome(selectedLevel, arg =>
-          executeEffort(arg, model, undefined, persistAsDefault, resolvedSessionEffort),
+        const outcome = computeConfirmOutcome(choice.selectedLevel, arg =>
+          executeEffort(arg, model, undefined, choice.persistAsDefault, resolvedSessionEffort),
         );
         messages.push(outcome.message);
         if (outcome.effortUpdate) {
@@ -276,18 +317,18 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
         }
       }
 
-      if (ultracodeChanged) {
+      if (choice.ultracodeChanged) {
         const ultraOutcome = executeEffort(
-          ultracodeOn ? 'ultracode on' : 'ultracode off',
+          choice.ultracodeOn ? 'ultracode on' : 'ultracode off',
           model,
           undefined,
-          persistAsDefault,
+          choice.persistAsDefault,
           nextEffort,
         );
         messages.push(
           messages.length === 0 || !ultraOutcome.effortUpdate
             ? ultraOutcome.message
-            : `Ultracode ${ultracodeOn ? 'on' : 'off'}`,
+            : `Ultracode ${choice.ultracodeOn ? 'on' : 'off'}`,
         );
         if (!shouldApplyLevel && ultraOutcome.effortUpdate && ultraOutcome.effortUpdate.ultracode === undefined) {
           nextEffort = ultraOutcome.effortUpdate.value;
@@ -295,7 +336,7 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
         }
       }
 
-      if (hasEffortUpdate || ultracodeChanged) {
+      if (hasEffortUpdate || choice.ultracodeChanged) {
         setAppState(prev => ({
           ...prev,
           ...(hasEffortUpdate
@@ -304,21 +345,55 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
                 settingsEffortTable: teSettingsEffortTable(),
               }
             : {}),
-          ...(ultracodeChanged ? { ultracode: ultracodeOn } : {}),
+          ...(choice.ultracodeChanged ? { ultracode: choice.ultracodeOn } : {}),
         }));
       }
 
       onDone(messages.join(' · '));
     },
+    [resolvedSessionEffort, model, onDone, setAppState],
+  );
+
+  const handleConfirm = React.useCallback(
+    (persistAsDefault = true) => {
+      if (doneRef.current) return;
+      const shouldApplyLevel = levelChanged || !ultracodeChanged;
+      const choice: PendingEffortConfirm = {
+        selectedLevel,
+        levelChanged,
+        ultracodeOn,
+        ultracodeChanged,
+        persistAsDefault: persistAsDefault && !isSessionOnlyConfirm,
+      };
+      const totalOutputTokens = getTotalOutputTokens();
+      const cacheWarm = promptCacheMayBeWarm ?? totalOutputTokens > 0;
+      if (
+        shouldApplyLevel &&
+        shouldWarnEffortCacheMiss({
+          target: selectedLevel,
+          current: resolvedSessionEffort,
+          mainLoopModel: model,
+          permissionMode,
+          totalOutputTokens,
+          ackedAtOutputTokens: effortCacheMissAckedAtOutputTokens,
+          promptCacheMayBeWarm: cacheWarm,
+        })
+      ) {
+        setPendingConfirm(choice);
+        return;
+      }
+      commitConfirm(choice);
+    },
     [
-      resolvedSessionEffort,
-      geometry.levels,
-      initialIdx,
-      initialUltracode,
+      commitConfirm,
+      isSessionOnlyConfirm,
+      levelChanged,
       model,
-      onDone,
-      selectedIdx,
-      setAppState,
+      permissionMode,
+      promptCacheMayBeWarm,
+      resolvedSessionEffort,
+      selectedLevel,
+      ultracodeChanged,
       ultracodeOn,
     ],
   );
@@ -329,7 +404,8 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
     onDone(CANCEL_MESSAGE);
   }, [onDone]);
 
-  const exitState = useExitOnCtrlCDWithKeybindings(handleCancel);
+  const isSliderActive = pendingConfirm === null;
+  const exitState = useExitOnCtrlCDWithKeybindings(handleCancel, undefined, isSliderActive);
 
   const handleKeyDown = React.useCallback(
     (e: KeyboardEvent) => {
@@ -365,7 +441,7 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
     'effortSlider:thisSessionOnly': confirmSessionOnly,
   };
 
-  useKeybindings(sliderBindings, { context: 'EffortSlider' });
+  useKeybindings(sliderBindings, { context: 'EffortSlider', isActive: isSliderActive });
   useKeybindings(
     {
       'effortPanel:decrease': decrease,
@@ -376,7 +452,7 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
       'effortPanel:thisSessionOnly': confirmSessionOnly,
       'effortPanel:cancel': handleCancel,
     },
-    { context: 'EffortPanel' },
+    { context: 'EffortPanel', isActive: isSliderActive },
   );
 
   const leftChord = useShortcutDisplay('effortSlider:decreaseEffort', 'EffortSlider', 'left');
@@ -384,9 +460,19 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   const adjustShortcut = [leftChord, rightChord].filter(Boolean).join('/');
   const sessionOnlyShortcut = useShortcutDisplay('effortSlider:thisSessionOnly', 'EffortSlider', 's');
 
-  const envOverride = getEffortEnvOverride();
-  const envActive = envOverride !== null && envOverride !== undefined;
-  const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
+  if (pendingConfirm !== null) {
+    return (
+      <CacheMissConfirmDialog
+        kind="effort"
+        targetLabel={pendingConfirm.selectedLevel}
+        onConfirm={() => {
+          effortCacheMissAckedAtOutputTokens = getTotalOutputTokens();
+          commitConfirm(pendingConfirm);
+        }}
+        onCancel={() => setPendingConfirm(null)}
+      />
+    );
+  }
 
   const triangleCol = geometry.trianglePositions[selectedIdx]!;
   const trackBefore = geometry.trackChars.slice(0, triangleCol);
@@ -396,7 +482,6 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   const lastLabel = geometry.levels[geometry.levels.length - 1]!;
   const trailingCount = Math.max(0, geometry.width - (lastStart + lastLabel.label.length));
 
-  const selectedLevel = geometry.levels[selectedIdx]!.value;
   const levelDescription = isEffortCostNoteEnabled(model) ? getEffortLevelDescription(model, selectedLevel) : null;
   const showMaxReminder = selectedLevel === 'max' && modelSupportsMaxEffort(model) && isMaxEffortReminderEnabled();
 
@@ -412,14 +497,21 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   return (
     <Pane>
       <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
-        <Text bold color="suggestion">
+        <Text bold color="permission">
           Effort
         </Text>
         {envActive && <Text color="warning">{`⚠ CLAUDE_CODE_EFFORT_LEVEL=${envRaw} overrides this session`}</Text>}
         <Box height={1} />
         <Box flexDirection="column" alignItems="center" width="100%">
-          <Box flexDirection="row" alignItems="flex-start">
-            <Box flexDirection="column" width={geometry.width}>
+          <Box flexDirection="row" alignItems="flex-start" justifyContent={fitsFullSlider ? undefined : 'center'}>
+            {!fitsFullSlider && (
+              <Box>
+                <Text dimColor>{selectedIdx === 0 ? ' ' : CAROUSEL_LEFT_CHEVRON} </Text>
+                <EffortLevelLabel level={geometry.levels[selectedIdx]!} selected={true} />
+                <Text dimColor> {selectedIdx === geometry.levels.length - 1 ? ' ' : CAROUSEL_RIGHT_CHEVRON}</Text>
+              </Box>
+            )}
+            <Box flexDirection="column" width={geometry.width} display={fitsFullSlider ? 'flex' : 'none'}>
               <Box>
                 <Text>Faster</Text>
                 <Text>{' '.repeat(headerGap)}</Text>
@@ -498,15 +590,17 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
           ) : null}
         </Box>
         <Box height={1} />
-        {/* Footer: Enter to confirm · s for this session only · Esc to cancel */}
-        <Text dimColor>
+        {/* Official 2.1.328 footer: ←/→ to adjust · s to use this session only · Enter to save · Esc to cancel */}
+        <Text dimColor italic>
           {exitState.pending ? (
             `Press ${exitState.keyName} again to cancel`
           ) : (
             <Byline>
               {adjustShortcut ? <KeyboardShortcutHint shortcut={adjustShortcut} action="adjust" /> : null}
-              <KeyboardShortcutHint shortcut="Enter" action="confirm" />
-              {sessionOnlyShortcut ? <Text>{sessionOnlyShortcut} for this session only</Text> : null}
+              {sessionOnlyShortcut && !isSessionOnlyConfirm ? (
+                <KeyboardShortcutHint shortcut={sessionOnlyShortcut} action="use this session only" />
+              ) : null}
+              <KeyboardShortcutHint shortcut="Enter" action={isSessionOnlyConfirm ? 'use this session only' : 'save'} />
               <KeyboardShortcutHint shortcut="Esc" action="cancel" />
             </Byline>
           )}
@@ -523,11 +617,12 @@ function getScreenReaderLevelNote(model: string, level: EffortLevel): string {
   return level === 'max' ? MAX_EFFORT_WARNING : '';
 }
 
-function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
+function ScreenReaderEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const ultracodeState = useAppState(s => s.ultracode);
   const sessionEffort = useAppState(s => s.sessionEffort);
   const settingsEffortTable = useAppState(s => s.settingsEffortTable);
+  const permissionMode = useAppState(s => s.toolPermissionContext.mode);
   const model = useMainLoopModel();
   const resolvedSessionEffort = React.useMemo(
     () => pdSessionEffort({ sessionEffort, effortValue: appStateEffort, settingsEffortTable }, model),
@@ -539,6 +634,7 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.React
     [model, resolvedSessionEffort, geometry],
   );
   const ultracodeOfferable = React.useMemo(() => isUltracodeOfferable(model), [model]);
+  const [pendingLevel, setPendingLevel] = React.useState<EffortLevel | null>(null);
   const doneRef = React.useRef(false);
 
   const options = React.useMemo(() => {
@@ -560,7 +656,7 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.React
 
   const defaultValue = geometry.levels[Math.min(initialIdx, geometry.levels.length - 1)]!.value;
 
-  const handleSelect = React.useCallback(
+  const commitSelected = React.useCallback(
     (selected: string) => {
       if (doneRef.current) return;
       doneRef.current = true;
@@ -584,16 +680,57 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.React
     [resolvedSessionEffort, model, onDone, setAppState, ultracodeState],
   );
 
+  const handleSelect = React.useCallback(
+    (selected: string) => {
+      if (doneRef.current) return;
+      if (selected !== ULTRACODE_SR_TOGGLE_VALUE) {
+        const level = selected as EffortLevel;
+        const totalOutputTokens = getTotalOutputTokens();
+        const cacheWarm = promptCacheMayBeWarm ?? totalOutputTokens > 0;
+        if (
+          shouldWarnEffortCacheMiss({
+            target: level,
+            current: resolvedSessionEffort,
+            mainLoopModel: model,
+            permissionMode,
+            totalOutputTokens,
+            ackedAtOutputTokens: effortCacheMissAckedAtOutputTokens,
+            promptCacheMayBeWarm: cacheWarm,
+          })
+        ) {
+          setPendingLevel(level);
+          return;
+        }
+      }
+      commitSelected(selected);
+    },
+    [commitSelected, model, permissionMode, promptCacheMayBeWarm, resolvedSessionEffort],
+  );
+
   const handleCancel = React.useCallback(() => {
     if (doneRef.current) return;
     doneRef.current = true;
     onDone(CANCEL_MESSAGE);
   }, [onDone]);
 
+  if (pendingLevel !== null) {
+    return (
+      <CacheMissConfirmDialog
+        kind="effort"
+        targetLabel={pendingLevel}
+        onConfirm={() => {
+          effortCacheMissAckedAtOutputTokens = getTotalOutputTokens();
+          commitSelected(pendingLevel);
+        }}
+        onCancel={() => setPendingLevel(null)}
+      />
+    );
+  }
+
   return (
     <Pane>
       <Box flexDirection="column">
-        <Text bold color="suggestion">
+        <Text bold color="permission">
           Effort
         </Text>
         {geometry.orgNote ? <Text>{geometry.orgNote}</Text> : null}

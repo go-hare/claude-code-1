@@ -857,7 +857,7 @@ function NotificationContent({
               } catch {
                 // keep raw env fallback
               }
-              return isRemote ? 'Authentication error · Try again' : 'Not logged in · Run /login';
+              return isRemote ? "Couldn't authenticate · try again" : 'Not logged in · run /login';
             })()}
           </Text>
         </Box>

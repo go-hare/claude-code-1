@@ -22,6 +22,7 @@ import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { getPipeDisplayRole, isPipeControlled } from '../../utils/pipeTransport.js';
 import { isUndercover } from '../../utils/undercover.js';
 import { memoryToggledOff } from '../../bootstrap/state.js';
+import { leftoverTaintsInclude } from '../../cli/leftoverTulip.js';
 import { hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js';
 import { getRenderVersion, subscribeRenderInvalidation } from '../../utils/render/invalidateAllRenders.js';
 import { CoordinatorTaskPanel, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
@@ -203,6 +204,7 @@ function PromptInputFooter({
   return (
     <>
       <Box
+        width={columns}
         flexDirection={isScreenReader ? 'column' : 'row'}
         flexWrap="wrap"
         alignItems="flex-start"
@@ -239,6 +241,7 @@ function PromptInputFooter({
                 historyFailedMatch={historyFailedMatch}
                 onOpenTasksDialog={onOpenTasksDialog}
                 leftArrowAgain={leftArrowAgain}
+                wrappedRowWidth={Math.max(0, columns - 4)}
               />
             </Box>
             {promptHintTail && !suppressHint ? (
@@ -373,7 +376,37 @@ function SessionStateRow({ modes, separated }: { modes: string[]; separated: boo
   return engine;
 }
 
-function FooterRightIndicators({
+/**
+ * Official 2.1.328 `eB` (chunk@319736883.js:955166) — footer right session mode
+ * labels: memory paused takes precedence over account memory read-only / off.
+ */
+export function formatFooterSessionModeLabels(
+  isMemoryPaused: boolean,
+  accountMemoryMode?: 'read_only' | 'off' | null,
+): string[] {
+  if (isMemoryPaused) return ['memory paused'];
+  if (accountMemoryMode === 'read_only') return ['account memory: read-only'];
+  if (accountMemoryMode === 'off') return ['account memory: off'];
+  return [];
+}
+
+/**
+ * Official 2.1.328 `fV` (chunk@319736883.js:897308, `Umo = "HIPAA configured"`).
+ */
+function HipaaConfiguredBadge(): React.ReactNode {
+  return (
+    <Text color="permission" wrap="truncate">
+      HIPAA configured
+    </Text>
+  );
+}
+
+type ExtendedFooterAppState = AppState & {
+  remoteBootstrap?: { seededFor?: string } | null;
+  accountMemoryMode?: 'read_only' | 'off' | null;
+};
+
+export function FooterRightIndicators({
   debug,
   bridgeSelected,
 }: {
@@ -382,9 +415,41 @@ function FooterRightIndicators({
 }): React.ReactNode {
   const remoteSessionUrl = useAppState(s => s.remoteSessionUrl);
   const remoteConnectionStatus = useAppState(s => s.remoteConnectionStatus);
+  const isRemoteBootstrapCreate = useAppState(
+    s => (s as ExtendedFooterAppState).remoteBootstrap?.seededFor === 'create',
+  );
+  const accountMemoryMode = useAppState(s => (s as ExtendedFooterAppState).accountMemoryMode ?? null);
   const bridgeStatus = useVisibleBridgeStatus();
 
+  // densable Z1 (@209095150): SessionMode mounts when modeLabels are non-empty
+  // or a ui.render hook matches. Subscribe via useSyncExternalStore so memory
+  // pause, HIPAA compliance taint, and dynamic SessionMode ui.render hook
+  // changes re-render reactively.
+  const appStore = useContext(AppStoreContext);
+  const subscribeFooterSessionState = useCallback(
+    (onStoreChange: () => void) => {
+      const unsubRender = subscribeRenderInvalidation(onStoreChange);
+      const unsubStore = appStore ? appStore.subscribe(onStoreChange) : () => {};
+      return () => {
+        unsubRender();
+        unsubStore();
+      };
+    },
+    [appStore],
+  );
+  useSyncExternalStore(
+    subscribeFooterSessionState,
+    () =>
+      `${memoryToggledOff() ? '1' : '0'}:${leftoverTaintsInclude('hipaa') ? '1' : '0'}:${getRenderVersion('ui.render')}`,
+    () =>
+      `${memoryToggledOff() ? '1' : '0'}:${leftoverTaintsInclude('hipaa') ? '1' : '0'}:${getRenderVersion('ui.render')}`,
+  );
+
   const items: React.ReactNode[] = [];
+
+  if (leftoverTaintsInclude('hipaa')) {
+    items.push(<HipaaConfiguredBadge key="hipaa" />);
+  }
 
   if (remoteSessionUrl) {
     const { suffix, color } = getCloudConnectionDisplay(remoteConnectionStatus);
@@ -393,6 +458,12 @@ function FooterRightIndicators({
         <Link url={remoteSessionUrl}>
           {figures.circleDouble} cloud{suffix}
         </Link>
+      </Text>,
+    );
+  } else if (isRemoteBootstrapCreate) {
+    items.push(
+      <Text key="cloud" dimColor wrap="truncate">
+        {figures.circleDouble} cloud
       </Text>,
     );
   }
@@ -417,27 +488,7 @@ function FooterRightIndicators({
     items.push(<BridgeStatusIndicator key="bridge" status={bridgeStatus} bridgeSelected={bridgeSelected} />);
   }
 
-  // densable Z1 (@209095150): SessionMode mounts when modeLabels are non-empty
-  // or a ui.render hook matches. Subscribe via useSyncExternalStore so memory
-  // pause and dynamic SessionMode ui.render hook changes re-render reactively.
-  const appStore = useContext(AppStoreContext);
-  const subscribeFooterSessionState = useCallback(
-    (onStoreChange: () => void) => {
-      const unsubRender = subscribeRenderInvalidation(onStoreChange);
-      const unsubStore = appStore ? appStore.subscribe(onStoreChange) : () => {};
-      return () => {
-        unsubRender();
-        unsubStore();
-      };
-    },
-    [appStore],
-  );
-  useSyncExternalStore(
-    subscribeFooterSessionState,
-    () => `${memoryToggledOff() ? '1' : '0'}:${getRenderVersion('ui.render')}`,
-    () => `${memoryToggledOff() ? '1' : '0'}:${getRenderVersion('ui.render')}`,
-  );
-  const modeLabels = memoryToggledOff() ? ['memory paused'] : [];
+  const modeLabels = memoryToggledOff() ? ['memory paused'] : formatFooterSessionModeLabels(false, accountMemoryMode);
   const hasSessionModeHook = hasMatchingFunctionHook('ui.render', {
     component: 'SessionMode',
   });

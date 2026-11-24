@@ -1,16 +1,24 @@
 import figures from 'figures';
 import capitalize from 'lodash-es/capitalize.js';
 import * as React from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState } from 'react';
+import stripAnsi from 'strip-ansi';
 import {
+  AccessibilityContext,
   Box,
   Byline,
   color,
+  type KeyboardEvent,
   KeyboardShortcutHint,
   Pane,
+  type PasteEvent,
   Ratchet,
+  SearchBox,
   Text,
+  type Theme,
   useModalOrTerminalSize,
+  useSearchInput,
+  useTerminalFocus,
   useTheme,
 } from '@anthropic/ink';
 import { useExitOnCtrlCDWithKeybindings } from 'src/hooks/useExitOnCtrlCDWithKeybindings.js';
@@ -72,7 +80,6 @@ import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { updateSettingsForSource } from '../utils/settings/settings.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/index.js';
-import { effortLevelToSymbol } from './EffortIndicator.js';
 import { MAX_EFFORT_WARNING } from './EffortPanel/effortPanelState.js';
 
 export type Props = {
@@ -261,6 +268,92 @@ export function buildVisibleModelPickerOptions<T extends ModelPickerRowOption>(
   return [...primaryOpts, moreRow, ...(opts.expanded ? overflowOpts : [])];
 }
 
+/** Official 2.1.328 `z9e` (chunk@319736883.js @774558): filter model options by label or stripped description. */
+export function filterModelPickerOptions<T extends { label: string; description?: string }>(
+  options: readonly T[],
+  query: string,
+): T[] {
+  if (!query) return [...options];
+  const q = query.toLowerCase();
+  return options.filter(
+    opt =>
+      (typeof opt.label === 'string' ? opt.label : '').toLowerCase().includes(q) ||
+      stripAnsi(opt.description ?? '')
+        .toLowerCase()
+        .includes(q),
+  );
+}
+
+/**
+ * Official 2.1.328 `r6` (chunk@319736883.js @762900): visual effort slider
+ * with filled/empty dots (`●`/`○`) and directional arrows (`←`/`→`).
+ */
+export function ModelEffortSlider({
+  effort,
+  levels,
+  defaultEffort,
+  isAdjustable,
+  note,
+  isNarrow,
+}: {
+  effort: EffortLevel;
+  levels: readonly EffortLevel[];
+  defaultEffort: EffortLevel;
+  isAdjustable: boolean;
+  note?: string;
+  isNarrow?: boolean;
+}): React.ReactNode {
+  const isScreenReader = useContext(AccessibilityContext) || isScreenReaderModeEnabled();
+  const idx = Math.max(0, levels.indexOf(effort));
+  const accentColor: keyof Theme | undefined = effort === 'max' ? 'error' : effort === 'xhigh' ? 'warning' : undefined;
+  const effortName = effort === 'xhigh' ? 'xHigh' : capitalize(effort);
+  const defaultSuffix = effort === defaultEffort ? ' (default)' : '';
+  const filledDots = levels
+    .slice(0, idx + 1)
+    .map(() => '●')
+    .join(' ');
+  const emptyDots = levels
+    .slice(idx + 1)
+    .map(() => ' ○')
+    .join('');
+  const leftDim = !isAdjustable || idx === 0;
+  const rightDim = !isAdjustable || idx === levels.length - 1;
+
+  return (
+    <>
+      <Text wrap="wrap">
+        <Text dimColor>Effort</Text> <Text color={accentColor}>{effortName}</Text>
+        <Text dimColor>
+          {defaultSuffix}
+          {note ?? ''}
+        </Text>
+      </Text>
+      {isScreenReader ? (
+        isAdjustable ? (
+          <Text dimColor>←/→ to adjust</Text>
+        ) : null
+      ) : isNarrow ? (
+        <Text dimColor>
+          <Text dimColor={leftDim}>←</Text> <Text color={accentColor}>{filledDots}</Text>
+          <Text dimColor>{emptyDots}</Text> <Text dimColor={rightDim}>→</Text>
+          {isAdjustable ? '\n←/→ to adjust' : ''}
+        </Text>
+      ) : (
+        <Text>
+          <Text dimColor={leftDim}>←</Text>
+          {'  '}
+          <Text color={accentColor}>{filledDots}</Text>
+          <Text dimColor>
+            {emptyDots}
+            {'  '}
+          </Text>
+          <Text dimColor={rightDim}>→</Text>
+        </Text>
+      )}
+    </>
+  );
+}
+
 function isMaxEffortReminderEnabled(): boolean {
   if (process.env.CLAUDE_CODE_MAX_EFFORT_REMINDER !== undefined) {
     return isEnvTruthy(process.env.CLAUDE_CODE_MAX_EFFORT_REMINDER);
@@ -283,6 +376,7 @@ export function ModelPicker({
 }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const [theme] = useTheme();
+  const isTerminalFocused = useTerminalFocus();
   const exitState = useExitOnCtrlCDWithKeybindings(onCancel, undefined, isStandaloneCommand === true);
   // Official 2.1.326 #215: respect modal row budget in short fullscreen windows.
   const { rows, columns } = useModalOrTerminalSize(useTerminalSize());
@@ -291,19 +385,55 @@ export function ModelPicker({
   // Memoize all derived values to prevent re-renders
   const modelOptions = useMemo(() => getModelOptions(isFastMode ?? false), [isFastMode]);
 
-  const sessionOverride = useMemo(() => resolveSessionModelOverride(sessionModel, initial), [sessionModel, initial]);
-  // densable sgM — LFh=14 chrome; no XKl search host → ngM=0
-  const maxVisible = computeModelPickerVisibleSlots({
-    rows,
-    searchChrome: false,
-    fastModeNotice: isModelPickerFastModeNoticeChrome(
-      isFastModeEnabled(),
-      showFastModeNotice,
-      isFastModeAvailable(),
-      isFastModeCooldown(),
-    ),
-    sessionModelBanner: sessionOverride !== null,
+  const screenReader = useContext(AccessibilityContext) || isScreenReaderModeEnabled();
+  const canSearch = isStandaloneCommand === true && !screenReader;
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const isSearchModeRef = useRef(false);
+  const exitSearchMode = useCallback(() => {
+    isSearchModeRef.current = false;
+    setIsSearchMode(false);
+  }, []);
+  const enterSearchMode = useCallback(() => {
+    if (!canSearch || isSearchModeRef.current) return;
+    isSearchModeRef.current = true;
+    setIsSearchMode(true);
+  }, [canSearch]);
+  const {
+    query: searchQuery,
+    queryRef: searchQueryRef,
+    cursorOffset: searchCursorOffset,
+    handleKeyDown: handleSearchInputKeyDown,
+    handlePaste: handleSearchInputPaste,
+  } = useSearchInput({
+    isActive: isSearchMode,
+    isActiveRef: isSearchModeRef,
+    backspaceExitsOnEmpty: true,
+    onExit: exitSearchMode,
   });
+
+  const sessionOverride = useMemo(() => resolveSessionModelOverride(sessionModel, initial), [sessionModel, initial]);
+  const fastModeNoticeChrome = isModelPickerFastModeNoticeChrome(
+    isFastModeEnabled(),
+    showFastModeNotice,
+    isFastModeAvailable(),
+    isFastModeCooldown(),
+  );
+  // densable sgM — LFh=14 chrome; reserve 4 rows when search box is shown
+  const maxVisible = computeModelPickerVisibleSlots(
+    canSearch
+      ? {
+          rows,
+          searchChrome: true,
+          fastModeNotice: fastModeNoticeChrome,
+          sessionModelBanner: sessionOverride !== null,
+        }
+      : {
+          rows,
+          searchChrome: false,
+          fastModeNotice: fastModeNoticeChrome,
+          sessionModelBanner: sessionOverride !== null,
+        },
+  );
 
   const currentModel = sessionOverride ?? initial;
   const initialValue =
@@ -365,7 +495,6 @@ export function ModelPicker({
   }, [modelOptions, currentModel, sessionOverride, initial, defaultOptionDescription]);
 
   const [moreModelsExpanded, setMoreModelsExpanded] = useState(false);
-  const screenReader = isScreenReaderModeEnabled();
 
   const allSelectOptions = useMemo(
     () =>
@@ -382,7 +511,7 @@ export function ModelPicker({
   );
   const baseOptionValue =
     initial === null ? NO_PREFERENCE : (findMatchingModelOptionValue(modelOptions, initial) ?? initial);
-  const selectOptions = useMemo(
+  const visibleModelOptions = useMemo(
     () =>
       buildVisibleModelPickerOptions(allSelectOptions, {
         currentValue: initialValue,
@@ -392,14 +521,19 @@ export function ModelPicker({
       }),
     [allSelectOptions, initialValue, baseOptionValue, moreModelsExpanded, screenReader],
   );
+  const selectOptions = useMemo(
+    () => (searchQuery === '' ? visibleModelOptions : filterModelPickerOptions(allSelectOptions, searchQuery)),
+    [visibleModelOptions, allSelectOptions, searchQuery],
+  );
   const initialFocusValue = useMemo(
     () => (selectOptions.some(_ => _.value === initialValue) ? initialValue : (selectOptions[0]?.value ?? undefined)),
     [selectOptions, initialValue],
   );
+  const resolvedFocusedValue = selectOptions.some(opt => opt.value === focusedValue) ? focusedValue : initialFocusValue;
   const visibleCount = Math.min(maxVisible, selectOptions.length);
 
-  const isMoreModelsFocused = focusedValue === MORE_MODELS_OPTION_VALUE;
-  const effectiveFocusedValue = isMoreModelsFocused ? undefined : focusedValue;
+  const isMoreModelsFocused = resolvedFocusedValue === MORE_MODELS_OPTION_VALUE;
+  const effectiveFocusedValue = isMoreModelsFocused ? undefined : resolvedFocusedValue;
   const focusedOption = allSelectOptions.find(opt => opt.value === effectiveFocusedValue);
   const focusedModelName = focusedOption?.label;
   const focusedDisabled = (focusedOption as { disabled?: boolean } | undefined)?.disabled === true;
@@ -454,9 +588,16 @@ export function ModelPicker({
 
   useKeybindings(
     {
-      'modelPicker:decreaseEffort': () => handleCycleEffort('left'),
-      'modelPicker:increaseEffort': () => handleCycleEffort('right'),
+      'modelPicker:decreaseEffort': () => {
+        if (isSearchModeRef.current && searchQueryRef.current !== '') return false;
+        handleCycleEffort('left');
+      },
+      'modelPicker:increaseEffort': () => {
+        if (isSearchModeRef.current && searchQueryRef.current !== '') return false;
+        handleCycleEffort('right');
+      },
       'modelPicker:thisSessionOnly': () => {
+        if (isSearchModeRef.current) return false;
         if (!onSetDefault) return;
         const value = effectiveFocusedValue;
         if (!value || focusedDisabled) return;
@@ -464,6 +605,16 @@ export function ModelPicker({
       },
     },
     { context: 'ModelPicker' },
+  );
+
+  useKeybindings(
+    {
+      'settings:search': () => {
+        if (isSearchModeRef.current) return false;
+        enterSearchMode();
+      },
+    },
+    { context: 'Settings', isActive: canSearch && !isSearchMode },
   );
 
   function commitSelection(value: string, persistAsDefault: boolean): void {
@@ -529,37 +680,106 @@ export function ModelPicker({
     commitSelection(value, true);
   }
 
+  function handleContainerKeyDown(e: KeyboardEvent): void {
+    if (e.defaultPrevented) return;
+    if (isSearchModeRef.current) {
+      if ((e.name === 'return' || e.name === 'down' || (e.ctrl && e.key === 'n')) && selectOptions.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      if (searchQueryRef.current === '') {
+        if (e.name === 'return') {
+          e.preventDefault();
+          const target = selectOptions.find(opt => opt.value === resolvedFocusedValue);
+          if (target !== undefined && !target.disabled) {
+            handleSelect(target.value);
+          }
+          return;
+        }
+        if (e.name === 'escape') {
+          e.preventDefault();
+          exitSearchMode();
+          return;
+        }
+      }
+      if (e.ctrl && e.key === 'n') {
+        e.preventDefault();
+        exitSearchMode();
+        return;
+      }
+      handleSearchInputKeyDown(e);
+      return;
+    }
+    if (!canSearch) return;
+    if (e.key === '/' && !e.ctrl && !e.meta) {
+      e.preventDefault();
+      enterSearchMode();
+    }
+  }
+
+  function handleContainerPaste(e: PasteEvent): void {
+    if (isSearchModeRef.current) {
+      handleSearchInputPaste(e);
+    }
+  }
+
   const selectSizingProps = {
-    columnSizingOptions: selectOptions,
+    columnSizingOptions: allSelectOptions,
   } as unknown as Record<string, never>;
 
   const focusedPdEffort =
     focusedModel !== undefined ? pdSessionEffort({ sessionEffort, settingsEffortTable }, focusedModel) : undefined;
   const ultracodeActiveForFocused =
     focusedModel !== undefined && isUltracodeModeActive(focusedModel, focusedPdEffort, ultracodeFlag);
+  const ultracodeNote = ultracodeActiveForFocused ? ' · Ultracode on (/effort)' : '';
   const showMaxReminder = displayEffort === 'max' && isMaxEffortReminderEnabled();
+  const isEffortAdjustable = !isSearchMode || searchQuery === '';
+  const effortFooterHint =
+    focusedSupportsEffort && effectiveFocusedValue !== undefined && !focusedDisabled ? (
+      <KeyboardShortcutHint shortcut="←/→" action="effort" />
+    ) : null;
+  const moreModelsFooterHint = isMoreModelsFocused ? (
+    <KeyboardShortcutHint shortcut="Enter" action={moreModelsExpanded ? 'collapse' : 'expand'} />
+  ) : null;
+  const enterAction = onSetDefault ? 'set as default' : 'confirm';
 
   const content = (
-    <Box flexDirection="column">
+    <Box
+      flexDirection="column"
+      tabIndex={0}
+      autoFocus={canSearch}
+      onKeyDown={handleContainerKeyDown}
+      onPaste={handleContainerPaste}
+    >
       <Box flexDirection="column">
         <Box marginBottom={1} flexDirection="column">
-          <Text color="remember" bold>
+          <Text color="permission" bold>
             Select model
           </Text>
           <Text dimColor>
-            {headerText ??
-              'Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model.'}
+            {headerText ?? 'Your pick is the default for new sessions. For other models, use --model.'}
           </Text>
           {sessionOverride && (
             <Text dimColor>
-              Currently using {modelDisplayString(sessionOverride)} for this session only (base model:{' '}
-              {modelDisplayString(initial)}). Selecting a model here replaces both.
+              Using {modelDisplayString(sessionOverride)} for this session only (base model:{' '}
+              {modelDisplayString(initial)}). Picking a model here replaces both.
             </Text>
           )}
         </Box>
 
         <Box flexDirection="column" marginBottom={1}>
-          <Ratchet restartKey={maxVisible}>
+          {canSearch && (
+            <Box marginBottom={1} flexDirection="column">
+              <SearchBox
+                query={searchQuery}
+                placeholder="Search models…"
+                isFocused={isSearchMode}
+                isTerminalFocused={isTerminalFocused}
+                cursorOffset={searchCursorOffset}
+              />
+            </Box>
+          )}
+          <Ratchet restartKey={`${maxVisible}:${moreModelsExpanded}`}>
             <Select
               defaultValue={initialValue}
               selectedValue={initialValue}
@@ -568,10 +788,13 @@ export function ModelPicker({
               {...selectSizingProps}
               onChange={handleSelect}
               onFocus={handleFocus}
+              onUpFromFirstItem={canSearch ? enterSearchMode : undefined}
               onCancel={() => onCancel?.()}
               visibleOptionCount={visibleCount}
               overflowHint="count"
               hiddenBelowUnit="model"
+              emptyMessage={`No models match "${searchQuery}"`}
+              isDisabled={isSearchMode}
             />
           </Ratchet>
         </Box>
@@ -581,14 +804,14 @@ export function ModelPicker({
             <Box marginBottom={1} flexDirection="column">
               {focusedSupportsEffort ? (
                 <>
-                  <Text dimColor wrap="wrap">
-                    <EffortLevelIndicator effort={displayEffort} />{' '}
-                    {displayEffort === 'xhigh' ? 'xHigh' : capitalize(displayEffort ?? 'high')} effort
-                    {displayEffort === focusedDefaultEffort ? ' (default)' : ''}
-                    {isNarrow ? '\n' : ' '}
-                    <Text dimColor>←/→ to adjust</Text>
-                    {ultracodeActiveForFocused ? ' · Ultracode on (/effort)' : ''}
-                  </Text>
+                  <ModelEffortSlider
+                    effort={displayEffort ?? focusedDefaultEffort}
+                    defaultEffort={focusedDefaultEffort}
+                    levels={focusedEffortLevels}
+                    isAdjustable={isEffortAdjustable}
+                    note={ultracodeNote}
+                    isNarrow={isNarrow}
+                  />
                   {displayEffort === 'max' ? (
                     showMaxReminder ? (
                       <Text color="warning">⚠ {MAX_EFFORT_WARNING}</Text>
@@ -598,10 +821,12 @@ export function ModelPicker({
                   ) : null}
                 </>
               ) : (
-                <Text dimColor>
-                  <EffortLevelIndicator effort={undefined} /> Effort not supported
-                  {focusedModelName ? ` for ${focusedModelName}` : ''}
-                </Text>
+                <Box minHeight={2}>
+                  <Text dimColor>
+                    Effort not supported
+                    {focusedModelName ? ` for ${focusedModelName}` : ''}
+                  </Text>
+                </Box>
               )}
             </Box>
           )}
@@ -610,14 +835,12 @@ export function ModelPicker({
         {isFastModeEnabled() ? (
           showFastModeNotice ? (
             <Box marginBottom={1}>
-              <Text dimColor>
-                Fast mode is <Text bold>ON</Text> (/fast). Switching models can turn it off.
-              </Text>
+              <Text dimColor>Fast mode is on (/fast). Switching models can turn it off.</Text>
             </Box>
           ) : isFastModeAvailable() && !isFastModeCooldown() ? (
             <Box marginBottom={1}>
               <Text dimColor>
-                Use <Text bold>/fast</Text> to turn on Fast mode (
+                Use <Text bold>/fast</Text> to turn on fast mode (
                 {currentModel ? modelDisplayString(currentModel) : FAST_MODE_MODEL_DISPLAY}).
               </Text>
             </Box>
@@ -627,16 +850,43 @@ export function ModelPicker({
 
       {isStandaloneCommand && (
         <Ratchet>
-          <Text dimColor>
+          <Text dimColor italic>
             {exitState.pending ? (
               `Press ${exitState.keyName} again to ${onCancel ? 'cancel' : 'exit'}`
+            ) : isSearchMode && searchQuery === '' ? (
+              <Byline>
+                <Text>Type to search</Text>
+                <KeyboardShortcutHint shortcut="↓" action="list" />
+                {effortFooterHint}
+                {moreModelsFooterHint}
+                {effectiveFocusedValue !== undefined && !focusedDisabled && (
+                  <KeyboardShortcutHint shortcut="Enter" action={enterAction} />
+                )}
+                <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+              </Byline>
+            ) : isSearchMode ? (
+              <Byline>
+                <Text>Type to filter</Text>
+                {selectOptions.length > 0 && <KeyboardShortcutHint shortcut="Enter/↓" action="list" />}
+                <KeyboardShortcutHint shortcut="Esc" action="clear" />
+              </Byline>
             ) : (
               <Byline>
-                {focusedValue !== undefined && !focusedDisabled && (
-                  <KeyboardShortcutHint shortcut="Enter" action={onSetDefault ? 'set as default' : 'confirm'} />
-                )}
-                {focusedValue !== undefined && !focusedDisabled && onSetDefault && (
+                {effortFooterHint}
+                {effectiveFocusedValue !== undefined && !focusedDisabled && onSetDefault && (
                   <KeyboardShortcutHint shortcut="s" action="use this session only" />
+                )}
+                {canSearch && (
+                  <ConfigurableShortcutHint
+                    action="settings:search"
+                    context="Settings"
+                    fallback="/"
+                    description="search"
+                  />
+                )}
+                {moreModelsFooterHint}
+                {effectiveFocusedValue !== undefined && !focusedDisabled && (
+                  <KeyboardShortcutHint shortcut="Enter" action={enterAction} />
                 )}
                 <ConfigurableShortcutHint action="select:cancel" context="Select" fallback="Esc" description="cancel" />
               </Byline>
@@ -657,10 +907,6 @@ export function ModelPicker({
 function resolveOptionModel(value?: string): string | undefined {
   if (!value) return undefined;
   return value === NO_PREFERENCE ? getDefaultMainLoopModel() : parseUserSpecifiedModel(value);
-}
-
-function EffortLevelIndicator({ effort }: { effort?: EffortLevel }): React.ReactNode {
-  return <Text color={effort ? 'claude' : 'subtle'}>{effortLevelToSymbol(effort ?? 'low')}</Text>;
 }
 
 /**

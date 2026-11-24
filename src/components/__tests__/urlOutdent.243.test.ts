@@ -43,12 +43,12 @@ describe('urlOutdent 243 #19', () => {
     'utf8',
   )
 
-  test('Pane exports official U/V/Io (2 / 1 / 2)', () => {
-    expect(pane).toContain('export const PANE_PADDING_X_MODAL = 1')
+  test('Pane exports official gm/Fk/vQ (2 / 0 / 2 in 2.1.328)', () => {
+    expect(pane).toContain('export const PANE_PADDING_X_MODAL = 0')
     expect(pane).toContain('export const PANE_PADDING_X_INLINE = 2')
     expect(pane).toContain('export const MODAL_LAYOUT_PADDING_X = 2')
-    expect(pane).toContain('paddingX={PANE_PADDING_X_MODAL}')
-    expect(pane).toContain('paddingX={PANE_PADDING_X_INLINE}')
+    expect(pane).toContain('insetX ?? PANE_PADDING_X_MODAL')
+    expect(pane).toContain('insetX ?? PANE_PADDING_X_INLINE')
   })
 
   test('Zi stacks q = (useIsInsideModal() ? Io : 0) + F', () => {

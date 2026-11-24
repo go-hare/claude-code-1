@@ -1,5 +1,6 @@
 import React from 'react';
 import { CtrlOToExpand } from 'src/components/CtrlOToExpand.js';
+import { FilePathLink } from 'src/components/FilePathLink.js';
 import { removeSandboxViolationTags } from 'src/utils/sandbox/sandbox-ui-utils.js';
 import { KeyboardShortcutHint } from '@anthropic/ink';
 import { MessageResponse } from 'src/components/MessageResponse.js';
@@ -20,12 +21,40 @@ import {
 import type { Out as BashOut } from './BashTool.js';
 
 type Props = {
-  content: Omit<BashOut, 'interrupted'> & { bashEditDiff?: BashEditDiff };
+  content: Omit<BashOut, 'interrupted'> & {
+    bashEditDiff?: BashEditDiff;
+    viewedImagePaths?: string[];
+  };
   verbose: boolean;
   timeoutMs?: number;
   style?: 'condensed';
   command?: string;
 };
+
+/**
+ * Official 2.1.328 `jA` (`chunk@307685543.js:460`): colored `+N` / `-M` line
+ * diff stats with `diffAddedWord` / `diffRemovedWord` and no parentheses.
+ */
+function LineDiffStats({ added, removed, bold }: { added: number; removed: number; bold?: boolean }): React.ReactNode {
+  if (added === 0 && removed === 0) {
+    return null;
+  }
+  return (
+    <Text>
+      {added > 0 && (
+        <Text color="diffAddedWord" bold={bold}>
+          +{added}
+        </Text>
+      )}
+      {added > 0 && removed > 0 && ' '}
+      {removed > 0 && (
+        <Text color="diffRemovedWord" bold={bold}>
+          -{removed}
+        </Text>
+      )}
+    </Text>
+  );
+}
 
 const MAX_BASH_DIFF_LINES = 40;
 const MAX_OMITTED_DIFF_NAMES = 3;
@@ -120,9 +149,10 @@ function BashEditDiffView({
             <Box flexDirection="column">
               <Text>
                 {action} <Text bold>{verbose ? file.filePath : getDisplayPath(file.filePath)}</Text>{' '}
-                <Text dimColor>
-                  (+{count(allLines, l => l.startsWith('+'))} -{count(allLines, l => l.startsWith('-'))})
-                </Text>
+                <LineDiffStats
+                  added={count(allLines, l => l.startsWith('+'))}
+                  removed={count(allLines, l => l.startsWith('-'))}
+                />
               </Text>
               {hideBody ? null : (
                 <StructuredDiffList
@@ -135,7 +165,7 @@ function BashEditDiffView({
               )}
               {hiddenLines > 0 && !hideBody ? (
                 <Text dimColor>
-                  … {hiddenLines} more lines <CtrlOToExpand />
+                  … +{hiddenLines} {hiddenLines === 1 ? 'line' : 'lines'} <CtrlOToExpand />
                 </Text>
               ) : null}
             </Box>
@@ -147,20 +177,17 @@ function BashEditDiffView({
           <Box flexDirection="column">
             <Text dimColor>
               {diff.files.length > 0
-                ? `… ${diff.moreFiles} more ${diff.moreFiles === 1 ? 'file' : 'files'} changed`
+                ? `… +${diff.moreFiles} ${diff.moreFiles === 1 ? 'file' : 'files'} changed`
                 : `${formatFileCount(diff.moreFiles)} changed (binary, mode only or too large to show)`}
               {diff.unavailable ? ' (part of the diff is unavailable)' : ''}
             </Text>
             {omittedPaths.map(filePath => (
-              <Text key={filePath} dimColor>
+              <FilePathLink key={filePath} filePath={filePath}>
                 {verbose ? filePath : getDisplayPath(filePath)}
-              </Text>
+              </FilePathLink>
             ))}
             {omittedPaths.length > 0 && diff.moreFiles > omittedPaths.length ? (
-              <Text dimColor>
-                … {diff.moreFiles - omittedPaths.length} more{' '}
-                {diff.moreFiles - omittedPaths.length === 1 ? 'file' : 'files'}
-              </Text>
+              <Text dimColor>+{diff.moreFiles - omittedPaths.length} more</Text>
             ) : null}
           </Box>
         </MessageResponse>
@@ -259,6 +286,7 @@ export default function BashToolResultMessage({
     bashEditDiff,
     persistedOutputPath,
     persistedOutputSize,
+    viewedImagePaths = [],
   },
   verbose,
   timeoutMs,
@@ -274,14 +302,33 @@ export default function BashToolResultMessage({
   // Extract "Shell cwd was reset" warning to render it with warning color instead of error
   const { cleanedStderr: stderr, cwdResetWarning } = extractCwdResetWarning(stderrWithoutViolations);
 
+  const viewedImageNotices = viewedImagePaths.map(filePath => (
+    <MessageResponse key={filePath}>
+      <Text dimColor>
+        [Image sent to Claude: <FilePathLink filePath={filePath}>{getDisplayPath(filePath)}</FilePathLink>]
+      </Text>
+    </MessageResponse>
+  ));
+
   // If this is an image, we don't want to truncate it in the UI
   if (isImage) {
     return (
-      <MessageResponse height={1}>
-        <Text dimColor>[Image data detected and sent to Claude]</Text>
-      </MessageResponse>
+      <Box flexDirection="column">
+        <MessageResponse height={1}>
+          <Text dimColor>[Image sent to Claude]</Text>
+        </MessageResponse>
+        {viewedImageNotices}
+      </Box>
     );
   }
+
+  const showEmptyOrBackgroundRow =
+    Boolean(backgroundTaskId) ||
+    (stdout === '' &&
+      stderr.trim() === '' &&
+      !cwdResetWarning &&
+      !bashEditDiff &&
+      (viewedImagePaths.length === 0 || Boolean(returnCodeInterpretation)));
 
   return (
     <Box flexDirection="column">
@@ -300,7 +347,7 @@ export default function BashToolResultMessage({
       {bashEditDiff ? (
         <BashEditDiffView diff={bashEditDiff} verbose={verbose} style={style} treeMoved={treeMoved} />
       ) : null}
-      {stdout === '' && stderr.trim() === '' && !cwdResetWarning && !bashEditDiff ? (
+      {showEmptyOrBackgroundRow ? (
         <MessageResponse height={1}>
           <Text dimColor>
             {backgroundTaskId ? (
@@ -313,6 +360,7 @@ export default function BashToolResultMessage({
           </Text>
         </MessageResponse>
       ) : null}
+      {viewedImageNotices}
       {timeoutMs && (
         <MessageResponse>
           <ShellTimeDisplay timeoutMs={timeoutMs} />
