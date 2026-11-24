@@ -13,9 +13,16 @@
  *   - Roster persistence for crash recovery
  */
 
+import { spawn as nodeSpawn } from 'child_process'
 import { mkdir, unlink, readdir, rm, lstat } from 'fs/promises'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
+import { isInBundledMode } from '../utils/bundledMode.js'
+import {
+  connectAuthenticatedPtyHost,
+  encodeCtrlFrame,
+  mintPtyAuthToken,
+} from './ptyHost.js'
 import {
   ATTACH_WAITING_REDRAW,
   COLD_ATTACH_ONCE_READY,
@@ -32,6 +39,7 @@ import {
   type AttacherEntry,
   type SpawnPtyFn,
   type RosterFile,
+  buildPtyHostSpawnArgs,
   createDefaultSpawnPty,
   createSignal,
   encodeDetachMsg,
@@ -222,6 +230,7 @@ function wireWorkerLifecycle(
   onKeepAliveChange: () => void,
   pendingSettleWrites: Set<Promise<unknown>>,
   log: (msg: string) => void,
+  ptyAuthBySock?: Map<string, string>,
 ): void {
   const trackWrite = (p: Promise<unknown>) => {
     pendingSettleWrites.add(p)
@@ -313,6 +322,7 @@ function wireWorkerLifecycle(
         unlink(getRendezvousSockPath(worker.record.short)).catch(() => {}),
       )
       if (entry.ptySock) {
+        ptyAuthBySock?.delete(entry.ptySock)
         trackWrite(unlink(entry.ptySock).catch(() => {}))
         trackWrite(unlink(getPtyErrPath(entry.ptySock)).catch(() => {}))
       }
@@ -372,6 +382,7 @@ function wireWorkerLifecycle(
 async function reapOrphanPtyHosts(
   handles: Map<string, BgWorker>,
   log: (msg: string) => void,
+  ptyAuthBySock?: Map<string, string>,
 ): Promise<void> {
   if (process.platform === 'win32') return
 
@@ -402,8 +413,10 @@ async function reapOrphanPtyHosts(
     })
     sock.once('connect', () => {
       sock.resume()
-      const { encodeCtrlFrame } =
-        require('./ptyHost.js') as typeof import('./ptyHost.js')
+      const authToken = ptyAuthBySock?.get(sockPath)
+      if (authToken) {
+        sock.write(encodeCtrlFrame({ t: 'auth', token: authToken }))
+      }
       sock.write(encodeCtrlFrame({ t: 'kill', sig: 'SIGTERM' }))
       sock.end()
       setTimeout((s: typeof sock) => s.destroy(), 2000, sock).unref()
@@ -485,6 +498,112 @@ async function ensureDaemonDirs(): Promise<void> {
 // BG Manager — official BG4
 // ---------------------------------------------------------------------------
 
+/**
+ * Authenticated default PTY spawner (`chunk@302131078.js @9867` + `chunk@308385766.js`):
+ * Mints a fresh per-socket `CLAUDE_BG_PTY_AUTH` token, passes it to the PTY host
+ * subprocess, and connects using `connectAuthenticatedPtyHost` which sends
+ * `{ t: 'auth', token }` and replies `{ t: 'pong' }` to host heartbeats.
+ */
+export function createAuthenticatedDefaultSpawnPty(
+  ptyAuthBySock?: Map<string, string>,
+): SpawnPtyFn {
+  return (cmd, args, opts) => {
+    const ptyAuth = mintPtyAuthToken()
+    ptyAuthBySock?.set(opts.ptySock, ptyAuth)
+    const authEnv: Record<string, string | undefined> = {
+      ...opts.env,
+      CLAUDE_BG_PTY_AUTH: ptyAuth,
+    }
+    const spawnArgs = buildPtyHostSpawnArgs(cmd, args, {
+      cols: opts.cols,
+      rows: opts.rows,
+      ptySock: opts.ptySock,
+      runtimeFlags: process.execArgv ?? [],
+      bundled: isInBundledMode(),
+    })
+
+    if (process.platform === 'win32') {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { spawnViaWmiSync, waitForPidExit } =
+        require('../utils/wmiSpawn.js') as typeof import('../utils/wmiSpawn.js')
+      const wmi = spawnViaWmiSync(spawnArgs, authEnv as NodeJS.ProcessEnv, {
+        cwd: opts.cwd,
+      })
+      if (wmi.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getProcessLstartString } =
+          require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
+        const expectedStart = getProcessLstartString(wmi.pid).catch(
+          () => undefined,
+        )
+        const handle = {
+          exited: waitForPidExit(wmi.pid, { expectedStart }),
+          signalCode: null as string | null,
+        }
+        return connectAuthenticatedPtyHost(
+          opts.ptySock,
+          wmi.pid,
+          ptyAuth,
+          handle,
+        )
+      }
+      const child = nodeSpawn(spawnArgs[0]!, spawnArgs.slice(1), {
+        cwd: opts.cwd,
+        env: authEnv as NodeJS.ProcessEnv,
+        stdio: 'ignore',
+        detached: true,
+        windowsHide: true,
+      })
+      child.unref()
+      if (child.pid == null) {
+        throw new Error(
+          `spawned bg pty host has no pid on Windows (WMI: ${wmi.reason})`,
+        )
+      }
+      const handle = {
+        exited: Promise.resolve(-1) as Promise<number>,
+        signalCode: null as string | null,
+      }
+      handle.exited = new Promise<number>((resolve, reject) => {
+        child.once('error', reject)
+        child.once('exit', (code, signal) => {
+          child.removeListener('error', reject)
+          handle.signalCode = signal ?? null
+          resolve(code ?? 0)
+        })
+      }).catch(() => -1)
+      return connectAuthenticatedPtyHost(
+        opts.ptySock,
+        child.pid,
+        ptyAuth,
+        handle,
+      )
+    }
+
+    let child: ReturnType<typeof Bun.spawn>
+    const spawnOptsBase = {
+      cwd: opts.cwd,
+      env: authEnv,
+      detached: true as const,
+      windowsHide: true as const,
+    }
+    try {
+      const errPath = getPtyErrPath(opts.ptySock)
+      child = Bun.spawn(spawnArgs, {
+        ...spawnOptsBase,
+        stdio: ['ignore', 'ignore', Bun.file(errPath)],
+      })
+    } catch {
+      child = Bun.spawn(spawnArgs, {
+        ...spawnOptsBase,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      })
+    }
+    child.unref()
+    return connectAuthenticatedPtyHost(opts.ptySock, child.pid, ptyAuth, child)
+  }
+}
+
 export async function startBgManager(opts?: {
   onLog?: (msg: string) => void
   spawnPty?: SpawnPtyFn
@@ -498,11 +617,14 @@ export async function startBgManager(opts?: {
 }): Promise<BgManagerInstance> {
   const log = opts?.onLog ?? (() => {})
   const handles = new Map<string, BgWorker>()
+  const ptyAuthBySock = new Map<string, string>()
   const pendingSettleWrites = new Set<Promise<unknown>>()
   // Official: O = _.spawnPty ?? nqq(); j = _.spawnPty === void 0
   // Spare only uses the default Bun.spawn path when caller did not inject spawnPty.
   const usingDefaultSpawnPty = opts?.spawnPty === undefined
-  const spawnPty = opts?.spawnPty ?? createDefaultSpawnPty()
+  const spawnPty =
+    opts?.spawnPty ?? createAuthenticatedDefaultSpawnPty(ptyAuthBySock)
+  void createDefaultSpawnPty
   const onKeepAliveChange = opts?.onKeepAliveChange ?? (() => {})
   let closed = false
   let adoptionComplete = false
@@ -876,6 +998,7 @@ export async function startBgManager(opts?: {
             onKeepAliveChange,
             pendingSettleWrites,
             log,
+            ptyAuthBySock,
           )
           onKeepAliveChange()
           logEvent('tengu_bg_spare_claim', {
@@ -936,6 +1059,7 @@ export async function startBgManager(opts?: {
       onKeepAliveChange,
       pendingSettleWrites,
       log,
+      ptyAuthBySock,
     )
     onKeepAliveChange()
     refillSpare()
@@ -1069,7 +1193,7 @@ export async function startBgManager(opts?: {
 
   // Reap orphan PTY hosts not in roster (official GmO)
   if (!roster.parseFailed) {
-    await reapOrphanPtyHosts(handles, log)
+    await reapOrphanPtyHosts(handles, log, ptyAuthBySock)
   }
   // Reap orphan spare socks (official f3q) — only when roster parse ok.
   // Adoption finishes before refillSpare is eligible (needs adoptionComplete),

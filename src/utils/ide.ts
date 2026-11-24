@@ -3,9 +3,10 @@ import axios from 'axios'
 import { execa } from 'execa'
 import capitalize from 'lodash-es/capitalize.js'
 import memoize from 'lodash-es/memoize.js'
+import { realpath } from 'fs/promises'
 import { createConnection } from 'net'
 import * as os from 'os'
-import { basename, join, sep as pathSeparator, resolve } from 'path'
+import { basename, isAbsolute, join, sep as pathSeparator, resolve } from 'path'
 import { logEvent } from 'src/services/analytics/index.js'
 import { getIsScrollDraining, getOriginalCwd } from '../bootstrap/state.js'
 import { callIdeRpc } from '../services/mcp/client.js'
@@ -95,8 +96,62 @@ export type DetectedIDEInfo = {
   workspaceFolders: string[]
   url: string
   isValid: boolean
+  /** Official 2.1.328 (`chunk@294254613.js @4022700`): true when workspace contains cwd (false for `'inside-cwd'` sub-workspaces). */
+  workspaceContainsCwd?: boolean
   authToken?: string
   ideRunningInWindows?: boolean
+}
+
+export type IdeWorkspaceMatch = 'contains-cwd' | 'inside-cwd' | 'unrelated'
+
+/** Official `N3t` (`chunk@294254613.js @4021950`) — normalize Windows drive letter case. */
+function normalizeDriveLetter(pathStr: string): string {
+  return pathStr.replace(/^[a-zA-Z]:/, match => match.toUpperCase())
+}
+
+/** Official `gW(child, parent, caseInsensitive)` (`chunk@289034284.js @146374`). */
+function isPathWithinOrEqual(child: string, parent: string): boolean {
+  if (child === parent) return true
+  const sep = parent.startsWith('/') ? '/' : '\\'
+  const prefix = parent.endsWith(sep) ? parent : parent + sep
+  return child.startsWith(prefix)
+}
+
+/**
+ * Official `Fmo(cwd, workspacePath)` (`chunk@294254613.js @4021850`):
+ * Classify how an IDE workspace folder relates to the current working directory.
+ * - `'contains-cwd'`: cwd equals or is inside workspacePath
+ * - `'inside-cwd'`: workspacePath is a subdirectory inside cwd (e.g. monorepo sub-workspace)
+ * - `'unrelated'`: neither contains the other
+ */
+export function classifyIdeWorkspaceMatch(
+  cwd: string,
+  workspacePath: string,
+): IdeWorkspaceMatch {
+  const normCwd = normalizeDriveLetter(cwd.normalize('NFC'))
+  const normWorkspace = normalizeDriveLetter(workspacePath.normalize('NFC'))
+  if (isPathWithinOrEqual(normCwd, normWorkspace)) return 'contains-cwd'
+  if (isPathWithinOrEqual(normWorkspace, normCwd)) return 'inside-cwd'
+  return 'unrelated'
+}
+
+/**
+ * Official `sUs` deduplication (`chunk@294254613.js @4020100`):
+ * Deduplicate candidate IDE lockfile directories by canonical `realpath`
+ * (falling back to `resolve(dir)` when a directory does not yet exist).
+ */
+export async function deduplicateIdeLockfileDirs(
+  dirs: readonly string[],
+): Promise<string[]> {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const dir of dirs) {
+    const canonical = await realpath(dir).catch(() => resolve(dir))
+    if (seen.has(canonical)) continue
+    seen.add(canonical)
+    result.push(dir)
+  }
+  return result
 }
 
 export type IdeType =
@@ -463,7 +518,7 @@ export async function getIdeLockfilesPaths(): Promise<string[]> {
   const paths: string[] = [join(getClaudeConfigHomeDir(), 'ide')]
 
   if (getPlatform() !== 'wsl') {
-    return paths
+    return deduplicateIdeLockfileDirs(paths)
   }
 
   // For Windows, use heuristics to find the potential paths.
@@ -511,7 +566,7 @@ export async function getIdeLockfilesPaths(): Promise<string[]> {
       logError(error)
     }
   }
-  return paths
+  return deduplicateIdeLockfileDirs(paths)
 }
 
 /**
@@ -655,11 +710,11 @@ export async function findAvailableIDE(): Promise<DetectedIDEInfo | null> {
     if (signal.aborted) {
       return null
     }
-    // Return the IDE if and only if there is exactly one match, otherwise the user must
-    // use /ide to select an IDE. When running from a supported built-in terminal, detectIDEs()
-    // should return at most one IDE.
-    if (ides.length === 1) {
-      return ides[0]!
+    // Official `CGo` (`chunk@294254613.js @4021550`): auto-connect only when
+    // there is a single IDE whose workspace contains cwd (not merely inside-cwd).
+    const containing = ides.filter(ide => ide.workspaceContainsCwd !== false)
+    if (containing.length === 1) {
+      return containing[0]!
     }
     await sleep(1000, signal)
   }
@@ -681,11 +736,10 @@ export async function detectIDEs(
     const ssePort = process.env.CLAUDE_CODE_SSE_PORT
     const envPort = ssePort ? parseInt(ssePort, 10) : null
 
-    // Get the current working directory, normalized to NFC for consistent
-    // comparison. macOS returns NFD paths (decomposed Unicode), while IDEs
-    // like VS Code report NFC paths (composed Unicode). Without normalization,
-    // paths containing accented/CJK characters fail to match.
-    const cwd = getOriginalCwd().normalize('NFC')
+    // Get the current working directory, normalized to NFC (and upper-case
+    // Windows drive letter) for consistent comparison. macOS returns NFD paths
+    // while IDEs report NFC paths.
+    const cwd = normalizeDriveLetter(getOriginalCwd().normalize('NFC'))
 
     // Get sorted lockfiles (full paths) and read them all in parallel.
     // findAvailableIDE() polls this every 1s for up to 30s; serial I/O here was
@@ -699,11 +753,11 @@ export async function detectIDEs(
     const getAncestors = makeAncestorPidLookup()
     const needsAncestryCheck = getPlatform() !== 'wsl' && isSupportedTerminal()
 
-    // Try to find a lockfile that contains our current working directory
+    // Try to find a lockfile that matches our current working directory
     for (const lockfileInfo of lockfileInfos) {
       if (!lockfileInfo) continue
 
-      let isValid = false
+      let matchKind: IdeWorkspaceMatch = 'unrelated'
       // Official IDE_SKIP_VALID_CHECK densable.
       let skipValidCheck = isEnvTruthy(
         process.env.CLAUDE_CODE_IDE_SKIP_VALID_CHECK,
@@ -717,14 +771,16 @@ export async function detectIDEs(
         // keep raw env fallback
       }
       if (skipValidCheck) {
-        isValid = true
+        matchKind = 'contains-cwd'
       } else if (lockfileInfo.port === envPort) {
         // If the port matches the environment variable, mark as valid regardless of directory
-        isValid = true
+        matchKind = 'contains-cwd'
       } else {
-        // Otherwise, check if the current working directory is within the workspace folders
-        isValid = lockfileInfo.workspaceFolders.some(idePath => {
-          if (!idePath) return false
+        // Official `AGo` (`chunk@294254613.js @4022000`): classify each workspace
+        // folder as 'contains-cwd' | 'inside-cwd' | 'unrelated'. Prefer
+        // 'contains-cwd', and accept 'inside-cwd' for absolute sub-workspaces.
+        for (const idePath of lockfileInfo.workspaceFolders) {
+          if (!idePath) continue
 
           let localPath = idePath
 
@@ -736,17 +792,18 @@ export async function detectIDEs(
           ) {
             // Check for WSL distro mismatch
             if (!checkWSLDistroMatch(idePath, process.env.WSL_DISTRO_NAME)) {
-              return false
+              continue
             }
 
             // Try both the original path and the converted path
             // This handles cases where the IDE might report either format
             const resolvedOriginal = resolve(localPath).normalize('NFC')
             if (
-              cwd === resolvedOriginal ||
-              cwd.startsWith(resolvedOriginal + pathSeparator)
+              classifyIdeWorkspaceMatch(cwd, resolvedOriginal) ===
+              'contains-cwd'
             ) {
-              return true
+              matchKind = 'contains-cwd'
+              break
             }
 
             // Convert Windows IDE path to WSL local path and check that too
@@ -756,29 +813,21 @@ export async function detectIDEs(
             localPath = converter.toLocalPath(idePath)
           }
 
-          const resolvedPath = resolve(localPath).normalize('NFC')
-
-          // On Windows, normalize paths for case-insensitive drive letter comparison
-          if (getPlatform() === 'windows') {
-            const normalizedCwd = cwd.replace(/^[a-zA-Z]:/, match =>
-              match.toUpperCase(),
-            )
-            const normalizedResolvedPath = resolvedPath.replace(
-              /^[a-zA-Z]:/,
-              match => match.toUpperCase(),
-            )
-            return (
-              normalizedCwd === normalizedResolvedPath ||
-              normalizedCwd.startsWith(normalizedResolvedPath + pathSeparator)
-            )
-          }
-
-          return (
-            cwd === resolvedPath || cwd.startsWith(resolvedPath + pathSeparator)
+          const resolvedPath = normalizeDriveLetter(
+            resolve(localPath).normalize('NFC'),
           )
-        })
+          const folderMatch = classifyIdeWorkspaceMatch(cwd, resolvedPath)
+          if (folderMatch === 'contains-cwd') {
+            matchKind = 'contains-cwd'
+            break
+          }
+          if (folderMatch === 'inside-cwd' && isAbsolute(localPath)) {
+            matchKind = 'inside-cwd'
+          }
+        }
       }
 
+      const isValid = matchKind !== 'unrelated'
       if (!isValid && !includeInvalid) {
         continue
       }
@@ -825,6 +874,7 @@ export async function detectIDEs(
         workspaceFolders: lockfileInfo.workspaceFolders,
         port: lockfileInfo.port,
         isValid: isValid,
+        workspaceContainsCwd: matchKind === 'contains-cwd',
         authToken: lockfileInfo.authToken,
         ideRunningInWindows: lockfileInfo.runningInWindows,
       })

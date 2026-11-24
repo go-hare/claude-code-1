@@ -16,6 +16,7 @@ import {
   TASK_NOTIFICATION_TAG,
   TOOL_USE_ID_TAG,
 } from '../../constants/xml.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { logEvent } from '../../services/analytics/index.js';
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js';
 import type { AppState } from '../../state/AppState.js';
@@ -26,7 +27,12 @@ import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { tailFile } from '../../utils/fsOperations.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { logError } from '../../utils/log.js';
-import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
+import {
+  enqueuePendingNotification,
+  getActiveMessageQueue,
+  type MessageQueueInstance,
+  type QueuedCommand,
+} from '../../utils/messageQueueManager.js';
 import {
   backgroundShellDeadlineMs,
   buildBashTaskDeliverySnapshot,
@@ -66,8 +72,11 @@ import { isMainSessionTask } from '../LocalMainSessionTask.js';
 import { type BashTaskKind, isLocalShellTask, type LocalShellFlavor, type LocalShellTaskState } from './guards.js';
 import { killTask } from './killShellTasks.js';
 import {
+  evaluateMemoryPressureReap,
+  getLastPressureReapAt,
   hasActiveAgentishTasks,
-  shouldReapOnMemoryPressure,
+  setLastPressureReapAt,
+  SHELL_PRESSURE_SKIP_LOG_THROTTLE_MS,
   shouldRegisterShellPressureReap,
 } from './shellPressureReap.js';
 
@@ -269,61 +278,397 @@ function attachShellKeepalive(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Quiet Check-in Watchdog — Official `p1o` / `tUi` / `rUi`
+// (`chunk@294254613.js @5722000-5725800`)
+// ---------------------------------------------------------------------------
+
+const QUIET_CHECKIN_MAX_POLL_MS = 60_000; // VBi
+const QUIET_CHECKIN_MIN_THRESHOLD_MS = 10_000; // ZBi
+const QUIET_CHECKIN_MAX_BACKOFF_EXP = 4; // f1o
+
+export function getQuietCheckinThresholdMs(): number {
+  const val = getFeatureValue_CACHED_MAY_BE_STALE('tengu_silent_heron', 0);
+  return typeof val === 'number' && Number.isFinite(val) && val >= QUIET_CHECKIN_MIN_THRESHOLD_MS ? val : 0;
+}
+
+function formatQuietDuration(ms: number): string {
+  const totalSec = Math.max(1, Math.round(ms / 1000));
+  if (totalSec < 60) return `${totalSec}s`;
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  if (mins < 60) return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`;
+}
+
+type QuietCheckinWatch = {
+  taskId: string;
+  description: string;
+  taskRegistry: TaskRegistry;
+  toolUseId?: string;
+  agentId?: AgentId;
+  owner: QuietShellOwnerState;
+  queue: MessageQueueInstance;
+  lastSize: number;
+  lastOutputAt: number;
+  getOutputSize: (taskId: string) => Promise<number>;
+  getThresholdMs: () => number;
+  getNow: () => number;
+  getLastInteraction: () => number;
+  isMainLoopBusy: () => boolean;
+};
+
+type QuietShellOwnerState = {
+  agentId: AgentId;
+  watches: Set<QuietCheckinWatch>;
+  pollMs: number;
+  timer: ReturnType<typeof setInterval> | undefined;
+  lastPollAt: number;
+  checkins: number;
+  lastCheckinAt: number;
+  previousCheckinAt: number;
+};
+
+const quietShellOwners = new Map<AgentId, QuietShellOwnerState>();
+
+export function resetQuietCheckinOwnersForTests(): void {
+  for (const owner of quietShellOwners.values()) {
+    if (owner.timer !== undefined) clearInterval(owner.timer);
+    owner.watches.clear();
+  }
+  quietShellOwners.clear();
+}
+
+function getQuietShellOwner(agentId: AgentId): QuietShellOwnerState {
+  const existing = quietShellOwners.get(agentId);
+  if (existing !== undefined) return existing;
+  const mainId = getMainThreadAgentId();
+  for (const [key, state] of quietShellOwners) {
+    if (state.watches.size === 0 && key !== mainId) {
+      quietShellOwners.delete(key);
+    }
+  }
+  const created: QuietShellOwnerState = {
+    agentId,
+    watches: new Set(),
+    pollMs: 0,
+    timer: undefined,
+    lastPollAt: 0,
+    checkins: 0,
+    lastCheckinAt: 0,
+    previousCheckinAt: 0,
+  };
+  quietShellOwners.set(agentId, created);
+  return created;
+}
+
+function detachQuietWatch(watch: QuietCheckinWatch): void {
+  const owner = watch.owner;
+  owner.watches.delete(watch);
+  if (owner.watches.size === 0 && owner.timer !== undefined) {
+    clearInterval(owner.timer);
+    owner.timer = undefined;
+  }
+}
+
+function isQuietCheckinCommandForOwner(cmd: QueuedCommand, owner: QuietShellOwnerState): boolean {
+  return (
+    cmd.origin?.kind === 'task-notification' && cmd.origin.source === 'shell-checkin' && cmd.agentId === owner.agentId
+  );
+}
+
+function evaluateQuietCheckinTick(
+  owner: QuietShellOwnerState,
+  watches: QuietCheckinWatch[],
+  sizes: Array<number | undefined>,
+): void {
+  const firstWatch = watches[0];
+  if (!firstWatch) return;
+  const thresholdMs = firstWatch.getThresholdMs();
+  if (owner.timer === undefined || thresholdMs <= 0) return;
+
+  const now = firstWatch.getNow();
+  const elapsedSincePoll = now - owner.lastPollAt - owner.pollMs;
+  const suspendDrift = elapsedSincePoll > owner.pollMs ? elapsedSincePoll : 0;
+  owner.lastPollAt = now;
+  owner.lastCheckinAt = Math.min(now, owner.lastCheckinAt + suspendDrift);
+
+  const lastInteraction = firstWatch.getLastInteraction();
+  if (owner.agentId === getMainThreadAgentId() && lastInteraction > owner.lastCheckinAt) {
+    owner.checkins = 0;
+  }
+
+  const eligible: Array<{ watch: QuietCheckinWatch; task: LocalShellTaskState }> = [];
+  for (let idx = 0; idx < watches.length; idx++) {
+    const watch = watches[idx]!;
+    watch.lastOutputAt = Math.min(now, watch.lastOutputAt + suspendDrift);
+    const size = sizes[idx];
+    if (size === undefined || !owner.watches.has(watch)) continue;
+    if (size > watch.lastSize) {
+      watch.lastSize = size;
+      watch.lastOutputAt = now;
+    }
+    const task = watch.taskRegistry.get(watch.taskId);
+    if (
+      isLocalShellTask(task) &&
+      task.status === 'running' &&
+      !task.notified &&
+      task.shellCommand?.status === 'backgrounded'
+    ) {
+      eligible.push({ watch, task });
+    }
+  }
+
+  const waitMs = thresholdMs * 2 ** Math.min(owner.checkins, QUIET_CHECKIN_MAX_BACKOFF_EXP);
+  const candidate = eligible.find(({ watch }) => now - Math.max(watch.lastOutputAt, owner.lastCheckinAt) >= waitMs);
+  if (candidate === undefined) return;
+  if (now - lastInteraction < thresholdMs) return;
+  if (candidate.watch.isMainLoopBusy() || hasActiveAgentishTasks(candidate.watch.taskRegistry.all())) return;
+  if (candidate.watch.queue.peek(cmd => isQuietCheckinCommandForOwner(cmd, owner)) !== undefined) return;
+
+  const { watch, task } = candidate;
+  const silenceMs = now - watch.lastOutputAt;
+  const othersList = eligible
+    .filter(item => item !== candidate)
+    .map(
+      item =>
+        `\n- ${item.watch.taskId} "${escapeXml(truncateNotificationSummary(item.watch.description))}": no new output for ${formatQuietDuration(now - item.watch.lastOutputAt)}, output file ${getTaskOutputPath(item.watch.taskId)}`,
+    )
+    .join('');
+  const nextWaitMs = thresholdMs * 2 ** Math.min(owner.checkins + 1, QUIET_CHECKIN_MAX_BACKOFF_EXP);
+  const outputPath = getTaskOutputPath(watch.taskId);
+  const toolUseIdLine = watch.toolUseId
+    ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(watch.toolUseId)}</${TOOL_USE_ID_TAG}>`
+    : '';
+  const summary = truncateNotificationSummary(
+    `${BACKGROUND_BASH_SUMMARY_PREFIX}"${watch.description}" is still running after ${formatQuietDuration(now - task.startTime)}, with no new output for ${formatQuietDuration(silenceMs)}`,
+  );
+  const message = `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(watch.taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
+<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+</${TASK_NOTIFICATION_TAG}>
+This is a check-in, not a completion. The command may be working quietly, or it may be hung: waiting on a lock, on input, or on a process that will never exit. Find out which before you wait any longer: read its output file and look at its processes. If it is stuck, stop this task and get the work done another way. If it is making progress, or is meant to keep running (a server, a watcher), leave it and end your turn. The next check-in comes after another ${formatQuietDuration(nextWaitMs)} of silence.${
+    othersList
+      ? `\nIt speaks for your other background commands too, which get none of their own. Look at any that has been silent for longer than it should:${othersList}`
+      : ''
+  }`;
+
+  watch.queue.enqueuePendingNotification(
+    {
+      value: message,
+      mode: 'task-notification',
+      origin: { kind: 'task-notification', source: 'shell-checkin', slug: watch.taskId },
+      skipAttachments: true,
+      priority: 'next',
+      agentId: owner.agentId,
+    },
+    { turnAttribution: 'inherit' },
+  );
+  owner.previousCheckinAt = owner.lastCheckinAt;
+  owner.lastCheckinAt = now;
+  owner.checkins++;
+  leftoverY('task_local_shell_quiet_checkin');
+  logForDebugging(
+    `LocalShellTask ${watch.taskId}: quiet check-in #${owner.checkins} for ${eligible.length} command(s) after ${silenceMs}ms of silence`,
+  );
+}
+
+function pollQuietCheckinOwner(owner: QuietShellOwnerState): void {
+  const watches = [...owner.watches];
+  if (watches.length === 0) return;
+  const thresholdMs = watches[0]!.getThresholdMs();
+  if (thresholdMs <= 0) {
+    watches.forEach(detachQuietWatch);
+    return;
+  }
+  void Promise.all(watches.map(w => w.getOutputSize(w.taskId).catch(() => undefined))).then(sizes => {
+    try {
+      evaluateQuietCheckinTick(owner, watches, sizes);
+    } catch (err) {
+      watches.forEach(detachQuietWatch);
+      leftoverM('task_local_shell_quiet_checkin', 'threw');
+      logError(err);
+    }
+  });
+}
+
 /**
- * Official $xu — register memoryPressure listener for main-thread bg shells.
- * Returns dispose (off listener). No-op when gated off.
+ * Official `p1o` (`chunk@294254613.js @5722300`):
+ * Register a background shell task for periodic quiet check-in notifications
+ * (`shell-checkin` / `task_local_shell_quiet_checkin`) after extended silence.
  */
-function installShellPressureReap(
+export function startQuietCheckin(
+  opts: {
+    taskId: string;
+    description: string;
+    taskRegistry: TaskRegistry;
+    toolUseId?: string;
+    kind?: BashTaskKind;
+    agentId?: AgentId;
+  },
+  deps?: {
+    queue?: MessageQueueInstance;
+    thresholdMs?: number;
+    pollMs?: number;
+    getOutputSize?: (taskId: string) => Promise<number>;
+    getNow?: () => number;
+    getLastInteraction?: () => number;
+    isMainLoopBusy?: () => boolean;
+  },
+): () => void {
+  if (opts.kind === 'monitor') return () => {};
+  const getThresholdMs = deps?.thresholdMs !== undefined ? () => deps.thresholdMs! : getQuietCheckinThresholdMs;
+  const thresholdMs = getThresholdMs();
+  if (thresholdMs <= 0) return () => {};
+  if (!getIsInteractive() && deps?.thresholdMs === undefined) return () => {};
+
+  const getNow = deps?.getNow ?? Date.now;
+  const now = getNow();
+  const ownerId = opts.agentId ?? getMainThreadAgentId();
+  const owner = getQuietShellOwner(ownerId);
+  const queue = deps?.queue ?? getActiveMessageQueue();
+
+  const watch: QuietCheckinWatch = {
+    taskId: opts.taskId,
+    description: opts.description,
+    taskRegistry: opts.taskRegistry,
+    toolUseId: opts.toolUseId,
+    agentId: opts.agentId,
+    owner,
+    queue,
+    lastSize: 0,
+    lastOutputAt: now,
+    getOutputSize: deps?.getOutputSize ?? getTaskOutputSize,
+    getThresholdMs,
+    getNow,
+    getLastInteraction: deps?.getLastInteraction ?? getLastInteractionTime,
+    isMainLoopBusy: deps?.isMainLoopBusy ?? getMainLoopBusy,
+  };
+
+  owner.watches.add(watch);
+  if (owner.timer === undefined) {
+    owner.pollMs = deps?.pollMs ?? Math.min(QUIET_CHECKIN_MAX_POLL_MS, Math.ceil(thresholdMs / 4));
+    owner.lastPollAt = now;
+    owner.timer = setInterval(pollQuietCheckinOwner, owner.pollMs, owner);
+    owner.timer.unref?.();
+  }
+
+  return () => {
+    detachQuietWatch(watch);
+    const removed = queue.removeByFilter(cmd => isQuietCheckinCommandForOwner(cmd, owner));
+    if (removed.length > 0) {
+      owner.checkins = Math.max(0, owner.checkins - 1);
+      owner.lastCheckinAt = owner.previousCheckinAt;
+    }
+  };
+}
+
+/**
+ * Official $xu / eqo (`chunk@294254613.js @5729800-5730800`) — register
+ * `memoryPressure` listener for main-thread bg shells.
+ * Only reaps when `level === 'critical'`, enforces 30m anti-churn
+ * (`lastPressureReapAt` with no terminal input since), and verifies host memory
+ * scarcity via `checkHostMemoryScarce()`.
+ */
+export function installShellPressureReap(
   taskId: string,
   description: string,
   registry: TaskRegistry,
   toolUseId?: string,
   kind?: BashTaskKind,
   agentId?: AgentId,
+  testOverrides?: {
+    isInteractive?: boolean;
+    getLastInteraction?: () => number;
+    isMainLoopBusy?: () => boolean;
+    getNow?: () => number;
+    checkHostMemory?: () => { scarce: boolean; detail: string };
+  },
 ): () => void {
   if (
     !shouldRegisterShellPressureReap({
       agentId,
       kind,
-      isInteractive: getIsInteractive(),
+      isInteractive: testOverrides?.isInteractive ?? getIsInteractive(),
     })
   ) {
     return () => {};
   }
 
   type MemoryPressureProcess = NodeJS.Process & {
-    on(event: 'memoryPressure', listener: () => void): NodeJS.Process;
-    off(event: 'memoryPressure', listener: () => void): NodeJS.Process;
+    on(event: 'memoryPressure', listener: (level?: string) => void): NodeJS.Process;
+    off(event: 'memoryPressure', listener: (level?: string) => void): NodeJS.Process;
   };
   const proc = process as MemoryPressureProcess;
+  const skipLoggedAt = new Map<string, number>();
 
-  const onPressure = (): void => {
-    const task = registry.get(taskId);
-    if (
-      !shouldReapOnMemoryPressure({
-        status: task?.status,
-        notified: task?.notified,
-        lastInteractionTime: getLastInteractionTime(),
-        mainLoopBusy: getMainLoopBusy(),
+  const onPressure = (level?: string): void => {
+    try {
+      const task = registry.get(taskId);
+      if (
+        !isLocalShellTask(task) ||
+        task.status !== 'running' ||
+        task.notified ||
+        (task.shellCommand && task.shellCommand.status !== 'backgrounded')
+      ) {
+        return;
+      }
+      const now = testOverrides?.getNow ? testOverrides.getNow() : Date.now();
+      const lastInteraction = testOverrides?.getLastInteraction
+        ? testOverrides.getLastInteraction()
+        : getLastInteractionTime();
+      const decision = evaluateMemoryPressureReap({
+        level,
+        status: task.status,
+        notified: task.notified,
+        shellCommandStatus: task.shellCommand?.status,
+        lastInteractionTime: lastInteraction,
+        now,
+        mainLoopBusy: testOverrides?.isMainLoopBusy ? testOverrides.isMainLoopBusy() : getMainLoopBusy(),
         hasActiveAgentTasks: hasActiveAgentishTasks(registry.all()),
-      })
-    ) {
-      return;
+        lastPressureReapAt: getLastPressureReapAt(),
+        taskStartTime: task.startTime,
+        checkHostMemory: testOverrides?.checkHostMemory,
+      });
+      if (!decision.shouldReap) {
+        if (decision.skipReason !== undefined) {
+          const prev = skipLoggedAt.get(decision.skipReason);
+          if (prev === undefined || now - prev >= SHELL_PRESSURE_SKIP_LOG_THROTTLE_MS) {
+            skipLoggedAt.set(decision.skipReason, now);
+            logForDebugging(
+              `LocalShellTask ${taskId}: memory-pressure reap skipped: ${decision.skipReason}${
+                decision.memoryDetail ? ` (${decision.memoryDetail})` : ''
+              }`,
+            );
+          }
+        }
+        return;
+      }
+      logForDebugging(
+        `LocalShellTask ${taskId}: reaped under critical memory pressure after ${Math.floor((now - lastInteraction) / 60_000)}m idle (${decision.memoryDetail})`,
+      );
+      leftoverY('task_local_shell_pressure_reap');
+      setLastPressureReapAt(now);
+      // Official F9r then t5e — notify first, then kill.
+      void enqueueShellNotification(
+        taskId,
+        description,
+        'killed',
+        undefined,
+        registry,
+        toolUseId,
+        kind ?? 'bash',
+        agentId,
+        'memory_pressure',
+      );
+      killTask(taskId, registry);
+    } catch (err) {
+      leftoverM('task_local_shell_pressure_reap', 'threw');
+      logError(err);
     }
-    leftoverY('task_local_shell_pressure_reap');
-    // Official F9r then t5e — notify first, then kill.
-    void enqueueShellNotification(
-      taskId,
-      description,
-      'killed',
-      undefined,
-      registry,
-      toolUseId,
-      kind ?? 'bash',
-      agentId,
-      'memory_pressure',
-    );
-    killTask(taskId, registry);
   };
 
   proc.on('memoryPressure', onPressure);
@@ -719,9 +1064,18 @@ export async function spawnShellTask(
       : () => {};
 
   const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
+  const disposeQuietCheckin = startQuietCheckin({
+    taskId,
+    description,
+    taskRegistry: registry,
+    toolUseId,
+    kind,
+    agentId,
+  });
 
   const settled = shellCommand.result.then(async result => {
     cancelStallWatchdog();
+    disposeQuietCheckin();
     disposePressureReap();
     await flushAndCleanup(shellCommand);
     let wasKilled = false;
@@ -857,6 +1211,14 @@ export function backgroundTask(
   // densable `_un` s.update → updateTaskState already emits task_updated.
 
   const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
+  const disposeQuietCheckin = startQuietCheckin({
+    taskId,
+    description,
+    taskRegistry: registry,
+    toolUseId,
+    kind,
+    agentId,
+  });
 
   // densable xmn on Ctrl+B / tNr: pressure + h9n(undefined)
   const disposePressureReap = installShellPressureReap(taskId, description, registry, toolUseId, kind, agentId);
@@ -868,6 +1230,7 @@ export function backgroundTask(
   // Set up result handler
   void shellCommand.result.then(async result => {
     cancelStallWatchdog();
+    disposeQuietCheckin();
     disposePressureReap();
     await flushAndCleanup(shellCommand);
     let wasKilled = false;
@@ -1064,6 +1427,13 @@ export function backgroundExistingForegroundTask(
   // Official YJn → $xu: pressure reap on auto-backgrounded foreground tasks
   // densable xmn/Ovu always have Xm — do not skip Gge when owner keepalive should attach.
   const autoBgRegistry = createTaskRegistry(getAppState, setAppState);
+  const disposeQuietCheckin = startQuietCheckin({
+    taskId,
+    description,
+    taskRegistry: autoBgRegistry,
+    toolUseId,
+    agentId,
+  });
   const disposePressureReap = installShellPressureReap(
     taskId,
     description,
@@ -1080,6 +1450,7 @@ export function backgroundExistingForegroundTask(
   // Set up result handler (mirrors backgroundTask's handler)
   void shellCommand.result.then(async result => {
     cancelStallWatchdog();
+    disposeQuietCheckin();
     disposePressureReap();
     await flushAndCleanup(shellCommand);
     let wasKilled = false;

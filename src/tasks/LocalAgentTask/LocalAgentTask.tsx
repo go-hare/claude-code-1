@@ -21,7 +21,6 @@ import { createTaskStateBase, isTerminalTaskStatus } from '../../Task.js';
 import type { Tools } from '../../Tool.js';
 import { findToolByName } from '../../Tool.js';
 import type { AgentToolResult } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js';
-import { VERIFICATION_AGENT_TYPE } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
 import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js';
 import { SUBAGENT_HANDBACK_TOOL_NAME } from '@claude-code/builtin-tools/tools/SubagentHandbackTool/constants.js';
 import { type AgentDefinition, isBuiltInAgent } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
@@ -1632,21 +1631,6 @@ export async function enqueueAgentNotification({
 
   if (registry.mutateAppState) {
     abortSpeculation(registry.mutateAppState);
-    if (claimedTask?.agentType === VERIFICATION_AGENT_TYPE) {
-      registry.mutateAppState(prev => {
-        const pending = prev.pendingPlanVerification;
-        if (!pending || !pending.verificationStarted || pending.verificationCompleted) {
-          return prev;
-        }
-        return {
-          ...prev,
-          pendingPlanVerification: {
-            ...pending,
-            verificationCompleted: true,
-          },
-        };
-      });
-    }
   }
 
   // densable BRt summary wording

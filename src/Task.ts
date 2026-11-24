@@ -15,6 +15,8 @@ export type TaskType =
   | 'monitor_ws'
   | 'dream'
   | 'auto_mode_scan'
+  | 'local_memory_import'
+  | 'post_turn_memory'
 
 export type TaskStatus =
   | 'pending'
@@ -61,6 +63,8 @@ export type TaskStateBase = {
   outputFile: string
   outputOffset: number
   notified: boolean
+  /** Official 2.1.328 (`chunk@292558663.js @1700`): optional use-case tag active when task started. */
+  startedUnderUseCase?: string
 }
 
 export type LocalShellSpawnInput = {
@@ -95,7 +99,7 @@ export type Task = {
   ): Promise<void>
 }
 
-// Task ID prefixes
+// Task ID prefixes (Official 2.1.328 `chunk@292558663.js @1219`)
 const TASK_ID_PREFIXES: Record<string, string> = {
   local_bash: 'b', // Keep as 'b' for backward compatibility
   local_agent: 'a',
@@ -104,11 +108,11 @@ const TASK_ID_PREFIXES: Record<string, string> = {
   local_workflow: 'w',
   monitor_mcp: 'm',
   mcp_task: 'k',
-  // densable MonitorWsTask / Kam — Artifact comment monitor
-  monitor_ws: 'c',
+  monitor_ws: 's',
   dream: 'd',
-  // densable oyg auto_mode_scan:"e"
   auto_mode_scan: 'e',
+  local_memory_import: 'n',
+  post_turn_memory: 'p',
 }
 
 // Get task ID prefix
@@ -135,6 +139,8 @@ export function createTaskStateBase(
   type: TaskType,
   description: string,
   toolUseId?: string,
+  outputKey: string = id,
+  startedUnderUseCase?: string,
 ): TaskStateBase {
   return {
     id,
@@ -143,8 +149,9 @@ export function createTaskStateBase(
     description,
     toolUseId,
     startTime: Date.now(),
-    outputFile: getTaskOutputPath(id),
+    outputFile: getTaskOutputPath(outputKey),
     outputOffset: 0,
     notified: false,
+    ...(startedUnderUseCase !== undefined ? { startedUnderUseCase } : {}),
   }
 }

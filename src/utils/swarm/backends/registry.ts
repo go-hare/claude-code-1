@@ -1,7 +1,13 @@
 import { getIsNonInteractiveSession } from '../../../bootstrap/state.js'
 import { logForDebugging } from '../../../utils/debug.js'
+import { isEnvTruthy } from '../../../utils/envUtils.js'
 import { errorMessage } from '../../../utils/errors.js'
+import { leftoverM, leftoverY } from '../../../utils/leftoverOt.js'
 import { getPlatform } from '../../../utils/platform.js'
+import {
+  getInitialSettings,
+  getSettingsForSource,
+} from '../../../utils/settings/settings.js'
 import {
   isInITerm2,
   isInWindowsTerminal,
@@ -171,9 +177,39 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
 
   logForDebugging('[BackendRegistry] Starting backend detection...')
 
+  // Check explicit teammateMode === 'iterm2' BEFORE tmux detection
+  // (Official `Hjr` in chunk@312276971.js @4100-4700).
+  const inITerm2 = isInITerm2()
+  if (getTeammateMode() === 'iterm2') {
+    if (!inITerm2) {
+      leftoverM('swarm_backend_detect', 'iterm2_explicit_not_in_iterm2')
+      throw new Error(
+        'teammateMode is set to "iterm2" but this session is not running inside iTerm2. Launch Claude from iTerm2, or change teammateMode in settings.',
+      )
+    }
+    const it2Available = await isIt2CliAvailable()
+    if (!it2Available) {
+      leftoverM('swarm_backend_detect', 'iterm2_explicit_no_it2')
+      throw new Error(
+        'teammateMode is set to "iterm2" but the it2 CLI is not reachable. Install it with `pip install it2` and enable the Python API in iTerm2 (Preferences > General > Magic > Enable Python API).',
+      )
+    }
+    logForDebugging(
+      '[BackendRegistry] Selected: iterm2 (explicit teammateMode)',
+    )
+    const backend = createITermBackend()
+    cachedBackend = backend
+    cachedDetectionResult = {
+      backend,
+      isNative: true,
+      needsIt2Setup: false,
+    }
+    leftoverY('swarm_backend_detect')
+    return cachedDetectionResult
+  }
+
   // Check all environment conditions upfront for logging
   const insideTmux = await isInsideTmux()
-  const inITerm2 = isInITerm2()
   const inWindowsTerminal = isInWindowsTerminal()
 
   logForDebugging(
@@ -398,24 +434,73 @@ export function markInProcessFallback(): void {
   inProcessFallbackActive = true
 }
 
+export type RegistryTeammateMode =
+  | 'auto'
+  | 'tmux'
+  | 'iterm2'
+  | 'windows-terminal'
+  | 'in-process'
+
 /**
  * Gets the teammate mode for this session.
  * Returns the session snapshot captured at startup, ignoring runtime config changes.
  */
-function getTeammateMode():
-  | 'auto'
-  | 'tmux'
-  | 'windows-terminal'
-  | 'in-process' {
-  return getTeammateModeFromSnapshot()
+function getTeammateMode(): RegistryTeammateMode {
+  return getTeammateModeFromSnapshot() as RegistryTeammateMode
+}
+
+type OutsideReadPermissionFlags = {
+  blockFileToolReadsOutsideWorkingDirectories?: boolean
+  blockReadsOutsideWorkingDirectories?: boolean
+}
+
+/**
+ * Official `_q()` + outside-read settings check (`chunk@312276971.js @7728`):
+ * Returns true when file-tool or general outside-working-directory read blocking
+ * is active, forcing teammates into in-process mode so they inherit the parent
+ * session's read fence instead of spawning an unfenced pane process.
+ */
+function hasOutsideReadBlockSetting(
+  perms: OutsideReadPermissionFlags | undefined,
+): boolean {
+  return (
+    perms?.blockFileToolReadsOutsideWorkingDirectories === true ||
+    perms?.blockReadsOutsideWorkingDirectories === true
+  )
+}
+
+function isOutsideReadBlockActive(): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    return false
+  }
+  try {
+    const flagPerms = getSettingsForSource('flagSettings')?.permissions as
+      | OutsideReadPermissionFlags
+      | undefined
+    if (hasOutsideReadBlockSetting(flagPerms)) {
+      return true
+    }
+    const mergedPerms = getInitialSettings()?.permissions as
+      | OutsideReadPermissionFlags
+      | undefined
+    if (hasOutsideReadBlockSetting(mergedPerms)) {
+      return true
+    }
+  } catch {
+    // Ignore when settings subsystem is unavailable in minimal test contexts
+  }
+  return false
 }
 
 /**
  * Checks if in-process teammate execution is enabled.
  *
  * Logic:
+ * - If non-interactive session, always enabled
+ * - If permissions.blockFileToolReadsOutsideWorkingDirectories or
+ *   permissions.blockReadsOutsideWorkingDirectories is set, force enabled
  * - If teammateMode is 'in-process', always enabled
- * - If teammateMode is 'tmux', always disabled (use pane backend)
+ * - If teammateMode is 'tmux', 'iterm2', or 'windows-terminal', disabled (use pane backend)
  * - If teammateMode is 'auto' (default), check environment:
  *   - If inside tmux, use pane backend (return false)
  *   - If inside iTerm2, use pane backend (return false) - detectAndGetBackend()
@@ -433,12 +518,25 @@ export function isInProcessEnabled(): boolean {
     return true
   }
 
+  // Official `X5n` (`chunk@312276971.js @7728`): force in-process when
+  // outside-working-directory read blocking is configured.
+  if (isOutsideReadBlockActive()) {
+    logForDebugging(
+      '[BackendRegistry] isInProcessEnabled: true (permissions.blockFileToolReadsOutsideWorkingDirectories)',
+    )
+    return true
+  }
+
   const mode = getTeammateMode()
 
   let enabled: boolean
   if (mode === 'in-process') {
     enabled = true
-  } else if (mode === 'tmux' || mode === 'windows-terminal') {
+  } else if (
+    mode === 'tmux' ||
+    mode === 'iterm2' ||
+    mode === 'windows-terminal'
+  ) {
     enabled = false
   } else {
     // 'auto' mode - if a prior spawn fell back to in-process because no pane

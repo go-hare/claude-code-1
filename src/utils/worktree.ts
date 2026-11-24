@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import chalk from 'chalk'
 import { spawnSync } from 'child_process'
 import { constants as fsConstants, statSync } from 'fs'
@@ -254,24 +253,175 @@ async function mkdirRecursive(dirPath: string): Promise<void> {
   await mkdir(dirPath, { recursive: true })
 }
 
+const WINDOWS_RESERVED_NAME_RE =
+  /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i
+const WINDOWS_DRIVE_OR_UNC_RE = /^(?:[a-zA-Z]:|[/\\]{2}|\\\?\?\\)/
+const DOTDOT_VARIANT_RE = /^\.\.[ .]*$/
+
+/**
+ * Official `gzs` (`chunk@294254613.js @4411000`):
+ * Reject traversal segments, absolute paths, drive-prefixed / UNC / NT paths,
+ * NUL bytes, and empty entries in `worktree.symlinkDirectories`.
+ */
+export function isUnsafeSymlinkDirectoryEntry(dir: string): boolean {
+  if (!dir || dir.trim() === '' || dir.includes('\0')) return true
+  if (containsPathTraversal(dir)) return true
+  if (isAbsolute(dir)) return true
+  if (WINDOWS_DRIVE_OR_UNC_RE.test(dir)) return true
+  return dir.split(/[/\\]/).some(segment => DOTDOT_VARIANT_RE.test(segment))
+}
+
+function isPathEqualOrInsideRoot(candidate: string, realRoot: string): boolean {
+  if (candidate === realRoot) return true
+  const prefix = realRoot.endsWith(sep) ? realRoot : realRoot + sep
+  return candidate.startsWith(prefix)
+}
+
+/**
+ * Official `uNt` (`chunk@294254613.js @4411150`):
+ * Verify that `destPath` is strictly confined inside `worktreePath` / `realWorktree`
+ * and that no existing ancestor or intermediate component is a symlink that could
+ * redirect creation outside the worktree.
+ */
+export async function isUnsafeWorktreeWriteDestination(
+  destPath: string,
+  worktreePath: string,
+  realWorktree: string,
+): Promise<boolean> {
+  const rel = relative(worktreePath, destPath)
+  if (rel === '' || isAbsolute(rel)) return true
+  if (destPath !== join(worktreePath, rel)) return true
+
+  const isWin = process.platform === 'win32'
+  for (const seg of rel.split(sep)) {
+    if (
+      seg === '' ||
+      seg === '..' ||
+      /~\d/.test(seg) ||
+      seg.endsWith('.') ||
+      seg.endsWith(' ') ||
+      seg.includes(':') ||
+      (sep === '/' && seg.includes('\\')) ||
+      seg.toLowerCase() === '.git' ||
+      (isWin && WINDOWS_RESERVED_NAME_RE.test(seg))
+    ) {
+      return true
+    }
+  }
+
+  // Walk upward from dirname(destPath) to verify the deepest existing ancestor
+  // resolves inside realWorktree without symlink redirection.
+  let ancestor = dirname(destPath)
+  for (;;) {
+    try {
+      const realAncestor = await realpath(ancestor)
+      if (!isPathEqualOrInsideRoot(realAncestor, realWorktree)) {
+        return true
+      }
+      const expectedRealAncestor = join(
+        realWorktree,
+        relative(worktreePath, ancestor),
+      )
+      if (realAncestor !== expectedRealAncestor) {
+        return true
+      }
+      break
+    } catch (err) {
+      if (getErrnoCode(err) !== 'ENOENT') return true
+      // Dangling symlink at ancestor: realpath throws ENOENT, lstat succeeds.
+      const lstatResult = await lstat(ancestor).catch(lstatErr =>
+        getErrnoCode(lstatErr) === 'ENOENT' ? null : lstatErr,
+      )
+      if (lstatResult !== null) return true
+      const parent = dirname(ancestor)
+      if (parent === ancestor) return true
+      ancestor = parent
+    }
+  }
+
+  // Walk every intermediate directory component top-down with lstat to reject
+  // any intermediate symlink between worktreePath and destPath.
+  const parentRel = relative(worktreePath, dirname(destPath))
+  if (parentRel !== '') {
+    if (isAbsolute(parentRel) || parentRel.split(sep).includes('..')) {
+      return true
+    }
+    let current = worktreePath
+    for (const part of parentRel.split(sep)) {
+      current = join(current, part)
+      try {
+        if ((await lstat(current)).isSymbolicLink()) {
+          return true
+        }
+      } catch (err) {
+        if (getErrnoCode(err) !== 'ENOENT') return true
+        break
+      }
+    }
+  }
+
+  // Finally check destPath itself: reject existing symlinks or mismatched realpaths.
+  try {
+    const destStat = await lstat(destPath)
+    if (destStat.isSymbolicLink()) return true
+    if (isWin || destStat.isFile() || destStat.isDirectory()) {
+      try {
+        const realDest = await realpath(destPath)
+        if (realDest !== join(realWorktree, rel)) return true
+      } catch {
+        return true
+      }
+    }
+  } catch (err) {
+    if (getErrnoCode(err) !== 'ENOENT') return true
+  }
+
+  return false
+}
+
 /**
  * Symlinks directories from the main repository to avoid duplication.
  * This prevents disk bloat from duplicating node_modules and other large directories.
+ *
+ * Hardened against path traversal, absolute paths, and symlink escapes
+ * (official `hzs` / `gzs` / `uNt` in `chunk@294254613.js @4411000-4413200`).
  *
  * @param repoRootPath - Path to the main repository root
  * @param worktreePath - Path to the worktree directory
  * @param dirsToSymlink - Array of directory names to symlink (e.g., ['node_modules'])
  */
-async function symlinkDirectories(
+export async function symlinkDirectories(
   repoRootPath: string,
   worktreePath: string,
   dirsToSymlink: string[],
 ): Promise<void> {
+  let realWorktree: string
+  try {
+    realWorktree = await realpath(worktreePath)
+  } catch (err) {
+    logForDebugging(
+      `Skipping symlinkDirectories: realpath(${worktreePath}) failed: ${errorMessage(err)}`,
+      { level: 'warn' },
+    )
+    return
+  }
+
+  let realRepoRoot: string
+  try {
+    realRepoRoot = await realpath(repoRootPath)
+  } catch (err) {
+    logForDebugging(
+      `Skipping symlinkDirectories: realpath(${repoRootPath}) failed: ${errorMessage(err)}`,
+      { level: 'warn' },
+    )
+    return
+  }
+
   for (const dir of dirsToSymlink) {
-    // Validate directory doesn't escape repository boundaries
-    if (containsPathTraversal(dir)) {
+    // Reject traversal, absolute paths, drive-prefixed and UNC paths
+    if (isUnsafeSymlinkDirectoryEntry(dir)) {
       logForDebugging(
-        `Skipping symlink for "${dir}": path traversal detected`,
+        `Skipping symlink for "${dir}": path traversal or absolute path`,
         { level: 'warn' },
       )
       continue
@@ -280,6 +430,46 @@ async function symlinkDirectories(
     const sourcePath = join(repoRootPath, dir)
     const destPath = join(worktreePath, dir)
 
+    // Verify every intermediate component & destination stay inside realWorktree
+    if (
+      await isUnsafeWorktreeWriteDestination(
+        destPath,
+        worktreePath,
+        realWorktree,
+      )
+    ) {
+      logForDebugging(
+        `Skipping symlink for "${dir}": destination fails the write-destination safety check`,
+        { level: 'warn' },
+      )
+      continue
+    }
+
+    // Verify source exists and resolves strictly inside realRepoRoot
+    try {
+      await lstat(sourcePath)
+      const realSource = await realpath(sourcePath)
+      if (!isPathEqualOrInsideRoot(realSource, realRepoRoot)) {
+        logForDebugging(
+          `Skipping symlink for "${dir}": source resolves outside repository root`,
+          { level: 'warn' },
+        )
+        continue
+      }
+    } catch (error) {
+      if (isENOENT(error)) {
+        logForDebugging(
+          `Skipping symlink for "${dir}": source does not exist in main repository`,
+        )
+      } else {
+        logForDebugging(
+          `Skipping symlink for "${dir}": lstat/realpath failed (${getErrnoCode(error) ?? 'unknown'}): ${errorMessage(error)}`,
+          { level: 'warn' },
+        )
+      }
+      continue
+    }
+
     try {
       await symlink(sourcePath, destPath, 'dir')
       logForDebugging(
@@ -287,7 +477,7 @@ async function symlinkDirectories(
       )
     } catch (error) {
       const code = getErrnoCode(error)
-      // ENOENT: source doesn't exist yet (expected - skip silently)
+      // ENOENT: parent directory doesn't exist in worktree (skip silently)
       // EEXIST: destination already exists (expected - skip silently)
       if (code !== 'ENOENT' && code !== 'EEXIST') {
         // Unexpected error (e.g., permission denied, unsupported platform)
@@ -1761,41 +1951,6 @@ async function performPostCreationSetup(
 
   // Copy gitignored files specified in .worktreeinclude (best-effort)
   await copyWorktreeIncludeFiles(repoRoot, worktreePath)
-
-  // The core.hooksPath config-set above is fragile: husky's prepare script
-  // (`git config core.hooksPath .husky`) runs on every `bun install` and
-  // resets the SHARED .git/config value back to relative, causing each
-  // worktree to resolve to its OWN .husky/ again. The attribution hook
-  // file isn't tracked (it's in .git/info/exclude), so fresh worktrees
-  // don't have it. Install it directly into the worktree's .husky/ —
-  // husky won't delete it (husky install is additive-only), and for
-  // non-husky repos this resolves to the shared .git/hooks/ (idempotent).
-  //
-  // Pass the worktree-local .husky explicitly: getHooksDir would return
-  // the absolute core.hooksPath we just set above (main repo's .husky),
-  // not the worktree's — `git rev-parse --git-path hooks` echoes the config
-  // value verbatim when it's absolute.
-  if (feature('COMMIT_ATTRIBUTION')) {
-    const worktreeHooksDir =
-      hooksPath === huskyPath ? join(worktreePath, '.husky') : undefined
-    void import('./postCommitAttribution.js')
-      .then(m =>
-        m
-          .installPrepareCommitMsgHook(worktreePath, worktreeHooksDir)
-          .catch(error => {
-            logForDebugging(
-              `Failed to install attribution hook in worktree: ${error}`,
-            )
-          }),
-      )
-      .catch(error => {
-        // Dynamic import() itself rejected (module load failure). The inner
-        // .catch above only handles installPrepareCommitMsgHook rejection —
-        // without this outer handler an import failure would surface as an
-        // unhandled promise rejection.
-        logForDebugging(`Failed to load postCommitAttribution module: ${error}`)
-      })
-  }
 }
 
 /**

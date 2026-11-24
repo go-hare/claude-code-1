@@ -9,6 +9,7 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'crypto'
+import { unlinkSync } from 'fs'
 import { createServer, type Server, type Socket } from 'net'
 import {
   chmod,
@@ -201,7 +202,36 @@ let lastStartFailureDetail: string | undefined
 /** Official `s().startInFlight` — Wnr wrap; wZe stays silent while starting. */
 let startInFlight = false
 let capabilityFilePath: string | null = null
+/** Official 2.1.328 (`chunk@319503157.js @37128`): active & in-flight keyfiles unlinked synchronously on process exit. */
+let activeKeyFile: string | undefined
+let pendingKeyFile: string | undefined
 let inboxBytes = 0
+
+/** Official `hn()` (`chunk@319503157.js @37128`) — register synchronous process exit handler once. */
+function registerKeyFileExitCleanup(): void {
+  if (!process.listeners('exit').includes(unlinkUdsKeyFilesOnExit)) {
+    process.on('exit', unlinkUdsKeyFilesOnExit)
+  }
+}
+
+/**
+ * Official `tta()` (`chunk@319503157.js @37140`) — synchronously unlink any
+ * active or pending UDS messaging keyfile when the process exits abruptly.
+ */
+export function unlinkUdsKeyFilesOnExit(): void {
+  try {
+    for (const file of new Set([activeKeyFile, pendingKeyFile])) {
+      if (file === undefined) continue
+      try {
+        unlinkSync(file)
+      } catch {
+        // already gone or inaccessible
+      }
+    }
+  } catch {
+    // best-effort synchronous cleanup on process exit
+  }
+}
 
 export const MAX_UDS_INBOX_ENTRIES = 1_000
 export const MAX_UDS_FRAME_BYTES = 64 * 1024
@@ -1002,20 +1032,29 @@ async function writeCapabilityFile(
   await mkdir(dir, { recursive: true, mode: 0o700 })
   await sweepDeadMessagingKeyTmps(dir, sweepPermitted)
   const target = join(dir, deriveMessagingKeyName(process.pid, socket))
+  // Official 2.1.328 (`chunk@319503157.js @31385`): track pendingKeyFile and arm
+  // synchronous exit cleanup BEFORE publishing the keyfile.
+  pendingKeyFile = target
+  registerKeyFileExitCleanup()
   try {
-    await unlink(target)
-  } catch {
-    // first publish, or already gone
+    try {
+      await unlink(target)
+    } catch {
+      // first publish, or already gone
+    }
+    await od(
+      target,
+      jsonStringify({
+        peerToken: token,
+        ...buildProcessStartIdentityFields(await ownProcStartAsync()),
+      }),
+      MESSAGING_KEY_MODE,
+    )
+    capabilityFilePath = target
+    activeKeyFile = target
+  } finally {
+    pendingKeyFile = undefined
   }
-  await od(
-    target,
-    jsonStringify({
-      peerToken: token,
-      ...buildProcessStartIdentityFields(await ownProcStartAsync()),
-    }),
-    MESSAGING_KEY_MODE,
-  )
-  capabilityFilePath = target
 }
 
 /**
@@ -1903,6 +1942,8 @@ async function startUdsMessagingBody(
       }
       capabilityFilePath = null
     }
+    activeKeyFile = undefined
+    pendingKeyFile = undefined
     if (startedServer) {
       await closeServer(startedServer)
     }
@@ -2025,6 +2066,8 @@ export async function stopUdsMessaging(): Promise<void> {
     }
     capabilityFilePath = null
   }
+  activeKeyFile = undefined
+  pendingKeyFile = undefined
 }
 
 /**

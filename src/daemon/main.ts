@@ -1,5 +1,7 @@
-import { type ChildProcess } from 'child_process'
-import { resolve } from 'path'
+import { type ChildProcess, execFile } from 'child_process'
+import { type FSWatcher, watch } from 'fs'
+import { realpath, stat } from 'fs/promises'
+import { basename, dirname, resolve } from 'path'
 import { tryProcessCwd } from '../utils/cachePaths.js'
 import { buildCliLaunch, spawnCli } from '../utils/cliLaunch.js'
 import {
@@ -26,6 +28,18 @@ import {
   readAliveDaemonLock,
   readDaemonLockLoose,
 } from './daemonLock.js'
+import {
+  type DaemonConfig,
+  type DaemonWorkerKind,
+  type SupervisorAuthManager,
+  type SupervisorToWorkerIpcMessage,
+  buildRemoteControlConfigFromEnv,
+  createSupervisorAuthManager,
+  diffDaemonConfig,
+  emptyDaemonConfig,
+  getDefaultDaemonConfigPath,
+  loadDaemonConfig,
+} from './workerRegistry.js'
 
 /**
  * Exit code used by workers for permanent (non-retryable) failures.
@@ -171,13 +185,367 @@ export function evaluateDaemonUpgradePoll(opts: {
 }
 
 interface WorkerState {
-  kind: string
+  id: string
+  kind: DaemonWorkerKind
+  config: unknown
   process: ChildProcess | null
   backoffMs: number
   failureCount: number
   parked: boolean
+  stopping: boolean
   lastStartTime: number
   restartTimer: ReturnType<typeof setTimeout> | null
+}
+
+// ---------------------------------------------------------------------------
+// On-disk binary identity probe & detached upgrade successor respawn
+// Official `Ot`, `Br`, `an` (`chunk@302249702.js @65500, @107200`)
+// ---------------------------------------------------------------------------
+
+export interface BinaryIdentity {
+  target: string
+  mtimeMs: number
+  version: string
+}
+
+const VERSION_IN_PATH_RE = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/
+
+export function extractSemverFromText(text: string): string | null {
+  const match = VERSION_IN_PATH_RE.exec(text)
+  return match ? match[1]! : null
+}
+
+function queryBinaryVersionCli(
+  binaryPath: string,
+  timeoutMs = 5_000,
+): Promise<string | null> {
+  return new Promise(resolveVersion => {
+    execFile(
+      binaryPath,
+      ['--version'],
+      { timeout: timeoutMs, windowsHide: true },
+      (err, stdout) => {
+        if (err || !stdout) {
+          resolveVersion(null)
+          return
+        }
+        resolveVersion(extractSemverFromText(String(stdout)))
+      },
+    )
+  })
+}
+
+/**
+ * Official `Ot(binaryPath)` (`chunk@302249702.js @65500`):
+ * Resolve the live on-disk binary target via `realpath` + `stat.mtimeMs`, and
+ * determine its version from the target path or `--version` output (never by
+ * re-reading static `process.env.CLAUDE_CODE_VERSION`).
+ */
+export async function probeBinaryIdentity(
+  binaryPath: string,
+  opts?: {
+    startupIdentity?: BinaryIdentity | null
+    fallbackVersion?: string
+    queryVersion?: (target: string) => Promise<string | null>
+  },
+): Promise<BinaryIdentity | null> {
+  try {
+    const target = await realpath(binaryPath)
+    const st = await stat(target)
+    const startup = opts?.startupIdentity
+    const unchanged =
+      startup != null &&
+      startup.target === target &&
+      startup.mtimeMs === st.mtimeMs
+    if (unchanged) {
+      return { target, mtimeMs: st.mtimeMs, version: startup.version }
+    }
+
+    const fromPath = extractSemverFromText(target)
+    let version = fromPath
+    if (!version && startup != null && opts?.queryVersion !== undefined) {
+      version = await opts.queryVersion(target).catch(() => null)
+    } else if (!version && startup != null) {
+      version = await queryBinaryVersionCli(target).catch(() => null)
+    }
+    if (!version) {
+      version =
+        opts?.fallbackVersion ??
+        (typeof MACRO !== 'undefined' ? MACRO.VERSION : 'unknown')
+    }
+    return { target, mtimeMs: st.mtimeMs, version }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Official `Br(startup, current)` (`chunk@302249702.js @65600`):
+ * True when the on-disk binary symlink target changed or its mtime changed.
+ */
+export function hasBinaryIdentityChanged(
+  startup: BinaryIdentity,
+  current: BinaryIdentity | null,
+): boolean {
+  if (current === null) return true
+  if (startup.target !== current.target) return true
+  if (startup.version !== current.version) return true
+  return startup.mtimeMs !== current.mtimeMs
+}
+
+/**
+ * Official `an()` (`chunk@302249702.js @107200`):
+ * Spawn a detached successor supervisor after releasing the current daemon lock
+ * when an on-disk binary upgrade is detected.
+ */
+export function spawnUpgradeSuccessor(opts: {
+  origin: string
+  jsonPath?: string
+  spawnedBy?: string
+  cwd?: string
+  spawnFn?: typeof spawnCli
+}): ChildProcess | null {
+  const successorArgs = [
+    'daemon',
+    'run',
+    '--origin',
+    opts.origin,
+    ...(opts.jsonPath ? ['--json-path', opts.jsonPath] : []),
+    ...(opts.spawnedBy ? ['--spawned-by', opts.spawnedBy] : []),
+  ]
+  const launch = buildCliLaunch(successorArgs, { env: { ...process.env } })
+  const doSpawn = opts.spawnFn ?? spawnCli
+  try {
+    const child = doSpawn(launch, {
+      cwd: opts.cwd ?? tryProcessCwd(),
+      stdio: 'ignore',
+      detached: true,
+    })
+    child.unref?.()
+    return child
+  } catch (err) {
+    console.error(
+      `[daemon] upgrade self-respawn failed: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Transient daemon idle-exit controller — Official `P()` (`chunk@302249702.js @73500`)
+// ---------------------------------------------------------------------------
+
+export const TRANSIENT_IDLE_GRACE_MS = 5_000
+export const TRANSIENT_STARTUP_IDLE_GRACE_MS = 15_000
+
+export interface TransientIdleExitController {
+  onKeepAliveChange(): void
+  dispose(): void
+  isTimerArmed(): boolean
+}
+
+export function createTransientIdleExitController(opts: {
+  origin: string
+  getActiveCount: () => number
+  isShuttingDown: () => boolean
+  onIdleExit: () => void
+  log?: (msg: string) => void
+  idleGraceMs?: number
+  startupIdleGraceMs?: number
+}): TransientIdleExitController {
+  const idleGraceMs = opts.idleGraceMs ?? TRANSIENT_IDLE_GRACE_MS
+  const startupIdleGraceMs =
+    opts.startupIdleGraceMs ?? TRANSIENT_STARTUP_IDLE_GRACE_MS
+  const log = opts.log ?? (msg => console.log(`[daemon] ${msg}`))
+
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  let everHadClient = false
+  let disposed = false
+
+  function cancelTimer(): void {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer)
+      idleTimer = null
+    }
+  }
+
+  function onKeepAliveChange(): void {
+    if (disposed || opts.origin !== 'transient' || opts.isShuttingDown()) {
+      return
+    }
+    if (opts.getActiveCount() > 0) {
+      everHadClient = true
+      cancelTimer()
+      return
+    }
+    if (idleTimer !== null) return
+
+    const graceMs = everHadClient ? idleGraceMs : startupIdleGraceMs
+    idleTimer = setTimeout(() => {
+      idleTimer = null
+      if (disposed || opts.isShuttingDown()) return
+      if (opts.getActiveCount() > 0) {
+        everHadClient = true
+        return
+      }
+      log(`idle ${Math.round(graceMs / 1000)}s with no clients — exiting`)
+      logEvent('tengu_daemon_idle_exit', {
+        grace_ms: graceMs,
+        never_had_client: !everHadClient,
+      })
+      opts.onIdleExit()
+    }, graceMs)
+    idleTimer.unref?.()
+  }
+
+  return {
+    onKeepAliveChange,
+    dispose() {
+      disposed = true
+      cancelTimer()
+    },
+    isTimerArmed: () => idleTimer !== null,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Daemon Config Hot-Reload Reconciler — Official `Mt()` (`chunk@302249702.js @62500`)
+// ---------------------------------------------------------------------------
+
+export interface DaemonConfigReconciler {
+  readonly currentConfig: DaemonConfig
+  reload(): Promise<{ stopped: number; started: number; restarted: number }>
+  dispose(): void
+}
+
+export function watchDaemonConfigFile(
+  jsonPath: string,
+  onChange: () => void,
+): () => void {
+  const dir = dirname(jsonPath)
+  const targetName = basename(jsonPath)
+  let watcher: FSWatcher | null = null
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let closed = false
+
+  const trigger = (): void => {
+    if (closed) return
+    if (debounceTimer) clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null
+      if (!closed) onChange()
+    }, 100)
+    debounceTimer.unref?.()
+  }
+
+  try {
+    watcher = watch(dir, { persistent: false }, (_event, filename) => {
+      if (!filename || filename === targetName) {
+        trigger()
+      }
+    })
+    watcher.on('error', () => {
+      // ignore transient watch errors
+    })
+  } catch {
+    // Parent directory may not exist yet — graceful no-op
+  }
+
+  return () => {
+    closed = true
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+      debounceTimer = null
+    }
+    watcher?.close()
+    watcher = null
+  }
+}
+
+export function createDaemonConfigReconciler(opts: {
+  jsonPath: string
+  initialConfig: DaemonConfig
+  onStartWorker: (id: string, kind: DaemonWorkerKind, config: unknown) => void
+  onStopWorker: (
+    id: string,
+    kind: DaemonWorkerKind,
+    cause?: 'reload' | 'upgrade' | 'yield',
+  ) => Promise<void> | void
+  onRestartWorker: (
+    id: string,
+    kind: DaemonWorkerKind,
+    config: unknown,
+  ) => Promise<void> | void
+  log?: (msg: string) => void
+  enableWatch?: boolean
+}): DaemonConfigReconciler {
+  const log = opts.log ?? (msg => console.log(`[daemon] ${msg}`))
+  let currentConfig = opts.initialConfig
+  let chain: Promise<{ stopped: number; started: number; restarted: number }> =
+    Promise.resolve({ stopped: 0, started: 0, restarted: 0 })
+
+  const reloadOnce = async (): Promise<{
+    stopped: number
+    started: number
+    restarted: number
+  }> => {
+    const loaded = await loadDaemonConfig(opts.jsonPath)
+    if (!loaded.ok) {
+      log(`config reload failed: ${loaded.error} — keeping last-good config`)
+      return { stopped: 0, started: 0, restarted: 0 }
+    }
+    for (const key of loaded.unknownKeys) {
+      log(`unknown config key '${key}' — upgrade claude?`)
+    }
+    const diff = diffDaemonConfig(currentConfig, loaded.config)
+    currentConfig = loaded.config
+
+    for (const item of diff.stop) {
+      await opts.onStopWorker(item.id, item.kind, 'reload')
+      log(`stopped ${item.id}`)
+    }
+    for (const item of diff.restart) {
+      await opts.onRestartWorker(item.id, item.kind, item.config)
+      log(`restarted ${item.id}`)
+    }
+    for (const item of diff.start) {
+      opts.onStartWorker(item.id, item.kind, item.config)
+      log(`spawned ${item.id}`)
+    }
+
+    const counts = {
+      stopped: diff.stop.length,
+      started: diff.start.length,
+      restarted: diff.restart.length,
+    }
+    if (counts.stopped + counts.started + counts.restarted > 0) {
+      log(
+        `reload: stopped=${counts.stopped} started=${counts.started} restarted=${counts.restarted}`,
+      )
+      logEvent('tengu_daemon_config_reload', counts)
+    }
+    return counts
+  }
+
+  const reload = () => {
+    chain = chain.then(reloadOnce, reloadOnce)
+    return chain
+  }
+
+  const stopWatch =
+    opts.enableWatch !== false
+      ? watchDaemonConfigFile(opts.jsonPath, () => {
+          void reload()
+        })
+      : () => {}
+
+  return {
+    get currentConfig() {
+      return currentConfig
+    },
+    reload,
+    dispose: stopWatch,
+  }
 }
 
 /**
@@ -778,14 +1146,87 @@ function parseSupervisorArgs(args: string[]): Record<string, string> {
       result.name = args[++i]!
     } else if (arg.startsWith('--name=')) {
       result.name = arg.slice('--name='.length)
+    } else if (arg === '--json-path' && i + 1 < args.length) {
+      result.jsonPath = resolve(args[++i]!)
+    } else if (arg.startsWith('--json-path=')) {
+      result.jsonPath = resolve(arg.slice('--json-path='.length))
     }
   }
   return result
 }
 
+function sendWorkerShutdownIpc(
+  child: ChildProcess | null,
+  cause?: 'upgrade' | 'reload' | 'yield',
+): void {
+  if (!child || child.killed) return
+  try {
+    if (typeof child.send === 'function' && child.connected) {
+      const msg: SupervisorToWorkerIpcMessage = {
+        type: 'shutdown',
+        ...(cause ? { cause } : {}),
+      }
+      child.send(msg)
+    }
+  } catch {
+    // IPC channel may already be closed
+  }
+}
+
+async function stopWorkerGracefully(
+  worker: WorkerState,
+  cause?: 'upgrade' | 'reload' | 'yield',
+  graceMs = 30_000,
+): Promise<void> {
+  worker.stopping = true
+  if (worker.restartTimer) {
+    clearTimeout(worker.restartTimer)
+    worker.restartTimer = null
+  }
+  const child = worker.process
+  if (!child || child.exitCode !== null) return
+
+  sendWorkerShutdownIpc(child, cause)
+  if (!child.killed) {
+    try {
+      child.kill('SIGTERM')
+    } catch {
+      // already exited
+    }
+  }
+
+  await new Promise<void>(resolveStop => {
+    if (child.exitCode !== null) {
+      resolveStop()
+      return
+    }
+    let killTimer: ReturnType<typeof setTimeout> | null = null
+    child.once('exit', () => {
+      if (killTimer) {
+        clearTimeout(killTimer)
+        killTimer = null
+      }
+      resolveStop()
+    })
+    killTimer = setTimeout(() => {
+      if (child.exitCode === null) {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // ignore
+        }
+      }
+      resolveStop()
+    }, graceMs)
+    killTimer.unref?.()
+  })
+}
+
 /**
- * Run the daemon supervisor loop. Spawns workers and restarts them
- * on crash with exponential backoff.
+ * Run the daemon supervisor loop. Reads & watches `daemon.json`
+ * (`tengu_daemon_config_reload`), coordinates OAuth IPC (`K9i`), probes on-disk
+ * binary upgrades (spawning a detached successor), and restarts crashed workers
+ * with exponential backoff.
  */
 async function runSupervisor(
   args: string[],
@@ -793,24 +1234,72 @@ async function runSupervisor(
 ): Promise<void> {
   const config = parseSupervisorArgs(args)
   const dir = config.dir || resolve('.')
+  const jsonPath = config.jsonPath || getDefaultDaemonConfigPath()
 
   console.log(`[daemon] supervisor starting in ${dir}`)
 
-  const workers: WorkerState[] = [
-    {
-      kind: 'remoteControl',
-      process: null,
-      backoffMs: BACKOFF_INITIAL_MS,
-      failureCount: 0,
-      parked: false,
-      lastStartTime: 0,
-      restartTimer: null,
-    },
-  ]
+  // Load daemon.json (falling back gracefully to CLI remoteControl config when absent)
+  const loaded = await loadDaemonConfig(jsonPath)
+  let initialConfig: DaemonConfig
+  if (loaded.ok) {
+    for (const key of loaded.unknownKeys) {
+      console.log(`[daemon] unknown config key '${key}' — upgrade claude?`)
+    }
+    initialConfig = loaded.config
+    if (!loaded.existed) {
+      const cliFallback = buildRemoteControlConfigFromEnv({
+        ...process.env,
+        DAEMON_WORKER_DIR: dir,
+        ...(config.name ? { DAEMON_WORKER_NAME: config.name } : {}),
+        DAEMON_WORKER_SPAWN_MODE: config.spawnMode || 'same-dir',
+        DAEMON_WORKER_CAPACITY: config.capacity || '4',
+        ...(config.permissionMode
+          ? { DAEMON_WORKER_PERMISSION: config.permissionMode }
+          : {}),
+        DAEMON_WORKER_SANDBOX: config.sandbox || '0',
+        DAEMON_WORKER_CREATE_SESSION: '1',
+      })
+      initialConfig = {
+        ...initialConfig,
+        remoteControl: [cliFallback],
+      }
+    }
+  } else {
+    console.error(
+      `[daemon] config load failed: ${loaded.error} — idling until daemon.json is fixed`,
+    )
+    initialConfig = emptyDaemonConfig()
+  }
+
+  const workerMap = new Map<string, WorkerState>()
+  const makeWorkerState = (
+    id: string,
+    kind: DaemonWorkerKind,
+    workerCfg: unknown,
+  ): WorkerState => ({
+    id,
+    kind,
+    config: workerCfg,
+    process: null,
+    backoffMs: BACKOFF_INITIAL_MS,
+    failureCount: 0,
+    parked: false,
+    stopping: false,
+    lastStartTime: 0,
+    restartTimer: null,
+  })
+
+  for (const kind of ['heartbeat', 'scheduled', 'remoteControl'] as const) {
+    const specs = initialConfig[kind] ?? []
+    for (let i = 0; i < specs.length; i++) {
+      const id = `${kind}:${i}`
+      workerMap.set(id, makeWorkerState(id, kind, specs[i]))
+    }
+  }
 
   // Official: tengu_daemon_start
   logEvent('tengu_daemon_start', {
-    workers: workers
+    workers: [...workerMap.values()]
       .map(w => w.kind)
       .join(',') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
@@ -832,8 +1321,6 @@ async function runSupervisor(
     log: msg => console.log(`[daemon] ${formatDaemonLogMessage(msg)}`),
   })
   if (!slot.ok) {
-    // Official: yield failure → e_('daemon_start','daemon_start_yield_failed');
-    // otherwise SH('daemon_start') and exit 1.
     if (slot.askedYield) {
       logEvent('tengu_daemon_start_yield_failed', {})
     }
@@ -841,8 +1328,6 @@ async function runSupervisor(
     return
   }
 
-  // densable: R9d exclusive create; R0o only when peer pid is dead (never clobber live).
-  // Stamp procStart / procStartFt (UHt/jMt) so cI/iPs can refuse PID reuse.
   let identityFields: { procStart?: unknown; procStartFt?: unknown } = {}
   try {
     const { readProcessStartIdentityFields } = await import('./daemonLock.js')
@@ -871,7 +1356,6 @@ async function runSupervisor(
     process.exitCode = 1
     return
   }
-  // Official: re-read after write; if another live pid owns it, exit.
   {
     const raced = await detectDaemonLockRace(lockOwner)
     if (raced) {
@@ -883,22 +1367,32 @@ async function runSupervisor(
     }
   }
 
-  // Write daemon state file so other CLI processes can query/stop us
-  writeDaemonState({
-    pid: process.pid,
-    cwd: dir,
-    startedAt: new Date(startedAtMs).toISOString(),
-    workerKinds: workers.map(w => w.kind),
-    lastStatus: 'running',
-  })
+  const syncDaemonState = (): void => {
+    writeDaemonState({
+      pid: process.pid,
+      cwd: dir,
+      startedAt: new Date(startedAtMs).toISOString(),
+      workerKinds: [...workerMap.values()].map(w => w.kind),
+      lastStatus: 'running',
+    })
+  }
+  syncDaemonState()
 
   const controller = new AbortController()
 
-  // Record startup version for self-restart detection
-  const startupVersion = process.env.CLAUDE_CODE_VERSION || 'unknown'
+  // Official `K9i`: Supervisor-side OAuth IPC coordinator
+  const authManager = createSupervisorAuthManager({
+    signal: controller.signal,
+    log: msg => console.log(`[daemon] ${formatDaemonLogMessage(msg)}`),
+  })
+  await authManager.ready
 
-  // Official Q: once, ownership-gated CvK. Awaited at end of run path so
-  // unlink finishes before process exit (void fire-and-forget left zombies).
+  // Probe live on-disk binary identity at startup (official `Ot`)
+  const binaryPath = process.execPath
+  const startupBinaryIdentity = await probeBinaryIdentity(binaryPath, {
+    fallbackVersion: typeof MACRO !== 'undefined' ? MACRO.VERSION : 'unknown',
+  })
+
   let lockCleared = false
   const clearOwnedLock = async (): Promise<void> => {
     if (lockCleared) return
@@ -906,108 +1400,174 @@ async function runSupervisor(
     await clearDaemonLockIfOwned(lockOwner)
   }
 
-  // Graceful shutdown — signal workers; lock cleared after they drain below.
-  const shutdown = () => {
-    console.log('[daemon] supervisor shutting down...')
+  let upgradeDetected = false
+  let shutdownCause: 'upgrade' | 'reload' | 'yield' | undefined
+
+  const shutdown = (cause?: 'upgrade' | 'reload' | 'yield') => {
+    if (controller.signal.aborted) return
+    shutdownCause = cause
+    console.log(
+      `[daemon] supervisor shutting down${cause ? ` (${cause})` : ''}...`,
+    )
     controller.abort()
     removeDaemonState()
-    for (const w of workers) {
+    for (const w of workerMap.values()) {
+      w.stopping = true
       if (w.restartTimer) {
         clearTimeout(w.restartTimer)
         w.restartTimer = null
       }
+      sendWorkerShutdownIpc(w.process, cause)
       if (w.process && !w.process.killed) {
         w.process.kill('SIGTERM')
       }
     }
   }
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
+  const onSigTerm = () => shutdown()
+  const onSigInt = () => shutdown()
+  process.on('SIGTERM', onSigTerm)
+  process.on('SIGINT', onSigInt)
 
-  // Periodic version check for self-restart on upgrade (with stale-build refusal & launcher check)
+  // Periodic on-disk binary upgrade check (official `We()` / `Ot` / `Br`)
   const upgradePollState: DaemonUpgradePollState = {
     refusedStaleTarget: null,
     deferredLauncherLogged: false,
   }
+  let versionCheckRunning = false
   const versionCheckInterval = setInterval(() => {
-    const currentVersion = process.env.CLAUDE_CODE_VERSION || 'unknown'
-    const result = evaluateDaemonUpgradePoll({
-      startupVersion,
-      currentVersion,
-      origin,
-      state: upgradePollState,
-    })
-    if (result.shouldRestart) {
-      shutdown()
+    if (
+      controller.signal.aborted ||
+      upgradeDetected ||
+      versionCheckRunning ||
+      !startupBinaryIdentity
+    ) {
+      return
     }
-  }, 30_000) // Check every 30s
+    versionCheckRunning = true
+    void (async () => {
+      try {
+        const currentIdentity = await probeBinaryIdentity(binaryPath, {
+          startupIdentity: startupBinaryIdentity,
+        })
+        if (!hasBinaryIdentityChanged(startupBinaryIdentity, currentIdentity)) {
+          upgradePollState.refusedStaleTarget = null
+          return
+        }
+        const currentVersion =
+          currentIdentity === null
+            ? `${startupBinaryIdentity.version}-deleted`
+            : currentIdentity.version === startupBinaryIdentity.version
+              ? `${currentIdentity.version}+mtime-${Math.trunc(currentIdentity.mtimeMs)}`
+              : currentIdentity.version
+        const result = evaluateDaemonUpgradePoll({
+          startupVersion: startupBinaryIdentity.version,
+          currentVersion,
+          origin,
+          state: upgradePollState,
+        })
+        if (result.shouldRestart) {
+          upgradeDetected = true
+          shutdown('upgrade')
+        }
+      } finally {
+        versionCheckRunning = false
+      }
+    })()
+  }, 30_000)
   versionCheckInterval.unref?.()
 
-  // Spawn and supervise workers
-  for (const worker of workers) {
+  // Spawn initial workers
+  for (const worker of workerMap.values()) {
     if (!controller.signal.aborted) {
-      spawnWorker(worker, dir, config, controller.signal)
+      spawnWorker(worker, dir, config, controller.signal, authManager)
     }
   }
 
-  // Wait for abort signal
-  await new Promise<void>(resolve => {
-    if (controller.signal.aborted) {
-      resolve()
-      return
-    }
-    controller.signal.addEventListener('abort', () => resolve(), { once: true })
+  // Watch daemon.json & dynamically reconcile desired workers (`tengu_daemon_config_reload`)
+  const reconciler = createDaemonConfigReconciler({
+    jsonPath,
+    initialConfig,
+    log: msg => console.log(`[daemon] ${formatDaemonLogMessage(msg)}`),
+    onStartWorker: (id, kind, workerCfg) => {
+      if (controller.signal.aborted) return
+      const worker = makeWorkerState(id, kind, workerCfg)
+      workerMap.set(id, worker)
+      spawnWorker(worker, dir, config, controller.signal, authManager)
+      syncDaemonState()
+    },
+    onStopWorker: async (id, _kind, cause) => {
+      const worker = workerMap.get(id)
+      if (!worker) return
+      workerMap.delete(id)
+      await stopWorkerGracefully(worker, cause)
+      syncDaemonState()
+    },
+    onRestartWorker: async (id, kind, workerCfg) => {
+      const existing = workerMap.get(id)
+      if (existing) {
+        await stopWorkerGracefully(existing, 'reload')
+      }
+      if (controller.signal.aborted) return
+      const replacement = makeWorkerState(id, kind, workerCfg)
+      workerMap.set(id, replacement)
+      spawnWorker(replacement, dir, config, controller.signal, authManager)
+      syncDaemonState()
+    },
   })
 
-  // Clean up version check interval
+  // Wait for abort signal
+  await new Promise<void>(resolveWait => {
+    if (controller.signal.aborted) {
+      resolveWait()
+      return
+    }
+    controller.signal.addEventListener('abort', () => resolveWait(), {
+      once: true,
+    })
+  })
+
+  // Clean up watcher, interval, and signal handlers
+  reconciler.dispose()
   clearInterval(versionCheckInterval)
+  process.off('SIGTERM', onSigTerm)
+  process.off('SIGINT', onSigInt)
 
   // Wait for all workers to exit
   await Promise.all(
-    workers
-      .filter(w => w.process && w.process.exitCode === null)
-      .map(
-        w =>
-          new Promise<void>(resolve => {
-            if (!w.process || w.process.exitCode !== null) {
-              resolve()
-              return
-            }
-            let killTimer: ReturnType<typeof setTimeout> | null = null
-            w.process.on('exit', () => {
-              if (killTimer) {
-                clearTimeout(killTimer)
-                killTimer = null
-              }
-              resolve()
-            })
-            // Force kill after grace period
-            killTimer = setTimeout(() => {
-              if (w.process && w.process.exitCode === null) {
-                w.process.kill('SIGKILL')
-              }
-              resolve()
-            }, 30_000)
-            killTimer.unref?.()
-          }),
-      ),
+    [...workerMap.values()].map(w => stopWorkerGracefully(w, shutdownCause)),
   )
 
-  // Official CvK — only if lock still ours (pid+startedAt).
+  authManager.dispose()
+
+  // Official CvK — release lock only if still ours (pid+startedAt) BEFORE
+  // spawning the detached upgrade successor so it acquires daemon.lock cleanly.
   await clearOwnedLock()
+
+  if (upgradeDetected) {
+    console.log('[daemon] spawning detached successor for upgrade...')
+    spawnUpgradeSuccessor({
+      origin,
+      jsonPath,
+      spawnedBy: lockOpts?.spawnedBy,
+      cwd: dir,
+    })
+  }
+
   console.log('[daemon] supervisor stopped')
 }
 
 /**
- * Spawn a worker child process with the appropriate env vars.
+ * Spawn a worker child process with Node IPC channel (`stdio: ['pipe', 'pipe', 'pipe', 'ipc']`),
+ * piped stdin JSON config (`{ config, initialAccessToken }`), and supervisor OAuth IPC wiring.
  */
 function spawnWorker(
   worker: WorkerState,
   dir: string,
   config: Record<string, string>,
   signal: AbortSignal,
+  authManager?: SupervisorAuthManager,
 ): void {
-  if (signal.aborted || worker.parked) return
+  if (signal.aborted || worker.parked || worker.stopping) return
 
   worker.lastStartTime = Date.now()
 
@@ -1023,42 +1583,61 @@ function spawnWorker(
     CLAUDE_CODE_SESSION_KIND: 'daemon-worker',
   }
 
-  console.log(`[daemon] spawning worker '${worker.kind}'`)
+  console.log(`[daemon] spawning worker '${worker.id}'`)
 
   const launch = buildCliLaunch([`--daemon-worker=${worker.kind}`], { env })
 
   const child = spawnCli(launch, {
     cwd: dir,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   })
 
   worker.process = child
+
+  // Pipe validated worker config + initialAccessToken on stdin (official `chunk@302249702.js @57600`)
+  child.stdin?.on('error', err => {
+    console.error(`[daemon] worker '${worker.id}' stdin error: ${err.message}`)
+  })
+  try {
+    child.stdin?.write(
+      `${JSON.stringify({
+        config: worker.config,
+        initialAccessToken: authManager?.getAccessToken(),
+      })}\n`,
+    )
+    child.stdin?.end()
+  } catch {
+    // stdin already closed
+  }
+
+  authManager?.attachWorker(child)
 
   // Pipe worker stdout/stderr to supervisor with prefix
   child.stdout?.on('data', (data: Buffer) => {
     const lines = data.toString().trimEnd().split('\n')
     for (const line of lines) {
-      console.log(`  ${line}`)
+      console.log(`  [${worker.id}] ${line}`)
     }
   })
   child.stderr?.on('data', (data: Buffer) => {
     const lines = data.toString().trimEnd().split('\n')
     for (const line of lines) {
-      console.error(`  ${line}`)
+      console.error(`  [${worker.id}] ${line}`)
     }
   })
 
   child.on('exit', (code, sig) => {
     worker.process = null
+    authManager?.detachWorker(child)
 
-    if (signal.aborted) {
-      // Supervisor is shutting down, don't restart
+    if (signal.aborted || worker.stopping) {
+      // Supervisor or hot-reload is stopping this worker, don't restart
       return
     }
 
     if (code === EXIT_CODE_PERMANENT) {
       console.error(
-        `[daemon] worker '${worker.kind}' exited with permanent error — parking`,
+        `[daemon] worker '${worker.id}' exited with permanent error — parking`,
       )
       logEvent('tengu_daemon_worker_permanent_exit', {
         kind: worker.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1081,7 +1660,7 @@ function spawnWorker(
       })
       if (worker.failureCount >= MAX_RAPID_FAILURES) {
         console.error(
-          `[daemon] worker '${worker.kind}' failed ${worker.failureCount} times rapidly — parking`,
+          `[daemon] worker '${worker.id}' failed ${worker.failureCount} times rapidly — parking`,
         )
         worker.parked = true
         return
@@ -1100,13 +1679,13 @@ function spawnWorker(
     }
 
     console.log(
-      `[daemon] worker '${worker.kind}' exited (code=${code}, signal=${sig}), restarting in ${worker.backoffMs}ms`,
+      `[daemon] worker '${worker.id}' exited (code=${code}, signal=${sig}), restarting in ${worker.backoffMs}ms`,
     )
 
     worker.restartTimer = setTimeout(() => {
       worker.restartTimer = null
-      if (!signal.aborted && !worker.parked) {
-        spawnWorker(worker, dir, config, signal)
+      if (!signal.aborted && !worker.parked && !worker.stopping) {
+        spawnWorker(worker, dir, config, signal, authManager)
       }
     }, worker.backoffMs)
     worker.restartTimer.unref?.()
@@ -1206,15 +1785,33 @@ async function runBgManagerStandalone(opts?: {
     await clearDaemonLockIfOwned(lockOwner)
   }
 
-  // manager assigned after startBgManager; shutdown/onYield close over the let.
+  // manager assigned after startBgManager; shutdown/onYield/idleExit close over the let.
   let manager: Awaited<ReturnType<typeof startBgManager>> | null = null
   let shuttingDown = false
+  let keepAlive: ReturnType<typeof setInterval> | null = null
+
+  const idleExit = createTransientIdleExitController({
+    origin,
+    getActiveCount: () =>
+      (manager?.leaseCount() ?? 0) + (manager?.liveHandleCount() ?? 0),
+    isShuttingDown: () => shuttingDown,
+    log: msg => console.log(`[daemon] ${formatDaemonLogMessage(msg)}`),
+    onIdleExit: () => {
+      void shutdown('idle_exit')
+    },
+  })
+
   const shutdown = async (
     reason?: string,
     closeOpts?: { displaced?: boolean; skipPathCleanup?: boolean },
   ): Promise<void> => {
     if (shuttingDown) return
     shuttingDown = true
+    idleExit.dispose()
+    if (keepAlive) {
+      clearInterval(keepAlive)
+      keepAlive = null
+    }
     console.log(
       `[daemon] bg-manager shutting down${reason ? ` (${reason})` : ''}...`,
     )
@@ -1249,6 +1846,7 @@ async function runBgManagerStandalone(opts?: {
   manager = await startBgManager({
     onLog: (msg: string) => console.log(`  ${formatDaemonLogMessage(msg)}`),
     onYield,
+    onKeepAliveChange: () => idleExit.onKeepAliveChange(),
   })
 
   console.log('[daemon] bg-manager ready')
@@ -1269,14 +1867,13 @@ async function runBgManagerStandalone(opts?: {
     void shutdown('SIGINT')
   })
 
-  // Keep alive
-  const keepAlive = setInterval(() => {
-    // Transient mode: exit if no active sessions for 30s
-    if (!manager) return
-    const hasActive = [...manager.handles.values()].some(h => !h.record.outcome)
-    if (!hasActive && manager.handles.size > 0) {
-      // All sessions completed — stay alive for a bit in case new dispatches come
-    }
+  // Official `P()` (`chunk@302249702.js @73500`): arm idle-exit right after ready
+  // and re-check periodically so transient standalone daemons exit cleanly once
+  // all handles finish and no client leases remain.
+  idleExit.onKeepAliveChange()
+  keepAlive = setInterval(() => {
+    if (!manager || shuttingDown) return
+    idleExit.onKeepAliveChange()
   }, 10_000)
   keepAlive.unref()
 }

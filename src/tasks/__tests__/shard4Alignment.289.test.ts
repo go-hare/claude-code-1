@@ -3,7 +3,6 @@ import { randomUUID } from 'crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
-import { VERIFICATION_AGENT_TYPE } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import {
   coalesceNotice,
   flushAllCoalesceForTests,
@@ -341,17 +340,17 @@ describe('Shard 4 2.1.289 alignment regressions', () => {
     })
   })
 
-  test('LocalAgentTask sets pendingPlanVerification.verificationCompleted and honors keepalive without getAppState', async () => {
+  test('LocalAgentTask notifies completion and honors keepalive without getAppState', async () => {
     const h = createTestHarness({
       v1: {
         id: 'v1',
         type: 'local_agent',
         status: 'completed',
-        description: 'Verify plan',
+        description: 'Background agent',
         agentId: 'v1',
-        agentType: VERIFICATION_AGENT_TYPE,
-        prompt: 'verify',
-        selectedAgent: { agentType: VERIFICATION_AGENT_TYPE } as never,
+        agentType: 'general-purpose',
+        prompt: 'work',
+        selectedAgent: { agentType: 'general-purpose' } as never,
         startTime: Date.now() - 100,
         outputFile: '/tmp/v1.out',
         outputOffset: 0,
@@ -390,22 +389,16 @@ describe('Shard 4 2.1.289 alignment regressions', () => {
         keepaliveReasons: new Set<string>(),
       },
     } as unknown as AppState['tasks'])
-    h.state = {
-      ...h.state,
-      pendingPlanVerification: {
-        plan: 'step 1',
-        verificationStarted: true,
-        verificationCompleted: false,
-      },
-    }
 
     await enqueueAgentNotification({
       taskId: 'v1',
-      description: 'Verify plan',
+      description: 'Background agent',
       status: 'completed',
       registry: h.registry,
     })
-    expect(h.state.pendingPlanVerification?.verificationCompleted).toBe(true)
+    expect((h.registry.get('v1') as { notified?: boolean })?.notified).toBe(
+      true,
+    )
 
     // Attach keepalive child to fgParent, then call unregisterAgentForeground WITHOUT getAppState
     addKeepaliveReason('fgParent', agentKeepaliveReason('child1'), h.registry)
