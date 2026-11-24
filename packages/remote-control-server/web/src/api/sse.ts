@@ -11,17 +11,40 @@ export function connectSSE(
   disconnectSSE()
 
   const uuid = getUuid()
-  const url = `/web/sessions/${sessionId}/events?uuid=${encodeURIComponent(uuid)}`
+  const params = new URLSearchParams({ uuid })
+  if (fromSeqNum > 0) {
+    params.set('from_sequence_num', String(fromSeqNum))
+  }
+  const url = `/web/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`
   const es = new EventSource(url)
   currentEventSource = es
 
   let lastSeenSeq = fromSeqNum
+  const seenEventIds = new Set<string>()
+  let hadError = false
 
   es.addEventListener('message', (e: MessageEvent) => {
     try {
       const data = JSON.parse(e.data) as SessionEvent
-      if (data.seqNum !== undefined && data.seqNum <= lastSeenSeq) return
-      if (data.seqNum !== undefined) lastSeenSeq = data.seqNum
+      if (typeof data.seqNum === 'number' && data.seqNum > 0) {
+        const isServerRestartReset =
+          (data.seqNum === 1 && lastSeenSeq > 1) ||
+          (hadError &&
+            data.seqNum <= lastSeenSeq &&
+            typeof data.id === 'string' &&
+            !seenEventIds.has(data.id))
+        if (isServerRestartReset) {
+          lastSeenSeq = 0
+          seenEventIds.clear()
+        } else if (data.seqNum <= lastSeenSeq) {
+          return
+        }
+        lastSeenSeq = data.seqNum
+      }
+      hadError = false
+      if (typeof data.id === 'string' && data.id) {
+        seenEventIds.add(data.id)
+      }
       onEvent(data)
     } catch {
       // ignore parse errors
@@ -29,6 +52,7 @@ export function connectSSE(
   })
 
   es.addEventListener('error', () => {
+    hadError = true
     // EventSource auto-reconnects
   })
 }

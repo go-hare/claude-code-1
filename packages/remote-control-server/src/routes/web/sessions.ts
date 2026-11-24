@@ -1,6 +1,7 @@
 import { log, error as logError } from '../../logger'
-import { Hono } from 'hono'
-import { uuidAuth } from '../../auth/middleware'
+import { Hono, type Context } from 'hono'
+import { validateApiKey } from '../../auth/api-key'
+import { extractBearerToken, uuidAuth } from '../../auth/middleware'
 import { getAutomationStateSnapshot } from '../../services/automationState'
 import {
   createSession,
@@ -9,19 +10,45 @@ import {
   listWebSessionSummariesByOwnerUuid,
   listWebSessionsByOwnerUuid,
   resolveOwnedWebSessionId,
+  resolveReadableWebSessionId,
   toWebSessionResponse,
 } from '../../services/session'
-import { storeBindSession, storeGetSessionWorker } from '../../store'
+import {
+  storeBindSession,
+  storeGetEnvironment,
+  storeGetSessionWorker,
+  storeIsSessionOwner,
+} from '../../store'
 import { createWorkItem } from '../../services/work-dispatch'
 import { createSSEStream } from '../../transport/sse-writer'
 import { getEventBus } from '../../transport/event-bus'
 
 const app = new Hono()
 
+function hasValidApiKey(c: Context): boolean {
+  const bearer = extractBearerToken(c)
+  return !!bearer && validateApiKey(bearer)
+}
+
 /** POST /web/sessions — Create a session from web UI */
 app.post('/sessions', uuidAuth, async c => {
   const uuid = c.get('uuid')!
   const body = await c.req.json()
+  if (body.environment_id) {
+    const env = storeGetEnvironment(body.environment_id)
+    if (env?.workerType === 'acp') {
+      return c.json(
+        {
+          error: {
+            type: 'invalid_request',
+            message:
+              'Cannot create a web session on an ACP environment; open the ACP agent session directly',
+          },
+        },
+        400,
+      )
+    }
+  }
   const session = createSession({
     environment_id: body.environment_id || null,
     title: body.title || 'New Session',
@@ -61,7 +88,10 @@ app.get('/sessions/all', uuidAuth, async c => {
 /** GET /web/sessions/:id — Session detail */
 app.get('/sessions/:id', uuidAuth, async c => {
   const uuid = c.get('uuid')!
-  const sessionId = resolveOwnedWebSessionId(c.req.param('id')!, uuid)
+  const apiKeyAuthd = hasValidApiKey(c)
+  const sessionId = resolveReadableWebSessionId(c.req.param('id')!, uuid, {
+    hasApiKey: apiKeyAuthd,
+  })
   if (!sessionId) {
     return c.json(
       { error: { type: 'forbidden', message: 'Not your session' } },
@@ -75,9 +105,17 @@ app.get('/sessions/:id', uuidAuth, async c => {
       404,
     )
   }
+  const response = toWebSessionResponse(session)
+  // For shared ACP discovery without ownership or API key, return only routing metadata
+  if (
+    session.source === 'acp' &&
+    !apiKeyAuthd &&
+    !storeIsSessionOwner(sessionId, uuid)
+  ) {
+    return c.json(response, 200)
+  }
   const worker = storeGetSessionWorker(sessionId)
   const automationState = getAutomationStateSnapshot(worker?.externalMetadata)
-  const response = toWebSessionResponse(session)
   return c.json(
     automationState === undefined
       ? response
@@ -89,7 +127,9 @@ app.get('/sessions/:id', uuidAuth, async c => {
 /** GET /web/sessions/:id/history — Historical events for session */
 app.get('/sessions/:id/history', uuidAuth, async c => {
   const uuid = c.get('uuid')!
-  const sessionId = resolveOwnedWebSessionId(c.req.param('id')!, uuid)
+  const sessionId = resolveOwnedWebSessionId(c.req.param('id')!, uuid, {
+    hasApiKey: hasValidApiKey(c),
+  })
   if (!sessionId) {
     return c.json(
       { error: { type: 'forbidden', message: 'Not your session' } },
@@ -112,7 +152,9 @@ app.get('/sessions/:id/history', uuidAuth, async c => {
 /** SSE /web/sessions/:id/events — Real-time event stream */
 app.get('/sessions/:id/events', uuidAuth, async c => {
   const uuid = c.get('uuid')!
-  const sessionId = resolveOwnedWebSessionId(c.req.param('id')!, uuid)
+  const sessionId = resolveOwnedWebSessionId(c.req.param('id')!, uuid, {
+    hasApiKey: hasValidApiKey(c),
+  })
   if (!sessionId) {
     return c.json(
       { error: { type: 'forbidden', message: 'Not your session' } },
@@ -138,8 +180,15 @@ app.get('/sessions/:id/events', uuidAuth, async c => {
     )
   }
 
-  const lastEventId = c.req.header('Last-Event-ID')
-  const fromSeqNum = lastEventId ? parseInt(lastEventId, 10) : 0
+  const parsePositiveSeq = (val: string | undefined): number => {
+    if (!val) return 0
+    const parsed = Number.parseInt(val, 10)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  }
+  const fromSeqNum = Math.max(
+    parsePositiveSeq(c.req.header('Last-Event-ID')),
+    parsePositiveSeq(c.req.query('from_sequence_num')),
+  )
   return createSSEStream(c, sessionId, fromSeqNum)
 })
 

@@ -32,8 +32,8 @@ export function PermissionPromptView({
         </span>
         <span className="text-sm font-semibold text-warning-text">Permission Request</span>
       </div>
-      {description && <div className="mb-2 text-sm text-text-secondary">{esc(description)}</div>}
-      <div className="mb-2 font-mono text-xs font-bold text-text-primary">{esc(toolName)}</div>
+      {description && <div className="mb-2 text-sm text-text-secondary">{description}</div>}
+      <div className="mb-2 font-mono text-xs font-bold text-text-primary">{toolName}</div>
       {toolName !== 'AskUserQuestion' && (
         <pre className="mb-3 max-h-40 overflow-auto rounded-lg bg-surface-1 p-2 text-xs text-text-secondary font-mono">
           {truncate(inputStr, 500)}
@@ -61,6 +61,75 @@ export function PermissionPromptView({
 // AskUserPanelView — multi-question interactive panel
 // ============================================================
 
+export function toggleMultiSelectAnswer(prev: unknown, oIdx: number): number[] {
+  const current = Array.isArray(prev) ? prev.filter((item): item is number => typeof item === 'number') : [];
+  return current.includes(oIdx) ? current.filter(i => i !== oIdx) : [...current, oIdx];
+}
+
+export function buildAskUserAnswers(
+  questions: Question[],
+  answers: Record<string, unknown>,
+  otherTexts?: Record<string, string>,
+  fallbackQuestion?: string,
+): Record<string, string> {
+  const merged: Record<string, unknown> = { ...answers };
+  if (otherTexts) {
+    for (const [qIdx, rawText] of Object.entries(otherTexts)) {
+      const trimmed = rawText.trim();
+      if (!trimmed) continue;
+      const idx = Number.parseInt(qIdx, 10);
+      const q = questions[idx];
+      const existing = merged[qIdx];
+      if (q?.multiSelect && Array.isArray(existing) && existing.length > 0) {
+        merged[qIdx] = [...existing, trimmed];
+      } else {
+        merged[qIdx] = trimmed;
+      }
+    }
+  }
+
+  const mapped: Record<string, string> = {};
+  for (const [qIdx, val] of Object.entries(merged)) {
+    const idx = Number.parseInt(qIdx, 10);
+    const q = questions[idx];
+    if (!q) {
+      if (questions.length === 0) {
+        const fallbackKey = fallbackQuestion?.trim() || String(qIdx);
+        if (Array.isArray(val)) {
+          const joined = val
+            .map(i => String(i))
+            .filter(Boolean)
+            .join(', ');
+          if (joined) mapped[fallbackKey] = joined;
+        } else if (typeof val === 'string') {
+          if (val.trim()) mapped[fallbackKey] = val;
+        } else if (val !== undefined && val !== null) {
+          mapped[fallbackKey] = String(val);
+        }
+      }
+      continue;
+    }
+    const key = q.question || String(idx);
+    if (typeof val === 'number') {
+      mapped[key] = q.options?.[val]?.label || String(val);
+    } else if (Array.isArray(val)) {
+      const labels = val
+        .map(i => (typeof i === 'number' ? q.options?.[i]?.label || String(i) : String(i)))
+        .filter(Boolean);
+      if (labels.length > 0) {
+        mapped[key] = labels.join(', ');
+      }
+    } else if (typeof val === 'string') {
+      if (val.trim()) {
+        mapped[key] = val;
+      }
+    } else if (val !== undefined && val !== null) {
+      mapped[key] = String(val);
+    }
+  }
+  return mapped;
+}
+
 export function AskUserPanelView({
   questions,
   description,
@@ -70,7 +139,7 @@ export function AskUserPanelView({
   requestId: string;
   questions: Question[];
   description: string;
-  onSubmit: (answers: Record<string, unknown>) => void;
+  onSubmit: (answers: Record<string, string>) => void;
   onSkip: () => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
@@ -79,31 +148,21 @@ export function AskUserPanelView({
 
   const handleSelect = (qIdx: number, oIdx: number, multiSelect: boolean) => {
     if (multiSelect) {
-      const current = (answers[qIdx] as number[]) || [];
-      const next = current.includes(oIdx) ? current.filter(i => i !== oIdx) : [...current, oIdx];
-      setAnswers({ ...answers, [qIdx]: next });
+      setAnswers(prev => ({ ...prev, [qIdx]: toggleMultiSelectAnswer(prev[qIdx], oIdx) }));
     } else {
-      setAnswers({ ...answers, [qIdx]: oIdx });
+      setAnswers(prev => ({ ...prev, [qIdx]: oIdx }));
     }
   };
 
   const handleOtherSubmit = (qIdx: number) => {
     const text = otherTexts[qIdx]?.trim();
     if (!text) return;
-    setAnswers({ ...answers, [qIdx]: text });
-    setOtherTexts({ ...otherTexts, [qIdx]: '' });
+    setAnswers(prev => ({ ...prev, [qIdx]: text }));
+    setOtherTexts(prev => ({ ...prev, [qIdx]: '' }));
   };
 
   const handleSubmit = () => {
-    const mapped: Record<string, unknown> = {};
-    for (const [qIdx, val] of Object.entries(answers)) {
-      const q = questions[parseInt(qIdx, 10)];
-      if (!q) continue;
-      if (typeof val === 'number') mapped[qIdx] = q.options?.[val]?.label || String(val);
-      else if (Array.isArray(val)) mapped[qIdx] = val.map(i => q.options?.[i]?.label || String(i));
-      else mapped[qIdx] = val;
-    }
-    onSubmit(mapped);
+    onSubmit(buildAskUserAnswers(questions, answers, otherTexts, description));
   };
 
   // Single question — simple layout
@@ -113,12 +172,12 @@ export function AskUserPanelView({
 
     return (
       <div className="rounded-xl border border-brand/30 bg-surface-1 p-4">
-        <div className="mb-3 text-sm font-semibold text-text-primary">
-          {esc(description || q.question || 'Question')}
-        </div>
+        <div className="mb-3 text-sm font-semibold text-text-primary">{description || q.question || 'Question'}</div>
         <div className="space-y-2">
           {(q.options || []).map((opt, j) => {
-            const isSelected = multiSelect ? ((answers[0] as number[]) || []).includes(j) : answers[0] === j;
+            const isSelected = multiSelect
+              ? Array.isArray(answers[0]) && (answers[0] as unknown[]).includes(j)
+              : answers[0] === j;
             return (
               <button
                 key={j}
@@ -130,8 +189,8 @@ export function AskUserPanelView({
                     : 'border-border bg-surface-2 text-text-secondary hover:border-border-light',
                 )}
               >
-                <div className="font-medium">{esc(opt.label)}</div>
-                {opt.description && <div className="mt-0.5 text-xs text-text-muted">{esc(opt.description)}</div>}
+                <div className="font-medium">{opt.label}</div>
+                {opt.description && <div className="mt-0.5 text-xs text-text-muted">{opt.description}</div>}
               </button>
             );
           })}
@@ -175,7 +234,7 @@ export function AskUserPanelView({
 
   return (
     <div className="rounded-xl border border-brand/30 bg-surface-1 p-4">
-      <div className="mb-3 text-sm font-semibold text-text-primary">{esc(description || 'Questions')}</div>
+      <div className="mb-3 text-sm font-semibold text-text-primary">{description || 'Questions'}</div>
       <div className="mb-3 flex gap-1 overflow-x-auto">
         {questions.map((q, i) => (
           <button
@@ -247,10 +306,12 @@ function QuestionTab({
 
   return (
     <div>
-      <div className="mb-2 text-sm text-text-secondary">{esc(question.question)}</div>
+      <div className="mb-2 text-sm text-text-secondary">{question.question}</div>
       <div className="space-y-2">
         {(question.options || []).map((opt, j) => {
-          const isSelected = multiSelect ? ((answers[qIdx] as number[]) || []).includes(j) : answers[qIdx] === j;
+          const isSelected = multiSelect
+            ? Array.isArray(answers[qIdx]) && (answers[qIdx] as unknown[]).includes(j)
+            : answers[qIdx] === j;
           return (
             <button
               key={j}
@@ -262,8 +323,8 @@ function QuestionTab({
                   : 'border-border bg-surface-2 text-text-secondary hover:border-border-light',
               )}
             >
-              <div className="font-medium">{esc(opt.label)}</div>
-              {opt.description && <div className="mt-0.5 text-xs text-text-muted">{esc(opt.description)}</div>}
+              <div className="font-medium">{opt.label}</div>
+              {opt.description && <div className="mt-0.5 text-xs text-text-muted">{opt.description}</div>}
             </button>
           );
         })}

@@ -3,6 +3,7 @@ import { log, error as logError } from '../logger'
 export interface SessionEvent {
   id: string
   sessionId: string
+  agentId?: string
   type: string
   payload: unknown
   direction: 'inbound' | 'outbound'

@@ -167,8 +167,10 @@ describe('Session Service', () => {
       expect(summaries).toHaveLength(1)
       expect(summaries[0].title).toBe('Test')
       expect(summaries[0].updated_at).toBeGreaterThan(0)
-      // Summary should not have environment_id
-      expect('environment_id' in summaries[0]).toBe(false)
+      // Summary includes source, environment_id, and created_at for dashboard display
+      expect(summaries[0].source).toBe('remote-control')
+      expect(summaries[0].environment_id).toBeNull()
+      expect(summaries[0].created_at).toBeGreaterThan(0)
     })
   })
 

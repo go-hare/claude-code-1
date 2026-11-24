@@ -40,6 +40,8 @@ export function NewSessionDialog({ open, environments, onClose, onCreated }: New
     }
   };
 
+  const selectableEnvironments = environments.filter(env => env.worker_type !== 'acp');
+
   return (
     <Dialog
       open={open}
@@ -72,7 +74,7 @@ export function NewSessionDialog({ open, environments, onClose, onCreated }: New
               className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-none"
             >
               <option value="">-- None --</option>
-              {environments.map(env => (
+              {selectableEnvironments.map(env => (
                 <option key={env.id} value={env.id}>
                   {env.machine_name || env.id} ({env.branch || 'no branch'})
                 </option>

@@ -118,16 +118,19 @@ function SingleToolCard({ tool, compact, onPermissionRespond }: SingleToolCardPr
         {tool.status === 'running' && <span className="text-[10px] text-status-running animate-pulse">running</span>}
       </button>
 
-      {/* 权限请求按钮 */}
-      {tool.status === 'waiting_for_confirmation' && tool.permissionRequest && (
-        <div className="mt-1.5 ml-4">
-          <ToolPermissionButtons
-            requestId={tool.permissionRequest.requestId}
-            options={tool.permissionRequest.options}
-            onRespond={onPermissionRespond || (() => {})}
-          />
-        </div>
-      )}
+      {/* 权限请求按钮 — 仅在存在选项且提供了回调时渲染，避免空横幅或重复控件 */}
+      {tool.status === 'waiting_for_confirmation' &&
+        tool.permissionRequest &&
+        tool.permissionRequest.options.length > 0 &&
+        onPermissionRespond && (
+          <div className="mt-1.5 ml-4">
+            <ToolPermissionButtons
+              requestId={tool.permissionRequest.requestId}
+              options={tool.permissionRequest.options}
+              onRespond={onPermissionRespond}
+            />
+          </div>
+        )}
 
       {/* 展开详情 */}
       {expanded && (

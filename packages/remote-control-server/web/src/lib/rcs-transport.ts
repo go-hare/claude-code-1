@@ -1,5 +1,5 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
-import { getUuid } from '../api/client'
+import { getActiveApiToken, getUuid } from '../api/client'
 import { generateMessageUuid } from './utils'
 import type { SessionEvent, EventPayload } from '../types'
 
@@ -13,6 +13,8 @@ class SSEEventBus {
   private listeners: Set<SSEEventHandler> = new Set()
   private eventSource: EventSource | null = null
   private _lastSeqNum = 0
+  private seenEventIds = new Set<string>()
+  private hadError = false
 
   get lastSeqNum() {
     return this._lastSeqNum
@@ -25,24 +27,50 @@ class SSEEventBus {
   }
 
   /** Connect to the SSE stream for a session */
-  connect(sessionId: string): void {
+  connect(sessionId: string, fromSeqNum = 0): void {
     this.disconnect()
+    this._lastSeqNum = fromSeqNum
     const uuid = getUuid()
-    const url = `/web/sessions/${sessionId}/events?uuid=${encodeURIComponent(uuid)}`
+    const params = new URLSearchParams({ uuid })
+    if (fromSeqNum > 0) {
+      params.set('from_sequence_num', String(fromSeqNum))
+    }
+    const url = `/web/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`
     const es = new EventSource(url)
     this.eventSource = es
 
     es.addEventListener('message', (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data) as SessionEvent
-        if (data.seqNum !== undefined && data.seqNum <= this._lastSeqNum) return
-        if (data.seqNum !== undefined) this._lastSeqNum = data.seqNum
+        if (typeof data.seqNum === 'number' && data.seqNum > 0) {
+          const isServerRestartReset =
+            (data.seqNum === 1 && this._lastSeqNum > 1) ||
+            (this.hadError &&
+              data.seqNum <= this._lastSeqNum &&
+              typeof data.id === 'string' &&
+              !this.seenEventIds.has(data.id))
+          if (isServerRestartReset) {
+            this._lastSeqNum = 0
+            this.seenEventIds.clear()
+          } else if (data.seqNum <= this._lastSeqNum) {
+            return
+          }
+          this._lastSeqNum = data.seqNum
+        }
+        this.hadError = false
+        if (typeof data.id === 'string' && data.id) {
+          this.seenEventIds.add(data.id)
+        }
         for (const handler of this.listeners) {
           handler(data)
         }
       } catch {
         // ignore parse errors
       }
+    })
+
+    es.addEventListener('error', () => {
+      this.hadError = true
     })
   }
 
@@ -53,6 +81,8 @@ class SSEEventBus {
       this.eventSource = null
     }
     this._lastSeqNum = 0
+    this.seenEventIds.clear()
+    this.hadError = false
   }
 }
 
@@ -92,11 +122,9 @@ export class RCSTransport implements ChatTransport<UIMessage> {
   > {
     const lastMessage = messages[messages.length - 1]
     if (!lastMessage || lastMessage.role !== 'user') {
-      // Return empty stream if no user message
       return new ReadableStream({ start: c => c.close() })
     }
 
-    // Extract text from the user message parts
     const text = lastMessage.parts
       .filter(
         (
@@ -110,72 +138,146 @@ export class RCSTransport implements ChatTransport<UIMessage> {
       return new ReadableStream({ start: c => c.close() })
     }
 
-    // POST user message to the RCS backend
-    const uuid = getUuid()
-    const response = await fetch(
-      `/web/sessions/${this.sessionId}/events?uuid=${encodeURIComponent(uuid)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'user',
-          uuid: generateMessageUuid(),
-          content: text,
-          message: { content: text },
-        }),
-        signal: abortSignal,
-      },
-    )
+    // Subscribe BEFORE POSTing so early SSE responses cannot be missed
+    const bufferedEvents: SessionEvent[] = []
+    let liveHandler: SSEEventHandler | null = null
+    const unsub = sseBus.onEvent(event => {
+      if (liveHandler) {
+        liveHandler(event)
+      } else {
+        bufferedEvents.push(event)
+      }
+    })
+    this.destroy()
+    this.unsub = unsub
 
-    if (!response.ok) {
-      const data = await response
-        .json()
-        .catch(() => ({ error: { message: response.statusText } }))
-      throw new Error(data.error?.message || 'Failed to send message')
+    const uuid = getUuid()
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-UUID': uuid,
+    }
+    const apiToken = getActiveApiToken()
+    if (apiToken) {
+      headers['Authorization'] = `Bearer ${apiToken}`
     }
 
-    // Create a ReadableStream from the SSE event bus
-    // Collects events until the assistant turn is complete
+    let response: Response
+    try {
+      response = await fetch(
+        `/web/sessions/${encodeURIComponent(this.sessionId)}/events`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            type: 'user',
+            uuid: generateMessageUuid(),
+            content: text,
+            message: { content: text },
+          }),
+          signal: abortSignal,
+        },
+      )
+    } catch (err) {
+      this.destroy()
+      throw err
+    }
+
+    if (!response.ok) {
+      this.destroy()
+      const rawText = await response.text().catch(() => '')
+      let errMsg = response.statusText || 'Failed to send message'
+      try {
+        const data = JSON.parse(rawText) as {
+          error?: string | { message?: string; type?: string }
+        }
+        if (typeof data.error === 'string') {
+          errMsg = data.error
+        } else if (data.error?.message || data.error?.type) {
+          errMsg = data.error.message || data.error.type || errMsg
+        }
+      } catch {
+        if (rawText.trim()) errMsg = rawText.trim()
+      }
+      throw new Error(errMsg)
+    }
+
     return new ReadableStream<UIMessageChunk>({
       start: controller => {
-        let textId = `text-${Date.now()}`
+        let textCounter = 0
         let started = false
+        let closed = false
+
+        const safeEnqueue = (chunk: UIMessageChunk) => {
+          if (closed) return
+          try {
+            controller.enqueue(chunk)
+          } catch {
+            closed = true
+            cleanup()
+          }
+        }
+
+        const safeClose = () => {
+          if (closed) return
+          closed = true
+          try {
+            controller.close()
+          } catch {
+            // already closed
+          }
+          cleanup()
+        }
 
         const ensureStarted = () => {
-          if (!started) {
+          if (!started && !closed) {
             started = true
-            controller.enqueue({
+            safeEnqueue({
               type: 'start',
               messageId: `msg-${Date.now()}`,
             })
           }
         }
 
+        const onAbort = () => {
+          safeEnqueue({ type: 'abort', reason: 'Aborted' })
+          safeClose()
+        }
+
+        const cleanup = () => {
+          liveHandler = null
+          if (this.unsub === unsub) {
+            this.unsub()
+            this.unsub = null
+          }
+          if (abortSignal) {
+            abortSignal.removeEventListener('abort', onAbort)
+          }
+        }
+
         const handler = (event: SessionEvent) => {
+          if (closed) return
           const type = event.type
           const payload = event.payload || ({} as EventPayload)
 
-          // Skip bridge init noise
           const serialized = JSON.stringify(event)
           if (/Remote Control connecting/i.test(serialized)) return
 
           switch (type) {
-            // ---- Assistant text ----
             case 'assistant': {
               const content =
                 typeof payload.content === 'string' ? payload.content : ''
               if (content && content.trim()) {
+                const textId = `text-${Date.now()}-${++textCounter}`
                 ensureStarted()
-                controller.enqueue({ type: 'text-start', id: textId })
-                controller.enqueue({
+                safeEnqueue({ type: 'text-start', id: textId })
+                safeEnqueue({
                   type: 'text-delta',
                   id: textId,
                   delta: content,
                 })
-                controller.enqueue({ type: 'text-end', id: textId })
+                safeEnqueue({ type: 'text-end', id: textId })
               }
 
-              // Check for embedded tool_use blocks
               const msg = payload.message as Record<string, unknown> | undefined
               if (
                 msg &&
@@ -190,7 +292,7 @@ export class RCSTransport implements ChatTransport<UIMessage> {
                   const toolCallId =
                     (block.id as string) ||
                     `call-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-                  controller.enqueue({
+                  safeEnqueue({
                     type: 'tool-input-available',
                     toolCallId,
                     toolName: (block.name as string) || 'tool',
@@ -198,152 +300,124 @@ export class RCSTransport implements ChatTransport<UIMessage> {
                   })
                 }
               }
-
-              // Finish after assistant message
-              ensureStarted()
-              controller.enqueue({ type: 'finish', finishReason: 'stop' })
-              controller.close()
-              cleanup()
+              // Keep stream open for tool calls / multi-step replies; close on result or session idle
               break
             }
 
-            // ---- Tool use events ----
             case 'tool_use': {
               ensureStarted()
+              const p = payload as Record<string, unknown>
               const toolCallId =
-                ((payload as Record<string, unknown>).tool_call_id as string) ||
+                (p.tool_call_id as string) ||
+                (p.tool_use_id as string) ||
                 `call-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-              controller.enqueue({
+              safeEnqueue({
                 type: 'tool-input-available',
                 toolCallId,
-                toolName:
-                  ((payload as Record<string, unknown>).tool_name as string) ||
-                  'tool',
-                input: (payload as Record<string, unknown>).tool_input || {},
+                toolName: (p.tool_name as string) || 'tool',
+                input: p.tool_input || {},
               })
               break
             }
 
-            // ---- Tool result events ----
             case 'tool_result': {
               ensureStarted()
+              const p = payload as Record<string, unknown>
               const resultCallId =
-                ((payload as Record<string, unknown>).tool_call_id as string) ||
+                (p.tool_call_id as string) ||
+                (p.tool_use_id as string) ||
                 `call-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
               const output =
-                typeof (payload as Record<string, unknown>).output === 'string'
-                  ? (payload as Record<string, unknown>).output
-                  : (payload as Record<string, unknown>).content || ''
-              controller.enqueue({
+                typeof p.output === 'string' ? p.output : p.content || ''
+              safeEnqueue({
                 type: 'tool-output-available',
                 toolCallId: resultCallId,
-                output: output as string,
+                output: String(output),
               })
               break
             }
 
-            // ---- Permission / control requests ----
             case 'control_request':
             case 'permission_request': {
               const req = payload.request as Record<string, unknown> | undefined
               if (req && req.subtype === 'can_use_tool') {
-                // Forward to the UI layer for handling
                 this.onPermissionRequest?.(event)
               }
-              // Don't close the stream — wait for the response
               break
             }
 
-            // ---- Status events ----
-            case 'status': {
-              const msg =
-                (typeof payload.message === 'string' ? payload.message : '') ||
-                payload.content ||
-                ''
-              if (/connecting|waiting|initializing|Remote Control/i.test(msg))
-                return
+            case 'result':
+            case 'result_success': {
+              ensureStarted()
+              safeEnqueue({ type: 'finish', finishReason: 'stop' })
+              safeClose()
               break
             }
 
-            // ---- Session status ----
             case 'session_status': {
               if (typeof payload.status === 'string') {
                 this.onSessionStatus?.(payload.status)
                 if (
+                  payload.status === 'idle' ||
                   payload.status === 'archived' ||
                   payload.status === 'inactive'
                 ) {
                   ensureStarted()
-                  controller.enqueue({ type: 'finish', finishReason: 'stop' })
-                  controller.close()
-                  cleanup()
+                  safeEnqueue({ type: 'finish', finishReason: 'stop' })
+                  safeClose()
                 }
               }
               break
             }
 
-            // ---- Errors ----
             case 'error': {
+              const errorText = String(
+                (typeof payload.message === 'string' && payload.message) ||
+                  payload.content ||
+                  'Unknown error',
+              )
+              this.onError?.(errorText)
               ensureStarted()
-              controller.enqueue({
+              safeEnqueue({
                 type: 'error',
-                errorText: String(
-                  payload.message || payload.content || 'Unknown error',
-                ),
+                errorText,
               })
-              controller.enqueue({ type: 'finish', finishReason: 'error' })
-              controller.close()
-              cleanup()
+              safeEnqueue({ type: 'finish', finishReason: 'error' })
+              safeClose()
               break
             }
 
-            // ---- Interrupt ----
             case 'interrupt': {
               ensureStarted()
-              controller.enqueue({
+              safeEnqueue({
                 type: 'abort',
                 reason: 'Session interrupted',
               })
-              controller.close()
-              cleanup()
+              safeClose()
               break
             }
-
-            // ---- Skip noise ----
-            case 'partial_assistant':
-            case 'result':
-            case 'result_success':
-            case 'control_response':
-            case 'permission_response':
-            case 'system':
-            case 'task_state':
-            case 'automation_state':
-              return
 
             default:
               return
           }
         }
 
-        const cleanup = () => {
-          if (this.unsub) {
-            this.unsub()
-            this.unsub = null
-          }
-        }
-
-        this.unsub = sseBus.onEvent(handler)
-
-        // Handle abort
         if (abortSignal) {
-          const onAbort = () => {
-            controller.enqueue({ type: 'abort', reason: 'Aborted' })
-            controller.close()
-            cleanup()
-            abortSignal.removeEventListener('abort', onAbort)
+          if (abortSignal.aborted) {
+            onAbort()
+            return
           }
           abortSignal.addEventListener('abort', onAbort)
         }
+
+        liveHandler = handler
+        for (const buffered of bufferedEvents.splice(0)) {
+          if (closed) break
+          handler(buffered)
+        }
+      },
+      cancel: () => {
+        this.destroy()
       },
     })
   }

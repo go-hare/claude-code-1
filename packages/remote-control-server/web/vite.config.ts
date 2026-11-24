@@ -61,7 +61,10 @@ export default defineConfig({
       '/web': 'http://localhost:3000',
       '/v1': 'http://localhost:3000',
       '/v2': 'http://localhost:3000',
-      '/acp': 'http://localhost:3000',
+      '/acp': {
+        target: 'http://localhost:3000',
+        ws: true,
+      },
     },
   },
 })

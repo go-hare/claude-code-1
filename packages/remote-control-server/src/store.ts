@@ -326,14 +326,13 @@ export function storeListSessionsByOwnerUuid(uuid: string): SessionRecord[] {
     }
   }
 
-  // Auto-bind orphaned sessions (no owner — typically ACP agent sessions created via REST registration)
+  // Include shared ACP sessions (read-only discovery across Web UI UUIDs;
+  // relay WS and mutating endpoints enforce API key / ownership auth).
+  // Never auto-bind orphaned non-ACP sessions during passive GET listing,
+  // otherwise Dashboard polling steals CLI sessions before POST /web/bind.
   for (const [sessionId, session] of sessions) {
     if (resultIds.has(sessionId)) continue
-    const owners = sessionOwners.get(sessionId)
-    // No owners map entry at all, or empty owners set
-    const isOrphaned = !owners || owners.size === 0
-    if (isOrphaned) {
-      storeBindSession(sessionId, uuid)
+    if (session.source === 'acp') {
       result.push(session)
       resultIds.add(sessionId)
     }

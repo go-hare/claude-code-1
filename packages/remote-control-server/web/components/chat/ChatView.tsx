@@ -33,6 +33,14 @@ export function ChatView({
   // 将相邻的 ToolCallEntry 合并为一组
   const grouped = groupToolCalls(entries);
   const hasMessages = entries.length > 0;
+  let lastUserGroupIndex = -1;
+  for (let idx = grouped.length - 1; idx >= 0; idx--) {
+    const item = grouped[idx];
+    if (item?.type === 'single' && item.entry.type === 'user_message') {
+      lastUserGroupIndex = idx;
+      break;
+    }
+  }
 
   // Thinking indicator: awaiting first assistant/tool after user turn,
   // or re-entered busy session still waiting on a reply.
@@ -54,8 +62,13 @@ export function ChatView({
             {grouped.map((item, i) => {
               if (item.type === 'single') {
                 return (
-                  <div key={`entry-${i}`} className={cn(entrySpacing(entries, i))}>
-                    <EntryRenderer entry={item.entry} isLoading={isLoading} onPermissionRespond={onPermissionRespond} />
+                  <div key={`entry-${i}`} className={cn(entrySpacing(grouped, i))}>
+                    <EntryRenderer
+                      entry={item.entry}
+                      isStreaming={isLoading && i === grouped.length - 1}
+                      isLastUserMessage={i === lastUserGroupIndex}
+                      onPermissionRespond={onPermissionRespond}
+                    />
                   </div>
                 );
               }
@@ -100,22 +113,24 @@ export function ChatView({
 // 间距逻辑 — 用户消息前后间距大，工具调用紧贴
 // =============================================================================
 
-function entrySpacing(entries: ThreadEntry[], index: number): string {
-  const entry = entries[index];
+function entrySpacing(grouped: GroupedItem[], index: number): string {
+  const item = grouped[index];
+  if (!item || item.type !== 'single') return 'py-2';
+  const entry = item.entry;
   // 用户消息前后大留白 — Claude.ai 式宽松间距
-  if (entry?.type === 'user_message') {
+  if (entry.type === 'user_message') {
     return 'pt-10 pb-3';
   }
   // 助手消息 — 工具调用紧贴，否则多留白
-  if (entry?.type === 'assistant_message') {
-    const next = entries[index + 1];
-    if (next?.type === 'tool_call') {
+  if (entry.type === 'assistant_message') {
+    const next = grouped[index + 1];
+    if (next?.type === 'tool_group' || (next?.type === 'single' && next.entry.type === 'tool_call')) {
       return 'pt-3 pb-1';
     }
     return 'pt-3 pb-8';
   }
   // Plan 条目
-  if (entry?.type === 'plan') {
+  if (entry.type === 'plan') {
     return 'pt-3 pb-3';
   }
   return 'py-2';
@@ -127,18 +142,20 @@ function entrySpacing(entries: ThreadEntry[], index: number): string {
 
 function EntryRenderer({
   entry,
-  isLoading,
+  isStreaming,
+  isLastUserMessage,
   onPermissionRespond,
 }: {
   entry: ThreadEntry;
-  isLoading: boolean;
+  isStreaming: boolean;
+  isLastUserMessage: boolean;
   onPermissionRespond?: (requestId: string, optionId: string | null, optionKind: string | null) => void;
 }) {
   switch (entry.type) {
     case 'user_message':
-      return <UserBubble entry={entry} />;
+      return <UserBubble entry={entry} isLastUserMessage={isLastUserMessage} />;
     case 'assistant_message':
-      return <AssistantBubble entry={entry} isStreaming={isLoading} />;
+      return <AssistantBubble entry={entry} isStreaming={isStreaming} />;
     case 'tool_call':
       return <ToolCallGroup entries={[entry as ToolCallEntry]} onPermissionRespond={onPermissionRespond} />;
     case 'plan':

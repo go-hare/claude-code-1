@@ -11,6 +11,8 @@ interface RelayConnectionEntry {
   keepalive: ReturnType<typeof setInterval> | null
   ws: WSContext
   openTime: number
+  /** Pending JSON-RPC session/set_mode request IDs awaiting session_mode_set over RCS relay */
+  pendingModeRequestIds: Array<string | number>
 }
 
 const relayConnections = new Map<string, RelayConnectionEntry>() // key: relayWsId
@@ -41,7 +43,10 @@ export function handleRelayOpen(
   const agentConn = findAcpConnectionByAgentId(agentId)
   if (!agentConn) {
     log(`[ACP-Relay] Agent ${agentId} not found or offline`)
-    sendToRelayWs(ws, { type: 'error', message: 'Agent not found or offline' })
+    sendToRelayWs(ws, {
+      type: 'error',
+      payload: { message: 'Agent not found or offline' },
+    })
     ws.close(4004, 'agent not found')
     return
   }
@@ -56,16 +61,58 @@ export function handleRelayOpen(
     sendToRelayWs(entry.ws, { type: 'keep_alive' })
   }, RELAY_KEEPALIVE_INTERVAL_MS)
 
-  // Subscribe to channel group EventBus — forward agent responses to frontend
+  // Subscribe to channel group EventBus — forward only target agent's responses to frontend
   const channelGroupId = agentConn.channelGroupId
   const bus = getAcpEventBus(channelGroupId)
   const unsub = bus.subscribe((event: SessionEvent) => {
     if (ws.readyState !== 1) return
     if (event.direction !== 'inbound') return
+    const payloadAgentId =
+      event.payload &&
+      typeof event.payload === 'object' &&
+      'agentId' in event.payload &&
+      typeof (event.payload as Record<string, unknown>).agentId === 'string'
+        ? ((event.payload as Record<string, unknown>).agentId as string)
+        : undefined
+    const eventAgentId = event.agentId ?? payloadAgentId
+    if (eventAgentId !== agentId) return
+    const entry = relayConnections.get(relayWsId)
     // Handle agent disconnect specially: send status to frontend
     if (event.type === 'agent_disconnect') {
+      entry?.pendingModeRequestIds.splice(0)
       sendToRelayWs(ws, { type: 'status', payload: { connected: false } })
       return
+    }
+    const payloadObj =
+      event.payload && typeof event.payload === 'object'
+        ? (event.payload as Record<string, unknown>)
+        : null
+    if (
+      payloadObj?.jsonrpc === '2.0' &&
+      (typeof payloadObj.id === 'string' || typeof payloadObj.id === 'number')
+    ) {
+      if (entry) {
+        const idx = entry.pendingModeRequestIds.indexOf(payloadObj.id)
+        if (idx >= 0) entry.pendingModeRequestIds.splice(idx, 1)
+      }
+      sendToRelayWs(ws, event.payload as object)
+      return
+    }
+    if (
+      payloadObj?.type === 'session_mode_set' &&
+      entry &&
+      entry.pendingModeRequestIds.length > 0
+    ) {
+      const reqId = entry.pendingModeRequestIds.shift()!
+      sendToRelayWs(ws, {
+        jsonrpc: '2.0',
+        id: reqId,
+        result: payloadObj.payload ?? {},
+      })
+      return
+    }
+    if (payloadObj?.type === 'error' && entry) {
+      entry.pendingModeRequestIds.splice(0)
     }
     // Forward agent responses to the frontend WebSocket
     sendToRelayWs(ws, event.payload as object)
@@ -77,6 +124,7 @@ export function handleRelayOpen(
     keepalive,
     ws,
     openTime: Date.now(),
+    pendingModeRequestIds: [],
   })
 
   // Don't send a synthetic status message here!
@@ -115,8 +163,21 @@ export function handleRelayMessage(
     // Forward to acp-link agent
     const sent = sendToAgentWs(entry.agentId, msg)
     if (!sent) {
-      sendToRelayWs(ws, { type: 'error', message: 'Agent connection lost' })
+      sendToRelayWs(ws, {
+        type: 'error',
+        payload: { message: 'Agent connection lost' },
+      })
       return
+    }
+
+    // Track JSON-RPC session/set_mode request IDs so legacy session_mode_set
+    // responses emitted over rcsUpstream correlate back as JSON-RPC 2.0 results.
+    if (
+      msg.jsonrpc === '2.0' &&
+      msg.method === 'session/set_mode' &&
+      (typeof msg.id === 'string' || typeof msg.id === 'number')
+    ) {
+      entry.pendingModeRequestIds.push(msg.id)
     }
   }
 }

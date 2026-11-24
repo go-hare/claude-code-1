@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { UserMessageEntry, AssistantMessageEntry, UserMessageImage } from '../../src/lib/types';
-import { cn, esc } from '../../src/lib/utils';
+import { cn } from '../../src/lib/utils';
 import { MessageResponse } from '../ai-elements/message';
 import { Reasoning, ReasoningTrigger, ReasoningContent } from '../ai-elements/reasoning';
 import { ChevronDown } from 'lucide-react';
@@ -14,9 +14,10 @@ const COLLAPSED_MAX_HEIGHT = 200;
 
 interface UserBubbleProps {
   entry: UserMessageEntry;
+  isLastUserMessage?: boolean;
 }
 
-export function UserBubble({ entry }: UserBubbleProps) {
+export function UserBubble({ entry, isLastUserMessage }: UserBubbleProps) {
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -32,7 +33,7 @@ export function UserBubble({ entry }: UserBubbleProps) {
   }, [checkOverflow, entry.content]);
 
   return (
-    <div className="flex justify-end">
+    <div className="flex justify-end" data-last-user-message={isLastUserMessage ? 'true' : undefined}>
       <div className="max-w-[85%] sm:max-w-[70%]">
         {/* 图片附件 */}
         {entry.images && entry.images.length > 0 && (
@@ -53,7 +54,7 @@ export function UserBubble({ entry }: UserBubbleProps) {
               )}
               style={!expanded && overflowing ? { maxHeight: `${COLLAPSED_MAX_HEIGHT}px` } : undefined}
             >
-              {esc(entry.content)}
+              {entry.content}
             </div>
             {/* 折叠渐变遮罩 + 展开按钮 */}
             {!expanded && overflowing && (
@@ -130,18 +131,45 @@ export function AssistantBubble({ entry, isStreaming }: AssistantBubbleProps) {
 // 图片缩略图 — 点击放大
 // =============================================================================
 
+const SAFE_RASTER_IMAGE_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'image/bmp',
+]);
+
+export function sanitizeImageMimeType(mimeType: string | undefined, fallback: string): string {
+  const normalized = (mimeType ?? '').trim().toLowerCase();
+  return SAFE_RASTER_IMAGE_MIMES.has(normalized) ? normalized : fallback;
+}
+
+export function openImageSafely(image: UserMessageImage): void {
+  try {
+    const binary = atob(image.data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const safeMimeType = sanitizeImageMimeType(image.mimeType, 'application/octet-stream');
+    const blob = new Blob([bytes], { type: safeMimeType });
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  } catch (err) {
+    console.error('[ImageThumbnail] Failed to open image:', err);
+  }
+}
+
 function ImageThumbnail({ image }: { image: UserMessageImage }) {
-  const dataUrl = `data:${image.mimeType};base64,${image.data}`;
+  const safeMimeType = sanitizeImageMimeType(image.mimeType, 'image/png');
+  const dataUrl = `data:${safeMimeType};base64,${image.data}`;
   return (
     <button
       type="button"
       className="rounded-lg overflow-hidden border border-border hover:border-brand/40 transition-colors cursor-pointer"
-      onClick={() => {
-        const w = window.open('');
-        if (w) {
-          w.document.write(`<img src="${dataUrl}" style="max-width:100%;max-height:100%" />`);
-        }
-      }}
+      onClick={() => openImageSafely(image)}
     >
       <img src={dataUrl} alt="Uploaded image" className="h-20 w-20 object-cover" />
     </button>

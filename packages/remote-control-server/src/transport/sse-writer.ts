@@ -59,6 +59,7 @@ export function createSSEStream(c: Context, sessionId: string, fromSeqNum = 0) {
         const missed = bus.getEventsSince(fromSeqNum)
         for (const event of missed) {
           const data = JSON.stringify({
+            id: event.id,
             type: event.type,
             payload: event.payload,
             direction: event.direction,
@@ -78,6 +79,7 @@ export function createSSEStream(c: Context, sessionId: string, fromSeqNum = 0) {
       // Subscribe to new events
       const unsub = bus.subscribe(event => {
         const data = JSON.stringify({
+          id: event.id,
           type: event.type,
           payload: event.payload,
           direction: event.direction,

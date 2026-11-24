@@ -7,15 +7,16 @@ interface NavbarProps {
   onTokenClick: () => void;
   activeTokenLabel?: string | null;
   sessionTitle?: string;
+  isAcp?: boolean;
   onBack?: () => void;
 }
 
-export function Navbar({ onIdentityClick, onTokenClick, activeTokenLabel, sessionTitle, onBack }: NavbarProps) {
+export function Navbar({ onIdentityClick, onTokenClick, activeTokenLabel, sessionTitle, isAcp, onBack }: NavbarProps) {
   return (
     <nav className="sticky top-0 z-40 border-b border-border bg-surface-1/80 backdrop-blur-md">
       <div className="mx-auto flex h-11 sm:h-12 max-w-5xl items-center justify-between px-3 sm:px-4">
         {sessionTitle ? (
-          /* Session 页面 — 返回按钮 + agent 名 */
+          /* Session 页面 — 返回按钮 + 会话/agent 名 */
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
@@ -27,9 +28,11 @@ export function Navbar({ onIdentityClick, onTokenClick, activeTokenLabel, sessio
             </button>
             <span className="text-text-muted/40">/</span>
             <span className="text-sm font-display font-medium text-text-primary truncate">{sessionTitle}</span>
-            <span className="rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-medium text-brand flex-shrink-0">
-              ACP
-            </span>
+            {isAcp && (
+              <span className="rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-medium text-brand flex-shrink-0">
+                ACP
+              </span>
+            )}
           </div>
         ) : (
           /* Dashboard 页面 — 品牌 */

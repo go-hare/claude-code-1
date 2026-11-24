@@ -28,25 +28,61 @@ export interface SessionEvent {
   id?: string
 }
 
+export interface SessionTaskItem {
+  id: string
+  subject: string
+  status: string
+  description?: string
+  owner?: string
+}
+
+export interface AutomationState {
+  enabled: boolean
+  phase: 'standby' | 'sleeping' | null
+  next_tick_at: number | null
+  sleep_until: number | null
+}
+
 export interface EventPayload {
   content?: string
   message?: unknown
   status?: string
   uuid?: string
+  isSynthetic?: boolean
   raw?: {
     uuid?: string
     status?: string
+    isSynthetic?: boolean
+    message?: unknown
+    tasks?: unknown[]
+    task_list_id?: string
   }
   request_id?: string
   request?: PermissionRequest
+  response?: Record<string, unknown>
+  approved?: boolean
   tool_name?: string
   tool_input?: unknown
+  tool_call_id?: string
+  tool_use_id?: string
+  output?: unknown
+  is_error?: boolean
   input?: unknown
   description?: string
+  tasks?: unknown[]
+  task_list_id?: string
+  taskListId?: string
+  enabled?: boolean
+  phase?: 'standby' | 'sleeping' | null
+  next_tick_at?: number | null
+  sleep_until?: number | null
 }
 
 export interface ContentBlock {
   type: string
+  id?: string
+  tool_use_id?: string
+  tool_call_id?: string
   text?: string
   name?: string
   input?: unknown
@@ -57,6 +93,8 @@ export interface ContentBlock {
 export interface PermissionRequest {
   subtype?: string
   tool_name?: string
+  tool_use_id?: string
+  tool_call_id?: string
   input?: unknown
   tool_input?: unknown
   description?: string

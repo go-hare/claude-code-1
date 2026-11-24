@@ -115,7 +115,10 @@ export interface SessionSummaryResponse {
   id: string
   title: string | null
   status: string
+  source: string
+  environment_id: string | null
   username: string | null
+  created_at: number
   updated_at: number
 }
 

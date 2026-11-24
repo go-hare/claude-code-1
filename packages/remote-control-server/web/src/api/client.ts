@@ -7,18 +7,63 @@ import type {
 import { generateMessageUuid } from '../lib/utils'
 
 const BASE = ''
+const CORRUPTED_UUID_SENTINEL = '__default__'
+const CORRUPTED_TOKEN_ID_PREFIX = 'tk_'
+
+export function isCorruptedUuid(value: string | null | undefined): boolean {
+  if (!value || !value.trim()) return true
+  return (
+    value === CORRUPTED_UUID_SENTINEL ||
+    value.startsWith(CORRUPTED_TOKEN_ID_PREFIX)
+  )
+}
+
+/** In-memory fallback UUID when localStorage is unavailable or throws */
+let fallbackUuid: string | null = null
 
 export function getUuid(): string {
-  let uuid = localStorage.getItem('rcs_uuid')
-  if (!uuid) {
-    uuid = generateMessageUuid()
-    localStorage.setItem('rcs_uuid', uuid)
+  let uuid: string | null = null
+  let storageReadable = true
+  try {
+    uuid = localStorage.getItem('rcs_uuid')
+  } catch {
+    storageReadable = false
   }
-  return uuid
+  if (!storageReadable) {
+    if (isCorruptedUuid(fallbackUuid)) {
+      fallbackUuid = generateMessageUuid()
+    }
+    return fallbackUuid!
+  }
+  if (isCorruptedUuid(uuid)) {
+    const generated = generateMessageUuid()
+    let storageWritable = true
+    try {
+      localStorage.setItem('rcs_uuid', generated)
+    } catch {
+      storageWritable = false
+    }
+    if (!storageWritable) {
+      if (isCorruptedUuid(fallbackUuid)) {
+        fallbackUuid = generated
+      }
+      return fallbackUuid!
+    }
+    fallbackUuid = generated
+    return generated
+  }
+  fallbackUuid = uuid
+  return uuid!
 }
 
 export function setUuid(uuid: string): void {
-  localStorage.setItem('rcs_uuid', uuid)
+  if (isCorruptedUuid(uuid)) return
+  fallbackUuid = uuid
+  try {
+    localStorage.setItem('rcs_uuid', uuid)
+  } catch {
+    // ignore storage errors
+  }
 }
 
 /** Active API token for Authorization header (set by useTokens) */
@@ -32,28 +77,75 @@ export function getActiveApiToken(): string | null {
   return _activeToken
 }
 
+async function readResponseBody(res: Response): Promise<{
+  data: unknown
+  rawText: string
+}> {
+  if (typeof res.text === 'function') {
+    const rawText = await res.text()
+    if (!rawText) return { data: undefined, rawText: '' }
+    try {
+      return { data: JSON.parse(rawText), rawText }
+    } catch {
+      return { data: undefined, rawText }
+    }
+  }
+  try {
+    const data = await res.json()
+    return { data, rawText: '' }
+  } catch {
+    return { data: undefined, rawText: '' }
+  }
+}
+
+function extractApiErrorMessage(
+  data: unknown,
+  rawText: string,
+  res: Response,
+): string {
+  if (data && typeof data === 'object') {
+    const record = data as Record<string, unknown>
+    const errField = record.error
+    if (typeof errField === 'string' && errField.trim()) {
+      return errField
+    }
+    if (errField && typeof errField === 'object') {
+      const errObj = errField as Record<string, unknown>
+      if (typeof errObj.message === 'string' && errObj.message.trim()) {
+        return errObj.message
+      }
+      if (typeof errObj.type === 'string' && errObj.type.trim()) {
+        return errObj.type
+      }
+    }
+  }
+  if (rawText.trim()) return rawText.trim()
+  return res.statusText || `HTTP ${res.status}`
+}
+
 async function api<T>(
   method: string,
   path: string,
   body?: unknown,
 ): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const uuid = getUuid()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-UUID': uuid,
+  }
 
   if (_activeToken) {
     headers['Authorization'] = `Bearer ${_activeToken}`
   }
 
-  const uuid = getUuid()
-  const sep = path.includes('?') ? '&' : '?'
-  const url = `${BASE}${path}${sep}uuid=${encodeURIComponent(uuid)}`
+  const url = `${BASE}${path}`
   const opts: RequestInit = { method, headers }
   if (body !== undefined) opts.body = JSON.stringify(body)
 
   const res = await fetch(url, opts)
-  const data = await res.json()
+  const { data, rawText } = await readResponseBody(res)
   if (!res.ok) {
-    const err = data.error || { type: 'unknown', message: res.statusText }
-    throw new Error(err.message || err.type)
+    throw new Error(extractApiErrorMessage(data, rawText, res))
   }
   return data as T
 }

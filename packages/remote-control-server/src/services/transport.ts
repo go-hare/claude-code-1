@@ -72,15 +72,27 @@ export function normalizePayload(
   if (p.name) normalized.tool_name = p.name
   if (p.tool_input) normalized.tool_input = p.tool_input
   if (p.input) normalized.tool_input = p.input
+  if (typeof p.tool_call_id === 'string' && p.tool_call_id)
+    normalized.tool_call_id = p.tool_call_id
+  if (typeof p.tool_use_id === 'string' && p.tool_use_id) {
+    normalized.tool_use_id = p.tool_use_id
+    if (!normalized.tool_call_id) normalized.tool_call_id = p.tool_use_id
+  }
+  if (p.output !== undefined) normalized.output = p.output
+  if (typeof p.is_error === 'boolean') normalized.is_error = p.is_error
 
   // Preserve permission fields
   if (p.request_id) normalized.request_id = p.request_id
   if (p.request) normalized.request = p.request
   if (p.approved !== undefined) normalized.approved = p.approved
   if (p.updated_input) normalized.updated_input = p.updated_input
+  if (p.updated_permissions !== undefined)
+    normalized.updated_permissions = p.updated_permissions
+  if (p.response !== undefined) normalized.response = p.response
 
-  // Preserve message field for backward compat
-  if (p.message) normalized.message = p.message
+  // Preserve message field for backward compat (including string deny/feedback messages)
+  if (p.message !== undefined && p.message !== null)
+    normalized.message = p.message
 
   if (type === 'task_state') {
     if (typeof p.task_list_id === 'string')

@@ -101,6 +101,17 @@ export class ACPClient {
   private onPermissionRequest: PermissionRequestHandler | null = null
   private onBrowserToolCall: BrowserToolCallHandler | null = null
   private onErrorMessage: ErrorMessageHandler | null = null
+  private errorMessageListeners: Set<ErrorMessageHandler> = new Set()
+  private jsonRpcSeq = 0
+  private pendingJsonRpcRequests = new Map<
+    string,
+    {
+      resolve: (result: unknown) => void
+      reject: (err: Error) => void
+      timer: ReturnType<typeof setTimeout>
+    }
+  >()
+  private pendingSetModeIds: string[] = []
 
   // Pending session operations
   private pendingSessionList: {
@@ -194,6 +205,21 @@ export class ACPClient {
     this.onErrorMessage = handler
   }
 
+  addErrorMessageHandler(handler: ErrorMessageHandler): void {
+    this.errorMessageListeners.add(handler)
+  }
+
+  removeErrorMessageHandler(handler: ErrorMessageHandler): void {
+    this.errorMessageListeners.delete(handler)
+  }
+
+  private emitErrorMessage(message: string): void {
+    this.onErrorMessage?.(message)
+    for (const listener of this.errorMessageListeners) {
+      listener(message)
+    }
+  }
+
   setSessionSwitchingHandler(handler: SessionSwitchingHandler | null): void {
     this.onSessionSwitching = handler
   }
@@ -207,6 +233,18 @@ export class ACPClient {
 
   getState(): ConnectionState {
     return this.connectionState
+  }
+
+  isConnected(): boolean {
+    return (
+      this.connectionState === 'connected' &&
+      this.ws !== null &&
+      this.ws.readyState === WebSocket.OPEN
+    )
+  }
+
+  reconnect(): Promise<void> {
+    return this.connect()
   }
 
   getSessionId(): string | null {
@@ -301,6 +339,17 @@ export class ACPClient {
   }
 
   async connect(): Promise<void> {
+    // Settle any superseded in-flight connect() promise so callers never hang
+    if (this.connectReject) {
+      const prevReject = this.connectReject
+      this.connectResolve = null
+      this.connectReject = null
+      prevReject(new DisconnectRequestedError())
+    } else {
+      this.connectResolve = null
+      this.connectReject = null
+    }
+
     // Clean up any existing connection first
     if (this.ws) {
       const oldWs = this.ws
@@ -311,8 +360,6 @@ export class ACPClient {
         /* ignore */
       }
       this.stopHeartbeat()
-      this.connectResolve = null
-      this.connectReject = null
     }
 
     this.setState('connecting')
@@ -349,8 +396,12 @@ export class ACPClient {
           // Ignore messages from stale sockets
           if (this.ws !== ws) return
           try {
-            const response: ProxyResponse = JSON.parse(event.data)
-            this.handleResponse(response)
+            const parsed = JSON.parse(event.data) as Record<string, unknown>
+            if (parsed.jsonrpc === '2.0') {
+              this.handleJsonRpcMessage(parsed)
+              return
+            }
+            this.handleResponse(parsed as unknown as ProxyResponse)
           } catch (error) {
             console.error('[ACPClient] Failed to parse message:', error)
           }
@@ -371,26 +422,108 @@ export class ACPClient {
           if (this.ws !== ws) return
           console.log('[ACPClient] WebSocket closed', event.code, event.reason)
 
-          // Check if closed due to auth failure (code 4001) or other error during connect
+          this.stopHeartbeat()
+          this.ws = null
+
+          const closeReason =
+            event.reason || `Connection closed (code: ${event.code})`
+
+          // Check if closed due to auth failure (code 4001/4003) or other error during connect
           if (this.connectReject) {
-            const errorMessage =
-              event.reason || `Connection closed (code: ${event.code})`
-            this.setState('error', errorMessage)
-            this.connectReject(new Error(errorMessage))
+            this.setState('error', closeReason)
+            this.connectReject(new Error(closeReason))
             this.connectResolve = null
             this.connectReject = null
-          } else {
+          } else if (this.connectionState !== 'error') {
+            // Preserve 'error' state if onerror or a connect-phase error already set it
             this.setState('disconnected')
           }
 
-          this.ws = null
-          this.sessionId = null
+          this.resetSessionState(new Error(closeReason))
         }
       } catch (error) {
+        this.connectResolve = null
+        this.connectReject = null
         this.setState('error', (error as Error).message)
         reject(error)
       }
     })
+  }
+
+  private removePendingSetModeId(id: string): void {
+    const idx = this.pendingSetModeIds.indexOf(id)
+    if (idx >= 0) {
+      this.pendingSetModeIds.splice(idx, 1)
+    }
+  }
+
+  private handleJsonRpcMessage(msg: Record<string, unknown>): void {
+    const id =
+      typeof msg.id === 'string' || typeof msg.id === 'number'
+        ? String(msg.id)
+        : null
+    if (!id) {
+      // JSON-RPC notifications are already mirrored via legacy `{ type, payload }` frames
+      return
+    }
+    const pending = this.pendingJsonRpcRequests.get(id)
+    if (msg.error && typeof msg.error === 'object') {
+      const errObj = msg.error as Record<string, unknown>
+      const errMsg =
+        typeof errObj.message === 'string'
+          ? errObj.message
+          : 'ACP JSON-RPC request failed'
+      if (pending) {
+        clearTimeout(pending.timer)
+        this.pendingJsonRpcRequests.delete(id)
+        this.removePendingSetModeId(id)
+        pending.reject(new Error(errMsg))
+      }
+      this.emitErrorMessage(errMsg)
+      return
+    }
+    if (pending) {
+      clearTimeout(pending.timer)
+      this.pendingJsonRpcRequests.delete(id)
+      this.removePendingSetModeId(id)
+      pending.resolve(msg.result)
+    }
+  }
+
+  private rejectPendingOperations(error: Error): void {
+    this.pendingSessionTarget = null
+    if (this.pendingSessionList) {
+      clearTimeout(this.pendingSessionList.timer)
+      this.pendingSessionList.reject(error)
+      this.pendingSessionList = null
+    }
+    if (this.pendingSessionLoad) {
+      clearTimeout(this.pendingSessionLoad.timer)
+      this.pendingSessionLoad.reject(error)
+      this.pendingSessionLoad = null
+    }
+    if (this.pendingSessionResume) {
+      clearTimeout(this.pendingSessionResume.timer)
+      this.pendingSessionResume.reject(error)
+      this.pendingSessionResume = null
+    }
+    for (const [, pending] of this.pendingJsonRpcRequests) {
+      clearTimeout(pending.timer)
+      pending.reject(error)
+    }
+    this.pendingJsonRpcRequests.clear()
+    this.pendingSetModeIds = []
+  }
+
+  private resetSessionState(error: Error): void {
+    this.sessionId = null
+    this._modelState = null
+    this._agentCapabilities = null
+    this._promptCapabilities = null
+    this._availableCommands = []
+    this.onModelStateChanged?.(null)
+    this.onAvailableCommandsChanged?.([])
+    this.rejectPendingOperations(error)
   }
 
   private handleResponse(response: ProxyResponse): void {
@@ -403,47 +536,43 @@ export class ACPClient {
           this._agentCapabilities = response.payload.capabilities ?? null
           this.setState('connected')
           this.startHeartbeat()
-          this.connectResolve?.(undefined)
+          const pendingResolve = this.connectResolve
+          this.connectResolve = null
+          this.connectReject = null
+          pendingResolve?.(undefined)
         } else {
           this.stopHeartbeat()
-          this.setState('disconnected')
+          const pendingReject = this.connectReject
+          this.connectResolve = null
+          this.connectReject = null
+          if (pendingReject) {
+            this.setState('error', 'Agent disconnected')
+            pendingReject(new Error('Agent disconnected'))
+          } else {
+            this.setState('disconnected')
+          }
+          this.resetSessionState(new Error('Agent disconnected'))
         }
-        this.connectResolve = null
-        this.connectReject = null
         break
 
-      case 'error':
+      case 'error': {
         console.error('[ACPClient] Error:', response.payload)
         const errorMsg =
           response.payload?.message || JSON.stringify(response.payload)
-        this.pendingSessionTarget = null
-        // Reject pending session operations if any (clear their timers)
-        if (this.pendingSessionList) {
-          clearTimeout(this.pendingSessionList.timer)
-          this.pendingSessionList.reject(new Error(errorMsg))
-          this.pendingSessionList = null
-        }
-        if (this.pendingSessionLoad) {
-          clearTimeout(this.pendingSessionLoad.timer)
-          this.pendingSessionLoad.reject(new Error(errorMsg))
-          this.pendingSessionLoad = null
-        }
-        if (this.pendingSessionResume) {
-          clearTimeout(this.pendingSessionResume.timer)
-          this.pendingSessionResume.reject(new Error(errorMsg))
-          this.pendingSessionResume = null
-        }
-        // If during connect phase, reject the connect promise
+        this.rejectPendingOperations(new Error(errorMsg))
+        // If during connect phase, preserve error state and reject the connect promise
         if (this.connectReject) {
+          this.setState('error', errorMsg)
           this.connectReject(new Error(errorMsg))
           this.connectResolve = null
           this.connectReject = null
         } else {
           // After connected, notify UI about the error
           console.error('[ACPClient] Agent error:', errorMsg)
-          this.onErrorMessage?.(errorMsg)
+          this.emitErrorMessage(errorMsg)
         }
         break
+      }
 
       case 'session_created':
         this.sessionId = response.payload.sessionId
@@ -550,6 +679,19 @@ export class ACPClient {
         }
         this.onModelChanged?.(response.payload.modelId)
         break
+
+      case 'session_mode_set': {
+        const modeReqId = this.pendingSetModeIds.shift()
+        if (modeReqId) {
+          const pending = this.pendingJsonRpcRequests.get(modeReqId)
+          if (pending) {
+            clearTimeout(pending.timer)
+            this.pendingJsonRpcRequests.delete(modeReqId)
+            pending.resolve(response.payload ?? {})
+          }
+        }
+        break
+      }
 
       case 'browser_tool_call':
         this.handleBrowserToolCall(response.callId, response.params)
@@ -679,6 +821,50 @@ export class ACPClient {
     this.send({ type: 'set_session_model', payload: { modelId } })
   }
 
+  /**
+   * Update permission mode on an active ACP session via JSON-RPC session/set_mode.
+   */
+  async setSessionMode(modeId: string): Promise<void> {
+    if (!this.sessionId) {
+      throw new Error('No active session')
+    }
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected')
+    }
+    const id = `mode_${++this.jsonRpcSeq}`
+    const sessionId = this.sessionId
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pendingJsonRpcRequests.get(id)?.timer === timer) {
+          this.pendingJsonRpcRequests.delete(id)
+          this.removePendingSetModeId(id)
+          reject(new Error('Set session mode timed out'))
+        }
+      }, 15_000)
+      this.pendingSetModeIds.push(id)
+      this.pendingJsonRpcRequests.set(id, {
+        resolve: () => resolve(),
+        reject,
+        timer,
+      })
+      try {
+        this.ws!.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id,
+            method: 'session/set_mode',
+            params: { sessionId, modeId },
+          }),
+        )
+      } catch (err) {
+        clearTimeout(timer)
+        this.pendingJsonRpcRequests.delete(id)
+        this.removePendingSetModeId(id)
+        reject(err)
+      }
+    })
+  }
+
   respondToPermission(requestId: string, optionId: string | null): void {
     const outcome = optionId
       ? { outcome: 'selected' as const, optionId }
@@ -713,9 +899,15 @@ export class ACPClient {
     if (!this.supportsSessionList) {
       throw new Error('Listing sessions is not supported by this agent')
     }
+    if (this.pendingSessionList) {
+      clearTimeout(this.pendingSessionList.timer)
+      const prev = this.pendingSessionList
+      this.pendingSessionList = null
+      prev.reject(new Error('List sessions superseded by newer request'))
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (this.pendingSessionList) {
+        if (this.pendingSessionList?.timer === timer) {
           this.pendingSessionList = null
           reject(new Error('List sessions timed out'))
         }
@@ -725,7 +917,9 @@ export class ACPClient {
         this.send({ type: 'list_sessions', payload: request })
       } catch (err) {
         clearTimeout(timer)
-        this.pendingSessionList = null
+        if (this.pendingSessionList?.timer === timer) {
+          this.pendingSessionList = null
+        }
         reject(err)
       }
     })
@@ -740,11 +934,17 @@ export class ACPClient {
     if (!this.supportsLoadSession) {
       throw new Error('Loading sessions is not supported by this agent')
     }
+    if (this.pendingSessionLoad) {
+      clearTimeout(this.pendingSessionLoad.timer)
+      const prev = this.pendingSessionLoad
+      this.pendingSessionLoad = null
+      prev.reject(new Error('Load session superseded by newer request'))
+    }
     return new Promise((resolve, reject) => {
       this.pendingSessionTarget = request.sessionId
       this.onSessionSwitching?.(request.sessionId)
       const timer = setTimeout(() => {
-        if (this.pendingSessionLoad) {
+        if (this.pendingSessionLoad?.timer === timer) {
           this.pendingSessionTarget = null
           this.pendingSessionLoad = null
           reject(new Error('Load session timed out'))
@@ -755,8 +955,10 @@ export class ACPClient {
         this.send({ type: 'load_session', payload: request })
       } catch (err) {
         clearTimeout(timer)
-        this.pendingSessionTarget = null
-        this.pendingSessionLoad = null
+        if (this.pendingSessionLoad?.timer === timer) {
+          this.pendingSessionTarget = null
+          this.pendingSessionLoad = null
+        }
         reject(err)
       }
     })
@@ -771,11 +973,17 @@ export class ACPClient {
     if (!this.supportsResumeSession) {
       throw new Error('Resuming sessions is not supported by this agent')
     }
+    if (this.pendingSessionResume) {
+      clearTimeout(this.pendingSessionResume.timer)
+      const prev = this.pendingSessionResume
+      this.pendingSessionResume = null
+      prev.reject(new Error('Resume session superseded by newer request'))
+    }
     return new Promise((resolve, reject) => {
       this.pendingSessionTarget = request.sessionId
       this.onSessionSwitching?.(request.sessionId)
       const timer = setTimeout(() => {
-        if (this.pendingSessionResume) {
+        if (this.pendingSessionResume?.timer === timer) {
           this.pendingSessionTarget = null
           this.pendingSessionResume = null
           reject(new Error('Resume session timed out'))
@@ -786,8 +994,10 @@ export class ACPClient {
         this.send({ type: 'resume_session', payload: request })
       } catch (err) {
         clearTimeout(timer)
-        this.pendingSessionTarget = null
-        this.pendingSessionResume = null
+        if (this.pendingSessionResume?.timer === timer) {
+          this.pendingSessionTarget = null
+          this.pendingSessionResume = null
+        }
         reject(err)
       }
     })
@@ -805,41 +1015,11 @@ export class ACPClient {
     this.connectReject = null
 
     if (this.ws) {
-      try {
-        // Don't send disconnect to acp-link — keep agent process alive for reconnection
-        // Just close the WebSocket
-      } catch {
-        // Ignore send errors during disconnect
-      }
-      this.ws.close()
+      const wsToClose = this.ws
       this.ws = null
+      wsToClose.close()
     }
     this.setState('disconnected')
-    this.sessionId = null
-    this.pendingSessionTarget = null
-    this._modelState = null
-    this._agentCapabilities = null
-    this._availableCommands = []
-    // Notify model state subscribers that session is gone
-    this.onModelStateChanged?.(null)
-    this.onAvailableCommandsChanged?.([])
-
-    // Reject all pending operations before clearing (clear their timers too)
-    const disconnectError = new Error('Disconnected')
-    if (this.pendingSessionList) {
-      clearTimeout(this.pendingSessionList.timer)
-      this.pendingSessionList.reject(disconnectError)
-      this.pendingSessionList = null
-    }
-    if (this.pendingSessionLoad) {
-      clearTimeout(this.pendingSessionLoad.timer)
-      this.pendingSessionLoad.reject(disconnectError)
-      this.pendingSessionLoad = null
-    }
-    if (this.pendingSessionResume) {
-      clearTimeout(this.pendingSessionResume.timer)
-      this.pendingSessionResume.reject(disconnectError)
-      this.pendingSessionResume = null
-    }
+    this.resetSessionState(new Error('Disconnected'))
   }
 }

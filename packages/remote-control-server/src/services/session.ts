@@ -124,9 +124,19 @@ export function resolveExistingWebSessionId(sessionId: string): string | null {
   return resolveExistingSessionId(sessionId)
 }
 
+export interface ResolveWebSessionOptions {
+  /** Allow read-only access to shared ACP session metadata for Web UI routing */
+  allowSharedAcpRead?: boolean
+  /** Allow claiming an unowned non-ACP session when explicitly addressed by ID */
+  allowUnownedClaim?: boolean
+  /** Request authenticated with a valid server API key */
+  hasApiKey?: boolean
+}
+
 export function resolveOwnedWebSessionId(
   sessionId: string,
   uuid: string,
+  options?: ResolveWebSessionOptions,
 ): string | null {
   if (storeIsSessionOwner(sessionId, uuid)) {
     return sessionId
@@ -140,9 +150,24 @@ export function resolveOwnedWebSessionId(
     return compatibleCodeSessionId
   }
 
-  // Auto-bind: if the session exists but has no owner, claim it for the requesting user
   const existingId = resolveExistingSessionId(sessionId)
-  if (existingId) {
+  if (!existingId) {
+    return null
+  }
+
+  const existingSession = storeGetSession(existingId)
+  if (existingSession?.source === 'acp') {
+    if (options?.hasApiKey || options?.allowSharedAcpRead) {
+      return existingId
+    }
+    return null
+  }
+
+  if (options?.hasApiKey) {
+    return existingId
+  }
+
+  if (options?.allowUnownedClaim) {
     const owners = storeGetSessionOwners(existingId)
     if (!owners || owners.size === 0) {
       storeBindSession(existingId, uuid)
@@ -151,6 +176,23 @@ export function resolveOwnedWebSessionId(
   }
 
   return null
+}
+
+/**
+ * Resolve a session for read-only Web UI detail lookup (`GET /web/sessions/:id`).
+ * Allows shared ACP session routing discovery (relay WS enforces API key auth)
+ * and direct-URL claim of unowned CLI sessions (`/code/:sessionId?bridge=...`).
+ */
+export function resolveReadableWebSessionId(
+  sessionId: string,
+  uuid: string,
+  options?: Pick<ResolveWebSessionOptions, 'hasApiKey'>,
+): string | null {
+  return resolveOwnedWebSessionId(sessionId, uuid, {
+    allowSharedAcpRead: true,
+    allowUnownedClaim: true,
+    hasApiKey: options?.hasApiKey,
+  })
 }
 
 export function listWebSessionsByOwnerUuid(uuid: string): SessionResponse[] {
@@ -210,16 +252,22 @@ export function listSessions() {
 
 function toSummaryResponse(row: {
   id: string
+  environmentId: string | null
   title: string | null
   status: string
+  source: string
   username: string | null
+  createdAt: Date
   updatedAt: Date
 }): SessionSummaryResponse {
   return {
     id: row.id,
     title: row.title,
     status: row.status,
+    source: row.source,
+    environment_id: row.environmentId,
     username: row.username,
+    created_at: row.createdAt.getTime() / 1000,
     updated_at: row.updatedAt.getTime() / 1000,
   }
 }

@@ -1,6 +1,8 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { ACPClient } from '../acp/client'
 import type { ModelInfo, SessionModelState } from '../acp/types'
+
+const MODEL_CHANGE_TIMEOUT_MS = 15_000
 
 export interface UseModelsResult {
   /** Whether model selection is supported by the current agent */
@@ -30,16 +32,32 @@ export function useModels(client: ACPClient): UseModelsResult {
     client.modelState,
   )
   const [isLoading, setIsLoading] = useState(false)
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearLoadingTimer = useCallback(() => {
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current)
+      loadingTimerRef.current = null
+    }
+  }, [])
 
   // Subscribe to model state changes (session created/destroyed)
-  // This replaces the previous 500ms polling approach
   useEffect(() => {
-    // Handler for when model state changes (session created or disconnected)
     const handleModelStateChanged = (state: SessionModelState | null) => {
       setModelState(state)
+      if (!state) {
+        clearLoadingTimer()
+        setIsLoading(false)
+        return
+      }
       // Auto-restore previously selected model when a new session is created
-      if (state && state.availableModels.length > 0) {
-        const saved = localStorage.getItem('acp_model_id')
+      if (state.availableModels.length > 0) {
+        let saved: string | null = null
+        try {
+          saved = localStorage.getItem('acp_model_id')
+        } catch {
+          // ignore
+        }
         if (
           saved &&
           saved !== state.currentModelId &&
@@ -52,6 +70,12 @@ export function useModels(client: ACPClient): UseModelsResult {
 
     // Handler for when current model changes within a session
     const handleModelChanged = (modelId: string) => {
+      clearLoadingTimer()
+      try {
+        localStorage.setItem('acp_model_id', modelId)
+      } catch {
+        // ignore
+      }
       setModelState(prev => {
         if (!prev) return null
         return {
@@ -62,16 +86,22 @@ export function useModels(client: ACPClient): UseModelsResult {
       setIsLoading(false)
     }
 
-    // Register handlers - setModelStateChangedHandler immediately calls with current state
+    const handleError = () => {
+      clearLoadingTimer()
+      setIsLoading(false)
+    }
+
     client.setModelStateChangedHandler(handleModelStateChanged)
     client.setModelChangedHandler(handleModelChanged)
+    client.addErrorMessageHandler(handleError)
 
     return () => {
-      // Clear handlers on unmount
+      clearLoadingTimer()
       client.setModelStateChangedHandler(() => {})
       client.setModelChangedHandler(() => {})
+      client.removeErrorMessageHandler(handleError)
     }
-  }, [client])
+  }, [client, clearLoadingTimer])
 
   const availableModels = useMemo(
     () => modelState?.availableModels ?? [],
@@ -90,17 +120,22 @@ export function useModels(client: ACPClient): UseModelsResult {
       if (!modelState) {
         throw new Error('Model selection not supported')
       }
+      clearLoadingTimer()
       setIsLoading(true)
+      loadingTimerRef.current = setTimeout(() => {
+        loadingTimerRef.current = null
+        setIsLoading(false)
+      }, MODEL_CHANGE_TIMEOUT_MS)
       try {
         await client.setSessionModel(modelId)
-        localStorage.setItem('acp_model_id', modelId)
-        // The model_changed event will update the state
+        // Persist to localStorage only after server confirms via model_changed
       } catch (error) {
+        clearLoadingTimer()
         setIsLoading(false)
         throw error
       }
     },
-    [client, modelState],
+    [client, modelState, clearLoadingTimer],
   )
 
   return {

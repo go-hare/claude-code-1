@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { SessionEvent, EventPayload } from '../types';
 import { esc, truncate, cn, extractEventText, isConversationClearedStatus } from '../lib/utils';
+import { buildAskUserAnswers, toggleMultiSelectAnswer } from './PermissionViews';
 
 // ============================================================
 // Tool Trace State
@@ -297,7 +298,7 @@ function UserBubble({ content }: { content: string }) {
   return (
     <div className="flex justify-end">
       <div className="max-w-[75%] rounded-2xl rounded-br-md bg-brand/15 px-4 py-2.5 text-sm text-text-primary">
-        {esc(content)}
+        {content}
       </div>
     </div>
   );
@@ -402,7 +403,7 @@ function ToolCard({ entry }: { entry: TraceEntry }) {
 function SystemBubble({ content }: { content: string }) {
   return (
     <div className="flex justify-center">
-      <div className="rounded-full bg-surface-2 px-4 py-1.5 text-xs text-text-muted">{esc(content)}</div>
+      <div className="rounded-full bg-surface-2 px-4 py-1.5 text-xs text-text-muted">{content}</div>
     </div>
   );
 }
@@ -427,8 +428,8 @@ function PermissionPrompt({
   return (
     <div className="rounded-xl border border-status-warning/30 bg-surface-1 p-4">
       <div className="mb-2 text-sm font-semibold text-status-warning">Permission Request</div>
-      {description && <div className="mb-2 text-sm text-text-secondary">{esc(description)}</div>}
-      <div className="mb-2 font-mono text-xs font-bold text-text-primary">{esc(toolName)}</div>
+      {description && <div className="mb-2 text-sm text-text-secondary">{description}</div>}
+      <div className="mb-2 font-mono text-xs font-bold text-text-primary">{toolName}</div>
       {toolName !== 'AskUserQuestion' && (
         <pre className="mb-3 max-h-40 overflow-auto rounded-lg bg-tool-card p-2 text-xs text-text-secondary">
           {truncate(inputStr, 500)}
@@ -466,38 +467,26 @@ function AskUserPanel({
 }) {
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [otherTexts, setOtherTexts] = useState<Record<string, string>>({});
+  // Unconditional hook call (Rules of Hooks: must appear before any early return)
+  const [activeTab, setActiveTab] = useState(0);
 
   const handleSelect = (qIdx: number, oIdx: number, multiSelect: boolean) => {
     if (multiSelect) {
-      const current = (answers[qIdx] as number[]) || [];
-      const next = current.includes(oIdx) ? current.filter(i => i !== oIdx) : [...current, oIdx];
-      setAnswers({ ...answers, [qIdx]: next });
+      setAnswers(prev => ({ ...prev, [qIdx]: toggleMultiSelectAnswer(prev[qIdx], oIdx) }));
     } else {
-      setAnswers({ ...answers, [qIdx]: oIdx });
+      setAnswers(prev => ({ ...prev, [qIdx]: oIdx }));
     }
   };
 
   const handleOtherSubmit = (qIdx: number) => {
     const text = otherTexts[qIdx]?.trim();
     if (!text) return;
-    setAnswers({ ...answers, [qIdx]: text });
-    setOtherTexts({ ...otherTexts, [qIdx]: '' });
+    setAnswers(prev => ({ ...prev, [qIdx]: text }));
+    setOtherTexts(prev => ({ ...prev, [qIdx]: '' }));
   };
 
   const handleSubmit = () => {
-    const mapped: Record<string, unknown> = {};
-    for (const [qIdx, val] of Object.entries(answers)) {
-      const q = questions[parseInt(qIdx, 10)];
-      if (!q) continue;
-      if (typeof val === 'number') {
-        mapped[qIdx] = q.options?.[val]?.label || String(val);
-      } else if (Array.isArray(val)) {
-        mapped[qIdx] = val.map(i => q.options?.[i]?.label || String(i));
-      } else {
-        mapped[qIdx] = val;
-      }
-    }
-    onSubmit(mapped);
+    onSubmit(buildAskUserAnswers(questions, answers, otherTexts, description));
   };
 
   if (questions.length <= 1) {
@@ -507,12 +496,12 @@ function AskUserPanel({
 
     return (
       <div className="rounded-xl border border-brand/30 bg-surface-1 p-4">
-        <div className="mb-3 text-sm font-semibold text-text-primary">
-          {esc(description || q.question || 'Question')}
-        </div>
+        <div className="mb-3 text-sm font-semibold text-text-primary">{description || q.question || 'Question'}</div>
         <div className="space-y-2">
           {(q.options || []).map((opt, j) => {
-            const isSelected = multiSelect ? ((answers[0] as number[]) || []).includes(j) : selectedIdx === j;
+            const isSelected = multiSelect
+              ? Array.isArray(answers[0]) && (answers[0] as unknown[]).includes(j)
+              : selectedIdx === j;
             return (
               <button
                 key={j}
@@ -524,8 +513,8 @@ function AskUserPanel({
                     : 'border-border bg-surface-2 text-text-secondary hover:border-border-light',
                 )}
               >
-                <div className="font-medium">{esc(opt.label)}</div>
-                {opt.description && <div className="mt-0.5 text-xs text-text-muted">{esc(opt.description)}</div>}
+                <div className="font-medium">{opt.label}</div>
+                {opt.description && <div className="mt-0.5 text-xs text-text-muted">{opt.description}</div>}
               </button>
             );
           })}
@@ -565,11 +554,9 @@ function AskUserPanel({
   }
 
   // Multiple questions — tab layout
-  const [activeTab, setActiveTab] = useState(0);
-
   return (
     <div className="rounded-xl border border-brand/30 bg-surface-1 p-4">
-      <div className="mb-3 text-sm font-semibold text-text-primary">{esc(description || 'Questions')}</div>
+      <div className="mb-3 text-sm font-semibold text-text-primary">{description || 'Questions'}</div>
       <div className="mb-3 flex gap-1 overflow-x-auto">
         {questions.map((q, i) => (
           <button
@@ -639,10 +626,12 @@ function QuestionTab({
 
   return (
     <div>
-      <div className="mb-2 text-sm text-text-secondary">{esc(question.question)}</div>
+      <div className="mb-2 text-sm text-text-secondary">{question.question}</div>
       <div className="space-y-2">
         {(question.options || []).map((opt, j) => {
-          const isSelected = multiSelect ? ((answers[qIdx] as number[]) || []).includes(j) : answers[qIdx] === j;
+          const isSelected = multiSelect
+            ? Array.isArray(answers[qIdx]) && (answers[qIdx] as unknown[]).includes(j)
+            : answers[qIdx] === j;
           return (
             <button
               key={j}
@@ -654,8 +643,8 @@ function QuestionTab({
                   : 'border-border bg-surface-2 text-text-secondary hover:border-border-light',
               )}
             >
-              <div className="font-medium">{esc(opt.label)}</div>
-              {opt.description && <div className="mt-0.5 text-xs text-text-muted">{esc(opt.description)}</div>}
+              <div className="font-medium">{opt.label}</div>
+              {opt.description && <div className="mt-0.5 text-xs text-text-muted">{opt.description}</div>}
             </button>
           );
         })}
@@ -818,7 +807,7 @@ function LoadingIndicator({ verb }: { verb: string }) {
   return (
     <div className="flex items-center gap-2 text-sm text-text-secondary">
       <span className="animate-glimmer text-brand">{SPINNER_CYCLE[frame]}</span>
-      <span className="animate-glimmer">{esc(verb)}…</span>
+      <span className="animate-glimmer">{verb}…</span>
       <span className="text-text-muted">{elapsed}s</span>
     </div>
   );
@@ -1085,15 +1074,42 @@ export function useEventProcessor() {
             isError: !!payload.is_error,
           };
 
-    // Add entry to the last assistant message
+    // Attach to the active trace host, or create an orphan host message if none exists yet
     setMessages(prev => {
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const msg = prev[i];
+        if (msg.kind === 'assistant' && msg.traceId === result.host.id) {
+          return [...prev.slice(0, i), { ...msg, traceEntries: [...msg.traceEntries, entry] }, ...prev.slice(i + 1)];
+        }
+      }
+      if (result.createdHost) {
+        return [
+          ...prev,
+          {
+            kind: 'assistant',
+            content: '',
+            traceEntries: [entry],
+            traceExpanded: false,
+            traceId: result.createdHost.id,
+          },
+        ];
+      }
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].kind === 'assistant') {
           const msg = prev[i] as AssistantMessage;
           return [...prev.slice(0, i), { ...msg, traceEntries: [...msg.traceEntries, entry] }, ...prev.slice(i + 1)];
         }
       }
-      return prev;
+      return [
+        ...prev,
+        {
+          kind: 'assistant',
+          content: '',
+          traceEntries: [entry],
+          traceExpanded: false,
+          traceId: result.host.id,
+        },
+      ];
     });
   }
 

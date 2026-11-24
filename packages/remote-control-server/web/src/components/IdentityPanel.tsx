@@ -10,22 +10,34 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../componen
 interface IdentityPanelProps {
   open: boolean;
   onClose: () => void;
+  onUuidImported?: (uuid: string) => void;
 }
 
-export function IdentityPanel({ open, onClose }: IdentityPanelProps) {
+export function IdentityPanel({ open, onClose, onUuidImported }: IdentityPanelProps) {
   const [copied, setCopied] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [uuid, setLocalUuid] = useState<string>(() => getUuid());
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerRef = useRef<QrScanner | null>(null);
-  const uuid = getUuid();
   const { resolvedTheme } = useTheme();
+
+  // Refresh displayed UUID whenever dialog opens
+  useEffect(() => {
+    if (open) {
+      setLocalUuid(getUuid());
+      setCameraError(null);
+    } else {
+      setScanning(false);
+    }
+  }, [open]);
 
   const qrColors =
     resolvedTheme === 'dark' ? { dark: '#ECE9E0', light: '#1C1B18' } : { dark: '#141413', light: '#FDFCF8' };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || scanning) return;
     // Defer one frame so Radix Dialog Portal has finished mounting the canvas
     const rafId = requestAnimationFrame(() => {
       if (!canvasRef.current) return;
@@ -39,52 +51,28 @@ export function IdentityPanel({ open, onClose }: IdentityPanelProps) {
       });
     });
     return () => cancelAnimationFrame(rafId);
-  }, [open, uuid, resolvedTheme]);
-
-  // Cleanup scanner on close
-  useEffect(() => {
-    if (!open && scannerRef.current) {
-      scannerRef.current.stop();
-      scannerRef.current.destroy();
-      scannerRef.current = null;
-      setScanning(false);
-    }
-  }, [open]);
-
-  if (!open) return null;
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(uuid);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const startCamera = async () => {
-    if (!videoRef.current) return;
-    setScanning(true);
-    try {
-      const scanner = new QrScanner(
-        videoRef.current,
-        result => {
-          handleScannedData(result.data);
-        },
-        { returnDetailedScanResult: true },
-      );
-      scannerRef.current = scanner;
-      await scanner.start();
-    } catch (e) {
-      console.error('Camera error:', e);
-      setScanning(false);
-    }
-  };
+  }, [open, scanning, uuid, resolvedTheme]);
 
   const stopCamera = () => {
-    if (scannerRef.current) {
-      scannerRef.current.stop();
-      scannerRef.current.destroy();
-      scannerRef.current = null;
+    const existing = scannerRef.current;
+    scannerRef.current = null;
+    if (existing) {
+      existing.stop();
+      existing.destroy();
     }
     setScanning(false);
+  };
+
+  const applyImportedUuid = (importedUuid: string) => {
+    setUuid(importedUuid);
+    setLocalUuid(importedUuid);
+    stopCamera();
+    onClose();
+    if (onUuidImported) {
+      onUuidImported(importedUuid);
+    } else {
+      window.location.reload();
+    }
   };
 
   const handleScannedData = (data: string) => {
@@ -108,9 +96,7 @@ export function IdentityPanel({ open, onClose }: IdentityPanelProps) {
       const url = new URL(data);
       const importedUuid = url.searchParams.get('uuid');
       if (importedUuid) {
-        setUuid(importedUuid);
-        stopCamera();
-        onClose();
+        applyImportedUuid(importedUuid);
         return;
       }
     } catch {
@@ -119,11 +105,68 @@ export function IdentityPanel({ open, onClose }: IdentityPanelProps) {
 
     // Raw UUID string
     if (data.length >= 32) {
-      setUuid(data);
-      stopCamera();
-      onClose();
+      applyImportedUuid(data);
       return;
     }
+  };
+
+  const handleScannedDataRef = useRef(handleScannedData);
+  handleScannedDataRef.current = handleScannedData;
+
+  // Initialize camera QrScanner AFTER <video ref={videoRef} /> mounts when scanning becomes true
+  useEffect(() => {
+    if (!open || !scanning) return;
+
+    let cancelled = false;
+    let localScanner: QrScanner | null = null;
+
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled || !videoRef.current) return;
+      const scanner = new QrScanner(
+        videoRef.current,
+        result => {
+          handleScannedDataRef.current(result.data);
+        },
+        { returnDetailedScanResult: true },
+      );
+      localScanner = scanner;
+      scannerRef.current = scanner;
+      scanner.start().catch((e: unknown) => {
+        if (cancelled) return;
+        console.error('Camera error:', e);
+        setCameraError(e instanceof Error ? e.message : 'Camera error');
+        if (scannerRef.current === scanner) {
+          scannerRef.current = null;
+        }
+        scanner.destroy();
+        setScanning(false);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      const toDestroy = localScanner ?? scannerRef.current;
+      localScanner = null;
+      scannerRef.current = null;
+      if (toDestroy) {
+        toDestroy.stop();
+        toDestroy.destroy();
+      }
+    };
+  }, [open, scanning]);
+
+  if (!open) return null;
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(uuid);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const startCamera = () => {
+    setCameraError(null);
+    setScanning(true);
   };
 
   const handleScanUpload = () => {
@@ -199,6 +242,9 @@ export function IdentityPanel({ open, onClose }: IdentityPanelProps) {
               </button>
             </div>
           )}
+
+          {/* Camera error */}
+          {cameraError && <div className="text-xs text-status-error">{cameraError}</div>}
 
           {/* Action buttons */}
           <div className="flex gap-2">

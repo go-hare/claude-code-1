@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ACPClient } from '../src/acp/client';
 import type { AgentSessionInfo } from '../src/acp/types';
 import { ChatInterface } from './ChatInterface';
@@ -16,6 +16,8 @@ interface ACPMainProps {
  */
 export function ACPMain({ client, agentId }: ACPMainProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [newSessionTrigger, setNewSessionTrigger] = useState(0);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => client.getSessionId());
 
   // Handle session selection
   const handleSelectSession = useCallback(
@@ -55,9 +57,7 @@ export function ACPMain({ client, agentId }: ACPMainProps) {
             {!sidebarCollapsed && (
               <button
                 type="button"
-                onClick={() => {
-                  // ChatInterface handles new session internally
-                }}
+                onClick={() => setNewSessionTrigger(n => n + 1)}
                 className="h-7 w-7 flex items-center justify-center rounded-lg text-text-muted hover:text-brand hover:bg-brand/10 transition-colors"
                 title="新会话"
               >
@@ -77,14 +77,23 @@ export function ACPMain({ client, agentId }: ACPMainProps) {
         {/* 会话列表 */}
         {!sidebarCollapsed && (
           <div className="flex-1 overflow-y-auto">
-            <SidebarSessionList client={client} onSelectSession={handleSelectSession} />
+            <SidebarSessionList
+              client={client}
+              activeSessionId={activeSessionId}
+              onSelectSession={handleSelectSession}
+            />
           </div>
         )}
       </div>
 
       {/* 聊天区域 */}
       <div className="flex-1 flex flex-col min-w-0">
-        <ChatInterface client={client} agentId={agentId} />
+        <ChatInterface
+          client={client}
+          agentId={agentId}
+          newSessionTrigger={newSessionTrigger}
+          onActiveSessionChange={setActiveSessionId}
+        />
       </div>
     </div>
   );
@@ -96,28 +105,49 @@ export function ACPMain({ client, agentId }: ACPMainProps) {
 
 function SidebarSessionList({
   client,
+  activeSessionId,
   onSelectSession,
 }: {
   client: ACPClient;
+  activeSessionId: string | null;
   onSelectSession: (session: AgentSessionInfo) => void;
 }) {
   const [sessions, setSessions] = useState<AgentSessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(activeSessionId);
+  const loadSeqRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Sync sidebar highlight whenever ChatInterface creates/loads/switches sessions
+  useEffect(() => {
+    setSelectedId(activeSessionId);
+  }, [activeSessionId]);
 
   const loadSessions = useCallback(async () => {
     if (!client.supportsSessionList) {
       setLoading(false);
       return;
     }
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
       const response = await client.listSessions();
+      if (!mountedRef.current || loadSeqRef.current !== seq) return;
       setSessions(response.sessions);
     } catch (err) {
+      if (!mountedRef.current || loadSeqRef.current !== seq) return;
       console.warn('[SidebarSessionList] Failed to load:', err);
     } finally {
-      setLoading(false);
+      if (mountedRef.current && loadSeqRef.current === seq) {
+        setLoading(false);
+      }
     }
   }, [client]);
 
@@ -125,16 +155,24 @@ function SidebarSessionList({
     if (client.getState() === 'connected' && client.supportsSessionList) {
       loadSessions();
     }
-  }, [client, loadSessions]);
+  }, [client, loadSessions, activeSessionId]);
 
   useEffect(() => {
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     const handler = (state: string) => {
       if (state === 'connected') {
-        setTimeout(loadSessions, 200);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          void loadSessions();
+        }, 200);
       }
     };
     client.setConnectionStateHandler(handler);
-    return () => client.removeConnectionStateHandler(handler);
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      client.removeConnectionStateHandler(handler);
+    };
   }, [client, loadSessions]);
 
   useEffect(() => {
@@ -170,6 +208,7 @@ function SidebarSessionList({
 
   // 按日期分组
   const groups = groupByRecency(sorted);
+  const effectiveActiveId = activeSessionId ?? selectedId;
 
   return (
     <nav className="py-1" aria-label="历史会话">
@@ -186,12 +225,12 @@ function SidebarSessionList({
               key={session.sessionId}
               type="button"
               onClick={() => {
-                setActiveId(session.sessionId);
+                setSelectedId(session.sessionId);
                 onSelectSession(session);
               }}
               className={cn(
                 'w-full flex items-center gap-2.5 px-4 py-2 text-left transition-colors rounded-none',
-                session.sessionId === activeId
+                session.sessionId === effectiveActiveId
                   ? 'bg-brand/8 text-text-primary'
                   : 'text-text-secondary hover:bg-surface-2/60 hover:text-text-primary',
               )}

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import imageCompression from 'browser-image-compression';
 import type { ACPClient } from '../src/acp/client';
 import type {
+  ConnectionState,
   SessionUpdate,
   PermissionRequestPayload,
   PermissionOption,
@@ -70,9 +71,91 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 // Type Definitions - imported from shared types module
 // =============================================================================
 
+// Tracks an in-flight initial session creation/restore per ACPClient so
+// React StrictMode double-mount deduplicates without wedging on fallback or reconnect.
+const inFlightSessionInits = new WeakMap<ACPClient, Promise<void>>();
+
+export function clearInitialAcpSession(client: ACPClient): void {
+  inFlightSessionInits.delete(client);
+}
+
+export function ensureInitialAcpSession(
+  client: ACPClient,
+  options: {
+    lastSessionId: string | null;
+    permissionMode: string;
+  },
+): Promise<void> {
+  if (client.getSessionId() || !client.isConnected()) {
+    return Promise.resolve();
+  }
+  const existing = inFlightSessionInits.get(client);
+  if (existing) {
+    return existing;
+  }
+
+  const initPromise = (async () => {
+    const { lastSessionId, permissionMode } = options;
+    if (lastSessionId && (client.supportsLoadSession || client.supportsResumeSession)) {
+      try {
+        if (client.supportsLoadSession) {
+          await client.loadSession({ sessionId: lastSessionId });
+        } else {
+          await client.resumeSession({ sessionId: lastSessionId });
+        }
+        return;
+      } catch (err) {
+        if (!client.isConnected()) return;
+        console.warn('[ChatInterface] Failed to restore session, creating new one:', err);
+      }
+    }
+    if (!client.isConnected()) return;
+    await client.createSession(undefined, permissionMode);
+  })().finally(() => {
+    if (inFlightSessionInits.get(client) === initPromise) {
+      inFlightSessionInits.delete(client);
+    }
+  });
+
+  inFlightSessionInits.set(client, initPromise);
+  return initPromise;
+}
+
+export function applyPermissionModeChange(options: {
+  nextMode: string;
+  previousMode: string;
+  seqRef: { current: number };
+  setMode: (mode: string) => void;
+  setModeOnClient: (mode: string) => Promise<void>;
+  onError: (message: string) => void;
+  shouldSyncClient: boolean;
+}): Promise<void> {
+  const { nextMode, previousMode, seqRef, setMode, setModeOnClient, onError, shouldSyncClient } = options;
+  const seq = ++seqRef.current;
+  setMode(nextMode);
+  try {
+    localStorage.setItem('acp_permission_mode', nextMode);
+  } catch {}
+  if (!shouldSyncClient) {
+    return Promise.resolve();
+  }
+  return setModeOnClient(nextMode).catch(err => {
+    console.warn('[ChatInterface] Failed to update session mode:', err);
+    if (seqRef.current === seq) {
+      setMode(previousMode);
+      try {
+        localStorage.setItem('acp_permission_mode', previousMode);
+      } catch {}
+    }
+    onError(err instanceof Error ? err.message : 'Failed to update permission mode');
+  });
+}
+
 interface ChatInterfaceProps {
   client: ACPClient;
   agentId?: string;
+  newSessionTrigger?: number;
+  onActiveSessionChange?: (sessionId: string | null) => void;
 }
 
 // =============================================================================
@@ -152,23 +235,42 @@ function findToolCallIndex(entries: ThreadEntry[], toolCallId: string): number {
 // ChatInterface Component
 // =============================================================================
 
-export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
+export function ChatInterface({ client, agentId, newSessionTrigger = 0, onActiveSessionChange }: ChatInterfaceProps) {
   // Flat list of entries (like Zed's entries: Vec<AgentThreadEntry>)
   const [entries, setEntries] = useState<ThreadEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [permissionMode, setPermissionMode] = useState(() => localStorage.getItem('acp_permission_mode') || 'default');
+  const [permissionMode, setPermissionMode] = useState(() => {
+    try {
+      return localStorage.getItem('acp_permission_mode') || 'default';
+    } catch {
+      return 'default';
+    }
+  });
+  const permissionModeRef = useRef(permissionMode);
+  permissionModeRef.current = permissionMode;
+  const modeChangeSeqRef = useRef(0);
+  const lastNewSessionTriggerRef = useRef(newSessionTrigger);
   // Reference: Zed's supports_images() checks prompt_capabilities.image
   const [supportsImages, setSupportsImages] = useState(false);
   const { commands: availableCommands } = useCommands(client);
 
-  useEffect(() => {
-    activeSessionIdRef.current = activeSessionId;
-  }, [activeSessionId]);
+  const showTransientError = useCallback((msg: string) => {
+    setErrorMessage(msg);
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setErrorMessage(null), 5000);
+  }, []);
+
+  const updateActiveSession = useCallback(
+    (sessionId: string | null) => {
+      activeSessionIdRef.current = sessionId;
+      onActiveSessionChange?.(sessionId);
+    },
+    [onActiveSessionChange],
+  );
 
   const resetThreadState = useCallback(() => {
     setEntries([]);
@@ -185,7 +287,7 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
         setEntries([]);
         setIsLoading(false);
       }
-      setActiveSessionId(sessionId);
+      updateActiveSession(sessionId);
       setSessionReady(true);
       setSupportsImages(client.supportsImages);
       // Persist session ID for restoration on remount
@@ -196,14 +298,14 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
       }
       console.log('[ChatInterface] Active session:', sessionId, 'supportsImages:', client.supportsImages);
     },
-    [client, storageKey],
+    [client, storageKey, updateActiveSession],
   );
 
   // =============================================================================
   // Permission Request Handler
   // =============================================================================
   const handlePermissionRequest = useCallback((request: PermissionRequestPayload) => {
-    if (activeSessionIdRef.current && request.sessionId !== activeSessionIdRef.current) {
+    if (!activeSessionIdRef.current || request.sessionId !== activeSessionIdRef.current) {
       return;
     }
     console.log('[ChatInterface] Permission request:', request);
@@ -258,7 +360,7 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
   // Session Update Handler (Zed-style: check last entry type)
   // =============================================================================
   const handleSessionUpdate = useCallback((sessionId: string, update: SessionUpdate) => {
-    if (activeSessionIdRef.current && sessionId !== activeSessionIdRef.current) {
+    if (!activeSessionIdRef.current || sessionId !== activeSessionIdRef.current) {
       return;
     }
 
@@ -487,67 +589,93 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
   // Setup Effect
   // =============================================================================
   useEffect(() => {
+    let cancelled = false;
+
     client.setSessionCreatedHandler(sessionId => {
+      if (cancelled) return;
       console.log('[ChatInterface] Session created:', sessionId);
       activateSession(sessionId);
     });
 
     client.setSessionLoadedHandler(sessionId => {
+      if (cancelled) return;
       console.log('[ChatInterface] Session loaded/resumed:', sessionId);
       activateSession(sessionId, { resetEntries: false });
     });
 
     client.setSessionSwitchingHandler(sessionId => {
+      if (cancelled) return;
       console.log('[ChatInterface] Switching to session:', sessionId);
-      setActiveSessionId(sessionId);
+      // Synchronously update ref before history replay session_update frames arrive
+      updateActiveSession(sessionId);
       resetThreadState();
     });
 
     client.setSessionUpdateHandler((sessionId: string, update: SessionUpdate) => {
+      if (cancelled) return;
       handleSessionUpdate(sessionId, update);
     });
 
     client.setPromptCompleteHandler(stopReason => {
+      if (cancelled) return;
       console.log('[ChatInterface] Prompt complete:', stopReason);
-      // Always set isLoading=false when prompt completes
-      // This includes stopReason="cancelled" (which is the expected response after client.cancel())
-      // Note: Tool calls are already marked as "canceled" in handleCancel before this fires
       setIsLoading(false);
     });
 
-    client.setPermissionRequestHandler(handlePermissionRequest);
-
-    client.setErrorMessageHandler(msg => {
-      console.error('[ChatInterface] Agent error:', msg);
-      setErrorMessage(msg);
-      // Clear any existing timer
-      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-      // Auto-clear after 5 seconds
-      errorTimerRef.current = setTimeout(() => setErrorMessage(null), 5000);
+    client.setPermissionRequestHandler(request => {
+      if (cancelled) return;
+      handlePermissionRequest(request);
     });
 
-    // Restore last session or create a new one
-    const lastSessionId = storageKey ? localStorage.getItem(storageKey) : null;
-    if (lastSessionId && (client.supportsLoadSession || client.supportsResumeSession)) {
-      console.log('[ChatInterface] Restoring session:', lastSessionId);
-      const restore = async () => {
+    client.setErrorMessageHandler(msg => {
+      if (cancelled) return;
+      console.error('[ChatInterface] Agent error:', msg);
+      showTransientError(msg);
+    });
+
+    const startInitialSession = () => {
+      let lastSessionId: string | null = null;
+      if (storageKey) {
         try {
-          if (client.supportsLoadSession) {
-            await client.loadSession({ sessionId: lastSessionId });
-          } else {
-            await client.resumeSession({ sessionId: lastSessionId });
-          }
-        } catch (err) {
-          console.warn('[ChatInterface] Failed to restore session, creating new one:', err);
-          client.createSession(undefined, permissionMode);
+          lastSessionId = localStorage.getItem(storageKey);
+        } catch {
+          // ignore storage errors
         }
-      };
-      restore();
-    } else {
-      client.createSession(undefined, permissionMode);
+      }
+      void ensureInitialAcpSession(client, {
+        lastSessionId,
+        permissionMode: permissionModeRef.current,
+      }).catch(err => {
+        if (!cancelled) {
+          console.warn('[ChatInterface] Failed to initialize session:', err);
+        }
+      });
+    };
+
+    const handleConnectionState = (state: ConnectionState) => {
+      if (cancelled) return;
+      if (state === 'disconnected' || state === 'error') {
+        clearInitialAcpSession(client);
+        resetThreadState();
+        updateActiveSession(null);
+      } else if (state === 'connected' && !client.getSessionId()) {
+        startInitialSession();
+      }
+    };
+    client.setConnectionStateHandler(handleConnectionState);
+
+    const existingSessionId = client.getSessionId();
+    if (existingSessionId) {
+      // Reuse already-active session (e.g. React StrictMode remount)
+      activateSession(existingSessionId, { resetEntries: false });
+    } else if (client.isConnected()) {
+      startInitialSession();
     }
+
     return () => {
+      cancelled = true;
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+      client.removeConnectionStateHandler(handleConnectionState);
       client.setSessionCreatedHandler(() => {});
       client.setSessionLoadedHandler(() => {});
       client.setSessionSwitchingHandler(null);
@@ -556,7 +684,16 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
       client.setPermissionRequestHandler(() => {});
       client.setErrorMessageHandler(() => {});
     };
-  }, [activateSession, client, handlePermissionRequest, handleSessionUpdate, resetThreadState]);
+  }, [
+    activateSession,
+    client,
+    handlePermissionRequest,
+    handleSessionUpdate,
+    resetThreadState,
+    showTransientError,
+    storageKey,
+    updateActiveSession,
+  ]);
 
   // =============================================================================
   // User Actions
@@ -564,24 +701,31 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
 
   // Reference: Zed's ConnectionView.reset() + set_server_state() + _external_thread()
   // Creates a new session by clearing current state and calling new_session
-  // This is the core of Zed's NewThread action
   const handleNewSession = useCallback(() => {
     console.log('[ChatInterface] Creating new session...');
 
-    // Reference: Zed's set_server_state() calls close_all_sessions() before setting new state
-    // Cancel any ongoing request before creating new session
-    if (isLoading) {
+    if (isLoading && client.isConnected()) {
       client.cancel();
     }
 
-    // 1. Clear all entries (like Zed's set_server_state which creates new view)
     resetThreadState();
-    setActiveSessionId(null);
+    updateActiveSession(null);
 
-    // 3. Create new session (like Zed's initial_state -> connection.new_session())
-    // The session_created handler will set sessionReady=true when ready
-    client.createSession(undefined, permissionMode);
-  }, [client, isLoading, resetThreadState, permissionMode]);
+    if (client.isConnected()) {
+      client.createSession(undefined, permissionModeRef.current).catch(err => {
+        console.error('[ChatInterface] Failed to create new session:', err);
+        showTransientError(err instanceof Error ? err.message : 'Failed to create new session');
+      });
+    }
+  }, [client, isLoading, resetThreadState, showTransientError, updateActiveSession]);
+
+  // Trigger new session creation from sidebar "+" button in ACPMain
+  useEffect(() => {
+    if (newSessionTrigger > lastNewSessionTriggerRef.current) {
+      lastNewSessionTriggerRef.current = newSessionTrigger;
+      handleNewSession();
+    }
+  }, [newSessionTrigger, handleNewSession]);
 
   // Cancel handler - matches Zed's cancel() logic in acp_thread.rs
   // 1. Mark all pending/running/waiting_for_confirmation tool calls as canceled
@@ -687,9 +831,13 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
 
       if (perm?.options && perm.options.length > 0) {
         if (approved) {
-          // Pick the first allow option (prefer allow_once, then allow_always)
+          // Pick allow_once, then allow_always, then any non-reject option, then options[0]
+          // so clicking Allow never silently downgrades to cancelled (optionId=null).
           const allowOpt =
-            perm.options.find(o => o.kind === 'allow_once') ?? perm.options.find(o => o.kind === 'allow_always');
+            perm.options.find(o => o.kind === 'allow_once') ??
+            perm.options.find(o => o.kind === 'allow_always') ??
+            perm.options.find(o => !o.kind.startsWith('reject')) ??
+            perm.options[0];
           if (allowOpt) {
             optionId = allowOpt.optionId;
             optionKind = allowOpt.kind;
@@ -705,7 +853,7 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
         }
       }
 
-      // Fallback: if no matching option found, use null (cancelled)
+      // Fallback when options list is empty or reject option isn't enumerated
       if (!optionId) {
         optionKind = approved ? 'allow_once' : 'reject_once';
       }
@@ -803,13 +951,10 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Chat messages — unified ChatView */}
+      {/* Chat messages — unified ChatView (permissions are handled by PermissionPanel below to avoid duplicate controls) */}
       <ChatView
         entries={entries}
         isLoading={isLoading && !sessionReady ? false : isLoading}
-        onPermissionRespond={(requestId, optionId, optionKind) => {
-          handlePermissionResponse(requestId, optionId, optionKind as PermissionOption['kind'] | null);
-        }}
         emptyTitle={sessionReady ? '开始对话' : undefined}
         emptyDescription={sessionReady ? '输入消息开始与 ACP agent 聊天' : undefined}
       />
@@ -840,8 +985,15 @@ export function ChatInterface({ client, agentId }: ChatInterfaceProps) {
             <PermissionModeSelector
               mode={permissionMode}
               onModeChange={(m: string) => {
-                setPermissionMode(m);
-                localStorage.setItem('acp_permission_mode', m);
+                void applyPermissionModeChange({
+                  nextMode: m,
+                  previousMode: permissionModeRef.current,
+                  seqRef: modeChangeSeqRef,
+                  setMode: setPermissionMode,
+                  setModeOnClient: mode => client.setSessionMode(mode),
+                  onError: showTransientError,
+                  shouldSyncClient: Boolean(sessionReady && client.isConnected() && client.getSessionId()),
+                });
               }}
             />
             <ModelSelectorPopover client={client} />

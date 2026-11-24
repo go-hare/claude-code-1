@@ -141,14 +141,12 @@ export function useQRScanner({
 
     return () => {
       isCancelled = true
-      if (scanner) {
-        scanner.stop()
-        scanner.destroy()
-      }
-      if (qrScannerRef.current) {
-        qrScannerRef.current.stop()
-        qrScannerRef.current.destroy()
-        qrScannerRef.current = null
+      const instanceToDestroy = scanner ?? qrScannerRef.current
+      scanner = null
+      qrScannerRef.current = null
+      if (instanceToDestroy) {
+        instanceToDestroy.stop()
+        instanceToDestroy.destroy()
       }
     }
   }, [isScanning]) // Only depend on isScanning, callbacks are accessed via refs

@@ -167,6 +167,11 @@ export interface ProxyModelChangedMessage {
   }
 }
 
+export interface ProxySessionModeSetMessage {
+  type: 'session_mode_set'
+  payload?: Record<string, unknown>
+}
+
 // ============================================================================
 // Session History Response Types
 // Reference: Zed's AgentSessionList in acp_thread/src/connection.rs
@@ -216,6 +221,7 @@ export type ProxyResponse =
   | ProxyPermissionRequestMessage
   | ProxyBrowserToolCallMessage
   | ProxyModelChangedMessage
+  | ProxySessionModeSetMessage
   | ProxyPongMessage
   // Session history responses
   | ProxySessionListMessage

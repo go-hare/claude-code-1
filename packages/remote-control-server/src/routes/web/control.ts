@@ -1,6 +1,7 @@
 import { log, error as logError } from '../../logger'
-import { Hono } from 'hono'
-import { uuidAuth } from '../../auth/middleware'
+import { Hono, type Context } from 'hono'
+import { validateApiKey } from '../../auth/api-key'
+import { extractBearerToken, uuidAuth } from '../../auth/middleware'
 import {
   getSession,
   isSessionClosedStatus,
@@ -21,12 +22,13 @@ type OwnershipCheckResult =
       sessionId: string
     }
 
-function checkOwnership(
-  c: { get: (key: string) => string | undefined },
-  sessionId: string,
-): OwnershipCheckResult {
+function checkOwnership(c: Context, sessionId: string): OwnershipCheckResult {
   const uuid = c.get('uuid')!
-  const resolvedSessionId = resolveOwnedWebSessionId(sessionId, uuid)
+  const bearer = extractBearerToken(c)
+  const hasApiKey = !!bearer && validateApiKey(bearer)
+  const resolvedSessionId = resolveOwnedWebSessionId(sessionId, uuid, {
+    hasApiKey,
+  })
   if (!resolvedSessionId) {
     return { error: true }
   }

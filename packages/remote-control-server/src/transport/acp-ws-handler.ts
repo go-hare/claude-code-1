@@ -115,11 +115,12 @@ function handleRegister(wsId: string, msg: Record<string, unknown>): void {
   entry.channelGroupId = channelGroupId
   entry.capabilities = capabilities || null
 
-  // Subscribe to channel group EventBus — broadcast events to this WS
+  // Subscribe to channel group EventBus — forward outbound events targeted to this agent
   const bus = getAcpEventBus(channelGroupId)
   const unsub = bus.subscribe((event: SessionEvent) => {
     if (entry.ws.readyState !== 1) return
     if (event.direction !== 'outbound') return
+    if (event.agentId && event.agentId !== entry.agentId) return
     // Forward outbound events as raw ACP messages
     sendToWs(entry.ws, event.payload as object)
   })
@@ -168,11 +169,12 @@ function handleIdentify(wsId: string, msg: Record<string, unknown>): void {
   entry.channelGroupId = channelGroupId
   entry.capabilities = record.capabilities || null
 
-  // Subscribe to channel group EventBus — broadcast events to this WS
+  // Subscribe to channel group EventBus — forward outbound events targeted to this agent
   const bus = getAcpEventBus(channelGroupId)
   const unsub = bus.subscribe((event: SessionEvent) => {
     if (entry.ws.readyState !== 1) return
     if (event.direction !== 'outbound') return
+    if (event.agentId && event.agentId !== entry.agentId) return
     sendToWs(entry.ws, event.payload as object)
   })
   entry.unsub = unsub
@@ -245,11 +247,12 @@ export function handleAcpWsMessage(
       lastPollAt: new Date(),
     } as Parameters<typeof storeUpdateEnvironment>[1])
 
-    // Pass-through: publish to channel group EventBus as inbound
+    // Pass-through: publish to channel group EventBus as inbound tagged with agentId
     const bus = getAcpEventBus(entry.channelGroupId)
     bus.publish({
       id: randomUUID(),
       sessionId: entry.channelGroupId,
+      agentId: entry.agentId,
       type: (msg.type as string) || 'acp_message',
       payload: msg,
       direction: 'inbound',
@@ -283,12 +286,13 @@ export function handleAcpWsClose(
   if (entry.agentId) {
     storeMarkAcpAgentOffline(entry.agentId)
 
-    // Notify all relay connections that this agent is gone
+    // Notify relay connections for this agent that it disconnected
     if (entry.channelGroupId) {
       const bus = getAcpEventBus(entry.channelGroupId)
       bus.publish({
         id: randomUUID(),
         sessionId: entry.channelGroupId,
+        agentId: entry.agentId,
         type: 'agent_disconnect',
         payload: { agentId: entry.agentId },
         direction: 'inbound',
