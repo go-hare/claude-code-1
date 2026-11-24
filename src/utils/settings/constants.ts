@@ -83,7 +83,8 @@ export function getSettingSourceDisplayNameLowercase(
     | 'session'
     | 'mcpServerPolicy'
     | 'toolsNarrowing'
-    | 'hostCredential',
+    | 'hostCredential'
+    | 'mcpMount',
 ): string {
   switch (source) {
     case 'userSettings':
@@ -95,7 +96,7 @@ export function getSettingSourceDisplayNameLowercase(
     case 'flagSettings':
       return 'command line arguments'
     case 'policySettings':
-      return 'host managed settings'
+      return 'enterprise managed settings'
     case 'cliArg':
       return 'CLI argument'
     case 'command':
@@ -108,6 +109,8 @@ export function getSettingSourceDisplayNameLowercase(
       return 'restricted tools'
     case 'hostCredential':
       return 'cloud-session credential guard'
+    case 'mcpMount':
+      return 'Remote Control server mount'
   }
 }
 
@@ -124,7 +127,8 @@ export function getSettingSourceDisplayNameCapitalized(
     | 'session'
     | 'mcpServerPolicy'
     | 'toolsNarrowing'
-    | 'hostCredential',
+    | 'hostCredential'
+    | 'mcpMount',
 ): string {
   switch (source) {
     case 'userSettings':
@@ -136,7 +140,7 @@ export function getSettingSourceDisplayNameCapitalized(
     case 'flagSettings':
       return 'Command line arguments'
     case 'policySettings':
-      return 'Host managed settings'
+      return 'Enterprise managed settings'
     case 'cliArg':
       return 'CLI argument'
     case 'command':
@@ -149,6 +153,8 @@ export function getSettingSourceDisplayNameCapitalized(
       return 'Restricted tools'
     case 'hostCredential':
       return 'Cloud-session credential guard'
+    case 'mcpMount':
+      return 'Remote Control server mount'
   }
 }
 
@@ -191,11 +197,15 @@ export function parseSettingSourcesFlag(flag: string): SettingSource[] {
 export function getEnabledSettingSources(): SettingSource[] {
   const allowed = getAllowedSettingSources()
 
-  // Always include policy and flag settings
-  const result = new Set<SettingSource>(allowed)
-  result.add('policySettings')
-  result.add('flagSettings')
-  return Array.from(result)
+  // Always include flag and policy settings, and ALWAYS return sources in
+  // canonical SETTING_SOURCES precedence order (user -> project -> local ->
+  // flag -> policy) matching official `zo()` (`chunk@283533298.js@5380`).
+  // This guarantees `--setting-sources` can never let `--settings` override
+  // enterprise `policySettings` or invert `local,user` precedence.
+  const enabled = new Set<SettingSource>(allowed)
+  enabled.add('flagSettings')
+  enabled.add('policySettings')
+  return SETTING_SOURCES.filter(source => enabled.has(source))
 }
 
 /**

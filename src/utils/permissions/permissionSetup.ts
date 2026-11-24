@@ -675,15 +675,18 @@ export function clearCommandScopedAllowRules(
 }
 
 /**
- * Official 2.1.325 #2319 (SEA `fzt` @283107404):
- * Strip slash-command `allowed-tools` grants (`alwaysAllowRules.command`) and
- * mark the permission context guarded so background/woken turns do not inherit
- * them.
+ * Official 2.1.328 (`AZt`, `chunk@288422663.js @583`):
+ * Strip slash-command `allowed-tools` grants (`alwaysAllowRules.command` via
+ * `clearCommandScopedAllowRules` / `FOe`, preserving `alwaysDenyRules.command`)
+ * and set `pollEventDeliveryGuard: true` on the returned context.
  */
 export function applyPollEventDeliveryGuard(
   context: ToolPermissionContext,
 ): ToolPermissionContext {
-  return clearCommandScopedAllowRules(context)
+  const cleared = clearCommandScopedAllowRules(context)
+  return cleared.pollEventDeliveryGuard === true
+    ? cleared
+    : { ...cleared, pollEventDeliveryGuard: true }
 }
 
 /** densable kick-out qLe trigger (inAuto only; plan+auto has no qLe) */

@@ -750,9 +750,7 @@ export const setupGracefulShutdown = memoize(() => {
     void gracefulShutdown(143) // Exit code 143 (128 + 15) for SIGTERM
   })
   process.on('SIGHUP', () => {
-    preemptTerminalForShutdown()
-    logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGHUP' })
-    void gracefulShutdown(129) // Exit code 129 (128 + 1) for SIGHUP
+    handleSighupSignal()
   })
   if (process.platform === 'win32') {
     process.on('SIGBREAK', () => {
@@ -760,10 +758,11 @@ export const setupGracefulShutdown = memoize(() => {
       logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGBREAK' })
       void gracefulShutdown(0)
     })
-  } else {
+  } else if (process.env.CLAUDE_BG_BACKEND !== 'daemon') {
     // Detect orphaned process when terminal closes without delivering SIGHUP.
     // macOS revokes TTY file descriptors instead of signaling, leaving the
     // process alive but unable to read/write. Periodically check stdin validity.
+    // Skipped for daemon background workers (`CLAUDE_BG_BACKEND === 'daemon'`).
     if (process.stdin.isTTY) {
       orphanCheckInterval = setInterval(() => {
         // Skip during scroll drain — even a cheap check consumes an event
@@ -782,42 +781,425 @@ export const setupGracefulShutdown = memoize(() => {
     }
   }
 
-  // Log uncaught exceptions for container observability and analytics
-  // Error names (e.g., "TypeError") are not sensitive - safe to log
+  // Official 2.1.328 `dRa` (`chunk@294254613.js@380900..384500`):
+  // uncaughtException / unhandledRejection with HTTP/2 stream-teardown recovery
+  // budget, CLAUDE_CODE_SUPERVISED immediate exit, 10-in-5s loop circuit
+  // breaker, and 10s startup-mount watchdog.
   process.on('uncaughtException', error => {
-    logForDiagnosticsNoPII('error', 'uncaught_exception', {
-      error_name: error.name,
-      error_message: error.message.slice(0, 2000),
-    })
-    logEvent('tengu_uncaught_exception', {
-      error_name:
-        error.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    })
+    handleUncaughtException(error)
   })
 
-  // Log unhandled promise rejections for container observability and analytics
   process.on('unhandledRejection', reason => {
-    const errorName =
-      reason instanceof Error
-        ? reason.name
-        : typeof reason === 'string'
-          ? 'string'
-          : 'unknown'
-    const errorInfo =
-      reason instanceof Error
-        ? {
-            error_name: reason.name,
-            error_message: reason.message.slice(0, 2000),
-            error_stack: reason.stack?.slice(0, 4000),
-          }
-        : { error_message: String(reason).slice(0, 2000) }
-    logForDiagnosticsNoPII('error', 'unhandled_rejection', errorInfo)
-    logEvent('tengu_unhandled_rejection', {
-      error_name:
-        errorName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    })
+    handleUnhandledRejection(reason)
   })
 })
+
+/** Official 2.1.328 `dRa` (`chunk@294254613.js@377316..393500`) constants. */
+export const UNCAUGHT_EXCEPTION_BREAKER_THRESHOLD = 10
+export const UNCAUGHT_EXCEPTION_BREAKER_WINDOW_MS = 5_000
+export const UNCAUGHT_RECENT_CAP = 3
+export const HTTP2_RECOVERY_BUDGET = 50
+export const HTTP2_RECOVERY_WINDOW_MS = 60_000
+export const STARTUP_MOUNT_WATCHDOG_MS = 10_000
+export const SANDBOX_CLEANUP_WAIT_MS = 500
+export const WORKTREE_REMOVAL_DEFAULT_BUDGET_MS = 600_000
+/** Official `Mon = 70` (`EX_SOFTWARE`) for uncaught errors under `CLAUDE_CODE_SUPERVISED`. */
+export const SUPERVISED_UNCAUGHT_EXIT_CODE = 70
+
+const HTTP2_STREAM_ERROR_RE =
+  /^Stream closed with error code NGHTTP2_[A-Z0-9_]+$/
+const HTTP2_SESSION_ERROR_RE = /^Session closed with error code \d+$/
+
+let ownsControllingTerminal = false
+let uncaughtCount = 0
+let uncaughtWindowStart = 0
+let uncaughtBreakerTripped = false
+let recentUncaught: Array<{ name: string; message: string }> = []
+let http2RecoveryCount = 0
+let http2RecoveryWindowStart = 0
+let startupActionStarted = false
+let startupExpectsUiMount = false
+let startupUiMounted = false
+const startupWatchdogTimers = new Set<ReturnType<typeof setTimeout>>()
+const owedSandboxCleanups = new Map<
+  unknown,
+  { promise: Promise<void>; resolve: () => void }
+>()
+
+function hasStackFrame(stack: unknown, needle: string): boolean {
+  return (
+    typeof stack === 'string' &&
+    stack.split('\n').some(line => {
+      const trimmed = line.trim()
+      return trimmed.startsWith('at ') && trimmed.includes(needle)
+    })
+  )
+}
+
+/**
+ * Official 2.1.328 `cen(e)` (`chunk@294254613.js@349623`):
+ * Detect recoverable Node/Bun HTTP/2 stream/session teardown errors.
+ */
+export function isHttp2StreamTeardownError(error: unknown): boolean {
+  try {
+    if (!(error instanceof Error)) return false
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ERR_HTTP2_STREAM_ERROR') {
+      return (
+        typeof error.message === 'string' &&
+        HTTP2_STREAM_ERROR_RE.test(error.message) &&
+        hasStackFrame(error.stack, 'emitStreamErrorNT (node:http2:')
+      )
+    }
+    if (code === 'ERR_HTTP2_GOAWAY_SESSION') {
+      return (
+        error.message ===
+          'New streams cannot be created after receiving a GOAWAY' &&
+        hasStackFrame(error.stack, 'streamRejectedByGoawaySession (node:http2:')
+      )
+    }
+    if (code === 'ERR_HTTP2_SESSION_ERROR') {
+      return (
+        typeof error.message === 'string' &&
+        HTTP2_SESSION_ERROR_RE.test(error.message) &&
+        hasStackFrame(error.stack, 'goaway (node:http2:')
+      )
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+/** Official `dRa.markOwnsControllingTerminal()`. */
+export function markOwnsControllingTerminal(): void {
+  ownsControllingTerminal = true
+}
+
+/**
+ * Official `dRa` SIGHUP handler (`chunk@294254613.js@380900`):
+ * Ignore `SIGHUP` when `process.env.CLAUDE_BG_BACKEND === 'daemon'` unless the
+ * process owns a controlling terminal; otherwise exit `129`.
+ */
+export function handleSighupSignal(): 'ignored_bg' | 'shutdown' {
+  if (process.env.CLAUDE_BG_BACKEND === 'daemon') {
+    if (ownsControllingTerminal) {
+      preemptTerminalForShutdown()
+      logForDiagnosticsNoPII('info', 'shutdown_signal', {
+        signal: 'SIGHUP',
+        bg_ctty: true,
+      })
+      void gracefulShutdown(129)
+      return 'shutdown'
+    }
+    logForDiagnosticsNoPII('info', 'shutdown_signal', {
+      signal: 'SIGHUP_ignored_bg',
+    })
+    return 'ignored_bg'
+  }
+  preemptTerminalForShutdown()
+  logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGHUP' })
+  void gracefulShutdown(129) // Exit code 129 (128 + 1) for SIGHUP
+  return 'shutdown'
+}
+
+/**
+ * Official `dRa.recordHttp2RecoveryAndCheckBudget(nowMs)`:
+ * Allows up to 50 HTTP/2 stream teardown recoveries per 60,000ms window.
+ */
+export function recordHttp2RecoveryAndCheckBudget(
+  nowMs: number = Date.now(),
+): boolean {
+  if (nowMs - http2RecoveryWindowStart > HTTP2_RECOVERY_WINDOW_MS) {
+    http2RecoveryCount = 0
+    http2RecoveryWindowStart = nowMs
+  }
+  http2RecoveryCount++
+  return http2RecoveryCount <= HTTP2_RECOVERY_BUDGET
+}
+
+/**
+ * Official `dRa.recordUncaughtAndCheckBreaker(nowMs)`:
+ * Trips after 10 uncaught exceptions within a 5,000ms window.
+ */
+export function recordUncaughtAndCheckBreaker(
+  nowMs: number = Date.now(),
+): boolean {
+  if (uncaughtBreakerTripped) return false
+  if (nowMs - uncaughtWindowStart > UNCAUGHT_EXCEPTION_BREAKER_WINDOW_MS) {
+    uncaughtCount = 0
+    uncaughtWindowStart = nowMs
+    recentUncaught = []
+  }
+  uncaughtCount++
+  if (uncaughtCount >= UNCAUGHT_EXCEPTION_BREAKER_THRESHOLD) {
+    uncaughtBreakerTripped = true
+    return true
+  }
+  return false
+}
+
+/** Official `dRa.markStartupActionStarted(expectsUiMount)`. */
+export function markStartupActionStarted(expectsUiMount: boolean): void {
+  startupActionStarted = true
+  startupExpectsUiMount = expectsUiMount
+}
+
+/** Disarm the startup-mount watchdog once the UI / REPL mounts. */
+export function markStartupUiMounted(): void {
+  startupUiMounted = true
+  for (const timer of startupWatchdogTimers) {
+    clearTimeout(timer)
+  }
+  startupWatchdogTimers.clear()
+}
+
+function inNonUiSubcommand(): boolean {
+  return startupActionStarted && !startupExpectsUiMount
+}
+
+/**
+ * Official `dRa.exitIfStartupNeverMounted(reason)` (`chunk@294254613.js@383500`):
+ * Exit with code 1 if an uncaught startup error occurred and the UI never mounted.
+ */
+export function exitIfStartupNeverMounted(reason?: string): boolean {
+  if (startupUiMounted || inNonUiSubcommand() || shutdownInProgress) {
+    return false
+  }
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- startup failure notice before exit
+    writeSync(2, `Claude Code could not start: ${reason ?? '<unknown>'}\n`)
+  } catch {
+    // Ignore stderr write errors
+  }
+  void gracefulShutdown(1, 'other', { cause: 'startup_ui_never_appeared' })
+  return true
+}
+
+/**
+ * Official `dRa.scheduleStartupMountWatchdog(reason)` (10,000ms timer, unref'd).
+ * Disarmed automatically when `markStartupUiMounted()` is called.
+ */
+export function scheduleStartupMountWatchdog(
+  reason?: string,
+  timeoutMs: number = STARTUP_MOUNT_WATCHDOG_MS,
+): ReturnType<typeof setTimeout> | undefined {
+  if (
+    !getIsInteractive() ||
+    startupUiMounted ||
+    inNonUiSubcommand() ||
+    shutdownInProgress
+  ) {
+    return undefined
+  }
+  const timer = setTimeout(() => {
+    startupWatchdogTimers.delete(timer)
+    exitIfStartupNeverMounted(reason)
+  }, timeoutMs)
+  timer.unref()
+  startupWatchdogTimers.add(timer)
+  return timer
+}
+
+function isSupervisedProcess(): boolean {
+  return isEnvTruthy(process.env.CLAUDE_CODE_SUPERVISED)
+}
+
+function describeUncaught(err: unknown): {
+  name: string
+  message: string
+  stack?: string
+  isError: boolean
+} {
+  if (err instanceof Error) {
+    return {
+      name: typeof err.name === 'string' ? err.name : 'Error',
+      message:
+        typeof err.message === 'string' ? err.message.slice(0, 2000) : '',
+      stack:
+        typeof err.stack === 'string' ? err.stack.slice(0, 4000) : undefined,
+      isError: true,
+    }
+  }
+  if (typeof err === 'string') {
+    return { name: 'string', message: err.slice(0, 2000), isError: false }
+  }
+  return {
+    name: 'non-error',
+    message: String(err).slice(0, 2000),
+    isError: false,
+  }
+}
+
+/**
+ * Official `dRa` uncaughtException handler (`chunk@294254613.js@381500..382900`):
+ * 1. HTTP/2 stream teardown recovery within 50/60s budget
+ * 2. `CLAUDE_CODE_SUPERVISED` immediate exit (code 70)
+ * 3. Loop circuit breaker: 10 uncaught exceptions within 5,000ms -> forced exit(1)
+ * 4. Schedules 10,000ms startup-mount watchdog
+ */
+export function handleUncaughtException(
+  error: unknown,
+  nowMs: number = Date.now(),
+):
+  | 'breaker_already_tripped'
+  | 'http2_recovered'
+  | 'supervised_exit'
+  | 'breaker_tripped'
+  | 'logged' {
+  if (uncaughtBreakerTripped) return 'breaker_already_tripped'
+  const info = describeUncaught(error)
+  const recovered =
+    info.isError &&
+    isHttp2StreamTeardownError(error) &&
+    recordHttp2RecoveryAndCheckBudget(nowMs)
+
+  logForDiagnosticsNoPII('error', 'uncaught_exception', {
+    error_name: info.name,
+    error_message: info.message,
+    recovered,
+  })
+  logEvent('tengu_uncaught_exception', {
+    error_name:
+      info.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    ...(recovered ? { recovered: true } : {}),
+  })
+
+  if (recovered) {
+    logForDebugging(
+      `Recovered HTTP/2 stream-teardown uncaught exception (${info.name})`,
+    )
+    return 'http2_recovered'
+  }
+
+  if (isSupervisedProcess()) {
+    uncaughtBreakerTripped = true
+    logForDebugging(
+      `Uncaught exception under CLAUDE_CODE_SUPERVISED — exiting ${SUPERVISED_UNCAUGHT_EXIT_CODE}: ${info.name}`,
+      { level: 'error' },
+    )
+    if (shutdownInProgress) {
+      forceExit(SUPERVISED_UNCAUGHT_EXIT_CODE)
+    }
+    void gracefulShutdown(SUPERVISED_UNCAUGHT_EXIT_CODE, 'other', {
+      cause: 'uncaught_exception',
+    })
+    return 'supervised_exit'
+  }
+
+  const tripped = recordUncaughtAndCheckBreaker(nowMs)
+  if (recentUncaught.length < UNCAUGHT_RECENT_CAP || tripped) {
+    recentUncaught.push({
+      name: info.name,
+      message: info.message.slice(0, 200),
+    })
+  }
+  if (tripped) {
+    logEvent('tengu_uncaught_exception_loop', {
+      count: uncaughtCount,
+      window_ms: UNCAUGHT_EXCEPTION_BREAKER_WINDOW_MS,
+      error_name:
+        info.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    cleanupTerminalModes()
+    try {
+      for (const entry of recentUncaught) {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- fatal loop diagnostics before exit
+        writeSync(
+          2,
+          `Uncaught exception (loop): ${entry.name}: ${entry.message}\n`,
+        )
+      }
+      // eslint-disable-next-line custom-rules/no-sync-fs -- fatal loop diagnostics before exit
+      writeSync(
+        2,
+        `Uncaught exception loop detected (${uncaughtCount} in ${UNCAUGHT_EXCEPTION_BREAKER_WINDOW_MS}ms) — forcing shutdown\n`,
+      )
+    } catch {
+      // Ignore stderr write errors
+    }
+    forceExit(1)
+  }
+
+  scheduleStartupMountWatchdog(info.message || info.name)
+  return 'logged'
+}
+
+/**
+ * Official `dRa` unhandledRejection handler (`chunk@294254613.js@382900..383400`):
+ * Logs rejection, exits immediately under `CLAUDE_CODE_SUPERVISED`, and
+ * schedules the 10,000ms startup-mount watchdog.
+ */
+export function handleUnhandledRejection(
+  reason: unknown,
+):
+  | 'breaker_already_tripped'
+  | 'swallowed_abort'
+  | 'supervised_exit'
+  | 'logged' {
+  if (uncaughtBreakerTripped) return 'breaker_already_tripped'
+  const info = describeUncaught(reason)
+  const errorInfo = info.isError
+    ? {
+        error_name: info.name,
+        error_message: info.message,
+        ...(info.stack ? { error_stack: info.stack } : {}),
+      }
+    : { error_message: info.message }
+  logForDiagnosticsNoPII('error', 'unhandled_rejection', errorInfo)
+  logEvent('tengu_unhandled_rejection', {
+    error_name:
+      info.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+  if (info.isError && info.name === 'AbortError') {
+    logForDebugging(
+      'Swallowed unhandled AbortError rejection (not exiting bg/supervised worker)',
+    )
+    return 'swallowed_abort'
+  }
+  if (isSupervisedProcess()) {
+    uncaughtBreakerTripped = true
+    logForDebugging(
+      `Unhandled rejection under CLAUDE_CODE_SUPERVISED — exiting ${SUPERVISED_UNCAUGHT_EXIT_CODE}: ${info.name}`,
+      { level: 'error' },
+    )
+    if (shutdownInProgress) {
+      forceExit(SUPERVISED_UNCAUGHT_EXIT_CODE)
+    }
+    void gracefulShutdown(SUPERVISED_UNCAUGHT_EXIT_CODE, 'other', {
+      cause: 'unhandled_rejection',
+    })
+    return 'supervised_exit'
+  }
+  scheduleStartupMountWatchdog(info.message || info.name)
+  return 'logged'
+}
+
+/** Register an in-flight sandbox cleanup task so shutdown drains up to `SANDBOX_CLEANUP_WAIT_MS`. */
+export function registerOwedSandboxCleanup(key: unknown): void {
+  if (!owedSandboxCleanups.has(key)) {
+    const { promise, resolve } = Promise.withResolvers<void>()
+    owedSandboxCleanups.set(key, { promise, resolve })
+  }
+}
+
+/** Resolve a registered sandbox cleanup task (official `A0(e)`). */
+export function resolveOwedSandboxCleanup(key: unknown): void {
+  owedSandboxCleanups.get(key)?.resolve()
+  owedSandboxCleanups.delete(key)
+}
+
+/** Official `Len()`: combined promise of active sandbox cleanups, or null if none. */
+export function getOwedSandboxCleanupPromise(): Promise<void> | null {
+  if (owedSandboxCleanups.size === 0) return null
+  return Promise.all(
+    Array.from(owedSandboxCleanups.values(), entry => entry.promise),
+  ).then(() => {})
+}
+
+export function isUncaughtBreakerTrippedForTesting(): boolean {
+  return uncaughtBreakerTripped
+}
 
 export function gracefulShutdownSync(
   exitCode = 0,
@@ -981,6 +1363,19 @@ export function releaseShutdownClaim(): void {
   shutdownInProgress = false
 }
 
+function widenFailsafeBy(extraMs: number, exitCode: number): void {
+  if (extraMs > 0 && failsafeFiresAtMs !== undefined) {
+    armShutdownFailsafe(
+      Math.max(0, failsafeFiresAtMs - Date.now()) + extraMs,
+      exitCode,
+    )
+  }
+}
+
+export function getFailsafeFiresAtMsForTesting(): number | undefined {
+  return failsafeFiresAtMs
+}
+
 /** Reset shutdown state - only for use in tests */
 export function resetShutdownState(): void {
   shutdownInProgress = false
@@ -989,6 +1384,21 @@ export function resetShutdownState(): void {
   resumeHintOmitsWorktree = false
   resumeHintLaunchFlags = undefined
   printModeSignalHandlersRegistered = false
+  ownsControllingTerminal = false
+  uncaughtCount = 0
+  uncaughtWindowStart = 0
+  uncaughtBreakerTripped = false
+  recentUncaught = []
+  http2RecoveryCount = 0
+  http2RecoveryWindowStart = 0
+  startupActionStarted = false
+  startupExpectsUiMount = false
+  startupUiMounted = false
+  for (const timer of startupWatchdogTimers) {
+    clearTimeout(timer)
+  }
+  startupWatchdogTimers.clear()
+  owedSandboxCleanups.clear()
   if (failsafeTimer !== undefined) {
     clearTimeout(failsafeTimer)
     failsafeTimer = undefined
@@ -1079,6 +1489,8 @@ export async function gracefulShutdown(
      * (densable WMo.resumeHintOmitsWorktree).
      */
     removeWorktree?: WorktreeRemovalTask | unknown
+    /** Optional diagnostic shutdown cause (official `dRa.shutdown`). */
+    cause?: string
   },
 ): Promise<void> {
   if (shutdownInProgress) {
@@ -1141,14 +1553,12 @@ export async function gracefulShutdown(
   // Local also keeps sessionEndHooks budget: max(5s, hooks+3.5s, drain+1.5s).
   const drainBudgetMs = getStdoutDrainBudgetMs()
   const FAILSAFE_DRAIN_HEADROOM_MS = 1500 // densable P8y
-  armShutdownFailsafe(
-    Math.max(
-      5000,
-      sessionEndBoundMs + 3500,
-      drainBudgetMs + FAILSAFE_DRAIN_HEADROOM_MS,
-    ),
-    exitCode,
+  const baseFailsafeMs = Math.max(
+    5000,
+    sessionEndBoundMs + 3500,
+    drainBudgetMs + FAILSAFE_DRAIN_HEADROOM_MS,
   )
+  armShutdownFailsafe(baseFailsafeMs, exitCode)
 
   // Flush session data first — this is the most critical cleanup. If the
   // terminal is dead (SIGHUP, SSH disconnect), hooks and analytics may hang
@@ -1236,8 +1646,10 @@ export async function gracefulShutdown(
     // best-effort — never block shutdown
   }
 
-  // #987: inspect worktree HEAD state before removing at exit so detached HEAD
-  // or switched-branch commits are not silently lost.
+  // #987 + Official 2.1.328 `dRa.removeWorktreeAtExit` (`chunk@294254613.js@389400`):
+  // Inspect worktree HEAD state and run `removeWorktree` STRICTLY ONCE before
+  // SessionEnd hooks, widening the failsafe timeout to cover `budgetMs` so a
+  // large worktree removal is not killed prematurely by the 5s failsafe.
   if (isWorktreeRemovalTask(options?.removeWorktree)) {
     try {
       const safety = await inspectWorktreeSafetyBeforeShutdownRemoval()
@@ -1251,8 +1663,21 @@ export async function gracefulShutdown(
           }
         }
       } else {
-        const budgetMs = options.removeWorktree.budgetMs ?? 15_000
-        await Promise.race([options.removeWorktree.run(), sleep(budgetMs)])
+        const budgetMs =
+          options.removeWorktree.budgetMs ?? WORKTREE_REMOVAL_DEFAULT_BUDGET_MS
+        if (failsafeFiresAtMs !== undefined) {
+          armShutdownFailsafe(
+            Math.max(failsafeFiresAtMs - Date.now(), budgetMs + baseFailsafeMs),
+            exitCode,
+          )
+        }
+        try {
+          await Promise.race([options.removeWorktree.run(), sleep(budgetMs)])
+        } finally {
+          if (failsafeFiresAtMs !== undefined) {
+            armShutdownFailsafe(baseFailsafeMs, exitCode)
+          }
+        }
       }
     } catch {
       // best-effort — never block shutdown
@@ -1280,27 +1705,30 @@ export async function gracefulShutdown(
     // best-effort — never block shutdown
   }
 
-  // #987: inspect worktree HEAD state before removing at exit so detached HEAD
-  // or switched-branch commits are not silently lost.
-  if (isWorktreeRemovalTask(options?.removeWorktree)) {
-    try {
-      const safety = await inspectWorktreeSafetyBeforeShutdownRemoval()
-      if (safety.keep) {
-        if (safety.reason) {
-          try {
-            // eslint-disable-next-line custom-rules/no-sync-fs -- must flush before exit
-            writeSync(2, safety.reason + '\n')
-          } catch {
-            // ignore stderr write errors
-          }
-        }
-      } else {
-        const budgetMs = options.removeWorktree.budgetMs ?? 15_000
-        await Promise.race([options.removeWorktree.run(), sleep(budgetMs)])
+  // Official 2.1.328 `dRa` (`chunk@294254613.js@389800`):
+  // Drain active sandbox cleanup (owed sandbox cleanups / SandboxManager reset
+  // when sandbox was active) bounded by SANDBOX_CLEANUP_WAIT_MS (500ms).
+  try {
+    const owedSandbox = getOwedSandboxCleanupPromise()
+    let activeSandboxReset: Promise<void> | null = null
+    if (owedSandbox === null) {
+      const { hasSandboxStartedOnce, SandboxManager } = await import(
+        './sandbox/sandbox-adapter.js'
+      )
+      if (hasSandboxStartedOnce()) {
+        activeSandboxReset = SandboxManager.reset()
       }
-    } catch {
-      // best-effort — never block shutdown
     }
+    const sandboxCleanup = owedSandbox ?? activeSandboxReset
+    if (sandboxCleanup !== null) {
+      widenFailsafeBy(SANDBOX_CLEANUP_WAIT_MS, exitCode)
+      await Promise.race([
+        sandboxCleanup.catch(() => {}),
+        sleep(SANDBOX_CLEANUP_WAIT_MS),
+      ])
+    }
+  } catch {
+    // best-effort — never block shutdown
   }
 
   // Log startup perf before analytics shutdown flushes/cancels timers

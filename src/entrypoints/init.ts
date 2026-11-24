@@ -7,6 +7,7 @@ import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import type { AttributedCounter } from '../bootstrap/state.js'
 import {
   getSessionCounter,
+  onSessionSwitch,
   setMeter,
   updateLastInteractionTime,
 } from '../bootstrap/state.js'
@@ -15,7 +16,12 @@ import { populateOAuthAccountInfoIfNeeded } from '../services/oauth/client.js'
 import {
   initializePolicyLimitsLoadingPromise,
   isPolicyLimitsEligible,
+  waitForPolicyLimitsToLoad,
 } from '../services/policyLimits/index.js'
+import {
+  getRemoteSettingsLoadStatus,
+  onRemoteSettingsLoadStatusChanged,
+} from '../utils/settings/remoteSettingsState.js'
 import { preconnectAnthropicApi } from '../utils/apiPreconnect.js'
 import { applyExtraCACertsFromConfig } from '../utils/caCertsConfig.js'
 import { registerCleanup } from '../utils/cleanupRegistry.js'
@@ -97,6 +103,115 @@ let sessionCountRecorded = false
 let deferredTelemetryPending = false
 let firstTurnTelemetryReleased = false
 
+/** Official 2.1.328 `QDe` bounded remote-settings wait timeout before telemetry init. */
+export const REMOTE_SETTINGS_TELEMETRY_WAIT_TIMEOUT_MS = 10_000
+
+let remoteManagedSettingsLoadPromise: Promise<void> | null = null
+let pendingTelemetryInitPromise: Promise<void> | null = null
+let telemetryInitializerHookForTesting: (() => Promise<void>) | null = null
+
+const PROXY_ENV_KEYS = [
+  'https_proxy',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'HTTP_PROXY',
+] as const
+
+const TELEMETRY_TRANSPORT_ENV_KEYS = [
+  'NODE_EXTRA_CA_CERTS',
+  'https_proxy',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'HTTP_PROXY',
+  'no_proxy',
+  'NO_PROXY',
+  'CLAUDE_CODE_CLIENT_CERT',
+  'CLAUDE_CODE_CLIENT_KEY',
+  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
+] as const
+
+/**
+ * Official 2.1.328 `Xw` (`chunk@302699776.js@14585`): structured error raised
+ * when an HTTP/HTTPS proxy environment variable contains a malformed URL.
+ */
+export class ProxyConfigError extends Error {
+  readonly source: string
+  readonly rawValue: string
+
+  constructor(message: string, source = 'HTTP_PROXY', rawValue = '') {
+    super(message)
+    this.name = 'ProxyConfigError'
+    this.source = source
+    this.rawValue = rawValue
+  }
+}
+
+/** Official `dD(e)` (`chunk@284851610.js@209051`): find first configured proxy env entry. */
+export function getConfiguredProxyEnvEntry(
+  env: NodeJS.ProcessEnv = process.env,
+): { source: string; value: string } | undefined {
+  for (const key of PROXY_ENV_KEYS) {
+    const value = env[key]
+    if (value) {
+      return { source: key, value }
+    }
+  }
+  return undefined
+}
+
+/** Official `cD(e)` (`chunk@284851610.js@209051`): parse proxy URL and require non-empty host. */
+export function parseValidProxyUrl(value: string): URL | undefined {
+  try {
+    const parsed = new URL(value)
+    return parsed.host ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Official `jFn(source, value)` (`chunk@284851610.js@209051`). */
+export function formatInvalidProxyUrlMessage(
+  source: string,
+  value: string,
+): string {
+  const sanitized = value.replace(/\p{Cc}/gu, '')
+  return `Invalid proxy URL in ${source}: "${sanitized}" cannot be parsed as a URL.\nProxy settings must be a complete URL including the scheme, e.g. "http://proxy.example.com:8080".\nFix or unset ${source} and restart Claude Code.`
+}
+
+/**
+ * Official `chunk@302699776.js@14585`: validate configured HTTP/HTTPS proxy URL
+ * before `configureGlobalAgents()` initializes global HTTP dispatchers.
+ */
+export function validateStartupProxyConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const entry = getConfiguredProxyEnvEntry(env)
+  if (entry && !parseValidProxyUrl(entry.value)) {
+    throw new ProxyConfigError(
+      formatInvalidProxyUrlMessage(entry.source, entry.value),
+      entry.source,
+      entry.value,
+    )
+  }
+}
+
+/** Register an in-flight remote managed settings fetch promise for `initializeTelemetryAfterTrust()`. */
+export function registerRemoteManagedSettingsLoadPromise(
+  promise: Promise<void> | null,
+): void {
+  remoteManagedSettingsLoadPromise = promise
+}
+
+export function getPendingTelemetryInitPromiseForTesting(): Promise<void> | null {
+  return pendingTelemetryInitPromise
+}
+
+export function setTelemetryInitializerForTesting(
+  fn: (() => Promise<void>) | null,
+): void {
+  telemetryInitializerHookForTesting = fn
+}
+
 const COWORK_CLOUD_ENTRYPOINTS = new Set([
   'remote_cowork',
   'remote_cowork_trigger',
@@ -169,12 +284,15 @@ export function recordSessionCountMetricOnce(): boolean {
   return true
 }
 
-/** Test-only helper for `#1759` and `#333` telemetry init/deferral tests. */
+/** Test-only helper for `#1759`, `#333`, and remote-settings telemetry init tests. */
 export function resetSessionCountMetricForTesting(): void {
   sessionCountRecorded = false
   deferredTelemetryPending = false
   firstTurnTelemetryReleased = false
   telemetryInitialized = false
+  remoteManagedSettingsLoadPromise = null
+  pendingTelemetryInitPromise = null
+  telemetryInitializerHookForTesting = null
 }
 
 export const init = memoize(async (): Promise<void> => {
@@ -381,6 +499,11 @@ export const init = memoize(async (): Promise<void> => {
     })
     logForDebugging('[init] configureGlobalMTLS complete')
 
+    // Official 2.1.328 (`chunk@302699776.js@14585`): validate proxy URL syntax
+    // before initializing global HTTP agents so malformed HTTP_PROXY/HTTPS_PROXY
+    // fails fast with structured ProxyConfigError.
+    validateStartupProxyConfig()
+
     // Configure global HTTP agents (proxy and/or mTLS)
     const proxyStart = Date.now()
     logForDebugging('[init] configureGlobalAgents starting')
@@ -479,6 +602,19 @@ export const init = memoize(async (): Promise<void> => {
       })
     }
 
+    // Official 2.1.328 (`chunk@302699776.js@16535`): re-ensure scratchpad dir
+    // whenever the active session switches so a new session ID gets its own dir.
+    onSessionSwitch(() => {
+      if (isScratchpadEnabled()) {
+        ensureScratchpadDir().catch(err => {
+          logForDebugging(
+            `onSessionSwitch: ensureScratchpadDir failed: ${errorMessage(err)}`,
+            { level: 'error' },
+          )
+        })
+      }
+    })
+
     // Surface ripgrep fallback (e.g. Android/Termux) once per session.
     // Goes to stderr so it doesn't corrupt pipe-mode (`-p`) stdout.
     try {
@@ -504,6 +640,14 @@ export const init = memoize(async (): Promise<void> => {
     })
     profileCheckpoint('init_function_end')
   } catch (error) {
+    if (error instanceof ProxyConfigError) {
+      logForDiagnosticsNoPII('error', 'proxy_invalid', {
+        source: error.source,
+      })
+      process.stderr.write(`${error.message}\n`)
+      gracefulShutdownSync(1)
+      return
+    }
     if (error instanceof ConfigParseError) {
       // Skip the interactive Ink dialog when we can't safely render it.
       // The dialog breaks JSON consumers (e.g. desktop marketplace plugin
@@ -531,14 +675,78 @@ export const init = memoize(async (): Promise<void> => {
   }
 })
 
+function snapshotTelemetryTransportEnv(): Record<string, string | undefined> {
+  const snap: Record<string, string | undefined> = {}
+  for (const key of TELEMETRY_TRANSPORT_ENV_KEYS) {
+    snap[key] = process.env[key]
+  }
+  return snap
+}
+
+function didTelemetryTransportEnvChange(
+  before: Record<string, string | undefined>,
+): boolean {
+  return TELEMETRY_TRANSPORT_ENV_KEYS.some(
+    key => process.env[key] !== before[key],
+  )
+}
+
+async function waitForRemoteManagedSettingsSettlement(
+  timeoutMs: number = REMOTE_SETTINGS_TELEMETRY_WAIT_TIMEOUT_MS,
+): Promise<void> {
+  const waits: Promise<unknown>[] = []
+  if (remoteManagedSettingsLoadPromise !== null) {
+    waits.push(remoteManagedSettingsLoadPromise)
+  }
+  if (isPolicyLimitsEligible()) {
+    waits.push(waitForPolicyLimitsToLoad())
+  }
+  if (waits.length === 0 && getRemoteSettingsLoadStatus() === undefined) {
+    return
+  }
+  if (waits.length === 0) {
+    return
+  }
+  let timerId: ReturnType<typeof setTimeout> | undefined
+  let unsubStatus: (() => void) | undefined
+  try {
+    await Promise.race([
+      Promise.allSettled(waits),
+      new Promise<void>(resolve => {
+        // Also resolve early if remote settings status settles via state machine
+        // when no explicit promise was provided.
+        if (remoteManagedSettingsLoadPromise === null) {
+          unsubStatus = onRemoteSettingsLoadStatusChanged(() => {
+            if (getRemoteSettingsLoadStatus() !== undefined) {
+              resolve()
+            }
+          })
+        }
+        timerId = setTimeout(resolve, timeoutMs)
+        timerId.unref()
+      }),
+    ])
+  } finally {
+    if (timerId !== undefined) {
+      clearTimeout(timerId)
+    }
+    unsubStatus?.()
+  }
+}
+
 /**
  * Initialize telemetry after trust has been granted.
- * For remote-settings-eligible users, waits for settings to load (non-blocking),
- * then re-applies env vars (to include remote settings) before initializing telemetry.
+ * Official 2.1.328 `QDe()` (`chunk@302699776.js@17197`):
+ * For remote-settings-eligible users (or when a remote managed settings fetch
+ * is in-flight), waits for remote settings to settle (non-blocking, bounded
+ * timeout), then re-applies env vars, CA certs, mTLS, and proxy configuration
+ * before initializing telemetry.
  * For non-eligible users, initializes telemetry immediately.
  * This should only be called once, after the trust dialog has been accepted.
  */
-export function initializeTelemetryAfterTrust(): void {
+export function initializeTelemetryAfterTrust(opts?: {
+  timeoutMs?: number
+}): void {
   // Official 2.1.326 (#333): Cowork cloud sessions hold OTel export until the
   // first turn so idle/unused sessions send nothing (including session.count).
   if (shouldDeferTelemetryUntilFirstTurn()) {
@@ -548,7 +756,56 @@ export function initializeTelemetryAfterTrust(): void {
     )
     return
   }
-  void doInitializeTelemetry().catch(error => {
+
+  const shouldWaitForRemote =
+    remoteManagedSettingsLoadPromise !== null || isPolicyLimitsEligible()
+
+  if (shouldWaitForRemote) {
+    if (getIsNonInteractiveSession() && isBetaTracingEnabled()) {
+      void doInitializeTelemetry().catch(error => {
+        logForDebugging(
+          `[3P telemetry] Eager telemetry init failed (beta tracing): ${errorMessage(error)}`,
+          { level: 'error' },
+        )
+      })
+    }
+    logForDebugging(
+      '[3P telemetry] Waiting for remote managed settings fetch before telemetry init',
+    )
+    pendingTelemetryInitPromise = waitForRemoteManagedSettingsSettlement(
+      opts?.timeoutMs ?? REMOTE_SETTINGS_TELEMETRY_WAIT_TIMEOUT_MS,
+    )
+      .then(async () => {
+        logForDebugging(
+          '[3P telemetry] Remote managed settings fetch settled, initializing telemetry',
+        )
+        const envBefore = snapshotTelemetryTransportEnv()
+        applyConfigEnvironmentVariables()
+        applyExtraCACertsFromConfig()
+        configureGlobalMTLS()
+        if (didTelemetryTransportEnvChange(envBefore)) {
+          try {
+            validateStartupProxyConfig()
+            configureGlobalAgents()
+          } catch (proxyErr) {
+            logForDebugging(
+              `[3P telemetry] Proxy reconfiguration skipped after remote settings: ${errorMessage(proxyErr)}`,
+              { level: 'error' },
+            )
+          }
+        }
+        await doInitializeTelemetry()
+      })
+      .catch(error => {
+        logForDebugging(
+          `[3P telemetry] Telemetry init failed (remote settings path): ${errorMessage(error)}`,
+          { level: 'error' },
+        )
+      })
+    return
+  }
+
+  pendingTelemetryInitPromise = doInitializeTelemetry().catch(error => {
     logForDebugging(
       `[3P telemetry] Telemetry init failed: ${errorMessage(error)}`,
       { level: 'error' },
@@ -559,6 +816,17 @@ export function initializeTelemetryAfterTrust(): void {
 async function doInitializeTelemetry(): Promise<void> {
   if (telemetryInitialized) {
     // Already initialized, nothing to do
+    return
+  }
+
+  if (telemetryInitializerHookForTesting !== null) {
+    telemetryInitialized = true
+    try {
+      await telemetryInitializerHookForTesting()
+    } catch (error) {
+      telemetryInitialized = false
+      throw error
+    }
     return
   }
 

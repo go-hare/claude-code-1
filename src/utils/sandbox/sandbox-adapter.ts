@@ -2810,21 +2810,20 @@ export function convertToSandboxRuntimeConfig(
   // Package @anthropic-ai/sandbox-runtime@0.0.70 does not yet read the field;
   // host still stamps it for forward-compat and enforces via ask-callback.
   const strictAllowlist = resolveSandboxStrictAllowlist() || undefined
+  const trusted = resolveTrustedSandboxSettings(settings, hostProxy)
   const network: SandboxRuntimeConfig['network'] & {
     strictAllowlist?: boolean
   } = {
     allowedDomains,
     deniedDomains,
     ...(strictAllowlist ? { strictAllowlist: true } : {}),
-    allowUnixSockets: settings.sandbox?.network?.allowUnixSockets,
-    allowAllUnixSockets: settings.sandbox?.network?.allowAllUnixSockets,
+    allowUnixSockets: trusted.network.allowUnixSockets,
+    allowAllUnixSockets: trusted.network.allowAllUnixSockets,
     // densable 2.1.251 #66 qe — network.allowMachLookup (macOS XPC allowlist)
-    allowMachLookup: settings.sandbox?.network?.allowMachLookup,
-    allowLocalBinding: settings.sandbox?.network?.allowLocalBinding,
-    httpProxyPort:
-      settings.sandbox?.network?.httpProxyPort ?? hostProxy.httpProxyPort,
-    socksProxyPort:
-      settings.sandbox?.network?.socksProxyPort ?? hostProxy.socksProxyPort,
+    allowMachLookup: trusted.network.allowMachLookup,
+    allowLocalBinding: trusted.network.allowLocalBinding,
+    httpProxyPort: trusted.network.httpProxyPort,
+    socksProxyPort: trusted.network.socksProxyPort,
   }
   const tlsTerminate = resolveSandboxTlsTerminate()
   if (tlsTerminate !== undefined) {
@@ -2843,7 +2842,11 @@ export function convertToSandboxRuntimeConfig(
   }
 
   // densable Pa: `Nu=!1`; WeakMap.set(Ya, Nu) then return Ya
-  // densable 2.1.251 #66 qe — allowAppleEvents + enableWeaker* land on package config
+  // Official 2.1.328 (`chunk@283546038.js@20294`, `chunk@290312616.js@926803`):
+  // weakening flags (allowAppleEvents, allowNestedUserNamespaces,
+  // enableWeakerNestedSandbox, enableWeakerNetworkIsolation) are read STRICTLY
+  // from trusted sources (`policySettings`, `flagSettings`, enabled
+  // `userSettings`) — NEVER from `projectSettings` or `localSettings`.
   const config = {
     network,
     filesystem: {
@@ -2854,12 +2857,11 @@ export function convertToSandboxRuntimeConfig(
       ...(filesystemDisabled ? { disabled: true as const } : {}),
     },
     ...(credentials !== undefined ? { credentials } : {}),
-    ignoreViolations: settings.sandbox?.ignoreViolations,
-    enableWeakerNestedSandbox: settings.sandbox?.enableWeakerNestedSandbox,
-    enableWeakerNetworkIsolation:
-      settings.sandbox?.enableWeakerNetworkIsolation,
-    allowAppleEvents: settings.sandbox?.allowAppleEvents,
-    allowNestedUserNamespaces: settings.sandbox?.allowNestedUserNamespaces,
+    ignoreViolations: trusted.ignoreViolations,
+    enableWeakerNestedSandbox: trusted.enableWeakerNestedSandbox,
+    enableWeakerNetworkIsolation: trusted.enableWeakerNetworkIsolation,
+    allowAppleEvents: trusted.allowAppleEvents,
+    allowNestedUserNamespaces: trusted.allowNestedUserNamespaces,
     ripgrep: ripgrepConfig,
   }
   rememberBuiltConfigAllowlist(config, false)
@@ -2881,6 +2883,346 @@ function trustedSandboxNetworkSources(): Array<
       ? getSettingsForSource('userSettings')
       : null,
   ]
+}
+
+const SANDBOX_NETWORK_BYPASS_KEYS = [
+  'allowUnixSockets',
+  'allowAllUnixSockets',
+  'allowLocalBinding',
+  'allowMachLookup',
+  'httpProxyPort',
+  'socksProxyPort',
+] as const
+
+const SANDBOX_PROXY_PORT_KEYS = ['httpProxyPort', 'socksProxyPort'] as const
+
+let droppedRepoNetworkAllowancesLogged = false
+
+function pickTrustedSandboxValue<T>(
+  getter: (sandbox: NonNullable<SettingsJson['sandbox']>) => T | undefined,
+): T | undefined {
+  for (const src of trustedSandboxNetworkSources()) {
+    const val = src?.sandbox ? getter(src.sandbox) : undefined
+    if (val !== undefined) return val
+  }
+  return undefined
+}
+
+function pickPolicySandboxValue<T>(
+  getter: (sandbox: NonNullable<SettingsJson['sandbox']>) => T | undefined,
+): T | undefined {
+  const policySandbox = getSettingsForSource('policySettings')?.sandbox
+  return policySandbox ? getter(policySandbox) : undefined
+}
+
+function mergeTrustedSandboxArray<T>(
+  getter: (
+    sandbox: NonNullable<SettingsJson['sandbox']>,
+  ) => readonly T[] | undefined,
+): T[] {
+  const out: T[] = []
+  const seen = new Set<T>()
+  for (const src of trustedSandboxNetworkSources()) {
+    const arr = src?.sandbox ? getter(src.sandbox) : undefined
+    if (!arr) continue
+    for (const item of arr) {
+      if (!seen.has(item)) {
+        seen.add(item)
+        out.push(item)
+      }
+    }
+  }
+  return out
+}
+
+function mergeTrustedIgnoreViolations(): Record<string, string[]> | undefined {
+  const merged = new Map<string, string[]>()
+  for (const src of trustedSandboxNetworkSources()) {
+    const entries = src?.sandbox?.ignoreViolations
+    if (!entries) continue
+    for (const [cmd, paths] of Object.entries(entries)) {
+      const existing = merged.get(cmd) ?? []
+      merged.set(cmd, Array.from(new Set([...existing, ...paths])))
+    }
+  }
+  return merged.size > 0 ? Object.fromEntries(merged) : undefined
+}
+
+/**
+ * Official 2.1.328 `Xo()` (`chunk@290312616.js@1092764`) + admin sandbox
+ * mandate (`policySettings.sandbox.enabled`): true when enterprise policy or
+ * CLI flag mandates the sandbox.
+ */
+export function isSandboxAdminMandated(): boolean {
+  if (shouldAllowManagedSandboxDomainsOnly()) return true
+  const policySandbox = getSettingsForSource('policySettings')?.sandbox
+  if (
+    policySandbox?.enabled === true ||
+    policySandbox?.failIfUnavailable === true ||
+    policySandbox?.allowUnsandboxedCommands === false
+  ) {
+    return true
+  }
+  const flagSandbox = getSettingsForSource('flagSettings')?.sandbox
+  if (flagSandbox?.allowUnsandboxedCommands === false) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 `$me()` (`chunk@290312616.js@1093867`): true when a trusted
+ * network restriction is active (admin mandate, strict allowlist, or trusted
+ * denied domains / WebFetch domain deny rules).
+ */
+export function hasTrustedSandboxNetworkRestriction(): boolean {
+  if (isSandboxAdminMandated() || resolveSandboxStrictAllowlist()) {
+    return true
+  }
+  const sources = [
+    getSettingsForSource('policySettings'),
+    getSettingsForSource('flagSettings'),
+  ]
+  return sources.some(
+    s =>
+      (s?.sandbox?.network?.deniedDomains?.length ?? 0) > 0 ||
+      (s?.permissions?.deny ?? []).some(
+        rule =>
+          typeof rule === 'string' &&
+          /^WebFetch\(\s*domain:/i.test(rule.trim()),
+      ),
+  )
+}
+
+export type TrustedSandboxSettingsResolution = {
+  allowAppleEvents: boolean | undefined
+  allowNestedUserNamespaces: boolean | undefined
+  enableWeakerNestedSandbox: boolean | undefined
+  enableWeakerNetworkIsolation: boolean | undefined
+  ignoreViolations: Record<string, string[]> | undefined
+  network: {
+    allowUnixSockets: string[] | undefined
+    allowAllUnixSockets: boolean | undefined
+    allowLocalBinding: boolean | undefined
+    allowMachLookup: string[] | undefined
+    httpProxyPort: number | undefined
+    socksProxyPort: number | undefined
+  }
+  adminMandated: boolean
+  trustedNetworkRestricted: boolean
+  managedDomainsOnly: boolean
+}
+
+/**
+ * Official 2.1.328 `wpl` + `nG(e)` (`chunk@283546038.js@20294`,
+ * `chunk@290312616.js@926803`):
+ * - Reads `allowAppleEvents`, `allowNestedUserNamespaces`,
+ *   `enableWeakerNestedSandbox`, and `enableWeakerNetworkIsolation` strictly
+ *   from trusted sources (`policySettings`, `flagSettings`, enabled
+ *   `userSettings`) — never from `projectSettings` or `localSettings`.
+ * - Under admin sandbox mandate (`policySettings.sandbox.enabled` / `Xo()`),
+ *   drops all 6 network bypass keys (`allowUnixSockets`, `allowAllUnixSockets`,
+ *   `allowLocalBinding`, `allowMachLookup`, `httpProxyPort`, `socksProxyPort`)
+ *   from `projectSettings`/`localSettings`.
+ * - Under trusted deny/strict allowlist (`$me()`), blocks project/local
+ *   `httpProxyPort`/`socksProxyPort`.
+ * - Under `allowManagedDomainsOnly` (`bhe()`), restricts `httpProxyPort` and
+ *   `socksProxyPort` to `policySettings` only.
+ */
+export function resolveTrustedSandboxSettings(
+  settings: SettingsJson,
+  hostProxy?: { httpProxyPort?: number; socksProxyPort?: number },
+): TrustedSandboxSettingsResolution {
+  const adminMandated = isSandboxAdminMandated()
+  const trustedNetworkRestricted = hasTrustedSandboxNetworkRestriction()
+  const managedDomainsOnly = shouldAllowManagedSandboxDomainsOnly()
+
+  // Strictly trusted sources only (policy -> flag -> enabled userSettings);
+  // projectSettings and localSettings can NEVER enable weakening flags.
+  const allowAppleEvents = pickTrustedSandboxValue(s => s.allowAppleEvents)
+  const allowNestedUserNamespaces = pickTrustedSandboxValue(
+    s => s.allowNestedUserNamespaces,
+  )
+  const enableWeakerNestedSandbox = pickTrustedSandboxValue(
+    s => s.enableWeakerNestedSandbox,
+  )
+  const enableWeakerNetworkIsolation = pickTrustedSandboxValue(
+    s => s.enableWeakerNetworkIsolation,
+  )
+
+  const ignoreViolations = adminMandated
+    ? mergeTrustedIgnoreViolations()
+    : settings.sandbox?.ignoreViolations
+
+  const mergedNetwork = settings.sandbox?.network
+  if (!adminMandated && !trustedNetworkRestricted) {
+    return {
+      allowAppleEvents,
+      allowNestedUserNamespaces,
+      enableWeakerNestedSandbox,
+      enableWeakerNetworkIsolation,
+      ignoreViolations,
+      network: {
+        allowUnixSockets: mergedNetwork?.allowUnixSockets,
+        allowAllUnixSockets: mergedNetwork?.allowAllUnixSockets,
+        allowLocalBinding: mergedNetwork?.allowLocalBinding,
+        allowMachLookup: mergedNetwork?.allowMachLookup,
+        httpProxyPort: mergedNetwork?.httpProxyPort ?? hostProxy?.httpProxyPort,
+        socksProxyPort:
+          mergedNetwork?.socksProxyPort ?? hostProxy?.socksProxyPort,
+      },
+      adminMandated,
+      trustedNetworkRestricted,
+      managedDomainsOnly,
+    }
+  }
+
+  if (!droppedRepoNetworkAllowancesLogged) {
+    droppedRepoNetworkAllowancesLogged = true
+    const repoSources = (['projectSettings', 'localSettings'] as const).map(
+      src => (isSettingSourceEnabled(src) ? getSettingsForSource(src) : null),
+    )
+    const keysToCheck = adminMandated
+      ? SANDBOX_NETWORK_BYPASS_KEYS
+      : SANDBOX_PROXY_PORT_KEYS
+    const droppedKeys = keysToCheck.filter(key =>
+      repoSources.some(src => {
+        const val = src?.sandbox?.network?.[key]
+        return val !== undefined && val !== false
+      }),
+    )
+    if (droppedKeys.length > 0) {
+      logForDebugging(
+        adminMandated
+          ? `[sandbox] admin sandbox mandate: ignoring sandbox.network.${droppedKeys.join(', ')} from project/local settings`
+          : `[sandbox] trusted network deny list or strict allowlist: ignoring sandbox.network.${droppedKeys.join(', ')} from project/local settings (a project may not replace the filtering proxy)`,
+      )
+    }
+    if (managedDomainsOnly) {
+      const nonPolicyTrusted = [
+        getSettingsForSource('flagSettings'),
+        isSettingSourceEnabled('userSettings')
+          ? getSettingsForSource('userSettings')
+          : null,
+      ]
+      const droppedProxyKeys = SANDBOX_PROXY_PORT_KEYS.filter(key =>
+        nonPolicyTrusted.some(
+          src => src?.sandbox?.network?.[key] !== undefined,
+        ),
+      )
+      if (droppedProxyKeys.length > 0) {
+        logForDebugging(
+          `[sandbox] network.allowManagedDomainsOnly: ignoring sandbox.network.${droppedProxyKeys.join(', ')} from --settings/user settings; only managed settings may replace the filtering proxy`,
+        )
+      }
+    }
+  }
+
+  const pickProxyPort = managedDomainsOnly
+    ? pickPolicySandboxValue
+    : pickTrustedSandboxValue
+  const httpProxyPort =
+    pickProxyPort(s => s.network?.httpProxyPort) ?? hostProxy?.httpProxyPort
+  const socksProxyPort =
+    pickProxyPort(s => s.network?.socksProxyPort) ?? hostProxy?.socksProxyPort
+
+  if (!adminMandated) {
+    return {
+      allowAppleEvents,
+      allowNestedUserNamespaces,
+      enableWeakerNestedSandbox,
+      enableWeakerNetworkIsolation,
+      ignoreViolations,
+      network: {
+        allowUnixSockets: mergedNetwork?.allowUnixSockets,
+        allowAllUnixSockets: mergedNetwork?.allowAllUnixSockets,
+        allowLocalBinding: mergedNetwork?.allowLocalBinding,
+        allowMachLookup: mergedNetwork?.allowMachLookup,
+        httpProxyPort,
+        socksProxyPort,
+      },
+      adminMandated,
+      trustedNetworkRestricted,
+      managedDomainsOnly,
+    }
+  }
+
+  const allowUnixSockets = mergeTrustedSandboxArray(
+    s => s.network?.allowUnixSockets,
+  )
+  const allowMachLookup = mergeTrustedSandboxArray(
+    s => s.network?.allowMachLookup,
+  )
+  const allowAllUnixSockets =
+    mergedNetwork?.allowAllUnixSockets === false
+      ? false
+      : pickTrustedSandboxValue(s => s.network?.allowAllUnixSockets)
+  const allowLocalBinding =
+    mergedNetwork?.allowLocalBinding === false
+      ? false
+      : pickTrustedSandboxValue(s => s.network?.allowLocalBinding)
+
+  return {
+    allowAppleEvents,
+    allowNestedUserNamespaces,
+    enableWeakerNestedSandbox,
+    enableWeakerNetworkIsolation,
+    ignoreViolations,
+    network: {
+      allowUnixSockets:
+        allowUnixSockets.length > 0 ? allowUnixSockets : undefined,
+      allowAllUnixSockets,
+      allowLocalBinding,
+      allowMachLookup: allowMachLookup.length > 0 ? allowMachLookup : undefined,
+      httpProxyPort,
+      socksProxyPort,
+    },
+    adminMandated,
+    trustedNetworkRestricted,
+    managedDomainsOnly,
+  }
+}
+
+/** Official 2.1.328 `pN` (`chunk@290312616.js@740798`): Linux/WSL seccomp userns policy env var. */
+export const SRT_ALLOW_NESTED_USERNS_ENV = 'SRT_ALLOW_NESTED_USERNS'
+
+/**
+ * Build the `{ SRT_ALLOW_NESTED_USERNS: '0' | '1' }` signal from trusted sandbox settings.
+ * Default-deny (`'0'`) unless `sandbox.allowNestedUserNamespaces === true` in a trusted tier.
+ */
+export function getSrtAllowNestedUsernsEnv(
+  settings: SettingsJson = getSettings_DEPRECATED(),
+): Record<typeof SRT_ALLOW_NESTED_USERNS_ENV, '0' | '1'> {
+  const allow =
+    resolveTrustedSandboxSettings(settings).allowNestedUserNamespaces === true
+  return { [SRT_ALLOW_NESTED_USERNS_ENV]: allow ? '1' : '0' }
+}
+
+/**
+ * Official 2.1.328 `Gq(e)` (`chunk@290312616.js@740798, 757066`):
+ * Propagate `SRT_ALLOW_NESTED_USERNS=0|1` on Linux/WSL wrapped sandbox commands
+ * so seccomp filters receive the official default-deny signal even when running
+ * `@anthropic-ai/sandbox-runtime@0.0.73`.
+ */
+export function applyLinuxNestedUsernsEnv(
+  wrappedCommand: string,
+  allowNestedUserNamespaces: boolean,
+): string {
+  const value = allowNestedUserNamespaces ? '1' : '0'
+  const assignment = `${SRT_ALLOW_NESTED_USERNS_ENV}=${value}`
+  if (wrappedCommand.includes(`${SRT_ALLOW_NESTED_USERNS_ENV}=`)) {
+    return wrappedCommand.replace(/SRT_ALLOW_NESTED_USERNS=[01]/g, assignment)
+  }
+  if (/(?:^|\s)(?:\S*\/)?bwrap\s/.test(wrappedCommand)) {
+    const withSetenv = wrappedCommand.includes(' -- ')
+      ? wrappedCommand.replace(
+          ' -- ',
+          ` --setenv ${SRT_ALLOW_NESTED_USERNS_ENV} ${value} -- `,
+        )
+      : wrappedCommand
+    return `${assignment} ${withSetenv}`
+  }
+  return `${assignment} ${wrappedCommand}`
 }
 
 /**
@@ -4060,10 +4402,26 @@ async function wrapWithSandbox(
   // 2.1.325 #2340: Ensure `--ro-bind` allowRead mounts precede `--bind`
   // writePath mounts after `--tmpfs <denyRead>` so bwrap does not fail with
   // `Can't create file` when cwd is below an `allowRead` inside a `denyRead`.
+  // 2.1.328 (`chunk@290312616.js@740798, 757066`): propagate default-deny
+  // `SRT_ALLOW_NESTED_USERNS=0|1` so Linux/WSL seccomp filters enforce userns policy.
   if (plat === 'linux' || plat === 'wsl') {
-    return fixLinuxBwrapAllowReadMountOrder(wrapped)
+    const fixed = fixLinuxBwrapAllowReadMountOrder(wrapped)
+    const customAllowNested = (
+      customConfig as { allowNestedUserNamespaces?: boolean } | undefined
+    )?.allowNestedUserNamespaces
+    const allowNested =
+      customAllowNested === false
+        ? false
+        : resolveTrustedSandboxSettings(getSettings_DEPRECATED())
+            .allowNestedUserNamespaces === true
+    return applyLinuxNestedUsernsEnv(fixed, allowNested)
   }
   return wrapped
+}
+
+/** Whether sandbox initialization completed at least once in this session. */
+export function hasSandboxStartedOnce(): boolean {
+  return sandboxStartedOnce
 }
 
 /**
@@ -4135,6 +4493,11 @@ async function initialize(
 
       const settings = getSettings_DEPRECATED()
       const runtimeConfig = convertToSandboxRuntimeConfig(settings)
+      const platForInit = getPlatform()
+      if (platForInit === 'linux' || platForInit === 'wsl') {
+        process.env[SRT_ALLOW_NESTED_USERNS_ENV] =
+          getSrtAllowNestedUsernsEnv(settings)[SRT_ALLOW_NESTED_USERNS_ENV]
+      }
       const hasNetworkLists =
         (runtimeConfig.network?.allowedDomains?.length ?? 0) > 0 ||
         (runtimeConfig.network?.deniedDomains?.length ?? 0) > 0
@@ -4152,12 +4515,15 @@ async function initialize(
       // changes (zvt/qvt) must refresh sandbox config so write deny tracks producers.
       const unsubSettings = settingsChangeDetector.subscribe(() => {
         const settings = getSettings_DEPRECATED()
-        applySandboxRuntimeConfig(
-          convertToSandboxRuntimeConfig(settings),
-          cfg => {
-            BaseSandboxManager.updateConfig(cfg)
-          },
-        )
+        const nextConfig = convertToSandboxRuntimeConfig(settings)
+        const currentPlat = getPlatform()
+        if (currentPlat === 'linux' || currentPlat === 'wsl') {
+          process.env[SRT_ALLOW_NESTED_USERNS_ENV] =
+            getSrtAllowNestedUsernsEnv(settings)[SRT_ALLOW_NESTED_USERNS_ENV]
+        }
+        applySandboxRuntimeConfig(nextConfig, cfg => {
+          BaseSandboxManager.updateConfig(cfg)
+        })
         logForDebugging('Sandbox configuration updated from settings change')
       })
       const unsubCommandProducers = subscribeCommandProducerDirsChanged(() => {
@@ -4215,6 +4581,7 @@ async function reset(): Promise<void> {
   isSupportedPlatform.cache.clear?.()
   initializationPromise = undefined
   sandboxStartedOnce = false
+  droppedRepoNetworkAllowancesLogged = false
   hostedToolContainer = false
   sandboxDisabledThisSession = false
   initFailureReason = undefined

@@ -26,13 +26,18 @@ import {
 import {
   autoModeHasDenyRules,
   buildUnfinishedCheckAsk,
+  CIRCUIT_BREAKER_POLICY,
+  type CircuitBreakerName,
   formatNonInteractiveAskCauseMessage,
   hasBypassImmuneNonClassifierAlsoBreaker,
+  hasBypassImmuneSafetyCheck,
   hasClassifierRoutedSafetyCheck,
   hasUnwaivableBypassImmuneSafetyCheck,
+  isBypassImmuneSafetyCheck,
   isClassifierRoutedSafetyCheck,
   isDesktopForwardSkipClassifier,
   isServerHeldClassifierAsk,
+  isUnwaivableBypassImmuneSafetyCheck,
   pluginOriginCaller,
   shouldHoldConsecutiveDenials,
 } from './nhoGates.js'
@@ -57,6 +62,7 @@ import { AbortError, isAbortError, toError } from '../errors.js'
 import { logError } from '../log.js'
 import { SandboxManager } from '../sandbox/sandbox-adapter.js'
 import {
+  getEnabledSettingSources,
   getSettingSourceDisplayNameLowercase,
   SETTING_SOURCES,
 } from '../settings/constants.js'
@@ -91,8 +97,10 @@ import {
 } from './permissionRuleParser.js'
 import { isBroadRule, isAutoModeFilteringActive } from './broadRuleFilter.js'
 import {
+  contextBlocksOutsideReads,
   getOutsideReadPrompt,
   isAutoModeOrPlanActingAsAuto,
+  settingsHaveBlockFileToolReadsOutsideWorkingDirectories,
   shouldOfferBlockOutsideReads,
 } from './outsideReads.js'
 import { isEvalConfined } from './evalConfined.js'
@@ -4354,6 +4362,18 @@ async function hasPermissionsToUseToolInner(
     prePlanMode: toolPermissionContext.prePlanMode,
   })
 
+  // Official 2.1.328 `ZMt` (`chunk@294254613.js@3738150..3738700`):
+  // Update monotonic `removalWaiverRulesClear` latch before evaluating
+  // bypass-immune safety checks.
+  checkAndLatchRemovalWaiverRulesClear(toolPermissionContext, context)
+
+  const canWaiveBypassRemovalPrompt =
+    shouldBypassPermissions &&
+    toolPermissionResult?.behavior === 'ask' &&
+    effectiveMode === 'bypassPermissions' &&
+    context.hookAskFloor !== true &&
+    isRemovalWaiverAllowed(toolPermissionContext, context)
+
   if (toolPermissionResult?.behavior === 'ask') {
     // `personOnly: true` asks (e.g. org new-artifact approval) MUST return
     // before both bypassPermissions and whole-tool alwaysAllowRules.
@@ -4361,16 +4381,32 @@ async function hasPermissionsToUseToolInner(
       return toolPermissionResult
     }
 
-    // Bypass-immune safety checks (non-classifierApprovable or unwaivable
+    // Bypass-immune safety checks (non-classifierApprovable or bypassImmune
     // circuit breakers) must prompt (or splendid-horizon / non-interactive deny)
-    // even in bypassPermissions mode.
-    const isBypassImmuneSafetyCheck =
-      findSafetyCheckDecision(
-        toolPermissionResult.decisionReason,
-        check => !check.classifierApprovable,
-      ) !== undefined ||
-      hasUnwaivableBypassImmuneSafetyCheck(toolPermissionResult.decisionReason)
-    if (isBypassImmuneSafetyCheck) {
+    // even in bypassPermissions mode — EXCEPT `waivableInBypass: true` checks
+    // (`dangerousRemoval`) when `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS`
+    // is truthy, no `PermissionRequest` hook is active, and `removalWaiverRulesClear`
+    // has never been invalidated.
+    const hasBlockingBypassImmuneSafetyCheck = canWaiveBypassRemovalPrompt
+      ? findSafetyCheckDecision(
+          toolPermissionResult.decisionReason,
+          check =>
+            isUnwaivableBypassImmuneSafetyCheck(check) ||
+            (!check.classifierApprovable &&
+              !isWaivableBypassSafetyCheck(check)),
+        ) !== undefined ||
+        hasUnwaivableBypassImmuneSafetyCheck(
+          toolPermissionResult.decisionReason,
+        )
+      : findSafetyCheckDecision(
+          toolPermissionResult.decisionReason,
+          check =>
+            !check.classifierApprovable || isBypassImmuneSafetyCheck(check),
+        ) !== undefined ||
+        hasUnwaivableBypassImmuneSafetyCheck(
+          toolPermissionResult.decisionReason,
+        )
+    if (hasBlockingBypassImmuneSafetyCheck) {
       const layeredNow = getToolPermissionContextFromLayers(context)
       const modeNow = getEffectivePermissionMode(tool, layeredNow)
       const splendid = applySplendidHorizonBypassDeny(
@@ -4430,6 +4466,14 @@ async function hasPermissionsToUseToolInner(
 
   // 2a. Check if mode allows the tool to run
   if (shouldBypassPermissions) {
+    if (
+      canWaiveBypassRemovalPrompt &&
+      toolPermissionResult?.behavior === 'ask' &&
+      hasBypassImmuneSafetyCheck(toolPermissionResult.decisionReason)
+    ) {
+      logForDebugging('permission_bypass_removal_prompt_waived')
+      logEvent('tengu_permission_bypass_removal_prompt_waived', {})
+    }
     return {
       behavior: 'allow',
       updatedInput: getUpdatedInputOrFallback(toolPermissionResult, input),
@@ -4586,6 +4630,11 @@ export function syncPermissionRulesFromDisk(
   toolPermissionContext: ToolPermissionContext,
   rules: PermissionRule[],
 ): ToolPermissionContext {
+  // Official 2.1.328 (`chunk@294254613.js@3740800`): check BEFORE clearing so
+  // removing prior deny/ask rules mid-session cannot retroactively unlock
+  // `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS` removal waivers.
+  checkAndLatchRemovalWaiverRulesClear(toolPermissionContext)
+
   let context = toolPermissionContext
 
   // Official 2.1.328 `jYn` (`chunk@294254613.js @3740296`):
@@ -4639,7 +4688,182 @@ export function syncPermissionRulesFromDisk(
   if (settingsHaveBlockWritesOutsideWorkingDirectories()) {
     next = applyBlockWritesOutsideWorkingDirectories(next)
   }
+  if (settingsHaveBlockFileToolReadsOutsideWorkingDirectories()) {
+    next = {
+      ...next,
+      blockFileToolReadsOutsideWorkingDirectories: true,
+    } as ToolPermissionContext
+  }
+  // Official `jYn` end (`Tlr(h); Czr(void 0)`): latch after replacing rules too.
+  checkAndLatchRemovalWaiverRulesClear(next)
   return next
+}
+
+/**
+ * Official 2.1.328 (`chunk@284607801.js@93742`, `chunk@283886268.js@6708`):
+ * True when file-tool reads outside working directories are fenced via either
+ * `permissions.blockReadsOutsideWorkingDirectories` or launch `--settings`
+ * `permissions.blockFileToolReadsOutsideWorkingDirectories`.
+ */
+export function isFileToolOutsideReadFenceActive(
+  toolPermissionContext: ToolPermissionContext,
+): boolean {
+  return contextBlocksOutsideReads(
+    toolPermissionContext as ToolPermissionContext & {
+      blockFileToolReadsOutsideWorkingDirectories?: boolean
+    },
+  )
+}
+
+const REMOVAL_WAIVER_DISQUALIFYING_TOOLS = new Set([
+  BASH_TOOL_NAME,
+  POWERSHELL_TOOL_NAME,
+  'Edit',
+  'Write',
+  'Read',
+  'MultiEdit',
+  'NotebookEdit',
+  '*',
+])
+
+const REMOVAL_WAIVER_EPHEMERAL_SOURCES = new Set(['cliArg', 'session'])
+
+/**
+ * Official 2.1.328 `Ir().removalWaiverRulesClear` (`chunk@289034284.js@211038`,
+ * `chunk@294254613.js@3741033`): monotonic one-way latch. Once set to `false`
+ * (due to disqualifying deny/ask rules, `blockReadsOutsideWorkingDirectories`,
+ * or an active `PermissionRequest` hook), it stays `false` for the rest of the
+ * session so clearing rules mid-session cannot unlock dangerous-removal waivers.
+ */
+let removalWaiverRulesClear: boolean | undefined
+
+function isWaivableBypassSafetyCheck(check: {
+  circuitBreaker?: string
+  also?: readonly string[]
+}): boolean {
+  if (!check.circuitBreaker) return false
+  if (!Object.hasOwn(CIRCUIT_BREAKER_POLICY, check.circuitBreaker)) return false
+  const policy =
+    CIRCUIT_BREAKER_POLICY[check.circuitBreaker as CircuitBreakerName]
+  if (!policy.bypassImmune || !policy.waivableInBypass) return false
+  // Any secondary unwaivable breaker in `also` prevents waiver.
+  return !isUnwaivableBypassImmuneSafetyCheck(check)
+}
+
+/** Official 2.1.328 `Fl(e)` (`chunk@289034284.js`): disqualifying rules/blocks check. */
+export function hasRemovalWaiverDisqualifyingRules(
+  toolPermissionContext: ToolPermissionContext,
+): boolean {
+  if (toolPermissionContext.blockReadsOutsideWorkingDirectories === true) {
+    return true
+  }
+  const ruleMaps = [
+    toolPermissionContext.alwaysDenyRules,
+    toolPermissionContext.alwaysAskRules,
+  ]
+  for (const bySource of ruleMaps) {
+    if (!bySource) continue
+    for (const [source, rawRules] of Object.entries(bySource)) {
+      if (!rawRules) continue
+      for (const rawRule of rawRules) {
+        const parsed = permissionRuleValueFromString(rawRule)
+        if (
+          REMOVAL_WAIVER_EPHEMERAL_SOURCES.has(source) &&
+          parsed.ruleContent === undefined
+        ) {
+          continue
+        }
+        if (REMOVAL_WAIVER_DISQUALIFYING_TOOLS.has(parsed.toolName)) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/** Official 2.1.328 `Czr` / `pG('PermissionRequest')`: true when any PermissionRequest hook is active. */
+export function hasActivePermissionRequestHook(
+  context?: Pick<ToolUseContext, 'getAppState'>,
+): boolean {
+  for (const source of getEnabledSettingSources()) {
+    const hooks = getSettingsForSource(source)?.hooks?.PermissionRequest
+    if (Array.isArray(hooks) && hooks.length > 0) {
+      return true
+    }
+  }
+  const policyHooks =
+    getSettingsForSource('policySettings')?.hooks?.PermissionRequest
+  if (Array.isArray(policyHooks) && policyHooks.length > 0) {
+    return true
+  }
+  try {
+    const sessionHooks = context?.getAppState?.()?.sessionHooks
+    if (sessionHooks instanceof Map) {
+      for (const store of sessionHooks.values()) {
+        const matchers = store?.hooks?.PermissionRequest
+        if (Array.isArray(matchers) && matchers.length > 0) {
+          return true
+        }
+      }
+    }
+  } catch {
+    // If app state is unavailable, fall through to settings-only check
+  }
+  return false
+}
+
+/** Official `Tlr(e)` + `Czr(context)`: monotonically latch `removalWaiverRulesClear`. */
+export function checkAndLatchRemovalWaiverRulesClear(
+  toolPermissionContext: ToolPermissionContext,
+  context?: Pick<ToolUseContext, 'getAppState'>,
+): void {
+  if (
+    !isEnvTruthy(process.env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS)
+  ) {
+    return
+  }
+  if (
+    hasRemovalWaiverDisqualifyingRules(toolPermissionContext) ||
+    hasActivePermissionRequestHook(context)
+  ) {
+    removalWaiverRulesClear = false
+  } else if (removalWaiverRulesClear === undefined) {
+    removalWaiverRulesClear = true
+  }
+}
+
+/**
+ * Official 2.1.328 `tes(e) && pG('PermissionRequest') === 'none'`:
+ * Waive `waivableInBypass` dangerous-removal prompts ONLY when
+ * `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS` is truthy (and not in a
+ * child session), no `PermissionRequest` hook is active, and
+ * `removalWaiverRulesClear` has never been invalidated.
+ */
+export function isRemovalWaiverAllowed(
+  toolPermissionContext: ToolPermissionContext,
+  context?: Pick<ToolUseContext, 'getAppState'>,
+): boolean {
+  if (
+    !isEnvTruthy(
+      process.env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS,
+    ) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_CHILD_SESSION)
+  ) {
+    return false
+  }
+  checkAndLatchRemovalWaiverRulesClear(toolPermissionContext, context)
+  return (
+    removalWaiverRulesClear === true && !hasActivePermissionRequestHook(context)
+  )
+}
+
+export function getRemovalWaiverRulesClearForTesting(): boolean | undefined {
+  return removalWaiverRulesClear
+}
+
+export function resetRemovalWaiverRulesClearForTesting(): void {
+  removalWaiverRulesClear = undefined
 }
 
 /**

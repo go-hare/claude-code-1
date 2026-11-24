@@ -111,6 +111,37 @@ export type OverageDisabledReason =
   | 'no_limits_configured' // No overage limits configured for account
   | 'unknown' // Unknown reason, should not happen
 
+export type OverageScope = 'service' | 'channel' | 'group_pool' | 'organization'
+
+export type OveragePeriod = 'daily' | 'weekly' | 'monthly'
+
+export type LowPriorityStatus =
+  | 'active'
+  | 'not_needed'
+  | 'slot_busy'
+  | 'weekly_limit'
+  | 'budget_exhausted'
+  | 'ineligible'
+  | 'off'
+  | 'unrecognized'
+
+export type LowPriorityOffer = 'treatment' | 'control'
+
+export type RateLimitGraceZone = {
+  rateLimitType: 'five_hour' | 'seven_day'
+  resetsAt?: number
+  extraUsageStatus?: 'allowed' | 'allowed_warning'
+  paidBy: 'credits' | 'allowance'
+}
+
+export type RateLimitGraceParseResult =
+  | { limiterRan: false }
+  | {
+      limiterRan: true
+      zone: RateLimitGraceZone | null
+      covered?: boolean
+    }
+
 export type ClaudeAILimits = {
   status: QuotaStatus
   // unifiedRateLimitFallbackAvailable is currently used to warn users that set
@@ -124,11 +155,38 @@ export type ClaudeAILimits = {
   overageResetsAt?: number
   overageDisabledReason?: OverageDisabledReason
   isUsingOverage?: boolean
-  /**
-   * densable hvr / Vqn consumer-only. Local header parse does not produce
-   * this field — do not invent a mapping.
-   */
+  /** Official 2.1.328 `anthropic-ratelimit-unified-overage-in-use`. */
   overageInUse?: boolean
+  /** Official 2.1.328 `anthropic-ratelimit-unified-overage-scope`. */
+  overageScope?: OverageScope
+  /** Official 2.1.328 `anthropic-ratelimit-unified-overage-period`. */
+  overagePeriod?: OveragePeriod
+  /** Official 2.1.328 `Bt(e)` member spend limit period (when `org_spend_cap_reached` with no overage-scope). */
+  memberSpendLimit?: { period?: OveragePeriod }
+  /** Official 2.1.328 `anthropic-ratelimit-unified-overage-daily-cap-paused`. */
+  dailyCapPaused?: boolean
+  /** Official 2.1.328 `anthropic-ratelimit-unified-overage-period-monthly-utilization`. */
+  overagePeriodMonthly?: { utilization: number }
+  /** Official 2.1.328 `anthropic-ratelimit-unified-overage-period-channel-utilization`. */
+  overagePeriodChannel?: { utilization: number }
+  /** Official 2.1.328 `anthropic-ratelimit-unified-upgrade-paths`. */
+  upgradePaths?: string[]
+  /** Official 2.1.328 `anthropic-ratelimit-unified-grace-*` wrap-up fields. */
+  rateLimitGraceActive?: boolean
+  rateLimitGracePaidBy?: 'credits' | 'allowance'
+  graceStatus?: string
+  graceFiveHourUtilization?: number
+  graceSevenDayUtilization?: number
+  /** Official 2.1.328 `anthropic-ratelimit-unified-slow-*` low-priority lane fields. */
+  lowPriorityStatus?: LowPriorityStatus
+  lowPriorityOffer?: LowPriorityOffer
+  lowPriorityRetryAfterSeconds?: number
+  lowPriorityMaxWaitSeconds?: number
+  lowPriorityBudgetUtilization?: number
+  lowPriorityBudgetResetsAt?: number
+  /** Official 2.1.328 `anthropic-ratelimit-unified-5h-status` / `-7d-status`. */
+  fiveHourStatus?: QuotaStatus
+  sevenDayStatus?: QuotaStatus
   surpassedThreshold?: number
 }
 
@@ -196,6 +254,20 @@ export function getLimitsAccountEpoch(): number {
 type RawWindowUtilization = {
   utilization: number // 0-1 fraction
   resets_at: number // unix epoch seconds
+  /** Official 2.1.328 `si(e)`: `anthropic-ratelimit-unified-{5h,7d,7d_oi}-status`. */
+  status?: QuotaStatus
+}
+export type WindowReading = {
+  utilization?: number
+  resets_at?: number
+  surpassedThreshold?: number
+  status?: QuotaStatus
+}
+export type WindowReadings = {
+  five_hour?: WindowReading
+  seven_day?: WindowReading
+  seven_day_overage_included?: WindowReading
+  overage?: WindowReading
 }
 type RawUtilization = {
   five_hour?: RawWindowUtilization
@@ -213,6 +285,22 @@ const RAW_UTILIZATION_KEYS = [
   'seven_day_overage_included',
   'overage',
 ] as const
+
+const VALID_WINDOW_STATUSES: readonly QuotaStatus[] = [
+  'allowed',
+  'allowed_warning',
+  'rejected',
+]
+
+function parseFiniteNumberHeader(raw: string | null): number | undefined {
+  if (raw === null || raw === '') return undefined
+  const num = Number(raw)
+  return Number.isFinite(num) ? num : undefined
+}
+
+function parseWindowQuotaStatus(raw: string | null): QuotaStatus | undefined {
+  return VALID_WINDOW_STATUSES.find(status => status === raw)
+}
 
 /**
  * densable 2.1.243 `Y0a` — drop windows whose `resets_at` has passed.
@@ -236,10 +324,65 @@ export function getRawUtilization(): RawUtilization {
   return selectOpenRawUtilization(rawUtilization)
 }
 
+/**
+ * Official 2.1.328 `si(e)` (`chunk@293569796.js@42950`): parse per-window
+ * utilization, reset, surpassed-threshold, and status headers (`5h`, `7d`,
+ * `7d_oi`, `overage`). Drops `overage` when `overage-scope === 'group_pool'`.
+ */
+export function extractWindowReadings(
+  headers: globalThis.Headers,
+): WindowReadings {
+  const readings: WindowReadings = {}
+  for (const [key, abbrev] of [
+    ['five_hour', '5h'],
+    ['seven_day', '7d'],
+    ['seven_day_overage_included', '7d_oi'],
+    ['overage', 'overage'],
+  ] as const) {
+    const utilization = parseFiniteNumberHeader(
+      headers.get(`anthropic-ratelimit-unified-${abbrev}-utilization`),
+    )
+    const reset = parseFiniteNumberHeader(
+      headers.get(`anthropic-ratelimit-unified-${abbrev}-reset`),
+    )
+    const surpassedThreshold = parseFiniteNumberHeader(
+      headers.get(`anthropic-ratelimit-unified-${abbrev}-surpassed-threshold`),
+    )
+    const status =
+      key === 'overage'
+        ? undefined
+        : parseWindowQuotaStatus(
+            headers.get(`anthropic-ratelimit-unified-${abbrev}-status`),
+          )
+    if (
+      utilization === undefined &&
+      reset === undefined &&
+      surpassedThreshold === undefined &&
+      status === undefined
+    ) {
+      continue
+    }
+    readings[key] = {
+      ...(utilization !== undefined && { utilization }),
+      ...(reset !== undefined && { resets_at: Math.round(reset) }),
+      ...(surpassedThreshold !== undefined && { surpassedThreshold }),
+      ...(status !== undefined && { status }),
+    }
+  }
+  if (
+    headers.get('anthropic-ratelimit-unified-overage-scope') === 'group_pool'
+  ) {
+    delete readings.overage
+  }
+  return readings
+}
+
 export function extractRawUtilization(
   headers: globalThis.Headers,
 ): RawUtilization {
   const result: RawUtilization = {}
+  const isGroupPool =
+    headers.get('anthropic-ratelimit-unified-overage-scope') === 'group_pool'
   for (const [key, abbrev] of [
     ['five_hour', '5h'],
     ['seven_day', '7d'],
@@ -247,12 +390,23 @@ export function extractRawUtilization(
     // Same header family as mockRateLimits overage-utilization / overage-reset.
     ['overage', 'overage'],
   ] as const) {
+    if (key === 'overage' && isGroupPool) continue
     const util = headers.get(
       `anthropic-ratelimit-unified-${abbrev}-utilization`,
     )
     const reset = headers.get(`anthropic-ratelimit-unified-${abbrev}-reset`)
     if (util !== null && reset !== null) {
-      result[key] = { utilization: Number(util), resets_at: Number(reset) }
+      const status =
+        key === 'overage'
+          ? undefined
+          : parseWindowQuotaStatus(
+              headers.get(`anthropic-ratelimit-unified-${abbrev}-status`),
+            )
+      result[key] = {
+        utilization: Number(util),
+        resets_at: Number(reset),
+        ...(status !== undefined ? { status } : {}),
+      }
     }
   }
   return result
@@ -481,14 +635,196 @@ function getEarlyWarningFromHeaders(
   return null
 }
 
+function parseClampedUnitHeader(
+  headers: globalThis.Headers,
+  name: string,
+): number | undefined {
+  const raw = headers.get(name)
+  if (raw === null || raw.trim() === '') return undefined
+  const num = Number(raw)
+  return Number.isFinite(num) ? Math.max(0, Math.min(1, num)) : undefined
+}
+
+function parseNonNegativeHeader(
+  headers: globalThis.Headers,
+  name: string,
+): number | undefined {
+  const raw = headers.get(name)
+  if (raw === null || raw.trim() === '') return undefined
+  const num = Number(raw)
+  return Number.isFinite(num) && num >= 0 ? num : undefined
+}
+
+function parseFutureEpochSecondsHeader(
+  headers: globalThis.Headers,
+  name: string,
+  nowMs: number,
+): number | undefined {
+  const raw = headers.get(name)
+  if (raw === null || raw.trim() === '') return undefined
+  const num = Number(raw)
+  return Number.isFinite(num) && num * 1000 > nowMs
+    ? Math.round(num)
+    : undefined
+}
+
+/**
+ * Official 2.1.328 `An(e, r)` (`chunk@293569796.js@18854`): parse grace wrap-up
+ * headers (`anthropic-ratelimit-unified-grace-status`, `-grace-5h-utilization`,
+ * `-grace-7d-utilization`).
+ */
+export function parseRateLimitGraceHeaders(
+  headers: globalThis.Headers,
+  nowMs: number = Date.now(),
+): RateLimitGraceParseResult {
+  if (headers.get('anthropic-ratelimit-unified-status') === null) {
+    return { limiterRan: false }
+  }
+  const grace5h =
+    parseClampedUnitHeader(
+      headers,
+      'anthropic-ratelimit-unified-grace-5h-utilization',
+    ) ?? 0
+  const grace7d =
+    parseClampedUnitHeader(
+      headers,
+      'anthropic-ratelimit-unified-grace-7d-utilization',
+    ) ?? 0
+  if (
+    headers.get('anthropic-ratelimit-unified-grace-status') === 'eligible' ||
+    (grace5h === 0 && grace7d === 0)
+  ) {
+    return { limiterRan: true, zone: null }
+  }
+  const reset5h = parseFutureEpochSecondsHeader(
+    headers,
+    'anthropic-ratelimit-unified-5h-reset',
+    nowMs,
+  )
+  const reset7d = parseFutureEpochSecondsHeader(
+    headers,
+    'anthropic-ratelimit-unified-7d-reset',
+    nowMs,
+  )
+  const prefer5h =
+    grace5h > 0 &&
+    reset5h !== undefined &&
+    (reset7d === undefined || reset5h > reset7d)
+  const rateLimitType: 'five_hour' | 'seven_day' =
+    grace7d > 0 && !prefer5h ? 'seven_day' : 'five_hour'
+  const overageStatusRaw = headers.get(
+    'anthropic-ratelimit-unified-overage-status',
+  )
+  const extraUsageStatus =
+    overageStatusRaw === 'allowed' || overageStatusRaw === 'allowed_warning'
+      ? overageStatusRaw
+      : undefined
+  return {
+    limiterRan: true,
+    zone: {
+      rateLimitType,
+      resetsAt: rateLimitType === 'seven_day' ? reset7d : reset5h,
+      extraUsageStatus,
+      paidBy:
+        headers.get('anthropic-ratelimit-unified-status') === 'rejected' &&
+        extraUsageStatus !== undefined
+          ? 'credits'
+          : 'allowance',
+    },
+    covered:
+      extraUsageStatus !== undefined ||
+      headers.get('anthropic-ratelimit-unified-overage-in-use') === 'true',
+  }
+}
+
+/** Official 2.1.328 `Md(e)` (`chunk@289476641.js@230101`): slow-lane status. */
+function parseSlowStatusHeader(
+  headers: globalThis.Headers,
+): LowPriorityStatus | undefined {
+  const raw = headers.get('anthropic-ratelimit-unified-slow-status')
+  if (raw === null) return undefined
+  switch (raw) {
+    case 'active':
+    case 'not_needed':
+    case 'slot_busy':
+    case 'weekly_limit':
+    case 'budget_exhausted':
+    case 'ineligible':
+    case 'off':
+      return raw
+    default:
+      return 'unrecognized'
+  }
+}
+
+/** Official 2.1.328 `jt(e)` (`chunk@293569796.js@66864`): overage scope. */
+function parseOverageScopeHeader(
+  headers: globalThis.Headers,
+): OverageScope | undefined {
+  const raw = headers.get('anthropic-ratelimit-unified-overage-scope')
+  if (
+    raw === 'service' ||
+    raw === 'channel' ||
+    raw === 'group_pool' ||
+    raw === 'organization'
+  ) {
+    return raw
+  }
+  return undefined
+}
+
+function parseOveragePeriodHeader(
+  headers: globalThis.Headers,
+): OveragePeriod | undefined {
+  const raw = headers.get('anthropic-ratelimit-unified-overage-period')
+  if (raw === 'daily' || raw === 'weekly' || raw === 'monthly') {
+    return raw
+  }
+  return undefined
+}
+
+/** Official 2.1.328 `Bt(e)` (`chunk@293569796.js@66985`): member spend limit. */
+function parseMemberSpendLimitHeader(
+  headers: globalThis.Headers,
+): { period?: OveragePeriod } | undefined {
+  if (
+    headers.get('anthropic-ratelimit-unified-overage-disabled-reason') !==
+      'org_spend_cap_reached' ||
+    headers.get('anthropic-ratelimit-unified-overage-scope') !== null
+  ) {
+    return undefined
+  }
+  const raw = headers.get('anthropic-ratelimit-unified-overage-period')
+  if (raw === null) return {}
+  if (raw === 'daily' || raw === 'weekly' || raw === 'monthly') {
+    return { period: raw }
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.328 `De(e, r)` + `An(e, r)` + `Md`/`t2a`/`I7o`/`M7o`/`Kp`/`Yp`
+ * (`chunk@293569796.js@18854, 42000, 47104, 66864`, `chunk@289476641.js@230101`).
+ * Parses all 33 unified rate-limit response headers.
+ */
+export function computeLimitsFromHeaders(
+  headers: globalThis.Headers,
+  nowMs: number = Date.now(),
+): ClaudeAILimits {
+  return computeNewLimitsFromHeaders(headers, nowMs)
+}
+
 function computeNewLimitsFromHeaders(
   headers: globalThis.Headers,
+  nowMs: number = Date.now(),
 ): ClaudeAILimits {
   const status =
     (headers.get('anthropic-ratelimit-unified-status') as QuotaStatus) ||
     'allowed'
   const resetsAtHeader = headers.get('anthropic-ratelimit-unified-reset')
-  const resetsAt = resetsAtHeader ? Number(resetsAtHeader) : undefined
+  const resetsAt = resetsAtHeader
+    ? Math.round(Number(resetsAtHeader))
+    : undefined
   const unifiedRateLimitFallbackAvailable =
     headers.get('anthropic-ratelimit-unified-fallback') === 'available'
 
@@ -503,7 +839,7 @@ function computeNewLimitsFromHeaders(
     'anthropic-ratelimit-unified-overage-reset',
   )
   const overageResetsAt = overageResetsAtHeader
-    ? Number(overageResetsAtHeader)
+    ? Math.round(Number(overageResetsAtHeader))
     : undefined
 
   // Reason why overage is disabled (spending cap or wallet empty)
@@ -511,10 +847,125 @@ function computeNewLimitsFromHeaders(
     'anthropic-ratelimit-unified-overage-disabled-reason',
   ) as OverageDisabledReason | null
 
+  // Official 2.1.328 overage scope, period, daily-cap, in-use, period utilizations, upgrade paths
+  const overageScope = parseOverageScopeHeader(headers)
+  const overagePeriod = parseOveragePeriodHeader(headers)
+  const memberSpendLimit = parseMemberSpendLimitHeader(headers)
+  const dailyCapPaused =
+    headers.get('anthropic-ratelimit-unified-overage-daily-cap-paused') ===
+    'true'
+  const overageInUse =
+    headers.get('anthropic-ratelimit-unified-overage-in-use') === 'true'
+  const upgradePathsRaw = headers.get(
+    'anthropic-ratelimit-unified-upgrade-paths',
+  )
+  const upgradePaths = upgradePathsRaw
+    ? upgradePathsRaw
+        .split(',')
+        .map(path => path.trim())
+        .filter(Boolean)
+    : undefined
+  const monthlyUtil = parseFiniteNumberHeader(
+    headers.get(
+      'anthropic-ratelimit-unified-overage-period-monthly-utilization',
+    ),
+  )
+  const overagePeriodMonthly =
+    monthlyUtil !== undefined ? { utilization: monthlyUtil } : undefined
+  const channelUtil = parseFiniteNumberHeader(
+    headers.get(
+      'anthropic-ratelimit-unified-overage-period-channel-utilization',
+    ),
+  )
+  const overagePeriodChannel =
+    channelUtil !== undefined ? { utilization: channelUtil } : undefined
+
+  // Official 2.1.328 grace wrap-up headers
+  const graceStatusRaw = headers.get('anthropic-ratelimit-unified-grace-status')
+  const graceFiveHourUtilization = parseClampedUnitHeader(
+    headers,
+    'anthropic-ratelimit-unified-grace-5h-utilization',
+  )
+  const graceSevenDayUtilization = parseClampedUnitHeader(
+    headers,
+    'anthropic-ratelimit-unified-grace-7d-utilization',
+  )
+  const graceParsed = parseRateLimitGraceHeaders(headers, nowMs)
+  const graceZone = graceParsed.limiterRan ? graceParsed.zone : null
+
+  // Official 2.1.328 slow-lane (low-priority) headers
+  const lowPriorityStatus = parseSlowStatusHeader(headers)
+  const slowOfferRaw = headers.get('anthropic-ratelimit-unified-slow-offer')
+  const lowPriorityOffer: LowPriorityOffer | undefined =
+    slowOfferRaw === 'treatment' || slowOfferRaw === 'control'
+      ? slowOfferRaw
+      : undefined
+  const lowPriorityRetryAfterSeconds = parseNonNegativeHeader(
+    headers,
+    'anthropic-ratelimit-unified-slow-retry-after',
+  )
+  const lowPriorityMaxWaitSeconds = parseNonNegativeHeader(
+    headers,
+    'anthropic-ratelimit-unified-slow-max-wait',
+  )
+  const lowPriorityBudgetUtilization = parseClampedUnitHeader(
+    headers,
+    'anthropic-ratelimit-unified-slow-budget-utilization',
+  )
+  const slowBudgetResetNum = parseFiniteNumberHeader(
+    headers.get('anthropic-ratelimit-unified-slow-budget-reset'),
+  )
+  const lowPriorityBudgetResetsAt =
+    slowBudgetResetNum !== undefined
+      ? Math.round(slowBudgetResetNum)
+      : undefined
+
+  // Official 2.1.328 per-window status headers
+  const fiveHourStatus = parseWindowQuotaStatus(
+    headers.get('anthropic-ratelimit-unified-5h-status'),
+  )
+  const sevenDayStatus = parseWindowQuotaStatus(
+    headers.get('anthropic-ratelimit-unified-7d-status'),
+  )
+
   // Determine if we're using overage (standard limits rejected but overage allowed)
   const isUsingOverage =
     status === 'rejected' &&
     (overageStatus === 'allowed' || overageStatus === 'allowed_warning')
+
+  const extendedFields: Partial<ClaudeAILimits> = {
+    ...(overageScope && { overageScope }),
+    ...(overagePeriod && { overagePeriod }),
+    ...(memberSpendLimit && { memberSpendLimit }),
+    ...(dailyCapPaused && { dailyCapPaused: true }),
+    ...(overageInUse && { overageInUse: true }),
+    ...(upgradePaths && upgradePaths.length > 0 && { upgradePaths }),
+    ...(overagePeriodMonthly && { overagePeriodMonthly }),
+    ...(overagePeriodChannel && { overagePeriodChannel }),
+    ...(graceStatusRaw !== null && { graceStatus: graceStatusRaw }),
+    ...(graceFiveHourUtilization !== undefined && { graceFiveHourUtilization }),
+    ...(graceSevenDayUtilization !== undefined && { graceSevenDayUtilization }),
+    ...(graceZone !== null && {
+      rateLimitGraceActive: true,
+      ...(isUsingOverage && { rateLimitGracePaidBy: graceZone.paidBy }),
+    }),
+    ...(lowPriorityStatus !== undefined && { lowPriorityStatus }),
+    ...(lowPriorityOffer !== undefined && { lowPriorityOffer }),
+    ...(lowPriorityRetryAfterSeconds !== undefined && {
+      lowPriorityRetryAfterSeconds,
+    }),
+    ...(lowPriorityMaxWaitSeconds !== undefined && {
+      lowPriorityMaxWaitSeconds,
+    }),
+    ...(lowPriorityBudgetUtilization !== undefined && {
+      lowPriorityBudgetUtilization,
+    }),
+    ...(lowPriorityBudgetResetsAt !== undefined && {
+      lowPriorityBudgetResetsAt,
+    }),
+    ...(fiveHourStatus !== undefined && { fiveHourStatus }),
+    ...(sevenDayStatus !== undefined && { sevenDayStatus }),
+  }
 
   // Check for early warning based on surpassed-threshold header
   // If status is allowed/allowed_warning and we find a surpassed threshold, show warning
@@ -525,7 +976,18 @@ function computeNewLimitsFromHeaders(
       unifiedRateLimitFallbackAvailable,
     )
     if (earlyWarning) {
-      return earlyWarning
+      // Official `We(e, r, o)` (`chunk@293569796.js@47900`): carry forward
+      // upgradePaths, overage metadata (unless in grace), period utilizations,
+      // grace/slow/window status metadata onto early-warning result.
+      return {
+        ...earlyWarning,
+        ...(!extendedFields.rateLimitGraceActive && {
+          ...(overageStatus && { overageStatus }),
+          ...(overageResetsAt !== undefined && { overageResetsAt }),
+          ...(overageDisabledReason && { overageDisabledReason }),
+        }),
+        ...extendedFields,
+      }
     }
     // No early warning threshold surpassed
     finalStatus = 'allowed'
@@ -537,9 +999,10 @@ function computeNewLimitsFromHeaders(
     unifiedRateLimitFallbackAvailable,
     ...(rateLimitType && { rateLimitType }),
     ...(overageStatus && { overageStatus }),
-    ...(overageResetsAt && { overageResetsAt }),
+    ...(overageResetsAt !== undefined && { overageResetsAt }),
     ...(overageDisabledReason && { overageDisabledReason }),
     isUsingOverage,
+    ...extendedFields,
   }
 }
 

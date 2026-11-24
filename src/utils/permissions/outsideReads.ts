@@ -18,9 +18,13 @@ import type { ToolPermissionContext } from '../../Tool.js'
 import type { PermissionAskDecision } from '../../types/permissions.js'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 
-/** official jx */
+/** official jx / m2 */
 export const OUTSIDE_READS_BLOCKED_REASON =
   'Reads outside the working directories are blocked (permissions.blockReadsOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.'
+
+/** Official 2.1.328 `kye` (`chunk@283886268.js@5249`). */
+export const FILE_TOOL_OUTSIDE_READS_BLOCKED_REASON =
+  'Reads outside the working directories are blocked (permissions.blockFileToolReadsOutsideWorkingDirectories).'
 
 export const AUTO_MODE_OUTSIDE_READS_KIND = 'auto_mode_outside_reads' as const
 
@@ -58,6 +62,11 @@ const FILE_TOOLS_OFFERING_OUTSIDE_READ_BLOCK = new Set([
   GLOB_TOOL_NAME,
 ])
 
+export type OutsideReadsContextLike = {
+  blockReadsOutsideWorkingDirectories?: boolean
+  blockFileToolReadsOutsideWorkingDirectories?: boolean
+}
+
 /** official tke() */
 export function settingsHaveBlockReadsOutsideWorkingDirectories(): boolean {
   return getEnabledSettingSources().some(
@@ -67,10 +76,46 @@ export function settingsHaveBlockReadsOutsideWorkingDirectories(): boolean {
   )
 }
 
-export function contextBlocksOutsideReads(context: {
-  blockReadsOutsideWorkingDirectories?: boolean
-}): boolean {
-  return context.blockReadsOutsideWorkingDirectories === true
+/**
+ * Official 2.1.328 `e5e()` (`chunk@284607801.js@93742`):
+ * `permissions.blockFileToolReadsOutsideWorkingDirectories` is honored ONLY
+ * from launch `--settings` (`flagSettings`); ignored in user, project, local,
+ * and managed settings. Refuses file-tool reads outside working directories
+ * without altering shell-command behavior.
+ */
+export function settingsHaveBlockFileToolReadsOutsideWorkingDirectories(): boolean {
+  return (
+    getSettingsForSource('flagSettings')?.permissions
+      ?.blockFileToolReadsOutsideWorkingDirectories === true
+  )
+}
+
+/** Official 2.1.328 `Nb(e)` (`chunk@283886268.js@6708`). */
+export function contextBlocksOutsideReads(
+  context: OutsideReadsContextLike,
+): boolean {
+  return (
+    context.blockReadsOutsideWorkingDirectories === true ||
+    context.blockFileToolReadsOutsideWorkingDirectories === true ||
+    settingsHaveBlockFileToolReadsOutsideWorkingDirectories()
+  )
+}
+
+/** Official 2.1.328 `Dot(e)` (`chunk@283886268.js@6708`). */
+export function formatOutsideReadsBlockSettingNames(
+  context: OutsideReadsContextLike,
+): string {
+  const names: string[] = []
+  if (context.blockReadsOutsideWorkingDirectories === true) {
+    names.push('permissions.blockReadsOutsideWorkingDirectories')
+  }
+  if (
+    context.blockFileToolReadsOutsideWorkingDirectories === true ||
+    settingsHaveBlockFileToolReadsOutsideWorkingDirectories()
+  ) {
+    names.push('permissions.blockFileToolReadsOutsideWorkingDirectories')
+  }
+  return names.join(' and ')
 }
 
 export function isOutsideReadFileToolName(toolName: string): boolean {
@@ -114,8 +159,19 @@ export function outsideReadsDialogPayload(input: {
   }
 }
 
-export function blockedOutsideReadFileToolMessage(path: string): string {
-  return `${path} is outside the working directories; reads outside them are blocked (permissions.blockReadsOutsideWorkingDirectories).`
+export function blockedOutsideReadFileToolMessage(
+  path: string,
+  context?: OutsideReadsContextLike,
+): string {
+  const onlyFileToolFence =
+    context !== undefined &&
+    context.blockReadsOutsideWorkingDirectories !== true &&
+    (context.blockFileToolReadsOutsideWorkingDirectories === true ||
+      settingsHaveBlockFileToolReadsOutsideWorkingDirectories())
+  const settingName = onlyFileToolFence
+    ? 'permissions.blockFileToolReadsOutsideWorkingDirectories'
+    : 'permissions.blockReadsOutsideWorkingDirectories'
+  return `${path} is outside the working directories; reads outside them are blocked (${settingName}).`
 }
 
 export function blockedOutsideReadUserChoiceMessage(opts?: {
@@ -260,6 +316,7 @@ export type OutsideReadFirstPromptContext = {
   mode: string
   shouldAvoidPermissionPrompts?: boolean
   blockReadsOutsideWorkingDirectories?: boolean
+  blockFileToolReadsOutsideWorkingDirectories?: boolean
   /**
    * densable `g.servedCall` — CCR/remote served permission context.
    * yBt: `if(s.forRemoteExecution===!0||g.servedCall===!0)return!1`
@@ -307,7 +364,7 @@ export function shouldOfferBlockOutsideReads(opts: {
   // gold yBt: if(!xa(g.mode)||…) — plan + Jf() (auto-mode active) stamps DualInk
   if (!isAutoModeOrPlanActingAsAuto(context.mode)) return false
   if (context.shouldAvoidPermissionPrompts) return false
-  if (context.blockReadsOutsideWorkingDirectories === true) return false
+  if (contextBlocksOutsideReads(context)) return false
   // gold yBt: if(s.forRemoteExecution===!0||g.servedCall===!0)return!1
   // DualInk first-ask is local TTY only — remote/CCR has its own relay.
   if (opts.forRemoteExecution === true || context.servedCall === true) {

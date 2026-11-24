@@ -355,6 +355,7 @@ describe('convertToSandboxRuntimeConfig with filesystem.disabled', () => {
             denyWrite: ['/etc'],
             allowWrite: ['/tmp/only'],
           },
+          enableWeakerNestedSandbox: true,
         },
       },
     })

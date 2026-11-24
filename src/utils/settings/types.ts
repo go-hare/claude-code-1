@@ -5,7 +5,6 @@ import { isEnvTruthy } from '../envUtils.js'
 import { lazySchema } from '../lazySchema.js'
 import { PERMISSION_MODES } from '../permissions/PermissionMode.js'
 import { MarketplaceSourceSchema } from '../plugins/schemas.js'
-import { CLAUDE_CODE_SETTINGS_SCHEMA_URL } from './constants.js'
 import { PermissionRuleSchema } from './permissionValidation.js'
 
 // Re-export hook schemas and types from centralized location for backward compatibility
@@ -75,6 +74,12 @@ export const PermissionsSchema = lazySchema(() =>
         .optional()
         .describe(
           'When true, file tools refuse reads outside the working directories',
+        ),
+      blockFileToolReadsOutsideWorkingDirectories: z
+        .boolean()
+        .optional()
+        .describe(
+          "@internal For the program that starts Claude Code: read only from --settings at the launch; ignored in settings sent to a running session and in user, project, local and managed settings. Refuse reads outside the working directories, other than a shell command's, in every permission mode.",
         ),
       blockWritesOutsideWorkingDirectories: z
         .boolean()
@@ -277,7 +282,7 @@ export const SettingsSchema = lazySchema(() =>
   z
     .object({
       $schema: z
-        .literal(CLAUDE_CODE_SETTINGS_SCHEMA_URL)
+        .string()
         .optional()
         .describe('JSON Schema reference for Claude Code settings'),
       apiKeyHelper: z
@@ -1058,6 +1063,19 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           '@internal Cloud gateway URL to pre-fill and auto-connect to during login. Typically set in local managed settings alongside forceLoginMethod: "gateway" so users never type the URL. Hidden from public SDK types until Cloud gateway is documented.',
         ),
+      // Official 2.1.328 (`chunk@284022131.js@266422`): managed source composition & SDK parent tier layering
+      parentSettingsBehavior: z
+        .enum(['first-wins', 'merge'])
+        .optional()
+        .describe(
+          'Controls whether the SDK parent tier (Options.managedSettings / --managed-settings) layers under this admin tier: "first-wins" (default) or "merge".',
+        ),
+      managedSourcesBehavior: z
+        .enum(['first-wins', 'merge'])
+        .optional()
+        .describe(
+          'Controls how managed settings sources compose: "first-wins" (default) or "merge" (server-managed > MDM > managed-settings.json).',
+        ),
       // Organization UUID to use for OAuth login (will be added as URL param to authorization URL)
       forceLoginOrgUUID: z
         .union([z.string(), z.array(z.string())])
@@ -1220,7 +1238,21 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Custom Exa AI MCP endpoint URL. Defaults to https://mcp.exa.ai/mcp.',
         ),
-      sandbox: SandboxSettingsSchema().optional(),
+      sandbox: SandboxSettingsSchema()
+        .extend({
+          windows: z
+            .object({
+              backend: z
+                .enum(['sandboxuser', 'mxc'])
+                .optional()
+                .describe(
+                  'Windows only: how sandboxed commands are confined ("sandboxuser" default, or experimental "mxc" BaseContainer). Read from user, managed/policy, or --settings only; project/local ignored.',
+                ),
+            })
+            .optional()
+            .describe('@internal Settings of the sandbox on native Windows.'),
+        })
+        .optional(),
       feedbackSurveyRate: z
         .number()
         .min(0)

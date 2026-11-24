@@ -32,9 +32,14 @@ export function fileSuffixForOauthConfig(): string {
 
 export const CLAUDE_AI_INFERENCE_SCOPE = 'user:inference' as const
 export const CLAUDE_AI_PROFILE_SCOPE = 'user:profile' as const
+export const PLUGINS_SCOPE = 'user:plugins' as const
+export const PROJECTS_READ_SCOPE = 'user:projects:read' as const
+export const PROJECTS_WRITE_SCOPE = 'user:projects:write' as const
 /** Official 2.1.325 #2369 (`fYr`) — privacy consent settings permission requested during /login. */
 export const PRIVACY_CONSENTS_WRITE_SCOPE =
   'user:privacy_consents:write' as const
+/** Official 2.1.328 (`chunk@283308531.js@4400`) — Design OAuth client ID. */
+export const DESIGN_CLIENT_ID = '59637612-477b-4836-a601-b0589eda7704' as const
 const CONSOLE_SCOPE = 'org:create_api_key' as const
 export const OAUTH_BETA_HEADER = 'oauth-2025-04-20' as const
 
@@ -53,13 +58,87 @@ export const CLAUDE_AI_OAUTH_SCOPES = [
   'user:file_upload',
 ] as const
 
-// All OAuth scopes - union of all scopes used in Claude CLI
-// When logging in, request all scopes in order to handle both Console -> Claude.ai redirect
-// Ensure that `OAuthConsentPage` in apps repo is kept in sync with this list.
+const INCREMENTAL_OPTIONAL_SCOPES = [
+  PROJECTS_READ_SCOPE,
+  PROJECTS_WRITE_SCOPE,
+  PRIVACY_CONSENTS_WRITE_SCOPE,
+] as const
+
+/**
+ * Official 2.1.328 `Fin()` (`chunk@283308531.js@800`): Claude.ai OAuth scopes,
+ * adding `user:plugins` only when registered on the active OAuth endpoint
+ * (omitted when `CLAUDE_CODE_CUSTOM_OAUTH_URL` / FedStart or custom client ID is set).
+ */
+export function getClaudeAiOauthScopes(): string[] {
+  const cfg = getOauthConfig()
+  const scopes: string[] = [...CLAUDE_AI_OAUTH_SCOPES]
+  if (cfg.PLUGINS_SCOPE_REGISTERED) {
+    scopes.push(PLUGINS_SCOPE)
+  }
+  return scopes
+}
+
+/**
+ * Official 2.1.328 `s_s()` (`chunk@283308531.js@850`): union of Console +
+ * Claude.ai OAuth scopes, guarding `user:privacy_consents:write` and
+ * `user:plugins` off when `CLAUDE_CODE_CUSTOM_OAUTH_URL` (FedStart) or
+ * `CLAUDE_CODE_OAUTH_CLIENT_ID` is set.
+ */
+export function getAllOauthScopes(): string[] {
+  const cfg = getOauthConfig()
+  const scopes = Array.from(
+    new Set<string>([...CONSOLE_OAUTH_SCOPES, ...getClaudeAiOauthScopes()]),
+  )
+  if (cfg.PRIVACY_CONSENTS_SCOPE_REGISTERED) {
+    scopes.push(PRIVACY_CONSENTS_WRITE_SCOPE)
+  }
+  return scopes
+}
+
+/** Official 2.1.328 `i_s()`: filter requested incremental scopes against registered flags. */
+export function filterIncrementalOauthScopes(
+  scopes: readonly string[],
+): string[] {
+  if (!Array.isArray(scopes)) return []
+  const cfg = getOauthConfig()
+  return scopes.filter(scope => {
+    if (
+      !INCREMENTAL_OPTIONAL_SCOPES.includes(
+        scope as (typeof INCREMENTAL_OPTIONAL_SCOPES)[number],
+      )
+    ) {
+      return false
+    }
+    if (scope === PROJECTS_READ_SCOPE || scope === PROJECTS_WRITE_SCOPE) {
+      return cfg.PROJECTS_SCOPES_REGISTERED
+    }
+    if (scope === PRIVACY_CONSENTS_WRITE_SCOPE) {
+      return cfg.PRIVACY_CONSENTS_SCOPE_REGISTERED
+    }
+    return false
+  })
+}
+
+/** Official 2.1.328 `b$i()`: Claude.ai scopes + allowed incremental scopes. */
+export function getOauthScopesWithIncremental(
+  extraScopes: readonly string[],
+): string[] {
+  return Array.from(
+    new Set([
+      ...getClaudeAiOauthScopes(),
+      ...filterIncrementalOauthScopes(extraScopes),
+    ]),
+  )
+}
+
+// All OAuth scopes - union of all scopes used in Claude CLI (default prod list).
+// Prefer `getAllOauthScopes()` at runtime so FedStart (`CLAUDE_CODE_CUSTOM_OAUTH_URL`)
+// drops unregistered scopes (`user:plugins`, `user:privacy_consents:write`).
 export const ALL_OAUTH_SCOPES = Array.from(
   new Set([
     ...CONSOLE_OAUTH_SCOPES,
     ...CLAUDE_AI_OAUTH_SCOPES,
+    PLUGINS_SCOPE,
     PRIVACY_CONSENTS_WRITE_SCOPE,
   ]),
 )
@@ -82,7 +161,13 @@ type OauthConfig = {
   CLAUDEAI_SUCCESS_URL: string
   MANUAL_REDIRECT_URL: string
   CLIENT_ID: string
+  DESIGN_CLIENT_ID: string
   OAUTH_FILE_SUFFIX: string
+  PLUGINS_SCOPE_REGISTERED: boolean
+  PROJECTS_SCOPES_REGISTERED: boolean
+  PRIVACY_CONSENTS_SCOPE_REGISTERED: boolean
+  HYBRID_SETTINGS_SCOPE_REGISTERED: boolean
+  SCOPES_CLEARED_BY?: readonly string[]
   MCP_PROXY_URL: string
   MCP_PROXY_PATH: string
 }
@@ -104,8 +189,13 @@ const PROD_OAUTH_CONFIG = {
     'https://platform.claude.com/oauth/code/success?app=claude-code',
   MANUAL_REDIRECT_URL: 'https://platform.claude.com/oauth/code/callback',
   CLIENT_ID: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+  DESIGN_CLIENT_ID,
   // No suffix for production config
   OAUTH_FILE_SUFFIX: '',
+  PLUGINS_SCOPE_REGISTERED: true,
+  PROJECTS_SCOPES_REGISTERED: true,
+  PRIVACY_CONSENTS_SCOPE_REGISTERED: true,
+  HYBRID_SETTINGS_SCOPE_REGISTERED: true,
   MCP_PROXY_URL: 'https://mcp-proxy.anthropic.com',
   MCP_PROXY_PATH: '/v1/mcp/{server_id}',
 } as const
@@ -143,7 +233,12 @@ const STAGING_OAUTH_CONFIG =
         MANUAL_REDIRECT_URL:
           'https://platform.staging.ant.dev/oauth/code/callback',
         CLIENT_ID: '22422756-60c9-4084-8eb7-27705fd5cf9a',
+        DESIGN_CLIENT_ID: '00000000-0000-4000-8000-000000000000',
         OAUTH_FILE_SUFFIX: '-staging-oauth',
+        PLUGINS_SCOPE_REGISTERED: true,
+        PROJECTS_SCOPES_REGISTERED: true,
+        PRIVACY_CONSENTS_SCOPE_REGISTERED: true,
+        HYBRID_SETTINGS_SCOPE_REGISTERED: true,
         MCP_PROXY_URL: 'https://mcp-proxy-staging.anthropic.com',
         MCP_PROXY_PATH: '/v1/mcp/{server_id}',
       } as const)
@@ -174,7 +269,12 @@ function getLocalOauthConfig(): OauthConfig {
     CLAUDEAI_SUCCESS_URL: `${consoleBase}/oauth/code/success?app=claude-code`,
     MANUAL_REDIRECT_URL: `${consoleBase}/oauth/code/callback`,
     CLIENT_ID: '22422756-60c9-4084-8eb7-27705fd5cf9a',
+    DESIGN_CLIENT_ID: '00000000-0000-4000-8000-000000000000',
     OAUTH_FILE_SUFFIX: '-local-oauth',
+    PLUGINS_SCOPE_REGISTERED: true,
+    PROJECTS_SCOPES_REGISTERED: true,
+    PRIVACY_CONSENTS_SCOPE_REGISTERED: true,
+    HYBRID_SETTINGS_SCOPE_REGISTERED: true,
     MCP_PROXY_URL: 'http://localhost:8205',
     MCP_PROXY_PATH: '/v1/toolbox/shttp/mcp/{server_id}',
   }
@@ -204,6 +304,8 @@ export function getOauthConfig(): OauthConfig {
 
   // Allow overriding all OAuth URLs to point to an approved FedStart deployment.
   // Only allowlisted base URLs are accepted to prevent credential leakage.
+  // Official 2.1.328 (`chunk@283308531.js@4400`): clear unregistered scope flags
+  // (plugins, projects, privacy consents, hybrid settings) on FedStart.
   const oauthBaseUrl = process.env.CLAUDE_CODE_CUSTOM_OAUTH_URL
   if (oauthBaseUrl) {
     const base = oauthBaseUrl.replace(/\/$/, '')
@@ -225,6 +327,11 @@ export function getOauthConfig(): OauthConfig {
       CLAUDEAI_SUCCESS_URL: `${base}/oauth/code/success?app=claude-code`,
       MANUAL_REDIRECT_URL: `${base}/oauth/code/callback`,
       OAUTH_FILE_SUFFIX: '-custom-oauth',
+      PLUGINS_SCOPE_REGISTERED: false,
+      PROJECTS_SCOPES_REGISTERED: false,
+      PRIVACY_CONSENTS_SCOPE_REGISTERED: false,
+      HYBRID_SETTINGS_SCOPE_REGISTERED: false,
+      SCOPES_CLEARED_BY: ['CLAUDE_CODE_CUSTOM_OAUTH_URL'],
     }
   }
 
@@ -234,6 +341,14 @@ export function getOauthConfig(): OauthConfig {
     config = {
       ...config,
       CLIENT_ID: clientIdOverride,
+      PLUGINS_SCOPE_REGISTERED: false,
+      PROJECTS_SCOPES_REGISTERED: false,
+      PRIVACY_CONSENTS_SCOPE_REGISTERED: false,
+      HYBRID_SETTINGS_SCOPE_REGISTERED: false,
+      SCOPES_CLEARED_BY: [
+        ...(config.SCOPES_CLEARED_BY ?? []),
+        'CLAUDE_CODE_OAUTH_CLIENT_ID',
+      ],
     }
   }
 
