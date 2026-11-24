@@ -584,7 +584,6 @@ import { Messages, type MessagesSource } from '../components/Messages.js';
 import { WaitingTranscriptMessages } from '../components/messages/WaitingTranscriptMessages.js';
 import { TaskListV2 } from '../components/TaskListV2.js';
 import { TeammateViewHeader } from '../components/TeammateViewHeader.js';
-import { getPipeIpc } from '../utils/pipeTransport.js';
 import { useTasksV2WithCollapseEffect } from '../hooks/useTasksV2.js';
 import { maybeMarkProjectOnboardingComplete } from '../projectOnboardingState.js';
 import type { MCPServerConnection } from '../services/mcp/types.js';
@@ -2205,7 +2204,7 @@ function REPLInner({
   // These fields contain excluded strings that must not appear in external builds.
   const spinnerTip = useAppState(s => s.spinnerTip);
   const spinnerTipLabel = useAppState(s => s.spinnerTipLabel);
-  const showExpandedTodos = useAppState(s => s.expandedView) === 'tasks';
+  const showExpandedTodos = useAppState(s => s.expandedView === 'tasks');
   const pendingWorkerRequest = useAppState(s => s.pendingWorkerRequest);
   const pendingSandboxRequest = useAppState(s => s.pendingSandboxRequest);
   const teamContext = useAppState(s => s.teamContext);
@@ -2352,7 +2351,12 @@ function REPLInner({
       sessionEngine.dispose();
       turnController.dispose();
       submitController.dispose();
-      sessionHooksRegistry.clear(getMainThreadAgentId());
+      const currentSessionId: string = getSessionId();
+      const mainAgentId: string = getMainThreadAgentId();
+      sessionHooksRegistry.clear(currentSessionId);
+      if (mainAgentId !== currentSessionId) {
+        sessionHooksRegistry.clear(mainAgentId);
+      }
     },
     [sessionEngine, turnController, submitController, sessionHooksRegistry],
   );
@@ -3043,7 +3047,7 @@ function REPLInner({
   const topDialog = useTopDialog();
   const hasOpenDialogs = useHasOpenDialogs();
   const hasBlockingOpenDialogs = useHasBlockingOpenDialogs();
-  const hidePromptForHardNms = useNhtHidesPromptInput();
+  const rawHidePromptForHardNms = useNhtHidesPromptInput();
   const dialogStore = useDialogStore();
   // densable cu → iXg(Gxt): compact submit is assigned after onSubmit exists.
   const resumeReturnCompactRef = React.useRef<() => void>(() => {});
@@ -3554,13 +3558,16 @@ function REPLInner({
           permissionPromptStartTimeMs: Date.now(),
           onUserInteraction() {},
           onAbort() {
+            removeLeaderToolUseConfirm(toolUseID);
             resolve({ deny: 'the dialog was dismissed' });
           },
           onAllow(updatedInput) {
+            removeLeaderToolUseConfirm(toolUseID);
             const answers = (updatedInput as { answers?: Record<string, string> })?.answers;
             resolve({ result: { answers: answers ?? {} } });
           },
           onReject(feedback) {
+            removeLeaderToolUseConfirm(toolUseID);
             resolve({ deny: feedback || 'the dialog was dismissed' });
           },
           async recheckPermission() {},
@@ -3579,9 +3586,26 @@ function REPLInner({
     };
   }, [store, addNotification, onChangeDynamicMcpConfig]);
 
-  const messages = useSyncExternalStore(transcriptProjection.subscribe, transcriptProjection.getSnapshot);
-  const messagesRef = useRef(messages);
+  // Subscribe only to non-ephemeral-progress transcript changes in normal mode
+  // (and virtual-scroll transcript mode where Messages subscribes via source)
+  // so 1s tool/agent progress ticks update Messages and ScrollPin without
+  // re-rendering REPL. Classic (non-fullscreen) ctrl+o and dumpMode render
+  // directly from `messages`, so they subscribe to the full snapshot.
+  const subscribeFullTranscript =
+    screen === 'transcript' && (!isFullscreenEnvEnabled() || disableVirtualScroll || dumpMode);
+  const messages = useSyncExternalStore(
+    subscribeFullTranscript ? transcriptProjection.subscribe : transcriptProjection.subscribeNonProgress,
+    subscribeFullTranscript ? transcriptProjection.getSnapshot : transcriptProjection.getNonProgressSnapshot,
+  );
+  const messagesRef = useRef(transcriptProjection.getCurrent());
   messagesRef.current = transcriptProjection.getCurrent();
+  useEffect(
+    () =>
+      transcriptProjection.subscribe(() => {
+        messagesRef.current = transcriptProjection.getCurrent();
+      }),
+    [transcriptProjection],
+  );
   // densable REPL `lr=rn()` — Ink ClockProvider `useClock`, not IdleReturnClock.
   const clock = useClock();
   // densable REPL `wa` / `new Xj({turn,messageQueue,transcript,store,session,taskRegistry,spinnerStore,dialogStore,clock:lr})`.
@@ -4292,15 +4316,26 @@ function REPLInner({
     [draftController],
   );
 
-  const [inputMode, setInputMode] = useState<PromptInputMode>('prompt');
+  const [inputMode, setInputModeRaw] = useState<PromptInputMode>('prompt');
+  const inputModeRef = useRef<PromptInputMode>('prompt');
+  inputModeRef.current = inputMode;
+  const setInputMode = useCallback(
+    (next: React.SetStateAction<PromptInputMode>) => {
+      const resolved = typeof next === 'function' ? next(inputModeRef.current) : next;
+      inputModeRef.current = resolved;
+      draftController.setMode(resolved);
+      setInputModeRaw(resolved);
+    },
+    [draftController],
+  );
   const restoreHandedBackPrompt = useCallback(
     (text: string) => {
       setInputMode('prompt');
       setInputValue(joinHandedBackPrompt(inputValueRef.current, text));
     },
-    [setInputValue],
+    [setInputMode, setInputValue],
   );
-  const [stashedPrompt, setStashedPrompt] = useState<
+  const [stashedPrompt, setStashedPromptRaw] = useState<
     | {
         text: string;
         cursorOffset: number;
@@ -4308,6 +4343,22 @@ function REPLInner({
       }
     | undefined
   >();
+  const stashedPromptRef = useRef(stashedPrompt);
+  stashedPromptRef.current = stashedPrompt;
+  const setStashedPrompt: React.Dispatch<
+    React.SetStateAction<
+      | {
+          text: string;
+          cursorOffset: number;
+          pastedContents: Record<number, PastedContent>;
+        }
+      | undefined
+    >
+  > = useCallback(next => {
+    const resolved = typeof next === 'function' ? next(stashedPromptRef.current) : next;
+    stashedPromptRef.current = resolved;
+    setStashedPromptRaw(resolved);
+  }, []);
 
   // Callback to filter commands based on CCR's available slash commands
   const handleRemoteInit = useCallback(
@@ -5482,6 +5533,15 @@ function REPLInner({
         }));
         void updateSessionName(log.agentName);
 
+        // Official chunk@319736883.js @473310: clear prior session's file/bash caches
+        // before restoring the resumed transcript's state (skipped on fork).
+        if (entrypoint !== 'fork') {
+          readFileState.current.clear();
+          bashTools.current.clear();
+          bashHosts.current.clear();
+          bashToolsProcessedIdx.current = 0;
+        }
+
         // Restore read file state from the message history
         restoreReadFileState(messages, log.projectPath ?? getOriginalCwd());
 
@@ -5650,8 +5710,8 @@ function REPLInner({
         // after in-session /resume or attach handoff with history.
         setSubmitCount(countUserPromptsInMessages(messages));
 
-        // Clear any active tool JSX
-        setToolJSX(null);
+        // Clear any active tool JSX (including local-jsx commands such as /resume or /btw)
+        setToolJSX({ jsx: null, shouldHidePromptInput: false, clearLocalJSX: true });
         repinScroll(true, 'session-resume');
 
         // densable: y0("") only when entrypoint !== "fork" (fork keeps draft).
@@ -6100,6 +6160,9 @@ function REPLInner({
     hasDraft: hasDraft || heldBackReleasePending,
     isPromptInputActive: isDialogHeldBack,
   });
+  // Keep PromptInput mounted while DialogHost is parked behind a draft/typing/panel
+  // so the user can edit, send, or clear their draft (breaks draft↔hard-dialog deadlock).
+  const hidePromptForHardNms = rawHidePromptForHardNms && hostParkMode === null;
   const hostDialogVisibility = getHostDialogVisibility({
     hasOpenDialogs,
     focusedOverlay: focusedInputDialog,
@@ -6188,27 +6251,14 @@ function REPLInner({
     }
   }, [viewingAgentTaskId, isLoading]);
 
-  // Re-pin scroll when Host permission appears/dismisses (single-host — not
-  // focusedInputDialog peek). Same ScrollBox as messages; need explicit
-  // scrollToBottom for appear (sticky may be broken) and dismiss (onScroll
-  // was suppressed). useLayoutEffect: re-pin before Ink frame.
+  // Official 2.1.299 (#597) / 2.1.328 (`tU`): onBelowTranscriptSlotChange —
+  // only repin when already sticky at the bottom and no dialogReturnTarget is
+  // active, so opening/closing permission dialogs, tool progress, or panels
+  // (e.g. /btw) while scrolled up does not yank the transcript to the bottom.
   const hostPermissionOpen = isPermissionPromptDialog(topDialogKind);
-  const prevHostPermissionRef = useRef(hostPermissionOpen);
-  useLayoutEffect(() => {
-    if (prevHostPermissionRef.current !== hostPermissionOpen) {
-      repinScroll(true, 'overlay');
-    }
-    prevHostPermissionRef.current = hostPermissionOpen;
-  }, [hostPermissionOpen, repinScroll]);
-
-  // Official 2.1.299 (#597): onBelowTranscriptSlotChange — only repin when
-  // already sticky at the bottom, so opening/closing /btw while scrolled up in
-  // fullscreen does not jump the transcript to the bottom.
   const belowTranscriptSlotOpen =
     hostPermissionOpen ||
-    Boolean(
-      toolJSX?.isLocalJSXCommand && toolJSX.isImmediate && !(isFullscreenEnvEnabled() && toolJSX.isLocalJSXCommand),
-    );
+    Boolean(toolJSX && !(isFullscreenEnvEnabled() && toolJSX.isLocalJSXCommand && toolJSX.isImmediate));
   useLayoutEffect(() => {
     scrollPin.onBelowTranscriptSlotChange(belowTranscriptSlotOpen);
   }, [belowTranscriptSlotOpen, scrollPin]);
@@ -6224,6 +6274,15 @@ function REPLInner({
     prevViewingAgentRef.current = viewingAgentTaskId;
     repinScroll(true, 'agent-view-change');
   }, [viewingAgentTaskId, repinScroll]);
+
+  const activeCompactionAbortRef = useRef<AbortController | null>(null);
+  const abortInFlightCompaction = useCallback(() => {
+    const ac = activeCompactionAbortRef.current;
+    if (ac && !ac.signal.aborted) {
+      ac.abort('compaction_cancelled');
+    }
+    activeCompactionAbortRef.current = null;
+  }, []);
 
   function onCancel() {
     const abortController = turnController.abortController;
@@ -6289,13 +6348,18 @@ function REPLInner({
       proactiveModule?.pauseProactive();
     }
 
+    abortInFlightCompaction();
+    getIdleCompactionRunner().clear();
     queryGuard.forceEnd();
     setMainLoopBusy(false);
 
     // densable FBe: Esc salvages in-progress **thinking only** (isVirtual),
     // not streaming body text — body promote races content_block_stop → double ●.
-    const thinkingPartial = streamingThinking?.thinking?.trim();
-    if (thinkingPartial && streamMode === 'thinking') {
+    // Read live TurnController snapshot and clear streamingThinking synchronously
+    // so a rapid second Esc cannot duplicate the salvaged thinking bubble.
+    const liveTurnSnapshot = turnController.getSnapshot();
+    const thinkingPartial = liveTurnSnapshot.streamingThinking?.thinking?.trim();
+    if (thinkingPartial && liveTurnSnapshot.streamMode === 'thinking') {
       setMessages(prev => [
         ...prev,
         createAssistantMessage({
@@ -6309,6 +6373,7 @@ function REPLInner({
           isVirtual: true,
         }),
       ]);
+      turnController.setStreamingThinking(null);
     }
 
     resetLoadingState();
@@ -6877,6 +6942,10 @@ function REPLInner({
 
   const isIdleBusyRef = useRef(isLoading);
   isIdleBusyRef.current = isLoading;
+  const compactToolUseContextRef = useRef(getToolUseContext);
+  compactToolUseContextRef.current = getToolUseContext;
+  const compactMainLoopModelRef = useRef(mainLoopModel);
+  compactMainLoopModelRef.current = mainLoopModel;
 
   useEffect(() => {
     setFunctionHooksTurnReader(() => getMainThreadTurn());
@@ -6890,49 +6959,128 @@ function REPLInner({
       return { aborted: turnId };
     });
     setSessionCompactHandler(async ({ instructions }) => {
+      if (queryGuard.isActive || isIdleBusyRef.current) {
+        return { compacted: false };
+      }
       const { compactConversation, buildPostCompactMessages } = await import('../services/compact/compact.js');
       const { getCacheSharingParams } = await import('../commands/compact/compact.js');
       const { getMessagesAfterCompactBoundary } = await import('../utils/messages.js');
-      const msgs = getMessagesAfterCompactBoundary(messagesRef.current);
-      const ctx = getToolUseContext(msgs, [], new AbortController(), mainLoopModel);
-      const result = await compactConversation(
-        msgs,
-        ctx as unknown as import('../Tool.js').ToolUseContext,
-        await getCacheSharingParams(ctx as unknown as import('../Tool.js').ToolUseContext, msgs),
-        false,
-        instructions === '' ? undefined : instructions,
-        false,
-      );
-      setMessages(buildPostCompactMessages(result) as typeof msgs);
-      return { compacted: true };
-    });
-    const idleRunner = getIdleCompactionRunner();
-    const idleHost = {
-      refusal: () => (isIdleBusyRef.current ? 'busy' : undefined),
-      compact: async () => {
-        const { compactConversation, buildPostCompactMessages } = await import('../services/compact/compact.js');
-        const { getCacheSharingParams } = await import('../commands/compact/compact.js');
-        const { getMessagesAfterCompactBoundary, createSystemMessage } = await import('../utils/messages.js');
-        const { tokenCountWithEstimation } = await import('../utils/tokens.js');
-        const msgs = getMessagesAfterCompactBoundary(messagesRef.current);
-        const tokensBefore = tokenCountWithEstimation(msgs);
-        const ctx = getToolUseContext(msgs, [], new AbortController(), mainLoopModel);
+      if (queryGuard.isActive || isIdleBusyRef.current) {
+        return { compacted: false };
+      }
+      const preCompactSnapshot = messagesRef.current;
+      const preCompactLastUuid = preCompactSnapshot.at(-1)?.uuid;
+      const msgs = getMessagesAfterCompactBoundary(preCompactSnapshot);
+      const compactAc = new AbortController();
+      abortInFlightCompaction();
+      activeCompactionAbortRef.current = compactAc;
+      try {
+        const ctx = compactToolUseContextRef.current(msgs, [], compactAc, compactMainLoopModelRef.current);
         const result = await compactConversation(
           msgs,
           ctx as unknown as import('../Tool.js').ToolUseContext,
           await getCacheSharingParams(ctx as unknown as import('../Tool.js').ToolUseContext, msgs),
           false,
-          undefined,
+          instructions === '' ? undefined : instructions,
           false,
         );
-        const postMessages = buildPostCompactMessages(result) as typeof msgs;
-        const tokensAfter = tokenCountWithEstimation(postMessages);
-        setMessages([...postMessages, createSystemMessage(IDLE_COMPACT_COMPLETED_MESSAGE, 'info')] as typeof msgs);
-        return { tokensBefore, tokensAfter };
+        const transcriptChanged =
+          messagesRef.current !== preCompactSnapshot || messagesRef.current.at(-1)?.uuid !== preCompactLastUuid;
+        if (compactAc.signal.aborted || queryGuard.isActive || transcriptChanged) {
+          return { compacted: false };
+        }
+        const nextMessages = buildPostCompactMessages(result) as typeof msgs;
+        setMessages(nextMessages);
+        scrollPin.resetForCompaction(nextMessages);
+        setConversationId(randomUUID());
+        setAppState(prev => pruneDisplayedMessageContent(prev, nextMessages));
+        resetMicrocompactState();
+        runPostCompactCleanup(ctx.options.querySource);
+        if (feature('PROACTIVE') || feature('KAIROS')) {
+          proactiveModule?.setContextBlocked(false);
+        }
+        return { compacted: true };
+      } finally {
+        if (activeCompactionAbortRef.current === compactAc) {
+          activeCompactionAbortRef.current = null;
+        }
+      }
+    });
+    const idleRunner = getIdleCompactionRunner();
+    const idleHost = {
+      refusal: () => (queryGuard.isActive || isIdleBusyRef.current ? 'busy' : undefined),
+      abort: abortInFlightCompaction,
+      compact: async (signal?: AbortSignal) => {
+        if (signal?.aborted || queryGuard.isActive || isIdleBusyRef.current) {
+          return null;
+        }
+        const { compactConversation, buildPostCompactMessages } = await import('../services/compact/compact.js');
+        const { getCacheSharingParams } = await import('../commands/compact/compact.js');
+        const { getMessagesAfterCompactBoundary, createSystemMessage } = await import('../utils/messages.js');
+        const { tokenCountWithEstimation } = await import('../utils/tokens.js');
+        if (signal?.aborted || queryGuard.isActive || isIdleBusyRef.current) {
+          return null;
+        }
+        const preCompactSnapshot = messagesRef.current;
+        const preCompactLastUuid = preCompactSnapshot.at(-1)?.uuid;
+        const msgs = getMessagesAfterCompactBoundary(preCompactSnapshot);
+        const tokensBefore = tokenCountWithEstimation(msgs);
+        const compactAc = new AbortController();
+        const onOuterAbort = () => compactAc.abort(signal?.reason ?? 'idle_compaction_cancelled');
+        signal?.addEventListener('abort', onOuterAbort, { once: true });
+        if (signal?.aborted || queryGuard.isActive || isIdleBusyRef.current) {
+          signal?.removeEventListener('abort', onOuterAbort);
+          return null;
+        }
+        abortInFlightCompaction();
+        activeCompactionAbortRef.current = compactAc;
+        try {
+          const ctx = compactToolUseContextRef.current(msgs, [], compactAc, compactMainLoopModelRef.current);
+          const result = await compactConversation(
+            msgs,
+            ctx as unknown as import('../Tool.js').ToolUseContext,
+            await getCacheSharingParams(ctx as unknown as import('../Tool.js').ToolUseContext, msgs),
+            false,
+            undefined,
+            false,
+          );
+          if (signal?.aborted || compactAc.signal.aborted) {
+            const abortErr = new Error('Idle compaction aborted');
+            abortErr.name = 'AbortError';
+            throw abortErr;
+          }
+          const transcriptChanged =
+            messagesRef.current !== preCompactSnapshot || messagesRef.current.at(-1)?.uuid !== preCompactLastUuid;
+          if (queryGuard.isActive || transcriptChanged) {
+            return null;
+          }
+          const postMessages = buildPostCompactMessages(result) as typeof msgs;
+          const tokensAfter = tokenCountWithEstimation(postMessages);
+          const nextMessages = [
+            ...postMessages,
+            createSystemMessage(IDLE_COMPACT_COMPLETED_MESSAGE, 'info'),
+          ] as typeof msgs;
+          setMessages(nextMessages);
+          scrollPin.resetForCompaction(nextMessages);
+          setConversationId(randomUUID());
+          setAppState(prev => pruneDisplayedMessageContent(prev, nextMessages));
+          resetMicrocompactState();
+          runPostCompactCleanup(ctx.options.querySource);
+          if (feature('PROACTIVE') || feature('KAIROS')) {
+            proactiveModule?.setContextBlocked(false);
+          }
+          return { tokensBefore, tokensAfter };
+        } finally {
+          signal?.removeEventListener('abort', onOuterAbort);
+          if (activeCompactionAbortRef.current === compactAc) {
+            activeCompactionAbortRef.current = null;
+          }
+        }
       },
     };
     idleRunner.host = idleHost;
     return () => {
+      abortInFlightCompaction();
       if (idleRunner.host === idleHost) {
         idleRunner.host = null;
       }
@@ -6941,7 +7089,7 @@ function REPLInner({
       setFunctionHooksTurnReader(undefined);
       setSessionCompactHandler(undefined);
     };
-  }, [getToolUseContext, mainLoopModel, setMessages]);
+  }, [abortInFlightCompaction, queryGuard, scrollPin, setAppState, setConversationId, setMessages]);
 
   useEffect(() => {
     // densable XL `$3`: bind session tool-use context so $.tool.call / $.mcp.call
@@ -7150,6 +7298,7 @@ function REPLInner({
         displayTransform,
         setInProgressToolUseIDs,
         addNotification,
+        onCompacted: scrollPin.resetForCompaction,
       });
     },
     [
@@ -7167,6 +7316,7 @@ function REPLInner({
       setConversationId,
       setInProgressToolUseIDs,
       addNotification,
+      scrollPin,
     ],
   );
 
@@ -7449,6 +7599,7 @@ function REPLInner({
             sendBridgeResultRef,
             proactiveActive,
             restoreMessageSyncRef,
+            onCompacted: scrollPin.resetForCompaction,
           },
         )
         .then(
@@ -7754,6 +7905,7 @@ function REPLInner({
         pastedContentsOverride?: Record<number, PastedContent>;
         resumesStaleQuotaWait?: boolean;
         sendNow?: boolean;
+        sendQueuedOnly?: boolean;
         queueSubmit?: boolean;
         composerEnter?: unknown;
       },
@@ -7791,6 +7943,7 @@ function REPLInner({
           pastedContents,
           ideSelection,
           stashedPrompt,
+          getStashedPrompt: () => stashedPromptRef.current,
           getAbortController: () => turnController.abortController,
           getCurrentInput: () => inputValueRef.current,
           getMessages: () => messagesRef.current,
@@ -8055,18 +8208,29 @@ function REPLInner({
   // `/rate-limit-options` so an extra Enter after the usage limit menu never
   // executes the half-typed shell command.
   const handleOpenRateLimitOptions = useCallback(() => {
+    if (inputModeRef.current === 'bash' && draftController.mode !== 'bash') {
+      draftController.setMode('bash');
+    }
     if (draftController.mode === 'bash') {
       draftController.clear();
       draftController.setMode('prompt');
+      inputValueRef.current = '';
+      setPastedContents({});
+      setInputMode('prompt');
     } else if (draftController.value.length > 0) {
       return;
     }
-    void onSubmitRef.current('/rate-limit-options', {
-      setCursorOffset: () => {},
-      clearBuffer: () => {},
-      resetHistory: () => {},
-    });
-  }, [draftController]);
+    void onSubmitRef.current(
+      '/rate-limit-options',
+      {
+        setCursorOffset: () => {},
+        clearBuffer: () => {},
+        resetHistory: () => {},
+      },
+      undefined,
+      { inputModeOverride: 'prompt' },
+    );
+  }, [draftController, setInputMode, setPastedContents]);
   handleOpenRateLimitOptionsRef.current = handleOpenRateLimitOptions;
 
   const handleExit = useCallback(async () => {
@@ -8695,7 +8859,6 @@ function REPLInner({
   useMailboxBridge({ isLoading, onSubmitMessage: handleIncomingPrompt });
   useMasterMonitor();
   useSlaveNotifications();
-  const _pipeIpcState = useAppState(s => getPipeIpc(s));
 
   usePipePermissionForward({
     store,
@@ -8906,15 +9069,16 @@ function REPLInner({
   // Callback to capture frozen state when entering transcript mode
   const handleEnterTranscript = useCallback(() => {
     setFrozenTranscriptState({
-      messagesLength: messages.length,
+      messagesLength: messagesRef.current.length,
       streamingToolUsesLength: streamingToolUses.length,
     });
-  }, [messages.length, streamingToolUses.length]);
+  }, [streamingToolUses.length]);
 
-  // Callback to clear frozen state when exiting transcript mode
+  // Callback to clear frozen state and reset ScrollPin when exiting transcript mode
   const handleExitTranscript = useCallback(() => {
     setFrozenTranscriptState(null);
-  }, []);
+    scrollPin.resetForTranscriptExit();
+  }, [scrollPin]);
 
   // Props for GlobalKeybindingHandlers component (rendered inside KeybindingSetup)
   const virtualScrollActive = isFullscreenEnvEnabled() && !disableVirtualScroll;
@@ -9072,8 +9236,12 @@ function REPLInner({
   // surprise n/N on re-entry. Same exit resets [ dump mode — each ctrl+o
   // entry is a fresh instance.
   const inTranscript = screen === 'transcript' && virtualScrollActive;
+  const prevInTranscriptRef = useRef(inTranscript);
   useEffect(() => {
     if (!inTranscript) {
+      if (prevInTranscriptRef.current) {
+        scrollPin.resetForTranscriptExit();
+      }
       setSearchQuery('');
       setSearchCount(0);
       setSearchCurrent(0);
@@ -9084,7 +9252,8 @@ function REPLInner({
       setDumpMode(false);
       setEditorStatus('');
     }
-  }, [inTranscript]);
+    prevInTranscriptRef.current = inTranscript;
+  }, [inTranscript, scrollPin]);
   useEffect(() => {
     setHighlight(inTranscript ? searchQuery : '');
     // Clear the position-based CURRENT (yellow) overlay too. setHighlight
@@ -9111,8 +9280,11 @@ function REPLInner({
     searchBarOpen: searchOpen,
   };
 
-  // Use frozen lengths to slice arrays, avoiding memory overhead of cloning
-  const transcriptMessages = frozenTranscriptState ? messages.slice(0, frozenTranscriptState.messagesLength) : messages;
+  // Use frozen lengths to slice arrays, avoiding memory overhead of cloning.
+  // In dumpMode (`[`), never slice against the entry freeze so all live/recent
+  // messages and progress rows are dumped to scrollback.
+  const transcriptMessages =
+    frozenTranscriptState && !dumpMode ? messages.slice(0, frozenTranscriptState.messagesLength) : messages;
   const transcriptStreamingToolUses = frozenTranscriptState
     ? streamingToolUses.slice(0, frozenTranscriptState.streamingToolUsesLength)
     : streamingToolUses;
@@ -9364,7 +9536,8 @@ function REPLInner({
       isFullscreenEnvEnabled() && !disableVirtualScroll && !dumpMode ? scrollViewport : undefined;
     const transcriptMessagesElement = (
       <Messages
-        messages={staticAgentMessages ?? transcriptMessages}
+        source={transcriptScrollViewport ? messagesSource : undefined}
+        messages={transcriptScrollViewport ? undefined : (staticAgentMessages ?? transcriptMessages)}
         tools={tools}
         commands={commands}
         verbose={true}
@@ -9374,7 +9547,16 @@ function REPLInner({
         conversationId={focusedConversationId}
         screen={screen}
         agentDefinitions={agentDefinitions}
-        streamingToolUses={viewedAgentTask ? EMPTY_STREAMING_TOOL_USES : transcriptStreamingToolUses}
+        streamingToolUses={
+          viewedAgentTask
+            ? EMPTY_STREAMING_TOOL_USES
+            : transcriptScrollViewport
+              ? focusedStreamingToolUses
+              : transcriptStreamingToolUses
+        }
+        showStreamingText={showStreamingText}
+        hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText && !focusFoldHoldsPreview}
+        streamingDisplayStore={streamingDisplayStore}
         showAllInTranscript={showAllInTranscript}
         onOpenRateLimitOptions={handleOpenRateLimitOptions}
         hideLogo={!!viewedAgentTask}
@@ -9438,12 +9620,15 @@ function REPLInner({
         {transcriptScrollViewport ? (
           <FullscreenLayout
             scrollViewport={scrollViewport}
+            onPillClick={() => {
+              scrollViewport.handle?.scrollToBottom();
+            }}
             scrollable={
               <>
                 {transcriptMessagesElement}
                 <WaitingTranscriptMessages
                   task={viewedAgentTask}
-                  messages={staticAgentMessages ?? transcriptMessages}
+                  messages={staticAgentMessages ?? messages}
                   isLoading={focusedIsLoading}
                 />
                 {transcriptToolJSX}
@@ -9582,12 +9767,14 @@ function REPLInner({
   // overlays in `MenuWaitContext.Provider value={true}` (`Ivt`).
   const ozs = topDialogIsModal
     ? {
+        key: topDialog ? `dialog:${topDialog.id}` : 'dialog',
         content: <DialogHost variant="modal" suppressReason={dialogSuppressReason} />,
         footer: dialogPanelVis.inPane ? <PromptBannerFooter hideSessionTitle={hideSessionTitle} /> : undefined,
         visible: modalChrome === 'visible',
       }
     : toolJsxCentered && (!dialogHostUnmounted || dialogPanelVis.drawn)
       ? {
+          key: 'tooljsx',
           content: <MenuWaitContext.Provider value={true}>{toolJSX!.jsx}</MenuWaitContext.Provider>,
           visible: true,
           footer: dialogPanelVis.inPane ? <PromptBannerFooter hideSessionTitle={hideSessionTitle} /> : undefined,
@@ -10459,6 +10646,7 @@ function REPLInner({
                             abortController={abortController}
                             onRestoreIdeSelection={returnIdeSelection}
                             hasSuppressedDialogs={!!hasSuppressedDialogs}
+                            isDialogParked={hostParkMode !== null}
                             isLocalJSXCommandActive={isShowingLocalJSXCommand}
                             getToolUseContext={getToolUseContext}
                             toolPermissionContext={toolPermissionContext}
@@ -11184,6 +11372,7 @@ function REPLInner({
                                     } else {
                                       setMessages(postCompact);
                                     }
+                                    scrollPin.resetForCompaction(messagesRef.current);
                                     // Partial compact bypasses handleMessageFromStream — clear
                                     // the context-blocked flag so proactive ticks resume.
                                     if (feature('PROACTIVE') || feature('KAIROS')) {

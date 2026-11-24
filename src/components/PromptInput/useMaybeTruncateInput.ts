@@ -46,6 +46,8 @@ type Props = {
   keepsFullTextRef?: { current: boolean }
   /** Optional explicit draft adapter matching official `h.keepsFullText` / `h.keepFullText()`. */
   draft?: DraftKeepsFullText
+  /** Optional paste-ID allocator ref to advance past any truncation-allocated ID. */
+  nextPasteIdRef?: { current: number }
 }
 
 /**
@@ -65,6 +67,7 @@ export function useMaybeTruncateInput({
   vimMode,
   keepsFullTextRef,
   draft,
+  nextPasteIdRef,
 }: Props) {
   const internalKeepsFullTextRef = useRef(false)
   const keepsFullText = keepsFullTextRef ?? internalKeepsFullTextRef
@@ -91,6 +94,19 @@ export function useMaybeTruncateInput({
       pastedContents,
     )
 
+    if (nextPasteIdRef) {
+      let maxId = 0
+      for (const key of Object.keys(newPastedContents)) {
+        const id = Number(key)
+        if (Number.isFinite(id) && id > maxId) {
+          maxId = id
+        }
+      }
+      if (maxId >= nextPasteIdRef.current) {
+        nextPasteIdRef.current = maxId + 1
+      }
+    }
+
     onInputChange(newInput)
     const effectiveVimMode = vimMode ?? getPromptInputStoreVimMode()
     const nextOffset =
@@ -113,5 +129,6 @@ export function useMaybeTruncateInput({
     vimMode,
     keepsFullText,
     draft,
+    nextPasteIdRef,
   ])
 }

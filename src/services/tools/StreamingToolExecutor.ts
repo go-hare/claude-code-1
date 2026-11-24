@@ -424,6 +424,28 @@ export class StreamingToolExecutor {
     // Abort running tool subprocesses (Bash spawns, etc.) so they don't
     // continue producing results after the executor is replaced.
     this.siblingAbortController.abort('streaming_fallback')
+    // Clear any still-tracked tool IDs from inProgressToolUseIDs and reset
+    // interruptible state before clearing this.tools, since getCompletedResults()
+    // returns early when discarded.
+    if (this.tools.length > 0) {
+      const discardedIds = new Set(this.tools.map(t => t.id))
+      this.toolUseContext.setInProgressToolUseIDs(prev => {
+        let changed = false
+        for (const id of discardedIds) {
+          if (prev.has(id)) {
+            changed = true
+            break
+          }
+        }
+        if (!changed) return prev
+        const next = new Set(prev)
+        for (const id of discardedIds) {
+          next.delete(id)
+        }
+        return next
+      })
+    }
+    this.toolUseContext.setHasInterruptibleToolInProgress?.(false)
     // Release references to allow GC of tool blocks, messages, and promises.
     this.tools.length = 0
     this.progressAvailableResolve = undefined

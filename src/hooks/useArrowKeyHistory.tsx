@@ -110,6 +110,8 @@ export function useArrowKeyHistory(
   // Synchronous tracker for history index to avoid stale closure issues
   // React state updates are async, so rapid keypresses can see stale values
   const historyIndexRef = useRef(0);
+  // Generation bumped on resetHistory so stale async loads cannot apply after reset
+  const resetGenRef = useRef(0);
 
   // Track the mode filter that was active when history navigation started
   // This is set on the first arrow press and stays fixed until reset
@@ -213,21 +215,25 @@ export function useArrowKeyHistory(
     }
 
     const modeFilter = initialModeFilterRef.current;
+    const resetGenAtPress = resetGenRef.current;
+
+    // If mode filter changed, invalidate cache synchronously BEFORE the async load
+    // without clobbering historyIndexRef.current (which already holds targetIndex + 1).
+    if (historyCacheModeFilter.current !== modeFilter) {
+      historyCache.current = [];
+      historyCacheModeFilter.current = modeFilter;
+    }
 
     void (async () => {
       const neededCount = targetIndex + 1; // How many entries we need
-
-      // If mode filter changed, invalidate cache
-      if (historyCacheModeFilter.current !== modeFilter) {
-        historyCache.current = [];
-        historyCacheModeFilter.current = modeFilter;
-        historyIndexRef.current = 0;
-      }
 
       // Load more entries if needed
       if (historyCache.current.length < neededCount) {
         // Batches concurrent requests - rapid keypresses share a single disk read
         const entries = await loadHistoryEntries(neededCount, modeFilter);
+        if (resetGenRef.current !== resetGenAtPress || historyCacheModeFilter.current !== modeFilter) {
+          return;
+        }
         // Only update cache if we loaded more than currently cached
         // (handles race condition where multiple loads complete out of order)
         if (entries.length > historyCache.current.length) {
@@ -235,10 +241,14 @@ export function useArrowKeyHistory(
         }
       }
 
+      if (resetGenRef.current !== resetGenAtPress || historyCacheModeFilter.current !== modeFilter) {
+        return;
+      }
+
       // Check if we can navigate
       if (targetIndex >= historyCache.current.length) {
-        // Rollback the ref since we can't navigate
-        historyIndexRef.current--;
+        // Rollback the ref since we can't navigate (never allow negative index)
+        historyIndexRef.current = Math.max(0, historyIndexRef.current - 1);
         // Keep the draft intact - user stays on their current input
         return;
       }
@@ -285,6 +295,7 @@ export function useArrowKeyHistory(
     setLastShownHistoryEntry(undefined);
     setHistoryIndex(0);
     historyIndexRef.current = 0;
+    resetGenRef.current++;
     initialModeFilterRef.current = undefined;
     lastRecalledValueRef.current = null;
     historyCountGenRef.current++;

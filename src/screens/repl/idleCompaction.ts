@@ -51,11 +51,11 @@ export type IdleCompactionSizes = {
 }
 
 export type IdleCompactionHost = {
-  compact: () =>
-    | Promise<IdleCompactionSizes | null>
-    | IdleCompactionSizes
-    | null
+  compact: (
+    signal?: AbortSignal,
+  ) => Promise<IdleCompactionSizes | null> | IdleCompactionSizes | null
   refusal?: () => Promise<string | undefined> | string | undefined
+  abort?: () => void
 }
 
 /** Official 2.1.325 `hRn` (#1446). */
@@ -198,6 +198,7 @@ export class IdleCompactionRunner {
     | undefined = undefined
   private heldSummaryMessages: unknown[] | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
+  private inFlightAbort: AbortController | null = null
 
   recordTurnEnd(reason?: string): void {
     this.lastTurnEndInfo = {
@@ -274,6 +275,11 @@ export class IdleCompactionRunner {
       clearTimeout(this.timer)
       this.timer = null
     }
+    if (this.inFlightAbort !== null) {
+      this.inFlightAbort.abort('idle_compaction_cancelled')
+      this.inFlightAbort = null
+    }
+    this.host?.abort?.()
   }
 
   arm(
@@ -335,11 +341,9 @@ export class IdleCompactionRunner {
     const contextTokens = getContextTokens ? getContextTokens() : 0
     const prefixToken = getPrefixToken()
     const isPrecompute = this.host === null
-    const action = this.host
-      ? () => this.host!.compact()
-      : this.summarize && prefixToken !== null
-        ? () => this.summarize!(prefixToken)
-        : null
+    const hostRef = this.host
+    const hasAction =
+      hostRef !== null || (this.summarize !== null && prefixToken !== null)
 
     const skip = checkIdleCompactionEligibility(
       isPrecompute,
@@ -350,7 +354,7 @@ export class IdleCompactionRunner {
     )
     const outcome =
       skip ??
-      (action ? ((await this.host?.refusal?.()) ?? 'started') : 'no_host')
+      (hasAction ? ((await hostRef?.refusal?.()) ?? 'started') : 'no_host')
     this.record = { timer: 'fired', outcome }
 
     logEvent('tengu_idle_compact_fired', {
@@ -362,12 +366,23 @@ export class IdleCompactionRunner {
       sinceTurnEndMs: now - turnEndMs,
     })
 
-    if (outcome === 'started' && action) {
-      this.record.result = await settleIdleCompaction(
-        Promise.resolve().then(action),
-        now,
-        isPrecompute ? 'summarized' : 'compacted',
-      )
+    if (outcome === 'started' && hasAction) {
+      const ac = new AbortController()
+      this.inFlightAbort = ac
+      const action = hostRef
+        ? () => hostRef.compact(ac.signal)
+        : () => this.summarize!(prefixToken)
+      try {
+        this.record.result = await settleIdleCompaction(
+          Promise.resolve().then(action),
+          now,
+          isPrecompute ? 'summarized' : 'compacted',
+        )
+      } finally {
+        if (this.inFlightAbort === ac) {
+          this.inFlightAbort = null
+        }
+      }
     }
   }
 }

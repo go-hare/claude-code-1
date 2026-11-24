@@ -105,6 +105,13 @@ export type SubmitPromptOptions = {
   pastedContentsOverride?: Record<number, PastedContent>
   resumesStaleQuotaWait?: boolean
   sendNow?: boolean
+  /**
+   * Explicit queued-only fast-path signal (official 2.1.328 `hW` -> `XT` /
+   * `sendQueuedNow`). Bypasses `!hasImages` so stale closure `pastedContents`
+   * (e.g., `queueEditIndex !== null` or post-`onAgentSubmit` `named_agent`
+   * `chat:sendNow`) never falls through to submit images to the leader.
+   */
+  sendQueuedOnly?: boolean
   queueSubmit?: boolean
   composerEnter?: unknown
   inputModeOverride?: PromptInputMode
@@ -119,6 +126,7 @@ export type SubmitPromptDeps = {
   pastedContents: Record<number, PastedContent>
   ideSelection: IDESelection | undefined
   stashedPrompt: StashedPrompt | undefined
+  getStashedPrompt?: () => StashedPrompt | undefined
   getAbortController: () => AbortController | null
   getCurrentInput: () => string
   getMessages: () => Message[]
@@ -323,19 +331,6 @@ export class SubmitController {
       return true
     }
 
-    if (options?.sendNow && input.trim() === '') {
-      trySendQueuedNowKey(() => this.#store.getState(), deps.setAppState, {
-        mode: 'prompt',
-        isTurnRunning: () => this.#queryGuard.isRunning,
-        isTurnActive: () => this.#queryGuard.isActive,
-        isDispatchingForModel: () => this.#queryGuard.isDispatchingForModel,
-        abortSignal: deps.getAbortController(),
-        lowLatency: deps.queuedNowLowLatencyHost,
-        interruptForSubmit,
-      })
-      return
-    }
-
     // Official 2.1.309 (#1131): key-bound slash commands run in 'prompt' mode
     // even when the composer is in 'bash' (!) mode.
     const effectiveInputMode: PromptInputMode =
@@ -343,6 +338,38 @@ export class SubmitController {
       (options?.fromKeybinding && input.trim().startsWith('/')
         ? 'prompt'
         : deps.inputMode)
+
+    const hasImages = Object.values(effectivePastedContents).some(
+      c => c.type === 'image',
+    )
+
+    if (
+      options?.sendQueuedOnly ||
+      (options?.sendNow && input.trim() === '' && !hasImages)
+    ) {
+      const viewed = viewedAgentForInput({
+        viewingAgentTaskId: this.#store.getState().viewingAgentTaskId,
+        tasks: this.#store.getState().tasks,
+      })
+      if (effectiveInputMode === 'prompt' && viewed.type === 'leader') {
+        trySendQueuedNowKey(() => this.#store.getState(), deps.setAppState, {
+          mode: 'prompt',
+          isTurnRunning: () => this.#queryGuard.isRunning,
+          isTurnActive: () => this.#queryGuard.isActive,
+          isDispatchingForModel: () => this.#queryGuard.isDispatchingForModel,
+          abortSignal: deps.getAbortController(),
+          lowLatency: deps.queuedNowLowLatencyHost,
+          interruptForSubmit,
+        })
+      } else if (
+        effectiveInputMode === 'prompt' &&
+        viewed.type === 'named_agent' &&
+        isVelvetPandaEnabled()
+      ) {
+        deps.queuedNowLowLatencyHost.sendQueuedNow(viewed.task.id)
+      }
+      return
+    }
 
     deps.repinScroll(true, 'submit')
 
@@ -411,8 +438,16 @@ export class SubmitController {
       prependToShellHistoryCache(input.trim())
     }
 
-    if (deps.stashedPrompt !== undefined && !isSlashCommand && submitsNow) {
-      this.#restoreStashedPrompt(deps.stashedPrompt, helpers, deps)
+    let stashedRestored = false
+    const initialStash = this.#getLiveStashedPrompt(deps, stashedRestored)
+    if (initialStash !== undefined && !isSlashCommand && submitsNow) {
+      if (
+        this.#restoreStashedPrompt(initialStash, helpers, deps, {
+          checkEmptyInput: Boolean(options?.fromKeybinding),
+        })
+      ) {
+        stashedRestored = true
+      }
     } else if (submitsNow) {
       if (!options?.fromKeybinding) {
         deps.setInputValue('')
@@ -528,11 +563,8 @@ export class SubmitController {
       onSubmitProceed: submitsNow
         ? undefined
         : () => deps.setInputMode('prompt'),
-      queuePriority: options?.sendNow
-        ? 'now'
-        : options?.queueSubmit
-          ? 'next'
-          : undefined,
+      queuePriority:
+        options?.sendNow || options?.queueSubmit ? 'next' : undefined,
       forceQueue: Boolean(
         options?.queueSubmit ||
           (options?.sendNow &&
@@ -558,38 +590,49 @@ export class SubmitController {
       awaitSessionStartHooks: this.#turnController.awaitSessionStartHooks,
     })
 
-    const viewed = viewedAgentForInput({
-      viewingAgentTaskId: this.#store.getState().viewingAgentTaskId,
-      tasks: this.#store.getState().tasks,
-    })
-    const namedTaskId =
-      viewed.type === 'named_agent' ? viewed.task.id : undefined
-    const currentAc = deps.getAbortController()
-    const sameAbort =
-      abortBeforeSubmit !== null && currentAc === abortBeforeSubmit
-    const leaderEmptyKey =
-      effectiveInputMode === 'prompt' && viewed.type === 'leader' && sameAbort
-    const namedAgentSendNow =
-      effectiveInputMode === 'prompt' && namedTaskId !== undefined
-    if (leaderEmptyKey) {
-      trySendQueuedNowKey(() => this.#store.getState(), deps.setAppState, {
-        mode: 'prompt',
-        isTurnRunning: () => this.#queryGuard.isRunning,
-        isTurnActive: () => this.#queryGuard.isActive,
-        isDispatchingForModel: () => this.#queryGuard.isDispatchingForModel,
-        abortSignal: currentAc,
-        lowLatency: deps.queuedNowLowLatencyHost,
-        interruptForSubmit,
+    // Official 2.1.328 `hW`/`vN` (chunk@319736883.js @1065800): ONLY run
+    // sendQueuedNow when chat:sendNow (`options?.sendNow === true`) was pressed,
+    // never on plain Enter or chat:queueSubmit (`options?.queueSubmit === true`).
+    if (options?.sendNow === true) {
+      const viewed = viewedAgentForInput({
+        viewingAgentTaskId: this.#store.getState().viewingAgentTaskId,
+        tasks: this.#store.getState().tasks,
       })
-    } else if (namedAgentSendNow && isVelvetPandaEnabled()) {
-      deps.queuedNowLowLatencyHost.sendQueuedNow(namedTaskId)
+      const namedTaskId =
+        viewed.type === 'named_agent' ? viewed.task.id : undefined
+      const currentAc = deps.getAbortController()
+      const sameAbort =
+        abortBeforeSubmit !== null && currentAc === abortBeforeSubmit
+      const leaderSendNow =
+        effectiveInputMode === 'prompt' && viewed.type === 'leader' && sameAbort
+      const namedAgentSendNow =
+        effectiveInputMode === 'prompt' && namedTaskId !== undefined
+      if (leaderSendNow) {
+        trySendQueuedNowKey(() => this.#store.getState(), deps.setAppState, {
+          mode: 'prompt',
+          isTurnRunning: () => this.#queryGuard.isRunning,
+          isTurnActive: () => this.#queryGuard.isActive,
+          isDispatchingForModel: () => this.#queryGuard.isDispatchingForModel,
+          abortSignal: currentAc,
+          lowLatency: deps.queuedNowLowLatencyHost,
+          interruptForSubmit,
+        })
+      } else if (namedAgentSendNow && isVelvetPandaEnabled()) {
+        deps.queuedNowLowLatencyHost.sendQueuedNow(namedTaskId)
+      }
     }
 
-    if (
-      (isSlashCommand || this.#turnController.isLoading) &&
-      deps.stashedPrompt !== undefined
-    ) {
-      this.#restoreStashedPrompt(deps.stashedPrompt, helpers, deps)
+    if (isSlashCommand || !submitsNow || this.#turnController.isLoading) {
+      const liveStash = this.#getLiveStashedPrompt(deps, stashedRestored)
+      if (liveStash !== undefined) {
+        if (
+          this.#restoreStashedPrompt(liveStash, helpers, deps, {
+            checkEmptyInput: true,
+          })
+        ) {
+          stashedRestored = true
+        }
+      }
     }
   }
 
@@ -696,6 +739,7 @@ export class SubmitController {
 
     const executeImmediateCommand = async (): Promise<void> => {
       let doneWasCalled = false
+      let immediateStashRestored = false
       const onDone = (
         result?: string,
         doneOptions?: {
@@ -748,8 +792,18 @@ export class SubmitController {
         if (newMessages.length) {
           deps.setMessages(prev => [...prev, ...newMessages])
         }
-        if (deps.stashedPrompt !== undefined) {
-          this.#restoreStashedPrompt(deps.stashedPrompt, helpers, deps)
+        const liveStash = this.#getLiveStashedPrompt(
+          deps,
+          immediateStashRestored,
+        )
+        if (liveStash !== undefined) {
+          if (
+            this.#restoreStashedPrompt(liveStash, helpers, deps, {
+              checkEmptyInput: true,
+            })
+          ) {
+            immediateStashRestored = true
+          }
         }
       }
 
@@ -971,11 +1025,23 @@ export class SubmitController {
     })
   }
 
+  #getLiveStashedPrompt(
+    deps: SubmitPromptDeps,
+    alreadyRestored: boolean,
+  ): StashedPrompt | undefined {
+    if (alreadyRestored) return undefined
+    return deps.getStashedPrompt ? deps.getStashedPrompt() : deps.stashedPrompt
+  }
+
   #restoreStashedPrompt(
     stashedPrompt: StashedPrompt,
     helpers: PromptInputHelpers,
     deps: SubmitPromptDeps,
-  ): void {
+    options?: { checkEmptyInput?: boolean },
+  ): boolean {
+    if (options?.checkEmptyInput && deps.getCurrentInput().trim() !== '') {
+      return false
+    }
     deps.setInputValue(stashedPrompt.text)
     helpers.setCursorOffset(stashedPrompt.cursorOffset)
     deps.setPastedContents(stashedPrompt.pastedContents)
@@ -987,6 +1053,7 @@ export class SubmitController {
       priority: 'high',
       timeoutMs: 5000,
     })
+    return true
   }
 
   async executeQueuedInput(
@@ -1057,6 +1124,11 @@ export class SubmitController {
       return false
     }
 
+    if (!this.#queryGuard.reserve()) {
+      return false
+    }
+    const reservedGeneration = this.#queryGuard.generation
+
     const queuedCommand =
       typeof input === 'string'
         ? ({
@@ -1066,11 +1138,62 @@ export class SubmitController {
           } satisfies QueuedCommand)
         : input
 
+    const releaseReservationIfOwned = (): void => {
+      if (this.#queryGuard.generation === reservedGeneration) {
+        this.#queryGuard.cancelReservation()
+      }
+    }
+
+    const finalizeClaimedFailure = async (
+      claimedCommands: QueuedCommand[],
+      error: unknown,
+    ): Promise<void> => {
+      if (claimedCommands.length === 0) return
+      try {
+        await finalizeAutonomyCommandsForTurn({
+          commands: claimedCommands,
+          outcome: { type: 'failed', error },
+          currentDir: getCwd(),
+          priority: 'later',
+        })
+      } catch (finalizeError: unknown) {
+        logError(toError(finalizeError))
+      }
+    }
+
     void (async () => {
-      const claim = await claimConsumableQueuedAutonomyCommands([queuedCommand])
-      if (this.#disposed) return
+      let claim: Awaited<
+        ReturnType<typeof claimConsumableQueuedAutonomyCommands>
+      >
+      try {
+        claim = await claimConsumableQueuedAutonomyCommands([queuedCommand])
+      } catch (error: unknown) {
+        releaseReservationIfOwned()
+        logError(toError(error))
+        return
+      }
+
+      if (
+        this.#disposed ||
+        this.#queryGuard.generation !== reservedGeneration
+      ) {
+        releaseReservationIfOwned()
+        await finalizeClaimedFailure(
+          claim.claimedCommands,
+          new Error('Incoming prompt cancelled before execution'),
+        )
+        return
+      }
+
       const command = claim.attachmentCommands[0]
-      if (!command) return
+      if (!command) {
+        releaseReservationIfOwned()
+        await finalizeClaimedFailure(
+          claim.claimedCommands,
+          new Error('Incoming prompt produced no attachment command'),
+        )
+        return
+      }
 
       const newAbortController = createAbortController()
       deps.setAbortControllerForQuery(newAbortController)
@@ -1098,21 +1221,24 @@ export class SubmitController {
             deps.mainLoopModel,
           )) !== false
       } catch (error: unknown) {
-        try {
-          await finalizeAutonomyCommandsForTurn({
-            commands: claim.claimedCommands,
-            outcome: { type: 'failed', error },
-            currentDir: getCwd(),
-            priority: 'later',
-          })
-        } catch (finalizeError: unknown) {
-          logError(toError(finalizeError))
+        if (this.#queryGuard.generation === reservedGeneration) {
+          releaseReservationIfOwned()
+          deps.setAbortControllerForQuery(null)
         }
+        await finalizeClaimedFailure(claim.claimedCommands, error)
         logError(toError(error))
         return
       }
 
       if (!executed) {
+        if (this.#queryGuard.generation === reservedGeneration) {
+          releaseReservationIfOwned()
+          deps.setAbortControllerForQuery(null)
+        }
+        await finalizeClaimedFailure(
+          claim.claimedCommands,
+          new Error('Incoming prompt query did not execute'),
+        )
         return
       }
       try {
@@ -1129,6 +1255,7 @@ export class SubmitController {
         logError(toError(finalizeError))
       }
     })().catch((error: unknown) => {
+      releaseReservationIfOwned()
       logError(toError(error))
     })
     return true

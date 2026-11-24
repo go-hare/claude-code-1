@@ -273,6 +273,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // handler and double-press-to-exit from ever seeing the keypress.
   const isCtrlCActive =
     isContextActive &&
+    !isDialogChromeVisible &&
     (canCancelRunningTask ||
       hasEditableQueuedCommands ||
       isViewingTeammate ||

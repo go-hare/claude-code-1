@@ -232,7 +232,13 @@ export class TurnController {
   }
 
   resetRequestState = (): void => {
-    this.beginEngineRead()
+    this.#cancelThinkingHide?.()
+    this.#cancelThinkingHide = null
+    this.#publish({
+      isMainRequestAwaitingResponse: false,
+      isMainResponseStreaming: false,
+      streamingThinking: null,
+    })
   }
 
   get isMainRequestAwaitingResponse(): boolean {

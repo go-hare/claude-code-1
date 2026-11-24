@@ -214,6 +214,7 @@ export type DispatchReplStreamEventDeps = {
     priority: 'immediate' | 'high' | 'medium' | 'low'
     timeoutMs?: number
   }) => void
+  onCompacted?: (nextMessages: MessageType[]) => void
 }
 
 /**
@@ -429,6 +430,7 @@ export function dispatchReplStreamEvent(
     displayTransform,
     setInProgressToolUseIDs,
     addNotification,
+    onCompacted,
   } = deps
 
   // Official 2.1.328 #563: two-part spinner token counter keyed by responseLengthRef
@@ -465,6 +467,7 @@ export function dispatchReplStreamEvent(
           setMessages(() => [newMessage])
         }
         setConversationId(randomUUID())
+        onCompacted?.(messagesRef.current)
         setAppState(prev =>
           pruneDisplayedMessageContent(prev, messagesRef.current),
         )
@@ -942,6 +945,7 @@ export type RunReplTurnDeps = {
   sendBridgeResultRef: { current: () => void }
   proactiveActive: unknown
   restoreMessageSyncRef: { current: (m: UserMessage) => void }
+  onCompacted?: (nextMessages: MessageType[]) => void
 }
 
 async function executeReplTurnImpl(
@@ -959,6 +963,7 @@ async function executeReplTurnImpl(
 ): Promise<SDKResultMessage | undefined> {
   const {
     store,
+    queryGuard,
     initialMcpClients,
     titleDisabled,
     sessionTitle,
@@ -995,6 +1000,7 @@ async function executeReplTurnImpl(
     apiMetricsRef,
     loadingStartTimeRef,
     onTurnComplete,
+    onCompacted,
   } = deps
 
   if (shouldQuery) {
@@ -1091,14 +1097,17 @@ async function executeReplTurnImpl(
       curAllow === additionalAllowedTools ||
       (curAllow?.length === additionalAllowedTools.length &&
         curAllow.every((v, i) => v === additionalAllowedTools[i]))
-    const curDeny = prev.toolPermissionContext.alwaysDenyRules.command ?? []
+    const curDeny = prev.toolPermissionContext.alwaysDenyRules.command
     const nextDeny =
-      additionalDisallowedTools.length === 0
-        ? curDeny
-        : Array.from(new Set([...curDeny, ...additionalDisallowedTools]))
+      additionalDisallowedTools.length > 0
+        ? Array.from(new Set(additionalDisallowedTools))
+        : undefined
     const denySame =
-      curDeny.length === nextDeny.length &&
-      curDeny.every((v, i) => v === nextDeny[i])
+      curDeny === nextDeny ||
+      (curDeny !== undefined &&
+        nextDeny !== undefined &&
+        curDeny.length === nextDeny.length &&
+        curDeny.every((v, i) => v === nextDeny[i]))
     if (
       allowSame &&
       denySame &&
@@ -1118,7 +1127,7 @@ async function executeReplTurnImpl(
         },
         alwaysDenyRules: {
           ...cleared.alwaysDenyRules,
-          command: nextDeny.length > 0 ? nextDeny : undefined,
+          command: nextDeny,
         },
         pollEventDeliveryGuard: undefined,
       },
@@ -1128,6 +1137,7 @@ async function executeReplTurnImpl(
   if (!shouldQuery) {
     if (newMessages.some(isCompactBoundaryMessage)) {
       setConversationId(randomUUID())
+      onCompacted?.(messagesRef.current)
       setAppState(prev =>
         pruneDisplayedMessageContent(prev, messagesRef.current),
       )
@@ -1135,8 +1145,10 @@ async function executeReplTurnImpl(
         proactiveModule?.setContextBlocked(false)
       }
     }
-    resetLoadingState()
-    setAbortController(null)
+    if (queryGuard.generation === thisGeneration) {
+      resetLoadingState()
+      setAbortController(null)
+    }
     return
   }
 
@@ -1144,6 +1156,12 @@ async function executeReplTurnImpl(
   // starting a turn (especially restarted or autonomous turns) so plugin
   // commands, agents, and hooks are loaded before the turn runs.
   await waitForInitialPluginsLoaded(abortController.signal)
+  if (
+    queryGuard.generation !== thisGeneration ||
+    abortController.signal.aborted
+  ) {
+    return undefined
+  }
 
   const toolUseContext = getToolUseContext(
     messagesIncludingNewMessages,
@@ -1174,6 +1192,12 @@ async function executeReplTurnImpl(
     credentials: toolUseContext.credentials,
     abortController,
   })
+  if (
+    queryGuard.generation !== thisGeneration ||
+    abortController.signal.aborted
+  ) {
+    return undefined
+  }
   const promptRenderEpoch = getPromptRenderEpoch()
 
   queryCheckpoint('query_context_loading_start')
@@ -1196,6 +1220,12 @@ async function executeReplTurnImpl(
       getUserContext(),
       getSystemContext(),
     ])
+  if (
+    queryGuard.generation !== thisGeneration ||
+    abortController.signal.aborted
+  ) {
+    return undefined
+  }
   const userContext = {
     ...baseUserContext,
     ...getCoordinatorUserContext(
@@ -1273,17 +1303,31 @@ async function executeReplTurnImpl(
   const result = await runHostEngineTurn({
     engine: hostEngine,
     feed: engineFeed,
-    onRead: deps.onEngineRead,
-    onMainRequestStart: () => {
-      if (!abortController.signal.aborted) deps.onMainRequestStart?.()
+    onRead: () => {
+      if (queryGuard.generation !== thisGeneration) return
+      deps.onEngineRead?.()
     },
-    onStatus: deps.onEngineStatus,
+    onMainRequestStart: () => {
+      if (
+        queryGuard.generation !== thisGeneration ||
+        abortController.signal.aborted
+      ) {
+        return
+      }
+      deps.onMainRequestStart?.()
+    },
+    onStatus: compactResult => {
+      if (queryGuard.generation !== thisGeneration) return
+      deps.onEngineStatus?.(compactResult)
+    },
     turnInput,
     newMessages,
     onQueryEvent: event => {
+      if (queryGuard.generation !== thisGeneration) return
       onQueryEvent(event as Parameters<typeof onQueryEvent>[0])
     },
     addNotification: n => {
+      if (queryGuard.generation !== thisGeneration) return
       addNotification({
         key: n.key ?? 'engine-notification',
         text: n.text,
@@ -1299,7 +1343,7 @@ async function executeReplTurnImpl(
     },
   })
 
-  {
+  if (queryGuard.generation === thisGeneration) {
     // densable _runImpl post-query
     const arm = leftArrowDeferRef.current
     if (arm) {
@@ -1422,7 +1466,11 @@ async function executeReplTurnImpl(
     }
   }
 
-  if (process.env.USER_TYPE === 'ant' && apiMetricsRef.current.length > 0) {
+  if (
+    queryGuard.generation === thisGeneration &&
+    process.env.USER_TYPE === 'ant' &&
+    apiMetricsRef.current.length > 0
+  ) {
     const entries = apiMetricsRef.current
 
     const ttfts = entries.map(e => e.ttftMs)
@@ -1460,14 +1508,16 @@ async function executeReplTurnImpl(
     ])
   }
 
-  resetLoadingState()
-  logQueryProfileReport()
-  await onTurnComplete?.(
-    messagesRef.current,
-    typeof result?.terminal_reason === 'string'
-      ? result.terminal_reason
-      : undefined,
-  )
+  if (queryGuard.generation === thisGeneration) {
+    resetLoadingState()
+    logQueryProfileReport()
+    await onTurnComplete?.(
+      messagesRef.current,
+      typeof result?.terminal_reason === 'string'
+        ? result.terminal_reason
+        : undefined,
+    )
+  }
   return result
 }
 
@@ -1647,6 +1697,21 @@ export async function runReplTurn(
   let engineResult: SDKResultMessage | undefined
 
   try {
+    // Capture the previous tail message timestamp BEFORE appending newMessages
+    // so idleRunner.consumeReturnAfterIdle measures true idle time instead of ~0ms.
+    const prevLastMsg = messagesRef.current.at(-1)
+    const prevLastMessageTs =
+      prevLastMsg &&
+      'timestamp' in prevLastMsg &&
+      typeof prevLastMsg.timestamp === 'string'
+        ? Date.parse(prevLastMsg.timestamp)
+        : undefined
+    // Clear any armed idle-compaction timer and abort any in-flight idle
+    // compaction immediately before appending newMessages so it cannot race
+    // this live turn.
+    const idleRunner = getIdleCompactionRunner()
+    idleRunner.clear()
+
     pipeReturnHadErrorRef.current = false
     resetTimingRefs()
     setMessages(oldMessages => [...oldMessages, ...newMessages])
@@ -1677,8 +1742,13 @@ export async function runReplTurn(
       }
     }
 
-    const idleRunner = getIdleCompactionRunner()
-    idleRunner.clear()
+    if (
+      queryGuard.generation !== thisGeneration ||
+      abortController.signal.aborted
+    ) {
+      return true
+    }
+
     const heldSummary = idleRunner.consumeHeldSummary() as MessageType[] | null
     let effectiveLatestMessages = latestMessages
     if (heldSummary && heldSummary.length > 0) {
@@ -1689,16 +1759,9 @@ export async function runReplTurn(
       setMessages(oldMessages => [...injected, ...oldMessages])
       effectiveLatestMessages = [...injected, ...latestMessages]
     }
-    const lastPrevMsg = latestMessages.at(-1)
-    const lastPrevTs =
-      lastPrevMsg &&
-      'timestamp' in lastPrevMsg &&
-      typeof lastPrevMsg.timestamp === 'string'
-        ? Date.parse(lastPrevMsg.timestamp)
-        : undefined
     idleRunner.consumeReturnAfterIdle(
-      lastPrevTs !== undefined && !Number.isNaN(lastPrevTs)
-        ? lastPrevTs
+      prevLastMessageTs !== undefined && !Number.isNaN(prevLastMessageTs)
+        ? prevLastMessageTs
         : undefined,
       tokenCountWithEstimation(effectiveLatestMessages),
     )

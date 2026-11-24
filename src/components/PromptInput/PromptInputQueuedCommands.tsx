@@ -12,6 +12,7 @@ import { useIdeConnectionStatus } from '../../hooks/useIdeConnectionStatus.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { formatSendNowHint } from '../../keybindings/shortcutFormat.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
+import type { NormalizedUserMessage } from '../../types/message.js';
 import type { QueuedCommand } from '../../types/textInputTypes.js';
 import {
   canShowQueueSendNowHint,
@@ -206,6 +207,33 @@ export function computeClassicQueuedMaxRows(terminalRows: number, queuedCount: n
   return Math.max(MIN_QUEUED_PREVIEW_ROWS, Math.floor(budget / queuedCount));
 }
 
+export type PairedQueuedCommandMessage = {
+  message: NormalizedUserMessage;
+  command: QueuedCommand;
+};
+
+/**
+ * Official 2.1.328 `W2` (@319736883): pair every normalized message block with
+ * its originating `QueuedCommand` so multi-block `ContentBlockParam[]` commands
+ * never shift subsequent rows' `ideSelection`, margin, or edit highlight alignment.
+ */
+export function pairQueuedCommandMessages(processedCommands: QueuedCommand[]): PairedQueuedCommandMessage[] {
+  return processedCommands
+    .map(command => {
+      let content = command.value;
+      if (command.mode === 'bash' && typeof content === 'string') {
+        content = `<bash-input>${content}</bash-input>`;
+      }
+      // [Image #N] placeholders are inline in the text value (inserted at
+      // paste time), so the queue preview shows them without stub blocks.
+      return {
+        command,
+        userMessage: createUserMessage({ content, origin: command.origin }),
+      };
+    })
+    .flatMap(({ command, userMessage }) => normalizeMessages([userMessage]).map(message => ({ message, command })));
+}
+
 function PromptInputQueuedCommandsImpl({
   abortController,
   mcpClients,
@@ -227,8 +255,8 @@ function PromptInputQueuedCommandsImpl({
 
   // createUserMessage mints a fresh UUID per call; without memoization, streaming
   // re-renders defeat Message's areMessagePropsEqual (compares uuid) → flicker.
-  // densable Vag: keep processedCommands so queueEditIndex (lJ index) maps to
-  // the visible row via identity (indexOf), not display-list order.
+  // Pair every normalized message block with its originating QueuedCommand
+  // (official W2) so multi-block commands never drift out of alignment.
   const prepared = useMemo(() => {
     if (queuedCommands.length === 0) return null;
     // task-notification is shown via useInboxNotification; most isMeta commands
@@ -240,20 +268,8 @@ function PromptInputQueuedCommandsImpl({
     const visibleCommands = queuedCommands.filter(cmd => isQueuedCommandVisible(cmd));
     if (visibleCommands.length === 0) return null;
     const processedCommands = processQueuedCommands(visibleCommands);
-    return {
-      messages: normalizeMessages(
-        processedCommands.map(cmd => {
-          let content = cmd.value;
-          if (cmd.mode === 'bash' && typeof content === 'string') {
-            content = `<bash-input>${content}</bash-input>`;
-          }
-          // [Image #N] placeholders are inline in the text value (inserted at
-          // paste time), so the queue preview shows them without stub blocks.
-          return createUserMessage({ content, origin: cmd.origin });
-        }),
-      ),
-      processedCommands,
-    };
+    const pairs = pairQueuedCommandMessages(processedCommands);
+    return pairs.length > 0 ? pairs : null;
   }, [queuedCommands]);
 
   const handleSendNowClick = React.useCallback(() => {
@@ -273,11 +289,11 @@ function PromptInputQueuedCommandsImpl({
     return null;
   }
 
-  // densable Vag: YZw=Dln.filter(lJ)[MEc]; yho=processedCommands.indexOf(YZw)
+  // Official lKt: resolve selected editable command by reference and check
+  // whether any paired row belongs to it.
   const selectedCmd =
     queueEditIndex === null ? undefined : queuedCommands.filter(isQueuedCommandEditable)[queueEditIndex];
-  const highlightRow = selectedCmd ? prepared.processedCommands.indexOf(selectedCmd) : -1;
-  const selecting = highlightRow !== -1;
+  const selecting = selectedCmd !== undefined && prepared.some(entry => entry.command === selectedCmd);
 
   const sendNowChord = formatSendNowHint();
   const isFullscreen = isFullscreenEnvEnabled();
@@ -307,25 +323,23 @@ function PromptInputQueuedCommandsImpl({
       </Box>
     ) : null;
 
-  const classicMaxRows = !isFullscreen
-    ? computeClassicQueuedMaxRows(terminalRows, prepared.messages.length)
-    : undefined;
+  const classicMaxRows = !isFullscreen ? computeClassicQueuedMaxRows(terminalRows, prepared.length) : undefined;
 
   return (
     <Box flexDirection="column">
-      {prepared.messages.map((message, i) => {
-        const cmd = prepared.processedCommands[i];
-        const nextCmd = prepared.processedCommands[i + 1];
+      {prepared.map(({ message, command: cmd }, i) => {
+        const prevCmd = i > 0 ? prepared[i - 1]?.command : undefined;
+        const nextCmd = prepared[i + 1]?.command;
         const preview =
-          cmd?.ideSelection !== undefined && !shouldHideQueuedIdeSelectionPreview(cmd) && nextCmd !== cmd
+          cmd.ideSelection !== undefined && !shouldHideQueuedIdeSelectionPreview(cmd) && nextCmd !== cmd
             ? formatQueuedIdeSelection(ideStatus, cmd.ideSelection)
             : null;
         // #135 (2.1.326): in classic renderer, cap long queued prompt height so
         // it never hides Claude's streaming reply or erases scrollback.
-        const rawText = typeof cmd?.value === 'string' ? cmd.value : '';
+        const rawText = typeof cmd.value === 'string' ? cmd.value : '';
         const estCols = Math.max(20, terminalColumns - 4);
         const estLines =
-          classicMaxRows !== undefined && cmd?.mode === 'prompt' && rawText.length > 0
+          classicMaxRows !== undefined && cmd.mode === 'prompt' && rawText.length > 0
             ? rawText.split('\n').reduce((acc, line) => acc + Math.max(1, Math.ceil(line.length / estCols)), 0)
             : 0;
         const hiddenQueuedLines =
@@ -334,7 +348,7 @@ function PromptInputQueuedCommandsImpl({
           <Message
             message={message}
             lookups={EMPTY_LOOKUPS}
-            addMargin={i === 0 || (cmd !== undefined && isQueuedCommandEditable(cmd))}
+            addMargin={i === 0 || (prevCmd !== cmd && isQueuedCommandEditable(cmd))}
             tools={[]}
             commands={[]}
             verbose={false}
@@ -350,9 +364,9 @@ function PromptInputQueuedCommandsImpl({
           <QueuedMessageProvider
             key={i}
             noticeSystemLines={noticeSystemLines}
-            selectionHighlight={selecting ? (i === highlightRow ? 'on' : 'off') : undefined}
+            selectionHighlight={selecting ? (cmd === selectedCmd ? 'on' : 'off') : undefined}
           >
-            {classicMaxRows !== undefined && cmd?.mode === 'prompt' ? (
+            {classicMaxRows !== undefined && cmd.mode === 'prompt' ? (
               <>
                 <Box
                   flexDirection="column"

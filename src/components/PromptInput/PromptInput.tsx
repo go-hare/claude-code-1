@@ -346,6 +346,7 @@ type Props = {
       /** densable resumesStaleQuotaWait — empty Enter substituted A4f. */
       resumesStaleQuotaWait?: boolean;
       sendNow?: boolean;
+      sendQueuedOnly?: boolean;
       queueSubmit?: boolean;
       /** densable Vwr — composer Enter only; omitted for sendNow/queueSubmit. */
       composerEnter?: unknown;
@@ -366,6 +367,7 @@ type Props = {
   helpOpen: boolean;
   setHelpOpen: React.Dispatch<React.SetStateAction<boolean>>;
   hasSuppressedDialogs?: boolean;
+  isDialogParked?: boolean;
   isLocalJSXCommandActive?: boolean;
   onLeftArrowOnEmpty?: () => void;
   takePendingPastes?: () => string[];
@@ -383,6 +385,7 @@ const PROMPT_FOOTER_LINES = 5;
 
 const noopSubscribe = (): (() => void) => () => {};
 const nullDraftSnapshot = (): null => null;
+const EMPTY_TASK_DECORATIONS: Record<string, { content: string }> = {};
 
 // densable 2.1.218 #4: LEFT_ARROW_AGAIN_TIMEOUT removed — idp/sdp owns arm window (Dzs=3000)
 
@@ -588,6 +591,7 @@ function PromptInput({
   helpOpen,
   setHelpOpen,
   hasSuppressedDialogs,
+  isDialogParked = false,
   isLocalJSXCommandActive = false,
   onLeftArrowOnEmpty: onLeftArrowOnEmptyProp,
   takePendingPastes,
@@ -611,8 +615,10 @@ function PromptInput({
   // system, so treat them as a modal overlay here to stop navigation keys from
   // leaking into TextInput/footer handlers and stacking a second dialog.
   // densable single-host: Host blocking open (permission / managed / …) keeps
-  // the draft mounted but must not steal keys from DialogHost Select.
-  const hostBlocksKeys = useHasBlockingOpenDialogs();
+  // the draft mounted but must not steal keys from DialogHost Select — EXCEPT
+  // when DialogHost is parked behind a draft (isDialogParked), in which case
+  // PromptInput must remain interactive so the user can send or clear the draft.
+  const hostBlocksKeys = useHasBlockingOpenDialogs() && !isDialogParked;
   const isModalOverlayActive = useIsModalOverlayActive() || isLocalJSXCommandActive || hostBlocksKeys;
   const { dispatchPasteEvent } = useApp();
   const inputTakesFocus = !isModalOverlayActive && !isSearchingHistory && !helpOpen && !isSideQuestionVisible;
@@ -887,7 +893,7 @@ function PromptInput({
   const speculationSessionTimeSavedMs = useAppState(s => s.speculationSessionTimeSavedMs);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const viewSelectionMode = useAppState(s => s.viewSelectionMode);
-  const showSpinnerTree = useAppState(s => s.expandedView) === 'teammates';
+  const showSpinnerTree = useAppState(s => s.expandedView === 'teammates');
   const buddyEnabled = isBuddyEnabled();
   const { companion: _companion, companionMuted } = buddyEnabled
     ? getGlobalConfig()
@@ -978,6 +984,29 @@ function PromptInput({
     // do not collide with live nextPasteIdRef minting.
     seedPasteIdCounter(nextPasteIdRef.current);
   }
+  const advanceNextPasteIdAbove = useCallback((contents: Record<number, PastedContent>) => {
+    let maxId = 0;
+    for (const key of Object.keys(contents)) {
+      const id = Number(key);
+      if (Number.isFinite(id) && id > maxId) {
+        maxId = id;
+      }
+    }
+    if (maxId >= nextPasteIdRef.current) {
+      nextPasteIdRef.current = maxId + 1;
+      seedPasteIdCounter(nextPasteIdRef.current);
+    }
+  }, []);
+  useEffect(() => {
+    advanceNextPasteIdAbove(pastedContents);
+  }, [pastedContents, advanceNextPasteIdAbove]);
+  const allocatePasteId = useCallback((): number => {
+    advanceNextPasteIdAbove(pastedContents);
+    advanceNextPasteIdAbove(pastedContentsRef.current);
+    const id = nextPasteIdRef.current++;
+    seedPasteIdCounter(nextPasteIdRef.current);
+    return id;
+  }, [pastedContents, advanceNextPasteIdAbove]);
   // Armed by onImagePaste; if the very next keystroke is a non-space
   // printable, inputFilter prepends a space before it. Any other input
   // (arrow, escape, backspace, paste, space) disarms without inserting.
@@ -992,7 +1021,7 @@ function PromptInput({
   // First ↓ selects the pill, second ↓ moves to row 0. Prevents double-select
   // of pill + row when both bg tasks (pill) and forked agents (rows) are visible.
   const coordinatorTaskIndex = useAppState(s => s.coordinatorTaskIndex);
-  const taskDecorations = useAppState(s => s.taskDecorations ?? {});
+  const taskDecorations = useAppState(s => s.taskDecorations ?? EMPTY_TASK_DECORATIONS);
   const idleTeammatesExpanded = useAppState(s => s.idleTeammatesExpanded ?? false);
   const setCoordinatorTaskIndex = useCallback(
     (v: number | ((prev: number) => number)) =>
@@ -1530,13 +1559,23 @@ function PromptInput({
     debounceMs: 1000,
   });
 
+  const handleTruncatePastedContents = useCallback(
+    (nextContents: Record<number, PastedContent>) => {
+      advanceNextPasteIdAbove(nextContents);
+      pastedContentsRef.current = nextContents;
+      setPastedContents(nextContents);
+    },
+    [advanceNextPasteIdAbove, setPastedContents],
+  );
+
   useMaybeTruncateInput({
     input,
     pastedContents,
     onInputChange: trackAndSetInput,
     setCursorOffset,
-    setPastedContents,
+    setPastedContents: handleTruncatePastedContents,
     keepsFullTextRef,
+    nextPasteIdRef,
   });
 
   const defaultPlaceholder = usePromptInputPlaceholder({
@@ -1568,17 +1607,17 @@ function PromptInput({
       // Check if this is a single character insertion at the start
       const isSingleCharInsertion = value.length === input.length + 1;
       const insertedAtStart = cursorOffset === 0;
-      const mode = getModeFromInput(value);
+      const nextMode = getModeFromInput(value);
 
-      if (insertedAtStart && mode !== 'prompt') {
+      if (mode === 'prompt' && insertedAtStart && nextMode !== 'prompt') {
         setAppState(prev => (prev.footerSelection === null ? prev : { ...prev, footerSelection: null }));
         if (isSingleCharInsertion) {
-          onModeChange(mode);
+          onModeChange(nextMode);
           return;
         }
         // Multi-char insertion into empty input (e.g. tab-accepting "! gcloud auth login")
         if (input.length === 0) {
-          onModeChange(mode);
+          onModeChange(nextMode);
           const valueWithoutMode = getValueFromInput(value).replaceAll('\t', '    ');
           pushToBuffer(input, cursorOffset, pastedContents);
           if (isKeystroke) {
@@ -1609,7 +1648,17 @@ function PromptInput({
 
       trackAndSetInput(processedValue, undefined, { kind: 'composer' });
     },
-    [trackAndSetInput, onModeChange, input, cursorOffset, pushToBuffer, pastedContents, dismissStashHint, setAppState],
+    [
+      trackAndSetInput,
+      onModeChange,
+      mode,
+      input,
+      cursorOffset,
+      pushToBuffer,
+      pastedContents,
+      dismissStashHint,
+      setAppState,
+    ],
   );
 
   const onChange = useCallback(
@@ -1869,7 +1918,29 @@ function PromptInput({
       // submit instead of treating Enter as openSelected only.
       const state = store.getState();
       // densable Is: lte() && queueEditIndex !== null && Io() → consume Enter
-      if (isKbCohesionFixesEnabled() && state.queueEditIndex !== null && popSelectedCommandFromQueue()) {
+      if (
+        !submitOptions?.sendNow &&
+        isKbCohesionFixesEnabled() &&
+        state.queueEditIndex !== null &&
+        popSelectedCommandFromQueue()
+      ) {
+        return;
+      }
+      // Official 2.1.328 `hW`: empty chat:sendNow (or sendNow while queueEditIndex
+      // is active) bypasses footerSelection, promptSuggestion, stale-quota
+      // substitution, and the empty-input guard so SubmitController can execute
+      // trySendQueuedNowKey / named-agent sendQueuedNow.
+      if (submitOptions?.sendNow && (state.queueEditIndex !== null || (inputParam.trim() === '' && !hasImages))) {
+        await onSubmitProp(
+          '',
+          {
+            setCursorOffset,
+            clearBuffer,
+            resetHistory,
+          },
+          undefined,
+          { sendNow: true, sendQueuedOnly: true },
+        );
         return;
       }
       if (state.footerSelection && footerItemsRef.current.includes(state.footerSelection)) {
@@ -1911,6 +1982,7 @@ function PromptInput({
         liveInputRef.current = stripped.input;
         setCursorOffset(stripped.input.length);
         if (stripped.pastedContents !== activePastedContents) {
+          setPastedContents(stripped.pastedContents);
           pastedContentsRef.current = stripped.pastedContents;
           activePastedContents = stripped.pastedContents;
         }
@@ -1927,6 +1999,23 @@ function PromptInput({
           return;
         }
         inputParam = stripped.input;
+      }
+
+      // Official 2.1.328 `hW`: empty chat:sendNow bypasses promptSuggestion,
+      // stale-quota substitution, and the empty-input guard so SubmitController
+      // can execute trySendQueuedNowKey / named-agent sendQueuedNow.
+      if (submitOptions?.sendNow && inputParam.trim() === '' && !hasImages) {
+        await onSubmitProp(
+          '',
+          {
+            setCursorOffset,
+            clearBuffer,
+            resetHistory,
+          },
+          undefined,
+          { sendNow: true, sendQueuedOnly: true },
+        );
+        return;
       }
 
       // If input is empty OR matches the suggestion, submit it
@@ -2068,6 +2157,18 @@ function PromptInput({
           },
           activePastedContents,
         );
+        if (submitOptions?.sendNow && activeAgent.type === 'named_agent') {
+          await onSubmitProp(
+            '',
+            {
+              setCursorOffset,
+              clearBuffer,
+              resetHistory,
+            },
+            undefined,
+            { sendNow: true, sendQueuedOnly: true },
+          );
+        }
         return;
       }
 
@@ -2109,6 +2210,7 @@ function PromptInput({
       removeNotification,
       popSelectedCommandFromQueue,
       clearExpandPasteHint,
+      setPastedContents,
     ],
   );
 
@@ -2247,27 +2349,43 @@ function PromptInput({
 
   // Track if prompt suggestion should be shown (computed later with terminal width).
   // Hidden in teammate view — suggestion is leader-context only.
-  const showPromptSuggestion = mode === 'prompt' && suggestions.length === 0 && promptSuggestion && !viewingAgentTaskId;
-  if (showPromptSuggestion) {
-    markShown();
-  }
+  const showPromptSuggestion = Boolean(
+    mode === 'prompt' && suggestions.length === 0 && promptSuggestion && !viewingAgentTaskId,
+  );
+  const shouldSuppressSuggestionForTiming = Boolean(
+    promptSuggestionState.text && !promptSuggestion && promptSuggestionState.shownAt === 0 && !viewingAgentTaskId,
+  );
+  const promptSuggestionUnshown = promptSuggestionState.shownAt === 0;
+  useEffect(() => {
+    if (showPromptSuggestion && promptSuggestionUnshown) {
+      markShown();
+    }
+  }, [showPromptSuggestion, promptSuggestionUnshown, promptSuggestionState.text, markShown]);
 
   // If suggestion was generated but can't be shown due to timing, log suppression.
   // Exclude teammate view: markShown() is gated above, so shownAt stays 0 there —
   // but that's not a timing failure, the suggestion is valid when returning to leader.
-  if (promptSuggestionState.text && !promptSuggestion && promptSuggestionState.shownAt === 0 && !viewingAgentTaskId) {
+  useEffect(() => {
+    if (!shouldSuppressSuggestionForTiming || !promptSuggestionState.text) {
+      return;
+    }
     logSuggestionSuppressed('timing', promptSuggestionState.text);
-    setAppState(prev => ({
-      ...prev,
-      promptSuggestion: {
-        text: null,
-        promptId: null,
-        shownAt: 0,
-        acceptedAt: 0,
-        generationRequestId: null,
-      },
-    }));
-  }
+    setAppState(prev => {
+      if (!prev.promptSuggestion.text || prev.promptSuggestion.shownAt !== 0) {
+        return prev;
+      }
+      return {
+        ...prev,
+        promptSuggestion: {
+          text: null,
+          promptId: null,
+          shownAt: 0,
+          acceptedAt: 0,
+          generationRequestId: null,
+        },
+      };
+    });
+  }, [shouldSuppressSuggestionForTiming, promptSuggestionState.text, setAppState]);
 
   // #147 (2.1.326): capture cursor anchor synchronously when async image read starts
   // so typing right after pasting doesn't split the word with `[Image #N]`.
@@ -2298,7 +2416,7 @@ function PromptInput({
     clearExpandPasteHint();
     onModeChange('prompt');
 
-    const pasteId = nextPasteIdRef.current++;
+    const pasteId = allocatePasteId();
 
     const newContent: PastedContent = {
       id: pasteId,
@@ -2466,7 +2584,7 @@ function PromptInput({
     // Use special handling for long pasted text (>PASTE_THRESHOLD chars)
     // or if it exceeds the number of lines we want to show
     if (text.length > PASTE_THRESHOLD || numLines > maxLines) {
-      const pasteId = nextPasteIdRef.current++;
+      const pasteId = allocatePasteId();
 
       const newContent: PastedContent = {
         id: pasteId,
@@ -3201,152 +3319,171 @@ function PromptInput({
     },
   );
 
-  useInput((char, key) => {
-    // Skip all input handling when a full-screen dialog is open. These dialogs
-    // render via early return, but hooks run unconditionally — so without this
-    // guard, Escape inside a dialog leaks to the double-press message-selector.
-    if (showBashesDialog || showTeamsDialog || showQuickOpen || showGlobalSearch || showHistoryPicker) {
-      return;
-    }
+  const isRawPromptInputActive =
+    !isModalOverlayActive &&
+    !showBashesDialog &&
+    !showTeamsDialog &&
+    !showQuickOpen &&
+    !showGlobalSearch &&
+    !showHistoryPicker &&
+    !showBridgeDialog &&
+    !showModelPicker &&
+    !showFastModePicker &&
+    !showThinkingToggle &&
+    !isSearchingHistory;
 
-    // densable SQw: backspace/delete/ctrl+u|w|k clears queueEditIndex
-    if (
-      store.getState().queueEditIndex !== null &&
-      (key.backspace || key.delete || (key.ctrl && (char === 'u' || char === 'w' || char === 'k')))
-    ) {
-      setQueueEditIndex(null);
-    }
-
-    // Detect failed Alt shortcuts on macOS (Option key produces special characters)
-    // Official 2.1.323 (#2100): only show hint when prompt is empty (`D.value === ""`),
-    // so typing ø or π inside words on Danish/Norwegian/Faroese/Greek layouts does not
-    // trigger the Option-key hint.
-    if (getPlatform() === 'macos' && isMacosOptionChar(char) && liveInputRef.current === '') {
-      const shortcut = MACOS_OPTION_SPECIAL_CHARS[char];
-      const terminalName = getNativeCSIuTerminalDisplayName();
-      const jsx = terminalName ? (
-        <Text dimColor>
-          To enable {shortcut}, set <Text bold>Option as Meta</Text> in {terminalName} preferences (⌘,)
-        </Text>
-      ) : (
-        <Text dimColor>To enable {shortcut}, run /terminal-setup</Text>
-      );
-      addNotification({
-        key: 'option-meta-hint',
-        jsx,
-        priority: 'immediate',
-        timeoutMs: 5000,
-      });
-      // Don't return - let the character be typed so user sees the issue
-    }
-
-    // Footer navigation is handled via useKeybindings above (Footer context)
-
-    // NOTE: ctrl+_, ctrl+g, ctrl+s are handled via Chat context keybindings above
-
-    // Type-to-exit footer: printable chars while a pill is selected refocus
-    // the input and type the char. Nav keys are captured by useKeybindings
-    // above, so anything reaching here is genuinely not a footer action.
-    // onChange clears footerSelection, so no explicit deselect.
-    // Bare \n is name "enter" (key.return is false). Windows ConPTY often
-    // delivers Enter as \r\n — the \r already ran footer:openSelected; if
-    // \n type-to-exits it inserts a newline and clears the pill (flash,
-    // first Enter looks like it missed).
-    if (footerItemSelected && char && char !== '\n' && !key.ctrl && !key.meta && !key.escape && !key.return) {
-      const liveVal = liveInputRef.current;
-      const liveOff = cursorOffsetRef.current;
-      const { newInput, newOffset } = computeNfcInsertResult(liveVal, liveOff, char);
-      setAppState(prev =>
-        prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
-      );
-      onChange(newInput);
-      const enteredMode =
-        liveOff === 0 && newInput.length === liveVal.length + 1 && getModeFromInput(newInput) !== 'prompt';
-      if (!enteredMode) {
-        cursorOffsetRef.current = newOffset;
-        setCursorOffset(newOffset);
-      }
-      return;
-    }
-
-    // densable Ys: (Xe===0 || (lte() && escape)) && (escape || VEc || ctrl+u)
-    if (
-      (cursorOffset === 0 || (isKbCohesionFixesEnabled() && key.escape)) &&
-      (key.escape || key.backspace || key.delete || (key.ctrl && char === 'u'))
-    ) {
-      onModeChange('prompt');
-      setHelpOpen(false);
-    }
-
-    // Exit help mode when backspace is pressed and input is empty
-    if (helpOpen && input === '' && (key.backspace || key.delete)) {
-      setHelpOpen(false);
-    }
-
-    // esc is a little overloaded:
-    // - when we're loading a response, it's used to cancel the request
-    // - otherwise, it's used to show the message selector
-    // - when double pressed, it's used to clear the input
-    // - when input is empty, pop from command queue
-
-    // Handle ESC key press
-    if (key.escape) {
-      // Abort active speculation
-      if (speculation.status === 'active') {
-        abortSpeculation(setAppState);
+  useInput(
+    (char, key) => {
+      // Skip all input handling when any modal, dialog, picker, or history search
+      // is active so Escape / characters cannot leak into PromptInput or trigger
+      // double-Esc Rewind while a dialog is in the foreground.
+      if (!isRawPromptInputActive) {
         return;
       }
 
-      // Dismiss side question response if visible
-      if (isSideQuestionVisible && onDismissSideQuestion) {
-        onDismissSideQuestion();
-        return;
-      }
-
-      // densable $l: Esc while selecting a queued row clears index first
-      // (before help-close) so highlight does not survive an extra Esc.
-      if (store.getState().queueEditIndex !== null) {
+      // densable SQw: backspace/delete/ctrl+u|w|k clears queueEditIndex
+      if (
+        store.getState().queueEditIndex !== null &&
+        (key.backspace || key.delete || (key.ctrl && (char === 'u' || char === 'w' || char === 'k')))
+      ) {
         setQueueEditIndex(null);
+      }
+
+      // Detect failed Alt shortcuts on macOS (Option key produces special characters)
+      // Official 2.1.323 (#2100): only show hint when prompt is empty (`D.value === ""`),
+      // so typing ø or π inside words on Danish/Norwegian/Faroese/Greek layouts does not
+      // trigger the Option-key hint.
+      if (getPlatform() === 'macos' && isMacosOptionChar(char) && liveInputRef.current === '') {
+        const shortcut = MACOS_OPTION_SPECIAL_CHARS[char];
+        const terminalName = getNativeCSIuTerminalDisplayName();
+        const jsx = terminalName ? (
+          <Text dimColor>
+            To enable {shortcut}, set <Text bold>Option as Meta</Text> in {terminalName} preferences (⌘,)
+          </Text>
+        ) : (
+          <Text dimColor>To enable {shortcut}, run /terminal-setup</Text>
+        );
+        addNotification({
+          key: 'option-meta-hint',
+          jsx,
+          priority: 'immediate',
+          timeoutMs: 5000,
+        });
+        // Don't return - let the character be typed so user sees the issue
+      }
+
+      // Footer navigation is handled via useKeybindings above (Footer context)
+
+      // NOTE: ctrl+_, ctrl+g, ctrl+s are handled via Chat context keybindings above
+
+      // Type-to-exit footer: printable chars while a pill is selected refocus
+      // the input and type the char. Nav keys are captured by useKeybindings
+      // above, so anything reaching here is genuinely not a footer action.
+      // onChange clears footerSelection, so no explicit deselect.
+      // Bare \n is name "enter" (key.return is false). Windows ConPTY often
+      // delivers Enter as \r\n — the \r already ran footer:openSelected; if
+      // \n type-to-exits it inserts a newline and clears the pill (flash,
+      // first Enter looks like it missed).
+      if (footerItemSelected && char && char !== '\n' && !key.ctrl && !key.meta && !key.escape && !key.return) {
+        const liveVal = liveInputRef.current;
+        const liveOff = cursorOffsetRef.current;
+        const { newInput, newOffset } = computeNfcInsertResult(liveVal, liveOff, char);
+        setAppState(prev =>
+          prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
+        );
+        onChange(newInput);
+        const enteredMode =
+          mode === 'prompt' &&
+          liveOff === 0 &&
+          newInput.length === liveVal.length + 1 &&
+          getModeFromInput(newInput) !== 'prompt';
+        if (!enteredMode) {
+          cursorOffsetRef.current = newOffset;
+          setCursorOffset(newOffset);
+        }
         return;
       }
 
-      // Close help menu if open
-      if (helpOpen) {
+      // densable Ys: (Xe===0 || (lte() && escape)) && (escape || VEc || ctrl+u)
+      if (
+        (cursorOffset === 0 || (isKbCohesionFixesEnabled() && key.escape)) &&
+        (key.escape || key.backspace || key.delete || (key.ctrl && char === 'u'))
+      ) {
+        onModeChange('prompt');
         setHelpOpen(false);
-        return;
       }
 
-      // Footer selection clearing is now handled via Footer context keybindings
-      // (footer:clearSelection action bound to escape)
-      // If a footer item is selected, let the Footer keybinding handle it
-      if (footerItemSelected) {
-        return;
+      // Exit help mode when backspace is pressed and input is empty
+      if (helpOpen && input === '' && (key.backspace || key.delete)) {
+        setHelpOpen(false);
       }
 
-      // #109 (2.1.326): never pop main conversation's queued commands on Esc
-      // while viewing a subagent or teammate.
-      if (!isKbCohesionFixesEnabled() && !viewingAgentTaskId) {
-        const hasEditable = queuedCommands.some(isQueuedCommandEditable);
-        if (
-          hasEditable &&
-          (popAllCommandsFromQueue() ||
-            !(queuedCommands.some(isQueuedCommandEditable) && liveInputRef.current === input))
-        ) {
+      // esc is a little overloaded:
+      // - when we're loading a response, it's used to cancel the request
+      // - otherwise, it's used to show the message selector
+      // - when double pressed, it's used to clear the input
+      // - when input is empty, pop from command queue
+
+      // Handle ESC key press
+      if (key.escape) {
+        // Abort active speculation
+        if (speculation.status === 'active') {
+          abortSpeculation(setAppState);
           return;
+        }
+
+        // Dismiss side question response if visible
+        if (isSideQuestionVisible && onDismissSideQuestion) {
+          onDismissSideQuestion();
+          return;
+        }
+
+        // densable $l: Esc while selecting a queued row clears index first
+        // (before help-close) so highlight does not survive an extra Esc.
+        if (store.getState().queueEditIndex !== null) {
+          setQueueEditIndex(null);
+          return;
+        }
+
+        // Close help menu if open
+        if (helpOpen) {
+          setHelpOpen(false);
+          return;
+        }
+
+        // Footer selection clearing is now handled via Footer context keybindings
+        // (footer:clearSelection action bound to escape)
+        // If a footer item is selected, let the Footer keybinding handle it
+        if (footerItemSelected) {
+          return;
+        }
+
+        // #109 (2.1.326): never pop main conversation's queued commands on Esc
+        // while viewing a subagent or teammate.
+        if (!isKbCohesionFixesEnabled() && !viewingAgentTaskId) {
+          const hasEditable = queuedCommands.some(isQueuedCommandEditable);
+          if (
+            hasEditable &&
+            (popAllCommandsFromQueue() ||
+              !(queuedCommands.some(isQueuedCommandEditable) && liveInputRef.current === input))
+          ) {
+            return;
+          }
+        }
+
+        // #167 (2.1.326): do not open Rewind from key-repeat Esc right after
+        // holding Esc cleared typed text.
+        if (messages.length > 0 && !input && !isLoading && Date.now() - lastNonEmptyEscAtRef.current >= 800) {
+          doublePressEscFromEmpty();
         }
       }
 
-      // #167 (2.1.326): do not open Rewind from key-repeat Esc right after
-      // holding Esc cleared typed text.
-      if (messages.length > 0 && !input && !isLoading && Date.now() - lastNonEmptyEscAtRef.current >= 800) {
-        doublePressEscFromEmpty();
+      if (key.return && helpOpen) {
+        setHelpOpen(false);
       }
-    }
-
-    if (key.return && helpOpen) {
-      setHelpOpen(false);
-    }
-  });
+    },
+    { isActive: isRawPromptInputActive },
+  );
 
   const tasksV2 = useTasksV2();
   const hideSessionTitle = hideSessionTitleFromTasks(tasksV2);

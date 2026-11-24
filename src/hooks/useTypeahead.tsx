@@ -553,9 +553,23 @@ export function useTypeahead({
   const bashPathNoSlashInputRef = useRef<string | null>(null);
   // densable GtS previous-input snapshot for inline :name: completion
   const previousInputForEmojiRef = useRef<string | undefined>(undefined);
+  // Live input/mode refs and monotonic request IDs for async staleness guards
+  const latestInputRef = useRef(input);
+  latestInputRef.current = input;
+  const latestModeRef = useRef(mode);
+  latestModeRef.current = mode;
+  if (mode !== 'bash') {
+    latestBashInputRef.current = '';
+  }
+  const latestDirRequestIdRef = useRef(0);
+  const latestCustomTitleRequestIdRef = useRef(0);
+  const latestTabRequestIdRef = useRef(0);
 
   // Clear all suggestions
   const clearSuggestions = useCallback(() => {
+    latestDirRequestIdRef.current++;
+    latestCustomTitleRequestIdRef.current++;
+    latestTabRequestIdRef.current++;
     setSuggestionsState(() => ({
       commandArgumentHint: undefined,
       suggestions: [],
@@ -687,32 +701,38 @@ export function useTypeahead({
       }
 
       // Bash mode: check for history-based ghost text completion
-      if (mode === 'bash' && value.trim()) {
+      if (mode === 'bash') {
         latestBashInputRef.current = value;
-        const historyMatch = await getShellHistoryCompletion(value);
-        // Discard stale results if input changed while waiting
-        if (latestBashInputRef.current !== value) {
-          return;
-        }
-        if (historyMatch) {
-          setInlineGhostText({
-            text: historyMatch.suffix,
-            fullCommand: historyMatch.fullCommand,
-            insertPosition: value.length,
-          });
-          // Clear dropdown suggestions when showing ghost text
-          setSuggestionsState(() => ({
-            commandArgumentHint: undefined,
-            suggestions: [],
-            selectedSuggestion: -1,
-          }));
-          setSuggestionType('none');
-          setMaxColumnWidth(undefined);
-          return;
-        } else {
-          // No history match, clear ghost text
+        if (!value.trim()) {
           setInlineGhostText(undefined);
+        } else {
+          const historyMatch = await getShellHistoryCompletion(value);
+          // Discard stale results if mode left bash or input changed while waiting
+          if (latestModeRef.current !== 'bash' || latestBashInputRef.current !== value) {
+            return;
+          }
+          if (historyMatch) {
+            setInlineGhostText({
+              text: historyMatch.suffix,
+              fullCommand: historyMatch.fullCommand,
+              insertPosition: value.length,
+            });
+            // Clear dropdown suggestions when showing ghost text
+            setSuggestionsState(() => ({
+              commandArgumentHint: undefined,
+              suggestions: [],
+              selectedSuggestion: -1,
+            }));
+            setSuggestionType('none');
+            setMaxColumnWidth(undefined);
+            return;
+          } else {
+            // No history match, clear ghost text
+            setInlineGhostText(undefined);
+          }
         }
+      } else {
+        latestBashInputRef.current = '';
       }
 
       // Check for @ to trigger team member / named subagent / peer session suggestions
@@ -911,7 +931,15 @@ export function useTypeahead({
             return;
           }
 
+          const dirReqId = ++latestDirRequestIdRef.current;
           const dirSuggestions = await getDirectoryCompletions(args);
+          if (
+            dirReqId !== latestDirRequestIdRef.current ||
+            latestInputRef.current !== value ||
+            latestModeRef.current !== mode
+          ) {
+            return;
+          }
           if (dirSuggestions.length > 0) {
             setSuggestionsState(prev => ({
               suggestions: dirSuggestions,
@@ -939,9 +967,17 @@ export function useTypeahead({
           const { args } = parsedCommand;
 
           // Get custom title suggestions using partial match
+          const titleReqId = ++latestCustomTitleRequestIdRef.current;
           const matches = await searchSessionsByCustomTitle(args, {
             limit: 10,
           });
+          if (
+            titleReqId !== latestCustomTitleRequestIdRef.current ||
+            latestInputRef.current !== value ||
+            latestModeRef.current !== mode
+          ) {
+            return;
+          }
 
           const suggestions = matches.map(log => {
             const sessionId = getSessionIdFromLog(log);
@@ -1388,8 +1424,13 @@ export function useTypeahead({
             setCursorOffset,
           );
           // Don't clear suggestions so user can continue typing or select a specific option
-          // Instead, update for the new prefix
-          void updateSuggestions(input.replace(completionToken.token, replacementValue), cursorOffset);
+          // Instead, update for the new prefix at the exact token position and updated cursor
+          const nextInput =
+            input.slice(0, completionToken.startPos) +
+            replacementValue +
+            input.slice(completionToken.startPos + completionToken.token.length);
+          const nextCursorOffset = completionToken.startPos + replacementValue.length;
+          void updateSuggestions(nextInput, nextCursorOffset);
         } else if (index < suggestions.length) {
           // Otherwise, apply the selected suggestion
           const suggestion = suggestions[index];
@@ -1419,11 +1460,23 @@ export function useTypeahead({
     } else if (input.trim() !== '') {
       let suggestionType: SuggestionType;
       let suggestionItems: SuggestionItem[];
+      const snapInput = input;
+      const snapCursorOffset = cursorOffset;
+      const snapMode = mode;
+      const tabReqId = ++latestTabRequestIdRef.current;
 
       if (mode === 'bash') {
         suggestionType = 'shell';
         // This should be very fast, taking <10ms
-        const bashSuggestions = await generateBashSuggestions(input, cursorOffset);
+        const bashSuggestions = await generateBashSuggestions(snapInput, snapCursorOffset);
+        if (
+          tabReqId !== latestTabRequestIdRef.current ||
+          latestInputRef.current !== snapInput ||
+          cursorOffsetRef.current !== snapCursorOffset ||
+          latestModeRef.current !== snapMode
+        ) {
+          return;
+        }
         if (bashSuggestions.length === 1) {
           // If single suggestion, apply it immediately
           const suggestion = bashSuggestions[0];
@@ -1431,8 +1484,8 @@ export function useTypeahead({
             const metadata = suggestion.metadata as { completionType: ShellCompletionType } | undefined;
             applyShellSuggestion(
               suggestion,
-              input,
-              cursorOffset,
+              snapInput,
+              snapCursorOffset,
               onInputChange,
               setCursorOffset,
               metadata?.completionType,
@@ -1445,13 +1498,21 @@ export function useTypeahead({
       } else {
         suggestionType = 'file';
         // If no suggestions, fetch file and MCP resource suggestions
-        const completionInfo = extractCompletionToken(input, cursorOffset, true);
+        const completionInfo = extractCompletionToken(snapInput, snapCursorOffset, true);
         if (completionInfo) {
           // If token starts with @, search without the @ prefix
           const isAtSymbol = completionInfo.token.startsWith('@');
           const searchToken = isAtSymbol ? completionInfo.token.substring(1) : completionInfo.token;
 
           suggestionItems = await generateUnifiedSuggestions(searchToken, mcpResources, agents, isAtSymbol);
+          if (
+            tabReqId !== latestTabRequestIdRef.current ||
+            latestInputRef.current !== snapInput ||
+            cursorOffsetRef.current !== snapCursorOffset ||
+            latestModeRef.current !== snapMode
+          ) {
+            return;
+          }
         } else {
           suggestionItems = [];
         }
@@ -1760,8 +1821,18 @@ export function useTypeahead({
         const word = input.slice(wordStart, cursorOffset);
         const snapInput = input;
         const snapOffset = cursorOffset;
+        const snapMode = mode;
+        const tabReqId = ++latestTabRequestIdRef.current;
         void getPathCompletions(word, { keepDotPrefix: true })
           .then(matches => {
+            if (
+              tabReqId !== latestTabRequestIdRef.current ||
+              latestInputRef.current !== snapInput ||
+              cursorOffsetRef.current !== snapOffset ||
+              latestModeRef.current !== snapMode
+            ) {
+              return;
+            }
             if (matches.length === 1 && matches[0]) {
               const applied = applyBashPathSuggestion(matches[0], snapInput, snapOffset);
               onInputChange(applied.value);
