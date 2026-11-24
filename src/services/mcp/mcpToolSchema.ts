@@ -12,6 +12,12 @@
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { APIError } from '@anthropic-ai/sdk'
+import type {
+  JsonSchemaType,
+  JsonSchemaValidator,
+  jsonSchemaValidator,
+} from '@modelcontextprotocol/client'
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv'
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { logEvent } from '../analytics/index.js'
@@ -62,6 +68,63 @@ const PRESERVE_KEYS = [
   'title',
 ] as const
 const DRAFT_2020_12 = 'https://json-schema.org/draft/2020-12/schema'
+
+/**
+ * Official 2.1.328 (`Nh` @chunk@335138039.js@146748): legacy JSON Schema
+ * `$schema` dialect URIs stripped prior to AJV 2020-12 validation so older
+ * MCP servers declaring draft-04/06/07/2019-09 or unversioned `$schema` do
+ * not fail schema compilation.
+ */
+export const LEGACY_JSON_SCHEMA_DIALECT_URIS: ReadonlySet<string> = new Set([
+  'http://json-schema.org/draft-04/schema',
+  'https://json-schema.org/draft-04/schema',
+  'http://json-schema.org/draft-06/schema',
+  'https://json-schema.org/draft-06/schema',
+  'http://json-schema.org/draft-07/schema',
+  'https://json-schema.org/draft-07/schema',
+  'http://json-schema.org/draft/2019-09/schema',
+  'https://json-schema.org/draft/2019-09/schema',
+  'http://json-schema.org/schema',
+  'https://json-schema.org/schema',
+])
+
+export function isLegacyJsonSchemaDialectUri(uri: unknown): boolean {
+  return (
+    typeof uri === 'string' &&
+    LEGACY_JSON_SCHEMA_DIALECT_URIS.has(uri.replace(/#$/, ''))
+  )
+}
+
+/**
+ * Official 2.1.328 (`vi` @chunk@335138039.js@146748): strip legacy JSON Schema
+ * `$schema` dialect URIs (draft-04/06/07/2019-09 / unversioned) before AJV
+ * compilation while leaving draft 2020-12 and custom `$schema` values intact.
+ */
+export function stripLegacyJsonSchemaDialect<T extends Record<string, unknown>>(
+  schema: T,
+): T {
+  if (!isLegacyJsonSchemaDialectUri(schema.$schema)) {
+    return schema
+  }
+  const { $schema: _dropped, ...rest } = schema
+  return rest as T
+}
+
+/**
+ * Official 2.1.328 (`LegacyDialectToleratingValidator` / `class vi`
+ * @chunk@335138039.js@146748): AJV jsonSchemaValidator wrapper that strips
+ * legacy `$schema` dialect URIs before delegating to `AjvJsonSchemaValidator`.
+ */
+export class LegacyDialectToleratingValidator implements jsonSchemaValidator {
+  private readonly inner = new AjvJsonSchemaValidator()
+
+  getValidator<T>(schema: JsonSchemaType): JsonSchemaValidator<T> {
+    const stripped = stripLegacyJsonSchemaDialect(
+      schema as Record<string, unknown>,
+    )
+    return this.inner.getValidator<T>(stripped as JsonSchemaType)
+  }
+}
 
 export const TENGU_MCP_NORMALIZE_ROOT_COMBINATORS =
   'tengu_mcp_normalize_root_combinators'

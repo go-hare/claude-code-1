@@ -6,9 +6,11 @@ import { randomUUID } from 'crypto'
 import { SAME_CWD_CHILD_NOTE } from 'src/utils/agentSharesCwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import {
+  clearCommandScopedAllowRules,
   getAutoModeUnavailableReason,
   isBypassPermissionsModeDisabled,
 } from 'src/utils/permissions/permissionSetup.js'
+import { permissionRuleValueFromString } from 'src/utils/permissions/permissionRuleParser.js'
 import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
 import type { HostPermissionLayer } from 'src/engine/hostPermissionLayers.js'
 import {
@@ -52,15 +54,29 @@ import {
   connectToServer,
   fetchToolsForClient,
 } from 'src/services/mcp/client.js'
-import { getMcpConfigByName } from 'src/services/mcp/config.js'
+import { isCliOwnedConfig } from 'src/services/mcp/cliOwnedConfigs.js'
+import {
+  doesEnterpriseMcpConfigExist,
+  filterMcpServersByPolicy,
+  getMcpConfigByName,
+  getMcpServerPolicyBlockReason,
+} from 'src/services/mcp/config.js'
+import { getMcpConnectTimeoutMs } from 'src/services/mcp/mcpConnectTimeout.js'
+import { normalizeNameForMCP } from 'src/services/mcp/normalization.js'
 import type {
+  McpServerConfig,
   MCPServerConnection,
   ScopedMcpServerConfig,
 } from 'src/services/mcp/types.js'
+import { getProjectMcpServerStatusStrict } from 'src/services/mcp/utils.js'
+import { isClaudeInChromeMCPServer } from 'src/utils/claudeInChrome/common.js'
+import { isComputerUseMCPServer } from 'src/utils/computerUse/common.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import {
   dedupeToolsByName,
   toolMatchesName,
   type Tool,
+  type ToolPermissionContext,
   type Tools,
   type ToolUseContext,
 } from 'src/Tool.js'
@@ -187,6 +203,456 @@ import { FORK_SUBAGENT_TYPE } from './forkSubagent.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
 import { omitClaudeMdUserContext } from 'src/utils/omitClaudeMd.js'
 
+export type AgentInlineMcpGateReason =
+  | 'plugin-only-restricted'
+  | 'enterprise-mcp-locked'
+  | 'restricted-personal-config'
+  | 'untrusted-origin'
+  | 'reserved-name'
+  | 'disallowed-transport'
+  | 'ssrf-blocked'
+  | 'project-approval'
+  | 'managed-policy'
+
+export type AgentInlineMcpGateResult =
+  | { allowed: true }
+  | { allowed: false; reason: AgentInlineMcpGateReason; message: string }
+
+const DISALLOWED_AGENT_INLINE_MCP_TRANSPORTS = new Set<string>([
+  'sse-ide',
+  'ws-ide',
+  'sdk',
+  'claudeai-proxy',
+])
+
+const RESERVED_AGENT_MCP_EXACT_NAMES = new Set<string>([
+  'ide',
+  'claude-code-remote',
+  'webagent',
+])
+
+const BLOCKED_SSRF_HOSTNAMES = new Set<string>([
+  'localhost',
+  'metadata.google.internal',
+  'metadata.goog',
+  'instance-data',
+  'metadata.azure.internal',
+])
+
+function isBlockedIpv4Octets(
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+): boolean {
+  if (
+    a < 0 ||
+    a > 255 ||
+    b < 0 ||
+    b > 255 ||
+    c < 0 ||
+    c > 255 ||
+    d < 0 ||
+    d > 255
+  ) {
+    return true
+  }
+  if (a === 0) return true // 0.0.0.0/8 unspecified
+  if (a === 10) return true // 10.0.0.0/8 RFC 1918
+  if (a === 100 && b >= 64 && b <= 127) return true // 100.64.0.0/10 CGNAT
+  if (a === 127) return true // 127.0.0.0/8 loopback
+  if (a === 169 && b === 254) return true // 169.254.0.0/16 link-local / cloud IMDS
+  if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12 RFC 1918
+  if (a === 192 && b === 0 && c === 0) return true // 192.0.0.0/24 IETF protocol
+  if (a === 192 && b === 168) return true // 192.168.0.0/16 RFC 1918
+  if (a === 198 && (b === 18 || b === 19)) return true // 198.18.0.0/15 benchmarking
+  if (a >= 224) return true // multicast / reserved / broadcast
+  return false
+}
+
+function parseIpv4Dotted(
+  host: string,
+): [number, number, number, number] | null {
+  const parts = host.split('.')
+  if (parts.length !== 4) return null
+  const nums: number[] = []
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null
+    const value = Number(part)
+    if (value < 0 || value > 255) return null
+    nums.push(value)
+  }
+  return [nums[0]!, nums[1]!, nums[2]!, nums[3]!]
+}
+
+function parseIpv6Groups(rawHost: string): number[] | null {
+  const unwrapped =
+    rawHost.startsWith('[') && rawHost.endsWith(']')
+      ? rawHost.slice(1, -1)
+      : rawHost
+  const withoutZone = unwrapped.split('%')[0]!.toLowerCase()
+  if (!withoutZone.includes(':')) return null
+
+  // Convert trailing embedded IPv4 (e.g. ::ffff:127.0.0.1) into two 16-bit hex groups.
+  let normalized = withoutZone
+  const lastColon = normalized.lastIndexOf(':')
+  const tail = normalized.slice(lastColon + 1)
+  if (tail.includes('.')) {
+    const ipv4 = parseIpv4Dotted(tail)
+    if (!ipv4) return null
+    const hi = ((ipv4[0] << 8) | ipv4[1]).toString(16)
+    const lo = ((ipv4[2] << 8) | ipv4[3]).toString(16)
+    normalized = `${normalized.slice(0, lastColon + 1)}${hi}:${lo}`
+  }
+
+  const halves = normalized.split('::')
+  if (halves.length > 2) return null
+  const parseSide = (side: string): number[] | null => {
+    if (side === '') return []
+    const tokens = side.split(':')
+    const out: number[] = []
+    for (const token of tokens) {
+      if (!/^[0-9a-f]{1,4}$/.test(token)) return null
+      out.push(Number.parseInt(token, 16))
+    }
+    return out
+  }
+  const left = parseSide(halves[0]!)
+  const right = halves.length === 2 ? parseSide(halves[1]!) : []
+  if (!left || !right) return null
+  if (halves.length === 1) {
+    return left.length === 8 ? left : null
+  }
+  const missing = 8 - (left.length + right.length)
+  if (missing < 1) return null
+  return [...left, ...new Array<number>(missing).fill(0), ...right]
+}
+
+function isBlockedIpv6Groups(groups: readonly number[]): boolean {
+  if (groups.length !== 8) return true
+  const g0 = groups[0]!
+  const g1 = groups[1]!
+  const g2 = groups[2]!
+  const g3 = groups[3]!
+  const g4 = groups[4]!
+  const g5 = groups[5]!
+  const g6 = groups[6]!
+  const g7 = groups[7]!
+  const allZeroPrefix6 =
+    g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0
+  if (allZeroPrefix6 && g6 === 0 && (g7 === 0 || g7 === 1)) {
+    return true // :: unspecified or ::1 loopback
+  }
+  // IPv4-mapped (::ffff:0:0/96) or IPv4-compatible (::/96) or NAT64 (64:ff9b::/96)
+  const isIpv4Mapped =
+    g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff
+  const isNat64 =
+    g0 === 0x0064 &&
+    g1 === 0xff9b &&
+    g2 === 0 &&
+    g3 === 0 &&
+    g4 === 0 &&
+    g5 === 0
+  if (isIpv4Mapped || allZeroPrefix6 || isNat64) {
+    return isBlockedIpv4Octets(
+      (g6 >> 8) & 0xff,
+      g6 & 0xff,
+      (g7 >> 8) & 0xff,
+      g7 & 0xff,
+    )
+  }
+  if ((g0 & 0xfe00) === 0xfc00) return true // fc00::/7 ULA (incl. fd00:ec2::254)
+  if ((g0 & 0xffc0) === 0xfe80) return true // fe80::/10 link-local
+  if ((g0 & 0xff00) === 0xff00) return true // ff00::/8 multicast
+  return false
+}
+
+/**
+ * Official 2.1.328 (`LOe(e)` @chunk@288385318.js): whether personal user
+ * agents are restricted from defining inline MCP servers via
+ * `CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG`.
+ */
+export function isAgentPersonalConfigRestricted(
+  agentDefinition: Pick<AgentDefinition, 'source'>,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!isEnvTruthy(env.CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG)) {
+    return false
+  }
+  return (
+    agentDefinition.source === undefined ||
+    agentDefinition.source === 'userSettings'
+  )
+}
+
+/**
+ * Official 2.1.328 (`Mee(g)` + `Z6r(ee)` @chunk@303112704.js): block inline
+ * agent MCP server names that collide with reserved internal names (`ide`,
+ * `claude-in-chrome`, `computer-use`, `claude_ai_*`, `claude-code-remote`,
+ * `webagent`) or protected session servers held by the parent session.
+ */
+export function isReservedAgentMcpServerName(
+  name: string,
+  parentClients?: readonly MCPServerConnection[],
+): boolean {
+  if (isClaudeInChromeMCPServer(name) || isComputerUseMCPServer(name)) {
+    return true
+  }
+  if (name === 'Slack sign-in (Claude Code tag)') {
+    return true
+  }
+  const normalized = normalizeNameForMCP(name).toLowerCase()
+  if (RESERVED_AGENT_MCP_EXACT_NAMES.has(normalized)) {
+    return true
+  }
+  if (normalized.startsWith('claude_ai_')) {
+    return true
+  }
+  if (parentClients) {
+    for (const client of parentClients) {
+      const parentNorm = normalizeNameForMCP(client.name).toLowerCase()
+      if (client.name !== name && parentNorm !== normalized) {
+        continue
+      }
+      const cfg = client.config
+      const isProtectedSessionServer =
+        cfg.scope === 'enterprise' ||
+        cfg.scope === 'managed' ||
+        cfg.scope === 'claudeai' ||
+        cfg.type === 'sdk' ||
+        cfg.type === 'sse-ide' ||
+        cfg.type === 'ws-ide' ||
+        isCliOwnedConfig(cfg)
+      if (isProtectedSessionServer) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 SSRF / address guard for inline remote MCP server URLs.
+ * Rejects non-http/https/ws/wss schemes and loopback / link-local / private /
+ * cloud-metadata addresses unless explicitly allowed.
+ */
+export function checkAgentInlineMcpUrlSsrf(
+  serverConfig: McpServerConfig | ScopedMcpServerConfig,
+  options?: { allowPrivateAddresses?: boolean },
+): { allowed: true } | { allowed: false; message: string } {
+  if (!('url' in serverConfig) || typeof serverConfig.url !== 'string') {
+    return { allowed: true }
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(serverConfig.url)
+  } catch {
+    return {
+      allowed: false,
+      message: `invalid MCP server URL: ${serverConfig.url}`,
+    }
+  }
+  const protocol = parsed.protocol.toLowerCase()
+  const transportType = serverConfig.type
+  const allowedSchemes =
+    transportType === 'ws'
+      ? new Set(['ws:', 'wss:'])
+      : transportType === 'http' || transportType === 'sse'
+        ? new Set(['http:', 'https:'])
+        : new Set(['http:', 'https:', 'ws:', 'wss:'])
+  if (!allowedSchemes.has(protocol)) {
+    return {
+      allowed: false,
+      message: `disallowed URL scheme '${protocol}' for inline MCP server`,
+    }
+  }
+
+  const allowPrivate =
+    options?.allowPrivateAddresses === true ||
+    isEnvTruthy(process.env.CLAUDE_CODE_ALLOW_PRIVATE_INLINE_MCP)
+  if (allowPrivate) {
+    return { allowed: true }
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
+  if (
+    hostname === '' ||
+    BLOCKED_SSRF_HOSTNAMES.has(hostname) ||
+    hostname.endsWith('.localhost')
+  ) {
+    return {
+      allowed: false,
+      message: `blocked loopback/metadata host '${hostname}' in inline MCP server URL`,
+    }
+  }
+
+  const ipv4 = parseIpv4Dotted(hostname)
+  if (ipv4 && isBlockedIpv4Octets(ipv4[0], ipv4[1], ipv4[2], ipv4[3])) {
+    return {
+      allowed: false,
+      message: `blocked private/loopback/link-local IPv4 address '${hostname}' in inline MCP server URL`,
+    }
+  }
+
+  const ipv6 = parseIpv6Groups(hostname)
+  if (ipv6 && isBlockedIpv6Groups(ipv6)) {
+    return {
+      allowed: false,
+      message: `blocked private/loopback/link-local IPv6 address '${hostname}' in inline MCP server URL`,
+    }
+  }
+
+  return { allowed: true }
+}
+
+/**
+ * Official 2.1.328 (`chunk@303112704.js@119519-121500`): enforce ALL 4 security
+ * gates on agent-scoped frontmatter MCP servers BEFORE `connectToServer`:
+ * 1. Project approval & managed MCP policy gate (`RI` / `Ru` / `getProjectMcpServerStatus`)
+ * 2. Untrusted agent origin (`rZr`) & `CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG` (`LOe`) gate
+ * 3. Reserved / protected session server name collision guard (`Mee` / `Z6r`)
+ * 4. Remote URL SSRF / private-network / disallowed-transport guard (`Tbe` / address guard)
+ */
+export function validateAgentInlineMcpServer(params: {
+  agentDefinition: Pick<
+    AgentDefinition,
+    'agentType' | 'source' | 'baseDir' | 'fromAdditionalDirectory'
+  >
+  serverName: string
+  serverConfig: McpServerConfig | ScopedMcpServerConfig
+  parentClients?: readonly MCPServerConnection[]
+  isInline?: boolean
+  allowPrivateAddresses?: boolean
+}): AgentInlineMcpGateResult {
+  const {
+    agentDefinition,
+    serverName,
+    serverConfig,
+    parentClients,
+    isInline = true,
+    allowPrivateAddresses,
+  } = params
+
+  const agentIsAdminTrusted = isSourceAdminTrusted(agentDefinition.source)
+  if (isRestrictedToPluginOnly('mcp') && !agentIsAdminTrusted) {
+    return {
+      allowed: false,
+      reason: 'plugin-only-restricted',
+      message: `strictPluginOnlyCustomization locks MCP to plugin-only (agent source: ${agentDefinition.source})`,
+    }
+  }
+
+  if (doesEnterpriseMcpConfigExist() && !agentIsAdminTrusted) {
+    return {
+      allowed: false,
+      reason: 'enterprise-mcp-locked',
+      message: `enterprise MCP config blocks frontmatter MCP server '${serverName}'`,
+    }
+  }
+
+  if (
+    isInline &&
+    serverConfig.type !== undefined &&
+    DISALLOWED_AGENT_INLINE_MCP_TRANSPORTS.has(serverConfig.type)
+  ) {
+    return {
+      allowed: false,
+      reason: 'disallowed-transport',
+      message: `MCP transport '${serverConfig.type}' is not allowed in agent frontmatter for '${serverName}'`,
+    }
+  }
+
+  if (isReservedAgentMcpServerName(serverName, parentClients)) {
+    return {
+      allowed: false,
+      reason: 'reserved-name',
+      message: `MCP server '${serverName}' collides with a reserved or protected session server name`,
+    }
+  }
+
+  if (isInline) {
+    if (!isAgentHooksOriginTrusted(agentDefinition)) {
+      return {
+        allowed: false,
+        reason: 'untrusted-origin',
+        message: `untrusted agent origin (source: ${agentDefinition.source}) cannot define inline MCP server '${serverName}'`,
+      }
+    }
+
+    if (isAgentPersonalConfigRestricted(agentDefinition)) {
+      return {
+        allowed: false,
+        reason: 'restricted-personal-config',
+        message: `personal agents cannot define inline MCP servers when CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG is set`,
+      }
+    }
+
+    const ssrf = checkAgentInlineMcpUrlSsrf(serverConfig, {
+      allowPrivateAddresses,
+    })
+    if (!ssrf.allowed) {
+      return {
+        allowed: false,
+        reason: 'ssrf-blocked',
+        message: ssrf.message,
+      }
+    }
+  }
+
+  const scopedConfig: ScopedMcpServerConfig =
+    'scope' in serverConfig
+      ? serverConfig
+      : ({
+          ...serverConfig,
+          scope: 'dynamic' as const,
+        } as ScopedMcpServerConfig)
+
+  const { blocked } = filterMcpServersByPolicy({ [serverName]: scopedConfig })
+  if (blocked.length > 0) {
+    return {
+      allowed: false,
+      reason: 'managed-policy',
+      message: `MCP server '${serverName}' blocked by managed settings MCP policy`,
+    }
+  }
+
+  const policyBlockReason = getMcpServerPolicyBlockReason(
+    serverName,
+    scopedConfig,
+  )
+  if (policyBlockReason === 'project-approval') {
+    return {
+      allowed: false,
+      reason: 'project-approval',
+      message: `MCP server '${serverName}' is not approved for this project (approve via /mcp)`,
+    }
+  }
+  if (policyBlockReason) {
+    return {
+      allowed: false,
+      reason: 'managed-policy',
+      message: `MCP server '${serverName}' blocked by managed settings MCP policy`,
+    }
+  }
+
+  // Project-scoped agents defining inline MCP servers require explicit project
+  // MCP approval (matching `.mcp.json` trust model — strict check so headless/
+  // non-interactive runs cannot silently approve inline project agent servers).
+  if (
+    isInline &&
+    agentDefinition.source === 'projectSettings' &&
+    getProjectMcpServerStatusStrict(serverName) !== 'approved'
+  ) {
+    return {
+      allowed: false,
+      reason: 'project-approval',
+      message: `inline MCP server '${serverName}' from project agent '${agentDefinition.agentType}' is not approved for this project (approve via /mcp)`,
+    }
+  }
+
+  return { allowed: true }
+}
+
 /**
  * Initialize agent-specific MCP servers
  * Agents can define their own MCP servers in their frontmatter that are additive
@@ -197,7 +663,7 @@ import { omitClaudeMdUserContext } from 'src/utils/omitClaudeMd.js'
  * @param parentClients MCP clients inherited from parent context
  * @returns Merged clients (parent + agent-specific), agent MCP tools, and cleanup function
  */
-async function initializeAgentMcpServers(
+export async function initializeAgentMcpServers(
   agentDefinition: AgentDefinition,
   parentClients: MCPServerConnection[],
 ): Promise<{
@@ -214,15 +680,23 @@ async function initializeAgentMcpServers(
     }
   }
 
-  // When MCP is locked to plugin-only, skip frontmatter MCP servers for
-  // USER-CONTROLLED agents only. Plugin, built-in, and policySettings agents
-  // are admin-trusted — their frontmatter MCP is part of the admin-approved
-  // surface. Blocking them (as the first cut did) breaks plugin agents that
-  // legitimately need MCP, contradicting "plugin-provided always loads."
+  // When MCP is locked to plugin-only or enterprise MCP config is active,
+  // skip frontmatter MCP servers for non-admin-trusted agents.
   const agentIsAdminTrusted = isSourceAdminTrusted(agentDefinition.source)
   if (isRestrictedToPluginOnly('mcp') && !agentIsAdminTrusted) {
     logForDebugging(
       `[Agent: ${agentDefinition.agentType}] Skipping MCP servers: strictPluginOnlyCustomization locks MCP to plugin-only (agent source: ${agentDefinition.source})`,
+    )
+    return {
+      clients: parentClients,
+      tools: [],
+      cleanup: async () => {},
+    }
+  }
+  if (doesEnterpriseMcpConfigExist() && !agentIsAdminTrusted) {
+    logForDebugging(
+      `[Agent: ${agentDefinition.agentType}] Skipping MCP servers: blocked by enterprise MCP config (agent source: ${agentDefinition.source})`,
+      { level: 'warn' },
     )
     return {
       clients: parentClients,
@@ -236,6 +710,7 @@ async function initializeAgentMcpServers(
   // Only newly created clients should be cleaned up when the agent finishes
   const newlyCreatedClients: MCPServerConnection[] = []
   const agentTools: Tool[] = []
+  let loggedUntrustedOrigin = false
 
   for (const spec of agentDefinition.mcpServers) {
     let config: ScopedMcpServerConfig | null = null
@@ -274,8 +749,69 @@ async function initializeAgentMcpServers(
       isNewlyCreated = true
     }
 
-    // Connect to the server
-    const client = await connectToServer(name, config)
+    // Enforce official 2.1.328 security gates BEFORE connecting
+    const gate = validateAgentInlineMcpServer({
+      agentDefinition,
+      serverName: name,
+      serverConfig: config,
+      parentClients,
+      isInline: isNewlyCreated,
+    })
+    if (!gate.allowed) {
+      if (gate.reason === 'untrusted-origin' && !loggedUntrustedOrigin) {
+        loggedUntrustedOrigin = true
+        logAgentHooksOriginUntrusted(agentDefinition, 'subagent')
+      }
+      logForDebugging(
+        `[Agent: ${agentDefinition.agentType}] MCP server '${name}' skipped (${gate.reason}): ${gate.message}`,
+        { level: 'warn' },
+      )
+      continue
+    }
+
+    // Connect to the server with bounded dial timeout (official boundDial)
+    const connectPromise = connectToServer(name, config)
+    const dialTimeoutMs = getMcpConnectTimeoutMs()
+    let dialTimeoutHandle: ReturnType<typeof setTimeout> | undefined
+    let client: MCPServerConnection
+    try {
+      client = await Promise.race([
+        connectPromise,
+        new Promise<never>((_, reject) => {
+          dialTimeoutHandle = setTimeout(() => {
+            reject(
+              new Error(
+                `subagent MCP server connect timed out after ${dialTimeoutMs}ms`,
+              ),
+            )
+          }, dialTimeoutMs)
+          dialTimeoutHandle.unref?.()
+        }),
+      ])
+      if (dialTimeoutHandle !== undefined) {
+        clearTimeout(dialTimeoutHandle)
+      }
+    } catch (error) {
+      if (dialTimeoutHandle !== undefined) {
+        clearTimeout(dialTimeoutHandle)
+      }
+      logForDebugging(
+        `[Agent: ${agentDefinition.agentType}] MCP server '${name}' connect timed out or aborted: ${error instanceof Error ? error.message : String(error)}`,
+        { level: 'warn' },
+      )
+      if (isNewlyCreated) {
+        connectPromise.then(
+          lateClient => {
+            if (lateClient.type === 'connected') {
+              lateClient.cleanup().catch(() => {})
+            }
+          },
+          () => {},
+        )
+      }
+      continue
+    }
+
     agentClients.push(client)
     if (isNewlyCreated) {
       newlyCreatedClients.push(client)
@@ -546,6 +1082,162 @@ export function resolvePersistedAgentModel(options: {
   return undefined
 }
 
+/**
+ * Official 2.1.328 (`bgn` + `WUo` + `lc` + `tDo`, `chunk@303112704.js @126922, @179687`):
+ * Artifact family sub-capabilities share the `Artifact` tool schema, so
+ * `disallowedTools` entries naming them must be projected into
+ * `alwaysDenyRules.session` for permission enforcement.
+ */
+const ARTIFACT_FAMILY_DISALLOWED_SUBTOOLS = new Set([
+  'ArtifactComments',
+  'ArtifactData',
+  'ArtifactCheck',
+])
+
+export function extractDisallowedArtifactFamilyRules(
+  disallowedTools?: readonly string[],
+): string[] {
+  const out = new Set<string>()
+  for (const spec of disallowedTools ?? []) {
+    const { toolName } = permissionRuleValueFromString(spec)
+    if (ARTIFACT_FAMILY_DISALLOWED_SUBTOOLS.has(toolName)) {
+      out.add(toolName)
+    }
+  }
+  return [...out]
+}
+
+export function applyAgentDisallowedToolsDenyRules(
+  context: ToolPermissionContext,
+  agentDefinition?: Pick<AgentDefinition, 'disallowedTools'>,
+): ToolPermissionContext {
+  const denyRules = extractDisallowedArtifactFamilyRules(
+    agentDefinition?.disallowedTools,
+  )
+  if (denyRules.length === 0) return context
+  return {
+    ...context,
+    alwaysDenyRules: {
+      ...context.alwaysDenyRules,
+      session: [...(context.alwaysDenyRules.session ?? []), ...denyRules],
+    },
+  }
+}
+
+function isMcpServerActiveForWake(
+  serverName: string,
+  scope: string | undefined,
+  context: ToolUseContext,
+): boolean {
+  if (scope === undefined || scope === 'dynamic' || scope === 'claudeai') {
+    return true
+  }
+  const liveClients = context.getAppState().mcp?.clients
+  if (!liveClients) return true
+  return liveClients.some(
+    client =>
+      client.name === serverName &&
+      (client.config as { scope?: string } | undefined)?.scope === scope &&
+      client.type !== 'disabled',
+  )
+}
+
+/**
+ * Official 2.1.328 (`so` + `ao`, `chunk@303426333.js @15200-15500`):
+ * drop tools belonging to MCP servers that have since been disabled.
+ */
+export function filterDisabledMcpTools(
+  tools: Tools,
+  context: ToolUseContext,
+): Tools {
+  return tools.filter(tool => {
+    const mcpInfo = tool.mcpInfo as
+      | { serverName: string; scope?: string }
+      | undefined
+    return (
+      mcpInfo === undefined ||
+      isMcpServerActiveForWake(mcpInfo.serverName, mcpInfo.scope, context)
+    )
+  })
+}
+
+/**
+ * Official 2.1.328 (`io` + `ao`, `chunk@303426333.js @15320-15500`):
+ * drop MCP client entries for servers that have since been disabled.
+ */
+export function filterDisabledMcpClients(
+  clients: readonly MCPServerConnection[],
+  context: ToolUseContext,
+): MCPServerConnection[] {
+  return clients.filter(client =>
+    isMcpServerActiveForWake(
+      client.name,
+      (client.config as { scope?: string } | undefined)?.scope,
+      context,
+    ),
+  )
+}
+
+const RESUME_WAKE_STRIPPED_PERMISSION_LAYERS = new Set([
+  'allowed_tools',
+  'permission_mode',
+  'permission_mode_cap',
+])
+
+/**
+ * Official 2.1.328 (`T0o`, `chunk@303426333.js @14729-15600`):
+ * on agent wake/resume, strip stale command-scoped `alwaysAllowRules.command`
+ * via `clearCommandScopedAllowRules` (`FOe`, preserving `alwaysDenyRules.command`),
+ * drop transient permission layers, and filter disabled MCP tools/clients
+ * (including `refreshTools` and `refreshMcpClients`).
+ */
+export function sanitizeToolUseContextForResumeWake(
+  context: ToolUseContext,
+): ToolUseContext {
+  const { refreshTools, refreshMcpClients } = context.options
+  let cachedRefresh: { of: Tools; tools: Tools } | undefined
+  const baseGetAppState = context.getAppState
+  const wrappedGetAppState: ToolUseContext['getAppState'] = () => {
+    const state = baseGetAppState()
+    const stripped = clearCommandScopedAllowRules(state.toolPermissionContext)
+    if (stripped === state.toolPermissionContext) return state
+    return {
+      ...state,
+      toolPermissionContext: stripped,
+    }
+  }
+  return {
+    ...context,
+    getAppState: wrappedGetAppState,
+    ...(context.permissionLayers !== undefined && {
+      permissionLayers: context.permissionLayers.filter(
+        layer => !RESUME_WAKE_STRIPPED_PERMISSION_LAYERS.has(layer.kind),
+      ),
+    }),
+    options: {
+      ...context.options,
+      tools: filterDisabledMcpTools(context.options.tools, context),
+      ...(refreshTools && {
+        refreshTools: () => {
+          const latest = refreshTools()
+          if (cachedRefresh?.of !== latest) {
+            cachedRefresh = {
+              of: latest,
+              tools: filterDisabledMcpTools(latest, context),
+            }
+          }
+          return cachedRefresh.tools
+        },
+      }),
+      mcpClients: filterDisabledMcpClients(context.options.mcpClients, context),
+      ...(refreshMcpClients && {
+        refreshMcpClients: () =>
+          filterDisabledMcpClients(refreshMcpClients(), context),
+      }),
+    },
+  }
+}
+
 export async function* runAgent({
   agentDefinition,
   promptMessages,
@@ -705,6 +1397,13 @@ export async function* runAgent({
   sameCwdWriteCapableSibling?: boolean
 }): AsyncGenerator<Message | RunAgentSpinnerMode, void> {
   // Track subagent usage for feature discovery
+
+  // Official 2.1.328 (`T0o`, `chunk@303426333.js @14729`): on wake/resume,
+  // strip command-scoped allow rules (`FOe`) and filter disabled MCP tools/clients.
+  if (isResume) {
+    toolUseContext = sanitizeToolUseContextForResumeWake(toolUseContext)
+    availableTools = filterDisabledMcpTools(availableTools, toolUseContext)
+  }
 
   const appState = toolUseContext.getAppState()
   const permissionMode = appState.toolPermissionContext.mode
@@ -905,6 +1604,7 @@ export async function* runAgent({
       toolPermissionContext = {
         ...toolPermissionContext,
         shouldAvoidPermissionPrompts: true,
+        avoidsPromptsByNature: true,
       }
     }
 
@@ -940,9 +1640,19 @@ export async function* runAgent({
       }
     }
 
-    // densable Lt @194778750: register worktreePath in additionalWorkingDirectories
+    // Official 2.1.328 (`tDo`, `chunk@303112704.js @126922, @179687`):
+    // project Artifact family disallowedTools into alwaysDenyRules.session.
+    toolPermissionContext = applyAgentDisallowedToolsDenyRules(
+      toolPermissionContext,
+      agentDefinition,
+    )
+
+    // Official 2.1.328 (`chunk@303112704.js @126940`):
+    // register worktreePath in additionalWorkingDirectories only when
+    // `blockWritesOutsideWorkingDirectories` is not enabled.
     if (
       worktreePath &&
+      !toolPermissionContext.blockWritesOutsideWorkingDirectories &&
       !toolPermissionContext.additionalWorkingDirectories.has(worktreePath)
     ) {
       toolPermissionContext = {

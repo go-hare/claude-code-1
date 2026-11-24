@@ -195,11 +195,17 @@ import {
   mcpToolCheckPermissionsResult,
 } from './mcpToolInteraction.js'
 import { buildMcpToolName } from './mcpStringUtils.js'
+import { createHash } from 'crypto'
+import { isIPv6 } from 'net'
 import {
   coerceMcpToolInputForSchema,
   type DroppedMcpToolRecord,
   filterListedMcpToolsBySchema,
+  LegacyDialectToleratingValidator,
+  stripLegacyJsonSchemaDialect,
 } from './mcpToolSchema.js'
+
+export { LegacyDialectToleratingValidator, stripLegacyJsonSchemaDialect }
 import { wrapDocsConnectorToolForTerminalAutoOpen } from './docsConnectorAutoOpen.js'
 import { normalizeNameForMCP } from './normalization.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
@@ -225,8 +231,10 @@ import { clearKeychainCache } from '../../utils/secureStorage/macOsKeychainHelpe
 import { sleep } from '../../utils/sleep.js'
 import {
   ClaudeAuthProvider,
+  clearMcpOAuthStubIfTokenless,
   dialWithSignedOutFallback,
   hasMcpDiscoveryButNoToken,
+  IssuerEchoCrossOriginError,
   markStoredTokenRejectedForRedial,
   serverHasStoredRefreshToken,
   wrapFetchWithStepUpDetection,
@@ -316,6 +324,7 @@ import {
   isClaudeAiProxyListAuthError,
   isTerminalConnectionError,
   MAX_MCP_DESCRIPTION_LENGTH,
+  MAX_MCP_TOOL_NAME_LENGTH,
   MCP_TOOL_CALL_INTERRUPTED,
   type MCPResultType,
   type MCPToolCallResult,
@@ -496,7 +505,9 @@ const connectToServerMemo = memoize(
 
         // Use the auth provider with SSEClientTransport
         const transportOptions: SSEClientTransportOptions = {
-          ...(authProvider ? { authProvider } : {}),
+          ...(authProvider
+            ? { authProvider, skipIssuerMetadataValidation: true }
+            : {}),
           // Use fresh timeout per request to avoid stale AbortSignal bug.
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
@@ -728,7 +739,9 @@ const connectToServerMemo = memoize(
           isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
         })
         const transportOptions: StreamableHTTPClientTransportOptions = {
-          ...(authProvider ? { authProvider } : {}),
+          ...(authProvider
+            ? { authProvider, skipIssuerMetadataValidation: true }
+            : {}),
           // Use fresh timeout per request to avoid stale AbortSignal bug.
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
@@ -791,7 +804,9 @@ const connectToServerMemo = memoize(
                 dialConnected,
               })
             return new SSEClientTransport(sseUrl, {
-              ...(sseAuth ? { authProvider: sseAuth } : {}),
+              ...(sseAuth
+                ? { authProvider: sseAuth, skipIssuerMetadataValidation: true }
+                : {}),
               fetch,
               eventSourceInit: { fetch: eventSourceFetch },
               requestInit: sseRequestInit,
@@ -2295,6 +2310,9 @@ const connectToServerMemo = memoize(
           `connected-client wiring failed (placeholder retained, adoption will retry): ${errorMessage(wiringErr)}`,
         )
       }
+      if (serverRef.type === 'http' || serverRef.type === 'sse') {
+        await clearMcpOAuthStubIfTokenless(name, serverRef)
+      }
       // Official 2.1.325 #2308: notify background MCP task pollers that a fresh
       // connection for this server is live so they resume updating.
       notifyMcpServerConnected(connectedClientResult)
@@ -2329,10 +2347,16 @@ const connectToServerMemo = memoize(
       // densable 2.1.219: surface errorCode (HTTP / errno / ENDPOINT_NOT_FOUND)
       // so mcp list / /mcp can show status — issue (fSp/mSp).
       let errorText = errorMessage(error)
-      let errorCode = extractMcpConnectionErrorCode(error, {
-        transportType: serverRef.type,
-        hasSessionId: false,
-      })
+      const issuerEchoDenied =
+        error instanceof IssuerEchoCrossOriginError ||
+        (error instanceof Error &&
+          error.cause instanceof IssuerEchoCrossOriginError)
+      let errorCode = issuerEchoDenied
+        ? 'ISSUER_ECHO_DENIED'
+        : extractMcpConnectionErrorCode(error, {
+            transportType: serverRef.type,
+            hasSessionId: false,
+          })
       if (errorCode === 'CONNECT_TIMEOUT') {
         const suspendedMessage = detectConnectSuspendedMessage(
           name,
@@ -3286,6 +3310,297 @@ function nextDroppedToolsSeq(client: MCPServerConnection): {
   return { seq: state.started, state }
 }
 
+/**
+ * Official 2.1.328 (`$mt` / `RAn` / `mhs` / `AZe` @chunk@289358491.js,
+ * @chunk@283835568.js): canonical anti-spoofing keys for MCP tools so a
+ * renamed or malicious server cannot inherit another server's allow/deny
+ * permission rules.
+ */
+export type McpStandardKey = {
+  key: string
+  pinned: boolean
+}
+
+export type McpToolInfoWithKeys = NonNullable<Tool['mcpInfo']> & {
+  accountMemoryServer?: boolean
+  standardKey?: McpStandardKey
+  denyKey?: string
+  toolNameShared?: boolean
+  legacyGrantRefused?: boolean
+}
+
+const STANDARD_KEY_MAX_LEN = 54
+const STANDARD_KEY_MAX_HOST_LEN = 253
+const STANDARD_KEY_TRUNC_PREFIX_LEN = 21
+const STANDARD_KEY_HASH_LEN = 32
+const STANDARD_KEY_DENY_MAX_LEN = 128
+const STANDARD_KEY_VALID_RE = /^[A-Za-z0-9_-]+$/
+const STANDARD_KEY_HOST_RE = /^([A-Za-z0-9._-]+)(?::[0-9]*)?$/
+const STANDARD_KEY_IPV6_RE = /^\[([0-9A-Fa-f:.]+)\](?::[0-9]*)?$/
+const STANDARD_KEY_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+const STANDARD_KEY_NUMERIC_TLD_RE = /^(?:[0-9]+|0x[0-9a-f]*)$/
+const STANDARD_KEY_HEX_ID_RE = /^(?:0x)?[0-9a-f_]+$/
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function isValidStandardKeySegment(candidate: string): boolean {
+  return (
+    STANDARD_KEY_VALID_RE.test(candidate) &&
+    !candidate.includes('__') &&
+    !candidate.startsWith('_') &&
+    !candidate.endsWith('_')
+  )
+}
+
+function trimAsciiControlAndSpace(raw: string): string {
+  let start = 0
+  let end = raw.length
+  while (start < end && raw.charCodeAt(start) <= 32) start++
+  while (end > start && raw.charCodeAt(end - 1) <= 32) end--
+  return raw.slice(start, end)
+}
+
+/**
+ * Official 2.1.328 (`mhs` @chunk@283835568.js@7109): derive a stable,
+ * URL-bound key for remote MCP servers (`https://api.example.com/mcp` →
+ * `api_example_com`, non-HTTPS/IP/long hosts → `h-<sha256-32>`).
+ */
+export function deriveMcpUrlStandardKey(url: string): string | undefined {
+  const cleaned = trimAsciiControlAndSpace(url.replace(/[\t\r\n]/g, ''))
+  const sep = cleaned.indexOf('://')
+  if (sep < 0) return undefined
+  const scheme = cleaned.slice(0, sep).toLowerCase()
+  if (scheme !== 'http' && scheme !== 'https') return undefined
+  const authority = cleaned.slice(sep + 3).split(/[/?#]/, 1)[0] ?? ''
+  if (authority.includes('\\')) return undefined
+  const hostPort = authority.slice(authority.lastIndexOf('@') + 1)
+  const hostMatch =
+    STANDARD_KEY_HOST_RE.exec(hostPort) ?? STANDARD_KEY_IPV6_RE.exec(hostPort)
+  if (!hostMatch?.[1]) return undefined
+  if (hostPort.startsWith('[') && !isIPv6(hostMatch[1])) return undefined
+  const host = hostMatch[1].toLowerCase().replace(/\.$/, '')
+  if (host === '') return undefined
+
+  const originForHash = `${scheme}://${host.includes(':') ? `[${host}]` : host}`
+  const hash32 = sha256Hex(originForHash).slice(0, STANDARD_KEY_HASH_LEN)
+  const fallback = `h-${hash32}`
+
+  let readable: string | undefined
+  const labels = host.split('.')
+  const tld = labels.at(-1) ?? ''
+  if (
+    scheme === 'https' &&
+    host.length <= STANDARD_KEY_MAX_HOST_LEN &&
+    labels.length >= 2 &&
+    !tld.includes('-') &&
+    !labels.some(l => l.startsWith('sk-ant-')) &&
+    !STANDARD_KEY_NUMERIC_TLD_RE.test(tld) &&
+    labels.every(l => STANDARD_KEY_LABEL_RE.test(l))
+  ) {
+    const joined = labels.join('_')
+    const strippedHex = joined.replaceAll('-', '')
+    const looksHexId =
+      (strippedHex.length === 32 || strippedHex.length === 23) &&
+      STANDARD_KEY_HEX_ID_RE.test(strippedHex)
+    if (!looksHexId) {
+      readable = joined
+    }
+  }
+
+  const candidate =
+    readable === undefined
+      ? fallback
+      : readable.length > STANDARD_KEY_MAX_LEN
+        ? `${readable.slice(0, STANDARD_KEY_TRUNC_PREFIX_LEN).replace(/^[_-]+|[_-]+$/g, '')}-${hash32}`
+        : readable
+  const finalKey = `${candidate}-`
+    .replace(/[_-]+/g, '-')
+    .startsWith('org-connector-')
+    ? fallback
+    : candidate
+  return isValidStandardKeySegment(finalKey) ? finalKey : undefined
+}
+
+function isReservedStandardKeyServerName(serverName: string): boolean {
+  const norm = normalizeNameForMCP(serverName).toLowerCase()
+  return (
+    norm === 'ide' ||
+    isClaudeInChromeMCPServer(serverName) ||
+    (feature('CHICAGO_MCP') ? isComputerUseMCPServer!(serverName) : false)
+  )
+}
+
+/**
+ * Official 2.1.328 (`AZe` @chunk@289358491.js@1212): detect a non-claude.ai
+ * server attempting to spoof a `claude_ai_*` connector server name.
+ */
+export function isSpoofedClaudeAiServerName(
+  serverName: string,
+  config: Pick<ScopedMcpServerConfig, 'scope'>,
+): boolean {
+  return (
+    normalizeNameForMCP(serverName).startsWith('claude_ai_') &&
+    config.scope !== 'claudeai'
+  )
+}
+
+/**
+ * Official 2.1.328 (`$mt` @chunk@289358491.js@4910): compute the canonical
+ * `standardKey` identifying an MCP server independently of display aliases.
+ */
+export function computeMcpStandardKey(
+  serverName: string,
+  config: ScopedMcpServerConfig,
+  isCliOwned: boolean = isCliOwnedConfig(config),
+): McpStandardKey | undefined {
+  if (isCliOwned || isReservedStandardKeyServerName(serverName)) {
+    return { key: normalizeNameForMCP(serverName), pinned: true }
+  }
+  switch (config.type) {
+    case 'sse-ide':
+    case 'ws-ide':
+      return { key: 'ide', pinned: true }
+    case 'http':
+    case 'sse': {
+      const key = deriveMcpUrlStandardKey(config.url)
+      return key !== undefined ? { key, pinned: false } : undefined
+    }
+    case 'claudeai-proxy': {
+      const key = deriveMcpUrlStandardKey(config.url)
+      return key !== undefined ? { key, pinned: false } : undefined
+    }
+    case 'stdio':
+    case undefined:
+      return { key: normalizeNameForMCP(serverName), pinned: false }
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Official 2.1.328 (`RAn` @chunk@289358491.js@2809): compute the alternate
+ * `denyKey` so deny/ask rules continue to match across connector IDs and
+ * canonicalized URL origins (e.g. punycode/IDN or proxy origin forms).
+ */
+export function computeMcpDenyKey(
+  config: ScopedMcpServerConfig & { connectorId?: string },
+): string | undefined {
+  if (config.type === 'sdk' && typeof config.connectorId === 'string') {
+    const normalized = normalizeNameForMCP(config.connectorId)
+    if (
+      normalized.length > 0 &&
+      normalized.length <= STANDARD_KEY_DENY_MAX_LEN &&
+      !normalized.includes('__')
+    ) {
+      return normalized
+    }
+    return undefined
+  }
+  if (
+    config.type !== 'http' &&
+    config.type !== 'sse' &&
+    config.type !== 'claudeai-proxy'
+  ) {
+    return undefined
+  }
+  if (typeof config.url !== 'string' || !URL.canParse(config.url)) {
+    return undefined
+  }
+  const originKey = deriveMcpUrlStandardKey(new URL(config.url).origin)
+  const rawUrlKey = deriveMcpUrlStandardKey(config.url)
+  return originKey !== undefined && originKey !== rawUrlKey
+    ? originKey
+    : undefined
+}
+
+/**
+ * Official 2.1.328 (`wl` / `composeMcpTool` @chunk@335138039.js@210828):
+ * attach `standardKey`, `denyKey`, `toolNameShared`, and `legacyGrantRefused`
+ * anti-spoofing metadata onto a composed MCP `Tool`, and refuse persistent
+ * allow-rules when a server spoofs a `claude_ai_*` name or has colliding
+ * normalized tool names.
+ */
+export function composeMcpTool(params: {
+  serverName: string
+  config: ScopedMcpServerConfig
+  toolName: string
+  fullyQualifiedName: string
+  skipPrefix?: boolean
+  standardKey?: McpStandardKey
+  denyKey?: string
+  toolNameShared?: boolean
+  legacyGrantRefused?: boolean
+  requiresUserInteraction: boolean
+  isFirstPartyDesignServer: boolean
+  baseTool: Tool
+}): Tool {
+  const {
+    serverName,
+    config,
+    toolName,
+    fullyQualifiedName,
+    standardKey,
+    denyKey,
+    toolNameShared = false,
+    legacyGrantRefused = false,
+    requiresUserInteraction,
+    isFirstPartyDesignServer,
+    baseTool,
+  } = params
+
+  const spoofedClaudeAi = isSpoofedClaudeAiServerName(serverName, config)
+  const allowRulesBlocked =
+    spoofedClaudeAi || legacyGrantRefused || toolNameShared
+  if (allowRulesBlocked) {
+    logMCPDebug(
+      serverName,
+      spoofedClaudeAi
+        ? "Allow rules do not apply: this server's name starts like a claude.ai connector's. To use allow rules, the server needs another name, and the rules must use that name."
+        : legacyGrantRefused
+          ? 'Allow rules do not apply: another MCP server already uses this name. Give this server a different name and write the rules for that name.'
+          : `Allow rules do not apply to "${toolName}": another tool of this server gets the same name in Claude Code. To use allow rules, the server must rename one of them.`,
+    )
+  }
+
+  const prevMcpInfo = baseTool.mcpInfo as McpToolInfoWithKeys | undefined
+  const mcpInfo: McpToolInfoWithKeys = {
+    ...(prevMcpInfo ?? { serverName, toolName }),
+    ...(standardKey !== undefined ? { standardKey } : {}),
+    ...(denyKey !== undefined ? { denyKey } : {}),
+    ...(toolNameShared ? { toolNameShared: true } : {}),
+    ...(spoofedClaudeAi || legacyGrantRefused
+      ? { legacyGrantRefused: true }
+      : {}),
+  }
+
+  const omitsPersistentAllow =
+    allowRulesBlocked ||
+    connectorDesignOmitsPersistentAllow(isFirstPartyDesignServer, toolName)
+
+  return {
+    ...baseTool,
+    mcpInfo,
+    suppressesAlwaysAllowRule: () =>
+      requiresUserInteraction || omitsPersistentAllow,
+    async checkPermissions(input: unknown) {
+      const denied = connectorDesignTokenlessWriteDeny(
+        isFirstPartyDesignServer,
+        toolName,
+        input,
+      )
+      if (denied) return denied
+      return mcpToolCheckPermissionsResult(
+        requiresUserInteraction,
+        fullyQualifiedName,
+        serverName,
+        omitsPersistentAllow,
+      )
+    },
+  }
+}
+
 export const fetchToolsForClient = memoizeWithLRU(
   async (client: MCPServerConnection): Promise<Tool[]> => {
     if (client.type !== 'connected') return []
@@ -3359,24 +3674,24 @@ export const fetchToolsForClient = memoizeWithLRU(
       // #2151: Collect omitted tools + reasons and publish onto client.droppedTools.
       const droppedSeq = nextDroppedToolsSeq(client)
       const droppedRaw: DroppedMcpToolRecord[] = []
-      const listedAfterSchema = filterListedMcpToolsBySchema(toolsToProcess, {
-        serverName: client.name,
-        config: client.config,
-        onDroppedTool: entry => droppedRaw.push(entry),
-      })
-      if (droppedSeq.seq > droppedSeq.state.applied) {
-        droppedSeq.state.applied = droppedSeq.seq
-        const seenDropped = new Set<string>()
-        const dedupedDropped: DroppedMcpToolRecord[] = []
-        for (const item of droppedRaw) {
-          if (!seenDropped.has(item.toolName)) {
-            seenDropped.add(item.toolName)
-            dedupedDropped.push(item)
-          }
+      const toolsWithValidNames = toolsToProcess.filter(tool => {
+        if (tool.name.trim().length === 0) {
+          droppedRaw.push({
+            toolName: tool.name || '(empty)',
+            reason: 'tool name is empty',
+          })
+          return false
         }
-        client.droppedTools =
-          dedupedDropped.length > 0 ? dedupedDropped : undefined
-      }
+        return true
+      })
+      const listedAfterSchema = filterListedMcpToolsBySchema(
+        toolsWithValidNames,
+        {
+          serverName: client.name,
+          config: client.config,
+          onDroppedTool: entry => droppedRaw.push(entry),
+        },
+      )
 
       // densable jo — sse/http Design MCP on api.anthropic.com, no Authorization.
       const isFirstPartyDesignServer = isFirstPartyDesignMcpServer(
@@ -3405,749 +3720,779 @@ export const fetchToolsForClient = memoizeWithLRU(
         return true
       })
 
+      // Official 2.1.328 (chunk@335138039.js@219009 / @222896): detect tools
+      // on the same server whose normalized fully-qualified names collide so
+      // allow-rules cannot be spoofed across colliding tool names.
+      const normalizedFqCounts = new Map<string, number>()
+      for (const listed of listedAfterBrowserPolicy) {
+        const fq = buildMcpToolName(client.name, listed.name)
+        normalizedFqCounts.set(fq, (normalizedFqCounts.get(fq) ?? 0) + 1)
+      }
+      const serverStandardKey = computeMcpStandardKey(
+        client.name,
+        client.config,
+      )
+      const serverDenyKey = computeMcpDenyKey(client.config)
+
       // Convert MCP tools to our Tool format
-      return filterMcpToolsByNameLength(
-        listedAfterBrowserPolicy
-          .map((tool): Tool => {
-            const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
-            const requiresUserInteraction = isMcpRequiresUserInteraction(
-              tool._meta,
-            )
-            const mcpInfo: NonNullable<Tool['mcpInfo']> & {
-              accountMemoryServer?: boolean
-            } = {
-              serverName: client.name,
-              toolName: tool.name,
-              scope: client.config.scope,
-              source: mcpInfoSource(client.name, client.config),
-              // Official org/admin ceiling from server config toolPermissions.
-              // hasOwn: plain maps + prototype-key tool names must not leak
-              // Object.prototype.constructor (Function) as a permission value.
-              effectiveMaxPermission:
-                toolPermissions && Object.hasOwn(toolPermissions, tool.name)
-                  ? toolPermissions[tool.name]
-                  : undefined,
-              // densable Dn — cliOwned / accountMemory (X2e) / accountMemoryServer (oe) stamps.
-              ...(isCliOwnedConfig(client.config) ? { cliOwned: true } : {}),
-              ...(isAccountMemoryTool(serverRefForMemory, tool.name)
-                ? { accountMemory: true }
-                : {}),
-              ...(accountMemoryServer ? { accountMemoryServer: true } : {}),
-            }
-            return {
-              ...MCPTool,
-              // In skip-prefix mode, use the original name for model invocation so MCP tools
-              // can override builtins by name. mcpInfo is used for permission checking.
-              name: skipPrefix ? tool.name : fullyQualifiedName,
-              mcpInfo,
-              isMcp: true,
-              // Collapse whitespace: _meta is open to external MCP servers, and
-              // a newline here would inject orphan lines into the deferred-tool
-              // list (formatDeferredToolLine joins on '\n').
-              searchHint:
-                typeof tool._meta?.['anthropic/searchHint'] === 'string'
-                  ? tool._meta['anthropic/searchHint']
-                      .replace(/\s+/g, ' ')
-                      .trim() || undefined
-                  : undefined,
-              alwaysLoad: tool._meta?.['anthropic/alwaysLoad'] === true,
-              async description() {
-                return tool.description ?? ''
+      const composedTools = listedAfterBrowserPolicy
+        .map((tool): Tool => {
+          const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
+          const requiresUserInteraction = isMcpRequiresUserInteraction(
+            tool._meta,
+          )
+          const toolNameShared =
+            (normalizedFqCounts.get(fullyQualifiedName) ?? 0) > 1
+          const mcpInfo: McpToolInfoWithKeys = {
+            serverName: client.name,
+            toolName: tool.name,
+            scope: client.config.scope,
+            source: mcpInfoSource(client.name, client.config),
+            // Official org/admin ceiling from server config toolPermissions.
+            // hasOwn: plain maps + prototype-key tool names must not leak
+            // Object.prototype.constructor (Function) as a permission value.
+            effectiveMaxPermission:
+              toolPermissions && Object.hasOwn(toolPermissions, tool.name)
+                ? toolPermissions[tool.name]
+                : undefined,
+            // densable Dn — cliOwned / accountMemory (X2e) / accountMemoryServer (oe) stamps.
+            ...(isCliOwnedConfig(client.config) ? { cliOwned: true } : {}),
+            ...(isAccountMemoryTool(serverRefForMemory, tool.name)
+              ? { accountMemory: true }
+              : {}),
+            ...(accountMemoryServer ? { accountMemoryServer: true } : {}),
+          }
+          const baseTool: Tool = {
+            ...MCPTool,
+            // In skip-prefix mode, use the original name for model invocation so MCP tools
+            // can override builtins by name. mcpInfo is used for permission checking.
+            name: skipPrefix ? tool.name : fullyQualifiedName,
+            mcpInfo,
+            isMcp: true,
+            // Collapse whitespace: _meta is open to external MCP servers, and
+            // a newline here would inject orphan lines into the deferred-tool
+            // list (formatDeferredToolLine joins on '\n').
+            searchHint:
+              typeof tool._meta?.['anthropic/searchHint'] === 'string'
+                ? tool._meta['anthropic/searchHint']
+                    .replace(/\s+/g, ' ')
+                    .trim() || undefined
+                : undefined,
+            alwaysLoad: tool._meta?.['anthropic/alwaysLoad'] === true,
+            async description() {
+              return tool.description ?? ''
+            },
+            async prompt(
+              options?: Parameters<Tool['prompt']>[0] & {
+                loadedThroughToolSearch?: boolean
               },
-              async prompt(
-                options?: Parameters<Tool['prompt']>[0] & {
-                  loadedThroughToolSearch?: boolean
-                },
-              ) {
-                const desc = tool.description ?? ''
-                const cap = getMaxMcpDescriptionLengthForConfig(
-                  client.config,
-                  options?.loadedThroughToolSearch === true,
-                )
-                return desc.length > cap
-                  ? desc.slice(0, cap) + '… [truncated]'
-                  : desc
-              },
-              isConcurrencySafe() {
-                return tool.annotations?.readOnlyHint ?? false
-              },
-              isReadOnly() {
-                return tool.annotations?.readOnlyHint ?? false
-              },
-              toAutoClassifierInput(input) {
-                return mcpToolInputToAutoClassifierInput(input, tool.name)
-              },
-              isDestructive() {
-                return tool.annotations?.destructiveHint ?? false
-              },
-              isOpenWorld() {
-                return tool.annotations?.openWorldHint ?? false
-              },
-              isSearchOrReadCommand() {
-                return classifyMcpToolForCollapse(client.name, tool.name)
-              },
-              requiresUserInteraction() {
-                return requiresUserInteraction
-              },
-              suppressesAlwaysAllowRule: () =>
-                requiresUserInteraction ||
+            ) {
+              const desc = tool.description ?? ''
+              const cap = getMaxMcpDescriptionLengthForConfig(
+                client.config,
+                options?.loadedThroughToolSearch === true,
+              )
+              return desc.length > cap
+                ? desc.slice(0, cap) + '… [truncated]'
+                : desc
+            },
+            isConcurrencySafe() {
+              return tool.annotations?.readOnlyHint ?? false
+            },
+            isReadOnly() {
+              return tool.annotations?.readOnlyHint ?? false
+            },
+            toAutoClassifierInput(input) {
+              return mcpToolInputToAutoClassifierInput(input, tool.name)
+            },
+            isDestructive() {
+              return tool.annotations?.destructiveHint ?? false
+            },
+            isOpenWorld() {
+              return tool.annotations?.openWorldHint ?? false
+            },
+            isSearchOrReadCommand() {
+              return classifyMcpToolForCollapse(client.name, tool.name)
+            },
+            requiresUserInteraction() {
+              return requiresUserInteraction
+            },
+            suppressesAlwaysAllowRule: () =>
+              requiresUserInteraction ||
+              connectorDesignOmitsPersistentAllow(
+                isFirstPartyDesignServer,
+                tool.name,
+              ),
+            inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
+            async checkPermissions(input: unknown) {
+              // densable Gr/Ui — tokenless writes are native-tool-only here.
+              const denied = connectorDesignTokenlessWriteDeny(
+                isFirstPartyDesignServer,
+                tool.name,
+                input,
+              )
+              if (denied) return denied
+              return mcpToolCheckPermissionsResult(
+                requiresUserInteraction,
+                fullyQualifiedName,
+                client.name,
                 connectorDesignOmitsPersistentAllow(
                   isFirstPartyDesignServer,
                   tool.name,
                 ),
-              inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
-              async checkPermissions(input: unknown) {
-                // densable Gr/Ui — tokenless writes are native-tool-only here.
-                const denied = connectorDesignTokenlessWriteDeny(
-                  isFirstPartyDesignServer,
-                  tool.name,
-                  input,
-                )
-                if (denied) return denied
-                return mcpToolCheckPermissionsResult(
-                  requiresUserInteraction,
-                  fullyQualifiedName,
-                  client.name,
-                  connectorDesignOmitsPersistentAllow(
-                    isFirstPartyDesignServer,
-                    tool.name,
-                  ),
-                )
-              },
-              async call(
-                args: Record<string, unknown>,
-                context,
-                _canUseTool,
-                parentMessage,
-                onProgress?: ToolCallProgress<MCPProgress>,
-              ) {
-                // densable Vr/Fi — one local path for both gold connector copies.
-                applyConnectorDesignMembership(
-                  isFirstPartyDesignServer,
-                  tool.name,
-                  args,
-                  (operation, projectId) => {
-                    // Lazy: designProjectGrant pulls function-hook modules.
-                    // A static import here would load that graph for every MCP client.
-                    const {
-                      designSessionState,
-                      noteDesignProjectMembershipChange,
-                    } =
-                      // eslint-disable-next-line @typescript-eslint/no-require-imports
-                      require('../designProjectGrant.js') as typeof import('../designProjectGrant.js')
-                    noteDesignProjectMembershipChange(
-                      designSessionState(context),
-                      operation,
-                      projectId,
-                    )
-                  },
-                )
-                // densable 2.1.222 #6 — stamp active MCP for next API cost share
-                // (cleared after one attributed main/subagent request).
-                context.options.activeMcpServer = client.name
-                context.options.activeMcpTool = tool.name
-                if (isFixedUrlOfficialMarketplacePluginMcp(client.config)) {
-                  markMcpServerLoggable(client.name)
-                }
-
-                // Official 2.1.328 (@335374540): prefer context.toolUseId (set by
-                // Code Mode inner calls and sub-dispatches) before falling back to
-                // scanning parentMessage for the first tool_use block.
-                const toolUseId =
-                  context.toolUseId ?? extractToolUseId(parentMessage)
-                const meta = toolUseId
-                  ? { 'claudecode/toolUseId': toolUseId }
-                  : {}
-
-                // Emit progress when tool starts
-                if (onProgress && toolUseId) {
-                  onProgress({
-                    toolUseID: toolUseId,
-                    data: {
-                      type: 'mcp_progress',
-                      status: 'started',
-                      serverName: client.name,
-                      toolName: tool.name,
-                    },
-                  })
-                }
-
-                const startTime = Date.now()
-                // densable Biy: Host-side file_upload path policy (Uiy/Ned) with live
-                // ToolPermissionContext before forwarding to Claude in Chrome MCP.
-                // Official 2.1.326 #82: Coerce numeric text args (e.g. "42") to
-                // numbers when a merged anyOf/oneOf branch accepts a number.
-                let callArgs = coerceMcpToolInputForSchema(
-                  args,
-                  tool.inputSchema,
-                )
-                if (
-                  isClaudeInChromeMCPServer(client.name) &&
-                  isChromeFileUploadToolName(tool.name)
-                ) {
-                  const permCtx = context.getAppState().toolPermissionContext
-                  const prepared = await prepareChromeFileUploadInput(
-                    tool.name,
-                    args,
-                    permCtx,
-                  )
-                  if ('error' in prepared) {
-                    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-                      prepared.error,
-                      'chrome file_upload path rejected',
-                    )
-                  }
-                  callArgs = prepared.input
-                }
-                const MAX_SESSION_RETRIES = 1
-                // Official 2.1.193/206: headersHelper may mint short-lived auth
-                // headers; OAuth may hold a refresh_token. On 401 re-run the
-                // helper / refresh once, then reconnect (reauth_retry).
-                // Official recursive path retries with the new connected client
-                // object (isAuthRetry); we keep that client for the next loop
-                // iteration instead of only relying on the connection cache.
-                const MAX_AUTH_RECONNECT_RETRIES = 1
-                let authReconnectRetries = 0
-                let preferredClient: ConnectedMCPServer | null = null
-                for (let attempt = 0; ; attempt++) {
-                  try {
-                    const connectedClient: ConnectedMCPServer =
-                      preferredClient ?? (await ensureConnectedClient(client))
-                    preferredClient = null
-                    // Official 2.1.325 #2306: if a tool call reconnected the
-                    // MCP server (different client instance), refresh the live
-                    // tool pool so subsequent SDK host calls point to the new
-                    // connection rather than answering "Not connected".
-                    if (
-                      connectedClient !== client &&
-                      connectedClient.type === 'connected'
-                    ) {
-                      void fetchToolsForClient(connectedClient)
-                        .then(freshTools => {
-                          swapMcpServerTools(
-                            client.name,
-                            freshTools,
-                            connectedClient.config,
-                            connectedClient,
-                          )
-                        })
-                        .catch(() => {})
-                    }
-                    // densable 2.1.212: MCP > threshold → auto-background
+              )
+            },
+            async call(
+              args: Record<string, unknown>,
+              context,
+              _canUseTool,
+              parentMessage,
+              onProgress?: ToolCallProgress<MCPProgress>,
+            ) {
+              // densable Vr/Fi — one local path for both gold connector copies.
+              applyConnectorDesignMembership(
+                isFirstPartyDesignServer,
+                tool.name,
+                args,
+                (operation, projectId) => {
+                  // Lazy: designProjectGrant pulls function-hook modules.
+                  // A static import here would load that graph for every MCP client.
+                  const {
+                    designSessionState,
+                    noteDesignProjectMembershipChange,
+                  } =
                     // eslint-disable-next-line @typescript-eslint/no-require-imports
-                    const {
-                      resolveMcpAutoBackgroundMs,
-                      callMcpToolWithAutoBackground,
-                      extractSep2663ServerTask,
-                      handleSep2663ServerTask,
-                    } =
-                      require('../../utils/mcpAutoBackground.js') as typeof import('../../utils/mcpAutoBackground.js')
-                    const transportType =
-                      typeof client === 'object' &&
-                      client &&
-                      'config' in client &&
-                      client.config &&
-                      typeof client.config === 'object' &&
-                      'type' in client.config
-                        ? String(
-                            (client.config as { type?: string }).type ?? '',
-                          )
-                        : typeof client === 'object' &&
-                            client &&
-                            'type' in client
-                          ? String((client as { type?: string }).type ?? '')
-                          : ''
-                    const autoBgMs = resolveMcpAutoBackgroundMs(process.env, {
-                      transportType,
-                      isNonInteractiveSession:
-                        context.options.isNonInteractiveSession,
+                    require('../designProjectGrant.js') as typeof import('../designProjectGrant.js')
+                  noteDesignProjectMembershipChange(
+                    designSessionState(context),
+                    operation,
+                    projectId,
+                  )
+                },
+              )
+              // densable 2.1.222 #6 — stamp active MCP for next API cost share
+              // (cleared after one attributed main/subagent request).
+              context.options.activeMcpServer = client.name
+              context.options.activeMcpTool = tool.name
+              if (isFixedUrlOfficialMarketplacePluginMcp(client.config)) {
+                markMcpServerLoggable(client.name)
+              }
+
+              // Official 2.1.328 (@335374540): prefer context.toolUseId (set by
+              // Code Mode inner calls and sub-dispatches) before falling back to
+              // scanning parentMessage for the first tool_use block.
+              const toolUseId =
+                context.toolUseId ?? extractToolUseId(parentMessage)
+              const meta = toolUseId
+                ? { 'claudecode/toolUseId': toolUseId }
+                : {}
+
+              // Emit progress when tool starts
+              if (onProgress && toolUseId) {
+                onProgress({
+                  toolUseID: toolUseId,
+                  data: {
+                    type: 'mcp_progress',
+                    status: 'started',
+                    serverName: client.name,
+                    toolName: tool.name,
+                  },
+                })
+              }
+
+              const startTime = Date.now()
+              // densable Biy: Host-side file_upload path policy (Uiy/Ned) with live
+              // ToolPermissionContext before forwarding to Claude in Chrome MCP.
+              // Official 2.1.326 #82: Coerce numeric text args (e.g. "42") to
+              // numbers when a merged anyOf/oneOf branch accepts a number.
+              let callArgs = coerceMcpToolInputForSchema(args, tool.inputSchema)
+              if (
+                isClaudeInChromeMCPServer(client.name) &&
+                isChromeFileUploadToolName(tool.name)
+              ) {
+                const permCtx = context.getAppState().toolPermissionContext
+                const prepared = await prepareChromeFileUploadInput(
+                  tool.name,
+                  args,
+                  permCtx,
+                )
+                if ('error' in prepared) {
+                  throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                    prepared.error,
+                    'chrome file_upload path rejected',
+                  )
+                }
+                callArgs = prepared.input
+              }
+              const MAX_SESSION_RETRIES = 1
+              // Official 2.1.193/206: headersHelper may mint short-lived auth
+              // headers; OAuth may hold a refresh_token. On 401 re-run the
+              // helper / refresh once, then reconnect (reauth_retry).
+              // Official recursive path retries with the new connected client
+              // object (isAuthRetry); we keep that client for the next loop
+              // iteration instead of only relying on the connection cache.
+              const MAX_AUTH_RECONNECT_RETRIES = 1
+              let authReconnectRetries = 0
+              let preferredClient: ConnectedMCPServer | null = null
+              for (let attempt = 0; ; attempt++) {
+                try {
+                  const connectedClient: ConnectedMCPServer =
+                    preferredClient ?? (await ensureConnectedClient(client))
+                  preferredClient = null
+                  // Official 2.1.325 #2306: if a tool call reconnected the
+                  // MCP server (different client instance), refresh the live
+                  // tool pool so subsequent SDK host calls point to the new
+                  // connection rather than answering "Not connected".
+                  if (
+                    connectedClient !== client &&
+                    connectedClient.type === 'connected'
+                  ) {
+                    void fetchToolsForClient(connectedClient)
+                      .then(freshTools => {
+                        swapMcpServerTools(
+                          client.name,
+                          freshTools,
+                          connectedClient.config,
+                          connectedClient,
+                        )
+                      })
+                      .catch(() => {})
+                  }
+                  // densable 2.1.212: MCP > threshold → auto-background
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const {
+                    resolveMcpAutoBackgroundMs,
+                    callMcpToolWithAutoBackground,
+                    extractSep2663ServerTask,
+                    handleSep2663ServerTask,
+                  } =
+                    require('../../utils/mcpAutoBackground.js') as typeof import('../../utils/mcpAutoBackground.js')
+                  const transportType =
+                    typeof client === 'object' &&
+                    client &&
+                    'config' in client &&
+                    client.config &&
+                    typeof client.config === 'object' &&
+                    'type' in client.config
+                      ? String((client.config as { type?: string }).type ?? '')
+                      : typeof client === 'object' && client && 'type' in client
+                        ? String((client as { type?: string }).type ?? '')
+                        : ''
+                  const autoBgMs = resolveMcpAutoBackgroundMs(process.env, {
+                    transportType,
+                    isNonInteractiveSession:
+                      context.options.isNonInteractiveSession,
+                  })
+
+                  const runMcp = (signal: AbortSignal) =>
+                    callMCPToolWithUrlElicitationRetry({
+                      client: connectedClient,
+                      clientConnection: client,
+                      tool: tool.name,
+                      args: callArgs,
+                      meta,
+                      signal,
+                      setAppState: context.setAppState,
+                      onProgress:
+                        onProgress && toolUseId
+                          ? progressData => {
+                              onProgress({
+                                toolUseID: toolUseId,
+                                data: progressData,
+                              })
+                            }
+                          : undefined,
+                      handleElicitation: context.handleElicitation,
+                      requestDialog: context.requestDialog,
+                      canUseTool: _canUseTool,
+                      toolUseContext: context,
+                      model: context.options.mainLoopModel,
                     })
 
-                    const runMcp = (signal: AbortSignal) =>
-                      callMCPToolWithUrlElicitationRetry({
-                        client: connectedClient,
-                        clientConnection: client,
-                        tool: tool.name,
-                        args: callArgs,
-                        meta,
-                        signal,
-                        setAppState: context.setAppState,
-                        onProgress:
-                          onProgress && toolUseId
-                            ? progressData => {
-                                onProgress({
-                                  toolUseID: toolUseId,
-                                  data: progressData,
-                                })
-                              }
-                            : undefined,
-                        handleElicitation: context.handleElicitation,
-                        requestDialog: context.requestDialog,
-                        canUseTool: _canUseTool,
-                        toolUseContext: context,
-                        model: context.options.mainLoopModel,
-                      })
+                  let mcpResult =
+                    autoBgMs > 0
+                      ? await callMcpToolWithAutoBackground({
+                          run: runMcp,
+                          serverName: client.name,
+                          toolName: tool.name,
+                          toolUseId,
+                          parentAbortController: context.abortController,
+                          setAppState:
+                            context.setAppStateForTasks ?? context.setAppState,
+                          autoBackgroundMs: autoBgMs,
+                          toolLabel: fullyQualifiedName,
+                          foregroundSession: (context as { session?: object })
+                            .session,
+                          // densable $cy: defer auto-bg while URL elicitation open.
+                          // Gold: process counter (begin/end around elicitation) OR
+                          // AppState elicitation.queue length (REPL dialog). Prefer
+                          // true on either signal — only return false when both
+                          // probes say clear (or throw).
+                          hasPendingElicitation: () => {
+                            let processPending = false
+                            try {
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              const { hasPendingMcpElicitation } =
+                                require('./transportErrorState.js') as typeof import('./transportErrorState.js')
+                              processPending = hasPendingMcpElicitation()
+                            } catch {
+                              /* optional */
+                            }
+                            if (processPending) return true
+                            try {
+                              const q = context.getAppState().elicitation?.queue
+                              return Array.isArray(q) && q.length > 0
+                            } catch {
+                              return false
+                            }
+                          },
+                        })
+                      : await runMcp(context.abortController.signal)
 
-                    let mcpResult =
-                      autoBgMs > 0
-                        ? await callMcpToolWithAutoBackground({
-                            run: runMcp,
-                            serverName: client.name,
-                            toolName: tool.name,
-                            toolUseId,
-                            parentAbortController: context.abortController,
-                            setAppState:
-                              context.setAppStateForTasks ??
-                              context.setAppState,
-                            autoBackgroundMs: autoBgMs,
-                            toolLabel: fullyQualifiedName,
-                            foregroundSession: (context as { session?: object })
-                              .session,
-                            // densable $cy: defer auto-bg while URL elicitation open.
-                            // Gold: process counter (begin/end around elicitation) OR
-                            // AppState elicitation.queue length (REPL dialog). Prefer
-                            // true on either signal — only return false when both
-                            // probes say clear (or throw).
-                            hasPendingElicitation: () => {
-                              let processPending = false
-                              try {
-                                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                                const { hasPendingMcpElicitation } =
-                                  require('./transportErrorState.js') as typeof import('./transportErrorState.js')
-                                processPending = hasPendingMcpElicitation()
-                              } catch {
-                                /* optional */
-                              }
-                              if (processPending) return true
-                              try {
-                                const q =
-                                  context.getAppState().elicitation?.queue
-                                return Array.isArray(q) && q.length > 0
-                              } catch {
-                                return false
-                              }
+                  // Official 325 #1701 & #1702: when an MCP server runs a tool
+                  // call as a SEP-2663 task, immediately background it (unless
+                  // CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND is set).
+                  const sep2663Task = extractSep2663ServerTask(mcpResult)
+                  if (sep2663Task) {
+                    mcpResult = (await handleSep2663ServerTask({
+                      serverName: client.name,
+                      toolName: tool.name,
+                      toolLabel: fullyQualifiedName,
+                      toolUseId,
+                      taskRef: sep2663Task,
+                      setAppState:
+                        context.setAppStateForTasks ?? context.setAppState,
+                      parentAbortSignal: context.abortController.signal,
+                      isNonInteractiveSession:
+                        context.options.isNonInteractiveSession,
+                      pollToCompletion: async pollSignal => {
+                        type RawTaskClient = {
+                          request: (
+                            req: {
+                              method: string
+                              params: Record<string, unknown>
                             },
-                          })
-                        : await runMcp(context.abortController.signal)
-
-                    // Official 325 #1701 & #1702: when an MCP server runs a tool
-                    // call as a SEP-2663 task, immediately background it (unless
-                    // CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND is set).
-                    const sep2663Task = extractSep2663ServerTask(mcpResult)
-                    if (sep2663Task) {
-                      mcpResult = (await handleSep2663ServerTask({
-                        serverName: client.name,
-                        toolName: tool.name,
-                        toolLabel: fullyQualifiedName,
-                        toolUseId,
-                        taskRef: sep2663Task,
-                        setAppState:
-                          context.setAppStateForTasks ?? context.setAppState,
-                        parentAbortSignal: context.abortController.signal,
-                        isNonInteractiveSession:
-                          context.options.isNonInteractiveSession,
-                        pollToCompletion: async pollSignal => {
-                          type RawTaskClient = {
-                            request: (
-                              req: {
-                                method: string
-                                params: Record<string, unknown>
-                              },
-                              opts?: { signal?: AbortSignal },
-                            ) => Promise<Record<string, unknown>>
-                          }
-                          // Official 2.1.325 #2308: follow server reconnects so
-                          // background MCP tasks keep updating when another call
-                          // drops and later reconnects the same server.
-                          let activeConnected: ConnectedMCPServer =
-                            connectedClient
-                          let wakeupResolve: (() => void) | undefined
-                          const unsubscribe = onMcpServerConnected(
-                            client.name,
-                            fresh => {
-                              activeConnected = fresh
-                              wakeupResolve?.()
-                              wakeupResolve = undefined
-                            },
-                          )
-                          const interval = sep2663Task.pollIntervalMs ?? 2000
-                          let consecutiveErrors = 0
-                          const MAX_CONSECUTIVE_POLL_ERRORS = 5
-                          try {
-                            while (!pollSignal.aborted) {
-                              const settled = await peekSettledConnection(
-                                client.name,
-                                client.config,
+                            opts?: { signal?: AbortSignal },
+                          ) => Promise<Record<string, unknown>>
+                        }
+                        // Official 2.1.325 #2308: follow server reconnects so
+                        // background MCP tasks keep updating when another call
+                        // drops and later reconnects the same server.
+                        let activeConnected: ConnectedMCPServer =
+                          connectedClient
+                        let wakeupResolve: (() => void) | undefined
+                        const unsubscribe = onMcpServerConnected(
+                          client.name,
+                          fresh => {
+                            activeConnected = fresh
+                            wakeupResolve?.()
+                            wakeupResolve = undefined
+                          },
+                        )
+                        const interval = sep2663Task.pollIntervalMs ?? 2000
+                        let consecutiveErrors = 0
+                        const MAX_CONSECUTIVE_POLL_ERRORS = 5
+                        try {
+                          while (!pollSignal.aborted) {
+                            const settled = await peekSettledConnection(
+                              client.name,
+                              client.config,
+                            )
+                            if (
+                              settled &&
+                              settled.type === 'connected' &&
+                              settled !== activeConnected
+                            ) {
+                              activeConnected = settled
+                            }
+                            const rawClient =
+                              activeConnected.client as unknown as RawTaskClient
+                            try {
+                              const statusRes = await rawClient.request(
+                                {
+                                  method: 'tasks/get',
+                                  params: { taskId: sep2663Task.mcpTaskId },
+                                },
+                                { signal: pollSignal },
                               )
-                              if (
-                                settled &&
-                                settled.type === 'connected' &&
-                                settled !== activeConnected
-                              ) {
-                                activeConnected = settled
-                              }
-                              const rawClient =
-                                activeConnected.client as unknown as RawTaskClient
-                              try {
-                                const statusRes = await rawClient.request(
+                              consecutiveErrors = 0
+                              const st = String(statusRes?.status ?? '')
+                              if (st === 'completed') {
+                                return await rawClient.request(
                                   {
-                                    method: 'tasks/get',
+                                    method: 'tasks/result',
                                     params: { taskId: sep2663Task.mcpTaskId },
                                   },
                                   { signal: pollSignal },
                                 )
-                                consecutiveErrors = 0
-                                const st = String(statusRes?.status ?? '')
-                                if (st === 'completed') {
-                                  return await rawClient.request(
-                                    {
-                                      method: 'tasks/result',
-                                      params: { taskId: sep2663Task.mcpTaskId },
-                                    },
-                                    { signal: pollSignal },
-                                  )
-                                }
-                                if (st === 'failed' || st === 'cancelled') {
-                                  throw new Error(
-                                    String(
-                                      statusRes?.statusMessage ??
-                                        `MCP task ${sep2663Task.mcpTaskId} ${st}`,
-                                    ),
-                                  )
-                                }
-                              } catch (pollErr) {
-                                if (pollSignal.aborted) throw pollErr
-                                // If another call reconnected the server while
-                                // this poll failed on the old socket, switch
-                                // immediately and retry without counting down.
-                                const fresh = await peekSettledConnection(
-                                  client.name,
-                                  client.config,
-                                )
-                                if (
-                                  fresh &&
-                                  fresh.type === 'connected' &&
-                                  fresh !== activeConnected
-                                ) {
-                                  activeConnected = fresh
-                                  consecutiveErrors = 0
-                                  continue
-                                }
-                                consecutiveErrors++
-                                if (
-                                  consecutiveErrors >=
-                                  MAX_CONSECUTIVE_POLL_ERRORS
-                                ) {
-                                  throw pollErr
-                                }
                               }
-                              await new Promise<void>(resolve => {
-                                let timer: ReturnType<typeof setTimeout>
-                                const onAbort = () => {
-                                  clearTimeout(timer)
-                                  wakeupResolve = undefined
-                                  resolve()
-                                }
-                                timer = setTimeout(() => {
-                                  pollSignal.removeEventListener(
-                                    'abort',
-                                    onAbort,
-                                  )
-                                  wakeupResolve = undefined
-                                  resolve()
-                                }, interval)
-                                pollSignal.addEventListener('abort', onAbort, {
-                                  once: true,
-                                })
-                                wakeupResolve = () => {
-                                  clearTimeout(timer)
-                                  pollSignal.removeEventListener(
-                                    'abort',
-                                    onAbort,
-                                  )
-                                  wakeupResolve = undefined
-                                  resolve()
-                                }
-                              })
+                              if (st === 'failed' || st === 'cancelled') {
+                                throw new Error(
+                                  String(
+                                    statusRes?.statusMessage ??
+                                      `MCP task ${sep2663Task.mcpTaskId} ${st}`,
+                                  ),
+                                )
+                              }
+                            } catch (pollErr) {
+                              if (pollSignal.aborted) throw pollErr
+                              // If another call reconnected the server while
+                              // this poll failed on the old socket, switch
+                              // immediately and retry without counting down.
+                              const fresh = await peekSettledConnection(
+                                client.name,
+                                client.config,
+                              )
+                              if (
+                                fresh &&
+                                fresh.type === 'connected' &&
+                                fresh !== activeConnected
+                              ) {
+                                activeConnected = fresh
+                                consecutiveErrors = 0
+                                continue
+                              }
+                              consecutiveErrors++
+                              if (
+                                consecutiveErrors >= MAX_CONSECUTIVE_POLL_ERRORS
+                              ) {
+                                throw pollErr
+                              }
                             }
-                            throw new Error('MCP task polling aborted')
-                          } finally {
-                            unsubscribe()
+                            await new Promise<void>(resolve => {
+                              let timer: ReturnType<typeof setTimeout>
+                              const onAbort = () => {
+                                clearTimeout(timer)
+                                wakeupResolve = undefined
+                                resolve()
+                              }
+                              timer = setTimeout(() => {
+                                pollSignal.removeEventListener('abort', onAbort)
+                                wakeupResolve = undefined
+                                resolve()
+                              }, interval)
+                              pollSignal.addEventListener('abort', onAbort, {
+                                once: true,
+                              })
+                              wakeupResolve = () => {
+                                clearTimeout(timer)
+                                pollSignal.removeEventListener('abort', onAbort)
+                                wakeupResolve = undefined
+                                resolve()
+                              }
+                            })
                           }
-                        },
-                      })) as typeof mcpResult
-                    }
+                          throw new Error('MCP task polling aborted')
+                        } finally {
+                          unsubscribe()
+                        }
+                      },
+                    })) as typeof mcpResult
+                  }
 
-                    // densable 2.1.246 #10: `if(Ae.interrupted)throw new Rn(Q6)`
-                    // before completed progress — abort must not become empty
-                    // content → Dyo `(completed with no output)`.
-                    throwIfMcpToolCallInterrupted(mcpResult)
+                  // densable 2.1.246 #10: `if(Ae.interrupted)throw new Rn(Q6)`
+                  // before completed progress — abort must not become empty
+                  // content → Dyo `(completed with no output)`.
+                  throwIfMcpToolCallInterrupted(mcpResult)
 
-                    // densable: auto-bg returns moved-to-background tool result while
-                    // the call still runs — do not emit false "completed" progress.
-                    const autoBackgrounded =
-                      !!mcpResult &&
-                      typeof mcpResult === 'object' &&
-                      'autoBackgrounded' in mcpResult &&
-                      (mcpResult as { autoBackgrounded?: boolean })
-                        .autoBackgrounded === true
+                  // densable: auto-bg returns moved-to-background tool result while
+                  // the call still runs — do not emit false "completed" progress.
+                  const autoBackgrounded =
+                    !!mcpResult &&
+                    typeof mcpResult === 'object' &&
+                    'autoBackgrounded' in mcpResult &&
+                    (mcpResult as { autoBackgrounded?: boolean })
+                      .autoBackgrounded === true
 
-                    // Emit progress when tool completes successfully
-                    if (onProgress && toolUseId && !autoBackgrounded) {
-                      onProgress({
-                        toolUseID: toolUseId,
-                        data: {
-                          type: 'mcp_progress',
-                          status: 'completed',
-                          serverName: client.name,
-                          toolName: tool.name,
-                          elapsedTimeMs: Date.now() - startTime,
-                        },
-                      })
-                    }
+                  // Emit progress when tool completes successfully
+                  if (onProgress && toolUseId && !autoBackgrounded) {
+                    onProgress({
+                      toolUseID: toolUseId,
+                      data: {
+                        type: 'mcp_progress',
+                        status: 'completed',
+                        serverName: client.name,
+                        toolName: tool.name,
+                        elapsedTimeMs: Date.now() - startTime,
+                      },
+                    })
+                  }
 
-                    const mcpMeta =
-                      mcpResult &&
-                      typeof mcpResult === 'object' &&
-                      (('_meta' in mcpResult && mcpResult._meta) ||
-                        ('structuredContent' in mcpResult &&
-                          mcpResult.structuredContent))
-                        ? {
-                            ...('_meta' in mcpResult && mcpResult._meta
-                              ? {
-                                  _meta: mcpResult._meta as Record<
+                  const mcpMeta =
+                    mcpResult &&
+                    typeof mcpResult === 'object' &&
+                    (('_meta' in mcpResult && mcpResult._meta) ||
+                      ('structuredContent' in mcpResult &&
+                        mcpResult.structuredContent))
+                      ? {
+                          ...('_meta' in mcpResult && mcpResult._meta
+                            ? {
+                                _meta: mcpResult._meta as Record<
+                                  string,
+                                  unknown
+                                >,
+                              }
+                            : {}),
+                          ...('structuredContent' in mcpResult &&
+                          mcpResult.structuredContent
+                            ? {
+                                structuredContent:
+                                  mcpResult.structuredContent as Record<
                                     string,
                                     unknown
                                   >,
-                                }
-                              : {}),
-                            ...('structuredContent' in mcpResult &&
-                            mcpResult.structuredContent
-                              ? {
-                                  structuredContent:
-                                    mcpResult.structuredContent as Record<
-                                      string,
-                                      unknown
-                                    >,
-                                }
-                              : {}),
-                          }
-                        : undefined
+                              }
+                            : {}),
+                        }
+                      : undefined
 
-                    return {
-                      data: mcpResult.content,
-                      ...(mcpMeta && Object.keys(mcpMeta).length > 0
-                        ? { mcpMeta }
-                        : {}),
+                  return {
+                    data: mcpResult.content,
+                    ...(mcpMeta && Object.keys(mcpMeta).length > 0
+                      ? { mcpMeta }
+                      : {}),
+                  }
+                } catch (error) {
+                  // Session expired — the connection cache has been
+                  // cleared, so retry with a fresh client.
+                  if (
+                    error instanceof McpSessionExpiredError &&
+                    attempt < MAX_SESSION_RETRIES &&
+                    (!error.mayHaveRun ||
+                      tool.annotations?.readOnlyHint === true ||
+                      tool.annotations?.idempotentHint === true)
+                  ) {
+                    logMCPDebug(
+                      client.name,
+                      `Retrying tool '${tool.name}' after session recovery`,
+                    )
+                    continue
+                  }
+
+                  // Official 2.1.193/206: 401 auth recovery — headersHelper
+                  // re-mint, or OAuth refresh_token reconnect, once only.
+                  // Concurrent callers rejoin the same in-flight reconnect
+                  // (OHs Map: reauth_retry leader / collateral_rejoin).
+                  if (authReconnectRetries < MAX_AUTH_RECONNECT_RETRIES) {
+                    const serverConfig = client.config as {
+                      headersHelper?: string
+                      type?: string
+                      url?: string
+                      headers?: Record<string, string>
+                      oauth?: unknown
                     }
-                  } catch (error) {
-                    // Session expired — the connection cache has been
-                    // cleared, so retry with a fresh client.
-                    if (
-                      error instanceof McpSessionExpiredError &&
-                      attempt < MAX_SESSION_RETRIES &&
-                      (!error.mayHaveRun ||
-                        tool.annotations?.readOnlyHint === true ||
-                        tool.annotations?.idempotentHint === true)
-                    ) {
+                    const hasRefreshToken =
+                      (serverConfig.type === 'http' ||
+                        serverConfig.type === 'sse') &&
+                      !!serverConfig.url &&
+                      serverHasStoredRefreshToken(
+                        client.name,
+                        serverConfig as {
+                          type: 'http' | 'sse'
+                          url: string
+                          headers?: Record<string, string>
+                        },
+                      )
+                    const kind = classifyAuthReconnectKind({
+                      type: serverConfig.type,
+                      headersHelper: serverConfig.headersHelper,
+                      url: serverConfig.url,
+                      hasRefreshToken,
+                      hasUserAuthHeader: headersHaveAuthorization(
+                        serverConfig.headers,
+                      ),
+                    })
+                    const cacheKey = getServerCacheKey(
+                      client.name,
+                      client.config,
+                    )
+                    // Official W: ConnectionClosed mid-reconnect → rejoin
+                    // even if this call didn't see a 401 classification.
+                    const closedWhileReconnecting =
+                      kind !== null &&
+                      isConnectionClosedWhileReconnecting(
+                        error,
+                        hasAuthReconnectInFlight(cacheKey),
+                      )
+                    const shouldReconnect =
+                      kind !== null &&
+                      (error instanceof McpAuthError || closedWhileReconnecting)
+
+                    if (shouldReconnect && kind !== null) {
+                      authReconnectRetries++
                       logMCPDebug(
                         client.name,
-                        `Retrying tool '${tool.name}' after session recovery`,
+                        kind === 'mcp_headers_helper'
+                          ? `Tool '${tool.name}' returned 401; re-running headersHelper and retrying once`
+                          : `Tool '${tool.name}' returned 401; refresh token stored — reconnecting and retrying once`,
                       )
-                      continue
-                    }
-
-                    // Official 2.1.193/206: 401 auth recovery — headersHelper
-                    // re-mint, or OAuth refresh_token reconnect, once only.
-                    // Concurrent callers rejoin the same in-flight reconnect
-                    // (OHs Map: reauth_retry leader / collateral_rejoin).
-                    if (authReconnectRetries < MAX_AUTH_RECONNECT_RETRIES) {
-                      const serverConfig = client.config as {
-                        headersHelper?: string
-                        type?: string
-                        url?: string
-                        headers?: Record<string, string>
-                        oauth?: unknown
-                      }
-                      const hasRefreshToken =
-                        (serverConfig.type === 'http' ||
-                          serverConfig.type === 'sse') &&
-                        !!serverConfig.url &&
-                        serverHasStoredRefreshToken(
-                          client.name,
-                          serverConfig as {
-                            type: 'http' | 'sse'
-                            url: string
-                            headers?: Record<string, string>
+                      const reconnected: MCPServerConnection =
+                        await joinOrStartAuthReconnect(
+                          cacheKey,
+                          kind,
+                          async (): Promise<MCPServerConnection> => {
+                            await clearServerCache(client.name, client.config)
+                            return connectToServer(client.name, client.config)
+                          },
+                          join => {
+                            // Official Ze(kind, role): telemetry distinguishes
+                            // the leader reauth_retry from collateral_rejoin.
+                            if (join.role === 'leader') {
+                              logEvent(
+                                kind === 'mcp_headers_helper'
+                                  ? 'tengu_mcp_headers_helper_retry'
+                                  : 'tengu_mcp_oauth_refresh_retry',
+                                {},
+                              )
+                            } else {
+                              logEvent(
+                                kind === 'mcp_headers_helper'
+                                  ? 'tengu_mcp_headers_helper_collateral_rejoin'
+                                  : 'tengu_mcp_oauth_refresh_collateral_rejoin',
+                                {},
+                              )
+                            }
                           },
                         )
-                      const kind = classifyAuthReconnectKind({
-                        type: serverConfig.type,
-                        headersHelper: serverConfig.headersHelper,
-                        url: serverConfig.url,
-                        hasRefreshToken,
-                        hasUserAuthHeader: headersHaveAuthorization(
-                          serverConfig.headers,
-                        ),
-                      })
-                      const cacheKey = getServerCacheKey(
+                      if (reconnected.type === 'connected') {
+                        // Official: retry the tool with the reconnected client
+                        // (recursive JTo isAuthRetry). Prefer this object so
+                        // we don't race another cache miss after clear+connect.
+                        // Official 2.1.325 #2306: also refresh server tools in
+                        // the live tool pool so SDK host calls point to the
+                        // new connection instead of answering "Not connected".
+                        preferredClient = reconnected
+                        void fetchToolsForClient(reconnected)
+                          .then(freshTools => {
+                            swapMcpServerTools(
+                              client.name,
+                              freshTools,
+                              reconnected.config,
+                              reconnected,
+                            )
+                          })
+                          .catch(() => {})
+                        continue
+                      }
+                      logMCPDebug(
                         client.name,
-                        client.config,
+                        `Auth reconnect returned '${reconnected.type}'; falling through to needs-auth`,
                       )
-                      // Official W: ConnectionClosed mid-reconnect → rejoin
-                      // even if this call didn't see a 401 classification.
-                      const closedWhileReconnecting =
-                        kind !== null &&
-                        isConnectionClosedWhileReconnecting(
-                          error,
-                          hasAuthReconnectInFlight(cacheKey),
-                        )
-                      const shouldReconnect =
-                        kind !== null &&
-                        (error instanceof McpAuthError ||
-                          closedWhileReconnecting)
-
-                      if (shouldReconnect && kind !== null) {
-                        authReconnectRetries++
-                        logMCPDebug(
-                          client.name,
-                          kind === 'mcp_headers_helper'
-                            ? `Tool '${tool.name}' returned 401; re-running headersHelper and retrying once`
-                            : `Tool '${tool.name}' returned 401; refresh token stored — reconnecting and retrying once`,
-                        )
-                        const reconnected: MCPServerConnection =
-                          await joinOrStartAuthReconnect(
-                            cacheKey,
-                            kind,
-                            async (): Promise<MCPServerConnection> => {
-                              await clearServerCache(client.name, client.config)
-                              return connectToServer(client.name, client.config)
-                            },
-                            join => {
-                              // Official Ze(kind, role): telemetry distinguishes
-                              // the leader reauth_retry from collateral_rejoin.
-                              if (join.role === 'leader') {
-                                logEvent(
-                                  kind === 'mcp_headers_helper'
-                                    ? 'tengu_mcp_headers_helper_retry'
-                                    : 'tengu_mcp_oauth_refresh_retry',
-                                  {},
-                                )
-                              } else {
-                                logEvent(
-                                  kind === 'mcp_headers_helper'
-                                    ? 'tengu_mcp_headers_helper_collateral_rejoin'
-                                    : 'tengu_mcp_oauth_refresh_collateral_rejoin',
-                                  {},
-                                )
-                              }
-                            },
-                          )
-                        if (reconnected.type === 'connected') {
-                          // Official: retry the tool with the reconnected client
-                          // (recursive JTo isAuthRetry). Prefer this object so
-                          // we don't race another cache miss after clear+connect.
-                          // Official 2.1.325 #2306: also refresh server tools in
-                          // the live tool pool so SDK host calls point to the
-                          // new connection instead of answering "Not connected".
-                          preferredClient = reconnected
-                          void fetchToolsForClient(reconnected)
-                            .then(freshTools => {
-                              swapMcpServerTools(
-                                client.name,
-                                freshTools,
-                                reconnected.config,
-                                reconnected,
-                              )
-                            })
-                            .catch(() => {})
-                          continue
-                        }
-                        logMCPDebug(
-                          client.name,
-                          `Auth reconnect returned '${reconnected.type}'; falling through to needs-auth`,
-                        )
-                      }
                     }
-
-                    // Emit progress when tool fails
-                    if (onProgress && toolUseId) {
-                      onProgress({
-                        toolUseID: toolUseId,
-                        data: {
-                          type: 'mcp_progress',
-                          status: 'failed',
-                          serverName: client.name,
-                          toolName: tool.name,
-                          elapsedTimeMs: Date.now() - startTime,
-                        },
-                      })
-                    }
-                    // Wrap MCP SDK errors so telemetry gets useful context
-                    // instead of just "Error" or "McpError" (the constructor
-                    // name). MCP SDK errors are protocol-level messages and
-                    // don't contain user file paths or code.
-                    if (
-                      error instanceof Error &&
-                      !(
-                        error instanceof
-                        TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-                      )
-                    ) {
-                      const name = error.constructor.name
-                      if (name === 'Error') {
-                        throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-                          error.message,
-                          error.message.slice(0, 200),
-                        )
-                      }
-                      // McpError has a numeric `code` with the JSON-RPC error
-                      // code (e.g. -32000 ConnectionClosed, -32001 RequestTimeout)
-                      if (
-                        name === 'McpError' &&
-                        'code' in error &&
-                        typeof error.code === 'number'
-                      ) {
-                        throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-                          error.message,
-                          `McpError ${error.code}`,
-                        )
-                      }
-                    }
-                    throw error
                   }
+
+                  // Emit progress when tool fails
+                  if (onProgress && toolUseId) {
+                    onProgress({
+                      toolUseID: toolUseId,
+                      data: {
+                        type: 'mcp_progress',
+                        status: 'failed',
+                        serverName: client.name,
+                        toolName: tool.name,
+                        elapsedTimeMs: Date.now() - startTime,
+                      },
+                    })
+                  }
+                  // Wrap MCP SDK errors so telemetry gets useful context
+                  // instead of just "Error" or "McpError" (the constructor
+                  // name). MCP SDK errors are protocol-level messages and
+                  // don't contain user file paths or code.
+                  if (
+                    error instanceof Error &&
+                    !(
+                      error instanceof
+                      TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+                    )
+                  ) {
+                    const name = error.constructor.name
+                    if (name === 'Error') {
+                      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                        error.message,
+                        error.message.slice(0, 200),
+                      )
+                    }
+                    // McpError has a numeric `code` with the JSON-RPC error
+                    // code (e.g. -32000 ConnectionClosed, -32001 RequestTimeout)
+                    if (
+                      name === 'McpError' &&
+                      'code' in error &&
+                      typeof error.code === 'number'
+                    ) {
+                      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                        error.message,
+                        `McpError ${error.code}`,
+                      )
+                    }
+                  }
+                  throw error
                 }
-              },
-              userFacingName() {
-                // Prefer title annotation if available, otherwise use tool name
-                const displayName = tool.annotations?.title || tool.name
-                return `${client.name} - ${displayName} (MCP)`
-              },
-              ...(isClaudeInChromeMCPServer(client.name) &&
-              (client.config.type === 'stdio' || !client.config.type)
-                ? claudeInChromeToolRendering().getClaudeInChromeMCPToolOverrides(
-                    tool.name,
-                  )
-                : {}),
-              ...(feature('CHICAGO_MCP') &&
-              (client.config.type === 'stdio' || !client.config.type) &&
-              isComputerUseMCPServer!(client.name)
-                ? computerUseWrapper!().getComputerUseMCPToolOverrides(
-                    tool.name,
-                  )
-                : {}),
-            }
+              }
+            },
+            userFacingName() {
+              // Prefer title annotation if available, otherwise use tool name
+              const displayName = tool.annotations?.title || tool.name
+              return `${client.name} - ${displayName} (MCP)`
+            },
+            ...(isClaudeInChromeMCPServer(client.name) &&
+            (client.config.type === 'stdio' || !client.config.type)
+              ? claudeInChromeToolRendering().getClaudeInChromeMCPToolOverrides(
+                  tool.name,
+                )
+              : {}),
+            ...(feature('CHICAGO_MCP') &&
+            (client.config.type === 'stdio' || !client.config.type) &&
+            isComputerUseMCPServer!(client.name)
+              ? computerUseWrapper!().getComputerUseMCPToolOverrides(tool.name)
+              : {}),
+          }
+          return composeMcpTool({
+            serverName: client.name,
+            config: client.config,
+            toolName: tool.name,
+            fullyQualifiedName,
+            skipPrefix,
+            standardKey: serverStandardKey,
+            denyKey: serverDenyKey,
+            toolNameShared,
+            requiresUserInteraction,
+            isFirstPartyDesignServer,
+            baseTool,
           })
-          .map(mappedTool =>
-            wrapDocsConnectorToolForTerminalAutoOpen(
-              mappedTool,
-              client.name,
-              client.config,
-            ),
-          )
-          .filter(isIncludedMcpTool),
-        client.name,
-      )
+        })
+        .map(mappedTool =>
+          wrapDocsConnectorToolForTerminalAutoOpen(
+            mappedTool,
+            client.name,
+            client.config,
+          ),
+        )
+        .filter(isIncludedMcpTool)
+
+      for (const candidate of composedTools) {
+        if (candidate.name.length > MAX_MCP_TOOL_NAME_LENGTH) {
+          droppedRaw.push({
+            toolName: candidate.mcpInfo?.toolName ?? candidate.name,
+            reason: `tool name has ${candidate.name.length} characters and exceeds the ${MAX_MCP_TOOL_NAME_LENGTH}-character limit`,
+          })
+        }
+      }
+
+      if (droppedSeq.seq > droppedSeq.state.applied) {
+        droppedSeq.state.applied = droppedSeq.seq
+        const seenDropped = new Set<string>()
+        const dedupedDropped: DroppedMcpToolRecord[] = []
+        for (const item of droppedRaw) {
+          if (!seenDropped.has(item.toolName)) {
+            seenDropped.add(item.toolName)
+            dedupedDropped.push(item)
+          }
+        }
+        client.droppedTools =
+          dedupedDropped.length > 0 ? dedupedDropped : undefined
+      }
+
+      return filterMcpToolsByNameLength(composedTools, client.name)
     } catch (error) {
       const msg = errorMessage(error)
       // densable n4e catch: claudeai-proxy bearer reject → discoveryBearerRejected
@@ -4227,6 +4572,48 @@ export const fetchResourcesForClient = memoizeWithLRU(
   (client: MCPServerConnection) => client.name,
   MCP_FETCH_CACHE_SIZE,
 )
+
+/**
+ * Official 2.1.328 (`hR` / `completeResourceTemplate`
+ * @chunk@335138039.js@243488): invoke MCP `completion/complete` for a
+ * resource template argument when the connected server advertises the
+ * `completions` capability.
+ */
+export async function completeResourceTemplate(
+  client: MCPServerConnection,
+  uri: string,
+  argumentName: string,
+  argumentValue: string,
+  contextArguments: Record<string, string> = {},
+): Promise<string[]> {
+  if (client.type !== 'connected' || !client.capabilities?.completions) {
+    return []
+  }
+  try {
+    const result = await client.client.complete({
+      ref: { type: 'ref/resource', uri },
+      argument: { name: argumentName, value: argumentValue },
+      ...(Object.keys(contextArguments).length > 0
+        ? { context: { arguments: contextArguments } }
+        : {}),
+    })
+    logEvent('tengu_mcp_complete_resource_template', {
+      outcome:
+        'success' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return result.completion.values
+  } catch (error) {
+    logEvent('tengu_mcp_complete_resource_template', {
+      outcome:
+        'failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    logMCPError(
+      client.name,
+      `Failed to complete resource template: ${errorMessage(error)}`,
+    )
+    return []
+  }
+}
 
 export const fetchCommandsForClient = memoizeWithLRU(
   async (client: MCPServerConnection): Promise<Command[]> => {

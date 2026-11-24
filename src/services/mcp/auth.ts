@@ -8,6 +8,7 @@ import {
   OAuthErrorCode,
   auth as sdkAuth,
   refreshAuthorization as sdkRefreshAuthorization,
+  UnauthorizedError,
   type AuthorizationServerMetadata,
   type FetchLike,
   type OAuthClientInformation,
@@ -44,6 +45,7 @@ import type { SecureStorageData } from '../../utils/secureStorage/types.js'
 import type { ScopedMcpServerConfig } from './types.js'
 import { sleep } from '../../utils/sleep.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logEvent } from '../analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { McpCredentialStoreUnavailableError } from './connectionHelpers.js'
@@ -314,6 +316,7 @@ type MCPRefreshFailureReason =
   | 'invalid_client'
   | 'unauthorized_client'
   | 'concurrent_reregister'
+  | 'issuer_echo_denied'
   | 'transient_retries_exhausted'
   | 'request_failed'
 
@@ -330,6 +333,7 @@ type MCPOAuthFlowErrorReason =
   | 'port_unavailable'
   | 'sdk_auth_failed'
   | 'token_exchange_failed'
+  | 'issuer_echo_denied'
   | 'unknown'
 
 const MAX_LOCK_RETRIES = 5
@@ -739,12 +743,283 @@ function createAuthFetch(): FetchLike {
  * URL itself). The HTTPS requirement here is defense-in-depth beyond schema validation
  * — RFC 8414 mandates OAuth metadata retrieval over TLS.
  */
+export const TENGU_MCP_ISSUER_STRICT_ECHO = 'tengu_mcp_issuer_strict_echo'
+
+/**
+ * Official 2.1.328 (`Mne` @chunk@334972328.js@19641): RFC 8414 §3.3
+ * cross-origin issuer-echo denial error.
+ */
+export class IssuerEchoCrossOriginError extends Error {
+  readonly expected: string
+  readonly received: string | undefined
+  readonly code = 'issuer_echo_denied'
+
+  constructor(expected: string, received: string | undefined) {
+    super(
+      `Issuer echo cross-origin mismatch (RFC 8414 §3.3): expected ${jsonStringify(expected)}, received ${jsonStringify(received)}`,
+    )
+    this.expected = expected
+    this.received = received
+    this.name = 'IssuerEchoCrossOriginError'
+  }
+}
+
+export function isIssuerStrictEchoEnabled(): boolean {
+  try {
+    return (
+      getFeatureValue_CACHED_MAY_BE_STALE(
+        TENGU_MCP_ISSUER_STRICT_ECHO,
+        false,
+      ) === true
+    )
+  } catch {
+    return false
+  }
+}
+
+function issuerEchoMatchesExactly(expected: string, received: string): boolean {
+  return (
+    received === expected ||
+    (expected.endsWith('/') && received === expected.slice(0, -1))
+  )
+}
+
+function parseHttpIssuerUrl(raw: string): URL | undefined {
+  try {
+    const parsed = new URL(raw)
+    if (
+      (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+      parsed.origin !== 'null'
+    ) {
+      return parsed
+    }
+  } catch {
+    // invalid URL
+  }
+  return undefined
+}
+
+export type IssuerOriginRelation =
+  | 'same_origin'
+  | 'cross_origin'
+  | 'unparseable'
+
+function classifyIssuerOriginRelation(
+  expected: string,
+  received: string,
+): IssuerOriginRelation {
+  const exp = parseHttpIssuerUrl(expected)
+  const rec = parseHttpIssuerUrl(received)
+  if (!exp || !rec) return 'unparseable'
+  if (
+    exp.username !== '' ||
+    exp.password !== '' ||
+    rec.username !== '' ||
+    rec.password !== '' ||
+    rec.search !== '' ||
+    rec.hash !== ''
+  ) {
+    return 'cross_origin'
+  }
+  return exp.origin === rec.origin ? 'same_origin' : 'cross_origin'
+}
+
+function collectIssuerMismatchFacets(
+  expected: string,
+  received: string,
+): string[] {
+  const exp = parseHttpIssuerUrl(expected)
+  const rec = parseHttpIssuerUrl(received)
+  if (!exp || !rec) return []
+  const facets: string[] = []
+  if (exp.protocol !== rec.protocol) facets.push('scheme')
+  if (exp.username !== rec.username || exp.password !== rec.password) {
+    facets.push('userinfo')
+  }
+  if (exp.hostname !== rec.hostname) facets.push('host')
+  if (exp.port !== rec.port) facets.push('port')
+  if (exp.pathname !== rec.pathname) facets.push('path')
+  if (exp.search !== rec.search) facets.push('query')
+  if (exp.hash !== rec.hash) facets.push('fragment')
+  if (facets.length === 0) facets.push('normalization_only')
+  return facets
+}
+
+function hashIssuerForTelemetry(issuer: string): string {
+  return createHash('sha256').update(issuer).digest('hex').slice(0, 16)
+}
+
+export type IssuerEchoSite =
+  | 'rfc9728_chain'
+  | 'legacy_path_fallback'
+  | 'sdk_auth'
+  | 'persisted_state'
+  | 'refresh_rediscovery'
+
+/**
+ * Official 2.1.328 (`g$r` @chunk@334972328.js@20889): RFC 8414 §3.3
+ * issuer-echo policy check. In `enforce` mode (`tengu_mcp_issuer_strict_echo`
+ * enabled, or explicit `strict: true`), rejects cross-origin or unparseable
+ * issuer metadata with `IssuerEchoCrossOriginError`.
+ */
+export function evaluateIssuerEchoPolicy({
+  serverName,
+  site,
+  expectedIssuer,
+  receivedIssuer,
+  serverConfig,
+  strict,
+}: {
+  serverName: string
+  site: IssuerEchoSite
+  expectedIssuer: string | undefined
+  receivedIssuer: string | undefined
+  serverConfig?: McpSSEServerConfig | McpHTTPServerConfig
+  strict?: boolean
+}): void {
+  if (expectedIssuer === undefined) return
+  if (
+    receivedIssuer !== undefined &&
+    issuerEchoMatchesExactly(expectedIssuer, receivedIssuer)
+  ) {
+    return
+  }
+  const originRelation: IssuerOriginRelation =
+    receivedIssuer === undefined
+      ? 'unparseable'
+      : classifyIssuerOriginRelation(expectedIssuer, receivedIssuer)
+  const mode = (strict ?? isIssuerStrictEchoEnabled()) ? 'enforce' : 'observe'
+  const denied = mode === 'enforce' && originRelation !== 'same_origin'
+  try {
+    const facets =
+      receivedIssuer === undefined
+        ? ['issuer_missing']
+        : collectIssuerMismatchFacets(expectedIssuer, receivedIssuer)
+    const baseUrl = serverConfig
+      ? getLoggingSafeMcpBaseUrl(serverConfig)
+      : undefined
+    logEvent('tengu_mcp_oauth_issuer_echo_mismatch', {
+      site: site as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      originRelation:
+        originRelation as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      outcome: (denied
+        ? 'denied'
+        : 'proceeded') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...(facets.length > 0
+        ? {
+            mismatchFacets: facets.join(
+              ',',
+            ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          }
+        : {}),
+      expectedIssuerHash: hashIssuerForTelemetry(
+        expectedIssuer,
+      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...(receivedIssuer !== undefined
+        ? {
+            receivedIssuerHash: hashIssuerForTelemetry(
+              receivedIssuer,
+            ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          }
+        : {}),
+      ...(baseUrl
+        ? {
+            mcpServerBaseUrl:
+              baseUrl as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          }
+        : {}),
+    })
+  } catch (telemetryErr) {
+    try {
+      logMCPDebug(
+        serverName,
+        `issuer-echo telemetry failed: ${errorMessage(telemetryErr)}`,
+      )
+    } catch {
+      // ignore logging error
+    }
+  }
+  if (denied) {
+    throw new IssuerEchoCrossOriginError(expectedIssuer, receivedIssuer)
+  }
+}
+
+/**
+ * Official 2.1.328 (`_pa` @chunk@334972328.js@21585): thrown during background
+ * discovery (`handleRedirection = false`) when the AS offers DCR/CIMD and no
+ * tokens exist, deferring client registration until user-initiated auth.
+ */
+export class McpClientRegistrationDeferredError extends UnauthorizedError {
+  readonly serverName: string
+
+  constructor(serverName: string) {
+    super(
+      'Authentication required; client registration is deferred until the user authenticates',
+    )
+    this.serverName = serverName
+    this.name = 'McpClientRegistrationDeferredError'
+  }
+}
+
+function getRedirectOriginWithoutPort(uri: string): string {
+  try {
+    const parsed = new URL(uri)
+    return `${parsed.protocol}//${parsed.hostname}`
+  } catch {
+    return uri
+  }
+}
+
+function isLoopbackRedirectUri(uri: string): boolean {
+  const origin = getRedirectOriginWithoutPort(uri)
+  return origin === 'http://127.0.0.1' || origin === 'http://localhost'
+}
+
+function isLoopbackCallbackRedirectUri(uri: string): boolean {
+  if (!isLoopbackRedirectUri(uri)) return false
+  try {
+    return new URL(uri).pathname === '/callback'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official 2.1.328 (`FNo` @chunk@334972328.js@22718): delete a tokenless
+ * OAuth storage stub (no accessToken and no refreshToken) once a server
+ * connects without OAuth or fails an initial tokenless auth attempt.
+ */
+export async function clearMcpOAuthStubIfTokenless(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+): Promise<void> {
+  const serverKey = getServerKey(serverName, serverConfig)
+  const storage = getSecureStorage()
+  const existing = storage.read()
+  const entry = existing?.mcpOAuth?.[serverKey]
+  if (!entry || entry.accessToken || entry.refreshToken) {
+    return
+  }
+  try {
+    const nextMcpOAuth = { ...existing.mcpOAuth }
+    delete nextMcpOAuth[serverKey]
+    storage.update({
+      ...existing,
+      mcpOAuth: nextMcpOAuth,
+    })
+  } catch (err) {
+    logMCPDebug(serverName, `clear tokenless stub failed: ${errorMessage(err)}`)
+  }
+}
+
 async function fetchAuthServerMetadata(
   serverName: string,
   serverUrl: string,
   configuredMetadataUrl: string | undefined,
   fetchFn?: FetchLike,
   resourceMetadataUrl?: URL,
+  serverConfigForAnalytics?: McpSSEServerConfig | McpHTTPServerConfig,
 ): Promise<Awaited<ReturnType<typeof discoverAuthorizationServerMetadata>>> {
   if (configuredMetadataUrl) {
     if (!configuredMetadataUrl.startsWith('https://')) {
@@ -765,17 +1040,26 @@ async function fetchAuthServerMetadata(
   }
 
   try {
-    const { authorizationServerMetadata } = await discoverOAuthServerInfo(
-      serverUrl,
-      {
+    const { authorizationServerUrl, authorizationServerMetadata } =
+      await discoverOAuthServerInfo(serverUrl, {
         ...(fetchFn && { fetchFn }),
         ...(resourceMetadataUrl && { resourceMetadataUrl }),
-      },
-    )
+        skipIssuerMetadataValidation: true,
+      })
     if (authorizationServerMetadata) {
+      evaluateIssuerEchoPolicy({
+        serverName,
+        site: 'rfc9728_chain',
+        expectedIssuer: authorizationServerUrl,
+        receivedIssuer: authorizationServerMetadata.issuer,
+        serverConfig: serverConfigForAnalytics,
+      })
       return authorizationServerMetadata
     }
   } catch (err) {
+    if (err instanceof IssuerEchoCrossOriginError) {
+      throw err
+    }
     // Any error from the RFC 9728 → RFC 8414 chain (5xx from the root or
     // resolved-AS probe, schema parse failure, network error) — fall through
     // to the legacy path-aware retry.
@@ -791,9 +1075,31 @@ async function fetchAuthServerMetadata(
   if (url.pathname === '/') {
     return undefined
   }
-  return discoverAuthorizationServerMetadata(url, {
-    ...(fetchFn && { fetchFn }),
-  })
+  try {
+    const metadata = await discoverAuthorizationServerMetadata(url, {
+      ...(fetchFn && { fetchFn }),
+      skipIssuerValidation: true,
+    })
+    if (metadata) {
+      evaluateIssuerEchoPolicy({
+        serverName,
+        site: 'legacy_path_fallback',
+        expectedIssuer: url.href,
+        receivedIssuer: metadata.issuer,
+        serverConfig: serverConfigForAnalytics,
+      })
+    }
+    return metadata
+  } catch (err) {
+    if (err instanceof IssuerEchoCrossOriginError) {
+      throw err
+    }
+    logMCPDebug(
+      serverName,
+      `Path-aware auth server discovery failed: ${errorMessage(err)}`,
+    )
+    return undefined
+  }
 }
 
 export class AuthenticationCancelledError extends Error {
@@ -1001,6 +1307,8 @@ export async function snapshotMcpOAuthTokens(
   }
 }
 
+export const snapshotServerTokens = snapshotMcpOAuthTokens
+
 /**
  * densable ZLu — server-side RFC 7009 revoke of the given token set only.
  * Does **not** clear local secure storage (unlike revokeServerTokens / wat).
@@ -1025,6 +1333,8 @@ export async function revokeTokensAtServer(
       asUrl,
       serverConfig.oauth?.authServerMetadataUrl,
       authFetch,
+      undefined,
+      serverConfig,
     )
     if (!metadata) {
       logMCPDebug(serverName, 'No OAuth metadata found')
@@ -1105,7 +1415,10 @@ export async function revokeTokensAtServer(
     }
   } catch (error: unknown) {
     logMCPDebug(serverName, `Failed to revoke tokens: ${errorMessage(error)}`)
-    failure = 'server_revoke_failed'
+    failure =
+      error instanceof IssuerEchoCrossOriginError
+        ? 'issuer_echo_denied'
+        : 'server_revoke_failed'
   }
   return failure
 }
@@ -1159,6 +1472,8 @@ export async function revokeReplacedMcpTokens(
     logEvent('mcp_oauth_revoke', {})
   }
 }
+
+export const revokeReplacedServerTokens = revokeReplacedMcpTokens
 
 /**
  * densable wat — clear-auth path: revoke current tokens on server + clear local.
@@ -1728,9 +2043,15 @@ export async function performMCPOAuthFlow(
 
   // densable FLv: read cached OAuth entry BEFORE clear — port/client reuse for
   // pre-registered clients (Slack) depends on prior redirectUri + clientId.
+  // Also snapshot prior tokens before re-auth so replaced tokens can be
+  // revoked at the AS once the new sign-in succeeds (official wPl / kPl).
   const storage = getSecureStorage()
   const serverKey = getServerKey(serverName, serverConfig)
   const cachedEntry = storage.read()?.mcpOAuth?.[serverKey]
+  const previousTokenSnapshot = await snapshotServerTokens(
+    serverName,
+    serverConfig,
+  )
   const cachedStepUpScope = cachedEntry?.stepUpScope
   const cachedResourceMetadataUrl =
     cachedEntry?.discoveryState?.resourceMetadataUrl
@@ -1845,6 +2166,7 @@ export async function performMCPOAuthFlow(
         serverConfig.oauth?.authServerMetadataUrl,
         authFetch,
         wwwAuthParams.resourceMetadataUrl,
+        serverConfig,
       )
       if (metadata) {
         // Store metadata in provider for scope information
@@ -1855,6 +2177,9 @@ export async function performMCPOAuthFlow(
         )
       }
     } catch (error) {
+      if (error instanceof IssuerEchoCrossOriginError) {
+        throw error
+      }
       logMCPDebug(
         serverName,
         `Failed to fetch OAuth metadata: ${errorMessage(error)}`,
@@ -1996,6 +2321,7 @@ export async function performMCPOAuthFlow(
             scope: wwwAuthParams.scope,
             resourceMetadataUrl: wwwAuthParams.resourceMetadataUrl,
             fetchFn: authFetch,
+            skipIssuerMetadataValidation: true,
           })
           logMCPDebug(serverName, `Initial auth result: ${result}`)
 
@@ -2008,7 +2334,15 @@ export async function performMCPOAuthFlow(
         } catch (error) {
           logMCPDebug(serverName, `SDK auth error: ${error}`)
           cleanup()
-          rejectOnce(new Error(`SDK auth failed: ${errorMessage(error)}`))
+          if (error instanceof IssuerEchoCrossOriginError) {
+            rejectOnce(error)
+          } else {
+            rejectOnce(
+              new Error(`SDK auth failed: ${errorMessage(error)}`, {
+                cause: error,
+              }),
+            )
+          }
         }
       }
 
@@ -2148,11 +2482,21 @@ export async function performMCPOAuthFlow(
       authorizationCode,
       resourceMetadataUrl: wwwAuthParams.resourceMetadataUrl,
       fetchFn: authFetch,
+      skipIssuerMetadataValidation: true,
     })
 
     logMCPDebug(serverName, `Auth result: ${result}`)
 
     if (result === 'AUTHORIZED') {
+      // Official kPl: revoke any replaced prior tokens once new tokens land
+      if (previousTokenSnapshot) {
+        await revokeReplacedServerTokens(
+          serverName,
+          serverConfig,
+          previousTokenSnapshot,
+        )
+      }
+
       // Debug: Check if tokens were properly saved
       const savedTokens = await provider.tokens()
       logMCPDebug(
@@ -2186,15 +2530,26 @@ export async function performMCPOAuthFlow(
   } catch (error) {
     logMCPDebug(serverName, `Error during auth completion: ${error}`)
 
+    // Official FNo: clean up newly-created tokenless stub on failed auth
+    if (!cachedEntry?.clientId && !cachedEntry?.stepUpScope) {
+      await clearMcpOAuthStubIfTokenless(serverName, serverConfig)
+    }
+
     // Determine failure reason for attribution telemetry. The try block covers
     // port acquisition, the callback server, the redirect flow, and token
     // exchange. Map known failure paths to stable reason codes.
     let reason: MCPOAuthFlowErrorReason = 'unknown'
     let oauthErrorCode: string | undefined
     let httpStatus: number | undefined
+    const errorCause = error instanceof Error ? error.cause : undefined
 
     if (error instanceof AuthenticationCancelledError) {
       reason = 'cancelled'
+    } else if (
+      error instanceof IssuerEchoCrossOriginError ||
+      errorCause instanceof IssuerEchoCrossOriginError
+    ) {
+      reason = 'issuer_echo_denied'
     } else if (authorizationCodeObtained) {
       reason = 'token_exchange_failed'
     } else {
@@ -2353,6 +2708,8 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   sawAuthChallenge = false
   /** densable `lOt.authChallengeOpen`. */
   authChallengeOpen = false
+  /** Official 2.1.328: whether discovery metadata advertised DCR or CIMD. */
+  registrationOfferedByDiscovery = false
 
   constructor(
     serverName: string,
@@ -2543,6 +2900,22 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         client_id: configClientId,
         client_secret: clientConfig?.clientSecret,
       }
+    }
+
+    // Official 2.1.328 (_pa): during background discovery (handleRedirection=false),
+    // do not trigger unprompted Dynamic Client Registration until the user
+    // initiates authentication.
+    if (
+      !this.handleRedirection &&
+      this.registrationOfferedByDiscovery &&
+      !storedInfo?.accessToken &&
+      !storedInfo?.refreshToken
+    ) {
+      logMCPDebug(
+        this.serverName,
+        `No client info found; deferring client registration to authentication time`,
+      )
+      throw new McpClientRegistrationDeferredError(this.serverName)
     }
 
     // If we don't have stored client info, return undefined to trigger registration
@@ -2975,6 +3348,56 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
+    // Official 2.1.328 (chunk@334972328.js@57320): apply configured oauth.scopes
+    // or curated metadata scope override, append offline_access when supported
+    // (kyl), and strip duplicate/Entra-incompatible prompt=consent (Eyl).
+    const configuredScope = this._pendingStepUpScope
+      ? undefined
+      : this.serverConfig.oauth?.scopes ||
+        (this.serverConfig.oauth?.authServerMetadataUrl
+          ? getScopeFromMetadata(this._metadata)
+          : undefined)
+    const urlScope = authorizationUrl.searchParams.get('scope')
+    const baseScope = configuredScope ?? urlScope
+    if (baseScope !== urlScope) {
+      logMCPDebug(
+        this.serverName,
+        `Overrode authorization scope from ${urlScope || 'NONE'} to configured: ${baseScope || 'NONE'}`,
+      )
+    }
+    const effectiveScope =
+      baseScope === null
+        ? null
+        : maybeAppendOfflineAccess(baseScope, this._metadata)
+    if (effectiveScope !== null && effectiveScope !== urlScope) {
+      authorizationUrl.searchParams.set('scope', effectiveScope)
+      if (effectiveScope !== configuredScope) {
+        logMCPDebug(
+          this.serverName,
+          `Appended offline_access to authorization scope`,
+        )
+      }
+    }
+    const isEntra = isEntraLoginUrl(authorizationUrl)
+    const existingPrompts = authorizationUrl.searchParams.getAll('prompt')
+    const filteredPrompts = isEntra
+      ? existingPrompts.filter(p => p !== 'consent')
+      : existingPrompts
+    if (
+      filteredPrompts.length !== existingPrompts.length ||
+      filteredPrompts.length > 1
+    ) {
+      authorizationUrl.searchParams.delete('prompt')
+      if (filteredPrompts.length > 0) {
+        authorizationUrl.searchParams.set(
+          'prompt',
+          filteredPrompts.includes('consent')
+            ? 'consent'
+            : filteredPrompts.at(-1)!,
+        )
+      }
+    }
+
     // Store the authorization URL
     this._authorizationUrl = authorizationUrl.toString()
 
@@ -3134,9 +3557,26 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
+    if (state.authorizationServerMetadata) {
+      evaluateIssuerEchoPolicy({
+        serverName: this.serverName,
+        site: 'sdk_auth',
+        expectedIssuer: state.authorizationServerUrl,
+        receivedIssuer: state.authorizationServerMetadata.issuer,
+        serverConfig: this.serverConfig,
+      })
+    }
+
     const storage = getSecureStorage()
     const existingData = storage.read() || {}
     const serverKey = getServerKey(this.serverName, this.serverConfig)
+
+    const meta = state.authorizationServerMetadata
+    this.registrationOfferedByDiscovery =
+      meta !== undefined &&
+      (typeof meta.registration_endpoint === 'string' ||
+        (meta.client_id_metadata_document_supported === true &&
+          isLoopbackCallbackRedirectUri(this.redirectUri)))
 
     const discoveredIssuer =
       state.authorizationServerMetadata?.issuer ?? state.authorizationServerUrl
@@ -3194,7 +3634,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         `Returning cached discovery state (authServer: ${cached.authorizationServerUrl})`,
       )
 
-      return {
+      const state: OAuthDiscoveryState = {
         authorizationServerUrl: cached.authorizationServerUrl,
         resourceMetadataUrl: cached.resourceMetadataUrl,
         resourceMetadata:
@@ -3202,6 +3642,23 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         authorizationServerMetadata:
           cached.authorizationServerMetadata as OAuthDiscoveryState['authorizationServerMetadata'],
       }
+      if (state.authorizationServerMetadata) {
+        try {
+          evaluateIssuerEchoPolicy({
+            serverName: this.serverName,
+            site: 'persisted_state',
+            expectedIssuer: state.authorizationServerUrl,
+            receivedIssuer: state.authorizationServerMetadata.issuer,
+            serverConfig: this.serverConfig,
+          })
+        } catch (err) {
+          if (err instanceof IssuerEchoCrossOriginError) {
+            await this.invalidateCredentials('discovery').catch(() => {})
+          }
+          throw err
+        }
+      }
+      return state
     }
 
     // Check config hint for direct metadata URL
@@ -3449,8 +3906,17 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
             )
             metadata = await discoverAuthorizationServerMetadata(
               cached.authorizationServerUrl,
-              { fetchFn: authFetch },
+              { fetchFn: authFetch, skipIssuerValidation: true },
             )
+            if (metadata) {
+              evaluateIssuerEchoPolicy({
+                serverName: this.serverName,
+                site: 'refresh_rediscovery',
+                expectedIssuer: cached.authorizationServerUrl,
+                receivedIssuer: metadata.issuer,
+                serverConfig: this.serverConfig,
+              })
+            }
           }
         }
         if (!metadata) {
@@ -3459,6 +3925,8 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
             this.serverConfig.url,
             this.serverConfig.oauth?.authServerMetadataUrl,
             authFetch,
+            undefined,
+            this.serverConfig,
           )
         }
         if (!metadata) {
@@ -3508,6 +3976,14 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         emitRefreshEvent('failure', 'no_tokens_returned')
         return undefined
       } catch (error) {
+        if (error instanceof IssuerEchoCrossOriginError) {
+          logMCPDebug(
+            this.serverName,
+            `Token refresh denied by issuer-echo policy: ${errorMessage(error)}`,
+          )
+          emitRefreshEvent('failure', 'issuer_echo_denied')
+          return undefined
+        }
         // Invalid grant means the refresh token itself is invalid/revoked/expired.
         // densable 2.1.216: on permanent clear → t7r.emit(serverName) for UI reauth.
         const refreshErrCode = oauthErrorCodeOf(error)
@@ -3790,6 +4266,52 @@ function getScopeFromMetadata(
   }
   // Intentionally no scopes_supported fallback (2.1.196).
   return undefined
+}
+
+/**
+ * Official 2.1.328 (`kyl` @chunk@334972328.js@76035): append `offline_access`
+ * to the authorization scope when the AS advertises it in `scopes_supported`
+ * and it is not already requested, ensuring refresh tokens are issued.
+ */
+export function maybeAppendOfflineAccess(
+  scope: string | null,
+  metadata: { scopes_supported?: readonly string[] } | undefined,
+): string | null {
+  if (scope !== null && scope.split(' ').includes('offline_access')) {
+    return scope
+  }
+  if (!metadata?.scopes_supported?.includes('offline_access')) {
+    return scope
+  }
+  return scope === null ? 'offline_access' : `${scope} offline_access`
+}
+
+const ENTRA_LOGIN_EXACT_HOSTS: readonly string[] = [
+  'login.microsoftonline.com',
+  'login.microsoftonline.us',
+  'login.partner.microsoftonline.cn',
+  'login.chinacloudapi.cn',
+]
+
+const ENTRA_LOGIN_HOST_SUFFIXES: readonly string[] = [
+  '.b2clogin.com',
+  '.ciamlogin.com',
+]
+
+/**
+ * Official 2.1.328 (`Eyl` @chunk@334972328.js@76393): recognize Microsoft
+ * Entra ID (Azure AD / B2C / External ID / sovereign cloud) login hosts.
+ */
+export function isEntraLoginUrl(url: string | URL): boolean {
+  try {
+    const hostname = (typeof url === 'string' ? new URL(url) : url).hostname
+    return (
+      ENTRA_LOGIN_EXACT_HOSTS.includes(hostname) ||
+      ENTRA_LOGIN_HOST_SUFFIXES.some(suffix => hostname.endsWith(suffix))
+    )
+  } catch {
+    return false
+  }
 }
 
 export function hasStaticAuthHeader(
