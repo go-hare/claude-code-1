@@ -888,49 +888,12 @@ export function ScrollKeybindingHandler({
     if (text) showCopiedToast(text);
   }
 
-  // Translate selection to track a keyboard page jump. Selection coords are
-  // screen-buffer-local; a scrollTo that moves content by N rows must also
-  // shift anchor+focus by N so the highlight stays on the same text (native
-  // terminal behavior: selection moves with content, clips at viewport
-  // edges). Rows that scroll out of the viewport are captured into
-  // scrolledOffAbove/Below before the scroll so getSelectedText still
-  // returns the full text. Wheel scroll (scroll:lineUp/Down via scrollBy)
-  // still clears — its async pendingScrollDelta drain means the actual
-  // delta isn't known synchronously (follow-up).
-  function translateSelectionForJump(s: ScrollBoxHandle, delta: number): void {
-    const sel = selection.getState();
-    if (!sel?.anchor || !sel.focus) return;
-    const top = s.getViewportTop();
-    const bottom = top + s.getViewportHeight() - 1;
-    // Only translate if the selection is ON scrollbox content. Selections
-    // in the footer/prompt/StickyPromptHeader are on static text — the
-    // scroll doesn't move what's under them. Same guard as ink.tsx's
-    // auto-follow translate (commit 36a8d154).
-    if (sel.anchor.row < top || sel.anchor.row > bottom) return;
-    // Cross-boundary: anchor in scrollbox, focus in footer/header. Mirror
-    // ink.tsx's Flag-3 guard — fall through without shifting OR capturing.
-    // The static endpoint pins the selection; shifting would teleport it
-    // into scrollbox content.
-    if (sel.focus.row < top || sel.focus.row > bottom) return;
-    const max = Math.max(0, s.getScrollHeight() - s.getViewportHeight());
-    const cur = s.getScrollTop() + s.getPendingDelta();
-    // Actual scroll distance after boundary clamp. jumpBy may call
-    // scrollToBottom when target >= max but the view can't move past max,
-    // so the selection shift is bounded here.
-    const actual = Math.max(0, Math.min(max, cur + delta)) - cur;
-    if (actual === 0) return;
-    if (actual > 0) {
-      // Scrolling down: content moves up. Rows at the TOP leave viewport.
-      // Anchor+focus shift -actual so they track the content that moved up.
-      selection.captureScrolledRows(top, top + actual - 1, 'above');
-      selection.shiftSelection(-actual, top, bottom);
-    } else {
-      // Scrolling up: content moves down. Rows at the BOTTOM leave viewport.
-      const a = -actual;
-      selection.captureScrolledRows(bottom - a + 1, bottom, 'below');
-      selection.shiftSelection(a, top, bottom);
-    }
-  }
+  // Official 2.1.328 (`oL`): selection translation and off-screen row capture
+  // are driven exclusively by Ink's render-phase `frame.followScroll` ->
+  // `OverlayController.followScroll` (delta = scrollTop - scrollTopRendered).
+  // Do NOT synchronously shift/capture selection here — doing so alongside
+  // `ScrollBox` leaving `scrollTopRendered` for paint time double-shifts and
+  // duplicates captured rows.
 
   useKeybindings(
     {
@@ -940,7 +903,6 @@ export function ScrollKeybindingHandler({
         if (yieldsPageKeysWhenContentFits && s.getScrollHeight() <= s.getViewportHeight()) return false;
         if (trackTelemetry) recordPageJump();
         const d = -Math.max(1, Math.floor(s.getViewportHeight() / 2));
-        translateSelectionForJump(s, d);
         const sticky = jumpBy(s, d, trackTelemetry);
         notifyScroll(sticky, s);
       },
@@ -950,15 +912,10 @@ export function ScrollKeybindingHandler({
         if (yieldsPageKeysWhenContentFits && s.getScrollHeight() <= s.getViewportHeight()) return false;
         if (trackTelemetry) recordPageJump();
         const d = Math.max(1, Math.floor(s.getViewportHeight() / 2));
-        translateSelectionForJump(s, d);
         const sticky = jumpBy(s, d, trackTelemetry);
         notifyScroll(sticky, s);
       },
       'scroll:lineUp': () => {
-        // Wheel: scrollBy accumulates into pendingScrollDelta, drained async
-        // by the renderer. captureScrolledRows can't read the outgoing rows
-        // before they leave (drain is non-deterministic). Clear for now.
-        selection.clearSelection();
         const s = scrollRef.current;
         // Return false (not consumed) when the ScrollBox content fits —
         // scroll would be a no-op. Lets a child component's handler take
@@ -971,7 +928,6 @@ export function ScrollKeybindingHandler({
         notifyScroll(false, s);
       },
       'scroll:lineDown': () => {
-        selection.clearSelection();
         const s = scrollRef.current;
         if (!s || s.getScrollHeight() <= s.getViewportHeight()) return false;
         if (trackTelemetry) recordScroll();
@@ -985,21 +941,12 @@ export function ScrollKeybindingHandler({
         if (!s) return;
         // Official p2r densable: top jump marks scrollback cap reached.
         if (trackTelemetry) recordReachedScrollbackCap();
-        translateSelectionForJump(s, -(s.getScrollTop() + s.getPendingDelta()));
         s.scrollTo(0);
         notifyScroll(false, s);
       },
       'scroll:bottom': () => {
         const s = scrollRef.current;
         if (!s) return;
-        const max = Math.max(0, s.getScrollHeight() - s.getViewportHeight());
-        translateSelectionForJump(s, max - (s.getScrollTop() + s.getPendingDelta()));
-        // scrollTo(max) eager-writes scrollTop so the render-phase sticky
-        // follow computes followDelta=0. Without this, scrollToBottom()
-        // alone leaves scrollTop stale → followDelta=max-stale →
-        // shiftSelectionForFollow applies the SAME shift we already did
-        // above, 2× offset. scrollToBottom() then re-enables sticky.
-        s.scrollTo(max);
         s.scrollToBottom();
         notifyScroll(true, s);
       },
@@ -1053,7 +1000,6 @@ export function ScrollKeybindingHandler({
         if (!s) return;
         if (trackTelemetry) recordPageJump();
         const d = -Math.max(1, Math.floor(s.getViewportHeight() / 2));
-        translateSelectionForJump(s, d);
         const sticky = jumpBy(s, d, trackTelemetry);
         notifyScroll(sticky, s);
       },
@@ -1062,7 +1008,6 @@ export function ScrollKeybindingHandler({
         if (!s) return;
         if (trackTelemetry) recordPageJump();
         const d = Math.max(1, Math.floor(s.getViewportHeight() / 2));
-        translateSelectionForJump(s, d);
         const sticky = jumpBy(s, d, trackTelemetry);
         notifyScroll(sticky, s);
       },
@@ -1071,7 +1016,6 @@ export function ScrollKeybindingHandler({
         if (!s) return;
         if (trackTelemetry) recordPageJump();
         const d = -Math.max(1, s.getViewportHeight());
-        translateSelectionForJump(s, d);
         const sticky = jumpBy(s, d, trackTelemetry);
         notifyScroll(sticky, s);
       },
@@ -1080,7 +1024,6 @@ export function ScrollKeybindingHandler({
         if (!s) return;
         if (trackTelemetry) recordPageJump();
         const d = Math.max(1, s.getViewportHeight());
-        translateSelectionForJump(s, d);
         const sticky = jumpBy(s, d, trackTelemetry);
         notifyScroll(sticky, s);
       },
@@ -1115,7 +1058,7 @@ export function ScrollKeybindingHandler({
         else if (act === 'top') recordReachedScrollbackCap();
         else if (act !== 'bottom') recordPageJump();
       }
-      const sticky = applyModalPagerAction(s, act, d => translateSelectionForJump(s, d), trackTelemetry);
+      const sticky = applyModalPagerAction(s, act, undefined, trackTelemetry);
       if (sticky === null) return;
       notifyScroll(sticky, s);
       event.stopImmediatePropagation();
@@ -1377,15 +1320,13 @@ export function dragScrollDirection(
 // mark reachedScrollbackCap (p2r densable).
 export function jumpBy(s: ScrollBoxHandle, delta: number, trackTelemetry = false): boolean {
   const max = Math.max(0, s.getScrollHeight() - s.getViewportHeight());
-  const target = s.getScrollTop() + s.getPendingDelta() + delta;
+  const target = Math.min(s.getScrollTop(), max) + s.getPendingDelta() + delta;
   if (target >= max) {
-    // Eager-write scrollTop so follow-scroll sees followDelta=0. Callers
-    // that ran translateSelectionForJump already shifted; scrollToBottom()
-    // alone would double-shift via the render-phase sticky follow.
-    s.scrollTo(max);
-    // densable OJh on the max branch: autoScroll off clamps without sticky.
+    // densable OJh / X$e on the max branch: autoScroll off clamps without sticky.
     if (getAutoScrollEnabled()) {
       s.scrollToBottom();
+    } else {
+      s.scrollTo(max);
     }
     return true;
   }
@@ -1538,7 +1479,7 @@ export function modalPagerAction(
 export function applyModalPagerAction(
   s: ScrollBoxHandle,
   act: ModalPagerAction | null,
-  onBeforeJump: (delta: number) => void,
+  onBeforeJump?: (delta: number) => void,
   trackTelemetry = false,
 ): boolean | null {
   switch (act) {
@@ -1547,33 +1488,30 @@ export function applyModalPagerAction(
     case 'lineUp':
     case 'lineDown': {
       const d = act === 'lineDown' ? 1 : -1;
-      onBeforeJump(d);
+      onBeforeJump?.(d);
       return jumpBy(s, d, trackTelemetry);
     }
     case 'halfPageUp':
     case 'halfPageDown': {
       const half = Math.max(1, Math.floor(s.getViewportHeight() / 2));
       const d = act === 'halfPageDown' ? half : -half;
-      onBeforeJump(d);
+      onBeforeJump?.(d);
       return jumpBy(s, d, trackTelemetry);
     }
     case 'fullPageUp':
     case 'fullPageDown': {
       const page = Math.max(1, s.getViewportHeight());
       const d = act === 'fullPageDown' ? page : -page;
-      onBeforeJump(d);
+      onBeforeJump?.(d);
       return jumpBy(s, d, trackTelemetry);
     }
     case 'top':
-      onBeforeJump(-(s.getScrollTop() + s.getPendingDelta()));
+      onBeforeJump?.(-(s.getScrollTop() + s.getPendingDelta()));
       s.scrollTo(0);
       return false;
     case 'bottom': {
       const max = Math.max(0, s.getScrollHeight() - s.getViewportHeight());
-      onBeforeJump(max - (s.getScrollTop() + s.getPendingDelta()));
-      // Eager-write scrollTop before scrollToBottom — same double-shift
-      // fix as scroll:bottom and jumpBy's max branch.
-      s.scrollTo(max);
+      onBeforeJump?.(max - (s.getScrollTop() + s.getPendingDelta()));
       s.scrollToBottom();
       return true;
     }

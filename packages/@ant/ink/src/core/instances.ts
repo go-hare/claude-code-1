@@ -90,11 +90,6 @@ class InkInstancesMap extends Map<NodeJS.WriteStream, Ink> {
     return super.set(key, value)
   }
 
-  delete(key: NodeJS.WriteStream): boolean {
-    this.treeRoots.delete(key)
-    return super.delete(key)
-  }
-
   /**
    * densable claimForStandaloneRender — store promise.then(clear, clear) so
    * createRoot / wrappedRender can await pendingStandaloneRender.

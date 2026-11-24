@@ -50,7 +50,7 @@ export default function createRenderer(
   node: DOMElement,
   stylePool: StylePool,
 ): Renderer {
-  // Reuse Output across frames so charCache (tokenize + grapheme clustering)
+  // Reuse Output across frames so LineCells's keptLines/keptCells cache
   // persists — most lines don't change between renders.
   let output: Output | undefined
   let incrementalPainter: IncrementalPainter | undefined

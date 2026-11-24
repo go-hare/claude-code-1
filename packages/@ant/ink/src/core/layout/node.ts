@@ -125,6 +125,10 @@ export type LayoutNode = {
   getComputedHeight(): number
   getComputedBorder(edge: LayoutEdge): number
   getComputedPadding(edge: LayoutEdge): number
+  /** Official 2.1.328 `getOfferedWidth` — recover width offered to measureFunc. */
+  getOfferedWidth?(width: number, height: number): number
+  /** Official 2.1.328 `aC(node)` — validate underlying Yoga Int32Array buffers. */
+  isIntact?(): boolean
 
   // Style setters
   setWidth(value: number): void

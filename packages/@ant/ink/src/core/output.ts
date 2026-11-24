@@ -1,65 +1,766 @@
+import type { AnsiCode } from '@alcalzone/ansi-tokenize'
+import chalk from 'chalk'
+import { isSoftwareBidiNeeded } from './bidi.js'
 import {
-  type AnsiCode,
-  type StyledChar,
-  styledCharsFromTokens,
-  tokenize,
-} from '@alcalzone/ansi-tokenize'
-import { getGraphemeSegmenter } from './utils/grapheme.js'
-
-/** Debug logger — no-op placeholder until proper logger injection is added */
-const logForDebugging = (_message: string) => {}
-import { isSoftwareBidiNeeded, reorderBidi } from './bidi.js'
+  BIDI_SUBSTITUTE_RANGES,
+  CELL_RUN_SHIFT,
+  CELL_SEGMENTER_TABLE_CAP,
+  CELL_TAB_FLAG,
+  CELL_WIDTH_MASK,
+  type CellSegmenter,
+  createCellSegmenter,
+  createScreenCellSegmenter,
+  DEFAULT_TAB_WIDTH,
+} from './cell-segmenter.js'
+import { filterItalicOffTokens } from './colorize.js'
 import { type Rectangle, unionRect } from './layout/geometry.js'
 import {
   blitRegion,
-  CellWidth,
-  extractHyperlinkFromStyles,
-  filterOutHyperlinkStyles,
-  markNoSelectRegion,
+  type CharPool,
   clearNoSelectRegion,
-  OSC8_PREFIX,
+  type HyperlinkPool,
+  markNoSelectRegion,
   resetScreen,
   restoreNoSelectRegion,
   type Screen,
   type StylePool,
-  setCellAt,
   shiftRows,
 } from './screen.js'
-import { stringWidth } from './stringWidth.js'
-import { LineCells, sanitizeBidiControls } from './tabstops.js'
-import sliceAnsiFallback from './utils/sliceAnsi.js'
 import {
-  SoftWrapKind,
-  type SoftWrapKind as SoftWrapKindValue,
   packSoftWrap,
   SW_ELIDED_SEP,
+  SoftWrapKind,
+  type SoftWrapKind as SoftWrapKindValue,
 } from './softWrap.js'
+import {
+  computeGraphemeExtraWidth,
+  needsWidthCalibration,
+  stringWidth,
+} from './stringWidth.js'
+import { sanitizeBidiControls } from './tabstops.js'
+import { getGraphemeSegmenter } from './utils/grapheme.js'
+import sliceAnsiFallback from './utils/sliceAnsi.js'
+import { isAtlasTrackingEnabled, trackAtlasKey } from './xtermAtlas.js'
 
-function sliceAnsi(text: string, start: number, end?: number): string {
+/** Debug logger — no-op placeholder until proper logger injection is added */
+const logForDebugging = (_message: string) => {}
+
+const LONE_SURROGATE_RE = /\p{Cs}/gu
+const CALIBRATED_SLICE_SCRATCH_CAP = 4096
+
+type CalibratedColumns = {
+  ours: number[]
+  buns: number[]
+}
+
+type CalibratedSliceCache = {
+  text: string
+  columns: CalibratedColumns
+}
+
+let calSeg: CellSegmenter | undefined
+let calScratch: { cells: Int32Array; runs: Int32Array } | undefined
+let calCache: CalibratedSliceCache | undefined
+
+function clearCalibratedSliceCache(): void {
+  calCache = undefined
+  if (calSeg && calSeg.graphemes.length > CELL_SEGMENTER_TABLE_CAP) {
+    calSeg = undefined
+  }
+}
+
+function mapCalibratedColumn(cols: CalibratedColumns, target: number): number {
+  const idx = cols.ours.findIndex(col => col >= target)
+  if (idx !== -1) return cols.buns[idx]!
+  return cols.buns.at(-1)! + target - cols.ours.at(-1)!
+}
+
+function getCalibratedColumns(text: string): CalibratedColumns {
+  if (calCache?.text === text) return calCache.columns
+  if (calCache) clearCalibratedSliceCache()
+  else queueMicrotask(clearCalibratedSliceCache)
+
+  if (!calSeg) {
+    calSeg = createCellSegmenter([])
+  }
+  const safeText =
+    typeof text.isWellFormed === 'function' && text.isWellFormed()
+      ? text
+      : text.replace(LONE_SURROGATE_RE, '\uDC00')
+  let buf =
+    safeText.length > CALIBRATED_SLICE_SCRATCH_CAP
+      ? {
+          cells: new Int32Array(2 * safeText.length),
+          runs: new Int32Array(2 * safeText.length),
+        }
+      : (calScratch ??= {
+          cells: new Int32Array(2 * CALIBRATED_SLICE_SCRATCH_CAP),
+          runs: new Int32Array(2 * CALIBRATED_SLICE_SCRATCH_CAP),
+        })
+  let count = calSeg.segment(safeText, buf.cells, buf.runs, false)
+  if (count < 0) {
+    const cap = Math.max(-count, buf.cells.length)
+    buf = { cells: new Int32Array(2 * cap), runs: new Int32Array(2 * cap) }
+    count = calSeg.segment(safeText, buf.cells, buf.runs, false)
+  }
+
+  const ours = [0]
+  const buns = [0]
+  const bunSw =
+    typeof Bun !== 'undefined' && typeof Bun.stringWidth === 'function'
+      ? Bun.stringWidth
+      : undefined
+  for (let i = 0; i < count; i++) {
+    const gIdx = buf.cells[2 * i]!
+    const grapheme = calSeg.graphemes[gIdx]!
+    let baseW = buf.cells[2 * i + 1]! & CELL_WIDTH_MASK
+    if (baseW === CELL_WIDTH_MASK) {
+      baseW = bunSw
+        ? bunSw(grapheme, { ambiguousIsNarrow: true })
+        : stringWidth(grapheme)
+    }
+    const extra = computeGraphemeExtraWidth(grapheme, baseW)
+    buns.push(buns[i]! + baseW)
+    ours.push(ours[i]! + baseW + extra)
+  }
+  const columns: CalibratedColumns = { ours, buns }
+  calCache = { text, columns }
+  return columns
+}
+
+/**
+ * Official 2.1.328 `qbt(str, from, to)` (`chunk@283862629.js`) — calibrated ANSI
+ * column slice. Maps calibrated display columns (`ours`) to raw `Bun.sliceAnsi`
+ * columns (`buns`) when `needsWidthCalibration(text)` is true.
+ */
+export function sliceAnsi(text: string, start: number, end?: number): string {
   const bunSlice =
     typeof Bun !== 'undefined' && typeof Bun.sliceAnsi === 'function'
       ? Bun.sliceAnsi
       : undefined
-  return bunSlice
-    ? bunSlice(text, start, end)
-    : sliceAnsiFallback(text, start, end)
+  if (!bunSlice) {
+    return sliceAnsiFallback(text, start, end)
+  }
+  if (!needsWidthCalibration(text)) {
+    return bunSlice(text, start, end)
+  }
+  const cols = getCalibratedColumns(text)
+  const mappedStart = mapCalibratedColumn(cols, start)
+  const mappedEnd =
+    end === undefined ? undefined : mapCalibratedColumn(cols, end)
+  return bunSlice(text, mappedStart, mappedEnd)
+}
+
+export { sliceAnsi as calibratedSliceAnsi }
+
+// --- Official 2.1.328 `JDa` / `v` truecolor -> 256-color downgrade ---
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: official JDa SGR truecolor matcher
+const TRUECOLOR_SGR_RE = /^\x1b\[([34]8);2;(\d+);(\d+);(\d+)m$/
+const CUBE_LEVELS = [0, 95, 135, 175, 215, 255] as const
+
+function rgbToAnsi256(r: number, g: number, b: number): number {
+  const toIdx = (v: number): number =>
+    v < 48 ? 0 : v < 115 ? 1 : v < 155 ? 2 : v < 195 ? 3 : v < 235 ? 4 : 5
+  const ri = toIdx(r)
+  const gi = toIdx(g)
+  const bi = toIdx(b)
+  const cubeIdx = 16 + 36 * ri + 6 * gi + bi
+  const avg = Math.round((r + g + b) / 3)
+  if (avg < 5) return 16
+  if (avg > 244 && ri === gi && gi === bi) return cubeIdx
+  const grayStep = Math.max(0, Math.min(23, Math.round((avg - 8) / 10)))
+  const grayIdx = 232 + grayStep
+  const grayVal = 8 + grayStep * 10
+  const cr = CUBE_LEVELS[ri]!
+  const cg = CUBE_LEVELS[gi]!
+  const cb = CUBE_LEVELS[bi]!
+  const cubeDist = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2
+  const grayDist = (r - grayVal) ** 2 + (g - grayVal) ** 2 + (b - grayVal) ** 2
+  return grayDist < cubeDist ? grayIdx : cubeIdx
+}
+
+/** Official 2.1.328 `JDa` — downgrade 24-bit RGB SGR to 256-color when `chalk.level < 3`. */
+function downgradeTruecolorCodes(codes: AnsiCode[]): AnsiCode[] {
+  if (chalk.level >= 3 || codes.length === 0) return codes
+  let out: AnsiCode[] | undefined
+  for (let i = 0; i < codes.length; i++) {
+    const entry = codes[i]!
+    const match = TRUECOLOR_SGR_RE.exec(entry.code)
+    if (match) {
+      out ??= codes.slice(0, i)
+      out.push({
+        type: 'ansi',
+        code: `\x1b[${match[1]};5;${rgbToAnsi256(+match[2]!, +match[3]!, +match[4]!)}m`,
+        endCode: entry.endCode,
+      })
+    } else if (out) {
+      out.push(entry)
+    }
+  }
+  return out ?? codes
 }
 
 /**
- * A grapheme cluster with precomputed terminal width, styleId, and hyperlink.
- * Built once per unique line (cached via charCache), so the per-char hot loop
- * is just property reads + setCellAt — no stringWidth, no style interning,
- * no hyperlink extraction per frame.
- *
- * styleId is safe to cache: StylePool is session-lived (never reset).
- * hyperlink is stored as a string (not interned ID) since hyperlinkPool
- * resets every 5 min; setCellAt interns it per-frame (cheap Map.get).
+ * Official 2.1.328 `prt()` — tracks chalk color-level generation so
+ * `LineCells.refreshGenerations()` invalidates cached styles whenever
+ * `chalk.level` changes (e.g. truecolor -> 256-color clamp).
  */
-type ClusteredChar = {
-  value: string
-  width: number
-  styleId: number
-  hyperlink: string | undefined
+function getChalkGeneration(): number {
+  return chalk.level
+}
+
+// --- Official 2.1.323 (#1989) `gqr` leading combining-mark reordering ---
+
+function isCombiningMarkCodeUnit(ch: string): boolean {
+  if (stringWidth(ch) !== 0) return false
+  const first = getGraphemeSegmenter()
+    .segment(`a${ch}`)
+    [Symbol.iterator]()
+    .next().value?.segment
+  return first !== 'a'
+}
+
+export function reorderLeadingCombiningMarks(grapheme: string): string {
+  if (grapheme.length < 2 || grapheme.charCodeAt(0) <= 127) return grapheme
+  let markEnd = 0
+  for (const ch of grapheme) {
+    if (!isCombiningMarkCodeUnit(ch)) break
+    markEnd += ch.length
+  }
+  if (markEnd === 0) return grapheme
+  let baseEnd = markEnd
+  while (baseEnd < grapheme.length) {
+    const cp = grapheme.codePointAt(baseEnd)!
+    const ch = String.fromCodePoint(cp)
+    baseEnd += ch.length
+    if (stringWidth(ch) > 0) {
+      if (
+        baseEnd === grapheme.length &&
+        grapheme.charCodeAt(markEnd - 1) === 0x200d
+      ) {
+        return grapheme
+      }
+      const reordered =
+        grapheme.slice(markEnd, baseEnd) +
+        grapheme.slice(0, markEnd) +
+        grapheme.slice(baseEnd)
+      return stringWidth(reordered) === stringWidth(grapheme)
+        ? reordered
+        : grapheme
+    }
+  }
+  return grapheme
+}
+
+// --- Official 2.1.328 `bm` (`LineCells`) ---
+
+const STYLE_SHIFT = 17 // jn
+const HYPERLINK_SHIFT = 2 // Cr
+const WIDTH_MASK = 3 // Ft
+const SGR_RESET_THRESHOLD = 2048 // EM
+const KEPT_CELLS_CAP = 131072 // Pv
+const KEPT_TEXT_CAP = 262144 // wM
+const KEPT_TEXT_OVERHEAD = 64 // CM
+const VALID_SGR_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: official RM SGR validator
+  /^\x1b\[(?:\d{1,3})(?:;5;\d{1,3}|;2;\d{1,3};\d{1,3};\d{1,3})?m$/ // RM
+const HIDDEN_END_CODE = '\x1b[28m' // BPa
+
+function packCellWord1(
+  styleId: number,
+  hyperlinkId: number,
+  width: number,
+): number {
+  return (styleId << STYLE_SHIFT) | (hyperlinkId << HYPERLINK_SHIFT) | width
+}
+
+function growInt32Array(
+  arr: Int32Array<ArrayBuffer>,
+  needed: number,
+  copyLength: number,
+): Int32Array<ArrayBuffer> {
+  if (arr.length >= needed) return arr
+  const next = new Int32Array(Math.max(needed, 2 * arr.length))
+  if (copyLength > 0) {
+    next.set(arr.subarray(0, Math.min(copyLength, arr.length)))
+  }
+  return next
+}
+
+/**
+ * Official 2.1.328 `bm` — segmented cell buffer + flat `Int32Array` `keptCells`
+ * line cache backed by `Bun.ant.CellSegmenter` (when present) or `JsCellSegmenter`.
+ */
+export class LineCells {
+  readonly stylePool: StylePool
+  charPool: CharPool
+  native: CellSegmenter = createScreenCellSegmenter(BIDI_SUBSTITUTE_RANGES)
+  cells = new Int32Array(512)
+  runs = new Int32Array(512)
+  count = 0
+  reordered = false
+  graphemes: string[] = this.native.graphemes
+  sgrKeys: string[] = this.native.sgrKeys
+  sgrCloseKeys: string[] = this.native.sgrCloseKeys
+  uris: string[] = this.native.uris
+  private charMap = new Int32Array(256)
+  private charMapLength = 0
+  private styleIds = new Int32Array(64)
+  private styleGeneration: number
+  private chalkGeneration = getChalkGeneration()
+  private linkIds = new Int32Array(16)
+  private hyperlinkPool: HyperlinkPool | undefined
+  private words = new Int32Array(64)
+  readonly keptLines = new Map<string, number>()
+  keptCells = new Int32Array(1024)
+  keptLength = 0
+  keptText = 0
+  private keptInVisualOrder = false
+
+  constructor(stylePool: StylePool, charPool: CharPool) {
+    this.stylePool = stylePool
+    this.charPool = charPool
+    this.styleGeneration = stylePool.generation
+  }
+
+  segment(text: string, reorderBidi: boolean): number {
+    if (
+      this.sgrKeys.length > CELL_SEGMENTER_TABLE_CAP ||
+      this.uris.length > CELL_SEGMENTER_TABLE_CAP ||
+      this.graphemes.length > 4 * CELL_SEGMENTER_TABLE_CAP
+    ) {
+      this.resetNative()
+    }
+    this.refreshGenerations()
+    let count = this.native.segment(text, this.cells, this.runs, reorderBidi)
+    if (count < 0) {
+      const cap = Math.max(-count, this.cells.length)
+      const nextCells = new Int32Array(2 * cap)
+      this.runs = new Int32Array(2 * cap)
+      this.cells = nextCells
+      count = this.native.segment(text, this.cells, this.runs, reorderBidi)
+    }
+    if (needsWidthCalibration(text)) {
+      for (let i = 0; i < count; i++) {
+        const meta = this.cells[2 * i + 1]!
+        const baseW = meta & CELL_WIDTH_MASK
+        const extra = computeGraphemeExtraWidth(
+          this.graphemes[this.cells[2 * i]!]!,
+          baseW,
+        )
+        this.cells[2 * i + 1] = meta + Math.min(extra, CELL_WIDTH_MASK - baseW)
+      }
+    }
+    this.count = count
+    this.reordered = reorderBidi
+    return count
+  }
+
+  width(text: string, column: number, reorderBidi: boolean): number {
+    const cached = this.keptLines.get(text)
+    if (cached !== undefined) return this.keptCells[cached]!
+    const count = this.segment(text, reorderBidi)
+    let col = column
+    for (let i = 0; i < count; i++) {
+      const meta = this.cells[2 * i + 1]!
+      if ((meta & CELL_TAB_FLAG) !== 0) {
+        const mod =
+          ((col % DEFAULT_TAB_WIDTH) + DEFAULT_TAB_WIDTH) % DEFAULT_TAB_WIDTH
+        col += DEFAULT_TAB_WIDTH - mod
+      } else {
+        col += meta & CELL_WIDTH_MASK
+      }
+    }
+    return col - column
+  }
+
+  keepColumns(startCol: number, x1: number, x2: number): number {
+    let col = startCol
+    let firstCol = Math.max(startCol, x1)
+    let kept = 0
+    for (let i = 0; i < this.count; i++) {
+      const meta = this.cells[2 * i + 1]!
+      const step =
+        (meta & CELL_TAB_FLAG) !== 0
+          ? DEFAULT_TAB_WIDTH -
+            (((col % DEFAULT_TAB_WIDTH) + DEFAULT_TAB_WIDTH) %
+              DEFAULT_TAB_WIDTH)
+          : meta & CELL_WIDTH_MASK
+      const nextCol = col + step
+      if (col >= x1 && col < x2 && nextCol <= x2) {
+        if (kept === 0) firstCol = col
+        this.cells[2 * kept] = this.cells[2 * i]!
+        this.cells[2 * kept + 1] = meta
+        kept++
+      }
+      col = nextCol
+    }
+    this.count = kept
+    return firstCol
+  }
+
+  trailingSpaces(text: string): number {
+    this.segment(text, false)
+    let trailing = 0
+    while (
+      trailing < this.count &&
+      this.graphemes[this.cells[2 * (this.count - 1 - trailing)]!] === ' '
+    ) {
+      trailing++
+    }
+    return trailing
+  }
+
+  charIndices(): Int32Array {
+    const graphemes = this.graphemes
+    if (this.charMapLength < graphemes.length) {
+      this.charMap = growInt32Array(
+        this.charMap,
+        graphemes.length,
+        this.charMapLength,
+      )
+      for (let i = this.charMapLength; i < graphemes.length; i++) {
+        this.charMap[i] = this.charPool.intern(
+          reorderLeadingCombiningMarks(graphemes[i]!),
+        )
+      }
+      this.charMapLength = graphemes.length
+    }
+    return this.charMap
+  }
+
+  runWords(hyperlinkPool: HyperlinkPool): Int32Array {
+    const count = this.count
+    if (count === 0) return this.words
+    if (this.hyperlinkPool !== hyperlinkPool) {
+      this.hyperlinkPool = hyperlinkPool
+      this.linkIds.fill(0)
+    }
+    let maxRun = this.cells[2 * count - 1]! >>> CELL_RUN_SHIFT
+    if (this.reordered) {
+      for (let i = 0; i < count; i++) {
+        maxRun = Math.max(maxRun, this.cells[2 * i + 1]! >>> CELL_RUN_SHIFT)
+      }
+    }
+    const runCount = maxRun + 1
+    this.words = growInt32Array(this.words, runCount, 0)
+    for (let r = 0; r < runCount; r++) {
+      const uriIdx = this.runs[2 * r + 1]!
+      let linkId = 0
+      if (uriIdx !== 0) {
+        this.linkIds = growInt32Array(
+          this.linkIds,
+          uriIdx + 1,
+          this.linkIds.length,
+        )
+        linkId = this.linkIds[uriIdx]!
+        if (linkId === 0) {
+          linkId = hyperlinkPool.intern(this.uris[uriIdx]!) + 1
+          this.linkIds[uriIdx] = linkId
+        }
+        linkId -= 1
+      }
+      this.words[r] = packCellWord1(this.styleId(this.runs[2 * r]!), linkId, 0)
+    }
+    return this.words
+  }
+
+  paint(
+    screenCells: Int32Array,
+    screenWidth: number,
+    x: number,
+    y: number,
+    hyperlinkPool: HyperlinkPool,
+  ): number {
+    return this.native.paint(
+      screenCells,
+      screenWidth,
+      x,
+      y,
+      this.cells,
+      this.count,
+      undefined,
+      this.charIndices(),
+      this.runWords(hyperlinkPool),
+    )
+  }
+
+  startFrame(
+    inVisualOrder: boolean,
+    hyperlinkPool: HyperlinkPool,
+    charPool?: CharPool,
+  ): void {
+    this.refreshGenerations()
+    if (charPool !== undefined && charPool !== this.charPool) {
+      this.charPool = charPool
+      this.charMapLength = 0
+      this.forgetKept()
+    }
+    if (
+      inVisualOrder !== this.keptInVisualOrder ||
+      hyperlinkPool !== this.hyperlinkPool
+    ) {
+      this.keptInVisualOrder = inVisualOrder
+      this.forgetKept()
+    }
+  }
+
+  kept(text: string): number | undefined {
+    return this.keptLines.get(text)
+  }
+
+  keep(
+    text: string,
+    screenCells: Int32Array,
+    offset: number,
+    colWidth: number,
+  ): void {
+    let rawSum = 0
+    for (let i = 0; i < this.count; i++) {
+      rawSum += this.cells[2 * i + 1]! & (CELL_WIDTH_MASK | CELL_TAB_FLAG)
+    }
+    const entryLen = 1 + 2 * colWidth
+    if (rawSum !== colWidth || entryLen > KEPT_CELLS_CAP) return
+    if (
+      this.keptLength + entryLen > KEPT_CELLS_CAP ||
+      this.keptText > KEPT_TEXT_CAP
+    ) {
+      this.forgetKept()
+    }
+    const base = this.keptLength
+    const buf = (this.keptCells = growInt32Array(
+      this.keptCells,
+      base + entryLen,
+      base,
+    ))
+    buf[base] = colWidth
+    for (let i = 1; i < entryLen; i++) {
+      buf[base + i] = screenCells[offset + i - 1]!
+    }
+    this.keptLength += entryLen
+    this.keptText += text.length + KEPT_TEXT_OVERHEAD
+    // Copy string via utf16le to detach from any large parent rope/slice.
+    this.keptLines.set(Buffer.from(text, 'utf16le').toString('utf16le'), base)
+  }
+
+  forgetKept(): void {
+    this.keptLines.clear()
+    this.keptLength = 0
+    this.keptText = 0
+  }
+
+  refreshGenerations(): void {
+    const chalkGen = getChalkGeneration()
+    if (
+      this.stylePool.generation === this.styleGeneration &&
+      chalkGen === this.chalkGeneration
+    ) {
+      return
+    }
+    this.styleGeneration = this.stylePool.generation
+    this.chalkGeneration = chalkGen
+    this.forgetKept()
+    if (this.sgrKeys.length > SGR_RESET_THRESHOLD) {
+      this.resetNative()
+    } else {
+      this.styleIds.fill(0)
+    }
+  }
+
+  resetNative(): void {
+    this.native = createScreenCellSegmenter(BIDI_SUBSTITUTE_RANGES)
+    this.graphemes = this.native.graphemes
+    this.sgrKeys = this.native.sgrKeys
+    this.sgrCloseKeys = this.native.sgrCloseKeys
+    this.uris = this.native.uris
+    this.charMapLength = 0
+    this.linkIds.fill(0)
+    this.styleIds = new Int32Array(64)
+  }
+
+  styleId(sgrIdx: number): number {
+    this.styleIds = growInt32Array(
+      this.styleIds,
+      sgrIdx + 1,
+      this.styleIds.length,
+    )
+    let idPlusOne = this.styleIds[sgrIdx]!
+    if (idPlusOne === 0) {
+      idPlusOne =
+        this.stylePool.intern(
+          filterItalicOffTokens(
+            downgradeTruecolorCodes(this.ansiCodes(sgrIdx)),
+          ),
+        ) + 1
+      this.styleIds[sgrIdx] = idPlusOne
+    }
+    return idPlusOne - 1
+  }
+
+  ansiCodes(sgrIdx: number): AnsiCode[] {
+    if (sgrIdx === 0) return []
+    const codes = this.sgrKeys[sgrIdx]!.split('\x00')
+    const closeCodes = this.sgrCloseKeys[sgrIdx]!.split('\x00')
+    const result: AnsiCode[] = []
+    for (let i = 0; i < codes.length; i++) {
+      const code = codes[i]!
+      const endCode = closeCodes[i]!
+      if (VALID_SGR_RE.test(code) && endCode !== HIDDEN_END_CODE) {
+        result.push({ type: 'ansi', code, endCode })
+      }
+    }
+    return result
+  }
+}
+
+// --- Official 2.1.328 `wh` / `qg` / `Ch` / `Xg` / `Hv` screen paint helpers ---
+
+/** Official `wh` — expand `screen.damage` for `[minX, maxX)` on row `y`. */
+function expandRowDamage(
+  screen: Screen,
+  minX: number,
+  maxX: number,
+  y: number,
+): void {
+  if (minX >= maxX || y < 0 || y >= screen.height) return
+  const damage = screen.damage
+  if (!damage) {
+    screen.damage = { x: minX, y, width: maxX - minX, height: 1 }
+    return
+  }
+  const right = Math.max(damage.x + damage.width, maxX)
+  const bottom = Math.max(damage.y + damage.height, y + 1)
+  damage.x = Math.min(damage.x, minX)
+  damage.y = Math.min(damage.y, y)
+  damage.width = right - damage.x
+  damage.height = bottom - damage.y
+}
+
+/** Official `qg` — update screen damage and record xterm.js atlas keys. */
+function recordPaintedSpan(
+  screen: Screen,
+  minX: number,
+  maxX: number,
+  y: number,
+): void {
+  expandRowDamage(screen, minX, maxX, y)
+  if (isAtlasTrackingEnabled() && minX < maxX && y >= 0 && y < screen.height) {
+    const cells = screen.cells
+    for (
+      let col = minX, ci = (y * screen.width + minX) << 1;
+      col < maxX;
+      col++, ci += 2
+    ) {
+      trackAtlasKey(cells[ci]!, cells[ci + 1]! >>> STYLE_SHIFT)
+    }
+  }
+}
+
+/** Official `Ch` — paint already-segmented `lineCells` into `screen` at `(x, y)`. */
+function paintSegmentedLine(
+  screen: Screen,
+  x: number,
+  y: number,
+  lineCells: LineCells,
+): number {
+  const packed = lineCells.paint(
+    screen.cells,
+    screen.width,
+    x,
+    y,
+    screen.hyperlinkPool,
+  )
+  const minX = Math.floor(packed / 1048576) % 65536
+  const maxX = Math.floor(packed / 68719476736)
+  recordPaintedSpan(screen, minX, maxX, y)
+  return packed % 1048576
+}
+
+/**
+ * Official `Xg` — paint `line` at `(x, y)` using `lineCells`'s `keptLines`
+ * fast-path cache when safe (not splitting wide characters at either edge),
+ * otherwise segment, paint, and cache.
+ */
+function paintCachedLine(
+  screen: Screen,
+  x: number,
+  y: number,
+  line: string,
+  reorderBidi: boolean,
+  lineCells: LineCells,
+): number {
+  const cells = screen.cells
+  const offset = (y * screen.width + x) << 1
+  const keptIdx = lineCells.kept(line)
+  if (keptIdx !== undefined && x >= 0 && y >= 0 && y < screen.height) {
+    const keptCells = lineCells.keptCells
+    const colWidth = keptCells[keptIdx]!
+    const intLen = colWidth << 1
+    const endX = x + colWidth
+    if (
+      endX <= screen.width &&
+      (cells[offset + 1]! & WIDTH_MASK) !== 2 &&
+      (endX === screen.width ||
+        (cells[offset + intLen + 1]! & WIDTH_MASK) !== 2)
+    ) {
+      for (let i = 0; i < intLen; i++) {
+        cells[offset + i] = keptCells[keptIdx + 1 + i]!
+      }
+      recordPaintedSpan(screen, x, endX, y)
+      return endX
+    }
+  }
+  if (lineCells.segment(line, reorderBidi) === 0) return x
+  const endX = paintSegmentedLine(screen, x, y, lineCells)
+  if (
+    keptIdx === undefined &&
+    x >= 0 &&
+    y >= 0 &&
+    y < screen.height &&
+    endX <= screen.width
+  ) {
+    lineCells.keep(line, cells, offset, endX - x)
+  }
+  return endX
+}
+
+// Official 2.1.328 `Lv` — strong directional marks prepended when software bidi
+// reorders a line with an explicit `WriteOperation.direction`.
+const BIDI_DIRECTION_PREFIX = {
+  ltr: '\u200E',
+  rtl: '\u200F',
+} as const
+
+/** Official `gm(direction)` — true when explicit direction + software bidi apply. */
+function usesDirectedBidi(
+  direction: 'ltr' | 'rtl' | undefined,
+): direction is 'ltr' | 'rtl' {
+  return direction !== undefined && isSoftwareBidiNeeded()
+}
+
+/** Official `Hv` — paint a line with optional direction prefix and column clip. */
+function paintDirectedLine(
+  screen: Screen,
+  line: string,
+  x: number,
+  y: number,
+  lineCells: LineCells,
+  direction: 'ltr' | 'rtl' | undefined,
+  clipX: { x1: number; x2: number } | undefined,
+): number {
+  const text = usesDirectedBidi(direction)
+    ? BIDI_DIRECTION_PREFIX[direction] + line
+    : line
+  const reorder = isSoftwareBidiNeeded()
+  if (clipX === undefined) {
+    return paintCachedLine(screen, x, y, text, reorder, lineCells)
+  }
+  lineCells.segment(text, reorder)
+  const startX = lineCells.keepColumns(x, clipX.x1, clipX.x2)
+  return lineCells.count === 0
+    ? startX
+    : paintSegmentedLine(screen, startX, y, lineCells)
 }
 
 /**
@@ -196,23 +897,19 @@ type NoSelectOperation = {
 export default class Output {
   width: number
   height: number
-  private readonly stylePool: StylePool
   private screen: Screen
-  /** densable `lineCells` — gold `new nf(stylePool, charPool)`. */
-  private readonly lineCells: LineCells
+  /** Official 2.1.328 `lineCells` (`new bm(stylePool, screen.charPool)`). */
+  readonly lineCells: LineCells
 
   private readonly operations: Operation[] = []
-  /** Official 2.1.328 `rowsAtRightEdge` — screen rows written near the right edge for `Lu`. */
+  /** Official 2.1.328 `rowsAtRightEdge` — screen rows written at/past the right edge for `Lu`. */
   readonly rowsAtRightEdge: Set<number> = new Set()
-
-  private charCache: Map<string, ClusteredChar[]> = new Map()
 
   constructor(options: Options) {
     const { width, height, stylePool, screen } = options
 
     this.width = width
     this.height = height
-    this.stylePool = stylePool
     this.screen = screen
     this.lineCells = new LineCells(stylePool, screen.charPool)
 
@@ -220,11 +917,9 @@ export default class Output {
   }
 
   /**
-   * Reuse this Output for a new frame. Zeroes the screen buffer, clears
-   * the operation list (backing storage is retained), and caps charCache
-   * growth. Preserving charCache across frames is the main win — most
-   * lines don't change between renders, so tokenize + grapheme clustering
-   * becomes a cache hit.
+   * Reuse this Output for a new frame. Zeroes the screen buffer and clears
+   * the operation list while preserving `lineCells`'s `keptLines`/`keptCells`
+   * cache across frames (automatically invalidated on stylePool/chalk/pool changes).
    */
   reset(width: number, height: number, screen: Screen): void {
     this.width = width
@@ -233,7 +928,6 @@ export default class Output {
     this.operations.length = 0
     this.rowsAtRightEdge.clear()
     resetScreen(screen, width, height)
-    if (this.charCache.size > 16384) this.charCache.clear()
   }
 
   /**
@@ -345,8 +1039,9 @@ export default class Output {
 
   /**
    * Official 2.1.328 `writeDirected(x, y, text, softWrap, direction, maxWidth)`:
-   * right-aligns RTL lines within `maxWidth` (trimming trailing wrap spaces)
-   * when `direction === 'rtl'`; passes LTR directly to `writeLines`.
+   * only applies directed software BiDi / RTL right-alignment when
+   * `usesDirectedBidi(direction)` (`gm(M)`) is true; on native BiDi terminals
+   * delegates directly to `this.write()` (preserving `softWrap`).
    */
   writeDirected(
     x: number,
@@ -356,7 +1051,7 @@ export default class Output {
     direction: 'ltr' | 'rtl' | undefined,
     maxWidth: number,
   ): void {
-    if (direction !== 'ltr' && direction !== 'rtl') {
+    if (!usesDirectedBidi(direction)) {
       this.write(x, y, text, softWrap)
       return
     }
@@ -373,7 +1068,7 @@ export default class Output {
       const trailing =
         nextKind === SoftWrapKind.HardBreak
           ? 0
-          : line.length - line.trimEnd().length
+          : this.lineCells.trailingSpaces(line)
       const keepGap = nextKind === SoftWrapKind.Continuation && trailing < width
       const trimmedWidth =
         width - Math.min(trailing, Math.max(width - maxWidth, keepGap ? 1 : 0))
@@ -389,6 +1084,11 @@ export default class Output {
         )
       }
     }
+  }
+
+  /** Official 2.1.328 `paintedWidth(line, column)` — display width at `column`. */
+  paintedWidth(line: string, column: number): number {
+    return this.lineCells.width(line, column, isSoftwareBidiNeeded())
   }
 
   clip(clip: Clip) {
@@ -410,26 +1110,144 @@ export default class Output {
     }
   }
 
+  /**
+   * Official 2.1.328 `ws.paintWrite(operation, clip)` — clips and paints
+   * visible lines directly via `lineCells` without intermediate `.map()` arrays
+   * (skipping any line with `index < sliceStart - 1 || index >= sliceEnd`).
+   */
+  private paintWrite(
+    operation: WriteOperation,
+    clip: Clip | undefined,
+  ): number {
+    const { x, y, lines, softWrap, direction } = operation
+    const { screen, lineCells } = this
+    const clipX1 = clip?.x1 ?? -Infinity
+    const clipX2 = clip?.x2 ?? Infinity
+    const clipHorizontally = clip?.x1 !== undefined && clip.x2 !== undefined
+    const clipVertically = clip?.y1 !== undefined && clip.y2 !== undefined
+
+    const sliceStart = clipVertically ? Math.max(0, clip.y1! - y) : 0
+    const sliceEnd = Math.min(
+      lines.length,
+      this.height - y,
+      clipVertically ? clip.y2! - y : Infinity,
+    )
+    if (sliceStart >= sliceEnd) return 0
+    if (clipHorizontally) {
+      if (x > clip.x2!) return 0
+    }
+
+    const reorder = isSoftwareBidiNeeded()
+    const directedClipX =
+      clipHorizontally && usesDirectedBidi(direction)
+        ? { x1: clip.x1!, x2: clip.x2! }
+        : undefined
+    const sliceHorizontally = clipHorizontally && directedClipX === undefined
+    const swStartCol = clipHorizontally ? Math.max(x, clipX1) : x
+    const paintX = directedClipX !== undefined ? x : swStartCol
+
+    let packedPrev = 0
+    if (
+      sliceStart > 0 &&
+      (softWrap?.[sliceStart] ?? SoftWrapKind.HardBreak) !==
+        SoftWrapKind.HardBreak
+    ) {
+      const prevLine = sliceHorizontally
+        ? this.cutToColumns(lines[sliceStart - 1]!, x, clipX1, clipX2, reorder)
+        : lines[sliceStart - 1]!
+      packedPrev = packSoftWrap(
+        paintDirectedLine(
+          screen,
+          prevLine,
+          paintX,
+          -1,
+          lineCells,
+          direction,
+          directedClipX,
+        ),
+        swStartCol,
+      )
+    }
+
+    let writtenCells = 0
+    for (let index = sliceStart; index < sliceEnd; index++) {
+      const line = lines[index]!
+      const lineY = y + index
+      if (swStartCol > x && x + lineCells.width(line, x, reorder) < clipX1) {
+        packedPrev = packSoftWrap(swStartCol, swStartCol)
+        continue
+      }
+      const lineToPaint = sliceHorizontally
+        ? this.cutToColumns(line, x, clipX1, clipX2, reorder)
+        : line
+      const contentEnd = paintDirectedLine(
+        screen,
+        lineToPaint,
+        paintX,
+        lineY,
+        lineCells,
+        direction,
+        directedClipX,
+      )
+      writtenCells += contentEnd - swStartCol
+      if (contentEnd >= screen.width && lineY >= 0) {
+        this.rowsAtRightEdge.add(lineY)
+      }
+      if (softWrap) {
+        const kind = softWrap[index]
+        screen.softWrap[lineY] =
+          kind === SoftWrapKind.HardBreak || kind === undefined
+            ? 0
+            : kind === SoftWrapKind.ContinuationElidedSep
+              ? packedPrev | SW_ELIDED_SEP
+              : packedPrev
+        packedPrev = packSoftWrap(contentEnd, swStartCol)
+      }
+    }
+    return writtenCells
+  }
+
+  /** Official 2.1.328 `ws.cutToColumns` — horizontal clip with bidi sanitization. */
+  private cutToColumns(
+    line: string,
+    x: number,
+    x1: number,
+    x2: number,
+    reorder: boolean,
+  ): string {
+    if (x >= x1 && x + this.lineCells.width(line, x, reorder) <= x2) {
+      return line
+    }
+    const sanitized = sanitizeBidiControls(line)
+    const from = Math.max(0, x1 - x)
+    let to = x2 - x
+    let sliced = sliceAnsi(sanitized, from, to)
+    const placedX = Math.max(x, x1)
+    while (
+      to > from &&
+      this.lineCells.width(sliced, placedX, reorder) > x2 - placedX
+    ) {
+      to--
+      sliced = sliceAnsi(sanitized, from, to)
+    }
+    return sliced
+  }
+
   get(): Screen {
     const screen = this.screen
     const screenWidth = this.width
     const screenHeight = this.height
+    this.lineCells.startFrame(
+      isSoftwareBidiNeeded(),
+      screen.hyperlinkPool,
+      screen.charPool,
+    )
 
     // Track blit vs write cell counts for debugging
     let blitCells = 0
     let writeCells = 0
 
-    // Pass 1: expand damage to cover clear regions. The buffer is freshly
-    // zeroed by resetScreen, so this pass only marks damage so diff()
-    // checks these regions against the previous frame.
-    //
-    // Also collect clears from absolute-positioned nodes. An absolute
-    // node overlays normal-flow siblings; when it shrinks, its clear is
-    // pushed AFTER those siblings' clean-subtree blits (DOM order). The
-    // blit copies the absolute node's own stale paint from prevScreen,
-    // and since clear is damage-only, the ghost survives diff. Normal-
-    // flow clears don't need this — a normal-flow node's old position
-    // can't have been painted on top of a sibling's current position.
+    // Pass 1: expand damage to cover clear regions and collect absolute clears.
     const absoluteClears: { rect: Rectangle; opIndex: number }[] = []
     for (let i = 0; i < this.operations.length; i++) {
       const operation = this.operations[i]!
@@ -463,17 +1281,9 @@ export default class Output {
       const operation = this.operations[opIndex]!
       switch (operation.type) {
         case 'clear':
-          // handled in pass 1
           continue
 
         case 'clip':
-          // Intersect with the parent clip (if any) so nested
-          // overflow:hidden boxes can't write outside their ancestor's
-          // clip region. Without this, a message with overflow:hidden at
-          // the bottom of a scrollbox pushes its OWN clip (based on its
-          // layout bounds, already translated by -scrollTop) which can
-          // extend below the scrollbox viewport — writes escape into
-          // the sibling bottom section's rows.
           clips.push(intersectClip(clips.at(-1), operation.clip))
           continue
 
@@ -482,9 +1292,6 @@ export default class Output {
           continue
 
         case 'blit': {
-          // Bulk-copy cells from source screen region using TypedArray.set().
-          // Tracking damage ensures diff() checks blitted cells for stale content
-          // when a parent blits an area that previously contained child content.
           const {
             src,
             x: regionX,
@@ -492,11 +1299,6 @@ export default class Output {
             width: regionWidth,
             height: regionHeight,
           } = operation
-          // Intersect with active clip — a child's clean-blit passes its full
-          // cached rect, but the parent ScrollBox may have shrunk (pill mount).
-          // Without this, the blit writes past the ScrollBox's new bottom edge
-          // into the pill's row. densable `unclipped` skips the stack (hn
-          // copies rows below the new viewport before DECSTBM).
           const clip = operation.unclipped ? undefined : clips.at(-1)
           const startX = Math.max(regionX, clip?.x1 ?? 0)
           const startY = Math.max(regionY, clip?.y1 ?? 0)
@@ -516,10 +1318,6 @@ export default class Output {
           if (src.width !== screenWidth) {
             this.checkRightEdgeOf(startY, maxY)
           }
-          // Skip rows covered by an absolute-positioned node's clear.
-          // Absolute nodes overlay normal-flow siblings, so prevScreen in
-          // that region holds the absolute node's stale paint — blitting
-          // it back would ghost. See absoluteClears collection above.
           const queueRestore = (
             x1: number,
             y1: number,
@@ -567,177 +1365,14 @@ export default class Output {
         }
 
         case 'write': {
-          const { softWrap, direction } = operation
-          let { x, y } = operation
-          let lines = operation.lines
-          let swFrom = 0
-          // densable k — packed softWrap seed for the next continuation row
-          let packedPrev = 0
-
-          const clip = clips.at(-1)
-          const applyDirection =
-            direction !== undefined && isSoftwareBidiNeeded()
-          let directedClipX: { x1: number; x2: number } | undefined
-
-          if (clip) {
-            const clipHorizontally =
-              typeof clip?.x1 === 'number' && typeof clip?.x2 === 'number'
-
-            const clipVertically =
-              typeof clip?.y1 === 'number' && typeof clip?.y2 === 'number'
-
-            // If text is positioned outside of clipping area altogether,
-            // skip to the next operation to avoid unnecessary calculations
-            if (clipHorizontally) {
-              // gold: if(ie&&B>K.x2)continue
-              if (x > clip.x2!) {
-                continue
-              }
-            }
-
-            if (clipVertically) {
-              const height = lines.length
-              // gold: j+he<K.y1||j>K.y2
-              if (y + height < clip.y1! || y > clip.y2!) {
-                continue
-              }
-            }
-
-            if (clipHorizontally) {
-              if (applyDirection) {
-                // Official 2.1.328 `paintWrite` (`ie = Q && gm(M) ? m : void 0`):
-                // when explicit direction + software bidi are active, reorder the
-                // full line visually first and clip columns at placement time.
-                directedClipX = { x1: clip.x1!, x2: clip.x2! }
-              } else {
-                // densable: Ya + lineCells.width from column x; skip lines
-                // outside the vertical slice (`fe<he-1||fe>=ce`).
-                let sliceStart = 0
-                let sliceEnd = lines.length
-                let sliceY = y
-                if (clipVertically) {
-                  sliceStart = y < clip.y1! ? clip.y1! - y : 0
-                  sliceEnd =
-                    y + lines.length > clip.y2! ? clip.y2! - y : sliceEnd
-                  sliceY = y < clip.y1! ? clip.y1! : y
-                }
-                sliceEnd = Math.min(
-                  sliceEnd,
-                  sliceStart + (this.height - sliceY),
-                )
-                const reorder = isSoftwareBidiNeeded()
-                let intersects = false
-                lines = lines.map((line, index) => {
-                  if (index < sliceStart - 1 || index >= sliceEnd) return line
-                  const from = x < clip.x1! ? clip.x1! - x : 0
-                  const lineWidth = this.lineCells.width(line, x, reorder)
-                  if (x + lineWidth >= clip.x1!) intersects = true
-                  if (from === 0 && x + lineWidth <= clip.x2!) return line
-                  const sanitized = sanitizeBidiControls(line)
-                  let to = clip.x2! - x
-                  let sliced = sliceAnsi(sanitized, from, to)
-                  const placedX = Math.max(x, clip.x1!)
-                  const maxCells = clip.x2! - placedX
-                  while (
-                    to > from &&
-                    this.lineCells.width(sliced, placedX, reorder) > maxCells
-                  ) {
-                    to--
-                    sliced = sliceAnsi(sanitized, from, to)
-                  }
-                  return sliced
-                })
-                if (!intersects) continue
-                if (x < clip.x1!) {
-                  x = clip.x1!
-                }
-              }
-            }
-
-            if (clipVertically) {
-              const from = y < clip.y1! ? clip.y1! - y : 0
-              const height = lines.length
-              const to = y + height > clip.y2! ? clip.y2! - y : height
-
-              // densable: first visible line is a continuation — seed packed
-              // prev from the clipped-away previous line's content end.
-              const kindAtFrom = softWrap?.[from] ?? SoftWrapKind.HardBreak
-              if (
-                softWrap &&
-                from > 0 &&
-                kindAtFrom !== SoftWrapKind.HardBreak
-              ) {
-                const startCol = directedClipX
-                  ? Math.max(x, directedClipX.x1)
-                  : x
-                packedPrev = packSoftWrap(
-                  startCol +
-                    this.lineCells.width(
-                      lines[from - 1]!,
-                      startCol,
-                      isSoftwareBidiNeeded(),
-                    ),
-                  startCol,
-                )
-              }
-
-              lines = lines.slice(from, to)
-              swFrom = from
-
-              if (y < clip.y1!) {
-                y = clip.y1!
-              }
-            }
-          }
-
-          const swBits = screen.softWrap
-          const swStartCol = directedClipX ? Math.max(x, directedClipX.x1) : x
-          const dirPrefix = applyDirection
-            ? BIDI_DIRECTION_PREFIX[direction]
-            : ''
-          let offsetY = 0
-
-          for (const line of lines) {
-            const lineY = y + offsetY
-            // Line can be outside screen if `text` is taller than screen height
-            if (lineY >= screenHeight) {
-              break
-            }
-            const contentEnd = writeLineToScreen(
-              screen,
-              dirPrefix ? dirPrefix + line : line,
-              x,
-              lineY,
-              screenWidth,
-              this.stylePool,
-              this.charCache,
-              directedClipX,
-            )
-            if (lineY >= 0 && contentEnd >= screenWidth - 1) {
-              this.rowsAtRightEdge.add(lineY)
-            }
-            writeCells += contentEnd - swStartCol
-            // densable write arm: HardBreak→0; Continuation→packedPrev;
-            // ContinuationElidedSep→packedPrev|Ao; then seed next packedPrev.
-            if (softWrap) {
-              const kind = softWrap[swFrom + offsetY] ?? SoftWrapKind.HardBreak
-              swBits[lineY] =
-                kind === SoftWrapKind.HardBreak
-                  ? 0
-                  : kind === SoftWrapKind.ContinuationElidedSep
-                    ? packedPrev | SW_ELIDED_SEP
-                    : packedPrev
-              packedPrev = packSoftWrap(contentEnd, swStartCol)
-            }
-            offsetY++
-          }
+          writeCells += this.paintWrite(operation, clips.at(-1))
           continue
         }
       }
     }
 
-    // densable get() second pass: restoreNoSelect pg then noSelect, in
-    // operation order so later writes don't keep stomping opaque fences.
+    // Pass 2: restoreNoSelect then noSelect, in operation order so later writes
+    // don't keep stomping opaque fences.
     {
       const clips2: Clip[] = []
       let restoreAt = 0
@@ -774,7 +1409,6 @@ export default class Output {
       }
     }
 
-    // Log blit/write ratio for debugging - high write count suggests blitting isn't working
     const totalCells = blitCells + writeCells
     if (totalCells > 1000 && writeCells > blitCells) {
       logForDebugging(
@@ -784,346 +1418,4 @@ export default class Output {
 
     return screen
   }
-}
-
-function stylesEqual(a: AnsiCode[], b: AnsiCode[]): boolean {
-  if (a === b) return true // Reference equality fast path
-  const len = a.length
-  if (len !== b.length) return false
-  if (len === 0) return true // Both empty
-  for (let i = 0; i < len; i++) {
-    if (a[i]!.code !== b[i]!.code) return false
-  }
-  return true
-}
-
-/**
- * Convert a string with ANSI codes into styled characters with proper grapheme
- * clustering. Fixes ansi-tokenize splitting grapheme clusters (like family
- * emojis) into individual code points.
- *
- * Also precomputes styleId + hyperlink per style run (not per char) — an
- * 80-char line with 3 style runs does 3 intern calls instead of 80.
- */
-/**
- * Official 2.1.323 (#1989) `K` / `_Or` — detect a zero-width combining mark
- * that attaches to a preceding base character, and reorder any grapheme cluster
- * starting with combining marks so the first positive-width base codepoint
- * precedes them (preventing accents from landing left of the text).
- */
-function isCombiningMarkCodeUnit(ch: string): boolean {
-  if (stringWidth(ch) !== 0) return false
-  const first = getGraphemeSegmenter()
-    .segment(`a${ch}`)
-    [Symbol.iterator]()
-    .next().value?.segment
-  return first !== 'a'
-}
-
-export function reorderLeadingCombiningMarks(grapheme: string): string {
-  if (grapheme.length < 2 || grapheme.charCodeAt(0) <= 127) return grapheme
-  let markEnd = 0
-  for (const ch of grapheme) {
-    if (!isCombiningMarkCodeUnit(ch)) break
-    markEnd += ch.length
-  }
-  if (markEnd === 0) return grapheme
-  let baseEnd = markEnd
-  while (baseEnd < grapheme.length) {
-    const cp = grapheme.codePointAt(baseEnd)!
-    const ch = String.fromCodePoint(cp)
-    baseEnd += ch.length
-    if (stringWidth(ch) > 0) {
-      if (
-        baseEnd === grapheme.length &&
-        grapheme.charCodeAt(markEnd - 1) === 0x200d
-      ) {
-        return grapheme
-      }
-      const reordered =
-        grapheme.slice(markEnd, baseEnd) +
-        grapheme.slice(0, markEnd) +
-        grapheme.slice(baseEnd)
-      return stringWidth(reordered) === stringWidth(grapheme)
-        ? reordered
-        : grapheme
-    }
-  }
-  return grapheme
-}
-
-function styledCharsWithGraphemeClustering(
-  chars: StyledChar[],
-  stylePool: StylePool,
-): ClusteredChar[] {
-  const charCount = chars.length
-  if (charCount === 0) return []
-
-  const result: ClusteredChar[] = []
-  const bufferChars: string[] = []
-  let bufferStyles: AnsiCode[] = chars[0]!.styles
-
-  for (let i = 0; i < charCount; i++) {
-    const char = chars[i]!
-    const styles = char.styles
-
-    // Different styles means we need to flush and start new buffer — unless
-    // this char is a combining mark attaching to the previous grapheme cluster
-    // (official 2.1.323 #1989 `a5r` grapheme-preserving style boundary).
-    if (
-      bufferChars.length > 0 &&
-      !stylesEqual(styles, bufferStyles) &&
-      !isCombiningMarkCodeUnit(char.value)
-    ) {
-      flushBuffer(bufferChars.join(''), bufferStyles, stylePool, result)
-      bufferChars.length = 0
-    }
-
-    bufferChars.push(char.value)
-    if (bufferChars.length === 1) {
-      bufferStyles = styles
-    }
-  }
-
-  // Final flush
-  if (bufferChars.length > 0) {
-    flushBuffer(bufferChars.join(''), bufferStyles, stylePool, result)
-  }
-
-  return result
-}
-
-function flushBuffer(
-  buffer: string,
-  styles: AnsiCode[],
-  stylePool: StylePool,
-  out: ClusteredChar[],
-): void {
-  // Compute styleId + hyperlink ONCE for the whole style run.
-  // Every grapheme in this buffer shares the same styles.
-  //
-  // Extract and track hyperlinks separately, filter from styles.
-  // Always check for OSC 8 codes to filter, not just when a URL is
-  // extracted. The tokenizer treats OSC 8 close codes (empty URL) as
-  // active styles, so they must be filtered even when no hyperlink
-  // URL is present.
-  const hyperlink = extractHyperlinkFromStyles(styles) ?? undefined
-  const hasOsc8Styles =
-    hyperlink !== undefined ||
-    styles.some(
-      s =>
-        s.code.length >= OSC8_PREFIX.length && s.code.startsWith(OSC8_PREFIX),
-    )
-  const filteredStyles = hasOsc8Styles
-    ? filterOutHyperlinkStyles(styles)
-    : styles
-  const styleId = stylePool.intern(filteredStyles)
-
-  for (const { segment: rawGrapheme } of getGraphemeSegmenter().segment(
-    buffer,
-  )) {
-    const grapheme = reorderLeadingCombiningMarks(rawGrapheme)
-    out.push({
-      value: grapheme,
-      width: stringWidth(grapheme),
-      styleId,
-      hyperlink,
-    })
-  }
-}
-
-/**
- * Write a single line's characters into the screen buffer.
- * Extracted from Output.get() so JSC can optimize this tight,
- * monomorphic loop independently — better register allocation,
- * setCellAt inlining, and type feedback than when buried inside
- * a 300-line dispatch function.
- *
- * Returns the end column (x + visual width, including tab expansion) so
- * the caller can record it in screen.softWrap without re-walking the
- * line via stringWidth(). Caller computes the debug cell-count as end-x.
- */
-// Official 2.1.328 `Lv` — strong directional marks prepended when software bidi
-// reorders a line with an explicit `WriteOperation.direction`.
-const BIDI_DIRECTION_PREFIX = {
-  ltr: '\u200E',
-  rtl: '\u200F',
-} as const
-
-function writeLineToScreen(
-  screen: Screen,
-  line: string,
-  x: number,
-  y: number,
-  screenWidth: number,
-  stylePool: StylePool,
-  charCache: Map<string, ClusteredChar[]>,
-  clipX?: { x1: number; x2: number },
-): number {
-  let characters = charCache.get(line)
-  if (!characters) {
-    characters = reorderBidi(
-      styledCharsWithGraphemeClustering(
-        styledCharsFromTokens(tokenize(line)),
-        stylePool,
-      ),
-    )
-    charCache.set(line, characters)
-  }
-
-  let offsetX = x
-  let placedEnd = clipX ? Math.max(x, clipX.x1) : x
-
-  for (let charIdx = 0; charIdx < characters.length; charIdx++) {
-    const character = characters[charIdx]!
-    const codePoint = character.value.codePointAt(0)
-
-    // Handle C0 control characters (0x00-0x1F) that cause cursor movement
-    // mismatches. stringWidth treats these as width 0, but terminals may
-    // move the cursor differently.
-    if (codePoint !== undefined && codePoint <= 0x1f) {
-      // Tab (0x09): expand to spaces to reach next tab stop
-      if (codePoint === 0x09) {
-        const tabWidth = 8
-        const spacesToNextStop = tabWidth - (offsetX % tabWidth)
-        for (let i = 0; i < spacesToNextStop && offsetX < screenWidth; i++) {
-          if (!clipX || (offsetX >= clipX.x1 && offsetX + 1 <= clipX.x2)) {
-            setCellAt(screen, offsetX, y, {
-              char: ' ',
-              styleId: stylePool.none,
-              width: CellWidth.Narrow,
-              hyperlink: undefined,
-            })
-            placedEnd = offsetX + 1
-          }
-          offsetX++
-        }
-      }
-      // ESC (0x1B): skip incomplete escape sequences that ansi-tokenize
-      // didn't recognize. ansi-tokenize only parses SGR sequences (ESC[...m)
-      // and OSC 8 hyperlinks (ESC]8;;url BEL). Other sequences like cursor
-      // movement, screen clearing, or terminal title become individual char
-      // tokens that we need to skip here.
-      else if (codePoint === 0x1b) {
-        const nextChar = characters[charIdx + 1]?.value
-        const nextCode = nextChar?.codePointAt(0)
-        if (
-          nextChar === '(' ||
-          nextChar === ')' ||
-          nextChar === '*' ||
-          nextChar === '+'
-        ) {
-          // Charset selection: ESC ( X, ESC ) X, etc.
-          // Skip the intermediate char and the charset designator
-          charIdx += 2
-        } else if (nextChar === '[') {
-          // CSI sequence: ESC [ ... final-byte
-          // Final byte is in range 0x40-0x7E (@, A-Z, [\]^_`, a-z, {|}~)
-          // Examples: ESC[2J (clear), ESC[?25l (cursor hide), ESC[H (home)
-          charIdx++ // skip the [
-          while (charIdx < characters.length - 1) {
-            charIdx++
-            const c = characters[charIdx]?.value.codePointAt(0)
-            // Final byte terminates the sequence
-            if (c !== undefined && c >= 0x40 && c <= 0x7e) {
-              break
-            }
-          }
-        } else if (
-          nextChar === ']' ||
-          nextChar === 'P' ||
-          nextChar === '_' ||
-          nextChar === '^' ||
-          nextChar === 'X'
-        ) {
-          // String-based sequences terminated by BEL (0x07) or ST (ESC \):
-          // - OSC: ESC ] ... (Operating System Command)
-          // - DCS: ESC P ... (Device Control String)
-          // - APC: ESC _ ... (Application Program Command)
-          // - PM:  ESC ^ ... (Privacy Message)
-          // - SOS: ESC X ... (Start of String)
-          charIdx++ // skip the introducer char
-          while (charIdx < characters.length - 1) {
-            charIdx++
-            const c = characters[charIdx]?.value
-            // BEL (0x07) terminates the sequence
-            if (c === '\x07') {
-              break
-            }
-            // ST (String Terminator) is ESC \
-            // When we see ESC, check if next char is backslash
-            if (c === '\x1b') {
-              const nextC = characters[charIdx + 1]?.value
-              if (nextC === '\\') {
-                charIdx++ // skip the backslash too
-                break
-              }
-            }
-          }
-        } else if (
-          nextCode !== undefined &&
-          nextCode >= 0x30 &&
-          nextCode <= 0x7e
-        ) {
-          // Single-character escape sequences: ESC followed by 0x30-0x7E
-          // (excluding the multi-char introducers already handled above)
-          // - Fp range (0x30-0x3F): ESC 7 (save cursor), ESC 8 (restore)
-          // - Fe range (0x40-0x5F): ESC D (index), ESC M (reverse index)
-          // - Fs range (0x60-0x7E): ESC c (reset)
-          charIdx++ // skip the command char
-        }
-      }
-      // Carriage return (0x0D): would move cursor to column 0, skip it
-      // Backspace (0x08): would move cursor left, skip it
-      // Bell (0x07), vertical tab (0x0B), form feed (0x0C): skip
-      // All other control chars (0x00-0x06, 0x0E-0x1F): skip
-      // Note: newline (0x0A) is already handled by line splitting
-      continue
-    }
-
-    // Zero-width characters (combining marks, ZWNJ, ZWS, etc.)
-    // don't occupy terminal cells — storing them as Narrow cells
-    // desyncs the virtual cursor from the real terminal cursor.
-    // Width was computed once during clustering (cached via charCache).
-    const charWidth = character.width
-    if (charWidth === 0) {
-      continue
-    }
-
-    const isWideCharacter = charWidth >= 2
-    const step = isWideCharacter ? 2 : 1
-
-    // Wide char at last column can't fit — terminal would wrap it to
-    // the next line, desyncing our cursor model. Place a SpacerHead
-    // to mark the blank column, matching terminal behavior.
-    if (isWideCharacter && offsetX + 2 > screenWidth) {
-      if (!clipX || (offsetX >= clipX.x1 && offsetX + 1 <= clipX.x2)) {
-        setCellAt(screen, offsetX, y, {
-          char: ' ',
-          styleId: stylePool.none,
-          width: CellWidth.SpacerHead,
-          hyperlink: undefined,
-        })
-        placedEnd = offsetX + 1
-      }
-      offsetX++
-      continue
-    }
-
-    // styleId + hyperlink were precomputed during clustering (once per
-    // style run, cached via charCache). Hot loop is now just property
-    // reads — no intern, no extract, no filter per frame.
-    if (!clipX || (offsetX >= clipX.x1 && offsetX + step <= clipX.x2)) {
-      setCellAt(screen, offsetX, y, {
-        char: character.value,
-        styleId: character.styleId,
-        width: isWideCharacter ? CellWidth.Wide : CellWidth.Narrow,
-        hyperlink: character.hyperlink,
-      })
-      placedEnd = offsetX + step
-    }
-    offsetX += step
-  }
-
-  return clipX ? placedEnd : offsetX
 }

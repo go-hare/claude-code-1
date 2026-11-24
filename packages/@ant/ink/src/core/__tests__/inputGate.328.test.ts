@@ -94,7 +94,8 @@ describe('2.1.328 Ink InputGate (class Kh) & wantEveryKey opt-out', () => {
       timesPresses: () => true,
     })
 
-    const dialog = dom.createNode('ink-box')
+    const rootNode = (ink as unknown as { rootNode: dom.DOMElement }).rootNode
+    const dialog = dom.createNode('ink-box', rootNode.yogaNode?.config)
     const receivedKeys: string[] = []
     dialog._eventHandlers = {
       onKeyDown: e => {
@@ -107,7 +108,6 @@ describe('2.1.328 Ink InputGate (class Kh) & wantEveryKey opt-out', () => {
       owner: 'dialog-1',
       onChange: d => droppedChanges.push(d),
     }
-    const rootNode = (ink as unknown as { rootNode: dom.DOMElement }).rootNode
     dom.appendChildNode(rootNode, dialog)
     // Simulate first frame paint of the dialog at t=1000
     dialog.firstFrame = { writtenAt: 1000 }

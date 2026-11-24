@@ -265,6 +265,13 @@ export class TerminalQuerier {
     return count
   }
 
+  /** Official 2.1.328 `bAs.awaits(query)` — true while `query` is still queued. */
+  awaits(query: TerminalQuery): boolean {
+    return this.queue.some(
+      item => item.kind === 'query' && item.match === query.match,
+    )
+  }
+
   /**
    * Drop a still-pending query. Match is by `query.match` identity, the
    * same object passed to `send()`. Resolves that send() with undefined.

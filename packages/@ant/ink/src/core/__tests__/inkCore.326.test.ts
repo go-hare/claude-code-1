@@ -276,18 +276,20 @@ describe('Wave 326 Group 4A — Ink core & keybindings', () => {
       internal.repaint = () => {
         repaintCount++
       }
-      internal.isFinishingWrites = true
+      // Official 2.1.328 handleStdoutBackpressure:
+      // - endedBy === 'drain' reasserts terminal modes & forceRedraws
+      // - endedBy !== 'drain' (timeout/flush) without renderers falls back to repaint()
+      internal.isFinishingWrites = false
       internal.handleStdoutBackpressure({
         droppedBytes: 128,
-        endedBy: 'drain',
+        endedBy: 'timeout',
         durationMs: 10,
         peakQueuedBytes: 128,
       })
       expect(reassertCount).toBe(0)
       expect(redrawCount).toBe(0)
-      expect(repaintCount).toBe(0)
+      expect(repaintCount).toBe(1)
 
-      internal.isFinishingWrites = false
       internal.handleStdoutBackpressure({
         droppedBytes: 128,
         endedBy: 'drain',

@@ -71,15 +71,11 @@ describe('densable 2.1.289 createInstance inherits root yoga config', () => {
 })
 
 describe('densable 2.1.289 createInstance sy raw-mode hold', () => {
-  test('createInstance calls sy(x,f) after apply props, not export function sy', async () => {
+  test('commit-phase insertion calls sy(x,f) (not render-phase createInstance), not export function sy', async () => {
     const src = await Bun.file(RECON).text()
     expect(src).not.toContain('export function sy')
-    expect(src).toContain('syncRawModeHold(node, _root)')
-    const create = src.indexOf('createInstance(')
-    const apply = src.indexOf('applyProp(node, key, value)', create)
-    const sy = src.indexOf('syncRawModeHold(node, _root)', create)
-    expect(apply).toBeGreaterThan(create)
-    expect(sy).toBeGreaterThan(apply)
+    expect(src).toContain('syncRawModeHold(node, host)')
+    expect(src).toContain('commitInsertChild(')
     expect(src).toContain('if (holds === !!node._holdsRawModeRef) return')
     expect(src).toContain('host.setRawMode(delta > 0)')
     expect(src).toContain(

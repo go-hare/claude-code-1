@@ -5,13 +5,15 @@ import { getYogaCounters } from './yoga-layout/index.js'
 const MAX_TERMINAL_COLUMNS = 500
 const MAX_FAULT_ERROR_MESSAGES = 16 // dA
 const MAX_FAULT_DEBUG_LINES = 5 // cS
-const PERSISTING_FAULT_THRESHOLD = 50 // fA / mL_
+const PERSISTING_FAULT_THRESHOLD = 100 // fA
+const MAX_DAMAGED_LAYOUTS_BEFORE_RELAXING_CHECKS = 8 // hA
 const MAX_LISTENER_FAULT_DEBUG_LINES = 5 // dS
 
 export type YogaCounterSnapshot = {
   ms: number
   visited: number
   measured: number
+  measureCacheHits?: number
   cacheHits: number
   live: number
 }
@@ -23,6 +25,7 @@ export type LayoutControllerHost = {
   isLayoutChecked?: () => boolean
   onFaultMessage?: (message: string, opts?: { level?: string }) => void
   onFaultError?: (error: Error) => void
+  onDamagedLayout?: () => void
   onYogaMs?: (ms: number) => void
 }
 
@@ -63,6 +66,14 @@ export class LayoutController {
     this.rootNode = rootNode
     this.layoutConfig = layoutConfig
     this.host = host
+    if (this.layoutConfig) {
+      this.layoutConfig.onDamage = () => {
+        this.layoutDamaged = true
+        if (this.paintStopsAtDamage) {
+          throw new TypeError('a layout node is damaged')
+        }
+      }
+    }
   }
 
   subscribeLayout = (listener: () => void): (() => void) => {
@@ -102,11 +113,12 @@ export class LayoutController {
     }
     const ms = performance.now() - start
     this.host.onYogaMs?.(ms)
-    const counters = getYogaCounters()
+    const counters = getYogaCounters(yogaNode)
     this.lastYogaCounters = {
       ms,
       visited: counters.visited,
       measured: counters.measured,
+      measureCacheHits: counters.measureCacheHits,
       cacheHits: counters.cacheHits,
       live: counters.live,
     }
@@ -139,7 +151,7 @@ export class LayoutController {
       try {
         this.calculateYogaLayout(yogaNode)
         if (!this.layoutDamaged) return
-        this.damagedLayouts++
+        this.countDamagedLayout()
         fault = new Error('ink layout record is damaged')
       } catch (err) {
         fault = LayoutController.describeLayoutFault(err)
@@ -158,6 +170,28 @@ export class LayoutController {
     if (primary) {
       this.reportLayoutFaultToErrorTracking(primary, retryFault)
       this.logLayoutFaultForDebugging(primary, retryFault)
+    }
+  }
+
+  /**
+   * Official 2.1.328 `Cs.countDamagedLayout()` — emit telemetry on first
+   * damage event and disable integer checks (`checksNumbers = false`) after
+   * `hA = 8` repeated damage events.
+   */
+  private countDamagedLayout(): void {
+    if (++this.damagedLayouts === 1) {
+      this.host.onDamagedLayout?.()
+    } else if (
+      this.damagedLayouts === MAX_DAMAGED_LAYOUTS_BEFORE_RELAXING_CHECKS
+    ) {
+      if (this.layoutConfig) {
+        this.layoutConfig.checksNumbers = false
+      }
+      this.host.onFaultError?.(
+        new Error(
+          'ink layout records keep being damaged; odd numbers no longer checked',
+        ),
+      )
     }
   }
 

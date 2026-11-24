@@ -6,6 +6,7 @@ import {
 import type { FlickerReason, Frame } from './frame.js'
 import {
   CellWidth,
+  type CharPool,
   cellAt,
   copyRows,
   createScreen,
@@ -396,14 +397,23 @@ export class RowDrawer {
   readonly written: number[] = []
   private blankRow = new Int32Array(0)
   private capabilities: TerminalRenderCapabilities | undefined
+  private charPool: CharPool | undefined
 
   constructor(encoder: TerminalEncoder) {
     this.encoder = encoder
   }
 
-  begin(caps?: TerminalRenderCapabilities): void {
+  begin(caps?: TerminalRenderCapabilities, charPool?: CharPool): boolean {
     this.written.length = 0
     this.capabilities = caps
+    const changed =
+      charPool !== undefined &&
+      this.charPool !== undefined &&
+      this.charPool !== charPool
+    if (charPool !== undefined) {
+      this.charPool = charPool
+    }
+    return changed
   }
 
   draw(shown: Screen, shownRow: number, next: Screen, nextRow: number): void {
@@ -1261,6 +1271,7 @@ export class FullscreenRenderer {
   private styleGeneration = 0
   private unwritten: { cleared?: FlickerReason } | undefined
   private erasesFirst: FlickerReason | undefined
+  private dirtyAfterInvalidate = false
 
   constructor(encoder: TerminalEncoder, rows: RowDrawer, stylePool: StylePool) {
     this.encoder = encoder
@@ -1272,6 +1283,7 @@ export class FullscreenRenderer {
     this.front = undefined
     this.cursor = undefined
     this.erasesFirst = reason ?? this.erasesFirst
+    this.dirtyAfterInvalidate = this.erasesFirst === undefined
   }
 
   frameWasWritten(): void {
@@ -1298,7 +1310,7 @@ export class FullscreenRenderer {
     if (hadUnwritten) {
       this.invalidate(this.unwritten?.cleared)
     }
-    rows.begin(caps)
+    const charPoolChanged = rows.begin(caps, nextScreen.charPool)
 
     if (
       this.front &&
@@ -1314,6 +1326,8 @@ export class FullscreenRenderer {
     }
 
     const cleared = this.erasesFirst
+    const needsRowInvalidate = this.dirtyAfterInvalidate && !cleared
+    this.dirtyAfterInvalidate = false
     this.unwritten = { cleared }
     if (cleared) {
       this.erasesFirst = undefined
@@ -1342,7 +1356,13 @@ export class FullscreenRenderer {
       nextScreen.charPool,
       nextScreen.hyperlinkPool,
     ))
-    if (hadUnwritten || poolsChanged || caps.repaintsEveryCell) {
+    if (
+      hadUnwritten ||
+      poolsChanged ||
+      caps.repaintsEveryCell ||
+      charPoolChanged ||
+      needsRowInvalidate
+    ) {
       invalidateScreenRows(front, 0, height)
     }
 

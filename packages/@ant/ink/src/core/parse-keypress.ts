@@ -769,11 +769,13 @@ export function parseMultipleKeypresses(
     }
   }
 
-  // densable: if(r) d(); if(r&&a) emit paste.
+  // densable: if(r) d(); if(r&&a) { if (p) emit paste; a = false; p = ''; }
   if (isFlush) {
     flushPendingBytes()
-    if (inPaste && pasteBuffer) {
-      keys.push(createPaste(pasteBuffer))
+    if (inPaste) {
+      if (pasteBuffer) {
+        keys.push(createPaste(pasteBuffer))
+      }
       inPaste = false
       pasteBuffer = ''
     }

@@ -379,6 +379,7 @@ export class StylePool {
     this.styles = []
     this.transitionCache.clear()
     this.inverseCache.clear()
+    this.underlineCache.clear()
     this.currentMatchCache.clear()
     this.selectionBgCache.clear()
     this.overflowWarned = false

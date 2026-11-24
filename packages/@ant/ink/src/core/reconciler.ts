@@ -27,7 +27,6 @@ import {
   EVENT_HANDLER_PROPS,
   type EventHandlerProps,
 } from './events/event-handlers.js'
-import { getFocusManager, getRootNode } from './focus.js'
 import { LayoutDisplay } from './layout/node.js'
 import applyStyles, { type Styles, type TextStyles } from './styles.js'
 
@@ -154,6 +153,15 @@ function applyRawModeDelta(host: DOMElement, delta: number): void {
   else host._pendingRawModeDelta = (host._pendingRawModeDelta ?? 0) + delta
 }
 
+/** Walk up to the top-most ancestor without throwing on focusManager-less trees. */
+function findRootNode(node: DOMElement): DOMElement {
+  let current: DOMElement = node
+  while (current.parentNode) {
+    current = current.parentNode
+  }
+  return current
+}
+
 /**
  * densable `sy(n,u)` — sync this node's raw-mode hold against the root host.
  * Not exported (gold is a local helper, not a public API).
@@ -163,6 +171,25 @@ function syncRawModeHold(node: DOMElement, host: DOMElement): void {
   if (holds === !!node._holdsRawModeRef) return
   node._holdsRawModeRef = holds
   applyRawModeDelta(host, holds ? 1 : -1)
+}
+
+/** Commit-phase subtree raw-mode hold sync (idempotent via `_holdsRawModeRef`). */
+function syncRawModeHoldTree(node: DOMNode, host: DOMElement): void {
+  if (node.nodeName === '#text') return
+  syncRawModeHold(node, host)
+  for (const child of node.childNodes) {
+    if (child.nodeName !== '#text') {
+      syncRawModeHoldTree(child, host)
+    }
+  }
+}
+
+function commitInsertChild(parent: DOMElement, child: DOMNode): void {
+  if (child.nodeName === '#text') return
+  const root = findRootNode(parent)
+  if (root.nodeName === 'ink-root') {
+    syncRawModeHoldTree(child, root)
+  }
 }
 
 /** densable `hy` — release this subtree's raw-mode holds on unmount. */
@@ -178,13 +205,34 @@ function releaseRawModeHoldTree(node: DOMElement, host: DOMElement): void {
   }
 }
 
+/**
+ * Official 2.1.328 `ds(parent, child)` — detach child, free its Yoga subtree,
+ * notify `focusManager` if present, and release raw-mode holds. Shared by
+ * `removeChild`, `removeChildFromContainer`, and `Ink.unmount()` (`ownTree`).
+ */
+export function removeChildAndCleanup(
+  node: DOMElement,
+  removeNode: DOMNode,
+): void {
+  removeChildNode(node, removeNode)
+  cleanupYogaNode(removeNode)
+  if (removeNode.nodeName === '#text') return
+  const root = findRootNode(node)
+  if (root.focusManager) {
+    root.focusManager.handleNodeRemoved(removeNode, root)
+  }
+  // densable: hy(u,f)
+  releaseRawModeHoldTree(removeNode, root)
+}
+
 function applyProp(node: DOMElement, key: string, value: unknown): void {
   if (key === 'children') return
 
   if (key === 'style') {
-    setStyle(node, value as Styles)
+    const nextStyle = (value as Styles | undefined) ?? {}
+    setStyle(node, nextStyle)
     if (node.yogaNode) {
-      applyStyles(node.yogaNode, value as Styles)
+      applyStyles(node.yogaNode, nextStyle)
     }
     return
   }
@@ -367,9 +415,6 @@ const reconciler = createReconciler<
       applyProp(node, key, value)
     }
 
-    // densable: sy(x,f) — raw-mode hold against the root container
-    syncRawModeHold(node, _root)
-
     if (isDebugRepaintsEnabled()) {
       node.debugOwnerChain = getOwnerChain(internalHandle)
     }
@@ -409,8 +454,18 @@ const reconciler = createReconciler<
     markDirty(node)
   },
   appendInitialChild: appendChildNode,
-  appendChild: appendChildNode,
-  insertBefore: insertBeforeNode,
+  appendChild(parentNode: DOMElement, childNode: DOMNode): void {
+    appendChildNode(parentNode, childNode)
+    commitInsertChild(parentNode, childNode)
+  },
+  insertBefore(
+    parentNode: DOMElement,
+    newChildNode: DOMNode,
+    beforeChildNode: DOMNode,
+  ): void {
+    insertBeforeNode(parentNode, newChildNode, beforeChildNode)
+    commitInsertChild(parentNode, newChildNode)
+  },
   finalizeInitialChildren(
     _node: DOMElement,
     _type: ElementNames,
@@ -419,7 +474,7 @@ const reconciler = createReconciler<
     return props['autoFocus'] === true
   },
   commitMount(node: DOMElement): void {
-    getFocusManager(node).handleAutoFocus(node)
+    findRootNode(node).focusManager?.handleAutoFocus(node)
   },
   isPrimaryRenderer: true,
   supportsMutation: true,
@@ -435,16 +490,19 @@ const reconciler = createReconciler<
   getInstanceFromNode: () => null,
   prepareScopeUpdate() {},
   getInstanceFromScope: () => null,
-  appendChildToContainer: appendChildNode,
-  insertInContainerBefore: insertBeforeNode,
-  removeChildFromContainer(node: DOMElement, removeNode: DOMNode): void {
-    removeChildNode(node, removeNode)
-    cleanupYogaNode(removeNode)
-    if (removeNode.nodeName === '#text') return
-    getFocusManager(node).handleNodeRemoved(removeNode, node)
-    // densable: hy(u,f)
-    releaseRawModeHoldTree(removeNode, getRootNode(node))
+  appendChildToContainer(container: DOMElement, childNode: DOMNode): void {
+    appendChildNode(container, childNode)
+    commitInsertChild(container, childNode)
   },
+  insertInContainerBefore(
+    container: DOMElement,
+    newChildNode: DOMNode,
+    beforeChildNode: DOMNode,
+  ): void {
+    insertBeforeNode(container, newChildNode, beforeChildNode)
+    commitInsertChild(container, newChildNode)
+  },
+  removeChildFromContainer: removeChildAndCleanup,
   // React 19 commitUpdate receives old and new props directly instead of an updatePayload
   commitUpdate(
     node: DOMElement,
@@ -459,7 +517,7 @@ const reconciler = createReconciler<
       let rawModeHandlersChanged = false
       for (const [key, value] of Object.entries(props)) {
         if (key === 'style') {
-          setStyle(node, value as Styles)
+          setStyle(node, (value as Styles | undefined) ?? {})
           continue
         }
 
@@ -498,30 +556,28 @@ const reconciler = createReconciler<
       }
       // densable: if(g)sy(n,R7t(n)); if(y?.autoFocus===!0)Xk(n).handleAutoFocus(n)
       if (rawModeHandlersChanged) {
-        syncRawModeHold(node, getRootNode(node))
+        const root = findRootNode(node)
+        if (root.nodeName === 'ink-root') {
+          syncRawModeHold(node, root)
+        }
       }
       if (props['autoFocus'] === true) {
-        getFocusManager(node).handleAutoFocus(node)
+        findRootNode(node).focusManager?.handleAutoFocus(node)
       }
     }
 
     if (style && node.yogaNode) {
-      applyStyles(node.yogaNode, style, newProps['style'] as Styles)
+      applyStyles(
+        node.yogaNode,
+        style,
+        (newProps['style'] as Styles | undefined) ?? {},
+      )
     }
   },
   commitTextUpdate(node: TextNode, _oldText: string, newText: string): void {
     setTextNodeValue(node, newText)
   },
-  removeChild(node, removeNode) {
-    removeChildNode(node, removeNode)
-    cleanupYogaNode(removeNode)
-    if (removeNode.nodeName !== '#text') {
-      const root = getRootNode(node)
-      root.focusManager!.handleNodeRemoved(removeNode, root)
-      // densable: hy(u,f)
-      releaseRawModeHoldTree(removeNode, root)
-    }
-  },
+  removeChild: removeChildAndCleanup,
   // React 19 required methods
   maySuspendCommit(): boolean {
     return false

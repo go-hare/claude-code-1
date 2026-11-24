@@ -332,10 +332,7 @@ export function stampFirstFrame(
   node.firstFrame = root[frameKey]
 }
 
-export const appendChildNode = (
-  node: DOMElement,
-  childNode: DOMElement,
-): void => {
+export const appendChildNode = (node: DOMElement, childNode: DOMNode): void => {
   const sameParent = childNode.parentNode === node
   if (childNode.parentNode) {
     removeChildNode(childNode.parentNode, childNode)
@@ -509,10 +506,11 @@ export const setAccessibility = (
   node.accessibility = accessibility
 }
 
-export const setStyle = (node: DOMNode, style: Styles): void => {
+export const setStyle = (node: DOMNode, style: Styles = {}): void => {
+  const nextStyle: Styles = style ?? {}
   // Compare style properties to avoid marking dirty unnecessarily.
   // React creates new style objects on every render even when unchanged.
-  if (stylesEqual(node.style, style)) {
+  if (stylesEqual(node.style, nextStyle)) {
     return
   }
   const wasAbsolute = node.style.position === 'absolute'
@@ -521,8 +519,8 @@ export const setStyle = (node: DOMNode, style: Styles): void => {
   if (node.style.display === 'none') {
     stampFirstFrame(node)
   }
-  node.style = style
-  if (!wasAbsolute && style.position === 'absolute' && node.parentNode) {
+  node.style = nextStyle
+  if (!wasAbsolute && nextStyle.position === 'absolute' && node.parentNode) {
     leftoverGsStampAbsoluteDescendant(node.parentNode)
   }
   markDirty(node)
@@ -748,6 +746,12 @@ export function rebuildYogaSubtree(
       node.nodeName !== 'ink-progress'
     if (!needsYoga) return undefined
     const fresh = createLayoutNode(yogaConfig)
+    // Official 2.1.328 `rh`: replacing an existing Yoga node skips `.free()`
+    // on the potentially damaged old node, so decrement liveNodes to keep the
+    // config's live count balanced.
+    if (node.yogaNode !== undefined && fresh.config) {
+      fresh.config.liveNodes--
+    }
     if (node.nodeName === 'ink-text') {
       fresh.setMeasureFunc(measureTextNode.bind(null, node))
     } else if (node.nodeName === 'ink-raw-ansi') {

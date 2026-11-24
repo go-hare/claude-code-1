@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import instances from '../core/instances.js'
+import { Ns } from '../core/instances.js'
 import useStdin from './use-stdin.js'
 
 /**
@@ -37,13 +37,13 @@ export function useProbeExternalClear(enabled = true): void {
   useEffect(() => {
     if (!enabled || !querier) return
     if (termProgram !== 'iTerm.app' && termProgram !== 'Apple_Terminal') return
-    const ink = instances.get(process.stdout)
+    const ink = Ns().get(process.stdout)
     if (!ink) return
 
     const ac = new AbortController()
     ;(async () => {
       while (!ac.signal.aborted) {
-        await ink.probeExternalClear(querier)
+        await ink.probeExternalClear(querier, ac.signal)
         await sleepMs(200, ac.signal)
       }
     })()

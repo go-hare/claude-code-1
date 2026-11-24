@@ -5,6 +5,7 @@ import Yoga, {
   Edge,
   FlexDirection,
   Gutter,
+  isYogaNodeIntact,
   Justify,
   MeasureMode,
   Overflow,
@@ -108,10 +109,7 @@ export class YogaLayoutNode implements LayoutNode {
 
   /** densable clearLayoutCacheRecursive — delegate to pure-JS yoga Node. */
   clearLayoutCacheRecursive(): void {
-    const yoga = this.yoga as {
-      clearLayoutCacheRecursive?: () => void
-    }
-    yoga.clearLayoutCacheRecursive?.()
+    this.yoga.clearLayoutCacheRecursive()
   }
 
   // Computed layout
@@ -138,6 +136,14 @@ export class YogaLayoutNode implements LayoutNode {
 
   getComputedPadding(edge: LayoutEdge): number {
     return this.yoga.getComputedPadding(EDGE_MAP[edge]!)
+  }
+
+  getOfferedWidth(width: number, height: number): number {
+    return this.yoga.getOfferedWidth(width, height)
+  }
+
+  isIntact(): boolean {
+    return isYogaNodeIntact(this.yoga)
   }
 
   // Style setters

@@ -33,7 +33,10 @@ import {
 } from '../../../packages/@ant/ink/src/core/dom.js';
 import { emptyFrame } from '../../../packages/@ant/ink/src/core/frame.js';
 import { InputGate } from '../../../packages/@ant/ink/src/core/inputGate.js';
-import instances from '../../../packages/@ant/ink/src/core/instances.js';
+import instances, {
+  bindInkSessionHost,
+  resetInkSessionHostForTests,
+} from '../../../packages/@ant/ink/src/core/instances.js';
 import {
   leftoverGsDecstbmOk,
   shiftCachedLayoutSubtree,
@@ -604,26 +607,52 @@ describe('UI 2.1.328 1:1 alignment fixes', () => {
     ink.unmount();
   });
 
-  test('Output.writeDirected right-aligns rtl lines within maxWidth', () => {
-    const stylePool = new StylePool();
-    const screen = {
-      width: 10,
-      height: 2,
-      stylePool,
-      charPool: new CharPool(),
-      hyperlinkPool: new HyperlinkPool(),
-    };
-    const out = new Output({
-      width: 10,
-      height: 2,
-      stylePool,
-      screen: emptyFrame(2, 10, stylePool, screen.charPool, screen.hyperlinkPool).screen,
-    });
-    out.writeDirected(0, 0, 'abc', undefined, 'rtl', 10);
-    const sc = out.get();
-    let line = '';
-    for (let x = 0; x < 10; x++) line += cellAt(sc, x, 0)?.char ?? ' ';
-    expect(line).toBe('       abc');
+  test('Output.writeDirected right-aligns rtl lines within maxWidth only when software BiDi is needed', () => {
+    const prevWt = process.env.WT_SESSION;
+    const prevTerm = process.env.TERM_PROGRAM;
+    try {
+      // Software BiDi host (WT_SESSION set): right-aligns RTL lines within maxWidth
+      process.env.WT_SESSION = 'test-wt-session';
+      const swHost = {};
+      bindInkSessionHost(() => swHost);
+      const stylePool = new StylePool();
+      const charPool = new CharPool();
+      const hyperlinkPool = new HyperlinkPool();
+      const out = new Output({
+        width: 10,
+        height: 2,
+        stylePool,
+        screen: emptyFrame(2, 10, stylePool, charPool, hyperlinkPool).screen,
+      });
+      out.writeDirected(0, 0, 'abc', undefined, 'rtl', 10);
+      const sc = out.get();
+      let line = '';
+      for (let x = 0; x < 10; x++) line += cellAt(sc, x, 0)?.char ?? ' ';
+      expect(line).toBe('       abc');
+
+      // Native BiDi host (WT_SESSION unset, TERM_PROGRAM !== vscode): delegates to write()
+      delete process.env.WT_SESSION;
+      process.env.TERM_PROGRAM = 'iTerm.app';
+      const nativeHost = {};
+      bindInkSessionHost(() => nativeHost);
+      const outNative = new Output({
+        width: 10,
+        height: 2,
+        stylePool,
+        screen: emptyFrame(2, 10, stylePool, charPool, hyperlinkPool).screen,
+      });
+      outNative.writeDirected(0, 0, 'abc', undefined, 'rtl', 10);
+      const scNative = outNative.get();
+      let nativeLine = '';
+      for (let x = 0; x < 10; x++) nativeLine += cellAt(scNative, x, 0)?.char ?? ' ';
+      expect(nativeLine).toBe('abc       ');
+    } finally {
+      resetInkSessionHostForTests();
+      if (prevWt === undefined) delete process.env.WT_SESSION;
+      else process.env.WT_SESSION = prevWt;
+      if (prevTerm === undefined) delete process.env.TERM_PROGRAM;
+      else process.env.TERM_PROGRAM = prevTerm;
+    }
   });
 
   test('isNewRendererEnabled honors CLAUDE_CODE_NEW_RENDERER env override', () => {

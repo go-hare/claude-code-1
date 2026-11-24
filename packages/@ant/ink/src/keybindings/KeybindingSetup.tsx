@@ -340,7 +340,7 @@ export function KeybindingSetup({
 
         case 'unbound':
           setPendingChord(null);
-          return true;
+          return wasInChord;
 
         case 'none':
           return false;

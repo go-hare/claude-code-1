@@ -49,7 +49,7 @@ import {
   hitTest,
   nodeHasWheelHandler,
 } from './hit-test.js';
-import instances, { Ns } from './instances.js';
+import { Ns } from './instances.js';
 import { FrameScheduler } from './frame-scheduler.js';
 import { LayoutController } from './layout-controller.js';
 import { LogUpdate } from './log-update.js';
@@ -71,6 +71,7 @@ import reconciler, {
   getLastCommitMs,
   isDebugRepaintsEnabled,
   recordYogaMs,
+  removeChildAndCleanup,
   resetProfileCounters,
 } from './reconciler.js';
 import renderNodeToOutput, { createRenderFrameContext, leftoverGsDropCachedLayout } from './render-node-to-output.js';
@@ -176,6 +177,7 @@ import {
 import {
   DEC,
   decreset,
+  decset,
   DFE,
   DISABLE_MOUSE_TRACKING,
   EFE,
@@ -277,7 +279,9 @@ function isBenchLiveCountsEnvEnabled(): boolean {
 }
 
 function isEnvTruthyLike(value: string | undefined): boolean {
-  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+  if (!value) return false;
+  const v = value.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 }
 
 /** densable `O` — gold `u().getPlatform()`; ctor only branches on `"windows"`. */
@@ -861,8 +865,9 @@ export default class Ink {
     // Unmount when process exits
     this.unsubscribeExit = onExit(this.unmount, { alwaysLast: false });
 
-    // densable: this.rootNode=_r("ink-root",hs.Config.create())
+    // densable: let C=hu.Config.create(); C.checksNumbers=!s.CLAUDE_CODE_DISABLE_LAYOUT_CHECK;
     const yogaConfig = Yoga.Config.create();
+    yogaConfig.checksNumbers = !isEnvTruthyLike(process.env.CLAUDE_CODE_DISABLE_LAYOUT_CHECK);
     this.rootNode = dom.createNode('ink-root', yogaConfig);
     this.layout = new LayoutController(this.rootNode, yogaConfig, {
       width: () => (this.options.stdout.isTTY || this.options.stdout.columns ? this.terminalColumns : undefined),
@@ -1219,12 +1224,12 @@ export default class Ink {
   }
 
   /**
-   * densable requestInputPriorityFrame — arm SSo interval for _So=50ms.
-   * Gold also ends an SR announcement hold (`pWe`) and drops held
-   * announcements so the next paint is not stuck behind the timer.
+   * Official 2.1.328 `requestInputPriorityFrame` — arm SSo interval for W7i=50ms.
+   * Also ends an SR announcement hold (`pWe`) and drops held announcements so
+   * the next paint is not stuck behind the timer.
    */
   requestInputPriorityFrame = (): void => {
-    this.scheduler.prioritizeInput(this.pacerNow() + 50);
+    this.scheduler.requestInputPriorityFrame(this.pacerNow() + 50);
     let dirty = false;
     if (this.srAnnouncementHoldTimer !== null) {
       endScreenReaderHold();
@@ -1253,17 +1258,32 @@ export default class Ink {
     if (episode.droppedBytes > 0) {
       const probe = episode.endedBy === 'drain';
       this.appRef.current?.querier?.resync({ probe });
-      if (!this.isFinishingWrites) {
-        if (probe) {
-          this.reassertTerminalModes();
-          this.forceRedraw();
-        } else {
-          this.repaint();
-        }
+      const resetForNewRenderer =
+        Boolean(this.renderers) && (probe || this.isFinishingWrites) && !this.isHandedOff && !this.isUnmounted;
+      if (resetForNewRenderer) {
+        this.writeKeptForNextFrame();
+        const mainScreenReset =
+          decreset(DEC.MOUSE_PIXELS) +
+          decset(DEC.MOUSE_SGR) +
+          decreset(DEC.MOUSE_SGR) +
+          decreset(DEC.MOUSE_ANY) +
+          decreset(DEC.MOUSE_BUTTON) +
+          decreset(DEC.MOUSE_NORMAL) +
+          EXIT_ALT_SCREEN;
+        this.options.stdout.write(
+          (this.altScreenActive ? this.modes.reassertFrom('altScreen') : mainScreenReset) + this.nativeCursorSeq,
+        );
+      }
+      if (probe || resetForNewRenderer) {
+        this.reassertTerminalModes();
+        this.forceRedraw();
+      } else {
+        this.repaint();
       }
     }
+    this.noteQueueWritten();
     if (episode.endedBy === 'drain') {
-      this.scheduler.resumeFromBacklog();
+      this.scheduler.releaseHeldFrame();
     }
     if (episode.droppedBytes > 0 || episode.durationMs >= 1000) {
       this.logger.debug(
@@ -1281,15 +1301,16 @@ export default class Ink {
     this.layout.notifyLayoutListeners();
   }
 
-  private static readonly MAX_UNWRITTEN_RETRIES = 3;
+  /** Official 2.1.328 `p2 = 2` — max post-retry unwritten frame attempts. */
+  private static readonly MAX_UNWRITTEN_RETRIES = 2;
 
   /**
-   * Official 2.1.327/328 `beginFrame`: snapshot displayed state (and inline /
-   * covering renderer state) before painting so a failed frame can be rolled
-   * back and retried cleanly instead of leaving the screen blank or frozen.
+   * Official 2.1.328 `beginFrame` (@409981): snapshot displayed state (and
+   * inline / covering renderer state) before painting so a failed frame can be
+   * rolled back and retried cleanly instead of leaving the screen blank/frozen.
    */
   private beginFrame(): void {
-    if (!this.options.stdout.isTTY) return;
+    if (!(this.renderers || this.unwritten) || !this.options.stdout.isTTY) return;
     this.renderers?.inline.frameBegins();
     this.renderers?.covering.frameBegins();
     this.unwritten = {
@@ -1389,6 +1410,7 @@ export default class Ink {
           this.onRender();
         } finally {
           this.isRedrawingAtOnce = false;
+          this.logger.error(err);
         }
       }
       if (this.unwritten?.isLost && !this.isRedrawingAtOnce) {
@@ -1408,9 +1430,7 @@ export default class Ink {
       this.ensureInteractive();
     }
     this.hasRendered = true;
-    this.scheduler.invalidatePendingMicrotask();
-    this.scheduler.cancelDrainFrame();
-    this.scheduler.cancelScheduledFrame();
+    this.scheduler.cancelExtraFrame();
 
     // densable: if(this.rootNode.layoutStale){ clear; stale winsize → handleResize
     // else onComputeLayout + flushSyncWork }. Re-layout after Ab subscribe.
@@ -1531,84 +1551,77 @@ export default class Ink {
     // still receives the frame. (Local empty-skips after external 2J remount
     // left the physical alt buffer black until a later content frame.)
     if (activeRenderers) {
-      let rendered: ReturnType<Ink['renderToBytes']> | undefined;
-      try {
-        rendered = this.renderToBytes(frame, terminalWidth, terminalRows, activeRenderers);
-      } catch (err) {
-        this.leaveNewRenderer(err instanceof Error ? err.message : String(err));
+      const rendered = this.renderToBytes(frame, terminalWidth, terminalRows, activeRenderers);
+      if (rendered.hasDiff) {
+        this.maybeProactiveAtlasReset(rendered.patches);
       }
-      if (rendered !== undefined) {
-        if (rendered.hasDiff) {
-          this.maybeProactiveAtlasReset(rendered.patches);
-        }
-        const itermSeq = this.placeItermForFrame(
-          frame,
-          rendered.before,
-          activeRenderers.inline.scrolledOutRows + activeRenderers.covering.countIn(frame) - (frame.top ?? 0),
-          terminalWidth,
-          terminalRows,
-          tmuxHost,
-          tmuxPane,
-          isTmuxPassthrough,
-        );
-        if (itermSeq !== '') {
-          rendered.patches.push({ type: 'stdout', content: itermSeq });
-        }
-        const pendingImages = this.terminalImages.drain();
-        if (pendingImages !== '') {
-          rendered.patches.unshift({ type: 'stdout', content: pendingImages });
-        }
-        const writeStart = performance.now();
-        this.leftAltScreenSinceFrame = false;
-        const kept = this.takeKeptForNextFrame();
-        if (this.unwritten) {
-          this.unwritten.beingWritten = kept + pendingImages;
-        }
-        const skipSync =
-          this.skipSyncMarkers() ||
-          (!rendered.mayTear && pendingImages === '' && itermSeq === '') ||
-          (isTmuxPassthrough && (this.terminalImages.size > 0 || pendingImages !== ''));
-        writeDiffToTerminal(this.terminal, rendered.patches, skipSync, terminalRows, kept);
-        if (this.isFrameOwed || (this.unwritten?.isLost && !this.isRedrawingAtOnce)) {
-          dom.stampFirstFrame(this.rootNode);
-          this.takesInputFrom = this.pressClock() + INPUT_RECOVERY_HOLD_MS;
-        }
-        this.unwritten = undefined;
-        this.isFrameOwed = false;
-        activeRenderers.fullscreen.frameWasWritten();
-        const writeMs = performance.now() - writeStart;
-        this.maybeResetPools(renderStart);
-        this.prevFrameContaminated = false;
-        this.repaintAfterStaleAbsolutePaint(frame);
-        if (frame.scrollDrainPending) {
-          this.scheduler.scheduleExtraFrame();
-        }
-        const yc = this.layout.takeYogaCounters();
-        const commitMs = this.rootNode.lastCommitMs ?? 0;
-        this.rootNode.lastCommitMs = 0;
-        this.rootNode.scrollCommitStartedAt = undefined;
-        resetProfileCounters();
-        if (rendered.hasDiff || frameLayoutShifted) this.followHover();
-        this.tellFrameListeners();
-        this.options.onFrame?.({
-          durationMs: performance.now() - renderStart,
-          flickers: rendered.flickers,
-          phases: {
-            renderer: rendererMs,
-            diff: rendered.diffMs,
-            optimize: 0,
-            write: writeMs,
-            patches: rendered.patches.length,
-            yoga: yc.ms,
-            commit: commitMs,
-            yogaVisited: yc.visited,
-            yogaMeasured: yc.measured,
-            yogaCacheHits: yc.cacheHits,
-            yogaLive: yc.live,
-          },
-        });
-        return;
+      const itermSeq = this.placeItermForFrame(
+        frame,
+        rendered.before,
+        activeRenderers.inline.scrolledOutRows + activeRenderers.covering.countIn(frame) - (frame.top ?? 0),
+        terminalWidth,
+        terminalRows,
+        tmuxHost,
+        tmuxPane,
+        isTmuxPassthrough,
+      );
+      if (itermSeq !== '') {
+        rendered.patches.push({ type: 'stdout', content: itermSeq });
       }
+      const pendingImages = this.terminalImages.drain();
+      if (pendingImages !== '') {
+        rendered.patches.unshift({ type: 'stdout', content: pendingImages });
+      }
+      const writeStart = performance.now();
+      this.leftAltScreenSinceFrame = false;
+      const kept = this.takeKeptForNextFrame();
+      if (this.unwritten) {
+        this.unwritten.beingWritten = kept + pendingImages;
+      }
+      const skipSync =
+        this.skipSyncMarkers() ||
+        (!rendered.mayTear && pendingImages === '' && itermSeq === '') ||
+        (isTmuxPassthrough && (this.terminalImages.size > 0 || pendingImages !== ''));
+      writeDiffToTerminal(this.terminal, rendered.patches, skipSync, terminalRows, kept);
+      if (this.isFrameOwed || (this.unwritten?.isLost && !this.isRedrawingAtOnce)) {
+        dom.stampFirstFrame(this.rootNode);
+        this.takesInputFrom = this.pressClock() + INPUT_RECOVERY_HOLD_MS;
+      }
+      this.unwritten = undefined;
+      this.isFrameOwed = false;
+      activeRenderers.fullscreen.frameWasWritten();
+      const writeMs = performance.now() - writeStart;
+      this.maybeResetPools(renderStart);
+      this.prevFrameContaminated = false;
+      this.repaintAfterStaleAbsolutePaint(frame);
+      if (frame.scrollDrainPending) {
+        this.scheduler.scheduleExtraFrame();
+      }
+      const yc = this.layout.takeYogaCounters();
+      const commitMs = this.rootNode.lastCommitMs ?? 0;
+      this.rootNode.lastCommitMs = 0;
+      this.rootNode.scrollCommitStartedAt = undefined;
+      resetProfileCounters();
+      if (rendered.hasDiff || frameLayoutShifted) this.followHover();
+      this.tellFrameListeners();
+      this.options.onFrame?.({
+        durationMs: performance.now() - renderStart,
+        flickers: rendered.flickers,
+        phases: {
+          renderer: rendererMs,
+          diff: rendered.diffMs,
+          optimize: 0,
+          write: writeMs,
+          patches: rendered.patches.length,
+          yoga: yc.ms,
+          commit: commitMs,
+          yogaVisited: yc.visited,
+          yogaMeasured: yc.measured,
+          yogaCacheHits: yc.cacheHits,
+          yogaLive: yc.live,
+        },
+      });
+      return;
     }
 
     if (
@@ -2737,15 +2750,28 @@ export default class Ink {
    * densable probeExternalClear(querier) — iTerm.app / Apple_Terminal only
    * (caller gates). 1-based clamp: `min(max(y+1,1), rows, emittedRows)`.
    * When rows===1 the clamp is always ≤1 so 1-row nvim never wipe-redraws.
+   * Official 2.1.328 (`chunk@306863829.js @423542`): sends ONLY CPR (`querier.send(query)`)
+   * without calling `querier.flush()`, avoiding 200ms DA1 sentinel injection & `owed()` leaks.
    */
-  async probeExternalClear(querier: TerminalQuerier): Promise<boolean> {
-    if (!this.altScreenActive || this.isPaused || this.isUnmounted) return false;
+  async probeExternalClear(querier: TerminalQuerier, signal?: AbortSignal): Promise<boolean> {
+    if (!this.altScreenActive || this.isHandedOff || this.isUnmounted || signal?.aborted) return false;
     const sent = this.displayCursor;
     if (!sent) return false;
     const rowOf = (cursor: { y: number; emittedRows: number }): number =>
       Math.min(Math.max(cursor.y + 1, 1), this.stdoutSize().rows, cursor.emittedRows);
     if (rowOf(sent) <= 1) return false;
-    const pos = await querier.send(cursorPositionQuery());
+    const query = cursorPositionQuery();
+    const onAbort = (): void => {
+      querier.cancel(query);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    let pos: { type: 'cursorPosition'; row: number; col: number } | undefined;
+    try {
+      pos = await querier.send(query);
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
+    if (signal?.aborted || !this.altScreenActive || this.isHandedOff || this.isUnmounted) return false;
     if (pos?.row !== 1) return false;
     const parked = this.displayCursor;
     if (parked === null || rowOf(parked) <= 1) return false;
@@ -4040,6 +4066,17 @@ export default class Ink {
   };
 
   /**
+   * Official 2.1.328 `takeBackTerminal()` (`chunk@306863829.js @440xxx`):
+   * called on a surviving `tree()` root when a React root on the same stdout
+   * unmounts and relinquishes terminal ownership.
+   */
+  takeBackTerminal(): void {
+    if (this.isUnmounted || this.isHandedOff) return;
+    this.repaint();
+    this.onRender();
+  }
+
+  /**
    * densable `tree()` — imperative DOM instead of React `render()`.
    * Gold: throws if render() already ran; then ensureInteractive + ownTree.
    */
@@ -4216,16 +4253,17 @@ export default class Ink {
     reconciler.flushSyncWork();
     if (this.ownTree) {
       for (const child of this.rootNode.childNodes.slice()) {
-        if (child.nodeName !== '#text') {
-          dom.removeChildNode(this.rootNode, child);
-        }
+        removeChildAndCleanup(this.rootNode, child);
       }
     }
     const registry = Ns();
     if (registry.treeRoots.get(this.options.stdout) === this) {
       registry.treeRoots.delete(this.options.stdout);
     }
-    instances.delete(this.options.stdout);
+    if (registry.get(this.options.stdout) === this) {
+      registry.delete(this.options.stdout);
+      registry.treeRoots.get(this.options.stdout)?.takeBackTerminal();
+    }
 
     // Free the root yoga node, then clear its reference. Children are already
     // freed by the reconciler's removeChildFromContainer; using .free() (not
