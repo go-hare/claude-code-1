@@ -88,19 +88,25 @@ export function Doctor({ onDone }: Props): React.ReactNode {
   }, [mcpTools]);
 
   const [diagnostic, setDiagnostic] = useState<DiagnosticInfo | null>(null);
+  const [diagnosticError, setDiagnosticError] = useState<string | null>(null);
   const [agentInfo, setAgentInfo] = useState<AgentInfo | null>(null);
   const [contextWarnings, setContextWarnings] = useState<ContextWarnings | null>(null);
   const [versionLockInfo, setVersionLockInfo] = useState<VersionLockInfo | null>(null);
   const validationErrors = useSettingsErrors();
 
+  // Deduplicate getDoctorDiagnostic() so diagnostics and dist-tags share a single fetch.
+  const diagnosticPromise = useMemo(() => getDoctorDiagnostic(), []);
+
   // Create promise once for dist-tags fetch (depends on diagnostic)
   const distTagsPromise = useMemo(
     () =>
-      getDoctorDiagnostic().then(diag => {
-        const fetchDistTags = diag.installationType === 'native' ? getGcsDistTags : getNpmDistTags;
-        return fetchDistTags().catch(() => ({ latest: null, stable: null }));
-      }),
-    [],
+      diagnosticPromise
+        .then(diag => {
+          const fetchDistTags = diag.installationType === 'native' ? getGcsDistTags : getNpmDistTags;
+          return fetchDistTags().catch(() => ({ latest: null, stable: null }));
+        })
+        .catch(() => ({ latest: null, stable: null })),
+    [diagnosticPromise],
   );
   const autoUpdatesChannel = getInitialSettings()?.autoUpdatesChannel ?? 'latest';
 
@@ -133,64 +139,95 @@ export function Doctor({ onDone }: Props): React.ReactNode {
       .filter(v => v.status !== 'valid');
   }, []);
 
+  // Run installation diagnostics and stale-lock cleanup once on mount (not on AppState churn).
   useEffect(() => {
-    void getDoctorDiagnostic().then(setDiagnostic);
+    let cancelled = false;
+    void diagnosticPromise
+      .then(diag => {
+        if (!cancelled) {
+          setDiagnostic(diag);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setDiagnosticError(err instanceof Error ? err.message : String(err));
+        }
+      });
 
-    void (async () => {
-      const userAgentsDir = join(getClaudeConfigHomeDir(), 'agents');
-      const projectAgentsDir = join(getOriginalCwd(), '.claude', 'agents');
-
-      const { activeAgents, allAgents, failedFiles } = agentDefinitions;
-
-      const [userDirExists, projectDirExists] = await Promise.all([
-        pathExists(userAgentsDir),
-        pathExists(projectAgentsDir),
-      ]);
-
-      const agentInfoData = {
-        activeAgents: activeAgents.map(a => ({
-          agentType: a.agentType,
-          source: a.source,
-        })),
-        userAgentsDir,
-        projectAgentsDir,
-        userDirExists,
-        projectDirExists,
-        failedFiles,
-      };
-      setAgentInfo(agentInfoData);
-
-      const warnings = await checkContextWarnings(
-        tools,
-        {
-          activeAgents,
-          allAgents,
-          failedFiles,
-        },
-        async () => toolPermissionContext,
-      );
-      setContextWarnings(warnings);
-
-      // Fetch version lock info if PID-based locking is enabled
-      if (isPidBasedLockingEnabled()) {
-        const locksDir = join(getXDGStateHome(), 'claude', 'locks');
-        const staleLocksCleaned = cleanupStaleLocks(locksDir);
-        const locks = getAllLockInfo(locksDir);
+    // Fetch version lock info if PID-based locking is enabled
+    if (isPidBasedLockingEnabled()) {
+      const locksDir = join(getXDGStateHome(), 'claude', 'locks');
+      const staleLocksCleaned = cleanupStaleLocks(locksDir);
+      const locks = getAllLockInfo(locksDir);
+      if (!cancelled) {
         setVersionLockInfo({
           enabled: true,
           locks,
           locksDir,
           staleLocksCleaned,
         });
-      } else {
-        setVersionLockInfo({
-          enabled: false,
-          locks: [],
-          locksDir: '',
-          staleLocksCleaned: 0,
-        });
+      }
+    } else if (!cancelled) {
+      setVersionLockInfo({
+        enabled: false,
+        locks: [],
+        locksDir: '',
+        staleLocksCleaned: 0,
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [diagnosticPromise]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const userAgentsDir = join(getClaudeConfigHomeDir(), 'agents');
+        const projectAgentsDir = join(getOriginalCwd(), '.claude', 'agents');
+
+        const { activeAgents, allAgents, failedFiles } = agentDefinitions;
+
+        const [userDirExists, projectDirExists] = await Promise.all([
+          pathExists(userAgentsDir),
+          pathExists(projectAgentsDir),
+        ]);
+        if (cancelled) return;
+
+        const agentInfoData = {
+          activeAgents: activeAgents.map(a => ({
+            agentType: a.agentType,
+            source: a.source,
+          })),
+          userAgentsDir,
+          projectAgentsDir,
+          userDirExists,
+          projectDirExists,
+          failedFiles,
+        };
+        setAgentInfo(agentInfoData);
+
+        const warnings = await checkContextWarnings(
+          tools,
+          {
+            activeAgents,
+            allAgents,
+            failedFiles,
+          },
+          async () => toolPermissionContext,
+        );
+        if (!cancelled) {
+          setContextWarnings(warnings);
+        }
+      } catch {
+        // Non-fatal: agent/context warnings are supplemental to core diagnostics.
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [toolPermissionContext, tools, agentDefinitions]);
 
   const handleDismiss = useCallback(() => {
@@ -205,6 +242,21 @@ export function Doctor({ onDone }: Props): React.ReactNode {
     },
     { context: 'Confirmation' },
   );
+
+  // Error state
+  if (diagnosticError && !diagnostic) {
+    return (
+      <Pane>
+        <Box flexDirection="column" gap={1}>
+          <Text bold color="error">
+            Diagnostics failed
+          </Text>
+          <Text color="error">{diagnosticError}</Text>
+          <PressEnterToContinue />
+        </Box>
+      </Pane>
+    );
+  }
 
   // Loading state
   if (!diagnostic) {

@@ -1,4 +1,4 @@
-import React, { Suspense, use, useDeferredValue, useEffect, useState } from 'react';
+import React, { Suspense, use, useDeferredValue, useEffect, useRef, useState } from 'react';
 import type { DeepImmutable } from 'src/types/utils.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { useElapsedTime } from '../../hooks/useElapsedTime.js';
@@ -49,8 +49,23 @@ export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props)
   // resolves, preventing the Suspense fallback from flickering.
   const [outputPromise, setOutputPromise] = useState<Promise<TaskOutputResult>>(() => getTaskOutput(shell));
   const deferredOutputPromise = useDeferredValue(outputPromise);
+  const wasRunningRef = useRef(shell.status === 'running');
+  const prevShellIdRef = useRef(shell.id);
 
   useEffect(() => {
+    if (prevShellIdRef.current !== shell.id) {
+      prevShellIdRef.current = shell.id;
+      wasRunningRef.current = shell.status === 'running';
+      setOutputPromise(getTaskOutput(shell));
+    } else if (shell.status !== 'running') {
+      if (wasRunningRef.current) {
+        wasRunningRef.current = false;
+        setOutputPromise(getTaskOutput(shell));
+      }
+      return;
+    } else {
+      wasRunningRef.current = true;
+    }
     if (shell.status !== 'running') {
       return;
     }

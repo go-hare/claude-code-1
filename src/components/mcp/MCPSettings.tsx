@@ -16,7 +16,14 @@ import { MCPRemoteServerMenu } from './MCPRemoteServerMenu.js';
 import { MCPStdioServerMenu } from './MCPStdioServerMenu.js';
 import { MCPToolDetailView } from './MCPToolDetailView.js';
 import { MCPToolListView } from './MCPToolListView.js';
-import type { AgentMcpServerInfo, MCPViewState, ServerInfo } from './types.js';
+import type { AgentMcpServerInfo, ServerInfo } from './types.js';
+
+type LocalMCPViewState =
+  | { type: 'list'; defaultTab?: string }
+  | { type: 'server-menu'; serverName: string; fallbackServer: ServerInfo }
+  | { type: 'server-tools'; serverName: string; fallbackServer: ServerInfo }
+  | { type: 'server-tool-detail'; serverName: string; fallbackServer: ServerInfo; toolName: string }
+  | { type: 'agent-server-menu'; agentServer: AgentMcpServerInfo };
 
 type Props = {
   onComplete: (result?: string, options?: { display?: CommandResultDisplay }) => void;
@@ -29,7 +36,7 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
   const mcp = useAppState(s => s.mcp);
   const agentDefinitions = useAppState(s => s.agentDefinitions);
   const mcpClients = mcp.clients;
-  const [viewState, setViewState] = React.useState<MCPViewState>({
+  const [viewState, setViewState] = React.useState<LocalMCPViewState>({
     type: 'list',
   });
   const [servers, setServers] = React.useState<ServerInfo[]>([]);
@@ -146,6 +153,27 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
     onComplete,
   ]);
 
+  const activeServer =
+    viewState.type === 'server-menu' || viewState.type === 'server-tools' || viewState.type === 'server-tool-detail'
+      ? (servers.find(s => s.name === viewState.serverName) ?? viewState.fallbackServer)
+      : null;
+
+  const detailTool =
+    viewState.type === 'server-tool-detail'
+      ? filterToolsByServer(mcp.tools, viewState.serverName).find(t => t.name === viewState.toolName)
+      : undefined;
+
+  // Move missing-tool fallback out of render into an effect so state updates stay pure.
+  useEffect(() => {
+    if (viewState.type === 'server-tool-detail' && !detailTool) {
+      setViewState({
+        type: 'server-tools',
+        serverName: viewState.serverName,
+        fallbackServer: activeServer ?? viewState.fallbackServer,
+      });
+    }
+  }, [viewState, detailTool, activeServer]);
+
   switch (viewState.type) {
     case 'list':
       return (
@@ -153,7 +181,9 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
           servers={servers}
           suppressedClaudeAiConnectors={suppressedClaudeAiConnectors}
           agentServers={agentMcpServers}
-          onSelectServer={server => setViewState({ type: 'server-menu', server })}
+          onSelectServer={server =>
+            setViewState({ type: 'server-menu', serverName: server.name, fallbackServer: server })
+          }
           onSelectAgentServer={(agentServer: AgentMcpServerInfo) =>
             setViewState({ type: 'agent-server-menu', agentServer })
           }
@@ -165,18 +195,19 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
       );
 
     case 'server-menu': {
-      const serverTools = filterToolsByServer(mcp.tools, viewState.server.name);
+      const server = activeServer ?? viewState.fallbackServer;
+      const serverTools = filterToolsByServer(mcp.tools, server.name);
 
-      const defaultTab = viewState.server.transport === 'claudeai-proxy' ? 'claude.ai' : 'Claude Code';
+      const defaultTab = server.transport === 'claudeai-proxy' ? 'claude.ai' : 'Claude Code';
 
-      if (viewState.server.transport === 'stdio') {
+      if (server.transport === 'stdio') {
         return (
           <MCPStdioServerMenu
-            server={viewState.server}
+            server={server}
             serverToolsCount={serverTools.length}
             onViewTools={() => {
               setLastToolSelection(null);
-              setViewState({ type: 'server-tools', server: viewState.server });
+              setViewState({ type: 'server-tools', serverName: server.name, fallbackServer: server });
             }}
             onCancel={() => setViewState({ type: 'list', defaultTab })}
             onComplete={onComplete}
@@ -185,11 +216,11 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
       } else {
         return (
           <MCPRemoteServerMenu
-            server={viewState.server}
+            server={server}
             serverToolsCount={serverTools.length}
             onViewTools={() => {
               setLastToolSelection(null);
-              setViewState({ type: 'server-tools', server: viewState.server });
+              setViewState({ type: 'server-tools', serverName: server.name, fallbackServer: server });
             }}
             onCancel={() => setViewState({ type: 'list', defaultTab })}
             onComplete={onComplete}
@@ -199,41 +230,41 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
     }
 
     case 'server-tools': {
-      const savedSelection = lastToolSelection?.serverName === viewState.server.name ? lastToolSelection : null;
+      const server = activeServer ?? viewState.fallbackServer;
+      const savedSelection = lastToolSelection?.serverName === server.name ? lastToolSelection : null;
       return (
         <MCPToolListView
-          server={viewState.server}
+          server={server}
           startOn={savedSelection?.toolName}
           defaultFocusIndex={savedSelection?.toolIndex}
           onSelectTool={(tool, index) => {
             setLastToolSelection({
-              serverName: viewState.server.name,
+              serverName: server.name,
               toolName: tool.name,
               toolIndex: index,
             });
             setViewState({
               type: 'server-tool-detail',
-              server: viewState.server,
-              toolIndex: index,
+              serverName: server.name,
+              fallbackServer: server,
+              toolName: tool.name,
             });
           }}
-          onBack={() => setViewState({ type: 'server-menu', server: viewState.server })}
+          onBack={() => setViewState({ type: 'server-menu', serverName: server.name, fallbackServer: server })}
         />
       );
     }
 
     case 'server-tool-detail': {
-      const serverTools = filterToolsByServer(mcp.tools, viewState.server.name);
-      const tool = serverTools[viewState.toolIndex];
-      if (!tool) {
-        setViewState({ type: 'server-tools', server: viewState.server });
+      const server = activeServer ?? viewState.fallbackServer;
+      if (!detailTool) {
         return null;
       }
       return (
         <MCPToolDetailView
-          tool={tool}
-          server={viewState.server}
-          onBack={() => setViewState({ type: 'server-tools', server: viewState.server })}
+          tool={detailTool}
+          server={server}
+          onBack={() => setViewState({ type: 'server-tools', serverName: server.name, fallbackServer: server })}
         />
       );
     }

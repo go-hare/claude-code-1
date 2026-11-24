@@ -46,8 +46,10 @@ export interface LaunchCommandOptions<TParsed, TViewProps> {
 
   /**
    * Perform the command operation.
-   * - Call onDone with the user-visible summary text.
-   * - Return the View props to render, or null to render nothing.
+   * - Call onDone with the complete human-readable summary text (processSlashCommand
+   *   skips mounting returned JSX once onDone has fired, so all user-visible fields
+   *   must be included in the onDone text).
+   * - Return the View props to render (used by tests or direct callers), or null.
    * - Throw to trigger the error path.
    */
   dispatch: (
@@ -55,6 +57,12 @@ export interface LaunchCommandOptions<TParsed, TViewProps> {
     onDone: LocalJSXCommandOnDone,
     context: ToolUseContext,
   ) => Promise<TViewProps | null>
+
+  /**
+   * Optional formatter turning returned View props into user-visible text when
+   * dispatch did not already call onDone directly.
+   */
+  formatSummary?: (viewProps: TViewProps) => string
 
   /**
    * React component rendered with the props returned by dispatch.
@@ -96,9 +104,21 @@ export function launchCommand<TParsed, TViewProps>(
     }
 
     // ── Dispatch ──────────────────────────────────────────────────────────────
+    let doneCalled = false
+    const trackedOnDone: LocalJSXCommandOnDone = (result, options) => {
+      doneCalled = true
+      onDone(result, options)
+    }
     try {
-      const viewProps = await opts.dispatch(parsed as TParsed, onDone, context)
+      const viewProps = await opts.dispatch(
+        parsed as TParsed,
+        trackedOnDone,
+        context,
+      )
       if (viewProps === null) return null
+      if (!doneCalled && opts.formatSummary) {
+        trackedOnDone(opts.formatSummary(viewProps), { display: 'system' })
+      }
       return React.createElement(
         opts.View as React.ComponentType<object>,
         viewProps as object,
@@ -106,7 +126,11 @@ export function launchCommand<TParsed, TViewProps>(
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       opts.onDispatchError?.(err)
-      onDone(`${opts.commandName} failed: ${msg}`, { display: 'system' })
+      if (!doneCalled) {
+        trackedOnDone(`${opts.commandName} failed: ${msg}`, {
+          display: 'system',
+        })
+      }
       return opts.errorView(msg)
     }
   }

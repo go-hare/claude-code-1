@@ -506,8 +506,11 @@ function PlanLimitsUsage({
   const [limitedBySignIn, setLimitedBySignIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const cancelledRef = React.useRef(false);
+  const loadSeqRef = React.useRef(0);
 
   const loadUtilization = React.useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setIsLoading(true);
     setError(null);
     setEnrichError(null);
@@ -528,9 +531,11 @@ function PlanLimitsUsage({
     setLimitedBySignIn(false);
     try {
       const data = await fetchUtilization();
+      if (cancelledRef.current || seq !== loadSeqRef.current) return;
       setUtilization(data);
       setEnrichError(null);
     } catch (err) {
+      if (cancelledRef.current || seq !== loadSeqRef.current) return;
       const axiosError = err as { response?: { status?: number; data?: unknown; headers?: Record<string, unknown> } };
       const isRateLimited = axiosError.response?.status === 429;
       const heldUntilMs = isRateLimited ? parseRetryAfterHeldUntilMs(axiosError.response?.headers) : undefined;
@@ -559,12 +564,18 @@ function PlanLimitsUsage({
       const responseBody = axiosError.response?.data ? jsonStringify(axiosError.response.data) : undefined;
       setError(responseBody ? `Failed to load usage data: ${responseBody}` : 'Failed to load usage data');
     } finally {
-      setIsLoading(false);
+      if (!cancelledRef.current && seq === loadSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
+    cancelledRef.current = false;
     void loadUtilization();
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [loadUtilization]);
 
   useKeybinding(

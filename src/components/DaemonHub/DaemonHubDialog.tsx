@@ -16,13 +16,15 @@
  *   service actions ← daemonMain(['uninstall'|'stop'])
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import * as React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, Pane, Tab, Tabs } from '@anthropic/ink';
 import { Select } from '../CustomSelect/select.js';
 import type { OptionWithDescription } from '../CustomSelect/select.js';
 import { PermissionDialog } from '../permissions/PermissionDialog.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
+import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { type CronTask, isCronTaskEnabled, listAllCronTasks } from '../../utils/cronTasks.js';
 import { cronToHuman } from '../../utils/cron.js';
 import { listRemoteControlServersWithStatus, type RemoteControlServerView } from '../../bridge/remoteControlServers.js';
@@ -72,6 +74,60 @@ type Nav =
   | { type: 'detail-remoteControl'; entry: RemoteControlServerView }
   | { type: 'new'; kind: 'scheduled' | 'remoteControl'; prefill?: CronTask };
 
+const serviceCaptureStorage = new AsyncLocalStorage<string[]>();
+let captureRefCount = 0;
+let savedConsoleLog: typeof console.log | null = null;
+let savedConsoleError: typeof console.error | null = null;
+let installedLogWrapper: typeof console.log | null = null;
+let installedErrorWrapper: typeof console.error | null = null;
+
+async function captureAsyncScopedConsole(fn: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  if (captureRefCount === 0) {
+    const origLog = console.log;
+    const origErr = console.error;
+    savedConsoleLog = origLog;
+    savedConsoleError = origErr;
+    installedLogWrapper = (...args: unknown[]) => {
+      const store = serviceCaptureStorage.getStore();
+      if (store) {
+        store.push(args.map(String).join(' '));
+      } else {
+        origLog(...args);
+      }
+    };
+    installedErrorWrapper = (...args: unknown[]) => {
+      const store = serviceCaptureStorage.getStore();
+      if (store) {
+        store.push(args.map(String).join(' '));
+      } else {
+        origErr(...args);
+      }
+    };
+    console.log = installedLogWrapper;
+    console.error = installedErrorWrapper;
+  }
+  captureRefCount++;
+  try {
+    await serviceCaptureStorage.run(lines, fn);
+  } finally {
+    captureRefCount--;
+    if (captureRefCount === 0) {
+      if (savedConsoleLog && console.log === installedLogWrapper) {
+        console.log = savedConsoleLog;
+      }
+      if (savedConsoleError && console.error === installedErrorWrapper) {
+        console.error = savedConsoleError;
+      }
+      savedConsoleLog = null;
+      savedConsoleError = null;
+      installedLogWrapper = null;
+      installedErrorWrapper = null;
+    }
+  }
+  return lines;
+}
+
 export function DaemonHubDialog({ onDone, initialData, defaultTab = 'scheduled' }: Props): React.ReactNode {
   useRegisterOverlay('daemon-hub');
   const [data, setData] = useState<DaemonHubData | null>(initialData ?? null);
@@ -82,13 +138,31 @@ export function DaemonHubDialog({ onDone, initialData, defaultTab = 'scheduled' 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const reloadSeqRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Allow Esc/cancel while loading or displaying a load error so the overlay never traps input.
+  useKeybinding('confirm:no', () => onDone(undefined, { display: 'skip' }), {
+    context: 'Confirmation',
+    isActive: nav.type === 'hub' && !data,
+  });
 
   const reload = useCallback(async () => {
+    const seq = ++reloadSeqRef.current;
     try {
       const next = await loadDaemonHubData();
+      if (!mountedRef.current || seq !== reloadSeqRef.current) return;
       setData(next);
       setLoadError(null);
     } catch (err) {
+      if (!mountedRef.current || seq !== reloadSeqRef.current) return;
       setLoadError(errorMessage(err));
     }
   }, []);
@@ -111,24 +185,20 @@ export function DaemonHubDialog({ onDone, initialData, defaultTab = 'scheduled' 
       setMessage(null);
       try {
         const { daemonMain } = await import('../../daemon/main.js');
-        // capture console like /daemon text path
-        const lines: string[] = [];
-        const origLog = console.log;
-        const origErr = console.error;
-        console.log = (...a: unknown[]) => lines.push(a.map(String).join(' '));
-        console.error = (...a: unknown[]) => lines.push(a.map(String).join(' '));
-        try {
+        const lines = await captureAsyncScopedConsole(async () => {
           await daemonMain([action]);
-        } finally {
-          console.log = origLog;
-          console.error = origErr;
-        }
+        });
+        if (!mountedRef.current) return;
         setMessage(lines.join('\n') || `${action} done.`);
         await reload();
       } catch (err) {
-        setMessage(`${action} failed: ${errorMessage(err)}`);
+        if (mountedRef.current) {
+          setMessage(`${action} failed: ${errorMessage(err)}`);
+        }
       } finally {
-        setBusy(false);
+        if (mountedRef.current) {
+          setBusy(false);
+        }
       }
     },
     [busy, reload],
@@ -182,8 +252,9 @@ export function DaemonHubDialog({ onDone, initialData, defaultTab = 'scheduled' 
   if (!data && !loadError) {
     return (
       <PermissionDialog title={DAEMON_HUB_TITLE}>
-        <Box paddingX={2} paddingY={1}>
+        <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
           <Text dimColor>Loading…</Text>
+          <Text dimColor>Esc to close</Text>
         </Box>
       </PermissionDialog>
     );
@@ -192,8 +263,9 @@ export function DaemonHubDialog({ onDone, initialData, defaultTab = 'scheduled' 
   if (loadError && !data) {
     return (
       <PermissionDialog title={DAEMON_HUB_TITLE} color="error">
-        <Box paddingX={2} paddingY={1}>
+        <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
           <Text color="error">{loadError}</Text>
+          <Text dimColor>Esc to close</Text>
         </Box>
       </PermissionDialog>
     );

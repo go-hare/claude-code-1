@@ -80,6 +80,14 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
   const [cursorOffset, setCursorOffset] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
   const [inFlight, setInFlight] = React.useState(false);
+  const mountedRef = React.useRef(true);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const transition = React.useCallback((next: VaultStep) => {
     setStep(next);
@@ -110,10 +118,18 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
           return;
         }
         if (choice.kind === 'list') {
+          setError(null);
           setInFlight(true);
-          void listKeys().then(keys => {
-            closeWith(formatKeyList(keys));
-          });
+          void listKeys()
+            .then(keys => {
+              if (!mountedRef.current) return;
+              closeWith(formatKeyList(keys));
+            })
+            .catch(e => {
+              if (!mountedRef.current) return;
+              setInFlight(false);
+              setError(`Failed to list secrets: ${e instanceof Error ? e.message : String(e)}`);
+            });
           return;
         }
         // Set / Get / Delete — collect key first
@@ -141,19 +157,35 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
       const ch = input.toLowerCase();
       if (ch === 'y' || key.return) {
         if (step.kind === 'confirm-delete') {
+          setError(null);
           setInFlight(true);
           const key = step.key;
-          void deleteSecret(key).then(removed => {
-            closeWith(removed ? `Deleted: ${key}` : `Key not found: ${key}`);
-          });
+          void deleteSecret(key)
+            .then(removed => {
+              if (!mountedRef.current) return;
+              closeWith(removed ? `Deleted: ${key}` : `Key not found: ${key}`);
+            })
+            .catch(e => {
+              if (!mountedRef.current) return;
+              setInFlight(false);
+              setError(`Failed to delete ${key}: ${e instanceof Error ? e.message : String(e)}`);
+            });
         } else {
           // confirm-overwrite — proceed with setSecret
+          setError(null);
           setInFlight(true);
           const k = step.key;
           const v = step.value;
           void setSecret(k, v)
-            .then(() => closeWith(`Secret stored: ${k} = [REDACTED]`))
-            .catch(e => closeWith(`Failed to store ${k}: ${e instanceof Error ? e.message : String(e)}`));
+            .then(() => {
+              if (!mountedRef.current) return;
+              closeWith(`Secret stored: ${k} = [REDACTED]`);
+            })
+            .catch(e => {
+              if (!mountedRef.current) return;
+              setInFlight(false);
+              setError(`Failed to store ${k}: ${e instanceof Error ? e.message : String(e)}`);
+            });
         }
       } else if (ch === 'n') {
         transition({ kind: 'menu' });
@@ -194,14 +226,22 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
     }
     if (step.kind !== 'collect-key') return;
     if (step.action === 'get') {
+      setError(null);
       setInFlight(true);
-      void getSecret(key).then(v => {
-        if (v === null) {
-          closeWith(`Key not found: ${key}`);
-        } else {
-          closeWith(`Key found: ${key} = ${maskSecret(v)}`);
-        }
-      });
+      void getSecret(key)
+        .then(v => {
+          if (!mountedRef.current) return;
+          if (v === null) {
+            closeWith(`Key not found: ${key}`);
+          } else {
+            closeWith(`Key found: ${key} = ${maskSecret(v)}`);
+          }
+        })
+        .catch(e => {
+          if (!mountedRef.current) return;
+          setInFlight(false);
+          setError(`Failed to read ${key}: ${e instanceof Error ? e.message : String(e)}`);
+        });
       return;
     }
     if (step.action === 'delete') {
@@ -222,9 +262,11 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
     }
     const k = step.key;
     // Check overwrite
+    setError(null);
     setInFlight(true);
     void getSecret(k)
       .then(existing => {
+        if (!mountedRef.current) return;
         if (existing !== null) {
           // Need confirmation
           setInFlight(false);
@@ -235,9 +277,16 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
           });
           return;
         }
-        return setSecret(k, rawValue).then(() => closeWith(`Secret stored: ${k} = [REDACTED]`));
+        return setSecret(k, rawValue).then(() => {
+          if (!mountedRef.current) return;
+          closeWith(`Secret stored: ${k} = [REDACTED]`);
+        });
       })
-      .catch(e => closeWith(`Failed to store ${k}: ${e instanceof Error ? e.message : String(e)}`));
+      .catch(e => {
+        if (!mountedRef.current) return;
+        setInFlight(false);
+        setError(`Failed to store ${k}: ${e instanceof Error ? e.message : String(e)}`);
+      });
   };
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -247,6 +296,7 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
         title="Local Vault"
         subtitle={`${VAULT_MENU.length} actions`}
         onCancel={() => closeWith('Local vault panel dismissed')}
+        isCancelActive={step.kind === 'menu' && !inFlight}
         color="background"
         hideInputGuide
       >
@@ -257,6 +307,11 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
               <Text dimColor>{m.description}</Text>
             </Box>
           ))}
+          {error !== null && (
+            <Box marginTop={1}>
+              <Text color="warning">✗ {error}</Text>
+            </Box>
+          )}
           {inFlight && (
             <Box marginTop={1}>
               <Text dimColor>Working...</Text>
@@ -272,12 +327,23 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
 
   if (step.kind === 'confirm-delete') {
     return (
-      <Dialog title="Confirm Delete" onCancel={() => transition({ kind: 'menu' })} color="warning" hideInputGuide>
+      <Dialog
+        title="Confirm Delete"
+        onCancel={() => transition({ kind: 'menu' })}
+        isCancelActive={false}
+        color="warning"
+        hideInputGuide
+      >
         <Box flexDirection="column">
           <Text>Delete secret "{step.key}"? This cannot be undone.</Text>
           <Box marginTop={1}>
             <Text dimColor>y/Enter = delete · n/Esc = cancel</Text>
           </Box>
+          {error !== null && (
+            <Box marginTop={1}>
+              <Text color="warning">✗ {error}</Text>
+            </Box>
+          )}
           {inFlight && <Text dimColor>Deleting...</Text>}
         </Box>
       </Dialog>
@@ -286,12 +352,23 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
 
   if (step.kind === 'confirm-overwrite') {
     return (
-      <Dialog title="Confirm Overwrite" onCancel={() => transition({ kind: 'menu' })} color="warning" hideInputGuide>
+      <Dialog
+        title="Confirm Overwrite"
+        onCancel={() => transition({ kind: 'menu' })}
+        isCancelActive={false}
+        color="warning"
+        hideInputGuide
+      >
         <Box flexDirection="column">
           <Text>Secret "{step.key}" already exists. Overwrite? Old value is lost.</Text>
           <Box marginTop={1}>
             <Text dimColor>y/Enter = overwrite · n/Esc = cancel</Text>
           </Box>
+          {error !== null && (
+            <Box marginTop={1}>
+              <Text color="warning">✗ {error}</Text>
+            </Box>
+          )}
           {inFlight && <Text dimColor>Storing...</Text>}
         </Box>
       </Dialog>
@@ -307,6 +384,7 @@ function LocalVaultPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.R
     <Dialog
       title={`Local Vault · ${step.kind === 'collect-key' ? 'KEY' : 'VALUE'}`}
       onCancel={() => transition({ kind: 'menu' })}
+      isCancelActive={false}
       color="background"
       hideInputGuide
     >

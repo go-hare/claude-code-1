@@ -105,6 +105,8 @@ export function MCPRemoteServerMenu({
   const copyUrl = authorizationUrl || claudeAIAuthUrl || claudeAIClearAuthUrl;
   const { copiedVia, copy: copyViaClipboard } = useMcpCopiedVia(copyUrl);
   const unmountedRef = useRef(false);
+  const isClearingClaudeAIAuthRef = useRef(false);
+  const isClearingAuthRef = useRef(false);
   const [callbackUrlInput, setCallbackUrlInput] = useState('');
   const [callbackUrlCursorOffset, setCallbackUrlCursorOffset] = useState(0);
   const [manualCallbackSubmit, setManualCallbackSubmit] = useState<((url: string) => void) | null>(null);
@@ -113,13 +115,13 @@ export function MCPRemoteServerMenu({
   // navigates away before ours fires), abort the OAuth flow so the callback
   // server is closed. Without this, the server stays bound and the process
   // can outlive the terminal. Copy-via timers live in ZW / useMcpCopiedVia.
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
       unmountedRef.current = true;
       authAbortControllerRef.current?.abort();
-    },
-    [],
-  );
+    };
+  }, []);
 
   // Gold `Gn` / `xn` (#1264): a connected remote server is only effectively
   // authenticated if it has OAuth tokens or sends credentials (headers/helper/XAA).
@@ -145,6 +147,7 @@ export function MCPRemoteServerMenu({
     setIsReconnecting(true);
     try {
       const result = await reconnectMcpServer(server.name);
+      if (unmountedRef.current) return;
       const success = result.client.type === 'connected';
       logEvent('tengu_claudeai_mcp_auth_completed', { success });
       if (success) {
@@ -159,44 +162,54 @@ export function MCPRemoteServerMenu({
         );
       }
     } catch (err) {
+      if (unmountedRef.current) return;
       logEvent('tengu_claudeai_mcp_auth_completed', { success: false });
       onComplete?.(handleReconnectError(err, server.name));
     } finally {
-      setIsReconnecting(false);
+      if (!unmountedRef.current) {
+        setIsReconnecting(false);
+      }
     }
   }, [reconnectMcpServer, server.name, onComplete]);
 
   const handleClaudeAIClearAuthComplete = React.useCallback(async () => {
-    await clearServerCache(server.name, {
-      ...server.config,
-      scope: server.scope,
-    });
+    if (isClearingClaudeAIAuthRef.current) return;
+    isClearingClaudeAIAuthRef.current = true;
+    try {
+      await clearServerCache(server.name, {
+        ...server.config,
+        scope: server.scope,
+      });
+      if (unmountedRef.current) return;
 
-    setAppState(prev => {
-      const newClients = prev.mcp.clients.map(c =>
-        c.name === server.name ? { ...c, type: 'needs-auth' as const } : c,
-      );
-      const newTools = excludeToolsByServer(prev.mcp.tools, server.name);
-      const newCommands = excludeCommandsByServer(prev.mcp.commands, server.name);
-      const newResources = excludeResourcesByServer(prev.mcp.resources, server.name);
+      setAppState(prev => {
+        const newClients = prev.mcp.clients.map(c =>
+          c.name === server.name ? { ...c, type: 'needs-auth' as const } : c,
+        );
+        const newTools = excludeToolsByServer(prev.mcp.tools, server.name);
+        const newCommands = excludeCommandsByServer(prev.mcp.commands, server.name);
+        const newResources = excludeResourcesByServer(prev.mcp.resources, server.name);
 
-      return {
-        ...prev,
-        mcp: {
-          ...prev.mcp,
-          clients: newClients,
-          tools: newTools,
-          commands: newCommands,
-          resources: newResources,
-        },
-      };
-    });
+        return {
+          ...prev,
+          mcp: {
+            ...prev.mcp,
+            clients: newClients,
+            tools: newTools,
+            commands: newCommands,
+            resources: newResources,
+          },
+        };
+      });
 
-    logEvent('tengu_claudeai_mcp_clear_auth_completed', {});
-    onComplete?.(`Disconnected from ${server.name}.`);
-    setIsClaudeAIClearingAuth(false);
-    setClaudeAIClearAuthUrl(null);
-    setClaudeAIClearAuthBrowserOpened(false);
+      logEvent('tengu_claudeai_mcp_clear_auth_completed', {});
+      onComplete?.(`Disconnected from ${server.name}.`);
+      setIsClaudeAIClearingAuth(false);
+      setClaudeAIClearAuthUrl(null);
+      setClaudeAIClearAuthBrowserOpened(false);
+    } finally {
+      isClearingClaudeAIAuthRef.current = false;
+    }
   }, [server.name, server.config, server.scope, setAppState, onComplete]);
 
   // Escape to cancel authentication flow
@@ -312,6 +325,7 @@ export function MCPRemoteServerMenu({
 
     try {
       await toggleMcpServer(server.name);
+      if (unmountedRef.current) return;
 
       if (server.config.type === 'claudeai-proxy') {
         logEvent('tengu_claudeai_mcp_toggle', {
@@ -324,11 +338,14 @@ export function MCPRemoteServerMenu({
       // Return to the server list so user can continue managing other servers
       onCancel();
     } catch (err) {
+      if (unmountedRef.current) return;
       const action = wasEnabled ? 'disable' : 'enable';
       onComplete?.(`Failed to ${action} MCP server '${server.name}': ${errorMessage(err)}`);
     } finally {
       isTogglingRef.current = false;
-      setTogglingAction(null);
+      if (!unmountedRef.current) {
+        setTogglingAction(null);
+      }
     }
   }, [server.client.type, server.config.type, server.name, toggleMcpServer, onCancel, onComplete]);
 
@@ -356,22 +373,38 @@ export function MCPRemoteServerMenu({
         const previousTokens = server.isAuthenticated
           ? await snapshotMcpOAuthTokens(server.name, server.config)
           : undefined;
+        if (unmountedRef.current) return;
 
-        await performMCPOAuthFlow(server.name, server.config, setAuthorizationUrl, controller.signal, {
-          onWaitingForCallback: submit => {
-            setManualCallbackSubmit(() => submit);
+        await performMCPOAuthFlow(
+          server.name,
+          server.config,
+          url => {
+            if (!unmountedRef.current) {
+              setAuthorizationUrl(url);
+            }
           },
-        });
+          controller.signal,
+          {
+            onWaitingForCallback: submit => {
+              if (!unmountedRef.current) {
+                setManualCallbackSubmit(() => submit);
+              }
+            },
+          },
+        );
+        if (unmountedRef.current) return;
 
         logEvent('tengu_mcp_auth_config_authenticate', {
           wasAuthenticated: server.isAuthenticated,
         });
 
         const result = await reconnectMcpServer(server.name);
+        if (unmountedRef.current) return;
 
         if (result.client.type === 'connected') {
           if (previousTokens) {
             await revokeReplacedMcpTokens(server.name, server.config, previousTokens);
+            if (unmountedRef.current) return;
           }
           const message = isEffectivelyAuthenticated
             ? `Authentication successful. Reconnected to ${server.name}.`
@@ -397,77 +430,90 @@ export function MCPRemoteServerMenu({
         }
       }
     } catch (err) {
+      if (unmountedRef.current) return;
       // Don't show error if it was a cancellation
       if (err instanceof Error && !(err instanceof AuthenticationCancelledError)) {
         setError(err.message);
       }
     } finally {
-      setIsAuthenticating(false);
       authAbortControllerRef.current = null;
-      setManualCallbackSubmit(null);
-      setCallbackUrlInput('');
+      if (!unmountedRef.current) {
+        setIsAuthenticating(false);
+        setManualCallbackSubmit(null);
+        setCallbackUrlInput('');
+      }
     }
   }, [server.isAuthenticated, server.config, server.name, onComplete, reconnectMcpServer, isEffectivelyAuthenticated]);
 
   const handleClearAuth = async () => {
     if (server.config.type === 'claudeai-proxy') return;
+    if (isClearingAuthRef.current) return;
+    isClearingAuthRef.current = true;
 
-    if (server.config) {
-      // First revoke the authentication tokens and clear all auth state
-      const revokeResult = await revokeServerTokens(server.name, server.config);
-      if (!revokeResult.cleared) {
-        onComplete?.(
-          `Authentication for ${server.name} was not cleared: sign-in data is still stored, or the credential store could not be read. Try Clear authentication again.`,
-        );
-        return;
-      }
-      logEvent('tengu_mcp_auth_config_clear', {});
-
-      // Disconnect the client and clear the cache
-      await clearServerCache(server.name, {
-        ...server.config,
-        scope: server.scope,
-      });
-
-      // Update app state to remove the disconnected server's tools, commands, and resources
-      setAppState(prev => {
-        const newClients = prev.mcp.clients.map(c =>
-          // 'failed' is a misnomer here, but we don't really differentiate between "not connected" and "failed" at the moment
-          c.name === server.name ? { ...c, type: 'failed' as const } : c,
-        );
-        const newTools = excludeToolsByServer(prev.mcp.tools, server.name);
-        const newCommands = excludeCommandsByServer(prev.mcp.commands, server.name);
-        const newResources = excludeResourcesByServer(prev.mcp.resources, server.name);
-
-        return {
-          ...prev,
-          mcp: {
-            ...prev.mcp,
-            clients: newClients,
-            tools: newTools,
-            commands: newCommands,
-            resources: newResources,
-          },
-        };
-      });
-
-      // Gold #1263: if the server was connected/needs-auth, dial without OAuth
-      // so servers that work without sign-in reconnect as connected instead of
-      // remaining marked failed.
-      if (server.client.type !== 'failed' && server.client.type !== 'disabled' && 'url' in server.config) {
-        dialedWithoutOAuth.set(server.name, server.config.url);
-        try {
-          const result = await reconnectMcpServer(server.name);
-          if (result.client.type === 'connected') {
-            onComplete?.(`Authentication cleared for ${server.name}. Connected without sign-in.`);
-            return;
-          }
-        } catch {
-          // Fall through to default clear message if reconnect fails
+    try {
+      if (server.config) {
+        // First revoke the authentication tokens and clear all auth state
+        const revokeResult = await revokeServerTokens(server.name, server.config);
+        if (unmountedRef.current) return;
+        if (!revokeResult.cleared) {
+          onComplete?.(
+            `Authentication for ${server.name} was not cleared: sign-in data is still stored, or the credential store could not be read. Try Clear authentication again.`,
+          );
+          return;
         }
-      }
+        logEvent('tengu_mcp_auth_config_clear', {});
 
-      onComplete?.(`Authentication cleared for ${server.name}.`);
+        // Disconnect the client and clear the cache
+        await clearServerCache(server.name, {
+          ...server.config,
+          scope: server.scope,
+        });
+        if (unmountedRef.current) return;
+
+        // Update app state to remove the disconnected server's tools, commands, and resources
+        setAppState(prev => {
+          const newClients = prev.mcp.clients.map(c =>
+            // 'failed' is a misnomer here, but we don't really differentiate between "not connected" and "failed" at the moment
+            c.name === server.name ? { ...c, type: 'failed' as const } : c,
+          );
+          const newTools = excludeToolsByServer(prev.mcp.tools, server.name);
+          const newCommands = excludeCommandsByServer(prev.mcp.commands, server.name);
+          const newResources = excludeResourcesByServer(prev.mcp.resources, server.name);
+
+          return {
+            ...prev,
+            mcp: {
+              ...prev.mcp,
+              clients: newClients,
+              tools: newTools,
+              commands: newCommands,
+              resources: newResources,
+            },
+          };
+        });
+
+        // Gold #1263: if the server was connected/needs-auth, dial without OAuth
+        // so servers that work without sign-in reconnect as connected instead of
+        // remaining marked failed.
+        if (server.client.type !== 'failed' && server.client.type !== 'disabled' && 'url' in server.config) {
+          dialedWithoutOAuth.set(server.name, server.config.url);
+          try {
+            const result = await reconnectMcpServer(server.name);
+            if (unmountedRef.current) return;
+            if (result.client.type === 'connected') {
+              onComplete?.(`Authentication cleared for ${server.name}. Connected without sign-in.`);
+              return;
+            }
+          } catch {
+            if (unmountedRef.current) return;
+            // Fall through to default clear message if reconnect fails
+          }
+        }
+
+        onComplete?.(`Authentication cleared for ${server.name}.`);
+      }
+    } finally {
+      isClearingAuthRef.current = false;
     }
   };
 
@@ -883,6 +929,7 @@ export function MCPRemoteServerMenu({
                   setIsReconnecting(true);
                   try {
                     const result = await reconnectMcpServer(server.name);
+                    if (unmountedRef.current) return;
                     if (server.config.type === 'claudeai-proxy') {
                       logEvent('tengu_claudeai_mcp_reconnect', {
                         success: result.client.type === 'connected',
@@ -895,6 +942,7 @@ export function MCPRemoteServerMenu({
                     });
                     onComplete?.(message);
                   } catch (err) {
+                    if (unmountedRef.current) return;
                     if (server.config.type === 'claudeai-proxy') {
                       logEvent('tengu_claudeai_mcp_reconnect', {
                         success: false,
@@ -902,7 +950,9 @@ export function MCPRemoteServerMenu({
                     }
                     onComplete?.(handleReconnectError(err, server.name));
                   } finally {
-                    setIsReconnecting(false);
+                    if (!unmountedRef.current) {
+                      setIsReconnecting(false);
+                    }
                   }
                   break;
                 case 'toggle-enabled':

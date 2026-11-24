@@ -3,12 +3,48 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js';
-import { parseCronExpression } from '../../utils/cron.js';
+import { cronToHuman, parseCronExpression } from '../../utils/cron.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
-import { createTrigger, deleteTrigger, getTrigger, listTriggers, runTrigger, updateTrigger } from './triggersApi.js';
+import {
+  createTrigger,
+  deleteTrigger,
+  getTrigger,
+  listTriggers,
+  runTrigger,
+  type Trigger,
+  type UpdateTriggerBody,
+  updateTrigger,
+} from './triggersApi.js';
 import { ScheduleView } from './ScheduleView.js';
 import { parseScheduleArgs } from './parseArgs.js';
-import type { UpdateTriggerBody } from './triggersApi.js';
+
+function formatTriggerRow(trigger: Trigger): string {
+  const schedule = cronToHuman(trigger.cron_expression, { utc: true });
+  const status = trigger.enabled ? 'enabled' : 'disabled';
+  const agentPart = trigger.agent_id ? ` · agent: ${trigger.agent_id}` : '';
+  const nextRun = trigger.next_run ? new Date(trigger.next_run).toLocaleString() : '—';
+  return [
+    `- ${trigger.trigger_id} · ${status}${agentPart}`,
+    `  Schedule: ${schedule} (${trigger.cron_expression})`,
+    `  Prompt: ${trigger.prompt}`,
+    `  Next run: ${nextRun}`,
+  ].join('\n');
+}
+
+function formatTriggerDetail(trigger: Trigger): string {
+  const schedule = cronToHuman(trigger.cron_expression, { utc: true });
+  const lines = [
+    `ID: ${trigger.trigger_id}`,
+    `Status: ${trigger.enabled ? 'enabled' : 'disabled'}`,
+    `Schedule: ${schedule} (${trigger.cron_expression})`,
+  ];
+  if (trigger.agent_id) lines.push(`Agent: ${trigger.agent_id}`);
+  lines.push(`Next run: ${trigger.next_run ? new Date(trigger.next_run).toLocaleString() : '—'}`);
+  if (trigger.last_run) lines.push(`Last run: ${new Date(trigger.last_run).toLocaleString()}`);
+  lines.push(`Prompt: ${trigger.prompt}`);
+  if (trigger.created_at) lines.push(`Created: ${new Date(trigger.created_at).toLocaleString()}`);
+  return lines.join('\n');
+}
 
 export const callSchedule: LocalJSXCommandCall = async (onDone, _context, args) => {
   logEvent('tengu_schedule_started', {
@@ -34,9 +70,12 @@ export const callSchedule: LocalJSXCommandCall = async (onDone, _context, args) 
     logEvent('tengu_schedule_list', {});
     try {
       const triggers = await listTriggers();
-      onDone(triggers.length === 0 ? 'No scheduled triggers found.' : `${triggers.length} scheduled trigger(s).`, {
-        display: 'system',
-      });
+      onDone(
+        triggers.length === 0
+          ? 'No scheduled triggers found. Use /schedule create <cron> <prompt> to create one.'
+          : `${triggers.length} scheduled trigger(s).\n${triggers.map(formatTriggerRow).join('\n')}`,
+        { display: 'system' },
+      );
       return React.createElement(ScheduleView, { mode: 'list', triggers });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -56,7 +95,7 @@ export const callSchedule: LocalJSXCommandCall = async (onDone, _context, args) 
     });
     try {
       const trigger = await getTrigger(id);
-      onDone(`Trigger ${id} fetched.`, { display: 'system' });
+      onDone(`Trigger ${id} fetched.\n${formatTriggerDetail(trigger)}`, { display: 'system' });
       return React.createElement(ScheduleView, { mode: 'detail', trigger });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -87,7 +126,7 @@ export const callSchedule: LocalJSXCommandCall = async (onDone, _context, args) 
     });
     try {
       const trigger = await createTrigger({ cron_expression: cron, prompt });
-      onDone(`Trigger created: ${trigger.trigger_id}`, { display: 'system' });
+      onDone(`Trigger created: ${trigger.trigger_id}\n${formatTriggerDetail(trigger)}`, { display: 'system' });
       return React.createElement(ScheduleView, { mode: 'created', trigger });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -131,7 +170,7 @@ export const callSchedule: LocalJSXCommandCall = async (onDone, _context, args) 
 
     try {
       const trigger = await updateTrigger(id, body);
-      onDone(`Trigger ${id} updated.`, { display: 'system' });
+      onDone(`Trigger ${id} updated.\n${formatTriggerDetail(trigger)}`, { display: 'system' });
       return React.createElement(ScheduleView, { mode: 'updated', trigger });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

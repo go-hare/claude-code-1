@@ -37,6 +37,8 @@ import {
   supportsExtendedKeys,
 } from '@anthropic/ink';
 import { createRoot } from '../utils/inkRoot.js';
+import { wrapWithSessionServices } from '../context/sessionServices.js';
+import { getPinnedStorageV5 } from '../utils/storageV5/index.js';
 import { AppStateProvider } from '../state/AppState.js';
 import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
 import { useNotifications } from '../context/notifications.js';
@@ -292,6 +294,121 @@ export function findNonHeaderRowIndex(rows: ReadonlyArray<{ kind: string }>, pre
     if (rows[i]?.kind !== 'header') return i;
   }
   return clamped;
+}
+
+/**
+ * Combine AgentView CLI dispatch defaults with interactive `/model`, `/effort`,
+ * and `/fast` session overrides so every spawn/relaunch path honors them.
+ */
+export function buildFleetSessionExtraArgs(opts: {
+  dispatchDefaults?: FleetDispatchDefaults;
+  dispatchExtraArgs?: readonly string[];
+  sessionModel?: string;
+  sessionEffort?: string;
+  sessionFastMode?: boolean;
+}): {
+  effectiveDefaults: FleetDispatchDefaults | undefined;
+  relaunchExtraArgs: string[];
+  spawnExtraArgs: string[];
+} {
+  const effectiveDefaults: FleetDispatchDefaults | undefined =
+    opts.sessionModel === undefined && opts.sessionEffort === undefined
+      ? opts.dispatchDefaults
+      : {
+          ...opts.dispatchDefaults,
+          ...(opts.sessionModel !== undefined ? { model: opts.sessionModel } : {}),
+          ...(opts.sessionEffort !== undefined ? { effort: opts.sessionEffort } : {}),
+        };
+
+  const relaunchExtraArgs = fleetUpExtraArgs(opts.dispatchExtraArgs);
+  if (opts.sessionFastMode !== undefined) {
+    let mergedInlineSettings = false;
+    for (let i = 0; i < relaunchExtraArgs.length; i++) {
+      const arg = relaunchExtraArgs[i]!;
+      if (arg === '--settings' && i + 1 < relaunchExtraArgs.length) {
+        const val = relaunchExtraArgs[i + 1]!.trim();
+        if (val.startsWith('{') && val.endsWith('}')) {
+          try {
+            const parsed = JSON.parse(val) as Record<string, unknown>;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              relaunchExtraArgs[i + 1] = JSON.stringify({ ...parsed, fastMode: opts.sessionFastMode });
+              mergedInlineSettings = true;
+              break;
+            }
+          } catch {
+            // Fall through and append a separate --settings JSON arg
+          }
+        }
+      } else if (arg.startsWith('--settings=')) {
+        const val = arg.slice('--settings='.length).trim();
+        if (val.startsWith('{') && val.endsWith('}')) {
+          try {
+            const parsed = JSON.parse(val) as Record<string, unknown>;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              relaunchExtraArgs[i] = `--settings=${JSON.stringify({ ...parsed, fastMode: opts.sessionFastMode })}`;
+              mergedInlineSettings = true;
+              break;
+            }
+          } catch {
+            // Fall through
+          }
+        }
+      }
+    }
+    if (!mergedInlineSettings) {
+      relaunchExtraArgs.push('--settings', JSON.stringify({ fastMode: opts.sessionFastMode }));
+    }
+  }
+
+  return {
+    effectiveDefaults,
+    relaunchExtraArgs,
+    spawnExtraArgs: [...serializeFleetDispatchDefaults(effectiveDefaults), ...relaunchExtraArgs],
+  };
+}
+
+/**
+ * Stable identity key for tracking pinned sessions across refreshes.
+ */
+function pinnedSessionKey(session: SessionEntry): string {
+  return session.short ?? session.sessionId ?? '';
+}
+
+/**
+ * Find the first previously-pinned live (`pid > 0`) session that genuinely vanished
+ * without being deleted, archived, unpinned, or a `pid === 0` startup placeholder.
+ */
+export function findPinnedSessionToAutoRelaunch(opts: {
+  previousPinned: ReadonlyMap<string, SessionEntry>;
+  currentSessions: readonly SessionEntry[];
+  userRemovedIds: ReadonlySet<string>;
+  deletedJobIds: ReadonlySet<string>;
+  deletedSessionIds: ReadonlySet<string>;
+}): SessionEntry | null {
+  const { previousPinned, currentSessions, userRemovedIds, deletedJobIds, deletedSessionIds } = opts;
+  const currentByKey = new Map<string, SessionEntry>();
+  const currentLivePids = new Set<number>();
+  for (const s of currentSessions) {
+    const key = pinnedSessionKey(s);
+    if (key) currentByKey.set(key, s);
+    if (s.pid > 0) currentLivePids.add(s.pid);
+  }
+  for (const [key, prevSession] of previousPinned) {
+    if (!prevSession.pinned || prevSession.archived || prevSession.pid <= 0) continue;
+    const sid = prevSession.sessionId;
+    if (
+      userRemovedIds.has(key) ||
+      deletedJobIds.has(key) ||
+      (sid !== undefined && (userRemovedIds.has(sid) || deletedSessionIds.has(sid)))
+    ) {
+      continue;
+    }
+    // If the session is still present (even with updated PID, unpinned, or archived), do not respawn.
+    if (currentByKey.has(key)) continue;
+    if (currentLivePids.has(prevSession.pid)) continue;
+    return prevSession;
+  }
+  return null;
 }
 /** densable h.deadEpochOfferedJobId + #u timestamp. */
 let deadEpochOfferedJobId: string | null = null;
@@ -1251,10 +1368,24 @@ function AgentViewApp({
       | { type: 'login' },
   ) => void;
 }): React.ReactElement {
-  // densable cVe(defaults) + restricted passthrough for every up/spawn path.
-  const fleetSpawnExtraArgs = useMemo(
-    () => [...serializeFleetDispatchDefaults(dispatchDefaults), ...fleetUpExtraArgs(dispatchExtraArgs)],
-    [dispatchDefaults, dispatchExtraArgs],
+  const [sessionModel, setSessionModel] = useState<string | undefined>(undefined);
+  const [sessionEffort, setSessionEffort] = useState<string | undefined>(undefined);
+  const [sessionFastMode, setSessionFastMode] = useState<boolean | undefined>(undefined);
+  // densable cVe(defaults) + restricted passthrough + interactive /model /effort /fast overrides for every up/spawn path.
+  const {
+    effectiveDefaults: effectiveDispatchDefaults,
+    relaunchExtraArgs: fleetRelaunchExtraArgs,
+    spawnExtraArgs: fleetSpawnExtraArgs,
+  } = useMemo(
+    () =>
+      buildFleetSessionExtraArgs({
+        dispatchDefaults,
+        dispatchExtraArgs,
+        sessionModel,
+        sessionEffort,
+        sessionFastMode,
+      }),
+    [dispatchDefaults, dispatchExtraArgs, sessionModel, sessionEffort, sessionFastMode],
   );
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [jobStatesBySessionId, setJobStatesBySessionId] = useState<ReadonlyMap<string, BgJobState>>(() => new Map());
@@ -1345,22 +1476,33 @@ function AgentViewApp({
   const peekSendingRef = useRef(false);
   // Per-group fold state
   const [foldedGroups, setFoldedGroups] = useState<Set<string>>(() => new Set());
+  const collapsedGroups = useMemo(() => [...foldedGroups], [foldedGroups]);
+  const dispatchInputRef = useRef(dispatchInput);
+  dispatchInputRef.current = dispatchInput;
+  const dispatchModeRef = useRef(dispatchMode);
+  dispatchModeRef.current = dispatchMode;
   const canonicalLauncherCwd = useMemo(() => resolveFleetCanonicalLauncherCwd(), []);
   const onRestoreComposerDraft = useCallback((draft: FleetComposerDraftRestore) => {
-    setDispatchInput(draft.query);
-    setCursorOffset(draft.query.length);
-    setDispatchMode(draft.mode);
+    if (dispatchInputRef.current.length === 0 && dispatchModeRef.current === 'prompt') {
+      setDispatchInput(prev => (prev.length > 0 ? prev : draft.query));
+      setCursorOffset(draft.query.length);
+      setDispatchMode(draft.mode);
+    }
     if (draft.collapsed.length > 0) {
-      setFoldedGroups(new Set(draft.collapsed));
+      setFoldedGroups(prev => (prev.size > 0 ? prev : new Set(draft.collapsed)));
     }
   }, []);
-  const handOverDraft = useFleetComposerDraftPersistence({
-    canonicalLauncherCwd,
-    snapshot: {
+  const draftSnapshot = useMemo(
+    () => ({
       query: dispatchInput,
       mode: dispatchMode,
-      collapsed: [...foldedGroups],
-    },
+      collapsed: collapsedGroups,
+    }),
+    [dispatchInput, dispatchMode, collapsedGroups],
+  );
+  const handOverDraft = useFleetComposerDraftPersistence({
+    canonicalLauncherCwd,
+    snapshot: draftSnapshot,
     onRestore: onRestoreComposerDraft,
   });
   /** When true, show all completed rows (past doneCap fold). */
@@ -1532,14 +1674,14 @@ function AgentViewApp({
   const newSessionAttemptRef = useRef(0);
   /** densable attach.attachingJobId. */
   const attachingJobIdRef = useRef<string | null>(null);
-  const [sessionModel, setSessionModel] = useState<string | undefined>(undefined);
-  const [sessionEffort, setSessionEffort] = useState<string | undefined>(undefined);
-  const [sessionFastMode, setSessionFastMode] = useState<boolean | undefined>(undefined);
   const [settingPicker, setSettingPicker] = useState<{
     setting: 'model' | 'effort' | 'fast';
     options: Array<{ value: string; description?: string }>;
     selected: number;
   } | null>(null);
+  const mountedRef = useRef(true);
+  const resumePickerGenRef = useRef(0);
+  const probeSocketsRef = useRef<Set<import('net').Socket>>(new Set());
   const lastRelaunchRef = useRef(0);
   /** Monotonic refresh generation — stale async passes must not clobber newer results. */
   const refreshGenerationRef = useRef(0);
@@ -1568,10 +1710,21 @@ function AgentViewApp({
 
   useEffect(
     () => () => {
+      mountedRef.current = false;
+      resumePickerGenRef.current += 1;
+      cancelPeekTap();
       if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
       if (deleteArmTimerRef.current) clearTimeout(deleteArmTimerRef.current);
+      for (const sock of probeSocketsRef.current) {
+        try {
+          sock.destroy();
+        } catch {
+          // ignore
+        }
+      }
+      probeSocketsRef.current.clear();
     },
-    [],
+    [cancelPeekTap],
   );
   const [commands, setCommands] = useState<Command[]>([]);
   /** Official fleet templates list (e$a `t` arg) for @mention / leading token. */
@@ -1608,9 +1761,13 @@ function AgentViewApp({
 
   // Load commands + fleet templates/routines for dispatch autocomplete
   useEffect(() => {
-    void import('../commands.js').then(({ getCommands }) => {
-      void getCommands(process.cwd()).then(setCommands);
-    });
+    let cancelled = false;
+    void import('../commands.js')
+      .then(({ getCommands }) => getCommands(process.cwd()))
+      .then(loaded => {
+        if (!cancelled) setCommands(loaded);
+      })
+      .catch(() => {});
     try {
       setFleetTemplates(listTemplates());
     } catch {
@@ -1625,6 +1782,7 @@ function AgentViewApp({
     void listAllJobs()
       .catch(() => [])
       .then(jobs => {
+        if (cancelled) return;
         const rows = jobs.map(j => ({
           template: j.state.template,
           createdAt: j.state.createdAt,
@@ -1634,8 +1792,11 @@ function AgentViewApp({
           return changed ? { ...c, agentLastUsed: next } : c;
         });
         const persisted = getGlobalConfig().agentLastUsed ?? {};
-        setAgentLastUsed(persisted);
+        if (!cancelled) setAgentLastUsed(persisted);
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // densable: if(_t) Ki(!1) — typing closes all-agent browse.
@@ -1826,14 +1987,25 @@ function AgentViewApp({
             if (!short) return;
             try {
               const detail = await new Promise<string | undefined>(resolve => {
+                let settled = false;
                 const sock = new net.Socket();
-                const timer = setTimeout(() => {
+                probeSocketsRef.current.add(sock);
+                const finish = (value: string | undefined) => {
+                  if (settled) return;
+                  settled = true;
+                  clearTimeout(timer);
+                  probeSocketsRef.current.delete(sock);
                   sock.destroy();
-                  resolve(undefined);
+                  resolve(value);
+                };
+                const timer = setTimeout(() => {
+                  finish(undefined);
                 }, 500);
                 sock.on('error', () => {
-                  clearTimeout(timer);
-                  resolve(undefined);
+                  finish(undefined);
+                });
+                sock.on('close', () => {
+                  finish(undefined);
                 });
                 sock.on('connect', () => {
                   sock.write(JSON.stringify({ proto: 1, op: 'subscribe', short, tail: 200 }) + '\n');
@@ -1843,8 +2015,6 @@ function AgentViewApp({
                   buf += chunk.toString();
                   const nl = buf.indexOf('\n');
                   if (nl < 0) return;
-                  sock.destroy();
-                  clearTimeout(timer);
                   try {
                     const msg = jsonParse(buf.slice(0, nl)) as Record<string, unknown>;
                     if (msg.type === 'snapshot' && Array.isArray(msg.streamTail)) {
@@ -1859,14 +2029,14 @@ function AgentViewApp({
                       for (let i = lines.length - 1; i >= 0; i--) {
                         const l = lines[i]!;
                         if (!l.startsWith('─') && !l.startsWith('❯') && !l.startsWith('←') && !l.startsWith('↑')) {
-                          resolve(l.slice(0, 120));
+                          finish(l.slice(0, 120));
                           return;
                         }
                       }
                     }
-                    resolve(undefined);
+                    finish(undefined);
                   } catch {
-                    resolve(undefined);
+                    finish(undefined);
                   }
                 });
                 sock.connect(socketPath);
@@ -2109,22 +2279,52 @@ function AgentViewApp({
     };
   }, [sessions]);
 
-  // Auto-relaunch: if a pinned session disappears, respawn it
-  const pinnedSessionsRef = useRef<Map<number, SessionEntry>>(new Map());
+  // Auto-relaunch: if a previously-pinned live session disappears unexpectedly, respawn it.
+  // Explicitly deleted/archived/unpinned sessions and pid === 0 startup placeholders are excluded.
+  const pinnedSessionsRef = useRef<Map<string, SessionEntry>>(new Map());
+  const userRemovedPinnedRef = useRef<Set<string>>(new Set());
+  const markUserRemovedPinned = useCallback((session: SessionEntry) => {
+    const key = pinnedSessionKey(session);
+    if (key) {
+      userRemovedPinnedRef.current.add(key);
+      pinnedSessionsRef.current.delete(key);
+    }
+    if (session.sessionId) {
+      userRemovedPinnedRef.current.add(session.sessionId);
+      userRemovedPinnedRef.current.add(session.sessionId.slice(0, 8));
+      pinnedSessionsRef.current.delete(session.sessionId);
+    }
+  }, []);
   useEffect(() => {
-    if (!sessions.length) return;
+    const nextPinned = new Map<string, SessionEntry>();
+    for (const s of sessions) {
+      const key = pinnedSessionKey(s);
+      if (s.pinned && !s.archived && s.pid > 0 && key) {
+        nextPinned.set(key, s);
+      }
+    }
+    if (!sessions.length) {
+      for (const key of [...pinnedSessionsRef.current.keys()]) {
+        if (userRemovedPinnedRef.current.has(key)) {
+          pinnedSessionsRef.current.delete(key);
+        }
+      }
+      return;
+    }
+
     const now = Date.now();
-    if (now - lastRelaunchRef.current < AUTO_RELAUNCH_MIN_INTERVAL_MS) return;
-
-    const currentPids = new Set(sessions.map(s => s.pid));
-    const previousPinned = pinnedSessionsRef.current;
-
-    // Check if any previously-pinned session has disappeared
-    for (const [pid, prevSession] of previousPinned) {
-      if (!currentPids.has(pid) && prevSession.pinned) {
-        // Pinned session disappeared — respawn it
+    const canRelaunch = now - lastRelaunchRef.current >= AUTO_RELAUNCH_MIN_INTERVAL_MS;
+    if (canRelaunch) {
+      const missing = findPinnedSessionToAutoRelaunch({
+        previousPinned: pinnedSessionsRef.current,
+        currentSessions: sessions,
+        userRemovedIds: userRemovedPinnedRef.current,
+        deletedJobIds: deletedJobIdsRef.current,
+        deletedSessionIds: deletedSessionIdsRef.current,
+      });
+      if (missing) {
         lastRelaunchRef.current = now;
-        const name = prevSession.name ?? `respawn-${pid}`;
+        const name = missing.name ?? `respawn-${missing.pid}`;
         void handleBgStart([
           '-p',
           `Continue the previous task (session "${name}" was restarted)`,
@@ -2132,16 +2332,10 @@ function AgentViewApp({
           name,
           ...fleetSpawnExtraArgs,
         ]).then(refresh);
-        break; // One relaunch per cycle
       }
     }
 
-    // Update tracked pinned sessions
-    const newPinned = new Map<number, SessionEntry>();
-    for (const s of sessions) {
-      if (s.pinned) newPinned.set(s.pid, s);
-    }
-    pinnedSessionsRef.current = newPinned;
+    pinnedSessionsRef.current = nextPinned;
   }, [sessions, refresh, fleetSpawnExtraArgs]);
 
   // -------------------------------------------------------------------------
@@ -2693,6 +2887,7 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
 
   const openResumePicker = useCallback(async () => {
+    const gen = ++resumePickerGenRef.current;
     setResumePicker({ entries: null, failed: false, selected: 0 });
     setDispatchInput('');
     setCursorOffset(0);
@@ -2702,6 +2897,7 @@ function AgentViewApp({
       // 2) exclude sessions already in the main (non-archived) Fleet list
       // 3) still include soft-archived / Earlier jobs (deleted from main list)
       const { listSessionsImpl } = await import('../utils/listSessionsImpl.js');
+      if (!mountedRef.current || gen !== resumePickerGenRef.current) return;
       const excludeIds = new Set<string>();
       for (const s of sessions) {
         if (s.archived || !s.sessionId) continue;
@@ -2714,6 +2910,7 @@ function AgentViewApp({
         limit: 200,
         includeWorktrees: true,
       });
+      if (!mountedRef.current || gen !== resumePickerGenRef.current) return;
       const byId = new Map<string, ResumePickerEntry>();
       for (const s of listed) {
         if (!s.sessionId) continue;
@@ -2737,8 +2934,10 @@ function AgentViewApp({
         });
       }
       const entries = [...byId.values()].sort((a, b) => b.modified.getTime() - a.modified.getTime());
+      if (!mountedRef.current || gen !== resumePickerGenRef.current) return;
       setResumePicker({ entries, failed: false, selected: 0 });
     } catch {
+      if (!mountedRef.current || gen !== resumePickerGenRef.current) return;
       setResumePicker({ entries: [], failed: true, selected: 0 });
     }
   }, [sessions]);
@@ -2750,6 +2949,7 @@ function AgentViewApp({
         setError(ALREADY_IN_LIST_MESSAGE);
         return;
       }
+      resumePickerGenRef.current += 1;
       setResumePicker(null);
       dispatchingRef.current = true;
       try {
@@ -2932,8 +3132,8 @@ function AgentViewApp({
                     await relaunchAgentsView({
                       mode: 'manual',
                       cwdFilter,
-                      defaults: dispatchDefaults,
-                      extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
+                      defaults: effectiveDispatchDefaults,
+                      extraArgs: fleetRelaunchExtraArgs,
                       handOverDraft,
                       onError: msg => setError(msg),
                     });
@@ -3092,8 +3292,9 @@ function AgentViewApp({
       onAction,
       commands,
       cwdFilter,
-      dispatchDefaults,
-      dispatchExtraArgs,
+      effectiveDispatchDefaults,
+      fleetRelaunchExtraArgs,
+      handOverDraft,
     ],
   );
 
@@ -3146,6 +3347,13 @@ function AgentViewApp({
       await writeFile(pinsPath, JSON.stringify(pins, null, 2));
     } catch {}
     // Also patch job state for immediate UI update
+    if (session.pinned) {
+      const key = pinnedSessionKey(session);
+      if (key) pinnedSessionsRef.current.delete(key);
+    } else {
+      userRemovedPinnedRef.current.delete(short);
+      if (session.sessionId) userRemovedPinnedRef.current.delete(session.sessionId);
+    }
     const { patchBgJobState } = await import('../daemon/jobState.js');
     patchBgJobState(short, { pinned: !session.pinned });
     await refresh();
@@ -3165,7 +3373,13 @@ function AgentViewApp({
     if (!session) return;
     const newName = renameValue.trim();
     if (newName) {
-      await patchSessionByPid(session.pid, { name: newName });
+      const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
+      if (short) {
+        patchBgJobState(short, { name: newName, nameSource: 'user' });
+      }
+      if (session.pid > 0) {
+        await patchSessionByPid(session.pid, { name: newName });
+      }
     }
     setViewMode('list');
     await refresh();
@@ -3180,6 +3394,7 @@ function AgentViewApp({
     if (!session) return;
     const short = session.short ?? session.sessionId?.slice(0, 8);
     if (!short) return;
+    markUserRemovedPinned(session);
     clearDeleteArm();
     const releaseTombstone = tombstoneJob(session);
     // Official cp: noteDeleteRefusal(id, null) at delete start.
@@ -3225,7 +3440,7 @@ function AgentViewApp({
       setDeleteRefusals(prev => noteDeleteRefusal(prev, short, `worktree ${phrase}`));
       setError(`Worktree kept at ${result.keptWorktree} \u2014 ${phrase}; the session was not removed from the list`);
     }
-  }, [getSelectedSession, refresh, clearDeleteArm, tombstoneJob]);
+  }, [getSelectedSession, refresh, clearDeleteArm, tombstoneJob, markUserRemovedPinned]);
 
   /**
    * densable FSS stop then cO(id, justKilled=true): first Ctrl+X on active/blocked.
@@ -3287,23 +3502,6 @@ function AgentViewApp({
     },
     [armDeleteConfirm, refresh, remoteJobOf, stopRemote],
   );
-
-  const handleDeleteAll = useCallback(async () => {
-    clearDeleteArm();
-    for (const session of done) {
-      // Prefer daemon short (attach correctness) over sessionId slice.
-      const short = session.short ?? session.sessionId?.slice(0, 8);
-      if (!short) continue;
-      const releaseTombstone = tombstoneJob(session);
-      try {
-        // densable force:true for fleet delete (non-git / dirty still clears jobdir)
-        await deleteJob(short, { force: true });
-      } finally {
-        releaseTombstone();
-      }
-    }
-    await refresh();
-  }, [done, refresh, clearDeleteArm, tombstoneJob]);
 
   const handleGroupStart = useCallback(() => {
     const session = getSelectedSession();
@@ -3379,6 +3577,7 @@ function AgentViewApp({
     }
     const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
     if (!short) return;
+    markUserRemovedPinned(session);
     // densable archive also clears pins.json so daemon retire is not blocked
     // by a stale pin entry (state.json alone is not enough — bgWorker reads pins).
     try {
@@ -3407,7 +3606,7 @@ function AgentViewApp({
     setDeleteConfirmSessionId(null);
     setUngroupConfirmSessionId(null);
     await refresh();
-  }, [getSelectedSession, refresh, remoteJobOf, archiveRemote]);
+  }, [getSelectedSession, refresh, remoteJobOf, archiveRemote, markUserRemovedPinned]);
 
   const handleUnarchive = useCallback(async () => {
     const session = getSelectedSession();
@@ -3819,6 +4018,7 @@ function AgentViewApp({
     // densable /resume past-session overlay key handling
     if (resumePicker) {
       if (key.escape || (key.ctrl && input === 'c') || key.meta) {
+        resumePickerGenRef.current += 1;
         setResumePicker(null);
         return;
       }
@@ -4473,6 +4673,87 @@ function AgentViewApp({
       return;
     }
 
+    // Shared Esc-clear-draft (double-Esc + kill-buffer), Ctrl+Y restore, and confirmed Ctrl+X helpers
+    const runEscClearDraft = () => {
+      const step = stepAgentViewEscapeDraft({
+        simpleView,
+        queryIsFilter,
+        dispatchInput,
+        currentHint: info,
+      });
+      if (step.action === 'arm') {
+        setInfo(AGENT_VIEW_ESC_CLEAR_HINT);
+        if (escClearHintTimerRef.current) clearTimeout(escClearHintTimerRef.current);
+        escClearHintTimerRef.current = setTimeout(() => {
+          setInfo(prev => (prev === AGENT_VIEW_ESC_CLEAR_HINT ? null : prev));
+        }, AGENT_VIEW_ESC_CLEAR_TIMEOUT_MS);
+        return;
+      }
+      if (step.killedText !== null) {
+        killedDraftRef.current = step.killedText;
+      }
+      setDispatchInput('');
+      setCursorOffset(0);
+      setDispatchMode('prompt');
+      dispatchVimSetModeRef.current('INSERT');
+      setVimMode('INSERT');
+      setSelectedIndex(idx => findNonHeaderRowIndex(flatRows, idx));
+      if (step.nextHint !== null) {
+        setInfo(step.nextHint);
+        if (escClearHintTimerRef.current) clearTimeout(escClearHintTimerRef.current);
+        escClearHintTimerRef.current = setTimeout(() => {
+          setInfo(prev => (prev === step.nextHint ? null : prev));
+        }, AGENT_VIEW_RESTORE_HINT_TIMEOUT_MS);
+      } else if (info === AGENT_VIEW_ESC_CLEAR_HINT) {
+        setInfo(null);
+      }
+    };
+
+    const runCtrlXConfirmed = () => {
+      // densable R4e("x"): active/blocked first X = stop+arm justKilled; second X = delete.
+      // completed first X = arm delete; second X = delete. Grouped jobs: ungroup arm first.
+      if (currentRow?.kind === 'header' && currentRow.group.startsWith('group:')) {
+        const gname = currentRow.group.slice(6);
+        if (gname === UNGROUPED_LABEL) return;
+        const token = `group:${gname}`;
+        if (ungroupConfirmSessionId === token) {
+          clearDeleteArm();
+          void handleUngroupAll(gname);
+        } else {
+          armDeleteConfirm(token, { ungroup: true });
+        }
+        return;
+      }
+      const session = getSelectedSession();
+      if (!session) {
+        // #56 / #61: never bulk-delete a section when focused on a header/fold row
+        return;
+      }
+      // Prefer ungroup when job is in a custom group and second press is ungroup-confirm
+      if (session.group && ungroupConfirmSessionId === session.sessionId) {
+        clearDeleteArm();
+        void handleUngroup();
+        return;
+      }
+      if (deleteConfirmSessionId === session.sessionId) {
+        // densable second X → delete (works for justKilled arm too)
+        clearDeleteArm();
+        void handleDelete();
+        return;
+      }
+      // First press: grouped jobs offer ungroup; active/blocked stop+arm; else arm delete.
+      if (session.group) {
+        armDeleteConfirm(session.sessionId, { ungroup: true });
+      } else {
+        const band = deriveBand(session);
+        if (band === 'blocked' || band === 'active') {
+          void handleStopThenArmDelete(session);
+        } else {
+          armDeleteConfirm(session.sessionId);
+        }
+      }
+    };
+
     // Dispatch input handling (with cursor / bash / paste / multiline support)
     if (focusArea === 'dispatch') {
       // densable 2.1.212 #14 / 2.1.248 #45 leftover: shift+enter or ctrl+j
@@ -4524,12 +4805,7 @@ function AgentViewApp({
           return;
         }
         if (dispatchInput || dispatchMode === 'bash') {
-          setDispatchInput('');
-          setCursorOffset(0);
-          setDispatchMode('prompt');
-          dispatchVim.setMode('INSERT');
-          setVimMode('INSERT');
-          setSelectedIndex(idx => findNonHeaderRowIndex(flatRows, idx));
+          runEscClearDraft();
         } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
           // densable MD.current → NO(null): cancel delete/ungroup arm first.
           clearPending();
@@ -4538,13 +4814,23 @@ function AgentViewApp({
         }
         return;
       }
+      if (key.ctrl && !key.meta && input === 'y' && killedDraftRef.current) {
+        // Official 2.1.323 (#2129): ctrl+y restores the last Esc-cleared prompt in dispatch mode too.
+        const restored = restoreAgentViewKilledDraft(dispatchInput, killedDraftRef.current);
+        setDispatchInput(restored);
+        setCursorOffset(restored.length);
+        if (info === AGENT_VIEW_RESTORE_HINT) {
+          setInfo(null);
+        }
+        return;
+      }
       // Official: empty bash + backspace → exit bash mode (JIy before leftover)
       if (key.backspace && !dispatchInput && dispatchMode === 'bash') {
         setDispatchMode('prompt');
         return;
       }
-      if (input === 'x' && key.ctrl && done.length > 0) {
-        void handleDeleteAll();
+      if (input === 'x' && key.ctrl) {
+        runCtrlXConfirmed();
         return;
       }
       // Official dcn: empty prompt + "!" → bash mode (`vgn()&&!simpleView`)
@@ -4624,48 +4910,7 @@ function AgentViewApp({
       }
       return;
     } else if (input === 'x' && key.ctrl) {
-      // densable R4e("x"): active/blocked first X = stop+arm justKilled; second X = delete.
-      // completed first X = arm delete; second X = delete. Grouped jobs: ungroup arm first.
-      if (currentRow?.kind === 'header' && currentRow.group.startsWith('group:')) {
-        const gname = currentRow.group.slice(6);
-        if (gname === UNGROUPED_LABEL) return;
-        const token = `group:${gname}`;
-        if (ungroupConfirmSessionId === token) {
-          clearDeleteArm();
-          void handleUngroupAll(gname);
-        } else {
-          armDeleteConfirm(token, { ungroup: true });
-        }
-        return;
-      }
-      const session = getSelectedSession();
-      if (!session) {
-        // #56 / #61: never bulk-delete a section when focused on a header/fold row
-        return;
-      }
-      // Prefer ungroup when job is in a custom group and second press is ungroup-confirm
-      if (session.group && ungroupConfirmSessionId === session.sessionId) {
-        clearDeleteArm();
-        void handleUngroup();
-        return;
-      }
-      if (deleteConfirmSessionId === session.sessionId) {
-        // densable second X → delete (works for justKilled arm too)
-        clearDeleteArm();
-        void handleDelete();
-        return;
-      }
-      // First press: grouped jobs offer ungroup; active/blocked stop+arm; else arm delete.
-      if (session.group) {
-        armDeleteConfirm(session.sessionId, { ungroup: true });
-      } else {
-        const band = deriveBand(session);
-        if (band === 'blocked' || band === 'active') {
-          void handleStopThenArmDelete(session);
-        } else {
-          armDeleteConfirm(session.sessionId);
-        }
-      }
+      runCtrlXConfirmed();
       return;
     } else if (input === 'a' && !key.ctrl && !key.meta && sessions.length > 0) {
       // Soft-archive / unarchive (local product surface for official archive)
@@ -4702,38 +4947,7 @@ function AgentViewApp({
       if (dispatchInput || dispatchMode === 'bash') {
         // Official 2.1.323 (#2129): in full view with a non-filter prompt, Esc
         // requires a second press to clear (saving to kill buffer for ctrl+y).
-        const step = stepAgentViewEscapeDraft({
-          simpleView,
-          queryIsFilter,
-          dispatchInput,
-          currentHint: info,
-        });
-        if (step.action === 'arm') {
-          setInfo(AGENT_VIEW_ESC_CLEAR_HINT);
-          if (escClearHintTimerRef.current) clearTimeout(escClearHintTimerRef.current);
-          escClearHintTimerRef.current = setTimeout(() => {
-            setInfo(prev => (prev === AGENT_VIEW_ESC_CLEAR_HINT ? null : prev));
-          }, AGENT_VIEW_ESC_CLEAR_TIMEOUT_MS);
-          return;
-        }
-        if (step.killedText !== null) {
-          killedDraftRef.current = step.killedText;
-        }
-        setDispatchInput('');
-        setCursorOffset(0);
-        setDispatchMode('prompt');
-        dispatchVimSetModeRef.current('INSERT');
-        setVimMode('INSERT');
-        setSelectedIndex(idx => findNonHeaderRowIndex(flatRows, idx));
-        if (step.nextHint !== null) {
-          setInfo(step.nextHint);
-          if (escClearHintTimerRef.current) clearTimeout(escClearHintTimerRef.current);
-          escClearHintTimerRef.current = setTimeout(() => {
-            setInfo(prev => (prev === step.nextHint ? null : prev));
-          }, AGENT_VIEW_RESTORE_HINT_TIMEOUT_MS);
-        } else if (info === AGENT_VIEW_ESC_CLEAR_HINT) {
-          setInfo(null);
-        }
+        runEscClearDraft();
       } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
         clearPending();
       } else {
@@ -5534,7 +5748,14 @@ async function ensureDaemonRunning(opts?: { forceTransient?: boolean }): Promise
   return ensure(opts);
 }
 
-async function attachToPtySession(short: string): Promise<{ error?: string }> {
+async function attachToPtySession(
+  short: string,
+  opts?: {
+    forceUnresponsive?: boolean;
+    replyOnResume?: boolean;
+    afterNoResponse?: boolean;
+  },
+): Promise<{ error?: string }> {
   const { attachToSession } = await import('../daemon/clientAttach.js');
   const { sendControlRequest } = await import('../daemon/controlSocket.js');
   const { listAllJobs } = await import('../daemon/jobState.js');
@@ -5543,15 +5764,22 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
   const forceFresh = forceFreshNextShort === short;
   if (forceFresh) forceFreshNextShort = null;
 
-  // Official flow: try attach → if ENOJOB → respawn → retry attach
-  let result = await attachToSession(short, {
-    alreadyInAlt: true,
-    gateStdinUntilFirstFrame: true,
-  });
+  const forceUnresponsive = Boolean(opts?.forceUnresponsive);
+  const replyOnResume = Boolean(opts?.replyOnResume);
+  const afterNoResponse = Boolean(opts?.afterNoResponse);
+
+  // Official flow: try attach → if ENOJOB → respawn → retry attach.
+  // When forceUnresponsive is confirmed, skip re-attaching to the stuck worker and respawn directly.
+  let result: Awaited<ReturnType<typeof attachToSession>> = forceUnresponsive
+    ? { outcome: 'error', msg: 'ENOJOB' }
+    : await attachToSession(short, {
+        alreadyInAlt: true,
+        gateStdinUntilFirstFrame: true,
+      });
   // densable vZn @188812447: zot (ENOENT/ECONNREFUSED/ECONNRESET/control socket
   // closed) → F2({forceTransient:true}) then re-attach. Do not invent a new
   // compositor — reuse ensureDaemonRunning next to this attach host.
-  if (result.outcome === 'error' && result.msg && ATTACH_SOCKET_UNREACHABLE_RE.test(result.msg)) {
+  if (!forceUnresponsive && result.outcome === 'error' && result.msg && ATTACH_SOCKET_UNREACHABLE_RE.test(result.msg)) {
     const started = await ensureDaemonRunning({ forceTransient: true });
     if (started.ok) {
       result = await attachToSession(short, {
@@ -5561,18 +5789,20 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
     }
   }
   // gold vZn: after zot retry, wait while Got (ERESPAWNING|ESTARTING), 20 * 500ms
-  for (let w = 0; result.msg && ATTACH_STILL_STARTING_RE.test(result.msg) && w < 20; w++) {
-    await new Promise(r => setTimeout(r, 500));
-    result = await attachToSession(short, {
-      alreadyInAlt: true,
-      gateStdinUntilFirstFrame: true,
-    });
+  if (!forceUnresponsive) {
+    for (let w = 0; result.msg && ATTACH_STILL_STARTING_RE.test(result.msg) && w < 20; w++) {
+      await new Promise(r => setTimeout(r, 500));
+      result = await attachToSession(short, {
+        alreadyInAlt: true,
+        gateStdinUntilFirstFrame: true,
+      });
+    }
   }
   let respawned = false;
   let waitedForBoot = false;
 
-  if (result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
-    // Session not in daemon — respawn it (official: S8_ / densable Xyr)
+  if (forceUnresponsive || (result.outcome === 'error' && result.msg?.includes('ENOJOB'))) {
+    // Session not in daemon (or confirmed unresponsive restart) — respawn it (official: S8_ / densable Xyr)
     const jobs = await listAllJobs();
     const job = jobs.find(j => j.short === short || j.state.sessionId === short || j.state.sessionId.startsWith(short));
     if (job) {
@@ -5581,7 +5811,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
       const { probeJobAlive, xyrPreflightBeforeRespawn } = await import('../daemon/xyrRespawn.js');
       // densable 2.1.246 Kn/Ti: worker still booting (present, not alive).
       // Opening it must retry attach — not kill+respawn (Windows race).
-      if (!forceFresh) {
+      if (!forceFresh && !forceUnresponsive) {
         const bootProbe = await probeJobAlive(attachShort);
         if (bootProbe.present && !bootProbe.alive) {
           waitedForBoot = true;
@@ -5597,18 +5827,22 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
           }
         }
       }
-      if (!waitedForBoot && result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
+      if (!waitedForBoot && (forceUnresponsive || (result.outcome === 'error' && result.msg?.includes('ENOJOB')))) {
         // densable Xyr: hLp / D9e / gLp before IAe (Zxe after hasMessages)
         const preflight = await xyrPreflightBeforeRespawn({
           short: attachShort,
           resumeSessionId: resumeId,
           hasMessages: false,
-          force: forceFresh,
+          force: forceFresh || forceUnresponsive,
           forceRefusalRetry: forceFresh,
         });
         if (preflight.error) {
           // densable remount restore: BwH (enterAlt + 2J + H [+ extended keys])
           process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
+          if (forceUnresponsive && /couldn't stop/i.test(preflight.error)) {
+            restartOfferedJobId = attachShort;
+            return { error: FLEET_RESTART_STOP_UNCONFIRMED_MSG };
+          }
           return { error: preflight.error };
         }
         const effectiveResumeId = preflight.resumeSessionId;
@@ -5701,6 +5935,9 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
               rows: process.stdout.rows || 30,
               // densable Xyr forceRefusalRetry on second enter
               ...(forceFresh ? { forceRefusalRetry: true, force: true } : {}),
+              // Official #49: confirmed restart of unresponsive worker (+ reply-on-resume when active)
+              ...(forceUnresponsive ? { forceUnresponsive: true } : {}),
+              ...(replyOnResume ? { replyOnResume: true } : {}),
             },
             timeoutMs: 10000,
           },
@@ -5721,6 +5958,10 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
           process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
           const errMsg = (resp as { error?: string; errorCode?: string; code?: string }).error ?? 'respawn failed';
           const code = (resp as { errorCode?: string; code?: string }).errorCode ?? (resp as { code?: string }).code;
+          if (code === 'kill_unconfirmed') {
+            restartOfferedJobId = job.short || short;
+            return { error: FLEET_RESTART_STOP_UNCONFIRMED_MSG };
+          }
           if (code === DEAD_EPOCH_TRANSCRIPT_GONE || code === 'dead_epoch_transcript_gone') {
             deadEpochGoneJobId = job.short || short;
             return { error: FLEET_DEAD_EPOCH_GONE };
@@ -5748,6 +5989,15 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
     return {};
   }
   if (result.outcome === 'error') {
+    if (
+      !afterNoResponse &&
+      !forceUnresponsive &&
+      result.msg &&
+      /did not respond|not responding|unresponsive/i.test(result.msg)
+    ) {
+      restartOfferedJobId = short;
+      return { error: FLEET_RESTART_OFFER_MSG };
+    }
     return { error: formatAttachError(result.msg) };
   }
   return {};
@@ -5859,29 +6109,41 @@ export async function renderAgentView(options?: {
         break;
       }
       const action = await new Promise<
-        | { type: 'open'; sessionId: string; short: string; logPath?: string }
+        | {
+            type: 'open';
+            sessionId: string;
+            short: string;
+            logPath?: string;
+            forceUnresponsive?: boolean;
+            replyOnResume?: boolean;
+            afterNoResponse?: boolean;
+          }
         | { type: 'done'; resumeHintRequested?: boolean }
         | { type: 'login' }
       >(resolve => {
         // ThemeProvider required: without it useTheme() defaults to 'dark', so
         // selection userMessageBackground paints as rgb(55,55,55) on light terminals.
+        // Wrap with SessionServicesProvider when storageV5 is pinned so draft pre-exit flush has storageV5.
         root.render(
-          <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
-            <AppStateProvider>
-              <KeybindingSetup>
-                <AgentViewApp
-                  enteredViaLeftArrow={enteredViaLeftArrow}
-                  dispatchExtraArgs={options?.dispatchExtraArgs}
-                  dispatchDefaults={options?.dispatchDefaults}
-                  cwdFilter={options?.cwdFilter}
-                  currentSessionId={options?.currentSessionId}
-                  restoreSessionId={lastSelectedSessionId}
-                  initialError={remountError}
-                  onAction={resolve}
-                />
-              </KeybindingSetup>
-            </AppStateProvider>
-          </ThemeProvider>,
+          wrapWithSessionServices(
+            <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
+              <AppStateProvider>
+                <KeybindingSetup>
+                  <AgentViewApp
+                    enteredViaLeftArrow={enteredViaLeftArrow}
+                    dispatchExtraArgs={options?.dispatchExtraArgs}
+                    dispatchDefaults={options?.dispatchDefaults}
+                    cwdFilter={options?.cwdFilter}
+                    currentSessionId={options?.currentSessionId}
+                    restoreSessionId={lastSelectedSessionId}
+                    initialError={remountError}
+                    onAction={resolve}
+                  />
+                </KeybindingSetup>
+              </AppStateProvider>
+            </ThemeProvider>,
+            getPinnedStorageV5(),
+          ),
         );
       });
 
@@ -5948,7 +6210,11 @@ export async function renderAgentView(options?: {
         // Attach to PTY socket (same as official: raw terminal ↔ PTY host)
         // densable: after detach, if(X) process.stdout.write(BwH()) then cj_/createRoot.
         // BwH is emitted at end of attachToPtySession (enterAltScreenSequence).
-        const attachResult = await attachToPtySession(action.short);
+        const attachResult = await attachToPtySession(action.short, {
+          forceUnresponsive: action.forceUnresponsive,
+          replyOnResume: action.replyOnResume,
+          afterNoResponse: action.afterNoResponse,
+        });
         // Official: (J = k.msg) on attach_failed / still-starting settle.
         remountError = attachResult.error;
         if (shutdownSignalReceived) {

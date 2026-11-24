@@ -573,6 +573,15 @@ export function ManagePlugins({
   const viewGenRef = useRef(0);
   const activePluginIdRef = useRef<string | null>(null);
   const isProcessingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const toggleChainsRef = useRef<Map<string, Promise<void>>>(new Map());
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   // Official 2.1.327 #382 & 2.1.328 #617: Track transition/accept timestamps
   // so click+Enter or held Enter cannot turn off several plugins.
   const lastViewTransitionAtRef = useRef(0);
@@ -739,6 +748,7 @@ export function ManagePlugins({
     } else {
       bumpViewGeneration(null);
       if (pendingToggles.size > 0) {
+        void onManageComplete?.();
         setResult('Run /reload-plugins to apply plugin changes.');
         return;
       }
@@ -750,14 +760,40 @@ export function ManagePlugins({
   // Excludes confirm-project-uninstall and confirm-data-cleanup ONLY when
   // PluginConfirmList is active (not processing); while processing, keep Esc
   // active here so Esc is never ignored (#615).
+  // Also disabled while MCP subviews (mcp-detail/mcp-tools/mcp-tool-detail) are
+  // active because their own Dialog/onCancel owns Esc.
   useKeybinding('confirm:no', handleBack, {
     context: 'Confirmation',
     isActive:
       (viewState !== 'plugin-list' || !isSearchMode) &&
+      !(
+        typeof viewState === 'object' &&
+        (viewState.type === 'mcp-detail' || viewState.type === 'mcp-tools' || viewState.type === 'mcp-tool-detail')
+      ) &&
       (isProcessing ||
         (viewState !== 'confirm-project-uninstall' &&
           !(typeof viewState === 'object' && viewState.type === 'confirm-data-cleanup'))),
   });
+
+  // Fallback out of render when an MCP detail view has an unsupported transport config type.
+  const mcpDetailConfigType =
+    typeof viewState === 'object' && viewState.type === 'mcp-detail'
+      ? (mcpClients.find(c => c.name === viewState.client.name) ?? viewState.client).config.type
+      : undefined;
+  const isUnsupportedMcpDetail =
+    typeof viewState === 'object' &&
+    viewState.type === 'mcp-detail' &&
+    !(
+      mcpDetailConfigType === 'stdio' ||
+      mcpDetailConfigType === 'sse' ||
+      mcpDetailConfigType === 'http' ||
+      mcpDetailConfigType === 'claudeai-proxy'
+    );
+  useEffect(() => {
+    if (isUnsupportedMcpDetail) {
+      setViewState('plugin-list');
+    }
+  }, [isUnsupportedMcpDetail]);
 
   // Helper to get MCP status
   const getMcpStatus = (
@@ -1120,6 +1156,8 @@ export function ManagePlugins({
       return;
     }
 
+    let cancelled = false;
+
     async function detectMcpb() {
       // Check plugin manifest first
       const mcpServersSpec = selectedPlugin!.plugin.manifest.mcpServers;
@@ -1139,6 +1177,7 @@ export function ManagePlugins({
           const marketplaceJsonPath = path.join(marketplaceDir, '.claude-plugin', 'marketplace.json');
 
           const content = await fs.readFile(marketplaceJsonPath, 'utf-8');
+          if (cancelled) return;
           const marketplace = jsonParse(content);
 
           const entry = marketplace.plugins?.find((p: { name: string }) => p.name === selectedPlugin!.plugin.name);
@@ -1154,18 +1193,26 @@ export function ManagePlugins({
         }
       }
 
-      setSelectedPluginHasMcpb(hasMcpb);
+      if (!cancelled) {
+        setSelectedPluginHasMcpb(hasMcpb);
+      }
     }
 
     void detectMcpb();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedPlugin]);
 
   // Load installed plugins grouped by marketplace
   useEffect(() => {
+    let cancelled = false;
+
     async function loadInstalledPlugins() {
       setLoading(true);
       try {
         const { enabled, disabled } = await loadAllPlugins();
+        if (cancelled) return;
         const mergedSettings = getSettings_DEPRECATED(); // Use merged settings to respect all layers
 
         const allPlugins = filterManagedDisabledPlugins([...enabled, ...disabled]);
@@ -1226,11 +1273,16 @@ export function ManagePlugins({
         setPluginStates(allStates);
         setSelectedIndex(0);
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     void loadInstalledPlugins();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Auto-navigate to target plugin if specified (once only)
@@ -1538,44 +1590,65 @@ export function ManagePlugins({
       const pluginScope = item.scope;
       const isBuiltin = pluginScope === 'builtin';
       if (isBuiltin || isInstallableScope(pluginScope as PersistablePluginScope)) {
-        const newPending = new Map(pendingToggles);
-        // Omit scope — see handleSingleOperation's enable/disable comment.
-        if (currentPending) {
-          // Cancel: reverse the operation back to the original state
-          newPending.delete(pluginId);
-          void (async () => {
-            try {
-              if (currentPending === 'will-disable') {
-                await enablePluginOp(pluginId);
-              } else {
-                await disablePluginOp(pluginId);
-              }
-              clearAllCaches();
-            } catch (err) {
-              logError(err);
+        const nextPending: 'will-disable' | 'will-enable' | undefined = currentPending
+          ? undefined
+          : isEnabled
+            ? 'will-disable'
+            : 'will-enable';
+        const shouldEnable = currentPending ? currentPending === 'will-disable' : !isEnabled;
+
+        setPendingToggles(prev => {
+          const next = new Map(prev);
+          if (nextPending === undefined) {
+            next.delete(pluginId);
+          } else {
+            next.set(pluginId, nextPending);
+          }
+          return next;
+        });
+
+        // Serialize per-plugin writes so rapid Space taps never race on disk, and
+        // roll back optimistic state + surface an error if persistence fails.
+        const prevChain = toggleChainsRef.current.get(pluginId) ?? Promise.resolve();
+        const nextChain = prevChain.then(async () => {
+          try {
+            const opResult = shouldEnable ? await enablePluginOp(pluginId) : await disablePluginOp(pluginId);
+            if (!opResult.success) {
+              throw new Error(opResult.message || `Failed to ${shouldEnable ? 'enable' : 'disable'} ${pluginId}`);
             }
-          })();
-        } else {
-          newPending.set(pluginId, isEnabled ? 'will-disable' : 'will-enable');
-          void (async () => {
-            try {
-              if (isEnabled) {
-                await disablePluginOp(pluginId);
-              } else {
-                await enablePluginOp(pluginId);
-              }
-              clearAllCaches();
-            } catch (err) {
-              logError(err);
+            clearAllCaches();
+            await onManageComplete?.();
+            if (mountedRef.current) {
+              setProcessError(null);
             }
-          })();
-        }
-        setPendingToggles(newPending);
+          } catch (err) {
+            logError(err);
+            if (mountedRef.current) {
+              setPendingToggles(prev => {
+                if (prev.get(pluginId) !== nextPending) return prev;
+                const rolledBack = new Map(prev);
+                if (currentPending === undefined) {
+                  rolledBack.delete(pluginId);
+                } else {
+                  rolledBack.set(pluginId, currentPending);
+                }
+                return rolledBack;
+              });
+              setProcessError(`Failed to update ${item.plugin.name}: ${errorMessage(err)}`);
+            }
+          }
+        });
+        const wrappedChain = nextChain.finally(() => {
+          if (toggleChainsRef.current.get(pluginId) === wrappedChain) {
+            toggleChainsRef.current.delete(pluginId);
+          }
+        });
+        toggleChainsRef.current.set(pluginId, wrappedChain);
       }
     } else if (item?.type === 'mcp') {
       void toggleMcpServer(item.client.name);
     }
-  }, [selectedIndex, filteredItems, pendingToggles, pluginStates, toggleMcpServer]);
+  }, [selectedIndex, filteredItems, pendingToggles, toggleMcpServer, onManageComplete]);
 
   // Handle accept (Enter) in plugin-list
   const handleAccept = React.useCallback(() => {
@@ -2138,14 +2211,15 @@ export function ManagePlugins({
             try {
               await savePluginOptions(pluginId, values, viewState.schema);
               clearAllCaches();
+              await onManageComplete?.();
               // Official 2.1.328 #614: Do not close or reopen if user already went back.
-              if (!isStillCurrent()) return;
+              if (!isStillCurrent() || !mountedRef.current) return;
               setResult('Configuration saved. Run /reload-plugins for changes to take effect.');
             } catch (err) {
-              if (!isStillCurrent()) return;
+              if (!isStillCurrent() || !mountedRef.current) return;
               setProcessError(`Failed to save configuration: ${errorMessage(err)}`);
             }
-            if (isStillCurrent()) {
+            if (isStillCurrent() && mountedRef.current) {
               setViewState('plugin-details');
             }
           })();
@@ -2193,16 +2267,18 @@ export function ManagePlugins({
 
         // Reload with provided config
         await loadMcpbFile(mcpbPath, selectedPlugin.plugin.path, pluginId, undefined, config);
+        clearAllCaches();
+        await onManageComplete?.();
 
         // Official 2.1.328 #614: Do not close or reopen if user already went back.
-        if (!isStillCurrent()) return;
+        if (!isStillCurrent() || !mountedRef.current) return;
         // Success - go back to details
         setProcessError(null);
         setConfigNeeded(null);
         setViewState('plugin-details');
         setResult('Configuration saved. Run /reload-plugins for changes to take effect.');
       } catch (err) {
-        if (!isStillCurrent()) return;
+        if (!isStillCurrent() || !mountedRef.current) return;
         const errorMsg = errorMessage(err);
         setProcessError(`Failed to save configuration: ${errorMsg}`);
         setViewState('plugin-details');
@@ -2562,7 +2638,7 @@ export function ManagePlugins({
 
   // MCP detail view
   if (typeof viewState === 'object' && viewState.type === 'mcp-detail') {
-    const client = viewState.client;
+    const client = mcpClients.find(c => c.name === viewState.client.name) ?? viewState.client;
     const serverToolsCount = filterToolsByServer(mcpTools, client.name).length;
 
     // Common handlers for MCP menus
@@ -2663,14 +2739,13 @@ export function ManagePlugins({
       );
     }
 
-    // Fallback - shouldn't happen but handle gracefully
-    setViewState('plugin-list');
+    // Fallback handled via useEffect (isUnsupportedMcpDetail)
     return null;
   }
 
   // MCP tools view
   if (typeof viewState === 'object' && viewState.type === 'mcp-tools') {
-    const client = viewState.client;
+    const client = mcpClients.find(c => c.name === viewState.client.name) ?? viewState.client;
     const scope = client.config.scope;
     const configType = client.config.type;
 
@@ -2734,7 +2809,8 @@ export function ManagePlugins({
 
   // MCP tool detail view
   if (typeof viewState === 'object' && viewState.type === 'mcp-tool-detail') {
-    const { client, tool } = viewState;
+    const client = mcpClients.find(c => c.name === viewState.client.name) ?? viewState.client;
+    const { tool } = viewState;
     const scope = client.config.scope;
     const configType = client.config.type;
 

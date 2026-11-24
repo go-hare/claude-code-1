@@ -495,18 +495,32 @@ function ErrorsTabContent({
   const [pendingConfirmRow, setPendingConfirmRow] = useState<ErrorRow | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [marketplaceLoadFailures, setMarketplaceLoadFailures] = useState<Array<{ name: string; error: string }>>([]);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Detect marketplaces that are installed but fail to load their data
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       try {
         const config = await loadKnownMarketplacesConfig();
+        if (cancelled) return;
         const { failures } = await loadMarketplacesWithGracefulDegradation(config);
+        if (cancelled) return;
         setMarketplaceLoadFailures(failures);
       } catch {
         // Ignore — if we can't load config, other tabs handle it
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const failedMarketplaces = installationStatus.marketplaces.filter(m => m.status === 'failed');
@@ -615,10 +629,12 @@ function ErrorsTabContent({
           try {
             await removeMarketplaceSource(action.name, undefined, storageV5, credentials);
             clearAllCaches();
+            markPluginsChanged();
+            if (!mountedRef.current) return;
             setMarketplaceLoadFailures(prev => prev.filter(f => f.name !== action.name));
             setActionMessage(`${figures.tick} Removed marketplace "${action.name}"`);
-            markPluginsChanged();
           } catch (err) {
+            if (!mountedRef.current) return;
             setActionMessage(`Failed to remove "${action.name}": ${err instanceof Error ? err.message : String(err)}`);
           }
         })();
@@ -664,9 +680,11 @@ function ErrorsTabContent({
 
   // Clamp selectedIndex when rows shrink (e.g. after removal)
   const clampedIndex = Math.min(selectedIndex, Math.max(0, rows.length - 1));
-  if (clampedIndex !== selectedIndex) {
-    setSelectedIndex(clampedIndex);
-  }
+  useEffect(() => {
+    if (clampedIndex !== selectedIndex) {
+      setSelectedIndex(clampedIndex);
+    }
+  }, [clampedIndex, selectedIndex]);
 
   const selectedAction = rows[clampedIndex]?.action;
   const hasAction = selectedAction && selectedAction.kind !== 'none' && selectedAction.kind !== 'managed-only';
@@ -1335,6 +1353,13 @@ export function PluginSettings({
     }
   }, [viewState.type, completePluginMenu]);
 
+  // Redirect legacy marketplace-menu viewState in an effect instead of during render.
+  useEffect(() => {
+    if (viewState.type === 'marketplace-menu') {
+      setViewState({ type: 'menu' });
+    }
+  }, [viewState.type]);
+
   // Render different views based on state
   if (viewState.type === 'help') {
     return (
@@ -1397,8 +1422,6 @@ export function PluginSettings({
   }
 
   if (viewState.type === 'marketplace-menu') {
-    // Show a simple menu for marketplace operations
-    setViewState({ type: 'menu' });
     return null;
   }
 

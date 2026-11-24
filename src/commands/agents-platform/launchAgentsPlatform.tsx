@@ -3,14 +3,25 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js';
-import { parseCronExpression } from '../../utils/cron.js';
+import { cronToHuman, parseCronExpression } from '../../utils/cron.js';
 import type { LocalJSXCommandCall, LocalJSXCommandOnDone } from '../../types/command.js';
-import { createAgent, deleteAgent, listAgents, runAgent } from './agentsApi.js';
+import { type AgentTrigger, createAgent, deleteAgent, listAgents, runAgent } from './agentsApi.js';
 import { AgentsPlatformView } from './AgentsPlatformView.js';
 import { parseAgentsPlatformArgs } from './parseArgs.js';
 import { launchCommand } from '../_shared/launchCommand.js';
 
 type AgentsPlatformViewProps = React.ComponentProps<typeof AgentsPlatformView>;
+
+function formatAgentRow(agent: AgentTrigger): string {
+  const schedule = cronToHuman(agent.cron_expr, { utc: true });
+  const nextRun = agent.next_run ? new Date(agent.next_run).toLocaleString() : '—';
+  return [
+    `- ${agent.id} · ${agent.status}`,
+    `  Schedule: ${schedule} (${agent.cron_expr})`,
+    `  Prompt: ${agent.prompt}`,
+    `  Next run: ${nextRun}`,
+  ].join('\n');
+}
 
 async function dispatchAgentsPlatform(
   parsed: ReturnType<typeof parseAgentsPlatformArgs>,
@@ -20,9 +31,12 @@ async function dispatchAgentsPlatform(
     logEvent('tengu_agents_platform_list', {});
     try {
       const agents = await listAgents();
-      onDone(agents.length === 0 ? 'No scheduled agents found.' : `${agents.length} scheduled agent(s).`, {
-        display: 'system',
-      });
+      onDone(
+        agents.length === 0
+          ? 'No scheduled agents found. Use /agents-platform create <cron> <prompt> to create one.'
+          : `${agents.length} scheduled agent(s).\n${agents.map(formatAgentRow).join('\n')}`,
+        { display: 'system' },
+      );
       return { mode: 'list', agents };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -53,7 +67,11 @@ async function dispatchAgentsPlatform(
     });
     try {
       const agent = await createAgent(cron, prompt);
-      onDone(`Agent created: ${agent.id}`, { display: 'system' });
+      const schedule = cronToHuman(agent.cron_expr, { utc: true });
+      onDone(
+        `Agent created: ${agent.id}\nSchedule: ${schedule} (${agent.cron_expr})\nPrompt: ${agent.prompt}\nStatus: ${agent.status}`,
+        { display: 'system' },
+      );
       return { mode: 'created', agent };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

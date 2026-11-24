@@ -46,35 +46,49 @@ export function AddMarketplace({
   cliMode = false,
 }: Props): React.ReactNode {
   const hasAttemptedAutoAdd = useRef(false);
+  const mountedRef = useRef(true);
+  const isLoadingRef = useRef(false);
   const [isLoading, setLoading] = useState(false);
   const [progressMessage, setProgressMessage] = useState<string>('');
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const handleAdd = async () => {
+    if (isLoadingRef.current) return;
     const input = inputValue.trim();
     if (!input) {
       setError('Please enter a marketplace source');
       return;
     }
 
-    const parsed = await parseMarketplaceInput(input);
-    if (!parsed) {
-      setError('Invalid marketplace source format. Try: owner/repo, https://..., or ./path');
-      return;
-    }
-
-    // Check if parseMarketplaceInput returned an error
-    if ('error' in parsed) {
-      setError(parsed.error);
-      return;
-    }
-
+    isLoadingRef.current = true;
     setError(null);
+    setLoading(true);
+    setProgressMessage('');
 
     try {
-      setLoading(true);
-      setProgressMessage('');
+      const parsed = await parseMarketplaceInput(input);
+      if (!mountedRef.current) return;
+      if (!parsed) {
+        setError('Invalid marketplace source format. Try: owner/repo, https://..., or ./path');
+        return;
+      }
+
+      // Check if parseMarketplaceInput returned an error
+      if ('error' in parsed) {
+        setError(parsed.error);
+        return;
+      }
+
       const { name, resolvedSource } = await addMarketplaceSource(parsed, message => {
-        setProgressMessage(message);
+        if (mountedRef.current) {
+          setProgressMessage(message);
+        }
       });
       saveMarketplaceToSettings(name, { source: resolvedSource });
       clearAllCaches();
@@ -92,8 +106,7 @@ export function AddMarketplace({
         await onAddComplete();
       }
 
-      setProgressMessage('');
-      setLoading(false);
+      if (!mountedRef.current) return;
 
       if (cliMode) {
         // In CLI mode, set result to trigger completion
@@ -105,15 +118,20 @@ export function AddMarketplace({
     } catch (err) {
       const error = toError(err);
       logError(error);
+      if (!mountedRef.current) return;
       setError(error.message);
-      setProgressMessage('');
-      setLoading(false);
 
       if (cliMode) {
         // In CLI mode, set result with error to trigger completion
         setResult(re(`Error: ${error.message}`));
       } else {
         setResult(null);
+      }
+    } finally {
+      isLoadingRef.current = false;
+      if (mountedRef.current) {
+        setProgressMessage('');
+        setLoading(false);
       }
     }
   };

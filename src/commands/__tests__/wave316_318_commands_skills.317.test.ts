@@ -164,7 +164,7 @@ describe('Wave 316-318 Commands / Hooks / Skills / Tasks alignment', () => {
       'utf8',
     )
     expect(src).toContain(
-      'if (filterByPr === undefined || loading || filteredLogs.length > 0) return',
+      'if (selectedRef.current || filterByPr === undefined || loading || filteredLogs.length > 0) return',
     )
     expect(src).toContain('loadMoreLogs(50)')
   })

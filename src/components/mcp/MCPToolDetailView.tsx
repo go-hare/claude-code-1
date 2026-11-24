@@ -36,6 +36,8 @@ export function MCPToolDetailView({ tool, server, onBack }: Props): React.ReactN
   const limit = getMaxMcpDescriptionLength();
 
   React.useEffect(() => {
+    let cancelled = false;
+    setToolDescription('');
     async function loadDescription() {
       try {
         const desc = await tool.description(
@@ -53,12 +55,19 @@ export function MCPToolDetailView({ tool, server, onBack }: Props): React.ReactN
             tools: [],
           },
         );
-        setToolDescription(desc);
+        if (!cancelled) {
+          setToolDescription(desc);
+        }
       } catch {
-        setToolDescription('Failed to load description');
+        if (!cancelled) {
+          setToolDescription('Failed to load description');
+        }
       }
     }
     void loadDescription();
+    return () => {
+      cancelled = true;
+    };
   }, [tool]);
 
   const titleContent = (

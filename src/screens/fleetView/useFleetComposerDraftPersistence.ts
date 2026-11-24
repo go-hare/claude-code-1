@@ -1,18 +1,20 @@
 /**
  * densable qd @192241903 — Vk(AIt) + debounced qJt + exit fallback.
  */
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSessionServices } from '../../context/sessionServices.js'
 import { registerPreExitFlush } from '../../utils/cleanupRegistry.js'
 import { isHoverRestOn } from '../../utils/storageV5/hoverRestPin.js'
 import type { StorageV5 } from '../../utils/storageV5/createLocalFsBackend.js'
 import {
   clearFleetLauncherDraft,
+  clearFleetLauncherDraftSync,
   fleetComposerDraftForDisk,
   loadFleetLauncherDraft,
   parseFleetComposerDraftFromDisk,
   persistFleetLauncherDraft,
   persistFleetLauncherDraftAsync,
+  persistFleetLauncherDraftSync,
   type FleetLauncherDraftBody,
 } from './launcherDraft.js'
 
@@ -84,14 +86,31 @@ export function handOverFleetComposerDraft(
   return flushFleetComposerDraft(canonicalLauncherCwd, snapshot, storage)
 }
 
+export type FleetDraftHandOver = (() => Promise<void> | undefined) & {
+  rollback: () => void
+}
+
+function stringArraysEqual(
+  a: readonly string[],
+  b: readonly string[],
+): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 export function useFleetComposerDraftPersistence(input: {
   canonicalLauncherCwd: string
   snapshot: FleetComposerDraftSnapshot
   onRestore: (draft: FleetComposerDraftRestore) => void
-}): () => Promise<void> | undefined {
+}): FleetDraftHandOver {
   const { storageV5 } = useSessionServices()
   const storage = storageV5 as StorageV5 | undefined
   const preExitFlushedRef = useRef(false)
+  const handOverUnregisterRef = useRef<(() => void) | null>(null)
   const restoreOnceRef = useRef(false)
   const dirtyRef = useRef(false)
   const baselineRef = useRef<{
@@ -112,7 +131,7 @@ export function useFleetComposerDraftPersistence(input: {
         snapshotRef.current.query,
         snapshotRef.current.mode,
       ),
-      collapsed: snapshotRef.current.collapsed,
+      collapsed: [...snapshotRef.current.collapsed],
     }
   }, [input.canonicalLauncherCwd, storage])
 
@@ -138,9 +157,12 @@ export function useFleetComposerDraftPersistence(input: {
     const { query, mode, collapsed } = snapshotRef.current
     const q = fleetComposerDraftForDisk(query, mode)
     const prev = baselineRef.current
-    if (prev && (q !== prev.text || collapsed !== prev.collapsed)) {
+    if (
+      prev &&
+      (q !== prev.text || !stringArraysEqual(collapsed, prev.collapsed))
+    ) {
       prev.text = q
-      prev.collapsed = collapsed
+      prev.collapsed = [...collapsed]
       dirtyRef.current = true
     }
     if (!dirtyRef.current) return
@@ -164,13 +186,28 @@ export function useFleetComposerDraftPersistence(input: {
 
   useEffect(() => {
     return () => {
+      handOverUnregisterRef.current?.()
+      handOverUnregisterRef.current = null
       if (dirtyRef.current && !preExitFlushedRef.current) {
         dirtyRef.current = false
-        void flushFleetComposerDraft(
-          cwdRef.current,
-          snapshotRef.current,
-          storageRef.current,
-        )
+        if (isHoverRestOn() && storageRef.current !== undefined) {
+          void flushFleetComposerDraft(
+            cwdRef.current,
+            snapshotRef.current,
+            storageRef.current,
+          )
+        } else {
+          const { query, mode, collapsed } = snapshotRef.current
+          const q = fleetComposerDraftForDisk(query, mode)
+          if (q || collapsed.length > 0) {
+            persistFleetLauncherDraftSync(cwdRef.current, {
+              q,
+              collapsed: [...collapsed],
+            })
+          } else {
+            clearFleetLauncherDraftSync(cwdRef.current)
+          }
+        }
       }
     }
   }, [])
@@ -198,11 +235,10 @@ export function useFleetComposerDraftPersistence(input: {
       const { query, mode, collapsed } = snapshotRef.current
       const q = fleetComposerDraftForDisk(query, mode)
       if (q || collapsed.length > 0) {
-        void persistFleetLauncherDraft(
-          input.canonicalLauncherCwd,
-          { q, collapsed: [...collapsed] },
-          storage,
-        )
+        persistFleetLauncherDraftSync(input.canonicalLauncherCwd, {
+          q,
+          collapsed: [...collapsed],
+        })
       }
     }
     process.on('exit', flush)
@@ -212,7 +248,7 @@ export function useFleetComposerDraftPersistence(input: {
     }
   }, [input.canonicalLauncherCwd, storage])
 
-  return useCallback(() => {
+  const handOver = useCallback(() => {
     try {
       const wasDirty = dirtyRef.current
       dirtyRef.current = false
@@ -224,13 +260,25 @@ export function useFleetComposerDraftPersistence(input: {
       )
       if (pending) {
         preExitFlushedRef.current = true
-        registerPreExitFlush(() => pending)
+        handOverUnregisterRef.current?.()
+        handOverUnregisterRef.current = registerPreExitFlush(() => pending)
       }
       return pending
     } catch {
       return undefined
     }
   }, [])
+
+  const rollback = useCallback(() => {
+    preExitFlushedRef.current = false
+    handOverUnregisterRef.current?.()
+    handOverUnregisterRef.current = null
+  }, [])
+
+  return useMemo(() => {
+    const fn: FleetDraftHandOver = Object.assign(() => handOver(), { rollback })
+    return fn
+  }, [handOver, rollback])
 }
 
 function onRestoreSafe(

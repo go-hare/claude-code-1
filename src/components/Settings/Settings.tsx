@@ -79,7 +79,7 @@ export function Settings({ onClose, context, defaultTab, openedForCost = false }
       </Suspense>
     </Tab>,
     <Tab key="usage" title="Usage">
-      <Usage openedForCost={openedForCost} />
+      <Usage openedForCost={openedForCost} onClose={onClose} />
     </Tab>,
     <Tab key="stats" title="Stats">
       <Stats onClose={onClose} />

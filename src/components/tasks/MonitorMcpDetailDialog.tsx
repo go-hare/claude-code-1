@@ -35,7 +35,7 @@ export function MonitorMcpDetailDialog({ task, onBack, onKill }: Props): React.R
   };
 
   return (
-    <Box flexDirection="column" tabIndex={0} borderStyle="round" onKeyDown={handleKeyDown}>
+    <Box flexDirection="column" tabIndex={0} autoFocus borderStyle="round" onKeyDown={handleKeyDown}>
       <Dialog
         title="MCP Monitor"
         subtitle={

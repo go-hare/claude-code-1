@@ -14,6 +14,9 @@ import {
   listMemories,
   listStores,
   listVersions,
+  type Memory,
+  type MemoryStore,
+  type MemoryVersion,
   redactVersion,
   updateMemory,
 } from './memoryStoresApi.js';
@@ -23,6 +26,42 @@ import { launchCommand } from '../_shared/launchCommand.js';
 
 type MemoryStoresViewProps = React.ComponentProps<typeof MemoryStoresView>;
 
+function formatStoreRow(store: MemoryStore): string {
+  const status = store.archived_at ? 'archived' : 'active';
+  const ns = store.namespace ? ` · ns: ${store.namespace}` : '';
+  return `- ${store.memory_store_id} · ${store.name} · ${status}${ns}`;
+}
+
+function formatStoreDetail(store: MemoryStore): string {
+  const lines = [
+    `ID: ${store.memory_store_id}`,
+    `Name: ${store.name}`,
+    ...(store.namespace ? [`Namespace: ${store.namespace}`] : []),
+    `Status: ${store.archived_at ? 'archived' : 'active'}`,
+  ];
+  if (store.created_at) lines.push(`Created: ${new Date(store.created_at).toLocaleString()}`);
+  if (store.archived_at) lines.push(`Archived: ${new Date(store.archived_at).toLocaleString()}`);
+  return lines.join('\n');
+}
+
+function formatMemoryRow(mem: Memory): string {
+  const preview = mem.content.length > 80 ? `${mem.content.slice(0, 80)}…` : mem.content;
+  return `- ${mem.memory_id}: ${preview}`;
+}
+
+function formatMemoryDetail(mem: Memory): string {
+  const lines = [`ID: ${mem.memory_id}`, `Store: ${mem.memory_store_id}`, `Content: ${mem.content}`];
+  if (mem.created_at) lines.push(`Created: ${new Date(mem.created_at).toLocaleString()}`);
+  if (mem.updated_at) lines.push(`Updated: ${new Date(mem.updated_at).toLocaleString()}`);
+  return lines.join('\n');
+}
+
+function formatVersionRow(ver: MemoryVersion): string {
+  const redacted = ver.redacted_at ? ' · redacted' : '';
+  const created = ver.created_at ? ` · created ${new Date(ver.created_at).toLocaleString()}` : '';
+  return `- ${ver.version_id}${redacted}${created}`;
+}
+
 async function dispatchMemoryStores(
   parsed: ReturnType<typeof parseMemoryStoresArgs>,
   onDone: LocalJSXCommandOnDone,
@@ -31,9 +70,12 @@ async function dispatchMemoryStores(
     logEvent('tengu_memory_stores_list', {});
     try {
       const stores = await listStores();
-      onDone(stores.length === 0 ? 'No memory stores found.' : `${stores.length} memory store(s).`, {
-        display: 'system',
-      });
+      onDone(
+        stores.length === 0
+          ? 'No memory stores found. Use /memory-stores create <name> to create one.'
+          : `${stores.length} memory store(s).\n${stores.map(formatStoreRow).join('\n')}`,
+        { display: 'system' },
+      );
       return { mode: 'list', stores };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -52,7 +94,7 @@ async function dispatchMemoryStores(
     });
     try {
       const store = await getStore(id);
-      onDone(`Memory store ${id} fetched.`, { display: 'system' });
+      onDone(`Memory store ${id} fetched.\n${formatStoreDetail(store)}`, { display: 'system' });
       return { mode: 'detail', store };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -71,7 +113,10 @@ async function dispatchMemoryStores(
     });
     try {
       const store = await createStore(name);
-      onDone(`Memory store created: ${store.memory_store_id}`, { display: 'system' });
+      onDone(
+        `Memory store created: ${store.memory_store_id}\nName: ${store.name}${store.namespace ? `\nNamespace: ${store.namespace}` : ''}`,
+        { display: 'system' },
+      );
       return { mode: 'created', store };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -90,7 +135,8 @@ async function dispatchMemoryStores(
     });
     try {
       const store = await archiveStore(id);
-      onDone(`Memory store ${id} archived.`, { display: 'system' });
+      const archivedAt = store.archived_at ? `\nArchived at: ${new Date(store.archived_at).toLocaleString()}` : '';
+      onDone(`Memory store ${id} archived.${archivedAt}`, { display: 'system' });
       return { mode: 'archived', store };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -112,7 +158,7 @@ async function dispatchMemoryStores(
       onDone(
         memories.length === 0
           ? `No memories in store ${storeId}.`
-          : `${memories.length} memory(ies) in store ${storeId}.`,
+          : `${memories.length} memory(ies) in store ${storeId}.\n${memories.map(formatMemoryRow).join('\n')}`,
         { display: 'system' },
       );
       return { mode: 'memory-list', storeId, memories };
@@ -133,7 +179,9 @@ async function dispatchMemoryStores(
     });
     try {
       const memory = await createMemory(storeId, content);
-      onDone(`Memory created: ${memory.memory_id}`, { display: 'system' });
+      onDone(`Memory created: ${memory.memory_id}\nStore: ${memory.memory_store_id}\nContent: ${memory.content}`, {
+        display: 'system',
+      });
       return { mode: 'memory-created', memory };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -152,7 +200,7 @@ async function dispatchMemoryStores(
     });
     try {
       const memory = await getMemory(storeId, memoryId);
-      onDone(`Memory ${memoryId} fetched.`, { display: 'system' });
+      onDone(`Memory ${memoryId} fetched.\n${formatMemoryDetail(memory)}`, { display: 'system' });
       return { mode: 'memory-detail', memory };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -171,7 +219,7 @@ async function dispatchMemoryStores(
     });
     try {
       const memory = await updateMemory(storeId, memoryId, content);
-      onDone(`Memory ${memoryId} updated.`, { display: 'system' });
+      onDone(`Memory ${memoryId} updated.\nContent: ${memory.content}`, { display: 'system' });
       return { mode: 'memory-updated', memory };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -212,7 +260,7 @@ async function dispatchMemoryStores(
       onDone(
         versions.length === 0
           ? `No memory versions found for store ${storeId}.`
-          : `${versions.length} version(s) in store ${storeId}.`,
+          : `${versions.length} version(s) in store ${storeId}.\n${versions.map(formatVersionRow).join('\n')}`,
         { display: 'system' },
       );
       return { mode: 'versions', storeId, versions };
@@ -234,7 +282,8 @@ async function dispatchMemoryStores(
   });
   try {
     const version = await redactVersion(storeId, versionId);
-    onDone(`Version ${versionId} redacted.`, { display: 'system' });
+    const redactedAt = version.redacted_at ? `\nRedacted at: ${new Date(version.redacted_at).toLocaleString()}` : '';
+    onDone(`Version ${versionId} redacted.${redactedAt}`, { display: 'system' });
     return { mode: 'redacted', version };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

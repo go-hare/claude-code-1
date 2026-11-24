@@ -65,7 +65,7 @@ export function MCPToolListView({ server, startOn, defaultFocusIndex, onSelectTo
   const blockedCount = orderedTools.filter(tool => tool.mcpInfo?.effectiveMaxPermission === 'blocked').length;
   const enabledCount = orderedTools.length - blockedCount;
 
-  const toolOptions = orderedTools.map((tool, index) => {
+  const toolOptions = orderedTools.map(tool => {
     const toolName = getMcpDisplayName(tool.name, server.name);
     const fullDisplayName = tool.userFacingName ? tool.userFacingName({}) : toolName;
     // Extract just the tool display name without server prefix
@@ -76,7 +76,7 @@ export function MCPToolListView({ server, startOn, defaultFocusIndex, onSelectTo
     if (isBlocked) {
       return {
         label: displayName,
-        value: index.toString(),
+        value: tool.name,
         blocked: true,
         description: 'disabled by your organization',
         descriptionColor: 'error' as const,
@@ -94,12 +94,14 @@ export function MCPToolListView({ server, startOn, defaultFocusIndex, onSelectTo
 
     return {
       label: displayName,
-      value: index.toString(),
+      value: tool.name,
       blocked: false,
       description: annotations.length > 0 ? annotations.join(', ') : undefined,
       descriptionColor: isDestructive ? 'error' : isReadOnly ? 'success' : undefined,
     };
   });
+
+  const initialFocusValue = orderedTools[initialFocusIndex]?.name;
 
   const focusedItem = showBlockedWarning ? toolOptions[focusedIndex] : undefined;
   const subtitle = focusedItem?.blocked ? (
@@ -132,15 +134,18 @@ export function MCPToolListView({ server, startOn, defaultFocusIndex, onSelectTo
       ) : (
         <Select
           options={toolOptions}
-          defaultFocusValue={String(initialFocusIndex)}
+          defaultFocusValue={initialFocusValue}
           hideIndexes={!isScreenReaderModeEnabled()}
           disablePrintableKeybindings={!isScreenReaderModeEnabled()}
           onFocus={value => {
-            setFocusedIndex(parseInt(value, 10));
+            const index = orderedTools.findIndex(t => t.name === value);
+            if (index >= 0) {
+              setFocusedIndex(index);
+            }
             setShowBlockedWarning(false);
           }}
           onChange={value => {
-            const index = parseInt(value, 10);
+            const index = orderedTools.findIndex(t => t.name === value);
             const item = toolOptions[index];
             const tool = orderedTools[index];
             if (!item || !tool) return;

@@ -37,6 +37,14 @@ function MCPToggle({
   const mcpClients = useAppState(s => s.mcp.clients);
   const toggleMcpServer = useMcpToggleEnabled();
   const didRun = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (didRun.current) return;
@@ -44,29 +52,53 @@ function MCPToggle({
 
     const isEnabling = action === 'enable';
     const clients = mcpClients.filter(c => c.name !== 'ide');
-    const toToggle =
-      target === 'all'
-        ? clients.filter(c => (isEnabling ? c.type === 'disabled' : c.type !== 'disabled'))
-        : clients.filter(c => c.name === target);
 
-    if (toToggle.length === 0) {
-      onComplete(
-        target === 'all'
-          ? `All MCP servers are already ${isEnabling ? 'enabled' : 'disabled'}`
-          : `MCP server "${target}" not found`,
-      );
+    if (target !== 'all') {
+      const match = clients.find(c => c.name === target);
+      if (!match) {
+        onComplete(`MCP server "${target}" not found`);
+        return;
+      }
+      const needsToggle = isEnabling ? match.type === 'disabled' : match.type !== 'disabled';
+      if (!needsToggle) {
+        onComplete(`MCP server "${target}" is already ${isEnabling ? 'enabled' : 'disabled'}`);
+        return;
+      }
+      void Promise.resolve(toggleMcpServer(match.name))
+        .then(() => {
+          if (mountedRef.current) {
+            onComplete(`MCP server "${target}" ${isEnabling ? 'enabled' : 'disabled'}`);
+          }
+        })
+        .catch(err => {
+          if (mountedRef.current) {
+            const msg = err instanceof Error ? err.message : String(err);
+            onComplete(`Failed to ${action} MCP server "${target}": ${msg}`);
+          }
+        });
       return;
     }
 
-    for (const s of toToggle) {
-      void toggleMcpServer(s.name);
+    const toToggle = clients.filter(c => (isEnabling ? c.type === 'disabled' : c.type !== 'disabled'));
+    if (toToggle.length === 0) {
+      onComplete(`All MCP servers are already ${isEnabling ? 'enabled' : 'disabled'}`);
+      return;
     }
 
-    onComplete(
-      target === 'all'
-        ? `${isEnabling ? 'Enabled' : 'Disabled'} ${toToggle.length} MCP server(s)`
-        : `MCP server "${target}" ${isEnabling ? 'enabled' : 'disabled'}`,
-    );
+    void Promise.allSettled(toToggle.map(s => toggleMcpServer(s.name))).then(results => {
+      if (!mountedRef.current) return;
+      const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      const succeeded = results.length - failures.length;
+      if (failures.length === 0) {
+        onComplete(`${isEnabling ? 'Enabled' : 'Disabled'} ${succeeded} MCP server(s)`);
+      } else {
+        const firstErr =
+          failures[0]!.reason instanceof Error ? failures[0]!.reason.message : String(failures[0]!.reason);
+        onComplete(
+          `${isEnabling ? 'Enabled' : 'Disabled'} ${succeeded}/${results.length} MCP server(s) (${failures.length} failed: ${firstErr})`,
+        );
+      }
+    });
   }, [action, target, mcpClients, toggleMcpServer, onComplete]);
 
   return null;

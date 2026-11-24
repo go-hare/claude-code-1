@@ -299,7 +299,10 @@ export async function relaunchAgentsView(input: {
   typedAgent?: string
   extraArgs?: string[]
   /** Official #1764 + #1904 (`onShutdownClaimed: handOverDraft`). */
-  handOverDraft?: () => Promise<void> | undefined | void
+  handOverDraft?: (() => Promise<void> | undefined | void) & {
+    rollback?: () => void
+  }
+  onHandOverRollback?: () => void
   onError?: (msg: string) => void
 }): Promise<void> {
   const {
@@ -309,6 +312,7 @@ export async function relaunchAgentsView(input: {
     typedAgent,
     extraArgs,
     handOverDraft,
+    onHandOverRollback,
     onError,
   } = input
 
@@ -367,8 +371,17 @@ export async function relaunchAgentsView(input: {
   await handOverDraft?.()
 
   writeSwitchingPreSpawnMessage()
-  const result = spawnCliRelaunch({ args, env })
+  let result: ReturnType<typeof spawnCliRelaunch>
+  try {
+    result = spawnCliRelaunch({ args, env })
+  } catch (err) {
+    onHandOverRollback?.()
+    handOverDraft?.rollback?.()
+    throw err
+  }
   if (!result.ok) {
+    onHandOverRollback?.()
+    handOverDraft?.rollback?.()
     if (mode === 'manual') {
       onError?.(`Couldn't switch to the latest build — ${result.error}`)
     }

@@ -298,6 +298,7 @@ function LocalMemoryPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.
         title="Local Memory"
         subtitle={`${MENU.length} actions`}
         onCancel={() => closeWith('Local memory panel dismissed')}
+        isCancelActive={step.kind === 'menu'}
         color="background"
         hideInputGuide
       >
@@ -319,7 +320,13 @@ function LocalMemoryPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.
   // Confirmation prompts
   if (step.kind === 'confirm-archive') {
     return (
-      <Dialog title="Confirm Archive" onCancel={() => transition({ kind: 'menu' })} color="warning" hideInputGuide>
+      <Dialog
+        title="Confirm Archive"
+        onCancel={() => transition({ kind: 'menu' })}
+        isCancelActive={false}
+        color="warning"
+        hideInputGuide
+      >
         <Box flexDirection="column">
           <Text>Archive store "{step.store}"? This renames it to *.archived.</Text>
           <Box marginTop={1}>
@@ -331,7 +338,13 @@ function LocalMemoryPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.
   }
   if (step.kind === 'confirm-overwrite') {
     return (
-      <Dialog title="Confirm Overwrite" onCancel={() => transition({ kind: 'menu' })} color="warning" hideInputGuide>
+      <Dialog
+        title="Confirm Overwrite"
+        onCancel={() => transition({ kind: 'menu' })}
+        isCancelActive={false}
+        color="warning"
+        hideInputGuide
+      >
         <Box flexDirection="column">
           <Text>
             Entry "{step.store}/{step.key}" already exists. Overwrite with new value ({step.value.length} chars)?
@@ -412,6 +425,7 @@ function LocalMemoryPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.
     <Dialog
       title={`Local Memory · ${step.kind.replace('collect-', '').toUpperCase()}`}
       onCancel={() => transition({ kind: 'menu' })}
+      isCancelActive={false}
       color="background"
       hideInputGuide
     >

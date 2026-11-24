@@ -13,16 +13,16 @@
 
 import { basename, resolve } from 'path';
 import * as React from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { Select } from '../CustomSelect/select.js';
 import type { OptionWithDescription } from '../CustomSelect/select.js';
 import { PermissionDialog } from '../permissions/PermissionDialog.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import TextInput from '../TextInput.js';
-import { type CronTask, upsertCronTask } from '../../utils/cronTasks.js';
+import { type CronTask, removeCronTasks, upsertCronTask } from '../../utils/cronTasks.js';
 import { parseScheduleInput } from '../../utils/cron.js';
-import { getOriginalCwd } from '../../bootstrap/state.js';
+import { getOriginalCwd, getProjectRoot } from '../../bootstrap/state.js';
 import { errorMessage } from '../../utils/errors.js';
 
 function slugify(s: string): string {
@@ -56,16 +56,24 @@ export function ScheduledTaskFormDialog({
   prefill,
   defaultDir,
   onCancel,
-  onDone,
+  onDone: _onDone,
   onSaved,
 }: Props): React.ReactNode {
   useRegisterOverlay('daemon-hub-scheduled-form');
   const isEdit = prefill !== undefined;
-  const cwd = defaultDir ?? getOriginalCwd();
+  const cwd = defaultDir ?? prefill?.createdInProject ?? (getProjectRoot() || getOriginalCwd());
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const [prompt, setPrompt] = useState(prefill?.prompt ?? '');
   const [schedule, setSchedule] = useState(prefill?.cron ?? '');
-  const [dirText, setDirText] = useState(prefill ? cwd : cwd);
+  const [dirText, setDirText] = useState(cwd);
   const [id, setId] = useState(prefill?.id ?? '');
   const [idUserEdited, setIdUserEdited] = useState(isEdit);
   const [phase, setPhase] = useState<Phase>('form');
@@ -116,22 +124,30 @@ export function ScheduledTaskFormDialog({
     setBusy(true);
     try {
       // densable IBt always recurring for hub form
-      const result = await upsertCronTask({
-        id: taskId,
-        cron: parsed.cron,
-        prompt: prompt.trim(),
-        recurring: true,
-        enabled: isEdit && prefill ? prefill.enabled !== false : true,
-      });
+      await upsertCronTask(
+        {
+          id: taskId,
+          cron: parsed.cron,
+          prompt: prompt.trim(),
+          recurring: true,
+          enabled: isEdit && prefill ? prefill.enabled !== false : true,
+        },
+        resolvedDir,
+      );
+      // If editing and the task id or directory changed, remove the previous entry so it doesn't duplicate.
+      const prevDir = prefill?.createdInProject ?? (defaultDir ? resolve(defaultDir) : undefined);
+      const effectivePrevDir = resolve(prevDir ?? cwd);
+      if (isEdit && prefill && (taskId !== prefill.id || resolvedDir !== effectivePrevDir)) {
+        await removeCronTasks([prefill.id], prevDir);
+      }
       await onSaved();
-      onDone(result === 'created' ? `Created scheduled task '${taskId}'.` : `Updated scheduled task '${taskId}'.`, {
-        display: 'system',
-      });
     } catch (err) {
-      setError(`Save failed: ${errorMessage(err)}`);
-      setBusy(false);
+      if (mountedRef.current) {
+        setError(`Save failed: ${errorMessage(err)}`);
+        setBusy(false);
+      }
     }
-  }, [busy, schedule, effectiveId, prompt, existingIds, isEdit, prefill, onSaved, onDone]);
+  }, [busy, schedule, effectiveId, prompt, existingIds, isEdit, prefill, resolvedDir, defaultDir, cwd, onSaved]);
 
   if (phase !== 'form') {
     const labelMap: Record<Exclude<Phase, 'form'>, string> = {

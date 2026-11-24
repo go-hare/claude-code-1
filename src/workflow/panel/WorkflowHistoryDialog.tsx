@@ -4,7 +4,7 @@
  * Live phase/agent monitor is Tasks → WorkflowDetailDialog, not this screen.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, type KeyboardEvent, useAnimationFrame } from '@anthropic/ink';
 import type { Theme } from '@anthropic/ink';
 import { useAppState, useAppStateStore, useSetAppState } from '../../state/AppState.js';
@@ -119,6 +119,7 @@ export function WorkflowHistoryDialog({
   const [mode, setMode] = useState<Mode>({ mode: 'list' });
   const [selected, setSelected] = useState(0);
   const [clockRef, now] = useAnimationFrame(1000);
+  const didAutoOpenRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,10 +160,16 @@ export function WorkflowHistoryDialog({
 
   // densable: single item → auto open detail once
   useEffect(() => {
-    if (!loading && items.length === 1 && mode.mode === 'list') {
-      setMode({ mode: 'detail', itemId: items[0]!.taskId });
+    if (!loading && items.length === 1 && mode.mode === 'list' && !didAutoOpenRef.current) {
+      didAutoOpenRef.current = true;
+      const only = items[0]!;
+      if (only.live && onOpenLiveDetail) {
+        onOpenLiveDetail(only.taskId);
+        return;
+      }
+      setMode({ mode: 'detail', itemId: only.taskId });
     }
-  }, [loading, items, mode.mode]);
+  }, [loading, items, mode.mode, onOpenLiveDetail]);
 
   // Keep list selection index aligned with pinned detail id when items re-sort.
   useEffect(() => {
@@ -242,7 +249,7 @@ export function WorkflowHistoryDialog({
     const elapsed = Math.max(0, (detailItem.endTime ?? now) - detailItem.startTime);
     const tok = formatTokens(detailItem.totalTokens);
     return (
-      <Box flexDirection="column" tabIndex={0} autoFocus borderStyle="round" onKeyDown={handleKeyDown}>
+      <Box ref={clockRef} flexDirection="column" tabIndex={0} autoFocus borderStyle="round" onKeyDown={handleKeyDown}>
         <Dialog
           title={detailItem.workflowName}
           subtitle={

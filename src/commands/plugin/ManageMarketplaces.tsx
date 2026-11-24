@@ -126,17 +126,46 @@ export function ManageMarketplaces({
   const [selectedMarketplace, setSelectedMarketplace] = useState<MarketplaceState | null>(null);
   const [detailsMenuIndex, setDetailsMenuIndex] = useState(0);
   const hasAttemptedAutoAction = useRef(false);
+  const mountedRef = useRef(true);
+  const isProcessingRef = useRef(false);
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  const scheduleTimeout = (fn: () => void, ms: number): void => {
+    const id = setTimeout(() => {
+      timersRef.current.delete(id);
+      if (mountedRef.current) {
+        fn();
+      }
+    }, ms);
+    timersRef.current.add(id);
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const timers = timersRef.current;
+    return () => {
+      mountedRef.current = false;
+      for (const t of timers) {
+        clearTimeout(t);
+      }
+      timers.clear();
+    };
+  }, []);
 
   // Load marketplaces and their installed plugins
   useEffect(() => {
+    let cancelled = false;
     async function loadMarketplaces() {
       try {
         const config = await loadKnownMarketplacesConfig();
+        if (cancelled) return;
         const { enabled, disabled } = await loadAllPlugins();
+        if (cancelled) return;
         const allPlugins = [...enabled, ...disabled];
 
         // Load marketplaces with graceful degradation
         const { marketplaces, failures } = await loadMarketplacesWithGracefulDegradation(config);
+        if (cancelled) return;
 
         const failureByName = new Map(failures.map(f => [f.name, f.error]));
         const states: MarketplaceState[] = [];
@@ -200,7 +229,9 @@ export function ManageMarketplaces({
               }
               setMarketplaceStates(newStates);
               // Apply the change immediately
-              setTimeout(applyChanges, 100, newStates);
+              scheduleTimeout(() => {
+                void applyChanges(newStates);
+              }, 100);
             } else if (targetState) {
               // No action - just show the details view for this marketplace
               setSelectedIndex(targetIndex + 1); // +1 because "Add Marketplace" is at index 0
@@ -212,15 +243,21 @@ export function ManageMarketplaces({
           }
         }
       } catch (err) {
+        if (cancelled) return;
         if (setError) {
           setError(err instanceof Error ? err.message : 'Failed to load marketplaces');
         }
         setProcessError(err instanceof Error ? err.message : 'Failed to load marketplaces');
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
     void loadMarketplaces();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetMarketplace, action, error]);
 
@@ -238,6 +275,8 @@ export function ManageMarketplaces({
 
   // Apply all pending changes
   const applyChanges = async (states?: MarketplaceState[]) => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
     const statesToProcess = states || marketplaceStates;
     const wasInDetailsView = internalView === 'details';
     setIsProcessing(true);
@@ -247,6 +286,10 @@ export function ManageMarketplaces({
 
     try {
       const settings = getSettingsForSource('userSettings');
+      // Accumulate enabledPlugins changes across batch removals instead of re-spreading the stale pre-loop snapshot.
+      const accumulatedEnabledPlugins: Record<string, boolean | string[] | undefined> = {
+        ...settings?.enabledPlugins,
+      };
       let updatedCount = 0;
       let removedCount = 0;
       const refreshedMarketplaces = new Set<string>();
@@ -256,14 +299,13 @@ export function ManageMarketplaces({
         if (state.pendingRemove) {
           // First uninstall all plugins from this marketplace
           if (state.installedPlugins && state.installedPlugins.length > 0) {
-            const newEnabledPlugins = { ...settings?.enabledPlugins };
             for (const plugin of state.installedPlugins) {
               const pluginId = createPluginId(plugin.name, state.name);
               // Mark as disabled/uninstalled
-              newEnabledPlugins[pluginId] = false;
+              accumulatedEnabledPlugins[pluginId] = false;
             }
             updateSettingsForSource('userSettings', {
-              enabledPlugins: newEnabledPlugins,
+              enabledPlugins: { ...accumulatedEnabledPlugins },
             });
           }
 
@@ -284,7 +326,9 @@ export function ManageMarketplaces({
           await refreshMarketplace(
             state.name,
             (message: string) => {
-              setProgressMessage(message);
+              if (mountedRef.current) {
+                setProgressMessage(message);
+              }
             },
             undefined,
             storageV5,
@@ -320,12 +364,17 @@ export function ManageMarketplaces({
         await onManageComplete();
       }
 
+      if (!mountedRef.current) return;
+
       // Reload marketplace data to show updated timestamps
       const config = await loadKnownMarketplacesConfig();
+      if (!mountedRef.current) return;
       const { enabled, disabled } = await loadAllPlugins();
+      if (!mountedRef.current) return;
       const allPlugins = [...enabled, ...disabled];
 
       const { marketplaces, failures: reloadFailures } = await loadMarketplacesWithGracefulDegradation(config);
+      if (!mountedRef.current) return;
       const reloadFailureByName = new Map(reloadFailures.map(f => [f.name, f.error]));
 
       const newStates: MarketplaceState[] = [];
@@ -381,12 +430,15 @@ export function ManageMarketplaces({
         } else {
           // Otherwise show result and exit to menu
           setResult(successMsg);
-          setTimeout(setViewState, 2000, { type: 'menu' as const });
+          scheduleTimeout(() => {
+            setViewState({ type: 'menu' as const });
+          }, 2000);
         }
       } else if (!wasInDetailsView) {
         setViewState({ type: 'menu' });
       }
     } catch (err) {
+      if (!mountedRef.current) return;
       const errorMsg = errorMessage(err);
       setProcessError(errorMsg);
       setProcessErrorTarget(wasInDetailsView && selectedMarketplace ? selectedMarketplace.name : null);
@@ -394,14 +446,17 @@ export function ManageMarketplaces({
         setError(errorMsg);
       }
     } finally {
-      setIsProcessing(false);
-      setProgressMessage(null);
+      isProcessingRef.current = false;
+      if (mountedRef.current) {
+        setIsProcessing(false);
+        setProgressMessage(null);
+      }
     }
   };
 
   // Handle confirming marketplace removal
   const confirmRemove = async () => {
-    if (!selectedMarketplace) return;
+    if (!selectedMarketplace || isProcessingRef.current) return;
 
     // Mark for removal and apply
     const newStates = marketplaceStates.map(state =>
@@ -453,6 +508,7 @@ export function ManageMarketplaces({
     const newAutoUpdate = !marketplace.autoUpdate;
     try {
       await setMarketplaceAutoUpdate(marketplace.name, newAutoUpdate);
+      if (!mountedRef.current) return;
 
       // Update local state
       setMarketplaceStates(prev =>
@@ -462,12 +518,13 @@ export function ManageMarketplaces({
       // Update selected marketplace reference
       setSelectedMarketplace(prev => (prev ? { ...prev, autoUpdate: newAutoUpdate } : prev));
     } catch (err) {
+      if (!mountedRef.current) return;
       setProcessError(err instanceof Error ? err.message : 'Failed to update setting');
       setProcessErrorTarget(marketplace.name);
     }
   };
 
-  // Escape in details or confirm-remove view - go back to list
+  // Escape in details view - go back to list (confirm-remove delegates Esc to PluginConfirmList.onCancel)
   useKeybinding(
     'confirm:no',
     () => {
@@ -476,7 +533,7 @@ export function ManageMarketplaces({
     },
     {
       context: 'Confirmation',
-      isActive: !isProcessing && (internalView === 'details' || internalView === 'confirm-remove'),
+      isActive: !isProcessing && internalView === 'details',
     },
   );
 

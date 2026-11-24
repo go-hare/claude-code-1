@@ -267,6 +267,14 @@ export function DiscoverPlugins({
   const [detailsMenuIndex, setDetailsMenuIndex] = useState(0);
   const [isInstalling, setIsInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Warning state for non-critical errors
   const [warning, setWarning] = useState<string | null>(null);
@@ -276,12 +284,15 @@ export function DiscoverPlugins({
 
   // Load all plugins from all marketplaces
   useEffect(() => {
+    let cancelled = false;
     async function loadAllPlugins() {
       try {
         const config = await loadKnownMarketplacesConfig();
+        if (cancelled) return;
 
         // Load marketplaces with graceful degradation
         const { marketplaces, failures } = await loadMarketplacesWithGracefulDegradation(config);
+        if (cancelled) return;
 
         // Collect all plugins from all marketplaces
         const allPlugins: InstallablePlugin[] = [];
@@ -310,6 +321,7 @@ export function DiscoverPlugins({
         // Fetch install counts and sort by popularity
         try {
           const counts = await getInstallCounts();
+          if (cancelled) return;
           setInstallCounts(counts);
 
           if (counts) {
@@ -325,6 +337,7 @@ export function DiscoverPlugins({
             uninstalledPlugins.sort((a, b) => a.entry.name.localeCompare(b.entry.name));
           }
         } catch (error) {
+          if (cancelled) return;
           // Log the error, then gracefully degrade to alphabetical sort
           logForDebugging(`Failed to fetch install counts: ${errorMessage(error)}`);
           uninstalledPlugins.sort((a, b) => a.entry.name.localeCompare(b.entry.name));
@@ -339,6 +352,7 @@ export function DiscoverPlugins({
             configuredMarketplaceCount: configuredCount,
             failedMarketplaceCount: failures.length,
           });
+          if (cancelled) return;
           setEmptyReason(reason);
         }
 
@@ -361,11 +375,14 @@ export function DiscoverPlugins({
           // densable 2.1.221 #29: unscoped catalog miss → refresh each marketplace → retry
           if (!foundPlugin) {
             for (const [name, entry] of Object.entries(config)) {
+              if (cancelled) return;
               logForDebugging(`Checking ${name} for new plugins…`);
               const outcome = await tryRefreshMarketplaceOnCatalogMiss(name, entry);
+              if (cancelled) return;
               if (outcome !== 'refreshed') continue;
               try {
                 const marketplace = await getMarketplace(name);
+                if (cancelled) return;
                 const plugin = marketplace?.plugins.find(p => p.name === targetPlugin);
                 if (plugin) {
                   const pluginId = createPluginId(plugin.name, name);
@@ -392,6 +409,7 @@ export function DiscoverPlugins({
             }
           }
 
+          if (cancelled) return;
           if (foundPlugin) {
             if (foundPlugin.isInstalled) {
               setError(
@@ -406,12 +424,18 @@ export function DiscoverPlugins({
           }
         }
       } catch (err) {
+        if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Failed to load plugins');
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
     void loadAllPlugins();
+    return () => {
+      cancelled = true;
+    };
   }, [setError, targetPlugin]);
 
   // Install selected plugins
@@ -465,6 +489,7 @@ export function DiscoverPlugins({
       }
     }
 
+    if (!mountedRef.current) return;
     setInstallingPlugins(new Set());
     setSelectedForInstall(new Set());
     clearAllCaches();
@@ -474,6 +499,15 @@ export function DiscoverPlugins({
     if (successCount > 0) {
       activateOutcome = await tryActivateInstalled([...new Set(installedIds)]);
     }
+
+    // densable: only mark needsRefresh when activate requires reload
+    if (successCount > 0 && activateOutcome === 'reload-required') {
+      if (onInstallComplete) {
+        await onInstallComplete();
+      }
+    }
+
+    if (!mountedRef.current) return;
 
     if (failureCount === 0) {
       const suffix = formatBatchInstallActivateSuffix(activateOutcome, successCount);
@@ -488,13 +522,6 @@ export function DiscoverPlugins({
             `Failed: ${formatFailureDetails(newFailedPlugins, false)}.${suffix}`,
         ),
       );
-    }
-
-    // densable: only mark needsRefresh when activate requires reload
-    if (successCount > 0 && activateOutcome === 'reload-required') {
-      if (onInstallComplete) {
-        await onInstallComplete();
-      }
     }
 
     setParentViewState({ type: 'menu' });
@@ -527,8 +554,11 @@ export function DiscoverPlugins({
       consentedEntryHelper: headersHelperPane.pinned(),
     });
 
+    if (!mountedRef.current) return;
+
     if (result.success) {
       const loaded = await findPluginOptionsTarget(plugin.pluginId);
+      if (!mountedRef.current) return;
       if (loaded) {
         setIsInstalling(false);
         setViewState({
@@ -540,10 +570,11 @@ export function DiscoverPlugins({
         return;
       }
       const outcome = await tryActivateInstalled(result.closure);
-      setResult(re(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`));
       if (outcome === 'reload-required' && onInstallComplete) {
         await onInstallComplete();
       }
+      if (!mountedRef.current) return;
+      setResult(re(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`));
       setParentViewState({ type: 'menu' });
     } else {
       setIsInstalling(false);
@@ -567,7 +598,7 @@ export function DiscoverPlugins({
     },
     {
       context: 'Confirmation',
-      isActive: viewState === 'plugin-details',
+      isActive: viewState === 'plugin-details' && !isInstalling,
     },
   );
 
@@ -749,10 +780,11 @@ export function DiscoverPlugins({
     const { plugin, pluginId, closure } = viewState;
     async function finish(baseMsg: string): Promise<void> {
       const outcome = await tryActivateInstalled(closure.length > 0 ? closure : [pluginId]);
-      setResult(re(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`));
       if (outcome === 'reload-required' && onInstallComplete) {
-        void onInstallComplete();
+        await onInstallComplete();
       }
+      if (!mountedRef.current) return;
+      setResult(re(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`));
       setParentViewState({ type: 'menu' });
     }
     return (

@@ -2,7 +2,7 @@
  * densable 2.1.248 chunk-j2hdyj1b — fleet launcher composer draft (qd / AIt / BLn).
  */
 import { createHash } from 'crypto'
-import { realpathSync } from 'fs'
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { z } from 'zod/v4'
@@ -191,6 +191,42 @@ export async function persistFleetLauncherDraft(
   storageV5?: StorageV5 | null,
 ): Promise<void> {
   await persistFleetLauncherDraftAsync(canonicalLauncherCwd, body, storageV5)
+}
+
+/**
+ * Synchronous draft persist fallback for `process.on('exit')` and immediate
+ * unmount teardown where async `fs/promises` writes are dropped by the runtime.
+ */
+export function persistFleetLauncherDraftSync(
+  canonicalLauncherCwd: string,
+  body: FleetLauncherDraftBody,
+): boolean {
+  const payload = stampDraft(body)
+  const serialized = jsonStringify(payload)
+  try {
+    mkdirSync(jobsRootDir(), { recursive: true })
+    writeFileSync(fleetLauncherDraftPath(canonicalLauncherCwd), serialized, {
+      mode: 0o666 & ~process.umask(),
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Synchronous draft deletion fallback for immediate teardown paths. */
+export function clearFleetLauncherDraftSync(
+  canonicalLauncherCwd: string,
+): boolean {
+  try {
+    rmSync(fleetLauncherDraftPath(canonicalLauncherCwd), {
+      recursive: true,
+      force: true,
+    })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** densable `KJt` — delete draft file / storage key. */

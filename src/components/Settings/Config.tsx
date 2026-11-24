@@ -203,7 +203,13 @@ import {
 import type { SettingsJson } from '../../utils/settings/types.js';
 import type { ThemeSetting } from '../../utils/theme.js';
 import { getThemeSetting } from '../../utils/themeSetting.js';
-import { getIsRemoteMode, getUserMsgOptIn, setUserMsgOptIn } from '../../bootstrap/state.js';
+import {
+  clearRefusalFallbackModelLatch,
+  getIsRemoteMode,
+  getUserMsgOptIn,
+  setUserMsgOptIn,
+} from '../../bootstrap/state.js';
+import { saveSessionModel } from '../../utils/sessionStorage.js';
 import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
 import { TIME_FORMAT_PRESETS } from 'src/utils/timeFormat.js';
 import { getClaudeConfigHomeDir, isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
@@ -426,6 +432,7 @@ export type PluginConfigSettingsOpts = {
   storageV5?: unknown;
   refusal?: string;
   onPersisted?: () => void;
+  onSaveResult?: (result: { error?: Error | null } | undefined) => void;
 };
 
 export { pluginConfigIdAliases };
@@ -525,13 +532,17 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
       const current = loadPluginConfigFromAllowedSources(pluginId).options?.[key] ?? field.default;
       const persist = async (next: PluginConfigOptionValue): Promise<void> => {
         if (lockReason !== undefined) return;
-        await persistPluginConfigOption(plugin, key, next, opts.storageV5);
-        opts.onPersisted?.();
+        const result = await persistPluginConfigOption(plugin, key, next, opts.storageV5);
+        opts.onSaveResult?.(result);
+        if (!result?.error) {
+          opts.onPersisted?.();
+        }
       };
       const base = {
         id,
         label: title,
         searchText: `${title} ${plugin.name} ${description}`,
+        ...(lockReason !== undefined ? { lock: { reason: lockReason } } : {}),
       };
       if (field.type === 'boolean') {
         rows.push({
@@ -868,6 +879,7 @@ export type ConfigHkeBag = {
   setChanges: React.Dispatch<React.SetStateAction<{ [key: string]: unknown }>>;
   onChangeMainModelConfig: (value: string | null) => void;
   onChangeVerbose: (value: boolean) => void;
+  reportSaveResult?: <T extends { error?: Error | null } | undefined>(result: T) => T;
 };
 
 /**
@@ -905,6 +917,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
     setChanges,
     onChangeMainModelConfig,
     onChangeVerbose,
+    reportSaveResult,
   } = n;
   void setAppState;
   void setChanges;
@@ -942,9 +955,11 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   ...prev,
                   idleCompaction,
                 }));
-                const { error } = updateSettingsForSource('userSettings', {
+                const res = updateSettingsForSource('userSettings', {
                   idleCompaction,
                 });
+                reportSaveResult?.(res);
+                const { error } = res;
                 if (error) {
                   setSettingsData(prev => ({
                     ...prev,
@@ -1412,11 +1427,12 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             {
               id: 'timestamps',
               label: 'Show message timestamps',
-              value: globalConfig.showMessageTimestamps ?? false,
+              value: settingsData?.showMessageTimestamps ?? globalConfig.showMessageTimestamps ?? false,
               type: 'boolean' as const,
               onChange(showMessageTimestamps: boolean) {
                 B('showMessageTimestamps', showMessageTimestamps);
                 W(current => ({ ...current, showMessageTimestamps }));
+                setSettingsData(prev => ({ ...prev, showMessageTimestamps }));
                 setGlobalConfig({ ...getGlobalConfig(), showMessageTimestamps });
                 setAppState(prev => ({ ...prev, showMessageTimestamps }));
                 logEvent('tengu_show_message_timestamps_setting_changed', {
@@ -1459,9 +1475,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
           const validatedMode = isExternalPermissionMode(parsedMode)
             ? toExternalPermissionMode(parsedMode)
             : parsedMode;
+          const userPerms = getSettingsForSource('userSettings')?.permissions;
           const result = F({
             permissions: {
-              ...settingsData?.permissions,
+              ...userPerms,
               defaultMode: validatedMode as (typeof PERMISSION_MODES)[number],
             },
           });
@@ -1822,7 +1839,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               type: 'enum' as const,
               onChange(selected: string) {
                 const defaultView = selected === 'default' ? undefined : (selected as 'chat' | 'transcript');
-                updateSettingsForSource('localSettings', { defaultView });
+                const saveResult = updateSettingsForSource('localSettings', { defaultView });
+                reportSaveResult?.(saveResult);
                 setSettingsData(prev => ({ ...prev, defaultView }));
                 const nextBrief = defaultView === 'chat';
                 setAppState(prev => {
@@ -2402,6 +2420,9 @@ export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHke
     setAppState: context.setAppState,
     setChanges: noopSetChanges,
     onChangeMainModelConfig(value) {
+      clearRefusalFallbackModelLatch('model_pick');
+      F({ model: value ?? undefined });
+      saveSessionModel(value);
       if (isFastModeEnabled()) clearFastModeCooldown();
       context.setAppState(prev => {
         const prevFast = !!prev.fastMode;
@@ -2701,12 +2722,20 @@ export function Config({
 
   const autoUpdaterDisabledReason = getAutoUpdaterDisabledReason();
 
-  function onChangeMainModelConfig(value: string | null): void {
+  const saveModelAsDefaultRef = useRef(false);
+
+  function onChangeMainModelConfig(value: string | null, persistAsDefault = false): void {
     const previousModel = mainLoopModel;
+    clearRefusalFallbackModelLatch('model_pick');
     logEvent('tengu_config_model_changed', {
       from_model: previousModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       to_model: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
+    if (persistAsDefault) {
+      F({ model: value ?? undefined });
+      setSettingsData(prev => ({ ...prev, model: value ?? undefined }));
+    }
+    saveSessionModel(value);
     // densable 2.1.218 #31 — Rft/uU/dU on `/config model=` path
     if (isFastModeEnabled()) {
       clearFastModeCooldown();
@@ -2790,10 +2819,12 @@ export function Config({
     setChanges,
     onChangeMainModelConfig,
     onChangeVerbose,
+    reportSaveResult,
   });
   const settingsItems: Setting[] = weConfigPluginRows(coreSettings, enabledPlugins, {
     storageV5,
     ...(getIsRemoteMode() ? { refusal: PLUGIN_CONFIG_REMOTE_REFUSAL } : {}),
+    onSaveResult: reportSaveResult,
     onPersisted() {
       setPluginConfigEpoch(n => n + 1);
     },
@@ -3045,8 +3076,11 @@ export function Config({
     if (globalConfig.showTurnDuration !== initialConfig.current.showTurnDuration) {
       formattedChanges.push(`${globalConfig.showTurnDuration ? 'Enabled' : 'Disabled'} turn duration`);
     }
-    if (globalConfig.showMessageTimestamps !== initialConfig.current.showMessageTimestamps) {
-      formattedChanges.push(`${globalConfig.showMessageTimestamps ? 'Enabled' : 'Disabled'} message timestamps`);
+    const nextShowTimestamps = settingsData?.showMessageTimestamps ?? globalConfig.showMessageTimestamps;
+    const initialShowTimestamps =
+      initialSettingsData.current?.showMessageTimestamps ?? initialConfig.current.showMessageTimestamps;
+    if (nextShowTimestamps !== initialShowTimestamps) {
+      formattedChanges.push(`${nextShowTimestamps ? 'Enabled' : 'Disabled'} message timestamps`);
     }
     if (
       (settingsData?.precomputeCompactionEnabled ?? false) !==
@@ -3085,6 +3119,11 @@ export function Config({
     currentOutputStyle,
     currentLanguage,
     settingsData?.autoUpdatesChannel,
+    settingsData?.idleCompaction,
+    settingsData?.autoContinueAtUsageLimit,
+    settingsData?.wheelScrollAccelerationEnabled,
+    settingsData?.precomputeCompactionEnabled,
+    settingsData?.showMessageTimestamps,
     isFastModeEnabled() ? (settingsData as Record<string, unknown> | undefined)?.fastMode : undefined,
     themeSetting,
     onClose,
@@ -3586,13 +3625,19 @@ export function Config({
         <>
           <ModelPicker
             initial={mainLoopModel}
+            onSetDefault={() => {
+              saveModelAsDefaultRef.current = true;
+            }}
             onSelect={(model, _effort) => {
+              const persistAsDefault = saveModelAsDefaultRef.current;
+              saveModelAsDefaultRef.current = false;
               isDirty.current = true;
-              onChangeMainModelConfig(model);
+              onChangeMainModelConfig(model, persistAsDefault);
               setShowSubmenu(null);
               setTabsHidden(false);
             }}
             onCancel={() => {
+              saveModelAsDefaultRef.current = false;
               setShowSubmenu(null);
               setTabsHidden(false);
             }}
@@ -3675,9 +3720,11 @@ export function Config({
               setTabsHidden(false);
 
               // Save to local settings
-              updateSettingsForSource('localSettings', {
-                outputStyle: style,
-              });
+              reportSaveResult(
+                updateSettingsForSource('localSettings', {
+                  outputStyle: style,
+                }),
+              );
 
               void logEvent('tengu_output_style_changed', {
                 style: (style ??

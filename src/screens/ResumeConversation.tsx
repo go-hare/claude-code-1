@@ -34,9 +34,18 @@ import { logError } from '../utils/log.js';
 import { createSystemMessage } from '../utils/messages.js';
 import {
   computeStandaloneAgentContext,
+  isCrossHostSessionHomeShape,
+  isUnsafeSessionRestorePath,
   restoreAgentFromSession,
+  restoreSessionStateFromLog,
   restoreWorktreeForResume,
 } from '../utils/sessionRestore.js';
+import {
+  preparePlanModeRestoreOnInteractiveResume,
+  takeRestoredWorkerForPlanResume,
+  type TranscriptPlanScanMessage,
+} from '../utils/permissions/planModeResume.js';
+import { restoreSessionTaskListId } from '../utils/tasks.js';
 import {
   adoptResumedSessionFile,
   enrichLogs,
@@ -84,6 +93,7 @@ type Props = {
   filterByPr?: boolean | number | string;
   thinkingConfig: ThinkingConfig;
   onTurnComplete?: (messages: Message[]) => void | Promise<void>;
+  onOpenAgents?: React.ComponentProps<typeof REPL>['onOpenAgents'];
 };
 
 export function ResumeConversation({
@@ -105,6 +115,7 @@ export function ResumeConversation({
   filterByPr,
   thinkingConfig,
   onTurnComplete,
+  onOpenAgents,
 }: Props): React.ReactNode {
   const { rows } = useTerminalSize();
   const agentDefinitions = useAppState(s => s.agentDefinitions);
@@ -120,6 +131,10 @@ export function ResumeConversation({
   const [showAllProjects, setShowAllProjects] = React.useState(false);
   /** densable q.current — ignore double-select while resuming */
   const selectingRef = React.useRef(false);
+  const selectedRef = React.useRef(false);
+  const mountedRef = React.useRef(true);
+  const loadGenerationRef = React.useRef(0);
+  const loadingMoreRef = React.useRef(false);
   const [resumeData, setResumeData] = React.useState<{
     messages: Message[];
     fileHistorySnapshots?: FileHistorySnapshot[];
@@ -127,6 +142,7 @@ export function ResumeConversation({
     agentName?: string;
     agentColor?: AgentColorName;
     mainThreadAgentDefinition?: AgentDefinition;
+    taskListId?: string;
   } | null>(null);
   const [crossProjectCommand, setCrossProjectCommand] = React.useState<string | null>(null);
   const sessionLogResultRef = React.useRef<SessionLogResult | null>(null);
@@ -157,8 +173,21 @@ export function ResumeConversation({
   useTerminalTitle(resumeData || terminalTitleDisabled ? null : 'claude · resume');
 
   React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const gen = ++loadGenerationRef.current;
+    loadingMoreRef.current = false;
     loadSameRepoMessageLogsProgressive(worktreePaths)
       .then(result => {
+        if (cancelled || !mountedRef.current || selectedRef.current || gen !== loadGenerationRef.current) {
+          return;
+        }
         sessionLogResultRef.current = result;
         logCountRef.current = result.logs.length;
         hasListRef.current = true;
@@ -167,42 +196,67 @@ export function ResumeConversation({
         setLoading(false);
       })
       .catch(error => {
+        if (cancelled || !mountedRef.current || selectedRef.current || gen !== loadGenerationRef.current) {
+          return;
+        }
         logError(error);
         hasListRef.current = true;
         setHasMore(false);
         setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [worktreePaths]);
 
   const loadMoreLogs = React.useCallback((count: number) => {
+    if (loadingMoreRef.current || selectedRef.current) return;
     const ref = sessionLogResultRef.current;
     if (!ref || ref.nextIndex >= ref.allStatLogs.length) {
       setHasMore(false);
       return;
     }
 
-    void enrichLogs(ref.allStatLogs, ref.nextIndex, count).then(result => {
-      if (sessionLogResultRef.current !== ref) return;
-      ref.nextIndex = result.nextIndex;
-      const more = ref.nextIndex < ref.allStatLogs.length;
-      setHasMore(more);
-      if (result.logs.length > 0) {
-        // enrichLogs returns fresh unshared objects — safe to mutate in place.
-        // Offset comes from logCountRef so the setLogs updater stays pure.
-        const offset = logCountRef.current;
-        result.logs.forEach((log, i) => {
-          log.value = offset + i;
-        });
-        setLogs(prev => prev.concat(result.logs));
-        logCountRef.current += result.logs.length;
-      } else if (more) {
-        loadMoreLogs(count);
-      }
-    });
+    const gen = loadGenerationRef.current;
+    loadingMoreRef.current = true;
+    void enrichLogs(ref.allStatLogs, ref.nextIndex, count)
+      .then(result => {
+        if (!mountedRef.current || selectedRef.current || gen !== loadGenerationRef.current) {
+          loadingMoreRef.current = false;
+          return;
+        }
+        if (sessionLogResultRef.current !== ref) {
+          loadingMoreRef.current = false;
+          return;
+        }
+        ref.nextIndex = result.nextIndex;
+        const more = ref.nextIndex < ref.allStatLogs.length;
+        loadingMoreRef.current = false;
+        setHasMore(more);
+        if (result.logs.length > 0) {
+          // enrichLogs returns fresh unshared objects — safe to mutate in place.
+          // Offset comes from logCountRef so the setLogs updater stays pure.
+          const offset = logCountRef.current;
+          result.logs.forEach((log, i) => {
+            log.value = offset + i;
+          });
+          setLogs(prev => prev.concat(result.logs));
+          logCountRef.current += result.logs.length;
+        } else if (more) {
+          loadMoreLogs(count);
+        }
+      })
+      .catch(error => {
+        loadingMoreRef.current = false;
+        if (!mountedRef.current || selectedRef.current || gen !== loadGenerationRef.current) {
+          return;
+        }
+        logError(error);
+      });
   }, []);
 
   React.useEffect(() => {
-    if (filterByPr === undefined || loading || filteredLogs.length > 0) return;
+    if (selectedRef.current || filterByPr === undefined || loading || filteredLogs.length > 0) return;
     const ref = sessionLogResultRef.current;
     if (!ref || ref.nextIndex >= ref.allStatLogs.length) return;
     loadMoreLogs(50);
@@ -210,23 +264,34 @@ export function ResumeConversation({
 
   const loadLogs = React.useCallback(
     (allProjects: boolean) => {
+      if (selectedRef.current) return;
+      const gen = ++loadGenerationRef.current;
+      loadingMoreRef.current = false;
       setLoading(true);
       const promise = allProjects
         ? loadAllProjectsMessageLogsProgressive()
         : loadSameRepoMessageLogsProgressive(worktreePaths);
       promise
         .then(result => {
+          if (!mountedRef.current || selectedRef.current || gen !== loadGenerationRef.current) {
+            return;
+          }
           sessionLogResultRef.current = result;
           logCountRef.current = result.logs.length;
           setLogs(result.logs);
           setHasMore(result.nextIndex < result.allStatLogs.length);
         })
         .catch(error => {
+          if (!mountedRef.current || selectedRef.current || gen !== loadGenerationRef.current) {
+            return;
+          }
           logError(error);
           setHasMore(false);
         })
         .finally(() => {
-          setLoading(false);
+          if (mountedRef.current && !selectedRef.current && gen === loadGenerationRef.current) {
+            setLoading(false);
+          }
         });
     },
     [worktreePaths],
@@ -239,8 +304,7 @@ export function ResumeConversation({
   }, [showAllProjects, loadLogs]);
 
   function onCancel() {
-    // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(1);
+    void gracefulShutdown(1);
   }
 
   async function onSelect(log: LogOption) {
@@ -273,7 +337,11 @@ export function ResumeConversation({
     let failureReason: 'load_error' | 'processing_error' = 'load_error';
     let alreadyLoggedNotFound = false;
     try {
-      const result = await loadConversationForResume(log, undefined);
+      if (log.fullPath && (isUnsafeSessionRestorePath(log.fullPath) || isCrossHostSessionHomeShape(log.fullPath))) {
+        throw new Error('Refusing to resume session from an unsafe or cross-host transcript path');
+      }
+
+      const result = await loadConversationForResume(log, undefined, { forkSession });
       if (!result) {
         logEvent('tengu_session_resumed', {
           entrypoint: 'picker' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -285,6 +353,7 @@ export function ResumeConversation({
       }
       failureReason = 'processing_error';
 
+      let effectiveAgentDefinitions = agentDefinitions;
       if (feature('COORDINATOR_MODE')) {
         /* eslint-disable @typescript-eslint/no-require-imports */
         const coordinatorModule =
@@ -303,13 +372,14 @@ export function ResumeConversation({
           /* eslint-enable @typescript-eslint/no-require-imports */
           getAgentDefinitionsWithOverrides.cache.clear?.();
           const freshAgentDefs = await getAgentDefinitionsWithOverrides(getOriginalCwd());
+          effectiveAgentDefinitions = {
+            ...freshAgentDefs,
+            allAgents: freshAgentDefs.allAgents,
+            activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
+          };
           setAppState(prev => ({
             ...prev,
-            agentDefinitions: {
-              ...freshAgentDefs,
-              allAgents: freshAgentDefs.allAgents,
-              activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
-            },
+            agentDefinitions: effectiveAgentDefinitions,
           }));
           result.messages.push(createSystemMessage(warning, 'warning'));
         }
@@ -324,12 +394,43 @@ export function ResumeConversation({
         await recordContentReplacement(result.contentReplacements);
       }
 
+      // Restore agent setting BEFORE restoreSessionStateFromLog (aligned with official
+      // chunk@335616421.js @52874 and REPL.tsx): hydrates AppState.agent and agent model
+      // immediately without leaking module-global pendingRestoredAgentModel, while still
+      // allowing transcript sessionModel in restoreSessionStateFromLog to take precedence.
       const { agentDefinition: resolvedAgentDef } = restoreAgentFromSession(
         result.agentSetting,
         mainThreadAgentDefinition,
-        agentDefinitions,
+        effectiveAgentDefinitions,
+        setAppState,
       );
       setAppState(prev => ({ ...prev, agent: resolvedAgentDef?.agentType }));
+
+      // Hydrate transcript-derived session state (model, endedByModel, fileHistory,
+      // attribution, contextCollapse, goals, agentNameRegistry, worker plan mode).
+      restoreSessionStateFromLog(result, setAppState, {
+        applyPlanModeResume: true,
+        restoredWorker: takeRestoredWorkerForPlanResume(),
+        forkSession: Boolean(forkSession),
+        planModeResumeLane: 'interactive',
+      });
+
+      const applyInteractivePlanModeRestore = await preparePlanModeRestoreOnInteractiveResume({
+        storedPermissionMode: result.permissionMode,
+        messages: result.messages as TranscriptPlanScanMessage[],
+        forkSession: Boolean(forkSession),
+        permissionModeSuppliedOnInvocation: false,
+        lane: 'interactive_picker',
+      });
+      setAppState(prev => {
+        const nextCtx = applyInteractivePlanModeRestore(prev.toolPermissionContext);
+        return nextCtx ? { ...prev, toolPermissionContext: nextCtx } : prev;
+      });
+
+      let resolvedTaskListId = taskListId;
+      if (!forkSession && !resolvedTaskListId) {
+        resolvedTaskListId = await restoreSessionTaskListId(result.sessionId ?? getSessionId());
+      }
 
       if (feature('COORDINATOR_MODE')) {
         /* eslint-disable @typescript-eslint/no-require-imports */
@@ -375,21 +476,19 @@ export function ResumeConversation({
         }
       }
 
-      if (feature('CONTEXT_COLLAPSE')) {
-        /* eslint-disable @typescript-eslint/no-require-imports */
-        (
-          require('../services/contextCollapse/persist.js') as typeof import('../services/contextCollapse/persist.js')
-        ).restoreFromEntries(result.contextCollapseCommits ?? [], result.contextCollapseSnapshot);
-        /* eslint-enable @typescript-eslint/no-require-imports */
-      }
-
       logEvent('tengu_session_resumed', {
         entrypoint: 'picker' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         success: true,
         resume_duration_ms: Math.round(performance.now() - resumeStart),
       });
 
+      selectedRef.current = true;
+      loadGenerationRef.current += 1;
+      loadingMoreRef.current = false;
+      sessionLogResultRef.current = null;
+      logCountRef.current = 0;
       setLogs([]);
+      setHasMore(false);
       // densable iXg(Gxt) is REPL-after-load, not picker intercept.
       setResumeData({
         messages: result.messages,
@@ -398,6 +497,7 @@ export function ResumeConversation({
         agentName: result.agentName,
         agentColor: (result.agentColor === 'default' ? undefined : result.agentColor) as AgentColorName | undefined,
         mainThreadAgentDefinition: resolvedAgentDef,
+        taskListId: resolvedTaskListId,
       });
       selectingRef.current = false;
       setResuming(false);
@@ -441,9 +541,10 @@ export function ResumeConversation({
         mainThreadAgentDefinition={resumeData.mainThreadAgentDefinition}
         autoConnectIdeFlag={autoConnectIdeFlag}
         disableSlashCommands={disableSlashCommands}
-        taskListId={taskListId}
+        taskListId={resumeData.taskListId ?? taskListId}
         thinkingConfig={thinkingConfig}
         onTurnComplete={onTurnComplete}
+        onOpenAgents={onOpenAgents}
       />
     );
   }
@@ -524,8 +625,7 @@ function ResumeFailedMessage({ sessionId }: { sessionId?: string }): React.React
 function CrossProjectMessage({ command }: { command: string }): React.ReactNode {
   React.useEffect(() => {
     const timeout = setTimeout(() => {
-      // eslint-disable-next-line custom-rules/no-process-exit
-      process.exit(0);
+      void gracefulShutdown(0);
     }, 100);
     return () => clearTimeout(timeout);
   }, []);

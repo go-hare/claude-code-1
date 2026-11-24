@@ -7,12 +7,50 @@ import {
 } from '../../services/analytics/index.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js';
-import { createSkill, deleteSkill, getSkill, getSkillVersion, getSkillVersions, listSkills } from './skillsApi.js';
+import {
+  createSkill,
+  deleteSkill,
+  getSkill,
+  getSkillVersion,
+  getSkillVersions,
+  listSkills,
+  type Skill,
+  type SkillVersion,
+} from './skillsApi.js';
 import { SkillStoreView } from './SkillStoreView.js';
 import { parseSkillStoreArgs } from './parseArgs.js';
 
 const USAGE =
   'Usage: /skill-store list | get ID | versions ID | version ID VER | create NAME MARKDOWN | delete ID | install ID[@VERSION]';
+
+function formatSkillRow(skill: Skill): string {
+  const owner = skill.owner_symbol ? `${skill.owner} (${skill.owner_symbol})` : skill.owner;
+  const deprecated = skill.deprecated ? ' · deprecated' : '';
+  return `- ${skill.skill_id} · ${skill.name}${deprecated} · owner: ${owner}`;
+}
+
+function formatSkillDetail(skill: Skill): string {
+  const owner = skill.owner_symbol ? `${skill.owner} (${skill.owner_symbol})` : skill.owner;
+  const lines = [
+    `ID: ${skill.skill_id}`,
+    `Name: ${skill.name}`,
+    `Owner: ${owner}`,
+    `Status: ${skill.deprecated ? 'deprecated' : 'active'}`,
+  ];
+  if (skill.allowed_tools && skill.allowed_tools.length > 0) {
+    lines.push(`Allowed tools: ${skill.allowed_tools.join(', ')}`);
+  }
+  if (skill.created_at) {
+    lines.push(`Created: ${new Date(skill.created_at).toLocaleString()}`);
+  }
+  return lines.join('\n');
+}
+
+function formatSkillVersionRow(ver: SkillVersion): string {
+  const created = ver.created_at ? ` (${new Date(ver.created_at).toLocaleString()})` : '';
+  const preview = ver.body.length > 80 ? `${ver.body.slice(0, 80)}…` : ver.body;
+  return `- ${ver.version}${created}: ${preview}`;
+}
 
 export const callSkillStore: LocalJSXCommandCall = async (onDone, _context, args) => {
   logEvent('tengu_skill_store_started', {
@@ -35,9 +73,12 @@ export const callSkillStore: LocalJSXCommandCall = async (onDone, _context, args
     logEvent('tengu_skill_store_list', {});
     try {
       const skills = await listSkills();
-      onDone(skills.length === 0 ? 'No skills found in the marketplace.' : `${skills.length} skill(s) available.`, {
-        display: 'system',
-      });
+      onDone(
+        skills.length === 0
+          ? 'No skills found in the marketplace.'
+          : `${skills.length} skill(s) available.\n${skills.map(formatSkillRow).join('\n')}`,
+        { display: 'system' },
+      );
       return React.createElement(SkillStoreView, { mode: 'list', skills });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -57,7 +98,7 @@ export const callSkillStore: LocalJSXCommandCall = async (onDone, _context, args
     });
     try {
       const skill = await getSkill(id);
-      onDone(`Skill ${id} fetched.`, { display: 'system' });
+      onDone(`Skill ${id} fetched.\n${formatSkillDetail(skill)}`, { display: 'system' });
       return React.createElement(SkillStoreView, { mode: 'detail', skill });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -78,7 +119,9 @@ export const callSkillStore: LocalJSXCommandCall = async (onDone, _context, args
     try {
       const versions = await getSkillVersions(id);
       onDone(
-        versions.length === 0 ? `No versions found for skill ${id}.` : `${versions.length} version(s) for skill ${id}.`,
+        versions.length === 0
+          ? `No versions found for skill ${id}.`
+          : `${versions.length} version(s) for skill ${id}.\n${versions.map(formatSkillVersionRow).join('\n')}`,
         { display: 'system' },
       );
       return React.createElement(SkillStoreView, {
@@ -106,7 +149,8 @@ export const callSkillStore: LocalJSXCommandCall = async (onDone, _context, args
     });
     try {
       const ver = await getSkillVersion(id, version);
-      onDone(`Skill ${id}@${version} fetched.`, { display: 'system' });
+      const created = ver.created_at ? `\nCreated: ${new Date(ver.created_at).toLocaleString()}` : '';
+      onDone(`Skill ${id}@${version} fetched.${created}\n\n${ver.body}`, { display: 'system' });
       return React.createElement(SkillStoreView, {
         mode: 'version-detail',
         version: ver,
@@ -131,7 +175,7 @@ export const callSkillStore: LocalJSXCommandCall = async (onDone, _context, args
     });
     try {
       const skill = await createSkill(name, markdown);
-      onDone(`Skill created: ${skill.skill_id}`, { display: 'system' });
+      onDone(`Skill created: ${skill.skill_id}\nName: ${skill.name}`, { display: 'system' });
       return React.createElement(SkillStoreView, { mode: 'created', skill });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

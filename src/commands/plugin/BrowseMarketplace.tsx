@@ -195,7 +195,15 @@ export function BrowseMarketplace({
   const [isInstalling, setIsInstalling] = useState(false);
   const lastViewTransitionAtRef = React.useRef(0);
   const lastEnterAcceptAtRef = React.useRef(0);
+  const mountedRef = React.useRef(true);
   const [installError, setInstallError] = useState<string | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Warning state for non-critical errors (e.g., some marketplaces failed to load)
   const [warning, setWarning] = useState<string | null>(null);
@@ -228,16 +236,22 @@ export function BrowseMarketplace({
     }
   }, [viewState, targetMarketplace, setParentViewState, marketplaces.length]);
 
-  useKeybinding('confirm:no', handleBack, { context: 'Confirmation' });
+  useKeybinding('confirm:no', handleBack, {
+    context: 'Confirmation',
+    isActive: !(typeof viewState === 'object' && viewState.type === 'plugin-options') && !isInstalling,
+  });
 
   // Load marketplaces and count installed plugins
   useEffect(() => {
+    let cancelled = false;
     async function loadMarketplaceData() {
       try {
         const config = await loadKnownMarketplacesConfig();
+        if (cancelled) return;
 
         // Load marketplaces with graceful degradation
         const { marketplaces, failures } = await loadMarketplacesWithGracefulDegradation(config);
+        if (cancelled) return;
 
         const marketplaceInfos: MarketplaceInfo[] = [];
         for (const { name, config: marketplaceConfig, data: marketplace } of marketplaces) {
@@ -293,8 +307,10 @@ export function BrowseMarketplace({
 
           const searchConfig = async (names: string[]): Promise<void> => {
             for (const name of names) {
+              if (cancelled) return;
               if (targetMarketplace && name !== targetMarketplace) continue;
               const marketplace = await getMarketplace(name);
+              if (cancelled) return;
               if (marketplace) {
                 const plugin = marketplace.plugins.find(p => p.name === targetPlugin);
                 if (plugin) {
@@ -317,17 +333,21 @@ export function BrowseMarketplace({
           };
 
           await searchConfig(Object.keys(config));
+          if (cancelled) return;
 
           // densable 2.1.221 #29: catalog miss → refresh eligible marketplaces → retry
           if (!foundPlugin) {
             const namesToRefresh = targetMarketplace ? [targetMarketplace] : Object.keys(config);
             for (const name of namesToRefresh) {
+              if (cancelled) return;
               const entry = config[name];
               if (!entry) continue;
               logForDebugging(`Checking ${name} for new plugins…`);
               const outcome = await tryRefreshMarketplaceOnCatalogMiss(name, entry);
+              if (cancelled) return;
               if (outcome !== 'refreshed') continue;
               const marketplace = await getMarketplace(name);
+              if (cancelled) return;
               const plugin = marketplace?.plugins.find(p => p.name === targetPlugin);
               if (plugin) {
                 const pluginId = createPluginId(plugin.name, name);
@@ -344,6 +364,7 @@ export function BrowseMarketplace({
             }
           }
 
+          if (cancelled) return;
           if (foundPlugin && foundMarketplace) {
             // Block only on global (user/managed) install — project/local scope
             // means the user might still want to add a user-scope entry so the
@@ -377,12 +398,18 @@ export function BrowseMarketplace({
           }
         }
       } catch (err) {
+        if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Failed to load marketplaces');
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
     void loadMarketplaceData();
+    return () => {
+      cancelled = true;
+    };
   }, [setError, targetMarketplace, targetPlugin]);
 
   // Load plugins when a marketplace is selected
@@ -452,7 +479,9 @@ export function BrowseMarketplace({
         if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Failed to load plugins');
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
@@ -513,6 +542,7 @@ export function BrowseMarketplace({
       }
     }
 
+    if (!mountedRef.current) return;
     setInstallingPlugins(new Set());
     setSelectedForInstall(new Set());
     clearAllCaches();
@@ -522,6 +552,16 @@ export function BrowseMarketplace({
     if (successCount > 0) {
       activateOutcome = await tryActivateInstalled([...new Set(installedIds)]);
     }
+
+    // densable: only mark needsRefresh when activate requires reload
+    // (load-failed already refreshed Layer-3; do not sticky reload notice)
+    if (successCount > 0 && activateOutcome === 'reload-required') {
+      if (onInstallComplete) {
+        await onInstallComplete();
+      }
+    }
+
+    if (!mountedRef.current) return;
 
     // Handle installation results
     if (failureCount === 0) {
@@ -538,14 +578,6 @@ export function BrowseMarketplace({
             `Failed: ${formatFailureDetails(newFailedPlugins, false)}.${suffix}`,
         ),
       );
-    }
-
-    // densable: only mark needsRefresh when activate requires reload
-    // (load-failed already refreshed Layer-3; do not sticky reload notice)
-    if (successCount > 0 && activateOutcome === 'reload-required') {
-      if (onInstallComplete) {
-        await onInstallComplete();
-      }
     }
 
     setParentViewState({ type: 'menu' });
@@ -578,8 +610,11 @@ export function BrowseMarketplace({
       consentedEntryHelper: headersHelperPane.pinned(),
     });
 
+    if (!mountedRef.current) return;
+
     if (result.success) {
       const loaded = await findPluginOptionsTarget(plugin.pluginId);
+      if (!mountedRef.current) return;
       if (loaded) {
         // densable: options flow may still need activate after configure
         setIsInstalling(false);
@@ -592,10 +627,11 @@ export function BrowseMarketplace({
         return;
       }
       const outcome = await tryActivateInstalled(result.closure);
-      setResult(re(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`));
       if (outcome === 'reload-required' && onInstallComplete) {
         await onInstallComplete();
       }
+      if (!mountedRef.current) return;
+      setResult(re(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`));
       setParentViewState({ type: 'menu' });
     } else {
       setIsInstalling(false);
@@ -761,10 +797,11 @@ export function BrowseMarketplace({
     const { plugin, pluginId, closure } = viewState;
     async function finish(baseMsg: string): Promise<void> {
       const outcome = await tryActivateInstalled(closure.length > 0 ? closure : [pluginId]);
-      setResult(re(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`));
       if (outcome === 'reload-required' && onInstallComplete) {
-        void onInstallComplete();
+        await onInstallComplete();
       }
+      if (!mountedRef.current) return;
+      setResult(re(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`));
       setParentViewState({ type: 'menu' });
     }
     return (
