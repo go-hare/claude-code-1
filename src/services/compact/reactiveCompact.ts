@@ -134,7 +134,11 @@ export function annotatePromptTooLongWithCompactFailure(
 export const reactiveCompactOnPromptTooLong: (
   messages: Message[],
   cacheSafeParams: Record<string, unknown>,
-  options: { customInstructions?: string; trigger?: string },
+  options: {
+    customInstructions?: string
+    trigger?: string
+    requestCannotGoOut?: boolean
+  },
 ) => Promise<{ ok: boolean; reason?: string; result?: CompactionResult }> =
   async (messages, cacheSafeParams, options) => {
     const params = cacheSafeParams as unknown as CacheSafeParams
@@ -152,6 +156,10 @@ export const reactiveCompactOnPromptTooLong: (
           autoCompactThreshold: 0,
           querySource: 'compact',
         },
+        false,
+        undefined,
+        undefined,
+        options.requestCannotGoOut ?? true,
       )
       return { ok: true, result }
     } catch (error) {
@@ -399,6 +407,8 @@ export const tryReactiveCompact: (params: {
   cacheSafeParams: Record<string, unknown>
   /** Optional token gap from PTL refusal (forwarded to compactConversation to seed initial trim) */
   tokenGap?: number
+  /** Official 2.1.328 (`compact_despite_hook_block`): true when the request cannot go out uncompacted */
+  requestCannotGoOut?: boolean
 }) => Promise<TryReactiveCompactOutcome> = async ({
   hasAttempted,
   querySource,
@@ -406,6 +416,7 @@ export const tryReactiveCompact: (params: {
   messages,
   cacheSafeParams,
   tokenGap,
+  requestCannotGoOut,
 }) => {
   // densable Jsa: withhold may already have happened; do not summarize when
   // ex()/Rhe()/source gates fail (return null → surface bare/Ysa PTL).
@@ -436,6 +447,7 @@ export const tryReactiveCompact: (params: {
       false,
       undefined,
       tokenGap,
+      requestCannotGoOut ?? true,
     )
     return { result }
   } catch (finalError) {

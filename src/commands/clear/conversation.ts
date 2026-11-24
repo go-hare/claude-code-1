@@ -23,6 +23,7 @@ import {
 } from '../../services/analytics/index.js'
 import { endMainThreadConversation } from '../../services/codeMode/executor.js'
 import type { AppState } from '../../state/AppState.js'
+import { isTerminalTaskStatus } from '../../Task.js'
 import { isInProcessTeammateTask } from '../../tasks/InProcessTeammateTask/types.js'
 import {
   clearAgentPermissionWaits,
@@ -32,9 +33,9 @@ import {
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import { isLocalShellTask } from '../../tasks/LocalShellTask/guards.js'
 import { isLocalWorkflowTask } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
-import { asAgentId } from '../../types/ids.js'
+import { type AgentId, asAgentId } from '../../types/ids.js'
+import { IDLE_WINDOW_KEEPALIVE_REASON } from '../../utils/task/framework.js'
 import type { Message } from '../../types/message.js'
-import { createEmptyAttributionState } from '../../utils/commitAttribution.js'
 import type { FileStateCache } from '../../utils/fileStateCache.js'
 import {
   executeSessionEndHooks,
@@ -189,6 +190,47 @@ export function computeSurvivingTaskIdsOnClear(
   }
 
   return survivingTaskIds
+}
+
+function findSurvivingTaskForAgentId(
+  tasks: AppState['tasks'],
+  agentId: string,
+): AppState['tasks'][string] | undefined {
+  if (Object.hasOwn(tasks, agentId)) {
+    return tasks[agentId]
+  }
+  return Object.values(tasks).find(
+    task =>
+      isInProcessTeammateTask(task) &&
+      (task.identity as { resumableAgentId?: string } | undefined)
+        ?.resumableAgentId === agentId,
+  )
+}
+
+/**
+ * Official 2.1.328 (`H1r`, `chunk@312460395.js`, called from `chunk@312462718.js @5883`):
+ * prune `agentNameRegistry` on `/clear` to keep only entries whose target task
+ * survived and is either non-terminal or a local agent held alive by a
+ * non-idle-window keepalive reason.
+ */
+export function pruneAgentNameRegistry(
+  registry: Map<string, AgentId>,
+  survivingTasks: AppState['tasks'],
+): Map<string, AgentId> {
+  return new Map(
+    [...registry].filter(([, agentId]) => {
+      const task = findSurvivingTaskForAgentId(survivingTasks, agentId)
+      if (task === undefined) return false
+      if (!isTerminalTaskStatus(task.status)) return true
+      return (
+        isLocalAgentTask(task) &&
+        task.keepaliveReasons !== undefined &&
+        [...task.keepaliveReasons].some(
+          reason => reason !== IDLE_WINDOW_KEEPALIVE_REASON,
+        )
+      )
+    }),
+  )
 }
 
 function buildBackgroundTasksChangedPayload(tasks: AppState['tasks']) {
@@ -399,17 +441,20 @@ export async function clearConversation({
   ])
   let survivingAgentTaskCount = 0
   let survivingTasksSnapshot: AppState['tasks'] | undefined
+  let clearedGoal: AppState['activeGoal'] | undefined
   if (setAppState) {
     setAppState(prev => {
       // Partition tasks using the same transitive survival predicate (#1760):
       // kill+remove unowned foreground tasks, preserve background tasks and their subtasks.
       const survivingIds = computeSurvivingTaskIdsOnClear(prev.tasks)
       const nextTasks: AppState['tasks'] = {}
+      const killedTaskIds: string[] = []
       for (const [taskId, task] of Object.entries(prev.tasks)) {
         if (!shouldKillTask(taskId, task, survivingIds)) {
           nextTasks[taskId] = task
           continue
         }
+        killedTaskIds.push(taskId)
         // Foreground task: kill it and drop from state
         try {
           if (task.status === 'running') {
@@ -437,14 +482,42 @@ export async function clearConversation({
       survivingAgentTaskCount = Object.values(nextTasks).filter(
         t => !NON_AGENT_SURVIVING_TASK_TYPES.has(t.type),
       ).length
+      clearedGoal = prev.activeGoal
+
+      // Official 2.1.328 (`chunk@312462718.js @5480-5920`):
+      // Clear toolPermissionContext.planDoc when present, clear viewingAgentTaskId
+      // when the currently viewed task was killed, prune agentNameRegistry (`H1r`),
+      // and clear activeGoal + frameUrls.
+      const prevPermCtx = prev.toolPermissionContext as
+        | (AppState['toolPermissionContext'] & { planDoc?: unknown })
+        | undefined
+      const clearedPlanDocPatch =
+        prevPermCtx !== undefined && prevPermCtx.planDoc !== undefined
+          ? {
+              toolPermissionContext: {
+                ...prevPermCtx,
+                planDoc: undefined,
+              },
+            }
+          : {}
+      const clearedViewingAgentPatch =
+        prev.viewingAgentTaskId !== undefined &&
+        killedTaskIds.includes(prev.viewingAgentTaskId)
+          ? {
+              viewingAgentTaskId: undefined,
+              viewSelectionMode: 'none' as const,
+            }
+          : {}
 
       return {
         ...prev,
         ...clearedArtifactConversationAppState(),
+        ...clearedPlanDocPatch,
+        activeGoal: undefined,
         tasks: nextTasks,
+        ...clearedViewingAgentPatch,
         runningSubagents:
           survivingAgentTaskCount === 0 ? 0 : prev.runningSubagents,
-        attribution: createEmptyAttributionState(),
         // densable session_start: clear clickable image path map
         storedImagePaths: new Map(),
         // densable 2.1.212 #17: /clear must re-prompt ultrareview overage
@@ -455,6 +528,11 @@ export async function clearConversation({
         // densable session reset: clear MessageDisplay salvage map
         displayedMessageContent: {},
         sendMessagePins: {},
+        agentNameRegistry: pruneAgentNameRegistry(
+          prev.agentNameRegistry,
+          nextTasks,
+        ),
+        frameUrls: {},
         pendingPlanVerification: undefined,
         // densable 2.1.243 #31: keep /rename name on the prompt bar when the
         // session title is still set (F=!clearedSessionTitle && ct()!==void 0).
@@ -494,6 +572,18 @@ export async function clearConversation({
         },
       }
     })
+    // Official 2.1.328 (`yEe`, `chunk@288443515.js @996`, `chunk@312462718.js @5883`):
+    // emit goal-cleared telemetry when `/clear` wipes an active goal.
+    if (clearedGoal !== undefined) {
+      logEvent('tengu_goal_cleared', {
+        reason:
+          'session_clear' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        iterations: clearedGoal.iterations,
+        durationMs: Date.now() - clearedGoal.setAt,
+        origin:
+          clearedGoal.origin as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
   } else if (getAppState) {
     const prevTasks = getAppState().tasks
     const survivingIds = computeSurvivingTaskIdsOnClear(prevTasks)

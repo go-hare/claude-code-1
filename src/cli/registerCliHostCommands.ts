@@ -3,18 +3,8 @@ import {
   Command as CommanderCommand,
   Option,
 } from '@commander-js/extra-typings'
-import {
-  getOriginalCwd,
-  setCwdState,
-  setDirectConnectServerUrl,
-  setOriginalCwd,
-} from '../bootstrap/state.js'
 import { registerMcpAddCommand } from '../commands/mcp/addCommand.js'
 import { registerMcpXaaIdpCommand } from '../commands/mcp/xaaIdpCommand.js'
-import {
-  createDirectConnectSession,
-  DirectConnectError,
-} from '../server/createDirectConnectSession.js'
 import {
   VALID_INSTALLABLE_SCOPES,
   VALID_UPDATE_SCOPES,
@@ -37,7 +27,6 @@ type SortedHelpConfig = {
 
 export interface CliHostRegistrationOptions {
   createSortedHelpConfig: () => SortedHelpConfig
-  getPendingConnectDangerouslySkipPermissions: () => boolean | undefined
 }
 
 function describe(path: CliCommandPath): string {
@@ -171,107 +160,6 @@ export function registerCliHostCommands(
       await mcpResetChoicesHandler()
     })
 
-  if (feature('DIRECT_CONNECT')) {
-    program
-      .command('server')
-      .description(describe(['server']))
-      .option('--port <number>', 'HTTP port', '0')
-      .option('--host <string>', 'Bind address', '0.0.0.0')
-      .option('--auth-token <token>', 'Bearer token for auth')
-      .option('--unix <path>', 'Listen on a unix domain socket')
-      .option(
-        '--workspace <dir>',
-        'Default working directory for sessions that do not specify cwd',
-      )
-      .option(
-        '--idle-timeout <ms>',
-        'Idle timeout for detached sessions in ms (0 = never expire)',
-        '600000',
-      )
-      .option(
-        '--max-sessions <n>',
-        'Maximum concurrent sessions (0 = unlimited)',
-        '32',
-      )
-      .action(
-        async (opts: {
-          port: string
-          host: string
-          authToken?: string
-          unix?: string
-          workspace?: string
-          idleTimeout: string
-          maxSessions: string
-        }) => {
-          const { randomBytes } = await import('crypto')
-          const { startServer } = await import('../server/server.js')
-          const { SessionManager } = await import('../server/sessionManager.js')
-          const { DangerousBackend } = await import(
-            '../server/backends/dangerousBackend.js'
-          )
-          const { printBanner } = await import('../server/serverBanner.js')
-          const { createServerLogger } = await import('../server/serverLog.js')
-          const { writeServerLock, removeServerLock, probeRunningServer } =
-            await import('../server/lockfile.js')
-
-          const existing = await probeRunningServer()
-          if (existing) {
-            process.stderr.write(
-              `A claude server is already running (pid ${existing.pid}) at ${existing.httpUrl}\n`,
-            )
-            process.exit(1)
-          }
-
-          const authToken =
-            opts.authToken ??
-            `sk-ant-cc-${randomBytes(16).toString('base64url')}`
-
-          const config = {
-            port: parseInt(opts.port, 10),
-            host: opts.host,
-            authToken,
-            unix: opts.unix,
-            workspace: opts.workspace,
-            idleTimeoutMs: parseInt(opts.idleTimeout, 10),
-            maxSessions: parseInt(opts.maxSessions, 10),
-          }
-
-          const backend = new DangerousBackend()
-          const sessionManager = new SessionManager(backend, {
-            idleTimeoutMs: config.idleTimeoutMs,
-            maxSessions: config.maxSessions,
-          })
-          const logger = createServerLogger()
-
-          const server = startServer(config, sessionManager, logger)
-          const actualPort = server.port ?? config.port
-          printBanner(config, authToken, actualPort)
-
-          await writeServerLock({
-            pid: process.pid,
-            port: actualPort,
-            host: config.host,
-            httpUrl: config.unix
-              ? `unix:${config.unix}`
-              : `http://${config.host}:${actualPort}`,
-            startedAt: Date.now(),
-          })
-
-          let shuttingDown = false
-          const shutdown = async () => {
-            if (shuttingDown) return
-            shuttingDown = true
-            server.stop(true)
-            await sessionManager.destroyAll()
-            await removeServerLock()
-            process.exit(0)
-          }
-          process.once('SIGINT', () => void shutdown())
-          process.once('SIGTERM', () => void shutdown())
-        },
-      )
-  }
-
   if (feature('SSH_REMOTE')) {
     program
       .command('ssh <host> [dir]')
@@ -301,70 +189,6 @@ export function registerCliHostCommands(
         )
         process.exit(1)
       })
-  }
-
-  if (feature('DIRECT_CONNECT')) {
-    program
-      .command('open <cc-url>')
-      .description(describe(['open']))
-      .option('-p, --print [prompt]', 'Print mode (headless)')
-      .option(
-        '--output-format <format>',
-        'Output format: text, json, stream-json',
-        'text',
-      )
-      .action(
-        async (
-          ccUrl: string,
-          commandOptions: {
-            print?: string | true
-            outputFormat?: string
-          },
-        ) => {
-          const { parseConnectUrl } = await import(
-            '../server/parseConnectUrl.js'
-          )
-          const { serverUrl, authToken } = parseConnectUrl(ccUrl)
-
-          let connectConfig
-          try {
-            const session = await createDirectConnectSession({
-              serverUrl,
-              authToken,
-              cwd: getOriginalCwd(),
-              dangerouslySkipPermissions:
-                options.getPendingConnectDangerouslySkipPermissions(),
-            })
-            if (session.workDir) {
-              setOriginalCwd(session.workDir)
-              setCwdState(session.workDir)
-            }
-            setDirectConnectServerUrl(serverUrl)
-            connectConfig = session.config
-          } catch (error) {
-            console.error(
-              error instanceof DirectConnectError
-                ? error.message
-                : String(error),
-            )
-            process.exit(1)
-          }
-
-          const { runConnectHeadless } = await import(
-            '../server/connectHeadless.js'
-          )
-
-          const prompt =
-            typeof commandOptions.print === 'string' ? commandOptions.print : ''
-          const interactive = commandOptions.print === true
-          await runConnectHeadless(
-            connectConfig,
-            prompt,
-            commandOptions.outputFormat,
-            interactive,
-          )
-        },
-      )
   }
 
   const auth = program

@@ -38,16 +38,18 @@ import { isEnvTruthy } from './envUtils.js'
 import { errorMessage } from './errors.js'
 import { logError } from './log.js'
 import {
+  collectMcpOnlyUnresolvedToolUseIds,
   createAssistantMessage,
   createUserMessage,
-  filterOrphanedThinkingOnlyMessages,
+  dropApiInvalidAssistantBlocks,
+  filterOrphanedThinkingAndWhitespaceMessages,
   filterUnresolvedToolUses,
-  filterWhitespaceOnlyAssistantMessages,
   isToolUseResultMessage,
   NO_RESPONSE_REQUESTED,
   normalizeMessages,
-  rewriteResumedSubagentShutdownToolResults,
+  rewriteMcpShutdownInterruptedToolResults,
 } from './messages.js'
+import { WITHHELD_MEMORY_REASON_LABELS } from './claudemd.js'
 import { copyPlanForResume } from './plans.js'
 import { scanDeferredToolUseFromTranscriptTail } from './queryHelpers.js'
 import { getResumePrompt } from './resumeReturn.js'
@@ -90,9 +92,17 @@ const SEND_USER_FILE_TOOL_NAME: string | null = feature('KAIROS')
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
+const MAX_SKILL_LISTING_NAMES = 4096
+const MAX_SKILL_LISTING_NAME_LENGTH = 512
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /**
- * densable nXu — structural validation of attachment payloads before resume
- * migration. Null / non-object / missing required fields → invalid (drop).
+ * Official 2.1.328 `bgs` (`chunk@294254613.js:2383707-2384805`) — structural
+ * validation of attachment payloads before resume/transcript loading.
+ * Null / non-object / missing required fields / out-of-bounds payloads → invalid (drop).
  */
 export function isValidAttachmentPayload(attachment: unknown): boolean {
   if (
@@ -118,12 +128,51 @@ export function isValidAttachmentPayload(attachment: unknown): boolean {
     case 'hook_success':
       return 'content' in e && typeof e.content === 'string'
     case 'skill_listing':
-      return !('names' in e) || e.names === undefined || Array.isArray(e.names)
+      return (
+        !('names' in e) ||
+        e.names === undefined ||
+        (Array.isArray(e.names) &&
+          e.names.length <= MAX_SKILL_LISTING_NAMES &&
+          e.names.every(
+            (name: unknown) =>
+              typeof name === 'string' &&
+              name.length <= MAX_SKILL_LISTING_NAME_LENGTH,
+          ))
+      )
     case 'hook_additional_context':
       return (
         'content' in e &&
         Array.isArray(e.content) &&
         e.content.every((t: unknown) => typeof t === 'string')
+      )
+    case 'task_reminder':
+    case 'todo_reminder':
+      return (
+        'content' in e &&
+        Array.isArray(e.content) &&
+        e.content.every(isPlainRecord)
+      )
+    case 'file':
+    case 'already_read_file':
+      return 'content' in e && isPlainRecord(e.content)
+    case 'withheld_memory':
+      return (
+        'by' in e &&
+        typeof e.by === 'string' &&
+        e.by !== '' &&
+        'entries' in e &&
+        Array.isArray(e.entries) &&
+        e.entries.every(
+          (entry: unknown) =>
+            isPlainRecord(entry) &&
+            'path' in entry &&
+            typeof entry.path === 'string' &&
+            'why' in entry &&
+            typeof entry.why === 'string' &&
+            Object.hasOwn(WITHHELD_MEMORY_REASON_LABELS, entry.why) &&
+            'displayPath' in entry &&
+            typeof entry.displayPath === 'string',
+        )
       )
     // densable 2.1.223: malformed diagnostics attachment must not crash resume
     case 'diagnostics':
@@ -1001,10 +1050,17 @@ export function deserializeMessagesWithInterruptDetection(
     // Transform legacy attachment types before processing (densable Hgy)
     const migratedMessages = sanitizedMessages.map(migrateLegacyAttachmentTypes)
 
+    // Official 2.1.328 `zct` (`chunk@294254613.js:2396061`): drop API-invalid
+    // assistant blocks (assistant tool_result, non-Anthropic server_tool_use,
+    // assistant-only-answered tool_use) and truncate overlong tool_use names.
+    const apiValidMessages = dropApiInvalidAssistantBlocks(migratedMessages, {
+      site: 'resume',
+    })
+
     // Strip invalid permissionMode values from deserialized user messages.
     // The field is unvalidated JSON from disk and may contain modes from a different build.
     const validModes = new Set<string>(PERMISSION_MODES)
-    for (const msg of migratedMessages) {
+    for (const msg of apiValidMessages) {
       if (
         msg.type === 'user' &&
         msg.permissionMode !== undefined &&
@@ -1014,17 +1070,20 @@ export function deserializeMessagesWithInterruptDetection(
       }
     }
 
-    // Official `Wxn` (#1166): rewrite `interruptedByShutdown` tool_result blocks
-    // to `YR` (`SESSION_ENDED_TOOL_RESULT_MESSAGE`), and when
-    // `CLAUDE_CODE_RESUME_SHOWS_CUT_OFF_CALLS` is set, synthesize `YR`
-    // tool_result blocks for cut-off `tool_use` calls.
+    // Official 2.1.328 `Uqn` / `Bqn` (`chunk@294254613.js:2382675-2383680`):
+    // rewrite `interruptedByShutdown` tool_result blocks scoped to MCP-only
+    // (`mcp__`) assistant tool_use groups, stripping `interruptedByShutdown`
+    // and stamping `toolDenialKind: 'interrupted'`.
     const foamySpring = isFoamySpringEnabled()
+    const rewrittenShutdownIds = new Set<string>()
     const afterShutdownRewrite = foamySpring
-      ? rewriteResumedSubagentShutdownToolResults(
-          migratedMessages,
+      ? rewriteMcpShutdownInterruptedToolResults(
+          apiValidMessages,
           SESSION_ENDED_TOOL_RESULT_MESSAGE,
+          rewrittenShutdownIds,
+          preserveUnresolvedToolUseIds,
         )
-      : migratedMessages
+      : apiValidMessages
     // Official 2.1.328 #1645/#1646 (`gje` / `hje` / `_je` in
     // `chunk@294254613.js @2403000-2410000`): capture trailing unresolved
     // tool_use IDs BEFORE filtering so we distinguish `endedOnApiError` (no open
@@ -1050,6 +1109,23 @@ export function deserializeMessagesWithInterruptDetection(
         'tengu_mutable_phoenix_killswitch',
         false,
       )
+    // Official 2.1.328 `Bqn` (`chunk@294254613.js:2399031`): even without
+    // CLAUDE_CODE_RESUME_SHOWS_CUT_OFF_CALLS, synthesize cut-off interrupted
+    // results for trailing MCP-only unresolved tool_use groups.
+    const trailingMcpCutOffIds =
+      !showsCutOffCalls &&
+      foamySpring &&
+      !replyOnResume &&
+      trailingUnresolvedIds.size > 0
+        ? collectTrailingUnresolvedToolUseIds(
+            afterShutdownRewrite,
+            collectMcpOnlyUnresolvedToolUseIds(
+              afterShutdownRewrite,
+              preFilterUnresolvedIds,
+            ),
+            true,
+          )
+        : new Set<string>()
     const withCutOffToolResults = showsCutOffCalls
       ? trailingUnresolvedIds.size > 0
         ? synthesizeCutOffToolResults(
@@ -1064,7 +1140,16 @@ export function deserializeMessagesWithInterruptDetection(
             afterShutdownRewrite,
             preserveUnresolvedToolUseIds,
           )
-      : afterShutdownRewrite
+      : trailingMcpCutOffIds.size > 0
+        ? synthesizeCutOffToolResults(
+            afterShutdownRewrite,
+            preserveUnresolvedToolUseIds,
+            trailingMcpCutOffIds,
+            trailingMcpCutOffIds,
+            SESSION_ENDED_TOOL_RESULT_MESSAGE,
+            false,
+          )
+        : afterShutdownRewrite
 
     // Filter out unresolved tool uses and any synthetic messages that follow them
     const filteredToolUses = filterUnresolvedToolUses(
@@ -1072,18 +1157,12 @@ export function deserializeMessagesWithInterruptDetection(
       preserveUnresolvedToolUseIds,
     ) as NormalizedMessage[]
 
-    // Filter out orphaned thinking-only assistant messages that can cause API errors
-    // during resume. These occur when streaming yields separate messages per content
-    // block and interleaved user messages prevent proper merging by message.id.
-    const filteredThinking = filterOrphanedThinkingOnlyMessages(
-      filteredToolUses,
-    ) as NormalizedMessage[]
-
-    // Filter out assistant messages with only whitespace text content.
-    // This can happen when model outputs "\n\n" before thinking, user cancels mid-stream.
+    // Official 2.1.328 `C4` (`chunk@294254613.js:2399235`): iterate orphaned
+    // thinking-only (`rXo`) + whitespace-only (`Z3o`) filtering to a fixpoint
+    // so cascading orphans exposed by whitespace removal are eliminated.
     const filteredMessages = stampIdLessAssistantMessages(
-      filterWhitespaceOnlyAssistantMessages(
-        filteredThinking,
+      filterOrphanedThinkingAndWhitespaceMessages(
+        filteredToolUses,
       ) as NormalizedMessage[],
     ) as NormalizedMessage[]
 

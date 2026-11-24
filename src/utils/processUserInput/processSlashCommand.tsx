@@ -18,14 +18,18 @@ import type {
   AssistantMessage,
   AttachmentMessage,
   Message,
+  MessageOrigin,
   NormalizedUserMessage,
   ProgressMessage,
   UserMessage,
 } from 'src/types/message.js';
+import type { PermissionMode } from 'src/types/permissions.js';
 import type { QueuedCommand } from 'src/types/textInputTypes.js';
 import { addInvokedSkill, getSessionId } from '../../bootstrap/state.js';
 import { COMMAND_MESSAGE_TAG, COMMAND_NAME_TAG } from '../../constants/xml.js';
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js';
+import type { IDESelection } from '../../hooks/useIdeSelection.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
@@ -40,7 +44,13 @@ import { renderToolUseProgressMessage } from '@claude-code/builtin-tools/tools/A
 import type { CommandResultDisplay } from '../../types/command.js';
 import { createAbortController } from '../abortController.js';
 import { getAgentContext } from '../agentContext.js';
-import { createAttachmentMessage, getAttachmentMessages } from '../attachments.js';
+import {
+  type Attachment,
+  createAttachmentMessage,
+  type GetAttachmentsOptions,
+  getAttachmentMessages,
+} from '../attachments.js';
+import type { PastedContent } from '../config.js';
 import { logForDebugging } from '../debug.js';
 import { isCoordinatorMainThread } from '../../coordinator/coordinatorMode.js';
 import { SKILL_TOOL_NAME } from '@claude-code/builtin-tools/tools/SkillTool/constants.js';
@@ -908,6 +918,32 @@ function logCmdHookBlocked(commandName: string): void {
   });
 }
 
+export type ProcessSlashCommandExtras = {
+  ideSelection?: IDESelection;
+  isMeta?: boolean;
+  permissionMode?: PermissionMode;
+  pastedContents?: Record<number, PastedContent>;
+  taskDelivery?: unknown;
+};
+
+const UNKNOWN_COMMAND_FALLBACK_KILLSWITCH = 'tengu_polished_quill_killswitch';
+const UNKNOWN_COMMAND_FALLBACK_MAX_NAMES = 40;
+const UNKNOWN_COMMAND_TOKEN_MAX_LEN = 256;
+
+/** Official 2.1.328 (`ajt` in `chunk@283042831.js`): safe slash token for fallback note. */
+function isSafeUnknownCommandToken(value: string): boolean {
+  return value.length <= UNKNOWN_COMMAND_TOKEN_MAX_LEN && /^[A-Za-z0-9_:.-]+$/.test(value);
+}
+
+type UnknownCommandFallbackPayload = {
+  type: 'unknown_command_fallback';
+  commandName?: string;
+  suggestion?: string;
+  availableCommandNames: string[];
+  availableCommandCount: number;
+  reservedName?: boolean;
+};
+
 async function processSlashCommandBody(
   inputString: string,
   precedingInputBlocks: ContentBlockParam[],
@@ -930,16 +966,70 @@ async function processSlashCommandBody(
   checkLine?: SlashLineCheckFn,
   /** Official 2.1.327 #397: preserve pasted image IDs when `/` input falls back to a regular prompt (e.g. `/tmp/a.txt`). */
   imagePasteIds: number[] = [],
+  extras?: ProcessSlashCommandExtras,
 ): Promise<ProcessUserInputBaseResult> {
+  // Official 2.1.328 (`y` in `chunk@319394973.js:18100`): fallback to regular
+  // user prompt preserving permissionMode, isMeta, origin, markPastedTextForModel,
+  // taskDelivery, pasted images, and optional prompt attachment extraction.
+  const fallbackToPrompt = async (
+    extraAttachments: UnknownCommandFallbackPayload[] = [],
+    fallbackText: string = inputString,
+    extractPromptAttachments = true,
+  ): Promise<ProcessUserInputBaseResult> => {
+    const promptId = randomUUID();
+    setPromptId(promptId);
+    logEvent('tengu_input_prompt', {});
+    void logOTelEvent('user_prompt', {
+      prompt_length: String(fallbackText.length),
+      prompt: redactIfDisabled(fallbackText),
+      'prompt.id': promptId,
+    });
+    let effectiveText = fallbackText;
+    if (!extras?.isMeta && extras?.pastedContents) {
+      const { markPastedTextForModel } = await import('./processUserInput.js');
+      const marked = markPastedTextForModel(fallbackText, extras.pastedContents);
+      if (typeof marked === 'string') {
+        effectiveText = marked;
+      }
+    }
+    const fallbackContent =
+      imageContentBlocks.length > 0
+        ? [...precedingInputBlocks, { type: 'text' as const, text: effectiveText }, ...imageContentBlocks]
+        : prepareUserContent({ inputString: effectiveText, precedingInputBlocks });
+    const userMsg = createUserMessage({
+      content: fallbackContent,
+      uuid,
+      imagePasteIds: imagePasteIds.length > 0 ? imagePasteIds : undefined,
+      permissionMode: extras?.permissionMode,
+      isMeta: extras?.isMeta || undefined,
+      origin: submissionOrigin as MessageOrigin | undefined,
+    });
+    if (extras?.taskDelivery !== undefined) {
+      (userMsg as { taskDelivery?: unknown }).taskDelivery = extras.taskDelivery;
+    }
+    return {
+      messages: [
+        userMsg,
+        ...attachmentMessages,
+        ...extraAttachments.map(att => createAttachmentMessage(att as unknown as Attachment)),
+      ],
+      shouldQuery: true,
+      ...(extractPromptAttachments && { extractPromptAttachments: true }),
+    };
+  };
+
   // Official 2.1.326 #130: rewrite `/<builtin> --help` -> `/help <builtin>` and
   // `/help <answersHelp>` -> `/<cmd> --help` before dispatching the command.
   const effectiveInput = rewriteSlashHelpInvocation(inputString, context.options.commands);
   const parsed = parseSlashCommand(effectiveInput);
   if (!parsed) {
     logEvent('tengu_input_slash_missing', {});
-    if (!context.options.isNonInteractiveSession) {
-      logCmdDispatch('cmd_parse_failed');
+    // Official 2.1.328 (`chunk@319394973.js:18720`): in `-p` / non-interactive
+    // mode, unparseable leading `/` falls back to a regular prompt query.
+    if (context.options.isNonInteractiveSession) {
+      return fallbackToPrompt([], inputString, true);
     }
+    logCmdDispatch('cmd_parse_failed');
     const errorMessage = 'Commands are in the form `/command [args]`';
     return {
       messages: [
@@ -957,13 +1047,30 @@ async function processSlashCommandBody(
     };
   }
 
-  const { commandName, args: parsedArgs, isMcp } = parsed;
+  let { commandName, args: parsedArgs } = parsed;
+  const { isMcp } = parsed;
+
+  // densable: `if(C&&!UD(C))C=void 0` — disabled command is missing.
+  let foundCommand = findCommand(commandName, context.options.commands);
+  let resolvedCommand = foundCommand && isCommandEnabled(foundCommand) ? foundCommand : undefined;
+  // Official 2.1.328 (`chunk@319394973.js:19110`): resolve space-separated
+  // colon subcommands (`/ns sub` -> `ns:sub`) for all slash commands.
+  if (!resolvedCommand && !isMcp && parsedArgs.trim()) {
+    const trimmedArgs = parsedArgs.trimStart();
+    const wsIdx = trimmedArgs.search(/\s/);
+    const firstToken = wsIdx === -1 ? trimmedArgs : trimmedArgs.slice(0, wsIdx);
+    const colonName = `${commandName}:${firstToken}`;
+    const colonFound = findCommand(colonName, context.options.commands);
+    if (colonFound && isCommandEnabled(colonFound)) {
+      foundCommand = colonFound;
+      resolvedCommand = colonFound;
+      commandName = colonName;
+      parsedArgs = wsIdx === -1 ? '' : trimmedArgs.slice(wsIdx + 1).trimStart();
+    }
+  }
 
   const sanitizedCommandName = isMcp ? 'mcp' : !builtInCommandNames().has(commandName) ? 'custom' : commandName;
 
-  // densable: `if(C&&!UD(C))C=void 0` — disabled command is missing.
-  const foundCommand = findCommand(commandName, context.options.commands);
-  const resolvedCommand = foundCommand && isCommandEnabled(foundCommand) ? foundCommand : undefined;
   if (!resolvedCommand) {
     // Check if this looks like a command name vs a file path or other input
     // Also check if it's an actual file path that exists
@@ -1019,11 +1126,21 @@ async function processSlashCommandBody(
           resultText: unavailable,
         };
       }
+      const visibleCommands = context.options.commands.filter(
+        cmd => !cmd.isHidden && !isSlashCommandOff(cmd) && isCommandEnabled(cmd),
+      );
+      // Official 2.1.328 (`chunk@319394973.js:7663, 22400`): in `-p`
+      // non-interactive mode (unless killswitch is set), unknown `/foo`
+      // falls back to querying the model with `unknown_command_fallback`.
+      const shouldFallbackToModel =
+        Boolean(context.options.isNonInteractiveSession) &&
+        !getFeatureValue_CACHED_MAY_BE_STALE(UNKNOWN_COMMAND_FALLBACK_KILLSWITCH, false);
+      const suggestionPool = shouldFallbackToModel
+        ? visibleCommands.filter(cmd => cmd.type === 'prompt' && !cmd.disableModelInvocation)
+        : visibleCommands;
       const suggestion = suggestSlashCommand(
         commandName,
-        context.options.commands
-          .filter(cmd => !cmd.isHidden && !isSlashCommandOff(cmd) && isCommandEnabled(cmd))
-          .map(cmd => ({ name: getCommandName(cmd), aliases: cmd.aliases })),
+        suggestionPool.map(cmd => ({ name: getCommandName(cmd), aliases: cmd.aliases })),
         { maxEditDistance: 2 },
       );
       logEvent('tengu_input_slash_invalid', {
@@ -1031,7 +1148,21 @@ async function processSlashCommandBody(
         is_mcp_template_unmatched: isMcpTemplateUnmatched,
         had_suggestion: Boolean(suggestion),
         suggestion_distance: suggestion ? slashCommandEditDistance(commandName, suggestion) : undefined,
+        fallback_to_model: shouldFallbackToModel,
       });
+      if (shouldFallbackToModel) {
+        const fallbackAttachment: UnknownCommandFallbackPayload = {
+          type: 'unknown_command_fallback',
+          commandName: isSafeUnknownCommandToken(commandName) ? commandName : undefined,
+          suggestion: suggestion !== undefined && isSafeUnknownCommandToken(suggestion) ? suggestion : undefined,
+          availableCommandNames: suggestionPool
+            .map(cmd => getCommandName(cmd))
+            .filter(isSafeUnknownCommandToken)
+            .slice(0, UNKNOWN_COMMAND_FALLBACK_MAX_NAMES),
+          availableCommandCount: visibleCommands.length,
+        };
+        return fallbackToPrompt([fallbackAttachment], inputString, true);
+      }
       logCmdDispatch('cmd_unknown');
 
       const unknownMessage = suggestion
@@ -1060,33 +1191,7 @@ async function processSlashCommandBody(
       };
     }
 
-    const promptId = randomUUID();
-    setPromptId(promptId);
-    logEvent('tengu_input_prompt', {});
-    // Log user prompt event for OTLP
-    void logOTelEvent('user_prompt', {
-      prompt_length: String(inputString.length),
-      prompt: redactIfDisabled(inputString),
-      'prompt.id': promptId,
-    });
-    // Official 2.1.327 #397: preserve pasted imageContentBlocks + imagePasteIds
-    // when a prompt starting with `/` (e.g. `/tmp/a.txt`) falls back to a
-    // regular user prompt instead of a slash command.
-    const fallbackContent =
-      imageContentBlocks.length > 0
-        ? [...precedingInputBlocks, { type: 'text' as const, text: inputString }, ...imageContentBlocks]
-        : prepareUserContent({ inputString, precedingInputBlocks });
-    return {
-      messages: [
-        createUserMessage({
-          content: fallbackContent,
-          uuid: uuid,
-          imagePasteIds: imagePasteIds.length > 0 ? imagePasteIds : undefined,
-        }),
-        ...attachmentMessages,
-      ],
-      shouldQuery: true,
-    };
+    return fallbackToPrompt([], inputString, true);
   }
 
   // Track slash command usage for feature discovery
@@ -1124,6 +1229,7 @@ async function processSlashCommandBody(
       modelScheduledOrigin,
       submissionOrigin,
       checkLineForArgs,
+      extras?.ideSelection,
     );
     const lineCheck = await checkLineCache.get(argsToRun);
     return lineCheck === undefined ? ran : { ...ran, lineCheck };
@@ -1440,6 +1546,7 @@ export async function processSlashCommand(
   hostInitiator?: unknown,
   checkLine?: SlashLineCheckFn,
   imagePasteIds: number[] = [],
+  extras?: ProcessSlashCommandExtras,
 ): Promise<ProcessUserInputBaseResult> {
   using commandRun = wrapCommandRunWait(takeCommandRunWait(uuid));
   try {
@@ -1460,6 +1567,7 @@ export async function processSlashCommand(
       hostInitiator,
       checkLine,
       imagePasteIds,
+      extras,
     );
     commandRun.settle({
       text: result.resultText,
@@ -1510,6 +1618,8 @@ async function getMessagesForSlashCommand(
   submissionOrigin?: { kind?: string },
   /** Official 2.1.325 (#731): pre-expansion UserPromptSubmit / prompt.submit check. */
   checkLine?: () => Promise<boolean>,
+  /** Official 2.1.328 (`chunk@319394973.js:48800`): non-diff IDE selection for prompt slash commands. */
+  ideSelection?: IDESelection,
 ): Promise<SlashCommandResult> {
   let resolvedName = commandName;
   let resolvedArgs = args;
@@ -1592,6 +1702,21 @@ async function getMessagesForSlashCommand(
 
   // densable sdr: use redirected args for dispatch
   const argsForDispatch = resolvedArgs;
+
+  // Official 2.1.328 (`chunk@319394973.js:33000` `it`): short-circuit headless
+  // `local-jsx` BEFORE `command.load()` so interactive UI modules never load in `-p`.
+  if (command.type === 'local-jsx' && context.options.isNonInteractiveSession) {
+    const headlessMessage = `/${getCommandName(command)} opens an interactive panel and isn't available in this environment. Run it from the Claude Code terminal instead.`;
+    return {
+      messages: [
+        createCommandInputMessage(formatCommandInput(command, argsForDispatch)),
+        createCommandInputMessage(`<local-command-stdout>${headlessMessage}</local-command-stdout>`),
+      ],
+      shouldQuery: false,
+      command,
+      resultText: headlessMessage,
+    };
+  }
 
   try {
     switch (command.type) {
@@ -2055,6 +2180,8 @@ async function getMessagesForSlashCommand(
             uuid,
             expansion.hookMessages,
             modelScheduledOrigin,
+            false,
+            ideSelection,
           );
           if (stackedCommands.length > 0) {
             const head = loaded.messages[0];
@@ -2291,6 +2418,8 @@ async function getMessagesForPromptSlashCommand(
   modelScheduledOrigin?: boolean,
   /** densable `I` — Skill tool passes `IQ(context)`. */
   readOnlySkillLoad = false,
+  /** Official 2.1.328 (`chunk@319394973.js:48800`): non-diff IDE selection. */
+  ideSelection?: IDESelection,
 ): Promise<SlashCommandResult> {
   // densable `Le`: `IQ(o)&&!I` — user slash on coordinator main summarizes;
   // Skill tool passes I so this gate is false and the body loads read-only.
@@ -2481,6 +2610,7 @@ async function getMessagesForPromptSlashCommand(
         skipAtMentions = true;
       }
     }
+    const effectiveIdeSelection = ideSelection?.source === 'diff' ? null : (ideSelection ?? null);
     attachmentMessages = await toArray(
       getAttachmentMessages(
         result
@@ -2488,11 +2618,15 @@ async function getMessagesForPromptSlashCommand(
           .map(block => block.text)
           .join(' '),
         context,
-        null,
+        effectiveIdeSelection,
         [], // queuedCommands - handled by query.ts for mid-turn attachments
         context.messages,
         'repl_main_thread',
-        { skipSkillDiscovery: true, skipAtMentions },
+        {
+          skipSkillDiscovery: true,
+          skipAtMentions,
+          planSlugSeed: args,
+        } as GetAttachmentsOptions,
       ),
     );
   }

@@ -4,7 +4,6 @@ import type {
   BetaUsage,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { Stream } from '@anthropic-ai/sdk/streaming.mjs'
-import { feature } from 'bun:bundle'
 import type { NonNullableUsage } from '../logging.js'
 
 /**
@@ -77,24 +76,6 @@ export function updateUsage(
         (partUsage as BetaUsage).cache_creation?.ephemeral_5m_input_tokens ??
         usage.cache_creation.ephemeral_5m_input_tokens,
     },
-    // cache_deleted_input_tokens: returned by the API when cache editing
-    // deletes KV cache content, but not in SDK types. Kept off NonNullableUsage
-    // so the string is eliminated from external builds by dead code elimination.
-    // Uses the same > 0 guard as other token fields to prevent message_delta
-    // from overwriting the real value with 0.
-    ...(feature('CACHED_MICROCOMPACT')
-      ? {
-          cache_deleted_input_tokens:
-            (partUsage as unknown as { cache_deleted_input_tokens?: number })
-              .cache_deleted_input_tokens != null &&
-            (partUsage as unknown as { cache_deleted_input_tokens: number })
-              .cache_deleted_input_tokens > 0
-              ? (partUsage as unknown as { cache_deleted_input_tokens: number })
-                  .cache_deleted_input_tokens
-              : ((usage as unknown as { cache_deleted_input_tokens?: number })
-                  .cache_deleted_input_tokens ?? 0),
-        }
-      : {}),
     inference_geo: usage.inference_geo,
     iterations: partUsage.iterations ?? usage.iterations,
     speed: (partUsage as BetaUsage).speed ?? usage.speed,
@@ -134,18 +115,6 @@ export function accumulateUsage(
         totalUsage.cache_creation.ephemeral_5m_input_tokens +
         messageUsage.cache_creation.ephemeral_5m_input_tokens,
     },
-    // See comment in updateUsage — field is not on NonNullableUsage to keep
-    // the string out of external builds.
-    ...(feature('CACHED_MICROCOMPACT')
-      ? {
-          cache_deleted_input_tokens:
-            ((totalUsage as unknown as { cache_deleted_input_tokens?: number })
-              .cache_deleted_input_tokens ?? 0) +
-            ((
-              messageUsage as unknown as { cache_deleted_input_tokens?: number }
-            ).cache_deleted_input_tokens ?? 0),
-        }
-      : {}),
     inference_geo: messageUsage.inference_geo, // Use the most recent
     iterations: messageUsage.iterations, // Use the most recent
     speed: messageUsage.speed, // Use the most recent

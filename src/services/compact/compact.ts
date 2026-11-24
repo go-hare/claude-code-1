@@ -835,12 +835,40 @@ export const ERROR_MESSAGE_INCOMPLETE_RESPONSE =
 
 export class CompactionBlockedByHookError extends Error {}
 
+/**
+ * Official 2.1.328 (`kLa`, `chunk@293843120.js @2124`):
+ * remote kill-switch gate allowing emergency compaction (when the request
+ * cannot go out uncompacted) to bypass a blocking `PreCompact` hook.
+ */
+export function isCompactDespiteHookBlockEnabled(): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_typed_snail', false) === true
+  )
+}
+
 export function throwIfCompactBlockedByHook(
   result: { blockedBy?: string },
   context: Pick<ToolUseContext, 'addNotification'>,
-  options?: { suppressNotification?: boolean },
+  options?: {
+    suppressNotification?: boolean
+    requestCannotGoOut?: boolean
+  },
 ): void {
   if (!result.blockedBy) return
+  // Official 2.1.328 (`compact_despite_hook_block`, `chunk@294254613.js @2704890-2705150`):
+  // when the request cannot go out uncompacted and `kLa()` is enabled, run
+  // compaction despite a PreCompact hook block instead of deadlocking the session.
+  if (options?.requestCannotGoOut) {
+    if (isCompactDespiteHookBlockEnabled()) {
+      logEvent('tengu_compact_despite_hook_block', { bypassed: true })
+      logForDebugging(
+        `Reactive compact runs despite a PreCompact hook's block, because the request cannot go out uncompacted: ${result.blockedBy}`,
+      )
+      return
+    }
+    logEvent('tengu_compact_despite_hook_block', { bypassed: false })
+  }
   logForDebugging(
     `Compaction blocked by PreCompact hook: ${result.blockedBy}`,
     { level: 'warn' },
@@ -1033,6 +1061,159 @@ export function attachPreCompactArtifactReadVersions(
 }
 
 /**
+ * Official 2.1.328 (`HBo` + `JJ`, `chunk@294254613.js @1965538-1965800` & `@3025080-3025200`):
+ * stamp `postTokens`, `durationMs`, and `cumulativeDroppedTokens` onto a
+ * `compact_boundary` message's `compactMetadata`.
+ */
+export function stampCompactBoundaryMetadata(
+  boundaryMarker: SystemCompactBoundaryMessage,
+  preCompactMessages: readonly Message[],
+  postTokens: number,
+  durationMs: number,
+): void {
+  let prevMaxDropped = 0
+  for (const msg of preCompactMessages) {
+    if (!msg || !isCompactBoundaryMessage(msg)) continue
+    const meta = (
+      msg as {
+        compactMetadata?: {
+          cumulativeDroppedTokens?: unknown
+          preTokens?: unknown
+          postTokens?: unknown
+        }
+      }
+    ).compactMetadata
+    if (!meta) continue
+    const pre = typeof meta.preTokens === 'number' ? meta.preTokens : 0
+    const post = typeof meta.postTokens === 'number' ? meta.postTokens : 0
+    const dropped =
+      typeof meta.cumulativeDroppedTokens === 'number'
+        ? meta.cumulativeDroppedTokens
+        : Math.max(0, pre - post)
+    if (dropped > prevMaxDropped) {
+      prevMaxDropped = dropped
+    }
+  }
+  const preTokens =
+    typeof boundaryMarker.compactMetadata.preTokens === 'number'
+      ? boundaryMarker.compactMetadata.preTokens
+      : 0
+  boundaryMarker.compactMetadata.postTokens = postTokens
+  boundaryMarker.compactMetadata.durationMs = durationMs
+  boundaryMarker.compactMetadata.cumulativeDroppedTokens =
+    prevMaxDropped + Math.max(0, preTokens - postTokens)
+}
+
+function readStringUuidArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string' && v !== '')
+    : []
+}
+
+function getPriorSummarizedTurnPromptUuids(msg: Message): string[] {
+  if (msg.type !== 'user') return []
+  return readStringUuidArray(
+    (msg as { summarizedTurnPromptUuids?: unknown }).summarizedTurnPromptUuids,
+  )
+}
+
+function isToolResultOnlyUserMessage(msg: Message): boolean {
+  const content = (msg as UserMessage).message?.content
+  return (
+    Array.isArray(content) &&
+    content.length > 0 &&
+    content.every(
+      block =>
+        typeof block === 'object' &&
+        block !== null &&
+        'type' in block &&
+        block.type === 'tool_result',
+    )
+  )
+}
+
+function isTurnOpeningUserMessage(msg: Message): msg is UserMessage {
+  if (msg.type !== 'user') return false
+  if (isToolResultOnlyUserMessage(msg)) return false
+  const rec = msg as UserMessage & {
+    promptId?: unknown
+    turnOrigin?: unknown
+    isVirtual?: unknown
+  }
+  return Boolean(
+    rec.promptId ||
+      rec.turnOrigin ||
+      !(rec.isMeta || rec.isVirtual || rec.isVisibleInTranscriptOnly),
+  )
+}
+
+/**
+ * Official 2.1.328 (`hGi` + `xJe` + `cOt`, `chunk@294254613.js @5884950`,
+ * `chunk@292548255.js @1355`): collect the prompt UUID(s) belonging to the
+ * active turn being summarized so post-compact summary messages retain turn
+ * lineage across compactions.
+ */
+export function collectSummarizedTurnPromptUuids(
+  messages: readonly Message[],
+): string[] | undefined {
+  let lastTurnStartIdx = -1
+  let lastPriorSummaryIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg) continue
+    if (
+      lastPriorSummaryIdx === -1 &&
+      getPriorSummarizedTurnPromptUuids(msg).length > 0
+    ) {
+      lastPriorSummaryIdx = i
+    }
+    if (lastTurnStartIdx === -1 && isTurnOpeningUserMessage(msg)) {
+      lastTurnStartIdx = i
+    }
+    if (lastTurnStartIdx !== -1 && lastPriorSummaryIdx !== -1) break
+  }
+  const idx = Math.max(lastTurnStartIdx, lastPriorSummaryIdx)
+  if (idx < 0) return undefined
+  const opener = messages[idx]
+  if (!opener || opener.type !== 'user') return undefined
+  if (opener.isCompactSummary) {
+    const carried = getPriorSummarizedTurnPromptUuids(opener)
+    return carried.length > 0 ? carried : undefined
+  }
+  const sentAsUuid = (opener as { sentAsUuid?: unknown }).sentAsUuid
+  const uuids =
+    typeof sentAsUuid === 'string' &&
+    sentAsUuid !== '' &&
+    sentAsUuid !== opener.uuid
+      ? [opener.uuid, sentAsUuid]
+      : opener.uuid
+        ? [opener.uuid]
+        : []
+  return uuids.length > 0 ? uuids : undefined
+}
+
+/**
+ * Official 2.1.328 (`gGi`, `chunk@294254613.js @5884195`):
+ * stamp `summarizedTurnPromptUuids` onto compact summary user messages.
+ */
+export function stampSummarizedTurnPromptUuids(
+  summaryMessages: UserMessage[],
+  preCompactMessages: readonly Message[],
+): UserMessage[] {
+  const uuids = collectSummarizedTurnPromptUuids(preCompactMessages)
+  if (uuids === undefined) return summaryMessages
+  return summaryMessages.map(msg => {
+    const existing = (msg as { summarizedTurnPromptUuids?: unknown })
+      .summarizedTurnPromptUuids
+    if (existing !== undefined) return msg
+    return {
+      ...msg,
+      summarizedTurnPromptUuids: uuids,
+    } as UserMessage
+  })
+}
+
+/**
  * Merges user-supplied custom instructions with hook-provided instructions.
  * User instructions come first; hook instructions are appended.
  * Empty strings normalize to undefined.
@@ -1061,7 +1242,9 @@ export async function compactConversation(
   stripNonEssential: boolean = false,
   preCompactHookResult?: Awaited<ReturnType<typeof executePreCompactHooks>>,
   initialTokenGap?: number,
+  requestCannotGoOut: boolean = false,
 ): Promise<CompactionResult> {
+  const compactStartTimeMs = performance.now()
   try {
     // densable 2.1.214: refuse compact when EndConversation ended the session
     const endedAppState = context.getAppState()
@@ -1101,6 +1284,7 @@ export async function compactConversation(
       )
       throwIfCompactBlockedByHook(hookResult, context, {
         suppressNotification: isAutoCompact,
+        requestCannotGoOut,
       })
     }
     customInstructions = mergeHookInstructions(
@@ -1460,19 +1644,22 @@ export async function compactConversation(
     )
 
     const transcriptPath = getTranscriptPath()
-    const summaryMessages: UserMessage[] = [
-      createUserMessage({
-        content: getCompactUserSummaryMessage(summary, {
-          suppressFollowUpQuestions,
-          transcriptPath,
-          headTruncated: ptlAttempts > 0,
-          toolNamesUsed: collectToolNamesUsedBeforeCompact(messages),
-          isTranscriptSuppressed: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+    const summaryMessages: UserMessage[] = stampSummarizedTurnPromptUuids(
+      [
+        createUserMessage({
+          content: getCompactUserSummaryMessage(summary, {
+            suppressFollowUpQuestions,
+            transcriptPath,
+            headTruncated: ptlAttempts > 0,
+            toolNamesUsed: collectToolNamesUsedBeforeCompact(messages),
+            isTranscriptSuppressed: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+          }),
+          isCompactSummary: true,
+          isVisibleInTranscriptOnly: true,
         }),
-        isCompactSummary: true,
-        isVisibleInTranscriptOnly: true,
-      }),
-    ]
+      ],
+      messages,
+    )
 
     // Previously "postCompactTokenCount" — renamed because this is the
     // compact API call's total usage (input_tokens ≈ preCompactTokenCount),
@@ -1491,6 +1678,13 @@ export async function compactConversation(
       ...postCompactFileAttachments,
       ...hookMessages,
     ] as Parameters<typeof roughTokenCountEstimationForMessages>[0])
+    const compactDurationMs = Math.round(performance.now() - compactStartTimeMs)
+    stampCompactBoundaryMetadata(
+      boundaryMarker,
+      messages,
+      truePostCompactTokenCount,
+      compactDurationMs,
+    )
 
     // Extract compaction API usage metrics
     const compactionUsage = getTokenUsage(summaryResponse)
@@ -1643,6 +1837,7 @@ export async function partialCompactConversation(
   userFeedback?: string,
   direction: PartialCompactDirection = 'from',
 ): Promise<CompactionResult> {
+  const partialCompactStartTimeMs = performance.now()
   try {
     const messagesToSummarize =
       direction === 'up_to'
@@ -2115,27 +2310,43 @@ export async function partialCompactConversation(
     )
 
     const transcriptPath = getTranscriptPath()
-    const summaryMessages: UserMessage[] = [
-      createUserMessage({
-        content: getCompactUserSummaryMessage(summary, {
-          suppressFollowUpQuestions: false,
-          transcriptPath,
-          headTruncated: ptlAttempts > 0,
-          toolNamesUsed: collectToolNamesUsedBeforeCompact(allMessages),
-          isTranscriptSuppressed: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+    const summaryMessages: UserMessage[] = stampSummarizedTurnPromptUuids(
+      [
+        createUserMessage({
+          content: getCompactUserSummaryMessage(summary, {
+            suppressFollowUpQuestions: false,
+            transcriptPath,
+            headTruncated: ptlAttempts > 0,
+            toolNamesUsed: collectToolNamesUsedBeforeCompact(allMessages),
+            isTranscriptSuppressed: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+          }),
+          isCompactSummary: true,
+          ...(messagesToKeep.length > 0
+            ? {
+                summarizeMetadata: {
+                  messagesSummarized: messagesToSummarize.length,
+                  userContext: userFeedback,
+                  direction,
+                },
+              }
+            : { isVisibleInTranscriptOnly: true as const }),
         }),
-        isCompactSummary: true,
-        ...(messagesToKeep.length > 0
-          ? {
-              summarizeMetadata: {
-                messagesSummarized: messagesToSummarize.length,
-                userContext: userFeedback,
-                direction,
-              },
-            }
-          : { isVisibleInTranscriptOnly: true as const }),
-      }),
-    ]
+      ],
+      messagesToSummarize,
+    )
+    const partialPostTokens = roughTokenCountEstimationForMessages([
+      boundaryMarker,
+      ...summaryMessages,
+      ...messagesToKeep,
+      ...postCompactFileAttachments,
+      ...hookMessages,
+    ] as Parameters<typeof roughTokenCountEstimationForMessages>[0])
+    stampCompactBoundaryMetadata(
+      boundaryMarker,
+      allMessages,
+      partialPostTokens,
+      Math.round(performance.now() - partialCompactStartTimeMs),
+    )
 
     if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
       notifyCompaction(

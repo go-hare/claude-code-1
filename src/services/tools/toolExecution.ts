@@ -37,7 +37,11 @@ import {
 } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { getPermissionConfirm } from '../../dialog/permissionConfirmRegistry.js'
-import { createAbortController } from '../../utils/abortController.js'
+import {
+  createAbortController,
+  createAbortErrorReason,
+  getAbortReasonMessage,
+} from '../../utils/abortController.js'
 import { registerForegroundToolCall } from '../../utils/foregroundToolCalls.js'
 import { areBackgroundTasksDisabled } from '../../utils/sessionBackgroundGates.js'
 import {
@@ -117,8 +121,10 @@ import { createAttachmentMessage } from '../../utils/attachments.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
   AbortError,
+  ControlStreamClosedError,
   errorMessage,
   getErrnoCode,
+  isAbortError,
   ShellError,
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../../utils/errors.js'
@@ -211,7 +217,9 @@ import {
   createStopHookSummaryMessage,
   createToolResultStopMessage,
   createUserMessage,
+  REJECT_MESSAGE,
   REJECT_MESSAGE_WITH_REASON_PREFIX,
+  SUBAGENT_REJECT_MESSAGE,
   SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX,
   withMemoryCorrectionHint,
 } from '../../utils/messages.js'
@@ -219,8 +227,12 @@ import type {
   PermissionDecision,
   PermissionResult,
 } from '../../utils/permissions/PermissionResult.js'
+import { AUTO_MODE_UNAVAILABLE_STOP_REASON } from '../../utils/permissions/autoModeUnavailable.js'
 import { decisionReasonToOTelSource } from '../../utils/permissions/permissionDecisionReasons.js'
-import { getAgentContext } from '../../utils/agentContext.js'
+import {
+  getAgentContext,
+  isDelegatedObservation,
+} from '../../utils/agentContext.js'
 import {
   agentContextSpawnDepth,
   webFetchHookBlockedHint,
@@ -1219,6 +1231,155 @@ async function checkRemoteSubagentCallerGate(opts: {
   return opts.source === 'session'
     ? remoteHostRefusedByMessage(opts.hostName, formatted)
     : remoteHostRefusedUnrunMessage(opts.hostName, formatted)
+}
+
+/** Official 2.1.328 `xMe` — pre-call skipped message after `permission-stop`. */
+const PERMISSION_STOP_SKIPPED_MESSAGE =
+  '[Tool call skipped: the turn was stopped before this call ran, by the check whose denial is on another call in this batch. Nothing refused this call and it had no effects; re-run it if still needed.]'
+
+/** Official 2.1.328 `o_o` / `s_o` / `obr` / `M$t` decision reason literals. */
+const AUTO_MODE_BILLING_CANCEL_REASON =
+  'Cancelled at the classifier billing notice'
+const AUTO_MODE_LEAVE_OFFER_STOP_REASON =
+  'Stopped at the offer to leave auto mode'
+const HELD_BACK_FOR_QUEUED_MESSAGE_REASON =
+  'tool permission request held back for a queued message'
+const PERMISSION_STREAM_CLOSED_REASON =
+  'tool permission stream closed before response received'
+
+function isCannedRejectionMessage(raw: string): boolean {
+  return (
+    raw === 'User denied permission' ||
+    raw === 'User aborted' ||
+    raw === CANCEL_MESSAGE ||
+    raw === REJECT_MESSAGE ||
+    raw === SUBAGENT_REJECT_MESSAGE
+  )
+}
+
+const PERMISSION_RULE_ERROR_TELEMETRY_MESSAGES = new Set([
+  'ccr_proxy_needs_approval_denied',
+  'ccr_proxy_needs_approval_chrome_site_denied',
+])
+
+export type ToolDenialKind =
+  | 'user-rejected'
+  | 'permission-rule'
+  | 'cancelled'
+  | 'interrupted'
+  | 'automode-blocked'
+  | 'automode-unavailable'
+  | 'automode-parsing-error'
+
+/**
+ * Official 2.1.328 `Vbe` (chunk@294254613.js:3520059) — classify a denied/ask
+ * `PermissionDecision` into a transcript-persisted `toolDenialKind`.
+ */
+export function deriveToolDenialKind(
+  decision: PermissionDecision,
+): ToolDenialKind {
+  if (decision.behavior === 'ask') return 'user-rejected'
+  const reason = decision.decisionReason
+  if (!reason) return 'permission-rule'
+  if (reason.type === 'classifier' && reason.classifier === 'auto-mode') {
+    if (
+      reason.reason === 'Classifier unavailable' ||
+      reason.reason === AUTO_MODE_UNAVAILABLE_STOP_REASON
+    ) {
+      return 'automode-unavailable'
+    }
+    return reason.noVerdict ? 'automode-parsing-error' : 'automode-blocked'
+  }
+  if (
+    reason.type === 'other' &&
+    (reason.reason === AUTO_MODE_BILLING_CANCEL_REASON ||
+      reason.reason === AUTO_MODE_LEAVE_OFFER_STOP_REASON)
+  ) {
+    return 'user-rejected'
+  }
+  if (
+    reason.type === 'other' &&
+    reason.reason === HELD_BACK_FOR_QUEUED_MESSAGE_REASON
+  ) {
+    return 'cancelled'
+  }
+  return 'permission-rule'
+}
+
+/**
+ * Official 2.1.328 `Gio` (chunk@294254613.js:3520350) — tag unanswered denials
+ * whose permission control stream closed before a response arrived.
+ */
+export function deriveToolDenialUnanswered(
+  decision: PermissionDecision,
+): 'stream-closed' | undefined {
+  if (decision.behavior !== 'deny') return undefined
+  const reason = decision.decisionReason
+  return reason?.type === 'other' &&
+    reason.reason === PERMISSION_STREAM_CLOSED_REASON
+    ? 'stream-closed'
+    : undefined
+}
+
+/**
+ * Official 2.1.328 `qJn` / `jwn` — true when a non-allow permission decision
+ * carries a human's own words (userFeedback or non-canned rejection reason).
+ */
+export function decisionHoldsPersonsWords(
+  decision: PermissionDecision,
+): boolean {
+  if (decision.behavior === 'allow') return false
+  if (decision.behavior === 'ask' && decision.userFeedback !== undefined) {
+    return true
+  }
+  const raw = decision.message?.trim() ?? ''
+  for (const prefix of [
+    REJECT_MESSAGE_WITH_REASON_PREFIX,
+    SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX,
+  ]) {
+    const trimmedPrefix = prefix.trim()
+    if (raw.startsWith(trimmedPrefix)) {
+      return raw.slice(trimmedPrefix.length).trim().length > 0
+    }
+  }
+  if (
+    decision.decisionReason?.type === 'permissionPromptTool' &&
+    raw.length > 0 &&
+    !isCannedRejectionMessage(raw)
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 `X6r` (chunk@294254613.js:4663000) — derive `toolDenialKind`
+ * for an error thrown during `tool.call()`.
+ */
+export function deriveToolErrorDenialKind(
+  error: unknown,
+  signal: AbortSignal,
+): ToolDenialKind | undefined {
+  const shellInterrupted = error instanceof ShellError && error.interrupted
+  if (
+    !(
+      error instanceof AbortError ||
+      shellInterrupted ||
+      (isAbortError(error) && signal.aborted)
+    )
+  ) {
+    if (
+      error instanceof
+        TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS &&
+      PERMISSION_RULE_ERROR_TELEMETRY_MESSAGES.has(error.telemetryMessage)
+    ) {
+      return 'permission-rule'
+    }
+    return undefined
+  }
+  return signal.aborted && getAbortReasonMessage(signal.reason) === 'background'
+    ? 'cancelled'
+    : 'interrupted'
 }
 
 function extractRemoteRejectionFeedback(
@@ -2527,14 +2688,21 @@ export async function* runToolUse(
           mcpServerBaseUrl,
         ),
       })
+      const cancelText =
+        getAbortReasonMessage(toolUseContext.abortController.signal.reason) ===
+        'permission-stop'
+          ? PERMISSION_STOP_SKIPPED_MESSAGE
+          : CANCEL_MESSAGE
       const content = createToolResultStopMessage(toolUse.id)
-      content.content = withMemoryCorrectionHint(CANCEL_MESSAGE)
+      content.content = withMemoryCorrectionHint(cancelText)
+      const cancelledMessage = createUserMessage({
+        content: [content],
+        toolUseResult: cancelText,
+        sourceToolAssistantUUID: assistantMessage.uuid,
+      })
+      cancelledMessage.toolDenialKind = 'cancelled'
       yield {
-        message: createUserMessage({
-          content: [content],
-          toolUseResult: CANCEL_MESSAGE,
-          sourceToolAssistantUUID: assistantMessage.uuid,
-        }),
+        message: cancelledMessage,
       }
       return
     }
@@ -4666,7 +4834,11 @@ async function checkPermissionsAndCallTool(
         stopReason = result.stopReason
         break
       case 'additionalContext':
-        resultingMessages.push(result.message)
+        // Official 2.1.328 (!Fi(g.agentContext), chunk@294254613.js:4858380):
+        // suppress PreToolUse additionalContext in delegated-observation subagents.
+        if (!isDelegatedObservation(getAgentContext())) {
+          resultingMessages.push(result.message)
+        }
         break
       case 'defer': {
         // Official 2.1.239: print-only + solo-only; emit hook_deferred_tool + r1t()
@@ -5007,13 +5179,48 @@ async function checkPermissionsAndCallTool(
       }
     }
 
+    const hasPersonsWords = decisionHoldsPersonsWords(permissionDecision)
+    const denialEndsTurn =
+      permissionDecision.behavior === 'deny' &&
+      (permissionDecision.endsTurn === true ||
+        (permissionDecision.decisionReason?.type === 'classifier' &&
+          permissionDecision.decisionReason.endsTurn === true))
+    const denialMonitorBlocked =
+      permissionDecision.behavior === 'deny' &&
+      permissionDecision.decisionReason?.type === 'classifier' &&
+      'monitorBlocked' in permissionDecision.decisionReason &&
+      (permissionDecision.decisionReason as { monitorBlocked?: boolean })
+        .monitorBlocked === true
+    const denialUnanswered = deriveToolDenialUnanswered(permissionDecision)
+
+    const denialMessage = createUserMessage({
+      content: messageContent,
+      imagePasteIds: rejectImageIds,
+      toolUseResult: `Error: ${errorMessage}`,
+      sourceToolAssistantUUID: assistantMessage.uuid,
+    })
+    denialMessage.toolDenialKind = deriveToolDenialKind(permissionDecision)
+    if (denialEndsTurn) {
+      denialMessage.toolDenialEndsTurn = true
+    }
+    if (denialMonitorBlocked) {
+      denialMessage.toolDenialMonitorBlocked = true
+    }
+    if (denialUnanswered !== undefined) {
+      denialMessage.toolDenialUnanswered = denialUnanswered
+    }
+    if (
+      permissionDecision.behavior === 'ask' &&
+      permissionDecision.userFeedback !== undefined
+    ) {
+      denialMessage.userFeedback = permissionDecision.userFeedback
+    }
+    if (hasPersonsWords) {
+      denialMessage.holdsPersonsWords = true
+    }
+
     resultingMessages.push({
-      message: createUserMessage({
-        content: messageContent,
-        imagePasteIds: rejectImageIds,
-        toolUseResult: `Error: ${errorMessage}`,
-        sourceToolAssistantUUID: assistantMessage.uuid,
-      }),
+      message: denialMessage,
     })
 
     // densable: I&&U.behavior==="deny"&&U.decisionReason.type==="hook"&&!aborted → LKr
@@ -5029,36 +5236,63 @@ async function checkPermissionsAndCallTool(
 
     // Run PermissionDenied hooks for auto mode classifier denials.
     // If a hook returns {retry: true}, tell the model it may retry.
-    if (
-      feature('TRANSCRIPT_CLASSIFIER') &&
-      permissionDecision.decisionReason?.type === 'classifier' &&
-      permissionDecision.decisionReason.classifier === 'auto-mode'
-    ) {
-      let hookSaysRetry = false
-      for await (const result of executePermissionDeniedHooks(
-        tool.name,
-        toolUseID,
-        processedInput,
-        permissionDecision.decisionReason.reason ?? 'Permission denied',
-        toolUseContext,
-        permissionMode,
-        toolUseContext.abortController.signal,
-      )) {
-        if (result.retry) hookSaysRetry = true
-      }
+    if (feature('TRANSCRIPT_CLASSIFIER')) {
       if (
-        hookSaysRetry &&
-        !permissionDecision.decisionReason.noVerdict &&
-        !(permissionDecision.behavior === 'deny' && permissionDecision.endsTurn)
+        permissionDecision.decisionReason?.type === 'classifier' &&
+        permissionDecision.decisionReason.classifier === 'auto-mode'
       ) {
-        resultingMessages.push({
-          message: createUserMessage({
-            content:
-              'The PermissionDenied hook indicated you may retry this tool call.',
-            isMeta: true,
-          }),
-        })
+        let hookSaysRetry = false
+        try {
+          for await (const result of executePermissionDeniedHooks(
+            tool.name,
+            toolUseID,
+            processedInput,
+            permissionDecision.decisionReason.reason ?? 'Permission denied',
+            toolUseContext,
+            permissionMode,
+            toolUseContext.abortController.signal,
+          )) {
+            if (result.retry) hookSaysRetry = true
+          }
+        } catch (err) {
+          if (!(err instanceof ControlStreamClosedError)) throw err
+          logForDebugging(
+            'PermissionDenied hooks cancelled (control stream closed)',
+          )
+        }
+        const classifierEndsTurn =
+          permissionDecision.behavior === 'deny' &&
+          (permissionDecision.endsTurn === true ||
+            permissionDecision.decisionReason.endsTurn === true)
+        if (
+          hookSaysRetry &&
+          !permissionDecision.decisionReason.noVerdict &&
+          !classifierEndsTurn
+        ) {
+          resultingMessages.push({
+            message: createUserMessage({
+              content:
+                'The PermissionDenied hook indicated you may retry this tool call.',
+              isMeta: true,
+              turnCompanion: true,
+            }),
+          })
+        }
       }
+    }
+
+    // Official 2.1.328 Ndi (chunk@294254613.js:4868065): abort turn with
+    // 'permission-stop' when a deny decision has endsTurn set.
+    if (
+      permissionDecision.behavior === 'deny' &&
+      (permissionDecision.endsTurn === true ||
+        (permissionDecision.decisionReason?.type === 'classifier' &&
+          permissionDecision.decisionReason.endsTurn === true)) &&
+      !toolUseContext.abortController.signal.aborted
+    ) {
+      toolUseContext.abortController.abort(
+        createAbortErrorReason('permission-stop'),
+      )
     }
 
     return resultingMessages
@@ -5260,6 +5494,8 @@ async function checkPermissionsAndCallTool(
         },
       })
 
+  let innerDenialHeldPersonsWords = false
+
   try {
     if (toolCallCapture) {
       try {
@@ -5347,6 +5583,13 @@ async function checkPermissionsAndCallTool(
                 scriptCheckDeferred?: boolean
               }
             ).scriptCheckDeferred === true))
+      const trackedCanUseTool: CanUseToolFn = async (...args) => {
+        const res = await callCanUseTool(...args)
+        if (res.behavior !== 'allow' && decisionHoldsPersonsWords(res)) {
+          innerDenialHeldPersonsWords = true
+        }
+        return res
+      }
       const invokeToolCall = () =>
         tool.call(
           callInput,
@@ -5374,7 +5617,7 @@ async function checkPermissionsAndCallTool(
             // gold @184489530 — call never inherits the Desktop-forward stamp.
             desktopForwardToolUseId: undefined,
           } as ToolUseContext,
-          callCanUseTool,
+          trackedCanUseTool,
           assistantMessage,
           progress => {
             if (isToolBridgeEvent(progress)) {
@@ -5818,6 +6061,9 @@ async function checkPermissionsAndCallTool(
         toolEndsTurn: endsTurn,
         sourceToolAssistantUUID: assistantMessage.uuid,
       })
+      if (innerDenialHeldPersonsWords) {
+        resultMessage.holdsPersonsWords = true
+      }
       if (
         hostContext.hostPrincipal &&
         !toolUseContext.abortController.signal.aborted
@@ -5976,9 +6222,16 @@ async function checkPermissionsAndCallTool(
     }
 
     // If the tool provided new messages, add them to the list to return.
+    // Official 2.1.328 Ndi (chunk@294254613.js:4886350): stamp turnCompanion: true
+    // on user messages in result.newMessages so they ride the same turn.
     if (result.newMessages && result.newMessages.length > 0) {
       for (const message of result.newMessages) {
-        resultingMessages.push({ message })
+        resultingMessages.push({
+          message:
+            message.type === 'user'
+              ? { ...message, turnCompanion: true }
+              : message,
+        })
       }
     }
     // densable success path: I&&!aborted → LKr
@@ -6126,29 +6379,50 @@ async function checkPermissionsAndCallTool(
       hookMessages.push(hookResult)
     }
 
+    // Official 2.1.328 Ndi catch (chunk@294254613.js:4890700): stamp
+    // toolDenialKind (X6r), holdsPersonsWords (Zi), and toolDenialEndsTurn.
+    const errorDenialKind = deriveToolErrorDenialKind(
+      error,
+      toolUseContext.abortController.signal,
+    )
+    const errorUserMessage = createUserMessage({
+      content: [
+        {
+          type: 'tool_result',
+          content,
+          is_error: true,
+          tool_use_id: toolUseID,
+        },
+      ],
+      toolUseResult: `Error: ${content}`,
+      mcpMeta: toolUseContext.agentId
+        ? undefined
+        : error instanceof
+            McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+          ? error.mcpMeta
+          : undefined,
+      sourceToolAssistantUUID: assistantMessage.uuid,
+    })
+    if (errorDenialKind !== undefined) {
+      errorUserMessage.toolDenialKind = errorDenialKind
+    }
+    if (innerDenialHeldPersonsWords) {
+      errorUserMessage.holdsPersonsWords = true
+    }
+    if (
+      toolUseContext.abortController.signal.aborted &&
+      getAbortReasonMessage(toolUseContext.abortController.signal.reason) ===
+        'permission-stop'
+    ) {
+      errorUserMessage.toolDenialEndsTurn = true
+    }
+
     // densable catch: after error tool_result + PostToolUseFailure hooks,
     // still LKr when continue:false and not abort — halt must not be dropped
     // when the tool fails mid-stream.
     const errorMessages = [
       {
-        message: createUserMessage({
-          content: [
-            {
-              type: 'tool_result',
-              content,
-              is_error: true,
-              tool_use_id: toolUseID,
-            },
-          ],
-          toolUseResult: `Error: ${content}`,
-          mcpMeta: toolUseContext.agentId
-            ? undefined
-            : error instanceof
-                McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-              ? error.mcpMeta
-              : undefined,
-          sourceToolAssistantUUID: assistantMessage.uuid,
-        }),
+        message: errorUserMessage,
       },
       ...hookMessages,
     ]

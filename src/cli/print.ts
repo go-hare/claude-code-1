@@ -114,7 +114,13 @@ import {
   countRemainingWakePollEventsAfter,
   consumeCancelPending,
   consumeCancelPendingAcked,
+  forgoRequeue,
   getCommandQueueSnapshot,
+  isFoldInFlight,
+  markCancelPending,
+  removeByFilter,
+  requeueTaken,
+  settleTaken,
 } from 'src/utils/messageQueueManager.js'
 import {
   backgroundForegroundBashToDeliverMessage,
@@ -343,6 +349,7 @@ import { getCwd } from 'src/utils/cwd.js'
 import {
   getMainThreadAgentId,
   getSessionCronTasks,
+  isMainThreadQueuedCommand,
 } from 'src/bootstrap/state.js'
 import omit from 'lodash-es/omit.js'
 import reject from 'lodash-es/reject.js'
@@ -472,7 +479,6 @@ import {
   resetSessionFilePointer,
   doesMessageExistInSession,
   findUnresolvedToolUse,
-  recordAttributionSnapshot,
   saveAgentSetting,
   saveMode,
   saveAiGeneratedTitle,
@@ -483,7 +489,6 @@ import {
   getTranscriptWriterDegraded,
 } from 'src/utils/sessionStorage.js'
 import { getReplBridgeHandle } from 'src/bridge/replBridgeHandle.js'
-import { incrementPromptCount } from 'src/utils/commitAttribution.js'
 import {
   setupSdkMcpClients,
   connectToServer,
@@ -2289,10 +2294,10 @@ export class PrintTextResults {
         text = 'Execution error'
         break
       case 'error_max_turns':
-        text = `Error: Reached max turns (${this.limits.maxTurns}).\nTip: Increase the limit with --max-turns or continue in a new session.`
+        text = `Error: Reached max turns (${this.limits.maxTurns})`
         break
       case 'error_max_budget_usd':
-        text = `Error: Exceeded USD budget ($${this.limits.maxBudgetUsd}).\nTip: Increase the limit with --max-budget-usd or start a new session to continue.`
+        text = `Error: Exceeded USD budget (${this.limits.maxBudgetUsd})`
         break
       case 'error_max_structured_output_retries': {
         const errors = msg.errors as string[] | undefined
@@ -2430,6 +2435,186 @@ export function isHeadlessCronLoading(opts: {
     )
   }
   return opts.running && opts.runPhase !== 'waiting_for_agents'
+}
+
+export type HeadlessInterruptReceipt = {
+  still_queued: string[]
+  cancelled?: string[]
+  put_back?: string[]
+  turn?: 'stopped' | 'idle' | 'spared'
+}
+
+/**
+ * Official 2.1.328 (`iw` + `Eh` in `chunk@323105654.js:367814, 825773-828500`):
+ * Handle interrupt queue side effects (`requeueTaken` / `settleTaken` /
+ * `cancel_queued: true`) and build the official receipt payload.
+ */
+export function buildHeadlessInterruptReceipt(opts: {
+  cancelQueued: boolean
+  turnOutcome?: 'stopped' | 'idle' | 'spared'
+  onCommandLifecycle?: (uuid: string, state: 'queued' | 'cancelled') => void
+  onPollEventsDiscarded?: (commands: QueuedCommand[], reason: string) => void
+}): HeadlessInterruptReceipt {
+  const {
+    cancelQueued,
+    turnOutcome,
+    onCommandLifecycle,
+    onPollEventsDiscarded,
+  } = opts
+
+  // Official `iw`: when not cancelling queued commands, resurrect any prompt
+  // absorbed mid-turn within its interrupt requeue window.
+  if (cancelQueued) {
+    settleTaken()
+  } else {
+    const putBackCmd = requeueTaken()
+    if (putBackCmd?.uuid !== undefined) {
+      onCommandLifecycle?.(putBackCmd.uuid, 'queued')
+    }
+  }
+
+  if (cancelQueued) {
+    const removed = removeByFilter(
+      cmd =>
+        isMainThreadQueuedCommand(cmd) &&
+        (cmd as { userStopNotice?: boolean }).userStopNotice !== true,
+    )
+    if (removed.length > 0) {
+      onPollEventsDiscarded?.(removed, 'interrupt cleared the queue')
+    }
+    const cancelled: string[] = []
+    for (const cmd of removed) {
+      if (cmd.uuid !== undefined) {
+        cancelled.push(cmd.uuid)
+        onCommandLifecycle?.(cmd.uuid, 'cancelled')
+      }
+    }
+    return {
+      still_queued: [],
+      cancelled,
+      ...(turnOutcome !== undefined ? { turn: turnOutcome } : {}),
+    }
+  }
+
+  const snapshot = getCommandQueueSnapshot()
+  const stillQueued: string[] = snapshot
+    .filter(isMainThreadQueuedCommand)
+    .map(cmd => cmd.uuid)
+    .filter((u): u is NonNullable<typeof u> => u !== undefined)
+  const putBack = snapshot.flatMap(cmd =>
+    (cmd as { runsAlone?: boolean }).runsAlone === true &&
+    cmd.uuid !== undefined
+      ? [cmd.uuid]
+      : [],
+  )
+  return {
+    still_queued: stillQueued,
+    ...(putBack.length > 0 ? { put_back: putBack } : {}),
+    ...(turnOutcome !== undefined ? { turn: turnOutcome } : {}),
+  }
+}
+
+/**
+ * Official 2.1.328 (`chunk@323105654.js:860400-861500`): when
+ * `rewind_conversation` requests `interrupt_if_running: true`, abort the
+ * active turn and await settlement BEFORE mutating `mutableMessages`.
+ */
+export async function interruptAndWaitForRewindSettlement(opts: {
+  getAbortController: () => AbortController | undefined
+  isRunning: () => boolean
+  getSettlingPromise: () => Promise<void> | undefined
+  timeoutMs?: number
+}): Promise<{ settled: boolean }> {
+  const timeoutMs = opts.timeoutMs ?? 10_000
+  const deadline = Date.now() + timeoutMs
+  opts.getAbortController()?.abort(createAbortErrorReason('remote-cancel'))
+
+  const settling = opts.getSettlingPromise()
+  if (settling !== undefined) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      settling.catch(() => undefined),
+      new Promise<void>(resolve => {
+        timer = setTimeout(resolve, Math.max(0, deadline - Date.now()))
+      }),
+    ])
+    if (timer !== undefined) clearTimeout(timer)
+  }
+
+  while (opts.isRunning() && Date.now() < deadline) {
+    opts.getAbortController()?.abort(createAbortErrorReason('remote-cancel'))
+    await sleep(20)
+  }
+  return { settled: !opts.isRunning() }
+}
+
+/**
+ * Official 2.1.328 (`Fw` + `Dw` in `chunk@323105654.js:428066, 853787`):
+ * Cancel a queued async message while guarding against in-flight mid-turn
+ * folds, forgoing requeue, marking cancel-pending, and emitting lifecycle.
+ */
+export function handleHeadlessCancelAsyncMessage(opts: {
+  targetUuid: string
+  sender?: 'host' | 'remote_client'
+  onCommandLifecycle?: (uuid: string, state: 'cancelled') => void
+  onPollEventsDiscarded?: (commands: QueuedCommand[], reason: string) => void
+  clearPrewaitIfNothingPending?: () => void
+}): { cancelled: boolean; message_uuid?: string } {
+  const sender = opts.sender ?? 'host'
+  const { targetUuid } = opts
+  const matchingBefore = getCommandQueueSnapshot().filter(
+    cmd => cmd.uuid === targetUuid,
+  )
+  const canEchoUuid =
+    matchingBefore.length > 0 &&
+    matchingBefore.every(cmd => cmd.drainOnly !== true)
+
+  const foldInFlight = isFoldInFlight(targetUuid)
+  const removed = foldInFlight
+    ? []
+    : dequeueAllMatching(
+        cmd =>
+          cmd.uuid === targetUuid &&
+          (sender === 'host' || cmd.bridgeOrigin === true),
+      )
+
+  if (removed.length === 0 && sender === 'host') {
+    forgoRequeue(targetUuid)
+  }
+  if (removed.length === 0 && !foldInFlight && sender === 'host') {
+    markCancelPending(targetUuid)
+  }
+  if (removed.length > 0) {
+    opts.onPollEventsDiscarded?.(removed, 'cancelled by the host')
+  }
+  opts.clearPrewaitIfNothingPending?.()
+  for (const cmd of removed) {
+    if (cmd.uuid !== undefined) {
+      opts.onCommandLifecycle?.(cmd.uuid, 'cancelled')
+    }
+  }
+  const cancelled = removed.length > 0
+  return cancelled && canEchoUuid
+    ? { cancelled, message_uuid: targetUuid }
+    : { cancelled }
+}
+
+/**
+ * Official 2.1.328 (`chunk@323105654.js:917860`): abort an in-flight
+ * control_request tracked by `request_id` when `control_cancel_request` arrives.
+ */
+export function handleIncomingControlCancelRequest(
+  inFlightControlRequests: Map<string, AbortController>,
+  requestId: string | undefined,
+): boolean {
+  const controller =
+    requestId !== undefined ? inFlightControlRequests.get(requestId) : undefined
+  logEvent('tengu_sdk_control_cancel_request', {
+    in_flight: Boolean(controller),
+  })
+  if (!controller) return false
+  controller.abort(createAbortErrorReason('remote-cancel'))
+  return true
 }
 
 /**
@@ -3409,15 +3594,6 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
 
   // Callback for when a permission prompt is shown
   const onPermissionPrompt = (details: RequiresActionDetails) => {
-    if (feature('COMMIT_ATTRIBUTION')) {
-      setAppState(prev => ({
-        ...prev,
-        attribution: {
-          ...prev.attribution,
-          permissionPromptCount: prev.attribution.permissionPromptCount + 1,
-        },
-      }))
-    }
     notifySessionStateChanged('requires_action', details)
   }
 
@@ -5676,11 +5852,17 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     }
   })
 
+  let activeRunPromise: Promise<void> | undefined
   const run = async () => {
     if (running) {
       return
     }
 
+    let resolveActiveRun!: () => void
+    const currentRunPromise = new Promise<void>(resolve => {
+      resolveActiveRun = resolve
+    })
+    activeRunPromise = currentRunPromise
     running = true
     runPhase = undefined
     notifySessionStateChanged('running')
@@ -5780,6 +5962,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           { level: 'info' },
         )
         running = false
+        if (activeRunPromise === currentRunPromise) {
+          activeRunPromise = undefined
+        }
+        resolveActiveRun()
         notifySessionStateChanged('idle')
         return
       }
@@ -6562,7 +6748,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           let lastResultBody = ''
           rapidFollowupPreempt.noteTurnStart({
             command: cmd,
-            members: [cmd],
+            members: batch,
           })
           try {
             await runWithTurnAttribution(
@@ -6849,11 +7035,13 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             // densable Dm.dropParkedBatch + Tl.clearAhead after turn settles.
             stopAllHookHeartbeatsForSession()
             rapidFollowupPreempt.noteTurnEnd()
+            settleTaken({ turnEnded: true })
             prewait.dropParkedBatch()
             startGate.clearAhead()
           } catch (error) {
             stopAllHookHeartbeatsForSession()
             rapidFollowupPreempt.noteTurnEnd()
+            settleTaken({ turnEnded: true })
             await finalizeAutonomyCommandsForTurn({
               commands: claimedAutonomyCommands,
               outcome: { type: 'failed', error },
@@ -7360,6 +7548,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         drainPrintSdkEvents()
       }
       running = false
+      if (activeRunPromise === currentRunPromise) {
+        activeRunPromise = undefined
+      }
+      resolveActiveRun()
       // densable post-tick (REPL isLoading→false): clear aPt; YKu && !rmt() → XKu.
       // Headless previously stamped aPt on kind:loop fire but never settled —
       // model-forgot-ScheduleWakeup left the dynamic loop dead in long -p/SDK sessions.
@@ -8132,6 +8324,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     }
     let initialized = false
     const midTurnHookRunner = createMidTurnHookRunner()
+    const inFlightControlRequests = new Map<string, AbortController>()
     logForDiagnosticsNoPII('info', 'cli_message_loop_started')
     for await (const message of structuredIO.structuredInput) {
       // Non-user events are handled inline (no queue). started→completed in
@@ -8207,6 +8400,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               subtype: 'interrupt'
               send_now?: boolean
               cancel_queued?: boolean
+              spare_background_tasks?: boolean
               message_uuid?: string
             }
             if (
@@ -8238,16 +8432,12 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               )
               continue
             }
-            // Track escapes for attribution (ant-only feature)
-            if (feature('COMMIT_ATTRIBUTION')) {
-              setAppState(prev => ({
-                ...prev,
-                attribution: {
-                  ...prev.attribution,
-                  escapeCount: prev.attribution.escapeCount + 1,
-                },
-              }))
-            }
+            const cancelQueued = interruptReq.cancel_queued === true
+            const spareBackgroundTasks =
+              interruptReq.spare_background_tasks === true
+            const hadActiveTurn = Boolean(
+              abortController && !abortController.signal.aborted,
+            )
             if (
               mcpStartupAbortRef.current &&
               !mcpStartupAbortRef.current.signal.aborted
@@ -8257,7 +8447,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             if (abortController) {
               sessionStoppedAfterRestart = true
               markSessionStoppedForPluginInput()
-              abortController.abort()
+              abortController.abort(createAbortErrorReason('user-cancel'))
             } else {
               sessionStoppedAfterRestart = true
               // Official 2.1.326 #95: if Stop arrived while restarting and the
@@ -8294,36 +8484,57 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               // right after set_model) must cancel the pending queued message.
               printPrewait?.interruptBeforeArm(getCommandQueue())
             }
-            // Official 2.1.328 (#593): notify the model when SDK interrupt
-            // stops background subagents so it does not claim they are still running.
-            const bgAgentsOnInterrupt = Object.values(
-              getAppState().tasks ?? {},
-            ).filter(
-              t =>
-                t.type === 'local_agent' &&
-                t.status === 'running' &&
-                (!('isBackgrounded' in t) || t.isBackgrounded),
-            )
-            if (bgAgentsOnInterrupt.length > 0) {
-              for (const agentTask of bgAgentsOnInterrupt) {
-                void stopTask(agentTask.id, {
-                  getAppState,
-                  setAppState,
-                  source: 'user',
-                }).catch(() => undefined)
+            // Official 2.1.328 (`chunk@323105654.js:827500`): respect
+            // `spare_background_tasks: true` — only sweep running background
+            // subagents when not spared.
+            if (!spareBackgroundTasks) {
+              // Official 2.1.328 (#593): notify the model when SDK interrupt
+              // stops background subagents so it does not claim they are still running.
+              const bgAgentsOnInterrupt = Object.values(
+                getAppState().tasks ?? {},
+              ).filter(
+                t =>
+                  t.type === 'local_agent' &&
+                  t.status === 'running' &&
+                  (!('isBackgrounded' in t) || t.isBackgrounded),
+              )
+              if (bgAgentsOnInterrupt.length > 0) {
+                for (const agentTask of bgAgentsOnInterrupt) {
+                  void stopTask(agentTask.id, {
+                    getAppState,
+                    setAppState,
+                    source: 'user',
+                  }).catch(() => undefined)
+                }
+                notifySweptBackgroundAgents(getAppState().tasks, setAppState, {
+                  sweptIds: bgAgentsOnInterrupt.map(t => t.id),
+                })
+                drainPrintSdkEvents()
               }
-              notifySweptBackgroundAgents(getAppState().tasks, setAppState, {
-                sweptIds: bgAgentsOnInterrupt.map(t => t.id),
-              })
-              drainPrintSdkEvents()
             }
+            const { settlePollEventsDiscardedUndelivered } = await import(
+              'src/cli/printControlExtras.js'
+            )
+            const interruptReceipt = buildHeadlessInterruptReceipt({
+              cancelQueued,
+              turnOutcome: hadActiveTurn ? 'stopped' : 'idle',
+              onCommandLifecycle: (uuid, state) => {
+                notifyCommandLifecycle(uuid, state)
+              },
+              onPollEventsDiscarded: (commands, reason) => {
+                settlePollEventsDiscardedUndelivered(commands, reason)
+              },
+            })
             midTurnHookRunner.abortAll()
             drainPrintSdkEvents()
             suggestionState.abortController?.abort()
             suggestionState.abortController = null
             suggestionState.lastEmitted = null
             suggestionState.pendingSuggestion = null
-            sendControlResponseSuccess(msg)
+            sendControlResponseSuccess(
+              msg,
+              interruptReceipt as unknown as Record<string, unknown>,
+            )
           } else if (req.subtype === 'end_session') {
             rapidFollowupDrain.endSessionRequested = true
             midTurnHookRunner.abortAll()
@@ -8589,7 +8800,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             }
             sendControlResponseSuccess(msg)
           } else if (req.subtype === 'rewind_conversation') {
-            // densable print @206543667
+            // Official 2.1.328 (`chunk@323105654.js:854500, 860400-861500`):
+            // When `busy && interrupt_if_running === true`, abort active turn
+            // and await turn settlement BEFORE splicing `mutableMessages`.
             const { rewindTargetUuidError, findRewindCut } = await import(
               './printControlHosts.js'
             )
@@ -8597,13 +8810,32 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               sendControlResponseError(msg, rewindTargetUuidError())
               continue
             }
-            const busy = running || getMainThreadQueueLength() > 0
-            if (busy && req.interrupt_if_running !== true) {
+            const isTurnBusy = () =>
+              (running && runPhase !== 'waiting_for_agents') ||
+              getMainThreadQueueLength() > 0
+            if (isTurnBusy() && req.interrupt_if_running !== true) {
               sendControlResponseSuccess(msg, {
                 rewound: false,
                 reason: 'turn_running',
               })
               continue
+            }
+            if (
+              req.interrupt_if_running === true &&
+              (running || abortController)
+            ) {
+              await interruptAndWaitForRewindSettlement({
+                getAbortController: () => abortController,
+                isRunning: () => running && runPhase !== 'waiting_for_agents',
+                getSettlingPromise: () => activeRunPromise,
+              })
+              if (isTurnBusy()) {
+                sendControlResponseSuccess(msg, {
+                  rewound: false,
+                  reason: 'turn_running',
+                })
+                continue
+              }
             }
             const cut = findRewindCut(mutableMessages, req.target_message_uuid)
             if ('refuse' in cut) {
@@ -8642,11 +8874,23 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               )
             }
           } else if (msg.request.subtype === 'cancel_async_message') {
-            const targetUuid = msg.request.message_uuid
-            const removed = dequeueAllMatching(cmd => cmd.uuid === targetUuid)
-            sendControlResponseSuccess(msg, {
-              cancelled: removed.length > 0,
+            const { settlePollEventsDiscardedUndelivered } = await import(
+              'src/cli/printControlExtras.js'
+            )
+            const cancelRes = handleHeadlessCancelAsyncMessage({
+              targetUuid: msg.request.message_uuid,
+              sender: 'host',
+              onCommandLifecycle: (uuid, state) => {
+                notifyCommandLifecycle(uuid, state)
+              },
+              onPollEventsDiscarded: (commands, reason) => {
+                settlePollEventsDiscardedUndelivered(commands, reason)
+              },
             })
+            sendControlResponseSuccess(
+              msg,
+              cancelRes as unknown as Record<string, unknown>,
+            )
           } else if (isClaimSessionRequest(req)) {
             // densable ne @210326103 + print host @199134207
             try {
@@ -9317,7 +9561,13 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               sendControlResponseError(msg, mcpCallNotFullyQualified(req.tool))
               continue
             }
+            inFlightControlRequests
+              .get(msg.request_id)
+              ?.abort(createAbortErrorReason('remote-cancel'))
+            inFlightControlRequests.delete(msg.request_id)
             completeControlLifecycleImmediately(async () => {
+              const reqAbort = createAbortController()
+              inFlightControlRequests.set(msg.request_id, reqAbort)
               try {
                 if (isStagedMcpCall(req)) {
                   sendControlResponseError(msg, mcpCallStagedDisabled())
@@ -9358,7 +9608,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                   clientConnection: client,
                   tool: parsedTool.toolName,
                   args,
-                  signal: (abortController ?? new AbortController()).signal,
+                  signal: reqAbort.signal,
                   setAppState,
                 })
                 sendControlResponseSuccess(msg, {
@@ -9369,6 +9619,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 })
               } catch (err) {
                 sendControlResponseError(msg, errorMessage(err))
+              } finally {
+                if (inFlightControlRequests.get(msg.request_id) === reqAbort) {
+                  inFlightControlRequests.delete(msg.request_id)
+                }
               }
             })
           } else if (msg.request.subtype === 'mcp_reconnect') {
@@ -9952,7 +10206,12 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             // coordinator mode or memory-mechanics extras — acceptable, the
             // alternative is the side question failing entirely.
             const question = req.question as string
+            inFlightControlRequests
+              .get(msg.request_id)
+              ?.abort(createAbortErrorReason('remote-cancel'))
             deferControlLifecycleUntilDone(async () => {
+              const sideAbort = createAbortController()
+              inFlightControlRequests.set(msg.request_id, sideAbort)
               try {
                 const saved = getLastCacheSafeParams()
                 const cacheSafeParams = saved
@@ -9966,7 +10225,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                       // safe. Same guard as generate_session_title above.
                       toolUseContext: {
                         ...saved.toolUseContext,
-                        abortController: createAbortController(),
+                        abortController: sideAbort,
                       },
                     }
                   : await buildSideQuestionFallbackParams({
@@ -9990,6 +10249,12 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                       thinkingConfig: options.thinkingConfig,
                       agents: currentAgents,
                     })
+                if (!saved) {
+                  cacheSafeParams.toolUseContext = {
+                    ...cacheSafeParams.toolUseContext,
+                    abortController: sideAbort,
+                  }
+                }
                 const result = await runSideQuestion({
                   question,
                   cacheSafeParams,
@@ -9997,6 +10262,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 sendControlResponseSuccess(msg, { response: result.response })
               } catch (e) {
                 sendControlResponseError(msg, errorMessage(e))
+              } finally {
+                if (inFlightControlRequests.get(msg.request_id) === sideAbort) {
+                  inFlightControlRequests.delete(msg.request_id)
+                }
               }
             })
           } else if (
@@ -11350,6 +11619,12 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           output.enqueue(message as StdoutMessage)
         }
         continue
+      } else if (message.type === 'control_cancel_request') {
+        // Official 2.1.328 (`chunk@323105654.js:917860`): abort matching
+        // in-flight control request by `request_id`.
+        const reqId = (message as { request_id?: string }).request_id
+        handleIncomingControlCancelRequest(inFlightControlRequests, reqId)
+        continue
       } else if (message.type === 'keep_alive') {
         // Silently ignore keep-alive messages
         continue
@@ -11545,20 +11820,6 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           if (ackText !== undefined) {
             claimFirstTurnAck?.({ queued: ackText })
           }
-        }
-        // Increment prompt count for attribution tracking and save snapshot
-        // The snapshot persists promptCount so it survives compaction
-        if (feature('COMMIT_ATTRIBUTION')) {
-          setAppState(prev => ({
-            ...prev,
-            attribution: incrementPromptCount(prev.attribution, snapshot => {
-              void recordAttributionSnapshot(snapshot).catch(error => {
-                logForDebugging(
-                  `Attribution: Failed to save snapshot: ${error}`,
-                )
-              })
-            }),
-          }))
         }
         void run()
       }

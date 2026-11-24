@@ -62,7 +62,10 @@ import type {
 } from '../../types/message.js'
 import { count } from '../../utils/array.js'
 import { getAbortReasonMessage } from '../../utils/abortController.js'
-import { getGlobalConfigWriteCount } from '../../utils/config.js'
+import {
+  getGlobalConfigWriteCount,
+  type PastedContent,
+} from '../../utils/config.js'
 import { levelSessionEffort, type EffortValue } from '../../utils/effort.js'
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js'
 import { closeOpenDiffs, getConnectedIdeClient } from '../../utils/ide.js'
@@ -77,7 +80,8 @@ import { pruneDisplayedMessageContent } from '../../utils/messageDisplayTransfor
 import {
   enqueue,
   getCommandQueue,
-  getCommandQueueLength,
+  getMainThreadQueueLength,
+  hasEditableCommandsInQueue,
   someInFlightDrainCommand,
   type SetAppState,
 } from '../../utils/messageQueueManager.js'
@@ -90,9 +94,11 @@ import {
   handleMessageFromStream,
   isCompactBoundaryMessage,
   isMetaVisibleOrigin,
+  textForResubmit,
   type StreamingThinking,
   type StreamingToolUse,
 } from '../../utils/messages.js'
+import { getCanonicalName } from '../../utils/model/model.js'
 import { resolveModelFacts } from '../../utils/model/modelFacts.js'
 import { tokenCountWithEstimation } from '../../utils/tokens.js'
 import {
@@ -113,11 +119,13 @@ import {
   logQueryProfileReport,
   queryCheckpoint,
 } from '../../utils/queryProfiler.js'
+import { logError } from '../../utils/log.js'
 import {
   isEphemeralToolProgress,
   isLoggableMessage,
   removeTranscriptMessage,
   saveAiGeneratedTitle,
+  stripOldToolUseResultsForStorage,
 } from '../../utils/sessionStorage.js'
 import {
   generateSessionTitle,
@@ -865,6 +873,357 @@ export function advanceTitleFallback(
   }
 }
 
+export type InFlightTitleRequest = {
+  promise: Promise<string | null>
+  abortController: AbortController
+}
+
+const fallbackTitleRequestsByAttemptRef = new WeakMap<
+  object,
+  InFlightTitleRequest | null
+>()
+
+/**
+ * Official 2.1.328 `Son` (`chunk@319736883.js @1719647`): collect earlier user
+ * messages from a batched turn that appear contiguously (with only synthetic
+ * rows between them) before `msgs[lastUserIdx]` so Esc auto-restore restores
+ * the entire batched prompt rather than only the last message.
+ */
+export function collectBatchedTurnUserMessagesForRestore(
+  msgs: readonly MessageType[],
+  lastUserIdx: number,
+  newMessages: readonly MessageType[],
+): UserMessage[] {
+  const newUserMsgs = newMessages.filter(selectableUserMessagesFilter)
+  const batchUuids = new Set(newUserMsgs.map(m => m.uuid))
+  const target = msgs[lastUserIdx]
+  if (
+    batchUuids.size <= 1 ||
+    !target ||
+    !selectableUserMessagesFilter(target) ||
+    !batchUuids.has(target.uuid)
+  ) {
+    return []
+  }
+  const earlier: UserMessage[] = []
+  for (
+    let i = lastUserIdx - 1;
+    i >= 0 && earlier.length < batchUuids.size - 1;
+    i--
+  ) {
+    const row = msgs[i]
+    if (!row) continue
+    if (selectableUserMessagesFilter(row) && batchUuids.has(row.uuid)) {
+      earlier.push(row)
+    } else if (!messagesAfterAreOnlySynthetic([row], -1)) {
+      return []
+    }
+  }
+  return earlier.length === batchUuids.size - 1 ? earlier.reverse() : []
+}
+
+/** Official 2.1.328 `won` (`chunk@319736883.js @1719920`): poll_events delivered after prompt blocks Esc auto-restore. */
+function hasPollEventsAfterIndex(
+  msgs: readonly MessageType[],
+  index: number,
+): boolean {
+  return msgs
+    .slice(index + 1)
+    .some(m => m.type === 'attachment' && m.attachment?.type === 'poll_events')
+}
+
+const FILE_TRACKING_TOOL_NAMES = new Set([
+  'Read',
+  'FileRead',
+  'Edit',
+  'FileEdit',
+  'Write',
+  'FileWrite',
+  'NotebookEdit',
+])
+
+/**
+ * Official 2.1.328 `yNr` (`chunk@303112704.js:107343`): collect file paths and
+ * nested memory paths tracked by tool calls and attachments in a transcript
+ * slice so `/rewind` can evict files read ONLY in the rewound future branch.
+ */
+export function collectTrackedFilePathsFromMessages(
+  messages: readonly MessageType[],
+): { readFilePaths: Set<string>; nestedMemoryPaths: Set<string> } {
+  const readFilePaths = new Set<string>()
+  const nestedMemoryPaths = new Set<string>()
+  for (const msg of messages) {
+    if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+      for (const block of msg.message.content) {
+        if (
+          block &&
+          typeof block === 'object' &&
+          block.type === 'tool_use' &&
+          typeof block.name === 'string' &&
+          FILE_TRACKING_TOOL_NAMES.has(block.name) &&
+          typeof block.input === 'object' &&
+          block.input !== null
+        ) {
+          const input = block.input as Record<string, unknown>
+          const filePath =
+            block.name === 'NotebookEdit'
+              ? input.notebook_path
+              : input.file_path
+          if (typeof filePath === 'string' && filePath.length > 0) {
+            readFilePaths.add(filePath)
+          }
+        }
+      }
+      continue
+    }
+    if (msg.type !== 'attachment') continue
+    const att = msg.attachment as Record<string, unknown> | undefined
+    if (!att || typeof att.type !== 'string') continue
+    if (att.type === 'file') {
+      const content = att.content as { type?: unknown } | undefined
+      if (
+        content?.type !== 'image' &&
+        content?.type !== 'pdf' &&
+        content?.type !== 'parts' &&
+        typeof att.filename === 'string' &&
+        att.filename.length > 0
+      ) {
+        readFilePaths.add(att.filename)
+      }
+    } else if (att.type === 'nested_memory') {
+      if (typeof att.path === 'string' && att.path.length > 0) {
+        nestedMemoryPaths.add(att.path)
+      }
+    } else if (att.type === 'relevant_memories') {
+      if (Array.isArray(att.memories)) {
+        for (const mem of att.memories) {
+          const p = (mem as { path?: unknown } | undefined)?.path
+          if (typeof p === 'string' && p.length > 0) {
+            readFilePaths.add(p)
+          }
+        }
+      }
+    } else if (att.type === 'edited_text_file') {
+      if (typeof att.filename === 'string' && att.filename.length > 0) {
+        readFilePaths.add(att.filename)
+      }
+    }
+  }
+  return { readFilePaths, nestedMemoryPaths }
+}
+
+export type RewindRefusalFallbackUnwindPlan = {
+  bannersSliced: number
+  clearLatch: boolean
+  lastSlicedFallbackModel: string
+  model:
+    | {
+        action: 'restore'
+        value: string | null
+        restoredFrom: 'transcript' | 'initial_model' | 'settings_fallthrough'
+      }
+    | {
+        action: 'keep'
+        reason: 'not_first_party' | 'writer_mismatch'
+      }
+}
+
+function isRefusalFallbackSystemBanner(
+  msg: MessageType,
+): msg is MessageType & { fallbackModel: string } {
+  return (
+    msg.type === 'system' &&
+    (msg as { subtype?: unknown }).subtype === 'model_refusal_fallback' &&
+    typeof (msg as { fallbackModel?: unknown }).fallbackModel === 'string'
+  )
+}
+
+function sameCanonicalModel(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (!a || !b) return false
+  return a === b || getCanonicalName(a) === getCanonicalName(b)
+}
+
+/**
+ * Official 2.1.328 `wYe` (`chunk@319736883.js:433388`): unwind a refusal
+ * fallback model switch when `/rewind` slices past the fallback banner.
+ */
+export function planRewindRefusalFallbackUnwind(input: {
+  keptMessages: readonly MessageType[]
+  slicedMessages: readonly MessageType[]
+  currentOverride: string | null | undefined
+  latchActive: boolean
+  firstParty: boolean
+  modelBeforeSwap: string | null | undefined
+  initialModel: string | null | undefined
+}): RewindRefusalFallbackUnwindPlan | undefined {
+  const slicedBanners = input.slicedMessages.filter(
+    isRefusalFallbackSystemBanner,
+  )
+  const lastBanner = slicedBanners.at(-1)
+  if (!lastBanner) return undefined
+  const lastSlicedFallbackModel = lastBanner.fallbackModel
+  const clearLatch =
+    input.latchActive && !input.keptMessages.some(isRefusalFallbackSystemBanner)
+
+  if (!input.firstParty) {
+    return {
+      bannersSliced: slicedBanners.length,
+      clearLatch,
+      lastSlicedFallbackModel,
+      model: { action: 'keep', reason: 'not_first_party' },
+    }
+  }
+  if (!sameCanonicalModel(input.currentOverride, lastSlicedFallbackModel)) {
+    return {
+      bannersSliced: slicedBanners.length,
+      clearLatch,
+      lastSlicedFallbackModel,
+      model: { action: 'keep', reason: 'writer_mismatch' },
+    }
+  }
+
+  let keptModel: string | undefined
+  for (let i = input.keptMessages.length - 1; i >= 0; i--) {
+    const m = input.keptMessages[i]
+    if (
+      m?.type === 'assistant' &&
+      !(m as { isMeta?: boolean }).isMeta &&
+      typeof m.message?.model === 'string' &&
+      m.message.model !== '<synthetic>'
+    ) {
+      const inPlace = (m as { inPlaceOfModel?: unknown }).inPlaceOfModel
+      keptModel = typeof inPlace === 'string' ? inPlace : m.message.model
+      break
+    }
+  }
+  if (keptModel != null) {
+    return {
+      bannersSliced: slicedBanners.length,
+      clearLatch,
+      lastSlicedFallbackModel,
+      model: {
+        action: 'restore',
+        value: keptModel,
+        restoredFrom: 'transcript',
+      },
+    }
+  }
+  const fallbackToInitial = input.modelBeforeSwap ?? input.initialModel
+  if (fallbackToInitial != null) {
+    return {
+      bannersSliced: slicedBanners.length,
+      clearLatch,
+      lastSlicedFallbackModel,
+      model: {
+        action: 'restore',
+        value: fallbackToInitial,
+        restoredFrom: 'initial_model',
+      },
+    }
+  }
+  return {
+    bannersSliced: slicedBanners.length,
+    clearLatch,
+    lastSlicedFallbackModel,
+    model: {
+      action: 'restore',
+      value: null,
+      restoredFrom: 'settings_fallthrough',
+    },
+  }
+}
+
+/**
+ * Official 2.1.328 `restoreDraftInto` / `fillDraftFrom` (`chunk@319736883.js:500317-500850`):
+ * reconstruct draft text, input mode, non-image `pastedContents`, and inline
+ * image blocks across one or more restored user messages.
+ */
+export function buildRestoredDraftFromMessages(
+  messages: readonly UserMessage[],
+): {
+  text: string
+  mode: 'bash' | 'prompt'
+  pastedContents: Record<number, PastedContent>
+} {
+  const texts: string[] = []
+  let mode: 'bash' | 'prompt' = 'prompt'
+  const pastedContents: Record<number, PastedContent> = {}
+  let nextPasteId = 1
+
+  const allocateId = (preferred?: number): number => {
+    if (
+      typeof preferred === 'number' &&
+      Number.isInteger(preferred) &&
+      preferred > 0 &&
+      !(preferred in pastedContents)
+    ) {
+      if (preferred >= nextPasteId) nextPasteId = preferred + 1
+      return preferred
+    }
+    while (nextPasteId in pastedContents) nextPasteId++
+    return nextPasteId++
+  }
+
+  for (const msg of messages) {
+    const r = textForResubmit(msg)
+    if (r) {
+      if (r.text.length > 0) texts.push(r.text)
+      if (messages.length === 1) {
+        mode = r.mode
+      }
+    }
+
+    // Restore non-image (and any recorded) pastedContents attached on the message.
+    const recordedPastes = (
+      msg as UserMessage & { pastedContents?: Record<number, PastedContent> }
+    ).pastedContents
+    if (recordedPastes && typeof recordedPastes === 'object') {
+      for (const entry of Object.values(recordedPastes)) {
+        if (!entry || typeof entry !== 'object') continue
+        const id = allocateId(entry.id)
+        pastedContents[id] = { ...entry, id }
+      }
+    }
+
+    // Restore inline base64 image blocks from message.content.
+    if (Array.isArray(msg.message.content)) {
+      const imageBlocks = msg.message.content.filter(
+        block => block.type === 'image',
+      )
+      imageBlocks.forEach((block, index) => {
+        if (block.type === 'image' && block.source.type === 'base64') {
+          const preferredId =
+            (msg.imagePasteIds as number[] | undefined)?.[index] ?? index + 1
+          const existing = pastedContents[preferredId]
+          if (
+            existing &&
+            existing.type === 'image' &&
+            existing.content === block.source.data
+          ) {
+            return
+          }
+          const id = allocateId(preferredId)
+          pastedContents[id] = {
+            id,
+            type: 'image',
+            content: block.source.data,
+            mediaType: block.source.media_type,
+          }
+        }
+      })
+    }
+  }
+
+  return {
+    text: texts.join('\n'),
+    mode,
+    pastedContents,
+  }
+}
+
 export type RunReplTurnDeps = {
   store: AppStateStore
   queryGuard: QueryGuard
@@ -875,6 +1234,8 @@ export type RunReplTurnDeps = {
   agentTitle: string | undefined
   haikuTitleAttemptedRef: { current: boolean }
   titleFallbackRef?: { current: TitleFallback | undefined }
+  /** Official 2.1.328 `_titleRequest`: stale-request cancellation ref for session title generation. */
+  titleRequestRef?: { current: InFlightTitleRequest | null }
   setHaikuTitle: (title: string) => void
   commands: Command[]
   setConversationId: (id: UUID) => void
@@ -944,7 +1305,9 @@ export type RunReplTurnDeps = {
   setLastQueryCompletionTime: (time: number) => void
   sendBridgeResultRef: { current: () => void }
   proactiveActive: unknown
-  restoreMessageSyncRef: { current: (m: UserMessage) => void }
+  restoreMessageSyncRef: {
+    current: (m: UserMessage, earlierBatch?: UserMessage[]) => void
+  }
   onCompacted?: (nextMessages: MessageType[]) => void
 }
 
@@ -971,6 +1334,7 @@ async function executeReplTurnImpl(
     agentTitle,
     haikuTitleAttemptedRef,
     titleFallbackRef,
+    titleRequestRef,
     setHaikuTitle,
     commands,
     setConversationId,
@@ -1049,16 +1413,44 @@ async function executeReplTurnImpl(
       isSubstantive: prose !== null,
     })
     if (candidate) {
+      const getActiveTitleReq = (): InFlightTitleRequest | null =>
+        titleRequestRef
+          ? titleRequestRef.current
+          : (fallbackTitleRequestsByAttemptRef.get(haikuTitleAttemptedRef) ??
+            null)
+      const setActiveTitleReq = (req: InFlightTitleRequest | null): void => {
+        if (titleRequestRef) {
+          titleRequestRef.current = req
+        } else {
+          fallbackTitleRequestsByAttemptRef.set(haikuTitleAttemptedRef, req)
+        }
+      }
+      // Official 2.1.328 (`chunk@319736883.js @1702100`): abort any prior
+      // in-flight title request and track the current promise so stale
+      // resolutions/rejections cannot clobber a newer title or session.
+      const prevTitleReq = getActiveTitleReq()
+      if (prevTitleReq && !prevTitleReq.abortController.signal.aborted) {
+        prevTitleReq.abortController.abort('superseded')
+      }
       haikuTitleAttemptedRef.current = true
       if (titleFallbackRef) {
         titleFallbackRef.current = candidate
       }
       const titleSessionId = getSessionId()
-      void generateSessionTitle(
+      const titleAbortController = new AbortController()
+      const titlePromise = generateSessionTitle(
         candidate.text,
-        new AbortController().signal,
-      ).then(
+        titleAbortController.signal,
+      )
+      const reqEntry: InFlightTitleRequest = {
+        promise: titlePromise,
+        abortController: titleAbortController,
+      }
+      setActiveTitleReq(reqEntry)
+      void titlePromise.then(
         title => {
+          if (getActiveTitleReq() !== reqEntry) return
+          setActiveTitleReq(null)
           if (titleSessionId !== getSessionId()) return
           if (title) {
             if (titleFallbackRef) {
@@ -1080,6 +1472,8 @@ async function executeReplTurnImpl(
           }
         },
         () => {
+          if (getActiveTitleReq() !== reqEntry) return
+          setActiveTitleReq(null)
           if (titleFallbackRef) {
             titleFallbackRef.current = advanceTitleFallback(candidate, {
               kind: 'failed',
@@ -1509,6 +1903,16 @@ async function executeReplTurnImpl(
   }
 
   if (queryGuard.generation === thisGeneration) {
+    // Official 2.1.328 `f4r` (`chunk@319736883.js @1706752`): strip old heavy
+    // toolUseResult payloads from aged transcript rows at turn end.
+    setMessages(prev => {
+      try {
+        return stripOldToolUseResultsForStorage(prev, freshTools)
+      } catch (err) {
+        logError(err)
+        return prev
+      }
+    })
     resetLoadingState()
     logQueryProfileReport()
     await onTurnComplete?.(
@@ -1712,6 +2116,10 @@ export async function runReplTurn(
     const idleRunner = getIdleCompactionRunner()
     idleRunner.clear()
 
+    // Capture pre-turn message UUIDs BEFORE appending newMessages so if a held
+    // idle-compaction summary is injected below, it replaces the pre-compaction
+    // history cleanly instead of leaving old uncompacted rows after the boundary.
+    const preTurnUuids = new Set(messagesRef.current.map(m => m.uuid))
     pipeReturnHadErrorRef.current = false
     resetTimingRefs()
     setMessages(oldMessages => [...oldMessages, ...newMessages])
@@ -1756,8 +2164,14 @@ export async function runReplTurn(
         ...heldSummary,
         createSystemMessage(IDLE_COMPACT_SUMMARIZED_MESSAGE, 'info'),
       ]
-      setMessages(oldMessages => [...injected, ...oldMessages])
-      effectiveLatestMessages = [...injected, ...latestMessages]
+      setMessages(oldMessages => [
+        ...injected,
+        ...oldMessages.filter(m => !preTurnUuids.has(m.uuid)),
+      ])
+      effectiveLatestMessages = [
+        ...injected,
+        ...latestMessages.filter(m => !preTurnUuids.has(m.uuid)),
+      ]
     }
     idleRunner.consumeReturnAfterIdle(
       prevLastMessageTs !== undefined && !Number.isNaN(prevLastMessageTs)
@@ -1793,7 +2207,9 @@ export async function runReplTurn(
   } finally {
     if (queryGuard.end(thisGeneration)) {
       const turnEndMs = Date.now()
-      setMainLoopBusy(false)
+      // Official 2.1.328 (`chunk@319736883.js @1666560`): keep mainLoopBusy true
+      // while main-thread queued commands remain to avoid spinner/busy flicker.
+      setMainLoopBusy(getMainThreadQueueLength() > 0)
       setLastQueryCompletionTime(turnEndMs)
       resetLoadingState()
       const idleRunner = getIdleCompactionRunner()
@@ -1919,7 +2335,7 @@ export async function runReplTurn(
         abortReason === 'refusal-fallback-edit') &&
       !queryGuard.isActive &&
       inputValueRef.current === '' &&
-      getCommandQueueLength() === 0 &&
+      !hasEditableCommandsInQueue() &&
       !someInFlightDrainCommand() &&
       !store.getState().viewingAgentTaskId
     ) {
@@ -1927,9 +2343,21 @@ export async function runReplTurn(
       const lastUserMsg = msgs.findLast(selectableUserMessagesFilter)
       if (lastUserMsg) {
         const idx = msgs.lastIndexOf(lastUserMsg)
-        if (messagesAfterAreOnlySynthetic(msgs, idx)) {
+        const earlierBatch = collectBatchedTurnUserMessagesForRestore(
+          msgs,
+          idx,
+          newMessages,
+        )
+        const firstIdx =
+          earlierBatch[0] !== undefined
+            ? msgs.lastIndexOf(earlierBatch[0])
+            : idx
+        if (
+          messagesAfterAreOnlySynthetic(msgs, idx) &&
+          !hasPollEventsAfterIndex(msgs, firstIdx)
+        ) {
           removeLastFromHistory()
-          restoreMessageSyncRef.current(lastUserMsg)
+          restoreMessageSyncRef.current(lastUserMsg, earlierBatch)
         }
       }
     }

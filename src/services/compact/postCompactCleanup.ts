@@ -91,24 +91,6 @@ export function runPostCompactCleanup(querySource?: QuerySource): void {
   // 2.1.304 #1016: reset sentSkillNames so skill_listing is re-sent post-compact.
   resetSentSkillNames()
   clearBetaTracingState()
-  if (feature('COMMIT_ATTRIBUTION')) {
-    // Intentionally fire-and-forget: the file-content cache sweep is a
-    // best-effort memory release whose completion no caller depends on.
-    // Keeping `runPostCompactCleanup` synchronous lets compaction call sites
-    // (REPL post-compact handler, /compact command, autoCompact) finish their
-    // own state transitions without an extra microtask round-trip — the sweep
-    // catches up on the next event-loop tick.
-    //
-    // The .catch is required even though the current attributionHooks.ts is a
-    // no-op stub: without it, a future restored sweepFileContentCache that
-    // throws would surface as an unhandled promise rejection from a function
-    // whose synchronous signature gives callers no way to observe it.
-    void import('../../utils/attributionHooks.js')
-      .then(m => m.sweepFileContentCache())
-      .catch(error => {
-        logError(error)
-      })
-  }
   clearSessionMessagesCache()
   for (const cb of compactCleanupCallbacks) {
     try {

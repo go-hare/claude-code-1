@@ -351,7 +351,6 @@ import { getPinnedStorageV5 } from 'src/utils/storageV5/index.js';
 import { logContextMetrics } from 'src/utils/api.js';
 import { registerCleanup } from 'src/utils/cleanupRegistry.js';
 import { eagerHasCliFlag, eagerParseCliFlag } from 'src/utils/cliArgs.js';
-import { createEmptyAttributionState } from 'src/utils/commitAttribution.js';
 import {
   countConcurrentSessions,
   isBgSession,
@@ -457,7 +456,6 @@ import { resetProToOpusDefault } from './migrations/resetProToOpusDefault.js';
 import { createRemoteSessionConfig } from './remote/RemoteSessionManager.js';
 /* eslint-enable @typescript-eslint/no-require-imports */
 // teleportWithProgress dynamically imported at call site
-import { createDirectConnectSession, DirectConnectError } from './server/createDirectConnectSession.js';
 import { initializeLspServerManager } from './services/lsp/manager.js';
 import { shouldEnablePromptSuggestion } from './services/PromptSuggestion/promptSuggestion.js';
 import {
@@ -522,29 +520,14 @@ import { getTmuxInstallInstructions, isTmuxAvailable, parsePRReference } from '.
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
 profileCheckpoint('main_tsx_imports_loaded');
 
-// Set by early argv processing when `claude open <url>` is detected (interactive mode only)
-type PendingConnect = {
-  url: string | undefined;
-  authToken: string | undefined;
-  dangerouslySkipPermissions: boolean;
-};
-const _pendingConnect: PendingConnect | undefined = feature('DIRECT_CONNECT')
-  ? {
-      url: undefined,
-      authToken: undefined,
-      dangerouslySkipPermissions: false,
-    }
-  : undefined;
-
 // Set by early argv processing when `claude assistant [sessionId]` is detected
 type PendingAssistantChat = { sessionId?: string; discover: boolean };
 const _pendingAssistantChat: PendingAssistantChat | undefined = feature('KAIROS')
   ? { sessionId: undefined, discover: false }
   : undefined;
 
-// `claude ssh <host> [dir]` — parsed from argv early (same pattern as
-// DIRECT_CONNECT above) so the main command path can pick it up and hand
-// the REPL an SSH-backed session instead of a local one.
+// `claude ssh <host> [dir]` — parsed from argv early so the main command path
+// can pick it up and hand the REPL an SSH-backed session instead of a local one.
 type PendingSSH = {
   host: string | undefined;
   cwd: string | undefined;
@@ -606,40 +589,6 @@ export async function main() {
     process.exit(0);
   });
   profileCheckpoint('main_warning_handler_initialized');
-
-  // Check for cc:// or cc+unix:// URL in argv — rewrite so the main command
-  // handles it, giving the full interactive TUI instead of a stripped-down subcommand.
-  // For headless (-p), we rewrite to the internal `open` subcommand.
-  if (feature('DIRECT_CONNECT')) {
-    const rawCliArgs = process.argv.slice(2);
-    const ccIdx = rawCliArgs.findIndex(a => a.startsWith('cc://') || a.startsWith('cc+unix://'));
-    if (ccIdx !== -1 && _pendingConnect) {
-      const ccUrl = rawCliArgs[ccIdx]!;
-      const { parseConnectUrl } = await import('./server/parseConnectUrl.js');
-      const parsed = parseConnectUrl(ccUrl);
-      _pendingConnect.dangerouslySkipPermissions = rawCliArgs.includes('--dangerously-skip-permissions');
-
-      if (rawCliArgs.includes('-p') || rawCliArgs.includes('--print')) {
-        // Headless: rewrite to internal `open` subcommand
-        const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
-        const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
-        if (dspIdx !== -1) {
-          stripped.splice(dspIdx, 1);
-        }
-        process.argv = [process.argv[0]!, process.argv[1]!, 'open', ccUrl, ...stripped];
-      } else {
-        // Interactive: strip cc:// URL and flags, run main command
-        _pendingConnect.url = parsed.serverUrl;
-        _pendingConnect.authToken = parsed.authToken;
-        const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
-        const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
-        if (dspIdx !== -1) {
-          stripped.splice(dspIdx, 1);
-        }
-        process.argv = [process.argv[0]!, process.argv[1]!, ...stripped];
-      }
-    }
-  }
 
   // Handle deep link URIs early — this is invoked by the OS protocol handler
   // and should bail out before full init since it only needs to parse the URI
@@ -1889,7 +1838,7 @@ async function run(): Promise<CommanderCommand> {
         inputFormat,
         hasSdkUrl: Boolean(sdkUrl),
         nonInteractive: getIsNonInteractiveSession(),
-        hasConnect: Boolean(_pendingConnect?.url),
+        hasConnect: false,
         hasSSH: Boolean(_pendingSSH?.host),
         hasAssistant: Boolean(_pendingAssistantChat),
         isViolinWoodEnabled,
@@ -2121,10 +2070,7 @@ async function run(): Promise<CommanderCommand> {
         process.exit(1);
       }
       // leftover host-refuse path only — do not invent a cloud host
-      if (
-        restricted &&
-        (Boolean(_pendingConnect?.url) || Boolean(_pendingSSH?.host) || isCloudRemoteLaunch(cloudLaunch))
-      ) {
+      if (restricted && (Boolean(_pendingSSH?.host) || isCloudRemoteLaunch(cloudLaunch))) {
         process.stderr.write(chalk.red(`${RESTRICTED_CLOUD_SSH_REFUSE}\n`));
         process.exit(1);
       }
@@ -3394,7 +3340,6 @@ async function run(): Promise<CommanderCommand> {
           // Do not invent a --cloud host; env + pending attach is the local twin.
           runsOnAnotherMachine:
             isRemoteEnvEnabled() ||
-            Boolean(_pendingConnect?.url) ||
             Boolean(_pendingSSH?.host) ||
             Boolean(process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY),
         });
@@ -4794,7 +4739,6 @@ async function run(): Promise<CommanderCommand> {
           trackedFiles: new Set(),
           snapshotSequence: 0,
         },
-        attribution: createEmptyAttributionState(),
         thinkingEnabled,
         promptSuggestionEnabled: shouldEnablePromptSuggestion(),
         awaySummaryEnabled: computeAwaySummaryEnabled(initialSettings),
@@ -5073,7 +5017,6 @@ async function run(): Promise<CommanderCommand> {
       const launchMode = determineMainLaunchMode({
         isNonInteractiveSession,
         continueRequested: !!options.continue,
-        hasPendingDirectConnect: feature('DIRECT_CONNECT') ? !!_pendingConnect?.url : false,
         hasPendingSsh: feature('SSH_REMOTE') ? !!_pendingSSH?.host : false,
         hasPendingAssistantChat: feature('KAIROS')
           ? !!_pendingAssistantChat && !!(_pendingAssistantChat.sessionId || _pendingAssistantChat.discover)
@@ -5142,7 +5085,6 @@ async function run(): Promise<CommanderCommand> {
             result,
             {
               forkSession: !!options.forkSession,
-              includeAttribution: true,
               transcriptPath: result.fullPath,
               replyOnResume: skipAutoResumeForCodeModeContinue ? false : !!options.replyOnResume,
               continueRequested: true,
@@ -5207,51 +5149,6 @@ async function run(): Promise<CommanderCommand> {
           logError(error);
           process.exit(1);
         }
-      } else if (launchMode === 'direct-connect' && feature('DIRECT_CONNECT') && _pendingConnect?.url) {
-        // `claude connect <url>` — full interactive TUI connected to a remote server
-        let directConnectConfig;
-        try {
-          const session = await createDirectConnectSession({
-            serverUrl: _pendingConnect.url,
-            authToken: _pendingConnect.authToken,
-            cwd: getOriginalCwd(),
-            dangerouslySkipPermissions: _pendingConnect.dangerouslySkipPermissions,
-          });
-          if (session.workDir) {
-            setOriginalCwd(session.workDir);
-            setCwdState(session.workDir);
-          }
-          setDirectConnectServerUrl(_pendingConnect.url);
-          directConnectConfig = session.config;
-        } catch (err) {
-          return await exitWithError(root, err instanceof DirectConnectError ? err.message : String(err), () =>
-            gracefulShutdown(1),
-          );
-        }
-
-        const connectInfoMessage = createSystemMessage(
-          `Connected to server at ${_pendingConnect.url}\nSession: ${directConnectConfig.sessionId}`,
-          'info',
-        );
-
-        await launchReplWithAgentsHandoff(
-          root,
-          { getFpsMetrics, stats, initialState },
-          {
-            debug: debug || debugToStderr,
-            commands,
-            initialTools: [],
-            initialMessages: [connectInfoMessage],
-            mcpClients: [],
-            autoConnectIdeFlag: ide,
-            mainThreadAgentDefinition,
-            disableSlashCommands,
-            directConnectConfig,
-            thinkingConfig,
-          },
-          renderAndRun,
-        );
-        return;
       } else if (launchMode === 'ssh-remote' && feature('SSH_REMOTE') && _pendingSSH?.host) {
         // `claude ssh <host> [dir]` — probe remote, deploy binary if needed,
         // spawn ssh with unix-socket -R forward to a local auth proxy, hand
@@ -6493,94 +6390,10 @@ async function run(): Promise<CommanderCommand> {
       await mcpResetChoicesHandler();
     });
 
-  // claude server
-  if (feature('DIRECT_CONNECT')) {
-    program
-      .command('server')
-      .description('Start a Claude Code session server')
-      .option('--port <number>', 'HTTP port', '0')
-      .option('--host <string>', 'Bind address', '0.0.0.0')
-      .option('--auth-token <token>', 'Bearer token for auth')
-      .option('--unix <path>', 'Listen on a unix domain socket')
-      .option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd')
-      .option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000')
-      .option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32')
-      .action(
-        async (opts: {
-          port: string;
-          host: string;
-          authToken?: string;
-          unix?: string;
-          workspace?: string;
-          idleTimeout: string;
-          maxSessions: string;
-        }) => {
-          const { randomBytes } = await import('crypto');
-          const { startServer } = await import('./server/server.js');
-          const { SessionManager } = await import('./server/sessionManager.js');
-          const { DangerousBackend } = await import('./server/backends/dangerousBackend.js');
-          const { printBanner } = await import('./server/serverBanner.js');
-          const { createServerLogger } = await import('./server/serverLog.js');
-          const { writeServerLock, removeServerLock, probeRunningServer } = await import('./server/lockfile.js');
-
-          const existing = await probeRunningServer();
-          if (existing) {
-            process.stderr.write(`A claude server is already running (pid ${existing.pid}) at ${existing.httpUrl}\n`);
-            process.exit(1);
-          }
-
-          const authToken = opts.authToken ?? `sk-ant-cc-${randomBytes(16).toString('base64url')}`;
-
-          const config = {
-            port: parseInt(opts.port, 10),
-            host: opts.host,
-            authToken,
-            unix: opts.unix,
-            workspace: opts.workspace,
-            idleTimeoutMs: parseInt(opts.idleTimeout, 10),
-            maxSessions: parseInt(opts.maxSessions, 10),
-          };
-
-          const backend = new DangerousBackend();
-          const sessionManager = new SessionManager(backend, {
-            idleTimeoutMs: config.idleTimeoutMs,
-            maxSessions: config.maxSessions,
-          });
-          const logger = createServerLogger();
-
-          const server = startServer(config, sessionManager, logger);
-          const actualPort = server.port ?? config.port;
-          printBanner(config, authToken, actualPort);
-
-          await writeServerLock({
-            pid: process.pid,
-            port: actualPort,
-            host: config.host,
-            httpUrl: config.unix ? `unix:${config.unix}` : `http://${config.host}:${actualPort}`,
-            startedAt: Date.now(),
-          });
-
-          let shuttingDown = false;
-          const shutdown = async () => {
-            if (shuttingDown) return;
-            shuttingDown = true;
-            // Stop accepting new connections before tearing down sessions.
-            server.stop(true);
-            await sessionManager.destroyAll();
-            await removeServerLock();
-            process.exit(0);
-          };
-          process.once('SIGINT', () => void shutdown());
-          process.once('SIGTERM', () => void shutdown());
-        },
-      );
-  }
-
   // `claude ssh <host> [dir]` — registered here only so --help shows it.
-  // The actual interactive flow is handled by early argv rewriting in main()
-  // (parallels the DIRECT_CONNECT/cc:// pattern above). If commander reaches
-  // this action it means the argv rewrite didn't fire (e.g. user ran
-  // `claude ssh` with no host) — just print usage.
+  // The actual interactive flow is handled by early argv rewriting in main().
+  // If commander reaches this action it means the argv rewrite didn't fire
+  // (e.g. user ran `claude ssh` with no host) — just print usage.
   if (feature('SSH_REMOTE')) {
     program
       .command('ssh <host> [dir]')
@@ -6612,54 +6425,6 @@ async function run(): Promise<CommanderCommand> {
         );
         process.exit(1);
       });
-  }
-
-  // claude connect — subcommand only handles -p (headless) mode.
-  // Interactive mode (without -p) is handled by early argv rewriting in main()
-  // which redirects to the main command with full TUI support.
-  if (feature('DIRECT_CONNECT')) {
-    program
-      .command('open <cc-url>')
-      .description('Connect to a Claude Code server (internal — use cc:// URLs)')
-      .option('-p, --print [prompt]', 'Print mode (headless)')
-      .option('--output-format <format>', 'Output format: text, json, stream-json', 'text')
-      .action(
-        async (
-          ccUrl: string,
-          opts: {
-            print?: string | true;
-            outputFormat?: string;
-          },
-        ) => {
-          const { parseConnectUrl } = await import('./server/parseConnectUrl.js');
-          const { serverUrl, authToken } = parseConnectUrl(ccUrl);
-
-          let connectConfig;
-          try {
-            const session = await createDirectConnectSession({
-              serverUrl,
-              authToken,
-              cwd: getOriginalCwd(),
-              dangerouslySkipPermissions: _pendingConnect?.dangerouslySkipPermissions,
-            });
-            if (session.workDir) {
-              setOriginalCwd(session.workDir);
-              setCwdState(session.workDir);
-            }
-            setDirectConnectServerUrl(serverUrl);
-            connectConfig = session.config;
-          } catch (err) {
-            console.error(err instanceof DirectConnectError ? err.message : String(err));
-            process.exit(1);
-          }
-
-          const { runConnectHeadless } = await import('./server/connectHeadless.js');
-
-          const prompt = typeof opts.print === 'string' ? opts.print : '';
-          const interactive = opts.print === true;
-          await runConnectHeadless(connectConfig, prompt, opts.outputFormat, interactive);
-        },
-      );
   }
 
   // claude auth

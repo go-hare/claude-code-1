@@ -109,6 +109,7 @@ describe('Shard 3 2.1.289 alignment fixes', () => {
 
     expect(childCtx.permissionLayers).toEqual([
       { kind: 'allowed_tools', allowedTools: ['Read'] },
+      { kind: 'avoid_prompts' },
       { kind: 'model', mainLoopModel: 'claude-opus-4-6' },
       { kind: 'effort', effort: 'high' },
     ])
@@ -285,11 +286,12 @@ describe('Shard 3 2.1.289 alignment fixes', () => {
     )
 
     // Finding #2: async parked subagents keep background shells + MCP/WS monitors alive
-    expect(runAgentSrc).toContain('const keepaliveGated = Boolean(')
+    expect(runAgentSrc).toContain('keepaliveGated = Boolean(')
+    expect(runAgentSrc).toContain('hasKeepaliveReasons ||')
+    expect(runAgentSrc).toContain('hasRunningOwnedBackgroundTasks')
     expect(runAgentSrc).toContain(
-      '(hasKeepaliveReasons || hasRunningOwnedBackgroundTasks)',
+      'if (keepaliveGated && stage.keepaliveGated) continue',
     )
-    expect(runAgentSrc).toContain('if (!keepaliveGated) {')
 
     // Finding #11: bypassPermissions parent check, bubble plan/dontAsk guard, mcpServerPolicy, worktreePath
     expect(runAgentSrc).toContain(

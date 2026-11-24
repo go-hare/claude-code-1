@@ -13,7 +13,6 @@ import type { Tools } from '../Tool.js'
 import { assembleToolPool } from '../tools.js'
 import type { Command } from '../types/command.js'
 import type { Message } from '../types/message.js'
-import type { AttributionState } from '../utils/commitAttribution.js'
 import type { FileHistoryState } from '../utils/fileHistory.js'
 import type { FileStateCache } from '../utils/fileStateCache.js'
 import { createAppStatePermissionContextSetters } from '../utils/permissions/permissionContextSetters.js'
@@ -354,15 +353,6 @@ export function createSessionToolUseContext(
         const updated = updater(prev.fileHistory)
         if (updated === prev.fileHistory) return prev
         return { ...prev, fileHistory: updated }
-      })
-    },
-    updateAttributionState(
-      updater: (prev: AttributionState) => AttributionState,
-    ) {
-      setAppState(prev => {
-        const updated = updater(prev.attribution)
-        if (updated === prev.attribution) return prev
-        return { ...prev, attribution: updated }
       })
     },
     retireDepartedAdditionalDirectories: directories => {

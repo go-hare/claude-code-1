@@ -9,7 +9,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js';
-import { useAppState, useSetAppState } from '../../state/AppState.js';
+import { useAppState } from '../../state/AppState.js';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
 import { type OptionWithDescription, Select } from '../CustomSelect/select.js';
@@ -153,7 +153,6 @@ export function PermissionPrompt<T extends string>({
   defaultFocusValue,
   hideIndexes,
 }: PermissionPromptProps<T>): React.ReactNode {
-  const setAppState = useSetAppState();
   const killAgentsHint = useKillAgentsHint(requestSource);
   const [acceptFeedback, setAcceptFeedback] = useState('');
   const [rejectFeedback, setRejectFeedback] = useState('');
@@ -373,16 +372,8 @@ export function PermissionPrompt<T extends string>({
   const handleCancel = useCallback(() => {
     if (isDisabled) return;
     logEvent('tengu_permission_request_escape', {});
-    // Increment escape count for attribution tracking
-    setAppState(prev => ({
-      ...prev,
-      attribution: {
-        ...prev.attribution,
-        escapeCount: prev.attribution.escapeCount + 1,
-      },
-    }));
     onCancel?.();
-  }, [isDisabled, onCancel, setAppState]);
+  }, [isDisabled, onCancel]);
 
   // Official 2.1.327 (#500): permission prompt Select stops at No instead of
   // wrapping around, and typing a digit past the last answer focuses No.

@@ -52,7 +52,8 @@ export const TOOL_RESULT_CLEARED_MESSAGE = '[Old tool result content cleared]'
  * Tools absent from the map use the hardcoded fallback.
  * Flag default is {} (no overrides == behavior unchanged).
  */
-const PERSIST_THRESHOLD_OVERRIDE_FLAG = 'tengu_satin_quoll'
+// Official 2.1.328 (`Me`, `chunk@292371852.js @4246`): tengu_velvet_ibis.
+const PERSIST_THRESHOLD_OVERRIDE_FLAG = 'tengu_velvet_ibis'
 
 /**
  * Resolve the effective persistence threshold for a tool.
@@ -69,7 +70,7 @@ export function getPersistenceThreshold(
   declaredMaxResultSizeChars: number,
 ): number {
   // Infinity = hard opt-out (reserved for tools that self-bound via other
-  // mechanisms). Checked before the GB override so tengu_satin_quoll can't
+  // mechanisms). Checked before the GB override so tengu_velvet_ibis can't
   // force it back on.
   if (!Number.isFinite(declaredMaxResultSizeChars)) {
     return declaredMaxResultSizeChars

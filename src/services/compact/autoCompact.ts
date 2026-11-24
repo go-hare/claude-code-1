@@ -17,13 +17,15 @@ import { isFableModel } from '../../utils/fableConsent.js'
 import { isFableCreditsSuffixExempt } from '../../utils/model/fableCreditsLabel.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
-import { hasExactErrorMessage } from '../../utils/errors.js'
+import { hasExactErrorMessage, isAbortError } from '../../utils/errors.js'
 import type { CacheSafeParams } from '../../utils/forkedAgent.js'
 import { logError } from '../../utils/log.js'
+import { isCompactBoundaryMessage } from '../../utils/messages.js'
 import { resolveColdCompactStripNonEssential } from '../../utils/coldCompact.js'
 import { getEnabledSettingSources } from '../../utils/settings/constants.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
-import { tokenCountWithEstimation } from '../../utils/tokens.js'
+import { getTokenUsage, tokenCountWithEstimation } from '../../utils/tokens.js'
+import { roughTokenCountEstimationForMessages } from '../tokenEstimation.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logEvent } from '../analytics/index.js'
 import { getMaxOutputTokensForModel } from '../api/claude.js'
@@ -90,6 +92,9 @@ export type AutoCompactTrackingState = {
   // Used as a circuit breaker to stop retrying when the context is
   // irrecoverably over the limit (e.g., prompt_too_long).
   consecutiveFailures?: number
+  // Official 2.1.328 (`KQn`): consecutive uncounted failures (e.g. Esc user
+  // aborts) tracked separately so they never trip the circuit breaker.
+  consecutiveUncountedFailures?: number
   // #863 SEA 325 G_o: rapid-refill breaker counter across compactions.
   consecutiveRapidRefills?: number
 }
@@ -150,6 +155,367 @@ export function estimateMaxTurnGrowth(model: string): number {
 // BQ 2026-03-10: 1,279 sessions had 50+ consecutive failures (up to 3,272)
 // in a single session, wasting ~250K API calls/day globally.
 const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isZeroUsage(usage: {
+  input_tokens?: number | null
+  cache_creation_input_tokens?: number | null
+  cache_read_input_tokens?: number | null
+  output_tokens?: number | null
+}): boolean {
+  return (
+    (usage.input_tokens ?? 0) +
+      (usage.cache_creation_input_tokens ?? 0) +
+      (usage.cache_read_input_tokens ?? 0) ===
+    0
+  )
+}
+
+type ContextManagementPayload = {
+  client_cut_tool_uses?: unknown
+  client_estimated_cleared_input_tokens?: unknown
+  client_estimate_measured_from_prompts?: unknown
+  applied_edits?: unknown
+}
+
+/**
+ * Official 2.1.328 (`Dtn`, `chunk@286370035.js @374986`):
+ * sum input tokens cleared by server-side `clear_tool_uses_20250919` edits
+ * (or client-cut edits) recorded on an assistant message's `context_management`.
+ */
+function clearedInputTokensFromContextManagement(
+  contextManagement: ContextManagementPayload | undefined,
+): number {
+  if (!contextManagement || typeof contextManagement !== 'object') {
+    return 0
+  }
+  const clientCut = contextManagement.client_cut_tool_uses
+  if (isFiniteNumber(clientCut) && clientCut > 0) {
+    const est = contextManagement.client_estimated_cleared_input_tokens
+    return isFiniteNumber(est) ? est : 0
+  }
+  const appliedEdits = contextManagement.applied_edits
+  if (!Array.isArray(appliedEdits)) {
+    return 0
+  }
+  let clearedTokens = 0
+  for (const edit of appliedEdits) {
+    if (typeof edit !== 'object' || edit === null) continue
+    const rec = edit as {
+      type?: unknown
+      cleared_input_tokens?: unknown
+    }
+    if (rec.type !== 'clear_tool_uses_20250919') continue
+    if (isFiniteNumber(rec.cleared_input_tokens)) {
+      clearedTokens += rec.cleared_input_tokens
+    }
+  }
+  const clientEst = contextManagement.client_estimated_cleared_input_tokens
+  if (!isFiniteNumber(clientEst)) {
+    return clearedTokens
+  }
+  const measuredFromPrompts =
+    contextManagement.client_estimate_measured_from_prompts === true &&
+    clearedTokens > 0
+  return measuredFromPrompts ? clientEst : Math.min(clearedTokens, clientEst)
+}
+
+/**
+ * Official 2.1.328 (`N6` + `H_t` + `pUn`, `chunk@294254613.js @1966716`):
+ * extract the server-cleared token count from the most recent post-boundary
+ * assistant message's `context_management`. Stopping at the latest compact
+ * boundary prevents pre-compact edits from inflating post-compact sizing.
+ */
+export function getServerClearedTokens(messages: readonly Message[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg) continue
+    if (isCompactBoundaryMessage(msg)) return 0
+    if (msg.type !== 'assistant') continue
+    const usage = getTokenUsage(msg)
+    if (!usage || isZeroUsage(usage)) continue
+    const rawMsg = msg.message as
+      | (NonNullable<typeof msg.message> & {
+          context_management?: ContextManagementPayload
+        })
+      | undefined
+    if (!rawMsg?.context_management && rawMsg?.stop_reason === null) {
+      continue
+    }
+    return clearedInputTokensFromContextManagement(rawMsg?.context_management)
+  }
+  return 0
+}
+
+function getPromptTokensForPutOff(message: Message): number | undefined {
+  if (message.type !== 'assistant') return undefined
+  if ((message as { handedOff?: boolean }).handedOff) return undefined
+  const usage = getTokenUsage(message)
+  if (!usage || isZeroUsage(usage)) return undefined
+  const rawUsage = usage as typeof usage & {
+    iterations?: Array<{
+      type?: string
+      input_tokens?: number | null
+      cache_creation_input_tokens?: number | null
+      cache_read_input_tokens?: number | null
+    }> | null
+    server_tool_use?: {
+      web_search_requests?: number | null
+      web_fetch_requests?: number | null
+    } | null
+  }
+  if (Array.isArray(rawUsage.iterations) && rawUsage.iterations.length > 0) {
+    const firstMsgIter = rawUsage.iterations.find(
+      it => it && it.type === 'message',
+    )
+    if (!firstMsgIter) return undefined
+    const total =
+      (firstMsgIter.input_tokens ?? 0) +
+      (firstMsgIter.cache_creation_input_tokens ?? 0) +
+      (firstMsgIter.cache_read_input_tokens ?? 0)
+    return total > 0 ? total : undefined
+  }
+  const webSearch = rawUsage.server_tool_use?.web_search_requests ?? 0
+  const webFetch = rawUsage.server_tool_use?.web_fetch_requests ?? 0
+  const total =
+    (usage.input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0)
+  if (webSearch > 0 || webFetch > 0 || total === 0) return undefined
+  return total
+}
+
+/**
+ * Official 2.1.328 (`fqt`, `chunk@294254613.js @1968792`):
+ * minimum API prompt token size observed since the most recent compact boundary
+ * that stamped `compactMetadata.postTokens`. Returns `undefined` when no prior
+ * compact boundary with `postTokens` exists in `messages`.
+ */
+export function getMinPromptTokensSinceLastCompact(
+  messages: readonly Message[],
+): number | undefined {
+  let minTokens: number | undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg) continue
+    if (isCompactBoundaryMessage(msg)) {
+      const meta = (msg as { compactMetadata?: { postTokens?: unknown } })
+        .compactMetadata
+      return meta?.postTokens === undefined ? undefined : minTokens
+    }
+    const tokens = getPromptTokensForPutOff(msg)
+    if (tokens !== undefined) {
+      minTokens = minTokens === undefined ? tokens : Math.min(minTokens, tokens)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.328 (`CLa`, `chunk@293843120.js @2394`): minimum remaining room
+ * below threshold (`tengu_spare_attic`) before auto-compact put-off kicks in.
+ */
+export function getPutOffMinRoomTokens(): number {
+  const val = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
+    'tengu_spare_attic',
+    0,
+  )
+  return typeof val === 'number' && Number.isFinite(val) ? val : 0
+}
+
+/**
+ * Official 2.1.328 (`Ikt`, `chunk@294254613.js @2077793`):
+ * auto-compact threshold for the model's full context window (ignoring any
+ * smaller `CLAUDE_CODE_AUTO_COMPACT_WINDOW` / `settings.autoCompactWindow` cap).
+ */
+export function getFullWindowAutoCompactThreshold(
+  model: string,
+  options?: { querySource?: string; ignorePctOverride?: boolean },
+): number {
+  const reservedTokensForSummary = Math.min(
+    getMaxOutputTokensForModel(model),
+    MAX_OUTPUT_TOKENS_FOR_SUMMARY,
+  )
+  const fullEffectiveWindow =
+    getContextWindowForModel(model, getSdkBetas()) - reservedTokensForSummary
+  let bufferTokens = getAutocompactBufferTokens(model)
+  try {
+    const { scaleAutocompactBufferForColdCompact } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/coldCompact.js') as typeof import('../../utils/coldCompact.js')
+    bufferTokens = scaleAutocompactBufferForColdCompact(bufferTokens)
+  } catch {
+    // optional
+  }
+  const fullThreshold = fullEffectiveWindow - bufferTokens
+  const exemptPctOverride =
+    options?.ignorePctOverride === true ||
+    isCloudAutocompactPctOverrideExempt(options?.querySource)
+  const envPercent = exemptPctOverride
+    ? undefined
+    : process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+  if (envPercent) {
+    const parsed = parseFloat(envPercent)
+    if (!Number.isNaN(parsed) && parsed > 0 && parsed <= 100) {
+      const pct = Math.floor(fullEffectiveWindow * (parsed / 100))
+      return Math.min(pct, fullThreshold)
+    }
+  }
+  return fullThreshold
+}
+
+/**
+ * Official 2.1.328 (`sBe`, `chunk@294254613.js @2077837`):
+ * true when post-summary room below `thresholdTokens` is smaller than the
+ * configured `tengu_spare_attic` minimum room, so compacting again right at
+ * the capped threshold would thrash — defer to the model's full window instead.
+ */
+export function shouldPutOffAutoCompact(
+  leftBySummary: number,
+  thresholdTokens: number,
+  minRoomTokens: number = getPutOffMinRoomTokens(),
+): boolean {
+  return (
+    minRoomTokens > 0 &&
+    minRoomTokens < thresholdTokens &&
+    thresholdTokens - leftBySummary < minRoomTokens
+  )
+}
+
+export type AutoCompactPrefixOverflow = {
+  prefixTokens: number
+  thresholdTokens: number
+  totalInputTokens: number
+  messagesEstimate: number
+  snipTokensFreed: number
+  documentBlockCount: number
+  imageBlockCount: number
+}
+
+/**
+ * Official 2.1.328 (`MRs`, `chunk@294254613.js @3055520`):
+ * detect when the fixed prefix (system prompt + tools + CLAUDE.md + memories)
+ * alone exceeds the auto-compact threshold, meaning compaction cannot free
+ * enough space to drop under threshold.
+ */
+export function detectAutoCompactPrefixOverflow(
+  messages: readonly Message[],
+  model: string,
+  snipTokensFreed = 0,
+  options?: { querySource?: string; ignorePctOverride?: boolean },
+): AutoCompactPrefixOverflow | null {
+  let lastUsage: ReturnType<typeof getTokenUsage>
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg) continue
+    if (isCompactBoundaryMessage(msg)) break
+    const u = getTokenUsage(msg)
+    if (u && !isZeroUsage(u)) {
+      lastUsage = u
+      break
+    }
+  }
+  if (!lastUsage) return null
+  const totalInputTokens =
+    (lastUsage.input_tokens ?? 0) +
+    (lastUsage.cache_read_input_tokens ?? 0) +
+    (lastUsage.cache_creation_input_tokens ?? 0)
+  const messagesEstimate = roughTokenCountEstimationForMessages(
+    messages as Parameters<typeof roughTokenCountEstimationForMessages>[0],
+  )
+  const prefixTokens = Math.max(
+    0,
+    totalInputTokens - snipTokensFreed - messagesEstimate,
+  )
+  const thresholdTokens = getAutoCompactThreshold(model, options)
+  if (prefixTokens <= thresholdTokens) return null
+
+  let documentBlockCount = 0
+  let imageBlockCount = 0
+  const countMedia = (blocks: readonly unknown[]): void => {
+    for (const raw of blocks) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const block = raw as {
+        type?: unknown
+        source?: { type?: unknown }
+        content?: unknown
+      }
+      if (
+        block.type === 'document' &&
+        block.source?.type !== 'text' &&
+        block.source?.type !== 'content'
+      ) {
+        documentBlockCount++
+      } else if (block.type === 'image') {
+        imageBlockCount++
+      } else if (block.type === 'tool_result' && Array.isArray(block.content)) {
+        countMedia(block.content)
+      }
+    }
+  }
+  for (const msg of messages) {
+    const content = (msg as { message?: { content?: unknown } }).message
+      ?.content
+    if (Array.isArray(content)) {
+      countMedia(content)
+    }
+  }
+
+  return {
+    prefixTokens,
+    thresholdTokens,
+    totalInputTokens,
+    messagesEstimate,
+    snipTokensFreed,
+    documentBlockCount,
+    imageBlockCount,
+  }
+}
+
+/**
+ * Official 2.1.328 (`KQn`, `chunk@294254613.js @3055125`):
+ * update autocompact failure counters. Uncounted failures (e.g. user Esc abort)
+ * increment `consecutiveUncountedFailures` without incrementing
+ * `consecutiveFailures`, so repeated Esc cancellations never permanently trip
+ * the circuit breaker.
+ */
+export function recordAutoCompactFailure(
+  tracking: AutoCompactTrackingState | undefined,
+  opts?: {
+    uncounted?: boolean
+    routedThroughReactive?: boolean
+  },
+): {
+  consecutiveFailures: number
+  consecutiveUncountedFailures: number
+  uncountedStopReached: boolean
+} {
+  const uncounted = opts?.uncounted === true
+  const consecutiveFailures =
+    (tracking?.consecutiveFailures ?? 0) + (uncounted ? 0 : 1)
+  const consecutiveUncountedFailures =
+    (tracking?.consecutiveUncountedFailures ?? 0) + (uncounted ? 1 : 0)
+  if (consecutiveFailures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {
+    logForDebugging(
+      `autocompact: circuit breaker tripped after ${consecutiveFailures} consecutive failures${opts?.routedThroughReactive ? ' (reactive path)' : ''} — skipping future attempts this session`,
+      { level: 'warn' },
+    )
+    logEvent('tengu_auto_compact_circuit_breaker', {
+      consecutiveFailures,
+      ...(opts?.routedThroughReactive ? { routedThroughReactive: true } : {}),
+    })
+  }
+  return {
+    consecutiveFailures,
+    consecutiveUncountedFailures,
+    uncountedStopReached:
+      uncounted &&
+      consecutiveUncountedFailures === MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
+  }
+}
 
 let lastSentClaudeMdTokens: number | undefined
 
@@ -486,17 +852,52 @@ export async function shouldAutoCompact(
   }
 
   const claudeMdGrowth = await getClaudeMdGrowthTokens(currentClaudeMd)
+  const serverCleared = getServerClearedTokens(messages)
   const tokenCount =
-    tokenCountWithEstimation(messages) - snipTokensFreed + claudeMdGrowth
+    tokenCountWithEstimation(messages) -
+    snipTokensFreed +
+    serverCleared +
+    claudeMdGrowth
   const threshold = getAutoCompactThreshold(model, { querySource })
   const effectiveWindow = getEffectiveContextWindowSize(model)
 
   logForDebugging(
-    `autocompact: tokens=${tokenCount} threshold=${threshold} effectiveWindow=${effectiveWindow}${snipTokensFreed > 0 ? ` snipFreed=${snipTokensFreed}` : ''}${claudeMdGrowth > 0 ? ` claudeMdGrowth=${claudeMdGrowth}` : ''}`,
+    `autocompact: tokens=${tokenCount} threshold=${threshold} effectiveWindow=${effectiveWindow}${snipTokensFreed > 0 ? ` snipFreed=${snipTokensFreed}` : ''}${serverCleared > 0 ? ` serverCleared=${serverCleared}` : ''}${claudeMdGrowth > 0 ? ` claudeMdGrowth=${claudeMdGrowth}` : ''}`,
   )
 
   const { isAboveAutoCompactThreshold, isAtBlockingLimit } =
     calculateTokenWarningState(tokenCount, model, { querySource })
+
+  if (isAboveAutoCompactThreshold && !isAtBlockingLimit) {
+    const lastAssistant = messages.findLast(
+      m => m.type === 'assistant' && !m.isApiErrorMessage,
+    )
+    const hasUnHandedOffAssistant =
+      lastAssistant?.type === 'assistant' &&
+      !(lastAssistant as { handedOff?: boolean }).handedOff
+    if (hasUnHandedOffAssistant) {
+      const leftBySummary = getMinPromptTokensSinceLastCompact(messages)
+      const fullWindowLimit = getFullWindowAutoCompactThreshold(model, {
+        querySource,
+      })
+      if (
+        leftBySummary !== undefined &&
+        tokenCount < fullWindowLimit &&
+        shouldPutOffAutoCompact(leftBySummary, threshold)
+      ) {
+        logEvent('tengu_auto_compact_put_off', {
+          tokenCount,
+          leftBySummary,
+          thresholdTokens: threshold,
+          limit: fullWindowLimit,
+        })
+        logForDebugging(
+          `autocompact: not compacting at ${threshold}: no prompt since the last summary was under ${leftBySummary} tokens, so this conversation compacts at the threshold of the model's whole window (${fullWindowLimit})`,
+        )
+        return false
+      }
+    }
+  }
 
   return isAboveAutoCompactThreshold || isAtBlockingLimit
 }
@@ -533,7 +934,10 @@ export function findLargerPreviousModelForCompact(
     return undefined
   }
 
-  const tokenCount = tokenCountWithEstimation(messages) - snipTokensFreed
+  const tokenCount =
+    tokenCountWithEstimation(messages) -
+    snipTokensFreed +
+    getServerClearedTokens(messages)
   if (!calculateTokenWarningState(tokenCount, currentModel).isAtBlockingLimit) {
     return undefined
   }
@@ -570,6 +974,8 @@ export async function autoCompactIfNeeded(
   wasCompacted: boolean
   compactionResult?: CompactionResult
   consecutiveFailures?: number
+  consecutiveUncountedFailures?: number
+  uncountedStopReached?: boolean
   consecutiveRapidRefills?: number
   rapidRefillBreakerTripped?: boolean
 }> {
@@ -606,6 +1012,26 @@ export async function autoCompactIfNeeded(
 
   if (!shouldCompact) {
     return { wasCompacted: false }
+  }
+
+  // Official 2.1.328 (`MRs`, `chunk@294254613.js @3055520, @3060200`):
+  // emit diagnostic telemetry when the fixed prefix alone exceeds the
+  // auto-compact threshold (compaction cannot drop below threshold).
+  const prefixOverflow = detectAutoCompactPrefixOverflow(
+    messages,
+    model,
+    snipTokensFreed ?? 0,
+    { querySource },
+  )
+  if (prefixOverflow) {
+    logForDebugging(
+      `autocompact: fixed prefix ~${prefixOverflow.prefixTokens} > threshold ${prefixOverflow.thresholdTokens} — compaction cannot help`,
+      { level: 'warn' },
+    )
+    logEvent('tengu_auto_compact_prefix_overflow', {
+      ...prefixOverflow,
+      wouldHaveBlocked: true,
+    })
   }
 
   // #863 SEA 325 G_o: rapid-refill thrashing breaker
@@ -738,25 +1164,31 @@ export async function autoCompactIfNeeded(
     return {
       wasCompacted: true,
       compactionResult,
-      // Reset failure count on success
+      // Reset failure counts on success
       consecutiveFailures: 0,
+      consecutiveUncountedFailures: 0,
       consecutiveRapidRefills: rapidRefill.consecutiveRapidRefills,
     }
   } catch (error) {
-    if (!hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT)) {
+    const isUserAbort =
+      hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT) ||
+      isAbortError(error)
+    if (!isUserAbort) {
       logError(error)
     }
-    // Increment consecutive failure count for circuit breaker.
-    // The caller threads this through autoCompactTracking so the
-    // next query loop iteration can skip futile retry attempts.
-    const prevFailures = tracking?.consecutiveFailures ?? 0
-    const nextFailures = prevFailures + 1
-    if (nextFailures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {
-      logForDebugging(
-        `autocompact: circuit breaker tripped after ${nextFailures} consecutive failures — skipping future attempts this session`,
-        { level: 'warn' },
-      )
+    // Official 2.1.328 (`KQn`): user-aborted autocompact (Esc) does NOT
+    // increment `consecutiveFailures` so repeated Esc cancels never
+    // permanently trip the circuit breaker.
+    const failureState = recordAutoCompactFailure(tracking, {
+      uncounted: isUserAbort,
+    })
+    return {
+      wasCompacted: false,
+      consecutiveFailures: failureState.consecutiveFailures,
+      consecutiveUncountedFailures: failureState.consecutiveUncountedFailures,
+      ...(failureState.uncountedStopReached
+        ? { uncountedStopReached: true }
+        : {}),
     }
-    return { wasCompacted: false, consecutiveFailures: nextFailures }
   }
 }

@@ -24,10 +24,6 @@ import type { AgentId } from '../types/ids.js'
 import type { Message, UserMessage } from '../types/message.js'
 import type { LoadedPlugin, PluginError } from '../types/plugin.js'
 import type { DeepImmutable } from '../types/utils.js'
-import {
-  type AttributionState,
-  createEmptyAttributionState,
-} from '../utils/commitAttribution.js'
 import type {
   EffortValue,
   SessionEffortTag,
@@ -398,7 +394,6 @@ export type SessionAppState = DeepImmutable<{
   }
   agentDefinitions: AgentDefinitionsResult
   fileHistory: FileHistoryState
-  attribution: AttributionState
   todos: { [agentId: string]: TodoList }
   remoteAgentTaskSuggestions: { summary: string; task: string }[]
   elicitation: {
@@ -776,7 +771,6 @@ export function getDefaultSessionAppState(): SessionAppState {
       trackedFiles: new Set(),
       snapshotSequence: 0,
     } as FileHistoryState,
-    attribution: createEmptyAttributionState(),
     mcp: {
       clientsInitialized: false,
       clients: [] as MCPServerConnection[],

@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { statSync, type Stats } from 'fs'
 import { lstat, readdir, readFile, realpath, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
@@ -33,7 +32,6 @@ export const CLAUDE_CONFIG_DIRECTORIES = [
   'output-styles',
   'skills',
   'workflows',
-  ...(feature('TEMPLATES') ? (['templates'] as const) : []),
 ] as const
 
 export type ClaudeConfigDirectory = (typeof CLAUDE_CONFIG_DIRECTORIES)[number]
@@ -267,7 +265,7 @@ function sameCanonicalDir(
 }
 
 export function getProjectDirsUpToHome(
-  subdir: ClaudeConfigDirectory,
+  subdir: ClaudeConfigDirectory | 'templates',
   cwd: string,
 ): string[] {
   const home = resolve(homedir()).normalize('NFC')

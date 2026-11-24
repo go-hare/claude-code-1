@@ -56,18 +56,31 @@ describe('StreamingToolExecutor.discard()', () => {
     expect(toolsAfter).toHaveLength(0)
   })
 
-  test('aborts the sibling abort controller', () => {
+  test('aborts executing tool child abort controllers without aborting the turn controller', () => {
     const ctx = makeMinimalContext()
     const executor = new StreamingToolExecutor([], () => true as any, ctx)
+    const childController = new AbortController()
+    ;(
+      executor as unknown as {
+        tools: Array<{
+          id: string
+          status: string
+          abortController: AbortController
+        }>
+      }
+    ).tools.push({
+      id: 'tu-executing',
+      status: 'executing',
+      abortController: childController,
+    })
 
-    const siblingController = (
-      executor as unknown as { siblingAbortController: AbortController }
-    ).siblingAbortController
-    expect(siblingController.signal.aborted).toBe(false)
+    expect(childController.signal.aborted).toBe(false)
 
     executor.discard()
 
-    expect(siblingController.signal.aborted).toBe(true)
+    expect(childController.signal.aborted).toBe(true)
+    expect(childController.signal.reason).toBe('streaming_fallback')
+    expect(ctx.abortController.signal.aborted).toBe(false)
   })
 
   test('sets discarded flag so getCompletedResults yields nothing', () => {
@@ -386,8 +399,8 @@ describe('mergeToolDrainEvents (289)', () => {
   })
 })
 
-describe('StreamingToolExecutor remote-cancel (236 #27)', () => {
-  test('getAbortReason maps remote-cancel DOMException to remote_cancel, not user_interrupted', () => {
+describe('StreamingToolExecutor remote-cancel (aligned 2.1.328 chunk@305854618.js:83800)', () => {
+  test('getAbortReason maps remote-cancel DOMException to user_interrupted so synthetic tool_result is emitted', () => {
     const ctx = makeMinimalContext()
     ctx.abortController.abort(createAbortErrorReason('remote-cancel'))
     const executor = new StreamingToolExecutor([], () => true as any, ctx)
@@ -396,7 +409,7 @@ describe('StreamingToolExecutor remote-cancel (236 #27)', () => {
         getAbortReason: (tool: { block: { name: string } }) => string | null
       }
     ).getAbortReason({ block: { name: 'Bash' } })
-    expect(reason).toBe('remote_cancel')
+    expect(reason).toBe('user_interrupted')
   })
 
   test('getAbortReason string interrupt + default block interruptBehavior is null', () => {

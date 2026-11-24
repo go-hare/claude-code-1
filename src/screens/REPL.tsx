@@ -399,8 +399,6 @@ import { LivePromptDraft } from '../components/PromptInput/LivePromptDraft.js';
 import { PromptInputQueuedCommands } from '../components/PromptInput/PromptInputQueuedCommands.js';
 import { useRemoteSession } from '../hooks/useRemoteSession.js';
 import type { RemoteRequestDialog } from '../hooks/useRemoteUserDialog.js';
-import { useDirectConnect } from '../hooks/useDirectConnect.js';
-import type { DirectConnectConfig } from '../server/directConnectManager.js';
 import { useSSHSession } from '../hooks/useSSHSession.js';
 import { useAssistantHistory } from '../hooks/useAssistantHistory.js';
 import type { SSHSession } from '../ssh/createSSHSession.js';
@@ -536,7 +534,13 @@ import {
   isMetaVisibleOrigin,
 } from '../utils/messages.js';
 import { generateSessionTitle, isSyntheticSessionTitleText } from '../utils/sessionTitle.js';
-import type { TitleFallback } from './repl/runReplTurn.js';
+import {
+  buildRestoredDraftFromMessages,
+  collectTrackedFilePathsFromMessages,
+  planRewindRefusalFallbackUnwind,
+  type InFlightTitleRequest,
+  type TitleFallback,
+} from './repl/runReplTurn.js';
 import { startsWithRegisteredSlashCommand } from '../utils/slashCommandParsing.js';
 import { getReplBridgeHandle } from '../bridge/replBridgeHandle.js';
 import {
@@ -613,7 +617,7 @@ import { SubmitController } from './repl/SubmitController.js';
 import { TranscriptProjection } from './repl/TranscriptProjection.js';
 import { TurnController } from './repl/TurnController.js';
 import { ViewController } from './repl/ViewController.js';
-import type { ContentBlockParam, ContentBlock, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
+import type { ContentBlockParam, ContentBlock } from '@anthropic-ai/sdk/resources/messages.mjs';
 import type { ProcessUserInputContext } from '../utils/processUserInput/processUserInput.js';
 import { isEndedByModelCommandBlocked } from '../utils/processUserInput/processUserInput.js';
 import type { PastedContent } from '../utils/config.js';
@@ -663,8 +667,6 @@ import {
   fileHistoryEnabled,
   fileHistoryHasAnyChanges,
 } from '../utils/fileHistory.js';
-import { type AttributionState, incrementPromptCount } from '../utils/commitAttribution.js';
-import { recordAttributionSnapshot } from '../utils/sessionStorage.js';
 import {
   computeStandaloneAgentContext,
   restoreAgentFromSession,
@@ -1719,8 +1721,6 @@ export type Props = {
   taskListId?: string;
   // Remote session config for --remote mode (uses CCR as execution engine)
   remoteSessionConfig?: RemoteSessionConfig;
-  // Direct connect config for `claude connect` mode (connects to a claude server)
-  directConnectConfig?: DirectConnectConfig;
   // SSH session for `claude ssh` mode (local REPL, remote tools over ssh)
   sshSession?: SSHSession;
   // Thinking configuration to use when thinking is enabled
@@ -1981,7 +1981,6 @@ function REPLInner({
   disableSlashCommands = false,
   taskListId,
   remoteSessionConfig,
-  directConnectConfig,
   sshSession,
   thinkingConfig,
   onOpenAgents,
@@ -2807,7 +2806,7 @@ function REPLInner({
 
   // Ref for the synchronous restore callback — set after restoreMessageSync is
   // defined, read in the onQuery finally block for auto-restore on interrupt.
-  const restoreMessageSyncRef = useRef<(m: UserMessage) => void>(() => {});
+  const restoreMessageSyncRef = useRef<(m: UserMessage, earlierBatch?: UserMessage[]) => void>(() => {});
 
   // Official 2.1.328 single-source subscribable transcript (`transcriptProjection`)
   // + ScrollPin (`Zse`). ScrollPin subscribes directly to `transcriptProjection`
@@ -2938,9 +2937,6 @@ function REPLInner({
   useEffect(() => {
     if (process.env.USER_TYPE === 'ant') {
       void (async () => {
-        // Wait for repo classification to settle (memoized, no-op if primed).
-        const { isInternalModelRepo } = await import('../utils/commitAttribution.js');
-        await isInternalModelRepo();
         const { shouldShowUndercoverAutoNotice } = await import('../utils/undercover.js');
         if (shouldShowUndercoverAutoNotice()) {
           setShowUndercoverCallout(true);
@@ -3145,6 +3141,19 @@ function REPLInner({
   const fileHistoryCopyPromiseRef = useRef<Promise<void> | null>(null);
   const [dialogHostUnmounted, setDialogHostUnmounted] = useState(false);
   const titleFallbackRef = useRef<TitleFallback | undefined>(undefined);
+  // Official 2.1.328 (`chunk@319736883.js @1702100`): stale-request cancellation ref for session titles.
+  const titleRequestRef = useRef<InFlightTitleRequest | null>(null);
+  useEffect(() => {
+    return () => {
+      const active = titleRequestRef.current;
+      if (active) {
+        if (!active.abortController.signal.aborted) {
+          active.abortController.abort('unmount');
+        }
+        titleRequestRef.current = null;
+      }
+    };
+  }, []);
   const agentTitle = mainThreadAgentDefinition?.agentType;
   const terminalTitle = sessionTitle ?? sessionAiTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code';
   // densable waiting surfaces that pause the busy title glyph. Soft NMS
@@ -4002,6 +4011,16 @@ function REPLInner({
     }
     setUserInputOnProcessingRaw(input);
   }, []);
+
+  // Official 2.1.328 (`chunk@319736883.js @1666560` `isMainLoopBusy`): keep
+  // mainLoopBusy synced across loading, input processing, and main-thread queue
+  // depth so it does not flicker false between consecutive queued turns.
+  const mainThreadQueueLengthForBusy = useSyncExternalStore(messageQueue.subscribe, () =>
+    messageQueue.getMainThreadLength(),
+  );
+  useEffect(() => {
+    setMainLoopBusy(isLoading || Boolean(userInputOnProcessing) || mainThreadQueueLengthForBusy > 0);
+  }, [isLoading, userInputOnProcessing, mainThreadQueueLengthForBusy]);
   // Official 2.1.328 `zse` -> `Tje` `onRowsDrawn`: track the actually drawn
   // (possibly deferred) message length in ScrollPin.
   const onMessagesRowsDrawn = useCallback(
@@ -4411,19 +4430,7 @@ function REPLInner({
     requestDialog: requestDialog as unknown as RemoteRequestDialog,
   });
 
-  // Direct connect hook - manages WebSocket to a claude server for `claude connect` mode
-  const directConnect = useDirectConnect({
-    config: directConnectConfig,
-    setMessages,
-    setIsLoading: setIsExternalLoading,
-    setToolUseConfirmQueue,
-    dialogStore,
-    tools: combinedInitialTools,
-  });
-
   // SSH session hook - manages ssh child process for `claude ssh` mode.
-  // Same callback shape as useDirectConnect; only the transport under the
-  // hood differs (ChildProcess stdin/stdout vs WebSocket).
   const sshRemote = useSSHSession({
     session: sshSession,
     setMessages,
@@ -4434,7 +4441,7 @@ function REPLInner({
   });
 
   // Use whichever remote mode is active
-  const activeRemote = sshRemote.isRemoteMode ? sshRemote : directConnect.isRemoteMode ? directConnect : remoteSession;
+  const activeRemote = sshRemote.isRemoteMode ? sshRemote : remoteSession;
 
   const [pastedContents, setPastedContents] = useState<Record<number, PastedContent>>({});
   // Seed from transcript so resume/attach/bg sessions don't re-show the
@@ -5623,6 +5630,12 @@ function REPLInner({
         // Haiku title shouldn't carry over.
         haikuTitleAttemptedRef.current = true;
         titleFallbackRef.current = undefined;
+        if (titleRequestRef.current) {
+          if (!titleRequestRef.current.abortController.signal.aborted) {
+            titleRequestRef.current.abortController.abort('session_resume');
+          }
+          titleRequestRef.current = null;
+        }
         setHaikuTitle(undefined);
 
         // Exit any worktree a prior /resume entered, then cd into the one
@@ -6276,6 +6289,24 @@ function REPLInner({
   }, [viewingAgentTaskId, repinScroll]);
 
   const activeCompactionAbortRef = useRef<AbortController | null>(null);
+  const cancelForceEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearCancelForceEndTimer = useCallback(() => {
+    if (cancelForceEndTimerRef.current !== null) {
+      clearTimeout(cancelForceEndTimerRef.current);
+      cancelForceEndTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => {
+    const unsub = queryGuard.subscribe(() => {
+      if (!queryGuard.isRunning) {
+        clearCancelForceEndTimer();
+      }
+    });
+    return () => {
+      unsub();
+      clearCancelForceEndTimer();
+    };
+  }, [queryGuard, clearCancelForceEndTimer]);
   const abortInFlightCompaction = useCallback(() => {
     const ac = activeCompactionAbortRef.current;
     if (ac && !ac.signal.aborted) {
@@ -6350,8 +6381,34 @@ function REPLInner({
 
     abortInFlightCompaction();
     getIdleCompactionRunner().clear();
-    queryGuard.forceEnd();
-    setMainLoopBusy(false);
+    // Official 2.1.328 (`chunk@319736883.js @1698200-1699700`): on normal local
+    // Esc cancel while a turn is running, do NOT call `queryGuard.forceEnd()`
+    // synchronously — let `abortController.abort('user-cancel')` unwind
+    // `runReplTurn`'s `finally` (`if (queryGuard.end(thisGeneration))`) so
+    // `sendBridgeResultRef.current()`, `idleRunner.recordTurnEnd('aborted')`,
+    // `idleRunner.arm(...)`, `setLastQueryCompletionTime`, UDS `done` relay,
+    // and `mrOnTurnComplete` all run cleanly. Reserve `forceEnd()` strictly
+    // for stop-wait timeout / unrecoverable hang or remote/non-running states.
+    const hasLocalRunningTurn = Boolean(abortController && !activeRemote.isRemoteMode && queryGuard.isRunning);
+    if (hasLocalRunningTurn) {
+      const cancelGeneration = queryGuard.generation;
+      clearCancelForceEndTimer();
+      cancelForceEndTimerRef.current = setTimeout(() => {
+        cancelForceEndTimerRef.current = null;
+        if (queryGuard.isRunning && queryGuard.generation === cancelGeneration) {
+          logForDebugging('[onCancel] stop-wait timeout reached; forcing queryGuard end');
+          queryGuard.forceEnd();
+          setMainLoopBusy(Boolean(userInputOnProcessing) || messageQueue.getMainThreadLength() > 0);
+          sendBridgeResultRef.current();
+          void mrOnTurnComplete(messagesRef.current, true);
+        }
+      }, 10_000);
+      cancelForceEndTimerRef.current.unref?.();
+    } else {
+      clearCancelForceEndTimer();
+      queryGuard.forceEnd();
+      setMainLoopBusy(Boolean(userInputOnProcessing) || messageQueue.getMainThreadLength() > 0);
+    }
 
     // densable FBe: Esc salvages in-progress **thinking only** (isVirtual),
     // not streaming body text — body promote races content_block_stop → double ●.
@@ -6442,8 +6499,12 @@ function REPLInner({
     // activating conditions hold — leaving the Escape keybinding inactive.
     setAbortController(null);
 
-    // forceEnd() skips the finally path — fire directly (aborted=true).
-    void mrOnTurnComplete(messagesRef.current, true);
+    // When forceEnd() ran synchronously (no local running turn to unwind via
+    // runReplTurn's finally), notify bridge + mrOnTurnComplete directly.
+    if (!hasLocalRunningTurn) {
+      sendBridgeResultRef.current();
+      void mrOnTurnComplete(messagesRef.current, true);
+    }
   }
 
   // Function to handle queued command when canceling a permission request
@@ -7552,6 +7613,7 @@ function REPLInner({
             agentTitle,
             haikuTitleAttemptedRef,
             titleFallbackRef,
+            titleRequestRef,
             setHaikuTitle,
             commands,
             setConversationId,
@@ -7794,6 +7856,12 @@ function REPLInner({
         resetTeamLeadVerificationOnSessionBoundary();
         haikuTitleAttemptedRef.current = false;
         titleFallbackRef.current = undefined;
+        if (titleRequestRef.current) {
+          if (!titleRequestRef.current.abortController.signal.aborted) {
+            titleRequestRef.current.abortController.abort('session_clear');
+          }
+          titleRequestRef.current = null;
+        }
         setHaikuTitle(undefined);
         bashTools.current.clear();
         bashHosts.current.clear();
@@ -8348,13 +8416,108 @@ function REPLInner({
       const messageIndex = prev.lastIndexOf(message);
       if (messageIndex === -1) return;
 
+      const keptMessages = prev.slice(0, messageIndex);
+      const slicedMessages = prev.slice(messageIndex);
+
       logEvent('tengu_conversation_rewind', {
         preRewindMessageCount: prev.length,
         postRewindMessageCount: messageIndex,
-        messagesRemoved: prev.length - messageIndex,
+        messagesRemoved: slicedMessages.length,
         rewindToMessageIndex: messageIndex,
       });
-      setMessages(prev.slice(0, messageIndex));
+
+      // Official 2.1.328 `yNr` (`chunk@319736883.js @497000`): evict files and
+      // nested memories that were ONLY read in the rewound future branch from
+      // `readFileState` and `loadedNestedMemoryPathsRef` so rewound files &
+      // memories can resurface cleanly.
+      try {
+        const keptTracked = collectTrackedFilePathsFromMessages(keptMessages);
+        const slicedTracked = collectTrackedFilePathsFromMessages(slicedMessages);
+        readFileState.current.forgetReadsBeforeCompaction();
+        for (const path of slicedTracked.readFilePaths) {
+          if (!keptTracked.readFilePaths.has(path)) {
+            readFileState.current.delete(path);
+          }
+        }
+        for (const path of slicedTracked.nestedMemoryPaths) {
+          if (!keptTracked.nestedMemoryPaths.has(path)) {
+            readFileState.current.delete(path);
+            loadedNestedMemoryPathsRef.current.delete(path);
+          }
+        }
+      } catch (err) {
+        logError(err);
+      }
+
+      // Official 2.1.328 `Jne` (`chunk@319736883.js @497150`): reset optional
+      // session memorySelector cache if present so rewound memories can resurface.
+      try {
+        const sessionWithMemory = getBootstrapSession() as unknown as {
+          memorySelector?: { stateByDir?: Record<string, unknown>; lastUsage?: unknown };
+        };
+        if (sessionWithMemory.memorySelector) {
+          sessionWithMemory.memorySelector.stateByDir = {};
+          sessionWithMemory.memorySelector.lastUsage = null;
+        }
+      } catch {
+        /* optional */
+      }
+
+      // Official 2.1.328 `wYe` (`chunk@319736883.js @496920`): plan refusal
+      // fallback model unwind when slicing past a `model_refusal_fallback` banner.
+      let restoredModelFromFallback: string | null | undefined;
+      try {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const {
+          clearRefusalFallbackModelLatch,
+          clearRefusalFallbackOccurred,
+          getInitialMainLoopModel,
+          getMainLoopModelOverride,
+          getRefusalFallbackModelLatch,
+          hasRefusalFallbackOccurred,
+          setMainLoopModelOverride,
+        } = require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
+        const { getAPIProvider } =
+          require('../utils/model/providers.js') as typeof import('../utils/model/providers.js');
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        const latch = getRefusalFallbackModelLatch();
+        const unwindPlan = planRewindRefusalFallbackUnwind({
+          keptMessages,
+          slicedMessages,
+          currentOverride: getMainLoopModelOverride(),
+          latchActive: hasRefusalFallbackOccurred() || latch !== undefined,
+          firstParty: getAPIProvider() === 'firstParty',
+          modelBeforeSwap: latch?.previousOverride,
+          initialModel: getInitialMainLoopModel(),
+        });
+        if (unwindPlan) {
+          if (unwindPlan.clearLatch) {
+            clearRefusalFallbackModelLatch('rewind');
+            clearRefusalFallbackOccurred();
+          }
+          if (unwindPlan.model.action === 'restore') {
+            setMainLoopModelOverride(unwindPlan.model.value ?? undefined);
+            restoredModelFromFallback = unwindPlan.model.value;
+          }
+          logEvent('tengu_refusal_fallback_rewind_unwind', {
+            action: (unwindPlan.model.action === 'restore'
+              ? 'model_restored'
+              : unwindPlan.model.reason === 'not_first_party'
+                ? 'model_kept_3p'
+                : 'model_kept_writer_mismatch') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...(unwindPlan.model.action === 'restore' && {
+              restored_from: unwindPlan.model
+                .restoredFrom as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }),
+            latch_cleared: unwindPlan.clearLatch,
+            banners_sliced: unwindPlan.bannersSliced,
+          });
+        }
+      } catch (err) {
+        logError(err);
+      }
+
+      setMessages(keptMessages);
       // densable QAt @217225770 → F7e() only (not Ktn). Rewind is a
       // conversation_reset, not a continue. Do not invent a Vtn wipe here.
       try {
@@ -8393,6 +8556,65 @@ function REPLInner({
         /* eslint-enable @typescript-eslint/no-require-imports */
       }
 
+      // Official 2.1.328: rehydrate `activeGoal` from the surviving prefix
+      // (`keptMessages`) so rewinding past a `/goal` set/clear never leaves
+      // stale goal state or Stop hooks from the rewound branch.
+      try {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const { findGoalToRestore } =
+          require('../services/goal/restoreGoalFromTranscript.js') as typeof import('../services/goal/restoreGoalFromTranscript.js');
+        const { cancelPendingGoalIdleCheckin } =
+          require('../services/goal/goalIdleCheckin.js') as typeof import('../services/goal/goalIdleCheckin.js');
+        const { bumpGoalMutationEpoch, isGoalOwnedStopHook, markGoalStopHook } =
+          require('../commands/goal.js') as typeof import('../commands/goal.js');
+        const { addSessionHook, getSessionHooks, removeSessionHook } =
+          require('../utils/hooks/sessionHooks.js') as typeof import('../utils/hooks/sessionHooks.js');
+        const { getTotalOutputTokens } = require('../cost-tracker.js') as typeof import('../cost-tracker.js');
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        const currentGoal = store.getState().activeGoal;
+        const restoredCondition = findGoalToRestore(keptMessages);
+        if ((currentGoal?.condition ?? null) !== restoredCondition) {
+          const sid = getSessionId();
+          bumpGoalMutationEpoch();
+          cancelPendingGoalIdleCheckin();
+          const stopMatchers = getSessionHooks(store.getState(), sid, 'Stop').get('Stop') ?? [];
+          for (const matcher of stopMatchers) {
+            if (matcher.skillRoot !== undefined) continue;
+            for (const hook of matcher.hooks) {
+              if (isGoalOwnedStopHook(hook)) {
+                removeSessionHook(setAppState, sid, 'Stop', hook, {
+                  skillRoot: undefined,
+                  matchByIdentity: true,
+                });
+              }
+            }
+          }
+          if (restoredCondition === null) {
+            setAppState(prev => (prev.activeGoal === undefined ? prev : { ...prev, activeGoal: undefined }));
+          } else {
+            addSessionHook(
+              setAppState,
+              sid,
+              'Stop',
+              '',
+              markGoalStopHook({ type: 'prompt', prompt: restoredCondition }),
+            );
+            setAppState(prev => ({
+              ...prev,
+              activeGoal: {
+                condition: restoredCondition,
+                iterations: 0,
+                setAt: Date.now(),
+                origin: 'restored',
+                tokensAtStart: getTotalOutputTokens(),
+              },
+            }));
+          }
+        }
+      } catch (err) {
+        logError(err);
+      }
+
       // Official 2.1.323 (#2028): never blindly overwrite permission mode during
       // rewind. Only restore message.permissionMode when it is local (not
       // remoteSourced) and permitted by setPermissionModeWithGuards, leaving the
@@ -8401,6 +8623,10 @@ function REPLInner({
       const isRemoteSourced = (message as { remoteSourced?: boolean }).remoteSourced === true;
       setAppState(prev => ({
         ...prev,
+        ...(restoredModelFromFallback !== undefined && {
+          mainLoopModel: restoredModelFromFallback,
+          mainLoopModelForSession: null,
+        }),
         // Clear stale prompt suggestion from previous conversation state
         promptSuggestion: {
           text: null,
@@ -8425,44 +8651,35 @@ function REPLInner({
         }
       }
     },
-    [setMessages, setAppState],
+    [setMessages, setAppState, store],
   );
 
   // Synchronous rewind + input population. Used directly by auto-restore on
   // interrupt (so React batches with the abort's setMessages → single render,
   // no flicker). MessageSelector wraps this in setImmediate via handleRestoreMessage.
+  // Official 2.1.328 (`chunk@319736883.js @500200-500850`): supports restoring
+  // all user messages from a batched turn, IDE selection, and non-image + image pastes.
   const restoreMessageSync = useCallback(
-    (message: UserMessage) => {
-      rewindConversationTo(message);
+    (message: UserMessage, earlierBatch: UserMessage[] = []) => {
+      const batch = earlierBatch.length > 0 ? [...earlierBatch, message] : [message];
+      const rewindTarget = batch[0]!;
+      rewindConversationTo(rewindTarget);
       repinScrollRef.current(true, 'rewind');
 
-      const r = textForResubmit(message);
-      if (r) {
-        setInputValue(r.text);
-        setInputMode(r.mode);
+      for (const msg of batch) {
+        restoreIdeSelectionConsumedBy(msg.uuid, undefined);
       }
 
-      // Restore pasted images
-      if (Array.isArray(message.message.content) && message.message.content.some(block => block.type === 'image')) {
-        const imageBlocks: Array<ImageBlockParam> = message.message.content.filter(block => block.type === 'image');
-        if (imageBlocks.length > 0) {
-          const newPastedContents: Record<number, PastedContent> = {};
-          imageBlocks.forEach((block, index) => {
-            if (block.source.type === 'base64') {
-              const id = (message.imagePasteIds as number[] | undefined)?.[index] ?? index + 1;
-              newPastedContents[id] = {
-                id,
-                type: 'image',
-                content: block.source.data,
-                mediaType: block.source.media_type,
-              };
-            }
-          });
-          setPastedContents(newPastedContents);
-        }
+      const restored = buildRestoredDraftFromMessages(batch);
+      if (restored.text.length > 0) {
+        setInputValue(restored.text);
+        setInputMode(restored.mode);
+      }
+      if (Object.keys(restored.pastedContents).length > 0) {
+        setPastedContents(restored.pastedContents);
       }
     },
-    [rewindConversationTo, setInputValue],
+    [rewindConversationTo, setInputValue, restoreIdeSelectionConsumedBy],
   );
   restoreMessageSyncRef.current = restoreMessageSync;
 

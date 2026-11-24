@@ -4,7 +4,16 @@ import type {
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
-import { FallbackTriggeredError } from './services/api/withRetry.js'
+import {
+  FallbackTriggeredError,
+  getRetryDelay,
+} from './services/api/withRetry.js'
+import { isResumedUsageMessageDelta } from './services/api/claude.js'
+import {
+  POLL_CHUNK_MAX_BYTES,
+  POLL_CHUNK_MAX_EVENTS,
+} from '@claude-code/builtin-tools/tools/PollTool/constants.js'
+import { sleep } from './utils/sleep.js'
 import { randomUUID } from 'crypto'
 import {
   AUTOCOMPACT_THRASHING_MESSAGE,
@@ -88,7 +97,6 @@ import {
 import type { CallModelParams } from './query/turnStepHooks.js'
 import { logAntError, logForDebugging } from './utils/debug.js'
 import {
-  isRemoteCancelAbortReason,
   isShutdownAbortReason,
   shouldSuppressInterruptionMessage,
 } from './utils/abortController.js'
@@ -101,7 +109,6 @@ import {
   createAssistantAPIErrorMessage,
   getMessagesAfterCompactBoundary,
   createToolUseSummaryMessage,
-  createMicrocompactBoundaryMessage,
   isHumanLikeOrigin,
   isThinkingMessage,
   isUnparsedToolInput,
@@ -128,9 +135,6 @@ const skillPrefetch = feature('EXPERIMENTAL_SKILL_SEARCH')
 const searchExtraToolsPrefetch = feature('EXPERIMENTAL_SEARCH_EXTRA_TOOLS')
   ? (require('./services/searchExtraTools/prefetch.js') as typeof import('./services/searchExtraTools/prefetch.js'))
   : null
-const _jobClassifier = feature('TEMPLATES')
-  ? (require('./jobs/classifier.js') as typeof import('./jobs/classifier.js'))
-  : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { resolveStopHookBlockCap } from './utils/residualMsEnvGates.js'
 import { messagesEndWithSuccessfulTerminalMcpTool } from './utils/residualUiEnvGates.js'
@@ -143,6 +147,9 @@ import {
   registerFoldInFlight,
   unregisterFoldInFlight,
   isMidTurnFoldSuspended,
+  startRequeueWindow,
+  settleTaken,
+  wasPutBack,
 } from './utils/messageQueueManager.js'
 import { addToHistory } from './history.js'
 import {
@@ -190,7 +197,6 @@ import {
   StreamingToolExecutor,
 } from './services/tools/StreamingToolExecutor.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
-import { runTools } from './services/tools/toolOrchestration.js'
 import {
   isToolBridgeEvent,
   type ToolBridgeEvent,
@@ -548,6 +554,204 @@ export function getPrecomputeArmThreshold(
   }
 }
 
+// -- official 2.1.328 pure helpers
+
+const GOAL_TOOL_NAMES = new Set([
+  'SetGoal',
+  'ProposeGoal',
+  'PauseGoal',
+  'GetGoal',
+])
+
+/** Official 2.1.328 `cf` (`chunk@305854618.js @207056`): preserve stopHookBlockCount on goal-only tool turns. */
+export function isGoalToolsOnly(blocks: readonly ToolUseBlock[]): boolean {
+  return blocks.length > 0 && blocks.every(b => GOAL_TOOL_NAMES.has(b.name))
+}
+
+/**
+ * Official 2.1.328 `wSr` / `Iir` (`chunk@294254613.js:756964`): non-mutating
+ * 20-event / 32KB group-preserving poll-event slice so aborting during
+ * attachment building leaves events safely queued.
+ */
+export function selectPollEventChunk(
+  pollEvents: readonly QueuedCommand[],
+): QueuedCommand[] {
+  if (pollEvents.length === 0) return []
+  const chunk: QueuedCommand[] = []
+  let bytes = 0
+  for (let i = 0; i < pollEvents.length; ) {
+    const groupId = (pollEvents[i]!.pollEvent as { group?: string } | undefined)
+      ?.group
+    let end = i + 1
+    while (
+      groupId !== undefined &&
+      end < pollEvents.length &&
+      (pollEvents[end]!.pollEvent as { group?: string } | undefined)?.group ===
+        groupId
+    ) {
+      end++
+    }
+    const group = pollEvents.slice(i, end)
+    const groupBytes = group.reduce(
+      (sum, cmd) =>
+        sum + Buffer.byteLength(cmd.pollEvent?.envelope ?? '', 'utf8'),
+      0,
+    )
+    if (
+      chunk.length > 0 &&
+      (chunk.length + group.length > POLL_CHUNK_MAX_EVENTS ||
+        bytes + groupBytes > POLL_CHUNK_MAX_BYTES)
+    ) {
+      break
+    }
+    chunk.push(...group)
+    bytes += groupBytes
+    i = end
+  }
+  return chunk
+}
+
+/** Official 2.1.328 `Xus` (`chunk@285203830.js @12178`): max_tokens cut inside a tool call. */
+export const TOOL_CALL_CUT_RECOVERY_PROMPT =
+  'Your response was cut off because it exceeded the output token limit. The cut fell inside a tool call, so that call did not run and nothing of it was kept. Make the call again in a shorter response: split long content across several smaller tool calls. For a long file, write the first part and then append the rest in later calls.'
+
+/** Official 2.1.328 `qus` (`chunk@285203830.js @11247`): max_tokens cut in finished text block (reopen fence/table). */
+export const REOPEN_BLOCK_RECOVERY_PROMPT =
+  'Your response was cut off because it exceeded the output token limit. Continue from where you left off and finish the response. Start a new code fence or table header first if you were inside one.'
+
+/** Official 2.1.328 `CHn` (`chunk@285203830.js @9869`): MCP endTurn overridden by failed sibling tool call. */
+export const MCP_END_TURN_FAILED_SIBLING_OVERRIDE_PROMPT =
+  'The turn did not end: a tool call in your last message asked to end it, but another call in that message failed. Deal with the failure, then finish the turn. The calls that succeeded took effect, so do not repeat them.'
+
+/** Official 2.1.328 `amo` / `Kus` (`chunk@285203830.js @10150`): same-model refusal retry nudge. */
+export const SAME_MODEL_REFUSAL_RETRY_PROMPT =
+  'Your response above was stopped by a safety classifier — this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded.'
+
+export const SAME_MODEL_REFUSAL_RETRY_INTERRUPTED_PROMPT = `${SAME_MODEL_REFUSAL_RETRY_PROMPT} Exception: a tool call whose result reads "Interrupted" was already running when stopped, so some of its effects may have happened.`
+
+const MAX_SERVER_ERROR_CUT_RETRIES = 5
+
+function buildCutRetryWaitMessage(
+  error: unknown,
+  retryInMs: number,
+  retryAttempt: number,
+  uuid: () => string,
+): SystemAPIErrorMessage {
+  return {
+    type: 'system' as const,
+    subtype: 'api_error' as const,
+    level: 'error' as const,
+    error,
+    retryInMs,
+    retryAttempt,
+    maxRetries: MAX_SERVER_ERROR_CUT_RETRIES,
+    source: 'cut_retry',
+    timestamp: new Date().toISOString(),
+    uuid: uuid(),
+  } as unknown as SystemAPIErrorMessage
+}
+
+function isSafetyMonitorBlockedMessage(
+  msg: Message | StreamEvent | undefined,
+): msg is AssistantMessage {
+  return (
+    msg?.type === 'assistant' &&
+    msg.isApiErrorMessage === true &&
+    msg.apiError === 'safety_monitor_blocked'
+  )
+}
+
+function isSameModelRefusalMessage(
+  msg: Message | StreamEvent | undefined,
+): msg is AssistantMessage {
+  return (
+    msg?.type === 'assistant' &&
+    msg.isApiErrorMessage === true &&
+    (msg.message as { stop_reason?: unknown } | undefined)?.stop_reason ===
+      'refusal'
+  )
+}
+
+function isSameModelRefusalRetryArmed(
+  querySource: QuerySource,
+  refusalRetrySpent: boolean,
+): boolean {
+  if (refusalRetrySpent) return false
+  if (querySourceFamilyOf(querySource) === 'auxiliary') return false
+  if (
+    process.env.CLAUDE_CODE_DISABLE_REFUSAL_RETRY === '1' ||
+    process.env.CLAUDE_CODE_DISABLE_REFUSAL_RETRY === 'true'
+  ) {
+    return false
+  }
+  return true
+}
+
+/**
+ * Official 2.1.328 `x_` (`chunk@305854618.js @166703`): single non-error
+ * assistant message containing only an incomplete thinking block cut at
+ * `max_tokens` with server `resumable === true`.
+ */
+function canResumeIncompleteThinking(
+  responses: readonly AssistantMessage[],
+): boolean {
+  const nonError = responses.filter(m => !m.isApiErrorMessage)
+  if (nonError.length !== 1) return false
+  const msg = nonError[0]!
+  const content = msg.message?.content
+  if (!Array.isArray(content) || content.length !== 1) return false
+  const firstBlock = content[0] as { type?: string } | undefined
+  if (
+    firstBlock?.type !== 'thinking' &&
+    firstBlock?.type !== 'redacted_thinking'
+  ) {
+    return false
+  }
+  const inner = msg.message as unknown as {
+    stop_reason?: unknown
+    resumable?: unknown
+  }
+  return inner.stop_reason === 'max_tokens' && inner.resumable === true
+}
+
+/**
+ * Official 2.1.328 `O_` (`chunk@305854618.js @167100`): select specific
+ * `max_tokens` recovery nudge (`tool_call_cut` / `reopen_block` / default).
+ */
+export function selectMaxOutputTokensRecoveryPrompt(
+  responses: readonly AssistantMessage[],
+  isSubagent: boolean,
+  attempt: number,
+): string {
+  const toolCallCut = responses.some(
+    m =>
+      (m as AssistantMessage & { toolCallCutAtOutputLimit?: boolean })
+        .toolCallCutAtOutputLimit === true,
+  )
+  if (toolCallCut) {
+    return TOOL_CALL_CUT_RECOVERY_PROMPT
+  }
+  const lastNonError = responses.findLast(m => !m.isApiErrorMessage)
+  const content = lastNonError?.message?.content
+  const lastBlock = Array.isArray(content)
+    ? (content.at(-1) as { type?: string; text?: string } | undefined)
+    : undefined
+  const endedInNonEmptyText =
+    lastNonError?.message?.stop_reason === 'max_tokens' &&
+    lastBlock?.type === 'text' &&
+    typeof lastBlock.text === 'string' &&
+    lastBlock.text.trim() !== '' &&
+    !responses.some(
+      m =>
+        (m as AssistantMessage & { cutInUnfinishedBlock?: boolean })
+          .cutInUnfinishedBlock === true,
+    )
+  if (!isSubagent && endedInNonEmptyText) {
+    return REOPEN_BLOCK_RECOVERY_PROMPT
+  }
+  return getMaxOutputTokensRecoveryPrompt(isSubagent, attempt)
+}
+
 // -- query loop state
 
 // Mutable state carried between loop iterations
@@ -556,7 +760,16 @@ type State = {
   toolUseContext: ToolUseContext
   autoCompactTracking: AutoCompactTrackingState | undefined
   maxOutputTokensRecoveryCount: number
+  serverErrorCutRetryCount?: number
   hasAttemptedReactiveCompact: boolean
+  /** Official 2.1.328 (`chunk@305854618.js @206900`): two-pass 413 reactive compact. */
+  reactiveCompactDeeperPass?: 'none' | 'available' | 'spent'
+  /** Official 2.1.328 `resumeIncompleteThinking`: resume thinking cut at max_tokens. */
+  resumeIncompleteThinking?: boolean
+  /** Official 2.1.328 `refusalRetrySpent`: one-shot same-model refusal retry latch. */
+  refusalRetrySpent?: boolean
+  /** Official 2.1.328 `Ol`: one-shot guard on overriding MCP endTurn via Stop hook / failed sibling. */
+  mcpEndTurnOverrideSpent?: boolean
   maxOutputTokensOverride: number | undefined
   pendingToolUseSummary: Promise<ToolUseSummaryMessage | null> | undefined
   stopHookActive: boolean | undefined
@@ -575,7 +788,7 @@ type State = {
   malformedToolUseRetryCount?: number
   // Why the previous iteration continued. Undefined on first iteration.
   // Lets tests assert recovery paths fired without inspecting message contents.
-  transition: Continue | undefined
+  transition: Continue | { reason: 'refusal_retry'; model?: string } | undefined
 }
 
 async function* queryBody(
@@ -969,10 +1182,24 @@ async function* queryBody(
 
   // Only reached if queryLoop returned normally. Skipped on throw (error
   // propagates through yield*) and on .return() (Return completion closes
-  // both generators). This gives the same asymmetric started-without-completed
-  // signal as print.ts's drainCommandQueue when the turn fails.
+  // both generators). Official 2.1.328 `Pp` (`chunk@305854618.js @189350, @222333`):
+  // close the requeue window on main-thread turns, omit commands put back by
+  // `requeueTaken()`, and emit `cancelled` on abort vs `completed` normally.
+  if (!paramsWithTrace.toolUseContext.agentId) {
+    settleTaken()
+  }
+  const lifecycleEndState =
+    terminal?.reason === 'aborted_streaming' ||
+    terminal?.reason === 'aborted_tools'
+      ? 'cancelled'
+      : 'completed'
   for (const uuid of consumedCommandUuids) {
-    notifyCommandLifecycle(uuid, 'completed')
+    if (!wasPutBack(uuid)) {
+      notifyCommandLifecycle(uuid, lifecycleEndState)
+    }
+  }
+  if (!paramsWithTrace.toolUseContext.agentId) {
+    settleTaken({ turnEnded: true })
   }
   return terminal!
 }
@@ -1037,7 +1264,12 @@ async function* queryLoop(
     stopHookActive: params.stopHookActive,
     stopHookBlockCount: 0,
     maxOutputTokensRecoveryCount: 0,
+    serverErrorCutRetryCount: 0,
     hasAttemptedReactiveCompact: false,
+    reactiveCompactDeeperPass: 'none',
+    resumeIncompleteThinking: undefined,
+    refusalRetrySpent: false,
+    mcpEndTurnOverrideSpent: false,
     turnCount: 1,
     pendingToolUseSummary: undefined,
     // densable Pe.thinkingOnlyNudged — first iteration false.
@@ -1072,29 +1304,47 @@ async function* queryLoop(
     state.toolUseContext,
   )
 
-  // densable turn-start t1e fold — poll-event commands become poll_events
-  // attachments before the first API call. Abort leaves them queued.
+  // Official 2.1.328 turn-start poll-event fold (`chunk@305854618.js @226800-227600`):
+  // respect `isMidTurnFoldSuspended()`, apply 20-event / 32KB `selectPollEventChunk`
+  // cap, wrap with `registerFoldInFlight`/`unregisterFoldInFlight`, re-check abort
+  // after attachment building, consume with `{ reason: 'absorbed_mid_turn' }`,
+  // and emit `command_lifecycle('started')`.
   {
     const isMainThread =
       querySource.startsWith('repl_main_thread') || querySource === 'sdk'
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { isMainThreadQueuedCommand } =
       require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
-    const turnStartPoll = getCommandsByMaxPriority('next').filter(cmd => {
-      if (cmd.mode !== 'poll-event') return false
-      if (isMainThread) return isMainThreadQueuedCommand(cmd)
-      return cmd.agentId === state.toolUseContext.agentId
-    })
+    const rawTurnStartPoll = isMidTurnFoldSuspended()
+      ? []
+      : getCommandsByMaxPriority('next').filter(cmd => {
+          if (cmd.mode !== 'poll-event') return false
+          if (cmd.waitsOutStop === true || cmd.passive === true) return false
+          if (isMainThread) return isMainThreadQueuedCommand(cmd)
+          return cmd.agentId === state.toolUseContext.agentId
+        })
+    const turnStartPoll = selectPollEventChunk(rawTurnStartPoll)
     if (turnStartPoll.length > 0) {
+      registerFoldInFlight(turnStartPoll)
       try {
         const built = await getQueuedCommandAttachments(turnStartPoll)
-        if (built.some(attachment => attachment.type === 'poll_events')) {
+        if (
+          built.some(attachment => attachment.type === 'poll_events') &&
+          !state.toolUseContext.abortController.signal.aborted &&
+          !isMidTurnFoldSuspended()
+        ) {
           for (const att of built) {
             const msg = createAttachmentMessage(att)
             state.messages = [...state.messages, msg]
             yield msg
           }
-          removeFromQueue(turnStartPoll)
+          consumeFromQueue(turnStartPoll, { reason: 'absorbed_mid_turn' })
+          for (const cmd of turnStartPoll) {
+            if (cmd.uuid && !wasPutBack(cmd.uuid)) {
+              consumedCommandUuids.push(cmd.uuid)
+              notifyCommandLifecycle(cmd.uuid, 'started')
+            }
+          }
         }
       } catch (err) {
         if (isAbortError(err)) {
@@ -1105,6 +1355,8 @@ async function* queryLoop(
         } else {
           logError(err)
         }
+      } finally {
+        unregisterFoldInFlight(turnStartPoll)
       }
     }
   }
@@ -1191,11 +1443,22 @@ async function* queryLoop(
         emptyCompletionResent,
       } = state
       const malformedToolUseRetryCount = state.malformedToolUseRetryCount ?? 0
+      const reactiveCompactDeeperPass =
+        state.reactiveCompactDeeperPass ?? 'none'
+      const resumeIncompleteThinking = state.resumeIncompleteThinking
+      const serverErrorCutRetryCount = state.serverErrorCutRetryCount ?? 0
+      const refusalRetrySpent = state.refusalRetrySpent ?? false
+      const mcpEndTurnOverrideSpent = state.mcpEndTurnOverrideSpent ?? false
 
       // densable fl(H.transition, f.agentId) — gold skips when agentId is set
       // (subagent spinner store is per-id via $xe). Analog: only the main REPL
       // wires setOutputLimitRecovery; subagents have no spinner row.
-      announceOutputLimitRecovery(state.transition, toolUseContext)
+      announceOutputLimitRecovery(
+        state.transition?.reason === 'refusal_retry'
+          ? undefined
+          : state.transition,
+        toolUseContext,
+      )
 
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1248,6 +1511,13 @@ async function* queryLoop(
       ) {
         yield* leftoverDrainSpinnerModes()
         return { reason: 'background_requested' }
+      }
+
+      // Official 2.1.328 `Ip` (`chunk@305854618.js @230720`): arm the interrupt
+      // requeue window deadline on the last absorbed main-thread prompt before
+      // starting the next streaming API request.
+      if (!toolUseContext.agentId) {
+        startRequeueWindow()
       }
 
       yield { type: 'stream_request_start' }
@@ -1336,26 +1606,11 @@ async function* queryLoop(
         }
       }
 
-      // Strip thinking-block signatures proactively when the model has changed.
-      // Signatures are bound to the API key + model — replaying a protected-thinking
-      // block to a different model causes 400 errors. This covers /model switches
-      // mid-session (login switches are handled in login.tsx).
-      if (
-        messagesForQuery.some(m => {
-          if (m.type !== 'assistant') return false
-          const content = m.message?.content
-          if (!Array.isArray(content)) return false
-          return (content as unknown[]).some(
-            b =>
-              typeof b === 'object' &&
-              b !== null &&
-              (b as Record<string, unknown>).type === 'thinking' &&
-              (b as Record<string, unknown>).signature,
-          )
-        })
-      ) {
-        messagesForQuery = stripSignatureBlocks(messagesForQuery)
-      }
+      // Official 2.1.328 (`chunk@294254613.js:3319260, 6069470`): foreign-model
+      // thinking stripping (`stripForeignThinkingBlocks`) runs inside claude.ts
+      // per message.model compatibility, so same-model turns preserve prompt
+      // cache and extended-thinking continuity instead of unconditionally
+      // stripping signature blocks here.
       // Release toolUseResult payloads from previous turns — the next API call
       // only needs message.message.content (tool_result blocks), not the raw
       // output object. This prevents unbounded memory growth in long sessions
@@ -1450,12 +1705,6 @@ async function* queryLoop(
           }
         }
       }
-      // For cached microcompact (cache editing), defer boundary message until after
-      // the API response so we can use actual cache_deleted_input_tokens.
-      // Gated behind feature() so the string is eliminated from external builds.
-      const pendingCacheEdits = feature('CACHED_MICROCOMPACT')
-        ? microcompactResult.compactionInfo?.pendingCacheEdits
-        : undefined
       queryCheckpoint('query_microcompact_end')
 
       // Project the collapsed context view and maybe commit more collapses.
@@ -1835,14 +2084,14 @@ async function* queryLoop(
       let toolRequestedEndTurn: ToolEndTurnSource | false = false
 
       queryCheckpoint('query_setup_start')
-      const useStreamingToolExecution = config.gates.streamingToolExecution
-      let streamingToolExecutor = useStreamingToolExecution
-        ? new StreamingToolExecutor(
-            toolUseContext.options.tools,
-            canUseTool,
-            toolUseContext,
-          )
-        : null
+      // Official 2.1.328 (`chunk@305854618.js`): StreamingToolExecutor is always
+      // enabled (dead `tengu_streaming_tool_execution2` gate removed).
+      let streamingToolExecutor: StreamingToolExecutor =
+        new StreamingToolExecutor(
+          toolUseContext.options.tools,
+          canUseTool,
+          toolUseContext,
+        )
 
       const appState = toolUseContext.getAppState()
       // densable Ya — kickoff qc+Ha in parallel with the rest of query_setup
@@ -2193,10 +2442,57 @@ async function* queryLoop(
       // Official 2.1.328 `zr` (`chunk@305854618.js @275704`): last stop_reason
       // observed in stream_event(message_delta) across the current API stream.
       let lastDeltaStopReason: string | undefined
+      let lastDeltaOutputTokens: number | undefined
+      // Official 2.1.328 `Tt` (`chunk@305854618.js @275400-275950`): track
+      // cloned assistant messages so `message_delta` writebacks stay in sync.
+      const backfillClones: Array<{
+        src: AssistantMessage
+        dst: AssistantMessage
+      }> = []
+      const syncBackfillClones = () => {
+        for (const { src, dst } of backfillClones) {
+          const srcMsg = src.message as unknown as Record<string, unknown>
+          const dstMsg = dst.message as unknown as Record<string, unknown>
+          dst.message.usage = src.message.usage
+          dst.message.stop_reason = src.message.stop_reason
+          if ('stop_details' in srcMsg) {
+            dstMsg.stop_details = srcMsg.stop_details
+          }
+          if (srcMsg.context_management !== undefined) {
+            dstMsg.context_management = srcMsg.context_management
+          }
+          if (srcMsg.resumable !== undefined) {
+            dstMsg.resumable = srcMsg.resumable
+          }
+          if (srcMsg.pausedResponses !== undefined) {
+            dstMsg.pausedResponses = srcMsg.pausedResponses
+          }
+        }
+      }
+      const sameModelRefusalArmed = isSameModelRefusalRetryArmed(
+        querySource,
+        refusalRetrySpent,
+      )
+      let withheldSafetyMonitorBlock: AssistantMessage | undefined
+      let withheldSameModelRefusal: AssistantMessage | undefined
+      let pendingCallerFallbackRequest:
+        | {
+            originalModel: string
+            fallbackModel: string
+            requestId?: string | null
+            apiRefusalCategory?: string | null
+            silentArmAtTrigger?: boolean
+          }
+        | undefined
       try {
         while (attemptWithFallback) {
           attemptWithFallback = false
           lastDeltaStopReason = undefined
+          lastDeltaOutputTokens = undefined
+          backfillClones.length = 0
+          withheldSafetyMonitorBlock = undefined
+          withheldSameModelRefusal = undefined
+          pendingCallerFallbackRequest = undefined
           try {
             let streamingFallbackOccured = false
             // densable Ji — media-size (EFi) withheld AND buffered; flushed on
@@ -2441,6 +2737,13 @@ async function* queryLoop(
                 effortValue: layeredEffortValue,
                 advisorModel: appState.advisorModel,
                 continuesCutReply: maxOutputTokensRecoveryCount > 0,
+                ...(resumeIncompleteThinking === true && {
+                  resumeIncompleteThinking: true,
+                }),
+                onMessageDelta: () => {
+                  syncBackfillClones()
+                },
+                refusalFallbackHandledByCaller: true,
                 skipCacheWrite,
                 agentCacheTtlOverride,
                 thinkingStripPlan,
@@ -2517,13 +2820,29 @@ async function* queryLoop(
                   | {
                       type?: unknown
                       delta?: { stop_reason?: unknown }
+                      usage?: { output_tokens?: unknown }
                     }
                   | undefined
-                if (
-                  streamEv?.type === 'message_delta' &&
-                  typeof streamEv.delta?.stop_reason === 'string'
-                ) {
-                  lastDeltaStopReason = streamEv.delta.stop_reason
+                if (streamEv?.type === 'message_delta') {
+                  if (typeof streamEv.delta?.stop_reason === 'string') {
+                    lastDeltaStopReason = streamEv.delta.stop_reason
+                  }
+                  if (typeof streamEv.usage?.output_tokens === 'number') {
+                    lastDeltaOutputTokens = streamEv.usage.output_tokens
+                  }
+                  // Official 2.1.328 `Tt` (`chunk@305854618.js @275700-275950`):
+                  // sync cloned assistant messages on `message_delta`, and clear
+                  // the clone list on final (non-resumed) `message_delta`.
+                  syncBackfillClones()
+                  if (
+                    !isResumedUsageMessageDelta(
+                      streamEv as Parameters<
+                        typeof isResumedUsageMessageDelta
+                      >[0],
+                    )
+                  ) {
+                    backfillClones.length = 0
+                  }
                 }
               }
               yield* leftoverDrainSpinnerModes()
@@ -2868,8 +3187,19 @@ async function* queryLoop(
                     refusalFallbackPreferenceChoice = 'retry_fallback'
                   }
                 }
-                // Do not push into assistantMessages; stream will throw
-                // FallbackTriggeredError for the actual model switch retry.
+                // Record for caller-driven fallback if stream returns cleanly
+                // (when `refusalFallbackHandledByCaller: true` in claude.ts).
+                pendingCallerFallbackRequest = {
+                  originalModel: fb.originalModel,
+                  fallbackModel: fb.fallbackModel,
+                  requestId: fb.requestId,
+                  apiRefusalCategory: fb.apiRefusalCategory,
+                  silentArmAtTrigger: fb.silentArmAtTrigger,
+                }
+                backfillClones.length = 0
+                // Do not push into assistantMessages; either stream throws
+                // FallbackTriggeredError or caller handles `pendingCallerFallbackRequest`
+                // right after stream exits.
                 continue
               }
               // We won't use the tool_calls from the first attempt
@@ -2892,6 +3222,7 @@ async function* queryLoop(
                 toolResults.length = 0
                 toolUseBlocks.length = 0
                 needsFollowUp = false
+                backfillClones.length = 0
 
                 // Discard pending results from the failed streaming attempt and create
                 // a fresh executor. This prevents orphan tool_results (with old tool_use_ids)
@@ -2985,6 +3316,12 @@ async function* queryLoop(
                       content: clonedContent,
                     },
                   } as typeof message
+                  // Official 2.1.328 `Tt` (`chunk@305854618.js @275400-275950`):
+                  // record shallow clone so `message_delta` syncs usage/stop_reason/etc.
+                  backfillClones.push({
+                    src: assistantMsg,
+                    dst: yieldMessage as AssistantMessage,
+                  })
                 }
               }
               // Withhold recoverable errors (prompt-too-long, media-size,
@@ -3030,7 +3367,7 @@ async function* queryLoop(
                 withholdPtl = true
                 withheldLongContextRefusal = message as AssistantMessage
               }
-              const { withheld, replay: withheldMediaReplay } =
+              const { withheld: baseWithheld, replay: withheldMediaReplay } =
                 applyStreamMediaReplay(withheldMediaBuffer, message, {
                   ptl: withholdPtl,
                   media:
@@ -3047,6 +3384,23 @@ async function* queryLoop(
                       querySource,
                     ),
                 })
+              let withheld = baseWithheld
+              if (
+                !withheld &&
+                needsFollowUp &&
+                isSafetyMonitorBlockedMessage(message)
+              ) {
+                withheld = true
+                withheldSafetyMonitorBlock = message
+              }
+              if (
+                !withheld &&
+                sameModelRefusalArmed &&
+                isSameModelRefusalMessage(message)
+              ) {
+                withheld = true
+                withheldSameModelRefusal = message
+              }
               // densable: (Gt||Yt) soft/exact land BEFORE yield so consumers
               // see joined text + supersedesUuids on first delivery.
               // Yt → exact Yt.text+Ki.text + supersedes lane server_stitch
@@ -3088,6 +3442,10 @@ async function* queryLoop(
                           ? { supersedesUuids: land.supersedesUuids }
                           : {}),
                       } as AssistantMessage
+                      backfillClones.push({
+                        src: message as AssistantMessage,
+                        dst: landedAssistant,
+                      })
                       yieldMessage = landedAssistant
                       if (
                         land.supersedesUuids !== undefined &&
@@ -3168,6 +3526,62 @@ async function* queryLoop(
               yield* drainStreamingTools()
             }
             queryCheckpoint('query_api_streaming_end')
+            // Official 2.1.328 `Tt`: final sync of cloned assistant messages after stream end.
+            syncBackfillClones()
+            backfillClones.length = 0
+            // Official 2.1.328 (`chunk@294254613.js:3449563`): when claude.ts
+            // returned cleanly after yielding `fallback_request` (because
+            // `refusalFallbackHandledByCaller: true`), own the dialog + retry
+            // trigger here in query.ts.
+            if (pendingCallerFallbackRequest !== undefined) {
+              const fbReq = pendingCallerFallbackRequest
+              pendingCallerFallbackRequest = undefined
+              let choice = refusalFallbackPreferenceChoice
+              if (
+                choice === undefined &&
+                !fbReq.silentArmAtTrigger &&
+                toolUseContext.requestDialog
+              ) {
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const {
+                    getProviderRefusalFallbackGuidanceText,
+                    getSwitchModelsOnFlag,
+                    runRefusalFallbackDialogFlow,
+                  } =
+                    require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                  const flow = await runRefusalFallbackDialogFlow({
+                    decision: {
+                      isMainThread: toolUseContext.agentId === undefined,
+                      requestDialog: toolUseContext.requestDialog,
+                      silentAttempt: false,
+                      switchModelsOnFlag: getSwitchModelsOnFlag(),
+                    },
+                    requestDialog: toolUseContext.requestDialog,
+                    signal: toolUseContext.abortController.signal,
+                    payload: {
+                      originalModel: fbReq.originalModel,
+                      fallbackModel: fbReq.fallbackModel,
+                      apiRefusalCategory: fbReq.apiRefusalCategory ?? null,
+                      guidanceText: getProviderRefusalFallbackGuidanceText(
+                        getAPIProvider() === 'firstParty',
+                      ),
+                    },
+                  })
+                  choice = flow.choice
+                } catch {
+                  choice = 'retry_fallback'
+                }
+              }
+              refusalFallbackPreferenceChoice = choice
+              if (choice === undefined || choice === 'retry_fallback') {
+                throw new FallbackTriggeredError(
+                  fbReq.originalModel,
+                  fbReq.fallbackModel,
+                  'refusal',
+                )
+              }
+            }
             // densable Zue() @184980379 — Xue stash, else relay-stopped strip
             {
               const stripped =
@@ -3177,35 +3591,6 @@ async function* queryLoop(
                 )
               if (stripped) {
                 yield createAttachmentMessage(stripped)
-              }
-            }
-
-            // Yield deferred microcompact boundary message using actual API-reported
-            // token deletion count instead of client-side estimates.
-            // Entire block gated behind feature() so the excluded string
-            // is eliminated from external builds.
-            if (feature('CACHED_MICROCOMPACT') && pendingCacheEdits) {
-              const lastAssistant = assistantMessages.at(-1)
-              // The API field is cumulative/sticky across requests, so we
-              // subtract the baseline captured before this request to get the delta.
-              const usage = lastAssistant?.message.usage
-              const cumulativeDeleted = usage
-                ? ((usage as unknown as Record<string, number>)
-                    .cache_deleted_input_tokens ?? 0)
-                : 0
-              const deletedTokens = Math.max(
-                0,
-                cumulativeDeleted -
-                  pendingCacheEdits.baselineCacheDeletedTokens,
-              )
-              if (deletedTokens > 0) {
-                yield createMicrocompactBoundaryMessage(
-                  pendingCacheEdits.trigger,
-                  0,
-                  deletedTokens,
-                  pendingCacheEdits.deletedToolIds,
-                  [],
-                )
               }
             }
           } catch (innerError) {
@@ -3235,6 +3620,7 @@ async function* queryLoop(
                 toolResults.length = 0
                 toolUseBlocks.length = 0
                 needsFollowUp = false
+                backfillClones.length = 0
               } else {
                 // Fallback was triggered - switch model and retry
                 // Prefer the error's fallback model (refusal & availability paths
@@ -3349,6 +3735,7 @@ async function* queryLoop(
                 toolResults.length = 0
                 toolUseBlocks.length = 0
                 needsFollowUp = false
+                backfillClones.length = 0
 
                 // Update tool use context with new model before recreating executor
                 toolUseContext = {
@@ -3653,6 +4040,77 @@ async function* queryLoop(
         return { reason: 'model_error', error }
       }
 
+      // Official 2.1.328 (`chunk@305854618.js @281554-281850`): handle mid-turn
+      // `safety_monitor_blocked` when `needsFollowUp` is true — drain completed
+      // tools, cancel unstarted tools, synthesize `tool_result`s for unanswered
+      // tool calls, and yield the withheld safety monitor error.
+      const lastStreamedForSafety = assistantMessages.at(-1)
+      if (
+        needsFollowUp &&
+        isSafetyMonitorBlockedMessage(lastStreamedForSafety)
+      ) {
+        try {
+          for (const result of streamingToolExecutor.getCompletedResults()) {
+            if (isToolBridgeEvent(result)) {
+              yield result
+              continue
+            }
+            if (result.message) {
+              yield result.message
+              accumulateToolResultForMidTurn(
+                result.message,
+                toolResults,
+                applyPluginToolListFilter(
+                  toolUseContext.options.refreshTools?.() ??
+                    toolUseContext.options.tools,
+                ),
+                toolUseContext.options.mainLoopModel,
+              )
+            }
+          }
+        } catch (err) {
+          logError(err)
+        }
+        needsFollowUp = false
+        streamingToolExecutor.discard()
+        const answeredIds = new Set<string>()
+        for (const tr of toolResults) {
+          if (tr.type === 'user' && Array.isArray(tr.message.content)) {
+            for (const block of tr.message.content) {
+              if (block.type === 'tool_result') {
+                answeredIds.add(block.tool_use_id)
+              }
+            }
+          }
+        }
+        for (const msg of assistantMessages) {
+          if (!Array.isArray(msg.message?.content)) continue
+          for (const block of msg.message.content) {
+            if (block.type === 'tool_use' && !answeredIds.has(block.id)) {
+              const cancelledMsg = createUserMessage({
+                content: [
+                  {
+                    type: 'tool_result',
+                    content:
+                      '<tool_use_error>Cancelled: safety monitor blocked the response</tool_use_error>',
+                    is_error: true,
+                    tool_use_id: block.id,
+                  },
+                ],
+                toolUseResult: 'Cancelled: safety monitor blocked the response',
+                sourceToolAssistantUUID: msg.uuid,
+              })
+              yield cancelledMsg
+              toolResults.push(cancelledMsg)
+            }
+          }
+        }
+        if (withheldSafetyMonitorBlock === lastStreamedForSafety) {
+          yield lastStreamedForSafety
+          withheldSafetyMonitorBlock = undefined
+        }
+      }
+
       // Execute post-sampling hooks after model response is complete
       if (assistantMessages.length > 0) {
         void executePostSamplingHooks(
@@ -3666,35 +4124,23 @@ async function* queryLoop(
       }
 
       // We need to handle a streaming abort before anything else.
-      // When using streamingToolExecutor, we must consume getRemainingResults() so the
-      // executor can generate synthetic tool_result blocks for queued/in-progress tools.
-      // Without this, tool_use blocks would lack matching tool_result blocks.
+      // Official 2.1.328 (`chunk@305854618.js @282000` `zi`): ALWAYS drain
+      // `streamingToolExecutor.getRemainingResults()` on streaming abort
+      // (including `remote-cancel`) so tool_use blocks always receive matching
+      // synthetic tool_result blocks.
       if (toolUseContext.abortController.signal.aborted) {
-        // densable 2.1.236 #27: remote-cancel (print/SDK SIGTERM) skips
-        // Interrupted / REJECT synthetics on both streaming and pairing arms.
-        if (
-          !isRemoteCancelAbortReason(
-            toolUseContext.abortController.signal.reason,
-          )
-        ) {
-          if (streamingToolExecutor) {
-            // Consume remaining results - executor generates synthetic tool_results for
-            // aborted tools since it checks the abort signal in executeTool()
-            for await (const update of streamingToolExecutor.getRemainingResults()) {
-              if (isToolBridgeEvent(update)) {
-                yield update
-                continue
-              }
-              if (update.message) {
-                yield update.message
-              }
-            }
-          } else {
-            yield* yieldMissingToolResultBlocks(
-              assistantMessages,
-              'Interrupted by user',
-            )
+        for await (const update of streamingToolExecutor.getRemainingResults()) {
+          if (isToolBridgeEvent(update)) {
+            yield update
+            continue
           }
+          if (update.message) {
+            yield update.message
+          }
+        }
+        if (withheldSameModelRefusal !== undefined) {
+          yield withheldSameModelRefusal
+          withheldSameModelRefusal = undefined
         }
         // chicago MCP: auto-unhide + lock release on interrupt. Same cleanup
         // as the natural turn-end path in stopHooks.ts. Main thread only —
@@ -3727,6 +4173,152 @@ async function* queryLoop(
         }
         yield* leftoverDrainSpinnerModes()
         return { reason: 'aborted_streaming' }
+      }
+
+      // Official 2.1.328 (`chunk@305854618.js @283910-285400` `Gia`):
+      // same-model `refusal_retry` — retract refused turn, cancel unstarted
+      // tools, emit synthetic tool_results + notice + nudge once on the same
+      // model before surfacing refusal.
+      const lastStreamedForRefusal = assistantMessages.at(-1)
+      if (
+        sameModelRefusalArmed &&
+        isSameModelRefusalMessage(lastStreamedForRefusal) &&
+        lastStreamedForRefusal === withheldSameModelRefusal
+      ) {
+        for (const result of streamingToolExecutor.getCompletedResults()) {
+          if (isToolBridgeEvent(result)) {
+            yield result
+            continue
+          }
+          if (result.message) {
+            yield result.message
+            const endTurn = endTurnSourceFromToolResult(result.message)
+            if (endTurn) toolRequestedEndTurn = endTurn
+            accumulateToolResultForMidTurn(
+              result.message,
+              toolResults,
+              applyPluginToolListFilter(
+                toolUseContext.options.refreshTools?.() ??
+                  toolUseContext.options.tools,
+              ),
+              toolUseContext.options.mainLoopModel,
+            )
+          }
+        }
+        const alreadyPrevented = toolResults.some(
+          r =>
+            r.type === 'attachment' &&
+            (r.attachment.type === 'hook_deferred_tool' ||
+              r.attachment.type === 'hook_stopped_continuation'),
+        )
+        if (!alreadyPrevented && toolRequestedEndTurn === false) {
+          const startedToolUseIds = new Set<string>(
+            toolUseContext.getAppState().transcripts?.[
+              toolUseContext.agentId ?? ''
+            ]?.inProgressToolUseIDs ?? [],
+          )
+          streamingToolExecutor.discard()
+          clearActiveMcpStamps(toolUseContext.options, attributeMcpUsage)
+          const kept = assistantMessages.filter(
+            m => m !== lastStreamedForRefusal,
+          )
+          const answeredIds = new Set<string>()
+          for (const tr of toolResults) {
+            if (tr.type === 'user' && Array.isArray(tr.message.content)) {
+              for (const block of tr.message.content) {
+                if (block.type === 'tool_result') {
+                  answeredIds.add(block.tool_use_id)
+                }
+              }
+            }
+          }
+          let interruptedCount = 0
+          const notRunResults: UserMessage[] = []
+          for (const keptMsg of kept) {
+            if (!Array.isArray(keptMsg.message?.content)) continue
+            for (const block of keptMsg.message.content) {
+              if (block.type !== 'tool_use' || answeredIds.has(block.id)) {
+                continue
+              }
+              const wasStarted = startedToolUseIds.has(block.id)
+              if (wasStarted) interruptedCount++
+              const resultText = wasStarted
+                ? 'Interrupted: response stopped by safety classifier'
+                : 'Cancelled: response stopped by safety classifier before this tool ran'
+              notRunResults.push(
+                createUserMessage({
+                  content: [
+                    {
+                      type: 'tool_result',
+                      tool_use_id: block.id,
+                      is_error: true,
+                      content: resultText,
+                    },
+                  ],
+                  toolUseResult: resultText,
+                  sourceToolAssistantUUID: keptMsg.uuid,
+                }),
+              )
+            }
+          }
+          const producedNothing =
+            kept.length === 0 && (lastDeltaOutputTokens ?? 0) === 0
+          const refusalNotice = createSystemMessage(
+            `${renderModelName(currentModel)}'s safeguards stopped the response above · continuing once with that noted`,
+            'info',
+          )
+          const refusalNudge = createUserMessage({
+            content:
+              interruptedCount > 0
+                ? SAME_MODEL_REFUSAL_RETRY_INTERRUPTED_PROMPT
+                : SAME_MODEL_REFUSAL_RETRY_PROMPT,
+            isMeta: true,
+            turnCompanion: true,
+            ...(producedNothing ? { isVirtual: true } : {}),
+          })
+          for (const notRun of notRunResults) {
+            yield notRun
+          }
+          yield refusalNotice
+          yield refusalNudge
+          state = {
+            messages: [
+              ...messagesForQuery,
+              ...kept,
+              ...toolResults,
+              ...notRunResults,
+              refusalNudge,
+            ],
+            toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
+            autoCompactTracking: tracking,
+            maxOutputTokensRecoveryCount,
+            serverErrorCutRetryCount,
+            hasAttemptedReactiveCompact,
+            reactiveCompactDeeperPass,
+            resumeIncompleteThinking: undefined,
+            refusalRetrySpent: true,
+            mcpEndTurnOverrideSpent,
+            maxOutputTokensOverride: undefined,
+            pendingToolUseSummary: undefined,
+            stopHookActive,
+            stopHookBlockCount:
+              toolUseBlocks.length > 0 ? 0 : stopHookBlockCount,
+            turnCount,
+            thinkingOnlyNudged,
+            emptyCompletionResent,
+            transition: { reason: 'refusal_retry', model: currentModel },
+          }
+          yield* leftoverDrainSpinnerModes()
+          continue
+        }
+        yield lastStreamedForRefusal
+        withheldSameModelRefusal = undefined
+      } else if (
+        withheldSameModelRefusal !== undefined &&
+        lastStreamedForRefusal === withheldSameModelRefusal
+      ) {
+        yield withheldSameModelRefusal
+        withheldSameModelRefusal = undefined
       }
 
       // Yield tool use summary from previous turn — haiku (~1s) resolved during model streaming (5-30s)
@@ -3804,7 +4396,21 @@ async function* queryLoop(
           }
         }
         if ((isWithheld413 || isWithheldMedia) && reactiveCompact) {
-          const reactiveBreaker = checkRapidRefillBreaker(tracking)
+          // Official 2.1.328 (`chunk@305854618.js @286740, @290500`):
+          // two-pass `reactiveCompactDeeperPass` (`'none' -> 'available' -> 'spent'`).
+          const isDeeperPass =
+            isWithheld413 &&
+            hasAttemptedReactiveCompact &&
+            reactiveCompactDeeperPass === 'available' &&
+            state.transition?.reason === 'reactive_compact_retry'
+          const effectiveHasAttempted =
+            hasAttemptedReactiveCompact && !isDeeperPass
+          const reactiveBreaker = isDeeperPass
+            ? {
+                action: 'proceed' as const,
+                consecutiveRapidRefills: tracking?.consecutiveRapidRefills ?? 0,
+              }
+            : checkRapidRefillBreaker(tracking)
           if (
             !hasAttemptedReactiveCompact &&
             reactiveBreaker.action === 'trip'
@@ -3848,7 +4454,7 @@ async function* queryLoop(
             : undefined
           const runReactiveCompact = () =>
             reactiveCompact.tryReactiveCompact({
-              hasAttempted: hasAttemptedReactiveCompact,
+              hasAttempted: effectiveHasAttempted,
               querySource,
               aborted: ptlRecoveryAbort.controller.signal.aborted,
               messages: messagesForQuery,
@@ -3943,6 +4549,21 @@ async function* queryLoop(
             for (const msg of postCompactMessages) {
               yield msg
             }
+            // Official 2.1.328 (`chunk@305854618.js @290500`): arm a second
+            // deeper reactive compact pass when post-compact still retains
+            // enough message turns (`>= 3`) or content replacements.
+            const postCompactGroups = postCompactMessages.filter(
+              m => m.type === 'user' || m.type === 'assistant',
+            ).length
+            const nextDeeperPass: 'none' | 'available' | 'spent' = isDeeperPass
+              ? 'spent'
+              : isWithheld413 &&
+                  reactiveCompactDeeperPass === 'none' &&
+                  (postCompactGroups >= 3 ||
+                    (toolUseContext.contentReplacementState?.replacements
+                      ?.size ?? 0) > 0)
+                ? 'available'
+                : reactiveCompactDeeperPass
             const next: State = {
               messages: postCompactMessages,
               toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
@@ -3955,7 +4576,12 @@ async function* queryLoop(
                   reactiveBreaker.consecutiveRapidRefills,
               },
               maxOutputTokensRecoveryCount,
+              serverErrorCutRetryCount,
               hasAttemptedReactiveCompact: true,
+              reactiveCompactDeeperPass: nextDeeperPass,
+              resumeIncompleteThinking,
+              refusalRetrySpent,
+              mcpEndTurnOverrideSpent,
               maxOutputTokensOverride: undefined,
               pendingToolUseSummary: undefined,
               stopHookActive: undefined,
@@ -4039,10 +4665,17 @@ async function* queryLoop(
           return { reason: 'prompt_too_long' }
         }
 
-        // Check for max_output_tokens and inject recovery message. The error
-        // was withheld from the stream above; only surface it if recovery
-        // exhausts.
-        if (isWithheldMaxOutputTokens(lastMessage)) {
+        // Official 2.1.328 (`chunk@305854618.js @166019-169745` `Ym`):
+        // Check for max_output_tokens (or refused incomplete-thinking resume)
+        // and either resume incomplete thinking without a text nudge, or inject
+        // the official recovery nudge (`tool_call_cut` / `reopen_block` / default).
+        const thinkingResumeRefused =
+          resumeIncompleteThinking === true &&
+          lastMessage?.isApiErrorMessage === true &&
+          !isWithheldMaxOutputTokens(lastMessage) &&
+          !isWithheld413 &&
+          !isWithheldMedia
+        if (isWithheldMaxOutputTokens(lastMessage) || thinkingResumeRefused) {
           // Escalating retry: if we used the capped 8k default and hit the
           // limit, retry the SAME request at 64k — no meta message, no
           // multi-turn dance. This fires once per turn (guarded by the
@@ -4065,6 +4698,7 @@ async function* queryLoop(
             // keep raw env fallback
           }
           if (
+            !thinkingResumeRefused &&
             capEnabled &&
             maxOutputTokensOverride === undefined &&
             !hasMaxOutputTokensEnv
@@ -4077,7 +4711,11 @@ async function* queryLoop(
               toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
               autoCompactTracking: tracking,
               maxOutputTokensRecoveryCount,
+              serverErrorCutRetryCount,
               hasAttemptedReactiveCompact,
+              reactiveCompactDeeperPass,
+              refusalRetrySpent,
+              mcpEndTurnOverrideSpent,
               maxOutputTokensOverride: ESCALATED_MAX_TOKENS,
               pendingToolUseSummary: undefined,
               stopHookActive: undefined,
@@ -4092,33 +4730,59 @@ async function* queryLoop(
             continue
           }
 
-          if (maxOutputTokensRecoveryCount < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
+          const nextCount = thinkingResumeRefused
+            ? maxOutputTokensRecoveryCount
+            : maxOutputTokensRecoveryCount + 1
+          if (nextCount <= MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
+            const shouldResumeThinking =
+              !thinkingResumeRefused &&
+              canResumeIncompleteThinking(assistantMessages)
             const isSubagentQuery =
               toolUseContext.agentId !== undefined ||
               querySourceFamilyOf(querySource) === 'subagent'
-            const nextCount = maxOutputTokensRecoveryCount + 1
-            const recoveryMessage = createUserMessage({
-              content: getMaxOutputTokensRecoveryPrompt(
-                isSubagentQuery,
-                nextCount,
-              ),
-              isMeta: true,
-              turnCompanion: true,
-            })
+            const recoveryMessage = shouldResumeThinking
+              ? undefined
+              : createUserMessage({
+                  content: selectMaxOutputTokensRecoveryPrompt(
+                    assistantMessages,
+                    isSubagentQuery,
+                    nextCount,
+                  ),
+                  isMeta: true,
+                  turnCompanion: true,
+                })
             // Official 2.1.328 (`chunk@305854618.js @292000`): yield recovery
-            // nudge so REPL / QueryEngine / JSONL transcript stay in sync.
-            yield recoveryMessage
+            // nudge when present (omitted when resuming incomplete thinking).
+            if (recoveryMessage !== undefined) {
+              yield recoveryMessage
+            }
 
             const next: State = {
-              messages: [
-                ...messagesForQuery,
-                ...assistantMessages,
-                recoveryMessage,
-              ],
+              transition: {
+                reason: 'max_output_tokens_recovery',
+                attempt: nextCount,
+              },
+              messages:
+                recoveryMessage === undefined
+                  ? [
+                      ...messagesForQuery,
+                      ...assistantMessages.filter(m => !m.isApiErrorMessage),
+                    ]
+                  : [
+                      ...messagesForQuery,
+                      ...assistantMessages,
+                      recoveryMessage,
+                    ],
               toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
               autoCompactTracking: tracking,
               maxOutputTokensRecoveryCount: nextCount,
+              serverErrorCutRetryCount,
               hasAttemptedReactiveCompact,
+              reactiveCompactDeeperPass,
+              resumeIncompleteThinking:
+                recoveryMessage === undefined ? true : undefined,
+              refusalRetrySpent,
+              mcpEndTurnOverrideSpent,
               maxOutputTokensOverride: undefined,
               pendingToolUseSummary: undefined,
               stopHookActive: undefined,
@@ -4126,10 +4790,6 @@ async function* queryLoop(
               turnCount,
               thinkingOnlyNudged,
               emptyCompletionResent,
-              transition: {
-                reason: 'max_output_tokens_recovery',
-                attempt: nextCount,
-              },
             }
             state = next
             yield* leftoverDrainSpinnerModes()
@@ -4137,11 +4797,15 @@ async function* queryLoop(
           }
 
           // Recovery exhausted — surface the withheld error now.
-          yield lastMessage
+          if (lastMessage) {
+            yield lastMessage
+          }
         }
 
-        // densable GJn @214370857 / lQn @214417526 — after qJn, before
-        // malformed_tool_use. Shares WJn=3 with max_output_tokens_recovery.
+        // Official 2.1.328 `tp()` (`chunk@305854618.js @169500, @292450`):
+        // truncated response recovery — when `streamCutError` is set and
+        // `tengu_dreamy_flute` is enabled, use `serverErrorCutRetryCount` with
+        // exponential backoff wait; otherwise share `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT`.
         if (
           isTruncatedAfterOutputRecovery(
             lastMessage,
@@ -4149,11 +4813,37 @@ async function* queryLoop(
             querySource,
           )
         ) {
-          if (maxOutputTokensRecoveryCount < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
+          const streamCutErr = (
+            lastMessage as AssistantMessage & { streamCutError?: unknown }
+          ).streamCutError
+          const useServerCutWait =
+            streamCutErr !== undefined &&
+            getFeatureValue_CACHED_MAY_BE_STALE('tengu_dreamy_flute', false)
+          const cutPlan = useServerCutWait
+            ? serverErrorCutRetryCount + 1 <= MAX_SERVER_ERROR_CUT_RETRIES
+              ? {
+                  attempt: serverErrorCutRetryCount + 1,
+                  nextServerErrorCutRetryCount: serverErrorCutRetryCount + 1,
+                  nextMaxOutputTokensRecoveryCount:
+                    maxOutputTokensRecoveryCount,
+                  waitMs: getRetryDelay(serverErrorCutRetryCount + 1),
+                }
+              : undefined
+            : maxOutputTokensRecoveryCount < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT
+              ? {
+                  attempt: maxOutputTokensRecoveryCount + 1,
+                  nextServerErrorCutRetryCount: serverErrorCutRetryCount,
+                  nextMaxOutputTokensRecoveryCount:
+                    maxOutputTokensRecoveryCount + 1,
+                  waitMs: undefined,
+                }
+              : undefined
+
+          if (cutPlan !== undefined) {
             logEvent('query_truncated_response_recovery', {
               status:
                 'nudged' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              attempt: maxOutputTokensRecoveryCount + 1,
+              attempt: cutPlan.attempt,
             })
             const recoveryMessage = createUserMessage({
               content: truncatedRecoveryCopy(querySource),
@@ -4163,7 +4853,24 @@ async function* queryLoop(
             // Official 2.1.328 (`chunk@305854618.js @292450`): yield recovery
             // nudge so REPL / QueryEngine / JSONL transcript stay in sync.
             yield recoveryMessage
+            if (cutPlan.waitMs !== undefined) {
+              yield buildCutRetryWaitMessage(
+                streamCutErr,
+                cutPlan.waitMs,
+                cutPlan.attempt,
+                deps.uuid,
+              )
+              await sleep(cutPlan.waitMs, toolUseContext.abortController.signal)
+              if (toolUseContext.abortController.signal.aborted) {
+                yield* leftoverDrainSpinnerModes()
+                return { reason: 'aborted_streaming' }
+              }
+            }
             const next: State = {
+              transition: {
+                reason: 'truncated_response_recovery',
+                attempt: cutPlan.attempt,
+              },
               messages: [
                 ...messagesForQuery,
                 ...assistantMessages,
@@ -4171,8 +4878,13 @@ async function* queryLoop(
               ],
               toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
               autoCompactTracking: tracking,
-              maxOutputTokensRecoveryCount: maxOutputTokensRecoveryCount + 1,
+              maxOutputTokensRecoveryCount:
+                cutPlan.nextMaxOutputTokensRecoveryCount,
+              serverErrorCutRetryCount: cutPlan.nextServerErrorCutRetryCount,
               hasAttemptedReactiveCompact,
+              reactiveCompactDeeperPass,
+              refusalRetrySpent,
+              mcpEndTurnOverrideSpent,
               maxOutputTokensOverride: undefined,
               pendingToolUseSummary: undefined,
               stopHookActive: undefined,
@@ -4180,10 +4892,6 @@ async function* queryLoop(
               turnCount,
               thinkingOnlyNudged,
               emptyCompletionResent,
-              transition: {
-                reason: 'truncated_response_recovery',
-                attempt: maxOutputTokensRecoveryCount + 1,
-              },
             }
             state = next
             yield* leftoverDrainSpinnerModes()
@@ -4584,7 +5292,14 @@ async function* queryLoop(
             pendingToolUseSummary: undefined,
             stopHookActive: true,
             stopHookBlockCount: nextBlockCount,
-            turnCount,
+            // Official 2.1.328 (`chunk@305854618.js @297075`): advance `turnCount`
+            // on `stop_hook_blocking` retry so repeated blocks hit `maxTurns`.
+            turnCount: nextTurnCountOnBlock,
+            reactiveCompactDeeperPass: 'none',
+            serverErrorCutRetryCount: 0,
+            resumeIncompleteThinking: undefined,
+            refusalRetrySpent,
+            mcpEndTurnOverrideSpent,
             thinkingOnlyNudged,
             emptyCompletionResent,
             transition: { reason: 'stop_hook_blocking' },
@@ -4683,23 +5398,13 @@ async function* queryLoop(
 
       queryCheckpoint('query_tool_execution_start')
 
-      if (streamingToolExecutor) {
-        logEvent('tengu_streaming_tool_execution_used', {
-          tool_count: toolUseBlocks.length,
-          queryChainId: queryChainIdForAnalytics,
-          queryDepth: queryTracking.depth,
-        })
-      } else {
-        logEvent('tengu_streaming_tool_execution_not_used', {
-          tool_count: toolUseBlocks.length,
-          queryChainId: queryChainIdForAnalytics,
-          queryDepth: queryTracking.depth,
-        })
-      }
+      logEvent('tengu_streaming_tool_execution_used', {
+        tool_count: toolUseBlocks.length,
+        queryChainId: queryChainIdForAnalytics,
+        queryDepth: queryTracking.depth,
+      })
 
-      const toolUpdates = streamingToolExecutor
-        ? streamingToolExecutor.getRemainingResults()
-        : runTools(toolUseBlocks, assistantMessages, canUseTool, toolUseContext)
+      const toolUpdates = streamingToolExecutor.getRemainingResults()
 
       for await (const update of toolUpdates) {
         // densable jR: yield control events (set_expanded_view) onto the query
@@ -4891,87 +5596,188 @@ async function* queryLoop(
         yield* leftoverDrainSpinnerModes()
         return { reason: 'hook_stopped' }
       }
-      // densable 2.1.283 Ud @ 190790198 — StructuredOutput / MCP claude/endTurn
-      // completes without a recursive query turn (max_turns=1 one-shot).
+      // Official 2.1.328 (`chunk@305854618.js @109475, @158337, @301785` `Bm`/`Xc`/`Jc`):
+      // StructuredOutput (`tool`) always ends the turn immediately. For MCP `endTurn`
+      // (`mcp_meta`), a failed sibling tool (`tengu_cozy_fern`) or a blocking Stop hook
+      // (`tengu_glittery_mitten`) may override `endTurn` at most once per turn
+      // (`mcpEndTurnOverrideSpent`).
+      let mcpEndTurnOverrideMessage: UserMessage | undefined
       if (toolRequestedEndTurn) {
-        logEvent('tengu_mcp_tool_result_ended_turn', {
-          queryChainId: queryChainIdForAnalytics,
-          queryDepth: queryTracking.depth,
-          source:
-            toolRequestedEndTurn as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        // densable ip @195421735 — Acn; blocking discarded (no model re-invoke).
-        try {
-          const permissionMode =
-            updatedToolUseContext.getAppState().toolPermissionContext.mode
-          for await (const result of executePostToolBatchHooks(
-            collectPostToolBatchCalls(toolUseBlocks, toolResults),
-            `hook-${deps.uuid()}`,
-            updatedToolUseContext,
-            permissionMode,
-            updatedToolUseContext.abortController.signal,
-          )) {
-            if (result.message) yield result.message
-            if (result.blockingError || result.preventContinuation) {
-              logForDebugging(
-                `[end-turn] PostToolBatch block discarded (turn ended by ${
-                  toolRequestedEndTurn === 'tool'
-                    ? 'tool result'
-                    : 'MCP end-turn'
-                }, no model re-invoke): ${
-                  result.blockingError?.blockingError ??
-                  result.stopReason ??
-                  'preventContinuation'
-                }`,
-              )
-            }
-          }
-        } catch (err) {
-          if (!(err instanceof ControlStreamClosedError)) throw err
-          logForDebugging(
-            'PostToolBatch hooks cancelled (control stream closed)',
+        const isLastIterationForEndTurn = Boolean(
+          maxTurns && turnCount + 1 > maxTurns,
+        )
+        const hasFailedSiblingToolResult =
+          toolRequestedEndTurn === 'mcp_meta' &&
+          toolResults.some(
+            r =>
+              r.type === 'user' &&
+              Array.isArray(r.message.content) &&
+              r.message.content.some(
+                b => b.type === 'tool_result' && b.is_error === true,
+              ),
           )
-        }
-        if (updatedToolUseContext.abortController.signal.aborted) {
-          if (feature('CHICAGO_MCP') && !updatedToolUseContext.agentId) {
-            try {
-              const { cleanupComputerUseAfterTurn } = await import(
-                './utils/computerUse/cleanup.js'
-              )
-              await cleanupComputerUseAfterTurn(updatedToolUseContext)
-            } catch {
-              // Failures are silent — this is dogfooding cleanup, not critical path
+        if (
+          toolRequestedEndTurn === 'mcp_meta' &&
+          !mcpEndTurnOverrideSpent &&
+          !isLastIterationForEndTurn &&
+          hasFailedSiblingToolResult &&
+          getFeatureValue_CACHED_MAY_BE_STALE('tengu_cozy_fern', false)
+        ) {
+          mcpEndTurnOverrideMessage = createUserMessage({
+            content: MCP_END_TURN_FAILED_SIBLING_OVERRIDE_PROMPT,
+            isMeta: true,
+            turnCompanion: true,
+          })
+          logEvent('tengu_mcp_end_turn_overridden_by_failed_sibling', {
+            queryChainId: queryChainIdForAnalytics,
+            queryDepth: queryTracking.depth,
+          })
+        } else if (
+          toolRequestedEndTurn === 'mcp_meta' &&
+          !mcpEndTurnOverrideSpent &&
+          !isLastIterationForEndTurn &&
+          getFeatureValue_CACHED_MAY_BE_STALE('tengu_glittery_mitten', true)
+        ) {
+          const mcpStopResult = yield* handleStopHooks(
+            messagesForQuery,
+            assistantMessages,
+            systemPrompt,
+            userContext,
+            systemContext,
+            updatedToolUseContext,
+            querySource,
+            stopHookActive,
+          )
+          if (mcpStopResult.preventContinuation) {
+            yield* leftoverDrainSpinnerModes()
+            return {
+              reason: mcpStopResult.aborted
+                ? 'aborted_tools'
+                : 'stop_hook_prevented',
             }
           }
-          if (
-            !shouldSuppressInterruptionMessage(
-              updatedToolUseContext.abortController.signal.reason,
+          if (mcpStopResult.blockingErrors.length > 0) {
+            logEvent('tengu_mcp_end_turn_overridden_by_stop_hook', {
+              queryChainId: queryChainIdForAnalytics,
+              queryDepth: queryTracking.depth,
+            })
+            const nextTurnCountOnMcpStop = turnCount + 1
+            state = {
+              messages: [
+                ...messagesForQuery,
+                ...assistantMessages,
+                ...toolResults,
+                ...mcpStopResult.blockingErrors,
+              ],
+              toolUseContext: leftoverUnwrapStreamMode(updatedToolUseContext),
+              autoCompactTracking: tracking,
+              maxOutputTokensRecoveryCount: 0,
+              serverErrorCutRetryCount: 0,
+              hasAttemptedReactiveCompact,
+              reactiveCompactDeeperPass: 'none',
+              resumeIncompleteThinking: undefined,
+              refusalRetrySpent,
+              mcpEndTurnOverrideSpent: true,
+              maxOutputTokensOverride: undefined,
+              pendingToolUseSummary: nextPendingToolUseSummary,
+              stopHookActive: true,
+              stopHookBlockCount: stopHookBlockCount + 1,
+              turnCount: nextTurnCountOnMcpStop,
+              thinkingOnlyNudged: false,
+              emptyCompletionResent: false,
+              transition: { reason: 'stop_hook_blocking' },
+            }
+            yield* leftoverDrainSpinnerModes()
+            continue
+          }
+          logEvent('tengu_mcp_tool_result_ended_turn', {
+            queryChainId: queryChainIdForAnalytics,
+            queryDepth: queryTracking.depth,
+            source:
+              toolRequestedEndTurn as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          yield* leftoverDrainSpinnerModes()
+          return { reason: 'completed' }
+        } else {
+          logEvent('tengu_mcp_tool_result_ended_turn', {
+            queryChainId: queryChainIdForAnalytics,
+            queryDepth: queryTracking.depth,
+            source:
+              toolRequestedEndTurn as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          // densable ip @195421735 — Acn; blocking discarded (no model re-invoke).
+          try {
+            const permissionMode =
+              updatedToolUseContext.getAppState().toolPermissionContext.mode
+            for await (const result of executePostToolBatchHooks(
+              collectPostToolBatchCalls(toolUseBlocks, toolResults),
+              `hook-${deps.uuid()}`,
+              updatedToolUseContext,
+              permissionMode,
+              updatedToolUseContext.abortController.signal,
+            )) {
+              if (result.message) yield result.message
+              if (result.blockingError || result.preventContinuation) {
+                logForDebugging(
+                  `[end-turn] PostToolBatch block discarded (turn ended by ${
+                    toolRequestedEndTurn === 'tool'
+                      ? 'tool result'
+                      : 'MCP end-turn'
+                  }, no model re-invoke): ${
+                    result.blockingError?.blockingError ??
+                    result.stopReason ??
+                    'preventContinuation'
+                  }`,
+                )
+              }
+            }
+          } catch (err) {
+            if (!(err instanceof ControlStreamClosedError)) throw err
+            logForDebugging(
+              'PostToolBatch hooks cancelled (control stream closed)',
             )
-          ) {
-            yield createUserInterruptionMessage({
-              toolUse: false,
-              interruptedByShutdown: isShutdownAbortReason(
+          }
+          if (updatedToolUseContext.abortController.signal.aborted) {
+            if (feature('CHICAGO_MCP') && !updatedToolUseContext.agentId) {
+              try {
+                const { cleanupComputerUseAfterTurn } = await import(
+                  './utils/computerUse/cleanup.js'
+                )
+                await cleanupComputerUseAfterTurn(updatedToolUseContext)
+              } catch {
+                // Failures are silent — this is dogfooding cleanup, not critical path
+              }
+            }
+            if (
+              !shouldSuppressInterruptionMessage(
                 updatedToolUseContext.abortController.signal.reason,
               )
-                ? true
-                : undefined,
-            })
+            ) {
+              yield createUserInterruptionMessage({
+                toolUse: false,
+                interruptedByShutdown: isShutdownAbortReason(
+                  updatedToolUseContext.abortController.signal.reason,
+                )
+                  ? true
+                  : undefined,
+              })
+            }
           }
+          // densable ip: Stop via gs (endTurnSource); no handback bounce.
+          yield* handleStopHooks(
+            messagesForQuery,
+            assistantMessages,
+            systemPrompt,
+            userContext,
+            systemContext,
+            updatedToolUseContext,
+            querySource,
+            stopHookActive,
+            toolRequestedEndTurn,
+          )
+          yield* leftoverDrainSpinnerModes()
+          return { reason: 'completed' }
         }
-        // densable ip: Stop via gs (endTurnSource); no handback bounce.
-        yield* handleStopHooks(
-          messagesForQuery,
-          assistantMessages,
-          systemPrompt,
-          userContext,
-          systemContext,
-          updatedToolUseContext,
-          querySource,
-          stopHookActive,
-          toolRequestedEndTurn,
-        )
-        yield* leftoverDrainSpinnerModes()
-        return { reason: 'completed' }
       }
 
       if (tracking?.compacted) {
@@ -5099,16 +5905,12 @@ async function* queryLoop(
               toolUseID: hookId,
               hookEvent: 'PostToolBatch',
             })
-            // densable command Stop / goal / TeammateIdle still run; ignore
-            // the return so the turn stays hook_stopped (no model re-invoke).
-            yield* handleStopHooks(
+            // Official 2.1.328 (`chunk@305854618.js @302350` `wo`): on
+            // PostToolBatch stop, run turn-end reactions (`stopPass: 'turn_end_reactions'`)
+            // rather than full `handleStopHooks`.
+            yield* runTurnEndReactions(
               messagesForQuery.concat(assistantMessages, toolResults),
-              [],
-              systemPrompt,
-              userContext,
-              systemContext,
               updatedToolUseContext,
-              querySource,
               stopHookActive,
             )
             yield* leftoverDrainSpinnerModes()
@@ -5183,25 +5985,47 @@ async function* queryLoop(
       const { keepQueuedCommandsUntilFirstDroppedPrompt, latchPromptScreen } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('./utils/processUserInput/promptSubmit.js') as typeof import('./utils/processUserInput/promptSubmit.js')
-      const queuedCommandsSnapshot = isMidTurnFoldSuspended()
-        ? []
-        : getCommandsByMaxPriority(sleepRan ? 'later' : 'next')
-            .filter(cmd => {
-              if (isSlashCommand(cmd)) return false
-              if (isMainThread) return isMainThreadQueuedCommand(cmd)
-              // Subagents drain task-notifications and poll-events addressed to them —
-              // never user prompts, even if someone stamps an agentId on one.
-              return (
-                (cmd.mode === 'task-notification' ||
-                  cmd.mode === 'poll-event') &&
-                cmd.agentId === currentAgentId
+      // Official 2.1.328 (`chunk@305854618.js @304050`): check `maxTurns`
+      // BEFORE snapshotting or consuming mid-turn queued commands so queued
+      // user prompts and notifications are NOT silently popped and lost when
+      // the turn exits on `max_turns`.
+      const nextTurnCount = turnCount + 1
+      const maxTurnsReached = Boolean(maxTurns && nextTurnCount > maxTurns)
+      const rawQueuedSnapshot =
+        isMidTurnFoldSuspended() || maxTurnsReached
+          ? []
+          : getCommandsByMaxPriority(sleepRan ? 'later' : 'next')
+              .filter(cmd => {
+                if (cmd.waitsOutStop === true || cmd.passive === true) {
+                  return false
+                }
+                if (isSlashCommand(cmd)) return false
+                if (isMainThread) return isMainThreadQueuedCommand(cmd)
+                // Subagents drain task-notifications and poll-events addressed to them —
+                // never user prompts, even if someone stamps an agentId on one.
+                return (
+                  (cmd.mode === 'task-notification' ||
+                    cmd.mode === 'poll-event') &&
+                  cmd.agentId === currentAgentId
+                )
+              })
+              .filter(
+                keepQueuedCommandsUntilFirstDroppedPrompt(
+                  latchPromptScreen(() => updatedToolUseContext, {
+                    latch: true,
+                  }),
+                ),
               )
-            })
-            .filter(
-              keepQueuedCommandsUntilFirstDroppedPrompt(
-                latchPromptScreen(() => updatedToolUseContext, { latch: true }),
-              ),
-            )
+      // Official 2.1.328 `wSr` (`chunk@294254613.js:756964`): enforce the
+      // 20-event / 32KB chunk cap on mid-turn poll-events too.
+      const cappedPollSet = new Set(
+        selectPollEventChunk(
+          rawQueuedSnapshot.filter(cmd => cmd.mode === 'poll-event'),
+        ),
+      )
+      const queuedCommandsSnapshot = rawQueuedSnapshot.filter(
+        cmd => cmd.mode !== 'poll-event' || cappedPollSet.has(cmd),
+      )
       const queuedAutonomyClaim = await claimConsumableQueuedAutonomyCommands(
         queuedCommandsSnapshot,
       )
@@ -5322,7 +6146,9 @@ async function* queryLoop(
             )
           } else {
             consumedAutonomyCommands.push(...claimedConsumedCommands)
-            consumeFromQueue(claimedConsumedCommands)
+            consumeFromQueue(claimedConsumedCommands, {
+              reason: 'absorbed_mid_turn',
+            })
             const reminder = applyAbsorbedMidTurnEffects(
               claimedConsumedCommands,
             )
@@ -5331,7 +6157,7 @@ async function* queryLoop(
               toolResults.push(reminder)
             }
             for (const cmd of claimedConsumedCommands) {
-              if (cmd.uuid) {
+              if (cmd.uuid && !wasPutBack(cmd.uuid)) {
                 consumedCommandUuids.push(cmd.uuid)
                 notifyCommandLifecycle(cmd.uuid, 'started')
               }
@@ -5340,6 +6166,8 @@ async function* queryLoop(
         }
 
         let pollEventsBuildAborted = false
+        let queuedAttachmentCount = 0
+        let pollEventsAttachmentCount = 0
         try {
           for await (const attachment of getAttachmentMessages(
             null,
@@ -5351,6 +6179,11 @@ async function* queryLoop(
           )) {
             yield attachment
             toolResults.push(attachment)
+            if (attachment.attachment.type === 'queued_command') {
+              queuedAttachmentCount++
+            } else if (attachment.attachment.type === 'poll_events') {
+              pollEventsAttachmentCount++
+            }
           }
         } catch (err) {
           if (isAbortError(err)) {
@@ -5365,18 +6198,35 @@ async function* queryLoop(
         }
 
         // Remove only commands that were actually consumed as attachments.
-        // Official 2.1.328 (`chunk@305854618.js @306200`): check abort or
-        // suspension BEFORE consuming from queue, and run attribution / OTel /
-        // historyEntry flush / idle check-in clear / ultrathink boost across
-        // ALL absorbed mid-turn commands (including normal human prompts).
+        // Official 2.1.328 (`chunk@305854618.js @305650-306200`):
+        // - If queued_command attachment building degraded to 0 for non-poll
+        //   queued commands, leave them queued instead of silently dropping them.
+        // - Only consume poll-events when poll_events attachment was emitted.
+        // - Check abort/suspension BEFORE consuming from queue, and pass
+        //   `{ reason: 'absorbed_mid_turn' }` to arm `requeueWindow`.
         const claimedCommandSet = new Set(claimedConsumedCommands)
-        const consumedCommands = queuedAutonomyClaim.attachmentCommands.filter(
+        const nonPollToConsume = queuedAutonomyClaim.attachmentCommands.filter(
           cmd =>
-            (cmd.mode === 'prompt' ||
-              cmd.mode === 'task-notification' ||
-              (cmd.mode === 'poll-event' && !pollEventsBuildAborted)) &&
+            (cmd.mode === 'prompt' || cmd.mode === 'task-notification') &&
             !claimedCommandSet.has(cmd),
         )
+        const pollToConsume = queuedAutonomyClaim.attachmentCommands.filter(
+          cmd => cmd.mode === 'poll-event' && !claimedCommandSet.has(cmd),
+        )
+        const degradedNonPoll =
+          nonPollToConsume.length > 0 && queuedAttachmentCount === 0
+        if (degradedNonPoll) {
+          logForDebugging(
+            `[query] queued_command attachments degraded to 0 for ${nonPollToConsume.length} consumed command(s) — leaving them queued instead of dropping them`,
+            { level: 'warn' },
+          )
+        }
+        const consumedCommands = [
+          ...(degradedNonPoll ? [] : nonPollToConsume),
+          ...(!pollEventsBuildAborted && pollEventsAttachmentCount > 0
+            ? pollToConsume
+            : []),
+        ]
         if (consumedCommands.length > 0) {
           if (
             updatedToolUseContext.abortController.signal.aborted ||
@@ -5386,14 +6236,16 @@ async function* queryLoop(
               `[query] abort/suspension during mid-turn absorption — leaving ${consumedCommands.length} command(s) queued`,
             )
           } else {
-            consumeFromQueue(consumedCommands)
+            consumeFromQueue(consumedCommands, {
+              reason: 'absorbed_mid_turn',
+            })
             const reminder = applyAbsorbedMidTurnEffects(consumedCommands)
             if (reminder) {
               yield reminder
               toolResults.push(reminder)
             }
             for (const cmd of consumedCommands) {
-              if (cmd.uuid) {
+              if (cmd.uuid && !wasPutBack(cmd.uuid)) {
                 consumedCommandUuids.push(cmd.uuid)
                 notifyCommandLifecycle(cmd.uuid, 'started')
               }
@@ -5475,9 +6327,6 @@ async function* queryLoop(
         queryTracking,
       }
 
-      // Each time we have tool results and are about to recurse, that's a turn
-      const nextTurnCount = turnCount + 1
-
       // Periodic task summary for `claude ps` — fires mid-turn so a
       // long-running agent still refreshes what it's working on. Gated
       // only on !agentId so every top-level conversation (REPL, SDK, HFI,
@@ -5516,6 +6365,11 @@ async function* queryLoop(
         return { reason: 'max_turns', turnCount: nextTurnCount }
       }
 
+      if (mcpEndTurnOverrideMessage) {
+        yield mcpEndTurnOverrideMessage
+        toolResults.push(mcpEndTurnOverrideMessage)
+      }
+
       queryCheckpoint('query_recursive_call')
       const next: State = {
         messages: messagesForQuery.concat(assistantMessages, toolResults),
@@ -5525,13 +6379,26 @@ async function* queryLoop(
         autoCompactTracking: tracking,
         turnCount: nextTurnCount,
         maxOutputTokensRecoveryCount: 0,
+        serverErrorCutRetryCount: 0,
         hasAttemptedReactiveCompact: false,
+        reactiveCompactDeeperPass: 'none',
+        resumeIncompleteThinking: undefined,
+        refusalRetrySpent,
+        mcpEndTurnOverrideSpent:
+          mcpEndTurnOverrideSpent || mcpEndTurnOverrideMessage !== undefined,
         pendingToolUseSummary: nextPendingToolUseSummary,
         maxOutputTokensOverride: undefined,
         stopHookActive,
-        stopHookBlockCount: 0,
-        thinkingOnlyNudged,
+        // Official 2.1.328 (`chunk@305854618.js @207056, @308470`): preserve
+        // `stopHookBlockCount` when all tool calls in this turn were goal tools.
+        stopHookBlockCount: isGoalToolsOnly(toolUseBlocks)
+          ? stopHookBlockCount
+          : 0,
+        // Official 2.1.328 (`chunk@305854618.js @206945, @308470` `gl`):
+        // reset `thinkingOnlyNudged` and `malformedToolUseRetryCount` on every `next_turn`.
+        thinkingOnlyNudged: false,
         emptyCompletionResent: false,
+        malformedToolUseRetryCount: 0,
         transition: { reason: 'next_turn' },
       }
       yield* leftoverDrainSpinnerModes()

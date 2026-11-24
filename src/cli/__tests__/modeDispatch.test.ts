@@ -8,7 +8,6 @@ describe('determineMainLaunchMode', () => {
       determineMainLaunchMode({
         isNonInteractiveSession: true,
         continueRequested: true,
-        hasPendingDirectConnect: true,
         hasPendingSsh: true,
         hasPendingAssistantChat: true,
         hasResumeLikeRequest: true,
@@ -21,7 +20,6 @@ describe('determineMainLaunchMode', () => {
       determineMainLaunchMode({
         isNonInteractiveSession: false,
         continueRequested: true,
-        hasPendingDirectConnect: true,
         hasPendingSsh: true,
         hasPendingAssistantChat: true,
         hasResumeLikeRequest: true,
@@ -29,17 +27,16 @@ describe('determineMainLaunchMode', () => {
     ).toBe('continue')
   })
 
-  test('direct-connect wins when it is the highest-priority interactive branch', () => {
+  test('ssh-remote wins when it is the highest-priority interactive branch', () => {
     expect(
       determineMainLaunchMode({
         isNonInteractiveSession: false,
         continueRequested: false,
-        hasPendingDirectConnect: true,
         hasPendingSsh: true,
         hasPendingAssistantChat: true,
         hasResumeLikeRequest: true,
       }),
-    ).toBe('direct-connect')
+    ).toBe('ssh-remote')
   })
 
   test('falls back to interactive when no specialized mode matches', () => {
@@ -47,7 +44,6 @@ describe('determineMainLaunchMode', () => {
       determineMainLaunchMode({
         isNonInteractiveSession: false,
         continueRequested: false,
-        hasPendingDirectConnect: false,
         hasPendingSsh: false,
         hasPendingAssistantChat: false,
         hasResumeLikeRequest: false,

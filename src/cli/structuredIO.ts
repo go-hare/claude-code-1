@@ -29,6 +29,7 @@ import {
   type UserDialogResponse,
 } from 'src/utils/userDialog.js'
 import type {
+  SDKControlCancelRequest,
   SDKControlRequest,
   SDKControlResponse,
   StdinMessage,
@@ -335,7 +336,9 @@ export function getCurrentStructuredIO(): StructuredIO | undefined {
 }
 
 export class StructuredIO {
-  readonly structuredInput: AsyncGenerator<StdinMessage | SDKMessage>
+  readonly structuredInput: AsyncGenerator<
+    StdinMessage | SDKControlCancelRequest | SDKMessage
+  >
   private readonly pendingRequests = new Map<string, PendingRequest<unknown>>()
   /** Official 2.1.328 (#673): tools with pending `can_use_tool` parks when input closed. */
   private readonly streamClosedPendingPermissionTools = new Set<string>()
@@ -727,7 +730,7 @@ export class StructuredIO {
 
   private async processLine(
     line: string,
-  ): Promise<StdinMessage | SDKMessage | undefined> {
+  ): Promise<StdinMessage | SDKControlCancelRequest | SDKMessage | undefined> {
     // Skip empty lines (e.g. from double newlines in piped stdin)
     if (!line) {
       return undefined
@@ -735,6 +738,7 @@ export class StructuredIO {
     try {
       const message = normalizeControlMessageKeys(jsonParse(line)) as
         | StdinMessage
+        | SDKControlCancelRequest
         | SDKMessage
       if (message.type === 'keep_alive') {
         // Silently ignore keep-alive messages
@@ -880,6 +884,7 @@ export class StructuredIO {
       if (
         message.type !== 'user' &&
         message.type !== 'control_request' &&
+        message.type !== 'control_cancel_request' &&
         message.type !== 'assistant' &&
         message.type !== 'system'
       ) {
@@ -892,6 +897,12 @@ export class StructuredIO {
             : undefined,
         )
         return undefined
+      }
+      if (message.type === 'control_cancel_request') {
+        return typeof (message as { request_id?: unknown }).request_id ===
+          'string'
+          ? (message as SDKControlCancelRequest)
+          : undefined
       }
       if (message.type === 'control_request') {
         if (this.isRemoteTransport()) {
@@ -1332,39 +1343,72 @@ export class StructuredIO {
     }
   }
 
-  createHookCallback(callbackId: string, timeout?: number): HookCallback {
+  createHookCallback(
+    callbackId: string,
+    timeout?: number,
+    onFailure?: 'continue' | 'block',
+  ): HookCallback {
     return {
       type: 'callback',
       timeout,
+      ...(onFailure !== undefined ? { onFailure } : {}),
       callback: async (
         input: HookInput,
         toolUseID: string | null,
         abort: AbortSignal | undefined,
       ): Promise<HookJSONOutput> => {
+        // Official 2.1.328 (`chunk@294254613.js:4333200`, `chunk@322496717.js:54626`):
+        // `timeout` in hook config / SDK initialize is in seconds (matching
+        // `hooks.ts` `hook.timeout * 1000`). Always enforce `deadlineMs` even
+        // when a caller `abort` signal is passed, and propagate fatal
+        // `ControlStreamClosedError` / caller `AbortError` instead of swallowing.
+        const deadlineMs = timeout !== undefined ? timeout * 1000 : 30_000
+        const timeoutSignal = AbortSignal.timeout(deadlineMs)
+        const signal = abort
+          ? AbortSignal.any([abort, timeoutSignal])
+          : timeoutSignal
         try {
-          const deadlineMs = timeout ?? 30_000
           const result = await this.sendRequest<HookJSONOutput>(
             {
               subtype: 'hook_callback',
               callback_id: callbackId,
-              input: input as any,
+              input: input as unknown as Extract<
+                SDKControlRequest['request'],
+                { subtype: 'hook_callback' }
+              >['input'],
               tool_use_id: toolUseID || undefined,
               issued_at: Date.now(),
               deadline_ms: deadlineMs,
             },
             hookJSONOutputSchema(),
-            abort ?? AbortSignal.timeout(deadlineMs),
+            signal,
           )
           return result
         } catch (error) {
-          if (error instanceof Error && error.name === 'TimeoutError') {
-            const seconds = Math.round((timeout ?? 30_000) / 1000)
+          if (error instanceof ControlStreamClosedError) {
+            throw error
+          }
+          if (isAbortError(error)) {
+            throw error
+          }
+          if (
+            error instanceof Error &&
+            error.name === 'TimeoutError' &&
+            !abort?.aborted
+          ) {
+            const seconds = Math.round(deadlineMs / 1000)
             logForDebugging(
               `A hook did not answer within ${seconds}s; continuing without it. If it keeps missing, hooks from that machine pause until it registers again.`,
             )
+            if (onFailure === 'block') {
+              throw error
+            }
             return {}
           }
           console.error(`Error in hook callback ${callbackId}:`, error)
+          if (onFailure === 'block') {
+            throw error
+          }
           return {}
         }
       },

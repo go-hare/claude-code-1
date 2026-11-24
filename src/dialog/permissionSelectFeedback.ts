@@ -11,7 +11,6 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
-import { useSetAppState } from '../state/AppState.js'
 
 export type PermissionSelectFeedbackType = 'accept' | 'reject'
 
@@ -45,7 +44,6 @@ export function usePermissionSelectFeedback({
   logSubmitted: (type: PermissionSelectFeedbackType, feedback: string) => void
   logEscape: () => void
 } {
-  const setAppState = useSetAppState()
   const [acceptFeedback, setAcceptFeedback] = useState('')
   const [rejectFeedback, setRejectFeedback] = useState('')
   const [yesInputMode, setYesInputMode] = useState(false)
@@ -114,13 +112,6 @@ export function usePermissionSelectFeedback({
 
   function logEscape() {
     logEvent('tengu_permission_request_escape', {})
-    setAppState(prev => ({
-      ...prev,
-      attribution: {
-        ...prev.attribution,
-        escapeCount: prev.attribution.escapeCount + 1,
-      },
-    }))
   }
 
   const focusedType = hostShellFeedbackTypeOf(focusedValue)

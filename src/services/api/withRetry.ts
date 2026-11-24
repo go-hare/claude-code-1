@@ -83,7 +83,12 @@ import { handleFoundryCapabilityError } from '../../utils/foundryCapabilities.js
 import { isNonCustomOpusModel } from '../../utils/model/model.js'
 import { disableKeepAlive } from '../../utils/proxy.js'
 import { sleep } from '../../utils/sleep.js'
-import type { ThinkingConfig } from '../../utils/thinking.js'
+import {
+  isPrefixLockHealDeclined,
+  isThinkingBoundToOtherConversation,
+  isTopLevelSafeguardsRejected,
+  type ThinkingConfig,
+} from '../../utils/thinking.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -196,6 +201,10 @@ export function shouldRetry529(querySource: QuerySource | undefined): boolean {
 const PERSISTENT_MAX_BACKOFF_MS = 5 * 60 * 1000
 const PERSISTENT_RESET_CAP_MS = 6 * 60 * 60 * 1000
 const HEARTBEAT_INTERVAL_MS = 30_000
+/** Official 2.1.328 `xso = 60000` (`chunk@294254613.js:3270792`) — non-persistent Retry-After ceiling. */
+export const NON_PERSISTENT_MAX_RETRY_AFTER_MS = 60_000
+/** Official 2.1.328 `oyt = 0.25` — proportional jitter ratio. */
+const RETRY_JITTER_RATIO = 0.25
 
 function isUnattendedRetryEnabled(): boolean {
   if (!feature('UNATTENDED_RETRY')) return false
@@ -600,6 +609,10 @@ interface RetryOptions {
   }) => void
   /** Test override for the 1500ms Desktop Code tab one-off 401 retry delay. */
   desktopOneOff401DelayMs?: number
+  /** Official 2.1.328 `r.isNonStreamingRequest` — allows 404 last_resort fallback on non-streaming requests. */
+  isNonStreamingRequest?: boolean
+  /** Official 2.1.328 `r.isResumePrefillRequest` — excludes 4xx prefill errors from last_resort fallback. */
+  isResumePrefillRequest?: boolean
 }
 
 export class CannotRetryError extends Error {
@@ -634,15 +647,18 @@ export type FallbackTriggeredReason =
 
 export class FallbackTriggeredError extends Error {
   public readonly reason: FallbackTriggeredReason
+  public readonly cause?: unknown
 
   constructor(
     public readonly originalModel: string,
     public readonly fallbackModel: string,
     reason: FallbackTriggeredReason = 'overloaded',
+    cause?: unknown,
   ) {
     super(`Model fallback triggered: ${originalModel} -> ${fallbackModel}`)
     this.name = 'FallbackTriggeredError'
     this.reason = reason
+    this.cause = cause
   }
 }
 
@@ -711,6 +727,177 @@ export function isModelPermissionAPIError(error: unknown): boolean {
     message.includes('model:') ||
     (bodyMessage !== undefined && bodyMessage.includes('model:'))
   return isPermission && mentionsModel
+}
+
+/**
+ * Official 2.1.328 `oGe(e)` (`chunk@294254613.js:3293764`) — non-529 5xx server error.
+ */
+export function isNon529ServerError(error: unknown): error is APIError {
+  return (
+    error instanceof APIError &&
+    error.status !== undefined &&
+    error.status >= 500 &&
+    error.status < 600 &&
+    !is529Error(error)
+  )
+}
+
+/** Official 2.1.328 `xas(e)` — `not_found_error` body type. */
+function isNotFoundErrorType(error: APIError): boolean {
+  const body =
+    error.error && typeof error.error === 'object'
+      ? (error.error as { type?: unknown; error?: { type?: unknown } })
+      : undefined
+  return (
+    (error as { type?: unknown }).type === 'not_found_error' ||
+    body?.type === 'not_found_error' ||
+    body?.error?.type === 'not_found_error' ||
+    (error.message?.includes('"type":"not_found_error"') ?? false) ||
+    (error.message?.includes('"type": "not_found_error"') ?? false)
+  )
+}
+
+/** Official 2.1.328 `mMs` (`chunk@294254613.js:3272890`). */
+const LAST_RESORT_EXCLUDED_STATUSES = new Set([401, 407, 429, 404, 403, 413])
+
+/** Official 2.1.328 `Ias(status)` — 4xx statuses excluded on resume-prefill requests. */
+function isResumePrefillExcludedStatus(status: number): boolean {
+  return (
+    status >= 400 &&
+    status < 500 &&
+    status !== 401 &&
+    status !== 408 &&
+    status !== 409 &&
+    status !== 429 &&
+    status !== 451
+  )
+}
+
+/**
+ * Official 2.1.328 `mMs` + `Hso` (`chunk@294254613.js:3272890, 3286400`) —
+ * returns true if an `APIError` must NOT trigger `last_resort` model fallback
+ * (auth/quota/content/billing/context errors that switching models cannot fix).
+ */
+export function isLastResortFallbackExcluded(
+  error: APIError,
+  options?: {
+    isNonStreamingRequest?: boolean
+    isResumePrefillRequest?: boolean
+  },
+): boolean {
+  const status = error.status
+  if (
+    status !== undefined &&
+    LAST_RESORT_EXCLUDED_STATUSES.has(status) &&
+    !(status === 404 && options?.isNonStreamingRequest === true)
+  ) {
+    return true
+  }
+  const body =
+    error.error && typeof error.error === 'object'
+      ? (error.error as {
+          type?: unknown
+          error?: {
+            type?: unknown
+            details?: { error_code?: unknown }
+          }
+        })
+      : undefined
+  const errorType =
+    (error as { type?: unknown }).type ?? body?.error?.type ?? body?.type
+  if (errorType === 'billing_error') {
+    return true
+  }
+  if (
+    options?.isResumePrefillRequest === true &&
+    status !== undefined &&
+    isResumePrefillExcludedStatus(status)
+  ) {
+    return true
+  }
+  if (
+    isThinkingBoundToOtherConversation(error) &&
+    !isPrefixLockHealDeclined(error)
+  ) {
+    return true
+  }
+  if (parseMaxTokensContextOverflowError(error) !== undefined) {
+    return true
+  }
+  if (isFastModeNotEnabledError(error)) {
+    return true
+  }
+  if (isTopLevelSafeguardsRejected(error)) {
+    return true
+  }
+  const lower = (error.message ?? '').toLowerCase()
+  if (
+    lower.includes('credit balance is too low') ||
+    lower.includes('organization has been disabled') ||
+    lower.includes('output blocked by content filtering policy') ||
+    lower.includes('prompt is too long') ||
+    lower.includes('input is too long') ||
+    lower.includes('cannot be used as an advisor when the request model is') ||
+    lower.includes('could not process image') ||
+    lower.includes('could not process pdf') ||
+    lower.includes('pdf cannot be empty')
+  ) {
+    return true
+  }
+  if (
+    status === 400 &&
+    (body?.error?.type === 'policy_blocked' ||
+      body?.error?.details?.error_code === 'dlp_request_denied')
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 `cAt` (`chunk@294254613.js:3294850`) — wrap retryable
+ * non-`APIError` errors (AWS/GCP/WIF/connection/stale errors) into an
+ * `APIError` payload so `createSystemAPIErrorMessage` emits retry notices for
+ * all retryable errors, not only `APIError` instances.
+ */
+function toRetryNotificationError(error: unknown): APIError | null {
+  if (error instanceof APIError) {
+    return error
+  }
+  if (
+    isAwsCredentialsProviderError(error) ||
+    isGoogleAuthLibraryCredentialError(error) ||
+    isStaleConnectionError(error) ||
+    error instanceof Error
+  ) {
+    const wrapped = new APIError(
+      undefined,
+      undefined,
+      errorMessage(error),
+      undefined,
+    )
+    if (error instanceof Error) {
+      ;(wrapped as { cause?: unknown }).cause = error
+    }
+    return wrapped
+  }
+  return null
+}
+
+function createRetryNotificationMessage(
+  error: unknown,
+  retryInMs: number,
+  retryAttempt: number,
+  maxRetries: number,
+): SystemAPIErrorMessage | null {
+  const apiErr = toRetryNotificationError(error)
+  if (!apiErr) return null
+  return createSystemAPIErrorMessage(
+    apiErr,
+    retryInMs,
+    retryAttempt,
+    maxRetries,
+  )
 }
 
 function resolveCatalogEntryForModel(model: string) {
@@ -857,6 +1044,9 @@ export async function* withRetry<T>(
   let persistentAttempt = 0
   let watchdogSpentMs = 0
   let usageLimitSpentMs = 0
+  // Official 2.1.328 `K` (`chunk@294254613.js:3282538`) — cumulative ms spent in
+  // fast-mode short retry-after waits, capped at SHORT_RETRY_THRESHOLD_MS (20s).
+  let fastModeShortRetrySpentMs = 0
   // Official 2.1.328 `Y1e(r.querySource)`: main-turn overload wait cap when
   // CLAUDE_CODE_RETRY_WATCHDOG and CLAUDE_CODE_MAX_RETRIES are both unset.
   const overloadWaitMaxMs = getOverloadedRetryMaxWaitMs(options.querySource)
@@ -1188,11 +1378,17 @@ export async function* withRetry<T>(
         continue
       }
 
-      // Official densable: permanent model_not_found / permission_denied → FallbackTriggeredError
-      // with reason (before capacity/529 retry path). Host gets system/model_fallback.
+      // Official 2.1.328 (`chunk@294254613.js:3281400-3281650`): permanent
+      // model_not_found / permission_denied AND non-529 5xx (`oGe`) when not in
+      // fast mode / watchdog → FallbackTriggeredError with reason.
       // Official 2.1.301 (#850): also fall back once on firstParty for Fable availability errors.
       const isModelNotFound = isModelNotFoundAPIError(error)
       const isModelPerm = isModelPermissionAPIError(error)
+      const isServerErrorFallback =
+        !wasFastModeActive &&
+        !isFullRetryWatchdogActive() &&
+        !isUnattendedRetryEnabled() &&
+        isNon529ServerError(error)
       const effectiveFallbackModel =
         options.fallbackModel ??
         (isModelNotFound || isModelPerm
@@ -1200,21 +1396,29 @@ export async function* withRetry<T>(
             resolveFableAvailabilityFallbackModel(options.model))
           : undefined)
       if (
-        (isModelNotFound || isModelPerm) &&
+        (isModelNotFound || isModelPerm || isServerErrorFallback) &&
         effectiveFallbackModel &&
         effectiveFallbackModel !== options.model
       ) {
+        const fallbackReason: FallbackTriggeredReason = isModelNotFound
+          ? 'model_not_found'
+          : isModelPerm
+            ? 'permission_denied'
+            : 'server_error'
         logEvent('tengu_api_model_not_found_fallback_triggered', {
           original_model:
             options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           fallback_model:
             effectiveFallbackModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           provider: getAPIProviderForStatsig(),
+          reason:
+            fallbackReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
         throw new FallbackTriggeredError(
           options.model,
           effectiveFallbackModel,
-          isModelNotFound ? 'model_not_found' : 'permission_denied',
+          fallbackReason,
+          error,
         )
       }
 
@@ -1269,17 +1473,50 @@ export async function* withRetry<T>(
 
         const retryAfterMs =
           error instanceof APIError ? getRetryAfterMs(error) : null
+        const isShortRetryAfter =
+          retryAfterMs !== null && retryAfterMs < SHORT_RETRY_THRESHOLD_MS
         if (
           error instanceof APIError &&
           (error.status === 429 || is529Error(error)) &&
           !isRetryWatchdogActive() &&
-          retryAfterMs !== null &&
-          retryAfterMs < SHORT_RETRY_THRESHOLD_MS
+          isShortRetryAfter
         ) {
-          // Short retry-after: wait and retry with fast mode still active
-          // to preserve prompt cache (same model name on retry).
-          await sleep(retryAfterMs, options.signal, { abortError })
-          continue
+          // Official 2.1.328 `eGe` (`chunk@294254613.js:3282538`): enforce
+          // cumulative 20s cap across fast-mode short retry-after waits, report
+          // retry status, and yield a retry notification before sleeping.
+          const backoffMs = getRetryDelay(
+            attempt,
+            null,
+            SHORT_RETRY_THRESHOLD_MS,
+          )
+          const waitMs = Math.max(backoffMs, retryAfterMs)
+          if (
+            fastModeShortRetrySpentMs + waitMs < SHORT_RETRY_THRESHOLD_MS &&
+            attempt <= maxRetries
+          ) {
+            fastModeShortRetrySpentMs += waitMs
+            options.onRetryStatus?.({
+              kind: 'retrying',
+              deadline: Date.now() + waitMs,
+              attempt,
+              maxRetries,
+              error: {
+                status: error.status,
+                formatted: error.message,
+              },
+            })
+            const notif = createRetryNotificationMessage(
+              error,
+              waitMs,
+              attempt,
+              maxRetries,
+            )
+            if (notif) {
+              yield notif
+            }
+            await sleep(waitMs, options.signal, { abortError })
+            continue
+          }
         }
         // Long/unknown retry-after, 5xx, timeout, or watchdog active: fall back
         // to standard speed on the same model and refund the retry slot.
@@ -1366,12 +1603,14 @@ export async function* withRetry<T>(
 
       // Track consecutive 529 errors (Official #1880: only fall back to another
       // model when `!wasFastModeActive` — fast mode tries standard speed first).
+      // Official 2.1.328 (`chunk@294254613.js:3283609`): allow explicit
+      // `options.fallbackModel !== undefined` to trigger 529 fallback for
+      // Claude.ai subscribers and non-Opus models as well.
       if (
         !wasFastModeActive &&
         is529Error(error) &&
-        // If FALLBACK_FOR_ALL_PRIMARY_MODELS is not set, fall through only if the primary model is a non-custom Opus model.
-        // TODO: Revisit if the isNonCustomOpusModel check should still exist, or if isNonCustomOpusModel is a stale artifact of when Claude Code was hardcoded on Opus.
         (process.env.FALLBACK_FOR_ALL_PRIMARY_MODELS ||
+          options.fallbackModel !== undefined ||
           (!isClaudeAISubscriber() && isNonCustomOpusModel(options.model)))
       ) {
         consecutive529Errors++
@@ -1390,6 +1629,8 @@ export async function* withRetry<T>(
             throw new FallbackTriggeredError(
               options.model,
               options.fallbackModel,
+              'overloaded',
+              error,
             )
           }
 
@@ -1470,6 +1711,34 @@ export async function* withRetry<T>(
         !isStaleConnectionError(error) &&
         (!(error instanceof APIError) || !shouldRetry(error))
       ) {
+        // Official 2.1.328 (`chunk@294254613.js:3286400-3286800`): fall back
+        // via `last_resort` on eligible non-retryable HTTP errors when a
+        // distinct `options.fallbackModel` is configured.
+        if (
+          error instanceof APIError &&
+          error.status !== undefined &&
+          !isLastResortFallbackExcluded(error, options) &&
+          options.fallbackModel &&
+          options.fallbackModel !== options.model
+        ) {
+          logEvent('tengu_api_fallback_last_resort', {
+            status: error.status,
+            provider: getAPIProviderForStatsig(),
+            fastMode: retryContext.fastMode ?? false,
+          })
+          logEvent('api_request', {
+            status:
+              'api_request_last_resort_fallback' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          throw new FallbackTriggeredError(
+            options.model,
+            options.fallbackModel,
+            error.status === 404 && isNotFoundErrorType(error)
+              ? 'model_not_found'
+              : 'last_resort',
+            error,
+          )
+        }
         // densable `re("api_request", x instanceof yz || Upe(x) !== null ? "api_request_account_on_hold" : "api_request_non_retryable")`
         if (
           error instanceof OAuthAccountOnHoldError ||
@@ -1690,12 +1959,43 @@ export async function* withRetry<T>(
           PERSISTENT_RESET_CAP_MS,
         )
       } else {
-        delayMs = getRetryDelay(
-          attempt,
-          retryAfter,
-          overloadedMaxDelayMs,
-          overloadedBaseDelayMs,
+        // Official 2.1.328 (`chunk@294254613.js:3289294`): in non-persistent
+        // mode, abort with `tengu_api_retry_after_too_long` when `Retry-After`
+        // exceeds `Math.max(60_000, maxDelay * 1.25)`.
+        const retryAfterMs = parseRetryAfterHeaderMs(retryAfter) ?? 0
+        const retryAfterCeilingMs = Math.max(
+          NON_PERSISTENT_MAX_RETRY_AFTER_MS,
+          (overloadedMaxDelayMs ?? 0) * (1 + RETRY_JITTER_RATIO),
         )
+        if (isFullRetryWatchdogActive()) {
+          delayMs = Math.min(
+            getRetryDelay(
+              attempt,
+              retryAfter,
+              overloadedMaxDelayMs,
+              overloadedBaseDelayMs,
+            ),
+            PERSISTENT_RESET_CAP_MS,
+          )
+        } else if (retryAfterMs > retryAfterCeilingMs) {
+          logEvent('tengu_api_retry_after_too_long', {
+            delayMs: retryAfterMs,
+            status: error instanceof APIError ? error.status : undefined,
+            provider: getAPIProviderForStatsig(),
+          })
+          logEvent('api_request', {
+            status:
+              'api_request_retry_after_too_long' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          throw new CannotRetryError(error, retryContext)
+        } else {
+          delayMs = getRetryDelay(
+            attempt,
+            retryAfter,
+            overloadedMaxDelayMs,
+            overloadedBaseDelayMs,
+          )
+        }
       }
       if (usageLimitOverrideDelay !== undefined) {
         delayMs = usageLimitOverrideDelay
@@ -1737,7 +2037,10 @@ export async function* withRetry<T>(
       }
 
       const useHeartbeatSleep =
-        persistent || (isFullRetryWatchdogActive() && delayMs > 60_000)
+        persistent ||
+        delayMs > NON_PERSISTENT_MAX_RETRY_AFTER_MS ||
+        (isFullRetryWatchdogActive() &&
+          delayMs > NON_PERSISTENT_MAX_RETRY_AFTER_MS)
       if (useHeartbeatSleep) {
         if (delayMs > 60_000) {
           logEvent('tengu_api_persistent_retry_wait', {
@@ -1762,13 +2065,16 @@ export async function* withRetry<T>(
         let remaining = delayMs
         while (remaining > 0) {
           if (options.signal?.aborted) throw new APIUserAbortError()
-          if (error instanceof APIError) {
-            yield createSystemAPIErrorMessage(
+          if (!suppressRetryBanner) {
+            const notif = createRetryNotificationMessage(
               error,
               remaining,
               reportedAttempt,
               maxRetries,
             )
+            if (notif) {
+              yield notif
+            }
           }
           const chunk = Math.min(
             remaining,
@@ -1802,8 +2108,16 @@ export async function* withRetry<T>(
         // growing to the 5-min cap (bounded by maxWaitMs when configured).
         if (persistent && attempt >= maxRetries) attempt = maxRetries
       } else {
-        if (error instanceof APIError && !suppressRetryBanner) {
-          yield createSystemAPIErrorMessage(error, delayMs, attempt, maxRetries)
+        if (!suppressRetryBanner) {
+          const notif = createRetryNotificationMessage(
+            error,
+            delayMs,
+            attempt,
+            maxRetries,
+          )
+          if (notif) {
+            yield notif
+          }
         }
         await sleep(delayMs, options.signal, { abortError })
       }
@@ -1902,9 +2216,9 @@ export function getRetryDelay(
   const backoffMs = Math.round(baseDelay + jitter)
 
   if (retryAfterHeader) {
-    const seconds = parseInt(retryAfterHeader, 10)
-    if (!isNaN(seconds)) {
-      return Math.max(seconds * 1000, backoffMs)
+    const retryAfterMs = parseRetryAfterHeaderMs(retryAfterHeader)
+    if (retryAfterMs !== null) {
+      return Math.max(retryAfterMs, backoffMs)
     }
   }
 
@@ -2213,6 +2527,20 @@ function hasUnifiedRateLimitHeaders(error: APIError): boolean {
 }
 
 /**
+ * Official 2.1.328 `Iso(e)` (`chunk@294254613.js:3297279`) — transient 429
+ * lacking unified rate-limit quota headers (`representative-claim`,
+ * `overage-status`, `overage-disabled-reason`), allowing Pro/Max Claude.ai
+ * subscribers to retry transient non-quota 429s.
+ */
+export function isTransientNonUnified429(error: APIError): boolean {
+  return (
+    error.status === 429 &&
+    !hasUnifiedRateLimitHeaders(error) &&
+    !error.headers?.get?.(OVERAGE_DISABLED_REASON_HEADER)
+  )
+}
+
+/**
  * densable 2.1.239 Rew — 429 spend-limit / out-of-credits must not retry
  * (watchdog included). Header n9f always fails; Y8f fails when the response
  * has no unified claim/overage-status pair; body `exceeded_limit` + Y8f
@@ -2413,11 +2741,14 @@ export function shouldRetry(error: APIError): boolean {
   const shouldRetryHeader = error.headers?.get('x-should-retry')
 
   // If the server explicitly says whether or not to retry, obey.
-  // For Max and Pro users, should-retry is true, but in several hours, so we shouldn't.
+  // For Max and Pro users, should-retry is true, but in several hours, so we shouldn't
+  // UNLESS the 429 lacks unified rate-limit headers (transient non-quota 429, official Iso).
   // Enterprise users can retry because they typically use PAYG instead of rate limits.
   if (
     shouldRetryHeader === 'true' &&
-    (!isClaudeAISubscriber() || isEnterpriseSubscriber())
+    (!isClaudeAISubscriber() ||
+      isEnterpriseSubscriber() ||
+      isTransientNonUnified429(error))
   ) {
     return true
   }
@@ -2459,9 +2790,14 @@ export function shouldRetry(error: APIError): boolean {
   if (error.status === 409) return true
 
   // Retry on rate limits, but not for ClaudeAI Subscription users
-  // Enterprise users can retry because they typically use PAYG instead of rate limits
+  // unless it is a transient non-unified 429 lacking quota headers (official Iso).
+  // Enterprise users can retry because they typically use PAYG instead of rate limits.
   if (error.status === 429) {
-    return !isClaudeAISubscriber() || isEnterpriseSubscriber()
+    return (
+      !isClaudeAISubscriber() ||
+      isEnterpriseSubscriber() ||
+      isTransientNonUnified429(error)
+    )
   }
 
   // densable odn late: if(e.status===401)return lAe(),!0
@@ -2590,15 +2926,78 @@ const DEFAULT_FAST_MODE_FALLBACK_HOLD_MS = 30 * 60 * 1000 // 30 minutes
 const SHORT_RETRY_THRESHOLD_MS = 20 * 1000 // 20 seconds
 const MIN_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
-function getRetryAfterMs(error: APIError): number | null {
-  const retryAfter = getRetryAfter(error)
-  if (retryAfter) {
-    const seconds = parseInt(retryAfter, 10)
-    if (!isNaN(seconds)) {
-      return seconds * 1000
-    }
+const HTTP_DATE_TIME_RE = String.raw`(\d\d:\d\d)(:\d\d)?(?:\.\d{1,9})?`
+const HTTP_DATE_TZ_RE = String.raw`(?:GMT|UTC?|Z|(?:GMT|UTC)?([+-][01]\d):?([0-5]\d))`
+const RFC7231_DATE_RE = new RegExp(
+  String.raw`^(?:[a-z]{3,9},? *)?(\d\d?)[ -]([a-z]{3})[a-z]{0,6}[ -](\d\d(?:\d\d)?) +${HTTP_DATE_TIME_RE} +${HTTP_DATE_TZ_RE}$`,
+  'i',
+)
+const ALT_DATE_RE = new RegExp(
+  String.raw`^(?:[a-z]{3,9},? *)?([a-z]{3}) (\d\d?) (\d{4}) ${HTTP_DATE_TIME_RE} ${HTTP_DATE_TZ_RE}(?: \(.*\))?$`,
+  'i',
+)
+const ASCTIME_DATE_RE =
+  /^[a-z]{3,9} ([a-z]{3} +\d\d?) (\d\d:\d\d:\d\d)(?: GMT| UTC)? (\d{4})(?: GMT)?$/i
+const ISO_DATE_RE =
+  /^(\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d{1,9})?)?)(?:Z|([+-][01]\d):?([0-5]\d))$/i
+
+function parseHttpDateMs(raw: string): number {
+  const m1 = RFC7231_DATE_RE.exec(raw) ?? ALT_DATE_RE.exec(raw)
+  if (m1) {
+    const [, a, b, c, hhmm, ss, tzH, tzM] = m1
+    return Date.parse(
+      `${a} ${b} ${c} ${hhmm}${ss ?? ':00'} GMT${tzH ?? '+00'}${tzM ?? '00'}`,
+    )
+  }
+  const m2 = ISO_DATE_RE.exec(raw)
+  if (m2) {
+    return Date.parse(
+      `${m2[1]?.toUpperCase()}${m2[2] ?? '+00'}:${m2[3] ?? '00'}`,
+    )
+  }
+  const m3 = ASCTIME_DATE_RE.exec(raw)
+  if (m3) {
+    return Date.parse(`${m3[1]} ${m3[3]} ${m3[2]} GMT`)
+  }
+  return Number.NaN
+}
+
+/**
+ * Official 2.1.328 `wp` / `aB` / `FCi` / `vUe` (`chunk@286370035.js:298900-299600`) —
+ * parse `Retry-After` header in milliseconds supporting BOTH numeric seconds
+ * (integer or decimal) AND HTTP-date formats (RFC 7231 IMF-fixdate, RFC 850,
+ * asctime, ISO-8601). Past HTTP-dates return null so normal backoff applies.
+ */
+export function parseRetryAfterHeaderMs(
+  header: string | null | undefined,
+  nowMs: number = Date.now(),
+): number | null {
+  if (
+    typeof header !== 'string' ||
+    header.length === 0 ||
+    header.length > 100
+  ) {
+    return null
+  }
+  const trimmed = header.replace(/^[ \t]+|[ \t]+$/g, '')
+  if (trimmed.length === 0) return null
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    const sec = Number(trimmed)
+    return Number.isFinite(sec) ? Math.round(sec * 1000) : null
+  }
+  const parsedDateMs = parseHttpDateMs(trimmed)
+  if (Number.isFinite(parsedDateMs) && parsedDateMs > nowMs) {
+    return Math.round(parsedDateMs - nowMs)
   }
   return null
+}
+
+export function getRetryAfterMs(
+  error: APIError,
+  nowMs: number = Date.now(),
+): number | null {
+  const retryAfter = getRetryAfter(error)
+  return parseRetryAfterHeaderMs(retryAfter, nowMs)
 }
 
 function getRateLimitResetDelayMs(error: APIError): number | null {

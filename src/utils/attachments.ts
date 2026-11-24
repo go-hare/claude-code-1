@@ -297,6 +297,7 @@ import { isInProcessTeammate } from './teammateContext.js'
 import { removeTeammateFromTeamFile } from './swarm/teamHelpers.js'
 import { unassignTeammateTasks } from './tasks.js'
 import { getCompanionIntroAttachment } from '../buddy/prompt.js'
+import { SandboxManager } from './sandbox/sandbox-adapter.js'
 
 export const TODO_REMINDER_CONFIG = {
   TURNS_SINCE_WRITE: 10,
@@ -855,6 +856,8 @@ export type Attachment =
         path: string
         content: string
       }>
+      /** Official 2.1.328: skills truncated/omitted during compaction that should be reloaded via Skill tool. */
+      skillsToReload?: string[]
     }
   | {
       type: 'verify_plan_reminder'
@@ -992,6 +995,56 @@ export type Attachment =
       tokens?: number
     }
 
+/**
+ * Official 2.1.328 model-facing attachment variants handled by
+ * `normalizeAttachmentForAPI`. Kept as a companion union so `Attachment`
+ * stays in sync with `AttachmentMessage.tsx` / `nullRenderingAttachments.ts`.
+ */
+export type ExtendedAttachment328 =
+  | {
+      /** Official 2.1.328 (`pqi`): unknown `/foo` fallback note for `-p` / headless sessions. */
+      type: 'unknown_command_fallback'
+      commandName?: string
+      availableCommandNames?: string[]
+      availableCommandCount?: number
+      suggestion?: string
+      reservedName?: boolean
+    }
+  | {
+      /** Official 2.1.328 (`Sgo`): user message mentions `/skillName` mid-prompt. */
+      type: 'skill_mention'
+      skillName: string
+    }
+  | {
+      /** Official 2.1.328 (`iRt`): MCP tools excluded due to invalid API schemas. */
+      type: 'mcp_dropped_tools_delta'
+      addedEntries: string[]
+    }
+  | {
+      /** Official 2.1.328 (`SWs`): background memory directory update notice. */
+      type: 'memory_update'
+      source: string
+      summary: string
+      paths?: string[]
+      inContextPaths?: string[]
+    }
+  | {
+      /** Official 2.1.328 (`yWs`): periodic reminder to use ToolSearch for unloaded tools. */
+      type: 'tool_search_usage_reminder'
+      undiscoveredToolNames: string[]
+      undiscoveredCount: number
+    }
+  | {
+      /** Official 2.1.328 (`Ggo`): elapsed time reminder for long-running sessions. */
+      type: 'elapsed_time_reminder'
+      text: string
+    }
+  | {
+      /** Official 2.1.328 (`RXn`): dynamic sandbox instructions delta. */
+      type: 'sandbox_instructions'
+      content: string
+    }
+
 export type TeammateMailboxAttachment = {
   type: 'teammate_mailbox'
   messages: Array<{
@@ -1115,7 +1168,21 @@ export async function getAttachments(
     // getAttachmentMessages runs — returning [] here silently drops them.
     // Coworker runs with --bare and depends on task-notification for
     // mid-tool-call notifications from Local*Task/Remote*Task.
-    return getQueuedCommandAttachments(queuedCommands)
+    const queued = await getQueuedCommandAttachments(queuedCommands)
+    // Official 2.1.328 (`chunk@294254613.js:4091450`): CLAUDE_CODE_SIMPLE returns
+    // only queued commands, whereas `--bare` / CLAUDE_CODE_DISABLE_ATTACHMENTS
+    // keeps `agent_listing_delta` and `sandbox_instructions`.
+    if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+      return queued
+    }
+    return [
+      ...queued,
+      ...getAgentListingDeltaAttachment(toolUseContext, messages),
+      ...getSandboxInstructionsAttachment(
+        toolUseContext.options?.tools ?? [],
+        messages,
+      ),
+    ]
   }
 
   // This will slow down submissions
@@ -1160,6 +1227,25 @@ export async function getAttachments(
                     maskedInput,
                     toolUseContext.options.agentDefinitions.activeAgents,
                   ),
+                ),
+              ),
+              maybe('skill_mentions', () =>
+                Promise.resolve(
+                  options?.isHumanTypedPrompt === true &&
+                    isMainThread &&
+                    (toolUseContext.options.tools ?? []).some(t =>
+                      toolMatchesName(t, SKILL_TOOL_NAME),
+                    ) &&
+                    getFeatureValue_CACHED_MAY_BE_STALE(
+                      'tengu_humble_emerson',
+                      true,
+                    )
+                    ? processSkillMentions(
+                        maskedPreExpansion ?? maskedInput,
+                        toolUseContext.options.commands ?? [],
+                        { typed: options.preExpansionInput !== undefined },
+                      )
+                    : [],
                 ),
               ),
             ]),
@@ -1285,6 +1371,14 @@ export async function getAttachments(
     // Must run for all threads or subagent notifications drain into the void
     // (removed from queue by removeFromQueue but never attached).
     maybe('queued_commands', () => getQueuedCommandAttachments(queuedCommands)),
+    maybe('sandbox_instructions', () =>
+      Promise.resolve(
+        getSandboxInstructionsAttachment(
+          toolUseContext.options?.tools ?? [],
+          messages,
+        ),
+      ),
+    ),
     maybe('date_change', () =>
       Promise.resolve(getDateChangeAttachments(messages)),
     ),
@@ -1428,18 +1522,24 @@ export async function getAttachments(
         ),
       ]),
     ),
-    ...(feature('COMPACTION_REMINDERS')
-      ? [
-          maybe('compaction_reminder', () =>
-            Promise.resolve(
-              getCompactionReminderAttachment(
-                messages ?? [],
-                toolUseContext.options.mainLoopModel,
-              ),
-            ),
-          ),
-        ]
-      : []),
+    // Official 2.1.328 (`chunk@294254613.js:4098200-4099400`): both
+    // `total_tokens_reminder` and `budget_usd` run on all threads (including
+    // subagents), not only the main thread. Retired `compaction_reminder` is
+    // no longer emitted.
+    maybe('total_tokens_reminder', async () =>
+      Promise.resolve(
+        getTotalTokensReminderAttachment(
+          messages ?? [],
+          toolUseContext.options.mainLoopModel,
+          toolUseContext.agentId,
+        ),
+      ),
+    ),
+    maybe('budget_usd', async () =>
+      Promise.resolve(
+        getMaxBudgetUsdAttachment(toolUseContext.options.maxBudgetUsd),
+      ),
+    ),
     ...(feature('HISTORY_SNIP')
       ? [
           maybe('context_efficiency', () =>
@@ -1457,6 +1557,27 @@ export async function getAttachments(
         ),
         maybe('ide_opened_file', async () =>
           getOpenedFileFromIDE(ideSelection, toolUseContext),
+        ),
+        // Official 2.1.328 (`chunk@294254613.js:4099115`): process IDE selections
+        // captured on queued prompt / task-notification commands.
+        maybe('queued_ide_selections', async () =>
+          (
+            await Promise.all(
+              queuedCommands
+                .filter(
+                  cmd =>
+                    cmd.mode === 'prompt' || cmd.mode === 'task-notification',
+                )
+                .flatMap(({ ideSelection: queuedSel }) =>
+                  queuedSel
+                    ? [
+                        getSelectedLinesFromIDE(queuedSel, toolUseContext),
+                        getOpenedFileFromIDE(queuedSel, toolUseContext),
+                      ]
+                    : [],
+                ),
+            )
+          ).flat(),
         ),
         maybe('output_style', async () =>
           getOutputStyleAttachment(toolUseContext),
@@ -1525,25 +1646,8 @@ export async function getAttachments(
               }),
             ]
           : []),
-        maybe('total_tokens_reminder', async () =>
-          Promise.resolve(
-            getTotalTokensReminderAttachment(
-              messages ?? [],
-              toolUseContext.options.mainLoopModel,
-              toolUseContext.agentId,
-            ),
-          ),
-        ),
-        maybe('budget_usd', async () =>
-          Promise.resolve(
-            getMaxBudgetUsdAttachment(toolUseContext.options.maxBudgetUsd),
-          ),
-        ),
         maybe('output_token_usage', async () =>
           Promise.resolve(getOutputTokenUsageAttachment()),
-        ),
-        maybe('verify_plan_reminder', async () =>
-          getVerifyPlanReminderAttachment(messages, toolUseContext),
         ),
       ]
     : []
@@ -2573,20 +2677,23 @@ export function getAgentListingDeltaAttachment(
 ): Attachment[] {
   if (!shouldInjectAgentListInMessages()) return []
 
+  const tools = toolUseContext.options?.tools
   // Skip if AgentTool isn't in the pool — the listing would be unactionable.
   if (
-    !toolUseContext.options.tools.some(t => toolMatchesName(t, AGENT_TOOL_NAME))
+    !Array.isArray(tools) ||
+    !tools.some(t => toolMatchesName(t, AGENT_TOOL_NAME))
   ) {
     return []
   }
 
-  const { activeAgents, allowedAgentTypes } =
-    toolUseContext.options.agentDefinitions
+  const agentDefinitions = toolUseContext.options?.agentDefinitions
+  if (!agentDefinitions) return []
+  const { activeAgents, allowedAgentTypes } = agentDefinitions
 
   // Mirror AgentTool.prompt()'s filtering: MCP requirements → deny rules →
   // allowedAgentTypes restriction. Keep this in sync with AgentTool.tsx.
   const mcpServers = new Set<string>()
-  for (const tool of toolUseContext.options.tools) {
+  for (const tool of tools) {
     const info = mcpInfoFromString(tool.name)
     if (info) mcpServers.add(info.serverName)
   }
@@ -5788,50 +5895,143 @@ export function getVerifyPlanReminderTurnCount(messages: Message[]): number {
 }
 
 /**
- * Get verify plan reminder attachment if the model hasn't called VerifyPlanExecution yet.
+ * Official 2.1.328 `RXn`: emit `sandbox_instructions` delta attachment whenever
+ * shell tools are present and sandbox state/instructions changed relative to
+ * the last `sandbox_instructions` attachment after the latest compact boundary.
  */
-async function getVerifyPlanReminderAttachment(
+export function getSandboxInstructionsAttachment(
+  tools: Tools | undefined,
   messages: Message[] | undefined,
-  toolUseContext: ToolUseContext,
-): Promise<Attachment[]> {
-  // Official VERIFY_PLAN densable.
-  let verifyPlanEnabled = isEnvTruthy(process.env.CLAUDE_CODE_VERIFY_PLAN)
-  try {
-    const { isVerifyPlanEnvEnabled } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
-    verifyPlanEnabled = isVerifyPlanEnvEnabled()
-  } catch {
-    // keep raw env fallback
-  }
-  if (process.env.USER_TYPE !== 'ant' || !verifyPlanEnabled) {
-    return []
-  }
-
-  const appState = toolUseContext.getAppState()
-  const pending = appState.pendingPlanVerification
-
-  // Only remind if plan exists and verification not started or completed
+): Attachment[] {
   if (
-    !pending ||
-    pending.verificationStarted ||
-    pending.verificationCompleted
+    !Array.isArray(tools) ||
+    !tools.some(t => toolMatchesName(t, BASH_TOOL_NAME))
   ) {
     return []
   }
 
-  // Only remind every N turns
-  if (messages && messages.length > 0) {
-    const turnCount = getVerifyPlanReminderTurnCount(messages)
+  let current = ''
+  if (SandboxManager.isSandboxingEnabled()) {
+    const fsReadConfig = SandboxManager.getFsReadConfig()
+    const fsWriteConfig = SandboxManager.getFsWriteConfig()
+    const networkConfig = SandboxManager.getNetworkRestrictionConfig()
+    const allowUnixSockets = SandboxManager.getAllowUnixSockets()
+    const ignoreViolations = SandboxManager.getIgnoreViolations()
+    const allowUnsandboxed = SandboxManager.areUnsandboxedCommandsAllowed()
+    const restrictions: string[] = [
+      `Filesystem: ${jsonStringify({ read: fsReadConfig, write: fsWriteConfig })}`,
+    ]
+    const netSummary: Record<string, unknown> = {
+      ...(networkConfig?.deniedHosts
+        ? { deniedHosts: uniq(networkConfig.deniedHosts) }
+        : {}),
+      ...(allowUnixSockets ? { allowUnixSockets: uniq(allowUnixSockets) } : {}),
+    }
+    if (Object.keys(netSummary).length > 0) {
+      restrictions.push(`Network: ${jsonStringify(netSummary)}`)
+    }
+    if (ignoreViolations) {
+      restrictions.push(
+        `Ignored violations: ${jsonStringify(ignoreViolations)}`,
+      )
+    }
+    const overrideNote = allowUnsandboxed
+      ? 'Default to running commands inside the sandbox; only set `dangerouslyDisableSandbox: true` if the user explicitly asks or a command fails due to sandbox restrictions.'
+      : 'All commands MUST run inside the sandbox — `dangerouslyDisableSandbox` is disabled by policy.'
+    current = [
+      '## Command sandbox',
+      'Commands run in a sandbox by default with the following restrictions:',
+      ...restrictions,
+      overrideNote,
+    ].join('\n')
+  }
+
+  const afterCompact = getMessagesAfterCompactBoundary(messages ?? [])
+  let lastContent = ''
+  for (let i = afterCompact.length - 1; i >= 0; i--) {
+    const msg = afterCompact[i]
     if (
-      turnCount === 0 ||
-      turnCount % VERIFY_PLAN_REMINDER_CONFIG.TURNS_BETWEEN_REMINDERS !== 0
+      msg?.type === 'attachment' &&
+      msg.attachment?.type === 'sandbox_instructions'
     ) {
-      return []
+      const content = (msg.attachment as Record<string, unknown>).content
+      if (typeof content === 'string') {
+        lastContent = content
+        break
+      }
     }
   }
 
-  return [{ type: 'verify_plan_reminder' }]
+  if (current === lastContent) {
+    return []
+  }
+  const att: ExtendedAttachment328 = {
+    type: 'sandbox_instructions',
+    content: current,
+  }
+  return [att as unknown as Attachment]
+}
+
+/**
+ * Official 2.1.328 `Hut` / `mgo` / `Sgo`: detect mid-prompt `/skillName`
+ * mentions referencing prompt-type skills so the model knows it can invoke the
+ * Skill tool if the user is asking to run them.
+ */
+export function processSkillMentions(
+  input: string,
+  commands: readonly Command[],
+  options?: { typed?: boolean },
+): Attachment[] {
+  if (!input || commands.length === 0) return []
+  const byName = new Map<string, Command>()
+  for (const cmd of commands) {
+    if (!byName.has(cmd.name)) byName.set(cmd.name, cmd)
+  }
+  for (const cmd of commands) {
+    const facing = cmd.userFacingName?.()
+    if (facing && !byName.has(facing)) byName.set(facing, cmd)
+    for (const alias of cmd.aliases ?? []) {
+      if (!byName.has(alias)) byName.set(alias, cmd)
+    }
+  }
+
+  const matched = new Map<Command, string>()
+  const pattern =
+    /(^|[\s\u3002\u3001\uFF1F\uFF01])(\/[a-zA-Z][a-zA-Z0-9.:\-_]*)/g
+  let leadingSlashPrefix = input.startsWith('/')
+  let cursor = 0
+  let match: RegExpExecArray | null = null
+  while ((match = pattern.exec(input)) !== null) {
+    const lead = match[1] ?? ''
+    const token = match[2] ?? ''
+    let len = token.length
+    while (len > 0 && token[len - 1] === '.') len--
+    const start = match.index + lead.length
+    const end = start + len
+    if (leadingSlashPrefix && input.slice(cursor, start).trim() === '') {
+      cursor = end
+      continue
+    }
+    leadingSlashPrefix = false
+    const leftOk = start === 0 || /\s/.test(input[start - 1]!)
+    const rightOk = end === input.length || /\s/.test(input[end]!)
+    if (!leftOk || !rightOk) continue
+    const skillName = input.slice(start + 1, end)
+    const cmd = byName.get(skillName)
+    if (!cmd || cmd.type !== 'prompt' || matched.has(cmd)) continue
+    if (cmd.disableModelInvocation === true && options?.typed !== true) {
+      continue
+    }
+    matched.set(cmd, skillName)
+  }
+
+  return [...matched.values()].map(skillName => {
+    const att: ExtendedAttachment328 = {
+      type: 'skill_mention',
+      skillName,
+    }
+    return att as unknown as Attachment
+  })
 }
 
 export function getCompactionReminderAttachment(

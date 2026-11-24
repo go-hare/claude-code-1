@@ -84,10 +84,13 @@ import {
   shouldCacheControlOnApiSystem,
 } from '../../utils/midConversationSystem.js'
 import {
+  getServedModelsForRequestedModel,
   getStickyBetas,
   isStickyBetaRejected,
   isStickyBetaSentActive,
   isThirdPartyServerClassifierRefused,
+  recordServedModels,
+  stickyRejectBeta,
   stickySendBeta,
   markRelayThinkingStripRecorded,
   getRefusalFallbackModelLatch,
@@ -226,7 +229,9 @@ import {
 import {
   applyThinkingStripPlanToMessages,
   buildThinkingStripPlanFromMessages,
+  type KeepForeignThinkingMode,
   mergeThinkingStripPlans,
+  stripForeignThinkingBlocks,
 } from '../../utils/thinking.js'
 import {
   getBreakCacheMarkerPath,
@@ -240,7 +245,10 @@ import {
   extractQuotaStatusFromHeaders,
   type QuotaRejectedQuerySourceBucket,
 } from '../claudeAiLimits.js'
-import { getAPIContextManagement } from '../compact/apiMicrocompact.js'
+import {
+  getAPIContextManagement,
+  handleClearToolUsesRefusalError,
+} from '../compact/apiMicrocompact.js'
 import { bedrockAdapter } from '../providerUsage/adapters/bedrock.js'
 import { updateProviderBuckets } from '../providerUsage/store.js'
 
@@ -259,7 +267,6 @@ import {
 } from '@anthropic-ai/sdk/error'
 import {
   getAfkModeHeaderLatched,
-  getCacheEditingHeaderLatched,
   getFastModeHeaderLatched,
   getPromptCache1hAllowlist,
   getPromptCache1hEligible,
@@ -271,7 +278,6 @@ import {
   isEffortUnsupported,
   markEffortUnsupported,
   setAfkModeHeaderLatched,
-  setCacheEditingHeaderLatched,
   setFastModeHeaderLatched,
   setLastMainRequestId,
   setPromptCache1hAllowlist,
@@ -415,7 +421,6 @@ import {
   SEARCH_EXTRA_TOOLS_TOOL_NAME,
 } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
 import { count } from '../../utils/array.js'
-import { insertBlockAfterToolResults } from '../../utils/contentArray.js'
 import { validateBoundedIntEnvVar } from '../../utils/envValidation.js'
 import { safeParseJSON } from '../../utils/json.js'
 import { getInferenceProfileBackingModel } from '../../utils/model/bedrock.js'
@@ -439,12 +444,6 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../analytics/index.js'
-import {
-  consumePendingCacheEdits,
-  getPinnedCacheEdits,
-  markToolsSentToAPIState,
-  pinCacheEdits,
-} from '../compact/microCompact.js'
 import { shouldDeferLspTool } from '../lsp/manager.js'
 import { isToolFromMcpServer } from '../mcp/utils.js'
 import {
@@ -520,10 +519,10 @@ import {
   assistantMessageToMessageParam,
   getPreviousRequestIdFromMessages,
   lastAssistantMessageId,
+  stripEmptyUserTextBlocks,
   userMessageToMessageParam,
 } from './claude/messageParams.js'
 import {
-  buildSystemPromptBlocks,
   getCacheControl,
   getPromptCachingEnabled,
   isPromptCacheDiagnosticsEnabled,
@@ -544,13 +543,44 @@ import {
 } from './claude/requestParams.js'
 import { accumulateUsage, cleanupStream, updateUsage } from './claude/usage.js'
 
+/**
+ * Official 2.1.328 `_Os` (`chunk@294254613.js:3482796`) — build system prompt
+ * blocks with prompt-caching breakpoints, supporting `scopeRefused` fallback
+ * (omits `scope` from `cache_control` when `prompt-caching-scope-2026-01-05`
+ * was rejected by the endpoint/proxy).
+ */
+export function buildSystemPromptBlocks(
+  systemPrompt: SystemPrompt,
+  enablePromptCaching: boolean,
+  options?: {
+    skipGlobalCacheForSystemPrompt?: boolean
+    querySource?: QuerySource
+    agentCacheTtlOverride?: PromptCacheTtl
+    scopeRefused?: boolean
+  },
+): TextBlockParam[] {
+  return splitSysPromptPrefix(systemPrompt, {
+    skipGlobalCacheForSystemPrompt: options?.skipGlobalCacheForSystemPrompt,
+  }).map(block => ({
+    type: 'text' as const,
+    text: block.text,
+    ...(enablePromptCaching &&
+      block.cacheScope !== null && {
+        cache_control: getCacheControl({
+          scope: options?.scopeRefused ? undefined : block.cacheScope,
+          querySource: options?.querySource,
+          agentCacheTtlOverride: options?.agentCacheTtlOverride,
+        }),
+      }),
+  }))
+}
+
 export {
   accumulateUsage,
   addCacheBreakpoints,
   adjustParamsForNonStreaming,
   appendSystemReminderToLastUserMessage,
   assistantMessageToMessageParam,
-  buildSystemPromptBlocks,
   cleanupStream,
   configureTaskBudgetParams,
   getAPIMetadata,
@@ -560,27 +590,440 @@ export {
   getPromptCachingEnabled,
   MAX_NON_STREAMING_TOKENS,
   should1hCacheTTL,
+  stripEmptyUserTextBlocks,
   updateUsage,
   userMessageToMessageParam,
 }
 
 /**
- * Official 2.1.321 `t7n` (#1878): wraps a mid-stream `EPROTO` / `ERR_SSL_*`
- * error after an SSE event has already arrived so callers treat it as a
- * truncated stream (keeping partial reply or retrying) rather than surfacing
- * "API Error: EPROTO: The TLS handshake failed".
+ * Official 2.1.328 `Dpr` (`chunk@286370035.js:315894`) — stream ended cleanly
+ * without receiving `message_start` or any completed blocks / stop_reason.
+ */
+export class StreamNoEventsError extends Error {
+  constructor() {
+    super('Stream ended without receiving any events')
+    this.name = 'StreamNoEventsError'
+  }
+}
+
+/**
+ * Official 2.1.328 `wve` (`chunk@286370035.js:316016`) — malformed or
+ * out-of-order SSE event (event on an unstarted or already-closed block).
+ */
+export class StreamMalformedEventError extends Error {
+  readonly blockState: 'unstarted' | 'closed' | 'unreadable'
+
+  constructor(blockState: 'unstarted' | 'closed' | 'unreadable') {
+    super(
+      blockState === 'closed'
+        ? 'Content block already closed'
+        : blockState === 'unreadable'
+          ? 'Stream event unreadable'
+          : 'Content block not found',
+    )
+    this.name = 'StreamMalformedEventError'
+    this.blockState = blockState
+  }
+}
+
+/**
+ * Official 2.1.321 `t7n` (#1878) + 2.1.328 `Lpr` (`chunk@286370035.js:316275`):
+ * retryable stream truncation error for clean EOF mid-block / before terminal
+ * `message_delta`, or mid-stream `EPROTO` / `ERR_SSL_*` after an SSE event.
  */
 export class StreamTruncatedError extends APIConnectionError {
   readonly code = 'StreamTruncated'
   override readonly cause: unknown
 
-  constructor(cause: unknown) {
+  constructor(cause?: unknown) {
     super({
-      message: 'Stream truncated due to mid-stream TLS error',
+      message:
+        cause === undefined
+          ? 'Stream ended before the response was complete'
+          : 'Stream truncated due to mid-stream TLS error',
       cause: cause instanceof Error ? cause : undefined,
     })
     this.name = 'StreamTruncatedError'
     this.cause = cause
+  }
+}
+
+/** Official 2.1.328 `drn.header` (`chunk@285257860.js:170477`). */
+export const RESUMPTION_BETA_HEADER = 'resumption-2026-10-08'
+/** Official 2.1.328 `Exs = 3` (`chunk@294254613.js:3201800`). */
+export const MAX_STREAM_RESUMPTIONS = 3
+const STREAM_RESUMPTION_FLAG = 'tengu_peaceful_wigderson'
+
+export type PausedResponseLimit = 'pause_turn' | 'max_tokens' | 'server_timeout'
+
+export type PausedResponseRecord = {
+  limit: PausedResponseLimit
+  usage: NonNullableUsage
+  finishedBlocks: number
+  requestId?: string
+  resumedRequestId?: string
+}
+
+export type ResumedMessageDeltaEvent = BetaRawMessageStreamEvent & {
+  type: 'message_delta'
+  resumed_usage: BetaRawMessageStreamEvent extends { type: 'message_start' }
+    ? unknown
+    : unknown
+  paused_limit: PausedResponseLimit
+}
+
+export function isResumedUsageMessageDelta(
+  event: unknown,
+): event is BetaRawMessageStreamEvent & {
+  type: 'message_delta'
+  resumed_usage: Partial<NonNullableUsage>
+  paused_limit: PausedResponseLimit
+} {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    (event as { type?: unknown }).type === 'message_delta' &&
+    'resumed_usage' in event
+  )
+}
+
+export type ParsedResumptionPause = {
+  token: string | undefined
+  limit: PausedResponseLimit
+  frame: BetaRawMessageStreamEvent & { type: 'message_delta' }
+}
+
+/**
+ * Official 2.1.328 `Pxs` (`chunk@294254613.js:3205504`) — detect a pausable
+ * `message_delta` carrying `stop_details.resumption` (`max_tokens`,
+ * `server_timeout`, or `pause_turn` with a `resumption.token`), returning a
+ * cleaned frame with `resumption` stripped from `stop_details`.
+ */
+export function parseResumptionPauseDelta(
+  event: BetaRawMessageStreamEvent,
+): ParsedResumptionPause | undefined {
+  if (event.type !== 'message_delta') return undefined
+  const delta = event.delta as {
+    stop_reason?: string | null
+    stop_details?: Record<string, unknown> | null
+  }
+  const stopReason = delta.stop_reason
+  const stopDetails = delta.stop_details
+  if (
+    stopDetails === null ||
+    stopDetails === undefined ||
+    typeof stopDetails !== 'object'
+  ) {
+    return undefined
+  }
+  const resumption = stopDetails.resumption
+  if (
+    resumption === null ||
+    resumption === undefined ||
+    typeof resumption !== 'object'
+  ) {
+    return undefined
+  }
+  const rawToken = (resumption as { token?: unknown }).token
+  const token = typeof rawToken === 'string' ? rawToken : undefined
+  const isResumableLimit =
+    stopReason === 'max_tokens' ||
+    stopReason === 'server_timeout' ||
+    (stopReason === 'pause_turn' && token !== undefined)
+  if (!isResumableLimit) return undefined
+
+  const { resumption: _omittedResumption, ...cleanedStopDetails } = stopDetails
+  return {
+    token,
+    limit: stopReason,
+    frame: {
+      ...event,
+      delta: {
+        ...event.delta,
+        stop_details: cleanedStopDetails,
+      } as typeof event.delta,
+    },
+  }
+}
+
+type ResumptionBlockRecord = {
+  index: number
+  block: Record<string, unknown>
+  inputJson: string
+  incomplete: boolean
+}
+
+export type ResumptionStreamState = {
+  complete: ResumptionBlockRecord[]
+  open: ResumptionBlockRecord | undefined
+  offset: number
+  nextIndex: number
+  messages: BetaMessageStreamParams['messages']
+  replayed?: Omit<BetaMessageStreamParams, 'messages'>
+}
+
+/**
+ * Official 2.1.328 `Oxs` (`chunk@294254613.js:3206200`) — build the follow-up
+ * resumption request payload appending completed assistant blocks and
+ * `resumption: { type: 'enabled', token }`.
+ */
+export function buildResumptionRequestParams(
+  state: ResumptionStreamState,
+  token: string,
+): Record<string, unknown> {
+  const completedBlocks = state.complete.map(({ block, inputJson }) => {
+    if (inputJson === '') return block
+    try {
+      return { ...block, input: JSON.parse(inputJson) }
+    } catch {
+      return block
+    }
+  })
+  return {
+    ...(state.replayed ?? {}),
+    messages:
+      completedBlocks.length === 0
+        ? state.messages
+        : [
+            ...state.messages,
+            {
+              role: 'assistant' as const,
+              content: completedBlocks,
+            },
+          ],
+    resumption: { type: 'enabled', token },
+  }
+}
+
+/** Official 2.1.328 `Ixs` (`chunk@294254613.js:3206600`) — offset block indices across resumptions. */
+function transformResumedStreamEvent(
+  state: ResumptionStreamState,
+  event: BetaRawMessageStreamEvent,
+): BetaRawMessageStreamEvent | undefined {
+  switch (event.type) {
+    case 'content_block_start': {
+      if (state.open?.incomplete) {
+        state.open.incomplete = false
+        return undefined
+      }
+      const index = event.index + state.offset
+      state.open = {
+        index,
+        block: {
+          ...(event.content_block as unknown as Record<string, unknown>),
+        },
+        inputJson: '',
+        incomplete: false,
+      }
+      return { ...event, index }
+    }
+    case 'content_block_delta': {
+      if (
+        'replayed' in event &&
+        (event as { replayed?: unknown }).replayed === true
+      ) {
+        return undefined
+      }
+      const open = state.open
+      const delta = event.delta as unknown as Record<string, unknown>
+      if (open) {
+        if (open.block.type === 'text' && delta.type === 'text_delta') {
+          open.block.text = `${String(open.block.text ?? '')}${String(delta.text ?? '')}`
+        } else if (
+          open.block.type === 'text' &&
+          delta.type === 'citations_delta'
+        ) {
+          const existing = Array.isArray(open.block.citations)
+            ? open.block.citations
+            : []
+          open.block.citations = [...existing, delta.citation]
+        } else if (
+          open.block.type === 'thinking' &&
+          delta.type === 'thinking_delta'
+        ) {
+          open.block.thinking = `${String(open.block.thinking ?? '')}${String(delta.thinking ?? '')}`
+        } else if (
+          open.block.type === 'thinking' &&
+          delta.type === 'signature_delta'
+        ) {
+          open.block.signature = delta.signature
+        } else if (delta.type === 'input_json_delta') {
+          open.inputJson += String(delta.partial_json ?? '')
+        }
+      }
+      return { ...event, index: event.index + state.offset }
+    }
+    case 'content_block_stop': {
+      if (
+        'incomplete' in event &&
+        (event as { incomplete?: unknown }).incomplete === true
+      ) {
+        if (state.open !== undefined) {
+          state.open.incomplete = true
+        }
+        return undefined
+      }
+      const index = event.index + state.offset
+      if (state.open !== undefined) {
+        state.complete.push(state.open)
+        state.open = undefined
+      }
+      state.nextIndex = index + 1
+      return { ...event, index }
+    }
+    default:
+      return event
+  }
+}
+
+function* closeIncompleteOpenTextBlock(
+  state: ResumptionStreamState,
+): Generator<BetaRawMessageStreamEvent> {
+  if (state.open?.incomplete && state.open.block.type === 'text') {
+    yield {
+      type: 'content_block_stop',
+      index: state.open.index,
+    } as BetaRawMessageStreamEvent
+  }
+}
+
+export type WrapStreamWithResumptionOptions = {
+  messages: BetaMessageStreamParams['messages']
+  replayed?: Omit<BetaMessageStreamParams, 'messages'>
+  send: (
+    params: Record<string, unknown>,
+  ) => Promise<AsyncIterable<BetaRawMessageStreamEvent> | undefined>
+  isCancelled: () => boolean
+  fits?: (usage: unknown) => boolean
+  canResume?: () => boolean
+  maxResumptions?: number
+  onPaused?: () => void
+  onAnswered?: () => void
+  onCancelledAtPause?: (usage: unknown) => void
+}
+
+/**
+ * Official 2.1.328 `Wno` (`chunk@294254613.js:3202790-3206600`) — transparent
+ * server-side stream resumption for `pause_turn` / `max_tokens` /
+ * `server_timeout` responses carrying `stop_details.resumption.token`.
+ */
+export async function* wrapStreamWithResumption(
+  initialStream: AsyncIterable<BetaRawMessageStreamEvent>,
+  opts: WrapStreamWithResumptionOptions,
+): AsyncGenerator<BetaRawMessageStreamEvent> {
+  const state: ResumptionStreamState = {
+    complete: [],
+    open: undefined,
+    offset: 0,
+    nextIndex: 0,
+    messages: opts.messages,
+    replayed: opts.replayed,
+  }
+  const maxResumptions = opts.maxResumptions ?? MAX_STREAM_RESUMPTIONS
+  let activeStream: AsyncIterable<BetaRawMessageStreamEvent> = initialStream
+  let paused: ParsedResumptionPause | undefined
+  let resumptionCount = 0
+
+  for (;;) {
+    let answeredCurrent = paused === undefined
+    try {
+      for await (const event of activeStream) {
+        if (event.type === 'message_start') {
+          if (paused !== undefined) {
+            answeredCurrent = true
+            opts.onAnswered?.()
+            const resumedUsage = event.message?.usage
+            yield {
+              ...paused.frame,
+              delta: {
+                stop_reason: null,
+                stop_sequence: null,
+                stop_details: null,
+                container: null,
+              },
+              resumed_usage: resumedUsage,
+              paused_limit: paused.limit,
+            } as unknown as BetaRawMessageStreamEvent
+            paused = undefined
+            continue
+          }
+        }
+        if (event.type === 'message_delta') {
+          const parsedPause = parseResumptionPauseDelta(event)
+          if (parsedPause !== undefined) {
+            paused = parsedPause
+            continue
+          }
+          if (typeof event.delta.stop_reason === 'string') {
+            yield* closeIncompleteOpenTextBlock(state)
+            yield event
+            continue
+          }
+        }
+        if (event.type === 'message_stop' && paused !== undefined) {
+          break
+        }
+        const transformed = transformResumedStreamEvent(state, event)
+        if (transformed !== undefined) {
+          yield transformed
+        }
+      }
+    } catch (err) {
+      if (paused === undefined) throw err
+      if (opts.isCancelled()) {
+        opts.onCancelledAtPause?.(paused.frame.usage)
+        throw err
+      }
+    }
+
+    if (paused === undefined) {
+      return
+    }
+    if (opts.isCancelled()) {
+      opts.onCancelledAtPause?.(paused.frame.usage)
+      return
+    }
+    if (answeredCurrent) {
+      opts.onPaused?.()
+      state.offset = state.nextIndex
+      resumptionCount++
+    }
+    const { token } = paused
+    const shouldResume =
+      answeredCurrent &&
+      token !== undefined &&
+      resumptionCount <= maxResumptions &&
+      (opts.fits?.(paused.frame.usage) ?? true) &&
+      (opts.canResume?.() ?? true)
+
+    let nextStream: AsyncIterable<BetaRawMessageStreamEvent> | undefined
+    if (shouldResume && token !== undefined) {
+      try {
+        nextStream = await opts.send(buildResumptionRequestParams(state, token))
+      } catch (err) {
+        if (opts.isCancelled()) {
+          opts.onCancelledAtPause?.(paused.frame.usage)
+          throw err
+        }
+        nextStream = undefined
+      }
+    }
+    if (nextStream === undefined) {
+      yield* closeIncompleteOpenTextBlock(state)
+      yield {
+        ...paused.frame,
+        delta: {
+          ...paused.frame.delta,
+          stop_reason:
+            paused.limit === 'pause_turn' && state.open?.incomplete !== true
+              ? 'pause_turn'
+              : 'max_tokens',
+        },
+      } as BetaRawMessageStreamEvent
+      yield { type: 'message_stop' } as BetaRawMessageStreamEvent
+      return
+    }
+    activeStream = nextStream
   }
 }
 
@@ -870,6 +1313,23 @@ export type Options = {
    * effort off for the model across the session.
    */
   leavesEffortSupportAlone?: boolean
+  /** Official 2.1.328 `Yso` `keepForeignThinking` policy (default `'none'`). */
+  keepForeignThinking?: KeepForeignThinkingMode
+  /** Official 2.1.328 `ie.resumeIncompleteThinking` — suppress blanket thinking strip when resuming incomplete thinking. */
+  resumeIncompleteThinking?: boolean
+  /**
+   * Callback invoked after `message_delta` writes back `usage`, `stop_reason`,
+   * `stop_details`, `context_management`, `resumable`, and `pausedResponses`
+   * onto `newMessages` so callers holding cloned messages can sync them.
+   */
+  onMessageDelta?: (messages: AssistantMessage[]) => void
+  /**
+   * When true, refusal fallback yields `fallback_request` cleanly and returns
+   * for caller (`query.ts`) handling instead of running the dialog inside SSE.
+   */
+  refusalFallbackHandledByCaller?: boolean
+  /** Opt-in flag to enable transparent `pause_turn` stream resumption (`Wno`). */
+  enableStreamResumption?: boolean
   addNotification?: (notif: Notification) => void
   /**
    * densable 2.1.214 #39 onRetryStatus — stream stall / retry UI status.
@@ -1179,6 +1639,7 @@ export async function* executeNonStreamingRequest(
       querySource: retryOptions.querySource,
       onError: retryOptions.onError,
       onRetryStatus: retryOptions.onRetryStatus,
+      isNonStreamingRequest: true,
     },
   )
 
@@ -1550,34 +2011,6 @@ async function* queryModel(
     }
   }
 
-  // Determine if cached microcompact is enabled for this model.
-  // Computed once here (in async context) and captured by paramsFromContext.
-  // The beta header is also captured here to avoid a top-level import of the
-  // ant-only CACHE_EDITING_BETA_HEADER constant.
-  let cachedMCEnabled = false
-  let cacheEditingBetaHeader = ''
-  if (feature('CACHED_MICROCOMPACT')) {
-    const {
-      isCachedMicrocompactEnabled,
-      isModelSupportedForCacheEditing,
-      getCachedMCConfig,
-    } = await import('../compact/cachedMicrocompact.js')
-    const betas = await import('src/constants/betas.js')
-    cacheEditingBetaHeader = betas.CACHE_EDITING_BETA_HEADER
-    const featureEnabled = isCachedMicrocompactEnabled()
-    const modelSupported = isModelSupportedForCacheEditing(options.model)
-    // cachedMC requires a non-empty beta header; the CACHE_EDITING_BETA_HEADER
-    // constant is '' in this fork (upstream hasn't published the real value).
-    // Without it, cache_reference and cache_edits in the request body cause
-    // API 400: "tool_result.cache_reference: Extra inputs are not permitted".
-    const headerAvailable = !!cacheEditingBetaHeader
-    cachedMCEnabled = featureEnabled && modelSupported && headerAvailable
-    const config = getCachedMCConfig()
-    logForDebugging(
-      `Cached MC gate: enabled=${featureEnabled} modelSupported=${modelSupported} headerAvailable=${headerAvailable} model=${options.model} supportedModels=${jsonStringify((config as Record<string, unknown>).supportedModels)}`,
-    )
-  }
-
   const useGlobalCacheFeature = shouldUseGlobalCacheScope()
   // MCP tools are per-user → dynamic tool section → can't globally cache.
   const needsToolBasedCacheMarker =
@@ -1769,8 +2202,22 @@ async function* queryModel(
     return next
   }
 
+  // Official 2.1.328 `Yso` / `fio` (`chunk@294254613.js:3319260, 6069470`):
+  // strip signed `thinking` and `redacted_thinking` blocks ONLY from assistant
+  // messages whose `message.model` is foreign/incompatible with the target model,
+  // preserving same-model thinking blocks for prompt cache & multi-turn continuity.
+  const messagesWithForeignThinkingStripped = stripForeignThinkingBlocks(
+    messages,
+    normalizeModelStringForAPI(options.model),
+    { keepForeignThinking: options.keepForeignThinking },
+  )
+
   let messagesForAPI = postNormalizeForAPI(
-    normalizeMessagesForAPI(messages, filteredTools, normalizeModel),
+    normalizeMessagesForAPI(
+      messagesWithForeignThinkingStripped,
+      filteredTools,
+      normalizeModel,
+    ),
   )
   queryCheckpoint('query_message_normalization_end')
   // densable qWT → HWT after query_message_normalization_end (keep 100/600 +
@@ -1837,7 +2284,11 @@ async function* queryModel(
       ? () =>
           applyHwt(
             postNormalizeForAPI(
-              normalizeMessagesForAPI(messages, filteredTools, undefined),
+              normalizeMessagesForAPI(
+                messagesWithForeignThinkingStripped,
+                filteredTools,
+                undefined,
+              ),
             ),
           )
       : () => primary
@@ -1975,11 +2426,14 @@ async function* queryModel(
 
   const enablePromptCaching =
     options.enablePromptCaching ?? getPromptCachingEnabled(options.model)
-  const system = buildSystemPromptBlocks(systemPrompt, enablePromptCaching, {
-    skipGlobalCacheForSystemPrompt: needsToolBasedCacheMarker,
-    querySource: options.querySource,
-    agentCacheTtlOverride: options.agentCacheTtlOverride,
-  })
+  const buildSystem = (): TextBlockParam[] =>
+    buildSystemPromptBlocks(systemPrompt, enablePromptCaching, {
+      skipGlobalCacheForSystemPrompt: needsToolBasedCacheMarker,
+      querySource: options.querySource,
+      agentCacheTtlOverride: options.agentCacheTtlOverride,
+      scopeRefused: isStickyBetaRejected(PROMPT_CACHING_SCOPE_BETA_HEADER),
+    })
+  let system = buildSystem()
   const useBetas = betas.length > 0
 
   // densable 2.1.251 D6e — Sr intended TTL + main-thread querySource for xhe
@@ -2065,19 +2519,6 @@ async function* queryModel(
     setFastModeHeaderLatched(true)
   }
 
-  let cacheEditingHeaderLatched = getCacheEditingHeaderLatched() === true
-  if (feature('CACHED_MICROCOMPACT')) {
-    if (
-      !cacheEditingHeaderLatched &&
-      cachedMCEnabled &&
-      getAPIProvider() === 'firstParty' &&
-      options.querySource === 'repl_main_thread'
-    ) {
-      cacheEditingHeaderLatched = true
-      setCacheEditingHeaderLatched(true)
-    }
-  }
-
   const carriedEffort = resolveCarriedEffortForModel(
     {
       loopEffort: options.refusalFallbackEffort,
@@ -2130,7 +2571,6 @@ async function* queryModel(
       betas,
       autoModeActive: afkHeaderLatched,
       isUsingOverage: currentLimits.isUsingOverage ?? false,
-      cachedMCEnabled: cacheEditingHeaderLatched,
       anyDeferLoading: toolsForCacheDetection.length !== allTools.length,
       is1hCacheTTL: should1hCacheTTL(options.querySource, {
         agentCacheTtlOverride: options.agentCacheTtlOverride,
@@ -2183,12 +2623,6 @@ async function* queryModel(
     }
   }
 
-  // Consume pending cache edits ONCE before paramsFromContext is defined.
-  // paramsFromContext is called multiple times (logging, retries), so consuming
-  // inside it would cause the first call to steal edits from subsequent calls.
-  const consumedCacheEdits = cachedMCEnabled ? consumePendingCacheEdits() : null
-  const consumedPinnedEdits = cachedMCEnabled ? getPinnedCacheEdits() : []
-
   // Capture the betas sent in the last API request, including the ones that
   // were dynamically added, so we can log and send it to telemetry.
   let lastRequestBetas: string[] | undefined
@@ -2204,6 +2638,11 @@ async function* queryModel(
   let lastSentTokenCount = false
   let lastBindingControlsOnThirdParty = false
   let prefixLockStripAttempt = 0
+  // Official 2.1.328 `JXo` / `Gjn` (`chunk@294254613.js:2034842, 3401046`):
+  // track whether the last request sent `clear_tool_uses_20250919` so HTTP 400
+  // refusal strips the edit, latches the model, and retries cleanly.
+  let lastSentClearToolUses = false
+  let clearToolUsesDisabledForRequest = false
   // Official lM — active media-item-limit retry state (#13)
   let pendingMediaCap:
     | { limit: number; steps: number; refusedAt: number }
@@ -2292,7 +2731,9 @@ async function* queryModel(
           markRelayThinkingStripRecorded('marker')
         },
         prefixLockAttempt: prefixLockStripAttempt + 1,
+        resumeIncompleteThinking: options.resumeIncompleteThinking,
         leavesEffortSupportAlone: options.leavesEffortSupportAlone,
+        querySource: options.querySource,
       },
     )
     if (token === 'retry:thinking-display-updates') {
@@ -2331,6 +2772,18 @@ async function* queryModel(
     }
     if (token != null) {
       return token
+    }
+
+    // Official 2.1.328 `JXo` / `Gjn` (`chunk@294254613.js:2034842, 3401046`):
+    // HTTP 400 refusing `clear_tool_uses_20250919` latches the model for the
+    // process, strips the edit for this request, and retries cleanly.
+    if (
+      lastSentClearToolUses &&
+      handleClearToolUsesRefusalError(error, options.model)
+    ) {
+      clearToolUsesDisabledForRequest = true
+      lastSentClearToolUses = false
+      return 'retry:tool-result-clearing-edit'
     }
 
     // Official 2.1.314 k0o — API 400 "Invalid effort level" from org cap:
@@ -2373,6 +2826,10 @@ async function* queryModel(
       betas = betas.filter(b => !rejectedSet.has(b))
       for (const h of rejectedSet) {
         strippedBedrockBetas.add(h)
+      }
+      if (rejectedSet.has(PROMPT_CACHING_SCOPE_BETA_HEADER)) {
+        stickyRejectBeta(PROMPT_CACHING_SCOPE_BETA_HEADER)
+        system = buildSystem()
       }
       if (
         rejectedSet.has(EFFORT_BETA_HEADER) &&
@@ -2820,7 +3277,12 @@ async function* queryModel(
         ) {
           thinkingBudget = thinkingConfig.budgetTokens
         }
-        thinkingBudget = Math.min(maxOutputTokens - 1, thinkingBudget)
+        // Official 2.1.328 (`chunk@294254613.js:3372275`): enforce the 1024-token
+        // API floor on thinking.budget_tokens (`Math.max(1024, Math.min(maxOutputTokens - 1, thinkingBudget))`).
+        thinkingBudget = Math.max(
+          1024,
+          Math.min(maxOutputTokens - 1, thinkingBudget),
+        )
         thinking = {
           budget_tokens: thinkingBudget,
           type: 'enabled',
@@ -3031,12 +3493,19 @@ async function* queryModel(
       toolChoice = { type: 'auto' }
     }
 
-    // Get API context management strategies if enabled
+    // Get API context management strategies if enabled (official SUn + idle-gated zjn)
     const contextManagement = getAPIContextManagement({
       hasThinking,
       isRedactThinkingActive: betasParams.includes(REDACT_THINKING_BETA_HEADER),
       clearAllThinking: false,
+      model: options.model,
+      messages,
+      disableClearToolUses: clearToolUsesDisabledForRequest,
     })
+    lastSentClearToolUses =
+      contextManagement?.edits.some(
+        edit => edit.type === 'clear_tool_uses_20250919',
+      ) === true
 
     const enablePromptCaching =
       options.enablePromptCaching ?? getPromptCachingEnabled(retryContext.model)
@@ -3071,26 +3540,6 @@ async function* queryModel(
       }
     }
 
-    // Cache editing beta: header is latched session-stable; useCachedMC
-    // (controls cache_edits body behavior) stays live so edits stop when
-    // the feature disables but the header doesn't flip.
-    const useCachedMC =
-      cachedMCEnabled &&
-      getAPIProvider() === 'firstParty' &&
-      options.querySource === 'repl_main_thread'
-    if (
-      cacheEditingHeaderLatched &&
-      cacheEditingBetaHeader &&
-      getAPIProvider() === 'firstParty' &&
-      options.querySource === 'repl_main_thread' &&
-      !betasParams.includes(cacheEditingBetaHeader)
-    ) {
-      betasParams.push(cacheEditingBetaHeader)
-      logForDebugging(
-        'Cache editing beta header enabled for cached microcompact',
-      )
-    }
-
     // densable `_e&&!yt.includes(Opt))yt.push(Opt)` — send cache-diagnosis when
     // sticky sent&&!rejected (latched above via MWT/pje).
     if (
@@ -3100,14 +3549,16 @@ async function* queryModel(
       betasParams.push(CACHE_DIAGNOSIS_BETA_HEADER)
     }
 
-    // Only send temperature when thinking is disabled — the API requires
-    // temperature: 1 when thinking is enabled, which is already the default.
-    const temperature = !hasThinking
-      ? (options.temperatureOverride ?? 1)
-      : undefined
+    // Official 2.1.328 (`chunk@294254613.js:3377210`): only send temperature
+    // when thinking is disabled AND the model accepts `temperature` (`dn.acceptsTemperature`).
+    const modelFacts = getModelFacts(resolvedModel)
+    const temperature =
+      !hasThinking && modelFacts.acceptsTemperature
+        ? (options.temperatureOverride ?? 1)
+        : undefined
 
     // Filter out any empty-string beta headers before sending.
-    // Constants like CACHE_EDITING_BETA_HEADER or AFK_MODE_BETA_HEADER
+    // Constants like AFK_MODE_BETA_HEADER or CLI_INTERNAL_BETA_HEADER
     // can be '' when their feature gate is off; an empty string in the
     // betas array produces an invalid anthropic-beta header (400 error).
     // Official SIMULATE_PROXY_USAGE: keep only oauth beta (eJe) so requests
@@ -3214,9 +3665,6 @@ async function* queryModel(
       messagesForAPI,
       enablePromptCaching,
       options.querySource,
-      useCachedMC,
-      consumedCacheEdits,
-      consumedPinnedEdits,
       options.skipCacheWrite,
       options.agentCacheTtlOverride,
     )
@@ -3355,6 +3803,13 @@ async function* queryModel(
   // Official 2.1.328 `xCt.onReplyBegun()`: hold retry-lowered max_tokens ceiling
   // until the response stream actually starts (`message_start`).
   let confirmPendingMaxTokensCeiling: (() => void) | undefined
+  // Official 2.1.328 `Wno` (`chunk@294254613.js:3202790`): capture client +
+  // request params so server-side `pause_turn` / `stop_details.resumption.token`
+  // can transparently open a resumed stream.
+  let lastStreamClient:
+    | Awaited<ReturnType<typeof getAnthropicClient>>
+    | undefined
+  let lastStreamParams: ReturnType<typeof paramsFromContext> | undefined
 
   // densable labeled stream loop (`e:`): withRetry + for-await + partial path.
   while (true) {
@@ -3385,6 +3840,8 @@ async function* queryModel(
             queryCheckpoint('query_client_creation_end')
 
             const params = paramsFromContext(context)
+            lastStreamClient = anthropic
+            lastStreamParams = params
             captureAPIRequest(params, options.querySource) // Capture for bug reports
             void recordApiRequestForReplay({
               params: params as unknown as Record<string, unknown>,
@@ -3545,8 +4002,15 @@ async function* queryModel(
         usage = EMPTY_USAGE
         stopReason = null
         // densable To / at — #5 close-after-complete (Br=stopReason)
+        // Official 2.1.328 `mS`, `yx`, `Dc`, `jf`, `SEe`, `qie`, `VU`, `S3`
+        let streamMessageInProgress = false
         let messageDeltaCompleted = false
         let openContentBlockIndex: number | null = null
+        const closedContentBlocks = new Set<number>()
+        let thinkingEstimatedTokens = 0
+        let contextManagementResponse: unknown
+        const pausedResponses: PausedResponseRecord[] = []
+        let pausedRequestId: string | null | undefined = streamRequestId
         // Official Fh, Sb, lE, Aw, _h, QS (#121) — close abandoned stream envelope
         let streamMessageEnvelopeOpen = false
         let openBlockIndexForEnvelope: number | null = null
@@ -3795,10 +4259,78 @@ async function* queryModel(
           const CONSECUTIVE_PING_CAP = 30
           let consecutivePingCount = 0
 
+          // Official 2.1.328 `Wno` (`chunk@294254613.js:3202790, 3435194`):
+          // wrap stream with transparent server-side `pause_turn` /
+          // `stop_details.resumption.token` resumption when enabled.
+          const streamResumptionActive =
+            lastStreamClient !== undefined &&
+            lastStreamParams !== undefined &&
+            (options.enableStreamResumption === true ||
+              (lastRequestBetas?.includes(RESUMPTION_BETA_HEADER) === true &&
+                getFeatureValue_CACHED_MAY_BE_STALE(
+                  STREAM_RESUMPTION_FLAG,
+                  false,
+                )))
+          const activeEventStream: AsyncIterable<BetaRawMessageStreamEvent> =
+            streamResumptionActive && lastStreamClient && lastStreamParams
+              ? (() => {
+                  const resumptionClient = lastStreamClient
+                  const { messages: initialWireMessages, ...replayedParams } =
+                    lastStreamParams
+                  return wrapStreamWithResumption(stream, {
+                    messages: initialWireMessages,
+                    replayed: replayedParams,
+                    isCancelled: () =>
+                      signal.aborted ||
+                      streamIdleAborted ||
+                      streamSuspendedError !== undefined,
+                    canResume: () =>
+                      options.enableStreamResumption === true ||
+                      getFeatureValue_CACHED_MAY_BE_STALE(
+                        STREAM_RESUMPTION_FLAG,
+                        false,
+                      ),
+                    send: async resumeParams => {
+                      clearStreamIdleTimers()
+                      const resumed = await resumptionClient.beta.messages
+                        .create(
+                          {
+                            ...(resumeParams as unknown as BetaMessageStreamParams),
+                            stream: true,
+                          },
+                          {
+                            signal,
+                            ...(clientRequestId && {
+                              headers: {
+                                [CLIENT_REQUEST_ID_HEADER]: clientRequestId,
+                              },
+                            }),
+                          },
+                        )
+                        .withResponse()
+                      streamRequestId = resumed.request_id
+                      streamResponse = resumed.response
+                      resetStreamIdleTimer()
+                      return resumed.data
+                    },
+                    onCancelledAtPause: pausedUsage => {
+                      usage = updateUsage(
+                        usage,
+                        pausedUsage as Parameters<typeof updateUsage>[1],
+                      )
+                      for (const msg of newMessages) {
+                        msg.message.usage = usage
+                      }
+                      options.onMessageDelta?.(newMessages)
+                    },
+                  })
+                })()
+              : stream
+
           // densable Tfb(Ne, So) — synthetic keep-alive pings when body bytes advance
           // without SSE events (custom gateway / ANTHROPIC_BASE_URL proxies).
           for await (const partOrPing of withStreamKeepAlivePings(
-            stream,
+            activeEventStream,
             chunkTimes,
           )) {
             if (isStreamPingEvent(partOrPing)) {
@@ -4002,11 +4534,29 @@ async function* queryModel(
 
             switch (part.type) {
               case 'message_start': {
+                streamMessageInProgress = true
                 if (confirmPendingMaxTokensCeiling) {
                   confirmPendingMaxTokensCeiling()
                   confirmPendingMaxTokensCeiling = undefined
                 }
                 partialMessage = part.message
+                // Official 2.1.328 `Kys` (`chunk@294254613.js:3439150`): latch
+                // served model alias so `stripForeignThinkingBlocks` recognizes it.
+                if (part.message?.model) {
+                  const reqModelKey = normalizeModelStringForAPI(options.model)
+                  if (part.message.model !== reqModelKey) {
+                    const existingServed =
+                      getServedModelsForRequestedModel(reqModelKey)
+                    if (existingServed instanceof Set) {
+                      existingServed.add(part.message.model)
+                    } else {
+                      recordServedModels(
+                        reqModelKey,
+                        new Set([part.message.model]),
+                      )
+                    }
+                  }
+                }
                 ttftMs = Date.now() - start
                 usage = updateUsage(usage, part.message?.usage)
                 // Capture research from message_start if available (internal only).
@@ -4023,6 +4573,16 @@ async function* queryModel(
                 break
               }
               case 'content_block_start':
+                if (closedContentBlocks.has(part.index)) {
+                  logEvent('tengu_streaming_error', {
+                    error_type:
+                      'content_block_closed_start' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    part_type:
+                      part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    part_index: part.index,
+                  })
+                  throw new StreamMalformedEventError('closed')
+                }
                 // densable: switch(To=!1, us.content_block.type); at=us.index
                 messageDeltaCompleted = false
                 openContentBlockIndex = part.index
@@ -4092,15 +4652,22 @@ async function* queryModel(
                 const delta = part.delta as
                   | typeof part.delta
                   | ConnectorTextDelta
-                if (!contentBlock) {
+                const blockAlreadyClosed = closedContentBlocks.has(part.index)
+                if (!contentBlock || !blockAlreadyClosed) {
+                  messageDeltaCompleted = false
+                }
+                if (!contentBlock || blockAlreadyClosed) {
                   logEvent('tengu_streaming_error', {
-                    error_type:
-                      'content_block_not_found_delta' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    error_type: (contentBlock
+                      ? 'content_block_closed_delta'
+                      : 'content_block_not_found_delta') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                     part_type:
                       part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                     part_index: part.index,
                   })
-                  throw new RangeError('Content block not found')
+                  throw new StreamMalformedEventError(
+                    contentBlock ? 'closed' : 'unstarted',
+                  )
                 }
                 if (
                   feature('CONNECTOR_TEXT') &&
@@ -4124,9 +4691,23 @@ async function* queryModel(
                   ).connector_text += delta.connector_text
                 } else {
                   switch (delta.type) {
-                    case 'citations_delta':
-                      // TODO: handle citations
+                    case 'citations_delta': {
+                      // Official 2.1.328 (`chunk@294254613.js:3441470`): append
+                      // delta.citation onto text content block's citations array.
+                      if (contentBlock.type !== 'text') break
+                      const citation = (delta as { citation?: unknown })
+                        .citation
+                      if (typeof citation === 'object' && citation !== null) {
+                        const textBlock = contentBlock as {
+                          citations?: unknown[]
+                        }
+                        textBlock.citations = [
+                          ...(textBlock.citations ?? []),
+                          citation,
+                        ]
+                      }
                       break
+                    }
                     case 'input_json_delta':
                       if (
                         contentBlock.type !== 'tool_use' &&
@@ -4190,7 +4771,21 @@ async function* queryModel(
                       }
                       contentBlock.signature = delta.signature
                       break
-                    case 'thinking_delta':
+                    case 'thinking_delta': {
+                      // Official 2.1.328 (`chunk@294254613.js:3442480`): accumulate
+                      // estimated_tokens and break cleanly on redacted_thinking.
+                      const estTokens = (
+                        delta as { estimated_tokens?: unknown }
+                      ).estimated_tokens
+                      if (
+                        typeof estTokens === 'number' &&
+                        Number.isFinite(estTokens)
+                      ) {
+                        thinkingEstimatedTokens += estTokens
+                      }
+                      if (contentBlock.type === 'redacted_thinking') {
+                        break
+                      }
                       if (contentBlock.type !== 'thinking') {
                         logEvent('tengu_streaming_error', {
                           error_type:
@@ -4200,11 +4795,12 @@ async function* queryModel(
                           actual_type:
                             contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                         })
-                        throw new Error('Content block is not a thinking block')
+                        throw new StreamMalformedEventError('unreadable')
                       }
                       ;(contentBlock as { thinking: string }).thinking +=
                         delta.thinking
                       break
+                    }
                   }
                 }
                 // Capture research from content_block_delta if available (internal only).
@@ -4215,20 +4811,26 @@ async function* queryModel(
                 break
               }
               case 'content_block_stop': {
-                // densable: To=!1, at=null
-                messageDeltaCompleted = false
-                openContentBlockIndex = null
                 const contentBlock = contentBlocks[part.index]
-                if (!contentBlock) {
+                const blockAlreadyClosed = closedContentBlocks.has(part.index)
+                if (!contentBlock || !blockAlreadyClosed) {
+                  messageDeltaCompleted = false
+                }
+                if (!contentBlock || blockAlreadyClosed) {
                   logEvent('tengu_streaming_error', {
-                    error_type:
-                      'content_block_not_found_stop' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    error_type: (contentBlock
+                      ? 'content_block_closed_stop'
+                      : 'content_block_not_found_stop') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                     part_type:
                       part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                     part_index: part.index,
                   })
-                  throw new RangeError('Content block not found')
+                  throw new StreamMalformedEventError(
+                    contentBlock ? 'closed' : 'unstarted',
+                  )
                 }
+                // densable: To=!1, at=null
+                openContentBlockIndex = null
                 if (!partialMessage) {
                   logEvent('tengu_streaming_error', {
                     error_type:
@@ -4283,11 +4885,22 @@ async function* queryModel(
                     serverClassifierEnvelope(serverClassifierRequest)),
                 }
                 newMessages.push(m)
+                closedContentBlocks.add(part.index)
                 yield m
                 break
               }
               case 'message_delta': {
                 usage = updateUsage(usage, part.usage)
+                if (
+                  'context_management' in
+                    (part as unknown as Record<string, unknown>) &&
+                  (part as unknown as { context_management?: unknown })
+                    .context_management !== undefined
+                ) {
+                  contextManagementResponse = (
+                    part as unknown as { context_management?: unknown }
+                  ).context_management
+                }
                 if (
                   serverClassifierRequest !== undefined &&
                   typeof part.delta === 'object' &&
@@ -4299,6 +4912,35 @@ async function* queryModel(
                     part.delta,
                     contentBlocks,
                   )
+                }
+                // Official 2.1.328 `cyt(ml)` (`chunk@294254613.js:3445450`):
+                // when `wrapStreamWithResumption` seamlessly resumed a paused
+                // stream, record the paused segment in `pausedResponses` and
+                // reset per-segment accumulators to the resumed stream's usage.
+                if (isResumedUsageMessageDelta(part)) {
+                  pausedResponses.push({
+                    limit: part.paused_limit,
+                    usage,
+                    finishedBlocks: closedContentBlocks.size,
+                    requestId: pausedRequestId ?? undefined,
+                    resumedRequestId: streamRequestId ?? undefined,
+                  })
+                  pausedRequestId = streamRequestId
+                  streamCostCredit = 'none'
+                  thinkingEstimatedTokens = 0
+                  stopReason = null
+                  usage = updateUsage(
+                    EMPTY_USAGE,
+                    part.resumed_usage as Parameters<typeof updateUsage>[1],
+                  )
+                  if (partialMessage !== undefined) {
+                    const partialRec = partialMessage as unknown as Record<
+                      string,
+                      unknown
+                    >
+                    partialRec.pausedResponses = pausedResponses
+                    partialRec.usage = usage
+                  }
                 }
                 // Capture research from message_delta if available (internal only).
                 // Always overwrite with the latest value. Also write back to
@@ -4315,55 +4957,35 @@ async function* queryModel(
                   }
                 }
 
-                // Write final usage and stop_reason back to ALL yielded messages.
-                // densable: for (let Qo of ve) Qo.message.usage=tt, stop_reason=wt
-                // Messages are created at content_block_stop from partialMessage
-                // (output_tokens: 0, stop_reason: null). message_delta arrives
-                // after with the real cumulative values.
-                //
-                // IMPORTANT: Use direct property mutation, not object replacement.
-                // The transcript write queue holds a reference to message.message
-                // and serializes it lazily (100ms flush interval). Object
-                // replacement ({ ...lastMsg.message, usage }) would disconnect
-                // the queued reference; direct mutation ensures the transcript
-                // captures the final values.
-                stopReason = part.delta.stop_reason
-                // densable: if(Br=us.delta.stop_reason, Br!==null) To=!0
-                if (stopReason != null) {
-                  messageDeltaCompleted = true
-                }
-
-                for (const msg of newMessages) {
-                  msg.message.usage = usage
-                  msg.message.stop_reason = stopReason
-                }
-
                 // densable G2s — mint fallback_credit_token from stop_details once
+                // and scrub sensitive/transient fields (`fallback_credit_token`,
+                // `resumption`, `resumption_token`) before writing stop_details back.
+                const deltaRec = part.delta as unknown as {
+                  stop_reason?: string | null
+                  stop_details?: Record<string, unknown> | null
+                  resumable?: unknown
+                }
                 try {
-                  const delta = part.delta as {
-                    stop_details?: unknown & {
-                      fallback_credit_token?: unknown
-                    }
-                  }
-                  if (delta.stop_details !== undefined) {
+                  if (
+                    deltaRec.stop_details !== undefined &&
+                    deltaRec.stop_details !== null
+                  ) {
                     // eslint-disable-next-line @typescript-eslint/no-require-imports
                     const { planFallbackCreditMint } =
                       require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
                     const mint = planFallbackCreditMint({
-                      stopDetails: delta.stop_details,
+                      stopDetails: deltaRec.stop_details,
                       alreadyMinted: fallbackCreditMinted,
                     })
-                    // scrub token from live delta (privacy; densable deletes in place)
                     if (
-                      typeof delta.stop_details === 'object' &&
-                      delta.stop_details !== null &&
-                      'fallback_credit_token' in delta.stop_details
+                      typeof deltaRec.stop_details === 'object' &&
+                      deltaRec.stop_details !== null
                     ) {
-                      delete (
-                        delta.stop_details as {
-                          fallback_credit_token?: unknown
-                        }
-                      ).fallback_credit_token
+                      if ('fallback_credit_token' in deltaRec.stop_details) {
+                        delete deltaRec.stop_details.fallback_credit_token
+                      }
+                      delete deltaRec.stop_details.resumption
+                      delete deltaRec.stop_details.resumption_token
                     }
                     if (mint.creditCode !== undefined) {
                       mintedFallbackCreditCode = mint.creditCode
@@ -4388,6 +5010,51 @@ async function* queryModel(
                 } catch {
                   // densable optional
                 }
+
+                // Write final usage, stop_reason, stop_details, context_management,
+                // resumable, and pausedResponses back to ALL yielded messages
+                // (official 2.1.328 `chunk@294254613.js:3446500-3447500`).
+                //
+                // IMPORTANT: Use direct property mutation, not object replacement.
+                // The transcript write queue holds a reference to message.message
+                // and serializes it lazily (100ms flush interval).
+                const frameStopReason =
+                  typeof part.delta.stop_reason === 'string'
+                    ? part.delta.stop_reason
+                    : null
+                if (frameStopReason !== null) {
+                  stopReason = frameStopReason
+                  messageDeltaCompleted = true
+                }
+                const partRec = part as unknown as { resumable?: unknown }
+                const resumableFlag =
+                  typeof deltaRec.resumable === 'boolean'
+                    ? deltaRec.resumable
+                    : typeof partRec.resumable === 'boolean'
+                      ? partRec.resumable
+                      : undefined
+
+                for (const msg of newMessages) {
+                  msg.message.usage = usage
+                  msg.message.stop_reason = stopReason
+                  const msgInner = msg.message as unknown as Record<
+                    string,
+                    unknown
+                  >
+                  if (frameStopReason !== null || stopReason === null) {
+                    msgInner.stop_details = deltaRec.stop_details ?? null
+                  }
+                  if (contextManagementResponse !== undefined) {
+                    msgInner.context_management = contextManagementResponse
+                  }
+                  if (resumableFlag !== undefined) {
+                    msgInner.resumable = resumableFlag
+                  }
+                  if (pausedResponses.length > 0) {
+                    msgInner.pausedResponses = pausedResponses
+                  }
+                }
+                options.onMessageDelta?.(newMessages)
 
                 // densable non-mid end hop: !ui && di (lastHop / deferred)
                 if (
@@ -4477,6 +5144,7 @@ async function* queryModel(
                   try {
                     // eslint-disable-next-line @typescript-eslint/no-require-imports
                     const {
+                      getSwitchModelsOnFlag,
                       isRefusalFallbackEnabled,
                       runRefusalFallbackDialogFlow,
                       getProviderRefusalFallbackGuidanceText,
@@ -4536,6 +5204,28 @@ async function* queryModel(
                           // densable optional
                         }
                       } else if (
+                        options.refusalFallbackHandledByCaller === true
+                      ) {
+                        // Official 2.1.328 (`chunk@294254613.js:3449563`):
+                        // yield `fallback_request` and return cleanly so query.ts
+                        // owns the multi-hop dialog & retry chain.
+                        refusalHandledByFallback = true
+                        clearStreamIdleTimers()
+                        const { buildFallbackRequestEvent } =
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                        yield buildFallbackRequestEvent({
+                          originalModel: options.model,
+                          fallbackModel: targetModel,
+                          requestId: streamRequestId ?? null,
+                          apiRefusalCategory,
+                          apiRefusalExplanation:
+                            stopDetails?.explanation ?? null,
+                          creditCode: mintedFallbackCreditCode ?? null,
+                          silentArmAtTrigger: silentAttempt,
+                        }) as unknown as StreamEvent
+                        return
+                      } else if (
                         options.refusalFallbackPreferencePending === true &&
                         silentAttempt !== true
                       ) {
@@ -4569,9 +5259,7 @@ async function* queryModel(
                             isMainThread,
                             requestDialog: options.requestDialog,
                             silentAttempt,
-                            // Setting not fully plumbed; silentAttempt drives OXl silent_ab.
-                            // No-dialog-host still auto-switches via Gi default.
-                            switchModelsOnFlag: false,
+                            switchModelsOnFlag: getSwitchModelsOnFlag(),
                           },
                           requestDialog: options.requestDialog,
                           signal,
@@ -4739,6 +5427,7 @@ async function* queryModel(
                 break
               }
               case 'message_stop':
+                streamMessageInProgress = false
                 // densable: if (gr==="pending") gr="credited"; tr+=Zce(...)
                 {
                   const credit = onMessageStopCostCredit(streamCostCredit)
@@ -4857,11 +5546,17 @@ async function* queryModel(
           // Clear the idle timeout watchdog now that the stream loop has exited
           clearStreamIdleTimers()
 
+          // Official 2.1.328 (`chunk@294254613.js:3451812-3452600`): check
+          // signal.aborted FIRST after clean loop exit so an abort before or
+          // during streaming yields envelope cleanup and returns cleanly rather
+          // than throwing StreamNoEventsError / StreamTruncatedError.
+          if (signal.aborted) {
+            yield* closeAbandonedStreamEnvelope({ responseUnfinished: true })
+            return
+          }
+
           // If the stream was aborted by our idle timeout watchdog, fall back to
           // non-streaming retry rather than treating it as a completed stream.
-          if (streamSuspendedError !== undefined) {
-            throw streamSuspendedError
-          }
           if (streamIdleAborted) {
             // Instrumentation: proves the for-await exited after the watchdog fired
             // (vs. hung forever). exit_delay_ms measures abort propagation latency:
@@ -4888,20 +5583,21 @@ async function* queryModel(
             streamWatchdogFiredAt = null
             throw new Error('Stream idle timeout - no chunks received')
           }
+          if (streamSuspendedError !== undefined) {
+            throw streamSuspendedError
+          }
 
-          // Detect when the stream completed without producing any assistant messages.
-          // This covers two proxy failure modes:
-          // 1. No events at all (!partialMessage): proxy returned 200 with non-SSE body
-          // 2. Partial events (partialMessage set but no content blocks completed AND
-          //    no stop_reason received): proxy returned message_start but stream ended
-          //    before content_block_stop and before message_delta with stop_reason
-          // BetaMessageStream had the first check in _endRequest() but the raw Stream
-          // does not - without it the generator silently returns no assistant messages,
-          // causing "Execution error" in -p mode.
-          // Note: We must check stopReason to avoid false positives. For example, with
-          // structured output (--json-schema), the model calls a StructuredOutput tool
-          // on turn 1, then on turn 2 responds with end_turn and no content blocks.
-          // That's a legitimate empty response, not an incomplete stream.
+          // Official 2.1.328 `Lpr` (`chunk@294254613.js:3452198`): clean EOF
+          // inside an open content block is a dropped connection, not a complete reply.
+          if (streamMessageInProgress && openContentBlockIndex !== null) {
+            logForDebugging(
+              `Stream ended cleanly inside open block ${openContentBlockIndex} (stop_reason=${stopReason}) — treating as a dropped connection`,
+              { level: 'error' },
+            )
+            throw new StreamTruncatedError()
+          }
+
+          // Detect when the stream completed without producing any assistant messages (`Dpr`).
           if (!partialMessage || (newMessages.length === 0 && !stopReason)) {
             logForDebugging(
               !partialMessage
@@ -4915,7 +5611,21 @@ async function* queryModel(
               request_id: (streamRequestId ??
                 'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             })
-            throw new Error('Stream ended without receiving any events')
+            throw new StreamNoEventsError()
+          }
+
+          // Official 2.1.328 `Lpr` (`chunk@294254613.js:3452753`): clean EOF
+          // before a terminal message_delta (stop_reason !== null && messageDeltaCompleted)
+          // while the message is still open is a truncated stream.
+          if (
+            streamMessageInProgress &&
+            !(stopReason !== null && messageDeltaCompleted)
+          ) {
+            logForDebugging(
+              `Stream ended cleanly mid-response (stop_reason=${stopReason}, terminal=${messageDeltaCompleted}) — treating as a dropped connection`,
+              { level: 'error' },
+            )
+            throw new StreamTruncatedError()
           }
 
           // Log summary if any stalls occurred during streaming
@@ -5249,6 +5959,9 @@ async function* queryModel(
                   options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 blocks_yielded: newMessages.length,
                 has_output: hasOutput,
+                ...(thinkingEstimatedTokens > 0 && {
+                  thinking_estimated_tokens: thinkingEstimatedTokens,
+                }),
                 synthesized_stop_reason:
                   synthesizedStop as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 cause:
@@ -6141,11 +6854,6 @@ async function* queryModel(
       throw streamAttemptError
     }
   } // streamAttempt
-
-  // Mark all registered tools as sent to API so they become eligible for deletion
-  if (feature('CACHED_MICROCOMPACT') && cachedMCEnabled) {
-    markToolsSentToAPIState()
-  }
 
   // Track the last requestId for the main conversation chain so shutdown
   // can send a cache eviction hint to inference. Exclude backgrounded

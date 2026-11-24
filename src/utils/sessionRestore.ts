@@ -37,12 +37,6 @@ import type { Message } from '../types/message.js'
 import type { PermissionMode } from '../types/permissions.js'
 import { renameRecordingForSession } from './asciicast.js'
 import { clearMemoryFileCaches } from './claudemd.js'
-import {
-  type AttributionState,
-  attributionRestoreStateFromLog,
-  createEmptyAttributionState,
-  restoreAttributionStateFromSnapshots,
-} from './commitAttribution.js'
 import { updateSessionName } from './concurrentSessions.js'
 import { getCwd } from './cwd.js'
 import { isNetworkUncPath, isNtObjectNamespacePath } from './path.js'
@@ -273,20 +267,6 @@ export function restoreSessionStateFromLog(
     }))
   }
 
-  // Restore attribution state (ant-only feature; always reset when snapshots are absent)
-  if (feature('COMMIT_ATTRIBUTION')) {
-    if (result.attributionSnapshots && result.attributionSnapshots.length > 0) {
-      attributionRestoreStateFromLog(result.attributionSnapshots, newState => {
-        setAppState(prev => ({ ...prev, attribution: newState }))
-      })
-    } else {
-      setAppState(prev => ({
-        ...prev,
-        attribution: createEmptyAttributionState(),
-      }))
-    }
-  }
-
   // Restore context-collapse commit log + staged snapshot. Must run before
   // the first query() so projectView() can rebuild the collapsed view from
   // the resumed Message[]. Called unconditionally (even with
@@ -343,24 +323,6 @@ export function restoreSessionStateFromLog(
       lane: options.planModeResumeLane ?? 'interactive',
     })
   }
-}
-
-/**
- * Compute restored attribution state from log snapshots.
- * Used for computing initial state before render (e.g., main.tsx --continue).
- * Returns undefined if attribution feature is disabled or no snapshots exist.
- */
-export function computeRestoredAttributionState(
-  result: ResumeResult,
-): AttributionState | undefined {
-  if (
-    feature('COMMIT_ATTRIBUTION') &&
-    result.attributionSnapshots &&
-    result.attributionSnapshots.length > 0
-  ) {
-    return restoreAttributionStateFromSnapshots(result.attributionSnapshots)
-  }
-  return undefined
 }
 
 /**
@@ -731,7 +693,6 @@ export async function processResumedConversation(
     forkSession: boolean
     sessionIdOverride?: string
     transcriptPath?: string
-    includeAttribution?: boolean
     /**
      * densable a.replyOnResume — seed initialMessage:{replay:true} when
      * interactive mid-turn fork has no CLI prompt string.
@@ -879,9 +840,6 @@ export async function processResumedConversation(
   }
 
   // Compute initial state before render (per CLAUDE.md guidelines)
-  const restoredAttribution = opts.includeAttribution
-    ? computeRestoredAttributionState(result)
-    : undefined
   const standaloneAgentContext = computeStandaloneAgentContext(
     result.agentName,
     result.agentColor,
@@ -959,7 +917,6 @@ export async function processResumedConversation(
     ...(result.endedByModel ? { endedByModel: true } : {}),
     ...(resumedAgentType && { agent: resumedAgentType }),
     ...(resumedAgentModel && { mainLoopModel: resumedAgentModel }),
-    ...(restoredAttribution && { attribution: restoredAttribution }),
     ...(standaloneAgentContext && { standaloneAgentContext }),
     agentDefinitions: refreshedAgentDefs,
     ...(forceRcOn

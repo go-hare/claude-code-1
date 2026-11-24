@@ -35,7 +35,6 @@ import { createChildAbortController } from './abortController.js'
 import { ToolStateSlots } from './toolState.js'
 import { logForDebugging } from './debug.js'
 import {
-  cloneFileStateCache,
   createFileStateCacheWithSizeLimit,
   READ_FILE_STATE_CACHE_SIZE,
   type FileStateCache,
@@ -617,6 +616,38 @@ export type SubagentContextOverrides = {
  *   shareAbortController: true,
  * })
  */
+/**
+ * Official 2.1.328 (`EOe(..., { stripSeededFromContext: true })`,
+ * `chunk@289026028.js @4470`, called by `gVr` at `chunk@294254613.js @2818250`):
+ * clone a FileStateCache for a subagent while stripping `seededFromContext`
+ * flags so parent startup-seeded reads do not masquerade as explicit subagent
+ * reads.
+ */
+function cloneReadFileStateForSubagent(source: FileStateCache): FileStateCache {
+  const cloned = createFileStateCacheWithSizeLimit(source.max, source.maxSize)
+  const dumped = source.dump()
+  for (const entry of dumped) {
+    const value = entry[1].value as
+      | ((typeof entry)[1]['value'] & { seededFromContext?: boolean })
+      | undefined
+    if (value?.seededFromContext) {
+      entry[1] = {
+        ...entry[1],
+        value: {
+          ...value,
+          seededFromContext: false,
+        } as unknown as (typeof entry)[1]['value'],
+      }
+    }
+  }
+  cloned.load(dumped)
+  cloned.copyReadsBeforeCompactionFrom(source)
+  for (const p of source.startOnlyPaths()) {
+    cloned.markStartOnly(p)
+  }
+  return cloned
+}
+
 export function createSubagentContext(
   parentContext: ToolUseContext,
   overrides?: SubagentContextOverrides,
@@ -628,15 +659,18 @@ export function createSubagentContext(
       ? parentContext.abortController
       : createChildAbortController(parentContext.abortController))
 
-  // Determine getAppState - wrap to set shouldAvoidPermissionPrompts unless sharing abortController
-  // (if sharing abortController, it's an interactive agent that CAN show UI)
+  // Determine getAppState - wrap to set shouldAvoidPermissionPrompts +
+  // avoidsPromptsByNature unless sharing abortController (interactive agent)
   const getAppState: ToolUseContext['getAppState'] = overrides?.getAppState
     ? overrides.getAppState
     : overrides?.shareAbortController
       ? parentContext.getAppState
       : () => {
           const state = parentContext.getAppState()
-          if (state.toolPermissionContext.shouldAvoidPermissionPrompts) {
+          if (
+            state.toolPermissionContext.shouldAvoidPermissionPrompts &&
+            state.toolPermissionContext.avoidsPromptsByNature
+          ) {
             return state
           }
           return {
@@ -644,9 +678,56 @@ export function createSubagentContext(
             toolPermissionContext: {
               ...state.toolPermissionContext,
               shouldAvoidPermissionPrompts: true,
+              avoidsPromptsByNature: true,
             },
           }
         }
+
+  // Official 2.1.328 (`gVr`, `chunk@294254613.js @2817500-2817950`):
+  // when `options.tools` is overridden, strip parent-inherited `refreshTools`
+  // and `refreshMcpClients` callbacks so a later refresh cannot overwrite the
+  // subagent's restricted tool surface with the parent's full pool.
+  let resolvedOptions = overrides?.options ?? parentContext.options
+  if (
+    overrides?.options &&
+    overrides.options.tools !== parentContext.options.tools
+  ) {
+    const staleRefreshTools =
+      overrides.options.refreshTools !== undefined &&
+      overrides.options.refreshTools === parentContext.options.refreshTools
+    const staleRefreshMcpClients =
+      overrides.options.refreshMcpClients !== undefined &&
+      overrides.options.refreshMcpClients ===
+        parentContext.options.refreshMcpClients
+    if (staleRefreshTools || staleRefreshMcpClients) {
+      resolvedOptions = {
+        ...overrides.options,
+        refreshTools: staleRefreshTools
+          ? undefined
+          : overrides.options.refreshTools,
+        refreshMcpClients: staleRefreshMcpClients
+          ? undefined
+          : overrides.options.refreshMcpClients,
+      }
+    }
+  }
+
+  // Official 2.1.328 (`gVr`, `chunk@294254613.js @2817515`):
+  // append `{ kind: 'avoid_prompts' }` when the child avoids prompts by nature.
+  const avoidPromptsLayers: HostPermissionLayer[] =
+    overrides?.shareAbortController || overrides?.getAppState
+      ? []
+      : [{ kind: 'avoid_prompts' }]
+  const mergedPermissionLayers: ToolUseContext['permissionLayers'] =
+    parentContext.permissionLayers !== undefined ||
+    avoidPromptsLayers.length > 0 ||
+    overrides?.permissionLayers !== undefined
+      ? [
+          ...(parentContext.permissionLayers ?? []),
+          ...avoidPromptsLayers,
+          ...(overrides?.permissionLayers ?? []),
+        ]
+      : undefined
 
   const childAgentId = overrides?.agentId ?? createAgentId()
 
@@ -656,9 +737,9 @@ export function createSubagentContext(
     // subagent's own trace.
     langfuseRootTrace: parentContext.langfuseTrace,
     activeTaskExecutionContext: overrides?.activeTaskExecutionContext,
-    // Mutable state - cloned by default to maintain isolation
-    // Clone overrides.readFileState if provided, otherwise clone from parent
-    readFileState: cloneFileStateCache(
+    // Mutable state - cloned by default to maintain isolation, stripping
+    // `seededFromContext` flags (`EOe(..., { stripSeededFromContext: true })`).
+    readFileState: cloneReadFileStateForSubagent(
       overrides?.readFileState ?? parentContext.readFileState,
     ),
     // densable createSubagentContext copies the parent's wN by reference.
@@ -696,9 +777,20 @@ export function createSubagentContext(
     // AppState access
     getAppState,
     session: parentContext.session,
+    // Official 2.1.328 (`v5n = ["frameUrls"]`, `chunk@294254613.js @2817250, @2818850`):
+    // when `!shareSetAppState`, still forward `frameUrls` changes to parent state
+    // while isolating all other AppState fields.
     setAppState: overrides?.shareSetAppState
       ? parentContext.setAppState
-      : () => {},
+      : updater =>
+          parentContext.setAppState(prev => {
+            const next = updater(prev)
+            if (next === prev) return prev
+            if (next.frameUrls !== prev.frameUrls) {
+              return { ...prev, frameUrls: next.frameUrls }
+            }
+            return prev
+          }),
     // densable createSubagentContext: setToolPermissionContext noop when
     // !shareSetAppState; setSessionToolPermissionContext ALWAYS inherited so
     // bg subagent permission answers (incl. session deny rules) persist.
@@ -729,9 +821,6 @@ export function createSubagentContext(
       ? parentContext.pushApiMetricsEntry
       : undefined,
     updateFileHistoryState: () => {},
-    // Attribution is scoped and functional (prev => next) — safe to share even
-    // when setAppState is stubbed. Concurrent calls compose via React's state queue.
-    updateAttributionState: parentContext.updateAttributionState,
 
     // UI callbacks - undefined for subagents (can't control parent UI).
     // Gold Eqn copies onRetryStatus: n?.onRetryStatus. It does not Phn(child).
@@ -744,7 +833,7 @@ export function createSubagentContext(
     openMessageSelector: undefined,
 
     // Fields that can be overridden or copied from parent
-    options: overrides?.options ?? parentContext.options,
+    options: resolvedOptions,
     messages: overrides?.messages ?? parentContext.messages,
     // Generate new agentId for subagents (each subagent should have its own ID)
     agentId: childAgentId,
@@ -773,12 +862,8 @@ export function createSubagentContext(
     criticalSystemReminder_EXPERIMENTAL:
       overrides?.criticalSystemReminder_EXPERIMENTAL,
     requireCanUseTool: overrides?.requireCanUseTool,
-    ...((parentContext.permissionLayers !== undefined ||
-      overrides?.permissionLayers !== undefined) && {
-      permissionLayers: [
-        ...(parentContext.permissionLayers ?? []),
-        ...(overrides?.permissionLayers ?? []),
-      ],
+    ...(mergedPermissionLayers !== undefined && {
+      permissionLayers: mergedPermissionLayers,
     }),
   }
 }
@@ -884,18 +969,20 @@ export async function runForkedAgent({
   // excluded unless `keepPreservedMessages === true`.
   const initialUuids = new Set(initialMessages.map(m => m.uuid))
 
-  // Generate agent ID and record initial messages for transcript
-  // When skipTranscript is set, skip agent ID creation and all transcript I/O
+  // Generate agent ID and record ONLY promptMessages (not forkContextMessages)
+  // for the sidechain transcript — official 2.1.328 (`nTs`, `chunk@294254613.js @2824650`)
+  // avoids O(N) parent transcript duplication into every forked sidechain JSONL.
+  // When skipTranscript is set, skip agent ID creation and all transcript I/O.
   const agentId = skipTranscript ? undefined : createAgentId(forkLabel)
   let lastRecordedUuid: UUID | null = null
   if (agentId) {
-    await recordSidechainTranscript(initialMessages, agentId).catch(err =>
+    await recordSidechainTranscript(promptMessages, agentId).catch(err =>
       logForDebugging(
         `Forked agent [${forkLabel}] failed to record initial transcript: ${err}`,
       ),
     )
-    // Track the last recorded message UUID for parent chain continuity
-    lastRecordedUuid = initialMessages.findLast(isLoggableMessage)?.uuid ?? null
+    // Track the last recorded prompt message UUID for parent chain continuity
+    lastRecordedUuid = promptMessages.findLast(isLoggableMessage)?.uuid ?? null
   }
 
   // Run the query loop with isolated context (cache-safe params preserved)

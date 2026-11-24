@@ -52,13 +52,6 @@ import {
   isTeammate,
 } from '../utils/teammate.js'
 
-/* eslint-disable @typescript-eslint/no-require-imports */
-const jobClassifierModule = feature('TEMPLATES')
-  ? (require('../jobs/classifier.js') as typeof import('../jobs/classifier.js'))
-  : null
-
-/* eslint-enable @typescript-eslint/no-require-imports */
-
 import type { QuerySource } from '../constants/querySource.js'
 import type { ToolEndTurnSource } from './endTurnFromToolResult.js'
 import type { GoalCheckinActiveGoal } from '../services/goal/goalCheckin.js'
@@ -230,43 +223,15 @@ export async function* handleStopHooks(
   // Outside the prompt-suggestion gate: the REPL /btw command and the
   // side_question SDK control_request both read this snapshot, and neither
   // depends on prompt suggestions being enabled.
-  if (querySource === 'repl_main_thread' || querySource === 'sdk') {
+  // Official 2.1.328 (`chunk@305854618.js:126150`): match `repl_main_thread*`
+  // so custom output styles (`repl_main_thread:outputStyle:...`) still save fork params.
+  if (
+    !toolUseContext.agentId &&
+    (querySource.startsWith('repl_main_thread') || querySource === 'sdk')
+  ) {
     saveCacheSafeParams(createCacheSafeParams(stopHookContext))
   }
 
-  // Template job classification: when running as a dispatched job, classify
-  // state after each turn. Gate on repl_main_thread so background forks
-  // (extract-memories, auto-dream) don't pollute the timeline with their own
-  // assistant messages. Await the classifier so state.json is written before
-  // the turn returns — otherwise `claude list` shows stale state for the gap.
-  // Env key hardcoded (vs importing JOB_ENV_KEY from jobs/state) to match the
-  // require()-gated jobs/ import pattern above; spawn.test.ts asserts the
-  // string matches.
-  if (
-    feature('TEMPLATES') &&
-    process.env.CLAUDE_JOB_DIR &&
-    querySource.startsWith('repl_main_thread') &&
-    !toolUseContext.agentId
-  ) {
-    // Full turn history — assistantMessages resets each queryLoop iteration,
-    // so tool calls from earlier iterations (Agent spawn, then summary) need
-    // messagesForQuery to be visible in the tool-call summary.
-    const turnAssistantMessages = stopHookContext.messages.filter(
-      (m): m is AssistantMessage => m.type === 'assistant',
-    )
-    const p = jobClassifierModule!
-      .classifyAndWriteState(process.env.CLAUDE_JOB_DIR, turnAssistantMessages)
-      .catch(err => {
-        logForDebugging(`[job] classifier error: ${errorMessage(err)}`, {
-          level: 'error',
-        })
-      })
-    await Promise.race([
-      p,
-      // eslint-disable-next-line no-restricted-syntax -- sleep() has no .unref(); timer must not block exit
-      new Promise<void>(r => setTimeout(r, 60_000).unref()),
-    ])
-  }
   // --bare / SIMPLE: skip background bookkeeping (prompt suggestion,
   // memory extraction, auto-dream). Scripted -p calls don't want auto-memory
   // or forked agents contending for resources during shutdown.
@@ -642,30 +607,61 @@ export async function* handleStopHooks(
                     { skillRoot: undefined, matchByIdentity: true },
                   )
                   if (liveGoal?.condition === goalHook.prompt) {
-                    goalPass = 'met'
                     const iterations = (liveGoal.iterations ?? 0) + 1
                     const durationMs =
                       Date.now() - (liveGoal.setAt ?? Date.now())
                     const tokens =
                       getTotalOutputTokens() - (liveGoal.tokensAtStart ?? 0)
                     yield { type: 'active_goal', value: undefined }
-                    yield createAttachmentMessage({
-                      type: 'goal_status',
-                      met: true,
-                      condition: goalHook.prompt,
-                      reason: result.stopReason,
-                      iterations,
-                      durationMs,
-                      tokens,
-                    })
-                    logEvent('tengu_goal_achieved', {
-                      promptLength: goalHook.prompt.length,
-                      iterations,
-                      durationMs,
-                      tokens,
-                      origin: (liveGoal.origin ??
-                        'user') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    })
+                    // Official 2.1.328 (`chunk@305854618.js @133368`):
+                    // respect `result.impossible` — emit failed goal_status (`met: false, failed: true`)
+                    // instead of marking the goal met.
+                    goalPass = result.impossible ? 'impossible' : 'met'
+                    if (result.impossible) {
+                      yield createAttachmentMessage({
+                        type: 'goal_status',
+                        met: false,
+                        failed: true,
+                        condition: goalHook.prompt,
+                        reason: result.stopReason,
+                        iterations,
+                        durationMs,
+                        tokens,
+                      })
+                      logEvent('tengu_goal_failed', {
+                        promptLength: goalHook.prompt.length,
+                        reasonLength: result.stopReason?.length ?? 0,
+                        iterations,
+                        durationMs,
+                        tokens,
+                        origin: (liveGoal.origin ??
+                          'user') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      })
+                      logEvent('tengu_feature_bad', {
+                        feature_name:
+                          'goal_met' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        error_code:
+                          'impossible' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      })
+                    } else {
+                      yield createAttachmentMessage({
+                        type: 'goal_status',
+                        met: true,
+                        condition: goalHook.prompt,
+                        reason: result.stopReason,
+                        iterations,
+                        durationMs,
+                        tokens,
+                      })
+                      logEvent('tengu_goal_achieved', {
+                        promptLength: goalHook.prompt.length,
+                        iterations,
+                        durationMs,
+                        tokens,
+                        origin: (liveGoal.origin ??
+                          'user') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      })
+                    }
                   }
                 }
               }
@@ -723,6 +719,28 @@ export async function* handleStopHooks(
           )
         } else {
           if (result.blockingError) {
+            // Official 2.1.328 (`chunk@305854618.js @134390`): when the active goal
+            // is paused, update its iterations/lastReason and skip pushing blockingErrors
+            // so a paused goal does not force another model turn.
+            const liveGoalForPause = toolUseContext.getAppState().activeGoal
+            if (
+              liveGoalForPause &&
+              (liveGoalForPause as { paused?: boolean }).paused === true &&
+              getGoalMutationEpoch() === goalEpoch &&
+              isSameActiveGoal(liveGoalForPause, goalAtStop) &&
+              isGoalPromptHook(result.hook, liveGoalForPause.condition)
+            ) {
+              goalPass = 'not_met'
+              yield {
+                type: 'active_goal',
+                value: {
+                  ...liveGoalForPause,
+                  iterations: liveGoalForPause.iterations + 1,
+                  lastReason: result.stopReason,
+                },
+              }
+              continue
+            }
             const userMessage = createUserMessage({
               content: getStopHookMessage(result.blockingError),
               isMeta: true, // Hide from UI (shown in summary message instead)
@@ -828,10 +846,11 @@ export async function* handleStopHooks(
       }
       yield summaryMessage
 
-      // Official 2.1.327 (#432, #433): Distinguish failed-to-run Stop hooks
-      // from hooks that ran and reported a problem, and notify on SubagentStop
-      // failures in background agents as well.
-      if (hookErrors.length > 0) {
+      // Official 2.1.327 (#432, #433) + 2.1.328 (`chunk@305854618.js @135840`):
+      // Distinguish failed-to-run Stop hooks from hooks that ran and reported a
+      // problem, notify on SubagentStop failures, and suppress the error toast
+      // on stop-hook retry turns (`stopHookActive === true`).
+      if (hookErrors.length > 0 && !stopHookActive) {
         const expandShortcut = getShortcutDisplay(
           'app:toggleTranscript',
           'Global',
@@ -951,11 +970,15 @@ export async function* handleStopHooks(
       }
 
       // Run TeammateIdle hooks
+      // Official 2.1.328 (`chunk@305854618.js @137201`): pass `toolUseContext`
+      // so TeammateIdle hooks receive agentId/agentType and session hooks.
       const teammateIdleGenerator = executeTeammateIdleHooks(
         teammateName,
         teamName,
         permissionMode,
         toolUseContext.abortController.signal,
+        undefined,
+        toolUseContext,
       )
 
       for await (const result of teammateIdleGenerator) {

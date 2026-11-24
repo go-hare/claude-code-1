@@ -2328,19 +2328,38 @@ class Project {
       // Get slug if one exists for this session (used for plan files, etc.)
       const sessionId = getSessionId()
       const slug = getPlanSlugCache().get(sessionId)
+      // Official 2.1.328 (`chunk@294254613.js @553400`): load existing UUID set
+      // so sourceToolAssistantUUID overrides never create phantom parent links.
+      const seenUuids =
+        isSidechain || this.shouldSkipPersistence()
+          ? null
+          : await getSessionMessages(sessionId as UUID)
 
       for (const message of messages) {
         const isCompactBoundary = isCompactBoundaryMessage(message)
 
         // For tool_result messages, use the assistant message UUID from the message
-        // if available (set at creation time), otherwise fall back to sequential parent
+        // if available (set at creation time) AND present in seenUuids, otherwise
+        // fall back to sequential parent (official `tengu_phantom_parent_write`).
         let effectiveParentUuid = parentUuid
         if (
           message.type === 'user' &&
           'sourceToolAssistantUUID' in message &&
           message.sourceToolAssistantUUID
         ) {
-          effectiveParentUuid = message.sourceToolAssistantUUID as UUID
+          const candidateParent = message.sourceToolAssistantUUID as UUID
+          if (seenUuids === null || seenUuids.has(candidateParent)) {
+            effectiveParentUuid = candidateParent
+          } else {
+            logEvent('tengu_phantom_parent_write', {})
+          }
+        }
+        if (effectiveParentUuid === message.uuid) {
+          logEvent('tengu_chain_self_reference_write', {})
+          effectiveParentUuid =
+            parentUuid !== null && parentUuid !== message.uuid
+              ? parentUuid
+              : null
         }
 
         const transcriptMessage: TranscriptMessage = {
@@ -2370,6 +2389,16 @@ class Project {
           version: VERSION,
           gitBranch,
           slug,
+        }
+        // Official 2.1.328 (`oln`, `chunk@294254613.js @554825, @6056810`):
+        // null out oversized `originalFile` strings on write to cap JSONL bloat.
+        if (
+          transcriptMessage.type === 'user' &&
+          transcriptMessage.toolUseResult != null
+        ) {
+          transcriptMessage.toolUseResult = capOriginalFileForStorage(
+            transcriptMessage.toolUseResult,
+          )
         }
         await this.appendEntry(transcriptMessage)
         if (isChainParticipant(message)) {
@@ -4711,6 +4740,301 @@ export function removeExtraFields(
 }
 
 /**
+ * Official 2.1.328 (`Sfs = 1e4`, `chunk@285198511.js`): maximum length of
+ * `toolUseResult.originalFile` retained when writing transcript rows.
+ */
+export const MAX_ORIGINAL_FILE_STORAGE_CHARS = 10_000
+
+/**
+ * Official 2.1.328 (`oln`, `chunk@294254613.js @6056810`): null out oversized
+ * `originalFile` strings on `toolUseResult` before persisting to JSONL.
+ */
+export function capOriginalFileForStorage<T>(toolUseResult: T): T {
+  if (typeof toolUseResult !== 'object' || toolUseResult === null) {
+    return toolUseResult
+  }
+  const rec = toolUseResult as Record<string, unknown>
+  if (
+    typeof rec.originalFile === 'string' &&
+    rec.originalFile.length > MAX_ORIGINAL_FILE_STORAGE_CHARS
+  ) {
+    return { ...rec, originalFile: null } as unknown as T
+  }
+  return toolUseResult
+}
+
+export type StripForStorageTool = {
+  name: string
+  aliases?: readonly string[]
+  stripForStorage?: (output: unknown, verbose?: boolean) => unknown
+}
+
+function findStripToolByName(
+  tools: readonly StripForStorageTool[],
+  name: string,
+): StripForStorageTool | undefined {
+  return tools.find(
+    tool => tool.name === name || Boolean(tool.aliases?.includes(name)),
+  )
+}
+
+function getFallbackStripTools(): readonly StripForStorageTool[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { FileWriteTool } =
+      require('@claude-code/builtin-tools/tools/FileWriteTool/FileWriteTool.js') as {
+        FileWriteTool?: StripForStorageTool
+      }
+    return FileWriteTool ? [FileWriteTool] : []
+  } catch (err) {
+    logError(err)
+    return []
+  }
+}
+
+/**
+ * Official 2.1.328 (`Y1o` + `Bne`, `chunk@294254613.js @217740-218100`):
+ * trim old `agent_progress` / `skill_progress` user `tool_result` bodies,
+ * `toolUseResult`, and `mcpMeta` to bound memory/storage for aged progress rows.
+ */
+function stripProgressMessageForStorage(message: Message): Message {
+  try {
+    if (message.type !== 'progress') return message
+    const data = message.data as
+      | {
+          type?: string
+          message?: {
+            type?: string
+            message?: { role?: string; content?: unknown }
+            toolUseResult?: unknown
+            mcpMeta?: unknown
+            [key: string]: unknown
+          }
+          [key: string]: unknown
+        }
+      | undefined
+    if (
+      !data ||
+      (data.type !== 'agent_progress' && data.type !== 'skill_progress')
+    ) {
+      return message
+    }
+    const inner = data.message
+    if (!inner || inner.type !== 'user') return message
+    const content = inner.message?.content
+    const firstBlock = Array.isArray(content) ? content[0] : undefined
+    const toolResultBlock =
+      firstBlock &&
+      typeof firstBlock === 'object' &&
+      (firstBlock as { type?: unknown }).type === 'tool_result'
+        ? (firstBlock as Record<string, unknown>)
+        : undefined
+    const hasToolResultContent =
+      toolResultBlock !== undefined &&
+      toolResultBlock.content !== '' &&
+      toolResultBlock.content !== undefined
+    if (!hasToolResultContent && inner.mcpMeta === undefined) {
+      return message
+    }
+    return {
+      ...message,
+      data: {
+        ...data,
+        message: {
+          ...inner,
+          ...(toolResultBlock !== undefined
+            ? {
+                message: {
+                  role: 'user',
+                  content: [{ ...toolResultBlock, content: '' }],
+                },
+                toolUseResult: undefined,
+              }
+            : {}),
+          mcpMeta: undefined,
+        },
+      },
+    } as Message
+  } catch (err) {
+    logError(err)
+    return message
+  }
+}
+
+/**
+ * Official 2.1.328 (`Dqi`, `chunk@294254613.js @6058150-6058450`):
+ * invoke `tool.stripForStorage` on completed calls inside old `poll_events`
+ * `replEvals` attachments.
+ */
+function stripReplEvalsForStorage(
+  replEvals: readonly unknown[],
+  tools: readonly StripForStorageTool[],
+  verbose: boolean,
+): readonly unknown[] {
+  let changed = false
+  const nextEvals = replEvals.map(evalItem => {
+    if (typeof evalItem !== 'object' || evalItem === null) return evalItem
+    const rec = evalItem as { calls?: unknown[]; [key: string]: unknown }
+    if (!Array.isArray(rec.calls)) return evalItem
+    let evalChanged = false
+    const nextCalls = rec.calls.map(callItem => {
+      if (typeof callItem !== 'object' || callItem === null) return callItem
+      const call = callItem as {
+        kind?: unknown
+        toolName?: unknown
+        result?: unknown
+        [key: string]: unknown
+      }
+      if (call.kind !== 'ok' || typeof call.toolName !== 'string') {
+        return callItem
+      }
+      const tool = findStripToolByName(tools, call.toolName)
+      if (!tool?.stripForStorage) return callItem
+      let stripped: unknown
+      try {
+        stripped = tool.stripForStorage(call.result, verbose)
+      } catch (err) {
+        logError(err)
+        return callItem
+      }
+      if (stripped === call.result) return callItem
+      evalChanged = true
+      return { ...call, result: stripped }
+    })
+    if (!evalChanged) return evalItem
+    changed = true
+    return { ...rec, calls: nextCalls }
+  })
+  return changed ? nextEvals : replEvals
+}
+
+/**
+ * Official 2.1.328 (`f4r`, `chunk@294254613.js @6056943-6058350`):
+ * strip heavy `toolUseResult` payloads (via `tool.stripForStorage`), aged
+ * `progress` tool_result bodies (`Y1o`), and aged `poll_events.replEvals`
+ * call results (`Dqi`) for messages older than `keepRecent`.
+ * Returns the original array reference when no message changed.
+ */
+export function stripOldToolUseResultsForStorage(
+  messages: Message[],
+  tools: readonly StripForStorageTool[],
+  keepRecent = 200,
+  verbose = false,
+): Message[] {
+  const cutoff = messages.length - keepRecent
+  if (cutoff <= 0) return messages
+
+  let fallbackTools: readonly StripForStorageTool[] | undefined
+  const toolByUseId = new Map<string, StripForStorageTool>()
+  let result: Message[] | undefined
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!
+    if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+      for (const block of msg.message.content) {
+        if (block.type === 'tool_use') {
+          const tool =
+            findStripToolByName(tools, block.name) ??
+            findStripToolByName(
+              (fallbackTools ??= getFallbackStripTools()),
+              block.name,
+            )
+          if (tool?.stripForStorage) {
+            toolByUseId.set(block.id, tool)
+          }
+        }
+      }
+      continue
+    }
+
+    if (i < cutoff && msg.type === 'progress') {
+      const stripped = stripProgressMessageForStorage(msg)
+      if (stripped !== msg) {
+        if (!result) result = messages.slice()
+        result[i] = stripped
+      }
+      continue
+    }
+
+    if (i < cutoff && msg.type === 'attachment') {
+      const att = msg.attachment as
+        | { type?: string; replEvals?: unknown[]; [key: string]: unknown }
+        | undefined
+      if (att?.type === 'poll_events' && Array.isArray(att.replEvals)) {
+        const allTools = [
+          ...tools,
+          ...(fallbackTools ??= getFallbackStripTools()),
+        ]
+        const strippedEvals = stripReplEvalsForStorage(
+          att.replEvals,
+          allTools,
+          verbose,
+        )
+        if (strippedEvals !== att.replEvals) {
+          if (!result) result = messages.slice()
+          result[i] = {
+            ...msg,
+            attachment: { ...att, replEvals: strippedEvals },
+          } as unknown as Message
+        }
+      }
+      continue
+    }
+
+    if (
+      i >= cutoff ||
+      msg.type !== 'user' ||
+      msg.toolUseResult == null ||
+      !Array.isArray(msg.message?.content)
+    ) {
+      continue
+    }
+
+    const toolResultBlock = msg.message.content.find(
+      b => b.type === 'tool_result',
+    )
+    const tool =
+      toolResultBlock && 'tool_use_id' in toolResultBlock
+        ? toolByUseId.get(toolResultBlock.tool_use_id)
+        : undefined
+    if (!tool?.stripForStorage) continue
+
+    let updated: Message = msg
+    try {
+      const stripped = tool.stripForStorage(msg.toolUseResult, verbose)
+      if (stripped !== msg.toolUseResult) {
+        updated = { ...msg, toolUseResult: stripped }
+      }
+    } catch (err) {
+      logError(err)
+      updated = msg
+    }
+    if (updated === msg) continue
+    if (!result) result = messages.slice()
+    result[i] = updated
+  }
+
+  return result ?? messages
+}
+
+/**
+ * Official 2.1.328 (`nxe`, `chunk@294254613.js @2384797, @2424446`):
+ * drop attachment messages with missing/malformed payloads on transcript load.
+ * Lazy-required to avoid an ESM init cycle with `conversationRecovery.ts`.
+ */
+function dropMalformedAttachmentsOnLoad<T extends Message>(messages: T[]): T[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { dropMalformedAttachments } =
+      require('./conversationRecovery.js') as typeof import('./conversationRecovery.js')
+    return dropMalformedAttachments(messages) as T[]
+  } catch (err) {
+    logError(err)
+    return messages
+  }
+}
+
+/**
  * Splice the preserved segment back into the chain after compaction.
  *
  * Preserved messages exist in the JSONL with their ORIGINAL pre-compact
@@ -6607,7 +6931,7 @@ function convertToLogOption(
 
   return {
     date: lastMessage.timestamp,
-    messages: removeExtraFields(transcript),
+    messages: dropMalformedAttachmentsOnLoad(removeExtraFields(transcript)),
     fullPath,
     value,
     created,
@@ -8557,7 +8881,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
     const sessionId = mostRecentLeaf.sessionId as UUID | undefined
     return {
       ...log,
-      messages: removeExtraFields(transcript),
+      messages: dropMalformedAttachmentsOnLoad(removeExtraFields(transcript)),
       firstPrompt: extractFirstPrompt(transcript),
       messageCount: countVisibleMessages(transcript),
       summary: mostRecentLeaf
@@ -10624,10 +10948,12 @@ export async function getAgentTranscript(agentId: AgentId): Promise<{
     const agentTranscript = transcript.filter(msg => msg.agentId === agentId)
 
     return {
-      // Convert TranscriptMessage[] to Message[] and rewrite shutdown-interrupted
-      // tool_result blocks (#499 SEA HKr/bxn, updated 2.1.309 #1166 YR)
+      // Convert TranscriptMessage[] to Message[], drop malformed attachments
+      // (`nxe`), and rewrite shutdown-interrupted tool_result blocks (#499 SEA HKr/bxn, updated 2.1.309 #1166 YR)
       messages: rewriteResumedSubagentShutdownToolResults(
-        agentTranscript.map(({ isSidechain, parentUuid, ...msg }) => msg),
+        dropMalformedAttachmentsOnLoad(
+          agentTranscript.map(({ isSidechain, parentUuid, ...msg }) => msg),
+        ),
         "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]",
       ),
       contentReplacements: agentContentReplacements.get(agentId) ?? [],
@@ -11109,7 +11435,7 @@ export async function loadAllLogsFromSessionFile(
 
     logs.push({
       date: leafMessage.timestamp,
-      messages: removeExtraFields(chain),
+      messages: dropMalformedAttachmentsOnLoad(removeExtraFields(chain)),
       fullPath: sessionFile,
       value: 0,
       created: new Date(firstMessage.timestamp),

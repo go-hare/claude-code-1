@@ -42,6 +42,7 @@ import {
   maybeResizeAndDownsampleImageBlock,
 } from '../imageResizer.js'
 import {
+  mintPasteId,
   shouldMarkPastedContent,
   wrapPastedContentBlock,
 } from '../../history.js'
@@ -156,6 +157,12 @@ export type ProcessUserInputBaseResult = {
    * hook verdict (block/stop/drop) ended the prompt while abort was set.
    */
   endedUnderAbort?: boolean
+  /**
+   * Official 2.1.328 (chunk@319394973.js / chunk@306199530.js @62750):
+   * slash fallback to regular prompt asks processUserInputBase to extract
+   * prompt `@`-mentions & non-diff `ideSelection` (or owe ambient on `'mentions'`).
+   */
+  extractPromptAttachments?: boolean
 }
 
 export type SlashLineCheckResult = {
@@ -735,7 +742,7 @@ async function applyPromptSubmitProceeds(
   }
 }
 
-/** densable `Ys` @195539942 — splice ambient attachments at index 1. */
+/** densable `En` (`chunk@306199530.js:54600`) — splice ambient attachments after first non-companion user message. */
 async function deliverOwedAmbientAttachments(
   result: ProcessUserInputBaseResult,
   context: ProcessUserInputContext,
@@ -746,9 +753,18 @@ async function deliverOwedAmbientAttachments(
   delete result.ambientAttachmentsOwed
   if (!owed) return
   const ambient = await toArray(
-    getAttachmentMessages(null, context, null, [], history, querySource),
+    getAttachmentMessages(null, context, null, [], history, querySource, {
+      deliveredTurnStart: true,
+    }),
   )
-  result.messages.splice(1, 0, ...ambient)
+  const insertAfter = result.messages.findIndex(
+    m => m.type === 'user' && !(m as { turnCompanion?: boolean }).turnCompanion,
+  )
+  result.messages.splice(
+    insertAfter === -1 ? 1 : insertAfter + 1,
+    0,
+    ...ambient,
+  )
 }
 
 export async function processUserInput({
@@ -1092,8 +1108,10 @@ export async function processUserInput({
     )
   }
 
-  // densable: input shouldQuery===false forces result.shouldQuery=false
-  // (override processTextPrompt default true for plain notifications).
+  // Official 2.1.328 (`chunk@306199530.js:47450`): capture `wasShouldQuery`
+  // BEFORE forcing `result.shouldQuery = false`, so coalesced held turns
+  // (`shouldQuery: false, queryHeldForNextTurn: true`) still run submission hooks.
+  const wasShouldQuery = queryHeldForNextTurn === true && result.shouldQuery
   if (shouldQueryInput === false) {
     result.shouldQuery = false
     // Local analog of gold uun transcript-only stamp — use existing field.
@@ -1108,7 +1126,14 @@ export async function processUserInput({
     }
   }
 
-  if (!result.shouldQuery || result.forkDispatched) {
+  // Official 2.1.328 (`chunk@306199530.js:47500`): skip UserPromptSubmit /
+  // prompt.submit hooks for `mode === 'bash'`, non-querying non-held inputs,
+  // and already-dispatched forked slash commands.
+  if (
+    (!result.shouldQuery && !wasShouldQuery) ||
+    mode === 'bash' ||
+    result.forkDispatched
+  ) {
     await deliverOwedAmbientAttachments(result, context, messages, querySource)
     return result
   }
@@ -1118,7 +1143,8 @@ export async function processUserInput({
     return result
   }
 
-  if (lineCheck === undefined) onQueryCommitted?.()
+  if (lineCheck === undefined && shouldQueryInput !== false)
+    onQueryCommitted?.()
 
   // Official 2.1.325 (#731): reuse lineCheck.outcome when UserPromptSubmit /
   // prompt.submit already ran before skill/slash expansion.
@@ -1177,6 +1203,7 @@ export async function processUserInput({
       },
     )
     queryCheckpoint('query_hooks_end')
+    await deliverOwedAmbientAttachments(result, context, messages, querySource)
     return result
   }
 
@@ -1366,6 +1393,7 @@ export async function processUserInput({
     )
   }
   queryCheckpoint('query_hooks_end')
+  await deliverOwedAmbientAttachments(result, context, messages, querySource)
 
   // densable 2.1.248 #40 wl — autoload workflow-authoring on keyword / ultracode.
   if (result.shouldQuery) {
@@ -1470,23 +1498,49 @@ async function processUserInputBase(
   // discarded for the regular prompt path. Also normalizes bridge inputs
   // where iOS may send `mediaType` instead of `media_type` (mobile-apps#5825).
   let normalizedInput: string | ContentBlockParam[] = input
+  const imagePasteIds: number[] = []
+  const inlineImageContents: Record<number, PastedContent> = {}
 
   if (typeof input === 'string') {
     inputString = input
   } else if (input.length > 0) {
     queryCheckpoint('query_image_processing_start')
     const processedBlocks: ContentBlockParam[] = []
+    // Official 2.1.328 (`chunk@306199530.js:56300-57400`): persist inline array
+    // `image` blocks via `storeImages` (unless paths were already inlined) so
+    // Claude receives `[Image source: ...]` and dimensions metadata.
+    const shouldStoreInlineImages = !inlinedImagePaths?.length
+    const textInInput = getContentText(input) || undefined
     for (const block of input) {
       if (block.type === 'image') {
         const resized = await maybeResizeAndDownsampleImageBlock(block)
-        // Collect image metadata for isMeta message
-        if (resized.dimensions) {
-          const metadataText = createImageMetadataText(resized.dimensions)
-          if (metadataText) {
-            imageMetadataTexts.push(metadataText)
+        processedBlocks.push(resized.block)
+        if (resized.block.type !== 'image') {
+          continue
+        }
+        if (!shouldStoreInlineImages) {
+          if (resized.dimensions) {
+            const metadataText = createImageMetadataText(resized.dimensions)
+            if (metadataText) {
+              imageMetadataTexts.push(metadataText)
+            }
+          }
+          continue
+        }
+        const pasteId = mintPasteId(textInInput, {
+          ...pastedContents,
+          ...inlineImageContents,
+        })
+        imagePasteIds.push(pasteId)
+        if (block.source.type === 'base64' && block.source.data.length > 0) {
+          inlineImageContents[pasteId] = {
+            id: pasteId,
+            type: 'image',
+            content: block.source.data,
+            mediaType: block.source.media_type,
+            dimensions: resized.dimensions,
           }
         }
-        processedBlocks.push(resized.block)
       } else {
         processedBlocks.push(block)
       }
@@ -1516,10 +1570,24 @@ async function processUserInputBase(
 
   // Store images to disk so Claude can reference the path in context
   // (for manipulation with CLI tools, uploading to PRs, etc.)
-  // densable j9d: write disk + stamp AppState so UserImageMessage is clickable
-  const storedImagePaths = pastedContents
-    ? await storeImages(pastedContents, context.setAppState)
+  // densable j9d + 2.1.328: store both pasted images and inline array images.
+  const hasInlineImages = Object.keys(inlineImageContents).length > 0
+  const imagesToStore =
+    pastedContents || hasInlineImages
+      ? { ...pastedContents, ...inlineImageContents }
+      : undefined
+  const storedImagePaths = imagesToStore
+    ? await storeImages(imagesToStore, context.setAppState)
     : new Map<number, string>()
+  for (const inlineImg of Object.values(inlineImageContents)) {
+    const metadataText = createImageMetadataText(
+      inlineImg.dimensions ?? {},
+      storedImagePaths.get(inlineImg.id),
+    )
+    if (metadataText) {
+      imageMetadataTexts.push(metadataText)
+    }
+  }
 
   // Resize pasted images to ensure they fit within API limits (parallel processing)
   queryCheckpoint('query_pasted_image_processing_start')
@@ -1552,7 +1620,6 @@ async function processUserInputBase(
   // paste ids / dimension metadata; degraded text placeholders still go in
   // content so the user message is not empty after a failed resize.
   const imageContentBlocks: ContentBlockParam[] = []
-  const imagePasteIds: number[] = []
   for (const {
     id,
     resized,
@@ -1666,56 +1733,6 @@ async function processUserInputBase(
     }
   }
 
-  // For slash commands, attachments will be extracted within getMessagesForSlashCommand.
-  // Use slashInputForProcess so prepared RZn/authority wrappers that re-open
-  // `/loop…` still skip attachment extraction (same as bare leading `/`).
-  const slashLooksLikeCommand =
-    (slashInputForProcess?.trimStart().startsWith('/') ?? false) ||
-    (inputString?.trimStart().startsWith('/') ?? false)
-  // densable yn Le/Pe: L!=="all" && (skipSlash || !startsWith("/")); Pe=L===void 0
-  const skipMode: 'all' | 'mentions' | undefined =
-    skipAttachments === true || skipAttachments === 'all'
-      ? 'all'
-      : skipAttachments === 'mentions'
-        ? 'mentions'
-        : origin?.kind === 'plugin'
-          ? 'all'
-          : undefined
-  const canExtractThisPrompt = effectiveSkipSlash || !slashLooksLikeCommand
-  const shouldExtractAttachments =
-    skipMode !== 'all' &&
-    skipMode === undefined &&
-    canExtractThisPrompt &&
-    mode !== 'poll-event' &&
-    mode !== 'task-notification' &&
-    inputString !== null
-
-  // densable: isRegularUserPrompt = !isMeta && prompt mode && shouldQuery!==false.
-  const isRegularUserPrompt =
-    mode === 'prompt' && !isMeta && shouldQuery !== false
-  const isHumanTypedPrompt = isRegularUserPrompt && origin?.kind === 'human'
-  queryCheckpoint('query_attachment_loading_start')
-  // Official 2.1.328 #674: mark pasted text with `<pasted_content id="...">`
-  // for Claude when enabled (including on 3P providers and telemetry-off).
-  // Run BEFORE `getAttachmentMessages` so `getPastedContentNoteAttachment`
-  // emits `PASTED_CONTENT_SYSTEM_REMINDER` on Turn 1 when the paste happens.
-  const markedPromptInput =
-    mode === 'prompt' && !isMeta
-      ? markPastedTextForModel(normalizedInput, pastedContents)
-      : normalizedInput
-  const markedInputString =
-    typeof markedPromptInput === 'string'
-      ? markedPromptInput
-      : Array.isArray(markedPromptInput)
-        ? markedPromptInput
-            .filter(
-              (b): b is { type: 'text'; text: string } =>
-                b.type === 'text' && typeof b.text === 'string',
-            )
-            .map(b => b.text)
-            .join('\n')
-        : null
-
   // Official 2.1.323 BN (#2194): mask picked file references (`@[...](claude-ref:...)`
   // / Google Docs links and spans between two picked files or after a picked file
   // and a link) before extracting @file / /skill mentions and keywords.
@@ -1725,71 +1742,6 @@ async function processUserInputBase(
     preExpansionInput !== undefined
       ? maskPickedFileReferences(preExpansionInput)
       : undefined
-  const attachmentMessages = shouldExtractAttachments
-    ? await toArray(
-        getAttachmentMessages(
-          maskedInputForMentions,
-          context,
-          ideSelection ?? null,
-          [], // queuedCommands - handled by query.ts for mid-turn attachments
-          messages,
-          querySource,
-          {
-            isRegularUserPrompt,
-            isHumanTypedPrompt,
-            preExpansionInput: maskedPreExpansion,
-            suppressWorkflowKeyword,
-            markedInput: markedInputString,
-          },
-        ),
-      )
-    : shouldQuery !== false
-      ? await toArray(
-          getAttachmentMessages(
-            null,
-            context,
-            null,
-            [],
-            messages,
-            querySource,
-            {
-              deliveredTurnStart: true,
-              markedInput: markedInputString,
-            },
-          ),
-        )
-      : []
-  queryCheckpoint('query_attachment_loading_end')
-
-  const inlinedImageAttachment =
-    inlinedImagePaths && inlinedImagePaths.length > 0
-      ? createAttachmentMessage({
-          type: 'inlined_image_paths',
-          paths: inlinedImagePaths,
-        })
-      : null
-  const threadSnapshot = stampThreadState ? snapshotThreadState() : undefined
-  const threadStateAttachment = threadSnapshot
-    ? createAttachmentMessage({
-        type: 'thread_state',
-        ...threadSnapshot,
-      })
-    : null
-
-  // Bash commands
-  if (inputString !== null && mode === 'bash') {
-    const { processBashCommand } = await import('./processBashCommand.js')
-    return addImageMetadataMessage(
-      await processBashCommand(
-        inputString,
-        precedingInputBlocks,
-        attachmentMessages,
-        context,
-        setToolJSX,
-      ),
-      imageMetadataTexts,
-    )
-  }
 
   // densable BZt keyword — route through /ultraplan. Detect on the
   // pre-expansion input so pasted content containing the word cannot
@@ -1834,6 +1786,111 @@ async function processUserInputBase(
     return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }
 
+  // Official 2.1.328 (`chunk@306199530.js:61400`): dispatch Bash commands
+  // BEFORE `getAttachmentMessages` so `!cmd` does not expand `@file` mentions
+  // or collect ambient attachments.
+  if (inputString !== null && mode === 'bash') {
+    const { processBashCommand } = await import('./processBashCommand.js')
+    return addImageMetadataMessage(
+      await processBashCommand(
+        inputString,
+        precedingInputBlocks,
+        [],
+        context,
+        setToolJSX,
+      ),
+      imageMetadataTexts,
+    )
+  }
+
+  // For slash commands, attachments will be extracted within getMessagesForSlashCommand.
+  // Use slashInputForProcess so prepared RZn/authority wrappers that re-open
+  // `/loop…` still skip attachment extraction (same as bare leading `/`).
+  const slashLooksLikeCommand =
+    (slashInputForProcess?.trimStart().startsWith('/') ?? false) ||
+    (inputString?.trimStart().startsWith('/') ?? false)
+  // Official 2.1.328 (`chunk@306199530.js:61700` `x`/`L`):
+  // `x = skipMode !== 'all' && (effectiveSkipSlash || !slashLooksLikeCommand)`
+  // `L = skipMode === undefined`
+  // When `!(x && L)`, return `[]` — never fall back to `getAttachmentMessages(null, ...)`.
+  const skipMode: 'all' | 'mentions' | undefined =
+    skipAttachments === true || skipAttachments === 'all'
+      ? 'all'
+      : skipAttachments === 'mentions'
+        ? 'mentions'
+        : origin?.kind === 'plugin'
+          ? 'all'
+          : undefined
+  const canExtractThisPrompt =
+    skipMode !== 'all' &&
+    (effectiveSkipSlash || !slashLooksLikeCommand) &&
+    mode !== 'poll-event' &&
+    mode !== 'task-notification'
+  const shouldExtractAttachments =
+    canExtractThisPrompt && skipMode === undefined
+
+  // densable: isRegularUserPrompt = !isMeta && prompt mode && shouldQuery!==false.
+  const isRegularUserPrompt =
+    mode === 'prompt' && !isMeta && shouldQuery !== false
+  const isHumanTypedPrompt = isRegularUserPrompt && origin?.kind === 'human'
+  queryCheckpoint('query_attachment_loading_start')
+  // Official 2.1.328 #674: mark pasted text with `<pasted_content id="...">`
+  // for Claude when enabled (including on 3P providers and telemetry-off).
+  // Run BEFORE `getAttachmentMessages` so `getPastedContentNoteAttachment`
+  // emits `PASTED_CONTENT_SYSTEM_REMINDER` on Turn 1 when the paste happens.
+  const markedPromptInput =
+    mode === 'prompt' && !isMeta
+      ? markPastedTextForModel(normalizedInput, pastedContents)
+      : normalizedInput
+  const markedInputString =
+    typeof markedPromptInput === 'string'
+      ? markedPromptInput
+      : Array.isArray(markedPromptInput)
+        ? markedPromptInput
+            .filter(
+              (b): b is { type: 'text'; text: string } =>
+                b.type === 'text' && typeof b.text === 'string',
+            )
+            .map(b => b.text)
+            .join('\n')
+        : null
+
+  const attachmentMessages = shouldExtractAttachments
+    ? await toArray(
+        getAttachmentMessages(
+          maskedInputForMentions,
+          context,
+          ideSelection ?? null,
+          [], // queuedCommands - handled by query.ts for mid-turn attachments
+          messages,
+          querySource,
+          {
+            isRegularUserPrompt,
+            isHumanTypedPrompt,
+            preExpansionInput: maskedPreExpansion,
+            suppressWorkflowKeyword,
+            markedInput: markedInputString,
+          },
+        ),
+      )
+    : []
+  queryCheckpoint('query_attachment_loading_end')
+
+  const inlinedImageAttachment =
+    inlinedImagePaths && inlinedImagePaths.length > 0
+      ? createAttachmentMessage({
+          type: 'inlined_image_paths',
+          paths: inlinedImagePaths,
+        })
+      : null
+  const threadSnapshot = stampThreadState ? snapshotThreadState() : undefined
+  const threadStateAttachment = threadSnapshot
+    ? createAttachmentMessage({
+        type: 'thread_state',
+        ...threadSnapshot,
+      })
+    : null
+
   // Slash commands
   // Skip for remote bridge messages — input from CCR clients is plain text
   const slashBody =
@@ -1868,7 +1925,42 @@ async function processUserInputBase(
       hostInitiator,
       checkLine,
       imagePasteIds,
+      {
+        ideSelection:
+          ideSelection?.source === 'diff' ? undefined : ideSelection,
+        isMeta,
+        permissionMode,
+        pastedContents,
+        taskDelivery,
+      },
     )
+    // Official 2.1.328 (`chunk@306199530.js:62750`): when a slash command falls
+    // back to a regular prompt (`/path` or `-p` unknown `/foo`), extract
+    // `@`-mentions & non-diff `ideSelection` (or defer ambient on `'mentions'`).
+    if (slashResult.extractPromptAttachments && !canExtractThisPrompt) {
+      if (skipMode === undefined) {
+        const extracted = await toArray(
+          getAttachmentMessages(
+            maskPickedFileReferences(slashBody),
+            context,
+            ideSelection?.source === 'diff' ? null : (ideSelection ?? null),
+            [],
+            messages,
+            querySource,
+            {
+              isRegularUserPrompt,
+              isHumanTypedPrompt,
+              preExpansionInput: maskedPreExpansion,
+              suppressWorkflowKeyword,
+              markedInput: markedInputString,
+            },
+          ),
+        )
+        slashResult.messages.splice(1, 0, ...extracted)
+      } else if (skipMode === 'mentions') {
+        slashResult.ambientAttachmentsOwed = true
+      }
+    }
     if (inlinedImageAttachment) {
       slashResult.messages.push(inlinedImageAttachment)
     }
@@ -1926,6 +2018,20 @@ async function processUserInputBase(
     ),
     imageMetadataTexts,
   )
+  // Official 2.1.328 (`chunk@306199530.js:56300`): preserve `imagePasteIds` for
+  // inline array image blocks even when `pastedContents` has no pasted images.
+  if (imagePasteIds.length > 0) {
+    const primaryUser = promptResult.messages.find(
+      m =>
+        m.type === 'user' && !(m as { turnCompanion?: boolean }).turnCompanion,
+    )
+    if (
+      primaryUser?.type === 'user' &&
+      primaryUser.imagePasteIds === undefined
+    ) {
+      primaryUser.imagePasteIds = imagePasteIds
+    }
+  }
   // densable Le&&!Pe → ambientAttachmentsOwed
   if (skipMode === 'mentions' && canExtractThisPrompt) {
     promptResult.ambientAttachmentsOwed = true

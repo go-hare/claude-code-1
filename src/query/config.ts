@@ -1,5 +1,4 @@
 import { getSessionId } from '../bootstrap/state.js'
-import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import type { SessionId } from '../types/ids.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 
@@ -30,9 +29,9 @@ export function buildQueryConfig(): QueryConfig {
   return {
     sessionId: getSessionId(),
     gates: {
-      streamingToolExecution: checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
-        'tengu_streaming_tool_execution2',
-      ),
+      // Official 2.1.328 (`chunk@305854618.js`): dead `tengu_streaming_tool_execution2`
+      // gate removed — StreamingToolExecutor is always enabled.
+      streamingToolExecution: true,
       emitToolUseSummaries: (() => {
         try {
           const { isEmitToolUseSummariesEnabled } =

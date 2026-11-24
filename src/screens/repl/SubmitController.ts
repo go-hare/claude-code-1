@@ -39,7 +39,6 @@ import {
   finalizeAutonomyCommandsForTurn,
 } from '../../utils/autonomyQueueLifecycle.js'
 import { clearHeldClearedDraft } from '../../utils/clearedDraftHold.js'
-import { incrementPromptCount } from '../../utils/commitAttribution.js'
 import type { PastedContent } from '../../utils/config.js'
 import { getCwd } from '../../utils/cwd.js'
 import { logForDebugging } from '../../utils/debug.js'
@@ -75,7 +74,6 @@ import {
 } from '../../utils/plugins/functionHooksModules.js'
 import { isEndedByModelCommandBlocked } from '../../utils/processUserInput/processUserInput.js'
 import type { QueryGuard } from '../../utils/QueryGuard.js'
-import { recordAttributionSnapshot } from '../../utils/sessionStorage.js'
 import { prependToShellHistoryCache } from '../../utils/suggestions/shellHistoryCompletion.js'
 import type { RemoteMessageContent } from '../../utils/teleport/api.js'
 import { escapeXml } from '../../utils/xml.js'
@@ -474,17 +472,6 @@ export class SubmitController {
       ) {
         deps.setUserInputOnProcessing(input)
         deps.resetTimingRefs()
-      }
-
-      if (feature('COMMIT_ATTRIBUTION')) {
-        deps.setAppState(prev => ({
-          ...prev,
-          attribution: incrementPromptCount(prev.attribution, snapshot => {
-            void recordAttributionSnapshot(snapshot).catch((error: unknown) => {
-              logForDebugging(`Attribution: Failed to save snapshot: ${error}`)
-            })
-          }),
-        }))
       }
     }
 

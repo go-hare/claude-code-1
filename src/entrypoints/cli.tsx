@@ -10,8 +10,8 @@ import { getStartupCwdError } from '../utils/startupCwd.js';
 // Runtime fallback for MACRO.* when not injected by build/dev defines.
 // This happens when running cli.tsx directly (not via `bun run dev` or built dist/).
 if (typeof globalThis.MACRO === 'undefined') {
-  (globalThis as any).MACRO = {
-    VERSION: process.env.CLAUDE_CODE_VERSION || '2.1.888',
+  (globalThis as unknown as { MACRO: typeof MACRO }).MACRO = {
+    VERSION: process.env.CLAUDE_CODE_VERSION || '2.7.310',
     BUILD_TIME: new Date().toISOString(),
     // Official densable embeds GIT_SHA; empty when not built via defines.
     GIT_SHA: process.env.GIT_SHA || process.env.SOURCE_COMMIT || '',
@@ -632,27 +632,6 @@ async function main(): Promise<void> {
         return;
       }
     }
-  }
-
-  // Fast-path for `claude job <subcommand>`: template jobs.
-  if (feature('TEMPLATES') && args[0] === 'job') {
-    profileCheckpoint('cli_templates_path');
-    const { templatesMain } = await import('../cli/handlers/templateJobs.js');
-    await templatesMain(args.slice(1));
-    // process.exit (not return) — mountFleetView's Ink TUI can leave event
-    // loop handles that prevent natural exit.
-    // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(0);
-  }
-
-  // Backward-compat: new/list/reply → job <sub> (deprecated)
-  if (feature('TEMPLATES') && (args[0] === 'new' || args[0] === 'list' || args[0] === 'reply')) {
-    console.error(`[deprecated] Use: claude job ${args[0]} ${args.slice(1).join(' ')}`.trim());
-    profileCheckpoint('cli_templates_path');
-    const { templatesMain } = await import('../cli/handlers/templateJobs.js');
-    await templatesMain(args);
-    // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(0);
   }
 
   // densable 2.1.224 #1: `claude self-hosted-runner` — no feature gate in SEA dispatch.

@@ -6,7 +6,6 @@ import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import {
   getProjectDirsUpToHome,
   extractDescriptionFromMarkdown,
-  type ClaudeConfigDirectory,
 } from '../utils/markdownConfigLoader.js'
 
 export interface TemplateInfo {
@@ -22,10 +21,7 @@ export interface TemplateInfo {
  * plus the user-level ~/.claude/templates.
  */
 function getTemplatesDirs(): string[] {
-  const projectDirs = getProjectDirsUpToHome(
-    'templates' as ClaudeConfigDirectory,
-    process.cwd(),
-  )
+  const projectDirs = getProjectDirsUpToHome('templates', process.cwd())
 
   // User-level dir (getProjectDirsUpToHome stops before home)
   const userDir = join(getClaudeConfigHomeDir(), 'templates')

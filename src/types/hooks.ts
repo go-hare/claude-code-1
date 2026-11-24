@@ -16,7 +16,6 @@ import type { Message } from 'src/types/message.js'
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
 import { permissionUpdateSchema } from 'src/utils/permissions/PermissionUpdateSchema.js'
 import type { AppState } from '../state/AppState.js'
-import type { AttributionState } from '../utils/commitAttribution.js'
 
 export function isHookEvent(value: string): value is HookEvent {
   return HOOK_EVENTS.includes(value as HookEvent)
@@ -274,9 +273,6 @@ export function isAsyncHookJSONOutput(
 /** Context passed to callback hooks for state access */
 export type HookCallbackContext = {
   getAppState: () => AppState
-  updateAttributionState: (
-    updater: (prev: AttributionState) => AttributionState,
-  ) => void
 }
 
 /** Hook that is a callback. */

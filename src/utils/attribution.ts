@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { stat } from 'fs/promises'
 import { getClientType } from '../bootstrap/state.js'
 import {
@@ -14,14 +13,8 @@ import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWrite
 import { GLOB_TOOL_NAME } from '@claude-code/builtin-tools/tools/GlobTool/prompt.js'
 import { GREP_TOOL_NAME } from '@claude-code/builtin-tools/tools/GrepTool/prompt.js'
 import type { Entry } from '../types/logs.js'
-import {
-  type AttributionData,
-  calculateCommitAttribution,
-  isInternalModelRepo,
-} from './commitAttribution.js'
 import { logForDebugging } from './debug.js'
 import { parseJSONL } from './json.js'
-import { logError } from './log.js'
 import { getAttributionEmail } from './attributionEmail.js'
 import { getRealModelName } from './attributionModel.js'
 import { getAPIProvider } from './model/providers.js'
@@ -416,40 +409,6 @@ function countUserPromptsFromEntries(entries: ReadonlyArray<Entry>): number {
   return countUserPromptsInMessages(nonSidechain)
 }
 
-/**
- * Get full attribution data from the provided AppState's attribution state.
- * Uses ALL tracked files from the attribution state (not just staged files)
- * because for PR attribution, files may not be staged yet.
- * Returns null if no attribution data is available.
- */
-async function getPRAttributionData(
-  appState: AppState,
-): Promise<AttributionData | null> {
-  const attribution = appState.attribution
-
-  if (!attribution) {
-    return null
-  }
-
-  // Handle both Map and plain object (in case of serialization)
-  const fileStates = attribution.fileStates
-  const isMap = fileStates instanceof Map
-  const trackedFiles = isMap
-    ? Array.from(fileStates.keys())
-    : Object.keys(fileStates)
-
-  if (trackedFiles.length === 0) {
-    return null
-  }
-
-  try {
-    return await calculateCommitAttribution([attribution], trackedFiles)
-  } catch (error) {
-    logError(error as Error)
-    return null
-  }
-}
-
 const MEMORY_ACCESS_TOOL_NAMES = new Set([
   FILE_READ_TOOL_NAME,
   GREP_TOOL_NAME,
@@ -535,18 +494,16 @@ async function getTranscriptStats(): Promise<{
  * @param getAppState Function to get the current AppState (from command context)
  */
 export async function getEnhancedPRAttribution(
-  getAppState: () => AppState,
+  _getAppState: () => AppState,
 ): Promise<string> {
   if (process.env.USER_TYPE === 'ant' && isUndercover()) {
     return ''
   }
-  const base = await computeBaseEnhancedPRAttribution(getAppState)
+  const base = await computeBaseEnhancedPRAttribution()
   return resolveAttributionText('pr', base)
 }
 
-async function computeBaseEnhancedPRAttribution(
-  getAppState: () => AppState,
-): Promise<string> {
+async function computeBaseEnhancedPRAttribution(): Promise<string> {
   if (getClientType() === 'remote') {
     const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
     if (remoteSessionId) {
@@ -573,63 +530,27 @@ async function computeBaseEnhancedPRAttribution(
 
   const defaultAttribution = `🤖 Generated with [Claude Code](${PRODUCT_URL})`
 
-  // Get AppState first
-  const appState = getAppState()
+  const { promptCount, memoryAccessCount } = await getTranscriptStats()
 
   logForDebugging(
-    `PR Attribution: appState.attribution exists: ${!!appState.attribution}`,
-  )
-  if (appState.attribution) {
-    const fileStates = appState.attribution.fileStates
-    const isMap = fileStates instanceof Map
-    const fileCount = isMap ? fileStates.size : Object.keys(fileStates).length
-    logForDebugging(`PR Attribution: fileStates count: ${fileCount}`)
-  }
-
-  // Get attribution stats (transcript is read once for both prompt count and memory access)
-  const [attributionData, { promptCount, memoryAccessCount }, isInternal] =
-    await Promise.all([
-      getPRAttributionData(appState),
-      getTranscriptStats(),
-      isInternalModelRepo(),
-    ])
-
-  const claudePercent = attributionData?.summary.claudePercent ?? 0
-
-  logForDebugging(
-    `PR Attribution: claudePercent: ${claudePercent}, promptCount: ${promptCount}, memoryAccessCount: ${memoryAccessCount}`,
+    `PR Attribution: promptCount: ${promptCount}, memoryAccessCount: ${memoryAccessCount}`,
   )
 
   // Get real model name for attribution
   const realModelName = getRealModelName()
 
   // If no attribution data, return default
-  if (claudePercent === 0 && promptCount === 0 && memoryAccessCount === 0) {
+  if (promptCount === 0 && memoryAccessCount === 0) {
     logForDebugging('PR Attribution: returning default (no data)')
     return defaultAttribution
   }
 
-  // Build the enhanced attribution: "🤖 Generated with Claude Code (93% 3-shotted by claude-opus-4-5, 2 memories recalled)"
+  // Build the enhanced attribution: "🤖 Generated with Claude Code (0% 3-shotted by claude-opus-4-5, 2 memories recalled)"
   const memSuffix =
     memoryAccessCount > 0
       ? `, ${memoryAccessCount} ${memoryAccessCount === 1 ? 'memory' : 'memories'} recalled`
       : ''
-  const summary = `🤖 Generated with [Claude Code](${PRODUCT_URL}) (${claudePercent}% ${promptCount}-shotted by ${realModelName}${memSuffix})`
-
-  // Append trailer lines for squash-merge survival. Only for allowlisted repos
-  // (INTERNAL_MODEL_REPOS) and only in builds with COMMIT_ATTRIBUTION enabled —
-  // attributionTrailer.ts contains excluded strings, so reach it via dynamic
-  // import behind feature(). When the repo is configured with
-  // squash_merge_commit_message=PR_BODY (cli, apps), the PR body becomes the
-  // squash commit body verbatim — trailer lines at the end become proper git
-  // trailers on the squash commit.
-  if (feature('COMMIT_ATTRIBUTION') && isInternal && attributionData) {
-    const { buildPRTrailers } = await import('./attributionTrailer.js')
-    const trailers = buildPRTrailers(attributionData, appState.attribution)
-    const result = `${summary}\n\n${trailers.join('\n')}`
-    logForDebugging(`PR Attribution: returning with trailers: ${result}`)
-    return result
-  }
+  const summary = `🤖 Generated with [Claude Code](${PRODUCT_URL}) (0% ${promptCount}-shotted by ${realModelName}${memSuffix})`
 
   logForDebugging(`PR Attribution: returning summary: ${summary}`)
   return summary

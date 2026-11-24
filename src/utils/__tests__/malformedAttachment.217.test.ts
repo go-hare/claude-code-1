@@ -38,11 +38,20 @@ describe('malformed attachment densable 2.1.217 #10', () => {
   })
 
   test('nXu accepts unknown types (default true)', () => {
-    expect(isValidAttachmentPayload({ type: 'file', filename: 'x' })).toBe(true)
+    expect(
+      isValidAttachmentPayload({ type: 'custom_unknown_type', x: 1 }),
+    ).toBe(true)
+    // Official 2.1.328 `bgs`: `file` now requires an object `content` payload.
+    expect(
+      isValidAttachmentPayload({ type: 'file', filename: 'x', content: {} }),
+    ).toBe(true)
+    expect(isValidAttachmentPayload({ type: 'file', filename: 'x' })).toBe(
+      false,
+    )
   })
 
   test('dQr drops malformed attachment messages and keeps others', () => {
-    const good = attachmentMsg({ type: 'file', filename: 'ok.ts' })
+    const good = attachmentMsg({ type: 'file', filename: 'ok.ts', content: {} })
     const badNull = attachmentMsg(null)
     const badNewFile = attachmentMsg({ type: 'new_file' })
     const user = {

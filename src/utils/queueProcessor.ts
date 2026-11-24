@@ -7,9 +7,19 @@ import {
   peek,
   setInFlightDrainBatch,
 } from './messageQueueManager.js'
+import {
+  getPromptSubmitLatch,
+  isAheadOfSessionStart,
+} from './processUserInput/promptSubmitEntries.js'
 
 type ProcessQueueParams = {
   executeInput: (commands: QueuedCommand[]) => Promise<void>
+  /** Official 2.1.328 (`t0t`): while SessionStart hooks run, wait unless false or ahead-of-session-start. */
+  waitsOnSessionStart?: (cmd: QueuedCommand) => boolean
+  /** Official 2.1.328 (`t0t` `H`): returns true if an Enter-screened promptSubmitted stamp is stale. */
+  screeningStale?: (
+    submitted: NonNullable<QueuedCommand['promptSubmitted']>,
+  ) => boolean
 }
 
 type ProcessQueueResult = {
@@ -18,27 +28,28 @@ type ProcessQueueResult = {
 
 /**
  * Check if a queued command is a slash command (value starts with '/').
+ * Official 2.1.328 (`r_` in `chunk@288448047.js`): for `ContentBlockParam[]`,
+ * inspects the trailing block (`at(-1)`), matching `processUserInputBase`.
  */
 function isSlashCommand(cmd: QueuedCommand): boolean {
-  if (cmd.mode === 'poll-event') {
+  if (cmd.mode === 'poll-event' || cmd.textNotTyped === true) {
+    return false
+  }
+  if (cmd.skipSlashCommands && cmd.bridgeOrigin !== true) {
     return false
   }
   if (typeof cmd.value === 'string') {
-    return (
-      cmd.value.trim().startsWith('/') &&
-      (!cmd.skipSlashCommands || cmd.bridgeOrigin === true)
-    )
+    return cmd.value.trim().startsWith('/')
   }
-  // For ContentBlockParam[], check the first text block
-  for (const block of cmd.value) {
-    if (block.type === 'text') {
-      return (
-        block.text.trim().startsWith('/') &&
-        (!cmd.skipSlashCommands || cmd.bridgeOrigin === true)
-      )
-    }
+  if (!Array.isArray(cmd.value)) {
+    return false
   }
-  return false
+  const lastBlock = cmd.value.at(-1)
+  return (
+    lastBlock?.type === 'text' &&
+    typeof lastBlock.text === 'string' &&
+    lastBlock.text.trim().startsWith('/')
+  )
 }
 
 /**
@@ -62,6 +73,8 @@ function isSlashCommand(cmd: QueuedCommand): boolean {
  */
 export function processQueueIfReady({
   executeInput,
+  waitsOnSessionStart = () => true,
+  screeningStale,
 }: ProcessQueueParams): ProcessQueueResult {
   // densable AL(cmd): main thread is agentId===mi(). Skip subagent-addressed
   // commands — an unfiltered peek returning a subagent notification would
@@ -72,8 +85,34 @@ export function processQueueIfReady({
   const { isMainThreadQueuedCommand } =
     require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
   const isMainThread = (cmd: QueuedCommand) => isMainThreadQueuedCommand(cmd)
+  const isDrainableMainThread = (cmd: QueuedCommand) =>
+    isMainThread(cmd) && cmd.passive !== true
 
-  const next = peek(cmd => isMainThread(cmd) && cmd.passive !== true)
+  const dispatchSingle = (cmd: QueuedCommand): ProcessQueueResult => {
+    const taken = dequeue(c => c === cmd)!
+    const batch = [taken]
+    setInFlightDrainBatch(batch)
+    void executeInput(batch).finally(() => clearInFlightDrainBatch(batch))
+    return { processed: true }
+  }
+
+  // Official 2.1.328 (`t0t` in `chunk@319736883.js:1829150`): SessionStart
+  // barrier — while SessionStart hooks are in flight, hold queued commands
+  // unless they were explicitly stamped ahead-of-session-start or exempt.
+  if (getPromptSubmitLatch() !== undefined) {
+    const ahead = peek(
+      cmd => isDrainableMainThread(cmd) && isAheadOfSessionStart(cmd.uuid),
+    )
+    const fallback = peek(isDrainableMainThread)
+    const candidate =
+      ahead ?? (fallback?.screeningPending === true ? undefined : fallback)
+    if (!candidate || (ahead === undefined && waitsOnSessionStart(candidate))) {
+      return { processed: false }
+    }
+    return dispatchSingle(candidate)
+  }
+
+  const next = peek(isDrainableMainThread)
   if (!next) {
     return { processed: false }
   }
@@ -83,53 +122,87 @@ export function processQueueIfReady({
     return { processed: false }
   }
 
-  // Slash commands and bash-mode commands are processed individually.
+  // Slash commands, bash-mode commands, and drainOnly/runsAlone items run solo.
   // Bash commands need per-command error isolation, exit codes, and progress UI.
-  // densable btt: drainOnly is taken as a singleton then stop.
-  if (isSlashCommand(next) || next.mode === 'bash' || next.drainOnly === true) {
-    const cmd = dequeue(cmd => cmd === next)!
-    const batch = [cmd]
-    setInFlightDrainBatch(batch)
-    void executeInput(batch).finally(() => clearInFlightDrainBatch(batch))
-    return { processed: true }
+  if (
+    isSlashCommand(next) ||
+    next.mode === 'bash' ||
+    next.drainOnly === true ||
+    (next as { runsAlone?: boolean }).runsAlone === true
+  ) {
+    return dispatchSingle(next)
   }
 
   // Official 2.1.328 t0t / cz (chunk@319736883.js @1829080-1830100):
   // Drain all non-slash-command items matching mode, priority tier, and
   // transcript-only (shouldQuery === false) polarity. Filtering to targetPriority
   // before checking screeningPending / drainOnly ensures 'now' items are never
-  // blocked behind a screeningPending 'next' item, and breaking on a second item
-  // carrying ideSelection.text prevents dropping its selection.
+  // blocked behind a screeningPending 'next' item. Also enforce:
+  // - promptSubmitted staleness / stopped batch splitting
+  // - `@`-mention split guard (`!value.includes('@')`) when coalescing screened prompts
+  // - ideSelection.text split on second item
   const targetMode = next.mode
   const targetPriority = next.priority ?? 'next'
   const targetTranscriptOnly = next.shouldQuery === false
   let stop = false
   let batchCount = 0
+  let prevScreenedFresh = true
   const commands = dequeueAllMatching(cmd => {
     if (stop) return false
-    if (!isMainThread(cmd) || cmd.passive === true) {
+    if (!isDrainableMainThread(cmd)) {
       return false
     }
     if ((cmd.priority ?? 'next') !== targetPriority) {
       return false
     }
-    if (cmd.screeningPending === true || cmd.drainOnly === true) {
+    if (cmd.screeningPending === true) {
       stop = true
       return false
     }
+    const runsAlone = (cmd as { runsAlone?: boolean }).runsAlone === true
+    const screenedFresh =
+      prevScreenedFresh &&
+      cmd.drainOnly !== true &&
+      !runsAlone &&
+      cmd.promptSubmitted !== undefined &&
+      cmd.promptSubmitted.stopped === undefined &&
+      screeningStale !== undefined &&
+      !screeningStale(cmd.promptSubmitted)
     if (
-      isSlashCommand(cmd) ||
-      cmd.mode !== targetMode ||
-      (cmd.shouldQuery === false) !== targetTranscriptOnly
+      (cmd.promptSubmitted !== undefined ||
+        cmd.drainOnly === true ||
+        runsAlone) &&
+      !screenedFresh
     ) {
-      return false
+      stop = true
+      if (batchCount > 0) return false
     }
+    const matchesBatch =
+      !isSlashCommand(cmd) &&
+      cmd.mode === targetMode &&
+      (cmd.shouldQuery === false) === targetTranscriptOnly
     if (batchCount > 0 && cmd.ideSelection?.text) {
       stop = true
       return false
     }
-    batchCount++
-    return true
+    if (
+      batchCount > 0 &&
+      prevScreenedFresh &&
+      !(
+        screenedFresh &&
+        matchesBatch &&
+        typeof cmd.value === 'string' &&
+        !cmd.value.includes('@')
+      )
+    ) {
+      stop = true
+      return false
+    }
+    if (matchesBatch) {
+      batchCount++
+      prevScreenedFresh = screenedFresh
+    }
+    return matchesBatch
   })
   if (commands.length === 0) {
     return { processed: false }

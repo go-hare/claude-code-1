@@ -1,5 +1,6 @@
 import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import {
+  CANCEL_MESSAGE,
   createUserMessage,
   REJECT_MESSAGE,
   STOPPED_WHILE_RUNNING_REJECT_MESSAGE,
@@ -7,13 +8,14 @@ import {
 } from 'src/utils/messages.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import { findToolByName, type Tools, type ToolUseContext } from '../../Tool.js'
-import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
 import {
   createAbortController,
   createChildAbortController,
+  getAbortReasonMessage,
   isRemoteCancelAbortReason,
 } from '../../utils/abortController.js'
+import { logError } from '../../utils/log.js'
 import {
   isSingleShotPrintSession,
   getMainThreadAgentHooks,
@@ -348,12 +350,21 @@ export function applyContextLayersToToolUseContext(
   }
 }
 
+/** Official 2.1.328 `LB` — turn-abort synthetic tool_result text. */
+const TURN_ABORT_TOOL_MESSAGE =
+  '[Tool call did not complete: the turn was ended to deliver the message that follows. Nothing refused it; re-run it if still needed.]'
+
+type StreamingToolUseContext = ToolUseContext & {
+  sameTurnErroredToolUseIds?: Set<string>
+}
+
 type TrackedTool = {
   id: string
   block: ToolUseBlock
   assistantMessage: AssistantMessage
   status: ToolStatus
   isConcurrencySafe: boolean
+  abortController?: AbortController
   promise?: Promise<void>
   results?: Message[]
   // Progress messages are stored separately and yielded immediately
@@ -364,6 +375,20 @@ type TrackedTool = {
   contextModifiersApplied?: boolean
   contextLayers?: ContextLayer[]
   contextLayersApplied?: boolean
+}
+
+/** Official 2.1.328 `Mc` — true when a tracked tool produced an is_error tool_result. */
+function hasErrorToolResult(tool: TrackedTool): boolean {
+  return (
+    tool.results?.some(
+      msg =>
+        msg.type === 'user' &&
+        Array.isArray(msg.message?.content) &&
+        msg.message.content.some(
+          block => block.type === 'tool_result' && block.is_error === true,
+        ),
+    ) ?? false
+  )
 }
 
 export type ExclusiveCallQueuedBehindEntry = {
@@ -386,9 +411,6 @@ export const exclusiveCallQueuedBehind = new Map<
 export class StreamingToolExecutor {
   private tools: TrackedTool[] = []
   private toolUseContext: ToolUseContext
-  private hasErrored = false
-  private erroredToolDescription = ''
-  private siblingAbortController: AbortController
   private discarded = false
   private responseOpen = true
   private progressAvailableResolve?: () => void
@@ -403,9 +425,6 @@ export class StreamingToolExecutor {
     toolUseContext: ToolUseContext,
   ) {
     this.toolUseContext = toolUseContext
-    this.siblingAbortController = createChildAbortController(
-      toolUseContext.abortController,
-    )
   }
 
   /**
@@ -421,9 +440,19 @@ export class StreamingToolExecutor {
   discard(): void {
     this.discarded = true
     this.wakeWaiters()
-    // Abort running tool subprocesses (Bash spawns, etc.) so they don't
-    // continue producing results after the executor is replaced.
-    this.siblingAbortController.abort('streaming_fallback')
+    // Abort running tool subprocesses (Bash spawns, etc.) via each tool's child
+    // controller so they don't continue producing results after replacement.
+    // Because `this.discarded` is already true, child aborts will not bubble up
+    // to `this.toolUseContext.abortController`.
+    for (const tool of this.tools) {
+      if (
+        tool.status === 'executing' &&
+        tool.abortController &&
+        !tool.abortController.signal.aborted
+      ) {
+        tool.abortController.abort('streaming_fallback')
+      }
+    }
     // Clear any still-tracked tool IDs from inProgressToolUseIDs and reset
     // interruptible state before clearing this.tools, since getCompletedResults()
     // returns early when discarded.
@@ -571,11 +600,7 @@ export class StreamingToolExecutor {
 
   private createSyntheticErrorMessage(
     toolUseId: string,
-    reason:
-      | 'sibling_error'
-      | 'user_interrupted'
-      | 'streaming_fallback'
-      | 'conversation_ended',
+    reason: 'user_interrupted' | 'streaming_fallback' | 'conversation_ended',
     assistantMessage: AssistantMessage,
     wasRunning = false,
   ): Message {
@@ -596,17 +621,51 @@ export class StreamingToolExecutor {
         sourceToolAssistantUUID: assistantMessage.uuid,
       })
     }
-    // For user interruptions (ESC to reject), use REJECT_MESSAGE so the UI shows
-    // "User rejected edit" instead of "Error editing file"
+    // Official 2.1.328 $a.createSyntheticErrorMessage (chunk@305854618.js:82600-84200):
+    // stamp toolDenialKind, toolDenialBeforeRun, and interruptedByShutdown.
     if (reason === 'user_interrupted') {
+      const abortSignal = this.toolUseContext.abortController.signal
+      const abortReasonMsg = getAbortReasonMessage(abortSignal.reason)
+      if (abortReasonMsg === 'turn-abort') {
+        const msg = createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: TURN_ABORT_TOOL_MESSAGE,
+              is_error: true,
+              tool_use_id: toolUseId,
+            },
+          ],
+          toolUseResult: TURN_ABORT_TOOL_MESSAGE,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        })
+        msg.toolDenialKind = 'interrupted'
+        return msg
+      }
+      if (abortReasonMsg === 'background') {
+        const msg = createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: withMemoryCorrectionHint(CANCEL_MESSAGE),
+              is_error: true,
+              tool_use_id: toolUseId,
+            },
+          ],
+          toolUseResult: CANCEL_MESSAGE,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        })
+        msg.toolDenialKind = 'cancelled'
+        return msg
+      }
       const rejectMessage =
-        wasRunning &&
-        isRemoteCancelAbortReason(
-          this.toolUseContext.abortController.signal.reason,
-        )
+        wasRunning && isRemoteCancelAbortReason(abortSignal.reason)
           ? STOPPED_WHILE_RUNNING_REJECT_MESSAGE
           : REJECT_MESSAGE
-      return createUserMessage({
+      const denialBeforeRun =
+        !wasRunning ||
+        this.toolUseContext.toolDecisions?.get(toolUseId)?.decision === 'reject'
+      const msg = createUserMessage({
         content: [
           {
             type: 'tool_result',
@@ -616,66 +675,57 @@ export class StreamingToolExecutor {
           },
         ],
         toolUseResult: 'User rejected tool use',
+        interruptedByShutdown: abortReasonMsg === 'shutdown' ? true : undefined,
         sourceToolAssistantUUID: assistantMessage.uuid,
       })
+      msg.toolDenialKind = 'user-rejected'
+      if (denialBeforeRun) {
+        msg.toolDenialBeforeRun = true
+      }
+      return msg
     }
-    if (reason === 'streaming_fallback') {
-      return createUserMessage({
-        content: [
-          {
-            type: 'tool_result',
-            content:
-              '<tool_use_error>Error: Streaming fallback - tool execution discarded</tool_use_error>',
-            is_error: true,
-            tool_use_id: toolUseId,
-          },
-        ],
-        toolUseResult: 'Streaming fallback - tool execution discarded',
-        sourceToolAssistantUUID: assistantMessage.uuid,
-      })
-    }
-    const desc = this.erroredToolDescription
-    const msg = desc
-      ? `Cancelled: parallel tool call ${desc} errored`
-      : 'Cancelled: parallel tool call errored'
     return createUserMessage({
       content: [
         {
           type: 'tool_result',
-          content: `<tool_use_error>${msg}</tool_use_error>`,
+          content:
+            '<tool_use_error>Error: Streaming fallback - tool execution discarded</tool_use_error>',
           is_error: true,
           tool_use_id: toolUseId,
         },
       ],
-      toolUseResult: msg,
+      toolUseResult: 'Streaming fallback - tool execution discarded',
       sourceToolAssistantUUID: assistantMessage.uuid,
     })
   }
 
   /**
    * Determine why a tool should be cancelled.
+   * Official 2.1.328 $a.getAbortReason / eGr (chunk@305854618.js:83800):
+   * - No sibling_error cascade
+   * - `permission-stop` returns null so the denying tool's result is preserved
+   *   and subsequent queued calls hit runToolUse's pre-call cancelled path
+   * - `remote-cancel` maps to `user_interrupted` (do NOT suppress synthetic tool_results)
    */
   private getAbortReason(
     tool: TrackedTool,
-  ):
-    | 'sibling_error'
-    | 'user_interrupted'
-    | 'streaming_fallback'
-    | 'conversation_ended'
-    | 'remote_cancel'
-    | null {
+  ): 'user_interrupted' | 'streaming_fallback' | 'conversation_ended' | null {
     if (this.discarded) {
       return 'streaming_fallback'
     }
-    if (this.hasErrored) {
-      return 'sibling_error'
-    }
     if (this.toolUseContext.abortController.signal.aborted) {
-      const reason = this.toolUseContext.abortController.signal.reason
+      const reasonMsg = getAbortReasonMessage(
+        this.toolUseContext.abortController.signal.reason,
+      )
+      // Official d$t: permission-stop does not replace a tool's own denial
+      // result with a synthetic user_interrupted message.
+      if (reasonMsg === 'permission-stop') {
+        return null
+      }
       // densable 2.1.214: EndConversation aborts with "end_conversation".
       // The EndConversation tool itself is not cancelled (null); siblings
       // get conversation_ended synthetic tool_result.
-      if (reason === 'end_conversation') {
+      if (reasonMsg === 'end_conversation') {
         return tool.block.name === 'EndConversation'
           ? null
           : 'conversation_ended'
@@ -683,15 +733,10 @@ export class StreamingToolExecutor {
       // 'interrupt' means the user typed a new message while tools were
       // running. Only cancel tools whose interruptBehavior is 'cancel';
       // 'block' tools shouldn't reach here (abort isn't fired).
-      if (reason === 'interrupt') {
+      if (reasonMsg === 'interrupt') {
         return this.getToolInterruptBehavior(tool) === 'cancel'
           ? 'user_interrupted'
           : null
-      }
-      // densable 2.1.236 #27: print/SDK SIGTERM is nC("remote-cancel") —
-      // kill trees + exit 143, no Interrupted / REJECT synthetic denials.
-      if (isRemoteCancelAbortReason(reason)) {
-        return 'remote_cancel'
       }
       return 'user_interrupted'
     }
@@ -708,15 +753,31 @@ export class StreamingToolExecutor {
     }
   }
 
-  private getToolDescription(tool: TrackedTool): string {
-    const input = tool.block.input as Record<string, unknown> | undefined
-    const summary = input?.command ?? input?.file_path ?? input?.pattern ?? ''
-    if (typeof summary === 'string' && summary.length > 0) {
-      const truncated =
-        summary.length > 40 ? summary.slice(0, 40) + '\u2026' : summary
-      return `${tool.block.name}(${truncated})`
+  /**
+   * Official 2.1.328 `buildSameTurnErroredToolUseIds` (chunk@305854618.js:86400) —
+   * IDs of prior tool calls in this streaming turn that produced an `is_error`
+   * tool_result.
+   */
+  private buildSameTurnErroredToolUseIds(
+    tool: TrackedTool,
+  ): Set<string> | undefined {
+    try {
+      const erroredIds = new Set<string>()
+      for (const t of this.tools) {
+        if (t === tool) break
+        if (hasErrorToolResult(t)) {
+          erroredIds.add(t.id)
+        }
+      }
+      return erroredIds
+    } catch (error) {
+      logError(error)
+      logEvent('tengu_same_turn_errored_ids_error', {
+        is_error: true,
+        is_error_instance: error instanceof Error,
+      })
+      return undefined
     }
-    return tool.block.name
   }
 
   /**
@@ -778,16 +839,10 @@ export class StreamingToolExecutor {
     const cwdBeforeExclusive = !tool.isConcurrencySafe ? getCwd() : undefined
 
     const collectResults = async () => {
-      // If already aborted (by error or user), generate synthetic error block instead of running the tool
+      // If already aborted, generate synthetic error block instead of running the tool.
+      // Official 2.1.328 (chunk@305854618.js:83800): remote-cancel emits a
+      // synthetic tool_result too (do not suppress).
       const initialAbortReason = this.getAbortReason(tool)
-      if (initialAbortReason === 'remote_cancel') {
-        tool.results = messages
-        tool.contextModifiers = contextModifiers
-        tool.status = 'completed'
-        this.wakeWaiters()
-        this.updateInterruptibleState()
-        return
-      }
       if (initialAbortReason) {
         messages.push(
           this.createSyntheticErrorMessage(
@@ -805,13 +860,10 @@ export class StreamingToolExecutor {
         return
       }
 
-      // Per-tool child controller. Lets siblingAbortController kill running
-      // subprocesses (Bash spawns listen to this signal) when a Bash error
-      // cascades. Permission-dialog rejection also aborts this controller
-      // (PermissionContext.ts cancelAndAbort) — that abort must bubble up to
-      // the query controller so the query loop's post-tool abort check ends
-      // the turn. Without bubble-up, ExitPlanMode "clear context + auto"
-      // sends REJECT_MESSAGE to the model instead of aborting (#21056 regression).
+      // Per-tool child controller linked directly to the turn abortController
+      // (official 2.1.328 @87200 — no Bash siblingAbortController cascade).
+      // Permission-dialog rejection or permission-stop aborts this controller —
+      // bubble up to the turn controller so the query loop ends the turn.
       const exclusiveEntry: ExclusiveCallQueuedBehindEntry = {
         isQueued: () =>
           !this.discarded &&
@@ -836,26 +888,32 @@ export class StreamingToolExecutor {
         ],
       )
       const toolAbortController = createAbortController()
+      tool.abortController = toolAbortController
       let detached = false
       const isDetachedOrLetGo = () =>
         detached || detachedToolCallWasLetGo(tool.id, session)
       const queryLinked = createChildAbortController(
-        this.siblingAbortController,
+        this.toolUseContext.abortController,
       )
-      queryLinked.signal.addEventListener(
-        'abort',
-        () => {
-          if (!isDetachedOrLetGo()) {
-            toolAbortController.abort(queryLinked.signal.reason)
-          }
-        },
-        { once: true },
-      )
+      if (queryLinked.signal.aborted) {
+        if (!isDetachedOrLetGo()) {
+          toolAbortController.abort(queryLinked.signal.reason)
+        }
+      } else {
+        queryLinked.signal.addEventListener(
+          'abort',
+          () => {
+            if (!isDetachedOrLetGo()) {
+              toolAbortController.abort(queryLinked.signal.reason)
+            }
+          },
+          { once: true },
+        )
+      }
       toolAbortController.signal.addEventListener(
         'abort',
         () => {
           if (
-            toolAbortController.signal.reason !== 'sibling_error' &&
             !isDetachedOrLetGo() &&
             !this.toolUseContext.abortController.signal.aborted &&
             !this.discarded
@@ -906,21 +964,23 @@ export class StreamingToolExecutor {
           })
         : () => {}
 
+      const execContext: StreamingToolUseContext = {
+        ...this.toolUseContext,
+        abortController: toolAbortController,
+        // Official sameTurnToolUses: prior tools in this streaming turn.
+        sameTurnToolUses: this.buildSameTurnToolUses(tool),
+        // Official 2.1.328 sameTurnErroredToolUseIds: prior errored tool IDs.
+        sameTurnErroredToolUseIds: this.buildSameTurnErroredToolUseIds(tool),
+      }
       const generator = runToolUse(
         tool.block,
         tool.assistantMessage,
         this.canUseTool,
-        {
-          ...this.toolUseContext,
-          abortController: toolAbortController,
-          // Official sameTurnToolUses: prior tools in this streaming turn.
-          sameTurnToolUses: this.buildSameTurnToolUses(tool),
-        },
+        execContext,
       )
 
-      // Track if this specific tool has produced an error result.
-      // This prevents the tool from receiving a duplicate "sibling error"
-      // message when it is the one that caused the error.
+      // Track if this specific tool has produced an error result so a later
+      // abort does not append a duplicate synthetic error.
       let thisToolErrored = false
 
       const drainGenerator = async () => {
@@ -932,26 +992,25 @@ export class StreamingToolExecutor {
               this.wakeWaiters()
               continue
             }
-            // Check if we were aborted by a sibling tool error or user interruption.
-            // Only add the synthetic error if THIS tool didn't produce the error.
+            // Check if aborted by user interruption or fallback.
+            // Only add the synthetic error if THIS tool didn't already produce an error.
             // densable send-now: detached tools ignore the query abort (do not cancel).
             const abortReason = isDetachedOrLetGo()
               ? null
               : this.getAbortReason(tool)
-            if (abortReason === 'remote_cancel' && !thisToolErrored) {
-              break
-            }
-            if (
-              abortReason &&
-              abortReason !== 'remote_cancel' &&
-              !thisToolErrored
-            ) {
+            if (abortReason && !thisToolErrored) {
+              const denialKind =
+                update.message?.type === 'user'
+                  ? update.message.toolDenialKind
+                  : undefined
+              const wasRunning =
+                denialKind === undefined || denialKind === 'interrupted'
               messages.push(
                 this.createSyntheticErrorMessage(
                   tool.id,
                   abortReason,
                   tool.assistantMessage,
-                  true,
+                  wasRunning,
                 ),
               )
               break
@@ -966,14 +1025,6 @@ export class StreamingToolExecutor {
 
             if (isErrorResult) {
               thisToolErrored = true
-              // Only Bash errors cancel siblings. Bash commands often have implicit
-              // dependency chains (e.g. mkdir fails → subsequent commands pointless).
-              // Read/WebFetch/etc are independent — one failure shouldn't nuke the rest.
-              if (tool.block.name === BASH_TOOL_NAME) {
-                this.hasErrored = true
-                this.erroredToolDescription = this.getToolDescription(tool)
-                this.siblingAbortController.abort('sibling_error')
-              }
             }
 
             if (update.message) {
@@ -1352,17 +1403,17 @@ export class StreamingToolExecutor {
     while (this.hasUnfinishedTools()) {
       await this.processQueue()
 
+      let yielded = false
       for (const result of this.getCompletedResults()) {
+        yielded = true
         yield result
       }
 
-      // If we still have executing tools but nothing completed, wait for any to complete
-      // OR for progress to become available
-      if (
-        this.hasExecutingTools() &&
-        !this.hasCompletedResults() &&
-        !this.hasPendingProgress()
-      ) {
+      // If we still have executing tools and yielded nothing, wait for any to complete
+      // OR for progress to become available. Tracking `yielded` (official 2.1.328
+      // chunk@305854618.js:93604-93860) avoids a microtask busy-spin when an
+      // exclusive executing tool blocks an already-completed tool queued behind it.
+      if (this.hasExecutingTools() && !yielded && !this.hasPendingProgress()) {
         const executingPromises = this.tools
           .filter(t => t.status === 'executing' && t.promise)
           .map(t => t.promise!)
@@ -1420,13 +1471,6 @@ export class StreamingToolExecutor {
         this.appliedConcurrentContextModifiers = true
       }
     }
-  }
-
-  /**
-   * Check if there are any completed results ready to yield
-   */
-  private hasCompletedResults(): boolean {
-    return this.tools.some(t => t.status === 'completed')
   }
 
   /**

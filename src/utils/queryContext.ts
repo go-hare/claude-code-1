@@ -216,7 +216,6 @@ export async function buildSideQuestionFallbackParams({
     setInProgressToolUseIDs: createSetInProgressToolUseIDs(taskRegistry),
     setResponseLength: () => {},
     updateFileHistoryState: () => {},
-    updateAttributionState: () => {},
   }
 
   return {

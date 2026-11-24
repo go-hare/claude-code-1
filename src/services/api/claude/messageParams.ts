@@ -7,15 +7,14 @@ import type {
   TextBlockParam,
 } from '@anthropic-ai/sdk/resources/index.mjs'
 import { feature } from 'bun:bundle'
+import { NO_CONTENT_MESSAGE } from 'src/constants/messages.js'
 import type { QuerySource } from 'src/constants/querySource.js'
-import { logForDebugging } from 'src/utils/debug.js'
 import { isConnectorTextBlock } from '../../../types/connectorText.js'
 import type {
   AssistantMessage,
   Message,
   UserMessage,
 } from '../../../types/message.js'
-import { insertBlockAfterToolResults } from '../../../utils/contentArray.js'
 import {
   type ApiSystemMessage,
   isApiSystemMessage,
@@ -23,7 +22,6 @@ import {
 } from '../../../utils/midConversationSystem.js'
 import type { PromptCacheTtl } from '../../../utils/promptCacheTtl.js'
 import { logEvent } from '../../analytics/index.js'
-import { pinCacheEdits } from '../../compact/microCompact.js'
 import { getCacheControl } from './promptCaching.js'
 
 /** densable DWT — last assistant message.id with requestId and not API error. */
@@ -58,6 +56,34 @@ export function getPreviousRequestIdFromMessages(
   return undefined
 }
 
+/**
+ * Official 2.1.328 `Wso` (`chunk@294254613.js:3305944`) — strip empty or
+ * whitespace-only text blocks from user message content arrays before
+ * stamping `cache_control` so the Anthropic API never returns HTTP 400 on
+ * empty/whitespace text blocks. Falls back to `[{ type: 'text', text: NO_CONTENT_MESSAGE }]`
+ * when every block was stripped.
+ */
+export function stripEmptyUserTextBlocks<T extends BetaContentBlockParam>(
+  content: readonly T[],
+): BetaContentBlockParam[] {
+  let filtered: BetaContentBlockParam[] | undefined
+  for (let i = 0; i < content.length; i++) {
+    const block = content[i]!
+    if (
+      block.type === 'text' &&
+      (typeof block.text !== 'string' || block.text.trim() === '')
+    ) {
+      filtered ??= content.slice(0, i)
+    } else {
+      filtered?.push(block)
+    }
+  }
+  if (filtered === undefined) return [...content]
+  return filtered.length > 0
+    ? filtered
+    : [{ type: 'text', text: NO_CONTENT_MESSAGE }]
+}
+
 export function userMessageToMessageParam(
   message: UserMessage,
   addCache = false,
@@ -83,11 +109,14 @@ export function userMessageToMessageParam(
         ],
       }
     } else {
+      const cleaned = stripEmptyUserTextBlocks(
+        message.message!.content as BetaContentBlockParam[],
+      )
       return {
         role: 'user',
-        content: message.message!.content!.map((_, i) => ({
-          ..._,
-          ...(i === message.message!.content!.length - 1
+        content: cleaned.map((block, i) => ({
+          ...block,
+          ...(i === cleaned.length - 1
             ? enablePromptCaching
               ? {
                   cache_control: getCacheControl({
@@ -101,13 +130,15 @@ export function userMessageToMessageParam(
       }
     }
   }
-  // Clone array content to prevent in-place mutations (e.g., insertCacheEditsBlock's
-  // splice) from contaminating the original message. Without cloning, multiple calls
-  // to addCacheBreakpoints share the same array and each splices in duplicate cache_edits.
+  // Clone array content (and strip empty/whitespace text blocks via Wso) to
+  // prevent in-place mutations from contaminating the original message and
+  // avoid API 400 on empty text blocks.
   return {
     role: 'user',
     content: (Array.isArray(message.message!.content)
-      ? [...message.message!.content]
+      ? stripEmptyUserTextBlocks(
+          message.message!.content as BetaContentBlockParam[],
+        )
       : message.message!
           .content) as import('@anthropic-ai/sdk/resources/beta/messages/messages.js').BetaContentBlockParam[],
   }
@@ -235,44 +266,10 @@ export function appendSystemReminderToLastUserMessage(
   ]
 }
 
-function isToolResultBlock(
-  block: unknown,
-): block is { type: 'tool_result'; tool_use_id: string } {
-  return (
-    block !== null &&
-    typeof block === 'object' &&
-    'type' in block &&
-    (block as { type: string }).type === 'tool_result' &&
-    'tool_use_id' in block
-  )
-}
-
-type CachedMCEditItem =
-  | { type: 'delete'; cache_reference: string }
-  | { type: string; tool_use_id: string }
-
-type CachedMCEditsBlock = {
-  type: 'cache_edits'
-  edits: CachedMCEditItem[]
-}
-
-function getCacheEditRef(edit: CachedMCEditItem): string {
-  return 'cache_reference' in edit ? edit.cache_reference : edit.tool_use_id
-}
-
-type CachedMCPinnedEdits = {
-  userMessageIndex: number
-  block: CachedMCEditsBlock
-}
-
-// Exported for testing cache_reference placement constraints
 export function addCacheBreakpoints(
   messages: (UserMessage | AssistantMessage | ApiSystemMessage)[],
   enablePromptCaching: boolean,
   querySource?: QuerySource,
-  useCachedMC = false,
-  newCacheEdits?: CachedMCEditsBlock | null,
-  pinnedEdits?: CachedMCPinnedEdits[],
   skipCacheWrite = false,
   agentCacheTtlOverride?: PromptCacheTtl,
 ): MessageParam[] {
@@ -328,7 +325,7 @@ export function addCacheBreakpoints(
     skipCacheWrite,
   })
 
-  const result = messages.map((msg, index) => {
+  return messages.map((msg, index) => {
     const addCache = index === markerIndex
     if (isApiSystemMessage(msg)) {
       // densable: role:"system" + optional cache_control on text block
@@ -370,113 +367,4 @@ export function addCacheBreakpoints(
       agentCacheTtlOverride,
     )
   })
-
-  if (!useCachedMC) {
-    return result
-  }
-
-  // Track all cache_references being deleted to prevent duplicates across blocks.
-  const seenDeleteRefs = new Set<string>()
-
-  // Helper to deduplicate a cache_edits block against already-seen deletions
-  const deduplicateEdits = (block: CachedMCEditsBlock): CachedMCEditsBlock => {
-    const uniqueEdits = block.edits.filter(edit => {
-      const ref = getCacheEditRef(edit)
-      if (seenDeleteRefs.has(ref)) {
-        return false
-      }
-      seenDeleteRefs.add(ref)
-      return true
-    })
-    return { ...block, edits: uniqueEdits }
-  }
-
-  // Re-insert all previously-pinned cache_edits at their original positions
-  for (const pinned of pinnedEdits ?? []) {
-    const msg = result[pinned.userMessageIndex]
-    if (msg && msg.role === 'user') {
-      if (!Array.isArray(msg.content)) {
-        msg.content = [{ type: 'text', text: msg.content as string }]
-      }
-      const dedupedBlock = deduplicateEdits(pinned.block)
-      if (dedupedBlock.edits.length > 0) {
-        insertBlockAfterToolResults(msg.content, dedupedBlock)
-      }
-    }
-  }
-
-  // Insert new cache_edits into the last user message and pin them
-  if (newCacheEdits && result.length > 0) {
-    const dedupedNewEdits = deduplicateEdits(newCacheEdits)
-    if (dedupedNewEdits.edits.length > 0) {
-      for (let i = result.length - 1; i >= 0; i--) {
-        const msg = result[i]
-        if (msg && msg.role === 'user') {
-          if (!Array.isArray(msg.content)) {
-            msg.content = [{ type: 'text', text: msg.content as string }]
-          }
-          insertBlockAfterToolResults(msg.content, dedupedNewEdits)
-          // Pin so this block is re-sent at the same position in future calls
-          pinCacheEdits(
-            i,
-            newCacheEdits as unknown as import('../../compact/cachedMicrocompact.js').CacheEditsBlock,
-          )
-
-          logForDebugging(
-            `Added cache_edits block with ${dedupedNewEdits.edits.length} deletion(s) to message[${i}]: ${dedupedNewEdits.edits.map(getCacheEditRef).join(', ')}`,
-          )
-          break
-        }
-      }
-    }
-  }
-
-  // Add cache_reference to tool_result blocks that are within the cached prefix.
-  // Must be done AFTER cache_edits insertion since that modifies content arrays.
-  // Note: this code only runs when useCachedMC=true (early return at line ~3202).
-  if (enablePromptCaching) {
-    // Find the last message containing a cache_control marker
-    let lastCCMsg = -1
-    for (let i = 0; i < result.length; i++) {
-      const msg = result[i]!
-      if (Array.isArray(msg.content)) {
-        for (const block of msg.content) {
-          if (block && typeof block === 'object' && 'cache_control' in block) {
-            lastCCMsg = i
-          }
-        }
-      }
-    }
-
-    // Add cache_reference to tool_result blocks that are strictly before
-    // the last cache_control marker. The API requires cache_reference to
-    // appear "before or on" the last cache_control — we use strict "before"
-    // to avoid edge cases where cache_edits splicing shifts block indices.
-    //
-    // Create new objects instead of mutating in-place to avoid contaminating
-    // blocks reused by secondary queries that use models without cache_editing support.
-    if (lastCCMsg >= 0) {
-      for (let i = 0; i < lastCCMsg; i++) {
-        const msg = result[i]!
-        if (msg.role !== 'user' || !Array.isArray(msg.content)) {
-          continue
-        }
-        let cloned = false
-        for (let j = 0; j < msg.content.length; j++) {
-          const block = msg.content[j]
-          if (block && isToolResultBlock(block)) {
-            if (!cloned) {
-              msg.content = [...msg.content]
-              cloned = true
-            }
-            msg.content[j] = Object.assign({}, block, {
-              cache_reference: block.tool_use_id,
-            })
-          }
-        }
-      }
-    }
-  }
-
-  return result
 }

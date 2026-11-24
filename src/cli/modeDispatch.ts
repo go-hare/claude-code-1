@@ -1,7 +1,6 @@
 export type MainLaunchMode =
   | 'headless'
   | 'continue'
-  | 'direct-connect'
   | 'ssh-remote'
   | 'assistant-chat'
   | 'resume-like'
@@ -10,7 +9,6 @@ export type MainLaunchMode =
 export function determineMainLaunchMode(options: {
   isNonInteractiveSession: boolean
   continueRequested: boolean
-  hasPendingDirectConnect: boolean
   hasPendingSsh: boolean
   hasPendingAssistantChat: boolean
   hasResumeLikeRequest: boolean
@@ -18,7 +16,6 @@ export function determineMainLaunchMode(options: {
   const {
     isNonInteractiveSession,
     continueRequested,
-    hasPendingDirectConnect,
     hasPendingSsh,
     hasPendingAssistantChat,
     hasResumeLikeRequest,
@@ -29,9 +26,6 @@ export function determineMainLaunchMode(options: {
   }
   if (continueRequested) {
     return 'continue'
-  }
-  if (hasPendingDirectConnect) {
-    return 'direct-connect'
   }
   if (hasPendingSsh) {
     return 'ssh-remote'

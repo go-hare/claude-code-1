@@ -100,7 +100,12 @@ export function shouldRetainProgressInMutableMessages(msg: {
 }
 import { logForDebugging } from './utils/debug.js'
 import { isBareMode } from './utils/envUtils.js'
-import { getFastModeState } from './utils/fastMode.js'
+import {
+  getFastModeState,
+  getFastModeUnavailableReason,
+  isModelFastModeRejectedForSession,
+} from './utils/fastMode.js'
+import { releaseQueuedAfterTurn } from './utils/messageQueueManager.js'
 import {
   type FileHistoryState,
   fileHistoryEnabled,
@@ -3321,7 +3326,11 @@ export class QueryEngine {
             callsThisQuery + tombstonedStructuredOutputCalls >= maxRetries &&
             survivingStructuredOutputs.length === 0
           ) {
+            // Official 2.1.328 (`chunk@322707994.js:141200`): record transcript
+            // BEFORE flushing session storage, close partial stream, and emit
+            // terminal_reason + fast_mode_disabled_reason + origin.
             if (persistSession) {
+              await recordTranscript(this.mutableMessages)
               await flushSessionStorage()
             }
             for (const ev of partialStreamCloser.closeAtTurnEnd(
@@ -3329,6 +3338,16 @@ export class QueryEngine {
             )) {
               yield ev as unknown as SDKMessage
             }
+            const fastModeState = getFastModeState(
+              mainLoopModel,
+              initialAppState.fastMode,
+            )
+            const fastModeDisabledReason =
+              fastModeState === 'off'
+                ? isModelFastModeRejectedForSession(mainLoopModel)
+                  ? 'model_not_allowed'
+                  : (getFastModeUnavailableReason() ?? undefined)
+                : undefined
             yield {
               type: 'result',
               subtype: 'error_max_structured_output_retries',
@@ -3337,28 +3356,33 @@ export class QueryEngine {
               is_error: true,
               num_turns: turnCount,
               stop_reason: lastStopReason,
+              terminal_reason: 'structured_output_retry_exhausted',
               session_id: getSessionId(),
               total_cost_usd: getTotalCost(),
               usage: this.totalUsage,
               modelUsage: getModelUsage(),
               permission_denials: this.permissionDenials,
-              fast_mode_state: getFastModeState(
-                mainLoopModel,
-                initialAppState.fastMode,
-              ),
+              fast_mode_state: fastModeState,
+              ...(fastModeDisabledReason !== undefined
+                ? { fast_mode_disabled_reason: fastModeDisabledReason }
+                : {}),
+              ...(options?.origin !== undefined
+                ? { origin: options.origin }
+                : {}),
               uuid: randomUUID(),
               errors: [
                 tombstonedStructuredOutputCalls > 0
                   ? `Failed to provide surviving structured output after ${maxRetries} attempts (${tombstonedStructuredOutputCalls} retracted by a model fallback)`
                   : `Failed to provide valid structured output after ${maxRetries} attempts`,
               ],
-            }
+            } as SDKMessage
             return
           }
         }
       }
     } finally {
       await queryGen.return?.(undefined as never)
+      releaseQueuedAfterTurn()
     }
 
     // Stop hooks yield progress/attachment messages AFTER the assistant

@@ -2064,7 +2064,29 @@ export function processHookJSONOutput({
   const result: Partial<HookResult> = {}
 
   // Cast to typed interface for type-safe property access
-  const json = rawJson as TypedSyncHookOutput
+  const rawTyped = rawJson as TypedSyncHookOutput
+
+  // Official 2.1.328 tne / l$o (chunk@294254613.js:4252516): if a hook already
+  // blocked (decision === 'block' or continue === false) and emitted a
+  // hookSpecificOutput naming a different event, drop hookSpecificOutput and
+  // preserve the security block instead of throwing and discarding the block.
+  const dropMismatchedHookSpecificOutput =
+    expectedHookEvent !== undefined &&
+    expectedHookEvent !== 'PermissionRequest' &&
+    (rawTyped.decision === 'block' || rawTyped.continue === false) &&
+    rawTyped.hookSpecificOutput !== undefined &&
+    rawTyped.hookSpecificOutput.hookEventName !== expectedHookEvent
+  if (dropMismatchedHookSpecificOutput) {
+    logForDebugging(
+      `Hook ${hookName} blocked, but its hookSpecificOutput was ignored because it names ${rawTyped.hookSpecificOutput?.hookEventName}, not ${expectedHookEvent}. Set hookEventName to ${expectedHookEvent} to use it.`,
+      { level: 'warn' },
+    )
+    result.suppressOriginalPrompt = true
+  }
+
+  const json: TypedSyncHookOutput = dropMismatchedHookSpecificOutput
+    ? { ...rawTyped, hookSpecificOutput: undefined }
+    : rawTyped
 
   // At this point we know it's a sync response
   const syncJson = json
@@ -2172,33 +2194,21 @@ export function processHookJSONOutput({
     }
 
     switch (json.hookSpecificOutput.hookEventName) {
-      case 'PreToolUse':
-        // Override with more specific permission decision if provided
-        if (json.hookSpecificOutput.permissionDecision) {
-          switch (json.hookSpecificOutput.permissionDecision) {
-            case 'allow':
-              result.permissionBehavior = 'allow'
-              break
-            case 'deny':
-              result.permissionBehavior = 'deny'
-              result.blockingError = {
-                blockingError:
-                  json.hookSpecificOutput.permissionDecisionReason ||
-                  json.reason ||
-                  'Blocked by hook',
-                command,
-              }
-              break
-            case 'ask':
-              result.permissionBehavior = 'ask'
-              break
-            case 'defer':
-              result.permissionBehavior = 'defer'
-              break
-          }
+      case 'PreToolUse': {
+        // PreToolUse permissionDecision is already resolved above with the
+        // `alreadyBlocked` guard so top-level `decision: 'block'` can never be
+        // downgraded to 'allow'/'ask'/'defer'. Preserve any block reason when
+        // a weaker permissionDecision was ignored or permissionDecisionReason
+        // is omitted.
+        const downgradedFromBlock =
+          json.decision === 'block' &&
+          json.hookSpecificOutput.permissionDecision !== undefined &&
+          json.hookSpecificOutput.permissionDecision !== 'deny'
+        if (!downgradedFromBlock) {
+          result.hookPermissionDecisionReason =
+            json.hookSpecificOutput.permissionDecisionReason ??
+            result.hookPermissionDecisionReason
         }
-        result.hookPermissionDecisionReason =
-          json.hookSpecificOutput.permissionDecisionReason
         // Extract updatedInput if provided
         if (json.hookSpecificOutput.updatedInput) {
           result.updatedInput = json.hookSpecificOutput.updatedInput
@@ -2206,6 +2216,7 @@ export function processHookJSONOutput({
         // Extract additionalContext if provided
         result.additionalContext = json.hookSpecificOutput.additionalContext
         break
+      }
       case 'UserPromptSubmit':
         result.additionalContext = json.hookSpecificOutput.additionalContext
         result.sessionTitle = json.hookSpecificOutput.sessionTitle
@@ -3289,7 +3300,7 @@ export async function getMatchingHooks(
     // Fast-path: callback/function hooks don't need dedup (each is unique).
     // Skip the 6-pass filter + 4×Map + 4×Array.from below when all hooks are
     // callback/function — the common case for internal hooks like
-    // sessionFileAccessHooks/attributionHooks (44x faster in microbench).
+    // sessionFileAccessHooks (44x faster in microbench).
     if (
       matchedHooks.every(
         m => m.hook.type === 'callback' || m.hook.type === 'function',
@@ -4570,8 +4581,8 @@ async function* executeHooks({
       })
     }
   } else {
-    // Fast-path: all hooks are internal callbacks (sessionFileAccessHooks,
-    // attributionHooks). These return {} and don't use the abort signal, so we
+    // Fast-path: all hooks are internal callbacks (sessionFileAccessHooks).
+    // These return {} and don't use the abort signal, so we
     // can skip span/progress/abortSignal/processHookJSONOutput/resultLoop.
     // Measured: 6.01µs → ~1.8µs per PostToolUse hit (-70%).
     const batchStartTime = Date.now()
@@ -4579,7 +4590,6 @@ async function* executeHooks({
     const context = toolUseContext
       ? {
           getAppState: toolUseContext.getAppState,
-          updateAttributionState: toolUseContext.updateAttributionState,
         }
       : undefined
     for (const [i, matchedEntry] of matchingHooks.entries()) {
@@ -7711,7 +7721,8 @@ export async function* executeStopHooks(
     toolUseContext,
     messages,
     requestPrompt,
-    skipSessionFunctionHooks: stopPass !== 'turn_end_reactions',
+    skipSessionFunctionHooks:
+      stopPass !== 'turn_end' && stopPass !== 'turn_end_reactions',
     sessionFunctionHooksOnly: stopPass === 'turn_end_reactions',
   })
 }
@@ -7724,6 +7735,8 @@ export async function* executeStopHooks(
  * @param permissionMode Optional permission mode
  * @param signal Optional AbortSignal to cancel hook execution
  * @param timeoutMs Optional timeout in milliseconds for hook execution
+ * @param toolUseContext Optional ToolUseContext for agentId/agentType and session hooks (official YGo @4225480)
+ * @param storageV5 Optional storageV5 override
  * @returns Async generator that yields progress messages and blocking errors
  */
 export async function* executeTeammateIdleHooks(
@@ -7732,10 +7745,20 @@ export async function* executeTeammateIdleHooks(
   permissionMode?: string,
   signal?: AbortSignal,
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  toolUseContext?: ToolUseContext,
   storageV5?: unknown,
 ): AsyncGenerator<AggregatedHookResult> {
   const hookInput: TeammateIdleHookInput = {
-    ...createBaseHookInput(permissionMode),
+    ...createBaseHookInput(
+      permissionMode,
+      undefined,
+      toolUseContext
+        ? {
+            agentId: toolUseContext.agentId,
+            agentType: toolUseContext.agentType,
+          }
+        : undefined,
+    ),
     hook_event_name: 'TeammateIdle',
     teammate_name: teammateName,
     team_name: teamName,
@@ -7746,7 +7769,11 @@ export async function* executeTeammateIdleHooks(
     toolUseID: randomUUID(),
     signal,
     timeoutMs,
-    storageV5: storageV5 ?? getPinnedStorageV5(),
+    toolUseContext,
+    storageV5:
+      storageV5 ??
+      (toolUseContext as { storageV5?: unknown } | undefined)?.storageV5 ??
+      getPinnedStorageV5(),
   })
 }
 
@@ -9752,7 +9779,6 @@ async function executeHookCallback({
   const context = toolUseContext
     ? {
         getAppState: toolUseContext.getAppState,
-        updateAttributionState: toolUseContext.updateAttributionState,
       }
     : undefined
   const json = await hook.callback(

@@ -25,13 +25,13 @@ describe('Wave 3 recovery & interrupted tool call alignment (#1007, #1166)', () 
     )
   })
 
-  test('#1166 rewrites interruptedByShutdown tool_result blocks to YR during deserialize', () => {
+  test('#1166 rewrites interruptedByShutdown tool_result blocks to YR during deserialize (2.1.328 Uqn MCP-only)', () => {
     const assistantMsg = createAssistantMessage({
       content: [
         {
           type: 'tool_use',
           id: 'toolu_1',
-          name: 'Bash',
+          name: 'mcp__srv__run',
           input: { command: 'ls' },
         },
       ],

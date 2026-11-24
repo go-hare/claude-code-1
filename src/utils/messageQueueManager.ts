@@ -9,7 +9,13 @@ import {
   stampPollEventNonce,
 } from '@claude-code/builtin-tools/tools/PollTool/constants.js'
 import type { Permutations } from 'src/types/utils.js'
-import { addToHistory } from '../history.js'
+import {
+  addToHistory,
+  isValidPasteId,
+  mintPasteId,
+  parseReferences,
+  renumberPasteRefInDisplay,
+} from '../history.js'
 import {
   getMainThreadAgentId,
   getSessionId,
@@ -34,6 +40,16 @@ import type {
  */
 export type QueuedCommand = Omit<BaseQueuedCommand, 'pollEvent'> & {
   textNotTyped?: boolean
+  /** Official 2.1.328 (`chunk@294254613.js:775500`): resurrect prompt if interrupted within N ms of mid-turn absorption. */
+  requeueIfInterruptedWithinMs?: number
+  /** Official 2.1.328: resurrected/put-back prompt runs in its own turn. */
+  runsAlone?: boolean
+  /** Official 2.1.328: prompt needs re-screening after resurrection. */
+  screeningOwed?: boolean
+  /** Official 2.1.328: waits out stop without being dropped. */
+  waitsOutStop?: boolean
+  /** Official 2.1.328: synthetic user-stop notice exempt from cancel_queued clearing. */
+  userStopNotice?: boolean
   pollEvent?: NonNullable<BaseQueuedCommand['pollEvent']> & {
     group?: string
     startsTurn?: boolean
@@ -377,6 +393,8 @@ const CANCEL_PENDING_CAP = 256
  */
 export class MessageQueueInstance {
   private readonly commandQueue: QueuedCommand[] = []
+  /** Official 2.1.328 (`k`): commands held until current turn finishes. */
+  private readonly queuedAfterTurn: QueuedCommand[] = []
   /** Frozen snapshot — recreated on every mutation for useSyncExternalStore. */
   private snapshot: readonly QueuedCommand[] = Object.freeze([])
   private readonly queueChanged = createSignal()
@@ -406,6 +424,45 @@ export class MessageQueueInstance {
   private midTurnFoldSuspended = false
   /** Official 2.1.328 — active Poll tool calls keyed by agentId (or '__main__'). */
   private readonly activePollCalls = new Set<string>()
+  /** Official 2.1.328 (`xe`) — active holdBack predicate and marked commands. */
+  private activeHold:
+    | {
+        holds: (cmd: QueuedCommand) => boolean
+        marked: Set<QueuedCommand>
+      }
+    | undefined = undefined
+  /** Official 2.1.328 (`ts`) — clock source for interrupt requeue window. */
+  private readonly nowFn: () => number
+  /** Official 2.1.328 (`Zi`) — last mid-turn absorbed prompt eligible for interrupt requeue. */
+  private requeueCandidate:
+    | {
+        uuid: string | undefined
+        cmd: QueuedCommand
+        withinMs: number | undefined
+        until: number | undefined
+      }
+    | undefined = undefined
+  /** Official 2.1.328 (`Ol`) — UUIDs resurrected via requeueTaken(). */
+  private readonly putBackUuids = new Set<string>()
+
+  constructor(opts?: { now?: () => number }) {
+    this.nowFn =
+      opts?.now ??
+      (() => Math.max(performance.timeOrigin + performance.now(), Date.now()))
+  }
+
+  private applyHoldBack(cmd: QueuedCommand): boolean {
+    if (
+      this.activeHold === undefined ||
+      cmd.passive === true ||
+      !this.activeHold.holds(cmd)
+    ) {
+      return false
+    }
+    cmd.passive = true
+    this.activeHold.marked.add(cmd)
+    return true
+  }
 
   /**
    * Subscribe to command queue changes.
@@ -562,6 +619,7 @@ export class MessageQueueInstance {
       ...stamped,
       priority: stamped.priority ?? 'next',
     }
+    this.applyHoldBack(queued)
     if (opts.ahead) this.commandQueue.unshift(queued)
     else this.commandQueue.push(queued)
 
@@ -704,13 +762,15 @@ export class MessageQueueInstance {
         ? getTurnAttributionKey()
         : undefined)
     const stamped = withMainThreadAgentId(stripPeerCommandHopChain(queued))
-    this.commandQueue.push({
+    const entry: QueuedCommand = {
       ...stamped,
       priority: stamped.priority ?? 'later',
       ...(inheritedKey !== undefined
         ? { inheritedTurnAttributionKey: inheritedKey }
         : {}),
-    })
+    }
+    this.applyHoldBack(entry)
+    this.commandQueue.push(entry)
     this.notifySubscribers()
     if (!(command as { unlogged?: boolean }).unlogged) {
       logOperation(
@@ -829,17 +889,20 @@ export class MessageQueueInstance {
     return matched
   }
 
-  private spliceQueuedCommands(commandsToRemove: QueuedCommand[]): void {
-    if (commandsToRemove.length === 0) return
-    const before = this.commandQueue.length
+  private spliceQueuedCommands(
+    commandsToRemove: QueuedCommand[],
+  ): QueuedCommand[] {
+    if (commandsToRemove.length === 0) return []
+    const removed: QueuedCommand[] = []
     for (let i = this.commandQueue.length - 1; i >= 0; i--) {
       if (commandsToRemove.includes(this.commandQueue[i]!)) {
-        this.commandQueue.splice(i, 1)
+        removed.unshift(this.commandQueue.splice(i, 1)[0]!)
       }
     }
-    if (this.commandQueue.length !== before) {
+    if (removed.length > 0) {
       this.notifySubscribers()
     }
+    return removed
   }
 
   remove(commandsToRemove: QueuedCommand[]): void {
@@ -867,11 +930,217 @@ export class MessageQueueInstance {
       logForDebugging(`consume: ${opts.reason}`)
     }
 
-    this.spliceQueuedCommands(commandsToConsume)
+    const removed = this.spliceQueuedCommands(commandsToConsume)
     failCommandRunWaits(commandsToConsume, COMMAND_LEFT_QUEUE_AS_TEXT)
     this.commandsConsumed.emit(commandsToConsume)
     for (const _cmd of commandsToConsume) {
       logOperation('remove')
+    }
+    // Official 2.1.328 (`chunk@294254613.js:775500` `Ai`): record the last
+    // mid-turn absorbed main-thread prompt so an interrupt within its requeue
+    // window can resurrect it into its own turn.
+    if (opts?.reason === 'absorbed_mid_turn') {
+      for (const cmd of removed) {
+        if (cmd.mode !== 'prompt' || !isMainThreadQueuedCommand(cmd)) continue
+        const uuid = cmd.uuid
+        const withinMs =
+          uuid !== undefined &&
+          cmd.shouldQuery !== false &&
+          cmd.passive !== true &&
+          !this.cancelPending.has(uuid)
+            ? cmd.requeueIfInterruptedWithinMs
+            : undefined
+        if (withinMs !== undefined || this.requeueCandidate !== undefined) {
+          this.requeueCandidate = { uuid, cmd, withinMs, until: undefined }
+        }
+      }
+    }
+  }
+
+  /** Official 2.1.328 (`va`): arm the deadline on the last absorbed prompt. */
+  startRequeueWindow(): void {
+    if (this.requeueCandidate?.withinMs !== undefined) {
+      this.requeueCandidate.until ??=
+        this.nowFn() + this.requeueCandidate.withinMs
+    }
+  }
+
+  /** Official 2.1.328 (`Xl`): close the requeue window; clear putBack set on turn end. */
+  settleTaken({ turnEnded = false }: { turnEnded?: boolean } = {}): void {
+    this.requeueCandidate = undefined
+    if (turnEnded) {
+      this.putBackUuids.clear()
+    }
+  }
+
+  /** Official 2.1.328 (`Ja`): permanently cancel resurrection eligibility for uuid. */
+  forgoRequeue(uuid: string): void {
+    if (this.requeueCandidate?.uuid === uuid) {
+      this.requeueCandidate.withinMs = undefined
+    }
+    for (const cmd of this.commandQueue) {
+      if (cmd.uuid === uuid) {
+        delete cmd.requeueIfInterruptedWithinMs
+      }
+    }
+  }
+
+  /**
+   * Official 2.1.328 (`Ia`): if the last mid-turn absorbed prompt is still
+   * within its interrupt requeue window, re-enqueue it ahead as a standalone
+   * resurrected prompt (`drainOnly`, `runsAlone`, `admissionExempt: 'resurrected'`).
+   */
+  requeueTaken(): QueuedCommand | undefined {
+    const taken = this.requeueCandidate
+    this.requeueCandidate = undefined
+    if (
+      taken?.uuid === undefined ||
+      taken.withinMs === undefined ||
+      (taken.until !== undefined && this.nowFn() > taken.until)
+    ) {
+      return undefined
+    }
+    const {
+      requeueIfInterruptedWithinMs: _withinMs,
+      promptSubmitted,
+      attachmentSourceUuid: _srcUuid,
+      deliveryId: _deliveryId,
+      ...rest
+    } = taken.cmd
+    this.putBackUuids.add(taken.uuid)
+    this.foldInFlight.delete(taken.uuid)
+    this.enqueueReportingAdmission(
+      {
+        ...rest,
+        drainOnly: true,
+        runsAlone: true,
+        admissionExempt: 'resurrected',
+        ...(promptSubmitted !== undefined ? { screeningOwed: true } : {}),
+      },
+      { ahead: true },
+    )
+    return taken.cmd
+  }
+
+  /** Official 2.1.328 (`Fa`): whether uuid was put back via requeueTaken(). */
+  wasPutBack(uuid: string): boolean {
+    return this.putBackUuids.has(uuid)
+  }
+
+  /** Official 2.1.328 (`il`): fate of a folded copy ('drop' | 'wait' | 'keep'). */
+  foldCopyFate(uuid: string): 'drop' | 'wait' | 'keep' {
+    if (this.putBackUuids.has(uuid)) return 'drop'
+    if (
+      this.foldInFlight.has(uuid) &&
+      this.commandQueue.some(
+        cmd =>
+          cmd.uuid === uuid && cmd.requeueIfInterruptedWithinMs !== undefined,
+      )
+    ) {
+      return 'wait'
+    }
+    return this.requeueCandidate?.uuid === uuid &&
+      this.requeueCandidate.withinMs !== undefined &&
+      (this.requeueCandidate.until === undefined ||
+        this.nowFn() <= this.requeueCandidate.until)
+      ? 'wait'
+      : 'keep'
+  }
+
+  /** Official 2.1.328 (`Cu`): once the folded copy is written, forgo requeue. */
+  foldCopyWritten(uuid: string): void {
+    if (this.requeueCandidate?.uuid === uuid || this.foldInFlight.has(uuid)) {
+      this.forgoRequeue(uuid)
+    }
+  }
+
+  /** Official 2.1.328 (`Md`): remaining ms in the armed requeue window. */
+  requeueWindowLeftMs(): number | undefined {
+    if (
+      this.requeueCandidate?.withinMs !== undefined &&
+      this.requeueCandidate.until !== undefined &&
+      this.nowFn() <= this.requeueCandidate.until
+    ) {
+      return this.requeueCandidate.until - this.nowFn()
+    }
+    return undefined
+  }
+
+  /**
+   * Official 2.1.328 (`$e` in `chunk@294254613.js:760000`): mark matching queued
+   * commands (and matching future enqueues) passive until the returned release
+   * function is invoked.
+   */
+  holdBack(holds: (cmd: QueuedCommand) => boolean): () => number {
+    if (this.activeHold !== undefined) {
+      throw new Error(
+        'holdBack: this message queue already has a hold; end it with the function the first call returned before setting another',
+      )
+    }
+    const hold = { holds, marked: new Set<QueuedCommand>() }
+    this.activeHold = hold
+    try {
+      let markedCount = 0
+      for (const cmd of this.commandQueue) {
+        if (this.applyHoldBack(cmd)) markedCount++
+      }
+      if (markedCount > 0) this.notifySubscribers()
+    } catch (err) {
+      if (this.activeHold === hold) this.activeHold = undefined
+      for (const cmd of hold.marked) delete cmd.passive
+      throw err
+    }
+    return () => {
+      if (this.activeHold !== hold) return 0
+      this.activeHold = undefined
+      const held = this.commandQueue.filter(cmd => hold.marked.has(cmd))
+      if (held.length === 0) return 0
+      const remaining = this.commandQueue.filter(cmd => !hold.marked.has(cmd))
+      for (const cmd of held) delete cmd.passive
+      this.commandQueue.length = 0
+      this.commandQueue.push(...remaining, ...held)
+      this.notifySubscribers()
+      return held.length
+    }
+  }
+
+  /** Official 2.1.328 (`Le`): release a subset of currently held-back commands. */
+  letHeldBackGo(pred: (cmd: QueuedCommand) => boolean): number {
+    const marked = this.activeHold?.marked
+    if (!marked) return 0
+    const released = this.commandQueue.filter(
+      cmd => marked.has(cmd) && pred(cmd),
+    )
+    for (const cmd of released) {
+      delete cmd.passive
+      marked.delete(cmd)
+    }
+    if (released.length > 0) this.notifySubscribers()
+    return released.length
+  }
+
+  /** Official 2.1.328 (`ys`): stage a command to be enqueued ahead once the turn ends. */
+  queueAfterTurn(cmd: QueuedCommand): void {
+    this.queuedAfterTurn.push(cmd)
+  }
+
+  /**
+   * Official 2.1.328 (`Hi`): release staged post-turn commands ahead in FIFO order
+   * unless a `'now'` priority command is already waiting in the queue.
+   */
+  releaseQueuedAfterTurn(): void {
+    const staged = this.queuedAfterTurn.splice(0)
+    if (
+      staged.length > 0 &&
+      this.commandQueue.some(cmd => cmd.priority === 'now')
+    ) {
+      logForDebugging(
+        `releaseQueuedAfterTurn: dropped ${staged.length}, a 'now' command waits`,
+      )
+      return
+    }
+    for (const cmd of staged.reverse()) {
+      this.enqueueReportingAdmission(cmd, { ahead: true })
     }
   }
 
@@ -910,6 +1179,7 @@ export class MessageQueueInstance {
 
   reset(): void {
     this.commandQueue.length = 0
+    this.queuedAfterTurn.length = 0
     this.snapshot = Object.freeze([])
     this.inFlightDrainBatch = null
     this.cancelPending.clear()
@@ -917,6 +1187,9 @@ export class MessageQueueInstance {
     this.foldInFlight.clear()
     this.midTurnFoldSuspended = false
     this.activePollCalls.clear()
+    this.activeHold = undefined
+    this.requeueCandidate = undefined
+    this.putBackUuids.clear()
     this.commandsConsumed.clear()
     this.commandsDiscarded.clear()
   }
@@ -986,6 +1259,7 @@ export class MessageQueueInstance {
   popAllEditable(
     currentInput: string,
     currentCursorOffset: number,
+    currentPastedContents: Record<number, PastedContent> = {},
   ): PopAllEditableResult | undefined {
     if (this.commandQueue.length === 0) {
       return undefined
@@ -1012,31 +1286,33 @@ export class MessageQueueInstance {
       return undefined
     }
 
-    // Extract text from queued commands (handles both strings and ContentBlockParam[])
-    const queuedTexts = editable.map(cmd => extractTextFromValue(cmd.value))
-    const newInput = [...queuedTexts, currentInput].filter(Boolean).join('\n')
-
-    // Calculate cursor offset: length of joined queued commands + 1 + current cursor offset
-    const cursorOffset = queuedTexts.join('\n').length + 1 + currentCursorOffset
-
-    // Extract images from queued commands
+    // Official 2.1.328 (`chunk@294254613.js:777500` `Bc`/`nu`/`KPt`/`Wnt`):
+    // prefer `preExpansionValue` when present, remap colliding paste IDs, and
+    // avoid off-by-1 cursorOffset when `currentInput === ''`.
+    const remapped = remapEditablePasteIds(
+      editable,
+      currentInput,
+      currentPastedContents,
+    )
     const images: PastedContent[] = []
-    let nextImageId = Date.now() // Use timestamp as base for unique IDs
-    for (const cmd of editable) {
-      // handlePromptSubmit queues images in pastedContents (value is a string).
-      // Preserve the original PastedContent id so imageStore lookups still work.
-      if (cmd.pastedContents) {
-        for (const content of Object.values(cmd.pastedContents)) {
-          if (content.type === 'image' || content.inline === true) {
-            images.push(content)
-          }
-        }
-      }
+    let nextImageId = Date.now()
+    const pulledTexts: string[] = []
+    for (let i = 0; i < editable.length; i++) {
+      const cmd = editable[i]!
+      const slot = remapped[i]!
+      pulledTexts.push(slot.text)
+      images.push(...slot.entries)
       // Bridge/remote commands may embed images directly in ContentBlockParam[].
       const cmdImages = extractImagesFromValue(cmd.value, nextImageId)
       images.push(...cmdImages)
       nextImageId += cmdImages.length
     }
+    const pulledJoined = pulledTexts.filter(Boolean).join('\n')
+    const { text: newInput, cursorOffset } = joinPulledWithDraft(
+      pulledJoined,
+      currentInput,
+      currentCursorOffset,
+    )
 
     for (const command of editable) {
       logOperation(
@@ -1045,7 +1321,7 @@ export class MessageQueueInstance {
       )
       // Official 2.1.295 (#424): keep pulled-back queued messages in prompt
       // history (with armUndo: false) so they aren't lost after ← + ↑/Esc.
-      const text = extractTextFromValue(command.value)
+      const text = extractEditableText(command)
       if (text) {
         const display = command.mode === 'bash' ? `!${text}` : text
         addToHistory(
@@ -1081,6 +1357,7 @@ export class MessageQueueInstance {
     index: number,
     currentInput: string,
     currentCursorOffset: number,
+    currentPastedContents: Record<number, PastedContent> = {},
   ): PopEditableAtResult | undefined {
     const cmd = this.commandQueue.filter(isQueuedCommandEditable)[index]
     if (!cmd) {
@@ -1090,24 +1367,35 @@ export class MessageQueueInstance {
       return undefined
     }
 
-    const text = extractTextFromValue(cmd.value)
-    const newInput = [text, currentInput].filter(Boolean).join('\n')
-    const cursorOffset = text.length + 1 + currentCursorOffset
+    const [slot] = remapEditablePasteIds(
+      [cmd],
+      currentInput,
+      currentPastedContents,
+    )
+    const pulledText = slot!.text
+    const { text: newInput, cursorOffset } = joinPulledWithDraft(
+      pulledText,
+      currentInput,
+      currentCursorOffset,
+    )
 
-    const images: PastedContent[] = []
-    if (cmd.pastedContents) {
-      for (const content of Object.values(cmd.pastedContents)) {
-        if (content.type === 'image' || content.inline === true) {
-          images.push(content)
-        }
-      }
-    }
-    images.push(...extractImagesFromValue(cmd.value, Date.now()))
+    const images: PastedContent[] = [
+      ...slot!.entries,
+      ...extractImagesFromValue(cmd.value, Date.now()),
+    ]
 
     logOperation(
       'popOne',
       typeof cmd.value === 'string' ? cmd.value : undefined,
     )
+    const historyText = extractEditableText(cmd)
+    if (historyText) {
+      const display = cmd.mode === 'bash' ? `!${historyText}` : historyText
+      addToHistory(
+        { display, pastedContents: cmd.pastedContents ?? {} },
+        { armUndo: false },
+      )
+    }
 
     const gr = this.commandQueue.indexOf(cmd)
     if (gr !== -1) {
@@ -1785,6 +2073,66 @@ export function consume(
   activeQueue.consume(commandsToConsume, opts)
 }
 
+/** Official 2.1.328 (`va`): arm the interrupt requeue deadline for the last mid-turn absorbed prompt. */
+export function startRequeueWindow(): void {
+  activeQueue.startRequeueWindow()
+}
+
+/** Official 2.1.328 (`Xl`): close the interrupt requeue window; clear putBack set when `turnEnded`. */
+export function settleTaken(opts?: { turnEnded?: boolean }): void {
+  activeQueue.settleTaken(opts)
+}
+
+/** Official 2.1.328 (`Ja`): cancel interrupt requeue eligibility for `uuid`. */
+export function forgoRequeue(uuid: string): void {
+  activeQueue.forgoRequeue(uuid)
+}
+
+/** Official 2.1.328 (`Ia`): resurrect the last mid-turn absorbed prompt if still within its window. */
+export function requeueTaken(): QueuedCommand | undefined {
+  return activeQueue.requeueTaken()
+}
+
+/** Official 2.1.328 (`Fa`): whether `uuid` was resurrected via `requeueTaken()`. */
+export function wasPutBack(uuid: string): boolean {
+  return activeQueue.wasPutBack(uuid)
+}
+
+/** Official 2.1.328 (`il`): fate of a folded prompt copy ('drop' | 'wait' | 'keep'). */
+export function foldCopyFate(uuid: string): 'drop' | 'wait' | 'keep' {
+  return activeQueue.foldCopyFate(uuid)
+}
+
+/** Official 2.1.328 (`Cu`): mark folded copy written so it will no longer be requeued. */
+export function foldCopyWritten(uuid: string): void {
+  activeQueue.foldCopyWritten(uuid)
+}
+
+/** Official 2.1.328 (`Md`): remaining ms in the armed requeue window. */
+export function requeueWindowLeftMs(): number | undefined {
+  return activeQueue.requeueWindowLeftMs()
+}
+
+/** Official 2.1.328 (`$e`): temporarily hold matching commands passive until release is called. */
+export function holdBack(holds: (cmd: QueuedCommand) => boolean): () => number {
+  return activeQueue.holdBack(holds)
+}
+
+/** Official 2.1.328 (`Le`): release a subset of held-back commands matching `pred`. */
+export function letHeldBackGo(pred: (cmd: QueuedCommand) => boolean): number {
+  return activeQueue.letHeldBackGo(pred)
+}
+
+/** Official 2.1.328 (`ys`): stage a command to run ahead after the current turn finishes. */
+export function queueAfterTurn(cmd: QueuedCommand): void {
+  activeQueue.queueAfterTurn(cmd)
+}
+
+/** Official 2.1.328 (`Hi`): release staged post-turn commands ahead unless a `'now'` command waits. */
+export function releaseQueuedAfterTurn(): void {
+  activeQueue.releaseQueuedAfterTurn()
+}
+
 /**
  * Remove commands matching a predicate.
  * Returns the removed commands.
@@ -2081,6 +2429,123 @@ function extractTextFromValue(value: string | ContentBlockParam[]): string {
   return typeof value === 'string' ? value : extractTextContent(value, '\n')
 }
 
+/** Official 2.1.328 (`uln`): command has a non-empty pre-expansion text draft. */
+function hasPreExpansionValue(cmd: QueuedCommand): boolean {
+  return (
+    typeof cmd.preExpansionValue === 'string' &&
+    cmd.preExpansionValue.trim() !== '' &&
+    (cmd.skipSlashCommands === true ||
+      cmd.pasteTagged === true ||
+      cmd.pastedContents !== undefined)
+  )
+}
+
+/** Official 2.1.328 (`KPt`): prefer `preExpansionValue` when available. */
+function extractEditableText(cmd: QueuedCommand): string {
+  if (hasPreExpansionValue(cmd)) {
+    return cmd.preExpansionValue!
+  }
+  return extractTextFromValue(cmd.value)
+}
+
+/** Official 2.1.328 (`C4r`): extract editable pasted entries (images, inline, or all when pre-expansion). */
+function extractEditablePastedContents(cmd: QueuedCommand): PastedContent[] {
+  if (!cmd.pastedContents) return []
+  const usePreExpansion = hasPreExpansionValue(cmd)
+  return Object.values(cmd.pastedContents).filter(
+    c => c.type === 'image' || c.inline === true || usePreExpansion,
+  )
+}
+
+/**
+ * Official 2.1.328 (`nu` in `chunk@294254613.js:777500`): remap text paste IDs
+ * that collide with paste IDs or dangling `[Pasted text #N]` references in the
+ * current draft or other pulled queued commands.
+ */
+function remapEditablePasteIds(
+  cmds: QueuedCommand[],
+  currentInput: string,
+  currentPastedContents: Record<number, PastedContent>,
+): Array<{ text: string; entries: PastedContent[] }> {
+  const items = cmds.map(cmd => ({
+    text: extractEditableText(cmd),
+    entries: extractEditablePastedContents(cmd),
+  }))
+  const collectForeignRefIds = (
+    text: string,
+    ownIds: Set<number>,
+  ): Set<number> => {
+    const foreign = new Set<number>()
+    for (const ref of parseReferences(text)) {
+      if (isValidPasteId(ref.id) && !ownIds.has(ref.id)) {
+        foreign.add(ref.id)
+      }
+    }
+    return foreign
+  }
+  const currentOwnIds = new Set(Object.keys(currentPastedContents).map(Number))
+  const foreignPerSlot = [
+    collectForeignRefIds(currentInput, currentOwnIds),
+    ...items.map(item =>
+      collectForeignRefIds(item.text, new Set(item.entries.map(e => e.id))),
+    ),
+  ]
+  const claimedIds = new Set<number>(currentOwnIds)
+  return items.map((item, idx) => {
+    const takenByOthers = new Set<number>(claimedIds)
+    for (let slot = 0; slot < foreignPerSlot.length; slot++) {
+      if (slot === idx + 1) continue
+      for (const id of foreignPerSlot[slot]!) {
+        takenByOthers.add(id)
+      }
+    }
+    let text = item.text
+    const entries = item.entries.map(entry => {
+      if (entry.type !== 'text' || !takenByOthers.has(entry.id)) {
+        claimedIds.add(entry.id)
+        return entry
+      }
+      const combinedPasted: Record<number, unknown> = {
+        ...currentPastedContents,
+      }
+      for (const id of claimedIds) combinedPasted[id] = true
+      for (const id of takenByOthers) combinedPasted[id] = true
+      const newId = mintPasteId(
+        [currentInput, ...items.map(i => i.text)].join('\n'),
+        combinedPasted,
+      )
+      text = renumberPasteRefInDisplay(text, entry.id, newId, 'text')
+      claimedIds.add(newId)
+      return { ...entry, id: newId }
+    })
+    return { text, entries }
+  })
+}
+
+/**
+ * Official 2.1.328 (`Wnt` in `chunk@294254613.js:758370`): combine pulled text
+ * ahead of current input without off-by-1 cursorOffset when draft is empty.
+ */
+function joinPulledWithDraft(
+  pulledText: string,
+  currentInput: string,
+  currentCursorOffset: number,
+): { text: string; cursorOffset: number } {
+  if (!pulledText) {
+    return { text: currentInput, cursorOffset: currentCursorOffset }
+  }
+  if (!currentInput) {
+    return {
+      text: pulledText,
+      cursorOffset: pulledText.length + currentCursorOffset,
+    }
+  }
+  return {
+    text: `${pulledText}\n${currentInput}`,
+    cursorOffset: pulledText.length + 1 + currentCursorOffset,
+  }
+}
+
 /**
  * densable XLr — image blocks in a queued value become PastedContent.
  * String values return [].
@@ -2150,23 +2615,34 @@ export function hasPoppableEditableCommandsInQueue(
 export function popAllEditable(
   currentInput: string,
   currentCursorOffset: number,
+  currentPastedContents: Record<number, PastedContent> = {},
 ): PopAllEditableResult | undefined {
-  return activeQueue.popAllEditable(currentInput, currentCursorOffset)
+  return activeQueue.popAllEditable(
+    currentInput,
+    currentCursorOffset,
+    currentPastedContents,
+  )
 }
 
 export type PopEditableAtResult = PopAllEditableResult
 
 /**
- * densable `Ne` / `popEditableAt` 1:1 (2.1.234 #20).
- * Index is into `n.filter(lJ)` (editable), then NMt-gated.
- * Paste-id remap (`ke`) is not ported — same extract path as `popAllEditable`.
+ * densable `Ne` / `popEditableAt` 1:1 (2.1.328).
+ * Index is into `n.filter(lJ)` (editable), then NMt-gated, with `nu` paste-id
+ * collision remapping and `Wnt` cursorOffset alignment.
  */
 export function popEditableAt(
   index: number,
   currentInput: string,
   currentCursorOffset: number,
+  currentPastedContents: Record<number, PastedContent> = {},
 ): PopEditableAtResult | undefined {
-  return activeQueue.popEditableAt(index, currentInput, currentCursorOffset)
+  return activeQueue.popEditableAt(
+    index,
+    currentInput,
+    currentCursorOffset,
+    currentPastedContents,
+  )
 }
 
 /**
@@ -2247,15 +2723,22 @@ export function countRemainingWakePollEventsAfter(
  * through isBridgeSafeCommand().
  */
 export function isSlashCommand(cmd: QueuedCommand): boolean {
-  if (cmd.mode === 'poll-event') {
+  if (cmd.mode === 'poll-event' || cmd.textNotTyped === true) {
     return false
   }
-  if (cmd.textNotTyped === true) {
+  if (cmd.skipSlashCommands && cmd.bridgeOrigin !== true) {
     return false
   }
+  if (typeof cmd.value === 'string') {
+    return cmd.value.trim().startsWith('/')
+  }
+  if (!Array.isArray(cmd.value)) {
+    return false
+  }
+  const lastBlock = cmd.value.at(-1)
   return (
-    typeof cmd.value === 'string' &&
-    cmd.value.trim().startsWith('/') &&
-    (!cmd.skipSlashCommands || cmd.bridgeOrigin === true)
+    lastBlock?.type === 'text' &&
+    typeof lastBlock.text === 'string' &&
+    lastBlock.text.trim().startsWith('/')
   )
 }
