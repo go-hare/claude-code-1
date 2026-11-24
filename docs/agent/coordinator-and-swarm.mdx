@@ -631,8 +631,7 @@ pane-based team 主要通过 footer TeamStatus 和 TeamsDialog 管理：Enter �
 | task stop | `packages/builtin-tools/src/tools/TaskStopTool/TaskStopTool.ts`、`src/tasks/stopTask.ts` |
 | team gate | `src/utils/agentSwarmsEnabled.ts` |
 | team file helpers | `src/utils/swarm/teamHelpers.ts` |
-| TeamCreate | `packages/builtin-tools/src/tools/TeamCreateTool/TeamCreateTool.ts` |
-| TeamDelete | `packages/builtin-tools/src/tools/TeamDeleteTool/TeamDeleteTool.ts` |
+| TeamCreate / TeamDelete 常量 *(工具已退役)* | `src/constants/tools.ts`（2.1.328 已移除模型工具实现，改由 `AgentTool` 与 `teamHelpers` 驱动） |
 | spawn teammate | `packages/builtin-tools/src/tools/shared/spawnMultiAgent.ts` |
 | in-process teammate spawn | `src/utils/swarm/spawnInProcess.ts` |
 | in-process teammate runner | `src/utils/swarm/inProcessRunner.ts` |

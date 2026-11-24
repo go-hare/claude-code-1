@@ -72,21 +72,27 @@ export function getMacroDefines(): Record<string, string> {
  */
 export const DEFAULT_BUILD_FEATURES = [
   'BUDDY', // 陪伴宠物角色（Squirtle Waddles）
+  'BASH_CLASSIFIER', // Official 2.1.328 ON — Bash 权限分类器与自动审批（39 处引用，含队友/auto-mode）
   'TRANSCRIPT_CLASSIFIER', // 对话分类器，用于标注会话类型
+  'POWERSHELL_AUTO_MODE', // Official 2.1.328 ON — PowerShell auto-mode 权限支持与分类器指引
   'BRIDGE_MODE', // Remote Control / Bridge 模式，远程控制会话
+  'CCR_AUTO_CONNECT', // Official 2.1.328 ON — CCR 自动连接默认门（tengu_cobalt_harbor）
   'AGENT_TRIGGERS_REMOTE', // sessionIngress 模块级 Map 累积（非 GB 级主因）
   'CHICAGO_MCP', // Chicago MCP 集成（内部代号）
   'VOICE_MODE', // Push-to-Talk 语音输入模式
-  'SHOT_STATS', // 单次请求统计信息收集
   'PROMPT_CACHE_BREAK_DETECTION', // 检测 prompt cache 是否被打破（有 10 条上限，可控）
   'TOKEN_BUDGET', // Token 预算管理与控制
   // P0: local features
   'AGENT_TRIGGERS', // 本地 Agent 触发器（工具调用时启动子代理）
+  'AGENT_MEMORY_SNAPSHOT', // Official 2.1.328 ON — Agent 记忆快照初始化与更新检查
+  'HISTORY_PICKER', // Official 2.1.328 ON — Ctrl+R 模态历史搜索选择器
+  'MCP_SKILLS', // Official 2.1.328 ON — MCP server `skill://` 资源技能发现
+  'WEB_BROWSER_TOOL', // Official 2.1.328 ON — 内置 WebBrowser 工具
+  'NEW_INIT', // Official 2.1.328 ON — `/init` 新版初始化提示门（受 CLAUDE_CODE_NEW_INIT / GB 运行时控）
   'ULTRATHINK', // 超深度思考模式，增加推理链长度
   'BUILTIN_EXPLORE_PLAN_AGENTS', // 内置 Explore/Plan 子代理类型
   'LODESTONE', // 上下文锚点，优化长对话的相关性检索
   'EXTRACT_MEMORIES', // 每次 turn 结束 fork 完整消息历史（非 GB 级主因）
-  'VERIFICATION_AGENT', // 任务完成后 fork 完整消息（非 GB 级主因）
   'KAIROS_BRIEF', // Kairos 定时摘要（定时汇报当前状态）
   'AWAY_SUMMARY', // 离线摘要（用户离开后生成总结）
   // densable 2.1.222 #21 Removed ultraplan feature — product cut, not a
@@ -130,14 +136,12 @@ export const DEFAULT_BUILD_FEATURES = [
   'UDS_INBOX', // 本机 UDS inbox / peers / pipes control plane
   'LAN_PIPES', // 局域网 TCP + UDP beacon；依赖 UDS_INBOX 编译面
   'BG_SESSIONS', // 后台会话管理（ps/logs/attach/kill）
-  'TEMPLATES', // 模板任务（new/list/reply 子命令）
   // 'REVIEW_ARTIFACT',          // 代码审查产物（API 请求无响应，待排查 schema 兼容性）
   // API content block types
   'CONNECTOR_TEXT', // Connector 文本块类型，扩展 API 内容格式
-  // Attribution tracking
-  'COMMIT_ATTRIBUTION', // Git 提交归属追踪（记录 AI 辅助贡献）
-  // Server mode (claude server / claude open)
-  'DIRECT_CONNECT', // 直连模式（claude server / claude open）
+  // Telemetry
+  'ENHANCED_TELEMETRY_BETA', // Official 2.1.328 ON — 增强遥测 beta 门（受环境变量/GB 运行时控）
+  'COWORKER_TYPE_TELEMETRY', // Official 2.1.328 ON — CLAUDE_CODE_COWORKER_TYPE 遥测环境字段
   // Skill search & learning — feature flags compiled in (so the slash
   // commands /skill-* etc. exist), but the runtime "enabled" toggle
   // defaults to OFF (see featureCheck.ts). Operators turn on via the

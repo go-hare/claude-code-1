@@ -3,6 +3,11 @@ import { randomUUID } from 'crypto'
 import { readFileSync } from 'fs'
 import { homedir, hostname, tmpdir } from 'os'
 import { basename, join, resolve } from 'path'
+import { z } from 'zod/v4'
+import {
+  parseSseChunk,
+  type SseParserState,
+} from '../remote/SessionsV2Client.js'
 import { getRemoteSessionUrl } from '../constants/product.js'
 import { shutdownDatadog } from '../services/analytics/datadog.js'
 import { shutdown1PEventLogging } from '../services/analytics/firstPartyEventLogger.js'
@@ -29,6 +34,7 @@ import {
 } from '../utils/worktree.js'
 import {
   BridgeFatalError,
+  type BridgeSessionsWatchApi,
   createBridgeApiClient,
   isExpiredErrorType,
   isSuppressible403,
@@ -183,6 +189,575 @@ export type BridgeRestartConfig = BridgeConfig & {
   initialSessionRequeuesPersistedAt?: number
   boundedResumeSessionIds?: string[]
   enqueuePointerWrite?: <T>(fn: () => Promise<T>) => Promise<T>
+  /** Official 2.1.328 (`chunk@315298418.js @105160`): resolves shutdown cause (e.g. 'upgrade' | 'reload'). */
+  awaitShutdownCause?: () => Promise<string | undefined> | string | undefined
+}
+
+// ── Official 2.1.328 `[bridge:watch]` SSE resume-token watch stream ────────
+// chunk@315298418.js @49000-55000 (`Vo`, `gi`, `Go`)
+
+const WATCH_RESUME_TOKEN_TTL_MS = 210_000
+const WATCH_MINT_COOLDOWN_MS = 30_000
+const WATCH_BACKOFF_BASE_MS = 15_000
+const WATCH_BACKOFF_CAP_MS = 60_000
+const WATCH_MIN_HEALTHY_MS = 30_000
+const WATCH_HEALTHY_RECONNECT_MAX_MS = 20_000
+const WATCH_SILENT_TIMEOUT_MS = 45_000
+const WATCH_TICK_INTERVAL_MS = 15_000
+const WATCH_NO_SYNC_MIN_MS = 360_000
+const WATCH_NO_SYNC_MAX_MS = 540_000
+const WATCH_MAX_UNEXPECTED_STREAK = 3
+const WATCH_PARK_LONG_MS = 3_600_000
+const WATCH_PARK_AUTH_MS = 900_000
+const WATCH_RATE_LIMIT_DEFAULT_MS = 30_000
+const WATCH_RETRY_AFTER_CAP_MS = 600_000
+const WATCH_MAX_FRAME_BYTES = 3_145_728
+const WATCH_RESUME_TOKEN_RE = /^[\x21-\x7e]{1,4096}$/
+
+const watchBoundedStrSchema = z.string().max(256)
+const watchOptStrSchema = watchBoundedStrSchema
+  .nullish()
+  .transform(v => v ?? undefined)
+const bridgeWatchPayloadSchema = z.object({
+  id: watchBoundedStrSchema.min(1),
+  environment_id: watchOptStrSchema,
+  status: watchOptStrSchema,
+  worker_status: watchOptStrSchema,
+  last_event_at: watchOptStrSchema,
+  external_metadata: z
+    .object({
+      tool_host_status: z
+        .object({
+          state: z.literal('requested'),
+          environment_id: watchBoundedStrSchema.min(1),
+          requested_at: watchBoundedStrSchema.min(1),
+        })
+        .optional()
+        .catch(undefined),
+    })
+    .optional()
+    .catch(undefined),
+})
+
+export type BridgeWatchState =
+  | 'off'
+  | 'connecting'
+  | 'connected'
+  | 'backoff'
+  | 'parked'
+
+export type BridgeWatchFrame = {
+  sessionId: string
+  environmentId?: string
+  archived: boolean
+  fingerprint: string
+  toolHostRequest?: {
+    environmentId: string
+    requestedAt: string
+  }
+}
+
+export type BridgeWatchClock = {
+  now(): number
+  monotonicNow(): number
+  setTimeout(fn: () => void, ms: number, opts?: { unref?: boolean }): () => void
+}
+
+export type BridgeWatchOptions = {
+  api: BridgeSessionsWatchApi
+  getAccessToken: () => Promise<string | undefined> | string | undefined
+  onFrame: (frame: BridgeWatchFrame) => void
+  onDroppedFrame?: () => void
+  onStateChange?: (state: BridgeWatchState, reason?: string) => void
+  clock?: BridgeWatchClock
+  random?: () => number
+}
+
+export type BridgeWatchController = {
+  start(): void
+  stop(): void
+  readonly state: BridgeWatchState
+  getResumeToken(): string | undefined
+}
+
+const DEFAULT_WATCH_CLOCK: BridgeWatchClock = {
+  now: () => Date.now(),
+  monotonicNow: () => performance.now(),
+  setTimeout(fn, ms, opts) {
+    const id = setTimeout(fn, ms)
+    if (opts?.unref) id.unref?.()
+    return () => clearTimeout(id)
+  },
+}
+
+type WatchEndOutcome = {
+  end:
+    | 'network'
+    | 'auth'
+    | 'not_offered'
+    | 'token_expired'
+    | 'rate_limited'
+    | 'http_retryable'
+    | 'http_unexpected'
+    | 'resume_token_unusable'
+    | 'not_event_stream'
+    | 'oversized_frame'
+    | 'closed'
+    | 'closed_before_sync'
+    | 'slept'
+    | 'silent'
+    | 'connect_timeout'
+    | 'no_sync'
+  retryAfterMs?: number
+}
+
+function classifyWatchHttpStatus(
+  status: number,
+  retryAfterMs?: number,
+): WatchEndOutcome {
+  switch (status) {
+    case 401:
+    case 403:
+      return { end: 'auth' }
+    case 404:
+      return { end: 'not_offered' }
+    case 410:
+      return { end: 'token_expired' }
+    case 429:
+      return { end: 'rate_limited', retryAfterMs }
+    default:
+      return {
+        end:
+          status >= 500 || status === 408
+            ? 'http_retryable'
+            : 'http_unexpected',
+        retryAfterMs,
+      }
+  }
+}
+
+/**
+ * Official 2.1.328 `$e` / `gi` (`chunk@315298418.js @49500-54000`): parse an
+ * `added`/`changed` JSON frame from `/v1/code/sessions/watch` including
+ * `external_metadata.tool_host_status`.
+ */
+export function parseBridgeWatchFrame(
+  rawJson: string,
+): BridgeWatchFrame | null {
+  let parsedJson: unknown
+  try {
+    parsedJson = JSON.parse(rawJson)
+  } catch {
+    return null
+  }
+  const result = bridgeWatchPayloadSchema.safeParse(parsedJson)
+  if (!result.success) {
+    return null
+  }
+  const {
+    id,
+    environment_id,
+    status,
+    worker_status,
+    last_event_at,
+    external_metadata,
+  } = result.data
+  const toolHost = external_metadata?.tool_host_status
+  return {
+    sessionId: id,
+    ...(environment_id !== undefined && { environmentId: environment_id }),
+    archived: /(^|_)archived$/i.test(status ?? ''),
+    fingerprint: `${status} ${worker_status} ${last_event_at}`,
+    ...(toolHost && {
+      toolHostRequest: {
+        environmentId: toolHost.environment_id,
+        requestedAt: toolHost.requested_at,
+      },
+    }),
+  }
+}
+
+/**
+ * Official 2.1.328 `[bridge:watch]` SSE resume-token watch stream helper
+ * (`Vo` in `chunk@315298418.js @49000-55000`).
+ */
+export function createBridgeSessionsWatch(
+  opts: BridgeWatchOptions,
+): BridgeWatchController {
+  const { api } = opts
+  const clock = opts.clock ?? DEFAULT_WATCH_CLOCK
+  const rand = opts.random ?? Math.random
+
+  let state: BridgeWatchState = 'off'
+  let generation = 0
+  let currentAbort: AbortController | undefined
+  let cancelWatchdog: (() => void) | undefined
+  let cancelReconnect: (() => void) | undefined
+  let resumeToken: { value: string; at: number } | undefined
+  let lastActivity = { wall: 0, monotonic: 0 }
+  let lastSync = { wall: 0, monotonic: 0 }
+  let nextMintAtMonotonic = Number.NEGATIVE_INFINITY
+  let connectedAtMonotonic: number | undefined
+  let noSyncLimitMs = WATCH_NO_SYNC_MIN_MS
+  let backoffAttempt = 0
+  let unexpectedStreak = 0
+
+  function stamp(): { wall: number; monotonic: number } {
+    return { wall: clock.now(), monotonic: clock.monotonicNow() }
+  }
+
+  function elapsedSince(mark: { wall: number; monotonic: number }): number {
+    return Math.max(
+      clock.now() - mark.wall,
+      clock.monotonicNow() - mark.monotonic,
+    )
+  }
+
+  function runSafe(fn: (() => void) | undefined): void {
+    if (!fn) return
+    try {
+      fn()
+    } catch (err) {
+      logError(err instanceof Error ? err : new Error(String(err)))
+    }
+  }
+
+  function setState(next: BridgeWatchState, reason?: string): void {
+    if (next === state) return
+    logForDebugging(
+      `[bridge:watch] ${state} -> ${next}${reason ? ` after ${reason}` : ''}`,
+    )
+    state = next
+    runSafe(() => opts.onStateChange?.(next, reason))
+  }
+
+  function clearTimersAndAbort(): void {
+    generation++
+    currentAbort?.abort()
+    currentAbort = undefined
+    cancelWatchdog?.()
+    cancelReconnect?.()
+    cancelWatchdog = undefined
+    cancelReconnect = undefined
+  }
+
+  function computeBackoffMs(atCap = false): number {
+    if (!atCap) backoffAttempt++
+    const attempt = atCap ? Number.POSITIVE_INFINITY : backoffAttempt
+    const raw = Number.isFinite(attempt)
+      ? Math.min(
+          WATCH_BACKOFF_CAP_MS,
+          WATCH_BACKOFF_BASE_MS * 2 ** Math.max(0, attempt - 1),
+        )
+      : WATCH_BACKOFF_CAP_MS
+    const jitter = (rand() * 2 - 1) * 0.5 * raw
+    return Math.max(0, raw + jitter)
+  }
+
+  function scheduleAttempt(delayMs: number): void {
+    const ms = Number.isFinite(delayMs) ? delayMs : WATCH_BACKOFF_CAP_MS
+    logForDebugging(`[bridge:watch] next attempt in ${Math.round(ms / 1000)}s`)
+    cancelReconnect = clock.setTimeout(startAttempt, ms, { unref: true })
+  }
+
+  function park(reason: string, baseMs: number): void {
+    scheduleAttempt(baseMs * (0.5 + rand()))
+    setState('parked', reason)
+  }
+
+  function handleSync(id: string | undefined): void {
+    if (id === undefined || !WATCH_RESUME_TOKEN_RE.test(id)) {
+      runSafe(opts.onDroppedFrame)
+      return
+    }
+    lastSync = stamp()
+    resumeToken = { value: id, at: lastSync.wall }
+    if (state !== 'connected') {
+      connectedAtMonotonic = clock.monotonicNow()
+      unexpectedStreak = 0
+      setState('connected')
+    }
+  }
+
+  function handleEventData(raw: string): void {
+    const frame = parseBridgeWatchFrame(raw)
+    if (!frame) {
+      runSafe(opts.onDroppedFrame)
+      return
+    }
+    runSafe(() => opts.onFrame(frame))
+  }
+
+  function readWatchStream(
+    body: NodeJS.ReadableStream & { destroy: () => void },
+    signal: AbortSignal,
+    gen: number,
+  ): Promise<WatchEndOutcome> {
+    return new Promise(resolve => {
+      let parserState: SseParserState | undefined
+      let settled = false
+      const onAbort = (): void => {
+        body.destroy()
+      }
+      const finish = (end: WatchEndOutcome['end']): void => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', onAbort)
+        body.destroy()
+        resolve({ end })
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      body.on('data', (chunk: Buffer | Uint8Array | string) => {
+        if (gen !== generation || settled) return
+        lastActivity = stamp()
+        const bytes =
+          typeof chunk === 'string'
+            ? Buffer.from(chunk, 'utf8')
+            : new Uint8Array(chunk)
+        const parsed = parseSseChunk(parserState, bytes, WATCH_MAX_FRAME_BYTES)
+        parserState = parsed.state
+        for (const ev of parsed.events) {
+          if (gen !== generation || settled) return
+          if (ev.kind === 'tooLarge') {
+            finish('oversized_frame')
+            return
+          }
+          if (ev.kind === 'comment') continue
+          if (ev.event === 'sync') {
+            handleSync(ev.id)
+          } else if (
+            (ev.event === 'added' || ev.event === 'changed') &&
+            ev.data
+          ) {
+            handleEventData(ev.data)
+          }
+        }
+      })
+      body.on('error', () => finish('network'))
+      body.on('end', () => finish('closed'))
+      body.on('close', () => finish('closed'))
+    })
+  }
+
+  async function waitDelay(ms: number, signal: AbortSignal): Promise<void> {
+    if (ms <= 0 || signal.aborted) return
+    await new Promise<void>(resolve => {
+      const cancel = clock.setTimeout(
+        () => {
+          signal.removeEventListener('abort', onAbort)
+          resolve()
+        },
+        ms,
+        { unref: true },
+      )
+      const onAbort = (): void => {
+        cancel()
+        resolve()
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
+  async function runAttempt(
+    gen: number,
+    signal: AbortSignal,
+  ): Promise<WatchEndOutcome> {
+    const token = await opts.getAccessToken()
+    if (gen !== generation) return { end: 'network' }
+    if (!token) return { end: 'auth' }
+
+    const tokenAge =
+      resumeToken === undefined
+        ? Number.POSITIVE_INFINITY
+        : clock.now() - resumeToken.at
+    if (!(tokenAge >= 0 && tokenAge < WATCH_RESUME_TOKEN_TTL_MS)) {
+      const waitMs = nextMintAtMonotonic - clock.monotonicNow()
+      if (waitMs > 0) {
+        await waitDelay(waitMs, signal)
+      }
+      if (gen !== generation) return { end: 'network' }
+      lastActivity = stamp()
+      resumeToken = undefined
+      nextMintAtMonotonic =
+        clock.monotonicNow() + WATCH_MINT_COOLDOWN_MS * (1 + 0.5 * rand())
+      const minted = await api.mintResumeToken(token, signal)
+      if (gen !== generation) return { end: 'network' }
+      if (minted.status !== 200) {
+        return minted.status === 404 || minted.status === 410
+          ? { end: 'http_unexpected' }
+          : classifyWatchHttpStatus(minted.status, minted.retryAfterMs)
+      }
+      if (
+        minted.resumeToken === undefined ||
+        !WATCH_RESUME_TOKEN_RE.test(minted.resumeToken)
+      ) {
+        return { end: 'resume_token_unusable' }
+      }
+      resumeToken = { value: minted.resumeToken, at: clock.now() }
+    }
+
+    if (resumeToken === undefined) return { end: 'network' }
+    const opened = await api.open(token, resumeToken.value, signal)
+    if (gen !== generation) {
+      opened.body?.destroy()
+      return { end: 'network' }
+    }
+    if (opened.status !== 200) {
+      return opened.status === 410 && clock.now() - resumeToken.at < 30_000
+        ? { end: 'http_unexpected' }
+        : classifyWatchHttpStatus(opened.status, opened.retryAfterMs)
+    }
+    if (!opened.body) {
+      return { end: 'not_event_stream' }
+    }
+    return readWatchStream(opened.body, signal, gen)
+  }
+
+  function finishAttempt(outcome: WatchEndOutcome): void {
+    const connectedDur =
+      state === 'connected' && connectedAtMonotonic !== undefined
+        ? clock.monotonicNow() - connectedAtMonotonic
+        : undefined
+    const effectiveEnd =
+      (outcome.end === 'closed' || outcome.end === 'network') &&
+      elapsedSince(lastActivity) > 2 * WATCH_SILENT_TIMEOUT_MS
+        ? 'slept'
+        : outcome.end === 'closed' && connectedDur === undefined
+          ? 'closed_before_sync'
+          : outcome.end
+    const wasHealthy =
+      connectedDur !== undefined && connectedDur >= WATCH_MIN_HEALTHY_MS
+    clearTimersAndAbort()
+    connectedAtMonotonic = undefined
+    if (wasHealthy) {
+      backoffAttempt = 0
+    }
+
+    let delayMs: number
+    switch (effectiveEnd) {
+      case 'not_offered':
+        park(effectiveEnd, WATCH_PARK_LONG_MS)
+        return
+      case 'auth':
+        park(effectiveEnd, WATCH_PARK_AUTH_MS)
+        return
+      case 'http_unexpected':
+      case 'resume_token_unusable':
+      case 'not_event_stream':
+      case 'oversized_frame':
+        resumeToken = undefined
+        if (++unexpectedStreak >= WATCH_MAX_UNEXPECTED_STREAK) {
+          park(effectiveEnd, WATCH_PARK_LONG_MS)
+          return
+        }
+        delayMs = computeBackoffMs(true)
+        break
+      case 'slept':
+        delayMs = 0
+        break
+      case 'closed':
+      case 'network':
+      case 'silent':
+      case 'no_sync':
+        delayMs = wasHealthy
+          ? rand() * WATCH_HEALTHY_RECONNECT_MAX_MS
+          : computeBackoffMs()
+        break
+      case 'token_expired':
+        resumeToken = undefined
+        delayMs = computeBackoffMs()
+        break
+      default:
+        delayMs = computeBackoffMs()
+        break
+    }
+
+    const retryAfter =
+      outcome.retryAfterMs ??
+      (effectiveEnd === 'rate_limited' ? WATCH_RATE_LIMIT_DEFAULT_MS : 0)
+    const effectiveDelay = Math.max(
+      delayMs,
+      Math.min(retryAfter, WATCH_RETRY_AFTER_CAP_MS) * (1 + 0.5 * rand()),
+    )
+    scheduleAttempt(effectiveDelay)
+    setState('backoff', effectiveEnd)
+  }
+
+  function armWatchdog(gen: number): void {
+    cancelWatchdog = clock.setTimeout(
+      () => {
+        if (gen !== generation) return
+        const idleMs = elapsedSince(lastActivity)
+        if (idleMs > 2 * WATCH_SILENT_TIMEOUT_MS) {
+          finishAttempt({ end: 'slept' })
+        } else if (idleMs > WATCH_SILENT_TIMEOUT_MS) {
+          finishAttempt({
+            end: state === 'connected' ? 'silent' : 'connect_timeout',
+          })
+        } else if (elapsedSince(lastSync) > noSyncLimitMs) {
+          finishAttempt({ end: 'no_sync' })
+        } else {
+          armWatchdog(gen)
+        }
+      },
+      WATCH_TICK_INTERVAL_MS,
+      { unref: true },
+    )
+  }
+
+  function startAttempt(): void {
+    clearTimersAndAbort()
+    const gen = generation
+    const abort = new AbortController()
+    currentAbort = abort
+    lastActivity = stamp()
+    lastSync = lastActivity
+    noSyncLimitMs =
+      WATCH_NO_SYNC_MIN_MS +
+      rand() * (WATCH_NO_SYNC_MAX_MS - WATCH_NO_SYNC_MIN_MS)
+    armWatchdog(gen)
+    runAttempt(gen, abort.signal)
+      .catch(err => {
+        if (gen !== generation) return { end: 'network' as const }
+        const code =
+          err !== null && typeof err === 'object' && 'code' in err
+            ? String((err as { code?: unknown }).code)
+            : ''
+        logForDebugging(
+          `[bridge:watch] attempt threw ${err instanceof Error ? err.name : typeof err} ${code}`,
+          { level: 'error' },
+        )
+        return { end: 'network' as const }
+      })
+      .then(outcome => {
+        if (gen === generation) {
+          finishAttempt(outcome)
+        }
+      })
+      .catch(err => {
+        logError(err instanceof Error ? err : new Error(String(err)))
+      })
+    setState('connecting')
+  }
+
+  return {
+    start() {
+      if (state === 'off') {
+        startAttempt()
+      }
+    },
+    stop() {
+      clearTimersAndAbort()
+      connectedAtMonotonic = undefined
+      setState('off')
+    },
+    get state() {
+      return state
+    },
+    getResumeToken() {
+      return resumeToken?.value
+    },
+  }
 }
 
 /**
@@ -2262,6 +2837,32 @@ export async function runBridgeLoop(
     logForDebugging(
       `[bridge:shutdown] Skipping archive+deregister to allow resume (env ${environmentId}, spawnMode ${config.spawnMode})`,
     )
+    // Official 2.1.328 (`chunk@315298418.js @105160`): mark environment offline
+    // on preserved shutdown unless reloading/upgrading in place.
+    const shutdownCause = await restartConfig.awaitShutdownCause?.()
+    if (shutdownCause !== 'upgrade' && shutdownCause !== 'reload') {
+      const apiWithOffline = api as BridgeApiClient & {
+        markEnvironmentOffline?: (
+          envId: string,
+          envSecret: string,
+        ) => Promise<void>
+      }
+      if (apiWithOffline.markEnvironmentOffline) {
+        try {
+          await apiWithOffline.markEnvironmentOffline(
+            environmentId,
+            currentEnvironmentSecret,
+          )
+          logForDebugging('[bridge:shutdown] Environment marked offline')
+        } catch (err) {
+          logger.logVerbose(
+            err instanceof BridgeFatalError && err.status === 401
+              ? 'Failed to mark environment offline: the environment credential was rejected'
+              : `Failed to mark environment offline: ${errorMessage(err)}`,
+          )
+        }
+      }
+    }
     return
   }
 

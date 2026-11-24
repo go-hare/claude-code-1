@@ -7,9 +7,21 @@ import { request as httpsRequest } from 'node:https'
 import axios from 'axios'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 
+import {
+  isBridgeEnrollableUntrustedRefusal,
+  parseUntrustedDeviceRefusal,
+  type UntrustedDeviceRefusal,
+} from '../remote/SessionsV2Client.js'
 import { getAnthropicClientPlatform } from '../utils/teleport/api.js'
+import { getClaudeCodeUserAgent } from '../utils/userAgent.js'
+import { UNTRUSTED_DEVICE_HINT } from './codeSessionApi.js'
 import { debugBody, extractErrorDetail } from './debugUtils.js'
 import { rcLog } from './rcDebugLog.js'
+import { toCompatSessionId, toInfraSessionId } from './sessionIdCompat.js'
+import {
+  isTrustedDeviceGateEnabled,
+  recoverTrustedDeviceTokenAfterUntrusted,
+} from './trustedDevice.js'
 import {
   BRIDGE_LOGIN_INSTRUCTION,
   type BridgeApiClient,
@@ -17,6 +29,99 @@ import {
   type PermissionResponseEvent,
   type WorkResponse,
 } from './types.js'
+
+/** Official 2.1.328 `wIn` (`chunk@292186245.js @579`). */
+export const BRIDGE_FOLDER_ALREADY_SERVED = 'bridge_folder_already_served'
+
+/** Official 2.1.328 `vwt` (`chunk@283708551.js @29783`) — redact credentials in git URLs. */
+export function stripGitUrlCredentials(url: string | null): string | null {
+  return url == null ? url : url.replace(/:\/\/[^/]*@/, '://***@')
+}
+
+/** Official 2.1.328 `Kge` (`chunk@290117572.js @190`) — v1 session endpoints retired. */
+export function isSessionsV1RetiredResponse(res: {
+  status: number
+  data: unknown
+}): boolean {
+  const { status, data } = res
+  return (
+    status >= 400 &&
+    status < 500 &&
+    typeof data === 'object' &&
+    data !== null &&
+    'error' in data &&
+    typeof data.error === 'object' &&
+    data.error !== null &&
+    'reason' in data.error &&
+    (data.error as { reason?: unknown }).reason === 'sessions_v1_retired'
+  )
+}
+
+export type ToolHostAdvertState =
+  | { kind: 'advertise'; advert: { cliVersion: string; platform: string } }
+  | { kind: 'withdraw' }
+  | { kind: 'unknown' }
+
+export type BridgeRegisterConfig = BridgeConfig & {
+  machineId?: string | null
+  getDeviceUuid?: () => string | undefined | Promise<string | undefined>
+  getToolHostAdvert?: () => ToolHostAdvertState
+  getDirectoryBrowseAdvert?: () => boolean
+  hostProfile?: { tools: unknown[]; mcp_servers?: unknown[] }
+}
+
+export type BridgeSessionsWatchApi = {
+  mintResumeToken(
+    accessToken: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    status: number
+    retryAfterMs?: number
+    resumeToken?: string
+  }>
+  open(
+    accessToken: string,
+    lastEventId: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    status: number
+    body?: NodeJS.ReadableStream & { destroy: () => void }
+    retryAfterMs?: number
+  }>
+}
+
+export type BridgeApiClientV2 = BridgeApiClient & {
+  registerBridgeEnvironment(
+    config: BridgeRegisterConfig,
+    signal?: AbortSignal,
+  ): Promise<{
+    environment_id: string
+    environment_secret: string
+    environment_secret_expires_in?: number
+  }>
+  pollForWork(
+    environmentId: string,
+    environmentSecret: string,
+    signal?: AbortSignal,
+    reclaimOlderThanMs?: number,
+    pollIntervalMs?: number,
+  ): Promise<WorkResponse | null>
+  /** Official 2.1.328 `POST /v1/environments/bridge/{id}/offline`. */
+  markEnvironmentOffline(
+    environmentId: string,
+    environmentSecret: string,
+  ): Promise<void>
+  /** Official 2.1.328 `[bridge:watch]` resume-token SSE watch client. */
+  sessionsWatch: BridgeSessionsWatchApi
+}
+
+export type BridgeUntrustedDeviceHandler = {
+  recover: (previousToken?: string) => Promise<string | undefined>
+  hint?: (
+    refusal: UntrustedDeviceRefusal,
+    opts: { justEnrolled: boolean },
+  ) => string
+}
 
 type BridgeApiDeps = {
   baseUrl: string
@@ -41,7 +146,14 @@ type BridgeApiDeps = {
    * and the server falls through to its flag-off/no-op path. The CLI-side
    * gate is tengu_sessions_elevated_auth_enforcement (see trustedDevice.ts).
    */
-  getTrustedDeviceToken?: () => string | undefined
+  getTrustedDeviceToken?: () => string | undefined | Promise<string | undefined>
+  /**
+   * Official 2.1.328 `enroll_and_retry` handler for 403 `untrusted_device`
+   * responses on registration/reconnect.
+   */
+  untrustedDevice?: BridgeUntrustedDeviceHandler
+  /** Optional toggle for archiveSession endpoint preference (defaults to CCR v2 first). */
+  useCcrV2SessionCrud?: () => boolean
 }
 
 const BETA_HEADER = 'environments-2025-11-01'
@@ -307,7 +419,134 @@ export class BridgeFatalError extends Error {
   }
 }
 
-export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
+/** Official 2.1.328 `WPr` (`chunk@315278370.js`) — 403 `untrusted_device` fatal error. */
+export class UntrustedDeviceBridgeError extends BridgeFatalError {
+  readonly hint: string
+  constructor(context: string, hint: string) {
+    super(`${context}: ${hint}`, 403, 'untrusted_device')
+    this.hint = hint
+  }
+}
+
+function parseRetryAfterMs(raw: unknown): number | undefined {
+  if (typeof raw !== 'string' || !raw.trim()) return undefined
+  const seconds = Number(raw.trim())
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000)
+  }
+  const dateMs = Date.parse(raw)
+  if (!Number.isNaN(dateMs)) {
+    return Math.max(0, dateMs - Date.now())
+  }
+  return undefined
+}
+
+function extractErrorReasonFromData(data: unknown): string | undefined {
+  if (data && typeof data === 'object') {
+    if (
+      'error' in data &&
+      data.error &&
+      typeof data.error === 'object' &&
+      'reason' in data.error &&
+      typeof (data.error as { reason?: unknown }).reason === 'string'
+    ) {
+      return (data.error as { reason: string }).reason
+    }
+  }
+  return undefined
+}
+
+async function handleUntrustedDevice403<T>(
+  handler: BridgeUntrustedDeviceHandler,
+  resolveAuth: () => string,
+  debug: (msg: string) => void,
+  response: { status: number; data: T },
+  sentDeviceToken: string | undefined,
+  retryFn: (
+    accessToken: string,
+    deviceToken?: string,
+  ) => Promise<{ status: number; data: T }>,
+  context: string,
+): Promise<{ status: number; data: T }> {
+  let refusal = parseUntrustedDeviceRefusal(response.data)
+  if (refusal === undefined) {
+    return response
+  }
+  let justEnrolled = false
+  if (isBridgeEnrollableUntrustedRefusal(refusal)) {
+    debug(
+      `[bridge:api] ${context}: 403 untrusted_device, enrolling this computer and retrying`,
+    )
+    const renewedToken = await handler.recover(sentDeviceToken)
+    if (renewedToken) {
+      const retryResponse = await retryFn(resolveAuth(), renewedToken)
+      const retryRefusal =
+        retryResponse.status === 403
+          ? parseUntrustedDeviceRefusal(retryResponse.data)
+          : undefined
+      if (retryRefusal === undefined) {
+        return retryResponse
+      }
+      refusal = retryRefusal
+      justEnrolled = true
+      debug(
+        `[bridge:api] ${context}: retry after enrollment also got untrusted_device`,
+      )
+    }
+  }
+  const hint =
+    handler.hint?.(refusal, { justEnrolled }) ?? UNTRUSTED_DEVICE_HINT
+  throw new UntrustedDeviceBridgeError(context, hint)
+}
+
+function safeBridgeUserAgent(runnerVersion: string): string {
+  try {
+    return getClaudeCodeUserAgent()
+  } catch {
+    return `claude-code/${runnerVersion}`
+  }
+}
+
+/**
+ * Official 2.1.328 `POST /v1/environments/bridge/{environmentId}/offline`.
+ * Marks a preserved bridge environment offline without deregistering/deleting it.
+ */
+export async function markEnvironmentOffline(opts: {
+  baseUrl: string
+  environmentId: string
+  environmentSecret: string
+  runnerVersion: string
+  getTrustedDeviceToken?: () => string | undefined | Promise<string | undefined>
+  onDebug?: (msg: string) => void
+}): Promise<void> {
+  validateBridgeId(opts.environmentId, 'environmentId')
+  const path = `/v1/environments/bridge/${opts.environmentId}/offline`
+  opts.onDebug?.(`[bridge:api] POST ${path}`)
+  const url = `${opts.baseUrl}${path}`
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${opts.environmentSecret}`,
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+    'anthropic-beta': BETA_HEADER,
+    'anthropic-client-platform': getAnthropicClientPlatform(),
+    'x-environment-runner-version': opts.runnerVersion,
+    'User-Agent': safeBridgeUserAgent(opts.runnerVersion),
+  }
+  const deviceToken = await opts.getTrustedDeviceToken?.()
+  if (deviceToken) {
+    headers['X-Trusted-Device-Token'] = deviceToken
+  }
+  const response = await axios.post(url, undefined, {
+    ...buildBridgeProxyAxiosOptions(url),
+    headers,
+    timeout: 5_000,
+    validateStatus: s => s < 500,
+  })
+  handleErrorStatus(response.status, response.data, 'MarkOffline')
+  opts.onDebug?.(`[bridge:api] POST ${path} -> ${response.status}`)
+}
+
+export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
   function debug(msg: string): void {
     deps.onDebug?.(msg)
   }
@@ -315,7 +554,10 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
   let consecutiveEmptyPolls = 0
   const EMPTY_POLL_LOG_INTERVAL = 100
 
-  function getHeaders(accessToken: string): Record<string, string> {
+  async function getHeaders(
+    accessToken: string,
+    overrideDeviceToken?: string,
+  ): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
@@ -323,8 +565,10 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
       'anthropic-beta': BETA_HEADER,
       'anthropic-client-platform': getAnthropicClientPlatform(),
       'x-environment-runner-version': deps.runnerVersion,
+      'User-Agent': safeBridgeUserAgent(deps.runnerVersion),
     }
-    const deviceToken = deps.getTrustedDeviceToken?.()
+    const deviceToken =
+      overrideDeviceToken ?? (await deps.getTrustedDeviceToken?.())
     if (deviceToken) {
       headers['X-Trusted-Device-Token'] = deviceToken
     }
@@ -339,19 +583,54 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
     return accessToken
   }
 
+  function resolveUntrustedDeviceHandler():
+    | BridgeUntrustedDeviceHandler
+    | undefined {
+    if (deps.untrustedDevice) {
+      return deps.untrustedDevice
+    }
+    if (deps.getTrustedDeviceToken && isTrustedDeviceGateEnabled()) {
+      return {
+        recover: previousToken =>
+          recoverTrustedDeviceTokenAfterUntrusted(previousToken),
+      }
+    }
+    return undefined
+  }
+
   /**
-   * Execute an OAuth-authenticated request with a single retry on 401.
-   * On 401, attempts token refresh via handleOAuth401Error (same pattern as
-   * withRetry.ts for v1/messages). If refresh succeeds, retries the request
-   * once with the new token. If refresh fails or the retry also returns 401,
-   * the 401 response is returned for handleErrorStatus to throw BridgeFatalError.
+   * Execute an OAuth-authenticated request with a single retry on 401 and
+   * optional official 2.1.328 `enroll_and_retry` recovery on 403 `untrusted_device`.
    */
   async function withOAuthRetry<T>(
-    fn: (accessToken: string) => Promise<{ status: number; data: T }>,
+    fn: (
+      accessToken: string,
+      deviceToken?: string,
+    ) => Promise<{ status: number; data: T }>,
     context: string,
+    untrustedMode: 'enroll_and_retry' | 'pass_through' = 'pass_through',
   ): Promise<{ status: number; data: T }> {
+    const untrustedHandler =
+      untrustedMode === 'enroll_and_retry'
+        ? resolveUntrustedDeviceHandler()
+        : undefined
+    const sentDeviceToken = untrustedHandler
+      ? await deps.getTrustedDeviceToken?.()
+      : undefined
     const accessToken = resolveAuth()
-    const response = await fn(accessToken)
+    const response = await fn(accessToken, sentDeviceToken)
+
+    if (response.status === 403 && untrustedHandler) {
+      return handleUntrustedDevice403(
+        untrustedHandler,
+        resolveAuth,
+        debug,
+        response,
+        sentDeviceToken,
+        fn,
+        context,
+      )
+    }
 
     if (response.status !== 401) {
       return response
@@ -368,7 +647,18 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
     if (refreshed) {
       debug(`[bridge:api] ${context}: Token refreshed, retrying request`)
       const newToken = resolveAuth()
-      const retryResponse = await fn(newToken)
+      const retryResponse = await fn(newToken, sentDeviceToken)
+      if (retryResponse.status === 403 && untrustedHandler) {
+        return handleUntrustedDevice403(
+          untrustedHandler,
+          resolveAuth,
+          debug,
+          retryResponse,
+          sentDeviceToken,
+          fn,
+          context,
+        )
+      }
       if (retryResponse.status !== 401) {
         return retryResponse
       }
@@ -385,66 +675,142 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
     return buildBridgeProxyAxiosOptions(url)
   }
 
+  async function watchHeaders(
+    accessToken: string,
+  ): Promise<Record<string, string>> {
+    const { 'anthropic-beta': _beta, ...rest } = await getHeaders(accessToken)
+    return {
+      ...rest,
+      'anthropic-client-platform': getAnthropicClientPlatform(),
+      'anthropic-client-version': deps.runnerVersion,
+    }
+  }
+
   return {
     async registerBridgeEnvironment(
-      config: BridgeConfig,
+      config: BridgeRegisterConfig,
       signal?: AbortSignal,
-    ): Promise<{ environment_id: string; environment_secret: string }> {
+    ): Promise<{
+      environment_id: string
+      environment_secret: string
+      environment_secret_expires_in?: number
+    }> {
       debug(
         `[bridge:api] POST /v1/environments/bridge bridgeId=${config.bridgeId}`,
       )
 
+      // Official 2.1.328 ToolHost capability advert (chunk@315278370.js @3118)
+      let toolHostMeta: Record<string, string> | undefined
+      const advert = config.getToolHostAdvert?.() ?? { kind: 'withdraw' }
+      switch (advert.kind) {
+        case 'advertise':
+          toolHostMeta = {
+            tool_host: '2',
+            tool_host_cc_version: advert.advert.cliVersion,
+            tool_host_platform: advert.advert.platform,
+          }
+          break
+        case 'withdraw':
+          if (config.reuseEnvironmentId) {
+            toolHostMeta = {
+              tool_host: '',
+              tool_host_cc_version: '',
+              tool_host_platform: '',
+              tool_host_blocker: '',
+            }
+          }
+          break
+        case 'unknown':
+          break
+      }
+
+      let dirBrowseMeta: Record<string, string> | undefined
+      const dirBrowse = config.getDirectoryBrowseAdvert
+        ? config.getDirectoryBrowseAdvert()
+        : false
+      if (dirBrowse === true) {
+        dirBrowseMeta = { dir_browse: '1' }
+      } else if (dirBrowse === false && config.reuseEnvironmentId) {
+        dirBrowseMeta = { dir_browse: '' }
+      }
+
+      const deviceUuid = await Promise.resolve()
+        .then(() => config.getDeviceUuid?.())
+        .catch(() => undefined)
+
+      const sanitizedGitRepoUrl = stripGitUrlCredentials(config.gitRepoUrl)
+
+      const body = {
+        machine_name: config.machineName,
+        ...(config.machineId != null && { machine_id: config.machineId }),
+        directory: config.dir,
+        branch: config.branch,
+        git_repo_url: sanitizedGitRepoUrl,
+        max_sessions: config.maxSessions,
+        metadata: {
+          worker_type: config.workerType,
+          ...(config.machineId != null && { machine_id: config.machineId }),
+          ...(deviceUuid !== undefined && { device_uuid: deviceUuid }),
+          ...toolHostMeta,
+          ...dirBrowseMeta,
+        },
+        ...(config.hostProfile && { host: config.hostProfile }),
+        ...(config.reuseEnvironmentId && {
+          environment_id: config.reuseEnvironmentId,
+        }),
+      }
+
       const url = `${deps.baseUrl}/v1/environments/bridge`
       const response = await withOAuthRetry(
-        (token: string) =>
+        async (token: string, deviceToken?: string) =>
           axios.post<{
             environment_id: string
             environment_secret: string
-          }>(
-            url,
-            {
-              machine_name: config.machineName,
-              directory: config.dir,
-              branch: config.branch,
-              git_repo_url: config.gitRepoUrl,
-              // Advertise session capacity so claude.ai/code can show
-              // "2/4 sessions" badges and only block the picker when
-              // actually at capacity. Backends that don't yet accept
-              // this field will silently ignore it.
-              max_sessions: config.maxSessions,
-              // worker_type lets claude.ai filter environments by origin
-              // (e.g. assistant picker only shows assistant-mode workers).
-              // Desktop cowork app sends "cowork"; we send a distinct value.
-              metadata: { worker_type: config.workerType },
-              // Idempotent re-registration: if we have a backend-issued
-              // environment_id from a prior session (--session-id resume),
-              // send it back so the backend reattaches instead of creating
-              // a new env. The backend may still hand back a fresh ID if
-              // the old one expired — callers must compare the response.
-              ...(config.reuseEnvironmentId && {
-                environment_id: config.reuseEnvironmentId,
-              }),
-            },
-            {
-              ...proxyOpts(url),
-              headers: getHeaders(token),
-              timeout: 15_000,
-              ...(deps.baseUrl.startsWith('https:') && {
-                transport: createTlsHandshakeTimeoutTransport(15_000),
-              }),
-              validateStatus: status => status < 500,
-              signal,
-            },
-          ),
+            environment_secret_expires_in?: number
+          }>(url, body, {
+            ...proxyOpts(url),
+            headers: await getHeaders(token, deviceToken),
+            timeout: 15_000,
+            ...(deps.baseUrl.startsWith('https:') && {
+              transport: createTlsHandshakeTimeoutTransport(15_000),
+            }),
+            validateStatus: status => status < 500,
+            signal,
+          }),
         'Registration',
+        'enroll_and_retry',
       )
+
+      // Official 2.1.328 409 conflict: folder already served by another instance
+      if (
+        response.status === 409 &&
+        (extractErrorReasonFromData(response.data) ===
+          BRIDGE_FOLDER_ALREADY_SERVED ||
+          extractErrorTypeFromData(response.data) ===
+            BRIDGE_FOLDER_ALREADY_SERVED)
+      ) {
+        throw new BridgeFatalError(
+          extractErrorDetail(response.data) ??
+            'This folder is already served by another Claude Code on this device. Stop it first.',
+          409,
+          BRIDGE_FOLDER_ALREADY_SERVED,
+        )
+      }
 
       handleErrorStatus(response.status, response.data, 'Registration')
       debug(
         `[bridge:api] POST /v1/environments/bridge -> ${response.status} environment_id=${response.data.environment_id}`,
       )
       debug(
-        `[bridge:api] >>> ${debugBody({ machine_name: config.machineName, directory: config.dir, branch: config.branch, git_repo_url: config.gitRepoUrl, max_sessions: config.maxSessions, metadata: { worker_type: config.workerType } })}`,
+        `[bridge:api] >>> ${debugBody({
+          ...body,
+          ...(body.host && {
+            host: {
+              tools: body.host.tools.length,
+              mcp: body.host.mcp_servers?.length ?? 0,
+            },
+          }),
+        })}`,
       )
       debug(`[bridge:api] <<< ${debugBody(response.data)}`)
       return response.data
@@ -455,6 +821,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
       environmentSecret: string,
       signal?: AbortSignal,
       reclaimOlderThanMs?: number,
+      pollIntervalMs?: number,
     ): Promise<WorkResponse | null> {
       validateBridgeId(environmentId, 'environmentId')
 
@@ -463,14 +830,19 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
       const prevEmptyPolls = consecutiveEmptyPolls
       consecutiveEmptyPolls = 0
 
+      const params: Record<string, number> = {}
+      if (reclaimOlderThanMs !== undefined) {
+        params.reclaim_older_than_ms = reclaimOlderThanMs
+      }
+      if (pollIntervalMs !== undefined) {
+        params.poll_interval_ms = pollIntervalMs
+      }
+
       const url = `${deps.baseUrl}/v1/environments/${environmentId}/work/poll`
       const response = await axios.get<WorkResponse | null>(url, {
         ...proxyOpts(url),
-        headers: getHeaders(environmentSecret),
-        params:
-          reclaimOlderThanMs !== undefined
-            ? { reclaim_older_than_ms: reclaimOlderThanMs }
-            : undefined,
+        headers: await getHeaders(environmentSecret),
+        params: Object.keys(params).length > 0 ? params : undefined,
         timeout: 10_000,
         signal,
         validateStatus: status => status < 500,
@@ -493,6 +865,16 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
           )
         }
         return null
+      }
+
+      const workData = response.data.data as WorkResponse['data'] & {
+        mode?: string
+      }
+      if (workData?.mode != null) {
+        debug(
+          `[bridge:api] GET .../work/poll -> ${response.status} workId=${response.data.id} type=${workData.type} mode=${workData.mode} sessionId=${workData.id}`,
+        )
+        return response.data
       }
 
       debug(
@@ -518,7 +900,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
         {},
         {
           ...proxyOpts(url),
-          headers: getHeaders(sessionToken),
+          headers: await getHeaders(sessionToken),
           timeout: 10_000,
           validateStatus: s => s < 500,
         },
@@ -540,13 +922,13 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       const url = `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/stop`
       const response = await withOAuthRetry(
-        (token: string) =>
+        async (token: string, deviceToken?: string) =>
           axios.post(
             url,
             { force },
             {
               ...proxyOpts(url),
-              headers: getHeaders(token),
+              headers: await getHeaders(token, deviceToken),
               timeout: 10_000,
               validateStatus: s => s < 500,
             },
@@ -565,10 +947,10 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       const url = `${deps.baseUrl}/v1/environments/bridge/${environmentId}`
       const response = await withOAuthRetry(
-        (token: string) =>
+        async (token: string, deviceToken?: string) =>
           axios.delete(url, {
             ...proxyOpts(url),
-            headers: getHeaders(token),
+            headers: await getHeaders(token, deviceToken),
             timeout: 10_000,
             validateStatus: s => s < 500,
           }),
@@ -581,39 +963,85 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
       )
     },
 
+    async markEnvironmentOffline(
+      environmentId: string,
+      environmentSecret: string,
+    ): Promise<void> {
+      await markEnvironmentOffline({
+        baseUrl: deps.baseUrl,
+        environmentId,
+        environmentSecret,
+        runnerVersion: deps.runnerVersion,
+        getTrustedDeviceToken: deps.getTrustedDeviceToken,
+        onDebug: deps.onDebug,
+      })
+    },
+
     async archiveSession(sessionId: string): Promise<void> {
       validateBridgeId(sessionId, 'sessionId')
 
-      debug(`[bridge:api] POST /v1/sessions/${sessionId}/archive`)
+      const v2Path = `/v1/code/sessions/${toInfraSessionId(sessionId)}/archive`
+      const v1Path = `/v1/sessions/${toCompatSessionId(sessionId)}/archive`
+      const paths =
+        deps.useCcrV2SessionCrud?.() === false
+          ? [v1Path, v2Path]
+          : [v2Path, v1Path]
 
-      const url = `${deps.baseUrl}/v1/sessions/${sessionId}/archive`
-      const response = await withOAuthRetry(
-        (token: string) =>
-          axios.post(
-            url,
-            {},
-            {
-              ...proxyOpts(url),
-              headers: getHeaders(token),
-              timeout: 10_000,
-              validateStatus: s => s < 500,
-            },
-          ),
-        'ArchiveSession',
-      )
+      for (let i = 0; i < paths.length; i++) {
+        const path = paths[i]!
+        const hasFallback = i + 1 < paths.length
+        debug(`[bridge:api] POST ${path}`)
 
-      // 409 = already archived (idempotent, not an error)
-      if (response.status === 409) {
-        debug(
-          `[bridge:api] POST /v1/sessions/${sessionId}/archive -> 409 (already archived)`,
+        const url = `${deps.baseUrl}${path}`
+        const response = await withOAuthRetry(
+          async (token: string, deviceToken?: string) =>
+            axios.post(
+              url,
+              {},
+              {
+                ...proxyOpts(url),
+                headers: await getHeaders(token, deviceToken),
+                timeout: 10_000,
+                validateStatus: s => s < 500,
+              },
+            ),
+          'ArchiveSession',
+          'pass_through',
         )
+
+        // Clean fallback between CCR v2 and v1 archive routes:
+        // - v2 -> v1 fallback on 404/405/501 (legacy / self-hosted servers)
+        // - v1 -> v2 fallback on `sessions_v1_retired` (official `Kge`)
+        if (hasFallback) {
+          if (
+            path === v2Path &&
+            (response.status === 404 ||
+              response.status === 405 ||
+              response.status === 501)
+          ) {
+            debug(
+              `[bridge:api] POST ${path} -> ${response.status}, falling back to ${v1Path}`,
+            )
+            continue
+          }
+          if (path === v1Path && isSessionsV1RetiredResponse(response)) {
+            debug(
+              `[bridge:api] POST ${path} -> ${response.status} (sessions_v1_retired), falling back to ${v2Path}`,
+            )
+            continue
+          }
+        }
+
+        // 409 = already archived (idempotent, not an error)
+        if (response.status === 409) {
+          debug(`[bridge:api] POST ${path} -> 409 (already archived)`)
+          return
+        }
+
+        handleErrorStatus(response.status, response.data, 'ArchiveSession')
+        debug(`[bridge:api] POST ${path} -> ${response.status}`)
         return
       }
-
-      handleErrorStatus(response.status, response.data, 'ArchiveSession')
-      debug(
-        `[bridge:api] POST /v1/sessions/${sessionId}/archive -> ${response.status}`,
-      )
     },
 
     async reconnectSession(
@@ -630,19 +1058,20 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       const url = `${deps.baseUrl}/v1/environments/${environmentId}/bridge/reconnect`
       const response = await withOAuthRetry(
-        (token: string) =>
+        async (token: string, deviceToken?: string) =>
           axios.post(
             url,
             { session_id: sessionId },
             {
               ...proxyOpts(url),
-              headers: getHeaders(token),
+              headers: await getHeaders(token, deviceToken),
               timeout: 10_000,
               validateStatus: s => s < 500,
               signal,
             },
           ),
         'ReconnectSession',
+        'enroll_and_retry',
       )
 
       handleErrorStatus(response.status, response.data, 'ReconnectSession')
@@ -670,7 +1099,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
         {},
         {
           ...proxyOpts(url),
-          headers: getHeaders(sessionToken),
+          headers: await getHeaders(sessionToken),
           timeout: 10_000,
           validateStatus: s => s < 500,
         },
@@ -700,7 +1129,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
         { events: [event] },
         {
           ...proxyOpts(url),
-          headers: getHeaders(sessionToken),
+          headers: await getHeaders(sessionToken),
           timeout: 10_000,
           validateStatus: s => s < 500,
         },
@@ -716,6 +1145,67 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
       )
       debug(`[bridge:api] >>> ${debugBody({ events: [event] })}`)
       debug(`[bridge:api] <<< ${debugBody(response.data)}`)
+    },
+
+    sessionsWatch: {
+      async mintResumeToken(accessToken: string, signal?: AbortSignal) {
+        const url = `${deps.baseUrl}/v1/code/sessions?limit=1`
+        const { status, data, headers } = await axios.get<unknown>(url, {
+          ...proxyOpts(url),
+          headers: await watchHeaders(accessToken),
+          timeout: 10_000,
+          signal,
+          maxRedirects: 0,
+          validateStatus: () => true,
+        })
+        debug(`[bridge:api] GET /v1/code/sessions?limit=1 -> ${status}`)
+        const resumeToken =
+          data !== null && typeof data === 'object' && 'resume_token' in data
+            ? (data as { resume_token?: unknown }).resume_token
+            : undefined
+        return {
+          status,
+          retryAfterMs: parseRetryAfterMs(headers?.['retry-after']),
+          ...(typeof resumeToken === 'string' && { resumeToken }),
+        }
+      },
+
+      async open(
+        accessToken: string,
+        lastEventId: string,
+        signal?: AbortSignal,
+      ) {
+        const url = `${deps.baseUrl}/v1/code/sessions/watch?include_trigger_sessions=true&exclude_tags=-`
+        const { status, data, headers } = await axios.get<
+          NodeJS.ReadableStream & { destroy: () => void }
+        >(url, {
+          ...proxyOpts(url),
+          headers: {
+            ...(await watchHeaders(accessToken)),
+            Accept: 'text/event-stream',
+            'Last-Event-ID': lastEventId,
+          },
+          responseType: 'stream',
+          timeout: 0,
+          signal,
+          maxRedirects: 0,
+          validateStatus: () => true,
+        })
+        debug(`[bridge:api] GET /v1/code/sessions/watch -> ${status}`)
+        const contentType = headers?.['content-type']
+        if (
+          status === 200 &&
+          typeof contentType === 'string' &&
+          contentType.includes('text/event-stream')
+        ) {
+          return { status, body: data }
+        }
+        data?.destroy?.()
+        return {
+          status,
+          retryAfterMs: parseRetryAfterMs(headers?.['retry-after']),
+        }
+      },
     },
   }
 }

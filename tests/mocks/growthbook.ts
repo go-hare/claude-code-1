@@ -55,6 +55,19 @@ export function growthbookMock() {
     // densable KIt — default false in mocks so KD→qTa paths are testable.
     isGrowthBookEnabled: () => false,
     hasGrowthBookEnvOverride: () => false,
+    hasGrowthBookOverride: () => false,
+    readSavedFeatureFlagsFromConfig: () => ({}),
+    getFeatureValue_SESSION_PINNED: (n: string, d: unknown) =>
+      applyGrowthbookFeatureGetters(n, d),
+    peekSessionPinnedFeatureValue: () => undefined,
+    peekFeatureValue_SESSION_PINNED: (n: string, d: unknown) =>
+      applyGrowthbookFeatureGetters(n, d),
+    ATIS_REQUEST_HEADER: 'x-cc-atis',
+    getClientDataAtis: () => undefined,
+    atisPin: (raw: string) => raw,
+    isConversationAtisLatchEnabled: () => false,
+    getRequestAtis: () => undefined,
+    latchConversationAtis: () => {},
     getAllGrowthBookFeatures: () => ({}),
     getGrowthBookConfigOverrides: () => ({}),
     setGrowthBookConfigOverride: () => {},

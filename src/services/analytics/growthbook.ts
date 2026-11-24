@@ -33,7 +33,8 @@ import { resolveGbRefreshIntervalMsOrDefault } from '../../utils/residualFinalEn
 import { createSignal } from '../../utils/signal.js'
 import { withTimeout } from '../../utils/sleep.js'
 import { profileCheckpoint } from '../../utils/startupProfiler.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
+import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
+import { getBootstrapSession } from '../../utils/sessionHost.js'
 import {
   type GitHubActionsMetadata,
   getUserForGrowthBook,
@@ -71,8 +72,20 @@ export type GrowthBookUserAttributes = {
   github?: GitHubActionsMetadata
   /** densable GB cacheKeyAttributes / targeting. */
   slackTagConnected?: boolean
-  atisPin?: boolean
+  atisPin?: string | boolean
   ccrDerivedSurface?: string
+}
+
+type SavedFlagsSnapshot = {
+  flags: Record<string, unknown>
+  accountUuid?: string
+  organizationUuid?: string
+}
+
+type GlobalConfigWithFeatureFlags = ReturnType<typeof getGlobalConfig> & {
+  cachedFeatureFlags?: Record<string, unknown>
+  cachedFeatureFlagsAt?: number
+  cachedGrowthBookFeaturesAt?: number
 }
 
 let client: GrowthBook | null = null
@@ -103,6 +116,11 @@ const experimentDataByFeature = new Map<string, StoredExperimentData>()
 // Cache for remote eval feature values - workaround for SDK not respecting remoteEval response
 // The SDK's setForcedFeatures also doesn't work reliably with remoteEval
 const remoteEvalFeatureValues = new Map<string, unknown>()
+
+// Official 2.1.328 `ownSavedFlags` (chunk@286370035.js @745000): carries the
+// account's previously fetched remote-eval flags across same-account OAuth
+// token rotation while the recreated client is still re-fetching.
+let ownSavedFlags: SavedFlagsSnapshot | null = null
 
 // Track features accessed before init that need exposure logging
 const pendingExposures = new Set<string>()
@@ -188,17 +206,43 @@ export function onGrowthBookRefresh(
 /**
  * Parse env var overrides for GrowthBook features.
  * Set CLAUDE_INTERNAL_FC_OVERRIDES to a JSON object mapping feature keys to values
- * to bypass remote eval and disk cache. Useful for eval harnesses that need to
- * test specific feature flag configurations. Only active when USER_TYPE is 'ant'.
+ * to bypass remote eval and disk cache. Useful for eval harnesses and tests that
+ * need deterministic feature flag configurations.
  *
  * Example: CLAUDE_INTERNAL_FC_OVERRIDES='{"my_feature": true, "my_config": {"key": "val"}}'
  */
 let envOverrides: Record<string, unknown> | null = null
+let envOverridesRaw: string | undefined
 let envOverridesParsed = false
 
 function getEnvOverrides(): Record<string, unknown> | null {
-  if (!envOverridesParsed) {
+  const raw = process.env.CLAUDE_INTERNAL_FC_OVERRIDES
+  if (!envOverridesParsed || raw !== envOverridesRaw) {
     envOverridesParsed = true
+    envOverridesRaw = raw
+    envOverrides = null
+    if (raw && raw.trim().length > 0) {
+      try {
+        const parsed: unknown = jsonParse(raw)
+        if (
+          parsed !== null &&
+          typeof parsed === 'object' &&
+          !Array.isArray(parsed)
+        ) {
+          envOverrides = parsed as Record<string, unknown>
+        } else {
+          logForDebugging(
+            '[GrowthBook] Ignoring CLAUDE_INTERNAL_FC_OVERRIDES: expected JSON object',
+            { level: 'warn' },
+          )
+        }
+      } catch (e) {
+        logForDebugging(
+          `[GrowthBook] Failed to parse CLAUDE_INTERNAL_FC_OVERRIDES: ${toError(e).message}`,
+          { level: 'warn' },
+        )
+      }
+    }
   }
   return envOverrides
 }
@@ -214,14 +258,23 @@ export function hasGrowthBookEnvOverride(feature: string): boolean {
 }
 
 /**
- * Local config overrides set via /config Gates tab (ant-only). Checked after
- * env-var overrides — env wins so eval harnesses remain deterministic. Unlike
+ * Official 2.1.328 `hasGrowthBookOverride` (`RN` in chunk@286370035.js):
+ * true when either an env override or a config override is set for `feature`.
+ */
+export function hasGrowthBookOverride(feature: string): boolean {
+  if (hasGrowthBookEnvOverride(feature)) return true
+  const configOverrides = getConfigOverrides()
+  return configOverrides !== undefined && feature in configOverrides
+}
+
+/**
+ * Local config overrides set via /config Gates tab. Checked after env-var
+ * overrides — env wins so eval harnesses remain deterministic. Unlike
  * getEnvOverrides this is not memoized: the user can change overrides at
  * runtime, and getGlobalConfig() is already memory-cached (pointer-chase)
  * until the next saveGlobalConfig() invalidates it.
  */
 function getConfigOverrides(): Record<string, unknown> | undefined {
-  if (true) return undefined
   try {
     return getGlobalConfig().growthBookOverrides
   } catch {
@@ -232,15 +285,43 @@ function getConfigOverrides(): Record<string, unknown> | undefined {
 }
 
 /**
+ * Official 2.1.328 `o2` (`chunk@284735426.js`): prefer `cachedGrowthBookFeatures`,
+ * falling back to `cachedFeatureFlags`.
+ */
+export function readSavedFeatureFlagsFromConfig(
+  config: GlobalConfigWithFeatureFlags | undefined,
+): Record<string, unknown> | undefined {
+  if (!config) return undefined
+  return config.cachedGrowthBookFeatures ?? config.cachedFeatureFlags
+}
+
+/**
+ * Official 2.1.328 `readSavedFlags` (`chunk@286370035.js @735500`):
+ * prefer same-account rotated `ownSavedFlags` carry before disk cache.
+ */
+function readSavedFlags(): Record<string, unknown> | undefined {
+  if (ownSavedFlags !== null) {
+    return ownSavedFlags.flags
+  }
+  try {
+    return readSavedFeatureFlagsFromConfig(
+      getGlobalConfig() as GlobalConfigWithFeatureFlags,
+    )
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Enumerate all known GrowthBook features and their current resolved values
- * (not including overrides). In-memory payload first, disk cache fallback —
+ * (not including overrides). In-memory payload first, carried/disk cache fallback —
  * same priority as the getters. Used by the /config Gates tab.
  */
 export function getAllGrowthBookFeatures(): Record<string, unknown> {
   if (remoteEvalFeatureValues.size > 0) {
     return Object.fromEntries(remoteEvalFeatureValues)
   }
-  return getGlobalConfig().cachedGrowthBookFeatures ?? {}
+  return readSavedFlags() ?? {}
 }
 
 export function getGrowthBookConfigOverrides(): Record<string, unknown> {
@@ -258,7 +339,6 @@ export function setGrowthBookConfigOverride(
   feature: string,
   value: unknown,
 ): void {
-  if (true) return
   try {
     saveGlobalConfig(c => {
       const current = c.growthBookOverrides ?? {}
@@ -266,8 +346,7 @@ export function setGrowthBookConfigOverride(
         if (!(feature in current)) return c
         const { [feature]: _, ...rest } = current
         if (Object.keys(rest).length === 0) {
-          const { growthBookOverrides: __, ...configWithout } = c
-          return configWithout
+          return { ...c, growthBookOverrides: undefined }
         }
         return { ...c, growthBookOverrides: rest }
       }
@@ -283,7 +362,6 @@ export function setGrowthBookConfigOverride(
 }
 
 export function clearGrowthBookConfigOverrides(): void {
-  if (true) return
   try {
     saveGlobalConfig(c => {
       if (
@@ -292,8 +370,7 @@ export function clearGrowthBookConfigOverrides(): void {
       ) {
         return c
       }
-      const { growthBookOverrides: _, ...rest } = c
-      return rest
+      return { ...c, growthBookOverrides: undefined }
     })
     refreshed.emit()
   } catch (e) {
@@ -419,14 +496,30 @@ async function processRemoteEvalPayload(
  */
 function syncRemoteEvalToDisk(): void {
   const fresh = Object.fromEntries(remoteEvalFeatureValues)
-  const config = getGlobalConfig()
-  if (isEqual(config.cachedGrowthBookFeatures, fresh)) {
+  const config = getGlobalConfig() as GlobalConfigWithFeatureFlags
+  if (
+    isEqual(readSavedFeatureFlagsFromConfig(config), fresh) &&
+    isEqual(config.cachedFeatureFlags, fresh)
+  ) {
     return
   }
-  saveGlobalConfig(current => ({
-    ...current,
-    cachedGrowthBookFeatures: fresh,
-  }))
+  const now = Date.now()
+  saveGlobalConfig(current => {
+    const cur = current as GlobalConfigWithFeatureFlags
+    return {
+      ...cur,
+      cachedFeatureFlags: fresh,
+      cachedFeatureFlagsAt: now,
+      ...(cur.cachedGrowthBookFeatures != null ||
+      cur.cachedGrowthBookFeaturesAt != null ||
+      cur.cachedFeatureFlagsAt == null
+        ? {
+            cachedGrowthBookFeatures: fresh,
+            cachedGrowthBookFeaturesAt: now,
+          }
+        : {}),
+    }
+  })
 }
 
 /**
@@ -742,6 +835,7 @@ function getUserAttributes(): GrowthBookUserAttributes {
   const apiBaseUrlHost = getApiBaseUrlHost()
   const identity = resolveGrowthBookIdentityIds(user)
 
+  const rawAtis = getClientDataAtis()
   const attributes = {
     id: user.deviceId,
     sessionId: user.sessionId,
@@ -759,7 +853,7 @@ function getUserAttributes(): GrowthBookUserAttributes {
       githubActionsMetadata: user.githubActionsMetadata,
     }),
     slackTagConnected: false,
-    atisPin: false,
+    atisPin: rawAtis ? atisPin(rawAtis) : false,
   }
   return attributes
 }
@@ -1177,7 +1271,7 @@ export function getFeatureValueWithSource<T>(
   }
 
   try {
-    const cached = getGlobalConfig().cachedGrowthBookFeatures?.[feature]
+    const cached = readSavedFlags()?.[feature]
     if (cached !== undefined) {
       pendingExposures.add(feature)
       return {
@@ -1222,7 +1316,7 @@ export async function awaitGrowthBookBeforePermissionMode(): Promise<void> {
 
   let cachedFeatures: Record<string, unknown> = {}
   try {
-    cachedFeatures = getGlobalConfig().cachedGrowthBookFeatures ?? {}
+    cachedFeatures = readSavedFlags() ?? {}
   } catch {
     cachedFeatures = {}
   }
@@ -1247,10 +1341,13 @@ export async function awaitGrowthBookBeforePermissionMode(): Promise<void> {
 }
 
 /**
- * densable 2.1.248 `zce(e,t)` — pin the first GB read for this process.
- * `let r=rl().pinnedFeatureValues??=new Map;if(!r.has(e))r.set(e,R(e,t));return r.get(e)`
+ * Official 2.1.328 `getFeatureValue_SESSION_PINNED` (`Gt` in chunk@286370035.js @1087900
+ * / chunk@309099536.js @7500) — pin the first GrowthBook evaluation for this session.
  */
-export function getPinnedFeatureValue<T>(feature: string, defaultValue: T): T {
+export function getFeatureValue_SESSION_PINNED<T>(
+  feature: string,
+  defaultValue: T,
+): T {
   const pinned = getPinnedFeatureValues()
   if (!pinned.has(feature)) {
     pinned.set(
@@ -1259,6 +1356,37 @@ export function getPinnedFeatureValue<T>(feature: string, defaultValue: T): T {
     )
   }
   return pinned.get(feature) as T
+}
+
+/**
+ * Official 2.1.328 `peekSessionPinnedFeatureValue` (`E8` in chunk@286370035.js):
+ * read an already-pinned session value without evaluating or pinning.
+ */
+export function peekSessionPinnedFeatureValue<T = unknown>(
+  feature: string,
+): T | undefined {
+  return getPinnedFeatureValues().get(feature) as T | undefined
+}
+
+/**
+ * Official 2.1.328 `peekFeatureValue_SESSION_PINNED` (`iPi` in chunk@286370035.js):
+ * return the session-pinned value if already latched, otherwise read cached without pinning.
+ */
+export function peekFeatureValue_SESSION_PINNED<T>(
+  feature: string,
+  defaultValue: T,
+): T {
+  const pinned = getPinnedFeatureValues()
+  return pinned.has(feature)
+    ? (pinned.get(feature) as T)
+    : getFeatureValue_CACHED_MAY_BE_STALE(feature, defaultValue)
+}
+
+/**
+ * densable 2.1.248 `zce(e,t)` — alias for `getFeatureValue_SESSION_PINNED`.
+ */
+export function getPinnedFeatureValue<T>(feature: string, defaultValue: T): T {
+  return getFeatureValue_SESSION_PINNED(feature, defaultValue)
 }
 
 export function getFeatureValue_CACHED_MAY_BE_STALE(
@@ -1320,9 +1448,9 @@ export function getFeatureValue_CACHED_MAY_BE_STALE<T>(
     return defaultValue
   }
 
-  // Fall back to disk cache (survives across process restarts)
+  // Fall back to carried ownSavedFlags / disk cache (cachedGrowthBookFeatures ?? cachedFeatureFlags)
   try {
-    const cached = getGlobalConfig().cachedGrowthBookFeatures?.[feature]
+    const cached = readSavedFlags()?.[feature]
     if (cached !== undefined) {
       return coalesceNullFeatureValue(cached, defaultValue)
     }
@@ -1384,11 +1512,13 @@ export function checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
     pendingExposures.add(gate)
   }
 
-  // Return cached value immediately from disk
-  // First check GrowthBook cache, then fall back to Statsig cache for migration
+  // Return cached value immediately from carried flags or disk
+  // First check GrowthBook / cachedFeatureFlags cache, then fall back to Statsig cache for migration
   try {
-    const config = getGlobalConfig()
-    const gbCached = config.cachedGrowthBookFeatures?.[gate]
+    const config = getGlobalConfig() as GlobalConfigWithFeatureFlags
+    const gbCached =
+      ownSavedFlags?.flags?.[gate] ??
+      readSavedFeatureFlagsFromConfig(config)?.[gate]
     if (gbCached !== undefined) {
       return Boolean(gbCached)
     }
@@ -1441,14 +1571,16 @@ export async function checkSecurityRestrictionGate(
   }
 
   // Check Statsig cache first - it may have correct value from previous logged-in session
-  const config = getGlobalConfig()
+  const config = getGlobalConfig() as GlobalConfigWithFeatureFlags
   const statsigCached = config.cachedStatsigGates?.[gate]
   if (statsigCached !== undefined) {
     return Boolean(statsigCached)
   }
 
-  // Then check GrowthBook cache
-  const gbCached = config.cachedGrowthBookFeatures?.[gate]
+  // Then check carried ownSavedFlags / GrowthBook / cachedFeatureFlags cache
+  const gbCached =
+    ownSavedFlags?.flags?.[gate] ??
+    readSavedFeatureFlagsFromConfig(config)?.[gate]
   if (gbCached !== undefined) {
     return Boolean(gbCached)
   }
@@ -1488,8 +1620,19 @@ export async function checkGate_CACHED_OR_BLOCKING(
     return localDefault !== undefined ? Boolean(localDefault) : false
   }
 
-  // Fast path: disk cache already says true — trust it
-  const cached = getGlobalConfig().cachedGrowthBookFeatures?.[gate]
+  // Fast path: in-memory remote eval already says true
+  if (remoteEvalFeatureValues.get(gate) === true) {
+    logExposureForFeature(gate)
+    return true
+  }
+
+  // Fast path: carried ownSavedFlags or disk cache already says true — trust it
+  const cached =
+    ownSavedFlags?.flags?.[gate] === true
+      ? true
+      : readSavedFeatureFlagsFromConfig(
+          getGlobalConfig() as GlobalConfigWithFeatureFlags,
+        )?.[gate]
   if (cached === true) {
     // Log experiment exposure if data is available, otherwise defer
     if (experimentDataByFeature.has(gate)) {
@@ -1516,14 +1659,20 @@ export type GrowthBookResetOptions = {
    * Cleared on account switch / explicit logout.
    */
   preserveLoggedExposures?: boolean
+  /**
+   * Official 2.1.328 `keepsOwnSavedFlags` (`chunk@286370035.js @745000`):
+   * carry the current remote-eval flags across same-account OAuth token
+   * rotation while the recreated client re-fetches.
+   */
+  keepsOwnSavedFlags?: boolean
 }
 
 /**
  * Refresh GrowthBook after auth changes (login/logout/OAuth rotation).
  *
- * densable Iwe(e): mYt({preservePendingExposures:!0, preserveLoggedExposures:e?.preserveLoggedExposures})
- * then emit + re-init. NOTE: must destroy/recreate — apiHostRequestHeaders
- * cannot be updated after client creation.
+ * Official 2.1.328 (`chunk@286370035.js @745000`): snapshots `ownSavedFlags`
+ * when `keepsOwnSavedFlags === true`, destroys/recreates the client, emits
+ * `refreshed`, and drops `ownSavedFlags` after re-init if auth/account changed.
  */
 export function refreshGrowthBookAfterAuthChange(
   options?: GrowthBookResetOptions,
@@ -1533,27 +1682,33 @@ export function refreshGrowthBookAfterAuthChange(
   }
 
   try {
+    let carried: SavedFlagsSnapshot | null = null
+    if (options?.keepsOwnSavedFlags === true) {
+      carried =
+        remoteEvalFeatureValues.size > 0
+          ? {
+              flags: Object.fromEntries(remoteEvalFeatureValues),
+              accountUuid: clientAuthAccountUuid,
+              organizationUuid: clientAuthOrganizationUuid,
+            }
+          : ownSavedFlags
+    }
+
     // densable Iwe always preservePendingExposures:true on auth-change path
     resetGrowthBook({
       preservePendingExposures: true,
       preserveLoggedExposures: options?.preserveLoggedExposures,
     })
+    ownSavedFlags = carried
 
     // resetGrowthBook cleared remoteEvalFeatureValues. If re-init below
     // times out (hadFeatures=false) or short-circuits on !hasAuth (logout),
     // the init-callback notify never fires — subscribers stay synced to the
     // previous account's memoized state. Notify here so they re-read now
-    // (falls to disk cache). If re-init succeeds, they'll notify again with
-    // fresh values; if not, at least they're synced to the post-reset state.
+    // (falls to carried ownSavedFlags / disk cache).
     refreshed.emit()
 
     // Reinitialize with fresh auth headers and attributes
-    // Track this promise so security gate checks can wait for it.
-    // .catch before .finally: initializeGrowthBook can reject if its sync
-    // helpers throw (getGrowthBookClient, getAuthHeaders, resetGrowthBook —
-    // clientWrapper.initialized itself has its own .catch so never rejects),
-    // and .finally re-settles with the original rejection — the sync
-    // try/catch below cannot catch async rejections.
     reinitializingPromise = initializeGrowthBook()
       .catch(error => {
         logError(toError(error))
@@ -1561,6 +1716,15 @@ export function refreshGrowthBookAfterAuthChange(
       })
       .finally(() => {
         reinitializingPromise = null
+        if (
+          ownSavedFlags !== null &&
+          (!clientCreatedWithAuth ||
+            clientAuthAccountUuid !== ownSavedFlags.accountUuid ||
+            clientAuthOrganizationUuid !== ownSavedFlags.organizationUuid)
+        ) {
+          ownSavedFlags = null
+          refreshed.emit()
+        }
       })
   } catch (error) {
     if (process.env.NODE_ENV === 'development') {
@@ -1604,9 +1768,11 @@ export function resetGrowthBook(options?: GrowthBookResetOptions): void {
     loggedSkippedValueLessFeatures = false
   }
   remoteEvalFeatureValues.clear()
+  ownSavedFlags = null
   getGrowthBookClient.cache?.clear?.()
   initializeGrowthBook.cache?.clear?.()
   envOverrides = null
+  envOverridesRaw = undefined
   envOverridesParsed = false
 }
 
@@ -1621,10 +1787,8 @@ let beforeExitListener: (() => void) | null = null
 /**
  * Light refresh - re-fetch features from server without recreating client.
  * densable X8n: first detect OAuth Authorization rotation (#34); if rotated,
- * hard-recreate via refreshGrowthBookAfterAuthChange. Else refreshFeatures.
- *
- * Unlike refreshGrowthBookAfterAuthChange() which destroys and recreates the client,
- * the light path preserves client state and just fetches fresh feature values.
+ * hard-recreate via refreshGrowthBookAfterAuthChange (with `keepsOwnSavedFlags`
+ * on same-account rotation). Else refreshFeatures.
  */
 export async function refreshGrowthBookFeatures(): Promise<void> {
   if (!isGrowthBookEnabled()) {
@@ -1673,6 +1837,8 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
         }
         refreshGrowthBookAfterAuthChange({
           preserveLoggedExposures: decision.preserveLoggedExposures,
+          keepsOwnSavedFlags:
+            decision.sameAccount && currentAccountUuid !== undefined,
         })
         return
       }
@@ -1739,6 +1905,77 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
       throw error
     }
     logError(toError(error))
+  }
+}
+
+// ============================================================================
+// Official 2.1.328 ATIS Request Header & Conversation Latch
+// (chunk@286370035.js @1088500 / chunk@309099536.js @7093-8023)
+// ============================================================================
+
+/** Official `aPi` — request header carrying the conversation ATIS token. */
+export const ATIS_REQUEST_HEADER = 'x-cc-atis'
+
+const ATIS_TOKEN_RE = /^[\x21-\x7e]+$/
+
+/** Official `Xnn` — read the `atis` string from cached client data. */
+export function getClientDataAtis(): string | undefined {
+  try {
+    const raw = getGlobalConfig().clientDataCache?.atis
+    return typeof raw === 'string' && raw.length > 0 ? raw : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Official `Ghr` — extract the pin segment from a structured `v1.<pin>.<a>.<b>.<c>`
+ * ATIS token, or return the raw string if it does not match that shape.
+ */
+export function atisPin(raw: string): string {
+  const [prefix, pin, ...rest] = raw.split('.')
+  return prefix === 'v1' &&
+    pin !== undefined &&
+    pin !== '' &&
+    rest.length === 3 &&
+    rest.every(part => part !== '')
+    ? pin
+    : raw
+}
+
+/** Official `ivl` — GrowthBook gate for latching conversation ATIS (`tengu_kestrel_moor`). */
+export function isConversationAtisLatchEnabled(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_kestrel_moor', true)
+}
+
+/**
+ * Official `lPi` — resolve the ATIS header value to send on API requests.
+ * When conversation latching is enabled and latched, returns the latched value
+ * (or `undefined` if latched empty); otherwise falls back to live client data.
+ */
+export function getRequestAtis(): string | undefined {
+  if (!isConversationAtisLatchEnabled()) {
+    return getClientDataAtis()
+  }
+  const latched = getBootstrapSession().conversationLatches.atisLatch()
+  if (typeof latched !== 'string') {
+    return getClientDataAtis()
+  }
+  return latched.length > 0 ? latched : undefined
+}
+
+/**
+ * Official `dPi` — latch the current client-data ATIS value into the active
+ * conversation once (first non-undefined write wins; invalid / non-ASCII tokens
+ * latch as empty string `""` so subsequent requests omit the header).
+ */
+export function latchConversationAtis(): void {
+  const latches = getBootstrapSession().conversationLatches
+  if (latches.atisLatch() === undefined) {
+    const atis = getClientDataAtis()
+    latches.replaceAtisLatch(
+      atis !== undefined && ATIS_TOKEN_RE.test(atis) ? atis : '',
+    )
   }
 }
 

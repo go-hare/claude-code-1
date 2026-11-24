@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
 import type {
   SDKControlCancelRequest,
@@ -27,6 +28,16 @@ import {
   sendEventToRemoteSession,
 } from '../utils/teleport/api.js'
 import {
+  SessionsV2Client,
+  type SessionsV2ClientCallbacks,
+  type SessionsV2ClientOptions,
+  type SessionsV2ConnectInfo,
+  type SessionsV2DeliveryUpdate,
+  type SessionsV2EventPostOutcome,
+  type SessionsV2EventSigner,
+  type SessionsV2ToolHostEnded,
+} from './SessionsV2Client.js'
+import {
   SessionsWebSocket,
   type SessionsWebSocketCallbacks,
 } from './SessionsWebSocket.js'
@@ -36,6 +47,13 @@ import {
  * Used so redelivered dialog request_ids that were already answered stay skipped.
  */
 const SEEN_CONTROL_RESPONSE_ID_CAP = 1000
+
+/** Official `ht` (`chunk@318978761.js @43200`) — undelivered response retry delays. */
+const UNDELIVERED_RETRY_DELAYS_MS = [1_000, 5_000, 15_000, 45_000] as const
+const MAX_UNDELIVERED_RETRY_ATTEMPTS = UNDELIVERED_RETRY_DELAYS_MS.length
+
+/** Official `En` (`chunk@318978761.js`) — timeout for served tool response POSTs. */
+const SERVED_TOOL_RESPONSE_TIMEOUT_MS = 120_000
 
 /**
  * Official `qX` — subagent permission requests (non-AskUserQuestion, non-ExitPlanMode)
@@ -90,6 +108,21 @@ export type RemoteUserDialogResponse = {
   result?: unknown
 }
 
+export type RemoteResponseKind = 'permission' | 'dialog' | 'hook' | 'tool'
+export type RemoteResponseUndeliveredReason = 'undelivered' | 'overtaken'
+
+type UndeliveredResponseEntry = {
+  response: SDKControlResponse
+  kind: RemoteResponseKind
+  uuid: string
+  request?: SDKControlPermissionRequest
+  failures: number
+  inFlight: boolean
+  giveUpOnSettle: RemoteResponseUndeliveredReason | null
+  timer: ReturnType<typeof setTimeout> | null
+  told: boolean
+}
+
 export type RemoteSessionConfig = {
   sessionId: string
   getAccessToken: () => string
@@ -115,6 +148,40 @@ export type RemoteSessionConfig = {
   seedAskersPastATurn?: string[]
   /** 2.1.300 #626: keep open subagent permission requests alive across turn end */
   subagentRequestsOutliveTheTurn?: boolean
+  /**
+   * Official 2.1.328 transport selection: defaults to CCR v2 SSE (`SessionsV2Client`).
+   * Set `transport: 'websocket'` or `useLegacyWebSocket: true` to explicitly fall back
+   * to the legacy v1 `SessionsWebSocket` transport.
+   */
+  transport?: 'sse' | 'websocket'
+  /** Explicit legacy v1 WebSocket opt-in (equivalent to `transport: 'websocket'`). */
+  useLegacyWebSocket?: boolean
+  /** Called on HTTP 401 to refresh OAuth credentials before retrying SSE / POST. */
+  onAuth401?: (staleBearer: string) => Promise<boolean>
+  /** Resume SSE stream from this sequence number (`from_sequence_num` / `Last-Event-ID`). */
+  initialSequenceNum?: number
+  /** Request `control_only=1` on the SSE stream. */
+  controlOnly?: boolean
+  /** Keep redialling indefinitely past the 5-attempt reconnect budget. */
+  keepStreamRedialling?: boolean
+  /**
+   * Keep undelivered control responses in memory and automatically retry on reconnect
+   * (defaults to `true` on `SessionsV2Client`; pass `false` to disable).
+   */
+  keepUndeliveredResponses?: boolean
+  /** Track in-flight outbound POST requests for `flushSends()`. */
+  trackSendsInFlight?: boolean
+  /** Optional event signer for device-attested sessions. */
+  eventSigner?: SessionsV2EventSigner
+  /**
+   * Official 2.1.328 `rebindEventSigner` (`chunk@318978761.js @45757`).
+   * Invoked when `security_update` raises the tier to `elevated` (and on reconnect
+   * after a tier raise). If it returns a new signer function, the active
+   * `SessionsV2Client` adopts it immediately.
+   */
+  rebindEventSigner?: (() => SessionsV2EventSigner | undefined) | (() => void)
+  /** Optional overrides forwarded to `SessionsV2Client` (e.g. custom fetch/timers in tests). */
+  v2ClientOptions?: Partial<SessionsV2ClientOptions>
 }
 
 export type RemoteSessionCallbacks = {
@@ -145,11 +212,13 @@ export type RemoteSessionCallbacks = {
   /** densable onUserDialogCancelled */
   onUserDialogCancelled?: (requestId: string) => void
   /** Called when connection is established */
-  onConnected?: () => void
+  onConnected?: (info?: SessionsV2ConnectInfo) => void
   /** Called when connection is lost and cannot be restored */
-  onDisconnected?: () => void
-  /** Called on transient WS drop while reconnect backoff is in progress */
+  onDisconnected?: (reason?: string) => void
+  /** Called on transient stream drop while reconnect backoff is in progress */
   onReconnecting?: () => void
+  /** Official 2.1.328 `onStreamSilent` — liveness timeout fired on SSE stream */
+  onStreamSilent?: (info: { suspended: boolean }) => void
   /** densable onCatchUpTruncated — optional */
   onCatchUpTruncated?: () => void
   /** Called on error */
@@ -173,22 +242,52 @@ export type RemoteSessionCallbacks = {
    * `endWorkerStart`.
    */
   onWorkerGone?: () => void
+  /** Official 2.1.328 `onDeliveryUpdate` — raw `delivery_update` frame (`PROCESSING`/`PROCESSED`). */
+  onDeliveryUpdate?: (update: SessionsV2DeliveryUpdate) => void
+  /** Official 2.1.328 `onLineTaken` — delivery status matched `PROCESSING`/`PROCESSED`. */
+  onLineTaken?: (eventId: string) => void
+  /** Official 2.1.328 `onLineSettled` — delivery status matched `PROCESSED` (return true to suppress `onLineTaken`). */
+  onLineSettled?: ((eventId: string) => boolean) | ((eventId: string) => void)
+  /** Official 2.1.328 `onWorkerConnectionStatus` — `session_update.connection_status`. */
+  onWorkerConnectionStatus?: (status: string) => void
+  /** Official 2.1.328 `onToolHostEnded` — `ephemeral_event` with `event_type: 'tool_host_ended'`. */
+  onToolHostEnded?: (info: SessionsV2ToolHostEnded) => void
+  /** Official 2.1.328 `onSecurityTierRaised` — `security_update` with `security_tier: 'elevated'`. */
+  onSecurityTierRaised?: () => void
+  /** Official 2.1.328 `onResponseUndelivered` — kept control response gave up or was overtaken. */
+  onResponseUndelivered?: (
+    requestId: string,
+    kind: RemoteResponseKind,
+    reason: RemoteResponseUndeliveredReason,
+  ) => void
+}
+
+function sendOptionsForKind(kind: RemoteResponseKind | null): {
+  timeoutMs?: number
+} {
+  return kind === 'tool' ? { timeoutMs: SERVED_TOOL_RESPONSE_TIMEOUT_MS } : {}
 }
 
 /**
  * Manages a remote CCR session.
  *
  * Coordinates:
- * - WebSocket subscription for receiving messages from CCR
- * - HTTP POST for sending user messages to CCR
- * - Permission request/response flow
- * - densable 2.1.214 #7: dialog redelivery + answered-elsewhere dismiss
+ * - CCR v2 SSE subscription (`SessionsV2Client`) by default, with legacy
+ *   `SessionsWebSocket` fallback when explicitly requested
+ * - HTTP POST for sending user messages and control responses to CCR
+ * - `undeliveredResponses` retry queue across disconnects/reconnects
+ * - Permission request/response flow & dialog redelivery
  */
 export class RemoteSessionManager {
+  private client: SessionsV2Client | null = null
   private websocket: SessionsWebSocket | null = null
   private pendingPermissionRequests: Map<string, SDKControlPermissionRequest> =
     new Map()
+  /** Official `undeliveredResponses` (`chunk@318978761.js @43620`) — retried on timer and reconnect. */
+  private undeliveredResponses: Map<string, UndeliveredResponseEntry> =
+    new Map()
   private seedRequestsArmed = false
+  private securityTierRaiseSeen = false
   private lifetime = new AbortController()
   /** densable pendingDialogRequests — request_ids of open request_user_dialog */
   private pendingDialogRequests: Set<string> = new Set()
@@ -230,50 +329,180 @@ export class RemoteSessionManager {
     private readonly callbacks: RemoteSessionCallbacks,
   ) {}
 
+  private shouldUseLegacyWebSocket(): boolean {
+    return (
+      this.config.useLegacyWebSocket === true ||
+      this.config.transport === 'websocket'
+    )
+  }
+
+  private shouldKeepUndeliveredResponses(): boolean {
+    return this.config.keepUndeliveredResponses !== false
+  }
+
+  private invokeRebindEventSigner(): void {
+    try {
+      const nextSigner = this.config.rebindEventSigner?.()
+      if (typeof nextSigner === 'function') {
+        this.client?.setEventSigner(nextSigner)
+      }
+    } catch (err) {
+      logForDebugging(
+        `[RemoteSessionManager] rebindEventSigner threw: ${errorMessage(err)}`,
+        { level: 'error' },
+      )
+    }
+  }
+
+  private armSeedRequestsIfNeeded(): void {
+    if (this.seedRequestsArmed || this.lifetime.signal.aborted) {
+      return
+    }
+    this.seedRequestsArmed = true
+    const before = this.pendingPermissionRequests.size
+    const seeds = this.config.seedSubagentRequests ?? []
+    for (const seed of seeds) {
+      try {
+        this.handleControlRequest(seed, {})
+      } catch (err) {
+        logForDebugging(
+          `[RemoteSessionManager] seedSubagentRequests handler threw: ${errorMessage(err)}`,
+          { level: 'warn' },
+        )
+      }
+    }
+    const adopted = this.pendingPermissionRequests.size - before
+    if (adopted > 0) {
+      logEvent('tengu_remote_subagent_requests_adopted', {
+        count: adopted,
+        subagents_asking_at_a_turn_end:
+          this.config.seedAskersPastATurn?.length ?? 0,
+      })
+    }
+  }
+
   /**
-   * Connect to the remote session via WebSocket
+   * Connect to the remote session via CCR v2 SSE (`SessionsV2Client`) by default,
+   * or legacy v1 `SessionsWebSocket` when explicitly requested.
    */
   connect(): void {
     logForDebugging(
       `[RemoteSessionManager] Connecting to session ${this.config.sessionId}`,
     )
 
-    const wsCallbacks: SessionsWebSocketCallbacks = {
+    if (this.shouldUseLegacyWebSocket()) {
+      const wsCallbacks: SessionsWebSocketCallbacks = {
+        onMessage: (message, extras) => this.handleMessage(message, extras),
+        onConnected: () => {
+          logForDebugging('[RemoteSessionManager] Connected')
+          this.workerSeenThisConnection = false
+          this.callbacks.onConnected?.()
+          this.armSeedRequestsIfNeeded()
+        },
+        onClose: () => {
+          logForDebugging('[RemoteSessionManager] Disconnected')
+          this.callbacks.onDisconnected?.()
+        },
+        onReconnecting: () => {
+          this.workerSeenThisConnection = false
+          logForDebugging('[RemoteSessionManager] Reconnecting')
+          this.callbacks.onReconnecting?.()
+        },
+        onError: error => {
+          logError(error)
+          this.callbacks.onError?.(error)
+        },
+      }
+
+      this.websocket = new SessionsWebSocket(
+        this.config.sessionId,
+        this.config.orgUuid,
+        this.config.getAccessToken,
+        wsCallbacks,
+      )
+
+      void this.websocket.connect()
+      return
+    }
+
+    const sseCallbacks: SessionsV2ClientCallbacks = {
       onMessage: (message, extras) => this.handleMessage(message, extras),
-      onConnected: () => {
+      onConnected: info => {
         logForDebugging('[RemoteSessionManager] Connected')
-        this.callbacks.onConnected?.()
-        if (!this.seedRequestsArmed && !this.lifetime.signal.aborted) {
-          this.seedRequestsArmed = true
-          const before = this.pendingPermissionRequests.size
-          const seeds = this.config.seedSubagentRequests ?? []
-          for (const seed of seeds) {
-            try {
-              this.handleControlRequest(seed, {})
-            } catch (err) {
-              logForDebugging(
-                `[RemoteSessionManager] seedSubagentRequests handler threw: ${errorMessage(err)}`,
-                { level: 'warn' },
-              )
-            }
-          }
-          const adopted = this.pendingPermissionRequests.size - before
-          if (adopted > 0) {
-            logEvent('tengu_remote_subagent_requests_adopted', {
-              count: adopted,
-              subagents_asking_at_a_turn_end:
-                this.config.seedAskersPastATurn?.length ?? 0,
-            })
+        this.workerSeenThisConnection = false
+        if (this.securityTierRaiseSeen) {
+          this.invokeRebindEventSigner()
+        }
+        for (const entry of this.undeliveredResponses.values()) {
+          entry.failures = 0
+          if (entry.giveUpOnSettle === 'undelivered') {
+            entry.giveUpOnSettle = null
           }
         }
+        this.resendUndeliveredResponses()
+        this.callbacks.onConnected?.(info)
+        this.armSeedRequestsIfNeeded()
       },
-      onClose: () => {
+      onClose: reason => {
         logForDebugging('[RemoteSessionManager] Disconnected')
-        this.callbacks.onDisconnected?.()
+        if (this.client?.isRevivable()) {
+          this.giveUpUndeliveredResponses()
+        } else {
+          this.dropUndeliveredResponses()
+        }
+        this.callbacks.onDisconnected?.(reason)
       },
       onReconnecting: () => {
+        this.workerSeenThisConnection = false
         logForDebugging('[RemoteSessionManager] Reconnecting')
         this.callbacks.onReconnecting?.()
+      },
+      onStreamSilent: info => {
+        this.callbacks.onStreamSilent?.(info)
+      },
+      onDeliveryUpdate: ({ eventId, status }) => {
+        this.callbacks.onDeliveryUpdate?.({ eventId, status })
+        if (/PROCESS(ING|ED)$/i.test(status)) {
+          if (
+            /PROCESSED$/i.test(status) &&
+            this.callbacks.onLineSettled?.(eventId)
+          ) {
+            return
+          }
+          this.callbacks.onLineTaken?.(eventId)
+        }
+      },
+      onWorkerConnectionStatus: status => {
+        logForDebugging(
+          `[RemoteSessionManager] The service reports the worker ${
+            status === 'connected' || status === 'disconnected'
+              ? status
+              : 'in an unknown state'
+          }`,
+        )
+        if (status === 'connected') {
+          this.noteWorkerLive()
+          this.callbacks.onWorkerConnectionStatus?.(status)
+        } else if (status === 'disconnected') {
+          this.workerSeenThisConnection = false
+          this.callbacks.onWorkerGone?.()
+          this.callbacks.onWorkerConnectionStatus?.(status)
+        }
+      },
+      onSecurityTierRaised: () => {
+        this.securityTierRaiseSeen = true
+        this.invokeRebindEventSigner()
+        this.callbacks.onSecurityTierRaised?.()
+      },
+      onToolHostEnded: info => {
+        logForDebugging(
+          "[RemoteSessionManager] The service ended this session's connection to a computer serving its tools",
+        )
+        this.callbacks.onToolHostEnded?.(info)
+      },
+      onCatchUpTruncated: () => {
+        logForDebugging('[RemoteSessionManager] Catch-up truncated')
+        this.callbacks.onCatchUpTruncated?.()
       },
       onError: error => {
         logError(error)
@@ -281,14 +510,31 @@ export class RemoteSessionManager {
       },
     }
 
-    this.websocket = new SessionsWebSocket(
+    this.client = new SessionsV2Client(
       this.config.sessionId,
       this.config.orgUuid,
       this.config.getAccessToken,
-      wsCallbacks,
+      sseCallbacks,
+      this.config.onAuth401,
+      this.config.initialSequenceNum,
+      {
+        ...this.config.v2ClientOptions,
+        trackSends:
+          this.config.trackSendsInFlight === true ||
+          this.config.v2ClientOptions?.trackSends === true,
+        controlOnly:
+          this.config.controlOnly === true ||
+          this.config.v2ClientOptions?.controlOnly === true,
+        eventSigner:
+          this.config.eventSigner ?? this.config.v2ClientOptions?.eventSigner,
+        keepRedialling: () =>
+          this.config.keepStreamRedialling === true ||
+          this.serving ||
+          this.config.v2ClientOptions?.keepRedialling?.() === true,
+      },
     )
 
-    void this.websocket.connect()
+    void this.client.connect()
   }
 
   /**
@@ -329,6 +575,12 @@ export class RemoteSessionManager {
       const { request_id } = message as SDKControlCancelRequest
       this.reinstatablePermissionRequests.delete(request_id)
       this.reinstatableDialogIds.delete(request_id)
+      const kept = this.undeliveredResponses.get(request_id)
+      if (kept?.kind === 'hook' || kept?.kind === 'tool') {
+        this.giveUpUndeliveredEntry(kept, 'overtaken')
+      } else if (kept) {
+        this.dropKeptResponse(kept)
+      }
       if (this.retireServedRequest(request_id, 'worker')) {
         return
       }
@@ -363,6 +615,17 @@ export class RemoteSessionManager {
       const response = (message as SDKControlResponse).response
       const requestId = response.request_id
       this.recordSeenControlResponseId(requestId)
+
+      const kept = this.undeliveredResponses.get(requestId)
+      const msgUuid =
+        'uuid' in message ? (message as { uuid?: unknown }).uuid : undefined
+      if (
+        kept !== undefined &&
+        msgUuid === kept.uuid &&
+        kept.giveUpOnSettle !== 'overtaken'
+      ) {
+        this.dropKeptResponse(kept)
+      }
 
       const pendingPerm = this.pendingPermissionRequests.get(requestId)
       if (pendingPerm) {
@@ -546,8 +809,6 @@ export class RemoteSessionManager {
         return
       }
       if (!this.callbacks.onUserDialogRequest) {
-        // No host handler — densable still parks only when callback exists;
-        // without it, report unsupported so the worker does not hang.
         logForDebugging(
           `[RemoteSessionManager] Unsupported control request subtype: ${inner.subtype}`,
         )
@@ -559,7 +820,7 @@ export class RemoteSessionManager {
             error: `Unsupported control request subtype: ${inner.subtype}`,
           },
         }
-        this.websocket?.sendControlResponse(response)
+        this.sendControlResponseOverTransport(response, null)
         return
       }
       logForDebugging(
@@ -586,7 +847,7 @@ export class RemoteSessionManager {
         error: `Unsupported control request subtype: ${inner.subtype}`,
       },
     }
-    this.websocket?.sendControlResponse(response)
+    this.sendControlResponseOverTransport(response, null)
   }
 
   /**
@@ -653,18 +914,303 @@ export class RemoteSessionManager {
 
   /**
    * gold `reviveStreamForUserSend` @206760063
-   * leftover SessionsWebSocket has no `reviveAfterExhaustion` — no-op.
    */
-  private reviveStreamForUserSend(): void {
-    // gold: this.client?.reviveAfterExhaustion() then onReconnecting
+  private reviveStreamForUserSend(): boolean {
+    if (this.client?.reviveAfterExhaustion()) {
+      this.callbacks.onReconnecting?.()
+      return true
+    }
+    return false
+  }
+
+  // ── Official `undeliveredResponses` queue (chunk@318978761.js @70500-75000) ──
+
+  private sendControlResponseOverTransport(
+    response: SDKControlResponse,
+    kind: RemoteResponseKind | null,
+    originalRequest?: SDKControlPermissionRequest,
+    onPosted?: (posted: ServedChannelPostOutcome, replyMs: number) => void,
+  ): void {
+    if (this.client) {
+      const client = this.client
+      const startMs = performance.now()
+      const wrappedListener =
+        onPosted === undefined
+          ? undefined
+          : (
+              outcome: SessionsV2EventPostOutcome,
+            ): SessionsV2EventPostOutcome => {
+              try {
+                const mapped: ServedChannelPostOutcome =
+                  outcome.outcome === 'accepted'
+                    ? {
+                        outcome: 'accepted',
+                        signMs: outcome.signMs,
+                        postMs: outcome.postMs,
+                      }
+                    : { outcome: outcome.outcome }
+                onPosted(mapped, Math.round(performance.now() - startMs))
+              } catch (err) {
+                logForDebugging(
+                  `[RemoteSessionManager] An answer's post listener threw; the answer's fate is unchanged: ${errorMessage(err)}`,
+                  { level: 'warn' },
+                )
+              }
+              return outcome
+            }
+
+      if (kind === null || !this.shouldKeepUndeliveredResponses()) {
+        const p = client.sendControlResponse(
+          response,
+          undefined,
+          sendOptionsForKind(kind),
+        )
+        if (wrappedListener) {
+          void p.then(wrappedListener)
+        }
+        return
+      }
+
+      const requestId = response.response.request_id
+      const entry: UndeliveredResponseEntry = this.undeliveredResponses.get(
+        requestId,
+      ) ?? {
+        response,
+        kind,
+        uuid: randomUUID(),
+        failures: 0,
+        inFlight: false,
+        giveUpOnSettle: null,
+        timer: null,
+        told: false,
+      }
+      entry.response = response
+      if (originalRequest !== undefined) {
+        entry.request = originalRequest
+      }
+      this.undeliveredResponses.set(requestId, entry)
+      this.postKeptResponse(client, entry, wrappedListener)
+      return
+    }
+
+    if (this.websocket) {
+      this.websocket.sendControlResponse(response)
+      if (onPosted) {
+        try {
+          onPosted({ outcome: 'accepted' }, 0)
+        } catch (err) {
+          logForDebugging(
+            `[RemoteSessionManager] An answer's post listener threw; ` +
+              `the answer's fate is unchanged: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        }
+      }
+    }
+  }
+
+  private postKeptResponse(
+    client: SessionsV2Client,
+    entry: UndeliveredResponseEntry,
+    onOutcome?: (
+      outcome: SessionsV2EventPostOutcome,
+    ) => SessionsV2EventPostOutcome,
+  ): void {
+    entry.inFlight = true
+    const reqPromise = client.sendControlResponse(
+      entry.response,
+      entry.uuid,
+      sendOptionsForKind(entry.kind),
+    )
+    const chained =
+      onOutcome === undefined ? reqPromise : reqPromise.then(onOutcome)
+    chained.then(
+      outcome => this.settleResponsePost(entry, outcome),
+      err => {
+        logForDebugging(
+          `[RemoteSessionManager] Posting an answer threw: ${errorMessage(err)}`,
+          { level: 'warn' },
+        )
+        this.settleResponsePost(entry, { outcome: 'failed', cause: 'network' })
+      },
+    )
+  }
+
+  private settleResponsePost(
+    entry: UndeliveredResponseEntry,
+    outcome: SessionsV2EventPostOutcome,
+  ): void {
+    entry.inFlight = false
+    const requestId = entry.response.response.request_id
+    if (this.undeliveredResponses.get(requestId) !== entry) {
+      return
+    }
+
+    if (outcome.outcome === 'accepted') {
+      if (entry.giveUpOnSettle === 'overtaken') {
+        this.giveUpUndeliveredEntry(entry, 'overtaken')
+        return
+      }
+      this.dropKeptResponse(entry)
+      return
+    }
+
+    if (entry.giveUpOnSettle !== null) {
+      this.giveUpUndeliveredEntry(entry, entry.giveUpOnSettle)
+      return
+    }
+
+    if (
+      outcome.outcome === 'session_inactive' ||
+      (outcome.outcome === 'failed' &&
+        outcome.cause === 'http' &&
+        outcome.status === 404)
+    ) {
+      this.dropKeptResponse(entry)
+      logForDebugging(
+        `[RemoteSessionManager] Answer for ${clipServedRequestId(requestId)} has no session to go to; dropped`,
+      )
+      return
+    }
+
+    if (outcome.outcome === 'failed' && outcome.cause === 'closed') {
+      if (!this.client?.isRevivable()) {
+        this.giveUpUndeliveredEntry(entry, 'undelivered')
+      }
+      return
+    }
+
+    if (
+      outcome.outcome === 'failed' &&
+      outcome.cause === 'http' &&
+      outcome.status !== undefined &&
+      outcome.status < 500 &&
+      outcome.status !== 408 &&
+      outcome.status !== 429
+    ) {
+      logForDebugging(
+        `[RemoteSessionManager] Answer for ${clipServedRequestId(requestId)} was refused by the service (http ${outcome.status}); not re-sending`,
+        { level: 'warn' },
+      )
+      this.giveUpUndeliveredEntry(entry, 'undelivered')
+      return
+    }
+
+    if (!this.client?.isConnected()) {
+      logForDebugging(
+        `[RemoteSessionManager] Answer for ${clipServedRequestId(requestId)} did not reach the session while the stream is down; it goes again at reconnect`,
+      )
+      return
+    }
+
+    entry.failures += 1
+    if (entry.failures > MAX_UNDELIVERED_RETRY_ATTEMPTS) {
+      logForDebugging(
+        `[RemoteSessionManager] Answer for ${clipServedRequestId(requestId)} could not be delivered after ${entry.failures} attempts; giving up`,
+        { level: 'warn' },
+      )
+      this.giveUpUndeliveredEntry(entry, 'undelivered')
+      return
+    }
+    this.scheduleResponseResend(entry)
+  }
+
+  private dropKeptResponse(entry: UndeliveredResponseEntry): void {
+    this.clearResendTimer(entry)
+    this.undeliveredResponses.delete(entry.response.response.request_id)
+  }
+
+  private giveUpUndeliveredEntry(
+    entry: UndeliveredResponseEntry,
+    reason: RemoteResponseUndeliveredReason,
+  ): void {
+    const requestId = entry.response.response.request_id
+    if (entry.inFlight) {
+      if (entry.giveUpOnSettle !== 'overtaken') {
+        entry.giveUpOnSettle = reason
+      }
+      return
+    }
+    this.dropKeptResponse(entry)
+    if (
+      reason === 'undelivered' &&
+      (entry.kind === 'dialog' || entry.kind === 'permission')
+    ) {
+      this.seenControlResponseIds.delete(requestId)
+      if (entry.kind === 'permission') {
+        if (entry.request !== undefined) {
+          this.recordReinstatablePermissionRequest(requestId, entry.request)
+        }
+      } else {
+        this.recordReinstatableDialogId(requestId)
+      }
+    }
+    if (entry.told) return
+    entry.told = true
+    this.callbacks.onResponseUndelivered?.(requestId, entry.kind, reason)
+  }
+
+  private scheduleResponseResend(entry: UndeliveredResponseEntry): void {
+    this.clearResendTimer(entry)
+    const idx = Math.min(entry.failures, MAX_UNDELIVERED_RETRY_ATTEMPTS) - 1
+    const delayMs = UNDELIVERED_RETRY_DELAYS_MS[idx] ?? 45_000
+    const requestId = entry.response.response.request_id
+    entry.timer = setTimeout(() => {
+      const current = this.undeliveredResponses.get(requestId)
+      const client = this.client
+      if (!current || !client) return
+      current.timer = null
+      if (!current.inFlight) {
+        this.postKeptResponse(client, current)
+      }
+    }, delayMs)
+    entry.timer.unref?.()
+  }
+
+  private clearResendTimer(entry: UndeliveredResponseEntry): void {
+    if (entry.timer !== null) {
+      clearTimeout(entry.timer)
+      entry.timer = null
+    }
+  }
+
+  private resendUndeliveredResponses(): void {
+    const client = this.client
+    if (!client) return
+    for (const entry of this.undeliveredResponses.values()) {
+      this.clearResendTimer(entry)
+      if (!entry.inFlight) {
+        this.postKeptResponse(client, entry)
+      }
+    }
+  }
+
+  private giveUpUndeliveredResponses(): void {
+    for (const entry of [...this.undeliveredResponses.values()]) {
+      this.giveUpUndeliveredEntry(entry, 'undelivered')
+    }
+  }
+
+  private dropUndeliveredResponses(): void {
+    for (const entry of [...this.undeliveredResponses.values()]) {
+      if (entry.giveUpOnSettle === 'overtaken') {
+        entry.inFlight = false
+        this.giveUpUndeliveredEntry(entry, 'overtaken')
+        continue
+      }
+      this.dropKeptResponse(entry)
+    }
+  }
+
+  /** Number of control responses currently queued awaiting delivery / retry. */
+  getUndeliveredResponseCount(): number {
+    return this.undeliveredResponses.size
   }
 
   /**
    * gold `respondToServedChannelRequest` @206767294
-   * gold `sendResponse` @206760163 leftover: WS send is void (not a Promise);
-   * no undeliveredResponses / keepUndeliveredResponses fleet.
-   * gold `Be` @206773533 via leftoverServedSendOpts — leftover WS cannot take
-   * timeout, still compute probe vs tool opts.
+   * gold `sendResponse` @206760163
+   * gold `Be` @206773533 via leftoverServedSendOpts
    */
   respondToServedChannelRequest(
     requestId: string,
@@ -679,7 +1225,7 @@ export class RemoteSessionManager {
       return false
     }
     this.pendingServedRequests.delete(requestId)
-    if (!this.websocket) return false
+    if (!this.client && !this.websocket) return false
     this.recordSeenControlResponseId(requestId)
     this.recordSettledServedRequestId(requestId)
     this.reviveStreamForUserSend()
@@ -694,20 +1240,15 @@ export class RemoteSessionManager {
       },
     }
     // gold `r.subtype==="remote_tools_probe"?null:"tool"` then Be(n)
-    // leftover sendControlResponse is void — still compute Be opts
-    void leftoverServedSendOpts(
-      pending.subtype === 'remote_tools_probe' ? null : 'tool',
+    const responseKind =
+      pending.subtype === 'remote_tools_probe' ? null : 'tool'
+    void leftoverServedSendOpts(responseKind)
+    this.sendControlResponseOverTransport(
+      response,
+      responseKind,
+      undefined,
+      onPosted,
     )
-    this.websocket.sendControlResponse(response)
-    try {
-      onPosted?.({ outcome: 'accepted' }, 0)
-    } catch (err) {
-      logForDebugging(
-        `[RemoteSessionManager] An answer's post listener threw; ` +
-          `the answer's fate is unchanged: ${errorMessage(err)}`,
-        { level: 'warn' },
-      )
-    }
     return true
   }
 
@@ -764,6 +1305,7 @@ export class RemoteSessionManager {
     logForDebugging(
       `[RemoteSessionManager] Sending message to session ${this.config.sessionId}`,
     )
+    this.reviveStreamForUserSend()
 
     const result = await sendEventToRemoteSession(
       this.config.sessionId,
@@ -805,6 +1347,7 @@ export class RemoteSessionManager {
 
     this.retirePermissionRequest(requestId)
     this.recordSeenControlResponseId(requestId)
+    this.reviveStreamForUserSend()
 
     const response: SDKControlResponse = {
       type: 'control_response',
@@ -824,7 +1367,11 @@ export class RemoteSessionManager {
       `[RemoteSessionManager] Sending permission response: ${result.behavior}`,
     )
 
-    this.websocket?.sendControlResponse(response)
+    this.sendControlResponseOverTransport(
+      response,
+      'permission',
+      pendingRequest,
+    )
   }
 
   /**
@@ -843,6 +1390,7 @@ export class RemoteSessionManager {
       return
     }
     this.recordSeenControlResponseId(requestId)
+    this.reviveStreamForUserSend()
     const response: SDKControlResponse = {
       type: 'control_response',
       response: {
@@ -857,14 +1405,14 @@ export class RemoteSessionManager {
     logForDebugging(
       `[RemoteSessionManager] Sending user dialog response: ${result.behavior}`,
     )
-    this.websocket?.sendControlResponse(response)
+    this.sendControlResponseOverTransport(response, 'dialog')
   }
 
   /**
    * Check if connected to the remote session
    */
   isConnected(): boolean {
-    return this.websocket?.isConnected() ?? false
+    return this.client?.isConnected() ?? this.websocket?.isConnected() ?? false
   }
 
   /**
@@ -872,15 +1420,24 @@ export class RemoteSessionManager {
    */
   cancelSession(): void {
     logForDebugging('[RemoteSessionManager] Sending interrupt signal')
-    this.websocket?.sendControlRequest({ subtype: 'interrupt' })
+    this.reviveStreamForUserSend()
+    if (this.client) {
+      this.client.sendControlRequest({ subtype: 'interrupt' })
+    } else {
+      this.websocket?.sendControlRequest({ subtype: 'interrupt' })
+    }
   }
 
   /**
-   * leftover `gPe.postControlRequest` host — wrap existing SessionsWebSocket
-   * `sendControlRequest`. Interrupt stays `cancelSession`.
+   * Send a control request over the active transport.
    */
   sendControl(request: SDKControlRequestInner): void {
-    this.websocket?.sendControlRequest(request)
+    this.reviveStreamForUserSend()
+    if (this.client) {
+      this.client.sendControlRequest(request)
+    } else {
+      this.websocket?.sendControlRequest(request)
+    }
   }
 
   /**
@@ -896,8 +1453,18 @@ export class RemoteSessionManager {
   disconnect(): void {
     logForDebugging('[RemoteSessionManager] Disconnecting')
     this.lifetime.abort()
+    this.client?.close()
+    this.client = null
     this.websocket?.close()
     this.websocket = null
+    for (const entry of [...this.undeliveredResponses.values()]) {
+      this.clearResendTimer(entry)
+      if (entry.giveUpOnSettle !== null) {
+        entry.inFlight = false
+        this.giveUpUndeliveredEntry(entry, entry.giveUpOnSettle)
+      }
+    }
+    this.undeliveredResponses.clear()
     this.pendingPermissionRequests.clear()
     this.pendingDialogRequests.clear()
     for (const requestId of [...this.pendingServedRequests.keys()]) {
@@ -909,12 +1476,23 @@ export class RemoteSessionManager {
   }
 
   /**
-   * Force reconnect the WebSocket.
-   * Useful when the subscription becomes stale after container shutdown.
+   * Force reconnect the active SSE stream (or legacy WebSocket).
    */
   reconnect(): void {
+    if (this.client) {
+      logForDebugging('[RemoteSessionManager] Reconnecting SSE stream')
+      this.client.reconnect()
+      return
+    }
     logForDebugging('[RemoteSessionManager] Reconnecting WebSocket')
     this.websocket?.reconnect()
+  }
+
+  /**
+   * Official 2.1.328 `reconnectAfterSuspend` — redial SSE after OS suspend.
+   */
+  reconnectAfterSuspend(): void {
+    this.client?.reconnectAfterSuspend()
   }
 }
 

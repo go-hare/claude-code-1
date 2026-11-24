@@ -82,7 +82,7 @@ bun run docs:dev
 ### Runtime & Build
 
 - **Runtime**: Bun (not Node.js). All imports, builds, and execution use Bun APIs.
-- **Build**: `build.ts` 执行 `Bun.build({ target: 'node', splitting: true })`，入口 `src/entrypoints/cli.tsx`，输出 `dist/cli.js` + chunk files。Build 默认启用 41 个 feature（见下方 Feature Flag 段）。构建后自动兼容处理 `import.meta.require` 与 `globalThis.Bun` 解构（产物 bun/node 都可运行）。构建时会将 `vendor/audio-capture/`、`src/utils/vendor/ripgrep/` 与 `vendor/clipboard-image/` 复制到 `dist/vendor/` 下。
+- **Build**: `build.ts` 执行 `Bun.build({ target: 'node', splitting: true })`，入口 `src/entrypoints/cli.tsx`，输出 `dist/cli.js` + chunk files。Build 默认启用 46 个 feature（见下方 Feature Flag 段）。构建后自动兼容处理 `import.meta.require` 与 `globalThis.Bun` 解构（产物 bun/node 都可运行）。构建时会将 `vendor/audio-capture/`、`src/utils/vendor/ripgrep/` 与 `vendor/clipboard-image/` 复制到 `dist/vendor/` 下。
 - **Build (Vite)**: `vite.config.ts` + `scripts/post-build.ts`，代码分割模式，chunk 输出到 `dist/chunks/`。post-build 遍历 `dist/` 和 `dist/chunks/` 下所有 `.js` 文件做 `globalThis.Bun` 解构 patch，复制 vendor 文件到 `dist/vendor/`。
 - **Vendor 路径解析**: 构建后 chunk 文件位于 `dist/` 或 `dist/chunks/` 下，vendor 二进制在 `dist/vendor/`。`src/utils/distRoot.ts` 提供共享的 `distRoot` 函数，通过 `import.meta.url` 路径中 `lastIndexOf('dist')` 或 `lastIndexOf('src')` 定位根目录。`ripgrep.ts`、`computerUse/setup.ts`、`claudeInChrome/setup.ts`、`updateCCB.ts` 均使用 `distRoot` 而非内联 `import.meta.url` 路径推算。`packages/audio-capture-napi/src/index.ts` 有独立的 `lastIndexOf('dist')` 逻辑，功能等价。
 - **为什么 Vite 必须代码分割**: Bun/JSC 会全量解析单个大 JS 文件的 bytecode 和 JIT，单文件 17MB 产物导致 RSS 暴涨至 ~1GB（Node/V8 懒解析仅需 ~220MB）。代码分割为 600+ 小 chunk 后 Bun 按需加载，`--version` RSS 从 966MB 降至 35MB，完整加载从 1GB+ 降至 ~500MB。
@@ -105,11 +105,10 @@ bun run docs:dev
    - `remote-control` / `rc` / `remote` / `sync` / `bridge` — feature-gated (BRIDGE_MODE)
    - `daemon` [subcommand] — feature-gated (DAEMON)
    - `ps` / `logs` / `attach` / `kill` / `--bg` — feature-gated (BG_SESSIONS)
-   - `new` / `list` / `reply` — Template job commands
    - `environment-runner` / `self-hosted-runner` — BYOC runner
    - `--tmux` + `--worktree` 组合
    - 默认路径：加载 `main.tsx` 启动完整 CLI
-2. **`src/main.tsx`** (~6300 行) — Commander.js CLI definition。注册大量 subcommands：`mcp` (serve/add/remove/list...)、`server`、`ssh`、`open`、`auth`、`plugin`、`agents`、`auto-mode`、`doctor`、`update` 等。主 `.action()` 处理器负责权限、MCP、会话恢复、REPL/Headless 模式分发。
+2. **`src/main.tsx`** (~6300 行) — Commander.js CLI definition。注册大量 subcommands：`mcp` (serve/add/remove/list...)、`ssh`、`auth`、`plugin`、`agents`、`auto-mode`、`doctor`、`update` 等。主 `.action()` 处理器负责权限、MCP、会话恢复、REPL/Headless 模式分发。
 3. **`src/entrypoints/init.ts`** — One-time initialization (telemetry, config, trust dialog)。
 
 ### Core Loop
@@ -145,7 +144,7 @@ bun run docs:dev
   - **Web/MCP**: WebFetchTool, WebSearchTool, MCPTool, McpAuthTool
   - **调度**: CronCreateTool, CronDeleteTool, CronListTool
   - **工具发现**: ToolSearch（`SearchExtraToolsTool`，wire 名 `ToolSearch`）、ExecuteExtraTool（compat core）、SyntheticOutput
-  - **其他**: LSPTool, ConfigTool, SkillTool, EnterWorktreeTool, ExitWorktreeTool 等
+  - **其他**: LSPTool, SkillTool, EnterWorktreeTool, ExitWorktreeTool 等（`ConfigTool`、`TeamCreateTool`、`TeamDeleteTool`、`TaskOutputTool` 已按 2.1.328 移除）
 - **`packages/builtin-tools/src/tools/shared/`** — Tool 共享工具函数。⚠️ **`src/tools/` 目录已不存在**，整个工具树都在 `packages/builtin-tools/` 下；看到旧文档或注释里写 `src/tools/...` 一律按 `packages/builtin-tools/src/tools/...` 理解。
 - **`src/services/searchExtraTools/`** — TF-IDF 工具索引模块（`toolIndex.ts`），为延迟工具提供语义搜索能力。复用 `localSearch.ts` 的 TF-IDF 算法函数（`computeWeightedTf`、`computeIdf`、`cosineSimilarity` 已导出）。修改这些函数时需同步检查工具索引测试。`prefetch.ts` 的 `extractQueryFromMessages` 复用了 `skillSearch/prefetch.ts` 的同名导出函数，修改 skill prefetch 的该函数时需同步检查工具预取行为。工具预取使用独立的 `discoveredToolsThisSession` Set，与 skill prefetch 的去重集合互不影响。
 
@@ -230,20 +229,20 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 
 **启用方式**: 环境变量 `FEATURE_<FLAG_NAME>=1`。例如 `FEATURE_BUDDY=1 bun run dev`。
 
-**Build 默认 features**：**41 个**，唯一来源是 `scripts/defines.ts` 的 `DEFAULT_BUILD_FEATURES`（`build.ts` 和 `vite.config.ts` 都从这里 import，不要在别处维护第二份清单）：
+**Build 默认 features**：**46 个**，唯一来源是 `scripts/defines.ts` 的 `DEFAULT_BUILD_FEATURES`（`build.ts` 和 `vite.config.ts` 都从这里 import，不要在别处维护第二份清单）：
 
-- 基础: `BUDDY`, `TRANSCRIPT_CLASSIFIER`, `BRIDGE_MODE`, `AGENT_TRIGGERS_REMOTE`, `CHICAGO_MCP`, `VOICE_MODE`
-- 统计/缓存: `SHOT_STATS`, `PROMPT_CACHE_BREAK_DETECTION`, `TOKEN_BUDGET`
-- P0 本地: `AGENT_TRIGGERS`, `ULTRATHINK`, `BUILTIN_EXPLORE_PLAN_AGENTS`, `LODESTONE`
-- P1 API 依赖: `EXTRACT_MEMORIES`, `VERIFICATION_AGENT`, `KAIROS_BRIEF`, `AWAY_SUMMARY`
+- 基础: `BUDDY`, `BASH_CLASSIFIER`, `TRANSCRIPT_CLASSIFIER`, `POWERSHELL_AUTO_MODE`, `BRIDGE_MODE`, `CCR_AUTO_CONNECT`, `AGENT_TRIGGERS_REMOTE`, `CHICAGO_MCP`, `VOICE_MODE`
+- 统计/缓存/遥测: `PROMPT_CACHE_BREAK_DETECTION`, `TOKEN_BUDGET`, `ENHANCED_TELEMETRY_BETA`, `COWORKER_TYPE_TELEMETRY`
+- P0 本地: `AGENT_TRIGGERS`, `AGENT_MEMORY_SNAPSHOT`, `HISTORY_PICKER`, `MCP_SKILLS`, `WEB_BROWSER_TOOL`, `NEW_INIT`, `ULTRATHINK`, `BUILTIN_EXPLORE_PLAN_AGENTS`, `LODESTONE`
+- P1 API 依赖: `EXTRACT_MEMORIES`, `KAIROS_BRIEF`, `AWAY_SUMMARY`
 - P2: `DAEMON`, `ACP`
 - 工作流: `WORKFLOW_SCRIPTS`, `MONITOR_TOOL`, `KAIROS`
-- 上下文恢复: `REACTIVE_COMPACT`（413/PTL withhold + tryReactiveCompact；对齐 densable SEA；**不含** collapse/snip）
+- 上下文恢复: `REACTIVE_COMPACT`（413/PTL withhold + tryReactiveCompact；对齐 densable SEA；**不含** collapse/snip/legacy `cache_edits`）
 - KAIROS 外围: `KAIROS_CHANNELS`, `KAIROS_PUSH_NOTIFICATION`, `KAIROS_GITHUB_WEBHOOKS`
-- 多 worker: `COORDINATOR_MODE`, `BG_SESSIONS`, `TEMPLATES`
+- 多 worker: `COORDINATOR_MODE`, `BG_SESSIONS`
 - 本机/LAN 协作: `UDS_INBOX`（inbox/peers/pipes）、`LAN_PIPES`（TCP + UDP beacon；依赖 UDS）— densable 产品面默认 ON（1:1）
 - 团队记忆: `TEAMMEM`（`memory/team` 同步；需 OAuth + GitHub remote 运行时门）
-- 连接器: `CONNECTOR_TEXT`, `COMMIT_ATTRIBUTION`, `DIRECT_CONNECT`
+- 连接器: `CONNECTOR_TEXT`
 - 实验性: `EXPERIMENTAL_SKILL_SEARCH`, `EXPERIMENTAL_SEARCH_EXTRA_TOOLS`
 - 模式: `SSH_REMOTE`
 - 其他: `AUTOFIX_PR`, `NATIVE_CLIPBOARD_IMAGE`, `AUTO_THEME`
@@ -251,6 +250,8 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 **已注释禁用（6 个）**——每条上方都有注释写明原因，**不要随手加回来**：
 
 `TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`（后两者 stub 风险会抑制 proactive autoCompact）、`FORK_SUBAGENT`（289 产品门是 `isForkSubagentProductEnabled()`：交互默认开、headless 默认关、coordinator 关；**不读**这个编译旗标）、`REVIEW_ARTIFACT`、`SKILL_LEARNING`
+
+**已彻底拆除的废弃/官方 OFF 旗标（6 个，对应实现与编译旗标均已删除，不要复活）**：`CACHED_MICROCOMPACT`（已废弃 legacy `cache_edits`/`cache_reference` 路径，非官方 `clear_tool_uses_20250919`）、`SHOT_STATS`、`VERIFICATION_AGENT`、`TEMPLATES`、`COMMIT_ATTRIBUTION`、`DIRECT_CONNECT`（均为官方 2.1.328 OFF 或已废弃路径）。
 
 **已产品拆除（不要复活）**：`ULTRAPLAN` **编译旗标**（densable 2.1.222 #21；不是 `FEATURE_ULTRAPLAN=1`）。densable 2.1.289 gold `BZt` slash HAS BODY：`/ultraplan` + 对话框 + ccrSession 已接回，`isEnabled` 是 `jj()` / `isUltraplanProductEnabled()`。ultracode / ultrareview keyword 在 `src/utils/workflowKeyword.ts`。Anthropic Team/Enterprise **远程**控制面（`remoteManagedSettings`、org tips、CRI policy webhook、managed-settings security 对话框）仍拆；机器本地 MDM/file/hkcu **已接回**。`policyLimits` **已接回**：`src/services/policyLimits/` fetch + leftover `Jt` 评测；Team/Enterprise OAuth 或 Console key 才 eligible。
 
@@ -426,7 +427,7 @@ bun run precheck
 ## Working with This Codebase
 
 - **precheck must pass** — `bun run precheck`（typecheck + `check:fix` + `docs:check` + test + `check:ci`）必须零错误，任何修改都不能引入新的类型/lint/格式/文档/测试错误。最后那步 `check:ci`（= `biome ci .`）是**非改写**的复核，跑在 `bun test` 之后：`check:fix` 会顺手改文件，所以它自己"通过"不代表工作树最终是干净的。有它兜底，precheck 就不可能放过一个 `biome ci` 会拒的状态。
-- **Feature flags** — **runtime** 无 env 时 `feature()` 返回 `false`；**dev/build** 注入 `DEFAULT_BUILD_FEATURES`（41 个默认 ON），含 `UDS_INBOX`/`LAN_PIPES`/`TEAMMEM`/KAIROS 外围等，见上文 Feature Flag System 与 `scripts/defines.ts`。不要写成「本地默认全 OFF」。不要在 `cli.tsx` 中重定义 `feature` 函数——它从 `bun:bundle` 导入。
+- **Feature flags** — **runtime** 无 env 时 `feature()` 返回 `false`；**dev/build** 注入 `DEFAULT_BUILD_FEATURES`（46 个默认 ON），含 `BASH_CLASSIFIER`/`HISTORY_PICKER`/`MCP_SKILLS`/`WEB_BROWSER_TOOL`/`CCR_AUTO_CONNECT`/`POWERSHELL_AUTO_MODE`/`UDS_INBOX`/`LAN_PIPES`/`TEAMMEM`/KAIROS 外围等，见上文 Feature Flag System 与 `scripts/defines.ts`。不要写成「本地默认全 OFF」。不要在 `cli.tsx` 中重定义 `feature` 函数——它从 `bun:bundle` 导入。
 - **React Compiler output** — Components have decompiled memoization boilerplate (`const $ = _c(N)`). This is normal.
 - **`bun:bundle` import** — `import { feature } from 'bun:bundle'` 是 Bun 内置模块，由运行时/构建器解析。不要用自定义函数替代它。**`feature()` 只能直接用在 `if` 语句或三元表达式的条件位置**（Bun 编译器限制），不能赋值给变量、不能放在箭头函数体里、不能作为 `&&` 链的一部分。正确：`if (feature('X')) {}` 或 `feature('X') ? a : b`。
 - **`src/` path alias** — tsconfig maps `src/*` to `./src/*`. Imports like `import { ... } from 'src/utils/...'` are valid.
