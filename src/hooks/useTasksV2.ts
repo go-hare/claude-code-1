@@ -95,7 +95,7 @@ export class TasksV2Store {
   /**
    * Point the file watcher at the current tasks directory. Called on start
    * and whenever #fetch detects the task list ID has changed (e.g. when
-   * TeamCreateTool sets leaderTeamName mid-session).
+   * session team initialization sets leaderTeamName).
    */
   #rewatch(dir: string): void {
     // Retry even on same dir if the previous watch attempt failed (dir
@@ -123,8 +123,8 @@ export class TasksV2Store {
   #fetch = async (): Promise<void> => {
     const generation = ++this.#issuedFetch
     const taskListId = getTaskListId()
-    // Task list ID can change mid-session (TeamCreateTool sets
-    // leaderTeamName) — point the watcher at the current dir.
+    // Task list ID can change mid-session (e.g. when leaderTeamName is set)
+    // — point the watcher at the current dir.
     this.#rewatch(getTasksDir(taskListId))
     // densable 2.1.289 jMn #k: read throw → keep #c, log, arm poll. Do not
     // treat failure as [] (that hides Next: until the next successful poll).

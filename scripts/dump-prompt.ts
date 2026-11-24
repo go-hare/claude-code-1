@@ -103,7 +103,6 @@ mock.module('@claude-code/builtin-tools/tools/GrepTool/prompt.js', () => ({
 }))
 mock.module('@claude-code/builtin-tools/tools/AgentTool/constants.js', () => ({
   AGENT_TOOL_NAME: 'Agent',
-  VERIFICATION_AGENT_TYPE: 'verification',
 }))
 mock.module(
   '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js',

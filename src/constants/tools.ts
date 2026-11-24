@@ -1,6 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle'
-import { TASK_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskOutputTool/constants.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/constants.js'
 import { ENTER_PLAN_MODE_TOOL_NAME } from '@claude-code/builtin-tools/tools/EnterPlanModeTool/constants.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
@@ -27,8 +26,6 @@ import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/Syn
 import { SLEEP_TOOL_NAME } from '@claude-code/builtin-tools/tools/SleepTool/prompt.js'
 import { LSP_TOOL_NAME } from '@claude-code/builtin-tools/tools/LSPTool/prompt.js'
 import { VERIFY_PLAN_EXECUTION_TOOL_NAME } from '@claude-code/builtin-tools/tools/VerifyPlanExecutionTool/constants.js'
-import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js'
-import { TEAM_DELETE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamDeleteTool/constants.js'
 import { EXECUTE_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExecuteTool/constants.js'
 import { ENTER_WORKTREE_TOOL_NAME } from '@claude-code/builtin-tools/tools/EnterWorktreeTool/constants.js'
 import { EXIT_WORKTREE_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/constants.js'
@@ -43,6 +40,12 @@ import { OBSERVER_REPORT_TOOL_NAME } from '@claude-code/builtin-tools/tools/Obse
 import { SUBAGENT_HANDBACK_TOOL_NAME } from '@claude-code/builtin-tools/tools/SubagentHandbackTool/constants.js'
 import { ARTIFACT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
 import { GET_TASK_TOOL_NAME } from '../utils/bashTaskDeliveryOutcomes.js'
+
+// Legacy retired tool names retained for backwards-compatible filtering and
+// orchestration exclusions.
+export const TASK_OUTPUT_TOOL_NAME = 'TaskOutput'
+export const TEAM_CREATE_TOOL_NAME = 'TeamCreate'
+export const TEAM_DELETE_TOOL_NAME = 'TeamDelete'
 
 export const ALL_AGENT_DISALLOWED_TOOLS = new Set([
   TASK_OUTPUT_TOOL_NAME,
@@ -120,7 +123,7 @@ export const IN_PROCESS_TEAMMATE_ALLOWED_TOOLS = new Set([
 /*
  * BLOCKED FOR ASYNC AGENTS:
  * - AgentTool: Blocked to prevent recursion
- * - TaskOutputTool: Blocked to prevent recursion
+ * - TaskOutput: Blocked to prevent recursion (retired tool)
  * - ExitPlanModeTool: Plan mode is a main thread abstraction.
  * - TaskStopTool: Requires access to main thread task state.
  * - TungstenTool: Uses singleton virtual terminal abstraction that conflicts between agents.

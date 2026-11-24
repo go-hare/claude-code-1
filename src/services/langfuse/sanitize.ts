@@ -9,11 +9,7 @@ const REDACTED_FILE_TOOLS = new Set([
 const REDACTED_SHELL_TOOLS = new Set(['BashTool', 'PowerShellTool'])
 // Vault-class tools and tools that intentionally surface user secrets must
 // have their tool_result redacted in Langfuse traces.
-const SENSITIVE_OUTPUT_TOOLS = new Set([
-  'ConfigTool',
-  'MCPTool',
-  'LocalVaultFetch',
-])
+const SENSITIVE_OUTPUT_TOOLS = new Set(['MCPTool', 'LocalVaultFetch'])
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

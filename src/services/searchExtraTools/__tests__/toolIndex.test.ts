@@ -68,10 +68,10 @@ describe('buildToolIndex', () => {
     const tools = [
       makeMockTool({ name: 'CoreRead', alwaysLoad: true }),
       makeMockTool({
-        name: 'ConfigTool',
+        name: 'RemoteTriggerTool',
         shouldDefer: true,
-        searchHint: 'configure settings options',
-        prompt: async () => 'Manage configuration settings.',
+        searchHint: 'manage remote trigger schedules',
+        prompt: async () => 'Manage remote trigger schedules.',
       }),
       makeMockTool({
         name: 'CronCreateTool',
@@ -111,10 +111,10 @@ describe('searchTools', () => {
         prompt: async () => 'Create cron jobs for scheduling tasks.',
       }),
       makeMockTool({
-        name: 'ConfigTool',
+        name: 'RemoteTriggerTool',
         shouldDefer: true,
-        searchHint: 'configure settings options',
-        prompt: async () => 'Manage configuration settings.',
+        searchHint: 'manage remote trigger schedules',
+        prompt: async () => 'Manage remote trigger schedules.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
 
@@ -129,9 +129,9 @@ describe('searchTools', () => {
   test('returns empty array for empty query', async () => {
     const tools = [
       makeMockTool({
-        name: 'ConfigTool',
+        name: 'RemoteTriggerTool',
         shouldDefer: true,
-        prompt: async () => 'Manage configuration.',
+        prompt: async () => 'Manage remote triggers.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
 
@@ -142,9 +142,9 @@ describe('searchTools', () => {
   test('returns empty array when no tools match', async () => {
     const tools = [
       makeMockTool({
-        name: 'ConfigTool',
+        name: 'RemoteTriggerTool',
         shouldDefer: true,
-        prompt: async () => 'Manage configuration settings.',
+        prompt: async () => 'Manage remote trigger schedules.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
 
@@ -170,9 +170,9 @@ describe('getToolIndex caching', () => {
   test('returns cached index for same tool list', async () => {
     const tools = [
       makeMockTool({
-        name: 'ConfigTool',
+        name: 'RemoteTriggerTool',
         shouldDefer: true,
-        prompt: async () => 'Manage configuration.',
+        prompt: async () => 'Manage remote triggers.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
 
@@ -184,9 +184,9 @@ describe('getToolIndex caching', () => {
   test('rebuilds index after clearToolIndexCache', async () => {
     const tools = [
       makeMockTool({
-        name: 'ConfigTool',
+        name: 'RemoteTriggerTool',
         shouldDefer: true,
-        prompt: async () => 'Manage configuration.',
+        prompt: async () => 'Manage remote triggers.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
 

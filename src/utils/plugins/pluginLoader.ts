@@ -88,8 +88,12 @@ import type {
   PluginManifest,
   PluginWarning,
 } from '../../types/plugin.js'
+import { logEvent } from '../../services/analytics/index.js'
+import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
-import { isEnvTruthy } from '../envUtils.js'
+import { getClaudeConfigHomeDir, isBareMode, isEnvTruthy } from '../envUtils.js'
+import { isSettingSourceEnabled } from '../settings/constants.js'
+import { isRestrictedToPluginOnly } from '../settings/pluginOnlyPolicy.js'
 import { isSyncPluginInstallEnabled } from '../residualFinalEnvGates.js'
 import { githubRepoGitUrl } from '../residualMoreEnvGates.js'
 import {
@@ -3954,10 +3958,295 @@ function syncedDuplicateNameError(
  * on first-match, making --plugin-dir useless for iterating on an
  * installed plugin.
  */
+/**
+ * Official 2.1.328 `Hm` (`chunk@294254613.js@5571797`, re-exported by
+ * `chunk@308319903.js`) — sentinel marketplace suffix for plugins adopted from
+ * `~/.claude/skills/` or `./.claude/skills/` (`<name>@skills-dir`).
+ */
+export const SKILLS_DIR_MARKETPLACE_NAME = 'skills-dir'
+
+/**
+ * Official 2.1.328 `a5t` / `displaySkillsDirPath` (`chunk@294254613.js@5453679`,
+ * re-exported by `chunk@308319903.js`): human-readable display path for a
+ * skills-dir plugin (relative `./...` for project scope, full path otherwise).
+ */
+export function displaySkillsDirPath(plugin: {
+  path: string
+  scope?: 'user' | 'project'
+}): string {
+  if (plugin.scope === 'project') {
+    const cwd = getCwd()
+    const projectSkillsDir = join(cwd, '.claude', 'skills')
+    if (plugin.path.startsWith(projectSkillsDir + sep)) {
+      return `.${sep}${relative(cwd, plugin.path)}`
+    }
+  }
+  return plugin.path
+}
+
+/**
+ * Official 2.1.328 `D6s` / `areLocalPluginDirsAllowedByPolicy`
+ * (`chunk@294254613.js@1316160`, `chunk@284022131.js@81150`):
+ * checks whether `@skills-dir` auto-load is permitted under bare mode,
+ * plugin-only policy, `blockedMarketplaces`, and `strictKnownMarketplaces`.
+ */
+export function isSkillsDirPluginAutoLoadAllowed(): boolean {
+  if (isBareMode()) return false
+  if (isRestrictedToPluginOnly('skills')) return false
+  const blocked = getBlockedMarketplaces()
+  if (blocked?.some(entry => entry.source === SKILLS_DIR_MARKETPLACE_NAME)) {
+    return false
+  }
+  const strict = getStrictKnownMarketplaces()
+  if (
+    strict !== null &&
+    !strict.some(entry => entry.source === SKILLS_DIR_MARKETPLACE_NAME)
+  ) {
+    return false
+  }
+  return true
+}
+
+type SkillsDirCandidate = {
+  dir: string
+  scope: 'user' | 'project'
+}
+
+export type LoadSkillsAsPluginsOptions = {
+  /** Explicit skills directories to scan (overrides default `~/.claude/skills` + `<cwd>/.claude/skills`). */
+  skillsDirs?: ReadonlyArray<{ dir: string; scope: 'user' | 'project' }>
+  /** Explicit enabledPlugins map override (defaults to merged settings). */
+  enabledPlugins?: Record<string, boolean | string[] | undefined>
+  /** Skip managed policy check (used when caller has already authorized explicit directories). */
+  skipPolicyCheck?: boolean
+}
+
+export type SkillsDirLoadedPlugin = LoadedPlugin & {
+  scope?: 'user' | 'project'
+}
+
+async function hasClaudePluginMarkerDir(dirPath: string): Promise<boolean> {
+  try {
+    const names = await readdir(dirPath)
+    return names.includes('.claude-plugin')
+  } catch {
+    return false
+  }
+}
+
+async function discoverSkillsAsPluginCandidates(
+  options?: LoadSkillsAsPluginsOptions,
+): Promise<SkillsDirCandidate[]> {
+  if (!options?.skipPolicyCheck && !isSkillsDirPluginAutoLoadAllowed()) {
+    return []
+  }
+
+  const roots: Array<{ dir: string; scope: 'user' | 'project' }> = []
+  if (options?.skillsDirs !== undefined) {
+    roots.push(...options.skillsDirs)
+  } else {
+    const userSkillsDir = join(getClaudeConfigHomeDir(), 'skills')
+    if (isSettingSourceEnabled('userSettings')) {
+      roots.push({ dir: userSkillsDir, scope: 'user' })
+    }
+    if (isSettingSourceEnabled('projectSettings')) {
+      const projectSkillsDir = join(getCwd(), '.claude', 'skills')
+      const resolvedUser = await realpath(userSkillsDir).catch(
+        () => userSkillsDir,
+      )
+      const resolvedProject = await realpath(projectSkillsDir).catch(
+        () => projectSkillsDir,
+      )
+      if (
+        projectSkillsDir !== userSkillsDir &&
+        resolvedProject !== resolvedUser
+      ) {
+        roots.push({ dir: projectSkillsDir, scope: 'project' })
+      }
+    }
+  }
+
+  const candidates: SkillsDirCandidate[] = []
+  for (const { dir: rootDir, scope } of roots) {
+    let entries: Dirent[]
+    try {
+      entries = await readdir(rootDir, { withFileTypes: true })
+    } catch (err) {
+      if (!isENOENT(err) && !isFsInaccessible(err)) {
+        logForDebugging(
+          `[skill-as-plugin] readdir ${rootDir} failed: ${errorMessage(err)}`,
+          { level: 'warn' },
+        )
+      }
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) {
+        logForDebugging(
+          `[plugins] skipping hidden skills-dir entry '${entry.name}': dot-prefixed dirs are never adopted as plugins`,
+        )
+        continue
+      }
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+        continue
+      }
+      candidates.push({ dir: join(rootDir, entry.name), scope })
+    }
+  }
+  return candidates
+}
+
+/**
+ * Official 2.1.328 `t6o` / `loadSkillsAsPlugins`
+ * (`chunk@294254613.js@5571797`, re-exported by `chunk@308319903.js`):
+ * scans `~/.claude/skills/` (user scope) and `./.claude/skills/` (project scope)
+ * for subdirectories containing `.claude-plugin/`, loading each as a
+ * `<name>@skills-dir` plugin while respecting `enabledPlugins`, duplicate-name
+ * shadowing, and project-scope monitor stripping.
+ */
+export async function loadSkillsAsPlugins(
+  options?: LoadSkillsAsPluginsOptions,
+): Promise<{
+  plugins: SkillsDirLoadedPlugin[]
+  errors: PluginError[]
+  warnings: PluginWarning[]
+}> {
+  const candidates = await discoverSkillsAsPluginCandidates(options)
+  if (candidates.length === 0) {
+    return { plugins: [], errors: [], warnings: [] }
+  }
+
+  const enabledPlugins =
+    options?.enabledPlugins ??
+    ({
+      ...getAddDirEnabledPlugins(),
+      ...(getSettings_DEPRECATED()?.enabledPlugins ?? {}),
+    } as Record<string, boolean | string[] | undefined>)
+
+  const loadedResults = await Promise.all(
+    candidates.map(async ({ dir, scope }) => {
+      const folderName = basename(dir)
+      const initialSource = `${folderName}@${SKILLS_DIR_MARKETPLACE_NAME}`
+      try {
+        if (!(await hasClaudePluginMarkerDir(dir))) {
+          return null
+        }
+        const manifestPath = join(dir, '.claude-plugin', 'plugin.json')
+        const hasManifest = await pathExists(manifestPath)
+        const { plugin, errors, warnings } = await createPluginFromPath(
+          dir,
+          initialSource,
+          true,
+          folderName,
+          false,
+        )
+        if (!hasManifest) {
+          return errors.length > 0 || warnings.length > 0
+            ? { plugin: null, errors, warnings }
+            : null
+        }
+        const scopedPlugin: SkillsDirLoadedPlugin = {
+          ...plugin,
+          source: `${plugin.name}@${SKILLS_DIR_MARKETPLACE_NAME}`,
+          repository: `${plugin.name}@${SKILLS_DIR_MARKETPLACE_NAME}`,
+          scope,
+        }
+        if (scope === 'project') {
+          const monitorNames = (scopedPlugin.monitors ?? []).map(
+            (m, idx) => m.name ?? `#${idx + 1}`,
+          )
+          if (monitorNames.length > 0) {
+            warnings.push({
+              type: 'project-scope-server-stripped',
+              source: scopedPlugin.source,
+              plugin: scopedPlugin.name,
+              warning: `${monitorNames.length} ${monitorNames.length === 1 ? 'monitor' : 'monitors'} (${monitorNames.join(', ')}) from project-scope plugin "${scopedPlugin.name}" ${monitorNames.length === 1 ? 'was' : 'were'} not armed — project-supplied monitors have no per-item approval flow.`,
+            })
+          }
+          scopedPlugin.monitors = []
+        }
+        return { plugin: scopedPlugin, errors, warnings }
+      } catch (err) {
+        if (enabledPlugins[initialSource] === false) {
+          logForDebugging(
+            `Skipping load-failure error for disabled plugin ${initialSource}`,
+          )
+          return null
+        }
+        return {
+          plugin: null,
+          errors: [
+            {
+              type: 'generic-error' as const,
+              source: initialSource,
+              error: `Failed to load skill folder as plugin: ${errorMessage(err)}`,
+            },
+          ],
+          warnings: [] as PluginWarning[],
+        }
+      }
+    }),
+  )
+
+  const errors: PluginError[] = []
+  const warnings: PluginWarning[] = []
+  const byName = new Map<string, SkillsDirLoadedPlugin>()
+
+  for (const item of loadedResults) {
+    if (!item) continue
+    if (!item.plugin) {
+      errors.push(...item.errors)
+      warnings.push(...item.warnings)
+      continue
+    }
+    const existing = byName.get(item.plugin.name)
+    if (existing) {
+      const crossScope = existing.scope !== item.plugin.scope
+      errors.push({
+        type: 'generic-error',
+        orphan: true,
+        source: `${basename(item.plugin.path)}@${SKILLS_DIR_MARKETPLACE_NAME}`,
+        error: crossScope
+          ? `Not loaded — your ${displaySkillsDirPath(existing)} (same plugin name "${item.plugin.name}") shadowed the project's ${displaySkillsDirPath(item.plugin)}. To use the project's copy here, rename or move yours.`
+          : `Not loaded — same plugin name "${item.plugin.name}" as ${displaySkillsDirPath(existing)} (which loaded instead). Delete ${displaySkillsDirPath(item.plugin)}, or give it a different "name" in its plugin.json.`,
+      })
+      continue
+    }
+    errors.push(...item.errors)
+    warnings.push(...item.warnings)
+    byName.set(item.plugin.name, item.plugin)
+  }
+
+  const plugins = [...byName.values()]
+  for (const plugin of plugins) {
+    const setting = enabledPlugins[plugin.source]
+    plugin.enabled =
+      setting === undefined
+        ? plugin.manifest.defaultEnabled !== false
+        : setting === true
+  }
+
+  if (plugins.length > 0 || errors.length > 0) {
+    logEvent('tengu_plugin_skills_dir_loaded', {
+      count: plugins.length,
+      user_count: plugins.filter(p => p.scope === 'user').length,
+      project_count: plugins.filter(p => p.scope === 'project').length,
+      project_suppressed_count: 0,
+      error_count: errors.length,
+    })
+  }
+  if (plugins.length > 0) {
+    logForDebugging(`Loaded ${plugins.length} skills-as-plugins`)
+  }
+  return { plugins, errors, warnings }
+}
+
 export function mergePluginSources(sources: {
   session: LoadedPlugin[]
   marketplace: LoadedPlugin[]
   builtin: LoadedPlugin[]
+  /** Official 2.1.328 `@skills-dir` plugins (`loadSkillsAsPlugins`). */
+  skillsDir?: LoadedPlugin[]
   /** densable `e.synced` — claude.ai copies; local same-name wins */
   synced?: LoadedPlugin[]
   managedNames?: Set<string> | null
@@ -4004,13 +4293,41 @@ export function mergePluginSources(sources: {
     }
     return true
   })
+  const higherPriorityNames = new Set([
+    ...sessionNames,
+    ...marketplacePlugins.map(p => p.name),
+  ])
+  const skillsDirPlugins = (sources.skillsDir ?? []).filter(p => {
+    if (managed?.has(p.name)) {
+      errors.push({
+        type: 'generic-error',
+        orphan: true,
+        source: p.source,
+        plugin: p.name,
+        error: `skills-dir copy of "${p.name}" ignored: plugin is locked by managed settings`,
+      })
+      return false
+    }
+    if (higherPriorityNames.has(p.name)) {
+      logForDebugging(
+        `skills-dir plugin "${p.name}" shadowed by higher-priority plugin`,
+      )
+      return false
+    }
+    return true
+  })
   // densable kff `e.synced`: first-wins among synced copies; managed drop;
-  // enabled local (session / marketplace / builtin) shadows. Official zD
+  // enabled local (session / marketplace / skillsDir / builtin) shadows. Official zD
   // applies to this arm only — session↔marketplace matching stays exact.
   let syncedPlugins: LoadedPlugin[] = []
   if (sources.synced?.length) {
     const localByFold = new Map<string, string>()
-    for (const group of [sessionPlugins, marketplacePlugins, sources.builtin]) {
+    for (const group of [
+      sessionPlugins,
+      marketplacePlugins,
+      skillsDirPlugins,
+      sources.builtin,
+    ]) {
       for (const plugin of group) {
         const folded = foldPluginName(plugin.name)
         if (plugin.enabled !== false && !localByFold.has(folded)) {
@@ -4067,12 +4384,12 @@ export function mergePluginSources(sources: {
     })
   }
 
-  // Session, marketplace, synced, builtin — official `[...o,...s,...a,...l,...e.builtin]`
-  // without the skill arm (`a`) tip does not have.
+  // Official 2.1.328 `[...session, ...marketplace, ...skillsDir, ...synced, ...builtin]`
   return {
     plugins: [
       ...sessionPlugins,
       ...marketplacePlugins,
+      ...skillsDirPlugins,
       ...syncedPlugins,
       ...sources.builtin,
     ],
@@ -4195,6 +4512,7 @@ async function assemblePluginLoadResult(
     sessionNoMcpResult,
     sessionUrlResult,
     syncedResult,
+    skillsDirResult,
   ] = await Promise.all([
     marketplaceLoader(),
     inlinePlugins.length > 0
@@ -4211,6 +4529,7 @@ async function assemblePluginLoadResult(
     syncedPluginDirs.length > 0
       ? loadSyncedPlugins(syncedPluginDirs)
       : Promise.resolve({ plugins: [], errors: [], warnings: [] }),
+    loadSkillsAsPlugins(),
   ])
   const sessionResult = {
     plugins: [
@@ -4238,6 +4557,7 @@ async function assemblePluginLoadResult(
   const { plugins: allPlugins, errors: mergeErrors } = mergePluginSources({
     session: sessionResult.plugins,
     marketplace: marketplaceResult.plugins,
+    skillsDir: skillsDirResult.plugins,
     synced: syncedResult.plugins,
     builtin: [...builtinResult.enabled, ...builtinResult.disabled],
     managedNames: getManagedPluginNames(),
@@ -4245,6 +4565,7 @@ async function assemblePluginLoadResult(
   const allErrors = [
     ...marketplaceResult.errors,
     ...sessionResult.errors,
+    ...skillsDirResult.errors,
     ...syncedResult.errors,
     ...mergeErrors,
     ...getSyncedPluginSyncErrors(),
@@ -4252,6 +4573,7 @@ async function assemblePluginLoadResult(
   const allWarnings = [
     ...(marketplaceResult.warnings ?? []),
     ...sessionResult.warnings,
+    ...skillsDirResult.warnings,
     ...syncedResult.warnings,
   ]
 

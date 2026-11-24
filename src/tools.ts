@@ -97,14 +97,9 @@ import { DesignSyncTool } from '@claude-code/builtin-tools/tools/DesignSyncTool/
 import { TestingPermissionTool } from '@claude-code/builtin-tools/tools/testing/TestingPermissionTool.js'
 import { GrepTool } from '@claude-code/builtin-tools/tools/GrepTool/GrepTool.js'
 import { TungstenTool } from '@claude-code/builtin-tools/tools/TungstenTool/TungstenTool.js'
-// Lazy require to break circular dependency: tools.ts -> TeamCreateTool/TeamDeleteTool -> ... -> tools.ts
+// Lazy require to break circular dependency: tools.ts -> SendMessageTool -> ... -> tools.ts
+// Official 2.1.328: TeamCreate, TeamDelete, and Config tools are retired.
 /* eslint-disable @typescript-eslint/no-require-imports */
-const getTeamCreateTool = () =>
-  require('@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js')
-    .TeamCreateTool as typeof import('@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js').TeamCreateTool
-const getTeamDeleteTool = () =>
-  require('@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js')
-    .TeamDeleteTool as typeof import('@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js').TeamDeleteTool
 const getSendMessageTool = () =>
   require('@claude-code/builtin-tools/tools/SendMessageTool/SendMessageTool.js')
     .SendMessageTool as typeof import('@claude-code/builtin-tools/tools/SendMessageTool/SendMessageTool.js').SendMessageTool
@@ -118,7 +113,6 @@ import { ExecuteTool } from '@claude-code/builtin-tools/tools/ExecuteTool/Execut
 import { EnterPlanModeTool } from '@claude-code/builtin-tools/tools/EnterPlanModeTool/EnterPlanModeTool.js'
 import { EnterWorktreeTool } from '@claude-code/builtin-tools/tools/EnterWorktreeTool/EnterWorktreeTool.js'
 import { ExitWorktreeTool } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/ExitWorktreeTool.js'
-import { ConfigTool } from '@claude-code/builtin-tools/tools/ConfigTool/ConfigTool.js'
 import { SendFeedbackTool } from '@claude-code/builtin-tools/tools/SendFeedbackTool/SendFeedbackTool.js'
 import { ShareOnboardingGuideTool } from './commands/team-onboarding/shareOnboardingGuide.js'
 // densable ikw — always in the base pool; isEnabled() gates via GB + session + Ktr
@@ -295,7 +289,6 @@ export function getAllBaseTools(): Tools {
     SkillTool,
     EnterPlanModeTool,
     LocalMemoryRecallTool,
-    ConfigTool,
     // densable leftover IE() — SendFeedback is always in the base pool; aLt/Ufs gate isEnabled()
     SendFeedbackTool,
     ShareOnboardingGuideTool,
@@ -312,8 +305,6 @@ export function getAllBaseTools(): Tools {
     ...(isWorktreeModeEnabled() ? [EnterWorktreeTool, ExitWorktreeTool] : []),
     getSendMessageTool(),
     ...(ListPeersTool ? [ListPeersTool] : []),
-    getTeamCreateTool(),
-    getTeamDeleteTool(),
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
     ReportFindingsTool,
     ObserverReportTool,

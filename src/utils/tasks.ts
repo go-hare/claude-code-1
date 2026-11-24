@@ -33,7 +33,7 @@ let ownTaskListId: string | undefined
 
 /**
  * Sets the leader's team name for task list resolution.
- * Called by TeamCreateTool when a team is created.
+ * Called when the session team is initialized.
  */
 export function setLeaderTeamName(teamName: string): void {
   if (leaderTeamName === teamName) return
@@ -488,7 +488,7 @@ export async function resetTaskList(taskListId: string): Promise<void> {
  * 1. CLAUDE_CODE_TASK_LIST_ID - explicit task list ID
  * 2. In-process teammate: leader's team name (so teammates share the leader's task list)
  * 3. CLAUDE_CODE_TEAM_NAME - set when running as a process-based teammate
- * 4. Leader team name - set when the leader creates a team via TeamCreate
+ * 4. Leader team name - set when the leader initializes a session team
  * 5. Session ID - fallback for standalone sessions
  */
 export function getTaskListId(): string {

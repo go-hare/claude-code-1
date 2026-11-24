@@ -7,7 +7,7 @@ import type { Tool } from 'src/Tool.js'
 import { AGENT_TOOL_NAME } from '../AgentTool/constants.js'
 import { BRIEF_TOOL_NAME } from '../BriefTool/prompt.js'
 import { ENTER_WORKTREE_TOOL_NAME } from '../EnterWorktreeTool/constants.js'
-import { SEND_USER_FILE_TOOL_NAME } from '../SendUserFileTool/prompt.js'
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from '../SyntheticOutputTool/SyntheticOutputTool.js'
 import { isKairosLoopDynamicEnabled } from 'src/utils/loopDynamic.js'
 import { getInitialSettings } from 'src/utils/settings/settings.js'
 
@@ -138,15 +138,15 @@ function isToolSearchFetchRuleEnabled(): boolean {
 }
 
 /**
- * densable `TX` — opt-in defer policy (not CORE_TOOLS whitelist).
+ * densable `TX` / official 2.1.328 `O()` — opt-in defer policy (not CORE_TOOLS whitelist).
  *
- * Order (SEA 2.1.221):
+ * Order (2.1.328):
  * 1. alwaysLoad === true → never defer
  * 2. eGu() non_deferrable list → never defer
  * 3. isMcp → always defer
- * 4. ToolSearch (dw) → never defer
+ * 4. ToolSearch (So) / StructuredOutput (al) → never defer
  * 5. Agent + fork subagent enabled → never defer
- * 6. Brief / SendUserFile → never defer
+ * 6. Brief (SendUserMessage) → never defer (SendUserFile no longer hard-exempt)
  * 7. PushNotification + remote_trigger entrypoint → never defer
  * 8. ScheduleWakeup + jKe (248 always-on) → never defer
  * 9. EnterWorktree + SESSION_KIND=bg → never defer
@@ -162,8 +162,9 @@ export function isDeferredTool(tool: Tool): boolean {
   // densable: if(e.isMcp===!0)return!0
   if (tool.isMcp === true) return true
 
-  // densable: if(e.name===dw)return!1 — ToolSearch itself is never deferred
+  // Official 2.1.328 O(): ToolSearch (So) and StructuredOutput (al) never defer
   if (tool.name === SEARCH_EXTRA_TOOLS_TOOL_NAME) return false
+  if (tool.name === SYNTHETIC_OUTPUT_TOOL_NAME) return false
 
   // densable: if(e.name===Qo){if(t.isForkSubagentEnabled())return!0} then
   // isDeferredTool inverts alwaysLoad — Agent stays undeferred when Yne.
@@ -176,11 +177,9 @@ export function isDeferredTool(tool: Tool): boolean {
     if (isForkSubagentProductEnabled()) return false
   }
 
-  // densable: if(e.name===b3_)return!1 — Brief / SendUserMessage
+  // Official 2.1.328 O(): Brief / SendUserMessage never defers
+  // (SendUserFile hard exemption removed in 2.1.328 chunk@293366980.js@4522)
   if (tool.name === BRIEF_TOOL_NAME) return false
-
-  // densable: if(e.name===S3_)return!1 — SendUserFile
-  if (tool.name === SEND_USER_FILE_TOOL_NAME) return false
 
   // densable: if(e.name===Mre&&nrr())return!1 — PushNotification + remote_trigger
   if (tool.name === 'PushNotification' && isRemoteTriggerEntrypoint()) {

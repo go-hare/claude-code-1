@@ -1354,10 +1354,10 @@ describe('plugin eval leftover edges densable 2.1.283', () => {
     expect(denyNames).toContain('ExitWorktree')
   })
 
-  test('Ai uf leftover-denies WebFetch/Config/ScheduleWakeup on Read-only', async () => {
+  test('Ai uf leftover-denies WebFetch/ScheduleWakeup on Read-only (Config retired in 2.1.328)', async () => {
     const leftover = leftoverEvalBuiltinDenies(['Read'])
     expect(leftover).toContain('WebFetch')
-    expect(leftover).toContain('Config')
+    expect(leftover).not.toContain('Config')
     expect(leftover).toContain('ScheduleWakeup')
     expect(leftover).not.toContain('Read')
     expect(leftover).not.toContain('Glob')

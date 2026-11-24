@@ -26,6 +26,7 @@ import {
   type ScrollBoxHandle,
   StatusIcon,
   Text,
+  useIsInsideModal,
   useModalClaimScrollBox,
   useModalOrTerminalSize,
   useModalScrollViewport,
@@ -35,7 +36,6 @@ import type { AppState } from '../../../state/AppStateStore.js';
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/constants.js';
 import type { AllowedPrompt } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js';
-import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js';
 import { isAgentSwarmsEnabled } from '../../../utils/agentSwarmsEnabled.js';
 import { planModelSupportsAutoMode } from '../../../utils/betas.js';
 import { calculateContextPercentages, getContextWindowForModel } from '../../../utils/context.js';
@@ -500,7 +500,7 @@ export function ExitPlanModePermissionRequest({
       const transcriptHint = `\n\nIf you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: ${transcriptPath}`;
 
       const teamHint = isAgentSwarmsEnabled()
-        ? `\n\nIf this plan can be broken down into multiple independent tasks, consider using the ${TEAM_CREATE_TOOL_NAME} tool to create a team and parallelize the work.`
+        ? `\n\nIf this plan can be broken down into multiple independent tasks, consider spawning named teammates with the ${AGENT_TOOL_NAME} tool (pass a \`name\`) to parallelize the work.`
         : '';
 
       const feedbackSuffix = acceptFeedback ? `\n\nUser feedback on this plan: ${acceptFeedback}` : '';
@@ -714,9 +714,13 @@ export function ExitPlanModePermissionRequest({
     toolUseConfirm.onReject();
   };
 
+  // Official 2.1.328 `TAt = 24`: compact modal threshold for suppressing
+  // redundant top border, extra margins, and "Here is Claude's plan:" header.
+  const COMPACT_MODAL_ROWS = 24;
   // densable teu: Qae()+tqe() — Select is a flexShrink:0 sibling of the plan
   // ScrollBox. tot.bottom sticky was analog; modal hides bottom so options
   // vanished and Enter was the only remaining key.
+  const insideModal = useIsInsideModal();
   const modalScrollViewport = useModalScrollViewport();
   const claimScrollBox = useModalClaimScrollBox();
   const terminalSize = useTerminalSize();
@@ -735,6 +739,8 @@ export function ExitPlanModePermissionRequest({
   // Official 2.1.328 `kn?.attach`: after claimScrollBox claims, ModalScroller
   // skips its inner ScrollBox and this ScrollBox attaches directly to modalScrollViewport.
   const claimed = claimScrollBox != null && modalScrollViewport != null;
+  const compactModal = (claimed || insideModal) && modalRows < COMPACT_MODAL_ROWS;
+  const modalMarginTop = compactModal ? 0 : 1;
   // leftover tot.bottom sticky — gold 0; clear if a prior session parked JSX.
   useLayoutEffect(() => {
     setStickyFooter?.(null);
@@ -833,11 +839,15 @@ export function ExitPlanModePermissionRequest({
           innerPaddingX={0}
           workerBadge={workerBadge}
           requestSource={resolvedRequestSource}
+          marginTop={modalMarginTop}
+          hideBorder={compactModal}
         >
-          <Box flexDirection="column" marginTop={1}>
-            <Box paddingX={1} flexDirection="column">
-              <Text>Here is Claude&apos;s plan:</Text>
-            </Box>
+          <Box flexDirection="column" marginTop={modalMarginTop}>
+            {!compactModal && (
+              <Box paddingX={1} flexDirection="column">
+                <Text>Here is Claude&apos;s plan:</Text>
+              </Box>
+            )}
             <PermissionOverflowBox marginBottom={1}>
               <Markdown>{currentPlan}</Markdown>
             </PermissionOverflowBox>
@@ -869,7 +879,7 @@ export function ExitPlanModePermissionRequest({
         flexShrink={0}
       >
         <Text dimColor>Claude has written up a plan and is ready to execute. Would you like to proceed?</Text>
-        <Box marginTop={1}>
+        <Box marginTop={modalMarginTop}>
           <Select
             options={options}
             hideIndexes={isSubagentPlan}
@@ -900,7 +910,7 @@ export function ExitPlanModePermissionRequest({
                   <Text dimColor>{' · '}</Text>
                   <Text color="success">
                     <StatusIcon status="success" withSpace />
-                    Plan saved!
+                    plan saved
                   </Text>
                 </>
               )}

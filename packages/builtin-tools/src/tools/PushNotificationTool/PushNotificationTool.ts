@@ -99,6 +99,7 @@ export const PushNotificationTool = buildTool({
   name: PUSH_NOTIFICATION_TOOL_NAME,
   searchHint: 'push notification mobile alert notify user',
   maxResultSizeChars: 1_000,
+  shouldDefer: true,
   strict: true,
 
   get inputSchema(): InputSchema {

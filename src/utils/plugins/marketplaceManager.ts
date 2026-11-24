@@ -1799,6 +1799,31 @@ export async function gitPull(
     ? ['-c', 'credential.helper=']
     : []
 
+  // Official 2.1.328 SHA-pin preservation (`chunk@284022131.js@78700`):
+  // uppercase SHA refs are refused; full lowercase commit SHAs hold the
+  // marketplace at that exact commit across refreshes and auto-updates.
+  const uppercaseShaError = checkUppercaseCommitShaRefError(ref)
+  if (uppercaseShaError !== undefined) {
+    return { code: 1, stderr: uppercaseShaError }
+  }
+  if (isFullLowercaseCommitSha(ref)) {
+    const headResult = await execFileNoThrowWithCwd(
+      gitExe(),
+      ['rev-parse', '--verify', '-q', 'HEAD'],
+      { cwd, timeout: getPluginGitTimeoutMs(), stdin: 'ignore', env },
+    )
+    if (headResult.code === 0 && headResult.stdout.trim() === ref) {
+      logForDebugging(
+        `Marketplace at ${cwd} is already pinned to commit ${ref}; preserving exact commit on refresh`,
+      )
+      return { code: 0, stderr: '' }
+    }
+    return {
+      code: 1,
+      stderr: `Marketplace HEAD (${headResult.stdout.trim() || 'unreadable'}) does not match pinned commit ${ref}; re-cloning at pinned commit`,
+    }
+  }
+
   if (ref) {
     const fetchResult = await execFileNoThrowWithCwd(
       gitExe(),
@@ -2476,11 +2501,16 @@ async function detectGitSparseConeSetSupport(
 }
 
 /**
- * Official 2.1.325 #2378 (`zH` / `q6` / `G7t` / `I8e`):
- * Full 40-char lowercase hexadecimal commit SHA support for marketplace `ref`.
+ * Official 2.1.325 #2378 (`zH` / `q6` / `G7t` / `I8e`) & 2.1.328 `rU` / `GRt`:
+ * Full 40-char (SHA-1) or 64-char (SHA-256) hexadecimal commit SHA support for
+ * marketplace `ref` pinning.
  */
-const FULL_COMMIT_SHA_LOWER_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
-const FULL_COMMIT_SHA_ANYCASE_RE = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/
+const FULL_COMMIT_SHA_LOWER_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
+const FULL_COMMIT_SHA_ANYCASE_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/i
+
+export function isCommitShaRef(ref: string | undefined): ref is string {
+  return typeof ref === 'string' && FULL_COMMIT_SHA_ANYCASE_RE.test(ref)
+}
 
 export function isFullLowercaseCommitSha(
   ref: string | undefined,
@@ -2615,6 +2645,7 @@ export async function gitClone(
   ref?: string,
   sparsePaths?: string[],
   skipLfs?: boolean,
+  options?: { heldBy?: { ref?: string } },
 ): Promise<{ code: number; stderr: string }> {
   // Official bZe / CLAUDE_CODE_PLUGIN_PREFER_HTTPS (+ REMOTE) — rewrite git@/ssh/http URLs.
   gitUrl = rewritePluginGitUrlPreferHttps(gitUrl)
@@ -2691,23 +2722,56 @@ export async function gitClone(
     if (fetchRes.code !== 0) {
       result = fetchRes
     } else {
+      let heldBranchOrTag: string | undefined
+      let heldPatterns: string[] | undefined
+      if (options?.heldBy !== undefined) {
+        let targetRef = options.heldBy.ref
+        if (targetRef === undefined) {
+          const symRes = await execFileNoThrowWithCwd(
+            gitExe(),
+            ['symbolic-ref', '-q', 'HEAD'],
+            {
+              cwd: targetPath,
+              timeout: timeoutMs,
+              stdin: 'ignore',
+              env: cloneEnv,
+            },
+          )
+          targetRef =
+            symRes.stdout.trim().replace(/^refs\/heads\//, '') || 'HEAD'
+        }
+        heldBranchOrTag = targetRef
+        heldPatterns = [
+          `refs/remotes/origin/heads/${targetRef}`,
+          ...(options.heldBy.ref !== undefined
+            ? [`refs/remotes/origin/tags/${targetRef}`]
+            : []),
+        ]
+      }
       const containsRes = await execFileNoThrowWithCwd(
         gitExe(),
         [
           'for-each-ref',
-          '--count=1',
+          heldPatterns ? '--format=%(refname)' : '--count=1',
           '--contains',
           commitShaPin,
-          'refs/remotes/origin/',
+          ...(heldPatterns ?? ['refs/remotes/origin/']),
         ],
         { cwd: targetPath, timeout: timeoutMs, stdin: 'ignore', env: cloneEnv },
       )
+      const isContained = heldPatterns
+        ? containsRes.stdout
+            .split(/\r?\n/)
+            .some(line => heldPatterns.includes(line))
+        : containsRes.stdout.trim() !== ''
       if (containsRes.code !== 0 && containsRes.code !== 129) {
         result = containsRes
-      } else if (containsRes.code === 129 || containsRes.stdout.trim() === '') {
+      } else if (containsRes.code === 129 || !isContained) {
         return {
           code: 1,
-          stderr: `Refusing to use commit ${commitShaPin}, set as this marketplace's \`ref\`: no branch or tag of this repository holds it. Check that the id is right and that the commit is still on a branch or tag. If your organization manages this marketplace, ask your administrator.`,
+          stderr: heldPatterns
+            ? `Refusing to use commit ${commitShaPin}: \`${heldBranchOrTag}\`, which this marketplace follows, does not hold it.`
+            : `Refusing to use commit ${commitShaPin}, set as this marketplace's \`ref\`: no branch or tag of this repository holds it. Check that the id is right and that the commit is still on a branch or tag. If your organization manages this marketplace, ask your administrator.`,
         }
       } else {
         const updateHeadRes = await execFileNoThrowWithCwd(
@@ -2924,6 +2988,90 @@ export async function gitClone(
   }
 
   return result
+}
+
+/**
+ * Official 2.1.328 `QLo(source)` (`chunk@294254613.js@5242000`):
+ * resolve candidate git clone URLs for a marketplace source.
+ */
+async function resolveMarketplaceCloneUrls(
+  source: MarketplaceSource,
+): Promise<string[]> {
+  if (source.source === 'git') {
+    return [source.url]
+  }
+  if (source.source !== 'github') {
+    return []
+  }
+  const httpsUrl = `https://github.com/${source.repo}.git`
+  if (shouldPreferPluginHttpsOrRemote()) {
+    return [httpsUrl]
+  }
+  const sshUrl = `git@github.com:${source.repo}.git`
+  const sshConfigured = await isGitHubSshLikelyConfigured()
+  return sshConfigured ? [sshUrl, httpsUrl] : [httpsUrl, sshUrl]
+}
+
+/**
+ * Official 2.1.328 `H9s` / `cloneMarketplaceAtCommit`
+ * (`chunk@294254613.js@5242166`, re-exported by `chunk@324927222.js`):
+ * clones a git/github marketplace repository at an exact 40- or 64-char
+ * commit SHA, verifying that the commit is held by the source's branch/tag
+ * (or matches an explicit SHA pin on the source).
+ */
+export async function cloneMarketplaceAtCommit(
+  source: MarketplaceSource,
+  commitSha: string,
+  targetPath: string,
+): Promise<void> {
+  const uppercaseCommitErr = checkUppercaseCommitShaRefError(commitSha)
+  if (uppercaseCommitErr !== undefined) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      uppercaseCommitErr,
+      'marketplace clone at a commit failed',
+    )
+  }
+  if (!isFullLowercaseCommitSha(commitSha)) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      `Invalid commit SHA "${commitSha}": expected a 40- or 64-character lowercase hexadecimal commit id.`,
+      'marketplace clone at a commit failed',
+    )
+  }
+
+  const gitSource =
+    source.source === 'git' || source.source === 'github' ? source : undefined
+  const sourceRef = gitSource?.ref
+  const sparsePaths = gitSource?.sparsePaths
+  const pinnedRef = isFullLowercaseCommitSha(sourceRef?.toLowerCase())
+    ? sourceRef!.toLowerCase()
+    : undefined
+
+  if (pinnedRef !== undefined && pinnedRef !== commitSha) {
+    throw new Error('its source is pinned at another commit')
+  }
+
+  const urls = await resolveMarketplaceCloneUrls(source)
+  let lastError = 'its marketplace is no git repository'
+  const fs = getFsImplementation()
+  for (const url of urls) {
+    const res = await gitClone(
+      url,
+      targetPath,
+      commitSha,
+      sparsePaths,
+      gitSource?.skipLfs,
+      { heldBy: pinnedRef === undefined ? { ref: sourceRef } : undefined },
+    )
+    if (res.code === 0) {
+      return
+    }
+    lastError = res.stderr
+    await fs.rm(targetPath, { recursive: true, force: true }).catch(() => {})
+  }
+  throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+    lastError,
+    'marketplace clone at a commit failed',
+  )
 }
 
 /**
@@ -5219,7 +5367,18 @@ export async function refreshMarketplace(
 
     // Update based on source type
     if (source.source === 'github' || source.source === 'git') {
-      // Git sources: do in-place git pull
+      const uppercaseShaError = checkUppercaseCommitShaRefError(source.ref)
+      if (uppercaseShaError !== undefined) {
+        throw new Error(uppercaseShaError)
+      }
+      const reservedShaError = checkReservedOfficialMarketplaceCommitShaRef(
+        name,
+        source.ref,
+      )
+      if (reservedShaError !== null) {
+        throw new Error(reservedShaError)
+      }
+      // Git sources: do in-place git pull (preserves commit when SHA-pinned)
       if (source.source === 'github') {
         // Same SSH/HTTPS fallback as loadAndCacheMarketplace: if the pull
         // succeeds the remote URL in .git/config is used, but a re-clone

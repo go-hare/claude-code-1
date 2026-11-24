@@ -582,8 +582,6 @@ export async function cleanupSessionTeams(): Promise<void> {
   )
   // Kill panes first — on SIGINT the teammate processes are still running;
   // deleting directories alone would orphan them in open tmux/iTerm2 panes.
-  // (TeamDeleteTool's path doesn't need this — by then teammates have
-  // gracefully exited and useInboxPoller has already closed their panes.)
   await Promise.allSettled(teams.map(name => killOrphanedTeammatePanes(name)))
   await Promise.allSettled(teams.map(name => cleanupTeamDirectories(name)))
   sessionCreatedTeams.clear()

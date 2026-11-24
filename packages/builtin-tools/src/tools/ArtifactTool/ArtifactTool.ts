@@ -774,7 +774,7 @@ export const ArtifactTool = buildTool({
     'artifact list read comments reply resolve live-edit watch unwatch status assets files verify delete room_send quickstart upload html markdown share publish',
   briefStandalone: true,
   maxResultSizeChars: 2_000,
-  shouldDefer: true,
+  shouldDefer: false,
   strict: true,
 
   get inputSchema(): InputSchema {

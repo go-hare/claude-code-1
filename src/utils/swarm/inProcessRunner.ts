@@ -62,8 +62,6 @@ import { TASK_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskCrea
 import { TASK_GET_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskGetTool/constants.js'
 import { TASK_LIST_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskListTool/constants.js'
 import { TASK_UPDATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskUpdateTool/constants.js'
-import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js'
-import { TEAM_DELETE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamDeleteTool/constants.js'
 import type { Message } from '../../types/message.js'
 import { asAgentId } from '../../types/ids.js'
 import type { PermissionDecision } from '../../types/permissions.js'
@@ -1198,8 +1196,6 @@ export async function runInProcessTeammate(
           ...new Set([
             ...agentDefinition.tools,
             SEND_MESSAGE_TOOL_NAME,
-            TEAM_CREATE_TOOL_NAME,
-            TEAM_DELETE_TOOL_NAME,
             TASK_CREATE_TOOL_NAME,
             TASK_GET_TOOL_NAME,
             TASK_LIST_TOOL_NAME,

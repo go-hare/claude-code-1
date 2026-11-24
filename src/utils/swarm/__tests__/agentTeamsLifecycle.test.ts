@@ -7,17 +7,17 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import * as realEnvUtils from '../../envUtils.js'
 import { getClaudeConfigHomeDir } from '../../envUtils.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
-import { getTeamFilePath } from '../teamHelpers.js'
+import { clearLeaderTeamName } from '../../tasks.js'
+import { initializeSessionTeam } from '../sessionTeam.js'
+import { cleanupSessionTeams, getTeamFilePath } from '../teamHelpers.js'
 
 const envUtilsSnap = snapshotModuleExports(realEnvUtils)
-
-let terminateCalls: string[] = []
 
 mock.module('src/utils/swarm/backends/registry.js', () => {
   const executor = {
@@ -37,8 +37,7 @@ mock.module('src/utils/swarm/backends/registry.js', () => {
       }
     },
     async sendMessage() {},
-    async terminate(agentId: string) {
-      terminateCalls.push(agentId)
+    async terminate() {
       return true
     },
     async kill() {
@@ -78,30 +77,12 @@ let tempHome: string
 let previousConfigDir: string | undefined
 let previousAnthropicApiKey: string | undefined
 let state: any
-let pendingTimers: ReturnType<typeof setTimeout>[] = []
 
 function setState(updater: (prev: any) => any): void {
   state = updater(state)
 }
 
-/** Same path TeamDelete/readTeamFile uses — not a parallel tempHome join. */
-function readTeamConfig(teamName: string): any {
-  return JSON.parse(readFileSync(getTeamFilePath(teamName), 'utf-8'))
-}
-
-function writeTeamConfig(teamName: string, config: unknown): void {
-  const file = getTeamFilePath(teamName)
-  mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, JSON.stringify(config, null, 2))
-}
-
-function schedule(ms: number, fn: () => void): void {
-  pendingTimers.push(setTimeout(fn, ms))
-}
-
 beforeEach(() => {
-  terminateCalls = []
-  for (const t of pendingTimers.splice(0)) clearTimeout(t)
   previousConfigDir = process.env.CLAUDE_CONFIG_DIR
   previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY
   tempHome = join(
@@ -144,8 +125,9 @@ beforeEach(() => {
   }
 })
 
-afterEach(() => {
-  for (const t of pendingTimers.splice(0)) clearTimeout(t)
+afterEach(async () => {
+  await cleanupSessionTeams()
+  clearLeaderTeamName()
   if (previousConfigDir === undefined) {
     delete process.env.CLAUDE_CONFIG_DIR
   } else {
@@ -165,19 +147,14 @@ afterAll(() => {
 })
 
 describe('Agent Teams lifecycle', () => {
-  test('TeamCreate and TeamDelete are hidden when agent swarms are disabled', async () => {
+  test('retired TeamCreate and TeamDelete tools are never exposed in base tools', async () => {
     const previousTeams = process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
-    delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+    process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'
     try {
-      const { TeamCreateTool } = await import(
-        '@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
-      )
-      const { TeamDeleteTool } = await import(
-        '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
-      )
-
-      expect(TeamCreateTool.isEnabled()).toBe(false)
-      expect(TeamDeleteTool.isEnabled()).toBe(false)
+      const { getAllBaseTools } = await import('../../../tools.js')
+      const names = new Set(getAllBaseTools().map(t => t.name))
+      expect(names.has('TeamCreate')).toBe(false)
+      expect(names.has('TeamDelete')).toBe(false)
     } finally {
       if (previousTeams === undefined) {
         delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
@@ -187,13 +164,10 @@ describe('Agent Teams lifecycle', () => {
     }
   })
 
-  test('runs TeamCreate -> spawn -> TaskUpdate -> SendMessage -> TeamDelete', async () => {
+  test('runs initializeSessionTeam -> spawn -> TaskUpdate -> SendMessage -> cleanupSessionTeams', async () => {
     const previousTeams = process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
     process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'
     try {
-      const { TeamCreateTool } = await import(
-        '@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
-      )
       const { spawnTeammate } = await import(
         '@claude-code/builtin-tools/tools/shared/spawnMultiAgent.js'
       )
@@ -206,9 +180,13 @@ describe('Agent Teams lifecycle', () => {
       const { SendMessageTool } = await import(
         '@claude-code/builtin-tools/tools/SendMessageTool/SendMessageTool.js'
       )
-      const { TeamDeleteTool } = await import(
-        '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
-      )
+
+      const initialized = await initializeSessionTeam({
+        existingTeamName: 'alpha',
+      })
+      state.teamContext = initialized.teamContext
+      expect(initialized.teamContext.teamName).toBe('alpha')
+      expect(existsSync(getTeamFilePath('alpha'))).toBe(true)
 
       const context = {
         getAppState: () => state,
@@ -218,14 +196,6 @@ describe('Agent Teams lifecycle', () => {
         },
         abortController: new AbortController(),
       } as any
-
-      const created = await TeamCreateTool.call(
-        { team_name: 'alpha', description: 'test team' },
-        context,
-        undefined as any,
-        undefined as any,
-      )
-      expect(created.data.team_name).toBe('alpha')
 
       const spawned = await spawnTeammate(
         {
@@ -262,28 +232,8 @@ describe('Agent Teams lifecycle', () => {
       )
       expect(message.data.success).toBe(true)
 
-      const blockedDelete = await TeamDeleteTool.call(
-        {},
-        context,
-        undefined as any,
-        undefined as any,
-      )
-      expect(blockedDelete.data.success).toBe(false)
-      expect(terminateCalls).toEqual(['worker@alpha'])
-
-      const config = readTeamConfig('alpha')
-      config.members = config.members.map((member: any) =>
-        member.name === 'worker' ? { ...member, isActive: false } : member,
-      )
-      writeTeamConfig('alpha', config)
-
-      const deleted = await TeamDeleteTool.call(
-        {},
-        context,
-        undefined as any,
-        undefined as any,
-      )
-      expect(deleted.data.success).toBe(true)
+      await cleanupSessionTeams()
+      expect(existsSync(getTeamFilePath('alpha'))).toBe(false)
     } finally {
       if (previousTeams === undefined) {
         delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
@@ -291,142 +241,5 @@ describe('Agent Teams lifecycle', () => {
         process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = previousTeams
       }
     }
-  })
-
-  test('TeamDelete waits for active teammates to become inactive before cleanup', async () => {
-    const { TeamDeleteTool } = await import(
-      '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
-    )
-    const now = Date.now()
-    writeTeamConfig('alpha', {
-      name: 'alpha',
-      createdAt: now,
-      leadAgentId: 'team-lead@alpha',
-      members: [
-        {
-          agentId: 'team-lead@alpha',
-          name: 'team-lead',
-          joinedAt: now,
-          tmuxPaneId: '',
-          cwd: tempHome,
-          subscriptions: [],
-        },
-        {
-          agentId: 'worker@alpha',
-          name: 'worker',
-          joinedAt: now,
-          tmuxPaneId: 'in-process',
-          cwd: tempHome,
-          subscriptions: [],
-          backendType: 'in-process',
-        },
-      ],
-    })
-    state.teamContext = {
-      teamName: 'alpha',
-      teamFilePath: getTeamFilePath('alpha'),
-      leadAgentId: 'team-lead@alpha',
-      teammates: {
-        'worker@alpha': {
-          name: 'worker',
-          tmuxSessionName: 'in-process',
-          tmuxPaneId: 'in-process',
-          cwd: tempHome,
-          spawnedAt: now,
-        },
-      },
-    }
-
-    schedule(25, () => {
-      const config = readTeamConfig('alpha')
-      config.members = config.members.map((member: any) =>
-        member.name === 'worker' ? { ...member, isActive: false } : member,
-      )
-      writeTeamConfig('alpha', config)
-    })
-
-    const result = await TeamDeleteTool.call(
-      { wait_ms: 1000 },
-      {
-        getAppState: () => state,
-        setAppState: setState,
-      } as any,
-      undefined as any,
-      undefined as any,
-    )
-
-    expect(result.data.success).toBe(true)
-  })
-
-  test('TeamDelete terminates inactive team-file members that still have running AppState tasks', async () => {
-    const { TeamDeleteTool } = await import(
-      '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
-    )
-    const now = Date.now()
-    writeTeamConfig('alpha', {
-      name: 'alpha',
-      createdAt: now,
-      leadAgentId: 'team-lead@alpha',
-      members: [
-        {
-          agentId: 'team-lead@alpha',
-          name: 'team-lead',
-          joinedAt: now,
-          tmuxPaneId: '',
-          cwd: tempHome,
-          subscriptions: [],
-        },
-        {
-          agentId: 'worker@alpha',
-          name: 'worker',
-          joinedAt: now,
-          tmuxPaneId: 'in-process',
-          cwd: tempHome,
-          subscriptions: [],
-          backendType: 'in-process',
-          isActive: false,
-        },
-      ],
-    })
-    state.teamContext = {
-      teamName: 'alpha',
-      teamFilePath: getTeamFilePath('alpha'),
-      leadAgentId: 'team-lead@alpha',
-      teammates: {
-        'worker@alpha': {
-          name: 'worker',
-          tmuxSessionName: 'in-process',
-          tmuxPaneId: 'in-process',
-          cwd: tempHome,
-          spawnedAt: now,
-        },
-      },
-    }
-    state.tasks = {
-      teammate_task_worker: {
-        id: 'teammate_task_worker',
-        type: 'in_process_teammate',
-        status: 'running',
-        shutdownRequested: false,
-        identity: {
-          agentId: 'worker@alpha',
-          agentName: 'worker',
-          teamName: 'alpha',
-        },
-      },
-    }
-
-    const result = await TeamDeleteTool.call(
-      {},
-      {
-        getAppState: () => state,
-        setAppState: setState,
-      } as any,
-      undefined as any,
-      undefined as any,
-    )
-
-    expect(result.data.success).toBe(true)
-    expect(terminateCalls).toEqual(['worker@alpha'])
   })
 })

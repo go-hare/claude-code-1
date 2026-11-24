@@ -56,8 +56,10 @@ import {
   coerceDescriptionToString,
   type FrontmatterData,
   type FrontmatterShell,
+  mergeDisallowedToolsFromFrontmatter,
   parseBooleanFrontmatter,
   parseFrontmatter,
+  parseFrontmatterMetadata,
   parseShellFrontmatter,
   splitPathInFrontmatter,
 } from '../utils/frontmatterParser.js'
@@ -201,6 +203,72 @@ function parseSkillPaths(frontmatter: FrontmatterData): string[] | undefined {
   return patterns
 }
 
+// Official 2.1.328 `vot()` / `gsn()` / `YB()` (`chunk@284022131.js@395500-397000`,
+// `chunk@294254613.js@3898200`): skip connector-downloads and cloud browser-downloads
+// folders during skill discovery so downloaded connector files are never loaded as skills.
+const CONNECTOR_DOWNLOADS_DIR_NAME = 'connector-downloads'
+const CONNECTOR_DOWNLOADS_INVISIBLE_RE =
+  /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g
+const CONNECTOR_DOWNLOADS_SEGMENT_RE = new RegExp(
+  `^${CONNECTOR_DOWNLOADS_DIR_NAME}[. ]*(?::.*)?$`,
+)
+
+export function isConnectorDownloadsSegment(segment: string): boolean {
+  if (segment.length < CONNECTOR_DOWNLOADS_DIR_NAME.length) {
+    return false
+  }
+  const normalized = segment
+    .toLowerCase()
+    .replaceAll('\u017F', 's')
+    .replace(CONNECTOR_DOWNLOADS_INVISIBLE_RE, '')
+  return CONNECTOR_DOWNLOADS_SEGMENT_RE.test(normalized)
+}
+
+function isPathInsideConnectorDownloadsSync(targetPath: string): boolean {
+  if (typeof targetPath !== 'string' || targetPath.length === 0) {
+    return false
+  }
+  const segments = targetPath.split(/[\\/]/)
+  if (segments.some(isConnectorDownloadsSegment)) {
+    return true
+  }
+  const stageRoot = process.env.CLAUDE_STAGE_FILE_ROOT
+  if (stageRoot && isAbsolute(stageRoot)) {
+    const browserDownloads = resolve(stageRoot, 'browser-downloads')
+    const normalized = resolve(targetPath)
+    if (
+      normalized === browserDownloads ||
+      normalized.startsWith(browserDownloads + pathSep)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 `vot(path)` (`chunk@284022131.js@396977`): returns true when
+ * `dirPath` (or its resolved realpath) is a `connector-downloads` directory or
+ * lies beneath one.
+ */
+export async function isConnectorDownloadsPath(
+  dirPath: string,
+): Promise<boolean> {
+  const normalized = resolve(dirPath)
+  if (isPathInsideConnectorDownloadsSync(normalized)) {
+    return true
+  }
+  try {
+    const resolved = await realpath(normalized)
+    if (isPathInsideConnectorDownloadsSync(resolved)) {
+      return true
+    }
+  } catch {
+    // Path may not exist yet — lexical check above already ran.
+  }
+  return false
+}
+
 /**
  * Parses all skill frontmatter fields that are shared between file-based and
  * MCP skill loading. Caller supplies the resolved skill name and the
@@ -233,6 +301,10 @@ export function parseSkillFrontmatterFields(
   shell: FrontmatterShell | undefined
   /** densable createdBy — dream-proposal only. */
   createdBy: 'dream-proposal' | undefined
+  /** Official 2.1.328 `fallback` — thin-pointer stub yields to plugin/MCP skill. */
+  fallback: boolean | undefined
+  /** Official 2.1.328 `metadata` — free-form author metadata object. */
+  metadata: Record<string, unknown> | undefined
 } {
   const validatedDescription = coerceDescriptionToString(
     frontmatter.description,
@@ -263,13 +335,23 @@ export function parseSkillFrontmatterFields(
     )
   }
 
+  // Official 2.1.328: preserve `displayName` frontmatter field (falling back to `name`)
   const rawDisplayName =
-    frontmatter.name != null ? String(frontmatter.name) : undefined
+    frontmatter.displayName != null
+      ? String(frontmatter.displayName)
+      : frontmatter.name != null
+        ? String(frontmatter.name)
+        : undefined
   let displayName: string | undefined = rawDisplayName
   if (rawDisplayName !== undefined && !isValidSkillName(rawDisplayName)) {
     recordNameNotShown(rawDisplayName, `is not shown for ${resolvedName}`)
     displayName = undefined
   }
+
+  const fallback =
+    frontmatter.fallback === undefined || frontmatter.fallback === null
+      ? undefined
+      : parseBooleanFrontmatter(frontmatter.fallback)
 
   return {
     displayName,
@@ -278,8 +360,9 @@ export function parseSkillFrontmatterFields(
     allowedTools: parseSlashCommandToolsFromFrontmatter(
       frontmatter['allowed-tools'],
     ),
-    disallowedTools: parseSlashCommandToolsFromFrontmatter(
-      frontmatter['disallowed-tools'],
+    disallowedTools: mergeDisallowedToolsFromFrontmatter(
+      frontmatter,
+      parseSlashCommandToolsFromFrontmatter,
     ),
     argumentHint:
       frontmatter['argument-hint'] != null
@@ -314,6 +397,8 @@ export function parseSkillFrontmatterFields(
       frontmatter.improved_by === 'dream-proposal'
         ? 'dream-proposal'
         : undefined,
+    fallback,
+    metadata: parseFrontmatterMetadata(frontmatter.metadata),
   }
 }
 
@@ -328,6 +413,7 @@ export function createSkillCommand({
   markdownContent,
   contentHash,
   allowedTools,
+  disallowedTools,
   argumentHint,
   argumentNames,
   whenToUse,
@@ -346,6 +432,8 @@ export function createSkillCommand({
   effort,
   shell,
   createdBy,
+  fallback,
+  metadata,
   skillFile,
 }: {
   skillName: string
@@ -356,6 +444,7 @@ export function createSkillCommand({
   /** densable contentHash (JoS fingerprint). Defaults to Bun.hash(markdown). */
   contentHash?: string
   allowedTools: string[]
+  disallowedTools?: string[]
   argumentHint: string | undefined
   argumentNames: string[]
   whenToUse: string | undefined
@@ -374,6 +463,8 @@ export function createSkillCommand({
   effort: EffortValue | undefined
   shell: FrontmatterShell | undefined
   createdBy?: 'dream-proposal'
+  fallback?: boolean
+  metadata?: Record<string, unknown>
   skillFile?: PromptCommand['skillFile']
 }): Command {
   // densable 2.1.228 #12 — $vr/$Phn label+sanitize for claude.ai synced skills;
@@ -384,7 +475,8 @@ export function createSkillCommand({
   let finalWhenToUse = whenToUse
   let finalArgumentHint = argumentHint
   let finalAllowedTools = allowedTools
-  let finalDisallowedTools: string[] | undefined
+  let finalDisallowedTools: string[] | undefined =
+    disallowedTools && disallowedTools.length > 0 ? disallowedTools : undefined
   let finalHooks = hooks
   let finalExecutionContext = executionContext
   let finalBackground = background
@@ -450,7 +542,7 @@ export function createSkillCommand({
     finalHooks = undefined
   }
 
-  return {
+  const command: Command = {
     type: 'prompt',
     name: skillName,
     description: finalDescription,
@@ -586,6 +678,18 @@ export function createSkillCommand({
       return [{ type: 'text', text: finalContent }]
     },
   } satisfies Command
+
+  if (fallback !== undefined) {
+    ;(command as Command & { fallback?: boolean }).fallback = fallback
+  }
+  if (metadata !== undefined) {
+    ;(command as Command & { metadata?: Record<string, unknown> }).metadata =
+      metadata
+  }
+  if (displayName !== undefined) {
+    ;(command as Command & { displayName?: string }).displayName = displayName
+  }
+  return command
 }
 
 /**
@@ -598,6 +702,13 @@ async function loadSkillsFromSkillsDir(
   loadedFrom: 'skills' | 'syncedSkills' = 'skills',
   hostCatalogSkills?: ReadonlySet<string>,
 ): Promise<SkillWithPath[]> {
+  if (await isConnectorDownloadsPath(basePath)) {
+    logForDebugging(
+      `[skills] Skipped skills dir in or beneath a connector-downloads folder: ${basePath}`,
+    )
+    return []
+  }
+
   const fs = getFsImplementation()
 
   let entries
@@ -894,21 +1005,54 @@ export const getSkillDirCommands = memoize(
         ]
       : getProjectDirsUpToHome('skills', cwd)
     const seenProjectDirs = new Set<string>()
-    const projectSkillsDirs: string[] = []
+    const dedupedProjectSkillsDirs: string[] = []
     for (const dir of rawProjectSkillsDirs) {
       const normalized = resolve(dir)
       if (!seenProjectDirs.has(normalized)) {
         seenProjectDirs.add(normalized)
-        projectSkillsDirs.push(dir)
+        dedupedProjectSkillsDirs.push(dir)
       }
     }
+
+    // Official 2.1.328 `_Hs` (`chunk@294254613.js@3898200`): skip project skill
+    // dirs and added folders located in or beneath a connector-downloads dir.
+    const projectConnectorFlags = await Promise.all(
+      dedupedProjectSkillsDirs.map(dir => isConnectorDownloadsPath(dir)),
+    )
+    const projectSkillsDirs = dedupedProjectSkillsDirs.filter(
+      (_dir, idx) => !projectConnectorFlags[idx],
+    )
 
     logForDebugging(
       `Loading skills from: managed=${managedSkillsDir}, user=${userSkillsDir}, project=[${projectSkillsDirs.join(', ')}]`,
     )
 
     // Load from additional directories (--add-dir)
-    const additionalDirs = getAdditionalDirectoriesForClaudeMd()
+    const rawAdditionalDirs = getAdditionalDirectoriesForClaudeMd()
+    const additionalConnectorFlags = await Promise.all(
+      rawAdditionalDirs.map(async dir => {
+        for (const candidate of [
+          dir,
+          join(dir, '.claude'),
+          join(dir, '.claude', 'skills'),
+          join(dir, '.claude', 'commands'),
+        ]) {
+          if (await isConnectorDownloadsPath(candidate)) {
+            return true
+          }
+        }
+        return false
+      }),
+    )
+    const additionalDirs = rawAdditionalDirs.filter((dir, idx) => {
+      if (additionalConnectorFlags[idx]) {
+        logForDebugging(
+          `[skills] Skipped added folder in or beneath a connector-downloads folder: ${dir}`,
+        )
+        return false
+      }
+      return true
+    })
     const skillsLocked = isRestrictedToPluginOnly('skills')
     const projectSettingsEnabled =
       isSettingSourceEnabled('projectSettings') && !skillsLocked
@@ -1485,9 +1629,12 @@ export async function discoverSkillDirsForPaths(
     // Start from the file's parent directory
     let currentDir = dirname(filePath)
 
-    if (isUnderPrefixes(currentDir, pluginOwnedPrefixes)) {
+    if (
+      isUnderPrefixes(currentDir, pluginOwnedPrefixes) ||
+      (await isConnectorDownloadsPath(currentDir))
+    ) {
       logForDebugging(
-        '[skills] Skipped the nested skills search for a file in a sync-owned or plugin folder',
+        '[skills] Skipped the nested skills search for a file in a sync-owned, plugin, or connector-downloads folder',
       )
       continue
     }

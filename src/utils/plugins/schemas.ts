@@ -55,8 +55,14 @@ export const ALLOWED_OFFICIAL_MARKETPLACE_NAMES = new Set([
   'anthropic-marketplace',
   'anthropic-plugins',
   'agent-skills',
+  'anthropic-agent-skills',
   'life-sciences',
   'knowledge-work-plugins',
+  'claude-for-legal',
+  'claude-for-financial-services',
+  'financial-services-plugins',
+  'first-party-plugins',
+  'claude-tag-plugins',
 ])
 
 /**
@@ -64,28 +70,39 @@ export const ALLOWED_OFFICIAL_MARKETPLACE_NAMES = new Set([
  * These are still reserved/allowed names, but opt out of the auto-update
  * default that other official marketplaces receive.
  */
-const NO_AUTO_UPDATE_OFFICIAL_MARKETPLACES = new Set(['knowledge-work-plugins'])
+const NO_AUTO_UPDATE_OFFICIAL_MARKETPLACES = new Set([
+  'knowledge-work-plugins',
+  'first-party-plugins',
+])
 
 /**
  * Check if auto-update is enabled for a marketplace.
  * Uses the stored value if set, otherwise defaults based on whether
- * it's an official Anthropic marketplace (true) or not (false).
+ * it's a claudeai/pluginDirectory marketplace or an official Anthropic
+ * marketplace (true) or not (false).
  * Official marketplaces in NO_AUTO_UPDATE_OFFICIAL_MARKETPLACES are excluded
  * from the auto-update default.
  *
+ * Official 2.1.328 `pot(e, o, r)` (`chunk@284022131.js@49984`).
+ *
  * @param marketplaceName - The name of the marketplace
- * @param entry - The marketplace entry (may have autoUpdate set)
+ * @param entry - The marketplace entry (may have autoUpdate and/or source set)
+ * @param explicitOverride - Optional explicit override taking highest priority
  * @returns Whether auto-update is enabled for this marketplace
  */
 export function isMarketplaceAutoUpdate(
   marketplaceName: string,
-  entry: { autoUpdate?: boolean },
+  entry: { autoUpdate?: boolean; source?: { source?: string } },
+  explicitOverride?: boolean,
 ): boolean {
+  if (explicitOverride !== undefined) return explicitOverride
+  if (entry.autoUpdate !== undefined) return entry.autoUpdate
+  if (entry.source?.source === 'claudeai') return true
+  if (entry.source?.source === 'pluginDirectory') return true
   const normalizedName = marketplaceName.toLowerCase()
   return (
-    entry.autoUpdate ??
-    (ALLOWED_OFFICIAL_MARKETPLACE_NAMES.has(normalizedName) &&
-      !NO_AUTO_UPDATE_OFFICIAL_MARKETPLACES.has(normalizedName))
+    ALLOWED_OFFICIAL_MARKETPLACE_NAMES.has(normalizedName) &&
+    !NO_AUTO_UPDATE_OFFICIAL_MARKETPLACES.has(normalizedName)
   )
 }
 
@@ -96,12 +113,13 @@ export function isMarketplaceAutoUpdate(
  * - "official" combined with "anthropic" or "claude" (e.g., "official-claude-plugins")
  * - "anthropic" or "claude" combined with "official" (e.g., "claude-official")
  * - Names starting with "anthropic" or "claude" followed by official-sounding terms
- *   like "marketplace", "plugins" (e.g., "anthropic-marketplace-new", "claude-plugins-v2")
+ *   like "marketplace", "plugins", "official", "directory", "directories"
+ *   (e.g., "anthropic-marketplace-new", "claude-plugins-v2", "claude-directory")
  *
- * The pattern is case-insensitive.
+ * The pattern is case-insensitive. Official 2.1.328 `qi()` / `Li` (`chunk@284022131.js@50150`).
  */
 export const BLOCKED_OFFICIAL_NAME_PATTERN =
-  /(?:official[^a-z0-9]*(anthropic|claude)|(?:anthropic|claude)[^a-z0-9]*official|^(?:anthropic|claude)[^a-z0-9]*(marketplace|plugins|official))/i
+  /(?:official[^a-z0-9]*(anthropic|claude)|(?:anthropic|claude)[^a-z0-9]*official|^(?:anthropic|claude)[^a-z0-9]*(marketplace|plugins|official|directory|directories))/i
 
 /**
  * Pattern to detect non-ASCII characters that could be used for homograph attacks.
@@ -427,6 +445,35 @@ export const PluginAuthorSchema = lazySchema(() =>
   }),
 )
 
+const MAX_PLUGIN_NETWORK_HOSTS = 256
+
+const PluginManifestNetworkSchema = lazySchema(() =>
+  z
+    .preprocess(
+      value =>
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Array.isArray((value as { hosts?: unknown }).hosts)
+          ? {
+              hosts: (value as { hosts: unknown[] }).hosts
+                .slice(0, MAX_PLUGIN_NETWORK_HOSTS)
+                .map(h => (typeof h === 'string' ? h : '')),
+            }
+          : undefined,
+      z
+        .object({
+          hosts: z
+            .array(z.string())
+            .describe(
+              'Hosts in sandbox.network.allowedDomains syntax: a host, with an optional leading "*." and an optional ":port".',
+            ),
+        })
+        .optional(),
+    )
+    .optional(),
+)
+
 /**
  * Metadata part of the plugin manifest file (plugin.json)
  *
@@ -435,6 +482,12 @@ export const PluginAuthorSchema = lazySchema(() =>
  */
 const PluginManifestMetadataSchema = lazySchema(() =>
   z.object({
+    $schema: z
+      .string()
+      .optional()
+      .describe(
+        'JSON Schema reference for editor autocomplete/validation; ignored at load time',
+      ),
     name: z
       .string()
       .min(1, 'Plugin name cannot be empty')
@@ -447,6 +500,12 @@ const PluginManifestMetadataSchema = lazySchema(() =>
       })
       .describe(
         'Unique identifier for the plugin, used for namespacing (prefer kebab-case)',
+      ),
+    displayName: z
+      .string()
+      .optional()
+      .describe(
+        'Human-readable name shown in UI (e.g., "GitHub Utils"). Falls back to `name` when omitted. Unlike `name`, may contain spaces and any casing; not used for namespacing or lookup.',
       ),
     version: z
       .string()
@@ -485,6 +544,17 @@ const PluginManifestMetadataSchema = lazySchema(() =>
       .describe(
         'Plugins that must be enabled for this plugin to function. Bare names (no "@marketplace") are resolved against the declaring plugin\'s own marketplace.',
       ),
+    metadata: z
+      .preprocess(
+        value =>
+          value !== null && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : undefined,
+        z.record(z.string(), z.unknown()).optional(),
+      )
+      .describe(
+        "Free-form metadata for the plugin author's own use (e.g. entitlement or catalog fields). Preserved on the parsed manifest but not read by Claude Code.",
+      ),
     engines: z
       .preprocess(
         value =>
@@ -497,6 +567,9 @@ const PluginManifestMetadataSchema = lazySchema(() =>
       .describe(
         'Compatible runtime versions, e.g. { "claude-code": ">=2.1.0" }',
       ),
+    network: PluginManifestNetworkSchema().describe(
+      'The network hosts any part of the plugin reaches, as its author states them, for `claude plugin validate` to list.',
+    ),
   }),
 )
 
@@ -1226,12 +1299,192 @@ export const PluginManifestMonitorsSchema = lazySchema(() =>
       .describe(
         'Background watch scripts the host arms as persistent Monitor tasks (unsandboxed, same trust tier as hooks) so plugins need not instruct the model to arm them. When omitted, monitors/monitors.json at the plugin root is loaded if present.',
       ),
-    experimental: z
-      .object({
-        monitors: z.union([z.string(), PluginMonitorsArraySchema()]).optional(),
-      })
-      .passthrough()
+  }),
+)
+
+/**
+ * Official 2.1.328 `fr()` (`chunk@284022131.js@62500`) — plugin themes paths.
+ */
+const PluginManifestThemesSchema = lazySchema(() =>
+  z.object({
+    themes: z.union([
+      RelativePath().describe(
+        'Path to a themes directory or file, relative to the plugin root. When set, the themes/ directory is not auto-loaded — list its files here if you want both.',
+      ),
+      z
+        .array(
+          RelativePath().describe(
+            'Path to a themes directory or file, relative to the plugin root. When set, the themes/ directory is not auto-loaded — list its files here if you want both.',
+          ),
+        )
+        .describe(
+          'List of theme directory or file paths. When set, the themes/ directory is not auto-loaded.',
+        ),
+    ]),
+  }),
+)
+
+/**
+ * Official 2.1.328 `la()` (`chunk@284022131.js@62900`) — plugin workflows paths.
+ */
+const PluginManifestWorkflowsSchema = lazySchema(() =>
+  z.object({
+    workflows: z
+      .union([
+        RelativePath().describe(
+          'Path to a workflows directory or .js file, relative to the plugin root. When set, the workflows/ directory is not auto-loaded — list its files here if you want both.',
+        ),
+        z
+          .array(
+            RelativePath().describe(
+              'Path to a workflows directory or .js file, relative to the plugin root. When set, the workflows/ directory is not auto-loaded — list its files here if you want both.',
+            ),
+          )
+          .describe(
+            'List of workflow directory or .js file paths. When set, the workflows/ directory is not auto-loaded.',
+          ),
+      ])
       .optional(),
+  }),
+)
+
+/**
+ * Official 2.1.328 `ba()` (`chunk@284022131.js@72400`) — plugin type contract (.d.ts).
+ */
+const PluginManifestTypesSchema = lazySchema(() =>
+  z.object({
+    types: RelativePath()
+      .refine(p => p.endsWith('.d.ts'), {
+        message:
+          "types must name a TypeScript declaration file ending in '.d.ts'",
+      })
+      .refine(p => !p.split(/[\\/]/).includes('..'), {
+        message:
+          "types must stay inside the plugin directory (no '..' segment)",
+      })
+      .optional()
+      .describe(
+        "Path to the plugin's type contract, relative to the plugin root and starting with ./ (a self-contained .d.ts file).",
+      ),
+  }),
+)
+
+const PLUGIN_BINARY_NAME_RE = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9_-])?$/
+const PLUGIN_BINARY_SHA256_RE = /^[0-9a-f]{64}$/
+const MAX_PLUGIN_BINARIES = 64
+
+const PluginBinaryEntrySchema = lazySchema(() =>
+  z.object({
+    sha256: z.string().regex(PLUGIN_BINARY_SHA256_RE),
+  }),
+)
+
+function parsePluginBinariesMap(
+  raw: unknown,
+): Record<string, { sha256: string }> | undefined {
+  const parsed = z.record(z.string(), z.unknown()).safeParse(raw)
+  if (!parsed.success) return undefined
+  const out: Record<string, { sha256: string }> = Object.create(null)
+  let count = 0
+  for (const [key, val] of Object.entries(parsed.data)) {
+    if (count >= MAX_PLUGIN_BINARIES) break
+    const entry = PluginBinaryEntrySchema().safeParse(val)
+    if (PLUGIN_BINARY_NAME_RE.test(key) && entry.success) {
+      out[key] = entry.data
+      count++
+    }
+  }
+  return count > 0 ? out : undefined
+}
+
+/**
+ * Official 2.1.328 `ha()` (`chunk@284022131.js@72100`) — sha256-pinned binaries.
+ */
+const PluginManifestBinariesSchema = lazySchema(() =>
+  z.object({
+    binaries: z
+      .unknown()
+      .transform(parsePluginBinariesMap)
+      .describe(
+        'sha256-pinned files to fetch into bin/ at install time, keyed by basename (target triple encoded in the name)',
+      ),
+  }),
+)
+
+const PluginSyntaxHighlightingLanguageSchema = lazySchema(() =>
+  z
+    .object({
+      id: z
+        .string()
+        .max(64)
+        .regex(/^[a-z][a-z0-9_-]*$/, 'must match ^[a-z][a-z0-9_-]*$'),
+      remote: z
+        .string()
+        .max(256)
+        .regex(
+          /^(npm:[@a-z0-9/._-]+(@[a-z0-9._+-]+)?|github:[\w.-]+\/[\w.-]+@[\w./-]+#.+\.js)$/,
+          'must be npm:<pkg>[@ver] or github:<owner>/<repo>@<ref>#<path>.js',
+        )
+        .optional(),
+      integrity: z
+        .string()
+        .max(512)
+        .regex(
+          /^sha(256|384|512)-[A-Za-z0-9+/=]+$/,
+          'must be SRI form: sha256-, sha384-, or sha512-<base64>',
+        )
+        .optional(),
+    })
+    .strict(),
+)
+
+const PluginSyntaxHighlightingSchema = lazySchema(() =>
+  z.object({
+    syntaxHighlighting: z
+      .object({
+        hljsLanguages: z
+          .array(PluginSyntaxHighlightingLanguageSchema())
+          .max(16),
+      })
+      .strict(),
+  }),
+)
+
+const PluginEvalsPathSchema = lazySchema(() =>
+  z.union([z.string(), z.array(z.string())]),
+)
+
+/**
+ * Official 2.1.328 `Sa()` (`chunk@284022131.js@73300`) — experimental manifest
+ * components (`themes`, `outputStyles`, `workflows`, `monitors`,
+ * `syntaxHighlighting`, `evals`) with `.passthrough()` preserved.
+ */
+const PluginManifestExperimentalSchema = lazySchema(() =>
+  z.object({
+    experimental: z.preprocess(
+      value =>
+        value !== null && typeof value === 'object' && !Array.isArray(value)
+          ? value
+          : undefined,
+      z
+        .object({
+          ...PluginManifestThemesSchema().partial().shape,
+          ...PluginSyntaxHighlightingSchema().partial().shape,
+          ...PluginManifestMonitorsSchema().partial().shape,
+          ...PluginManifestOutputStylesSchema().partial().shape,
+          ...PluginManifestWorkflowsSchema().shape,
+          evals: PluginEvalsPathSchema()
+            .optional()
+            .describe(
+              'Directory of eval cases for the plugin evaluation harness, relative to the plugin root (default: evals/). A list is accepted; its first entry is the case directory.',
+            ),
+        })
+        .passthrough()
+        .optional()
+        .describe(
+          'Components whose manifest shape may change without a deprecation cycle. Move a key out of here once it is promoted to stable.',
+        ),
+    ),
   }),
 )
 
@@ -1258,12 +1511,17 @@ export const PluginManifestSchema = lazySchema(() =>
     ...PluginManifestAgentsSchema().partial().shape,
     ...PluginManifestSkillsSchema().partial().shape,
     ...PluginManifestOutputStylesSchema().partial().shape,
+    ...PluginManifestThemesSchema().partial().shape,
+    ...PluginManifestWorkflowsSchema().shape,
     ...PluginManifestChannelsSchema().partial().shape,
     ...PluginManifestMcpServerSchema().partial().shape,
     ...PluginManifestLspServerSchema().partial().shape,
-    ...PluginManifestSettingsSchema().partial().shape,
-    ...PluginManifestUserConfigSchema().partial().shape,
     ...PluginManifestMonitorsSchema().partial().shape,
+    ...PluginManifestSettingsSchema().partial().shape,
+    ...PluginManifestTypesSchema().partial().shape,
+    ...PluginManifestUserConfigSchema().partial().shape,
+    ...PluginManifestBinariesSchema().partial().shape,
+    ...PluginManifestExperimentalSchema().partial().shape,
   }),
 )
 
@@ -1359,9 +1617,39 @@ export const MarketplaceSourceSchema = lazySchema(() =>
     }),
     z.object({
       source: z.literal('npm'),
-      package: NpmPackageNameSchema().describe(
-        'NPM package containing marketplace.json',
-      ),
+      package: NpmPackageNameSchema()
+        .or(
+          z
+            .string()
+            .regex(
+              /^@[a-z0-9][a-z0-9-._]*\/\*$/,
+              'Invalid npm package name format',
+            ),
+        )
+        .describe(
+          'npm package containing marketplace.json (e.g. "@acme/claude-marketplace"). A scope wildcard such as "@acme/*" still parses in a managed list, so a list that holds one stays valid, but it matches no marketplace package.',
+        ),
+      version: z
+        .string()
+        .optional()
+        .describe(
+          'Version or range to fetch (e.g. "1.4.0", "^1.4"); defaults to the latest dist-tag',
+        ),
+      registry: z
+        .string()
+        .url()
+        .refine(url => {
+          try {
+            const parsed = new URL(url)
+            return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+          } catch {
+            return false
+          }
+        }, 'Registry must be an http(s) URL')
+        .optional()
+        .describe(
+          'Registry URL. When adding a marketplace: a one-off registry override (otherwise your npm configuration decides). Under allowManagedPermissionRulesOnly, an npm marketplace keeps plugin allowed-tools only when both the entry and the registration pin this same registry.',
+        ),
     }),
     z.object({
       source: z.literal('file'),
@@ -1373,6 +1661,16 @@ export const MarketplaceSourceSchema = lazySchema(() =>
         .string()
         .describe('Local directory containing .claude-plugin/marketplace.json'),
     }),
+    // Official 2.1.328 `chunk@284022131.js@81150` — policy-list sentinel for
+    // ~/.claude/skills/ auto-load (@skills-dir plugins).
+    z
+      .object({
+        source: z.literal('skills-dir'),
+        path: z.string().optional(),
+      })
+      .describe(
+        'Policy-list sentinel for the ~/.claude/skills/ auto-load (@skills-dir plugins). In strictKnownMarketplaces: opt the scan back IN (by default any allowlist blocks it). In blockedMarketplaces: turn the scan OFF without otherwise restricting marketplaces.',
+      ),
     z.object({
       source: z.literal('hostPattern'),
       hostPattern: z

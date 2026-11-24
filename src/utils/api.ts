@@ -38,7 +38,7 @@ import {
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/constants.js'
-import { TASK_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskOutputTool/constants.js'
+import { TASK_OUTPUT_TOOL_NAME } from '../constants/tools.js'
 import type { Message } from '../types/message.js'
 import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.js'
 import {
@@ -453,6 +453,43 @@ export function logAPIPrefix(systemPrompt: SystemPrompt): void {
  *    - System prompt prefix (cacheScope='org')
  *    - Everything else concatenated (cacheScope='org')
  */
+export const SYSTEM_PROMPT_STATIC_BREAKPOINT =
+  '__SYSTEM_PROMPT_STATIC_BREAKPOINT__'
+
+/**
+ * Official 2.1.328 `YXr` (`chunk@292335968.js:870`) — split a string around a
+ * marker only when the marker appears alone on its own line.
+ */
+function splitOnStandaloneMarkerLine(text: string, marker: string): string[] {
+  let idx = text.indexOf(marker)
+  while (idx !== -1) {
+    const lineStart = idx === 0 ? 0 : text.lastIndexOf('\n', idx - 1) + 1
+    const nextNewline = text.indexOf('\n', idx)
+    const lineEnd = nextNewline === -1 ? text.length : nextNewline
+    if (text.slice(lineStart, lineEnd).trim() === marker) {
+      const before = text.slice(0, lineStart)
+      const after = text.slice(lineEnd)
+      return [
+        ...(before.trim() ? [before] : []),
+        marker,
+        ...(after.trim() ? [after] : []),
+      ]
+    }
+    if (nextNewline === -1) break
+    idx = text.indexOf(marker, nextNewline + 1)
+  }
+  return [text]
+}
+
+/** Official 2.1.328 `bai` (`chunk@292335968.js:1334`). */
+function splitStaticBreakpointBlocks(text: string): string[] {
+  if (!text.includes(SYSTEM_PROMPT_STATIC_BREAKPOINT)) return [text]
+  return splitOnStandaloneMarkerLine(
+    text,
+    SYSTEM_PROMPT_STATIC_BREAKPOINT,
+  ).filter(chunk => chunk !== SYSTEM_PROMPT_STATIC_BREAKPOINT)
+}
+
 export function splitSysPromptPrefix(
   systemPrompt: SystemPrompt,
   options?: { skipGlobalCacheForSystemPrompt?: boolean },
@@ -476,7 +513,7 @@ export function splitSysPromptPrefix(
       } else if (CLI_SYSPROMPT_PREFIXES.has(prompt)) {
         systemPromptPrefix = prompt
       } else {
-        rest.push(prompt)
+        rest.push(splitStaticBreakpointBlocks(prompt).join(''))
       }
     }
 
@@ -523,10 +560,22 @@ export function splitSysPromptPrefix(
       if (systemPromptPrefix)
         result.push({ text: systemPromptPrefix, cacheScope: null })
       const staticJoined = staticBlocks.join('\n\n')
-      if (staticJoined)
-        result.push({ text: staticJoined, cacheScope: 'global' })
+      const staticChunks = staticJoined
+        ? splitStaticBreakpointBlocks(staticJoined)
+        : []
+      for (const chunk of staticChunks) {
+        result.push({ text: chunk, cacheScope: 'global' })
+      }
+      // Official 2.1.328 `kai` (`chunk@292335968.js:5027`): preserve org-scoped
+      // caching on the dynamic suffix when there is <= 1 global static block;
+      // drop to null only when multiple static blocks already occupy the slots.
       const dynamicJoined = dynamicBlocks.join('\n\n')
-      if (dynamicJoined) result.push({ text: dynamicJoined, cacheScope: null })
+      if (dynamicJoined) {
+        result.push({
+          text: dynamicJoined,
+          cacheScope: staticChunks.length > 1 ? null : 'org',
+        })
+      }
 
       logEvent('tengu_sysprompt_boundary_found', {
         blockCount: result.length,
@@ -544,16 +593,24 @@ export function splitSysPromptPrefix(
   let attributionHeader: string | undefined
   let systemPromptPrefix: string | undefined
   const rest: string[] = []
+  const fallbackBoundaryIndex = systemPrompt.indexOf(
+    SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+  )
 
-  for (const block of systemPrompt) {
-    if (!block) continue
+  for (let i = 0; i < systemPrompt.length; i++) {
+    const block = systemPrompt[i]
+    if (!block || block === SYSTEM_PROMPT_DYNAMIC_BOUNDARY) continue
 
     if (block.startsWith('x-anthropic-billing-header')) {
       attributionHeader = block
     } else if (CLI_SYSPROMPT_PREFIXES.has(block)) {
       systemPromptPrefix = block
     } else {
-      rest.push(block)
+      rest.push(
+        fallbackBoundaryIndex === -1 || i < fallbackBoundaryIndex
+          ? splitStaticBreakpointBlocks(block).join('')
+          : block,
+      )
     }
   }
 

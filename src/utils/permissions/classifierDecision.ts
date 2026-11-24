@@ -12,11 +12,8 @@ import { SLEEP_TOOL_NAME } from '@claude-code/builtin-tools/tools/SleepTool/prom
 import { TASK_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskCreateTool/constants.js'
 import { TASK_GET_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskGetTool/constants.js'
 import { TASK_LIST_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskListTool/constants.js'
-import { TASK_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskOutputTool/constants.js'
 import { TASK_STOP_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskStopTool/prompt.js'
 import { TASK_UPDATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskUpdateTool/constants.js'
-import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js'
-import { TEAM_DELETE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamDeleteTool/constants.js'
 import { TODO_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TodoWriteTool/constants.js'
 import { SEARCH_EXTRA_TOOLS_TOOL_NAME } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
 import { YOLO_CLASSIFIER_TOOL_NAME } from './yoloClassifier.js'
@@ -70,16 +67,16 @@ const SAFE_YOLO_ALLOWLISTED_TOOLS = new Set([
   TASK_UPDATE_TOOL_NAME,
   TASK_LIST_TOOL_NAME,
   TASK_STOP_TOOL_NAME,
-  TASK_OUTPUT_TOOL_NAME,
+  'TaskOutput', // retired legacy tool name
   // Plan mode / UI
   ASK_USER_QUESTION_TOOL_NAME,
   ENTER_PLAN_MODE_TOOL_NAME,
   EXIT_PLAN_MODE_TOOL_NAME,
   // Swarm coordination (internal mailbox/team state only — teammates have
   // their own permission checks, so no actual security bypass).
-  TEAM_CREATE_TOOL_NAME,
+  'TeamCreate', // retired legacy tool name
   // Agent cleanup
-  TEAM_DELETE_TOOL_NAME,
+  'TeamDelete', // retired legacy tool name
   SEND_MESSAGE_TOOL_NAME,
   // Workflow orchestration — subagents go through canUseTool individually
   ...(WORKFLOW_TOOL_NAME ? [WORKFLOW_TOOL_NAME] : []),

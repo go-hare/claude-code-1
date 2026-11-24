@@ -16,10 +16,12 @@ import {
   snapshotModuleExports,
 } from '../../../tests/mocks/settings.js'
 import * as realSettings from 'src/utils/settings/settings.js'
+import * as realGrowthbook from 'src/services/analytics/growthbook.js'
 import * as realForkProduct from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js'
 
 // Snapshot BEFORE mock.module — live namespace rebinds under Bun.
 const settingsSnap = snapshotModuleExports(realSettings)
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 const forkProductSnap = snapshotModuleExports(realForkProduct)
 
 mock.module('src/utils/log.ts', logMock)
@@ -59,6 +61,9 @@ afterAll(() => {
     '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js',
     () => ({ ...forkProductSnap }),
   )
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
   restoreSettingsMockWith(mock.module, settingsSnap)
 })
 
@@ -230,7 +235,7 @@ describe('isDeferredTool (densable TX)', () => {
     ).toBe(false)
   })
 
-  test('Brief/SendUserMessage and SendUserFile never defer', () => {
+  test('Brief/SendUserMessage and StructuredOutput never defer; SendUserFile follows shouldDefer (2.1.328)', () => {
     expect(
       isDeferredTool(
         makeTool({ name: 'SendUserMessage', shouldDefer: true }) as never,
@@ -238,9 +243,14 @@ describe('isDeferredTool (densable TX)', () => {
     ).toBe(false)
     expect(
       isDeferredTool(
-        makeTool({ name: 'SendUserFile', shouldDefer: true }) as never,
+        makeTool({ name: 'StructuredOutput', shouldDefer: true }) as never,
       ),
     ).toBe(false)
+    expect(
+      isDeferredTool(
+        makeTool({ name: 'SendUserFile', shouldDefer: true }) as never,
+      ),
+    ).toBe(true)
   })
 
   test('PushNotification never defers on remote_trigger entrypoint', () => {

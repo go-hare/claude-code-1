@@ -1,5 +1,10 @@
 import { feature } from 'bun:bundle'
-import { ASYNC_AGENT_ALLOWED_TOOLS } from '../constants/tools.js'
+import { getIsInteractive, getIsRemoteMode } from '../bootstrap/state.js'
+import {
+  ASYNC_AGENT_ALLOWED_TOOLS,
+  TEAM_CREATE_TOOL_NAME,
+  TEAM_DELETE_TOOL_NAME,
+} from '../constants/tools.js'
 import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -15,8 +20,6 @@ import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMes
 import { SKILL_TOOL_NAME } from '@claude-code/builtin-tools/tools/SkillTool/constants.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import { TASK_STOP_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskStopTool/prompt.js'
-import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js'
-import { TEAM_DELETE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamDeleteTool/constants.js'
 import { ARTIFACT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
 import {
   isBareMode,
@@ -110,7 +113,19 @@ export function isCoordinatorMode(): boolean {
     // (not lazy require) — early require() of this module from main.tsx can
     // leave an incomplete ESM exports object; lazy require(residualFinalEnvGates)
     // then deadlocks on property access under Bun/Windows startup.
-    return isCoordinatorModeEnvEnabled()
+    if (!isCoordinatorModeEnvEnabled()) {
+      return false
+    }
+    // Official 2.1.328 (`qa`, `chunk@288533936.js @378`):
+    // `if (ud() && !xn() && !s.CLAUDE_CODE_REMOTE) return !1`
+    if (
+      getIsInteractive() &&
+      !getIsRemoteMode() &&
+      !isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+    ) {
+      return false
+    }
+    return true
   }
   return false
 }

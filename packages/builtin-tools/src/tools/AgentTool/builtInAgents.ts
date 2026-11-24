@@ -1,6 +1,5 @@
 import { feature } from 'bun:bundle'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { isSafeModeEnabled } from 'src/utils/safeMode.js'
 import { CLAUDE_CODE_GUIDE_AGENT } from './built-in/claudeCodeGuideAgent.js'
@@ -8,7 +7,6 @@ import { EXPLORE_AGENT } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { PLAN_AGENT } from './built-in/planAgent.js'
 import { STATUSLINE_SETUP_AGENT } from './built-in/statuslineSetup.js'
-import { VERIFICATION_AGENT } from './built-in/verificationAgent.js'
 import {
   isWebFetchAgentEnabled,
   WEB_FETCH_AGENT,
@@ -92,13 +90,6 @@ export function getBuiltInAgents(): AgentDefinition[] {
 
   if (isNonSdkEntrypoint) {
     agents.push(CLAUDE_CODE_GUIDE_AGENT)
-  }
-
-  if (
-    feature('VERIFICATION_AGENT') &&
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false)
-  ) {
-    agents.push(VERIFICATION_AGENT)
   }
 
   return agents

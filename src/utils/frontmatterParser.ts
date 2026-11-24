@@ -12,7 +12,10 @@ export type FrontmatterData = {
   // YAML can return null for keys with no value (e.g., "key:" with nothing after)
   'allowed-tools'?: string | string[] | null
   'disallowed-tools'?: string | string[] | null
+  // Official 2.1.328 `chunk@294254613.js@1070578`: canonical camelCase alias of `disallowed-tools`
+  disallowedTools?: string | string[] | null
   description?: string | null
+  displayName?: string | null
   // Memory type: 'user', 'feedback', 'project', or 'reference'
   // Only applicable to memory files; narrowed via parseMemoryType() in src/memdir/memoryTypes.ts
   type?: string | null
@@ -31,7 +34,8 @@ export type FrontmatterData = {
   // 'true' = user can type /skill-name to invoke
   // 'false' = only model can invoke via Skill tool
   // Default depends on source: commands/ defaults to true, skills/ defaults to false
-  'user-invocable'?: string | null
+  'user-invocable'?: string | boolean | number | null
+  'disable-model-invocation'?: string | boolean | number | null
   // Hooks to register when this skill is invoked
   // Keys are hook events (PreToolUse, PostToolUse, Stop, etc.)
   // Values are arrays of matcher configurations with hooks
@@ -47,6 +51,12 @@ export type FrontmatterData = {
   // Agent type to use when forked (e.g., 'Bash', 'general-purpose')
   // Only applicable when context is 'fork'
   agent?: string | null
+  background?: boolean | string | number | null
+  // Official 2.1.328: thin-pointer stub fallback flag & arbitrary author metadata
+  fallback?: boolean | string | number | null
+  metadata?: Record<string, unknown> | null
+  created_by?: string | null
+  improved_by?: string | null
   // Glob patterns for file paths this skill applies to. Accepts either a
   // comma-separated string or a YAML list of strings.
   // When set, the skill is only activated when the model touches matching files
@@ -479,5 +489,42 @@ export function parseShellFrontmatter(
     `Frontmatter 'shell: ${value}' in ${source} is not recognized. Valid values: ${FRONTMATTER_SHELLS.join(', ')}. Falling back to bash.`,
     { level: 'warn' },
   )
+  return undefined
+}
+
+/**
+ * Official 2.1.328 `_Ue` (`chunk@294254613.js@2211028`) + merge support:
+ * reads both kebab-case `disallowed-tools` and camelCase `disallowedTools`
+ * from frontmatter and merges them cleanly without dropping either.
+ */
+export function mergeDisallowedToolsFromFrontmatter(
+  frontmatter: FrontmatterData,
+  parseTools: (raw: unknown) => string[],
+): string[] {
+  const kebab = parseTools(frontmatter['disallowed-tools'])
+  const camel = parseTools(frontmatter.disallowedTools)
+  if (kebab.length === 0) return camel
+  if (camel.length === 0) return kebab
+  const seen = new Set<string>(kebab)
+  const merged = [...kebab]
+  for (const tool of camel) {
+    if (!seen.has(tool)) {
+      seen.add(tool)
+      merged.push(tool)
+    }
+  }
+  return merged
+}
+
+/**
+ * Official 2.1.328 `C(e.metadata) ? e.metadata : undefined`
+ * (`chunk@294254613.js@3881200`): preserves plain object `metadata` frontmatter.
+ */
+export function parseFrontmatterMetadata(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
   return undefined
 }

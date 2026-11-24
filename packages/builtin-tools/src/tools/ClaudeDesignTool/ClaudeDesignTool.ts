@@ -265,7 +265,7 @@ export const ClaudeDesignTool = buildTool({
   name: CLAUDE_DESIGN_TOOL_NAME,
   searchHint: 'work with Claude Design (claude.ai/design) projects',
   maxResultSizeChars: 100_000,
-  shouldDefer: true,
+  shouldDefer: false,
   get inputSchema(): InputSchema {
     return inputSchema()
   },

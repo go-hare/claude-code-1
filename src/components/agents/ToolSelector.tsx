@@ -15,7 +15,6 @@ import { GrepTool } from '@claude-code/builtin-tools/tools/GrepTool/GrepTool.js'
 import { ListMcpResourcesTool } from '@claude-code/builtin-tools/tools/ListMcpResourcesTool/ListMcpResourcesTool.js';
 import { NotebookEditTool } from '@claude-code/builtin-tools/tools/NotebookEditTool/NotebookEditTool.js';
 import { ReadMcpResourceTool } from '@claude-code/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js';
-import { TaskOutputTool } from '@claude-code/builtin-tools/tools/TaskOutputTool/TaskOutputTool.js';
 import { TaskStopTool } from '@claude-code/builtin-tools/tools/TaskStopTool/TaskStopTool.js';
 import { TodoWriteTool } from '@claude-code/builtin-tools/tools/TodoWriteTool/TodoWriteTool.js';
 import { TungstenTool } from '@claude-code/builtin-tools/tools/TungstenTool/TungstenTool.js';
@@ -61,7 +60,6 @@ function getToolBuckets(): ToolBuckets {
         TodoWriteTool.name,
         WebSearchTool.name,
         TaskStopTool.name,
-        TaskOutputTool.name,
         ListMcpResourcesTool.name,
         ReadMcpResourceTool.name,
       ]),

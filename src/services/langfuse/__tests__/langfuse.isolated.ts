@@ -156,12 +156,6 @@ describe('Langfuse integration', () => {
       expect(sanitizeToolOutput('BashTool', shortOutput)).toBe('hello world')
     })
 
-    test('redacts ConfigTool output', async () => {
-      const { sanitizeToolOutput } = await import('../sanitize.js')
-      const result = sanitizeToolOutput('ConfigTool', 'config data')
-      expect(result).toBe('[ConfigTool output redacted, 11 chars]')
-    })
-
     test('redacts MCPTool output', async () => {
       const { sanitizeToolOutput } = await import('../sanitize.js')
       const result = sanitizeToolOutput('MCPTool', 'mcp data')

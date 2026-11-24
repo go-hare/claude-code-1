@@ -1,8 +1,10 @@
 import { feature } from 'bun:bundle'
+import { AsyncLocalStorage } from 'async_hooks'
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { dirname } from 'path'
 import { getProjectRoot } from 'src/bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getCwd } from 'src/utils/cwd.js'
 import {
   builtInCommandNames,
@@ -156,6 +158,351 @@ const remoteSkillModules = feature('EXPERIMENTAL_SKILL_SEARCH')
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
+const forkedSkillStackStorage = new AsyncLocalStorage<ReadonlySet<string>>()
+const activeForkedSkillByAgentId = new Map<string, ReadonlySet<string>>()
+
+/**
+ * Official 2.1.328 `H6(e)` (`chunk@294254613.js@1279876`) — canonical skill name
+ * used for forked-skill recursion tracking.
+ */
+function getCanonicalSkillName(command: Command): string {
+  return command.type === 'prompt' && command.unqualifiedName != null
+    ? command.unqualifiedName
+    : command.name
+}
+
+type ForkedSkillToolUseContext = ToolUseContext & {
+  spawnedBySkill?: string
+  spawnedByForkedSkill?: boolean
+  options: ToolUseContext['options'] & {
+    spawnedBySkill?: string
+    spawnedByForkedSkill?: boolean
+  }
+}
+
+/**
+ * Returns the active stack of forked skill names executing in the current
+ * async/subagent execution context (AsyncLocalStorage stack, active agentId map,
+ * and explicit `spawnedBySkill` context fields).
+ */
+export function getActiveForkedSkillNames(
+  context?: Partial<ToolUseContext>,
+): Set<string> {
+  const active = new Set<string>()
+  const stored = forkedSkillStackStorage.getStore()
+  if (stored) {
+    for (const name of stored) active.add(name)
+  }
+  const agentIds = [context?.agentId, getAgentContext()?.agentId]
+  for (const id of agentIds) {
+    if (!id) continue
+    const forAgent = activeForkedSkillByAgentId.get(id)
+    if (forAgent) {
+      for (const name of forAgent) active.add(name)
+    }
+  }
+  const forkCtx = context as Partial<ForkedSkillToolUseContext> | undefined
+  if (typeof forkCtx?.spawnedBySkill === 'string' && forkCtx.spawnedBySkill) {
+    active.add(forkCtx.spawnedBySkill)
+  }
+  if (
+    typeof forkCtx?.options?.spawnedBySkill === 'string' &&
+    forkCtx.options.spawnedBySkill
+  ) {
+    active.add(forkCtx.options.spawnedBySkill)
+  }
+  return active
+}
+
+/**
+ * Runs `fn` with `skillName` pushed onto the active forked-skill recursion
+ * guard stack (propagates across async calls and nested subagents).
+ */
+export function runWithActiveForkedSkill<T>(skillName: string, fn: () => T): T {
+  const next = new Set<string>(forkedSkillStackStorage.getStore())
+  next.add(skillName)
+  return forkedSkillStackStorage.run(next, fn)
+}
+
+/**
+ * Official 2.1.328 `we(C, o)` (`chunk@303609827.js@13460`) + ancestor stack:
+ * returns true when a forked skill subagent attempts to re-invoke itself (or an
+ * active ancestor forked skill) via SkillTool.
+ */
+export function isForkedSkillRecursiveInvocation(
+  command: Command,
+  context: ToolUseContext,
+): boolean {
+  if (command.type !== 'prompt') return false
+  const activeStack = getActiveForkedSkillNames(context)
+  if (activeStack.size === 0) return false
+  const forkCtx = context as ForkedSkillToolUseContext
+  const inForkedSkill =
+    forkCtx.spawnedByForkedSkill === true ||
+    forkCtx.options?.spawnedByForkedSkill === true ||
+    (forkedSkillStackStorage.getStore()?.size ?? 0) > 0 ||
+    activeForkedSkillByAgentId.has(
+      context.agentId ?? getAgentContext()?.agentId ?? '',
+    )
+  const isForkSkill =
+    command.context === 'fork' ||
+    (command.getContext !== undefined && inForkedSkill)
+  if (!isForkSkill) return false
+  const canonical = getCanonicalSkillName(command)
+  return activeStack.has(canonical) || activeStack.has(command.name)
+}
+
+/**
+ * Official 2.1.328 reserved synced-skill namespace boundary helpers
+ * (`xbt`, `Pbt`, `EQ`, `Epe`, `ERe`, `y_n`, `aZe`, `nVe`, `TSe`, `sgo`, `DVr`, `DCa`
+ * in `chunk@284022131.js@6074`, `chunk@294252098.js@267`,
+ * `chunk@294254613.js@1283413, @4037500-4040000`, `chunk@303609827.js@24200-25800`).
+ */
+export const RESERVED_SYNCED_SKILL_NAMESPACES = ['anthropic-skills'] as const
+const SHA256_PINNED_SKILL_RULE_RE = /@sha256:[0-9a-f]{64}$/
+const RESERVED_NS_INVISIBLE_RE =
+  /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g
+const PLAID_HARBOR_FLAG = 'tengu_plaid_harbor'
+
+/** Official 2.1.328 `nHr`: ESC, C1 controls (U+0080..U+009F), LF/VT/FF/CR/LS/PS. */
+function hasReservedNsControlOrNewline(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (
+      code === 0x1b ||
+      (code >= 0x80 && code <= 0x9f) ||
+      code === 0x0a ||
+      code === 0x0b ||
+      code === 0x0c ||
+      code === 0x0d ||
+      code === 0x2028 ||
+      code === 0x2029
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+export function isSha256PinnedSkillRule(rule: string): boolean {
+  return SHA256_PINNED_SKILL_RULE_RE.test(rule)
+}
+
+function isReservedNamespacePrefixed(lowerName: string): boolean {
+  return RESERVED_SYNCED_SKILL_NAMESPACES.some(ns =>
+    lowerName.startsWith(`${ns}:`),
+  )
+}
+
+function normalizeForNamespacePrefix(name: string): string {
+  return name
+    .normalize('NFKC')
+    .replace(RESERVED_NS_INVISIBLE_RE, '')
+    .toLowerCase()
+}
+
+export function matchReservedSyncedSkillNamespace(
+  name: string,
+): string | undefined {
+  const trimmed = name.trimEnd()
+  const lower = trimmed.toLowerCase()
+  for (const ns of RESERVED_SYNCED_SKILL_NAMESPACES) {
+    if (lower === ns || lower.startsWith(`${ns}:`)) {
+      return ns
+    }
+    const normalized = normalizeForNamespacePrefix(trimmed)
+    if (normalized === ns || normalized.startsWith(`${ns}:`)) {
+      return ns
+    }
+    if (hasReservedNsControlOrNewline(trimmed)) {
+      let pos = 0
+      let matched = true
+      for (const ch of ns) {
+        const nextIdx = normalized.indexOf(ch, pos)
+        if (nextIdx === -1) {
+          matched = false
+          break
+        }
+        pos = nextIdx + 1
+      }
+      if (matched) return ns
+    }
+  }
+  return undefined
+}
+
+export function isReservedSyncedSkillName(name: string): boolean {
+  return matchReservedSyncedSkillNamespace(name) !== undefined
+}
+
+export function isAccountSyncedSkillCommand(
+  command: Command | undefined,
+): boolean {
+  if (!command) return false
+  if (command.loadedFrom === 'syncedSkills') return true
+  if (
+    command.type === 'prompt' &&
+    command.source === 'plugin' &&
+    command.pluginInfo !== undefined
+  ) {
+    const info = command.pluginInfo as { accountSkillsWrapper?: boolean }
+    return info.accountSkillsWrapper === true
+  }
+  return false
+}
+
+function isReservedNamespaceGuardEnabled(): boolean {
+  try {
+    return (
+      getFeatureValue_CACHED_MAY_BE_STALE(PLAID_HARBOR_FLAG, true) !== false
+    )
+  } catch {
+    return true
+  }
+}
+
+function parseSkillRuleContent(ruleContent: string): {
+  name: string
+  prefix?: string
+} {
+  const normalized = ruleContent.startsWith('/')
+    ? ruleContent.substring(1)
+    : ruleContent
+  if (normalized.endsWith(':*') || normalized.endsWith(' *')) {
+    return { name: normalized, prefix: normalized.slice(0, -2) }
+  }
+  return { name: normalized }
+}
+
+function rawSkillRuleMatchesCandidate(
+  ruleContent: string,
+  candidate: string,
+): boolean {
+  const { name, prefix } = parseSkillRuleContent(ruleContent)
+  return (
+    name === candidate || (prefix !== undefined && candidate.startsWith(prefix))
+  )
+}
+
+function boundarySafeSkillRuleMatchesCandidate(
+  ruleContent: string,
+  candidate: string,
+): boolean {
+  const { prefix } = parseSkillRuleContent(ruleContent)
+  if (prefix === undefined) {
+    return rawSkillRuleMatchesCandidate(ruleContent, candidate)
+  }
+  const lowerPrefix = prefix.toLowerCase()
+  const isNsExact = (
+    RESERVED_SYNCED_SKILL_NAMESPACES as readonly string[]
+  ).includes(lowerPrefix)
+  const isNsPrefixed = isReservedNamespacePrefixed(lowerPrefix)
+  if (!isNsExact && !isNsPrefixed) {
+    return (
+      !isReservedNamespacePrefixed(candidate.toLowerCase()) &&
+      rawSkillRuleMatchesCandidate(ruleContent, candidate)
+    )
+  }
+  return (
+    (!isNsExact && candidate === prefix) || candidate.startsWith(`${prefix}:`)
+  )
+}
+
+export type SkillAllowRuleVerdict =
+  | 'allow'
+  | 'no-match'
+  | 'held-back-nonholder'
+  | 'held-back-boundary'
+
+/**
+ * Official 2.1.328 `DVr(rule, requestedName, commandObj)`
+ * (`chunk@294254613.js@4038900`): evaluates an allow rule against a skill,
+ * distinguishing normal allow/no-match from reserved-namespace holds
+ * (`held-back-nonholder` and `held-back-boundary`).
+ */
+export function evaluateSkillAllowRule(
+  ruleContent: string,
+  commandName: string,
+  commandObj: Command | undefined,
+): SkillAllowRuleVerdict {
+  const syncedAlias =
+    commandObj?.type === 'prompt' &&
+    commandObj.loadedFrom === 'syncedSkills' &&
+    commandObj.unqualifiedName != null &&
+    (commandObj.aliases?.includes(commandObj.unqualifiedName) ?? false)
+      ? commandObj.unqualifiedName
+      : undefined
+  const candidates = [
+    commandName,
+    ...(commandObj !== undefined ? [commandObj.name] : []),
+    ...(syncedAlias !== undefined ? [syncedAlias] : []),
+  ]
+  const rawMatched = candidates.some(c =>
+    rawSkillRuleMatchesCandidate(ruleContent, c),
+  )
+  if (!isReservedNamespaceGuardEnabled()) {
+    return rawMatched ? 'allow' : 'no-match'
+  }
+  const isHolder = isAccountSyncedSkillCommand(commandObj)
+  const boundaryMatched = candidates.some(c =>
+    boundarySafeSkillRuleMatchesCandidate(ruleContent, c),
+  )
+  if (
+    candidates.some(
+      c =>
+        boundarySafeSkillRuleMatchesCandidate(ruleContent, c) &&
+        (isHolder || !isReservedSyncedSkillName(c)),
+    )
+  ) {
+    return 'allow'
+  }
+  if (!rawMatched) return 'no-match'
+  return boundaryMatched ? 'held-back-nonholder' : 'held-back-boundary'
+}
+
+/**
+ * Official 2.1.328 `DCa(rule, skillName, info)` (`chunk@294254613.js@4039200`):
+ * formats the user-facing explanation when an allow rule is held back at a
+ * reserved namespace boundary or for a nonholder skill.
+ */
+export function formatSkillAllowRuleHeldBackReason(
+  ruleContent: string,
+  skillName: string,
+  info: { kind: 'nonholder'; pluginName?: string } | { kind: 'boundary' },
+): string {
+  const { prefix } = parseSkillRuleContent(ruleContent)
+  const lowerPrefix = prefix?.toLowerCase()
+  const ruleTargetsReserved =
+    lowerPrefix !== undefined
+      ? (RESERVED_SYNCED_SKILL_NAMESPACES as readonly string[]).includes(
+          lowerPrefix,
+        ) || isReservedNamespacePrefixed(lowerPrefix)
+      : isReservedNamespacePrefixed(ruleContent.toLowerCase())
+  const reservedNs = matchReservedSyncedSkillNamespace(skillName) ?? skillName
+  const lead = ruleTargetsReserved
+    ? `Skill(${ruleContent}) only covers skills synced from your claude.ai account.`
+    : `Skill(${ruleContent}) does not cover "${reservedNs}:" names, which are reserved for skills synced from your claude.ai account.`
+  if (info.kind === 'nonholder') {
+    const origin =
+      info.pluginName !== undefined
+        ? `comes from the plugin "${info.pluginName}"`
+        : 'is not synced'
+    return `${lead} ${skillName} ${origin}, so no rule for that name can pre-approve it; it needs approval each time.`
+  }
+  if (
+    lowerPrefix !== undefined &&
+    (RESERVED_SYNCED_SKILL_NAMESPACES as readonly string[]).includes(
+      lowerPrefix,
+    )
+  ) {
+    return `Skill(${ruleContent}) only covers names starting with "${prefix}:". Add Skill(${skillName}) to allow ${skillName} without asking.`
+  }
+  if (ruleTargetsReserved) {
+    return `Skill(${ruleContent}) only covers ${prefix} and names starting with "${prefix}:". Add Skill(${skillName}) to allow ${skillName} without asking.`
+  }
+  return `${lead} Add Skill(${skillName}) to allow ${skillName} without asking.`
+}
+
 /**
  * Executes a skill in a forked sub-agent context.
  * This runs the skill prompt in an isolated agent with its own token budget.
@@ -281,32 +628,46 @@ async function executeForkedSkill(
     `SkillTool executing forked skill ${commandName} with agent ${agentDefinition.agentType}`,
   )
 
+  const canonicalSkillName = getCanonicalSkillName(command)
+  const nextForkStack = new Set<string>(getActiveForkedSkillNames(context))
+  nextForkStack.add(canonicalSkillName)
+  const forkedChildContext: ForkedSkillToolUseContext = {
+    ...context,
+    getAppState: modifiedGetAppState,
+    permissionLayers,
+    spawnedBySkill: canonicalSkillName,
+    spawnedByForkedSkill: true,
+    options: {
+      ...context.options,
+      spawnedBySkill: canonicalSkillName,
+      spawnedByForkedSkill: true,
+    },
+  }
+
   // densable 2.1.218: context:fork skills default to background (Cvo/wvo).
   // Opt out with frontmatter `background: false`. Returns immediately with
   // "Running in the background as @name"; findings arrive via task-notification.
   if (background) {
     const setAppState = context.setAppStateForTasks ?? context.setAppState
     try {
-      const launched = await launchBackgroundForkedSkill({
-        agentId,
-        agentDefinition,
-        command,
-        description: `/${getCommandName(command)} ${args ?? ''}`.trim(),
-        prompt: skillContent,
-        promptMessages,
-        context: {
-          ...context,
+      const launched = await forkedSkillStackStorage.run(nextForkStack, () =>
+        launchBackgroundForkedSkill({
+          agentId,
+          agentDefinition,
+          command,
+          description: `/${getCommandName(command)} ${args ?? ''}`.trim(),
+          prompt: skillContent,
+          promptMessages,
+          context: forkedChildContext,
+          canUseTool,
           getAppState: modifiedGetAppState,
-          permissionLayers,
-        },
-        canUseTool,
-        getAppState: modifiedGetAppState,
-        setAppState,
-        availableTools,
-        webFetchReadmissionAllowed,
-        readFileState: forkReadFileState,
-        recordInvocationOnSuccess: recordInvocation,
-      })
+          setAppState,
+          availableTools,
+          webFetchReadmissionAllowed,
+          readFileState: forkReadFileState,
+          recordInvocationOnSuccess: recordInvocation,
+        }),
+      )
       if (launched) {
         return {
           data: {
@@ -330,56 +691,55 @@ async function executeForkedSkill(
 
   // Collect messages from the forked agent
   const agentMessages: Message[] = []
+  activeForkedSkillByAgentId.set(agentId, nextForkStack)
 
   try {
-    // Run the sub-agent
-    for await (const message of runAgent({
-      agentDefinition,
-      promptMessages,
-      toolUseContext: {
-        ...context,
-        getAppState: modifiedGetAppState,
-        permissionLayers,
-      },
-      canUseTool,
-      isAsync: false,
-      querySource: 'agent:custom',
-      model: command.model as ModelAlias | undefined,
-      availableTools,
-      webFetchReadmissionAllowed,
-      override: { agentId, readFileState: forkReadFileState },
-    })) {
-      if (isRunAgentSpinnerMode(message)) continue
-      agentMessages.push(message)
+    // Run the sub-agent inside the active forked-skill recursion guard stack
+    await forkedSkillStackStorage.run(nextForkStack, async () => {
+      for await (const message of runAgent({
+        agentDefinition,
+        promptMessages,
+        toolUseContext: forkedChildContext,
+        canUseTool,
+        isAsync: false,
+        querySource: 'agent:custom',
+        model: command.model as ModelAlias | undefined,
+        availableTools,
+        webFetchReadmissionAllowed,
+        override: { agentId, readFileState: forkReadFileState },
+      })) {
+        if (isRunAgentSpinnerMode(message)) continue
+        agentMessages.push(message)
 
-      // Report progress for tool uses (like AgentTool does)
-      if (
-        (message.type === 'assistant' || message.type === 'user') &&
-        onProgress
-      ) {
-        const normalizedNew = normalizeMessages([message])
-        for (const m of normalizedNew) {
-          const contentArray = m.message?.content
-          const hasToolContent =
-            Array.isArray(contentArray) &&
-            contentArray.some(
-              (c: { type: string }) =>
-                c.type === 'tool_use' || c.type === 'tool_result',
-            )
-          if (hasToolContent) {
-            onProgress({
-              toolUseID: `skill_${parentMessage.message.id}`,
-              data: {
-                message: m,
-                type: 'skill_progress',
-                prompt: skillContent,
-                agentId,
-              },
-            })
+        // Report progress for tool uses (like AgentTool does)
+        if (
+          (message.type === 'assistant' || message.type === 'user') &&
+          onProgress
+        ) {
+          const normalizedNew = normalizeMessages([message])
+          for (const m of normalizedNew) {
+            const contentArray = m.message?.content
+            const hasToolContent =
+              Array.isArray(contentArray) &&
+              contentArray.some(
+                (c: { type: string }) =>
+                  c.type === 'tool_use' || c.type === 'tool_result',
+              )
+            if (hasToolContent) {
+              onProgress({
+                toolUseID: `skill_${parentMessage.message.id}`,
+                data: {
+                  message: m,
+                  type: 'skill_progress',
+                  prompt: skillContent,
+                  agentId,
+                },
+              })
+            }
           }
         }
       }
-    }
+    })
 
     const lastAssistant = [...agentMessages]
       .reverse()
@@ -415,6 +775,7 @@ async function executeForkedSkill(
       },
     }
   } finally {
+    activeForkedSkillByAgentId.delete(agentId)
     // Release skill content from invokedSkills state
     clearInvokedSkillsForAgent(agentId)
   }
@@ -635,6 +996,18 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       }
     }
 
+    // Official 2.1.328 `we(C, o)` (`chunk@303609827.js@21600`):
+    // prevent a forked skill subagent from recursively re-invoking itself or an
+    // active ancestor forked skill via SkillTool.
+    if (isForkedSkillRecursiveInvocation(foundCommand, context)) {
+      logEvent('tengu_skill_tool_fork_recursion_blocked', {})
+      return {
+        result: false,
+        message: `Skill ${normalizedCommandName} is already executing in this forked context — you are the subagent running it. Execute the instructions in the skill body directly instead of re-invoking the ${SKILL_TOOL_NAME} tool.`,
+        errorCode: 9,
+      }
+    }
+
     // densable mvn: disableModelInvocation && !userTypedThisTurn
     // Skill tool validateInput is model-invoked (userTypedThisTurn=false).
     if (foundCommand.disableModelInvocation) {
@@ -674,25 +1047,25 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     const commands = await getAllCommands(context)
     const commandObj = findCommand(commandName, commands)
 
-    // Helper function to check if a rule matches the skill
+    // Helper function to check if a deny/ask rule matches the skill
     // Normalizes both inputs by stripping leading slashes for consistent matching
     const ruleMatches = (ruleContent: string): boolean => {
-      // Normalize rule content by stripping leading slash
-      const normalizedRule = ruleContent.startsWith('/')
-        ? ruleContent.substring(1)
-        : ruleContent
-
-      // Check exact match (using normalized commandName)
-      if (normalizedRule === commandName) {
+      if (rawSkillRuleMatchesCandidate(ruleContent, commandName)) {
         return true
       }
-      // Check prefix match (e.g., "review:*" matches "review-pr 123")
-      if (normalizedRule.endsWith(':*')) {
-        const prefix = normalizedRule.slice(0, -2) // Remove ':*'
-        return commandName.startsWith(prefix)
+      if (
+        commandObj &&
+        rawSkillRuleMatchesCandidate(ruleContent, commandObj.name)
+      ) {
+        return true
       }
       return false
     }
+
+    const isNonholderReservedName = (): boolean =>
+      isReservedNamespaceGuardEnabled() &&
+      isReservedSyncedSkillName(commandName) &&
+      !isAccountSyncedSkillCommand(commandObj)
 
     // Check for deny rules
     const denyRules = getRuleByContentsForTool(
@@ -731,14 +1104,46 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       }
     }
 
-    // Check for allow rules
+    // Check for explicit ask rules (official `chunk@303609827.js@25150`)
+    const askRules = getRuleByContentsForTool(
+      permissionContext,
+      SkillTool as Tool,
+      'ask',
+    )
+    for (const [ruleContent, rule] of askRules.entries()) {
+      if (ruleMatches(ruleContent)) {
+        const suppressAlwaysAllow =
+          isNonholderReservedName() || isSha256PinnedSkillRule(commandName)
+        return {
+          behavior: 'ask',
+          message: `Execute skill: ${commandName}`,
+          decisionReason: {
+            type: 'rule',
+            rule,
+          },
+          ...(suppressAlwaysAllow ? { suppressAlwaysAllowRule: true } : {}),
+          updatedInput: { skill, args },
+          metadata: commandObj ? { command: commandObj } : undefined,
+        }
+      }
+    }
+
+    // Check for allow rules with official 2.1.328 reserved-namespace boundary
+    // enforcement (`DVr` / `held-back-nonholder` / `held-back-boundary`).
     const allowRules = getRuleByContentsForTool(
       permissionContext,
       SkillTool as Tool,
       'allow',
     )
+    let heldBack: { rule: string; kind: 'nonholder' | 'boundary' } | undefined
     for (const [ruleContent, rule] of allowRules.entries()) {
-      if (ruleMatches(ruleContent)) {
+      if (isSha256PinnedSkillRule(ruleContent)) continue
+      const verdict = evaluateSkillAllowRule(
+        ruleContent,
+        commandName,
+        commandObj,
+      )
+      if (verdict === 'allow') {
         return {
           behavior: 'allow',
           updatedInput: { skill, args },
@@ -747,6 +1152,11 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
             rule,
           },
         }
+      }
+      if (verdict === 'held-back-nonholder') {
+        heldBack = { rule: ruleContent, kind: 'nonholder' }
+      } else if (verdict === 'held-back-boundary') {
+        heldBack ??= { rule: ruleContent, kind: 'boundary' }
       }
     }
 
@@ -795,6 +1205,46 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       }
     }
 
+    const pluginName =
+      commandObj?.type === 'prompt' && commandObj.source === 'plugin'
+        ? commandObj.pluginInfo?.pluginManifest.name
+        : undefined
+    const isNonholder = isNonholderReservedName()
+    const effectiveHeldBackKind =
+      heldBack === undefined
+        ? undefined
+        : isNonholder
+          ? 'nonholder'
+          : heldBack.kind
+    const heldBackMessage =
+      heldBack === undefined || effectiveHeldBackKind === undefined
+        ? undefined
+        : formatSkillAllowRuleHeldBackReason(
+            heldBack.rule,
+            commandObj?.name ?? commandName,
+            effectiveHeldBackKind === 'nonholder'
+              ? { kind: 'nonholder', pluginName }
+              : { kind: 'boundary' },
+          )
+    const decisionReason =
+      heldBackMessage === undefined
+        ? undefined
+        : ({ type: 'other', reason: heldBackMessage } as const)
+
+    // Official 2.1.328 `chunk@303609827.js@25680`: nonholder reserved-namespace
+    // skills and `@sha256:` pinned skill invocations must ask every time with
+    // `suppressAlwaysAllowRule: true` and no persistent allow-rule suggestions.
+    if (isNonholder || isSha256PinnedSkillRule(commandName)) {
+      return {
+        behavior: 'ask',
+        message: `Execute skill: ${commandName}${heldBackMessage ? ` — ${heldBackMessage}` : ''}`,
+        decisionReason,
+        suppressAlwaysAllowRule: true,
+        updatedInput: { skill, args },
+        metadata: commandObj ? { command: commandObj } : undefined,
+      }
+    }
+
     // Prepare suggestions for exact skill and prefix
     // Use normalized commandName (without leading slash) for consistent rules
     const suggestions = [
@@ -827,8 +1277,8 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     // Default behavior: ask user for permission
     return {
       behavior: 'ask',
-      message: `Execute skill: ${commandName}`,
-      decisionReason: undefined,
+      message: `Execute skill: ${commandName}${heldBackMessage ? ` — ${heldBackMessage}` : ''}`,
+      decisionReason,
       suggestions,
       updatedInput: { skill, args },
       metadata: commandObj ? { command: commandObj } : undefined,
@@ -1221,6 +1671,8 @@ const SAFE_SKILL_PROPERTIES = new Set([
   'type',
   'progressMessage',
   'contentLength',
+  'contentHash',
+  'skillFile',
   'argNames',
   'model',
   'effort',
@@ -1230,15 +1682,32 @@ const SAFE_SKILL_PROPERTIES = new Set([
   'skillRoot',
   'context',
   'agent',
+  'background',
   'getPromptForCommand',
+  'getContext',
+  'getEffort',
+  'getDefaultEffort',
+  'onUserTypedArgs',
+  'formatForegroundForkResult',
   'frontmatterKeys',
+  'declaredFields',
+  'metadata',
+  'createdBy',
+  'fallback',
+  'displayName',
+  'unqualifiedName',
+  'fromHostCatalog',
   // CommandBase properties
   'name',
   'description',
+  'menuDescription',
+  'listingDescription',
   'hasUserSpecifiedDescription',
   'isEnabled',
   'isHidden',
   'aliases',
+  'subcommands',
+  'subcommandsBareOnly',
   'isMcp',
   'argumentHint',
   'whenToUse',
@@ -1249,6 +1718,7 @@ const SAFE_SKILL_PROPERTIES = new Set([
   'loadedFrom',
   'immediate',
   'userFacingName',
+  'getArgumentCompletions',
 ])
 
 function skillHasOnlySafeProperties(command: Command): boolean {

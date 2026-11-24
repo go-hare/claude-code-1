@@ -63,18 +63,4 @@ describe('autoScrollEnabled (densable sp default true)', () => {
     expect(compact).toBeGreaterThan(0)
     expect(scroll).toBeGreaterThan(compact)
   })
-
-  test('ConfigTool supportedSettings lists autoScrollEnabled as global boolean', async () => {
-    const src = await Bun.file(
-      join(
-        import.meta.dir,
-        '../../../packages/builtin-tools/src/tools/ConfigTool/supportedSettings.ts',
-      ),
-    ).text()
-    expect(src).toMatch(/autoScrollEnabled:\s*\{/)
-    expect(src).toMatch(/source: 'global'/)
-    expect(src).toContain(
-      'Auto-scroll the conversation view to bottom (fullscreen mode only)',
-    )
-  })
 })
