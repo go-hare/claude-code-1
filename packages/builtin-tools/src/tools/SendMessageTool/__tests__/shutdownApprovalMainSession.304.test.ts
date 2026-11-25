@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { setDynamicTeamContext } from 'src/utils/teammate.js'
 import { runWithTeammateContext } from 'src/utils/teammateContext.js'
+import {
+  recordPendingShutdownRequest,
+  resetPendingShutdownRequestsForTesting,
+} from 'src/utils/teammateMailbox.js'
 import { SendMessageTool } from '../SendMessageTool.js'
 
 afterEach(() => {
   setDynamicTeamContext(null)
+  resetPendingShutdownRequestsForTesting()
 })
 
 describe('SendMessageTool shutdown_response in main session (#995)', () => {
@@ -55,6 +60,7 @@ describe('SendMessageTool shutdown_response in main session (#995)', () => {
     })) as unknown as Parameters<typeof SendMessageTool.call>[2]
     const assistantMsg = {} as Parameters<typeof SendMessageTool.call>[3]
 
+    recordPendingShutdownRequest('req-456', 'worker', true)
     const result = await runWithTeammateContext(
       {
         agentId: 'worker@my-team',

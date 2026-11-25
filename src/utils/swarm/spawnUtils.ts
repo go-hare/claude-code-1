@@ -12,7 +12,9 @@ import {
 } from '../../bootstrap/state.js'
 import { quote } from '../bash/shellQuote.js'
 import { isInBundledMode } from '../bundledMode.js'
+import type { EffortValue } from '../effort.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
+import { getSessionTaskListId } from '../tasks.js'
 import { getTeammateModeFromSnapshot } from './backends/teammateModeSnapshot.js'
 import { TEAMMATE_COMMAND_ENV_VAR } from './constants.js'
 
@@ -41,6 +43,7 @@ export function buildInheritedCliFlags(options?: {
   permissionMode?: PermissionMode
   disallowedTools?: readonly string[]
   tools?: readonly string[]
+  effort?: EffortValue
 }): string {
   return quote(buildInheritedCliArgParts(options))
 }
@@ -50,9 +53,10 @@ export function buildInheritedCliArgParts(options?: {
   permissionMode?: PermissionMode
   disallowedTools?: readonly string[]
   tools?: readonly string[]
+  effort?: EffortValue
 }): string[] {
   const flags: string[] = []
-  const { planModeRequired, permissionMode, disallowedTools, tools } =
+  const { planModeRequired, permissionMode, disallowedTools, tools, effort } =
     options || {}
 
   // Propagate permission mode to teammates, but NOT if plan mode is required
@@ -90,6 +94,11 @@ export function buildInheritedCliArgParts(options?: {
   const modelOverride = getMainLoopModelOverride()
   if (modelOverride) {
     flags.push('--model', modelOverride)
+  }
+
+  // Official 2.1.331: forward explicit/agent-definition effort level to pane teammates
+  if (effort !== undefined) {
+    flags.push('--effort', String(effort))
   }
 
   // Propagate --settings if set via CLI
@@ -212,6 +221,14 @@ export function getInheritedEnvVarAssignments(): Array<[string, string]> {
     ['CLAUDECODE', '1'],
     ['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', '1'],
   ]
+
+  // Official 2.1.331: forward session/explicit task list ID so pane teammates
+  // share the leader's task list after /clear or --resume rekeying.
+  const taskListId =
+    process.env.CLAUDE_CODE_TASK_LIST_ID || getSessionTaskListId()
+  if (taskListId) {
+    envVars.push(['CLAUDE_CODE_TASK_LIST_ID', taskListId])
+  }
 
   for (const key of TEAMMATE_ENV_VARS) {
     const value = process.env[key]

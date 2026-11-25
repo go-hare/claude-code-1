@@ -7,13 +7,22 @@ import { registerCleanup } from '../../../utils/cleanupRegistry.js'
 import { getCwd } from '../../../utils/cwd.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { jsonStringify } from '../../../utils/slowOperations.js'
-import { writeToMailbox } from '../../../utils/teammateMailbox.js'
+import {
+  clearTeamLeadEntryKeyForInbox,
+  createTeamLeadEntryKeyForInbox,
+  getInboxPath,
+  writeToMailbox,
+} from '../../../utils/teammateMailbox.js'
 import {
   buildInheritedCliArgParts,
   buildInheritedEnvVars,
   getInheritedEnvVarAssignments,
   getTeammateCommand,
 } from '../spawnUtils.js'
+import {
+  recordSpawnedTeammatePane,
+  untrackSpawnedTeammatePane,
+} from '../teamHelpers.js'
 import { assignTeammateColor } from '../teammateLayoutManager.js'
 import { isInsideTmux } from './detection.js'
 import type {
@@ -136,9 +145,25 @@ export class PaneBackendExecutor implements TeammateExecutor {
       }
     }
 
+    const inboxPath = getInboxPath(config.name, config.teamName)
+    let createdPane: { paneId: string; insideTmux: boolean } | undefined
+    let leadVerifyKeyCreated = false
+
     try {
       // Assign a unique color to this teammate
       const teammateColor = config.color ?? assignTeammateColor(agentId)
+
+      // Official 2.1.331: create per-inbox Ed25519 lead verify key before
+      // writing initial prompt or launching the pane process.
+      let leadVerifyKey: string | undefined
+      try {
+        leadVerifyKey = createTeamLeadEntryKeyForInbox(inboxPath)
+        leadVerifyKeyCreated = true
+      } catch (keyErr) {
+        logForDebugging(
+          `[PaneBackendExecutor] Could not generate lead verify key for ${agentId}: ${keyErr}`,
+        )
+      }
 
       const paneResult =
         config.useSplitPane === false &&
@@ -155,6 +180,8 @@ export class PaneBackendExecutor implements TeammateExecutor {
 
       // Check if we're inside tmux to determine how to send commands
       const insideTmux = await isInsideTmux()
+      createdPane = { paneId, insideTmux }
+      recordSpawnedTeammatePane(this.type, paneId)
 
       // Enable pane border status on first teammate when inside tmux
       if (isFirstTeammate && insideTmux) {
@@ -176,6 +203,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
         teammateColor,
         '--parent-session-id',
         config.parentSessionId || getSessionId(),
+        ...(leadVerifyKey ? ['--lead-verify-key', leadVerifyKey] : []),
         ...(config.planModeRequired ? ['--plan-mode-required'] : []),
         ...(config.agentType ? ['--agent-type', config.agentType] : []),
       ]
@@ -186,6 +214,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
         planModeRequired: config.planModeRequired,
         permissionMode: appState.toolPermissionContext.mode,
         disallowedTools: appState.toolPermissionContext.alwaysDenyRules?.cliArg,
+        effort: config.effort ?? config.agentDefinition?.effort,
       })
 
       // If teammate has a custom model, add --model flag (or replace inherited one)
@@ -213,6 +242,23 @@ export class PaneBackendExecutor implements TeammateExecutor {
           ? buildPowerShellSpawnCommand(binaryPath, allArgs, workingDir)
           : `cd ${quote([workingDir])} && env ${envStr} ${quote([binaryPath])} ${quote(allArgs)}`
 
+      // Official 2.1.331: write initial instructions to mailbox BEFORE starting
+      // the pane command, and abort + tear down the pane if the write fails.
+      const promptMsgId = await writeToMailbox(
+        config.name,
+        {
+          from: 'team-lead',
+          text: config.prompt,
+          timestamp: new Date().toISOString(),
+        },
+        config.teamName,
+      )
+      if (promptMsgId === undefined) {
+        throw new Error(
+          `Failed to write initial instructions to ${config.name}'s inbox — spawn aborted`,
+        )
+      }
+
       // Send the command to the new pane
       // Use swarm socket when running outside tmux (external swarm session)
       await this.backend.sendCommandToPane(paneId, spawnCommand, !insideTmux)
@@ -229,25 +275,10 @@ export class PaneBackendExecutor implements TeammateExecutor {
               `[PaneBackendExecutor] Cleanup: killing pane for ${id}`,
             )
             await this.backend.killPane(info.paneId, !info.insideTmux)
+            untrackSpawnedTeammatePane(this.type, info.paneId)
           }
           this.spawnedTeammates.clear()
         })
-      }
-
-      // densable dO: soft-fail on initial prompt — pane still spawned
-      const promptMsgId = await writeToMailbox(
-        config.name,
-        {
-          from: 'team-lead',
-          text: config.prompt,
-          timestamp: new Date().toISOString(),
-        },
-        config.teamName,
-      )
-      if (promptMsgId === undefined) {
-        logForDebugging(
-          `[PaneBackendExecutor] Spawned ${agentId} but FAILED initial prompt mailbox write`,
-        )
       }
 
       logForDebugging(
@@ -268,6 +299,22 @@ export class PaneBackendExecutor implements TeammateExecutor {
         isSplitPane: config.useSplitPane !== false,
       }
     } catch (error) {
+      if (createdPane) {
+        try {
+          await this.backend.killPane(
+            createdPane.paneId,
+            !createdPane.insideTmux,
+          )
+        } catch (killErr) {
+          logForDebugging(
+            `[PaneBackendExecutor] Failed to tear down pane ${createdPane.paneId} after spawn failure: ${killErr}`,
+          )
+        }
+        untrackSpawnedTeammatePane(this.type, createdPane.paneId)
+      }
+      if (leadVerifyKeyCreated) {
+        clearTeamLeadEntryKeyForInbox(inboxPath)
+      }
       const errorMessage =
         error instanceof Error ? error.message : String(error)
       logForDebugging(
@@ -400,6 +447,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
 
     if (killed) {
       this.spawnedTeammates.delete(agentId)
+      untrackSpawnedTeammatePane(this.type, paneId)
       logForDebugging(`[PaneBackendExecutor] kill() succeeded for ${agentId}`)
     } else {
       logForDebugging(`[PaneBackendExecutor] kill() failed for ${agentId}`)

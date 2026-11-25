@@ -2,6 +2,7 @@ import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/
 import type { CustomAgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { ToolUseContext } from '../../../Tool.js'
 import type { PermissionMode } from '../../../types/permissions.js'
+import type { EffortValue } from '../../effort.js'
 
 /**
  * Types of backends available for teammate execution.
@@ -223,6 +224,8 @@ export type TeammateSpawnConfig = TeammateIdentity & {
   cwd: string
   /** Model to use for this teammate */
   model?: string
+  /** Optional reasoning effort level override for this teammate */
+  effort?: EffortValue
   /** Optional custom agent type for process-based teammates. */
   agentType?: string
   /** Optional resolved custom agent definition for in-process teammates. */

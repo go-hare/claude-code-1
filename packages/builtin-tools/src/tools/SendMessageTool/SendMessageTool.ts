@@ -51,6 +51,7 @@ import {
   MAIN_RECIPIENT_NAME,
   TEAM_LEAD_NAME,
 } from 'src/utils/swarm/constants.js'
+import { wakeIdleTeammate } from 'src/utils/swarm/inProcessRunner.js'
 import { readTeamFileAsync } from 'src/utils/swarm/teamHelpers.js'
 import {
   getAgentId,
@@ -70,6 +71,7 @@ import {
   hasPendingShutdownRequestForAddressee,
   hasTeamLeadEntryKeyForInbox,
   isStructuredProtocolMessage,
+  recordPendingShutdownRequest,
   removePendingShutdownRequest,
   writeToMailbox,
 } from 'src/utils/teammateMailbox.js'
@@ -100,6 +102,7 @@ import {
   localClaimedRemoteBodies,
   parseNameRef,
   resolvePeerByName,
+  resolveTeammateByBareName,
   setSendMessagePinOnAppState,
   type PeerCandidate,
 } from './nameResolve.js'
@@ -764,14 +767,6 @@ export type MessageOutput = {
   resumedAgentId?: string
 }
 
-export type BroadcastOutput = {
-  success: boolean
-  message: string
-  recipients: string[]
-  routing?: MessageRouting
-  errorClass?: string
-}
-
 export type RequestOutput = {
   success: boolean
   message: string
@@ -792,7 +787,6 @@ export type ResponseOutput = {
 
 export type SendMessageToolOutput =
   | MessageOutput
-  | BroadcastOutput
   | RequestOutput
   | ResponseOutput
 
@@ -1309,6 +1303,9 @@ async function handleMessage(
     }
   }
 
+  // Official 2.1.331 `nni` — wake idle in-process teammate immediately after write.
+  wakeIdleTeammate(appState.tasks, recipientName, teamName)
+
   const recipientColor = findTeammateColor(appState, recipientName)
 
   // densable vKg: routing.content = Bs(t, 50) — full body lives only in the
@@ -1326,106 +1323,6 @@ async function handleMessage(
         summary,
         content: truncate(content, 50),
       },
-    },
-  }
-}
-
-async function handleBroadcast(
-  content: string,
-  summary: string | undefined,
-  context: ToolUseContext,
-): Promise<{ data: BroadcastOutput }> {
-  const appState = context.getAppState()
-  const teamName = getTeamName(appState.teamContext)
-
-  if (!teamName) {
-    throw new Error(
-      'Not in a team context. Create a team with Teammate spawnTeam first, or set CLAUDE_CODE_TEAM_NAME.',
-    )
-  }
-
-  const teamFile = await readTeamFileAsync(teamName)
-  if (!teamFile) {
-    throw new Error(`Team "${teamName}" does not exist`)
-  }
-
-  const senderName =
-    getAgentName() || (isTeammate() ? 'teammate' : TEAM_LEAD_NAME)
-  if (!senderName) {
-    throw new Error(
-      'Cannot broadcast: sender name is required. Set CLAUDE_CODE_AGENT_NAME.',
-    )
-  }
-
-  const senderColor = getTeammateColor()
-
-  const recipients: string[] = []
-  for (const member of teamFile.members) {
-    if (member.name.toLowerCase() === senderName.toLowerCase()) {
-      continue
-    }
-    recipients.push(member.name)
-  }
-
-  if (recipients.length === 0) {
-    return {
-      data: {
-        success: true,
-        message: 'No teammates to broadcast to (you are the only team member)',
-        recipients: [],
-      },
-    }
-  }
-
-  const delivered: string[] = []
-  const failed: string[] = []
-  for (const recipientName of recipients) {
-    const msgId = await writeToMailbox(
-      recipientName,
-      {
-        from: senderName,
-        text: content,
-        summary,
-        timestamp: new Date().toISOString(),
-        color: senderColor,
-      },
-      teamName,
-    )
-    if (msgId === undefined) {
-      failed.push(recipientName)
-    } else {
-      delivered.push(recipientName)
-    }
-  }
-
-  if (delivered.length === 0) {
-    return {
-      data: {
-        success: false,
-        message: `Failed to write broadcast to any teammate inbox — nothing was sent. Try again.`,
-        recipients: [],
-        errorClass: 'mailbox_write_failed',
-      },
-    }
-  }
-
-  // densable: same Bs(…, 50) preview on routing as unicast (token savings in
-  // tool_result / replayed history). Partial deliver still reports who got it.
-  const partialNote =
-    failed.length > 0 ? ` (${failed.length} failed: ${failed.join(', ')})` : ''
-  return {
-    data: {
-      success: true,
-      message: `Message broadcast to ${delivered.length} teammate(s): ${delivered.join(', ')}${partialNote}`,
-      recipients: delivered,
-      routing: {
-        sender: senderName,
-        senderColor,
-        target: '@team',
-        summary,
-        content: truncate(content, 50),
-      },
-      ...(failed.length > 0 ? { errorClass: 'mailbox_write_failed' } : {}),
     },
   }
 }
@@ -1459,6 +1356,14 @@ async function handleShutdownRequest(
     }
   }
 
+  if (!getDynamicTeamContext()) {
+    recordPendingShutdownRequest(
+      requestId,
+      targetName,
+      senderName === TEAM_LEAD_NAME,
+    )
+  }
+
   const shutdownMessage = createShutdownRequestMessage({
     requestId,
     from: senderName,
@@ -1489,6 +1394,9 @@ async function handleShutdownRequest(
     }
   }
 
+  // Official 2.1.331 `nni` — wake idle in-process teammate immediately after shutdown_request.
+  wakeIdleTeammate(appState.tasks, targetName, teamName)
+
   return {
     data: {
       success: true,
@@ -1518,11 +1426,11 @@ async function handleShutdownApproval(
   const agentId = getAgentId()
   const agentName = getAgentName() || 'teammate'
 
-  // Official 2.1.328 (`chunk@325838323.js @57118`): split-pane teammates with
-  // an active lead verify key must only approve shutdown_request IDs verified
-  // from the team lead.
+  // Official 2.1.331 (`@349666000`): BOTH in-process teammates
+  // (`teammateContext !== undefined`) AND pane teammates with an active lead
+  // verify key must only approve shutdown_request IDs recorded from team lead.
   if (
-    getActiveLeadVerifyKey() !== undefined &&
+    (teammateContext !== undefined || getActiveLeadVerifyKey() !== undefined) &&
     !hasPendingShutdownRequestForAddressee(
       requestId,
       teammateContext?.agentName ?? agentName,
@@ -1916,6 +1824,8 @@ async function handlePlanApproval(
     }
   }
 
+  wakeIdleTeammate(appState.tasks, recipientName, teamName)
+
   return {
     data: {
       success: true,
@@ -1969,6 +1879,8 @@ async function handlePlanRejection(
     }
   }
 
+  wakeIdleTeammate(appState.tasks, recipientName, teamName)
+
   return {
     data: {
       success: true,
@@ -1981,8 +1893,7 @@ async function handlePlanRejection(
 export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
   buildTool({
     name: SEND_MESSAGE_TOOL_NAME,
-    searchHint:
-      'send message to teammate agent, broadcast, inter-agent communication, swarm messaging, agent coordination',
+    searchHint: 'send messages to agent teammates',
     maxResultSizeChars: 100_000,
 
     userFacingName() {
@@ -2307,13 +2218,6 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
       }
 
-      if (input.to === '*') {
-        return {
-          result: false,
-          message: 'structured messages cannot be broadcast (to: "*")',
-          errorCode: 9,
-        }
-      }
       if (feature('UDS_INBOX') && parseAddress(input.to).scheme !== 'other') {
         return {
           result: false,
@@ -2975,12 +2879,43 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
       }
 
+      // Official 2.1.331 @349705500: non-teammate background subagents
+      // (`local_agent`) must not send structured team-protocol frames.
+      if (typeof input.message !== 'string' && context.agentId) {
+        const senderTask = context.getAppState().tasks[context.agentId]
+        if (
+          isLocalAgentTask(senderTask) ||
+          getAgentContext()?.agentType !== 'teammate'
+        ) {
+          return {
+            data: {
+              success: false,
+              message:
+                'Structured team-protocol messages (shutdown/plan responses and requests) are acts of the session itself and cannot be sent by a background subagent. Send a plain text message instead.',
+              errorClass: 'not_reachable',
+            },
+          }
+        }
+      }
+
+      // Broadcast (to: "*") is no longer supported.
+      if (input.to === '*') {
+        return {
+          data: {
+            success: false,
+            message:
+              'broadcast (to: "*") is no longer supported — send a message per recipient',
+            errorClass: 'not_reachable',
+          },
+        }
+      }
+
       // Route to in-process subagent by name or raw agentId before falling
       // through to ambient-team resolution. Stopped agents are auto-resumed.
       // Also covers plan_approval_response when the model targets a local
       // subagent id (createAgentId) — must not hit team-lead mailbox gate.
       // (Observer sender gate is at call() entry — covers UDS/mailbox/etc.)
-      if (input.to !== '*') {
+      {
         let localText: string | null = null
         if (typeof input.message === 'string') {
           localText = input.message
@@ -3005,10 +2940,9 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
       }
 
-      // densable 2.1.225 gIn/rKp + 2.1.234 #34 searchTruncated —
-      // after in-process agents, resolve bare name / name [ref] against local
-      // UDS + RC peers (incl. account bridge walk) with pin guard.
-      // densable 2.1.236 C1: require non-empty text (pure idle handled earlier).
+      // Official 2.1.331 @349587500 & @349722973: resolve active session
+      // teammates BEFORE falling through to UDS/bridge peer resolution so
+      // plain-text SendMessage to teammates works when UDS_INBOX is enabled.
       if (
         feature('UDS_INBOX') &&
         typeof input.message === 'string' &&
@@ -3017,6 +2951,39 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         input.to !== MAIN_RECIPIENT &&
         parseAddress(input.to).scheme === 'other'
       ) {
+        const appStateNow = context.getAppState()
+        const teamName = getTeamName(appStateNow.teamContext)
+        const teamFile = teamName ? await readTeamFileAsync(teamName) : null
+
+        const bareMailboxTarget = resolveTeammateByBareName({
+          to: input.to,
+          teamName,
+          teamContextTeammates: appStateNow.teamContext?.teammates,
+          teamFileMembers: teamFile?.members,
+          teamLeadName: TEAM_LEAD_NAME,
+        })
+        if (bareMailboxTarget !== null) {
+          const delivered = await handleMessage(
+            bareMailboxTarget.recipientName,
+            input.message,
+            input.summary,
+            context,
+          )
+          if (notifyIdle) {
+            /* eslint-disable @typescript-eslint/no-require-imports */
+            const idle =
+              require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+            /* eslint-enable @typescript-eslint/no-require-imports */
+            return {
+              data: {
+                ...delivered.data,
+                message: `${delivered.data.message}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY}`,
+              },
+            }
+          }
+          return delivered
+        }
+
         /* eslint-disable @typescript-eslint/no-require-imports */
         const udsClient =
           require('src/utils/udsClient.js') as typeof import('src/utils/udsClient.js')
@@ -3024,11 +2991,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
         const cloudPeers =
           require('src/utils/teleport/cloudPeerSessions.js') as typeof import('src/utils/teleport/cloudPeerSessions.js')
-        const {
-          appendSearchTruncatedSuccessSuffix,
-          appendSearchTruncatedBody,
-          searchTruncatedDisplayNote,
-        } =
+        const { appendSearchTruncatedSuccessSuffix } =
           require('src/utils/sessionListIncompleteCopy.js') as typeof import('src/utils/sessionListIncompleteCopy.js')
         /* eslint-enable @typescript-eslint/no-require-imports */
         const accountStatus = { failed: false, truncated: false }
@@ -3043,12 +3006,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         // densable Mhf / g(): searchTruncated = cloud.truncated || bridge.truncated
         const searchTruncated =
           cloudList.truncated === true || accountStatus.truncated === true
-        const appStateNow = context.getAppState()
+        const seenTeammates = new Set<string>()
         const listingUniqueness: Array<{ kind: string; id: string }> = []
-        for (const [id] of Object.entries(
+        for (const id of Object.keys(
           appStateNow.teamContext?.teammates ?? {},
         )) {
+          seenTeammates.add(id)
           listingUniqueness.push({ kind: 'teammate', id })
+        }
+        for (const member of teamFile?.members ?? []) {
+          if (seenTeammates.has(member.agentId)) continue
+          seenTeammates.add(member.agentId)
+          listingUniqueness.push({ kind: 'teammate', id: member.agentId })
         }
         for (const [name, id] of appStateNow.agentNameRegistry) {
           if (name) listingUniqueness.push({ kind: 'subagent', id })
@@ -3438,23 +3407,6 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         // Message+notify to a non-UDS target: deliver message via mailbox below,
         // but refuse the idle subscription with an explicit note.
         if (typeof input.message === 'string') {
-          if (input.to === '*') {
-            const delivered = await handleBroadcast(
-              input.message,
-              input.summary,
-              context,
-            )
-            const base =
-              typeof delivered.data.message === 'string'
-                ? delivered.data.message
-                : 'Broadcast sent.'
-            return {
-              data: {
-                ...delivered.data,
-                message: `${base}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY}`,
-              },
-            }
-          }
           const delivered = await handleMessage(
             input.to,
             input.message,
@@ -3482,14 +3434,22 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       }
 
       if (typeof input.message === 'string') {
-        if (input.to === '*') {
-          return handleBroadcast(input.message, input.summary, context)
-        }
-        return handleMessage(input.to, input.message, input.summary, context)
-      }
-
-      if (input.to === '*') {
-        throw new Error('structured messages cannot be broadcast')
+        const appStateNow = context.getAppState()
+        const teamName = getTeamName(appStateNow.teamContext)
+        const teamFile = teamName ? await readTeamFileAsync(teamName) : null
+        const resolvedTeammate = resolveTeammateByBareName({
+          to: input.to,
+          teamName,
+          teamContextTeammates: appStateNow.teamContext?.teammates,
+          teamFileMembers: teamFile?.members,
+          teamLeadName: TEAM_LEAD_NAME,
+        })
+        return handleMessage(
+          resolvedTeammate?.recipientName ?? input.to,
+          input.message,
+          input.summary,
+          context,
+        )
       }
 
       switch (input.message.type) {

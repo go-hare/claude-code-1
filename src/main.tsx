@@ -3981,15 +3981,19 @@ async function run(): Promise<CommanderCommand> {
       // via existingTeamName so we do not rewrite assistant-*.
       let sessionTeamContext: AppState['teamContext'] | undefined;
       if (isAgentSwarmsEnabled() && !storedTeammateOpts?.agentId) {
-        const { initializeSessionTeam } = await import('./utils/swarm/sessionTeam.js');
-        sessionTeamContext = (
-          await initializeSessionTeam({
-            existingTeamName: assistantTeamContext?.teamName,
-          })
-        ).teamContext;
-        if (options.sessionId && !options.forkSession) {
-          const { restoreSessionTaskListId } = await import('./utils/tasks.js');
-          await restoreSessionTaskListId(getSessionId());
+        try {
+          const { initializeSessionTeam } = await import('./utils/swarm/sessionTeam.js');
+          sessionTeamContext = (
+            await initializeSessionTeam({
+              existingTeamName: assistantTeamContext?.teamName,
+            })
+          ).teamContext;
+          if (options.sessionId && !options.forkSession) {
+            const { restoreSessionTaskListId } = await import('./utils/tasks.js');
+            await restoreSessionTaskListId(getSessionId());
+          }
+        } catch (err) {
+          logError(err);
         }
       }
 

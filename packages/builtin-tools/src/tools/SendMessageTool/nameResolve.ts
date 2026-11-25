@@ -36,6 +36,13 @@ export type PeerCandidate = {
   environmentKind?: string
 }
 
+export type MailboxTeammateResolution = {
+  kind: 'mailbox'
+  recipientName: string
+  memberAgentId?: string
+  memberIdentitySource?: 'team-context' | 'roster'
+}
+
 export type NameResolveResult =
   | {
       kind: 'ok'
@@ -523,6 +530,142 @@ export function formatAmbiguousMessage(
     msg = appendSearchTruncatedBody(msg, true)
   }
   return msg
+}
+
+/**
+ * Official 2.1.331 `fe()` — resolve a bare recipient name or `name [ref]` against
+ * active session teammates (`appState.teamContext.teammates`, `'team-lead'`,
+ * and `teamFile.members`) before falling through to UDS/bridge peer resolution.
+ */
+export function resolveTeammateByBareName(args: {
+  to: string
+  teamName?: string
+  teamContextTeammates?: Record<string, { name: string }>
+  teamFileMembers?: ReadonlyArray<{ agentId: string; name: string }>
+  teamLeadName?: string
+}): MailboxTeammateResolution | null {
+  const parsed = parseNameRef(args.to)
+  const ctxEntries = Object.entries(args.teamContextTeammates ?? {})
+  if (parsed !== null) {
+    const normalizedName = normalizeAgentName(parsed.name)
+    const teammateCandidates: Array<{
+      agentId: string
+      name: string
+      source: 'team-context' | 'roster'
+    }> = []
+    const seen = new Set<string>()
+    for (const [id, tm] of ctxEntries) {
+      seen.add(id)
+      teammateCandidates.push({
+        agentId: id,
+        name: tm.name,
+        source: 'team-context',
+      })
+    }
+    if (args.teamName) {
+      for (const m of args.teamFileMembers ?? []) {
+        if (seen.has(m.agentId)) continue
+        seen.add(m.agentId)
+        teammateCandidates.push({
+          agentId: m.agentId,
+          name: m.name,
+          source: 'roster',
+        })
+      }
+    }
+    const sameNameHits = teammateCandidates.filter(
+      tm =>
+        normalizeAgentName(tm.name) === normalizedName &&
+        listingRefMatchesCandidate(
+          { kind: 'teammate', id: tm.agentId },
+          parsed.ref,
+        ),
+    )
+    if (sameNameHits.length === 1) {
+      const hit = sameNameHits[0]!
+      return {
+        kind: 'mailbox',
+        recipientName: hit.name,
+        memberAgentId: hit.agentId,
+        memberIdentitySource: hit.source,
+      }
+    }
+    const refOnlyHits = teammateCandidates.filter(tm =>
+      listingRefMatchesCandidate(
+        { kind: 'teammate', id: tm.agentId },
+        parsed.ref,
+      ),
+    )
+    if (refOnlyHits.length === 1) {
+      const hit = refOnlyHits[0]!
+      return {
+        kind: 'mailbox',
+        recipientName: hit.name,
+        memberAgentId: hit.agentId,
+        memberIdentitySource: hit.source,
+      }
+    }
+    return null
+  }
+  const to = args.to
+  const normalizedTo = normalizeAgentName(to)
+  const leadName = args.teamLeadName ?? 'team-lead'
+
+  const exactCtx = ctxEntries.find(([, tm]) => tm.name === to)
+  if (exactCtx) {
+    return {
+      kind: 'mailbox',
+      recipientName: exactCtx[1].name,
+      memberAgentId: exactCtx[0],
+      memberIdentitySource: 'team-context',
+    }
+  }
+
+  if (args.teamName) {
+    if (to === leadName) {
+      return { kind: 'mailbox', recipientName: leadName }
+    }
+    const exactRoster = args.teamFileMembers?.find(m => m.name === to)
+    if (exactRoster) {
+      return {
+        kind: 'mailbox',
+        recipientName: exactRoster.name,
+        memberAgentId: exactRoster.agentId,
+        memberIdentitySource: 'roster',
+      }
+    }
+  }
+
+  const normCtx = ctxEntries.find(
+    ([, tm]) => normalizeAgentName(tm.name) === normalizedTo,
+  )
+  if (normCtx) {
+    return {
+      kind: 'mailbox',
+      recipientName: normCtx[1].name,
+      memberAgentId: normCtx[0],
+      memberIdentitySource: 'team-context',
+    }
+  }
+
+  if (args.teamName) {
+    if (normalizedTo === normalizeAgentName(leadName)) {
+      return { kind: 'mailbox', recipientName: leadName }
+    }
+    const normRoster = args.teamFileMembers?.find(
+      m => normalizeAgentName(m.name) === normalizedTo,
+    )
+    if (normRoster) {
+      return {
+        kind: 'mailbox',
+        recipientName: normRoster.name,
+        memberAgentId: normRoster.agentId,
+        memberIdentitySource: 'roster',
+      }
+    }
+  }
+
+  return null
 }
 
 /**

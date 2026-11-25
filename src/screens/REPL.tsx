@@ -5594,6 +5594,16 @@ function REPLInner({
         const { renameRecordingForSession } = await import('../utils/asciicast.js');
         await renameRecordingForSession();
         await resetSessionFilePointer();
+        if (isAgentSwarmsEnabled()) {
+          const { rekeySessionTeamInSession } = await import('../utils/swarm/sessionTeam.js');
+          const rekeyedTeam = await rekeySessionTeamInSession();
+          if (rekeyedTeam) {
+            setAppState(prev => ({
+              ...prev,
+              teamContext: rekeyedTeam.teamContext,
+            }));
+          }
+        }
 
         // densable 2.1.239 OMo after S1 switchSession (print.ts already did).
         // Then y_u from CCR stash when present (interactive #13).

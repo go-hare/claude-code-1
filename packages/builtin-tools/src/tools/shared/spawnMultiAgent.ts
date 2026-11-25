@@ -10,27 +10,36 @@ import type { ToolUseContext } from 'src/Tool.js'
 import { formatAgentId } from 'src/utils/agentId.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import type { EffortValue } from 'src/utils/effort.js'
 import { errorMessage } from 'src/utils/errors.js'
 import { getTeammateExecutor } from 'src/utils/swarm/backends/registry.js'
 import type {
-  BackendType,
   TeammateExecutor,
   TeammateSpawnResult,
 } from 'src/utils/swarm/backends/types.js'
 import {
+  isReservedSpawnAgentName,
   MAIN_RECIPIENT_NAME,
   SWARM_SESSION_NAME,
   TEAM_LEAD_NAME,
 } from 'src/utils/swarm/constants.js'
 import {
   getTeamFilePath,
+  hasControlChars,
   readTeamFileAsync,
+  recordSpawnedTeammatePane,
+  removeTeamMember,
   sanitizeAgentName,
-  writeTeamFileAsync,
   type TeamFile,
+  updateTeamFile,
 } from 'src/utils/swarm/teamHelpers.js'
 import { assignTeammateColor } from 'src/utils/swarm/teammateLayoutManager.js'
 import { resolveTeammateModel } from 'src/utils/swarm/teammateModel.js'
+import {
+  clearPendingShutdownRequestsForAddressee,
+  clearTeamLeadEntryKeyForInbox,
+  getInboxPath,
+} from 'src/utils/teammateMailbox.js'
 import type { CustomAgentDefinition } from '../AgentTool/loadAgentsDir.js'
 import { isCustomAgent } from '../AgentTool/loadAgentsDir.js'
 
@@ -64,6 +73,7 @@ export type SpawnTeammateConfig = {
   use_splitpane?: boolean
   plan_mode_required?: boolean
   model?: string
+  effort?: EffortValue
   agent_type?: string
   description?: string
   /** request_id of the API call whose response contained the tool_use that
@@ -81,6 +91,7 @@ type SpawnInput = {
   use_splitpane?: boolean
   plan_mode_required?: boolean
   model?: string
+  effort?: EffortValue
   agent_type?: string
   description?: string
   invokingRequestId?: string
@@ -90,33 +101,28 @@ type SpawnInput = {
 // Helper Functions
 // ============================================================================
 
-/**
- * densable pzg — sanitize (@→-), refuse reserved MAIN_RECIPIENT_NAME, then
- * uniquify against team members with numeric suffixes (tester-2, tester-3).
- * @internal Exported for testing
- */
-export async function generateUniqueTeammateName(
+function computeUniqueTeammateNameFromMembers(
   baseName: string,
-  teamName: string | undefined,
-): Promise<string> {
-  // densable YZi then D6 gate — always, even without a team file.
+  members?: TeamFile['members'],
+): string {
+  // densable YZi then D6/M2 gate — always, even without a team file.
   const sanitized = sanitizeAgentName(baseName)
   if (sanitized === MAIN_RECIPIENT_NAME) {
     throw new Error(
       `"${MAIN_RECIPIENT_NAME}" is a reserved recipient name (SendMessage routes it to the main conversation) — choose another teammate name.`,
     )
   }
+  if (isReservedSpawnAgentName(sanitized)) {
+    throw new Error(
+      'That teammate name is a reserved name ("main", "team-lead", "user" or "system", in any spelling) or has the shape of an agent id or a session id, which already addresses a recipient directly — choose another teammate name.',
+    )
+  }
 
-  if (!teamName) {
+  if (!members) {
     return sanitized
   }
 
-  const teamFile = await readTeamFileAsync(teamName)
-  if (!teamFile) {
-    return sanitized
-  }
-
-  const existingNames = new Set(teamFile.members.map(m => m.name.toLowerCase()))
+  const existingNames = new Set(members.map(m => m.name.toLowerCase()))
 
   // If the base name doesn't exist, use it as-is
   if (!existingNames.has(sanitized.toLowerCase())) {
@@ -132,76 +138,37 @@ export async function generateUniqueTeammateName(
   return `${sanitized}-${suffix}`
 }
 
+/**
+ * densable pzg — sanitize (@→-), refuse reserved names, then uniquify against
+ * team members with numeric suffixes (tester-2, tester-3).
+ * @internal Exported for testing
+ */
+export async function generateUniqueTeammateName(
+  baseName: string,
+  teamName: string | undefined,
+): Promise<string> {
+  if (!teamName) {
+    return computeUniqueTeammateNameFromMembers(baseName)
+  }
+
+  const teamFile = await readTeamFileAsync(teamName)
+  return computeUniqueTeammateNameFromMembers(baseName, teamFile?.members)
+}
+
 // ============================================================================
 // Spawn Handler
 // ============================================================================
 
-type ResolvedSpawn = {
+type ReservedSpawn = {
   teamName: string
-  teamFile: TeamFile
+  leadAgentId: string
+  leadMember?: TeamFile['members'][number]
   sanitizedName: string
   teammateId: string
   model: string
   teammateColor: ReturnType<typeof assignTeammateColor>
   workingDir: string
   agentDefinition?: CustomAgentDefinition
-}
-
-async function resolveSpawn(
-  input: SpawnInput,
-  context: ToolUseContext,
-): Promise<ResolvedSpawn> {
-  if (!input.name || !input.prompt) {
-    throw new Error('name and prompt are required for spawn operation')
-  }
-
-  const appState = context.getAppState()
-  // densable HSw: team name comes only from the implicit session team.
-  const teamName = appState.teamContext?.teamName
-  if (!teamName) {
-    logEvent('subagent_teammate_no_team_name', {})
-    throw new Error(
-      'Internal error: session team not initialized. This should have happened at startup when agent swarms are enabled.',
-    )
-  }
-
-  const teamFile = await readTeamFileAsync(teamName)
-  if (!teamFile) {
-    throw new Error(
-      `Internal error: team file for "${teamName}" not found. The session team should have been initialized at startup.`,
-    )
-  }
-
-  const uniqueName = await generateUniqueTeammateName(input.name, teamName)
-  const sanitizedName = sanitizeAgentName(uniqueName)
-  const teammateId = formatAgentId(sanitizedName, teamName)
-  const model = resolveTeammateModel(input.model, appState.mainLoopModel)
-  const teammateColor = assignTeammateColor(teammateId)
-  const workingDir = input.cwd || getCwd()
-
-  let agentDefinition: CustomAgentDefinition | undefined
-  if (input.agent_type) {
-    const foundAgent = context.options.agentDefinitions.activeAgents.find(
-      a => a.agentType === input.agent_type,
-    )
-    if (foundAgent && isCustomAgent(foundAgent)) {
-      agentDefinition = foundAgent
-    }
-    logForDebugging(
-      `[spawnTeammate] agent_type=${input.agent_type}, found=${!!agentDefinition}`,
-    )
-  }
-
-  return {
-    teamName,
-    teamFile,
-    sanitizedName,
-    teammateId,
-    model,
-    teammateColor,
-    workingDir,
-    agentDefinition,
-  }
 }
 
 function getBackendDisplay(result: TeammateSpawnResult): {
@@ -230,19 +197,16 @@ function getBackendDisplay(result: TeammateSpawnResult): {
 
 function updateTeamContext(
   context: ToolUseContext,
-  spawn: ResolvedSpawn,
+  spawn: ReservedSpawn,
   result: TeammateSpawnResult,
 ): void {
   const display = getBackendDisplay(result)
 
   context.setAppState(prev => {
-    const leadAgentId =
-      prev.teamContext?.leadAgentId || spawn.teamFile.leadAgentId
+    const leadAgentId = prev.teamContext?.leadAgentId || spawn.leadAgentId
     const existingTeammates = prev.teamContext?.teammates || {}
     const needsLeaderEntry = !(leadAgentId in existingTeammates)
-    const leadMember = spawn.teamFile.members.find(
-      m => m.name === TEAM_LEAD_NAME,
-    )
+    const leadMember = spawn.leadMember
 
     return {
       ...prev,
@@ -285,57 +249,6 @@ function updateTeamContext(
   })
 }
 
-async function appendTeamMember(
-  input: SpawnInput,
-  spawn: ResolvedSpawn,
-  result: TeammateSpawnResult,
-): Promise<void> {
-  const teamFile = await readTeamFileAsync(spawn.teamName)
-  if (!teamFile) {
-    throw new Error(
-      `Team "${spawn.teamName}" disappeared during teammate spawn.`,
-    )
-  }
-
-  const display = getBackendDisplay(result)
-  teamFile.members.push({
-    agentId: spawn.teammateId,
-    name: spawn.sanitizedName,
-    agentType: input.agent_type,
-    model: spawn.model,
-    prompt: input.prompt,
-    color: spawn.teammateColor,
-    planModeRequired: input.plan_mode_required,
-    joinedAt: Date.now(),
-    tmuxPaneId: display.paneId,
-    cwd: spawn.workingDir,
-    subscriptions: [],
-    backendType: result.backendType,
-  })
-  await writeTeamFileAsync(spawn.teamName, teamFile)
-}
-
-async function rollbackTeamFileMember(spawn: ResolvedSpawn): Promise<void> {
-  try {
-    const teamFile = await readTeamFileAsync(spawn.teamName)
-    if (!teamFile) return
-
-    const members = teamFile.members.filter(
-      member => member.agentId !== spawn.teammateId,
-    )
-    if (members.length === teamFile.members.length) return
-
-    await writeTeamFileAsync(spawn.teamName, {
-      ...teamFile,
-      members,
-    })
-  } catch (error) {
-    logForDebugging(
-      `[spawnTeammate] Failed to roll back team file for ${spawn.teammateId}: ${errorMessage(error)}`,
-    )
-  }
-}
-
 function isSpawnedTeammateTask(task: unknown, agentId: string): boolean {
   if (!task || typeof task !== 'object') return false
   const identity = (task as { identity?: { agentId?: unknown } }).identity
@@ -344,13 +257,13 @@ function isSpawnedTeammateTask(task: unknown, agentId: string): boolean {
 
 function removeSpawnedTeammateFromAppState(
   context: ToolUseContext,
-  spawn: ResolvedSpawn,
-  result: TeammateSpawnResult,
+  spawn: ReservedSpawn,
+  result?: TeammateSpawnResult,
 ): void {
   context.setAppState(prev => {
     const tasks = Object.fromEntries(
       Object.entries(prev.tasks).filter(([taskId, task]) => {
-        if (result.taskId && taskId === result.taskId) return false
+        if (result?.taskId && taskId === result.taskId) return false
         return !isSpawnedTeammateTask(task, spawn.teammateId)
       }),
     ) as typeof prev.tasks
@@ -378,25 +291,30 @@ function removeSpawnedTeammateFromAppState(
 
 async function cleanupSpawnAfterFailure(
   context: ToolUseContext,
-  spawn: ResolvedSpawn,
+  spawn: ReservedSpawn,
   executor: TeammateExecutor,
-  result: TeammateSpawnResult,
+  result?: TeammateSpawnResult,
 ): Promise<void> {
-  try {
-    const killed = await executor.kill(spawn.teammateId)
-    if (!killed) {
-      await executor.terminate(
-        spawn.teammateId,
-        'Teammate spawn failed before registration completed',
+  if (result?.success) {
+    try {
+      const killed = await executor.kill(spawn.teammateId)
+      if (!killed) {
+        await executor.terminate(
+          spawn.teammateId,
+          'Teammate spawn failed before registration completed',
+        )
+      }
+    } catch (error) {
+      logForDebugging(
+        `[spawnTeammate] Failed to clean up spawned teammate ${spawn.teammateId}: ${errorMessage(error)}`,
       )
     }
-  } catch (error) {
-    logForDebugging(
-      `[spawnTeammate] Failed to clean up spawned teammate ${spawn.teammateId}: ${errorMessage(error)}`,
-    )
   }
 
-  await rollbackTeamFileMember(spawn)
+  clearTeamLeadEntryKeyForInbox(
+    getInboxPath(spawn.sanitizedName, spawn.teamName),
+  )
+  await removeTeamMember(spawn.teamName, spawn.teammateId)
   try {
     removeSpawnedTeammateFromAppState(context, spawn, result)
   } catch (error) {
@@ -410,7 +328,49 @@ async function handleSpawn(
   input: SpawnInput,
   context: ToolUseContext,
 ): Promise<{ data: SpawnOutput }> {
-  const spawn = await resolveSpawn(input, context)
+  if (!input.name || !input.prompt) {
+    throw new Error('name and prompt are required for spawn operation')
+  }
+
+  const appState = context.getAppState()
+  // densable HSw: team name comes only from the implicit session team.
+  const teamName = appState.teamContext?.teamName
+  if (!teamName) {
+    logEvent('subagent_teammate_no_team_name', {})
+    throw new Error(
+      'Internal error: session team not initialized. This should have happened at startup when agent swarms are enabled.',
+    )
+  }
+
+  for (const [label, value] of [
+    ['name', input.name],
+    ['team_name', teamName],
+  ] as const) {
+    if (hasControlChars(value)) {
+      throw new Error(
+        label === 'name'
+          ? 'Invalid name: control characters are not allowed in agent or team names'
+          : 'Invalid team_name: control characters are not allowed in agent or team names',
+      )
+    }
+  }
+
+  const model = resolveTeammateModel(input.model, appState.mainLoopModel)
+  const workingDir = input.cwd || getCwd()
+
+  let agentDefinition: CustomAgentDefinition | undefined
+  if (input.agent_type) {
+    const foundAgent = context.options.agentDefinitions.activeAgents.find(
+      a => a.agentType === input.agent_type,
+    )
+    if (foundAgent && isCustomAgent(foundAgent)) {
+      agentDefinition = foundAgent
+    }
+    logForDebugging(
+      `[spawnTeammate] agent_type=${input.agent_type}, found=${!!agentDefinition}`,
+    )
+  }
+
   const executor = await getTeammateExecutor(true, {
     onNeedsIt2Setup: context.requestDialog
       ? async tmuxAvailable =>
@@ -421,50 +381,122 @@ async function handleSpawn(
   })
   executor.setContext?.(context)
 
-  const result = await executor.spawn({
-    name: spawn.sanitizedName,
-    teamName: spawn.teamName,
-    color: spawn.teammateColor,
-    prompt: input.prompt,
-    cwd: spawn.workingDir,
-    model: spawn.model,
-    agentType: input.agent_type,
-    agentDefinition: spawn.agentDefinition,
-    description: input.description,
-    planModeRequired: input.plan_mode_required ?? false,
-    parentSessionId: getSessionId(),
-    invokingRequestId: input.invokingRequestId,
-    useSplitPane: input.use_splitpane !== false,
+  // Official 2.1.331 `G()` — atomically uniquify the teammate name and reserve
+  // the member entry in config.json under proper-lockfile BEFORE spawning.
+  const reserved = await updateTeamFile(teamName, teamFile => {
+    const sanitizedName = computeUniqueTeammateNameFromMembers(
+      input.name,
+      teamFile.members,
+    )
+    const teammateId = formatAgentId(sanitizedName, teamName)
+    const teammateColor = assignTeammateColor(teammateId)
+    teamFile.members.push({
+      agentId: teammateId,
+      name: sanitizedName,
+      agentType: input.agent_type,
+      model,
+      prompt: input.prompt,
+      color: teammateColor,
+      planModeRequired: input.plan_mode_required,
+      joinedAt: Date.now(),
+      tmuxPaneId: executor.type === 'in-process' ? 'in-process' : '',
+      cwd: workingDir,
+      subscriptions: [],
+      backendType: executor.type,
+    })
+    const leadMember = teamFile.members.find(m => m.name === TEAM_LEAD_NAME)
+    return {
+      teamName,
+      leadAgentId: teamFile.leadAgentId,
+      leadMember,
+      sanitizedName,
+      teammateId,
+      model,
+      teammateColor,
+      workingDir,
+      agentDefinition,
+    } satisfies ReservedSpawn
   })
 
-  if (!result.success) {
-    throw new Error(result.error ?? 'Failed to spawn teammate')
+  if (!reserved) {
+    throw new Error(
+      `Internal error: team file for "${teamName}" not found. The session team should have been initialized at startup.`,
+    )
   }
 
+  clearPendingShutdownRequestsForAddressee(reserved.sanitizedName)
+  if (executor.type === 'in-process') {
+    clearTeamLeadEntryKeyForInbox(
+      getInboxPath(reserved.sanitizedName, reserved.teamName),
+    )
+  }
+
+  let result: TeammateSpawnResult | undefined
   try {
-    await appendTeamMember(input, spawn, result)
-    updateTeamContext(context, spawn, result)
-  } catch (error) {
-    await cleanupSpawnAfterFailure(context, spawn, executor, result)
-    throw error
-  }
+    result = await executor.spawn({
+      name: reserved.sanitizedName,
+      teamName: reserved.teamName,
+      color: reserved.teammateColor,
+      prompt: input.prompt,
+      cwd: reserved.workingDir,
+      model: reserved.model,
+      effort: input.effort,
+      agentType: input.agent_type,
+      agentDefinition: reserved.agentDefinition,
+      description: input.description,
+      planModeRequired: input.plan_mode_required ?? false,
+      parentSessionId: getSessionId(),
+      invokingRequestId: input.invokingRequestId,
+      useSplitPane: input.use_splitpane !== false,
+    })
 
-  const display = getBackendDisplay(result)
-  return {
-    data: {
-      teammate_id: spawn.teammateId,
-      agent_id: spawn.teammateId,
-      agent_type: input.agent_type,
-      model: spawn.model,
-      name: spawn.sanitizedName,
-      color: spawn.teammateColor,
-      tmux_session_name: display.sessionName,
-      tmux_window_name: display.windowName,
-      tmux_pane_id: display.paneId,
-      team_name: spawn.teamName,
-      is_splitpane: display.isSplitPane,
-      plan_mode_required: input.plan_mode_required,
-    },
+    if (!result.success) {
+      throw new Error(result.error ?? 'Failed to spawn teammate')
+    }
+
+    const display = getBackendDisplay(result)
+    const finalBackendType = result.backendType ?? executor.type
+    if (display.paneId && finalBackendType !== 'in-process') {
+      recordSpawnedTeammatePane(finalBackendType, display.paneId)
+    }
+
+    // Update reserved member entry with concrete paneId / backendType under lock
+    if (
+      display.paneId !== (executor.type === 'in-process' ? 'in-process' : '') ||
+      finalBackendType !== executor.type
+    ) {
+      await updateTeamFile(reserved.teamName, teamFile => {
+        const member = teamFile.members.find(
+          m => m.agentId === reserved.teammateId,
+        )
+        if (!member) return false
+        member.tmuxPaneId = display.paneId
+        member.backendType = finalBackendType
+        return true
+      })
+    }
+
+    updateTeamContext(context, reserved, result)
+
+    return {
+      data: {
+        teammate_id: reserved.teammateId,
+        agent_id: reserved.teammateId,
+        agent_type: input.agent_type,
+        model: reserved.model,
+        name: reserved.sanitizedName,
+        color: reserved.teammateColor,
+        tmux_session_name: display.sessionName,
+        tmux_window_name: display.windowName,
+        tmux_pane_id: display.paneId,
+        team_name: reserved.teamName,
+        is_splitpane: display.isSplitPane,
+        plan_mode_required: input.plan_mode_required,
+      },
+    }
+  } catch (error) {
+    await cleanupSpawnAfterFailure(context, reserved, executor, result)
+    throw error
   }
 }
 

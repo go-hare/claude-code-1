@@ -530,25 +530,25 @@ export function resetPendingShutdownRequestsForTesting(): void {
   pendingShutdownRequests.clear()
 }
 
-const VALID_TEAM_NAME_RE = /^[A-Za-z0-9_.-]+$/
+const SESSION_TEAM_NAME_RE = /^session-[a-z0-9-]+$/
 
 /**
- * Official `vt` (#1555) — returns true if the named team's `config.json` is
- * missing (ENOENT), meaning the team was deleted and late messages must not
- * recreate its inbox file.
+ * Official 2.1.331 `Mt(e)` — returns true only for session-derived teams
+ * (`session-*`) whose sanitized `config.json` is missing (ENOENT), meaning the
+ * session team was cleaned up and late messages must not recreate its inbox.
+ * Non-session teams return `false` immediately.
  */
 async function isTeamDeleted(teamName?: string): Promise<boolean> {
-  const resolved = teamName || getTeamName()
-  if (
-    !resolved ||
-    !VALID_TEAM_NAME_RE.test(resolved) ||
-    resolved === '.' ||
-    resolved === '..'
-  ) {
+  const resolved = teamName || getTeamName() || ''
+  if (!resolved.startsWith('session-')) {
+    return false
+  }
+  const sanitized = resolved.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()
+  if (!SESSION_TEAM_NAME_RE.test(sanitized)) {
     return false
   }
   try {
-    await stat(join(getTeamsDir(), resolved, 'config.json'))
+    await stat(join(getTeamsDir(), sanitized, 'config.json'))
     return false
   } catch (err) {
     return getErrnoCode(err) === 'ENOENT'

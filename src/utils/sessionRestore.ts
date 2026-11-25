@@ -35,6 +35,7 @@ import type {
 } from '../types/logs.js'
 import type { Message } from '../types/message.js'
 import type { PermissionMode } from '../types/permissions.js'
+import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.js'
 import { renameRecordingForSession } from './asciicast.js'
 import { clearMemoryFileCaches } from './claudemd.js'
 import { updateSessionName } from './concurrentSessions.js'
@@ -724,6 +725,13 @@ export async function processResumedConversation(
   }
 
   // Reuse the resumed session's ID unless --fork-session is specified
+  let rekeyedSessionTeam:
+    | Awaited<
+        ReturnType<
+          typeof import('./swarm/sessionTeam.js').rekeySessionTeamAtStartup
+        >
+      >
+    | undefined
   if (!opts.forkSession) {
     const sid = opts.sessionIdOverride ?? result.sessionId
     if (sid) {
@@ -752,6 +760,12 @@ export async function processResumedConversation(
       await renameRecordingForSession()
       await resetSessionFilePointer()
       restoreCostStateForSession(sid)
+      if (isAgentSwarmsEnabled()) {
+        const { rekeySessionTeamAtStartup } = await import(
+          './swarm/sessionTeam.js'
+        )
+        rekeyedSessionTeam = await rekeySessionTeamAtStartup()
+      }
     }
   } else if (result.contentReplacements?.length) {
     // --fork-session keeps the fresh startup session ID. useLogMessages will
@@ -912,6 +926,9 @@ export async function processResumedConversation(
 
   let nextInitialState: AppState = {
     ...planHydratedState,
+    ...(rekeyedSessionTeam
+      ? { teamContext: rekeyedSessionTeam.teamContext }
+      : {}),
     initialMessage: seededInitialMessage,
     // densable: ...e.endedByModel?{endedByModel:!0}:{}
     ...(result.endedByModel ? { endedByModel: true } : {}),

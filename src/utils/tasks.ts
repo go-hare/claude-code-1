@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'async_hooks'
-import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { lstat, mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
+import { dirname, join } from 'path'
 import { z } from 'zod/v4'
 import { getSessionId } from '../bootstrap/state.js'
 import { uniq } from './array.js'
@@ -54,6 +54,10 @@ export function clearLeaderTeamName(): void {
   notifyTasksUpdated()
 }
 
+export function getLeaderTeamName(): string | undefined {
+  return leaderTeamName
+}
+
 /**
  * Sets or clears the session-scoped task list ID (e.g. restored on resume/clear).
  */
@@ -104,7 +108,56 @@ export function resetTaskListState(): void {
 
 /** Official `Cxo` (#1252) — persisted session task list pointer filename. */
 export const SESSION_TASK_LIST_FILE = '.session-task-list'
+/** Official 2.1.331 `ebs` — post-/clear session task list pointer filename. */
+export const SESSION_LIST_FILE = '.session-list'
 const VALID_SESSION_TASK_LIST_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/
+const SESSION_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function sessionTeamKeyForTasks(sessionId: string): string {
+  const suffix = SESSION_UUID_RE.test(sessionId)
+    ? sessionId.slice(0, 8).toLowerCase()
+    : sessionId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()
+  return `session-${suffix}`
+}
+
+/**
+ * Official 2.1.331 `Wmd` — record the active team/session task list ID under
+ * the new session's `session-<id>` tasks directory after `/clear` so a later
+ * `--resume` / `/resume` can still locate the task list.
+ */
+export async function noteSessionTaskListAfterClear(
+  sessionId: string = getSessionId(),
+): Promise<void> {
+  const listId = sessionTaskListId ?? leaderTeamName
+  if (!listId || process.env.CLAUDE_CODE_TASK_LIST_ID) return
+  if (!VALID_SESSION_TASK_LIST_ID_RE.test(listId)) return
+  try {
+    const dir = getTasksDir(sessionTeamKeyForTasks(sessionId))
+    const parent = dirname(dir)
+    for (const folder of [parent, dir]) {
+      try {
+        await mkdir(folder, { recursive: folder === parent })
+      } catch (err) {
+        if (getErrnoCode(err) !== 'EEXIST') throw err
+      }
+      const info = await lstat(folder)
+      if (!info.isDirectory() || info.isSymbolicLink()) {
+        logForDebugging(
+          '[sessionTeam] Not noting the task list of the cleared session: its folder is not a plain directory',
+          { level: 'warn' },
+        )
+        return
+      }
+    }
+    await writeFile(join(dir, SESSION_LIST_FILE), listId, 'utf-8')
+  } catch (error) {
+    logForDebugging(
+      `[sessionTeam] Could not note the task list of the cleared session: ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
+  }
+}
 
 /**
  * Persist the active team/session task list ID under the session's team task
@@ -117,7 +170,7 @@ export async function persistSessionTaskListId(
   if (!activeListId || process.env.CLAUDE_CODE_TASK_LIST_ID) return
   if (!VALID_SESSION_TASK_LIST_ID_RE.test(activeListId)) return
   try {
-    const teamTasksDir = getTasksDir(`session-${sessionId.slice(0, 8)}`)
+    const teamTasksDir = getTasksDir(sessionTeamKeyForTasks(sessionId))
     await mkdir(teamTasksDir, { recursive: true })
     await writeFile(
       join(teamTasksDir, SESSION_TASK_LIST_FILE),
@@ -142,17 +195,19 @@ export async function restoreSessionTaskListId(
   if (process.env.CLAUDE_CODE_TASK_LIST_ID) {
     return process.env.CLAUDE_CODE_TASK_LIST_ID
   }
-  try {
-    const teamTasksDir = getTasksDir(`session-${sessionId.slice(0, 8)}`)
-    const saved = (
-      await readFile(join(teamTasksDir, SESSION_TASK_LIST_FILE), 'utf-8')
-    ).trim()
-    if (VALID_SESSION_TASK_LIST_ID_RE.test(saved)) {
-      setSessionTaskListId(saved, { persist: false })
-      return saved
+  const teamTasksDir = getTasksDir(sessionTeamKeyForTasks(sessionId))
+  for (const filename of [SESSION_LIST_FILE, SESSION_TASK_LIST_FILE]) {
+    try {
+      const saved = (
+        await readFile(join(teamTasksDir, filename), 'utf-8')
+      ).trim()
+      if (VALID_SESSION_TASK_LIST_ID_RE.test(saved)) {
+        setSessionTaskListId(saved, { persist: false })
+        return saved
+      }
+    } catch {
+      // Try next pointer file
     }
-  } catch {
-    // No persisted pointer file — normal for sessions without a team task list.
   }
   return undefined
 }
@@ -1126,7 +1181,8 @@ export async function unassignTeammateTasks(
   teammateName: string,
   reason: 'terminated' | 'shutdown',
 ): Promise<UnassignTasksResult> {
-  const tasks = await listTasks(teamName)
+  const taskListId = sessionTaskListId ?? teamName
+  const tasks = await listTasks(taskListId)
   const unresolvedAssignedTasks = tasks.filter(
     t =>
       t.status !== 'completed' &&
@@ -1135,7 +1191,10 @@ export async function unassignTeammateTasks(
 
   // Unassign each task and reset status to open
   for (const task of unresolvedAssignedTasks) {
-    await updateTask(teamName, task.id, { owner: undefined, status: 'pending' })
+    await updateTask(taskListId, task.id, {
+      owner: undefined,
+      status: 'pending',
+    })
   }
 
   if (unresolvedAssignedTasks.length > 0) {

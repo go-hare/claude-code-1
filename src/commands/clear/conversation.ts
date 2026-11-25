@@ -62,8 +62,10 @@ import {
   initTaskOutputAsSymlink,
 } from '../../utils/task/diskOutput.js'
 import { resetImageRereadState } from '../../utils/subagentCacheEvict.js'
+import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
 import {
   getOwnTaskListId,
+  noteSessionTaskListAfterClear,
   sanitizePathComponent,
   setOwnTaskListId,
 } from '../../utils/tasks.js'
@@ -637,6 +639,10 @@ export async function clearConversation({
 
   regenerateSessionId({ setCurrentAsParent: true })
   const newSessionId = getSessionId()
+
+  if (isAgentSwarmsEnabled()) {
+    await noteSessionTaskListAfterClear(newSessionId)
+  }
 
   // Official 2.1.328 (#393): only rename HI(sourceId) -> HI(newSessionId)
   // when an explicit ownTaskListId differs from newSessionId (so local `/clear`

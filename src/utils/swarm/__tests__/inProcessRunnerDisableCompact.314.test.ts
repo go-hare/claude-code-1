@@ -10,9 +10,7 @@ describe('inProcessRunner DISABLE_COMPACT guard (#1256)', () => {
     )
     expect(src).toContain('!isEnvTruthy(process.env.DISABLE_COMPACT)')
     const idxGuard = src.indexOf('!isEnvTruthy(process.env.DISABLE_COMPACT)')
-    const idxThreshold = src.indexOf(
-      'getAutoCompactThreshold(toolUseContext.options.mainLoopModel)',
-    )
+    const idxThreshold = src.indexOf('tokenCount > compactionParams.threshold')
     expect(idxGuard).toBeGreaterThan(-1)
     expect(idxThreshold).toBeGreaterThan(idxGuard)
   })

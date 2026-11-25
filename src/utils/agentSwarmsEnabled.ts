@@ -1,4 +1,5 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { isEnvTruthy } from './envUtils.js'
 
 /**
  * densable `xd` / isAgentSwarmsEnabled.
@@ -14,7 +15,7 @@ function hasAgentTeamsCliFlag(): boolean {
 
 export function isAgentSwarmsEnabled(): boolean {
   if (
-    !process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) &&
     !hasAgentTeamsCliFlag()
   ) {
     return false

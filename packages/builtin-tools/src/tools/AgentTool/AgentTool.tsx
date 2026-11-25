@@ -784,57 +784,6 @@ export const AgentTool = buildTool({
       }
     };
 
-    // densable: S && name && !fork && !WIe && !isolation && !cwd
-    // Same NFKC fold as isExplicitFork so `Fork` / dashed forms skip teammate spawn.
-    const isForkType =
-      subagent_type !== undefined &&
-      normalizeAgentTypeKey(subagent_type) === normalizeAgentTypeKey(FORK_SUBAGENT_TYPE) &&
-      isForkSubagentProductEnabled();
-    if (
-      teamContext &&
-      name &&
-      !isForkType &&
-      !shouldSkipTeammateSpawnForWebFetch(subagent_type, toolUseContext.options.agentDefinitions.activeAgents) &&
-      !isolation &&
-      !cwd
-    ) {
-      // densable: N() before teammate spawn
-      consumeSessionSpawnSlot();
-      // Set agent definition color for grouped UI display before spawning
-      const agentDef = subagent_type
-        ? toolUseContext.options.agentDefinitions.activeAgents.find(a => a.agentType === subagent_type)
-        : undefined;
-      if (agentDef?.color) {
-        setAgentColor(subagent_type!, agentDef.color);
-      }
-      const result = await spawnTeammate(
-        {
-          name,
-          prompt,
-          description,
-          use_splitpane: true,
-          // densable: plan_mode_required:_==="plan" where _ is parent session mode
-          // (input `mode` is deprecated/ignored).
-          plan_mode_required: permissionMode === 'plan',
-          model: resolveForcedSpawnModel(agentDef?.model, model),
-          agent_type: subagent_type,
-          invokingRequestId: assistantMessage?.requestId as string | undefined,
-        },
-        toolUseContext,
-      );
-
-      // Type assertion uses TeammateSpawnedOutput (defined above) instead of any.
-      // This type is excluded from the exported outputSchema for dead code elimination.
-      // Cast through unknown because TeammateSpawnedOutput is intentionally
-      // not part of the exported Output union (for dead code elimination purposes).
-      const spawnResult: TeammateSpawnedOutput = {
-        status: 'teammate_spawned' as const,
-        prompt,
-        ...result.data,
-      };
-      return { data: spawnResult } as unknown as { data: Output };
-    }
-
     // densable: fork is explicit `subagent_type: fork` (NFKC) AND gate AND
     // constraints. Omitting subagent_type never defaults to fork.
     const allAgents = toolUseContext.options.agentDefinitions.activeAgents;
@@ -867,6 +816,81 @@ export const AgentTool = buildTool({
       );
     }
     const isForkPath = isExplicitFork && forkAvailable;
+
+    // Official 2.1.331 @324840000..324844005: enforce Agent(Type) permission
+    // deny rules, allowedAgentTypes allowlist, and subagent_type existence
+    // BEFORE entering the teammate spawn branch.
+    if (subagent_type !== undefined && !isExplicitFork) {
+      const denyRule = getDenyRuleForAgent(appState.toolPermissionContext, AGENT_TOOL_NAME, subagent_type);
+      if (denyRule) {
+        throw new Error(
+          `Agent type '${subagent_type}' has been denied by permission rule '${AGENT_TOOL_NAME}(${subagent_type})' from ${denyRule.source ?? 'settings'}.`,
+        );
+      }
+      const allowedAgents = filterDeniedAgents(
+        allowedAgentTypes ? allAgents.filter(a => allowedAgentTypes.includes(a.agentType)) : allAgents,
+        appState.toolPermissionContext,
+        AGENT_TOOL_NAME,
+      );
+      if (
+        (allowedAgentTypes && !allowedAgentTypes.includes(subagent_type)) ||
+        !allowedAgents.some(a => a.agentType === subagent_type)
+      ) {
+        throw new Error(
+          `Agent type '${subagent_type}' not found. Available agents: ${formatAvailableAgentTypes(allowedAgents.map(a => a.agentType))}`,
+        );
+      }
+    }
+
+    // densable: S && name && !fork && !WIe && !isolation && !cwd
+    // Same NFKC fold as isExplicitFork so `Fork` / dashed forms skip teammate spawn.
+    const isForkType = isForkPath;
+    if (
+      teamContext &&
+      name &&
+      !isForkType &&
+      !shouldSkipTeammateSpawnForWebFetch(subagent_type, toolUseContext.options.agentDefinitions.activeAgents) &&
+      !isolation &&
+      !cwd
+    ) {
+      // densable: N() before teammate spawn
+      consumeSessionSpawnSlot();
+      // Set agent definition color for grouped UI display before spawning
+      const agentDef = subagent_type
+        ? toolUseContext.options.agentDefinitions.activeAgents.find(a => a.agentType === subagent_type)
+        : undefined;
+      if (agentDef?.color) {
+        setAgentColor(subagent_type!, agentDef.color);
+      }
+      const result = await spawnTeammate(
+        {
+          name,
+          prompt,
+          description,
+          use_splitpane: true,
+          // densable: plan_mode_required:_==="plan" where _ is parent session mode
+          // (input `mode` is deprecated/ignored).
+          plan_mode_required: permissionMode === 'plan',
+          model: resolveForcedSpawnModel(agentDef?.model, model),
+          effort,
+          agent_type: subagent_type,
+          invokingRequestId: assistantMessage?.requestId as string | undefined,
+        },
+        toolUseContext,
+      );
+
+      // Type assertion uses TeammateSpawnedOutput (defined above) instead of any.
+      // This type is excluded from the exported outputSchema for dead code elimination.
+      // Cast through unknown because TeammateSpawnedOutput is intentionally
+      // not part of the exported Output union (for dead code elimination purposes).
+      const spawnResult: TeammateSpawnedOutput = {
+        status: 'teammate_spawned' as const,
+        prompt,
+        ...result.data,
+      };
+      return { data: spawnResult } as unknown as { data: Output };
+    }
+
     if (isForkPath && forkConstraintMessage) {
       throw new Error(forkConstraintMessage);
     }

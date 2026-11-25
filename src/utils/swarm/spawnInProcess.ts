@@ -397,7 +397,7 @@ export function killInProcessTeammate(
   }
 
   if (teamName && agentId) {
-    removeMemberByAgentId(teamName, agentId)
+    void removeMemberByAgentId(teamName, agentId)
   }
 
   releaseTeammateIdleWindowKeepalive(agentId ?? taskId, registry)

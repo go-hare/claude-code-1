@@ -31,7 +31,10 @@ import {
 import { resetMicrocompactState } from '../../services/compact/microCompact.js'
 import type { AppState } from '../../state/AppState.js'
 import type { Tool, ToolUseContext } from '../../Tool.js'
-import { appendTeammateMessage } from '../../tasks/InProcessTeammateTask/InProcessTeammateTask.js'
+import {
+  appendTeammateMessage,
+  findTeammateTaskByAgentId,
+} from '../../tasks/InProcessTeammateTask/InProcessTeammateTask.js'
 import type {
   InProcessTeammateTaskState,
   TeammateIdentity,
@@ -76,6 +79,8 @@ import {
   getTokenCountFromUsage,
 } from '../../utils/tokens.js'
 import { createAbortController } from '../abortController.js'
+import { formatAgentId } from '../agentId.js'
+import type { EffortValue } from '../effort.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { type AgentContext, runWithAgentContext } from '../agentContext.js'
 import {
@@ -99,10 +104,15 @@ import type { PermissionUpdate } from '../permissions/PermissionUpdateSchema.js'
 import { hasPermissionsToUseTool } from '../permissions/permissions.js'
 import { restoreDangerousPermissions } from '../permissions/permissionSetup.js'
 import { emitTaskTerminatedSdk } from '../sdkEventQueue.js'
-import { sleep } from '../sleep.js'
 import { jsonStringify } from '../slowOperations.js'
 import { asSystemPrompt } from '../systemPromptType.js'
-import { claimTask, listTasks, type Task, updateTask } from '../tasks.js'
+import {
+  claimTask,
+  getTaskListId,
+  listTasks,
+  type Task,
+  updateTask,
+} from '../tasks.js'
 import type { TeammateContext } from '../teammateContext.js'
 import { runWithTeammateContext } from '../teammateContext.js'
 import {
@@ -144,6 +154,78 @@ import { TEAMMATE_SYSTEM_PROMPT_ADDENDUM } from './teammatePromptAddendum.js'
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
 
 const PERMISSION_POLL_INTERVAL_MS = 500
+
+const teammateWakeCallbacks = new Map<string, Set<() => void>>()
+
+/**
+ * Official 2.1.331 `nni` — wake an idle in-process teammate immediately after
+ * writing a new mailbox message or shutdown request instead of waiting for the
+ * next 500ms poll tick. Supports both live `inProcessRunner` sleep waiters and
+ * task-level `retryWake.emit()` hooks.
+ */
+export function wakeIdleTeammate(
+  tasks: AppState['tasks'] | undefined,
+  recipientName: string,
+  teamName: string | undefined,
+): boolean {
+  if (!teamName) return false
+  const agentId = formatAgentId(recipientName, teamName)
+  let woken = false
+
+  if (tasks) {
+    const task = findTeammateTaskByAgentId(agentId, tasks)
+    if (task?.status === 'running' && 'retryWake' in task) {
+      const retryWake = (task as { retryWake?: { emit?: () => void } })
+        .retryWake
+      if (typeof retryWake?.emit === 'function') {
+        retryWake.emit()
+        woken = true
+      }
+    }
+  }
+
+  const callbacks = teammateWakeCallbacks.get(agentId)
+  if (callbacks && callbacks.size > 0) {
+    for (const wake of [...callbacks]) {
+      wake()
+    }
+    woken = true
+  }
+  return woken
+}
+
+function sleepOrWake(
+  ms: number,
+  agentId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise<void>(resolve => {
+    let settled = false
+    const cleanup = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal.removeEventListener('abort', cleanup)
+      const set = teammateWakeCallbacks.get(agentId)
+      if (set) {
+        set.delete(cleanup)
+        if (set.size === 0) {
+          teammateWakeCallbacks.delete(agentId)
+        }
+      }
+      resolve()
+    }
+    let set = teammateWakeCallbacks.get(agentId)
+    if (!set) {
+      set = new Set()
+      teammateWakeCallbacks.set(agentId, set)
+    }
+    set.add(cleanup)
+    signal.addEventListener('abort', cleanup, { once: true })
+    const timer = setTimeout(cleanup, ms)
+  })
+}
 
 /**
  * Official 2.1.327 (#423): compute an in-process teammate's own resolved model,
@@ -564,6 +646,8 @@ export type InProcessRunnerConfig = {
   abortController: AbortController
   /** Optional model override for this teammate */
   model?: string
+  /** Optional reasoning effort level override for this teammate */
+  effort?: EffortValue
   /** Optional system prompt override for this teammate */
   systemPrompt?: string
   /** How to apply the system prompt: 'replace' or 'append' to default */
@@ -836,7 +920,11 @@ async function waitForNextPromptOrShutdown(
 
     // Wait before next poll (skip on first iteration to check immediately)
     if (pollCount > 0) {
-      await sleep(POLL_INTERVAL_MS)
+      await sleepOrWake(
+        POLL_INTERVAL_MS,
+        identity.agentId,
+        abortController.signal,
+      )
     }
     pollCount++
 
@@ -959,7 +1047,7 @@ async function waitForNextPromptOrShutdown(
                   : { ...task, permissionMode: mode },
               setAppState,
             )
-            setMemberMode(identity.teamName, identity.agentName, mode)
+            await setMemberMode(identity.teamName, identity.agentName, mode)
             await markMessageAsReadByIdentity(
               identity.agentName,
               identity.teamName,
@@ -1085,6 +1173,7 @@ export async function runInProcessTeammate(
     toolUseContext,
     abortController,
     model,
+    effort,
     systemPrompt,
     systemPromptMode,
     allowedTools,
@@ -1181,6 +1270,9 @@ export async function runInProcessTeammate(
     teammateSystemPrompt = systemPromptParts.join('\n')
   }
 
+  // Official 2.1.331: thread explicit effort override (or agent frontmatter effort)
+  const resolvedEffort = effort ?? agentDefinition?.effort
+
   // Resolve agent definition - use full system prompt with teammate addendum
   // IMPORTANT: Set permissionMode to 'default' so teammates always get full tool
   // access regardless of the leader's permission mode.
@@ -1208,6 +1300,7 @@ export async function runInProcessTeammate(
     // Propagate model from custom agent definition so getAgentModel()
     // can use it as a fallback when no tool-level model is specified
     ...(agentDefinition?.model ? { model: agentDefinition.model } : {}),
+    ...(resolvedEffort !== undefined ? { effort: resolvedEffort } : {}),
     ...(agentDefinition?.omitClaudeMd ? { omitClaudeMd: true } : {}),
   }
 
@@ -1227,9 +1320,13 @@ export async function runInProcessTeammate(
 
   // Try to claim an available task immediately so the UI can show activity
   // from the very start. The idle loop handles claiming for subsequent tasks.
-  // TeamCreate maps Team = TaskList, so teammates claim from the shared
-  // team task list. This matches getTaskListId() inside teammate context.
-  await tryClaimNextTask(identity.teamName, identity.agentName)
+  // Use getTaskListId() inside teammate context so session task list overrides
+  // (e.g. after /clear or --resume) are honored while defaulting to teamName.
+  const initialTaskListId = runWithTeammateContext(
+    teammateContext,
+    getTaskListId,
+  )
+  await tryClaimNextTask(initialTaskListId, identity.agentName)
 
   try {
     // Add initial prompt to task.messages for display (wrapped with XML)
@@ -1685,13 +1782,17 @@ export async function runInProcessTeammate(
       )
 
       // Wait for next message or shutdown
+      const activeTaskListId = runWithTeammateContext(
+        teammateContext,
+        getTaskListId,
+      )
       const waitResult = await waitForNextPromptOrShutdown(
         identity,
         abortController,
         taskId,
         toolUseContext.getAppState,
         setAppState,
-        identity.teamName,
+        activeTaskListId,
       )
 
       switch (waitResult.type) {

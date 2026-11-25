@@ -1,58 +1,23 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { randomUUID } from 'crypto'
+import { readFileSync } from 'fs'
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { z } from 'zod/v4'
 import { getSessionCreatedTeams } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { getTeamsDir } from '../envUtils.js'
 import { errorMessage, getErrnoCode } from '../errors.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { gitExe } from '../git.js'
-import { lazySchema } from '../lazySchema.js'
+import * as lockfile from '../lockfile.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
-import { getTasksDir, notifyTasksUpdated } from '../tasks.js'
 import { getAgentName, getTeamName, isTeammate } from '../teammate.js'
+import {
+  clearTeamLeadEntryKeyForInbox,
+  getInboxPath,
+} from '../teammateMailbox.js'
 import { type BackendType, isPaneBackend } from './backends/types.js'
 import { TEAM_LEAD_NAME } from './constants.js'
-
-export const inputSchema = lazySchema(() =>
-  z.strictObject({
-    operation: z
-      .enum(['spawnTeam', 'cleanup'])
-      .describe(
-        'Operation: spawnTeam to create a team, cleanup to remove team and task directories.',
-      ),
-    agent_type: z
-      .string()
-      .optional()
-      .describe(
-        'Type/role of the team lead (e.g., "researcher", "test-runner"). ' +
-          'Used for team file and inter-agent coordination.',
-      ),
-    team_name: z
-      .string()
-      .optional()
-      .describe('Name for the new team to create (required for spawnTeam).'),
-    description: z
-      .string()
-      .optional()
-      .describe('Team description/purpose (only used with spawnTeam).'),
-  }),
-)
-
-// Output types for different operations
-export type SpawnTeamOutput = {
-  team_name: string
-  team_file_path: string
-  lead_agent_id: string
-}
-
-export type CleanupOutput = {
-  success: boolean
-  message: string
-  team_name?: string
-}
 
 export type TeamAllowedPath = {
   path: string // Directory path (absolute)
@@ -61,12 +26,25 @@ export type TeamAllowedPath = {
   addedAt: number // Timestamp when added
 }
 
+/**
+ * Official 2.1.331 — identity of the leader process that owns a session team
+ * config file, used to safely reclaim stale team directories after a crash
+ * without clobbering another live leader's team.
+ */
+export type LeadProcessInfo = {
+  pid: number
+  pidSpace: string
+  claimedAt: number
+  procStart?: string
+}
+
 export type TeamFile = {
   name: string
   description?: string
   createdAt: number
   leadAgentId: string
   leadSessionId?: string // Actual session UUID of the leader (for discovery)
+  leadProcess?: LeadProcessInfo
   hiddenPaneIds?: string[] // Pane IDs that are currently hidden from the UI
   teamAllowedPaths?: TeamAllowedPath[] // Paths all teammates can edit without asking
   members: Array<{
@@ -89,9 +67,13 @@ export type TeamFile = {
   }>
 }
 
-export type Input = z.infer<ReturnType<typeof inputSchema>>
-// Export SpawnTeamOutput as Output for backward compatibility
-export type Output = SpawnTeamOutput
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional check for control chars in agent/team names
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/
+
+/** Official 2.1.331 `fyl` — detect ASCII control characters in agent/team names. */
+export function hasControlChars(value: string): boolean {
+  return CONTROL_CHAR_RE.test(value)
+}
 
 /**
  * Sanitizes a name for use in tmux window names, worktree paths, and file paths.
@@ -123,6 +105,61 @@ export function getTeamFilePath(teamName: string): string {
   return join(getTeamDir(teamName), 'config.json')
 }
 
+function isValidLeadProcess(value: unknown): value is LeadProcessInfo {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const rec = value as Record<string, unknown>
+  return (
+    typeof rec.pid === 'number' &&
+    Number.isSafeInteger(rec.pid) &&
+    typeof rec.pidSpace === 'string' &&
+    typeof rec.claimedAt === 'number' &&
+    Number.isFinite(rec.claimedAt) &&
+    (!('procStart' in rec) ||
+      rec.procStart === undefined ||
+      typeof rec.procStart === 'string')
+  )
+}
+
+function isValidTeamMember(
+  value: unknown,
+): value is TeamFile['members'][number] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const rec = value as Record<string, unknown>
+  return typeof rec.agentId === 'string' && typeof rec.name === 'string'
+}
+
+/**
+ * Official 2.1.331 `hEo` — validate/sanitize parsed team config JSON so
+ * corrupt or partially written objects never crash downstream readers.
+ */
+export function sanitizeTeamFile(raw: unknown): TeamFile | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null
+  }
+  const rec = raw as TeamFile
+  if (typeof rec.name !== 'string') {
+    return null
+  }
+  const members = Array.isArray(rec.members)
+    ? rec.members.filter(isValidTeamMember)
+    : []
+  const leadProcess = isValidLeadProcess(rec.leadProcess)
+    ? rec.leadProcess
+    : undefined
+  if (
+    Array.isArray(rec.members) &&
+    members.length === rec.members.length &&
+    leadProcess === rec.leadProcess
+  ) {
+    return rec
+  }
+  return { ...rec, members, leadProcess }
+}
+
 /**
  * Reads a team file by name (sync — for sync contexts like React render paths)
  * @internal Exported for team discovery UI
@@ -131,7 +168,7 @@ export function getTeamFilePath(teamName: string): string {
 export function readTeamFile(teamName: string): TeamFile | null {
   try {
     const content = readFileSync(getTeamFilePath(teamName), 'utf-8')
-    return jsonParse(content) as TeamFile
+    return sanitizeTeamFile(jsonParse(content))
   } catch (e) {
     if (getErrnoCode(e) === 'ENOENT') return null
     logForDebugging(
@@ -149,7 +186,7 @@ export async function readTeamFileAsync(
 ): Promise<TeamFile | null> {
   try {
     const content = await readFile(getTeamFilePath(teamName), 'utf-8')
-    return jsonParse(content) as TeamFile
+    return sanitizeTeamFile(jsonParse(content))
   } catch (e) {
     if (getErrnoCode(e) === 'ENOENT') return null
     logForDebugging(
@@ -160,17 +197,7 @@ export async function readTeamFileAsync(
 }
 
 /**
- * Writes a team file (sync — for sync contexts)
- */
-// sync IO: called from sync context
-function writeTeamFile(teamName: string, teamFile: TeamFile): void {
-  const teamDir = getTeamDir(teamName)
-  mkdirSync(teamDir, { recursive: true })
-  writeFileSync(getTeamFilePath(teamName), jsonStringify(teamFile, null, 2))
-}
-
-/**
- * Writes a team file (async — for tool handlers)
+ * Writes a team file (async — for initial team creation)
  */
 export async function writeTeamFileAsync(
   teamName: string,
@@ -181,14 +208,171 @@ export async function writeTeamFileAsync(
   await writeFile(getTeamFilePath(teamName), jsonStringify(teamFile, null, 2))
 }
 
+const TEAM_FILE_LOCK_OPTIONS = {
+  realpath: false,
+  retries: {
+    retries: 10,
+    minTimeout: 5,
+    maxTimeout: 100,
+  },
+  onCompromised: () => {},
+}
+
+const inProcessTeamFileQueues = new Map<string, Promise<unknown>>()
+
+async function withInProcessTeamFileQueue<T>(
+  configPath: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = inProcessTeamFileQueues.get(configPath) ?? Promise.resolve()
+  let releaseQueue: () => void = () => {}
+  const gate = new Promise<void>(resolve => {
+    releaseQueue = resolve
+  })
+  const tail = prev.then(() => gate)
+  inProcessTeamFileQueues.set(configPath, tail)
+
+  await prev
+  try {
+    return await fn()
+  } finally {
+    releaseQueue()
+    if (inProcessTeamFileQueues.get(configPath) === tail) {
+      inProcessTeamFileQueues.delete(configPath)
+    }
+  }
+}
+
+function missingTeamFileError(teamName: string): Error {
+  return new Error(
+    `Internal error: team file for "${teamName}" not found. The session team should have been initialized at startup.`,
+  )
+}
+
+/**
+ * Official 2.1.331 `fke` — read-modify-write `config.json` while holding a
+ * `proper-lockfile` lock on `${configPath}.lock` (plus in-process queue to
+ * serialize concurrent same-process writers). Returning `false` from `updater`
+ * aborts the write without rewriting the file.
+ */
+export async function updateTeamFile<T>(
+  teamName: string,
+  updater: (teamFile: TeamFile) => T | false,
+  options?: { bestEffortWrite?: boolean },
+): Promise<T | undefined> {
+  const configPath = getTeamFilePath(teamName)
+  return withInProcessTeamFileQueue(configPath, async () => {
+    let release: (() => Promise<void>) | undefined
+    try {
+      release = await lockfile.lock(configPath, {
+        lockfilePath: `${configPath}.lock`,
+        ...TEAM_FILE_LOCK_OPTIONS,
+      })
+    } catch (err) {
+      if (getErrnoCode(err) === 'ENOENT') {
+        throw missingTeamFileError(teamName)
+      }
+      throw err
+    }
+
+    try {
+      const teamFile = await readTeamFileAsync(teamName)
+      if (!teamFile) {
+        throw new Error(
+          'Team config file unreadable (lock acquired, read failed)',
+        )
+      }
+      const result = updater(teamFile)
+      if (result === false) {
+        return undefined
+      }
+      try {
+        const serialized = jsonStringify(teamFile, null, 2)
+        const handle = await open(configPath, 'r+')
+        try {
+          await handle.writeFile(serialized, 'utf-8')
+          await handle.truncate(Buffer.byteLength(serialized, 'utf-8'))
+        } finally {
+          await handle.close()
+        }
+      } catch (writeErr) {
+        if (!options?.bestEffortWrite) {
+          throw getErrnoCode(writeErr) === 'ENOENT'
+            ? missingTeamFileError(teamName)
+            : writeErr
+        }
+        logForDebugging(
+          `[TeammateTool] Failed to write team file for ${teamName}: ${errorMessage(writeErr)}`,
+          { level: 'error' },
+        )
+      }
+      return result
+    } finally {
+      try {
+        await release()
+      } catch (releaseErr) {
+        logForDebugging(
+          `[TeammateTool] updateTeamFile lock release failed: ${errorMessage(releaseErr)}`,
+        )
+      }
+    }
+  })
+}
+
+/**
+ * Adds a member to the team config file under lock.
+ */
+export async function addMemberToTeam(
+  teamName: string,
+  member: TeamFile['members'][number],
+): Promise<boolean> {
+  try {
+    const added = await updateTeamFile(teamName, teamFile => {
+      if (teamFile.members.some(m => m.agentId === member.agentId)) {
+        return false
+      }
+      teamFile.members.push(member)
+      return true
+    })
+    return added === true
+  } catch (err) {
+    logForDebugging(
+      `[TeammateTool] addMemberToTeam(${member.agentId}) failed for team ${teamName}: ${errorMessage(err)}`,
+    )
+    return false
+  }
+}
+
+/**
+ * Official 2.1.331 `nNi` — removes a member by agentId under lock (used for
+ * rollback when spawn fails after identity reservation).
+ */
+export async function removeTeamMember(
+  teamName: string,
+  agentId: string,
+): Promise<void> {
+  try {
+    await updateTeamFile(teamName, teamFile => {
+      const idx = teamFile.members.findIndex(m => m.agentId === agentId)
+      if (idx === -1) return false
+      teamFile.members.splice(idx, 1)
+      return true
+    })
+  } catch (err) {
+    logForDebugging(
+      `[TeammateTool] removeTeamMember(${agentId}) failed: ${errorMessage(err)}`,
+    )
+  }
+}
+
 /**
  * Removes a teammate from the team file by agent ID or name.
  * Used by the leader when processing shutdown approvals.
  */
-export function removeTeammateFromTeamFile(
+export async function removeTeammateFromTeamFile(
   teamName: string,
   identifier: { agentId?: string; name?: string },
-): boolean {
+): Promise<boolean> {
   const identifierStr = identifier.agentId || identifier.name
   if (!identifierStr) {
     logForDebugging(
@@ -197,82 +381,130 @@ export function removeTeammateFromTeamFile(
     return false
   }
 
-  const teamFile = readTeamFile(teamName)
-  if (!teamFile) {
+  let notFound = false
+  try {
+    const removed =
+      (await updateTeamFile(
+        teamName,
+        teamFile => {
+          notFound = false
+          const originalLength = teamFile.members.length
+          teamFile.members = teamFile.members.filter(m => {
+            if (identifier.agentId && m.agentId === identifier.agentId) {
+              return false
+            }
+            if (identifier.name && m.name === identifier.name) {
+              return false
+            }
+            return true
+          })
+          const changed = teamFile.members.length !== originalLength
+          notFound = !changed
+          return changed ? true : false
+        },
+        { bestEffortWrite: true },
+      )) ?? false
+
+    if (removed) {
+      if (identifier.name) {
+        clearTeamLeadEntryKeyForInbox(getInboxPath(identifier.name, teamName))
+      }
+      logForDebugging(
+        `[TeammateTool] Removed teammate from team file: ${identifierStr}`,
+      )
+    } else if (notFound) {
+      logForDebugging(
+        `[TeammateTool] Teammate ${identifierStr} not found in team file for "${teamName}"`,
+      )
+    }
+    return removed
+  } catch (err) {
     logForDebugging(
-      `[TeammateTool] Cannot remove teammate ${identifierStr}: failed to read team file for "${teamName}"`,
+      `[TeammateTool] Cannot remove teammate ${identifierStr} from "${teamName}": ${errorMessage(err)}`,
     )
     return false
   }
-
-  const originalLength = teamFile.members.length
-  teamFile.members = teamFile.members.filter(m => {
-    if (identifier.agentId && m.agentId === identifier.agentId) return false
-    if (identifier.name && m.name === identifier.name) return false
-    return true
-  })
-
-  if (teamFile.members.length === originalLength) {
-    logForDebugging(
-      `[TeammateTool] Teammate ${identifierStr} not found in team file for "${teamName}"`,
-    )
-    return false
-  }
-
-  writeTeamFile(teamName, teamFile)
-  logForDebugging(
-    `[TeammateTool] Removed teammate from team file: ${identifierStr}`,
-  )
-  return true
 }
 
 /**
  * Adds a pane ID to the hidden panes list in the team file.
  * @param teamName - The name of the team
  * @param paneId - The pane ID to hide
- * @returns true if the pane was added to hidden list, false if team doesn't exist
+ * @returns true if the pane was added or already present, false if team doesn't exist
  */
-export function addHiddenPaneId(teamName: string, paneId: string): boolean {
-  const teamFile = readTeamFile(teamName)
-  if (!teamFile) {
+export async function addHiddenPaneId(
+  teamName: string,
+  paneId: string,
+): Promise<boolean> {
+  try {
+    let existed = false
+    const updated = await updateTeamFile(
+      teamName,
+      teamFile => {
+        existed = true
+        const hiddenPaneIds = teamFile.hiddenPaneIds ?? []
+        if (hiddenPaneIds.includes(paneId)) {
+          return false
+        }
+        hiddenPaneIds.push(paneId)
+        teamFile.hiddenPaneIds = hiddenPaneIds
+        return true
+      },
+      { bestEffortWrite: true },
+    )
+    if (updated) {
+      logForDebugging(
+        `[TeammateTool] Added ${paneId} to hidden panes for team ${teamName}`,
+      )
+    }
+    return existed
+  } catch (err) {
+    logForDebugging(
+      `[TeammateTool] addHiddenPaneId(${paneId}) failed for team ${teamName}: ${errorMessage(err)}`,
+    )
     return false
   }
-
-  const hiddenPaneIds = teamFile.hiddenPaneIds ?? []
-  if (!hiddenPaneIds.includes(paneId)) {
-    hiddenPaneIds.push(paneId)
-    teamFile.hiddenPaneIds = hiddenPaneIds
-    writeTeamFile(teamName, teamFile)
-    logForDebugging(
-      `[TeammateTool] Added ${paneId} to hidden panes for team ${teamName}`,
-    )
-  }
-  return true
 }
 
 /**
  * Removes a pane ID from the hidden panes list in the team file.
  * @param teamName - The name of the team
  * @param paneId - The pane ID to show (remove from hidden list)
- * @returns true if the pane was removed from hidden list, false if team doesn't exist
+ * @returns true if the team exists, false otherwise
  */
-export function removeHiddenPaneId(teamName: string, paneId: string): boolean {
-  const teamFile = readTeamFile(teamName)
-  if (!teamFile) {
+export async function removeHiddenPaneId(
+  teamName: string,
+  paneId: string,
+): Promise<boolean> {
+  try {
+    let existed = false
+    const updated = await updateTeamFile(
+      teamName,
+      teamFile => {
+        existed = true
+        const hiddenPaneIds = teamFile.hiddenPaneIds ?? []
+        const index = hiddenPaneIds.indexOf(paneId)
+        if (index === -1) {
+          return false
+        }
+        hiddenPaneIds.splice(index, 1)
+        teamFile.hiddenPaneIds = hiddenPaneIds
+        return true
+      },
+      { bestEffortWrite: true },
+    )
+    if (updated) {
+      logForDebugging(
+        `[TeammateTool] Removed ${paneId} from hidden panes for team ${teamName}`,
+      )
+    }
+    return existed
+  } catch (err) {
+    logForDebugging(
+      `[TeammateTool] removeHiddenPaneId(${paneId}) failed for team ${teamName}: ${errorMessage(err)}`,
+    )
     return false
   }
-
-  const hiddenPaneIds = teamFile.hiddenPaneIds ?? []
-  const index = hiddenPaneIds.indexOf(paneId)
-  if (index !== -1) {
-    hiddenPaneIds.splice(index, 1)
-    teamFile.hiddenPaneIds = hiddenPaneIds
-    writeTeamFile(teamName, teamFile)
-    logForDebugging(
-      `[TeammateTool] Removed ${paneId} from hidden panes for team ${teamName}`,
-    )
-  }
-  return true
 }
 
 /**
@@ -282,38 +514,44 @@ export function removeHiddenPaneId(teamName: string, paneId: string): boolean {
  * @param tmuxPaneId - The pane ID of the teammate to remove
  * @returns true if the member was removed, false if team or member doesn't exist
  */
-export function removeMemberFromTeam(
+export async function removeMemberFromTeam(
   teamName: string,
   tmuxPaneId: string,
-): boolean {
-  const teamFile = readTeamFile(teamName)
-  if (!teamFile) {
-    return false
-  }
-
-  const memberIndex = teamFile.members.findIndex(
-    m => m.tmuxPaneId === tmuxPaneId,
-  )
-  if (memberIndex === -1) {
-    return false
-  }
-
-  // Remove from members array
-  teamFile.members.splice(memberIndex, 1)
-
-  // Also remove from hiddenPaneIds if present
-  if (teamFile.hiddenPaneIds) {
-    const hiddenIndex = teamFile.hiddenPaneIds.indexOf(tmuxPaneId)
-    if (hiddenIndex !== -1) {
-      teamFile.hiddenPaneIds.splice(hiddenIndex, 1)
+): Promise<boolean> {
+  try {
+    const removed =
+      (await updateTeamFile(
+        teamName,
+        teamFile => {
+          const memberIndex = teamFile.members.findIndex(
+            m => m.tmuxPaneId === tmuxPaneId,
+          )
+          if (memberIndex === -1) {
+            return false
+          }
+          teamFile.members.splice(memberIndex, 1)
+          if (teamFile.hiddenPaneIds) {
+            const hiddenIndex = teamFile.hiddenPaneIds.indexOf(tmuxPaneId)
+            if (hiddenIndex !== -1) {
+              teamFile.hiddenPaneIds.splice(hiddenIndex, 1)
+            }
+          }
+          return true
+        },
+        { bestEffortWrite: true },
+      )) ?? false
+    if (removed) {
+      logForDebugging(
+        `[TeammateTool] Removed member with pane ${tmuxPaneId} from team ${teamName}`,
+      )
     }
+    return removed
+  } catch (err) {
+    logForDebugging(
+      `[TeammateTool] removeMemberFromTeam(${tmuxPaneId}) failed for team ${teamName}: ${errorMessage(err)}`,
+    )
+    return false
   }
-
-  writeTeamFile(teamName, teamFile)
-  logForDebugging(
-    `[TeammateTool] Removed member with pane ${tmuxPaneId} from team ${teamName}`,
-  )
-  return true
 }
 
 /**
@@ -323,28 +561,54 @@ export function removeMemberFromTeam(
  * @param agentId - The agent ID of the teammate to remove (e.g., "researcher@my-team")
  * @returns true if the member was removed, false if team or member doesn't exist
  */
-export function removeMemberByAgentId(
+export async function removeMemberByAgentId(
   teamName: string,
   agentId: string,
-): boolean {
-  const teamFile = readTeamFile(teamName)
-  if (!teamFile) {
+  options?: { onlyIfJoinedBefore?: number },
+): Promise<boolean> {
+  let skippedStale = false
+  try {
+    const removed =
+      (await updateTeamFile(
+        teamName,
+        teamFile => {
+          const memberIndex = teamFile.members.findIndex(
+            m => m.agentId === agentId,
+          )
+          const member = teamFile.members[memberIndex]
+          if (!member) {
+            skippedStale = false
+            return false
+          }
+          if (
+            options?.onlyIfJoinedBefore !== undefined &&
+            member.joinedAt >= options.onlyIfJoinedBefore
+          ) {
+            skippedStale = true
+            return false
+          }
+          skippedStale = false
+          teamFile.members.splice(memberIndex, 1)
+          return true
+        },
+        { bestEffortWrite: true },
+      )) ?? false
+    if (removed) {
+      logForDebugging(
+        `[TeammateTool] Removed member ${agentId} from team ${teamName}`,
+      )
+    } else if (skippedStale) {
+      logForDebugging(
+        `[TeammateTool] Skipped stale removal of ${agentId} from team ${teamName} (re-added after removal was initiated)`,
+      )
+    }
+    return removed
+  } catch (err) {
+    logForDebugging(
+      `[TeammateTool] removeMemberByAgentId(${agentId}) failed for team ${teamName}: ${errorMessage(err)}`,
+    )
     return false
   }
-
-  const memberIndex = teamFile.members.findIndex(m => m.agentId === agentId)
-  if (memberIndex === -1) {
-    return false
-  }
-
-  // Remove from members array
-  teamFile.members.splice(memberIndex, 1)
-
-  writeTeamFile(teamName, teamFile)
-  logForDebugging(
-    `[TeammateTool] Removed member ${agentId} from team ${teamName}`,
-  )
-  return true
 }
 
 /**
@@ -354,38 +618,47 @@ export function removeMemberByAgentId(
  * @param memberName - The name of the member to update
  * @param mode - The new permission mode
  */
-export function setMemberMode(
+export async function setMemberMode(
   teamName: string,
   memberName: string,
   mode: PermissionMode,
-): boolean {
-  const teamFile = readTeamFile(teamName)
-  if (!teamFile) {
-    return false
+): Promise<boolean> {
+  const outcome: { status: 'unchanged' | 'absent' | 'set' } = {
+    status: 'unchanged',
   }
-
-  const member = teamFile.members.find(m => m.name === memberName)
-  if (!member) {
+  try {
+    await updateTeamFile(teamName, teamFile => {
+      const member = teamFile.members.find(m => m.name === memberName)
+      if (!member) {
+        outcome.status = 'absent'
+        return false
+      }
+      if (member.mode === mode) {
+        outcome.status = 'unchanged'
+        return false
+      }
+      outcome.status = 'set'
+      member.mode = mode
+      return true
+    })
+    if (outcome.status === 'absent') {
+      logForDebugging(
+        `[TeammateTool] Cannot set member mode: member ${memberName} not found in team ${teamName}`,
+      )
+      return false
+    }
+    if (outcome.status === 'set') {
+      logForDebugging(
+        `[TeammateTool] Set member ${memberName} in team ${teamName} to mode: ${mode}`,
+      )
+    }
+    return true
+  } catch (err) {
     logForDebugging(
-      `[TeammateTool] Cannot set member mode: member ${memberName} not found in team ${teamName}`,
+      `[TeammateTool] Cannot set member mode: ${errorMessage(err)}`,
     )
     return false
   }
-
-  // Only write if the value is actually changing
-  if (member.mode === mode) {
-    return true
-  }
-
-  // Create updated members array immutably
-  const updatedMembers = teamFile.members.map(m =>
-    m.name === memberName ? { ...m, mode } : m,
-  )
-  writeTeamFile(teamName, { ...teamFile, members: updatedMembers })
-  logForDebugging(
-    `[TeammateTool] Set member ${memberName} in team ${teamName} to mode: ${mode}`,
-  )
-  return true
 }
 
 /**
@@ -402,46 +675,46 @@ export function syncTeammateMode(
   const teamName = teamNameOverride ?? getTeamName()
   const agentName = getAgentName()
   if (teamName && agentName) {
-    setMemberMode(teamName, agentName, mode)
+    void setMemberMode(teamName, agentName, mode)
   }
 }
 
 /**
- * Sets multiple team members' permission modes in a single atomic operation.
+ * Sets multiple team members' permission modes in a single atomic locked operation.
  * Avoids race conditions when updating multiple teammates at once.
  * @param teamName - The name of the team
  * @param modeUpdates - Array of {memberName, mode} to update
  */
-export function setMultipleMemberModes(
+export async function setMultipleMemberModes(
   teamName: string,
   modeUpdates: Array<{ memberName: string; mode: PermissionMode }>,
-): boolean {
-  const teamFile = readTeamFile(teamName)
-  if (!teamFile) {
+): Promise<boolean> {
+  const updateMap = new Map(modeUpdates.map(u => [u.memberName, u.mode]))
+  try {
+    let anyChanged = false
+    await updateTeamFile(teamName, teamFile => {
+      anyChanged = false
+      for (const member of teamFile.members) {
+        const newMode = updateMap.get(member.name)
+        if (newMode !== undefined && member.mode !== newMode) {
+          member.mode = newMode
+          anyChanged = true
+        }
+      }
+      return anyChanged ? true : false
+    })
+    if (anyChanged) {
+      logForDebugging(
+        `[TeammateTool] Set ${modeUpdates.length} member modes in team ${teamName}`,
+      )
+    }
+    return true
+  } catch (err) {
+    logForDebugging(
+      `[TeammateTool] Cannot set multiple member modes: ${errorMessage(err)}`,
+    )
     return false
   }
-
-  // Build a map of updates for efficient lookup
-  const updateMap = new Map(modeUpdates.map(u => [u.memberName, u.mode]))
-
-  // Create updated members array immutably
-  let anyChanged = false
-  const updatedMembers = teamFile.members.map(member => {
-    const newMode = updateMap.get(member.name)
-    if (newMode !== undefined && member.mode !== newMode) {
-      anyChanged = true
-      return { ...member, mode: newMode }
-    }
-    return member
-  })
-
-  if (anyChanged) {
-    writeTeamFile(teamName, { ...teamFile, members: updatedMembers })
-    logForDebugging(
-      `[TeammateTool] Set ${modeUpdates.length} member modes in team ${teamName}`,
-    )
-  }
-  return true
 }
 
 /**
@@ -456,32 +729,65 @@ export async function setMemberActive(
   memberName: string,
   isActive: boolean,
 ): Promise<void> {
-  const teamFile = await readTeamFileAsync(teamName)
-  if (!teamFile) {
+  const outcome: { status: 'unchanged' | 'absent' | 'set' } = {
+    status: 'unchanged',
+  }
+  try {
+    await updateTeamFile(teamName, teamFile => {
+      const member = teamFile.members.find(m => m.name === memberName)
+      if (!member) {
+        outcome.status = 'absent'
+        return false
+      }
+      if (member.isActive === isActive) {
+        outcome.status = 'unchanged'
+        return false
+      }
+      outcome.status = 'set'
+      member.isActive = isActive
+      return true
+    })
+    if (outcome.status === 'absent') {
+      logForDebugging(
+        `[TeammateTool] Cannot set member active: member ${memberName} not found in team ${teamName}`,
+      )
+    } else if (outcome.status === 'set') {
+      logForDebugging(
+        `[TeammateTool] Set member ${memberName} in team ${teamName} to ${isActive ? 'active' : 'idle'}`,
+      )
+    }
+  } catch (err) {
     logForDebugging(
-      `[TeammateTool] Cannot set member active: team ${teamName} not found`,
+      `[TeammateTool] Cannot set member active: ${errorMessage(err)}`,
     )
-    return
   }
+}
 
-  const member = teamFile.members.find(m => m.name === memberName)
-  if (!member) {
+/**
+ * Sets multiple team members' active status in a single locked operation.
+ */
+export async function setMultipleMembersActive(
+  teamName: string,
+  activeUpdates: Array<{ memberName: string; isActive: boolean }>,
+): Promise<void> {
+  const updateMap = new Map(activeUpdates.map(u => [u.memberName, u.isActive]))
+  try {
+    await updateTeamFile(teamName, teamFile => {
+      let anyChanged = false
+      for (const member of teamFile.members) {
+        const nextActive = updateMap.get(member.name)
+        if (nextActive !== undefined && member.isActive !== nextActive) {
+          member.isActive = nextActive
+          anyChanged = true
+        }
+      }
+      return anyChanged ? true : false
+    })
+  } catch (err) {
     logForDebugging(
-      `[TeammateTool] Cannot set member active: member ${memberName} not found in team ${teamName}`,
+      `[TeammateTool] Cannot set multiple members active: ${errorMessage(err)}`,
     )
-    return
   }
-
-  // Only write if the value is actually changing
-  if (member.isActive === isActive) {
-    return
-  }
-
-  member.isActive = isActive
-  await writeTeamFileAsync(teamName, teamFile)
-  logForDebugging(
-    `[TeammateTool] Set member ${memberName} in team ${teamName} to ${isActive ? 'active' : 'idle'}`,
-  )
 }
 
 /**
@@ -552,8 +858,7 @@ async function destroyWorktree(worktreePath: string): Promise<void> {
 
 /**
  * Mark a team as created this session so it gets cleaned up on exit.
- * Call this right after the initial writeTeamFile. TeamDelete should
- * call unregisterTeamForSessionCleanup to prevent double-cleanup.
+ * Call this right after the initial writeTeamFile.
  * Backing Set lives in bootstrap/state.ts so resetStateForTests()
  * clears it between tests (avoids the PR #17615 cross-shard leak class).
  */
@@ -562,11 +867,44 @@ export function registerTeamForSessionCleanup(teamName: string): void {
 }
 
 /**
- * Remove a team from session cleanup tracking (e.g., after explicit
- * TeamDelete — already cleaned, don't try again on shutdown).
+ * Remove a team from session cleanup tracking.
  */
 export function unregisterTeamForSessionCleanup(teamName: string): void {
   getSessionCreatedTeams().delete(teamName)
+}
+
+/**
+ * Process-owned pane tracking (official 2.1.331 `sNi` / `fVs`).
+ * Ensures session cleanup only kills panes spawned by THIS leader process,
+ * never panes owned by another session sharing or reclaiming a team name.
+ */
+const spawnedTeammatePanes = new Set<string>()
+
+function paneOwnershipKey(backendType: BackendType, paneId: string): string {
+  return `${backendType}:${paneId}`
+}
+
+/** Official 2.1.331 `sNi` — record a pane spawned by this leader process. */
+export function recordSpawnedTeammatePane(
+  backendType: BackendType,
+  paneId: string,
+): void {
+  if (isPaneBackend(backendType) && paneId) {
+    spawnedTeammatePanes.add(paneOwnershipKey(backendType, paneId))
+  }
+}
+
+export function untrackSpawnedTeammatePane(
+  backendType: BackendType,
+  paneId: string,
+): void {
+  if (isPaneBackend(backendType) && paneId) {
+    spawnedTeammatePanes.delete(paneOwnershipKey(backendType, paneId))
+  }
+}
+
+export function _resetSpawnedTeammatePanesForTesting(): void {
+  spawnedTeammatePanes.clear()
 }
 
 /**
@@ -588,21 +926,27 @@ export async function cleanupSessionTeams(): Promise<void> {
 }
 
 /**
- * Best-effort kill of all pane-backed teammate panes for a team.
+ * Best-effort kill of pane-backed teammate panes owned by this process.
  * Called from cleanupSessionTeams on ungraceful leader exit (SIGINT/SIGTERM).
  * Dynamic imports avoid adding registry/detection to this module's static
  * dep graph — this only runs at shutdown, so the import cost is irrelevant.
  */
-async function killOrphanedTeammatePanes(teamName: string): Promise<void> {
-  const teamFile = readTeamFile(teamName)
+export async function killOrphanedTeammatePanes(
+  teamName: string,
+  ownedPanes?: ReadonlySet<string>,
+): Promise<void> {
+  const teamFile = await readTeamFileAsync(teamName)
   if (!teamFile) return
 
+  const owned = ownedPanes ?? spawnedTeammatePanes
   const paneMembers = teamFile.members.filter(
     m =>
       m.name !== TEAM_LEAD_NAME &&
       m.tmuxPaneId &&
       m.backendType &&
-      isPaneBackend(m.backendType),
+      isPaneBackend(m.backendType) &&
+      (owned.has(paneOwnershipKey(m.backendType, m.tmuxPaneId)) ||
+        owned.has(m.tmuxPaneId)),
   )
   if (paneMembers.length === 0) return
 
@@ -631,16 +975,17 @@ async function killOrphanedTeammatePanes(teamName: string): Promise<void> {
   )
 }
 
+const CLEANUP_DELETE_ATTEMPTS = 3
+
 /**
- * Cleans up team and task directories for a given team name.
- * Also cleans up git worktrees created for teammates.
- * Called when a swarm session is terminated.
+ * Official 2.1.331 `rSr` — cleans up ONLY `~/.claude/teams/{team}` (and any
+ * recorded teammate git worktrees) using atomic rename (`${dir}.deleted-${id}`)
+ * plus retry delete. NEVER deletes `~/.claude/tasks/{team}` so session tasks
+ * survive exit for `--resume`.
  */
 export async function cleanupTeamDirectories(teamName: string): Promise<void> {
-  const sanitizedName = sanitizeName(teamName)
-
   // Read team file to get worktree paths BEFORE deleting the team directory
-  const teamFile = readTeamFile(teamName)
+  const teamFile = await readTeamFileAsync(teamName)
   const worktreePaths: string[] = []
   if (teamFile) {
     for (const member of teamFile.members) {
@@ -655,27 +1000,32 @@ export async function cleanupTeamDirectories(teamName: string): Promise<void> {
     await destroyWorktree(worktreePath)
   }
 
-  // Clean up team directory (~/.claude/teams/{team-name}/)
+  // Clean up team directory (~/.claude/teams/{team-name}/) only — never tasks!
   const teamDir = getTeamDir(teamName)
   try {
-    await rm(teamDir, { recursive: true, force: true })
+    const tombstoneDir = `${teamDir}.deleted-${randomUUID()}`
+    const targetDir = await rename(teamDir, tombstoneDir).then(
+      () => tombstoneDir,
+      () => teamDir,
+    )
+    for (let attempt = 1; ; attempt++) {
+      await rm(targetDir, { recursive: true, force: true })
+      const gone = await stat(targetDir).then(
+        () => false,
+        err => getErrnoCode(err) === 'ENOENT',
+      )
+      if (gone) break
+      if (attempt === CLEANUP_DELETE_ATTEMPTS) {
+        logForDebugging(
+          `[TeammateTool] ${targetDir} still exists after ${attempt} delete attempts`,
+        )
+        throw new Error('team folder still exists after every delete attempt')
+      }
+    }
     logForDebugging(`[TeammateTool] Cleaned up team directory: ${teamDir}`)
   } catch (error) {
     logForDebugging(
       `[TeammateTool] Failed to clean up team directory ${teamDir}: ${errorMessage(error)}`,
-    )
-  }
-
-  // Clean up tasks directory (~/.claude/tasks/{taskListId}/)
-  // The leader and teammates all store tasks under the sanitized team name.
-  const tasksDir = getTasksDir(sanitizedName)
-  try {
-    await rm(tasksDir, { recursive: true, force: true })
-    logForDebugging(`[TeammateTool] Cleaned up tasks directory: ${tasksDir}`)
-    notifyTasksUpdated()
-  } catch (error) {
-    logForDebugging(
-      `[TeammateTool] Failed to clean up tasks directory ${tasksDir}: ${errorMessage(error)}`,
     )
   }
 }
