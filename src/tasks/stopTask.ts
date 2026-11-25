@@ -24,6 +24,10 @@ import {
   TOOL_USE_ID_TAG,
 } from '../constants/xml.js'
 import { asAgentId } from '../types/ids.js'
+import {
+  isAgentKillLoopSettled,
+  isTerminalAgentTaskStatus,
+} from '../utils/agentStopBag.js'
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
 import { stopObserverPairing } from '../utils/observerAgents.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
@@ -186,6 +190,21 @@ function fireObserverTombstone(
 }
 
 /**
+ * Official 2.1.331 `ho(task, taskId)` (@325138700) — true when a terminal
+ * `local_agent` or `local_workflow` still has an unsettled kill-loop.
+ */
+export function isUnsettledTerminalKillLoop(
+  task: TaskStateBase,
+  taskId: string,
+): boolean {
+  return (
+    isTerminalAgentTaskStatus(task.status) &&
+    (task.type === 'local_agent' || task.type === 'local_workflow') &&
+    !isAgentKillLoopSettled(taskId)
+  )
+}
+
+/**
  * Look up a task by ID (Elo fuzzy on miss), validate ownership + running/parked,
  * kill it, cascade descendants when the target was YC-parked (densable H1e).
  *
@@ -259,7 +278,7 @@ export async function stopTask(
         'not_owner',
       )
     }
-    if (source === 'user') {
+    if (source !== undefined) {
       fireObserverTombstone(
         resolvedId,
         typeof agentTask.agentType === 'string'
@@ -267,8 +286,14 @@ export async function stopTask(
           : undefined,
       )
     }
-    // densable: if status!==running return XV (kill parked/terminal observer)
-    if (agentTask.status !== 'running') {
+    // Official 2.1.331: kill parked/terminal observer unless its terminal kill-loop is still unsettled.
+    if (
+      agentTask.status !== 'running' &&
+      !(
+        isTerminalAgentTaskStatus(agentTask.status) &&
+        !isAgentKillLoopSettled(resolvedId)
+      )
+    ) {
       killAsyncAgent(
         resolvedId,
         createTaskRegistry(getAppState, setAppState),
@@ -282,18 +307,22 @@ export async function stopTask(
     }
   }
 
-  // densable yhe @194999400: status running OR gT(YC park) OR user-stopped
-  // non-running monitor_ws OR paused workflow
+  // Official 2.1.331 `D9o` (@325133600): status running OR YC-parked OR
+  // source-stopped non-running monitor_ws OR paused workflow OR unsettled kill-loop.
   const parked = agentTask ? isParkedKeepaliveAgent(agentTask) : false
   const stoppedMonitorWsByUser =
-    task.status !== 'running' && task.type === 'monitor_ws' && source === 'user'
+    task.status !== 'running' &&
+    task.type === 'monitor_ws' &&
+    source !== undefined
   const pausedWorkflow =
     task.type === 'local_workflow' && task.status === 'paused'
+  const unsettledKillLoop = isUnsettledTerminalKillLoop(task, resolvedId)
   if (
     task.status !== 'running' &&
     !parked &&
     !stoppedMonitorWsByUser &&
-    !pausedWorkflow
+    !pausedWorkflow &&
+    !unsettledKillLoop
   ) {
     throw new StopTaskError(
       `Task ${displayId} is not running (status: ${task.status})`,
@@ -317,9 +346,25 @@ export async function stopTask(
     )
   }
 
-  // densable: if (source==="user") hAe
-  if (source === 'user' && agentTask) {
+  // Official 2.1.331: if (source !== undefined) stamp stoppedByUser (covers user + client)
+  if (source !== undefined && agentTask) {
     markAgentStoppedByUser(resolvedId, setAppState)
+  }
+
+  // Official 2.1.331 `if (L)` (@325135100): task already ended, but its loop is
+  // still unsettled — re-signal abort and report status without throwing not_running.
+  if (unsettledKillLoop) {
+    const abortCtrl = (task as { abortController?: AbortController })
+      .abortController
+    if (abortCtrl && !abortCtrl.signal.aborted) {
+      abortCtrl.abort()
+    }
+    return {
+      taskId: resolvedId,
+      taskType: task.type,
+      command: isLocalShellTask(task) ? task.command : task.description,
+      note: `had already ended (${task.status}) but its loop had not exited; re-signalled it and killed 0 process group(s). The record remains listed while the loop is still live.`,
+    }
   }
 
   // Capture YC-before-kill for cascade gate (densable p=zle(l))
@@ -349,7 +394,7 @@ export async function stopTask(
           summary: child.description,
         })
       }
-      if (source === 'user') {
+      if (source !== undefined) {
         markAgentStoppedByUser(child.id, setAppState)
       }
       killAsyncAgent(

@@ -1,4 +1,4 @@
-import { constants as fsConstants } from 'fs'
+import { constants as fsConstants, realpathSync } from 'fs'
 import {
   type FileHandle,
   lstat,
@@ -7,17 +7,30 @@ import {
   readdir,
   readlink,
   realpath,
-  stat,
   symlink,
   unlink,
 } from 'fs/promises'
 import { tmpdir } from 'os'
-import { dirname, isAbsolute, join, normalize, sep } from 'path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  resolve,
+  sep,
+} from 'path'
 import { getSessionId } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { getErrnoCode } from '../errors.js'
+import { getPathsForPermissionCheck } from '../fsOperations.js'
 import { logError } from '../log.js'
-import { getProjectTempDir } from '../permissions/filesystem.js'
+import {
+  getClaudeTempDir,
+  getProjectTempDir,
+} from '../permissions/filesystem.js'
+import { getPlatform } from '../platform.js'
 import { sleep } from '../sleep.js'
 
 // SECURITY: O_NOFOLLOW prevents following symlinks when opening task output files.
@@ -32,10 +45,12 @@ const DEFAULT_MAX_READ_BYTES = 8 * 1024 * 1024 // 8MB
  * Disk cap for task output files. In file mode (bash), a watchdog polls
  * file size and kills the process. In pipe mode (hooks), DiskTaskOutput
  * drops chunks past this limit. Shared so both caps stay in sync.
+ * Official 2.1.331 `Tce = 5368709120` ('5GB'), `uU = 67108864` (64MB), `qCs = 8192`.
  */
-/** densable 2.1.283 vLo — 1GB disk cap (was 5GB locally; gold differs). Keep 252 pinWriteTarget. */
-export const MAX_TASK_OUTPUT_BYTES = 1_073_741_824
-export const MAX_TASK_OUTPUT_BYTES_DISPLAY = '1GB'
+export const MAX_TASK_OUTPUT_BYTES = 5_368_709_120
+export const MAX_TASK_OUTPUT_BYTES_DISPLAY = '5GB'
+export const MAX_PERSISTED_OUTPUT_BYTES = 67_108_864
+export const TASK_OUTPUT_TAIL_BYTES = 8192
 
 /** densable 2.1.247 RTe — queued when the output file cannot be written. */
 export const UNWRITTEN_OUTPUT_NOTICE = `
@@ -79,9 +94,348 @@ export function getTaskOutputDir(): string {
   return _taskOutputDir
 }
 
-/** Test helper — clears the memoized dir. */
+// Official 2.1.331 `yn().linkedOutputs` + `K` (linked target identity map) +
+// `linksInheritedBefore` / `inheritedLinkLines` for pre-session symlink inheritance.
+const PROCESS_START_MS = Date.now() - process.uptime() * 1000
+const linkedOutputs = new Map<string, string>()
+const linkedTargetIdentities = new Map<
+  string,
+  { dev: number | bigint; ino: number | bigint }
+>()
+let linksInheritedBefore = PROCESS_START_MS
+const inheritedLinkLines = new Map<string, number>()
+
+export function inheritPredecessorTaskOutputLinks(
+  dir: string,
+  cutoffMs: number,
+): void {
+  if (!Number.isFinite(cutoffMs)) return
+  inheritedLinkLines.set(
+    dir,
+    Math.max(PROCESS_START_MS, Math.min(Date.now(), cutoffMs)),
+  )
+}
+
+export function getLinksInheritedBeforeFor(dir: string): number {
+  return Math.max(linksInheritedBefore, inheritedLinkLines.get(dir) ?? 0)
+}
+
+/** Test helper — override the pre-session inheritance cutoff timestamp. */
+export function _setLinksInheritedBeforeForTest(cutoffMs?: number): void {
+  linksInheritedBefore = cutoffMs ?? PROCESS_START_MS
+  inheritedLinkLines.clear()
+}
+
+/** Test helper — clears the memoized dir and symlink registration state. */
 export function _resetTaskOutputDirForTest(): void {
   _taskOutputDir = undefined
+  linkedOutputs.clear()
+  linkedTargetIdentities.clear()
+  linksInheritedBefore = PROCESS_START_MS
+  inheritedLinkLines.clear()
+}
+
+const SESSION_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function foldCaseForPlatform(p: string): string {
+  const plat = getPlatform()
+  return plat === 'windows' || plat === 'macos' ? p.toLowerCase() : p
+}
+
+function isSessionIdSegment(segment: string): boolean {
+  return (
+    segment === getSessionId() ||
+    SESSION_UUID_RE.test(segment) ||
+    segment.startsWith('session_') ||
+    segment.startsWith('cse_')
+  )
+}
+
+function getTaskOutputRootDirNormalized(): string {
+  return dirname(dirname(dirname(resolve(getTaskOutputDir()))))
+}
+
+function safeRealpathSync(p: string): string {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
+/** Official 2.1.331 `x(e)` — path is inside the task output temp root. */
+function isUnderTaskOutputRoot(targetPath: string): boolean {
+  const root = resolve(getClaudeTempDir()).replace(/[\\/]+$/, '')
+  const normalizedTarget = resolve(targetPath)
+  const rootPrefix = root.endsWith(sep) ? root : root + sep
+  const cmpTarget = foldCaseForPlatform(normalizedTarget)
+  const cmpRoot = foldCaseForPlatform(root)
+  const cmpPrefix = foldCaseForPlatform(rootPrefix)
+  return cmpTarget === cmpRoot || cmpTarget.startsWith(cmpPrefix)
+}
+
+/** Official 2.1.331 `Rt(e)` — canonicalize task output path across root aliases (e.g. /tmp -> /private/tmp). */
+function canonicalizeTaskOutputPath(filePath: string): string {
+  const root = getTaskOutputRootDirNormalized()
+  const resolved = resolve(filePath)
+  if (resolved.startsWith(root + sep)) {
+    return resolved
+  }
+  const candidateRoot = dirname(dirname(dirname(dirname(resolved))))
+  const realCandidate = safeRealpathSync(candidateRoot)
+  if (foldCaseForPlatform(realCandidate) === foldCaseForPlatform(root)) {
+    return join(root, resolved.slice(candidateRoot.length + 1))
+  }
+  return resolved
+}
+
+/**
+ * Official 2.1.331 `f6t` (`isTaskOutputFilePath`) — true when any spelling of
+ * `filePath` sits directly inside `<taskOutputRoot>/<project>/<sessionId>/tasks/`.
+ */
+export function isTaskOutputFilePath(filePath: string): boolean {
+  const root = getTaskOutputRootDirNormalized()
+  const roots = new Set(
+    [root, safeRealpathSync(root)].map(r => foldCaseForPlatform(r)),
+  )
+  return getPathsForPermissionCheck(filePath).some(spelling => {
+    const dir = dirname(resolve(spelling))
+    const sessionDir = dirname(dir)
+    const rootDir = dirname(dirname(sessionDir))
+    return (
+      foldCaseForPlatform(basename(dir)) === 'tasks' &&
+      isSessionIdSegment(basename(sessionDir)) &&
+      roots.has(foldCaseForPlatform(rootDir))
+    )
+  })
+}
+
+function sessionGlobPatterns(): string[] {
+  const patterns = [
+    '????????-????-????-????-????????????',
+    'session_*',
+    'cse_*',
+  ]
+  const sid = getSessionId()
+  if (
+    sid &&
+    !SESSION_UUID_RE.test(sid) &&
+    !sid.startsWith('session_') &&
+    !sid.startsWith('cse_') &&
+    /^[A-Za-z0-9._-]+$/.test(sid)
+  ) {
+    patterns.push(sid)
+  }
+  return patterns
+}
+
+/**
+ * Official 2.1.331 `FGi` (`taskOutputDirExclusions`) — ripgrep glob exclusions
+ * preventing directory-level Grep from traversing into task output directories.
+ * Returns `['!**']` when searching directly inside a `tasks/` directory.
+ */
+export function taskOutputDirExclusions(dirPath: string): string[] {
+  const root = getTaskOutputRootDirNormalized()
+  const roots = Array.from(new Set([root, safeRealpathSync(root)]))
+  const exclusions = new Set<string>()
+  const stripPrefix = (parent: string, child: string): string | null => {
+    const prefix = parent.endsWith(sep) ? parent : parent + sep
+    return foldCaseForPlatform(child).startsWith(foldCaseForPlatform(prefix))
+      ? child.slice(prefix.length)
+      : null
+  }
+  const toSlash = (p: string): string => p.replaceAll('\\', '/')
+
+  for (const spelling of getPathsForPermissionCheck(dirPath)) {
+    const abs = resolve(spelling)
+    for (const r of roots) {
+      const rootName = basename(r)
+      if (foldCaseForPlatform(abs) === foldCaseForPlatform(r)) {
+        for (const pat of sessionGlobPatterns()) {
+          exclusions.add(`!/*/${pat}/tasks/**`)
+          exclusions.add(`!**/${rootName}/*/${pat}/tasks/**`)
+        }
+        continue
+      }
+      const relToRoot = stripPrefix(abs, r)
+      if (relToRoot !== null) {
+        for (const pat of sessionGlobPatterns()) {
+          exclusions.add(`!/${toSlash(relToRoot)}/*/${pat}/tasks/**`)
+          exclusions.add(`!**/${rootName}/*/${pat}/tasks/**`)
+        }
+        continue
+      }
+      const relInsideRoot = stripPrefix(r, abs)
+      if (relInsideRoot !== null) {
+        const parts = relInsideRoot.split(sep)
+        if (parts.length === 1) {
+          for (const pat of sessionGlobPatterns()) {
+            exclusions.add(`!/${pat}/tasks/**`)
+            exclusions.add(
+              `!**/${rootName}/${toSlash(relInsideRoot)}/${pat}/tasks/**`,
+            )
+          }
+        } else if (!isSessionIdSegment(parts[1] ?? '')) {
+          // unrelated directory
+        } else if (parts.length === 2) {
+          exclusions.add('!/tasks/**')
+          exclusions.add(`!**/${rootName}/${toSlash(relInsideRoot)}/tasks/**`)
+        } else if (foldCaseForPlatform(parts[2] ?? '') === 'tasks') {
+          exclusions.add('!**')
+        }
+      }
+    }
+  }
+  return [...exclusions]
+}
+
+async function readlinkOrNull(linkPath: string): Promise<string | null> {
+  try {
+    return await readlink(linkPath)
+  } catch (e) {
+    if (getErrnoCode(e) === 'EINVAL') return null
+    throw e
+  }
+}
+
+async function lstatOrNull(filePath: string) {
+  try {
+    return await lstat(filePath)
+  } catch (e) {
+    if (getErrnoCode(e) === 'ENOENT') return null
+    throw e
+  }
+}
+
+async function recordTargetIdentity(targetPath: string): Promise<void> {
+  const fh = await open(
+    targetPath,
+    process.platform === 'win32'
+      ? 'r'
+      : fsConstants.O_RDONLY | O_NOFOLLOW | (fsConstants.O_NONBLOCK ?? 0),
+  ).catch(e => {
+    throw wrapSwapOpenError(e, targetPath)
+  })
+  try {
+    const st = await fh.stat()
+    if (!st.isFile() || (process.platform !== 'win32' && st.nlink !== 1)) {
+      throw new TaskOutputSwapRefusedError(
+        targetPath,
+        'link target is not a regular single-link file',
+      )
+    }
+    linkedTargetIdentities.set(targetPath, { dev: st.dev, ino: st.ino })
+  } finally {
+    await fh.close()
+  }
+}
+
+async function registerLinkedOutput(
+  linkPath: string,
+  targetPath: string,
+): Promise<void> {
+  if (isUnderTaskOutputRoot(targetPath)) {
+    await recordTargetIdentity(targetPath)
+  }
+  linkedOutputs.set(canonicalizeTaskOutputPath(linkPath), targetPath)
+}
+
+function getRecordedTargetIdentity(targetPath: string): {
+  dev: number | bigint
+  ino: number | bigint
+} {
+  const id = linkedTargetIdentities.get(targetPath)
+  if (id === undefined) {
+    throw new TaskOutputSwapRefusedError(
+      targetPath,
+      'link target identity was never recorded',
+    )
+  }
+  return id
+}
+
+/**
+ * Official 2.1.331 `pt(e, n, r)` — allow inheriting an unregistered symlink ONLY
+ * when its target is absolute and inside the tasks root or `CLAUDE_CONFIG_DIR`
+ * AND the symlink's `ctimeMs` strictly predates `linksInheritedBeforeFor(dir)`.
+ */
+async function inheritPreSessionOutputSymlink(
+  canonicalLinkPath: string,
+  ioPath: string,
+  rawTarget: string,
+): Promise<string> {
+  const configRoot = resolve(getClaudeConfigHomeDir())
+  const inConfigDir =
+    isAbsolute(rawTarget) && resolve(rawTarget).startsWith(configRoot + sep)
+  if (
+    !isAbsolute(rawTarget) ||
+    (!isUnderTaskOutputRoot(rawTarget) && !inConfigDir)
+  ) {
+    throw new TaskOutputSwapRefusedError(
+      canonicalLinkPath,
+      'output is an unregistered symlink of a shape this session does not create',
+    )
+  }
+  const st = await lstat(ioPath)
+  if (
+    !st.isSymbolicLink() ||
+    st.ctimeMs >= getLinksInheritedBeforeFor(dirname(canonicalLinkPath))
+  ) {
+    throw new TaskOutputSwapRefusedError(
+      canonicalLinkPath,
+      'output is an unregistered symlink made during this session',
+    )
+  }
+  await registerLinkedOutput(canonicalLinkPath, rawTarget)
+  return rawTarget
+}
+
+/** Official 2.1.331 `tt(e, n)` — verify symlink against `linkedOutputs` allowlist or pre-session bound. */
+async function resolveAuthorizedOutputSymlink(
+  linkPath: string,
+  ioPath: string,
+): Promise<string | null> {
+  const canonical = canonicalizeTaskOutputPath(linkPath)
+  let expected = linkedOutputs.get(canonical)
+  if (expected === undefined) {
+    if (!isTaskOutputFilePath(canonical)) {
+      throw new TaskOutputSwapRefusedError(
+        canonical,
+        'output is an unregistered symlink outside any tasks directory',
+      )
+    }
+    const raw = await readlinkOrNull(ioPath)
+    if (raw === null) return null
+    expected = await inheritPreSessionOutputSymlink(canonical, ioPath, raw)
+  }
+  const current = await readlinkOrNull(ioPath)
+  if (current === null) return null
+  if (current !== expected) {
+    throw new TaskOutputSwapRefusedError(
+      canonical,
+      'output symlink was re-pointed',
+    )
+  }
+  return expected
+}
+
+function wrapSwapOpenError(e: unknown, pathForError: string): unknown {
+  const code = getErrnoCode(e)
+  if (
+    code === 'ELOOP' ||
+    code === 'EISDIR' ||
+    code === 'ENOTDIR' ||
+    code === 'ENXIO' ||
+    code === 'EOPNOTSUPP' ||
+    code === 'ENOTSUP'
+  ) {
+    return new TaskOutputSwapRefusedError(
+      pathForError,
+      `open refused a swapped leaf (${code})`,
+    )
+  }
+  return e
 }
 
 /**
@@ -109,23 +463,53 @@ export async function repointTaskOutputSymlinks(
   const oldPrefix = oldSideDir.endsWith(sep) ? oldSideDir : oldSideDir + sep
   for (const name of entries) {
     if (!name.endsWith('.output')) continue
-    const linkPath = join(_taskOutputDir, name)
-    let target: string
+    const linkPath = canonicalizeTaskOutputPath(join(_taskOutputDir, name))
+    let expected = linkedOutputs.get(linkPath)
     try {
-      target = await readlink(linkPath)
-    } catch {
-      continue
-    }
-    if (!target.startsWith(oldPrefix) && target !== oldSideDir) continue
-    const next =
-      target === oldSideDir
-        ? newSideDir
-        : newSideDir + target.slice(oldSideDir.length)
-    try {
+      if (expected === undefined) {
+        const raw = await readlinkOrNull(linkPath)
+        if (raw === null) continue
+        expected = await inheritPreSessionOutputSymlink(linkPath, linkPath, raw)
+      }
+      if (!expected.startsWith(oldPrefix) && expected !== oldSideDir) continue
+      const next =
+        expected === oldSideDir
+          ? newSideDir
+          : newSideDir + expected.slice(oldSideDir.length)
+      const current = await readlinkOrNull(linkPath)
+      if (current === null) continue
+      if (current !== expected) {
+        throw new TaskOutputSwapRefusedError(
+          linkPath,
+          'output symlink was re-pointed',
+        )
+      }
+      await pinWriteTarget(_taskOutputDir)
       await unlink(linkPath)
-      await symlink(next, linkPath)
+      if (linkedOutputs.get(linkPath) === expected) {
+        await registerLinkedOutput(linkPath, next)
+      }
+      try {
+        await symlink(next, linkPath).catch(async e => {
+          if (getErrnoCode(e) !== 'EEXIST') throw e
+          const nowTarget = await readlinkOrNull(linkPath).catch(() => null)
+          if (nowTarget !== next && nowTarget !== linkedOutputs.get(linkPath)) {
+            throw e
+          }
+        })
+      } catch (e) {
+        if (linkedOutputs.get(linkPath) === next) {
+          linkedOutputs.delete(linkPath)
+        }
+        throw e
+      }
+      if ((await readlinkOrNull(linkPath).catch(() => null)) === next) {
+        linkedOutputs.set(linkPath, next)
+      }
     } catch (e) {
-      logError(e)
+      if (getErrnoCode(e) !== 'ENOENT' && !isTaskOutputSwapRefusal(e)) {
+        logError(e)
+      }
     }
   }
 }
@@ -142,6 +526,11 @@ export class TaskOutputSwapRefusedError extends Error {
     )
     this.name = 'TaskOutputSwapRefusedError'
   }
+}
+
+/** Official 2.1.331 `SAt` (`isTaskOutputSwapRefusal`). */
+export function isTaskOutputSwapRefusal(err: unknown): boolean {
+  return err instanceof TaskOutputSwapRefusedError
 }
 
 /**
@@ -167,43 +556,125 @@ function throwTasksDirMovedOrLinked(dir: string): never {
 }
 
 /**
- * densable `Fk` @252 pinWriteTarget. After mkdir, refuse a tasks dir that
- * is not the same directory by a link-free route — except Mac realpath
- * aliases (different path, same device+inode). Windows gold arm is `y()`;
- * skip alias/refuse. Do not invent linux `/proc/self/fd` or O_DIRECTORY
- * hold cache `q`.
+ * Official 2.1.331 `pinWriteTarget` / `en(dir, canonHandle, platform)`:
+ * Refuse any symlink (leaf or ancestor) or non-directory at `dir`.
+ * Only accepts a realpath mismatch on macOS when EVERY ancestor component is a
+ * true directory (not a symlink — e.g. APFS firmlinks) and `fstat` of
+ * `O_RDONLY | O_DIRECTORY | O_NOFOLLOW` matches the canonical directory's (dev, ino).
  */
 export async function pinWriteTarget(dir: string): Promise<void> {
   if (process.platform === 'win32') {
     return
   }
 
-  // Exists as a directory entry (gold Fk lstat after mkdir).
-  await lstat(dir)
-
-  let resolved: string
+  let entry: Awaited<ReturnType<typeof lstat>>
   try {
-    resolved = await realpath(dir)
+    entry = await lstat(dir)
   } catch (e) {
-    // densable ELOOP → A(t) @252
-    if (getErrnoCode(e) === 'ELOOP') {
+    const code = getErrnoCode(e)
+    if (code === 'ELOOP' || code === 'ENOTDIR') {
       throwTasksDirMovedOrLinked(dir)
     }
     throw e
   }
 
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    logForDebugging(
+      `pinWriteTarget: ${dir} is not a real directory (symlink=${entry.isSymbolicLink()}); refused`,
+      { level: 'warn' },
+    )
+    throwTasksDirMovedOrLinked(dir)
+  }
+
+  let resolved: string
+  try {
+    resolved = await realpath(dir)
+  } catch (e) {
+    const code = getErrnoCode(e)
+    if (code === 'ELOOP' || code === 'ENOTDIR') {
+      throwTasksDirMovedOrLinked(dir)
+    }
+    throw e
+  }
+
+  const O_DIRECTORY = fsConstants.O_DIRECTORY ?? 0
+
   if (normalize(dir) === normalize(resolved)) {
+    let fh: FileHandle
+    try {
+      fh = await open(dir, fsConstants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+    } catch (e) {
+      const code = getErrnoCode(e)
+      if (code === 'ELOOP' || code === 'ENOTDIR') {
+        throwTasksDirMovedOrLinked(dir)
+      }
+      throw e
+    }
+    try {
+      const fdStat = await fh.stat()
+      if (
+        !fdStat.isDirectory() ||
+        fdStat.dev !== entry.dev ||
+        fdStat.ino !== entry.ino
+      ) {
+        throwTasksDirMovedOrLinked(dir)
+      }
+    } finally {
+      await fh.close()
+    }
     return
   }
 
-  // densable Fk @252: else stat both; same device+inode → alias.
-  const [given, canon] = await Promise.all([stat(dir), stat(resolved)])
-  if (given.dev === canon.dev && given.ino === canon.ino) {
-    logForDebugging(
-      `pinWriteTarget: ${dir} is rendered ${resolved} by realpath; ` +
-        'same directory (device and inode), treated as an alias',
-    )
-    return
+  if (process.platform === 'darwin') {
+    let allAncestorsRealDirs = true
+    for (let cur = normalize(dir); ; cur = dirname(cur)) {
+      try {
+        const st = await lstat(cur)
+        if (st.isSymbolicLink() || !st.isDirectory()) {
+          allAncestorsRealDirs = false
+          break
+        }
+      } catch {
+        allAncestorsRealDirs = false
+        break
+      }
+      if (dirname(cur) === cur) break
+    }
+    if (allAncestorsRealDirs) {
+      let givenHandle: FileHandle | undefined
+      let canonHandle: FileHandle | undefined
+      try {
+        givenHandle = await open(
+          dir,
+          fsConstants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW,
+        )
+        canonHandle = await open(
+          resolved,
+          fsConstants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW,
+        )
+        const [given, canon] = await Promise.all([
+          givenHandle.stat({ bigint: true }),
+          canonHandle.stat({ bigint: true }),
+        ])
+        if (
+          given.isDirectory() &&
+          canon.isDirectory() &&
+          given.dev === canon.dev &&
+          given.ino === canon.ino
+        ) {
+          logForDebugging(
+            `pinWriteTarget: ${dir} is rendered ${resolved} by realpath; ` +
+              'same directory (device and inode), treated as an alias',
+          )
+          return
+        }
+      } catch {
+        // Fall through to refuse
+      } finally {
+        await givenHandle?.close().catch(() => {})
+        await canonHandle?.close().catch(() => {})
+      }
+    }
   }
 
   logForDebugging(
@@ -230,85 +701,173 @@ export function getTaskOutputPath(taskId: string): string {
   return join(getTaskOutputDir(), `${taskId}.output`)
 }
 
-/** densable XX — read refuses a symlink-to-symlink or unix nlink≠1 leaf. */
+/** Official 2.1.331 — read refuses unregistered symlinks, chained symlinks, or unix nlink≠1 leaf. */
 const TASK_OUTPUT_NOT_REGULAR = 'not a regular nlink-1 file'
 
 /**
- * densable XX leaf preflight (no V/vt). Follows one symlink hop
- * (initTaskOutputAsSymlink); refuses a second hop and unix nlink≠1.
- * Gold callees V / vt stay ABSENT — do not invent.
+ * Official 2.1.331 `resolveTaskOutputReadPath` — validates the leaf against the
+ * `linkedOutputs` allowlist + pre-session symlink inheritance bound (`linksInheritedBeforeFor`),
+ * refuses unregistered session-created symlinks, symlink chains, symlinks leading
+ * back into the tasks tree, non-files, and Unix `nlink !== 1` hardlinks.
  */
 export async function resolveTaskOutputReadPath(
   path: string,
+  depth = 0,
 ): Promise<string | null> {
-  let st
-  try {
-    st = await lstat(path)
-  } catch (e) {
-    if (getErrnoCode(e) === 'ENOENT') return null
-    throw e
-  }
-  let readPath = path
+  const canonical = canonicalizeTaskOutputPath(path)
+  const st = await lstatOrNull(canonical)
+  if (st === null) return null
+
   if (st.isSymbolicLink()) {
-    const target = await readlink(path)
-    readPath = isAbsolute(target) ? target : join(dirname(path), target)
+    const target = await resolveAuthorizedOutputSymlink(canonical, canonical)
+    if (target === null) {
+      return resolveTaskOutputReadPath(path, depth)
+    }
+    if (isUnderTaskOutputRoot(target)) {
+      if (depth > 0) {
+        throw new TaskOutputSwapRefusedError(canonical, 'output links chain')
+      }
+      return resolveTaskOutputReadPath(target, depth + 1)
+    }
+    let resolvedTarget: string
     try {
-      st = await lstat(readPath)
+      resolvedTarget = await realpath(target)
     } catch (e) {
       if (getErrnoCode(e) === 'ENOENT') return null
-      throw e
+      throw wrapSwapOpenError(e, canonical)
     }
-    if (st.isSymbolicLink()) {
-      throw new Error(TASK_OUTPUT_NOT_REGULAR)
+    if (isUnderTaskOutputRoot(resolvedTarget)) {
+      throw new TaskOutputSwapRefusedError(
+        canonical,
+        'output link leads back into the tasks tree',
+      )
     }
+    const targetStat = await lstatOrNull(resolvedTarget)
+    if (targetStat === null) return null
+    if (targetStat.isSymbolicLink() || !targetStat.isFile()) {
+      throw new TaskOutputSwapRefusedError(canonical, TASK_OUTPUT_NOT_REGULAR)
+    }
+    return resolvedTarget
   }
-  if (!st.isFile()) {
-    throw new Error(TASK_OUTPUT_NOT_REGULAR)
+
+  if (depth === 0 && st.isFile() && st.nlink === 0) {
+    return null
   }
-  // Gold XX: nlink≠1 refuse when hop depth is 0. After one legitimate
-  // .output → transcript hop (initTaskOutputAsSymlink), still require a
-  // plain file leaf; windows skips nlink (anyLinkCount).
-  if (process.platform !== 'win32' && st.nlink !== 1) {
-    throw new Error(TASK_OUTPUT_NOT_REGULAR)
+  if (
+    !st.isFile() ||
+    (process.platform !== 'win32' && st.nlink !== 1 && depth === 0)
+  ) {
+    throw new TaskOutputSwapRefusedError(canonical, TASK_OUTPUT_NOT_REGULAR)
   }
-  return readPath
+  return canonical
 }
 
 /**
- * densable XX open-read. After the leaf check, open O_RDONLY|O_NOFOLLOW
- * (windows `"r"`). Caller must close.
- *
- * densable `vt` @182200349 — after open, recheck handle identity:
- * plain file + (registeredIdentity ino/dev OR nlink===1 unless anyLinkCount)
- * + optional prior lstat match. Mismatch → throw "output file identity changed".
+ * Official 2.1.331 `$Xe` (`openTaskOutputRead` / `openTaskOutputForRead`):
+ * Validates leaf + authorized symlink allowlist, opens with `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`
+ * (Windows `"r"`), and verifies handle identity via `vt`. Caller must close.
  */
 export async function openTaskOutputRead(
   path: string,
+  depth = 0,
+  relooked = false,
 ): Promise<FileHandle | null> {
-  const readable = await resolveTaskOutputReadPath(path)
-  if (readable === null) {
+  const canonical = canonicalizeTaskOutputPath(path)
+  const st = await lstatOrNull(canonical)
+  if (st === null) {
     return null
   }
-  let st
-  try {
-    st = await lstat(readable)
-  } catch (e) {
-    if (getErrnoCode(e) === 'ENOENT') return null
-    throw e
+
+  if (st.isSymbolicLink()) {
+    const target = await resolveAuthorizedOutputSymlink(canonical, canonical)
+    if (target === null) {
+      if (relooked) {
+        throw new TaskOutputSwapRefusedError(
+          canonical,
+          'output leaf changed during open',
+        )
+      }
+      return openTaskOutputRead(canonical, depth, true)
+    }
+    if (isUnderTaskOutputRoot(target)) {
+      if (depth > 0) {
+        throw new TaskOutputSwapRefusedError(canonical, 'output links chain')
+      }
+      return openTaskOutputRead(target, depth + 1, false)
+    }
+    // Authorized symlink to external transcript (e.g. ~/.claude/projects/.../*.jsonl)
+    let resolvedTarget: string
+    let targetStat: Awaited<ReturnType<typeof lstat>>
+    let fh: FileHandle
+    try {
+      resolvedTarget = await realpath(target)
+      if (isUnderTaskOutputRoot(resolvedTarget)) {
+        throw new TaskOutputSwapRefusedError(
+          canonical,
+          'output link leads back into the tasks tree',
+        )
+      }
+      targetStat = await lstat(resolvedTarget)
+      fh =
+        process.platform === 'win32'
+          ? await open(resolvedTarget, 'r')
+          : await open(
+              resolvedTarget,
+              fsConstants.O_RDONLY | O_NOFOLLOW | (fsConstants.O_NONBLOCK ?? 0),
+            )
+    } catch (e) {
+      if (isTaskOutputSwapRefusal(e)) throw e
+      if (getErrnoCode(e) === 'ENOENT') return null
+      throw wrapSwapOpenError(e, canonical)
+    }
+    try {
+      const fdStat = await fh.stat()
+      if (
+        !fdStat.isFile() ||
+        fdStat.ino !== targetStat.ino ||
+        fdStat.dev !== targetStat.dev
+      ) {
+        throw new TaskOutputSwapRefusedError(
+          canonical,
+          'link target is not a regular file',
+        )
+      }
+    } catch (e) {
+      await fh.close().catch(() => {})
+      throw e
+    }
+    return fh
   }
+
+  if (depth === 0 && st.isFile() && st.nlink === 0) {
+    return null
+  }
+  if (
+    !st.isFile() ||
+    (process.platform !== 'win32' && st.nlink !== 1 && depth === 0)
+  ) {
+    throw new TaskOutputSwapRefusedError(canonical, TASK_OUTPUT_NOT_REGULAR)
+  }
+
   try {
     const fh =
       process.platform === 'win32'
-        ? await open(readable, 'r')
+        ? await open(canonical, 'r')
         : await open(
-            readable,
+            canonical,
             fsConstants.O_RDONLY | O_NOFOLLOW | (fsConstants.O_NONBLOCK ?? 0),
           )
-    // densable vt(handle, priorStat, path, {anyLinkCount on windows})
+    // densable vt(handle, priorStat, path, {registeredIdentity, anyLinkCount})
     try {
-      await vt(fh, st, path, {
+      const checkStatus = await vt(fh, st, path, {
+        registeredIdentity:
+          depth > 0 ? getRecordedTargetIdentity(canonical) : undefined,
         anyLinkCount: process.platform === 'win32',
+        unlinkedIsGone: depth === 0,
       })
+      if (checkStatus === 'gone') {
+        return null
+      }
     } catch (e) {
       await fh.close().catch(() => {})
       throw e
@@ -318,8 +877,171 @@ export async function openTaskOutputRead(
     if (getErrnoCode(e) === 'ENOENT') {
       return null
     }
+    if (isTaskOutputSwapRefusal(e)) {
+      throw e
+    }
+    throw wrapSwapOpenError(e, canonical)
+  }
+}
+
+/**
+ * Official 2.1.331 `uTr` (`bindTaskOutputForRead`):
+ * Safely binds a task output file for reading via `openTaskOutputRead`
+ * (O_NOFOLLOW + registered-symlink allowlist + nlink=1 + fstat recheck) and
+ * returns a `/dev/fd/<fd>` (macOS) or `/proc/self/fd/<fd>` (Linux/WSL) handle.
+ * Caller MUST call `close()` in `finally`.
+ */
+export async function bindTaskOutputForRead(filePath: string): Promise<{
+  ioPath: string
+  canonicalPath: string
+  handle: FileHandle
+  close: () => Promise<void>
+}> {
+  const canonical = canonicalizeTaskOutputPath(filePath)
+  const handle = await openTaskOutputRead(canonical)
+  if (handle === null) {
+    // Throw ENOENT if the entry itself doesn't exist; otherwise the link target vanished.
+    await lstat(canonical)
+    throw new Error(
+      `task output ${canonical} is no longer available (the file it pointed to was removed)`,
+    )
+  }
+  const platform = getPlatform()
+  let ioPath = canonical
+  if (platform === 'linux' || platform === 'wsl') {
+    const procFd = `/proc/self/fd/${handle.fd}`
+    const procReadable = await readlink(procFd).then(
+      () => true,
+      () => false,
+    )
+    if (procReadable) {
+      ioPath = procFd
+    }
+  } else if (platform === 'macos') {
+    ioPath = `/dev/fd/${handle.fd}`
+  }
+  return {
+    ioPath,
+    canonicalPath: canonical,
+    handle,
+    close: () => handle.close(),
+  }
+}
+
+/**
+ * Official 2.1.331 `N` (`openTaskOutputForAppend`) — safe append/create opener
+ * verifying pre-open `lstat` (plain file, `nlink === 1`, or authorized symlink
+ * under tasks root) + `O_NOFOLLOW` + post-open `fstat` identity & `nlink === 1`.
+ */
+export async function openTaskOutputForAppend(
+  filePath: string,
+  opts: {
+    exclusive?: boolean
+    windowsFlags?: string
+    retried?: boolean
+    relooked?: boolean
+  } = {},
+  depth = 0,
+): Promise<FileHandle> {
+  const canonical = isTaskOutputFilePath(filePath)
+    ? canonicalizeTaskOutputPath(filePath)
+    : filePath
+  const parentDir = dirname(canonical)
+
+  if (process.platform === 'win32') {
+    await mkdir(parentDir, { recursive: true })
+    return open(canonical, opts.windowsFlags ?? 'a')
+  }
+
+  if (
+    foldCaseForPlatform(resolve(parentDir)) ===
+    foldCaseForPlatform(resolve(getTaskOutputDir()))
+  ) {
+    await ensureOutputDir()
+  } else {
+    await mkdir(parentDir, { recursive: true })
+    const parentStat = await lstat(parentDir)
+    if (parentStat.isSymbolicLink() || !parentStat.isDirectory()) {
+      throwTasksDirMovedOrLinked(parentDir)
+    }
+  }
+
+  const existing = await lstatOrNull(canonical)
+  if (existing?.isSymbolicLink()) {
+    const target = await resolveAuthorizedOutputSymlink(canonical, canonical)
+    if (target === null) {
+      if (opts.relooked) {
+        throw new TaskOutputSwapRefusedError(
+          canonical,
+          'output leaf changed during open',
+        )
+      }
+      return openTaskOutputForAppend(
+        canonical,
+        { ...opts, relooked: true },
+        depth,
+      )
+    }
+    if (opts.exclusive || depth > 0 || !isUnderTaskOutputRoot(target)) {
+      throw new TaskOutputSwapRefusedError(
+        canonical,
+        'output link is not appendable',
+      )
+    }
+    return openTaskOutputForAppend(
+      target,
+      { exclusive: opts.exclusive, windowsFlags: opts.windowsFlags },
+      depth + 1,
+    )
+  }
+
+  if (
+    existing !== null &&
+    (!existing.isFile() || (existing.nlink !== 1 && depth === 0))
+  ) {
+    throw new TaskOutputSwapRefusedError(
+      canonical,
+      'existing output is not a plain file',
+    )
+  }
+
+  const createExclusive = opts.exclusive === true || existing === null
+  const flags =
+    fsConstants.O_WRONLY |
+    fsConstants.O_APPEND |
+    (createExclusive ? fsConstants.O_CREAT | fsConstants.O_EXCL : 0) |
+    O_NOFOLLOW |
+    (fsConstants.O_NONBLOCK ?? 0)
+
+  let fh: FileHandle
+  try {
+    fh = await open(canonical, flags)
+  } catch (e) {
+    if (!opts.exclusive && getErrnoCode(e) === 'EEXIST' && !opts.retried) {
+      return openTaskOutputForAppend(
+        canonical,
+        { ...opts, retried: true },
+        depth,
+      )
+    }
+    throw wrapSwapOpenError(e, canonical)
+  }
+
+  if (depth > 0 && existing === null) {
+    const st = await fh.stat()
+    linkedTargetIdentities.set(canonical, { dev: st.dev, ino: st.ino })
+  }
+
+  try {
+    await vt(fh, existing, canonical, {
+      registeredIdentity:
+        depth > 0 ? getRecordedTargetIdentity(canonical) : undefined,
+    })
+  } catch (e) {
+    await fh.close().catch(() => {})
     throw e
   }
+  return fh
 }
 
 /**
@@ -334,26 +1056,37 @@ export async function vt(
   opts?: {
     registeredIdentity?: { ino: number | bigint; dev: number | bigint }
     anyLinkCount?: boolean
+    unlinkedIsGone?: boolean
   },
-): Promise<void> {
-  try {
-    const r = await handle.stat()
-    const s = opts?.registeredIdentity
-    if (
-      !r.isFile() ||
-      (s !== undefined
-        ? r.ino !== s.ino || r.dev !== s.dev
-        : !opts?.anyLinkCount && r.nlink !== 1) ||
-      (prior !== null && (r.ino !== prior.ino || r.dev !== prior.dev))
-    ) {
-      throw new Error('output file identity changed')
-    }
-  } catch (r) {
-    if (r instanceof Error && r.message === 'output file identity changed') {
-      throw r
-    }
-    throw r
+): Promise<'same' | 'gone'> {
+  const r = await handle.stat()
+  const s = opts?.registeredIdentity
+  if (
+    opts?.unlinkedIsGone &&
+    s === undefined &&
+    !opts.anyLinkCount &&
+    prior !== null &&
+    r.isFile() &&
+    r.nlink === 0 &&
+    r.ino === prior.ino &&
+    r.dev === prior.dev
+  ) {
+    await handle.close().catch(() => {})
+    return 'gone'
   }
+  if (
+    !r.isFile() ||
+    (s !== undefined
+      ? r.ino !== s.ino || r.dev !== s.dev
+      : !opts?.anyLinkCount && r.nlink !== 1) ||
+    (prior !== null && (r.ino !== prior.ino || r.dev !== prior.dev))
+  ) {
+    throw new TaskOutputSwapRefusedError(
+      pathForError,
+      'output file identity changed',
+    )
+  }
+  return 'same'
 }
 
 /** Read [offset, offset+maxBytes) through densable XX open-read. */
@@ -541,16 +1274,7 @@ export class DiskTaskOutput {
     while (true) {
       try {
         if (!this.#fileHandle) {
-          await ensureOutputDir()
-          this.#fileHandle = await open(
-            this.#path,
-            process.platform === 'win32'
-              ? 'a'
-              : fsConstants.O_WRONLY |
-                  fsConstants.O_APPEND |
-                  fsConstants.O_CREAT |
-                  O_NOFOLLOW,
-          )
+          this.#fileHandle = await openTaskOutputForAppend(this.#path)
         }
         while (true) {
           const generation = this.#generation
@@ -853,7 +1577,7 @@ export async function getTaskOutputDelta(
     }
   } catch (e) {
     const code = getErrnoCode(e)
-    if (code === 'ENOENT') {
+    if (code === 'ENOENT' || isTaskOutputSwapRefusal(e)) {
       return { content: '', newOffset: fromOffset }
     }
     logError(e)
@@ -924,6 +1648,9 @@ export async function getTaskOutputSize(taskId: string): Promise<number> {
       await fh.close()
     }
   } catch (e) {
+    if (isTaskOutputSwapRefusal(e)) {
+      throw e
+    }
     const code = getErrnoCode(e)
     if (code === 'ENOENT') {
       return 0
@@ -943,8 +1670,15 @@ export async function cleanupTaskOutput(taskId: string): Promise<void> {
     outputs.delete(taskId)
   }
 
+  const outputPath = canonicalizeTaskOutputPath(getTaskOutputPath(taskId))
+  const prevTarget = linkedOutputs.get(outputPath)
+  linkedOutputs.delete(outputPath)
+  if (prevTarget !== undefined) {
+    linkedTargetIdentities.delete(prevTarget)
+  }
+
   try {
-    await unlink(getTaskOutputPath(taskId))
+    await unlink(outputPath)
   } catch (e) {
     const code = getErrnoCode(e)
     if (code === 'ENOENT') {
@@ -983,7 +1717,9 @@ export function initTaskOutput(taskId: string): Promise<string> {
 
 /**
  * Initialize output file as a symlink to another file (e.g., agent transcript).
- * Tries to create the symlink first; if a file already exists, removes it and retries.
+ * Registers the symlink in `linkedOutputs` (and target identity when under tasks
+ * root) so `openTaskOutputRead` / `bindTaskOutputForRead` authorize it while
+ * refusing any unregistered symlink.
  */
 export function initTaskOutputAsSymlink(
   taskId: string,
@@ -993,18 +1729,39 @@ export function initTaskOutputAsSymlink(
     (async () => {
       try {
         await ensureOutputDir()
-        const outputPath = getTaskOutputPath(taskId)
+        const outputPath = canonicalizeTaskOutputPath(getTaskOutputPath(taskId))
 
+        if (isUnderTaskOutputRoot(targetPath)) {
+          await recordTargetIdentity(targetPath)
+        }
+        linkedOutputs.set(outputPath, targetPath)
         try {
-          await symlink(targetPath, outputPath)
-        } catch {
-          await unlink(outputPath)
-          await symlink(targetPath, outputPath)
+          try {
+            await symlink(targetPath, outputPath)
+          } catch (e) {
+            if (getErrnoCode(e) !== 'EEXIST') throw e
+            await unlink(outputPath).catch(err => {
+              if (getErrnoCode(err) !== 'ENOENT') throw err
+            })
+            await symlink(targetPath, outputPath)
+          }
+        } catch (err) {
+          if (linkedOutputs.get(outputPath) === targetPath) {
+            linkedOutputs.delete(outputPath)
+          }
+          throw err
+        }
+        if (
+          (await readlinkOrNull(outputPath).catch(() => null)) === targetPath
+        ) {
+          linkedOutputs.set(outputPath, targetPath)
         }
 
         return outputPath
       } catch (error) {
-        logError(error)
+        if (!isTaskOutputSwapRefusal(error)) {
+          logError(error)
+        }
         return initTaskOutput(taskId)
       }
     })(),

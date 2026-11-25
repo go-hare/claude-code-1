@@ -82,7 +82,8 @@ describe('MCP stopped consumers', () => {
           interrupted: outcome === 'interrupted',
         })
       await new Promise(resolve => setImmediate(resolve))
-      expect(statusAtAbort).toBe('killed')
+      // Official 2.1.331 `qhi.kill` aborts before transitioning task status to 'killed'.
+      expect(statusAtAbort).toBe('running')
       expect(app.tasks[taskId]?.status).toBe('killed')
       expect(getCommandQueue()).toHaveLength(0)
     })

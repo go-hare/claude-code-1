@@ -305,11 +305,13 @@ export class TaskOutput {
   async #readStdoutFromFile(): Promise<string> {
     const maxBytes = getMaxOutputLength()
     try {
-      // densable XX — O_NOFOLLOW open after symlink/nlink leaf check.
+      // densable XX / Official 2.1.331 Zoe.#k — O_NOFOLLOW open after symlink/nlink leaf check.
       const fh = await openTaskOutputRead(this.path)
       if (fh === null) {
-        this.#outputFileRedundant = true
-        return ''
+        logForDebugging(
+          `TaskOutput.#readStdoutFromFile: ${this.path} is gone (ENOENT)`,
+        )
+        return this.#formatReadUnavailable('ENOENT')
       }
       try {
         const size = (await fh.stat()).size
@@ -353,8 +355,12 @@ export class TaskOutput {
       logForDebugging(
         `TaskOutput.#readStdoutFromFile: failed to read ${this.path} (${code}): ${err}`,
       )
-      return `<bash output unavailable: output file ${this.path} could not be read (${code}). This usually means another Claude Code process in the same project deleted it during startup cleanup.>`
+      return this.#formatReadUnavailable(code)
     }
+  }
+
+  #formatReadUnavailable(code: string): string {
+    return `<bash output unavailable: output file ${this.path} could not be read (${code}). This usually means another Claude Code process in the same project deleted it during startup cleanup.>`
   }
 
   /** Sync getter for ExecResult.stderr */

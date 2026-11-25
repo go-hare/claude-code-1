@@ -145,8 +145,10 @@ describe('Shard 3 2.1.289 alignment fixes', () => {
     try {
       delete process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
       expect(MonitorTool.isEnabled()).toBe(true)
+      // Official 2.1.331 `Je.isEnabled()` (`sc()`) gates on platform Git Bash /
+      // non-MXC availability rather than CLAUDE_CODE_DISABLE_BACKGROUND_TASKS.
       process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1'
-      expect(MonitorTool.isEnabled()).toBe(false)
+      expect(MonitorTool.isEnabled()).toBe(true)
     } finally {
       if (prevDisable === undefined) {
         delete process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS

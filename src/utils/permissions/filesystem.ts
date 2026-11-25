@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'crypto'
 import {
+  lstatSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -775,11 +776,52 @@ function isClaudeSettingsPathLexical(expandedPath: string): boolean {
   )
 }
 
+/**
+ * Official 2.1.331 `rc()` (@310416900) — map resolved non-lexical target paths
+ * of symlinked Claude settings files back to the settings file path so editing
+ * a settings symlink's target cannot evade `claudeSettingsFile` protection.
+ */
+function getSettingsSymlinkTargetMap(): Map<string, string> {
+  const map = new Map<string, string>()
+  const settingsPaths = getSettingsPaths()
+  for (const settingsPath of settingsPaths) {
+    let isSym = false
+    try {
+      isSym = lstatSync(settingsPath).isSymbolicLink()
+    } catch {
+      continue
+    }
+    if (!isSym) continue
+    const walk = walkPermissionPaths(settingsPath)
+    for (const spelling of walk.paths) {
+      const expanded = expandPath(spelling)
+      const candidates = [expanded]
+      try {
+        const real = expandPath(realpathSync(expanded))
+        if (real !== expanded) candidates.push(real)
+      } catch {
+        // target may not exist yet
+      }
+      for (const candidate of candidates) {
+        if (!isClaudeSettingsPathLexical(candidate)) {
+          map.set(normalizeCaseForComparison(candidate), settingsPath)
+        }
+      }
+    }
+  }
+  return map
+}
+
 export function isClaudeSettingsPath(filePath: string): boolean {
   // SECURITY: Normalize path structure first to prevent bypass via redundant ./
   // sequences like `./.claude/./settings.json` which would evade the endsWith() check
   const expandedPath = expandPath(filePath)
   if (isClaudeSettingsPathLexical(expandedPath)) {
+    return true
+  }
+  if (
+    getSettingsSymlinkTargetMap().has(normalizeCaseForComparison(expandedPath))
+  ) {
     return true
   }
 
@@ -1007,7 +1049,8 @@ export const getClaudeTempDir = memoize(function getClaudeTempDir(): string {
 export const getBundledSkillsRoot = memoize(
   function getBundledSkillsRoot(): string {
     const nonce = randomBytes(16).toString('hex')
-    return join(getClaudeTempDir(), 'bundled-skills', MACRO.VERSION, nonce)
+    const version = typeof MACRO !== 'undefined' ? MACRO.VERSION : '0.0.0'
+    return join(getClaudeTempDir(), 'bundled-skills', version, nonce)
   },
 )
 
@@ -1565,10 +1608,17 @@ export function checkPathSafetyForAutoEdit(
         | 'backgroundOperator'
         | 'suspiciousWindowsPath'
         | 'outsideReadsBlocked'
+        | 'claudeSettingsFile'
+      also?: readonly string[]
     } {
   // Get all paths to check (original + symlink resolved paths)
   const pathsToCheck =
     precomputedPathsToCheck ?? getPathsForPermissionCheck(path)
+
+  // Official 2.1.331 `Ose` (@310445273) + `pOo`: settings files, symlinked
+  // settings targets (`rc()`), and managed drop-in dirs (failing closed when
+  // managed drop-in dirs cannot be resolved).
+  const isSettingsPath = isJsonOrSettingsPathForWriteBlock(pathsToCheck)
 
   // Check for suspicious Windows path patterns on all paths
   // densable yat / uK TX: circuitBreaker:"suspiciousWindowsPath"; pass
@@ -1585,11 +1635,35 @@ export function checkPathSafetyForAutoEdit(
         message: `Claude requested permissions to write to ${path}, which contains a suspicious Windows path pattern that requires manual approval.`,
         classifierApprovable: false,
         circuitBreaker: 'suspiciousWindowsPath',
+        ...(isSettingsPath ? { also: ['claudeSettingsFile'] as const } : {}),
       }
     }
   }
 
-  // Check for Claude config files on all paths
+  // Official 2.1.331 `Ose`: Claude settings files (including managed drop-ins
+  // and symlink targets of settings files) carry circuitBreaker: 'claudeSettingsFile'.
+  if (isSettingsPath) {
+    const settingsLinkMap = getSettingsSymlinkTargetMap()
+    const foldedPaths = pathsToCheck.map(p =>
+      normalizeCaseForComparison(expandPath(p)),
+    )
+    const linkedSettingsFile = foldedPaths
+      .map(p => settingsLinkMap.get(p))
+      .find((s): s is string => s !== undefined)
+    const linkNote =
+      linkedSettingsFile === undefined ||
+      foldedPaths.includes(normalizeCaseForComparison(linkedSettingsFile))
+        ? ''
+        : ` The Claude Code settings file ${linkedSettingsFile} leads here through a link.`
+    return {
+      safe: false,
+      message: `Claude requested permissions to write to ${path}, but you haven't granted it yet.${linkNote}`,
+      classifierApprovable: linkedSettingsFile === undefined,
+      circuitBreaker: 'claudeSettingsFile',
+    }
+  }
+
+  // Check for non-settings Claude config files (.claude/commands, agents, skills) on all paths
   for (const pathToCheck of pathsToCheck) {
     if (isClaudeConfigFilePath(pathToCheck)) {
       return {
@@ -3001,6 +3075,7 @@ export function checkReadPermissionForTool(
       blockOutsideReads: outsideReads,
       readBlockFence: outsideReads,
     },
+    pathsToCheck,
   )
   const restrictedReadDeny = denyRestrictedFileToolOutsideCwd(
     path,
@@ -3380,6 +3455,8 @@ function nsWritePermissionForTool<Input extends AnyObject>(
         | 'backgroundOperator'
         | 'suspiciousWindowsPath'
         | 'outsideReadsBlocked'
+        | 'claudeSettingsFile'
+      also?: readonly string[]
     }
     // gold c6n: append Tl/Tln landing sentence and blockedPath.
     const carry = symlinkCarryForWorkingDirectorySet(
@@ -3405,6 +3482,7 @@ function nsWritePermissionForTool<Input extends AnyObject>(
         ...(failedCheck.circuitBreaker
           ? { circuitBreaker: failedCheck.circuitBreaker }
           : {}),
+        ...(failedCheck.also ? { also: failedCheck.also } : {}),
       },
     }
   }
@@ -3732,10 +3810,138 @@ export function checkEditableInternalPath(
 }
 
 /**
+ * Official 2.1.331 `sg()` / `pOe()` + `AOo()` — map a resolved spelling back
+ * through trusted OS symlink equivalences (e.g. macOS `/private/tmp` <-> `/tmp`,
+ * `/private/var` <-> `/var`) and known internal harness roots so legitimate
+ * non-escaped files under macOS `/var/folders/...` still pass all-spellings
+ * verification while any symlink pointing outside internal roots fails closed.
+ */
+function getTrustedSystemSymlinkPairs(): ReadonlyArray<
+  readonly [string, string]
+> {
+  if (getPlatform() !== 'macos') {
+    return []
+  }
+  const pairs: Array<readonly [string, string]> = []
+  for (const [canon, alias] of [
+    ['/private/tmp', '/tmp'],
+    ['/private/var', '/var'],
+    ['/private/etc', '/etc'],
+  ] as const) {
+    try {
+      if (realpathSync(alias) === canon) {
+        pairs.push([canon, alias])
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return pairs
+}
+
+function rewriteInternalRootAliases(spelling: string): string[] {
+  const candidates: string[] = []
+  const add = (p: string): void => {
+    if (p !== spelling && !candidates.includes(p)) {
+      candidates.push(p)
+    }
+  }
+
+  // Known harness roots: map resolved form back to lexical root (official `AOo`).
+  const harnessRoots = [
+    getClaudeConfigHomeDir(),
+    getOriginalCwd(),
+    getClaudeTempDir().replace(/[\\/]+$/, ''),
+    getProjectTempDir().replace(/[\\/]+$/, ''),
+    getToolResultsDir().replace(/[\\/]+$/, ''),
+  ]
+  for (const root of harnessRoots) {
+    if (!root) continue
+    for (const form of getPathsForPermissionCheck(root)) {
+      if (form === root) continue
+      if (spelling === form || spelling.startsWith(form + sep)) {
+        add(root + spelling.slice(form.length))
+      } else if (spelling === root || spelling.startsWith(root + sep)) {
+        add(form + spelling.slice(root.length))
+      }
+    }
+  }
+
+  // Trusted macOS system symlink equivalences (official `pOe`).
+  for (const [canon, alias] of getTrustedSystemSymlinkPairs()) {
+    if (spelling === canon || spelling.startsWith(canon + sep)) {
+      add(alias + spelling.slice(canon.length))
+    } else if (spelling === alias || spelling.startsWith(alias + sep)) {
+      add(canon + spelling.slice(alias.length))
+    }
+  }
+
+  return candidates
+}
+
+/**
+ * Official 2.1.331 `Bc` (@310486750) — evaluate `checkOne` across EVERY candidate
+ * spelling (unresolved path + symlink hops + resolved realpath).
+ * Any `'deny'` short-circuits immediately; EVERY spelling must return `'allow'`
+ * (either directly or via a trusted root alias) for the overall result to allow.
+ */
+function checkAllSpellingsForInternalPath(
+  spellings: readonly string[],
+  checkOne: (spelling: string) => PermissionResult,
+): PermissionResult {
+  let firstAllow: PermissionResult | undefined
+  for (const spelling of spellings) {
+    let result = checkOne(spelling)
+    if (result.behavior === 'passthrough') {
+      for (const alias of rewriteInternalRootAliases(spelling)) {
+        const aliasResult = checkOne(alias)
+        if (aliasResult.behavior === 'deny') {
+          return aliasResult
+        }
+        if (aliasResult.behavior === 'allow') {
+          result = aliasResult
+          break
+        }
+      }
+    }
+    if (result.behavior === 'deny') {
+      return result
+    }
+    if (result.behavior !== 'allow') {
+      return { behavior: 'passthrough', message: '' }
+    }
+    firstAllow ??= result
+  }
+  return firstAllow ?? { behavior: 'passthrough', message: '' }
+}
+
+/**
  * Check if a path is an internal path that can be read without permission.
  * Returns a PermissionResult - either 'allow' if matched, or 'passthrough' to continue checking.
+ *
+ * Official 2.1.331 `w6e` (@310489333) + `Bc` (@310486750): requires EVERY
+ * candidate spelling (`precomputedPathsToCheck`, or `getPathsForPermissionCheck(absolutePath)`
+ * covering unresolved + symlink-resolved paths) to satisfy the internal path check,
+ * so a symlink inside `getProjectTempDir()` (or any other internal dir) pointing
+ * to an external file like `~/.ssh/id_rsa` is NEVER auto-allowed.
  */
 export function checkReadableInternalPath(
+  absolutePath: string,
+  input: { [key: string]: unknown },
+  restricted?: boolean,
+  fence?: { blockOutsideReads?: boolean; readBlockFence?: boolean },
+  precomputedPathsToCheck?: readonly string[],
+): PermissionResult {
+  const spellings =
+    precomputedPathsToCheck && precomputedPathsToCheck.length > 0
+      ? precomputedPathsToCheck
+      : getPathsForPermissionCheck(absolutePath)
+  return checkAllSpellingsForInternalPath(spellings, spelling =>
+    checkReadableInternalPathSingle(spelling, input, restricted, fence),
+  )
+}
+
+function checkReadableInternalPathSingle(
   absolutePath: string,
   input: { [key: string]: unknown },
   restricted?: boolean,

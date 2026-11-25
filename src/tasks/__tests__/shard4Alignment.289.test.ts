@@ -559,7 +559,8 @@ describe('Shard 4 2.1.289 alignment regressions', () => {
       statusAtAbort = h.registry.get(mcpKillId)?.status
     })
     await killMcpTask(mcpKillId, h.registry)
-    expect(statusAtAbort).toBe('killed')
+    // Official 2.1.331 McpTask.kill aborts controllers BEFORE transitioning status to 'killed'.
+    expect(statusAtAbort).toBe('running')
     expect(h.registry.get(mcpKillId)?.status).toBe('killed')
   })
 

@@ -14,17 +14,24 @@ import { createTaskRegistry } from 'src/utils/taskRegistry.js';
 import { bashToolHasPermission } from '../BashTool/bashPermissions.js';
 import { BashTool } from '../BashTool/BashTool.js';
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js';
-import { shouldUseSandbox } from '../BashTool/shouldUseSandbox.js';
+import {
+  clearSandboxStateAtCheck,
+  getSandboxPolicyRefusal,
+  KEPT_IN_SANDBOX_SINCE_CHECK_NOTE,
+  recordSandboxStateAtCheck,
+  SANDBOX_GONE_SINCE_CHECK_MESSAGE,
+  SandboxPolicyRefusalError,
+  shouldKeepRewrittenCommandInSandbox,
+  shouldUseSandbox,
+} from '../BashTool/shouldUseSandbox.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
-import { getAskRuleForTool, getDenyRuleForTool } from 'src/utils/permissions/permissions.js';
+import { getAskRules, getDenyRules } from 'src/utils/permissions/permissions.js';
 import type { PermissionRule } from 'src/utils/permissions/PermissionRule.js';
 import type { ToolPermissionContext } from 'src/Tool.js';
-import { isIP } from 'net';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { formatDuration, truncate } from 'src/utils/format.js';
 import { getAgentContext } from 'src/utils/agentContext.js';
 import { isAgentStopPending } from 'src/utils/agentStopBag.js';
-import { isBlockedAddress } from 'src/utils/hooks/ssrfGuard.js';
 import type { AgentId } from 'src/types/ids.js';
 import { exec } from 'src/utils/Shell.js';
 import { logEvent } from 'src/services/analytics/index.js';
@@ -38,136 +45,83 @@ import {
   notifyMonitorStreamEvent,
   type MonitorStreamPump,
 } from 'src/utils/monitorStreamNotify.js';
-import { spawnMonitorWebSocket } from 'src/utils/monitorWsSpawn.js';
+import {
+  formatMonitorWebSocketPreconditionError,
+  MonitorWsPreconditionError,
+  monitorWebSocketPrecondition,
+  spawnMonitorWebSocket,
+} from 'src/utils/monitorWsSpawn.js';
 import { leftoverPolicyLimitsDp } from 'src/cli/leftoverTulip.js';
-import { shouldAllowManagedSandboxDomainsOnly } from 'src/utils/sandbox/sandbox-adapter.js';
-import { getSettings_DEPRECATED, getSettingsForSource } from 'src/utils/settings/settings.js';
+import { getPlatform } from 'src/utils/platform.js';
+import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js';
+import { findGitBashPathOrNull } from 'src/utils/windowsPaths.js';
 
 const MONITOR_TOOL_NAME = 'Monitor';
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
+const WILDCARD_RULE_CONTENT_RE = /^[\s*]+$/;
+const MXC_BASH_REFUSAL_MESSAGE =
+  'Bash commands cannot run under the current Windows MXC sandbox backend. Use PowerShell instead.';
 
-function parseSandboxDomainPattern(pattern: string): { hostPattern: string; port?: number } {
-  const trimmed = pattern.trim().toLowerCase();
-  const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(trimmed);
-  if (bracketed) {
-    return {
-      hostPattern: bracketed[1]!,
-      ...(bracketed[2] !== undefined ? { port: Number(bracketed[2]) } : {}),
-    };
-  }
-  const colonIdx = trimmed.lastIndexOf(':');
-  if (colonIdx > 0 && !trimmed.slice(0, colonIdx).includes(':')) {
-    const portStr = trimmed.slice(colonIdx + 1);
-    if (/^\d+$/.test(portStr)) {
-      return { hostPattern: trimmed.slice(0, colonIdx), port: Number(portStr) };
-    }
-  }
-  return { hostPattern: trimmed };
-}
-
-function matchesSandboxHostPattern(hostPattern: string, host: string): boolean {
-  const target = host.toLowerCase();
-  if (hostPattern === '*') return true;
-  if (hostPattern.startsWith('*.')) {
-    const suffix = hostPattern.slice(1);
-    return target.endsWith(suffix) && target.length > suffix.length;
-  }
-  return target === hostPattern;
-}
-
-function collectSandboxDomains(
-  sources: Array<ReturnType<typeof getSettingsForSource>>,
-  kind: 'allow' | 'deny',
-): string[] {
-  const key = kind === 'allow' ? 'allowedDomains' : 'deniedDomains';
-  const out: string[] = [];
-  for (const s of sources) {
-    if (!s) continue;
-    for (const d of s.sandbox?.network?.[key] ?? []) {
-      out.push(d);
-    }
-    for (const rule of s.permissions?.[kind] ?? []) {
-      const m = /^WebFetch\(domain:([^)]+)\)$/.exec(rule);
-      if (m?.[1]) out.push(m[1]);
-    }
-  }
-  return out;
-}
-
-/** densable `eGr` — sandbox.network.deniedDomains + allowManagedDomainsOnly check. */
-function checkMonitorSandboxNetworkHost(
-  host: string,
-  port: number,
-): { allowed: true } | { allowed: false; reason: string } {
-  const policy = getSettingsForSource('policySettings');
-  const merged = getSettings_DEPRECATED();
-  const denied = collectSandboxDomains([merged, policy], 'deny');
-  const matchesEntry = (entry: string): boolean => {
-    const parsed = parseSandboxDomainPattern(entry);
-    if (!matchesSandboxHostPattern(parsed.hostPattern, host)) return false;
-    return parsed.port === undefined || parsed.port === port;
-  };
-  if (denied.some(matchesEntry)) {
-    return { allowed: false, reason: `${host} is in sandbox.network.deniedDomains` };
-  }
-  if (!shouldAllowManagedSandboxDomainsOnly()) {
-    return { allowed: true };
-  }
-  const allowed = collectSandboxDomains([policy], 'allow');
-  if (allowed.some(matchesEntry)) {
-    return { allowed: true };
-  }
-  return {
-    allowed: false,
-    reason: `sandbox.network.allowManagedDomainsOnly is set and ${host} is not in the policy allowlist`,
-  };
-}
+type OptionalMxcSandboxManager = typeof SandboxManager & {
+  isBashToolWithheldForMxcBackend?: () => boolean;
+  isBashRefusedByMxcBackend?: () => boolean;
+};
 
 /**
- * densable CIt — synchronous compliance + literal-IP SSRF + sandbox-policy precondition.
- * DNS lookup + IP pinning runs post-approval inside `spawnMonitorWebSocket`.
+ * Official 2.1.331 `sc()` (@312918900) / `Je.isEnabled()` (@326869100):
+ * Monitor is enabled on non-Windows platforms, and on Windows only when Bash
+ * is not withheld for the MXC sandbox backend and Git Bash is available.
  */
-function monitorWebSocketPrecondition(url: string): {
-  kind: 'compliance' | 'ssrf' | 'sandbox-policy';
-  host: string;
-  detail: string;
-} | null {
-  const policyDenied = leftoverPolicyLimitsDp('allow_web_fetch', 'Arbitrary-URL egress', 'is');
-  if (policyDenied !== null) {
-    return {
-      kind: 'compliance',
-      host: '',
-      detail: policyDenied,
-    };
-  }
-  const parsed = new URL(url);
-  const host = parsed.hostname.replace(/^\[|\]$/g, '');
-  if (isIP(host) && isBlockedAddress(host)) {
-    return {
-      kind: 'ssrf',
-      host,
-      detail: 'the address is in a private, link-local, or cloud-metadata range',
-    };
-  }
-  const port = parsed.port !== '' ? Number(parsed.port) : parsed.protocol === 'wss:' ? 443 : 80;
-  const sandboxCheck = checkMonitorSandboxNetworkHost(host, port);
-  if (!sandboxCheck.allowed) {
-    return {
-      kind: 'sandbox-policy',
-      host,
-      detail: sandboxCheck.reason,
-    };
-  }
-  return null;
+export function isMonitorPlatformEnabled(
+  platform: string = getPlatform(),
+  gitBashPath: string | null = platform === 'windows' ? findGitBashPathOrNull() : '',
+  bashWithheldForMxc: boolean = (SandboxManager as OptionalMxcSandboxManager).isBashToolWithheldForMxcBackend?.() ===
+    true,
+): boolean {
+  if (platform !== 'windows') return true;
+  if (bashWithheldForMxc) return false;
+  return gitBashPath !== null;
 }
 
-/** SEA `Sln` (@287793665) — check whole-tool Bash deny/ask rules for code-exec tools. */
+function getMonitorCommandSandboxRefusal(useSandbox: boolean, command: string): string | null {
+  if ((SandboxManager as OptionalMxcSandboxManager).isBashRefusedByMxcBackend?.() === true) {
+    return MXC_BASH_REFUSAL_MESSAGE;
+  }
+  return getSandboxPolicyRefusal(useSandbox, command, false, 'bash');
+}
+
+function findWholeOrWildcardBashRule(
+  toolPermissionContext: ToolPermissionContext,
+  rules: readonly PermissionRule[],
+): PermissionRule | null {
+  // Official 2.1.331 `U` / `kws` / `g5i` (@314161000, @309925939):
+  // Ignore `source === 'toolsNarrowing'` and match either whole-tool Bash
+  // rules (no ruleContent) OR wildcard `Bash(*)` / `Bash( * )` / `Bash(**)` rules.
+  const filtered = rules.filter(rule => rule.source !== 'toolsNarrowing');
+  const toolAliases = (toolPermissionContext as { toolAliases?: Record<string, string> }).toolAliases;
+  const alias = toolAliases?.[BASH_TOOL_NAME];
+  const bashNames = alias !== undefined ? [BASH_TOOL_NAME, alias] : [BASH_TOOL_NAME];
+  for (const name of bashNames) {
+    const whole = filtered.find(rule => rule.ruleValue.toolName === name && rule.ruleValue.ruleContent === undefined);
+    if (whole !== undefined) return whole;
+  }
+  return (
+    filtered.find(
+      rule =>
+        bashNames.includes(rule.ruleValue.toolName) &&
+        rule.ruleValue.ruleContent !== undefined &&
+        WILDCARD_RULE_CONTENT_RE.test(rule.ruleValue.ruleContent),
+    ) ?? null
+  );
+}
+
+/** Official 2.1.331 `iWn` (@314161000) — check whole-tool & wildcard `Bash(*)` deny/ask rules for code-exec tools. */
 function checkBashRuleForCodeExec(
   toolPermissionContext: ToolPermissionContext,
   surfaceLabel: string,
 ): { rule: PermissionRule; verdict: PermissionResult } | null {
-  const denyRule = getDenyRuleForTool(toolPermissionContext, { name: BASH_TOOL_NAME });
+  const denyRule = findWholeOrWildcardBashRule(toolPermissionContext, getDenyRules(toolPermissionContext));
   if (denyRule !== null) {
     return {
       rule: denyRule,
@@ -178,7 +132,7 @@ function checkBashRuleForCodeExec(
       },
     };
   }
-  const askRule = getAskRuleForTool(toolPermissionContext, { name: BASH_TOOL_NAME });
+  const askRule = findWholeOrWildcardBashRule(toolPermissionContext, getAskRules(toolPermissionContext));
   if (askRule !== null) {
     return {
       rule: askRule,
@@ -192,7 +146,20 @@ function checkBashRuleForCodeExec(
   return null;
 }
 
-/** densable Ae — deny bashCommandClamp / CIt hits, otherwise ask. */
+/** Official 2.1.331 `vIn` — compliance (`allow_web_fetch`) + literal-IP SSRF + sandbox network policy. */
+function checkMonitorWsPrecondition(url: string) {
+  const policyDenied = leftoverPolicyLimitsDp('allow_web_fetch', 'Arbitrary-URL egress', 'is');
+  if (policyDenied !== null) {
+    return {
+      kind: 'compliance' as const,
+      host: '',
+      detail: policyDenied,
+    };
+  }
+  return monitorWebSocketPrecondition(url);
+}
+
+/** Official 2.1.331 `mtl` + `qe` + `Ue` — deny bashCommandClamp / precondition / Bash(*) deny, else ask. */
 function checkMonitorWebSocketPermission(
   ws: { url: string; protocols?: string[] },
   context?: ToolUseContext,
@@ -210,14 +177,11 @@ function checkMonitorWebSocketPermission(
       },
     };
   }
-  const precondition = monitorWebSocketPrecondition(ws.url);
+  const precondition = checkMonitorWsPrecondition(ws.url);
   if (precondition !== null) {
     return {
       behavior: 'deny',
-      message:
-        precondition.kind === 'compliance'
-          ? `Monitor cannot open a WebSocket. ${precondition.detail}`
-          : `Monitor cannot open a WebSocket to ${precondition.host}: ${precondition.detail}.`,
+      message: formatMonitorWebSocketPreconditionError(precondition),
       decisionReason: {
         type: 'other',
         reason:
@@ -231,11 +195,20 @@ function checkMonitorWebSocketPermission(
   }
   const protocols =
     ws.protocols !== undefined && ws.protocols.length > 0 ? ` (subprotocols: ${ws.protocols.join(', ')})` : '';
-  return {
+  const askResult: PermissionResult = {
     behavior: 'ask',
     message: `Monitor will open a WebSocket to ${ws.url}${protocols}`,
     suggestions: [],
   };
+  const permCtx = context?.getAppState?.()?.toolPermissionContext;
+  if (!permCtx) {
+    return askResult;
+  }
+  const bashRule = checkBashRuleForCodeExec(permCtx, MONITOR_TOOL_NAME);
+  if (bashRule === null) {
+    return askResult;
+  }
+  return bashRule.verdict.behavior === 'deny' ? bashRule.verdict : { ...askResult, matchedAskRule: bashRule.rule };
 }
 
 function isAsciiWsUrl(url: string): boolean {
@@ -352,6 +325,12 @@ const outputSchema = lazySchema(() =>
     timeoutMs: z.number().optional().describe('Timeout deadline in milliseconds (0 when persistent).'),
     persistent: z.boolean().optional().describe('No timeout — runs until TaskStop or session end.'),
     outputFile: z.string().optional(),
+    keptInSandboxByCheck: z
+      .boolean()
+      .optional()
+      .describe(
+        'True when the command ran in the sandbox only because its permission check relied on the sandbox; the settings would otherwise have exempted it.',
+      ),
   }),
 );
 type OutputSchema = ReturnType<typeof outputSchema>;
@@ -411,7 +390,7 @@ export const MonitorTool = buildTool({
   },
 
   isEnabled() {
-    return !isBackgroundTasksDisabled();
+    return isMonitorPlatformEnabled();
   },
 
   async description(): Promise<string> {
@@ -459,53 +438,72 @@ export const MonitorTool = buildTool({
     return BashTool.preparePermissionMatcher({ command });
   },
 
+  permissionCheckFailureDecision(_input: MonitorInput, context: ToolUseContext): PermissionResult | undefined {
+    // Official 2.1.331 `Wls` (@316633649): fail closed when a permission check
+    // crashes under an active per-spawn `bashCommandClamp`.
+    const clamps = (context?.getAppState?.()?.toolPermissionContext as { bashCommandClamps?: unknown[] } | undefined)
+      ?.bashCommandClamps;
+    if (Array.isArray(clamps) && clamps.length > 0) {
+      return {
+        behavior: 'deny',
+        message: `The ${MONITOR_TOOL_NAME} permission check crashed and this agent carries a per-spawn bashCommandClamp; denying rather than running an unverified command.`,
+        decisionReason: {
+          type: 'other',
+          reason: 'bashCommandClamp permission check crashed',
+        },
+      };
+    }
+    return undefined;
+  },
+
   async checkPermissions(input: MonitorInput, context: ToolUseContext): Promise<PermissionResult> {
     if (input.ws !== undefined) {
-      const wsResult = checkMonitorWebSocketPermission(input.ws, context);
-      const bashRule = checkBashRuleForCodeExec(context.getAppState().toolPermissionContext, MONITOR_TOOL_NAME);
-      if (bashRule !== null) {
-        if (bashRule.verdict.behavior === 'deny') {
-          return bashRule.verdict;
-        }
-        if (wsResult.behavior === 'ask') {
-          return { ...wsResult, matchedAskRule: bashRule.rule };
-        }
+      return checkMonitorWebSocketPermission(input.ws, context);
+    }
+    const sandboxAtStart = shouldUseSandbox({ command: input.command });
+    try {
+      const appState = context.getAppState();
+      const bashRule = checkBashRuleForCodeExec(appState.toolPermissionContext, MONITOR_TOOL_NAME);
+      if (bashRule?.verdict.behavior === 'deny') {
+        return bashRule.verdict;
       }
-      return wsResult;
-    }
-    const appState = context.getAppState();
-    const bashRule = checkBashRuleForCodeExec(appState.toolPermissionContext, MONITOR_TOOL_NAME);
-    if (bashRule?.verdict.behavior === 'deny') {
+      // densable 2.1.289 @194307650 `Dzn({ ...n, command: n.command }, r.shellPermission)` —
+      // preserve `description`, `timeout_ms`, and `persistent` in `updatedInput` so toolExecution
+      // never overwrites MonitorInput with `{ command }` alone (`Monitor event: "undefined"`).
+      // 2.1.290 `Ne` (@297418221): suspend sandbox auto-allow so Monitor doesn't silently bypass rules.
+      const bashInput = {
+        ...input,
+        command: input.command ?? '',
+      } as unknown as Parameters<typeof bashToolHasPermission>[0];
+      const suspendedContext: ToolUseContext = {
+        ...context,
+        permissionLayers: [...(context.permissionLayers ?? []), { kind: 'sandbox_auto_allow_suspended' }],
+      };
+      const perm = await bashToolHasPermission(bashInput, suspendedContext);
+      const mergedPerm: PermissionResult =
+        (perm.behavior === 'allow' || perm.behavior === 'ask') && perm.updatedInput !== undefined
+          ? {
+              ...perm,
+              updatedInput: { ...input, ...perm.updatedInput },
+            }
+          : perm;
+      if (bashRule === null || mergedPerm.behavior === 'deny') {
+        return mergedPerm;
+      }
+      if (mergedPerm.behavior === 'ask') {
+        const { suggestions: _suggestions, ...rest } = mergedPerm;
+        return { ...rest, matchedAskRule: bashRule.rule };
+      }
       return bashRule.verdict;
+    } finally {
+      // Official 2.1.331 `He` / `fNn` (@326863500): pin check-time sandbox state
+      // so hook/settings changes cannot silently drop sandboxing between check and call.
+      recordSandboxStateAtCheck(
+        context.toolUseId,
+        { command: input.command },
+        sandboxAtStart || shouldUseSandbox({ command: input.command }),
+      );
     }
-    // densable 2.1.289 @194307650 `Dzn({ ...n, command: n.command }, r.shellPermission)` —
-    // preserve `description`, `timeout_ms`, and `persistent` in `updatedInput` so toolExecution
-    // never overwrites MonitorInput with `{ command }` alone (`Monitor event: "undefined"`).
-    // 2.1.290 `Ne` (@297418221): suspend sandbox auto-allow so Monitor doesn't silently bypass rules.
-    const bashInput = {
-      ...input,
-      command: input.command ?? '',
-    } as unknown as Parameters<typeof bashToolHasPermission>[0];
-    const suspendedContext: ToolUseContext = {
-      ...context,
-      permissionLayers: [...(context.permissionLayers ?? []), { kind: 'sandbox_auto_allow_suspended' }],
-    };
-    const perm = await bashToolHasPermission(bashInput, suspendedContext);
-    const mergedPerm: PermissionResult =
-      (perm.behavior === 'allow' || perm.behavior === 'ask') && perm.updatedInput !== undefined
-        ? {
-            ...perm,
-            updatedInput: { ...input, ...perm.updatedInput },
-          }
-        : perm;
-    if (bashRule === null || mergedPerm.behavior === 'deny') {
-      return mergedPerm;
-    }
-    if (mergedPerm.behavior === 'ask') {
-      const { suggestions: _suggestions, ...rest } = mergedPerm;
-      return { ...rest, matchedAskRule: bashRule.rule };
-    }
-    return bashRule.verdict;
   },
 
   userFacingName() {
@@ -540,6 +538,20 @@ export const MonitorTool = buildTool({
         errorCode: 2,
       };
     }
+    if (input.command !== undefined) {
+      // Official 2.1.331 `ze` (@326864650): enforce Windows strict-sandbox / MXC policy refusal.
+      const policyRefusal = getMonitorCommandSandboxRefusal(
+        shouldUseSandbox({ command: input.command }),
+        input.command,
+      );
+      if (policyRefusal !== null) {
+        return {
+          result: false,
+          message: policyRefusal,
+          errorCode: 14,
+        };
+      }
+    }
     return { result: true };
   },
 
@@ -557,33 +569,51 @@ export const MonitorTool = buildTool({
 
     logEvent('tengu_monitor_tool_used', {});
 
-    if (feature('MONITOR_TOOL')) {
-      if (ws !== undefined) {
-        const handle = await spawnMonitorWebSocket({
-          url: ws.url,
-          protocols: ws.protocols,
-          description,
-          timeoutMs: S.timeout_ms,
-          persistent: S.persistent,
-          bounded,
-          toolUseId,
-          agentId: effectiveAgentId,
-          setAppState,
-          taskRegistry: registry,
-        });
-        return {
-          data: {
-            taskId: handle.taskId,
-            timeoutMs: S.persistent ? 0 : S.timeout_ms,
-            persistent: S.persistent,
-          },
-        };
+    if (ws !== undefined) {
+      // Official 2.1.331 `Ke` (@326868480): re-check compliance (`allow_web_fetch`),
+      // SSRF, and sandbox network policy right before opening the WebSocket.
+      const wsPrecondition = checkMonitorWsPrecondition(ws.url);
+      if (wsPrecondition !== null) {
+        throw new MonitorWsPreconditionError(formatMonitorWebSocketPreconditionError(wsPrecondition));
       }
+      const handle = await spawnMonitorWebSocket({
+        url: ws.url,
+        protocols: ws.protocols,
+        description,
+        timeoutMs: S.timeout_ms,
+        persistent: S.persistent,
+        bounded,
+        toolUseId,
+        agentId: effectiveAgentId,
+        setAppState,
+        taskRegistry: registry,
+      });
+      return {
+        data: {
+          taskId: handle.taskId,
+          timeoutMs: S.persistent ? 0 : S.timeout_ms,
+          persistent: S.persistent,
+        },
+      };
     }
 
     if (!command) {
       throw new Error('exactly one of command or ws');
     }
+
+    // Official 2.1.331 `Ve` (@326866000): pin check-to-run sandbox decision and
+    // enforce Windows strict-sandbox / MXC policy refusal before spawning.
+    const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(toolUseId, { command });
+    clearSandboxStateAtCheck(toolUseId);
+    const effectiveUseSandbox = shouldUseSandbox({ command }, { disableUnsandboxedCommands: keepInSandboxSinceCheck });
+    const policyRefusal = getMonitorCommandSandboxRefusal(effectiveUseSandbox, command);
+    if (policyRefusal !== null) {
+      throw new SandboxPolicyRefusalError(policyRefusal);
+    }
+    if (keepInSandboxSinceCheck && !effectiveUseSandbox) {
+      throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
+    }
+    const keptInSandboxByCheck = keepInSandboxSinceCheck && effectiveUseSandbox && !shouldUseSandbox({ command });
 
     // densable xe / w1n: pipe stdout into the stream pump (j6 Monitor event).
     const taskRef: { id?: string } = {};
@@ -615,7 +645,7 @@ export const MonitorTool = buildTool({
     const shellCommand = await exec(command, abortController.signal, 'bash', {
       onStdout: onMonitorStdout,
       preventCwdChanges: true,
-      shouldUseSandbox: shouldUseSandbox({ command }),
+      shouldUseSandbox: effectiveUseSandbox,
       agentWorktree: context.agentWorktree,
       useToolMemoryCgroup: true,
     });
@@ -716,6 +746,7 @@ export const MonitorTool = buildTool({
         taskId: handle.taskId,
         timeoutMs: S.persistent ? 0 : S.timeout_ms,
         persistent: S.persistent,
+        ...(keptInSandboxByCheck ? { keptInSandboxByCheck: true } : {}),
       },
     };
   },
@@ -730,10 +761,11 @@ export const MonitorTool = buildTool({
       : isMonitorTimeoutBounded()
         ? `expires in ${formatDuration(content.timeoutMs ?? DEFAULT_MONITOR_TIMEOUT_MS, { hideTrailingZeros: true })} unless the source ends first; you get one notice at expiry — re-arm if you still need the watch`
         : `timeout ${content.timeoutMs ?? DEFAULT_MONITOR_TIMEOUT_MS}ms`;
+    const keptNote = content.keptInSandboxByCheck === true ? ` ${KEPT_IN_SANDBOX_SINCE_CHECK_NOTE}` : '';
     return {
       tool_use_id: toolUseId,
       type: 'tool_result',
-      content: `Monitor started (task ${content.taskId}, ${deadline}). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply.`,
+      content: `Monitor started (task ${content.taskId}, ${deadline}). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply.${keptNote}`,
     };
   },
 

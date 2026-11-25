@@ -72,6 +72,7 @@ import {
   stillRunningDetachText,
 } from '../../utils/detachedToolCallNotify.js'
 import { TASK_STOP_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskStopTool/prompt.js'
+import { GET_TASK_TOOL_NAME } from '../../utils/bashTaskDeliveryOutcomes.js'
 import {
   buildCodeEditToolAttributes,
   isCodeEditingTool,
@@ -1601,6 +1602,22 @@ function getMcpServerBaseUrlFromToolName(
   return getLoggingSafeMcpBaseUrl(serverConnection.config)
 }
 
+/**
+ * Official 2.1.331 `E_l` (@311340059) / toolExecution hint (@319751208):
+ * GetTask is kept in the base pool for synthetic delivery rendering while
+ * `GetTaskTool.isEnabled()` returns `false`; explain this when a model tries
+ * to call `GetTask` directly.
+ */
+export const GET_TASK_UNAVAILABLE_HINT =
+  ". GetTask is not a tool you can call. A background command's or task's result reaches you by itself when it finishes, unless the message that started it said otherwise, so you don't need to check on it."
+
+export function formatUnavailableBuiltInToolHint(toolName: string): string {
+  if (toolName === GET_TASK_TOOL_NAME) {
+    return GET_TASK_UNAVAILABLE_HINT
+  }
+  return ''
+}
+
 const MCP_RESOURCE_TOOL_NAMES = new Set([
   'ListMcpResourcesTool',
   'ListMcpResources',
@@ -1717,6 +1734,7 @@ export async function* runToolUse(
     }
     const sanitizedToolName = sanitizeToolNameForAnalytics(toolName)
     const mistypedHint =
+      formatUnavailableBuiltInToolHint(toolName) ||
       suggestMistypedHostConnectorTool(
         toolName,
         toolUseContext.options.tools,

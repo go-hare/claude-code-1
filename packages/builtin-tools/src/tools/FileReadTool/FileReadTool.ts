@@ -96,6 +96,10 @@ import {
   FileTooLargeError,
   readFileInRange,
 } from 'src/utils/readFileInRange.js'
+import {
+  bindTaskOutputForRead,
+  isTaskOutputFilePath,
+} from 'src/utils/task/diskOutput.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
@@ -884,19 +888,25 @@ export const FileReadTool = buildTool({
     }
 
     try {
-      let opened: Awaited<ReturnType<typeof openReadBoundToApproval>> | null =
-        null
+      let opened:
+        | Awaited<ReturnType<typeof openReadBoundToApproval>>
+        | Awaited<ReturnType<typeof bindTaskOutputForRead>>
+        | null = null
       try {
-        const pinnedInode =
-          getPlatform() === 'macos'
-            ? await snapshotApprovedReadIdentity(approvedReadPaths)
-            : undefined
-        opened = await openReadBoundToApproval(
-          fullFilePath,
-          approvedReadPaths,
-          context.abortController.signal,
-          pinnedInode,
-        )
+        if (isTaskOutputFilePath(fullFilePath)) {
+          opened = await bindTaskOutputForRead(fullFilePath)
+        } else {
+          const pinnedInode =
+            getPlatform() === 'macos'
+              ? await snapshotApprovedReadIdentity(approvedReadPaths)
+              : undefined
+          opened = await openReadBoundToApproval(
+            fullFilePath,
+            approvedReadPaths,
+            context.abortController.signal,
+            pinnedInode,
+          )
+        }
       } catch (error) {
         // ENOENT stays on the similar-file path; a swapped symlink does not.
         if (!isENOENT(error)) throw error

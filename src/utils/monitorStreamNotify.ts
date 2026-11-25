@@ -161,9 +161,11 @@ export function createLineDebouncer(
 function isAgentPushNotifEnabled(): boolean {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getGlobalConfig } =
+    const { resolveUserIntentSetting } =
       require('./config.js') as typeof import('./config.js')
-    return getGlobalConfig().agentPushNotifEnabled === true
+    return (
+      resolveUserIntentSetting('agentPushNotifEnabled', false).value === true
+    )
   } catch {
     return false
   }
@@ -383,7 +385,9 @@ export type MonitorStreamPumpOpts = {
   schedule?: LineDebounceSchedule
 }
 
-/** densable `w1n` */
+const MONITOR_STREAM_SUPPRESSED_SAMPLE_MAX_LINES = 5
+
+/** Official 2.1.331 `MQo` / densable `w1n` */
 export function createMonitorStreamPump(
   opts: MonitorStreamPumpOpts,
 ): MonitorStreamPump {
@@ -395,31 +399,62 @@ export function createMonitorStreamPump(
   const bucket = createTokenBucket(capacity, refillMs, now)
   let eventCount = 0
   let suppressed = 0
+  let suppressedSample: string[] = []
   let firstSuppressedAt: number | undefined
-  let lastSuppressedAt: number | undefined
+  let lastAttemptAt = now()
   let closed = false
 
-  function tryAdmit(): boolean {
+  function recordSuppressedSample(batch: string | undefined): void {
+    if (!batch) return
+    const lines = batch
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+    if (lines.length === 0) return
+    suppressedSample.push(...lines)
+    if (suppressedSample.length > MONITOR_STREAM_SUPPRESSED_SAMPLE_MAX_LINES) {
+      suppressedSample.splice(
+        0,
+        suppressedSample.length - MONITOR_STREAM_SUPPRESSED_SAMPLE_MAX_LINES,
+      )
+    }
+  }
+
+  function tryAdmit(batch?: string): boolean {
+    const currentNow = now()
+    // Official 2.1.331 `MQo` (@324374224): reset `firstSuppressedAt` BEFORE
+    // `tryConsume()` whenever the stream has been quiet for > 3×refillMs or
+    // the token bucket has refilled to full capacity so a recovered burst
+    // never latches and kills a healthy long-running monitor hours later.
+    if (
+      currentNow - lastAttemptAt > refillMs * 3 ||
+      bucket.tokens() === capacity
+    ) {
+      firstSuppressedAt = undefined
+    }
+    lastAttemptAt = currentNow
     if (!bucket.tryConsume()) {
+      recordSuppressedSample(batch)
       suppressed++
-      lastSuppressedAt = now()
-      if (firstSuppressedAt === undefined) firstSuppressedAt = now()
+      if (firstSuppressedAt === undefined) firstSuppressedAt = currentNow
       return false
     }
     if (suppressed > 0) {
+      const recoveryBody = [
+        monitorSuppressedEvent(suppressed),
+        ...suppressedSample,
+      ].join('\n')
       notifyMonitorStreamEvent(
         opts.description,
-        monitorSuppressedEvent(suppressed),
+        recoveryBody,
         opts.taskRef.id,
-        { isHousekeeping: true, agentId: opts.agentId },
+        {
+          isHousekeeping: true,
+          agentId: opts.agentId,
+        },
       )
       suppressed = 0
-      if (
-        lastSuppressedAt !== undefined &&
-        now() - lastSuppressedAt > refillMs * 3
-      ) {
-        firstSuppressedAt = undefined
-      }
+      suppressedSample = []
     }
     eventCount++
     return true
@@ -430,7 +465,7 @@ export function createMonitorStreamPump(
       closed = true
       return
     }
-    if (tryAdmit()) {
+    if (tryAdmit(batch)) {
       notifyMonitorStreamEvent(opts.description, batch, opts.taskRef.id, {
         agentId: opts.agentId,
       })
@@ -482,11 +517,16 @@ export function createMonitorStreamPump(
       }
     }
     if (opts.isStopped?.()) return
-    const admitted = leftover !== undefined && tryAdmit()
+    const admitted = leftover !== undefined && tryAdmit(leftover)
     if (terminal !== undefined) {
-      const combined = [admitted ? leftover : undefined, extraBody]
-        .filter((part): part is string => part !== undefined)
+      const combined = [
+        admitted ? leftover : undefined,
+        extraBody,
+        ...suppressedSample,
+      ]
+        .filter((part): part is string => part !== undefined && part !== '')
         .join('\n')
+      suppressedSample = []
       const body =
         combined !== '' ? monitorEventBody(combined, false) : undefined
       let stopNote: string | undefined

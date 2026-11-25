@@ -40,14 +40,16 @@ describe('densable 2.1.252 #1 pinWriteTarget', () => {
     )
   })
 
-  test('leaf symlink onto the same dir inode is treated as an alias', async () => {
+  test('leaf symlink onto a directory is refused (official 2.1.331 lstat check)', async () => {
     if (process.platform === 'win32') return
     const root = await makeDir()
     const a = join(root, 'A')
     await mkdir(a, { recursive: true })
     const b = join(root, 'B')
     await symlink(a, b)
-    await pinWriteTarget(b)
+    await expect(pinWriteTarget(b)).rejects.toThrow(
+      /task output swap refused \(tasks dir moved or linked\)/,
+    )
   })
 
   test('symlink loop is refused with recover', async () => {

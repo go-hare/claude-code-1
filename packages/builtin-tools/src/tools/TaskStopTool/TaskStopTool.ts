@@ -2,13 +2,16 @@ import { z } from 'zod/v4'
 import type { TaskStateBase } from 'src/Task.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
-import { stopTask } from 'src/tasks/stopTask.js'
+import { isObserverAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import { isUnsettledTerminalKillLoop, stopTask } from 'src/tasks/stopTask.js'
 import { isParkedKeepaliveAgent } from 'src/utils/task/framework.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import {
   namesRemoteHost,
+  REMOTE_TOOL_HOST_FIELD,
   remoteHostNotForwardedMessage,
+  remoteHostSchemaProperty,
 } from 'src/services/tools/remoteToolHost.js'
 import { DESCRIPTION, TASK_STOP_TOOL_NAME } from './prompt.js'
 import { renderToolResultMessage } from './UI.js'
@@ -25,7 +28,31 @@ const inputSchema = lazySchema(() =>
     shell_id: z.string().optional().describe('Deprecated: use task_id instead'),
   }),
 )
-type InputSchema = ReturnType<typeof inputSchema>
+const inputSchemaWithRemoteHost = lazySchema(() =>
+  inputSchema().extend({
+    [REMOTE_TOOL_HOST_FIELD]: z
+      .string()
+      .optional()
+      .describe(
+        remoteHostSchemaProperty()?._host.description ??
+          'Target machine name when remote tool forwarding is enabled',
+      ),
+  }),
+)
+type InputSchema =
+  | ReturnType<typeof inputSchema>
+  | ReturnType<typeof inputSchemaWithRemoteHost>
+
+function isTaskStopRemoteExecutionSupported(): boolean {
+  try {
+    return (
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_violin_varnish', false) ===
+      true
+    )
+  } catch {
+    return false
+  }
+}
 
 const outputSchema = lazySchema(() =>
   z.object({
@@ -70,23 +97,19 @@ export const TaskStopTool = buildTool({
   // KillShell / KillBash are deprecated names - kept as aliases for backward compatibility
   // with existing transcripts and SDK users
   aliases: ['KillShell', 'KillBash'],
-  // densable y1 — tengu_violin_varnish, default off.
+  // Official 2.1.331 `Ut` (@325140400): `Lde()` (`tengu_violin_varnish`, default off)
+  // gates both `remoteExecution.supported` and extending `inputSchema` with `_host`.
   get remoteExecution() {
-    let supported = false
-    try {
-      supported =
-        getFeatureValue_CACHED_MAY_BE_STALE('tengu_violin_varnish', false) ===
-        true
-    } catch {
-      supported = false
-    }
-    return { supported }
+    return { supported: isTaskStopRemoteExecutionSupported() }
   },
   backgrounding: 'never' as const,
   maxResultSizeChars: 100_000,
   userFacingName: () => 'Stop Task',
   get inputSchema(): InputSchema {
-    return inputSchema()
+    return isTaskStopRemoteExecutionSupported() &&
+      remoteHostSchemaProperty() !== undefined
+      ? inputSchemaWithRemoteHost()
+      : inputSchema()
   },
   get outputSchema(): OutputSchema {
     return outputSchema()
@@ -148,9 +171,21 @@ export const TaskStopTool = buildTool({
       }
     }
 
-    // densable H1e: running OR zle(YC park: completed + keepalive)
+    // Official 2.1.331 `Ut.validateInput` (@325140900): allow running, YC-parked,
+    // non-running observer agents (`Sp`), paused `local_workflow`, and unsettled
+    // terminal agent/workflow kill-loops (`ho`).
     const parked = isParkedKeepaliveAgent(task)
-    if (task.status !== 'running' && !parked) {
+    const isObserver = isObserverAgentTask(task)
+    const pausedWorkflow =
+      task.type === 'local_workflow' && task.status === 'paused'
+    const unsettledKillLoop = isUnsettledTerminalKillLoop(task, resolvedId)
+    if (
+      task.status !== 'running' &&
+      !parked &&
+      !isObserver &&
+      !pausedWorkflow &&
+      !unsettledKillLoop
+    ) {
       return {
         result: false,
         message: `Task ${resolvedId} is not running (status: ${task.status})`,

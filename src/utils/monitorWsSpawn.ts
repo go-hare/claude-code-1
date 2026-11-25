@@ -26,6 +26,12 @@ import {
 } from './monitorStreamNotify.js'
 import { getWebSocketTLSOptions } from './mtls.js'
 import { getWebSocketProxyAgent, getWebSocketProxyUrl } from './proxy.js'
+import { leftoverPolicyLimitsDp } from '../cli/leftoverTulip.js'
+import { shouldAllowManagedSandboxDomainsOnly } from './sandbox/sandbox-adapter.js'
+import {
+  getSettings_DEPRECATED,
+  getSettingsForSource,
+} from './settings/settings.js'
 import {
   addKeepaliveReason,
   monitorKeepaliveReason,
@@ -41,6 +47,156 @@ export class MonitorWsPreconditionError extends Error {
     super(message)
     this.name = 'MonitorWsPreconditionError'
   }
+}
+
+export type MonitorWsPreconditionFailure = {
+  kind: 'compliance' | 'ssrf' | 'sandbox-policy'
+  host: string
+  detail: string
+}
+
+function parseSandboxDomainPattern(pattern: string): {
+  hostPattern: string
+  port?: number
+} {
+  const trimmed = pattern.trim().toLowerCase()
+  const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(trimmed)
+  if (bracketed) {
+    return {
+      hostPattern: bracketed[1]!,
+      ...(bracketed[2] !== undefined ? { port: Number(bracketed[2]) } : {}),
+    }
+  }
+  const colonIdx = trimmed.lastIndexOf(':')
+  if (colonIdx > 0 && !trimmed.slice(0, colonIdx).includes(':')) {
+    const portStr = trimmed.slice(colonIdx + 1)
+    if (/^\d+$/.test(portStr)) {
+      return { hostPattern: trimmed.slice(0, colonIdx), port: Number(portStr) }
+    }
+  }
+  return { hostPattern: trimmed }
+}
+
+function matchesSandboxHostPattern(hostPattern: string, host: string): boolean {
+  const target = host.toLowerCase()
+  if (hostPattern === '*') return true
+  if (hostPattern.startsWith('*.')) {
+    const suffix = hostPattern.slice(1)
+    return target.endsWith(suffix) && target.length > suffix.length
+  }
+  return target === hostPattern
+}
+
+function collectSandboxDomains(
+  sources: Array<ReturnType<typeof getSettingsForSource>>,
+  kind: 'allow' | 'deny',
+): string[] {
+  const key = kind === 'allow' ? 'allowedDomains' : 'deniedDomains'
+  const out: string[] = []
+  for (const s of sources) {
+    if (!s) continue
+    for (const d of s.sandbox?.network?.[key] ?? []) {
+      out.push(d)
+    }
+    for (const rule of s.permissions?.[kind] ?? []) {
+      const m = /^WebFetch\(domain:([^)]+)\)$/.exec(rule)
+      if (m?.[1]) out.push(m[1])
+    }
+  }
+  return out
+}
+
+/** Official 2.1.331 `Edt` — sandbox.network.deniedDomains + allowManagedDomainsOnly check. */
+export function checkMonitorSandboxNetworkHost(
+  host: string,
+  port: number,
+): { allowed: true } | { allowed: false; reason: string } {
+  const policy = getSettingsForSource('policySettings')
+  const merged = getSettings_DEPRECATED()
+  const denied = collectSandboxDomains([merged, policy], 'deny')
+  const matchesEntry = (entry: string): boolean => {
+    const parsed = parseSandboxDomainPattern(entry)
+    if (!matchesSandboxHostPattern(parsed.hostPattern, host)) return false
+    return parsed.port === undefined || parsed.port === port
+  }
+  if (denied.some(matchesEntry)) {
+    return {
+      allowed: false,
+      reason: `${host} is in sandbox.network.deniedDomains`,
+    }
+  }
+  if (!shouldAllowManagedSandboxDomainsOnly()) {
+    return { allowed: true }
+  }
+  const allowed = collectSandboxDomains([policy], 'allow')
+  if (allowed.some(matchesEntry)) {
+    return { allowed: true }
+  }
+  return {
+    allowed: false,
+    reason: `sandbox.network.allowManagedDomainsOnly is set and ${host} is not in the policy allowlist`,
+  }
+}
+
+/**
+ * Official 2.1.331 `vIn` (@326867700) — synchronous compliance (`allow_web_fetch`)
+ * + literal-IP SSRF + sandbox network policy (`deniedDomains` / `allowManagedDomainsOnly`)
+ * check shared by `MonitorTool.checkPermissions`, `MonitorTool.call`, and `spawnMonitorWebSocket`.
+ */
+export function monitorWebSocketPrecondition(
+  url: string,
+): MonitorWsPreconditionFailure | null {
+  const policyDenied = leftoverPolicyLimitsDp(
+    'allow_web_fetch',
+    'Arbitrary-URL egress',
+    'is',
+  )
+  if (policyDenied !== null) {
+    return {
+      kind: 'compliance',
+      host: '',
+      detail: policyDenied,
+    }
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new MonitorWsPreconditionError(`could not resolve ${url}`)
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '')
+  if (isIP(host) && isBlockedAddress(host)) {
+    return {
+      kind: 'ssrf',
+      host,
+      detail:
+        'the address is in a private, link-local, or cloud-metadata range',
+    }
+  }
+  const port =
+    parsed.port !== ''
+      ? Number(parsed.port)
+      : parsed.protocol === 'wss:'
+        ? 443
+        : 80
+  const sandboxCheck = checkMonitorSandboxNetworkHost(host, port)
+  if (!sandboxCheck.allowed) {
+    return {
+      kind: 'sandbox-policy',
+      host,
+      detail: sandboxCheck.reason,
+    }
+  }
+  return null
+}
+
+/** Official 2.1.331 `ce(r)` (@326868410) */
+export function formatMonitorWebSocketPreconditionError(
+  failure: MonitorWsPreconditionFailure,
+): string {
+  return failure.kind === 'compliance'
+    ? `Monitor cannot open a WebSocket. ${failure.detail}`
+    : `Monitor cannot open a WebSocket to ${failure.host}: ${failure.detail}.`
 }
 
 export type MonitorWsSpawnInput = {
@@ -240,6 +396,17 @@ export async function spawnMonitorWebSocket(
     new Set(input.protocols).size !== (input.protocols?.length ?? 0)
   ) {
     throw new Error('WebSocket protocols must be unique, non-empty HTTP tokens')
+  }
+  // Official 2.1.331 `Ke` / `vIn` (@326868480): re-run compliance (`allow_web_fetch`),
+  // literal-IP SSRF, and sandbox network policy (`deniedDomains`, `allowManagedDomainsOnly`)
+  // immediately before opening the WebSocket so policy changes or direct spawns cannot bypass.
+  if (input.ambient !== true) {
+    const precondition = monitorWebSocketPrecondition(input.url)
+    if (precondition !== null) {
+      throw new MonitorWsPreconditionError(
+        formatMonitorWebSocketPreconditionError(precondition),
+      )
+    }
   }
   const registry = input.taskRegistry
   const taskId = input.reuseTaskId ?? generateTaskId('monitor_ws')

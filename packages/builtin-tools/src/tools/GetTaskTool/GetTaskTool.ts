@@ -19,7 +19,6 @@ import {
   backgroundTaskEnding,
   buildBashTaskDeliverySnapshot,
   formatWorkingGetTaskStatusMessage,
-  isBashTaskGetDeliveryEnabled,
   readBashTaskSnapshotOutput,
   type GetTaskWorkingEnding,
 } from 'src/utils/bashTaskDelivery.js'
@@ -418,8 +417,10 @@ export const GetTaskTool = buildTool({
   userFacingName() {
     return GET_TASK_TOOL_NAME
   },
+  // Official 2.1.331 `Vn.isEnabled()` (@325208988): always disabled for direct
+  // model invocation; kept in `getAllBaseTools()` for synthetic delivery rendering.
   isEnabled() {
-    return isBashTaskGetDeliveryEnabled()
+    return false
   },
   isConcurrencySafe() {
     return true

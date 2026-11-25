@@ -27,6 +27,11 @@ import { semanticBoolean } from 'src/utils/semanticBoolean.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
 import { plural } from 'src/utils/stringUtils.js'
 import { isSafeGlobPattern } from 'src/utils/settings/validation.js'
+import {
+  bindTaskOutputForRead,
+  isTaskOutputFilePath,
+  taskOutputDirExclusions,
+} from 'src/utils/task/diskOutput.js'
 import { GREP_TOOL_NAME, getDescription } from './prompt.js'
 import {
   getToolUseSummary,
@@ -513,6 +518,9 @@ export const GrepTool = buildTool({
     const root = await openSearchRoot(absolutePath, approved)
     let results: string[] = []
     if (root) {
+      let boundTaskOutput:
+        | Awaited<ReturnType<typeof bindTaskOutputForRead>>
+        | undefined
       try {
         await root.recheckBeforeSpawn()
         for (const denyGlob of compileReadDenyRgGlobs(
@@ -526,6 +534,25 @@ export const GrepTool = buildTool({
           absolutePath,
         )) {
           args.push('--glob', exclusion)
+        }
+
+        const taskOutputCandidate = isTaskOutputFilePath(absolutePath)
+          ? absolutePath
+          : isTaskOutputFilePath(root.canonical)
+            ? root.canonical
+            : undefined
+        if (taskOutputCandidate !== undefined) {
+          boundTaskOutput = await bindTaskOutputForRead(taskOutputCandidate)
+        } else {
+          const taskExclusions = taskOutputDirExclusions(root.canonical)
+          if (taskExclusions.includes('!**')) {
+            throw new Error(
+              "Task output files are read individually: Grep (or Read) a specific task's output path rather than the tasks directory.",
+            )
+          }
+          for (const taskExcl of taskExclusions) {
+            args.push('--glob', taskExcl)
+          }
         }
 
         results = await ripGrep(args, root.target, abortController.signal, {
@@ -547,6 +574,7 @@ export const GrepTool = buildTool({
           )
         }
       } finally {
+        await boundTaskOutput?.close()
         await root.close()
       }
     }

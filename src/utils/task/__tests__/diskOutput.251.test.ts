@@ -23,6 +23,7 @@ import {
   getTaskOutput,
   getTaskOutputSize,
   initTaskOutput,
+  initTaskOutputAsSymlink,
   openTaskOutputRead,
   resolveTaskOutputReadPath,
 } from '../diskOutput.js'
@@ -76,7 +77,7 @@ describe('densable 2.1.251 #64 task output XX/Que', () => {
     expect(task).toContain('openTaskOutputRead(this.path)')
   })
 
-  test('resolveTaskOutputReadPath refuses double symlink hop', async () => {
+  test('resolveTaskOutputReadPath refuses double symlink hop and unregistered symlinks', async () => {
     if (process.platform === 'win32') return
     const dir = await makeDir()
     const real = join(dir, 'real.out')
@@ -86,7 +87,7 @@ describe('densable 2.1.251 #64 task output XX/Que', () => {
     await symlink(real, mid)
     await symlink(mid, leaf)
     await expect(resolveTaskOutputReadPath(leaf)).rejects.toThrow(
-      /not a regular nlink-1 file/,
+      /task output swap refused/,
     )
   })
 
@@ -110,14 +111,23 @@ describe('densable 2.1.251 #64 task output XX/Que', () => {
     )
   })
 
-  test('resolveTaskOutputReadPath follows one hop to a plain nlink-1 file', async () => {
+  test('resolveTaskOutputReadPath follows one hop for registered initTaskOutputAsSymlink and refuses unregistered symlinks', async () => {
     if (process.platform === 'win32') return
     const dir = await makeDir()
     const real = join(dir, 'transcript.txt')
-    const linkPath = join(dir, 'task.output')
     await writeFile(real, 'hello-xx')
-    await symlink(real, linkPath)
-    await expect(resolveTaskOutputReadPath(linkPath)).resolves.toBe(real)
+    const unregistered = join(dir, 'unregistered.output')
+    await symlink(real, unregistered)
+    await expect(resolveTaskOutputReadPath(unregistered)).rejects.toThrow(
+      /task output swap refused/,
+    )
+
+    const taskId = `251-reg-sym-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const linkPath = await initTaskOutputAsSymlink(taskId, real)
+    const { realpath } = await import('fs/promises')
+    await expect(resolveTaskOutputReadPath(linkPath)).resolves.toBe(
+      await realpath(real),
+    )
   })
 
   test('openTaskOutputRead opens a plain file and returns content via fh', async () => {
