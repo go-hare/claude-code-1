@@ -50,7 +50,7 @@ import {
 } from '../utils/collapseReadSearch.js';
 import { collapseTeammateShutdowns } from '../utils/collapseTeammateShutdowns.js';
 import { filterFoldedLoopNoopMessages } from '../utils/loopNoopFold.js';
-import { getGlobalConfig } from '../utils/config.js';
+import { resolveUserIntentSetting } from '../utils/config.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { type BriefToolStats, collapseFocusTranscript, type FocusTranscriptMessage } from '../utils/focusTranscript.js';
 import { isFullscreenEnvEnabled, isFullscreenFeatureGateEnabled } from '../utils/fullscreen.js';
@@ -1772,7 +1772,7 @@ const MessagesImpl = ({
   const { progress } = useTerminalNotification();
   const prevProgressState = useRef<string | null>(null);
   const progressEnabled =
-    getGlobalConfig().terminalProgressBarEnabled &&
+    resolveUserIntentSetting('terminalProgressBarEnabled', true).value &&
     !getIsRemoteMode() &&
     !(proactiveModule?.isProactiveActive() ?? false) &&
     !isWaitingForUserInput;

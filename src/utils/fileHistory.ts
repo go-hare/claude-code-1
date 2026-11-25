@@ -32,7 +32,7 @@ import { logEvent } from 'src/services/analytics/index.js'
 import { notifyVscodeFileUpdated } from 'src/services/mcp/vscodeSdkMcp.js'
 import type { LogOption } from 'src/types/logs.js'
 import { inspect } from 'util'
-import { getGlobalConfig } from './config.js'
+import { resolveUserIntentSetting } from './config.js'
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { getErrnoCode, isENOENT } from './errors.js'
@@ -98,12 +98,25 @@ export function fileHistoryEnabled(): boolean {
     return fileHistoryEnabledSdk()
   }
   return (
-    getGlobalConfig().fileCheckpointingEnabled !== false &&
-    !isFileCheckpointingEnvDisabled()
+    resolveUserIntentSetting('fileCheckpointingEnabled', true).value !==
+      false && !isFileCheckpointingEnvDisabled()
   )
 }
 
 function fileHistoryEnabledSdk(): boolean {
+  // Official 2.1.331: In a session an SDK starts, only an administrator's false applies.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSettingsForSource } =
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    if (
+      getSettingsForSource('policySettings')?.fileCheckpointingEnabled === false
+    ) {
+      return false
+    }
+  } catch {
+    // policySettings unavailable
+  }
   // Official ENABLE_SDK_FILE_CHECKPOINTING densable.
   let sdkCheckpointingEnabled = isEnvTruthy(
     process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING,

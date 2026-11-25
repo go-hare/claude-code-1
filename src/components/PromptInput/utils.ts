@@ -3,15 +3,14 @@ import {
   isShiftEnterKeyBindingInstalled,
 } from '../../commands/terminalSetup/terminalSetup.js'
 import type { Key } from '@anthropic/ink'
-import { getGlobalConfig } from '../../utils/config.js'
+import { resolveUserIntentSetting } from '../../utils/config.js'
 import { env } from '../../utils/env.js'
 /**
  * Helper function to check if vim mode is currently enabled
  * @returns boolean indicating if vim mode is active
  */
 export function isVimModeEnabled(): boolean {
-  const config = getGlobalConfig()
-  return config.editorMode === 'vim'
+  return resolveUserIntentSetting('editorMode', 'normal').value === 'vim'
 }
 
 export function getNewlineInstructions(): string {

@@ -4,7 +4,7 @@ import { useNotifications } from 'src/context/notifications.js';
 import { Text } from '@anthropic/ink';
 import { logEvent } from 'src/services/analytics/index.js';
 import { useDebounceCallback } from 'usehooks-ts';
-import { type Command, getCommandName } from '../commands.js';
+import { type Command, getCommandName, type LocalJSXCommandContext } from '../commands.js';
 import { getModeFromInput, getValueFromInput } from '../components/PromptInput/inputModes.js';
 import type { SuggestionItem, SuggestionType } from '../components/PromptInput/PromptInputFooterSuggestions.js';
 import { useIsModalOverlayActive, useRegisterOverlay } from '../context/overlayContext.js';
@@ -85,6 +85,63 @@ function isPathMetadata(metadata: unknown): metadata is { type: 'directory' | 'f
 
 /** densable YPo — slash commands whose arg is a directory path. */
 const DIRECTORY_ARG_COMMANDS = new Set(['add-dir', 'cd']);
+
+/** Official 2.1.331 `Rwe` — prefix for `command.getArgumentCompletions` suggestions. */
+const COMMAND_ARG_SUGGESTION_PREFIX = 'command-arg-';
+
+export type CommandArgSuggestionMetadata = {
+  replacement: string;
+  partial: boolean;
+};
+
+export function isCommandArgSuggestionMetadata(metadata: unknown): metadata is CommandArgSuggestionMetadata {
+  return (
+    typeof metadata === 'object' &&
+    metadata !== null &&
+    'replacement' in metadata &&
+    typeof (metadata as { replacement?: unknown }).replacement === 'string' &&
+    'partial' in metadata &&
+    typeof (metadata as { partial?: unknown }).partial === 'boolean'
+  );
+}
+
+function findCommandByNameOrAlias(name: string, commands: Command[]): Command | undefined {
+  return commands.find(cmd => getCommandName(cmd) === name || cmd.aliases?.includes(name));
+}
+
+/**
+ * Official 2.1.331 `K8e` (@343260552) — run a command's `getArgumentCompletions`
+ * callback on the current argument token and map results into typeahead items.
+ */
+export async function fetchCommandArgumentSuggestions(
+  input: string,
+  getArgumentCompletions: NonNullable<Command['getArgumentCompletions']>,
+  context: LocalJSXCommandContext,
+): Promise<SuggestionItem[]> {
+  const spaceIndex = input.indexOf(' ');
+  if (!input.startsWith('/') || spaceIndex === -1) return [];
+  const commandName = input.slice(1, spaceIndex);
+  const rawArgs = input.slice(spaceIndex + 1);
+  const tokens = rawArgs.split(/\s+/).filter(Boolean);
+  const endsWithSpace = rawArgs === '' || /\s$/.test(rawArgs);
+  const currentToken = endsWithSpace ? '' : (tokens.at(-1) ?? '');
+  const precedingTokens = endsWithSpace ? tokens : tokens.slice(0, -1);
+  const items = await getArgumentCompletions(currentToken, context);
+  const prefix = [`/${commandName}`, ...precedingTokens].join(' ');
+  return items.slice(0, 12).map(item => {
+    const isFinal = item.isFinal === true || item.value.toLowerCase() === currentToken.toLowerCase();
+    const appendSpace = !isFinal && (item.appendSpace ?? true);
+    return {
+      id: `${COMMAND_ARG_SUGGESTION_PREFIX}${item.value}`,
+      displayText: item.value,
+      description: item.description,
+      metadata: {
+        replacement: `${prefix} ${item.value}${appendSpace ? ' ' : ''}`,
+        partial: !isFinal,
+      } satisfies CommandArgSuggestionMetadata,
+    };
+  });
+}
 
 /**
  * densable `ne.current` for directory suggestion provenance.
@@ -563,12 +620,14 @@ export function useTypeahead({
   }
   const latestDirRequestIdRef = useRef(0);
   const latestCustomTitleRequestIdRef = useRef(0);
+  const latestCommandArgRequestIdRef = useRef(0);
   const latestTabRequestIdRef = useRef(0);
 
   // Clear all suggestions
   const clearSuggestions = useCallback(() => {
     latestDirRequestIdRef.current++;
     latestCustomTitleRequestIdRef.current++;
+    latestCommandArgRequestIdRef.current++;
     latestTabRequestIdRef.current++;
     setSuggestionsState(() => ({
       commandArgumentHint: undefined,
@@ -1003,6 +1062,58 @@ export function useTypeahead({
           clearSuggestions();
           return;
         }
+
+        // Official 2.1.331 (@343339477): wire command.getArgumentCompletions (e.g. /config key=value).
+        if (parsedCommand && value.includes(' ')) {
+          const matchedCommand = findCommandByNameOrAlias(parsedCommand.commandName, commands);
+          if (matchedCommand?.getArgumentCompletions) {
+            const argReqId = ++latestCommandArgRequestIdRef.current;
+            const completionContext = {
+              getAppState: () => store.getState(),
+              setAppState: () => {},
+              options: {
+                mcpClients: store.getState().mcp.clients,
+              },
+            } as unknown as LocalJSXCommandContext;
+            const pending = fetchCommandArgumentSuggestions(
+              value.substring(0, effectiveCursorOffset),
+              matchedCommand.getArgumentCompletions,
+              completionContext,
+            );
+            const fast = await Promise.race([
+              pending,
+              new Promise<undefined>(resolve => setImmediate(() => resolve(undefined))),
+            ]);
+            if (
+              fast === undefined &&
+              suggestionsRef.current.some(item => !item.id.startsWith(COMMAND_ARG_SUGGESTION_PREFIX))
+            ) {
+              clearSuggestions();
+            }
+            const argSuggestions = fast ?? (await pending);
+            if (
+              argReqId !== latestCommandArgRequestIdRef.current ||
+              latestInputRef.current !== value ||
+              dismissedForInputRef.current === value ||
+              latestModeRef.current !== mode
+            ) {
+              return;
+            }
+            if (argSuggestions.length > 0) {
+              setSuggestionsState(prev => ({
+                suggestions: argSuggestions,
+                selectedSuggestion: getPreservedSelection(prev.suggestions, prev.selectedSuggestion, argSuggestions),
+                commandArgumentHint: undefined,
+              }));
+              setSuggestionType('command');
+              setMaxColumnWidth(undefined);
+              return;
+            }
+            debouncedFetchFileSuggestions.cancel();
+            clearSuggestions();
+            return;
+          }
+        }
       }
 
       // Determine whether to display the argument hint and command suggestions.
@@ -1189,6 +1300,7 @@ export function useTypeahead({
       // Note: using suggestionsRef instead of suggestions to avoid recreating
       // this callback when only selectedSuggestion changes (not the suggestions list)
       allCommandsMaxWidth,
+      store,
     ],
   );
 
@@ -1252,16 +1364,28 @@ export function useTypeahead({
 
       if (suggestionType === 'command' && index < suggestions.length) {
         if (suggestion) {
-          // Splice the completed command at the cursor position, preserving
-          // any text after the cursor (e.g., user typed "/com" before existing text).
+          // Official 2.1.331: command-arg completion replacement (e.g. `/config theme=` or `/config theme=dark`).
           const metadata = suggestion.metadata;
-          if (metadata && typeof metadata === 'object' && 'name' in metadata && 'type' in metadata) {
-            const commandName = getCommandName(metadata as Command);
-            const replacement = `/${commandName} `;
-            onInputChange(replacement + input.slice(cursorOffset));
+          if (isCommandArgSuggestionMetadata(metadata)) {
+            const { replacement, partial } = metadata;
+            onInputChange(replacement);
             setCursorOffset(replacement.length);
+            if (partial) {
+              void updateSuggestions(replacement, replacement.length);
+            } else {
+              clearSuggestions();
+            }
+          } else {
+            // Splice the completed command at the cursor position, preserving
+            // any text after the cursor (e.g., user typed "/com" before existing text).
+            if (metadata && typeof metadata === 'object' && 'name' in metadata && 'type' in metadata) {
+              const commandName = getCommandName(metadata as Command);
+              const replacement = `/${commandName} `;
+              onInputChange(replacement + input.slice(cursorOffset));
+              setCursorOffset(replacement.length);
+            }
+            clearSuggestions();
           }
-          clearSuggestions();
         }
       } else if (suggestionType === 'custom-title' && suggestions.length > 0) {
         // Apply custom title to /resume command with sessionId
@@ -1563,6 +1687,29 @@ export function useTypeahead({
 
     if (suggestionType === 'command' && index < suggestions.length) {
       if (suggestion) {
+        if (
+          suggestion.id.startsWith(COMMAND_ARG_SUGGESTION_PREFIX) &&
+          isCommandArgSuggestionMetadata(suggestion.metadata)
+        ) {
+          debouncedFetchFileSuggestions.cancel();
+          // Official 2.1.331 (@343347157): bare Enter on `/config ` opens the command directly
+          // rather than picking the first argument completion.
+          if (/^\/\S+\s+$/.test(input)) {
+            clearSuggestions();
+            onSubmit(input, /* isSubmittingSlashCommand */ true);
+            return;
+          }
+          const { replacement, partial } = suggestion.metadata;
+          onInputChange(replacement);
+          setCursorOffset(replacement.length);
+          if (partial) {
+            void updateSuggestions(replacement, replacement.length);
+          } else {
+            clearSuggestions();
+            onSubmit(replacement.trim(), /* isSubmittingSlashCommand */ true);
+          }
+          return;
+        }
         applyCommandSuggestion(
           suggestion,
           true, // execute on return
@@ -1702,6 +1849,7 @@ export function useTypeahead({
     clearSuggestions,
     debouncedFetchFileSuggestions,
     debouncedFetchSlackChannels,
+    updateSuggestions,
   ]);
 
   // Handler for autocomplete:accept - accepts current suggestion via Tab or Right Arrow

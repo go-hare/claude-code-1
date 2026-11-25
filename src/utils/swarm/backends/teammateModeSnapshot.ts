@@ -6,11 +6,16 @@
  * affect the teammate mode for the current session.
  */
 
-import { getGlobalConfig } from '../../../utils/config.js'
+import { resolveUserIntentSetting } from '../../../utils/config.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { logError } from '../../../utils/log.js'
 
-export type TeammateMode = 'auto' | 'tmux' | 'windows-terminal' | 'in-process'
+export type TeammateMode =
+  | 'auto'
+  | 'tmux'
+  | 'iterm2'
+  | 'windows-terminal'
+  | 'in-process'
 
 // Module-level variable to hold the captured mode at startup
 let initialTeammateMode: TeammateMode | null = null
@@ -60,8 +65,10 @@ export function captureTeammateModeSnapshot(): void {
       `[TeammateModeSnapshot] Captured from CLI override: ${initialTeammateMode}`,
     )
   } else {
-    const config = getGlobalConfig()
-    initialTeammateMode = config.teammateMode ?? 'auto'
+    initialTeammateMode = resolveUserIntentSetting(
+      'teammateMode',
+      'auto' as const,
+    ).value
     logForDebugging(
       `[TeammateModeSnapshot] Captured from config: ${initialTeammateMode}`,
     )

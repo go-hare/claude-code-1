@@ -83,7 +83,7 @@ function asMeta(
 }
 
 function displayLabel(row: ConfigSettingRow): string {
-  return row.searchText ?? row.label
+  return row.label
 }
 
 /** densable ye — lock blocks unless writableWhileLocked matches raw. */
@@ -135,6 +135,14 @@ export function findConfigSetting(
   )
 }
 
+import type { ThemeSetting } from '../../utils/theme.js'
+
+export type ConfigShorthandOverrides = {
+  setTheme?: (setting: ThemeSetting) => unknown
+  includeHooks?: boolean
+  remoteToolServingOn?: boolean
+}
+
 function asConfigSettingRow(row: {
   id: string
   label: string | { toString(): string }
@@ -147,9 +155,7 @@ function asConfigSettingRow(row: {
   consentGated?: boolean
   canWithdraw?: () => boolean
   lock?: ConfigSettingLock
-  onChange: (
-    value: boolean | string,
-  ) => Promise<ConfigSettingChange | undefined> | undefined
+  onChange: (value: boolean | string) => unknown
 }): ConfigSettingRow {
   const label =
     typeof row.label === 'string' ? row.label : (row.searchText ?? row.id)
@@ -169,27 +175,81 @@ function asConfigSettingRow(row: {
     ...(row.lock !== undefined ? { lock: row.lock } : {}),
     onChange: async value => {
       const result = await row.onChange(value)
-      return result ?? undefined
+      if (
+        typeof result === 'object' &&
+        result !== null &&
+        ('error' in result || 'messageSuffix' in result)
+      ) {
+        return result as ConfigSettingChange
+      }
+      return undefined
     },
   }
 }
 
-/** densable we(hKe(ce(n)).settings, n) — core catalog + plugin rows. */
+/**
+ * Official 2.1.331 `ke` (@335530540): keep `defaultToAgentsView` settable via
+ * `/config defaultToAgentsView=false` even when `tengu_maple_sundial` replaces
+ * it with the grouped `agentsView` row in the visual dialog.
+ */
+function mergeDialogFieldRowsForShorthand<T extends { id: string }>(
+  settings: T[],
+  dialogFieldRows: T[],
+  isRemote: boolean,
+): T[] {
+  if (isRemote) return settings
+  const targetId = 'defaultToAgentsView'
+  return [
+    ...settings.filter(row => row.id !== targetId),
+    ...dialogFieldRows.filter(row => row.id === targetId),
+  ]
+}
+
+/** densable we(ke(hKe(ce(n))), n) — core catalog + dialogFieldRows + plugin rows + hooks. */
 export async function getConfigSettingsCatalog(
   context: LocalJSXCommandContext,
+  overrides: ConfigShorthandOverrides = {},
 ): Promise<ConfigSettingRow[]> {
   const {
     hKe,
     ceFromCommandContext,
     weConfigPluginRows,
+    wrapSettingWithConfigSetHook,
+    describeConfigRowsWithHooks,
     PLUGIN_CONFIG_REMOTE_REFUSAL,
   } = await import('../../components/Settings/Config.js')
   const enabled = context.getAppState().plugins?.enabled ?? []
-  const { settings } = hKe(ceFromCommandContext(context))
-  const rows = weConfigPluginRows(settings, enabled, {
+  const isRemote = getIsRemoteMode()
+  const { settings, dialogFieldRows } = hKe(
+    ceFromCommandContext(context, overrides),
+  )
+  const coreRows = mergeDialogFieldRowsForShorthand(
+    settings,
+    dialogFieldRows,
+    isRemote,
+  )
+  let rows = weConfigPluginRows(coreRows, enabled, {
     storageV5: context.storageV5,
-    ...(getIsRemoteMode() ? { refusal: PLUGIN_CONFIG_REMOTE_REFUSAL } : {}),
+    reloadPlugins: context.reloadPlugins,
+    ...(isRemote ? { refusal: PLUGIN_CONFIG_REMOTE_REFUSAL } : {}),
   })
+  if (overrides.includeHooks !== false) {
+    const origin = isRemote
+      ? ({ kind: 'bridge' } as const)
+      : ({ kind: 'composer' } as const)
+    const describeOverrides = await describeConfigRowsWithHooks(rows)
+    if (describeOverrides.size > 0) {
+      rows = rows.flatMap(row => {
+        const override = describeOverrides.get(row.id)
+        if (override?.hidden) return []
+        if (override) {
+          return [{ ...row, label: override.label }]
+        }
+        return [row]
+      })
+    }
+    rows = rows.map(row => wrapSettingWithConfigSetHook(row, origin))
+  }
   return rows.map(row => asConfigSettingRow(row as never))
 }
 
@@ -378,12 +438,32 @@ export function formatConfigShorthandUsage(rows: ConfigSettingRow[]): string {
     .join('\n')
 }
 
-/** densable Lat */
+/** densable Lat / _Mn */
 export async function applyConfigKeyValues(
   pairs: ConfigKeyValuePair[],
   context: LocalJSXCommandContext,
+  overrides: ConfigShorthandOverrides = {},
 ): Promise<ConfigShorthandResult[]> {
-  const rows = await getConfigSettingsCatalog(context)
+  let rows = await getConfigSettingsCatalog(context, overrides)
+  const hitPolicyLock = pairs.some(({ key, raw }) => {
+    const row = findConfigSetting(key, rows)
+    return (
+      row !== undefined &&
+      row.lock?.source !== 'managed' &&
+      isConfigSettingLockedForRaw(row, raw)
+    )
+  })
+  if (hitPolicyLock) {
+    try {
+      const { refreshPolicyLimits } = await import(
+        '../../services/policyLimits/index.js'
+      )
+      await refreshPolicyLimits()
+    } catch {
+      // ignore refresh error
+    }
+    rows = await getConfigSettingsCatalog(context, overrides)
+  }
   const results: ConfigShorthandResult[] = []
   for (const { key, raw } of pairs) {
     results.push(await applyConfigSetting(key, raw, rows))
@@ -402,7 +482,7 @@ export function isConfigHelpOrListToken(token: string): boolean {
 export async function formatConfigShorthandHelp(
   context: LocalJSXCommandContext,
 ): Promise<string> {
-  const rows = await getConfigSettingsCatalog(context)
+  const rows = await getConfigSettingsCatalog(context, { includeHooks: false })
   const usage = formatConfigShorthandUsage(rows)
   return `Usage: /config key=value [key=value ...]\n${usage}`
 }
@@ -410,19 +490,25 @@ export async function formatConfigShorthandHelp(
 export async function applyConfigShorthandFromArgs(
   args: string,
   context: LocalJSXCommandContext,
+  overrides: ConfigShorthandOverrides = {},
 ): Promise<string> {
   const pairs = parseConfigKeyValueArgs(args)
   if (!pairs) {
     return `Expected key=value, got "${args}". Run /config to see what's available.`
   }
-  const results = await applyConfigKeyValues(pairs, context)
+  const results = await applyConfigKeyValues(pairs, context, overrides)
   const withhold = getIsRemoteMode()
   return results
     .map(result => formatConfigShorthandResult(result, withhold))
     .join('\n')
 }
 
-/** densable gps */
+/**
+ * Official 2.1.331 `xud` + `jo` (@335533800, @335534620):
+ * - Synthesizes `['true', 'false']` for boolean rows
+ * - Filters to settable rows (boolean, options, or managedEnum with coerce)
+ * - Falls back to `optionsHint` for description when no fixed options exist
+ */
 export async function getConfigArgumentCompletions(
   args: string,
   context: LocalJSXCommandContext,
@@ -434,32 +520,51 @@ export async function getConfigArgumentCompletions(
     appendSpace?: boolean
   }>
 > {
-  const rows = (await getConfigSettingsCatalog(context)).filter(
-    row => !row.consentGated,
-  )
+  const catalog = await getConfigSettingsCatalog(context, {
+    includeHooks: false,
+  })
+  const settable = catalog.flatMap(row => {
+    if (row.consentGated) return []
+    const options =
+      row.type === 'boolean'
+        ? ['true', 'false']
+        : row.options && row.options.length > 0
+          ? row.options
+          : undefined
+    if (options || (row.type === 'managedEnum' && row.coerce)) {
+      return [
+        {
+          id: row.id,
+          options,
+          hint: row.type === 'managedEnum' ? row.optionsHint : undefined,
+        },
+      ]
+    }
+    return []
+  })
   const eq = args.indexOf('=')
   if (eq === -1) {
     const prefix = args.toLowerCase()
-    return rows
-      .filter(row => row.id.toLowerCase().startsWith(prefix))
+    return settable
+      .filter(item => item.id.toLowerCase().startsWith(prefix))
       .sort((a, b) => a.id.localeCompare(b.id))
-      .map(row => ({
-        value: `${row.id}=`,
-        description: row.options?.slice(0, 4).join(' | '),
+      .map(item => ({
+        value: `${item.id}=`,
+        description: item.options?.slice(0, 4).join(' | ') ?? item.hint,
         isFinal: false,
         appendSpace: false,
       }))
   }
   const key = args.slice(0, eq)
   const valuePrefix = args.slice(eq + 1).toLowerCase()
-  const row = rows.find(
+  const match = settable.find(
     candidate => candidate.id.toLowerCase() === key.toLowerCase(),
   )
-  if (!row?.options) return []
-  return row.options
+  if (!match?.options) return []
+  return match.options
     .filter(option => option.toLowerCase().startsWith(valuePrefix))
     .map(option => ({
-      value: `${row.id}=${option}`,
+      value: `${match.id}=${option}`,
       isFinal: true,
     }))
 }

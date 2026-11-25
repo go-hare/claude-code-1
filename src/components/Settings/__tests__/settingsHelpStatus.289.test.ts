@@ -122,7 +122,9 @@ describe('densable 2.1.289 Config submenus, search, safe-mode, and rc channel', 
   test('ThemePicker receives safe-mode helpText and autoUpdatesChannel handles rc/latest', () => {
     expect(configSrc).toContain('Custom themes are disabled in safe mode')
     expect(configSrc).toContain("? 'slow'")
-    expect(configSrc).toContain('autoUpdatesChannel: undefined')
+    expect(configSrc).toContain(
+      "const nextChannelValue = finalChannel === 'latest' ? undefined : finalChannel",
+    )
   })
 })
 
@@ -154,7 +156,7 @@ describe('densable 2.1.289 Usage, Stats, and MCP panels', () => {
     expect(usageSrc).toContain("'Session'")
     expect(usageSrc).toContain('isPluginSkillListingFootprintEnabled')
     expect(usageSrc).toContain("getAPIProvider() === 'gateway'")
-    expect(usageSrc).toContain('isClaudeAISubscriber() && hasProfileScope()')
+    expect(usageSrc).toContain('const subscriber = isClaudeAISubscriber()')
     expect(usageSrc).toContain("What's contributing to your limits usage?")
     expect(usageSrc).toContain('scanUsageTranscripts')
     expect(usageSrc).toContain('aggregatePluginSkillListing')

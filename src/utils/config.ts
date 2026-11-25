@@ -167,6 +167,10 @@ export type ProjectConfig = {
   }
   /** Spawn mode for `claude remote-control` multi-session. Set by first-run dialog or `w` toggle. */
   remoteControlSpawnMode?: 'same-dir' | 'worktree'
+  /** Official 2.1.331: org-synced project memory read/write opt-ins (per directory). */
+  orgMemoryRead?: boolean
+  orgMemoryWrites?: boolean
+  orgMemoryWritesAccount?: string
 }
 
 const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
@@ -183,12 +187,8 @@ const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
 
 export type InstallMethod = 'local' | 'native' | 'global' | 'unknown'
 
-export {
-  EDITOR_MODES,
-  NOTIFICATION_CHANNELS,
-} from './configConstants.js'
-
-import type { EDITOR_MODES, NOTIFICATION_CHANNELS } from './configConstants.js'
+import { EDITOR_MODES, NOTIFICATION_CHANNELS } from './configConstants.js'
+export { EDITOR_MODES, NOTIFICATION_CHANNELS }
 
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number]
 
@@ -713,8 +713,10 @@ export type GlobalConfig = {
   // Permission explainer configuration
   permissionExplainerEnabled?: boolean // Enable Haiku-generated explanations for permission requests (default: true)
 
-  // Teammate spawn mode: 'auto' | 'tmux' | 'windows-terminal' | 'in-process'
-  teammateMode?: 'auto' | 'tmux' | 'windows-terminal' | 'in-process' // How to spawn teammates (default: 'auto')
+  // Teammate spawn mode: 'auto' | 'tmux' | 'iterm2' | 'windows-terminal' | 'in-process'
+  teammateMode?: 'auto' | 'tmux' | 'iterm2' | 'windows-terminal' | 'in-process' // How to spawn teammates (default: 'auto')
+  // Official 2.1.331: mirror local sessions to claude.ai as view-only
+  autoUploadSessions?: boolean
 
   // PR status footer configuration (feature-flagged via GrowthBook)
   prStatusFooterEnabled?: boolean // Show PR review status in footer (default: true)
@@ -1900,6 +1902,245 @@ export function getGlobalConfig(): GlobalConfig {
     return migrateConfigFields(
       getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig),
     )
+  }
+}
+
+/**
+ * Official 2.1.331 `XJe` (@309340462) — user-intent settings migrated from
+ * `~/.claude.json` to `~/.claude/settings.json`.
+ */
+export const USER_INTENT_SETTING_KEYS = [
+  'theme',
+  'editorMode',
+  'verbose',
+  'preferredNotifChannel',
+  'autoCompactEnabled',
+  'autoScrollEnabled',
+  'fileCheckpointingEnabled',
+  'showTurnDuration',
+  'showMessageTimestamps',
+  'terminalProgressBarEnabled',
+  'todoFeatureEnabled',
+  'teammateMode',
+  'remoteControlAtStartup',
+  'autoUploadSessions',
+  'inputNeededNotifEnabled',
+  'agentPushNotifEnabled',
+] as const
+
+export type UserIntentSettingKey = (typeof USER_INTENT_SETTING_KEYS)[number]
+
+export type UserIntentSettingSource =
+  | import('./settings/constants.js').SettingSource
+  | 'legacyGlobalConfig'
+  | 'default'
+
+const VALID_TEAMMATE_MODES = new Set([
+  'auto',
+  'tmux',
+  'iterm2',
+  'windows-terminal',
+  'in-process',
+])
+
+function parseLegacyUserIntentValue<K extends UserIntentSettingKey>(
+  key: K,
+  raw: unknown,
+): NonNullable<import('./settings/types.js').SettingsJson[K]> | undefined {
+  if (raw === undefined) return undefined
+  switch (key) {
+    case 'theme':
+      return typeof raw === 'string' && raw.length > 0
+        ? (raw as NonNullable<import('./settings/types.js').SettingsJson[K]>)
+        : undefined
+    case 'editorMode':
+      return typeof raw === 'string' &&
+        (EDITOR_MODES as readonly string[]).includes(raw)
+        ? (raw as NonNullable<import('./settings/types.js').SettingsJson[K]>)
+        : undefined
+    case 'preferredNotifChannel':
+      return typeof raw === 'string' &&
+        (NOTIFICATION_CHANNELS as readonly string[]).includes(raw)
+        ? (raw as NonNullable<import('./settings/types.js').SettingsJson[K]>)
+        : undefined
+    case 'teammateMode':
+      return typeof raw === 'string' && VALID_TEAMMATE_MODES.has(raw)
+        ? (raw as NonNullable<import('./settings/types.js').SettingsJson[K]>)
+        : undefined
+    default:
+      return typeof raw === 'boolean'
+        ? (raw as NonNullable<import('./settings/types.js').SettingsJson[K]>)
+        : undefined
+  }
+}
+
+/**
+ * Official 2.1.331 `El(key, defaultValue)` (@309340462):
+ * Read merged settings sources (highest precedence wins; skips projectSettings
+ * when it aliases userSettings), fall back to legacy `~/.claude.json` only
+ * when set to a valid non-default value, otherwise return `defaultValue`.
+ */
+export function resolveUserIntentSetting<K extends UserIntentSettingKey, D>(
+  key: K,
+  defaultValue: D,
+): {
+  value: NonNullable<import('./settings/types.js').SettingsJson[K]> | D
+  source: UserIntentSettingSource
+} {
+  try {
+    // Lazy require avoids settings ↔ config module init cycles.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getEnabledSettingSources } =
+      require('./settings/constants.js') as typeof import('./settings/constants.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSettingsForSource, projectSettingsAliasesUserSettings } =
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const sources = getEnabledSettingSources()
+    const hasUserSettings = sources.includes('userSettings')
+    for (let i = sources.length - 1; i >= 0; i--) {
+      const source = sources[i]!
+      if (
+        source === 'projectSettings' &&
+        hasUserSettings &&
+        projectSettingsAliasesUserSettings()
+      ) {
+        continue
+      }
+      const val = getSettingsForSource(source)?.[key]
+      if (val !== undefined) {
+        return {
+          value: val as NonNullable<
+            import('./settings/types.js').SettingsJson[K]
+          >,
+          source,
+        }
+      }
+    }
+  } catch {
+    // Settings unavailable during early startup — fall through to legacy config.
+  }
+
+  const legacyRaw = getGlobalConfig()[key]
+  if (legacyRaw !== undefined && legacyRaw !== DEFAULT_GLOBAL_CONFIG[key]) {
+    const parsed = parseLegacyUserIntentValue(key, legacyRaw)
+    if (parsed !== undefined) {
+      return { value: parsed, source: 'legacyGlobalConfig' }
+    }
+  }
+
+  return { value: defaultValue, source: 'default' }
+}
+
+/**
+ * Official 2.1.331 `cue(key, value, storageV5)` (@309341251):
+ * Persist a user-intent setting to `userSettings` (`~/.claude/settings.json`).
+ */
+export function saveUserIntentSetting<K extends UserIntentSettingKey>(
+  key: K,
+  value: import('./settings/types.js').SettingsJson[K],
+  storageV5?: unknown,
+): { error: Error | null } {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { updateSettingsForSource } =
+    require('./settings/settings.js') as typeof import('./settings/settings.js')
+  return updateSettingsForSource(
+    'userSettings',
+    { [key]: value } as import('./settings/types.js').SettingsJson,
+    undefined,
+    storageV5,
+  )
+}
+
+/**
+ * Official 2.1.331 `kOt()` (@307705805) — effective `remoteControlAtStartup`
+ * without applying the CCR auto-connect platform fallback (returns `undefined`
+ * when unset so `/config remoteControl` displays `'default'`).
+ */
+export function getEffectiveRemoteControlAtStartupSetting():
+  | boolean
+  | undefined {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const {
+    getSettingsForSource,
+    getSecuritySensitiveSetting,
+    projectSettingsAliasesUserSettings,
+  } =
+    require('./settings/settings.js') as typeof import('./settings/settings.js')
+
+  const project = projectSettingsAliasesUserSettings()
+    ? undefined
+    : getSettingsForSource('projectSettings')?.remoteControlAtStartup
+  const local = getSettingsForSource('localSettings')?.remoteControlAtStartup
+  if (project === false || local === false) return false
+
+  const fromTrusted = getSecuritySensitiveSetting('remoteControlAtStartup')[0]
+  if (fromTrusted !== undefined) return fromTrusted
+
+  const legacy = getGlobalConfig().remoteControlAtStartup
+  return typeof legacy === 'boolean' ? legacy : undefined
+}
+
+/**
+ * Official 2.1.331 `zdo()` (@335496256) — effective `GlobalConfig` view with
+ * all 16 `USER_INTENT_SETTING_KEYS` resolved from settings first and legacy
+ * `~/.claude.json` second.
+ */
+export function getEffectiveGlobalConfig(): GlobalConfig {
+  const base = getGlobalConfig()
+  return {
+    ...base,
+    theme: resolveUserIntentSetting('theme', DEFAULT_GLOBAL_CONFIG.theme)
+      .value as ThemeSetting,
+    editorMode: resolveUserIntentSetting(
+      'editorMode',
+      DEFAULT_GLOBAL_CONFIG.editorMode ?? 'normal',
+    ).value,
+    verbose: resolveUserIntentSetting('verbose', DEFAULT_GLOBAL_CONFIG.verbose)
+      .value,
+    preferredNotifChannel: resolveUserIntentSetting(
+      'preferredNotifChannel',
+      DEFAULT_GLOBAL_CONFIG.preferredNotifChannel,
+    ).value,
+    autoCompactEnabled: resolveUserIntentSetting(
+      'autoCompactEnabled',
+      DEFAULT_GLOBAL_CONFIG.autoCompactEnabled,
+    ).value,
+    autoScrollEnabled: resolveUserIntentSetting(
+      'autoScrollEnabled',
+      DEFAULT_GLOBAL_CONFIG.autoScrollEnabled,
+    ).value,
+    fileCheckpointingEnabled: resolveUserIntentSetting(
+      'fileCheckpointingEnabled',
+      DEFAULT_GLOBAL_CONFIG.fileCheckpointingEnabled,
+    ).value,
+    showTurnDuration: resolveUserIntentSetting(
+      'showTurnDuration',
+      DEFAULT_GLOBAL_CONFIG.showTurnDuration,
+    ).value,
+    showMessageTimestamps: resolveUserIntentSetting(
+      'showMessageTimestamps',
+      DEFAULT_GLOBAL_CONFIG.showMessageTimestamps ?? false,
+    ).value,
+    terminalProgressBarEnabled: resolveUserIntentSetting(
+      'terminalProgressBarEnabled',
+      DEFAULT_GLOBAL_CONFIG.terminalProgressBarEnabled,
+    ).value,
+    todoFeatureEnabled: resolveUserIntentSetting(
+      'todoFeatureEnabled',
+      DEFAULT_GLOBAL_CONFIG.todoFeatureEnabled,
+    ).value,
+    teammateMode: resolveUserIntentSetting('teammateMode', undefined).value,
+    remoteControlAtStartup: getEffectiveRemoteControlAtStartupSetting(),
+    autoUploadSessions: resolveUserIntentSetting('autoUploadSessions', false)
+      .value,
+    inputNeededNotifEnabled: resolveUserIntentSetting(
+      'inputNeededNotifEnabled',
+      false,
+    ).value,
+    agentPushNotifEnabled: resolveUserIntentSetting(
+      'agentPushNotifEnabled',
+      false,
+    ).value,
   }
 }
 

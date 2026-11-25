@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
 import { SandboxSettingsSchema } from '../../entrypoints/sandboxTypes.js'
+import { EDITOR_MODES, NOTIFICATION_CHANNELS } from '../configConstants.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { lazySchema } from '../lazySchema.js'
 import { PERMISSION_MODES } from '../permissions/PermissionMode.js'
@@ -807,13 +808,21 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           "Inbound cross-session peer messages (SendMessage from your other sessions): 'accept' delivers them, 'hold' parks them for your review without letting Claude act, 'refuse' opts this session out. An explicit value always wins. Unset (mode parity): a message auto-delivers only when the sending session's permission-mode class matches yours (bypass↔bypass or prompting↔prompting); a mismatched sender's message is held for your approval; a sender that asserts no class is held only while this session bypasses permission prompts.",
         ),
-      // Official 2.1.325 #2298: teammateMode settings field
+      // Official 2.1.325 #2298 + 2.1.331: teammateMode settings field
       teammateMode: z
-        .enum(['tmux', 'iterm2', 'in-process', 'auto'])
+        .enum(['tmux', 'iterm2', 'windows-terminal', 'in-process', 'auto'])
         .optional()
         .catch(undefined)
         .describe(
           'How spawned teammates execute (tmux, iterm2, in-process, auto)',
+        ),
+      // Official 2.1.331: remoteMessageReceipts (cross-session / cloud / RC delivery notices)
+      remoteMessageReceipts: z
+        .enum(['on', 'always', 'off'])
+        .optional()
+        .catch(undefined)
+        .describe(
+          "@internal Delivery notices for messages between this session and cloud or Remote Control sessions. 'on' (default): notices, local ones too, start at most 30 turns an hour and one for each recipient that holds. 'always': neither limit, so two sessions can keep waking each other. 'off': no notices about those sessions, and no reports on messages received through them; the limits still apply to local ones. Read only from managed and user settings; --settings counts only with 'off'.",
         ),
       // densable Ktr / vCe — ProposeGoal ask policy
       modelProposedGoals: z
@@ -1572,6 +1581,61 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Color theme: "auto", a built-in theme name, or "custom:<slug>".',
         ),
+      // Official 2.1.331 USER_INTENT_SETTING_KEYS (XJe @305509367..305515974):
+      editorMode: z
+        .enum(EDITOR_MODES)
+        .optional()
+        .catch(undefined)
+        .describe('Key binding mode for the prompt input'),
+      verbose: z
+        .boolean()
+        .optional()
+        .describe('Show full tool output instead of truncated summaries'),
+      preferredNotifChannel: z
+        .enum(NOTIFICATION_CHANNELS)
+        .optional()
+        .catch(undefined)
+        .describe('Preferred OS notification channel'),
+      fileCheckpointingEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          "Snapshot files before edits so /rewind can restore them. In a session an SDK starts, only an administrator's false applies",
+        ),
+      showTurnDuration: z
+        .boolean()
+        .optional()
+        .describe('Show "Cooked for Nm Ns" after each assistant turn'),
+      terminalProgressBarEnabled: z
+        .boolean()
+        .optional()
+        .describe('Emit OSC 9;4 progress sequences during long operations'),
+      todoFeatureEnabled: z
+        .boolean()
+        .optional()
+        .describe('Enable the todo / task tracking panel'),
+      autoUploadSessions: z
+        .boolean()
+        .optional()
+        .describe(
+          'Mirror local sessions to claude.ai as view-only (no remote control)',
+        ),
+      inputNeededNotifEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Push to mobile when a permission prompt or question is waiting',
+        ),
+      agentPushNotifEnabled: z
+        .boolean()
+        .optional()
+        .describe('Allow Claude to push proactive mobile notifications'),
+      clawdFileProgressEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          "@internal Whether to show Clawd, Claude Code's mascot, carrying the file on the progress line when a file goes to or from a connector",
+        ),
       fastMode: z
         .boolean()
         .optional()
@@ -2000,6 +2064,20 @@ export const SettingsSchema = lazySchema(() =>
         .enum(['disable'])
         .optional()
         .describe('Disable auto mode'),
+      // Official 2.1.331: remoteTools.allowUnattendedServing
+      remoteTools: z
+        .object({
+          allowUnattendedServing: z
+            .boolean()
+            .optional()
+            .describe(
+              '@internal When false in managed or user settings, a cloud session in auto mode may not run commands on this computer without a person approving each one, whatever consent the computer has given; a project, local or --settings value is ignored. Default: true.',
+            ),
+        })
+        .optional()
+        .describe(
+          '@internal How this computer serves tool calls to cloud sessions',
+        ),
       sshConfigs: z
         .array(
           z.object({

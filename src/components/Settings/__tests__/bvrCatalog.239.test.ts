@@ -30,7 +30,7 @@ describe('densable 2.1.239 bvr persist wrappers', () => {
   test('Config defines official F/B/W wrappers', () => {
     expect(config).toContain('function F(patch: SettingsJson)')
     expect(config).toContain(
-      "return updateSettingsForSource('userSettings', patch)",
+      "return reportSaveResult(updateSettingsForSource('userSettings', patch))",
     )
     expect(config).toContain('function B<K extends keyof SettingsJson>')
     expect(config).toContain('function W(updater: (current: GlobalConfig)')

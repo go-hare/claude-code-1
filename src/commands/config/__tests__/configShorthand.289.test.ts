@@ -178,7 +178,7 @@ describe('densable 2.1.289 n0t / Ge / uo', () => {
     expect(configUi).toContain('export function ceFromCommandContext')
     expect(configUi).toContain("id: 'autoCompact'")
     expect(configUi).toContain("id: 'tips'")
-    expect(shorthand).toContain('hKe(ceFromCommandContext(context))')
+    expect(shorthand).toContain('ceFromCommandContext(context, overrides)')
     expect(shorthand).toContain('weConfigPluginRows')
     expect(shorthand).not.toContain('coreSwitchModelsOnFlagRow')
   })

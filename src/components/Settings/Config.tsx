@@ -18,12 +18,29 @@ import { useState, useCallback, useLayoutEffect, useRef } from 'react';
 import axios from 'axios';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import figures from 'figures';
-import { type GlobalConfig, saveGlobalConfig, getCurrentProjectConfig, type OutputStyle } from '../../utils/config.js';
+import {
+  type GlobalConfig,
+  saveGlobalConfig,
+  getCurrentProjectConfig,
+  saveCurrentProjectConfig,
+  getEffectiveGlobalConfig,
+  saveUserIntentSetting,
+  type OutputStyle,
+} from '../../utils/config.js';
 import { normalizeApiKeyForConfig } from '../../utils/authPortable.js';
 import { getClaudeAIOAuthTokens, isClaudeAISubscriber } from '../../utils/auth.js';
 import { getOauthConfig } from '../../constants/oauth.js';
-import { refreshPolicyLimits } from '../../services/policyLimits/index.js';
-import { runFunctionHookChain } from '../../utils/plugins/functionHooksModules.js';
+import { getPolicyDenyKind, isPolicyAllowed, refreshPolicyLimits } from '../../services/policyLimits/index.js';
+import {
+  getLoadedFunctionHooksModules,
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from '../../utils/plugins/functionHooksModules.js';
+import { ConfigSettingRefusalError } from '../../commands/config/configShorthand.js';
+import { readFileSync } from 'fs';
+import { mkdir, writeFile } from 'fs/promises';
+import { hostname } from 'os';
+import { dirname, join } from 'path';
 
 /**
  * Official 2.1.299 (#652): sync `/config` push notification toggles to the
@@ -48,7 +65,7 @@ export async function syncPushNotificationPreferences(
 ): Promise<void> {
   const isSubscriber = deps.isSubscriber ?? isClaudeAISubscriber;
   const getTokens = deps.getTokens ?? getClaudeAIOAuthTokens;
-  const getConfig = deps.getConfig ?? getGlobalConfig;
+  const getConfig = deps.getConfig ?? getEffectiveGlobalConfig;
   try {
     if (!isSubscriber()) return;
     const tokens = getTokens();
@@ -191,6 +208,7 @@ import {
   getInitialSettings,
   getSettingsForSource,
   persistSettingsForSource,
+  projectSettingsAliasesUserSettings,
   updateSettingsForSource,
   type CrossSessionInbound,
   type DialogExpiry,
@@ -198,10 +216,11 @@ import {
 import {
   getSettingSourceDisplayNameCapitalized,
   isSettingSourceEnabled,
+  SETTING_SOURCES,
   type SettingSource,
 } from '../../utils/settings/constants.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
-import type { ThemeSetting } from '../../utils/theme.js';
+import { THEME_SETTINGS, type ThemeSetting } from '../../utils/theme.js';
 import { getThemeSetting } from '../../utils/themeSetting.js';
 import {
   clearRefusalFallbackModelLatch,
@@ -210,7 +229,13 @@ import {
   setUserMsgOptIn,
 } from '../../bootstrap/state.js';
 import { saveSessionModel } from '../../utils/sessionStorage.js';
-import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
+import { DEFAULT_OUTPUT_STYLE_NAME, OUTPUT_STYLE_CONFIG } from 'src/constants/outputStyles.js';
+import { MODEL_ALIASES } from '../../utils/model/aliases.js';
+import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
+import { isFable5AvailableOnProvider } from '../../utils/model/fablePicker.js';
+import { modelRejectsDisabledThinking } from '../../utils/thinking.js';
+import { env } from '../../utils/env.js';
+import { logForDebugging } from '../../utils/debug.js';
 import { TIME_FORMAT_PRESETS } from 'src/utils/timeFormat.js';
 import { getClaudeConfigHomeDir, isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
 import { buildConfigDisplayEntries, displayIndexForSetting, sortConfigCatalog } from 'src/utils/configCatalog.js';
@@ -372,6 +397,7 @@ export type Setting =
       consentGated?: boolean;
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
+      notice?: string;
       provided?: SettingProvidedMeta;
       // densable grantBlocker — DualInk-off list shows qAr copy instead of onChange(true).
       grantBlocker?: RemoteHomeSettingsGrantBlocker;
@@ -379,7 +405,7 @@ export type Setting =
   | (SettingBase & {
       value: string;
       options: string[];
-      onChange(value: string): void;
+      onChange(value: string): unknown;
       type: 'enum';
       // densable: pickToCommit opens EnumPicker (crossSessionInbound + IRn string+options).
       pickToCommit?: boolean;
@@ -389,6 +415,7 @@ export type Setting =
       consentGated?: boolean;
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
+      notice?: string;
       provided?: SettingProvidedMeta;
       /** Official 2.1.321 (#1856): value is derived default (not explicitly persisted in settings). */
       isDefaultValue?: boolean;
@@ -399,12 +426,13 @@ export type Setting =
       value: string;
       options?: string[];
       optionsHint?: string;
-      onChange(value: string): void;
+      onChange(value: string): unknown;
       type: 'managedEnum';
       coerce?(raw: string): string | undefined;
       consentGated?: boolean;
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
+      notice?: string;
       provided?: SettingProvidedMeta;
       /** Official 2.1.321 (#1856): value is derived default (not explicitly persisted in settings). */
       isDefaultValue?: boolean;
@@ -432,6 +460,7 @@ type PluginUserConfigField = {
 export type PluginConfigSettingsOpts = {
   storageV5?: unknown;
   refusal?: string;
+  reloadPlugins?: () => Promise<void>;
   onPersisted?: () => void;
   onSaveResult?: (result: { error?: Error | null } | undefined) => void;
 };
@@ -456,15 +485,16 @@ function samePluginConfigValue(a: unknown, b: unknown): boolean {
 }
 
 /**
- * densable Eo — write one plugin option under userSettings.pluginConfigs.
- * Reload-after-save (gold vo) is omitted: those helpers are not on this exclusive set.
+ * Official 2.1.331 `Xo` + `Zo` (@335536980) — write one plugin option under
+ * `userSettings.pluginConfigs`, invalidate caches, and reload plugins.
  */
 export async function persistPluginConfigOption(
   plugin: LoadedPlugin,
   key: string,
   value: PluginConfigOptionValue,
   storageV5?: unknown,
-): Promise<{ error?: Error } | undefined> {
+  reloadPlugins?: () => Promise<void>,
+): Promise<ConfigSettingChange | undefined> {
   const pluginId = getPluginStorageId(plugin);
   const next = Array.isArray(value) ? [...value] : value;
   const inflightKey = `${pluginId}\0${key}`;
@@ -493,6 +523,21 @@ export async function persistPluginConfigOption(
   });
   if (result.error) return { error: result.error };
   clearPluginOptionsCache();
+  // Official 2.1.331 `Zo(n, i)`: detect pluginStorageId mismatch or reload failure.
+  const loadedMod = getLoadedFunctionHooksModules().find(m => m.name === plugin.name);
+  if (loadedMod !== undefined && loadedMod.pluginStorageId !== undefined && loadedMod.pluginStorageId !== pluginId) {
+    return { messageSuffix: ' · saved; /reload-plugins applies it' };
+  }
+  if (reloadPlugins) {
+    try {
+      await reloadPlugins();
+    } catch (err) {
+      logForDebugging(`/config ${plugin.name}.${key}: saved; ${errorMessage(err)}`);
+      return {
+        messageSuffix: ' · saved, but the plugin did not reload; /reload-plugins applies it',
+      };
+    }
+  }
   return;
 }
 
@@ -506,11 +551,12 @@ export function weConfigPluginRows(
 }
 
 /**
- * densable IRn / pluginConfigSettings — enabled plugins' non-sensitive,
+ * Official 2.1.331 `XZr` (@335537750) — enabled plugins' non-sensitive,
  * non-multiple userConfig fields as /config rows. Label is userConfig.title
  * (agents-md.instructionFiles → "Project instructions"). Id is
  * `${pluginName}.${key}`, disambiguated with pluginId on name collision.
- * Do not invent SettingsJson.instructionFiles.
+ * `onChange` returns the awaited `persistPluginConfigOption` promise so
+ * shorthand (`-p` / headless) flushes to disk and propagates `{ error }` / reload suffix.
  */
 export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: PluginConfigSettingsOpts = {}): Setting[] {
   const rows: Setting[] = [];
@@ -531,19 +577,22 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
       const title = re(field.title ?? key);
       const description = re(field.description ?? '');
       const current = loadPluginConfigFromAllowedSources(pluginId).options?.[key] ?? field.default;
-      const persist = async (next: PluginConfigOptionValue): Promise<void> => {
-        if (lockReason !== undefined) return;
-        const result = await persistPluginConfigOption(plugin, key, next, opts.storageV5);
+      const persist = async (next: PluginConfigOptionValue): Promise<ConfigSettingChange | undefined> => {
+        if (lockReason !== undefined) {
+          return { error: new ConfigSettingRefusalError(lockReason) };
+        }
+        const result = await persistPluginConfigOption(plugin, key, next, opts.storageV5, opts.reloadPlugins);
         opts.onSaveResult?.(result);
         if (!result?.error) {
           opts.onPersisted?.();
         }
+        return result;
       };
       const base = {
         id,
         label: title,
         searchText: `${title} ${plugin.name} ${description}`,
-        ...(lockReason !== undefined ? { lock: { reason: lockReason } } : {}),
+        ...(lockReason !== undefined ? { lock: { reason: lockReason, source: 'managed' } } : {}),
       };
       if (field.type === 'boolean') {
         rows.push({
@@ -557,7 +606,7 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
             kind: 'boolean',
           },
           onChange(value: boolean) {
-            void persist(value);
+            return persist(value);
           },
         });
         continue;
@@ -577,7 +626,7 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
             kind: 'choice',
           },
           onChange(value: string) {
-            void persist(value);
+            return persist(value);
           },
         });
         continue;
@@ -617,11 +666,11 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
               (field.min === undefined || parsed >= field.min) &&
               (field.max === undefined || parsed <= field.max)
             ) {
-              void persist(parsed);
+              return persist(parsed);
             }
             return;
           }
-          void persist(value);
+          return persist(value);
         },
       });
     }
@@ -767,52 +816,68 @@ export const SETTINGS_SAVE_FAILED_MESSAGE =
   "a settings change wasn't saved · check that your settings files are valid and writable";
 
 /**
- * Setting sources that override `userSettings` in highest-wins precedence order.
- * Official 2.1.327 (#372) `Fe` / `I`.
- */
-const HIGHER_PRECEDENCE_SOURCES: readonly SettingSource[] = [
-  'policySettings',
-  'flagSettings',
-  'localSettings',
-  'projectSettings',
-];
-
-/**
  * Map `/config` UI row IDs to their underlying `SettingsJson` key so `/config`
  * can display an override note when a higher-precedence source overrides a row.
  */
 const CONFIG_ROW_ID_TO_SETTINGS_KEY: Record<string, keyof SettingsJson> = {
-  autoCompact: 'autoCompactEnabled' as keyof SettingsJson,
-  autoScroll: 'autoScrollEnabled' as keyof SettingsJson,
+  agentPushNotifEnabled: 'agentPushNotifEnabled',
+  autoCompact: 'autoCompactEnabled',
+  autoScroll: 'autoScrollEnabled',
   autoUpdatesChannel: 'autoUpdatesChannel',
-  checkpoints: 'fileCheckpointingEnabled' as keyof SettingsJson,
-  editor: 'editorMode' as keyof SettingsJson,
+  checkpoints: 'fileCheckpointingEnabled',
+  clawdFileProgress: 'clawdFileProgressEnabled',
+  editor: 'editorMode',
+  inputNeededNotifEnabled: 'inputNeededNotifEnabled',
   language: 'language',
   model: 'model',
-  notifChannel: 'preferredNotifChannel' as keyof SettingsJson,
+  notifChannel: 'preferredNotifChannel',
   outputStyle: 'outputStyle',
   permissionMode: 'permissions',
-  precomputeCompactionEnabled: 'precomputeCompactionEnabled' as keyof SettingsJson,
-  progressBar: 'terminalProgressBarEnabled' as keyof SettingsJson,
+  precomputeCompactionEnabled: 'precomputeCompactionEnabled',
+  progressBar: 'terminalProgressBarEnabled',
   promptSuggestionEnabled: 'promptSuggestionEnabled',
-  recap: 'awaySummaryEnabled' as keyof SettingsJson,
+  recap: 'awaySummaryEnabled',
+  reduceMotion: 'prefersReducedMotion',
+  remoteMessageReceipts: 'remoteMessageReceipts',
+  switchModelsOnFlag: 'switchModelsOnFlag',
   teammateMode: 'teammateMode',
-  theme: 'theme' as keyof SettingsJson,
+  theme: 'theme',
   thinking: 'alwaysThinkingEnabled',
-  timeFormat: 'timeFormat' as keyof SettingsJson,
-  timestamps: 'showMessageTimestamps' as keyof SettingsJson,
-  turnDuration: 'showTurnDuration' as keyof SettingsJson,
-  verbose: 'verbose' as keyof SettingsJson,
-  workflowKeywordTriggerEnabled: 'workflowKeywordTriggerEnabled' as keyof SettingsJson,
+  timeFormat: 'timeFormat',
+  timestamps: 'showMessageTimestamps',
+  tips: 'spinnerTipsEnabled',
+  turnDuration: 'showTurnDuration',
+  verbose: 'verbose',
+  workflowKeywordTriggerEnabled: 'workflowKeywordTriggerEnabled',
 };
 
 /**
- * Official 2.1.327 (#372) `Fe`: find the highest-precedence enabled source
- * above `userSettings` that sets `key`.
+ * Official 2.1.331 `Pe` / `P` (@335499280, @335520900): target write scope for
+ * rows that write to or sync `localSettings` so they only warn about sources
+ * strictly above `localSettings` (no self-override warning for `outputStyle`).
  */
-export function getHigherPrecedenceSettingSource(key: keyof SettingsJson): SettingSource | undefined {
-  for (const source of HIGHER_PRECEDENCE_SOURCES) {
+const CONFIG_ROW_TARGET_SOURCE: Partial<Record<string, SettingSource>> = {
+  outputStyle: 'localSettings',
+  reduceMotion: 'localSettings',
+  tips: 'localSettings',
+};
+
+/**
+ * Official 2.1.331 `Pe(key, targetSource = 'userSettings')`: find the
+ * highest-precedence enabled source strictly above `targetSource` that sets `key`.
+ */
+export function getHigherPrecedenceSettingSource(
+  key: keyof SettingsJson,
+  targetSource: SettingSource = 'userSettings',
+): SettingSource | undefined {
+  const targetIdx = SETTING_SOURCES.indexOf(targetSource);
+  const higherSources = SETTING_SOURCES.slice(targetIdx + 1).reverse();
+  const hasUserSettings = isSettingSourceEnabled('userSettings');
+  for (const source of higherSources) {
     if (!isSettingSourceEnabled(source)) continue;
+    if (source === 'projectSettings' && hasUserSettings && projectSettingsAliasesUserSettings()) {
+      continue;
+    }
     const settings = getSettingsForSource(source);
     if (!settings) continue;
     if (key === 'permissions') {
@@ -827,13 +892,507 @@ export function getHigherPrecedenceSettingSource(key: keyof SettingsJson): Setti
 }
 
 /**
- * Official 2.1.327 (#372) `I(key)`: human-readable note explaining when another
- * settings source overrides what `/config` saves to user settings.
+ * Official 2.1.331 `P(rowId, targetSource)` (@335499280): human-readable note
+ * explaining when a higher-precedence settings source overrides what `/config` saves.
  */
-export function getConfigOverrideNotice(rowIdOrKey: string): string | undefined {
+export function getConfigOverrideNotice(rowIdOrKey: string, targetSource?: SettingSource): string | undefined {
+  const effectiveTarget = targetSource ?? CONFIG_ROW_TARGET_SOURCE[rowIdOrKey] ?? 'userSettings';
   const settingsKey = (CONFIG_ROW_ID_TO_SETTINGS_KEY[rowIdOrKey] ?? rowIdOrKey) as keyof SettingsJson;
-  const source = getHigherPrecedenceSettingSource(settingsKey);
+  const source = getHigherPrecedenceSettingSource(settingsKey, effectiveTarget);
   return source ? `${getSettingSourceDisplayNameCapitalized(source)} override what you save here` : undefined;
+}
+
+/**
+ * Official 2.1.331 `Lo` (@335496256) — normalize ISO language code / name for
+ * `/config language=...` shorthand.
+ */
+const LANGUAGE_CODE_ALIASES = new Map<string, string>([
+  ['jp', 'ja'],
+  ['kr', 'ko'],
+  ['cn', 'zh'],
+  ['tw', 'zh-Hant'],
+]);
+
+let cachedLanguageDisplayNames: Intl.DisplayNames | undefined;
+
+function getLanguageDisplayNames(): Intl.DisplayNames {
+  if (!cachedLanguageDisplayNames) {
+    cachedLanguageDisplayNames = new Intl.DisplayNames(['en'], { type: 'language' });
+  }
+  return cachedLanguageDisplayNames;
+}
+
+export function coerceLanguageConfigInput(raw: string): string {
+  const trimmed = re(raw).trim();
+  if (!trimmed || trimmed.toLowerCase() === 'default') return 'default';
+  if (trimmed.length <= 3) {
+    const lower = trimmed.toLowerCase();
+    const code = LANGUAGE_CODE_ALIASES.get(lower) ?? lower;
+    try {
+      const display = getLanguageDisplayNames().of(code);
+      if (display && display !== code) return display;
+    } catch {
+      // fall through to title case
+    }
+  }
+  return trimmed
+    .split(/\s+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
+ * Official 2.1.331 `Io()` (@335496256) — settable model aliases for `/config model=...`.
+ */
+export function getConfigModelOptions(): string[] {
+  const showFable = isFable5AvailableOnProvider();
+  return [
+    'default',
+    ...MODEL_ALIASES.filter(alias => (showFable || !alias.includes('fable')) && isModelAllowed(alias)),
+  ];
+}
+
+/**
+ * Official 2.1.331 `kpn()` / `vo()` (@335502980) — Remote Control org-policy lock.
+ */
+export function getRemoteControlLockInfo(): { reason: string; source: 'managed' | 'policy' } | null {
+  if (getInitialSettings().disableRemoteControl === true) {
+    return {
+      reason: "Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).",
+      source: 'managed',
+    };
+  }
+  if (getPolicyDenyKind('allow_remote_control') === 'org_denied') {
+    return {
+      reason: "Remote Control is disabled by your organization's policy.",
+      source: 'policy',
+    };
+  }
+  return null;
+}
+
+// --- Official 2.1.331 6 new catalog row helpers ---
+
+const UNATTENDED_SERVING_CONSENT_VERSION = 1;
+const UNATTENDED_SERVING_CONSENT_TERMS = 'unattended-serving:v1:auto-arm-classifier';
+export const UNATTENDED_SERVING_LABELS = {
+  accepted: 'Allowed',
+  declined: 'Not allowed',
+  unset: 'Not asked yet',
+} as const;
+export type UnattendedServingChoice = keyof typeof UNATTENDED_SERVING_LABELS;
+
+function normalizeUnattendedHostname(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/(\.(local|lan|home|localdomain))+$/, '');
+}
+
+function getUnattendedServingConsentPath(): string {
+  return join(getClaudeConfigHomeDir(), 'state', 'unattended-serving-consent.json');
+}
+
+function getUnattendedServingForbidSource(): 'managed' | 'user' | undefined {
+  if (getSettingsForSource('policySettings')?.remoteTools?.allowUnattendedServing === false) {
+    return 'managed';
+  }
+  if (getSettingsForSource('userSettings')?.remoteTools?.allowUnattendedServing === false) {
+    return 'user';
+  }
+  return undefined;
+}
+
+export function getUnattendedServingForbidReason(): string | undefined {
+  const source = getUnattendedServingForbidSource();
+  if (source === 'managed') {
+    return "Turned off by your organization's settings (remoteTools.allowUnattendedServing)";
+  }
+  if (source === 'user') {
+    return 'Turned off in your user settings (remoteTools.allowUnattendedServing: false in ~/.claude/settings.json) — remove it there to re-enable';
+  }
+  return undefined;
+}
+
+export function readUnattendedServingConsent(): {
+  choice: UnattendedServingChoice;
+  unreadable: boolean;
+  staleYes: boolean;
+} {
+  try {
+    const raw = readFileSync(getUnattendedServingConsentPath(), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      version?: unknown;
+      choice?: unknown;
+      terms?: unknown;
+      hostname?: unknown;
+    };
+    if (
+      parsed.version !== UNATTENDED_SERVING_CONSENT_VERSION ||
+      (parsed.choice !== 'accepted' && parsed.choice !== 'declined') ||
+      typeof parsed.terms !== 'string' ||
+      typeof parsed.hostname !== 'string'
+    ) {
+      return { choice: 'unset', unreadable: true, staleYes: false };
+    }
+    const valid =
+      parsed.choice === 'declined' ||
+      (normalizeUnattendedHostname(parsed.hostname) === normalizeUnattendedHostname(hostname()) &&
+        parsed.terms === UNATTENDED_SERVING_CONSENT_TERMS);
+    return {
+      choice: valid ? parsed.choice : 'unset',
+      unreadable: false,
+      staleYes: !valid && parsed.choice === 'accepted',
+    };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === 'ENOENT') {
+      return { choice: 'unset', unreadable: false, staleYes: false };
+    }
+    return { choice: 'unset', unreadable: true, staleYes: false };
+  }
+}
+
+export async function persistUnattendedServingConsent(
+  choice: 'accepted' | 'declined',
+): Promise<'saved' | 'forbidden' | 'not_saved'> {
+  if (choice === 'accepted' && getUnattendedServingForbidSource() !== undefined) {
+    return 'forbidden';
+  }
+  try {
+    const filePath = getUnattendedServingConsentPath();
+    await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
+    const payload = {
+      version: UNATTENDED_SERVING_CONSENT_VERSION,
+      choice,
+      terms: UNATTENDED_SERVING_CONSENT_TERMS,
+      decidedAt: new Date().toISOString(),
+      hostname: normalizeUnattendedHostname(hostname()),
+    };
+    await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+    logEvent('tengu_served_unattended_consent', {
+      action: choice as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      surface: 'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    return 'saved';
+  } catch {
+    return 'not_saved';
+  }
+}
+
+export const ALWAYS_DELIVER_LABELS = {
+  off: 'off',
+  mine: 'from your sessions on this computer',
+  anyone: 'from anyone',
+} as const;
+
+export type AlwaysDeliverBinding = {
+  current: 'mine' | 'anyone' | 'paused' | undefined;
+  sessionClass: 'bypass' | 'prompting';
+  set: (next: { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' } | undefined) => void;
+};
+
+let sessionAlwaysDeliverState: { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' } | undefined;
+
+export function getAlwaysDeliverInSessionState():
+  | { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' }
+  | undefined {
+  return sessionAlwaysDeliverState;
+}
+
+export function setAlwaysDeliverInSessionState(
+  next: { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' } | undefined,
+): void {
+  sessionAlwaysDeliverState = next;
+}
+
+function getRemoteMessageReceiptsWithSource(): { value: 'on' | 'always' | 'off'; source: SettingSource } | undefined {
+  for (let i = SETTING_SOURCES.length - 1; i >= 0; i--) {
+    const source = SETTING_SOURCES[i]!;
+    if (!isSettingSourceEnabled(source)) continue;
+    const val = getSettingsForSource(source)?.remoteMessageReceipts;
+    if (val === undefined) continue;
+    if (source === 'flagSettings' && val !== 'off') continue;
+    return { value: val, source };
+  }
+  return undefined;
+}
+
+function getOrgMemoryAccountKey(): string | null {
+  const acct = getGlobalConfig().oauthAccount;
+  if (!acct?.accountUuid || !acct.organizationUuid) return null;
+  return `${acct.accountUuid}/${acct.organizationUuid}`;
+}
+
+function isOrgMemorySyncOpen(): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_ORG_MEMORY)) return false;
+  if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_haze_glass', false)) return false;
+  if (process.env.CLAUDE_MEMORY_STORES?.trim()) return false;
+  if (!isClaudeAISubscriber()) return false;
+  return isPolicyAllowed('allow_memory_sync');
+}
+
+function isOrgMemoryWritesEligible(): boolean {
+  return getOrgMemoryAccountKey() !== null && isOrgMemorySyncOpen();
+}
+
+function isOrgMemoryWritesActive(): boolean {
+  const proj = getCurrentProjectConfig();
+  const key = getOrgMemoryAccountKey();
+  return (
+    proj.orgMemoryWrites === true && proj.orgMemoryWritesAccount !== undefined && proj.orgMemoryWritesAccount === key
+  );
+}
+
+let orgMemoryReadRowSeen = false;
+let orgMemoryWritesRowSeen = false;
+
+export function resetConfigRowSeenFlagsForTesting(): void {
+  orgMemoryReadRowSeen = false;
+  orgMemoryWritesRowSeen = false;
+  sessionAlwaysDeliverState = undefined;
+}
+
+function getClawdFileProgressNotice(settingsData: SettingsJson | undefined): string | undefined {
+  if (isScreenReaderModeEnabled()) return "Clawd doesn't show in screen reader mode";
+  if (settingsData?.prefersReducedMotion === true) return "Clawd doesn't show while Reduce motion is on";
+  return undefined;
+}
+
+export function isClawdFileProgressRowVisible(terminal: string | null = env.terminal): boolean {
+  if (!isSettingSourceEnabled('userSettings')) return false;
+  if (getHigherPrecedenceSettingSource('clawdFileProgressEnabled') !== undefined) return false;
+  if (terminal === 'Apple_Terminal') return false;
+  const piped = getFeatureValue_CACHED_MAY_BE_STALE('tengu_piped_planet', false);
+  const steady =
+    !isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) && getFeatureValue_CACHED_MAY_BE_STALE('tengu_steady_quail', false);
+  return piped || steady;
+}
+
+/**
+ * Official 2.1.331 `vo()` (@335502980) — construct the `remoteControl` `/config`
+ * row (locked `managedEnum` when org policy / managed settings forbid it,
+ * otherwise `enum` backed by `userSettings.remoteControlAtStartup`).
+ */
+export function buildRemoteControlSettingRow(
+  currentValue: boolean | undefined,
+  lockInfo: { reason: string; source: 'managed' | 'policy' } | null,
+  onChange: (selected: string) => ConfigSettingChange | undefined,
+): Setting {
+  if (lockInfo !== null) {
+    return {
+      id: 'remoteControl',
+      label: 'Enable Remote Control for all sessions',
+      value: 'disabled',
+      lock: {
+        reason: lockInfo.reason,
+        source: lockInfo.source,
+        writableWhileLocked: ['false'],
+      },
+      options: ['true', 'false', 'default'],
+      type: 'managedEnum' as const,
+      onChange,
+    };
+  }
+  return {
+    id: 'remoteControl',
+    label: 'Enable Remote Control for all sessions',
+    value: currentValue === undefined ? 'default' : String(currentValue),
+    options: ['true', 'false', 'default'],
+    type: 'enum' as const,
+    onChange,
+  };
+}
+
+// --- Official 2.1.331 config.set / config.describe plugin hook wrappers (`UZo` / `Le` / `_ci`) ---
+
+export type ConfigHookOrigin = { kind: 'composer' } | { kind: 'bridge' };
+
+function buildConfigHookRowDescriptor(setting: Setting): {
+  key: string;
+  label: string;
+  description?: string;
+  kind: 'boolean' | 'choice' | 'number' | 'text';
+  value: boolean | string | number;
+  options?: string[];
+  provider: { kind: 'core' } | { kind: 'plugin'; pluginId: string };
+  isLocked: boolean;
+} {
+  const label =
+    typeof setting.label === 'string' ? setting.label : 'searchText' in setting ? setting.searchText : setting.id;
+  const provided = setting.provided;
+  const kind: 'boolean' | 'choice' | 'number' | 'text' =
+    setting.type === 'boolean'
+      ? 'boolean'
+      : (provided?.kind ??
+        (setting.type === 'enum'
+          ? 'choice'
+          : setting.coerce !== undefined
+            ? 'text'
+            : setting.options !== undefined
+              ? 'choice'
+              : 'text'));
+  const options = setting.type === 'boolean' ? undefined : setting.options;
+  const numericVal = kind === 'number' && typeof setting.value === 'string' ? Number(setting.value) : Number.NaN;
+  const value: boolean | string | number =
+    typeof setting.value === 'string' && setting.value.trim() !== '' && Number.isFinite(numericVal)
+      ? numericVal
+      : setting.value;
+  return {
+    key: setting.id,
+    label,
+    ...(provided !== undefined ? { description: provided.description } : {}),
+    kind,
+    value,
+    ...(kind === 'choice' && options !== undefined ? { options } : {}),
+    provider: provided === undefined ? { kind: 'core' } : { kind: 'plugin', pluginId: provided.pluginId },
+    isLocked: setting.lock !== undefined,
+  };
+}
+
+function coerceConfigHookNextValue(setting: Setting, rawValue: unknown): boolean | string | undefined {
+  if (setting.type === 'boolean') {
+    return typeof rawValue === 'boolean' ? rawValue : undefined;
+  }
+  if (typeof rawValue === 'number') return String(rawValue);
+  return typeof rawValue === 'string' ? rawValue : undefined;
+}
+
+/**
+ * Official 2.1.331 `UZo` / `Le` (@335541500): wrap a `/config` row's `onChange`
+ * through plugin `config.set` hooks when any `config.set` hook is registered.
+ */
+export function wrapSettingWithConfigSetHook<T extends Setting>(
+  setting: T,
+  origin: ConfigHookOrigin = { kind: 'composer' },
+): T {
+  if (!hasMatchingFunctionHook('config.set')) {
+    return setting;
+  }
+  const baseOnChange = setting.onChange as (value: boolean | string) => unknown;
+  return {
+    ...setting,
+    onChange(nextValue: boolean | string) {
+      if (!hasMatchingFunctionHook('config.set')) {
+        return baseOnChange(nextValue);
+      }
+      const rowDesc = buildConfigHookRowDescriptor(setting);
+      const hookValue = rowDesc.kind === 'number' && typeof nextValue === 'string' ? Number(nextValue) : nextValue;
+      let writeOutcome: ConfigSettingChange | undefined;
+      let writeErrored = false;
+      let writeRan = false;
+      return runFunctionHookChain(
+        'config.set',
+        {
+          key: rowDesc.key,
+          value: hookValue,
+          previous: rowDesc.value,
+          provider: rowDesc.provider,
+          origin,
+        },
+        async arg => {
+          const candidate =
+            arg && typeof arg === 'object' && 'value' in arg ? (arg as { value?: unknown }).value : hookValue;
+          const coerced = coerceConfigHookNextValue(setting, candidate);
+          if (coerced === undefined) {
+            return { deny: `${rowDesc.label}: a ${rowDesc.kind} setting can't take that value` };
+          }
+          let finalValue: boolean | string | undefined = coerced;
+          if (jsonStringify(candidate) !== jsonStringify(hookValue) && typeof coerced === 'string') {
+            const coerceFn = setting.type === 'managedEnum' ? setting.coerce : undefined;
+            if (rowDesc.kind === 'choice' && coerceFn === undefined && !(rowDesc.options ?? []).includes(coerced)) {
+              finalValue = undefined;
+            } else if (coerceFn !== undefined) {
+              finalValue = coerceFn(coerced);
+            }
+          }
+          if (finalValue === undefined) {
+            const hint = setting.type === 'managedEnum' && setting.optionsHint ? ` ${setting.optionsHint}` : '';
+            return { deny: `${rowDesc.label} doesn't accept "${re(String(candidate))}".${hint}` };
+          }
+          writeRan = true;
+          const rawRes = await baseOnChange(finalValue);
+          writeOutcome = asConfigSettingChange(rawRes);
+          writeErrored = writeOutcome?.error !== undefined && writeOutcome.error !== null;
+          if (writeErrored) {
+            return { deny: `${writeOutcome!.error!.message}${writeOutcome?.messageSuffix ?? ''}` };
+          }
+          return { value: finalValue };
+        },
+      )
+        .then(res => {
+          if (writeErrored) {
+            return writeOutcome;
+          }
+          const deny =
+            res && typeof res === 'object' && 'deny' in res && typeof (res as { deny?: unknown }).deny === 'string'
+              ? (res as { deny: string }).deny
+              : undefined;
+          if (deny !== undefined) {
+            return { error: new ConfigSettingRefusalError(re(deny)) };
+          }
+          if (!writeRan) {
+            return {
+              error: new ConfigSettingRefusalError("a plugin's hook answered without writing"),
+            };
+          }
+          return writeOutcome;
+        })
+        .catch(err => ({
+          error: new ConfigSettingRefusalError(`config.set failed: ${errorMessage(err)}`),
+        }));
+    },
+  };
+}
+
+export type ConfigDescribeOverride = {
+  label: string;
+  hidden: boolean;
+};
+
+/**
+ * Official 2.1.331 `_ci` / `kcs` (@335544400): run plugin `config.describe`
+ * hooks to hide or relabel `/config` rows when hooks are registered.
+ */
+export async function describeConfigRowsWithHooks(
+  settings: readonly Setting[],
+): Promise<Map<string, ConfigDescribeOverride>> {
+  const overrides = new Map<string, ConfigDescribeOverride>();
+  if (!hasMatchingFunctionHook('config.describe')) {
+    return overrides;
+  }
+  await Promise.all(
+    settings.map(async setting => {
+      const rowDesc = buildConfigHookRowDescriptor(setting);
+      if (!hasMatchingFunctionHook('config.describe', { key: rowDesc.key })) {
+        return;
+      }
+      try {
+        const res = await runFunctionHookChain(
+          'config.describe',
+          {
+            key: rowDesc.key,
+            label: rowDesc.label,
+            description: rowDesc.description,
+            isHidden: false,
+            provider: rowDesc.provider,
+          },
+          async arg => arg,
+        );
+        if (res && typeof res === 'object') {
+          const rec = res as { isHidden?: unknown; label?: unknown };
+          if (rec.isHidden === true) {
+            overrides.set(setting.id, { label: rowDesc.label, hidden: true });
+          } else if (typeof rec.label === 'string' && rec.label !== rowDesc.label) {
+            overrides.set(setting.id, { label: re(rec.label), hidden: false });
+          }
+        }
+      } catch {
+        // Ignore faulty describe hook for this row
+      }
+    }),
+  );
+  return overrides;
 }
 
 export const NOTIF_CHANNEL_OPTIONS: ReadonlyArray<GlobalConfig['preferredNotifChannel']> = [
@@ -886,7 +1445,9 @@ export type ConfigHkeBag = {
   promptSuggestionEnabled: boolean | undefined;
   mainLoopModel: string | null;
   currentOutputStyle: OutputStyle;
+  setCurrentOutputStyle?: (style: OutputStyle) => void;
   currentLanguage: string | undefined;
+  setCurrentLanguage?: (language: string | undefined) => void;
   themeSetting: string;
   storageV5: unknown;
   isConnectedToIde: boolean;
@@ -897,14 +1458,17 @@ export type ConfigHkeBag = {
   showAutoInDefaultModePicker: boolean;
   currentDefaultPermissionMode: PermissionMode;
   mapleSundial: boolean;
-  setTheme: (setting: ThemeSetting) => void;
+  remoteToolServingOn?: boolean;
+  alwaysDeliver?: AlwaysDeliverBinding;
+  terminalOverride?: string | null;
+  setTheme: (setting: ThemeSetting) => unknown;
   F: (patch: SettingsJson) => { error: Error | null };
   B: <K extends keyof SettingsJson>(key: K, value: SettingsJson[K]) => { error: Error | null };
   W: (updater: (current: GlobalConfig) => GlobalConfig) => void;
   setAppState: ReturnType<typeof useSetAppState>;
   setChanges: React.Dispatch<React.SetStateAction<{ [key: string]: unknown }>>;
-  onChangeMainModelConfig: (value: string | null) => void;
-  onChangeVerbose: (value: boolean) => void;
+  onChangeMainModelConfig: (value: string | null, persistAsDefault?: boolean) => ConfigSettingChange | undefined;
+  onChangeVerbose: (value: boolean) => ConfigSettingChange | undefined;
   reportSaveResult?: <T extends { error?: Error | null } | undefined>(result: T) => T;
 };
 
@@ -912,7 +1476,7 @@ export type ConfigHkeBag = {
  * densable hKe — pure catalog of /config rows from a bag. Plugin rows are
  * concatenated by we() (gold V1n), not here.
  */
-export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
+export function hKe(n: ConfigHkeBag): { settings: Setting[]; dialogFieldRows: Setting[] } {
   const {
     globalConfig,
     setGlobalConfig,
@@ -924,7 +1488,9 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
     promptSuggestionEnabled,
     mainLoopModel,
     currentOutputStyle,
+    setCurrentOutputStyle,
     currentLanguage,
+    setCurrentLanguage,
     themeSetting,
     storageV5,
     isConnectedToIde,
@@ -935,6 +1501,9 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
     showAutoInDefaultModePicker,
     currentDefaultPermissionMode,
     mapleSundial,
+    remoteToolServingOn = false,
+    alwaysDeliver,
+    terminalOverride,
     setTheme,
     F,
     B,
@@ -945,10 +1514,134 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
     onChangeVerbose,
     reportSaveResult,
   } = n;
-  void setAppState;
-  void setChanges;
-  void mainLoopModel;
+
+  // Official 2.1.331 `_o` / `Ne` (@335501050): clear or sync any legacy localSettings
+  // shadow after writing tips / reduceMotion to userSettings via F().
+  async function clearOrSyncLocalShadow(
+    key: 'spinnerTipsEnabled' | 'prefersReducedMotion',
+    value: boolean,
+    userSaveError: Error | null,
+  ): Promise<ConfigSettingChange | undefined> {
+    const localVal =
+      userSaveError ||
+      !isSettingSourceEnabled('userSettings') ||
+      getSettingsForSource('projectSettings')?.[key] === !value
+        ? value
+        : undefined;
+    const currentLocal = getSettingsForSource('localSettings')?.[key];
+    if (currentLocal !== localVal) {
+      await persistSettingsForSource('localSettings', { [key]: localVal } as SettingsJson, undefined, storageV5);
+    }
+    if (userSaveError) return { error: userSaveError };
+    return undefined;
+  }
+
+  // Official 2.1.331 `s0o` (@335510770): thinking required lock for models that
+  // reject disabled thinking (e.g. Fable 5).
+  const effectiveModel = mainLoopModel ?? getMainLoopModel();
+  const thinkingRequiredReason = modelRejectsDisabledThinking(effectiveModel)
+    ? `Thinking can't be turned off for ${modelDisplayString(effectiveModel)}`
+    : undefined;
+
+  // Official 2.1.331 `We` / `vo` (@335502980): Remote Control org-policy lock & save.
+  const remoteControlLock = getRemoteControlLockInfo();
+  function applyRemoteControlChange(selected: string): ConfigSettingChange | undefined {
+    if (selected !== 'false' && remoteControlLock !== null) {
+      return { error: new ConfigSettingRefusalError(remoteControlLock.reason) };
+    }
+    if (selected === 'default') {
+      const res = B('remoteControlAtStartup', undefined);
+      if (res.error) return { error: res.error };
+      W(current => {
+        if (current.remoteControlAtStartup === undefined) return current;
+        const next = { ...current };
+        delete next.remoteControlAtStartup;
+        return next;
+      });
+      setSettingsData(prev => ({ ...prev, remoteControlAtStartup: undefined }));
+      setGlobalConfig({ ...globalConfig, remoteControlAtStartup: undefined });
+    } else {
+      const enabled = selected === 'true';
+      const res = B('remoteControlAtStartup', enabled);
+      if (res.error) return { error: res.error };
+      setSettingsData(prev => ({ ...prev, remoteControlAtStartup: enabled }));
+      setGlobalConfig({ ...globalConfig, remoteControlAtStartup: enabled });
+    }
+    const resolved = getRemoteControlAtStartup();
+    setAppState(prev => {
+      if (prev.replBridgeEnabled === resolved && !prev.replBridgeOutboundOnly) return prev;
+      return {
+        ...prev,
+        replBridgeEnabled: resolved,
+        replBridgeOutboundOnly: false,
+      };
+    });
+    return undefined;
+  }
+
+  // Official 2.1.331 `Me` (@335530540): dialogFieldRows keeps defaultToAgentsView
+  // settable via `/config defaultToAgentsView=false` even when mapleSundial groups it.
+  const fleetEnabled = isLeftArrowFleetEnabled();
+  const leftArrowEnabled = fleetEnabled && !getIsRemoteMode();
+  const agentsFieldRows: Setting[] = [
+    ...(fleetEnabled
+      ? [
+          {
+            id: 'defaultToAgentsView',
+            // Official 2.1.328 label (`chunk@312293526.js:12914`)
+            label: 'Open agents view by default',
+            value: globalConfig.defaultToAgentsView ?? false,
+            type: 'boolean' as const,
+            onChange(defaultToAgentsView: boolean) {
+              W(current => ({ ...current, defaultToAgentsView }));
+              setGlobalConfig({
+                ...getEffectiveGlobalConfig(),
+                defaultToAgentsView,
+              });
+            },
+          } satisfies Setting,
+        ]
+      : []),
+    ...(leftArrowEnabled
+      ? [
+          {
+            id: 'leftArrowOpensAgents',
+            label: '← opens agents',
+            value: globalConfig.leftArrowOpensAgents ?? true,
+            type: 'boolean' as const,
+            onChange(leftArrowOpensAgents: boolean) {
+              W(current => ({ ...current, leftArrowOpensAgents }));
+              setGlobalConfig({
+                ...getEffectiveGlobalConfig(),
+                leftArrowOpensAgents,
+              });
+            },
+          } satisfies Setting,
+        ]
+      : []),
+  ];
+
+  // Official 2.1.331 unattendedServing / orgMemory / clawdFileProgress / remoteMessageReceipts state.
+  const unattendedConsent = readUnattendedServingConsent();
+  const unattendedForbidReason = getUnattendedServingForbidReason();
+  const showUnattendedServing =
+    unattendedConsent.choice !== 'unset' ||
+    unattendedConsent.unreadable ||
+    unattendedConsent.staleYes ||
+    remoteToolServingOn;
+  const clawdNotice = getClawdFileProgressNotice(settingsData);
+  const projectConfig = getCurrentProjectConfig();
+  const showOrgMemoryRead = (orgMemoryReadRowSeen ||= projectConfig.orgMemoryRead === false || isOrgMemorySyncOpen());
+  const showOrgMemoryWrites = (orgMemoryWritesRowSeen ||=
+    isOrgMemoryWritesEligible() || projectConfig.orgMemoryWrites === true);
+  const remoteReceiptsInfo = getRemoteMessageReceiptsWithSource();
+  const showRemoteMessageReceipts =
+    isCrossSessionInboxConfigRowVisible() &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_toasty_phoenix', false) &&
+    (remoteReceiptsInfo?.source ?? 'userSettings') === 'userSettings';
+
   return {
+    dialogFieldRows: agentsFieldRows,
     settings: sortConfigCatalog([
       // Global settings
       {
@@ -959,7 +1652,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         value: settingsData?.autoCompactEnabled ?? globalConfig.autoCompactEnabled,
         type: 'boolean' as const,
         onChange(autoCompactEnabled: boolean) {
-          B('autoCompactEnabled', autoCompactEnabled);
+          const res = B('autoCompactEnabled', autoCompactEnabled);
+          if (res.error) return { error: res.error };
           setSettingsData(prev => ({ ...prev, autoCompactEnabled }));
           setGlobalConfig({ ...globalConfig, autoCompactEnabled });
           logEvent('tengu_auto_compact_setting_changed', {
@@ -991,7 +1685,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                     ...prev,
                     idleCompaction: prevValue,
                   }));
-                  return;
+                  return { error };
                 }
                 logEvent('tengu_idle_compaction_setting_changed', {
                   enabled: idleCompaction,
@@ -1015,13 +1709,59 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   autoContinueAtUsageLimit,
                 }));
                 const result = setAutoContinueAtUsageLimitSetting(autoContinueAtUsageLimit);
+                reportSaveResult?.(result);
                 if (result.error) {
                   const restored = isAutoContinueAtUsageLimitEffective();
                   setSettingsData(prev => ({
                     ...prev,
                     autoContinueAtUsageLimit: restored,
                   }));
+                  return { error: result.error };
                 }
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      // Official 2.1.331: unattendedServing (@335508600)
+      ...(showUnattendedServing
+        ? [
+            {
+              id: 'unattendedServing',
+              label: 'Unattended commands from cloud sessions on this computer',
+              value: UNATTENDED_SERVING_LABELS[unattendedConsent.choice],
+              options: [UNATTENDED_SERVING_LABELS.declined, UNATTENDED_SERVING_LABELS.accepted],
+              type: 'enum' as const,
+              pickToCommit: true,
+              consentGated: true,
+              canWithdraw: () =>
+                unattendedConsent.choice === 'accepted' || unattendedConsent.unreadable || unattendedConsent.staleYes,
+              ...(unattendedForbidReason !== undefined
+                ? {
+                    lock: {
+                      reason: unattendedForbidReason,
+                      source: 'managed',
+                      writableWhileLocked: [UNATTENDED_SERVING_LABELS.declined],
+                    },
+                  }
+                : {}),
+              async onChange(value: string) {
+                const outcome = await persistUnattendedServingConsent(
+                  value === UNATTENDED_SERVING_LABELS.accepted ? 'accepted' : 'declined',
+                );
+                if (outcome === 'forbidden') {
+                  return {
+                    error: new ConfigSettingRefusalError(
+                      unattendedForbidReason ?? 'Unattended serving is disabled by settings',
+                    ),
+                  };
+                }
+                setGlobalConfig({ ...globalConfig });
+                if (outcome === 'not_saved') {
+                  return {
+                    error: new ConfigSettingRefusalError("Couldn't save your answer, so nothing changed"),
+                  };
+                }
+                return undefined;
               },
             } satisfies Setting,
           ]
@@ -1043,23 +1783,22 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   ...prev,
                   switchModelsOnFlag: enabled,
                 }));
-                void persistSwitchModelsOnFlag(enabled, 'config', storageV5);
+                return persistSwitchModelsOnFlag(enabled, 'config', storageV5).then(res => {
+                  reportSaveResult?.(res);
+                  return res.error ? { error: res.error } : undefined;
+                });
               },
             } satisfies Setting,
           ]
         : []),
       {
         id: 'tips',
+        notice: getConfigOverrideNotice('tips', 'localSettings'),
         label: 'Show tips',
         value: settingsData?.spinnerTipsEnabled ?? true,
         type: 'boolean' as const,
         onChange(spinnerTipsEnabled: boolean) {
-          // Official 2.1.326 #184: persist Show tips to userSettings (not localSettings)
-          // so the setting applies across folders rather than only the current folder.
-          F({
-            spinnerTipsEnabled,
-          });
-          // Update local state to reflect the change immediately
+          const res = F({ spinnerTipsEnabled });
           setSettingsData(prev => ({
             ...prev,
             spinnerTipsEnabled,
@@ -1067,6 +1806,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
           logEvent('tengu_tips_setting_changed', {
             enabled: spinnerTipsEnabled,
           });
+          return clearOrSyncLocalShadow('spinnerTipsEnabled', spinnerTipsEnabled, res.error);
         },
       },
       // densable leftover Co()?[{id:"feedbackDrafts"...}] after Show tips.
@@ -1095,15 +1835,12 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         : []),
       {
         id: 'reduceMotion',
+        notice: getConfigOverrideNotice('reduceMotion', 'localSettings'),
         label: 'Reduce motion',
         value: settingsData?.prefersReducedMotion ?? false,
         type: 'boolean' as const,
         onChange(prefersReducedMotion: boolean) {
-          // Official 2.1.326 #184: persist Reduce motion to userSettings (not localSettings)
-          // so the setting applies across folders rather than only the current folder.
-          F({
-            prefersReducedMotion,
-          });
+          const res = F({ prefersReducedMotion });
           setSettingsData(prev => ({
             ...prev,
             prefersReducedMotion,
@@ -1116,18 +1853,59 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
           logEvent('tengu_reduce_motion_setting_changed', {
             enabled: prefersReducedMotion,
           });
+          return clearOrSyncLocalShadow('prefersReducedMotion', prefersReducedMotion, res.error);
         },
       },
+      // Official 2.1.331: clawdFileProgress (@335510558)
+      ...(isClawdFileProgressRowVisible(terminalOverride)
+        ? [
+            {
+              id: 'clawdFileProgress',
+              label: 'Show Clawd carrying files',
+              value: settingsData?.clawdFileProgressEnabled ?? false,
+              type: 'boolean' as const,
+              ...(clawdNotice !== undefined && settingsData?.clawdFileProgressEnabled === true
+                ? { notice: clawdNotice }
+                : {}),
+              onChange(enabled: boolean) {
+                const prevValue = settingsData?.clawdFileProgressEnabled;
+                setSettingsData(prev => ({ ...prev, clawdFileProgressEnabled: enabled }));
+                const res = F({ clawdFileProgressEnabled: enabled });
+                if (res.error) {
+                  setSettingsData(prev => ({ ...prev, clawdFileProgressEnabled: prevValue }));
+                  return { error: res.error };
+                }
+                logEvent('tengu_clawd_file_progress_setting_changed', { enabled });
+                setChanges(prev => ({ ...prev, 'Clawd carrying files': enabled ? 'on' : 'off' }));
+                return enabled && clawdNotice !== undefined ? { messageSuffix: ` · ${clawdNotice}` } : undefined;
+              },
+            } satisfies Setting,
+          ]
+        : []),
       {
         id: 'thinking',
         label: 'Thinking mode',
-        value: thinkingEnabled ?? true,
+        value: thinkingRequiredReason !== undefined ? true : (thinkingEnabled ?? true),
+        ...(thinkingRequiredReason !== undefined
+          ? {
+              lock: {
+                reason: thinkingRequiredReason,
+                source: 'managed',
+                reasonShipsOffBox: true,
+                writableWhileLocked: ['true', '1', 'on', 'yes'],
+              },
+            }
+          : {}),
         type: 'boolean' as const,
         onChange(enabled: boolean) {
+          if (!enabled && thinkingRequiredReason !== undefined) {
+            return { error: new ConfigSettingRefusalError(thinkingRequiredReason) };
+          }
           setAppState(prev => ({ ...prev, thinkingEnabled: enabled }));
-          F({
+          const res = F({
             alwaysThinkingEnabled: enabled ? undefined : false,
           });
+          if (res.error) return { error: res.error };
           logEvent('tengu_thinking_toggled', { enabled });
         },
       },
@@ -1141,9 +1919,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               type: 'boolean' as const,
               onChange(enabled: boolean) {
                 clearFastModeCooldown();
-                F({
+                const res = F({
                   fastMode: enabled ? true : undefined,
                 });
+                if (res.error) return { error: res.error };
                 if (enabled) {
                   setAppState(prev => ({
                     ...prev,
@@ -1179,9 +1958,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   ...prev,
                   promptSuggestionEnabled: enabled,
                 }));
-                F({
+                const res = F({
                   promptSuggestionEnabled: enabled ? undefined : false,
                 });
+                if (res.error) return { error: res.error };
               },
             },
           ]
@@ -1193,9 +1973,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         value: settingsData.emojiCompletionEnabled !== false,
         type: 'boolean' as const,
         onChange(enabled: boolean) {
-          F({
+          const res = F({
             emojiCompletionEnabled: enabled ? undefined : false,
           });
+          if (res.error) return { error: res.error };
           setSettingsData(getInitialSettings());
         },
       },
@@ -1209,7 +1990,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             ...prev,
             awaySummaryEnabled: enabled,
           }));
-          F({ awaySummaryEnabled: enabled ? undefined : false });
+          const res = F({ awaySummaryEnabled: enabled ? undefined : false });
+          if (res.error) return { error: res.error };
           setSettingsData(prev => ({
             ...prev,
             awaySummaryEnabled: enabled ? undefined : false,
@@ -1262,7 +2044,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               onChange(enabled: boolean) {
                 const fallback = resolveWorkflowsAvailability().defaultOn;
                 const next = enabled === fallback ? undefined : enabled;
-                F({ enableWorkflows: next, disableWorkflows: undefined });
+                const res = F({ enableWorkflows: next, disableWorkflows: undefined });
+                if (res.error) return { error: res.error };
                 setSettingsData(prev => ({
                   ...prev,
                   enableWorkflows: next,
@@ -1281,7 +2064,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               type: 'boolean' as const,
               onChange(enabled: boolean) {
                 const next = enabled ? undefined : false;
-                F({ workflowKeywordTriggerEnabled: next });
+                const res = F({ workflowKeywordTriggerEnabled: next });
+                if (res.error) return { error: res.error };
                 setSettingsData(prev => ({
                   ...prev,
                   workflowKeywordTriggerEnabled: next,
@@ -1303,7 +2087,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               type: 'boolean' as const,
               onChange(enabled: boolean) {
                 const next = enabled === true ? undefined : enabled;
-                F({ enableArtifact: next, disableArtifact: undefined });
+                const res = F({ enableArtifact: next, disableArtifact: undefined });
+                if (res.error) return { error: res.error };
                 setSettingsData(prev => ({
                   ...prev,
                   enableArtifact: next,
@@ -1334,7 +2119,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   };
                 });
                 setGlobalConfig({
-                  ...getGlobalConfig(),
+                  ...getEffectiveGlobalConfig(),
                   speculationEnabled: enabled,
                 });
                 logEvent('tengu_speculation_setting_changed', {
@@ -1352,12 +2137,11 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               value: globalConfig.fileCheckpointingEnabled,
               type: 'boolean' as const,
               onChange(enabled: boolean) {
-                W(current => ({
-                  ...current,
-                  fileCheckpointingEnabled: enabled,
-                }));
+                const res = B('fileCheckpointingEnabled', enabled);
+                if (res.error) return { error: res.error };
+                setSettingsData(prev => ({ ...prev, fileCheckpointingEnabled: enabled }));
                 setGlobalConfig({
-                  ...getGlobalConfig(),
+                  ...globalConfig,
                   fileCheckpointingEnabled: enabled,
                 });
                 logEvent('tengu_file_history_snapshots_setting_changed', {
@@ -1367,9 +2151,71 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             },
           ]
         : []),
+      // Official 2.1.331: orgMemoryRead & orgMemoryWrites (@335512000)
+      ...(showOrgMemoryRead
+        ? [
+            {
+              id: 'orgMemoryRead',
+              label: 'Synced project memory (this directory; applies next session)',
+              value: projectConfig.orgMemoryRead ?? true,
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                const hadWrites = getCurrentProjectConfig().orgMemoryWrites === true;
+                saveCurrentProjectConfig(prev =>
+                  enabled
+                    ? { ...prev, orgMemoryRead: undefined }
+                    : { ...prev, orgMemoryRead: false, orgMemoryWrites: undefined, orgMemoryWritesAccount: undefined },
+                );
+                if (!enabled && hadWrites) {
+                  logEvent('tengu_org_memory_writes_setting_changed', { enabled: false });
+                }
+                logEvent('tengu_org_memory_read_setting_changed', { enabled });
+                setGlobalConfig({ ...globalConfig });
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      ...(showOrgMemoryWrites
+        ? [
+            {
+              id: 'orgMemoryWrites',
+              label:
+                projectConfig.orgMemoryRead === false
+                  ? 'Synced project memory writes (enable reads first)'
+                  : 'Synced project memory writes (this directory; applies next session)',
+              value: isOrgMemoryWritesActive(),
+              canWithdraw: () => getCurrentProjectConfig().orgMemoryWrites === true,
+              consentGated: true,
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                const withdrawStale =
+                  enabled && !isOrgMemoryWritesActive() && getCurrentProjectConfig().orgMemoryWrites === true;
+                const next = withdrawStale ? false : enabled;
+                if (next && getCurrentProjectConfig().orgMemoryRead === false) {
+                  return { error: new ConfigSettingRefusalError('Enable synced project memory reads first') };
+                }
+                const accountKey = getOrgMemoryAccountKey();
+                if (next && accountKey === null) {
+                  return {
+                    error: new ConfigSettingRefusalError(
+                      'Sign in to your claude.ai account to enable synced project memory writes',
+                    ),
+                  };
+                }
+                saveCurrentProjectConfig(prev => ({
+                  ...prev,
+                  orgMemoryWrites: next,
+                  orgMemoryWritesAccount: next ? (accountKey ?? undefined) : undefined,
+                }));
+                logEvent('tengu_org_memory_writes_setting_changed', { enabled: next });
+                setGlobalConfig({ ...globalConfig });
+              },
+            } satisfies Setting,
+          ]
+        : []),
       {
         id: 'verbose',
-        label: 'Verbose output',
+        label: mapleSundial ? 'Verbose' : 'Verbose output',
         value: verbose,
         type: 'boolean',
         onChange: onChangeVerbose,
@@ -1380,11 +2226,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         value: globalConfig.terminalProgressBarEnabled,
         type: 'boolean' as const,
         onChange(terminalProgressBarEnabled: boolean) {
-          W(current => ({
-            ...current,
-            terminalProgressBarEnabled,
-          }));
-          setGlobalConfig({ ...getGlobalConfig(), terminalProgressBarEnabled });
+          const res = B('terminalProgressBarEnabled', terminalProgressBarEnabled);
+          if (res.error) return { error: res.error };
+          setSettingsData(prev => ({ ...prev, terminalProgressBarEnabled }));
+          setGlobalConfig({ ...globalConfig, terminalProgressBarEnabled });
           logEvent('tengu_terminal_progress_bar_setting_changed', {
             enabled: terminalProgressBarEnabled,
           });
@@ -1403,7 +2248,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   showStatusInTerminalTab,
                 }));
                 setGlobalConfig({
-                  ...getGlobalConfig(),
+                  ...getEffectiveGlobalConfig(),
                   showStatusInTerminalTab,
                 });
                 logEvent('tengu_terminal_tab_status_setting_changed', {
@@ -1419,8 +2264,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         value: globalConfig.showTurnDuration,
         type: 'boolean' as const,
         onChange(showTurnDuration: boolean) {
-          W(current => ({ ...current, showTurnDuration }));
-          setGlobalConfig({ ...getGlobalConfig(), showTurnDuration });
+          const res = B('showTurnDuration', showTurnDuration);
+          if (res.error) return { error: res.error };
+          setSettingsData(prev => ({ ...prev, showTurnDuration }));
+          setGlobalConfig({ ...globalConfig, showTurnDuration });
           logEvent('tengu_show_turn_duration_setting_changed', {
             enabled: showTurnDuration,
           });
@@ -1435,7 +2282,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               value: settingsData?.precomputeCompactionEnabled ?? false,
               type: 'boolean' as const,
               onChange(precomputeCompactionEnabled: boolean) {
-                F({ precomputeCompactionEnabled });
+                const res = F({ precomputeCompactionEnabled });
+                if (res.error) return { error: res.error };
                 setSettingsData(prev => ({
                   ...prev,
                   precomputeCompactionEnabled,
@@ -1447,7 +2295,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             } satisfies Setting,
           ]
         : []),
-      // densable timestamps /config — tengu_silk_hinge. Persist B + global + AppState.
+      // densable timestamps /config — tengu_silk_hinge. Persist B + AppState.
       ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_silk_hinge', false)
         ? [
             {
@@ -1456,10 +2304,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               value: settingsData?.showMessageTimestamps ?? globalConfig.showMessageTimestamps ?? false,
               type: 'boolean' as const,
               onChange(showMessageTimestamps: boolean) {
-                B('showMessageTimestamps', showMessageTimestamps);
-                W(current => ({ ...current, showMessageTimestamps }));
+                const res = B('showMessageTimestamps', showMessageTimestamps);
+                if (res.error) return { error: res.error };
                 setSettingsData(prev => ({ ...prev, showMessageTimestamps }));
-                setGlobalConfig({ ...getGlobalConfig(), showMessageTimestamps });
+                setGlobalConfig({ ...globalConfig, showMessageTimestamps });
                 setAppState(prev => ({ ...prev, showMessageTimestamps }));
                 logEvent('tengu_show_message_timestamps_setting_changed', {
                   enabled: showMessageTimestamps,
@@ -1478,7 +2326,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         onChange(timeFormat: string) {
           const preset = TIME_FORMAT_PRESETS.find(p => p === timeFormat);
           if (!preset) return;
-          F({ timeFormat: preset });
+          const res = F({ timeFormat: preset });
+          if (res.error) return { error: res.error };
           setSettingsData(prev => ({ ...prev, timeFormat: preset }));
           logEvent('tengu_time_format_setting_changed', {
             value: preset as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1491,8 +2340,14 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         value: currentDefaultPermissionMode,
         isDefaultValue: !settingsData?.permissions?.defaultMode,
         options: (() => {
+          // Official 2.1.331 (@335518060): exclude bypassPermissions so neither panel
+          // cycling nor `/config permissionMode=bypassPermissions` can enter bypass mode.
           const priorityOrder: PermissionMode[] = ['default', 'plan'];
-          return [...priorityOrder, ...PERMISSION_MODES.filter(m => !priorityOrder.includes(m))];
+          const excluded: PermissionMode[] = ['bypassPermissions'];
+          return [
+            ...priorityOrder,
+            ...PERMISSION_MODES.filter(m => !priorityOrder.includes(m) && !excluded.includes(m)),
+          ];
         })(),
         type: 'enum' as const,
         onChange(mode: string) {
@@ -1511,7 +2366,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
 
           if (result.error) {
             logError(result.error);
-            return;
+            return { error: result.error };
           }
 
           // Update local state to reflect the change immediately.
@@ -1541,9 +2396,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               value: (settingsData as { useAutoModeDuringPlan?: boolean } | undefined)?.useAutoModeDuringPlan ?? true,
               type: 'boolean' as const,
               onChange(useAutoModeDuringPlan: boolean) {
-                F({
+                const res = F({
                   useAutoModeDuringPlan,
                 });
+                if (res.error) return { error: res.error };
                 setSettingsData(prev => ({
                   ...prev,
                   useAutoModeDuringPlan,
@@ -1589,6 +2445,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               return rest;
             });
             logError(result.error);
+            return { error: result.error };
           }
         },
       },
@@ -1637,7 +2494,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                 });
               },
             },
-            // densable autoScroll (fullscreen only). Dual-write settings + global.
+            // densable autoScroll (fullscreen only). Write userSettings via B.
             {
               id: 'autoScroll',
               label: 'Auto-scroll',
@@ -1645,10 +2502,9 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               type: 'boolean' as const,
               onChange(autoScrollEnabled: boolean) {
                 const result = B('autoScrollEnabled', autoScrollEnabled);
-                if (result.error) return;
-                W(current => ({ ...current, autoScrollEnabled }));
-                setGlobalConfig({ ...getGlobalConfig(), autoScrollEnabled });
-                setSettingsData(getInitialSettings());
+                if (result.error) return { error: result.error };
+                setGlobalConfig({ ...globalConfig, autoScrollEnabled });
+                setSettingsData(prev => ({ ...prev, autoScrollEnabled }));
                 logEvent('tengu_config_changed', {
                   setting: 'autoScrollEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                   value: String(autoScrollEnabled) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1666,7 +2522,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                 const result = F({
                   wheelScrollAccelerationEnabled,
                 });
-                if (result.error) return;
+                if (result.error) return { error: result.error };
                 setSettingsData(getInitialSettings());
                 logEvent('tengu_config_changed', {
                   setting:
@@ -1681,17 +2537,15 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         : []),
       // densable w0t/z4/JEt agents rows. z4=isLeftArrowFleetEnabled; JEt=z4&&!Jl.
       ...(() => {
-        const z4 = isLeftArrowFleetEnabled();
-        const jet = z4 && !getIsRemoteMode();
         if (mapleSundial) {
-          if (!(z4 || jet)) return [];
+          if (!(fleetEnabled || leftArrowEnabled)) return [];
           return [
             {
               id: 'agentsView',
               label: 'Agents view',
               value:
-                (jet && (globalConfig.leftArrowOpensAgents ?? true)) ||
-                (z4 && (globalConfig.defaultToAgentsView ?? false))
+                (leftArrowEnabled && (globalConfig.leftArrowOpensAgents ?? true)) ||
+                (fleetEnabled && (globalConfig.defaultToAgentsView ?? false))
                   ? 'on'
                   : 'off',
               type: 'managedEnum' as const,
@@ -1699,43 +2553,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             } satisfies Setting,
           ];
         }
-        return [
-          ...(z4
-            ? [
-                {
-                  id: 'defaultToAgentsView',
-                  // Official 2.1.328 label (`chunk@312293526.js:12914`)
-                  label: 'Open agents view by default',
-                  value: globalConfig.defaultToAgentsView ?? false,
-                  type: 'boolean' as const,
-                  onChange(defaultToAgentsView: boolean) {
-                    W(current => ({ ...current, defaultToAgentsView }));
-                    setGlobalConfig({
-                      ...getGlobalConfig(),
-                      defaultToAgentsView,
-                    });
-                  },
-                } satisfies Setting,
-              ]
-            : []),
-          ...(jet
-            ? [
-                {
-                  id: 'leftArrowOpensAgents',
-                  label: '← opens agents',
-                  value: globalConfig.leftArrowOpensAgents ?? true,
-                  type: 'boolean' as const,
-                  onChange(leftArrowOpensAgents: boolean) {
-                    W(current => ({ ...current, leftArrowOpensAgents }));
-                    setGlobalConfig({
-                      ...getGlobalConfig(),
-                      leftArrowOpensAgents,
-                    });
-                  },
-                } satisfies Setting,
-              ]
-            : []),
-        ];
+        return agentsFieldRows;
       })(),
       // autoUpdates setting is hidden - use DISABLE_AUTOUPDATER env var to control
       autoUpdaterDisabledReason
@@ -1758,9 +2576,17 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
       {
         id: 'theme',
         label: 'Theme',
-        value: themeSetting,
-        type: 'managedEnum',
-        onChange: setTheme,
+        searchText: 'dark light',
+        value:
+          isSafeModeEnabled() && Boolean(parseCustomThemeRef(themeSetting))
+            ? `${themeSetting} (disabled in safe mode)`
+            : themeSetting,
+        type: 'managedEnum' as const,
+        options: [...THEME_SETTINGS],
+        optionsHint: 'For custom themes, use /theme.',
+        onChange(value: string) {
+          return setTheme(value as ThemeSetting);
+        },
       },
       ...(mapleSundial
         ? [
@@ -1773,12 +2599,11 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               onChange(notifChannel: string) {
                 const nextChannel = NOTIF_CHANNEL_OPTIONS.find(opt => opt === notifChannel);
                 if (!nextChannel) return;
-                W(current => ({
-                  ...current,
-                  preferredNotifChannel: nextChannel,
-                }));
+                const res = B('preferredNotifChannel', nextChannel);
+                if (res.error) return { error: res.error };
+                setSettingsData(prev => ({ ...prev, preferredNotifChannel: nextChannel }));
                 setGlobalConfig({
-                  ...getGlobalConfig(),
+                  ...globalConfig,
                   preferredNotifChannel: nextChannel,
                 });
               },
@@ -1792,12 +2617,11 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               options: [...NOTIF_CHANNEL_OPTIONS],
               type: 'enum' as const,
               onChange(notifChannel: GlobalConfig['preferredNotifChannel']) {
-                W(current => ({
-                  ...current,
-                  preferredNotifChannel: notifChannel,
-                }));
+                const res = B('preferredNotifChannel', notifChannel);
+                if (res.error) return { error: res.error };
+                setSettingsData(prev => ({ ...prev, preferredNotifChannel: notifChannel }));
                 setGlobalConfig({
-                  ...getGlobalConfig(),
+                  ...globalConfig,
                   preferredNotifChannel: notifChannel,
                 });
               },
@@ -1815,7 +2639,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                         taskCompleteNotifEnabled,
                       }));
                       setGlobalConfig({
-                        ...getGlobalConfig(),
+                        ...getEffectiveGlobalConfig(),
                         taskCompleteNotifEnabled,
                       });
                     },
@@ -1826,12 +2650,11 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                     value: globalConfig.inputNeededNotifEnabled ?? false,
                     type: 'boolean' as const,
                     onChange(inputNeededNotifEnabled: boolean) {
-                      W(current => ({
-                        ...current,
-                        inputNeededNotifEnabled,
-                      }));
+                      const res = B('inputNeededNotifEnabled', inputNeededNotifEnabled);
+                      if (res.error) return { error: res.error };
+                      setSettingsData(prev => ({ ...prev, inputNeededNotifEnabled }));
                       setGlobalConfig({
-                        ...getGlobalConfig(),
+                        ...globalConfig,
                         inputNeededNotifEnabled,
                       });
                       void syncPushNotificationPreferences({ inputNeededNotifEnabled }).catch(err => {
@@ -1849,12 +2672,11 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                     value: globalConfig.agentPushNotifEnabled ?? false,
                     type: 'boolean' as const,
                     onChange(agentPushNotifEnabled: boolean) {
-                      W(current => ({
-                        ...current,
-                        agentPushNotifEnabled,
-                      }));
+                      const res = B('agentPushNotifEnabled', agentPushNotifEnabled);
+                      if (res.error) return { error: res.error };
+                      setSettingsData(prev => ({ ...prev, agentPushNotifEnabled }));
                       setGlobalConfig({
-                        ...getGlobalConfig(),
+                        ...globalConfig,
                         agentPushNotifEnabled,
                       });
                       void syncPushNotificationPreferences({ agentPushNotifEnabled }).catch(err => {
@@ -1871,10 +2693,38 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
           ]),
       {
         id: 'outputStyle',
+        notice: getConfigOverrideNotice('outputStyle', 'localSettings'),
         label: 'Output style',
-        value: currentOutputStyle,
+        value:
+          isSafeModeEnabled() && !Object.hasOwn(OUTPUT_STYLE_CONFIG, currentOutputStyle)
+            ? `${currentOutputStyle} (disabled in safe mode)`
+            : currentOutputStyle,
         type: 'managedEnum' as const,
-        onChange: () => {}, // handled by OutputStylePicker submenu
+        options: Object.keys(OUTPUT_STYLE_CONFIG),
+        optionsHint: 'For custom styles, open /config.',
+        async onChange(style: string) {
+          if (style === currentOutputStyle) {
+            return { messageSuffix: ' (already the current style)' };
+          }
+          if (!isSettingSourceEnabled('localSettings')) {
+            return {
+              error: new ConfigSettingRefusalError("Local settings are disabled; output style couldn't be saved."),
+            };
+          }
+          setCurrentOutputStyle?.(style);
+          setSettingsData(prev => ({ ...prev, outputStyle: style }));
+          const res = await persistSettingsForSource('localSettings', { outputStyle: style }, undefined, storageV5);
+          reportSaveResult?.(res);
+          if (res.error) {
+            return { error: res.error };
+          }
+          logEvent('tengu_output_style_changed', {
+            style: style as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            settings_source: 'localSettings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          return undefined;
+        },
       },
       ...(showDefaultViewPicker
         ? [
@@ -1891,6 +2741,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                 const defaultView = selected === 'default' ? undefined : (selected as 'chat' | 'transcript');
                 const saveResult = updateSettingsForSource('localSettings', { defaultView });
                 reportSaveResult?.(saveResult);
+                if (saveResult.error) return { error: saveResult.error };
                 setSettingsData(prev => ({ ...prev, defaultView }));
                 const nextBrief = defaultView === 'chat';
                 setAppState(prev => {
@@ -1915,7 +2766,23 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         label: 'Language',
         value: currentLanguage ?? 'Default (English)',
         type: 'managedEnum' as const,
-        onChange: () => {}, // handled by LanguagePicker submenu
+        coerce: coerceLanguageConfigInput,
+        optionsHint: "Any language name or ISO code (e.g. 'ja'); use 'default' for English.",
+        async onChange(value: string) {
+          const nextLanguage = value.toLowerCase() === 'default' ? undefined : value;
+          setCurrentLanguage?.(nextLanguage);
+          setSettingsData(prev => ({ ...prev, language: nextLanguage }));
+          const res = await persistSettingsForSource('userSettings', { language: nextLanguage }, undefined, storageV5);
+          reportSaveResult?.(res);
+          if (res.error) {
+            return { error: res.error };
+          }
+          logEvent('tengu_language_changed', {
+            language: (nextLanguage ?? 'default') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          return undefined;
+        },
       },
       {
         id: 'editor',
@@ -1925,43 +2792,54 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         options: ['normal', 'vim'],
         type: 'enum',
         onChange(value: string) {
-          W(current => ({
-            ...current,
-            editorMode: value as GlobalConfig['editorMode'],
-          }));
+          const nextMode = value === 'vim' ? 'vim' : 'normal';
+          const res = B('editorMode', nextMode);
+          if (res.error) return { error: res.error };
+          setSettingsData(prev => ({ ...prev, editorMode: nextMode }));
           setGlobalConfig({
-            ...getGlobalConfig(),
-            editorMode: value as GlobalConfig['editorMode'],
+            ...globalConfig,
+            editorMode: nextMode,
           });
 
           logEvent('tengu_editor_mode_changed', {
-            mode: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            mode: nextMode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           });
         },
       },
-      {
-        id: 'askUserQuestionTimeout',
-        label: 'Question auto-continue timeout',
-        // Official 2.1.200: default never (no auto-continue unless configured)
-        consentGated: true,
-        value: settingsData?.askUserQuestionTimeout ?? 'never',
-        options: ['60s', '5m', '10m', 'never'],
-        type: 'enum' as const,
-        onChange(value: string) {
-          const next = value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : 'never';
-          setSettingsData(prev => ({
-            ...prev,
-            askUserQuestionTimeout: next,
-          }));
-          F({
-            askUserQuestionTimeout: next,
-          });
-          logEvent('tengu_ask_user_question_timeout_changed', {
-            value: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          });
-        },
-      },
+      // Official 2.1.331 `Ae("askUserQuestionTimeout")` (@335522900): hide when managed outside userSettings.
+      ...(!isConfigSettingManagedOutsideUser('askUserQuestionTimeout')
+        ? [
+            {
+              id: 'askUserQuestionTimeout',
+              label: 'Question auto-continue timeout',
+              // Official 2.1.200: default never (no auto-continue unless configured)
+              consentGated: true,
+              value: settingsData?.askUserQuestionTimeout ?? 'never',
+              options: ['never', '60s', '5m', '10m'],
+              type: 'enum' as const,
+              onChange(value: string) {
+                const next =
+                  value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : 'never';
+                const prevVal = settingsData?.askUserQuestionTimeout;
+                setSettingsData(prev => ({
+                  ...prev,
+                  askUserQuestionTimeout: next,
+                }));
+                const res = F({
+                  askUserQuestionTimeout: next,
+                });
+                if (res.error) {
+                  setSettingsData(prev => ({ ...prev, askUserQuestionTimeout: prevVal }));
+                  return { error: res.error };
+                }
+                logEvent('tengu_ask_user_question_timeout_changed', {
+                  value: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+          ]
+        : []),
       ...(isProposeGoalGrowthBookEnabled()
         ? [
             {
@@ -1981,7 +2859,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                 const result = F({ modelProposedGoals: next });
                 if (result.error) {
                   logError(result.error);
-                  return;
+                  return { error: result.error };
                 }
                 logEvent('tengu_model_proposed_goals_changed', {
                   value: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -2004,13 +2882,18 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               onChange(value: string) {
                 const next: DialogExpiry | undefined =
                   value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : undefined;
+                const prevVal = settingsData?.dialogExpiry;
                 setSettingsData(prev => ({
                   ...prev,
                   dialogExpiry: next,
                 }));
-                F({
+                const res = F({
                   dialogExpiry: next,
                 });
+                if (res.error) {
+                  setSettingsData(prev => ({ ...prev, dialogExpiry: prevVal }));
+                  return { error: res.error };
+                }
                 logEvent('tengu_dialog_expiry_changed', {
                   value: (value === 'default'
                     ? 'default'
@@ -2035,13 +2918,18 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               onChange(value: string) {
                 const next: CrossSessionInbound | undefined =
                   value === 'accept' || value === 'hold' || value === 'refuse' ? value : undefined;
+                const prevVal = settingsData?.crossSessionInbound;
                 setSettingsData(prev => ({
                   ...prev,
                   crossSessionInbound: next,
                 }));
-                F({
+                const res = F({
                   crossSessionInbound: next,
                 });
+                if (res.error) {
+                  setSettingsData(prev => ({ ...prev, crossSessionInbound: prevVal }));
+                  return { error: res.error };
+                }
                 logEvent('tengu_cross_session_inbound_changed', {
                   value: (value === 'default'
                     ? 'default'
@@ -2052,6 +2940,64 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             },
           ]
         : []),
+      // Official 2.1.331: alwaysDeliverInSession (@335527000)
+      ...(isCrossSessionInboxConfigRowVisible() &&
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_crystalline_phoenix', true) &&
+      alwaysDeliver !== undefined
+        ? [
+            {
+              id: 'alwaysDeliverInSession',
+              label: 'Always deliver in this session',
+              consentGated: true,
+              pickToCommit: true,
+              value:
+                alwaysDeliver.current === 'paused'
+                  ? 'paused in bypass mode'
+                  : ALWAYS_DELIVER_LABELS[alwaysDeliver.current ?? 'off'],
+              options: Object.values(ALWAYS_DELIVER_LABELS),
+              type: 'enum' as const,
+              onChange(value: string) {
+                const scope = (['mine', 'anyone'] as const).find(k => ALWAYS_DELIVER_LABELS[k] === value);
+                alwaysDeliver.set(scope ? { scope, madeIn: alwaysDeliver.sessionClass } : undefined);
+                setGlobalConfig({ ...globalConfig });
+                logEvent('tengu_cross_session_inbound_changed', {
+                  value: (scope ?? 'off') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      // Official 2.1.331: remoteMessageReceipts (@335527500)
+      ...(showRemoteMessageReceipts
+        ? [
+            {
+              id: 'remoteMessageReceipts',
+              label: 'Delivery notices to and from cloud and Remote Control sessions',
+              notice:
+                (settingsData?.remoteMessageReceipts ?? remoteReceiptsInfo?.value) === 'always'
+                  ? 'No limit on how often delivery notices, local ones too, wake Claude: two sessions can keep waking each other'
+                  : undefined,
+              consentGated: true,
+              pickToCommit: true,
+              value: settingsData?.remoteMessageReceipts ?? remoteReceiptsInfo?.value ?? 'on',
+              options: ['on', 'always', 'off'],
+              type: 'enum' as const,
+              onChange(value: string) {
+                const next = (['on', 'always', 'off'] as const).find(opt => opt === value);
+                if (!next) return;
+                const prevVal = settingsData?.remoteMessageReceipts;
+                setSettingsData(prev => ({ ...prev, remoteMessageReceipts: next }));
+                const res = F({ remoteMessageReceipts: next === 'on' ? undefined : next });
+                if (res.error) {
+                  setSettingsData(prev => ({ ...prev, remoteMessageReceipts: prevVal }));
+                  return { error: res.error };
+                }
+                return undefined;
+              },
+            } satisfies Setting,
+          ]
+        : []),
       {
         id: 'externalEditorContext',
         label: mapleSundial ? 'Show responses in IDE' : 'Show last response in external editor',
@@ -2059,7 +3005,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         type: 'boolean' as const,
         onChange(externalEditorContext: boolean) {
           W(current => ({ ...current, externalEditorContext }));
-          setGlobalConfig({ ...getGlobalConfig(), externalEditorContext });
+          setGlobalConfig({ ...getEffectiveGlobalConfig(), externalEditorContext });
           logEvent('tengu_external_editor_context_changed', {
             enabled: externalEditorContext,
           });
@@ -2079,7 +3025,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             };
           });
           setGlobalConfig({
-            ...getGlobalConfig(),
+            ...getEffectiveGlobalConfig(),
             prStatusFooterEnabled: enabled,
           });
           logEvent('tengu_pr_status_footer_setting_changed', {
@@ -2090,9 +3036,15 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
       {
         id: 'model',
         label: 'Model',
-        value: mainLoopModel === null ? 'Default (recommended)' : mainLoopModel,
+        searchText: 'effort',
+        value: mainLoopModel === null ? 'Default (recommended)' : modelDisplayString(mainLoopModel),
         type: 'managedEnum' as const,
-        onChange: onChangeMainModelConfig,
+        options: getConfigModelOptions(),
+        optionsHint: 'For a specific model ID, use /model.',
+        onChange(value: string) {
+          const nextModel = value.toLowerCase() === 'default' ? null : value;
+          return onChangeMainModelConfig(nextModel, true);
+        },
       },
       ...(isConnectedToIde
         ? [
@@ -2108,7 +3060,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   diffTool: diffTool as GlobalConfig['diffTool'],
                 }));
                 setGlobalConfig({
-                  ...getGlobalConfig(),
+                  ...getEffectiveGlobalConfig(),
                   diffTool: diffTool as GlobalConfig['diffTool'],
                 });
 
@@ -2129,7 +3081,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               type: 'boolean' as const,
               onChange(autoConnectIde: boolean) {
                 W(current => ({ ...current, autoConnectIde }));
-                setGlobalConfig({ ...getGlobalConfig(), autoConnectIde });
+                setGlobalConfig({ ...getEffectiveGlobalConfig(), autoConnectIde });
 
                 logEvent('tengu_auto_connect_ide_changed', {
                   enabled: autoConnectIde,
@@ -2151,7 +3103,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   ...current,
                   autoInstallIdeExtension,
                 }));
-                setGlobalConfig({ ...getGlobalConfig(), autoInstallIdeExtension });
+                setGlobalConfig({ ...getEffectiveGlobalConfig(), autoInstallIdeExtension });
 
                 logEvent('tengu_auto_install_ide_extension_changed', {
                   enabled: autoInstallIdeExtension,
@@ -2163,7 +3115,9 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         : []),
       {
         id: 'chrome',
-        label: 'Claude in Chrome enabled by default',
+        label: mapleSundial ? 'Claude in Chrome' : 'Claude in Chrome enabled by default',
+        // Official 2.1.331 (@335525500): consent-gated under tengu_joyful_parasol (default true).
+        ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_joyful_parasol', true) !== false ? { consentGated: true } : {}),
         value: globalConfig.claudeInChromeDefaultEnabled ?? false, // densable: undefined → false
         type: 'boolean' as const,
         onChange(enabled: boolean) {
@@ -2172,7 +3126,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             claudeInChromeDefaultEnabled: enabled,
           }));
           setGlobalConfig({
-            ...getGlobalConfig(),
+            ...getEffectiveGlobalConfig(),
             claudeInChromeDefaultEnabled: enabled,
           });
           logEvent('tengu_claude_in_chrome_setting_changed', {
@@ -2187,8 +3141,8 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             const label = cliOverride ? `Teammate mode [overridden: ${cliOverride}]` : 'Teammate mode';
             const isWindows = getPlatform() === 'windows';
             const teammateModeOptions = isWindows
-              ? ['auto', 'tmux', 'windows-terminal', 'in-process']
-              : ['auto', 'tmux', 'in-process'];
+              ? ['auto', 'tmux', 'iterm2', 'windows-terminal', 'in-process']
+              : ['auto', 'tmux', 'iterm2', 'in-process'];
             return [
               {
                 id: 'teammateMode',
@@ -2197,20 +3151,25 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                 options: teammateModeOptions,
                 type: 'enum' as const,
                 onChange(mode: string) {
-                  if (mode !== 'auto' && mode !== 'tmux' && mode !== 'windows-terminal' && mode !== 'in-process') {
+                  if (
+                    mode !== 'auto' &&
+                    mode !== 'tmux' &&
+                    mode !== 'iterm2' &&
+                    mode !== 'windows-terminal' &&
+                    mode !== 'in-process'
+                  ) {
                     return;
                   }
                   if (mode === 'windows-terminal' && !isWindows) {
                     return;
                   }
+                  const res = B('teammateMode', mode);
+                  if (res.error) return { error: res.error };
                   // Clear CLI override and set new mode (pass mode to avoid race condition)
                   clearCliTeammateModeOverride(mode);
-                  W(current => ({
-                    ...current,
-                    teammateMode: mode,
-                  }));
+                  setSettingsData(prev => ({ ...prev, teammateMode: mode }));
                   setGlobalConfig({
-                    ...getGlobalConfig(),
+                    ...globalConfig,
                     teammateMode: mode,
                   });
                   logEvent('tengu_teammate_mode_changed', {
@@ -2224,53 +3183,13 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
           })()
         : []),
       // Remote at startup toggle — gated on build flag + GrowthBook + policy
-      ...(feature('BRIDGE_MODE') && isBridgeEnabled()
+      ...(feature('BRIDGE_MODE') && (isBridgeEnabled() || remoteControlLock !== null)
         ? [
-            {
-              id: 'remoteControl',
-              label: 'Enable Remote Control for all sessions',
-              value:
-                globalConfig.remoteControlAtStartup === undefined
-                  ? 'default'
-                  : String(globalConfig.remoteControlAtStartup),
-              options: ['true', 'false', 'default'],
-              type: 'enum' as const,
-              onChange(selected: string) {
-                if (selected === 'default') {
-                  // Unset the config key so it falls back to the platform default
-                  W(current => {
-                    if (current.remoteControlAtStartup === undefined) return current;
-                    const next = { ...current };
-                    delete next.remoteControlAtStartup;
-                    return next;
-                  });
-                  setGlobalConfig({
-                    ...getGlobalConfig(),
-                    remoteControlAtStartup: undefined,
-                  });
-                } else {
-                  const enabled = selected === 'true';
-                  W(current => {
-                    if (current.remoteControlAtStartup === enabled) return current;
-                    return { ...current, remoteControlAtStartup: enabled };
-                  });
-                  setGlobalConfig({
-                    ...getGlobalConfig(),
-                    remoteControlAtStartup: enabled,
-                  });
-                }
-                // Sync to AppState so useReplBridge reacts immediately
-                const resolved = getRemoteControlAtStartup();
-                setAppState(prev => {
-                  if (prev.replBridgeEnabled === resolved && !prev.replBridgeOutboundOnly) return prev;
-                  return {
-                    ...prev,
-                    replBridgeEnabled: resolved,
-                    replBridgeOutboundOnly: false,
-                  };
-                });
-              },
-            },
+            buildRemoteControlSettingRow(
+              globalConfig.remoteControlAtStartup,
+              remoteControlLock,
+              applyRemoteControlChange,
+            ),
           ]
         : []),
       // densable 2.1.289: so(hZ(B8())||s.remoteHomeSettingsMode==="forward")
@@ -2286,7 +3205,9 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
               onChange(enabled: boolean) {
                 if (enabled) {
                   return {
-                    error: new Error('Turn this on from the /config panel, which shows what will be sent'),
+                    error: new ConfigSettingRefusalError(
+                      'Turn this on from the /config panel, which shows what will be sent',
+                    ),
                   };
                 }
                 const previous = globalConfig.remoteHomeSettingsMode;
@@ -2306,12 +3227,14 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                         remoteHomeSettingsMode: getRemoteHomeSettingsMode(),
                       });
                       return {
-                        error: new Error(remoteHomeSettingsNotStoredMessage()),
+                        error: new ConfigSettingRefusalError(remoteHomeSettingsNotStoredMessage()),
                       };
                     case 'refused':
                       setGlobalConfig({ ...globalConfig, remoteHomeSettingsMode: previous });
                       return {
-                        error: new Error('Cloud settings forwarding is not available right now; nothing was changed'),
+                        error: new ConfigSettingRefusalError(
+                          "Cloud settings forwarding isn't available right now, so nothing changed",
+                        ),
                       };
                   }
                 });
@@ -2343,6 +3266,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         ? [
             {
               id: 'apiKey',
+              consentGated: true,
               label: (
                 <Text>
                   Use custom API key: <Text bold>{normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY)}</Text>
@@ -2402,7 +3326,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   return updated;
                 });
                 void refreshPolicyLimits();
-                setGlobalConfig(getGlobalConfig());
+                setGlobalConfig(getEffectiveGlobalConfig());
               },
             },
           ]
@@ -2411,14 +3335,24 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
   };
 }
 
+export type ConfigContextOverrides = {
+  setTheme?: (setting: ThemeSetting) => unknown;
+  remoteToolServingOn?: boolean;
+  alwaysDeliver?: AlwaysDeliverBinding;
+  terminalOverride?: string | null;
+};
+
 /**
  * densable ce — bag for hKe from a /config command context (no panel React
  * setters). Gold `shouldShowExternalIncludesToggle: !1`.
  */
-export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHkeBag {
+export function ceFromCommandContext(
+  context: LocalJSXCommandContext,
+  overrides: ConfigContextOverrides = {},
+): ConfigHkeBag {
   const r = context.getAppState();
   const settingsData = getInitialSettings();
-  const globalConfig = getGlobalConfig();
+  const globalConfig = getEffectiveGlobalConfig();
   const noopSetSettings: ConfigHkeBag['setSettingsData'] = () => {};
   const noopSetChanges: ConfigHkeBag['setChanges'] = () => {};
   function F(patch: SettingsJson) {
@@ -2453,7 +3387,7 @@ export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHke
     currentLanguage: settingsData?.language,
     themeSetting: getThemeSetting(),
     storageV5: context.storageV5,
-    isConnectedToIde: hasAccessToIDEExtensionDiffFeature(context.options.mcpClients),
+    isConnectedToIde: hasAccessToIDEExtensionDiffFeature(context.options?.mcpClients ?? []),
     isFileCheckpointingAvailable: !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING),
     shouldShowExternalIncludesToggle: false,
     autoUpdaterDisabledReason: getAutoUpdaterDisabledReason(),
@@ -2463,22 +3397,37 @@ export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHke
       : false,
     currentDefaultPermissionMode: permissionModeFromString(settingsData?.permissions?.defaultMode ?? 'default'),
     mapleSundial: getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false),
-    setTheme: () => {},
+    remoteToolServingOn: overrides.remoteToolServingOn ?? isEnvTruthy(process.env.CLAUDE_CODE_REMOTE_TOOL_SERVING),
+    alwaysDeliver: overrides.alwaysDeliver,
+    terminalOverride: overrides.terminalOverride,
+    setTheme:
+      overrides.setTheme ??
+      ((setting: ThemeSetting) => {
+        const res = saveUserIntentSetting('theme', setting, context.storageV5);
+        return res.error ? { error: res.error } : undefined;
+      }),
     F,
     B,
     W,
     setAppState: context.setAppState,
     setChanges: noopSetChanges,
     onChangeMainModelConfig(value) {
+      if (value !== null && !isModelAllowed(value)) {
+        return {
+          error: new ConfigSettingRefusalError(`Model "${value}" is not allowed by your settings`),
+        };
+      }
       clearRefusalFallbackModelLatch('model_pick');
-      F({ model: value ?? undefined });
-      saveSessionModel(value);
       if (isFastModeEnabled()) clearFastModeCooldown();
+      let fastSuffix = '';
       context.setAppState(prev => {
         const prevFast = !!prev.fastMode;
         const nextFast = resolveFastModeAfterModelSwitch(value, prev.fastMode);
         const billed = isBilledAsExtraUsage(value, nextFast, isOpus1mMergeEnabled());
-        const { nextFastMode } = applyFastModeOnModelSwitch(value, prev.fastMode, { billedAsExtraUsage: billed });
+        const { nextFastMode, suffix } = applyFastModeOnModelSwitch(value, prev.fastMode, {
+          billedAsExtraUsage: billed,
+        });
+        fastSuffix = suffix;
         return {
           ...prev,
           mainLoopModel: value,
@@ -2486,10 +3435,18 @@ export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHke
           ...(nextFastMode !== prevFast ? { fastMode: nextFastMode } : null),
         };
       });
+      saveSessionModel(value);
+      const res = F({ model: value ?? undefined });
+      if (res.error) {
+        return { error: res.error, ...(fastSuffix ? { messageSuffix: fastSuffix } : {}) };
+      }
+      return fastSuffix ? { messageSuffix: fastSuffix } : undefined;
     },
     onChangeVerbose(value) {
-      W(current => ({ ...current, verbose: value }));
+      const res = B('verbose', value);
+      if (res.error) return { error: res.error };
       context.setAppState(prev => ({ ...prev, verbose: value }));
+      return undefined;
     },
   };
 }
@@ -2505,8 +3462,8 @@ export function Config({
   const insideModal = useIsInsideModal();
   const [, setTheme] = useTheme();
   const themeSetting = useThemeSetting();
-  const [globalConfig, setGlobalConfig] = useState(getGlobalConfig());
-  const initialConfig = React.useRef(getGlobalConfig());
+  const [globalConfig, setGlobalConfig] = useState(() => getEffectiveGlobalConfig());
+  const initialConfig = React.useRef(getEffectiveGlobalConfig());
   const [settingsData, setSettingsData] = useState(getInitialSettings());
   const initialSettingsData = React.useRef(getInitialSettings());
   const [currentOutputStyle, setCurrentOutputStyle] = useState<OutputStyle>(
@@ -2774,16 +3731,20 @@ export function Config({
 
   const saveModelAsDefaultRef = useRef(false);
 
-  function onChangeMainModelConfig(value: string | null, persistAsDefault = false): void {
+  function onChangeMainModelConfig(value: string | null, persistAsDefault = false): ConfigSettingChange | undefined {
     const previousModel = mainLoopModel;
     clearRefusalFallbackModelLatch('model_pick');
     logEvent('tengu_config_model_changed', {
       from_model: previousModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       to_model: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
+    let persistError: Error | null = null;
     if (persistAsDefault) {
-      F({ model: value ?? undefined });
-      setSettingsData(prev => ({ ...prev, model: value ?? undefined }));
+      const res = F({ model: value ?? undefined });
+      persistError = res.error;
+      if (!persistError) {
+        setSettingsData(prev => ({ ...prev, model: value ?? undefined }));
+      }
     }
     saveSessionModel(value);
     // densable 2.1.218 #31 — Rft/uU/dU on `/config model=` path
@@ -2814,12 +3775,17 @@ export function Config({
       }
       return { ...prev, model: valStr };
     });
+    if (persistError) {
+      return { error: persistError, ...(fastSuffix ? { messageSuffix: fastSuffix } : {}) };
+    }
+    return fastSuffix ? { messageSuffix: fastSuffix } : undefined;
   }
 
-  function onChangeVerbose(value: boolean): void {
-    // Update the global config to persist the setting
-    W(current => ({ ...current, verbose: value }));
-    setGlobalConfig({ ...getGlobalConfig(), verbose: value });
+  function onChangeVerbose(value: boolean): ConfigSettingChange | undefined {
+    const res = B('verbose', value);
+    if (res.error) return { error: res.error };
+    setSettingsData(prev => ({ ...prev, verbose: value }));
+    setGlobalConfig({ ...globalConfig, verbose: value });
 
     // Update the app state for immediate UI feedback
     setAppState(prev => ({
@@ -2833,7 +3799,27 @@ export function Config({
       }
       return { ...prev, verbose: value };
     });
+    return undefined;
   }
+
+  // Official 2.1.331: interactive session-scoped alwaysDeliverInSession binding.
+  const currentToolPermMode = useAppState(s => s.toolPermissionContext.mode);
+  const currentSessionClass: 'bypass' | 'prompting' =
+    currentToolPermMode === 'bypassPermissions' ? 'bypass' : 'prompting';
+  const storedAlwaysDeliver = getAlwaysDeliverInSessionState();
+  const alwaysDeliverBinding: AlwaysDeliverBinding | undefined =
+    isCrossSessionInboxConfigRowVisible() &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_crystalline_phoenix', true) &&
+    getSettingsForSource('policySettings')?.crossSessionInbound === undefined
+      ? {
+          current:
+            storedAlwaysDeliver?.madeIn === 'prompting' && currentSessionClass === 'bypass'
+              ? 'paused'
+              : storedAlwaysDeliver?.scope,
+          sessionClass: currentSessionClass,
+          set: setAlwaysDeliverInSessionState,
+        }
+      : undefined;
 
   // TODO: Add MCP servers
   // densable U_c — section-order the rows we already have; do not invent.
@@ -2850,7 +3836,9 @@ export function Config({
     promptSuggestionEnabled,
     mainLoopModel,
     currentOutputStyle,
+    setCurrentOutputStyle,
     currentLanguage,
+    setCurrentLanguage,
     themeSetting,
     storageV5,
     isConnectedToIde,
@@ -2861,6 +3849,8 @@ export function Config({
     showAutoInDefaultModePicker,
     currentDefaultPermissionMode,
     mapleSundial,
+    remoteToolServingOn: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE_TOOL_SERVING),
+    alwaysDeliver: alwaysDeliverBinding,
     setTheme,
     F,
     B,
@@ -2871,14 +3861,52 @@ export function Config({
     onChangeVerbose,
     reportSaveResult,
   });
-  const settingsItems: Setting[] = weConfigPluginRows(coreSettings, enabledPlugins, {
+  const hookOrigin: ConfigHookOrigin = getIsRemoteMode() ? { kind: 'bridge' } : { kind: 'composer' };
+  const rawSettingsItems: Setting[] = weConfigPluginRows(coreSettings, enabledPlugins, {
     storageV5,
+    reloadPlugins: context.reloadPlugins,
     ...(getIsRemoteMode() ? { refusal: PLUGIN_CONFIG_REMOTE_REFUSAL } : {}),
     onSaveResult: reportSaveResult,
     onPersisted() {
       setPluginConfigEpoch(n => n + 1);
     },
-  });
+  }).map(item => wrapSettingWithConfigSetHook(item, hookOrigin));
+
+  // Official 2.1.331 `_ci`: apply plugin `config.describe` hide/relabel hooks when registered.
+  const [describeOverrides, setDescribeOverrides] = useState<Map<string, ConfigDescribeOverride>>(() => new Map());
+  const rawSettingsIdsKey = rawSettingsItems.map(item => item.id).join('\0');
+  React.useEffect(() => {
+    if (!hasMatchingFunctionHook('config.describe')) {
+      setDescribeOverrides(prev => (prev.size === 0 ? prev : new Map()));
+      return;
+    }
+    let cancelled = false;
+    void describeConfigRowsWithHooks(rawSettingsItems).then(next => {
+      if (!cancelled) setDescribeOverrides(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawSettingsIdsKey]);
+
+  const settingsItems: Setting[] = React.useMemo(() => {
+    if (describeOverrides.size === 0) return rawSettingsItems;
+    const out: Setting[] = [];
+    for (const item of rawSettingsItems) {
+      const override = describeOverrides.get(item.id);
+      if (override?.hidden) continue;
+      if (override) {
+        out.push({
+          ...item,
+          label: override.label,
+        } as Setting);
+      } else {
+        out.push(item);
+      }
+    }
+    return out;
+  }, [rawSettingsItems, describeOverrides]);
 
   // Filter settings based on search query
   const filteredSettingsItems = React.useMemo(() => {
@@ -2992,7 +4020,12 @@ export function Config({
       if (item.value === 'channel') {
         const currentIdx = NOTIF_CHANNEL_OPTIONS.indexOf(globalConfig.preferredNotifChannel);
         const nextChannel = NOTIF_CHANNEL_OPTIONS[(currentIdx + 1) % NOTIF_CHANNEL_OPTIONS.length]!;
-        W(current => ({ ...current, preferredNotifChannel: nextChannel }));
+        const res = B('preferredNotifChannel', nextChannel);
+        if (res.error) {
+          showConfigChangeResult('notifChannel', { error: res.error });
+          return;
+        }
+        setSettingsData(prev => ({ ...prev, preferredNotifChannel: nextChannel }));
         setGlobalConfig(prev => ({ ...prev, preferredNotifChannel: nextChannel }));
         logEvent('tengu_config_changed', {
           setting: 'notifChannel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -3000,7 +4033,12 @@ export function Config({
         });
       } else if (item.value === 'inputNeeded') {
         const nextVal = !(globalConfig.inputNeededNotifEnabled ?? false);
-        W(current => ({ ...current, inputNeededNotifEnabled: nextVal }));
+        const res = B('inputNeededNotifEnabled', nextVal);
+        if (res.error) {
+          showConfigChangeResult('inputNeededNotifEnabled', { error: res.error });
+          return;
+        }
+        setSettingsData(prev => ({ ...prev, inputNeededNotifEnabled: nextVal }));
         setGlobalConfig(prev => ({ ...prev, inputNeededNotifEnabled: nextVal }));
         void syncPushNotificationPreferences({ inputNeededNotifEnabled: nextVal }).catch(err => {
           logError(err instanceof Error ? err : new Error(String(err)));
@@ -3011,7 +4049,12 @@ export function Config({
         });
       } else if (item.value === 'done') {
         const nextVal = !(globalConfig.agentPushNotifEnabled ?? false);
-        W(current => ({ ...current, agentPushNotifEnabled: nextVal }));
+        const res = B('agentPushNotifEnabled', nextVal);
+        if (res.error) {
+          showConfigChangeResult('agentPushNotifEnabled', { error: res.error });
+          return;
+        }
+        setSettingsData(prev => ({ ...prev, agentPushNotifEnabled: nextVal }));
         setGlobalConfig(prev => ({ ...prev, agentPushNotifEnabled: nextVal }));
         void syncPushNotificationPreferences({ agentPushNotifEnabled: nextVal }).catch(err => {
           logError(err instanceof Error ? err : new Error(String(err)));
@@ -3027,6 +4070,7 @@ export function Config({
       globalConfig.preferredNotifChannel,
       globalConfig.inputNeededNotifEnabled,
       globalConfig.agentPushNotifEnabled,
+      showConfigChangeResult,
     ],
   );
 
@@ -3387,6 +4431,23 @@ export function Config({
       return;
     }
 
+    // Official 2.1.331 (@361646200): enforce setting.lock in interactive Config UI.
+    if (setting.lock !== undefined) {
+      if (setting.lock.source === 'policy') {
+        void refreshPolicyLimits().catch(() => {});
+      }
+      if (setting.lock.reason) {
+        addNotification({
+          key: 'config-change-refused',
+          kind: 'warning',
+          text: setting.lock.reason,
+          color: 'warning',
+          priority: 'immediate',
+        });
+      }
+      return;
+    }
+
     if (setting.type === 'boolean') {
       // densable: off→on with grantBlocker shows qAr copy; otherwise open RemoteHomeSettings confirmation.
       if (setting.id === 'remoteHomeSettings' && setting.value === false) {
@@ -3537,7 +4598,21 @@ export function Config({
       isDirty.current = true;
       const currentIndex = setting.options.indexOf(setting.value);
       const nextIndex = (currentIndex + 1) % setting.options.length;
-      setting.onChange(setting.options[nextIndex]!);
+      const pending = setting.onChange(setting.options[nextIndex]!);
+      void Promise.resolve(pending)
+        .then(result => {
+          showConfigChangeResult(setting.id, result);
+        })
+        .catch((error: unknown) => {
+          logError(error);
+          addNotification({
+            key: 'config-change-refused',
+            kind: 'warning',
+            text: `Setting change failed: ${errorMessage(error)}`,
+            color: 'warning',
+            priority: 'immediate',
+          });
+        });
       return;
     }
   }, [
@@ -3759,8 +4834,33 @@ export function Config({
             onSelect={(model, _effort) => {
               const persistAsDefault = saveModelAsDefaultRef.current;
               saveModelAsDefaultRef.current = false;
-              isDirty.current = true;
-              onChangeMainModelConfig(model, persistAsDefault);
+              const modelRow = coreSettings.find(item => item.id === 'model');
+              const commit = (chosen: string | null) => {
+                isDirty.current = true;
+                return onChangeMainModelConfig(chosen, persistAsDefault);
+              };
+              const pending =
+                modelRow !== undefined && modelRow.type === 'managedEnum' && hasMatchingFunctionHook('config.set')
+                  ? wrapSettingWithConfigSetHook(
+                      {
+                        ...modelRow,
+                        onChange: (val: string) => commit(val === 'default' ? null : val),
+                      },
+                      hookOrigin,
+                    ).onChange(model ?? 'default')
+                  : commit(model);
+              void Promise.resolve(pending)
+                .then(res => showConfigChangeResult('model', res))
+                .catch((error: unknown) => {
+                  logError(error);
+                  addNotification({
+                    key: 'model-switch-blocked',
+                    kind: 'warning',
+                    text: `Couldn't switch model: ${errorMessage(error)}`,
+                    color: 'warning',
+                    priority: 'immediate',
+                  });
+                });
               setShowSubmenu(null);
               setTabsHidden(false);
             }}
@@ -3842,24 +4942,34 @@ export function Config({
           <OutputStylePicker
             initialStyle={currentOutputStyle}
             onComplete={style => {
-              isDirty.current = true;
-              setCurrentOutputStyle(style ?? DEFAULT_OUTPUT_STYLE_NAME);
               setShowSubmenu(null);
               setTabsHidden(false);
-
-              // Save to local settings
-              reportSaveResult(
-                updateSettingsForSource('localSettings', {
-                  outputStyle: style,
-                }),
-              );
-
-              void logEvent('tengu_output_style_changed', {
-                style: (style ??
-                  DEFAULT_OUTPUT_STYLE_NAME) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                settings_source: 'localSettings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
+              const styleRow = coreSettings.find(item => item.id === 'outputStyle');
+              const commit = (chosen: string) => {
+                isDirty.current = true;
+                const nextStyle = chosen || DEFAULT_OUTPUT_STYLE_NAME;
+                setCurrentOutputStyle(nextStyle);
+                const res = reportSaveResult(
+                  updateSettingsForSource('localSettings', {
+                    outputStyle: chosen || undefined,
+                  }),
+                );
+                if (res.error) return { error: res.error };
+                void logEvent('tengu_output_style_changed', {
+                  style: nextStyle as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  settings_source: 'localSettings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+                return undefined;
+              };
+              const pending =
+                styleRow !== undefined && styleRow.type === 'managedEnum' && hasMatchingFunctionHook('config.set')
+                  ? wrapSettingWithConfigSetHook(
+                      { ...styleRow, options: undefined, onChange: commit },
+                      hookOrigin,
+                    ).onChange(style ?? DEFAULT_OUTPUT_STYLE_NAME)
+                  : commit(style ?? '');
+              void Promise.resolve(pending).then(res => showConfigChangeResult('outputStyle', res));
             }}
             onCancel={() => {
               setShowSubmenu(null);
@@ -3883,20 +4993,28 @@ export function Config({
           <LanguagePicker
             initialLanguage={currentLanguage}
             onComplete={language => {
-              isDirty.current = true;
-              setCurrentLanguage(language);
               setShowSubmenu(null);
               setTabsHidden(false);
-
-              // Save to user settings
-              F({
-                language,
-              });
-
-              void logEvent('tengu_language_changed', {
-                language: (language ?? 'default') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
+              const langRow = coreSettings.find(item => item.id === 'language');
+              const commit = (chosen: string) => {
+                isDirty.current = true;
+                const nextLang = chosen && chosen.toLowerCase() !== 'default' ? chosen : undefined;
+                setCurrentLanguage(nextLang);
+                const res = F({
+                  language: nextLang,
+                });
+                if (res.error) return { error: res.error };
+                void logEvent('tengu_language_changed', {
+                  language: (nextLang ?? 'default') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+                return undefined;
+              };
+              const pending =
+                langRow !== undefined && langRow.type === 'managedEnum' && hasMatchingFunctionHook('config.set')
+                  ? wrapSettingWithConfigSetHook({ ...langRow, onChange: commit }, hookOrigin).onChange(language ?? '')
+                  : commit(language ?? '');
+              void Promise.resolve(pending).then(res => showConfigChangeResult('language', res));
             }}
             onCancel={() => {
               setShowSubmenu(null);
@@ -4003,7 +5121,21 @@ export function Config({
               onChange={(value: string) => {
                 closeEnumPicker();
                 isDirty.current = true;
-                enumPickerSetting.onChange(value);
+                const pending = enumPickerSetting.onChange(value);
+                void Promise.resolve(pending)
+                  .then(result => {
+                    showConfigChangeResult(enumPickerSetting.id, result);
+                  })
+                  .catch((error: unknown) => {
+                    logError(error);
+                    addNotification({
+                      key: 'config-change-refused',
+                      kind: 'warning',
+                      text: `Setting change failed: ${errorMessage(error)}`,
+                      color: 'warning',
+                      priority: 'immediate',
+                    });
+                  });
               }}
               onCancel={closeEnumPicker}
             />
@@ -4044,7 +5176,21 @@ export function Config({
                   closeTextEdit();
                   if (next !== formatSettingDisplayValue(textEditSetting)) {
                     isDirty.current = true;
-                    textEditSetting.onChange(next);
+                    const pending = textEditSetting.onChange(next);
+                    void Promise.resolve(pending)
+                      .then(result => {
+                        showConfigChangeResult(textEditSetting.id, result);
+                      })
+                      .catch((error: unknown) => {
+                        logError(error);
+                        addNotification({
+                          key: 'config-change-refused',
+                          kind: 'warning',
+                          text: `Setting change failed: ${errorMessage(error)}`,
+                          color: 'warning',
+                          priority: 'immediate',
+                        });
+                      });
                   }
                 }}
                 onExit={closeTextEdit}
@@ -4259,9 +5405,18 @@ export function Config({
                         >
                           {setting.type === 'boolean' ? (
                             <>
-                              <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
+                              <Text
+                                color={isSelected ? 'suggestion' : undefined}
+                                dimColor={setting.lock !== undefined && !isSelected}
+                                wrap="truncate-end"
+                              >
                                 {formatConfigOnOffValue(setting.value)}
                               </Text>
+                              {setting.lock?.reason && (
+                                <Text dimColor wrap="truncate-end">
+                                  {` · ${setting.lock.reason}`}
+                                </Text>
+                              )}
                               {showThinkingWarning && setting.id === 'thinking' && (
                                 <Text color="warning" wrap="truncate-end">
                                   {' '}
@@ -4275,15 +5430,27 @@ export function Config({
                               )}
                             </>
                           ) : setting.id === 'theme' ? (
-                            <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
+                            <Text
+                              color={isSelected ? 'suggestion' : undefined}
+                              dimColor={setting.lock !== undefined && !isSelected}
+                              wrap="truncate-end"
+                            >
                               {THEME_LABELS[setting.value.toString()] ?? setting.value.toString()}
                             </Text>
                           ) : setting.id === 'notifChannel' && !mapleSundial ? (
-                            <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
+                            <Text
+                              color={isSelected ? 'suggestion' : undefined}
+                              dimColor={setting.lock !== undefined && !isSelected}
+                              wrap="truncate-end"
+                            >
                               <NotifChannelLabel value={setting.value.toString()} />
                             </Text>
                           ) : setting.id === 'permissionMode' ? (
-                            <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
+                            <Text
+                              color={isSelected ? 'suggestion' : undefined}
+                              dimColor={setting.lock !== undefined && !isSelected}
+                              wrap="truncate-end"
+                            >
                               {permissionModeShortTitle(setting.value as PermissionMode)}
                               {(setting as { isDefaultValue?: boolean }).isDefaultValue ? ' (default)' : ''}
                             </Text>
@@ -4295,11 +5462,23 @@ export function Config({
                               </Text>
                             </Box>
                           ) : (
-                            <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
-                              {formatConfigOnOffValue(setting.value.toString(), setting.provided !== undefined)}
-                            </Text>
+                            <>
+                              <Text
+                                color={isSelected ? 'suggestion' : undefined}
+                                dimColor={setting.lock !== undefined && !isSelected}
+                                wrap="truncate-end"
+                              >
+                                {formatConfigOnOffValue(setting.value.toString(), setting.provided !== undefined)}
+                              </Text>
+                              {setting.lock?.reason && (
+                                <Text dimColor wrap="truncate-end">
+                                  {` · ${setting.lock.reason}`}
+                                </Text>
+                              )}
+                            </>
                           )}
                           {mapleSundial &&
+                            setting.lock === undefined &&
                             ((setting.type === 'enum' && setting.pickToCommit === true) ||
                               (setting.type === 'managedEnum' &&
                                 !isMapleJrExternalIncludes(setting) &&
@@ -4330,12 +5509,24 @@ export function Config({
               !isSearchMode &&
               (() => {
                 const activeSetting = filteredSettingsItems[selectedIndex];
-                const overrideNote = activeSetting ? getConfigOverrideNotice(activeSetting.id) : undefined;
-                return overrideNote ? (
-                  <Text color="warning" wrap="wrap">
-                    {overrideNote}
-                  </Text>
-                ) : null;
+                const lockReason = activeSetting?.lock?.reason;
+                const overrideNote = activeSetting
+                  ? (activeSetting.notice ?? getConfigOverrideNotice(activeSetting.id))
+                  : undefined;
+                return (
+                  <>
+                    {lockReason ? (
+                      <Text dimColor wrap="wrap">
+                        {lockReason}
+                      </Text>
+                    ) : null}
+                    {overrideNote ? (
+                      <Text color="warning" wrap="wrap">
+                        {overrideNote}
+                      </Text>
+                    ) : null}
+                  </>
+                );
               })()}
             {saveFailedWarning ? (
               <Text color="warning" wrap="wrap">

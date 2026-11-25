@@ -95,6 +95,7 @@ import {
   userFacingName,
 } from './UI.js'
 import {
+  applyEditToFile,
   areFileEditsInputsEquivalent,
   findActualString,
   getFastPatchFromContents,
@@ -564,9 +565,8 @@ export const FileEditTool = buildTool({
       file,
       () => {
         // Simulate the edit to get the final content using the exact same logic as the tool
-        return replace_all
-          ? file.replaceAll(actualOldString, new_string)
-          : file.replace(actualOldString, new_string)
+        // (avoids String.prototype.replace $$ / $& corruption and matches trailing-newline cleanup).
+        return applyEditToFile(file, actualOldString, new_string, replace_all)
       },
     )
 
