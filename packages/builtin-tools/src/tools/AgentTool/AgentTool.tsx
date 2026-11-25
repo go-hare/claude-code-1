@@ -45,7 +45,13 @@ import {
   updateProgressFromStreamTokenEstimate,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import { addKeepaliveReason, agentKeepaliveReason } from 'src/utils/task/framework.js';
-import { createTaskRegistry } from 'src/utils/taskRegistry.js';
+import {
+  clearTaskTranscriptInProgressToolUseIDs,
+  createTaskRegistry,
+  seedTaskTranscriptMessages,
+  setTaskTranscriptTurnStart,
+  updateTaskTranscriptMessage,
+} from 'src/utils/taskRegistry.js';
 import {
   checkRemoteAgentEligibility,
   formatPreconditionError,
@@ -1684,6 +1690,13 @@ export const AgentTool = buildTool({
         ...(isDelegatedObservation(getAgentContext()) ? { delegatedObservation: true } : {}),
       };
 
+      // Seed initial prompt messages into AppState.transcripts so opening the
+      // subagent view immediately after spawn shows the prompt without waiting
+      // on disk persistence (fork subagents load inherited context from disk).
+      if (!isForkPath) {
+        seedTaskTranscriptMessages(agentBackgroundTask.agentId, promptMessages, rootSetAppState);
+      }
+
       // Workload propagation: handlePromptSubmit wraps the entire turn in
       // runWithWorkload (AsyncLocalStorage). ALS context is captured at
       // invocation time — when this `void` fires — and survives every await
@@ -1837,6 +1850,25 @@ export const AgentTool = buildTool({
                 getAppState: toolUseContext.getAppState,
               });
               foregroundTaskId = registration.taskId;
+              // Register name → agentId on foreground path too so panel label and
+              // SendMessage routing work if foreground agent is viewed, mid-backgrounded,
+              // or resumed after completion (matches official 2.1.331 registerName).
+              if (name && !isReservedSpawnAgentName(name)) {
+                const fgId = asAgentId(foregroundTaskId);
+                rootSetAppState(prev => {
+                  const next = new Map(prev.agentNameRegistry);
+                  next.set(name, fgId);
+                  return { ...prev, agentNameRegistry: next };
+                });
+              } else if (name && isReservedSpawnAgentName(name)) {
+                logForDebugging(
+                  `[registerName] refused reserved name "${name}" for ${foregroundTaskId} — SendMessage routes it to the main conversation`,
+                );
+              }
+              if (!isForkPath) {
+                seedTaskTranscriptMessages(foregroundTaskId, promptMessages, rootSetAppState);
+              }
+              setTaskTranscriptTurnStart(foregroundTaskId, agentStartTime, rootSetAppState);
               backgroundPromise = registration.backgroundSignal.then(() => ({
                 type: 'background' as const,
               }));
@@ -2045,6 +2077,9 @@ export const AgentTool = buildTool({
                           }
                           agentMessages.push(msg);
                           isIdleTracker.track(msg);
+                          // Official 2.1.331 `mwe`: mirror mid-backgrounded stream
+                          // messages into AppState.transcripts[taskId] too.
+                          updateTaskTranscriptMessage(backgroundedTaskId, msg, rootSetAppState);
 
                           // Rebuild so late message_delta usage mutations stick.
                           rebuildProgressFromMessages(
@@ -2084,6 +2119,7 @@ export const AgentTool = buildTool({
                         }
                         // Final rebuild after stream ends so last message_delta
                         // usage mutations are reflected before completion.
+                        clearTaskTranscriptInProgressToolUseIDs(backgroundedTaskId, rootSetAppState);
                         rebuildProgressFromMessages(
                           tracker,
                           agentMessages,
@@ -2306,6 +2342,10 @@ export const AgentTool = buildTool({
                   toolUseContext.options.tools,
                 );
                 if (foregroundTaskId) {
+                  // Official 2.1.331 `mwe`: mirror foreground stream messages into
+                  // AppState.transcripts[taskId] so viewing a running foreground
+                  // subagent displays live turns and tool activity.
+                  updateTaskTranscriptMessage(foregroundTaskId, message, rootSetAppState);
                   // Always push token progress (not only on tool_use messages).
                   // Text-only turns still need footer updates after message_delta.
                   updateAsyncAgentProgress(

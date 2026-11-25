@@ -510,6 +510,18 @@ export async function clearConversation({
               viewSelectionMode: 'none' as const,
             }
           : {}
+      // Official 2.1.331 (@335669436): prune AppState.transcripts entries for killed tasks.
+      let nextTranscripts = prev.transcripts
+      if (nextTranscripts && killedTaskIds.length > 0) {
+        for (const id of killedTaskIds) {
+          if (id in nextTranscripts) {
+            if (nextTranscripts === prev.transcripts) {
+              nextTranscripts = { ...prev.transcripts }
+            }
+            delete nextTranscripts[id]
+          }
+        }
+      }
 
       return {
         ...prev,
@@ -517,6 +529,9 @@ export async function clearConversation({
         ...clearedPlanDocPatch,
         activeGoal: undefined,
         tasks: nextTasks,
+        ...(nextTranscripts !== prev.transcripts
+          ? { transcripts: nextTranscripts }
+          : {}),
         ...clearedViewingAgentPatch,
         runningSubagents:
           survivingAgentTaskCount === 0 ? 0 : prev.runningSubagents,

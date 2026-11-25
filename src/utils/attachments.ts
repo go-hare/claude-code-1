@@ -19,6 +19,7 @@ import {
 } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import { FileTooLargeError, readFileInRange } from './readFileInRange.js'
 import { expandPath } from './path.js'
+import { hashContent } from './hash.js'
 import { mergePendingNestedMemoryTriggers } from './propagateNestedMemory.js'
 import { asStringArray, countCharInString } from './stringUtils.js'
 import { uniq } from './array.js'
@@ -4388,7 +4389,10 @@ export function filterToBundledAndMcp(commands: Command[]): Command[] {
 function getSkillDigest(cmd: Command): string {
   const desc = cmd.description ?? ''
   const when = cmd.type === 'prompt' ? (cmd.whenToUse ?? '') : ''
-  return Bun.hash(`${cmd.name}\0${desc}\0${when}`).toString(36)
+  const key = `${cmd.name}\0${desc}\0${when}`
+  return typeof Bun !== 'undefined'
+    ? Bun.hash(key).toString(36)
+    : hashContent(key)
 }
 
 export function collectPriorSkillListings(

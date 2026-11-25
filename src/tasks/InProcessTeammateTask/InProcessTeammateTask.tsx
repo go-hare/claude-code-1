@@ -15,6 +15,7 @@ import { logForDebugging } from '../../utils/debug.js';
 import { createUserMessage } from '../../utils/messages.js';
 import { killInProcessTeammate } from '../../utils/swarm/spawnInProcess.js';
 import { updateTaskState } from '../../utils/task/framework.js';
+import { applyMessageToInProgressToolUseIDs, EMPTY_TASK_TRANSCRIPT } from '../../utils/taskRegistry.js';
 import type { InProcessTeammateTaskState, PendingTeammateUserMessage } from './types.js';
 import { appendCappedMessage, isInProcessTeammateTask } from './types.js';
 
@@ -46,26 +47,44 @@ export function requestTeammateShutdown(taskId: string, setAppState: SetAppState
 }
 
 /**
- * Append a message to a teammate's conversation history.
- * Used for zoomed view to show the teammate's conversation.
+ * Official 2.1.331 `OYr` (@342598625): append a message to a teammate's
+ * conversation history in both `AppState.transcripts[taskId]` and legacy
+ * `task.messages` (capped).
  */
 export function appendTeammateMessage(taskId: string, message: Message, setAppState: SetAppState): void {
-  updateTaskState<InProcessTeammateTaskState>(taskId, setAppState, task => {
-    if (task.status !== 'running') {
-      return task;
+  setAppState(prev => {
+    const task = prev.tasks[taskId];
+    if (!task || !isInProcessTeammateTask(task) || task.status !== 'running') {
+      return prev;
     }
-
+    const currentTr = prev.transcripts?.[taskId] ?? EMPTY_TASK_TRANSCRIPT;
+    const nextTrMessages = appendCappedMessage(currentTr.messages, message);
+    const toolPatch = applyMessageToInProgressToolUseIDs(currentTr.inProgressToolUseIDs, message);
     return {
-      ...task,
-      messages: appendCappedMessage(task.messages, message),
+      ...prev,
+      tasks: {
+        ...prev.tasks,
+        [taskId]: {
+          ...task,
+          messages: appendCappedMessage(task.messages, message),
+        },
+      },
+      transcripts: {
+        ...prev.transcripts,
+        [taskId]: {
+          ...currentTr,
+          messages: nextTrMessages,
+          ...toolPatch,
+        },
+      },
     };
   });
 }
 
 /**
- * Inject a user message to a teammate's pending queue.
- * Used when viewing a teammate's transcript to send typed messages to them.
- * Also adds the message to task.messages so it appears immediately in the transcript.
+ * Official 2.1.331 `ren` (@342598966): inject a user message to a teammate's
+ * pending queue and mirror it immediately onto both `AppState.transcripts[taskId]`
+ * and legacy `task.messages`.
  */
 export function injectUserMessageToTeammate(
   taskId: string,
@@ -80,12 +99,16 @@ export function injectUserMessageToTeammate(
   setAppState: SetAppState,
 ): boolean {
   let injected = false;
-  updateTaskState<InProcessTeammateTaskState>(taskId, setAppState, task => {
+  setAppState(prev => {
+    const task = prev.tasks[taskId];
+    if (!task || !isInProcessTeammateTask(task)) {
+      return prev;
+    }
     // Allow message injection when teammate is running or idle (waiting for input)
     // Only reject if teammate is in a terminal state
     if (isTerminalTaskStatus(task.status)) {
       logForDebugging(`Dropping message for teammate task ${taskId}: task status is "${task.status}"`);
-      return task;
+      return prev;
     }
 
     injected = true;
@@ -107,11 +130,26 @@ export function injectUserMessageToTeammate(
     if (options?.origin !== undefined) {
       userMessageArgs.origin = options.origin;
     }
+    const userMessage = createUserMessage(userMessageArgs);
+    const currentTr = prev.transcripts?.[taskId] ?? EMPTY_TASK_TRANSCRIPT;
 
     return {
-      ...task,
-      pendingUserMessages: [...task.pendingUserMessages, pendingMessage],
-      messages: appendCappedMessage(task.messages, createUserMessage(userMessageArgs)),
+      ...prev,
+      tasks: {
+        ...prev.tasks,
+        [taskId]: {
+          ...task,
+          pendingUserMessages: [...task.pendingUserMessages, pendingMessage],
+          messages: appendCappedMessage(task.messages, userMessage),
+        },
+      },
+      transcripts: {
+        ...prev.transcripts,
+        [taskId]: {
+          ...currentTr,
+          messages: appendCappedMessage(currentTr.messages, userMessage),
+        },
+      },
     };
   });
   return injected;

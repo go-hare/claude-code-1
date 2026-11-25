@@ -70,7 +70,7 @@ import {
   sweepStaleKeepaliveReasons,
   updateTaskState,
 } from '../../utils/task/framework.js';
-import { createTaskRegistry, type TaskRegistry } from '../../utils/taskRegistry.js';
+import { createTaskRegistry, type TaskRegistry, updateTaskTranscriptMessage } from '../../utils/taskRegistry.js';
 import { emitTaskProgress } from '../../utils/task/sdkProgress.js';
 import { createSignal } from '../../utils/signal.js';
 import { roughTokenCountEstimationForMessages } from '../../services/tokenEstimation.js';
@@ -1371,20 +1371,18 @@ export function queuePendingMessage(
 }
 
 /**
- * Append a message to task.messages so it appears in the viewed transcript
- * immediately. Caller constructs the Message (breaks the messages.ts cycle).
+ * Official 2.1.331 `yNn` (@321358559): append a message to `AppState.transcripts[taskId]`
+ * so it appears in the viewed transcript immediately (even before task registration).
+ * Caller constructs the Message (breaks the messages.ts cycle).
  * queuePendingMessage and resumeAgentBackground route the prompt to the
- * agent's API input but don't touch the display.
+ * agent's API input; this mirrors it onto the transcript store.
  */
 export function appendMessageToLocalAgent(
   taskId: string,
   message: Message,
   setAppState: (f: (prev: AppState) => AppState) => void,
 ): void {
-  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => ({
-    ...task,
-    messages: [...(task.messages ?? []), message],
-  }));
+  updateTaskTranscriptMessage(taskId, message, setAppState);
 }
 
 /**
@@ -2033,6 +2031,9 @@ export function killAsyncAgent(
     };
   });
   if (killed) {
+    registry.updateTranscript?.(taskId, tr =>
+      tr.inProgressToolUseIDs.size === 0 ? tr : { ...tr, inProgressToolUseIDs: new Set<string>() },
+    );
     clearDeferredAgentProgressRebuild(taskId);
     clearAgentPermissionWaitsForAgent(taskId);
     resetImageRereadState(taskId);
@@ -2549,9 +2550,9 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
       resuming: false,
       adoptResumePending: false,
       result,
-      // 2.1.323 #2155: release completed subagent transcript from memory once
-      // finalized (unless parked interactive where user can still view live chat).
-      messages: isParkedKeepaliveAgent(completedCandidate) && !getIsNonInteractiveSession() ? task.messages : [],
+      // Official 2.1.331 `rEi` (@321372600): do NOT wipe messages/transcripts on
+      // completion — transcript stays viewable while retained or during panel grace
+      // and is freed by evictTerminalTask / applyTaskOffsetsAndEvictions / remove / /clear.
       progress: {
         toolUseCount,
         tokenCount,
@@ -2575,6 +2576,9 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
     return next;
   });
   if (completed) {
+    registry.updateTranscript?.(taskId, tr =>
+      tr.inProgressToolUseIDs.size === 0 ? tr : { ...tr, inProgressToolUseIDs: new Set<string>() },
+    );
     clearDeferredAgentProgressRebuild(taskId);
     clearAgentPermissionWaitsForAgent(taskId);
     resetImageRereadState(taskId);
@@ -2622,8 +2626,8 @@ export function failAgentTask(taskId: string, error: string, registry: TaskRegis
       resuming: false,
       adoptResumePending: false,
       error,
-      // 2.1.323 #2155: release failed subagent transcript from memory
-      messages: [],
+      // Official 2.1.331 `Qds` (@321374350): do NOT wipe messages/transcripts on
+      // failure — transcript stays viewable until evicted or cleared.
       endTime: Date.now(),
       // densable eto: leave keepaliveReasons as-is (no bot arm on fail path)
       evictAfter: computePanelEvictAfter(task, { park: false }),
@@ -2633,6 +2637,9 @@ export function failAgentTask(taskId: string, error: string, registry: TaskRegis
     };
   });
   if (failed) {
+    registry.updateTranscript?.(taskId, tr =>
+      tr.inProgressToolUseIDs.size === 0 ? tr : { ...tr, inProgressToolUseIDs: new Set<string>() },
+    );
     clearDeferredAgentProgressRebuild(taskId);
     clearAgentPermissionWaitsForAgent(taskId);
     resetImageRereadState(taskId);
@@ -3072,7 +3079,19 @@ export function unregisterAgentForeground(
     cleanupFn = task.unregisterCleanup;
 
     const { [taskId]: removed, ...rest } = prev.tasks;
-    return { ...prev, tasks: rest };
+    const prevTranscripts = prev.transcripts;
+    let nextTranscripts = prevTranscripts;
+    if (prevTranscripts && taskId in prevTranscripts) {
+      const { [taskId]: _removedTr, ...restTr } = prevTranscripts;
+      nextTranscripts = restTr;
+    }
+    const viewingThis = prev.viewingAgentTaskId === taskId;
+    return {
+      ...prev,
+      tasks: rest,
+      ...(nextTranscripts !== prevTranscripts ? { transcripts: nextTranscripts } : {}),
+      ...(viewingThis ? { viewingAgentTaskId: undefined, viewSelectionMode: 'none' as const } : {}),
+    };
   });
 
   // Call cleanup outside of the state updater (avoid side effects in updater)

@@ -529,19 +529,23 @@ function SpinnerWithVerbInner({
   const hasRunningTeammates = runningTeammates.length > 0;
   const allIdle = hasRunningTeammates && runningTeammates.every(t => t.isIdle);
 
-  // Gather aggregate token stats from all running agents.
+  // Gather aggregate token stats from all running agents only when viewing the
+  // main thread; when viewing a specific subagent/teammate, responseLengthRef
+  // (from sje) already reflects that agent's own token count.
   let teammateTokens = 0;
-  for (const task of Object.values(tasks)) {
-    if (task.status !== 'running') continue;
-    if (isInProcessTeammateTask(task)) {
-      if (task.progress?.tokenCount) {
-        teammateTokens += task.progress.tokenCount;
+  if (isMainSession) {
+    for (const task of Object.values(tasks)) {
+      if (task.status !== 'running') continue;
+      if (isInProcessTeammateTask(task)) {
+        if (task.progress?.tokenCount) {
+          teammateTokens += task.progress.tokenCount;
+        }
+        continue;
       }
-      continue;
-    }
-    if (isLocalAgentTask(task)) {
-      if (task.progress?.tokenCount) {
-        teammateTokens += task.progress.tokenCount;
+      if (isLocalAgentTask(task)) {
+        if (task.progress?.tokenCount) {
+          teammateTokens += task.progress.tokenCount;
+        }
       }
     }
   }
@@ -594,7 +598,7 @@ function SpinnerWithVerbInner({
   const customTipsActive =
     tipsOverride?.excludeDefault === true && (Boolean(tipsOverride.tipsFile) || (tipsOverride.tips?.length ?? 0) > 0);
   const tipsEnabled = settings.spinnerTipsEnabled !== false;
-  const showBtwTip = tipsEnabled && elapsedSnapshot > 30_000 && !getGlobalConfig().btwUseCount;
+  const showBtwTip = isMainSession && tipsEnabled && elapsedSnapshot > 30_000 && !getGlobalConfig().btwUseCount;
 
   const effectiveTip = customTipsActive ? spinnerTip : showBtwTip && !nextTask ? BTW_SPINNER_TIP : spinnerTip;
   const tipLabel = resolveSpinnerTipLabel(effectiveTip, spinnerTip, spinnerTipLabel);

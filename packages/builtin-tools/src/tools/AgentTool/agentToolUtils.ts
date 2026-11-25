@@ -82,7 +82,13 @@ import {
   classifyYoloAction,
 } from 'src/utils/permissions/yoloClassifier.js'
 import { emitTaskProgress as emitTaskProgressEvent } from 'src/utils/task/sdkProgress.js'
-import { createTaskRegistry } from 'src/utils/taskRegistry.js'
+import {
+  clearTaskTranscriptInProgressToolUseIDs,
+  createTaskRegistry,
+  EMPTY_TASK_TRANSCRIPT,
+  setTaskTranscriptTurnStart,
+  updateTaskTranscriptMessage,
+} from 'src/utils/taskRegistry.js'
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import {
   formatCyberSafeguardDefenseAccessNote,
@@ -1378,7 +1384,9 @@ export function parkAgentOnKeepaliveDeferNotify(
   setAppState(prev => {
     const t = prev.tasks[taskId]
     if (!isLocalAgentTask(t)) return prev
-    const base = t.messages ?? []
+    const current = prev.transcripts?.[taskId] ?? EMPTY_TASK_TRANSCRIPT
+    const base =
+      current.messages.length > 0 ? current.messages : (t.messages ?? [])
     const filtered = base.filter(
       m =>
         !(
@@ -1388,9 +1396,13 @@ export function parkAgentOnKeepaliveDeferNotify(
     )
     return {
       ...prev,
-      tasks: {
-        ...prev.tasks,
-        [taskId]: { ...t, messages: [...filtered, turnDuration] },
+      transcripts: {
+        ...prev.transcripts,
+        [taskId]: {
+          ...current,
+          messages: [...filtered, turnDuration],
+          inProgressToolUseIDs: new Set<string>(),
+        },
       },
     }
   })
@@ -1615,6 +1627,9 @@ export async function runAsyncAgentLifecycle({
         rootSetAppState,
       )
     }
+    // Official 2.1.331 `pQo(A, e, { turnStartTime: gt })` (@324590200):
+    // stamp per-turn wall-clock start so focused spinner shows this turn's elapsed time.
+    setTaskTranscriptTurnStart(taskId, Date.now(), rootSetAppState)
     armStallWatchdog()
     for await (const message of makeStream(
       onCacheSafeParams,
@@ -1634,21 +1649,11 @@ export async function runAsyncAgentLifecycle({
         lastStallBumpAt = nowMs
         armStallWatchdog()
       }
-      // Append immediately when UI holds the task (retain). Bootstrap reads
-      // disk in parallel and UUID-merges the prefix — disk-write-before-yield
-      // means live is always a suffix of disk, so merge is order-correct.
-      rootSetAppState(prev => {
-        const t = prev.tasks[taskId]
-        if (!isLocalAgentTask(t) || !t.retain) return prev
-        const base = t.messages ?? []
-        return {
-          ...prev,
-          tasks: {
-            ...prev.tasks,
-            [taskId]: { ...t, messages: [...base, message] },
-          },
-        }
-      })
+      // Official 2.1.331 `mwe` (@324596523): write every streamed message into
+      // `AppState.transcripts[taskId]` unconditionally (with UUID dedup + live
+      // `inProgressToolUseIDs` tracking). Disk bootstrap merges any earlier
+      // prefix when the user opens the view; eviction frees the entry on GC.
+      updateTaskTranscriptMessage(taskId, message, rootSetAppState)
       // Rebuild from the full message list so in-place usage mutations from
       // message_delta (after content_block_stop yield) are reflected in the
       // footer token count. Incremental-only updates permanently stuck at 0.
@@ -1690,6 +1695,7 @@ export async function runAsyncAgentLifecycle({
 
     // Final rebuild after stream ends — last message_delta may have mutated
     // usage after the final content_block_stop yield with no further messages.
+    clearTaskTranscriptInProgressToolUseIDs(taskId, rootSetAppState)
     rebuildProgressFromMessages(
       tracker,
       agentMessages,

@@ -30,6 +30,7 @@ import {
   substituteArguments,
 } from '../utils/argumentSubstitution.js'
 import { logForDebugging } from '../utils/debug.js'
+import { hashContent } from '../utils/hash.js'
 import {
   awaitPendingSkillDownload,
   hasPendingSkillDownload,
@@ -565,7 +566,11 @@ export function createSkillCommand({
     paths: finalPaths,
     contentLength: markdownContent.length,
     // densable Xen: contentHash:i??Bun.hash(o).toString(36)
-    contentHash: contentHash ?? Bun.hash(markdownContent).toString(36),
+    contentHash:
+      contentHash ??
+      (typeof Bun !== 'undefined'
+        ? Bun.hash(markdownContent).toString(36)
+        : hashContent(markdownContent)),
     isHidden: !userInvocable,
     progressMessage: 'running',
     userFacingName(): string {
@@ -776,7 +781,10 @@ async function loadSkillsFromSkillsDir(
           skillName,
           markdownContent,
           // densable disk load: contentHash:Bun.hash(p).toString(36) on full file
-          contentHash: Bun.hash(content).toString(36),
+          contentHash:
+            typeof Bun !== 'undefined'
+              ? Bun.hash(content).toString(36)
+              : hashContent(content),
           source,
           baseDir: skillDirPath,
           loadedFrom,

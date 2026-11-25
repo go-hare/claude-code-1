@@ -1,5 +1,6 @@
 import { LRUCache } from 'lru-cache'
 import { normalize } from 'path'
+import { hashContent } from './hash.js'
 
 export type FileState = {
   content: string
@@ -67,7 +68,10 @@ export function normalizeLineEndingsForHash(content: string): string {
 
 /** densable DAu — content fingerprint for xOe. */
 export function fileStateContentHash(content: string): string {
-  return Bun.hash(normalizeLineEndingsForHash(content)).toString(36)
+  const normalized = normalizeLineEndingsForHash(content)
+  return typeof Bun !== 'undefined'
+    ? Bun.hash(normalized).toString(36)
+    : hashContent(normalized)
 }
 
 /**

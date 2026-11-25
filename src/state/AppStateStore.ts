@@ -293,6 +293,9 @@ export type SessionAppState = DeepImmutable<{
     [taskId: string]: {
       messages: readonly Message[]
       inProgressToolUseIDs: Set<string>
+      toolWindowStartTime?: number
+      turnStartTime?: number
+      totalPausedMs?: number
     }
   }
   // Name → AgentId registry populated by Agent tool when `name` is provided.

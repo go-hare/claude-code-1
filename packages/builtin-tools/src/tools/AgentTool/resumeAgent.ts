@@ -574,11 +574,13 @@ async function resumeAgentBackgroundAfterClaim({
           err instanceof Error ? err.message : String(err),
         )
   }
-  // densable Aye / #985: disk missing or partial → merge/fallback to
-  // in-memory mirror (`LocalAgentTask.messages`) written during the run.
-  const liveTasks = toolUseContext.getAppState().tasks
-  const task = liveTasks?.[agentId]
-  const mirrored =
+  // densable Aye / #985 / Official 2.1.331 `Jo` (@324587300): disk missing or
+  // partial → merge/fallback to in-memory `AppState.transcripts[agentId]`
+  // (or legacy `task.messages`) mirrored during the run.
+  const appStateForMirror = toolUseContext.getAppState()
+  const transcriptMirror = appStateForMirror.transcripts?.[agentId]?.messages
+  const task = appStateForMirror.tasks?.[agentId]
+  const legacyTaskMessages =
     task &&
     typeof task === 'object' &&
     'messages' in task &&
@@ -586,6 +588,10 @@ async function resumeAgentBackgroundAfterClaim({
     task.messages.length > 0
       ? (task.messages as NonNullable<typeof transcript>['messages'])
       : undefined
+  const mirrored =
+    transcriptMirror && transcriptMirror.length > 0
+      ? (transcriptMirror as NonNullable<typeof transcript>['messages'])
+      : legacyTaskMessages
   if (!transcript && mirrored) {
     logForDebugging(
       `[resumeAgentBackground ${agentId}] disk transcript missing; using ${mirrored.length} in-memory messages mirrored during the run`,

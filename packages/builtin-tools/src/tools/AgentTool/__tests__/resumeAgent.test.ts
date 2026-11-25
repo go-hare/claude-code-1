@@ -62,14 +62,14 @@ describe('resumeAgent', () => {
     expect(tasks[taskId]?.resuming).toBe(false)
   })
 
-  test('disk transcript missing uses in-memory task.messages before throw', () => {
-    // densable 2.1.216 Aye: P = disk; if (!P) mirror g.getTranscript messages
+  test('disk transcript missing uses in-memory transcripts / task.messages before throw', () => {
+    // densable 2.1.216 Aye / Official 2.1.331 `Jo`: P = disk; if (!P) mirror transcripts / task.messages
     const src = readFileSync(join(import.meta.dir, '../resumeAgent.ts'), 'utf8')
     expect(src).toContain('disk transcript missing; using')
     expect(src).toContain('in-memory messages mirrored during the run')
     expect(src).toContain('contentReplacements: []')
     expect(src).toMatch(
-      /if \(!transcript\) \{[\s\S]*?task\.messages[\s\S]*?if \(!transcript\) \{[\s\S]*?No transcript found for agent ID/,
+      /transcripts\?\.\[agentId\]\?\.messages[\s\S]*?task\.messages[\s\S]*?if \(!transcript && mirrored\) \{[\s\S]*?if \(!transcript\) \{[\s\S]*?No transcript found for agent ID/,
     )
   })
 

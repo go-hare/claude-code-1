@@ -41,6 +41,10 @@ import type {
 } from '../../tasks/InProcessTeammateTask/types.js'
 import { appendCappedMessage } from '../../tasks/InProcessTeammateTask/types.js'
 import {
+  EMPTY_TASK_TRANSCRIPT,
+  setTaskTranscriptTurnStart,
+} from '../taskRegistry.js'
+import {
   createActivityDescriptionResolver,
   createProgressTracker,
   getProgressUpdate,
@@ -1329,18 +1333,33 @@ export async function runInProcessTeammate(
   await tryClaimNextTask(initialTaskListId, identity.agentName)
 
   try {
-    // Add initial prompt to task.messages for display (wrapped with XML)
-    updateTaskState(
-      taskId,
-      task => ({
-        ...task,
-        messages: appendCappedMessage(
-          task.messages,
-          createUserMessage({ content: wrappedInitialPrompt }),
-        ),
-      }),
-      setAppState,
-    )
+    // Official 2.1.331 (@351220377): mirror initial prompt to both
+    // AppState.transcripts[taskId] and legacy task.messages.
+    const initialPromptMsg = createUserMessage({
+      content: wrappedInitialPrompt,
+    })
+    setAppState(prev => {
+      const task = prev.tasks[taskId]
+      if (!task || task.type !== 'in_process_teammate') return prev
+      const currentTr = prev.transcripts?.[taskId] ?? EMPTY_TASK_TRANSCRIPT
+      return {
+        ...prev,
+        tasks: {
+          ...prev.tasks,
+          [taskId]: {
+            ...task,
+            messages: appendCappedMessage(task.messages, initialPromptMsg),
+          },
+        },
+        transcripts: {
+          ...prev.transcripts,
+          [taskId]: {
+            ...currentTr,
+            messages: appendCappedMessage(currentTr.messages, initialPromptMsg),
+          },
+        },
+      }
+    })
 
     // Per-teammate content replacement state. The while-loop below calls
     // runAgent repeatedly over an accumulating `allMessages` buffer (which
@@ -1365,12 +1384,14 @@ export async function runInProcessTeammate(
       // The lifecycle abortController still kills the whole teammate if needed.
       const currentWorkAbortController = createAbortController()
 
-      // Store the work controller in task state so UI can abort it
+      // Store the work controller in task state so UI can abort it, and stamp
+      // Official 2.1.331 `turnStartTime` (@351222948) on AppState.transcripts[taskId].
       updateTaskState(
         taskId,
         task => ({ ...task, currentWorkAbortController }),
         setAppState,
       )
+      setTaskTranscriptTurnStart(taskId, Date.now(), setAppState)
 
       // Prepare prompt messages for this iteration
       // For the first iteration, start fresh
@@ -1439,14 +1460,25 @@ export async function runInProcessTeammate(
         allMessages.length = 0
         allMessages.push(...contextMessages)
 
-        // Mirror compaction into task.messages — otherwise the AppState
-        // mirror grows unbounded (500 turns = 500+ messages, 10-50MB).
-        // Replace with the compacted messages, matching allMessages.
-        updateTaskState(
-          taskId,
-          task => ({ ...task, messages: [...contextMessages, userMessage] }),
-          setAppState,
-        )
+        // Official 2.1.331 (@351222029): mirror compaction into both
+        // AppState.transcripts[taskId] and legacy task.messages.
+        const compactedMessages = [...contextMessages, userMessage]
+        setAppState(prev => {
+          const task = prev.tasks[taskId]
+          if (!task || task.type !== 'in_process_teammate') return prev
+          const currentTr = prev.transcripts?.[taskId] ?? EMPTY_TASK_TRANSCRIPT
+          return {
+            ...prev,
+            tasks: {
+              ...prev.tasks,
+              [taskId]: { ...task, messages: compactedMessages },
+            },
+            transcripts: {
+              ...prev.transcripts,
+              [taskId]: { ...currentTr, messages: compactedMessages },
+            },
+          }
+        })
       }
 
       // Pass previous messages as context to preserve conversation history
@@ -1578,67 +1610,93 @@ export async function runInProcessTeammate(
               )
               const progress = getProgressUpdate(tracker, iterationMessages)
 
-              updateTaskState(
-                taskId,
-                task => {
-                  // Track in-progress tool use IDs for animation in transcript view
-                  let inProgressToolUseIDs = task.inProgressToolUseIDs
-                  if (message.type === 'assistant') {
-                    for (const block of Array.isArray(message.message!.content)
-                      ? message.message!.content
-                      : []) {
-                      if (
-                        typeof block !== 'string' &&
-                        block.type === 'tool_use'
-                      ) {
-                        inProgressToolUseIDs = new Set([
-                          ...(inProgressToolUseIDs ?? []),
-                          block.id,
-                        ])
-                      }
+              setAppState(prev => {
+                const task = prev.tasks[taskId]
+                if (!task || task.type !== 'in_process_teammate') return prev
+                // Track in-progress tool use IDs for animation in transcript view
+                let inProgressToolUseIDs = task.inProgressToolUseIDs
+                if (message.type === 'assistant') {
+                  for (const block of Array.isArray(message.message!.content)
+                    ? message.message!.content
+                    : []) {
+                    if (
+                      typeof block !== 'string' &&
+                      block.type === 'tool_use'
+                    ) {
+                      inProgressToolUseIDs = new Set([
+                        ...(inProgressToolUseIDs ?? []),
+                        block.id,
+                      ])
                     }
-                  } else if (message.type === 'user') {
-                    const content = message.message!.content
-                    if (Array.isArray(content)) {
-                      for (const block of content) {
-                        if (
-                          typeof block === 'object' &&
-                          'type' in block &&
-                          block.type === 'tool_result'
-                        ) {
-                          if (inProgressToolUseIDs) {
-                            inProgressToolUseIDs = new Set(inProgressToolUseIDs)
-                            inProgressToolUseIDs.delete(block.tool_use_id)
-                          }
+                  }
+                } else if (message.type === 'user') {
+                  const content = message.message!.content
+                  if (Array.isArray(content)) {
+                    for (const block of content) {
+                      if (
+                        typeof block === 'object' &&
+                        'type' in block &&
+                        block.type === 'tool_result'
+                      ) {
+                        if (inProgressToolUseIDs) {
+                          inProgressToolUseIDs = new Set(inProgressToolUseIDs)
+                          inProgressToolUseIDs.delete(block.tool_use_id)
                         }
                       }
                     }
                   }
+                }
 
-                  // Never regress live footer tokens (pre-message_delta zeros /
-                  // stale sibling snapshots must not wipe a higher count).
-                  const tokenCount = Math.max(
-                    progress.tokenCount ?? 0,
-                    task.progress?.tokenCount ?? 0,
-                  )
-                  const toolUseCount = Math.max(
-                    progress.toolUseCount ?? 0,
-                    task.progress?.toolUseCount ?? 0,
-                  )
+                // Never regress live footer tokens (pre-message_delta zeros /
+                // stale sibling snapshots must not wipe a higher count).
+                const tokenCount = Math.max(
+                  progress.tokenCount ?? 0,
+                  task.progress?.tokenCount ?? 0,
+                )
+                const toolUseCount = Math.max(
+                  progress.toolUseCount ?? 0,
+                  task.progress?.toolUseCount ?? 0,
+                )
 
-                  return {
-                    ...task,
-                    progress: {
-                      ...progress,
-                      tokenCount,
-                      toolUseCount,
+                const currentTr =
+                  prev.transcripts?.[taskId] ?? EMPTY_TASK_TRANSCRIPT
+                const nextInProgressSet =
+                  inProgressToolUseIDs ?? currentTr.inProgressToolUseIDs
+                const toolWindowPatch =
+                  currentTr.inProgressToolUseIDs.size === 0 &&
+                  nextInProgressSet.size > 0
+                    ? { toolWindowStartTime: Date.now() }
+                    : {}
+
+                return {
+                  ...prev,
+                  tasks: {
+                    ...prev.tasks,
+                    [taskId]: {
+                      ...task,
+                      progress: {
+                        ...progress,
+                        tokenCount,
+                        toolUseCount,
+                      },
+                      messages: appendCappedMessage(task.messages, message),
+                      inProgressToolUseIDs,
                     },
-                    messages: appendCappedMessage(task.messages, message),
-                    inProgressToolUseIDs,
-                  }
-                },
-                setAppState,
-              )
+                  },
+                  transcripts: {
+                    ...prev.transcripts,
+                    [taskId]: {
+                      ...currentTr,
+                      messages: appendCappedMessage(
+                        currentTr.messages,
+                        message,
+                      ),
+                      inProgressToolUseIDs: nextInProgressSet,
+                      ...toolWindowPatch,
+                    },
+                  },
+                }
+              })
               // message_delta often lands with no further yields until the next
               // tool result — deferred rebuild unfreezes footer tokens.
               // updateAgentProgress works for any running task with progress.
@@ -1705,18 +1763,37 @@ export async function runInProcessTeammate(
           `[inProcessRunner] ${identity.agentId} work interrupted, returning to idle`,
         )
 
-        // Add interrupt message to teammate's messages so it appears in their scrollback
+        // Official 2.1.331 (@351225585): mirror interrupt message to both
+        // AppState.transcripts[taskId] and legacy task.messages.
         const interruptMessage = createAssistantAPIErrorMessage({
           content: ERROR_MESSAGE_USER_ABORT,
         })
-        updateTaskState(
-          taskId,
-          task => ({
-            ...task,
-            messages: appendCappedMessage(task.messages, interruptMessage),
-          }),
-          setAppState,
-        )
+        setAppState(prev => {
+          const task = prev.tasks[taskId]
+          if (!task || task.type !== 'in_process_teammate') return prev
+          const currentTr = prev.transcripts?.[taskId] ?? EMPTY_TASK_TRANSCRIPT
+          return {
+            ...prev,
+            tasks: {
+              ...prev.tasks,
+              [taskId]: {
+                ...task,
+                messages: appendCappedMessage(task.messages, interruptMessage),
+              },
+            },
+            transcripts: {
+              ...prev.transcripts,
+              [taskId]: {
+                ...currentTr,
+                messages: appendCappedMessage(
+                  currentTr.messages,
+                  interruptMessage,
+                ),
+                inProgressToolUseIDs: new Set<string>(),
+              },
+            },
+          }
+        })
         if (currentAutonomyRunId) {
           await markAutonomyRunFailed(
             currentAutonomyRunId,
@@ -1902,36 +1979,64 @@ export async function runInProcessTeammate(
       usage: lastUsage as AgentToolResult['usage'],
     } as unknown as AgentToolResult
 
-    updateTaskState(
-      taskId,
-      task => {
-        // killInProcessTeammate may have already set status:killed +
-        // notified:true + cleared fields. Don't overwrite (would flip
-        // killed → completed and double-emit the SDK bookend).
-        if (task.status !== 'running') {
-          alreadyTerminal = true
-          return task
-        }
-        toolUseId = task.toolUseId
-        task.onIdleCallbacks?.forEach(cb => cb())
-        task.unregisterCleanup?.()
-        return {
-          ...task,
-          status: 'completed' as const,
-          notified: true,
-          endTime: Date.now(),
-          result: teammateResult,
-          messages: task.messages?.length ? [task.messages.at(-1)!] : undefined,
-          pendingUserMessages: [],
-          inProgressToolUseIDs: undefined,
-          abortController: undefined,
-          unregisterCleanup: undefined,
-          currentWorkAbortController: undefined,
-          onIdleCallbacks: [],
-        }
-      },
-      setAppState,
-    )
+    setAppState(prev => {
+      const task = prev.tasks[taskId]
+      if (!task || task.type !== 'in_process_teammate') return prev
+      // killInProcessTeammate may have already set status:killed +
+      // notified:true + cleared fields. Don't overwrite (would flip
+      // killed → completed and double-emit the SDK bookend).
+      if (task.status !== 'running') {
+        alreadyTerminal = true
+        return prev
+      }
+      toolUseId = task.toolUseId
+      task.onIdleCallbacks?.forEach(cb => cb())
+      task.unregisterCleanup?.()
+      const viewingThis = prev.viewingAgentTaskId === taskId
+      const currentTr = prev.transcripts?.[taskId]
+      const preservedMessages = viewingThis
+        ? task.messages
+        : task.messages?.length
+          ? [task.messages.at(-1)!]
+          : undefined
+      const preservedTrMessages = viewingThis
+        ? (currentTr?.messages ?? task.messages ?? [])
+        : currentTr?.messages.length
+          ? [currentTr.messages.at(-1)!]
+          : []
+      return {
+        ...prev,
+        tasks: {
+          ...prev.tasks,
+          [taskId]: {
+            ...task,
+            status: 'completed' as const,
+            notified: true,
+            endTime: Date.now(),
+            result: teammateResult,
+            messages: preservedMessages,
+            pendingUserMessages: [],
+            inProgressToolUseIDs: undefined,
+            abortController: undefined,
+            unregisterCleanup: undefined,
+            currentWorkAbortController: undefined,
+            onIdleCallbacks: [],
+          },
+        },
+        ...(currentTr !== undefined
+          ? {
+              transcripts: {
+                ...prev.transcripts,
+                [taskId]: {
+                  ...currentTr,
+                  messages: preservedTrMessages,
+                  inProgressToolUseIDs: new Set<string>(),
+                },
+              },
+            }
+          : {}),
+      }
+    })
     void evictTaskOutput(taskId)
     evictTeammateSpinnerSlice(taskId)
     // Eagerly evict task from AppState since it's been consumed
@@ -1957,34 +2062,62 @@ export async function runInProcessTeammate(
     // Mark task as failed and notify any waiters
     let alreadyTerminal = false
     let toolUseId: string | undefined
-    updateTaskState(
-      taskId,
-      task => {
-        if (task.status !== 'running') {
-          alreadyTerminal = true
-          return task
-        }
-        toolUseId = task.toolUseId
-        task.onIdleCallbacks?.forEach(cb => cb())
-        task.unregisterCleanup?.()
-        return {
-          ...task,
-          status: 'failed' as const,
-          notified: true,
-          error: errorMessage,
-          isIdle: true,
-          endTime: Date.now(),
-          onIdleCallbacks: [],
-          messages: task.messages?.length ? [task.messages.at(-1)!] : undefined,
-          pendingUserMessages: [],
-          inProgressToolUseIDs: undefined,
-          abortController: undefined,
-          unregisterCleanup: undefined,
-          currentWorkAbortController: undefined,
-        }
-      },
-      setAppState,
-    )
+    setAppState(prev => {
+      const task = prev.tasks[taskId]
+      if (!task || task.type !== 'in_process_teammate') return prev
+      if (task.status !== 'running') {
+        alreadyTerminal = true
+        return prev
+      }
+      toolUseId = task.toolUseId
+      task.onIdleCallbacks?.forEach(cb => cb())
+      task.unregisterCleanup?.()
+      const viewingThis = prev.viewingAgentTaskId === taskId
+      const currentTr = prev.transcripts?.[taskId]
+      const preservedMessages = viewingThis
+        ? task.messages
+        : task.messages?.length
+          ? [task.messages.at(-1)!]
+          : undefined
+      const preservedTrMessages = viewingThis
+        ? (currentTr?.messages ?? task.messages ?? [])
+        : currentTr?.messages.length
+          ? [currentTr.messages.at(-1)!]
+          : []
+      return {
+        ...prev,
+        tasks: {
+          ...prev.tasks,
+          [taskId]: {
+            ...task,
+            status: 'failed' as const,
+            notified: true,
+            error: errorMessage,
+            isIdle: true,
+            endTime: Date.now(),
+            onIdleCallbacks: [],
+            messages: preservedMessages,
+            pendingUserMessages: [],
+            inProgressToolUseIDs: undefined,
+            abortController: undefined,
+            unregisterCleanup: undefined,
+            currentWorkAbortController: undefined,
+          },
+        },
+        ...(currentTr !== undefined
+          ? {
+              transcripts: {
+                ...prev.transcripts,
+                [taskId]: {
+                  ...currentTr,
+                  messages: preservedTrMessages,
+                  inProgressToolUseIDs: new Set<string>(),
+                },
+              },
+            }
+          : {}),
+      }
+    })
     void evictTaskOutput(taskId)
     evictTeammateSpinnerSlice(taskId)
     // Eagerly evict task from AppState since it's been consumed

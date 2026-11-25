@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { isAbsolute, normalize, resolve, sep } from 'path'
+import stripAnsi from 'strip-ansi'
 import { wrapText } from '@anthropic/ink'
 import { logEvent } from '../services/analytics/index.js'
 import { getCwdState, getMainThreadAgentId } from '../bootstrap/state.js'
@@ -844,9 +845,9 @@ export const THOUGHT_FOR_MS_CAP = 600_000
 /** densable Io `Mb` — `pc` hold-then-clear after `$s` drops the summary. */
 export const LEFTOVER_SS_HOLD_MS = 3000
 
-/** densable `tn` — `Bun.stripANSI`. */
+/** densable `tn` — `Bun.stripANSI` (falls back to `strip-ansi` on Node.js). */
 export function leftoverTn(s: string): string {
-  return Bun.stripANSI(s)
+  return typeof Bun !== 'undefined' ? Bun.stripANSI(s) : stripAnsi(s)
 }
 
 /**

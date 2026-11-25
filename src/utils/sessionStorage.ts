@@ -2129,6 +2129,16 @@ class Project {
     }
   }
 
+  hasPendingWritesForFile(filePath: string): boolean {
+    const queue = this.writeQueues.get(filePath)
+    return (
+      (queue !== undefined && queue.length > 0) ||
+      this.pendingEntries.length > 0 ||
+      this.activeDrain !== null ||
+      this.pendingWriteCount > 0
+    )
+  }
+
   async flush(): Promise<void> {
     // SDK/print result can race the first user/assistant write. If the
     // session pointer is still null, drain pendingEntries to disk so
@@ -3234,17 +3244,61 @@ export async function recordTranscript(
   return (lastRecorded?.uuid as UUID | undefined) ?? startingParentUuid ?? null
 }
 
+// In-flight sidechain transcript writes keyed by agentId so `getAgentTranscript`
+// (official 2.1.331 `bde` / `_td` @316271011) awaits pending writes before
+// reading `agent-<id>.jsonl` instead of racing ENOENT right after spawn.
+const inFlightSidechainWrites = new Map<string, Promise<void>>()
+
+async function awaitWithOptionalAbort(
+  promise: Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!signal) {
+    await promise.catch(() => {})
+    return
+  }
+  if (signal.aborted) return
+  let onAbort: (() => void) | undefined
+  try {
+    await Promise.race([
+      promise.catch(() => {}),
+      new Promise<void>(resolve => {
+        onAbort = () => resolve()
+        signal.addEventListener('abort', onAbort, { once: true })
+      }),
+    ])
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener('abort', onAbort)
+    }
+  }
+}
+
 export async function recordSidechainTranscript(
   messages: Message[],
   agentId?: string,
   startingParentUuid?: UUID | null,
 ) {
-  await getProject().insertMessageChain(
+  const work = getProject().insertMessageChain(
     cleanMessagesForLogging(messages),
     true,
     agentId,
     startingParentUuid,
   )
+  if (!agentId) {
+    await work
+    return
+  }
+  const prev = inFlightSidechainWrites.get(agentId)
+  const tracked = (prev ? prev.catch(() => {}).then(() => work) : work).finally(
+    () => {
+      if (inFlightSidechainWrites.get(agentId) === tracked) {
+        inFlightSidechainWrites.delete(agentId)
+      }
+    },
+  )
+  inFlightSidechainWrites.set(agentId, tracked)
+  await work
 }
 
 export async function recordQueueOperation(queueOp: QueueOperationMessage) {
@@ -10904,15 +10958,42 @@ async function getStatOnlyLogsForWorktrees(
  * @returns The conversation chain and budget replacement records for the agent,
  *          or null if not found
  */
-export async function getAgentTranscript(agentId: AgentId): Promise<{
+export async function getAgentTranscript(
+  agentId: AgentId,
+  options?: { signal?: AbortSignal },
+): Promise<{
   messages: Message[]
   contentReplacements: ContentReplacementRecord[]
 } | null> {
+  const signal = options?.signal
+  if (signal?.aborted) {
+    return null
+  }
   const agentFile = getAgentTranscriptPath(agentId)
+
+  // Official 2.1.331 `bde` / `_td` (@316271011): settle in-flight sidechain
+  // writes and flush queued writes for this file before reading disk so
+  // entering a newly spawned subagent's view never races ENOENT.
+  const pendingWrite = inFlightSidechainWrites.get(agentId)
+  if (pendingWrite) {
+    await awaitWithOptionalAbort(pendingWrite, signal)
+    if (signal?.aborted) {
+      return null
+    }
+  }
+  if (project?.hasPendingWritesForFile(agentFile)) {
+    await awaitWithOptionalAbort(project.flush(), signal)
+    if (signal?.aborted) {
+      return null
+    }
+  }
 
   try {
     const { messages, agentContentReplacements } =
       await loadTranscriptFile(agentFile)
+    if (signal?.aborted) {
+      return null
+    }
 
     // Find messages with matching agentId
     const agentMessages = Array.from(messages.values()).filter(
@@ -10996,23 +11077,28 @@ export function extractAgentIdsFromMessages(messages: Message[]): string[] {
  * which is more reliable than loading from disk since each teammate turn
  * uses a random agentId for transcript storage.
  */
-export function extractTeammateTranscriptsFromTasks(tasks: {
-  [taskId: string]: {
-    type: string
-    identity?: { agentId: string }
-    messages?: Message[]
-  }
-}): { [agentId: string]: Message[] } {
+export function extractTeammateTranscriptsFromTasks(
+  tasks: {
+    [taskId: string]: {
+      type: string
+      identity?: { agentId: string }
+      messages?: Message[]
+    }
+  },
+  appTranscripts?: {
+    [taskId: string]: { messages: readonly Message[] } | undefined
+  },
+): { [agentId: string]: Message[] } {
   const transcripts: { [agentId: string]: Message[] } = {}
 
-  for (const task of Object.values(tasks)) {
-    if (
-      task.type === 'in_process_teammate' &&
-      task.identity?.agentId &&
-      task.messages &&
-      task.messages.length > 0
-    ) {
-      transcripts[task.identity.agentId] = task.messages
+  for (const [taskId, task] of Object.entries(tasks)) {
+    if (task.type === 'in_process_teammate' && task.identity?.agentId) {
+      const fromStore = appTranscripts?.[taskId]?.messages
+      const msgs =
+        fromStore && fromStore.length > 0 ? [...fromStore] : task.messages
+      if (msgs && msgs.length > 0) {
+        transcripts[task.identity.agentId] = msgs
+      }
     }
   }
 

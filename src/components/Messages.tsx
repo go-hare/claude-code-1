@@ -521,7 +521,7 @@ type Props = Omit<InnerProps, 'messages'> & {
   /** Official 2.1.328 `Tje` source (`live` subscribable transcript or `static` snapshot). */
   source?: MessagesSource;
   /** Backwards-compat optional messages array for non-live callers/tests (ignored when `source.kind === 'live'`). */
-  messages?: MessageType[];
+  messages?: readonly MessageType[];
   /** Official 2.1.328 `Tje`: when false while loading on main prompt, `useDeferredValue` defers transcript re-renders. */
   showStreamingText?: boolean;
   /** Official 2.1.328 `Tje` `Se`: submitted user prompt echoed until the deferred transcript snapshot advances past `placeholderBaseline`. */

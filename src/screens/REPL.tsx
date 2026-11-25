@@ -394,7 +394,11 @@ import {
   PERMISSION_WEBFETCH_KIND,
 } from '../dialog/specs/permissionKinds.js';
 import { viewedAgentForInput } from '../components/PromptInput/viewedAgent.js';
-import { createTaskRegistry } from '../utils/taskRegistry.js';
+import {
+  createTaskRegistry,
+  EMPTY_TASK_TRANSCRIPT,
+  mergeDiskAndLiveTranscriptMessages,
+} from '../utils/taskRegistry.js';
 import { LivePromptDraft } from '../components/PromptInput/LivePromptDraft.js';
 import { PromptInputQueuedCommands } from '../components/PromptInput/PromptInputQueuedCommands.js';
 import { useRemoteSession } from '../hooks/useRemoteSession.js';
@@ -2211,6 +2215,9 @@ function REPLInner({
   const workerSandboxPermissions = useAppState(s => s.workerSandboxPermissions);
   const elicitation = useAppState(s => s.elicitation);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
+  const viewedAgentTranscript = useAppState(s =>
+    s.viewingAgentTaskId ? s.transcripts?.[s.viewingAgentTaskId] : undefined,
+  );
   const queueEditIndex = useAppState(s => s.queueEditIndex);
   const setAppState = useSetAppState();
   // #1717: Restore persisted SEP-2663 MCP tasks on --resume after REPL mounts
@@ -2240,43 +2247,91 @@ function REPLInner({
   const replDiffAutoOpenBaseline = useReplDiffAutoOpenBaseline(willowCrateEnabled, trackedFilesForDiff, setAppState);
   const { columns: replDiffColumns } = useTerminalSize();
 
-  // Bootstrap: retained local_agent that hasn't loaded disk yet → read
-  // sidechain JSONL and UUID-merge with whatever stream has appended so far.
-  // Stream appends immediately on retain (no defer); bootstrap fills the
-  // prefix. Disk-write-before-yield means live is always a suffix of disk.
+  // Official 2.1.331 `VXe` (@343110287): retained local_agent that hasn't
+  // loaded disk yet → read sidechain JSONL (with AbortController cancel +
+  // `.catch()` fallback) and UUID-merge into `AppState.transcripts[taskId]`.
+  // Stream appends unconditionally into `AppState.transcripts[taskId]`;
+  // bootstrap fills any historical prefix (and retries briefly if a newly
+  // spawned agent hasn't written its initial JSONL yet).
   const viewedLocalAgent = viewingAgentTaskId ? tasks[viewingAgentTaskId] : undefined;
   const needsBootstrap = isLocalAgentTask(viewedLocalAgent) && viewedLocalAgent.retain && !viewedLocalAgent.diskLoaded;
   useEffect(() => {
     if (!viewingAgentTaskId || !needsBootstrap) return;
     const taskId = viewingAgentTaskId;
-    void getAgentTranscript(asAgentId(taskId)).then(result => {
-      setAppState(prev => {
-        const t = prev.tasks[taskId];
-        if (!isLocalAgentTask(t) || t.diskLoaded || !t.retain) return prev;
-        const live = t.messages ?? [];
-        const disk = result?.messages ?? [];
-        const liveByUuid = new Map(live.map(m => [m.uuid, m]));
-        const diskUuids = new Set(disk.map(m => m.uuid));
-        const merged: typeof live = [];
-        for (const m of disk) {
-          merged.push(liveByUuid.get(m.uuid) ?? m);
-        }
-        for (const m of live) {
-          if (!diskUuids.has(m.uuid)) merged.push(m);
-        }
-        return {
-          ...prev,
-          tasks: {
-            ...prev.tasks,
-            [taskId]: {
-              ...t,
-              messages: merged,
-              diskLoaded: true,
-            },
-          },
-        };
-      });
-    });
+    const controller = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const MAX_EMPTY_RETRIES = 2;
+
+    const loadOnce = (attempt: number) => {
+      void getAgentTranscript(asAgentId(taskId), { signal: controller.signal })
+        .then(result => {
+          if (controller.signal.aborted) return;
+          let shouldRetry = false;
+          setAppState(prev => {
+            const t = prev.tasks[taskId];
+            if (!isLocalAgentTask(t) || t.diskLoaded || !t.retain) return prev;
+            const existingTr = prev.transcripts?.[taskId];
+            const live = existingTr && existingTr.messages.length > 0 ? existingTr.messages : (t.messages ?? []);
+            const disk = result?.messages ?? [];
+            if (result === null && live.length === 0 && t.status === 'running' && attempt < MAX_EMPTY_RETRIES) {
+              shouldRetry = true;
+              return prev;
+            }
+            const merged = mergeDiskAndLiveTranscriptMessages(disk, live);
+            return {
+              ...prev,
+              tasks: {
+                ...prev.tasks,
+                [taskId]: {
+                  ...t,
+                  diskLoaded: true,
+                },
+              },
+              transcripts: {
+                ...prev.transcripts,
+                [taskId]: {
+                  ...EMPTY_TASK_TRANSCRIPT,
+                  ...existingTr,
+                  messages: merged,
+                },
+              },
+            };
+          });
+          if (shouldRetry && !controller.signal.aborted) {
+            retryTimer = setTimeout(() => {
+              if (!controller.signal.aborted) {
+                loadOnce(attempt + 1);
+              }
+            }, 150);
+          }
+        })
+        .catch(err => {
+          if (controller.signal.aborted) return;
+          logError(err);
+          setAppState(prev => {
+            const t = prev.tasks[taskId];
+            if (!isLocalAgentTask(t) || t.diskLoaded || !t.retain) return prev;
+            return {
+              ...prev,
+              tasks: {
+                ...prev.tasks,
+                [taskId]: {
+                  ...t,
+                  diskLoaded: true,
+                },
+              },
+            };
+          });
+        });
+    };
+
+    loadOnce(0);
+    return () => {
+      controller.abort();
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+      }
+    };
   }, [viewingAgentTaskId, needsBootstrap, setAppState]);
 
   const store = useAppStateStore();
@@ -5149,6 +5204,23 @@ function REPLInner({
   );
   const activeRetryStatus = viewingAgentTaskId ? viewedAgentRetryStatus : retryStatus;
 
+  // Official 2.1.331 `bw` (@344732900) + `nde` (@344278337): derive spinner
+  // visibility from the currently viewed agent when viewing a subagent/teammate
+  // instead of leaking main-thread loading/streaming/sleep state into it.
+  const viewedTaskForSpinner = viewingAgentTaskId ? tasks[viewingAgentTaskId] : undefined;
+  const viewedTeammateForSpinner =
+    viewedTaskForSpinner && isInProcessTeammateTask(viewedTaskForSpinner) ? viewedTaskForSpinner : undefined;
+  const viewedLocalAgentForSpinner =
+    !viewedTeammateForSpinner && viewedTaskForSpinner && isLocalAgentTask(viewedTaskForSpinner)
+      ? viewedTaskForSpinner
+      : undefined;
+  const isViewingSubagentForSpinner = Boolean(viewedTeammateForSpinner || viewedLocalAgentForSpinner);
+  const focusedSpinnerActive = viewedTeammateForSpinner
+    ? viewedTeammateForSpinner.status === 'running'
+    : viewedLocalAgentForSpinner
+      ? viewedLocalAgentForSpinner.status === 'running' && !viewedLocalAgentForSpinner.isIdle
+      : isLoading || Boolean(userInputOnProcessing) || hasRunningTeammates || messageQueue.getMainThreadLength() > 0;
+
   const showSpinner =
     (!toolJSX || toolJSX.showSpinner === true) &&
     !hasBlockingOpenDialogs &&
@@ -5157,30 +5229,58 @@ function REPLInner({
     workerSandboxPermissions.queue.length === 0 &&
     // Show spinner during input processing, API call, while teammates are running,
     // or while pending main-thread queue items remain (densable Xwt — not full
-    // queue length). Full getCommandQueueLength() includes subagent-addressed
-    // entries processQueueIfReady never drains → spinner stuck after Sautéed.
-    (isLoading ||
-      userInputOnProcessing ||
-      hasRunningTeammates ||
-      // Keep spinner visible while main-thread task notifications are queued.
-      // Without this, the spinner briefly disappears between consecutive
-      // notifications (e.g., multiple background agents completing in rapid
-      // succession) because isLoading goes false momentarily between each one.
-      messageQueue.getMainThreadLength() > 0) &&
+    // queue length). When viewing a subagent/teammate, gate on that agent's
+    // own running state instead of main's.
+    focusedSpinnerActive &&
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
-    !onlySleepToolActive &&
+    (isViewingSubagentForSpinner || !onlySleepToolActive) &&
     // gold zht + #131 (2.1.326): keep spinner visible during mid-response API
     // retry (activeRetryStatus !== null) even when partial reply text streamed.
-    (!hasStreamingText ||
+    // Main-thread streaming preview only replaces main's spinner, never a subagent's.
+    (isViewingSubagentForSpinner ||
+      !hasStreamingText ||
       activeRetryStatus !== null ||
       (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 ||
       isBriefOnly ||
       focusFoldHoldsPreview);
 
-  // #205 (2.1.326): true once reply text has been emitted in the active turn so
-  // SpinnerWithVerb suppresses tip flash/bounce as the reply finishes.
+  // Official 2.1.331 `sje` (@344275809): dynamic ref adapters reading the
+  // viewed subagent/teammate's own turnStartTime, totalPausedMs, and tokenCount
+  // from AppState.transcripts / AppState.tasks instead of main-thread refs.
+  const focusedSpinnerRefs = useMemo(() => {
+    if (!viewingAgentTaskId) return null;
+    const id = viewingAgentTaskId;
+    return {
+      loadingStartTimeRef: {
+        get current(): number {
+          const st = store.getState();
+          const wallStart = st.transcripts?.[id]?.turnStartTime ?? st.tasks[id]?.startTime ?? Date.now();
+          return performance.now() - Math.max(0, Date.now() - wallStart);
+        },
+      },
+      responseLengthRef: {
+        get current(): number {
+          const st = store.getState();
+          const t = st.tasks[id];
+          const tokens = t && 'progress' in t ? (t.progress?.tokenCount ?? 0) : 0;
+          return tokens * 4;
+        },
+      },
+      totalPausedMsRef: {
+        get current(): number {
+          return store.getState().transcripts?.[id]?.totalPausedMs ?? 0;
+        },
+      },
+      pauseStartTimeRef: { current: null as number | null },
+    };
+  }, [store, viewingAgentTaskId]);
+
+  // #205 (2.1.326) / Official 2.1.331 `Uo` (@344278500): true once reply text
+  // has been emitted in the active main-thread turn so SpinnerWithVerb
+  // suppresses tip flash/bounce as the reply finishes (main-thread only).
   const afterReplyText = useMemo(() => {
+    if (isViewingSubagentForSpinner) return false;
     if (hasStreamingText) return true;
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -5193,7 +5293,7 @@ function REPLInner({
       }
     }
     return false;
-  }, [hasStreamingText, messages]);
+  }, [isViewingSubagentForSpinner, hasStreamingText, messages]);
 
   // #7 (2.1.326): actionable placeholder hint in empty prompt after a request fails.
   const failedRequestNextStepHint = useMemo(() => {
@@ -8137,12 +8237,19 @@ function REPLInner({
       const expandedPromptText =
         typeof agentMessageContent === 'string' ? agentMessageContent : expandPastedTextRefs(input, effectivePasted);
       if (isLocalAgentTask(task)) {
-        appendMessageToLocalAgent(task.id, createUserMessage({ content: agentMessageContent }), setAppState);
+        // Official 2.1.331 (@344488738): stamp origin:{kind:'human'} and pass
+        // shownAs: humanMsg.uuid so queued_command drain deduplicates in place.
+        const humanMsg = createUserMessage({
+          content: agentMessageContent,
+          origin: { kind: 'human' },
+        });
+        appendMessageToLocalAgent(task.id, humanMsg, setAppState);
         if (task.status === 'running') {
-          // densable panel human queue: sqe(…,{isMeta:!0, origin:{kind:"human"}})
+          // densable panel human queue: sqe(…,{isMeta:!0, origin:{kind:"human"}, shownAs})
           queuePendingMessage(task.id, agentMessageContent, setAppState, {
             isMeta: true,
             origin: { kind: 'human' },
+            shownAs: humanMsg.uuid,
           });
         } else {
           void resumeAgentBackground({
@@ -9540,9 +9647,16 @@ function REPLInner({
   const viewedTeammateTask = viewedTask && isInProcessTeammateTask(viewedTask) ? viewedTask : undefined;
   const viewedAgentTask = viewedTeammateTask ?? (viewedTask && isLocalAgentTask(viewedTask) ? viewedTask : undefined);
 
+  // Official 2.1.331 `Rge` + `Gll` (@342901640, @313454277):
+  // Read viewed agent/teammate messages from `AppState.transcripts[taskId]`
+  // (falling back to legacy `task.messages` for mock tasks).
   // When viewing an agent, never fall through to leader — empty until
   // bootstrap/stream fills. Closes the see-leader-type-agent footgun.
-  const rawAgentMessages = viewedAgentTask?.messages;
+  const rawAgentMessages = viewedAgentTask
+    ? viewedAgentTranscript && viewedAgentTranscript.messages.length > 0
+      ? viewedAgentTranscript.messages
+      : viewedAgentTask.messages
+    : undefined;
   // Fork sidechain encodes the user prompt inside a mixed user message alongside
   // tool_result blocks; surface the prompt as a standalone bubble and strip the
   // boilerplate text from its original carrier while preserving tool_results.
@@ -9664,9 +9778,17 @@ function REPLInner({
     return unresolved.length > 0 ? new Set(unresolved) : EMPTY_STRING_SET;
   }, [viewedAgentTask, viewedTeammateTask, displayedAgentMessages]);
   const focusedInProgressToolUseIDs = viewedTeammateTask
-    ? (viewedTeammateTask.inProgressToolUseIDs ?? EMPTY_STRING_SET)
+    ? viewedTeammateTask.status !== 'running'
+      ? EMPTY_STRING_SET
+      : viewedAgentTranscript && viewedAgentTranscript.inProgressToolUseIDs.size > 0
+        ? viewedAgentTranscript.inProgressToolUseIDs
+        : (viewedTeammateTask.inProgressToolUseIDs ?? EMPTY_STRING_SET)
     : viewedAgentTask
-      ? localAgentInProgressToolUseIDs
+      ? viewedAgentTask.status !== 'running'
+        ? EMPTY_STRING_SET
+        : viewedAgentTranscript && viewedAgentTranscript.inProgressToolUseIDs.size > 0
+          ? viewedAgentTranscript.inProgressToolUseIDs
+          : localAgentInProgressToolUseIDs
       : inProgressToolUseIDs;
   const focusedStreamingToolUses = viewedAgentTask ? EMPTY_STREAMING_TOOL_USES : streamingToolUses;
   // Official 2.1.328 C0a (@292634291): `isLoading: h ? h.status==="running" && !h.isIdle : r`
@@ -10226,32 +10348,42 @@ function REPLInner({
                   />
                   {/* WebBrowserPanel removed — browser-lite, no panel */}
                   <Box flexGrow={1} />
-                  {/* densable hJ So: isLoading && !showSpinner && e(dJ). XOR
-                    with xMn spinner — retry row does not sit under hJ. */}
-                  {isLoading && !showSpinner ? <LeftoverMhrRetryRow agentId={viewingAgentTaskId ?? undefined} /> : null}
+                  {/* densable hJ So / official 2.1.331 `nde` (@344279300):
+                    focusedIsLoading && !showSpinner && e(dJ). XOR with xMn spinner. */}
+                  {focusedIsLoading && !showSpinner ? (
+                    <LeftoverMhrRetryRow agentId={viewingAgentTaskId ?? undefined} />
+                  ) : null}
                   {showSpinner && !liveStateRowMounted && (
                     <SpinnerWithVerb
-                      mode={streamMode}
-                      spinnerTip={spinnerTip}
-                      spinnerTipLabel={spinnerTipLabel}
-                      responseLengthRef={responseLengthRef}
-                      apiMetricsRef={apiMetricsRef}
-                      compactProgressActiveRef={compactProgressActiveRef}
-                      compactingHint={compactingHint}
-                      compactingStartTime={compactingStartTime}
-                      overrideMessage={spinnerMessage}
-                      spinnerSuffix={stopHookSpinnerSuffix}
+                      mode={
+                        viewedAgentTask
+                          ? focusedInProgressToolUseIDs.size > 0
+                            ? 'tool-use'
+                            : 'responding'
+                          : streamMode
+                      }
+                      spinnerTip={viewedAgentTask ? undefined : spinnerTip}
+                      spinnerTipLabel={viewedAgentTask ? undefined : spinnerTipLabel}
+                      responseLengthRef={focusedSpinnerRefs ? focusedSpinnerRefs.responseLengthRef : responseLengthRef}
+                      apiMetricsRef={viewedAgentTask ? undefined : apiMetricsRef}
+                      compactProgressActiveRef={viewedAgentTask ? undefined : compactProgressActiveRef}
+                      compactingHint={viewedAgentTask ? undefined : compactingHint}
+                      compactingStartTime={viewedAgentTask ? undefined : compactingStartTime}
+                      overrideMessage={viewedAgentTask ? null : spinnerMessage}
+                      spinnerSuffix={viewedAgentTask ? null : stopHookSpinnerSuffix}
                       verbose={verbose}
-                      loadingStartTimeRef={loadingStartTimeRef}
-                      totalPausedMsRef={totalPausedMsRef}
-                      pauseStartTimeRef={pauseStartTimeRef}
-                      overrideColor={spinnerColor}
-                      overrideShimmerColor={spinnerShimmerColor}
-                      hasActiveTools={inProgressToolUseIDs.size > 0}
-                      leaderIsIdle={!isLoading}
+                      loadingStartTimeRef={
+                        focusedSpinnerRefs ? focusedSpinnerRefs.loadingStartTimeRef : loadingStartTimeRef
+                      }
+                      totalPausedMsRef={focusedSpinnerRefs ? focusedSpinnerRefs.totalPausedMsRef : totalPausedMsRef}
+                      pauseStartTimeRef={focusedSpinnerRefs ? focusedSpinnerRefs.pauseStartTimeRef : pauseStartTimeRef}
+                      overrideColor={viewedAgentTask ? undefined : spinnerColor}
+                      overrideShimmerColor={viewedAgentTask ? undefined : spinnerShimmerColor}
+                      hasActiveTools={focusedInProgressToolUseIDs.size > 0}
+                      leaderIsIdle={viewedAgentTask ? !focusedIsLoading : !isLoading}
                       retryStatus={viewingAgentTaskId ? null : retryStatus}
                       afterReplyText={afterReplyText}
-                      outputLimitRecovery={outputLimitRecovery}
+                      outputLimitRecovery={viewedAgentTask ? null : outputLimitRecovery}
                       agentId={viewingAgentTaskId ?? undefined}
                     />
                   )}

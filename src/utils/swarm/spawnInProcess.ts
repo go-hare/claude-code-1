@@ -389,6 +389,11 @@ export function killInProcessTeammate(
     paneTeardown: undefined,
     evictAfter: undefined,
   }))
+  registry.updateTranscript?.(taskId, tr =>
+    tr.inProgressToolUseIDs.size === 0
+      ? tr
+      : { ...tr, inProgressToolUseIDs: new Set<string>() },
+  )
 
   // Banner/footer/inbox read teamContext.teammates, not the team file.
   // Xm.update only patches tasks — drop the live member in the same setter.

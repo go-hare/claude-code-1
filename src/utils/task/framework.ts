@@ -362,6 +362,12 @@ function shouldSkipTerminalEviction(task: TaskState, taskId: string): boolean {
   if ('retain' in task && (task.evictAfter ?? Infinity) > now) {
     return true
   }
+  if (task.type === 'in_process_teammate') {
+    const evictAfter = (task as { evictAfter?: number }).evictAfter
+    if ((evictAfter ?? 0) > now) {
+      return true
+    }
+  }
   if (task.type === 'local_workflow') {
     const evictAfter = (task as { evictAfter?: number }).evictAfter
     if ((evictAfter ?? 0) > now || !isAgentKillLoopSettled(taskId)) {
@@ -394,6 +400,8 @@ export function evictTerminalTask(
     if (!task) return prev
     if (!isTerminalTaskStatus(task.status)) return prev
     if (!task.notified) return prev
+    // Never evict a task while the user is actively viewing its transcript.
+    if (prev.viewingAgentTaskId === taskId) return prev
     if (shouldSkipTerminalEviction(task, taskId)) return prev
     evicted = true
     const { [taskId]: _removed, ...remainingTasks } = prev.tasks
@@ -794,7 +802,10 @@ export function applyTaskOffsetsAndEvictions(
       if (!fresh || !isTerminalTaskStatus(fresh.status) || !fresh.notified) {
         continue
       }
-      if (shouldSkipTerminalEviction(fresh, id)) {
+      if (
+        prev.viewingAgentTaskId === id ||
+        shouldSkipTerminalEviction(fresh, id)
+      ) {
         continue
       }
       delete newTasks[id]

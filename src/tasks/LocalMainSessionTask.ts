@@ -53,6 +53,11 @@ import {
   initTaskOutputAsSymlink,
 } from '../utils/task/diskOutput.js'
 import { registerTask, updateTaskState } from '../utils/task/framework.js'
+import {
+  EMPTY_TASK_TRANSCRIPT,
+  seedTaskTranscriptMessages,
+  setTaskTranscriptTurnStart,
+} from '../utils/taskRegistry.js'
 import type { LocalAgentTaskState } from './LocalAgentTask/LocalAgentTask.js'
 
 // Main session tasks use LocalAgentTaskState with agentType='main-session'
@@ -178,9 +183,10 @@ export function completeMainSessionTask(
   let wasBackgrounded = true
   let toolUseId: string | undefined
 
-  updateTaskState<LocalMainSessionTaskState>(taskId, setAppState, task => {
-    if (task.status !== 'running') {
-      return task
+  setAppState(prev => {
+    const task = prev.tasks[taskId]
+    if (!task || task.type !== 'local_agent' || task.status !== 'running') {
+      return prev
     }
 
     // Track if task was backgrounded (for notification decision)
@@ -189,11 +195,41 @@ export function completeMainSessionTask(
 
     task.unregisterCleanup?.()
 
+    const viewingThis = prev.viewingAgentTaskId === taskId
+    const currentTr = prev.transcripts?.[taskId]
+    const prevMessages =
+      currentTr && currentTr.messages.length > 0
+        ? currentTr.messages
+        : task.messages
+    const finalMessages = viewingThis
+      ? prevMessages
+      : prevMessages?.length
+        ? [prevMessages.at(-1)!]
+        : []
+
     return {
-      ...task,
-      status: success ? 'completed' : 'failed',
-      endTime: Date.now(),
-      messages: task.messages?.length ? [task.messages.at(-1)!] : undefined,
+      ...prev,
+      tasks: {
+        ...prev.tasks,
+        [taskId]: {
+          ...task,
+          status: success ? 'completed' : 'failed',
+          endTime: Date.now(),
+          messages: finalMessages?.length ? [...finalMessages] : undefined,
+        },
+      },
+      ...(currentTr !== undefined
+        ? {
+            transcripts: {
+              ...prev.transcripts,
+              [taskId]: {
+                ...currentTr,
+                messages: finalMessages ?? [],
+                inProgressToolUseIDs: new Set<string>(),
+              },
+            },
+          }
+        : {}),
     }
   })
 
@@ -297,7 +333,11 @@ export function foregroundMainSessionTask(
       return prev
     }
 
-    taskMessages = (task as LocalMainSessionTaskState).messages
+    const trMessages = prev.transcripts?.[taskId]?.messages
+    taskMessages =
+      trMessages && trMessages.length > 0
+        ? [...trMessages]
+        : (task as LocalMainSessionTaskState).messages
 
     // Restore previous foregrounded task to background if it exists
     const prevId = prev.foregroundedTaskId
@@ -395,6 +435,8 @@ export function startBackgroundSession({
     setAppState,
     agentDefinition,
   )
+  seedTaskTranscriptMessages(taskId, messages, setAppState)
+  setTaskTranscriptTurnStart(taskId, Date.now(), setAppState)
 
   // Persist the pre-backgrounding conversation to the task's isolated
   // transcript so TaskOutput shows context immediately. Subsequent messages
@@ -501,10 +543,12 @@ export function startBackgroundSession({
           const task = prev.tasks[taskId]
           if (!task || task.type !== 'local_agent') return prev
           const prevProgress = task.progress
+          const currentTr = prev.transcripts?.[taskId] ?? EMPTY_TASK_TRANSCRIPT
           if (
             prevProgress?.tokenCount === tokenCount &&
             prevProgress.toolUseCount === toolCount &&
-            task.messages === bgMessages
+            task.messages === bgMessages &&
+            currentTr.messages === bgMessages
           ) {
             return prev
           }
@@ -522,6 +566,13 @@ export function startBackgroundSession({
                       ? prevProgress.recentActivities
                       : [...recentActivities],
                 },
+                messages: bgMessages,
+              },
+            },
+            transcripts: {
+              ...prev.transcripts,
+              [taskId]: {
+                ...currentTr,
                 messages: bgMessages,
               },
             },
