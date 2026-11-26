@@ -67,12 +67,22 @@ export type TeamFile = {
   }>
 }
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional check for control chars in agent/team names
-const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/
+const CONTROL_CHAR_RE = /\p{Cc}/u
 
-/** Official 2.1.331 `fyl` — detect ASCII control characters in agent/team names. */
+/** Official 2.1.331 `fyl` — detect Unicode control characters (C0/DEL/C1) in agent/team names. */
 export function hasControlChars(value: string): boolean {
   return CONTROL_CHAR_RE.test(value)
+}
+
+/** Official 2.1.331 `nSr` — refuse strings containing control characters before terminal pane dispatch. */
+export function assertNoControlChars(value: string): void {
+  const match = CONTROL_CHAR_RE.exec(value)
+  if (match) {
+    const codePoint = match[0].codePointAt(0) ?? 0
+    throw new Error(
+      `Refusing to send command containing control character U+${codePoint.toString(16).padStart(4, '0').toUpperCase()} to terminal pane`,
+    )
+  }
 }
 
 /**
@@ -150,14 +160,42 @@ export function sanitizeTeamFile(raw: unknown): TeamFile | null {
   const leadProcess = isValidLeadProcess(rec.leadProcess)
     ? rec.leadProcess
     : undefined
+  const description =
+    typeof rec.description === 'string' ? rec.description : undefined
   if (
     Array.isArray(rec.members) &&
     members.length === rec.members.length &&
-    leadProcess === rec.leadProcess
+    leadProcess === rec.leadProcess &&
+    description === rec.description
   ) {
     return rec
   }
-  return { ...rec, members, leadProcess }
+  return { ...rec, description, members, leadProcess }
+}
+
+/** Official 2.1.331 export alias (`hEo` / `parsedTeamFile`). */
+export const parsedTeamFile = sanitizeTeamFile
+
+/**
+ * Official 2.1.331 `M2t` — returns true when a `shutdown_approved` frame was
+ * timestamped on or before the current member's `joinedAt` (e.g. a stale frame
+ * from a previous teammate who had the same name before a respawn).
+ */
+export async function isShutdownFrameStale(
+  teamName: string,
+  agentId: string,
+  messageTimestamp: string,
+): Promise<boolean> {
+  const teamFile = await readTeamFileAsync(teamName).catch(() => null)
+  const member = teamFile?.members.find(m => m.agentId === agentId)
+  const stale =
+    member !== undefined && member.joinedAt >= Date.parse(messageTimestamp)
+  if (stale) {
+    logForDebugging(
+      `[TeammateTool] Ignoring a shutdown approval for ${agentId}: it was sent before this member joined`,
+    )
+  }
+  return stale
 }
 
 /**

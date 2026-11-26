@@ -149,6 +149,7 @@ export class InProcessBackend implements TeammateExecutor {
       abortController: result.abortController,
       backendType: this.type,
       color: config.color,
+      outputFile: result.outputFile,
       error: result.error,
     }
   }

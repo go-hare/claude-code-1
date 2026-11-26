@@ -7944,6 +7944,7 @@ You have exited auto mode. The user may now want to interact more directly. You 
     case 'goal_status':
     case 'thinking_stripped':
     case 'advisor_stripped':
+    case 'prompt_as_file':
       return []
   }
 

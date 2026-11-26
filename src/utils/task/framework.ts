@@ -849,23 +849,71 @@ export async function pollTasks(
   }
 }
 
+const TASK_NOTIFICATION_CLOSE_RE = new RegExp(
+  `<(?=\\s*/\\s*${TASK_NOTIFICATION_TAG}\\b)`,
+  'gi',
+)
+
+/**
+ * Official 2.1.331 `zi` (@7584116): escape any literal `</task-notification>`
+ * (including whitespace/case variants) inside trailing content so untrusted
+ * output cannot close or spoof the `<task-notification>` XML envelope early.
+ */
+export function escapeTaskNotificationTrailing(trailing: string): string {
+  return trailing.replace(TASK_NOTIFICATION_CLOSE_RE, '&lt;')
+}
+
+/**
+ * Official 2.1.331 `zi` (@7584116): format a `<task-notification>` XML envelope
+ * and sanitize any literal closing `</task-notification>` tags in `trailing`.
+ */
+export function formatTaskNotificationXml(opts: {
+  taskId: string
+  toolUseId?: string
+  taskType?: string
+  outputFile?: string
+  status: string
+  summary: string
+  summaryLead?: string
+  body?: string
+  trailing?: string
+}): string {
+  const fields: Array<[string, string | undefined]> = [
+    [TASK_ID_TAG, opts.taskId],
+    [TOOL_USE_ID_TAG, opts.toolUseId],
+    [TASK_TYPE_TAG, opts.taskType],
+    [OUTPUT_FILE_TAG, opts.outputFile],
+    [STATUS_TAG, opts.status],
+    [SUMMARY_TAG, opts.summary],
+  ]
+  let xml = `<${TASK_NOTIFICATION_TAG}>`
+  for (const [tag, value] of fields) {
+    if (value) {
+      xml += `\n${tag === SUMMARY_TAG ? (opts.summaryLead ?? '') : ''}<${tag}>${value}</${tag}>`
+    }
+  }
+  const safeTrailing = opts.trailing
+    ? escapeTaskNotificationTrailing(opts.trailing)
+    : ''
+  return `${xml}${opts.body ?? ''}\n</${TASK_NOTIFICATION_TAG}>${safeTrailing}`
+}
+
 /**
  * Enqueue a task notification to the message queue.
  */
 function enqueueTaskNotification(attachment: TaskAttachment): void {
   const statusText = getStatusText(attachment.status)
-
   const outputPath = getTaskOutputPath(attachment.taskId)
-  const toolUseIdLine = attachment.toolUseId
-    ? `\n<${TOOL_USE_ID_TAG}>${attachment.toolUseId}</${TOOL_USE_ID_TAG}>`
-    : ''
-  const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${attachment.taskId}</${TASK_ID_TAG}>${toolUseIdLine}
-<${TASK_TYPE_TAG}>${attachment.taskType}</${TASK_TYPE_TAG}>
-<${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
-<${STATUS_TAG}>${attachment.status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>Task "${attachment.description}" ${statusText}</${SUMMARY_TAG}>
-</${TASK_NOTIFICATION_TAG}>`
+  const message = formatTaskNotificationXml({
+    taskId: escapeXml(attachment.taskId),
+    toolUseId: attachment.toolUseId
+      ? escapeXml(attachment.toolUseId)
+      : undefined,
+    taskType: escapeXml(attachment.taskType),
+    outputFile: escapeXml(outputPath),
+    status: escapeXml(attachment.status),
+    summary: escapeXml(`Task "${attachment.description}" ${statusText}`),
+  })
 
   enqueuePendingNotification({ value: message, mode: 'task-notification' })
 }
@@ -937,16 +985,14 @@ export function notifySweptBackgroundAgents(
 
     const outputPath = getTaskOutputPath(task.id)
     const summary = `Agent "${task.description}" ${reason}`
-    const toolUseIdLine = task.toolUseId
-      ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(task.toolUseId)}</${TOOL_USE_ID_TAG}>`
-      : ''
-    const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${escapeXml(task.id)}</${TASK_ID_TAG}>${toolUseIdLine}
-<${TASK_TYPE_TAG}>${escapeXml(task.type)}</${TASK_TYPE_TAG}>
-<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
-<${STATUS_TAG}>killed</${STATUS_TAG}>
-<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
-</${TASK_NOTIFICATION_TAG}>`
+    const message = formatTaskNotificationXml({
+      taskId: escapeXml(task.id),
+      toolUseId: task.toolUseId ? escapeXml(task.toolUseId) : undefined,
+      taskType: escapeXml(task.type),
+      outputFile: escapeXml(outputPath),
+      status: 'killed',
+      summary: escapeXml(summary),
+    })
 
     // Because we mark `notified: true` below (preventing enqueueAgentNotification
     // from emitting later), emit the once-gated SDK `system/task_notification`

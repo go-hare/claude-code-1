@@ -17,15 +17,22 @@ import { sleep } from './utils/sleep.js'
 import { randomUUID } from 'crypto'
 import {
   AUTOCOMPACT_THRASHING_MESSAGE,
+  armAutoCompactAfterTurn,
   calculateTokenWarningState,
   checkRapidRefillBreaker,
   getAutoCompactThreshold,
   getEffectiveContextWindowSize,
+  isAutoCompactAfterTurnEnabled,
   isAutoCompactEnabled,
   isPrecomputeCompactionEnabled,
   recordSentClaudeMdTokens,
   type AutoCompactTrackingState,
 } from './services/compact/autoCompact.js'
+import {
+  emitPromptAsFileNotice,
+  rewriteOversizedPromptsForApi,
+  trySaveOversizedPromptAsFile,
+} from './services/compact/promptAsFile.js'
 import { roughTokenCountEstimation } from './services/tokenEstimation.js'
 import {
   buildPostCompactMessages,
@@ -226,7 +233,10 @@ import {
   incrementBudgetContinuationCount,
   getSessionId,
   getPromptRenderEpoch,
+  getSdkBetas,
 } from './bootstrap/state.js'
+import { getBootstrapSession } from './utils/sessionRoot.js'
+import type { Precompute } from './utils/sessionSlots.js'
 import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
 import { count } from './utils/array.js'
 import {
@@ -788,7 +798,11 @@ type State = {
   malformedToolUseRetryCount?: number
   // Why the previous iteration continued. Undefined on first iteration.
   // Lets tests assert recovery paths fired without inspecting message contents.
-  transition: Continue | { reason: 'refusal_retry'; model?: string } | undefined
+  transition:
+    | Continue
+    | { reason: 'refusal_retry'; model?: string }
+    | { reason: 'prompt_as_file' }
+    | undefined
 }
 
 async function* queryBody(
@@ -805,6 +819,7 @@ async function* queryBody(
 > {
   const consumedCommandUuids: string[] = []
   const consumedAutonomyCommands: QueuedCommand[] = []
+  let promptAsFileNoticeSent = false
 
   // Create Langfuse trace for this query turn (no-op if not configured).
   // When called as a sub-agent, langfuseTrace is already set by runAgent()
@@ -1383,6 +1398,8 @@ async function* queryLoop(
   })()
   void _pluginDevModsTurn
 
+  let promptAsFileNoticeSent = false
+
   try {
     // eslint-disable-next-line no-constant-condition
     while (true) {
@@ -1454,7 +1471,8 @@ async function* queryLoop(
       // (subagent spinner store is per-id via $xe). Analog: only the main REPL
       // wires setOutputLimitRecovery; subagents have no spinner row.
       announceOutputLimitRecovery(
-        state.transition?.reason === 'refusal_retry'
+        state.transition?.reason === 'refusal_retry' ||
+          state.transition?.reason === 'prompt_as_file'
           ? undefined
           : state.transition,
         toolUseContext,
@@ -1731,6 +1749,60 @@ async function* queryLoop(
       let fullSystemPrompt = asSystemPrompt(
         appendSystemContext(systemPrompt, systemContext),
       )
+
+      // Official 2.1.331 `tao` + `Jr(void 0, true, {}, true)`: rewrite any
+      // already-saved oversized prompts and save oversized human prompts to a
+      // file before autocompact runs.
+      const promptAsFileContextWindow = getContextWindowForModel(
+        toolUseContext.options.mainLoopModel,
+        getSdkBetas(),
+      )
+      if (querySource !== 'compact') {
+        messagesForQuery = rewriteOversizedPromptsForApi(
+          messagesForQuery,
+          promptAsFileContextWindow,
+          {
+            recordTelemetry:
+              state.transition === undefined &&
+              toolUseContext.agentId === undefined,
+          },
+        )
+      }
+      if (
+        toolUseContext.agentId === undefined &&
+        !toolUseContext.abortController.signal.aborted
+      ) {
+        let promptAsFileNoFile = false
+        let hasSavedAtThisTop = false
+        while (!promptAsFileNoFile) {
+          const savedPromptAttachment = await trySaveOversizedPromptAsFile({
+            rows: messagesForQuery,
+            contextWindow: promptAsFileContextWindow,
+            needsProof: true,
+            beforeCompaction: true,
+            hasSavedAtThisTop,
+            tools: toolUseContext.options.tools,
+            signal: toolUseContext.abortController.signal,
+          })
+          if (
+            savedPromptAttachment === undefined ||
+            savedPromptAttachment === 'no_file'
+          ) {
+            promptAsFileNoFile = savedPromptAttachment === 'no_file'
+            break
+          }
+          if (!promptAsFileNoticeSent) {
+            promptAsFileNoticeSent = true
+            emitPromptAsFileNotice()
+          }
+          yield savedPromptAttachment
+          hasSavedAtThisTop = true
+          messagesForQuery = rewriteOversizedPromptsForApi(
+            [...messagesForQuery, savedPromptAttachment],
+            promptAsFileContextWindow,
+          )
+        }
+      }
 
       queryCheckpoint('query_autocompact_start')
       const autocompactOutcome = await deps.autocompact(
@@ -4620,6 +4692,49 @@ async function* queryLoop(
             return { reason: 'aborted_streaming' }
           }
 
+          // Official 2.1.331 `Jr(yt, false)` — if compaction could not recover
+          // from PTL, try saving an oversized user prompt to a file and retry.
+          if (
+            isWithheld413 &&
+            !isWithheldLongContext &&
+            toolUseContext.agentId === undefined &&
+            !toolUseContext.abortController.signal.aborted
+          ) {
+            const ptlSavedPrompt = await trySaveOversizedPromptAsFile({
+              rows: messagesForQuery,
+              contextWindow: promptAsFileContextWindow,
+              needsProof: false,
+              beforeCompaction: false,
+              tools: toolUseContext.options.tools,
+              signal: toolUseContext.abortController.signal,
+            })
+            if (ptlSavedPrompt !== undefined && ptlSavedPrompt !== 'no_file') {
+              if (!promptAsFileNoticeSent) {
+                promptAsFileNoticeSent = true
+                emitPromptAsFileNotice()
+              }
+              yield ptlSavedPrompt
+              state = {
+                messages: [...messagesForQuery, ptlSavedPrompt],
+                toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
+                autoCompactTracking: tracking,
+                maxOutputTokensRecoveryCount,
+                hasAttemptedReactiveCompact,
+                reactiveCompactDeeperPass,
+                maxOutputTokensOverride: undefined,
+                pendingToolUseSummary: undefined,
+                stopHookActive: undefined,
+                stopHookBlockCount: 0,
+                turnCount,
+                thinkingOnlyNudged,
+                emptyCompletionResent,
+                transition: { reason: 'prompt_as_file' },
+              }
+              yield* leftoverDrainSpinnerModes()
+              continue
+            }
+          }
+
           // No recovery — surface the withheld error and exit. Do NOT fall
           // through to stop hooks: the model never produced a valid response,
           // so hooks have nothing meaningful to evaluate. Running stop hooks
@@ -5384,6 +5499,26 @@ async function* queryLoop(
           }
           yield* leftoverDrainSpinnerModes()
           continue
+        }
+
+        // Official 2.1.331 `sf()` (`tengu_auto_compact_after_turn`): arm
+        // post-turn precompute auto-compact on clean `end_turn` completion.
+        if (
+          effectiveStopReason === 'end_turn' &&
+          isAutoCompactAfterTurnEnabled()
+        ) {
+          const sessionPrecompute =
+            (toolUseContext.session as { precompute?: Precompute } | undefined)
+              ?.precompute ?? getBootstrapSession().precompute
+          await armAutoCompactAfterTurn({
+            messages: [...messagesForQuery, ...assistantMessages],
+            model: toolUseContext.options.mainLoopModel,
+            precompute: sessionPrecompute,
+            querySource,
+            agentId: toolUseContext.agentId,
+            tracking,
+            signal: toolUseContext.abortController.signal,
+          })
         }
 
         yield* leftoverDrainSpinnerModes()

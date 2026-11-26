@@ -747,7 +747,10 @@ import {
   isShutdownApproved,
   consumePendingShutdownRequest,
 } from '../utils/teammateMailbox.js'
-import { removeTeammateFromTeamFile } from '../utils/swarm/teamHelpers.js'
+import {
+  isShutdownFrameStale,
+  removeTeammateFromTeamFile,
+} from '../utils/swarm/teamHelpers.js'
 import { unassignTeammateTasks } from '../utils/tasks.js'
 import {
   getRunningTasks,
@@ -7667,17 +7670,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               const shutdownApproval = isShutdownApproved(m.text)
               if (
                 shutdownApproval &&
-                teamName &&
-                consumePendingShutdownRequest(
-                  shutdownApproval.requestId,
-                  shutdownApproval.from,
-                )
+                shutdownApproval.from === m.from &&
+                teamName
               ) {
                 const teammateToRemove = shutdownApproval.from
-                logForDebugging(
-                  `[print.ts] Processing shutdown_approved from ${teammateToRemove}`,
-                )
-
                 // Find the teammate ID by name
                 const teammateId = refreshedState.teamContext?.teammates
                   ? Object.entries(refreshedState.teamContext.teammates).find(
@@ -7686,6 +7682,28 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                   : undefined
 
                 if (teammateId) {
+                  // Official 2.1.331 `M2t`: ignore stale shutdown_approved from before respawn
+                  if (
+                    await isShutdownFrameStale(
+                      teamName,
+                      teammateId,
+                      m.timestamp,
+                    )
+                  ) {
+                    continue
+                  }
+                  if (
+                    !consumePendingShutdownRequest(
+                      shutdownApproval.requestId,
+                      shutdownApproval.from,
+                    )
+                  ) {
+                    continue
+                  }
+                  logForDebugging(
+                    `[print.ts] Processing shutdown_approved from ${teammateToRemove}`,
+                  )
+
                   // Remove from team file
                   removeTeammateFromTeamFile(teamName, {
                     agentId: teammateId,

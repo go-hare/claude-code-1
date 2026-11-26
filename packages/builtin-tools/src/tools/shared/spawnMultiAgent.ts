@@ -3,7 +3,7 @@
  * Extracted from TeammateTool to allow reuse by AgentTool.
  */
 
-import { getSessionId } from 'src/bootstrap/state.js'
+import { getOriginalCwd, getSessionId } from 'src/bootstrap/state.js'
 import { it2SetupSpec } from 'src/dialog/specs/jsuKinds.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { ToolUseContext } from 'src/Tool.js'
@@ -63,6 +63,10 @@ export type SpawnOutput = {
   team_name?: string
   is_splitpane?: boolean
   plan_mode_required?: boolean
+  /** Official 2.1.331: set when a pane teammate started in originalCwd !== current shell cwd. */
+  started_away_from_shell?: boolean
+  /** Official 2.1.331: output log file for in-process teammates. */
+  outputFile?: string
 }
 
 export type SpawnTeammateConfig = {
@@ -73,6 +77,7 @@ export type SpawnTeammateConfig = {
   use_splitpane?: boolean
   plan_mode_required?: boolean
   model?: string
+  modelSource?: 'tool' | 'frontmatter'
   effort?: EffortValue
   agent_type?: string
   description?: string
@@ -91,6 +96,7 @@ type SpawnInput = {
   use_splitpane?: boolean
   plan_mode_required?: boolean
   model?: string
+  modelSource?: 'tool' | 'frontmatter'
   effort?: EffortValue
   agent_type?: string
   description?: string
@@ -105,6 +111,11 @@ function computeUniqueTeammateNameFromMembers(
   baseName: string,
   members?: TeamFile['members'],
 ): string {
+  if (hasControlChars(baseName)) {
+    throw new Error(
+      'Invalid name: control characters are not allowed in agent or team names',
+    )
+  }
   // densable YZi then D6/M2 gate — always, even without a team file.
   const sanitized = sanitizeAgentName(baseName)
   if (sanitized === MAIN_RECIPIENT_NAME) {
@@ -355,8 +366,11 @@ async function handleSpawn(
     }
   }
 
-  const model = resolveTeammateModel(input.model, appState.mainLoopModel)
-  const workingDir = input.cwd || getCwd()
+  const model = resolveTeammateModel(
+    input.model,
+    appState.mainLoopModel,
+    input.modelSource,
+  )
 
   let agentDefinition: CustomAgentDefinition | undefined
   if (input.agent_type) {
@@ -380,6 +394,10 @@ async function handleSpawn(
       : undefined,
   })
   executor.setContext?.(context)
+  // Official 2.1.331 `re()` vs `j()`: pane teammates start in the session's
+  // original folder (`getOriginalCwd()`), while in-process teammates use `getCwd()`.
+  const workingDir =
+    input.cwd || (executor.type === 'in-process' ? getCwd() : getOriginalCwd())
 
   // Official 2.1.331 `G()` — atomically uniquify the teammate name and reserve
   // the member entry in config.json under proper-lockfile BEFORE spawning.
@@ -478,6 +496,9 @@ async function handleSpawn(
 
     updateTeamContext(context, reserved, result)
 
+    const startedAwayFromShell =
+      display.isSplitPane && reserved.workingDir !== getCwd() ? true : undefined
+
     return {
       data: {
         teammate_id: reserved.teammateId,
@@ -492,6 +513,8 @@ async function handleSpawn(
         team_name: reserved.teamName,
         is_splitpane: display.isSplitPane,
         plan_mode_required: input.plan_mode_required,
+        ...(startedAwayFromShell ? { started_away_from_shell: true } : {}),
+        ...(result.outputFile ? { outputFile: result.outputFile } : {}),
       },
     }
   } catch (error) {

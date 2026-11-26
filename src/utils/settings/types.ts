@@ -1,4 +1,5 @@
 import { feature } from 'bun:bundle'
+import { posix as posixPath, win32 as win32Path } from 'path'
 import { z } from 'zod/v4'
 import { SandboxSettingsSchema } from '../../entrypoints/sandboxTypes.js'
 import { EDITOR_MODES, NOTIFICATION_CHANNELS } from '../configConstants.js'
@@ -279,6 +280,719 @@ export const CUSTOMIZATION_SURFACES = [
   'mcp',
 ] as const
 
+const MAX_INT32_MS = 2_147_483_647
+const POLICY_HELPER_MAX_RETRIES = 5
+const POLICY_HELPER_FORBIDDEN_CHARS_RE = /[\p{Cc}\u2028\u2029]|\p{DI}/u
+const POLICY_HELPER_WIN32_EXE_SUFFIX_RE = /\.(exe|ps1)$/i
+const POLICY_HELPER_PS1_SUFFIX_RE = /\.ps1$/i
+const POLICY_HELPER_PS1_WILDCARD_RE = /[[\]`*?]/
+const POLICY_HELPER_PS1_WILDCARD_ERROR =
+  'a .ps1 path must not contain "[", "]", "`", "*", or "?" on Windows (PowerShell resolves them as wildcard syntax)'
+const POLICY_HELPER_BOTH_PATH_AND_SCRIPT_ERROR =
+  'exactly one of path/script must be configured'
+const POLICY_HELPER_SCRIPT_INTERPRETER_PAIR_ERROR =
+  '"script" and "interpreter" must be configured together'
+const POLICY_HELPER_WINDOWS_ASCII_SCRIPT_ERROR =
+  'script must be ASCII-only on Windows (PowerShell decodes stdin with the console OEM code page); spell non-ASCII characters as escapes, e.g. [char]0x00E9'
+const POLICY_HELPER_ENTRY_REQUIRED_ERROR =
+  'Entry must carry "path" (a helper executable) or "script" + "interpreter" (an inline helper), and/or "defaultSettings" (a static settings payload)'
+
+const POLICY_HELPER_PLATFORMS = ['macos', 'linux', 'windows', 'wsl'] as const
+type PolicyHelperPlatform = (typeof POLICY_HELPER_PLATFORMS)[number]
+
+const POLICY_HELPER_MAP_KEYS = [...POLICY_HELPER_PLATFORMS, 'default'] as const
+const POLICY_HELPER_ENTRY_FIELDS = [
+  'path',
+  'script',
+  'interpreter',
+  'outputBehavior',
+  'onFailure',
+  'retries',
+  'timeoutMs',
+  'refreshIntervalMs',
+  'defaultSettings',
+] as const
+const POLICY_HELPER_ENVELOPE_FIELDS = [
+  'managedSettings',
+  'appendSystemPrompt',
+] as const
+const POLICY_HELPER_CLEAR_FIELDS = [
+  'path',
+  'script',
+  'defaultSettings',
+] as const
+
+function isWin32DeviceNamespace(filePath: string): boolean {
+  return /^[\\/]{2}[?.][\\/]/.test(filePath)
+}
+
+function isWin32UncPath(filePath: string): boolean {
+  const normalized = filePath.replaceAll('/', '\\')
+  if (isWin32DeviceNamespace(normalized)) return false
+  return /^\\{2}[^\\]/.test(normalized)
+}
+
+function isPosixNetOrNetworkServersMount(filePath: string): boolean {
+  if (!filePath.startsWith('/')) return false
+  const parts: string[] = []
+  for (const segment of filePath.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      parts.pop()
+      continue
+    }
+    parts.push(segment)
+    if (
+      (parts.length === 2 && parts[0]?.toLowerCase() === 'net') ||
+      (parts.length === 3 &&
+        parts[0]?.toLowerCase() === 'network' &&
+        parts[1]?.toLowerCase() === 'servers')
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function isMacosSpecialRoot(filePath: string): boolean {
+  if (!/\/\.(?:vol|file|nofollow|resolve)(?:\/|$)/i.test(filePath)) return false
+  if (!filePath.startsWith('/')) return false
+  const parts: string[] = []
+  for (const segment of filePath.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      parts.pop()
+      continue
+    }
+    parts.push(segment)
+    if (
+      parts.length === 1 &&
+      /^\.(?:vol|file|nofollow|resolve)$/i.test(segment)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function isPosixNetworkAutomountRoot(filePath: string): boolean {
+  return (
+    isPosixNetOrNetworkServersMount(filePath) ||
+    /^\/network\/servers(\/|$)/i.test(filePath) ||
+    isMacosSpecialRoot(filePath)
+  )
+}
+
+function isPosixMagicLinkRoot(filePath: string): boolean {
+  return /^\/(proc|dev\/(fd|stdin|stdout|stderr))(\/|$)/i.test(filePath)
+}
+
+function isNormalizedPolicyHelperPath(
+  filePath: string,
+  mode: 'win32' | 'posix',
+  opts: {
+    rejectDriveRelative?: boolean
+    rejectUnc?: boolean
+    rejectNetworkRoot?: boolean
+    rejectMagicLinkRoot?: boolean
+  } = {},
+): boolean {
+  if (mode === 'win32') {
+    const normalizedSep = filePath.replaceAll('/', '\\')
+    if (isWin32DeviceNamespace(normalizedSep)) return false
+    const isUnc = isWin32UncPath(normalizedSep)
+    if (opts.rejectUnc && isUnc) return false
+    if (opts.rejectDriveRelative) {
+      if (
+        !/^[A-Za-z]:\\/.test(normalizedSep) &&
+        !isUnc &&
+        /^(\\|[A-Za-z]:)/.test(normalizedSep)
+      ) {
+        return false
+      }
+    }
+    if (win32Path.normalize(normalizedSep) !== normalizedSep) return false
+    const parts = normalizedSep.split('\\')
+    if (parts.some(seg => seg === '.' || seg === '..')) return false
+    if (
+      parts.some(
+        (seg, idx) =>
+          /[. ]$/.test(seg) ||
+          (seg.includes(':') && !(idx === 0 && /^[A-Za-z]:$/.test(seg))),
+      )
+    ) {
+      return false
+    }
+    const rest = normalizedSep.startsWith('\\\\')
+      ? normalizedSep.slice(2)
+      : normalizedSep
+    if (/\\{2}/.test(rest)) return false
+    return (
+      !normalizedSep.endsWith('\\') || /^([A-Za-z]:)?\\$/.test(normalizedSep)
+    )
+  }
+  if (opts.rejectNetworkRoot && isPosixNetworkAutomountRoot(filePath)) {
+    return false
+  }
+  if (opts.rejectMagicLinkRoot && isPosixMagicLinkRoot(filePath)) {
+    return false
+  }
+  if (posixPath.normalize(filePath) !== filePath) return false
+  if (filePath.split('/').some(seg => seg === '.' || seg === '..')) return false
+  if (/\/{2}/.test(filePath)) return false
+  return !filePath.endsWith('/') || filePath === '/'
+}
+
+function isWellFormedUtf16(value: string): boolean {
+  if (typeof value.isWellFormed === 'function') {
+    return value.isWellFormed()
+  }
+  return !/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(
+    value,
+  )
+}
+
+function nullableOptional<T extends z.ZodType>(schema: T) {
+  return z
+    .preprocess(
+      value => (value === null ? undefined : value),
+      schema.optional(),
+    )
+    .optional()
+}
+
+function clampedIntMin(minValue: number) {
+  return z
+    .number()
+    .int()
+    .min(minValue)
+    .transform(value => Math.min(value, MAX_INT32_MS))
+}
+
+function isClearedPolicyHelperEntry(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  return (
+    POLICY_HELPER_CLEAR_FIELDS.some(key => record[key] === null) &&
+    POLICY_HELPER_CLEAR_FIELDS.every(
+      key => record[key] === null || record[key] === undefined,
+    )
+  )
+}
+
+export const PolicyHelperSchema = lazySchema(() =>
+  z.object({
+    path: z.string().describe('Absolute path to the helper executable'),
+    timeoutMs: nullableOptional(clampedIntMin(1000)),
+    refreshIntervalMs: nullableOptional(
+      z.union([z.literal(0), clampedIntMin(60_000)]),
+    ),
+  }),
+)
+
+function createPolicyHelperPathSchema(platform: PolicyHelperPlatform) {
+  const mode = platform === 'windows' ? 'win32' : 'posix'
+  const opts = {
+    rejectDriveRelative: platform === 'windows',
+    rejectUnc: platform === 'windows',
+    rejectNetworkRoot: platform !== 'windows',
+    rejectMagicLinkRoot: platform !== 'windows',
+    requireWin32ExecutableSuffix: platform === 'windows',
+  }
+  return z
+    .string()
+    .max(1024, { message: 'path must be at most 1024 characters' })
+    .refine(value => !POLICY_HELPER_FORBIDDEN_CHARS_RE.test(value), {
+      message:
+        'path must not contain control, line/paragraph-separator, or invisible (default-ignorable) characters',
+    })
+    .refine(
+      value => (mode === 'win32' ? win32Path : posixPath).isAbsolute(value),
+      { message: 'path must be absolute' },
+    )
+    .refine(
+      value =>
+        !(mode === 'win32' && opts.requireWin32ExecutableSuffix) ||
+        POLICY_HELPER_WIN32_EXE_SUFFIX_RE.test(value),
+      { message: 'path must end in .exe or .ps1 on Windows' },
+    )
+    .refine(
+      value =>
+        mode !== 'win32' ||
+        !(
+          POLICY_HELPER_PS1_SUFFIX_RE.test(value) &&
+          POLICY_HELPER_PS1_WILDCARD_RE.test(value)
+        ),
+      { message: POLICY_HELPER_PS1_WILDCARD_ERROR },
+    )
+    .refine(value => isNormalizedPolicyHelperPath(value, mode, opts), {
+      message:
+        mode === 'win32'
+          ? 'path must be in normalized form: no "." or ".." segments, no doubled or trailing separators, no component ending in "." or a space, no ":" outside the drive letter, no device-namespace (\\\\?\\) prefix, no drive-relative (\\dir or C:name) or UNC (\\\\server\\share) form'
+          : 'path must be in normalized form: no "." or ".." segments, no doubled or trailing separators, and not under a network automount root (/net/<host>, /Network/Servers, or macOS /.vol /.file /.nofollow /.resolve) or a kernel magic-link root (/proc, /dev/fd)',
+    })
+    .describe('Absolute path to the helper executable')
+}
+
+function createPolicyHelperScriptSchema(platform: PolicyHelperPlatform) {
+  return z
+    .string({ message: 'script must be a string' })
+    .min(1, { message: 'script must not be empty' })
+    .max(65_536, { message: 'script must be at most 65536 characters' })
+    .refine(value => !value.includes('\0'), {
+      message: 'script must not contain NUL bytes',
+    })
+    .refine(value => isWellFormedUtf16(value), {
+      message: 'script must be valid UTF-8 (no lone surrogates)',
+    })
+    .refine(value => platform !== 'windows' || !/[\u0080-\uffff]/.test(value), {
+      message: POLICY_HELPER_WINDOWS_ASCII_SCRIPT_ERROR,
+    })
+    .describe(
+      'Inline helper script, delivered to the fixed interpreter over stdin (never written to disk)',
+    )
+}
+
+function createPolicyHelperInterpreterSchema(platform: PolicyHelperPlatform) {
+  return (
+    platform === 'windows'
+      ? z.literal('pwsh', {
+          message:
+            "interpreter must be 'pwsh' on windows ('sh' is not supported there)",
+        })
+      : z.literal('sh', {
+          message: "interpreter must be 'sh' on macos/linux/wsl",
+        })
+  ).describe(
+    "Fixed interpreter for `script`: 'sh' (/bin/sh) on macos/linux/wsl entries; 'pwsh' (PowerShell at its fixed install locations, never PATH) on the windows entry",
+  )
+}
+
+const PolicyHelperOutputBehaviorSchema = () =>
+  z
+    .enum(['replace', 'merge'])
+    .describe(
+      "How the helper's managedSettings compose with the settings of the source that delivered this entry: 'replace' (default) — the output is the policy; 'merge' — the output is deep-merged over that source's own settings the way merged managed sources compose (helper scalars win, arrays union, objects merge — except fallbackModel, forceLoginOrgUUID, gatewayInternalNetworks, sandbox.filesystem.allowRead, sandbox.credentials.awsPairs, sandbox.ripgrep and the restriction allowlists such as allowedMcpServers, allowedProviders, availableModels and allowedHttpHookUrls, which are the helper's whole value when it emits one; tighten a permission with a deny), so a failed helper costs only the delta",
+    )
+
+const PolicyHelperOnFailureSchema = () =>
+  z.preprocess(
+    value =>
+      value === undefined || value === 'continue' || value === 'refuse'
+        ? value
+        : 'refuse',
+    z
+      .enum(['continue', 'refuse'])
+      .describe(
+        `What happens when this entry's helper fails at startup (bad path, missing file or interpreter, non-zero exit, timeout, oversize or invalid output) and no static settings payload (this entry's own, the linux entry's on WSL, or the map's "default") applies in its place: 'refuse' — Claude Code does not start, naming the failure; 'continue' — Claude Code starts without the helper's output, on the delivering source's own settings, with a /status notice. Default: 'refuse' when the entry comes from MDM or the managed settings file, 'continue' when it comes from remote managed settings. Any other value is treated as 'refuse', with a /status notice. The install and update commands start no session and are never refused over a remote entry: they report the refusal in /status. An entry whose other fields fail validation runs no helper; from MDM or the managed settings file, any value but 'continue' on it then refuses to start Claude Code until the entry is fixed, unless a static settings payload (the entry's own, kept when it validates, the linux entry's for a wsl one, or the map's "default") serves in its place. From remote, a non-interactive session runs the helper off settings verified this session without the interactive approval, so 'refuse' there too means the helper ran and failed; a launch whose remote settings could not be verified this session (offline, fetch failed) starts without the helper regardless; and a failure first reached after the session has started (settings verified or approved mid-session, which on a machine that only ever runs non-interactively is every launch) ends a session no person watches (non-interactive, a background session no client is attached to, or a teammate session) as the refused start would have, and leaves a watched interactive one (a terminal, with or without remote control, or an attached background session) running under a /status notice with its next start refused. Background refresh failures always keep the last good output whatever this says`,
+      ),
+  )
+
+const PolicyHelperRetriesSchema = () =>
+  z
+    .number()
+    .int()
+    .min(0)
+    .transform(value => Math.min(value, POLICY_HELPER_MAX_RETRIES))
+    .describe(
+      "How many more times to run this entry's helper when a run fails to execute — it could not be launched, exited non-zero, or was stopped at timeoutMs — before that counts as a failure (a non-negative integer; default 0, a single attempt; above 5 is treated as 5). Attempts are separated by a short randomized backoff (from 250 ms, doubling per attempt, at most 4 s each) and each attempt gets the full timeoutMs, so a start that waits on the helper can wait up to (retries + 1) × timeoutMs plus the backoff. Output the helper did produce and that was refused — oversized, not a JSON object, an invalid envelope, or settings that fail validation — is not retried, and neither is an invalid path. Applies alike at startup and on each background refresh; only once the attempts are used up do the entry's failure rules (a static settings payload in its place, onFailure, the refresh notice) apply, naming the last attempt's failure",
+    )
+
+const PolicyHelperDefaultPayloadSchema = lazySchema(() =>
+  z.record(z.string(), z.unknown()).superRefine((record, ctx) => {
+    for (const key of ['policyHelper', 'policyHelpers'] as const) {
+      if (record[key] !== undefined && record[key] !== null) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `must not contain "${key}" — the default payload is applied as managed settings and cannot configure further policy helpers`,
+        })
+      }
+    }
+    for (const key of POLICY_HELPER_ENTRY_FIELDS) {
+      if (record[key] !== undefined && record[key] !== null) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `must not contain "${key}" — a static payload is a managed-settings object, not a policyHelpers entry; entry fields (${POLICY_HELPER_ENTRY_FIELDS.join('/')}) belong on the per-OS entries (policyHelpers.${POLICY_HELPER_PLATFORMS.join('/')})`,
+        })
+      }
+    }
+    for (const key of POLICY_HELPER_ENVELOPE_FIELDS) {
+      if (record[key] !== undefined && record[key] !== null) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `must not contain "${key}" — a static payload is the managedSettings SUBTREE, not the helper's stdout envelope; paste the object your helper emits UNDER "managedSettings", not the envelope around it`,
+        })
+      }
+    }
+    for (const key of POLICY_HELPER_MAP_KEYS) {
+      if (record[key] !== undefined && record[key] !== null) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `must not contain "${key}" — a static payload is the VALUE of a policyHelpers key (a managed-settings object), never another policyHelpers map; don't paste the map or its "${key}" line inside the slot`,
+        })
+      }
+    }
+  }),
+)
+
+function validatePolicyHelperEntryCombo(entry: {
+  path?: string
+  script?: string
+  interpreter?: string
+  defaultSettings?: Record<string, unknown>
+}): string | null {
+  const { path, script, interpreter, defaultSettings } = entry
+  if (path !== undefined && script !== undefined) {
+    return POLICY_HELPER_BOTH_PATH_AND_SCRIPT_ERROR
+  }
+  if ((script === undefined) !== (interpreter === undefined)) {
+    return POLICY_HELPER_SCRIPT_INTERPRETER_PAIR_ERROR
+  }
+  if (
+    path === undefined &&
+    script === undefined &&
+    defaultSettings === undefined
+  ) {
+    return POLICY_HELPER_ENTRY_REQUIRED_ERROR
+  }
+  return null
+}
+
+function createPolicyHelperPlatformEntrySchema(platform: PolicyHelperPlatform) {
+  return PolicyHelperSchema()
+    .omit({ path: true })
+    .extend({
+      path: nullableOptional(createPolicyHelperPathSchema(platform)),
+      script: nullableOptional(createPolicyHelperScriptSchema(platform)),
+      interpreter: nullableOptional(
+        createPolicyHelperInterpreterSchema(platform),
+      ),
+      outputBehavior: nullableOptional(PolicyHelperOutputBehaviorSchema()),
+      onFailure: nullableOptional(PolicyHelperOnFailureSchema()),
+      retries: nullableOptional(PolicyHelperRetriesSchema()),
+      defaultSettings: z
+        .preprocess(
+          value => (value === null ? undefined : value),
+          PolicyHelperDefaultPayloadSchema().optional(),
+        )
+        .optional(),
+    })
+    .check(ctx => {
+      if (ctx.issues.length > 0) return
+      const err = validatePolicyHelperEntryCombo(ctx.value)
+      if (err !== null) {
+        ctx.issues.push({
+          code: 'custom',
+          message: err,
+          input: ctx.value,
+        })
+      }
+    })
+}
+
+function policyHelperPlatformSlot(platform: PolicyHelperPlatform) {
+  return z
+    .preprocess(value => {
+      if (value === null) return undefined
+      if (isClearedPolicyHelperEntry(value)) return undefined
+      return value
+    }, createPolicyHelperPlatformEntrySchema(platform).optional())
+    .optional()
+}
+
+export const PolicyHelpersSchema = lazySchema(() =>
+  z.object({
+    macos: policyHelperPlatformSlot('macos'),
+    linux: policyHelperPlatformSlot('linux'),
+    windows: policyHelperPlatformSlot('windows'),
+    wsl: policyHelperPlatformSlot('wsl'),
+    default: z
+      .preprocess(
+        value => (value === null ? undefined : value),
+        PolicyHelperDefaultPayloadSchema().optional(),
+      )
+      .optional(),
+  }),
+)
+
+const INVALID_FOOTER_LINK_ENTRY = Object.freeze({
+  type: 'invalid-entry-stripped' as const,
+})
+
+const FooterLinkEntrySchema = lazySchema(() =>
+  z.union([
+    z
+      .object({
+        type: z
+          .literal('regex')
+          .describe(
+            'Config variant. This client understands "regex": matches turn output and builds a URL from named capture groups. Entries with other variants are preserved but skipped at runtime.',
+          ),
+        pattern: z
+          .string()
+          .describe(
+            'Regex matched against turn output (tool results and assistant text)',
+          ),
+        url: z
+          .string()
+          .describe(
+            'Link target. {name} placeholders are filled from named regex capture groups, e.g. (?<id>...) -> {id}. Values are URL-encoded; the origin must be literal in the template. The scheme must be https, http, or a recognized editor or workspace deep-link scheme: vscode, vscode-insiders, cursor, windsurf, zed, jetbrains, idea, slack, linear, notion, figma.',
+          ),
+        label: z
+          .string()
+          .optional()
+          .describe(
+            'Badge text. {name} placeholders filled from named capture groups; defaults to the full match.',
+          ),
+      })
+      .passthrough(),
+    z
+      .object({
+        type: z
+          .string()
+          .describe(
+            'Config variant discriminator for entries this client does not understand; the entry is preserved as-is and skipped at runtime.',
+          ),
+      })
+      .passthrough(),
+  ]),
+)
+
+const GATEWAY_INTERNAL_NETWORKS_UNREADABLE = '(unreadable)'
+
+const MANAGED_MCP_SERVER_NAME_ERROR =
+  'server names may only contain letters, numbers, hyphens and underscores, and may not be constructor, prototype, __proto__, __defineGetter__, __defineSetter__, __lookupGetter__ or __lookupSetter__'
+
+const MANAGED_MCP_SERVERS_RECORD_ERROR =
+  '"managedMcpServers" must be an object keyed by server name (the .mcp.json mcpServers shape; Claude Desktop\'s array form of its same-named key is not accepted here: use the server name as the key and "type" instead of "transport"). No managed MCP servers are installed from it until it is fixed.'
+
+const MANAGED_MCP_DISALLOWED_KEYS = [
+  'command',
+  'args',
+  'env',
+  'headersHelper',
+] as const
+
+const MANAGED_MCP_ALLOWED_TYPES = new Set(['http', 'streamable-http', 'sse'])
+const MANAGED_MCP_CONTROL_OR_FORMAT_RE = /[\p{Cc}\p{Cf}\u2028\u2029]/u
+const MANAGED_MCP_CONTROL_OR_FORMAT_GLOBAL_RE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu
+const MANAGED_MCP_ENV_VAR_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/
+const MANAGED_MCP_URL_MAX_LEN = 65_536
+const MANAGED_MCP_AUTH_META_URL_MAX_LEN = 4096
+const MANAGED_MCP_REQUEST_TIMEOUT_CAP_MS = 300_000
+
+function isValidManagedMcpServerName(name: string): boolean {
+  return (
+    /^[A-Za-z0-9_-]+$/.test(name) &&
+    !(name in Object.prototype && name.startsWith('__')) &&
+    name !== 'constructor' &&
+    name !== 'prototype'
+  )
+}
+
+function isHttpsUrlWithHost(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' && parsed.hostname !== ''
+  } catch {
+    return false
+  }
+}
+
+function walkManagedMcpStrings(
+  value: unknown,
+  pathPrefix = '',
+  depth = 0,
+): Array<[string, string, boolean]> {
+  if (typeof value === 'string') return [[pathPrefix, value, false]]
+  if (depth > 4 || value === null || typeof value !== 'object') return []
+  return Object.entries(value).flatMap(([key, child]) => {
+    const escapedKey = key.replace(
+      MANAGED_MCP_CONTROL_OR_FORMAT_GLOBAL_RE,
+      ch => `\\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, '0')}`,
+    )
+    const nextPath = pathPrefix ? `${pathPrefix}.${escapedKey}` : escapedKey
+    return [
+      [nextPath, key, true] as [string, string, boolean],
+      ...walkManagedMcpStrings(child, nextPath, depth + 1),
+    ]
+  })
+}
+
+function foldManagedMcpServerConfig<
+  T extends {
+    timeout?: number
+    request_timeout_ms?: number
+    orgMaxPermission?: string | null
+  },
+>({ request_timeout_ms, ...rest }: T) {
+  const result: Omit<T, 'request_timeout_ms'> & { timeout?: number } = {
+    ...rest,
+    ...(rest.timeout === undefined && request_timeout_ms !== undefined
+      ? {
+          timeout: Math.min(
+            request_timeout_ms,
+            MANAGED_MCP_REQUEST_TIMEOUT_CAP_MS,
+          ),
+        }
+      : {}),
+  }
+  if (result.orgMaxPermission === 'allow') {
+    delete result.orgMaxPermission
+  }
+  return result
+}
+
+const ManagedMcpOAuthSchema = lazySchema(() =>
+  z.object({
+    clientId: z.string().optional(),
+    callbackPort: z.number().int().positive().optional(),
+    authServerMetadataUrl: z
+      .string()
+      .refine(url => url.length <= MANAGED_MCP_AUTH_META_URL_MAX_LEN, {
+        abort: true,
+        message: 'authServerMetadataUrl is too long',
+      })
+      .url()
+      .startsWith('https://', {
+        message: 'authServerMetadataUrl must use https://',
+      })
+      .optional(),
+    scopes: z.string().min(1).optional(),
+    xaa: z.boolean().optional(),
+  }),
+)
+
+const ManagedMcpToolEntrySchema = lazySchema(() =>
+  z.object({
+    name: z.string(),
+    permission_policy: z
+      .enum(['always_allow', 'always_ask', 'always_deny'])
+      .optional(),
+  }),
+)
+
+const ManagedMcpUrlFieldSchema = () =>
+  z.string().refine(url => url.length <= MANAGED_MCP_URL_MAX_LEN, {
+    abort: true,
+    message: 'url is too long',
+  })
+
+const ManagedMcpCommonFields = () => ({
+  url: ManagedMcpUrlFieldSchema(),
+  headers: z.record(z.string(), z.string()).optional(),
+  headersHelper: z.string().optional(),
+  oauth: ManagedMcpOAuthSchema().optional(),
+  timeout: z.number().int().positive().optional(),
+  request_timeout_ms: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .catch(undefined)
+    .describe('@internal CCR backend wire hint; folded into timeout at parse.'),
+  tools: z.array(ManagedMcpToolEntrySchema()).optional(),
+  alwaysLoad: z.boolean().optional(),
+  displayName: z.string().optional().catch(undefined),
+  bareElicitationCapability: z.boolean().optional(),
+  discoveryCache: z.boolean().optional(),
+  role: z.literal('comms').optional().catch(undefined),
+  toolPermissions: z
+    .record(z.string(), z.enum(['allow', 'ask', 'blocked']))
+    .optional(),
+  orgMaxPermission: z.string().nullable().catch('malformed').optional(),
+})
+
+const ManagedMcpHttpServerSchema = lazySchema(() =>
+  z
+    .object({
+      type: z
+        .enum(['http', 'streamable-http'])
+        .transform(() => 'http' as const),
+      ...ManagedMcpCommonFields(),
+    })
+    .transform(foldManagedMcpServerConfig),
+)
+
+const ManagedMcpSseServerSchema = lazySchema(() =>
+  z
+    .object({
+      type: z.literal('sse'),
+      ...ManagedMcpCommonFields(),
+    })
+    .transform(foldManagedMcpServerConfig),
+)
+
+export const ManagedMcpServerConfigSchema = lazySchema(() =>
+  z
+    .record(z.string(), z.unknown())
+    .check(ctx => {
+      const addIssue = (path: string[], message: string) => {
+        ctx.issues.push({
+          code: 'custom',
+          path,
+          message,
+          input: ctx.value,
+        })
+      }
+      for (const disallowed of MANAGED_MCP_DISALLOWED_KEYS) {
+        if (Object.hasOwn(ctx.value, disallowed)) {
+          addIssue(
+            [disallowed],
+            `"${disallowed}" is not allowed in managed settings: only http/sse URL servers can be delivered this way, and a managed settings document must not name a program to run`,
+          )
+        }
+      }
+      if (
+        typeof ctx.value.type !== 'string' ||
+        !MANAGED_MCP_ALLOWED_TYPES.has(ctx.value.type)
+      ) {
+        addIssue(
+          ['type'],
+          'managed settings can only deliver "http" or "sse" servers',
+        )
+      }
+      const url = ctx.value.url
+      if (typeof url === 'string' && !isHttpsUrlWithHost(url)) {
+        addIssue(
+          ['url'],
+          'managed settings servers must use a valid https:// url',
+        )
+      }
+      for (const [entryPath, str, isKey] of walkManagedMcpStrings(ctx.value)) {
+        if (MANAGED_MCP_CONTROL_OR_FORMAT_RE.test(str)) {
+          addIssue(
+            entryPath.split('.'),
+            'contains control or invisible format characters (in a key or a value); a managed settings document must not be able to print escape sequences',
+          )
+        } else if (!isKey && MANAGED_MCP_ENV_VAR_RE.test(str)) {
+          addIssue(
+            entryPath.split('.'),
+            "${VAR} references are not expanded in managed settings; use a literal value (a managed settings document must not read the user's environment)",
+          )
+        }
+      }
+    })
+    .pipe(z.union([ManagedMcpHttpServerSchema(), ManagedMcpSseServerSchema()])),
+)
+
+function createKnownMarketplacesRecordSchema(keyName: string) {
+  return z.record(z.string(), ExtraKnownMarketplaceSchema()).check(ctx => {
+    for (const [key, entry] of Object.entries(ctx.value)) {
+      if (entry.source.source === 'settings' && entry.source.name !== key) {
+        ctx.issues.push({
+          code: 'custom',
+          input: entry.source.name,
+          path: [key, 'source', 'name'],
+          message:
+            `Settings-sourced marketplace name must match its ${keyName} key ` +
+            `(got key "${key}" but source.name "${entry.source.name}")`,
+        })
+      }
+    }
+  })
+}
+
 export const SettingsSchema = lazySchema(() =>
   z
     .object({
@@ -309,6 +1023,30 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Command to refresh GCP authentication (e.g., gcloud auth application-default login)',
+        ),
+      policyHelper: z
+        .preprocess(value => {
+          if (value === null) return undefined
+          if (
+            value &&
+            typeof value === 'object' &&
+            !Array.isArray(value) &&
+            (value as Record<string, unknown>).path === null
+          ) {
+            return undefined
+          }
+          return value
+        }, PolicyHelperSchema().optional())
+        .describe(
+          'Executable that computes managed settings at startup. Honored only from admin-controlled policy sources.',
+        ),
+      policyHelpers: z
+        .preprocess(
+          value => (value === null ? undefined : value),
+          PolicyHelpersSchema().optional(),
+        )
+        .describe(
+          '@internal Per-OS variant of policyHelper, keyed by platform: macos, linux, windows, wsl, plus an optional "default" entry that is a STATIC settings payload (a JSON object of managed settings, not a helper). Each per-OS entry carries a helper — a "path", or an inline "script" + "interpreter" delivered to a fixed interpreter over stdin, either with timeoutMs/refreshIntervalMs — its own static "defaultSettings" payload, or both; an entry may be payload-only. Selection for a platform walks its chain (the platform\'s own entry; on wsl the linux entry next): the first helper on the chain wins over policyHelper; if no helper is configured — or the selected helper fails at startup or refresh — the first payload applies (the chain\'s "defaultSettings" in platform-specific-first order, then the top-level "default", applied with no process spawned; unrecognized platforms reach only "default"); with no payload either, policyHelper. Honored from admin-controlled policy sources, and from remote managed settings — a payload of plain policy as delivered, like any other remote key; a helper, or a payload carrying anything the managed-settings approval dialog lists, only once the settings are verified this session and approved there (policyHelper itself is never honored from remote).',
         ),
       // Gated so the SDK generator (which runs without CLAUDE_CODE_ENABLE_XAA)
       // doesn't surface this in GlobalClaudeSettings. Read via getXaaIdpSettings().
@@ -355,6 +1093,74 @@ export const SettingsSchema = lazySchema(() =>
           'Whether file picker should respect .gitignore files (default: true). ' +
             'Note: .ignore files are always respected.',
         ),
+      breakReminder: z
+        .object({
+          enabled: z
+            .boolean()
+            .optional()
+            .describe(
+              'Show a friendly nudge after sustained continuous use (default false). Must be true for the reminder to fire.',
+            ),
+          intervalMinutes: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe(
+              'Minutes of continuous use before the reminder fires (default 30). Re-fires every interval until you take a break.',
+            ),
+          breakThresholdMinutes: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe(
+              'Minutes of inactivity that count as a break and reset the timer (default 10)',
+            ),
+          message: z
+            .string()
+            .optional()
+            .describe(
+              'Custom reminder text. Leave unset for a rotating set of friendly nudges.',
+            ),
+        })
+        .optional()
+        .describe(
+          '@internal Opt-in break reminder. When enabled, shows a dismissible nudge after sustained continuous use. Never blocks — just a friendly heads-up.',
+        ),
+      quietHours: z
+        .object({
+          enabled: z
+            .boolean()
+            .optional()
+            .describe(
+              'Show a one-time nudge when you start or keep using the CLI inside your quiet-hours window (default false).',
+            ),
+          start: z
+            .string()
+            .regex(
+              /^([01]?\d|2[0-3]):[0-5]\d$/,
+              'Expected 24-hour local time "HH:MM" (e.g. "22:00")',
+            )
+            .optional()
+            .describe(
+              'Start of the quiet-hours window, 24-hour local time "HH:MM".',
+            ),
+          end: z
+            .string()
+            .regex(
+              /^([01]?\d|2[0-3]):[0-5]\d$/,
+              'Expected 24-hour local time "HH:MM" (e.g. "07:00")',
+            )
+            .optional()
+            .describe(
+              'End of the quiet-hours window, 24-hour local time "HH:MM". May be earlier than start for an overnight range.',
+            ),
+        })
+        .optional()
+        .describe(
+          '@internal Opt-in quiet hours. When enabled, shows a single soft nudge per session while inside the configured local-time window. Never blocks.',
+        ),
       cleanupPeriodDays: z
         .number()
         .nonnegative()
@@ -379,6 +1185,18 @@ export const SettingsSchema = lazySchema(() =>
         }, z.boolean().optional())
         .describe(
           'Set to false to turn off syncing of the skills you have on claude.ai. An invalid value is treated as false until it is fixed.',
+        ),
+      syncClaudeAiPlugins: z
+        .boolean()
+        .optional()
+        .describe(
+          'Set to false to turn off syncing of the plugins you have enabled on claude.ai. In your user settings (or managed settings): nothing more is downloaded, previously synced plugins (~/.claude/plugins/synced) are hidden from every session started afterwards and moved to ~/.claude/plugins/.trash at the next launch (deleted after cleanupPeriodDays; re-downloaded, not restored, if you re-enable). In .claude/settings.local.json or --settings: downloads stop and synced plugins are hidden for sessions in that workspace or invocation only (nothing is moved). Not read from project settings (.claude/settings.json). Only false is honored — the feature is enabled server-side for your account, so setting true does not turn it on early. While it is on, synced plugins load in every session like plugins you installed yourself (a plugin you installed with the same name takes precedence), are re-synced at each launch, and are removed when you disable them on claude.ai. Only applies when signed in with your Claude account.',
+        ),
+      wslInheritsWindowsSettings: z
+        .boolean()
+        .optional()
+        .describe(
+          'When set to true in either admin-only Windows source — the HKLM SOFTWARE/Policies/ClaudeCode registry key or C:/Program Files/ClaudeCode/managed-settings.json — WSL reads managed settings from the full Windows policy chain (HKLM, C:/Program Files/ClaudeCode via DrvFs, HKCU) in addition to /etc/claude-code. Windows sources take priority. The flag is also required in HKCU itself for HKCU policy to apply on WSL (double opt-in: admin enables the chain, user confirms HKCU). On native Windows the flag has no effect.',
         ),
       env: EnvironmentVariablesSchema()
         .optional()
@@ -439,6 +1257,13 @@ export const SettingsSchema = lazySchema(() =>
       permissions: PermissionsSchema()
         .optional()
         .describe('Tool usage permissions configuration'),
+      additionalDirectoryConfigRoots: z
+        .record(z.string(), z.string().catch(''))
+        .optional()
+        .catch(undefined)
+        .describe(
+          "@internal For the program that starts Claude Code only: read from --settings and from settings that program sends while the session runs; ignored in settings files. Maps an added folder (--add-dir, or a claim's additional_directories) by its absolute path, also matched by its real path, to the absolute path of the checkout whose .claude skills, commands, agents and plugin settings that folder then reads instead of its own; file access stays with the folder. Full contract, with when to send it and what makes a root unusable: apps/cli/docs/desktop-host-contract.md, entry additionalDirectoryConfigRoots.",
+        ),
       modelType: z
         .enum(['anthropic', 'openai', 'gemini', 'grok'])
         .optional()
@@ -546,6 +1371,26 @@ export const SettingsSchema = lazySchema(() =>
             'Affects every spend figure Claude Code reports: /cost, the status line, and the SDK total_cost_usd. ' +
             'Typically set in managed settings by enterprise administrators.',
         ),
+      modelCatalogUrl: z
+        .string()
+        .optional()
+        .describe(
+          '@internal URL of the published model-catalog document Claude Code reads for sessions the model-selector service does not serve per user: first-party sessions with no claude.ai login ' +
+            '(an API key or Console key, an apiKeyHelper, workload identity — unless the service accepts ' +
+            'that credential directly); Bedrock, Vertex, Foundry and Mantle sessions where the release turns the document on for the provider or CLAUDE_CODE_MODEL_CATALOG=1 opts the session in; and ANTHROPIC_BASE_URL gateway sessions and Claude Platform on AWS / Google Cloud sessions once Anthropic enables the document for them (a release that opens them, then GrowthBook tengu_delegated_quail at shadow or primary, or at any value for a file:// URL behind an ANTHROPIC_BASE_URL gateway; until that release they do not read the hosted document). Until then there, and always on the Claude apps gateway provider (its own /v1/models is the ' +
+            'model list), a URL of the organization’s own set here is read whatever the flag says, only for ' +
+            'what a row states about its own model: it moves no picker row, alias or default. ' +
+            'What a row states includes a new model’s settings and, from an in-date copy that Anthropic signed, its prompt text. ' +
+            'Sessions with a claude.ai login (the service serves them) never read it. The document is the signed JSON document Anthropic publishes at https://downloads.claude.ai/model-catalog/v1/catalog.json, or a mirror of it. Defaults to that hosted URL; a self-hosted mirror is any other https:// or http:// URL, or a file:// URL naming a local path for devices without egress. The hosted document is verified against the signing keys built into Claude Code; a self-hosted one is verified against those keys or against modelCatalogPublicKey. Only honored from managed settings (server-managed, MDM / OS policy, or managed-settings.json); also settable with the CLAUDE_CODE_MODEL_CATALOG_URL environment variable, which managed settings override and which is verified against the built-in keys only. Reading the document at all is controlled by Anthropic per release; CLAUDE_CODE_MODEL_CATALOG=off disables it locally.',
+        ),
+      modelCatalogPublicKey: z
+        .string()
+        .optional()
+        .describe(
+          '@internal PEM-encoded RSA public key (SubjectPublicKeyInfo, "-----BEGIN PUBLIC KEY-----", at least 2048 bits) that a self-hosted model-catalog document named by modelCatalogUrl must be signed with: the ".raw-sig.json" sidecar next to the document (the same format Claude Code release manifests use, RSASSA-PKCS1-v1_5 / SHA-512 over the context prefix and the exact document bytes) is verified against this key. Consulted only for a modelCatalogUrl ' +
+            'set in the same managed settings — not for the hosted URL and not for a URL set only by ' +
+            'CLAUDE_CODE_MODEL_CATALOG_URL, which are verified against the keys built into Claude Code. A value that is not such a key disables the self-hosted source. Only honored from managed settings.',
+        ),
       // Whether to automatically approve all MCP servers in the project
       enableAllProjectMcpServers: z
         .boolean()
@@ -606,6 +1451,18 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'When true, skip registration of skills that ship with the CLI (bundled skills).',
+        ),
+      managedMcpServers: z
+        .record(
+          z.string().refine(isValidManagedMcpServerName, {
+            error: MANAGED_MCP_SERVER_NAME_ERROR,
+          }),
+          ManagedMcpServerConfigSchema(),
+          { error: MANAGED_MCP_SERVERS_RECORD_ERROR },
+        )
+        .optional()
+        .describe(
+          'MCP servers the organization provides to every user, keyed by server name, each with the .mcp.json entry shape; only "http" and "sse" servers are accepted (nothing that names a program to run, no ${VAR} references). Honored from managed settings only; users cannot remove them, deniedMcpServers still applies, and they need no allowedMcpServers entry. Not read in Claude Desktop\'s Code tab on a third-party deployment or in Cowork sessions, where Claude Desktop supplies and locks the session\'s MCP servers itself.',
         ),
       // Enterprise allowlist of MCP servers
       allowedMcpServers: z
@@ -669,6 +1526,12 @@ export const SettingsSchema = lazySchema(() =>
         .boolean()
         .optional()
         .describe('Disable all hooks and statusLine execution'),
+      disableReplyCheck: z
+        .boolean()
+        .optional()
+        .describe(
+          "Disable the reply check in Claude Tag sessions on a self-hosted runner. The check re-prompts Claude, at most four times a turn, when a turn ends without a call to one of Claude Tag's reply tools. It is not a hook, so disableAllHooks does not affect it. Disabling it also stops two messages to Claude that Anthropic's service can request for such a session: a nudge after a long stretch of work with no visible update, and a reminder added to prompts. Claude Code's built-in reminder to give progress updates, on models that have it, is then no longer held back. Set it in managed settings; false there keeps the check on. Everywhere else it is ignored and the check stays on. Has no effect on sessions that Anthropic hosts.",
+        ),
       // Official residual — disable `claude agents` agent view.
       disableAgentView: z.boolean().optional().describe(
         // densable 2.1.289 SEA copy — fleet breadth, not agents-only.
@@ -738,6 +1601,12 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'When true, strip ```! / !` skill shell commands instead of executing them. ' +
             'Also forced on when CLAUDE_CODE_IS_COWORK is set. Policy settings take precedence.',
+        ),
+      disableWindowsBashCommandSplit: z
+        .boolean()
+        .optional()
+        .describe(
+          'Windows only. Set to true to keep every Bash command in a single argument to bash, so that endpoint security tools that match text in process command lines see it whole. Otherwise Claude Code may split a long command over several arguments. With true, a command of about 7,000 characters or more, or fewer if it is full of quotes, may reach bash cut short, and then usually fails with a syntax error. Only honored from managed settings; ignored in user, project, local and --settings sources.',
         ),
       // Which shell backs input-box `!` (see resolveDefaultShell)
       defaultShell: z
@@ -891,6 +1760,14 @@ export const SettingsSchema = lazySchema(() =>
             'deniedMcpServers still merges from all sources, so users can deny servers for themselves. ' +
             'Users can still add their own MCP servers, but only the admin-defined allowlist applies.',
         ),
+      desktopMcpServersListScope: z
+        .string()
+        .optional()
+        .catch('all')
+        .meta({ default: undefined })
+        .describe(
+          'Claude desktop app only. Where your allow list and deny list apply to MCP servers added in the Claude desktop app. "code" (default): Your allow list also governs MCP servers added in the Claude desktop app, in Code tab sessions and the Artifact pane. "all": Your allow list and your deny list also govern MCP servers added in the Claude desktop app, in every tab (including Chat and Cowork). "off": Your allow list doesn\'t govern MCP servers added in the Claude desktop app. Read only from managed settings. Any other value counts as `all`. Where sources are merged or mixed, `off` counts as `all`. Leave the key out, or set it only in the managed source that holds your list. `deniedMcpServers` applies in Code tab sessions and the Artifact pane with every value, and in every tab with `all`. MCP servers sent to SSH hosts are not governed by these lists in this release. The Claude Code CLI reads nothing from this key, but written alone in a higher managed source it makes that source lead, and Claude Code skips the managed sources beneath it. Write it only beside the list it scopes.',
+        ),
       // When true (and set in managed settings), claude.ai cloud MCP connectors
       // load alongside managed-mcp.json instead of being suppressed by its
       // exclusive-control lockdown. Default off preserves the lockdown.
@@ -902,6 +1779,12 @@ export const SettingsSchema = lazySchema(() =>
           'When true (and set in managed settings), claude.ai cloud MCP connectors load alongside ' +
             'managed-mcp.json instead of being suppressed by its exclusive-control lockdown. ' +
             'Default off preserves the lockdown. Read from managed settings only.',
+        ),
+      allowClaudeInChromeWithManagedMcp: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true (and set in device managed settings: MDM, the managed-settings.json file, or a policy helper those configure), the built-in Claude in Chrome MCP server can run alongside managed-mcp.json instead of being blocked by its exclusive-control lockdown. deniedMcpServers and the organization's Claude in Chrome setting still block it. Default off preserves the lockdown.",
         ),
       // Force customizations through plugins only (LinkedIn ask via GTM)
       strictPluginOnlyCustomization: z
@@ -953,6 +1836,22 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Whether to render the fork built-in status line (model + ctx + 5h/7d limits + cost + cache pill). Toggled with /statusline.',
         ),
+      prUrlTemplate: z
+        .string()
+        .optional()
+        .describe(
+          'URL template for PR links in the footer link badges and inline messages. The detected git PR is rendered as the first footer-link badge. Placeholders: {host} {owner} {repo} {number} {url}. Example: "https://reviews.example.com/{owner}/{repo}/pull/{number}"',
+        ),
+      footerLinksRegexes: z
+        .array(FooterLinkEntrySchema().catch(INVALID_FOOTER_LINK_ENTRY))
+        .transform(entries =>
+          entries.filter(entry => entry !== INVALID_FOOTER_LINK_ENTRY),
+        )
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Extra clickable footer badges that appear when a regex matches turn output (tool results and assistant responses). Read from user, flag, and managed settings only; ignored in project .claude/settings.json and local .claude/settings.local.json. At most 5 badges render; the oldest is displaced by newer matches and /clear removes them. Use to surface IDs printed by project CLIs as session links.',
+        ),
       // Official 2.1.323 (#2210): Deprecated — kept in schema for backward compatibility
       // so existing settings files still load, but has no runtime effect.
       subagentStatusLine: z
@@ -990,42 +1889,25 @@ export const SettingsSchema = lazySchema(() =>
           'Managed plugins (plugin@marketplace ids that managed enabledPlugins sets true) whose hooks run last among plugins, innermost, in the listed order: the last id listed sits just above the built-in plugins and sees each event as every other plugin left it. Only honored from managed settings (or, on a machine with none, from user settings for your own plugins); ignored in project, local and --settings sources.',
         ),
       // Extra marketplaces for this repository (usually for project settings)
-      extraKnownMarketplaces: z
-        .record(z.string(), ExtraKnownMarketplaceSchema())
-        .check(ctx => {
-          // For settings sources, key must equal source.name. diffMarketplaces
-          // looks up materialized state by dict key; addMarketplaceSource stores
-          // under marketplace.name (= source.name for settings). A mismatch means
-          // the reconciler never converges — every session: key-lookup misses →
-          // 'missing' → source-idempotency returns alreadyMaterialized but
-          // installed++ anyway → pointless cache clears. For github/git/url the
-          // name comes from a fetched marketplace.json (mismatch is expected and
-          // benign); for settings, both key and name are user-authored in the
-          // same JSON object.
-          for (const [key, entry] of Object.entries(ctx.value)) {
-            if (
-              entry.source.source === 'settings' &&
-              entry.source.name !== key
-            ) {
-              ctx.issues.push({
-                code: 'custom',
-                input: entry.source.name,
-                path: [key, 'source', 'name'],
-                message:
-                  `Settings-sourced marketplace name must match its extraKnownMarketplaces key ` +
-                  `(got key "${key}" but source.name "${entry.source.name}")`,
-              })
-            }
-          }
-        })
+      extraKnownMarketplaces: createKnownMarketplacesRecordSchema(
+        'extraKnownMarketplaces',
+      )
         .optional()
         .describe(
           'Additional marketplaces to make available for this repository. Typically used in repository .claude/settings.json to ensure team members have required plugin sources. Alias: additionalMarketplaces (densable 2.1.232).',
         ),
-      // densable 2.1.232 #8 — public alias names are rewritten to canonical keys
-      // by applySettingsKeyAliases (sRe) before SettingsSchema parse. Do not
-      // add additionalMarketplaces/allowedMarketplaces as schema fields:
-      // after sRe they are deleted and only extraKnown/strictKnown remain.
+      // Official 2.1.331 includes alias keys directly in SettingsSchema so strict
+      // validation and generated JSON schemas recognize them; applySettingsKeyAliases
+      // still normalizes them to canonical keys when loading settings files.
+      additionalMarketplaces: createKnownMarketplacesRecordSchema(
+        'additionalMarketplaces',
+      )
+        .optional()
+        .describe(
+          'Alias for extraKnownMarketplaces: this key is read exactly as if it were spelled ' +
+            'extraKnownMarketplaces. Do not set both in one file — if both appear, this key is ignored ' +
+            'with a warning. Claude Code may rewrite this key as extraKnownMarketplaces when it updates the file. Clients older than this alias ignore it, so prefer extraKnownMarketplaces while older Claude Code versions still share the same settings.',
+        ),
       // Enterprise strict list of allowed marketplace sources (policy settings only)
       // When set, ONLY these exact sources can be added. Check happens BEFORE download.
       strictKnownMarketplaces: z
@@ -1041,6 +1923,14 @@ export const SettingsSchema = lazySchema(() =>
             'Note: this is a policy gate only — it does NOT register marketplaces. ' +
             'To pre-register allowed marketplaces for users, also set extraKnownMarketplaces. ' +
             'Alias: allowedMarketplaces (densable 2.1.232).',
+        ),
+      allowedMarketplaces: z
+        .array(MarketplaceSourceSchema())
+        .optional()
+        .describe(
+          'Alias for strictKnownMarketplaces (managed settings only): this key is read exactly as if it ' +
+            'were spelled strictKnownMarketplaces. Do not set both in one file — if both appear, this key ' +
+            'is ignored with a warning. Clients older than this alias ignore it, so keep using strictKnownMarketplaces when the allowlist must also bind older Claude Code versions.',
         ),
       // Enterprise blocklist of marketplace sources (policy settings only)
       // When set, these exact sources are blocked. Check happens BEFORE download.
@@ -1072,6 +1962,14 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           '@internal Cloud gateway URL to pre-fill and auto-connect to during login. Typically set in local managed settings alongside forceLoginMethod: "gateway" so users never type the URL. Hidden from public SDK types until Cloud gateway is documented.',
         ),
+      gatewayInternalNetworks: z
+        .array(z.string())
+        .optional()
+        .catch([GATEWAY_INTERNAL_NETWORKS_UNREADABLE])
+        .meta({ default: undefined })
+        .describe(
+          "IPv4 CIDR blocks (at most 4, each /8 to /32, not overlapping) your Cloud gateway sits in: the public block your organization numbers its internal network from, which lets /login reach a gateway there. A block must lie entirely outside private space, where /login accepts a gateway without this key. /login accepts a gateway inside a listed block over a direct connection only, and only when this machine's own address on that connection is inside the same block, so /login must happen from a machine whose own address is inside the block (not through a proxy, VPN pool, container or NAT segment outside it). A bar against copied settings files, not proof of location. Honored only from admin-controlled managed settings (MDM / managed-settings.json / policy helper); ignored in user, project, and remote-delivered settings.",
+        ),
       // Official 2.1.328 (`chunk@284022131.js@266422`): managed source composition & SDK parent tier layering
       parentSettingsBehavior: z
         .enum(['first-wins', 'merge'])
@@ -1094,6 +1992,12 @@ export const SettingsSchema = lazySchema(() =>
             'string or an array of UUIDs (any one is permitted). When set in ' +
             'managed settings, login fails if the authenticated account does not ' +
             'belong to a listed organization.',
+        ),
+      allowNestedModelAccessUnderForceLogin: z
+        .boolean()
+        .optional()
+        .describe(
+          "Self-hosted runner hosts only. Set to true to let a Claude Code started by a runner session's command use the runner's model access (--nested-model-access) when this machine's managed settings set forceLoginOrgUUID or forceLoginMethod. It asks the runner which organization the session owner's sign-in belongs to, and stops if the pin does not permit it or the runner does not answer. Without this key it is left signed out. Any program on the machine can pretend to be the runner, so with this key the pin is not a security boundary: set it on runner hosts only, never in a profile that reaches people's own computers. Honored only from this machine's own administrator sources (MDM, the managed settings file, or a policy helper that they name); ignored in server-managed, user, project, local and --settings sources.",
         ),
       allowedProviders: z
         .preprocess(
@@ -1302,6 +2206,34 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Precompute the compaction summary in the background before it is needed. Only applies when auto-compact is on.',
         ),
+      precomputeArmTokens: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .catch(undefined)
+        .describe(
+          '@internal Read from the flag settings only, for a host that sends /compact below the automatic threshold: the main conversation starts its background compaction summary at this many tokens, when that is sooner than it would by itself, so that /compact finds it ready. A window set below the billing boundary compacts without a background summary, and this does not change that.',
+        ),
+      autoCompactRaisedForLoad: z
+        .boolean()
+        .optional()
+        .catch(undefined)
+        .describe(
+          "@internal Read from the flag settings only, in Claude Desktop's Code tab: true lets a conversation compact at twice what is still in each request after a summary (system prompt, tools, instruction files), where that is above its auto-compact threshold.",
+        ),
+      autoCompactOfferAnswer: z
+        .object({
+          model: z.string().min(1).max(200),
+          choice: z.enum(['accept', 'keep', 'undo']),
+          tokens: z.number().int().positive(),
+          at: z.number().int().positive(),
+        })
+        .optional()
+        .catch(undefined)
+        .describe(
+          "@internal Read from the flag settings only, in Claude Desktop's Code tab: the person's answer to the app's offer of a lower auto-compact window, which Claude Code records on this computer. `tokens` is the window they chose or kept, and `at` is when they answered (epoch ms)",
+        ),
       // Official 2.1.299 (#567): idleCompaction setting (defaults to true).
       idleCompaction: z
         .boolean()
@@ -1469,6 +2401,30 @@ export const SettingsSchema = lazySchema(() =>
           'When true, auto-start Remote Control for sessions. Only user-scope ' +
             'settings can enable this; project/local true is ignored. false from ' +
             'any scope disables.',
+        ),
+      remoteControl: z
+        .object({
+          shareHostProfile: z
+            .enum(['off', 'basic', 'full'])
+            .optional()
+            .catch(undefined)
+            .describe(
+              "@internal What a Remote Control environment reports about this machine when it registers: 'off' reports nothing, 'basic' the OS, architecture and detected developer tools, 'full' also the names of MCP servers configured on this machine (never a repository's .mcp.json). When unset, the level comes from the feature rollout, which may be any of the three. Managed, --settings and user settings choose the level (the most restrictive wins); project and local settings can only lower it, never raise it. Read when Remote Control starts; lowering it later applies from the next registration, raising it from the next start.",
+            ),
+        })
+        .optional()
+        .describe('@internal Remote Control (`claude remote-control`) options'),
+      isolatePeerMachines: z
+        .boolean()
+        .optional()
+        .describe(
+          'Require explicit approval before SendMessage can reach a peer session on another machine via Remote Control',
+        ),
+      daemonColdStart: z
+        .enum(['transient', 'ask'])
+        .optional()
+        .describe(
+          "When no background service is running: 'transient' spawns one for this login session; 'ask' offers to install it persistently",
         ),
       effortLevel: z
         .enum(
@@ -1668,6 +2624,12 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           '@internal When false, the session recap (shown when you return after being away for 5+ minutes) is disabled. When absent or true, recap is enabled. Hidden from public SDK types until external launch.',
         ),
+      responseComparisonEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          '@internal Set to false to stop Claude Code from showing two answers to one message and asking which is better. When absent or true, it may do so on some turns. Hidden from public SDK types until external launch.',
+        ),
       // densable `non_deferrable_builtins` / eGu — opt-out list for TX defer policy
       non_deferrable_builtins: z
         .array(z.string())
@@ -1777,6 +2739,12 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Maximum Claude Code version allowed to start. If the running version is newer, Claude Code exits at startup with instructions to install an approved version. Only enforced from managed (policy) settings.',
+        ),
+      downloadsMirrorUrl: z
+        .string()
+        .optional()
+        .describe(
+          'Anthropic-run mirror from which native installs download Claude Code releases (claude install, claude update, and auto-updates), instead of https://downloads.claude.ai. Must be exactly https://claude.fedstart.com/claude-downloads (Claude for Government). Any other value stops installs and updates with an error. CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC normally turns auto-updates off, but not with this mirror set. Only read from managed (policy) settings.',
         ),
       plansDirectory: z
         .string()
@@ -1921,6 +2889,12 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'IANA time zone for times shown in the UI, e.g. "UTC" or "Europe/Dublin". Default: the system time zone. An unknown name falls back to the system time zone.',
+        ),
+      doneMeansMerged: z
+        .boolean()
+        .optional()
+        .describe(
+          '@internal When true, Claude keeps working until the PR is ready for you to merge, a cron/Monitor is armed to resume later, or it hands you a self-contained next step.',
         ),
       /**
        * Official axScreenReader — render screen-reader friendly output.
@@ -2117,6 +3091,13 @@ export const SettingsSchema = lazySchema(() =>
           'SSH connection configurations for remote environments. ' +
             'Typically set in managed settings by enterprise administrators ' +
             'to pre-configure SSH connections for team members.',
+        ),
+      sshHostCommands: z
+        .unknown()
+        .meta({ type: 'array' })
+        .optional()
+        .describe(
+          "SSH connections in Claude Desktop whose host comes from a command. A list of entries, each with `id`, `name` and `command`, and optionally `sshIdentityFile` and `startDirectory`. Desktop runs `command` on this computer when you create the connection or another host for it, not each time you connect. `command` is a program name or absolute path (single-quote a path with spaces), then plain arguments. Nothing else can be quoted. For pipes, variables or a leading `~`, use a script. On Windows, the program must be a full path from a drive letter, such as `C:/tools/acme.exe`, ending in `.exe`, `.cmd` or `.bat`. Quoted paths and Windows need Claude Desktop v4.16336.0 or later. The command must print only the host on standard output: `host` or `user@host` on one line, or a JSON object with `sshHost` and, optionally, `sshPort` and `startDirectory`. Desktop reads this key only from user settings and from this computer's managed settings. Claude Code itself does not use it.",
         ),
       /**
        * densable claudeMd — org-managed CLAUDE.md-style instructions.

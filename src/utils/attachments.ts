@@ -295,7 +295,10 @@ import {
   isTeamLead,
 } from './teammate.js'
 import { isInProcessTeammate } from './teammateContext.js'
-import { removeTeammateFromTeamFile } from './swarm/teamHelpers.js'
+import {
+  isShutdownFrameStale,
+  removeTeammateFromTeamFile,
+} from './swarm/teamHelpers.js'
 import { unassignTeammateTasks } from './tasks.js'
 import { getCompanionIntroAttachment } from '../buddy/prompt.js'
 import { SandboxManager } from './sandbox/sandbox-adapter.js'
@@ -994,6 +997,14 @@ export type Attachment =
       iterations?: number
       durationMs?: number
       tokens?: number
+    }
+  | {
+      /** Official 2.1.331 `prompt_as_file` — oversized user prompt saved to disk. */
+      type: 'prompt_as_file'
+      promptUuid: string
+      path: string
+      characters: number
+      hasCopiesBehind?: boolean
     }
 
 /**
@@ -5679,11 +5690,8 @@ async function getTeammateMailboxAttachments(
   if (teamLeadStatus && teamName) {
     for (const m of allMessages) {
       const shutdownApproval = isShutdownApproved(m.text)
-      if (shutdownApproval) {
+      if (shutdownApproval && shutdownApproval.from === m.from) {
         const teammateToRemove = shutdownApproval.from
-        logForDebugging(
-          `[SwarmMailbox] Processing shutdown_approved from ${teammateToRemove}`,
-        )
 
         // Find the teammate ID by name
         const teammateId = appState.teamContext?.teammates
@@ -5693,6 +5701,14 @@ async function getTeammateMailboxAttachments(
           : undefined
 
         if (teammateId) {
+          // Official 2.1.331 `M2t`: ignore stale shutdown_approved from before respawn
+          if (await isShutdownFrameStale(teamName, teammateId, m.timestamp)) {
+            continue
+          }
+          logForDebugging(
+            `[SwarmMailbox] Processing shutdown_approved from ${teammateToRemove}`,
+          )
+
           // Remove from team file
           removeTeammateFromTeamFile(teamName, {
             agentId: teammateId,

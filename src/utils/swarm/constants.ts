@@ -28,9 +28,17 @@ export function normalizeSpawnAgentName(name: string): string {
     .replace(/\s+/g, '-')
 }
 
+/** Official 2.1.331 `Fra` — cloud/remote session ID shape (reserved against teammate name spoofing). */
+const TAGGED_SESSION_ID_RE =
+  /^(?:session|cse)_(?:vrtx_|bdrk_)?(?:staging_|local_)?01[1-9a-z]{22}$/i
+
+/** Official 2.1.331 `gx` — local session ID shape (reserved against teammate name spoofing). */
+const LOCAL_SESSION_ID_RE =
+  /^local_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/
+
 /**
- * densable `uO` — spawn `name` is reserved (main / team-lead / user / system
- * in any spelling) or already an agent-id shape (`OA`).
+ * Official 2.1.331 `M2` — spawn `name` is reserved (main / team-lead / user / system
+ * in any spelling) or already has the shape of an agent ID or session ID.
  */
 export function isReservedSpawnAgentName(name: string): boolean {
   const n = normalizeSpawnAgentName(name)
@@ -39,7 +47,9 @@ export function isReservedSpawnAgentName(name: string): boolean {
     n === TEAM_LEAD_NAME ||
     n === USER_RECIPIENT_NAME ||
     n === SYSTEM_RECIPIENT_NAME ||
-    toAgentId(n) !== null
+    toAgentId(n) !== null ||
+    TAGGED_SESSION_ID_RE.test(n) ||
+    LOCAL_SESSION_ID_RE.test(n)
   )
 }
 export const SWARM_SESSION_NAME = 'claude-swarm'

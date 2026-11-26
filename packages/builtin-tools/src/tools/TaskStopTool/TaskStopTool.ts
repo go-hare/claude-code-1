@@ -86,9 +86,18 @@ export function truncateTaskCommandForDisplay(
   if (command === undefined || command.length <= TASK_STOP_COMMAND_MAX_CHARS) {
     return command
   }
-  const omitted =
-    command.length - TASK_STOP_COMMAND_HEAD_CHARS - TASK_STOP_COMMAND_TAIL_CHARS
-  return `${command.slice(0, TASK_STOP_COMMAND_HEAD_CHARS)}…[${omitted} chars omitted]…${command.slice(-TASK_STOP_COMMAND_TAIL_CHARS)}`
+  let head = command.slice(0, TASK_STOP_COMMAND_HEAD_CHARS)
+  const lastCode = head.charCodeAt(head.length - 1)
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
+    head = head.slice(0, -1)
+  }
+  let tail = command.slice(-TASK_STOP_COMMAND_TAIL_CHARS)
+  const firstCode = tail.charCodeAt(0)
+  if (firstCode >= 0xdc00 && firstCode <= 0xdfff) {
+    tail = tail.slice(1)
+  }
+  const omitted = command.length - head.length - tail.length
+  return `${head}…[${omitted} chars omitted]…${tail}`
 }
 
 export const TaskStopTool = buildTool({
@@ -202,10 +211,19 @@ export const TaskStopTool = buildTool({
     return DESCRIPTION
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {
+    // Official 2.1.331 `Ut.mapToolResultToToolResultBlockParam`: apply `Wre`
+    // truncation to `message` and `command` at tool_result serialization time.
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: jsonStringify(output),
+      content: jsonStringify({
+        ...output,
+        message:
+          truncateTaskCommandForDisplay(output.message) ?? output.message,
+        ...(output.command !== undefined
+          ? { command: truncateTaskCommandForDisplay(output.command) }
+          : {}),
+      }),
     }
   },
   renderToolUseMessage() {
@@ -234,15 +252,14 @@ export const TaskStopTool = buildTool({
       note?: string
     }
 
-    const displayCommand = truncateTaskCommandForDisplay(result.command)
     return {
       data: {
         message: result.note
           ? `Task ${result.taskId} ${result.note}`
-          : `Successfully stopped task: ${result.taskId} (${displayCommand})`,
+          : `Successfully stopped task: ${result.taskId} (${result.command})`,
         task_id: result.taskId,
         task_type: result.taskType,
-        command: displayCommand,
+        command: result.command,
       },
     }
   },

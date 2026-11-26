@@ -70,6 +70,8 @@ const NULL_RENDERING_TYPES = [
   'agent_ask_notice',
   // densable tool_results_cut (#1422) — model/compact marker; UI null
   'tool_results_cut',
+  // Official 2.1.331 prompt_as_file — transcript marker for saved oversized prompt; UI null
+  'prompt_as_file',
 ] as const satisfies readonly Attachment['type'][]
 
 export type NullRenderingAttachmentType = (typeof NULL_RENDERING_TYPES)[number]

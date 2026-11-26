@@ -150,6 +150,7 @@ export type CancelReason =
   | 'relaunch'
   | 'desktop_handoff'
   | 'cloud_handoff'
+  | 'model_switch'
   | 'process_exit'
   | 'fired'
   | 'stale'

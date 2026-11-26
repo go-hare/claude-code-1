@@ -52,7 +52,10 @@ import {
   TEAM_LEAD_NAME,
 } from 'src/utils/swarm/constants.js'
 import { wakeIdleTeammate } from 'src/utils/swarm/inProcessRunner.js'
-import { readTeamFileAsync } from 'src/utils/swarm/teamHelpers.js'
+import {
+  isShutdownFrameStale,
+  readTeamFileAsync,
+} from 'src/utils/swarm/teamHelpers.js'
 import {
   getAgentId,
   getAgentName,
@@ -68,6 +71,7 @@ import {
   createShutdownRequestMessage,
   getActiveLeadVerifyKey,
   getInboxPath,
+  getShownPlanDigest,
   hasPendingShutdownRequestForAddressee,
   hasTeamLeadEntryKeyForInbox,
   isStructuredProtocolMessage,
@@ -684,7 +688,7 @@ function isTeammateLifecycleFrame(message: string): boolean {
 function sendMessageObjectSchema(uds: boolean, teams: boolean) {
   const toDesc = uds
     ? `Recipient: a name from ${LIST_AGENTS_TOOL_NAME} (append its " [ref]" only when a listing or an error shows one), a teammate name, "main", or a background agent's agentId`
-    : 'Recipient: teammate name'
+    : 'Recipient: a background agent\'s name or agentId, a teammate name, or "main"'
   const unionMessage = z.union([PLAIN_TEXT_MESSAGE, StructuredMessage()])
   const message = teams
     ? uds
@@ -1458,6 +1462,23 @@ async function handleShutdownApproval(
     if (teamFile && agentId) {
       const selfMember = teamFile.members.find(m => m.agentId === agentId)
       if (selfMember) {
+        // Official 2.1.331: guard stale shutdown frames from before this
+        // teammate joined (e.g. respawned with the same name).
+        const reqTsMatch = /^shutdown-(\d{10,20})@/.exec(requestId)
+        if (reqTsMatch?.[1]) {
+          const reqTsIso = new Date(Number(reqTsMatch[1])).toISOString()
+          if (await isShutdownFrameStale(teamName, agentId, reqTsIso)) {
+            return {
+              data: {
+                success: false,
+                message:
+                  'Ignoring stale shutdown request sent before this teammate joined. Nothing was done and you keep running.',
+                request_id: requestId,
+                degradedClass: 'shutdown_refused',
+              },
+            }
+          }
+        }
         ownPaneId = selfMember.tmuxPaneId
         ownBackendType = selfMember.backendType
       }
@@ -1775,6 +1796,9 @@ async function tryDeliverToLocalAgent(
   return null
 }
 
+const MISSING_PLAN_DIGEST_PANE_NOTE =
+  ' No single plan is on record for this request, so this teammate may refuse the approval and ask again. If that keeps happening, ask the user to run /clear.'
+
 async function handlePlanApproval(
   recipientName: string,
   requestId: string,
@@ -1792,8 +1816,24 @@ async function handlePlanApproval(
 
   const leaderMode = appState.toolPermissionContext.mode
   const modeToInherit = leaderMode === 'plan' ? 'default' : leaderMode
+  // Official 2.1.331 `gn` / `fnl`: attach SHA-256 planDigest when on record.
+  const planDigest = getShownPlanDigest(requestId)
+  const targetEntry = Object.values(appState.teamContext?.teammates ?? {}).find(
+    t => t.name.toLowerCase() === recipientName.toLowerCase(),
+  )
+  const targetPane =
+    targetEntry?.tmuxPaneId ??
+    (teamName
+      ? (await readTeamFileAsync(teamName))?.members.find(
+          m => m.name.toLowerCase() === recipientName.toLowerCase(),
+        )?.tmuxPaneId
+      : undefined)
+  const isPaneTeammate =
+    targetPane !== undefined &&
+    targetPane !== 'in-process' &&
+    targetPane !== 'leader'
 
-  // densable tQg: include feedback when present
+  // Official 2.1.331 `gn`: include feedback and planDigest when present
   const approvalResponse = {
     type: 'plan_approval_response',
     requestId,
@@ -1801,6 +1841,7 @@ async function handlePlanApproval(
     ...(feedback !== undefined ? { feedback } : {}),
     timestamp: new Date().toISOString(),
     permissionMode: modeToInherit,
+    ...(planDigest !== undefined ? { planDigest } : {}),
   }
 
   const msgId = await writeToMailbox(
@@ -1829,7 +1870,7 @@ async function handlePlanApproval(
   return {
     data: {
       success: true,
-      message: `Plan approved for ${recipientName}. They will receive the approval and can proceed with implementation.`,
+      message: `Plan approved for ${recipientName}. They will receive the approval and can proceed with implementation.${planDigest === undefined && isPaneTeammate ? MISSING_PLAN_DIGEST_PANE_NOTE : ''}`,
       request_id: requestId,
     },
   }

@@ -45,6 +45,7 @@ export class TaskOutput {
   #recentLines = new CircularBuffer<string>(1000)
   #totalLines = 0
   #totalBytes = 0
+  #pipedStdoutBytes = 0
   #maxMemory: number
   #onProgress: ProgressCallback | null
   /** Set by getStdout() — true when the file was fully read (≤ maxOutputLength). */
@@ -180,6 +181,9 @@ export class TaskOutput {
 
   #writeBuffered(data: string, isStderr: boolean): void {
     this.#totalBytes += data.length
+    if (!isStderr) {
+      this.#pipedStdoutBytes += data.length
+    }
 
     this.#updateProgress(data)
 
@@ -381,6 +385,11 @@ export class TaskOutput {
 
   get totalBytes(): number {
     return this.#totalBytes
+  }
+
+  /** Official 2.1.331 `Zoe.pipedStdoutBytes` — piped stdout UTF-16 length (same unit as `totalBytes`). */
+  get pipedStdoutBytes(): number {
+    return this.#pipedStdoutBytes
   }
 
   /**

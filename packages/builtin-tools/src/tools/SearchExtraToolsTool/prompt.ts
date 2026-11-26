@@ -8,7 +8,6 @@ import { AGENT_TOOL_NAME } from '../AgentTool/constants.js'
 import { BRIEF_TOOL_NAME } from '../BriefTool/prompt.js'
 import { ENTER_WORKTREE_TOOL_NAME } from '../EnterWorktreeTool/constants.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '../SyntheticOutputTool/SyntheticOutputTool.js'
-import { isKairosLoopDynamicEnabled } from 'src/utils/loopDynamic.js'
 import { getInitialSettings } from 'src/utils/settings/settings.js'
 
 export { SEARCH_EXTRA_TOOLS_TOOL_NAME } from './constants.js'
@@ -138,19 +137,19 @@ function isToolSearchFetchRuleEnabled(): boolean {
 }
 
 /**
- * densable `TX` / official 2.1.328 `O()` — opt-in defer policy (not CORE_TOOLS whitelist).
+ * Official 2.1.331 `STt` / `y()` — opt-in defer policy (not CORE_TOOLS whitelist).
  *
- * Order (2.1.328):
+ * Order (2.1.331):
  * 1. alwaysLoad === true → never defer
  * 2. eGu() non_deferrable list → never defer
  * 3. isMcp → always defer
- * 4. ToolSearch (So) / StructuredOutput (al) → never defer
+ * 4. ToolSearch (Sr) / StructuredOutput (Oa) → never defer
  * 5. Agent + fork subagent enabled → never defer
- * 6. Brief (SendUserMessage) → never defer (SendUserFile no longer hard-exempt)
+ * 6. Brief (SendUserMessage) → never defer
  * 7. PushNotification + remote_trigger entrypoint → never defer
- * 8. ScheduleWakeup + jKe (248 always-on) → never defer
- * 9. EnterWorktree + SESSION_KIND=bg → never defer
- * 10. else shouldDefer === true
+ * 8. EnterWorktree + SESSION_KIND=bg → never defer
+ * 9. else shouldDefer === true (ScheduleWakeupTool sets shouldDefer: false directly;
+ *    the obsolete ScheduleWakeup special-case exemption was removed in 2.1.331)
  */
 export function isDeferredTool(tool: Tool): boolean {
   // densable: if(e.alwaysLoad===!0)return!1
@@ -183,11 +182,6 @@ export function isDeferredTool(tool: Tool): boolean {
 
   // densable: if(e.name===Mre&&nrr())return!1 — PushNotification + remote_trigger
   if (tool.name === 'PushNotification' && isRemoteTriggerEntrypoint()) {
-    return false
-  }
-
-  // densable: if(e.name===k_&&jKe())return!1 — ScheduleWakeup + kairos loop dynamic
-  if (tool.name === 'ScheduleWakeup' && isKairosLoopDynamicEnabled()) {
     return false
   }
 

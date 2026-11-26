@@ -117,6 +117,13 @@ function isPathWithinOrEqual(child: string, parent: string): boolean {
   return child.startsWith(prefix)
 }
 
+/** Strip trailing path separators while preserving root `/` or `C:\`. */
+function stripTrailingSep(pathStr: string): string {
+  if (pathStr.length <= 1) return pathStr
+  if (/^[A-Za-z]:[\\/]+$/.test(pathStr)) return pathStr.slice(0, 3)
+  return pathStr.replace(/[\\/]+$/, '')
+}
+
 /**
  * Official `Fmo(cwd, workspacePath)` (`chunk@294254613.js @4021850`):
  * Classify how an IDE workspace folder relates to the current working directory.
@@ -128,8 +135,10 @@ export function classifyIdeWorkspaceMatch(
   cwd: string,
   workspacePath: string,
 ): IdeWorkspaceMatch {
-  const normCwd = normalizeDriveLetter(cwd.normalize('NFC'))
-  const normWorkspace = normalizeDriveLetter(workspacePath.normalize('NFC'))
+  const normCwd = stripTrailingSep(normalizeDriveLetter(cwd.normalize('NFC')))
+  const normWorkspace = stripTrailingSep(
+    normalizeDriveLetter(workspacePath.normalize('NFC')),
+  )
   if (isPathWithinOrEqual(normCwd, normWorkspace)) return 'contains-cwd'
   if (isPathWithinOrEqual(normWorkspace, normCwd)) return 'inside-cwd'
   return 'unrelated'

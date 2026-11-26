@@ -290,6 +290,8 @@ export type TeammateSpawnResult = {
   windowName?: string
   /** Whether the backend used split panes. */
   isSplitPane?: boolean
+  /** Output file path for in-process teammates (Official 2.1.331 `outputFile`). */
+  outputFile?: string
 }
 
 /**

@@ -31,7 +31,8 @@ import {
 } from './canonicalize.js'
 import {
   PROPOSE_GOAL_CONDITION_MAX_CHARS,
-  PROPOSE_GOAL_TOOL_NAME,
+  PROPOSE_GOAL_LEGACY_TOOL_NAME,
+  SET_GOAL_TOOL_NAME,
 } from './constants.js'
 import {
   ASK_USER_SCHEMA_DESCRIPTION,
@@ -98,7 +99,9 @@ function meta(
 }
 
 export const ProposeGoalTool = buildTool({
-  name: PROPOSE_GOAL_TOOL_NAME,
+  name: SET_GOAL_TOOL_NAME,
+  aliases: [PROPOSE_GOAL_LEGACY_TOOL_NAME],
+  backgrounding: 'never',
   shouldDefer: true,
   searchHint: SEARCH_HINT,
   maxResultSizeChars: 1000,
@@ -134,7 +137,7 @@ export const ProposeGoalTool = buildTool({
 
   renderToolUseMessage(input: ProposeGoalInput) {
     if (!input.condition) return ''
-    return `Propose goal: ${truncateGoalConditionForRender(flattenNewlines(input.condition), 200)}`
+    return `Goal: ${truncateGoalConditionForRender(flattenNewlines(input.condition), 200)}`
   },
 
   mapToolResultToToolResultBlockParam(
@@ -151,7 +154,7 @@ export const ProposeGoalTool = buildTool({
 
   async call({ condition, ask_user }: ProposeGoalInput, context) {
     if (context.agentId) {
-      throw Error('ProposeGoal cannot be used in agent contexts')
+      throw Error('SetGoal cannot be used in agent contexts')
     }
     if (
       getIsNonInteractiveSession() ||
@@ -176,8 +179,9 @@ export const ProposeGoalTool = buildTool({
       )
     }
     if (isGoalClearKeyword(n)) {
-      throw Error(
-        'ProposeGoal only proposes a new goal; it cannot clear one. The user can clear an active goal with /goal clear.',
+      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+        `${SET_GOAL_TOOL_NAME} cannot clear a goal. The user can end it with /goal clear.`,
+        'set goal asked to clear',
       )
     }
     const gate = getGoalRestoreGate()
@@ -284,3 +288,6 @@ export const ProposeGoalTool = buildTool({
     return { data: { condition: n, askUser: true } }
   },
 })
+
+/** Official 2.1.331 canonical export name (`SetGoalTool`). */
+export const SetGoalTool = ProposeGoalTool

@@ -8,6 +8,7 @@
  */
 
 import {
+  createHash,
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
@@ -1872,12 +1873,100 @@ export const PlanApprovalResponseMessageSchema = lazySchema(() =>
     feedback: z.string().optional(),
     timestamp: z.string(),
     permissionMode: PermissionModeSchema().optional(),
+    planDigest: z.string().optional(),
   }),
 )
 
 export type PlanApprovalResponseMessage = z.infer<
   ReturnType<typeof PlanApprovalResponseMessageSchema>
 >
+
+const MAX_SHOWN_PLAN_DIGESTS = 1024
+const shownPlanDigests = new Map<string, string | null>()
+
+/** Official 2.1.331 `Dgo` — SHA-256 hex digest of a plan's content. */
+export function computePlanDigest(planContent: string): string {
+  return createHash('sha256').update(planContent).digest('hex')
+}
+
+/**
+ * Official 2.1.331 `ydr` — record the digest of a plan shown to the lead for
+ * `requestId`. If a second plan arrives under the same `requestId` with a
+ * different digest, mark the slot `null` so approval is refused.
+ */
+export function recordShownPlanDigest(
+  requestId: string,
+  planContent: string,
+): void {
+  const digest = computePlanDigest(planContent)
+  const existing = shownPlanDigests.get(requestId)
+  if (existing === undefined) {
+    if (shownPlanDigests.size < MAX_SHOWN_PLAN_DIGESTS) {
+      shownPlanDigests.set(requestId, digest)
+    } else {
+      logForDebugging(
+        '[planDigest] The record of shown plans is full, so an approval of a new plan request will be refused until the conversation is cleared',
+        { level: 'warn' },
+      )
+    }
+  } else if (existing !== digest) {
+    shownPlanDigests.set(requestId, null)
+  }
+}
+
+/** Official 2.1.331 `fnl` — look up the unambiguous plan digest for `requestId`. */
+export function getShownPlanDigest(requestId: string): string | undefined {
+  return shownPlanDigests.get(requestId) ?? undefined
+}
+
+/** Official 2.1.331 `pnl` — invalidate all recorded plan digests without evicting keys. */
+export function invalidateAllShownPlanDigests(): void {
+  for (const key of shownPlanDigests.keys()) {
+    shownPlanDigests.set(key, null)
+  }
+}
+
+/** Official 2.1.331 `Sdr` — clear all recorded plan digests (e.g. on `/clear` or in tests). */
+export function clearShownPlanDigests(): void {
+  shownPlanDigests.clear()
+}
+
+export type PlanApprovalBindingResult =
+  | 'bound'
+  | 'unbound'
+  | 'already_answered'
+  | 'mismatch'
+  | 'plan_digest_mismatch'
+
+/**
+ * Official 2.1.331 `CEo` — verify that an inbound `plan_approval_response`
+ * matches the teammate's pending plan approval request and (when required) its
+ * SHA-256 `planDigest`.
+ */
+export function verifyPlanApprovalBinding(
+  pending:
+    | {
+        requestId: string
+        answered: boolean
+        planDigest?: string
+      }
+    | undefined,
+  response: Pick<
+    PlanApprovalResponseMessage,
+    'requestId' | 'approved' | 'planDigest'
+  >,
+  requireDigest = false,
+): PlanApprovalBindingResult {
+  if (!pending) return 'unbound'
+  if (pending.answered) return 'already_answered'
+  if (pending.requestId !== response.requestId) return 'mismatch'
+  const digestMatches =
+    response.planDigest !== undefined &&
+    response.planDigest === pending.planDigest
+  return requireDigest && response.approved && !digestMatches
+    ? 'plan_digest_mismatch'
+    : 'bound'
+}
 
 /**
  * Shutdown request message sent from leader to teammate via mailbox

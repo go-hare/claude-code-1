@@ -1775,6 +1775,7 @@ export function useManageMCPConnections(
           break
         }
         case 'pending':
+        case 'cached':
           break
       }
     },

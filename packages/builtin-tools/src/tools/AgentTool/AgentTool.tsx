@@ -101,6 +101,7 @@ import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { createUserMessage, extractTextContent, isSyntheticMessage, normalizeMessages } from 'src/utils/messages.js';
 import { getAgentModel } from 'src/utils/model/agent.js';
+import { getMainLoopModel, parseUserSpecifiedModel } from 'src/utils/model/model.js';
 import { permissionModeSchema } from 'src/utils/permissions/PermissionMode.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
 import { filterDeniedAgents, getDenyRuleForAgent } from 'src/utils/permissions/permissions.js';
@@ -395,8 +396,10 @@ type TeammateSpawnedOutput = {
   prompt: string;
   teammate_id: string;
   agent_id: string;
+  agentId?: string;
   agent_type?: string;
   model?: string;
+  resolvedModel?: string;
   name: string;
   color?: string;
   tmux_session_name: string;
@@ -405,6 +408,8 @@ type TeammateSpawnedOutput = {
   team_name?: string;
   is_splitpane?: boolean;
   plan_mode_required?: boolean;
+  started_away_from_shell?: boolean;
+  outputFile?: string;
 };
 
 // Combined output type including both public and internal types
@@ -878,6 +883,7 @@ export const AgentTool = buildTool({
           // (input `mode` is deprecated/ignored).
           plan_mode_required: permissionMode === 'plan',
           model: resolveForcedSpawnModel(agentDef?.model, model),
+          modelSource: model ? 'tool' : 'frontmatter',
           effort,
           agent_type: subagent_type,
           invokingRequestId: assistantMessage?.requestId as string | undefined,
@@ -885,6 +891,9 @@ export const AgentTool = buildTool({
         toolUseContext,
       );
 
+      // Official 2.1.331 (@20658821): include agentId, resolvedModel, outputFile,
+      // and started_away_from_shell in teammate_spawned payload.
+      const resolvedModel = parseUserSpecifiedModel(result.data.model ?? appState.mainLoopModel ?? getMainLoopModel());
       // Type assertion uses TeammateSpawnedOutput (defined above) instead of any.
       // This type is excluded from the exported outputSchema for dead code elimination.
       // Cast through unknown because TeammateSpawnedOutput is intentionally
@@ -892,6 +901,8 @@ export const AgentTool = buildTool({
       const spawnResult: TeammateSpawnedOutput = {
         status: 'teammate_spawned' as const,
         prompt,
+        agentId: result.data.agent_id,
+        resolvedModel,
         ...result.data,
       };
       return { data: spawnResult } as unknown as { data: Output };
@@ -2733,7 +2744,11 @@ export const AgentTool = buildTool({
             text: `Spawned successfully. (This tool result is internal metadata — never quote or paste any part of it, including the ID below, into a user-facing reply.)
 agent_id: ${spawnData.agent_id}
 name: ${spawnData.name}
-The agent is now running and will receive instructions via mailbox.`,
+The agent is now running and will receive instructions via mailbox.${
+              spawnData.started_away_from_shell
+                ? `\nIt started in the session's own folder, not in the folder the shell has moved to, so that folder's settings and permission rules do not apply to it. Send it the path to work in, and tell the user that /cd moves the session's folder.`
+                : ''
+            }`,
           },
         ],
       };

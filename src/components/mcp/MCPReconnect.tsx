@@ -132,6 +132,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
             break;
           }
           case 'pending':
+          case 'cached':
           case 'failed':
           case 'disabled':
             setError(`Failed to reconnect to ${serverName}`);

@@ -5263,3 +5263,115 @@ export async function execIntoTmuxWorktree(args: string[]): Promise<{
 
   return { handled: true }
 }
+
+// ---------------------------------------------------------------------------
+// Official 2.1.331: `CLAUDE_CODE_LAZY_WORKTREE` (`ur`) + Background Work
+// Commit Warning (`lo` / `Kn`).
+// ---------------------------------------------------------------------------
+
+export const CLAUDE_CODE_LAZY_WORKTREE_ENV = 'CLAUDE_CODE_LAZY_WORKTREE'
+
+/**
+ * Official 2.1.331 `s.CLAUDE_CODE_LAZY_WORKTREE !== void 0` — returns true when
+ * the host deferred materializing a worktree via `CLAUDE_CODE_LAZY_WORKTREE`.
+ */
+export function isLazyWorktreeEnvSet(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env[CLAUDE_CODE_LAZY_WORKTREE_ENV] !== undefined
+}
+
+/**
+ * Official 2.1.331 `ur()` (`29_lazy_worktree.js`) — desktop local `/ship`
+ * put-up approval is only allowed when the desktop gate is enabled, the Code
+ * tab owns the session, it is neither remote nor a child session, and
+ * `CLAUDE_CODE_LAZY_WORKTREE` is unset (`=== undefined`).
+ */
+export function isDesktopWorktreePutUpAllowed(options: {
+  desktopShipFlagEnabled: boolean
+  codeTabsOwnSession: boolean
+  isRemote?: boolean
+  isChildSession?: boolean
+  env?: NodeJS.ProcessEnv
+}): boolean {
+  const {
+    desktopShipFlagEnabled,
+    codeTabsOwnSession,
+    isRemote = false,
+    isChildSession = false,
+    env = process.env,
+  } = options
+  return (
+    desktopShipFlagEnabled &&
+    codeTabsOwnSession &&
+    !isRemote &&
+    !isChildSession &&
+    !isLazyWorktreeEnvSet(env)
+  )
+}
+
+/** Official 2.1.331 `Kn` (`30_commit_while_bg.js`) — commit blocked while background agents are active. */
+export const BACKGROUND_WORK_COMMIT_WARNING =
+  'Claude is still at work in the background in this session, and a commit would take along what it has half written. Once that work is done'
+
+const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'killed'])
+
+export type CommitGuardTaskLike = {
+  status: string
+  type: string
+  isBackgrounded?: boolean
+  isObserver?: boolean
+  isIdle?: boolean
+}
+
+/**
+ * Official 2.1.331 `lo(taskRegistry.all())` — count non-terminal background
+ * agents and background shells that may still be mutating the working tree.
+ */
+export function countActiveBackgroundWorkForCommit(
+  tasks: Record<string, CommitGuardTaskLike>,
+  options?: { includeLocalScript?: boolean },
+): { agents: number; shells: number } {
+  const active = Object.values(tasks).filter(
+    task => !TERMINAL_TASK_STATUSES.has(task.status),
+  )
+  const includeLocalScript = options?.includeLocalScript ?? true
+  let agents = 0
+  let shells = 0
+  for (const task of active) {
+    if (
+      (task.type === 'local_agent' &&
+        task.isBackgrounded === true &&
+        task.isObserver !== true) ||
+      (task.type === 'in_process_teammate' && task.isIdle !== true) ||
+      task.type === 'local_workflow' ||
+      (includeLocalScript && task.type === 'local_script')
+    ) {
+      agents++
+    }
+    if (task.type === 'local_bash' && task.isBackgrounded === true) {
+      shells++
+    }
+  }
+  return { agents, shells }
+}
+
+/**
+ * Official 2.1.331 `Kn` (`30_commit_while_bg.js`) — warn before committing
+ * dirty working tree changes while background agents are still running in this
+ * session.
+ */
+export function getBackgroundWorkCommitWarning(params: {
+  isClean: boolean
+  tasks: Record<string, CommitGuardTaskLike>
+  hasTargetPr?: boolean
+  includeLocalScript?: boolean
+}): string | undefined {
+  if (params.hasTargetPr === false || params.isClean) {
+    return undefined
+  }
+  const { agents } = countActiveBackgroundWorkForCommit(params.tasks, {
+    includeLocalScript: params.includeLocalScript,
+  })
+  return agents > 0 ? BACKGROUND_WORK_COMMIT_WARNING : undefined
+}

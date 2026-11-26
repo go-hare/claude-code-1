@@ -32,6 +32,7 @@ import {
   cleanupTeamDirectories,
   getTeamDir,
   getTeamFilePath,
+  hasControlChars,
   type LeadProcessInfo,
   readTeamFileAsync,
   registerTeamForSessionCleanup,
@@ -47,33 +48,72 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const VALID_TASK_LIST_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/
 const LEAD_PROCESS_CLOCK_SKEW_MS = 2000
+const BASE58_ALPHABET =
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+const MAX_CUSTOM_SESSION_SUFFIX_LEN = 120
 
 let inheritedTeamName: string | null | undefined
 
 /**
- * Official 2.1.331 `H2t` / sessionTeamName — `session-${sessionId.slice(0, 8)}`
- * for UUID session IDs, or sanitized `session-<safe>` for non-UUID session IDs.
+ * Official 2.1.331 `GE(e)` — decode an Anthropic tagged base58 session ID
+ * (`session_01...` / `cse_01...`) into its canonical 36-char UUID string.
+ */
+export function decodeTaggedSessionUuid(sessionId: string): string | undefined {
+  const underscoreIdx = sessionId.lastIndexOf('_')
+  if (underscoreIdx < 0) return undefined
+  const payload = sessionId.slice(underscoreIdx + 1)
+  if (!payload.startsWith('01')) return undefined
+  let value = 0n
+  for (const ch of payload.slice(2)) {
+    const digit = BASE58_ALPHABET.indexOf(ch)
+    if (digit < 0) return undefined
+    value = value * 58n + BigInt(digit)
+  }
+  const hex = value.toString(16).padStart(32, '0')
+  if (hex.length !== 32) return undefined
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
+
+/**
+ * Official 2.1.331 `H2t` / sessionTeamName:
+ * - UUID session IDs → `session-${sessionId.slice(0, 8).toLowerCase()}`
+ * - Tagged base58 session IDs (`session_01...`) → `session-${decodedUuid}`
+ * - Arbitrary non-UUID session IDs → sanitized & length-bounded `session-<safe>`
  */
 export function sessionTeamName(sessionId: string): string {
-  const suffix = UUID_RE.test(sessionId)
-    ? sessionId.slice(0, 8).toLowerCase()
-    : sanitizeName(sessionId)
-  return `session-${suffix}`
+  if (UUID_RE.test(sessionId)) {
+    return `${SESSION_TEAM_PREFIX}-${sessionId.slice(0, 8).toLowerCase()}`
+  }
+  const decodedUuid = decodeTaggedSessionUuid(sessionId)
+  if (decodedUuid !== undefined) {
+    return `${SESSION_TEAM_PREFIX}-${decodedUuid}`
+  }
+  const safe = sanitizeName(sessionId).slice(0, MAX_CUSTOM_SESSION_SUFFIX_LEN)
+  return `${SESSION_TEAM_PREFIX}-${/[a-z0-9]/i.test(safe) ? safe : 'default'}`
 }
 
 /**
  * Official 2.1.331 `tbs` — validates a persisted or env-injected session task list ID.
+ * Rejects control characters, path separators, traversal, and oversized IDs while
+ * accepting UUIDs, tagged session IDs, `session-<8hex>`, and safe task list IDs.
  */
-function isValidSessionTaskListId(id: string): boolean {
-  if (!VALID_TASK_LIST_ID_RE.test(id)) return false
+export function isValidSessionTaskListId(id: string): boolean {
+  if (!id || hasControlChars(id) || !VALID_TASK_LIST_ID_RE.test(id)) {
+    return false
+  }
   const prefix = `${SESSION_TEAM_PREFIX}-`
   const stripped = id.startsWith(prefix) ? id.slice(prefix.length) : undefined
-  return (
+  if (
     UUID_RE.test(id) ||
+    decodeTaggedSessionUuid(id) !== undefined ||
     (stripped !== undefined &&
-      (UUID_RE.test(stripped) || /^[0-9a-f]{8}$/i.test(stripped))) ||
-    VALID_TASK_LIST_ID_RE.test(id)
-  )
+      (UUID_RE.test(stripped) ||
+        decodeTaggedSessionUuid(stripped) !== undefined ||
+        /^[0-9a-f]{8}$/i.test(stripped)))
+  ) {
+    return true
+  }
+  return !id.includes('..')
 }
 
 /**
@@ -215,6 +255,11 @@ export async function initializeSessionTeam(opts?: {
   keepSessionKeyedTaskList?: boolean
 }): Promise<InitializeSessionTeamResult> {
   const existing = opts?.existingTeamName || consumeInheritedTeamName()
+  if (existing && hasControlChars(existing)) {
+    throw new Error(
+      'Invalid team_name: control characters are not allowed in agent or team names',
+    )
+  }
   const teamName = existing ?? sessionTeamName(getSessionId())
   const leadAgentId = formatAgentId(TEAM_LEAD_NAME, teamName)
   const teamFilePath = getTeamFilePath(teamName)

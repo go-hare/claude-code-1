@@ -55,7 +55,7 @@ describe('loop always-on 248 #46', () => {
     }
   })
 
-  test('TX and ScheduleWakeup prompt use leftover-import jKe, not GB', async () => {
+  test('ScheduleWakeup prompt has no GB call and ScheduleWakeupTool sets shouldDefer: false (2.1.331)', async () => {
     const txSrc = await Bun.file(
       new URL(
         '../../../packages/builtin-tools/src/tools/SearchExtraToolsTool/prompt.ts',
@@ -69,7 +69,6 @@ describe('loop always-on 248 #46', () => {
       ),
     ).text()
 
-    expect(txSrc).toContain("from 'src/utils/loopDynamic.js'")
     expect(txSrc).not.toContain(
       "getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_loop_dynamic'",
     )
@@ -80,11 +79,17 @@ describe('loop always-on 248 #46', () => {
     const { isDeferredTool } = await import(
       '../../../packages/builtin-tools/src/tools/SearchExtraToolsTool/prompt.js'
     )
+    const { ScheduleWakeupTool } = await import(
+      '../../../packages/builtin-tools/src/tools/ScheduleWakeupTool/ScheduleWakeupTool.js'
+    )
+    expect(ScheduleWakeupTool.shouldDefer).toBe(false)
+    expect(isDeferredTool(ScheduleWakeupTool)).toBe(false)
+    // Official 2.1.331 removed the special-case ScheduleWakeup exemption from isDeferredTool
     expect(
       isDeferredTool({
         name: 'ScheduleWakeup',
         shouldDefer: true,
       } as never),
-    ).toBe(false)
+    ).toBe(true)
   })
 })

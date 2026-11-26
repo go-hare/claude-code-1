@@ -1135,12 +1135,15 @@ export async function spawnShellTask(
  * @returns taskId for the registered task
  */
 export function registerForeground(
-  input: LocalShellSpawnInput & { shellCommand: ShellCommand },
+  input: LocalShellSpawnInput & {
+    shellCommand: ShellCommand;
+    onlyWaitsByLooking?: boolean;
+  },
   setAppState: SetAppState,
   toolUseId: string | undefined,
   getAppState: () => AppState,
 ): string {
-  const { command, description, shellCommand, agentId, innerCall, shell } = input;
+  const { command, description, shellCommand, agentId, innerCall, shell, onlyWaitsByLooking } = input;
 
   const taskId = shellCommand.taskOutput.taskId;
 
@@ -1155,6 +1158,7 @@ export function registerForeground(
     status: 'running',
     command,
     ...(shell !== undefined ? { shell } : {}),
+    ...(onlyWaitsByLooking === true ? { onlyWaitsByLooking: true } : {}),
     completionStatusSentInAttachment: false,
     shellCommand,
     unregisterCleanup,
@@ -1554,5 +1558,228 @@ async function flushAndCleanup(shellCommand: ShellCommand): Promise<void> {
     shellCommand.cleanup();
   } catch (error) {
     logError(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.331: Foreground Bash wait grace period after background jobs
+// (`Sle` / `XJt` / `ePe` / `JJt` / `ZJt` / `eZt` / `tZt` / `tengu_bash_wait_after_jobs`).
+// ---------------------------------------------------------------------------
+
+/** Official GrowthBook flag (`JJt`) controlling wait-after-jobs mode (`'count' | 'end'`). */
+export const BASH_WAIT_AFTER_JOBS_FLAG = 'tengu_breezy_wolf';
+
+const SLEEP_COMMAND_MAX_LEN = 10_000;
+const SLEEP_WAIT_MIN_SECONDS = 20;
+const SLEEP_WAIT_GRACE_EXTRA_SECONDS = 3;
+const WAIT_AFTER_JOBS_MIN_ELAPSED_MS = 60_000;
+const SLEEP_UNIT_MULTIPLIERS: Record<string, number> = {
+  m: 60,
+  h: 3600,
+  d: 86400,
+};
+const SLEEP_ARG_RE = /\bsleep(?:\s+-s(?:econds)?)?\s+(\d+(?:\.\d*)?)([smhd]?)\b/gi;
+const BASH_SLEEP_LOOP_RE = /[;\n][ \t]*do\s(?:(?![;\n][ \t]*done\b)[\s\S])*?\bsleep\s|\b(?:until|while)\s+sleep\s/;
+const PWSH_SLEEP_LOOP_RE =
+  /(?:\b(?:do|for|foreach|until|while)\b|%)[^{]*\{(?:[^{}]|\{[^{}]*\})*?(?:\{[^{}]*?)?\bsleep\s/i;
+const WAIT_AFTER_JOBS_ENTRYPOINTS = new Set(['cli', 'claude-vscode', 'claude-desktop']);
+const ACTIVE_JOB_TASK_TYPES = new Set(['local_bash', 'local_agent', 'remote_agent', 'local_workflow', 'local_script']);
+
+export type BashWaitAfterJobsMode = 'count' | 'end';
+
+export type BashWaitAfterJobsEntry = {
+  firstSeenAt: number;
+  mode: BashWaitAfterJobsMode;
+  graceMs: number;
+  movedForJob: boolean;
+};
+
+/** Official `Sle` — per-toolUseId grace tracker stored in `toolUseContext.toolState`. */
+export class BashWaitAfterJobsState {
+  byCall = new Map<string, BashWaitAfterJobsEntry>();
+}
+
+/** Official `XJt` — compute grace seconds from max sleep inside a bash loop + 3s buffer. */
+export function computeSleepWaitGraceSeconds(command: string): number {
+  const maxSleepSecs = BASH_SLEEP_LOOP_RE.test(command)
+    ? Math.max(
+        0,
+        ...Array.from(
+          command.matchAll(SLEEP_ARG_RE),
+          ([, num, unit]) => Number(num) * (SLEEP_UNIT_MULTIPLIERS[unit?.toLowerCase() ?? ''] ?? 1),
+        ),
+      )
+    : 0;
+  return maxSleepSecs + SLEEP_WAIT_GRACE_EXTRA_SECONDS;
+}
+
+/** Official `ePe` — detect long sleep (>= 20s) or polling sleep loop in bash/powershell. */
+export function isSleepWaitCommand(command: string, shell: LocalShellFlavor = 'bash'): boolean {
+  if (command.length > SLEEP_COMMAND_MAX_LEN) return false;
+  const hasLongSleep = Array.from(command.matchAll(SLEEP_ARG_RE)).some(
+    ([, num, unit]) => Number(num) * (SLEEP_UNIT_MULTIPLIERS[unit?.toLowerCase() ?? ''] ?? 1) >= SLEEP_WAIT_MIN_SECONDS,
+  );
+  if (hasLongSleep) return true;
+  return (shell === 'powershell' ? PWSH_SLEEP_LOOP_RE : BASH_SLEEP_LOOP_RE).test(command);
+}
+
+/** Official `JJt` — read `tengu_breezy_wolf` mode (`'count' | 'end' | undefined`). */
+export function getBashWaitAfterJobsMode(override?: string): BashWaitAfterJobsMode | undefined {
+  const value = override !== undefined ? override : getFeatureValue_CACHED_MAY_BE_STALE(BASH_WAIT_AFTER_JOBS_FLAG, '');
+  return value === 'count' || value === 'end' ? value : undefined;
+}
+
+/** Official `ZJt` — enabled on cli / claude-vscode / claude-desktop when `tengu_breezy_wolf` is `'count'` or `'end'`. */
+export function isBashWaitAfterJobsEnabled(options?: { entrypoint?: string; modeOverride?: string }): boolean {
+  const entrypoint = options?.entrypoint ?? process.env.CLAUDE_CODE_ENTRYPOINT ?? 'cli';
+  return WAIT_AFTER_JOBS_ENTRYPOINTS.has(entrypoint) && getBashWaitAfterJobsMode(options?.modeOverride) !== undefined;
+}
+
+/** Official `ZYe` — strip `:preamble-...` suffix and omit `:inner` synthetic tool use IDs. */
+export function sanitizeBashWaitToolUseId(toolUseId: string | undefined): string | undefined {
+  if (toolUseId === undefined) return undefined;
+  const preambleIdx = toolUseId.indexOf(':preamble-');
+  const trimmed = preambleIdx === -1 ? toolUseId : toolUseId.slice(0, preambleIdx);
+  if (trimmed.endsWith(':inner')) return undefined;
+  return trimmed;
+}
+
+/**
+ * Official 2.1.331 `eZt` — register `firstSeenAt`/`graceMs`/`mode`/`movedForJob`
+ * in `state.byCall` and return `true` once when `mode === 'end'`, the call has
+ * been running long enough (`elapsedLongEnough`), and `now - firstSeenAt >= graceMs`.
+ */
+export function shouldMoveBashWaitAfterJobs(
+  state: BashWaitAfterJobsState,
+  task: { toolUseId?: string; command: string },
+  elapsedLongEnough: boolean,
+  now: number = Date.now(),
+  modeOverride?: string,
+): boolean {
+  const { toolUseId } = task;
+  if (toolUseId === undefined) return false;
+  let entry = state.byCall.get(toolUseId);
+  if (entry === undefined) {
+    const mode = getBashWaitAfterJobsMode(modeOverride);
+    if (mode === undefined) return false;
+    entry = {
+      firstSeenAt: now,
+      mode,
+      graceMs: computeSleepWaitGraceSeconds(task.command) * 1000,
+      movedForJob: false,
+    };
+    state.byCall.set(toolUseId, entry);
+  }
+  if (entry.mode !== 'end' || entry.movedForJob || !elapsedLongEnough || now - entry.firstSeenAt < entry.graceMs) {
+    return false;
+  }
+  entry.movedForJob = true;
+  return true;
+}
+
+/**
+ * Official 2.1.331 `tZt` — on foreground Bash settle, delete the `byCall` entry
+ * and emit `tengu_bash_wait_after_jobs` + `task_local_shell_wait_after_jobs`.
+ */
+export function recordBashWaitAfterJobsSettle(
+  state: BashWaitAfterJobsState,
+  toolUseId: string | undefined,
+  result: {
+    code: number;
+    interrupted: boolean;
+    timedOutAfterMs?: number;
+    backgroundTaskId?: string;
+  },
+  now: number = Date.now(),
+): boolean {
+  const entry = toolUseId === undefined ? undefined : state.byCall.get(toolUseId);
+  if (toolUseId === undefined || entry === undefined) return false;
+  state.byCall.delete(toolUseId);
+  const sanitizedToolUseId = sanitizeBashWaitToolUseId(toolUseId);
+  logEvent('tengu_bash_wait_after_jobs', {
+    enabled: entry.mode === 'end',
+    wait_ms: now - entry.firstSeenAt,
+    timeout_ms: entry.graceMs,
+    timed_out: result.timedOutAfterMs !== undefined,
+    was_backgrounded: result.backgroundTaskId !== undefined,
+    interrupted: result.interrupted,
+    exit_code: result.code,
+    ...(sanitizedToolUseId !== undefined
+      ? {
+          tool_use_id: sanitizedToolUseId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }
+      : {}),
+  });
+  leftoverY('task_local_shell_wait_after_jobs');
+  return true;
+}
+
+/**
+ * Official 2.1.331 `xhs` (wait-after-jobs branch) — called on foreground Bash
+ * progress ticks. If a completed/failed background `local_bash` notification is
+ * queued while this sole foreground `onlyWaitsByLooking` task is waiting and no
+ * other active non-monitor jobs remain, consult `shouldMoveBashWaitAfterJobs`
+ * and background the wait command so the queued job completion can reach Claude.
+ */
+export function maybeMoveBashWaitForCompletedJobs(params: {
+  state: BashWaitAfterJobsState;
+  toolUseId: string | undefined;
+  agentId: string | undefined;
+  getAppState: () => AppState;
+  setAppState: SetAppState;
+  now?: number;
+}): boolean {
+  const { state, toolUseId, agentId, getAppState, setAppState, now = Date.now() } = params;
+  if (toolUseId === undefined || agentId !== undefined) return false;
+  try {
+    const tasks = getAppState().tasks;
+    const foregroundWait = Object.values(tasks).find(
+      (t): t is LocalShellTaskState =>
+        isLocalShellTask(t) &&
+        t.status === 'running' &&
+        !t.isBackgrounded &&
+        t.toolUseId === toolUseId &&
+        t.onlyWaitsByLooking === true,
+    );
+    if (!foregroundWait) return false;
+
+    const queue = getActiveMessageQueue();
+    const queuedCommands = queue.getCommandsByMaxPriority('next');
+    const hasCompletedJobNotification = queuedCommands.some(cmd => {
+      if (cmd.mode !== 'task-notification') return false;
+      const taskId = cmd.taskId;
+      if (!taskId) return false;
+      const notifiedTask = tasks[taskId];
+      return (
+        isLocalShellTask(notifiedTask) &&
+        notifiedTask.kind !== 'monitor' &&
+        notifiedTask.onlyWaitsByLooking !== true &&
+        (notifiedTask.status === 'completed' || notifiedTask.status === 'failed')
+      );
+    });
+    if (!hasCompletedJobNotification) return false;
+
+    const otherActiveJobRunning = Object.values(tasks).some(t => {
+      if (t.status !== 'running' && t.status !== 'pending') return false;
+      if (!ACTIVE_JOB_TASK_TYPES.has(t.type)) return false;
+      if (isLocalShellTask(t) && (t.kind === 'monitor' || t.onlyWaitsByLooking === true)) {
+        return false;
+      }
+      return true;
+    });
+    if (otherActiveJobRunning) return false;
+
+    const elapsedLongEnough = now - foregroundWait.startTime >= WAIT_AFTER_JOBS_MIN_ELAPSED_MS;
+    if (!shouldMoveBashWaitAfterJobs(state, foregroundWait, elapsedLongEnough, now)) {
+      return false;
+    }
+
+    const registry = createTaskRegistry(getAppState, setAppState);
+    return backgroundTask(foregroundWait.id, registry, {
+      backgroundedToDeliverMessage: true,
+    });
+  } catch (err) {
+    logError(err);
+    return false;
   }
 }

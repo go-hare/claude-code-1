@@ -108,6 +108,11 @@ import { AskUserQuestionTool } from '@claude-code/builtin-tools/tools/AskUserQue
 import { LSPTool } from '@claude-code/builtin-tools/tools/LSPTool/LSPTool.js'
 import { ListMcpResourcesTool } from '@claude-code/builtin-tools/tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
 import { ReadMcpResourceTool } from '@claude-code/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
+import { ReadMcpResourceDirTool } from '@claude-code/builtin-tools/tools/ReadMcpResourceDirTool/ReadMcpResourceDirTool.js'
+import { WaitForMcpServersTool } from '@claude-code/builtin-tools/tools/WaitForMcpServersTool/WaitForMcpServersTool.js'
+import { ReadNotificationsTool } from '@claude-code/builtin-tools/tools/ReadNotificationsTool/ReadNotificationsTool.js'
+import { McpTaskResumePollingTool } from '@claude-code/builtin-tools/tools/McpTaskResumePollingTool/McpTaskResumePollingTool.js'
+import { ProposeSkillsTool } from '@claude-code/builtin-tools/tools/ProposeSkillsTool/ProposeSkillsTool.js'
 import { SearchExtraToolsTool } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/SearchExtraToolsTool.js'
 import { ExecuteTool } from '@claude-code/builtin-tools/tools/ExecuteTool/ExecuteTool.js'
 import { EnterPlanModeTool } from '@claude-code/builtin-tools/tools/EnterPlanModeTool/EnterPlanModeTool.js'
@@ -333,6 +338,11 @@ export function getAllBaseTools(): Tools {
     ...(process.env.NODE_ENV === 'test' ? [TestingPermissionTool] : []),
     ListMcpResourcesTool,
     ReadMcpResourceTool,
+    ReadMcpResourceDirTool,
+    ReadNotificationsTool,
+    McpTaskResumePollingTool,
+    ProposeSkillsTool,
+    WaitForMcpServersTool,
     // Include SearchExtraToolsTool when tool search might be enabled (optimistic check)
     // The actual decision to defer tools happens at request time in claude.ts
     ...(isSearchExtraToolsEnabledOptimistic() ? [SearchExtraToolsTool] : []),
@@ -488,6 +498,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
   const specialTools = new Set([
     ListMcpResourcesTool.name,
     ReadMcpResourceTool.name,
+    ReadMcpResourceDirTool.name,
     SYNTHETIC_OUTPUT_TOOL_NAME,
   ])
 

@@ -34,6 +34,7 @@ type RateLimitType =
   | 'seven_day'
   | 'seven_day_opus'
   | 'seven_day_sonnet'
+  | 'seven_day_overage_included'
   | 'overage'
 
 export type { RateLimitType }
@@ -269,7 +270,7 @@ export type WindowReadings = {
   seven_day_overage_included?: WindowReading
   overage?: WindowReading
 }
-type RawUtilization = {
+export type RawUtilization = {
   five_hour?: RawWindowUtilization
   seven_day?: RawWindowUtilization
   /** Official 2.1.323 (#2106): Fable weekly limit (`7d_oi`) window utilization + reset. */

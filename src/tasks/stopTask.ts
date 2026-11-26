@@ -15,14 +15,6 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growt
 import type { AppState } from '../state/AppState.js'
 import type { TaskStateBase } from '../Task.js'
 import { getTaskByType } from '../tasks.js'
-import {
-  OUTPUT_FILE_TAG,
-  STATUS_TAG,
-  SUMMARY_TAG,
-  TASK_ID_TAG,
-  TASK_NOTIFICATION_TAG,
-  TOOL_USE_ID_TAG,
-} from '../constants/xml.js'
 import { asAgentId } from '../types/ids.js'
 import {
   isAgentKillLoopSettled,
@@ -31,7 +23,10 @@ import {
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
 import { stopObserverPairing } from '../utils/observerAgents.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
-import { isParkedKeepaliveAgent } from '../utils/task/framework.js'
+import {
+  formatTaskNotificationXml,
+  isParkedKeepaliveAgent,
+} from '../utils/task/framework.js'
 import { createTaskRegistry } from '../utils/taskRegistry.js'
 import { escapeXml } from '../utils/xml.js'
 import {
@@ -104,9 +99,42 @@ function ownerLabel(ownerAgentId: string | undefined): string {
   return ownerAgentId ?? 'main session'
 }
 
+const STOP_SUMMARY_MAX_CHARS = 1000
+const STOP_SUMMARY_HEAD_CHARS = 500
+const STOP_SUMMARY_TAIL_CHARS = 300
+
+function sliceHeadSurrogateSafe(text: string, n: number): string {
+  if (n <= 0) return ''
+  if (text.length <= n) return text
+  const head = text.slice(0, n)
+  const last = head.charCodeAt(n - 1)
+  return last >= 0xd800 && last <= 0xdbff ? head.slice(0, -1) : head
+}
+
+function sliceTailSurrogateSafe(text: string, n: number): string {
+  if (n <= 0) return ''
+  if (text.length <= n) return text
+  const tail = text.slice(-n)
+  const first = tail.charCodeAt(0)
+  return first >= 0xdc00 && first <= 0xdfff ? tail.slice(1) : tail
+}
+
 /**
- * densable XFu — notify bash owner when stopper ≠ owner.
- * Uses task-notification priority next to owner's agent queue.
+ * Official 2.1.331 `Wre` (@7207654): truncate long (>1000 char) stop summaries
+ * to head (500) + tail (300) BEFORE XML escaping (`sn(Wre(...))`) so entity
+ * escapes like `&amp;` are never sliced in half.
+ */
+export function truncateStopSummary(text: string): string {
+  if (text.length <= STOP_SUMMARY_MAX_CHARS) return text
+  const head = sliceHeadSurrogateSafe(text, STOP_SUMMARY_HEAD_CHARS)
+  const tail = sliceTailSurrogateSafe(text, STOP_SUMMARY_TAIL_CHARS)
+  const omitted = text.length - head.length - tail.length
+  return `${head}…[${omitted} chars omitted]…${tail}`
+}
+
+/**
+ * Official 2.1.331 `pdi` — notify bash owner when stopper ≠ owner.
+ * Applies `Wre` truncation BEFORE `escapeXml`.
  */
 function notifyBashOwnerOfCrossStop(opts: {
   taskId: string
@@ -116,14 +144,12 @@ function notifyBashOwnerOfCrossStop(opts: {
   stopperAgentId: string | undefined
 }): void {
   const summary = `Task "${opts.description}" was stopped by ${ownerLabel(opts.stopperAgentId)}`
-  const toolUseXml = opts.toolUseId
-    ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
-    : ''
-  const value = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${escapeXml(opts.taskId)}</${TASK_ID_TAG}>${toolUseXml}
-<${STATUS_TAG}>stopped</${STATUS_TAG}>
-<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
-</${TASK_NOTIFICATION_TAG}>`
+  const value = formatTaskNotificationXml({
+    taskId: escapeXml(opts.taskId),
+    toolUseId: opts.toolUseId ? escapeXml(opts.toolUseId) : undefined,
+    status: 'stopped',
+    summary: escapeXml(truncateStopSummary(summary)),
+  })
   enqueuePendingNotification({
     value,
     mode: 'task-notification',
@@ -138,8 +164,9 @@ const MCP_TASK_STOPPED_NOTE =
   'No result will follow. The MCP server may already have done some of the work, or may still finish it.'
 
 /**
- * densable `Jvo` / SEA `z_r` — passive main-session notification when user or
+ * Official 2.1.331 `VIn` — passive main-session notification when user or
  * connected client stops a background task (`tengu_rosy_donut`, default true).
+ * Applies `Wre` truncation BEFORE `escapeXml`.
  */
 function notifyUserStoppedMainShellTask(opts: {
   taskId: string
@@ -149,22 +176,18 @@ function notifyUserStoppedMainShellTask(opts: {
   outputFile?: string
   note?: string
 }): void {
-  const toolUseXml = opts.toolUseId
-    ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
-    : ''
-  const outputFileXml = opts.outputFile
-    ? `\n<${OUTPUT_FILE_TAG}>${escapeXml(opts.outputFile)}</${OUTPUT_FILE_TAG}>`
-    : ''
   const base =
     opts.source === 'client'
       ? `Task "${opts.description}" was stopped by the user or by the app connected to this session`
       : `Task "${opts.description}" was stopped by the user`
   const summary = opts.note === undefined ? base : `${base}. ${opts.note}`
-  const value = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${escapeXml(opts.taskId)}</${TASK_ID_TAG}>${toolUseXml}${outputFileXml}
-<${STATUS_TAG}>killed</${STATUS_TAG}>
-<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
-</${TASK_NOTIFICATION_TAG}>`
+  const value = formatTaskNotificationXml({
+    taskId: escapeXml(opts.taskId),
+    toolUseId: opts.toolUseId ? escapeXml(opts.toolUseId) : undefined,
+    outputFile: opts.outputFile ? escapeXml(opts.outputFile) : undefined,
+    status: 'killed',
+    summary: escapeXml(truncateStopSummary(summary)),
+  })
   enqueuePendingNotification({
     value,
     mode: 'task-notification',
@@ -254,17 +277,18 @@ export async function stopTask(
   const agentTask = isLocalAgentTask(task)
     ? (task as LocalAgentTaskState)
     : null
-  // densable tns(caller, task.agentId): bash/workflow/monitor stamp agentId as owner;
-  // local_agent prefers ownerAgentId (panel holder) then agentId.
-  // densable H1e non-OH path uses l.agentId (bash owner); local_agent uses agentId too
-  // for ownership of the agent process itself.
-  const ownerId = agentTask
-    ? (agentTask.ownerAgentId ?? agentTask.agentId)
+  // Official 2.1.331 `D9o` (`Mln(y, C.agentId)`): for `local_agent`, check the
+  // agent's own `agentId` so an agent can stop itself (main/user/self allowed);
+  // for other tasks (e.g. `local_bash`), check `task.agentId` (the owning agent).
+  const taskAgentId = agentTask
+    ? agentTask.agentId
     : typeof (task as unknown as { agentId?: string }).agentId === 'string'
       ? (task as unknown as { agentId: string }).agentId
       : undefined
 
-  // densable OH path: observer self-stop forbidden; ownership via agentId; Fjr on user
+  const isUserOrClientStop = source === 'user' || source === 'client'
+
+  // densable OH path: observer self-stop forbidden; ownership via agentId; Fjr on user/client
   if (isObserver && agentTask) {
     if (callerAgentId !== undefined && callerAgentId === agentTask.agentId) {
       throw new StopTaskError(
@@ -278,7 +302,7 @@ export async function stopTask(
         'not_owner',
       )
     }
-    if (source !== undefined) {
+    if (isUserOrClientStop) {
       fireObserverTombstone(
         resolvedId,
         typeof agentTask.agentType === 'string'
@@ -313,7 +337,7 @@ export async function stopTask(
   const stoppedMonitorWsByUser =
     task.status !== 'running' &&
     task.type === 'monitor_ws' &&
-    source !== undefined
+    isUserOrClientStop
   const pausedWorkflow =
     task.type === 'local_workflow' && task.status === 'paused'
   const unsettledKillLoop = isUnsettledTerminalKillLoop(task, resolvedId)
@@ -330,10 +354,13 @@ export async function stopTask(
     )
   }
 
-  // densable: non-observer ownership check (agentId for observer already handled)
-  if (!isObserver && !callerOwnsTask(callerAgentId, ownerId)) {
+  // Official 2.1.331 `D9o`: non-observer ownership / self-stop check.
+  if (!isObserver && !callerOwnsTask(callerAgentId, taskAgentId)) {
+    const prefix = agentTask
+      ? `The main session, the user or the agent itself can stop task ${displayId}`
+      : `Task ${displayId} is owned by ${ownerLabel(taskAgentId)}`
     throw new StopTaskError(
-      `Task ${displayId} is owned by ${ownerLabel(ownerId)}; agent ${callerAgentId} cannot stop it.`,
+      `${prefix}; agent ${callerAgentId} cannot stop it.`,
       'not_owner',
     )
   }
@@ -346,8 +373,8 @@ export async function stopTask(
     )
   }
 
-  // Official 2.1.331: if (source !== undefined) stamp stoppedByUser (covers user + client)
-  if (source !== undefined && agentTask) {
+  // Official 2.1.331: stamp stoppedByUser for user/client stops (not system stops)
+  if (isUserOrClientStop && agentTask) {
     markAgentStoppedByUser(resolvedId, setAppState)
   }
 
@@ -394,7 +421,7 @@ export async function stopTask(
           summary: child.description,
         })
       }
-      if (source !== undefined) {
+      if (isUserOrClientStop) {
         markAgentStoppedByUser(child.id, setAppState)
       }
       killAsyncAgent(
@@ -448,7 +475,7 @@ export async function stopTask(
     }
     if (
       bashOwner === undefined &&
-      source !== undefined &&
+      isUserOrClientStop &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_rosy_donut', true)
     ) {
       notifyUserStoppedMainShellTask({
@@ -468,7 +495,7 @@ export async function stopTask(
     getAppState().tasks?.[resolvedId]?.status === 'killed'
   ) {
     if (
-      source !== undefined &&
+      isUserOrClientStop &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_rosy_donut', true)
     ) {
       notifyUserStoppedMainShellTask({

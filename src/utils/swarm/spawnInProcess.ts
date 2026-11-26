@@ -136,6 +136,8 @@ export type InProcessSpawnOutput = {
   abortController?: AbortController
   /** Teammate context for AsyncLocalStorage */
   teammateContext?: ReturnType<typeof createTeammateContext>
+  /** Task output file path for transcript/event log (Official 2.1.331 `outputFile`). */
+  outputFile?: string
   /** Error message if spawn failed */
   error?: string
 }
@@ -288,6 +290,7 @@ export async function spawnInProcessTeammate(
       taskId,
       abortController,
       teammateContext,
+      outputFile: taskState.outputFile,
     }
   } catch (error) {
     const errorMessage =

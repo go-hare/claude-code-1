@@ -88,9 +88,10 @@ export function isReportFindingsEnabled(
 
 export const ReportFindingsTool = buildTool({
   name: REPORT_FINDINGS_TOOL_NAME,
-  searchHint: 'report code review findings typed host ui',
+  searchHint: 'report code-review findings as a structured list',
+  backgrounding: 'never',
   maxResultSizeChars: 100_000,
-  shouldDefer: true,
+  shouldDefer: false,
   strict: true,
 
   get inputSchema(): InputSchema {

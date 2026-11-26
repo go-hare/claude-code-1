@@ -8,7 +8,7 @@ import type { ToolResultBlockParam, ToolUseContext, ValidationResult } from 'src
 import { buildTool } from 'src/Tool.js';
 import { spawnShellTask } from 'src/tasks/LocalShellTask/LocalShellTask.js';
 import { killTask } from 'src/tasks/LocalShellTask/killShellTasks.js';
-import { addKeepaliveReason, removeKeepaliveReason } from 'src/utils/task/framework.js';
+import { addKeepaliveReason, monitorKeepaliveReason, removeKeepaliveReason } from 'src/utils/task/framework.js';
 import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js';
 import { createTaskRegistry } from 'src/utils/taskRegistry.js';
 import { bashToolHasPermission } from '../BashTool/bashPermissions.js';
@@ -371,10 +371,30 @@ Your script's stdout is the event stream. Each line becomes a notification. Exit
 **Coverage — silence is not success.** When watching a job or process for an outcome, your filter must match every terminal state, not just the happy path. Stdout lines within 200ms are batched into a single notification.`;
 }
 
+/**
+ * Official 2.1.331 `Fe` (@326865200): compare `taskOutput.totalBytes` against
+ * `taskOutput.pipedStdoutBytes` (or the fallback UTF-16 `.length` counter) in
+ * the same UTF-16 code-unit basis so CJK / multi-byte UTF-8 stdout never
+ * causes false-positive or false-negative stderr detection.
+ */
+export function hasMonitorStderrOutput(
+  taskOutput: {
+    totalBytes: number;
+    pipedStdoutBytes?: number;
+    getStderr: () => string;
+  },
+  fallbackPipedStdoutChars: number,
+): boolean {
+  const pipedStdout =
+    typeof taskOutput.pipedStdoutBytes === 'number' ? taskOutput.pipedStdoutBytes : fallbackPipedStdoutChars;
+  return taskOutput.totalBytes > pipedStdout || taskOutput.getStderr().length > 0;
+}
+
 export const MonitorTool = buildTool({
   name: MONITOR_TOOL_NAME,
   searchHint:
     'watch, monitor, or keep an eye on a process/log/command or WebSocket — stream each stdout line as a live notification',
+  whenToUse: `When you are about to check a log, process or job again and again to catch each new event, use it and not repeated ${BASH_TOOL_NAME} calls or sleeps.`,
   // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @189896058
   enablesCodeExecution: true,
   backgrounding: 'never',
@@ -632,12 +652,12 @@ export const MonitorTool = buildTool({
       });
     }
 
-    // Official 2.1.326 #258: track piped stdout byte count so on 0-event
-    // expiry we can tell whether the monitor command wrote to stderr.
-    let pipedStdoutBytes = 0;
+    // Official 2.1.331 (`Zoe.#g` / `Fe`): track piped stdout in UTF-16 code units
+    // (same unit as TaskOutput.totalBytes) so CJK/UTF-8 output never skews stderr detection.
+    let pipedStdoutChars = 0;
     const onMonitorStdout = feature('MONITOR_TOOL')
       ? (chunk: string) => {
-          pipedStdoutBytes += Buffer.byteLength(chunk, 'utf8');
+          pipedStdoutChars += chunk.length;
           pump?.onData(chunk);
         }
       : undefined;
@@ -695,11 +715,12 @@ export const MonitorTool = buildTool({
     if (feature('MONITOR_TOOL')) {
       if (pump) {
         const stream = pump;
-        // densable xe @194304500: hold monitor:<id>:stream keepalive until
-        // stream.reportExit(handle) finishes flushing final lines & exit notice.
-        const streamKeepaliveReason = `monitor:${handle.taskId}:stream`;
+        // Official 2.1.331 `Ve` / `Fe`: use the canonical `monitor:<id>` keepalive
+        // key (deduplicated via Set with spawnShellTask's attachShellKeepalive)
+        // instead of registering a second duplicate `monitor:<id>:stream` entry.
+        const keepaliveReason = monitorKeepaliveReason(handle.taskId);
         if (effectiveAgentId) {
-          addKeepaliveReason(effectiveAgentId, streamKeepaliveReason, registry);
+          addKeepaliveReason(effectiveAgentId, keepaliveReason, registry);
         }
         const timeoutId = S.persistent
           ? undefined
@@ -707,13 +728,11 @@ export const MonitorTool = buildTool({
               if (stream.isClosed()) return;
               stream.flush();
               if (stream.isClosed()) return;
-              // Official 2.1.326 #258 (`I5o` @305453842): if the command wrote
-              // to stderr (totalBytes > pipedStdoutBytes or non-empty stderr),
-              // include the output file path in the 0-event expiry notice.
-              const stderrOutputFile =
-                shellCommand.taskOutput.totalBytes > pipedStdoutBytes || shellCommand.taskOutput.getStderr().length > 0
-                  ? shellCommand.taskOutput.path
-                  : undefined;
+              // Official 2.1.331 (`Fe` @326865200): compare totalBytes against
+              // pipedStdoutBytes in matching units to detect stderr reliably.
+              const stderrOutputFile = hasMonitorStderrOutput(shellCommand.taskOutput, pipedStdoutChars)
+                ? shellCommand.taskOutput.path
+                : undefined;
               notifyMonitorStreamEvent(
                 description,
                 monitorExpiredEvent(S.timeout_ms, stream.eventCount(), bounded, stderrOutputFile),
@@ -734,7 +753,7 @@ export const MonitorTool = buildTool({
             // best-effort
           } finally {
             if (effectiveAgentId) {
-              removeKeepaliveReason(effectiveAgentId, streamKeepaliveReason, registry);
+              removeKeepaliveReason(effectiveAgentId, keepaliveReason, registry);
             }
           }
         });

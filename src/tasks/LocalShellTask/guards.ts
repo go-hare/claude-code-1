@@ -52,6 +52,8 @@ export type LocalShellTaskState = TaskStateBase & {
   backgroundedToDeliverMessage?: boolean
   /** densable plugin turn-abort moved this command to the background. */
   backgroundedByTurnAbort?: boolean
+  /** Official 2.1.331 `onlyWaitsByLooking` — foreground sleep/wait polling loop eligible for wait-after-jobs grace move. */
+  onlyWaitsByLooking?: boolean
 }
 
 /** densable `backgroundTaskId !== undefined && cZe(agentContext)`. */

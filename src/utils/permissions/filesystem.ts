@@ -34,6 +34,7 @@ import {
   getOriginalCwd,
   getSessionId,
   memoryToggledOff,
+  onSessionSwitch,
 } from '../../bootstrap/state.js'
 import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { AnyObject, Tool, ToolPermissionContext } from '../../Tool.js'
@@ -1147,12 +1148,36 @@ export function isCurrentSessionTaskOutputPath(
   })
 }
 
+// Official 2.1.331 `scratchpadDirBySessionId` (@5334013 / @6239271):
+// per-session scratchpad path cache reset on session switch (`onSessionSwitch`).
+const scratchpadDirBySessionId = new Map<string, string>()
+
 /**
- * Returns the scratchpad directory path for the current session.
+ * Reset cached per-session scratchpad paths and memoized working-dir paths.
+ * Invoked automatically on `onSessionSwitch` and exported for tests.
+ */
+export function resetScratchpadDirCache(): void {
+  scratchpadDirBySessionId.clear()
+  getResolvedWorkingDirPaths.cache.clear?.()
+}
+
+onSessionSwitch(() => {
+  resetScratchpadDirCache()
+})
+
+/**
+ * Returns the scratchpad directory path for the current (or given) session.
  * Path format: /tmp/claude-{uid}/{sanitized-cwd}/{sessionId}/scratchpad/
  */
-export function getScratchpadDir(): string {
-  return join(getProjectTempDir(), getSessionId(), 'scratchpad')
+export function getScratchpadDir(sessionId: string = getSessionId()): string {
+  const cacheKey = `${sessionId}\0${getOriginalCwd()}`
+  const cached = scratchpadDirBySessionId.get(cacheKey)
+  if (cached !== undefined) {
+    return cached
+  }
+  const dir = join(getProjectTempDir(), sessionId, 'scratchpad')
+  scratchpadDirBySessionId.set(cacheKey, dir)
+  return dir
 }
 
 /**

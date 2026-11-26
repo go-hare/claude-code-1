@@ -8,26 +8,38 @@ import {
   runWithAgentContext,
 } from '../../utils/agentContext.js'
 import { getGlobalConfig } from '../../utils/config.js'
+import { getRateLimitTier, isClaudeAISubscriber } from '../../utils/auth.js'
 import {
   getContextWindowForModel,
   isRecognizedModelForWindowEnforcement,
 } from '../../utils/context.js'
 import { getRuntimeMainLoopModel } from '../../utils/model/model.js'
+import { getAPIProvider } from '../../utils/model/providers.js'
 import { isFableModel } from '../../utils/fableConsent.js'
 import { isFableCreditsSuffixExempt } from '../../utils/model/fableCreditsLabel.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { hasExactErrorMessage, isAbortError } from '../../utils/errors.js'
 import type { CacheSafeParams } from '../../utils/forkedAgent.js'
+import { leftoverP, leftoverY } from '../../utils/leftoverOt.js'
 import { logError } from '../../utils/log.js'
 import { isCompactBoundaryMessage } from '../../utils/messages.js'
+import type {
+  Precompute,
+  PrecomputeArmTrigger,
+  PrecomputeEntry,
+} from '../../utils/sessionSlots.js'
 import { resolveColdCompactStripNonEssential } from '../../utils/coldCompact.js'
 import { getEnabledSettingSources } from '../../utils/settings/constants.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { getTokenUsage, tokenCountWithEstimation } from '../../utils/tokens.js'
 import { roughTokenCountEstimationForMessages } from '../tokenEstimation.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
-import { logEvent } from '../analytics/index.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../analytics/index.js'
+import { currentLimits, type ClaudeAILimits } from '../claudeAiLimits.js'
 import { getMaxOutputTokensForModel } from '../api/claude.js'
 import { notifyCompaction } from '../api/promptCacheBreakDetection.js'
 import { setLastSummarizedMessageId } from '../SessionMemory/sessionMemoryUtils.js'
@@ -1191,4 +1203,452 @@ export async function autoCompactIfNeeded(
         : {}),
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.331: Post-turn precompute auto-compact arming (`sf` / `nf` / `rf` / `wFn`)
+// and saved-summary resume (`_resumeFromSummary`).
+// ---------------------------------------------------------------------------
+
+/** Official `tengu_hidden_rain` — GrowthBook gate for post-turn precompute auto-compact. */
+export const AUTO_COMPACT_AFTER_TURN_FLAG = 'tengu_hidden_rain'
+
+/** Official 2.1.331 `_resumeFromSummary` notice after swapping a saved summary. */
+export const SAVED_SUMMARY_RESUME_NOTICE =
+  'Resumed from a saved summary to save usage.'
+
+/** Official 2.1.331 `_resumeFromSummary` notice when starting an on-demand summary. */
+export function formatResumingFromSummaryNotice(cancelKey = 'esc'): string {
+  return `Resuming from a summary to save usage. Press ${cancelKey} to keep the full conversation.`
+}
+
+export type PrecomputeWorkerHostKind =
+  | 'tool_container_daemon'
+  | 'ccs_tenant'
+  | 'hosted_worker'
+  | 'none'
+
+/** Official `ooe(agentId)` — precompute map key (`'main'` for main thread). */
+export function getPrecomputeAgentKey(agentId: string | undefined): string {
+  return agentId ?? 'main'
+}
+
+/** Official `l_()` — detect whether this process runs in a hosted precompute worker. */
+export function getPrecomputeWorkerHostKind(
+  env: NodeJS.ProcessEnv = process.env,
+): PrecomputeWorkerHostKind {
+  if (isEnvTruthy(env.CLAUDE_CODE_TOOL_CONTAINER_DAEMON)) {
+    return 'tool_container_daemon'
+  }
+  if (isEnvTruthy(env.CLAUDE_CODE_CCS_TENANT)) {
+    return 'ccs_tenant'
+  }
+  if (
+    isEnvTruthy(env.CLAUDE_CODE_REMOTE) &&
+    env.CLAUDE_CODE_ENVIRONMENT_KIND === 'anthropic_cloud' &&
+    Boolean(env.CLAUDE_CODE_REMOTE_SESSION_ID)
+  ) {
+    return 'hosted_worker'
+  }
+  return 'none'
+}
+
+/** Official `nf()` — post-turn precompute auto-compact feature gate. */
+export function isAutoCompactAfterTurnEnabled(options?: {
+  workerHostKind?: PrecomputeWorkerHostKind
+  flagEnabled?: boolean
+}): boolean {
+  const hostKind = options?.workerHostKind ?? getPrecomputeWorkerHostKind()
+  if (hostKind === 'none') return false
+  const flag =
+    options?.flagEnabled ??
+    getFeatureValue_CACHED_MAY_BE_STALE(AUTO_COMPACT_AFTER_TURN_FLAG, false) ===
+      true
+  return flag
+}
+
+/** Official `rf(tracking)` — true while cooling down after a compact or after consecutive failures. */
+export function isAutoCompactCoolingDownOrFailing(
+  tracking: AutoCompactTrackingState | undefined,
+): boolean {
+  return (
+    (tracking?.compacted === true &&
+      tracking.turnCounter < RAPID_REFILL_TURN_THRESHOLD) ||
+    (tracking?.consecutiveFailures ?? 0) > 0
+  )
+}
+
+/** Official `V4(querySource, agentId)` — main-thread conversation query only. */
+export function isMainThreadPrecomputeSource(
+  querySource: QuerySource | string | undefined,
+  agentId: string | undefined,
+): boolean {
+  if (agentId !== undefined) return false
+  if (querySource === undefined) return true
+  return (
+    querySource === 'repl_main_thread' ||
+    querySource === 'sdk' ||
+    querySource.startsWith('repl_main_thread')
+  )
+}
+
+/**
+ * Official `Wdt()` — returns true when the active account/plan can absorb a
+ * background precompute summary without directly billing pay-per-request / zero-tier.
+ */
+export function canSpendForBackgroundPrecompute(options?: {
+  apiProvider?: string
+  isSubscriber?: boolean
+  rateLimitTier?: string | null
+}): boolean {
+  const provider = options?.apiProvider ?? getAPIProvider()
+  if (provider !== 'firstParty') return false
+  const subscriber = options?.isSubscriber ?? isClaudeAISubscriber()
+  if (!subscriber) return false
+  const tier = options?.rateLimitTier ?? getRateLimitTier()
+  if (tier === 'default_claude_zero') return false
+  return true
+}
+
+function getLastHumanPromptUuid(messages: readonly Message[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg || msg.type !== 'user') continue
+    if (msg.isMeta) continue
+    const content = msg.message?.content
+    if (
+      typeof content === 'string' ||
+      (Array.isArray(content) && !content.some(b => b.type === 'tool_result'))
+    ) {
+      return msg.uuid
+    }
+  }
+  return ''
+}
+
+export type ArmPrecomputeCompactionParams = {
+  precompute: Precompute
+  messages: Message[]
+  model: string
+  querySource?: QuerySource | string
+  agentId?: string
+  armTrigger?: PrecomputeArmTrigger
+  /** Optional async summarizer to run in the background; populates entry on settle. */
+  runSummarize?: (
+    signal: AbortSignal,
+  ) => Promise<
+    { ok: true; result: CompactionResult } | { ok: false; reason: string }
+  >
+}
+
+/**
+ * Official 2.1.331 `wFn` — arm a background precompute compaction entry on
+ * `session.precompute` for the given `armTrigger` (such as `'after_turn'`).
+ */
+export function armPrecomputeCompaction(
+  params: ArmPrecomputeCompactionParams,
+): boolean {
+  const {
+    precompute,
+    messages,
+    model,
+    querySource,
+    agentId,
+    armTrigger = 'estimate',
+    runSummarize,
+  } = params
+  const agentKey = getPrecomputeAgentKey(agentId)
+
+  if (querySource === 'compact' || querySource === 'session_memory') {
+    return false
+  }
+  if (
+    precompute.consecutiveCountedFailures(agentKey) >=
+    MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES
+  ) {
+    return false
+  }
+  const existing = precompute.get(agentKey) as PrecomputeEntry | undefined
+  if (existing !== undefined && existing.status !== 'failed') {
+    return false
+  }
+  const lastMsg = messages.at(-1)
+  if (!lastMsg?.uuid) return false
+
+  const promptUuid = getLastHumanPromptUuid(messages)
+  if (promptUuid && precompute.isVetoedUnder(agentKey, promptUuid)) {
+    return false
+  }
+
+  const abortController = new AbortController()
+  const startedAt = performance.now()
+  const preCompactTokens = tokenCountWithEstimation(messages)
+  const attemptNumber = precompute.nextAttemptNumber(agentKey)
+  const rowUuids = messages.map(m => m.uuid)
+
+  logEvent('tengu_precomputed_compact_started', {
+    preCompactTokens,
+    messageCount: messages.length,
+    precomputeAttemptNumber: attemptNumber,
+    armTrigger:
+      armTrigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    ...(querySource !== undefined
+      ? {
+          querySource:
+            querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }
+      : {}),
+  })
+
+  const settled = runSummarize
+    ? runSummarize(abortController.signal)
+        .then(outcome => {
+          const current = precompute.get(agentKey) as
+            | PrecomputeEntry
+            | undefined
+          if (
+            current?.status !== 'pending' ||
+            current.abortController !== abortController
+          ) {
+            return
+          }
+          if (outcome.ok) {
+            precompute.clearCountedFailures(agentKey)
+            precompute.put(agentKey, {
+              ...current,
+              status: 'ready',
+              result: outcome.result,
+              readyDurationMs: Math.round(performance.now() - startedAt),
+            })
+          } else {
+            precompute.recordCountedFailure(agentKey)
+            precompute.put(agentKey, {
+              ...current,
+              status: 'failed',
+            })
+          }
+        })
+        .catch(err => {
+          logError(err)
+          const current = precompute.get(agentKey) as
+            | PrecomputeEntry
+            | undefined
+          if (
+            current?.status === 'pending' &&
+            current.abortController === abortController
+          ) {
+            precompute.recordCountedFailure(agentKey)
+            precompute.put(agentKey, { ...current, status: 'failed' })
+          }
+        })
+    : Promise.resolve()
+
+  const entry: PrecomputeEntry = {
+    status: 'pending',
+    armTrigger,
+    coverage: {
+      lastUuid: lastMsg.uuid,
+      seenUuids: new Set(rowUuids),
+      rowUuids,
+    },
+    preCompactTokens,
+    model,
+    startedAt,
+    abortController,
+    settled,
+  }
+  precompute.put(agentKey, entry)
+  return true
+}
+
+export type ArmAutoCompactAfterTurnParams = {
+  messages: Message[]
+  model: string
+  precompute: Precompute
+  querySource?: QuerySource | string
+  agentId?: string
+  tracking?: AutoCompactTrackingState
+  signal?: AbortSignal
+  billedToUsageCredits?: boolean
+  limits?: Pick<ClaudeAILimits, 'status' | 'overageInUse'>
+  /** Optional override for `shouldAutoCompact` check. */
+  shouldCompactCheck?: () => Promise<boolean>
+  /** Optional override for `canSpendForBackgroundPrecompute` check. */
+  canSpendCheck?: () => boolean
+  /** Optional background summarizer forwarded to `armPrecomputeCompaction`. */
+  runSummarize?: ArmPrecomputeCompactionParams['runSummarize']
+}
+
+export type ArmAutoCompactAfterTurnResult = {
+  armed: boolean
+  skipReason?: 'would_spend' | 'threw'
+}
+
+/**
+ * Official 2.1.331 `sf()` — arm post-turn precompute auto-compact with
+ * `armTrigger: 'after_turn'` when a turn completes above the autocompact
+ * threshold and the summary will reach the next worker without spending
+ * usage credits/overage.
+ */
+export async function armAutoCompactAfterTurn(
+  params: ArmAutoCompactAfterTurnParams,
+): Promise<ArmAutoCompactAfterTurnResult> {
+  const {
+    messages,
+    model,
+    precompute,
+    querySource,
+    agentId,
+    tracking,
+    signal,
+    billedToUsageCredits,
+    limits = currentLimits,
+    shouldCompactCheck,
+    canSpendCheck,
+    runSummarize,
+  } = params
+  try {
+    const agentKey = getPrecomputeAgentKey(agentId)
+    if (
+      !isMainThreadPrecomputeSource(querySource, agentId) ||
+      isAutoCompactCoolingDownOrFailing(tracking) ||
+      precompute.has(agentKey) ||
+      signal?.aborted ||
+      !precompute.summaryReachesNextWorker()
+    ) {
+      return { armed: false }
+    }
+
+    const needsCompact = shouldCompactCheck
+      ? await shouldCompactCheck()
+      : await shouldAutoCompact(
+          messages,
+          model,
+          querySource as QuerySource | undefined,
+        )
+    if (!needsCompact) {
+      return { armed: false }
+    }
+
+    const canSpend = canSpendCheck
+      ? canSpendCheck()
+      : canSpendForBackgroundPrecompute()
+    if (
+      billedToUsageCredits === true ||
+      limits.overageInUse === true ||
+      limits.status !== 'allowed' ||
+      !canSpend
+    ) {
+      leftoverP('compact_after_turn', 'would_spend')
+      return { armed: false, skipReason: 'would_spend' }
+    }
+
+    const armed = armPrecomputeCompaction({
+      precompute,
+      messages,
+      model,
+      querySource,
+      agentId,
+      armTrigger: 'after_turn',
+      runSummarize,
+    })
+    if (armed) {
+      logEvent('tengu_auto_compact_after_turn', {})
+    }
+    return { armed }
+  } catch (err) {
+    leftoverP('compact_after_turn', 'threw')
+    logError(err)
+    return { armed: false, skipReason: 'threw' }
+  }
+}
+
+/**
+ * Official 2.1.331 `#u(messages)` — true when `session.precompute` holds a
+ * ready precomputed summary whose `coverage.lastUuid` is present in `messages`.
+ */
+export function hasReadyPrecomputedSummaryForMessages(
+  precompute: Precompute,
+  messages: readonly Message[],
+  agentId?: string,
+): boolean {
+  const entry = precompute.get(getPrecomputeAgentKey(agentId)) as
+    | PrecomputeEntry
+    | undefined
+  return (
+    entry?.status === 'ready' &&
+    messages.some(m => m.uuid === entry.coverage.lastUuid)
+  )
+}
+
+export type ResumeFromSavedSummaryParams = {
+  precompute: Precompute
+  getMessages: () => readonly Message[]
+  appendNotice: (content: string) => void
+  runCompact: () => Promise<void>
+  isCompactQueued?: () => boolean
+  agentId?: string
+  cancelKey?: string
+  featureName?: string
+}
+
+export type ResumeFromSavedSummaryResult =
+  | { applied: true; usedSavedSummary: boolean }
+  | {
+      applied: false
+      reason: 'compact_failed' | 'compact_queued' | 'compact_not_applied'
+    }
+
+/**
+ * Official 2.1.331 `_resumeFromSummary` — compact a resumed session from a
+ * ready saved summary (announcing `"Resumed from a saved summary to save usage."`
+ * after the boundary lands) or start an on-demand summary with a cancel hint.
+ */
+export async function resumeFromSavedSummary(
+  params: ResumeFromSavedSummaryParams,
+): Promise<ResumeFromSavedSummaryResult> {
+  const {
+    precompute,
+    getMessages,
+    appendNotice,
+    runCompact,
+    isCompactQueued,
+    agentId,
+    cancelKey = 'esc',
+    featureName = 'cli_cold_resume_quota_warning',
+  } = params
+  const beforeMessages = getMessages()
+  const prevBoundaryUuid = beforeMessages.findLast(
+    isCompactBoundaryMessage,
+  )?.uuid
+  const hasSavedSummary = hasReadyPrecomputedSummaryForMessages(
+    precompute,
+    beforeMessages,
+    agentId,
+  )
+
+  try {
+    if (!hasSavedSummary) {
+      appendNotice(formatResumingFromSummaryNotice(cancelKey))
+    }
+    await runCompact()
+  } catch (err) {
+    logError(err)
+    return { applied: false, reason: 'compact_failed' }
+  }
+
+  const afterBoundaryUuid = getMessages().findLast(
+    isCompactBoundaryMessage,
+  )?.uuid
+  if (afterBoundaryUuid !== prevBoundaryUuid) {
+    if (hasSavedSummary) {
+      appendNotice(SAVED_SUMMARY_RESUME_NOTICE)
+    }
+    leftoverY(featureName)
+    return { applied: true, usedSavedSummary: hasSavedSummary }
+  }
+
+  const reason = isCompactQueued?.() ? 'compact_queued' : 'compact_not_applied'
+  leftoverP(featureName, reason)
+  return { applied: false, reason }
 }

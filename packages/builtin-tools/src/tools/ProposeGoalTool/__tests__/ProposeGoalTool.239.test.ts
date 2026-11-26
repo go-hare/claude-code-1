@@ -238,7 +238,7 @@ describe('ProposeGoalTool.call gates', () => {
     const ctx = makeContext({ agentId: 'subagent-1' })
     await expect(
       ProposeGoalTool.call({ condition: 'bun test exits 0' }, ctx as never),
-    ).rejects.toThrow('ProposeGoal cannot be used in agent contexts')
+    ).rejects.toThrow('SetGoal cannot be used in agent contexts')
     expect(enqueueCalls).toHaveLength(0)
   })
 
@@ -281,7 +281,7 @@ describe('ProposeGoalTool.call gates', () => {
     await expect(
       ProposeGoalTool.call({ condition: 'CLEAR' }, ctx as never),
     ).rejects.toThrow(
-      'ProposeGoal only proposes a new goal; it cannot clear one. The user can clear an active goal with /goal clear.',
+      'SetGoal cannot clear a goal. The user can end it with /goal clear.',
     )
   })
 
@@ -542,8 +542,9 @@ describe('ProposeGoalTool.call dialog', () => {
 })
 
 describe('ProposeGoalTool surface', () => {
-  test('name / defer / readonly / concurrency / result size', () => {
-    expect(ProposeGoalTool.name).toBe('ProposeGoal')
+  test('name / aliases / defer / readonly / concurrency / result size', () => {
+    expect(ProposeGoalTool.name).toBe('SetGoal')
+    expect(ProposeGoalTool.aliases).toEqual(['ProposeGoal'])
     expect(ProposeGoalTool.shouldDefer).toBe(true)
     expect(ProposeGoalTool.isReadOnly()).toBe(true)
     expect(ProposeGoalTool.isConcurrencySafe()).toBe(false)
@@ -577,7 +578,7 @@ describe('ProposeGoalTool surface', () => {
       ProposeGoalTool.renderToolUseMessage({
         condition: 'bun test exits 0',
       }),
-    ).toBe('Propose goal: bun test exits 0')
+    ).toBe('Goal: bun test exits 0')
     expect(PROPOSE_GOAL_CONDITION_MAX_CHARS).toBe(500)
   })
 

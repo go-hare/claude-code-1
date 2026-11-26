@@ -43,6 +43,7 @@ import {
   sandboxNetworkTranscriptWatermark,
 } from '../utils/sandbox/sandboxNetworkDecision.js'
 import {
+  isShutdownFrameStale,
   removeTeammateFromTeamFile,
   syncTeammateMode,
 } from '../utils/swarm/teamHelpers.js'
@@ -59,7 +60,9 @@ import {
   isModeSetRequest,
   isPermissionRequest,
   isPermissionResponse,
+  computePlanDigest,
   isPlanApprovalRequest,
+  recordShownPlanDigest,
   isPlanApprovalResponse,
   isSandboxPermissionRequest,
   isSandboxPermissionResponse,
@@ -664,6 +667,8 @@ export function useInboxPoller({
         const parsed = isPlanApprovalRequest(m.text)
         if (!parsed) continue
 
+        recordShownPlanDigest(parsed.requestId, parsed.planContent)
+
         // Write approval response to teammate's inbox
         const approvalResponse = {
           type: 'plan_approval_response',
@@ -671,6 +676,7 @@ export function useInboxPoller({
           approved: true,
           timestamp: new Date().toISOString(),
           permissionMode: modeToInherit,
+          planDigest: computePlanDigest(parsed.planContent),
         }
 
         void writeToMailbox(
@@ -726,7 +732,27 @@ export function useInboxPoller({
 
       for (const m of shutdownApprovals) {
         const parsed = isShutdownApproved(m.text)
-        if (!parsed) continue
+        if (!parsed || parsed.from !== m.from) continue
+
+        // Guard stale shutdown_approved frames (Official 2.1.331 `MSn`/`M2t`)
+        // when a teammate with the same name was respawned after this frame was sent.
+        const teamName = currentAppState.teamContext?.teamName
+        const existingTeammateId = currentAppState.teamContext?.teammates
+          ? Object.entries(currentAppState.teamContext.teammates).find(
+              ([, t]) => t.name === parsed.from,
+            )?.[0]
+          : undefined
+        if (
+          teamName &&
+          existingTeammateId &&
+          (await isShutdownFrameStale(
+            teamName,
+            existingTeammateId,
+            m.timestamp,
+          ))
+        ) {
+          continue
+        }
 
         // Kill the pane if we have the info (pane-based teammates)
         if (parsed.paneId && parsed.backendType) {

@@ -307,6 +307,12 @@ import {
 } from '../../utils/plugins/pluginConfigSources.js';
 import { clearPluginOptionsCache, getPluginStorageId } from '../../utils/plugins/pluginOptionsStorage.js';
 import { jsonStringify } from '../../utils/slowOperations.js';
+import {
+  executePostModelSwitchHooks,
+  executePreModelSwitchHooks,
+  type PreModelSwitchDecision,
+} from '../../utils/hooks.js';
+import type { Message } from '../../types/message.js';
 
 function isIdleCompactionRowVisible(): boolean {
   for (const source of ['flagSettings', 'policySettings', 'localSettings', 'projectSettings'] as const) {
@@ -696,6 +702,170 @@ export function formatConfigOnOffValue(value: string | boolean, isPluginProvided
 function formatSettingDisplayValue(setting: Setting): string {
   const s = String(setting.value);
   return setting.provided !== undefined && setting.type !== 'boolean' ? s.replace(/[\t\n\r]/g, ' ').trim() : s;
+}
+
+/**
+ * Official 2.1.331 `wm(...)` in Config.tsx: strip ANSI CSI/OSC/ESC sequences
+ * and C0/C1/invisible control characters before echoing error text or hook
+ * notices to the terminal UI.
+ */
+export function sanitizeConfigErrorMessage(raw: string): string {
+  return re(raw).trim();
+}
+
+/**
+ * Step through enum setting options in either direction (`+1` for nextValue,
+ * `-1` for previousValue) with modulo wrap-around.
+ */
+export function cycleEnumOptionIndex(currentIndex: number, length: number, direction: 1 | -1): number {
+  if (length <= 0) return 0;
+  if (currentIndex < 0) return direction === -1 ? length - 1 : 0;
+  return (currentIndex + direction + length) % length;
+}
+
+export type TouchedConfigEntry = {
+  id: string;
+  asked?: string;
+  before?: string;
+};
+
+/**
+ * Official 2.1.331 `Qc` (@57452500) — format one changed `/config` setting
+ * (core or plugin option) for the exit summary.
+ */
+export function formatConfigExitSummaryLine(setting: Setting, mapleSundial = false): string {
+  const rawLabel =
+    typeof setting.label === 'string' ? setting.label : 'searchText' in setting ? setting.searchText : setting.id;
+  const displayLabel = setting.provided ? `${re(rawLabel)} (${re(setting.provided.plugin)})` : rawLabel;
+  if (setting.provided && setting.type === 'managedEnum') {
+    return `Changed ${displayLabel}`;
+  }
+  const formatted =
+    setting.type === 'boolean'
+      ? mapleSundial
+        ? setting.value
+          ? 'on'
+          : 'off'
+        : String(setting.value)
+      : formatSettingDisplayValue(setting);
+  const displayValue = setting.provided || setting.type === 'managedEnum' ? re(formatted) : formatted;
+  const noticeSuffix = setting.notice
+    ? ` · ${re(setting.notice.replace(/^.(?=.* override what you save here$)/, m => m.toLowerCase()))}`
+    : '';
+  return `Set ${displayLabel} to ${chalk.bold(displayValue)}${noticeSuffix}`;
+}
+
+/**
+ * Official 2.1.331 `Hd` (@57459191) — merge touched settings & plugin options
+ * into the `/config` exit summary so no changed setting or plugin option is
+ * silently dropped on close.
+ */
+export function buildConfigExitSummaryLines(
+  touched: Iterable<TouchedConfigEntry>,
+  settings: readonly Setting[],
+  existingLines: readonly string[],
+  alreadyCoveredIds: ReadonlySet<string> = new Set(['apiKey']),
+  mapleSundial = false,
+): string[] {
+  const result = [...existingLines];
+  for (const { id, asked, before } of touched) {
+    if (alreadyCoveredIds.has(id)) continue;
+    const setting = settings.find(item => item.id === id);
+    if (!setting) continue;
+    const currentVal = String(setting.value);
+    if ((asked !== undefined && currentVal === asked) || (before !== undefined && currentVal !== before)) {
+      result.push(formatConfigExitSummaryLine(setting, mapleSundial));
+    }
+  }
+  return uniq(result);
+}
+
+/**
+ * Official 2.1.331 `XWe` — returns the target model that enabling fast mode
+ * needs to promote to, or `undefined` when the current model already supports
+ * fast mode.
+ */
+export function getFastModePromotionTarget(currentModel: string | null): string | undefined {
+  if (isFastModeSupportedByModel(currentModel)) {
+    return undefined;
+  }
+  return getFastModeModel();
+}
+
+export type FastModePreModelSwitchCheckResult =
+  | { allowed: true; targetModel?: string; messageSuffix: string }
+  | { allowed: false; stale?: boolean; error?: ConfigSettingRefusalError };
+
+/**
+ * Official 2.1.331 `@31326445` — when enabling fast mode in `/config` requires
+ * promoting to a fast-mode-capable model, run `PreModelSwitch` hooks before
+ * committing, reject `block`/`ask` decisions, and guard against stale model
+ * changes while hooks execute.
+ */
+export async function runFastModePreModelSwitchCheck(opts: {
+  readCurrentModel: () => string | null;
+  messages: Message[];
+  isStale?: () => boolean;
+  runHooks?: (
+    req: { fromModel: string; toModel: string; requestedModel: string; source: 'command' },
+    messages: Message[],
+  ) => Promise<PreModelSwitchDecision>;
+  getPromotionTarget?: (currentModel: string | null) => string | undefined;
+}): Promise<FastModePreModelSwitchCheckResult> {
+  const resolveTarget = opts.getPromotionTarget ?? getFastModePromotionTarget;
+  const initialModel = opts.readCurrentModel();
+  const targetModel = resolveTarget(initialModel);
+  if (targetModel === undefined) {
+    if (opts.isStale?.()) return { allowed: false, stale: true };
+    return { allowed: true, targetModel: undefined, messageSuffix: '' };
+  }
+  const fromModel = initialModel ?? getMainLoopModel();
+  const runHooks = opts.runHooks ?? executePreModelSwitchHooks;
+  const hookResult = await runHooks(
+    {
+      fromModel,
+      toModel: targetModel,
+      requestedModel: targetModel,
+      source: 'command',
+    },
+    opts.messages,
+  );
+  if (opts.isStale?.()) {
+    return { allowed: false, stale: true };
+  }
+  if (hookResult.decision !== 'proceed') {
+    const rawReason =
+      hookResult.decision === 'ask'
+        ? `${hookResult.reason ?? 'confirmation required'} (run /model to switch, then enable fast mode)`
+        : hookResult.reason;
+    const parts = [rawReason, ...hookResult.messages]
+      .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
+      .map(sanitizeConfigErrorMessage);
+    const message =
+      parts.length > 0
+        ? `Couldn't switch to ${modelDisplayString(targetModel)}: ${parts.join(' · ')}`
+        : 'model switch blocked by a PreModelSwitch hook';
+    return {
+      allowed: false,
+      error: new ConfigSettingRefusalError(message),
+    };
+  }
+  const afterModel = opts.readCurrentModel();
+  const afterTarget = resolveTarget(afterModel);
+  if (afterTarget !== undefined && (afterTarget !== targetModel || afterModel !== initialModel)) {
+    return {
+      allowed: false,
+      error: new ConfigSettingRefusalError(
+        "Couldn't turn on fast mode: the model changed while PreModelSwitch hooks ran; try again",
+      ),
+    };
+  }
+  const safeMessages = hookResult.messages.map(sanitizeConfigErrorMessage).filter(Boolean);
+  return {
+    allowed: true,
+    targetModel: afterTarget,
+    messageSuffix: safeMessages.length > 0 ? ` · ${safeMessages.join(' · ')}` : '',
+  };
 }
 
 export type RemoteHomeSettingsDialogResult = 'forward' | 'keep_local' | 'not_now' | 'not_saved' | 'not_stored';
@@ -1339,7 +1509,7 @@ export function wrapSettingWithConfigSetHook<T extends Setting>(
           return writeOutcome;
         })
         .catch(err => ({
-          error: new ConfigSettingRefusalError(`config.set failed: ${errorMessage(err)}`),
+          error: new ConfigSettingRefusalError(`config.set failed: ${sanitizeConfigErrorMessage(errorMessage(err))}`),
         }));
     },
   };
@@ -1470,6 +1640,9 @@ export type ConfigHkeBag = {
   onChangeMainModelConfig: (value: string | null, persistAsDefault?: boolean) => ConfigSettingChange | undefined;
   onChangeVerbose: (value: boolean) => ConfigSettingChange | undefined;
   reportSaveResult?: <T extends { error?: Error | null } | undefined>(result: T) => T;
+  messages?: Message[];
+  readCurrentModel?: () => string | null;
+  latestFastPickRef?: React.MutableRefObject<number>;
 };
 
 /**
@@ -1513,6 +1686,9 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[]; dialogFieldRows: Se
     onChangeMainModelConfig,
     onChangeVerbose,
     reportSaveResult,
+    messages,
+    readCurrentModel,
+    latestFastPickRef,
   } = n;
 
   // Official 2.1.331 `_o` / `Ne` (@335501050): clear or sync any legacy localSettings
@@ -1917,31 +2093,66 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[]; dialogFieldRows: Se
               label: `Fast mode (${mainLoopModel ? modelDisplayString(mainLoopModel) : FAST_MODE_MODEL_DISPLAY})`,
               value: !!isFastMode,
               type: 'boolean' as const,
-              onChange(enabled: boolean) {
-                clearFastModeCooldown();
-                const res = F({
-                  fastMode: enabled ? true : undefined,
-                });
-                if (res.error) return { error: res.error };
+              async onChange(enabled: boolean) {
                 if (enabled) {
+                  const pickId = latestFastPickRef ? ++latestFastPickRef.current : undefined;
+                  const fromModel = (readCurrentModel ? readCurrentModel() : mainLoopModel) ?? getMainLoopModel();
+                  const hookCheck = await runFastModePreModelSwitchCheck({
+                    readCurrentModel: readCurrentModel ?? (() => mainLoopModel),
+                    messages: messages ?? [],
+                    isStale:
+                      pickId !== undefined && latestFastPickRef
+                        ? () => pickId !== latestFastPickRef.current
+                        : undefined,
+                  });
+                  if (!hookCheck.allowed) {
+                    return hookCheck.error ? { error: hookCheck.error } : undefined;
+                  }
+                  clearFastModeCooldown();
+                  const res = F({
+                    fastMode: true,
+                  });
+                  if (res.error) return { error: res.error };
+                  const promotedModel = hookCheck.targetModel;
                   setAppState(prev => ({
                     ...prev,
-                    mainLoopModel: getFastModeModel(),
-                    mainLoopModelForSession: null,
+                    ...(promotedModel !== undefined
+                      ? {
+                          mainLoopModel: promotedModel,
+                          mainLoopModelForSession: null,
+                        }
+                      : {}),
                     fastMode: true,
                   }));
+                  if (promotedModel !== undefined) {
+                    void executePostModelSwitchHooks(
+                      {
+                        fromModel,
+                        toModel: promotedModel,
+                        requestedModel: promotedModel,
+                        source: 'command',
+                      },
+                      messages ?? [],
+                    );
+                  }
                   setChanges(prev => ({
                     ...prev,
-                    model: getFastModeModel(),
+                    ...(promotedModel !== undefined ? { model: promotedModel } : {}),
                     'Fast mode': 'ON',
                   }));
-                } else {
-                  setAppState(prev => ({
-                    ...prev,
-                    fastMode: false,
-                  }));
-                  setChanges(prev => ({ ...prev, 'Fast mode': 'OFF' }));
+                  return hookCheck.messageSuffix ? { messageSuffix: hookCheck.messageSuffix } : undefined;
                 }
+                clearFastModeCooldown();
+                const res = F({
+                  fastMode: undefined,
+                });
+                if (res.error) return { error: res.error };
+                setAppState(prev => ({
+                  ...prev,
+                  fastMode: false,
+                }));
+                setChanges(prev => ({ ...prev, 'Fast mode': 'OFF' }));
+                return undefined;
               },
             },
           ]
@@ -2273,13 +2484,13 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[]; dialogFieldRows: Se
           });
         },
       },
-      // densable UJr /config — tengu_sepia_moth. Default LJr()=false.
+      // Official 2.1.331 `e6t()` / `/config` — tengu_sepia_moth. Default true.
       ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_sepia_moth', false)
         ? [
             {
               id: 'precomputeCompactionEnabled',
               label: 'Precompute compaction',
-              value: settingsData?.precomputeCompactionEnabled ?? false,
+              value: settingsData?.precomputeCompactionEnabled ?? true,
               type: 'boolean' as const,
               onChange(precomputeCompactionEnabled: boolean) {
                 const res = F({ precomputeCompactionEnabled });
@@ -3579,6 +3790,27 @@ export function Config({
   // densable Pe / w0t — tengu_maple_sundial (default false).
   const mapleSundial = getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false);
   const { addNotification } = useNotifications();
+  // Official 2.1.331 `wt` — track every touched setting & plugin option so exit summary covers all changes.
+  const touchedSettingsRef = useRef<Set<TouchedConfigEntry>>(new Set());
+  const latestFastPickRef = useRef(0);
+  const recordTouchedSetting = useCallback((setting: Setting, nextValue: boolean | string, pending: unknown) => {
+    const entry: TouchedConfigEntry = {
+      id: setting.id,
+      asked: String(nextValue),
+      before: String(setting.value),
+    };
+    touchedSettingsRef.current.add(entry);
+    void Promise.resolve(pending).then(
+      res => {
+        if (asConfigSettingChange(res)?.error) {
+          touchedSettingsRef.current.delete(entry);
+        }
+      },
+      () => {
+        touchedSettingsRef.current.delete(entry);
+      },
+    );
+  }, []);
   // densable DualInk-off `Si`/`bo` — remoteHomeSettings paints on the row, not H().
   const [remoteHomeSettingsNotice, setRemoteHomeSettingsNotice] = useState<string | null>(null);
   const showConfigChangeResult = useCallback(
@@ -3586,9 +3818,9 @@ export function Config({
       const change = asConfigSettingChange(result);
       if (settingId === 'remoteHomeSettings') {
         if (change?.error) {
-          setRemoteHomeSettingsNotice(change.error.message);
+          setRemoteHomeSettingsNotice(sanitizeConfigErrorMessage(change.error.message));
         } else if (change?.messageSuffix) {
-          setRemoteHomeSettingsNotice(`Saved${change.messageSuffix}`);
+          setRemoteHomeSettingsNotice(sanitizeConfigErrorMessage(`Saved${change.messageSuffix}`));
         } else {
           setRemoteHomeSettingsNotice(null);
         }
@@ -3598,7 +3830,7 @@ export function Config({
         addNotification({
           key: 'config-change-refused',
           kind: 'warning',
-          text: change.error.message,
+          text: sanitizeConfigErrorMessage(change.error.message),
           color: 'warning',
           priority: 'immediate',
         });
@@ -3608,7 +3840,7 @@ export function Config({
         addNotification({
           key: 'config-change-note',
           kind: 'feedback',
-          text: change.messageSuffix.replace(/^ · /, ''),
+          text: sanitizeConfigErrorMessage(change.messageSuffix.replace(/^ · /, '')),
           priority: 'immediate',
         });
       }
@@ -3860,6 +4092,9 @@ export function Config({
     onChangeMainModelConfig,
     onChangeVerbose,
     reportSaveResult,
+    messages: context.messages,
+    readCurrentModel: () => store.getState().mainLoopModel,
+    latestFastPickRef,
   });
   const hookOrigin: ConfigHookOrigin = getIsRemoteMode() ? { kind: 'bridge' } : { kind: 'composer' };
   const rawSettingsItems: Setting[] = weConfigPluginRows(coreSettings, enabledPlugins, {
@@ -4131,8 +4366,11 @@ export function Config({
       return;
     }
     // Log any changes that were made
-    // TODO: Make these proper messages
+    const coveredIds = new Set<string>(['apiKey']);
     const formattedChanges: string[] = Object.entries(changes).map(([key, value]) => {
+      coveredIds.add(key);
+      if (key === 'Fast mode') coveredIds.add('fast');
+      if (key === 'ultracodeKeywordTrigger') coveredIds.add('workflowKeywordTriggerEnabled');
       logEvent('tengu_config_changed', {
         key: key as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         value: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -4159,104 +4397,129 @@ export function Config({
       });
     }
     if (themeSetting !== initialThemeSetting.current) {
+      coveredIds.add('theme');
       formattedChanges.push(`Set theme to ${chalk.bold(themeSetting)}`);
     }
     if (globalConfig.preferredNotifChannel !== initialConfig.current.preferredNotifChannel) {
+      coveredIds.add('notifChannel');
       formattedChanges.push(`Set notifications to ${chalk.bold(globalConfig.preferredNotifChannel)}`);
     }
     if (currentOutputStyle !== initialOutputStyle.current) {
+      coveredIds.add('outputStyle');
       formattedChanges.push(`Set output style to ${chalk.bold(currentOutputStyle)}`);
     }
     if (currentLanguage !== initialLanguage.current) {
+      coveredIds.add('language');
       formattedChanges.push(`Set response language to ${chalk.bold(currentLanguage ?? 'Default (English)')}`);
     }
     if (globalConfig.editorMode !== initialConfig.current.editorMode) {
+      coveredIds.add('editor');
       formattedChanges.push(`Set editor mode to ${chalk.bold(globalConfig.editorMode || 'emacs')}`);
     }
     if (globalConfig.diffTool !== initialConfig.current.diffTool) {
+      coveredIds.add('diffTool');
       formattedChanges.push(`Set diff tool to ${chalk.bold(globalConfig.diffTool)}`);
     }
     if (globalConfig.autoConnectIde !== initialConfig.current.autoConnectIde) {
+      coveredIds.add('autoConnectIde');
       formattedChanges.push(`${globalConfig.autoConnectIde ? 'Enabled' : 'Disabled'} auto-connect to IDE`);
     }
     if (globalConfig.autoInstallIdeExtension !== initialConfig.current.autoInstallIdeExtension) {
+      coveredIds.add('autoInstallIdeExtension');
       formattedChanges.push(
         `${globalConfig.autoInstallIdeExtension ? 'Enabled' : 'Disabled'} auto-install IDE extension`,
       );
     }
     if (globalConfig.autoCompactEnabled !== initialConfig.current.autoCompactEnabled) {
+      coveredIds.add('autoCompact');
       formattedChanges.push(`${globalConfig.autoCompactEnabled ? 'Enabled' : 'Disabled'} auto-compact`);
     }
     if (globalConfig.remoteHomeSettingsMode !== initialConfig.current.remoteHomeSettingsMode) {
+      coveredIds.add('remoteHomeSettings');
       formattedChanges.push(
         `${globalConfig.remoteHomeSettingsMode === 'forward' ? 'Enabled' : 'Disabled'} using this machine's settings in cloud sessions`,
       );
     }
     if (globalConfig.autoScrollEnabled !== initialConfig.current.autoScrollEnabled) {
+      coveredIds.add('autoScroll');
       formattedChanges.push(`${globalConfig.autoScrollEnabled ? 'Enabled' : 'Disabled'} auto-scroll`);
     }
     if ((settingsData?.idleCompaction ?? true) !== (initialSettingsData.current?.idleCompaction ?? true)) {
+      coveredIds.add('idleCompaction');
       formattedChanges.push(`${(settingsData?.idleCompaction ?? true) ? 'Enabled' : 'Disabled'} idle compaction`);
     }
     if (
       (settingsData?.autoContinueAtUsageLimit ?? true) !==
       (initialSettingsData.current?.autoContinueAtUsageLimit ?? true)
     ) {
+      coveredIds.add('autoContinueAtUsageLimit');
       formattedChanges.push(
         `${(settingsData?.autoContinueAtUsageLimit ?? true) ? 'Enabled' : 'Disabled'} continue automatically at usage limit`,
       );
     }
     if (globalConfig.respectGitignore !== initialConfig.current.respectGitignore) {
+      coveredIds.add('gitignore');
       formattedChanges.push(
         `${globalConfig.respectGitignore ? 'Enabled' : 'Disabled'} respect .gitignore in file picker`,
       );
     }
     if (globalConfig.copyFullResponse !== initialConfig.current.copyFullResponse) {
+      coveredIds.add('copyFullResponse');
       formattedChanges.push(`${globalConfig.copyFullResponse ? 'Enabled' : 'Disabled'} always copy full response`);
     }
     if (globalConfig.copyOnSelect !== initialConfig.current.copyOnSelect) {
+      coveredIds.add('copyOnSelect');
       formattedChanges.push(`${globalConfig.copyOnSelect ? 'Enabled' : 'Disabled'} copy on select`);
     }
     if (globalConfig.leftArrowOpensAgents !== initialConfig.current.leftArrowOpensAgents) {
+      coveredIds.add('leftArrowOpensAgents');
       formattedChanges.push(`${(globalConfig.leftArrowOpensAgents ?? true) ? 'Enabled' : 'Disabled'} ← opens agents`);
     }
     if (globalConfig.defaultToAgentsView !== initialConfig.current.defaultToAgentsView) {
+      coveredIds.add('defaultToAgentsView');
       formattedChanges.push(`${globalConfig.defaultToAgentsView ? 'Enabled' : 'Disabled'} open agents view by default`);
     }
     if (
       (settingsData?.wheelScrollAccelerationEnabled ?? true) !==
       (initialSettingsData.current?.wheelScrollAccelerationEnabled ?? true)
     ) {
+      coveredIds.add('wheelScrollAcceleration');
       formattedChanges.push(
         `${(settingsData?.wheelScrollAccelerationEnabled ?? true) ? 'Enabled' : 'Disabled'} wheel scroll acceleration`,
       );
     }
     if (globalConfig.terminalProgressBarEnabled !== initialConfig.current.terminalProgressBarEnabled) {
+      coveredIds.add('progressBar');
       formattedChanges.push(
         `${globalConfig.terminalProgressBarEnabled ? 'Enabled' : 'Disabled'} terminal progress bar`,
       );
     }
     if (globalConfig.showStatusInTerminalTab !== initialConfig.current.showStatusInTerminalTab) {
+      coveredIds.add('showStatusInTerminalTab');
       formattedChanges.push(`${globalConfig.showStatusInTerminalTab ? 'Enabled' : 'Disabled'} terminal tab status`);
     }
     if (globalConfig.showTurnDuration !== initialConfig.current.showTurnDuration) {
+      coveredIds.add('turnDuration');
       formattedChanges.push(`${globalConfig.showTurnDuration ? 'Enabled' : 'Disabled'} turn duration`);
     }
     const nextShowTimestamps = settingsData?.showMessageTimestamps ?? globalConfig.showMessageTimestamps;
     const initialShowTimestamps =
       initialSettingsData.current?.showMessageTimestamps ?? initialConfig.current.showMessageTimestamps;
     if (nextShowTimestamps !== initialShowTimestamps) {
+      coveredIds.add('timestamps');
       formattedChanges.push(`${nextShowTimestamps ? 'Enabled' : 'Disabled'} message timestamps`);
     }
     if (
-      (settingsData?.precomputeCompactionEnabled ?? false) !==
-      (initialSettingsData.current?.precomputeCompactionEnabled ?? false)
+      (settingsData?.precomputeCompactionEnabled ?? true) !==
+      (initialSettingsData.current?.precomputeCompactionEnabled ?? true)
     ) {
+      coveredIds.add('precomputeCompactionEnabled');
       formattedChanges.push(
-        `${settingsData?.precomputeCompactionEnabled ? 'Enabled' : 'Disabled'} precompute compaction`,
+        `${(settingsData?.precomputeCompactionEnabled ?? true) ? 'Enabled' : 'Disabled'} precompute compaction`,
       );
     }
     if (globalConfig.remoteControlAtStartup !== initialConfig.current.remoteControlAtStartup) {
+      coveredIds.add('remoteControl');
       const remoteLabel =
         globalConfig.remoteControlAtStartup === undefined
           ? 'Reset Remote Control to default'
@@ -4264,6 +4527,7 @@ export function Config({
       formattedChanges.push(remoteLabel);
     }
     if (settingsData?.autoUpdatesChannel !== initialSettingsData.current?.autoUpdatesChannel) {
+      coveredIds.add('autoUpdatesChannel');
       formattedChanges.push(
         `Set auto-update channel to ${chalk.bold(
           (settingsData?.autoUpdatesChannel as string | undefined) === 'rc'
@@ -4272,8 +4536,15 @@ export function Config({
         )}`,
       );
     }
-    if (formattedChanges.length > 0) {
-      onClose(formattedChanges.join('\n'));
+    const allFormattedChanges = buildConfigExitSummaryLines(
+      touchedSettingsRef.current,
+      settingsItems,
+      formattedChanges,
+      coveredIds,
+      mapleSundial,
+    );
+    if (allFormattedChanges.length > 0) {
+      onClose(allFormattedChanges.join('\n'));
     } else {
       onClose('Config dialog dismissed', { display: 'system' });
     }
@@ -4292,6 +4563,8 @@ export function Config({
     settingsData?.showMessageTimestamps,
     isFastModeEnabled() ? (settingsData as Record<string, unknown> | undefined)?.fastMode : undefined,
     themeSetting,
+    settingsItems,
+    mapleSundial,
     onClose,
   ]);
 
@@ -4425,206 +4698,215 @@ export function Config({
 
   // Settings navigation and toggle actions via configurable keybindings.
   // Only active when not in search mode and no submenu is open.
-  const toggleSetting = useCallback(() => {
-    const setting = filteredSettingsItems[selectedIndexLive.current];
-    if (!setting || !setting.onChange) {
-      return;
-    }
-
-    // Official 2.1.331 (@361646200): enforce setting.lock in interactive Config UI.
-    if (setting.lock !== undefined) {
-      if (setting.lock.source === 'policy') {
-        void refreshPolicyLimits().catch(() => {});
+  const toggleSetting = useCallback(
+    (direction: 1 | -1 = 1) => {
+      const setting = filteredSettingsItems[selectedIndexLive.current];
+      if (!setting || !setting.onChange) {
+        return;
       }
-      if (setting.lock.reason) {
-        addNotification({
-          key: 'config-change-refused',
-          kind: 'warning',
-          text: setting.lock.reason,
-          color: 'warning',
-          priority: 'immediate',
-        });
-      }
-      return;
-    }
 
-    if (setting.type === 'boolean') {
-      // densable: off→on with grantBlocker shows qAr copy; otherwise open RemoteHomeSettings confirmation.
-      if (setting.id === 'remoteHomeSettings' && setting.value === false) {
-        const blocker = setting.grantBlocker;
-        if (blocker !== undefined) {
-          setRemoteHomeSettingsNotice(REMOTE_HOME_SETTINGS_GRANT_BLOCKERS[blocker]);
+      // Official 2.1.331 (@361646200): enforce setting.lock in interactive Config UI.
+      if (setting.lock !== undefined) {
+        if (setting.lock.source === 'policy') {
+          void refreshPolicyLimits().catch(() => {});
+        }
+        if (setting.lock.reason) {
+          addNotification({
+            key: 'config-change-refused',
+            kind: 'warning',
+            text: sanitizeConfigErrorMessage(setting.lock.reason),
+            color: 'warning',
+            priority: 'immediate',
+          });
+        }
+        return;
+      }
+
+      if (setting.type === 'boolean') {
+        // densable: off→on with grantBlocker shows qAr copy; otherwise open RemoteHomeSettings confirmation.
+        if (setting.id === 'remoteHomeSettings' && setting.value === false) {
+          const blocker = setting.grantBlocker;
+          if (blocker !== undefined) {
+            setRemoteHomeSettingsNotice(REMOTE_HOME_SETTINGS_GRANT_BLOCKERS[blocker]);
+          } else {
+            setShowSubmenu('RemoteHomeSettings');
+            setTabsHidden(true);
+          }
+          return;
+        }
+        isDirty.current = true;
+        const next = !setting.value;
+        if (setting.id === 'remoteHomeSettings') {
+          setRemoteHomeSettingsNotice(null);
+        }
+        const pending = setting.onChange(next);
+        recordTouchedSetting(setting, next, pending);
+        void Promise.resolve(pending)
+          .then(result => {
+            showConfigChangeResult(setting.id, result);
+          })
+          .catch((error: unknown) => {
+            logError(error);
+            addNotification({
+              key: 'config-change-refused',
+              kind: 'warning',
+              text: `Setting change failed: ${sanitizeConfigErrorMessage(errorMessage(error))}`,
+              color: 'warning',
+              priority: 'immediate',
+            });
+          });
+        if (setting.id === 'thinking') {
+          const backToInitial = next === initialThinkingEnabled.current;
+          if (backToInitial) {
+            setShowThinkingWarning(false);
+          } else if (context.messages.some(m => m.type === 'assistant')) {
+            setShowThinkingWarning(true);
+          }
+        }
+        return;
+      }
+
+      // densable Jr(Rn) → phn(false, "config_toggle") then T(false); no submenu.
+      if (isMapleJrExternalIncludes(setting)) {
+        recordExternalIncludesDecision(false, 'config_toggle', context);
+        setExternalIncludesApproved(false);
+        touchedSettingsRef.current.add({ id: setting.id, before: String(setting.value), asked: 'false' });
+        return;
+      }
+
+      if (setting.id === 'agentsView') {
+        setShowSubmenu('AgentsView');
+        setTabsHidden(true);
+        return;
+      }
+
+      if (mapleSundial && setting.id === 'notifChannel') {
+        setShowSubmenu('Notifications');
+        setTabsHidden(true);
+        return;
+      }
+
+      if (setting.provided !== undefined && setting.type === 'managedEnum') {
+        const displayValue = formatSettingDisplayValue(setting);
+        setTextEditId(setting.id);
+        setTextEditValue(displayValue);
+        setTextEditCursor(displayValue.length);
+        setShowSubmenu('TextEdit');
+        setTabsHidden(true);
+        return;
+      }
+
+      if (
+        setting.id === 'theme' ||
+        setting.id === 'model' ||
+        setting.id === 'showExternalIncludesDialog' ||
+        setting.id === 'outputStyle' ||
+        setting.id === 'language'
+      ) {
+        // managedEnum items open a submenu — isDirty is set by the submenu's
+        // completion callback, not here (submenu may be cancelled).
+        switch (setting.id) {
+          case 'theme':
+            setShowSubmenu('Theme');
+            setTabsHidden(true);
+            return;
+          case 'model':
+            setShowSubmenu('Model');
+            setTabsHidden(true);
+            return;
+          case 'showExternalIncludesDialog':
+            setShowSubmenu('ExternalIncludes');
+            setTabsHidden(true);
+            return;
+          case 'outputStyle':
+            setShowSubmenu('OutputStyle');
+            setTabsHidden(true);
+            return;
+          case 'language':
+            setShowSubmenu('Language');
+            setTabsHidden(true);
+            return;
+        }
+      }
+
+      if (setting.id === 'autoUpdatesChannel') {
+        if (autoUpdaterDisabledReason) {
+          // Auto-updates are disabled - show enable dialog instead
+          setShowSubmenu('EnableAutoUpdates');
+          setTabsHidden(true);
+          return;
+        }
+        const currentChannel = settingsData?.autoUpdatesChannel ?? 'latest';
+        if (currentChannel === 'latest') {
+          // Switching to stable - show downgrade dialog
+          setShowSubmenu('ChannelDowngrade');
+          setTabsHidden(true);
         } else {
-          setShowSubmenu('RemoteHomeSettings');
-          setTabsHidden(true);
+          // Switching to latest - ask config.set hook before persisting
+          void saveAutoUpdatesChannelWithConfigSetHook('latest', currentChannel, finalChannel => {
+            isDirty.current = true;
+            const nextChannelValue = finalChannel === 'latest' ? undefined : finalChannel;
+            F({
+              autoUpdatesChannel: nextChannelValue,
+              minimumVersion: undefined,
+            });
+            setSettingsData(prev => ({
+              ...prev,
+              autoUpdatesChannel: nextChannelValue,
+              minimumVersion: undefined,
+            }));
+            logEvent('tengu_autoupdate_channel_changed', {
+              channel: finalChannel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            });
+          });
         }
         return;
       }
-      isDirty.current = true;
-      const next = !setting.value;
-      if (setting.id === 'remoteHomeSettings') {
-        setRemoteHomeSettingsNotice(null);
-      }
-      const pending = setting.onChange(next);
-      void Promise.resolve(pending)
-        .then(result => {
-          showConfigChangeResult(setting.id, result);
-        })
-        .catch((error: unknown) => {
-          logError(error);
-          addNotification({
-            key: 'config-change-refused',
-            kind: 'warning',
-            text: `Setting change failed: ${errorMessage(error)}`,
-            color: 'warning',
-            priority: 'immediate',
-          });
-        });
-      if (setting.id === 'thinking') {
-        const backToInitial = next === initialThinkingEnabled.current;
-        if (backToInitial) {
-          setShowThinkingWarning(false);
-        } else if (context.messages.some(m => m.type === 'assistant')) {
-          setShowThinkingWarning(true);
-        }
-      }
-      return;
-    }
 
-    // densable Jr(Rn) → phn(false, "config_toggle") then T(false); no submenu.
-    if (isMapleJrExternalIncludes(setting)) {
-      recordExternalIncludesDecision(false, 'config_toggle', context);
-      setExternalIncludesApproved(false);
-      return;
-    }
-
-    if (setting.id === 'agentsView') {
-      setShowSubmenu('AgentsView');
-      setTabsHidden(true);
-      return;
-    }
-
-    if (mapleSundial && setting.id === 'notifChannel') {
-      setShowSubmenu('Notifications');
-      setTabsHidden(true);
-      return;
-    }
-
-    if (setting.provided !== undefined && setting.type === 'managedEnum') {
-      const displayValue = formatSettingDisplayValue(setting);
-      setTextEditId(setting.id);
-      setTextEditValue(displayValue);
-      setTextEditCursor(displayValue.length);
-      setShowSubmenu('TextEdit');
-      setTabsHidden(true);
-      return;
-    }
-
-    if (
-      setting.id === 'theme' ||
-      setting.id === 'model' ||
-      setting.id === 'showExternalIncludesDialog' ||
-      setting.id === 'outputStyle' ||
-      setting.id === 'language'
-    ) {
-      // managedEnum items open a submenu — isDirty is set by the submenu's
-      // completion callback, not here (submenu may be cancelled).
-      switch (setting.id) {
-        case 'theme':
-          setShowSubmenu('Theme');
-          setTabsHidden(true);
-          return;
-        case 'model':
-          setShowSubmenu('Model');
-          setTabsHidden(true);
-          return;
-        case 'showExternalIncludesDialog':
-          setShowSubmenu('ExternalIncludes');
-          setTabsHidden(true);
-          return;
-        case 'outputStyle':
-          setShowSubmenu('OutputStyle');
-          setTabsHidden(true);
-          return;
-        case 'language':
-          setShowSubmenu('Language');
-          setTabsHidden(true);
-          return;
-      }
-    }
-
-    if (setting.id === 'autoUpdatesChannel') {
-      if (autoUpdaterDisabledReason) {
-        // Auto-updates are disabled - show enable dialog instead
-        setShowSubmenu('EnableAutoUpdates');
+      if (setting.type === 'enum' && setting.pickToCommit) {
+        setEnumPickerId(setting.id);
+        setShowSubmenu('EnumPicker');
         setTabsHidden(true);
         return;
       }
-      const currentChannel = settingsData?.autoUpdatesChannel ?? 'latest';
-      if (currentChannel === 'latest') {
-        // Switching to stable - show downgrade dialog
-        setShowSubmenu('ChannelDowngrade');
-        setTabsHidden(true);
-      } else {
-        // Switching to latest - ask config.set hook before persisting
-        void saveAutoUpdatesChannelWithConfigSetHook('latest', currentChannel, finalChannel => {
-          isDirty.current = true;
-          const nextChannelValue = finalChannel === 'latest' ? undefined : finalChannel;
-          F({
-            autoUpdatesChannel: nextChannelValue,
-            minimumVersion: undefined,
+
+      if (setting.type === 'enum') {
+        isDirty.current = true;
+        const currentIndex = setting.options.indexOf(setting.value);
+        const nextIndex = cycleEnumOptionIndex(currentIndex, setting.options.length, direction);
+        const nextValue = setting.options[nextIndex]!;
+        const pending = setting.onChange(nextValue);
+        recordTouchedSetting(setting, nextValue, pending);
+        void Promise.resolve(pending)
+          .then(result => {
+            showConfigChangeResult(setting.id, result);
+          })
+          .catch((error: unknown) => {
+            logError(error);
+            addNotification({
+              key: 'config-change-refused',
+              kind: 'warning',
+              text: `Setting change failed: ${sanitizeConfigErrorMessage(errorMessage(error))}`,
+              color: 'warning',
+              priority: 'immediate',
+            });
           });
-          setSettingsData(prev => ({
-            ...prev,
-            autoUpdatesChannel: nextChannelValue,
-            minimumVersion: undefined,
-          }));
-          logEvent('tengu_autoupdate_channel_changed', {
-            channel: finalChannel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          });
-        });
+        return;
       }
-      return;
-    }
-
-    if (setting.type === 'enum' && setting.pickToCommit) {
-      setEnumPickerId(setting.id);
-      setShowSubmenu('EnumPicker');
-      setTabsHidden(true);
-      return;
-    }
-
-    if (setting.type === 'enum') {
-      isDirty.current = true;
-      const currentIndex = setting.options.indexOf(setting.value);
-      const nextIndex = (currentIndex + 1) % setting.options.length;
-      const pending = setting.onChange(setting.options[nextIndex]!);
-      void Promise.resolve(pending)
-        .then(result => {
-          showConfigChangeResult(setting.id, result);
-        })
-        .catch((error: unknown) => {
-          logError(error);
-          addNotification({
-            key: 'config-change-refused',
-            kind: 'warning',
-            text: `Setting change failed: ${errorMessage(error)}`,
-            color: 'warning',
-            priority: 'immediate',
-          });
-        });
-      return;
-    }
-  }, [
-    addNotification,
-    autoUpdaterDisabledReason,
-    context.messages,
-    filteredSettingsItems,
-    isMapleJrExternalIncludes,
-    settingsData?.autoUpdatesChannel,
-    setTabsHidden,
-    showConfigChangeResult,
-  ]);
+    },
+    [
+      addNotification,
+      autoUpdaterDisabledReason,
+      context.messages,
+      filteredSettingsItems,
+      isMapleJrExternalIncludes,
+      mapleSundial,
+      recordTouchedSetting,
+      settingsData?.autoUpdatesChannel,
+      setTabsHidden,
+      showConfigChangeResult,
+    ],
+  );
 
   const moveSelection = (delta: -1 | 1): void => {
     setShowThinkingWarning(false);
@@ -4666,15 +4948,15 @@ export function Config({
       },
       'select:accept': () => {
         if (isSearchModeRef.current) return false;
-        toggleSetting();
+        toggleSetting(1);
       },
       'select:previousValue': () => {
         if (isSearchModeRef.current) return false;
-        toggleSetting();
+        toggleSetting(-1);
       },
       'select:nextValue': () => {
         if (isSearchModeRef.current) return false;
-        toggleSetting();
+        toggleSetting(1);
       },
       'settings:search': () => {
         if (isSearchModeRef.current) return false;
@@ -5122,6 +5404,7 @@ export function Config({
                 closeEnumPicker();
                 isDirty.current = true;
                 const pending = enumPickerSetting.onChange(value);
+                recordTouchedSetting(enumPickerSetting, value, pending);
                 void Promise.resolve(pending)
                   .then(result => {
                     showConfigChangeResult(enumPickerSetting.id, result);
@@ -5131,7 +5414,7 @@ export function Config({
                     addNotification({
                       key: 'config-change-refused',
                       kind: 'warning',
-                      text: `Setting change failed: ${errorMessage(error)}`,
+                      text: `Setting change failed: ${sanitizeConfigErrorMessage(errorMessage(error))}`,
                       color: 'warning',
                       priority: 'immediate',
                     });
@@ -5177,6 +5460,7 @@ export function Config({
                   if (next !== formatSettingDisplayValue(textEditSetting)) {
                     isDirty.current = true;
                     const pending = textEditSetting.onChange(next);
+                    recordTouchedSetting(textEditSetting, next, pending);
                     void Promise.resolve(pending)
                       .then(result => {
                         showConfigChangeResult(textEditSetting.id, result);
@@ -5186,7 +5470,7 @@ export function Config({
                         addNotification({
                           key: 'config-change-refused',
                           kind: 'warning',
-                          text: `Setting change failed: ${errorMessage(error)}`,
+                          text: `Setting change failed: ${sanitizeConfigErrorMessage(errorMessage(error))}`,
                           color: 'warning',
                           priority: 'immediate',
                         });

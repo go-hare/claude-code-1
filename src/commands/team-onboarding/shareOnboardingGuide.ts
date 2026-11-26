@@ -267,8 +267,9 @@ const shareOnboardingGuideOutputSchema = lazySchema(() =>
 export const ShareOnboardingGuideTool = buildTool({
   name: SHARE_ONBOARDING_GUIDE_TOOL_NAME,
   searchHint: 'upload ONBOARDING.md and get a team share link',
+  backgrounding: 'never',
   maxResultSizeChars: 1000,
-  shouldDefer: true,
+  shouldDefer: false,
   async description() {
     return SHARE_ONBOARDING_GUIDE_DESCRIPTION
   },

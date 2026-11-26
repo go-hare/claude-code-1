@@ -18,6 +18,7 @@ import {
 } from '../../utils/hooks/sessionHooks.js'
 import goal from '../goal.js'
 import jsxGoal from '../goal/index.js'
+import { findToolByName } from '../../Tool.js'
 import { getAllBaseTools } from '../../tools.js'
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '../../..')
@@ -269,9 +270,11 @@ describe('gold /goal call: set / status / clear', () => {
 })
 
 describe('runtime tool pool', () => {
-  test('getAllBaseTools includes ProposeGoal, excludes analog GoalTool', () => {
-    const names = getAllBaseTools().map(t => t.name)
-    expect(names).toContain('ProposeGoal')
+  test('getAllBaseTools includes SetGoal (alias ProposeGoal), excludes analog GoalTool', () => {
+    const tools = getAllBaseTools()
+    const names = tools.map(t => t.name)
+    expect(names).toContain('SetGoal')
+    expect(findToolByName(tools, 'ProposeGoal')?.name).toBe('SetGoal')
     expect(names).not.toContain('GoalTool')
   })
 })

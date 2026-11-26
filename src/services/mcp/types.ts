@@ -442,12 +442,30 @@ export type DisabledMCPServer = {
   config: ScopedMcpServerConfig
 }
 
+/**
+ * Official 2.1.331 cache-first MCP server row — hydrated from discovery cache
+ * before a live transport dial completes.
+ */
+export type CachedMCPServer = {
+  name: string
+  type: 'cached'
+  config: ScopedMcpServerConfig
+  capabilities: ServerCapabilities
+  serverInfo?: {
+    name: string
+    version: string
+  }
+  cacheSavedAt: number
+  droppedTools?: DroppedMcpTool[]
+}
+
 export type MCPServerConnection =
   | ConnectedMCPServer
   | FailedMCPServer
   | NeedsAuthMCPServer
   | PendingMCPServer
   | DisabledMCPServer
+  | CachedMCPServer
 
 // Resource types
 export type ServerResource = Resource & { server: string }

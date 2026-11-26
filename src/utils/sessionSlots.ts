@@ -1337,22 +1337,73 @@ export class AutonomousLoopPreamble {
   }
 }
 
-/** Official be @178527985 — wi leftover empty (no invent). */
+export type PrecomputeArmTrigger =
+  | 'estimate'
+  | 'idle'
+  | 'after_turn'
+  | 'beside_turn'
+  | 'stop'
+
+export type PrecomputeCoverage = {
+  lastUuid: string
+  seenUuids: Set<string>
+  rowUuids: string[]
+}
+
+export type PrecomputeEntry = {
+  status: 'pending' | 'ready' | 'failed'
+  armTrigger: PrecomputeArmTrigger
+  coverage: PrecomputeCoverage
+  preCompactTokens: number
+  model: string
+  startedAt: number
+  abortController?: AbortController
+  settled?: Promise<unknown>
+  result?: unknown
+  readyDurationMs?: number
+  sidecarSessionId?: string
+}
+
+/** Official be @178527985 (updated 2.1.331 with veto/reachesNextWorker/keptSummaryLoader). */
 export class Precompute {
-  byAgent = new Map<string, unknown>()
+  byAgent = new Map<string, PrecomputeEntry | unknown>()
   attemptsByAgent = new Map<string, number>()
   cappedFailuresByAgent = new Map<string, number>()
+  vetoedUnderPrompt = new Map<string, string>()
   armGateEventEmitted = new Set<string>()
   sidecarIo: Promise<unknown> = Promise.resolve()
   rehydrateAttemptedSessions = new Set<string>()
   sidecarReadsAhead = new Map<string, unknown>()
+  keptSummaryLoader:
+    | ((...args: unknown[]) => Promise<unknown> | undefined)
+    | undefined
+  reachesNextWorker: (() => boolean) | undefined
+
+  setKeptSummaryLoader(
+    loader: ((...args: unknown[]) => Promise<unknown> | undefined) | undefined,
+  ): void {
+    this.keptSummaryLoader = loader
+  }
+  takeKeptSummaryLoader():
+    | ((...args: unknown[]) => Promise<unknown> | undefined)
+    | undefined {
+    const loader = this.keptSummaryLoader
+    this.keptSummaryLoader = undefined
+    return loader
+  }
+  setSummaryReachesNextWorker(fn: (() => boolean) | undefined): void {
+    this.reachesNextWorker = fn
+  }
+  summaryReachesNextWorker(): boolean {
+    return this.reachesNextWorker?.() === true
+  }
   get(e: string): unknown {
     return this.byAgent.get(e)
   }
   has(e: string): boolean {
     return this.byAgent.has(e)
   }
-  put(e: string, t: unknown): void {
+  put(e: string, t: PrecomputeEntry | unknown): void {
     this.byAgent.set(e, t)
   }
   remove(e: string): void {
@@ -1373,6 +1424,12 @@ export class Precompute {
   }
   clearCountedFailures(e: string): void {
     this.cappedFailuresByAgent.delete(e)
+  }
+  recordVeto(e: string, promptUuid: string): void {
+    this.vetoedUnderPrompt.set(e, promptUuid)
+  }
+  isVetoedUnder(e: string, promptUuid: string): boolean {
+    return this.vetoedUnderPrompt.get(e) === promptUuid
   }
   latchArmGateEvent(e: string): boolean {
     if (this.armGateEventEmitted.has(e)) return false
@@ -1415,6 +1472,7 @@ export class Precompute {
   forgetSubagentTelemetry(e: string): void {
     this.attemptsByAgent.delete(e)
     this.cappedFailuresByAgent.delete(e)
+    this.vetoedUnderPrompt.delete(e)
   }
 }
 

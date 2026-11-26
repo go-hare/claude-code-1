@@ -596,10 +596,17 @@ export const init = memoize(async (): Promise<void> => {
     // Initialize scratchpad directory if enabled
     if (isScratchpadEnabled()) {
       const scratchpadStart = Date.now()
-      await ensureScratchpadDir()
-      logForDiagnosticsNoPII('info', 'init_scratchpad_created', {
-        duration_ms: Date.now() - scratchpadStart,
-      })
+      try {
+        await ensureScratchpadDir()
+        logForDiagnosticsNoPII('info', 'init_scratchpad_created', {
+          duration_ms: Date.now() - scratchpadStart,
+        })
+      } catch (err) {
+        logForDebugging(
+          `init: ensureScratchpadDir failed: ${errorMessage(err)}`,
+          { level: 'error' },
+        )
+      }
     }
 
     // Official 2.1.328 (`chunk@302699776.js@16535`): re-ensure scratchpad dir

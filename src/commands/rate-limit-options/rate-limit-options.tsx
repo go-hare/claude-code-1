@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js';
 import type { CommandResultDisplay, LocalJSXCommandContext } from '../../commands.js';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
 import { Box, Dialog, Text } from '@anthropic/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { logEvent } from '../../services/analytics/index.js';
 import { fetchUtilization, formatUsageCreditsAmount } from '../../services/api/usage.js';
+import { type ClaudeAILimits, getRawUtilization, type RawUtilization } from '../../services/claudeAiLimits.js';
 import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
 import {
   canOfferQuotaAutoResume,
   cancelQuotaAutoResume,
+  fireQuotaAutoResumeContinuation,
   getQuotaAutoResumeState,
   getWaitThenContinueOption,
   hasPendingQuotaContinuationInQueue,
@@ -18,8 +21,20 @@ import {
 } from '../../services/quotaAutoResume.js';
 import type { ToolUseContext } from '../../Tool.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
-import { getOauthAccountInfo, getRateLimitTier, getSubscriptionType } from '../../utils/auth.js';
+import { getOauthAccountInfo, getRateLimitTier, getSubscriptionType, isClaudeAISubscriber } from '../../utils/auth.js';
 import { hasClaudeAiBillingAccess } from '../../utils/billing.js';
+import { isEnvTruthy } from '../../utils/envUtils.js';
+import { isFableModel } from '../../utils/fableConsent.js';
+import { leftoverM, leftoverY } from '../../utils/leftoverOt.js';
+import { logError } from '../../utils/log.js';
+import {
+  getDefaultHaikuModel,
+  getDefaultMainLoopModel,
+  getDefaultOpusModel,
+  getDefaultSonnetModel,
+  renderModelName,
+} from '../../utils/model/model.js';
+import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { call as extraUsageCall } from '../extra-usage/extra-usage.js';
 import { extraUsage } from '../extra-usage/index.js';
 import upgrade from '../upgrade/index.js';
@@ -96,7 +111,134 @@ export function formatSpendLimitAdjustRow(params: {
 export const SPEND_LIMIT_LOAD_FAILED_MESSAGE =
   "Couldn't load your current spend limit, so it can't be changed right now. Try /rate-limit-options again later.";
 
-type RateLimitOptionsMenuOptionType = 'upgrade' | 'extra-usage' | 'cancel' | 'auto-resume' | 'cancel-auto-resume';
+/** Official 2.1.331 GrowthBook gate (`tengu_melodic_pudding`) for rate-limit menu model switching. */
+export const RATE_LIMIT_SWITCH_MODEL_FLAG = 'tengu_melodic_pudding';
+
+/** Official 2.1.331 `d5e` continuation prompt queued after switching models from the rate-limit menu. */
+export const AUTO_CONTINUE_AFTER_SWITCH_PROMPT =
+  'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.';
+
+function isUsageCreditsOnlyModel(model: string | null | undefined): boolean {
+  if (!model) return false;
+  if (isFableModel(model)) return true;
+  const calmSeal = getFeatureValue_CACHED_MAY_BE_STALE<unknown>('tengu_calm_seal', null);
+  return (
+    Array.isArray(calmSeal) &&
+    calmSeal.some(entry => typeof entry === 'string' && entry.trim().toLowerCase() === model.trim().toLowerCase())
+  );
+}
+
+/**
+ * Official 2.1.331 `m6()` — resolve the default non-usage-credits-only fallback
+ * model when switching off a rate-limited overage-included model.
+ */
+export function getRateLimitSwitchModelFallback(options?: {
+  noModelFallback?: boolean;
+  candidates?: readonly string[];
+  allowCheck?: (model: string) => boolean;
+}): string | null {
+  if (options?.noModelFallback) return null;
+  const candidates = options?.candidates ?? [
+    getDefaultMainLoopModel(),
+    getDefaultOpusModel(),
+    getDefaultSonnetModel(),
+    getDefaultHaikuModel(),
+  ];
+  const allowCheck = options?.allowCheck ?? isModelAllowed;
+  for (const candidate of candidates) {
+    if (!candidate || isUsageCreditsOnlyModel(candidate)) continue;
+    if (allowCheck(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Official 2.1.331 `on(limits, mainLoopModel)` — determine whether the
+ * rate-limit options menu should offer a `"Switch to <model> and continue"` row.
+ */
+export function getSwitchModelTargetForRateLimit(
+  limits: Pick<ClaudeAILimits, 'status' | 'rateLimitType'>,
+  mainLoopModel: string | null | undefined,
+  options?: {
+    rawUtilization?: RawUtilization;
+    isSubscriber?: boolean;
+    billingType?: string | null;
+    isInteractive?: boolean;
+    isRemote?: boolean;
+    flagEnabled?: boolean;
+    fallbackModel?: string | null;
+  },
+): string | null {
+  const raw = options?.rawUtilization ?? getRawUtilization();
+  const fiveHourUtil = raw.five_hour?.utilization ?? 0;
+  const sevenDayUtil = raw.seven_day?.utilization ?? 0;
+  const isInteractiveSubscriber =
+    (options?.isSubscriber ?? isClaudeAISubscriber()) &&
+    (options?.billingType ?? getOauthAccountInfo()?.billingType) !== 'usage_based' &&
+    (options?.isInteractive ?? !getIsNonInteractiveSession()) &&
+    !(options?.isRemote ?? isEnvTruthy(process.env.CLAUDE_CODE_REMOTE));
+  if (
+    !(
+      limits.rateLimitType === 'seven_day_overage_included' &&
+      limits.status === 'rejected' &&
+      isUsageCreditsOnlyModel(mainLoopModel) &&
+      fiveHourUtil < 1 &&
+      sevenDayUtil < 1
+    ) ||
+    !isInteractiveSubscriber
+  ) {
+    return null;
+  }
+  const flagEnabled =
+    options?.flagEnabled ?? getFeatureValue_CACHED_MAY_BE_STALE(RATE_LIMIT_SWITCH_MODEL_FLAG, false) === true;
+  if (!flagEnabled) return null;
+  const fallback = options?.fallbackModel !== undefined ? options.fallbackModel : getRateLimitSwitchModelFallback();
+  return fallback ?? null;
+}
+
+/**
+ * Official 2.1.331 `di` / `Ci` — execute the rate-limit menu switch-model
+ * action: emit `tengu_rate_limit_options_menu_select_switch_model`, cancel
+ * quota auto-resume, update `mainLoopModel`, enqueue the auto-continuation
+ * prompt, record `model_switch` outcome, and report completion via `onDone`.
+ */
+export function executeRateLimitSwitchModel(params: {
+  targetModel: string;
+  setAppState: ToolUseContext['setAppState'];
+  onDone: RateLimitOptionsMenuProps['onDone'];
+  enqueueContinuation?: (prompt: string) => void;
+}): void {
+  const { targetModel, setAppState, onDone, enqueueContinuation } = params;
+  logEvent('tengu_rate_limit_options_menu_select_switch_model', {});
+  try {
+    cancelQuotaAutoResume('model_switch');
+    setAppState(prev => ({
+      ...prev,
+      mainLoopModel: targetModel,
+    }));
+    if (enqueueContinuation) {
+      enqueueContinuation(AUTO_CONTINUE_AFTER_SWITCH_PROMPT);
+    } else {
+      fireQuotaAutoResumeContinuation(AUTO_CONTINUE_AFTER_SWITCH_PROMPT);
+    }
+    leftoverY('model_switch');
+    onDone(`Switched to ${renderModelName(targetModel)} for this session · /model to change`, {
+      display: 'system',
+    });
+  } catch (err) {
+    logError(err);
+    leftoverM('model_switch', 'limit_menu_switch_threw');
+    onDone("Couldn't switch models. Run /model to switch.", { display: 'system' });
+  }
+}
+
+type RateLimitOptionsMenuOptionType =
+  | 'upgrade'
+  | 'extra-usage'
+  | 'cancel'
+  | 'auto-resume'
+  | 'cancel-auto-resume'
+  | 'switch-model';
 
 type RateLimitOptionsMenuProps = {
   onDone: (
@@ -122,6 +264,9 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
   const isTeamOrEnterprise = subscriptionType === 'team' || subscriptionType === 'enterprise';
   const buyFirst = getFeatureValue_CACHED_MAY_BE_STALE('tengu_jade_anvil_4', false);
   const [isCreditsRequired] = useState(() => isCreditsRequiredRateLimit(claudeAiLimits));
+  const [switchModelTarget] = useState(() =>
+    getSwitchModelTargetForRateLimit(claudeAiLimits, context.options.mainLoopModel),
+  );
   const [spendLimitState, setSpendLimitState] = useState<
     | { loaded: false; loadFailed: false }
     | { loaded: false; loadFailed: true }
@@ -234,10 +379,21 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
           }
         : undefined;
 
-    if (buyFirst) {
-      return autoResumeOption ? [...actionOptions, cancelOption, autoResumeOption] : [...actionOptions, cancelOption];
+    const secondaryOptions: OptionWithDescription<RateLimitOptionsMenuOptionType>[] = [];
+    if (autoResumeOption) {
+      secondaryOptions.push(autoResumeOption);
     }
-    return autoResumeOption ? [cancelOption, autoResumeOption, ...actionOptions] : [cancelOption, ...actionOptions];
+    if (switchModelTarget !== null) {
+      secondaryOptions.push({
+        label: `Switch to ${renderModelName(switchModelTarget)} and continue`,
+        value: 'switch-model',
+      });
+    }
+
+    if (buyFirst) {
+      return [...actionOptions, cancelOption, ...secondaryOptions];
+    }
+    return [cancelOption, ...secondaryOptions, ...actionOptions];
   }, [
     buyFirst,
     isMax20x,
@@ -245,6 +401,7 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
     hasExtraUsageEnabled,
     isUsageBased,
     isCreditsRequired,
+    switchModelTarget,
     isSpendLimitNudge,
     spendLimitState.loadFailed,
     episodeActive,
@@ -303,6 +460,15 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
     );
   }
 
+  function handleSelectSwitchModel(): void {
+    if (switchModelTarget === null) return;
+    executeRateLimitSwitchModel({
+      targetModel: switchModelTarget,
+      setAppState: context.setAppState,
+      onDone,
+    });
+  }
+
   function handleSelect(value: RateLimitOptionsMenuOptionType): void {
     // densable A3h: upgrade/team/extra-usage cancel pending auto-queue
     if (value === 'upgrade' || value === 'extra-usage') {
@@ -334,6 +500,8 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
       handleSelectAutoResume();
     } else if (value === 'cancel-auto-resume') {
       handleCancelAutoResume();
+    } else if (value === 'switch-model') {
+      handleSelectSwitchModel();
     } else if (value === 'cancel') {
       handleCancel();
     }

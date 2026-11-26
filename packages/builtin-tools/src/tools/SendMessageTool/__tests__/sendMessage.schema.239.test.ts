@@ -42,7 +42,8 @@ describe('densable 2.1.239 SendMessage E0m/FTl/BEm', () => {
     expect(typeof desc).toBe('string')
     if (typeof desc !== 'string') return
     expect(
-      desc === 'Recipient: teammate name' ||
+      desc ===
+        'Recipient: a background agent\'s name or agentId, a teammate name, or "main"' ||
         desc.includes('a name from ListAgents'),
     ).toBe(true)
     expect(desc).not.toContain('uds:')

@@ -23,8 +23,13 @@ import type { SetToolJSXFn, ToolCallProgress, ToolUseContext, ValidationResult }
 import { buildTool, findToolByName, type ToolDef } from 'src/Tool.js';
 import { formatDuration } from 'src/utils/format.js';
 import {
+  BashWaitAfterJobsState,
   backgroundExistingForegroundTask,
+  isBashWaitAfterJobsEnabled,
+  isSleepWaitCommand,
   markTaskNotified,
+  maybeMoveBashWaitForCompletedJobs,
+  recordBashWaitAfterJobsSettle,
   registerForeground,
   spawnShellTask,
   unregisterForeground,
@@ -125,7 +130,7 @@ import {
 } from 'src/utils/toolResultStorage.js';
 import { userFacingName as fileEditUserFacingName } from '../FileEditTool/UI.js';
 import { trackGitOperations } from '../shared/gitOperationTracking.js';
-import { bashToolHasPermission, commandHasAnyCd } from './bashPermissions.js';
+import { bashToolHasPermission, commandHasAnyCd, getGuardedRmLine, tryGuardDangerousRmAsk } from './bashPermissions.js';
 import { interpretCommandResult } from './commandSemantics.js';
 import { getDefaultTimeoutMs, getMaxTimeoutMs, getSimplePrompt } from './prompt.js';
 import { checkReadOnlyConstraints } from './readOnlyValidation.js';
@@ -1220,629 +1225,654 @@ export function findMatchingBackgroundShellTask(
     });
 }
 
-export const BashTool = buildTool({
-  name: BASH_TOOL_NAME,
-  searchHint: 'execute shell commands',
-  // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @187127917
-  enablesCodeExecution: true,
-  // densable li remoteExecution + backgrounding self
-  remoteExecution: {
-    supported: true,
-    refusedInputFields: ['dangerouslyDisableSandbox', 'run_in_background', '_simulatedSedEdit'],
-    decidingInputFields: ['command', 'run_in_background', 'dangerouslyDisableSandbox'],
-  },
-  backgrounding: 'self',
-  // 30K chars - tool result persistence threshold
-  maxResultSizeChars: 30_000,
-  strict: true,
-  async description({ description }) {
-    return description || 'Run shell command';
-  },
-  async prompt() {
-    return getSimplePrompt();
-  },
-  isConcurrencySafe(input) {
-    return this.isReadOnly?.(input) ?? false;
-  },
-  isReadOnly(input) {
-    const compoundCommandHasCd = commandHasAnyCd(input.command);
-    const result = checkReadOnlyConstraints(input, compoundCommandHasCd);
-    return result.behavior === 'allow';
-  },
-  toAutoClassifierInput(input) {
-    return input.command;
-  },
-  async preparePermissionMatcher({ command }) {
-    // Hook `if` filtering is "no match → skip hook" (deny-like semantics), so
-    // compound commands must fire the hook if ANY subcommand matches. Without
-    // splitting, `ls && git push` would bypass a `Bash(git *)` security hook.
-    const parsed = await parseForSecurity(command);
-    let subcommands: string[];
-    let fallback = false;
-    if (parsed.kind === 'simple') {
-      // Match on argv (strips leading VAR=val) so `FOO=bar git push` still
-      // matches `Bash(git *)`.
-      subcommands = parsed.commands.map(c => c.argv.join(' '));
-    } else if (
-      parsed.kind === 'too-complex' &&
-      !parsed.differential &&
-      HOOK_IF_FALLBACK_NODE_TYPES.has(parsed.nodeType ?? '')
-    ) {
-      // densable 2.1.243 #26 `P7r`: `$()` / backticks + extra args are
-      // too-complex for argv, but must not match every `if` (e.g. Bash(cat *)).
-      const root = await parseCommandRaw(command);
-      if (root === null || root === PARSE_ABORTED) {
-        return () => true;
-      }
-      const extracted = extractHookIfFallbackCommands(command, root);
-      if (extracted === null || extracted.length === 0) {
-        return () => true;
-      }
-      subcommands = extracted;
-      fallback = true;
-    } else {
-      return () => true;
-    }
-    return pattern => matchBashHookIfPattern(pattern, subcommands, fallback);
-  },
-  isSearchOrReadCommand(input) {
-    const parsed = inputSchema().safeParse(input);
-    if (!parsed.success) return { isSearch: false, isRead: false, isList: false };
-    return isSearchOrReadBashCommand(parsed.data.command);
-  },
-  get inputSchema(): InputSchema {
-    return inputSchema();
-  },
-  coerceInput: coerceBashInput,
-  get outputSchema(): OutputSchema {
-    return outputSchema();
-  },
-  userFacingName(input) {
-    if (!input) {
-      return 'Bash';
-    }
-    // Env var FIRST: shouldUseSandbox → splitCommand_DEPRECATED → shell-quote's
-    // `new RegExp` per call. userFacingName runs per-render for every bash
-    // message in history; with ~50 msgs + one slow-to-tokenize command, this
-    // exceeds the shimmer tick → transition abort → infinite retry (#21605).
-    return isBashSandboxShowIndicatorEnabled() && shouldUseSandbox(input) ? 'SandboxedBash' : 'Bash';
-  },
-  getToolUseSummary(input) {
-    if (!input?.command) {
-      return null;
-    }
-    const { command, description } = input;
-    if (description) {
-      return description;
-    }
-    return truncate(command, TOOL_SUMMARY_MAX_LENGTH);
-  },
-  getActivityDescription(input) {
-    if (!input?.command) {
-      return 'Running command';
-    }
-    const desc = input.description ?? truncate(input.command, TOOL_SUMMARY_MAX_LENGTH);
-    return `Running ${desc}`;
-  },
-  async validateInput(input: BashToolInput, context?: ToolUseContext): Promise<ValidationResult> {
-    // densable BT() && dK(n).requested — named host is not forwarded (errorCode 11)
-    const hostRefusal = remoteHostForwardRefusal(input, BASH_TOOL_NAME);
-    if (hostRefusal) return { ...hostRefusal, errorCode: 11 };
-    const policyRefusal = getSandboxPolicyRefusal(shouldUseSandbox(input), input.command, false, 'bash');
-    if (policyRefusal !== null) {
-      return { result: false, message: policyRefusal, errorCode: 14 };
-    }
-    if (feature('MONITOR_TOOL') && !isBackgroundTasksDisabled && !input.run_in_background) {
-      const sleepPattern = detectBlockedSleepPattern(input.command);
-      if (sleepPattern !== null) {
-        return {
-          result: false,
-          message: `Blocked: ${sleepPattern}. Run blocking commands in the background with run_in_background: true — you'll get a completion notification when done. For streaming events (watching logs, polling APIs), use the Monitor tool. If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.`,
-          errorCode: 10,
-        };
-      }
-    }
-    if (context?.getAppState && context.options?.tools) {
-      const matchingBg = findMatchingBackgroundShellTask(
-        {
-          command: input.command,
-          cwd: getCwd(),
-          agentId: context.agentId,
-          toolUseId: context.toolUseId,
-        },
-        context.getAppState().tasks,
-      );
-      if (matchingBg !== undefined && findToolByName(context.options.tools, 'TaskStop') !== undefined) {
-        return {
-          result: false,
-          errorCode: 15,
-          message: `Not started: this same command, in this directory, was moved to the background and has been running for ${formatDuration(Date.now() - matchingBg.startTime, { mostSignificantOnly: true })} (ID: ${matchingBg.id}). Its output is being written to: ${matchingBg.outputFile}. Let it finish, or, to run it again now, stop it first with TaskStop.`,
-        };
-      }
-    }
-    return { result: true };
-  },
-  async checkPermissions(input, context): Promise<PermissionResult> {
-    const sandboxAtStart = shouldUseSandbox(input);
-    const permissionMode = context.getAppState().toolPermissionContext.mode;
-    // Official 2.1.327 #475: head-start the Bash shell snapshot before approval
-    // resolves so the session's first Bash command starts faster.
-    startBashSnapshotHeadStart(Date.now, {
-      permissionMode,
-      isSubagent: Boolean(context.agentId),
-      isSandboxEnabled: sandboxAtStart,
-    });
-    // Official 2.1.327 #488: in auto and bypassPermissions modes, pre-warm the
-    // repo edit-diff snapshot early so the diff is ready sooner.
-    const isBackgroundInput = 'run_in_background' in input && Boolean(input.run_in_background);
-    const isSimulatedSed = '_simulatedSedEdit' in input && Boolean(input._simulatedSedEdit);
-    const prewarmCwd = getCwd();
-    const shouldPrewarmEditDiff =
-      (permissionMode === 'auto' || permissionMode === 'bypassPermissions') &&
-      isBashEditDiffEnabled(permissionMode) &&
-      !isBackgroundInput &&
-      !isSimulatedSed &&
-      !isGitStateSwitchCommand(input.command);
-    if (shouldPrewarmEditDiff) {
-      void prewarmBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
-    }
-    try {
-      const permResult = await bashToolHasPermission(input, context);
-      if (shouldPrewarmEditDiff && permResult.behavior === 'deny') {
-        discardPrewarmedBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
-      }
-      return permResult;
-    } catch (err) {
-      if (shouldPrewarmEditDiff) {
-        discardPrewarmedBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
-      }
-      throw err;
-    } finally {
-      // Official 2.1.326 #303 (`CSn`): record whether this call was checked as
-      // sandboxed so hook/SDK rewrites stay in the sandbox unless the approver
-      // explicitly sets `dangerouslyDisableSandbox: true`.
-      recordSandboxStateAtCheck(context.toolUseId, input, sandboxAtStart || shouldUseSandbox(input));
-    }
-  },
-  renderToolUseMessage,
-  renderToolUseProgressMessage,
-  renderToolUseQueuedMessage,
-  renderToolResultMessage,
-  // BashToolResultMessage shows <OutputLine content={stdout}> + stderr.
-  // UI never shows persistedOutputPath wrapper, backgroundInfo — those are
-  // model-facing (mapToolResult... below).
-  extractSearchText({ stdout, stderr }) {
-    return stderr ? `${stdout}\n${stderr}` : stdout;
-  },
-  mapToolResultToToolResultBlockParam(
-    {
-      interrupted,
-      stdout,
-      stderr,
-      isImage,
-      backgroundTaskId,
-      backgroundedByUser,
-      assistantAutoBackgrounded: _assistantAutoBackgrounded,
-      backgroundedToDeliverMessage,
-      backgroundedByTurnAbort,
-      timedOutAfterMs,
-      backgroundEndsWithFinalResponse,
-      backgroundCwdHint,
-      structuredContent,
-      persistedOutputPath,
-      persistedOutputSize,
-      bashEditDiff,
+export const BashTool = Object.assign(
+  buildTool({
+    name: BASH_TOOL_NAME,
+    searchHint: 'execute shell commands',
+    // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @187127917
+    enablesCodeExecution: true,
+    // densable li remoteExecution + backgrounding self
+    remoteExecution: {
+      supported: true,
+      refusedInputFields: ['dangerouslyDisableSandbox', 'run_in_background', '_simulatedSedEdit'],
+      decidingInputFields: ['command', 'run_in_background', 'dangerouslyDisableSandbox'],
     },
-    toolUseID,
-  ): ToolResultBlockParam {
-    // Handle structured content
-    if (structuredContent && structuredContent.length > 0) {
-      return {
-        tool_use_id: toolUseID,
-        type: 'tool_result',
-        content: structuredContent,
-      };
-    }
-
-    // For image data, format as image content block for Claude
-    if (isImage) {
-      const block = buildImageToolResult(stdout, toolUseID);
-      if (block) {
-        const trimmedStderr = typeof stderr === 'string' ? stderr.trim() : '';
-        if (trimmedStderr) {
+    backgrounding: 'self',
+    // 30K chars - tool result persistence threshold
+    maxResultSizeChars: 30_000,
+    strict: true,
+    async description({ description }) {
+      return description || 'Run shell command';
+    },
+    async prompt() {
+      return getSimplePrompt();
+    },
+    isConcurrencySafe(input) {
+      return this.isReadOnly?.(input) ?? false;
+    },
+    isReadOnly(input) {
+      const compoundCommandHasCd = commandHasAnyCd(input.command);
+      const result = checkReadOnlyConstraints(input, compoundCommandHasCd);
+      return result.behavior === 'allow';
+    },
+    toAutoClassifierInput(input) {
+      return input.command;
+    },
+    async preparePermissionMatcher({ command }) {
+      // Hook `if` filtering is "no match → skip hook" (deny-like semantics), so
+      // compound commands must fire the hook if ANY subcommand matches. Without
+      // splitting, `ls && git push` would bypass a `Bash(git *)` security hook.
+      const parsed = await parseForSecurity(command);
+      let subcommands: string[];
+      let fallback = false;
+      if (parsed.kind === 'simple') {
+        // Match on argv (strips leading VAR=val) so `FOO=bar git push` still
+        // matches `Bash(git *)`.
+        subcommands = parsed.commands.map(c => c.argv.join(' '));
+      } else if (
+        parsed.kind === 'too-complex' &&
+        !parsed.differential &&
+        HOOK_IF_FALLBACK_NODE_TYPES.has(parsed.nodeType ?? '')
+      ) {
+        // densable 2.1.243 #26 `P7r`: `$()` / backticks + extra args are
+        // too-complex for argv, but must not match every `if` (e.g. Bash(cat *)).
+        const root = await parseCommandRaw(command);
+        if (root === null || root === PARSE_ABORTED) {
+          return () => true;
+        }
+        const extracted = extractHookIfFallbackCommands(command, root);
+        if (extracted === null || extracted.length === 0) {
+          return () => true;
+        }
+        subcommands = extracted;
+        fallback = true;
+      } else {
+        return () => true;
+      }
+      return pattern => matchBashHookIfPattern(pattern, subcommands, fallback);
+    },
+    isSearchOrReadCommand(input) {
+      const parsed = inputSchema().safeParse(input);
+      if (!parsed.success) return { isSearch: false, isRead: false, isList: false };
+      return isSearchOrReadBashCommand(parsed.data.command);
+    },
+    get inputSchema(): InputSchema {
+      return inputSchema();
+    },
+    coerceInput: coerceBashInput,
+    get outputSchema(): OutputSchema {
+      return outputSchema();
+    },
+    userFacingName(input) {
+      if (!input) {
+        return 'Bash';
+      }
+      // Env var FIRST: shouldUseSandbox → splitCommand_DEPRECATED → shell-quote's
+      // `new RegExp` per call. userFacingName runs per-render for every bash
+      // message in history; with ~50 msgs + one slow-to-tokenize command, this
+      // exceeds the shimmer tick → transition abort → infinite retry (#21605).
+      return isBashSandboxShowIndicatorEnabled() && shouldUseSandbox(input) ? 'SandboxedBash' : 'Bash';
+    },
+    getToolUseSummary(input) {
+      if (!input?.command) {
+        return null;
+      }
+      const { command, description } = input;
+      if (description) {
+        return description;
+      }
+      return truncate(command, TOOL_SUMMARY_MAX_LENGTH);
+    },
+    getActivityDescription(input) {
+      if (!input?.command) {
+        return 'Running command';
+      }
+      const desc = input.description ?? truncate(input.command, TOOL_SUMMARY_MAX_LENGTH);
+      return `Running ${desc}`;
+    },
+    async validateInput(input: BashToolInput, context?: ToolUseContext): Promise<ValidationResult> {
+      // densable BT() && dK(n).requested — named host is not forwarded (errorCode 11)
+      const hostRefusal = remoteHostForwardRefusal(input, BASH_TOOL_NAME);
+      if (hostRefusal) return { ...hostRefusal, errorCode: 11 };
+      const policyRefusal = getSandboxPolicyRefusal(shouldUseSandbox(input), input.command, false, 'bash');
+      if (policyRefusal !== null) {
+        return { result: false, message: policyRefusal, errorCode: 14 };
+      }
+      if (feature('MONITOR_TOOL') && !isBackgroundTasksDisabled && !input.run_in_background) {
+        const sleepPattern = detectBlockedSleepPattern(input.command);
+        if (sleepPattern !== null) {
           return {
-            ...block,
-            content: [...(Array.isArray(block.content) ? block.content : []), { type: 'text', text: trimmedStderr }],
+            result: false,
+            message: `Blocked: ${sleepPattern}. Run blocking commands in the background with run_in_background: true — you'll get a completion notification when done. For streaming events (watching logs, polling APIs), use the Monitor tool. If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.`,
+            errorCode: 10,
           };
         }
-        return block;
       }
-    }
-
-    let processedStdout = stdout;
-    if (stdout) {
-      // Replace any leading newlines or lines with only whitespace
-      processedStdout = stdout.replace(/^(\s*\n)+/, '');
-      // Still trim the end as before
-      processedStdout = processedStdout.trimEnd();
-    }
-
-    // For large output that was persisted to disk, build <persisted-output>
-    // message for the model. The UI never sees this — it uses data.stdout.
-    if (persistedOutputPath) {
-      const preview = generatePreview(processedStdout, PREVIEW_SIZE_BYTES);
-      processedStdout = buildLargeToolResultMessage({
-        filepath: persistedOutputPath,
-        originalSize: persistedOutputSize ?? 0,
-        isJson: false,
-        preview: preview.preview,
-        hasMore: preview.hasMore,
-        truncatedAtBytes: (persistedOutputSize ?? 0) >= MAX_PERSISTED_SIZE ? MAX_PERSISTED_SIZE : undefined,
+      if (context?.getAppState && context.options?.tools) {
+        const matchingBg = findMatchingBackgroundShellTask(
+          {
+            command: input.command,
+            cwd: getCwd(),
+            agentId: context.agentId,
+            toolUseId: context.toolUseId,
+          },
+          context.getAppState().tasks,
+        );
+        if (matchingBg !== undefined && findToolByName(context.options.tools, 'TaskStop') !== undefined) {
+          return {
+            result: false,
+            errorCode: 15,
+            message: `Not started: this same command, in this directory, was moved to the background and has been running for ${formatDuration(Date.now() - matchingBg.startTime, { mostSignificantOnly: true })} (ID: ${matchingBg.id}). Its output is being written to: ${matchingBg.outputFile}. Let it finish, or, to run it again now, stop it first with TaskStop.`,
+          };
+        }
+      }
+      return { result: true };
+    },
+    async checkPermissions(input, context): Promise<PermissionResult> {
+      const sandboxAtStart = shouldUseSandbox(input);
+      const permissionMode = context.getAppState().toolPermissionContext.mode;
+      // Official 2.1.327 #475: head-start the Bash shell snapshot before approval
+      // resolves so the session's first Bash command starts faster.
+      startBashSnapshotHeadStart(Date.now, {
+        permissionMode,
+        isSubagent: Boolean(context.agentId),
+        isSandboxEnabled: sandboxAtStart,
       });
-    }
-
-    let errorMessage = stderr.trim();
-    if (interrupted) {
-      if (stderr) errorMessage += EOL;
-      errorMessage += '<error>Command was aborted before completion</error>';
-    }
-
-    let backgroundInfo = '';
-    if (backgroundTaskId) {
-      backgroundInfo = formatBackgroundShellCopy({
+      // Official 2.1.327 #488: in auto and bypassPermissions modes, pre-warm the
+      // repo edit-diff snapshot early so the diff is ready sooner.
+      const isBackgroundInput = 'run_in_background' in input && Boolean(input.run_in_background);
+      const isSimulatedSed = '_simulatedSedEdit' in input && Boolean(input._simulatedSedEdit);
+      const prewarmCwd = getCwd();
+      const shouldPrewarmEditDiff =
+        (permissionMode === 'auto' || permissionMode === 'bypassPermissions') &&
+        isBashEditDiffEnabled(permissionMode) &&
+        !isBackgroundInput &&
+        !isSimulatedSed &&
+        !isGitStateSwitchCommand(input.command);
+      if (shouldPrewarmEditDiff) {
+        void prewarmBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
+      }
+      try {
+        const permResult = await bashToolHasPermission(input, context);
+        if (shouldPrewarmEditDiff && permResult.behavior === 'deny') {
+          discardPrewarmedBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
+        }
+        return permResult;
+      } catch (err) {
+        if (shouldPrewarmEditDiff) {
+          discardPrewarmedBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
+        }
+        throw err;
+      } finally {
+        // Official 2.1.326 #303 (`CSn`): record whether this call was checked as
+        // sandboxed so hook/SDK rewrites stay in the sandbox unless the approver
+        // explicitly sets `dangerouslyDisableSandbox: true`.
+        recordSandboxStateAtCheck(context.toolUseId, input, sandboxAtStart || shouldUseSandbox(input));
+      }
+    },
+    renderToolUseMessage,
+    renderToolUseProgressMessage,
+    renderToolUseQueuedMessage,
+    renderToolResultMessage,
+    // BashToolResultMessage shows <OutputLine content={stdout}> + stderr.
+    // UI never shows persistedOutputPath wrapper, backgroundInfo — those are
+    // model-facing (mapToolResult... below).
+    extractSearchText({ stdout, stderr }) {
+      return stderr ? `${stdout}\n${stderr}` : stdout;
+    },
+    mapToolResultToToolResultBlockParam(
+      {
+        interrupted,
+        stdout,
+        stderr,
+        isImage,
         backgroundTaskId,
-        outputPath: getTaskOutputPath(backgroundTaskId),
         backgroundedByUser,
+        assistantAutoBackgrounded: _assistantAutoBackgrounded,
         backgroundedToDeliverMessage,
         backgroundedByTurnAbort,
-        reapedAtFinalResponse: backgroundEndsWithFinalResponse,
         timedOutAfterMs,
-      });
-      if (backgroundCwdHint) {
-        backgroundInfo += `\n${backgroundCwdHint}`;
-      }
-      if (isBashTaskGetDeliveryEnabled()) {
+        backgroundEndsWithFinalResponse,
+        backgroundCwdHint,
+        structuredContent,
+        persistedOutputPath,
+        persistedOutputSize,
+        bashEditDiff,
+      },
+      toolUseID,
+    ): ToolResultBlockParam {
+      // Handle structured content
+      if (structuredContent && structuredContent.length > 0) {
         return {
           tool_use_id: toolUseID,
           type: 'tool_result',
-          content: formatBackgroundTaskResult(
-            backgroundTaskId,
-            [errorMessage, backgroundInfo].filter(Boolean).join('\n'),
-            {
-              backgroundedByUser,
-              ending: backgroundTaskEnding(backgroundEndsWithFinalResponse === true),
-            },
-          ),
+          content: structuredContent,
         };
       }
-    }
 
-    return {
-      tool_use_id: toolUseID,
-      type: 'tool_result',
-      content: [processedStdout, errorMessage, backgroundInfo, formatBashEditDiffForToolResult(bashEditDiff)]
-        .filter(Boolean)
-        .join('\n'),
-      is_error: interrupted,
-    };
-  },
-  async call(
-    input: BashToolInput,
-    toolUseContext,
-    _canUseTool?: CanUseToolFn,
-    _parentMessage?: AssistantMessage,
-    onProgress?: ToolCallProgress<BashProgress>,
-  ) {
-    // Official 2.1.326 #303 (`aut` / `lut`): if the original command was
-    // checked as sandboxed and a hook/SDK host rewrote it without explicitly
-    // adding `dangerouslyDisableSandbox: true`, keep it in the sandbox.
-    const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(toolUseContext.toolUseId, input);
-    clearSandboxStateAtCheck(toolUseContext.toolUseId);
-    const effectiveUseSandbox = shouldUseSandbox(input, {
-      disableUnsandboxedCommands: keepInSandboxSinceCheck,
-    });
-    if (keepInSandboxSinceCheck && !effectiveUseSandbox) {
-      throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
-    }
-    const keptInSandboxNote =
-      keepInSandboxSinceCheck && effectiveUseSandbox && !shouldUseSandbox(input) && toolUseContext.innerCall !== true
-        ? KEPT_IN_SANDBOX_SINCE_CHECK_NOTE
-        : undefined;
-    const policyRefusal = getSandboxPolicyRefusal(effectiveUseSandbox, input.command, false, 'bash');
-    if (policyRefusal !== null) {
-      throw new SandboxPolicyRefusalError(policyRefusal);
-    }
-
-    const { abortController, getAppState, setAppState, setToolJSX } = toolUseContext;
-    const outputCleanup = createOutputFileCleanup({ get: id => getAppState().tasks[id] });
-
-    const stdoutAccumulator = new EndTruncatingAccumulator();
-    let stderrForShellReset = '';
-    let sandboxViolationSuffix = '';
-    let interpretationResult: ReturnType<typeof interpretCommandResult> | undefined;
-
-    let progressCounter = 0;
-    let wasInterrupted = false;
-    let result: ExecResult;
-
-    const isMainThread = !toolUseContext.agentId;
-    const preventCwdChanges = !isMainThread;
-    const permissionMode = getAppState().toolPermissionContext.mode;
-    const captureEditDiff =
-      isBashEditDiffEnabled(permissionMode) && !input.run_in_background && !input._simulatedSedEdit;
-    const skipGitSwitch = captureEditDiff && isGitStateSwitchCommand(input.command);
-    const editDiffSnapshot =
-      captureEditDiff && !skipGitSwitch
-        ? await consumePrewarmedBashEditDiffSnapshot(getCwd(), toolUseContext.toolUseId)
-        : null;
-    const coordinatorWriteValidation = await validateCoordinatorBashWriteAccess(input.command, toolUseContext.agentId);
-    if (!coordinatorWriteValidation.result) {
-      return {
-        data: {
-          stdout: '',
-          stderr: `${coordinatorWriteValidation.message}\nExit code 1`,
-          interrupted: false,
-        },
-      };
-    }
-
-    let persistedOutputPath: string | undefined;
-    let persistedOutputSize: number | undefined;
-    let isImage = false;
-    let compressedStdout = '';
-    let strippedStdout = '';
-    let stdout = '';
-    try {
-      try {
-        // Use the new async generator version of runShellCommand
-        const commandGenerator = runShellCommand({
-          input,
-          abortController,
-          // Use the always-shared task channel so async agents' background
-          // bash tasks are actually registered (and killable on agent exit).
-          setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
-          getAppState,
-          setToolJSX,
-          preventCwdChanges,
-          isMainThread,
-          toolUseId: toolUseContext.toolUseId,
-          agentId: toolUseContext.agentId,
-          agentContext: (
-            toolUseContext as {
-              agentContext?: {
-                isAsync?: boolean;
-                isMainSession?: boolean;
-                agentId?: string;
-              };
-            }
-          ).agentContext,
-          innerCall: toolUseContext.innerCall,
-          // densable 2.1.217 VRu/ZRu — pin isolation worktree into shell gates
-          agentWorktree: toolUseContext.agentWorktree,
-          keepInSandboxSinceCheck,
-          immediateProgress: (toolUseContext as { immediateProgress?: boolean }).immediateProgress === true,
-        });
-
-        // Consume the generator and capture the return value
-        let generatorResult;
-        do {
-          generatorResult = await commandGenerator.next();
-          if (!generatorResult.done && onProgress) {
-            const progress = generatorResult.value;
-            onProgress({
-              toolUseID: `bash-progress-${progressCounter++}`,
-              data: {
-                type: 'bash_progress',
-                output: progress.output,
-                fullOutput: progress.fullOutput,
-                elapsedTimeSeconds: progress.elapsedTimeSeconds,
-                totalLines: progress.totalLines,
-                totalBytes: progress.totalBytes,
-                taskId: progress.taskId,
-                timeoutMs: progress.timeoutMs,
-              },
-            });
-          }
-        } while (!generatorResult.done);
-
-        // Get the final result from the generator's return value
-        result = generatorResult.value;
-        outputCleanup.track(result);
-
-        trackGitOperations(input.command, result.code, result.stdout);
-
-        const isInterrupt = result.interrupted && abortController.signal.reason === 'interrupt';
-
-        // stderr is interleaved in stdout (merged fd) — result.stdout has both
-        stdoutAccumulator.append((result.stdout || '').trimEnd() + EOL);
-
-        // Interpret the command result using semantic rules
-        interpretationResult = interpretCommandResult(input.command, result.code, result.stdout || '', '');
-
-        // Check for git index.lock error (stderr is in stdout now)
-        if (result.stdout && result.stdout.includes(".git/index.lock': File exists")) {
-          logEvent('tengu_git_index_lock_error', {});
-        }
-
-        if (interpretationResult.isError && !isInterrupt) {
-          // Only add exit code if it's actually an error
-          if (result.code !== 0) {
-            stdoutAccumulator.append(`Exit code ${result.code}`);
-          }
-        }
-
-        if (!preventCwdChanges) {
-          const appState = getAppState();
-          if (resetCwdIfOutsideProject(appState.toolPermissionContext)) {
-            stderrForShellReset = stdErrAppendShellResetMessage('');
-          }
-        }
-
-        // Annotate output with sandbox violations if any (stderr is in stdout)
-        const originalStdout = result.stdout || '';
-        const baseOutputWithSbFailures = SandboxManager.annotateStderrWithSandboxFailures(
-          input.command,
-          originalStdout,
-        );
-        // Official 2.1.325 #2261 (`XLo`): when a sandboxed git command hits
-        // sandbox-protected read-only paths (e.g. `.claude/`), append a note
-        // so Claude warns the user and avoids re-running outside the sandbox.
-        const sandboxGitNote =
-          shouldUseSandbox(input) && SandboxManager.isSandboxingEnabled()
-            ? getSandboxedGitProtectedFileNote(originalStdout, result.code)
-            : undefined;
-        const extraSandboxNotes = [sandboxGitNote, keptInSandboxNote].filter(Boolean).join('\n');
-        const outputWithSbFailures = extraSandboxNotes
-          ? `${baseOutputWithSbFailures}${baseOutputWithSbFailures && !baseOutputWithSbFailures.endsWith('\n') ? '\n' : ''}${extraSandboxNotes}`
-          : baseOutputWithSbFailures;
-        // densable 2.1.243 #35: keep the appended <sandbox_violations> (and
-        // #2261 sandbox git note) on success (exit 0) — error path already throws with the full annotate.
-        sandboxViolationSuffix = extractSandboxViolationSuffix(originalStdout, outputWithSbFailures);
-
-        if (result.preSpawnError) {
-          throw new Error(result.preSpawnError);
-        }
-        if (interpretationResult.isError && !isInterrupt) {
-          // stderr is merged into stdout (merged fd); outputWithSbFailures
-          // already has the full output. Pass '' for stdout to avoid
-          // duplication in getErrorParts() and processBashCommand.
-          throw new ShellError('', outputWithSbFailures, result.code, result.interrupted);
-        }
-        wasInterrupted = result.interrupted;
-      } finally {
-        if (setToolJSX) setToolJSX(null);
-      }
-
-      // Get final string from accumulator
-      stdout = stdoutAccumulator.toString();
-
-      // Large output: the file on disk has more than getMaxOutputLength() bytes.
-      // stdout already contains the first chunk (from getStdout()). Copy the
-      // output file to the tool-results dir so the model can read it via
-      // FileRead. If > 64 MB, truncate after copying.
-      const persisted = await persistLargeOutputFile(result, outputCleanup);
-      persistedOutputPath = persisted.persistedOutputPath;
-      persistedOutputSize = persisted.persistedOutputSize;
-
-      const commandType = input.command.split(' ')[0];
-
-      logEvent('tengu_bash_tool_command_executed', {
-        command_type: commandType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        stdout_length: stdout.length,
-        stderr_length: 0,
-        exit_code: result.code,
-        interrupted: wasInterrupted,
-      });
-
-      // Log code indexing tool usage
-      const codeIndexingTool = detectCodeIndexingFromCommand(input.command);
-      if (codeIndexingTool) {
-        logEvent('tengu_code_indexing_tool_used', {
-          tool: codeIndexingTool as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          source: 'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          success: result.code === 0,
-        });
-      }
-
-      strippedStdout = stripEmptyLines(stdout);
-
-      // Claude Code hints protocol: CLIs/SDKs gated on CLAUDECODE=1 emit a
-      // `<claude-code-hint />` tag to stderr (merged into stdout here). Scan,
-      // record for useClaudeCodeHintRecommendation to surface, then strip
-      // so the model never sees the tag — a zero-token side channel.
-      // Stripping runs unconditionally (subagent output must stay clean too);
-      // only the dialog recording is main-thread-only.
-      const extracted = extractClaudeCodeHints(strippedStdout, input.command);
-      strippedStdout = extracted.stripped;
-      if (isMainThread && extracted.hints.length > 0) {
-        for (const hint of extracted.hints) maybeRecordPluginHint(hint);
-      }
-
-      isImage = isImageOutput(strippedStdout);
-
-      // Cap image dimensions + size if present (CC-304 — see
-      // resizeShellImageOutput). Scope the decoded buffer so it can be reclaimed
-      // before we build the output Out object.
-      compressedStdout = strippedStdout;
+      // For image data, format as image content block for Claude
       if (isImage) {
-        const resized = await resizeShellImageOutput(strippedStdout, result.outputFilePath, persistedOutputSize);
-        if (resized) {
-          compressedStdout = resized;
-        } else {
-          // Parse failed or file too large (e.g. exceeds MAX_IMAGE_FILE_SIZE).
-          // Keep isImage in sync with what we actually send so the UI label stays
-          // accurate — mapToolResultToToolResultBlockParam's defensive
-          // fallthrough will send text, not an image block.
-          isImage = false;
+        const block = buildImageToolResult(stdout, toolUseID);
+        if (block) {
+          const trimmedStderr = typeof stderr === 'string' ? stderr.trim() : '';
+          if (trimmedStderr) {
+            return {
+              ...block,
+              content: [...(Array.isArray(block.content) ? block.content : []), { type: 'text', text: trimmedStderr }],
+            };
+          }
+          return block;
         }
       }
-    } finally {
-      await outputCleanup.dispose();
-    }
 
-    const backgroundEndsWithFinalResponse = backgroundShellReapedAtFinalResponse(
-      result.backgroundTaskId,
-      getAgentContext(),
-    )
-      ? (true as const)
-      : undefined;
-    const backgroundCwdHint =
-      result.backgroundTaskId && commandHasAnyCd(input.command)
-        ? `Session cwd remains ${getCwd()}; directory changes made by the backgrounded command do not apply to subsequent commands.`
-        : undefined;
-    if (!result.backgroundTaskId && !wasInterrupted) {
-      await trackBashSingleFileReads(
+      let processedStdout = stdout;
+      if (stdout) {
+        // Replace any leading newlines or lines with only whitespace
+        processedStdout = stdout.replace(/^(\s*\n)+/, '');
+        // Still trim the end as before
+        processedStdout = processedStdout.trimEnd();
+      }
+
+      // For large output that was persisted to disk, build <persisted-output>
+      // message for the model. The UI never sees this — it uses data.stdout.
+      if (persistedOutputPath) {
+        const preview = generatePreview(processedStdout, PREVIEW_SIZE_BYTES);
+        processedStdout = buildLargeToolResultMessage({
+          filepath: persistedOutputPath,
+          originalSize: persistedOutputSize ?? 0,
+          isJson: false,
+          preview: preview.preview,
+          hasMore: preview.hasMore,
+          truncatedAtBytes: (persistedOutputSize ?? 0) >= MAX_PERSISTED_SIZE ? MAX_PERSISTED_SIZE : undefined,
+        });
+      }
+
+      let errorMessage = stderr.trim();
+      if (interrupted) {
+        if (stderr) errorMessage += EOL;
+        errorMessage += '<error>Command was aborted before completion</error>';
+      }
+
+      let backgroundInfo = '';
+      if (backgroundTaskId) {
+        backgroundInfo = formatBackgroundShellCopy({
+          backgroundTaskId,
+          outputPath: getTaskOutputPath(backgroundTaskId),
+          backgroundedByUser,
+          backgroundedToDeliverMessage,
+          backgroundedByTurnAbort,
+          reapedAtFinalResponse: backgroundEndsWithFinalResponse,
+          timedOutAfterMs,
+        });
+        if (backgroundCwdHint) {
+          backgroundInfo += `\n${backgroundCwdHint}`;
+        }
+        if (isBashTaskGetDeliveryEnabled()) {
+          return {
+            tool_use_id: toolUseID,
+            type: 'tool_result',
+            content: formatBackgroundTaskResult(
+              backgroundTaskId,
+              [errorMessage, backgroundInfo].filter(Boolean).join('\n'),
+              {
+                backgroundedByUser,
+                ending: backgroundTaskEnding(backgroundEndsWithFinalResponse === true),
+              },
+            ),
+          };
+        }
+      }
+
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result',
+        content: [processedStdout, errorMessage, backgroundInfo, formatBashEditDiffForToolResult(bashEditDiff)]
+          .filter(Boolean)
+          .join('\n'),
+        is_error: interrupted,
+      };
+    },
+    async call(
+      input: BashToolInput,
+      toolUseContext,
+      _canUseTool?: CanUseToolFn,
+      _parentMessage?: AssistantMessage,
+      onProgress?: ToolCallProgress<BashProgress>,
+    ) {
+      // Official 2.1.326 #303 (`aut` / `lut`): if the original command was
+      // checked as sandboxed and a hook/SDK host rewrote it without explicitly
+      // adding `dangerouslyDisableSandbox: true`, keep it in the sandbox.
+      const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(toolUseContext.toolUseId, input);
+      clearSandboxStateAtCheck(toolUseContext.toolUseId);
+      const effectiveUseSandbox = shouldUseSandbox(input, {
+        disableUnsandboxedCommands: keepInSandboxSinceCheck,
+      });
+      if (keepInSandboxSinceCheck && !effectiveUseSandbox) {
+        throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
+      }
+      const keptInSandboxNote =
+        keepInSandboxSinceCheck && effectiveUseSandbox && !shouldUseSandbox(input) && toolUseContext.innerCall !== true
+          ? KEPT_IN_SANDBOX_SINCE_CHECK_NOTE
+          : undefined;
+      const policyRefusal = getSandboxPolicyRefusal(effectiveUseSandbox, input.command, false, 'bash');
+      if (policyRefusal !== null) {
+        throw new SandboxPolicyRefusalError(policyRefusal);
+      }
+
+      const { abortController, getAppState, setAppState, setToolJSX } = toolUseContext;
+      const outputCleanup = createOutputFileCleanup({ get: id => getAppState().tasks[id] });
+
+      const stdoutAccumulator = new EndTruncatingAccumulator();
+      let stderrForShellReset = '';
+      let sandboxViolationSuffix = '';
+      let interpretationResult: ReturnType<typeof interpretCommandResult> | undefined;
+
+      let progressCounter = 0;
+      let wasInterrupted = false;
+      let result: ExecResult;
+
+      const isMainThread = !toolUseContext.agentId;
+      const preventCwdChanges = !isMainThread;
+      const permissionMode = getAppState().toolPermissionContext.mode;
+      const captureEditDiff =
+        isBashEditDiffEnabled(permissionMode) && !input.run_in_background && !input._simulatedSedEdit;
+      const skipGitSwitch = captureEditDiff && isGitStateSwitchCommand(input.command);
+      const editDiffSnapshot =
+        captureEditDiff && !skipGitSwitch
+          ? await consumePrewarmedBashEditDiffSnapshot(getCwd(), toolUseContext.toolUseId)
+          : null;
+      const coordinatorWriteValidation = await validateCoordinatorBashWriteAccess(
         input.command,
-        toolUseContext.readFileState,
-        toolUseContext.abortController.signal,
-        result.code,
-        persistedOutputPath !== undefined || isImage ? undefined : compressedStdout,
-        toolUseContext.nestedMemoryAttachmentTriggers
-          ? {
-              triggers: toolUseContext.nestedMemoryAttachmentTriggers,
-              permissions: () => toolUseContext.getAppState().toolPermissionContext,
-            }
-          : undefined,
+        toolUseContext.agentId,
       );
-    }
+      if (!coordinatorWriteValidation.result) {
+        return {
+          data: {
+            stdout: '',
+            stderr: `${coordinatorWriteValidation.message}\nExit code 1`,
+            interrupted: false,
+          },
+        };
+      }
 
-    const data: Out = {
-      stdout: compressedStdout,
-      stderr: mergeBashStderr(stderrForShellReset, sandboxViolationSuffix, EOL),
-      interrupted: wasInterrupted,
-      isImage,
-      returnCodeInterpretation: interpretationResult?.message,
-      noOutputExpected: isSilentBashCommand(input.command),
-      backgroundTaskId: result.backgroundTaskId,
-      backgroundedByUser: result.backgroundedByUser,
-      assistantAutoBackgrounded: result.assistantAutoBackgrounded,
-      backgroundedToDeliverMessage: result.backgroundedToDeliverMessage,
-      backgroundedByTurnAbort: result.backgroundedByTurnAbort,
-      timedOutAfterMs: result.timedOutAfterMs,
-      backgroundEndsWithFinalResponse,
-      backgroundCwdHint,
-      dangerouslyDisableSandbox:
-        'dangerouslyDisableSandbox' in input ? (input.dangerouslyDisableSandbox as boolean | undefined) : undefined,
-      persistedOutputPath,
-      persistedOutputSize,
-      bashEditDiff: skipGitSwitch
-        ? { files: [], moreFiles: 0, skipped: true }
-        : editDiffSnapshot === 'unavailable'
-          ? { files: [], moreFiles: 0, unavailable: true }
-          : editDiffSnapshot && !wasInterrupted && !result.backgroundTaskId
-            ? await diffBashEditDiffSnapshot(editDiffSnapshot)
+      let persistedOutputPath: string | undefined;
+      let persistedOutputSize: number | undefined;
+      let isImage = false;
+      let compressedStdout = '';
+      let strippedStdout = '';
+      let stdout = '';
+      try {
+        try {
+          // Use the new async generator version of runShellCommand
+          const commandGenerator = runShellCommand({
+            input,
+            abortController,
+            // Use the always-shared task channel so async agents' background
+            // bash tasks are actually registered (and killable on agent exit).
+            setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
+            getAppState,
+            setToolJSX,
+            preventCwdChanges,
+            isMainThread,
+            toolUseId: toolUseContext.toolUseId,
+            agentId: toolUseContext.agentId,
+            agentContext: (
+              toolUseContext as {
+                agentContext?: {
+                  isAsync?: boolean;
+                  isMainSession?: boolean;
+                  agentId?: string;
+                };
+              }
+            ).agentContext,
+            innerCall: toolUseContext.innerCall,
+            // densable 2.1.217 VRu/ZRu — pin isolation worktree into shell gates
+            agentWorktree: toolUseContext.agentWorktree,
+            keepInSandboxSinceCheck,
+            immediateProgress: (toolUseContext as { immediateProgress?: boolean }).immediateProgress === true,
+          });
+
+          // Official 2.1.331 `Sle` / `xhs` / `tZt` — track foreground sleep/wait
+          // commands after background jobs finish and emit `tengu_bash_wait_after_jobs`.
+          const waitAfterJobsState =
+            toolUseContext.toolState?.get(BashWaitAfterJobsState) ?? new BashWaitAfterJobsState();
+
+          // Consume the generator and capture the return value
+          let generatorResult;
+          do {
+            generatorResult = await commandGenerator.next();
+            if (!generatorResult.done) {
+              maybeMoveBashWaitForCompletedJobs({
+                state: waitAfterJobsState,
+                toolUseId: toolUseContext.toolUseId,
+                agentId: toolUseContext.agentId,
+                getAppState,
+                setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
+              });
+            }
+            if (!generatorResult.done && onProgress) {
+              const progress = generatorResult.value;
+              onProgress({
+                toolUseID: `bash-progress-${progressCounter++}`,
+                data: {
+                  type: 'bash_progress',
+                  output: progress.output,
+                  fullOutput: progress.fullOutput,
+                  elapsedTimeSeconds: progress.elapsedTimeSeconds,
+                  totalLines: progress.totalLines,
+                  totalBytes: progress.totalBytes,
+                  taskId: progress.taskId,
+                  timeoutMs: progress.timeoutMs,
+                },
+              });
+            }
+          } while (!generatorResult.done);
+
+          // Get the final result from the generator's return value
+          result = generatorResult.value;
+          recordBashWaitAfterJobsSettle(waitAfterJobsState, toolUseContext.toolUseId, result);
+          outputCleanup.track(result);
+
+          trackGitOperations(input.command, result.code, result.stdout);
+
+          const isInterrupt = result.interrupted && abortController.signal.reason === 'interrupt';
+
+          // stderr is interleaved in stdout (merged fd) — result.stdout has both
+          stdoutAccumulator.append((result.stdout || '').trimEnd() + EOL);
+
+          // Interpret the command result using semantic rules
+          interpretationResult = interpretCommandResult(input.command, result.code, result.stdout || '', '');
+
+          // Check for git index.lock error (stderr is in stdout now)
+          if (result.stdout && result.stdout.includes(".git/index.lock': File exists")) {
+            logEvent('tengu_git_index_lock_error', {});
+          }
+
+          if (interpretationResult.isError && !isInterrupt) {
+            // Only add exit code if it's actually an error
+            if (result.code !== 0) {
+              stdoutAccumulator.append(`Exit code ${result.code}`);
+            }
+          }
+
+          if (!preventCwdChanges) {
+            const appState = getAppState();
+            if (resetCwdIfOutsideProject(appState.toolPermissionContext)) {
+              stderrForShellReset = stdErrAppendShellResetMessage('');
+            }
+          }
+
+          // Annotate output with sandbox violations if any (stderr is in stdout)
+          const originalStdout = result.stdout || '';
+          const baseOutputWithSbFailures = SandboxManager.annotateStderrWithSandboxFailures(
+            input.command,
+            originalStdout,
+          );
+          // Official 2.1.325 #2261 (`XLo`): when a sandboxed git command hits
+          // sandbox-protected read-only paths (e.g. `.claude/`), append a note
+          // so Claude warns the user and avoids re-running outside the sandbox.
+          const sandboxGitNote =
+            shouldUseSandbox(input) && SandboxManager.isSandboxingEnabled()
+              ? getSandboxedGitProtectedFileNote(originalStdout, result.code)
+              : undefined;
+          const extraSandboxNotes = [sandboxGitNote, keptInSandboxNote].filter(Boolean).join('\n');
+          const outputWithSbFailures = extraSandboxNotes
+            ? `${baseOutputWithSbFailures}${baseOutputWithSbFailures && !baseOutputWithSbFailures.endsWith('\n') ? '\n' : ''}${extraSandboxNotes}`
+            : baseOutputWithSbFailures;
+          // densable 2.1.243 #35: keep the appended <sandbox_violations> (and
+          // #2261 sandbox git note) on success (exit 0) — error path already throws with the full annotate.
+          sandboxViolationSuffix = extractSandboxViolationSuffix(originalStdout, outputWithSbFailures);
+
+          if (result.preSpawnError) {
+            throw new Error(result.preSpawnError);
+          }
+          if (interpretationResult.isError && !isInterrupt) {
+            // stderr is merged into stdout (merged fd); outputWithSbFailures
+            // already has the full output. Pass '' for stdout to avoid
+            // duplication in getErrorParts() and processBashCommand.
+            throw new ShellError('', outputWithSbFailures, result.code, result.interrupted);
+          }
+          wasInterrupted = result.interrupted;
+        } finally {
+          if (setToolJSX) setToolJSX(null);
+        }
+
+        // Get final string from accumulator
+        stdout = stdoutAccumulator.toString();
+
+        // Large output: the file on disk has more than getMaxOutputLength() bytes.
+        // stdout already contains the first chunk (from getStdout()). Copy the
+        // output file to the tool-results dir so the model can read it via
+        // FileRead. If > 64 MB, truncate after copying.
+        const persisted = await persistLargeOutputFile(result, outputCleanup);
+        persistedOutputPath = persisted.persistedOutputPath;
+        persistedOutputSize = persisted.persistedOutputSize;
+
+        const commandType = input.command.split(' ')[0];
+
+        logEvent('tengu_bash_tool_command_executed', {
+          command_type: commandType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          stdout_length: stdout.length,
+          stderr_length: 0,
+          exit_code: result.code,
+          interrupted: wasInterrupted,
+        });
+
+        // Log code indexing tool usage
+        const codeIndexingTool = detectCodeIndexingFromCommand(input.command);
+        if (codeIndexingTool) {
+          logEvent('tengu_code_indexing_tool_used', {
+            tool: codeIndexingTool as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            source: 'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            success: result.code === 0,
+          });
+        }
+
+        strippedStdout = stripEmptyLines(stdout);
+
+        // Claude Code hints protocol: CLIs/SDKs gated on CLAUDECODE=1 emit a
+        // `<claude-code-hint />` tag to stderr (merged into stdout here). Scan,
+        // record for useClaudeCodeHintRecommendation to surface, then strip
+        // so the model never sees the tag — a zero-token side channel.
+        // Stripping runs unconditionally (subagent output must stay clean too);
+        // only the dialog recording is main-thread-only.
+        const extracted = extractClaudeCodeHints(strippedStdout, input.command);
+        strippedStdout = extracted.stripped;
+        if (isMainThread && extracted.hints.length > 0) {
+          for (const hint of extracted.hints) maybeRecordPluginHint(hint);
+        }
+
+        isImage = isImageOutput(strippedStdout);
+
+        // Cap image dimensions + size if present (CC-304 — see
+        // resizeShellImageOutput). Scope the decoded buffer so it can be reclaimed
+        // before we build the output Out object.
+        compressedStdout = strippedStdout;
+        if (isImage) {
+          const resized = await resizeShellImageOutput(strippedStdout, result.outputFilePath, persistedOutputSize);
+          if (resized) {
+            compressedStdout = resized;
+          } else {
+            // Parse failed or file too large (e.g. exceeds MAX_IMAGE_FILE_SIZE).
+            // Keep isImage in sync with what we actually send so the UI label stays
+            // accurate — mapToolResultToToolResultBlockParam's defensive
+            // fallthrough will send text, not an image block.
+            isImage = false;
+          }
+        }
+      } finally {
+        await outputCleanup.dispose();
+      }
+
+      const backgroundEndsWithFinalResponse = backgroundShellReapedAtFinalResponse(
+        result.backgroundTaskId,
+        getAgentContext(),
+      )
+        ? (true as const)
+        : undefined;
+      const backgroundCwdHint =
+        result.backgroundTaskId && commandHasAnyCd(input.command)
+          ? `Session cwd remains ${getCwd()}; directory changes made by the backgrounded command do not apply to subsequent commands.`
+          : undefined;
+      if (!result.backgroundTaskId && !wasInterrupted) {
+        await trackBashSingleFileReads(
+          input.command,
+          toolUseContext.readFileState,
+          toolUseContext.abortController.signal,
+          result.code,
+          persistedOutputPath !== undefined || isImage ? undefined : compressedStdout,
+          toolUseContext.nestedMemoryAttachmentTriggers
+            ? {
+                triggers: toolUseContext.nestedMemoryAttachmentTriggers,
+                permissions: () => toolUseContext.getAppState().toolPermissionContext,
+              }
             : undefined,
-    };
+        );
+      }
 
-    return {
-      data,
-    };
+      const data: Out = {
+        stdout: compressedStdout,
+        stderr: mergeBashStderr(stderrForShellReset, sandboxViolationSuffix, EOL),
+        interrupted: wasInterrupted,
+        isImage,
+        returnCodeInterpretation: interpretationResult?.message,
+        noOutputExpected: isSilentBashCommand(input.command),
+        backgroundTaskId: result.backgroundTaskId,
+        backgroundedByUser: result.backgroundedByUser,
+        assistantAutoBackgrounded: result.assistantAutoBackgrounded,
+        backgroundedToDeliverMessage: result.backgroundedToDeliverMessage,
+        backgroundedByTurnAbort: result.backgroundedByTurnAbort,
+        timedOutAfterMs: result.timedOutAfterMs,
+        backgroundEndsWithFinalResponse,
+        backgroundCwdHint,
+        dangerouslyDisableSandbox:
+          'dangerouslyDisableSandbox' in input ? (input.dangerouslyDisableSandbox as boolean | undefined) : undefined,
+        persistedOutputPath,
+        persistedOutputSize,
+        bashEditDiff: skipGitSwitch
+          ? { files: [], moreFiles: 0, skipped: true }
+          : editDiffSnapshot === 'unavailable'
+            ? { files: [], moreFiles: 0, unavailable: true }
+            : editDiffSnapshot && !wasInterrupted && !result.backgroundTaskId
+              ? await diffBashEditDiffSnapshot(editDiffSnapshot)
+              : undefined,
+      };
+
+      return {
+        data,
+      };
+    },
+    renderToolUseErrorMessage,
+    isResultTruncated(output: Out): boolean {
+      return isOutputLineTruncated(output.stdout) || isOutputLineTruncated(output.stderr);
+    },
+  } satisfies ToolDef<InputSchema, Out, BashProgress>),
+  {
+    // Official 2.1.331 `Si`: guardedRemovalAsk (`Ukn`) + guardedLineOf (`Bkn`)
+    guardedRemovalAsk: tryGuardDangerousRmAsk,
+    guardedLineOf: getGuardedRmLine,
   },
-  renderToolUseErrorMessage,
-  isResultTruncated(output: Out): boolean {
-    return isOutputLineTruncated(output.stdout) || isOutputLineTruncated(output.stderr);
-  },
-} satisfies ToolDef<InputSchema, Out, BashProgress>);
+);
 
 async function* runShellCommand({
   input,
@@ -2304,6 +2334,10 @@ async function* runShellCommand({
                 shellCommand,
                 agentId,
                 innerCall,
+                onlyWaitsByLooking:
+                  isMainThread && isSleepWaitCommand(command, 'bash') && isBashWaitAfterJobsEnabled()
+                    ? true
+                    : undefined,
               },
               setAppState,
               toolUseId,

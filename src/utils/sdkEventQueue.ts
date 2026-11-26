@@ -210,6 +210,18 @@ type StreamEventSdkEvent = {
   [key: string]: unknown
 }
 
+/** Official 2.1.331 `jp()` — informational system notice queued onto the SDK event stream. */
+type InformationalSdkEvent = {
+  type: 'system'
+  subtype: 'informational'
+  content: string
+  level?: string
+  tag?: string
+  isMeta?: boolean
+  timestamp?: string
+  uuid?: UUID | string
+}
+
 export type SdkEvent =
   | TaskStartedEvent
   | TaskProgressEvent
@@ -225,6 +237,7 @@ export type SdkEvent =
   | SdkStatusEvent
   | ConversationResetSdkEvent
   | StreamEventSdkEvent
+  | InformationalSdkEvent
 
 export type DrainedSdkEvent = SdkEvent & {
   uuid: UUID | string
