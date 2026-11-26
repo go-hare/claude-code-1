@@ -59,12 +59,13 @@ describe('Wave 316-318 UI / Components alignment', () => {
     ).toContain('nothing left to send')
   })
 
-  test('#1499 PromptInputFooterLeftSide checks voiceKeyShortcut !== "" and uses module-level counter across remounts', () => {
+  test('#1499 PromptInputFooterLeftSide checks voiceKeyShortcut !== "" and uses per-session RootSessionSlot counter across remounts', () => {
     const src = readFileSync(
       join(ROOT, 'src/components/PromptInput/PromptInputFooterLeftSide.tsx'),
       'utf8',
     )
-    expect(src).toContain('let voiceFooterHintCounted = false')
+    expect(src).toContain('voiceFooterHintCounted: false')
+    expect(src).toContain('new RootSessionSlot<PromptFooterLeftSessionState>')
     expect(src).toContain("voiceKeyShortcut === ''")
     expect(src).toContain("voiceKeyShortcut !== ''")
   })

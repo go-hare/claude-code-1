@@ -22,8 +22,9 @@ describe('2.1.290 #49/#56/#61/#75 AgentView alignments', () => {
       join(import.meta.dir, '..', 'AgentView.tsx'),
       'utf8',
     )
-    // #49 restartOfferedJobId + non-Esc check
-    expect(src).toContain('let restartOfferedJobId: string | null = null;')
+    // #49 restartOfferedJobId (per-session RootSessionSlot) + non-Esc check
+    expect(src).toContain('restartOfferedJobId: null')
+    expect(src).toContain('new RootSessionSlot<AgentViewSessionState>')
     expect(src).toContain("trigger !== 'esc'")
     // #56/#61 no ctrl+x bulk delete on header row
     expect(src).not.toContain("deleteConfirmSessionId === '*done*'")

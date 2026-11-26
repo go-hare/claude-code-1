@@ -420,7 +420,7 @@ describe('2.1.331 ReadMcpResourceDirTool', () => {
       capabilities: {
         extensions: { [MCP_SKILLS_EXTENSION_KEY]: { directoryRead: true } },
       } as ConnectedMCPServer['capabilities'],
-      config: DUMMY_HTTP_CONFIG,
+      config: { type: 'sdk', name: 'docs', scope: 'dynamic' },
       client: {
         request: requestMock,
       } as unknown as ConnectedMCPServer['client'],
@@ -469,7 +469,7 @@ describe('2.1.331 ReadMcpResourceDirTool', () => {
       capabilities: {
         extensions: { [MCP_SKILLS_EXTENSION_KEY]: { directoryRead: true } },
       } as ConnectedMCPServer['capabilities'],
-      config: DUMMY_HTTP_CONFIG,
+      config: { type: 'sdk', name: 'docs', scope: 'dynamic' },
       client: {
         request: mock(async () => {
           throw invalidParams
