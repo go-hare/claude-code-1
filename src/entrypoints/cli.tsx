@@ -684,6 +684,31 @@ async function main(): Promise<void> {
     process.env.CLAUDE_CODE_SIMPLE = '1';
   }
 
+  // Official 2.1.331: --safe-mode sets CLAUDE_CODE_SAFE_MODE=1 early.
+  if (args.includes('--safe-mode')) {
+    process.env.CLAUDE_CODE_SAFE_MODE = '1';
+  }
+
+  // Official 2.1.331: --ignore-persisted-trust sets CLAUDE_CODE_IGNORE_PERSISTED_TRUST=1 early.
+  if (args.includes('--ignore-persisted-trust')) {
+    process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST = '1';
+  }
+
+  // Official 2.1.331 `Fo` / `Do`: when a retired subcommand word like `config`
+  // or `migrate-installer` is invoked non-interactively, emit the official
+  // redirect hint instead of starting a session.
+  if (args.length > 0 && !process.stdout.isTTY && (args[0] === 'config' || args[0] === 'migrate-installer')) {
+    const { getCommandWordHint } = await import('../cli/handlers/cliSubcommandHint.js');
+    const hint = getCommandWordHint(args[0]!);
+    if (hint) {
+      console.error(
+        `"${args[0]}" isn't a Claude Code command, so this would have started a session.\n${hint}. To start a session, run this at a terminal. If you trust this folder, add -p and a prompt instead: -p runs the folder's hooks and settings.`,
+      );
+      process.exitCode = 0;
+      return;
+    }
+  }
+
   // Official emO full path: earlyInput first, then fire MDM + keychain
   // prefetch *before* main import so subprocesses overlap module eval.
   // main.tsx still starts them at top-level (idempotent no-ops if already fired).
@@ -710,6 +735,14 @@ async function main(): Promise<void> {
     'uninstall',
     'setup-token',
     'purge',
+    'project',
+    'gateway',
+    'sandbox',
+    'import-conversations',
+    'edit-hook',
+    'workspace-trust',
+    'worktree-hook',
+    'apply-project-settings',
     'migrate-installer',
     'config',
     'help',

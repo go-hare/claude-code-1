@@ -38,8 +38,39 @@ function writeRules(rules: AutoModeRules): void {
   process.stdout.write(jsonStringify(rules, null, 2) + '\n')
 }
 
-export function autoModeDefaultsHandler(): void {
-  writeRules(getDefaultExternalAutoModeRules())
+function extractRuleLabel(rule: string): string {
+  const stripped = rule
+    .replace(/\*/g, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .toLowerCase()
+    .trim()
+  const colonIdx = stripped.indexOf(':')
+  return colonIdx > 0 ? stripped.slice(0, colonIdx).trim() : stripped
+}
+
+/**
+ * Official 2.1.331 `R(s, i)`: filter auto-mode rules to entries whose label
+ * starts with `labelPrefix` (case-insensitive).
+ */
+export function filterAutoModeRulesByLabel(
+  rules: AutoModeRules,
+  labelPrefix: string,
+): AutoModeRules {
+  const normalizedPrefix =
+    extractRuleLabel(labelPrefix) || labelPrefix.toLowerCase().trim()
+  const matches = (entry: string): boolean =>
+    extractRuleLabel(entry).startsWith(normalizedPrefix)
+  return {
+    allow: rules.allow.filter(matches),
+    soft_deny: rules.soft_deny.filter(matches),
+    hard_deny: rules.hard_deny.filter(matches),
+    environment: rules.environment.filter(matches),
+  }
+}
+
+export function autoModeDefaultsHandler(label?: string): void {
+  const defaults = getDefaultExternalAutoModeRules()
+  writeRules(label ? filterAutoModeRulesByLabel(defaults, label) : defaults)
 }
 
 /**

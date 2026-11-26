@@ -238,7 +238,12 @@ function serializeValidationReport(
 // plugin validate
 export async function pluginValidateHandler(
   manifestPath: string,
-  options: { cowork?: boolean; json?: boolean; strict?: boolean },
+  options: {
+    cowork?: boolean
+    json?: boolean
+    strict?: boolean
+    profile?: string
+  },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   const strict = options.strict === true
@@ -337,16 +342,43 @@ export async function pluginValidateHandler(
   }
 }
 
+async function measureDirectoryBytes(dirPath: string): Promise<number> {
+  const { readdir, stat } = await import('node:fs/promises')
+  let total = 0
+  const entries = await readdir(dirPath, { withFileTypes: true })
+  for (const entry of entries) {
+    const full = join(dirPath, entry.name)
+    if (entry.isDirectory()) {
+      total += await measureDirectoryBytes(full)
+    } else if (entry.isFile()) {
+      const info = await stat(full)
+      total += info.size
+    }
+  }
+  return total
+}
+
 // plugin list (lines 5217–5416)
 export async function pluginListHandler(options: {
   json?: boolean
   available?: boolean
   cowork?: boolean
+  dataSize?: boolean | string
 }): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   logEvent('tengu_plugin_list_command', {})
 
   const installedData = loadInstalledPluginsV2()
+  if (
+    options.json &&
+    typeof options.dataSize === 'string' &&
+    !(
+      Object.hasOwn(installedData.plugins, options.dataSize) &&
+      (installedData.plugins[options.dataSize]?.length ?? 0) > 0
+    )
+  ) {
+    return cliError('--data-size names a plugin that is not installed')
+  }
   const { getPluginEditableScopes } = await import(
     '../../utils/plugins/pluginStartupCheck.js'
   )
@@ -401,11 +433,28 @@ export async function pluginListHandler(options: {
       mcpServers?: Record<string, unknown>
       errors?: string[]
       warnings?: string[]
+      dataSizeBytes?: number
     }> = []
 
+    const { getClaudeConfigHomeDir } = await import('../../utils/envUtils.js')
     for (const pluginId of pluginIds.sort()) {
       const installations = installedData.plugins[pluginId]
       if (!installations || installations.length === 0) continue
+
+      let dataSizeBytes: number | undefined
+      if (options.dataSize === true || options.dataSize === pluginId) {
+        const dataDir = join(
+          getClaudeConfigHomeDir(),
+          'plugins',
+          'data',
+          pluginId,
+        )
+        try {
+          dataSizeBytes = await measureDirectoryBytes(dataDir)
+        } catch {
+          dataSizeBytes = undefined
+        }
+      }
 
       // Find loading errors for this plugin
       const pluginName = parsePluginIdentifier(pluginId).name
@@ -448,6 +497,7 @@ export async function pluginListHandler(options: {
           mcpServers,
           errors: pluginErrors.length > 0 ? pluginErrors : undefined,
           warnings: pluginWarnings.length > 0 ? pluginWarnings : undefined,
+          ...(dataSizeBytes !== undefined ? { dataSizeBytes } : {}),
         })
       }
     }
@@ -793,10 +843,34 @@ export async function pluginListHandler(options: {
 // marketplace add (lines 5433–5487)
 export async function marketplaceAddHandler(
   source: string,
-  options: { cowork?: boolean; sparse?: string[]; scope?: string },
+  options: {
+    cowork?: boolean
+    sparse?: string[]
+    scope?: string
+    claudeai?: boolean
+    fromLink?: boolean
+    resolveOnly?: boolean
+    json?: boolean
+  },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
+  if (options.resolveOnly && !options.fromLink) {
+    return cliError('--resolve-only requires --from-link')
+  }
+  if (
+    options.resolveOnly &&
+    ((options.sparse && options.sparse.length > 0) ||
+      options.scope !== undefined)
+  ) {
+    return cliError('--resolve-only cannot be used with --sparse or --scope')
+  }
   try {
+    if (options.resolveOnly) {
+      const known = await loadKnownMarketplacesConfigSafe(getPinnedStorageV5())
+      const match = Object.keys(known).find(k => k === source) ?? null
+      return cliOk(jsonStringify({ existing: match }))
+    }
+
     const parsed = await parseMarketplaceInput(source)
 
     if (!parsed) {
@@ -863,6 +937,21 @@ export async function marketplaceAddHandler(
       source_type:
         sourceType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
+
+    if (options.fromLink) {
+      return cliOk(jsonStringify({ name, added: !alreadyMaterialized }))
+    }
+    if (options.json) {
+      return cliOk(
+        jsonStringify({
+          command: 'marketplace-add',
+          outcome: 'ok',
+          name,
+          scope,
+          added: !alreadyMaterialized,
+        }),
+      )
+    }
 
     const successLine = alreadyMaterialized
       ? re(
@@ -944,7 +1033,7 @@ export async function marketplaceListHandler(options: {
 // marketplace remove (lines 5576–5598)
 export async function marketplaceRemoveHandler(
   name: string,
-  options: { cowork?: boolean; scope?: string },
+  options: { cowork?: boolean; scope?: string; json?: boolean },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   let scope: ReturnType<typeof settingsSourceFromMarketplaceScope>
@@ -966,6 +1055,17 @@ export async function marketplaceRemoveHandler(
         name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
 
+    if (options.json) {
+      return cliOk(
+        jsonStringify({
+          command: 'marketplace-remove',
+          outcome: 'ok',
+          name,
+          ...(options.scope ? { scope: options.scope } : {}),
+        }),
+      )
+    }
+
     cliOk(
       re(
         formatCliActionSuccess(
@@ -981,7 +1081,7 @@ export async function marketplaceRemoveHandler(
 // marketplace update (lines 5609–5672)
 export async function marketplaceUpdateHandler(
   name: string | undefined,
-  options: { cowork?: boolean },
+  options: { cowork?: boolean; json?: boolean },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   try {
@@ -1003,6 +1103,16 @@ export async function marketplaceUpdateHandler(
         marketplace_name:
           name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
+
+      if (options.json) {
+        return cliOk(
+          jsonStringify({
+            command: 'marketplace-update',
+            outcome: 'ok',
+            name,
+          }),
+        )
+      }
 
       cliOk(
         re(formatCliActionSuccess(`Successfully updated marketplace: ${name}`)),
@@ -1219,6 +1329,7 @@ export async function pluginInstallHandler(
     yes?: boolean
     json?: boolean
     acceptCommand?: string
+    replace?: boolean
     marketplace?: string
   },
 ): Promise<void> {
@@ -1367,9 +1478,14 @@ export async function pluginUninstallHandler(
     scope?: string
     cowork?: boolean
     keepData?: boolean
+    prune?: boolean
+    yes?: boolean
     json?: boolean
   },
 ): Promise<void> {
+  if (options.prune && options.json) {
+    return cliError('--json cannot be used with --prune')
+  }
   if (options.cowork) setUseCoworkPlugins(true)
   const scope = options.scope || 'user'
   if (options.cowork && scope !== 'user') {
@@ -1400,6 +1516,14 @@ export async function pluginUninstallHandler(
     options.keepData,
     { json: options.json, scope },
   )
+  if (options.prune) {
+    const { runPluginPrune } = await import('./pluginPrune.js')
+    const pruneMsg = await runPluginPrune(
+      scope as 'user' | 'project' | 'local',
+      { yes: options.yes },
+    )
+    printCli(pruneMsg)
+  }
   await drainSettingsWrites().catch(() => {})
 }
 

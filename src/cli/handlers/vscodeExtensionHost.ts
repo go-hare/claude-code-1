@@ -220,4 +220,32 @@ export function registerVscodeExtensionHostCommands(
       )
       process.exit(0)
     })
+
+  program
+    .command('edit-hook', { hidden: true })
+    .allowExcessArguments(false)
+    .description(
+      'Apply one hook edit read as JSON from stdin (used by the VS Code extension)',
+    )
+    .requiredOption('--json', 'Read the edit as JSON from stdin')
+    .action(async () => {
+      if (process.stdin.isTTY) {
+        return cliError(
+          'claude edit-hook reads one JSON edit from stdin; it is run by the VS Code extension, not by hand',
+        )
+      }
+      const child = childSessionRefusal()
+      if (child !== undefined) return cliError(child)
+      const { runHookEdit } = await import('./hookEdit.js')
+      const edit = await readJsonEdit(
+        524_288,
+        'claude edit-hook: stdin is not a JSON edit',
+      )
+      const result = await runHookEdit(edit)
+      if (!result.ok) {
+        process.stdout.write(`${jsonStringify(result)}\n`)
+        return cliError(result.error)
+      }
+      return cliOk('{"ok":true}')
+    })
 }

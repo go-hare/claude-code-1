@@ -162,10 +162,82 @@ async function getMcpConfigsForListGet(): Promise<{
   return { servers, pendingProjectServers, rejectedProjectServers };
 }
 
+export type McpServeOptions = {
+  debug?: boolean;
+  verbose?: boolean;
+  transport?: 'stdio' | 'http';
+  port?: string;
+  resultFormat?: 'raw' | 'rendered';
+  sessionTunnel?: boolean;
+};
+
+/**
+ * Validate `claude mcp serve` options matching official 2.1.331 `hdl_mcp_serve.js`.
+ */
+export function validateMcpServeOptions(
+  options: McpServeOptions,
+):
+  | { ok: true; transport: 'stdio' | 'http'; port: number; resultFormat: 'raw' | 'rendered' }
+  | { ok: false; error: string } {
+  const transport = options.transport ?? 'stdio';
+  const resultFormat = options.resultFormat ?? 'raw';
+  let port = 0;
+
+  if (options.port !== undefined) {
+    if (transport !== 'http') {
+      return { ok: false, error: 'Error: --port only works with --transport http' };
+    }
+    const parsedPort = /^\d+$/.test(options.port) ? Number(options.port) : Number.NaN;
+    if (Number.isNaN(parsedPort) || parsedPort > 65535) {
+      return {
+        ok: false,
+        error: `Error: --port must be a whole number from 0 to 65535, got '${options.port}'`,
+      };
+    }
+    port = parsedPort;
+  }
+
+  if (options.sessionTunnel && transport !== 'http') {
+    return {
+      ok: false,
+      error: 'Error: --session-tunnel requires --transport http',
+    };
+  }
+
+  return { ok: true, transport, port, resultFormat };
+}
+
 // mcp serve (lines 4512–4532)
-export async function mcpServeHandler({ debug, verbose }: { debug?: boolean; verbose?: boolean }): Promise<void> {
+export async function mcpServeHandler({
+  debug,
+  verbose,
+  transport,
+  port,
+  resultFormat,
+  sessionTunnel,
+}: McpServeOptions): Promise<void> {
+  const validated = validateMcpServeOptions({
+    debug,
+    verbose,
+    transport,
+    port,
+    resultFormat,
+    sessionTunnel,
+  });
+  if (!validated.ok) {
+    return cliError(validated.error);
+  }
+
   const providedCwd = cwd();
-  logEvent('tengu_mcp_start', {});
+  logEvent('tengu_mcp_start', {
+    transport: validated.transport as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  });
+
+  if (sessionTunnel) {
+    return cliError(
+      'Error: --session-tunnel requires a hosted session tunnel envelope on stdin with --transport http --port 28471',
+    );
+  }
 
   try {
     await stat(providedCwd);
@@ -180,7 +252,7 @@ export async function mcpServeHandler({ debug, verbose }: { debug?: boolean; ver
     const { setup } = await import('../../setup.js');
     await setup(providedCwd, 'default', false, false, undefined, false);
     const { startMCPServer } = await import('../../entrypoints/mcp.js');
-    await startMCPServer(providedCwd, debug ?? false, verbose ?? false, 'raw');
+    await startMCPServer(providedCwd, debug ?? false, verbose ?? false, validated.resultFormat);
   } catch (error) {
     cliError(formatCliError(`Failed to start MCP server: ${error}`, 'Error: '));
   }

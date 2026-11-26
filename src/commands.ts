@@ -180,8 +180,7 @@ const claimMainCmd = feature('UDS_INBOX')
 // densable 2.1.212 dual registration:
 //   CP() && !IS_DEMO ? [_wd, vwd] : [gwd]
 // Resolved at COMMANDS() call time (not module load) so settings/env are live.
-function isAgentViewOffForFork(): boolean {
-  if (process.env.IS_DEMO) return true
+function isAgentViewEnabledForFleetBackground(): boolean {
   try {
     const { isAgentViewDisabled } =
       require('./utils/residualUiEnvGates.js') as typeof import('./utils/residualUiEnvGates.js')
@@ -196,10 +195,14 @@ function isAgentViewOffForFork(): boolean {
     } catch {
       /* settings optional */
     }
-    return isAgentViewDisabled(process.env, settingsDisable)
+    return !isAgentViewDisabled(process.env, settingsDisable)
   } catch {
-    return false
+    return true
   }
+}
+function isAgentViewOffForFork(): boolean {
+  if (process.env.IS_DEMO) return true
+  return !isAgentViewEnabledForFleetBackground()
 }
 // densable _wd — session-copy keepParent /fork
 const sessionForkCmd = (
@@ -260,6 +263,20 @@ import autocompact from './commands/autocompact/index.js'
 import autonomy from './commands/autonomy.js'
 import provider from './commands/provider.js'
 import setupBedrock from './commands/setup-bedrock/index.js'
+import setupVertex from './commands/setup-vertex/index.js'
+import access from './commands/access/index.js'
+import background from './commands/background/index.js'
+import cloudPlugins from './commands/cloud-plugins/index.js'
+import importCommand, { importNonInteractive } from './commands/import/index.js'
+import pauseMemory from './commands/pause-memory/index.js'
+import powerup from './commands/powerup/index.js'
+import proTrialExpired from './commands/pro-trial-expired/index.js'
+import project from './commands/project/index.js'
+import remoteWorkflow from './commands/remote-workflow/index.js'
+import stop, { stopNonInteractive } from './commands/stop/index.js'
+import useCase from './commands/use-case/index.js'
+import wellbeing from './commands/wellbeing/index.js'
+import workflowLaunchExec from './commands/workflow-launch-exec/index.js'
 import { logError } from './utils/log.js'
 import { toError } from './utils/errors.js'
 import { logForDebugging } from './utils/debug.js'
@@ -381,6 +398,19 @@ const COMMANDS = memoize((): Command[] => [
   autonomy,
   provider,
   setupBedrock,
+  setupVertex,
+  access,
+  cloudPlugins,
+  importCommand,
+  importNonInteractive,
+  pauseMemory,
+  powerup,
+  proTrialExpired,
+  project,
+  remoteWorkflow,
+  useCase,
+  wellbeing,
+  workflowLaunchExec,
   artifacts,
   agents,
   branch,
@@ -465,6 +495,10 @@ const COMMANDS = memoize((): Command[] => [
   ...(isAgentViewOffForFork()
     ? [inSessionForkCmd]
     : [sessionForkCmd, ...(subtaskCmdModule ? [subtaskCmdModule] : [])]),
+  // Official 2.1.331 `eco().fleetBackground` (`xx()` = !isAgentViewDisabled)
+  ...(isAgentViewEnabledForFleetBackground()
+    ? [background, stop, stopNonInteractive]
+    : []),
   ...(buddy ? [buddy] : []),
   ...(proactive ? [proactive] : []),
   ...(monitorCmd ? [monitorCmd] : []),
@@ -1189,6 +1223,10 @@ export const REMOTE_SAFE_COMMANDS: Set<Command> = new Set([
   statusline, // Status line toggle
   stickers, // Stickers
   mobile, // Mobile QR code
+  cloudPlugins, // Official 2.1.331 Nus (`P_t`)
+  pauseMemory, // Official 2.1.331 Nus (`GMt`)
+  powerup, // Official 2.1.331 Nus (`oIt`)
+  wellbeing, // Official 2.1.331 Nus (`lLt`)
 ])
 
 /**
@@ -1211,6 +1249,7 @@ export const BRIDGE_SAFE_COMMANDS: Set<Command> = new Set(
     summary, // Summarize conversation
     releaseNotes, // Show changelog
     files, // List tracked files
+    stopNonInteractive, // Official 2.1.331 Acr (`Xuo`) — stop bg session from bridge
   ].filter((c): c is Command => c !== null),
 )
 

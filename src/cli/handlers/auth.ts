@@ -209,15 +209,69 @@ export async function authLogin({
   sso,
   console: useConsole,
   claudeai,
+  gatewayJson,
+  organizationGateway,
 }: {
   email?: string
   sso?: boolean
   console?: boolean
   claudeai?: boolean
+  gatewayJson?: boolean
+  organizationGateway?: boolean
 }): Promise<void> {
+  const hasStandardOption = Boolean(
+    useConsole || claudeai || sso || email !== undefined,
+  )
+
+  if (organizationGateway) {
+    if (hasStandardOption || gatewayJson) {
+      process.stderr.write(
+        "--organization-gateway can't be used with another sign-in option.\n",
+      )
+      process.exit(1)
+    }
+    const { isChildSession } = await import('../../utils/sessionRoleEnv.js')
+    if (!process.stdin.isTTY || !process.stdout.isTTY || isChildSession()) {
+      process.stderr.write(
+        'This sign-in waits for you to press Enter, then opens your browser. Run this command yourself in a terminal, without piping or redirecting it, or run /login inside Claude Code.\n',
+      )
+      process.exit(1)
+    }
+    process.stderr.write(
+      "Claude Code can't start the sign-in to your organization's gateway: no organization gateway identity provider is configured in this machine's managed settings.\n",
+    )
+    process.exit(1)
+  }
+
   if (useConsole && claudeai) {
     process.stderr.write(
       `${formatCliError('--console and --claudeai cannot be used together.', 'Error: ')}\n`,
+    )
+    process.exit(1)
+  }
+
+  if (gatewayJson) {
+    if (hasStandardOption) {
+      process.stderr.write(
+        `${formatCliError("--gateway-json can't be used with --console, --claudeai, --sso, or --email.", 'Error: ')}\n`,
+      )
+      process.exit(1)
+    }
+    if (process.stdin.isTTY) {
+      process.stderr.write(
+        'This command is run by the VS Code extension, not by hand. To sign in from a terminal, run /login in Claude Code.\n',
+      )
+      process.exit(1)
+    }
+    const { isChildSession } = await import('../../utils/sessionRoleEnv.js')
+    if (isChildSession()) {
+      process.stderr.write(
+        'Cloud gateway sign-in needs a person to answer its questions, so it cannot run inside a Claude Code session. Sign in from the Claude Code panel in VS Code, or run /login in Claude Code.\n',
+      )
+      process.exit(1)
+    }
+    process.stderr.write(
+      "Cloud gateway sign-in isn't available with this machine's settings. If your organization manages this machine's settings, a gateway in your own settings file isn't used.\n",
     )
     process.exit(1)
   }
@@ -479,7 +533,9 @@ export async function authStatus(opts: {
   process.exit(loggedIn ? 0 : 1)
 }
 
-export async function authLogout(): Promise<void> {
+export async function authLogout(
+  options: { json?: boolean } = {},
+): Promise<void> {
   logOTelAuthEvent({ action: 'logout', success: true, authMethod: 'oauth' })
   // Official 2.1.326 #238: performLogout revokes OAuth refresh tokens via
   // revokeOAuthRefreshTokenWithRetry and returns 'revoke_unconfirmed' if server
@@ -495,13 +551,16 @@ export async function authLogout(): Promise<void> {
     await releaseAllHeldWifLocks()
     process.exit(1)
   }
-  if (outcome === 'revoke_unconfirmed') {
-    const unconfirmedMessage = await formatRevokeUnconfirmedMessage()
-    process.stdout.write(`${formatCliWarning(unconfirmedMessage, '')}\n`)
+  const unconfirmed = outcome === 'revoke_unconfirmed'
+  const message = unconfirmed
+    ? await formatRevokeUnconfirmedMessage()
+    : 'Successfully logged out from your Anthropic account.'
+  if (options.json) {
+    process.stdout.write(`${jsonStringify({ message })}\n`)
+  } else if (unconfirmed) {
+    process.stdout.write(`${formatCliWarning(message, '')}\n`)
   } else {
-    process.stdout.write(
-      `${formatCliActionSuccess('Successfully logged out from your Anthropic account.', '')}\n`,
-    )
+    process.stdout.write(`${formatCliActionSuccess(message, '')}\n`)
   }
   await Promise.all([
     waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true)),
