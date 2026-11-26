@@ -70,6 +70,7 @@ import {
   snapshotApprovedReadIdentity,
   takeApprovedFileToolPath,
 } from 'src/utils/fileToolApprovedOpen.js'
+import { assertNotCrossMachineSavedChatRead } from 'src/utils/sessionStorage.js'
 import { getSdkBetas } from 'src/bootstrap/state.js'
 import { getContextWindowForModel } from 'src/utils/context.js'
 import { getModelFacts } from 'src/utils/model/modelFacts.js'
@@ -825,6 +826,17 @@ export const FileReadTool = buildTool({
     // (especially handles whitespace trimming and Windows path separators)
     const fullFilePath = expandPath(file_path)
     const approvedReadPaths = takeApprovedFileToolPath(fullFilePath)
+
+    // Official 2.1.331 `Qji` (`09_cross_machine_transcript.js`): refuse reading
+    // files saved from claude.ai chats (`artifact-chat.*`) for another machine.
+    assertNotCrossMachineSavedChatRead(
+      [file_path, fullFilePath, ...approvedReadPaths],
+      {
+        remoteCall: (context as { remoteCall?: unknown }).remoteCall,
+        forRemoteExecution: context.forRemoteExecution,
+        toolName: FILE_READ_TOOL_NAME,
+      },
+    )
 
     // Dedup: if we've already read this exact range and the file hasn't
     // changed on disk, return a stub instead of re-sending the full content.

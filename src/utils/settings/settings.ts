@@ -3082,3 +3082,286 @@ export async function rereadManagedSettingsIfNeeded(
     releaseManagedReread(run)
   }
 }
+
+// ============================================================================
+// Official 2.1.331 Project Settings Fail-Closed When Serving (`08b_project_settings_serve.js`)
+// (`D_s`, `PH`, `DH`, `Xmr` engage-time fail-closed guard)
+// ============================================================================
+
+export {
+  ORG_HELPER_DEFAULT_MAX_BUFFER,
+  ORG_HELPER_DEFAULT_TIMEOUT_MS,
+  ORG_HELPER_EXIT_DRAIN_MS,
+  ORG_HELPER_OUTPUT_LIMIT_ERROR,
+  ORG_HELPER_OUTPUT_LIMIT_LOG,
+  OrganizationHelperOutputLimitError,
+  type SpawnOrganizationHelperOptions,
+  type SpawnOrganizationHelperResult,
+  spawnOrganizationHelper,
+} from './orgHelperExecutor.js'
+
+/** Official 2.1.331 `CH` */
+export const SERVED_PROJECT_SETTINGS_SLOTS = [
+  'project',
+  'local',
+  'legacy',
+] as const
+
+export type ServedProjectSettingsSlot =
+  (typeof SERVED_PROJECT_SETTINGS_SLOTS)[number]
+
+/** Official 2.1.331 `MH` */
+export const SERVED_PROJECT_SETTINGS_RETRY_COUNT = 3
+
+/** Official 2.1.331 `OH` */
+export const SERVED_PROJECT_SETTINGS_RETRY_DELAY_MS = 100
+
+/** Official 2.1.331 `D_s` exact message */
+export const SERVED_SETTINGS_UNREADABLE_MESSAGE =
+  'A project settings file could not be read as serving began, so nothing is served'
+
+/** Official 2.1.331 `DH` exact message */
+export const SERVED_SETTINGS_ACCEPTED_UNREADABLE_MESSAGE =
+  'What was accepted for this settings file could not be read, so it is not applied to cloud sessions. Run claude apply-project-settings in a terminal in this folder to accept it again.'
+
+/**
+ * Official 2.1.331 `D_s`: thrown when a project settings file cannot be read
+ * (or its symlink containment cannot be determined) as serving begins, failing
+ * closed so nothing is served.
+ */
+export class ProjectSettingsServeUnreadableError extends Error {
+  constructor() {
+    super(SERVED_SETTINGS_UNREADABLE_MESSAGE)
+    this.name = 'ProjectSettingsServeUnreadableError'
+  }
+}
+
+export type ServedSettingsSlotReadOutcome =
+  | 'absent'
+  | 'unreadable'
+  | { text: string }
+
+export type ServedSettingsLinkedAwayOutcome = boolean | 'cannot_tell'
+
+export type ServedSettingsSlotsDescriptor = {
+  project: string | null
+  local: string | null
+  legacy: string | null
+  linkedAway: readonly ServedProjectSettingsSlot[]
+  notFollowed?: readonly ServedProjectSettingsSlot[]
+}
+
+export type ServedSettingsSlotSnapshot = {
+  slot: ServedProjectSettingsSlot
+  path: string
+  read: ServedSettingsSlotReadOutcome
+  away: boolean
+}
+
+function sleepSyncMs(ms: number): void {
+  if (ms <= 0) return
+  if (typeof Bun !== 'undefined' && typeof Bun.sleepSync === 'function') {
+    Bun.sleepSync(ms)
+    return
+  }
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    // busy wait fallback only when Bun.sleepSync is unavailable
+  }
+}
+
+/**
+ * Official 2.1.331 `PH(readSlot, checkLinkedAway, filePath, notFollowed)`:
+ * Retries up to `MH` (3) times with `OH` (100ms) delay whenever a slot's
+ * symlink check returns `'cannot_tell'` or its read returns `'unreadable'`
+ * while not confirmed to be linked away.
+ */
+export function readProjectSettingsSlotWithRetry(
+  readSlot: (filePath: string) => ServedSettingsSlotReadOutcome,
+  checkLinkedAway: (filePath: string) => ServedSettingsLinkedAwayOutcome,
+  filePath: string,
+  notFollowed: boolean,
+  options?: {
+    maxAttempts?: number
+    retryDelayMs?: number
+    sleepFn?: (ms: number) => void
+  },
+): {
+  read: ServedSettingsSlotReadOutcome
+  leadNow: ServedSettingsLinkedAwayOutcome
+} {
+  const maxAttempts =
+    options?.maxAttempts ?? SERVED_PROJECT_SETTINGS_RETRY_COUNT
+  const retryDelayMs =
+    options?.retryDelayMs ?? SERVED_PROJECT_SETTINGS_RETRY_DELAY_MS
+  const sleep = options?.sleepFn ?? sleepSyncMs
+
+  for (let attempt = 1; ; attempt++) {
+    const before: ServedSettingsLinkedAwayOutcome = notFollowed
+      ? checkLinkedAway(filePath)
+      : false
+    const read = readSlot(filePath)
+    const after = checkLinkedAway(filePath)
+    const leadNow: ServedSettingsLinkedAwayOutcome =
+      before === 'cannot_tell' || after === 'cannot_tell'
+        ? 'cannot_tell'
+        : before || after
+    if (
+      !(
+        leadNow === 'cannot_tell' ||
+        (read === 'unreadable' && leadNow !== true)
+      ) ||
+      attempt >= maxAttempts
+    ) {
+      return { read, leadNow }
+    }
+    sleep(retryDelayMs)
+  }
+}
+
+/**
+ * Official 2.1.331 `Xmr` engage-time fail-closed guard (`08b_project_settings_serve.js`):
+ * Inspects each non-null project settings slot (`project`, `local`, `legacy`).
+ * If any present slot cannot determine symlink containment (`'cannot_tell'`) or
+ * is `'unreadable'` without being confirmed linked-away, throws
+ * `ProjectSettingsServeUnreadableError` (`"A project settings file could not be
+ * read as serving began, so nothing is served"`).
+ */
+export function assertProjectSettingsReadableForServing(
+  slots: ServedSettingsSlotsDescriptor,
+  readSlot: (filePath: string) => ServedSettingsSlotReadOutcome,
+  checkLinkedAway: (filePath: string) => ServedSettingsLinkedAwayOutcome = () =>
+    false,
+  options?: {
+    maxAttempts?: number
+    retryDelayMs?: number
+    sleepFn?: (ms: number) => void
+  },
+): ServedSettingsSlotSnapshot[] {
+  const snapshots: ServedSettingsSlotSnapshot[] = []
+  for (const slot of SERVED_PROJECT_SETTINGS_SLOTS) {
+    const filePath = slots[slot]
+    if (filePath === null) continue
+    const notFollowed = slots.notFollowed?.includes(slot) === true
+    const { read, leadNow } = readProjectSettingsSlotWithRetry(
+      readSlot,
+      checkLinkedAway,
+      filePath,
+      notFollowed,
+      options,
+    )
+    const away =
+      leadNow === true || (slots.linkedAway.includes(slot) && !notFollowed)
+    if (
+      read !== 'absent' &&
+      (leadNow === 'cannot_tell' || (read === 'unreadable' && !away))
+    ) {
+      throw new ProjectSettingsServeUnreadableError()
+    }
+    snapshots.push({
+      slot,
+      path: filePath,
+      read,
+      away: away || leadNow === 'cannot_tell',
+    })
+  }
+  return snapshots
+}
+
+/**
+ * Official 2.1.331 `DH(filePath)`:
+ * Fatal settings load result when the accepted settings record for a served
+ * project settings file could not be read.
+ */
+export function createAcceptedSettingsUnreadableResult(filePath: string): {
+  settings: null
+  errors: Array<{
+    file: string
+    path: string
+    message: string
+    severity: 'fatal'
+  }>
+  loadState: 'didNotLoad'
+} {
+  return {
+    settings: null,
+    errors: [
+      {
+        file: filePath,
+        path: '',
+        message: SERVED_SETTINGS_ACCEPTED_UNREADABLE_MESSAGE,
+        severity: 'fatal',
+      },
+    ],
+    loadState: 'didNotLoad',
+  }
+}
+
+/**
+ * Real-filesystem convenience entry point for `assertProjectSettingsReadableForServing`:
+ * reads `.claude/settings.json` (`project`) and `.claude/settings.local.json` (`local`)
+ * under `cwd` and throws `ProjectSettingsServeUnreadableError` if any present file
+ * is unreadable as serving begins.
+ */
+export function probeProjectSettingsForServing(
+  cwd: string = getOriginalCwd(),
+  options?: {
+    maxAttempts?: number
+    retryDelayMs?: number
+    sleepFn?: (ms: number) => void
+  },
+): ServedSettingsSlotSnapshot[] {
+  const fs = getFsImplementation()
+  const projectPath = join(cwd, '.claude', 'settings.json')
+  const localPath = join(cwd, '.claude', 'settings.local.json')
+  const readSlot = (filePath: string): ServedSettingsSlotReadOutcome => {
+    try {
+      return { text: fs.readFileSync(filePath, { encoding: 'utf-8' }) }
+    } catch (err) {
+      const code = getErrnoCode(err)
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return 'absent'
+      }
+      return 'unreadable'
+    }
+  }
+  const checkLinkedAway = (
+    filePath: string,
+  ): ServedSettingsLinkedAwayOutcome => {
+    try {
+      const canonicalRoot = fs.realpathSync(cwd)
+      const isOutsideRoot = (target: string): boolean => {
+        const rel = relative(canonicalRoot, target)
+        return rel.startsWith('..') || isAbsolute(rel)
+      }
+      const parentDir = dirname(filePath)
+      const parentResolved = safeResolvePath(fs, parentDir)
+      if (
+        parentResolved.isSymlink &&
+        isOutsideRoot(parentResolved.resolvedPath)
+      ) {
+        return true
+      }
+      const { resolvedPath, isSymlink } = safeResolvePath(fs, filePath)
+      if (!isSymlink) return false
+      return isOutsideRoot(resolvedPath)
+    } catch (err) {
+      const code = getErrnoCode(err)
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return false
+      }
+      return 'cannot_tell'
+    }
+  }
+  return assertProjectSettingsReadableForServing(
+    {
+      project: projectPath,
+      local: localPath,
+      legacy: null,
+      linkedAway: [],
+    },
+    readSlot,
+    checkLinkedAway,
+    options,
+  )
+}

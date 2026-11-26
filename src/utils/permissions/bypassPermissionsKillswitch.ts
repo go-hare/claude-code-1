@@ -10,16 +10,28 @@ import {
 } from '../../state/AppState.js'
 import type { ToolPermissionContext } from '../../Tool.js'
 import {
+  BYPASS_DISABLED_BY_HELD_TO_AUTO_MESSAGE,
+  BYPASS_DISABLED_BY_SETTINGS_MESSAGE,
   createDisabledBypassPermissionsContext,
+  getBypassPermissionsDisabledReason,
   isBypassPermissionsModeDisabled,
+  isModeBlockedByHeldToAuto,
   verifyAutoModeGateAccess,
 } from './permissionSetup.js'
+
+export {
+  BYPASS_DISABLED_BY_HELD_TO_AUTO_MESSAGE,
+  BYPASS_DISABLED_BY_SETTINGS_MESSAGE,
+  getBypassPermissionsDisabledReason,
+  isModeBlockedByHeldToAuto,
+}
 
 let bypassPermissionsCheckRan = false
 
 /**
- * Checks whether bypassPermissions mode is disabled by policy/settings/gate
- * and strips it from AppState.toolPermissionContext if so.
+ * Checks whether bypassPermissions mode is disabled by policy/settings/gate/
+ * held-to-auto session cap (`CLAUDE_CODE_BRIDGE_CHILD_HELD_TO_AUTO`, official
+ * 2.1.331 `xIo`/`FC`) and strips it from AppState.toolPermissionContext if so.
  */
 export async function checkAndDisableBypassPermissionsIfNeeded(
   _toolPermissionContext: ToolPermissionContext,
@@ -34,7 +46,8 @@ export async function checkAndDisableBypassPermissionsIfNeeded(
   }
   bypassPermissionsCheckRan = true
 
-  if (!isBypassPermissionsModeDisabled()) {
+  const disabledReason = getBypassPermissionsDisabledReason()
+  if (disabledReason === undefined && !isBypassPermissionsModeDisabled()) {
     return
   }
 
@@ -42,9 +55,28 @@ export async function checkAndDisableBypassPermissionsIfNeeded(
     const nextCtx = createDisabledBypassPermissionsContext(
       prev.toolPermissionContext,
     )
-    return nextCtx === prev.toolPermissionContext
-      ? prev
-      : { ...prev, toolPermissionContext: nextCtx }
+    if (nextCtx === prev.toolPermissionContext) {
+      return prev
+    }
+    if (disabledReason && prev.notifications?.queue) {
+      return {
+        ...prev,
+        toolPermissionContext: nextCtx,
+        notifications: {
+          ...prev.notifications,
+          queue: [
+            ...prev.notifications.queue,
+            {
+              key: 'bypass-permissions-disabled-by-settings',
+              text: disabledReason,
+              color: 'warning' as const,
+              priority: 'high' as const,
+            },
+          ],
+        },
+      }
+    }
+    return { ...prev, toolPermissionContext: nextCtx }
   })
 }
 

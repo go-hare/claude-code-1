@@ -128,6 +128,93 @@ type SendUserFileOutput = {
   file_uuid?: string
 }
 
+/**
+ * Official 2.1.331 `Lvo.arguments_changed` (`05_send_file_toctou.js`):
+ * Refusal returned when SendUserFile arguments/file paths changed between
+ * permission display (`checkPermissions`) and execution (`call`).
+ */
+export const SEND_USER_FILE_ARGUMENTS_CHANGED_ERROR =
+  'No file was sent: the arguments of this call changed after Claude Code had listed its files for the user. Make the call again.'
+
+type ListedSendUserFileSnapshot = {
+  rawKey: string
+  expandedKey: string
+}
+
+const MAX_LISTED_SEND_FILE_ENTRIES = 256
+const listedSendUserFileArgsByToolUseId = new Map<
+  string,
+  ListedSendUserFileSnapshot
+>()
+
+/**
+ * Official 2.1.331 `O(files)`: canonical sorted deduplicated file-list key.
+ */
+export function canonicalizeSendUserFilePaths(
+  paths: readonly string[],
+): string {
+  return Array.from(new Set(paths)).sort().join('\n')
+}
+
+function buildListedSendUserFileSnapshot(
+  paths: readonly string[],
+): ListedSendUserFileSnapshot {
+  return {
+    rawKey: canonicalizeSendUserFilePaths(paths),
+    expandedKey: canonicalizeSendUserFilePaths(paths.map(p => expandPath(p))),
+  }
+}
+
+/**
+ * Record the exact file list displayed/checked for `toolUseId` so `call()` can
+ * verify no TOCTOU argument mutation occurred before reading or uploading.
+ */
+export function recordListedSendUserFileArgs(
+  toolUseId: string,
+  paths: readonly string[],
+): void {
+  listedSendUserFileArgsByToolUseId.set(
+    toolUseId,
+    buildListedSendUserFileSnapshot(paths),
+  )
+  if (listedSendUserFileArgsByToolUseId.size > MAX_LISTED_SEND_FILE_ENTRIES) {
+    const oldest = listedSendUserFileArgsByToolUseId.keys().next().value
+    if (oldest !== undefined) {
+      listedSendUserFileArgsByToolUseId.delete(oldest)
+    }
+  }
+}
+
+/**
+ * Consume and verify that the file arguments passed to `call()` match what was
+ * recorded when Claude Code listed/checked files for `toolUseId`.
+ */
+export function verifySendUserFileArgsUnchanged(
+  toolUseId: string | undefined,
+  paths: readonly string[],
+): { ok: true } | { ok: false; error: string } {
+  if (!toolUseId) {
+    return { ok: true }
+  }
+  const stashed = listedSendUserFileArgsByToolUseId.get(toolUseId)
+  if (stashed === undefined) {
+    return { ok: true }
+  }
+  listedSendUserFileArgsByToolUseId.delete(toolUseId)
+  const current = buildListedSendUserFileSnapshot(paths)
+  if (
+    current.rawKey !== stashed.rawKey ||
+    current.expandedKey !== stashed.expandedKey
+  ) {
+    return { ok: false, error: SEND_USER_FILE_ARGUMENTS_CHANGED_ERROR }
+  }
+  return { ok: true }
+}
+
+export function clearSendUserFileArgsStashForTesting(): void {
+  listedSendUserFileArgsByToolUseId.clear()
+}
+
 export function normalizeSendUserFilePaths(
   input: Partial<SendUserFileInput>,
 ): string[] {
@@ -221,8 +308,42 @@ Guidelines:
     }
   },
 
-  async call(input: SendUserFileInput, context) {
+  async checkPermissions(input: SendUserFileInput, context) {
     const requestedPaths = normalizeSendUserFilePaths(input)
+    if (context.toolUseId) {
+      recordListedSendUserFileArgs(context.toolUseId, requestedPaths)
+    }
+    return {
+      behavior: 'allow' as const,
+      updatedInput: input,
+    }
+  },
+
+  async call(
+    input: SendUserFileInput,
+    context,
+  ): Promise<{ data: SendUserFileOutput }> {
+    const requestedPaths = normalizeSendUserFilePaths(input)
+    // Official 2.1.331 TOCTOU argument check (`05_send_file_toctou.js` + `SendUserFileTool`):
+    // refuse sending any file if arguments/paths changed after permission check/display.
+    const argCheck = verifySendUserFileArgsUnchanged(
+      context.toolUseId,
+      requestedPaths,
+    )
+    if (!argCheck.ok) {
+      return {
+        data: {
+          sent: false,
+          file_path: requestedPaths[0] ?? '',
+          files: requestedPaths.map(file_path => ({
+            file_path,
+            sent: false,
+            error: argCheck.error,
+          })),
+          error: argCheck.error,
+        },
+      }
+    }
     if (requestedPaths.length === 0) {
       return {
         data: {

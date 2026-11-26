@@ -16,13 +16,14 @@
 import http from 'http'
 import https from 'https'
 import type net from 'net'
-import { isIP } from 'net'
-import { checkServerIdentity } from 'tls'
-import { HttpsProxyAgent } from 'https-proxy-agent'
-import type { HttpsProxyAgentOptions } from 'https-proxy-agent'
 import { getCACertificates } from '../caCerts.js'
 import { getMTLSConfig } from '../mtls.js'
 import { getProxyUrl, shouldBypassProxy } from '../proxy.js'
+import {
+  type HardenedHttpsProxyAgentOptions,
+  type ProxyConnectEndpointOptions,
+  SecureHttpsProxyAgent,
+} from '../proxyConnectAgent.js'
 
 /** densable d1y */
 export function isLocalhostOtelEndpoint(endpoint: string | undefined): boolean {
@@ -192,35 +193,22 @@ function abortController(controller: AbortController): void {
   controller.abort()
 }
 
-function buildTlsServerIdentityOpts(host: string): {
-  servername: string
-  checkServerIdentity: typeof checkServerIdentity
-} {
-  if (!host || isIP(host)) {
-    return {
-      servername: '',
-      checkServerIdentity: (_servername, cert) =>
-        checkServerIdentity(host, cert),
-    }
-  }
-  return {
-    servername: host,
-    checkServerIdentity,
-  }
-}
-
 /**
- * HttpsProxyAgent subclass with explicit `isSecureEndpoint`, TLS servername
- * preservation, and bounded proxy tunnel open timeout.
+ * Official 2.1.331 `class Yt extends IUo`:
+ * Hardened `SecureHttpsProxyAgent` subclass with explicit `isSecureEndpoint`,
+ * TLS servername preservation, hardened CONNECT parsing, and bounded proxy
+ * tunnel open timeout.
  */
-export class OtlpProxyAgent<Uri extends string> extends HttpsProxyAgent<Uri> {
+export class OtlpProxyAgent<
+  _Uri extends string = string,
+> extends SecureHttpsProxyAgent {
   readonly #isSecure: boolean
   readonly #tunnelOpensWithinMs: number
 
   constructor(
     opts: { isSecure: boolean; tunnelOpensWithinMs: number },
-    proxy: Uri,
-    agentOpts?: HttpsProxyAgentOptions<Uri>,
+    proxy: string | URL,
+    agentOpts?: HardenedHttpsProxyAgentOptions,
   ) {
     super(proxy, agentOpts)
     this.#isSecure = opts.isSecure
@@ -233,31 +221,8 @@ export class OtlpProxyAgent<Uri extends string> extends HttpsProxyAgent<Uri> {
 
   override async connect(
     req: http.ClientRequest,
-    opts: Parameters<HttpsProxyAgent<Uri>['connect']>[1],
+    opts: ProxyConnectEndpointOptions,
   ): Promise<net.Socket> {
-    const connectOpts = opts.secureEndpoint
-      ? (() => {
-          const host =
-            (opts as { servername?: string; host?: string }).servername ||
-            opts.host ||
-            ''
-          const origCheck = (
-            opts as { checkServerIdentity?: typeof checkServerIdentity }
-          ).checkServerIdentity
-          return {
-            ...opts,
-            ...(origCheck
-              ? {
-                  checkServerIdentity: (
-                    _servername: string,
-                    cert: Parameters<typeof checkServerIdentity>[1],
-                  ) => origCheck(host, cert),
-                }
-              : buildTlsServerIdentityOpts(host)),
-          }
-        })()
-      : opts
-
     const controller = new AbortController()
     const timer = setTimeout(
       abortController,
@@ -266,10 +231,10 @@ export class OtlpProxyAgent<Uri extends string> extends HttpsProxyAgent<Uri> {
     )
     this.connectOpts = {
       ...this.connectOpts,
-      signal: controller.signal as never,
+      signal: controller.signal,
     }
     try {
-      const socket = await super.connect(req, connectOpts)
+      const socket = await super.connect(req, opts)
       if (this.#isSecure) {
         socket.once('secureConnect', () => clearTimeout(timer))
         socket.once('close', () => clearTimeout(timer))

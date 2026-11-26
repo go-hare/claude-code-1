@@ -4432,6 +4432,27 @@ function readTtyNonblock(fd: number, buf: Buffer): number {
 const MOUSE_EXIT_DRAIN_MS = 25;
 const MOUSE_EXIT_QUIET_MS = 4;
 
+/** Cross-runtime synchronous sleep: Bun.sleepSync when available, Atomics.wait/busy-wait in Node. */
+export function sleepSync(ms: number): void {
+  if (ms <= 0) return;
+  if (typeof Bun !== 'undefined' && typeof Bun.sleepSync === 'function') {
+    Bun.sleepSync(ms);
+    return;
+  }
+  if (typeof SharedArrayBuffer === 'function' && typeof Atomics !== 'undefined' && typeof Atomics.wait === 'function') {
+    try {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      return;
+    } catch {
+      /* fall through to busy-wait if Atomics.wait is disallowed */
+    }
+  }
+  const end = performance.now() + ms;
+  while (performance.now() < end) {
+    /* busy-wait fallback */
+  }
+}
+
 /**
  * densable `aqe(n=process.stdin,u=0)`. `owed` is `querier.owed()`: wait up
  * to `Gd` for that many DA1 replies on `/dev/tty`.
@@ -4482,7 +4503,7 @@ export function drainStdin(stdin: NodeJS.ReadStream = process.stdin, owed = 0, q
         t < deadline &&
         (lastMouseChunkAt === 0 || t - lastMouseChunkAt < MOUSE_EXIT_QUIET_MS);
       if (n < 0 || (!waitingForReplies && !waitingForQuietMouse) || t >= deadline) break;
-      Bun.sleepSync(2);
+      sleepSync(2);
     }
   } catch {
     // EAGAIN (buffer empty — expected), ENXIO/ENOENT (no controlling tty),

@@ -1309,6 +1309,12 @@ function openProxyConnectTunnel(
         const token = Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')
         headers.push(`Proxy-Authorization: Basic ${token}`)
       }
+      // Official 2.1.331 CONNECT request injection guard: reject whitespace in
+      // target or CR/LF/NUL in target or any CONNECT header.
+      if (/\s/.test(authority) || headers.some(line => /[\0\r\n]/.test(line))) {
+        fail()
+        return
+      }
       headers.push('', '')
       socket.write(headers.join('\r\n'))
     }
@@ -1318,14 +1324,23 @@ function openProxyConnectTunnel(
       buffered = Buffer.concat([buffered, buf])
       const headerEnd = buffered.indexOf('\r\n\r\n')
       if (headerEnd === -1) {
-        if (buffered.length > MAX_PROXY_CONNECT_HEADER_BYTES) {
+        if (buffered.length - 3 > MAX_PROXY_CONNECT_HEADER_BYTES) {
           fail()
         }
         return
       }
-      const headerText = buffered.subarray(0, headerEnd).toString('latin1')
-      const statusLine = headerText.split('\r\n', 1)[0] ?? ''
-      if (!/^HTTP\/1\.[01]\s+200(?:\s|$)/i.test(statusLine)) {
+      if (headerEnd > MAX_PROXY_CONNECT_HEADER_BYTES) {
+        fail()
+        return
+      }
+      const [statusLine = '', ...headerLines] = buffered
+        .subarray(0, headerEnd)
+        .toString('ascii')
+        .split('\r\n')
+      if (
+        !/^HTTP\/1\.[01]\s+200(?:\s|$)/i.test(statusLine) ||
+        headerLines.filter(Boolean).some(line => line.indexOf(':') < 0)
+      ) {
         fail()
         return
       }

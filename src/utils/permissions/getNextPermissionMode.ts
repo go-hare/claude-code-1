@@ -1,5 +1,8 @@
 import type { ToolPermissionContext } from '../../Tool.js'
-import type { PermissionMode } from './PermissionMode.js'
+import {
+  isModeBlockedByHeldToAuto,
+  type PermissionMode,
+} from './PermissionMode.js'
 import {
   isAutoModeGateEnabled,
   transitionPermissionMode,
@@ -17,9 +20,9 @@ function canCycleToAutoModeInCycle(
 /**
  * Determines the next permission mode when cycling through modes with Shift+Tab.
  *
- * Official 2.1.289 cycle:
- *   default → acceptEdits → plan
- *     ├─ if isBypassPermissionsModeAvailable → bypassPermissions → (auto if gated else default)
+ * Official 2.1.289 cycle (with 2.1.331 `RIo` held-to-auto filtering):
+ *   default → acceptEdits (skipped when held to auto) → plan
+ *     ├─ if isBypassPermissionsModeAvailable && !heldToAuto → bypassPermissions → (auto if gated else default)
  *     ├─ else if isAutoModeAvailable && isAutoModeGateEnabled() → auto → default
  *     └─ else → default
  */
@@ -29,13 +32,16 @@ export function getNextPermissionMode(
 ): PermissionMode {
   switch (toolPermissionContext.mode) {
     case 'default':
-      return 'acceptEdits'
+      return isModeBlockedByHeldToAuto('acceptEdits') ? 'plan' : 'acceptEdits'
 
     case 'acceptEdits':
       return 'plan'
 
     case 'plan':
-      if (toolPermissionContext.isBypassPermissionsModeAvailable) {
+      if (
+        toolPermissionContext.isBypassPermissionsModeAvailable &&
+        !isModeBlockedByHeldToAuto('bypassPermissions')
+      ) {
         return 'bypassPermissions'
       }
       if (canCycleToAutoModeInCycle(toolPermissionContext)) {

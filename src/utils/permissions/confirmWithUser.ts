@@ -28,6 +28,28 @@ import {
 } from '../../services/analytics/index.js'
 import { isNoOneToAskDenyReason } from './permissionDecisionReasons.js'
 
+export {
+  APPROVAL_CARD_ALLOWED_HOSTS,
+  APPROVAL_CARD_COMMIT_PUSH_PR_QUESTION,
+  APPROVAL_CARD_DECLINED_MESSAGE,
+  APPROVAL_CARD_MAX_WAIT_MS,
+  APPROVAL_CARD_MIN_READ_DELAY_MS,
+  APPROVAL_CARD_NEW_BRANCH_LABEL,
+  APPROVAL_CARD_PUBLIC_REPO_MESSAGE,
+  APPROVAL_CARD_PUSH_PR_QUESTION,
+  APPROVAL_CARD_STALE_OR_CHANGED_MESSAGE,
+  APPROVAL_CARD_TOO_FAST_MESSAGE,
+  APPROVAL_CARD_UNREADABLE_ANSWER_MESSAGE,
+  type ApprovalCardChoiceValue,
+  type ApprovalCardEnv,
+  type ApprovalCardPromptAnswer,
+  type ApprovalCardPromptRequest,
+  type ApprovalCardStopResult,
+  consumeApprovalCardToken,
+  isIssuedApprovalCardToken,
+  requestApprovalCardWithReadDelay,
+} from './approvalCardReadDelay.js'
+
 /** densable Flt */
 export const CONFIRM_TOOL_USE_ID_PREFIX = 'confirm_'
 
@@ -171,6 +193,7 @@ export async function confirmWithUser<T>(input: {
   question: string
   choices: ConfirmWithUserChoice<T>[]
   personOnly?: boolean
+  defaultToNo?: boolean
 }): Promise<ConfirmWithUserResult<T>> {
   const { toolUseContext, source } = input
   if (!canConfirmWithUser(toolUseContext)) {
@@ -225,6 +248,7 @@ async function askConfirmWithUser<T>(input: {
   question: string
   choices: ConfirmWithUserChoice<T>[]
   personOnly?: boolean
+  defaultToNo?: boolean
 }): Promise<ConfirmWithUserResult<T>> {
   const parsed = AskUserQuestionTool.inputSchema.safeParse({
     questions: [
@@ -260,6 +284,7 @@ async function askConfirmWithUser<T>(input: {
     ...permission,
     forcedByCaller: true,
     ...(input.personOnly === true ? { personOnly: true as const } : {}),
+    ...(input.defaultToNo === true ? { defaultToNo: true } : {}),
   }
   const toolUseID = `${CONFIRM_TOOL_USE_ID_PREFIX}${randomUUID()}`
   const result = await input.canUseTool(

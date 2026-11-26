@@ -299,6 +299,8 @@ function formatNamedConnectionError(code: string): string {
       return `No internet route — check your connection or VPN (${code})`
     case 'ERR_PROXY_TUNNEL':
       return `Couldn't connect through your proxy (${code})`
+    case 'RedirectRefused':
+      return `Unable to connect to API: sign in to network or proxy. The request was redirected (${code}). If that does not help, ask the network's administrator to let api.anthropic.com through`
     default:
       return `Unable to connect to API (${code})`
   }

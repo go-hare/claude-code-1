@@ -7,6 +7,7 @@ import {
   PERMISSION_MODES,
   type PermissionMode,
 } from '../../types/permissions.js'
+import { isEnvTruthy } from '../envUtils.js'
 import { lazySchema } from '../lazySchema.js'
 
 // Re-export for backwards compatibility
@@ -155,4 +156,49 @@ export function permissionModeFooterLabel(mode: PermissionMode): string {
 
 export function getModeColor(mode: PermissionMode): ModeColorKey {
   return getModeConfig(mode).color
+}
+
+/**
+ * Official 2.1.331 `gs` permission mode permissiveness ranks.
+ */
+const PERMISSION_MODE_RANK: Record<PermissionMode, number> = {
+  plan: 0,
+  bubble: 1,
+  default: 1,
+  dontAsk: 1,
+  acceptEdits: 2,
+  auto: 3,
+  bypassPermissions: 4,
+}
+
+/**
+ * Official 2.1.331 `kv(mode, ceiling)`:
+ * Returns `mode` if it is no more permissive than `ceiling`, otherwise `undefined`.
+ * Special-cases `ceiling === 'auto' && mode === 'acceptEdits'` → `undefined` because
+ * `acceptEdits` auto-allows edits without the auto-mode classifier.
+ */
+export function clampPermissionModeToCeiling(
+  mode: PermissionMode | undefined,
+  ceiling: PermissionMode,
+): PermissionMode | undefined {
+  if (!mode) return undefined
+  if (ceiling === 'auto' && mode === 'acceptEdits') return undefined
+  return PERMISSION_MODE_RANK[mode] <= PERMISSION_MODE_RANK[ceiling]
+    ? mode
+    : undefined
+}
+
+/**
+ * Official 2.1.331 `RIo(mode)`:
+ * Returns true when this bridge child session is held to auto mode
+ * (`CLAUDE_CODE_BRIDGE_CHILD_HELD_TO_AUTO`) and `mode` is not allowed
+ * at or below the `'auto'` ceiling (`bypassPermissions` and `acceptEdits`).
+ */
+export function isModeBlockedByHeldToAuto(
+  mode: PermissionMode | undefined,
+): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_BRIDGE_CHILD_HELD_TO_AUTO) &&
+    !clampPermissionModeToCeiling(mode, 'auto')
+  )
 }

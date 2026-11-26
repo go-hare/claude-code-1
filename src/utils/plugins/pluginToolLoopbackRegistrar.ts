@@ -6,6 +6,11 @@
  */
 import { randomUUID, timingSafeEqual } from 'crypto'
 import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http'
+import {
   Server,
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server'
@@ -67,10 +72,15 @@ export function clearPluginToolRegistrarForTests(): void {
   stopLoopbackServerForTests()
 }
 
+type LoopbackServer = {
+  readonly port: number
+  stop(closeActiveConnections?: boolean): void
+}
+
 let loopback:
   | {
       state: LoopbackState
-      server: ReturnType<typeof Bun.serve>
+      server: LoopbackServer
       /** plugin → generation (MCP Server.version suffix) */
       generations: Map<string, number>
     }
@@ -218,20 +228,184 @@ async function handleLoopbackFetch(
   return transport.handleRequest(request)
 }
 
-function ensureLoopbackListening(): LoopbackState {
+function isLoopbackAddress(remoteAddress: string | undefined): boolean {
+  return (
+    remoteAddress === '127.0.0.1' ||
+    remoteAddress === '::1' ||
+    remoteAddress === '::ffff:127.0.0.1'
+  )
+}
+
+async function nodeRequestToWebRequest(
+  req: IncomingMessage,
+  port: number,
+): Promise<Request> {
+  const method = req.method ?? 'GET'
+  const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`).toString()
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value === undefined) continue
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(key, item)
+    } else {
+      headers.set(key, value)
+    }
+  }
+  if (method === 'GET' || method === 'HEAD') {
+    return new Request(url, { method, headers })
+  }
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+  }
+  const body =
+    chunks.length > 0 ? new Uint8Array(Buffer.concat(chunks)) : undefined
+  return new Request(url, { method, headers, body })
+}
+
+async function writeWebResponseToNode(
+  response: Response,
+  res: ServerResponse,
+): Promise<void> {
+  if (res.destroyed || res.writableEnded) return
+  res.statusCode = response.status
+  if (response.statusText) {
+    res.statusMessage = response.statusText
+  }
+  response.headers.forEach((value, key) => {
+    if (typeof res.appendHeader === 'function') {
+      res.appendHeader(key, value)
+    } else {
+      res.setHeader(key, value)
+    }
+  })
+  if (!response.body) {
+    res.end()
+    return
+  }
+  const reader = response.body.getReader()
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (res.destroyed) {
+        await reader.cancel()
+        return
+      }
+      res.write(value)
+    }
+  } finally {
+    reader.releaseLock()
+    if (!res.writableEnded) {
+      res.end()
+    }
+  }
+}
+
+async function handleNodeLoopbackRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  state: LoopbackState,
+  generations: Map<string, number>,
+): Promise<void> {
+  try {
+    const request = await nodeRequestToWebRequest(req, state.port)
+    const response = await handleLoopbackFetch(request, state, generations)
+    await writeWebResponseToNode(response, res)
+  } catch (err) {
+    logForDebugging(
+      `$.tool.register: node loopback handler error: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'error' },
+    )
+    if (!res.headersSent) {
+      res.statusCode = 500
+      res.end('internal server error')
+    } else if (!res.writableEnded) {
+      res.end()
+    }
+  }
+}
+
+function createNodeLoopbackServer(
+  state: LoopbackState,
+  generations: Map<string, number>,
+): LoopbackServer {
+  const httpServer = createServer((req, res) => {
+    if (
+      req.socket.remoteAddress &&
+      !isLoopbackAddress(req.socket.remoteAddress)
+    ) {
+      res.statusCode = 404
+      res.end('not found')
+      return
+    }
+    void handleNodeLoopbackRequest(req, res, state, generations)
+  })
+  httpServer.on('connection', socket => {
+    if (socket.remoteAddress && !isLoopbackAddress(socket.remoteAddress)) {
+      socket.destroy()
+    }
+  })
+  httpServer.on('error', err => {
+    logForDebugging(
+      `$.tool.register: node loopback server error: ${err.message}`,
+      { level: 'error' },
+    )
+  })
+  // Omit host so Node binds synchronously (passing '127.0.0.1' defers through
+  // async dns.lookup and leaves address() null); loopback access is enforced
+  // on both 'connection' and request handlers plus bearer token auth.
+  httpServer.listen(0)
+  httpServer.unref()
+  const address = httpServer.address()
+  const port =
+    address !== null && typeof address === 'object' ? address.port : 0
+  return {
+    port,
+    stop: (closeActiveConnections?: boolean) => {
+      if (closeActiveConnections) {
+        httpServer.closeAllConnections?.()
+      }
+      httpServer.close()
+    },
+  }
+}
+
+function createLoopbackServer(
+  state: LoopbackState,
+  generations: Map<string, number>,
+  forceNode = false,
+): LoopbackServer {
+  if (
+    !forceNode &&
+    typeof Bun !== 'undefined' &&
+    typeof Bun.serve === 'function'
+  ) {
+    const bunServer = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: (req: Request) => handleLoopbackFetch(req, state, generations),
+    })
+    bunServer.unref()
+    return {
+      port: bunServer.port ?? 0,
+      stop: (closeActiveConnections?: boolean) => {
+        bunServer.stop(closeActiveConnections)
+      },
+    }
+  }
+  return createNodeLoopbackServer(state, generations)
+}
+
+function ensureLoopbackListening(forceNode = false): LoopbackState {
   if (loopback) return loopback.state
   const state: LoopbackState = { port: 0, secret: randomUUID() }
   const generations = new Map<string, number>()
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: (req: Request) => handleLoopbackFetch(req, state, generations),
-  })
-  server.unref()
+  const server = createLoopbackServer(state, generations, forceNode)
   registerCleanup(() => {
     stopLoopbackServerForTests()
   })
-  state.port = server.port ?? 0
+  state.port = server.port
   loopback = { state, server, generations }
   logForDebugging(
     `$.tool.register: loopback MCP server listening on 127.0.0.1:${state.port}`,
@@ -239,11 +413,10 @@ function ensureLoopbackListening(): LoopbackState {
   return state
 }
 
-/** densable LHt / 325 Apo */
-export function createBunPluginToolRegistrar(): PluginToolRegistrar {
+function createPluginToolRegistrar(forceNode: boolean): PluginToolRegistrar {
   return Object.assign(
     (plugin: string, tools: PluginRegisteredToolSpec[]) => {
-      const state = ensureLoopbackListening()
+      const state = ensureLoopbackListening(forceNode)
       if (!loopback) {
         throw new Error('plugin tool loopback failed to start')
       }
@@ -265,4 +438,14 @@ export function createBunPluginToolRegistrar(): PluginToolRegistrar {
         URL.parse(url)?.origin === `http://127.0.0.1:${loopback.state.port}`,
     },
   )
+}
+
+/** Explicit node:http loopback registrar (also used automatically when Bun.serve is unavailable). */
+export function createNodePluginToolRegistrar(): PluginToolRegistrar {
+  return createPluginToolRegistrar(true)
+}
+
+/** densable LHt / 325 Apo */
+export function createBunPluginToolRegistrar(): PluginToolRegistrar {
+  return createPluginToolRegistrar(false)
 }

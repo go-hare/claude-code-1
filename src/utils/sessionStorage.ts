@@ -125,6 +125,7 @@ import {
   isAbortError,
   isENOENT,
   isFsInaccessible,
+  TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from './errors.js'
 import type { FileHistorySnapshot } from './fileHistory.js'
 import { formatFileSize } from './format.js'
@@ -12861,5 +12862,71 @@ export async function planResumeHeadForTranscript(
     }
   } finally {
     await fh.close().catch(() => {})
+  }
+}
+
+// ============================================================================
+// Official 2.1.331 Cross-Machine Saved Chat Refusal Guard
+// (`09_cross_machine_transcript.js`: `__n`, `P1o`, `Qji` remoteCall check)
+// ============================================================================
+
+/** Official 2.1.331 `__n` basename prefix for files saved from claude.ai chats. */
+export const SAVED_CHAT_FILE_PREFIX = 'artifact-chat.'
+
+/** Official 2.1.331 telemetry/refusal code for cross-machine saved chat reads. */
+export const SAVED_CHAT_CROSS_MACHINE_REFUSAL_REASON =
+  'Read of a saved chat file refused for another machine'
+
+/**
+ * Official 2.1.331 `P1o(filePath)`:
+ * True when the file's basename starts with `artifact-chat.` (case-insensitive).
+ */
+export function isSavedChatFilePath(filePath: string): boolean {
+  return basename(filePath.replace(/\\/g, '/'))
+    .toLowerCase()
+    .startsWith(SAVED_CHAT_FILE_PREFIX)
+}
+
+/**
+ * Official 2.1.331 user-facing message refusing cross-machine saved chat reads.
+ */
+export function formatCrossMachineSavedChatRefusalMessage(
+  toolName = 'Read',
+): string {
+  return `The ${toolName} tool doesn't send files saved from claude.ai chats to a session on another machine. To read this file, use a Claude Code session on the machine where the file is.`
+}
+
+/**
+ * Official 2.1.331 `T` error thrown when a remote/cross-machine tool call
+ * attempts to read a saved claude.ai chat file (`artifact-chat.*`).
+ */
+export class CrossMachineSavedChatReadError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  constructor(toolName = 'Read') {
+    super(
+      formatCrossMachineSavedChatRefusalMessage(toolName),
+      SAVED_CHAT_CROSS_MACHINE_REFUSAL_REASON,
+    )
+    this.name = 'CrossMachineSavedChatReadError'
+  }
+}
+
+/**
+ * Official 2.1.331 `Qji` guard:
+ * Refuses reading any path (or symlink spelling) whose basename identifies a
+ * saved claude.ai chat file when invoked on behalf of another machine
+ * (`remoteCall !== undefined` or `forRemoteExecution === true`).
+ */
+export function assertNotCrossMachineSavedChatRead(
+  paths: readonly string[],
+  options: {
+    remoteCall?: unknown
+    forRemoteExecution?: boolean
+    toolName?: string
+  },
+): void {
+  const isCrossMachine =
+    options.remoteCall !== undefined || options.forRemoteExecution === true
+  if (isCrossMachine && paths.some(isSavedChatFilePath)) {
+    throw new CrossMachineSavedChatReadError(options.toolName ?? 'Read')
   }
 }

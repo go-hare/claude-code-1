@@ -17,6 +17,7 @@
  */
 
 import { open, stat } from 'fs/promises'
+import { isDeepStrictEqual } from 'node:util'
 import { join } from 'path'
 import { isHandedOverForUserMergeOrReview } from '../../daemon/jobState.js'
 import type { SessionEntry } from '../../cli/bg/engine.js'
@@ -810,7 +811,9 @@ export function fleetRemoteJobsStateEqual(
       typeof b === 'object' &&
       a !== null &&
       b !== null &&
-      Bun.deepEquals(a, b)
+      (typeof Bun !== 'undefined' && typeof Bun.deepEquals === 'function'
+        ? Bun.deepEquals(a, b)
+        : isDeepStrictEqual(a, b))
     )
   })
 }

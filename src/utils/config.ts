@@ -1152,6 +1152,101 @@ function parentConfigPathKey(pathKey: string): string {
   return normalizePathForConfigKey(resolve(pathKey, '..'))
 }
 
+/** Official 2.1.331 `TQn` default untrusted reason when output is not a TTY. */
+export const FOLDER_NOT_TRUSTED_NON_TTY_REASON =
+  "this folder isn't trusted, so no prompt could ask you to trust it"
+
+/** Official 2.1.331 `TQn` fail-closed reason when global config cannot be read. */
+export const CONFIG_UNREADABLE_TRUST_REASON =
+  "Claude Code couldn't read its config, so it can't tell whether this folder is trusted"
+
+/**
+ * Official 2.1.331 `TQn(gate, storage)` (`08_config_trust_failclosed.js`):
+ * Fail-closed folder trust check for non-TTY launches. Returns `undefined`
+ * when the folder is trusted (or the gate is disabled). If enabling/reading
+ * config throws, logs the error and returns `CONFIG_UNREADABLE_TRUST_REASON`
+ * instead of assuming trust.
+ */
+export async function checkFolderTrustForNonTtyLaunch(options?: {
+  storageV5?: StorageV5
+  gateEnabled?: boolean
+  enableConfigsFn?: (storageV5?: StorageV5) => Promise<void> | void
+  isTrustedFn?: () => boolean
+}): Promise<string | undefined> {
+  let reason = FOLDER_NOT_TRUSTED_NON_TTY_REASON
+  try {
+    await (options?.enableConfigsFn ?? enableConfigs)(options?.storageV5)
+    if (
+      (options?.isTrustedFn ?? checkHasTrustDialogAccepted)() ||
+      options?.gateEnabled === false
+    ) {
+      return undefined
+    }
+  } catch (err) {
+    logError(err)
+    reason = CONFIG_UNREADABLE_TRUST_REASON
+  }
+  return reason
+}
+
+/**
+ * Fail-closed trust evaluation returning a structured result that distinguishes
+ * an untrusted folder from an unreadable global config.
+ */
+export function checkFolderTrustFailClosed(options?: {
+  readConfigFn?: () => GlobalConfig | undefined
+  dir?: string
+}):
+  | { trusted: true }
+  | { trusted: false; configUnreadable: boolean; reason: string } {
+  if (getSessionTrustAccepted()) {
+    return { trusted: true }
+  }
+  if (isEnvTruthy(process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST)) {
+    return {
+      trusted: false,
+      configUnreadable: false,
+      reason: FOLDER_NOT_TRUSTED_NON_TTY_REASON,
+    }
+  }
+  let config: GlobalConfig | undefined
+  try {
+    config = options?.readConfigFn ? options.readConfigFn() : getGlobalConfig()
+  } catch (err) {
+    logError(err)
+    return {
+      trusted: false,
+      configUnreadable: true,
+      reason: CONFIG_UNREADABLE_TRUST_REASON,
+    }
+  }
+  if (config === undefined) {
+    return {
+      trusted: false,
+      configUnreadable: true,
+      reason: CONFIG_UNREADABLE_TRUST_REASON,
+    }
+  }
+  const projectPath = options?.dir
+    ? normalizePathForConfigKey(resolve(options.dir))
+    : getProjectPathForConfig()
+  const projectConfig = getProjectConfigEntryForPath(
+    config.projects,
+    projectPath,
+  )
+  if (projectConfig?.hasTrustDialogAccepted) {
+    return { trusted: true }
+  }
+  if (walkHasTrustDialogAccepted(config, options?.dir ?? getCwd())) {
+    return { trusted: true }
+  }
+  return {
+    trusted: false,
+    configUnreadable: false,
+    reason: FOLDER_NOT_TRUSTED_NON_TTY_REASON,
+  }
+}
+
 function computeTrustDialogAccepted(): boolean {
   // Check session-level trust (for home directory case where trust is not persisted)
   // When running from home dir, trust dialog is shown but acceptance is stored
@@ -1166,7 +1261,15 @@ function computeTrustDialogAccepted(): boolean {
     return false
   }
 
-  const config = getGlobalConfig()
+  let config: GlobalConfig
+  try {
+    config = getGlobalConfig()
+  } catch (err) {
+    // Official 2.1.331 fail-closed trust guard: if global config cannot be read,
+    // never assume the folder is trusted.
+    logError(err)
+    return false
+  }
 
   // Always check where trust would be saved (git root or original cwd)
   // This is the primary location where trust is persisted by saveCurrentProjectConfig

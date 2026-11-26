@@ -16,6 +16,7 @@ import {
 import { getSettingSourceDisplayNameLowercase } from '../settings/constants.js'
 import { jsonStringify } from '../slowOperations.js'
 import { toPosixPath } from './filesystem.js'
+import { isModeBlockedByHeldToAuto } from './PermissionMode.js'
 import type { PermissionRuleValue } from './PermissionRule.js'
 import type {
   PermissionUpdate,
@@ -310,6 +311,16 @@ function applySinglePermissionUpdate(
 ): ToolPermissionContext {
   switch (update.type) {
     case 'setMode':
+      // Official 2.1.331 `RIo`: bridge child sessions held to auto cannot enter
+      // modes outside the auto ceiling (`bypassPermissions` or `acceptEdits`).
+      if (isModeBlockedByHeldToAuto(update.mode)) {
+        logForDebugging(
+          update.mode === 'bypassPermissions'
+            ? 'Ignoring permission update: Bypass permissions mode is not available in a session held to auto mode'
+            : `Ignoring permission update: setMode '${update.mode}' rejected in a session held to auto mode`,
+        )
+        return context
+      }
       // Official 2.1.325 #2295 (SEA @284784602): reject unavailable bypassPermissions
       // and clear stale `prePlanMode` whenever leaving plan mode so a subsequent
       // plan exit cannot revert the session to an earlier permission mode.

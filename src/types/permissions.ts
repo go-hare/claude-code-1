@@ -290,6 +290,34 @@ export type PermissionAskDecision<
    * from silently bypassing the prompt.
    */
   wholeToolRuleDoesNotCover?: boolean
+  /**
+   * Official 2.1.331 `Ijn` / `gVo`: true when this ask was escalated after a
+   * safety-check flag or an earlier decline in the same turn.
+   */
+  afterClassifierBlock?: boolean
+  /**
+   * Official 2.1.331 `Ijn` / `_kl`: true when this ask requires direct user
+   * interaction and cannot be auto-approved by classifiers or fast paths.
+   */
+  askRequiresUserInteraction?: boolean
+  /**
+   * Official 2.1.331 `Ijn`: whether PermissionRequest hooks may refuse this ask.
+   */
+  hooksMayRefuse?: boolean
+  /**
+   * Official 2.1.331 `Ijn` / `_kl`: when false, PermissionRequest hooks must
+   * not auto-allow this ask.
+   */
+  hooksMayAllow?: boolean
+  /**
+   * Official 2.1.331 `Ijn` / `gVo` / `_kl` / `ao`: prompt should default to No/Deny.
+   */
+  defaultToNo?: boolean
+  /**
+   * Official 2.1.331 `Ijn` (`YJr`): pre-built refusal decision used when no
+   * prompt can be shown (`shouldAvoidPermissionPrompts` / `denyInsteadOfPrompting`).
+   */
+  refusal?: PermissionDenyDecision
 }
 
 /**

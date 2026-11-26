@@ -63,6 +63,31 @@ import {
 import { extractAuthorizationHeader } from '../../utils/residualFinalEnvGates.js'
 import { shouldPropagateTraceparent } from '../../utils/propagateTraceparent.js'
 import { assertValidOutgoingHeaders } from './invalidRequestHeader.js'
+import {
+  applyResponseCompressionPolicy,
+  wrapFetchWithModelRedirectGuard,
+} from './modelRedirectGuard.js'
+export {
+  applyResponseCompressionPolicy,
+  createRedirectRefusedError,
+  extractFetchMethodAndUrl,
+  hasAnyProxyConfigured,
+  inspectAndFollowModelRedirects,
+  isAnthropicApiHost,
+  isRedirectCheckEnabled,
+  isRedirectRefusedError,
+  isUnexpectedRedirectError,
+  MAX_SAFE_REDIRECT_HOPS,
+  noteModelCallRefused,
+  parseTriBoolEnv,
+  recordApiRedirect,
+  REDIRECT_CHECK_KILLSWITCH_FLAG,
+  resetApiRedirectCountsForTests,
+  RESPONSE_COMPRESSION_DISABLE_FLAG,
+  runWithModelRedirectTracking,
+  shouldDisableResponseCompression,
+  wrapFetchWithModelRedirectGuard,
+} from './modelRedirectGuard.js'
 
 /**
  * Environment variables for different client types:
@@ -654,9 +679,15 @@ export async function getAnthropicClient({
     ? resolveByteStreamIdleTimeoutMs({ provider: requestProvider })
     : 0
 
-  // Base fetch (gzip / client-request-id), then byte-body idle watchdog when
-  // NMh is on so J_ timeout:false is not a hang hole.
-  let resolvedFetch = buildFetch(fetchOverride, source, storageV5)
+  // Base fetch (gzip / client-request-id / redirect refusal / response
+  // compression policy), then byte-body idle watchdog when NMh is on so
+  // J_ timeout:false is not a hang hole.
+  let resolvedFetch = buildFetch(
+    fetchOverride,
+    source,
+    storageV5,
+    requestProvider,
+  )
   // densable 2.1.239: default missing Bedrock eventstream Content-Type,
   // then throw (no retry) when a proxy transformed it.
   resolvedFetch = wrapFetchWithBedrockContentTypeGuard(
@@ -1323,13 +1354,20 @@ function buildFetch(
   fetchOverride: ClientOptions['fetch'],
   source: string | undefined,
   storageV5?: unknown,
+  routedProvider: ReturnType<typeof getAPIProvider> = getAPIProvider(),
 ): ClientOptions['fetch'] {
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-  const inner = fetchOverride ?? globalThis.fetch
+  const rawInner = (fetchOverride ?? globalThis.fetch) as (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Promise<Response>
+  // Official 2.1.331 `qo`: refuse unexpected redirects on model API POSTs
+  // unless `CLAUDE_CODE_DISABLE_REDIRECT_CHECK` is set.
+  const guardedInner = wrapFetchWithModelRedirectGuard(rawInner)
   // Only send to the first-party API — Bedrock/Vertex/Foundry don't log it
   // and unknown headers risk rejection by strict proxies (inc-4029 class).
   const injectClientRequestId =
-    getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
+    routedProvider === 'firstParty' && isFirstPartyAnthropicBaseUrl()
   return async (input, init) => {
     // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
     const headers = new Headers(init?.headers)
@@ -1351,11 +1389,20 @@ function buildFetch(
     } catch {
       // never let logging crash the fetch
     }
-    const nextInit = { ...init, headers }
+    const nextInit: RequestInit & { unix?: string } = { ...init, headers }
+    // Official 2.1.331 (`28_response_compression.js`): set `accept-encoding: identity`
+    // on HTTPS proxied requests when `CLAUDE_CODE_DISABLE_RESPONSE_COMPRESSION`
+    // is enabled or `tengu_velvety_duckling` is enabled for firstParty.
+    if (url) {
+      applyResponseCompressionPolicy(url, headers, {
+        unix: nextInit.unix,
+        provider: routedProvider,
+      })
+    }
     // densable En_ — real path/body; before gzip so webhook sees JSON.
     // Official x_h: compress eligible first-party request bodies with gzip
     // and pad JSON body whitespace for length fingerprint resistance.
     const withGzip = applyGzipRequestBodyInit(url, nextInit, { storageV5 })
-    return inner(input, withGzip ?? nextInit)
+    return guardedInner(input, withGzip ?? nextInit)
   }
 }

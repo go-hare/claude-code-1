@@ -38,6 +38,7 @@ type REPLOutput = {
   result: string
   tool_calls: number
   media?: REPLMediaBlock[]
+  plainErrorLine?: { text: string; replaces: string }
 }
 
 export const REPLTool = buildTool({

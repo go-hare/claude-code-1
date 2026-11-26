@@ -9,9 +9,7 @@ import {
   Agent as HttpsAgent,
   type AgentOptions as HttpsAgentOptions,
 } from 'https'
-import { isIP, type Socket } from 'net'
-import { checkServerIdentity } from 'tls'
-import { HttpsProxyAgent, type HttpsProxyAgentOptions } from 'https-proxy-agent'
+import { type Socket } from 'net'
 import memoize from 'lodash-es/memoize.js'
 import type * as undici from 'undici'
 import { getIsNonInteractiveSession } from '../bootstrap/state.js'
@@ -25,6 +23,36 @@ import {
   setMtlsErrorClosingAgentFactory,
   type TLSConfig,
 } from './mtls.js'
+import {
+  type HardenedHttpsProxyAgentOptions,
+  SecureHttpsProxyAgent,
+} from './proxyConnectAgent.js'
+export {
+  assertSafeIdpProxyTarget,
+  buildConnectRequestLines,
+  buildTlsIdentityOptions,
+  createIdpHttpViaProxyBlockedError,
+  createIdpProxyAgent,
+  createLoopbackMetadataViaProxyBlockedError,
+  ERR_PROXY_TUNNEL_CODE,
+  HardenedHttpsProxyAgent,
+  type HardenedHttpsProxyAgentOptions,
+  type IdpDnsLookup,
+  IdpProxyAgent,
+  type IdpProxyAgentOptions,
+  isBlockedLoopbackOrMetadataHost,
+  MAX_PROXY_CONNECT_HEADER_BYTES,
+  type ParsedProxyConnectResponse,
+  parseIpBytes,
+  parseProxyConnectResponse,
+  PROXY_CONNECT_ERROR_STATUS_RE,
+  type ProxyConnectEndpointOptions,
+  type ProxyConnectHeadersInput,
+  type ProxyConnectHeaderValue,
+  resolveSafeIdpHostname,
+  SecureHttpsProxyAgent,
+  type SsrfBlockedError,
+} from './proxyConnectAgent.js'
 
 // Disable fetch keep-alive after a stale-pool ECONNRESET so retries open a
 // fresh TCP connection instead of reusing the dead pooled socket. Sticky for
@@ -482,50 +510,14 @@ export function getOrgPolicyAxiosProxyConfig(): { proxy: false } {
 }
 
 /**
- * Official 2.1.323 (#2068) `ver extends HttpsProxyAgent`:
- * Ensure TLS-inspecting proxies reached over `https://` receive the configured
- * CA certs and preserve target `servername` / `checkServerIdentity`.
- */
-class SecureHttpsProxyAgent extends HttpsProxyAgent<string> {
-  override async connect(
-    req: Parameters<HttpsProxyAgent<string>['connect']>[0],
-    opts: Parameters<HttpsProxyAgent<string>['connect']>[1],
-  ): ReturnType<HttpsProxyAgent<string>['connect']> {
-    if (!opts.secureEndpoint) {
-      return super.connect(req, opts)
-    }
-    const servername = opts.servername || opts.host || ''
-    const customCheck = opts.checkServerIdentity
-    return super.connect(req, {
-      ...opts,
-      ...(customCheck
-        ? {
-            checkServerIdentity: (
-              _host: string,
-              cert: Parameters<typeof checkServerIdentity>[1],
-            ) => customCheck(servername, cert),
-          }
-        : !servername || isIP(servername)
-          ? {
-              servername: '',
-              checkServerIdentity: (
-                _host: string,
-                cert: Parameters<typeof checkServerIdentity>[1],
-              ) => checkServerIdentity(servername, cert),
-            }
-          : { servername }),
-    })
-  }
-}
-
-/**
- * Create an HttpsProxyAgent with optional mTLS configuration
- * Skips local DNS resolution to let the proxy handle it
+ * Create a hardened SecureHttpsProxyAgent (`IUo extends Oe`) with optional mTLS
+ * configuration. Skips local DNS resolution when `CLAUDE_CODE_PROXY_RESOLVES_HOSTS`
+ * is set so the proxy handles DNS.
  */
 function createHttpsProxyAgent(
   proxyUrl: string,
-  extra: HttpsProxyAgentOptions<string> = {},
-): HttpsProxyAgent<string> {
+  extra: HardenedHttpsProxyAgentOptions = {},
+): SecureHttpsProxyAgent {
   const mtlsConfig = getMTLSConfig()
   const caCerts = getCACertificates()
 
@@ -542,7 +534,7 @@ function createHttpsProxyAgent(
     // densable optional
   }
 
-  const agentOptions: HttpsProxyAgentOptions<string> = {
+  const agentOptions: HardenedHttpsProxyAgentOptions = {
     ...(mtlsConfig && {
       cert: mtlsConfig.cert,
       key: mtlsConfig.key,
@@ -575,7 +567,7 @@ function createHttpsProxyAgent(
  * scoped to this instance.
  */
 export function createAxiosInstance(
-  extra: HttpsProxyAgentOptions<string> = {},
+  extra: HardenedHttpsProxyAgentOptions = {},
 ): AxiosInstance {
   const proxyUrl = getProxyUrl()
   const mtlsAgent = getMTLSAgent()

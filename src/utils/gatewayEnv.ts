@@ -789,6 +789,14 @@ async function defaultPostGatewayIdpToken(args: {
   if (testGatewayIdpPostToken) {
     return testGatewayIdpPostToken(args)
   }
+  if (isEnvTruthy(process.env.CLAUDE_GATEWAY_IDP_CONNECT_BY_HOSTNAME)) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { assertSafeIdpProxyTarget, getProxyUrl, shouldBypassProxy } =
+      require('./proxy.js') as typeof import('./proxy.js')
+    if (getProxyUrl() && !shouldBypassProxy(args.endpoint)) {
+      assertSafeIdpProxyTarget(args.endpoint, { connectByHostname: true })
+    }
+  }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const axiosMod = require('axios') as typeof import('axios') & {
     default?: typeof import('axios')

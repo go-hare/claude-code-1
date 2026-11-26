@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -77,25 +78,49 @@ function resolveClipboardBinary(): string | null {
   return null
 }
 
+export function runClipboardBinaryWithNodeSpawnSync(
+  binaryPath: string,
+): Buffer | null {
+  try {
+    const result = spawnSync(binaryPath, [], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 64 * 1024 * 1024,
+    })
+    if (result.error || result.status !== 0 || !result.stdout) return null
+    const buf = Buffer.isBuffer(result.stdout)
+      ? result.stdout
+      : Buffer.from(result.stdout)
+    return buf.length === 0 ? null : buf
+  } catch {
+    return null
+  }
+}
+
+export function runClipboardBinarySync(binaryPath: string): Buffer | null {
+  if (typeof Bun !== 'undefined' && typeof Bun.spawnSync === 'function') {
+    try {
+      const result = Bun.spawnSync({
+        cmd: [binaryPath],
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      if (result.exitCode !== 0) return null
+      const buf = Buffer.from(result.stdout)
+      return buf.length === 0 ? null : buf
+    } catch {
+      return null
+    }
+  }
+  return runClipboardBinaryWithNodeSpawnSync(binaryPath)
+}
+
 function getClipboardPNG(): Buffer | null {
   if (process.platform !== 'darwin') return null
 
   const binaryPath = resolveClipboardBinary()
   if (!binaryPath) return null
 
-  try {
-    const result = Bun.spawnSync({
-      cmd: [binaryPath],
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    if (result.exitCode !== 0) return null
-    const buf = Buffer.from(result.stdout)
-    if (buf.length === 0) return null
-    return buf
-  } catch {
-    return null
-  }
+  return runClipboardBinarySync(binaryPath)
 }
 
 function createDarwinNativeModule(): NativeModule {

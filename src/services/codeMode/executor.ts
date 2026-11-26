@@ -16,6 +16,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
+import { types as utilTypes } from 'node:util'
 import * as vm from 'node:vm'
 import { getMainThreadAgentId, setCwdState } from '../../bootstrap/state.js'
 import type { HostPermissionLayer } from '../../engine/hostPermissionLayers.js'
@@ -67,6 +68,8 @@ import {
   REPL_SETTLE_WINDOW_MS,
   REPL_SYNC_RUN_MS,
   REPL_TOOL_CALL_CAP,
+  REPL_UNAWAITED_PROMISE_ERROR,
+  REPL_UNKNOWN_OR_OVERSIZED_HOST_CALL_ERROR,
 } from './constants.js'
 import * as optInModule from './optIn.js'
 import {
@@ -81,6 +84,20 @@ import {
   pinCodeMode,
   unpinCodeMode,
 } from './optIn.js'
+import {
+  createReplCodec,
+  decodeReplWireValue,
+  formatThrownErrorHeader,
+  mapReplPlainErrorLine,
+  type ReplDosLimits,
+  ReplHostCallValidationError,
+  type ReplPlainErrorLine,
+  ReplTurnCallBudget,
+  type ResolvedReplDosLimits,
+  resolveReplDosLimits,
+  safeParseWithCircularTransformGuard,
+  summarizeReplErrorLine,
+} from './replDosGuards.js'
 import {
   ASYNC_REPL_MAX_EVALS,
   formatReplOutputEnvelope,
@@ -114,6 +131,8 @@ export type CodeModeExecutionResult = {
   ms?: number
   /** Official 2.1.328: true when the eval was dispatched asynchronously past the settle window (or rejected by cap). */
   asyncDispatched?: boolean
+  /** Official 2.1.331 (`o$a` / `Sei`): concise user-facing line replacing a verbose REPL TypeError. */
+  plainErrorLine?: ReplPlainErrorLine
 }
 
 /**
@@ -1465,6 +1484,8 @@ export type ExecuteCodeModeScriptOptions = {
   toolDescriptors?: ReadonlyArray<{ name: string; description: string }>
   /** Official 2.1.328: eval ID for `self.running()` self-identification inside the VM. */
   evalId?: number
+  /** Official 2.1.331: optional overrides for REPL host-call DoS & input validation limits. */
+  dosLimits?: ReplDosLimits
 }
 
 const PRIMITIVE_SHORTHAND_MAP: ReadonlyArray<readonly [string, string]> = [
@@ -1781,6 +1802,8 @@ type RealmBridge = {
     ) => Promise<Record<string, unknown>>,
     escapeHost: (s: unknown) => string,
   ) => unknown
+  realmObjectPrototype: object
+  realmArrayPrototype: object
 }
 
 const REALM_BRIDGE_INIT_SOURCE = `(() => {
@@ -1799,9 +1822,21 @@ const REALM_BRIDGE_INIT_SOURCE = `(() => {
   const _JSON = JSON;
   const _keys = _Object.keys;
   const _getPrototypeOf = _Object.getPrototypeOf;
+  const _defineProperty = _Object.defineProperty;
   const _create = _Object.create;
   const _isArray = _Array.isArray;
   const _toString = _Object.prototype.toString;
+
+  // Official 2.1.331 (kernel.prelude.js): throw a helpful TypeError when an
+  // unawaited Promise is coerced to a string instead of yielding "[object Promise]".
+  _defineProperty(_Promise.prototype, 'toString', {
+    value: function () {
+      throw new _TypeError(${JSON.stringify(REPL_UNAWAITED_PROMISE_ERROR)});
+    },
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
 
   const makeError = (message, name) => {
     const msg = typeof message === 'string' ? message : String(message ?? '');
@@ -1817,10 +1852,22 @@ const REALM_BRIDGE_INIT_SOURCE = `(() => {
     return err;
   };
 
-  const errInfo = (err) => ({
-    msg: err && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err),
-    name: err && typeof err === 'object' && typeof err.name === 'string' ? err.name : 'Error',
-  });
+  const errInfo = (err) => {
+    let msg;
+    if (err && typeof err === 'object' && typeof err.message === 'string') {
+      msg = err.message;
+    } else {
+      try {
+        msg = String(err);
+      } catch {
+        msg = '<unprintable thrown value>';
+      }
+    }
+    return {
+      msg,
+      name: err && typeof err === 'object' && typeof err.name === 'string' ? err.name : 'Error',
+    };
+  };
 
   const cloneToRealm = (val, seen) => {
     if (val === null || val === undefined) return val;
@@ -2009,6 +2056,8 @@ const REALM_BRIDGE_INIT_SOURCE = `(() => {
     createRealmObj,
     createNullProtoObj,
     createDollarFn,
+    realmObjectPrototype: _Object.prototype,
+    realmArrayPrototype: _Array.prototype,
   };
 })()`
 
@@ -2046,12 +2095,11 @@ type CodeModeEvalBinding = {
   exposedTools: string[]
   toolDescriptors: ReadonlyArray<{ name: string; description: string }>
   evalsAccess: ReplEvalAccess
+  dosLimits: ResolvedReplDosLimits
+  turnCallBudget: ReplTurnCallBudget
   isStopped: () => boolean
   getStopMessage: () => string
-  guardedCall: (
-    toolName: string,
-    input?: Record<string, unknown>,
-  ) => Promise<unknown>
+  guardedCall: (toolName: unknown, input?: unknown) => Promise<unknown>
   dispatchDollar: (first: unknown, values: unknown[]) => CodeModeShellRunner
 }
 
@@ -2230,9 +2278,11 @@ function makeOutsideEvalBinding(): CodeModeEvalBinding {
     exposedTools: [],
     toolDescriptors: [],
     evalsAccess: NO_EVALS,
+    dosLimits: resolveReplDosLimits(),
+    turnCallBudget: new ReplTurnCallBudget(),
     isStopped: () => false,
     getStopMessage: () => 'Code Mode script aborted',
-    guardedCall: toolName => unavailable(toolName),
+    guardedCall: toolName => unavailable(String(toolName)),
     dispatchDollar: () => async () => unavailable('Bash'),
   }
 }
@@ -2266,7 +2316,7 @@ function ensureToolGlobalBound(
   session.boundToolNames.add(globalName)
   session.sandbox[globalName] = sealAsyncForRealm(
     session,
-    (input: Record<string, unknown> = {}) =>
+    (input: unknown = {}) =>
       getCurrentEvalBinding(session).guardedCall(canonicalToolName, input),
   )
 }
@@ -2359,12 +2409,25 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
     configurable: false,
   })
 
+  const assertTextWithinLimit = (text: string): string => {
+    if (text.length > getBinding().dosLimits.mostTextChars) {
+      throw new ReplHostCallValidationError(
+        REPL_UNKNOWN_OR_OVERSIZED_HOST_CALL_ERROR,
+      )
+    }
+    return text
+  }
+
   // Official `Tl`: expose `atob` / `btoa` as realm-sealed sync functions.
   sandbox.atob = session.bridge.wrapSyncHostFn((input: unknown) =>
-    Buffer.from(String(input), 'base64').toString('binary'),
+    Buffer.from(assertTextWithinLimit(String(input)), 'base64').toString(
+      'binary',
+    ),
   )
   sandbox.btoa = session.bridge.wrapSyncHostFn((input: unknown) =>
-    Buffer.from(String(input), 'binary').toString('base64'),
+    Buffer.from(assertTextWithinLimit(String(input)), 'binary').toString(
+      'base64',
+    ),
   )
 
   // Official `Tl`: timers bound ONCE, tracking ownership per eval binding and
@@ -2402,6 +2465,7 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
       }
       currentCall.run(owner, () => {
         startCodeModeTurn(owner.turnState, owner.clampedTimeout)
+        owner.turnCallBudget.reset()
         try {
           ;(cb as (...a: unknown[]) => unknown)(...args)
         } catch {
@@ -2442,7 +2506,9 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
   // Official `Tl`/`St(e,"console",...)`: bound ONCE; writes to active eval's
   // `logs` plus session-wide ring buffer.
   const pushLog = (...args: unknown[]): void => {
-    const line = args.map(a => formatValueForOutput(a)).join(' ')
+    const line = assertTextWithinLimit(
+      args.map(a => formatValueForOutput(a)).join(' '),
+    )
     getBinding().logs.push(line)
     session.consoleBuffer.push(line)
     if (session.consoleBuffer.length > CONSOLE_RING_BUFFER_MAX) {
@@ -2499,7 +2565,7 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
 
   sandbox.callTool = sealAsyncForRealm(
     session,
-    (toolName: string, input: Record<string, unknown> = {}) =>
+    (toolName: unknown, input: unknown = {}) =>
       getBinding().guardedCall(toolName, input),
   )
   sandbox.$ = session.bridge.createDollarFn(
@@ -2511,7 +2577,7 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
   sandbox.searchTools = sealForRealm(
     session,
     (query: unknown, limit: unknown = 10) => {
-      const q = String(query ?? '')
+      const q = assertTextWithinLimit(String(query ?? ''))
         .toLowerCase()
         .trim()
       const max =
@@ -2530,7 +2596,7 @@ function createCodeModeVmSession(): PersistentCodeModeVmSession {
     },
   )
   sandbox.describeTool = sealForRealm(session, (name: unknown) => {
-    const targetName = String(name ?? '')
+    const targetName = assertTextWithinLimit(String(name ?? ''))
     const found = getBinding().toolDescriptors.find(d => d.name === targetName)
     return found ? { name: found.name, description: found.description } : null
   })
@@ -3993,10 +4059,13 @@ export async function executeCodeModeScript(
     availableToolNames,
     toolDescriptors,
     evalId,
+    dosLimits,
   } = options
 
   noteReplContextCreated()
 
+  const resolvedDosLimits = resolveReplDosLimits(dosLimits)
+  const turnCallBudget = new ReplTurnCallBudget(resolvedDosLimits)
   const clampedTimeout = Math.max(100, Math.min(timeoutMs, REPL_MAX_TIMEOUT_MS))
   const logs: string[] = []
   let toolCalls = 0
@@ -4043,6 +4112,17 @@ export async function executeCodeModeScript(
       : createCodeModeVmSession()
   const { sandbox, context } = vmSession
 
+  const callCodec = createReplCodec({
+    mostItems: resolvedDosLimits.mostItems,
+    mostDepth: resolvedDosLimits.mostDepth,
+    mostDigits: resolvedDosLimits.mostDigits,
+    mostChars: resolvedDosLimits.mostJsonChars,
+    hides: value =>
+      value === sandbox || value === globalThis || utilTypes.isProxy(value),
+    extraObjectPrototypes: [vmSession.bridge.realmObjectPrototype],
+    extraArrayPrototypes: [vmSession.bridge.realmArrayPrototype],
+  })
+
   const evalTurnState = makeTurnState()
 
   let timerRef: PausableCodeModeTimer | undefined
@@ -4052,8 +4132,8 @@ export async function executeCodeModeScript(
   const evalTimers = new Set<number>()
 
   const guardedCall = async (
-    toolName: string,
-    input: Record<string, unknown> = {},
+    rawToolName: unknown,
+    rawInput: unknown = {},
   ): Promise<unknown> => {
     // Official `ft` (`It.startsNoMoreCalls=!0`): once the turn deadline/abort
     // fires, zombie continuations cannot start new tool calls — they throw
@@ -4064,6 +4144,43 @@ export async function executeCodeModeScript(
     if (isStopped()) {
       throw new Error(getStopMessage())
     }
+    // Official 2.1.331 (`be.answer` / `MNt`): tool name must be a string within `mostTextChars`.
+    if (
+      typeof rawToolName !== 'string' ||
+      rawToolName.length > resolvedDosLimits.mostTextChars
+    ) {
+      throw new ReplHostCallValidationError(
+        REPL_UNKNOWN_OR_OVERSIZED_HOST_CALL_ERROR,
+      )
+    }
+    const toolName = rawToolName
+    // Official 2.1.331 (`createCodec.encode(..., true)` + `ae` + `Ae.#E`):
+    // validate nesting depth, BigInt digit count, per-call argument size, wire
+    // length/depth, and per-turn call count / total data budget BEFORE invoking
+    // the host tool.
+    const encodedInput = callCodec.encode(rawInput, undefined, true)
+    let decodedInput: unknown
+    try {
+      decodedInput = decodeReplWireValue(
+        encodedInput,
+        callCodec,
+        resolvedDosLimits,
+      )
+    } catch {
+      throw new ReplHostCallValidationError(
+        REPL_UNKNOWN_OR_OVERSIZED_HOST_CALL_ERROR,
+      )
+    }
+    binding.turnCallBudget.chargeOrThrow([toolName, encodedInput], false)
+    const input = (
+      typeof decodedInput === 'object' && decodedInput !== null
+        ? decodedInput
+        : decodedInput === undefined
+          ? {}
+          : decodedInput
+    ) as Record<string, unknown>
+    const inputObj =
+      typeof input === 'object' && input !== null ? input : undefined
     if (
       allowedTools &&
       !toolName.startsWith('mcp__') &&
@@ -4077,9 +4194,10 @@ export async function executeCodeModeScript(
       )
     }
     // Official 2.1.328 (#652): an edit that changes nothing no longer stops a script.
-    if (toolName === 'Edit' && isNoOpCodeModeEdit(input)) {
+    if (toolName === 'Edit' && inputObj && isNoOpCodeModeEdit(inputObj)) {
       return {
-        filePath: typeof input.file_path === 'string' ? input.file_path : '',
+        filePath:
+          typeof inputObj.file_path === 'string' ? inputObj.file_path : '',
         changed: false,
         noOp: true,
       }
@@ -4087,8 +4205,9 @@ export async function executeCodeModeScript(
     const callId = ++nextCallSeq
     const callLabel =
       (toolName === 'Bash' || toolName === 'PowerShell') &&
-      typeof input.command === 'string'
-        ? `${toolName}(${JSON.stringify(input.command.slice(0, 60))})`
+      inputObj &&
+      typeof inputObj.command === 'string'
+        ? `${toolName}(${JSON.stringify(inputObj.command.slice(0, 60))})`
         : toolName
     inFlightCalls.set(callId, callLabel)
     // Official `Wl`/`Xo`/`Mr`: the step-budget turn only counts *script* code —
@@ -4108,15 +4227,22 @@ export async function executeCodeModeScript(
       )
       void toolPromise.catch(() => {})
       const result = await Promise.race([toolPromise, stopPromise])
-      // Official `wl`/`Mr`: on resume, re-arm a fresh turn so a tool call that
-      // consumed most of the wall clock doesn't falsely charge it to the script.
-      if (wasArmed && !isStopped()) {
-        startCodeModeTurn(binding.turnState, clampedTimeout)
+      // Official `wl`/`Mr` + `Ae.#k`: on resume, re-arm a fresh turn and reset
+      // the per-turn call/data budget so awaiting lets subsequent turns proceed.
+      if (!isStopped()) {
+        binding.turnCallBudget.reset()
+        if (wasArmed) {
+          startCodeModeTurn(binding.turnState, clampedTimeout)
+        }
       }
       if (isStopped()) {
         throw new Error(getStopMessage())
       }
-      if (toolName === 'Read' && typeof input.file_path === 'string') {
+      if (
+        toolName === 'Read' &&
+        inputObj &&
+        typeof inputObj.file_path === 'string'
+      ) {
         const readContent =
           result &&
           typeof result === 'object' &&
@@ -4131,14 +4257,15 @@ export async function executeCodeModeScript(
               ? (result as { content: string }).content
               : undefined
         if (readContent !== undefined) {
-          scriptReadCache.set(input.file_path, readContent)
+          scriptReadCache.set(inputObj.file_path, readContent)
         }
       } else if (
         toolName === 'Write' &&
-        typeof input.file_path === 'string' &&
-        typeof input.content === 'string'
+        inputObj &&
+        typeof inputObj.file_path === 'string' &&
+        typeof inputObj.content === 'string'
       ) {
-        scriptReadCache.set(input.file_path, input.content)
+        scriptReadCache.set(inputObj.file_path, inputObj.content)
       }
       return result
     } catch (err) {
@@ -4150,17 +4277,18 @@ export async function executeCodeModeScript(
       // bypass allowedTools or trigger a Read permission prompt).
       if (
         toolName === 'Edit' &&
-        typeof input.file_path === 'string' &&
-        typeof input.old_string === 'string' &&
+        inputObj &&
+        typeof inputObj.file_path === 'string' &&
+        typeof inputObj.old_string === 'string' &&
         err instanceof Error &&
         /not found|multiple|match/i.test(err.message) &&
         (!allowedTools || allowedTools.has('Read'))
       ) {
         const content =
-          scriptReadCache.get(input.file_path) ??
-          getCachedFileContent?.(input.file_path)
+          scriptReadCache.get(inputObj.file_path) ??
+          getCachedFileContent?.(inputObj.file_path)
         if (content !== undefined) {
-          const hint = findClosestEditMatchHint(content, input.old_string)
+          const hint = findClosestEditMatchHint(content, inputObj.old_string)
           if (hint) {
             throw new Error(`${err.message}\n${hint}`)
           }
@@ -4169,8 +4297,11 @@ export async function executeCodeModeScript(
       throw err
     } finally {
       if (shouldPause) timerRef?.resume()
-      if (wasArmed && !isStopped()) {
-        startCodeModeTurn(binding.turnState, clampedTimeout)
+      if (!isStopped()) {
+        binding.turnCallBudget.reset()
+        if (wasArmed) {
+          startCodeModeTurn(binding.turnState, clampedTimeout)
+        }
       }
       if (!stopped) {
         inFlightCalls.delete(callId)
@@ -4348,6 +4479,8 @@ export async function executeCodeModeScript(
     exposedTools,
     toolDescriptors: descriptorList,
     evalsAccess,
+    dosLimits: resolvedDosLimits,
+    turnCallBudget,
     isStopped,
     getStopMessage,
     guardedCall,
@@ -4406,6 +4539,7 @@ export async function executeCodeModeScript(
       // per-eval turn and run inside `AsyncLocalStorage` so concurrent/detached
       // evals remain completely isolated.
       startCodeModeTurn(binding.turnState, clampedTimeout)
+      binding.turnCallBudget.reset()
       rawRun = vmSession.currentCall.run(binding, () =>
         script.runInContext(context),
       )
@@ -4441,6 +4575,8 @@ export async function executeCodeModeScript(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    const formattedError = formatThrownErrorHeader(err)
+    const plainErrorText = mapReplPlainErrorLine(err, formattedError)
     const prefix = logs.length > 0 ? `${logs.join('\n')}\n` : ''
     // Official 2.1.328 (#653): report which tool calls were still running when
     // the script failed.
@@ -4459,6 +4595,14 @@ export async function executeCodeModeScript(
       tool_calls: toolCalls,
       ...(stillRunning.length > 0 ? { inFlightAtFailure: stillRunning } : {}),
       ...(unsetVariables.length > 0 ? { unsetVariables } : {}),
+      ...(plainErrorText !== undefined
+        ? {
+            plainErrorLine: {
+              text: plainErrorText,
+              replaces: summarizeReplErrorLine(formattedError),
+            },
+          }
+        : {}),
     }
   } finally {
     binding.ended = true
@@ -5242,10 +5386,13 @@ export function wrapReplToolForCodeMode(
               rawInput,
               activeCwd,
             )
-            const parsed = target.inputSchema.safeParse(normalizedInput)
+            const parsed = safeParseWithCircularTransformGuard(
+              target.inputSchema,
+              normalizedInput,
+            )
             if (!parsed.success) {
               throw new Error(
-                `Invalid input for ${toolName}: ${parsed.error.message}`,
+                `Invalid input for ${toolName}: ${parsed.error?.message ?? 'validation failed'}`,
               )
             }
             // Official 2.1.326 #232: run tool.validateInput before canUseTool,
@@ -5429,12 +5576,13 @@ export function wrapReplToolForCodeMode(
                   managedResult.allow = true
                 }
                 if (item.updatedInput !== undefined) {
-                  const parsedUpdated = target.inputSchema.safeParse(
+                  const parsedUpdated = safeParseWithCircularTransformGuard(
+                    target.inputSchema,
                     item.updatedInput,
                   )
                   const remainingIssues = parsedUpdated.success
                     ? []
-                    : parsedUpdated.error.issues.filter(
+                    : (parsedUpdated.error?.issues ?? []).filter(
                         issue => issue.code !== 'unrecognized_keys',
                       )
                   if (!parsedUpdated.success && remainingIssues.length > 0) {

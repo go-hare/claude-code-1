@@ -88,6 +88,31 @@ import {
 } from 'src/utils/sandbox/sandbox-adapter.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { windowsPathToPosixPath } from 'src/utils/windowsPaths.js'
+import {
+  detectDangerousVariableRm,
+  type GuardedPermissionAskDecision,
+  type SafetyCheckDecisionReason,
+  tryGuardDangerousRmAsk,
+} from './dangerousRmGuard.js'
+export {
+  DANGEROUS_RM_GUARD_FLAG,
+  type DangerousRemovalRule,
+  type DangerousVariableRmMatch,
+  detectDangerousVariableRm,
+  getDangerousRmBypassWaiverNotice,
+  getGuardedRmLine,
+  type GuardedPermissionAskDecision,
+  type GuardedRmRewrite,
+  isDangerousRmGuardEnabled,
+  isRecursiveRmInvocation,
+  MAX_GUARDABLE_RM_COMMAND_LENGTH,
+  MAX_GUARDED_RM_REASON_LENGTH,
+  replaceSafetyCheckReason,
+  rewriteDangerousRmWithGuard,
+  type SafetyCheckDecisionReason,
+  tryGuardDangerousRmAsk,
+  WELL_KNOWN_NONEMPTY_ENV_VARS,
+} from './dangerousRmGuard.js'
 import { BashTool } from './BashTool.js'
 import { checkCommandOperatorPermissions } from './bashCommandHelpers.js'
 import {
@@ -3623,12 +3648,15 @@ export function checkDangerousRmAfterEutPeel(
     if (name !== 'rm' && name !== 'rmdir') continue
 
     const peeledCommand = tokens.join(' ')
-    const emptyVar = detectPossiblyEmptyVariableRm(peeledCommand)
+    const emptyVar = detectDangerousVariableRm(peeledCommand, {
+      mayBeUnset: () => true,
+    })
     if (emptyVar) {
       return dangerousRemovalAsk(
         emptyVar.command,
         `Dangerous ${emptyVar.command} operation detected: '${emptyVar.target}'\n\nThis target is a shell variable expansion that points at the filesystem root (or a top-level directory) when the variable is unset or empty. e.g. \`rm -rf $UNSET/*\` becomes \`rm -rf /*\`. This requires explicit approval and cannot be auto-allowed by permission rules.`,
         `on possibly-empty variable path: ${emptyVar.target}`,
+        emptyVar.removalRule,
       )
     }
     for (const candidateCwd of dirState.candidateDirs) {
@@ -3641,6 +3669,7 @@ export function checkDangerousRmAfterEutPeel(
           literal.command,
           `Dangerous ${literal.command} operation detected: '${literal.path}'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,
           `on critical path: ${literal.path}`,
+          'critical_path',
         )
       }
     }
@@ -3921,16 +3950,19 @@ function dangerousRemovalAsk(
   command: 'rm' | 'rmdir',
   message: string,
   reasonSuffix: string,
+  removalRule?: string,
 ): PermissionResult {
+  const decisionReason: SafetyCheckDecisionReason = {
+    type: 'safetyCheck',
+    reason: `Dangerous ${command} operation ${reasonSuffix}`,
+    classifierApprovable: false,
+    circuitBreaker: 'dangerousRemoval',
+    ...(removalRule !== undefined ? { removalRule } : {}),
+  }
   return {
     behavior: 'ask',
     message,
-    decisionReason: {
-      type: 'safetyCheck',
-      reason: `Dangerous ${command} operation ${reasonSuffix}`,
-      classifierApprovable: false,
-      circuitBreaker: 'dangerousRemoval',
-    },
+    decisionReason: decisionReason as PermissionDecisionReason,
     suggestions: [],
     suppressAlwaysAllowRule: true,
   }
@@ -4275,14 +4307,32 @@ export async function bashToolHasPermission(
     return wiseNewtDeny
   }
 
-  // densable DDs early gate — possibly-empty `$VAR/*` on rm/rmdir.
-  const emptyVarRm = detectPossiblyEmptyVariableRm(input.command)
+  // Official 2.1.331 `ZQ` + `Ukn` early gate — possibly-empty `$VAR/*` or
+  // `$VAR/<root_child>` on rm/rmdir; rewrite with `${VAR:?}` when guarded gate is active.
+  const emptyVarRm = detectDangerousVariableRm(input.command, {
+    mayBeUnset: () => true,
+  })
   if (emptyVarRm) {
-    return dangerousRemovalAsk(
+    const askRes = dangerousRemovalAsk(
       emptyVarRm.command,
       `Dangerous ${emptyVarRm.command} operation detected: '${emptyVarRm.target}'\n\nThis target is a shell variable expansion that points at the filesystem root (or a top-level directory) when the variable is unset or empty. e.g. \`rm -rf $UNSET/*\` becomes \`rm -rf /*\`. This requires explicit approval and cannot be auto-allowed by permission rules.`,
       `on possibly-empty variable path: ${emptyVarRm.target}`,
+      emptyVarRm.removalRule,
     )
+    if (
+      askRes.behavior === 'ask' &&
+      askRes.decisionReason?.type === 'safetyCheck'
+    ) {
+      const guarded = tryGuardDangerousRmAsk(
+        input,
+        askRes as GuardedPermissionAskDecision<typeof input>,
+        askRes.decisionReason as SafetyCheckDecisionReason,
+      )
+      if (guarded !== undefined) {
+        return guarded as PermissionResult
+      }
+    }
+    return askRes
   }
 
   // densable 2.1.289 — unwrap bash/sh -c before allow/bypass can skip rm checks.

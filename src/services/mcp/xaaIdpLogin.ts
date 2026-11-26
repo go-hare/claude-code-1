@@ -223,6 +223,19 @@ export async function discoverOidc(
 ): Promise<OpenIdProviderDiscoveryMetadata> {
   const base = idpIssuer.endsWith('/') ? idpIssuer : idpIssuer + '/'
   const url = new URL('.well-known/openid-configuration', base)
+  if (
+    process.env.CLAUDE_GATEWAY_IDP_CONNECT_BY_HOSTNAME &&
+    /^(?:1|true|yes|on)$/i.test(
+      process.env.CLAUDE_GATEWAY_IDP_CONNECT_BY_HOSTNAME.trim(),
+    )
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { assertSafeIdpProxyTarget, getProxyUrl, shouldBypassProxy } =
+      require('../../utils/proxy.js') as typeof import('../../utils/proxy.js')
+    if (getProxyUrl() && !shouldBypassProxy(url.href)) {
+      assertSafeIdpProxyTarget(url, { connectByHostname: true })
+    }
+  }
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
   const res = await fetch(url, {
     headers: { Accept: 'application/json' },

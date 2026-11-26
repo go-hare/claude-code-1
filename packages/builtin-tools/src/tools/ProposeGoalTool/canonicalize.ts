@@ -8,6 +8,8 @@
  * are BH-stripped (no ANSI), so tabstop-8 + stringWidth is the 1:1 remainder.
  */
 
+import { stringWidth } from '@anthropic/ink'
+
 const UNPAIRED_SURROGATE =
   /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
 
@@ -73,7 +75,10 @@ function isSurrogateCodePoint(cp: number): boolean {
 
 function codePointWidth(ch: string): number {
   try {
-    return Bun.stringWidth(ch, { ambiguousIsNarrow: true })
+    if (typeof Bun !== 'undefined' && typeof Bun.stringWidth === 'function') {
+      return Bun.stringWidth(ch, { ambiguousIsNarrow: true })
+    }
+    return stringWidth(ch)
   } catch {
     return 1
   }

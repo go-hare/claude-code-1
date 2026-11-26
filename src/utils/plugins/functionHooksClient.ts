@@ -7,6 +7,7 @@
  * JSON tree). No invented iframe.
  */
 import { existsSync, lstatSync, realpathSync, readFileSync } from 'fs'
+import * as nodeModule from 'node:module'
 import { isAbsolute, join, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import vm, {
@@ -1765,18 +1766,46 @@ function surfaceLoaderOf(file: string): string {
   return 'js'
 }
 
+type NodeStripTypeScriptTypes = (
+  code: string,
+  options?: { mode?: 'strip' | 'transform'; sourceUrl?: string },
+) => string
+
+function getNodeStripTypeScriptTypes(): NodeStripTypeScriptTypes | undefined {
+  const candidate = (nodeModule as { stripTypeScriptTypes?: unknown })
+    .stripTypeScriptTypes
+  return typeof candidate === 'function'
+    ? (candidate as NodeStripTypeScriptTypes)
+    : undefined
+}
+
 /**
  * densable `lin` — JS files pass through; TS/JSX go through Bun.Transpiler
- * with the classic `h`/`Fragment` pragma.
+ * with the classic `h`/`Fragment` pragma (falling back to Node's
+ * `module.stripTypeScriptTypes` for `.ts` when running outside Bun).
  */
-function transpileSurfaceSource(file: string, source: string): string {
+export function transpileSurfaceSource(file: string, source: string): string {
   const loader = surfaceLoaderOf(file)
   if (loader === 'js') return source
-  const prefix = loader === 'ts' ? '' : SURFACE_JSX_PRAGMA
-  const transpiler = new Bun.Transpiler({
-    loader: loader as 'js' | 'jsx' | 'ts' | 'tsx',
-  })
-  return transpiler.transformSync(`${prefix}${source}`)
+  if (typeof Bun !== 'undefined' && typeof Bun.Transpiler === 'function') {
+    const prefix = loader === 'ts' ? '' : SURFACE_JSX_PRAGMA
+    const transpiler = new Bun.Transpiler({
+      loader: loader as 'js' | 'jsx' | 'ts' | 'tsx',
+    })
+    return transpiler.transformSync(`${prefix}${source}`)
+  }
+  if (loader === 'ts') {
+    const stripTs = getNodeStripTypeScriptTypes()
+    if (stripTs) {
+      return stripTs(source, { mode: 'transform' })
+    }
+    throw new Error(
+      `Cannot transpile TypeScript surface module "${file}" without Bun.Transpiler or Node.js stripTypeScriptTypes; precompile it to .js/.mjs`,
+    )
+  }
+  throw new Error(
+    `Cannot transpile ${loader.toUpperCase()} surface module "${file}" under Node.js without Bun.Transpiler; precompile it to .js/.mjs`,
+  )
 }
 
 type AcornNode = {

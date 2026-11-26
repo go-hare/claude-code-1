@@ -194,7 +194,9 @@ import {
   createDenialTrackingState,
   DENIAL_LIMITS,
   type DenialTrackingState,
+  hasPersonDeclinedInChain,
   recordDenial,
+  recordPersonDeclinedInChain,
   recordSuccess,
   shouldFallbackToPrompting,
 } from './denialTracking.js'
@@ -2382,7 +2384,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (...args) => {
 }
 
 /**
- * Official 2.1.328 `FYn` (`chunk@294254613.js @1687570`):
+ * Official 2.1.331 `FYn` (`chunk@294254613.js @1687570`):
  * True when a hook asked for a prompt (`hookAskFloor`) or the ask result
  * itself requires a person (`personOnly === true`).
  */
@@ -2393,6 +2395,589 @@ export function mustAskPersonForPermission(
   return (
     hookAskFloor || (result.behavior === 'ask' && result.personOnly === true)
   )
+}
+
+// ============================================================================
+// Official 2.1.331 Prior-Refusal Escalation Guard (`Ijn`, `KJr`, `VJr`, `HVo`,
+// `Qls`, `S_t`, plus project-doc `Cki`/`eds`/`RVi`/`hVo`/`Mtl`/`Dtl`/`Aki`/
+// `gVo`/`Ie`) and MCP First-File-Send TOCTOU Guard (`Vks`/`Lvo`/`_kl`/`xki`).
+// ============================================================================
+
+/** Official 2.1.331 `zJr` */
+export const SAFETY_CHECK_FLAGGED_ASK_MESSAGE =
+  "This action needs a person's approval, because an automatic safety check flagged it."
+
+/** Official 2.1.331 `KJr` */
+export const PRIOR_REFUSAL_ASK_MESSAGE =
+  "This action needs a person's approval, because an action was declined earlier in this turn."
+
+/** Official 2.1.331 `VJr` */
+export const PRIOR_REFUSAL_DECISION_REASON =
+  'An action was declined earlier, so this one needs your approval too.'
+
+/** Official 2.1.331 `JJr` */
+export const SAFETY_CHECK_FLAGGED_DECISION_REASON =
+  "Claude's automatic safety check flagged this action, so it hasn't run. Allow it only if you asked Claude to do this."
+
+/** Official 2.1.331 `xjn` */
+export const AGENT_CALL_SAFETY_CHECK_DENY_MESSAGE =
+  "A mod can't make this call with $.agent.call in this session, because this session's safety check judges only the calls that Claude writes."
+
+/** Official 2.1.331 `XJr` */
+export const AGENT_CALL_SAFETY_CHECK_DENY: PermissionDenyDecision = {
+  behavior: 'deny',
+  message: AGENT_CALL_SAFETY_CHECK_DENY_MESSAGE,
+  decisionReason: {
+    type: 'other',
+    reason: AGENT_CALL_SAFETY_CHECK_DENY_MESSAGE,
+  },
+}
+
+/** Official 2.1.331 `YJr` */
+export function buildPriorRefusalNoOneToAskDeny(
+  reasonMessage: string,
+): PermissionDenyDecision {
+  return {
+    behavior: 'deny',
+    message: `${reasonMessage} Nobody can be asked here, so it has not run. Don't try to do the same thing another way.`,
+    decisionReason: {
+      type: 'asyncAgent',
+      reason: 'Permission prompts are not available in this context',
+    },
+  }
+}
+
+/** Official 2.1.331 `QJr` */
+export function buildUnjudgedHandoffDeny(
+  toolName: string,
+): PermissionDenyDecision {
+  const message = `${toolName} did not run. This session's safety check gave no verdict because it was not shown this call. That is not a judgment that the call is unsafe. Repeat the identical ${toolName} call once now so that the check can review it.`
+  return {
+    behavior: 'deny',
+    message,
+    decisionReason: {
+      type: 'other',
+      reason: message,
+    },
+  }
+}
+
+/**
+ * Official 2.1.331 `S_t(tool, input, context)`:
+ * True only for built-in (non-MCP) tools whose parsed input is read-only.
+ * MCP tools always return false even if they declare `isReadOnly`.
+ */
+export function isNonMcpReadOnlyToolCall(
+  tool: Tool,
+  input: { [key: string]: unknown },
+): boolean {
+  if (tool.isMcp === true || tool.mcpInfo !== undefined) {
+    return false
+  }
+  const parsed = tool.inputSchema.safeParse(input)
+  return parsed.success && tool.isReadOnly(parsed.data)
+}
+
+/**
+ * Official 2.1.331 `Qls(context, setAppState)`:
+ * Records that a person explicitly declined a tool call in the current
+ * `queryTracking.chainId` so subsequent non-read-only calls in the same turn
+ * are escalated to require human approval.
+ */
+export function recordPersonDeclinedInTurn(
+  context: Pick<ToolUseContext, 'queryTracking' | 'localDenialTracking'>,
+  setAppState: ToolUseContext['setAppState'],
+): void {
+  const chainId = context.queryTracking?.chainId
+  if (chainId === undefined) return
+  if (context.localDenialTracking) {
+    Object.assign(
+      context.localDenialTracking,
+      recordPersonDeclinedInChain(context.localDenialTracking, chainId),
+    )
+    return
+  }
+  setAppState(prev => {
+    const current = prev.denialTracking ?? createDenialTrackingState()
+    const next = recordPersonDeclinedInChain(current, chainId)
+    return next === current ? prev : { ...prev, denialTracking: next }
+  })
+}
+
+/**
+ * Official 2.1.331 `HVo(context)`:
+ * True when a person declined an action earlier in the current turn (`chainId`).
+ */
+export function hasPersonDeclinedInTurn(
+  context: Pick<
+    ToolUseContext,
+    'queryTracking' | 'localDenialTracking' | 'getAppState'
+  >,
+): boolean {
+  const chainId = context.queryTracking?.chainId
+  if (chainId === undefined) return false
+  const state =
+    context.localDenialTracking ??
+    context.getAppState().denialTracking ??
+    createDenialTrackingState()
+  return hasPersonDeclinedInChain(state, chainId)
+}
+
+export type PriorRefusalEscalationKind = false | true | 'afterANo'
+
+/**
+ * Official 2.1.331 `Ijn(tool, decision, context, toolUseId, escalation, handedOffUnjudged)`:
+ * Escalates auto-approved or unflagged actions to require explicit human
+ * approval (`personOnly`, `defaultToNo`, `hooksMayAllow: false`,
+ * `suppressAlwaysAllowRule`, `afterClassifierBlock`) whenever an automatic
+ * safety check flagged the call or a person declined an earlier action in this
+ * turn (`'afterANo'`).
+ */
+export function applyPriorRefusalOrSafetyCheckEscalation(
+  tool: Tool,
+  decision: PermissionDecision,
+  context: ToolUseContext,
+  toolUseId: string | undefined,
+  escalation: PriorRefusalEscalationKind,
+  handedOffUnjudged = false,
+  enforcementLevel: 'off' | 'count' | 'ask' = 'ask',
+): PermissionDecision {
+  const extContext = context as ToolUseContext & {
+    agentCall?: { toolUseId?: string }
+    hookAskUnderShellCheck?: PermissionDecision
+  }
+  const isAgentCall =
+    toolUseId !== undefined && extContext.agentCall?.toolUseId === toolUseId
+  const baseDecision =
+    decision.behavior === 'allow'
+      ? (extContext.hookAskUnderShellCheck ?? decision)
+      : decision
+  if (
+    (!escalation && !isAgentCall && !handedOffUnjudged) ||
+    decision.behavior === 'deny'
+  ) {
+    return baseDecision
+  }
+  if (enforcementLevel !== 'ask') {
+    return escalation && baseDecision.behavior === 'ask'
+      ? { ...baseDecision, afterClassifierBlock: true }
+      : baseDecision
+  }
+  if (isAgentCall) {
+    return AGENT_CALL_SAFETY_CHECK_DENY
+  }
+  if (handedOffUnjudged && !escalation) {
+    return decision.behavior === 'allow'
+      ? buildUnjudgedHandoffDeny(tool.name)
+      : decision
+  }
+  const message =
+    escalation === 'afterANo'
+      ? PRIOR_REFUSAL_ASK_MESSAGE
+      : SAFETY_CHECK_FLAGGED_ASK_MESSAGE
+  const layeredPermCtx = getEffectiveToolPermissionContext(context)
+  const askBase: PermissionAskDecision =
+    decision.behavior === 'ask'
+      ? decision
+      : {
+          behavior: 'ask',
+          message,
+          updatedInput: decision.updatedInput,
+          decisionReason:
+            escalation === 'afterANo'
+              ? { type: 'other', reason: PRIOR_REFUSAL_DECISION_REASON }
+              : {
+                  type: 'classifier',
+                  classifier: 'auto-mode',
+                  reason: SAFETY_CHECK_FLAGGED_DECISION_REASON,
+                },
+        }
+  return {
+    ...askBase,
+    afterClassifierBlock: true,
+    askRequiresUserInteraction: true,
+    personOnly: true,
+    hooksMayRefuse: true,
+    hooksMayAllow: false,
+    defaultToNo: true,
+    suppressAlwaysAllowRule: true,
+    suggestions: undefined,
+    ...(layeredPermCtx.shouldAvoidPermissionPrompts && {
+      refusal: buildPriorRefusalNoOneToAskDeny(message),
+    }),
+  }
+}
+
+// --- Official 2.1.331 Project Doc Save/Delete Prior-Refusal Guard (04b) ---
+
+/** Official 2.1.331 `Cki` */
+export const PROJECT_DOC_SAFETY_UNAVAILABLE_MESSAGE =
+  'This save or delete of a project doc did not run: the automatic safety check was not available, so it gave no verdict on the call. This is not a judgment that the action is unsafe.'
+
+/** Official 2.1.331 `eds` */
+export const PROJECT_DOC_ASK_MESSAGE =
+  "A save or delete of a project doc. It needs a person's approval, because text from other people may have reached you in this turn."
+
+/** Official 2.1.331 `RVi` */
+export const PROJECT_DOC_FLAGGED_REASON =
+  "Claude Code's automatic safety check flagged this action, so the action hasn't run. Allow it only if you asked Claude to do this."
+
+/** Official 2.1.331 `hVo` */
+export const PROJECT_DOC_OUTSIDE_TEXT_REASON =
+  'Claude may be acting on text that someone else wrote, such as a web page or a shared doc. Allow this only if you asked for it.'
+
+/** Official 2.1.331 `Mtl` */
+export const PROJECT_DOC_PRIOR_REFUSAL_REASON =
+  'An earlier save or delete in this chat was refused or stopped. Allow this one only if you want it.'
+
+/** Official 2.1.331 `Dtl` */
+export const PROJECT_DOC_EVERY_CALL_REASON =
+  'Claude asks before each save or delete in this chat. Allow this only if you asked for it.'
+
+/**
+ * Official 2.1.331 `Aki(isDelete, reason, asClassifier)`:
+ * Builds the approval ask decision for a project doc write/delete.
+ */
+export function buildProjectDocApprovalAsk(
+  isDelete: boolean,
+  reason: string = PROJECT_DOC_OUTSIDE_TEXT_REASON,
+  asClassifier = false,
+): PermissionAskDecision {
+  const fullReason = isDelete
+    ? `${reason} A deleted doc cannot be restored.`
+    : `${reason} If a doc with this name exists, this replaces it.`
+  return {
+    behavior: 'ask',
+    message: PROJECT_DOC_ASK_MESSAGE,
+    decisionReason: asClassifier
+      ? { type: 'classifier', classifier: 'auto-mode', reason: fullReason }
+      : { type: 'other', reason: fullReason },
+    suppressAlwaysAllowRule: true,
+  }
+}
+
+export type ProjectDocSafetyVerdict =
+  | 'flagged'
+  | 'not_flagged'
+  | 'fault'
+  | 'none'
+  | undefined
+
+/**
+ * Official 2.1.331 `gVo`:
+ * Applies the automatic safety-check floor verdict to a project doc
+ * write/delete permission decision.
+ */
+export function applyProjectDocSaveVerdict(
+  decision: PermissionDecision,
+  isDelete: boolean,
+  verdict: ProjectDocSafetyVerdict,
+  options?: {
+    enforceServerFloor?: boolean
+    asClassifier?: boolean
+    fallbackReason?: string
+  },
+): PermissionDecision {
+  const isMatchingAsk =
+    decision.behavior === 'ask' &&
+    decision.message === PROJECT_DOC_ASK_MESSAGE &&
+    (verdict === 'flagged' || verdict === 'fault')
+  const passThroughVerdict = options?.enforceServerFloor
+    ? 'not_flagged'
+    : undefined
+  if (
+    (decision.behavior !== 'allow' && !isMatchingAsk) ||
+    verdict === passThroughVerdict
+  ) {
+    return decision
+  }
+  if (verdict === 'fault') {
+    return {
+      behavior: 'deny',
+      message: PROJECT_DOC_SAFETY_UNAVAILABLE_MESSAGE,
+      decisionReason: {
+        type: 'other',
+        reason:
+          'The call did not run: the automatic safety check was not available',
+      },
+    }
+  }
+  const flagged = verdict === 'flagged'
+  const reasonText = flagged
+    ? PROJECT_DOC_FLAGGED_REASON
+    : verdict === 'not_flagged'
+      ? PROJECT_DOC_OUTSIDE_TEXT_REASON
+      : (options?.fallbackReason ?? PROJECT_DOC_OUTSIDE_TEXT_REASON)
+  return {
+    ...(decision.behavior === 'ask' ? decision : {}),
+    ...buildProjectDocApprovalAsk(
+      isDelete,
+      reasonText,
+      flagged && (options?.asClassifier ?? true),
+    ),
+    updatedInput: decision.updatedInput,
+    ...(flagged && {
+      defaultToNo: true,
+      afterClassifierBlock: true,
+    }),
+  }
+}
+
+export type ProjectDocMessageLike = {
+  type?: string
+  toolDenialKind?: unknown
+  message?: {
+    content?: unknown
+  }
+}
+
+/**
+ * Official 2.1.331 `Ie(messages, target, projectToolNames)`:
+ * Detects whether an earlier `project_write` or `project_delete` in the chat
+ * (optionally matching the same normalized path) was refused or stopped, and
+ * has not since been superseded by an identical succeeding call.
+ */
+export function hasPriorRefusedProjectDocMutation(
+  messages: readonly ProjectDocMessageLike[],
+  target?: { method: 'project_write' | 'project_delete'; path: string },
+  projectToolNames: readonly string[] = ['Projects'],
+): boolean {
+  const normalizeDocPath = (p: string): string =>
+    p.replace(/^\/+/, '').toLowerCase()
+  const targetNorm = target ? normalizeDocPath(target.path) : undefined
+  const trackedCalls = new Map<string, boolean>()
+  let refused = false
+
+  for (const entry of messages) {
+    const content = entry.message?.content
+    if (!Array.isArray(content)) continue
+
+    if (entry.type === 'assistant') {
+      for (const block of content) {
+        if (
+          typeof block !== 'object' ||
+          block === null ||
+          !('type' in block) ||
+          (block as { type?: unknown }).type !== 'tool_use'
+        ) {
+          continue
+        }
+        const toolUse = block as {
+          id?: unknown
+          name?: unknown
+          input?: unknown
+        }
+        if (
+          typeof toolUse.id !== 'string' ||
+          typeof toolUse.name !== 'string' ||
+          !projectToolNames.includes(toolUse.name) ||
+          typeof toolUse.input !== 'object' ||
+          toolUse.input === null
+        ) {
+          continue
+        }
+        const inp = toolUse.input as { method?: unknown; path?: unknown }
+        if (
+          (inp.method === 'project_write' || inp.method === 'project_delete') &&
+          typeof inp.path === 'string' &&
+          (targetNorm === undefined ||
+            normalizeDocPath(inp.path) === targetNorm)
+        ) {
+          trackedCalls.set(
+            toolUse.id,
+            target === undefined ||
+              (inp.method === target.method && inp.path === target.path),
+          )
+        }
+      }
+    } else if (entry.type === 'user') {
+      const hasDenialKind = entry.toolDenialKind !== undefined
+      for (const block of content) {
+        if (
+          typeof block !== 'object' ||
+          block === null ||
+          !('type' in block) ||
+          (block as { type?: unknown }).type !== 'tool_result'
+        ) {
+          continue
+        }
+        const toolResult = block as {
+          tool_use_id?: unknown
+          content?: unknown
+          is_error?: unknown
+        }
+        if (typeof toolResult.tool_use_id !== 'string') continue
+        const matched = trackedCalls.get(toolResult.tool_use_id)
+        if (matched === undefined) continue
+        if (hasDenialKind) {
+          refused ||=
+            toolResult.content !== PROJECT_DOC_SAFETY_UNAVAILABLE_MESSAGE
+        } else if (matched === true && toolResult.is_error !== true) {
+          refused = false
+        }
+      }
+    }
+  }
+
+  return refused
+}
+
+/**
+ * Official 2.1.331 Projects checkPermissions escalation (`Mtl` / `Dtl` / `hVo`):
+ * Returns an ask decision when a prior save/delete in the chat was refused
+ * (`Mtl` + `defaultToNo: true`), when every-call confirmation is required
+ * (`Dtl`), or after outside text (`hVo`).
+ */
+export function buildProjectDocMutationAskForReason(
+  isDelete: boolean,
+  reasonKind: 'repeat' | 'every_call' | 'after_outside_text',
+): PermissionAskDecision {
+  const reasonText =
+    reasonKind === 'repeat'
+      ? PROJECT_DOC_PRIOR_REFUSAL_REASON
+      : reasonKind === 'every_call'
+        ? PROJECT_DOC_EVERY_CALL_REASON
+        : PROJECT_DOC_OUTSIDE_TEXT_REASON
+  return {
+    ...buildProjectDocApprovalAsk(isDelete, reasonText),
+    ...(reasonKind === 'repeat' && { defaultToNo: true }),
+  }
+}
+
+// --- Official 2.1.331 Connector First-File-Send TOCTOU Guard (`05_send_file_toctou.js`) ---
+
+/** Official 2.1.331 `Lvo` */
+export const FIRST_FILE_SEND_REFUSAL_MESSAGES = {
+  nobody_to_ask:
+    "No file was sent: the first time that Claude Code sends a file to a connector, it asks the user, and here it cannot. Tell the user: Claude Code can send it where it can ask: in a terminal, VS Code, or the desktop app, in a mode other than Don't Ask. After one Yes there, new sessions on this computer follow the tool's own setting, if they are signed in with /login and not with a token.",
+  arguments_changed:
+    'No file was sent: the arguments of this call changed after Claude Code had listed its files for the user. Make the call again.',
+} as const
+
+export type FirstFileSendQuestion = {
+  reason: string
+  shown: { [key: string]: unknown }
+}
+
+export type FirstFileSendGuardResult =
+  | undefined
+  | 'nobody_to_ask'
+  | 'arguments_changed'
+  | FirstFileSendQuestion
+
+/**
+ * Official 2.1.331 `Vks(tool, input, checkedPhase, context)`:
+ * Evaluates whether a connector tool call sending files requires a first-send
+ * confirmation or must be refused due to `nobody_to_ask` or `arguments_changed`.
+ */
+export function evaluateFirstFileSendGuard(
+  tool: Tool & {
+    firstFileSend?: (
+      input: { [key: string]: unknown },
+      checked: unknown,
+      session?: unknown,
+    ) => { question?: FirstFileSendQuestion } | undefined
+  },
+  input: { [key: string]: unknown },
+  checkedPhase: unknown,
+  context: ToolUseContext,
+): FirstFileSendGuardResult {
+  const probe =
+    tool.isMcp === true
+      ? tool.firstFileSend?.(input, checkedPhase, undefined)
+      : undefined
+  if (probe === undefined) return undefined
+  const layered = getEffectiveToolPermissionContext(context)
+  if (
+    getEffectivePermissionMode(tool, layered) === 'dontAsk' ||
+    avoidsPromptsByNature(layered)
+  ) {
+    return 'nobody_to_ask'
+  }
+  return probe.question ?? 'arguments_changed'
+}
+
+/**
+ * Official 2.1.331 `_kl(decision, { reason, shown })`:
+ * Wraps a connector first-file-send prompt so hooks cannot auto-allow it and
+ * the user sees the exact listed files with `defaultToNo: true`.
+ */
+export function wrapFirstFileSendAsk(
+  decision: PermissionDecision,
+  question: FirstFileSendQuestion,
+): PermissionAskDecision {
+  const priorAsk = decision.behavior === 'ask' ? decision : undefined
+  let priorNote: string | undefined
+  if (priorAsk?.decisionReason?.type === 'hook') {
+    const r = priorAsk.decisionReason.reason
+    priorNote = `Hook ${priorAsk.decisionReason.hookName} requires confirmation${r ? `: ${r}` : '.'}`
+  } else if (priorAsk?.decisionReason?.type === 'classifier') {
+    priorNote =
+      priorAsk.decisionReason.classifier === 'auto-mode'
+        ? `Auto mode needs your confirmation: ${priorAsk.decisionReason.reason}`
+        : `Classifier ${priorAsk.decisionReason.classifier} requires confirmation: ${priorAsk.decisionReason.reason}`
+  }
+  const message =
+    priorNote === undefined
+      ? question.reason
+      : `${question.reason}\n${priorNote}`
+  return {
+    ...(priorAsk ?? {}),
+    behavior: 'ask',
+    message,
+    updatedInput: question.shown,
+    hooksMayAllow: false,
+    defaultToNo: true,
+    askRequiresUserInteraction: true,
+    localDisplayOnly: true,
+    suppressAlwaysAllowRule: true,
+    suggestions: undefined,
+    decisionReason: { type: 'other', reason: message },
+  }
+}
+
+/**
+ * Official 2.1.331 `xki`: applies the first-file-send / arguments-changed guard
+ * to a permission decision, denying on `nobody_to_ask` or `arguments_changed`.
+ */
+export function applyFirstFileSendGuard(
+  tool: Tool & {
+    firstFileSend?: (
+      input: { [key: string]: unknown },
+      checked: unknown,
+      session?: unknown,
+    ) => { question?: FirstFileSendQuestion } | undefined
+  },
+  input: { [key: string]: unknown },
+  decision: PermissionDecision,
+  checkedPhase: unknown,
+  context: ToolUseContext,
+): PermissionDecision {
+  if (decision.behavior === 'deny') return decision
+  const effectiveInput =
+    decision.updatedInput !== undefined ? decision.updatedInput : input
+  const outcome = evaluateFirstFileSendGuard(
+    tool,
+    effectiveInput,
+    checkedPhase,
+    context,
+  )
+  switch (outcome) {
+    case undefined:
+      return decision
+    case 'nobody_to_ask':
+    case 'arguments_changed':
+      return {
+        behavior: 'deny',
+        message: FIRST_FILE_SEND_REFUSAL_MESSAGES[outcome],
+        decisionReason: {
+          type: 'other',
+          reason: FIRST_FILE_SEND_REFUSAL_MESSAGES[outcome],
+        },
+      }
+    default:
+      return wrapFirstFileSendAsk(decision, outcome)
+  }
 }
 
 /**
@@ -2433,7 +3018,7 @@ const evaluateToolPermission: CanUseToolFn = async (
       ? { ...context, toolUseId: toolUseID }
       : context
 
-  const result =
+  const rawResult =
     forceDecision !== undefined
       ? forceDecision
       : await evaluatePermissionWithToolCheck({
@@ -2444,6 +3029,46 @@ const evaluateToolPermission: CanUseToolFn = async (
           evaluate: () =>
             hasPermissionsToUseToolInner(tool, input, evalContext),
         })
+
+  // Official 2.1.331 `Ijn` + `HVo` + `S_t`: if a person declined an earlier
+  // action in the same turn (`queryTracking.chainId`), escalate subsequent
+  // non-read-only actions to require explicit human approval (`KJr`/`VJr`).
+  const priorRefusalEscalation: PriorRefusalEscalationKind =
+    forceDecision === undefined &&
+    hasPersonDeclinedInTurn(evalContext) &&
+    !isNonMcpReadOnlyToolCall(tool, input)
+      ? 'afterANo'
+      : false
+  const escalatedResult =
+    priorRefusalEscalation !== false
+      ? applyPriorRefusalOrSafetyCheckEscalation(
+          tool,
+          rawResult,
+          evalContext,
+          toolUseID,
+          priorRefusalEscalation,
+          false,
+          'ask',
+        )
+      : rawResult
+  // Official 2.1.331 `xki` / `Vks`: enforce connector first-file-send & TOCTOU
+  // argument verification when a tool declares `firstFileSend`.
+  const result =
+    'firstFileSend' in tool
+      ? applyFirstFileSendGuard(
+          tool as Tool & {
+            firstFileSend?: (
+              inp: { [key: string]: unknown },
+              checked: unknown,
+              session?: unknown,
+            ) => { question?: FirstFileSendQuestion } | undefined
+          },
+          input,
+          escalatedResult,
+          undefined,
+          evalContext,
+        )
+      : escalatedResult
 
   // Reset consecutive denials on any allowed tool use in auto mode.
   // This ensures that a successful tool use (even one auto-allowed by rules)
@@ -2538,6 +3163,9 @@ const evaluateToolPermission: CanUseToolFn = async (
             message: DONT_ASK_REJECT_MESSAGE(tool.name),
           }
         }
+        if (result.refusal !== undefined) {
+          return result.refusal
+        }
         return {
           behavior: 'deny',
           message: formatNonInteractiveAskCauseMessage(result),
@@ -2565,6 +3193,9 @@ const evaluateToolPermission: CanUseToolFn = async (
             }
           }
           if (avoidsPromptsByNature(layeredPermissionContext)) {
+            if (result.refusal !== undefined) {
+              return result.refusal
+            }
             return {
               behavior: 'deny',
               message: formatNonInteractiveAskCauseMessage(result),
@@ -2739,7 +3370,12 @@ const evaluateToolPermission: CanUseToolFn = async (
       ) {
         return result
       }
-      if (tool.requiresUserInteraction?.() && result.behavior === 'ask') {
+      if (
+        (tool.requiresUserInteraction?.() ||
+          result.askRequiresUserInteraction === true ||
+          result.afterClassifierBlock === true) &&
+        result.behavior === 'ask'
+      ) {
         return result
       }
 
@@ -3790,7 +4426,14 @@ const evaluateToolPermission: CanUseToolFn = async (
         result.suggestions,
       )
       if (hookDecision) {
-        return hookDecision
+        if (
+          !(result.hooksMayAllow === false && hookDecision.behavior === 'allow')
+        ) {
+          return hookDecision
+        }
+      }
+      if (result.refusal !== undefined) {
+        return result.refusal
       }
       const hasExplicitCause =
         result.decisionReason !== undefined &&

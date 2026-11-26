@@ -81,6 +81,7 @@ import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
   consumePermissionPipelineResult,
   detachedLetGoPermissionDeny,
+  recordPersonDeclinedInTurn,
 } from '../../utils/permissions/permissions.js'
 import {
   findToolByName,
@@ -5112,6 +5113,9 @@ async function checkPermissionsAndCallTool(
   if (permissionDecision.behavior !== 'allow') {
     logForDebugging(`${tool.name} tool permission denied`)
     const decisionInfo = toolUseContext.toolDecisions?.get(toolUseID)
+    if (decisionInfo?.source === 'user_reject') {
+      recordPersonDeclinedInTurn(toolUseContext, toolUseContext.setAppState)
+    }
     endToolBlockedOnUserSpan('reject', decisionInfo?.source || 'unknown')
     endToolSpan()
 

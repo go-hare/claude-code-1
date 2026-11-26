@@ -34,6 +34,7 @@ import {
 } from '../settings/settings.js'
 import {
   isExternalPermissionMode,
+  isModeBlockedByHeldToAuto,
   type PermissionMode,
   permissionModeFromString,
   toExternalPermissionMode,
@@ -1135,6 +1136,17 @@ export function initialPermissionModeFromCLI({
   let result: { mode: PermissionMode; notification?: string } | undefined
 
   for (const mode of orderedModes) {
+    // Official 2.1.331 `RIo`: bridge child sessions held to auto drop any mode
+    // above/outside the auto ceiling (`bypassPermissions`, `acceptEdits`).
+    if (isModeBlockedByHeldToAuto(mode)) {
+      logForDebugging(`${mode} mode dropped: this session is held to auto`, {
+        level: 'warn',
+      })
+      if (mode === 'bypassPermissions') {
+        notification = BYPASS_DISABLED_BY_HELD_TO_AUTO_MESSAGE
+      }
+      continue
+    }
     if (mode === 'bypassPermissions' && disableBypassPermissionsMode) {
       if (growthBookDisableBypassPermissionsMode) {
         logForDebugging('bypassPermissions mode is disabled by Statsig gate', {
@@ -1146,7 +1158,7 @@ export function initialPermissionModeFromCLI({
         logForDebugging('bypassPermissions mode is disabled by settings', {
           level: 'warn',
         })
-        notification = 'Bypass permissions mode was disabled by settings'
+        notification = BYPASS_DISABLED_BY_SETTINGS_MESSAGE
       }
       continue // Skip this mode if it's disabled
     }
@@ -1398,6 +1410,7 @@ export async function initializeToolPermissionContext({
     (permissionMode === 'bypassPermissions' ||
       allowDangerouslySkipPermissions) &&
     !bypassDisabledBySettings &&
+    !isModeBlockedByHeldToAuto('bypassPermissions') &&
     !restricted
 
   // Load all permission rules from disk
@@ -2039,23 +2052,45 @@ export function trustedSourceGrantsDefaultMode(mode: PermissionMode): boolean {
   )
 }
 
+export const BYPASS_DISABLED_BY_SETTINGS_MESSAGE =
+  'Bypass permissions mode was disabled by settings'
+
+export const BYPASS_DISABLED_BY_HELD_TO_AUTO_MESSAGE =
+  'Bypass permissions mode is not available in a session held to auto mode'
+
+export { isModeBlockedByHeldToAuto }
+
 /**
- * Checks if bypassPermissions mode is currently disabled by Statsig gate or settings.
- * This is a synchronous version that uses cached Statsig values.
+ * Official 2.1.331 `xIo()`:
+ * Returns the reason bypassPermissions mode is currently unavailable, or
+ * `undefined` if it is allowed by policy, settings, and held-to-auto session cap.
  */
-export function isBypassPermissionsModeDisabled(): boolean {
+export function getBypassPermissionsDisabledReason(): string | undefined {
   const growthBookDisableBypassPermissionsMode =
     checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
       'tengu_disable_bypass_permissions_mode',
     )
+  if (growthBookDisableBypassPermissionsMode) {
+    return 'Bypass permissions mode was disabled by your organization policy'
+  }
   const settings = getSettings_DEPRECATED() || {}
-  const settingsDisableBypassPermissionsMode =
-    settings.permissions?.disableBypassPermissionsMode === 'disable'
+  if (settings.permissions?.disableBypassPermissionsMode === 'disable') {
+    return BYPASS_DISABLED_BY_SETTINGS_MESSAGE
+  }
+  if (isModeBlockedByHeldToAuto('bypassPermissions')) {
+    return BYPASS_DISABLED_BY_HELD_TO_AUTO_MESSAGE
+  }
+  return undefined
+}
 
-  return (
-    growthBookDisableBypassPermissionsMode ||
-    settingsDisableBypassPermissionsMode
-  )
+/**
+ * Official 2.1.331 `FC()` (`xIo() !== undefined`):
+ * Checks if bypassPermissions mode is currently disabled by Statsig gate,
+ * settings, or held-to-auto session cap (`CLAUDE_CODE_BRIDGE_CHILD_HELD_TO_AUTO`).
+ * This is a synchronous version that uses cached Statsig values.
+ */
+export function isBypassPermissionsModeDisabled(): boolean {
+  return getBypassPermissionsDisabledReason() !== undefined
 }
 
 /**
@@ -2305,6 +2340,9 @@ export function sanitizeInheritedPermissionMode(
   const external = isExternalPermissionMode(parsed)
     ? parsed
     : toExternalPermissionMode(parsed)
+  if (isModeBlockedByHeldToAuto(external)) {
+    return isAutoModeGateEnabled() ? 'auto' : 'default'
+  }
   if (external === 'bypassPermissions' && isBypassPermissionsModeDisabled()) {
     return 'default'
   }
@@ -2340,6 +2378,12 @@ export function setPermissionModeWithGuards(
         error: RESTRICTED_BYPASS_REFUSE,
       }
     }
+    if (isModeBlockedByHeldToAuto('bypassPermissions')) {
+      return {
+        ok: false,
+        error: BYPASS_DISABLED_BY_HELD_TO_AUTO_MESSAGE,
+      }
+    }
     if (isBypassPermissionsModeDisabled()) {
       return {
         ok: false,
@@ -2353,6 +2397,11 @@ export function setPermissionModeWithGuards(
         error:
           'Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions',
       }
+    }
+  } else if (isModeBlockedByHeldToAuto(mode)) {
+    return {
+      ok: false,
+      error: `${mode} mode is not available in a session held to auto mode`,
     }
   }
   if (mode === 'auto' && !isAutoModeGateEnabled()) {
