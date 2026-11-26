@@ -13,6 +13,7 @@ import {
   getTaskOutputPath,
 } from '../../utils/task/diskOutput.js'
 import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import {
   createTaskRegistry,
   type TaskRegistry,
@@ -45,19 +46,34 @@ export type LiveShellKillHandle = {
   result?: Promise<unknown>
 }
 
-const liveShellCommands = new Set<LiveShellKillHandle>()
-const pendingKillBackstops = new Set<Promise<void>>()
+type KillShellTasksHostState = {
+  liveShellCommands: Set<LiveShellKillHandle>
+  pendingKillBackstops: Set<Promise<void>>
+}
+
+const killShellTasksStateByHost = new HostSlot<KillShellTasksHostState>(() => ({
+  liveShellCommands: new Set<LiveShellKillHandle>(),
+  pendingKillBackstops: new Set<Promise<void>>(),
+}))
+
+function getKillShellTasksHostState(): KillShellTasksHostState {
+  return killShellTasksStateByHost.of(getBootstrapSessionHost())
+}
 
 export function registerLiveShellCommand(
   handle: LiveShellKillHandle,
 ): () => void {
+  const { liveShellCommands } = getKillShellTasksHostState()
   liveShellCommands.add(handle)
   return () => {
     liveShellCommands.delete(handle)
   }
 }
 
-function trackKillBackstop(handle: LiveShellKillHandle): void {
+function trackKillBackstop(
+  handle: LiveShellKillHandle,
+  state: KillShellTasksHostState,
+): void {
   if (!handle.result && handle.pid === undefined) return
   const p = (async () => {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -81,19 +97,21 @@ function trackKillBackstop(handle: LiveShellKillHandle): void {
       }
     }
   })()
-  pendingKillBackstops.add(p)
+  state.pendingKillBackstops.add(p)
   void p.finally(() => {
-    pendingKillBackstops.delete(p)
+    state.pendingKillBackstops.delete(p)
   })
 }
 
 /** SEA `rkr()` — kill all running live shell commands at shutdown (#810). */
 export function killLiveShellCommands(): void {
-  for (const cmd of Array.from(liveShellCommands)) {
+  const state = killShellTasksStateByHost.peek(getBootstrapSessionHost())
+  if (!state) return
+  for (const cmd of Array.from(state.liveShellCommands)) {
     if (cmd.status === 'running' || cmd.status === 'backgrounded') {
       try {
         cmd.kill()
-        trackKillBackstop(cmd)
+        trackKillBackstop(cmd, state)
       } catch (error) {
         logError(error)
       }
@@ -103,13 +121,17 @@ export function killLiveShellCommands(): void {
 
 /** SEA `Htn()` — wait for pending shell kill backstops to settle (#810). */
 export async function awaitPendingShellKillBackstops(): Promise<void> {
-  await Promise.allSettled(Array.from(pendingKillBackstops))
+  const state = killShellTasksStateByHost.peek(getBootstrapSessionHost())
+  if (!state) return
+  await Promise.allSettled(Array.from(state.pendingKillBackstops))
 }
 
 /** Testing-only: clear live shell command & backstop sets. */
 export function _resetLiveShellKillStateForTesting(): void {
-  liveShellCommands.clear()
-  pendingKillBackstops.clear()
+  const state = killShellTasksStateByHost.peek(getBootstrapSessionHost())
+  if (!state) return
+  state.liveShellCommands.clear()
+  state.pendingKillBackstops.clear()
 }
 
 /** densable `zN(e,n)` — n is Xm/taskRegistry. */

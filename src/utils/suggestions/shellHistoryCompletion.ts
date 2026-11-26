@@ -1,5 +1,6 @@
 import { getHistory } from '../../history.js'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 /**
  * Result of shell history completion lookup
@@ -13,19 +14,41 @@ export type ShellHistoryMatch = {
 
 // Cache for shell history commands to avoid repeated async reads
 // History only changes when user submits a command, so a long TTL is fine
-let shellHistoryCache: string[] | null = null
-let shellHistoryCacheTimestamp = 0
+class ShellHistoryCompletionHostState {
+  shellHistoryCache: string[] | null = null
+  shellHistoryCacheTimestamp = 0
+}
+
+const fallbackShellHistoryHost: object = {}
+const shellHistoryByHost = new HostSlot<ShellHistoryCompletionHostState>(
+  () => new ShellHistoryCompletionHostState(),
+)
+
+function getShellHistoryHostState(): ShellHistoryCompletionHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return shellHistoryByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return shellHistoryByHost.of(fallbackShellHistoryHost)
+}
+
 const CACHE_TTL_MS = 60000 // 60 seconds - history won't change while typing
 
 /**
  * Get shell commands from history, with caching
  */
 async function getShellHistoryCommands(): Promise<string[]> {
+  const hostState = getShellHistoryHostState()
   const now = Date.now()
 
   // Return cached result if still fresh
-  if (shellHistoryCache && now - shellHistoryCacheTimestamp < CACHE_TTL_MS) {
-    return shellHistoryCache
+  if (
+    hostState.shellHistoryCache &&
+    now - hostState.shellHistoryCacheTimestamp < CACHE_TTL_MS
+  ) {
+    return hostState.shellHistoryCache
   }
 
   const commands: string[] = []
@@ -51,8 +74,8 @@ async function getShellHistoryCommands(): Promise<string[]> {
     logForDebugging(`Failed to read shell history: ${error}`)
   }
 
-  shellHistoryCache = commands
-  shellHistoryCacheTimestamp = now
+  hostState.shellHistoryCache = commands
+  hostState.shellHistoryCacheTimestamp = now
   return commands
 }
 
@@ -60,8 +83,9 @@ async function getShellHistoryCommands(): Promise<string[]> {
  * Clear the shell history cache (useful when history is updated)
  */
 export function clearShellHistoryCache(): void {
-  shellHistoryCache = null
-  shellHistoryCacheTimestamp = 0
+  const hostState = getShellHistoryHostState()
+  hostState.shellHistoryCache = null
+  hostState.shellHistoryCacheTimestamp = 0
 }
 
 /**
@@ -72,6 +96,7 @@ export function clearShellHistoryCache(): void {
  * the full history which already includes the new command.
  */
 export function prependToShellHistoryCache(command: string): void {
+  const { shellHistoryCache } = getShellHistoryHostState()
   if (!shellHistoryCache) {
     return
   }

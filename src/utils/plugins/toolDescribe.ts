@@ -7,6 +7,7 @@
 import { mcpInfoFromString } from '../../services/mcp/mcpStringUtils.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { IW } from '../toolSchemaCache.js'
 import {
   checkToolDescribeArgument,
@@ -83,40 +84,58 @@ type DescribeBag = {
   described: Map<string, Promise<ToolDescribeResult>>
 }
 
+type ToolDescribeHostState = {
+  bag: DescribeBag
+  mcpRecordLookup: ((server: string) => Promise<McpRecord | null>) | null
+  secDefaultChanged: { isSent: boolean }
+}
+
 /** densable `R_` / `AH`. */
 function createToolDescribeBag(): DescribeBag {
   return {
-    resolver: null,
-    presence: null,
-    buildPresence: null,
-    invalidator: null,
+    resolver: resolveToolDescriptionImpl,
+    presence: tool =>
+      hasMatchingFunctionHook(
+        'tool.describe',
+        tool === undefined ? undefined : { tool },
+      ),
+    buildPresence: isToolDescribeCounted,
+    invalidator: IW,
     deferrals: new Map(),
     described: new Map(),
   }
 }
 
-const bag = createToolDescribeBag()
+const toolDescribeHostSlot = new HostSlot<ToolDescribeHostState>(() => ({
+  bag: createToolDescribeBag(),
+  mcpRecordLookup: null,
+  secDefaultChanged: { isSent: false },
+}))
+
+function getToolDescribeHostState(): ToolDescribeHostState {
+  return toolDescribeHostSlot.of(getBootstrapSessionHost())
+}
 
 export function setToolDescribeResolver(
   resolver: DescribeResolver | null,
 ): void {
-  bag.resolver = resolver
+  getToolDescribeHostState().bag.resolver = resolver
 }
 
 export function setToolDescribePresence(
   presence: DescribeBag['presence'],
 ): void {
-  bag.presence = presence
+  getToolDescribeHostState().bag.presence = presence
 }
 
 export function setToolDescribeBuildPresence(
   presence: DescribeBag['buildPresence'],
 ): void {
-  bag.buildPresence = presence
+  getToolDescribeHostState().bag.buildPresence = presence
 }
 
 export function setToolDescribeInvalidator(invalidator: () => void): void {
-  bag.invalidator = invalidator
+  getToolDescribeHostState().bag.invalidator = invalidator
 }
 
 /** densable `$e.resolveToolDescription` / `nls`. */
@@ -126,22 +145,24 @@ export function resolveToolDescription(
   isDeferred: boolean | undefined,
 ): Promise<ToolDescribeResult> {
   return (
-    bag.resolver?.(tool, description, isDeferred) ??
+    getToolDescribeHostState().bag.resolver?.(tool, description, isDeferred) ??
     Promise.resolve({ description, isDeferred })
   )
 }
 
 export function isToolDescribeHooked(tool: string | undefined): boolean {
-  return bag.presence?.(tool) ?? false
+  return getToolDescribeHostState().bag.presence?.(tool) ?? false
 }
 
 export function isToolDescribeHookedForBuild(
   tool: string | undefined,
 ): boolean {
+  const { bag } = getToolDescribeHostState()
   return (bag.buildPresence ?? bag.presence)?.(tool) ?? false
 }
 
 export function invalidateToolDescriptions(): void {
+  const { bag } = getToolDescribeHostState()
   bag.deferrals.clear()
   bag.described.clear()
   bag.invalidator?.()
@@ -151,15 +172,17 @@ export function recordDeferral(
   name: string,
   isDeferred: boolean | undefined,
 ): void {
+  const { bag } = getToolDescribeHostState()
   if (isDeferred === undefined) bag.deferrals.delete(name)
   else bag.deferrals.set(name, isDeferred)
 }
 
 export function deferralOf(name: string): boolean | undefined {
-  return bag.deferrals.get(name)
+  return getToolDescribeHostState().bag.deferrals.get(name)
 }
 
 export function forgetDeferrals(): void {
+  const { bag } = getToolDescribeHostState()
   bag.deferrals.clear()
   bag.described.clear()
 }
@@ -168,6 +191,7 @@ export function describedOnce(
   name: string,
   factory: () => Promise<ToolDescribeResult>,
 ): Promise<ToolDescribeResult> {
+  const { bag } = getToolDescribeHostState()
   const existing = bag.described.get(name) ?? factory()
   bag.described.set(name, existing)
   return existing
@@ -254,17 +278,15 @@ export function providerForMcpServer(input: {
   return pluginProvider(pluginStorageName(owner))
 }
 
-let mcpRecordLookup: ((server: string) => Promise<McpRecord | null>) | null =
-  null
-
 /** Test seam for gold `zLo` reject ("read as the organization's"). */
 export function setMcpRecordLookup(
   lookup: ((server: string) => Promise<McpRecord | null>) | null,
 ): void {
-  mcpRecordLookup = lookup
+  getToolDescribeHostState().mcpRecordLookup = lookup
 }
 
 async function readMcpRecord(server: string): Promise<McpRecord | null> {
+  const { mcpRecordLookup } = getToolDescribeHostState()
   if (mcpRecordLookup) return mcpRecordLookup(server)
   const { getMcpConfigByName } = await import('../../services/mcp/config.js')
   const cfg = getMcpConfigByName(server)
@@ -314,10 +336,8 @@ export function isToolDescribeCounted(tool: string | undefined): boolean {
 }
 
 /** densable `Lit`. */
-const secDefaultChanged = { isSent: false }
-
 export function resetToolDescribeSecDefaultSent(): void {
-  secDefaultChanged.isSent = false
+  getToolDescribeHostState().secDefaultChanged.isSent = false
 }
 
 /** densable `ua` / `Od["tool.describe"]`. */
@@ -413,6 +433,7 @@ export async function resolveToolDescriptionImpl(
       `tool.describe ${tool.name}: the built-in sec-default plugin changed this tool, though its hook should only pass the event on`,
       { level: 'error' },
     )
+    const { secDefaultChanged } = getToolDescribeHostState()
     if (!secDefaultChanged.isSent) secDefaultChanged.isSent = true
   }
   return { description: nextDescription, isDeferred: nextDeferred }

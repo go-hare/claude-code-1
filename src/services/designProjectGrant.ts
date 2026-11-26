@@ -12,6 +12,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { hasHookForEvent } from '../utils/hooks.js'
 import { hasMatchingFunctionHook } from '../utils/plugins/functionHooksModules.js'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionHost.js'
 import { ToolStateSlots } from '../utils/toolState.js'
 import {
   DESIGN_CONSENT_BIT,
@@ -126,22 +127,35 @@ export function designSessionState(context: {
   return context.toolState.get(DesignSessionState)
 }
 
-let probeOverride: Set<string> | null | undefined
-let cardOverride:
-  | 'fetch'
-  | null
-  | { name: string; sharingLabel: string; url: string } = 'fetch'
+type DesignProjectGrantOverrides = {
+  probeOverride: Set<string> | null | undefined
+  cardOverride:
+    | 'fetch'
+    | null
+    | { name: string; sharingLabel: string; url: string }
+}
+
+const designProjectGrantOverridesSlot =
+  new RootSessionSlot<DesignProjectGrantOverrides>(() => ({
+    probeOverride: undefined,
+    cardOverride: 'fetch',
+  }))
+
+function getDesignProjectGrantOverrides(): DesignProjectGrantOverrides {
+  return designProjectGrantOverridesSlot.of(getBootstrapSession())
+}
 
 export function resetDesignProjectGrantForTests(): void {
-  probeOverride = undefined
-  cardOverride = 'fetch'
+  const overrides = getDesignProjectGrantOverrides()
+  overrides.probeOverride = undefined
+  overrides.cardOverride = 'fetch'
 }
 
 /** Test seam. `null` is gold's unavailable probe. */
 export function seedDesignGrantProbe(
   value: 'fetch' | 'unavailable' | readonly string[],
 ): void {
-  probeOverride =
+  getDesignProjectGrantOverrides().probeOverride =
     value === 'fetch'
       ? undefined
       : value === 'unavailable'
@@ -152,7 +166,7 @@ export function seedDesignGrantProbe(
 export function seedDesignProjectCard(
   value: 'fetch' | null | { name: string; sharingLabel: string; url: string },
 ): void {
-  cardOverride = value
+  getDesignProjectGrantOverrides().cardOverride = value
 }
 
 /** Gold Ike(state, projectId). */
@@ -488,6 +502,7 @@ async function probeGrants(
   state: DesignSessionState,
   credentials?: unknown,
 ): Promise<Set<string> | null> {
+  const { probeOverride } = getDesignProjectGrantOverrides()
   if (probeOverride !== undefined) return probeOverride
   const flight = (state.grantsFetch ??= fetchGrantIds(credentials))
   try {
@@ -506,6 +521,7 @@ async function projectCard(
   signal: AbortSignal | undefined,
   credentials?: unknown,
 ): Promise<{ name: string; sharingLabel: string; url: string } | null> {
+  const { cardOverride } = getDesignProjectGrantOverrides()
   if (cardOverride !== 'fetch') return cardOverride
   try {
     const headers = await designAuthHeaders(credentials)

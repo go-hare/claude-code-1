@@ -5,6 +5,7 @@
  * Semantic names only — never export minify `Ut|qw|cen|u7e|fGo|uGo|pGo|m7n|p7e|Xcn`.
  */
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionRoot.js'
 
 /** densable `yG` / `bot` — idle-window keepalive is not a live child. */
 const IDLE_WINDOW_KEEPALIVE = 'flag:idle-window'
@@ -49,20 +50,28 @@ export type HandbackDeliveryRecord = {
   report?: { text: string; warning?: string }
 }
 
-const deliveredBySender = new Map<string, HandbackDeliveryRecord>()
+type SubagentHandbackSessionState = {
+  deliveredBySender: Map<string, HandbackDeliveryRecord>
+  /** densable uGo / pGo session contract bag. */
+  sessionContracts: Map<string, { contract: boolean; flagged: boolean }>
+}
 
-/** densable uGo / pGo session contract bag. */
-const sessionContracts = new Map<
-  string,
-  { contract: boolean; flagged: boolean }
->()
+const subagentHandbackStateSlot =
+  new RootSessionSlot<SubagentHandbackSessionState>(() => ({
+    deliveredBySender: new Map(),
+    sessionContracts: new Map(),
+  }))
+
+function getSubagentHandbackState(): SubagentHandbackSessionState {
+  return subagentHandbackStateSlot.of(getBootstrapSession())
+}
 
 /** densable v_n — one report per sender→recipient. */
 export function getHandbackDelivery(
   senderTaskId: string,
   recipient: string,
 ): HandbackDeliveryRecord | undefined {
-  const n = deliveredBySender.get(senderTaskId)
+  const n = getSubagentHandbackState().deliveredBySender.get(senderTaskId)
   return n?.recipient === recipient ? n : undefined
 }
 
@@ -75,6 +84,7 @@ export function recordHandbackDelivery(
   recipient: string,
   extra?: { flagged?: boolean },
 ): HandbackDeliveryRecord {
+  const { deliveredBySender } = getSubagentHandbackState()
   const prior = deliveredBySender.get(senderTaskId)
   const next: HandbackDeliveryRecord = {
     recipient,
@@ -88,12 +98,13 @@ export function recordHandbackDelivery(
 
 /** densable kbe — drop delivery-map row on sender settle. */
 export function clearHandbackDelivery(senderTaskId: string): void {
-  deliveredBySender.delete(senderTaskId)
+  getSubagentHandbackState().deliveredBySender.delete(senderTaskId)
 }
 
 export function clearHandbackDeliveriesForTests(): void {
-  deliveredBySender.clear()
-  sessionContracts.clear()
+  const state = getSubagentHandbackState()
+  state.deliveredBySender.clear()
+  state.sessionContracts.clear()
 }
 
 /** densable uGo — stamp the MC arm result onto the session contract bag. */
@@ -101,6 +112,7 @@ export function setHandbackSessionContract(
   agentId: string,
   contract: boolean,
 ): void {
+  const { sessionContracts } = getSubagentHandbackState()
   sessionContracts.set(agentId, {
     contract,
     flagged: sessionContracts.get(agentId)?.flagged === true,
@@ -109,6 +121,7 @@ export function setHandbackSessionContract(
 
 /** densable pGo — classifier flagged this sender. */
 export function flagHandbackSession(agentId: string): void {
+  const { sessionContracts } = getSubagentHandbackState()
   const prior = sessionContracts.get(agentId)
   sessionContracts.set(agentId, {
     contract: prior?.contract === true,
@@ -119,7 +132,7 @@ export function flagHandbackSession(agentId: string): void {
 export function getHandbackSessionContract(
   agentId: string,
 ): { contract: boolean; flagged: boolean } | undefined {
-  return sessionContracts.get(agentId)
+  return getSubagentHandbackState().sessionContracts.get(agentId)
 }
 
 export type HandbackContractFields = {

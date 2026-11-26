@@ -6,6 +6,7 @@
  */
 
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import {
   isCliOwnedConfig,
   markCcrInjectedConfig,
@@ -137,7 +138,9 @@ export function maybeMarkCcrInjectedConfig(name: string, config: object): void {
  * Gold `Is(el).value=!0` is a session latch; we also stamp
  * `bareElicitationCapability: true` on the dynamic clone when requested.
  */
-let bareElicitationPinned = false
+const hostBareElicitationPinnedSlot = new HostSlot<{ pinned: boolean }>(() => ({
+  pinned: false,
+}))
 
 export function maybePinHearthbotBareElicitation(
   name: string,
@@ -151,7 +154,7 @@ export function maybePinHearthbotBareElicitation(
     typeof (sourceConfig as { url: unknown }).url === 'string' &&
     isHearthbotCcrProxyUrl((sourceConfig as { url: string }).url)
   ) {
-    bareElicitationPinned = true
+    hostBareElicitationPinnedSlot.of(getBootstrapSessionHost()).pinned = true
     if (targetConfig) {
       targetConfig.bareElicitationCapability = true
     }
@@ -161,11 +164,17 @@ export function maybePinHearthbotBareElicitation(
 }
 
 export function isHearthbotBareElicitationPinned(): boolean {
-  return bareElicitationPinned
+  return (
+    hostBareElicitationPinnedSlot.peek(getBootstrapSessionHost())?.pinned ??
+    false
+  )
 }
 
 export function resetHearthbotBareElicitationPinForTests(): void {
-  bareElicitationPinned = false
+  const state = hostBareElicitationPinnedSlot.peek(getBootstrapSessionHost())
+  if (state) {
+    state.pinned = false
+  }
 }
 
 /**

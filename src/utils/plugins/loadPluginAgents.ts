@@ -1,5 +1,5 @@
-import memoize from 'lodash-es/memoize.js'
 import { basename, join } from 'path'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { isAutoMemoryEnabled } from '../../memdir/paths.js'
 import {
   externalBuiltinNamespaceName,
@@ -393,137 +393,165 @@ async function loadBuiltinPluginAgents(
   return loaded.filter(agent => agent !== null)
 }
 
-export const loadPluginAgents = memoize(
-  async (): Promise<AgentDefinition[]> => {
-    // Only load agents from enabled plugins
-    const { enabled, errors } = await loadAllPluginsCacheOnly()
+type CachedPluginAgentsFn = (() => Promise<AgentDefinition[]>) & {
+  cache: Map<unknown, Promise<AgentDefinition[]>>
+}
 
-    if (errors.length > 0) {
-      logForDebugging(
-        `Plugin loading errors: ${errors.map(e => getPluginErrorMessage(e)).join(', ')}`,
-      )
-    }
+const pluginAgentsCacheByHost = new HostSlot<
+  Map<unknown, Promise<AgentDefinition[]>>
+>(() => new Map())
 
-    // Process plugins in parallel; each plugin has its own loadedPaths scope
-    let loadFailure: string | null = null
-    const perPluginAgents = await Promise.all(
-      enabled.map(async (plugin): Promise<AgentDefinition[]> => {
-        // Track loaded file paths to prevent duplicates within this plugin
-        const loadedPaths = new Set<string>()
-        const pluginAgents: AgentDefinition[] = []
+async function loadPluginAgentsImpl(): Promise<AgentDefinition[]> {
+  // Only load agents from enabled plugins
+  const { enabled, errors } = await loadAllPluginsCacheOnly()
 
-        // Load agents from default agents directory
-        if (plugin.agentsPath) {
-          try {
-            const agents = await loadAgentsFromDirectory(
-              plugin.agentsPath,
-              plugin.name,
-              plugin.source,
-              plugin.path,
-              plugin.manifest,
-              loadedPaths,
-            )
-            pluginAgents.push(...agents)
-
-            if (agents.length > 0) {
-              logForDebugging(
-                `Loaded ${agents.length} agents from plugin ${plugin.name} default directory`,
-              )
-            }
-          } catch (error) {
-            loadFailure = 'plugin_load_agents_dir_failed'
-            logForDebugging(
-              `Failed to load agents from plugin ${plugin.name} default directory: ${error}`,
-              { level: 'error' },
-            )
-          }
-        }
-
-        // Load agents from additional paths specified in manifest
-        if (plugin.agentsPaths) {
-          // Process all agentsPaths in parallel. isDuplicatePath is synchronous
-          // (check-and-add), so concurrent access to loadedPaths is safe.
-          const pathResults = await Promise.all(
-            plugin.agentsPaths.map(
-              async (agentPath): Promise<AgentDefinition[]> => {
-                try {
-                  const fs = getFsImplementation()
-                  const stats = await fs.stat(agentPath)
-
-                  if (stats.isDirectory()) {
-                    // Load all .md files from directory
-                    const agents = await loadAgentsFromDirectory(
-                      agentPath,
-                      plugin.name,
-                      plugin.source,
-                      plugin.path,
-                      plugin.manifest,
-                      loadedPaths,
-                    )
-
-                    if (agents.length > 0) {
-                      logForDebugging(
-                        `Loaded ${agents.length} agents from plugin ${plugin.name} custom path: ${agentPath}`,
-                      )
-                    }
-                    return agents
-                  } else if (stats.isFile() && agentPath.endsWith('.md')) {
-                    // Load single agent file
-                    const agent = await loadAgentFromFile(
-                      agentPath,
-                      plugin.name,
-                      [],
-                      plugin.source,
-                      plugin.path,
-                      plugin.manifest,
-                      loadedPaths,
-                    )
-                    if (agent) {
-                      logForDebugging(
-                        `Loaded agent from plugin ${plugin.name} custom file: ${agentPath}`,
-                      )
-                      return [agent]
-                    }
-                  }
-                  return []
-                } catch (error) {
-                  loadFailure = 'plugin_load_agents_path_failed'
-                  logForDebugging(
-                    `Failed to load agents from plugin ${plugin.name} custom path ${agentPath}: ${error}`,
-                    { level: 'error' },
-                  )
-                  return []
-                }
-              },
-            ),
-          )
-          for (const agents of pathResults) {
-            pluginAgents.push(...agents)
-          }
-        }
-        if (plugin.isBuiltin) {
-          pluginAgents.push(
-            ...(await loadBuiltinPluginAgents(plugin, loadedPaths)),
-          )
-        }
-        return pluginAgents
-      }),
+  if (errors.length > 0) {
+    logForDebugging(
+      `Plugin loading errors: ${errors.map(e => getPluginErrorMessage(e)).join(', ')}`,
     )
+  }
 
-    const allAgents = perPluginAgents.flat()
-    logForDebugging(`Total plugin agents loaded: ${allAgents.length}`)
-    // densable `m`/`y` — `tengu_feature_bad` with the failure code, else ok.
-    if (loadFailure) {
-      logEvent('tengu_feature_bad', {
-        feature_name: 'plugin_load_agents',
-        error_code: loadFailure,
-      })
-    } else {
-      logEvent('tengu_feature_ok', { feature_name: 'plugin_load_agents' })
+  // Process plugins in parallel; each plugin has its own loadedPaths scope
+  let loadFailure: string | null = null
+  const perPluginAgents = await Promise.all(
+    enabled.map(async (plugin): Promise<AgentDefinition[]> => {
+      // Track loaded file paths to prevent duplicates within this plugin
+      const loadedPaths = new Set<string>()
+      const pluginAgents: AgentDefinition[] = []
+
+      // Load agents from default agents directory
+      if (plugin.agentsPath) {
+        try {
+          const agents = await loadAgentsFromDirectory(
+            plugin.agentsPath,
+            plugin.name,
+            plugin.source,
+            plugin.path,
+            plugin.manifest,
+            loadedPaths,
+          )
+          pluginAgents.push(...agents)
+
+          if (agents.length > 0) {
+            logForDebugging(
+              `Loaded ${agents.length} agents from plugin ${plugin.name} default directory`,
+            )
+          }
+        } catch (error) {
+          loadFailure = 'plugin_load_agents_dir_failed'
+          logForDebugging(
+            `Failed to load agents from plugin ${plugin.name} default directory: ${error}`,
+            { level: 'error' },
+          )
+        }
+      }
+
+      // Load agents from additional paths specified in manifest
+      if (plugin.agentsPaths) {
+        // Process all agentsPaths in parallel. isDuplicatePath is synchronous
+        // (check-and-add), so concurrent access to loadedPaths is safe.
+        const pathResults = await Promise.all(
+          plugin.agentsPaths.map(
+            async (agentPath): Promise<AgentDefinition[]> => {
+              try {
+                const fs = getFsImplementation()
+                const stats = await fs.stat(agentPath)
+
+                if (stats.isDirectory()) {
+                  // Load all .md files from directory
+                  const agents = await loadAgentsFromDirectory(
+                    agentPath,
+                    plugin.name,
+                    plugin.source,
+                    plugin.path,
+                    plugin.manifest,
+                    loadedPaths,
+                  )
+
+                  if (agents.length > 0) {
+                    logForDebugging(
+                      `Loaded ${agents.length} agents from plugin ${plugin.name} custom path: ${agentPath}`,
+                    )
+                  }
+                  return agents
+                } else if (stats.isFile() && agentPath.endsWith('.md')) {
+                  // Load single agent file
+                  const agent = await loadAgentFromFile(
+                    agentPath,
+                    plugin.name,
+                    [],
+                    plugin.source,
+                    plugin.path,
+                    plugin.manifest,
+                    loadedPaths,
+                  )
+                  if (agent) {
+                    logForDebugging(
+                      `Loaded agent from plugin ${plugin.name} custom file: ${agentPath}`,
+                    )
+                    return [agent]
+                  }
+                }
+                return []
+              } catch (error) {
+                loadFailure = 'plugin_load_agents_path_failed'
+                logForDebugging(
+                  `Failed to load agents from plugin ${plugin.name} custom path ${agentPath}: ${error}`,
+                  { level: 'error' },
+                )
+                return []
+              }
+            },
+          ),
+        )
+        for (const agents of pathResults) {
+          pluginAgents.push(...agents)
+        }
+      }
+      if (plugin.isBuiltin) {
+        pluginAgents.push(
+          ...(await loadBuiltinPluginAgents(plugin, loadedPaths)),
+        )
+      }
+      return pluginAgents
+    }),
+  )
+
+  const allAgents = perPluginAgents.flat()
+  logForDebugging(`Total plugin agents loaded: ${allAgents.length}`)
+  // densable `m`/`y` — `tengu_feature_bad` with the failure code, else ok.
+  if (loadFailure) {
+    logEvent('tengu_feature_bad', {
+      feature_name: 'plugin_load_agents',
+      error_code: loadFailure,
+    })
+  } else {
+    logEvent('tengu_feature_ok', { feature_name: 'plugin_load_agents' })
+  }
+  return allAgents
+}
+
+function createLoadPluginAgents(): CachedPluginAgentsFn {
+  const fn = (): Promise<AgentDefinition[]> => {
+    const cache = pluginAgentsCacheByHost.of(getBootstrapSessionHost())
+    if (cache.has(undefined)) {
+      return cache.get(undefined)!
     }
-    return allAgents
-  },
-)
+    const pending = loadPluginAgentsImpl()
+    cache.set(undefined, pending)
+    return pending
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<unknown, Promise<AgentDefinition[]>> {
+      return pluginAgentsCacheByHost.of(getBootstrapSessionHost())
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedPluginAgentsFn
+}
+
+export const loadPluginAgents: CachedPluginAgentsFn = createLoadPluginAgents()
 
 export function clearPluginAgentCache(): void {
   loadPluginAgents.cache?.clear?.()

@@ -5,22 +5,35 @@
  */
 import type { Tools } from '../../Tool.js'
 import type { Message } from '../../types/message.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 
-const messagesRef: { current: Message[] } = { current: [] }
-const toolsRef: { current: Tools } = { current: [] }
+type SandboxNetworkHeadlessRefsState = {
+  messagesRef: { current: Message[] }
+  toolsRef: { current: Tools }
+}
+
+const headlessRefsBySession =
+  new RootSessionSlot<SandboxNetworkHeadlessRefsState>(() => ({
+    messagesRef: { current: [] },
+    toolsRef: { current: [] },
+  }))
+
+function getHeadlessRefsState(): SandboxNetworkHeadlessRefsState {
+  return headlessRefsBySession.of(getBootstrapSession())
+}
 
 export function setSandboxNetworkHeadlessMessages(messages: Message[]): void {
-  messagesRef.current = messages
+  getHeadlessRefsState().messagesRef.current = messages
 }
 
 export function setSandboxNetworkHeadlessTools(tools: Tools): void {
-  toolsRef.current = tools
+  getHeadlessRefsState().toolsRef.current = tools
 }
 
 export function getSandboxNetworkHeadlessMessages(): Message[] {
-  return messagesRef.current
+  return getHeadlessRefsState().messagesRef.current
 }
 
 export function getSandboxNetworkHeadlessTools(): Tools {
-  return toolsRef.current
+  return getHeadlessRefsState().toolsRef.current
 }

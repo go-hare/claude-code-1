@@ -14,7 +14,7 @@
  * Kept out of bootstrap/state.ts (leaf module; no import cycle risk).
  */
 
-import { getBootstrapSessionHost } from './sessionHost.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 export type ForkReplayLaunchConfig = {
   /** Raw CLI `--append-system-prompt` string (not file/chrome mutations). */
@@ -31,7 +31,20 @@ export type ForkReplayLaunchConfig = {
  * launch (O_s). Used by nMr/kXs so /tui only carries `--effort` when it
  * differs from this baseline or CLI `--effort` was present.
  */
-let settingsEffortAtStartup: string | undefined
+const fallbackForkReplayHost: object = {}
+const settingsEffortAtStartupByHost = new HostSlot<{
+  value: string | undefined
+}>(() => ({ value: undefined }))
+
+function getSettingsEffortAtStartupSlot(): { value: string | undefined } {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return settingsEffortAtStartupByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return settingsEffortAtStartupByHost.of(fallbackForkReplayHost)
+}
 
 /**
  * official Rwn @178553301
@@ -90,13 +103,13 @@ export function getReplConfigArgv(): readonly string[] {
 
 /** densable `O_s(e)` — store settings effort baseline for nMr/kXs. */
 export function setSettingsEffortAtStartup(effort: string | undefined): void {
-  settingsEffortAtStartup =
+  getSettingsEffortAtStartupSlot().value =
     typeof effort === 'string' && effort !== '' ? effort : undefined
 }
 
 /** densable `M_s()` — settings effort at startup for /tui effort carry. */
 export function getSettingsEffortAtStartup(): string | undefined {
-  return settingsEffortAtStartup
+  return getSettingsEffortAtStartupSlot().value
 }
 
 /** Test helper — clear leftover fork-replay slots (not full Ie.reset). */
@@ -105,7 +118,7 @@ export function resetForkReplayLaunchConfig(): void {
   opts.replaceForkReplayLaunchConfig({})
   opts.replaceForkRestrictedLaunchConfig(false)
   opts.replaceReplConfigArgv([])
-  settingsEffortAtStartup = undefined
+  getSettingsEffortAtStartupSlot().value = undefined
 }
 
 /**

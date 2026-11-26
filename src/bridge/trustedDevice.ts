@@ -1,5 +1,4 @@
 import axios from 'axios'
-import memoize from 'lodash-es/memoize.js'
 import { hostname } from 'os'
 import {
   isPolicyEnforced,
@@ -14,6 +13,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { isEssentialTrafficOnly } from '../utils/privacyLevel.js'
 import { getSecureStorage } from '../utils/secureStorage/index.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 
 /**
@@ -119,8 +119,21 @@ export async function getTrustedDeviceTokenIfGateOn(): Promise<
 /** densable `L` @180888481 — `Xle` enroll cooldown. */
 const TRUSTED_DEVICE_ENROLL_RETRY_MS = 300_000
 
-/** densable `k.lastEnrollAttemptAtMs` @180888421. */
-let lastEnrollAttemptAtMs = 0
+type TrustedDeviceHostState = {
+  /** densable `k.lastEnrollAttemptAtMs` @180888421. */
+  lastEnrollAttemptAtMs: number
+  /** Host-scoped cache for `readStoredToken()`. */
+  storedTokenCache: Map<undefined, string | undefined>
+}
+
+const trustedDeviceHostSlot = new HostSlot<TrustedDeviceHostState>(() => ({
+  lastEnrollAttemptAtMs: 0,
+  storedTokenCache: new Map<undefined, string | undefined>(),
+}))
+
+function getTrustedDeviceHostState(): TrustedDeviceHostState {
+  return trustedDeviceHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable `Xle` @180891056. 403 `untrusted_device`: bust cache, enroll once
@@ -135,8 +148,12 @@ export async function recoverTrustedDeviceTokenAfterUntrusted(
   clearTrustedDeviceTokenCache()
   let n = await getTrustedDeviceTokenIfGateOn()
   if (!n || n === previousToken) {
-    if (Date.now() - lastEnrollAttemptAtMs >= TRUSTED_DEVICE_ENROLL_RETRY_MS) {
-      lastEnrollAttemptAtMs = Date.now()
+    const hostState = getTrustedDeviceHostState()
+    if (
+      Date.now() - hostState.lastEnrollAttemptAtMs >=
+      TRUSTED_DEVICE_ENROLL_RETRY_MS
+    ) {
+      hostState.lastEnrollAttemptAtMs = Date.now()
       await enrollTrustedDevice({ trigger: 'server_denied', credentials })
       n = await getTrustedDeviceTokenIfGateOn()
     }
@@ -190,20 +207,24 @@ export async function trustedDeviceTokenForBind(
     : { ok: false, error: 'not_given' }
 }
 
-// Memoized — secureStorage.read() spawns a macOS `security` subprocess (~40ms).
-// bridgeApi.ts calls this from getHeaders() on every poll/heartbeat/ack.
-// Cache cleared after enrollment (below) and on logout (clearAuthRelatedCaches).
+// Memoized per SessionHost — secureStorage.read() spawns a macOS `security`
+// subprocess (~40ms). bridgeApi.ts calls this from getHeaders() on every
+// poll/heartbeat/ack. Cache cleared after enrollment (below) and on logout
+// (clearAuthRelatedCaches).
 //
 // Only the storage read is memoized — the GrowthBook gate is checked live so
 // that a gate flip after GrowthBook refresh takes effect without a restart.
-const readStoredToken = memoize((): string | undefined => {
+function readStoredToken(): string | undefined {
+  const cache = getTrustedDeviceHostState().storedTokenCache
+  if (cache.has(undefined)) {
+    return cache.get(undefined)
+  }
   // Env var takes precedence for testing/canary.
   const envToken = process.env.CLAUDE_TRUSTED_DEVICE_TOKEN
-  if (envToken) {
-    return envToken
-  }
-  return getSecureStorage().read()?.trustedDeviceToken
-})
+  const token = envToken || getSecureStorage().read()?.trustedDeviceToken
+  cache.set(undefined, token)
+  return token
+}
 
 export function getTrustedDeviceToken(): string | undefined {
   if (!isGateEnabled()) {
@@ -213,7 +234,7 @@ export function getTrustedDeviceToken(): string | undefined {
 }
 
 export function clearTrustedDeviceTokenCache(): void {
-  readStoredToken.cache?.clear?.()
+  getTrustedDeviceHostState().storedTokenCache.clear()
 }
 
 /**
@@ -237,7 +258,7 @@ export function clearTrustedDeviceToken(): void {
   } catch {
     // Best-effort — don't block login if storage is inaccessible
   }
-  readStoredToken.cache?.clear?.()
+  clearTrustedDeviceTokenCache()
 }
 
 /**
@@ -379,7 +400,7 @@ export async function enrollTrustedDevice(opts?: {
         )
         return
       }
-      readStoredToken.cache?.clear?.()
+      clearTrustedDeviceTokenCache()
       logForDebugging(
         `[trusted-device] Enrolled device_id=${response.data.device_id ?? 'unknown'}`,
       )

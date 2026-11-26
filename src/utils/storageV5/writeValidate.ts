@@ -7,6 +7,7 @@
 
 import { lstat } from 'fs/promises'
 import { join } from 'path'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 export type WriteValidateErr = { code: string; argument?: string }
 
@@ -806,7 +807,9 @@ const JOB_TIMELINE_REL_XN = `${JOB_TIMELINE_FILE_M} is the job's timeline stream
 const MEMORY_REL_ALIAS_XE = 'team'
 /** densable leftover `V` @206341034 — `p` alias-segment cache cap. */
 const MEMORY_REL_ALIAS_CACHE_CAP = 32768
-const memoryRelAliasCache = new Map<string, readonly string[]>()
+const memoryRelAliasCacheHostSlot = new HostSlot<
+  Map<string, readonly string[]>
+>(() => new Map())
 
 /** densable leftover `c` @206341034 — trim trailing `.` / space. */
 function trimMemoryRelAliasTail(e: string): string {
@@ -833,6 +836,9 @@ function memoryRelAliasSegmentsO(e: string): string[] {
  * Distinct from leftover `I`=`Pad` `getKeyWriteDiscipline` @206342226.
  */
 function memoryRelAliasSegmentsI(e: string): readonly string[] {
+  const memoryRelAliasCache = memoryRelAliasCacheHostSlot.of(
+    getBootstrapSessionHost(),
+  )
   const cached = memoryRelAliasCache.get(e)
   if (cached !== undefined) return cached
   const a = Object.freeze(memoryRelAliasSegmentsO(e))

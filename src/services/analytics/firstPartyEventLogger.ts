@@ -10,10 +10,22 @@ import {
 } from '@opentelemetry/semantic-conventions'
 import { randomUUID } from 'crypto'
 import { isEqual } from 'lodash-es'
+import {
+  type CleanupUnregister,
+  registerCleanup,
+} from '../../utils/cleanupRegistry.js'
 import { getOrCreateUserID } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { HostSlot } from '../../utils/hostSlot.js'
 import { logError } from '../../utils/log.js'
 import { getPlatform, getWslVersion } from '../../utils/platform.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  ofDefaultHost,
+  runWithSession,
+  type Session,
+} from '../../utils/sessionRoot.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { profileCheckpoint } from '../../utils/startupProfiler.js'
 import { getCoreUserData } from '../../utils/user.js'
@@ -105,27 +117,109 @@ function getBatchConfig(): BatchConfig {
   )
 }
 
-// Module-local state for event logging (not exposed globally)
-let firstPartyEventLogger: ReturnType<typeof logs.getLogger> | null = null
-let firstPartyEventLoggerProvider: LoggerProvider | null = null
-// Last batch config used to construct the provider — used by
-// reinitialize1PEventLoggingIfConfigChanged to decide whether a rebuild is
-// needed when GrowthBook refreshes.
-let lastBatchConfig: BatchConfig | null = null
+type FirstPartyEventLoggerHostState = {
+  firstPartyEventLogger: ReturnType<typeof logs.getLogger> | null
+  firstPartyEventLoggerProvider: LoggerProvider | null
+  // Last batch config used to construct the provider — used by
+  // reinitialize1PEventLoggingIfConfigChanged to decide whether a rebuild is
+  // needed when GrowthBook refreshes.
+  lastBatchConfig: BatchConfig | null
+  trackedInLiveStates: boolean
+  unregisterCleanup: CleanupUnregister | null
+  sessionRef: WeakRef<Session> | undefined
+}
+
+const firstPartyEventLoggerHostSlot =
+  new HostSlot<FirstPartyEventLoggerHostState>(() => ({
+    firstPartyEventLogger: null,
+    firstPartyEventLoggerProvider: null,
+    lastBatchConfig: null,
+    trackedInLiveStates: false,
+    unregisterCleanup: null,
+    sessionRef: undefined,
+  }))
+
+function getFirstPartyEventLoggerState(): FirstPartyEventLoggerHostState {
+  return firstPartyEventLoggerHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEffectiveFirstPartyEventLogger(): ReturnType<
+  typeof logs.getLogger
+> | null {
+  return (
+    getFirstPartyEventLoggerState().firstPartyEventLogger ??
+    ofDefaultHost(firstPartyEventLoggerHostSlot).firstPartyEventLogger
+  )
+}
+
+// Track live host states via WeakRefs so process-level shutdown1PEventLogging()
+// outside ALS flushes & shuts down all live isolated hosts' providers too.
+const liveFirstPartyHostStates = new Set<
+  WeakRef<FirstPartyEventLoggerHostState>
+>()
+
+function pruneDeadFirstPartyHostStates(): void {
+  for (const ref of liveFirstPartyHostStates) {
+    if (ref.deref() === undefined) {
+      liveFirstPartyHostStates.delete(ref)
+    }
+  }
+}
+
+async function shutdownFirstPartyHostState(
+  state: FirstPartyEventLoggerHostState,
+): Promise<void> {
+  const unregister = state.unregisterCleanup
+  state.unregisterCleanup = null
+  unregister?.()
+  const provider = state.firstPartyEventLoggerProvider
+  state.firstPartyEventLoggerProvider = null
+  state.firstPartyEventLogger = null
+  if (!provider) {
+    return
+  }
+  try {
+    const ownerSession = state.sessionRef?.deref()
+    if (
+      ownerSession !== undefined &&
+      getActiveSessionFromAls() !== ownerSession
+    ) {
+      await runWithSession(ownerSession, () => provider.shutdown())
+    } else {
+      await provider.shutdown()
+    }
+  } catch {
+    // Ignore shutdown errors
+  }
+}
+
 /**
  * Flush and shutdown the 1P event logger.
  * This should be called as the final step before process exit to ensure
  * all events (including late ones from API responses) are exported.
+ *
+ * Inside an isolated ALS host session, shuts down only that host's provider.
+ * Outside an isolated ALS host session (process shutdown), flushes and shuts
+ * down ALL live hosts' providers.
  */
 export async function shutdown1PEventLogging(): Promise<void> {
-  if (!firstPartyEventLoggerProvider) {
+  if (getActiveSessionFromAls() !== undefined) {
+    await shutdownFirstPartyHostState(getFirstPartyEventLoggerState())
     return
   }
-  try {
-    await firstPartyEventLoggerProvider.shutdown()
-  } catch {
-    // Ignore shutdown errors
+  const states = new Set<FirstPartyEventLoggerHostState>()
+  states.add(getFirstPartyEventLoggerState())
+  for (const ref of liveFirstPartyHostStates) {
+    const state = ref.deref()
+    if (!state) {
+      liveFirstPartyHostStates.delete(ref)
+      continue
+    }
+    states.add(state)
   }
+  await Promise.allSettled(
+    Array.from(states, state => shutdownFirstPartyHostState(state)),
+  )
 }
 
 /**
@@ -214,12 +308,13 @@ export function logEventTo1P(
     return
   }
 
-  if (!firstPartyEventLogger || isSinkKilled('firstParty')) {
+  const logger = getEffectiveFirstPartyEventLogger()
+  if (!logger || isSinkKilled('firstParty')) {
     return
   }
 
   // Fire and forget - don't block on metadata enrichment
-  void logEventTo1PAsync(firstPartyEventLogger, eventName, metadata)
+  void logEventTo1PAsync(logger, eventName, metadata)
 }
 
 /** densable oC — same emit as logEventTo1P, awaited by gold logEventAsync. */
@@ -230,10 +325,11 @@ export function logEventTo1PPromise(
   if (!is1PEventLoggingEnabled()) {
     return Promise.resolve()
   }
-  if (!firstPartyEventLogger || isSinkKilled('firstParty')) {
+  const logger = getEffectiveFirstPartyEventLogger()
+  if (!logger || isSinkKilled('firstParty')) {
     return Promise.resolve()
   }
-  return logEventTo1PAsync(firstPartyEventLogger, eventName, metadata)
+  return logEventTo1PAsync(logger, eventName, metadata)
 }
 
 /**
@@ -266,7 +362,8 @@ export function logGrowthBookExperimentTo1P(
     return
   }
 
-  if (!firstPartyEventLogger || isSinkKilled('firstParty')) {
+  const logger = getEffectiveFirstPartyEventLogger()
+  if (!logger || isSinkKilled('firstParty')) {
     return
   }
 
@@ -292,7 +389,7 @@ export function logGrowthBookExperimentTo1P(
     environment: getEnvironmentForGrowthBook(),
   }
 
-  firstPartyEventLogger.emit({
+  logger.emit({
     body: 'growthbook_experiment',
     attributes,
   })
@@ -318,10 +415,12 @@ export function initialize1PEventLogging(): void {
     return
   }
 
+  const state = getFirstPartyEventLoggerState()
+
   // Fetch batch processor configuration from GrowthBook dynamic config
   // Uses cached value if available, refreshes in background
   const batchConfig = getBatchConfig()
-  lastBatchConfig = batchConfig
+  state.lastBatchConfig = batchConfig
   profileCheckpoint('1p_event_after_growthbook_config')
 
   const scheduledDelayMillis =
@@ -359,6 +458,10 @@ export function initialize1PEventLogging(): void {
   // internal events don't leak to customer endpoints and vice versa.
   // We don't register this globally - it's only used for internal event logging.
   // densable 2.1.248 QO(new op(...), new Oht("1P event logging"))
+  const captured = getActiveSessionFromAls()
+  const capturedRootRef =
+    captured !== undefined ? new WeakRef(captured.root) : undefined
+  state.sessionRef = capturedRootRef
   const eventLoggingExporter = wrapAnthropicTelemetryExporter(
     new FirstPartyEventLoggingExporter({
       maxBatchSize: maxExportBatchSize,
@@ -366,11 +469,17 @@ export function initialize1PEventLogging(): void {
       maxAttempts: batchConfig.maxAttempts,
       path: batchConfig.path,
       baseUrl: batchConfig.baseUrl,
-      isKilled: () => isSinkKilled('firstParty'),
+      isKilled: () => {
+        const ownerSession = capturedRootRef?.deref()
+        return ownerSession !== undefined &&
+          getActiveSessionFromAls() !== ownerSession
+          ? runWithSession(ownerSession, () => isSinkKilled('firstParty'))
+          : isSinkKilled('firstParty')
+      },
     }),
     new AnthropicTelemetryExportCounter('1P event logging'),
   )
-  firstPartyEventLoggerProvider = new LoggerProvider({
+  state.firstPartyEventLoggerProvider = new LoggerProvider({
     resource,
     processors: [
       new BatchLogRecordProcessor(eventLoggingExporter, {
@@ -385,10 +494,23 @@ export function initialize1PEventLogging(): void {
   // IMPORTANT: We must get the logger from our local provider, not logs.getLogger()
   // because logs.getLogger() returns a logger from the global provider, which is
   // separate and used for customer telemetry.
-  firstPartyEventLogger = firstPartyEventLoggerProvider.getLogger(
+  state.firstPartyEventLogger = state.firstPartyEventLoggerProvider.getLogger(
     'com.anthropic.claude_code.events',
     MACRO.VERSION,
   )
+
+  if (!state.trackedInLiveStates) {
+    state.trackedInLiveStates = true
+    if (liveFirstPartyHostStates.size > 64) {
+      pruneDeadFirstPartyHostStates()
+    }
+    liveFirstPartyHostStates.add(new WeakRef(state))
+  }
+  if (!state.unregisterCleanup) {
+    state.unregisterCleanup = registerCleanup(async () => {
+      await shutdownFirstPartyHostState(state)
+    })
+  }
 }
 
 /**
@@ -408,19 +530,20 @@ export function initialize1PEventLogging(): void {
  *    (buffer already drained, just cleanup).
  */
 export async function reinitialize1PEventLoggingIfConfigChanged(): Promise<void> {
-  if (!is1PEventLoggingEnabled() || !firstPartyEventLoggerProvider) {
+  const state = getFirstPartyEventLoggerState()
+  if (!is1PEventLoggingEnabled() || !state.firstPartyEventLoggerProvider) {
     return
   }
 
   const newConfig = getBatchConfig()
 
-  if (isEqual(newConfig, lastBatchConfig)) {
+  if (isEqual(newConfig, state.lastBatchConfig)) {
     return
   }
 
-  const oldProvider = firstPartyEventLoggerProvider
-  const oldLogger = firstPartyEventLogger
-  firstPartyEventLogger = null
+  const oldProvider = state.firstPartyEventLoggerProvider
+  const oldLogger = state.firstPartyEventLogger
+  state.firstPartyEventLogger = null
 
   try {
     await oldProvider.forceFlush()
@@ -428,7 +551,7 @@ export async function reinitialize1PEventLoggingIfConfigChanged(): Promise<void>
     // Export failures are already on disk; new exporter will retry them.
   }
 
-  firstPartyEventLoggerProvider = null
+  state.firstPartyEventLoggerProvider = null
   try {
     initialize1PEventLogging()
   } catch (e) {
@@ -436,8 +559,8 @@ export async function reinitialize1PEventLoggingIfConfigChanged(): Promise<void>
     // only forceFlush()'d, not shut down — it's still functional. Without
     // this, both stay null and the !firstPartyEventLoggerProvider gate at
     // the top makes recovery impossible.
-    firstPartyEventLoggerProvider = oldProvider
-    firstPartyEventLogger = oldLogger
+    state.firstPartyEventLoggerProvider = oldProvider
+    state.firstPartyEventLogger = oldLogger
     logError(e)
     return
   }

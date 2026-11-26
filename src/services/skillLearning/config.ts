@@ -1,3 +1,5 @@
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
+
 export type SkillLearningLlmConfig = {
   readonly timeoutMs: number
   readonly maxCallsPerSession: number
@@ -30,9 +32,14 @@ const DEFAULTS: SkillLearningConfig = {
   },
 }
 
-let overrides: SkillLearningConfigOverrides | undefined
+const configHostSlot = new HostSlot<{
+  overrides: SkillLearningConfigOverrides | undefined
+}>(() => ({
+  overrides: undefined,
+}))
 
 export function getSkillLearningConfig(): SkillLearningConfig {
+  const { overrides } = configHostSlot.of(getBootstrapSessionHost())
   if (!overrides) return DEFAULTS
   return {
     minConfidence: overrides.minConfidence ?? DEFAULTS.minConfidence,
@@ -44,9 +51,9 @@ export function getSkillLearningConfig(): SkillLearningConfig {
 export function setSkillLearningConfigForTest(
   config: SkillLearningConfigOverrides,
 ): void {
-  overrides = config
+  configHostSlot.of(getBootstrapSessionHost()).overrides = config
 }
 
 export function resetSkillLearningConfig(): void {
-  overrides = undefined
+  configHostSlot.of(getBootstrapSessionHost()).overrides = undefined
 }

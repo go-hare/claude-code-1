@@ -3,12 +3,15 @@ import { useEffect, useState } from 'react';
 import { Box, Byline, KeyboardShortcutHint, Text, useInput } from '@anthropic/ink';
 import figures from 'figures';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js';
 
 export const CLICK_TO_ENTER_GUARD_MS = 350;
 export const POST_TRANSITION_ENTER_GUARD_MS = 300;
 export const ENTER_REPEAT_COOLDOWN_MS = 350;
 
-let lastPluginUiClickAt = 0;
+const pluginListHelpersHostSlot = new HostSlot<{ lastPluginUiClickAt: number }>(() => ({
+  lastPluginUiClickAt: 0,
+}));
 
 /**
  * Official 2.1.327 #382: Record a mouse click in `/plugin` (row click, tab click,
@@ -16,15 +19,15 @@ let lastPluginUiClickAt = 0;
  * a plugin.
  */
 export function recordPluginUiClick(now = Date.now()): void {
-  lastPluginUiClickAt = now;
+  pluginListHelpersHostSlot.of(getBootstrapSessionHost()).lastPluginUiClickAt = now;
 }
 
 export function getLastPluginUiClickAt(): number {
-  return lastPluginUiClickAt;
+  return pluginListHelpersHostSlot.of(getBootstrapSessionHost()).lastPluginUiClickAt;
 }
 
 export function resetPluginUiClickForTests(): void {
-  lastPluginUiClickAt = 0;
+  pluginListHelpersHostSlot.of(getBootstrapSessionHost()).lastPluginUiClickAt = 0;
 }
 
 /**
@@ -49,7 +52,7 @@ export function shouldIgnorePluginEnterAction(params: {
   if (params.isBusy) return true;
   if (params.isRepeat) return true;
   const clickGuard = params.clickGuardMs ?? CLICK_TO_ENTER_GUARD_MS;
-  const lastClick = params.lastClickAt ?? lastPluginUiClickAt;
+  const lastClick = params.lastClickAt ?? getLastPluginUiClickAt();
   if (lastClick > 0 && now - lastClick >= 0 && now - lastClick < clickGuard) {
     return true;
   }

@@ -20,6 +20,7 @@ import {
 } from '../../types/permissions.js'
 import { toExternalPermissionMode } from './PermissionMode.js'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -62,8 +63,6 @@ export type RestoredWorkerMetadata = {
 } | null
 
 const TRANQUIL_FERN = 'tengu_tranquil_fern'
-
-let planModeResumeGuardEnabled: boolean | undefined
 
 /** Official `YWy`. */
 export function createPlanModeResumeTracker(): PlanModeResumeTracker {
@@ -111,21 +110,25 @@ export function isRestartedWorker(epoch: number | null | undefined): boolean {
 
 /** Official `h_u` / `tengu_tranquil_fern` default ON. */
 export function isPlanModeResumeGuardEnabled(): boolean {
-  if (planModeResumeGuardEnabled !== undefined) {
-    return planModeResumeGuardEnabled
+  const hostState = getPlanModeResumeHostState()
+  if (hostState.planModeResumeGuardEnabled !== undefined) {
+    return hostState.planModeResumeGuardEnabled
   }
   const { getFeatureValue_CACHED_MAY_BE_STALE } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('../../services/analytics/growthbook.js') as typeof import('../../services/analytics/growthbook.js')
-  planModeResumeGuardEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
+  hostState.planModeResumeGuardEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
     TRANQUIL_FERN,
     true,
   )
-  return planModeResumeGuardEnabled
+  return hostState.planModeResumeGuardEnabled
 }
 
 export function resetPlanModeResumeGuardForTests(): void {
-  planModeResumeGuardEnabled = undefined
+  const hostState = planModeResumeStateByHost.peek(getBootstrapSessionHost())
+  if (hostState) {
+    hostState.planModeResumeGuardEnabled = undefined
+  }
 }
 
 export type PlanModeResumeAppState = {
@@ -568,19 +571,37 @@ export function hydratePlanModeFromTranscript<T extends PlanModeResumeAppState>(
   return classifyPlanModeOnResume(tracker)
 }
 
+type PlanModeResumeHostState = {
+  planModeResumeGuardEnabled: boolean | undefined
+  skipPlanModeResumeBecauseContinue: boolean
+  stashedRestoredWorker: RestoredWorkerMetadata
+  restoredWorkerListeners: Set<
+    (restored: NonNullable<RestoredWorkerMetadata>) => void
+  >
+}
+
+const planModeResumeStateByHost = new HostSlot<PlanModeResumeHostState>(() => ({
+  planModeResumeGuardEnabled: undefined,
+  skipPlanModeResumeBecauseContinue: false,
+  stashedRestoredWorker: null,
+  restoredWorkerListeners: new Set(),
+}))
+
+function getPlanModeResumeHostState(): PlanModeResumeHostState {
+  return planModeResumeStateByHost.of(getBootstrapSessionHost())
+}
+
 /**
  * densable Jqy: continue never runs y_u, even if a CCR stash leaks in.
  * Resume / mid-session /resume clears this before applying.
  * 246 print `--continue` uses `my` instead — this gate stays for `y_u`.
  */
-let skipPlanModeResumeBecauseContinue = false
-
 export function setSkipPlanModeResumeBecauseContinue(skip: boolean): void {
-  skipPlanModeResumeBecauseContinue = skip
+  getPlanModeResumeHostState().skipPlanModeResumeBecauseContinue = skip
 }
 
 export function isPlanModeResumeSkippedBecauseContinue(): boolean {
-  return skipPlanModeResumeBecauseContinue
+  return getPlanModeResumeHostState().skipPlanModeResumeBecauseContinue
 }
 
 /**
@@ -612,7 +633,7 @@ export function hydratePlanModeFromRestoredWorker<
     log?: (message: string, extra?: { level?: string }) => void
   },
 ): PlanModeOnResume {
-  if (skipPlanModeResumeBecauseContinue) {
+  if (isPlanModeResumeSkippedBecauseContinue()) {
     return 'none'
   }
   const tracker = createPlanModeResumeTracker()
@@ -694,46 +715,46 @@ export function applyStashedPlanModeResumeForLaunch<
 }
 
 /** Bridge CCR initialize result — taken by REPL hydrate / resume. */
-let stashedRestoredWorker: RestoredWorkerMetadata = null
-const restoredWorkerListeners = new Set<
-  (restored: NonNullable<RestoredWorkerMetadata>) => void
->()
-
 export function stashRestoredWorkerForPlanResume(
   restored: RestoredWorkerMetadata,
 ): void {
-  stashedRestoredWorker = restored
+  const hostState = getPlanModeResumeHostState()
+  hostState.stashedRestoredWorker = restored
   if (restored) {
-    for (const cb of restoredWorkerListeners) {
+    for (const cb of hostState.restoredWorkerListeners) {
       cb(restored)
     }
   }
 }
 
 export function takeRestoredWorkerForPlanResume(): RestoredWorkerMetadata {
-  const next = stashedRestoredWorker
-  stashedRestoredWorker = null
+  const hostState = getPlanModeResumeHostState()
+  const next = hostState.stashedRestoredWorker
+  hostState.stashedRestoredWorker = null
   return next
 }
 
 export function peekRestoredWorkerForPlanResume(): RestoredWorkerMetadata {
-  return stashedRestoredWorker
+  return getPlanModeResumeHostState().stashedRestoredWorker
 }
 
 /** Interactive REPL: apply pending CCR restore + future bridge connects. */
 export function subscribeRestoredWorkerForPlanResume(
   cb: (restored: NonNullable<RestoredWorkerMetadata>) => void,
 ): () => void {
-  restoredWorkerListeners.add(cb)
+  const listeners = getPlanModeResumeHostState().restoredWorkerListeners
+  listeners.add(cb)
   return () => {
-    restoredWorkerListeners.delete(cb)
+    listeners.delete(cb)
   }
 }
 
 export function clearRestoredWorkerForPlanResumeForTests(): void {
-  stashedRestoredWorker = null
-  restoredWorkerListeners.clear()
-  skipPlanModeResumeBecauseContinue = false
+  const hostState = planModeResumeStateByHost.peek(getBootstrapSessionHost())
+  if (!hostState) return
+  hostState.stashedRestoredWorker = null
+  hostState.restoredWorkerListeners.clear()
+  hostState.skipPlanModeResumeBecauseContinue = false
 }
 
 export type PlanModeOnInteractiveResumeOptions = {

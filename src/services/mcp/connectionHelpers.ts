@@ -15,6 +15,7 @@ import {
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../utils/errors.js'
 import { logMCPDebug, logMCPError } from '../../utils/log.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -182,19 +183,39 @@ function getMcpAuthCachePath(): string {
   return join(getClaudeConfigHomeDir(), 'mcp-needs-auth-cache.json')
 }
 
-// Memoized so N concurrent isMcpAuthCached() calls during batched connection
-// share a single file read instead of N reads of the same file. Invalidated
-// on write (setMcpAuthCacheEntry) and clear (clearMcpAuthCache). Not using
-// lodash memoize because we need to null out the cache, not delete by key.
-let authCachePromise: Promise<McpAuthCacheData> | null = null
+type HostConnectionHelpersState = {
+  // Memoized so N concurrent isMcpAuthCached() calls during batched connection
+  // share a single file read instead of N reads of the same file. Invalidated
+  // on write (setMcpAuthCacheEntry) and clear (clearMcpAuthCache). Not using
+  // lodash memoize because we need to null out the cache, not delete by key.
+  authCachePromise: Promise<McpAuthCacheData> | null
+  // Serialize cache writes through a promise chain to prevent concurrent
+  // read-modify-write races when multiple servers return 401 in the same batch
+  writeChain: Promise<void>
+  lastRejectedClaudeAiBearerToken: string | undefined
+}
 
-function getMcpAuthCache(): Promise<McpAuthCacheData> {
-  if (!authCachePromise) {
-    authCachePromise = readFile(getMcpAuthCachePath(), 'utf-8')
+const hostConnectionHelpersSlot = new HostSlot<HostConnectionHelpersState>(
+  () => ({
+    authCachePromise: null,
+    writeChain: Promise.resolve(),
+    lastRejectedClaudeAiBearerToken: undefined,
+  }),
+)
+
+function getHostConnectionHelpersState(): HostConnectionHelpersState {
+  return hostConnectionHelpersSlot.of(getBootstrapSessionHost())
+}
+
+function getMcpAuthCache(
+  state: HostConnectionHelpersState = getHostConnectionHelpersState(),
+): Promise<McpAuthCacheData> {
+  if (!state.authCachePromise) {
+    state.authCachePromise = readFile(getMcpAuthCachePath(), 'utf-8')
       .then(data => jsonParse(data) as McpAuthCacheData)
       .catch(() => ({}))
   }
-  return authCachePromise
+  return state.authCachePromise
 }
 
 export async function isMcpAuthCached(serverId: string): Promise<boolean> {
@@ -206,22 +227,19 @@ export async function isMcpAuthCached(serverId: string): Promise<boolean> {
   return Date.now() - entry.timestamp < MCP_AUTH_CACHE_TTL_MS
 }
 
-// Serialize cache writes through a promise chain to prevent concurrent
-// read-modify-write races when multiple servers return 401 in the same batch
-let writeChain = Promise.resolve()
-
 export function setMcpAuthCacheEntry(serverId: string): void {
-  writeChain = writeChain
+  const state = getHostConnectionHelpersState()
+  const cachePath = getMcpAuthCachePath()
+  state.writeChain = state.writeChain
     .then(async () => {
-      const cache = await getMcpAuthCache()
+      const cache = await getMcpAuthCache(state)
       cache[serverId] = { timestamp: Date.now() }
-      const cachePath = getMcpAuthCachePath()
       await mkdir(dirname(cachePath), { recursive: true })
       await writeFile(cachePath, jsonStringify(cache))
       // Invalidate the read cache so subsequent reads see the new entry.
       // Safe because writeChain serializes writes: the next write's
       // getMcpAuthCache() call will re-read the file with this entry present.
-      authCachePromise = null
+      state.authCachePromise = null
     })
     .catch(() => {
       // Best-effort cache write
@@ -229,7 +247,10 @@ export function setMcpAuthCacheEntry(serverId: string): void {
 }
 
 export function clearMcpAuthCache(): void {
-  authCachePromise = null
+  const state = hostConnectionHelpersSlot.peek(getBootstrapSessionHost())
+  if (state) {
+    state.authCachePromise = null
+  }
   void unlink(getMcpAuthCachePath()).catch(() => {
     // Cache file may not exist
   })
@@ -489,23 +510,27 @@ export function isClaudeAiBearerRejectedError(error: unknown): boolean {
  * detect the refreshed sign-in and reconnect instead of staying stuck in a
  * failed state.
  */
-let lastRejectedClaudeAiBearerToken: string | undefined
-
 export function recordRejectedClaudeAiBearerToken(token: string): void {
-  lastRejectedClaudeAiBearerToken = token
+  getHostConnectionHelpersState().lastRejectedClaudeAiBearerToken = token
 }
 
 export function clearRejectedClaudeAiBearerToken(): void {
-  lastRejectedClaudeAiBearerToken = undefined
+  const state = hostConnectionHelpersSlot.peek(getBootstrapSessionHost())
+  if (state) {
+    state.lastRejectedClaudeAiBearerToken = undefined
+  }
 }
 
 export function hasClaudeAiBearerRecoveredAfterLogin(
   readToken: () => string | undefined = () =>
     getClaudeAIOAuthTokens()?.accessToken,
 ): boolean {
-  if (!lastRejectedClaudeAiBearerToken) return false
+  const lastRejected = hostConnectionHelpersSlot.peek(
+    getBootstrapSessionHost(),
+  )?.lastRejectedClaudeAiBearerToken
+  if (!lastRejected) return false
   const current = readToken()
-  return Boolean(current && current !== lastRejectedClaudeAiBearerToken)
+  return Boolean(current && current !== lastRejected)
 }
 
 /**

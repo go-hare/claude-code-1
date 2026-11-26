@@ -5,15 +5,31 @@
  * Version counters alone do not re-render React. `App` observes bumps via
  * useSyncExternalStore so cwd-sensitive UI refreshes after `/cd`.
  */
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
+
 export const RENDER_EVENTS = ['ui.render'] as const
 
-const renderVersions = new Map<string, number>()
-const listeners = new Set<() => void>()
+type RenderInvalidationHostState = {
+  renderVersions: Map<string, number>
+  listeners: Set<() => void>
+}
+
+const renderInvalidationHostSlot = new HostSlot<RenderInvalidationHostState>(
+  () => ({
+    renderVersions: new Map<string, number>(),
+    listeners: new Set<() => void>(),
+  }),
+)
+
+function getRenderInvalidationHostState(): RenderInvalidationHostState {
+  return renderInvalidationHostSlot.of(getBootstrapSessionHost())
+}
 
 /** densable `nq`. */
 export function invalidateRender(event: string): void {
-  renderVersions.set(event, (renderVersions.get(event) ?? 0) + 1)
-  for (const listener of listeners) {
+  const state = getRenderInvalidationHostState()
+  state.renderVersions.set(event, (state.renderVersions.get(event) ?? 0) + 1)
+  for (const listener of state.listeners) {
     listener()
   }
 }
@@ -26,7 +42,11 @@ export function invalidateAllRenders(): void {
 }
 
 export function getRenderVersion(event: string): number {
-  return renderVersions.get(event) ?? 0
+  return (
+    renderInvalidationHostSlot
+      .peek(getBootstrapSessionHost())
+      ?.renderVersions.get(event) ?? 0
+  )
 }
 
 /**
@@ -36,13 +56,16 @@ export function getRenderVersion(event: string): number {
 export function subscribeRenderInvalidation(
   onStoreChange: () => void,
 ): () => void {
-  listeners.add(onStoreChange)
+  const state = getRenderInvalidationHostState()
+  state.listeners.add(onStoreChange)
   return () => {
-    listeners.delete(onStoreChange)
+    state.listeners.delete(onStoreChange)
   }
 }
 
 export function resetRenderVersionsForTests(): void {
-  renderVersions.clear()
-  listeners.clear()
+  const state = renderInvalidationHostSlot.peek(getBootstrapSessionHost())
+  if (!state) return
+  state.renderVersions.clear()
+  state.listeners.clear()
 }

@@ -7,6 +7,7 @@
  */
 import type { ToolPermissionContext, ToolUseContext } from '../../Tool.js'
 import type { PermissionResult } from '../../types/permissions.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
 export type LiveEditPermissionInput = {
   action: 'live-edit'
@@ -34,18 +35,22 @@ export type ArtifactLiveEditVf = {
 }
 
 /** densable `vf` — null until product / host binds. */
-let vf: ArtifactLiveEditVf | null = null
+const liveEditVfHostSlot = new HostSlot<{ vf: ArtifactLiveEditVf | null }>(
+  () => ({
+    vf: null,
+  }),
+)
 
 export function getArtifactLiveEditVf(): ArtifactLiveEditVf | null {
-  return vf
+  return liveEditVfHostSlot.of(getBootstrapSessionHost()).vf
 }
 
 export function setArtifactLiveEditVf(next: ArtifactLiveEditVf | null): void {
-  vf = next
+  liveEditVfHostSlot.of(getBootstrapSessionHost()).vf = next
 }
 
 export function resetArtifactLiveEditVfForTests(): void {
-  vf = null
+  liveEditVfHostSlot.of(getBootstrapSessionHost()).vf = null
 }
 
 /**

@@ -30,13 +30,24 @@ import { logForDebugging } from '../debug.js'
 import { isEnvDefinedFalsy } from '../envUtils.js'
 import { errorMessage } from '../errors.js'
 import { getPlatform } from '../platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 const TOOL_CGROUP_NAME = 'claude-code-bash'
 /** densable m4b — 1 GiB */
 const HOST_RESERVE_BYTES = 1_073_741_824
 
-/** densable kZt — undefined=unresolved, null=disabled, string=cgroup dir */
-let memoizedCgroupDir: string | null | undefined
+/** Official 2.1.331 [W-14] densable kZt — undefined=unresolved, null=disabled, string=cgroup dir */
+const toolMemoryCgroupHostSlot = new HostSlot<{
+  memoizedCgroupDir: string | null | undefined
+}>(() => ({
+  memoizedCgroupDir: undefined,
+}))
+
+function getToolMemoryCgroupHostState(): {
+  memoizedCgroupDir: string | null | undefined
+} {
+  return toolMemoryCgroupHostSlot.of(getBootstrapSessionHost())
+}
 
 /** densable y4b — parse "512m" / "2G" / "1048576" → bytes */
 export function parseToolMemoryLimitBytes(
@@ -99,19 +110,20 @@ export function parseMemoryCgroupTarget(
  * when resolved or disabled; leaves unresolved when GB gate not met.
  */
 export function ensureToolMemoryCgroupDir(): string | undefined {
-  if (memoizedCgroupDir !== undefined) {
-    return memoizedCgroupDir ?? undefined
+  const hostState = getToolMemoryCgroupHostState()
+  if (hostState.memoizedCgroupDir !== undefined) {
+    return hostState.memoizedCgroupDir ?? undefined
   }
 
   const platform = getPlatform()
   if (platform !== 'linux' && platform !== 'wsl') {
-    memoizedCgroupDir = null
+    hostState.memoizedCgroupDir = null
     return undefined
   }
 
   const raw = process.env.CLAUDE_CODE_TOOL_MEMORY_LIMIT?.trim().toLowerCase()
   if (raw && (isEnvDefinedFalsy(raw) || raw === 'none')) {
-    memoizedCgroupDir = null
+    hostState.memoizedCgroupDir = null
     return undefined
   }
 
@@ -148,7 +160,7 @@ export function ensureToolMemoryCgroupDir(): string | undefined {
       target.v2 ? 'memory.max' : 'memory.limit_in_bytes',
     )
     writeFileSync(limitFile, String(limitBytes))
-    memoizedCgroupDir = target.dir
+    hostState.memoizedCgroupDir = target.dir
     logForDebugging(`tool cgroup: ${target.dir} limit=${limitBytes}`)
     logEvent('tengu_tool_cgroup', {
       status:
@@ -157,7 +169,7 @@ export function ensureToolMemoryCgroupDir(): string | undefined {
     })
     return target.dir
   } catch (err) {
-    memoizedCgroupDir = null
+    hostState.memoizedCgroupDir = null
     logForDebugging(
       `tool cgroup: disabled (${errorMessage(err) ?? String(err)})`,
     )
@@ -200,5 +212,5 @@ export function resolveToolMemoryCgroupForSpawn(
 
 /** Test helper — clear densable kZt memo. */
 export function resetToolMemoryCgroupMemoForTests(): void {
-  memoizedCgroupDir = undefined
+  getToolMemoryCgroupHostState().memoizedCgroupDir = undefined
 }

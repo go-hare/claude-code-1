@@ -11,6 +11,7 @@ import { realpathSync } from 'fs'
 import { basename, dirname, join, resolve, sep } from 'path'
 import type { SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 export type ForwardedUntrustedGrant = {
   literal: string
@@ -30,9 +31,18 @@ type CredentialFileEntry = {
   [key: string]: unknown
 }
 
-const recheckState = {
-  trustedDenyRoots: [] as TrustedDenyRootSnapshot[],
-  forwardedUntrustedGrants: [] as ForwardedUntrustedGrant[],
+type ReadDenyRecheckHostState = {
+  trustedDenyRoots: TrustedDenyRootSnapshot[]
+  forwardedUntrustedGrants: ForwardedUntrustedGrant[]
+}
+
+const recheckStateByHost = new HostSlot<ReadDenyRecheckHostState>(() => ({
+  trustedDenyRoots: [],
+  forwardedUntrustedGrants: [],
+}))
+
+function getRecheckState(): ReadDenyRecheckHostState {
+  return recheckStateByHost.of(getBootstrapSessionHost())
 }
 
 function tryRealpath(p: string): string | undefined {
@@ -85,6 +95,7 @@ function isAlreadyClearedMask(entry: CredentialFileEntry): boolean {
 }
 
 export function resetReadDenyRecheckState(): void {
+  const recheckState = getRecheckState()
   recheckState.trustedDenyRoots = []
   recheckState.forwardedUntrustedGrants = []
 }
@@ -93,6 +104,7 @@ export function recordReadDenyRecheckBaseline(params: {
   trustedDenyRoots: string[]
   forwardedUntrustedGrants: ForwardedUntrustedGrant[]
 }): void {
+  const recheckState = getRecheckState()
   recheckState.trustedDenyRoots = params.trustedDenyRoots.map(literal => ({
     literal,
     resolvedAtBuild: tryRealpath(literal),
@@ -109,6 +121,7 @@ export function getReadDenyRecheckBaseline(): {
   trustedDenyRoots: readonly TrustedDenyRootSnapshot[]
   forwardedUntrustedGrants: readonly ForwardedUntrustedGrant[]
 } {
+  const recheckState = getRecheckState()
   return {
     trustedDenyRoots: recheckState.trustedDenyRoots,
     forwardedUntrustedGrants: recheckState.forwardedUntrustedGrants,
@@ -212,6 +225,7 @@ export function recheckReadDenyAndCredentialMasksBeforeWrap(deps: {
   if (!config || config.filesystem.disabled) {
     return { movedCount: 0, droppedGrants: 0, narrowedMasks: 0 }
   }
+  const recheckState = getRecheckState()
   if (recheckState.trustedDenyRoots.length === 0) {
     return { movedCount: 0, droppedGrants: 0, narrowedMasks: 0 }
   }

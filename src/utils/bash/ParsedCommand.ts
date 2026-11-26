@@ -1,4 +1,4 @@
-import memoize from 'lodash-es/memoize.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   extractOutputRedirections,
   splitCommandWithOperators,
@@ -237,15 +237,39 @@ class TreeSitterParsedCommand implements IParsedCommand {
   }
 }
 
-const getTreeSitterAvailable = memoize(async (): Promise<boolean> => {
-  try {
-    const { parseCommand } = await import('./parser.js')
-    const testResult = await parseCommand('echo test')
-    return testResult !== null
-  } catch {
-    return false
+type ParsedCommandHostState = {
+  treeSitterAvailable: Promise<boolean> | undefined
+  lastCmd: string | undefined
+  lastResult: Promise<IParsedCommand | null> | undefined
+}
+
+const parsedCommandHostSlot = new HostSlot<ParsedCommandHostState>(() => ({
+  treeSitterAvailable: undefined,
+  lastCmd: undefined,
+  lastResult: undefined,
+}))
+
+function getParsedCommandHostState(): ParsedCommandHostState {
+  return parsedCommandHostSlot.of(getBootstrapSessionHost())
+}
+
+function getTreeSitterAvailable(): Promise<boolean> {
+  const hostState = getParsedCommandHostState()
+  if (hostState.treeSitterAvailable !== undefined) {
+    return hostState.treeSitterAvailable
   }
-})
+  const promise = (async (): Promise<boolean> => {
+    try {
+      const { parseCommand } = await import('./parser.js')
+      const testResult = await parseCommand('echo test')
+      return testResult !== null
+    } catch {
+      return false
+    }
+  })()
+  hostState.treeSitterAvailable = promise
+  return promise
+}
 
 /**
  * Build a TreeSitterParsedCommand from a pre-parsed AST root. Lets callers
@@ -289,14 +313,6 @@ async function doParse(command: string): Promise<IParsedCommand | null> {
   return new RegexParsedCommand_DEPRECATED(command)
 }
 
-// Single-entry cache: legacy callers (bashCommandIsSafeAsync,
-// buildSegmentWithoutRedirections) may call ParsedCommand.parse repeatedly
-// with the same command string. Each parse() is ~1 native.parse + ~6 tree
-// walks, so caching the most recent command skips the redundant work.
-// Size-1 bound avoids leaking TreeSitterParsedCommand instances.
-let lastCmd: string | undefined
-let lastResult: Promise<IParsedCommand | null> | undefined
-
 /**
  * ParsedCommand provides methods for working with shell commands.
  * Uses tree-sitter when available for quote-aware parsing,
@@ -308,11 +324,12 @@ export const ParsedCommand = {
    * Returns null if parsing fails completely.
    */
   parse(command: string): Promise<IParsedCommand | null> {
-    if (command === lastCmd && lastResult !== undefined) {
-      return lastResult
+    const hostState = getParsedCommandHostState()
+    if (command === hostState.lastCmd && hostState.lastResult !== undefined) {
+      return hostState.lastResult
     }
-    lastCmd = command
-    lastResult = doParse(command)
-    return lastResult
+    hostState.lastCmd = command
+    hostState.lastResult = doParse(command)
+    return hostState.lastResult
   },
 }

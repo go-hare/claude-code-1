@@ -1,4 +1,5 @@
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import { getBootstrapSessionHost } from './sessionHost.js'
 
 // Session-scoped cache of rendered tool schemas. Tool schemas render at server
 // position 2 (before system prompt), so any byte-level change busts the entire
@@ -51,11 +52,31 @@ export class r_ {
   }
 }
 
-const Vx = new r_()
+class WeakOwnerCache<T> {
+  #factory: () => T
+  #map = new WeakMap<object, T>()
+  constructor(factory: () => T) {
+    this.#factory = factory
+  }
+  of(host: object): T {
+    const existing = this.#map.get(host)
+    if (existing !== undefined) return existing
+    const created = this.#factory()
+    this.#map.set(host, created)
+    return created
+  }
+}
 
-/** densable kn @180125416 — leftover is process-global (not per-host K). */
+/** Official 2.1.331 @317623000 `var aos = new W(() => new uzn)`. */
+const aos = new WeakOwnerCache(() => new r_())
+
+export function toolSchemaCacheOf(host: object): r_ {
+  return aos.of(host)
+}
+
+/** Official 2.1.331 @317623000 `$St()` — `aos.of(N().host)`. */
 export function kn(): r_ {
-  return Vx
+  return aos.of(getBootstrapSessionHost())
 }
 
 export function getToolSchemaCache(): Map<string, CachedSchema> {

@@ -1,14 +1,119 @@
 import { resetSdkInitState } from '../../bootstrap/state.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import { isRestrictedToPluginOnly } from '../settings/pluginOnlyPolicy.js'
 // Import as module object so spyOn works in tests (direct imports bypass spies)
 import * as settingsModule from '../settings/settings.js'
-import { resetSettingsCache } from '../settings/settingsCache.js'
+import {
+  getSettingsOwner,
+  resetSettingsCache,
+} from '../settings/settingsCache.js'
 import { loadSettingsUnderPrime } from '../settings/settingsPrimer.js'
+import type { HooksSettings } from '../settings/types.js'
 import type { StorageV5 } from '../storageV5/createLocalFsBackend.js'
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
-import type { HooksSettings } from '../settings/types.js'
 
-let initialHooksConfig: HooksSettings | null = null
+const DEFAULT_SNAPSHOT_KEY = 'cli'
+
+type SessionHooksSnapshotEntry = {
+  initialHooksConfig: HooksSettings | null
+}
+
+type HostHooksConfigSnapshotState = {
+  initialHooksConfig: HooksSettings | null
+  snapshotKey: () => string
+  snapshotsBySessionId: Map<string, SessionHooksSnapshotEntry>
+  unsubscribeSettingsChange: (() => void) | null
+}
+
+const hostHooksConfigSnapshotSlot = new HostSlot<HostHooksConfigSnapshotState>(
+  () => ({
+    initialHooksConfig: null,
+    snapshotKey: () => DEFAULT_SNAPSHOT_KEY,
+    snapshotsBySessionId: new Map(),
+    unsubscribeSettingsChange: null,
+  }),
+)
+
+function getHostHooksConfigSnapshotState(): HostHooksConfigSnapshotState {
+  return hostHooksConfigSnapshotSlot.of(getBootstrapSessionHost())
+}
+
+function currentSnapshotEntry(
+  state: HostHooksConfigSnapshotState,
+): SessionHooksSnapshotEntry {
+  const key = state.snapshotKey()
+  let entry = state.snapshotsBySessionId.get(key)
+  if (!entry) {
+    entry = { initialHooksConfig: null }
+    state.snapshotsBySessionId.set(key, entry)
+  }
+  return entry
+}
+
+function storeHooksSnapshot(
+  state: HostHooksConfigSnapshotState,
+  config: HooksSettings,
+): void {
+  currentSnapshotEntry(state).initialHooksConfig = config
+  state.initialHooksConfig = config
+}
+
+function ensureSettingsChangeSubscription(
+  state: HostHooksConfigSnapshotState,
+): void {
+  if (state.unsubscribeSettingsChange !== null) {
+    return
+  }
+  let changeDetector:
+    | typeof import('../settings/changeDetector.js')['settingsChangeDetector']
+    | undefined
+  try {
+    changeDetector = (
+      require('../settings/changeDetector.js') as typeof import('../settings/changeDetector.js')
+    ).settingsChangeDetector
+  } catch {
+    return
+  }
+  if (!changeDetector) {
+    return
+  }
+  const currentSession = getBootstrapSession()
+  const sessionRef = new WeakRef(currentSession.root ?? currentSession)
+  const stateRef = new WeakRef(state)
+  let unsubscribe: (() => void) | null = null
+  unsubscribe = changeDetector.subscribe(source => {
+    const targetSession = sessionRef.deref()
+    if (!targetSession) {
+      unsubscribe?.()
+      const currentState = stateRef.deref()
+      if (
+        currentState &&
+        currentState.unsubscribeSettingsChange === unsubscribe
+      ) {
+        currentState.unsubscribeSettingsChange = null
+      }
+      return
+    }
+    runWithSession(targetSession, () => {
+      const hostState = getHostHooksConfigSnapshotState()
+      const settingsOwner = getSettingsOwner()
+      if (source === 'policySettings') {
+        settingsOwner.invalidatePolicyLayer()
+        settingsOwner.parsedFiles.clear()
+      } else {
+        settingsOwner.dropDerivedCaches(source)
+        settingsOwner.parsedFiles.clear()
+      }
+      storeHooksSnapshot(hostState, getHooksFromAllowedSources())
+    })
+  })
+  state.unsubscribeSettingsChange = unsubscribe
+}
 
 /**
  * Get hooks from allowed sources.
@@ -96,7 +201,9 @@ export function shouldDisableAllHooksIncludingManaged(): boolean {
  * Respects the allowManagedHooksOnly setting
  */
 export function captureHooksConfigSnapshot(): void {
-  initialHooksConfig = getHooksFromAllowedSources()
+  const state = getHostHooksConfigSnapshotState()
+  storeHooksSnapshot(state, getHooksFromAllowedSources())
+  ensureSettingsChangeSubscription(state)
 }
 
 /**
@@ -111,7 +218,9 @@ export function updateHooksConfigSnapshot(): void {
   // may not have been invalidated yet (e.g., if the file watcher's stability
   // threshold hasn't elapsed).
   resetSettingsCache()
-  initialHooksConfig = getHooksFromAllowedSources()
+  const state = getHostHooksConfigSnapshotState()
+  storeHooksSnapshot(state, getHooksFromAllowedSources())
+  ensureSettingsChangeSubscription(state)
 }
 
 /**
@@ -127,7 +236,9 @@ export async function updateHooksConfigSnapshotUnderPrime(
   }
   const dispose = await loadSettingsUnderPrime(storageV5)
   try {
-    initialHooksConfig = getHooksFromAllowedSources()
+    const state = getHostHooksConfigSnapshotState()
+    storeHooksSnapshot(state, getHooksFromAllowedSources())
+    ensureSettingsChangeSubscription(state)
   } finally {
     dispose?.()
   }
@@ -139,10 +250,12 @@ export async function updateHooksConfigSnapshotUnderPrime(
  * @returns The hooks configuration
  */
 export function getHooksConfigFromSnapshot(): HooksSettings | null {
-  if (initialHooksConfig === null) {
+  const state = getHostHooksConfigSnapshotState()
+  const entry = currentSnapshotEntry(state)
+  if (entry.initialHooksConfig === null) {
     captureHooksConfigSnapshot()
   }
-  return initialHooksConfig
+  return currentSnapshotEntry(state).initialHooksConfig
 }
 
 /**
@@ -150,6 +263,11 @@ export function getHooksConfigFromSnapshot(): HooksSettings | null {
  * Also resets SDK init state to prevent test pollution
  */
 export function resetHooksConfigSnapshot(): void {
-  initialHooksConfig = null
+  const state = getHostHooksConfigSnapshotState()
+  state.unsubscribeSettingsChange?.()
+  state.unsubscribeSettingsChange = null
+  state.snapshotsBySessionId.clear()
+  state.snapshotKey = () => DEFAULT_SNAPSHOT_KEY
+  state.initialHooksConfig = null
   resetSdkInitState()
 }

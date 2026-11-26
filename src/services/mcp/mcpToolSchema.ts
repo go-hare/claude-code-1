@@ -28,6 +28,7 @@ import {
 import { getAPIProvider } from '../../utils/model/providers.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { logMCPDebug, logMCPError } from '../../utils/log.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 /** Structural config for eHi / ingest — stdio has no url. */
 export type McpSchemaGateConfig = {
   type?: string
@@ -487,7 +488,19 @@ export function coerceMcpToolInputForSchema(
   return changed ? next : args
 }
 
-let metaValidator: ValidateFunction | null | undefined
+type HostMcpToolSchemaState = {
+  metaValidator: ValidateFunction | null | undefined
+  sessionRefusedToolSchemas: Map<string, Set<string>>
+}
+
+const hostMcpToolSchemaSlot = new HostSlot<HostMcpToolSchemaState>(() => ({
+  metaValidator: undefined,
+  sessionRefusedToolSchemas: new Map<string, Set<string>>(),
+}))
+
+function getHostMcpToolSchemaState(): HostMcpToolSchemaState {
+  return hostMcpToolSchemaSlot.of(getBootstrapSessionHost())
+}
 
 /** densable SRS() — do not strip $schema except the draft URL match path. */
 function shouldStripSchemaKeyword(): boolean {
@@ -504,17 +517,18 @@ function firstInvalidPropertyKey(schema: unknown): string | null {
 
 /** densable vRS — lazy Ajv2020 draft 2020-12 meta-validator; fail-open. */
 export function getMcpDraft202012Validator(): ValidateFunction | null {
-  if (metaValidator !== undefined) return metaValidator
+  const state = getHostMcpToolSchemaState()
+  if (state.metaValidator !== undefined) return state.metaValidator
   try {
-    metaValidator =
+    state.metaValidator =
       new Ajv2020({
         allErrors: false,
         validateFormats: false,
       }).getSchema(DRAFT_2020_12) ?? null
   } catch {
-    metaValidator = null
+    state.metaValidator = null
   }
-  if (metaValidator === null) {
+  if (state.metaValidator === null) {
     logForDebugging(
       'MCP: draft 2020-12 meta-validator unavailable — tool schema checks fail open',
       { level: 'warn' },
@@ -523,11 +537,14 @@ export function getMcpDraft202012Validator(): ValidateFunction | null {
       reason: 'schema_validator_unavailable' as never,
     })
   }
-  return metaValidator
+  return state.metaValidator
 }
 
 export function resetMcpDraft202012ValidatorForTests(): void {
-  metaValidator = undefined
+  const state = hostMcpToolSchemaSlot.peek(getBootstrapSessionHost())
+  if (state) {
+    state.metaValidator = undefined
+  }
 }
 
 /**
@@ -814,14 +831,14 @@ export function filterListedMcpToolsBySchema<T extends ListedMcpTool>(
 export const EMPTY_OBJECT_TOOL_SCHEMA = { type: 'object' } as const
 export const MAX_REFUSED_TOOL_SCHEMA_REPLACEMENTS = 8
 
-const sessionRefusedToolSchemas = new Map<string, Set<string>>()
-
 export function getRefusedToolSchemas(): Map<string, Set<string>> {
-  return sessionRefusedToolSchemas
+  return getHostMcpToolSchemaState().sessionRefusedToolSchemas
 }
 
 export function resetRefusedToolSchemas(): void {
-  sessionRefusedToolSchemas.clear()
+  hostMcpToolSchemaSlot
+    .peek(getBootstrapSessionHost())
+    ?.sessionRefusedToolSchemas.clear()
 }
 
 function canonicalJson(value: unknown): string {
@@ -846,7 +863,7 @@ export function hashToolInputSchema(schema: unknown): string {
 
 export function replaceRefusedToolSchemas<T>(
   toolSchemas: T[],
-  refusedToolSchemas: Map<string, Set<string>> = sessionRefusedToolSchemas,
+  refusedToolSchemas: Map<string, Set<string>> = getRefusedToolSchemas(),
 ): T[] {
   if (refusedToolSchemas.size === 0) return toolSchemas
   try {
@@ -917,7 +934,7 @@ export class RefusedToolSchemaResolver {
   #replacements = 0
 
   constructor(
-    refusedToolSchemas: Map<string, Set<string>> = sessionRefusedToolSchemas,
+    refusedToolSchemas: Map<string, Set<string>> = getRefusedToolSchemas(),
   ) {
     this.#refusedToolSchemas = refusedToolSchemas
   }

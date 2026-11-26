@@ -10,6 +10,7 @@
  * `root.host`; this is not a Map-by-sessionId stand-in.
  */
 
+import { HostSlot, RootSessionSlot } from './hostSlot.js'
 import {
   AccountCreditLatches,
   BackgroundHousekeeping,
@@ -572,6 +573,46 @@ function ofSession(session: object): SessionPromptBag {
   return created
 }
 
+/**
+ * Official 2.1.331 `zVs` — host-owned clock abstraction (`SessionHost.clock`).
+ * Wraps wall-clock `Date.now()`, monotonic `performance.now()`, and timers so
+ * multi-host environments and tests can inspect or override host time.
+ */
+export class HostClock {
+  now(): number {
+    return Date.now()
+  }
+
+  monotonicNow(): number {
+    return typeof performance !== 'undefined' &&
+      typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now()
+  }
+
+  setTimeout(
+    fn: () => void,
+    ms: number,
+    opts?: { unref?: boolean },
+  ): ReturnType<typeof setTimeout> {
+    const id = globalThis.setTimeout(fn, ms)
+    if (
+      opts?.unref &&
+      typeof id === 'object' &&
+      id !== null &&
+      'unref' in id &&
+      typeof id.unref === 'function'
+    ) {
+      id.unref()
+    }
+    return id
+  }
+
+  clearTimeout(id: ReturnType<typeof setTimeout>): void {
+    globalThis.clearTimeout(id)
+  }
+}
+
 export class SessionHost {
   backgroundHousekeeping: BackgroundHousekeeping
   launchOptions: LaunchOptions
@@ -585,6 +626,7 @@ export class SessionHost {
   requestLatches: RequestLatches
   accountCreditLatches: AccountCreditLatches
   proactivity: Proactivity
+  clock: HostClock
   /** densable qhe @178133390 — process-env change emit (Fc/IE). */
   envChange: Signal = createSignal()
 
@@ -601,6 +643,7 @@ export class SessionHost {
     requestLatches: RequestLatches
     accountCreditLatches: AccountCreditLatches
     proactivity: Proactivity
+    clock?: HostClock
   }) {
     this.backgroundHousekeeping = e.backgroundHousekeeping
     this.launchOptions = e.launchOptions
@@ -614,6 +657,7 @@ export class SessionHost {
     this.requestLatches = e.requestLatches
     this.accountCreditLatches = e.accountCreditLatches
     this.proactivity = e.proactivity
+    this.clock = e.clock ?? new HostClock()
   }
 }
 
@@ -666,7 +710,7 @@ export function subscribeUserPromptWaiting(
 }
 
 /** Official sn @178548001 */
-export function createSessionHost(): SessionHost {
+export function createSessionHost(opts?: { clock?: HostClock }): SessionHost {
   return new SessionHost({
     backgroundHousekeeping: new BackgroundHousekeeping(),
     launchOptions: new LaunchOptions(),
@@ -680,21 +724,43 @@ export function createSessionHost(): SessionHost {
     requestLatches: new RequestLatches(),
     accountCreditLatches: new AccountCreditLatches(),
     proactivity: new Proactivity(),
+    clock: opts?.clock ?? new HostClock(),
   })
 }
 
+import { getBootstrapSessionHost } from './sessionRoot.js'
+
 export {
+  EngineStore,
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getActiveSubconversation,
+  getActiveSubconversationFromAls,
   getBootstrapSession,
   getBootstrapSessionHost,
   getReplDiffHost,
+  getSessionSwitchSignal,
+  hasActiveSessionAls,
+  HostSlot,
+  isSharedBackend,
+  type NewHostSessionOptions,
+  ofDefaultHost,
+  registerSessionContextReader,
+  type RootSessionAlsContext,
+  RootSessionSlot,
   resetSessionHostForTests,
+  runWithNewHostSession,
+  runWithSession,
+  runWithSubconversationContext,
+  type SessionAlsContext,
+  sessionContextAls,
+  setSessionOverridesGetter,
+  setSharedBackendMode,
+  type SubconversationAlsContext,
 } from './sessionRoot.js'
 
 function bootstrapHost(): SessionHost {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return (
-    require('./sessionRoot.js') as typeof import('./sessionRoot.js')
-  ).getBootstrapSessionHost()
+  return getBootstrapSessionHost()
 }
 
 /** densable qhe @178133390 `Fc().emit()` */
@@ -723,19 +789,13 @@ export function isDisklessLaunch(): boolean {
 }
 
 /**
- * Official `Kr().teleportedSessionIds` @181213749 — host-keyed `WeakMap<SessionHost, Set<string>>`
+ * Official `Kr().teleportedSessionIds` @181213749 — host-keyed `HostSlot<Set<string>>`
  * (`var ano = new z(() => new i); function Kr() { return ano.of(U().host) }`).
  */
-const teleportedSessionIdsByHost = new WeakMap<object, Set<string>>()
+const teleportedSessionIdsByHost = new HostSlot<Set<string>>(() => new Set())
 
 export function getHostTeleportedSessionIds(): Set<string> {
-  const host = bootstrapHost()
-  let set = teleportedSessionIdsByHost.get(host)
-  if (!set) {
-    set = new Set()
-    teleportedSessionIdsByHost.set(host, set)
-  }
-  return set
+  return teleportedSessionIdsByHost.of(bootstrapHost())
 }
 
 /**

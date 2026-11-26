@@ -8,6 +8,7 @@ import { isBridgeEnabled } from 'src/bridge/bridgeEnabled.js'
 import { getGlobalConfig } from 'src/utils/config.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { shouldSuppressPushForUserPresence } from 'src/utils/residualUiEnvGates.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 
 const PUSH_NOTIFICATION_TOOL_NAME = 'PushNotification'
 
@@ -45,7 +46,13 @@ type PushOutput = {
 }
 
 const PUSH_DEDUP_WINDOW_MS = 60_000
-const recentPushByKey = new Map<string, number>()
+const recentPushByKeySlot = new RootSessionSlot<Map<string, number>>(
+  () => new Map(),
+)
+
+function getRecentPushByKey(): Map<string, number> {
+  return recentPushByKeySlot.of(getBootstrapSession())
+}
 
 const PUSH_SECRET_PATTERNS: ReadonlyArray<RegExp> = [
   // PEM private key blocks
@@ -92,7 +99,16 @@ export function maskPushNotificationSecrets(text: string): string {
 }
 
 export function _resetPushNotificationDedupForTesting(): void {
-  recentPushByKey.clear()
+  getRecentPushByKey().clear()
+}
+
+export function _recordPushNotificationDedupForTesting(
+  title: string,
+  body: string,
+  status: 'proactive' | 'normal' = 'normal',
+  now: number = Date.now(),
+): void {
+  getRecentPushByKey().set(`${title}\0${body}\0${status}`, now)
 }
 
 export const PushNotificationTool = buildTool({
@@ -255,6 +271,7 @@ Requires Remote Control to be configured. Respects user notification settings (t
     const effectiveStatus = input.status ?? 'normal'
     const dedupKey = `${input.title}\0${input.body}\0${effectiveStatus}`
     const now = Date.now()
+    const recentPushByKey = getRecentPushByKey()
     const lastSentAt = recentPushByKey.get(dedupKey)
     if (lastSentAt !== undefined && now - lastSentAt < PUSH_DEDUP_WINDOW_MS) {
       logForDebugging(

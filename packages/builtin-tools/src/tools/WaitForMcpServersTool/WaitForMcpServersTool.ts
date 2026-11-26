@@ -23,6 +23,7 @@ import {
 } from 'src/Tool.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 import { sleep } from 'src/utils/sleep.js'
 import { REPL_TOOL_NAME } from '../REPLTool/constants.js'
 import {
@@ -75,9 +76,37 @@ type ClientWithOptionalMeta = WaitableMcpClient & {
 }
 
 // Host-level state mirroring official `xAt` (declared latch) + live clients
-// accessor so zero-arg `isEnabled()` reflects pending MCP connections.
-let liveClientsSnapshot: readonly WaitableMcpClient[] = []
-let declaredSticky = false
+// accessor so zero-arg `isEnabled()` reflects pending MCP connections per host.
+type WaitForMcpHostState = {
+  liveClientsSnapshot: readonly WaitableMcpClient[]
+  declaredSticky: boolean
+}
+
+const fallbackWaitForMcpHost: object = {}
+
+function getActiveWaitForMcpHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackWaitForMcpHost
+}
+
+const waitForMcpHostSlot = new HostSlot<WaitForMcpHostState>(() => ({
+  liveClientsSnapshot: [],
+  declaredSticky: false,
+}))
+
+function getWaitForMcpHostState(): WaitForMcpHostState {
+  return waitForMcpHostSlot.of(getActiveWaitForMcpHost())
+}
 
 /** Return names of MCP servers currently in `'pending'` state (official `AAt`). */
 export function getPendingMcpServerNames(
@@ -90,37 +119,43 @@ export function getPendingMcpServerNames(
 export function setLiveMcpClientsForWait(
   clients: readonly WaitableMcpClient[],
 ): void {
-  liveClientsSnapshot = clients
+  getWaitForMcpHostState().liveClientsSnapshot = clients
 }
 
 /** Official `jZn` / `bdr` — set or clear the sticky declared latch for this host. */
 export function setWaitForMcpServersDeclared(declared: boolean): void {
-  declaredSticky = declared
+  getWaitForMcpHostState().declaredSticky = declared
 }
 
 /** Official `cBt` — whether WaitForMcpServers has been declared this session. */
 export function isWaitForMcpServersDeclared(): boolean {
-  return declaredSticky
+  return getWaitForMcpHostState().declaredSticky
 }
 
 /** Official `mnl` — true when at least one MCP server is currently pending. */
 export function hasPendingMcpServers(
-  clients: readonly WaitableMcpClient[] = liveClientsSnapshot,
+  clients: readonly WaitableMcpClient[] = getWaitForMcpHostState()
+    .liveClientsSnapshot,
 ): boolean {
   return getPendingMcpServerNames(clients).length > 0
 }
 
 /** Official `eNs` — enabled when any MCP server is pending or declared sticky. */
 export function isWaitForMcpServersEnabled(
-  clients: readonly WaitableMcpClient[] = liveClientsSnapshot,
+  clients: readonly WaitableMcpClient[] = getWaitForMcpHostState()
+    .liveClientsSnapshot,
 ): boolean {
-  return getPendingMcpServerNames(clients).length > 0 || declaredSticky
+  return (
+    getPendingMcpServerNames(clients).length > 0 ||
+    getWaitForMcpHostState().declaredSticky
+  )
 }
 
-/** Reset module-level latches between unit tests. */
+/** Reset host-level latches between unit tests. */
 export function resetWaitForMcpServersStateForTests(): void {
-  liveClientsSnapshot = []
-  declaredSticky = false
+  const state = getWaitForMcpHostState()
+  state.liveClientsSnapshot = []
+  state.declaredSticky = false
 }
 
 /** Official `A3` — failed server whose config lacks a URL / endpoint. */

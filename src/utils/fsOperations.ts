@@ -14,6 +14,7 @@ import { homedir } from 'os'
 import * as nodePath from 'path'
 import { getErrnoCode } from './errors.js'
 import { getPlatform } from './platform.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { slowLogging } from './slowOperations.js'
 
 /**
@@ -947,8 +948,21 @@ export const NodeFsOperations: FsOperations = {
   },
 }
 
-// The currently active filesystem implementation
-let activeFs: FsOperations = NodeFsOperations
+type FsOperationsHostState = {
+  activeFs: FsOperations
+  autofsNotMapRoots: Set<string>
+  autofsPassingFailures: Map<string, number>
+}
+
+const fsOperationsHostSlot = new HostSlot<FsOperationsHostState>(() => ({
+  activeFs: NodeFsOperations,
+  autofsNotMapRoots: new Set(),
+  autofsPassingFailures: new Map(),
+}))
+
+function getFsOperationsHostState(): FsOperationsHostState {
+  return fsOperationsHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Overrides the filesystem implementation. Note: This function does not
@@ -956,7 +970,7 @@ let activeFs: FsOperations = NodeFsOperations
  * @param implementation The filesystem implementation to use
  */
 export function setFsImplementation(implementation: FsOperations): void {
-  activeFs = implementation
+  getFsOperationsHostState().activeFs = implementation
 }
 
 /**
@@ -964,7 +978,7 @@ export function setFsImplementation(implementation: FsOperations): void {
  * @returns The currently active filesystem implementation
  */
 export function getFsImplementation(): FsOperations {
-  return activeFs
+  return getFsOperationsHostState().activeFs
 }
 
 /**
@@ -986,12 +1000,10 @@ const AUTOFS_PERMANENT_ERRNO = new Set([
 ])
 const AUTOFS_MAX_TRANSIENT_RETRIES = 2
 
-const autofsNotMapRoots = new Set<string>()
-const autofsPassingFailures = new Map<string, number>()
-
 export function _resetAutofsMapRootCacheForTesting(): void {
-  autofsNotMapRoots.clear()
-  autofsPassingFailures.clear()
+  const hostState = getFsOperationsHostState()
+  hostState.autofsNotMapRoots.clear()
+  hostState.autofsPassingFailures.clear()
 }
 
 export function isAutofsMapRoot(
@@ -1011,7 +1023,8 @@ export function isAutofsMapRoot(
   }
   const useCache =
     opts?.statfsSyncFn === undefined && opts?.platform === undefined
-  if (useCache && autofsNotMapRoots.has(normalized)) {
+  const hostState = useCache ? getFsOperationsHostState() : undefined
+  if (hostState && hostState.autofsNotMapRoots.has(normalized)) {
     return false
   }
   try {
@@ -1025,7 +1038,7 @@ export function isAutofsMapRoot(
         ).statfsSync?.(p))
     const info = statfsFn(normalized)
     if (info && Number(info.type) === AUTOFS_SUPER_MAGIC) {
-      if (useCache) autofsPassingFailures.delete(normalized)
+      if (hostState) hostState.autofsPassingFailures.delete(normalized)
       return true
     }
   } catch (err) {
@@ -1034,15 +1047,15 @@ export function isAutofsMapRoot(
       code === undefined
         ? err instanceof TypeError
         : AUTOFS_PERMANENT_ERRNO.has(code)
-    if (useCache) {
-      const count = (autofsPassingFailures.get(normalized) ?? 0) + 1
+    if (hostState) {
+      const count = (hostState.autofsPassingFailures.get(normalized) ?? 0) + 1
       if (!isPermanent && count < AUTOFS_MAX_TRANSIENT_RETRIES) {
-        autofsPassingFailures.set(normalized, count)
+        hostState.autofsPassingFailures.set(normalized, count)
         return false
       }
     }
   }
-  if (useCache) autofsNotMapRoots.add(normalized)
+  if (hostState) hostState.autofsNotMapRoots.add(normalized)
   return false
 }
 
@@ -1078,7 +1091,7 @@ export function isAutomountMapRoot(
  * Note: This function does not automatically update cwd.
  */
 export function setOriginalFsImplementation(): void {
-  activeFs = NodeFsOperations
+  getFsOperationsHostState().activeFs = NodeFsOperations
 }
 
 export type ReadFileRangeResult = {

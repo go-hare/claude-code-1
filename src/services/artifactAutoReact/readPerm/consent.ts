@@ -41,6 +41,7 @@ import {
   getAgentContext,
   isDelegatedObservation,
 } from 'src/utils/agentContext.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { hasSharedProbeToolUseId } from '../ownership.js'
 import { un } from '../store.js'
 
@@ -272,15 +273,19 @@ function freshState(): ConsentState {
   }
 }
 
-let state = freshState()
+const consentStateSlot = new RootSessionSlot<ConsentState>(freshState)
+
+function getConsentState(): ConsentState {
+  return consentStateSlot.of(getBootstrapSession())
+}
 
 /** Read-only view of the consent ledger (densable `X()` ask-class fields). */
 export function getConsentStateForTests(): Readonly<ConsentState> {
-  return state
+  return getConsentState()
 }
 
 export function resetConsentStateForTests(): void {
-  state = freshState()
+  consentStateSlot.drop(getBootstrapSession())
 }
 
 const ASK_NAMED_OTHER_ORG_CAP = 512
@@ -313,6 +318,7 @@ function envBoolean(value: string | undefined): boolean | undefined {
 
 /** densable md — five-class ask latch. */
 export function md(): boolean {
+  const state = getConsentState()
   if (state.askClassLatch === null) {
     state.askClassLatch =
       envBoolean(process.env.CLAUDE_CODE_ARTIFACT_FIVE_CLASS_ASKS) ??
@@ -653,7 +659,7 @@ export function VBe(
 
 /** densable _U */
 export function _U(cls: string, slug: string): boolean {
-  return state.askClassConsent.has(consentKey(cls, slug))
+  return getConsentState().askClassConsent.has(consentKey(cls, slug))
 }
 
 /**
@@ -668,7 +674,9 @@ export function hasAskClassArtifactRemembered(
 ): boolean {
   const toolUseId = context.toolUseId
   const taken =
-    toolUseId === undefined ? undefined : state.askClassTaken.get(toolUseId)
+    toolUseId === undefined
+      ? undefined
+      : getConsentState().askClassTaken.get(toolUseId)
   return (
     taken !== undefined &&
     taken.some(
@@ -683,23 +691,28 @@ export function hasAskClassArtifactRemembered(
 
 /** densable Ozr */
 export function Ozr(cls: string, slug: string, byPerson = false): void {
+  const state = getConsentState()
   state.askClassConsent.add(consentKey(cls, slug))
   if (byPerson) state.askClassPersonConsent.add(consentKey(cls, slug))
 }
 
 /** densable R7e */
 export function R7e(cls: string, slug: string): boolean {
-  return state.askClassPersonConsent.has(consentKey(cls, slug))
+  return getConsentState().askClassPersonConsent.has(consentKey(cls, slug))
 }
 
 /** densable Hzr */
 export function Hzr(slug: string): void {
-  state.askClassOutsideOrgConsent.add(consentKey('foreign_read', slug))
+  getConsentState().askClassOutsideOrgConsent.add(
+    consentKey('foreign_read', slug),
+  )
 }
 
 /** densable B7n */
 export function B7n(slug: string): boolean {
-  return state.askClassOutsideOrgConsent.has(consentKey('foreign_read', slug))
+  return getConsentState().askClassOutsideOrgConsent.has(
+    consentKey('foreign_read', slug),
+  )
 }
 
 /** densable Bjt — a class ask remembered on the artifact. */
@@ -728,7 +741,7 @@ export function NPe(
   canReachUser: boolean,
 ): void {
   if (context.toolUseId === undefined) return
-  const named = state.askNamedOtherOrg
+  const named = getConsentState().askNamedOtherOrg
   const prior = named.get(context.toolUseId)
   const next = canReachUser ? slugs : []
   const kept =
@@ -744,7 +757,7 @@ export function NPe(
 /** densable X_n */
 export function X_n(context: Pick<ToolUseContext, 'toolUseId'>): void {
   if (context.toolUseId !== undefined)
-    state.askNamedOtherOrg.delete(context.toolUseId)
+    getConsentState().askNamedOtherOrg.delete(context.toolUseId)
 }
 
 /** densable qBe */
@@ -754,7 +767,9 @@ export function qBe(
 ): boolean {
   return (
     context.toolUseId !== undefined &&
-    (state.askNamedOtherOrg.get(context.toolUseId) ?? []).includes(slug)
+    (getConsentState().askNamedOtherOrg.get(context.toolUseId) ?? []).includes(
+      slug,
+    )
   )
 }
 
@@ -880,6 +895,7 @@ function allowedByHook(context: ToolDecisionContext): boolean {
 export function PAr(context: ToolDecisionContext): void {
   const toolUseId = context.toolUseId
   if (toolUseId === undefined) return
+  const state = getConsentState()
   const pending = state.askClassPending.get(toolUseId) ?? []
   state.askClassPending.delete(toolUseId)
   const personAsked = state.askClassPersonAsked.get(toolUseId)
@@ -936,6 +952,7 @@ export function PAr(context: ToolDecisionContext): void {
 export function OCo(context: Pick<ToolUseContext, 'toolUseId'>): void {
   const toolUseId = context.toolUseId
   if (toolUseId === undefined) return
+  const state = getConsentState()
   const scopes = state.consentCheckScopes
   scopes.delete(toolUseId)
   if (scopes.size >= CONSENT_CHECK_SCOPES_CAP) {
@@ -953,13 +970,14 @@ export function beginArtifactConsentCheck(
   context: Pick<ToolUseContext, 'toolUseId'>,
 ): void {
   if (context.toolUseId !== undefined)
-    state.askClassPending.delete(context.toolUseId)
+    getConsentState().askClassPending.delete(context.toolUseId)
   OCo(context)
 }
 
 /** densable D1n — the scope changed since this call was checked (or is lost). */
 export function D1n(context: Pick<ToolUseContext, 'toolUseId'>): boolean {
   if (context.toolUseId === undefined) return false
+  const state = getConsentState()
   const scope = state.consentCheckScopes.get(context.toolUseId)
   return scope === undefined ? state.consentCheckScopesEvicted : scope !== KBe()
 }
@@ -1000,6 +1018,7 @@ export function classifierDecidesFor(
 /** densable Ke — a person consented to reading this foreign artifact. */
 export function Ke(context: ToolDecisionContext, slug: string): boolean {
   const toolUseId = context.toolUseId
+  const state = getConsentState()
   return (
     (toolUseId !== undefined &&
       state.askClassTakenByPerson.get(toolUseId) === true &&
@@ -1499,6 +1518,7 @@ export function yNe<I extends Record<string, unknown>>(
   context: ConsentContext,
   entries: ClassAskEntry[],
 ): ClassDecision<I> {
+  const state = getConsentState()
   const toolUseId = context.toolUseId
   if (toolUseId !== undefined) {
     state.askClassPending.delete(toolUseId)

@@ -13,6 +13,7 @@ import { isENOENT } from '../errors.js'
 import { logForDebugging } from '../debug.js'
 import { getPlatform } from '../platform.js'
 import * as lockfile from '../lockfile.js'
+import { getActiveSessionFromAls, runWithSession } from '../sessionHost.js'
 import type { StorageV5Result } from './createLocalFsBackend.js'
 
 const DEFAULT_STALE_MS = 30000
@@ -24,6 +25,8 @@ const BENIGN_RELEASE_CODES = new Set(['ERELEASED', 'ENOTACQUIRED'])
 type LockFrame = { identity: string; released: boolean }
 
 const lockFrameStore = new AsyncLocalStorage<LockFrame[]>()
+// Process-global path queue keyed by resolved physical disk path so concurrent
+// hosts serialize access to the exact same file on disk.
 const pathQueues = new Map<string, Promise<unknown>>()
 
 function ok<T>(value: T): StorageV5Result<T> {
@@ -135,8 +138,12 @@ export async function runSerializedByPath<T>(
   e: string,
   r: () => Promise<T>,
 ): Promise<T> {
+  const captured = getActiveSessionFromAls()
   await using n = await enterPathQueue(resolve(e))
   void n
+  if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+    return await runWithSession(captured, r)
+  }
   return await r()
 }
 
@@ -149,6 +156,11 @@ export async function withStorageLock<T>(
   r: (ctx: StorageLockCtx) => Promise<StorageV5Result<T>>,
   n: StorageLockOptions,
 ): Promise<StorageV5Result<T>> {
+  const captured = getActiveSessionFromAls()
+  const runInCaptured = <R>(fn: () => R): R =>
+    captured !== undefined && getActiveSessionFromAls() !== captured
+      ? runWithSession(captured, fn)
+      : fn()
   const i = n.lockfilePath ?? e
   const t = resolve(i)
   const o = lockFrameStore.getStore() ?? []
@@ -157,12 +169,15 @@ export async function withStorageLock<T>(
   }
   await using u = await enterPathQueue(t)
   void u
-  const s = () => r({ suspect: () => false })
+  const s = () => runInCaptured(() => r({ suspect: () => false }))
   const a = (f: unknown) => {
-    n.onForgone?.(f)
+    runInCaptured(() => n.onForgone?.(f))
     return s()
   }
-  if (n.proceedIf !== undefined && !(await n.proceedIf())) {
+  if (
+    n.proceedIf !== undefined &&
+    !(await runInCaptured(() => n.proceedIf!()))
+  ) {
     return await s()
   }
   const c = dirname(i)
@@ -265,13 +280,15 @@ export async function withStorageLock<T>(
   const le: LockFrame = { identity: t, released: false }
   try {
     return await lockFrameStore.run([...o, le], () =>
-      r({
-        suspect: () => {
-          const f = Date.now() - k
-          const O = performance.now() - y
-          return m || Math.abs(f - O) > 1000
-        },
-      }),
+      runInCaptured(() =>
+        r({
+          suspect: () => {
+            const f = Date.now() - k
+            const O = performance.now() - y
+            return m || Math.abs(f - O) > 1000
+          },
+        }),
+      ),
     )
   } finally {
     le.released = true

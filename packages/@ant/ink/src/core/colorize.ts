@@ -1,4 +1,5 @@
 import chalk from 'chalk'
+import { InkHostSlot } from './instances.js'
 import type { Color, TextStyles } from './styles.js'
 
 /**
@@ -217,8 +218,13 @@ function leftoverDualInkXy(text: string): string {
 const ANSI_BLACK_FG = '\x1b[30m'
 const ANSI_WHITE_FG = '\x1b[37m'
 const NEUTRAL_ANSI_CACHE_MAX = 256
-const neutralAnsiCache = new Map<Color, boolean>()
-let neutralAnsiCacheLevel = -1
+const neutralAnsiHostSlot = new InkHostSlot<{
+  cache: Map<Color, boolean>
+  level: number
+}>(() => ({
+  cache: new Map<Color, boolean>(),
+  level: -1,
+}))
 
 function openingSgrOf(styled: string, marker: string): string {
   const idx = styled.indexOf(marker)
@@ -226,18 +232,19 @@ function openingSgrOf(styled: string, marker: string): string {
 }
 
 function isNeutralAnsi16Color(color: Color): boolean {
-  if (chalk.level !== neutralAnsiCacheLevel) {
-    neutralAnsiCacheLevel = chalk.level
-    neutralAnsiCache.clear()
+  const state = neutralAnsiHostSlot.of()
+  if (chalk.level !== state.level) {
+    state.level = chalk.level
+    state.cache.clear()
   }
-  const cached = neutralAnsiCache.get(color)
+  const cached = state.cache.get(color)
   if (cached !== undefined) return cached
-  if (neutralAnsiCache.size >= NEUTRAL_ANSI_CACHE_MAX) {
-    neutralAnsiCache.clear()
+  if (state.cache.size >= NEUTRAL_ANSI_CACHE_MAX) {
+    state.cache.clear()
   }
   const sgr = openingSgrOf(colorize(' ', color, 'foreground'), ' ')
   const neutral = sgr === ANSI_BLACK_FG || sgr === ANSI_WHITE_FG
-  neutralAnsiCache.set(color, neutral)
+  state.cache.set(color, neutral)
   return neutral
 }
 

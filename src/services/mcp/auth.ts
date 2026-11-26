@@ -44,6 +44,12 @@ import { clearKeychainCache } from '../../utils/secureStorage/macOsKeychainHelpe
 import type { SecureStorageData } from '../../utils/secureStorage/types.js'
 import type { ScopedMcpServerConfig } from './types.js'
 import { sleep } from '../../utils/sleep.js'
+import {
+  HostSlot,
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logEvent } from '../analytics/index.js'
@@ -83,10 +89,16 @@ function createStrictReadProbeState(): StrictReadProbeState {
   }
 }
 
-let strictReadProbeState: StrictReadProbeState = createStrictReadProbeState()
+const strictReadProbeSlot = new HostSlot<StrictReadProbeState>(
+  createStrictReadProbeState,
+)
+
+function getStrictReadProbeState(): StrictReadProbeState {
+  return strictReadProbeSlot.of(getBootstrapSessionHost())
+}
 
 export function resetCredentialStoreStrictProbeState(): void {
-  strictReadProbeState = createStrictReadProbeState()
+  strictReadProbeSlot.drop(getBootstrapSessionHost())
 }
 
 function isEmptyStorageResult(
@@ -142,6 +154,7 @@ export async function readMcpCredentialStore(probe?: {
   challenged: boolean
 }): Promise<SecureStorageData | null | SecureStorageReadFailed> {
   const storage = getSecureStorage()
+  const strictReadProbeState = getStrictReadProbeState()
   if (probe !== undefined) {
     const keychainOnly = strictReadProbeState.keychainOnly
     const answeredFresh =
@@ -1488,8 +1501,61 @@ export const revokeReplacedServerTokens = revokeReplacedMcpTokens
  * Gold `vt().dialedWithoutOAuth` (#1263): tracks servers whose OAuth tokens
  * were cleared in `/mcp` so the immediate reconnect dials without OAuth.
  */
-export const dialedWithoutOAuth = new Map<string, string>()
-export const rejectedStoredTokens = new Map<string, string>()
+type McpAuthRecoveredListener = (
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+) => void
+
+type HostMcpAuthState = {
+  dialedWithoutOAuth: Map<string, string>
+  rejectedStoredTokens: Map<string, string>
+  activeOAuthCallbackSubmitters: Map<string, (callbackUrl: string) => boolean>
+  activeOAuthCallbackStates: Map<string, string>
+  activeOAuthPromises: Map<string, Promise<void>>
+  transientMcpRefreshFailures: Map<string, number>
+  mcpAuthRecoveredListeners: Map<
+    McpAuthRecoveredListener,
+    McpAuthRecoveredListener
+  >
+}
+
+const hostMcpAuthSlot = new HostSlot<HostMcpAuthState>(() => ({
+  dialedWithoutOAuth: new Map(),
+  rejectedStoredTokens: new Map(),
+  activeOAuthCallbackSubmitters: new Map(),
+  activeOAuthCallbackStates: new Map(),
+  activeOAuthPromises: new Map(),
+  transientMcpRefreshFailures: new Map(),
+  mcpAuthRecoveredListeners: new Map(),
+}))
+
+function getHostMcpAuthState(): HostMcpAuthState {
+  return hostMcpAuthSlot.of(getBootstrapSessionHost())
+}
+
+function createHostMapProxy<K, V>(getMap: () => Map<K, V>): Map<K, V> {
+  const proxy = new Proxy(new Map<K, V>(), {
+    get(_dummy, prop) {
+      const target = getMap()
+      if (prop === 'set') {
+        return (key: K, value: V) => {
+          target.set(key, value)
+          return proxy
+        }
+      }
+      const value = Reflect.get(target, prop, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  return proxy
+}
+
+export const dialedWithoutOAuth: Map<string, string> = createHostMapProxy(
+  () => getHostMcpAuthState().dialedWithoutOAuth,
+)
+export const rejectedStoredTokens: Map<string, string> = createHostMapProxy(
+  () => getHostMcpAuthState().rejectedStoredTokens,
+)
 export const connectsToRedialWithoutToken = new WeakMap<
   { name: string; type: string },
   () => { name: string; type: string }
@@ -1940,36 +2006,30 @@ async function performMCPXaaAuth(
   }
 }
 
-const activeOAuthCallbackSubmitters = new Map<
-  string,
-  (callbackUrl: string) => boolean
->()
-const activeOAuthCallbackStates = new Map<string, string>()
-const activeOAuthPromises = new Map<string, Promise<void>>()
-
 /**
  * #2171: Retrieve the active manual OAuth callback submitter for an MCP server.
  */
 export function getOAuthCallbackSubmitter(
   serverName: string,
 ): ((callbackUrl: string) => boolean) | undefined {
-  return activeOAuthCallbackSubmitters.get(serverName)
+  return getHostMcpAuthState().activeOAuthCallbackSubmitters.get(serverName)
 }
 
 export function getOAuthCallbackState(serverName: string): string | undefined {
-  return activeOAuthCallbackStates.get(serverName)
+  return getHostMcpAuthState().activeOAuthCallbackStates.get(serverName)
 }
 
 export function setActiveOAuthPromise(
   serverName: string,
   promise: Promise<void>,
 ): void {
-  activeOAuthPromises.set(serverName, promise)
+  const state = getHostMcpAuthState()
+  state.activeOAuthPromises.set(serverName, promise)
   void promise
     .catch(() => {})
     .finally(() => {
-      if (activeOAuthPromises.get(serverName) === promise) {
-        activeOAuthPromises.delete(serverName)
+      if (state.activeOAuthPromises.get(serverName) === promise) {
+        state.activeOAuthPromises.delete(serverName)
       }
     })
 }
@@ -1977,7 +2037,7 @@ export function setActiveOAuthPromise(
 export function getActiveOAuthPromise(
   serverName: string,
 ): Promise<void> | undefined {
-  return activeOAuthPromises.get(serverName)
+  return getHostMcpAuthState().activeOAuthPromises.get(serverName)
 }
 
 export async function performMCPOAuthFlow(
@@ -2292,14 +2352,19 @@ export async function performMCPOAuthFlow(
         }
       }
 
-      activeOAuthCallbackSubmitters.set(serverName, submitManualCallback)
-      activeOAuthCallbackStates.set(serverName, oauthState)
+      const hostAuthState = getHostMcpAuthState()
+      hostAuthState.activeOAuthCallbackSubmitters.set(
+        serverName,
+        submitManualCallback,
+      )
+      hostAuthState.activeOAuthCallbackStates.set(serverName, oauthState)
       clearSubmitter = () => {
         if (
-          activeOAuthCallbackSubmitters.get(serverName) === submitManualCallback
+          hostAuthState.activeOAuthCallbackSubmitters.get(serverName) ===
+          submitManualCallback
         ) {
-          activeOAuthCallbackSubmitters.delete(serverName)
-          activeOAuthCallbackStates.delete(serverName)
+          hostAuthState.activeOAuthCallbackSubmitters.delete(serverName)
+          hostAuthState.activeOAuthCallbackStates.delete(serverName)
         }
       }
 
@@ -2710,6 +2775,14 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   authChallengeOpen = false
   /** Official 2.1.328: whether discovery metadata advertised DCR or CIMD. */
   registrationOfferedByDiscovery = false
+  private readonly _capturedSession = getActiveSessionFromAls()
+
+  private runInProviderSession<T>(fn: () => T): T {
+    return this._capturedSession !== undefined &&
+      getActiveSessionFromAls() !== this._capturedSession
+      ? runWithSession(this._capturedSession, fn)
+      : fn()
+  }
 
   constructor(
     serverName: string,
@@ -2736,25 +2809,27 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   get clientMetadata(): OAuthClientMetadata {
-    const metadata: OAuthClientMetadata = {
-      client_name: `Claude Code (${this.serverName})`,
-      redirect_uris: [this.redirectUri],
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-      token_endpoint_auth_method: 'none', // Public client
-    }
+    return this.runInProviderSession(() => {
+      const metadata: OAuthClientMetadata = {
+        client_name: `Claude Code (${this.serverName})`,
+        redirect_uris: [this.redirectUri],
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none', // Public client
+      }
 
-    // Include scope from metadata if available
-    const metadataScope = getScopeFromMetadata(this._metadata)
-    if (metadataScope) {
-      metadata.scope = metadataScope
-      logMCPDebug(
-        this.serverName,
-        `Using scope from metadata: ${metadata.scope}`,
-      )
-    }
+      // Include scope from metadata if available
+      const metadataScope = getScopeFromMetadata(this._metadata)
+      if (metadataScope) {
+        metadata.scope = metadataScope
+        logMCPDebug(
+          this.serverName,
+          `Using scope from metadata: ${metadata.scope}`,
+        )
+      }
 
-    return metadata
+      return metadata
+    })
   }
 
   /**
@@ -2764,12 +2839,14 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
    * Override via MCP_OAUTH_CLIENT_METADATA_URL env var (e.g. for testing, FedStart).
    */
   get clientMetadataUrl(): string | undefined {
-    const override = process.env.MCP_OAUTH_CLIENT_METADATA_URL
-    if (override) {
-      logMCPDebug(this.serverName, `Using CIMD URL from env: ${override}`)
-      return override
-    }
-    return MCP_CLIENT_METADATA_URL
+    return this.runInProviderSession(() => {
+      const override = process.env.MCP_OAUTH_CLIENT_METADATA_URL
+      if (override) {
+        logMCPDebug(this.serverName, `Using CIMD URL from env: ${override}`)
+        return override
+      }
+      return MCP_CLIENT_METADATA_URL
+    })
   }
 
   setMetadata(
@@ -2782,7 +2859,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async saveAuthorizationServerUrl(url: string): Promise<void> {
-    this._expectedIssuer = url
+    return this.runInProviderSession(async () => {
+      this._expectedIssuer = url
+    })
   }
 
   private getExpectedIssuer(
@@ -2825,150 +2904,166 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async readCredentialStore(): Promise<SecureStorageData | null> {
-    const data = await readMcpCredentialStore(
-      this.handleRedirection
-        ? undefined
-        : {
-            serverName: this.serverName,
-            serverConfig: this.serverConfig,
-            challenged: this.authChallengeOpen,
-          },
-    )
-    if (data === SECURE_STORAGE_READ_FAILED) {
-      logMCPDebug(
-        this.serverName,
-        'Credential store could not be read (the login keychain may be locked); not reporting credentials as absent',
+    return this.runInProviderSession(async () => {
+      const data = await readMcpCredentialStore(
+        this.handleRedirection
+          ? undefined
+          : {
+              serverName: this.serverName,
+              serverConfig: this.serverConfig,
+              challenged: this.authChallengeOpen,
+            },
       )
-      throw new McpCredentialStoreUnavailableError(this.serverName)
-    }
-    return data
+      if (data === SECURE_STORAGE_READ_FAILED) {
+        logMCPDebug(
+          this.serverName,
+          'Credential store could not be read (the login keychain may be locked); not reporting credentials as absent',
+        )
+        throw new McpCredentialStoreUnavailableError(this.serverName)
+      }
+      return data
+    })
   }
 
   async state(): Promise<string> {
-    // Generate state if not already generated for this instance
-    if (!this._state) {
-      this._state = randomBytes(32).toString('base64url')
-      logMCPDebug(this.serverName, 'Generated new OAuth state')
-    }
-    return this._state
+    return this.runInProviderSession(async () => {
+      // Generate state if not already generated for this instance
+      if (!this._state) {
+        this._state = randomBytes(32).toString('base64url')
+        logMCPDebug(this.serverName, 'Generated new OAuth state')
+      }
+      return this._state
+    })
   }
 
   async clientInformation(
     context?: OAuthProviderContext,
   ): Promise<OAuthClientInformationWithIssuer | undefined> {
-    const data = await this.readCredentialStore()
-    const serverKey = getServerKey(this.serverName, this.serverConfig)
+    return this.runInProviderSession(async () => {
+      const data = await this.readCredentialStore()
+      const serverKey = getServerKey(this.serverName, this.serverConfig)
 
-    // Check session credentials first (from DCR or previous auth)
-    const storedInfo = data?.mcpOAuth?.[serverKey] as
-      | (NonNullable<SecureStorageData['mcpOAuth']>[string] & {
-          issuer?: string
-        })
-      | null
-      | undefined
-    if (storedInfo?.clientId) {
-      const candidate: OAuthClientInformationWithIssuer = {
-        client_id: storedInfo.clientId,
-        client_secret: storedInfo.clientSecret,
-        ...(storedInfo.issuer !== undefined
-          ? { issuer: storedInfo.issuer }
-          : {}),
+      // Check session credentials first (from DCR or previous auth)
+      const storedInfo = data?.mcpOAuth?.[serverKey] as
+        | (NonNullable<SecureStorageData['mcpOAuth']>[string] & {
+            issuer?: string
+          })
+        | null
+        | undefined
+      if (storedInfo?.clientId) {
+        const candidate: OAuthClientInformationWithIssuer = {
+          client_id: storedInfo.clientId,
+          client_secret: storedInfo.clientSecret,
+          ...(storedInfo.issuer !== undefined
+            ? { issuer: storedInfo.issuer }
+            : {}),
+        }
+        const expectedIssuer = this.getExpectedIssuer(context)
+        if (expectedIssuer !== undefined) {
+          const validated = validateSep2352Issuer(candidate, expectedIssuer, {
+            canPersistStamp: true,
+          })
+          if (validated === undefined) {
+            logMCPDebug(
+              this.serverName,
+              `Stored client_id issuer mismatch; ignoring stored client info`,
+            )
+            return undefined
+          }
+        }
+        logMCPDebug(this.serverName, `Found client info`)
+        return candidate
       }
-      const expectedIssuer = this.getExpectedIssuer(context)
-      if (expectedIssuer !== undefined) {
-        const validated = validateSep2352Issuer(candidate, expectedIssuer, {
-          canPersistStamp: true,
-        })
-        if (validated === undefined) {
-          logMCPDebug(
-            this.serverName,
-            `Stored client_id issuer mismatch; ignoring stored client info`,
-          )
-          return undefined
+
+      // Fallback: pre-configured client ID from server config
+      const configClientId = this.serverConfig.oauth?.clientId
+      if (configClientId) {
+        const clientConfig = data?.mcpOAuthClientConfig?.[serverKey]
+        logMCPDebug(this.serverName, `Using pre-configured client ID`)
+        return {
+          client_id: configClientId,
+          client_secret: clientConfig?.clientSecret,
         }
       }
-      logMCPDebug(this.serverName, `Found client info`)
-      return candidate
-    }
 
-    // Fallback: pre-configured client ID from server config
-    const configClientId = this.serverConfig.oauth?.clientId
-    if (configClientId) {
-      const clientConfig = data?.mcpOAuthClientConfig?.[serverKey]
-      logMCPDebug(this.serverName, `Using pre-configured client ID`)
-      return {
-        client_id: configClientId,
-        client_secret: clientConfig?.clientSecret,
+      // Official 2.1.328 (_pa): during background discovery (handleRedirection=false),
+      // do not trigger unprompted Dynamic Client Registration until the user
+      // initiates authentication.
+      if (
+        !this.handleRedirection &&
+        this.registrationOfferedByDiscovery &&
+        !storedInfo?.accessToken &&
+        !storedInfo?.refreshToken
+      ) {
+        logMCPDebug(
+          this.serverName,
+          `No client info found; deferring client registration to authentication time`,
+        )
+        throw new McpClientRegistrationDeferredError(this.serverName)
       }
-    }
 
-    // Official 2.1.328 (_pa): during background discovery (handleRedirection=false),
-    // do not trigger unprompted Dynamic Client Registration until the user
-    // initiates authentication.
-    if (
-      !this.handleRedirection &&
-      this.registrationOfferedByDiscovery &&
-      !storedInfo?.accessToken &&
-      !storedInfo?.refreshToken
-    ) {
-      logMCPDebug(
-        this.serverName,
-        `No client info found; deferring client registration to authentication time`,
-      )
-      throw new McpClientRegistrationDeferredError(this.serverName)
-    }
-
-    // If we don't have stored client info, return undefined to trigger registration
-    logMCPDebug(this.serverName, `No client info found`)
-    return undefined
+      // If we don't have stored client info, return undefined to trigger registration
+      logMCPDebug(this.serverName, `No client info found`)
+      return undefined
+    })
   }
 
   async saveClientInformation(
     clientInformation: OAuthClientInformationFull & { issuer?: string },
     context?: OAuthProviderContext,
   ): Promise<void> {
-    const storage = getSecureStorage()
-    const existingData = storage.read() || {}
-    const serverKey = getServerKey(this.serverName, this.serverConfig)
-    const prevEntry = existingData.mcpOAuth?.[serverKey] as
-      | (NonNullable<SecureStorageData['mcpOAuth']>[string] & {
-          issuer?: string
-        })
-      | null
-      | undefined
-    const persistedIssuer =
-      clientInformation.issuer ??
-      context?.issuer ??
-      this._metadata?.issuer ??
-      this._expectedIssuer ??
-      prevEntry?.issuer
+    return this.runInProviderSession(async () => {
+      const storage = getSecureStorage()
+      const existingData = storage.read() || {}
+      const serverKey = getServerKey(this.serverName, this.serverConfig)
+      const prevEntry = existingData.mcpOAuth?.[serverKey] as
+        | (NonNullable<SecureStorageData['mcpOAuth']>[string] & {
+            issuer?: string
+          })
+        | null
+        | undefined
+      const persistedIssuer =
+        clientInformation.issuer ??
+        context?.issuer ??
+        this._metadata?.issuer ??
+        this._expectedIssuer ??
+        prevEntry?.issuer
 
-    const updatedData: SecureStorageData = {
-      ...existingData,
-      mcpOAuth: {
-        ...existingData.mcpOAuth,
-        [serverKey]: {
-          ...(prevEntry ?? {}),
-          serverName: this.serverName,
-          serverUrl: this.serverConfig.url,
-          clientId: clientInformation.client_id,
-          clientSecret: clientInformation.client_secret,
-          // Official 325 #1853: round-trip SEP-2352 issuer stamp so re-login
-          // does not emit a spurious missing-issuer warning.
-          ...(persistedIssuer !== undefined ? { issuer: persistedIssuer } : {}),
-          // densable: persist redirect used for this registration (port reuse)
-          redirectUri: this.redirectUri,
-          // Provide default values for required fields if not present
-          accessToken: prevEntry?.accessToken || '',
-          expiresAt: prevEntry?.expiresAt || 0,
+      const updatedData: SecureStorageData = {
+        ...existingData,
+        mcpOAuth: {
+          ...existingData.mcpOAuth,
+          [serverKey]: {
+            ...(prevEntry ?? {}),
+            serverName: this.serverName,
+            serverUrl: this.serverConfig.url,
+            clientId: clientInformation.client_id,
+            clientSecret: clientInformation.client_secret,
+            // Official 325 #1853: round-trip SEP-2352 issuer stamp so re-login
+            // does not emit a spurious missing-issuer warning.
+            ...(persistedIssuer !== undefined
+              ? { issuer: persistedIssuer }
+              : {}),
+            // densable: persist redirect used for this registration (port reuse)
+            redirectUri: this.redirectUri,
+            // Provide default values for required fields if not present
+            accessToken: prevEntry?.accessToken || '',
+            expiresAt: prevEntry?.expiresAt || 0,
+          },
         },
-      },
-    }
+      }
 
-    storage.update(updatedData)
+      storage.update(updatedData)
+    })
   }
 
   async tokens(
+    context?: OAuthProviderContext,
+  ): Promise<OAuthTokensWithIssuer | undefined> {
+    return this.runInProviderSession(() => this._tokensImpl(context))
+  }
+
+  private async _tokensImpl(
     context?: OAuthProviderContext,
   ): Promise<OAuthTokensWithIssuer | undefined> {
     // Cross-process token changes (another CC instance refreshed or invalidated)
@@ -3179,6 +3274,15 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     tokens: OAuthTokensWithIssuer,
     context?: OAuthProviderContext,
   ): Promise<void> {
+    return this.runInProviderSession(() =>
+      this._saveTokensImpl(tokens, context),
+    )
+  }
+
+  private async _saveTokensImpl(
+    tokens: OAuthTokensWithIssuer,
+    context?: OAuthProviderContext,
+  ): Promise<void> {
     if (dialedWithoutOAuth.get(this.serverName) === this.serverConfig.url) {
       dialedWithoutOAuth.delete(this.serverName)
     }
@@ -3348,356 +3452,389 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
-    // Official 2.1.328 (chunk@334972328.js@57320): apply configured oauth.scopes
-    // or curated metadata scope override, append offline_access when supported
-    // (kyl), and strip duplicate/Entra-incompatible prompt=consent (Eyl).
-    const configuredScope = this._pendingStepUpScope
-      ? undefined
-      : this.serverConfig.oauth?.scopes ||
-        (this.serverConfig.oauth?.authServerMetadataUrl
-          ? getScopeFromMetadata(this._metadata)
-          : undefined)
-    const urlScope = authorizationUrl.searchParams.get('scope')
-    const baseScope = configuredScope ?? urlScope
-    if (baseScope !== urlScope) {
-      logMCPDebug(
-        this.serverName,
-        `Overrode authorization scope from ${urlScope || 'NONE'} to configured: ${baseScope || 'NONE'}`,
-      )
-    }
-    const effectiveScope =
-      baseScope === null
-        ? null
-        : maybeAppendOfflineAccess(baseScope, this._metadata)
-    if (effectiveScope !== null && effectiveScope !== urlScope) {
-      authorizationUrl.searchParams.set('scope', effectiveScope)
-      if (effectiveScope !== configuredScope) {
+    return this.runInProviderSession(async () => {
+      // Official 2.1.328 (chunk@334972328.js@57320): apply configured oauth.scopes
+      // or curated metadata scope override, append offline_access when supported
+      // (kyl), and strip duplicate/Entra-incompatible prompt=consent (Eyl).
+      const configuredScope = this._pendingStepUpScope
+        ? undefined
+        : this.serverConfig.oauth?.scopes ||
+          (this.serverConfig.oauth?.authServerMetadataUrl
+            ? getScopeFromMetadata(this._metadata)
+            : undefined)
+      const urlScope = authorizationUrl.searchParams.get('scope')
+      const baseScope = configuredScope ?? urlScope
+      if (baseScope !== urlScope) {
         logMCPDebug(
           this.serverName,
-          `Appended offline_access to authorization scope`,
+          `Overrode authorization scope from ${urlScope || 'NONE'} to configured: ${baseScope || 'NONE'}`,
         )
       }
-    }
-    const isEntra = isEntraLoginUrl(authorizationUrl)
-    const existingPrompts = authorizationUrl.searchParams.getAll('prompt')
-    const filteredPrompts = isEntra
-      ? existingPrompts.filter(p => p !== 'consent')
-      : existingPrompts
-    if (
-      filteredPrompts.length !== existingPrompts.length ||
-      filteredPrompts.length > 1
-    ) {
-      authorizationUrl.searchParams.delete('prompt')
-      if (filteredPrompts.length > 0) {
-        authorizationUrl.searchParams.set(
-          'prompt',
-          filteredPrompts.includes('consent')
-            ? 'consent'
-            : filteredPrompts.at(-1)!,
-        )
+      const effectiveScope =
+        baseScope === null
+          ? null
+          : maybeAppendOfflineAccess(baseScope, this._metadata)
+      if (effectiveScope !== null && effectiveScope !== urlScope) {
+        authorizationUrl.searchParams.set('scope', effectiveScope)
+        if (effectiveScope !== configuredScope) {
+          logMCPDebug(
+            this.serverName,
+            `Appended offline_access to authorization scope`,
+          )
+        }
       }
-    }
+      const isEntra = isEntraLoginUrl(authorizationUrl)
+      const existingPrompts = authorizationUrl.searchParams.getAll('prompt')
+      const filteredPrompts = isEntra
+        ? existingPrompts.filter(p => p !== 'consent')
+        : existingPrompts
+      if (
+        filteredPrompts.length !== existingPrompts.length ||
+        filteredPrompts.length > 1
+      ) {
+        authorizationUrl.searchParams.delete('prompt')
+        if (filteredPrompts.length > 0) {
+          authorizationUrl.searchParams.set(
+            'prompt',
+            filteredPrompts.includes('consent')
+              ? 'consent'
+              : filteredPrompts.at(-1)!,
+          )
+        }
+      }
 
-    // Store the authorization URL
-    this._authorizationUrl = authorizationUrl.toString()
+      // Store the authorization URL
+      this._authorizationUrl = authorizationUrl.toString()
 
-    // Extract and store scopes from the authorization URL for later use in token exchange
-    const scopes = authorizationUrl.searchParams.get('scope')
-    logMCPDebug(
-      this.serverName,
-      `Authorization URL: ${redactSensitiveUrlParams(authorizationUrl.toString())}`,
-    )
-    logMCPDebug(this.serverName, `Scopes in URL: ${scopes || 'NOT FOUND'}`)
-
-    if (scopes) {
-      this._scopes = scopes
+      // Extract and store scopes from the authorization URL for later use in token exchange
+      const scopes = authorizationUrl.searchParams.get('scope')
       logMCPDebug(
         this.serverName,
-        `Captured scopes from authorization URL: ${scopes}`,
+        `Authorization URL: ${redactSensitiveUrlParams(authorizationUrl.toString())}`,
       )
-    } else {
-      // If no scope in URL, try to get it from metadata
-      const metadataScope = getScopeFromMetadata(this._metadata)
-      if (metadataScope) {
-        this._scopes = metadataScope
+      logMCPDebug(this.serverName, `Scopes in URL: ${scopes || 'NOT FOUND'}`)
+
+      if (scopes) {
+        this._scopes = scopes
         logMCPDebug(
           this.serverName,
-          `Using scopes from metadata: ${metadataScope}`,
+          `Captured scopes from authorization URL: ${scopes}`,
         )
       } else {
-        logMCPDebug(this.serverName, `No scopes available from URL or metadata`)
+        // If no scope in URL, try to get it from metadata
+        const metadataScope = getScopeFromMetadata(this._metadata)
+        if (metadataScope) {
+          this._scopes = metadataScope
+          logMCPDebug(
+            this.serverName,
+            `Using scopes from metadata: ${metadataScope}`,
+          )
+        } else {
+          logMCPDebug(
+            this.serverName,
+            `No scopes available from URL or metadata`,
+          )
+        }
       }
-    }
 
-    // Persist scope for step-up auth: only when the transport-attached provider
-    // (handleRedirection=false) receives a step-up 401. The SDK calls auth()
-    // which calls redirectToAuthorization with the new scope. We persist it
-    // so the next performMCPOAuthFlow can use it without an extra probe request.
-    // Guard with !handleRedirection to avoid persisting during normal auth flows
-    // (where the scope may come from metadata scopes_supported rather than a 401).
-    if (this._scopes && !this.handleRedirection) {
-      const storage = getSecureStorage()
-      const existingData = storage.read() || {}
-      const serverKey = getServerKey(this.serverName, this.serverConfig)
-      const existing = existingData.mcpOAuth?.[serverKey]
-      if (existing) {
-        existing.stepUpScope = this._scopes
-        storage.update(existingData)
-        logMCPDebug(this.serverName, `Persisted step-up scope: ${this._scopes}`)
+      // Persist scope for step-up auth: only when the transport-attached provider
+      // (handleRedirection=false) receives a step-up 401. The SDK calls auth()
+      // which calls redirectToAuthorization with the new scope. We persist it
+      // so the next performMCPOAuthFlow can use it without an extra probe request.
+      // Guard with !handleRedirection to avoid persisting during normal auth flows
+      // (where the scope may come from metadata scopes_supported rather than a 401).
+      if (this._scopes && !this.handleRedirection) {
+        const storage = getSecureStorage()
+        const existingData = storage.read() || {}
+        const serverKey = getServerKey(this.serverName, this.serverConfig)
+        const existing = existingData.mcpOAuth?.[serverKey]
+        if (existing) {
+          existing.stepUpScope = this._scopes
+          storage.update(existingData)
+          logMCPDebug(
+            this.serverName,
+            `Persisted step-up scope: ${this._scopes}`,
+          )
+        }
       }
-    }
 
-    if (!this.handleRedirection) {
-      logMCPDebug(
-        this.serverName,
-        `Redirection handling is disabled, skipping redirect`,
-      )
-      return
-    }
+      if (!this.handleRedirection) {
+        logMCPDebug(
+          this.serverName,
+          `Redirection handling is disabled, skipping redirect`,
+        )
+        return
+      }
 
-    // Validate URL scheme for security
-    const urlString = authorizationUrl.toString()
-    if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
-      throw new Error(
-        'Invalid authorization URL: must use http:// or https:// scheme',
-      )
-    }
+      // Validate URL scheme for security
+      const urlString = authorizationUrl.toString()
+      if (
+        !urlString.startsWith('http://') &&
+        !urlString.startsWith('https://')
+      ) {
+        throw new Error(
+          'Invalid authorization URL: must use http:// or https:// scheme',
+        )
+      }
 
-    logMCPDebug(this.serverName, `Redirecting to authorization URL`)
-    const redactedUrl = redactSensitiveUrlParams(urlString)
-    logMCPDebug(this.serverName, `Authorization URL: ${redactedUrl}`)
+      logMCPDebug(this.serverName, `Redirecting to authorization URL`)
+      const redactedUrl = redactSensitiveUrlParams(urlString)
+      logMCPDebug(this.serverName, `Authorization URL: ${redactedUrl}`)
 
-    // Notify the UI about the authorization URL BEFORE opening the browser,
-    // so users can see the URL as a fallback if the browser fails to open
-    if (this.onAuthorizationUrlCallback) {
-      this.onAuthorizationUrlCallback(urlString)
-    }
+      // Notify the UI about the authorization URL BEFORE opening the browser,
+      // so users can see the URL as a fallback if the browser fails to open
+      if (this.onAuthorizationUrlCallback) {
+        this.onAuthorizationUrlCallback(urlString)
+      }
 
-    if (this.skipBrowserOpen) {
-      logMCPDebug(
-        this.serverName,
-        `Skipping browser open (skipBrowserOpen=true). URL: ${redactedUrl}`,
-      )
-      return
-    }
-    // densable K9e / XCb — skip the opener in a headless environment.
-    const headless = isHeadlessBrowserEnvironment()
-    if (headless) {
-      logMCPDebug(
-        this.serverName,
-        `Skipping browser open (headless environment). URL: ${redactedUrl}`,
-      )
-    } else {
-      logMCPDebug(this.serverName, `Opening authorization URL: ${redactedUrl}`)
-    }
-    const success = headless ? false : await openBrowser(urlString)
-    logEvent('tengu_mcp_oauth_browser_open', {
-      success,
-      headless,
-      platform:
-        getPlatform() as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      if (this.skipBrowserOpen) {
+        logMCPDebug(
+          this.serverName,
+          `Skipping browser open (skipBrowserOpen=true). URL: ${redactedUrl}`,
+        )
+        return
+      }
+      // densable K9e / XCb — skip the opener in a headless environment.
+      const headless = isHeadlessBrowserEnvironment()
+      if (headless) {
+        logMCPDebug(
+          this.serverName,
+          `Skipping browser open (headless environment). URL: ${redactedUrl}`,
+        )
+      } else {
+        logMCPDebug(
+          this.serverName,
+          `Opening authorization URL: ${redactedUrl}`,
+        )
+      }
+      const success = headless ? false : await openBrowser(urlString)
+      logEvent('tengu_mcp_oauth_browser_open', {
+        success,
+        headless,
+        platform:
+          getPlatform() as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      if (!headless && !success) {
+        logMCPDebug(
+          this.serverName,
+          `Browser didn't open automatically. URL is shown in UI.`,
+        )
+      }
     })
-    if (!headless && !success) {
-      logMCPDebug(
-        this.serverName,
-        `Browser didn't open automatically. URL is shown in UI.`,
-      )
-    }
   }
 
   async saveCodeVerifier(codeVerifier: string): Promise<void> {
-    logMCPDebug(this.serverName, `Saving code verifier`)
-    this._codeVerifier = codeVerifier
+    return this.runInProviderSession(async () => {
+      logMCPDebug(this.serverName, `Saving code verifier`)
+      this._codeVerifier = codeVerifier
+    })
   }
 
   async codeVerifier(): Promise<string> {
-    if (!this._codeVerifier) {
-      logMCPDebug(this.serverName, `No code verifier saved`)
-      throw new Error('No code verifier saved')
-    }
-    logMCPDebug(this.serverName, `Returning code verifier`)
-    return this._codeVerifier
+    return this.runInProviderSession(async () => {
+      if (!this._codeVerifier) {
+        logMCPDebug(this.serverName, `No code verifier saved`)
+        throw new Error('No code verifier saved')
+      }
+      logMCPDebug(this.serverName, `Returning code verifier`)
+      return this._codeVerifier
+    })
   }
 
   async invalidateCredentials(
     scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery',
   ): Promise<void> {
-    const storage = getSecureStorage()
-    const existingData = storage.read()
-    if (!existingData?.mcpOAuth) return
+    return this.runInProviderSession(async () => {
+      const storage = getSecureStorage()
+      const existingData = storage.read()
+      if (!existingData?.mcpOAuth) return
 
-    const serverKey = getServerKey(this.serverName, this.serverConfig)
-    const tokenData = existingData.mcpOAuth[serverKey]
-    if (!tokenData) return
+      const serverKey = getServerKey(this.serverName, this.serverConfig)
+      const tokenData = existingData.mcpOAuth[serverKey]
+      if (!tokenData) return
 
-    switch (scope) {
-      case 'all':
-        delete existingData.mcpOAuth[serverKey]
-        break
-      case 'client':
-        tokenData.clientId = undefined
-        tokenData.clientSecret = undefined
-        break
-      case 'tokens':
-        tokenData.accessToken = ''
-        tokenData.refreshToken = undefined
-        tokenData.expiresAt = 0
-        break
-      case 'verifier':
-        this._codeVerifier = undefined
-        return
-      case 'discovery':
-        tokenData.discoveryState = undefined
-        tokenData.stepUpScope = undefined
-        break
-    }
+      switch (scope) {
+        case 'all':
+          delete existingData.mcpOAuth[serverKey]
+          break
+        case 'client':
+          tokenData.clientId = undefined
+          tokenData.clientSecret = undefined
+          break
+        case 'tokens':
+          tokenData.accessToken = ''
+          tokenData.refreshToken = undefined
+          tokenData.expiresAt = 0
+          break
+        case 'verifier':
+          this._codeVerifier = undefined
+          return
+        case 'discovery':
+          tokenData.discoveryState = undefined
+          tokenData.stepUpScope = undefined
+          break
+      }
 
-    storage.update(existingData)
-    logMCPDebug(this.serverName, `Invalidated credentials (scope: ${scope})`)
+      storage.update(existingData)
+      logMCPDebug(this.serverName, `Invalidated credentials (scope: ${scope})`)
+    })
   }
 
   async saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
-    if (state.authorizationServerMetadata) {
-      evaluateIssuerEchoPolicy({
-        serverName: this.serverName,
-        site: 'sdk_auth',
-        expectedIssuer: state.authorizationServerUrl,
-        receivedIssuer: state.authorizationServerMetadata.issuer,
-        serverConfig: this.serverConfig,
-      })
-    }
-
-    const storage = getSecureStorage()
-    const existingData = storage.read() || {}
-    const serverKey = getServerKey(this.serverName, this.serverConfig)
-
-    const meta = state.authorizationServerMetadata
-    this.registrationOfferedByDiscovery =
-      meta !== undefined &&
-      (typeof meta.registration_endpoint === 'string' ||
-        (meta.client_id_metadata_document_supported === true &&
-          isLoopbackCallbackRedirectUri(this.redirectUri)))
-
-    const discoveredIssuer =
-      state.authorizationServerMetadata?.issuer ?? state.authorizationServerUrl
-    if (discoveredIssuer) {
-      this._expectedIssuer = discoveredIssuer
-    }
-
-    logMCPDebug(
-      this.serverName,
-      `Saving discovery state (authServer: ${state.authorizationServerUrl})`,
-    )
-
-    // Persist only the URLs, NOT the full metadata blobs.
-    // authorizationServerMetadata alone is ~1.5-2KB per MCP server (every
-    // grant type, PKCE method, endpoint the IdP supports). On macOS the
-    // keychain write goes through `security -i` which has a 4096-byte stdin
-    // line limit — with hex encoding that's ~2013 bytes of JSON total. Two
-    // OAuth MCP servers persisting full metadata overflows it, corrupting
-    // the credential store (#30337). The SDK re-fetches missing metadata
-    // with one HTTP GET on the next auth — see node_modules/.../auth.js
-    // `cachedState.authorizationServerMetadata ?? await discover...`.
-    const updatedData: SecureStorageData = {
-      ...existingData,
-      mcpOAuth: {
-        ...existingData.mcpOAuth,
-        [serverKey]: {
-          ...existingData.mcpOAuth?.[serverKey],
+    return this.runInProviderSession(async () => {
+      if (state.authorizationServerMetadata) {
+        evaluateIssuerEchoPolicy({
           serverName: this.serverName,
-          serverUrl: this.serverConfig.url,
-          accessToken: existingData.mcpOAuth?.[serverKey]?.accessToken || '',
-          expiresAt: existingData.mcpOAuth?.[serverKey]?.expiresAt || 0,
-          discoveryState: {
-            authorizationServerUrl: state.authorizationServerUrl,
-            resourceMetadataUrl: state.resourceMetadataUrl,
+          site: 'sdk_auth',
+          expectedIssuer: state.authorizationServerUrl,
+          receivedIssuer: state.authorizationServerMetadata.issuer,
+          serverConfig: this.serverConfig,
+        })
+      }
+
+      const storage = getSecureStorage()
+      const existingData = storage.read() || {}
+      const serverKey = getServerKey(this.serverName, this.serverConfig)
+
+      const meta = state.authorizationServerMetadata
+      this.registrationOfferedByDiscovery =
+        meta !== undefined &&
+        (typeof meta.registration_endpoint === 'string' ||
+          (meta.client_id_metadata_document_supported === true &&
+            isLoopbackCallbackRedirectUri(this.redirectUri)))
+
+      const discoveredIssuer =
+        state.authorizationServerMetadata?.issuer ??
+        state.authorizationServerUrl
+      if (discoveredIssuer) {
+        this._expectedIssuer = discoveredIssuer
+      }
+
+      logMCPDebug(
+        this.serverName,
+        `Saving discovery state (authServer: ${state.authorizationServerUrl})`,
+      )
+
+      // Persist only the URLs, NOT the full metadata blobs.
+      // authorizationServerMetadata alone is ~1.5-2KB per MCP server (every
+      // grant type, PKCE method, endpoint the IdP supports). On macOS the
+      // keychain write goes through `security -i` which has a 4096-byte stdin
+      // line limit — with hex encoding that's ~2013 bytes of JSON total. Two
+      // OAuth MCP servers persisting full metadata overflows it, corrupting
+      // the credential store (#30337). The SDK re-fetches missing metadata
+      // with one HTTP GET on the next auth — see node_modules/.../auth.js
+      // `cachedState.authorizationServerMetadata ?? await discover...`.
+      const updatedData: SecureStorageData = {
+        ...existingData,
+        mcpOAuth: {
+          ...existingData.mcpOAuth,
+          [serverKey]: {
+            ...existingData.mcpOAuth?.[serverKey],
+            serverName: this.serverName,
+            serverUrl: this.serverConfig.url,
+            accessToken: existingData.mcpOAuth?.[serverKey]?.accessToken || '',
+            expiresAt: existingData.mcpOAuth?.[serverKey]?.expiresAt || 0,
+            discoveryState: {
+              authorizationServerUrl: state.authorizationServerUrl,
+              resourceMetadataUrl: state.resourceMetadataUrl,
+            },
           },
         },
-      },
-    }
+      }
 
-    storage.update(updatedData)
+      storage.update(updatedData)
+    })
   }
 
   async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
-    if (this.authChallengeOpen) {
-      await this.readCredentialStore()
-    }
-    const storage = getSecureStorage()
-    const data = storage.read()
-    const serverKey = getServerKey(this.serverName, this.serverConfig)
-
-    const cached = data?.mcpOAuth?.[serverKey]?.discoveryState
-    if (cached?.authorizationServerUrl) {
-      logMCPDebug(
-        this.serverName,
-        `Returning cached discovery state (authServer: ${cached.authorizationServerUrl})`,
-      )
-
-      const state: OAuthDiscoveryState = {
-        authorizationServerUrl: cached.authorizationServerUrl,
-        resourceMetadataUrl: cached.resourceMetadataUrl,
-        resourceMetadata:
-          cached.resourceMetadata as OAuthDiscoveryState['resourceMetadata'],
-        authorizationServerMetadata:
-          cached.authorizationServerMetadata as OAuthDiscoveryState['authorizationServerMetadata'],
+    return this.runInProviderSession(async () => {
+      if (this.authChallengeOpen) {
+        await this.readCredentialStore()
       }
-      if (state.authorizationServerMetadata) {
-        try {
-          evaluateIssuerEchoPolicy({
-            serverName: this.serverName,
-            site: 'persisted_state',
-            expectedIssuer: state.authorizationServerUrl,
-            receivedIssuer: state.authorizationServerMetadata.issuer,
-            serverConfig: this.serverConfig,
-          })
-        } catch (err) {
-          if (err instanceof IssuerEchoCrossOriginError) {
-            await this.invalidateCredentials('discovery').catch(() => {})
-          }
-          throw err
-        }
-      }
-      return state
-    }
+      const storage = getSecureStorage()
+      const data = storage.read()
+      const serverKey = getServerKey(this.serverName, this.serverConfig)
 
-    // Check config hint for direct metadata URL
-    const metadataUrl = this.serverConfig.oauth?.authServerMetadataUrl
-    if (metadataUrl) {
-      logMCPDebug(
-        this.serverName,
-        `Fetching metadata from configured URL: ${metadataUrl}`,
-      )
-      try {
-        const metadata = await fetchAuthServerMetadata(
-          this.serverName,
-          this.serverConfig.url,
-          metadataUrl,
-          wrapAuthFetchWithHeaders(
-            this.serverName,
-            this.serverConfig,
-            createAuthFetch(),
-          ),
-        )
-        if (metadata) {
-          return {
-            authorizationServerUrl: metadata.issuer,
-            authorizationServerMetadata:
-              metadata as OAuthDiscoveryState['authorizationServerMetadata'],
-          }
-        }
-      } catch (error) {
+      const cached = data?.mcpOAuth?.[serverKey]?.discoveryState
+      if (cached?.authorizationServerUrl) {
         logMCPDebug(
           this.serverName,
-          `Failed to fetch from configured metadata URL: ${errorMessage(error)}`,
+          `Returning cached discovery state (authServer: ${cached.authorizationServerUrl})`,
         )
-      }
-    }
 
-    return undefined
+        const state: OAuthDiscoveryState = {
+          authorizationServerUrl: cached.authorizationServerUrl,
+          resourceMetadataUrl: cached.resourceMetadataUrl,
+          resourceMetadata:
+            cached.resourceMetadata as OAuthDiscoveryState['resourceMetadata'],
+          authorizationServerMetadata:
+            cached.authorizationServerMetadata as OAuthDiscoveryState['authorizationServerMetadata'],
+        }
+        if (state.authorizationServerMetadata) {
+          try {
+            evaluateIssuerEchoPolicy({
+              serverName: this.serverName,
+              site: 'persisted_state',
+              expectedIssuer: state.authorizationServerUrl,
+              receivedIssuer: state.authorizationServerMetadata.issuer,
+              serverConfig: this.serverConfig,
+            })
+          } catch (err) {
+            if (err instanceof IssuerEchoCrossOriginError) {
+              await this.invalidateCredentials('discovery').catch(() => {})
+            }
+            throw err
+          }
+        }
+        return state
+      }
+
+      // Check config hint for direct metadata URL
+      const metadataUrl = this.serverConfig.oauth?.authServerMetadataUrl
+      if (metadataUrl) {
+        logMCPDebug(
+          this.serverName,
+          `Fetching metadata from configured URL: ${metadataUrl}`,
+        )
+        try {
+          const metadata = await fetchAuthServerMetadata(
+            this.serverName,
+            this.serverConfig.url,
+            metadataUrl,
+            wrapAuthFetchWithHeaders(
+              this.serverName,
+              this.serverConfig,
+              createAuthFetch(),
+            ),
+          )
+          if (metadata) {
+            return {
+              authorizationServerUrl: metadata.issuer,
+              authorizationServerMetadata:
+                metadata as OAuthDiscoveryState['authorizationServerMetadata'],
+            }
+          }
+        } catch (error) {
+          logMCPDebug(
+            this.serverName,
+            `Failed to fetch from configured metadata URL: ${errorMessage(error)}`,
+          )
+        }
+      }
+
+      return undefined
+    })
   }
 
   async refreshAuthorization(
+    refreshToken: string,
+  ): Promise<OAuthTokensWithIssuer | undefined> {
+    return this.runInProviderSession(() =>
+      this._refreshAuthorizationImpl(refreshToken),
+    )
+  }
+
+  private async _refreshAuthorizationImpl(
     refreshToken: string,
   ): Promise<OAuthTokensWithIssuer | undefined> {
     const serverKey = getServerKey(this.serverName, this.serverConfig)
@@ -4095,7 +4232,6 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
 // from permanent invalid_grant/invalid_client so a brief IdP blip never
 // sticks the server in the 15-min needs-auth cache or skips mcp_tool hooks.
 const TRANSIENT_REFRESH_FAILURE_TTL_MS = 60_000
-const transientMcpRefreshFailures = new Map<string, number>()
 
 const PERMANENT_OAUTH_REFRESH_ERROR_CODES = new Set<string>([
   OAuthErrorCode.InvalidGrant,
@@ -4107,17 +4243,18 @@ const PERMANENT_OAUTH_REFRESH_ERROR_CODES = new Set<string>([
 ])
 
 export function markTransientMcpRefreshFailure(serverKey: string): void {
-  transientMcpRefreshFailures.set(serverKey, Date.now())
+  getHostMcpAuthState().transientMcpRefreshFailures.set(serverKey, Date.now())
 }
 
 export function clearTransientMcpRefreshFailure(serverKey: string): void {
-  transientMcpRefreshFailures.delete(serverKey)
+  getHostMcpAuthState().transientMcpRefreshFailures.delete(serverKey)
 }
 
 export function hasRecentTransientMcpRefreshFailure(
   serverKey: string,
   now: number = Date.now(),
 ): boolean {
+  const { transientMcpRefreshFailures } = getHostMcpAuthState()
   const ts = transientMcpRefreshFailures.get(serverKey)
   if (ts === undefined) return false
   if (now - ts > TRANSIENT_REFRESH_FAILURE_TTL_MS) {
@@ -4131,19 +4268,24 @@ export function hasRecentTransientMcpRefreshFailure(
  * Official 2.1.325 #2304 (`PHt`): pub/sub for servers whose OAuth token
  * refresh succeeded after a previous transient failure / needs-auth state.
  */
-type McpAuthRecoveredListener = (
-  serverName: string,
-  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
-) => void
-
-const mcpAuthRecoveredListeners = new Set<McpAuthRecoveredListener>()
-
 export function subscribeMcpAuthRecovered(
   listener: McpAuthRecoveredListener,
 ): () => void {
-  mcpAuthRecoveredListeners.add(listener)
+  const state = getHostMcpAuthState()
+  const capturedSession = getActiveSessionFromAls()
+  const wrapped: McpAuthRecoveredListener =
+    capturedSession !== undefined
+      ? (serverName, serverConfig) =>
+          runWithSession(capturedSession, () =>
+            listener(serverName, serverConfig),
+          )
+      : listener
+  state.mcpAuthRecoveredListeners.set(listener, wrapped)
+  let active = true
   return () => {
-    mcpAuthRecoveredListeners.delete(listener)
+    if (!active) return
+    active = false
+    state.mcpAuthRecoveredListeners.delete(listener)
   }
 }
 
@@ -4152,7 +4294,7 @@ export function emitMcpAuthRecovered(
   serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
 ): void {
   clearTransientMcpRefreshFailure(getServerKey(serverName, serverConfig))
-  for (const listener of mcpAuthRecoveredListeners) {
+  for (const listener of getHostMcpAuthState().mcpAuthRecoveredListeners.values()) {
     try {
       listener(serverName, serverConfig)
     } catch {

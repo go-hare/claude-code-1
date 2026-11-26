@@ -8,6 +8,10 @@ import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 
 import { spawnCliRelaunch } from '../../utils/cliRelaunch.js'
 import { AGENT_VIEW_RELAUNCH_ENV_KEY } from '../../utils/residualFinalEnvGates.js'
 import { getScreenReaderChildEnv } from '../../utils/screenReaderGate.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionRoot.js'
 import { flagArgPair } from '../../utils/tuiRelaunchCarry.js'
 
 export type FleetDispatchDefaults = {
@@ -29,12 +33,18 @@ export type ParseAgentsDispatchResult = {
 const AUTO_RELAUNCH_THROTTLE_MS = 3_600_000
 const AGENTS_AUTO_RELAUNCHED_AT_ENV = 'CLAUDE_AGENTS_AUTO_RELAUNCHED_AT'
 
-/** Module-level auto-relaunch throttle clock (densable Mg / Ms). */
-let lastAutoRelaunchAt = 0
+/** Per-session auto-relaunch throttle clock (densable Mg / Ms). */
+const fleetDispatchThrottleBySession = new RootSessionSlot<{
+  lastAutoRelaunchAt: number
+}>(() => ({ lastAutoRelaunchAt: 0 }))
+
+function getFleetDispatchThrottleState(): { lastAutoRelaunchAt: number } {
+  return fleetDispatchThrottleBySession.of(getBootstrapSession())
+}
 
 /** Test-only: reset auto throttle clock. */
 export function resetFleetDispatchAutoRelaunchClockForTests(): void {
-  lastAutoRelaunchAt = 0
+  getFleetDispatchThrottleState().lastAutoRelaunchAt = 0
 }
 
 /**
@@ -347,8 +357,10 @@ export async function relaunchAgentsView(input: {
   }
 
   if (mode === 'auto') {
-    if (Date.now() - lastAutoRelaunchAt < AUTO_RELAUNCH_THROTTLE_MS) return
-    lastAutoRelaunchAt = Date.now()
+    const throttle = getFleetDispatchThrottleState()
+    if (Date.now() - throttle.lastAutoRelaunchAt < AUTO_RELAUNCH_THROTTLE_MS)
+      return
+    throttle.lastAutoRelaunchAt = Date.now()
   }
 
   // typedAgent overrides bag.agent (densable P/sf UI agent pin); avoid double --agent.

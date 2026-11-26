@@ -18,15 +18,32 @@ import { extractTextContent } from '../utils/messages.js'
 import { asSystemPrompt } from '../utils/systemPromptType.js'
 import { getMainLoopModel, getSmallFastModel } from '../utils/model/model.js'
 import { getAPIProvider } from '../utils/model/providers.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../utils/sessionHost.js'
 
-// ─── Rate limiting ──────────────────────────────────
+// ─── Rate limiting & recent reactions (per root session) ────
 
-let lastReactTime = 0
+type CompanionReactSessionState = {
+  lastReactTime: number
+  recentReactions: string[]
+}
+
+const companionReactStateSlot = new RootSessionSlot<CompanionReactSessionState>(
+  () => ({
+    lastReactTime: 0,
+    recentReactions: [],
+  }),
+)
+
+function getCompanionReactState(): CompanionReactSessionState {
+  return companionReactStateSlot.of(getBootstrapSession())
+}
+
 const MIN_INTERVAL_MS = 45_000 // official is roughly 30-60s
-
-// ─── Recent reactions (avoid repetition) ────────────
-
-const recentReactions: string[] = []
 const MAX_RECENT = 8
 export const BUDDY_REACTION_MAX_OUTPUT_TOKENS = 1_024
 
@@ -117,20 +134,34 @@ export function triggerCompanionReaction(
 
   const addressed = isAddressed(messages, companion.name)
 
+  const state = getCompanionReactState()
   const now = Date.now()
-  if (!addressed && now - lastReactTime < MIN_INTERVAL_MS) return
+  if (!addressed && now - state.lastReactTime < MIN_INTERVAL_MS) return
 
   const transcript = buildTranscript(messages)
   if (!transcript.trim()) return
 
-  lastReactTime = now
+  state.lastReactTime = now
+  const capturedSession = getActiveSessionFromAls()
 
   void generateBuddyReaction(companion, transcript, addressed)
     .then(reaction => {
       if (!reaction) return
-      recentReactions.push(reaction)
-      if (recentReactions.length > MAX_RECENT) recentReactions.shift()
-      setReaction(reaction)
+      const deliver = () => {
+        state.recentReactions.push(reaction)
+        if (state.recentReactions.length > MAX_RECENT) {
+          state.recentReactions.shift()
+        }
+        setReaction(reaction)
+      }
+      if (
+        capturedSession !== undefined &&
+        getActiveSessionFromAls() !== capturedSession
+      ) {
+        runWithSession(capturedSession, deliver)
+        return
+      }
+      deliver()
     })
     .catch(() => {})
 }
@@ -168,8 +199,14 @@ function buildTranscript(messages: Message[]): string {
           ? content.slice(0, 300)
           : Array.isArray(content)
             ? content
-                .filter((b: any) => b?.type === 'text')
-                .map((b: any) => b.text)
+                .filter(
+                  (b): b is { type: 'text'; text: string } =>
+                    typeof b === 'object' &&
+                    b !== null &&
+                    (b as { type?: unknown }).type === 'text' &&
+                    typeof (b as { text?: unknown }).text === 'string',
+                )
+                .map(b => b.text)
                 .join(' ')
                 .slice(0, 300)
             : ''
@@ -240,7 +277,9 @@ async function callBuddyReactAPI(
         stats: companion.stats,
         transcript,
         reason: addressed ? 'addressed' : 'turn',
-        recent: recentReactions.map(r => r.slice(0, 200)),
+        recent: getCompanionReactState().recentReactions.map(r =>
+          r.slice(0, 200),
+        ),
         addressed,
       }),
       signal: AbortSignal.timeout(10_000),
@@ -283,7 +322,7 @@ async function queryBuddyReactionWithModel(
         `species: ${companion.species}`,
         `rarity: ${companion.rarity}`,
         `addressed: ${addressed ? 'yes' : 'no'}`,
-        `recent_reactions: ${recentReactions.join(' | ') || 'none'}`,
+        `recent_reactions: ${getCompanionReactState().recentReactions.join(' | ') || 'none'}`,
         '',
         'conversation:',
         transcript,

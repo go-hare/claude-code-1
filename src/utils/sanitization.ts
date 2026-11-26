@@ -22,6 +22,8 @@
  * The sanitization is always enabled to protect against these attacks.
  */
 
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
+
 export function partiallySanitizeUnicode(prompt: string): string {
   let current = prompt
   let previous = ''
@@ -304,18 +306,30 @@ export function isValidSkillName(name: string): boolean {
   )
 }
 
-const namesNotShown = new Set<string>()
+const fallbackSanitizationHost: object = {}
+const namesNotShownByHost = new HostSlot<Set<string>>(() => new Set())
+
+function getNamesNotShownSet(): Set<string> {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return namesNotShownByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return namesNotShownByHost.of(fallbackSanitizationHost)
+}
 
 export function getNamesNotShown(): ReadonlySet<string> {
-  return namesNotShown
+  return getNamesNotShownSet()
 }
 
 export function clearNamesNotShownForTests(): void {
-  namesNotShown.clear()
+  getNamesNotShownSet().clear()
 }
 
 /** 325 `kH` — record refused skill/command/agent name up to 100 entries. */
 export function recordNameNotShown(name: string, reason: string): void {
+  const namesNotShown = getNamesNotShownSet()
   const truncated = name.length > 200 ? `${name.slice(0, 200)}…` : name
   const safeName = truncated.replace(
     NON_ASCII_SPACE_Z_RE,

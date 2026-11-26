@@ -10,13 +10,21 @@
  * Both paths support full Unicode (Chinese, emoji, etc.) without IME involvement.
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 import { validateHwnd, runPs, VK_MAP, MODIFIER_KEYS } from './shared.js'
 
-/** Cache findEditChild results — window structure doesn't change while bound */
-const editChildCache = new Map<string, string | null>()
+/** Cache findEditChild results per host — window structure doesn't change while bound */
+const editChildCacheByHost = new HostSlot(
+  () => new Map<string, string | null>(),
+)
+
+function getEditChildCache(): Map<string, string | null> {
+  return editChildCacheByHost.of(getBootstrapSessionHost())
+}
 
 /** Clear cached edit-child mappings. Call on unbind. */
 export function clearEditChildCache(hwnd?: string): void {
+  const editChildCache = getEditChildCache()
   if (hwnd) {
     editChildCache.delete(hwnd)
   } else {
@@ -125,6 +133,7 @@ const EDIT_CLASSES = [
  */
 export function findEditChild(parentHwnd: string): string | null {
   parentHwnd = validateHwnd(parentHwnd)
+  const editChildCache = getEditChildCache()
 
   // Cache hit
   if (editChildCache.has(parentHwnd)) {

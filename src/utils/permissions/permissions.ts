@@ -60,6 +60,7 @@ import { extractOutputRedirections } from '../bash/commands.js'
 import { logForDebugging } from '../debug.js'
 import { AbortError, isAbortError, toError } from '../errors.js'
 import { logError } from '../log.js'
+import { RootSessionSlot } from '../sessionHost.js'
 import { SandboxManager } from '../sandbox/sandbox-adapter.js'
 import {
   getEnabledSettingSources,
@@ -1818,10 +1819,17 @@ type ClassifierOverflowCompactEntry = {
   }
 }
 
-const classifierOverflowCompactByAgent = new Map<
+// Official 2.1.331 [$e-095]: per-root-session classifier overflow compact tracker.
+const classifierOverflowCompactBySession = new RootSessionSlot(
+  () => new Map<string, ClassifierOverflowCompactEntry>(),
+)
+
+function getClassifierOverflowCompactByAgent(): Map<
   string,
   ClassifierOverflowCompactEntry
->()
+> {
+  return classifierOverflowCompactBySession.of(getBootstrapSession())
+}
 
 export function consumeClassifierOverflowCompact(
   agentId: string | undefined,
@@ -1833,6 +1841,7 @@ export function consumeClassifierOverflowCompact(
   stale?: 'epoch' | 'mode'
 } {
   const key = agentId ?? 'main'
+  const classifierOverflowCompactByAgent = getClassifierOverflowCompactByAgent()
   const prev = classifierOverflowCompactByAgent.get(key)
   classifierOverflowCompactByAgent.set(key, {
     canCompact: canCompactNext,
@@ -1858,6 +1867,7 @@ export function markClassifierOverflowCompactSpent(
   epoch: string,
 ): void {
   const key = agentId ?? 'main'
+  const classifierOverflowCompactByAgent = getClassifierOverflowCompactByAgent()
   const prev = classifierOverflowCompactByAgent.get(key)
   classifierOverflowCompactByAgent.set(key, {
     canCompact: prev?.canCompact ?? false,
@@ -1880,6 +1890,7 @@ export function requestClassifierOverflowCompact(
   const epoch = messages[0]?.uuid
   if (epoch === undefined) return undefined
   const key = agentId ?? 'main'
+  const classifierOverflowCompactByAgent = getClassifierOverflowCompactByAgent()
   const entry = classifierOverflowCompactByAgent.get(key)
   if (entry?.canCompact !== true || entry.spentEpoch === epoch) {
     return undefined
@@ -2334,10 +2345,17 @@ export function askIsHeldForQueuedMessage(
 }
 
 const MAX_RECORDED_PIPELINE_RESULTS = 256
-const permissionPipelineResultsByToolUseId = new Map<
+// Official 2.1.331 [$e-095]: per-root-session permission pipeline result cache.
+const permissionPipelineResultsBySession = new RootSessionSlot(
+  () => new Map<string, PermissionDecision>(),
+)
+
+function getPermissionPipelineResultsByToolUseId(): Map<
   string,
   PermissionDecision
->()
+> {
+  return permissionPipelineResultsBySession.of(getBootstrapSession())
+}
 
 /**
  * Record the post-pipeline `hasPermissionsToUseTool` result for a tool use so
@@ -2350,6 +2368,8 @@ export function recordPermissionPipelineResult(
   decision: PermissionDecision,
 ): void {
   if (!toolUseID) return
+  const permissionPipelineResultsByToolUseId =
+    getPermissionPipelineResultsByToolUseId()
   permissionPipelineResultsByToolUseId.set(toolUseID, decision)
   if (
     permissionPipelineResultsByToolUseId.size > MAX_RECORDED_PIPELINE_RESULTS
@@ -2365,6 +2385,8 @@ export function consumePermissionPipelineResult(
   toolUseID: string | undefined,
 ): PermissionDecision | undefined {
   if (!toolUseID) return undefined
+  const permissionPipelineResultsByToolUseId =
+    getPermissionPipelineResultsByToolUseId()
   const result = permissionPipelineResultsByToolUseId.get(toolUseID)
   permissionPipelineResultsByToolUseId.delete(toolUseID)
   return result
@@ -5377,8 +5399,15 @@ const REMOVAL_WAIVER_EPHEMERAL_SOURCES = new Set(['cliArg', 'session'])
  * (due to disqualifying deny/ask rules, `blockReadsOutsideWorkingDirectories`,
  * or an active `PermissionRequest` hook), it stays `false` for the rest of the
  * session so clearing rules mid-session cannot unlock dangerous-removal waivers.
+ * Official 2.1.331 [$e-095]: per-root-session `RootSessionSlot`.
  */
-let removalWaiverRulesClear: boolean | undefined
+const removalWaiverRulesClearBySession = new RootSessionSlot<{
+  clear: boolean | undefined
+}>(() => ({ clear: undefined }))
+
+function getRemovalWaiverSlot(): { clear: boolean | undefined } {
+  return removalWaiverRulesClearBySession.of(getBootstrapSession())
+}
 
 function isWaivableBypassSafetyCheck(check: {
   circuitBreaker?: string
@@ -5466,13 +5495,14 @@ export function checkAndLatchRemovalWaiverRulesClear(
   ) {
     return
   }
+  const slot = getRemovalWaiverSlot()
   if (
     hasRemovalWaiverDisqualifyingRules(toolPermissionContext) ||
     hasActivePermissionRequestHook(context)
   ) {
-    removalWaiverRulesClear = false
-  } else if (removalWaiverRulesClear === undefined) {
-    removalWaiverRulesClear = true
+    slot.clear = false
+  } else if (slot.clear === undefined) {
+    slot.clear = true
   }
 }
 
@@ -5497,16 +5527,20 @@ export function isRemovalWaiverAllowed(
   }
   checkAndLatchRemovalWaiverRulesClear(toolPermissionContext, context)
   return (
-    removalWaiverRulesClear === true && !hasActivePermissionRequestHook(context)
+    getRemovalWaiverSlot().clear === true &&
+    !hasActivePermissionRequestHook(context)
   )
 }
 
 export function getRemovalWaiverRulesClearForTesting(): boolean | undefined {
-  return removalWaiverRulesClear
+  return removalWaiverRulesClearBySession.peek(getBootstrapSession())?.clear
 }
 
 export function resetRemovalWaiverRulesClearForTesting(): void {
-  removalWaiverRulesClear = undefined
+  const slot = removalWaiverRulesClearBySession.peek(getBootstrapSession())
+  if (slot) {
+    slot.clear = undefined
+  }
 }
 
 /**

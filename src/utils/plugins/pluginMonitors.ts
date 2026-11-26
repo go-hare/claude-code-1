@@ -9,18 +9,31 @@
 import type { AppState } from '../../state/AppStateStore.js'
 import type { LoadedPlugin } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import type { TaskRegistry } from '../taskRegistry.js'
 import type { PluginMonitorConfig } from './schemas.js'
 
-const skillInvokedListeners = new Set<(skillName: string) => void>()
-const sessionArmedMonitorKeys = new Set<string>()
+type SessionPluginMonitorsState = {
+  skillInvokedListeners: Set<(skillName: string) => void>
+  sessionArmedMonitorKeys: Set<string>
+}
+
+const sessionPluginMonitorsSlot =
+  new RootSessionSlot<SessionPluginMonitorsState>(() => ({
+    skillInvokedListeners: new Set(),
+    sessionArmedMonitorKeys: new Set(),
+  }))
+
+function sessionMonitorsState(): SessionPluginMonitorsState {
+  return sessionPluginMonitorsSlot.of(getBootstrapSession())
+}
 
 /**
  * Official Gne.of(P).skillInvoked.emit(skillName) — notify plugin monitor
  * listeners when a skill is invoked (via Skill tool or slash command).
  */
 export function emitSkillInvoked(skillName: string): void {
-  for (const listener of skillInvokedListeners) {
+  for (const listener of sessionMonitorsState().skillInvokedListeners) {
     try {
       listener(skillName)
     } catch (err) {
@@ -38,18 +51,19 @@ export function emitSkillInvoked(skillName: string): void {
 export function subscribeSkillInvoked(
   listener: (skillName: string) => void,
 ): () => void {
-  skillInvokedListeners.add(listener)
+  const listeners = sessionMonitorsState().skillInvokedListeners
+  listeners.add(listener)
   return () => {
-    skillInvokedListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function getSessionArmedMonitorKeys(): Set<string> {
-  return sessionArmedMonitorKeys
+  return sessionMonitorsState().sessionArmedMonitorKeys
 }
 
 export function resetSessionArmedMonitorKeysForTests(): void {
-  sessionArmedMonitorKeys.clear()
+  sessionMonitorsState().sessionArmedMonitorKeys.clear()
 }
 
 export type ResolvedPluginMonitor = {

@@ -16,6 +16,7 @@ import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode } from './errors.js'
 import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { sleep } from './sleep.js'
 
 /** Match densable B / OIDC_CACHE_BACKGROUND_SEC without importing anthropicOidc. */
@@ -32,31 +33,43 @@ export const WIF_LOCK_RETRIES = {
 const WIF_LOCK_STALE_MS = 60_000
 const WIF_LOCK_UPDATE_MS = 5_000
 
-/** Process-global — same CI job siblings share credentials file, not memory. */
-const failedAccessTokens = new Set<string>()
+type WifCredentialRaceHostState = {
+  failedAccessTokens: Set<string>
+  /**
+   * Official 2.1.325 #2289 (`D9s` / `renewsToken`) — short commands like
+   * `claude auth status` disable WIF token renewal so they never acquire/strand
+   * a credentials lock when exiting quickly.
+   */
+  wifTokenRenewalAllowed: boolean
+  /** Active WIF lock release callbacks so short commands / exit release locks immediately. */
+  activeWifLockReleases: Set<() => Promise<void>>
+  wifExitCleanupRegistered: boolean
+}
 
-/**
- * Official 2.1.325 #2289 (`D9s` / `renewsToken`) — short commands like
- * `claude auth status` disable WIF token renewal so they never acquire/strand
- * a credentials lock when exiting quickly.
- */
-let wifTokenRenewalAllowed = true
+const wifStateByHost = new HostSlot<WifCredentialRaceHostState>(() => ({
+  failedAccessTokens: new Set<string>(),
+  wifTokenRenewalAllowed: true,
+  activeWifLockReleases: new Set<() => Promise<void>>(),
+  wifExitCleanupRegistered: false,
+}))
 
-/** Active WIF lock release callbacks so short commands / exit release locks immediately. */
-const activeWifLockReleases = new Set<() => Promise<void>>()
-let wifExitCleanupRegistered = false
+function getWifHostState(): WifCredentialRaceHostState {
+  return wifStateByHost.of(getBootstrapSessionHost())
+}
 
 export function declareNoWifTokenRenewal(): void {
-  wifTokenRenewalAllowed = false
+  getWifHostState().wifTokenRenewalAllowed = false
 }
 
 export function isWifTokenRenewalAllowed(): boolean {
-  return wifTokenRenewalAllowed
+  return getWifHostState().wifTokenRenewalAllowed
 }
 
-export async function releaseAllHeldWifLocks(): Promise<void> {
-  const releases = Array.from(activeWifLockReleases)
-  activeWifLockReleases.clear()
+async function releaseHeldWifLocksForState(
+  hostState: WifCredentialRaceHostState,
+): Promise<void> {
+  const releases = Array.from(hostState.activeWifLockReleases)
+  hostState.activeWifLockReleases.clear()
   await Promise.allSettled(
     releases.map(async rel => {
       try {
@@ -70,11 +83,23 @@ export async function releaseAllHeldWifLocks(): Promise<void> {
   )
 }
 
-function ensureWifExitCleanupRegistered(): void {
-  if (wifExitCleanupRegistered) return
-  wifExitCleanupRegistered = true
+export async function releaseAllHeldWifLocks(): Promise<void> {
+  const hostState = wifStateByHost.peek(getBootstrapSessionHost())
+  if (!hostState) return
+  await releaseHeldWifLocksForState(hostState)
+}
+
+function ensureWifExitCleanupRegistered(
+  hostState: WifCredentialRaceHostState,
+): void {
+  if (hostState.wifExitCleanupRegistered) return
+  hostState.wifExitCleanupRegistered = true
+  const stateRef = new WeakRef(hostState)
   registerCleanup(async () => {
-    await releaseAllHeldWifLocks()
+    const liveState = stateRef.deref()
+    if (!liveState) return
+    await releaseHeldWifLocksForState(liveState)
+    liveState.wifExitCleanupRegistered = false
   })
 }
 
@@ -117,6 +142,7 @@ function nowUnixSec(): number {
 /** densable lt(e) — record rejected exchange token before cache invalidate. */
 export function recordWifFailedAccessToken(token: string | undefined): void {
   if (!token) return
+  const { failedAccessTokens } = getWifHostState()
   failedAccessTokens.add(token)
   if (failedAccessTokens.size <= WIF_FAILED_ACCESS_TOKENS_MAX) return
   for (const stale of failedAccessTokens) {
@@ -126,9 +152,10 @@ export function recordWifFailedAccessToken(token: string | undefined): void {
 }
 
 export function clearWifCredentialRaceStateForTests(): void {
-  failedAccessTokens.clear()
-  wifTokenRenewalAllowed = true
-  activeWifLockReleases.clear()
+  const hostState = getWifHostState()
+  hostState.failedAccessTokens.clear()
+  hostState.wifTokenRenewalAllowed = true
+  hostState.activeWifLockReleases.clear()
   lockForTests = undefined
   sleepForTests = undefined
 }
@@ -144,12 +171,12 @@ export function setWifCredentialsLockForTests(
 }
 
 export function getWifFailedAccessTokensForTests(): ReadonlySet<string> {
-  return failedAccessTokens
+  return getWifHostState().failedAccessTokens
 }
 
 /** densable `o.has(c)` — skip pinning a bearer `lt` already rejected. */
 export function isWifFailedAccessToken(token: string | undefined): boolean {
-  return Boolean(token && failedAccessTokens.has(token))
+  return Boolean(token && getWifHostState().failedAccessTokens.has(token))
 }
 
 async function readCredentialsRecord(
@@ -173,11 +200,13 @@ export function wrapWifSiblingRotatedTokenAdoption(
   provider: WifTokenProvider,
   credentialsPath: string,
   mode: WifSiblingAdoptionMode,
-  rejectedTokens: ReadonlySet<string> = failedAccessTokens,
+  rejectedTokens?: ReadonlySet<string>,
 ): WifTokenProvider {
   return async opts => {
     if (!opts?.forceRefresh) return provider(opts)
-    if (mode === 'always' || rejectedTokens.size > 0) {
+    const activeRejected =
+      rejectedTokens ?? getWifHostState().failedAccessTokens
+    if (mode === 'always' || activeRejected.size > 0) {
       try {
         const parsed = await readCredentialsRecord(credentialsPath)
         const token = parsed?.access_token
@@ -185,7 +214,7 @@ export function wrapWifSiblingRotatedTokenAdoption(
         if (
           typeof token === 'string' &&
           token &&
-          !rejectedTokens.has(token) &&
+          !activeRejected.has(token) &&
           (typeof expiresAt !== 'number' ||
             nowUnixSec() < expiresAt - WIF_CACHE_BACKGROUND_SEC)
         ) {
@@ -328,7 +357,7 @@ async function acquireWifCredentialsDirLock(
  */
 export async function readValidCachedWifToken(
   credentialsPath: string,
-  rejectedTokens: ReadonlySet<string> = failedAccessTokens,
+  rejectedTokens: ReadonlySet<string> = getWifHostState().failedAccessTokens,
 ): Promise<WifAccessToken | null> {
   const parsed = await readCredentialsRecord(credentialsPath)
   if (!parsed) return null
@@ -362,11 +391,12 @@ export function wrapWifCredentialsLock(
   mode: WifLockMode,
 ): WifTokenProvider {
   return async opts => {
+    const hostState = getWifHostState()
     if (!opts?.forceRefresh) {
       try {
         const cached = await readValidCachedWifToken(
           credentialsPath,
-          failedAccessTokens,
+          hostState.failedAccessTokens,
         )
         if (cached !== null) {
           return cached
@@ -375,13 +405,13 @@ export function wrapWifCredentialsLock(
         // Fall through to locked refresh
       }
     }
-    if (!wifTokenRenewalAllowed) {
+    if (!hostState.wifTokenRenewalAllowed) {
       throw new AnthropicProfileOauthError(
         'The saved sign-in token has expired, was refused or cannot be read. This command does not renew it; a session does.',
       )
     }
 
-    ensureWifExitCleanupRegistered()
+    ensureWifExitCleanupRegistered(hostState)
     const dir = dirname(credentialsPath)
     let release: (() => Promise<void>) | undefined
     try {
@@ -399,14 +429,14 @@ export function wrapWifCredentialsLock(
       )
       return provider(opts)
     }
-    activeWifLockReleases.add(release)
+    hostState.activeWifLockReleases.add(release)
     try {
       logEvent('tengu_wif_user_oauth_lock_acquired', {
         mode: analyticsMode(mode),
       })
       return await provider(opts)
     } finally {
-      activeWifLockReleases.delete(release)
+      hostState.activeWifLockReleases.delete(release)
       logEvent('tengu_wif_user_oauth_lock_released', {
         mode: analyticsMode(mode),
       })

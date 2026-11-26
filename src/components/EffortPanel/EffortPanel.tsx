@@ -38,6 +38,7 @@ import {
 } from '../../utils/effort.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
+import { getBootstrapSession, RootSessionSlot } from '../../utils/sessionRoot.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
 import { Select } from '../CustomSelect/index.js';
 import {
@@ -63,11 +64,17 @@ const ULTRACODE_SR_TOGGLE_VALUE = 'ultracode-toggle';
 const CAROUSEL_LEFT_CHEVRON = '\u2039';
 const CAROUSEL_RIGHT_CHEVRON = '\u203A';
 
-let effortCacheMissAckedAtOutputTokens = -1;
+const effortCacheMissAckBySession = new RootSessionSlot<{
+  ackedAtOutputTokens: number;
+}>(() => ({ ackedAtOutputTokens: -1 }));
+
+function getEffortCacheMissAckState(): { ackedAtOutputTokens: number } {
+  return effortCacheMissAckBySession.of(getBootstrapSession());
+}
 
 /** @internal Reset warm-cache acknowledgement state between unit tests. */
 export function resetEffortCacheMissAckForTest(): void {
-  effortCacheMissAckedAtOutputTokens = -1;
+  getEffortCacheMissAckState().ackedAtOutputTokens = -1;
 }
 
 const RAINBOW_THEME_KEYS: readonly (keyof Theme)[] = [
@@ -295,6 +302,7 @@ function VisualEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm }: Pro
     (!levelChanged && resolvedSessionEffort === undefined && readUserSettingsEffortForModel(model) !== undefined);
 
   const doneRef = React.useRef(false);
+  const [ackState] = React.useState(() => getEffortCacheMissAckState());
 
   const commitConfirm = React.useCallback(
     (choice: PendingEffortConfirm) => {
@@ -375,7 +383,7 @@ function VisualEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm }: Pro
           mainLoopModel: model,
           permissionMode,
           totalOutputTokens,
-          ackedAtOutputTokens: effortCacheMissAckedAtOutputTokens,
+          ackedAtOutputTokens: ackState.ackedAtOutputTokens,
           promptCacheMayBeWarm: cacheWarm,
         })
       ) {
@@ -385,6 +393,7 @@ function VisualEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm }: Pro
       commitConfirm(choice);
     },
     [
+      ackState,
       commitConfirm,
       isSessionOnlyConfirm,
       levelChanged,
@@ -466,7 +475,7 @@ function VisualEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm }: Pro
         kind="effort"
         targetLabel={pendingConfirm.selectedLevel}
         onConfirm={() => {
-          effortCacheMissAckedAtOutputTokens = getTotalOutputTokens();
+          ackState.ackedAtOutputTokens = getTotalOutputTokens();
           commitConfirm(pendingConfirm);
         }}
         onCancel={() => setPendingConfirm(null)}
@@ -636,6 +645,7 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm 
   const ultracodeOfferable = React.useMemo(() => isUltracodeOfferable(model), [model]);
   const [pendingLevel, setPendingLevel] = React.useState<EffortLevel | null>(null);
   const doneRef = React.useRef(false);
+  const [ackState] = React.useState(() => getEffortCacheMissAckState());
 
   const options = React.useMemo(() => {
     const items = geometry.levels.map(lvl => {
@@ -694,7 +704,7 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm 
             mainLoopModel: model,
             permissionMode,
             totalOutputTokens,
-            ackedAtOutputTokens: effortCacheMissAckedAtOutputTokens,
+            ackedAtOutputTokens: ackState.ackedAtOutputTokens,
             promptCacheMayBeWarm: cacheWarm,
           })
         ) {
@@ -704,7 +714,7 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm 
       }
       commitSelected(selected);
     },
-    [commitSelected, model, permissionMode, promptCacheMayBeWarm, resolvedSessionEffort],
+    [ackState, commitSelected, model, permissionMode, promptCacheMayBeWarm, resolvedSessionEffort],
   );
 
   const handleCancel = React.useCallback(() => {
@@ -719,7 +729,7 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone, promptCacheMayBeWarm 
         kind="effort"
         targetLabel={pendingLevel}
         onConfirm={() => {
-          effortCacheMissAckedAtOutputTokens = getTotalOutputTokens();
+          ackState.ackedAtOutputTokens = getTotalOutputTokens();
           commitSelected(pendingLevel);
         }}
         onCancel={() => setPendingLevel(null)}

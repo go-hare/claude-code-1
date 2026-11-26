@@ -2,6 +2,7 @@ import { execaSync } from 'execa'
 import { logForDebugging } from '../debug.js'
 import { execFileNoThrow } from '../execFileNoThrow.js'
 import { execSyncWithDefaults_DEPRECATED } from '../execFileNoThrowPortable.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import {
   CREDENTIALS_SERVICE_SUFFIX,
@@ -391,7 +392,11 @@ async function doReadAsyncStrict(): Promise<KeychainStrictResult> {
   }
 }
 
-let keychainLockedCache: boolean | undefined
+const keychainLockedHostSlot = new HostSlot<{
+  keychainLockedCache: boolean | undefined
+}>(() => ({
+  keychainLockedCache: undefined,
+}))
 
 /**
  * Checks if the macOS keychain is locked.
@@ -405,10 +410,13 @@ let keychainLockedCache: boolean | undefined
  * Keychain lock state doesn't change during a CLI session.
  */
 export function isMacOsKeychainLocked(): boolean {
-  if (keychainLockedCache !== undefined) return keychainLockedCache
+  const hostState = keychainLockedHostSlot.of(getBootstrapSessionHost())
+  if (hostState.keychainLockedCache !== undefined) {
+    return hostState.keychainLockedCache
+  }
   // Only check on macOS
   if (process.platform !== 'darwin') {
-    keychainLockedCache = false
+    hostState.keychainLockedCache = false
     return false
   }
 
@@ -418,10 +426,10 @@ export function isMacOsKeychainLocked(): boolean {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     // Exit code 36 indicates the keychain is locked
-    keychainLockedCache = result.exitCode === 36
+    hostState.keychainLockedCache = result.exitCode === 36
   } catch {
     // If the command fails for any reason, assume keychain is not locked
-    keychainLockedCache = false
+    hostState.keychainLockedCache = false
   }
-  return keychainLockedCache
+  return hostState.keychainLockedCache
 }

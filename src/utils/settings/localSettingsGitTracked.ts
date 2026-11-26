@@ -11,6 +11,7 @@ import { getCwd } from '../cwd.js'
 import { getErrnoCode } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { findGitRootUncached } from '../git.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { internalToolSubprocessEnv } from '../subprocessEnv.js'
 import { whichSync } from '../which.js'
 
@@ -19,9 +20,18 @@ export type LocalSettingsGitTrackedValue =
   | 'untracked'
   | 'indeterminate'
 
-let localSettingsGitTracked:
-  | { cwd: string; value: LocalSettingsGitTrackedValue }
-  | undefined
+type HostLocalSettingsGitTrackedState = {
+  cache: { cwd: string; value: LocalSettingsGitTrackedValue } | undefined
+}
+
+const hostLocalSettingsGitTrackedSlot =
+  new HostSlot<HostLocalSettingsGitTrackedState>(() => ({
+    cache: undefined,
+  }))
+
+function getHostLocalSettingsGitTrackedState(): HostLocalSettingsGitTrackedState {
+  return hostLocalSettingsGitTrackedSlot.of(getBootstrapSessionHost())
+}
 
 function isEnoent(error: unknown): boolean {
   return getErrnoCode(error) === 'ENOENT'
@@ -225,7 +235,7 @@ export function scanLocalSettingsGitTracked(
 
 /** densable `Kte`. */
 export function resetLocalSettingsGitTrackedCache(): void {
-  localSettingsGitTracked = undefined
+  getHostLocalSettingsGitTrackedState().cache = undefined
 }
 
 /**
@@ -250,14 +260,12 @@ export function isLocalSettingsGitTracked({
     }
     return true
   }
+  const state = getHostLocalSettingsGitTrackedState()
   const cwd = getCwd()
-  let value =
-    localSettingsGitTracked?.cwd === cwd
-      ? localSettingsGitTracked.value
-      : undefined
+  let value = state.cache?.cwd === cwd ? state.cache.value : undefined
   if (value === undefined) {
     value = scanLocalSettingsGitTracked(cwd)
-    localSettingsGitTracked = { cwd, value }
+    state.cache = { cwd, value }
   }
   if (value === 'indeterminate') {
     return onIndeterminate === 'tracked'

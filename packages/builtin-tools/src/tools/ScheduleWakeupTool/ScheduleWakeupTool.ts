@@ -28,6 +28,7 @@ import {
   writePendingWakeup,
 } from 'src/utils/orphanCronResume.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { getBgJobDirectory } from 'src/utils/sessionNameJobSidecar.js'
 import { BRIEF_TOOL_NAME } from '../BriefTool/prompt.js'
 import {
@@ -49,9 +50,47 @@ function getPromptHelpers(): typeof import('./prompt.js') {
 /** densable `Tw` — Monitor tool wire name (no shared constant export). */
 const MONITOR_TOOL_NAME = 'Monitor'
 
-let lastArmedWakeupMeta:
-  | { scheduledFor: number; chainStartedAt: number; persisted: boolean }
-  | undefined
+type ArmedWakeupMeta = {
+  scheduledFor: number
+  chainStartedAt: number
+  persisted: boolean
+}
+
+type ScheduleWakeupSessionState = {
+  lastArmedWakeupMeta: ArmedWakeupMeta | undefined
+}
+
+const fallbackWakeupSession: { readonly root: object } = {
+  get root() {
+    return fallbackWakeupSession
+  },
+}
+
+function getActiveWakeupSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (
+      session !== null &&
+      typeof session === 'object' &&
+      session.root !== null &&
+      typeof session.root === 'object'
+    ) {
+      return session
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackWakeupSession
+}
+
+const scheduleWakeupSessionSlot =
+  new RootSessionSlot<ScheduleWakeupSessionState>(() => ({
+    lastArmedWakeupMeta: undefined,
+  }))
+
+function getScheduleWakeupSessionState(): ScheduleWakeupSessionState {
+  return scheduleWakeupSessionSlot.of(getActiveWakeupSession())
+}
 
 function resolveWakeupToolUseId(
   context?: { toolUseId?: string },
@@ -95,7 +134,7 @@ async function persistPendingWakeupBestEffort(
  * `ScheduleWakeupTool.call`.
  */
 export async function clearPendingWakeupOnFire(): Promise<void> {
-  lastArmedWakeupMeta = undefined
+  getScheduleWakeupSessionState().lastArmedWakeupMeta = undefined
   await persistPendingWakeupBestEffort(undefined)
 }
 
@@ -311,10 +350,11 @@ export const ScheduleWakeupTool = buildTool({
       }
       throw new ScheduleWakeupInputError(refusal)
     }
+    const wakeupState = getScheduleWakeupSessionState()
     // densable stop path → QKu
     if (stop === true) {
       const cancelledWakeups = stopDynamicLoop()
-      lastArmedWakeupMeta = undefined
+      wakeupState.lastArmedWakeupMeta = undefined
       await persistPendingWakeupBestEffort(undefined)
       return {
         data: {
@@ -339,7 +379,7 @@ export const ScheduleWakeupTool = buildTool({
     // densable !jKe → $$t("gate_off") + zeros
     if (!isKairosLoopDynamicEnabled()) {
       markLoopEnded('gate_off')
-      lastArmedWakeupMeta = undefined
+      wakeupState.lastArmedWakeupMeta = undefined
       await persistPendingWakeupBestEffort(undefined)
       return {
         data: {
@@ -352,7 +392,7 @@ export const ScheduleWakeupTool = buildTool({
     // densable JKu(t,n,r)
     const scheduled = scheduleModelWakeup(delaySeconds, prompt, reason)
     if (scheduled === null) {
-      lastArmedWakeupMeta = undefined
+      wakeupState.lastArmedWakeupMeta = undefined
       await persistPendingWakeupBestEffort(undefined)
       return {
         data: {
@@ -366,7 +406,7 @@ export const ScheduleWakeupTool = buildTool({
       getLoopChainStartedAt(prompt)?.startedAt ?? Date.now()
     const toolUseId = resolveWakeupToolUseId(context, parentMessage)
     if (toolUseId !== undefined) {
-      lastArmedWakeupMeta = {
+      wakeupState.lastArmedWakeupMeta = {
         scheduledFor: scheduled.scheduledFor,
         chainStartedAt,
         persisted: true,
@@ -377,7 +417,7 @@ export const ScheduleWakeupTool = buildTool({
         chainStartedAt,
       })
     } else {
-      lastArmedWakeupMeta = {
+      wakeupState.lastArmedWakeupMeta = {
         scheduledFor: scheduled.scheduledFor,
         chainStartedAt,
         persisted: false,
@@ -403,6 +443,8 @@ export const ScheduleWakeupTool = buildTool({
       stopped,
       cancelledWakeups,
     } = content
+    const lastArmedWakeupMeta =
+      getScheduleWakeupSessionState().lastArmedWakeupMeta
     if (
       stopped !== true &&
       scheduledFor > 0 &&

@@ -21,6 +21,11 @@ import {
 } from './settings/settings.js'
 import { checkHasTrustDialogAccepted } from './config.js'
 import { getProxyUrl } from './proxy.js'
+import {
+  getBootstrapSessionHost,
+  HostSlot,
+  ofDefaultHost,
+} from './sessionHost.js'
 
 export {
   DEFAULT_PROXY_AUTH_HELPER_TTL_MS,
@@ -85,7 +90,7 @@ export function classifyProxyAuthHelperFailure(input: {
   return 'did not return a value'
 }
 
-// --- Module state (official m9t / HYe / dkn) ---
+// --- Host state (official m9t / HYe / dkn) ---
 
 type ProxyAuthHelperConfig = {
   helper?: string
@@ -93,30 +98,62 @@ type ProxyAuthHelperConfig = {
   trustAccepted: () => boolean
 }
 
-let _config: ProxyAuthHelperConfig = {
-  helper: undefined,
-  fromProjectOrLocal: false,
-  trustAccepted: () => false,
+type ProxyAuthHelperHostState = {
+  hasExplicitConfig: boolean
+  config: ProxyAuthHelperConfig
+  cache: { value: string; timestamp: number } | null
+  /** Official dkn — force-refresh token (Proxy-Authenticate challenge). */
+  forceProxyAuthenticate: string | undefined
 }
 
-let _cache: { value: string; timestamp: number } | null = null
-/** Official dkn — force-refresh token (Proxy-Authenticate challenge). */
-let _forceProxyAuthenticate: string | undefined
+function createDefaultProxyAuthHelperConfig(): ProxyAuthHelperConfig {
+  return {
+    helper: undefined,
+    fromProjectOrLocal: false,
+    trustAccepted: () => checkHasTrustDialogAccepted(),
+  }
+}
+
+const proxyAuthHelperHostSlot = new HostSlot<ProxyAuthHelperHostState>(() => ({
+  hasExplicitConfig: false,
+  config: createDefaultProxyAuthHelperConfig(),
+  cache: null,
+  forceProxyAuthenticate: undefined,
+}))
+
+function getProxyAuthHelperHostState(): ProxyAuthHelperHostState {
+  return proxyAuthHelperHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEffectiveProxyAuthHelperConfig(): ProxyAuthHelperConfig {
+  const own = proxyAuthHelperHostSlot.peek(getBootstrapSessionHost())
+  if (own?.hasExplicitConfig) {
+    return own.config
+  }
+  const defaultState = ofDefaultHost(proxyAuthHelperHostSlot)
+  if (defaultState.hasExplicitConfig) {
+    return defaultState.config
+  }
+  return getProxyAuthHelperHostState().config
+}
 
 export function setProxyAuthHelperConfig(config: {
   helper?: string
   fromProjectOrLocal?: boolean
   trustAccepted?: () => boolean
 }): void {
-  _config = {
+  const hostState = getProxyAuthHelperHostState()
+  hostState.hasExplicitConfig = true
+  hostState.config = {
     helper: config.helper,
     fromProjectOrLocal: config.fromProjectOrLocal ?? false,
-    trustAccepted: config.trustAccepted ?? (() => false),
+    trustAccepted:
+      config.trustAccepted ?? (() => checkHasTrustDialogAccepted()),
   }
 }
 
 /**
- * Load proxyAuthHelper from settings into module config (call after settings ready).
+ * Load proxyAuthHelper from settings into host config (call after settings ready).
  * Official: m9t populated from settings schema field.
  */
 export function configureProxyAuthHelperFromSettings(): void {
@@ -137,13 +174,14 @@ export function configureProxyAuthHelperFromSettings(): void {
 }
 
 /**
- * Official Yyt — env gate + configured helper command from module config or settings.
+ * Official Yyt — env gate + configured helper command from host config or settings.
  */
 export function getConfiguredProxyAuthHelperCommand(): string | undefined {
-  // Prefer explicit module config (tests / late injection)
-  if (_config.helper) {
+  const config = getEffectiveProxyAuthHelperConfig()
+  // Prefer explicit host config (tests / late injection / boot config)
+  if (config.helper) {
     return resolveProxyAuthHelperCommand({
-      helperCommand: _config.helper,
+      helperCommand: config.helper,
     })
   }
   const settings = getSettings_DEPRECATED() || {}
@@ -162,26 +200,25 @@ export function isProxyAuthHelperFromProjectOrLocalSettings(): boolean {
 
 /** Official qCl — last cached Proxy-Authorization value. */
 export function getCachedProxyAuthHelperValue(): string | null {
-  return _cache?.value ?? null
+  return getProxyAuthHelperHostState().cache?.value ?? null
 }
 
 /**
  * Official Oci — force next fkn to re-run with Proxy-Authenticate challenge.
  */
 export function forceProxyAuthHelperRefresh(proxyAuthenticate?: string): void {
-  _cache = null
-  _forceProxyAuthenticate = proxyAuthenticate
+  const hostState = getProxyAuthHelperHostState()
+  hostState.cache = null
+  hostState.forceProxyAuthenticate = proxyAuthenticate
 }
 
 /** Official hNm — clear cache + config. */
 export function clearProxyAuthHelperState(): void {
-  _cache = null
-  _forceProxyAuthenticate = undefined
-  _config = {
-    helper: undefined,
-    fromProjectOrLocal: false,
-    trustAccepted: () => false,
-  }
+  const hostState = getProxyAuthHelperHostState()
+  hostState.cache = null
+  hostState.forceProxyAuthenticate = undefined
+  hostState.hasExplicitConfig = false
+  hostState.config = createDefaultProxyAuthHelperConfig()
 }
 
 /**
@@ -198,13 +235,16 @@ export async function runProxyAuthHelper(input?: {
   const command = getConfiguredProxyAuthHelperCommand()
   if (!command) return null
 
+  const hostState = getProxyAuthHelperHostState()
+  const effectiveConfig = getEffectiveProxyAuthHelperConfig()
   const fromProjectOrLocal =
-    _config.fromProjectOrLocal || isProxyAuthHelperFromProjectOrLocalSettings()
+    effectiveConfig.fromProjectOrLocal ||
+    isProxyAuthHelperFromProjectOrLocalSettings()
   if (
     shouldSkipProxyAuthHelperForTrust({
       fromProjectOrLocal,
       isNonInteractive: input?.isNonInteractive ?? getIsNonInteractiveSession(),
-      trustAccepted: _config.trustAccepted(),
+      trustAccepted: effectiveConfig.trustAccepted(),
     })
   ) {
     logForDebugging(
@@ -214,20 +254,21 @@ export async function runProxyAuthHelper(input?: {
     return null
   }
 
-  const forceAuth = _forceProxyAuthenticate ?? getProxyAuthenticate(input?.env)
+  const forceAuth =
+    hostState.forceProxyAuthenticate ?? getProxyAuthenticate(input?.env)
   const ttlMs = resolveProxyAuthHelperTtlMs(input?.env)
   if (
-    !_forceProxyAuthenticate &&
-    _cache &&
+    !hostState.forceProxyAuthenticate &&
+    hostState.cache &&
     shouldReuseProxyAuthHelperCache({
-      cachedAtMs: _cache.timestamp,
+      cachedAtMs: hostState.cache.timestamp,
       nowMs: input?.nowMs,
       ttlMs,
     })
   ) {
-    return _cache.value
+    return hostState.cache.value
   }
-  _forceProxyAuthenticate = undefined
+  hostState.forceProxyAuthenticate = undefined
 
   const proxyUrl = input?.proxyUrl ?? getProxyUrl(input?.env)
   let proxyHost: string | undefined
@@ -262,10 +303,10 @@ export async function runProxyAuthHelper(input?: {
     const stderr = result.stderr?.trim()
     const detail = stderr ? `${reason}: ${stderr}` : reason
     console.error(formatProxyAuthHelperFailure(detail))
-    return _cache?.value ?? null
+    return hostState.cache?.value ?? null
   }
 
-  _cache = { value: stdout, timestamp: input?.nowMs ?? Date.now() }
+  hostState.cache = { value: stdout, timestamp: input?.nowMs ?? Date.now() }
   return stdout
 }
 
@@ -274,13 +315,15 @@ export async function runProxyAuthHelper(input?: {
  */
 export function prefetchProxyAuthHelper(): void {
   if (!getConfiguredProxyAuthHelperCommand()) return
+  const effectiveConfig = getEffectiveProxyAuthHelperConfig()
   const fromProjectOrLocal =
-    _config.fromProjectOrLocal || isProxyAuthHelperFromProjectOrLocalSettings()
+    effectiveConfig.fromProjectOrLocal ||
+    isProxyAuthHelperFromProjectOrLocalSettings()
   if (
     shouldSkipProxyAuthHelperForTrust({
       fromProjectOrLocal,
       isNonInteractive: getIsNonInteractiveSession(),
-      trustAccepted: _config.trustAccepted(),
+      trustAccepted: effectiveConfig.trustAccepted(),
     })
   ) {
     return

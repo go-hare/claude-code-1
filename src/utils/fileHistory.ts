@@ -39,6 +39,7 @@ import { getErrnoCode, isENOENT } from './errors.js'
 import { pathExists } from './file.js'
 import { logError } from './log.js'
 import { isUnsafeNetworkOrNtIncludePath } from './path.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { recordFileHistorySnapshot } from './sessionStorage.js'
 
 type BackupFileName = string | null // The null value means the file does not exist in this version
@@ -408,15 +409,29 @@ export const REWIND_SKIPPED_LINKS_REASON =
  * back-to-back `/branch` calls and `/rewind` wait for copies into a session before
  * reading or restoring from it.
  */
-const inFlightBackupCopiesBySession = new Map<string, Promise<void>>()
+const inFlightBackupCopiesHostSlot = new HostSlot<Map<string, Promise<void>>>(
+  () => new Map<string, Promise<void>>(),
+)
+
+function getInFlightBackupCopiesBySession(): Map<string, Promise<void>> {
+  return inFlightBackupCopiesHostSlot.of(getBootstrapSessionHost())
+}
 
 export async function awaitInFlightFileHistoryCopy(
   sessionId: string,
 ): Promise<void> {
-  const pending = inFlightBackupCopiesBySession.get(sessionId)
+  const pending = getInFlightBackupCopiesBySession().get(sessionId)
   if (pending) {
     await pending
   }
+}
+
+/** Test-only accessor for the active SessionHost's in-flight backup copy map. */
+export function _getInFlightFileHistoryCopiesForTests(): Map<
+  string,
+  Promise<void>
+> {
+  return getInFlightBackupCopiesBySession()
 }
 
 /**
@@ -1894,6 +1909,7 @@ export async function copyFileHistoryForResume(log: LogOption): Promise<void> {
 
   // Official 2.1.326 #36: serialize backup copies per sessionId so back-to-back
   // /branch copies wait for the source session's in-flight copy before reading it.
+  const inFlightBackupCopiesBySession = getInFlightBackupCopiesBySession()
   const priorForTarget = inFlightBackupCopiesBySession.get(sessionId)
   const copyTask = (async () => {
     if (priorForTarget) {

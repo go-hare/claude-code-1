@@ -12,12 +12,12 @@
  * import from MCP-specific code.
  */
 
-import memoize from 'lodash-es/memoize.js'
 import type { LoadedPlugin } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
 import { getSecureStorage } from '../secureStorage/index.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   getSettingsForSource,
   persistSettingsForSource,
@@ -74,6 +74,71 @@ function mergeNullProtoPluginOptions(
   return merged
 }
 
+type HostPluginOptionsState = {
+  loadPluginOptionsCache: Map<string, PluginOptionValues>
+  optionValues: Map<string, Promise<PluginOptionValues>>
+}
+
+const hostPluginOptionsSlot = new HostSlot<HostPluginOptionsState>(() => ({
+  loadPluginOptionsCache: new Map(),
+  optionValues: new Map(),
+}))
+
+function pluginOptionsHostState(): HostPluginOptionsState {
+  return hostPluginOptionsSlot.of(getBootstrapSessionHost())
+}
+
+type CachedLoadPluginOptionsFn = ((pluginId: string) => PluginOptionValues) & {
+  cache: Map<string, PluginOptionValues>
+}
+
+function loadPluginOptionsImpl(pluginId: string): PluginOptionValues {
+  // Official 2.1.207: do not read project/local settings for pluginConfigs.
+  const nonSensitive =
+    loadPluginConfigFromAllowedSources(pluginId).options ??
+    (Object.create(null) as PluginOptionValues)
+
+  // NOTE: storage.read() spawns `security find-generic-password` on macOS
+  // (~50-100ms, synchronous). Mitigated by the memoize above (per-pluginId,
+  // session-lifetime) + keychain's own 30s TTL cache — so one blocking spawn
+  // per session per plugin-with-options. /reload-plugins clears the memoize
+  // and the next hook/MCP-load after that eats a fresh spawn.
+  const storage = getSecureStorage()
+  const secrets = storage.read()?.pluginSecrets
+  const sensitive =
+    secrets && Object.hasOwn(secrets, pluginId)
+      ? secrets[pluginId]!
+      : (Object.create(null) as Record<string, string>)
+
+  // secureStorage wins on collision — schema determines destination so
+  // collision shouldn't happen, but if a user hand-edits settings.json we
+  // trust the more secure source.
+  return mergeNullProtoPluginOptions(nonSensitive, sensitive)
+}
+
+function createLoadPluginOptions(): CachedLoadPluginOptionsFn {
+  const fn = (pluginId: string): PluginOptionValues => {
+    const cache = pluginOptionsHostState().loadPluginOptionsCache
+    if (cache.has(pluginId)) {
+      return cache.get(pluginId)!
+    }
+    const result = loadPluginOptionsImpl(pluginId)
+    cache.set(pluginId, result)
+    return result
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<string, PluginOptionValues> {
+      return pluginOptionsHostState().loadPluginOptionsCache
+    },
+    set(next: Map<string, PluginOptionValues>) {
+      pluginOptionsHostState().loadPluginOptionsCache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedLoadPluginOptionsFn
+}
+
 /**
  * Load saved option values for a plugin, merging non-sensitive (from settings)
  * with sensitive (from secureStorage). SecureStorage wins on key collision.
@@ -82,43 +147,19 @@ function mergeNullProtoPluginOptions(
  * would otherwise do a settings read + keychain spawn. Cache cleared via
  * `clearPluginOptionsCache` when settings change or plugins reload.
  */
-export const loadPluginOptions = memoize(
-  (pluginId: string): PluginOptionValues => {
-    // Official 2.1.207: do not read project/local settings for pluginConfigs.
-    const nonSensitive =
-      loadPluginConfigFromAllowedSources(pluginId).options ??
-      (Object.create(null) as PluginOptionValues)
-
-    // NOTE: storage.read() spawns `security find-generic-password` on macOS
-    // (~50-100ms, synchronous). Mitigated by the memoize above (per-pluginId,
-    // session-lifetime) + keychain's own 30s TTL cache — so one blocking spawn
-    // per session per plugin-with-options. /reload-plugins clears the memoize
-    // and the next hook/MCP-load after that eats a fresh spawn.
-    const storage = getSecureStorage()
-    const secrets = storage.read()?.pluginSecrets
-    const sensitive =
-      secrets && Object.hasOwn(secrets, pluginId)
-        ? secrets[pluginId]!
-        : (Object.create(null) as Record<string, string>)
-
-    // secureStorage wins on collision — schema determines destination so
-    // collision shouldn't happen, but if a user hand-edits settings.json we
-    // trust the more secure source.
-    return mergeNullProtoPluginOptions(nonSensitive, sensitive)
-  },
-)
+export const loadPluginOptions: CachedLoadPluginOptionsFn =
+  createLoadPluginOptions()
 
 /**
  * densable `q0` / `ct` — settings options + `Un().readAsync(credentials)`
  * pluginSecrets. Promise-memoized per pluginId (`dt().optionValues`); reject
  * drops the cache entry so the next call retries.
  */
-const optionValues = new Map<string, Promise<PluginOptionValues>>()
-
 export function loadPluginOptionsNw(
   pluginId: string,
   credentials?: unknown,
 ): Promise<PluginOptionValues> {
+  const optionValues = pluginOptionsHostState().optionValues
   const cached = optionValues.get(pluginId)
   if (cached !== undefined) {
     return cached
@@ -154,8 +195,9 @@ async function loadPluginOptionsCt(
 }
 
 export function clearPluginOptionsCache(): void {
-  loadPluginOptions.cache?.clear?.()
-  optionValues.clear()
+  const state = pluginOptionsHostState()
+  state.loadPluginOptionsCache.clear()
+  state.optionValues.clear()
 }
 
 async function mutatePluginSecrets(

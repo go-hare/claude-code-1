@@ -32,6 +32,7 @@ import {
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { isAbsolute, resolve as resolvePath } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isCommandInjectionCheckDisabled } from 'src/utils/residualFinalEnvGates.js'
 import { AbortError } from 'src/utils/errors.js'
@@ -2573,7 +2574,22 @@ function buildPendingClassifierCheck(
   }
 }
 
-const speculativeChecks = new Map<string, Promise<ClassifierResult>>()
+type SpeculativeClassifierEntry = {
+  cwd: string
+  promise: Promise<ClassifierResult>
+}
+
+const speculativeChecksBySession = new RootSessionSlot(
+  () => new Map<string, SpeculativeClassifierEntry>(),
+)
+
+function getSpeculativeChecks(): Map<string, SpeculativeClassifierEntry> {
+  return speculativeChecksBySession.of(getBootstrapSession())
+}
+
+function speculativeCheckKey(command: string, cwd: string): string {
+  return `${cwd}\0${command}`
+}
 
 /**
  * Start a speculative bash allow classifier check early, so it runs in
@@ -2584,7 +2600,12 @@ const speculativeChecks = new Map<string, Promise<ClassifierResult>>()
 export function peekSpeculativeClassifierCheck(
   command: string,
 ): Promise<ClassifierResult> | undefined {
-  return speculativeChecks.get(command)
+  const cwd = getCwd()
+  const entry = getSpeculativeChecks().get(speculativeCheckKey(command, cwd))
+  if (!entry || entry.cwd !== cwd) {
+    return undefined
+  }
+  return entry.promise
 }
 
 export function startSpeculativeClassifierCheck(
@@ -2595,8 +2616,9 @@ export function startSpeculativeClassifierCheck(
 ): boolean {
   // Same guards as buildPendingClassifierCheck
   if (!isClassifierPermissionsEnabled()) return false
-  if (feature('TRANSCRIPT_CLASSIFIER') && toolPermissionContext.mode === 'auto')
-    return false
+  if (feature('TRANSCRIPT_CLASSIFIER')) {
+    if (toolPermissionContext.mode === 'auto') return false
+  }
   if (toolPermissionContext.mode === 'bypassPermissions') return false
   const allowDescriptions = getBashPromptAllowDescriptions(
     toolPermissionContext,
@@ -2615,26 +2637,46 @@ export function startSpeculativeClassifierCheck(
   // Prevent unhandled rejection if the signal aborts before this promise is consumed.
   // The original promise (which may reject) is still stored in the Map for consumers to await.
   promise.catch(() => {})
-  speculativeChecks.set(command, promise)
+  getSpeculativeChecks().set(speculativeCheckKey(command, cwd), {
+    cwd,
+    promise,
+  })
   return true
+}
+
+export function _setSpeculativeClassifierCheckForTesting(
+  command: string,
+  promise: Promise<ClassifierResult>,
+): void {
+  const cwd = getCwd()
+  promise.catch(() => {})
+  getSpeculativeChecks().set(speculativeCheckKey(command, cwd), {
+    cwd,
+    promise,
+  })
 }
 
 /**
  * Consume a speculative classifier check result for the given command.
- * Returns the promise if one exists (and removes it from the map), or undefined.
+ * Returns the promise if one exists for the current CWD (and removes it from
+ * the session map), or undefined.
  */
 export function consumeSpeculativeClassifierCheck(
   command: string,
 ): Promise<ClassifierResult> | undefined {
-  const promise = speculativeChecks.get(command)
-  if (promise) {
-    speculativeChecks.delete(command)
+  const speculativeChecks = getSpeculativeChecks()
+  const cwd = getCwd()
+  const key = speculativeCheckKey(command, cwd)
+  const entry = speculativeChecks.get(key)
+  if (!entry || entry.cwd !== cwd) {
+    return undefined
   }
-  return promise
+  speculativeChecks.delete(key)
+  return entry.promise
 }
 
 export function clearSpeculativeChecks(): void {
-  speculativeChecks.clear()
+  getSpeculativeChecks().clear()
 }
 
 /**

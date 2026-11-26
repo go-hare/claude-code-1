@@ -25,6 +25,7 @@ import {
 } from './loopDynamic.js'
 import { firstPartyNameToCanonical, getMainLoopModel } from './model/model.js'
 import { modelHasCatalogCapability } from './model/modelCatalogCapabilities.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 /** densable `zKu` */
 export const LOOP_FILE_SENTINEL = '<<loop.md>>'
@@ -43,9 +44,26 @@ export const AUTONOMOUS_LOOP_PREAMBLE =
 export const AUTONOMOUS_LOOP_PREAMBLE_PERSISTENT =
   "# Autonomous loop check\n\nYou're being invoked on a timer while the user is away or occupied. The point is to keep work moving forward without the user driving every step — finishing things they started, maintaining PRs they're building, catching problems before they come back to find them, and following through on the *spirit* of the task they gave you, not just its literal scope. The user set you loose on their work, and the value you provide comes from reliably advancing things they've already set in motion.\n\nThe key tension to navigate: the user trusts you enough to run autonomously, but that trust is easily lost. Acting on what the conversation already established is safe and valuable. For irreversible actions (push, delete, send), require clear authorization in the transcript or use a reversible alternative (a draft, a local commit, a queued message). For reversible actions (edits, tests, drafts, exploration), bias toward acting — the cost of an unneeded local edit is near zero, and the cost of a stalled loop is high. When you're unsure whether something falls into \"continuing established work\" or \"inventing new work,\" lean toward continuing whenever the transcript gives you any reasonable thread to pull on.\n\n## What to act on\n\nThe current conversation is your highest-signal source — re-read the transcript above, since everything there is something the user was actively engaged with. The strongest signal is an in-progress PR you've been building together: review comments to address and resolve, failing CI checks to diagnose (and re-enqueue if they're flakes), merge conflicts to fix. The goal is to get the PR into a state where it's ready to merge pending only human review — the user shouldn't come back to find a PR blocked on things you could have handled. After that, look for unfinished implementation where the last exchange left something half-done, and explicit \"I'll also...\" or \"next I'll...\" commitments the conversation made and didn't honor. Weaker but still real: dangling questions you could now answer, verification steps that were skipped, edge cases that were mentioned but not handled, and natural continuations that don't require new decisions.\n\nIf you find anything in this category, act on it — actually do the work, don't describe what could be done. Run the tests, don't say \"you could run the tests.\" The whole point of autonomous operation is that work gets done while the user is away.\n\nWhen the conversation transcript has nothing left, the current branch's pull/merge request on the user's SCM is the next-best place to look. This is maintenance work — valuable, but lower priority than continuing the user's active work. Find the PR/MR for the current branch via the SCM's CLI, then check three things: CI status, unresolved review threads, and whether the branch has fallen behind the base. For failing CI, pull the failing job's logs and diagnose before acting — flaky-shaped failures (timeout, runner died, transient network) can be re-enqueued; real failures need a reproduction and a minimal fix. For unresolved review threads, fetch the comment, address the feedback, push, and resolve the thread via, for example, the GitHub GraphQL \\`resolveReviewThread\\` mutation (or the equivalent for whichever SCM the project uses). Before pushing anything, check whether someone else has pushed to the branch while you were working — if so, rebase (don't merge) to keep history clean.\n\nWhen CI is green, threads are clear, and there's idle time, sweeping the branch for issues is a good use of that time — bug-hunt or simplification passes catch problems before reviewers do, saving everyone a round-trip.\n\nIf everything is genuinely quiet — no conversation work, no PR maintenance — say so in one sentence and keep the loop alive. Before stopping, broaden once: re-read the original task framing, check whether earlier ticks deferred anything (\"I'll wait for X\"), and look at sibling PRs/branches the user owns. Persistence is the point of autonomous mode. Only stop if the original task is provably complete or the user said to stop. (Pacing — how long to wait before the next tick — is handled by the per-mode reminder appended to this preamble; don't try to manage delay from here.)\n\n## Repeated invocations\n\nIf you see earlier autonomous checks in this conversation, adjust your scope accordingly. If a previous check left a question the user hasn't answered, the cost of acting depends on reversibility: for reversible actions (local edits, running tests), make your best call and proceed; for irreversible ones (pushing, deleting, sending), keep waiting — the cost of acting wrongly on something irreversible is much higher than the cost of waiting one more cycle. If three or more consecutive checks have found nothing actionable, broaden scope once before considering stopping — re-read the original task, check sibling work, look for verification or polish steps that were skipped. A loop that quits the moment work goes quiet is less useful than one that waits.\n\nRead and analyze freely — understanding the state of things has no blast radius. Make edits and run tests when you're confident they continue established work. Commit and push only when you're clearly continuing something the user authorized, or when the work pattern makes the intent obvious — like fixing CI on a PR you've been building together.\n"
 
-// densable module state Ain / wfr
-let autonomousPreambleDelivered = false
-let lastLoopFileContent: string | null = null
+// densable session state Ain / wfr
+class LoopFireSessionState {
+  autonomousPreambleDelivered = false
+  lastLoopFileContent: string | null = null
+}
+
+const fallbackLoopFireSession = { root: {} as object }
+const loopFireStateBySession = new RootSessionSlot<LoopFireSessionState>(
+  () => new LoopFireSessionState(),
+)
+
+function getLoopFireSessionState(): LoopFireSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return loopFireStateBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return loopFireStateBySession.of(fallbackLoopFireSession)
+}
 
 /** densable `Gwo` / `_66` — `vH(CLAUDE_CODE_LOOP_PERSISTENT)` then GB. */
 export function isLoopPersistentPreambleEnabled(): boolean {
@@ -111,8 +129,9 @@ export function isLoopDefaultSentinel(prompt: string): boolean {
 
 /** densable `OU_` */
 export function resetAutonomousLoopDelivered(): void {
-  autonomousPreambleDelivered = false
-  lastLoopFileContent = null
+  const state = getLoopFireSessionState()
+  state.autonomousPreambleDelivered = false
+  state.lastLoopFileContent = null
 }
 
 /** densable `Rin` — PushNotification guidance (Mre = PushNotification) */
@@ -243,10 +262,11 @@ export function resolveAutonomousLoopFire(prompt: string): string | null {
     prompt === AUTONOMOUS_LOOP_DYNAMIC_SENTINEL
       ? autonomousTickDynamic()
       : autonomousTickCron()
-  if (autonomousPreambleDelivered || lastLoopFileContent !== null) {
+  const state = getLoopFireSessionState()
+  if (state.autonomousPreambleDelivered || state.lastLoopFileContent !== null) {
     return tick
   }
-  autonomousPreambleDelivered = true
+  state.autonomousPreambleDelivered = true
   return `${getAutonomousLoopPreamble()}
 
 ---
@@ -258,12 +278,13 @@ ${tick}`
 export function resolveLoopFileFire(prompt: string): string | null {
   if (!isLoopFileSentinel(prompt)) return null
   if (!isLoopDefaultPromptEnabled()) return null
+  const state = getLoopFireSessionState()
   const dynamic = prompt === LOOP_FILE_DYNAMIC_SENTINEL
   const file = readLoopFile()
   if (file) {
     const tick = dynamic ? loopFileTickDynamic() : loopFileTickCron()
-    if (lastLoopFileContent === file.content) return tick
-    lastLoopFileContent = file.content
+    if (state.lastLoopFileContent === file.content) return tick
+    state.lastLoopFileContent = file.content
     return `# /loop tick — tasks from ${file.path}
 
 The user configured a loop-tasks file. Work through the tasks defined below; these are the instructions for this tick and every subsequent tick (the reminder on later fires refers back to this message).
@@ -279,13 +300,13 @@ ${tick}`
   logAutonomousLoopActivation()
   const tick = dynamic ? loopFileAbsentTickDynamic() : autonomousTickCron()
   if (
-    lastLoopFileContent === AUTONOMOUS_PREAMBLE_MARKER ||
-    autonomousPreambleDelivered
+    state.lastLoopFileContent === AUTONOMOUS_PREAMBLE_MARKER ||
+    state.autonomousPreambleDelivered
   ) {
     return tick
   }
-  lastLoopFileContent = AUTONOMOUS_PREAMBLE_MARKER
-  autonomousPreambleDelivered = true
+  state.lastLoopFileContent = AUTONOMOUS_PREAMBLE_MARKER
+  state.autonomousPreambleDelivered = true
   return `${getAutonomousLoopPreamble()}
 
 ---

@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { BetaMessageStreamParams } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import type { Dirent } from 'fs'
 import { readdir, readFile, stat } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { join } from 'path'
 import type { QuerySource } from 'src/constants/querySource.js'
 import {
@@ -9,7 +9,8 @@ import {
   setLastAPIRequest,
   setLastAPIRequestMessages,
 } from '../bootstrap/state.js'
-import { getBootstrapSessionHost } from './sessionHost.js'
+import { HostSlot } from './hostSlot.js'
+import { getBootstrapSessionHost, ofDefaultHost } from './sessionRoot.js'
 import { TICK_TAG } from '../constants/xml.js'
 import {
   type LogOption,
@@ -84,10 +85,25 @@ type QueuedErrorEvent =
   | { type: 'mcpError'; serverName: string; error: unknown }
   | { type: 'mcpDebug'; serverName: string; message: string }
 
-const errorQueue: QueuedErrorEvent[] = []
+type LogHostState = {
+  errorQueue: QueuedErrorEvent[]
+  errorLogSink: ErrorLogSink | null
+  hardFailMode: boolean | undefined
+}
 
-// Sink - initialized during app startup
-let errorLogSink: ErrorLogSink | null = null
+const logHostSlot = new HostSlot<LogHostState>(() => ({
+  errorQueue: [],
+  errorLogSink: null,
+  hardFailMode: undefined,
+}))
+
+function getLogHostState(): LogHostState {
+  return logHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEffectiveErrorLogSink(state: LogHostState): ErrorLogSink | null {
+  return state.errorLogSink ?? ofDefaultHost(logHostSlot).errorLogSink
+}
 
 /**
  * Attach the error log sink that will receive all error events.
@@ -98,26 +114,27 @@ let errorLogSink: ErrorLogSink | null = null
  * the default command) without coordination.
  */
 export function attachErrorLogSink(newSink: ErrorLogSink): void {
-  if (errorLogSink !== null) {
+  const state = getLogHostState()
+  if (state.errorLogSink !== null) {
     return
   }
-  errorLogSink = newSink
+  state.errorLogSink = newSink
 
   // Drain the queue immediately - errors should not be delayed
-  if (errorQueue.length > 0) {
-    const queuedEvents = [...errorQueue]
-    errorQueue.length = 0
+  if (state.errorQueue.length > 0) {
+    const queuedEvents = [...state.errorQueue]
+    state.errorQueue.length = 0
 
     for (const event of queuedEvents) {
       switch (event.type) {
         case 'error':
-          errorLogSink.logError(event.error)
+          state.errorLogSink.logError(event.error)
           break
         case 'mcpError':
-          errorLogSink.logMCPError(event.serverName, event.error)
+          state.errorLogSink.logMCPError(event.serverName, event.error)
           break
         case 'mcpDebug':
-          errorLogSink.logMCPDebug(event.serverName, event.message)
+          state.errorLogSink.logMCPDebug(event.serverName, event.message)
           break
       }
     }
@@ -142,9 +159,13 @@ export function attachErrorLogSink(newSink: ErrorLogSink): void {
  * - Debug: Run `claude --debug` or `tail -f ~/.claude/debug/latest`
  * - In-memory: Call `getInMemoryErrors()` to get recent errors for the current session
  */
-const isHardFailMode = memoize((): boolean => {
-  return process.argv.includes('--hard-fail')
-})
+function isHardFailMode(): boolean {
+  const state = getLogHostState()
+  if (state.hardFailMode === undefined) {
+    state.hardFailMode = process.argv.includes('--hard-fail')
+  }
+  return state.hardFailMode
+}
 
 export function logError(error: unknown): void {
   const err = toError(error)
@@ -194,12 +215,14 @@ export function logError(error: unknown): void {
     addToInMemoryErrorLog(errorInfo)
 
     // If sink not attached, queue the event
-    if (errorLogSink === null) {
-      errorQueue.push({ type: 'error', error: err })
+    const state = getLogHostState()
+    const effectiveSink = getEffectiveErrorLogSink(state)
+    if (effectiveSink === null) {
+      state.errorQueue.push({ type: 'error', error: err })
       return
     }
 
-    errorLogSink.logError(err)
+    effectiveSink.logError(err)
   } catch {
     // pass
   }
@@ -236,9 +259,9 @@ export async function getErrorLogByIndex(
  * @private
  */
 async function loadLogList(path: string): Promise<LogOption[]> {
-  let files: Awaited<ReturnType<typeof readdir>>
+  let files: Dirent[]
   try {
-    files = (await readdir(path, { withFileTypes: true })) as any
+    files = await readdir(path, { withFileTypes: true })
   } catch {
     logError(new Error(`No logs found at ${path}`))
     return []
@@ -306,13 +329,15 @@ function parseISOString(s: string): Date {
 
 export function logMCPError(serverName: string, error: unknown): void {
   try {
+    const state = getLogHostState()
+    const effectiveSink = getEffectiveErrorLogSink(state)
     // If sink not attached, queue the event
-    if (errorLogSink === null) {
-      errorQueue.push({ type: 'mcpError', serverName, error })
+    if (effectiveSink === null) {
+      state.errorQueue.push({ type: 'mcpError', serverName, error })
       return
     }
 
-    errorLogSink.logMCPError(serverName, error)
+    effectiveSink.logMCPError(serverName, error)
   } catch {
     // Silently fail
   }
@@ -320,13 +345,15 @@ export function logMCPError(serverName: string, error: unknown): void {
 
 export function logMCPDebug(serverName: string, message: string): void {
   try {
+    const state = getLogHostState()
+    const effectiveSink = getEffectiveErrorLogSink(state)
     // If sink not attached, queue the event
-    if (errorLogSink === null) {
-      errorQueue.push({ type: 'mcpDebug', serverName, message })
+    if (effectiveSink === null) {
+      state.errorQueue.push({ type: 'mcpDebug', serverName, message })
       return
     }
 
-    errorLogSink.logMCPDebug(serverName, message)
+    effectiveSink.logMCPDebug(serverName, message)
   } catch {
     // Silently fail
   }
@@ -363,7 +390,9 @@ export function captureAPIRequest(
  * @internal
  */
 export function _resetErrorLogForTesting(): void {
-  errorLogSink = null
-  errorQueue.length = 0
+  const state = getLogHostState()
+  state.errorLogSink = null
+  state.errorQueue.length = 0
+  state.hardFailMode = undefined
   getBootstrapSessionHost().diagnostics.reset()
 }

@@ -1,3 +1,8 @@
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../utils/sessionHost.js'
 import type {
   createSkillCommand,
   parseSkillFrontmatterFields,
@@ -28,17 +33,28 @@ export type MCPSkillBuilders = {
   parseSkillFrontmatterFields: typeof parseSkillFrontmatterFields
 }
 
-let builders: MCPSkillBuilders | null = null
+let defaultBuilders: MCPSkillBuilders | null = null
+const hostBuildersSlot = new HostSlot<{ builders: MCPSkillBuilders | null }>(
+  () => ({ builders: null }),
+)
 
 export function registerMCPSkillBuilders(b: MCPSkillBuilders): void {
-  builders = b
+  if (getActiveSessionFromAls() === undefined) {
+    defaultBuilders = b
+    hostBuildersSlot.of(getBootstrapSessionHost()).builders = null
+    return
+  }
+  hostBuildersSlot.of(getBootstrapSessionHost()).builders = b
 }
 
 export function getMCPSkillBuilders(): MCPSkillBuilders {
-  if (!builders) {
+  const resolved =
+    hostBuildersSlot.peek(getBootstrapSessionHost())?.builders ??
+    defaultBuilders
+  if (!resolved) {
     throw new Error(
       'MCP skill builders not registered — loadSkillsDir.ts has not been evaluated yet',
     )
   }
-  return builders
+  return resolved
 }

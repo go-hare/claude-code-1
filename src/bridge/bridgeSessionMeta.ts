@@ -15,6 +15,7 @@
 
 import { getSessionId } from '../bootstrap/state.js'
 import { logForDebugging } from '../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 
 export type PersistedBridgeSession = {
   id: string
@@ -32,8 +33,7 @@ export type PersistedBridgeSession = {
   ownerOrganizationUuid?: string
 }
 
-/** densable Hd().currentSessionBridge* for the live REPL session only. */
-let current: {
+type LiveBridgeSessionMeta = {
   sessionId: string
   bridgeSessionId: string
   seq: number
@@ -42,7 +42,22 @@ let current: {
   noHistoryBackfill?: boolean
   ownerAccountUuid?: string
   ownerOrganizationUuid?: string
-} | null = null
+}
+
+type BridgeSessionMetaHostState = {
+  current: LiveBridgeSessionMeta | null
+}
+
+/** densable Hd().currentSessionBridge* for the live REPL session only. */
+const bridgeSessionMetaHostSlot = new HostSlot<BridgeSessionMetaHostState>(
+  () => ({
+    current: null,
+  }),
+)
+
+function getBridgeSessionMetaHostState(): BridgeSessionMetaHostState {
+  return bridgeSessionMetaHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable CXr(e,t,r,n,o,i) — remember bridge session for the active CLI session.
@@ -70,6 +85,8 @@ export function saveBridgeSessionMeta(
   if (!sessionId || !bridgeSessionId) return
   const liveId = getSessionId()
   if (sessionId === liveId) {
+    const hostState = getBridgeSessionMetaHostState()
+    const current = hostState.current
     const prev =
       current?.sessionId === sessionId &&
       current.bridgeSessionId === bridgeSessionId
@@ -97,7 +114,7 @@ export function saveBridgeSessionMeta(
       opts && 'ownerOrganizationUuid' in opts
         ? opts.ownerOrganizationUuid || undefined
         : prev?.ownerOrganizationUuid
-    current = {
+    const next: LiveBridgeSessionMeta = {
       sessionId,
       bridgeSessionId,
       seq: lastSequenceNum,
@@ -107,8 +124,9 @@ export function saveBridgeSessionMeta(
       ownerAccountUuid,
       ownerOrganizationUuid,
     }
+    hostState.current = next
     logForDebugging(
-      `[bridge:meta] CXr session=${sessionId} bridge=${bridgeSessionId} seq=${lastSequenceNum}${current.groupingId ? ` grouping=${current.groupingId}` : ''}${noHistoryBackfill ? ' noHistoryBackfill' : ''}${ownerAccountUuid ? ' owner' : ''}`,
+      `[bridge:meta] CXr session=${sessionId} bridge=${bridgeSessionId} seq=${lastSequenceNum}${next.groupingId ? ` grouping=${next.groupingId}` : ''}${noHistoryBackfill ? ' noHistoryBackfill' : ''}${ownerAccountUuid ? ' owner' : ''}`,
     )
   }
 }
@@ -117,6 +135,7 @@ export function saveBridgeSessionMeta(
 export function getPersistedBridgeSession():
   | PersistedBridgeSession
   | undefined {
+  const current = getBridgeSessionMetaHostState().current
   if (!current?.bridgeSessionId) return undefined
   // densable: only if still the active session
   if (current.sessionId !== getSessionId()) return undefined
@@ -133,11 +152,11 @@ export function getPersistedBridgeSession():
 
 /** densable kEo — clear live bridge meta (full teardown / disable). */
 export function clearBridgeSessionMeta(): void {
-  current = null
+  getBridgeSessionMetaHostState().current = null
   logForDebugging('[bridge:meta] kEo cleared')
 }
 
 /** Test helper. */
 export function resetBridgeSessionMetaForTests(): void {
-  current = null
+  getBridgeSessionMetaHostState().current = null
 }

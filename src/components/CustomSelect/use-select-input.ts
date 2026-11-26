@@ -11,6 +11,7 @@ import {
   useOptionalKeybindingContext,
 } from '@anthropic/ink'
 import { useKeybindings } from '../../keybindings/useKeybinding.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import {
   normalizeFullWidthDigits,
   normalizeFullWidthSpace,
@@ -25,16 +26,69 @@ import type { SelectState } from './use-select-state.js'
  */
 export const SIGCONT_RESUME_GRACE_MS = 150
 
-let lastSigcontResumedAt = 0
+type SigcontHostState = {
+  lastSigcontResumedAt: number
+}
+
+const LIVE_SIGCONT_PRUNE_THRESHOLD = 64
+
+const liveSigcontHostStates = new Set<WeakRef<SigcontHostState>>()
+const sigcontHostStateRegistry =
+  typeof FinalizationRegistry === 'function'
+    ? new FinalizationRegistry<WeakRef<SigcontHostState>>(ref => {
+        liveSigcontHostStates.delete(ref)
+      })
+    : undefined
+
+function pruneDeadSigcontHostStates(): void {
+  for (const ref of liveSigcontHostStates) {
+    if (ref.deref() === undefined) {
+      liveSigcontHostStates.delete(ref)
+    }
+  }
+}
+
+const sigcontStateByHost = new HostSlot<SigcontHostState>(() => {
+  if (liveSigcontHostStates.size > LIVE_SIGCONT_PRUNE_THRESHOLD) {
+    pruneDeadSigcontHostStates()
+  }
+  const state: SigcontHostState = { lastSigcontResumedAt: 0 }
+  const ref = new WeakRef(state)
+  liveSigcontHostStates.add(ref)
+  sigcontHostStateRegistry?.register(state, ref)
+  return state
+})
+
+/** Test-only helper for verifying dead WeakRef pruning in multi-host runs. */
+export function _getLiveSigcontHostStateCountForTests(): number {
+  return liveSigcontHostStates.size
+}
+
+function getSigcontHostState(): SigcontHostState {
+  return sigcontStateByHost.of(getBootstrapSessionHost())
+}
+
+// Single process-wide SIGCONT hook fans out to live host slots without leaking
+// EventEmitter listeners across multi-host sessions.
 let sigcontListenerAttached = false
 
 function ensureSigcontListener(): void {
+  // Materialize the active host's slot so OS SIGCONT updates it.
+  getSigcontHostState()
   if (sigcontListenerAttached) return
   sigcontListenerAttached = true
   if (typeof process !== 'undefined' && typeof process.on === 'function') {
     try {
       process.on('SIGCONT', () => {
-        lastSigcontResumedAt = Date.now()
+        const now = Date.now()
+        for (const ref of liveSigcontHostStates) {
+          const state = ref.deref()
+          if (state === undefined) {
+            liveSigcontHostStates.delete(ref)
+          } else {
+            state.lastSigcontResumedAt = now
+          }
+        }
       })
     } catch {
       // SIGCONT is unsupported on Windows
@@ -43,17 +97,18 @@ function ensureSigcontListener(): void {
 }
 
 export function noteProcessResumed(now = Date.now()): void {
-  lastSigcontResumedAt = now
+  getSigcontHostState().lastSigcontResumedAt = now
 }
 
 export function resetProcessResumedForTests(): void {
-  lastSigcontResumedAt = 0
+  getSigcontHostState().lastSigcontResumedAt = 0
 }
 
 export function isWithinSigcontGraceWindow(
   now = Date.now(),
   graceMs = SIGCONT_RESUME_GRACE_MS,
 ): boolean {
+  const { lastSigcontResumedAt } = getSigcontHostState()
   if (lastSigcontResumedAt <= 0) return false
   const elapsed = now - lastSigcontResumedAt
   return elapsed >= 0 && elapsed < graceMs

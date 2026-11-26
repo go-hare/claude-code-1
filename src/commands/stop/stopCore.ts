@@ -13,20 +13,25 @@ import {
   registryJobIdFromEnv,
 } from '../../utils/concurrentSessions.js'
 import { gracefulShutdown } from '../../utils/gracefulShutdown.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
 export type ActiveAttachHandle = {
   close: () => void
 }
 
-let activeAttachHandle: ActiveAttachHandle | null = null
+const stopCoreHostSlot = new HostSlot<{
+  activeAttachHandle: ActiveAttachHandle | null
+}>(() => ({
+  activeAttachHandle: null,
+}))
 
 /** Official 2.1.331 `Fdn()` — active attached background session handle, or null. */
 export function getActiveAttachHandle(): ActiveAttachHandle | null {
-  return activeAttachHandle
+  return stopCoreHostSlot.of(getBootstrapSessionHost()).activeAttachHandle
 }
 
 export function setActiveAttachHandle(handle: ActiveAttachHandle | null): void {
-  activeAttachHandle = handle
+  stopCoreHostSlot.of(getBootstrapSessionHost()).activeAttachHandle = handle
 }
 
 /**

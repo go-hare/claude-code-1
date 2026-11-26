@@ -2,6 +2,10 @@ import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/
 import { logForDebugging } from '../../../utils/debug.js'
 import { execFileNoThrow } from '../../../utils/execFileNoThrow.js'
 import { logError } from '../../../utils/log.js'
+import {
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../../../utils/sessionHost.js'
 import { count } from '../../array.js'
 import { sleep } from '../../sleep.js'
 import {
@@ -19,14 +23,24 @@ import {
 import { registerTmuxBackend } from './registry.js'
 import type { CreatePaneResult, PaneBackend, PaneId } from './types.js'
 
-// Track whether the first pane has been used for external swarm session
-let firstPaneUsedForExternal = false
+type TmuxBackendHostState = {
+  // Track whether the first pane has been used for external swarm session
+  firstPaneUsedForExternal: boolean
+  // Cached leader window target (session:window format) to avoid repeated queries
+  cachedLeaderWindowTarget: string | null
+  // Lock mechanism to prevent race conditions when spawning teammates in parallel
+  paneCreationLock: Promise<void>
+}
 
-// Cached leader window target (session:window format) to avoid repeated queries
-let cachedLeaderWindowTarget: string | null = null
+const tmuxBackendHostSlot = new HostSlot<TmuxBackendHostState>(() => ({
+  firstPaneUsedForExternal: false,
+  cachedLeaderWindowTarget: null,
+  paneCreationLock: Promise.resolve(),
+}))
 
-// Lock mechanism to prevent race conditions when spawning teammates in parallel
-let paneCreationLock: Promise<void> = Promise.resolve()
+function getTmuxBackendHostState(): TmuxBackendHostState {
+  return tmuxBackendHostSlot.of(getBootstrapSessionHost())
+}
 
 // Delay after pane creation to allow shell initialization (loading rc files, prompts, etc.)
 // 200ms is enough for most shell configurations including slow ones like starship/oh-my-zsh
@@ -41,13 +55,14 @@ function waitForPaneShellReady(): Promise<void> {
  * Returns a release function that must be called when done.
  */
 function acquirePaneCreationLock(): Promise<() => void> {
+  const hostState = getTmuxBackendHostState()
   let release: () => void
   const newLock = new Promise<void>(resolve => {
     release = resolve
   })
 
-  const previousLock = paneCreationLock
-  paneCreationLock = newLock
+  const previousLock = hostState.paneCreationLock
+  hostState.paneCreationLock = newLock
 
   return previousLock.then(() => release!)
 }
@@ -434,9 +449,10 @@ export class TmuxBackend implements PaneBackend {
    * Caches the result since the leader's window won't change.
    */
   private async getCurrentWindowTarget(): Promise<string | null> {
+    const hostState = getTmuxBackendHostState()
     // Return cached value if available
-    if (cachedLeaderWindowTarget) {
-      return cachedLeaderWindowTarget
+    if (hostState.cachedLeaderWindowTarget) {
+      return hostState.cachedLeaderWindowTarget
     }
 
     // Build the command - use -t to target the leader's pane specifically
@@ -456,8 +472,8 @@ export class TmuxBackend implements PaneBackend {
       return null
     }
 
-    cachedLeaderWindowTarget = result.stdout.trim()
-    return cachedLeaderWindowTarget
+    hostState.cachedLeaderWindowTarget = result.stdout.trim()
+    return hostState.cachedLeaderWindowTarget
   }
 
   /**
@@ -679,13 +695,15 @@ export class TmuxBackend implements PaneBackend {
     if (paneCount === null) {
       throw new Error('Could not determine pane count for swarm window')
     }
-    const isFirstTeammate = !firstPaneUsedForExternal && paneCount === 1
+    const hostState = getTmuxBackendHostState()
+    const isFirstTeammate =
+      !hostState.firstPaneUsedForExternal && paneCount === 1
 
     let paneId: string
 
     if (isFirstTeammate) {
       paneId = firstPaneId
-      firstPaneUsedForExternal = true
+      hostState.firstPaneUsedForExternal = true
       logForDebugging(
         `[TmuxBackend] Using initial pane for first teammate ${teammateName}: ${paneId}`,
       )

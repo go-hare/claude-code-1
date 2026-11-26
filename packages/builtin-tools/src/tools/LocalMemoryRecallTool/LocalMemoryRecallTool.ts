@@ -9,6 +9,7 @@ import { buildTool, type ToolDef } from 'src/Tool.js'
 import { isValidKey } from 'src/utils/localValidate.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getRuleByContentsForToolName } from 'src/utils/permissions/permissions.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import {
   FETCH_CAP_BYTES,
@@ -44,7 +45,9 @@ import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 // H2 fix: undefined-key path no longer silently bypasses. We always charge a
 // known key; when no caller-supplied id is available we use a singleton
 // fallback so the global cap still enforces.
-const FETCH_BUDGET_USED = new Map<string, number>()
+const fetchBudgetUsedBySession = new RootSessionSlot<Map<string, number>>(
+  () => new Map<string, number>(),
+)
 const MAX_BUDGET_KEYS = 64
 const NO_TURN_KEY = '__no_turn_key__'
 
@@ -116,26 +119,24 @@ function deriveTurnKey(context: {
  * function must be migrated to Atomics or a lock — not a Map.
  */
 function consumeBudget(turnKey: string, bytes: number): boolean {
+  const budgetUsed = fetchBudgetUsedBySession.of(getBootstrapSession())
   // Read-modify-write is atomic on the JS event loop because there is no
   // `await` between the get and the set below.
-  const used = FETCH_BUDGET_USED.get(turnKey) ?? 0
+  const used = budgetUsed.get(turnKey) ?? 0
   if (used + bytes > PER_TURN_FETCH_BUDGET_BYTES) return false
   // FIFO eviction by Map insertion order (Map.keys() is insertion-ordered).
   // Bounded to MAX_BUDGET_KEYS to keep memory flat across long sessions.
-  if (
-    FETCH_BUDGET_USED.size >= MAX_BUDGET_KEYS &&
-    !FETCH_BUDGET_USED.has(turnKey)
-  ) {
-    const firstKey = FETCH_BUDGET_USED.keys().next().value
-    if (firstKey !== undefined) FETCH_BUDGET_USED.delete(firstKey)
+  if (budgetUsed.size >= MAX_BUDGET_KEYS && !budgetUsed.has(turnKey)) {
+    const firstKey = budgetUsed.keys().next().value
+    if (firstKey !== undefined) budgetUsed.delete(firstKey)
   }
-  FETCH_BUDGET_USED.set(turnKey, used + bytes)
+  budgetUsed.set(turnKey, used + bytes)
   return true
 }
 
 // Test-only: reset the bookkeeping. Not exported from the package barrel.
 export function _resetFetchBudgetForTest(): void {
-  FETCH_BUDGET_USED.clear()
+  fetchBudgetUsedBySession.peek(getBootstrapSession())?.clear()
 }
 
 // stripUntrustedControl: see stripUntrusted.ts for regex construction details.

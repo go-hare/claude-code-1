@@ -1,7 +1,6 @@
 import { createHash, createPrivateKey, X509Certificate } from 'crypto'
 import type * as https from 'https'
 import { Agent as HttpsAgent } from 'https'
-import memoize from 'lodash-es/memoize.js'
 import * as net from 'net'
 import * as tls from 'tls'
 import type * as undici from 'undici'
@@ -10,6 +9,7 @@ import { logForDebugging } from './debug.js'
 import { getFsImplementation } from './fsOperations.js'
 import { isEnvTruthy } from './envUtils.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionRoot.js'
 
 export type MTLSConfig = {
   cert?: string
@@ -48,19 +48,53 @@ export const MTLS_CERT_MAX_BYTES = 1_048_576
 const PEM_CERTIFICATE_BLOCK_RE =
   /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g
 
-// Official WKe / GKe file caches (path + content)
-let cachedClientCert: MtlsCertFileCacheEntry | null = null
-let cachedClientKey: MtlsCertFileCacheEntry | null = null
-// Official _4t agent cache (config+ca identity)
-let cachedAgentBundle: {
-  config: MTLSConfig | undefined
-  ca: string | string[] | Buffer | undefined
-  agent: HttpsAgent | undefined
-} | null = null
-
 type MtlsHttpsAgentFactory = (options: https.AgentOptions) => HttpsAgent
-let mtlsErrorClosingAgentFactory: MtlsHttpsAgentFactory | null = null
-let mtlsClosesAfterServerError = false
+
+export type DroppedCrossCertificatePair = {
+  cross: X509Certificate
+  root: X509Certificate
+}
+
+type MtlsHostState = {
+  // Official WKe / GKe file caches (path + content)
+  cachedClientCert: MtlsCertFileCacheEntry | null
+  cachedClientKey: MtlsCertFileCacheEntry | null
+  // Official _4t agent cache (config+ca identity)
+  cachedAgentBundle: {
+    config: MTLSConfig | undefined
+    ca: string | string[] | Buffer | undefined
+    agent: HttpsAgent | undefined
+  } | null
+  mtlsErrorClosingAgentFactory: MtlsHttpsAgentFactory | null
+  mtlsClosesAfterServerError: boolean
+  getMTLSConfigCache: Map<unknown, MTLSConfig | undefined>
+  getMTLSAgentCache: Map<unknown, HttpsAgent | undefined>
+  lastSyncedDefaultCACertList: string[] | undefined
+  droppedCrossCertificates: DroppedCrossCertificatePair[]
+  servedCertificates: X509Certificate[]
+  servedCrossCertificateSignerMissing: boolean
+  caCertsFromHost: boolean
+}
+
+// Official 2.1.331 [W-051/052]: per-host mTLS & cross-certificate state on SessionHost.
+const mtlsHostSlot = new HostSlot<MtlsHostState>(() => ({
+  cachedClientCert: null,
+  cachedClientKey: null,
+  cachedAgentBundle: null,
+  mtlsErrorClosingAgentFactory: null,
+  mtlsClosesAfterServerError: false,
+  getMTLSConfigCache: new Map(),
+  getMTLSAgentCache: new Map(),
+  lastSyncedDefaultCACertList: undefined,
+  droppedCrossCertificates: [],
+  servedCertificates: [],
+  servedCrossCertificateSignerMissing: false,
+  caCertsFromHost: false,
+}))
+
+function getMtlsHostState(): MtlsHostState {
+  return mtlsHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Wire `KeepAliveErrorClosingAgent` construction into `getMTLSAgent()` when
@@ -71,18 +105,21 @@ export function setMtlsErrorClosingAgentFactory(
   factory: MtlsHttpsAgentFactory | null,
   enabled: boolean,
 ): void {
-  mtlsErrorClosingAgentFactory = factory
-  mtlsClosesAfterServerError = enabled
-  if (cachedAgentBundle?.agent) {
-    cachedAgentBundle.agent.maxFreeSockets = 0
-    for (const sockets of Object.values(cachedAgentBundle.agent.freeSockets)) {
+  const state = getMtlsHostState()
+  state.mtlsErrorClosingAgentFactory = factory
+  state.mtlsClosesAfterServerError = enabled
+  if (state.cachedAgentBundle?.agent) {
+    state.cachedAgentBundle.agent.maxFreeSockets = 0
+    for (const sockets of Object.values(
+      state.cachedAgentBundle.agent.freeSockets,
+    )) {
       for (const sock of [...(sockets ?? [])]) {
         sock.destroy()
       }
     }
   }
   getMTLSAgent.cache.clear?.()
-  cachedAgentBundle = null
+  state.cachedAgentBundle = null
 }
 
 /**
@@ -286,9 +323,10 @@ export function getLoadedMtlsCertPaths(): {
   certPath: string | undefined
   keyPath: string | undefined
 } {
+  const state = getMtlsHostState()
   return {
-    certPath: cachedClientCert?.path,
-    keyPath: cachedClientKey?.path,
+    certPath: state.cachedClientCert?.path,
+    keyPath: state.cachedClientKey?.path,
   }
 }
 
@@ -299,31 +337,32 @@ export function getLoadedMtlsCertPaths(): {
 export function resolveMTLSConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): MTLSConfig | undefined {
+  const state = getMtlsHostState()
   const config: MTLSConfig = {}
 
   const certPath = env.CLAUDE_CODE_CLIENT_CERT
   if (certPath) {
-    if (cachedClientCert?.path !== certPath) {
-      cachedClientCert = loadMtlsCertFileSync(
+    if (state.cachedClientCert?.path !== certPath) {
+      state.cachedClientCert = loadMtlsCertFileSync(
         certPath,
         'client certificate from CLAUDE_CODE_CLIENT_CERT',
       )
     }
-    if (cachedClientCert?.path === certPath) {
-      config.cert = cachedClientCert.content
+    if (state.cachedClientCert?.path === certPath) {
+      config.cert = state.cachedClientCert.content
     }
   }
 
   const keyPath = env.CLAUDE_CODE_CLIENT_KEY
   if (keyPath) {
-    if (cachedClientKey?.path !== keyPath) {
-      cachedClientKey = loadMtlsCertFileSync(
+    if (state.cachedClientKey?.path !== keyPath) {
+      state.cachedClientKey = loadMtlsCertFileSync(
         keyPath,
         'client key from CLAUDE_CODE_CLIENT_KEY',
       )
     }
-    if (cachedClientKey?.path === keyPath) {
-      config.key = cachedClientKey.content
+    if (state.cachedClientKey?.path === keyPath) {
+      config.key = state.cachedClientKey.content
     }
   }
 
@@ -339,12 +378,33 @@ export function resolveMTLSConfigFromEnv(
   return config
 }
 
-/**
- * Get mTLS configuration from process.env (memoized).
- */
-export const getMTLSConfig = memoize((): MTLSConfig | undefined => {
-  return resolveMTLSConfigFromEnv(process.env)
+function getMTLSConfigImpl(): MTLSConfig | undefined {
+  const cache = getMtlsHostState().getMTLSConfigCache
+  if (cache.has(undefined)) {
+    return cache.get(undefined)
+  }
+  const result = resolveMTLSConfigFromEnv(process.env)
+  cache.set(undefined, result)
+  return result
+}
+
+Object.defineProperty(getMTLSConfigImpl, 'cache', {
+  get: () => getMtlsHostState().getMTLSConfigCache,
+  set: (next: Map<unknown, MTLSConfig | undefined>) => {
+    getMtlsHostState().getMTLSConfigCache = next
+  },
+  configurable: true,
+  enumerable: true,
 })
+
+/**
+ * Get mTLS configuration from process.env (memoized per SessionHost).
+ */
+export const getMTLSConfig = getMTLSConfigImpl as unknown as (() =>
+  | MTLSConfig
+  | undefined) & {
+  cache: Map<unknown, MTLSConfig | undefined>
+}
 
 /**
  * densable XEt — async reload client cert/key from env with mid-rotation
@@ -358,6 +418,7 @@ export async function reloadMtlsClientMaterialFromEnvAsync(input?: {
   ) => Promise<MtlsCertFileCacheEntry | null>
   onChanged?: () => void
 }): Promise<MtlsClientMaterialReloadResult> {
+  const state = getMtlsHostState()
   const env = input?.env ?? process.env
   const load =
     input?.loadFile ?? ((path, label) => loadMtlsCertFileAsync(path, label))
@@ -392,18 +453,22 @@ export async function reloadMtlsClientMaterialFromEnvAsync(input?: {
   // densable: on fail keep prior cache (lqe/cqe); on success take new material
   const appliedCert = certPath
     ? readFailed
-      ? cachedClientCert
+      ? state.cachedClientCert
       : nextCert
     : null
-  const appliedKey = keyPath ? (readFailed ? cachedClientKey : nextKey) : null
+  const appliedKey = keyPath
+    ? readFailed
+      ? state.cachedClientKey
+      : nextKey
+    : null
   const changed = didMtlsCertCacheChange({
-    prevCert: cachedClientCert,
-    prevKey: cachedClientKey,
+    prevCert: state.cachedClientCert,
+    prevKey: state.cachedClientKey,
     nextCert: appliedCert,
     nextKey: appliedKey,
   })
-  cachedClientCert = appliedCert
-  cachedClientKey = appliedKey
+  state.cachedClientCert = appliedCert
+  state.cachedClientKey = appliedKey
   if (changed) {
     clearMTLSCache()
     input?.onChanged?.()
@@ -509,24 +574,31 @@ export async function tryReloadMtlsOnStaleTlsConnection(input?: {
   }
 }
 
-/**
- * Create an HTTPS agent with mTLS configuration (official Joi densable).
- * Reuses agent when config+ca identity unchanged.
- */
-export const getMTLSAgent = memoize((): HttpsAgent | undefined => {
+function getMTLSAgentImpl(): HttpsAgent | undefined {
+  const state = getMtlsHostState()
+  const cache = state.getMTLSAgentCache
+  if (cache.has(undefined)) {
+    return cache.get(undefined)
+  }
   const mtlsConfig = getMTLSConfig()
   const caCerts = getCACertificates()
 
   if (
-    cachedAgentBundle &&
-    cachedAgentBundle.config === mtlsConfig &&
-    cachedAgentBundle.ca === caCerts
+    state.cachedAgentBundle &&
+    state.cachedAgentBundle.config === mtlsConfig &&
+    state.cachedAgentBundle.ca === caCerts
   ) {
-    return cachedAgentBundle.agent
+    cache.set(undefined, state.cachedAgentBundle.agent)
+    return state.cachedAgentBundle.agent
   }
 
   if (!mtlsConfig && !caCerts) {
-    cachedAgentBundle = { config: mtlsConfig, ca: caCerts, agent: undefined }
+    state.cachedAgentBundle = {
+      config: mtlsConfig,
+      ca: caCerts,
+      agent: undefined,
+    }
+    cache.set(undefined, undefined)
     return undefined
   }
 
@@ -538,12 +610,32 @@ export const getMTLSAgent = memoize((): HttpsAgent | undefined => {
 
   logForDebugging('mTLS: Creating HTTPS agent with custom certificates')
   const agent =
-    mtlsClosesAfterServerError && mtlsErrorClosingAgentFactory
-      ? mtlsErrorClosingAgentFactory(agentOptions)
+    state.mtlsClosesAfterServerError && state.mtlsErrorClosingAgentFactory
+      ? state.mtlsErrorClosingAgentFactory(agentOptions)
       : new HttpsAgent(agentOptions)
-  cachedAgentBundle = { config: mtlsConfig, ca: caCerts, agent }
+  state.cachedAgentBundle = { config: mtlsConfig, ca: caCerts, agent }
+  cache.set(undefined, agent)
   return agent
+}
+
+Object.defineProperty(getMTLSAgentImpl, 'cache', {
+  get: () => getMtlsHostState().getMTLSAgentCache,
+  set: (next: Map<unknown, HttpsAgent | undefined>) => {
+    getMtlsHostState().getMTLSAgentCache = next
+  },
+  configurable: true,
+  enumerable: true,
 })
+
+/**
+ * Create an HTTPS agent with mTLS configuration (official Joi densable).
+ * Reuses agent when config+ca identity unchanged.
+ */
+export const getMTLSAgent = getMTLSAgentImpl as unknown as (() =>
+  | HttpsAgent
+  | undefined) & {
+  cache: Map<unknown, HttpsAgent | undefined>
+}
 
 /**
  * Get TLS options for WebSocket connections
@@ -604,12 +696,13 @@ export function getTLSFetchOptions(): {
  * Official m0n densable — clear mTLS memo + agent bundle (+ optional file cache).
  */
 export function clearMTLSCache(opts?: { clearFileCache?: boolean }): void {
+  const state = getMtlsHostState()
   getMTLSConfig.cache.clear?.()
   getMTLSAgent.cache.clear?.()
-  cachedAgentBundle = null
+  state.cachedAgentBundle = null
   if (opts?.clearFileCache) {
-    cachedClientCert = null
-    cachedClientKey = null
+    state.cachedClientCert = null
+    state.cachedClientKey = null
   }
   logForDebugging('Cleared mTLS configuration cache')
 }
@@ -648,8 +741,6 @@ export function configureGlobalMTLS(): void {
 type TlsWithSetDefaultCACertificates = typeof tls & {
   setDefaultCACertificates?: (certs: readonly string[]) => void
 }
-
-let lastSyncedDefaultCACertList: string[] | undefined
 
 function trySetDefaultCACertificates(
   certs: readonly string[],
@@ -716,40 +807,44 @@ export function syncDefaultCACertificates(opts?: {
   const parsedCerts = parsedEntries
     .map(e => e.cert)
     .filter((c): c is X509Certificate => c !== undefined)
+  const state = getMtlsHostState()
   const env = opts?.env ?? process.env
   const allCrossPairs = probeCrossSignedRootPairs(parsedCerts, env)
   if (allCrossPairs.length > 0) {
-    servedCertificates = servedCertificates.filter(s =>
+    state.servedCertificates = state.servedCertificates.filter(s =>
       allCrossPairs.some(({ cross, root }) =>
         matchesCrossRootPair(s, cross, root),
       ),
     )
     const unmatchedPairs = allCrossPairs.filter(
       ({ cross, root }) =>
-        !servedCertificates.some(s => matchesCrossRootPair(s, cross, root)),
+        !state.servedCertificates.some(s =>
+          matchesCrossRootPair(s, cross, root),
+        ),
     )
-    droppedCrossCertificates = unmatchedPairs
+    state.droppedCrossCertificates = unmatchedPairs
     const unsignedPairs = allCrossPairs.filter(
       ({ cross }) =>
         !parsedCerts.some(c => c !== cross && c.subject === cross.issuer),
     )
-    servedCrossCertificateSignerMissing = servedCertificates.some(s =>
-      unsignedPairs.some(({ cross, root }) =>
-        matchesCrossRootPair(s, cross, root),
-      ),
+    state.servedCrossCertificateSignerMissing = state.servedCertificates.some(
+      s =>
+        unsignedPairs.some(({ cross, root }) =>
+          matchesCrossRootPair(s, cross, root),
+        ),
     )
-    if (servedCrossCertificateSignerMissing) {
+    if (state.servedCrossCertificateSignerMissing) {
       logForDebugging(
         'CA certs: A certificate that a server sent names a cross-certificate this list cut, and no certificate in the store issued that cross-certificate: a certificate error will say that its root is missing',
       )
     }
   } else {
-    droppedCrossCertificates = []
-    servedCrossCertificateSignerMissing = false
+    state.droppedCrossCertificates = []
+    state.servedCrossCertificateSignerMissing = false
   }
 
   const droppedCrossCertSet = new Set(
-    droppedCrossCertificates.map(p => p.cross),
+    state.droppedCrossCertificates.map(p => p.cross),
   )
   const effectiveBlocks =
     droppedCrossCertSet.size > 0
@@ -761,7 +856,7 @@ export function syncDefaultCACertificates(opts?: {
   if (effectiveBlocks.length === 0) return false
 
   if (trySetDefaultCACertificates(effectiveBlocks, setter)) {
-    lastSyncedDefaultCACertList = effectiveBlocks
+    state.lastSyncedDefaultCACertList = effectiveBlocks
     return true
   }
 
@@ -776,7 +871,7 @@ export function syncDefaultCACertificates(opts?: {
     )
   }
   if (valid.length > 0 && trySetDefaultCACertificates(valid, setter)) {
-    lastSyncedDefaultCACertList = valid
+    state.lastSyncedDefaultCACertList = valid
     return true
   }
   return false
@@ -785,20 +880,10 @@ export function syncDefaultCACertificates(opts?: {
 export function getLastSyncedDefaultCACertListForTesting():
   | readonly string[]
   | undefined {
-  return lastSyncedDefaultCACertList
+  return getMtlsHostState().lastSyncedDefaultCACertList
 }
 
 export const MAX_HELD_SERVED_CERTIFICATES = 8
-
-export type DroppedCrossCertificatePair = {
-  cross: X509Certificate
-  root: X509Certificate
-}
-
-let droppedCrossCertificates: DroppedCrossCertificatePair[] = []
-let servedCertificates: X509Certificate[] = []
-let servedCrossCertificateSignerMissing = false
-let caCertsFromHost = false
 
 function matchesCrossRootPair(
   cert: X509Certificate,
@@ -834,11 +919,12 @@ export function noteServerServedCertificates(
   certs: readonly X509Certificate[],
   nowMs: number = Date.now(),
 ): boolean {
-  if (caCertsFromHost) return false
-  const seen = new Set(servedCertificates.map(c => c.fingerprint256))
-  const unmatched = droppedCrossCertificates.filter(
+  const state = getMtlsHostState()
+  if (state.caCertsFromHost) return false
+  const seen = new Set(state.servedCertificates.map(c => c.fingerprint256))
+  const unmatched = state.droppedCrossCertificates.filter(
     ({ cross, root }) =>
-      !servedCertificates.some(s => matchesCrossRootPair(s, cross, root)),
+      !state.servedCertificates.some(s => matchesCrossRootPair(s, cross, root)),
   )
   const accepted: X509Certificate[] = []
   let ignored = 0
@@ -852,7 +938,7 @@ export function noteServerServedCertificates(
     )
     if (idx === -1) continue
     if (
-      servedCertificates.length + accepted.length >=
+      state.servedCertificates.length + accepted.length >=
       MAX_HELD_SERVED_CERTIFICATES
     ) {
       ignored++
@@ -868,7 +954,7 @@ export function noteServerServedCertificates(
     )
   }
   if (accepted.length === 0) return false
-  servedCertificates = [...servedCertificates, ...accepted]
+  state.servedCertificates = [...state.servedCertificates, ...accepted]
   logForDebugging(
     `CA certs: Noted ${accepted.length} certificate(s) that a server sent; they only choose which system cross-certificates stay and are not added to the CA list`,
   )
@@ -880,23 +966,27 @@ export function noteServerServedCertificates(
 
 /** Gold `_ai` @280017478 (#1368). */
 export function hasUnmatchedDroppedCrossCertificate(): boolean {
+  const state = getMtlsHostState()
   return (
-    !caCertsFromHost &&
-    droppedCrossCertificates.some(
+    !state.caCertsFromHost &&
+    state.droppedCrossCertificates.some(
       ({ cross, root }) =>
-        !servedCertificates.some(s => matchesCrossRootPair(s, cross, root)),
+        !state.servedCertificates.some(s =>
+          matchesCrossRootPair(s, cross, root),
+        ),
     )
   )
 }
 
 /** Gold `F4o` @280017599 (#1368). */
 export function getDroppedCrossCertificatesCount(): number {
-  return droppedCrossCertificates.length
+  return getMtlsHostState().droppedCrossCertificates.length
 }
 
 /** Gold `yai` @280017630 (#1368). */
 export function isServedCrossCertificateSignerMissing(): boolean {
-  return !caCertsFromHost && servedCrossCertificateSignerMissing
+  const state = getMtlsHostState()
+  return !state.caCertsFromHost && state.servedCrossCertificateSignerMissing
 }
 
 export function setDroppedCrossCertificatesStateForTesting(state: {
@@ -905,10 +995,11 @@ export function setDroppedCrossCertificatesStateForTesting(state: {
   signerMissing?: boolean
   fromHost?: boolean
 }): void {
-  droppedCrossCertificates = state.dropped ?? []
-  servedCertificates = state.served ?? []
-  servedCrossCertificateSignerMissing = state.signerMissing ?? false
-  caCertsFromHost = state.fromHost ?? false
+  const hostState = getMtlsHostState()
+  hostState.droppedCrossCertificates = state.dropped ?? []
+  hostState.servedCertificates = state.served ?? []
+  hostState.servedCrossCertificateSignerMissing = state.signerMissing ?? false
+  hostState.caCertsFromHost = state.fromHost ?? false
 }
 
 /**
@@ -1136,10 +1227,31 @@ export class KnownRootCertTable {
   }
 }
 
-export const knownHashes = new KnownRootCertTable()
+const knownHashesByHost = new HostSlot<KnownRootCertTable>(
+  () => new KnownRootCertTable(),
+)
+
+function getKnownHashesTable(): KnownRootCertTable {
+  return knownHashesByHost.of(getBootstrapSessionHost())
+}
+
+export const knownHashes: KnownRootCertTable = new Proxy(
+  new KnownRootCertTable(),
+  {
+    get(_target, prop) {
+      const table = getKnownHashesTable()
+      const value = Reflect.get(table, prop, table)
+      return typeof value === 'function' ? value.bind(table) : value
+    },
+    set(_target, prop, value) {
+      const table = getKnownHashesTable()
+      return Reflect.set(table, prop, value, table)
+    },
+  },
+)
 
 export function knownRootOf(pem: string): KnownRootCertEntry | undefined {
-  return knownHashes.knownRootOf(pem)
+  return getKnownHashesTable().knownRootOf(pem)
 }
 
 // ---------------------------------------------------------------------------

@@ -79,6 +79,12 @@ import {
 } from './processUserInput/promptSubmitWaits.js'
 import { resetTurnHookQueuedPrompts } from './processUserInput/turnHookQueuedPrompts.js'
 import { recordQueueOperation } from './sessionStorage.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  runWithSession,
+  type Session,
+} from './sessionRoot.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { createSignal, type Signal } from './signal.js'
 import { recordHandbackDelivery } from './subagentHandback.js'
@@ -97,23 +103,21 @@ export type QueueRecordHookRunner = (
   hookOrigin?: unknown,
 ) => Promise<string> | string | undefined
 
-let queueSessionReadyPromise: Promise<unknown> | null = null
-let customQueueRecordHookRunner: QueueRecordHookRunner | null = null
-
 /** densable `P8i` — hold queue record hooks until session load settles. */
 export function setQueueSessionReadyPromise(
   promise: Promise<unknown> | null,
 ): void {
+  const hostState = getHostQueueState()
   if (promise === null) {
-    queueSessionReadyPromise = null
+    hostState.queueSessionReadyPromise = null
     return
   }
   const clear = (): void => {
-    if (queueSessionReadyPromise === promise) {
-      queueSessionReadyPromise = null
+    if (hostState.queueSessionReadyPromise === promise) {
+      hostState.queueSessionReadyPromise = null
     }
   }
-  queueSessionReadyPromise = promise
+  hostState.queueSessionReadyPromise = promise
   promise.then(clear, clear)
 }
 
@@ -121,7 +125,7 @@ export function setQueueSessionReadyPromise(
 export function setQueueRecordHookRunner(
   runner: QueueRecordHookRunner | null,
 ): void {
-  customQueueRecordHookRunner = runner
+  getHostQueueState().customQueueRecordHookRunner = runner
 }
 
 function defaultQueueRecordHookRunner(
@@ -206,16 +210,57 @@ function logQueueRecordError(err: unknown): void {
   }
 }
 
-/**
- * densable `Qvo(e)` — wraps `insertQueueOperation` / `recordQueueOperation`
- * with FIFO ordering, `session.append` `{ door: 'queue' }` rewrite, and a
- * 1000ms `.unref()` timeout fallback so disk persistence never stalls.
- */
-export function createQueueRecordWriter(
+type QueueRecordWriterController = {
+  close: (discardWrites?: boolean) => void
+}
+
+function registerQueueWriterCleanup(
+  controller: QueueRecordWriterController,
+  state?: HostQueueState,
+): void {
+  const controllerRef = new WeakRef(controller)
+  const stateRef = state ? new WeakRef(state) : undefined
+  let sessionRef: WeakRef<Session> | undefined
+  try {
+    const rootSession = getBootstrapSession().root
+    if (rootSession) {
+      sessionRef = new WeakRef(rootSession)
+    }
+  } catch {
+    // Ignore when sessionRoot is partially mocked in unit tests
+  }
+  registerCleanup(async () => {
+    const liveController = controllerRef.deref()
+    if (!liveController) return
+    if (stateRef && stateRef.deref() === undefined) return
+    const targetSession = sessionRef?.deref()
+    if (targetSession) {
+      let alreadyCurrent = false
+      try {
+        alreadyCurrent = getBootstrapSession().root === targetSession
+      } catch {
+        // Fall through to runWithSession
+      }
+      if (alreadyCurrent) {
+        liveController.close()
+      } else {
+        runWithSession(targetSession, () => {
+          liveController.close()
+        })
+      }
+      return
+    }
+    // If sessionRef was recorded and has been GC'd, clear timers without writing
+    // into defaultBootstrapSession's transcript.
+    liveController.close(sessionRef !== undefined)
+  })
+}
+
+function createHostQueueRecordWriter(
   writeRecord: (record: QueueOperationMessage) => void,
-  options?: { timeoutMs?: number },
+  timeoutMs: number,
+  resolveHostState: () => HostQueueState,
 ): (record: QueueOperationMessage, hookOrigin?: unknown) => void {
-  const timeoutMs = options?.timeoutMs ?? QUEUE_RECORD_HOOK_TIMEOUT_MS
   const queue: QueueOperationMessage[] = []
   const inFlight = new Map<
     QueueOperationMessage,
@@ -242,8 +287,11 @@ export function createQueueRecordWriter(
     }
   }
 
-  function drainWaiting(settledPromise?: Promise<unknown>): void {
-    const current = queueSessionReadyPromise
+  function drainWaiting(
+    hostState: HostQueueState,
+    settledPromise?: Promise<unknown>,
+  ): void {
+    const current = hostState.queueSessionReadyPromise
     const ready = current === null || current === settledPromise
     for (const [rec, start] of ready ? waitingReady : []) {
       waitingReady.delete(rec)
@@ -257,6 +305,7 @@ export function createQueueRecordWriter(
   }
 
   function settleRecord(
+    hostState: HostQueueState,
     orig: QueueOperationMessage,
     updated: QueueOperationMessage,
   ): void {
@@ -268,78 +317,89 @@ export function createQueueRecordWriter(
     if (idx !== -1) {
       queue[idx] = updated
     }
-    drainWaiting()
+    drainWaiting(hostState)
   }
 
-  function closeWriter(): void {
-    isClosed = true
-    for (const timer of inFlight.values()) {
-      clearTimeout(timer)
-    }
-    inFlight.clear()
-    waitingReady.clear()
-    flushHead()
+  const controller: QueueRecordWriterController = {
+    close(discardWrites = false): void {
+      isClosed = true
+      for (const timer of inFlight.values()) {
+        clearTimeout(timer)
+      }
+      inFlight.clear()
+      waitingReady.clear()
+      if (discardWrites) {
+        queue.length = 0
+        return
+      }
+      flushHead()
+    },
   }
 
-  function ensureCleanup(): void {
+  function ensureCleanup(hostState: HostQueueState): void {
     if (!cleanupRegistered) {
       cleanupRegistered = true
-      registerCleanup(async () => {
-        closeWriter()
-      })
+      registerQueueWriterCleanup(controller, hostState)
     }
   }
 
   function startHook(
+    hostState: HostQueueState,
     record: QueueOperationMessage,
     content: string,
     hookOrigin?: unknown,
   ): boolean {
-    const runner = customQueueRecordHookRunner ?? defaultQueueRecordHookRunner
+    const runner =
+      hostState.customQueueRecordHookRunner ?? defaultQueueRecordHookRunner
     const result = runner(content, hookOrigin)
     if (result === undefined) return false
-    ensureCleanup()
-    const timer = setTimeout(settleRecord, timeoutMs, record, record)
+    ensureCleanup(hostState)
+    const timer = setTimeout(settleRecord, timeoutMs, hostState, record, record)
     timer.unref?.()
     inFlight.set(record, timer)
     Promise.resolve(result).then(
       rewritten => {
         if (typeof rewritten === 'string') {
-          settleRecord(record, { ...record, content: rewritten })
+          settleRecord(hostState, record, { ...record, content: rewritten })
           return
         }
         logQueueRecordError(
           new Error('A queue record came back from its hooks no text'),
         )
-        settleRecord(record, record)
+        settleRecord(hostState, record, record)
       },
       err => {
         logQueueRecordError(err)
-        settleRecord(record, record)
+        settleRecord(hostState, record, record)
       },
     )
     return true
   }
 
   return (record: QueueOperationMessage, hookOrigin?: unknown): void => {
+    // Keep controller reachable for the lifetime of this writer function.
+    void controller
+    const hostState = resolveHostState()
     const { content } = record
     const canHook = typeof content === 'string' && !isClosed
-    const ready = queueSessionReadyPromise
+    const ready = hostState.queueSessionReadyPromise
     if (canHook && (ready !== null || waitingReady.size > 0)) {
       queue.push(record)
-      waitingReady.set(record, () => startHook(record, content, hookOrigin))
-      ensureCleanup()
+      waitingReady.set(record, () =>
+        startHook(hostState, record, content, hookOrigin),
+      )
+      ensureCleanup(hostState)
       if (ready !== null && waitingReady.size === 1) {
         ready.then(
-          () => drainWaiting(ready),
-          () => drainWaiting(ready),
+          () => drainWaiting(hostState, ready),
+          () => drainWaiting(hostState, ready),
         )
       }
       return
     }
     let started = false
     try {
-      started = canHook && startHook(record, content, hookOrigin)
+      started = canHook && startHook(hostState, record, content, hookOrigin)
     } catch (err) {
       logQueueRecordError(err)
       queue.push(record)
@@ -354,9 +414,20 @@ export function createQueueRecordWriter(
   }
 }
 
-const defaultQueueRecordWriter = createQueueRecordWriter(queueOp => {
-  void recordQueueOperation(queueOp)
-})
+/**
+ * densable `Qvo(e)` — wraps `insertQueueOperation` / `recordQueueOperation`
+ * with FIFO ordering, `session.append` `{ door: 'queue' }` rewrite, and a
+ * 1000ms `.unref()` timeout fallback so disk persistence never stalls.
+ */
+export function createQueueRecordWriter(
+  writeRecord: (record: QueueOperationMessage) => void,
+  options?: { timeoutMs?: number },
+): (record: QueueOperationMessage, hookOrigin?: unknown) => void {
+  const timeoutMs = options?.timeoutMs ?? QUEUE_RECORD_HOOK_TIMEOUT_MS
+  return createHostQueueRecordWriter(writeRecord, timeoutMs, () =>
+    getHostQueueState(),
+  )
+}
 
 function logOperation(operation: QueueOperation, content?: string): void {
   const sessionId = getSessionId()
@@ -367,7 +438,7 @@ function logOperation(operation: QueueOperation, content?: string): void {
     sessionId,
     ...(content !== undefined && { content }),
   }
-  defaultQueueRecordWriter(queueOp)
+  getHostQueueState().queueRecordWriter(queueOp)
 }
 
 // ============================================================================
@@ -1525,22 +1596,72 @@ export function createMessageQueue(): MessageQueueInstance {
   return new MessageQueueInstance()
 }
 
+/**
+ * Official 2.1.331 per-`SessionHost` message queue state bag (`WeakMap<SessionHost, HostQueueState>`),
+ * isolating queued commands, pending notifications, subscribers, fold-in-flight /
+ * cancel-pending sets, and queue-record hook plumbing across concurrent hosts.
+ */
+export type HostQueueState = {
+  readonly defaultQueue: MessageQueueInstance
+  activeQueue: MessageQueueInstance
+  queueSessionReadyPromise: Promise<unknown> | null
+  customQueueRecordHookRunner: QueueRecordHookRunner | null
+  readonly queueRecordWriter: (
+    record: QueueOperationMessage,
+    hookOrigin?: unknown,
+  ) => void
+}
+
+const hostQueueStates = new WeakMap<object, HostQueueState>()
+
+export function getHostQueueState(
+  host: object = getBootstrapSessionHost(),
+): HostQueueState {
+  let state = hostQueueStates.get(host)
+  if (state === undefined) {
+    const hostDefaultQueue = createMessageQueue()
+    let created!: HostQueueState
+    const queueRecordWriter = createHostQueueRecordWriter(
+      queueOp => {
+        void recordQueueOperation(queueOp)
+      },
+      QUEUE_RECORD_HOOK_TIMEOUT_MS,
+      () => created,
+    )
+    created = {
+      defaultQueue: hostDefaultQueue,
+      activeQueue: hostDefaultQueue,
+      queueSessionReadyPromise: null,
+      customQueueRecordHookRunner: null,
+      queueRecordWriter,
+    }
+    hostQueueStates.set(host, created)
+    state = created
+  }
+  return state
+}
+
+/** Sentinel default queue token preserved for `setActiveMessageQueue(defaultQueue)` callers. */
 export const defaultQueue = createMessageQueue()
-let activeQueue: MessageQueueInstance = defaultQueue
+
+function activeQueue(): MessageQueueInstance {
+  return getHostQueueState().activeQueue
+}
 
 export function getActiveMessageQueue(): MessageQueueInstance {
-  return activeQueue
+  return activeQueue()
 }
 
 export function setActiveMessageQueue(queue: MessageQueueInstance): void {
-  activeQueue = queue
+  const state = getHostQueueState()
+  state.activeQueue = queue === defaultQueue ? state.defaultQueue : queue
 }
 
 export const subscribeCommandsConsumed: Signal<[QueuedCommand[]]>['subscribe'] =
-  listener => activeQueue.subscribeCommandsConsumed(listener)
+  listener => activeQueue().subscribeCommandsConsumed(listener)
 export const subscribeCommandsDiscarded: Signal<
   [QueuedCommand[]]
->['subscribe'] = listener => activeQueue.subscribeCommandsDiscarded(listener)
+>['subscribe'] = listener => activeQueue().subscribeCommandsDiscarded(listener)
 
 // ============================================================================
 // useSyncExternalStore interface
@@ -1551,7 +1672,7 @@ export const subscribeCommandsDiscarded: Signal<
  * Compatible with React's useSyncExternalStore.
  */
 export const subscribeToCommandQueue: Signal['subscribe'] = listener =>
-  activeQueue.subscribe(listener)
+  activeQueue().subscribe(listener)
 
 /**
  * Get current snapshot of the command queue.
@@ -1559,7 +1680,7 @@ export const subscribeToCommandQueue: Signal['subscribe'] = listener =>
  * Returns a frozen array that only changes reference on mutation.
  */
 export function getCommandQueueSnapshot(): readonly QueuedCommand[] {
-  return activeQueue.getSnapshot()
+  return activeQueue().getSnapshot()
 }
 
 // ============================================================================
@@ -1571,7 +1692,7 @@ export function getCommandQueueSnapshot(): readonly QueuedCommand[] {
  * Use for one-off reads where you need the actual commands.
  */
 export function getCommandQueue(): QueuedCommand[] {
-  return activeQueue.getCommands()
+  return activeQueue().getCommands()
 }
 
 /**
@@ -1579,7 +1700,7 @@ export function getCommandQueue(): QueuedCommand[] {
  * densable j4i — full queue including nested/subagent-addressed entries.
  */
 export function getCommandQueueLength(): number {
-  return activeQueue.getLength()
+  return activeQueue().getLength()
 }
 
 /**
@@ -1590,14 +1711,14 @@ export function getCommandQueueLength(): number {
  * getCommandQueueLength().
  */
 export function getMainThreadQueueLength(): number {
-  return activeQueue.getMainThreadLength()
+  return activeQueue().getMainThreadLength()
 }
 
 /**
  * Check if there are commands in the queue.
  */
 export function hasCommandsInQueue(): boolean {
-  return activeQueue.hasCommands()
+  return activeQueue().hasCommands()
 }
 
 /**
@@ -1608,7 +1729,7 @@ export function hasCommandsInQueue(): boolean {
  * the rewind message selector (densable 2.1.216 #12).
  */
 export function hasEditableCommandsInQueue(): boolean {
-  return activeQueue.hasEditableCommands()
+  return activeQueue().hasEditableCommands()
 }
 
 /**
@@ -1617,7 +1738,7 @@ export function hasEditableCommandsInQueue(): boolean {
  * are picked up by useSyncExternalStore consumers.
  */
 export function recheckCommandQueue(): void {
-  activeQueue.recheck()
+  activeQueue().recheck()
 }
 
 // ============================================================================
@@ -1834,7 +1955,7 @@ function isVerifiedPeerOrigin(origin: PeerQueueOrigin): boolean {
 
 /** densable Un — count of queued cross-session peer commands. */
 export function countQueuedPeerMessages(): number {
-  return activeQueue.countQueuedPeerMessages()
+  return activeQueue().countQueuedPeerMessages()
 }
 
 function peerCommandBody(command: QueuedCommand): string {
@@ -1897,7 +2018,7 @@ export function enqueueReportingAdmission(
   command: QueuedCommand,
   opts: EnqueueReportingAdmissionOpts = {},
 ): ReportingAdmissionResult {
-  return activeQueue.enqueueReportingAdmission(command, opts)
+  return activeQueue().enqueueReportingAdmission(command, opts)
 }
 
 /**
@@ -1909,14 +2030,14 @@ export function enqueueReportingAdmission(
  * densable `xr` → `ds`: enqueue routes through enqueueReportingAdmission.
  */
 export function enqueue(command: QueuedCommand): void {
-  activeQueue.enqueue(command)
+  activeQueue().enqueue(command)
 }
 
 /**
  * densable `Te` — mark queued uuids as fold-in-flight.
  */
 export function registerFoldInFlight(commands: Array<{ uuid?: string }>): void {
-  activeQueue.registerFoldInFlight(commands)
+  activeQueue().registerFoldInFlight(commands)
 }
 
 /**
@@ -1925,22 +2046,22 @@ export function registerFoldInFlight(commands: Array<{ uuid?: string }>): void {
 export function unregisterFoldInFlight(
   commands: Array<{ uuid?: string }>,
 ): void {
-  activeQueue.unregisterFoldInFlight(commands)
+  activeQueue().unregisterFoldInFlight(commands)
 }
 
 /** densable `Pe`. */
 export function isFoldInFlight(uuid: string): boolean {
-  return activeQueue.isFoldInFlight(uuid)
+  return activeQueue().isFoldInFlight(uuid)
 }
 
 /** densable `Ze`. */
 export function suspendMidTurnFold(): void {
-  activeQueue.suspendMidTurnFold()
+  activeQueue().suspendMidTurnFold()
 }
 
 /** densable `Ft` — `qe || Mr()`. */
 export function isMidTurnFoldSuspended(): boolean {
-  return activeQueue.isMidTurnFoldSuspended()
+  return activeQueue().isMidTurnFoldSuspended()
 }
 
 /**
@@ -1948,7 +2069,7 @@ export function isMidTurnFoldSuspended(): boolean {
  * False when missing, already now, or fold-in-flight.
  */
 export function promoteToNow(uuid: string): boolean {
-  return activeQueue.promoteToNow(uuid)
+  return activeQueue().promoteToNow(uuid)
 }
 
 /**
@@ -1958,7 +2079,7 @@ export function demoteFromNow(
   uuid: string,
   raisedFrom: QueuePriority,
 ): boolean {
-  return activeQueue.demoteFromNow(uuid, raisedFrom)
+  return activeQueue().demoteFromNow(uuid, raisedFrom)
 }
 
 /**
@@ -1966,7 +2087,7 @@ export function demoteFromNow(
  * REPL typed send-now still flushes the main-thread batch.
  */
 export function promoteMainThreadQueueToNow(): number {
-  return activeQueue.promoteMainThreadQueueToNow()
+  return activeQueue().promoteMainThreadQueueToNow()
 }
 
 /**
@@ -1982,7 +2103,7 @@ export function enqueuePendingNotification(
   command: QueuedCommand,
   opts?: { turnAttribution?: 'inherit' | 'none' },
 ): void {
-  activeQueue.enqueuePendingNotification(command, opts)
+  activeQueue().enqueuePendingNotification(command, opts)
 }
 
 const PRIORITY_ORDER: Record<QueuePriority, number> = {
@@ -2004,7 +2125,7 @@ const PRIORITY_ORDER: Record<QueuePriority, number> = {
 export function dequeue(
   filter?: (cmd: QueuedCommand) => boolean,
 ): QueuedCommand | undefined {
-  return activeQueue.dequeue(filter)
+  return activeQueue().dequeue(filter)
 }
 
 /**
@@ -2012,7 +2133,7 @@ export function dequeue(
  * Logs a dequeue operation for each command.
  */
 export function dequeueAll(): QueuedCommand[] {
-  return activeQueue.dequeueAll()
+  return activeQueue().dequeueAll()
 }
 
 /**
@@ -2022,7 +2143,7 @@ export function dequeueAll(): QueuedCommand[] {
 export function peek(
   filter?: (cmd: QueuedCommand) => boolean,
 ): QueuedCommand | undefined {
-  return activeQueue.peek(filter)
+  return activeQueue().peek(filter)
 }
 
 /**
@@ -2039,7 +2160,7 @@ export function settleScreening(
         drainOnly?: boolean
       },
 ): boolean {
-  return activeQueue.settleScreening(uuid, update)
+  return activeQueue().settleScreening(uuid, update)
 }
 
 /**
@@ -2049,7 +2170,7 @@ export function settleScreening(
 export function dequeueAllMatching(
   predicate: (cmd: QueuedCommand) => boolean,
 ): QueuedCommand[] {
-  return activeQueue.dequeueAllMatching(predicate)
+  return activeQueue().dequeueAllMatching(predicate)
 }
 
 /**
@@ -2058,7 +2179,7 @@ export function dequeueAllMatching(
  * queue (e.g. from getCommandsByMaxPriority).
  */
 export function remove(commandsToRemove: QueuedCommand[]): void {
-  activeQueue.remove(commandsToRemove)
+  activeQueue().remove(commandsToRemove)
 }
 
 /**
@@ -2070,67 +2191,67 @@ export function consume(
   commandsToConsume: QueuedCommand[],
   opts?: { reason?: string },
 ): void {
-  activeQueue.consume(commandsToConsume, opts)
+  activeQueue().consume(commandsToConsume, opts)
 }
 
 /** Official 2.1.328 (`va`): arm the interrupt requeue deadline for the last mid-turn absorbed prompt. */
 export function startRequeueWindow(): void {
-  activeQueue.startRequeueWindow()
+  activeQueue().startRequeueWindow()
 }
 
 /** Official 2.1.328 (`Xl`): close the interrupt requeue window; clear putBack set when `turnEnded`. */
 export function settleTaken(opts?: { turnEnded?: boolean }): void {
-  activeQueue.settleTaken(opts)
+  activeQueue().settleTaken(opts)
 }
 
 /** Official 2.1.328 (`Ja`): cancel interrupt requeue eligibility for `uuid`. */
 export function forgoRequeue(uuid: string): void {
-  activeQueue.forgoRequeue(uuid)
+  activeQueue().forgoRequeue(uuid)
 }
 
 /** Official 2.1.328 (`Ia`): resurrect the last mid-turn absorbed prompt if still within its window. */
 export function requeueTaken(): QueuedCommand | undefined {
-  return activeQueue.requeueTaken()
+  return activeQueue().requeueTaken()
 }
 
 /** Official 2.1.328 (`Fa`): whether `uuid` was resurrected via `requeueTaken()`. */
 export function wasPutBack(uuid: string): boolean {
-  return activeQueue.wasPutBack(uuid)
+  return activeQueue().wasPutBack(uuid)
 }
 
 /** Official 2.1.328 (`il`): fate of a folded prompt copy ('drop' | 'wait' | 'keep'). */
 export function foldCopyFate(uuid: string): 'drop' | 'wait' | 'keep' {
-  return activeQueue.foldCopyFate(uuid)
+  return activeQueue().foldCopyFate(uuid)
 }
 
 /** Official 2.1.328 (`Cu`): mark folded copy written so it will no longer be requeued. */
 export function foldCopyWritten(uuid: string): void {
-  activeQueue.foldCopyWritten(uuid)
+  activeQueue().foldCopyWritten(uuid)
 }
 
 /** Official 2.1.328 (`Md`): remaining ms in the armed requeue window. */
 export function requeueWindowLeftMs(): number | undefined {
-  return activeQueue.requeueWindowLeftMs()
+  return activeQueue().requeueWindowLeftMs()
 }
 
 /** Official 2.1.328 (`$e`): temporarily hold matching commands passive until release is called. */
 export function holdBack(holds: (cmd: QueuedCommand) => boolean): () => number {
-  return activeQueue.holdBack(holds)
+  return activeQueue().holdBack(holds)
 }
 
 /** Official 2.1.328 (`Le`): release a subset of held-back commands matching `pred`. */
 export function letHeldBackGo(pred: (cmd: QueuedCommand) => boolean): number {
-  return activeQueue.letHeldBackGo(pred)
+  return activeQueue().letHeldBackGo(pred)
 }
 
 /** Official 2.1.328 (`ys`): stage a command to run ahead after the current turn finishes. */
 export function queueAfterTurn(cmd: QueuedCommand): void {
-  activeQueue.queueAfterTurn(cmd)
+  activeQueue().queueAfterTurn(cmd)
 }
 
 /** Official 2.1.328 (`Hi`): release staged post-turn commands ahead unless a `'now'` command waits. */
 export function releaseQueuedAfterTurn(): void {
-  activeQueue.releaseQueuedAfterTurn()
+  activeQueue().releaseQueuedAfterTurn()
 }
 
 /**
@@ -2140,7 +2261,7 @@ export function releaseQueuedAfterTurn(): void {
 export function removeByFilter(
   predicate: (cmd: QueuedCommand) => boolean,
 ): QueuedCommand[] {
-  return activeQueue.removeByFilter(predicate)
+  return activeQueue().removeByFilter(predicate)
 }
 
 /**
@@ -2148,7 +2269,7 @@ export function removeByFilter(
  * Used by ESC cancellation to discard queued notifications.
  */
 export function clearCommandQueue(): void {
-  activeQueue.clear()
+  activeQueue().clear()
 }
 
 /**
@@ -2156,8 +2277,10 @@ export function clearCommandQueue(): void {
  * Used for test cleanup.
  */
 export function resetCommandQueue(): void {
-  activeQueue.reset()
-  activeQueue = defaultQueue
+  const state = getHostQueueState()
+  state.activeQueue.reset()
+  state.activeQueue = state.defaultQueue
+  state.defaultQueue.reset()
   defaultQueue.reset()
   resetPromptSubmitWaits()
   resetCommandRunWaits()
@@ -2172,22 +2295,22 @@ export function markCancelPending(
   uuid: string,
   opts?: { terminalEmitted?: boolean },
 ): boolean {
-  return activeQueue.markCancelPending(uuid, opts)
+  return activeQueue().markCancelPending(uuid, opts)
 }
 
 /** densable `ye` — consume (delete) a pending cancel. */
 export function consumeCancelPending(uuid: string): boolean {
-  return activeQueue.consumeCancelPending(uuid)
+  return activeQueue().consumeCancelPending(uuid)
 }
 
 /** densable `ke` — consume the terminal-emitted ack. */
 export function consumeCancelPendingAcked(uuid: string): boolean {
-  return activeQueue.consumeCancelPendingAcked(uuid)
+  return activeQueue().consumeCancelPendingAcked(uuid)
 }
 
 /** densable `Se`. */
 export function hasCancelPendingAcked(uuid: string): boolean {
-  return activeQueue.hasCancelPendingAcked(uuid)
+  return activeQueue().hasCancelPendingAcked(uuid)
 }
 
 /**
@@ -2195,7 +2318,7 @@ export function hasCancelPendingAcked(uuid: string): boolean {
  * Cuy sets this synchronously after dequeue, before executeInput.
  */
 export function setInFlightDrainBatch(batch: QueuedCommand[]): void {
-  activeQueue.setInFlightDrainBatch(batch)
+  activeQueue().setInFlightDrainBatch(batch)
 }
 
 /**
@@ -2203,7 +2326,7 @@ export function setInFlightDrainBatch(batch: QueuedCommand[]): void {
  * or is the same reference currently held (a newer drain must not be wiped).
  */
 export function clearInFlightDrainBatch(batch?: QueuedCommand[]): void {
-  activeQueue.clearInFlightDrainBatch(batch)
+  activeQueue().clearInFlightDrainBatch(batch)
 }
 
 /**
@@ -2212,7 +2335,7 @@ export function clearInFlightDrainBatch(batch?: QueuedCommand[]): void {
 export function someInFlightDrainCommand(
   pred?: (cmd: QueuedCommand) => boolean,
 ): boolean {
-  return activeQueue.someInFlightDrainCommand(pred)
+  return activeQueue().someInFlightDrainCommand(pred)
 }
 
 // ============================================================================
@@ -2248,18 +2371,18 @@ export function isQueuedCommandEditable(cmd: QueuedCommand): boolean {
 // ============================================================================
 
 export function tryBeginPollCall(agentId?: string): boolean {
-  return activeQueue.tryBeginPollCall(agentId)
+  return activeQueue().tryBeginPollCall(agentId)
 }
 
 export function endPollCall(agentId?: string): void {
-  activeQueue.endPollCall(agentId)
+  return activeQueue().endPollCall(agentId)
 }
 
 export function drainPollEventChunk(agentId?: string): {
   commands: QueuedCommand[]
   remainingWakeCount: number
 } {
-  return activeQueue.drainPollEventChunk(agentId)
+  return activeQueue().drainPollEventChunk(agentId)
 }
 
 export function enqueueReplEvalPollEvent(opts: {
@@ -2311,7 +2434,7 @@ export function enqueueReplEvalPollEvent(opts: {
       ...(opts.media !== undefined && { media: opts.media }),
     },
   })
-  activeQueue.enqueue(cmd)
+  activeQueue().enqueue(cmd)
 }
 
 export function enqueueReplStatusPollEvent(opts: {
@@ -2350,7 +2473,7 @@ export function enqueueReplStatusPollEvent(opts: {
       wake: false,
     },
   })
-  activeQueue.enqueue(cmd)
+  activeQueue().enqueue(cmd)
 }
 
 /** densable `tp && uf` — main-thread editable, for T7e / zZe. */
@@ -2603,7 +2726,7 @@ export function isPoppableEditableCommand(
 export function hasPoppableEditableCommandsInQueue(
   inputEmpty: boolean,
 ): boolean {
-  return activeQueue.hasPoppableEditableCommands(inputEmpty)
+  return activeQueue().hasPoppableEditableCommands(inputEmpty)
 }
 
 /**
@@ -2617,7 +2740,7 @@ export function popAllEditable(
   currentCursorOffset: number,
   currentPastedContents: Record<number, PastedContent> = {},
 ): PopAllEditableResult | undefined {
-  return activeQueue.popAllEditable(
+  return activeQueue().popAllEditable(
     currentInput,
     currentCursorOffset,
     currentPastedContents,
@@ -2637,7 +2760,7 @@ export function popEditableAt(
   currentCursorOffset: number,
   currentPastedContents: Record<number, PastedContent> = {},
 ): PopEditableAtResult | undefined {
-  return activeQueue.popEditableAt(
+  return activeQueue().popEditableAt(
     index,
     currentInput,
     currentCursorOffset,
@@ -2701,7 +2824,7 @@ export function clampQueueEditIndex(
 export function getCommandsByMaxPriority(
   maxPriority: QueuePriority,
 ): QueuedCommand[] {
-  return activeQueue.getCommandsByMaxPriority(maxPriority)
+  return activeQueue().getCommandsByMaxPriority(maxPriority)
 }
 
 /**
@@ -2711,7 +2834,7 @@ export function getCommandsByMaxPriority(
 export function countRemainingWakePollEventsAfter(
   taken: readonly QueuedCommand[],
 ): number {
-  return activeQueue.countRemainingWakePollEventsAfter(taken)
+  return activeQueue().countRemainingWakePollEventsAfter(taken)
 }
 
 /**

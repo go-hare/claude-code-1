@@ -46,6 +46,7 @@ import {
 } from '../../utils/plugins/functionHooksModules.js';
 import { getRenderVersion, subscribeRenderInvalidation } from '../../utils/render/invalidateAllRenders.js';
 import { isMacOsKeychainLocked } from '../../utils/secureStorage/macOsKeychainStorage.js';
+import { getBootstrapSession, RootSessionSlot } from '../../utils/sessionRoot.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { InterruptedByUser } from '../InterruptedByUser.js';
 import { Markdown } from '../Markdown.js';
@@ -57,7 +58,7 @@ import { RateLimitMessage } from './RateLimitMessage.js';
 const MAX_API_ERROR_CHARS = 1000;
 const OVERLOAD_ERROR_MESSAGE = 'Overloaded';
 const FABLE_OFF_SWITCH_MESSAGE = 'Fable is experiencing high load, please use /model to switch to Sonnet';
-let assistantMessageRenderSeq = 0;
+const assistantMessageRenderSeqBySession = new RootSessionSlot<{ seq: number }>(() => ({ seq: 0 }));
 
 function getUiRenderVersion(): number {
   return getRenderVersion('ui.render');
@@ -383,7 +384,7 @@ function AssistantTextMessageWithRenderHook(
   const { subscribeFrames } = useApp();
   const fallbackIdRef = useRef<string | null>(null);
   if (fallbackIdRef.current === null) {
-    fallbackIdRef.current = `assistant_${++assistantMessageRenderSeq}`;
+    fallbackIdRef.current = `assistant_${++assistantMessageRenderSeqBySession.of(getBootstrapSession()).seq}`;
   }
   const requestId = props.messageId ?? fallbackIdRef.current;
   const { text } = props.param;

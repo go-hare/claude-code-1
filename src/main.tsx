@@ -4385,9 +4385,12 @@ async function run(): Promise<CommanderCommand> {
           onChangeAppState({ newState: newState as AppState, oldState: oldState as AppState }),
         );
 
-        // Official `uZr` engineStore.current — memory reads see the live context
+        // Official `uZr` engineStore.current — adopt headlessStore on the active
+        // root Session and point memory reads at the live permission context
         // (mid-session /permissions and settings sync changes), not just launch.
         {
+          const { getBootstrapSession } = await import('./utils/sessionHost.js');
+          getBootstrapSession().engineStore.adopt(headlessStore);
           const { registerClaudeMdPermissionContextSource } = await import('./utils/claudemd.js');
           registerClaudeMdPermissionContextSource(() => headlessStore.getState().toolPermissionContext);
         }

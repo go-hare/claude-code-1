@@ -1,4 +1,8 @@
 import { isInSigcontResumeGrace } from '@anthropic/ink'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionRoot.js'
 import { isWithinSigcontGraceWindow } from '../CustomSelect/use-select-input.js'
 
 /**
@@ -11,18 +15,24 @@ import { isWithinSigcontGraceWindow } from '../CustomSelect/use-select-input.js'
 export const PERMISSION_SUBMIT_GUARD_MS = 500
 export const PERMISSION_MOUNT_SETTLE_MS = 300
 
-let lastSubmitTimestamp = 0
+const submitGuardBySession = new RootSessionSlot<{
+  lastSubmitTimestamp: number
+}>(() => ({ lastSubmitTimestamp: 0 }))
+
+function getSubmitGuardState(): { lastSubmitTimestamp: number } {
+  return submitGuardBySession.of(getBootstrapSession())
+}
 
 export function recordPromptSubmitTime(now = Date.now()): void {
-  lastSubmitTimestamp = now
+  getSubmitGuardState().lastSubmitTimestamp = now
 }
 
 export function getLastPromptSubmitTime(): number {
-  return lastSubmitTimestamp
+  return getSubmitGuardState().lastSubmitTimestamp
 }
 
 export function resetPromptSubmitTimeForTests(): void {
-  lastSubmitTimestamp = 0
+  getSubmitGuardState().lastSubmitTimestamp = 0
 }
 
 export function isWithinPermissionKeyGuard(
@@ -31,6 +41,7 @@ export function isWithinPermissionKeyGuard(
   submitGuardMs = PERMISSION_SUBMIT_GUARD_MS,
   mountSettleMs = PERMISSION_MOUNT_SETTLE_MS,
 ): boolean {
+  const { lastSubmitTimestamp } = getSubmitGuardState()
   if (lastSubmitTimestamp > 0 && now - lastSubmitTimestamp < submitGuardMs) {
     return true
   }

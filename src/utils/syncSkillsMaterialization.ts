@@ -12,6 +12,7 @@ import {
   isSyncSkillsEnabled,
   resolveSyncSkillsWaitTimeoutMs,
 } from './residualFinalEnvGates.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 /**
  * Gold dTe / Tan: a latched account-skills veto turns materialization off.
@@ -31,7 +32,18 @@ type Pending = {
   resolve: (r: SyncSkillMaterializationResult) => void
 }
 
-const pendingBySkill = new Map<string, Pending>()
+const fallbackSyncSkillsHost: object = {}
+const pendingBySkillByHost = new HostSlot<Map<string, Pending>>(() => new Map())
+
+function getPendingBySkill(): Map<string, Pending> {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return pendingBySkillByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return pendingBySkillByHost.of(fallbackSyncSkillsHost)
+}
 
 /**
  * Official Dsd — register (or replace) a materialization waiter for skill name.
@@ -44,7 +56,7 @@ export function registerSyncSkillMaterialization(
   const promise = new Promise<SyncSkillMaterializationResult>(r => {
     resolve = r
   })
-  pendingBySkill.set(skillName, { promise, resolve })
+  getPendingBySkill().set(skillName, { promise, resolve })
   return resolve
 }
 
@@ -98,6 +110,7 @@ export async function waitForSyncSkillMaterialization(
   if (!syncSkillMaterializationAllowed(input?.env)) {
     return { ok: true }
   }
+  const pendingBySkill = getPendingBySkill()
   const pending = pendingBySkill.get(skillName)
   if (!pending) {
     return { ok: true }
@@ -135,7 +148,7 @@ export async function waitForSyncSkillMaterialization(
 
 /** Test helper — clear all pending materializations. */
 export function clearSyncSkillMaterializations(): void {
-  pendingBySkill.clear()
+  getPendingBySkill().clear()
 }
 
 /**

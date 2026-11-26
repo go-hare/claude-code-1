@@ -9,6 +9,12 @@ import { pathExists } from '../file.js'
 import { enqueuePendingNotification } from '../messageQueueManager.js'
 import { wrapInSystemReminder } from '../messages.js'
 import { ALLOWED_OFFICIAL_MARKETPLACE_NAMES } from '../plugins/schemas.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import type { ShellCommand } from '../ShellCommand.js'
 import { jsonParse } from '../slowOperations.js'
 import { registerPendingAsyncHook } from './AsyncHookRegistry.js'
@@ -17,10 +23,16 @@ import { emitHookResponse } from './hookEvents.js'
 /** densable Aqo @189460720 */
 const ASYNC_REWAKE_SUMMARY_CAP = 300
 const BROKEN_ASYNC_REWAKE_DEDUP_CAP = 64
-const brokenAsyncRewakeOutputs = new Map<string, string>()
+const hostBrokenAsyncRewakeSlot = new HostSlot<Map<string, string>>(
+  () => new Map(),
+)
+
+function brokenAsyncRewakeOutputs(): Map<string, string> {
+  return hostBrokenAsyncRewakeSlot.of(getBootstrapSessionHost())
+}
 
 export function resetBrokenAsyncRewakeForTests(): void {
-  brokenAsyncRewakeOutputs.clear()
+  brokenAsyncRewakeOutputs().clear()
 }
 
 /** densable `_ce` @189501200 — official marketplace / builtin plugin provenance. */
@@ -158,18 +170,19 @@ function isDuplicateBrokenAsyncRewake(
   key: string,
   output: string | undefined,
 ): boolean {
+  const outputs = brokenAsyncRewakeOutputs()
   if (output === undefined) {
-    brokenAsyncRewakeOutputs.delete(key)
+    outputs.delete(key)
     return false
   }
-  if (brokenAsyncRewakeOutputs.get(key) === output) {
+  if (outputs.get(key) === output) {
     return true
   }
-  brokenAsyncRewakeOutputs.delete(key)
-  brokenAsyncRewakeOutputs.set(key, output)
-  if (brokenAsyncRewakeOutputs.size > BROKEN_ASYNC_REWAKE_DEDUP_CAP) {
-    const [oldest] = brokenAsyncRewakeOutputs.keys()
-    if (oldest !== undefined) brokenAsyncRewakeOutputs.delete(oldest)
+  outputs.delete(key)
+  outputs.set(key, output)
+  if (outputs.size > BROKEN_ASYNC_REWAKE_DEDUP_CAP) {
+    const [oldest] = outputs.keys()
+    if (oldest !== undefined) outputs.delete(oldest)
   }
   return false
 }
@@ -206,112 +219,119 @@ export function executeInBackground({
     // code 2 (blocking error), enqueue as a task-notification so it wakes the
     // model via useQueueProcessor (idle) or gets injected mid-query via
     // queued_command attachments (busy).
-    void shellCommand.result.then(async result => {
-      await new Promise(resolve => setImmediate(resolve))
-      const stdout = await shellCommand.taskOutput.getStdout()
-      const stderr = shellCommand.taskOutput.getStderr()
-      shellCommand.cleanup()
-      emitHookResponse({
-        hookId,
-        hookName,
-        hookEvent,
-        output: stdout + stderr,
-        stdout,
-        stderr,
-        exitCode: result.code,
-        outcome: result.code === 0 ? 'success' : 'error',
-      })
-      let jsonRewakeSummary: string | undefined
-      if (pluginId) {
-        for (const line of stdout.split('\n')) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith('{')) continue
-          try {
-            const parsed = jsonParse(trimmed) as Record<string, unknown>
-            if (parsed && typeof parsed === 'object' && 'async' in parsed) {
-              continue
-            }
-            if (isSyncHookJSONOutput(parsed)) {
-              const rawSummary = (parsed as { rewakeSummary?: unknown })
-                .rewakeSummary
-              if (
-                typeof rawSummary === 'string' &&
-                rawSummary.trim() !== '' &&
-                isOfficialHookPluginId(pluginId)
-              ) {
-                jsonRewakeSummary = rawSummary
-                  .trim()
-                  .replace(/\s+/g, ' ')
-                  .slice(0, ASYNC_REWAKE_SUMMARY_CAP)
+    const captured = getActiveSessionFromAls()
+    void shellCommand.result.then(result => {
+      const handleResult = async () => {
+        await new Promise(resolve => setImmediate(resolve))
+        const stdout = await shellCommand.taskOutput.getStdout()
+        const stderr = shellCommand.taskOutput.getStderr()
+        shellCommand.cleanup()
+        emitHookResponse({
+          hookId,
+          hookName,
+          hookEvent,
+          output: stdout + stderr,
+          stdout,
+          stderr,
+          exitCode: result.code,
+          outcome: result.code === 0 ? 'success' : 'error',
+        })
+        let jsonRewakeSummary: string | undefined
+        if (pluginId) {
+          for (const line of stdout.split('\n')) {
+            const trimmed = line.trim()
+            if (!trimmed.startsWith('{')) continue
+            try {
+              const parsed = jsonParse(trimmed) as Record<string, unknown>
+              if (parsed && typeof parsed === 'object' && 'async' in parsed) {
+                continue
               }
+              if (isSyncHookJSONOutput(parsed)) {
+                const rawSummary = (parsed as { rewakeSummary?: unknown })
+                  .rewakeSummary
+                if (
+                  typeof rawSummary === 'string' &&
+                  rawSummary.trim() !== '' &&
+                  isOfficialHookPluginId(pluginId)
+                ) {
+                  jsonRewakeSummary = rawSummary
+                    .trim()
+                    .replace(/\s+/g, ' ')
+                    .slice(0, ASYNC_REWAKE_SUMMARY_CAP)
+                }
+              }
+              break
+            } catch {
+              // ignore non-JSON lines
             }
-            break
-          } catch {
-            // ignore non-JSON lines
           }
         }
-      }
-      const scriptCandidates = scriptPaths
-        ? scriptPaths.map(p => ({ path: p, cutFrom: undefined }))
-        : extractCommandScriptCandidates(command)
-      const missingScript =
-        result.code === 2
-          ? await detectMissingAsyncRewakeScript({
-              stdout,
-              stderr,
-              scriptPaths: scriptCandidates.map(c => c.path),
-            })
-          : undefined
-      if (
-        isDuplicateBrokenAsyncRewake(
-          `${hookName}\n${command}`,
-          missingScript?.output,
-        )
-      ) {
-        logForDebugging(
-          `Hooks: asyncRewake hook "${hookName}" (${command}) exited 2 again because ${missingScript?.scriptPath} cannot be opened; already reported, not waking the model`,
-          { level: 'warn' },
-        )
-        return
-      }
-      if (result.code === 2) {
-        let prefix: string
-        let summary: string
-        let output: string
-        if (missingScript !== undefined) {
-          const cutFrom = scriptCandidates.find(
-            c => c.path === missingScript.scriptPath,
-          )?.cutFrom
-          let splitHint = ''
-          summary = `${hookEvent} hook could not open ${basename(missingScript.scriptPath)}`
-          if (cutFrom !== undefined) {
-            splitHint = ` (the hook's command passes ${cutFrom} without quotes, so the shell split it at the space)`
-            summary = `${hookEvent} hook needs quotes around a path with a space (${basename(cutFrom)})`
-          }
-          prefix = `${hookName} hook could not run: ${missingScript.scriptPath} cannot be opened${splitHint}, so its command exited with code 2 without doing any work. This is a broken hook installation, not feedback on your work; it is reported this once and identical repeats are dropped. Interpreter output:`
-          output = missingScript.output
-        } else {
-          prefix =
-            rewakeMessage ??
-            `Stop hook blocking error from command "${hookName}":`
-          summary = jsonRewakeSummary ?? rewakeSummary ?? 'Stop hook feedback'
-          output = stderr || stdout
+        const scriptCandidates = scriptPaths
+          ? scriptPaths.map(p => ({ path: p, cutFrom: undefined }))
+          : extractCommandScriptCandidates(command)
+        const missingScript =
+          result.code === 2
+            ? await detectMissingAsyncRewakeScript({
+                stdout,
+                stderr,
+                scriptPaths: scriptCandidates.map(c => c.path),
+              })
+            : undefined
+        if (
+          isDuplicateBrokenAsyncRewake(
+            `${hookName}\n${command}`,
+            missingScript?.output,
+          )
+        ) {
+          logForDebugging(
+            `Hooks: asyncRewake hook "${hookName}" (${command}) exited 2 again because ${missingScript?.scriptPath} cannot be opened; already reported, not waking the model`,
+            { level: 'warn' },
+          )
+          return
         }
-        const escapedSummary = summary
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-        enqueuePendingNotification(
-          {
-            value: `<task-notification>\n<summary>${escapedSummary}</summary>\n</task-notification>\n${wrapInSystemReminder(`${prefix} ${output}`)}`,
-            mode: 'task-notification',
-            priority: 'next',
-            stopHookActive: true,
-            skipAttachments: true,
-          },
-          { turnAttribution: 'inherit' },
-        )
+        if (result.code === 2) {
+          let prefix: string
+          let summary: string
+          let output: string
+          if (missingScript !== undefined) {
+            const cutFrom = scriptCandidates.find(
+              c => c.path === missingScript.scriptPath,
+            )?.cutFrom
+            let splitHint = ''
+            summary = `${hookEvent} hook could not open ${basename(missingScript.scriptPath)}`
+            if (cutFrom !== undefined) {
+              splitHint = ` (the hook's command passes ${cutFrom} without quotes, so the shell split it at the space)`
+              summary = `${hookEvent} hook needs quotes around a path with a space (${basename(cutFrom)})`
+            }
+            prefix = `${hookName} hook could not run: ${missingScript.scriptPath} cannot be opened${splitHint}, so its command exited with code 2 without doing any work. This is a broken hook installation, not feedback on your work; it is reported this once and identical repeats are dropped. Interpreter output:`
+            output = missingScript.output
+          } else {
+            prefix =
+              rewakeMessage ??
+              `Stop hook blocking error from command "${hookName}":`
+            summary = jsonRewakeSummary ?? rewakeSummary ?? 'Stop hook feedback'
+            output = stderr || stdout
+          }
+          const escapedSummary = summary
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+          enqueuePendingNotification(
+            {
+              value: `<task-notification>\n<summary>${escapedSummary}</summary>\n</task-notification>\n${wrapInSystemReminder(`${prefix} ${output}`)}`,
+              mode: 'task-notification',
+              priority: 'next',
+              stopHookActive: true,
+              skipAttachments: true,
+            },
+            { turnAttribution: 'inherit' },
+          )
+        }
       }
+      if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+        return runWithSession(captured, handleResult)
+      }
+      return handleResult()
     })
     return true
   }

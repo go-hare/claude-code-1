@@ -13,6 +13,7 @@
  *     (`_mfC`, 4×6 ints) with `getOfferedWidth` & `markDirty` invalidation
  */
 
+import { InkHostSlot } from '../instances.js'
 import {
   Align,
   BoxSizing,
@@ -502,7 +503,7 @@ export class Node {
     this.parent = null
     this.children = []
     this.measureFunc = null
-    this.config = config ?? DEFAULT_CONFIG
+    this.config = config ?? getYogaHostState().defaultConfig
     this.isDirty_ = true
     this.isReferenceBaseline_ = false
     this.config.liveNodes++
@@ -1115,7 +1116,7 @@ export class Node {
     cfg.measureCacheHits = 0
     cfg.cacheHits = 0
     cfg.generation++
-    _lastCalculatedConfig = cfg
+    getYogaHostState().lastCalculatedConfig = cfg
 
     const w =
       ownerWidth !== undefined && isInt32Range(ownerWidth)
@@ -1153,8 +1154,22 @@ export class Node {
   }
 }
 
-const DEFAULT_CONFIG = createConfig() // `lC`
-let _lastCalculatedConfig: Config = DEFAULT_CONFIG
+type YogaHostState = {
+  defaultConfig: Config
+  lastCalculatedConfig: Config
+}
+
+const yogaHostSlot = new InkHostSlot<YogaHostState>(() => {
+  const defaultConfig = createConfig()
+  return {
+    defaultConfig,
+    lastCalculatedConfig: defaultConfig,
+  }
+})
+
+function getYogaHostState(): YogaHostState {
+  return yogaHostSlot.of()
+}
 
 // --
 // Structural integrity validation (`aC`), cache helpers (`uC`, `cC`, `dC`, `fC`), counters (`Ib`)
@@ -1197,7 +1212,7 @@ export function getYogaCounters(
       cfg = rootNode.config
     }
   }
-  const c = cfg ?? _lastCalculatedConfig
+  const c = cfg ?? getYogaHostState().lastCalculatedConfig
   return {
     visited: c.nodesVisited,
     measured: c.measureCalls,

@@ -9,6 +9,8 @@ import {
 import lodashCloneDeep from 'lodash-es/cloneDeep.js'
 import { addSlowOperation } from '../bootstrap/state.js'
 import { logForDebugging } from './debug.js'
+import { HostSlot } from './hostSlot.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 
 // Extended WriteFileOptions to include 'flush' which is available in Node.js 20.1.0+
 // but not yet in @types/node
@@ -53,10 +55,17 @@ const SLOW_OPERATION_THRESHOLD_MS = (() => {
 // Re-export for callers that still need the threshold value directly
 export { SLOW_OPERATION_THRESHOLD_MS }
 
-// Module-level re-entrancy guard. logForDebugging writes to a debug file via
-// appendFileSync, which goes through slowLogging again. Without this guard,
-// a slow appendFileSync → dispose → logForDebugging → appendFileSync → dispose → ...
-let isLogging = false
+// Host-scoped re-entrancy guard (official 2.1.331 `[W-5]`).
+// logForDebugging writes to a debug file via appendFileSync, which goes through
+// slowLogging again. Without this guard, a slow appendFileSync → dispose →
+// logForDebugging → appendFileSync → dispose → ...
+const slowOperationsHostSlot = new HostSlot<{ isLogging: boolean }>(() => ({
+  isLogging: false,
+}))
+
+function getSlowOperationsHostState(): { isLogging: boolean } {
+  return slowOperationsHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Extract the first stack frame outside this file, so the DevBar warning
@@ -115,8 +124,9 @@ class AntSlowLogger {
 
   [Symbol.dispose](): void {
     const duration = performance.now() - this.startTime
-    if (duration > SLOW_OPERATION_THRESHOLD_MS && !isLogging) {
-      isLogging = true
+    const state = getSlowOperationsHostState()
+    if (duration > SLOW_OPERATION_THRESHOLD_MS && !state.isLogging) {
+      state.isLogging = true
       try {
         const description =
           buildDescription(this.args) + callerFrame(this.err.stack)
@@ -125,7 +135,7 @@ class AntSlowLogger {
         )
         addSlowOperation(description, duration)
       } finally {
-        isLogging = false
+        state.isLogging = false
       }
     }
   }

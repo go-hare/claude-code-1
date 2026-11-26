@@ -6,6 +6,7 @@
 
 import { execFileNoThrow } from '../execFileNoThrow.js'
 import { gitExe } from '../git.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 export type PluginEvalGitVersionProbe = (
   file: string,
@@ -34,10 +35,12 @@ export class PluginEvalGitError extends Error {
 
 type GitVersion = readonly [number, number] | 'absent'
 
-const versionByPath = new Map<string, GitVersion>()
+const versionByPathHostSlot = new HostSlot<Map<string, GitVersion>>(
+  () => new Map(),
+)
 
 export function clearPluginEvalGitVersionCache(): void {
-  versionByPath.clear()
+  versionByPathHostSlot.of(getBootstrapSessionHost()).clear()
 }
 
 function timedOut(result: {
@@ -61,6 +64,7 @@ export async function assertPluginEvalGitVersion(
   env: NodeJS.ProcessEnv = process.env,
   probe: PluginEvalGitVersionProbe = execFileNoThrow,
 ): Promise<void> {
+  const versionByPath = versionByPathHostSlot.of(getBootstrapSessionHost())
   const pathKey = env.PATH ?? ''
   let cached = versionByPath.get(pathKey)
   if (cached === undefined) {

@@ -17,6 +17,12 @@ import { z } from 'zod/v4'
 import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode } from './errors.js'
 import { lazySchema } from './lazySchema.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 import { resolveCrossSessionInbound } from './settings/settings.js'
 import {
   canonicalizeMessagingSocketPath,
@@ -494,7 +500,7 @@ type IdleNotifyState = {
   conversationId: string
 }
 
-const state: IdleNotifyState = {
+const idleNotifyHostSlot = new HostSlot<IdleNotifyState>(() => ({
   outstanding: [],
   subscribers: [],
   exited: false,
@@ -502,10 +508,15 @@ const state: IdleNotifyState = {
   onNotice: null,
   pendingNotices: [],
   conversationId: randomUUID(),
+}))
+
+function getIdleNotifyState(): IdleNotifyState {
+  return idleNotifyHostSlot.of(getBootstrapSessionHost())
 }
 
 /** Test helper — reset module tables. */
 export function resetUdsIdleNotifyForTests(): void {
+  const state = getIdleNotifyState()
   for (const row of state.outstanding) clearTimeout(row.expiry)
   state.outstanding.length = 0
   state.subscribers.length = 0
@@ -583,6 +594,7 @@ function recordOutstanding(
   if (targetKey === undefined) {
     return { ok: false, reason: 'unreachable-namespace' }
   }
+  const state = getIdleNotifyState()
   const rows = state.outstanding
   // densable E2f / M7: trim BEFORE push using `>= MAX` so after insert the
   // target holds at most MAX_OUTSTANDING_PER_TARGET (not MAX+1).
@@ -599,8 +611,14 @@ function recordOutstanding(
   if (rows.length - priors.length >= MAX_PENDING_IDLE_SUBSCRIPTIONS) {
     return { ok: false, reason: 'cap' }
   }
+  const sessionRef = new WeakRef(getBootstrapSession().root)
   const expiry = setTimeout(() => {
-    expireOutstanding(msgId)
+    const targetSession = sessionRef.deref()
+    if (targetSession !== undefined) {
+      runWithSession(targetSession, () => expireOutstanding(msgId))
+    } else {
+      expireOutstanding(msgId)
+    }
   }, IDLE_SUBSCRIPTION_TTL_MS)
   expiry.unref?.()
   rows.push({
@@ -615,6 +633,7 @@ function recordOutstanding(
 }
 
 function expireOutstanding(msgId: string): void {
+  const state = getIdleNotifyState()
   const idx = state.outstanding.findIndex(r => r.msgId === msgId)
   if (idx === -1) return
   const [row] = state.outstanding.splice(idx, 1)
@@ -641,10 +660,11 @@ function expireOutstanding(msgId: string): void {
 }
 
 export function hasOutstandingIdleSubscription(msgId: string): boolean {
-  return state.outstanding.some(r => r.msgId === msgId)
+  return getIdleNotifyState().outstanding.some(r => r.msgId === msgId)
 }
 
 export function forgetIdleSubscription(msgId: string): void {
+  const state = getIdleNotifyState()
   const idx = state.outstanding.findIndex(r => r.msgId === msgId)
   if (idx === -1) return
   const [row] = state.outstanding.splice(idx, 1)
@@ -652,6 +672,7 @@ export function forgetIdleSubscription(msgId: string): void {
 }
 
 function deliverNotice(notice: IdleNoticeForModel): void {
+  const state = getIdleNotifyState()
   if (state.onNotice === null) {
     if (state.pendingNotices.length < MAX_PENDING_IDLE_SUBSCRIPTIONS) {
       state.pendingNotices.push(notice)
@@ -682,6 +703,7 @@ function deliverNotice(notice: IdleNoticeForModel): void {
 export function setIdleNoticeHandler(
   handler: ((notice: IdleNoticeForModel) => void) | null,
 ): void {
+  const state = getIdleNotifyState()
   state.onNotice = handler
   if (handler === null) return
   const pending = state.pendingNotices.splice(0)
@@ -694,6 +716,7 @@ export function setIdleNoticeHandler(
 export function setPeerIdleNoticeSender(
   sender: PeerIdleNoticeSender | null,
 ): void {
+  const state = getIdleNotifyState()
   if (sender !== null) state.exited = false
   state.sendNotice = sender
 }
@@ -837,6 +860,7 @@ async function subscribeToPeerIdleInner(
   }
 
   try {
+    const state = getIdleNotifyState()
     if (opts.sendControl) {
       await opts.sendControl(targetSocketPath, frame)
     } else if (state.sendNotice) {
@@ -910,6 +934,7 @@ export function acceptNotifyWhenIdle(args: {
   ownSocketPath: string
 }): AcceptNotifyResult {
   if (resolveCrossSessionInbound() === 'refuse') return 'refused'
+  const state = getIdleNotifyState()
   if (state.exited) return 'full'
   const reply = vetReplyAddress(args.from, args.ownSocketPath)
   if (reply === undefined) return 'unvettable'
@@ -949,6 +974,7 @@ export function correlatePeerIdleNotice(args: {
   fromMode?: string
 }): boolean {
   if (!hasOutstandingIdleSubscription(args.origMsgId)) return false
+  const state = getIdleNotifyState()
   const idx = state.outstanding.findIndex(r => r.msgId === args.origMsgId)
   if (idx === -1) return false
   const [row] = state.outstanding.splice(idx, 1)
@@ -988,6 +1014,7 @@ export async function flushIdleSubscribers(opts: {
   state: 'idle' | 'exited'
   detail?: string
 }): Promise<void> {
+  const state = getIdleNotifyState()
   const send = state.sendNotice
   const batch = state.subscribers.splice(0)
   if (opts.state === 'exited') state.exited = true

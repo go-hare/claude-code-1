@@ -7,7 +7,11 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import {
+  getActiveSessionFromAls,
+  runWithSession,
+} from '../../utils/sessionHost.js'
 import {
   getSkillLearningRoot,
   type ObservationStoreOptions,
@@ -23,7 +27,10 @@ import {
   type StoredInstinct,
 } from './instinctParser.js'
 
-let upsertQueue: Promise<unknown> = Promise.resolve()
+// Process-global per-directory write queue so concurrent ALS hosts targeting
+// the same on-disk instincts directory serialize read-modify-write cycles
+// without losing updates while retaining each caller's ALS session context.
+const upsertQueuesByDir = new Map<string, Promise<unknown>>()
 
 export type InstinctStoreOptions = ObservationStoreOptions & {
   project?: SkillLearningProjectContext
@@ -80,8 +87,24 @@ export function upsertInstinct(
   incoming: StoredInstinct,
   options?: InstinctStoreOptions,
 ): Promise<StoredInstinct> {
-  const result = upsertQueue.then(() => doUpsertInstinct(incoming, options))
-  upsertQueue = result.catch(() => {})
+  const dirKey = resolve(getInstinctsDir(options))
+  const capturedSession = getActiveSessionFromAls()
+  const prev = upsertQueuesByDir.get(dirKey) ?? Promise.resolve()
+  const result = prev.then(() =>
+    capturedSession !== undefined &&
+    getActiveSessionFromAls() !== capturedSession
+      ? runWithSession(capturedSession, () =>
+          doUpsertInstinct(incoming, options),
+        )
+      : doUpsertInstinct(incoming, options),
+  )
+  const settled = result.catch(() => {})
+  upsertQueuesByDir.set(dirKey, settled)
+  void settled.finally(() => {
+    if (upsertQueuesByDir.get(dirKey) === settled) {
+      upsertQueuesByDir.delete(dirKey)
+    }
+  })
   return result
 }
 

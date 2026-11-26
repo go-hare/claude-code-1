@@ -3,22 +3,43 @@ import type { SuggestionItem } from '../../components/PromptInput/PromptInputFoo
 import type { MCPServerConnection } from '../../services/mcp/types.js'
 import { logForDebugging } from '../debug.js'
 import { lazySchema } from '../lazySchema.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { createSignal } from '../signal.js'
 import { jsonParse } from '../slowOperations.js'
 
 const SLACK_SEARCH_TOOL = 'slack_search_channels'
 
-// Plain Map (not LRUCache) — findReusableCacheEntry needs to iterate all
-// entries for prefix matching, which LRUCache doesn't expose cleanly.
-const cache = new Map<string, string[]>()
-// Flat set of every channel name ever returned by MCP — used to gate
-// highlighting so only confirmed-real channels turn blue in the prompt.
-const knownChannels = new Set<string>()
-let knownChannelsVersion = 0
-const knownChannelsChanged = createSignal()
-export const subscribeKnownChannels = knownChannelsChanged.subscribe
-let inflightQuery: string | null = null
-let inflightPromise: Promise<string[]> | null = null
+class SlackChannelSuggestionsHostState {
+  // Plain Map (not LRUCache) — findReusableCacheEntry needs to iterate all
+  // entries for prefix matching, which LRUCache doesn't expose cleanly.
+  cache = new Map<string, string[]>()
+  // Flat set of every channel name ever returned by MCP — used to gate
+  // highlighting so only confirmed-real channels turn blue in the prompt.
+  knownChannels = new Set<string>()
+  knownChannelsVersion = 0
+  knownChannelsChanged = createSignal()
+  inflightQuery: string | null = null
+  inflightPromise: Promise<string[]> | null = null
+}
+
+const fallbackSlackSuggestionsHost: object = {}
+const slackSuggestionsByHost = new HostSlot<SlackChannelSuggestionsHostState>(
+  () => new SlackChannelSuggestionsHostState(),
+)
+
+function getSlackSuggestionsHostState(): SlackChannelSuggestionsHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return slackSuggestionsByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return slackSuggestionsByHost.of(fallbackSlackSuggestionsHost)
+}
+
+export function subscribeKnownChannels(listener: () => void): () => void {
+  return getSlackSuggestionsHostState().knownChannelsChanged.subscribe(listener)
+}
 
 function findSlackClient(
   clients: MCPServerConnection[],
@@ -104,12 +125,13 @@ export function hasSlackMcpServer(clients: MCPServerConnection[]): boolean {
 }
 
 export function getKnownChannelsVersion(): number {
-  return knownChannelsVersion
+  return getSlackSuggestionsHostState().knownChannelsVersion
 }
 
 export function findSlackChannelPositions(
   text: string,
 ): Array<{ start: number; end: number }> {
+  const { knownChannels } = getSlackSuggestionsHostState()
   const positions: Array<{ start: number; end: number }> = []
   const re = /(^|\s)#([a-z0-9][a-z0-9_-]{0,79})(?=\s|$)/g
   let m: RegExpExecArray | null
@@ -138,6 +160,7 @@ function mcpQueryFor(searchToken: string): string {
 // matches for searchToken. Lets typing "c"→"cl"→"cla" reuse the "c" cache
 // instead of issuing a new MCP call per keystroke.
 function findReusableCacheEntry(
+  cache: Map<string, string[]>,
   mcpQuery: string,
   searchToken: string,
 ): string[] | undefined {
@@ -162,30 +185,33 @@ export async function getSlackChannelSuggestions(
 ): Promise<SuggestionItem[]> {
   if (!searchToken) return []
 
+  const hostState = getSlackSuggestionsHostState()
+  const { cache, knownChannels } = hostState
   const mcpQuery = mcpQueryFor(searchToken)
   const lower = searchToken.toLowerCase()
 
-  let channels = cache.get(mcpQuery) ?? findReusableCacheEntry(mcpQuery, lower)
+  let channels =
+    cache.get(mcpQuery) ?? findReusableCacheEntry(cache, mcpQuery, lower)
   if (!channels) {
-    if (inflightQuery === mcpQuery && inflightPromise) {
-      channels = await inflightPromise
+    if (hostState.inflightQuery === mcpQuery && hostState.inflightPromise) {
+      channels = await hostState.inflightPromise
     } else {
-      inflightQuery = mcpQuery
-      inflightPromise = fetchChannels(clients, mcpQuery)
-      channels = await inflightPromise
+      hostState.inflightQuery = mcpQuery
+      hostState.inflightPromise = fetchChannels(clients, mcpQuery)
+      channels = await hostState.inflightPromise
       cache.set(mcpQuery, channels)
       const before = knownChannels.size
       for (const c of channels) knownChannels.add(c)
       if (knownChannels.size !== before) {
-        knownChannelsVersion++
-        knownChannelsChanged.emit()
+        hostState.knownChannelsVersion++
+        hostState.knownChannelsChanged.emit()
       }
       if (cache.size > 50) {
         cache.delete(cache.keys().next().value!)
       }
-      if (inflightQuery === mcpQuery) {
-        inflightQuery = null
-        inflightPromise = null
+      if (hostState.inflightQuery === mcpQuery) {
+        hostState.inflightQuery = null
+        hostState.inflightPromise = null
       }
     }
   }
@@ -201,9 +227,10 @@ export async function getSlackChannelSuggestions(
 }
 
 export function clearSlackChannelCache(): void {
-  cache.clear()
-  knownChannels.clear()
-  knownChannelsVersion = 0
-  inflightQuery = null
-  inflightPromise = null
+  const hostState = getSlackSuggestionsHostState()
+  hostState.cache.clear()
+  hostState.knownChannels.clear()
+  hostState.knownChannelsVersion = 0
+  hostState.inflightQuery = null
+  hostState.inflightPromise = null
 }

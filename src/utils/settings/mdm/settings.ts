@@ -24,6 +24,7 @@ import { logForDiagnosticsNoPII } from '../../diagLogs.js'
 import { readFileSync } from '../../fileRead.js'
 import { getFsImplementation } from '../../fsOperations.js'
 import { safeParseJSON } from '../../json.js'
+import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 import { profileCheckpoint } from '../../startupProfiler.js'
 import {
   getManagedFilePath,
@@ -52,9 +53,22 @@ import {
 
 type MdmResult = { settings: SettingsJson; errors: ValidationError[] }
 const EMPTY_RESULT: MdmResult = Object.freeze({ settings: {}, errors: [] })
-let mdmCache: MdmResult | null = null
-let hkcuCache: MdmResult | null = null
-let mdmLoadPromise: Promise<void> | null = null
+
+type HostMdmSettingsState = {
+  mdmCache: MdmResult | null
+  hkcuCache: MdmResult | null
+  mdmLoadPromise: Promise<void> | null
+}
+
+const hostMdmSettingsSlot = new HostSlot<HostMdmSettingsState>(() => ({
+  mdmCache: null,
+  hkcuCache: null,
+  mdmLoadPromise: null,
+}))
+
+function getHostMdmSettingsState(): HostMdmSettingsState {
+  return hostMdmSettingsSlot.of(getBootstrapSessionHost())
+}
 
 // ---------------------------------------------------------------------------
 // Startup load — fires early, awaited before first settings read
@@ -65,8 +79,9 @@ let mdmLoadPromise: Promise<void> | null = null
  * startup so the subprocess runs in parallel with module loading.
  */
 export function startMdmSettingsLoad(): void {
-  if (mdmLoadPromise) return
-  mdmLoadPromise = (async () => {
+  const state = getHostMdmSettingsState()
+  if (state.mdmLoadPromise) return
+  state.mdmLoadPromise = (async () => {
     profileCheckpoint('mdm_load_start')
     const startTime = Date.now()
 
@@ -74,8 +89,8 @@ export function startMdmSettingsLoad(): void {
     // Both paths produce the same RawReadResult; consumeRawReadResult parses it.
     const rawPromise = getMdmRawReadPromise() ?? fireRawRead()
     const { mdm, hkcu } = consumeRawReadResult(await rawPromise)
-    mdmCache = mdm
-    hkcuCache = hkcu
+    state.mdmCache = mdm
+    state.hkcuCache = hkcu
     profileCheckpoint('mdm_load_end')
 
     const duration = Date.now() - startTime
@@ -102,10 +117,11 @@ export function startMdmSettingsLoad(): void {
  * If startMdmSettingsLoad() was called early enough, this resolves immediately.
  */
 export async function ensureMdmSettingsLoaded(): Promise<void> {
-  if (!mdmLoadPromise) {
+  const state = getHostMdmSettingsState()
+  if (!state.mdmLoadPromise) {
     startMdmSettingsLoad()
   }
-  await mdmLoadPromise
+  await state.mdmLoadPromise
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +138,7 @@ export async function ensureMdmSettingsLoaded(): Promise<void> {
  * Does NOT include HKCU (user-writable) — use getHkcuSettings() for that.
  */
 export function getMdmSettings(): MdmResult {
-  return mdmCache ?? EMPTY_RESULT
+  return getHostMdmSettingsState().mdmCache ?? EMPTY_RESULT
 }
 
 /**
@@ -130,7 +146,7 @@ export function getMdmSettings(): MdmResult {
  * Only relevant on Windows — returns empty on other platforms.
  */
 export function getHkcuSettings(): MdmResult {
-  return hkcuCache ?? EMPTY_RESULT
+  return getHostMdmSettingsState().hkcuCache ?? EMPTY_RESULT
 }
 
 // ---------------------------------------------------------------------------
@@ -141,17 +157,19 @@ export function getHkcuSettings(): MdmResult {
  * Clear the MDM and HKCU settings caches, forcing a fresh read on next load.
  */
 export function clearMdmSettingsCache(): void {
-  mdmCache = null
-  hkcuCache = null
-  mdmLoadPromise = null
+  const state = getHostMdmSettingsState()
+  state.mdmCache = null
+  state.hkcuCache = null
+  state.mdmLoadPromise = null
 }
 
 /**
  * Update the session caches directly. Used by the change detector poll.
  */
 export function setMdmSettingsCache(mdm: MdmResult, hkcu: MdmResult): void {
-  mdmCache = mdm
-  hkcuCache = hkcu
+  const state = getHostMdmSettingsState()
+  state.mdmCache = mdm
+  state.hkcuCache = hkcu
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,3 @@
-import memoize from 'lodash-es/memoize.js'
 import { join } from 'path'
 import {
   getCurrentProjectConfig,
@@ -7,6 +6,7 @@ import {
 import { getCwd } from './utils/cwd.js'
 import { isDirEmpty } from './utils/file.js'
 import { getFsImplementation } from './utils/fsOperations.js'
+import { getBootstrapSession, RootSessionSlot } from './utils/sessionHost.js'
 
 export type Step = {
   key: string
@@ -60,7 +60,45 @@ export function maybeMarkProjectOnboardingComplete(): void {
   }
 }
 
-export const shouldShowProjectOnboarding = memoize((): boolean => {
+const fallbackOnboardingRootObj: object = {}
+const fallbackOnboardingSession = { root: fallbackOnboardingRootObj }
+
+function getActiveOnboardingSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) {
+      return session
+    }
+  } catch {
+    // Fall back to module-local sentinel if sessionHost is mocked
+  }
+  return fallbackOnboardingSession
+}
+
+function resolveOnboardingMemoKey(key: unknown): unknown {
+  return key === undefined ? getCwd() : key
+}
+
+class OnboardingCwdMemoMap extends Map<unknown, boolean> {
+  override get(key: unknown): boolean | undefined {
+    return super.get(resolveOnboardingMemoKey(key))
+  }
+  override has(key: unknown): boolean {
+    return super.has(resolveOnboardingMemoKey(key))
+  }
+  override set(key: unknown, value: boolean): this {
+    return super.set(resolveOnboardingMemoKey(key), value)
+  }
+  override delete(key: unknown): boolean {
+    return super.delete(resolveOnboardingMemoKey(key))
+  }
+}
+
+const shouldShowProjectOnboardingBySession = new RootSessionSlot<
+  Map<unknown, boolean>
+>(() => new OnboardingCwdMemoMap())
+
+function computeShouldShowProjectOnboarding(): boolean {
   const projectConfig = getCurrentProjectConfig()
   // Short-circuit on cached config before isProjectOnboardingComplete()
   // hits the filesystem — this runs during first render.
@@ -73,7 +111,48 @@ export const shouldShowProjectOnboarding = memoize((): boolean => {
   }
 
   return !isProjectOnboardingComplete()
-})
+}
+
+function createShouldShowProjectOnboarding() {
+  const fn = Object.assign(
+    function shouldShowProjectOnboarding(): boolean {
+      const cache = shouldShowProjectOnboardingBySession.of(
+        getActiveOnboardingSession(),
+      )
+      const key = getCwd()
+      if (cache.has(key)) {
+        return cache.get(key)!
+      }
+      const computed = computeShouldShowProjectOnboarding()
+      cache.set(key, computed)
+      return computed
+    },
+    {
+      cache: new Map<unknown, boolean>(),
+    },
+  )
+  Object.defineProperty(fn, 'cache', {
+    configurable: true,
+    enumerable: true,
+    get(): Map<unknown, boolean> {
+      return shouldShowProjectOnboardingBySession.of(
+        getActiveOnboardingSession(),
+      )
+    },
+    set(next: Map<unknown, boolean>): void {
+      const cache = shouldShowProjectOnboardingBySession.of(
+        getActiveOnboardingSession(),
+      )
+      cache.clear()
+      for (const [k, v] of next) {
+        cache.set(k, v)
+      }
+    },
+  })
+  return fn
+}
+
+export const shouldShowProjectOnboarding = createShouldShowProjectOnboarding()
 
 export function incrementProjectOnboardingSeenCount(): void {
   saveCurrentProjectConfig(current => ({

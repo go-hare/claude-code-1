@@ -11,6 +11,12 @@ import { getSessionId } from '../../bootstrap/state.js'
 import type { AgentId } from '../../types/ids.js'
 import { logError } from '../../utils/log.js'
 import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
+import {
   type RequestReplayRecords,
   writeRequestReplayRecords,
 } from '../../utils/sessionStorage.js'
@@ -24,8 +30,19 @@ type ReplayChainState = {
   sessionId: string
 }
 
-const chains = new Map<string, ReplayChainState>()
-const unrecordableShapes = new Set<string>()
+type ReplaySessionStore = {
+  chains: Map<string, ReplayChainState>
+  unrecordableShapes: Set<string>
+}
+
+const replayStoreSlot = new RootSessionSlot<ReplaySessionStore>(() => ({
+  chains: new Map<string, ReplayChainState>(),
+  unrecordableShapes: new Set<string>(),
+}))
+
+function getReplayStore(): ReplaySessionStore {
+  return replayStoreSlot.of(getBootstrapSession())
+}
 
 function hashReplayPayload(value: unknown): string {
   return createHash('sha256').update(jsonStringify(value)).digest('hex')
@@ -121,9 +138,10 @@ export function recordApiRequestForReplay(input: {
   agentId?: AgentId
 }): Promise<void> | undefined {
   try {
+    const store = getReplayStore()
     const sessionId = getSessionId()
     const chainKey = input.agentId ?? sessionId
-    const previousChain = chains.get(chainKey)
+    const previousChain = store.chains.get(chainKey)
     const { records, nextHashes, requestId } = buildRequestReplayRecords({
       params: input.params,
       querySource: input.querySource,
@@ -132,27 +150,32 @@ export function recordApiRequestForReplay(input: {
       previousChain,
     })
 
-    if (unrecordableShapes.has(records.shapeHash)) {
+    if (store.unrecordableShapes.has(records.shapeHash)) {
       return undefined
     }
 
+    const capturedSession = getActiveSessionFromAls()
     return writeRequestReplayRecords(records).then(
       result => {
         if (result === 'written') {
-          if (getSessionId() === sessionId) {
-            chains.delete(chainKey)
-            chains.set(chainKey, {
+          const activeSessionId =
+            capturedSession !== undefined
+              ? runWithSession(capturedSession, () => getSessionId())
+              : getSessionId()
+          if (activeSessionId === sessionId) {
+            store.chains.delete(chainKey)
+            store.chains.set(chainKey, {
               lastId: requestId,
               lastHashes: nextHashes,
               sessionId,
             })
-            if (chains.size > MAX_CHAINS) {
-              const oldest = chains.keys().next().value
-              if (oldest !== undefined) chains.delete(oldest)
+            if (store.chains.size > MAX_CHAINS) {
+              const oldest = store.chains.keys().next().value
+              if (oldest !== undefined) store.chains.delete(oldest)
             }
           }
         } else if (result === 'shape_too_large') {
-          unrecordableShapes.add(records.shapeHash)
+          store.unrecordableShapes.add(records.shapeHash)
         }
       },
       err => {
@@ -166,6 +189,8 @@ export function recordApiRequestForReplay(input: {
 }
 
 export function clearRequestReplayChainsForTest(): void {
-  chains.clear()
-  unrecordableShapes.clear()
+  const store = replayStoreSlot.peek(getBootstrapSession())
+  if (!store) return
+  store.chains.clear()
+  store.unrecordableShapes.clear()
 }

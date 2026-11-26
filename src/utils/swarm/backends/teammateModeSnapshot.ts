@@ -9,6 +9,10 @@
 import { resolveUserIntentSetting } from '../../../utils/config.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { logError } from '../../../utils/log.js'
+import {
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../../../utils/sessionHost.js'
 
 export type TeammateMode =
   | 'auto'
@@ -17,18 +21,30 @@ export type TeammateMode =
   | 'windows-terminal'
   | 'in-process'
 
-// Module-level variable to hold the captured mode at startup
-let initialTeammateMode: TeammateMode | null = null
+type TeammateModeSnapshotHostState = {
+  /** Captured teammate mode at startup. */
+  initialTeammateMode: TeammateMode | null
+  /** CLI override (set before capture if --teammate-mode is provided). */
+  cliTeammateModeOverride: TeammateMode | null
+}
 
-// CLI override (set before capture if --teammate-mode is provided)
-let cliTeammateModeOverride: TeammateMode | null = null
+/** Official 2.1.331 [W-388 Hod] — per-host teammate mode snapshot state. */
+const teammateModeSnapshotHostSlot =
+  new HostSlot<TeammateModeSnapshotHostState>(() => ({
+    initialTeammateMode: null,
+    cliTeammateModeOverride: null,
+  }))
+
+function getSnapshotState(): TeammateModeSnapshotHostState {
+  return teammateModeSnapshotHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Set the CLI override for teammate mode.
  * Must be called before captureTeammateModeSnapshot().
  */
 export function setCliTeammateModeOverride(mode: TeammateMode): void {
-  cliTeammateModeOverride = mode
+  getSnapshotState().cliTeammateModeOverride = mode
 }
 
 /**
@@ -36,7 +52,7 @@ export function setCliTeammateModeOverride(mode: TeammateMode): void {
  * Returns null if no CLI override was set.
  */
 export function getCliTeammateModeOverride(): TeammateMode | null {
-  return cliTeammateModeOverride
+  return getSnapshotState().cliTeammateModeOverride
 }
 
 /**
@@ -46,8 +62,9 @@ export function getCliTeammateModeOverride(): TeammateMode | null {
  * @param newMode - The new mode the user selected (passed directly to avoid race condition)
  */
 export function clearCliTeammateModeOverride(newMode: TeammateMode): void {
-  cliTeammateModeOverride = null
-  initialTeammateMode = newMode
+  const state = getSnapshotState()
+  state.cliTeammateModeOverride = null
+  state.initialTeammateMode = newMode
   logForDebugging(
     `[TeammateModeSnapshot] CLI override cleared, new mode: ${newMode}`,
   )
@@ -59,18 +76,19 @@ export function clearCliTeammateModeOverride(newMode: TeammateMode): void {
  * CLI override takes precedence over config.
  */
 export function captureTeammateModeSnapshot(): void {
-  if (cliTeammateModeOverride) {
-    initialTeammateMode = cliTeammateModeOverride
+  const state = getSnapshotState()
+  if (state.cliTeammateModeOverride) {
+    state.initialTeammateMode = state.cliTeammateModeOverride
     logForDebugging(
-      `[TeammateModeSnapshot] Captured from CLI override: ${initialTeammateMode}`,
+      `[TeammateModeSnapshot] Captured from CLI override: ${state.initialTeammateMode}`,
     )
   } else {
-    initialTeammateMode = resolveUserIntentSetting(
+    state.initialTeammateMode = resolveUserIntentSetting(
       'teammateMode',
       'auto' as const,
     ).value
     logForDebugging(
-      `[TeammateModeSnapshot] Captured from config: ${initialTeammateMode}`,
+      `[TeammateModeSnapshot] Captured from config: ${state.initialTeammateMode}`,
     )
   }
 }
@@ -80,7 +98,8 @@ export function captureTeammateModeSnapshot(): void {
  * Returns the snapshot captured at startup, ignoring any runtime config changes.
  */
 export function getTeammateModeFromSnapshot(): TeammateMode {
-  if (initialTeammateMode === null) {
+  const state = getSnapshotState()
+  if (state.initialTeammateMode === null) {
     // This indicates an initialization bug - capture should happen in setup()
     logError(
       new Error(
@@ -90,5 +109,5 @@ export function getTeammateModeFromSnapshot(): TeammateMode {
     captureTeammateModeSnapshot()
   }
   // Fallback to 'auto' if somehow still null (shouldn't happen, but safe)
-  return initialTeammateMode ?? 'auto'
+  return state.initialTeammateMode ?? 'auto'
 }

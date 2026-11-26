@@ -110,7 +110,14 @@ import { logForDebugging } from '../utils/debug.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { useNotifications } from '../context/notifications.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
-import { createStore } from '../state/store.js';
+import { createStore, type Store } from '../state/store.js';
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  type Session,
+} from '../utils/sessionRoot.js';
 import {
   getPromptInputStoreValue,
   setPromptInputStoreValue,
@@ -520,13 +527,33 @@ export function isOtherDrawer(previous: Array<{ plugin: string }>, next: Array<{
   return previous.length > 0 && next.length > 0 && !next.some(row => previous.some(was => was.plugin === row.plugin));
 }
 
+function runInCapturedSession(captured: Session | undefined, fn: () => void): void {
+  if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+    runWithSession(captured, fn);
+  } else {
+    fn();
+  }
+}
+
+function notifySessionListeners(listeners: Map<() => void, Session | undefined>): void {
+  for (const [listener, captured] of listeners) {
+    runInCapturedSession(captured, listener);
+  }
+}
+
 /**
  * densable `NLe` / `DQt` / `hSo` — Client surface focusedId mutex.
  * Gold: `NLe=et({focusedId:null}); DQt=(r)=>set if changed; hSo=(r)=>clear if current`.
  */
-const pluginClientFocusStore = createStore<{ focusedId: string | null }>({
-  focusedId: null,
-});
+const pluginClientFocusStoreBySession = new RootSessionSlot<Store<{ focusedId: string | null }>>(() =>
+  createStore<{ focusedId: string | null }>({
+    focusedId: null,
+  }),
+);
+
+function getPluginClientFocusStore(): Store<{ focusedId: string | null }> {
+  return pluginClientFocusStoreBySession.of(getBootstrapSession());
+}
 
 export { pluginFieldSeatKey, pluginFieldSeatGeneration, bumpPluginFieldSeatGeneration };
 
@@ -629,21 +656,25 @@ export function useYogaMeasure(read: () => number): number {
 }
 
 export function getPluginClientFocusedId(): string | null {
-  return pluginClientFocusStore.getState().focusedId;
+  return getPluginClientFocusStore().getState().focusedId;
 }
 
 export function subscribePluginClientFocus(listener: () => void): () => void {
-  return pluginClientFocusStore.subscribe(listener);
+  const store = getPluginClientFocusStore();
+  const captured = getActiveSessionFromAls();
+  return store.subscribe(() => {
+    runInCapturedSession(captured, listener);
+  });
 }
 
 /** densable `DQt` — set Client focusedId. */
 export function setPluginClientFocusedId(id: string | null): void {
-  pluginClientFocusStore.setState(prev => (prev.focusedId === id ? prev : { focusedId: id }));
+  getPluginClientFocusStore().setState(prev => (prev.focusedId === id ? prev : { focusedId: id }));
 }
 
 /** densable `hSo` — clear Client focusedId if it still holds `id`. */
 export function clearPluginClientFocusedId(id: string): void {
-  pluginClientFocusStore.setState(prev => (prev.focusedId === id ? { focusedId: null } : prev));
+  getPluginClientFocusStore().setState(prev => (prev.focusedId === id ? { focusedId: null } : prev));
 }
 
 /**
@@ -691,25 +722,49 @@ export function usePaneToastHold(): void {
 }
 
 type BandCollapsedListener = () => void;
-let bandCollapsedValue = false;
-const bandCollapsedListeners = new Set<BandCollapsedListener>();
+type SettledBudgetListener = () => void;
+type OpenListRowsListener = () => void;
+
+type PluginBandUiSessionState = {
+  bandCollapsedValue: boolean;
+  bandCollapsedListeners: Map<BandCollapsedListener, Session | undefined>;
+  settledBudgetValue: number | undefined;
+  settledBudgetListeners: Map<SettledBudgetListener, Session | undefined>;
+  openListRowsValue: number;
+  openListRowsListeners: Map<OpenListRowsListener, Session | undefined>;
+};
+
+const pluginBandUiStateBySession = new RootSessionSlot<PluginBandUiSessionState>(() => ({
+  bandCollapsedValue: false,
+  bandCollapsedListeners: new Map(),
+  settledBudgetValue: undefined,
+  settledBudgetListeners: new Map(),
+  openListRowsValue: 0,
+  openListRowsListeners: new Map(),
+}));
+
+function getPluginBandUiState(): PluginBandUiSessionState {
+  return pluginBandUiStateBySession.of(getBootstrapSession());
+}
 
 /** densable `v1t` — session bandCollapsed store. */
 export function getBandCollapsed(): boolean {
-  return bandCollapsedValue;
+  return getPluginBandUiState().bandCollapsedValue;
 }
 
 export function setBandCollapsed(next: boolean): void {
-  if (bandCollapsedValue === next) return;
-  bandCollapsedValue = next;
+  const state = getPluginBandUiState();
+  if (state.bandCollapsedValue === next) return;
+  state.bandCollapsedValue = next;
   setPluginBandExpanded(!next);
-  for (const listener of bandCollapsedListeners) listener();
+  notifySessionListeners(state.bandCollapsedListeners);
 }
 
 export function subscribeBandCollapsed(listener: BandCollapsedListener): () => void {
-  bandCollapsedListeners.add(listener);
+  const state = getPluginBandUiState();
+  state.bandCollapsedListeners.set(listener, getActiveSessionFromAls());
   return () => {
-    bandCollapsedListeners.delete(listener);
+    state.bandCollapsedListeners.delete(listener);
   };
 }
 
@@ -717,25 +772,23 @@ function useBandCollapsed(): boolean {
   return useSyncExternalStore(subscribeBandCollapsed, getBandCollapsed, getBandCollapsed);
 }
 
-type SettledBudgetListener = () => void;
 /** densable `d$` — shared settledBudget Map/store (`et(js(),…)`). */
-let settledBudgetValue: number | undefined;
-const settledBudgetListeners = new Set<SettledBudgetListener>();
-
 export function getSettledBudget(): number | undefined {
-  return settledBudgetValue;
+  return getPluginBandUiState().settledBudgetValue;
 }
 
 export function setSettledBudget(next: number | undefined): void {
-  if (settledBudgetValue === next) return;
-  settledBudgetValue = next;
-  for (const listener of settledBudgetListeners) listener();
+  const state = getPluginBandUiState();
+  if (state.settledBudgetValue === next) return;
+  state.settledBudgetValue = next;
+  notifySessionListeners(state.settledBudgetListeners);
 }
 
 export function subscribeSettledBudget(listener: SettledBudgetListener): () => void {
-  settledBudgetListeners.add(listener);
+  const state = getPluginBandUiState();
+  state.settledBudgetListeners.set(listener, getActiveSessionFromAls());
   return () => {
-    settledBudgetListeners.delete(listener);
+    state.settledBudgetListeners.delete(listener);
   };
 }
 
@@ -743,26 +796,24 @@ function useSettledBudget(): number | undefined {
   return useSyncExternalStore(subscribeSettledBudget, getSettledBudget, getSettledBudget);
 }
 
-type OpenListRowsListener = () => void;
 /** densable `s$` / `nr` — open Select extra rows into band maxHeight. */
-let openListRowsValue = 0;
-const openListRowsListeners = new Set<OpenListRowsListener>();
-
 export function getOpenListRows(): number {
-  return openListRowsValue;
+  return getPluginBandUiState().openListRowsValue;
 }
 
 export function setOpenListRows(next: number): void {
+  const state = getPluginBandUiState();
   const rows = Math.max(0, next);
-  if (openListRowsValue === rows) return;
-  openListRowsValue = rows;
-  for (const listener of openListRowsListeners) listener();
+  if (state.openListRowsValue === rows) return;
+  state.openListRowsValue = rows;
+  notifySessionListeners(state.openListRowsListeners);
 }
 
 export function subscribeOpenListRows(listener: OpenListRowsListener): () => void {
-  openListRowsListeners.add(listener);
+  const state = getPluginBandUiState();
+  state.openListRowsListeners.set(listener, getActiveSessionFromAls());
   return () => {
-    openListRowsListeners.delete(listener);
+    state.openListRowsListeners.delete(listener);
   };
 }
 
@@ -1231,34 +1282,51 @@ function paneRoomValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 1 ? Math.floor(value) : null;
 }
 
-/** densable `Vg` room store — dock columns / inline rows. */
-let dockRoomColumns: number | null = null;
-let inlineRoomRows: number | null = null;
-let dockRoomHydrated = false;
-const dockRoomListeners = new Set<() => void>();
+type DockRoomSessionState = {
+  dockRoomColumns: number | null;
+  inlineRoomRows: number | null;
+  dockRoomHydrated: boolean;
+  dockRoomListeners: Map<() => void, Session | undefined>;
+  paneFieldHeld: boolean;
+  paneFieldListeners: Map<() => void, Session | undefined>;
+};
+
+const dockRoomStateBySession = new RootSessionSlot<DockRoomSessionState>(() => ({
+  dockRoomColumns: null,
+  inlineRoomRows: null,
+  dockRoomHydrated: false,
+  dockRoomListeners: new Map(),
+  paneFieldHeld: false,
+  paneFieldListeners: new Map(),
+}));
+
+function getDockRoomState(): DockRoomSessionState {
+  const state = dockRoomStateBySession.of(getBootstrapSession());
+  hydrateDockRoom(state);
+  return state;
+}
 
 /**
  * densable `l$("PaneField")` — Input/Select focused in a plugin pane.
  * Grow/scroll stay on `Pane`; close is on `PaneField` too.
  */
-let paneFieldHeld = false;
-const paneFieldListeners = new Set<() => void>();
-
 function paneFieldHeldNow(): boolean {
-  return paneFieldHeld;
+  return dockRoomStateBySession.of(getBootstrapSession()).paneFieldHeld;
 }
 
 function subscribePaneFieldHeld(listener: () => void): () => void {
-  paneFieldListeners.add(listener);
+  const state = dockRoomStateBySession.of(getBootstrapSession());
+  state.paneFieldListeners.set(listener, getActiveSessionFromAls());
   return () => {
-    paneFieldListeners.delete(listener);
+    state.paneFieldListeners.delete(listener);
   };
 }
 
 function setPaneFieldHeld(next: boolean): void {
-  if (paneFieldHeld === next) return;
-  paneFieldHeld = next;
-  for (const listener of paneFieldListeners) listener();
+  const state = dockRoomStateBySession.of(getBootstrapSession());
+  if (state.paneFieldHeld === next) return;
+  state.paneFieldHeld = next;
+  notifySessionListeners(state.paneFieldListeners);
 }
 
 /** densable `XP(focusable, site)` — Input/Select remap to AbovePrompt* else the site. */
@@ -1277,44 +1345,45 @@ export function pluginKeysAreAhead(
 }
 
 export function getDockRoomColumns(): number | null {
-  return dockRoomColumns;
+  return getDockRoomState().dockRoomColumns;
 }
 
 export function getInlineRoomRows(): number | null {
-  return inlineRoomRows;
+  return getDockRoomState().inlineRoomRows;
 }
 
-function hydrateDockRoom(): void {
-  if (dockRoomHydrated) return;
-  dockRoomHydrated = true;
+function hydrateDockRoom(state: DockRoomSessionState): void {
+  if (state.dockRoomHydrated) return;
+  state.dockRoomHydrated = true;
   try {
     const { getGlobalConfig } = require('../utils/config.js') as typeof import('../utils/config.js');
     const stored = getGlobalConfig().pluginPanes;
     const dock = paneRoomValue(stored?.dockColumns);
     const inline = paneRoomValue(stored?.inlineRows);
-    if (dock !== null) dockRoomColumns = dock;
-    if (inline !== null) inlineRoomRows = inline;
+    if (dock !== null) state.dockRoomColumns = dock;
+    if (inline !== null) state.inlineRoomRows = inline;
   } catch {
     /* config unavailable */
   }
 }
 
-hydrateDockRoom();
-
 export function chooseDockRoom(columns: number | null): void {
-  dockRoomColumns = columns;
-  for (const listener of dockRoomListeners) listener();
+  const state = getDockRoomState();
+  state.dockRoomColumns = columns;
+  notifySessionListeners(state.dockRoomListeners);
 }
 
 export function chooseInlineRoom(rows: number | null): void {
-  inlineRoomRows = rows;
-  for (const listener of dockRoomListeners) listener();
+  const state = getDockRoomState();
+  state.inlineRoomRows = rows;
+  notifySessionListeners(state.dockRoomListeners);
 }
 
 export function subscribeDockRoom(listener: () => void): () => void {
-  dockRoomListeners.add(listener);
+  const state = getDockRoomState();
+  state.dockRoomListeners.set(listener, getActiveSessionFromAls());
   return () => {
-    dockRoomListeners.delete(listener);
+    state.dockRoomListeners.delete(listener);
   };
 }
 
@@ -1323,24 +1392,28 @@ export function subscribeDockRoom(listener: () => void): () => void {
  * `inlineRows`. Memory `null` keeps disk (`chosen ?? held`).
  */
 export function keepPluginPaneRoom(): void {
-  const chosenDock = dockRoomColumns;
-  const chosenInline = inlineRoomRows;
+  const state = getDockRoomState();
+  const chosenDock = state.dockRoomColumns;
+  const chosenInline = state.inlineRoomRows;
+  const captured = getActiveSessionFromAls();
   void import('../utils/config.js').then(({ saveGlobalConfig }) => {
-    saveGlobalConfig(current => {
-      const held = current.pluginPanes;
-      const dockColumns = chosenDock ?? held?.dockColumns;
-      const inlineRows = chosenInline ?? held?.inlineRows;
-      if (held?.dockColumns === dockColumns && held?.inlineRows === inlineRows) {
-        return current;
-      }
-      return {
-        ...current,
-        pluginPanes: {
-          ...held,
-          dockColumns,
-          inlineRows,
-        },
-      };
+    runInCapturedSession(captured, () => {
+      saveGlobalConfig(current => {
+        const held = current.pluginPanes;
+        const dockColumns = chosenDock ?? held?.dockColumns;
+        const inlineRows = chosenInline ?? held?.inlineRows;
+        if (held?.dockColumns === dockColumns && held?.inlineRows === inlineRows) {
+          return current;
+        }
+        return {
+          ...current,
+          pluginPanes: {
+            ...held,
+            dockColumns,
+            inlineRows,
+          },
+        };
+      });
     });
   });
 }
@@ -2973,10 +3046,16 @@ function resolvePluginColor(color: string): string {
 }
 
 /** densable `Le` — hover scope refcount store (`plugin\0scope` → count). */
-const pluginHoverGroupsStore = createStore<Map<string, number>>(new Map());
+const pluginHoverGroupsStoreBySession = new RootSessionSlot<Store<Map<string, number>>>(() =>
+  createStore<Map<string, number>>(new Map()),
+);
 
-function adjustPluginHoverGroup(groupKey: string, delta: number): void {
-  pluginHoverGroupsStore.setState(prev => {
+function getPluginHoverGroupsStore(): Store<Map<string, number>> {
+  return pluginHoverGroupsStoreBySession.of(getBootstrapSession());
+}
+
+function adjustPluginHoverGroup(store: Store<Map<string, number>>, groupKey: string, delta: number): void {
+  store.setState(prev => {
     const nextCount = (prev.get(groupKey) ?? 0) + delta;
     const next = new Map(prev);
     if (nextCount > 0) next.set(groupKey, nextCount);
@@ -2985,7 +3064,7 @@ function adjustPluginHoverGroup(groupKey: string, delta: number): void {
   });
 }
 
-function usePluginHoverScope(
+export function usePluginHoverScope(
   plugin: string | undefined,
   hover: Record<string, unknown> | undefined,
 ): {
@@ -2996,25 +3075,37 @@ function usePluginHoverScope(
 } {
   const scope = typeof hover?.scope === 'string' && hover.scope !== '' ? hover.scope : undefined;
   const groupKey = plugin !== undefined && plugin !== '' && scope !== undefined ? `${plugin}\0${scope}` : undefined;
+  const [hoverStore] = useState(() => getPluginHoverGroupsStore());
+  const [capturedSession] = useState(() => getActiveSessionFromAls());
+  const subscribeHoverGroups = useCallback(
+    (listener: () => void) =>
+      hoverStore.subscribe(() => {
+        runInCapturedSession(capturedSession, listener);
+      }),
+    [hoverStore, capturedSession],
+  );
   const isHot = useSyncExternalStore(
-    pluginHoverGroupsStore.subscribe,
-    () => (groupKey !== undefined ? (pluginHoverGroupsStore.getState().get(groupKey) ?? 0) > 0 : false),
+    subscribeHoverGroups,
+    () => (groupKey !== undefined ? (hoverStore.getState().get(groupKey) ?? 0) > 0 : false),
     () => false,
   );
   const heldKeyRef = useRef<string | undefined>(undefined);
-  const enter = useCallback((key: string | undefined) => {
-    if (key !== undefined && heldKeyRef.current === undefined) {
-      heldKeyRef.current = key;
-      adjustPluginHoverGroup(key, 1);
-    }
-  }, []);
+  const enter = useCallback(
+    (key: string | undefined) => {
+      if (key !== undefined && heldKeyRef.current === undefined) {
+        heldKeyRef.current = key;
+        adjustPluginHoverGroup(hoverStore, key, 1);
+      }
+    },
+    [hoverStore],
+  );
   const leave = useCallback(() => {
     const held = heldKeyRef.current;
     if (held !== undefined) {
       heldKeyRef.current = undefined;
-      adjustPluginHoverGroup(held, -1);
+      adjustPluginHoverGroup(hoverStore, held, -1);
     }
-  }, []);
+  }, [hoverStore]);
   useEffect(() => {
     if (heldKeyRef.current !== undefined && heldKeyRef.current !== groupKey) {
       leave();
@@ -3213,7 +3304,13 @@ type PluginActionKeySeat = {
   handle: unknown;
 };
 
-const pluginActionKeySeats = (() => {
+type PluginActionKeySeatsRegistry = {
+  add: (seat: PluginActionKeySeat) => void;
+  remove: (seat: PluginActionKeySeat) => void;
+  winnerOf: (action: string) => PluginActionKeySeat | undefined;
+};
+
+function createPluginActionKeySeatsRegistry(): PluginActionKeySeatsRegistry {
   const list: PluginActionKeySeat[] = [];
   let seq = 0;
   const remove = (seat: PluginActionKeySeat): void => {
@@ -3237,7 +3334,15 @@ const pluginActionKeySeats = (() => {
         );
     },
   };
-})();
+}
+
+const pluginActionKeySeatsBySession = new RootSessionSlot<PluginActionKeySeatsRegistry>(
+  createPluginActionKeySeatsRegistry,
+);
+
+function getPluginActionKeySeats(): PluginActionKeySeatsRegistry {
+  return pluginActionKeySeatsBySession.of(getBootstrapSession());
+}
 
 function actionComponentRank(component: string | undefined): number {
   return component === 'Pane' ? 2 : component === 'AbovePrompt' ? 1 : 0;
@@ -3276,18 +3381,20 @@ function PluginButtonActionKeys({
     seat.rank = rank;
   });
   useEffect(() => {
+    const seats = getPluginActionKeySeats();
     seat.action = action;
-    pluginActionKeySeats.add(seat);
-    return () => pluginActionKeySeats.remove(seat);
+    seats.add(seat);
+    return () => seats.remove(seat);
   }, [action, seat]);
   useEffect(() => {
     if (!keybindingContext || dialogOpen) return;
+    const seats = getPluginActionKeySeats();
     const unsubs = contexts.map(ctx =>
       keybindingContext.registerHandler({
         action,
         context: ctx,
         handler: () => {
-          const winner = pluginActionKeySeats.winnerOf(action);
+          const winner = seats.winnerOf(action);
           if (winner === undefined) return;
           firePress(winner.plugin, winner.handle);
         },
@@ -3303,7 +3410,7 @@ function PluginButtonActionKeys({
       const toCheck = [...new Set([...keybindingContext.activeContexts, ...contexts, 'Global'])];
       const resolved = keybindingContext.resolve(input, key, toCheck);
       if (resolved.type !== 'match' || resolved.action !== action) return;
-      const winner = pluginActionKeySeats.winnerOf(action);
+      const winner = getPluginActionKeySeats().winnerOf(action);
       if (winner === undefined) return;
       keybindingContext.setPendingChord(null);
       firePress(winner.plugin, winner.handle);
@@ -6927,16 +7034,21 @@ export function getAskUserQuestionSurfacePolicy(surface?: string): {
 
 const ENGINE_CONFIRM_METADATA_SOURCES = new Set(['mod_hot_reload', 'plugin_authoring_hand_over_check']);
 
-const registeredEngineConfirmRequestIds = new Set<string>();
+const registeredEngineConfirmRequestIdsBySession = new RootSessionSlot<Set<string>>(() => new Set<string>());
+
+function getRegisteredEngineConfirmRequestIds(): Set<string> {
+  return registeredEngineConfirmRequestIdsBySession.of(getBootstrapSession());
+}
 
 /**
  * Official 2.1.323 #2039 (`GJi` / `hUt`): mark an AskUserQuestion requestId as
  * an engine-owned confirmation question so mods cannot reword it.
  */
 export function registerEngineConfirmQuestion(requestId: string): () => void {
-  registeredEngineConfirmRequestIds.add(requestId);
+  const ids = getRegisteredEngineConfirmRequestIds();
+  ids.add(requestId);
   return () => {
-    registeredEngineConfirmRequestIds.delete(requestId);
+    ids.delete(requestId);
   };
 }
 
@@ -6950,7 +7062,7 @@ export function isEngineConfirmationAsk(requestId: string, metadataSource?: stri
   if (metadataSource !== undefined && ENGINE_CONFIRM_METADATA_SOURCES.has(metadataSource)) {
     return true;
   }
-  return registeredEngineConfirmRequestIds.has(requestId);
+  return getRegisteredEngineConfirmRequestIds().has(requestId);
 }
 
 /**

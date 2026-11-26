@@ -10,6 +10,13 @@
  * meta mount, bridgeCarrierChild `Cet` rewrite, CLAUDE_CODE_REMOTE `nf?OEe`.
  */
 
+import {
+  HostSlot,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
+
 export type CliOwnedBearerProvider = () => string | null | undefined
 
 export type CliOwnedAsyncBearerProvider = () => Promise<
@@ -68,11 +75,19 @@ function createRegistry(): CliOwnedRegistry {
   }
 }
 
-let registry = createRegistry()
+type HostCliOwnedRegistryState = {
+  registry: CliOwnedRegistry
+}
 
-/** densable `Kt()` ownership slice — module singleton. */
+const hostCliOwnedRegistrySlot = new HostSlot<HostCliOwnedRegistryState>(
+  () => ({
+    registry: createRegistry(),
+  }),
+)
+
+/** densable `Kt()` ownership slice — host-scoped via HostSlot. */
 function getCliOwnedRegistry(): CliOwnedRegistry {
-  return registry
+  return hostCliOwnedRegistrySlot.of(getBootstrapSessionHost()).registry
 }
 
 /**
@@ -147,7 +162,8 @@ export function isCcrInjectedConfig(config: object): boolean {
 
 /** Tests only — rebuild WeakSet/Maps (cannot clear WeakSet). */
 export function resetCliOwnedConfigsForTests(): void {
-  registry = createRegistry()
+  hostCliOwnedRegistrySlot.of(getBootstrapSessionHost()).registry =
+    createRegistry()
 }
 
 /**
@@ -233,40 +249,47 @@ export function notifyCliOwnedResponse(
  * Gold: extra headers then `await Ukn(r)` when Authorization is missing.
  */
 export function wrapCliOwnedFetch(inner: FetchLike, config: object): FetchLike {
+  const capturedSessionRef = new WeakRef(getBootstrapSession().root)
   return async (input, init) => {
-    const headers = new Headers(init?.headers)
-    const extras = collectCliOwnedRequestHeaders(config, {
-      method: (init?.method ?? 'GET').toUpperCase(),
-      body: init?.body,
-    })
-    for (const [name, value] of Object.entries(extras)) {
-      if (!headers.has(name) && name.toLowerCase() !== 'authorization') {
-        headers.set(name, value)
+    const run = async () => {
+      const headers = new Headers(init?.headers)
+      const extras = collectCliOwnedRequestHeaders(config, {
+        method: (init?.method ?? 'GET').toUpperCase(),
+        body: init?.body,
+      })
+      for (const [name, value] of Object.entries(extras)) {
+        if (!headers.has(name) && name.toLowerCase() !== 'authorization') {
+          headers.set(name, value)
+        }
       }
-    }
-    let bearerFingerprint: string | null = null
-    if (!headers.has('Authorization')) {
-      const token = await resolveCliOwnedBearerToken(config)
-      if (token) {
-        headers.set('Authorization', `Bearer ${token}`)
-        bearerFingerprint = token
+      let bearerFingerprint: string | null = null
+      if (!headers.has('Authorization')) {
+        const token = await resolveCliOwnedBearerToken(config)
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`)
+          bearerFingerprint = token
+        }
       }
+      const response = await inner(input, {
+        ...init,
+        headers,
+        redirect: 'error',
+      })
+      notifyCliOwnedResponse(config, {
+        method: (init?.method ?? 'GET').toUpperCase(),
+        status: response.status,
+        headers: response.headers,
+        requestHeaders: {
+          get: name =>
+            name.toLowerCase() === 'authorization' ? null : headers.get(name),
+        },
+        bearerFingerprint,
+      })
+      return response
     }
-    const response = await inner(input, {
-      ...init,
-      headers,
-      redirect: 'error',
-    })
-    notifyCliOwnedResponse(config, {
-      method: (init?.method ?? 'GET').toUpperCase(),
-      status: response.status,
-      headers: response.headers,
-      requestHeaders: {
-        get: name =>
-          name.toLowerCase() === 'authorization' ? null : headers.get(name),
-      },
-      bearerFingerprint,
-    })
-    return response
+    const targetSession = capturedSessionRef.deref()
+    return targetSession !== undefined
+      ? runWithSession(targetSession, run)
+      : run()
   }
 }

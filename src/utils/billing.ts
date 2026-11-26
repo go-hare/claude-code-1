@@ -6,6 +6,8 @@ import {
 } from './auth.js'
 import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
+import { HostSlot } from './hostSlot.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 
 export function hasConsoleBillingAccess(): boolean {
   // Check if cost reporting is disabled via environment variable
@@ -44,14 +46,22 @@ export function hasConsoleBillingAccess(): boolean {
 }
 
 // Mock billing access for /mock-limits testing (set by mockRateLimits.ts)
-let mockBillingAccessOverride: boolean | null = null
+const billingHostSlot = new HostSlot<{
+  mockBillingAccessOverride: boolean | null
+}>(() => ({
+  mockBillingAccessOverride: null,
+}))
 
 export function setMockBillingAccessOverride(value: boolean | null): void {
-  mockBillingAccessOverride = value
+  billingHostSlot.of(getBootstrapSessionHost()).mockBillingAccessOverride =
+    value
 }
 
 export function hasClaudeAiBillingAccess(): boolean {
   // Check for mock billing access first (for /mock-limits testing)
+  const mockBillingAccessOverride = billingHostSlot.of(
+    getBootstrapSessionHost(),
+  ).mockBillingAccessOverride
   if (mockBillingAccessOverride !== null) {
     return mockBillingAccessOverride
   }

@@ -1,12 +1,13 @@
 import { randomBytes } from 'crypto'
 import { open } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import type { ModelUsage } from '../entrypoints/agentSdkTypes.js'
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { errorMessage } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
 import { logError } from './log.js'
+import { getActiveSessionFromAls, runWithSession } from './sessionRoot.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { DailyActivity, DailyModelTokens, SessionStats } from './stats.js'
 
@@ -15,32 +16,40 @@ const MIN_MIGRATABLE_VERSION = 1
 const STATS_CACHE_FILENAME = 'stats-cache.json'
 
 /**
- * Simple in-memory lock to prevent concurrent cache operations.
+ * Process-global per-path FIFO lock queue keyed by resolved stats-cache path.
+ * Serializes read-modify-write across concurrent hosts sharing the same
+ * `CLAUDE_CONFIG_DIR` while allowing hosts with distinct config dirs to proceed
+ * concurrently.
  */
-let statsCacheLockPromise: Promise<void> | null = null
+const statsCachePathQueues = new Map<string, Promise<void>>()
 
 /**
- * Execute a function while holding the stats cache lock.
- * Only one operation can hold the lock at a time.
+ * Execute a function while holding the stats cache lock for the active
+ * `getStatsCachePath()`. Only one operation can hold the lock for a given
+ * physical stats-cache file at a time across the process.
  */
 export async function withStatsCacheLock<T>(fn: () => Promise<T>): Promise<T> {
-  // Wait for any existing lock to be released
-  while (statsCacheLockPromise) {
-    await statsCacheLockPromise
-  }
-
-  // Create our lock
-  let releaseLock: (() => void) | undefined
-  statsCacheLockPromise = new Promise<void>(resolve => {
-    releaseLock = resolve
+  const key = resolve(getStatsCachePath())
+  const captured = getActiveSessionFromAls()
+  const prev = statsCachePathQueues.get(key) ?? Promise.resolve()
+  let releaseLock: () => void = () => {}
+  const gate = new Promise<void>(resolveGate => {
+    releaseLock = resolveGate
   })
+  const tail = prev.then(() => gate)
+  statsCachePathQueues.set(key, tail)
 
+  await prev
   try {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      return await runWithSession(captured, fn)
+    }
     return await fn()
   } finally {
-    // Release the lock
-    statsCacheLockPromise = null
-    releaseLock?.()
+    releaseLock()
+    if (statsCachePathQueues.get(key) === tail) {
+      statsCachePathQueues.delete(key)
+    }
   }
 }
 

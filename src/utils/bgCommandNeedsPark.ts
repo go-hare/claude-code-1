@@ -16,6 +16,12 @@
 import { getAttacherCaps, subscribeAttacherCaps } from '../bootstrap/state.js'
 import type { BgJobState, BgSessionTempo } from '../daemon/jobState.js'
 import { isBgSession } from './concurrentSessions.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from './sessionHost.js'
 
 export type BgNeedsParkKind = 'refused' | 'already' | 'wrote'
 
@@ -38,7 +44,20 @@ type ActivePark = {
   unsubscribe: () => void
 }
 
-let activePark: ActivePark | null = null
+const fallbackBgCommandNeedsParkSession = { root: {} as object }
+const bgCommandNeedsParkBySession = new RootSessionSlot<{
+  activePark: ActivePark | null
+}>(() => ({ activePark: null }))
+
+function getBgCommandNeedsParkState(): { activePark: ActivePark | null } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return bgCommandNeedsParkBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return bgCommandNeedsParkBySession.of(fallbackBgCommandNeedsParkSession)
+}
 
 /** densable SB() = Zi() && !vT() — bg without attached terminal. */
 export function isBgNoTerminal(): boolean {
@@ -129,17 +148,29 @@ export async function clearBgCommandNeedsPark(
  * densable gQp — watch attacher caps; on attach clear park + restore prior.
  */
 function armParkRestore(needs: string, prior: Prior): void {
-  activePark?.unsubscribe()
+  const state = getBgCommandNeedsParkState()
+  const capturedSession = getActiveSessionFromAls()
+  state.activePark?.unsubscribe()
   const unsubscribe = subscribeAttacherCaps(() => {
-    // densable: if(SB()) return — still no terminal
-    if (isBgNoTerminal()) return
-    const cur = activePark
-    if (!cur || cur.needs !== needs) return
-    activePark = null
-    cur.unsubscribe()
-    void clearBgCommandNeedsPark(needs, cur.prior)
+    const runBody = () => {
+      // densable: if(SB()) return — still no terminal
+      if (isBgNoTerminal()) return
+      const cur = state.activePark
+      if (!cur || cur.needs !== needs) return
+      state.activePark = null
+      cur.unsubscribe()
+      void clearBgCommandNeedsPark(needs, cur.prior)
+    }
+    if (
+      capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+    ) {
+      runWithSession(capturedSession, runBody)
+    } else {
+      runBody()
+    }
   })
-  activePark = { needs, prior, unsubscribe }
+  state.activePark = { needs, prior, unsubscribe }
 }
 
 /**
@@ -156,7 +187,7 @@ export async function parkBgCommandNeedsInput(
     case 'refused':
       return false
     case 'already':
-      if (activePark?.needs !== needs) {
+      if (getBgCommandNeedsParkState().activePark?.needs !== needs) {
         armParkRestore(needs, {
           tempo: 'idle',
           needs: undefined,
@@ -250,6 +281,7 @@ export async function formatMcpNeedsAuthMessage(
 
 /** Test helper. */
 export function _resetBgCommandNeedsParkForTests(): void {
-  activePark?.unsubscribe()
-  activePark = null
+  const state = getBgCommandNeedsParkState()
+  state.activePark?.unsubscribe()
+  state.activePark = null
 }

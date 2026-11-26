@@ -16,6 +16,7 @@ import { jsonParse } from '../utils/slowOperations.js'
 import { normalizeControlMessageKeys } from '../utils/controlMessageCompat.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -87,8 +88,19 @@ type StdinLineBuffer = {
   capped: boolean
 }
 
-let pendingParse: Promise<AwaitInitializeResult | undefined> | undefined
-let lineBuffer: StdinLineBuffer | undefined
+type AwaitInitializeHostState = {
+  pendingParse: Promise<AwaitInitializeResult | undefined> | undefined
+  lineBuffer: StdinLineBuffer | undefined
+}
+
+const awaitInitializeHostSlot = new HostSlot<AwaitInitializeHostState>(() => ({
+  pendingParse: undefined,
+  lineBuffer: undefined,
+}))
+
+function getAwaitInitializeHostState(): AwaitInitializeHostState {
+  return awaitInitializeHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable `DXn` — utf8 stdin chunks for stream-json (also leftover after fl).
@@ -254,7 +266,8 @@ function interpretFirstLine(
 export function startAwaitInitializeStdinRead(
   generator: () => AsyncGenerator<string>,
 ): void {
-  if (pendingParse) return
+  const hostState = getAwaitInitializeHostState()
+  if (hostState.pendingParse) return
   const o: StdinLineBuffer = {
     generator: generator(),
     stash: [],
@@ -264,8 +277,8 @@ export function startAwaitInitializeStdinRead(
     adopted: false,
     capped: false,
   }
-  lineBuffer = o
-  pendingParse = readFirstNonEmptyLine(o)
+  hostState.lineBuffer = o
+  hostState.pendingParse = readFirstNonEmptyLine(o)
     .then(interpretFirstLine, (n: unknown) => {
       o.error = n
       logSdkLaunchInitializeSad('stdin_error')
@@ -275,21 +288,23 @@ export function startAwaitInitializeStdinRead(
       logSdkLaunchInitializeBad('parse_threw')
       return { kind: 'absent' } as AwaitInitializeResult
     })
-  void pendingParse.then(() => continueStashing(o))
+  void hostState.pendingParse.then(() => continueStashing(o))
 }
 
 /** densable `zqr`. */
 export function waitForAwaitInitialize(): Promise<
   AwaitInitializeResult | undefined
 > {
-  return pendingParse ?? Promise.resolve(undefined)
+  return (
+    getAwaitInitializeHostState().pendingParse ?? Promise.resolve(undefined)
+  )
 }
 
 /** densable `Ii` — leftover stdin after the initialize line (for getInputPrompt). */
 export function takeAdoptedAwaitInitializeStdin():
   | AsyncGenerator<string>
   | undefined {
-  const e = lineBuffer
+  const e = getAwaitInitializeHostState().lineBuffer
   if (!e || e.adopted) return
   e.adopted = true
   return adoptLeftover(e)
@@ -306,6 +321,7 @@ export function concatPluginDirs(
 }
 
 export function resetAwaitInitializeForTesting(): void {
-  pendingParse = undefined
-  lineBuffer = undefined
+  const hostState = getAwaitInitializeHostState()
+  hostState.pendingParse = undefined
+  hostState.lineBuffer = undefined
 }

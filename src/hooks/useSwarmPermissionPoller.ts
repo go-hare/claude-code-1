@@ -9,7 +9,7 @@
  * in useCanUseTool.ts, which creates pending requests that this hook monitors.
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useInterval } from 'usehooks-ts'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
@@ -23,6 +23,12 @@ import {
   pollForResponse,
   removeWorkerResponse,
 } from '../utils/swarm/permissionSync.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../utils/sessionRoot.js'
 import { getAgentName, getTeamName } from '../utils/teammate.js'
 
 const POLL_INTERVAL_MS = 500
@@ -72,8 +78,29 @@ export type PermissionResponseCallback = {
  */
 type PendingCallbackRegistry = Map<string, PermissionResponseCallback>
 
-// Module-level registry that persists across renders
-const pendingCallbacks: PendingCallbackRegistry = new Map()
+/**
+ * Callback signature for handling sandbox permission responses
+ */
+export type SandboxPermissionResponseCallback = {
+  requestId: string
+  host: string
+  resolve: (allow: boolean) => void
+}
+
+type SwarmPermissionPollerSessionState = {
+  pendingCallbacks: PendingCallbackRegistry
+  pendingSandboxCallbacks: Map<string, SandboxPermissionResponseCallback>
+}
+
+const swarmPermissionPollerBySession =
+  new RootSessionSlot<SwarmPermissionPollerSessionState>(() => ({
+    pendingCallbacks: new Map(),
+    pendingSandboxCallbacks: new Map(),
+  }))
+
+function getSwarmPermissionPollerState(): SwarmPermissionPollerSessionState {
+  return swarmPermissionPollerBySession.of(getBootstrapSession())
+}
 
 /**
  * Register a callback for a pending permission request
@@ -82,7 +109,10 @@ const pendingCallbacks: PendingCallbackRegistry = new Map()
 export function registerPermissionCallback(
   callback: PermissionResponseCallback,
 ): void {
-  pendingCallbacks.set(callback.requestId, callback)
+  getSwarmPermissionPollerState().pendingCallbacks.set(
+    callback.requestId,
+    callback,
+  )
   logForDebugging(
     `[SwarmPermissionPoller] Registered callback for request ${callback.requestId}`,
   )
@@ -92,7 +122,7 @@ export function registerPermissionCallback(
  * Unregister a callback (e.g., when the request is resolved locally or times out)
  */
 export function unregisterPermissionCallback(requestId: string): void {
-  pendingCallbacks.delete(requestId)
+  getSwarmPermissionPollerState().pendingCallbacks.delete(requestId)
   logForDebugging(
     `[SwarmPermissionPoller] Unregistered callback for request ${requestId}`,
   )
@@ -102,7 +132,7 @@ export function unregisterPermissionCallback(requestId: string): void {
  * Check if a request has a registered callback
  */
 export function hasPermissionCallback(requestId: string): boolean {
-  return pendingCallbacks.has(requestId)
+  return getSwarmPermissionPollerState().pendingCallbacks.has(requestId)
 }
 
 /**
@@ -111,8 +141,9 @@ export function hasPermissionCallback(requestId: string): boolean {
  * and also used in tests for isolation.
  */
 export function clearAllPendingCallbacks(): void {
-  pendingCallbacks.clear()
-  pendingSandboxCallbacks.clear()
+  const state = getSwarmPermissionPollerState()
+  state.pendingCallbacks.clear()
+  state.pendingSandboxCallbacks.clear()
 }
 
 /**
@@ -128,6 +159,7 @@ export function processMailboxPermissionResponse(params: {
   updatedInput?: Record<string, unknown>
   permissionUpdates?: unknown
 }): boolean {
+  const { pendingCallbacks } = getSwarmPermissionPollerState()
   const callback = pendingCallbacks.get(params.requestId)
 
   if (!callback) {
@@ -160,26 +192,16 @@ export function processMailboxPermissionResponse(params: {
 // ============================================================================
 
 /**
- * Callback signature for handling sandbox permission responses
- */
-export type SandboxPermissionResponseCallback = {
-  requestId: string
-  host: string
-  resolve: (allow: boolean) => void
-}
-
-// Module-level registry for sandbox permission callbacks
-const pendingSandboxCallbacks: Map<string, SandboxPermissionResponseCallback> =
-  new Map()
-
-/**
  * Register a callback for a pending sandbox permission request
  * Called when a worker sends a sandbox permission request to the leader
  */
 export function registerSandboxPermissionCallback(
   callback: SandboxPermissionResponseCallback,
 ): void {
-  pendingSandboxCallbacks.set(callback.requestId, callback)
+  getSwarmPermissionPollerState().pendingSandboxCallbacks.set(
+    callback.requestId,
+    callback,
+  )
   logForDebugging(
     `[SwarmPermissionPoller] Registered sandbox callback for request ${callback.requestId}`,
   )
@@ -189,7 +211,7 @@ export function registerSandboxPermissionCallback(
  * Check if a sandbox request has a registered callback
  */
 export function hasSandboxPermissionCallback(requestId: string): boolean {
-  return pendingSandboxCallbacks.has(requestId)
+  return getSwarmPermissionPollerState().pendingSandboxCallbacks.has(requestId)
 }
 
 /**
@@ -203,6 +225,7 @@ export function processSandboxPermissionResponse(params: {
   host: string
   allow: boolean
 }): boolean {
+  const { pendingSandboxCallbacks } = getSwarmPermissionPollerState()
   const callback = pendingSandboxCallbacks.get(params.requestId)
 
   if (!callback) {
@@ -229,6 +252,7 @@ export function processSandboxPermissionResponse(params: {
  * Process a permission response by invoking the registered callback
  */
 function processResponse(response: PermissionResponse): boolean {
+  const { pendingCallbacks } = getSwarmPermissionPollerState()
   const callback = pendingCallbacks.get(response.requestId)
 
   if (!callback) {
@@ -267,8 +291,9 @@ function processResponse(response: PermissionResponse): boolean {
  */
 export function useSwarmPermissionPoller(): void {
   const isProcessingRef = useRef(false)
+  const [capturedSession] = useState(() => getActiveSessionFromAls())
 
-  const poll = useCallback(async () => {
+  const runPoll = useCallback(async () => {
     // Don't poll if not a swarm worker
     if (!isSwarmWorker()) {
       return
@@ -279,6 +304,7 @@ export function useSwarmPermissionPoller(): void {
       return
     }
 
+    const { pendingCallbacks } = getSwarmPermissionPollerState()
     // Don't poll if no callbacks are registered
     if (pendingCallbacks.size === 0) {
       return
@@ -317,14 +343,28 @@ export function useSwarmPermissionPoller(): void {
     }
   }, [])
 
+  const poll = useCallback((): Promise<void> => {
+    if (
+      capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+    ) {
+      return runWithSession(capturedSession, runPoll)
+    }
+    return runPoll()
+  }, [capturedSession, runPoll])
+
   // Only poll if we're a swarm worker
-  const shouldPoll = isSwarmWorker()
+  const shouldPoll =
+    capturedSession !== undefined &&
+    getActiveSessionFromAls() !== capturedSession
+      ? runWithSession(capturedSession, isSwarmWorker)
+      : isSwarmWorker()
   useInterval(() => void poll(), shouldPoll ? POLL_INTERVAL_MS : null)
 
   // Initial poll on mount
   useEffect(() => {
-    if (isSwarmWorker()) {
+    if (shouldPoll) {
       void poll()
     }
-  }, [poll])
+  }, [poll, shouldPoll])
 }

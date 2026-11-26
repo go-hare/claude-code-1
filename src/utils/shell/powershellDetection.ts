@@ -5,6 +5,7 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { getPlatform } from '../platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { which } from '../which.js'
 
 /**
@@ -196,16 +197,27 @@ export async function findPowerShell(
   return null
 }
 
-let cachedPowerShellPath: Promise<string | null> | null = null
+const powerShellPathHostSlot = new HostSlot<{
+  cachedPowerShellPath: Promise<string | null> | null
+}>(() => ({
+  cachedPowerShellPath: null,
+}))
+
+function getPowerShellHostState(): {
+  cachedPowerShellPath: Promise<string | null> | null
+} {
+  return powerShellPathHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable `pX` — memoized PowerShell path (session).
  */
 export function getCachedPowerShellPath(): Promise<string | null> {
-  if (!cachedPowerShellPath) {
-    cachedPowerShellPath = findPowerShell()
+  const hostState = getPowerShellHostState()
+  if (!hostState.cachedPowerShellPath) {
+    hostState.cachedPowerShellPath = findPowerShell()
   }
-  return cachedPowerShellPath
+  return hostState.cachedPowerShellPath
 }
 
 export type PowerShellEdition = 'core' | 'desktop'
@@ -230,5 +242,5 @@ export async function getPowerShellEdition(): Promise<PowerShellEdition | null> 
  * Resets the cached PowerShell path. Only for testing.
  */
 export function resetPowerShellCache(): void {
-  cachedPowerShellPath = null
+  getPowerShellHostState().cachedPowerShellPath = null
 }

@@ -9,6 +9,7 @@ import { z } from 'zod/v4'
 import { toolMatchesName, type ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { listAgentsIncompleteNotes } from 'src/utils/sessionListIncompleteCopy.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 import {
@@ -54,9 +55,16 @@ export const LIST_AGENTS_EXHAUSTED_CURSOR_MESSAGE =
  * Official 2.1.328 (#440) `fMo` LRU cursor store: remembers cumulative row
  * keys already returned by previous pages in this session (max 32 cursors).
  */
-const listAgentsCursorCache = new Map<string, Set<string>>()
+const listAgentsCursorCacheSlot = new RootSessionSlot<Map<string, Set<string>>>(
+  () => new Map(),
+)
+
+function getListAgentsCursorCache(): Map<string, Set<string>> {
+  return listAgentsCursorCacheSlot.of(getBootstrapSession())
+}
 
 export function issueListAgentsCursor(shownKeys: Set<string>): string {
+  const listAgentsCursorCache = getListAgentsCursorCache()
   const token = randomBytes(6).toString('hex')
   listAgentsCursorCache.set(token, new Set(shownKeys))
   while (listAgentsCursorCache.size > LIST_AGENTS_CURSOR_CACHE_MAX) {
@@ -68,6 +76,7 @@ export function issueListAgentsCursor(shownKeys: Set<string>): string {
 }
 
 export function lookupListAgentsCursor(cursor: string): Set<string> | null {
+  const listAgentsCursorCache = getListAgentsCursorCache()
   const entry = listAgentsCursorCache.get(cursor)
   if (!entry) return null
   // Refresh LRU order
@@ -77,7 +86,7 @@ export function lookupListAgentsCursor(cursor: string): Set<string> | null {
 }
 
 export function clearListAgentsCursorCacheForTests(): void {
-  listAgentsCursorCache.clear()
+  getListAgentsCursorCache().clear()
 }
 
 /**

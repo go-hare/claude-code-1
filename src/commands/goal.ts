@@ -36,6 +36,7 @@ import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../services/analytics/index.js'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionHost.js'
 import { firstLineOf, plural } from '../utils/stringUtils.js'
 
 export const MAX_GOAL_CONDITION_LENGTH = 4000
@@ -176,15 +177,18 @@ function checkGates(): { message: string; code: string } | null {
  * an in-flight Stop hook evaluation running while background work is in
  * progress cannot overwrite a concurrent `/goal clear` or new `/goal`.
  */
-let goalMutationEpoch = 0
+const goalMutationEpochSlot = new RootSessionSlot<{ epoch: number }>(() => ({
+  epoch: 0,
+}))
 
 export function getGoalMutationEpoch(): number {
-  return goalMutationEpoch
+  return goalMutationEpochSlot.of(getBootstrapSession()).epoch
 }
 
 export function bumpGoalMutationEpoch(): number {
-  goalMutationEpoch += 1
-  return goalMutationEpoch
+  const slot = goalMutationEpochSlot.of(getBootstrapSession())
+  slot.epoch += 1
+  return slot.epoch
 }
 
 export function isSameActiveGoal(
@@ -203,7 +207,7 @@ export function applyGoalStateUpdateIfUnchanged(
   nextGoal: AppState['activeGoal'],
   snapshotEpoch?: number,
 ): boolean {
-  if (snapshotEpoch !== undefined && snapshotEpoch !== goalMutationEpoch) {
+  if (snapshotEpoch !== undefined && snapshotEpoch !== getGoalMutationEpoch()) {
     return false
   }
   let applied = false

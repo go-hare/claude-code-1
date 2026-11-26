@@ -6,6 +6,12 @@ import { logError } from './log.js'
 import { logForDebugging } from './debug.js'
 import { leftoverM, leftoverP, leftoverY } from './leftoverOt.js'
 import { isHumanLikeOrigin } from './messages.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from './sessionHost.js'
 import type { QueuePriority } from '../types/textInputTypes.js'
 
 export type ForegroundToolCall = {
@@ -15,6 +21,15 @@ export type ForegroundToolCall = {
 
 /** densable `Ct.peek/of` key — `session.root`, else the object (test bags). */
 function sessionRoot(session: object): object {
+  if (session === queryForegroundSession) {
+    try {
+      const active = getBootstrapSession()
+      if (active?.root) return active.root
+    } catch {
+      // Fall back to queryForegroundSession when sessionHost is mocked
+    }
+    return queryForegroundSession
+  }
   if (
     'root' in session &&
     typeof (session as { root?: unknown }).root === 'object' &&
@@ -112,7 +127,17 @@ const MOVABLE_AGENT_TOOL_NAMES = new Set(['Bash', 'PowerShell'])
 
 /** densable `WR` — Clock.setTimeout cancel handle, no unref. */
 function clockSetTimeout(callback: () => void, ms: number): () => void {
-  const timer = setTimeout(callback, ms)
+  const capturedSession = getActiveSessionFromAls()
+  const timer = setTimeout(() => {
+    if (
+      capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+    ) {
+      runWithSession(capturedSession, callback)
+    } else {
+      callback()
+    }
+  }, ms)
   return () => clearTimeout(timer)
 }
 
@@ -1265,14 +1290,32 @@ export class QueuedNowCoordinator {
  * Test-only Xj. Gold has no process-global Xj; REPL owns the
  * useMemo instance passed as `opts.lowLatency`.
  */
-let processLowLatency: QueuedNowLowLatency | undefined
-let processLowLatencyOpts: SendQueuedNowOpts | undefined
-let processLowLatencyState:
-  | {
-      getAppState: () => import('../state/AppState.js').AppState
-      setAppState: import('../Task.js').SetAppState
-    }
-  | undefined
+class ProcessLowLatencySessionState {
+  processLowLatency: QueuedNowLowLatency | undefined = undefined
+  processLowLatencyOpts: SendQueuedNowOpts | undefined = undefined
+  processLowLatencyState:
+    | {
+        getAppState: () => import('../state/AppState.js').AppState
+        setAppState: import('../Task.js').SetAppState
+      }
+    | undefined = undefined
+}
+
+const fallbackProcessLowLatencySession = { root: {} as object }
+const processLowLatencyBySession =
+  new RootSessionSlot<ProcessLowLatencySessionState>(
+    () => new ProcessLowLatencySessionState(),
+  )
+
+function getProcessLowLatencySessionState(): ProcessLowLatencySessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return processLowLatencyBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return processLowLatencyBySession.of(fallbackProcessLowLatencySession)
+}
 
 function isLocalAgentTaskRow(task: unknown): task is {
   type: 'local_agent'
@@ -1431,42 +1474,45 @@ function leftoverIhrSpinnerSlice(): QueuedNowSpinnerSlice {
   }
 }
 
-function testQueuedNowHost(): QueuedNowLowLatencyHost {
-  const getAppState = () => processLowLatencyState!.getAppState()
+function testQueuedNowHost(
+  slot: ProcessLowLatencySessionState,
+): QueuedNowLowLatencyHost {
+  const getAppState = () => slot.processLowLatencyState!.getAppState()
   const setAppState: import('../Task.js').SetAppState = updater =>
-    processLowLatencyState!.setAppState(updater)
+    slot.processLowLatencyState!.setAppState(updater)
   return {
     turn: {
       guard: {
         get isRunning() {
-          return processLowLatencyOpts?.isTurnRunning?.() ?? false
+          return slot.processLowLatencyOpts?.isTurnRunning?.() ?? false
         },
         get isDispatchingForModel() {
-          return processLowLatencyOpts?.isDispatchingForModel?.() ?? false
+          return slot.processLowLatencyOpts?.isDispatchingForModel?.() ?? false
         },
         get isActive() {
           return (
-            processLowLatencyOpts?.isTurnActive?.() ??
-            processLowLatencyOpts?.isTurnRunning?.() ??
+            slot.processLowLatencyOpts?.isTurnActive?.() ??
+            slot.processLowLatencyOpts?.isTurnRunning?.() ??
             false
           )
         },
         subscribe: onChange =>
-          processLowLatencyOpts?.subscribeTurnGuard?.(onChange) ?? (() => {}),
+          slot.processLowLatencyOpts?.subscribeTurnGuard?.(onChange) ??
+          (() => {}),
       },
       get abortController() {
         return (
-          processLowLatencyOpts?.getAbortController?.() ??
-          processLowLatencyOpts?.abortSignal ??
+          slot.processLowLatencyOpts?.getAbortController?.() ??
+          slot.processLowLatencyOpts?.abortSignal ??
           null
         )
       },
       get interruptForSubmit() {
-        return processLowLatencyOpts?.interruptForSubmit
+        return slot.processLowLatencyOpts?.interruptForSubmit
       },
       stream: {
         get isMainResponseStreaming() {
-          return processLowLatencyOpts?.isTurnRunning?.() ?? false
+          return slot.processLowLatencyOpts?.isTurnRunning?.() ?? false
         },
       },
     },
@@ -1479,8 +1525,8 @@ function testQueuedNowHost(): QueuedNowLowLatencyHost {
     clock: { setTimeout: clockSetTimeout },
     get messageQueue() {
       const mq = moduleMessageQueue()
-      const snap = processLowLatencyOpts?.getCommandQueueSnapshot
-      const subscribe = processLowLatencyOpts?.subscribeQueue
+      const snap = slot.processLowLatencyOpts?.getCommandQueueSnapshot
+      const subscribe = slot.processLowLatencyOpts?.subscribeQueue
       return {
         ...mq,
         ...(snap
@@ -1491,7 +1537,7 @@ function testQueuedNowHost(): QueuedNowLowLatencyHost {
     },
     get taskRegistry() {
       return (
-        processLowLatencyOpts?.taskRegistry ??
+        slot.processLowLatencyOpts?.taskRegistry ??
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         (
           require('./taskRegistry.js') as typeof import('./taskRegistry.js')
@@ -1508,10 +1554,11 @@ function rememberProcessLowLatency(
   setAppState: import('../Task.js').SetAppState,
   opts?: SendQueuedNowOpts,
 ): QueuedNowLowLatency {
-  processLowLatencyOpts = opts
-  processLowLatencyState = { getAppState, setAppState }
-  processLowLatency ??= new QueuedNowLowLatency(testQueuedNowHost())
-  return processLowLatency
+  const slot = getProcessLowLatencySessionState()
+  slot.processLowLatencyOpts = opts
+  slot.processLowLatencyState = { getAppState, setAppState }
+  slot.processLowLatency ??= new QueuedNowLowLatency(testQueuedNowHost(slot))
+  return slot.processLowLatency
 }
 
 /**
@@ -1583,7 +1630,11 @@ export function sendQueuedNow(
  */
 export const queuedNowLowLatency = {
   sendQueuedNow(uuid: string | undefined): boolean {
-    return processLowLatency?.sendQueuedNow(uuid) ?? false
+    return (
+      getProcessLowLatencySessionState().processLowLatency?.sendQueuedNow(
+        uuid,
+      ) ?? false
+    )
   },
 }
 
@@ -1627,10 +1678,11 @@ export function hostSendQueuedNow(
 }
 
 export function resetQueuedNowCoordinatorForTests(): void {
-  processLowLatency?.dispose()
-  processLowLatency = undefined
-  processLowLatencyOpts = undefined
-  processLowLatencyState = undefined
+  const slot = getProcessLowLatencySessionState()
+  slot.processLowLatency?.dispose()
+  slot.processLowLatency = undefined
+  slot.processLowLatencyOpts = undefined
+  slot.processLowLatencyState = undefined
 }
 
 /**

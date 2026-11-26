@@ -27,6 +27,8 @@
  * Defaults match densable so ink works without GB wire-up.
  */
 
+import { InkHostSlot } from './instances.js'
+
 /** densable LWu — OSC 104;255 (reset color index 255 / atlas). BEL-terminated. */
 export const ATLAS_RESET_OSC = '\x1b]104;255\x07'
 
@@ -42,54 +44,70 @@ const ATLAS_KEY_PACK_STRIDE = 32768
 /** densable $ty — hard cap; further keys mark saturated and stop tracking. */
 const ATLAS_KEY_HARD_CAP = 131072
 
-const atlasKeys = new Set<number>()
-let atlasKeysSaturated = false
-let atlasTrackingEnabled = true
-let atlasResetEnabled = true
-let atlasResetSuppressed = false
-let atlasResetThrottleBypassed = false
-let atlasResetCount = 0
-let atlasResetLastReason: 'none' | 'delta' | 'focus' | 'force' = 'none'
-let atlasResetLastAt = 0
+type AtlasResetReason = 'none' | 'delta' | 'focus' | 'force'
+
+type XtermAtlasHostState = {
+  atlasKeys: Set<number>
+  atlasKeysSaturated: boolean
+  atlasTrackingEnabled: boolean
+  atlasResetEnabled: boolean
+  atlasResetSuppressed: boolean
+  atlasResetThrottleBypassed: boolean
+  atlasResetCount: number
+  atlasResetLastReason: AtlasResetReason
+  atlasResetLastAt: number
+}
+
+const xtermAtlasHostSlot = new InkHostSlot<XtermAtlasHostState>(() => ({
+  atlasKeys: new Set<number>(),
+  atlasKeysSaturated: false,
+  atlasTrackingEnabled: true,
+  atlasResetEnabled: true,
+  atlasResetSuppressed: false,
+  atlasResetThrottleBypassed: false,
+  atlasResetCount: 0,
+  atlasResetLastReason: 'none',
+  atlasResetLastAt: 0,
+}))
 
 /** densable gfo */
 export function isAtlasTrackingEnabled(): boolean {
-  return atlasTrackingEnabled
+  return xtermAtlasHostSlot.peek()?.atlasTrackingEnabled ?? true
 }
 
 /** densable RDt */
 export function setAtlasTrackingEnabled(enabled: boolean): void {
-  atlasTrackingEnabled = enabled
+  xtermAtlasHostSlot.of().atlasTrackingEnabled = enabled
 }
 
 /** densable Por */
 export function isAtlasResetEnabled(): boolean {
-  return atlasResetEnabled
+  return xtermAtlasHostSlot.peek()?.atlasResetEnabled ?? true
 }
 
 /** densable P2u */
 export function setAtlasResetEnabled(enabled: boolean): void {
-  atlasResetEnabled = enabled
+  xtermAtlasHostSlot.of().atlasResetEnabled = enabled
 }
 
 /** densable Uds — suppress proactive resets (render-debug stress non-off). */
 export function isAtlasResetSuppressed(): boolean {
-  return atlasResetSuppressed
+  return xtermAtlasHostSlot.peek()?.atlasResetSuppressed ?? false
 }
 
 /** densable Bds */
 export function setAtlasResetSuppressed(suppressed: boolean): void {
-  atlasResetSuppressed = suppressed
+  xtermAtlasHostSlot.of().atlasResetSuppressed = suppressed
 }
 
 /** densable R2u — when true, delta path skips cooldown. */
 export function isAtlasResetThrottleBypassed(): boolean {
-  return atlasResetThrottleBypassed
+  return xtermAtlasHostSlot.peek()?.atlasResetThrottleBypassed ?? false
 }
 
 /** densable Fds */
 export function setAtlasResetThrottleBypassed(bypassed: boolean): void {
-  atlasResetThrottleBypassed = bypassed
+  xtermAtlasHostSlot.of().atlasResetThrottleBypassed = bypassed
 }
 
 /**
@@ -98,40 +116,53 @@ export function setAtlasResetThrottleBypassed(bypassed: boolean): void {
  */
 export function trackAtlasKey(charId: number, styleId: number): void {
   if (charId < 2) return
-  if (atlasKeys.size >= ATLAS_KEY_HARD_CAP) {
-    atlasKeysSaturated = true
+  const state = xtermAtlasHostSlot.of()
+  if (state.atlasKeys.size >= ATLAS_KEY_HARD_CAP) {
+    state.atlasKeysSaturated = true
     return
   }
-  atlasKeys.add(charId * ATLAS_KEY_PACK_STRIDE + styleId)
+  state.atlasKeys.add(charId * ATLAS_KEY_PACK_STRIDE + styleId)
 }
 
 /** densable DDt */
 export function getAtlasKeyStats(): { atlasKeys: number; saturated: boolean } {
-  return { atlasKeys: atlasKeys.size, saturated: atlasKeysSaturated }
+  const state = xtermAtlasHostSlot.peek()
+  if (!state) return { atlasKeys: 0, saturated: false }
+  return {
+    atlasKeys: state.atlasKeys.size,
+    saturated: state.atlasKeysSaturated,
+  }
 }
 
 /** densable Lor */
 export function clearAtlasKeys(): void {
-  atlasKeys.clear()
-  atlasKeysSaturated = false
+  const state = xtermAtlasHostSlot.peek()
+  if (!state) return
+  state.atlasKeys.clear()
+  state.atlasKeysSaturated = false
 }
 
 /** densable Wds */
 export function recordAtlasReset(reason: 'delta' | 'focus' | 'force'): void {
-  atlasResetCount++
-  atlasResetLastReason = reason
-  atlasResetLastAt = performance.now()
+  const state = xtermAtlasHostSlot.of()
+  state.atlasResetCount++
+  state.atlasResetLastReason = reason
+  state.atlasResetLastAt = performance.now()
 }
 
 export function getAtlasResetStats(): {
   count: number
-  lastReason: typeof atlasResetLastReason
+  lastReason: AtlasResetReason
   lastResetAt: number
 } {
+  const state = xtermAtlasHostSlot.peek()
+  if (!state) {
+    return { count: 0, lastReason: 'none', lastResetAt: 0 }
+  }
   return {
-    count: atlasResetCount,
-    lastReason: atlasResetLastReason,
-    lastResetAt: atlasResetLastAt,
+    count: state.atlasResetCount,
+    lastReason: state.atlasResetLastReason,
+    lastResetAt: state.atlasResetLastAt,
   }
 }
 
@@ -152,15 +183,17 @@ export function bootstrapXtermAtlas(opts?: {
   }
 }
 
-/** Test-only reset of module state. */
+/** Test-only reset of host state. */
 export function _resetXtermAtlasForTesting(): void {
-  atlasKeys.clear()
-  atlasKeysSaturated = false
-  atlasTrackingEnabled = true
-  atlasResetEnabled = true
-  atlasResetSuppressed = false
-  atlasResetThrottleBypassed = false
-  atlasResetCount = 0
-  atlasResetLastReason = 'none'
-  atlasResetLastAt = 0
+  const state = xtermAtlasHostSlot.peek()
+  if (!state) return
+  state.atlasKeys.clear()
+  state.atlasKeysSaturated = false
+  state.atlasTrackingEnabled = true
+  state.atlasResetEnabled = true
+  state.atlasResetSuppressed = false
+  state.atlasResetThrottleBypassed = false
+  state.atlasResetCount = 0
+  state.atlasResetLastReason = 'none'
+  state.atlasResetLastAt = 0
 }

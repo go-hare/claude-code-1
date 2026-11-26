@@ -5,6 +5,7 @@
  * Bound from REPL / print headless so register can mount dynamic HTTP MCP.
  */
 import type { ScopedMcpServerConfig } from 'src/services/mcp/types.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 export type PluginMcpRefusal =
   | 'unlisted'
@@ -66,14 +67,16 @@ export type PluginToolSessionHost = {
   }) => boolean
 }
 
-let sessionHost: PluginToolSessionHost | undefined
+const hostPluginToolSessionHostSlot = new HostSlot<{
+  sessionHost: PluginToolSessionHost | undefined
+}>(() => ({ sessionHost: undefined }))
 
 export function setPluginToolSessionHost(
   host: PluginToolSessionHost | undefined,
 ): void {
-  sessionHost = host
+  hostPluginToolSessionHostSlot.of(getBootstrapSessionHost()).sessionHost = host
 }
 
 export function getPluginToolSessionHost(): PluginToolSessionHost | undefined {
-  return sessionHost
+  return hostPluginToolSessionHostSlot.of(getBootstrapSessionHost()).sessionHost
 }

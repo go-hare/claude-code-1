@@ -1,4 +1,5 @@
 import { logForDebugging } from '../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { BridgeFatalError } from './bridgeApi.js'
 import type { BridgeApiClient } from './types.js'
 
@@ -51,24 +52,36 @@ export type BridgeDebugHandle = {
   describe: () => string
 }
 
-let debugHandle: BridgeDebugHandle | null = null
-const faultQueue: BridgeFault[] = []
+type BridgeDebugHostState = {
+  debugHandle: BridgeDebugHandle | null
+  faultQueue: BridgeFault[]
+}
+
+const bridgeDebugHostSlot = new HostSlot<BridgeDebugHostState>(() => ({
+  debugHandle: null,
+  faultQueue: [],
+}))
+
+function getBridgeDebugHostState(): BridgeDebugHostState {
+  return bridgeDebugHostSlot.of(getBootstrapSessionHost())
+}
 
 export function registerBridgeDebugHandle(h: BridgeDebugHandle): void {
-  debugHandle = h
+  getBridgeDebugHostState().debugHandle = h
 }
 
 export function clearBridgeDebugHandle(): void {
-  debugHandle = null
-  faultQueue.length = 0
+  const hostState = getBridgeDebugHostState()
+  hostState.debugHandle = null
+  hostState.faultQueue.length = 0
 }
 
 export function getBridgeDebugHandle(): BridgeDebugHandle | null {
-  return debugHandle
+  return getBridgeDebugHostState().debugHandle
 }
 
 export function injectBridgeFault(fault: BridgeFault): void {
-  faultQueue.push(fault)
+  getBridgeDebugHostState().faultQueue.push(fault)
   logForDebugging(
     `[bridge:debug] Queued fault: ${fault.method} ${fault.kind}/${fault.status}${fault.errorType ? `/${fault.errorType}` : ''} ×${fault.count}`,
   )
@@ -85,6 +98,7 @@ export function wrapApiForFaultInjection(
   api: BridgeApiClient,
 ): BridgeApiClient {
   function consume(method: BridgeFault['method']): BridgeFault | null {
+    const faultQueue = getBridgeDebugHostState().faultQueue
     const idx = faultQueue.findIndex(f => f.method === method)
     if (idx === -1) return null
     const fault = faultQueue[idx]!

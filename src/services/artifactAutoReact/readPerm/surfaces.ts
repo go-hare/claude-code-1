@@ -19,6 +19,12 @@ import type { PermissionMode } from '../../../types/permissions.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../../utils/envUtils.js'
 import { isClassifierRoutedSafetyCheck } from '../../../utils/permissions/nhoGates.js'
 import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+} from '../../../utils/sessionHost.js'
+import {
   truncateStartToWidth,
   truncateToWidth,
   truncateToWidthNoEllipsis,
@@ -51,12 +57,19 @@ const defaultDeps: SurfaceDeps = {
   featureValue: getFeatureValue_CACHED_MAY_BE_STALE,
 }
 
-let deps: SurfaceDeps = defaultDeps
+const surfaceDepsHostSlot = new HostSlot<{ deps: SurfaceDeps }>(() => ({
+  deps: defaultDeps,
+}))
+
+function getSurfaceDeps(): SurfaceDeps {
+  return surfaceDepsHostSlot.of(getBootstrapSessionHost()).deps
+}
 
 export function setConsentSurfaceDepsForTests(
   next: Partial<SurfaceDeps> | null,
 ): void {
-  deps = next === null ? defaultDeps : { ...defaultDeps, ...next }
+  surfaceDepsHostSlot.of(getBootstrapSessionHost()).deps =
+    next === null ? defaultDeps : { ...defaultDeps, ...next }
 }
 
 /** densable `de` — effective permission context (permissionLayers last-wins). */
@@ -77,7 +90,7 @@ export function isPlanModeBypassElevated(
   return (
     mode === 'plan' &&
     isBypassPermissionsModeAvailable === true &&
-    deps.isInteractive()
+    getSurfaceDeps().isInteractive()
   )
 }
 
@@ -173,7 +186,7 @@ export function isClassifierDecidingMode(
 ): boolean {
   return (
     mode === 'auto' ||
-    (mode === 'plan' && !servedCall && deps.isAutoModeActive())
+    (mode === 'plan' && !servedCall && getSurfaceDeps().isAutoModeActive())
   )
 }
 
@@ -217,12 +230,12 @@ export function isServerClassifierMode(mode: PermissionMode): boolean {
 
 /** densable `Yw` — `tengu_cobalt_plinth_sedge` (default false). */
 export function isArtifactUserOnlyConsentGateOn(): boolean {
-  return deps.featureValue('tengu_cobalt_plinth_sedge', false)
+  return getSurfaceDeps().featureValue('tengu_cobalt_plinth_sedge', false)
 }
 
 /** densable `Yke` — `tengu_cobalt_plinth_samphire` (default false). */
 export function isArtifactCopyFromGateOn(): boolean {
-  return deps.featureValue('tengu_cobalt_plinth_samphire', false)
+  return getSurfaceDeps().featureValue('tengu_cobalt_plinth_samphire', false)
 }
 
 /**
@@ -239,7 +252,9 @@ export function isArtifactAssetsOn(
   return un().assetsOnRoster
 }
 
-const frozenCopyFrom = new WeakMap<ArtifactAutoReactStore, boolean>()
+const frozenCopyFromBySession = new RootSessionSlot(
+  () => new WeakMap<ArtifactAutoReactStore, boolean>(),
+)
 
 /**
  * densable `Q6` — copy-from (copying asset files into other artifacts) on,
@@ -247,6 +262,7 @@ const frozenCopyFrom = new WeakMap<ArtifactAutoReactStore, boolean>()
  */
 export function isArtifactCopyFromOn(): boolean {
   const store = un()
+  const frozenCopyFrom = frozenCopyFromBySession.of(getBootstrapSession())
   let on = frozenCopyFrom.get(store)
   if (on === undefined) {
     on = isArtifactAssetsOn() && isArtifactCopyFromGateOn()

@@ -14,6 +14,12 @@
  */
 
 import { dirname, join, win32 } from 'path'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage, isENOENT, toError } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
@@ -163,22 +169,27 @@ import {
   syncExistingInstallationsForScope,
 } from './syncPluginInstallations.js'
 
-// Migration state to prevent running migration multiple times per session
-let migrationCompleted = false
+type HostInstalledPluginsState = {
+  migrationCompleted: boolean
+  installedPluginsCacheV2: InstalledPluginsFileV2 | null
+  inMemoryInstalledPlugins: InstalledPluginsFileV2 | null
+  enabledPluginsFetchPromise: Promise<void> | undefined
+  enabledPluginsBeingFetched: Set<string>
+}
 
-/**
- * Memoized cache of installed plugins data (V2 format)
- * Cleared by clearInstalledPluginsCache() when file is modified.
- * Prevents repeated filesystem reads within a single CLI session.
- */
-let installedPluginsCacheV2: InstalledPluginsFileV2 | null = null
+const hostInstalledPluginsSlot = new HostSlot<HostInstalledPluginsState>(
+  () => ({
+    migrationCompleted: false,
+    installedPluginsCacheV2: null,
+    inMemoryInstalledPlugins: null,
+    enabledPluginsFetchPromise: undefined,
+    enabledPluginsBeingFetched: new Set(),
+  }),
+)
 
-/**
- * Session-level snapshot of installed plugins at startup.
- * This is what the running session uses - it's NOT updated by background operations.
- * Background updates modify the disk file only.
- */
-let inMemoryInstalledPlugins: InstalledPluginsFileV2 | null = null
+function getHostInstalledPluginsState(): HostInstalledPluginsState {
+  return hostInstalledPluginsSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Get the path to the installed_plugins.json file
@@ -205,8 +216,9 @@ export function getInstalledPluginsV2FilePath(): string {
  * the in-memory state.
  */
 export function clearInstalledPluginsCache(): void {
-  installedPluginsCacheV2 = null
-  inMemoryInstalledPlugins = null
+  const state = getHostInstalledPluginsState()
+  state.installedPluginsCacheV2 = null
+  state.inMemoryInstalledPlugins = null
   logForDebugging('Cleared installed plugins cache')
 }
 
@@ -221,7 +233,8 @@ export function clearInstalledPluginsCache(): void {
  * This migration runs once per session at startup.
  */
 export function migrateToSinglePluginFile(): void {
-  if (migrationCompleted) {
+  const state = getHostInstalledPluginsState()
+  if (state.migrationCompleted) {
     return
   }
 
@@ -239,7 +252,7 @@ export function migrateToSinglePluginFile(): void {
       // Clean up legacy cache directories
       const v2Data = loadInstalledPluginsV2()
       cleanupLegacyCache(v2Data)
-      migrationCompleted = true
+      state.migrationCompleted = true
       return
     } catch (e) {
       if (!isENOENT(e)) throw e
@@ -252,7 +265,7 @@ export function migrateToSinglePluginFile(): void {
     } catch (e) {
       if (!isENOENT(e)) throw e
       // Case 3: No file exists - nothing to migrate
-      migrationCompleted = true
+      state.migrationCompleted = true
       return
     }
 
@@ -277,7 +290,7 @@ export function migrateToSinglePluginFile(): void {
     }
     // If version=2, already in correct format, no action needed
 
-    migrationCompleted = true
+    state.migrationCompleted = true
   } catch (error) {
     const errorMsg = errorMessage(error)
     logForDebugging(`Failed to migrate plugin files: ${errorMsg}`, {
@@ -285,7 +298,7 @@ export function migrateToSinglePluginFile(): void {
     })
     logError(toError(error))
     // Mark as completed to avoid retrying failed migration
-    migrationCompleted = true
+    state.migrationCompleted = true
   }
 }
 
@@ -356,7 +369,7 @@ function cleanupLegacyCache(v2Data: InstalledPluginsFileV2): void {
  * Reset migration state (for testing)
  */
 export function resetMigrationState(): void {
-  migrationCompleted = false
+  getHostInstalledPluginsState().migrationCompleted = false
 }
 
 /**
@@ -421,9 +434,10 @@ function migrateV1ToV2(v1Data: InstalledPluginsFileV1): InstalledPluginsFileV2 {
  * @returns V2 format data with array-per-plugin structure
  */
 export function loadInstalledPluginsV2(): InstalledPluginsFileV2 {
+  const state = getHostInstalledPluginsState()
   // Return cached V2 data if available
-  if (installedPluginsCacheV2 !== null) {
-    return installedPluginsCacheV2
+  if (state.installedPluginsCacheV2 !== null) {
+    return state.installedPluginsCacheV2
   }
 
   const filePath = getInstalledPluginsFilePath()
@@ -435,7 +449,7 @@ export function loadInstalledPluginsV2(): InstalledPluginsFileV2 {
       if (rawData.version === 2) {
         // V2 format - validate and return
         const validated = InstalledPluginsFileSchemaV2().parse(rawData.data)
-        installedPluginsCacheV2 = validated
+        state.installedPluginsCacheV2 = validated
         logForDebugging(
           `Loaded ${Object.keys(validated.plugins).length} installed plugins from ${filePath}`,
         )
@@ -445,7 +459,7 @@ export function loadInstalledPluginsV2(): InstalledPluginsFileV2 {
       // V1 format - convert to V2
       const v1Validated = InstalledPluginsFileSchemaV1().parse(rawData.data)
       const v2Data = migrateV1ToV2(v1Validated)
-      installedPluginsCacheV2 = v2Data
+      state.installedPluginsCacheV2 = v2Data
       logForDebugging(
         `Loaded and converted ${Object.keys(v1Validated.plugins).length} plugins from V1 format`,
       )
@@ -456,8 +470,8 @@ export function loadInstalledPluginsV2(): InstalledPluginsFileV2 {
     logForDebugging(
       `installed_plugins.json doesn't exist, returning empty V2 object`,
     )
-    installedPluginsCacheV2 = { version: 2, plugins: {} }
-    return installedPluginsCacheV2
+    state.installedPluginsCacheV2 = { version: 2, plugins: {} }
+    return state.installedPluginsCacheV2
   } catch (error) {
     const errorMsg = errorMessage(error)
     logForDebugging(
@@ -466,8 +480,8 @@ export function loadInstalledPluginsV2(): InstalledPluginsFileV2 {
     )
     logError(toError(error))
 
-    installedPluginsCacheV2 = { version: 2, plugins: {} }
-    return installedPluginsCacheV2
+    state.installedPluginsCacheV2 = { version: 2, plugins: {} }
+    return state.installedPluginsCacheV2
   }
 }
 
@@ -489,7 +503,7 @@ function saveInstalledPluginsV2(data: InstalledPluginsFileV2): void {
     })
 
     // Update cache
-    installedPluginsCacheV2 = data
+    getHostInstalledPluginsState().installedPluginsCacheV2 = data
 
     logForDebugging(
       `Saved ${Object.keys(data.plugins).length} installed plugins to ${filePath}`,
@@ -626,10 +640,11 @@ export function removePluginInstallation(
  * @returns V2 format data representing the session's view of installed plugins
  */
 export function getInMemoryInstalledPlugins(): InstalledPluginsFileV2 {
-  if (inMemoryInstalledPlugins === null) {
-    inMemoryInstalledPlugins = loadInstalledPluginsV2()
+  const state = getHostInstalledPluginsState()
+  if (state.inMemoryInstalledPlugins === null) {
+    state.inMemoryInstalledPlugins = loadInstalledPluginsV2()
   }
-  return inMemoryInstalledPlugins
+  return state.inMemoryInstalledPlugins
 }
 
 /**
@@ -729,7 +744,7 @@ export function updateInstallationPathOnDisk(
     })
 
     // Clear cache since disk changed, but do NOT update inMemoryInstalledPlugins
-    installedPluginsCacheV2 = null
+    getHostInstalledPluginsState().installedPluginsCacheV2 = null
 
     logForDebugging(
       `Updated ${pluginId} on disk to version ${newVersion} at ${newPath}`,
@@ -859,7 +874,7 @@ export function getPendingUpdatesDetails(): Array<{
  * This should only be called at startup or for testing.
  */
 export function resetInMemoryState(): void {
-  inMemoryInstalledPlugins = null
+  getHostInstalledPluginsState().inMemoryInstalledPlugins = null
 }
 
 /**
@@ -1256,14 +1271,11 @@ export type UncachedManagedExternalPlugin = {
   marketplaceSource?: MarketplaceSource
 }
 
-let enabledPluginsFetchPromise: Promise<void> | undefined
-const enabledPluginsBeingFetched = new Set<string>()
-
 /** Return any in-flight background fetch of managed external git plugins (#643). */
 export function getInFlightManagedExternalPluginFetch():
   | Promise<void>
   | undefined {
-  return enabledPluginsFetchPromise
+  return getHostInstalledPluginsState().enabledPluginsFetchPromise
 }
 
 /**
@@ -1289,6 +1301,8 @@ export function scheduleManagedExternalPluginBackgroundFetch(
 ): Promise<void> | undefined {
   if (candidates.length === 0) return undefined
   if (process.env.CLAUDE_CODE_SYNC_PLUGIN_INSTALL) return undefined
+  const state = getHostInstalledPluginsState()
+  const captured = getActiveSessionFromAls()
   const trafficDisabled =
     options?.isTrafficDisabled ??
     (() => Boolean(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC))
@@ -1299,89 +1313,95 @@ export function scheduleManagedExternalPluginBackgroundFetch(
     (source => source !== undefined && !isSourceAllowedByPolicy(source))
 
   const toFetch = candidates.filter(
-    c => !enabledPluginsBeingFetched.has(c.pluginId),
+    c => !state.enabledPluginsBeingFetched.has(c.pluginId),
   )
-  if (toFetch.length === 0) return enabledPluginsFetchPromise
+  if (toFetch.length === 0) return state.enabledPluginsFetchPromise
 
   for (const c of toFetch) {
-    enabledPluginsBeingFetched.add(c.pluginId)
+    state.enabledPluginsBeingFetched.add(c.pluginId)
   }
 
-  const prev = enabledPluginsFetchPromise ?? Promise.resolve()
-  const next = prev
-    .then(async () => {
-      let fetchedAny = false
-      for (const candidate of toFetch) {
-        if (exitingCheck()) {
-          logForDebugging(
-            `Not fetching external plugin ${candidate.pluginId}: exiting`,
-          )
-          continue
-        }
-        if (trafficDisabled()) {
-          logForDebugging(
-            `Not fetching external plugin ${candidate.pluginId}: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set; a plugin reload (/reload-plugins) fetches it`,
-            { level: 'warn' },
-          )
-          continue
-        }
-        if (
-          blockedCheck(candidate.pluginId) ||
-          marketplaceSourceBlockedCheck(candidate.marketplaceSource)
-        ) {
-          logForDebugging(
-            `Not fetching external plugin ${candidate.pluginId}: blocked by policy`,
-          )
-          continue
-        }
+  const prev = state.enabledPluginsFetchPromise ?? Promise.resolve()
+  const runFetch = async () => {
+    let fetchedAny = false
+    for (const candidate of toFetch) {
+      if (exitingCheck()) {
         logForDebugging(
-          `Fetching external plugin ${candidate.pluginId} into the cache`,
+          `Not fetching external plugin ${candidate.pluginId}: exiting`,
         )
-        try {
-          if (options?.fetcher) {
-            if (await options.fetcher(candidate)) {
-              fetchedAny = true
-            }
-          } else {
-            const { cacheAndRegisterPlugin } = await import(
-              './pluginInstallationHelpers.js'
-            )
-            await cacheAndRegisterPlugin(
-              candidate.pluginId,
-              candidate.entry as Parameters<typeof cacheAndRegisterPlugin>[1],
-              'managed',
-              undefined,
-            )
+        continue
+      }
+      if (trafficDisabled()) {
+        logForDebugging(
+          `Not fetching external plugin ${candidate.pluginId}: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set; a plugin reload (/reload-plugins) fetches it`,
+          { level: 'warn' },
+        )
+        continue
+      }
+      if (
+        blockedCheck(candidate.pluginId) ||
+        marketplaceSourceBlockedCheck(candidate.marketplaceSource)
+      ) {
+        logForDebugging(
+          `Not fetching external plugin ${candidate.pluginId}: blocked by policy`,
+        )
+        continue
+      }
+      logForDebugging(
+        `Fetching external plugin ${candidate.pluginId} into the cache`,
+      )
+      try {
+        if (options?.fetcher) {
+          if (await options.fetcher(candidate)) {
             fetchedAny = true
           }
-        } catch (err) {
-          logForDebugging(
-            `Failed background fetch of managed external plugin ${candidate.pluginId}: ${errorMessage(err)}`,
-            { level: 'warn' },
-          )
-        }
-      }
-      if (fetchedAny) {
-        if (options?.onFetchedAny) {
-          await options.onFetchedAny()
         } else {
-          await migrateFromEnabledPlugins({ fetchMissing: false })
+          const { cacheAndRegisterPlugin } = await import(
+            './pluginInstallationHelpers.js'
+          )
+          await cacheAndRegisterPlugin(
+            candidate.pluginId,
+            candidate.entry as Parameters<typeof cacheAndRegisterPlugin>[1],
+            'managed',
+            undefined,
+          )
+          fetchedAny = true
         }
+      } catch (err) {
+        logForDebugging(
+          `Failed background fetch of managed external plugin ${candidate.pluginId}: ${errorMessage(err)}`,
+          { level: 'warn' },
+        )
       }
+    }
+    if (fetchedAny) {
+      if (options?.onFetchedAny) {
+        await options.onFetchedAny()
+      } else {
+        await migrateFromEnabledPlugins({ fetchMissing: false })
+      }
+    }
+  }
+  const next = prev
+    .then(() => {
+      if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+        return runWithSession(captured, runFetch)
+      }
+      return runFetch()
     })
     .catch(err => {
       logError(err)
     })
     .finally(() => {
       for (const c of toFetch) {
-        enabledPluginsBeingFetched.delete(c.pluginId)
+        state.enabledPluginsBeingFetched.delete(c.pluginId)
       }
-      if (enabledPluginsFetchPromise === next) {
-        enabledPluginsFetchPromise = undefined
+      if (state.enabledPluginsFetchPromise === next) {
+        state.enabledPluginsFetchPromise = undefined
       }
     })
 
-  enabledPluginsFetchPromise = next
+  state.enabledPluginsFetchPromise = next
   return next
 }
 

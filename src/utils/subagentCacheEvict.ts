@@ -22,6 +22,7 @@ import {
 } from './context.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getAPIProvider } from './model/providers.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 
 /**
  * @param prerequisites both official wN() and Wqt() must already be true
@@ -308,9 +309,16 @@ type ImageRereadState = {
   refused: boolean
 }
 
-const imageRereadStates = new Map<string, ImageRereadState>()
+const imageRereadStatesSlot = new RootSessionSlot(
+  () => new Map<string, ImageRereadState>(),
+)
+
+function getImageRereadStates(): Map<string, ImageRereadState> {
+  return imageRereadStatesSlot.of(getBootstrapSession())
+}
 
 function getImageRereadState(agentKey: string): ImageRereadState {
+  const imageRereadStates = getImageRereadStates()
   let state = imageRereadStates.get(agentKey)
   if (state === undefined) {
     state = {
@@ -351,7 +359,7 @@ export function noteImageMediaStripped(
 ): void {
   const key = agentId ?? 'main'
   if (strippedCount === 0) {
-    const existing = imageRereadStates.get(key)
+    const existing = getImageRereadStates().get(key)
     if (existing !== undefined) {
       existing.mediaStripped = false
     }
@@ -363,6 +371,7 @@ export function noteImageMediaStripped(
 }
 
 export function resetImageRereadState(agentId?: string): void {
+  const imageRereadStates = getImageRereadStates()
   if (agentId === undefined) {
     imageRereadStates.clear()
   } else {

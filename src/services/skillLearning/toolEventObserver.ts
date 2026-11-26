@@ -9,6 +9,7 @@ import type {
 } from './types.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { logError } from '../../utils/log.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
 /**
  * Tool event hook layer.
@@ -47,7 +48,28 @@ const EMITTED_TURNS_MAP_MAX = 50
 /** How many sessions to retain after pruning the Map. */
 const EMITTED_TURNS_MAP_KEEP = 25
 
-const emittedTurns = new Map<string, Set<number>>()
+type ToolEventDeps = {
+  resolveProjectContext: (cwd: string) => SkillLearningProjectContext
+  isSkillLearningEnabled: () => boolean
+  RUNTIME_SESSION_ID: string
+  getRuntimeTurn: () => number
+}
+
+type ToolEventObserverHostState = {
+  emittedTurns: Map<string, Set<number>>
+  depImportCache: Promise<ToolEventDeps> | undefined
+}
+
+const toolEventObserverHostSlot = new HostSlot<ToolEventObserverHostState>(
+  () => ({
+    emittedTurns: new Map<string, Set<number>>(),
+    depImportCache: undefined,
+  }),
+)
+
+function getToolEventObserverHostState(): ToolEventObserverHostState {
+  return toolEventObserverHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Prune `emittedTurns` to stay within memory bounds.
@@ -62,6 +84,7 @@ const emittedTurns = new Map<string, Set<number>>()
  * directly.
  */
 export function pruneEmittedTurns(): void {
+  const { emittedTurns } = getToolEventObserverHostState()
   // Prune over-sized Sets first. FIFO by insertion order — NOT by turn
   // number magnitude. Non-monotonic turn ordering (e.g. replayed transcripts
   // or nested tool chains) should not cause us to evict the wrong entries.
@@ -89,6 +112,7 @@ export function pruneEmittedTurns(): void {
 }
 
 function markTurn(sessionId: string, turn: number): void {
+  const { emittedTurns } = getToolEventObserverHostState()
   // Refresh Map insertion order: delete + re-set so a recently-touched
   // session is treated as "youngest" for the LRU-ish Map eviction.
   const seen = emittedTurns.get(sessionId) ?? new Set<number>()
@@ -102,11 +126,14 @@ export function hasToolHookObservationsForTurn(
   sessionId: string,
   turn: number,
 ): boolean {
-  return emittedTurns.get(sessionId)?.has(turn) ?? false
+  return (
+    getToolEventObserverHostState().emittedTurns.get(sessionId)?.has(turn) ??
+    false
+  )
 }
 
 export function resetToolHookBookkeeping(): void {
-  emittedTurns.clear()
+  getToolEventObserverHostState().emittedTurns.clear()
 }
 
 function baseObservation(
@@ -137,20 +164,12 @@ function baseObservation(
   }
 }
 
-// Cached import promise — resolved once so the hot path pays no repeated
-// dynamic-import overhead after the first invocation.
-let _depImportCache:
-  | Promise<{
-      resolveProjectContext: (cwd: string) => SkillLearningProjectContext
-      isSkillLearningEnabled: () => boolean
-      RUNTIME_SESSION_ID: string
-      getRuntimeTurn: () => number
-    }>
-  | undefined
-
-function _getDeps() {
-  if (!_depImportCache) {
-    _depImportCache = Promise.all([
+// Cached import promise per host — resolved once so the hot path pays no
+// repeated dynamic-import overhead after the first invocation.
+function _getDeps(): Promise<ToolEventDeps> {
+  const state = getToolEventObserverHostState()
+  if (!state.depImportCache) {
+    state.depImportCache = Promise.all([
       import('./projectContext.js'),
       import('./featureCheck.js'),
       import('./runtimeObserver.js'),
@@ -161,12 +180,12 @@ function _getDeps() {
       getRuntimeTurn: ro.getRuntimeTurn,
     }))
   }
-  return _depImportCache
+  return state.depImportCache
 }
 
 /** Reset the cached dep import (for test isolation). */
 export function resetToolHookDepsCache(): void {
-  _depImportCache = undefined
+  getToolEventObserverHostState().depImportCache = undefined
 }
 
 /**

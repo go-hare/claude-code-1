@@ -28,7 +28,11 @@ import {
   shouldDisableAllHooksIncludingManaged,
 } from '../../utils/hooks/hooksConfigSnapshot.js'
 import { hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js'
-import { isUserPromptWaiting } from '../../utils/sessionHost.js'
+import {
+  getBootstrapSession,
+  isUserPromptWaiting,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { getCwd } from '../../utils/cwd.js'
 import { ToolPermissionPromptsUp } from '../../utils/toolState.js'
 import { escapeXml } from '../../utils/xml.js'
@@ -397,10 +401,63 @@ export type ExclusiveCallQueuedBehindEntry = {
   holdLogged: boolean
 }
 
-export const exclusiveCallQueuedBehind = new Map<
+const exclusiveCallQueuedBehindBySession = new RootSessionSlot<
+  Map<string, ExclusiveCallQueuedBehindEntry>
+>(() => new Map<string, ExclusiveCallQueuedBehindEntry>())
+
+function getExclusiveCallQueuedBehindMap(): Map<
+  string,
+  ExclusiveCallQueuedBehindEntry
+> {
+  return exclusiveCallQueuedBehindBySession.of(getBootstrapSession())
+}
+
+const emptyExclusiveCallQueuedBehindMap = new Map<
   string,
   ExclusiveCallQueuedBehindEntry
 >()
+
+export const exclusiveCallQueuedBehind: Map<
+  string,
+  ExclusiveCallQueuedBehindEntry
+> = new Proxy(emptyExclusiveCallQueuedBehindMap, {
+  get(_target, prop, receiver) {
+    if (
+      prop === 'set' ||
+      prop === 'getOrInsert' ||
+      prop === 'getOrInsertComputed'
+    ) {
+      const map = getExclusiveCallQueuedBehindMap()
+      if (prop === 'set') {
+        return (key: string, value: ExclusiveCallQueuedBehindEntry) => {
+          map.set(key, value)
+          return receiver
+        }
+      }
+      const value = Reflect.get(map, prop, map)
+      return typeof value === 'function' ? value.bind(map) : value
+    }
+    const map =
+      exclusiveCallQueuedBehindBySession.peek(getBootstrapSession()) ??
+      emptyExclusiveCallQueuedBehindMap
+    if (prop === 'forEach') {
+      return (
+        callbackfn: (
+          value: ExclusiveCallQueuedBehindEntry,
+          key: string,
+          m: Map<string, ExclusiveCallQueuedBehindEntry>,
+        ) => void,
+        thisArg?: unknown,
+      ) => {
+        map.forEach((value, key) => {
+          callbackfn.call(thisArg, value, key, receiver)
+        })
+      }
+    }
+    const value = Reflect.get(map, prop, map)
+    return typeof value === 'function' ? value.bind(map) : value
+  },
+})
 
 /**
  * Executes tools as they stream in with concurrency control.
@@ -873,11 +930,12 @@ export class StreamingToolExecutor {
         mayYetBeQueued: () => !this.discarded && this.responseOpen,
         holdLogged: false,
       }
-      exclusiveCallQueuedBehind.set(tool.id, exclusiveEntry)
+      const exclusiveMap = getExclusiveCallQueuedBehindMap()
+      exclusiveMap.set(tool.id, exclusiveEntry)
       using _releaseExclusiveHold = {
         [Symbol.dispose]: () => {
-          if (exclusiveCallQueuedBehind.get(tool.id) === exclusiveEntry) {
-            exclusiveCallQueuedBehind.delete(tool.id)
+          if (exclusiveMap.get(tool.id) === exclusiveEntry) {
+            exclusiveMap.delete(tool.id)
           }
         },
       }

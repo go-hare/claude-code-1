@@ -7,11 +7,13 @@ import type {
 import type { QueryEngine } from '../../../QueryEngine.js'
 import type { Command } from '../../../types/command.js'
 import type { AppState } from '../../../state/AppStateStore.js'
+import type { Session } from '../../../utils/sessionRoot.js'
 import type { ToolUseCache } from '../bridge.js'
 
 // ── Session state ─────────────────────────────────────────────────
 
 export type AcpSession = {
+  hostSession: Session
   queryEngine: QueryEngine
   cancelled: boolean
   cancelGeneration: number

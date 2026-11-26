@@ -11,6 +11,7 @@ import {
   resolveCommandKindLane,
   resolveCommandSourceTag,
 } from '../residualUiEnvGates.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { getSkillUsageScore } from './skillUsageTracking.js'
 
 // Treat these characters as word separators for command search
@@ -24,17 +25,39 @@ type CommandSearchItem = {
   aliasKey: string[] | undefined
 }
 
-// Cache the Fuse index keyed by the commands array identity. The commands
-// array is stable (memoized in REPL.tsx), so we only rebuild when it changes
-// rather than on every keystroke.
-let fuseCache: {
-  commands: Command[]
-  fuse: Fuse<CommandSearchItem>
-} | null = null
+class CommandSuggestionsHostState {
+  // Cache the Fuse index keyed by the commands array identity. The commands
+  // array is stable (memoized in REPL.tsx), so we only rebuild when it changes
+  // rather than on every keystroke.
+  fuseCache: {
+    commands: Command[]
+    fuse: Fuse<CommandSearchItem>
+  } | null = null
+  shadowedBundledSkills: { input: Command[]; output: Command[] } | undefined =
+    undefined
+  dedupedCommandsCache: { input: Command[]; output: Command[] } | undefined =
+    undefined
+}
+
+const fallbackCommandSuggestionsHost: object = {}
+const commandSuggestionsByHost = new HostSlot<CommandSuggestionsHostState>(
+  () => new CommandSuggestionsHostState(),
+)
+
+function getCommandSuggestionsHostState(): CommandSuggestionsHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return commandSuggestionsByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return commandSuggestionsByHost.of(fallbackCommandSuggestionsHost)
+}
 
 function getCommandFuse(commands: Command[]): Fuse<CommandSearchItem> {
-  if (fuseCache?.commands === commands) {
-    return fuseCache.fuse
+  const hostState = getCommandSuggestionsHostState()
+  if (hostState.fuseCache?.commands === commands) {
+    return hostState.fuseCache.fuse
   }
 
   const commandData: CommandSearchItem[] = commands
@@ -80,7 +103,7 @@ function getCommandFuse(commands: Command[]): Fuse<CommandSearchItem> {
     ],
   })
 
-  fuseCache = { commands, fuse }
+  hostState.fuseCache = { commands, fuse }
   return fuse
 }
 
@@ -331,16 +354,15 @@ function createCommandSuggestionItem(
   return item
 }
 
-let shadowedBundledSkills: { input: Command[]; output: Command[] } | undefined
-
 /**
  * densable `xLt` — a bundled skill yields to an earlier command of the same
  * name (user/project skills load first). Returns the input array itself when
  * nothing is dropped so the identity-keyed Fuse index stays warm.
  */
 export function dropShadowedBundledSkills(commands: Command[]): Command[] {
-  if (shadowedBundledSkills?.input === commands) {
-    return shadowedBundledSkills.output
+  const hostState = getCommandSuggestionsHostState()
+  if (hostState.shadowedBundledSkills?.input === commands) {
+    return hostState.shadowedBundledSkills.output
   }
   const seen = new Set<string>()
   let dropped = false
@@ -357,11 +379,9 @@ export function dropShadowedBundledSkills(commands: Command[]): Command[] {
     return true
   })
   const output = dropped ? kept : commands
-  shadowedBundledSkills = { input: commands, output }
+  hostState.shadowedBundledSkills = { input: commands, output }
   return output
 }
-
-let dedupedCommandsCache: { input: Command[]; output: Command[] } | undefined
 
 /**
  * Official 2.1.327 #455: deduplicate commands/skills that share the same
@@ -369,8 +389,9 @@ let dedupedCommandsCache: { input: Command[]; output: Command[] } | undefined
  * the `/` menu never lists duplicate rows that all invoke the first skill).
  */
 export function dedupeCommandsByName(commands: Command[]): Command[] {
-  if (dedupedCommandsCache?.input === commands) {
-    return dedupedCommandsCache.output
+  const hostState = getCommandSuggestionsHostState()
+  if (hostState.dedupedCommandsCache?.input === commands) {
+    return hostState.dedupedCommandsCache.output
   }
   const seen = new Set<string>()
   let dropped = false
@@ -384,7 +405,7 @@ export function dedupeCommandsByName(commands: Command[]): Command[] {
     return true
   })
   const output = dropped ? kept : commands
-  dedupedCommandsCache = { input: commands, output }
+  hostState.dedupedCommandsCache = { input: commands, output }
   return output
 }
 

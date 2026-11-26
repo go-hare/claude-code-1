@@ -33,6 +33,7 @@ import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { gitExe } from '../git.js'
 import { getAppliedGlobalConfigEnv } from '../managedEnv.js'
 import { expandPath, stripWindowsLongPathPrefixXpr } from '../path.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { permissionRuleValueFromString } from '../permissions/permissionRuleParser.js'
 import { getPlatform } from '../platform.js'
 import {
@@ -134,15 +135,35 @@ export const SEED_GIT_MR: NodeJS.ProcessEnv = {
       : '/dev/null/no-grafts',
 }
 
-const pathFilterCache = new Map<string, string>()
-/** densable `xn` — `Ir` caches successful `$e` only */
-const gitWhichCache = new Map<string, string>()
+class SeedGitHardenedHostState {
+  pathFilterCache = new Map<string, string>()
+  /** densable `xn` — `Ir` caches successful `$e` only */
+  gitWhichCache = new Map<string, string>()
+  /**
+   * densable `_612` `oe.preSettingsEnvSnapshot`.
+   * `get` lazily freezes `{...process.env}`; `peek`/`j()` is undefined until then.
+   */
+  preSettingsEnvSnapshot: NodeJS.ProcessEnv | undefined = undefined
+  windowsAppsAliasCache: { key: string; aliasDirs: string[] } | undefined =
+    undefined
+  /** densable `_615` `S` host `ensured` */
+  seedGitSEnsured: string | undefined = undefined
+}
 
-/**
- * densable `_612` `oe.preSettingsEnvSnapshot`.
- * `get` lazily freezes `{...process.env}`; `peek`/`j()` is undefined until then.
- */
-let preSettingsEnvSnapshot: NodeJS.ProcessEnv | undefined
+const fallbackSeedGitHost: object = {}
+const seedGitStateByHost = new HostSlot<SeedGitHardenedHostState>(
+  () => new SeedGitHardenedHostState(),
+)
+
+function getSeedGitHostState(): SeedGitHardenedHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return seedGitStateByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return seedGitStateByHost.of(fallbackSeedGitHost)
+}
 
 /** densable `Gt` unused `t="/tmp"` — TEMP/TMP only, not TMPDIR */
 const WIN_PATH_ENTRY = /^(?:[a-zA-Z]:[\\/]|[\\/]{2})/
@@ -183,17 +204,20 @@ function envGet(env: NodeJS.ProcessEnv, name: string): string | undefined {
  * Export so settings/bootstrap can import later.
  */
 export function getPreSettingsEnvSnapshot(): NodeJS.ProcessEnv {
-  return (preSettingsEnvSnapshot ??= Object.freeze({ ...process.env }))
+  const hostState = getSeedGitHostState()
+  return (hostState.preSettingsEnvSnapshot ??= Object.freeze({
+    ...process.env,
+  }))
 }
 
 /** densable `PYb` / `ot` / `j()` */
 export function peekPreSettingsEnvSnapshot(): NodeJS.ProcessEnv | undefined {
-  return preSettingsEnvSnapshot
+  return getSeedGitHostState().preSettingsEnvSnapshot
 }
 
 /** densable `RYb` / `SYb` / `st` / `it` */
 export function dropPreSettingsEnvSnapshot(): void {
-  preSettingsEnvSnapshot = undefined
+  getSeedGitHostState().preSettingsEnvSnapshot = undefined
 }
 
 /** densable `j` / `_612` `PYb` / `ot` */
@@ -317,7 +341,6 @@ const REALPATH_RETRY = new Set(['EPERM', 'EBUSY', 'EACCES'])
 const REALPATH_TRIES = 4
 const REALPATH_WAIT_MS = 50
 let realpathWaitSlot: Int32Array | undefined
-let windowsAppsAliasCache: { key: string; aliasDirs: string[] } | undefined
 
 /** densable `_841` `R` */
 function stripLongPathPrefix(path: string): string {
@@ -425,9 +448,10 @@ function isUnderSharedWindowsAppsAlias(
     )
   }
   const key = `${home}\0${localAppData}`
-  if (windowsAppsAliasCache?.key === key) {
+  const hostState = getSeedGitHostState()
+  if (hostState.windowsAppsAliasCache?.key === key) {
     return underWindowsAppsAlias(
-      windowsAppsAliasCache.aliasDirs,
+      hostState.windowsAppsAliasCache.aliasDirs,
       candidateDir,
       cwd,
     )
@@ -442,7 +466,7 @@ function isUnderSharedWindowsAppsAlias(
     }
     return real
   })
-  if (cacheable) windowsAppsAliasCache = { key, aliasDirs }
+  if (cacheable) hostState.windowsAppsAliasCache = { key, aliasDirs }
   return underWindowsAppsAlias(aliasDirs, candidateDir, cwd)
 }
 
@@ -511,16 +535,14 @@ function seedGitN(env: NodeJS.ProcessEnv = process.env): string {
   return envGet(env, 'CLAUDE_CODE_TMPDIR') || tmpdir()
 }
 
-/** densable `_615` `S` host `ensured` */
-let seedGitSEnsured: string | undefined
-
 /**
  * densable `_615` `S` — `join(N(),"claude")` then mkdir 0700 (`mode:448`).
  * `getuid` platforms chmod after mkdir; else try/catch mkdir only.
  */
 export function seedGitS(env: NodeJS.ProcessEnv = process.env): string {
+  const hostState = getSeedGitHostState()
   const dir = join(seedGitN(env), 'claude')
-  if (dir !== seedGitSEnsured) {
+  if (dir !== hostState.seedGitSEnsured) {
     if (typeof process.getuid === 'function') {
       mkdirSync(dir, { recursive: true, mode: 448 })
       chmodSync(dir, 448)
@@ -531,7 +553,7 @@ export function seedGitS(env: NodeJS.ProcessEnv = process.env): string {
         // official S swallows mkdir when getuid is missing
       }
     }
-    seedGitSEnsured = dir
+    hostState.seedGitSEnsured = dir
   }
   return dir
 }
@@ -838,6 +860,7 @@ export function seedGitVArgv(
  * densable `Ir` — `$e("git", PATH)`. Empty/no-hit is official `null` → 127.
  */
 export function seedGitIr(env: NodeJS.ProcessEnv): string | null {
+  const { gitWhichCache } = getSeedGitHostState()
   const pathValue = envGet(env, 'PATH') ?? ''
   const cached = gitWhichCache.get(pathValue)
   if (cached !== undefined) return cached
@@ -894,6 +917,7 @@ function omitKeys(env: NodeJS.ProcessEnv, keys: string[]): NodeJS.ProcessEnv {
 
 /** densable `Pr` — `$e` skipped, official fallback `d(s,a)`=`join` */
 export function filterSeedPath(pathValue: string, reach: string[]): string {
+  const { pathFilterCache } = getSeedGitHostState()
   const cacheKey = `${pathValue}\0${reach.join('\0')}`
   const cached = pathFilterCache.get(cacheKey)
   if (cached !== undefined) return cached

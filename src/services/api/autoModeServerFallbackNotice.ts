@@ -13,7 +13,7 @@ import {
   setServerClassifierFallbackChoice,
   clearServerClassifierFallbackChoice,
 } from '../../bootstrap/state.js'
-import { getBootstrapSessionHost } from '../../utils/sessionRoot.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionRoot.js'
 import { createHyperlink } from '../../utils/hyperlink.js'
 import type { ToolUseContext } from '../../Tool.js'
 import {
@@ -37,11 +37,15 @@ import {
 export const AUTO_MODE_CLASSIFIER_BILLING_DOCS_URL =
   'https://code.claude.com/docs/en/auto-mode-classifier-billing'
 
-let runtimeServerCheckDeclined = false
+const autoModeServerFallbackNoticeHostSlot = new HostSlot<{
+  runtimeServerCheckDeclined: boolean
+}>(() => ({ runtimeServerCheckDeclined: false }))
 
 /** Official 2.1.319 `v5o` (#1727): mark whether the server-side auto mode check declined this session. */
 export function setServerCheckDeclined(declined: boolean): void {
-  runtimeServerCheckDeclined = declined
+  autoModeServerFallbackNoticeHostSlot.of(
+    getBootstrapSessionHost(),
+  ).runtimeServerCheckDeclined = declined
 }
 
 /**
@@ -49,7 +53,12 @@ export function setServerCheckDeclined(declined: boolean): void {
  * declined / fallen back to local billing in this session.
  */
 export function serverCheckDeclined(): boolean {
-  if (runtimeServerCheckDeclined) return true
+  if (
+    autoModeServerFallbackNoticeHostSlot.peek(getBootstrapSessionHost())
+      ?.runtimeServerCheckDeclined
+  ) {
+    return true
+  }
   if (isThirdPartyServerClassifierRefused()) return true
   if (getServerClassifierFallbackChoice() !== undefined) return true
   const latches = getBootstrapSessionHost().requestLatches as {

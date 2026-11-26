@@ -187,6 +187,7 @@ import {
 import { logError } from './log.js'
 import { SandboxManager } from './sandbox/sandbox-adapter.js'
 import { AsyncLocalStorage } from 'async_hooks'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { createCombinedAbortSignal } from './combinedAbortSignal.js'
 import type { PermissionResult } from './permissions/PermissionResult.js'
 import { registerPendingAsyncHook } from './hooks/AsyncHookRegistry.js'
@@ -3920,10 +3921,11 @@ export function createSessionModelHookSlots(): SessionModelHookSlots {
   }
 }
 
-let sessionModelHookSlots: SessionModelHookSlots | undefined
+const sessionModelHookSlotsByHost = new HostSlot<SessionModelHookSlots>(() =>
+  createSessionModelHookSlots(),
+)
 export function getSessionModelHookSlots(): SessionModelHookSlots {
-  sessionModelHookSlots ??= createSessionModelHookSlots()
-  return sessionModelHookSlots
+  return sessionModelHookSlotsByHost.of(getBootstrapSessionHost())
 }
 
 async function waitForModelHookSlot(

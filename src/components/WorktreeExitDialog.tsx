@@ -7,8 +7,10 @@ import {
 } from 'src/services/analytics/index.js';
 import { logForDebugging } from 'src/utils/debug.js';
 import { Box, Text, Dialog } from '@anthropic/ink';
+import { hasScopedCwd } from '../utils/cwd.js';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { getPlansDirectory } from '../utils/plans.js';
+import { hasActiveSessionAls } from '../utils/sessionHost.js';
 import { setCwd } from '../utils/Shell.js';
 import {
   cleanupWorktree,
@@ -83,7 +85,9 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
             .then(removed => {
               // Official 2.1.323 (#1988): resolve fallback targetDir when originalCwd was deleted.
               const { targetDir } = resolveWorktreeExitTargetDir(worktreeSession);
-              process.chdir(targetDir);
+              if (!hasActiveSessionAls() && !hasScopedCwd()) {
+                process.chdir(targetDir);
+              }
               setCwd(targetDir);
               recordWorktreeExit();
               getPlansDirectory.cache.clear?.();
@@ -145,7 +149,9 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
       });
       await keepWorktree();
       const { targetDir } = resolveWorktreeExitTargetDir(worktreeSession);
-      process.chdir(targetDir);
+      if (!hasActiveSessionAls() && !hasScopedCwd()) {
+        process.chdir(targetDir);
+      }
       setCwd(targetDir);
       recordWorktreeExit();
       getPlansDirectory.cache.clear?.();
@@ -170,7 +176,9 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
       }
       await keepWorktree();
       const { targetDir } = resolveWorktreeExitTargetDir(worktreeSession);
-      process.chdir(targetDir);
+      if (!hasActiveSessionAls() && !hasScopedCwd()) {
+        process.chdir(targetDir);
+      }
       setCwd(targetDir);
       recordWorktreeExit();
       getPlansDirectory.cache.clear?.();
@@ -186,7 +194,9 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
       try {
         const removed = await cleanupWorktree();
         const { targetDir } = resolveWorktreeExitTargetDir(worktreeSession);
-        process.chdir(targetDir);
+        if (!hasActiveSessionAls() && !hasScopedCwd()) {
+          process.chdir(targetDir);
+        }
         setCwd(targetDir);
         recordWorktreeExit();
         getPlansDirectory.cache.clear?.();

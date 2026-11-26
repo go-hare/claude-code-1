@@ -9,10 +9,24 @@
  * unset defaults to dark.
  */
 
+import { InkHostSlot } from '../core/instances.js'
+
 export type SystemTheme = 'dark' | 'light'
 
-let cachedSystemTheme: SystemTheme | undefined
-const listeners = new Set<(theme: SystemTheme) => void>()
+type SystemThemeHostState = {
+  cachedSystemTheme: SystemTheme | undefined
+  listeners: Set<(theme: SystemTheme) => void>
+}
+
+// Explicit cross-host mirrors (e.g. init.ts → src/utils/systemTheme.ts cache
+// bridge) fire in the active host's ALS context whenever any host updates its
+// theme, without leaking into default-host `subscribeSystemTheme` callers.
+const mirrorListeners = new Set<(theme: SystemTheme) => void>()
+
+const systemThemeHostSlot = new InkHostSlot<SystemThemeHostState>(() => ({
+  cachedSystemTheme: undefined,
+  listeners: new Set<(theme: SystemTheme) => void>(),
+}))
 
 /**
  * Detect theme from $COLORFGBG environment variable (set by some terminals).
@@ -30,34 +44,54 @@ function detectFromColorFgBg(): SystemTheme | undefined {
 }
 
 /**
- * Get the current terminal theme. Cached after first detection.
+ * Get the current terminal theme. Cached per host after first detection.
  */
 export function getSystemThemeName(): SystemTheme {
-  if (cachedSystemTheme === undefined) {
-    cachedSystemTheme = detectFromColorFgBg() ?? 'dark'
+  const state = systemThemeHostSlot.of()
+  if (state.cachedSystemTheme === undefined) {
+    state.cachedSystemTheme = detectFromColorFgBg() ?? 'dark'
   }
-  return cachedSystemTheme
+  return state.cachedSystemTheme
 }
 
 export function setCachedSystemTheme(theme: SystemTheme): void {
+  const state = systemThemeHostSlot.of()
   // densable y0t: if(this.systemTheme===e)return; this.systemTheme=e; emit.
-  if (cachedSystemTheme === theme) return
-  cachedSystemTheme = theme
-  for (const listener of listeners) listener(theme)
+  if (state.cachedSystemTheme === theme) return
+  state.cachedSystemTheme = theme
+  for (const listener of mirrorListeners) listener(theme)
+  for (const listener of state.listeners) listener(theme)
 }
 
 /** Test-only: drop the COLORFGBG / OSC cache so the next read re-detects. */
 export function resetSystemThemeForTests(): void {
-  cachedSystemTheme = undefined
+  const state = systemThemeHostSlot.peek()
+  if (state) state.cachedSystemTheme = undefined
 }
 
-/** Ink → src cache bridge. `init.ts` registers the src setter. */
+/** Subscribe to system theme changes for the active host only. */
 export function subscribeSystemTheme(
   listener: (theme: SystemTheme) => void,
 ): () => void {
-  listeners.add(listener)
+  const state = systemThemeHostSlot.of()
+  state.listeners.add(listener)
   return () => {
-    listeners.delete(listener)
+    state.listeners.delete(listener)
+  }
+}
+
+/**
+ * Register an explicit cross-host mirror listener (e.g. `init.ts` Ink →
+ * `src/utils/systemTheme.ts` cache bridge). Runs synchronously in the updating
+ * host's active ALS context across all hosts without exposing isolated-host
+ * theme changes to default-host `subscribeSystemTheme` subscribers.
+ */
+export function registerSystemThemeMirror(
+  listener: (theme: SystemTheme) => void,
+): () => void {
+  mirrorListeners.add(listener)
+  return () => {
+    mirrorListeners.delete(listener)
   }
 }
 

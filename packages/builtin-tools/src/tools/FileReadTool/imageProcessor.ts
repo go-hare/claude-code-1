@@ -1,5 +1,6 @@
 import type { Buffer } from 'buffer'
 import { isInBundledMode } from 'src/utils/bundledMode.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 
 export type SharpInstance = {
   metadata(): Promise<{ width: number; height: number; format: string }>
@@ -31,12 +32,24 @@ type SharpCreatorOptions = {
 
 type SharpCreator = (options: SharpCreatorOptions) => SharpInstance
 
-let imageProcessorModule: { default: SharpFunction } | null = null
-let imageCreatorModule: { default: SharpCreator } | null = null
+type ImageProcessorHostState = {
+  imageProcessorModule: { default: SharpFunction } | null
+  imageCreatorModule: { default: SharpCreator } | null
+}
+
+const imageProcessorHostSlot = new HostSlot<ImageProcessorHostState>(() => ({
+  imageProcessorModule: null,
+  imageCreatorModule: null,
+}))
+
+function getImageProcessorHostState(): ImageProcessorHostState {
+  return imageProcessorHostSlot.of(getBootstrapSessionHost())
+}
 
 export async function getImageProcessor(): Promise<SharpFunction> {
-  if (imageProcessorModule) {
-    return imageProcessorModule.default
+  const state = getImageProcessorHostState()
+  if (state.imageProcessorModule) {
+    return state.imageProcessorModule.default
   }
 
   if (isInBundledMode()) {
@@ -47,7 +60,7 @@ export async function getImageProcessor(): Promise<SharpFunction> {
       // Bun/CJS interop can yield { sharp: { default: fn } } or { default: fn }.
       // Casting a non-function object caused: sharp2 is not a function (Object).
       const sharpFn = unwrapCallable<SharpFunction>(imageProcessor)
-      imageProcessorModule = { default: sharpFn }
+      state.imageProcessorModule = { default: sharpFn }
       return sharpFn
     } catch {
       // Fall back to sharp if native module is not available
@@ -61,7 +74,7 @@ export async function getImageProcessor(): Promise<SharpFunction> {
   // Single structural cast: our SharpFunction is a subset of sharp's actual type surface.
   const imported = await import('sharp')
   const sharp = unwrapCallable<SharpFunction>(imported)
-  imageProcessorModule = { default: sharp }
+  state.imageProcessorModule = { default: sharp }
   return sharp
 }
 
@@ -71,13 +84,14 @@ export async function getImageProcessor(): Promise<SharpFunction> {
  * so this always uses sharp directly.
  */
 export async function getImageCreator(): Promise<SharpCreator> {
-  if (imageCreatorModule) {
-    return imageCreatorModule.default
+  const state = getImageProcessorHostState()
+  if (state.imageCreatorModule) {
+    return state.imageCreatorModule.default
   }
 
   const imported = await import('sharp')
   const sharp = unwrapCallable<SharpCreator>(imported)
-  imageCreatorModule = { default: sharp }
+  state.imageCreatorModule = { default: sharp }
   return sharp
 }
 

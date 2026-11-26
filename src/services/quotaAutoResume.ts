@@ -24,6 +24,7 @@ import {
 } from '../bootstrap/state.js'
 import { getAgentId } from '../utils/teammate.js'
 import { createSignal } from '../utils/signal.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionRoot.js'
 import { logError } from '../utils/log.js'
 import {
   isClaudeAISubscriber,
@@ -247,25 +248,41 @@ function createEpisode(): Episode {
   }
 }
 
-let episode: Episode = createEpisode()
-let limitsHooked = false
+type QuotaAutoResumeHostState = {
+  episode: Episode
+  limitsHooked: boolean
+}
+
+// Official 2.1.331 [W-256]: per-host quota auto-resume state on SessionHost.
+const quotaAutoResumeHostSlot = new HostSlot<QuotaAutoResumeHostState>(() => ({
+  episode: createEpisode(),
+  limitsHooked: false,
+}))
+
+function getQuotaAutoResumeHostState(): QuotaAutoResumeHostState {
+  return quotaAutoResumeHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEpisode(): Episode {
+  return getQuotaAutoResumeHostState().episode
+}
 
 /** densable wF / J3e */
 export function getQuotaAutoResumeState(): QuotaAutoResumeState {
-  return episode.state
+  return getEpisode().state
 }
 
 export function subscribeQuotaAutoResumeChanged(
   listener: () => void,
 ): () => void {
-  return episode.changed.subscribe(listener)
+  return getEpisode().changed.subscribe(listener)
 }
 
 /** densable Kqn */
 export function subscribeQuotaAutoResumeEvents(
   listener: (event: QuotaAutoResumeEvent) => void,
 ): () => void {
-  return episode.events.subscribe(listener)
+  return getEpisode().events.subscribe(listener)
 }
 
 /** densable C4f */
@@ -362,6 +379,7 @@ export function getAutoContinueAtUsageLimitFromSettings(): boolean | undefined {
 
 /** densable _xi lite — disk key presence (no remote storageV5 invent) */
 export function refreshAutoContinueKeyPresence(): AutoContinueKeyPresence {
+  const episode = getEpisode()
   const entries = getAutoContinueAtUsageLimitSettingEntries()
   episode.autoContinueKeyPresence = entries.length === 0 ? 'absent' : 'present'
   return episode.autoContinueKeyPresence
@@ -371,7 +389,7 @@ export function refreshAutoContinueKeyPresence(): AutoContinueKeyPresence {
  * densable BXa / Wqn — settings value wins; else absent key ⇒ true.
  */
 export function isAutoContinueAtUsageLimitEffective(
-  presence: AutoContinueKeyPresence = episode.autoContinueKeyPresence,
+  presence: AutoContinueKeyPresence = getEpisode().autoContinueKeyPresence,
 ): boolean {
   const fromSettings = getAutoContinueAtUsageLimitFromSettings()
   if (fromSettings !== undefined) return fromSettings
@@ -442,7 +460,7 @@ export function canOfferQuotaAutoResume(limits: ClaudeAILimits): boolean {
 
 /** densable WXa — pending continuation still in queue */
 export function hasPendingQuotaContinuationInQueue(): boolean {
-  const uuid = episode.pendingContinuationUuid
+  const uuid = getEpisode().pendingContinuationUuid
   if (uuid === null) return false
   return getCommandQueue().some(cmd => cmd.uuid === uuid)
 }
@@ -451,6 +469,7 @@ export function hasPendingQuotaContinuationInQueue(): boolean {
  * densable bxi — cmd is this episode's continuation or a Yqn takeover uuid.
  */
 function isQuotaEpisodeOwnedCommand(cmd: QueuedCommand): boolean {
+  const episode = getEpisode()
   return (
     cmd.uuid !== undefined &&
     (cmd.uuid === episode.pendingContinuationUuid ||
@@ -462,7 +481,7 @@ function isQuotaEpisodeOwnedCommand(cmd: QueuedCommand): boolean {
  * densable Exi / p$t — episode still owns the wait (armed/stale or pending fire).
  */
 export function isQuotaAutoResumeEpisodeActive(
-  state: QuotaAutoResumeState = episode.state,
+  state: QuotaAutoResumeState = getEpisode().state,
 ): boolean {
   return (
     state.phase === 'armed' ||
@@ -477,6 +496,7 @@ export function isQuotaAutoResumeEpisodeActive(
  * RU().some(bxi) || sxa(bxi). sxa = someInFlightDrainCommand.
  */
 export function isQuotaAutoResumeLive(): boolean {
+  const episode = getEpisode()
   if (
     episode.state.phase === 'armed' ||
     episode.state.phase === 'stale' ||
@@ -496,12 +516,12 @@ export function isQuotaAutoResumeArmedOrPending(): boolean {
 
 /** densable Zt — F$ `hasArmedQuotaAutoResume` (`rP` as `Qze`). */
 export function isQuotaAutoResumeArmed(): boolean {
-  return episode.state.phase === 'armed'
+  return getEpisode().state.phase === 'armed'
 }
 
 /** densable P4f / waiting UI — armed/stale phase (for Esc cancel) */
 export function isQuotaAutoResumeWaiting(
-  state: QuotaAutoResumeState = episode.state,
+  state: QuotaAutoResumeState = getEpisode().state,
 ): boolean {
   return state.phase === 'armed' || state.phase === 'stale'
 }
@@ -519,6 +539,7 @@ function isMainThreadEditablePrompt(cmd: QueuedCommand): boolean {
 }
 
 function setState(next: QuotaAutoResumeState): void {
+  const episode = getEpisode()
   episode.state = next
   episode.changed.emit()
 }
@@ -617,6 +638,7 @@ export function compareArmedAccountIdentity(
 export function checkAndStopIfLoginChanged(
   currentOverride?: ArmedAccountIdentity | null,
 ): boolean {
+  const episode = getEpisode()
   if (episode.state.phase === 'idle' && !hasPendingQuotaContinuationInQueue()) {
     return false
   }
@@ -640,6 +662,7 @@ export function armQuotaAutoResume(
   rearm: number | null = null,
   armedForOverride?: ArmedAccountIdentity | null,
 ): void {
+  const episode = getEpisode()
   episode.episodeArmOrigin = origin
   episode.armedForAccount =
     armedForOverride !== undefined
@@ -674,6 +697,7 @@ function rearmQuotaAutoResume(
   rearm: number | null,
   origin: EpisodeArmOrigin,
 ): void {
+  const episode = getEpisode()
   if (isQuotaContinuationRevoked()) return
   if (
     episode.episodeArmOrigin === 'auto' &&
@@ -703,6 +727,7 @@ export function onQuotaRejectedForAutoResume(
 ): void {
   if (!isQuotaRejectedForAutoContinue(limits)) return
   if (!isQuotaAutoResumeSurfaceEligible()) return
+  const episode = getEpisode()
   const resetsAt = limits.resetsAt ?? 0
   // Lazy model resolve only for opus/sonnet windows (avoids auth in tests for five_hour)
   const eligible = isQuotaRearmEligibleRateLimit(limits.rateLimitType)
@@ -763,6 +788,7 @@ export function offerArmQuotaAutoResume(
   origin: EpisodeArmOrigin = 'dialog',
 ): boolean {
   if (!canOfferQuotaAutoResume(limits)) return false
+  const episode = getEpisode()
   episode.consecutiveRearms = 0
   if (origin === 'dialog') {
     episode.continuationsSinceHumanPrompt = 0
@@ -870,6 +896,7 @@ export function tryAutoArmQuotaAutoResume(
   nowMs: number = Date.now(),
 ): boolean {
   if (!canOfferQuotaAutoResume(limits)) return false
+  const episode = getEpisode()
   // densable O4f/zFm: if(r.handoffInProgress) return !1
   if (episode.handoffInProgress) return false
   // densable zFm: if(QOt()) return !1
@@ -939,6 +966,7 @@ function shouldClearAutoArmDedupe(reason: CancelReason): boolean {
  * Does not dequeue (gold Xqn only drops the pointer).
  */
 function dropPendingQuotaContinuationOwnership(keepIfDrained = false): boolean {
+  const episode = getEpisode()
   const uuid = episode.pendingContinuationUuid
   if (uuid === null) return false
   const inQueue = getCommandQueue().some(cmd => cmd.uuid === uuid)
@@ -957,6 +985,7 @@ function dropPendingQuotaContinuationOwnership(keepIfDrained = false): boolean {
  * keep it so WXa can still see the continuation after qXa fire / Yqn Xqn.
  */
 export function cancelQuotaAutoResume(reason: CancelReason): void {
+  const episode = getEpisode()
   // densable V4f: conversation_reset also drops the kxi latch (even if idle)
   if (reason === 'conversation_reset') {
     episode.handoffInProgress = false
@@ -989,7 +1018,7 @@ export function cancelQuotaAutoResume(reason: CancelReason): void {
  * Returns whether the episode was active (Exi) before cancel.
  */
 export function beginQuotaAutoResumeHandoff(reason: CancelReason): boolean {
-  episode.handoffInProgress = true
+  getEpisode().handoffInProgress = true
   if (!isQuotaAutoResumeLive()) return false
   const wasActive = isQuotaAutoResumeEpisodeActive()
   cancelQuotaAutoResume(reason)
@@ -998,7 +1027,7 @@ export function beginQuotaAutoResumeHandoff(reason: CancelReason): boolean {
 
 /** densable xfe — clear the O4f handoff latch */
 export function endQuotaAutoResumeHandoff(): void {
-  episode.handoffInProgress = false
+  getEpisode().handoffInProgress = false
 }
 
 /**
@@ -1011,6 +1040,7 @@ export function onQuotaAutoResumeHumanSubmit(
   uuid?: string,
   opts: { dispatching?: boolean } = {},
 ): void {
+  const episode = getEpisode()
   episode.continuationsSinceHumanPrompt = 0
   if (!isQuotaAutoResumeLive()) return
   dropPendingQuotaContinuationOwnership(true)
@@ -1035,6 +1065,7 @@ export function onQuotaAutoResumeHumanSubmit(
  * setting_off via G0S.
  */
 function isQuotaContinuationRevoked(): boolean {
+  const episode = getEpisode()
   if (!isQuotaAutoResumeKillswitchEnabled()) {
     cancelQuotaAutoResume('killswitch')
     episode.events.emit('disabled')
@@ -1058,7 +1089,7 @@ function isQuotaContinuationRevoked(): boolean {
 export function filterPendingQuotaContinuationIfRevoked(
   commands: QueuedCommand[],
 ): QueuedCommand[] {
-  const uuid = episode.pendingContinuationUuid
+  const uuid = getEpisode().pendingContinuationUuid
   if (uuid === null || !commands.some(cmd => cmd.uuid === uuid)) {
     return commands
   }
@@ -1068,6 +1099,7 @@ export function filterPendingQuotaContinuationIfRevoked(
 
 /** densable PVr — reset takeover/claim/origin bookkeeping; Xqn the pointer. */
 function resetQuotaEpisodeOwnership(): boolean {
+  const episode = getEpisode()
   episode.consecutiveRearms = 0
   episode.lastArmedResetsAtSeconds = 0
   episode.episodeArmOrigin = 'dialog'
@@ -1087,7 +1119,7 @@ function emitQuotaContinuationDropped(): void {
     reason:
       'continuation_dropped' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
-  episode.events.emit('continuation-dropped')
+  getEpisode().events.emit('continuation-dropped')
 }
 
 export type QuotaTurnClaimInput = {
@@ -1104,6 +1136,7 @@ export type QuotaTurnClaimInput = {
 export function claimQuotaAutoResumeTurn(
   input: QuotaTurnClaimInput,
 ): QuotaTurnClaim | null {
+  const episode = getEpisode()
   for (const uuid of input.turnUuids) {
     episode.dispatchingTakeoverUuids.delete(uuid)
   }
@@ -1167,6 +1200,7 @@ export function releaseQuotaAutoResumeTurnClaim(
   claim: QuotaTurnClaim | null,
   turnUuids: string[],
 ): void {
+  const episode = getEpisode()
   for (const uuid of turnUuids) {
     episode.dispatchingTakeoverUuids.delete(uuid)
   }
@@ -1216,6 +1250,7 @@ export function cancelQuotaAutoResumeWithNotice(
 export function fireQuotaAutoResumeContinuation(
   prompt: string = CONTINUATION_PROMPT,
 ): string {
+  const episode = getEpisode()
   dropPendingQuotaContinuationOwnership()
   episode.continuationsSinceHumanPrompt++
   const uuid = randomUUID()
@@ -1240,7 +1275,7 @@ export function fireQuotaAutoResumeContinuation(
  * `_ro` side-effects cancel when killswitch/auto-setting is off.
  */
 export function isQuotaWaitStale(): boolean {
-  return episode.state.phase === 'stale' && !isQuotaContinuationRevoked()
+  return getEpisode().state.phase === 'stale' && !isQuotaContinuationRevoked()
 }
 
 /** densable qvm / j4f — empty-Enter substitute text, or null. */
@@ -1256,6 +1291,7 @@ export function tickQuotaAutoResume(
   nowMs: number = Date.now(),
   stillRejected = false,
 ): 'pending' | 'fired' | 'stale' | 'idle' {
+  const episode = getEpisode()
   if (episode.state.phase !== 'armed') return 'idle'
   // Official 2.1.326 (#336): stop immediately with notice if login changed or ended.
   if (checkAndStopIfLoginChanged()) return 'idle'
@@ -1359,6 +1395,7 @@ export function getWaitThenContinueOption(
 export function setAutoContinueAtUsageLimitSetting(enabled: boolean): {
   error: Error | null
 } {
+  const episode = getEpisode()
   const result = updateSettingsForSource('userSettings', {
     autoContinueAtUsageLimit: enabled,
   })
@@ -1393,8 +1430,9 @@ export function isQuotaAutoResumeSessionReset(
 
 /** Hook limits → try auto-arm + densable s0v rearm (idempotent) */
 export function ensureQuotaAutoResumeLimitsSubscription(): void {
-  if (limitsHooked) return
-  limitsHooked = true
+  const hostState = getQuotaAutoResumeHostState()
+  if (hostState.limitsHooked) return
+  hostState.limitsHooked = true
   refreshAutoContinueKeyPresence()
   statusListeners.add((limits: ClaudeAILimits) => {
     if (limits.status === 'rejected') {
@@ -1411,7 +1449,7 @@ export function ensureQuotaAutoResumeLimitsSubscription(): void {
   onSessionSwitch((_id, reason) => {
     if (isQuotaAutoResumeSessionReset(reason)) {
       cancelQuotaAutoResume('conversation_reset')
-      episode.handoffInProgress = false
+      getEpisode().handoffInProgress = false
     }
   })
   // Opportunistic arm on existing rejected state
@@ -1422,8 +1460,9 @@ export function ensureQuotaAutoResumeLimitsSubscription(): void {
 
 /** Test helper — reset module episode */
 export function resetQuotaAutoResumeForTests(): void {
-  episode = createEpisode()
-  limitsHooked = false
+  const hostState = getQuotaAutoResumeHostState()
+  hostState.episode = createEpisode()
+  hostState.limitsHooked = false
 }
 
 /** Expose rearm cap for tests / future rearm path */

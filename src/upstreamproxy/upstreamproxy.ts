@@ -26,6 +26,12 @@ import { registerCleanup } from '../utils/cleanupRegistry.js'
 import { logForDebugging } from '../utils/debug.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { isENOENT } from '../utils/errors.js'
+import {
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  ofDefaultHost,
+} from '../utils/sessionHost.js'
 import { NO_PROXY_EMBEDDED } from '../utils/agentProxy/noProxy.js'
 import {
   agentProxyReadmePath,
@@ -50,7 +56,23 @@ type UpstreamProxyState = {
   caBundlePath?: string
 }
 
-let state: UpstreamProxyState = { enabled: false }
+const upstreamProxyHostSlot = new HostSlot<{
+  state: UpstreamProxyState | undefined
+}>(() => ({
+  state: undefined,
+}))
+
+function getUpstreamProxyHostState(): {
+  state: UpstreamProxyState | undefined
+} {
+  return upstreamProxyHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEffectiveUpstreamProxyState(): UpstreamProxyState {
+  const local = upstreamProxyHostSlot.peek(getBootstrapSessionHost())?.state
+  if (local !== undefined) return local
+  return ofDefaultHost(upstreamProxyHostSlot).state ?? { enabled: false }
+}
 
 /**
  * Initialize upstreamproxy. Called once from init.ts. Safe to call when the
@@ -64,6 +86,7 @@ export async function initUpstreamProxy(opts?: {
   caBundlePath?: string
   ccrBaseUrl?: string
 }): Promise<UpstreamProxyState> {
+  const hostState = getUpstreamProxyHostState()
   // Official REMOTE densable.
   let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
   try {
@@ -75,14 +98,14 @@ export async function initUpstreamProxy(opts?: {
     // keep raw env fallback
   }
   if (!isRemote) {
-    return state
+    return hostState.state ?? { enabled: false }
   }
   // CCR evaluates ccr_upstream_proxy_enabled server-side (where GrowthBook is
   // warm) and injects this env var via StartupContext.EnvironmentVariables.
   // Every CCR session is a fresh container with no GB cache, so a client-side
   // GB check here always returned the default (false).
   if (!isEnvTruthy(process.env.CCR_UPSTREAM_PROXY_ENABLED)) {
-    return state
+    return hostState.state ?? { enabled: false }
   }
 
   const sessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
@@ -91,14 +114,14 @@ export async function initUpstreamProxy(opts?: {
       '[upstreamproxy] CLAUDE_CODE_REMOTE_SESSION_ID unset; proxy disabled',
       { level: 'warn' },
     )
-    return state
+    return hostState.state ?? { enabled: false }
   }
 
   const tokenPath = opts?.tokenPath ?? SESSION_TOKEN_PATH
   const token = await readToken(tokenPath)
   if (!token) {
     logForDebugging('[upstreamproxy] no session token file; proxy disabled')
-    return state
+    return hostState.state ?? { enabled: false }
   }
 
   setNonDumpable()
@@ -119,7 +142,7 @@ export async function initUpstreamProxy(opts?: {
     opts?.systemCaPath ?? SYSTEM_CA_BUNDLE,
     caBundlePath,
   )
-  if (!caOk) return state
+  if (!caOk) return hostState.state ?? { enabled: false }
 
   try {
     const wsUrl = baseUrl.replace(/^http/, 'ws') + '/v1/code/upstreamproxy/ws'
@@ -128,7 +151,7 @@ export async function initUpstreamProxy(opts?: {
       setAgentProxyNote(undefined)
       relay.stop()
     })
-    state = { enabled: true, port: relay.port, caBundlePath }
+    hostState.state = { enabled: true, port: relay.port, caBundlePath }
     logForDebugging(`[upstreamproxy] enabled on 127.0.0.1:${relay.port}`)
     // densable 2.1.251 #48: An README + xe/Ept note (before agent tools run).
     // Gold: Ept(xe(y,void 0)) then ee(U, An(port,y)) then Ept(xe(y,U)).
@@ -140,7 +163,8 @@ export async function initUpstreamProxy(opts?: {
       'utf8',
     )
       .then(() => {
-        if (!state.enabled || state.port !== relay.port) return
+        if (!hostState.state?.enabled || hostState.state.port !== relay.port)
+          return
         setAgentProxyNote(buildAgentProxyEnvNote(caBundlePath, readmePath))
       })
       .catch((err: unknown) => {
@@ -148,7 +172,8 @@ export async function initUpstreamProxy(opts?: {
           `[upstreamproxy] README write failed: ${err instanceof Error ? err.message : String(err)}`,
           { level: 'warn' },
         )
-        if (!state.enabled || state.port !== relay.port) return
+        if (!hostState.state?.enabled || hostState.state.port !== relay.port)
+          return
         setAgentProxyNote(buildAgentProxyEnvNote(caBundlePath))
       })
     // Only unlink after the listener is up: if CA download or listen()
@@ -165,7 +190,7 @@ export async function initUpstreamProxy(opts?: {
     )
   }
 
-  return state
+  return hostState.state ?? { enabled: false }
 }
 
 /**
@@ -174,6 +199,7 @@ export async function initUpstreamProxy(opts?: {
  * the same recipe.
  */
 export function getUpstreamProxyEnv(): Record<string, string> {
+  const state = getEffectiveUpstreamProxyState()
   if (!state.enabled || !state.port || !state.caBundlePath) {
     // Child CLI processes can't re-initialize the relay (token file was
     // unlinked by the parent), but the parent's relay is still running and
@@ -216,7 +242,9 @@ export function getUpstreamProxyEnv(): Record<string, string> {
 
 /** Test-only: reset module state between test cases. */
 export function resetUpstreamProxyForTests(): void {
-  state = { enabled: false }
+  getUpstreamProxyHostState().state = hasActiveSessionAls()
+    ? { enabled: false }
+    : undefined
   setAgentProxyNote(undefined)
 }
 

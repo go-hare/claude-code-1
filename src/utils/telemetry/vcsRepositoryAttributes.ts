@@ -3,6 +3,8 @@ import { execFileNoThrow } from '../execFileNoThrow.js'
 import { getCwd } from '../cwd.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { gitExe } from '../git.js'
+import { HostSlot } from '../hostSlot.js'
+import { getBootstrapSessionHost } from '../sessionRoot.js'
 
 /**
  * Official 2.1.321 (#1873): OTEL semantic convention VCS repository attribute keys.
@@ -119,14 +121,28 @@ export function parseVcsRepositoryAttributes(
   return attrs
 }
 
-let cachedCwd: string | undefined
-let cachedVcsAttributes: Record<string, string> = {}
-let inFlightResolve: Promise<Record<string, string>> | null = null
+type VcsRepositoryAttributesHostState = {
+  cachedCwd: string | undefined
+  cachedVcsAttributes: Record<string, string>
+  inFlightResolve: Promise<Record<string, string>> | null
+}
+
+const vcsRepositoryAttributesHostSlot =
+  new HostSlot<VcsRepositoryAttributesHostState>(() => ({
+    cachedCwd: undefined,
+    cachedVcsAttributes: {},
+    inFlightResolve: null,
+  }))
+
+function getVcsRepositoryAttributesHostState(): VcsRepositoryAttributesHostState {
+  return vcsRepositoryAttributesHostSlot.of(getBootstrapSessionHost())
+}
 
 export function invalidateVcsRepositoryAttributesCache(): void {
-  cachedCwd = undefined
-  cachedVcsAttributes = {}
-  inFlightResolve = null
+  const state = getVcsRepositoryAttributesHostState()
+  state.cachedCwd = undefined
+  state.cachedVcsAttributes = {}
+  state.inFlightResolve = null
 }
 
 /**
@@ -137,13 +153,14 @@ export function invalidateVcsRepositoryAttributesCache(): void {
 export async function resolveVcsRepositoryAttributesForCwd(
   cwd: string = getCwd(),
 ): Promise<Record<string, string>> {
-  if (cachedCwd === cwd && inFlightResolve === null) {
-    return cachedVcsAttributes
+  const state = getVcsRepositoryAttributesHostState()
+  if (state.cachedCwd === cwd && state.inFlightResolve === null) {
+    return state.cachedVcsAttributes
   }
-  if (cachedCwd === cwd && inFlightResolve !== null) {
-    return inFlightResolve
+  if (state.cachedCwd === cwd && state.inFlightResolve !== null) {
+    return state.inFlightResolve
   }
-  cachedCwd = cwd
+  state.cachedCwd = cwd
   let currentPromise: Promise<Record<string, string>> | null = null
   currentPromise = (async () => {
     try {
@@ -170,22 +187,22 @@ export async function resolveVcsRepositoryAttributesForCwd(
         ...(revision ? { revision } : {}),
         ...(branch ? { name: branch, type: 'branch' as const } : {}),
       })
-      if (cachedCwd === cwd) {
-        cachedVcsAttributes = resolved
+      if (state.cachedCwd === cwd) {
+        state.cachedVcsAttributes = resolved
       }
       return resolved
     } catch {
-      if (cachedCwd === cwd) {
-        cachedVcsAttributes = {}
+      if (state.cachedCwd === cwd) {
+        state.cachedVcsAttributes = {}
       }
       return {}
     } finally {
-      if (inFlightResolve === currentPromise) {
-        inFlightResolve = null
+      if (state.inFlightResolve === currentPromise) {
+        state.inFlightResolve = null
       }
     }
   })()
-  inFlightResolve = currentPromise
+  state.inFlightResolve = currentPromise
   return currentPromise
 }
 
@@ -199,9 +216,10 @@ export function getVcsRepositoryTelemetryAttributes(
   if (!shouldIncludeRepositoryMetrics(env)) {
     return {}
   }
+  const state = getVcsRepositoryAttributesHostState()
   const cwd = getCwd()
-  if (cachedCwd !== cwd) {
+  if (state.cachedCwd !== cwd) {
     void resolveVcsRepositoryAttributesForCwd(cwd)
   }
-  return { ...cachedVcsAttributes }
+  return { ...state.cachedVcsAttributes }
 }

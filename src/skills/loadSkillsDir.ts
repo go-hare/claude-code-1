@@ -1,6 +1,5 @@
 import { realpath } from 'fs/promises'
 import ignore from 'ignore'
-import memoize from 'lodash-es/memoize.js'
 import {
   basename,
   dirname,
@@ -86,8 +85,68 @@ import {
   registerStrictPluginOnlyChangeCallback,
 } from '../utils/settings/pluginOnlyPolicy.js'
 import { HooksSchema, type HooksSettings } from '../utils/settings/types.js'
-import { createSignal } from '../utils/signal.js'
+import {
+  exitSessionContext,
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../utils/sessionHost.js'
+import { createSignal, type Signal } from '../utils/signal.js'
 import { registerMCPSkillBuilders } from './mcpSkillBuilders.js'
+
+type FailedLandingRecord = {
+  version: string
+  failures: number
+  failedAtMs: number
+}
+
+type HostSkillsState = {
+  skillDirCommandsCache: Map<string, Promise<Command[]>>
+  dynamicSkillDirs: Set<string>
+  deferredSkillDirs: Map<string, string>
+  dynamicSkills: Map<string, Command>
+  nestedDiscoveryWithheld: boolean
+  conditionalSkills: Map<string, Command>
+  activatedConditionalSkillNames: Set<string>
+  inMemorySyncedSkills: Map<string, Command>
+  failedSyncedSkillLandings: Map<string, FailedLandingRecord>
+  lastLoadedSyncedSkillRootsByDir: Map<string, Set<string>>
+  activeSyncedSkillHooksPruner: (roots: ReadonlySet<string>) => number
+  skillsLoaded: Signal
+}
+
+const hostSkillsSlot = new HostSlot<HostSkillsState>(() => ({
+  skillDirCommandsCache: new Map(),
+  dynamicSkillDirs: new Set(),
+  deferredSkillDirs: new Map(),
+  dynamicSkills: new Map(),
+  nestedDiscoveryWithheld: false,
+  conditionalSkills: new Map(),
+  activatedConditionalSkillNames: new Set(),
+  inMemorySyncedSkills: new Map(),
+  failedSyncedSkillLandings: new Map(),
+  lastLoadedSyncedSkillRootsByDir: new Map(),
+  activeSyncedSkillHooksPruner: () => 0,
+  skillsLoaded: createSignal(),
+}))
+
+function hostSkillsState(): HostSkillsState {
+  return hostSkillsSlot.of(getBootstrapSessionHost())
+}
+
+// Global listeners invoked inside the emitting host's ALS context whenever any
+// host loads dynamic skills (e.g. for cross-host observers).
+const globalSkillsLoaded = createSignal()
+
+// Signal fired when dynamic skills are loaded (delegated per SessionHost,
+// plus global listeners both emitted inside the emitting host's ALS context).
+const skillsLoaded: Signal = {
+  subscribe: listener => hostSkillsState().skillsLoaded.subscribe(listener),
+  emit: () => {
+    hostSkillsState().skillsLoaded.emit()
+    globalSkillsLoaded.emit()
+  },
+  clear: () => hostSkillsState().skillsLoaded.clear(),
+}
 
 export type LoadedFrom =
   | 'commands_DEPRECATED'
@@ -812,13 +871,14 @@ async function loadSkillsFromSkillsDir(
 
   const loaded = results.filter((r): r is SkillWithPath => r !== null)
   if (loadedFrom === 'syncedSkills') {
+    const state = hostSkillsState()
     const nextRoots = new Set<string>()
     for (const item of loaded) {
       if (item.skill.type === 'prompt' && item.skill.skillRoot) {
         nextRoots.add(item.skill.skillRoot)
       }
     }
-    const prevRoots = lastLoadedSyncedSkillRootsByDir.get(basePath)
+    const prevRoots = state.lastLoadedSyncedSkillRootsByDir.get(basePath)
     if (prevRoots && prevRoots.size > 0) {
       const removed = new Set<string>()
       for (const root of prevRoots) {
@@ -828,11 +888,11 @@ async function loadSkillsFromSkillsDir(
         pruneRemovedSyncedSkillHooks(
           removed,
           'skill_gone',
-          activeSyncedSkillHooksPruner,
+          state.activeSyncedSkillHooksPruner,
         )
       }
     }
-    lastLoadedSyncedSkillRootsByDir.set(basePath, nextRoots)
+    state.lastLoadedSyncedSkillRootsByDir.set(basePath, nextRoots)
   }
   return loaded
 }
@@ -999,271 +1059,300 @@ async function loadSkillsFromCommandsDir(
  *
  * @param cwd Current working directory for project directory traversal
  */
-export const getSkillDirCommands = memoize(
-  async (cwd: string): Promise<Command[]> => {
-    const userSkillsDir = join(getClaudeConfigHomeDir(), 'skills')
-    const managedSkillsDir = join(getManagedFilePath(), '.claude', 'skills')
-    const extensionRoot = getCurrentWorktreeSession()?.extensionRoot
-    const hasDistinctExtensionRoot =
-      extensionRoot !== undefined && resolve(extensionRoot) !== resolve(cwd)
-    const rawProjectSkillsDirs = hasDistinctExtensionRoot
-      ? [
-          ...getProjectDirsUpToHome('skills', cwd),
-          ...getProjectDirsUpToHome('skills', extensionRoot),
-        ]
-      : getProjectDirsUpToHome('skills', cwd)
-    const seenProjectDirs = new Set<string>()
-    const dedupedProjectSkillsDirs: string[] = []
-    for (const dir of rawProjectSkillsDirs) {
-      const normalized = resolve(dir)
-      if (!seenProjectDirs.has(normalized)) {
-        seenProjectDirs.add(normalized)
-        dedupedProjectSkillsDirs.push(dir)
-      }
+type CachedSkillDirCommandsFn = ((cwd: string) => Promise<Command[]>) & {
+  cache: Map<string, Promise<Command[]>>
+}
+
+async function loadSkillDirCommandsImpl(cwd: string): Promise<Command[]> {
+  const state = hostSkillsState()
+  const userSkillsDir = join(getClaudeConfigHomeDir(), 'skills')
+  const managedSkillsDir = join(getManagedFilePath(), '.claude', 'skills')
+  const extensionRoot = getCurrentWorktreeSession()?.extensionRoot
+  const hasDistinctExtensionRoot =
+    extensionRoot !== undefined && resolve(extensionRoot) !== resolve(cwd)
+  const rawProjectSkillsDirs = hasDistinctExtensionRoot
+    ? [
+        ...getProjectDirsUpToHome('skills', cwd),
+        ...getProjectDirsUpToHome('skills', extensionRoot),
+      ]
+    : getProjectDirsUpToHome('skills', cwd)
+  const seenProjectDirs = new Set<string>()
+  const dedupedProjectSkillsDirs: string[] = []
+  for (const dir of rawProjectSkillsDirs) {
+    const normalized = resolve(dir)
+    if (!seenProjectDirs.has(normalized)) {
+      seenProjectDirs.add(normalized)
+      dedupedProjectSkillsDirs.push(dir)
     }
+  }
 
-    // Official 2.1.328 `_Hs` (`chunk@294254613.js@3898200`): skip project skill
-    // dirs and added folders located in or beneath a connector-downloads dir.
-    const projectConnectorFlags = await Promise.all(
-      dedupedProjectSkillsDirs.map(dir => isConnectorDownloadsPath(dir)),
-    )
-    const projectSkillsDirs = dedupedProjectSkillsDirs.filter(
-      (_dir, idx) => !projectConnectorFlags[idx],
-    )
+  // Official 2.1.328 `_Hs` (`chunk@294254613.js@3898200`): skip project skill
+  // dirs and added folders located in or beneath a connector-downloads dir.
+  const projectConnectorFlags = await Promise.all(
+    dedupedProjectSkillsDirs.map(dir => isConnectorDownloadsPath(dir)),
+  )
+  const projectSkillsDirs = dedupedProjectSkillsDirs.filter(
+    (_dir, idx) => !projectConnectorFlags[idx],
+  )
 
-    logForDebugging(
-      `Loading skills from: managed=${managedSkillsDir}, user=${userSkillsDir}, project=[${projectSkillsDirs.join(', ')}]`,
-    )
+  logForDebugging(
+    `Loading skills from: managed=${managedSkillsDir}, user=${userSkillsDir}, project=[${projectSkillsDirs.join(', ')}]`,
+  )
 
-    // Load from additional directories (--add-dir)
-    const rawAdditionalDirs = getAdditionalDirectoriesForClaudeMd()
-    const additionalConnectorFlags = await Promise.all(
-      rawAdditionalDirs.map(async dir => {
-        for (const candidate of [
-          dir,
-          join(dir, '.claude'),
-          join(dir, '.claude', 'skills'),
-          join(dir, '.claude', 'commands'),
-        ]) {
-          if (await isConnectorDownloadsPath(candidate)) {
-            return true
-          }
+  // Load from additional directories (--add-dir)
+  const rawAdditionalDirs = getAdditionalDirectoriesForClaudeMd()
+  const additionalConnectorFlags = await Promise.all(
+    rawAdditionalDirs.map(async dir => {
+      for (const candidate of [
+        dir,
+        join(dir, '.claude'),
+        join(dir, '.claude', 'skills'),
+        join(dir, '.claude', 'commands'),
+      ]) {
+        if (await isConnectorDownloadsPath(candidate)) {
+          return true
         }
-        return false
-      }),
-    )
-    const additionalDirs = rawAdditionalDirs.filter((dir, idx) => {
-      if (additionalConnectorFlags[idx]) {
-        logForDebugging(
-          `[skills] Skipped added folder in or beneath a connector-downloads folder: ${dir}`,
-        )
-        return false
       }
-      return true
-    })
-    const skillsLocked = isRestrictedToPluginOnly('skills')
-    const projectSettingsEnabled =
-      isSettingSourceEnabled('projectSettings') && !skillsLocked
-
-    // --bare: skip auto-discovery (managed/user/project dir walks + legacy
-    // commands-dir). Load ONLY explicit --add-dir paths. Bundled skills
-    // register separately. skillsLocked still applies — --bare is not a
-    // policy bypass.
-    if (isBareMode()) {
-      if (additionalDirs.length === 0 || !projectSettingsEnabled) {
-        logForDebugging(
-          `[bare] Skipping skill dir discovery (${additionalDirs.length === 0 ? 'no --add-dir' : 'projectSettings disabled or skillsLocked'})`,
-        )
-        return []
-      }
-      const additionalSkillsNested = await Promise.all(
-        additionalDirs.map(dir =>
-          loadSkillsFromSkillsDir(
-            join(dir, '.claude', 'skills'),
-            'projectSettings',
-          ),
-        ),
+      return false
+    }),
+  )
+  const additionalDirs = rawAdditionalDirs.filter((dir, idx) => {
+    if (additionalConnectorFlags[idx]) {
+      logForDebugging(
+        `[skills] Skipped added folder in or beneath a connector-downloads folder: ${dir}`,
       )
-      // No dedup needed — explicit dirs, user controls uniqueness.
-      return additionalSkillsNested.flat().map(s => s.skill)
+      return false
     }
+    return true
+  })
+  const skillsLocked = isRestrictedToPluginOnly('skills')
+  const projectSettingsEnabled =
+    isSettingSourceEnabled('projectSettings') && !skillsLocked
 
-    // Load from /skills/ directories, additional dirs, and legacy /commands/ in parallel
-    // (all independent — different directories, no shared state)
-    const hostCatalog =
-      isSettingSourceEnabled('userSettings') && !skillsLocked
-        ? parseHostSkillCatalog()
-        : null
-
-    const [
-      managedSkills,
-      userSkills,
-      hostCatalogSkills,
-      projectSkillsNested,
-      additionalSkillsNested,
-      legacyCommands,
-      extensionRootLegacyCommands,
-    ] = await Promise.all([
-      (() => {
-        try {
-          const { isPolicySkillsDisabled } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
-          return isPolicySkillsDisabled()
-        } catch {
-          return isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_POLICY_SKILLS)
-        }
-      })()
-        ? Promise.resolve([])
-        : loadSkillsFromSkillsDir(managedSkillsDir, 'policySettings'),
-      isSettingSourceEnabled('userSettings') && !skillsLocked
-        ? loadSkillsFromSkillsDir(userSkillsDir, 'userSettings')
-        : Promise.resolve([]),
-      hostCatalog !== null
-        ? loadHostCatalogSkills(hostCatalog)
-        : Promise.resolve([]),
-      projectSettingsEnabled
-        ? Promise.all(
-            projectSkillsDirs.map(dir =>
-              loadSkillsFromSkillsDir(dir, 'projectSettings'),
-            ),
-          )
-        : Promise.resolve([]),
-      projectSettingsEnabled
-        ? Promise.all(
-            additionalDirs.map(dir =>
-              loadSkillsFromSkillsDir(
-                join(dir, '.claude', 'skills'),
-                'projectSettings',
-              ),
-            ),
-          )
-        : Promise.resolve([]),
-      // Legacy commands-as-skills goes through markdownConfigLoader with
-      // subdir='commands', which our agents-only guard there skips. Block
-      // here when skills are locked — these ARE skills, regardless of the
-      // directory they load from.
-      skillsLocked ? Promise.resolve([]) : loadSkillsFromCommandsDir(cwd),
-      !skillsLocked && hasDistinctExtensionRoot
-        ? loadSkillsFromCommandsDir(extensionRoot)
-        : Promise.resolve([]),
-    ])
-
-    // Flatten and combine all skills
-    const allSkillsWithPaths = [
-      ...managedSkills,
-      ...userSkills,
-      ...projectSkillsNested.flat(),
-      ...additionalSkillsNested.flat(),
-      ...legacyCommands,
-      ...extensionRootLegacyCommands,
-      ...getInMemorySyncedSkills().map(skill => ({
-        skill,
-        filePath: '',
-      })),
-    ]
-
-    // Deduplicate by resolved path (handles symlinks and duplicate parent directories)
-    // Pre-compute file identities in parallel (realpath calls are independent),
-    // then dedup synchronously (order-dependent first-wins)
-    const fileIds = await Promise.all(
-      allSkillsWithPaths.map(({ skill, filePath }) =>
-        skill.type === 'prompt'
-          ? getFileIdentity(filePath)
-          : Promise.resolve(null),
+  // --bare: skip auto-discovery (managed/user/project dir walks + legacy
+  // commands-dir). Load ONLY explicit --add-dir paths. Bundled skills
+  // register separately. skillsLocked still applies — --bare is not a
+  // policy bypass.
+  if (isBareMode()) {
+    if (additionalDirs.length === 0 || !projectSettingsEnabled) {
+      logForDebugging(
+        `[bare] Skipping skill dir discovery (${additionalDirs.length === 0 ? 'no --add-dir' : 'projectSettings disabled or skillsLocked'})`,
+      )
+      return []
+    }
+    const additionalSkillsNested = await Promise.all(
+      additionalDirs.map(dir =>
+        loadSkillsFromSkillsDir(
+          join(dir, '.claude', 'skills'),
+          'projectSettings',
+        ),
       ),
     )
+    // No dedup needed — explicit dirs, user controls uniqueness.
+    return additionalSkillsNested.flat().map(s => s.skill)
+  }
 
-    const seenFileIds = new Map<string, string>()
-    const deduplicatedSkills: Command[] = []
+  // Load from /skills/ directories, additional dirs, and legacy /commands/ in parallel
+  // (all independent — different directories, no shared state)
+  const hostCatalog =
+    isSettingSourceEnabled('userSettings') && !skillsLocked
+      ? parseHostSkillCatalog()
+      : null
 
-    for (let i = 0; i < allSkillsWithPaths.length; i++) {
-      const entry = allSkillsWithPaths[i]
-      if (entry === undefined || entry.skill.type !== 'prompt') continue
-      const { skill } = entry
-
-      const fileId = fileIds[i]
-      if (fileId === null || fileId === undefined) {
-        deduplicatedSkills.push(skill)
-        continue
+  const [
+    managedSkills,
+    userSkills,
+    hostCatalogSkills,
+    projectSkillsNested,
+    additionalSkillsNested,
+    legacyCommands,
+    extensionRootLegacyCommands,
+  ] = await Promise.all([
+    (() => {
+      try {
+        const { isPolicySkillsDisabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+        return isPolicySkillsDisabled()
+      } catch {
+        return isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_POLICY_SKILLS)
       }
+    })()
+      ? Promise.resolve([])
+      : loadSkillsFromSkillsDir(managedSkillsDir, 'policySettings'),
+    isSettingSourceEnabled('userSettings') && !skillsLocked
+      ? loadSkillsFromSkillsDir(userSkillsDir, 'userSettings')
+      : Promise.resolve([]),
+    hostCatalog !== null
+      ? loadHostCatalogSkills(hostCatalog)
+      : Promise.resolve([]),
+    projectSettingsEnabled
+      ? Promise.all(
+          projectSkillsDirs.map(dir =>
+            loadSkillsFromSkillsDir(dir, 'projectSettings'),
+          ),
+        )
+      : Promise.resolve([]),
+    projectSettingsEnabled
+      ? Promise.all(
+          additionalDirs.map(dir =>
+            loadSkillsFromSkillsDir(
+              join(dir, '.claude', 'skills'),
+              'projectSettings',
+            ),
+          ),
+        )
+      : Promise.resolve([]),
+    // Legacy commands-as-skills goes through markdownConfigLoader with
+    // subdir='commands', which our agents-only guard there skips. Block
+    // here when skills are locked — these ARE skills, regardless of the
+    // directory they load from.
+    skillsLocked ? Promise.resolve([]) : loadSkillsFromCommandsDir(cwd),
+    !skillsLocked && hasDistinctExtensionRoot
+      ? loadSkillsFromCommandsDir(extensionRoot)
+      : Promise.resolve([]),
+  ])
 
-      const existingSource = seenFileIds.get(fileId)
-      if (existingSource !== undefined) {
+  // Flatten and combine all skills
+  const allSkillsWithPaths = [
+    ...managedSkills,
+    ...userSkills,
+    ...projectSkillsNested.flat(),
+    ...additionalSkillsNested.flat(),
+    ...legacyCommands,
+    ...extensionRootLegacyCommands,
+    ...getInMemorySyncedSkills().map(skill => ({
+      skill,
+      filePath: '',
+    })),
+  ]
+
+  // Deduplicate by resolved path (handles symlinks and duplicate parent directories)
+  // Pre-compute file identities in parallel (realpath calls are independent),
+  // then dedup synchronously (order-dependent first-wins)
+  const fileIds = await Promise.all(
+    allSkillsWithPaths.map(({ skill, filePath }) =>
+      skill.type === 'prompt'
+        ? getFileIdentity(filePath)
+        : Promise.resolve(null),
+    ),
+  )
+
+  const seenFileIds = new Map<string, string>()
+  const deduplicatedSkills: Command[] = []
+
+  for (let i = 0; i < allSkillsWithPaths.length; i++) {
+    const entry = allSkillsWithPaths[i]
+    if (entry === undefined || entry.skill.type !== 'prompt') continue
+    const { skill } = entry
+
+    const fileId = fileIds[i]
+    if (fileId === null || fileId === undefined) {
+      deduplicatedSkills.push(skill)
+      continue
+    }
+
+    const existingSource = seenFileIds.get(fileId)
+    if (existingSource !== undefined) {
+      logForDebugging(
+        `Skipping duplicate skill '${skill.name}' from ${skill.source} (same file already loaded from ${existingSource})`,
+      )
+      continue
+    }
+
+    seenFileIds.set(fileId, skill.source)
+    deduplicatedSkills.push(skill)
+  }
+
+  const duplicatesRemoved =
+    allSkillsWithPaths.length - deduplicatedSkills.length
+  if (duplicatesRemoved > 0) {
+    logForDebugging(`Deduplicated ${duplicatesRemoved} skills (same file)`)
+  }
+
+  if (hostCatalogSkills.length > 0) {
+    const hostFileIds = await Promise.all(
+      hostCatalogSkills.map(({ filePath }) => getFileIdentity(filePath)),
+    )
+    for (let i = 0; i < hostCatalogSkills.length; i++) {
+      const entry = hostCatalogSkills[i]
+      if (!entry) continue
+      const fileId = hostFileIds[i]
+      if (fileId && seenFileIds.has(fileId)) {
         logForDebugging(
-          `Skipping duplicate skill '${skill.name}' from ${skill.source} (same file already loaded from ${existingSource})`,
+          `Skipping host catalog skill '${entry.skill.name}': another skills folder links to the same file`,
         )
         continue
       }
-
-      seenFileIds.set(fileId, skill.source)
-      deduplicatedSkills.push(skill)
+      deduplicatedSkills.push(entry.skill)
     }
+  }
 
-    const duplicatesRemoved =
-      allSkillsWithPaths.length - deduplicatedSkills.length
-    if (duplicatesRemoved > 0) {
-      logForDebugging(`Deduplicated ${duplicatesRemoved} skills (same file)`)
-    }
-
-    if (hostCatalogSkills.length > 0) {
-      const hostFileIds = await Promise.all(
-        hostCatalogSkills.map(({ filePath }) => getFileIdentity(filePath)),
-      )
-      for (let i = 0; i < hostCatalogSkills.length; i++) {
-        const entry = hostCatalogSkills[i]
-        if (!entry) continue
-        const fileId = hostFileIds[i]
-        if (fileId && seenFileIds.has(fileId)) {
-          logForDebugging(
-            `Skipping host catalog skill '${entry.skill.name}': another skills folder links to the same file`,
-          )
-          continue
-        }
-        deduplicatedSkills.push(entry.skill)
+  // Separate conditional skills (with paths frontmatter) from unconditional ones
+  const unconditionalSkills: Command[] = []
+  const newConditionalSkills: Command[] = []
+  for (const skill of deduplicatedSkills) {
+    const isConditional =
+      skill.type === 'prompt' && !!skill.paths && skill.paths.length > 0
+    // densable iXe update-existing: `if (P) { x=Q3e(R); if (has(x)) set(x,R) }`
+    if (isConditional) {
+      const x = skillMapKey(skill)
+      if (state.dynamicSkills.has(x)) {
+        state.dynamicSkills.set(x, skill)
       }
     }
-
-    // Separate conditional skills (with paths frontmatter) from unconditional ones
-    const unconditionalSkills: Command[] = []
-    const newConditionalSkills: Command[] = []
-    for (const skill of deduplicatedSkills) {
-      const isConditional =
-        skill.type === 'prompt' && !!skill.paths && skill.paths.length > 0
-      // densable iXe update-existing: `if (P) { x=Q3e(R); if (has(x)) set(x,R) }`
-      if (isConditional) {
-        const x = skillMapKey(skill)
-        if (dynamicSkills.has(x)) {
-          dynamicSkills.set(x, skill)
-        }
-      }
-      if (isConditional && !activatedConditionalSkillNames.has(skill.name)) {
-        newConditionalSkills.push(skill)
-      } else {
-        unconditionalSkills.push(skill)
-      }
+    if (
+      isConditional &&
+      !state.activatedConditionalSkillNames.has(skill.name)
+    ) {
+      newConditionalSkills.push(skill)
+    } else {
+      unconditionalSkills.push(skill)
     }
+  }
 
-    // Store conditional skills for later activation when matching files are touched
-    for (const skill of newConditionalSkills) {
-      conditionalSkills.set(skill.name, skill)
-    }
+  // Store conditional skills for later activation when matching files are touched
+  for (const skill of newConditionalSkills) {
+    state.conditionalSkills.set(skill.name, skill)
+  }
 
-    if (newConditionalSkills.length > 0) {
-      logForDebugging(
-        `[skills] ${newConditionalSkills.length} conditional skills stored (activated when matching files are touched)`,
-      )
-    }
-
+  if (newConditionalSkills.length > 0) {
     logForDebugging(
-      `Loaded ${deduplicatedSkills.length} unique skills (${unconditionalSkills.length} unconditional, ${newConditionalSkills.length} conditional, managed: ${managedSkills.length}, user: ${userSkills.length}, project: ${projectSkillsNested.flat().length}, additional: ${additionalSkillsNested.flat().length}, legacy commands: ${legacyCommands.length})`,
+      `[skills] ${newConditionalSkills.length} conditional skills stored (activated when matching files are touched)`,
     )
+  }
 
-    return unconditionalSkills
-  },
-  (cwd: string) =>
-    `${cwd}\0${getCurrentWorktreeSession()?.extensionRoot ?? ''}`,
-)
+  logForDebugging(
+    `Loaded ${deduplicatedSkills.length} unique skills (${unconditionalSkills.length} unconditional, ${newConditionalSkills.length} conditional, managed: ${managedSkills.length}, user: ${userSkills.length}, project: ${projectSkillsNested.flat().length}, additional: ${additionalSkillsNested.flat().length}, legacy commands: ${legacyCommands.length})`,
+  )
+
+  return unconditionalSkills
+}
+
+function createGetSkillDirCommands(): CachedSkillDirCommandsFn {
+  const fn = (cwd: string): Promise<Command[]> => {
+    const cache = hostSkillsState().skillDirCommandsCache
+    const key = `${cwd}\0${getCurrentWorktreeSession()?.extensionRoot ?? ''}`
+    const existing = cache.get(key)
+    if (existing !== undefined) {
+      return existing
+    }
+    const pending = loadSkillDirCommandsImpl(cwd)
+    cache.set(key, pending)
+    return pending
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<string, Promise<Command[]>> {
+      return hostSkillsState().skillDirCommandsCache
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedSkillDirCommandsFn
+}
+
+export const getSkillDirCommands: CachedSkillDirCommandsFn =
+  createGetSkillDirCommands()
 
 export const HOST_SKILL_CATALOG_DIR = '/mnt/skills/public'
 const HOST_SKILL_CATALOG_MAX = 64
@@ -1418,20 +1507,24 @@ export function disambiguateAddDirSkills(
 }
 
 export function clearSkillCaches() {
+  const state = hostSkillsState()
   getSkillDirCommands.cache?.clear?.()
   loadMarkdownFilesForSubdir.cache?.clear?.()
-  conditionalSkills.clear()
-  activatedConditionalSkillNames.clear()
+  state.conditionalSkills.clear()
+  state.activatedConditionalSkillNames.clear()
   clearInMemorySyncedSkills()
   clearSyncedSkillLandingFailures()
 }
 
 // Official 2.1.325 #2332: invalidate cached skills when managed
 // strictPluginOnlyCustomization changes mid-session.
-registerStrictPluginOnlyChangeCallback(() => {
-  clearSkillCaches()
-  clearDynamicSkills()
-})
+registerStrictPluginOnlyChangeCallback(
+  () => {
+    clearSkillCaches()
+    clearDynamicSkills()
+  },
+  { persistent: true },
+)
 
 // Backwards-compatible aliases for tests
 export { getSkillDirCommands as getCommandDirCommands }
@@ -1440,16 +1533,10 @@ export { transformSkillFiles }
 
 // --- Dynamic skill discovery ---
 
-// State for dynamically discovered skills
-const dynamicSkillDirs = new Set<string>()
-const deferredSkillDirs = new Map<string, string>()
-const dynamicSkills = new Map<string, Command>()
-
 // #1812 (2.1.319): Withhold nested `.claude/skills` discovery for the rest of
 // the session once the Bash sandbox has been enabled (gated on
 // `tengu_iridescent_feather`).
 const IRIDESCENT_FEATHER_FLAG = 'tengu_iridescent_feather'
-let nestedDiscoveryWithheld = false
 
 /**
  * #1812: Returns true when nested `.claude/skills` discovery has been latched
@@ -1457,7 +1544,7 @@ let nestedDiscoveryWithheld = false
  */
 export function isNestedSkillDiscoveryWithheld(): boolean {
   return (
-    nestedDiscoveryWithheld &&
+    hostSkillsState().nestedDiscoveryWithheld &&
     getFeatureValue_CACHED_MAY_BE_STALE(IRIDESCENT_FEATHER_FLAG, true)
   )
 }
@@ -1469,14 +1556,15 @@ export function isNestedSkillDiscoveryWithheld(): boolean {
  * sandbox off mid-session still cannot load skills written while sandboxed.
  */
 export function shouldWithholdNestedSkillDiscovery(): boolean {
+  const state = hostSkillsState()
   if (
-    !(nestedDiscoveryWithheld || SandboxManager.isSandboxingEnabled()) ||
+    !(state.nestedDiscoveryWithheld || SandboxManager.isSandboxingEnabled()) ||
     !getFeatureValue_CACHED_MAY_BE_STALE(IRIDESCENT_FEATHER_FLAG, true)
   ) {
     return false
   }
-  if (!nestedDiscoveryWithheld) {
-    nestedDiscoveryWithheld = true
+  if (!state.nestedDiscoveryWithheld) {
+    state.nestedDiscoveryWithheld = true
     logForDebugging(
       '[skills] Skills in .claude/skills folders below the folder Claude Code started in or was moved to with /cd will not load until Claude Code restarts, even if the Bash sandbox is turned off, because sandboxed commands can write to those folders. To use such a skill, start Claude Code in its folder or /cd there.',
     )
@@ -1486,7 +1574,7 @@ export function shouldWithholdNestedSkillDiscovery(): boolean {
 
 /** Test-only reset for `#1812` latched nested-discovery state. */
 export function resetNestedDiscoveryWithheldForTesting(): void {
-  nestedDiscoveryWithheld = false
+  hostSkillsState().nestedDiscoveryWithheld = false
 }
 
 function foldPathForPrefixMatch(p: string): string {
@@ -1556,31 +1644,36 @@ function isUnderPrefixes(dirPath: string, prefixes: string[]): boolean {
 
 // --- Conditional skills (path-filtered) ---
 
-// Skills with paths frontmatter that haven't been activated yet
-const conditionalSkills = new Map<string, Command>()
-// Names of skills that have been activated (survives cache clears within a session)
-const activatedConditionalSkillNames = new Set<string>()
-
-// Signal fired when dynamic skills are loaded
-const skillsLoaded = createSignal()
+export type DynamicSkillsListenerOptions = {
+  scope?: 'host' | 'global'
+}
 
 /**
  * Register a callback to be invoked when dynamic skills are loaded.
  * Used by other modules to clear caches without creating import cycles.
+ * Defaults to per-host scope; pass `{ scope: 'global' }` to receive events
+ * from all hosts (always invoked inside the emitting host's ALS context).
  * Returns an unsubscribe function.
  */
-export function onDynamicSkillsLoaded(callback: () => void): () => void {
+export function onDynamicSkillsLoaded(
+  callback: () => void,
+  options?: DynamicSkillsListenerOptions,
+): () => void {
   // Wrap at subscribe time so a throwing listener is logged and skipped
   // rather than aborting skillsLoaded.emit() and breaking skill loading.
   // Same callSafe pattern as growthbook.ts — createSignal.emit() has no
   // per-listener try/catch.
-  return skillsLoaded.subscribe(() => {
+  const wrapped = () => {
     try {
       callback()
     } catch (error) {
       logError(error)
     }
-  })
+  }
+  if (options?.scope === 'global') {
+    return globalSkillsLoaded.subscribe(wrapped)
+  }
+  return skillsLoaded.subscribe(wrapped)
 }
 
 /**
@@ -1627,6 +1720,7 @@ export async function discoverSkillDirsForPaths(
     return []
   }
 
+  const state = hostSkillsState()
   const fs = getFsImplementation()
   const resolvedCwd = cwd.endsWith(pathSep) ? cwd.slice(0, -1) : cwd
   const newDirs: string[] = []
@@ -1659,17 +1753,17 @@ export async function discoverSkillDirsForPaths(
       }
 
       const skillDir = join(currentDir, '.claude', 'skills')
-      const deferredAt = deferredSkillDirs.get(skillDir)
+      const deferredAt = state.deferredSkillDirs.get(skillDir)
       if (deferredAt !== undefined && deferredAt !== resolvedCwd) {
-        deferredSkillDirs.delete(skillDir)
-        dynamicSkillDirs.delete(skillDir)
+        state.deferredSkillDirs.delete(skillDir)
+        state.dynamicSkillDirs.delete(skillDir)
       }
 
       // Skip if we've already checked this path (hit or miss) — avoids
       // repeating the same failed stat on every Read/Write/Edit call when
       // the directory doesn't exist (the common case).
-      if (!dynamicSkillDirs.has(skillDir)) {
-        dynamicSkillDirs.add(skillDir)
+      if (!state.dynamicSkillDirs.has(skillDir)) {
+        state.dynamicSkillDirs.add(skillDir)
         try {
           await fs.stat(skillDir)
           // #1942: Also verify the resolved symlink target isn't inside ~/.claude/plugins
@@ -1701,7 +1795,7 @@ export async function discoverSkillDirsForPaths(
             )
             if (exitCode !== 1) {
               if (exitCode !== 0) {
-                deferredSkillDirs.set(skillDir, resolvedCwd)
+                state.deferredSkillDirs.set(skillDir, resolvedCwd)
               }
               logForDebugging(
                 `[skills] Skipped gitignored or unconfirmed skills dir: ${skillDir}`,
@@ -1784,7 +1878,8 @@ export async function addSkillDirectories(
     return
   }
 
-  const previousSkillNamesForLogging = new Set(dynamicSkills.keys())
+  const state = hostSkillsState()
+  const previousSkillNamesForLogging = new Set(state.dynamicSkills.keys())
 
   // Load skills from all directories
   const loadedSkills = await Promise.all(
@@ -1795,9 +1890,9 @@ export async function addSkillDirectories(
     const incoming = new Set(
       loadedSkills.flat().map(({ skill }) => skillMapKey(skill)),
     )
-    for (const [key, skill] of dynamicSkills) {
+    for (const [key, skill] of state.dynamicSkills) {
       if (skillBelongsToSkillDirs(skill, dirs) && !incoming.has(key)) {
-        dynamicSkills.delete(key)
+        state.dynamicSkills.delete(key)
       }
     }
   }
@@ -1806,14 +1901,14 @@ export async function addSkillDirectories(
   for (let i = loadedSkills.length - 1; i >= 0; i--) {
     for (const { skill } of loadedSkills[i] ?? []) {
       if (skill.type === 'prompt') {
-        dynamicSkills.set(skillMapKey(skill), skill)
+        state.dynamicSkills.set(skillMapKey(skill), skill)
       }
     }
   }
 
   const newSkillCount = loadedSkills.flat().length
   if (newSkillCount > 0) {
-    const addedSkills = [...dynamicSkills.keys()].filter(
+    const addedSkills = [...state.dynamicSkills.keys()].filter(
       n => !previousSkillNamesForLogging.has(n),
     )
     logForDebugging(
@@ -1824,7 +1919,7 @@ export async function addSkillDirectories(
         source:
           'file_operation' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         previousCount: previousSkillNamesForLogging.size,
-        newCount: dynamicSkills.size,
+        newCount: state.dynamicSkills.size,
         addedCount: addedSkills.length,
         directoryCount: dirs.length,
       })
@@ -1855,7 +1950,7 @@ export async function refreshMovedDirectorySkills(): Promise<void> {
  * These are skills discovered from file paths during the session.
  */
 export function getDynamicSkills(): Command[] {
-  return Array.from(dynamicSkills.values())
+  return Array.from(hostSkillsState().dynamicSkills.values())
 }
 
 /**
@@ -1874,13 +1969,14 @@ export function activateConditionalSkillsForPaths(
   filePaths: string[],
   cwd: string,
 ): string[] {
-  if (conditionalSkills.size === 0) {
+  const state = hostSkillsState()
+  if (state.conditionalSkills.size === 0) {
     return []
   }
 
   const activated: string[] = []
 
-  for (const [name, skill] of conditionalSkills) {
+  for (const [name, skill] of state.conditionalSkills) {
     if (skill.type !== 'prompt' || !skill.paths || skill.paths.length === 0) {
       continue
     }
@@ -1912,9 +2008,9 @@ export function activateConditionalSkillsForPaths(
 
       if (skillIgnore.ignores(relativePath)) {
         // Activate this skill by moving it to dynamic skills
-        dynamicSkills.set(skillMapKey(skill), skill)
-        conditionalSkills.delete(name)
-        activatedConditionalSkillNames.add(name)
+        state.dynamicSkills.set(skillMapKey(skill), skill)
+        state.conditionalSkills.delete(name)
+        state.activatedConditionalSkillNames.add(name)
         activated.push(name)
         logForDebugging(
           `[skills] Activated conditional skill '${name}' (matched path: ${relativePath})`,
@@ -1928,8 +2024,8 @@ export function activateConditionalSkillsForPaths(
     logEvent('tengu_dynamic_skills_changed', {
       source:
         'conditional_paths' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      previousCount: dynamicSkills.size - activated.length,
-      newCount: dynamicSkills.size,
+      previousCount: state.dynamicSkills.size - activated.length,
+      newCount: state.dynamicSkills.size,
       addedCount: activated.length,
       directoryCount: 0,
     })
@@ -1992,11 +2088,12 @@ export async function discoverAndActivateSkillsForFilePath(
 }
 
 export function clearDynamicSkills(): void {
-  dynamicSkillDirs.clear()
-  deferredSkillDirs.clear()
-  dynamicSkills.clear()
-  conditionalSkills.clear()
-  activatedConditionalSkillNames.clear()
+  const state = hostSkillsState()
+  state.dynamicSkillDirs.clear()
+  state.deferredSkillDirs.clear()
+  state.dynamicSkills.clear()
+  state.conditionalSkills.clear()
+  state.activatedConditionalSkillNames.clear()
 }
 
 const MAX_CHANGED_SKILL_DISCOVERY_DIRS = 100
@@ -2080,9 +2177,11 @@ export async function discoverNestedSkillsForChangedFiles(
 // edge out into many cycle violations; a variable-specifier dynamic import
 // passes dep-cruiser but fails to resolve in Bun-bundled binaries at runtime).
 // eslint-disable-next-line custom-rules/no-top-level-side-effects -- write-once registration, idempotent
-registerMCPSkillBuilders({
-  createSkillCommand,
-  parseSkillFrontmatterFields,
+exitSessionContext(() => {
+  registerMCPSkillBuilders({
+    createSkillCommand,
+    parseSkillFrontmatterFields,
+  })
 })
 
 export {
@@ -2102,22 +2201,10 @@ export {
  */
 export const SYNCED_SKILL_DOWNLOAD_COOLDOWN_MS = 600_000
 
-type FailedLandingRecord = {
-  version: string
-  failures: number
-  failedAtMs: number
-}
-
-const inMemorySyncedSkills = new Map<string, Command>()
-const failedSyncedSkillLandings = new Map<string, FailedLandingRecord>()
-const lastLoadedSyncedSkillRootsByDir = new Map<string, Set<string>>()
-let activeSyncedSkillHooksPruner: (roots: ReadonlySet<string>) => number = () =>
-  0
-
 export function setSyncedSkillHooksPruner(
   pruner: ((roots: ReadonlySet<string>) => number) | null,
 ): void {
-  activeSyncedSkillHooksPruner = pruner ?? (() => 0)
+  hostSkillsState().activeSyncedSkillHooksPruner = pruner ?? (() => 0)
 }
 
 export function retainInMemorySyncedSkill(
@@ -2125,7 +2212,7 @@ export function retainInMemorySyncedSkill(
   command: Command,
   opts?: { pendingDownloadStart?: (signal?: AbortSignal) => void },
 ): ((outcome: PendingSkillDownloadOutcome) => void) | undefined {
-  inMemorySyncedSkills.set(skillId, command)
+  hostSkillsState().inMemorySyncedSkills.set(skillId, command)
   if (opts?.pendingDownloadStart !== undefined) {
     return registerPendingSkillDownload(command.name, opts.pendingDownloadStart)
   }
@@ -2139,38 +2226,40 @@ export function removeInMemorySyncedSkill(
     removeHooksForRoots?: (roots: ReadonlySet<string>) => number
   },
 ): boolean {
-  const existing = inMemorySyncedSkills.get(skillId)
-  const deleted = inMemorySyncedSkills.delete(skillId)
+  const state = hostSkillsState()
+  const existing = state.inMemorySyncedSkills.get(skillId)
+  const deleted = state.inMemorySyncedSkills.delete(skillId)
   if (deleted && existing?.type === 'prompt' && existing.skillRoot) {
     pruneRemovedSyncedSkillHooks(
       new Set([existing.skillRoot]),
       opts?.reason ?? 'skill_gone',
-      opts?.removeHooksForRoots ?? activeSyncedSkillHooksPruner,
+      opts?.removeHooksForRoots ?? state.activeSyncedSkillHooksPruner,
     )
   }
   return deleted
 }
 
 export function getInMemorySyncedSkills(): Command[] {
-  return [...inMemorySyncedSkills.values()]
+  return [...hostSkillsState().inMemorySyncedSkills.values()]
 }
 
 export function clearInMemorySyncedSkills(opts?: {
   reason?: SkillHooksRemovalReason
   removeHooksForRoots?: (roots: ReadonlySet<string>) => number
 }): void {
+  const state = hostSkillsState()
   const roots = new Set<string>()
-  for (const cmd of inMemorySyncedSkills.values()) {
+  for (const cmd of state.inMemorySyncedSkills.values()) {
     if (cmd.type === 'prompt' && cmd.skillRoot) {
       roots.add(cmd.skillRoot)
     }
   }
-  inMemorySyncedSkills.clear()
+  state.inMemorySyncedSkills.clear()
   if (roots.size > 0) {
     pruneRemovedSyncedSkillHooks(
       roots,
       opts?.reason ?? 'sync_off',
-      opts?.removeHooksForRoots ?? activeSyncedSkillHooksPruner,
+      opts?.removeHooksForRoots ?? state.activeSyncedSkillHooksPruner,
     )
   }
 }
@@ -2180,8 +2269,9 @@ export function recordFailedSyncedSkillLanding(
   version: string,
   nowMs: number = Date.now(),
 ): void {
-  const prev = failedSyncedSkillLandings.get(skillId)
-  failedSyncedSkillLandings.set(skillId, {
+  const landings = hostSkillsState().failedSyncedSkillLandings
+  const prev = landings.get(skillId)
+  landings.set(skillId, {
     version,
     failures: prev?.version === version ? prev.failures + 1 : 1,
     failedAtMs: nowMs,
@@ -2193,10 +2283,11 @@ export function shouldSkipSyncedSkillDownload(
   version: string,
   nowMs: number = Date.now(),
 ): boolean {
-  const record = failedSyncedSkillLandings.get(skillId)
+  const landings = hostSkillsState().failedSyncedSkillLandings
+  const record = landings.get(skillId)
   if (!record) return false
   if (record.version !== version) {
-    failedSyncedSkillLandings.delete(skillId)
+    landings.delete(skillId)
     return false
   }
   const elapsed = nowMs - record.failedAtMs
@@ -2204,7 +2295,7 @@ export function shouldSkipSyncedSkillDownload(
 }
 
 export function clearSyncedSkillLandingFailures(): void {
-  failedSyncedSkillLandings.clear()
+  hostSkillsState().failedSyncedSkillLandings.clear()
 }
 
 export type SkillHooksRemovalReason =

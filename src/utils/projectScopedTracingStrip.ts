@@ -4,6 +4,8 @@
  */
 
 import { logForDebugging } from './debug.js'
+import { HostSlot } from './hostSlot.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 
 const PROJECT_SCOPED_SOURCES = new Set(['projectSettings', 'localSettings'])
 
@@ -24,10 +26,14 @@ const PROJECT_SCOPED_BLOCKED_KEYS = new Set([
   'TEMP',
 ])
 
-const warnedKeys = new Set<string>()
+const warnedKeysHostSlot = new HostSlot<Set<string>>(() => new Set())
+
+function getWarnedKeys(): Set<string> {
+  return warnedKeysHostSlot.of(getBootstrapSessionHost())
+}
 
 export function clearProjectScopedTracingWarnsForTests(): void {
-  warnedKeys.clear()
+  getWarnedKeys().clear()
 }
 
 /**
@@ -39,6 +45,7 @@ export function stripProjectScopedTracingEnv(
   source: string,
 ): Record<string, string> | undefined {
   if (!env || !PROJECT_SCOPED_SOURCES.has(source)) return env
+  const warnedKeys = getWarnedKeys()
   let copy: Record<string, string> | undefined
   for (const key of Object.keys(env)) {
     if (!PROJECT_SCOPED_BLOCKED_KEYS.has(key.toUpperCase())) continue

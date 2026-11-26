@@ -34,9 +34,14 @@ import {
 import {
   showVirtualCursor,
   hideVirtualCursor,
+  hideAllVirtualCursors,
   moveVirtualCursor,
 } from '../win32/virtualCursor.js'
-import { showIndicator, hideIndicator } from '../win32/inputIndicator.js'
+import {
+  showIndicator,
+  hideIndicator,
+  hideAllIndicators,
+} from '../win32/inputIndicator.js'
 import {
   ps,
   psAsync,
@@ -45,6 +50,7 @@ import {
   MODIFIER_KEYS,
 } from '../win32/shared.js'
 import { logForDebugging } from '../../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 
 // ---------------------------------------------------------------------------
 // Python Bridge (lazy-loaded, preferred over PowerShell for screenshots)
@@ -135,37 +141,51 @@ public class CuWin32 {
 // VK_MAP and MODIFIER_KEYS imported from '../win32/shared.js'
 
 // ---------------------------------------------------------------------------
-// Session-level HWND binding — all operations target this handle
+// Host-scoped HWND binding — all operations target this handle
 // ---------------------------------------------------------------------------
 
-let boundHwnd: string | null = null
-let boundPid: number | null = null
-let boundAppType: import('../win32/appDispatcher.js').AppType | null = null
-let boundFilePath: string | null = null
+type Win32BindingHostState = {
+  boundHwnd: string | null
+  boundPid: number | null
+  boundAppType: import('../win32/appDispatcher.js').AppType | null
+  boundFilePath: string | null
+}
+
+const win32BindingHostSlot = new HostSlot<Win32BindingHostState>(() => ({
+  boundHwnd: null,
+  boundPid: null,
+  boundAppType: null,
+  boundFilePath: null,
+}))
+
+function getWin32BindingState(): Win32BindingHostState {
+  return win32BindingHostSlot.of(getBootstrapSessionHost())
+}
 
 /** Get the bound HWND, or null if not bound */
 export function getBoundHwnd(): string | null {
-  return boundHwnd
+  return getWin32BindingState().boundHwnd
 }
 
 /** Get the bound app type */
 export function getBoundAppType(): string | null {
-  return boundAppType
+  return getWin32BindingState().boundAppType
 }
 
 /** Bind to a window HWND — all subsequent input/screenshot operations target this handle */
 export function bindWindow(hwnd: string, pid?: number): void {
   hwnd = validateHwnd(hwnd)
+  const state = getWin32BindingState()
   // Clean up previous binding
-  if (boundHwnd) {
-    unmarkBound(boundHwnd)
+  if (state.boundHwnd) {
+    unmarkBound(state.boundHwnd)
     hideVirtualCursor()
     hideIndicator()
   }
-  boundHwnd = hwnd
-  boundPid = pid ?? null
-  boundAppType = 'generic'
-  boundFilePath = null
+  state.boundHwnd = hwnd
+  state.boundPid = pid ?? null
+  state.boundAppType = 'generic'
+  state.boundFilePath = null
 
   // 1. Brief activation: set the window to accept input, then restore user's focus.
   //    Some apps (UWP/Electron) don't process SendMessage when never-activated.
@@ -203,23 +223,25 @@ export function bindFile(
   filePath: string,
   appType: import('../win32/appDispatcher.js').AppType,
 ): void {
-  boundHwnd = null
-  boundPid = null
-  boundAppType = appType
-  boundFilePath = filePath
+  const state = getWin32BindingState()
+  state.boundHwnd = null
+  state.boundPid = null
+  state.boundAppType = appType
+  state.boundFilePath = filePath
 }
 
 /** Unbind — revert to global mode, remove overlays */
 export function unbindWindow(): void {
-  if (boundHwnd) unmarkBound(boundHwnd)
+  const state = getWin32BindingState()
+  if (state.boundHwnd) unmarkBound(state.boundHwnd)
   hideVirtualCursor()
   hideIndicator()
   // Clear cached edit-child / InputSite mappings
   getWm().clearEditChildCache()
-  boundHwnd = null
-  boundPid = null
-  boundAppType = null
-  boundFilePath = null
+  state.boundHwnd = null
+  state.boundPid = null
+  state.boundAppType = null
+  state.boundFilePath = null
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +268,7 @@ function getWm() {
 
 const input: InputPlatform = {
   async moveMouse(x, y) {
-    if (boundHwnd) {
+    if (getWin32BindingState().boundHwnd) {
       // Bound mode: move virtual cursor (visual only), no real cursor movement
       moveVirtualCursor(Math.round(x), Math.round(y))
       return
@@ -257,6 +279,7 @@ const input: InputPlatform = {
   },
 
   async click(x, y, button) {
+    const { boundHwnd } = getWin32BindingState()
     if (boundHwnd) {
       moveVirtualCursor(Math.round(x), Math.round(y), true)
       // Find the deepest child window at these client coords and click on it.
@@ -296,6 +319,7 @@ const input: InputPlatform = {
   },
 
   async typeText(text) {
+    const { boundAppType, boundFilePath, boundHwnd } = getWin32BindingState()
     // COM-controlled apps: write directly via COM API
     if (boundAppType === 'word' && boundFilePath) {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -321,6 +345,7 @@ const input: InputPlatform = {
   },
 
   async key(name, action) {
+    const { boundHwnd } = getWin32BindingState()
     if (boundHwnd) {
       const lower = name.toLowerCase()
       const vk = VK_MAP[lower] ?? (name.length === 1 ? name.charCodeAt(0) : 0)
@@ -332,6 +357,7 @@ const input: InputPlatform = {
   },
 
   async keys(parts) {
+    const { boundHwnd } = getWin32BindingState()
     if (boundHwnd) {
       const ok = getWm().sendKeys(boundHwnd, parts)
       if (!ok) {
@@ -343,6 +369,7 @@ const input: InputPlatform = {
   },
 
   async scroll(amount, direction) {
+    const { boundHwnd } = getWin32BindingState()
     if (boundHwnd) {
       // WM_VSCROLL / WM_HSCROLL for window-bound scrolling
       const msg = direction === 'vertical' ? '0x0115' : '0x0114' // WM_VSCROLL / WM_HSCROLL
@@ -400,6 +427,7 @@ public class WScroll {
 
 const screenshot: ScreenshotPlatform = {
   async captureScreen(displayId): Promise<ScreenshotResult> {
+    const { boundHwnd } = getWin32BindingState()
     // If HWND is bound, capture that specific window
     if (boundHwnd) {
       const result = await this.captureWindow?.(String(boundHwnd))
@@ -421,6 +449,7 @@ const screenshot: ScreenshotPlatform = {
   },
 
   async captureRegion(x, y, w, h): Promise<ScreenshotResult> {
+    const { boundHwnd } = getWin32BindingState()
     // When HWND is bound, the window IS the region (matches macOS behavior)
     if (boundHwnd) {
       const result = await this.captureWindow?.(String(boundHwnd))
@@ -849,6 +878,7 @@ import type { WindowManagementPlatform, WindowAction } from './types.js'
 
 const windowManagement: WindowManagementPlatform = {
   manageWindow(action: WindowAction, opts?): boolean {
+    const { boundHwnd } = getWin32BindingState()
     if (!boundHwnd) return false
     const hwnd = boundHwnd
 
@@ -918,6 +948,7 @@ if ([CuWinMgmt]::IsIconic($h)) {
   },
 
   moveResize(x: number, y: number, width?: number, height?: number): boolean {
+    const { boundHwnd } = getWin32BindingState()
     if (!boundHwnd) return false
     const hwnd = boundHwnd
     if (width !== undefined && height !== undefined) {
@@ -938,6 +969,7 @@ if ([CuWinMgmt]::IsIconic($h)) {
     width: number
     height: number
   } | null {
+    const { boundHwnd } = getWin32BindingState()
     if (!boundHwnd) return null
     const out = ps(`${WINDOW_MGMT_TYPES}
 $rect = New-Object CuWinMgmt+RECT
@@ -955,14 +987,14 @@ if ([CuWinMgmt]::GetWindowRect([IntPtr]::new([long]${boundHwnd}), [ref]$rect)) {
 // Export
 // ---------------------------------------------------------------------------
 
-// Clean up all overlays on process exit
+// Clean up all overlays and subprocesses across every host on process exit
 function cleanupAll() {
   cleanupAllBorders()
-  hideVirtualCursor()
-  hideIndicator()
-  // Stop the Python bridge subprocess if it was started
+  hideAllVirtualCursors()
+  hideAllIndicators()
+  // Stop all hosts' Python bridge subprocesses if any were started
   try {
-    getBridge()?.stopBridge()
+    getBridge()?.stopAllBridges()
   } catch {}
 }
 process.on('exit', cleanupAll)

@@ -1,5 +1,10 @@
-import memoize from 'lodash-es/memoize.js'
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import {
   clearRegisteredPluginHooks,
   getRegisteredHooks,
@@ -36,14 +41,53 @@ import {
 } from './functionHooksModules.js'
 import { ensurePluginToolRegistrarInstalled } from './pluginToolLoopbackRegistrar.js'
 
-// Track if hot reload subscription is set up
-let hotReloadSubscribed = false
+type CachedPluginHooksFn = (() => Promise<void>) & {
+  cache: Map<unknown, Promise<void>>
+}
 
-// Snapshot of enabledPlugins for change detection in hot reload
-let lastPluginSettingsSnapshot: string | undefined
-let lastPluginTierSnapshot: string | undefined
+/**
+ * densable 2.1.251 gold-i `se()` hookRegistration* on the existing plugin
+ * hook loader (local `fY`). Not a second registry.
+ */
+export type PluginHookRegistration = {
+  hookRegistration: Promise<void> | undefined
+  hookRegistrationInFlight: Promise<void> | undefined
+  hookRegistrationFailed: boolean
+  hookRegistrationRetried: boolean
+  hookRegistrationArgs:
+    | { storageV5?: unknown; credentials?: unknown }
+    | undefined
+}
 
-const warnedShadowedTierKeys = new Set<string>()
+type HostPluginHooksState = {
+  hooksCache: Map<unknown, Promise<void>>
+  hotReloadSubscribed: boolean
+  unsubscribeHotReload: (() => void) | null
+  lastPluginSettingsSnapshot: string | undefined
+  lastPluginTierSnapshot: string | undefined
+  warnedShadowedTierKeys: Set<string>
+  pluginHookRegistration: PluginHookRegistration
+}
+
+const hostPluginHooksSlot = new HostSlot<HostPluginHooksState>(() => ({
+  hooksCache: new Map(),
+  hotReloadSubscribed: false,
+  unsubscribeHotReload: null,
+  lastPluginSettingsSnapshot: undefined,
+  lastPluginTierSnapshot: undefined,
+  warnedShadowedTierKeys: new Set(),
+  pluginHookRegistration: {
+    hookRegistration: undefined,
+    hookRegistrationInFlight: undefined,
+    hookRegistrationFailed: false,
+    hookRegistrationRetried: false,
+    hookRegistrationArgs: undefined,
+  },
+}))
+
+function hostPluginHooksState(): HostPluginHooksState {
+  return hostPluginHooksSlot.of(getBootstrapSessionHost())
+}
 
 function foldCanonicalSourceId(id: string): string {
   return normalizeCanonicalBuiltinPluginId(
@@ -68,6 +112,7 @@ function orderFunctionHookModules(
       { level: 'warn' },
     )
   }
+  const warnedShadowedTierKeys = hostPluginHooksState().warnedShadowedTierKeys
   for (const key of order.shadowed) {
     if (warnedShadowedTierKeys.has(key)) continue
     warnedShadowedTierKeys.add(key)
@@ -199,30 +244,8 @@ function convertPluginHooksToMatchers(
   return pluginMatchers
 }
 
-/**
- * densable 2.1.251 gold-i `se()` hookRegistration* on the existing plugin
- * hook loader (local `fY`). Not a second registry.
- */
-export type PluginHookRegistration = {
-  hookRegistration: Promise<void> | undefined
-  hookRegistrationInFlight: Promise<void> | undefined
-  hookRegistrationFailed: boolean
-  hookRegistrationRetried: boolean
-  hookRegistrationArgs:
-    | { storageV5?: unknown; credentials?: unknown }
-    | undefined
-}
-
-const pluginHookRegistration: PluginHookRegistration = {
-  hookRegistration: undefined,
-  hookRegistrationInFlight: undefined,
-  hookRegistrationFailed: false,
-  hookRegistrationRetried: false,
-  hookRegistrationArgs: undefined,
-}
-
 export function getPluginHookRegistration(): PluginHookRegistration {
-  return pluginHookRegistration
+  return hostPluginHooksState().pluginHookRegistration
 }
 
 async function registerPluginHooksOnce(): Promise<void> {
@@ -362,35 +385,53 @@ async function registerPluginHooksOnce(): Promise<void> {
  * Tracks gold-i `hookRegistrationInFlight` / `hookRegistrationFailed` on the
  * existing registration object so Osn/Lsn can await and retry once.
  */
-export const loadPluginHooks = memoize(async (): Promise<void> => {
-  // densable YNo — install $.tool.register HTTP registrar once plugins load.
-  ensurePluginToolRegistrarInstalled()
-  const reg = pluginHookRegistration
-  const flight = registerPluginHooksOnce()
-    .then(() => {
-      reg.hookRegistrationFailed = false
-    })
-    .catch((err: unknown) => {
-      reg.hookRegistrationFailed = true
-      throw err
-    })
-    .finally(() => {
-      if (reg.hookRegistrationInFlight === flight) {
-        reg.hookRegistrationInFlight = undefined
-      }
-    })
-  reg.hookRegistration = flight
-  reg.hookRegistrationInFlight = flight
-  return flight
-})
+function createLoadPluginHooks(): CachedPluginHooksFn {
+  const fn = (): Promise<void> => {
+    const state = hostPluginHooksState()
+    if (state.hooksCache.has(undefined)) {
+      return state.hooksCache.get(undefined)!
+    }
+    // densable YNo — install $.tool.register HTTP registrar once plugins load.
+    ensurePluginToolRegistrarInstalled()
+    const reg = state.pluginHookRegistration
+    const flight = registerPluginHooksOnce()
+      .then(() => {
+        reg.hookRegistrationFailed = false
+      })
+      .catch((err: unknown) => {
+        reg.hookRegistrationFailed = true
+        throw err
+      })
+      .finally(() => {
+        if (reg.hookRegistrationInFlight === flight) {
+          reg.hookRegistrationInFlight = undefined
+        }
+      })
+    reg.hookRegistration = flight
+    reg.hookRegistrationInFlight = flight
+    state.hooksCache.set(undefined, flight)
+    return flight
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<unknown, Promise<void>> {
+      return hostPluginHooksState().hooksCache
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedPluginHooksFn
+}
+
+export const loadPluginHooks: CachedPluginHooksFn = createLoadPluginHooks()
 
 export function resetPluginHookRegistrationForTests(): void {
-  pluginHookRegistration.hookRegistration = undefined
-  pluginHookRegistration.hookRegistrationInFlight = undefined
-  pluginHookRegistration.hookRegistrationFailed = false
-  pluginHookRegistration.hookRegistrationRetried = false
-  pluginHookRegistration.hookRegistrationArgs = undefined
-  warnedShadowedTierKeys.clear()
+  const state = hostPluginHooksState()
+  state.pluginHookRegistration.hookRegistration = undefined
+  state.pluginHookRegistration.hookRegistrationInFlight = undefined
+  state.pluginHookRegistration.hookRegistrationFailed = false
+  state.pluginHookRegistration.hookRegistrationRetried = false
+  state.pluginHookRegistration.hookRegistrationArgs = undefined
+  state.warnedShadowedTierKeys.clear()
   loadPluginHooks.cache?.clear?.()
 }
 
@@ -448,10 +489,13 @@ export async function pruneRemovedPluginHooks(): Promise<void> {
  * Reset hot reload subscription state. Only for testing.
  */
 export function resetHotReloadState(): void {
-  hotReloadSubscribed = false
-  lastPluginSettingsSnapshot = undefined
-  lastPluginTierSnapshot = undefined
-  warnedShadowedTierKeys.clear()
+  const state = hostPluginHooksState()
+  state.unsubscribeHotReload?.()
+  state.unsubscribeHotReload = null
+  state.hotReloadSubscribed = false
+  state.lastPluginSettingsSnapshot = undefined
+  state.lastPluginTierSnapshot = undefined
+  state.warnedShadowedTierKeys.clear()
 }
 
 /**
@@ -497,42 +541,63 @@ export function getPluginAffectingSettingsSnapshot(): string {
  * actually changed.
  */
 export function setupPluginHookHotReload(): void {
-  if (hotReloadSubscribed) {
+  const state = hostPluginHooksState()
+  if (state.hotReloadSubscribed) {
     return
   }
-  hotReloadSubscribed = true
+  state.hotReloadSubscribed = true
 
   // Capture the initial snapshot so the first policySettings change can compare
-  lastPluginSettingsSnapshot = getPluginAffectingSettingsSnapshot()
-  lastPluginTierSnapshot = jsonStringify(resolvePluginHookTierOrder())
+  state.lastPluginSettingsSnapshot = getPluginAffectingSettingsSnapshot()
+  state.lastPluginTierSnapshot = jsonStringify(resolvePluginHookTierOrder())
 
-  settingsChangeDetector.subscribe(source => {
-    const newTierSnapshot = jsonStringify(resolvePluginHookTierOrder())
-    const tierChanged = newTierSnapshot !== lastPluginTierSnapshot
-    if (
-      source === 'policySettings' ||
-      (source === 'userSettings' && tierChanged)
-    ) {
-      const newSnapshot = getPluginAffectingSettingsSnapshot()
-      if (newSnapshot === lastPluginSettingsSnapshot) {
-        logForDebugging(
-          'Plugin hooks: skipping reload, plugin-affecting settings unchanged',
-        )
-        return
+  const currentSession = getBootstrapSession()
+  const sessionRef = new WeakRef(currentSession.root ?? currentSession)
+  const stateRef = new WeakRef(state)
+  let unsubscribe: (() => void) | null = null
+  unsubscribe = settingsChangeDetector.subscribe(source => {
+    const targetSession = sessionRef.deref()
+    if (!targetSession) {
+      unsubscribe?.()
+      const currentState = stateRef.deref()
+      if (currentState) {
+        currentState.hotReloadSubscribed = false
+        if (currentState.unsubscribeHotReload === unsubscribe) {
+          currentState.unsubscribeHotReload = null
+        }
       }
-
-      lastPluginSettingsSnapshot = newSnapshot
-      lastPluginTierSnapshot = newTierSnapshot
-      logForDebugging(
-        'Plugin hooks: reloading due to plugin-affecting settings change',
-      )
-
-      // Clear all plugin-related caches
-      clearPluginCache('loadPluginHooks: plugin-affecting settings changed')
-      clearPluginHookCache()
-
-      // Reload hooks (fire-and-forget, don't block)
-      void loadPluginHooks()
+      return
     }
+    runWithSession(targetSession, () => {
+      const activeState = hostPluginHooksState()
+      const newTierSnapshot = jsonStringify(resolvePluginHookTierOrder())
+      const tierChanged = newTierSnapshot !== activeState.lastPluginTierSnapshot
+      if (
+        source === 'policySettings' ||
+        (source === 'userSettings' && tierChanged)
+      ) {
+        const newSnapshot = getPluginAffectingSettingsSnapshot()
+        if (newSnapshot === activeState.lastPluginSettingsSnapshot) {
+          logForDebugging(
+            'Plugin hooks: skipping reload, plugin-affecting settings unchanged',
+          )
+          return
+        }
+
+        activeState.lastPluginSettingsSnapshot = newSnapshot
+        activeState.lastPluginTierSnapshot = newTierSnapshot
+        logForDebugging(
+          'Plugin hooks: reloading due to plugin-affecting settings change',
+        )
+
+        // Clear all plugin-related caches
+        clearPluginCache('loadPluginHooks: plugin-affecting settings changed')
+        clearPluginHookCache()
+
+        // Reload hooks (fire-and-forget, don't block)
+        void loadPluginHooks()
+      }
+    })
   })
+  state.unsubscribeHotReload = unsubscribe
 }

@@ -8,6 +8,11 @@
  * gates getClaudeCodeMcpConfigs.
  */
 
+import {
+  RootSessionSlot,
+  getBootstrapSession,
+} from '../../utils/sessionRoot.js'
+
 export type SessionApprovedMcpServer = {
   name: string
   workspaceKey: string
@@ -15,8 +20,20 @@ export type SessionApprovedMcpServer = {
 
 export type SessionRejectedMcpServer = SessionApprovedMcpServer
 
-const approved: SessionApprovedMcpServer[] = []
-const rejected: SessionRejectedMcpServer[] = []
+type SessionMcpServerApprovalState = {
+  approved: SessionApprovedMcpServer[]
+  rejected: SessionRejectedMcpServer[]
+}
+
+const sessionMcpServerApprovalSlot =
+  new RootSessionSlot<SessionMcpServerApprovalState>(() => ({
+    approved: [],
+    rejected: [],
+  }))
+
+function getSessionMcpServerApprovalState(): SessionMcpServerApprovalState {
+  return sessionMcpServerApprovalSlot.of(getBootstrapSession())
+}
 
 function hasChoice(
   rows: readonly SessionApprovedMcpServer[],
@@ -41,35 +58,39 @@ function pushUnique(
 }
 
 export function getSessionApprovedMcpServers(): SessionApprovedMcpServer[] {
-  return approved
+  return getSessionMcpServerApprovalState().approved
 }
 
 export function getSessionRejectedMcpServers(): SessionRejectedMcpServer[] {
-  return rejected
+  return getSessionMcpServerApprovalState().rejected
 }
 
 export function approveSessionMcpServers(
   workspaceKey: string,
   names: string[],
 ): void {
-  pushUnique(approved, workspaceKey, names)
+  pushUnique(getSessionMcpServerApprovalState().approved, workspaceKey, names)
 }
 
 export function rejectSessionMcpServers(
   workspaceKey: string,
   names: string[],
 ): void {
-  pushUnique(rejected, workspaceKey, names)
+  pushUnique(getSessionMcpServerApprovalState().rejected, workspaceKey, names)
 }
 
 export function isSessionRejectedMcpServer(
   workspaceKey: string,
   name: string,
 ): boolean {
-  return hasChoice(rejected, workspaceKey, name)
+  const state = sessionMcpServerApprovalSlot.peek(getBootstrapSession())
+  return state ? hasChoice(state.rejected, workspaceKey, name) : false
 }
 
 export function resetSessionApprovedMcpServersForTests(): void {
-  approved.length = 0
-  rejected.length = 0
+  const state = sessionMcpServerApprovalSlot.peek(getBootstrapSession())
+  if (state) {
+    state.approved.length = 0
+    state.rejected.length = 0
+  }
 }

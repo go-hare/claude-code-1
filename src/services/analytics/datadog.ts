@@ -1,10 +1,14 @@
 import axios from 'axios'
 import { createHash } from 'crypto'
-import memoize from 'lodash-es/memoize.js'
 import { gzipSync } from 'zlib'
+import {
+  type CleanupUnregister,
+  registerCleanup,
+} from '../../utils/cleanupRegistry.js'
 import { getOrCreateUserID } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import { HostSlot } from '../../utils/hostSlot.js'
 import { logError } from '../../utils/log.js'
 import { getCanonicalName } from '../../utils/model/model.js'
 import {
@@ -12,6 +16,13 @@ import {
   isFirstPartyAnthropicBaseUrl,
 } from '../../utils/model/providers.js'
 import { MODEL_COSTS } from '../../utils/modelCost.js'
+import {
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  runWithSession,
+  type Session,
+} from '../../utils/sessionRoot.js'
 import { isAnalyticsDisabled } from './config.js'
 import { getEventMetadata } from './metadata.js'
 
@@ -371,14 +382,85 @@ type PeerRateWindow = {
   droppedSinceForward: number
 }
 
-const peerRateWindows = new Map<string, PeerRateWindow>()
+type DatadogLog = {
+  ddsource: string
+  ddtags: string
+  message: string
+  service: string
+  hostname: string
+  [key: string]: unknown
+}
+
+type DatadogHostState = {
+  peerRateWindows: Map<string, PeerRateWindow>
+  logBatch: DatadogLog[]
+  flushTimer: NodeJS.Timeout | null
+  datadogInitialized: boolean | null
+  /** densable gzip state: untried → accepted | refused after a non-429 gzip reject. */
+  datadogGzip: 'untried' | 'accepted' | 'refused'
+  initializeDatadogCache: Map<unknown, Promise<boolean>>
+  userBucketCache: Map<unknown, number>
+  trackedInLiveStates: boolean
+  unregisterCleanup: CleanupUnregister | null
+  sessionRef: WeakRef<Session> | undefined
+}
+
+const datadogHostSlot = new HostSlot<DatadogHostState>(() => ({
+  peerRateWindows: new Map<string, PeerRateWindow>(),
+  logBatch: [],
+  flushTimer: null,
+  datadogInitialized: null,
+  datadogGzip: 'untried',
+  initializeDatadogCache: new Map<unknown, Promise<boolean>>(),
+  userBucketCache: new Map<unknown, number>(),
+  trackedInLiveStates: false,
+  unregisterCleanup: null,
+  sessionRef: undefined,
+}))
+
+function getDatadogHostState(): DatadogHostState {
+  return datadogHostSlot.of(getBootstrapSessionHost())
+}
+
+// Track live host states via WeakRefs so process-level shutdownDatadog() outside
+// ALS flushes & clears timers across all live isolated hosts without retaining GC'd hosts.
+const liveDatadogHostStates = new Set<WeakRef<DatadogHostState>>()
+
+function pruneDeadDatadogHostStates(): void {
+  for (const ref of liveDatadogHostStates) {
+    if (ref.deref() === undefined) {
+      liveDatadogHostStates.delete(ref)
+    }
+  }
+}
+
+function trackDatadogHostForShutdown(state: DatadogHostState): void {
+  const active = getActiveSessionFromAls()
+  if (active !== undefined && state.sessionRef?.deref() !== active.root) {
+    state.sessionRef = new WeakRef(active.root)
+  }
+  if (!state.trackedInLiveStates) {
+    state.trackedInLiveStates = true
+    if (liveDatadogHostStates.size > 64) {
+      pruneDeadDatadogHostStates()
+    }
+    liveDatadogHostStates.add(new WeakRef(state))
+  }
+  if (!state.unregisterCleanup) {
+    state.unregisterCleanup = registerCleanup(async () => {
+      await shutdownDatadogHostState(state)
+    })
+  }
+}
 
 /** densable `K`. Never `export function K`. */
 function admitPeerRate(
+  state: DatadogHostState,
   eventName: string,
   serverKey: string | undefined,
   now: number,
 ): { admitted: boolean; droppedSinceLastForward: number } {
+  const peerRateWindows = state.peerRateWindows
   const id = `${eventName}\0${serverKey ?? '(no-server)'}`
   let window = peerRateWindows.get(id)
   if (!window) {
@@ -450,23 +532,8 @@ function emitDatadogGzipTengu(success: boolean): void {
   })
 }
 
-type DatadogLog = {
-  ddsource: string
-  ddtags: string
-  message: string
-  service: string
-  hostname: string
-  [key: string]: unknown
-}
-
-let logBatch: DatadogLog[] = []
-let flushTimer: NodeJS.Timeout | null = null
-let datadogInitialized: boolean | null = null
-/** densable gzip state: untried → accepted | refused after a non-429 gzip reject. */
-let datadogGzip: 'untried' | 'accepted' | 'refused' = 'untried'
-
-function shouldGzipDatadogLogs(): boolean {
-  if (datadogGzip === 'refused') return false
+function shouldGzipDatadogLogs(state: DatadogHostState): boolean {
+  if (state.datadogGzip === 'refused') return false
   const raw = process.env.CLAUDE_CODE_GZIP_DATADOG_LOGS
   if (raw === undefined) return defaultGzipDatadogLogs()
   if (raw === '0' || raw === 'false') return false
@@ -474,8 +541,11 @@ function shouldGzipDatadogLogs(): boolean {
   return defaultGzipDatadogLogs()
 }
 
-async function postDatadogLogs(logsToSend: DatadogLog[]): Promise<boolean> {
-  const gzip = shouldGzipDatadogLogs()
+async function postDatadogLogs(
+  state: DatadogHostState,
+  logsToSend: DatadogLog[],
+): Promise<boolean> {
+  const gzip = shouldGzipDatadogLogs(state)
   const body = gzip
     ? gzipSync(Buffer.from(JSON.stringify(logsToSend)))
     : logsToSend
@@ -489,8 +559,8 @@ async function postDatadogLogs(logsToSend: DatadogLog[]): Promise<boolean> {
       headers,
       timeout: NETWORK_TIMEOUT_MS,
     })
-    if (gzip && datadogGzip === 'untried') {
-      datadogGzip = 'accepted'
+    if (gzip && state.datadogGzip === 'untried') {
+      state.datadogGzip = 'accepted'
       emitDatadogGzipTengu(true)
     }
     return true
@@ -509,59 +579,149 @@ async function postDatadogLogs(logsToSend: DatadogLog[]): Promise<boolean> {
       `Datadog did not take a gzipped log batch (${reason}); resending it uncompressed, and sending later batches from this process uncompressed`,
       { level: 'error' },
     )
-    datadogGzip = 'refused'
-    const retried = await postDatadogLogs(logsToSend)
+    state.datadogGzip = 'refused'
+    const retried = await postDatadogLogs(state, logsToSend)
     emitDatadogGzipTengu(retried)
     return retried
   }
 }
 
-async function flushLogs(): Promise<void> {
-  if (logBatch.length === 0) return
+async function flushLogs(state: DatadogHostState): Promise<void> {
+  if (state.logBatch.length === 0) return
 
-  const logsToSend = logBatch
-  logBatch = []
-
-  await postDatadogLogs(logsToSend)
-}
-
-function scheduleFlush(): void {
-  if (flushTimer) return
-
-  flushTimer = setTimeout(() => {
-    flushTimer = null
-    void flushLogs()
-  }, getFlushIntervalMs()).unref()
-}
-
-export const initializeDatadog = memoize(async (): Promise<boolean> => {
-  // Gold `Ih()||XXo()` — privacy/3P/custom-oauth OR BYOC kind.
-  if (isAnalyticsDisabled() || isByocDatadogOff()) {
-    datadogInitialized = false
-    return false
-  }
+  const logsToSend = state.logBatch
+  state.logBatch = []
 
   try {
-    datadogInitialized = true
-    return true
-  } catch (error) {
-    logError(error)
-    datadogInitialized = false
-    return false
+    await postDatadogLogs(state, logsToSend)
+  } finally {
+    if (state.logBatch.length === 0 && state.flushTimer === null) {
+      const unregister = state.unregisterCleanup
+      state.unregisterCleanup = null
+      unregister?.()
+    }
   }
+}
+
+function scheduleFlush(state: DatadogHostState): void {
+  if (state.flushTimer) return
+
+  const captured = getActiveSessionFromAls()
+  const capturedRef =
+    captured !== undefined ? new WeakRef(captured.root) : undefined
+  const flushIntervalMs = getFlushIntervalMs()
+  state.flushTimer = exitSessionContext(() =>
+    setTimeout(() => {
+      state.flushTimer = null
+      const run = () => {
+        void flushLogs(state)
+      }
+      const ownerSession = capturedRef?.deref()
+      if (
+        ownerSession !== undefined &&
+        getActiveSessionFromAls() !== ownerSession
+      ) {
+        runWithSession(ownerSession, run)
+      } else {
+        run()
+      }
+    }, flushIntervalMs).unref(),
+  )
+}
+
+type HostMemoizedFn<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+const initializeDatadogImpl = async (): Promise<boolean> => {
+  const state = getDatadogHostState()
+  const cache = state.initializeDatadogCache
+  if (cache.has(undefined)) {
+    return cache.get(undefined) as Promise<boolean>
+  }
+  const promise = (async (): Promise<boolean> => {
+    // Gold `Ih()||XXo()` — privacy/3P/custom-oauth OR BYOC kind.
+    if (isAnalyticsDisabled() || isByocDatadogOff()) {
+      state.datadogInitialized = false
+      return false
+    }
+
+    try {
+      state.datadogInitialized = true
+      return true
+    } catch (error) {
+      logError(error)
+      state.datadogInitialized = false
+      return false
+    }
+  })()
+  cache.set(undefined, promise)
+  return promise
+}
+
+Object.defineProperty(initializeDatadogImpl, 'cache', {
+  get: () => getDatadogHostState().initializeDatadogCache,
+  set: (next: Map<unknown, Promise<boolean>>) => {
+    getDatadogHostState().initializeDatadogCache = next
+  },
+  configurable: true,
+  enumerable: true,
 })
+
+export const initializeDatadog =
+  initializeDatadogImpl as unknown as HostMemoizedFn<[], Promise<boolean>>
+
+async function shutdownDatadogHostState(
+  state: DatadogHostState,
+): Promise<void> {
+  if (state.flushTimer) {
+    clearTimeout(state.flushTimer)
+    state.flushTimer = null
+  }
+  const unregister = state.unregisterCleanup
+  state.unregisterCleanup = null
+  unregister?.()
+  const ownerSession = state.sessionRef?.deref()
+  if (
+    ownerSession !== undefined &&
+    getActiveSessionFromAls() !== ownerSession
+  ) {
+    await runWithSession(ownerSession, () => flushLogs(state))
+    return
+  }
+  await flushLogs(state)
+}
 
 /**
  * Flush remaining Datadog logs and shut down.
  * Called from gracefulShutdown() before process.exit() since
  * forceExit() prevents the beforeExit handler from firing.
+ *
+ * Inside an isolated ALS host session, flushes only that host.
+ * Outside an isolated ALS host session (process shutdown), flushes and
+ * clears timers across ALL live hosts so no isolated host's buffered
+ * Datadog events are dropped.
  */
 export async function shutdownDatadog(): Promise<void> {
-  if (flushTimer) {
-    clearTimeout(flushTimer)
-    flushTimer = null
+  if (getActiveSessionFromAls() !== undefined) {
+    await shutdownDatadogHostState(getDatadogHostState())
+    return
   }
-  await flushLogs()
+  const states = new Set<DatadogHostState>()
+  states.add(getDatadogHostState())
+  for (const ref of liveDatadogHostStates) {
+    const state = ref.deref()
+    if (!state) {
+      liveDatadogHostStates.delete(ref)
+      continue
+    }
+    states.add(state)
+  }
+  await Promise.allSettled(
+    Array.from(states, state => shutdownDatadogHostState(state)),
+  )
 }
 
 // NOTE: use via src/services/analytics/index.ts > logEvent
@@ -578,8 +738,10 @@ export async function trackDatadogEvent(
     return
   }
 
+  const state = getDatadogHostState()
+
   // Fast path: use cached result if available to avoid await overhead
-  let initialized = datadogInitialized
+  let initialized = state.datadogInitialized
   if (initialized === null) {
     initialized = await initializeDatadog()
   }
@@ -591,6 +753,7 @@ export async function trackDatadogEvent(
   if ((PEER_RATE_EVENTS as readonly string[]).includes(eventName)) {
     const serverKey = properties.mcpServerKeyHash ?? properties.mcpServerBaseUrl
     const admitted = admitPeerRate(
+      state,
       eventName,
       serverKey === undefined ? undefined : String(serverKey),
       Date.now(),
@@ -689,17 +852,18 @@ export async function trackDatadogEvent(
       }
     }
 
-    logBatch.push(log)
+    state.logBatch.push(log)
+    trackDatadogHostForShutdown(state)
 
     // Flush immediately if batch is full, otherwise schedule
-    if (logBatch.length >= MAX_BATCH_SIZE) {
-      if (flushTimer) {
-        clearTimeout(flushTimer)
-        flushTimer = null
+    if (state.logBatch.length >= MAX_BATCH_SIZE) {
+      if (state.flushTimer) {
+        clearTimeout(state.flushTimer)
+        state.flushTimer = null
       }
-      void flushLogs()
+      void flushLogs(state)
     } else {
-      scheduleFlush()
+      scheduleFlush(state)
     }
   } catch (error) {
     logError(error)
@@ -720,11 +884,17 @@ const NUM_USER_BUCKETS = 30
  * This allows us to estimate the number of unique users by counting unique buckets,
  * while preserving user privacy and reducing cardinality.
  */
-const getUserBucket = memoize((): number => {
+function getUserBucket(): number {
+  const cache = getDatadogHostState().userBucketCache
+  if (cache.has(undefined)) {
+    return cache.get(undefined) as number
+  }
   const userId = getOrCreateUserID()
   const hash = createHash('sha256').update(userId).digest('hex')
-  return parseInt(hash.slice(0, 8), 16) % NUM_USER_BUCKETS
-})
+  const bucket = parseInt(hash.slice(0, 8), 16) % NUM_USER_BUCKETS
+  cache.set(undefined, bucket)
+  return bucket
+}
 
 function getFlushIntervalMs(): number {
   // Official DATADOG_FLUSH_INTERVAL_MS densable pure parse.

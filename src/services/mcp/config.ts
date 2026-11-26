@@ -35,6 +35,12 @@ import { getCwd } from '../../utils/cwd.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { getGlobalClaudeFile } from '../../utils/env.js'
 import {
+  HostSlot,
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
+import {
   getMcpPolicyDenyExpansionEnv,
   getMcpPolicyPrimaryEnv,
 } from '../../utils/managedEnv.js'
@@ -190,14 +196,44 @@ export function isAutoConnectMcpTransport(
  * whether plugin startup is still in flight so a connector tool's approval
  * prompt is never auto-answered before plugins finish loading.
  */
-let cloudPluginStartupPending = false
+type EnterpriseMcpPresenceState = {
+  checked: boolean
+  present: boolean
+  valid: boolean
+  arrivedMidSession: boolean
+  arrivalNotice: string | null
+}
+
+type HostMcpConfigState = {
+  cloudPluginStartupPending: boolean
+  mcpConfigServerErrorsStore: McpConfigServerError[]
+  enterpriseMcpState: EnterpriseMcpPresenceState
+  managedMcpArrivalListeners: Set<(message: string) => void>
+}
+
+const hostMcpConfigSlot = new HostSlot<HostMcpConfigState>(() => ({
+  cloudPluginStartupPending: false,
+  mcpConfigServerErrorsStore: [],
+  enterpriseMcpState: {
+    checked: false,
+    present: false,
+    valid: false,
+    arrivedMidSession: false,
+    arrivalNotice: null,
+  },
+  managedMcpArrivalListeners: new Set(),
+}))
+
+function getHostMcpConfigState(): HostMcpConfigState {
+  return hostMcpConfigSlot.of(getBootstrapSessionHost())
+}
 
 export function setCloudPluginStartupPending(pending: boolean): void {
-  cloudPluginStartupPending = pending
+  getHostMcpConfigState().cloudPluginStartupPending = pending
 }
 
 export function isCloudPluginStartupPending(): boolean {
-  return cloudPluginStartupPending
+  return getHostMcpConfigState().cloudPluginStartupPending
 }
 
 export function shouldHoldConnectorApprovalWhilePluginsLoading(opts?: {
@@ -206,7 +242,9 @@ export function shouldHoldConnectorApprovalWhilePluginsLoading(opts?: {
   isConnectorTool?: boolean
 }): boolean {
   const isRemote = opts?.isRemote ?? Boolean(process.env.CLAUDE_CODE_REMOTE)
-  const pending = opts?.pluginStartupPending ?? cloudPluginStartupPending
+  const pending =
+    opts?.pluginStartupPending ??
+    getHostMcpConfigState().cloudPluginStartupPending
   const isConnectorTool = opts?.isConnectorTool ?? true
   return isRemote && pending && isConnectorTool
 }
@@ -2332,23 +2370,21 @@ export type McpConfigServerError = {
   message: string
 }
 
-let mcpConfigServerErrorsStore: McpConfigServerError[] = []
-
 /** densable `gEm` */
 export function storeMcpConfigServerErrors(
   errors: ReadonlyArray<McpConfigServerError>,
 ): void {
-  mcpConfigServerErrorsStore.push(...errors)
+  getHostMcpConfigState().mcpConfigServerErrorsStore.push(...errors)
 }
 
 /** densable `yEm` */
 export function getMcpConfigServerErrors(): McpConfigServerError[] {
-  return mcpConfigServerErrorsStore
+  return getHostMcpConfigState().mcpConfigServerErrorsStore
 }
 
 /** Test / process-reset helper. */
 export function resetMcpConfigServerErrors(): void {
-  mcpConfigServerErrorsStore = []
+  getHostMcpConfigState().mcpConfigServerErrorsStore = []
 }
 
 /**
@@ -2822,44 +2858,35 @@ export const MANAGED_MCP_ARRIVED_VALID_MESSAGE =
 export const MANAGED_MCP_ARRIVED_UNREADABLE_MESSAGE =
   "Your organization now manages MCP servers on this computer, but the file it sent can't be read, so your own servers won't load from now on. Ask your admin to fix the file."
 
-type EnterpriseMcpPresenceState = {
-  checked: boolean
-  present: boolean
-  valid: boolean
-  arrivedMidSession: boolean
-  arrivalNotice: string | null
-}
-
-const enterpriseMcpState: EnterpriseMcpPresenceState = {
-  checked: false,
-  present: false,
-  valid: false,
-  arrivedMidSession: false,
-  arrivalNotice: null,
-}
-
-const managedMcpArrivalListeners = new Set<(message: string) => void>()
-
 export function subscribeToManagedMcpArrival(
   listener: (message: string) => void,
 ): () => void {
-  managedMcpArrivalListeners.add(listener)
+  const state = getHostMcpConfigState()
+  const capturedSession = getActiveSessionFromAls()
+  const wrapped =
+    capturedSession !== undefined
+      ? (message: string) =>
+          runWithSession(capturedSession, () => listener(message))
+      : listener
+  state.managedMcpArrivalListeners.add(wrapped)
   return () => {
-    managedMcpArrivalListeners.delete(listener)
+    state.managedMcpArrivalListeners.delete(wrapped)
   }
 }
 
 export function getManagedMcpArrivalNotice(): string | null {
-  return enterpriseMcpState.arrivalNotice
+  return getHostMcpConfigState().enterpriseMcpState.arrivalNotice
 }
 
 export function consumeManagedMcpArrivalNotice(): string | null {
+  const { enterpriseMcpState } = getHostMcpConfigState()
   const notice = enterpriseMcpState.arrivalNotice
   enterpriseMcpState.arrivalNotice = null
   return notice
 }
 
 export function resetEnterpriseMcpConfigCache(): void {
+  const { enterpriseMcpState } = getHostMcpConfigState()
   enterpriseMcpState.checked = false
   enterpriseMcpState.present = false
   enterpriseMcpState.valid = false
@@ -2868,6 +2895,8 @@ export function resetEnterpriseMcpConfigCache(): void {
 }
 
 function evaluateEnterpriseMcpPresence(isRecheckAfterAbsent: boolean): boolean {
+  const { enterpriseMcpState, managedMcpArrivalListeners } =
+    getHostMcpConfigState()
   const filePath = getEnterpriseMcpFilePath()
   const fs = getFsImplementation()
   const fileExists = fs.existsSync(filePath)
@@ -2912,6 +2941,7 @@ export const doesEnterpriseMcpConfigExist: (() => boolean) & {
   cache: { clear: () => void }
 } = Object.assign(
   (): boolean => {
+    const { enterpriseMcpState } = getHostMcpConfigState()
     if (!enterpriseMcpState.checked) {
       return evaluateEnterpriseMcpPresence(false)
     }

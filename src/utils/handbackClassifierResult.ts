@@ -5,10 +5,24 @@
  * Blocked notes use densable Ax (sanitizeHarnessText) with prependMarker:false.
  */
 import { sanitizeHarnessText } from './harnessTextSanitize.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import { truncateCodeUnitsSafe } from './stringUtils.js'
 
 /** densable BDe — one-shot classifier result keyed by toolUseId. */
-const pendingByToolUseId = new Map<string, HandbackClassifierResult>()
+const fallbackHandbackSession = { root: {} as object }
+const pendingByToolUseIdBySession = new RootSessionSlot<
+  Map<string, HandbackClassifierResult>
+>(() => new Map())
+
+function getPendingByToolUseId(): Map<string, HandbackClassifierResult> {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return pendingByToolUseIdBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return pendingByToolUseIdBySession.of(fallbackHandbackSession)
+}
 
 export type HandbackClassifierResult =
   | { kind: 'blocked'; reason: string }
@@ -172,7 +186,7 @@ export function stashHandbackClassifierResult(
   toolUseId: string,
   result: HandbackClassifierResult,
 ): void {
-  pendingByToolUseId.set(toolUseId, result)
+  getPendingByToolUseId().set(toolUseId, result)
 }
 
 /** densable EOo — get+delete. */
@@ -180,14 +194,15 @@ export function takeHandbackClassifierResult(
   toolUseId: string | undefined,
 ): HandbackClassifierResult | undefined {
   if (toolUseId === undefined) return undefined
-  const result = pendingByToolUseId.get(toolUseId)
+  const pending = getPendingByToolUseId()
+  const result = pending.get(toolUseId)
   if (result === undefined) return undefined
-  pendingByToolUseId.delete(toolUseId)
+  pending.delete(toolUseId)
   return result
 }
 
 export function clearHandbackClassifierResultsForTests(): void {
-  pendingByToolUseId.clear()
+  getPendingByToolUseId().clear()
 }
 
 /** g = i!==undefined && i.kind!=="unavailable" — pGo / origin.flagged. */

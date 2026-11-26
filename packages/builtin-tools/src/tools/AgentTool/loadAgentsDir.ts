@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
-import memoize from 'lodash-es/memoize.js'
 import { basename } from 'path'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 import type { SettingSource } from 'src/utils/settings/constants.js'
 import { z } from 'zod/v4'
 import { isAutoMemoryEnabled } from 'src/memdir/paths.js'
@@ -338,104 +338,145 @@ async function initializeAgentMemorySnapshots(
   )
 }
 
-export const getAgentDefinitionsWithOverrides = memoize(
-  async (cwd: string): Promise<AgentDefinitionsResult> => {
-    // Simple mode: skip custom agents, only return built-ins
-    if (isBareMode()) {
-      const builtInAgents = getBuiltInAgents()
-      return {
-        activeAgents: builtInAgents,
-        allAgents: builtInAgents,
-      }
+type CachedAgentDefinitionsFn = ((
+  cwd: string,
+) => Promise<AgentDefinitionsResult>) & {
+  cache: Map<string, Promise<AgentDefinitionsResult>>
+}
+
+type HostAgentsState = {
+  definitionsCache: Map<string, Promise<AgentDefinitionsResult>>
+  warnedUnknownFrontmatterKeys: Map<string, string>
+}
+
+const hostAgentsSlot = new HostSlot<HostAgentsState>(() => ({
+  definitionsCache: new Map(),
+  warnedUnknownFrontmatterKeys: new Map(),
+}))
+
+function hostAgentsState(): HostAgentsState {
+  return hostAgentsSlot.of(getBootstrapSessionHost())
+}
+
+async function loadAgentDefinitionsWithOverridesImpl(
+  cwd: string,
+): Promise<AgentDefinitionsResult> {
+  // Simple mode: skip custom agents, only return built-ins
+  if (isBareMode()) {
+    const builtInAgents = getBuiltInAgents()
+    return {
+      activeAgents: builtInAgents,
+      allAgents: builtInAgents,
     }
+  }
 
-    try {
-      const markdownFiles = await loadMarkdownFilesForSubdir('agents', cwd)
+  try {
+    const markdownFiles = await loadMarkdownFilesForSubdir('agents', cwd)
 
-      const failedFiles: Array<{ path: string; error: string }> = []
-      const customAgents = markdownFiles
-        .map(({ filePath, baseDir, frontmatter, content, source }) => {
-          const agent = parseAgentFromMarkdown(
-            filePath,
-            baseDir,
-            frontmatter,
-            content,
-            source,
-          )
-          if (!agent) {
-            // Skip non-agent markdown files silently (e.g., reference docs
-            // co-located with agent definitions). Only report errors for files
-            // that look like agent attempts (have a 'name' field in frontmatter).
-            if (!frontmatter['name']) {
-              return null
-            }
-            const errorMsg = getParseError(frontmatter)
-            failedFiles.push({ path: filePath, error: errorMsg })
-            logForDebugging(
-              `Failed to parse agent from ${filePath}: ${errorMsg}`,
-            )
-            logEvent('tengu_agent_parse_error', {
-              error:
-                errorMsg as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              location:
-                source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            })
+    const failedFiles: Array<{ path: string; error: string }> = []
+    const customAgents = markdownFiles
+      .map(({ filePath, baseDir, frontmatter, content, source }) => {
+        const agent = parseAgentFromMarkdown(
+          filePath,
+          baseDir,
+          frontmatter,
+          content,
+          source,
+        )
+        if (!agent) {
+          // Skip non-agent markdown files silently (e.g., reference docs
+          // co-located with agent definitions). Only report errors for files
+          // that look like agent attempts (have a 'name' field in frontmatter).
+          if (!frontmatter['name']) {
             return null
           }
-          return agent
-        })
-        .filter(agent => agent !== null)
-
-      // Kick off plugin agent loading concurrently with memory snapshot init —
-      // loadPluginAgents is memoized and takes no args, so it's independent.
-      // Join both so neither becomes a floating promise if the other throws.
-      let pluginAgentsPromise = loadPluginAgents()
-      if (feature('AGENT_MEMORY_SNAPSHOT') && isAutoMemoryEnabled()) {
-        const [pluginAgents_] = await Promise.all([
-          pluginAgentsPromise,
-          initializeAgentMemorySnapshots(customAgents),
-        ])
-        pluginAgentsPromise = Promise.resolve(pluginAgents_)
-      }
-      const pluginAgents = await pluginAgentsPromise
-
-      const builtInAgents = getBuiltInAgents()
-
-      const allAgentsList: AgentDefinition[] = [
-        ...builtInAgents,
-        ...pluginAgents,
-        ...customAgents,
-      ]
-
-      const activeAgents = getActiveAgentsFromList(allAgentsList)
-
-      // Initialize colors for all active agents
-      for (const agent of activeAgents) {
-        if (agent.color) {
-          setAgentColor(agent.agentType, agent.color)
+          const errorMsg = getParseError(frontmatter)
+          failedFiles.push({ path: filePath, error: errorMsg })
+          logForDebugging(`Failed to parse agent from ${filePath}: ${errorMsg}`)
+          logEvent('tengu_agent_parse_error', {
+            error:
+              errorMsg as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            location:
+              source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          return null
         }
-      }
+        return agent
+      })
+      .filter(agent => agent !== null)
 
-      return {
-        activeAgents,
-        allAgents: allAgentsList,
-        failedFiles: failedFiles.length > 0 ? failedFiles : undefined,
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      logForDebugging(`Error loading agent definitions: ${errorMessage}`)
-      logError(error)
-      // Even on error, return the built-in agents
-      const builtInAgents = getBuiltInAgents()
-      return {
-        activeAgents: builtInAgents,
-        allAgents: builtInAgents,
-        failedFiles: [{ path: 'unknown', error: errorMessage }],
+    // Kick off plugin agent loading concurrently with memory snapshot init —
+    // loadPluginAgents is memoized and takes no args, so it's independent.
+    // Join both so neither becomes a floating promise if the other throws.
+    let pluginAgentsPromise = loadPluginAgents()
+    if (feature('AGENT_MEMORY_SNAPSHOT') && isAutoMemoryEnabled()) {
+      const [pluginAgents_] = await Promise.all([
+        pluginAgentsPromise,
+        initializeAgentMemorySnapshots(customAgents),
+      ])
+      pluginAgentsPromise = Promise.resolve(pluginAgents_)
+    }
+    const pluginAgents = await pluginAgentsPromise
+
+    const builtInAgents = getBuiltInAgents()
+
+    const allAgentsList: AgentDefinition[] = [
+      ...builtInAgents,
+      ...pluginAgents,
+      ...customAgents,
+    ]
+
+    const activeAgents = getActiveAgentsFromList(allAgentsList)
+
+    // Initialize colors for all active agents
+    for (const agent of activeAgents) {
+      if (agent.color) {
+        setAgentColor(agent.agentType, agent.color)
       }
     }
-  },
-)
+
+    return {
+      activeAgents,
+      allAgents: allAgentsList,
+      failedFiles: failedFiles.length > 0 ? failedFiles : undefined,
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    logForDebugging(`Error loading agent definitions: ${errorMessage}`)
+    logError(error)
+    // Even on error, return the built-in agents
+    const builtInAgents = getBuiltInAgents()
+    return {
+      activeAgents: builtInAgents,
+      allAgents: builtInAgents,
+      failedFiles: [{ path: 'unknown', error: errorMessage }],
+    }
+  }
+}
+
+function createGetAgentDefinitionsWithOverrides(): CachedAgentDefinitionsFn {
+  const fn = (cwd: string): Promise<AgentDefinitionsResult> => {
+    const cache = hostAgentsState().definitionsCache
+    const existing = cache.get(cwd)
+    if (existing !== undefined) {
+      return existing
+    }
+    const pending = loadAgentDefinitionsWithOverridesImpl(cwd)
+    cache.set(cwd, pending)
+    return pending
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<string, Promise<AgentDefinitionsResult>> {
+      return hostAgentsState().definitionsCache
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedAgentDefinitionsFn
+}
+
+export const getAgentDefinitionsWithOverrides: CachedAgentDefinitionsFn =
+  createGetAgentDefinitionsWithOverrides()
 
 export function clearAgentDefinitionsCache(): void {
   getAgentDefinitionsWithOverrides.cache.clear?.()
@@ -994,8 +1035,6 @@ function suggestFrontmatterKey(
   return best
 }
 
-const warnedUnknownFrontmatterKeys = new Map<string, string>()
-
 export function warnUnknownAgentFrontmatterKeys({
   subject,
   filePath,
@@ -1023,8 +1062,9 @@ export function warnUnknownAgentFrontmatterKeys({
   })
   const message = `${subject} ${filePath} has ${unknownKeys.length === 1 ? 'a frontmatter key' : 'frontmatter keys'} Claude Code does not recognize or apply: ${formatted.join(', ')}`
   const cacheKey = `${subject}:${filePath}`
-  if (warnedUnknownFrontmatterKeys.get(cacheKey) !== message) {
-    warnedUnknownFrontmatterKeys.set(cacheKey, message)
+  const warned = hostAgentsState().warnedUnknownFrontmatterKeys
+  if (warned.get(cacheKey) !== message) {
+    warned.set(cacheKey, message)
     logForDebugging(message, { level: 'warn' })
   }
   return message

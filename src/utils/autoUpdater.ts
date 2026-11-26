@@ -35,6 +35,7 @@ import { gracefulShutdownSync } from './gracefulShutdown.js'
 import { logError } from './log.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
 import { gt, gte, lt, lte } from './semver.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { sleep } from './sleep.js'
 import {
   getInitialSettings,
@@ -203,27 +204,42 @@ export type UpdateRestoreFailure = {
 }
 
 const AUTO_UPDATE_CHECK_THROTTLE_MS = 300_000
-let lastAutoUpdateCheckAt = 0
-let updateRestoreFailure: UpdateRestoreFailure | null = null
+
+type AutoUpdaterHostState = {
+  lastAutoUpdateCheckAt: number
+  updateRestoreFailure: UpdateRestoreFailure | null
+  mintedPreservedInodes: Set<bigint>
+}
+
+const autoUpdaterHostSlot = new HostSlot<AutoUpdaterHostState>(() => ({
+  lastAutoUpdateCheckAt: 0,
+  updateRestoreFailure: null,
+  mintedPreservedInodes: new Set(),
+}))
+
+function getAutoUpdaterHostState(): AutoUpdaterHostState {
+  return autoUpdaterHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
- * 5-minute process-wide throttle for background auto-update checks.
+ * 5-minute host-scoped throttle for background auto-update checks.
  * Matches official 2.1.328 `qKt` (`@300384488`).
  */
 export function shouldThrottleAutoUpdateCheck(): boolean {
+  const hostState = getAutoUpdaterHostState()
   const now = Date.now()
-  if (now - lastAutoUpdateCheckAt < AUTO_UPDATE_CHECK_THROTTLE_MS) {
+  if (now - hostState.lastAutoUpdateCheckAt < AUTO_UPDATE_CHECK_THROTTLE_MS) {
     logForDebugging(
-      `auto-update check throttled (last check ${Math.round((now - lastAutoUpdateCheckAt) / 1000)}s ago)`,
+      `auto-update check throttled (last check ${Math.round((now - hostState.lastAutoUpdateCheckAt) / 1000)}s ago)`,
     )
     return true
   }
-  lastAutoUpdateCheckAt = now
+  hostState.lastAutoUpdateCheckAt = now
   return false
 }
 
 export function resetAutoUpdateCheckThrottleForTests(): void {
-  lastAutoUpdateCheckAt = 0
+  getAutoUpdaterHostState().lastAutoUpdateCheckAt = 0
 }
 
 /**
@@ -285,13 +301,13 @@ export function shouldForceDowngrade(
  * failed npm global update. Matches official 2.1.328 `kRt()`.
  */
 export function getUpdateRestoreFailure(): UpdateRestoreFailure | null {
-  return updateRestoreFailure
+  return getAutoUpdaterHostState().updateRestoreFailure
 }
 
 export function setUpdateRestoreFailureForTests(
   failure: UpdateRestoreFailure | null,
 ): void {
-  updateRestoreFailure = failure
+  getAutoUpdaterHostState().updateRestoreFailure = failure
 }
 
 /**
@@ -1092,14 +1108,6 @@ export async function getVersionHistory(limit: number): Promise<string[]> {
 // ─── Windows self-rename backup tracking (official 2.1.328 `XKt`/`Ve`/`Be`/`ee`/`We`) ───
 
 /**
- * Inodes of `.old.<ts>` backups this process minted before `npm/bun install -g`.
- * npm moves the whole package dir into a `.`-prefixed retired directory on
- * rename conflict; tracking the inode lets restore locate the moved backup.
- * Process-lifetime only, matching official `n.mintedPreservedInodes`.
- */
-const mintedPreservedInodes = new Set<bigint>()
-
-/**
  * Official `Ve`: candidate "retired dir" parent roots — the two directories
  * above the running executable's package dir (e.g. `.../node_modules` and its
  * parent scope dir).
@@ -1132,7 +1140,7 @@ async function isPreservedInode(filePath: string): Promise<boolean> {
   const ino = await stat(filePath, { bigint: true })
     .then(s => s.ino)
     .catch(() => 0n)
-  return ino !== 0n && mintedPreservedInodes.has(ino)
+  return ino !== 0n && getAutoUpdaterHostState().mintedPreservedInodes.has(ino)
 }
 
 /**
@@ -1150,7 +1158,7 @@ export async function locatePreservedBackupForTests(
  * the Windows self-rename path of `installGlobalPackage`.
  */
 export function mintPreservedInodeForTests(ino: bigint): void {
-  mintedPreservedInodes.add(ino)
+  getAutoUpdaterHostState().mintedPreservedInodes.add(ino)
 }
 
 async function locatePreservedBackup(
@@ -1311,17 +1319,18 @@ export async function sweepHealMissingExecutableForTests(
  * reappeared, or refresh `preservedPath` if npm relocated it into a retired dir.
  */
 async function reconcileUpdateRestoreFailure(): Promise<void> {
-  if (!updateRestoreFailure) return
-  if (await pathExists(updateRestoreFailure.originalPath)) {
-    updateRestoreFailure = null
+  const hostState = getAutoUpdaterHostState()
+  if (!hostState.updateRestoreFailure) return
+  if (await pathExists(hostState.updateRestoreFailure.originalPath)) {
+    hostState.updateRestoreFailure = null
     return
   }
-  if (updateRestoreFailure.preservedPath !== undefined) {
+  if (hostState.updateRestoreFailure.preservedPath !== undefined) {
     const relocated = await locatePreservedBackup(
-      updateRestoreFailure.preservedPath,
+      hostState.updateRestoreFailure.preservedPath,
     )
-    updateRestoreFailure = {
-      originalPath: updateRestoreFailure.originalPath,
+    hostState.updateRestoreFailure = {
+      originalPath: hostState.updateRestoreFailure.originalPath,
       preservedPath: relocated ?? undefined,
     }
   }
@@ -1347,7 +1356,8 @@ export async function installGlobalPackage(
     return { status: 'in_progress' }
   }
 
-  const priorRestoreFailure = updateRestoreFailure
+  const hostState = getAutoUpdaterHostState()
+  const priorRestoreFailure = hostState.updateRestoreFailure
   try {
     await removeClaudeAliasesFromShellConfigs()
     const packageManager = getGlobalPackageManager()
@@ -1466,7 +1476,7 @@ To fix this issue:
           const backupIno = await stat(backupPath, { bigint: true })
             .then(s => s.ino)
             .catch(() => 0n)
-          if (backupIno !== 0n) mintedPreservedInodes.add(backupIno)
+          if (backupIno !== 0n) hostState.mintedPreservedInodes.add(backupIno)
         } catch {
           // Rename refused for this alias — leave it and proceed.
         }
@@ -1535,11 +1545,11 @@ To fix this issue:
         }
       }
       const renamedOriginals = new Set(renamedBackups.map(([orig]) => orig))
-      updateRestoreFailure =
+      hostState.updateRestoreFailure =
         firstRestoreFailure ??
-        (updateRestoreFailure &&
-        !renamedOriginals.has(updateRestoreFailure.originalPath)
-          ? updateRestoreFailure
+        (hostState.updateRestoreFailure &&
+        !renamedOriginals.has(hostState.updateRestoreFailure.originalPath)
+          ? hostState.updateRestoreFailure
           : null)
     }
 
@@ -1559,7 +1569,7 @@ To fix this issue:
             ...current,
             installMethod: 'global',
           }))
-          updateRestoreFailure = null
+          hostState.updateRestoreFailure = null
           logForDebugging(
             `npm/bun exited ${installResult.code} with only warnings on stderr but the install-prefix re-probe confirms the install landed (now ${probe.version}): ${combined}`,
           )
@@ -1632,13 +1642,13 @@ To fix this issue:
       ...current,
       installMethod: 'global',
     }))
-    updateRestoreFailure = null
+    hostState.updateRestoreFailure = null
 
     return { status: 'success', probeDurationMs: probe.durationMs }
   } finally {
     if (
-      updateRestoreFailure !== null &&
-      updateRestoreFailure === priorRestoreFailure
+      hostState.updateRestoreFailure !== null &&
+      hostState.updateRestoreFailure === priorRestoreFailure
     ) {
       await reconcileUpdateRestoreFailure()
     }

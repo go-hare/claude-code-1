@@ -6,6 +6,11 @@ import {
 } from './envUtils.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import { getScreenReaderChildEnv } from './screenReaderGate.js'
+import {
+  getBootstrapSessionHost,
+  HostSlot,
+  ofDefaultHost,
+} from './sessionHost.js'
 
 /**
  * Env vars to strip from subprocess environments when running inside GitHub
@@ -231,7 +236,11 @@ export function sandboxHelperSubprocessEnv(
 // Registered by init.ts after the upstreamproxy module is dynamically imported
 // in CCR sessions. Stays undefined in non-CCR startups so we never pull in the
 // upstreamproxy module graph (upstreamproxy.ts + relay.ts) via a static import.
-let _getUpstreamProxyEnv: (() => Record<string, string>) | undefined
+const upstreamProxyEnvHostSlot = new HostSlot<{
+  getUpstreamProxyEnv: (() => Record<string, string>) | undefined
+}>(() => ({
+  getUpstreamProxyEnv: undefined,
+}))
 
 /**
  * Called from init.ts to wire up the proxy env function after the upstreamproxy
@@ -240,15 +249,27 @@ let _getUpstreamProxyEnv: (() => Record<string, string>) | undefined
 export function registerUpstreamProxyEnvFn(
   fn: () => Record<string, string>,
 ): void {
-  _getUpstreamProxyEnv = fn
+  upstreamProxyEnvHostSlot.of(getBootstrapSessionHost()).getUpstreamProxyEnv =
+    fn
 }
 
 /**
  * Official kVt densable accessor — injected upstream-proxy env for subprocesses.
- * Returns {} when proxy is disabled or not registered (non-CCR).
+ * Falls back to the process-default host's boot registration when unset on an
+ * isolated host. Returns {} when proxy is disabled or not registered (non-CCR).
  */
 export function getRegisteredUpstreamProxyEnv(): Record<string, string> {
-  return _getUpstreamProxyEnv?.() ?? {}
+  const fn =
+    upstreamProxyEnvHostSlot.peek(getBootstrapSessionHost())
+      ?.getUpstreamProxyEnv ??
+    ofDefaultHost(upstreamProxyEnvHostSlot).getUpstreamProxyEnv
+  return fn?.() ?? {}
+}
+
+/** Test helper: clear the current host's registered upstream proxy env callback. */
+export function resetUpstreamProxyEnvFnForTests(): void {
+  upstreamProxyEnvHostSlot.of(getBootstrapSessionHost()).getUpstreamProxyEnv =
+    undefined
 }
 
 /**
@@ -272,7 +293,7 @@ export function subprocessEnv(): NodeJS.ProcessEnv {
   // in agent subprocesses route through the local relay. Returns {} when the
   // proxy is disabled or not registered (non-CCR), so this is a no-op outside
   // CCR containers.
-  const proxyEnv = _getUpstreamProxyEnv?.() ?? {}
+  const proxyEnv = getRegisteredUpstreamProxyEnv()
   // Official FXe — propagate CLAUDE_AX_SCREEN_READER=1 when screen-reader mode is on.
   const screenReaderEnv = getScreenReaderChildEnv()
   const settingsEnv = getSettings_DEPRECATED()?.env ?? {}

@@ -26,26 +26,38 @@ import {
 } from './sessionRelaunchUncarriable.js'
 import { getSettingsForSource } from './settings/settings.js'
 import type { SettingsJson } from './settings/types.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { getEmptyToolPermissionContext } from '../Tool.js'
 
 /** densable BJe — policy snapshot captured before gateway managed-settings refresh. */
-let policySnapshot: SettingsJson | null | undefined
+const policySnapshotHostSlot = new HostSlot<{
+  policySnapshot: SettingsJson | null | undefined
+}>(() => ({
+  policySnapshot: undefined,
+}))
+
+function getPolicySnapshotState(): {
+  policySnapshot: SettingsJson | null | undefined
+} {
+  return policySnapshotHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * official BJe / capturePolicySnapshot.
  * Call before policy refresh on gateway login.
  */
 export function capturePolicySnapshot(): void {
+  const state = getPolicySnapshotState()
   try {
-    policySnapshot = getSettingsForSource('policySettings') ?? null
+    state.policySnapshot = getSettingsForSource('policySettings') ?? null
   } catch {
-    policySnapshot = null
+    state.policySnapshot = null
   }
 }
 
 /** Test helper — clear BJe snapshot. */
 export function resetPolicySnapshotForTests(): void {
-  policySnapshot = undefined
+  getPolicySnapshotState().policySnapshot = undefined
 }
 
 /**
@@ -53,6 +65,7 @@ export function resetPolicySnapshotForTests(): void {
  * undefined snapshot ⇒ true (must relaunch to apply unknown baseline).
  */
 export function hasPolicyDiverged(): boolean {
+  const { policySnapshot } = getPolicySnapshotState()
   if (policySnapshot === undefined) return true
   let live: SettingsJson | null = null
   try {

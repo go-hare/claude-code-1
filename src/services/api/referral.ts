@@ -11,6 +11,7 @@ import { logForDebugging } from '../../utils/debug.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { logError } from '../../utils/log.js'
 import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionRoot.js'
 import { getOAuthHeaders, prepareApiRequest } from '../../utils/teleport/api.js'
 import type {
   ReferralCampaign,
@@ -38,8 +39,11 @@ function parseReferrerReward(value: unknown): ReferrerRewardInfo | null {
 // Cache expiration time: 24 hours (eligibility changes only on subscription/experiment changes)
 const CACHE_EXPIRATION_MS = 24 * 60 * 60 * 1000
 
-// Track in-flight fetch to prevent duplicate API calls
-let fetchInProgress: Promise<ReferralEligibilityResponse | null> | null = null
+// Official 2.1.331 [W-436]: track in-flight eligibility fetch per SessionHost
+// to prevent duplicate API calls without sharing across isolated hosts.
+const referralHostSlot = new HostSlot<{
+  fetchInProgress: Promise<ReferralEligibilityResponse | null> | null
+}>(() => ({ fetchInProgress: null }))
 
 export async function fetchReferralEligibility(
   campaign: ReferralCampaign = 'claude_code_guest_pass',
@@ -191,10 +195,11 @@ export function getCachedRemainingPasses(): number | null {
  * Returns the fetched response or null on error
  */
 export async function fetchAndStorePassesEligibility(): Promise<ReferralEligibilityResponse | null> {
+  const state = referralHostSlot.of(getBootstrapSessionHost())
   // Return existing promise if fetch is already in progress
-  if (fetchInProgress) {
+  if (state.fetchInProgress) {
     logForDebugging('Passes: Reusing in-flight eligibility fetch')
-    return fetchInProgress
+    return state.fetchInProgress
   }
 
   const orgId = getOauthAccountInfo()?.organizationUuid
@@ -204,7 +209,8 @@ export async function fetchAndStorePassesEligibility(): Promise<ReferralEligibil
   }
 
   // Store the promise to share with concurrent calls
-  fetchInProgress = (async () => {
+  let inFlight: Promise<ReferralEligibilityResponse | null> | null = null
+  inFlight = (async () => {
     try {
       const response = await fetchReferralEligibility()
 
@@ -232,11 +238,14 @@ export async function fetchAndStorePassesEligibility(): Promise<ReferralEligibil
       return null
     } finally {
       // Clear the promise when done
-      fetchInProgress = null
+      if (state.fetchInProgress === inFlight) {
+        state.fetchInProgress = null
+      }
     }
   })()
 
-  return fetchInProgress
+  state.fetchInProgress = inFlight
+  return inFlight
 }
 
 /**

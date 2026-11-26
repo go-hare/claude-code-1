@@ -4,11 +4,44 @@ import {
   spawn,
   spawnSync,
 } from 'child_process'
-import memoize from 'lodash-es/memoize.js'
 import { basename } from 'path'
-import { instances } from '@anthropic/ink'
+import { Ns } from '@anthropic/ink'
 import { logForDebugging } from './debug.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { whichSync } from './which.js'
+
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result>(
+  fn: (...args: Args) => Result,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
 
 function isCommandAvailable(command: string): boolean {
   return !!whichSync(command)
@@ -119,7 +152,7 @@ export function openFileInExternalEditor(
 
   // Terminal editor — needs alt-screen handoff since it takes over the
   // terminal. Blocks until the editor exits.
-  const inkInstance = instances.get(process.stdout)
+  const inkInstance = Ns().get(process.stdout)
   if (!inkInstance) return false
   // Only prepend +N for editors known to support it — notepad treats +42 as a
   // filename to open. Test basename so /home/vim/bin/kak doesn't match 'vim'
@@ -159,7 +192,7 @@ export function openFileInExternalEditor(
   }
 }
 
-export const getExternalEditor = memoize((): string | undefined => {
+export const getExternalEditor = memoizePerHost((): string | undefined => {
   // Prioritize environment variables
   if (process.env.VISUAL?.trim()) {
     return process.env.VISUAL.trim()

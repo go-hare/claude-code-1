@@ -1,5 +1,5 @@
 import { GrowthBook, helpers, setPolyfills } from '@growthbook/growthbook'
-import { isEqual, memoize } from 'lodash-es'
+import { isEqual } from 'lodash-es'
 import {
   getIsNonInteractiveSession,
   getPinnedFeatureValues,
@@ -30,11 +30,17 @@ import { getProxyFetchOptions } from '../../utils/proxy.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 import { logError } from '../../utils/log.js'
 import { resolveGbRefreshIntervalMsOrDefault } from '../../utils/residualFinalEnvGates.js'
-import { createSignal } from '../../utils/signal.js'
+import { createSignal, type Signal } from '../../utils/signal.js'
 import { withTimeout } from '../../utils/sleep.js'
 import { profileCheckpoint } from '../../utils/startupProfiler.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
-import { getBootstrapSession } from '../../utils/sessionHost.js'
+import {
+  exitSessionContext,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
 import {
   type GitHubActionsMetadata,
   getUserForGrowthBook,
@@ -88,21 +94,6 @@ type GlobalConfigWithFeatureFlags = ReturnType<typeof getGlobalConfig> & {
   cachedGrowthBookFeaturesAt?: number
 }
 
-let client: GrowthBook | null = null
-
-// Named handler refs so resetGrowthBook can remove them to prevent accumulation
-let currentBeforeExitHandler: (() => void) | null = null
-let currentExitHandler: (() => void) | null = null
-
-// Track whether auth was available when the client was created
-// This allows us to detect when we need to recreate with fresh auth headers
-let clientCreatedWithAuth = false
-// densable oji / iji / sji — stamped at client create so periodic refresh
-// can detect OAuth Authorization rotation (#34) without waiting for login.
-let clientAuthAuthorization: string | undefined
-let clientAuthAccountUuid: string | undefined
-let clientAuthOrganizationUuid: string | undefined
-
 // Store experiment data from payload for logging exposures later
 type StoredExperimentData = {
   experimentId: string
@@ -111,47 +102,175 @@ type StoredExperimentData = {
   hashAttribute?: string
   hashValue?: string
 }
-const experimentDataByFeature = new Map<string, StoredExperimentData>()
 
-// Cache for remote eval feature values - workaround for SDK not respecting remoteEval response
-// The SDK's setForcedFeatures also doesn't work reliably with remoteEval
-const remoteEvalFeatureValues = new Map<string, unknown>()
-
-// Official 2.1.328 `ownSavedFlags` (chunk@286370035.js @745000): carries the
-// account's previously fetched remote-eval flags across same-account OAuth
-// token rotation while the recreated client is still re-fetching.
-let ownSavedFlags: SavedFlagsSnapshot | null = null
-
-// Track features accessed before init that need exposure logging
-const pendingExposures = new Set<string>()
-
-// Track features that have already had their exposure logged this session (dedup)
-// This prevents firing duplicate exposure events when getFeatureValue_CACHED_MAY_BE_STALE
-// is called repeatedly in hot paths (e.g., isAutoMemoryEnabled in render loops)
-const loggedExposures = new Set<string>()
-
-// Track re-initialization promise for security gate checks
-// When GrowthBook is re-initializing (e.g., after auth change), security gate checks
-// should wait for init to complete to avoid returning stale values
-let reinitializingPromise: Promise<unknown> | null = null
-
-// densable QBi / ZBi / eji — one-shot logs for malformed payload skips (#15)
-let loggedSkippedNonObjectFeatures = false
-let loggedSkippedMalformedExperiments = false
-let loggedSkippedValueLessFeatures = false
-
-// Listeners notified when GrowthBook feature values refresh (initial init or
-// periodic refresh). Use for systems that bake feature values into long-lived
-// objects at construction time (e.g. firstPartyEventLogger reads
-// tengu_1p_event_batch_config once and builds a LoggerProvider with it) and
-// need to rebuild when config changes. Per-call readers like
-// getEventSamplingConfig / isSinkKilled don't need this — they're already
-// reactive.
-//
-// NOT cleared by resetGrowthBook — subscribers register once (typically in
-// init.ts) and must survive auth-change resets.
 type GrowthBookRefreshListener = () => void | Promise<void>
-const refreshed = createSignal()
+
+type GrowthBookClientWrapper = {
+  client: GrowthBook
+  initialized: Promise<void>
+} | null
+
+type GrowthBookHostState = {
+  client: GrowthBook | null
+  // Track whether auth was available when the client was created
+  // This allows us to detect when we need to recreate with fresh auth headers
+  clientCreatedWithAuth: boolean
+  // densable oji / iji / sji — stamped at client create so periodic refresh
+  // can detect OAuth Authorization rotation (#34) without waiting for login.
+  clientAuthAuthorization: string | undefined
+  clientAuthAccountUuid: string | undefined
+  clientAuthOrganizationUuid: string | undefined
+  experimentDataByFeature: Map<string, StoredExperimentData>
+  // Cache for remote eval feature values - workaround for SDK not respecting remoteEval response
+  // The SDK's setForcedFeatures also doesn't work reliably with remoteEval
+  remoteEvalFeatureValues: Map<string, unknown>
+  // Official 2.1.328 `ownSavedFlags` (chunk@286370035.js @745000): carries the
+  // account's previously fetched remote-eval flags across same-account OAuth
+  // token rotation while the recreated client is still re-fetching.
+  ownSavedFlags: SavedFlagsSnapshot | null
+  // Track features accessed before init that need exposure logging
+  pendingExposures: Set<string>
+  // Track features that have already had their exposure logged this session (dedup)
+  // This prevents firing duplicate exposure events when getFeatureValue_CACHED_MAY_BE_STALE
+  // is called repeatedly in hot paths (e.g., isAutoMemoryEnabled in render loops)
+  loggedExposures: Set<string>
+  // Track re-initialization promise for security gate checks
+  // When GrowthBook is re-initializing (e.g., after auth change), security gate checks
+  // should wait for init to complete to avoid returning stale values
+  reinitializingPromise: Promise<unknown> | null
+  // densable QBi / ZBi / eji — one-shot logs for malformed payload skips (#15)
+  loggedSkippedNonObjectFeatures: boolean
+  loggedSkippedMalformedExperiments: boolean
+  loggedSkippedValueLessFeatures: boolean
+  // Listeners notified when GrowthBook feature values refresh (initial init or
+  // periodic refresh). NOT cleared by resetGrowthBook — subscribers register
+  // once (typically in init.ts) and must survive auth-change resets.
+  refreshed: Signal
+  envOverrides: Record<string, unknown> | null
+  envOverridesRaw: string | undefined
+  envOverridesParsed: boolean
+  getGrowthBookClientCache: Map<unknown, GrowthBookClientWrapper>
+  initializeGrowthBookCache: Map<unknown, Promise<GrowthBook | null>>
+  refreshInterval: ReturnType<typeof setInterval> | null
+  trackedInLiveStates: boolean
+}
+
+const liveGrowthBookHostStates = new Set<WeakRef<GrowthBookHostState>>()
+let sharedGrowthBookProcessHooksInstalled = false
+
+function pruneDeadGrowthBookHostStates(): void {
+  for (const ref of liveGrowthBookHostStates) {
+    if (ref.deref() === undefined) {
+      liveGrowthBookHostStates.delete(ref)
+    }
+  }
+}
+
+function cleanupGrowthBookHostStateAtExit(state: GrowthBookHostState): void {
+  if (state.refreshInterval) {
+    clearInterval(state.refreshInterval)
+    state.refreshInterval = null
+  }
+  state.client?.destroy()
+}
+
+function onSharedGrowthBookBeforeExit(): void {
+  for (const ref of liveGrowthBookHostStates) {
+    const state = ref.deref()
+    if (!state) {
+      liveGrowthBookHostStates.delete(ref)
+      continue
+    }
+    cleanupGrowthBookHostStateAtExit(state)
+  }
+}
+
+function onSharedGrowthBookExit(): void {
+  for (const ref of liveGrowthBookHostStates) {
+    const state = ref.deref()
+    if (!state) {
+      liveGrowthBookHostStates.delete(ref)
+      continue
+    }
+    cleanupGrowthBookHostStateAtExit(state)
+  }
+}
+
+function ensureSharedGrowthBookProcessHooksInstalled(): void {
+  if (sharedGrowthBookProcessHooksInstalled) return
+  sharedGrowthBookProcessHooksInstalled = true
+  process.on('beforeExit', onSharedGrowthBookBeforeExit)
+  process.on('exit', onSharedGrowthBookExit)
+}
+
+function trackLiveGrowthBookHostState(state: GrowthBookHostState): void {
+  if (state.trackedInLiveStates) return
+  state.trackedInLiveStates = true
+  if (liveGrowthBookHostStates.size > 64) {
+    pruneDeadGrowthBookHostStates()
+  }
+  liveGrowthBookHostStates.add(new WeakRef(state))
+  ensureSharedGrowthBookProcessHooksInstalled()
+}
+
+// Official 2.1.331 [W-115 l$s]: per-host GrowthBook state on SessionHost.
+const growthBookHostSlot = new HostSlot<GrowthBookHostState>(() => ({
+  client: null,
+  clientCreatedWithAuth: false,
+  clientAuthAuthorization: undefined,
+  clientAuthAccountUuid: undefined,
+  clientAuthOrganizationUuid: undefined,
+  experimentDataByFeature: new Map(),
+  remoteEvalFeatureValues: new Map(),
+  ownSavedFlags: null,
+  pendingExposures: new Set(),
+  loggedExposures: new Set(),
+  reinitializingPromise: null,
+  loggedSkippedNonObjectFeatures: false,
+  loggedSkippedMalformedExperiments: false,
+  loggedSkippedValueLessFeatures: false,
+  refreshed: createSignal(),
+  envOverrides: null,
+  envOverridesRaw: undefined,
+  envOverridesParsed: false,
+  getGrowthBookClientCache: new Map(),
+  initializeGrowthBookCache: new Map(),
+  refreshInterval: null,
+  trackedInLiveStates: false,
+}))
+
+function getGrowthBookHostState(): GrowthBookHostState {
+  return growthBookHostSlot.of(getBootstrapSessionHost())
+}
+
+type HostMemoizedZeroArg<Result> = (() => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHostField<Result>(
+  fn: () => Result,
+  getCache: (state: GrowthBookHostState) => Map<unknown, Result>,
+  setCache: (state: GrowthBookHostState, next: Map<unknown, Result>) => void,
+): HostMemoizedZeroArg<Result> {
+  const memoized = (): Result => {
+    const cache = getCache(getGrowthBookHostState())
+    if (cache.has(undefined)) {
+      return cache.get(undefined) as Result
+    }
+    const result = fn()
+    cache.set(undefined, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => getCache(getGrowthBookHostState()),
+    set: (next: Map<unknown, Result>) => {
+      setCache(getGrowthBookHostState(), next)
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as HostMemoizedZeroArg<Result>
+}
 
 /** Call a listener with sync-throw and async-rejection both routed to logError. */
 function callSafe(listener: GrowthBookRefreshListener): void {
@@ -186,13 +305,14 @@ function callSafe(listener: GrowthBookRefreshListener): void {
 export function onGrowthBookRefresh(
   listener: GrowthBookRefreshListener,
 ): () => void {
+  const state = getGrowthBookHostState()
   let subscribed = true
-  const unsubscribe = refreshed.subscribe(() => callSafe(listener))
-  if (remoteEvalFeatureValues.size > 0) {
+  const unsubscribe = state.refreshed.subscribe(() => callSafe(listener))
+  if (state.remoteEvalFeatureValues.size > 0) {
     queueMicrotask(() => {
       // Re-check: listener may have been removed, or resetGrowthBook may have
       // cleared the Map, between registration and this microtask running.
-      if (subscribed && remoteEvalFeatureValues.size > 0) {
+      if (subscribed && state.remoteEvalFeatureValues.size > 0) {
         callSafe(listener)
       }
     })
@@ -211,16 +331,13 @@ export function onGrowthBookRefresh(
  *
  * Example: CLAUDE_INTERNAL_FC_OVERRIDES='{"my_feature": true, "my_config": {"key": "val"}}'
  */
-let envOverrides: Record<string, unknown> | null = null
-let envOverridesRaw: string | undefined
-let envOverridesParsed = false
-
 function getEnvOverrides(): Record<string, unknown> | null {
+  const state = getGrowthBookHostState()
   const raw = process.env.CLAUDE_INTERNAL_FC_OVERRIDES
-  if (!envOverridesParsed || raw !== envOverridesRaw) {
-    envOverridesParsed = true
-    envOverridesRaw = raw
-    envOverrides = null
+  if (!state.envOverridesParsed || raw !== state.envOverridesRaw) {
+    state.envOverridesParsed = true
+    state.envOverridesRaw = raw
+    state.envOverrides = null
     if (raw && raw.trim().length > 0) {
       try {
         const parsed: unknown = jsonParse(raw)
@@ -229,7 +346,7 @@ function getEnvOverrides(): Record<string, unknown> | null {
           typeof parsed === 'object' &&
           !Array.isArray(parsed)
         ) {
-          envOverrides = parsed as Record<string, unknown>
+          state.envOverrides = parsed as Record<string, unknown>
         } else {
           logForDebugging(
             '[GrowthBook] Ignoring CLAUDE_INTERNAL_FC_OVERRIDES: expected JSON object',
@@ -244,7 +361,7 @@ function getEnvOverrides(): Record<string, unknown> | null {
       }
     }
   }
-  return envOverrides
+  return state.envOverrides
 }
 
 /**
@@ -299,9 +416,11 @@ export function readSavedFeatureFlagsFromConfig(
  * Official 2.1.328 `readSavedFlags` (`chunk@286370035.js @735500`):
  * prefer same-account rotated `ownSavedFlags` carry before disk cache.
  */
-function readSavedFlags(): Record<string, unknown> | undefined {
-  if (ownSavedFlags !== null) {
-    return ownSavedFlags.flags
+function readSavedFlags(
+  state: GrowthBookHostState = getGrowthBookHostState(),
+): Record<string, unknown> | undefined {
+  if (state.ownSavedFlags !== null) {
+    return state.ownSavedFlags.flags
   }
   try {
     return readSavedFeatureFlagsFromConfig(
@@ -318,10 +437,11 @@ function readSavedFlags(): Record<string, unknown> | undefined {
  * same priority as the getters. Used by the /config Gates tab.
  */
 export function getAllGrowthBookFeatures(): Record<string, unknown> {
-  if (remoteEvalFeatureValues.size > 0) {
-    return Object.fromEntries(remoteEvalFeatureValues)
+  const state = getGrowthBookHostState()
+  if (state.remoteEvalFeatureValues.size > 0) {
+    return Object.fromEntries(state.remoteEvalFeatureValues)
   }
-  return readSavedFlags() ?? {}
+  return readSavedFlags(state) ?? {}
 }
 
 export function getGrowthBookConfigOverrides(): Record<string, unknown> {
@@ -355,7 +475,7 @@ export function setGrowthBookConfigOverride(
     })
     // Subscribers do their own change detection (see onGrowthBookRefresh docs),
     // so firing on a no-op write is fine.
-    refreshed.emit()
+    getGrowthBookHostState().refreshed.emit()
   } catch (e) {
     logError(e)
   }
@@ -372,7 +492,7 @@ export function clearGrowthBookConfigOverrides(): void {
       }
       return { ...c, growthBookOverrides: undefined }
     })
-    refreshed.emit()
+    getGrowthBookHostState().refreshed.emit()
   } catch (e) {
     logError(e)
   }
@@ -382,15 +502,18 @@ export function clearGrowthBookConfigOverrides(): void {
  * Log experiment exposure for a feature if it has experiment data.
  * Deduplicates within a session - each feature is logged at most once.
  */
-function logExposureForFeature(feature: string): void {
+function logExposureForFeature(
+  feature: string,
+  state: GrowthBookHostState = getGrowthBookHostState(),
+): void {
   // Skip if already logged this session (dedup)
-  if (loggedExposures.has(feature)) {
+  if (state.loggedExposures.has(feature)) {
     return
   }
 
-  const expData = experimentDataByFeature.get(feature)
+  const expData = state.experimentDataByFeature.get(feature)
   if (expData) {
-    loggedExposures.add(feature)
+    state.loggedExposures.add(feature)
     logGrowthBookExperimentTo1P({
       experimentId: expData.experimentId,
       variationId: expData.variationId,
@@ -415,6 +538,7 @@ function logExposureForFeature(feature: string): void {
  */
 async function processRemoteEvalPayload(
   gbClient: GrowthBook,
+  state: GrowthBookHostState = getGrowthBookHostState(),
 ): Promise<boolean> {
   // densable RUc — #15: null/malformed features must not crash or wipe cache.
   const payload = gbClient.getPayload()
@@ -429,9 +553,9 @@ async function processRemoteEvalPayload(
   // One-shot densable ke(...) logs for skipped entries
   if (
     processed.skippedNonObject.length > 0 &&
-    !loggedSkippedNonObjectFeatures
+    !state.loggedSkippedNonObjectFeatures
   ) {
-    loggedSkippedNonObjectFeatures = true
+    state.loggedSkippedNonObjectFeatures = true
     logError(
       new Error(
         `processRemoteEvalPayload: skipped non-object features [${processed.skippedNonObject.join(', ')}]`,
@@ -440,9 +564,9 @@ async function processRemoteEvalPayload(
   }
   if (
     processed.skippedMalformedExperiment.length > 0 &&
-    !loggedSkippedMalformedExperiments
+    !state.loggedSkippedMalformedExperiments
   ) {
-    loggedSkippedMalformedExperiments = true
+    state.loggedSkippedMalformedExperiments = true
     logError(
       new Error(
         `processRemoteEvalPayload: skipped malformed experiment entries [${processed.skippedMalformedExperiment.join(', ')}]`,
@@ -451,9 +575,9 @@ async function processRemoteEvalPayload(
   }
   if (
     processed.skippedValueLess.length > 0 &&
-    !loggedSkippedValueLessFeatures
+    !state.loggedSkippedValueLessFeatures
   ) {
-    loggedSkippedValueLessFeatures = true
+    state.loggedSkippedValueLessFeatures = true
     logError(
       new Error(
         `processRemoteEvalPayload: skipped value-less entries [${processed.skippedValueLess.join(', ')}]`,
@@ -467,18 +591,18 @@ async function processRemoteEvalPayload(
     features: processed.features,
   })
   // densable: if (mMe!==e) return !1 — client replaced mid-await
-  if (client !== gbClient) {
+  if (state.client !== gbClient) {
     return false
   }
 
   // densable: only now clear + replace maps (prior cache stays if we returned false above)
-  experimentDataByFeature.clear()
+  state.experimentDataByFeature.clear()
   for (const [key, exp] of processed.experiments) {
-    experimentDataByFeature.set(key, exp)
+    state.experimentDataByFeature.set(key, exp)
   }
-  remoteEvalFeatureValues.clear()
+  state.remoteEvalFeatureValues.clear()
   for (const [key, value] of processed.values) {
-    remoteEvalFeatureValues.set(key, value)
+    state.remoteEvalFeatureValues.set(key, value)
   }
   return true
 }
@@ -494,8 +618,10 @@ async function processRemoteEvalPayload(
  * switching builds is safe — the write is always a complete answer for this
  * process's SDK key.
  */
-function syncRemoteEvalToDisk(): void {
-  const fresh = Object.fromEntries(remoteEvalFeatureValues)
+function syncRemoteEvalToDisk(
+  state: GrowthBookHostState = getGrowthBookHostState(),
+): void {
+  const fresh = Object.fromEntries(state.remoteEvalFeatureValues)
   const config = getGlobalConfig() as GlobalConfigWithFeatureFlags
   if (
     isEqual(readSavedFeatureFlagsFromConfig(config), fresh) &&
@@ -894,12 +1020,14 @@ export function configureGrowthBookFetchPolyfill(): void {
 /**
  * Get or create the GrowthBook client instance
  */
-const getGrowthBookClient = memoize(
-  (): { client: GrowthBook; initialized: Promise<void> } | null => {
+const getGrowthBookClient = memoizePerHostField<GrowthBookClientWrapper>(
+  (): GrowthBookClientWrapper => {
     if (!isGrowthBookEnabled()) {
       return null
     }
 
+    const host = getBootstrapSessionHost()
+    const state = growthBookHostSlot.of(host)
     const attributes = getUserAttributes()
     const clientKey = getGrowthBookClientKey()
     const baseUrl =
@@ -937,19 +1065,19 @@ const getGrowthBookClient = memoize(
     }
     // 适配器模式下不需要 auth，GrowthBook Cloud 用 clientKey 即可
     const hasAuth = isAdapterMode || !authHeaders.error
-    clientCreatedWithAuth = hasAuth
+    state.clientCreatedWithAuth = hasAuth
     // densable rji: q8n=i; oji=i?Authorization:void 0; iji/sji from oauthAccount
-    clientAuthAuthorization =
+    state.clientAuthAuthorization =
       hasAuth && !authHeaders.error
         ? authHeaders.headers.Authorization
         : undefined
     try {
       const oauth = getGlobalConfig().oauthAccount
-      clientAuthAccountUuid = oauth?.accountUuid
-      clientAuthOrganizationUuid = oauth?.organizationUuid
+      state.clientAuthAccountUuid = oauth?.accountUuid
+      state.clientAuthOrganizationUuid = oauth?.organizationUuid
     } catch {
-      clientAuthAccountUuid = undefined
-      clientAuthOrganizationUuid = undefined
+      state.clientAuthAccountUuid = undefined
+      state.clientAuthOrganizationUuid = undefined
     }
 
     // Capture in local variable so the init callback operates on THIS client,
@@ -986,7 +1114,10 @@ const getGrowthBookClient = memoize(
           }
         : {}),
     })
-    client = thisClient
+    state.client = thisClient
+    // Register this host state under the single process-wide shared exit hook
+    // pair (WeakRef-backed so ephemeral hosts GC cleanly with 0 listener growth).
+    trackLiveGrowthBookHostState(state)
 
     if (!hasAuth) {
       // No auth available yet — skip HTTP init, rely on disk-cached values.
@@ -996,42 +1127,40 @@ const getGrowthBookClient = memoize(
 
     const initialized = thisClient
       .init({ timeout: 5000 })
-      .then(async result => {
+      .then(async _result => {
         // Guard: if this client was replaced by a newer one, skip processing
-        if (client !== thisClient) {
+        if (state.client !== thisClient) {
           return
         }
 
-        const hadFeatures = await processRemoteEvalPayload(thisClient)
+        const hadFeatures = await processRemoteEvalPayload(thisClient, state)
         // Re-check: processRemoteEvalPayload yields at `await setPayload`.
         // Microtask-only today (no encryption, no sticky-bucket service), but
         // the guard at the top of this callback runs before that await;
         // this runs after.
-        if (client !== thisClient) return
+        if (state.client !== thisClient) return
 
         if (hadFeatures) {
-          for (const feature of pendingExposures) {
-            logExposureForFeature(feature)
+          for (const feature of state.pendingExposures) {
+            logExposureForFeature(feature, state)
           }
-          pendingExposures.clear()
-          syncRemoteEvalToDisk()
+          state.pendingExposures.clear()
+          syncRemoteEvalToDisk(state)
           // Notify subscribers: remoteEvalFeatureValues is populated and
           // disk is freshly synced. _CACHED_MAY_BE_STALE reads memory first
           // (#22295), so subscribers see fresh values immediately.
-          refreshed.emit()
+          state.refreshed.emit()
         }
 
         // Log what features were loaded
       })
-      .catch(error => {})
-
-    // Register cleanup handlers for graceful shutdown (named refs so resetGrowthBook can remove them)
-    currentBeforeExitHandler = () => client?.destroy()
-    currentExitHandler = () => client?.destroy()
-    process.on('beforeExit', currentBeforeExitHandler)
-    process.on('exit', currentExitHandler)
+      .catch(_error => {})
 
     return { client: thisClient, initialized }
+  },
+  state => state.getGrowthBookClientCache,
+  (state, next) => {
+    state.getGrowthBookClientCache = next
   },
 )
 
@@ -1043,11 +1172,14 @@ const getGrowthBookClient = memoize(
  * attributes / auth headers so subscriptionType + rateLimitTier land for
  * feature-flag targeting (expired login token → wrong Max/Fable credits prompt).
  */
-export const initializeGrowthBook = memoize(
+export const initializeGrowthBook = memoizePerHostField<
+  Promise<GrowthBook | null>
+>(
   async (): Promise<GrowthBook | null> => {
     if (!isGrowthBookEnabled()) {
       return null
     }
+    const state = getGrowthBookHostState()
     const hasTrust =
       checkHasTrustDialogAccepted() ||
       getSessionTrustAccepted() ||
@@ -1072,22 +1204,14 @@ export const initializeGrowthBook = memoize(
       // densable always creates the client *after* pre-init refresh. Drop any
       // premature memoized client so getUserAttributes + Authorization stamp
       // post-refresh values (without clearing this initializeGrowthBook memo).
-      if (client !== null) {
+      if (state.client !== null) {
         stopPeriodicGrowthBookRefresh()
-        if (currentBeforeExitHandler) {
-          process.off('beforeExit', currentBeforeExitHandler)
-          currentBeforeExitHandler = null
-        }
-        if (currentExitHandler) {
-          process.off('exit', currentExitHandler)
-          currentExitHandler = null
-        }
-        client?.destroy()
-        client = null
-        clientCreatedWithAuth = false
-        clientAuthAuthorization = undefined
-        clientAuthAccountUuid = undefined
-        clientAuthOrganizationUuid = undefined
+        state.client?.destroy()
+        state.client = null
+        state.clientCreatedWithAuth = false
+        state.clientAuthAuthorization = undefined
+        state.clientAuthAccountUuid = undefined
+        state.clientAuthOrganizationUuid = undefined
         getGrowthBookClient.cache?.clear?.()
       }
     }
@@ -1100,7 +1224,7 @@ export const initializeGrowthBook = memoize(
     // Check if auth has become available since the client was created
     // If so, we need to recreate the client with fresh auth headers
     // Only check if trust is established to avoid triggering apiKeyHelper before trust dialog
-    if (!clientCreatedWithAuth && hasTrust) {
+    if (!state.clientCreatedWithAuth && hasTrust) {
       let currentAuth: { headers: Record<string, string>; error?: string }
       try {
         currentAuth = getAuthHeaders()
@@ -1126,6 +1250,10 @@ export const initializeGrowthBook = memoize(
     setupPeriodicGrowthBookRefresh()
 
     return clientWrapper.client
+  },
+  state => state.initializeGrowthBookCache,
+  (state, next) => {
+    state.initializeGrowthBookCache = next
   },
 )
 
@@ -1161,10 +1289,11 @@ async function getFeatureValueInternal<T>(
 
   // Use cached remote eval values if available (workaround for SDK bug)
   // densable nji: explicit null feature value → caller default (no crash)
+  const state = getGrowthBookHostState()
   let result: T
-  if (remoteEvalFeatureValues.has(feature)) {
+  if (state.remoteEvalFeatureValues.has(feature)) {
     result = coalesceNullFeatureValue(
-      remoteEvalFeatureValues.get(feature),
+      state.remoteEvalFeatureValues.get(feature),
       defaultValue,
     )
   } else {
@@ -1173,7 +1302,7 @@ async function getFeatureValueInternal<T>(
 
   // Log experiment exposure using stored experiment data
   if (logExposure) {
-    logExposureForFeature(feature)
+    logExposureForFeature(feature, state)
   }
 
   return result
@@ -1249,14 +1378,15 @@ export function getFeatureValueWithSource<T>(
     return { value: defaultValue, source: 'disabled' }
   }
 
-  if (experimentDataByFeature.has(feature)) {
-    logExposureForFeature(feature)
+  const state = getGrowthBookHostState()
+  if (state.experimentDataByFeature.has(feature)) {
+    logExposureForFeature(feature, state)
   }
 
-  if (remoteEvalFeatureValues.has(feature)) {
+  if (state.remoteEvalFeatureValues.has(feature)) {
     return {
       value: coalesceNullFeatureValue(
-        remoteEvalFeatureValues.get(feature),
+        state.remoteEvalFeatureValues.get(feature),
         defaultValue,
       ),
       source: 'payload',
@@ -1266,14 +1396,14 @@ export function getFeatureValueWithSource<T>(
   // Official 2.1.326 #56 (`holdsAnswer()`): once a live remote-eval payload is
   // held, a flag absent from that payload falls back to `defaultValue` instead
   // of reading a stale value left behind in the on-disk cache.
-  if (remoteEvalFeatureValues.size > 0) {
+  if (state.remoteEvalFeatureValues.size > 0) {
     return { value: defaultValue, source: 'fallback' }
   }
 
   try {
-    const cached = readSavedFlags()?.[feature]
+    const cached = readSavedFlags(state)?.[feature]
     if (cached !== undefined) {
-      pendingExposures.add(feature)
+      state.pendingExposures.add(feature)
       return {
         value: coalesceNullFeatureValue(cached, defaultValue),
         source: 'disk',
@@ -1426,31 +1556,32 @@ export function getFeatureValue_CACHED_MAY_BE_STALE<T>(
     return localDefault as T
   }
 
+  const state = getGrowthBookHostState()
   // Log experiment exposure if data is available, otherwise defer until after init
-  if (experimentDataByFeature.has(feature)) {
-    logExposureForFeature(feature)
+  if (state.experimentDataByFeature.has(feature)) {
+    logExposureForFeature(feature, state)
   } else {
-    pendingExposures.add(feature)
+    state.pendingExposures.add(feature)
   }
 
   // In-memory payload is authoritative once processRemoteEvalPayload has run.
   // densable nji: null → defaultValue
-  if (remoteEvalFeatureValues.has(feature)) {
+  if (state.remoteEvalFeatureValues.has(feature)) {
     return coalesceNullFeatureValue(
-      remoteEvalFeatureValues.get(feature),
+      state.remoteEvalFeatureValues.get(feature),
       defaultValue,
     )
   }
 
   // Official 2.1.326 #56 (`holdsAnswer()`): once a live payload has arrived,
   // do not fall back to stale on-disk cache entries for flags removed from it.
-  if (remoteEvalFeatureValues.size > 0) {
+  if (state.remoteEvalFeatureValues.size > 0) {
     return defaultValue
   }
 
   // Fall back to carried ownSavedFlags / disk cache (cachedGrowthBookFeatures ?? cachedFeatureFlags)
   try {
-    const cached = readSavedFlags()?.[feature]
+    const cached = readSavedFlags(state)?.[feature]
     if (cached !== undefined) {
       return coalesceNullFeatureValue(cached, defaultValue)
     }
@@ -1505,11 +1636,12 @@ export function checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
     return localDefault !== undefined ? Boolean(localDefault) : false
   }
 
+  const state = getGrowthBookHostState()
   // Log experiment exposure if data is available, otherwise defer until after init
-  if (experimentDataByFeature.has(gate)) {
-    logExposureForFeature(gate)
+  if (state.experimentDataByFeature.has(gate)) {
+    logExposureForFeature(gate, state)
   } else {
-    pendingExposures.add(gate)
+    state.pendingExposures.add(gate)
   }
 
   // Return cached value immediately from carried flags or disk
@@ -1517,7 +1649,7 @@ export function checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
   try {
     const config = getGlobalConfig() as GlobalConfigWithFeatureFlags
     const gbCached =
-      ownSavedFlags?.flags?.[gate] ??
+      state.ownSavedFlags?.flags?.[gate] ??
       readSavedFeatureFlagsFromConfig(config)?.[gate]
     if (gbCached !== undefined) {
       return Boolean(gbCached)
@@ -1564,10 +1696,11 @@ export async function checkSecurityRestrictionGate(
     return false
   }
 
+  const state = getGrowthBookHostState()
   // If re-initialization is in progress, wait for it to complete
   // This ensures we get fresh values after auth changes
-  if (reinitializingPromise) {
-    await reinitializingPromise
+  if (state.reinitializingPromise) {
+    await state.reinitializingPromise
   }
 
   // Check Statsig cache first - it may have correct value from previous logged-in session
@@ -1579,7 +1712,7 @@ export async function checkSecurityRestrictionGate(
 
   // Then check carried ownSavedFlags / GrowthBook / cachedFeatureFlags cache
   const gbCached =
-    ownSavedFlags?.flags?.[gate] ??
+    state.ownSavedFlags?.flags?.[gate] ??
     readSavedFeatureFlagsFromConfig(config)?.[gate]
   if (gbCached !== undefined) {
     return Boolean(gbCached)
@@ -1620,25 +1753,26 @@ export async function checkGate_CACHED_OR_BLOCKING(
     return localDefault !== undefined ? Boolean(localDefault) : false
   }
 
+  const state = getGrowthBookHostState()
   // Fast path: in-memory remote eval already says true
-  if (remoteEvalFeatureValues.get(gate) === true) {
-    logExposureForFeature(gate)
+  if (state.remoteEvalFeatureValues.get(gate) === true) {
+    logExposureForFeature(gate, state)
     return true
   }
 
   // Fast path: carried ownSavedFlags or disk cache already says true — trust it
   const cached =
-    ownSavedFlags?.flags?.[gate] === true
+    state.ownSavedFlags?.flags?.[gate] === true
       ? true
       : readSavedFeatureFlagsFromConfig(
           getGlobalConfig() as GlobalConfigWithFeatureFlags,
         )?.[gate]
   if (cached === true) {
     // Log experiment exposure if data is available, otherwise defer
-    if (experimentDataByFeature.has(gate)) {
-      logExposureForFeature(gate)
+    if (state.experimentDataByFeature.has(gate)) {
+      logExposureForFeature(gate, state)
     } else {
-      pendingExposures.add(gate)
+      state.pendingExposures.add(gate)
     }
     return true
   }
@@ -1681,17 +1815,18 @@ export function refreshGrowthBookAfterAuthChange(
     return
   }
 
+  const state = getGrowthBookHostState()
   try {
     let carried: SavedFlagsSnapshot | null = null
     if (options?.keepsOwnSavedFlags === true) {
       carried =
-        remoteEvalFeatureValues.size > 0
+        state.remoteEvalFeatureValues.size > 0
           ? {
-              flags: Object.fromEntries(remoteEvalFeatureValues),
-              accountUuid: clientAuthAccountUuid,
-              organizationUuid: clientAuthOrganizationUuid,
+              flags: Object.fromEntries(state.remoteEvalFeatureValues),
+              accountUuid: state.clientAuthAccountUuid,
+              organizationUuid: state.clientAuthOrganizationUuid,
             }
-          : ownSavedFlags
+          : state.ownSavedFlags
     }
 
     // densable Iwe always preservePendingExposures:true on auth-change path
@@ -1699,33 +1834,37 @@ export function refreshGrowthBookAfterAuthChange(
       preservePendingExposures: true,
       preserveLoggedExposures: options?.preserveLoggedExposures,
     })
-    ownSavedFlags = carried
+    state.ownSavedFlags = carried
 
     // resetGrowthBook cleared remoteEvalFeatureValues. If re-init below
     // times out (hadFeatures=false) or short-circuits on !hasAuth (logout),
     // the init-callback notify never fires — subscribers stay synced to the
     // previous account's memoized state. Notify here so they re-read now
     // (falls to carried ownSavedFlags / disk cache).
-    refreshed.emit()
+    state.refreshed.emit()
 
     // Reinitialize with fresh auth headers and attributes
-    reinitializingPromise = initializeGrowthBook()
+    const reinitPromise = initializeGrowthBook()
       .catch(error => {
         logError(toError(error))
         return null
       })
       .finally(() => {
-        reinitializingPromise = null
+        if (state.reinitializingPromise === reinitPromise) {
+          state.reinitializingPromise = null
+        }
         if (
-          ownSavedFlags !== null &&
-          (!clientCreatedWithAuth ||
-            clientAuthAccountUuid !== ownSavedFlags.accountUuid ||
-            clientAuthOrganizationUuid !== ownSavedFlags.organizationUuid)
+          state.ownSavedFlags !== null &&
+          (!state.clientCreatedWithAuth ||
+            state.clientAuthAccountUuid !== state.ownSavedFlags.accountUuid ||
+            state.clientAuthOrganizationUuid !==
+              state.ownSavedFlags.organizationUuid)
         ) {
-          ownSavedFlags = null
-          refreshed.emit()
+          state.ownSavedFlags = null
+          state.refreshed.emit()
         }
       })
+    state.reinitializingPromise = reinitPromise
   } catch (error) {
     if (process.env.NODE_ENV === 'development') {
       throw error
@@ -1739,41 +1878,33 @@ export function refreshGrowthBookAfterAuthChange(
  * densable mYt(e) — optional preservePendingExposures / preserveLoggedExposures.
  */
 export function resetGrowthBook(options?: GrowthBookResetOptions): void {
+  const state = getGrowthBookHostState()
   stopPeriodicGrowthBookRefresh()
-  // Remove process handlers before destroying client to prevent accumulation
-  if (currentBeforeExitHandler) {
-    process.off('beforeExit', currentBeforeExitHandler)
-    currentBeforeExitHandler = null
-  }
-  if (currentExitHandler) {
-    process.off('exit', currentExitHandler)
-    currentExitHandler = null
-  }
-  client?.destroy()
-  client = null
-  clientCreatedWithAuth = false
-  clientAuthAuthorization = undefined
-  clientAuthAccountUuid = undefined
-  clientAuthOrganizationUuid = undefined
-  reinitializingPromise = null
-  experimentDataByFeature.clear()
+  state.client?.destroy()
+  state.client = null
+  state.clientCreatedWithAuth = false
+  state.clientAuthAuthorization = undefined
+  state.clientAuthAccountUuid = undefined
+  state.clientAuthOrganizationUuid = undefined
+  state.reinitializingPromise = null
+  state.experimentDataByFeature.clear()
   if (!options?.preservePendingExposures) {
-    pendingExposures.clear()
+    state.pendingExposures.clear()
   }
   if (!options?.preserveLoggedExposures) {
-    loggedExposures.clear()
+    state.loggedExposures.clear()
     // densable mYt: !preserveLoggedExposures → clear QBi/ZBi/eji one-shot flags
-    loggedSkippedNonObjectFeatures = false
-    loggedSkippedMalformedExperiments = false
-    loggedSkippedValueLessFeatures = false
+    state.loggedSkippedNonObjectFeatures = false
+    state.loggedSkippedMalformedExperiments = false
+    state.loggedSkippedValueLessFeatures = false
   }
-  remoteEvalFeatureValues.clear()
-  ownSavedFlags = null
+  state.remoteEvalFeatureValues.clear()
+  state.ownSavedFlags = null
   getGrowthBookClient.cache?.clear?.()
   initializeGrowthBook.cache?.clear?.()
-  envOverrides = null
-  envOverridesRaw = undefined
-  envOverridesParsed = false
+  state.envOverrides = null
+  state.envOverridesRaw = undefined
+  state.envOverridesParsed = false
 }
 
 // Periodic refresh interval — official RSh hardcode 6h (21600000) with
@@ -1781,8 +1912,6 @@ export function resetGrowthBook(options?: GrowthBookResetOptions): void {
 function getGrowthBookRefreshIntervalMs(): number {
   return resolveGbRefreshIntervalMsOrDefault()
 }
-let refreshInterval: ReturnType<typeof setInterval> | null = null
-let beforeExitListener: (() => void) | null = null
 
 /**
  * Light refresh - re-fetch features from server without recreating client.
@@ -1795,9 +1924,10 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
     return
   }
 
+  const state = getGrowthBookHostState()
   try {
     // densable X8n: if (q8n) { checkAndRefreshOAuth…; if Authorization rotated → Iwe }
-    if (clientCreatedWithAuth) {
+    if (state.clientCreatedWithAuth) {
       try {
         const { checkAndRefreshOAuthTokenIfNeeded } = await import(
           '../../utils/auth.js'
@@ -1820,11 +1950,11 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
         // config unavailable
       }
       const decision = decideGrowthBookAuthRefresh({
-        clientCreatedWithAuth,
+        clientCreatedWithAuth: state.clientCreatedWithAuth,
         stamped: {
-          authorization: clientAuthAuthorization,
-          accountUuid: clientAuthAccountUuid,
-          organizationUuid: clientAuthOrganizationUuid,
+          authorization: state.clientAuthAuthorization,
+          accountUuid: state.clientAuthAccountUuid,
+          organizationUuid: state.clientAuthOrganizationUuid,
         },
         currentAuthorization,
         currentAccountUuid,
@@ -1842,12 +1972,12 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
         })
         return
       }
-    } else if (client) {
+    } else if (state.client) {
       // Official 2.1.323 (#2001): sessions opened before sign-in created a
       // signed-out GrowthBook client (`clientCreatedWithAuth === false`).
       // When auth headers appear later (e.g. after /login), re-read user
       // attributes and recreate GrowthBook so signed-out flags are replaced.
-      const prevClient = client
+      const prevClient = state.client
       try {
         const { checkAndRefreshOAuthTokenIfNeeded } = await import(
           '../../utils/auth.js'
@@ -1858,7 +1988,7 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
       }
       const currentAuth = getAuthHeaders()
       if (
-        prevClient === client &&
+        prevClient === state.client &&
         !currentAuth.error &&
         (currentAuth.headers.Authorization ||
           Object.keys(currentAuth.headers).length > 0)
@@ -1880,25 +2010,25 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
     // Guard: if this client was replaced during the in-flight refresh
     // (e.g. refreshGrowthBookAfterAuthChange ran), skip processing the
     // stale payload. Mirrors the init-callback guard above.
-    if (growthBookClient !== client) {
+    if (growthBookClient !== state.client) {
       return
     }
 
     // Rebuild remoteEvalFeatureValues from the refreshed payload so that
     // _BLOCKS_ON_INIT callers (e.g. getMaxVersion for the auto-update kill
     // switch) see fresh values, not the stale init-time snapshot.
-    const hadFeatures = await processRemoteEvalPayload(growthBookClient)
+    const hadFeatures = await processRemoteEvalPayload(growthBookClient, state)
     // Same re-check as init path: covers the setPayload yield inside
     // processRemoteEvalPayload (the guard above only covers refreshFeatures).
-    if (growthBookClient !== client) return
+    if (growthBookClient !== state.client) return
 
     // Gate on hadFeatures: if the payload was empty/malformed,
     // remoteEvalFeatureValues wasn't rebuilt — skip both the no-op disk
     // write and the spurious subscriber churn (clearCommandMemoizationCaches
     // + getCommands + 4× model re-renders).
     if (hadFeatures) {
-      syncRemoteEvalToDisk()
-      refreshed.emit()
+      syncRemoteEvalToDisk(state)
+      state.refreshed.emit()
     }
   } catch (error) {
     if (process.env.NODE_ENV === 'development') {
@@ -1991,37 +2121,47 @@ export function setupPeriodicGrowthBookRefresh(): void {
     return
   }
 
+  const state = getGrowthBookHostState()
+  const rootSessionRef = new WeakRef(getBootstrapSession().root)
+
   // Clear any existing interval to avoid duplicates
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
+  if (state.refreshInterval) {
+    clearInterval(state.refreshInterval)
+    state.refreshInterval = null
   }
 
-  refreshInterval = setInterval(() => {
-    void refreshGrowthBookFeatures()
+  const interval = setInterval(() => {
+    const session = rootSessionRef.deref()
+    if (!session) {
+      clearInterval(interval)
+      return
+    }
+    const hostState = growthBookHostSlot.peek(session.host)
+    if (!hostState || hostState.refreshInterval !== interval) {
+      clearInterval(interval)
+      return
+    }
+    runWithSession(session, () => {
+      void refreshGrowthBookFeatures()
+    })
   }, getGrowthBookRefreshIntervalMs())
   // Allow process to exit naturally - this timer shouldn't keep the process alive
-  refreshInterval.unref?.()
+  interval.unref?.()
+  state.refreshInterval = interval
 
-  // Register cleanup listener only once
-  if (!beforeExitListener) {
-    beforeExitListener = () => {
-      stopPeriodicGrowthBookRefresh()
-    }
-    process.once('beforeExit', beforeExitListener)
-  }
+  // Track this host state under the single process-wide shared exit hook pair
+  // (no per-host process.once('beforeExit') listener accumulation).
+  trackLiveGrowthBookHostState(state)
 }
 
 /**
  * Stop periodic refresh (for testing or cleanup)
  */
 export function stopPeriodicGrowthBookRefresh(): void {
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-    refreshInterval = null
-  }
-  if (beforeExitListener) {
-    process.removeListener('beforeExit', beforeExitListener)
-    beforeExitListener = null
+  const state = getGrowthBookHostState()
+  if (state.refreshInterval) {
+    clearInterval(state.refreshInterval)
+    state.refreshInterval = null
   }
 }
 
@@ -2057,9 +2197,11 @@ export function getDynamicConfig_CACHED_MAY_BE_STALE<T>(
 }
 
 // densable `de` — Gx `wx` / `he` reads `tengu_lively_beaver` through this slot.
-registerAccountOnHoldGateReader(gate =>
-  checkStatsigFeatureGate_CACHED_MAY_BE_STALE(gate),
-)
+exitSessionContext(() => {
+  registerAccountOnHoldGateReader(gate =>
+    checkStatsigFeatureGate_CACHED_MAY_BE_STALE(gate),
+  )
+})
 
 // file.ts reads `tengu_compact_line_prefix_killswitch` through this slot
 // instead of importing this module — that import was the edge that dragged

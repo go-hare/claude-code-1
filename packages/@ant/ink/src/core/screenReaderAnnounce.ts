@@ -6,6 +6,8 @@
  * so VoiceOver/NVDA speak the killed text without needing a permanent DOM node.
  */
 
+import { InkHostSlot } from './instances.js'
+
 const MAX_QUEUE = 16
 /** densable `v` / `M` — CLAUDE_AX_PREPARK_MS default 0, cap 5000. */
 const PREPARK_DEFAULT_MS = 0
@@ -14,11 +16,19 @@ const PREPARK_MAX_MS = 5000
 const ANNOUNCEMENT_HOLD_DEFAULT_MS = 1000
 const ANNOUNCEMENT_HOLD_MAX_MS = 10_000
 
-let queue: string[] = []
-/** densable `#t` — next drain should hold the SR frame. */
-let holdRequested = false
-/** densable `#a` — hold-until epoch ms. */
-let holdUntilMs = 0
+type ScreenReaderAnnounceHostState = {
+  queue: string[]
+  /** densable `#t` — next drain should hold the SR frame. */
+  holdRequested: boolean
+  /** densable `#a` — hold-until epoch ms. */
+  holdUntilMs: number
+}
+
+const announceHostSlot = new InkHostSlot<ScreenReaderAnnounceHostState>(() => ({
+  queue: [],
+  holdRequested: false,
+  holdUntilMs: 0,
+}))
 
 /**
  * densable `mW` / `pWr` — push an announcement; keep only the last MAX_QUEUE items.
@@ -26,10 +36,11 @@ let holdUntilMs = 0
  */
 export function announceForScreenReader(text: string, hold = false): void {
   if (text === '') return
-  queue.push(text)
-  if (hold) holdRequested = true
-  if (queue.length > MAX_QUEUE) {
-    queue.splice(0, queue.length - MAX_QUEUE)
+  const state = announceHostSlot.of()
+  state.queue.push(text)
+  if (hold) state.holdRequested = true
+  if (state.queue.length > MAX_QUEUE) {
+    state.queue.splice(0, state.queue.length - MAX_QUEUE)
   }
 }
 
@@ -37,40 +48,48 @@ export function announceForScreenReader(text: string, hold = false): void {
  * densable `GJc` — drain and clear the announcement queue.
  */
 export function drainScreenReaderAnnouncements(): string[] {
-  if (queue.length === 0) return []
-  const out = queue
-  queue = []
+  const state = announceHostSlot.peek()
+  if (!state || state.queue.length === 0) return []
+  const out = state.queue
+  state.queue = []
   return out
 }
 
 /** Test helper — clear queue without reading. */
 export function clearScreenReaderAnnouncements(): void {
-  queue = []
-  holdRequested = false
-  holdUntilMs = 0
+  const state = announceHostSlot.peek()
+  if (!state) return
+  state.queue = []
+  state.holdRequested = false
+  state.holdUntilMs = 0
 }
 
 /** densable `takeHoldRequest`. */
 export function takeScreenReaderHoldRequest(): boolean {
-  const requested = holdRequested
-  holdRequested = false
+  const state = announceHostSlot.peek()
+  if (!state) return false
+  const requested = state.holdRequested
+  state.holdRequested = false
   return requested
 }
 
 /** densable `GXo`. */
 export function startScreenReaderHold(untilMs: number): void {
-  holdUntilMs = untilMs
+  announceHostSlot.of().holdUntilMs = untilMs
 }
 
 /** densable `pWe`. */
 export function endScreenReaderHold(): void {
-  holdUntilMs = 0
-  holdRequested = false
+  const state = announceHostSlot.peek()
+  if (!state) return
+  state.holdUntilMs = 0
+  state.holdRequested = false
 }
 
 /** densable `zXo` + 2.1.323 (#2088) monotonic clock via `performance.now()`. */
 export function isScreenReaderHoldActive(nowMs = performance.now()): boolean {
-  return nowMs < holdUntilMs
+  const state = announceHostSlot.peek()
+  return state !== undefined && nowMs < state.holdUntilMs
 }
 
 /** densable `UXo`. */
@@ -105,7 +124,7 @@ export function takeScreenReaderAnnouncementHoldMs(
 
 /** Test helper — peek without drain. */
 export function peekScreenReaderAnnouncements(): readonly string[] {
-  return queue
+  return announceHostSlot.peek()?.queue ?? []
 }
 
 /**

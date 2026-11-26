@@ -33,42 +33,109 @@ import {
   splitIgnoreFileLines,
 } from '../utils/ignorePatterns.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
-import { createSignal } from '../utils/signal.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  type Session,
+} from '../utils/sessionRoot.js'
+import { createSignal, type Signal } from '../utils/signal.js'
 
-// Lazily constructed singleton
-let fileIndex: FileIndex | null = null
-
-function getFileIndex(): FileIndex {
-  if (!fileIndex) {
-    fileIndex = new FileIndex()
-  }
-  return fileIndex
+type FileSuggestionsSessionState = {
+  // Lazily constructed per-session FileIndex
+  fileIndex: FileIndex | null
+  fileListRefreshPromise: Promise<FileIndex> | null
+  // Signal fired when an in-progress index build completes. Lets the
+  // typeahead UI re-run its last search so partial results upgrade to full.
+  indexBuildComplete: Signal
+  cacheGeneration: number
+  // Background fetch for untracked files
+  untrackedFetchPromise: Promise<void> | null
+  // Store tracked files so we can rebuild index with untracked
+  cachedTrackedFiles: string[]
+  // Store config files so mergeUntrackedIntoNormalizedCache preserves them
+  cachedConfigFiles: string[]
+  // Store tracked directories so mergeUntrackedIntoNormalizedCache doesn't
+  // recompute ~270k path.dirname() calls on each merge
+  cachedTrackedDirs: string[]
+  // Cache for .ignore/.rgignore patterns (keyed by repoRoot:cwd)
+  ignorePatternsCache: ReturnType<typeof ignore> | null
+  ignorePatternsCacheKey: string | null
+  ignoreReincludeGlobs: string[]
+  lastReincludedFiles: string[]
+  reincludeRetryAtMs: number
+  // Throttle state for background refresh. .git/index mtime triggers an
+  // immediate refresh when tracked files change (add/checkout/commit/rm).
+  // The time floor still refreshes every 5s to pick up untracked files,
+  // which don't bump the index.
+  lastRefreshMs: number
+  lastGitIndexMtime: number | null
+  // Signatures of the path lists loaded into the Rust index. Two separate
+  // signatures because the two loadFromFileList call sites use differently
+  // structured arrays — a shared signature would ping-pong and never match.
+  // Skips nucleo.restart() when git ls-files returns an unchanged list
+  // (e.g. `git add` of an already-tracked file bumps index mtime but not the list).
+  loadedTrackedSignature: string | null
+  loadedMergedSignature: string | null
 }
 
-let fileListRefreshPromise: Promise<FileIndex> | null = null
-// Signal fired when an in-progress index build completes. Lets the
-// typeahead UI re-run its last search so partial results upgrade to full.
-const indexBuildComplete = createSignal()
-export const onIndexBuildComplete = indexBuildComplete.subscribe
-let cacheGeneration = 0
+const fileSuggestionsStateBySession =
+  new RootSessionSlot<FileSuggestionsSessionState>(() => ({
+    fileIndex: null,
+    fileListRefreshPromise: null,
+    indexBuildComplete: createSignal(),
+    cacheGeneration: 0,
+    untrackedFetchPromise: null,
+    cachedTrackedFiles: [],
+    cachedConfigFiles: [],
+    cachedTrackedDirs: [],
+    ignorePatternsCache: null,
+    ignorePatternsCacheKey: null,
+    ignoreReincludeGlobs: [],
+    lastReincludedFiles: [],
+    reincludeRetryAtMs: 0,
+    lastRefreshMs: 0,
+    lastGitIndexMtime: null,
+    loadedTrackedSignature: null,
+    loadedMergedSignature: null,
+  }))
 
-// Background fetch for untracked files
-let untrackedFetchPromise: Promise<void> | null = null
+function getFileSuggestionsState(): FileSuggestionsSessionState {
+  return fileSuggestionsStateBySession.of(getBootstrapSession())
+}
 
-// Store tracked files so we can rebuild index with untracked
-let cachedTrackedFiles: string[] = []
-// Store config files so mergeUntrackedIntoNormalizedCache preserves them
-let cachedConfigFiles: string[] = []
-// Store tracked directories so mergeUntrackedIntoNormalizedCache doesn't
-// recompute ~270k path.dirname() calls on each merge
-let cachedTrackedDirs: string[] = []
+function runInCapturedSession<T>(
+  captured: Session | undefined,
+  fn: () => T,
+): T {
+  if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+    return runWithSession(captured, fn)
+  }
+  return fn()
+}
 
-// Cache for .ignore/.rgignore patterns (keyed by repoRoot:cwd)
-let ignorePatternsCache: ReturnType<typeof ignore> | null = null
-let ignorePatternsCacheKey: string | null = null
-let ignoreReincludeGlobs: string[] = []
-let lastReincludedFiles: string[] = []
-let reincludeRetryAtMs = 0
+function getFileIndex(
+  state: FileSuggestionsSessionState = getFileSuggestionsState(),
+): FileIndex {
+  if (!state.fileIndex) {
+    state.fileIndex = new FileIndex()
+  }
+  return state.fileIndex
+}
+
+export function onIndexBuildComplete(listener: () => void): () => void {
+  const state = getFileSuggestionsState()
+  const captured = getActiveSessionFromAls()
+  const wrapped =
+    captured !== undefined
+      ? () => {
+          runInCapturedSession(captured, listener)
+        }
+      : listener
+  return state.indexBuildComplete.subscribe(wrapped)
+}
+
 const REINCLUDE_RETRY_BACKOFF_MS = 60_000
 const VCS_EXCLUDE_GLOBS = [
   '--glob',
@@ -85,43 +152,29 @@ const VCS_EXCLUDE_GLOBS = [
   '!.sl/',
 ]
 
-// Throttle state for background refresh. .git/index mtime triggers an
-// immediate refresh when tracked files change (add/checkout/commit/rm).
-// The time floor still refreshes every 5s to pick up untracked files,
-// which don't bump the index.
-let lastRefreshMs = 0
-let lastGitIndexMtime: number | null = null
-
-// Signatures of the path lists loaded into the Rust index. Two separate
-// signatures because the two loadFromFileList call sites use differently
-// structured arrays — a shared signature would ping-pong and never match.
-// Skips nucleo.restart() when git ls-files returns an unchanged list
-// (e.g. `git add` of an already-tracked file bumps index mtime but not the list).
-let loadedTrackedSignature: string | null = null
-let loadedMergedSignature: string | null = null
-
 /**
  * Clear all file suggestion caches.
  * Call this when resuming a session to ensure fresh file discovery.
  */
 export function clearFileSuggestionCaches(): void {
-  fileIndex = null
-  fileListRefreshPromise = null
-  cacheGeneration++
-  untrackedFetchPromise = null
-  cachedTrackedFiles = []
-  cachedConfigFiles = []
-  cachedTrackedDirs = []
-  indexBuildComplete.clear()
-  ignorePatternsCache = null
-  ignorePatternsCacheKey = null
-  ignoreReincludeGlobs = []
-  lastReincludedFiles = []
-  reincludeRetryAtMs = 0
-  lastRefreshMs = 0
-  lastGitIndexMtime = null
-  loadedTrackedSignature = null
-  loadedMergedSignature = null
+  const state = getFileSuggestionsState()
+  state.fileIndex = null
+  state.fileListRefreshPromise = null
+  state.cacheGeneration++
+  state.untrackedFetchPromise = null
+  state.cachedTrackedFiles = []
+  state.cachedConfigFiles = []
+  state.cachedTrackedDirs = []
+  state.indexBuildComplete.clear()
+  state.ignorePatternsCache = null
+  state.ignorePatternsCacheKey = null
+  state.ignoreReincludeGlobs = []
+  state.lastReincludedFiles = []
+  state.reincludeRetryAtMs = 0
+  state.lastRefreshMs = 0
+  state.lastGitIndexMtime = null
+  state.loadedTrackedSignature = null
+  state.loadedMergedSignature = null
 }
 
 /**
@@ -193,30 +246,31 @@ function normalizeGitPaths(
  * Merge already-normalized untracked files into the cache
  */
 async function mergeUntrackedIntoNormalizedCache(
+  state: FileSuggestionsSessionState,
   normalizedUntracked: string[],
 ): Promise<void> {
   if (normalizedUntracked.length === 0) return
-  if (!fileIndex || cachedTrackedFiles.length === 0) return
+  if (!state.fileIndex || state.cachedTrackedFiles.length === 0) return
 
   const untrackedDirs = await getDirectoryNamesAsync(normalizedUntracked)
   const allPaths = [
-    ...cachedTrackedFiles,
-    ...cachedConfigFiles,
-    ...cachedTrackedDirs,
+    ...state.cachedTrackedFiles,
+    ...state.cachedConfigFiles,
+    ...state.cachedTrackedDirs,
     ...normalizedUntracked,
     ...untrackedDirs,
   ]
   const sig = pathListSignature(allPaths)
-  if (sig === loadedMergedSignature) {
+  if (sig === state.loadedMergedSignature) {
     logForDebugging(
       `[FileIndex] skipped index rebuild — merged paths unchanged`,
     )
     return
   }
-  await fileIndex.loadFromFileListAsync(allPaths).done
-  loadedMergedSignature = sig
+  await state.fileIndex.loadFromFileListAsync(allPaths).done
+  state.loadedMergedSignature = sig
   logForDebugging(
-    `[FileIndex] rebuilt index with ${cachedTrackedFiles.length} tracked + ${normalizedUntracked.length} untracked files`,
+    `[FileIndex] rebuilt index with ${state.cachedTrackedFiles.length} tracked + ${normalizedUntracked.length} untracked files`,
   )
 }
 
@@ -280,14 +334,15 @@ export function extractIgnoreReincludeRules(
  * Results are cached per repoRoot:cwd combination
  */
 async function loadRipgrepIgnorePatterns(
+  state: FileSuggestionsSessionState,
   repoRoot: string,
   cwd: string,
 ): Promise<ReturnType<typeof ignore> | null> {
   const cacheKey = `${repoRoot}:${cwd}`
 
   // Return cached result if available
-  if (ignorePatternsCacheKey === cacheKey) {
-    return ignorePatternsCache
+  if (state.ignorePatternsCacheKey === cacheKey) {
+    return state.ignorePatternsCache
   }
 
   const fs = getFsImplementation()
@@ -328,9 +383,9 @@ async function loadRipgrepIgnorePatterns(
   }
 
   const result = hasPatterns ? ig : null
-  ignorePatternsCache = result
-  ignorePatternsCacheKey = cacheKey
-  ignoreReincludeGlobs = hasNegation ? [...augmentations, ...rules] : []
+  state.ignorePatternsCache = result
+  state.ignorePatternsCacheKey = cacheKey
+  state.ignoreReincludeGlobs = hasNegation ? [...augmentations, ...rules] : []
 
   return result
 }
@@ -344,6 +399,7 @@ async function loadRipgrepIgnorePatterns(
  * This is intentional as git tracks symlinks as symlinks.
  */
 async function getFilesUsingGit(
+  state: FileSuggestionsSessionState,
   abortSignal: AbortSignal,
   respectGitignore: boolean,
 ): Promise<string[] | null> {
@@ -384,7 +440,7 @@ async function getFilesUsingGit(
     let normalizedTracked = normalizeGitPaths(trackedFiles, repoRoot, cwd)
 
     // Apply .ignore/.rgignore patterns if present (faster than falling back to ripgrep)
-    const ignorePatterns = await loadRipgrepIgnorePatterns(repoRoot, cwd)
+    const ignorePatterns = await loadRipgrepIgnorePatterns(state, repoRoot, cwd)
     if (ignorePatterns) {
       const beforeCount = normalizedTracked.length
       normalizedTracked = ignorePatterns.filter(normalizedTracked)
@@ -394,7 +450,7 @@ async function getFilesUsingGit(
     }
 
     // Cache tracked files for later merge with untracked
-    cachedTrackedFiles = normalizedTracked
+    state.cachedTrackedFiles = normalizedTracked
 
     const duration = Date.now() - startTime
     logForDebugging(
@@ -409,7 +465,7 @@ async function getFilesUsingGit(
     })
 
     // Start background fetch for untracked files (don't await)
-    if (!untrackedFetchPromise) {
+    if (!state.untrackedFetchPromise) {
       const untrackedArgs = respectGitignore
         ? [
             '-c',
@@ -420,93 +476,106 @@ async function getFilesUsingGit(
           ]
         : ['-c', 'core.quotepath=false', 'ls-files', '--others']
 
-      const generation = cacheGeneration
-      untrackedFetchPromise = (async () => {
-        const ignorePatterns = await loadRipgrepIgnorePatterns(repoRoot, cwd)
-        const shouldReinclude =
-          respectGitignore && ignoreReincludeGlobs.length > 0
-        const reincludedPromise =
-          shouldReinclude && Date.now() >= reincludeRetryAtMs
-            ? ripGrep(
-                [
-                  '--files',
-                  '--hidden',
-                  ...ignoreReincludeGlobs.flatMap(g => ['--glob', g]),
-                  ...VCS_EXCLUDE_GLOBS,
-                ],
-                '.',
-                AbortSignal.timeout(10_000),
-                { cwd: repoRoot },
-              )
-                .then(files => {
-                  if (generation === cacheGeneration) {
-                    lastReincludedFiles = files
-                  }
-                  return files
-                })
-                .catch(err => {
-                  logForDebugging(
-                    `[FileIndex] .ignore re-include listing failed: ${errorMessage(err)}`,
-                  )
-                  if (generation === cacheGeneration) {
-                    reincludeRetryAtMs = Date.now() + REINCLUDE_RETRY_BACKOFF_MS
-                  }
-                  return lastReincludedFiles
-                })
-            : Promise.resolve(shouldReinclude ? lastReincludedFiles : [])
-
-        const [untrackedResult, reincludedFiles] = await Promise.all([
-          execFileNoThrowWithCwd(gitExe(), untrackedArgs, {
-            timeout: 10000,
-            cwd: repoRoot,
-          }),
-          reincludedPromise,
-        ])
-        if (generation !== cacheGeneration) {
-          return // Cache was cleared; don't merge stale untracked files
-        }
-        if (untrackedResult.code === 0) {
-          const rawUntrackedFiles = untrackedResult.stdout
-            .trim()
-            .split('\n')
-            .filter(Boolean)
-          for (const f of reincludedFiles
-            .map(p => path.normalize(p).replaceAll(path.sep, '/'))
-            .sort()) {
-            rawUntrackedFiles.push(f)
-          }
-
-          // Normalize paths BEFORE applying ignore patterns (consistent with tracked files)
-          let normalizedUntracked = normalizeGitPaths(
-            rawUntrackedFiles,
+      const generation = state.cacheGeneration
+      const captured = getActiveSessionFromAls()
+      const untrackedPromise = runInCapturedSession(captured, () =>
+        (async () => {
+          const ignorePatterns = await loadRipgrepIgnorePatterns(
+            state,
             repoRoot,
             cwd,
           )
+          const shouldReinclude =
+            respectGitignore && state.ignoreReincludeGlobs.length > 0
+          const reincludedPromise =
+            shouldReinclude && Date.now() >= state.reincludeRetryAtMs
+              ? ripGrep(
+                  [
+                    '--files',
+                    '--hidden',
+                    ...state.ignoreReincludeGlobs.flatMap(g => ['--glob', g]),
+                    ...VCS_EXCLUDE_GLOBS,
+                  ],
+                  '.',
+                  AbortSignal.timeout(10_000),
+                  { cwd: repoRoot },
+                )
+                  .then(files => {
+                    if (generation === state.cacheGeneration) {
+                      state.lastReincludedFiles = files
+                    }
+                    return files
+                  })
+                  .catch(err => {
+                    logForDebugging(
+                      `[FileIndex] .ignore re-include listing failed: ${errorMessage(err)}`,
+                    )
+                    if (generation === state.cacheGeneration) {
+                      state.reincludeRetryAtMs =
+                        Date.now() + REINCLUDE_RETRY_BACKOFF_MS
+                    }
+                    return state.lastReincludedFiles
+                  })
+              : Promise.resolve(
+                  shouldReinclude ? state.lastReincludedFiles : [],
+                )
 
-          // Apply .ignore/.rgignore patterns to normalized untracked files
-          if (ignorePatterns && normalizedUntracked.length > 0) {
-            const beforeCount = normalizedUntracked.length
-            normalizedUntracked = ignorePatterns.filter(normalizedUntracked)
-            logForDebugging(
-              `[FileIndex] applied ignore patterns to untracked: ${beforeCount} -> ${normalizedUntracked.length} files`,
-            )
+          const [untrackedResult, reincludedFiles] = await Promise.all([
+            execFileNoThrowWithCwd(gitExe(), untrackedArgs, {
+              timeout: 10000,
+              cwd: repoRoot,
+            }),
+            reincludedPromise,
+          ])
+          if (generation !== state.cacheGeneration) {
+            return // Cache was cleared; don't merge stale untracked files
           }
+          if (untrackedResult.code === 0) {
+            const rawUntrackedFiles = untrackedResult.stdout
+              .trim()
+              .split('\n')
+              .filter(Boolean)
+            for (const f of reincludedFiles
+              .map(p => path.normalize(p).replaceAll(path.sep, '/'))
+              .sort()) {
+              rawUntrackedFiles.push(f)
+            }
 
-          logForDebugging(
-            `[FileIndex] background untracked fetch: ${normalizedUntracked.length} files (${reincludedFiles.length} re-included by .ignore)`,
-          )
-          // Pass already-normalized files directly to merge function
-          void mergeUntrackedIntoNormalizedCache(normalizedUntracked)
-        }
-      })()
+            // Normalize paths BEFORE applying ignore patterns (consistent with tracked files)
+            let normalizedUntracked = normalizeGitPaths(
+              rawUntrackedFiles,
+              repoRoot,
+              cwd,
+            )
+
+            // Apply .ignore/.rgignore patterns to normalized untracked files
+            if (ignorePatterns && normalizedUntracked.length > 0) {
+              const beforeCount = normalizedUntracked.length
+              normalizedUntracked = ignorePatterns.filter(normalizedUntracked)
+              logForDebugging(
+                `[FileIndex] applied ignore patterns to untracked: ${beforeCount} -> ${normalizedUntracked.length} files`,
+              )
+            }
+
+            logForDebugging(
+              `[FileIndex] background untracked fetch: ${normalizedUntracked.length} files (${reincludedFiles.length} re-included by .ignore)`,
+            )
+            // Pass already-normalized files directly to merge function
+            void mergeUntrackedIntoNormalizedCache(state, normalizedUntracked)
+          }
+        })(),
+      )
         .catch(error => {
           logForDebugging(
             `[FileIndex] background untracked fetch failed: ${error}`,
           )
         })
         .finally(() => {
-          untrackedFetchPromise = null
+          if (state.untrackedFetchPromise === untrackedPromise) {
+            state.untrackedFetchPromise = null
+          }
         })
+      state.untrackedFetchPromise = untrackedPromise
     }
 
     return normalizedTracked
@@ -587,13 +656,14 @@ async function getClaudeConfigFiles(cwd: string): Promise<string[]> {
 async function getProjectFiles(
   abortSignal: AbortSignal,
   respectGitignore: boolean,
+  state: FileSuggestionsSessionState = getFileSuggestionsState(),
 ): Promise<string[]> {
   logForDebugging(
     `[FileIndex] getProjectFiles called, respectGitignore=${respectGitignore}`,
   )
 
   // Try git ls-files first (much faster for git repos)
-  const gitFiles = await getFilesUsingGit(abortSignal, respectGitignore)
+  const gitFiles = await getFilesUsingGit(state, abortSignal, respectGitignore)
   if (gitFiles !== null) {
     logForDebugging(
       `[FileIndex] using git ls-files result (${gitFiles.length} files)`,
@@ -627,8 +697,9 @@ async function getProjectFiles(
     rgArgs.push('--no-ignore-vcs')
   }
 
-  const files = await ripGrep(rgArgs, '.', abortSignal)
-  const relativePaths = files.map(f => path.relative(getCwd(), f))
+  const cwd = getCwd()
+  const files = await ripGrep(rgArgs, '.', abortSignal, { cwd })
+  const relativePaths = files.map(f => path.relative(cwd, path.resolve(cwd, f)))
 
   const duration = Date.now() - startTime
   logForDebugging(
@@ -649,8 +720,9 @@ async function getProjectFiles(
  * Returns a FileIndex populated for fast fuzzy search
  */
 export async function getPathsForSuggestions(): Promise<FileIndex> {
+  const state = getFileSuggestionsState()
   const signal = AbortSignal.timeout(10_000)
-  const index = getFileIndex()
+  const index = getFileIndex(state)
 
   try {
     // Check project settings first, then fall back to global config
@@ -674,25 +746,25 @@ export async function getPathsForSuggestions(): Promise<FileIndex> {
     ])
 
     // Cache for mergeUntrackedIntoNormalizedCache
-    cachedConfigFiles = configFiles
+    state.cachedConfigFiles = configFiles
 
     const allFiles = [...projectFiles, ...configFiles]
     const directories = await getDirectoryNamesAsync(allFiles)
-    cachedTrackedDirs = directories
+    state.cachedTrackedDirs = directories
     const allPathsList = [...directories, ...allFiles]
 
     // Skip rebuild when the list is unchanged. This is the common case
     // during a typing session — git ls-files returns the same output.
     const sig = pathListSignature(allPathsList)
-    if (sig !== loadedTrackedSignature) {
+    if (sig !== state.loadedTrackedSignature) {
       // Await the full build so cold-start returns complete results. The
       // build yields every ~4ms so the UI stays responsive — user can keep
       // typing during the ~120ms wait without input lag.
       await index.loadFromFileListAsync(allPathsList).done
-      loadedTrackedSignature = sig
+      state.loadedTrackedSignature = sig
       // We just replaced the merged index with tracked-only data. Force
       // the next untracked merge to rebuild even if its own sig matches.
-      loadedMergedSignature = null
+      state.loadedMergedSignature = null
     } else {
       logForDebugging(
         `[FileIndex] skipped index rebuild — tracked paths unchanged`,
@@ -770,7 +842,8 @@ function findMatchingFiles(
  */
 const REFRESH_THROTTLE_MS = 5_000
 export function startBackgroundCacheRefresh(): void {
-  if (fileListRefreshPromise) {
+  const state = getFileSuggestionsState()
+  if (state.fileListRefreshPromise) {
     return
   }
 
@@ -780,32 +853,42 @@ export function startBackgroundCacheRefresh(): void {
   // files, which don't bump .git/index. The signature checks downstream skip
   // the rebuild when the 5s refresh finds nothing actually changed.
   const indexMtime = getGitIndexMtime()
-  if (fileIndex) {
+  if (state.fileIndex) {
     const gitStateChanged =
-      indexMtime !== null && indexMtime !== lastGitIndexMtime
-    if (!gitStateChanged && Date.now() - lastRefreshMs < REFRESH_THROTTLE_MS) {
+      indexMtime !== null && indexMtime !== state.lastGitIndexMtime
+    if (
+      !gitStateChanged &&
+      Date.now() - state.lastRefreshMs < REFRESH_THROTTLE_MS
+    ) {
       return
     }
   }
 
-  const generation = cacheGeneration
+  const generation = state.cacheGeneration
   const refreshStart = Date.now()
+  const captured = getActiveSessionFromAls()
   // Ensure the FileIndex singleton exists — it's progressively queryable
   // via readyCount while the build runs. Callers searching early get partial
   // results; indexBuildComplete fires after .done so they can re-search.
-  getFileIndex()
-  fileListRefreshPromise = getPathsForSuggestions()
+  getFileIndex(state)
+  const refreshPromise = runInCapturedSession(captured, () =>
+    getPathsForSuggestions(),
+  )
     .then(result => {
-      if (generation !== cacheGeneration) {
+      if (generation !== state.cacheGeneration) {
         return result // Cache was cleared; don't overwrite with stale data
       }
-      fileListRefreshPromise = null
-      indexBuildComplete.emit()
+      if (state.fileListRefreshPromise === refreshPromise) {
+        state.fileListRefreshPromise = null
+      }
+      runInCapturedSession(captured, () => {
+        state.indexBuildComplete.emit()
+      })
       // Commit the start-time mtime observation on success. If git state
       // changed mid-refresh, the next call will see the newer mtime and
       // correctly refresh again.
-      lastGitIndexMtime = indexMtime
-      lastRefreshMs = Date.now()
+      state.lastGitIndexMtime = indexMtime
+      state.lastRefreshMs = Date.now()
       logForDebugging(
         `[FileIndex] cache refresh completed in ${Date.now() - refreshStart}ms`,
       )
@@ -816,11 +899,15 @@ export function startBackgroundCacheRefresh(): void {
         `[FileIndex] Cache refresh failed: ${errorMessage(error)}`,
       )
       logError(error)
-      if (generation === cacheGeneration) {
-        fileListRefreshPromise = null // Allow retry on next call
+      if (
+        generation === state.cacheGeneration &&
+        state.fileListRefreshPromise === refreshPromise
+      ) {
+        state.fileListRefreshPromise = null // Allow retry on next call
       }
-      return getFileIndex()
+      return getFileIndex(state)
     })
+  state.fileListRefreshPromise = refreshPromise
 }
 
 /**
@@ -884,7 +971,8 @@ export async function generateFileSuggestions(
     // searches during build return partial results from ready chunks, and
     // the typeahead callback (setOnIndexBuildComplete) re-fires the search
     // when the build finishes to upgrade partial → full.
-    const wasBuilding = fileListRefreshPromise !== null
+    const state = getFileSuggestionsState()
+    const wasBuilding = state.fileListRefreshPromise !== null
     startBackgroundCacheRefresh()
 
     // Handle both './' and '.\'
@@ -899,8 +987,8 @@ export async function generateFileSuggestions(
       normalizedPath = expandPath(normalizedPath)
     }
 
-    const matches = fileIndex
-      ? findMatchingFiles(fileIndex, normalizedPath)
+    const matches = state.fileIndex
+      ? findMatchingFiles(state.fileIndex, normalizedPath)
       : []
 
     const duration = Date.now() - startTime

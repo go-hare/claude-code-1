@@ -17,7 +17,11 @@ import {
   isReplBridgeActive,
 } from '../bootstrap/state.js'
 import { logForDebugging } from './debug.js'
-import { getBootstrapSessionHost } from './sessionRoot.js'
+import {
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  isSharedBackend,
+} from './sessionRoot.js'
 
 type TaskStartedEvent = {
   type: 'system'
@@ -289,12 +293,28 @@ export class SdkEventQueueBag {
   queueUsedReported = false
   nonbookendEvictionReported = false
   bookendEvictionReported = false
+  private heldLevels = 0
   /**
    * densable `Wf` without hostedWorker: `ENVIRONMENT_KIND==="bridge"`.
    * Gold bag default is `()=>false`; print/SDK host then overwrite. CLI analog
    * is live so bridge print stamps gx without a leftover SessionHost field.
    */
   redactsPersistedLane: () => boolean = shouldRedactPersistedSdkLane
+
+  holdLevels(): { release: () => void; [Symbol.dispose]: () => void } {
+    this.heldLevels++
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      if (this.heldLevels > 0) this.heldLevels--
+    }
+    return { release, [Symbol.dispose]: release }
+  }
+
+  isHoldingLevels(): boolean {
+    return this.heldLevels > 0
+  }
 
   setQueueKey(key: string | (() => string)): void {
     this.queueKey = typeof key === 'function' ? key : () => key
@@ -321,6 +341,7 @@ export class SdkEventQueueBag {
     this.queueUsedReported = false
     this.nonbookendEvictionReported = false
     this.bookendEvictionReported = false
+    this.heldLevels = 0
   }
 
   currentQueueOrCreate(): SdkEvent[] | null {
@@ -559,6 +580,21 @@ function claimTaskTerminatedSdkGate(taskId: string): boolean {
 /** densable Vi. */
 export function enqueueSdkEvent(event: SdkEvent): void {
   getSdkEventQueue().enqueue(event)
+}
+
+/**
+ * Official 2.1.331 `SWl()` — hold SDK event queue levels; returns a no-op
+ * handle when running in shared-backend mode outside an active ALS session.
+ */
+export function holdSdkEventQueueLevels(): {
+  release: () => void
+  [Symbol.dispose]: () => void
+} {
+  if (isSharedBackend() && !hasActiveSessionAls()) {
+    const release = () => {}
+    return { release, [Symbol.dispose]: release }
+  }
+  return getSdkEventQueue().holdLevels()
 }
 
 /**

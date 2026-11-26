@@ -18,6 +18,7 @@ import { isBackgroundTask } from '../../tasks/types.js'
 import type { TodoItem } from '../todo/types.js'
 import type { Task } from '../tasks.js'
 import type { BgInFlightSnapshot } from '../bgNeedsInputBridge.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 
 /** densable Vjb=200 — fan item label cap (PYe). */
 export const FAN_LABEL_MAX = 200
@@ -370,17 +371,30 @@ export type JFaAppStateSlice = {
   tasks?: Record<string, TaskState>
 }
 
-let jfaAppStateReader: (() => JFaAppStateSlice | null | undefined) | null = null
+type JFaAppStateReader = (() => JFaAppStateSlice | null | undefined) | null
 
-/** densable JFa store bridge — set from React tree; clear on unmount. */
-export function setJFaAppStateReader(
-  reader: (() => JFaAppStateSlice | null | undefined) | null,
-): void {
-  jfaAppStateReader = reader
+const fallbackJFaSession = { root: {} as object }
+const jfaAppStateReaderBySession = new RootSessionSlot<{
+  reader: JFaAppStateReader
+}>(() => ({ reader: null }))
+
+function getJFaAppStateReaderSlot(): { reader: JFaAppStateReader } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return jfaAppStateReaderBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return jfaAppStateReaderBySession.of(fallbackJFaSession)
 }
 
-export function getJFaAppStateReader(): typeof jfaAppStateReader {
-  return jfaAppStateReader
+/** densable JFa store bridge — set from React tree; clear on unmount. */
+export function setJFaAppStateReader(reader: JFaAppStateReader): void {
+  getJFaAppStateReaderSlot().reader = reader
+}
+
+export function getJFaAppStateReader(): JFaAppStateReader {
+  return getJFaAppStateReaderSlot().reader
 }
 
 /** densable Abf — session todos from reader or explicit opts. */
@@ -389,7 +403,7 @@ export function resolveSessionTodos(
 ): TodoItem[] | null {
   if (explicit !== undefined) return explicit
   try {
-    const slice = jfaAppStateReader?.()
+    const slice = getJFaAppStateReader()?.()
     if (!slice?.todos) return null
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getSessionId } = require('../../bootstrap/state.js') as {

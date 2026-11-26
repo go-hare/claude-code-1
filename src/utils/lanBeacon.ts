@@ -10,6 +10,7 @@
 import { createSocket, type Socket as DgramSocket } from 'dgram'
 import { EventEmitter } from 'events'
 import { logError } from './log.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -103,17 +104,19 @@ export function resolveLanPeerAuthToken(
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Module-level singleton — avoids (state as any)._lanBeacon hack
+// Per-host singleton — scoped via HostSlot on SessionHost
 // ---------------------------------------------------------------------------
 
-let _lanBeaconInstance: LanBeacon | null = null
+const lanBeaconHostSlot = new HostSlot<{ instance: LanBeacon | null }>(() => ({
+  instance: null,
+}))
 
 export function getLanBeacon(): LanBeacon | null {
-  return _lanBeaconInstance
+  return lanBeaconHostSlot.of(getBootstrapSessionHost()).instance
 }
 
 export function setLanBeacon(instance: LanBeacon | null): void {
-  _lanBeaconInstance = instance
+  lanBeaconHostSlot.of(getBootstrapSessionHost()).instance = instance
 }
 
 // ---------------------------------------------------------------------------

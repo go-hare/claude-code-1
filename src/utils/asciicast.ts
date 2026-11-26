@@ -8,12 +8,26 @@ import { getClaudeConfigHomeDir } from './envUtils.js'
 import { isTerminalRecordingEnvEnabled } from './residualFinalEnvGates.js'
 import { getFsImplementation } from './fsOperations.js'
 import { sanitizePath } from './path.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 import { jsonStringify } from './slowOperations.js'
 
-// Mutable recording state — filePath is updated when session ID changes (e.g., --resume)
-const recordingState: { filePath: string | null; timestamp: number } = {
-  filePath: null,
-  timestamp: 0,
+type AsciicastRecorder = {
+  flush(): Promise<void>
+  dispose(): Promise<void>
+}
+
+type AsciicastSessionState = {
+  recordingState: { filePath: string | null; timestamp: number }
+  recorder: AsciicastRecorder | null
+}
+
+const asciicastSessionSlot = new RootSessionSlot<AsciicastSessionState>(() => ({
+  recordingState: { filePath: null, timestamp: 0 },
+  recorder: null,
+}))
+
+function getAsciicastSessionState(): AsciicastSessionState {
+  return asciicastSessionSlot.of(getBootstrapSession())
 }
 
 /**
@@ -23,6 +37,7 @@ const recordingState: { filePath: string | null; timestamp: number } = {
  * The path is computed once and cached in recordingState.
  */
 export function getRecordFilePath(): string | null {
+  const { recordingState } = getAsciicastSessionState()
   if (recordingState.filePath !== null) {
     return recordingState.filePath
   }
@@ -45,8 +60,10 @@ export function getRecordFilePath(): string | null {
 }
 
 export function _resetRecordingStateForTesting(): void {
-  recordingState.filePath = null
-  recordingState.timestamp = 0
+  const state = asciicastSessionSlot.peek(getBootstrapSession())
+  if (!state) return
+  state.recordingState.filePath = null
+  state.recordingState.timestamp = 0
 }
 
 /**
@@ -56,6 +73,8 @@ export function _resetRecordingStateForTesting(): void {
  * the file so getSessionRecordingPaths() can find it by the resumed session ID.
  */
 export async function renameRecordingForSession(): Promise<void> {
+  const state = getAsciicastSessionState()
+  const { recordingState } = state
   const oldPath = recordingState.filePath
   if (!oldPath || recordingState.timestamp === 0) {
     return
@@ -70,7 +89,7 @@ export async function renameRecordingForSession(): Promise<void> {
     return
   }
   // Flush pending writes before renaming
-  await recorder?.flush()
+  await state.recorder?.flush()
   const oldName = basename(oldPath)
   const newName = basename(newPath)
   try {
@@ -83,13 +102,6 @@ export async function renameRecordingForSession(): Promise<void> {
     )
   }
 }
-
-type AsciicastRecorder = {
-  flush(): Promise<void>
-  dispose(): Promise<void>
-}
-
-let recorder: AsciicastRecorder | null = null
 
 function getTerminalSize(): { cols: number; rows: number } {
   // Direct access to stdout dimensions — not in a React component
@@ -110,6 +122,7 @@ export function installAsciicastRecorder(): void {
   if (!filePath) {
     return
   }
+  const state = getAsciicastSessionState()
 
   const { cols, rows } = getTerminalSize()
   const startTime = performance.now()
@@ -140,7 +153,7 @@ export function installAsciicastRecorder(): void {
   const writer = createBufferedWriter({
     writeFn(content: string) {
       // Use recordingState.filePath (mutable) so writes follow renames from --resume
-      const currentPath = recordingState.filePath
+      const currentPath = state.recordingState.filePath
       if (!currentPath) {
         return
       }
@@ -185,7 +198,7 @@ export function installAsciicastRecorder(): void {
   }
   process.stdout.on('resize', onResize)
 
-  recorder = {
+  state.recorder = {
     async flush(): Promise<void> {
       writer.flush()
       await pendingWrite
@@ -199,8 +212,8 @@ export function installAsciicastRecorder(): void {
   }
 
   registerCleanup(async () => {
-    await recorder?.dispose()
-    recorder = null
+    await state.recorder?.dispose()
+    state.recorder = null
   })
 
   logForDebugging(`[asciicast] Recording to ${filePath}`)

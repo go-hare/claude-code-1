@@ -2,6 +2,7 @@ import { getGlobalConfig } from 'src/utils/config.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { z } from 'zod/v4'
 import { lazySchema } from '../../utils/lazySchema.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import {
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
   getFeatureValue_CACHED_MAY_BE_STALE,
@@ -117,11 +118,21 @@ export const VSCODE_EXPERIMENT_GATE_KEYS = [
   'tengu_auto_mode_state',
 ] as const
 
-// Store the VSCode MCP client reference for sending notifications
-let vscodeMcpClient: ConnectedMCPServer | null = null
+type HostVscodeSdkMcpState = {
+  // Store the VSCode MCP client reference for sending notifications
+  vscodeMcpClient: ConnectedMCPServer | null
+  /** densable j2i once-per-session channel error warn. */
+  vscodeChannelErrorLogged: boolean
+}
 
-/** densable j2i once-per-session channel error warn. */
-let vscodeChannelErrorLogged = false
+const hostVscodeSdkMcpSlot = new HostSlot<HostVscodeSdkMcpState>(() => ({
+  vscodeMcpClient: null,
+  vscodeChannelErrorLogged: false,
+}))
+
+function getHostVscodeSdkMcpState(): HostVscodeSdkMcpState {
+  return hostVscodeSdkMcpSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Sends a file_updated notification to the VSCode MCP server. This is used to
@@ -135,6 +146,9 @@ export function notifyVscodeFileUpdated(
   oldContent: string | null,
   newContent: string | null,
 ): void {
+  const vscodeMcpClient = hostVscodeSdkMcpSlot.peek(
+    getBootstrapSessionHost(),
+  )?.vscodeMcpClient
   if (process.env.USER_TYPE !== 'ant' || !vscodeMcpClient) {
     return
   }
@@ -154,11 +168,12 @@ export function notifyVscodeFileUpdated(
 
 function attachVscodeChannelOnError(
   client: ConnectedMCPServer['client'],
+  state: HostVscodeSdkMcpState,
 ): void {
   const previous = client.onerror
   client.onerror = (error: Error) => {
-    if (!vscodeChannelErrorLogged) {
-      vscodeChannelErrorLogged = true
+    if (!state.vscodeChannelErrorLogged) {
+      state.vscodeChannelErrorLogged = true
       try {
         const msg =
           typeof error?.message === 'string' ? error.message : String(error)
@@ -186,7 +201,8 @@ export function setupVscodeSdkMcp(
   const client = sdkClients.find(c => c.name === 'claude-vscode')
 
   if (client && client.type === 'connected') {
-    vscodeMcpClient = client
+    const state = getHostVscodeSdkMcpState()
+    state.vscodeMcpClient = client
 
     // densable/v2: setNotificationHandler(method, {params}, handler)
     client.client.setNotificationHandler(
@@ -223,7 +239,7 @@ export function setupVscodeSdkMcp(
       },
     )
 
-    attachVscodeChannelOnError(client.client)
+    attachVscodeChannelOnError(client.client, state)
 
     // densable experiment_gates payload (14 keys) — push immediately.
     const gates: Record<string, boolean | string> = {
@@ -280,8 +296,11 @@ export function setupVscodeSdkMcp(
   }
 }
 
-/** Test-only: reset module singletons between cases. */
+/** Test-only: reset module singletons between cases for the current host. */
 export function resetVscodeSdkMcpForTests(): void {
-  vscodeMcpClient = null
-  vscodeChannelErrorLogged = false
+  const state = hostVscodeSdkMcpSlot.peek(getBootstrapSessionHost())
+  if (state) {
+    state.vscodeMcpClient = null
+    state.vscodeChannelErrorLogged = false
+  }
 }

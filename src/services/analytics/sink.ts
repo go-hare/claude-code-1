@@ -9,6 +9,13 @@
  */
 
 import { logForDebugging } from '../../utils/debug.js'
+import { HostSlot } from '../../utils/hostSlot.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  ofDefaultHost,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
 import { trackDatadogEvent } from './datadog.js'
 import {
   logEventTo1P,
@@ -29,11 +36,21 @@ import { isSinkKilled } from './sinkKillswitch.js'
 
 const DATADOG_GATE_NAME = 'tengu_log_datadog_events'
 
-// Module-level gate state - starts undefined, initialized during startup
-let isDatadogGateEnabled: boolean | undefined
+type AnalyticsSinkHostState = {
+  // Starts undefined, initialized during startup
+  isDatadogGateEnabled: boolean | undefined
+  /** densable `i` — drop reentrant logEvent while collecting metadata. */
+  logEventCollectingMetadata: boolean
+}
 
-/** densable `i` — drop reentrant logEvent while collecting metadata. */
-let logEventCollectingMetadata = false
+const analyticsSinkHostSlot = new HostSlot<AnalyticsSinkHostState>(() => ({
+  isDatadogGateEnabled: undefined,
+  logEventCollectingMetadata: false,
+}))
+
+function getAnalyticsSinkHostState(): AnalyticsSinkHostState {
+  return analyticsSinkHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Check if Datadog tracking is enabled.
@@ -43,8 +60,12 @@ function shouldTrackDatadog(): boolean {
   if (isSinkKilled('datadog')) {
     return false
   }
-  if (isDatadogGateEnabled !== undefined) {
-    return isDatadogGateEnabled
+  const state = getAnalyticsSinkHostState()
+  const effectiveGate =
+    state.isDatadogGateEnabled ??
+    ofDefaultHost(analyticsSinkHostSlot).isDatadogGateEnabled
+  if (effectiveGate !== undefined) {
+    return effectiveGate
   }
 
   // Fallback to cached value from previous session
@@ -76,14 +97,15 @@ function dispatchEvent(
  * Reentry while collecting metadata is dropped (gold unique English).
  */
 function logEventImpl(eventName: string, metadata: LogEventMetadata): void {
-  if (logEventCollectingMetadata) {
+  const state = getAnalyticsSinkHostState()
+  if (state.logEventCollectingMetadata) {
     logForDebugging(
       `logEvent reentered while collecting metadata — dropped ${eventName}. A getEventMetadata dependency (model/betas/auth) called logEvent synchronously; defer it (queueMicrotask) or move it out of the metadata path.`,
       { level: 'error' },
     )
     return
   }
-  logEventCollectingMetadata = true
+  state.logEventCollectingMetadata = true
   try {
     const sampleResult = shouldSampleEvent(eventName)
     if (sampleResult === 0) {
@@ -93,17 +115,26 @@ function logEventImpl(eventName: string, metadata: LogEventMetadata): void {
       dispatchEvent(eventName, metadata, sampleResult)
       return
     }
+    const captured = getActiveSessionFromAls()
     const run = () => {
-      logEventCollectingMetadata = true
-      try {
-        dispatchEvent(eventName, metadata, sampleResult)
-      } finally {
-        logEventCollectingMetadata = false
+      const exec = () => {
+        const s = getAnalyticsSinkHostState()
+        s.logEventCollectingMetadata = true
+        try {
+          dispatchEvent(eventName, metadata, sampleResult)
+        } finally {
+          s.logEventCollectingMetadata = false
+        }
+      }
+      if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+        runWithSession(captured, exec)
+      } else {
+        exec()
       }
     }
     void initializeGrowthBook().then(run, run)
   } finally {
-    logEventCollectingMetadata = false
+    state.logEventCollectingMetadata = false
   }
 }
 
@@ -144,7 +175,7 @@ async function logEventAsyncImpl(
  * Called from main.tsx during setupBackend().
  */
 export function initializeAnalyticsGates(): void {
-  isDatadogGateEnabled =
+  getAnalyticsSinkHostState().isDatadogGateEnabled =
     checkStatsigFeatureGate_CACHED_MAY_BE_STALE(DATADOG_GATE_NAME)
 }
 
@@ -161,4 +192,14 @@ export function initializeAnalyticsSink(): void {
     logEvent: logEventImpl,
     logEventAsync: logEventAsyncImpl,
   })
+}
+
+/**
+ * Reset analytics sink host state for testing purposes only.
+ * @internal
+ */
+export function _resetAnalyticsSinkForTesting(): void {
+  const state = getAnalyticsSinkHostState()
+  state.isDatadogGateEnabled = undefined
+  state.logEventCollectingMetadata = false
 }

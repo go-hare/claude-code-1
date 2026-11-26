@@ -13,6 +13,12 @@ import type { PermissionDenyDecision } from '../../../types/permissions.js'
 import type { ParsedArtifactUrl } from '../../../utils/artifactUrl.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { isEnvTruthy } from '../../../utils/envUtils.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+} from '../../../utils/sessionHost.js'
 import { DL } from '../frameDl.js'
 import { fetchFrameBoot, frameControlPlaneHeaders } from '../mint.js'
 import {
@@ -86,11 +92,14 @@ type ProvenanceState = {
   sandboxEgress: Map<string, { setting: string; at: number }>
 }
 
-const stateByStore = new WeakMap<ArtifactAutoReactStore, ProvenanceState>()
+const stateBySessionSlot = new RootSessionSlot(
+  () => new WeakMap<ArtifactAutoReactStore, ProvenanceState>(),
+)
 
-/** densable X() provenance subset — lives and dies with the un() store. */
+/** densable X() provenance subset — isolated per root session and reset with un() store. */
 export function provenanceState(): ProvenanceState {
   const store = un()
+  const stateByStore = stateBySessionSlot.of(getBootstrapSession())
   let st = stateByStore.get(store)
   if (st === undefined) {
     st = {
@@ -109,15 +118,19 @@ export function provenanceState(): ProvenanceState {
 
 type ProvenanceDeps = { fetch?: typeof globalThis.fetch }
 
-let depsOverride: ProvenanceDeps | null = null
+const provenanceDepsHostSlot = new HostSlot<{
+  depsOverride: ProvenanceDeps | null
+}>(() => ({
+  depsOverride: null,
+}))
 
 export function setProvenanceDepsForTests(deps: ProvenanceDeps | null): void {
-  depsOverride = deps
+  provenanceDepsHostSlot.of(getBootstrapSessionHost()).depsOverride = deps
 }
 
 export function resetProvenanceStateForTests(): void {
-  stateByStore.delete(un())
-  depsOverride = null
+  stateBySessionSlot.of(getBootstrapSession()).delete(un())
+  provenanceDepsHostSlot.of(getBootstrapSessionHost()).depsOverride = null
 }
 
 /**
@@ -660,7 +673,9 @@ async function probeContentHost(
     st.contentHostEgressUnanswered.add(host)
     un().contentHostEgressDenied.add(parsed.env)
   }
-  const fetchImpl = depsOverride?.fetch ?? globalThis.fetch
+  const fetchImpl =
+    provenanceDepsHostSlot.of(getBootstrapSessionHost()).depsOverride?.fetch ??
+    globalThis.fetch
   let res: Response
   let body: string
   try {

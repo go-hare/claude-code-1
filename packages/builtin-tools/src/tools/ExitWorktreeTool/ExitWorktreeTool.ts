@@ -390,7 +390,7 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
   async call(input, context) {
     const session = getCurrentWorktreeSession()
     if (!session) {
-      // validateInput guards this, but the session is module-level mutable
+      // validateInput guards this, but the session is host-scoped mutable
       // state — defend against a race between validation and execution.
       throw new Error('Not in a worktree session')
     }

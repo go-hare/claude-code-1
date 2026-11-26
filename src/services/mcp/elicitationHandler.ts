@@ -20,6 +20,7 @@ import {
   executeNotificationHooks,
 } from '../../utils/hooks.js'
 import { logMCPDebug, logMCPError } from '../../utils/log.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -824,29 +825,37 @@ export async function runElicitationHooks(
  * call, Claude is explicitly informed that the failure followed a declined
  * question and the decline still stands.
  */
-const lastElicitationDeclinedAtByServer = new Map<string, number>()
+const hostElicitationDeclinedSlot = new HostSlot<Map<string, number>>(
+  () => new Map<string, number>(),
+)
+
+function getLastElicitationDeclinedAtByServer(): Map<string, number> {
+  return hostElicitationDeclinedSlot.of(getBootstrapSessionHost())
+}
 
 export function recordMcpElicitationDeclinedForServer(
   serverName: string,
   atMs: number = Date.now(),
 ): void {
-  lastElicitationDeclinedAtByServer.set(serverName, atMs)
+  getLastElicitationDeclinedAtByServer().set(serverName, atMs)
 }
 
 export function consumeMcpElicitationDeclinedDuringCall(
   serverName: string,
   callStartMs: number,
 ): boolean {
-  const declinedAt = lastElicitationDeclinedAtByServer.get(serverName)
+  const map = hostElicitationDeclinedSlot.peek(getBootstrapSessionHost())
+  if (!map) return false
+  const declinedAt = map.get(serverName)
   if (declinedAt === undefined || declinedAt < callStartMs) {
     return false
   }
-  lastElicitationDeclinedAtByServer.delete(serverName)
+  map.delete(serverName)
   return true
 }
 
 export function clearMcpElicitationDeclinedState(): void {
-  lastElicitationDeclinedAtByServer.clear()
+  hostElicitationDeclinedSlot.peek(getBootstrapSessionHost())?.clear()
 }
 
 /**

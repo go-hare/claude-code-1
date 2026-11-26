@@ -35,6 +35,12 @@ import {
   subscribeMainThreadTurnBegin,
   subscribeMainThreadTurnEnd,
 } from '../mainThreadTurn.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 
 function asMeta(
   value: string,
@@ -174,28 +180,47 @@ type LeftoverJsSlot<T> = {
 }
 
 /**
- * densable js() — `{set,get}` cell. Never export minify `js`.
+ * densable js() — HostSlot-backed `{set,get}` cell. Never export minify `js`.
  */
 function leftoverJsSlot<T>(): LeftoverJsSlot<T> {
-  let value: T | undefined
+  const hostSlot = new HostSlot<{ value: T | undefined }>(() => ({
+    value: undefined,
+  }))
   return {
     set: (next: T | undefined) => {
-      value = next
+      hostSlot.of(getBootstrapSessionHost()).value = next
     },
-    get: () => value,
+    get: () => hostSlot.of(getBootstrapSessionHost()).value,
   }
 }
 
 /**
- * densable et(js(), dispose) — pin dispose on registerCleanup. Never
+ * densable et(js(), dispose) — pin dispose on host registerCleanup. Never
  * export minify `et`.
  */
 function leftoverEtSlot<T>(
   slot: LeftoverJsSlot<T>,
   dispose: (cell: LeftoverJsSlot<T>) => void,
 ): LeftoverJsSlot<T> {
-  registerCleanup(() => dispose(slot))
-  return slot
+  const cleanupRegistered = new HostSlot<{ registered: boolean }>(() => ({
+    registered: false,
+  }))
+  const ensureCleanup = (): void => {
+    const reg = cleanupRegistered.of(getBootstrapSessionHost())
+    if (reg.registered) return
+    reg.registered = true
+    registerCleanup(() => {
+      reg.registered = false
+      dispose(slot)
+    })
+  }
+  return {
+    get: () => slot.get(),
+    set: (next: T | undefined) => {
+      if (next !== undefined) ensureCleanup()
+      slot.set(next)
+    },
+  }
 }
 
 type LeftoverWatchRoot = {
@@ -276,7 +301,41 @@ const leftoverDeclinedFolders = leftoverEtSlot(
   cell => cell.set(undefined),
 )
 
-let binding: PluginDevModsBinding | undefined
+type PluginDevModsHostState = {
+  binding: PluginDevModsBinding | undefined
+  joinedDevModsDirs: Set<string>
+  joinedDirsCleanupRegistered: boolean
+  sessionSwitchSubscribed: boolean
+  turnSeq: number
+  boundTurnId: string | undefined
+  stampTracker: ReturnType<typeof createDevModStampTracker> | undefined
+  turnStartedAt: number | undefined
+  lastReloadFailed: boolean
+}
+
+const pluginDevModsHostSlot = new HostSlot<PluginDevModsHostState>(() => ({
+  binding: undefined,
+  joinedDevModsDirs: new Set(),
+  joinedDirsCleanupRegistered: false,
+  sessionSwitchSubscribed: false,
+  turnSeq: 0,
+  boundTurnId: undefined,
+  stampTracker: undefined,
+  turnStartedAt: undefined,
+  lastReloadFailed: false,
+}))
+
+function getPluginDevModsHostState(): PluginDevModsHostState {
+  return pluginDevModsHostSlot.of(getBootstrapSessionHost())
+}
+
+function getActiveDevModStampTracker(): ReturnType<
+  typeof createDevModStampTracker
+> {
+  const hostState = getPluginDevModsHostState()
+  hostState.stampTracker ??= createDevModStampTracker()
+  return hostState.stampTracker
+}
 
 type LeftoverTurnSlot = {
   turnId: number
@@ -311,24 +370,31 @@ function leftoverUniqueDirs(...groups: string[][]): string[] {
   return [...seen.values()]
 }
 
-const leftoverJoinedDevModsDirs = new Set<string>()
-registerCleanup(() => leftoverJoinedDevModsDirs.clear())
-
-let leftoverSessionSwitchSubscribed = false
+function ensureJoinedDevModsDirsCleanup(
+  hostState: PluginDevModsHostState,
+): void {
+  if (hostState.joinedDirsCleanupRegistered) return
+  hostState.joinedDirsCleanupRegistered = true
+  registerCleanup(() => {
+    hostState.joinedDevModsDirs.clear()
+    hostState.joinedDirsCleanupRegistered = false
+  })
+}
 
 function leftoverEnsureSessionSwitchIsolation(): void {
-  if (leftoverSessionSwitchSubscribed) return
+  const hostState = getPluginDevModsHostState()
+  if (hostState.sessionSwitchSubscribed) return
   try {
     const { onSessionSwitch } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
-    leftoverSessionSwitchSubscribed = true
+    hostState.sessionSwitchSubscribed = true
     const off = onSessionSwitch(() => {
       leftoverPruneForeignSessionDevModsDirs(sessionDevModsFolder())
     })
     registerCleanup(() => {
       off()
-      leftoverSessionSwitchSubscribed = false
+      hostState.sessionSwitchSubscribed = false
     })
   } catch {
     // bootstrap state optional in isolated unit tests
@@ -342,7 +408,7 @@ function leftoverIsForeignDevModsDir(
 ): boolean {
   const resolved = resolve(dir)
   if (resolved === currentResolved) return false
-  if (leftoverJoinedDevModsDirs.has(resolved)) return true
+  if (getPluginDevModsHostState().joinedDevModsDirs.has(resolved)) return true
   return (
     resolved !== devModsRootResolved &&
     dirname(resolved) === devModsRootResolved
@@ -417,7 +483,9 @@ function leftoverPinJoinPluginDir(): void {
   leftoverEnsureSessionSwitchIsolation()
   leftoverJoinPluginDir.set({
     joinPluginDir(folder: string) {
-      leftoverJoinedDevModsDirs.add(resolve(folder))
+      const hostState = getPluginDevModsHostState()
+      ensureJoinedDevModsDirsCleanup(hostState)
+      hostState.joinedDevModsDirs.add(resolve(folder))
       const { getInlinePlugins, setInlinePlugins } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
@@ -429,7 +497,7 @@ function leftoverPinJoinPluginDir(): void {
 export function bindPluginDevModsSession(
   next: PluginDevModsBinding | undefined,
 ): void {
-  binding = next
+  getPluginDevModsHostState().binding = next
   if (next === undefined) leftoverJoinPluginDir.set(undefined)
   else leftoverPinJoinPluginDir()
 }
@@ -456,17 +524,15 @@ export function isDevModsPersonTurn(
   return false
 }
 
-let leftoverTurnSeq = 0
-let leftoverBoundTurnId: string | undefined
-
 export function markPluginDevModsTurnRunning(
   running: boolean,
   person = false,
 ): void {
+  const hostState = getPluginDevModsHostState()
   if (running) {
-    leftoverTurnSeq += 1
-    const turnId = `dev-mods-${leftoverTurnSeq}`
-    leftoverBoundTurnId = turnId
+    hostState.turnSeq += 1
+    const turnId = `dev-mods-${hostState.turnSeq}`
+    hostState.boundTurnId = turnId
     bindMainThreadTurn({
       turnId,
       started: Promise.resolve(),
@@ -476,8 +542,8 @@ export function markPluginDevModsTurnRunning(
     return
   }
   // densable yHr(turnId) — release only the bound id, not whatever is current.
-  const turnId = leftoverBoundTurnId
-  leftoverBoundTurnId = undefined
+  const turnId = hostState.boundTurnId
+  hostState.boundTurnId = undefined
   if (turnId !== undefined) releaseMainThreadTurn(turnId)
 }
 
@@ -486,8 +552,9 @@ export function trackPluginDevModsTurn(opts?: {
   person?: boolean
   abort?: () => void
 }): Disposable {
-  leftoverTurnSeq += 1
-  const turnId = `dev-mods-${leftoverTurnSeq}`
+  const hostState = getPluginDevModsHostState()
+  hostState.turnSeq += 1
+  const turnId = `dev-mods-${hostState.turnSeq}`
   const person = opts?.person === true
   bindMainThreadTurn({
     turnId,
@@ -831,7 +898,8 @@ function leftoverPluginDevModsRefusalProbe(): string | undefined {
     },
     {
       refusal: 'dont_ask',
-      isRefused: () => binding?.permissionMode?.() === 'dontAsk',
+      isRefused: () =>
+        getPluginDevModsHostState().binding?.permissionMode?.() === 'dontAsk',
     },
     {
       refusal: 'untrusted',
@@ -869,6 +937,7 @@ export function pluginDevModsRefusal(): string | undefined {
 
 /** densable W — someone can answer, or binding is not ready yet. */
 export function canAskPluginDevMods(): boolean {
+  const binding = getPluginDevModsHostState().binding
   if (binding === undefined) return true
   try {
     const { canConfirmWithUser } =
@@ -887,7 +956,7 @@ export function canAskPluginDevMods(): boolean {
  * or `allowManagedDomainsOnly` is active; never in `dontAsk`.
  */
 export function canAutoEnablePluginDevMods(): boolean {
-  const mode = binding?.permissionMode?.()
+  const mode = getPluginDevModsHostState().binding?.permissionMode?.()
   let isAutoCircuitBroken = false
   if (mode === 'auto') {
     try {
@@ -1160,7 +1229,7 @@ function recordAnswerInUi(
   toolUseId: string,
 ): void {
   safeUiRecord(() => {
-    const activeBinding = binding
+    const activeBinding = getPluginDevModsHostState().binding
     const choiceLabel =
       raw.kind === 'chose'
         ? ASK_CHOICES.find(c => c.value === raw.value)?.label
@@ -1186,6 +1255,7 @@ async function askPluginDevModsLoop(
   abort: AbortController,
   depth: number,
 ): Promise<PluginDevModsAsk> {
+  const binding = getPluginDevModsHostState().binding
   if (binding === undefined) return 'no_one_to_ask'
   const { confirmWithUser } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1246,7 +1316,7 @@ export async function askPluginDevMods(
   folder: string,
   signal?: AbortSignal,
 ): Promise<PluginDevModsAsk> {
-  if (binding === undefined) {
+  if (getPluginDevModsHostState().binding === undefined) {
     try {
       const { logEvent } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1440,8 +1510,9 @@ function recordDevModLines(folder: string, outcome: DevModLoad): void {
   let enabled: Array<{ name: string; path: string }> = []
   try {
     enabled =
-      binding?.toolContext(new AbortController()).getAppState().plugins
-        .enabled ?? []
+      getPluginDevModsHostState()
+        .binding?.toolContext(new AbortController())
+        .getAppState().plugins.enabled ?? []
   } catch {
     enabled = []
   }
@@ -1582,8 +1653,6 @@ export function createDevModStampTracker(now: () => number = Date.now) {
   }
 }
 
-const activeDevModStampTracker = createDevModStampTracker()
-
 async function readDevModTrackedStamp(
   filePath: string,
 ): Promise<DevModTrackedStamp | undefined> {
@@ -1620,8 +1689,6 @@ export function shouldDeferModReloadAfterTurnBegin(options: {
   })
 }
 
-let activeDevModTurnStartedAt: number | undefined
-
 async function collectFolderPendingCtimeMs(
   folder: string,
   depth = 0,
@@ -1655,10 +1722,13 @@ async function reloadDevMods(opts?: {
   pendingCtimeMs?: readonly number[]
   nowMs?: number
 }): Promise<DevModLoad> {
+  const hostState = getPluginDevModsHostState()
+  const binding = hostState.binding
   if (binding?.reloadPlugins === undefined) return 'unbound'
+  const stampTracker = getActiveDevModStampTracker()
   let pendingCtimeMs = opts?.pendingCtimeMs
   if (pendingCtimeMs === undefined) {
-    const trackerCtimes = activeDevModStampTracker.getPendingCtimeMs()
+    const trackerCtimes = stampTracker.getPendingCtimeMs()
     if (trackerCtimes.length > 0) {
       pendingCtimeMs = trackerCtimes
     } else if (opts?.folder) {
@@ -1669,7 +1739,7 @@ async function reloadDevMods(opts?: {
     pendingCtimeMs !== undefined &&
     pendingCtimeMs.length > 0 &&
     shouldDeferModReloadAfterTurnBegin({
-      turnStartedAt: activeDevModTurnStartedAt,
+      turnStartedAt: hostState.turnStartedAt,
       isTurnRunning: leftoverDevModsTurn.isRunning(),
       pendingCtimeMs,
       nowMs: opts?.nowMs ?? Date.now(),
@@ -1698,12 +1768,12 @@ async function reloadDevMods(opts?: {
       return 'held'
     }
     await binding.reloadPlugins()
-    activeDevModLastReloadFailed = false
-    activeDevModStampTracker.markReloaded(true)
+    hostState.lastReloadFailed = false
+    stampTracker.markReloaded(true)
     return 'reloaded'
   } catch (error) {
-    activeDevModLastReloadFailed = true
-    activeDevModStampTracker.markReloaded(false)
+    hostState.lastReloadFailed = true
+    stampTracker.markReloaded(false)
     const msg = errorMessage(error)
     leftoverUiLog(
       'dev-mods',
@@ -1732,7 +1802,9 @@ function leftoverSaveDevModsFolder(folder: string): void {
     const { saveDevModsFolder } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../sessionStorage.js') as typeof import('../sessionStorage.js')
-    const storageV5 = binding?.toolContext(new AbortController()).storageV5
+    const storageV5 = getPluginDevModsHostState().binding?.toolContext(
+      new AbortController(),
+    ).storageV5
     saveDevModsFolder(folder, storageV5)
   } catch {
     // persist optional until session file exists
@@ -1750,11 +1822,12 @@ async function leftoverTouchFolder(folder: string): Promise<void> {
 
 function leftoverPinTurnEndTouch(): void {
   if (leftoverDevModsTurnEndUtimes.get() !== undefined) return
+  const hostState = getPluginDevModsHostState()
   const offBegin = leftoverDevModsTurn.onBegin(() => {
-    activeDevModTurnStartedAt = Date.now()
+    hostState.turnStartedAt = Date.now()
   })
   const offEnd = leftoverDevModsTurn.onEnd(() => {
-    activeDevModTurnStartedAt = undefined
+    hostState.turnStartedAt = undefined
     try {
       for (const folder of [
         ...(leftoverEnabledDirs.get() ?? []),
@@ -1954,7 +2027,14 @@ function leftoverClock(): LeftoverWatchDeps['clock'] {
   return {
     now: () => Date.now(),
     setTimeout: (fn, ms, opts) => {
-      const timer = setTimeout(fn, ms)
+      const captured = getActiveSessionFromAls()
+      const timer = setTimeout(() => {
+        if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+          runWithSession(captured, fn)
+        } else {
+          fn()
+        }
+      }, ms)
       if (opts?.unref) timer.unref?.()
       return () => clearTimeout(timer)
     },
@@ -2111,14 +2191,13 @@ export function createDevModWatchHandlers(
   }
 }
 
-/** Official 2.1.323 #2040: tracks whether the most recent mod reload failed. */
-let activeDevModLastReloadFailed = false
-
 /** densable Ro — chokidar persistent, ignoreInitial, followSymlinks:!1, 400ms. */
 function leftoverWatchRoot(
   folder: string,
   onChange: () => void,
 ): LeftoverWatchRoot {
+  const hostState = getPluginDevModsHostState()
+  const stampTracker = getActiveDevModStampTracker()
   let logPath: string | undefined
   try {
     const { getProject } =
@@ -2139,11 +2218,11 @@ function leftoverWatchRoot(
     binaryInterval: 400,
   })
   const handlers = createDevModWatchHandlers(
-    activeDevModStampTracker,
+    stampTracker,
     onChange,
     readDevModTrackedStamp,
     {
-      isReloadFailed: () => activeDevModLastReloadFailed,
+      isReloadFailed: () => hostState.lastReloadFailed,
     },
   )
   const fireIfChanged = (filePath: string) => {
@@ -2567,7 +2646,9 @@ function leftoverCatchUp(): void {
         }
         return
       case 'present':
-        if (binding?.permissionMode?.() === 'dontAsk') {
+        if (
+          getPluginDevModsHostState().binding?.permissionMode?.() === 'dontAsk'
+        ) {
           leftoverDevModsStage.set({ stage: 'wanted', folder: current.folder })
         } else if (pluginDevModsRefusal() === undefined) {
           void leftoverLoadDevModsAtStart(current.folder)

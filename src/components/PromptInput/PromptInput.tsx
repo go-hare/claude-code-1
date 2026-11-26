@@ -84,7 +84,7 @@ import {
   type Key,
   KeyboardEvent,
   color,
-  instances,
+  Ns,
   stringWidth,
   Text,
   useAnimationFrame,
@@ -118,6 +118,7 @@ import type { BaseTextInputProps, PromptInputMode, VimMode } from '../../types/t
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import { count } from '../../utils/array.js';
 import { isFullscreenActive } from '../../utils/fullscreen.js';
+import { getBootstrapSession, RootSessionSlot } from '../../utils/sessionRoot.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import {
   clampNormalModeCursorOffset,
@@ -528,10 +529,18 @@ function getPluginAutocompleteMetadata(item: SuggestionItem | undefined): Plugin
 
 // #181 (2.1.326): session-level latch so remounting PromptInput (e.g. after a
 // permission prompt or dialog) does not re-emit the identical effort notice.
-let lastShownEffortNotificationText: string | undefined;
+const promptInputNotificationLatchBySession = new RootSessionSlot<{
+  lastShownEffortNotificationText: string | undefined;
+}>(() => ({ lastShownEffortNotificationText: undefined }));
+
+function getPromptInputNotificationLatch(): {
+  lastShownEffortNotificationText: string | undefined;
+} {
+  return promptInputNotificationLatchBySession.of(getBootstrapSession());
+}
 
 export function resetLastShownEffortNotificationForTests(): void {
-  lastShownEffortNotificationText = undefined;
+  getPromptInputNotificationLatch().lastShownEffortNotificationText = undefined;
 }
 
 /**
@@ -643,7 +652,7 @@ function PromptInput({
   const [clearScreenTick, setClearScreenTick] = useState(0);
   useLayoutEffect(() => {
     if (clearScreenTick === 0) return;
-    instances.get(process.stdout)?.forceRedraw();
+    Ns().get(process.stdout)?.forceRedraw();
   }, [clearScreenTick]);
   // densable Wzg — iTerm/Apple DECXCPR poll; probe itself forceRedraws (no extra onDetected).
   useProbeExternalClear(isFullscreenActive());
@@ -3540,19 +3549,21 @@ function PromptInput({
       });
     }
   }, [midTaskPending, effortPendingNotificationText, store, addNotification, removeNotification]);
+  const [effortNotificationLatch] = useState(() => getPromptInputNotificationLatch());
   useEffect(() => {
+    const latch = effortNotificationLatch;
     if (!effortNotificationText) {
-      lastShownEffortNotificationText = undefined;
+      latch.lastShownEffortNotificationText = undefined;
       removeNotification('effort-level');
       return;
     }
     const nextText = effortPendingNotificationText ?? effortNotificationText;
     // #181 (2.1.326): skip re-emitting the identical effort notice when
     // PromptInput remounts after a permission prompt or dialog closes.
-    if (nextText === lastShownEffortNotificationText) {
+    if (nextText === latch.lastShownEffortNotificationText) {
       return;
     }
-    lastShownEffortNotificationText = nextText;
+    latch.lastShownEffortNotificationText = nextText;
     removeNotification('effort-level');
     addNotification({
       key: 'effort-level',
@@ -3563,7 +3574,13 @@ function PromptInput({
       // first-paint can miss it until a later panel refresh.
       timeoutMs: 10_000,
     });
-  }, [effortNotificationText, effortPendingNotificationText, addNotification, removeNotification]);
+  }, [
+    effortNotificationLatch,
+    effortNotificationText,
+    effortPendingNotificationText,
+    addNotification,
+    removeNotification,
+  ]);
 
   useBuddyNotification();
 

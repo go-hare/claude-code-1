@@ -16,6 +16,13 @@
 
 import { execFile } from 'child_process'
 import { isBareMode } from '../envUtils.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  ofDefaultHost,
+  runWithSession,
+} from '../sessionHost.js'
 import { withDeadline } from '../sleep.js'
 import {
   CREDENTIALS_SERVICE_SUFFIX,
@@ -45,24 +52,40 @@ type SpawnExecFile = (
   callback: ExecFileCallback,
 ) => unknown
 
-let execFileImpl: SpawnExecFile = execFile as SpawnExecFile
+type KeychainPrefetchHostState = {
+  execFileImpl: SpawnExecFile
+  /**
+   * Shared with auth.ts getApiKeyFromConfigOrMacOSKeychain(). densable `FHr`:
+   *   null            — not started / cleared
+   *   "pending"       — in flight (or timed out — sync reader must retry)
+   *   { stdout }      — completed with a spawn result (stdout may still be null)
+   */
+  legacyApiKeyPrefetch: PrefetchSpawnResult | 'pending' | null
+  /** Distinguishes explicit per-host clearLegacyApiKeyPrefetch() from unset fallback. */
+  legacyApiKeyCleared: boolean
+  prefetchPromise: Promise<void> | null
+}
 
-/**
- * Shared with auth.ts getApiKeyFromConfigOrMacOSKeychain(). densable `FHr`:
- *   null            — not started / cleared
- *   "pending"       — in flight (or timed out — sync reader must retry)
- *   { stdout }      — completed with a spawn result (stdout may still be null)
- */
-let legacyApiKeyPrefetch: PrefetchSpawnResult | 'pending' | null = null
+const keychainPrefetchHostSlot = new HostSlot<KeychainPrefetchHostState>(
+  () => ({
+    execFileImpl: execFile as SpawnExecFile,
+    legacyApiKeyPrefetch: null,
+    legacyApiKeyCleared: false,
+    prefetchPromise: null,
+  }),
+)
 
-let prefetchPromise: Promise<void> | null = null
+function getKeychainPrefetchHostState(): KeychainPrefetchHostState {
+  return keychainPrefetchHostSlot.of(getBootstrapSessionHost())
+}
 
 function spawnSecurity(
   serviceName: string,
+  execImpl: SpawnExecFile,
 ): Promise<PrefetchSpawnResult | null> {
   return new Promise(resolve => {
     try {
-      execFileImpl(
+      execImpl(
         'security',
         ['find-generic-password', '-a', getUsername(), '-w', '-s', serviceName],
         {
@@ -89,23 +112,37 @@ function spawnSecurity(
  * Missing `security` (non-darwin) is swallowed by Akd try/catch → null.
  */
 export function startKeychainPrefetch(): void {
-  if (prefetchPromise || isBareMode()) return
+  const hostState = getKeychainPrefetchHostState()
+  if (hostState.prefetchPromise || isBareMode()) return
 
+  const captured = getActiveSessionFromAls()
   const generation = keychainCacheState.generation
-  legacyApiKeyPrefetch = 'pending'
+  hostState.legacyApiKeyCleared = false
+  hostState.legacyApiKeyPrefetch = 'pending'
   const oauthSpawn = spawnSecurity(
     getMacOsKeychainStorageServiceName(CREDENTIALS_SERVICE_SUFFIX),
+    hostState.execFileImpl,
   ).then(result => {
-    if (result) primeKeychainCacheFromPrefetch(result.stdout, generation)
+    if (!result) return
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, () =>
+        primeKeychainCacheFromPrefetch(result.stdout, generation),
+      )
+    } else {
+      primeKeychainCacheFromPrefetch(result.stdout, generation)
+    }
   })
-  const legacySpawn = spawnSecurity(getMacOsKeychainStorageServiceName()).then(
-    result => {
-      if (result && legacyApiKeyPrefetch === 'pending') {
-        legacyApiKeyPrefetch = result
-      }
-    },
+  const legacySpawn = spawnSecurity(
+    getMacOsKeychainStorageServiceName(),
+    hostState.execFileImpl,
+  ).then(result => {
+    if (result && hostState.legacyApiKeyPrefetch === 'pending') {
+      hostState.legacyApiKeyPrefetch = result
+    }
+  })
+  hostState.prefetchPromise = Promise.all([oauthSpawn, legacySpawn]).then(
+    () => {},
   )
-  prefetchPromise = Promise.all([oauthSpawn, legacySpawn]).then(() => {})
 }
 
 /**
@@ -116,6 +153,10 @@ export function startKeychainPrefetch(): void {
 export async function ensureKeychainPrefetchCompleted(
   ms?: number,
 ): Promise<void> {
+  const own = keychainPrefetchHostSlot.peek(getBootstrapSessionHost())
+  const prefetchPromise =
+    own?.prefetchPromise ??
+    ofDefaultHost(keychainPrefetchHostSlot).prefetchPromise
   if (!prefetchPromise) return
   await (ms === undefined ? prefetchPromise : withDeadline(prefetchPromise, ms))
 }
@@ -128,6 +169,11 @@ export async function ensureKeychainPrefetchCompleted(
 export function getLegacyApiKeyPrefetchResult(): {
   stdout: string | null
 } | null {
+  const own = keychainPrefetchHostSlot.peek(getBootstrapSessionHost())
+  const legacyApiKeyPrefetch =
+    own && (own.legacyApiKeyPrefetch !== null || own.legacyApiKeyCleared)
+      ? own.legacyApiKeyPrefetch
+      : ofDefaultHost(keychainPrefetchHostSlot).legacyApiKeyPrefetch
   return legacyApiKeyPrefetch === 'pending' ? null : legacyApiKeyPrefetch
 }
 
@@ -137,19 +183,23 @@ export function getLegacyApiKeyPrefetchResult(): {
  * prefetch doesn't shadow a fresh write.
  */
 export function clearLegacyApiKeyPrefetch(): void {
-  legacyApiKeyPrefetch = null
+  const hostState = getKeychainPrefetchHostState()
+  hostState.legacyApiKeyPrefetch = null
+  hostState.legacyApiKeyCleared = true
 }
 
 /** Test-only: restore module locals + default execFile. */
 export function _resetKeychainPrefetchForTesting(): void {
-  prefetchPromise = null
-  legacyApiKeyPrefetch = null
-  execFileImpl = execFile as SpawnExecFile
+  const hostState = getKeychainPrefetchHostState()
+  hostState.prefetchPromise = null
+  hostState.legacyApiKeyPrefetch = null
+  hostState.legacyApiKeyCleared = false
+  hostState.execFileImpl = execFile as SpawnExecFile
 }
 
 /** Test-only: inject spawn (do not mock `child_process` globally). */
 export function _setKeychainPrefetchExecFileForTesting(
   impl: SpawnExecFile,
 ): void {
-  execFileImpl = impl
+  getKeychainPrefetchHostState().execFileImpl = impl
 }

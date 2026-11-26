@@ -1,10 +1,45 @@
-import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import { join } from 'path'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
-// Memoized: 150+ callers, many on hot paths. Keyed off CLAUDE_CONFIG_DIR so
-// tests that change the env var get a fresh value without explicit cache.clear.
-export const getClaudeConfigHomeDir = memoize(
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
+
+// Memoized per SessionHost: 150+ callers, many on hot paths. Keyed off
+// CLAUDE_CONFIG_DIR so tests that change the env var get a fresh value
+// without explicit cache.clear, while concurrent hosts stay isolated.
+export const getClaudeConfigHomeDir = memoizePerHost(
   (): string => {
     return (
       process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')

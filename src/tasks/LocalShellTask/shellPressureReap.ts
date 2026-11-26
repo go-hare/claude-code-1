@@ -21,6 +21,10 @@ import { isTerminalTaskStatus } from '../../Task.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { getErrnoCode } from '../../utils/errors.js'
 import { getPlatform, type Platform } from '../../utils/platform.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 
 /** Official h1o — 30 minutes of idle interaction before reaping is allowed. */
 export const SHELL_PRESSURE_IDLE_MS = 1_800_000
@@ -38,18 +42,20 @@ export type HostMemoryScarcity = {
   detail: string
 }
 
-let lastPressureReapAt = 0
+const lastPressureReapAtSlot = new RootSessionSlot<{ ts: number }>(() => ({
+  ts: 0,
+}))
 
 export function getLastPressureReapAt(): number {
-  return lastPressureReapAt
+  return lastPressureReapAtSlot.of(getBootstrapSession()).ts
 }
 
 export function setLastPressureReapAt(ts: number): void {
-  lastPressureReapAt = ts
+  lastPressureReapAtSlot.of(getBootstrapSession()).ts = ts
 }
 
 export function resetLastPressureReapAtForTests(): void {
-  lastPressureReapAt = 0
+  lastPressureReapAtSlot.of(getBootstrapSession()).ts = 0
 }
 
 /**
@@ -191,7 +197,7 @@ export function evaluateMemoryPressureReap(opts: {
   const now = opts.now ?? Date.now()
   const idleMs = opts.idleMs ?? SHELL_PRESSURE_IDLE_MS
   const antiChurnMs = opts.antiChurnMs ?? SHELL_PRESSURE_ANTI_CHURN_MS
-  const lastReap = opts.lastPressureReapAt ?? lastPressureReapAt
+  const lastReap = opts.lastPressureReapAt ?? getLastPressureReapAt()
 
   if (opts.level !== 'critical') {
     return {

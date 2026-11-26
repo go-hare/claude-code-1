@@ -1,6 +1,7 @@
 import emojiRegex from 'emoji-regex'
 import { eastAsianWidth } from 'get-east-asian-width'
 import stripAnsi from 'strip-ansi'
+import { hasInkActiveSessionAls, InkHostSlot } from './instances.js'
 import { getGraphemeSegmenter } from './utils/grapheme.js'
 
 const EMOJI_REGEX = emojiRegex()
@@ -235,13 +236,28 @@ const MAX_INDIC_VOWEL_EXTRA = 8
 
 export type EmojiWidthCalibrator = (grapheme: string) => number | undefined
 
-let customEmojiWidthCalibrator: EmojiWidthCalibrator | null | undefined
+let defaultCustomEmojiWidthCalibrator: EmojiWidthCalibrator | null | undefined
+
+const customEmojiCalibratorHostSlot = new InkHostSlot<{
+  hasOverride: boolean
+  calibrator: EmojiWidthCalibrator | null | undefined
+}>(() => ({
+  hasOverride: false,
+  calibrator: undefined,
+}))
 
 /** Official 2.1.326/328 `Ucl` (#222/#223): register a terminal-specific emoji width calibrator. */
 export function setTerminalEmojiWidthCalibrator(
   calibrator: EmojiWidthCalibrator | null | undefined,
 ): void {
-  customEmojiWidthCalibrator = calibrator
+  if (hasInkActiveSessionAls()) {
+    const slot = customEmojiCalibratorHostSlot.of()
+    slot.hasOverride = true
+    slot.calibrator = calibrator
+  } else {
+    defaultCustomEmojiWidthCalibrator = calibrator
+    customEmojiCalibratorHostSlot.delete()
+  }
 }
 
 /**
@@ -380,11 +396,15 @@ export function createTerminalEmojiWidthCalibrator(
 }
 
 function getActiveEmojiCalibrator(): EmojiWidthCalibrator | undefined {
-  if (customEmojiWidthCalibrator === null) {
+  const slot = customEmojiCalibratorHostSlot.peek()
+  const custom = slot?.hasOverride
+    ? slot.calibrator
+    : defaultCustomEmojiWidthCalibrator
+  if (custom === null) {
     return undefined
   }
-  if (customEmojiWidthCalibrator !== undefined) {
-    return customEmojiWidthCalibrator
+  if (custom !== undefined) {
+    return custom
   }
   return isGnuScreenEnv() ? gnuScreenJoinedEmojiWidth : undefined
 }
@@ -393,8 +413,8 @@ function getActiveEmojiCalibrator(): EmojiWidthCalibrator | undefined {
 export function needsWidthCalibration(str: string): boolean {
   return (
     CALIBRATION_NEEDED_RE.test(str) ||
-    (getActiveEmojiCalibrator() !== undefined &&
-      JOINED_OR_MODIFIER_EMOJI_RE.test(str))
+    (JOINED_OR_MODIFIER_EMOJI_RE.test(str) &&
+      getActiveEmojiCalibrator() !== undefined)
   )
 }
 

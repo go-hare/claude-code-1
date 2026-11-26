@@ -22,6 +22,7 @@ import {
 } from './genericProcessUtils.js'
 import { safeParseJSON } from './json.js'
 import { lazySchema } from './lazySchema.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { jsonStringify } from './slowOperations.js'
 
 const LOCK_FILE_REL = join('.claude', 'scheduled_tasks.lock')
@@ -47,13 +48,44 @@ export type SchedulerLockOptions = {
   lockIdentity?: string
 }
 
-let unregisterCleanup: (() => void) | undefined
-// Suppress repeat "held by X" log lines when polling a live owner.
-let lastBlockedBy: string | undefined
-// Official 2.1.323 (#2139): persist the ownerKey that acquired each lock path
-// so session switches (which change getSessionId()) do not leak the lock when
-// releaseSchedulerLock() runs.
-const acquiredOwnerKeys = new Map<string, string>()
+type HostSchedulerLockState = {
+  // Suppress repeat "held by X" log lines when polling a live owner per lock path.
+  lastBlockedByLockPath: Map<string, string>
+  // Official 2.1.323 (#2139): persist the ownerKey that acquired each lock path
+  // on this SessionHost so session switches (which change getSessionId()) do not
+  // leak the lock when releaseSchedulerLock() runs, while keeping multiple hosts
+  // in the same process isolated from each other.
+  acquiredOwnerKeys: Map<string, string>
+}
+
+const fallbackSchedulerLockHost: object = {}
+
+function getActiveSchedulerLockHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackSchedulerLockHost
+}
+
+const schedulerLockHostSlot = new HostSlot<HostSchedulerLockState>(() => ({
+  lastBlockedByLockPath: new Map<string, string>(),
+  acquiredOwnerKeys: new Map<string, string>(),
+}))
+
+function getSchedulerLockHostState(): HostSchedulerLockState {
+  return schedulerLockHostSlot.of(getActiveSchedulerLockHost())
+}
+
+const unregisterByLockPath = new Map<string, () => void>()
+const cleanupOwnerByLockPath = new Map<string, string>()
 
 function getLockPath(dir?: string): string {
   return join(dir ?? getProjectRoot(), LOCK_FILE_REL)
@@ -100,17 +132,20 @@ async function tryCreateExclusive(
 }
 
 function registerLockCleanup(
-  opts: SchedulerLockOptions | undefined,
+  lockPath: string,
+  resolvedDir: string,
   ownerKey: string,
 ): void {
-  unregisterCleanup?.()
+  unregisterByLockPath.get(lockPath)?.()
   const releaseOpts: SchedulerLockOptions = {
-    ...opts,
+    dir: resolvedDir,
     lockIdentity: ownerKey,
   }
-  unregisterCleanup = registerCleanup(async () => {
+  const unregister = registerCleanup(async () => {
     await releaseSchedulerLock(releaseOpts)
   })
+  unregisterByLockPath.set(lockPath, unregister)
+  cleanupOwnerByLockPath.set(lockPath, ownerKey)
 }
 
 /**
@@ -127,14 +162,17 @@ function registerLockCleanup(
 export async function tryAcquireSchedulerLock(
   opts?: SchedulerLockOptions,
 ): Promise<boolean> {
-  const dir = opts?.dir
-  const lockPath = getLockPath(dir)
+  const hostState = getSchedulerLockHostState()
+  const resolvedDir = opts?.dir ?? getProjectRoot()
+  const lockPath = getLockPath(resolvedDir)
   // "sessionId" in the lock file is really just a stable owner key. REPL
   // uses getSessionId() on initial acquire and persists it in acquiredOwnerKeys
   // so session switches don't orphan the lock; daemon callers supply their own
   // UUID. PID remains the liveness signal regardless.
   const ownerKey =
-    opts?.lockIdentity ?? acquiredOwnerKeys.get(lockPath) ?? getSessionId()
+    opts?.lockIdentity ??
+    hostState.acquiredOwnerKeys.get(lockPath) ??
+    getSessionId()
   const lock: SchedulerLock = {
     sessionId: ownerKey,
     pid: process.pid,
@@ -142,26 +180,26 @@ export async function tryAcquireSchedulerLock(
     acquiredAt: Date.now(),
   }
 
-  if (await tryCreateExclusive(lock, dir)) {
-    lastBlockedBy = undefined
-    acquiredOwnerKeys.set(lockPath, ownerKey)
-    registerLockCleanup(opts, ownerKey)
+  if (await tryCreateExclusive(lock, resolvedDir)) {
+    hostState.lastBlockedByLockPath.delete(lockPath)
+    hostState.acquiredOwnerKeys.set(lockPath, ownerKey)
+    registerLockCleanup(lockPath, resolvedDir, ownerKey)
     logForDebugging(
       `[ScheduledTasks] acquired scheduler lock (PID ${process.pid})`,
     )
     return true
   }
 
-  const existing = await readLock(dir)
+  const existing = await readLock(resolvedDir)
 
   // Already ours (idempotent). After --resume the session ID is restored
   // but the process has a new PID — update the lock file so other sessions
   // see a live PID and don't steal it.
   if (existing?.sessionId === ownerKey) {
-    acquiredOwnerKeys.set(lockPath, ownerKey)
+    hostState.acquiredOwnerKeys.set(lockPath, ownerKey)
     if (existing.pid !== process.pid) {
       await writeFile(lockPath, jsonStringify(lock))
-      registerLockCleanup(opts, ownerKey)
+      registerLockCleanup(lockPath, resolvedDir, ownerKey)
     }
     return true
   }
@@ -173,8 +211,8 @@ export async function tryAcquireSchedulerLock(
     isProcessRunning(existing.pid) &&
     (await processLstartMatches(existing.pid, existing.procStart))
   ) {
-    if (lastBlockedBy !== existing.sessionId) {
-      lastBlockedBy = existing.sessionId
+    if (hostState.lastBlockedByLockPath.get(lockPath) !== existing.sessionId) {
+      hostState.lastBlockedByLockPath.set(lockPath, existing.sessionId)
       logForDebugging(
         `[ScheduledTasks] scheduler lock held by session ${existing.sessionId} (PID ${existing.pid})`,
       )
@@ -189,10 +227,10 @@ export async function tryAcquireSchedulerLock(
     )
   }
   await unlink(lockPath).catch(() => {})
-  if (await tryCreateExclusive(lock, dir)) {
-    lastBlockedBy = undefined
-    acquiredOwnerKeys.set(lockPath, ownerKey)
-    registerLockCleanup(opts, ownerKey)
+  if (await tryCreateExclusive(lock, resolvedDir)) {
+    hostState.lastBlockedByLockPath.delete(lockPath)
+    hostState.acquiredOwnerKeys.set(lockPath, ownerKey)
+    registerLockCleanup(lockPath, resolvedDir, ownerKey)
     return true
   }
   // Another session won the recovery race.
@@ -205,16 +243,22 @@ export async function tryAcquireSchedulerLock(
 export async function releaseSchedulerLock(
   opts?: SchedulerLockOptions,
 ): Promise<void> {
-  unregisterCleanup?.()
-  unregisterCleanup = undefined
-  lastBlockedBy = undefined
+  const hostState = getSchedulerLockHostState()
+  const resolvedDir = opts?.dir ?? getProjectRoot()
+  const lockPath = getLockPath(resolvedDir)
+  hostState.lastBlockedByLockPath.delete(lockPath)
 
-  const dir = opts?.dir
-  const lockPath = getLockPath(dir)
-  const persistedOwnerKey = acquiredOwnerKeys.get(lockPath)
-  acquiredOwnerKeys.delete(lockPath)
+  const persistedOwnerKey = hostState.acquiredOwnerKeys.get(lockPath)
+  hostState.acquiredOwnerKeys.delete(lockPath)
   const ownerKey = opts?.lockIdentity ?? persistedOwnerKey ?? getSessionId()
-  const existing = await readLock(dir)
+
+  if (cleanupOwnerByLockPath.get(lockPath) === ownerKey) {
+    unregisterByLockPath.get(lockPath)?.()
+    unregisterByLockPath.delete(lockPath)
+    cleanupOwnerByLockPath.delete(lockPath)
+  }
+
+  const existing = await readLock(resolvedDir)
   if (!existing || existing.sessionId !== ownerKey) return
   if (
     existing.pid !== process.pid &&

@@ -10,6 +10,7 @@ import { errorMessage } from './errors.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
 import { formatFileSize } from './format.js'
 import { getPlatform } from './platform.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { getToolResultsDir } from './toolResultStorage.js'
 
 const READ_CHUNK_SIZE = 1048576 // 1 MiB (SEA wSt Bus)
@@ -235,28 +236,36 @@ export type PDFExtractPagesResult = {
   }
 }
 
-let pdftoppmAvailable: boolean | undefined
+const pdftoppmAvailableHostSlot = new HostSlot<{
+  pdftoppmAvailable: boolean | undefined
+}>(() => ({
+  pdftoppmAvailable: undefined,
+}))
 
 /**
  * Reset the pdftoppm availability cache. Used by tests only.
  */
 export function resetPdftoppmCache(): void {
-  pdftoppmAvailable = undefined
+  pdftoppmAvailableHostSlot.of(getBootstrapSessionHost()).pdftoppmAvailable =
+    undefined
 }
 
 /**
  * Check whether the `pdftoppm` binary (from poppler-utils) is available.
- * The result is cached for the lifetime of the process.
+ * The result is cached per SessionHost.
  */
 export async function isPdftoppmAvailable(): Promise<boolean> {
-  if (pdftoppmAvailable !== undefined) return pdftoppmAvailable
+  const hostState = pdftoppmAvailableHostSlot.of(getBootstrapSessionHost())
+  if (hostState.pdftoppmAvailable !== undefined) {
+    return hostState.pdftoppmAvailable
+  }
   const { code, stderr } = await execFileNoThrow('pdftoppm', ['-v'], {
     timeout: 5000,
     useCwd: false,
   })
   // pdftoppm prints version info to stderr and exits 0 (or sometimes 99 on older versions)
-  pdftoppmAvailable = code === 0 || stderr.length > 0
-  return pdftoppmAvailable
+  hostState.pdftoppmAvailable = code === 0 || stderr.length > 0
+  return hostState.pdftoppmAvailable
 }
 
 /**

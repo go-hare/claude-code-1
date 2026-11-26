@@ -555,8 +555,13 @@ export function matchesVersionLockFile(
   )
 }
 
+// Process-global PID lock cleanup state — locks are keyed by `process.pid` and
+// `process.on('exit')` is process-wide, so registering once per process avoids
+// leaking exit listeners across multi-host sessions.
 let activePerPidLockPath: string | null = null
 let perPidExitHandlerRegistered = false
+let sharedMaintenanceRelease: (() => void) | null = null
+let sharedExitHandlerRegistered = false
 
 /**
  * Official 2.1.328 `_t()`: write a non-contending per-PID lock file
@@ -566,7 +571,6 @@ export function writePerPidLock(
   versionPath: string,
   locksDir: string,
 ): boolean {
-  const fs = getFsImplementation()
   const versionName = basename(versionPath)
   const lockPath = getPerPidLockPath(locksDir, versionName, process.pid)
   try {
@@ -588,7 +592,7 @@ export function writePerPidLock(
     process.on('exit', () => {
       try {
         if (activePerPidLockPath) {
-          fs.unlinkSync(activePerPidLockPath)
+          getFsImplementation().unlinkSync(activePerPidLockPath)
           activePerPidLockPath = null
         }
       } catch {
@@ -599,9 +603,6 @@ export function writePerPidLock(
   logForDebugging(`Wrote per-PID lock for ${versionName} (PID ${process.pid})`)
   return true
 }
-
-let sharedMaintenanceRelease: (() => void) | null = null
-let sharedExitHandlerRegistered = false
 
 /**
  * Official 2.1.328 `rn()`: acquire or refresh the shared `${version}.lock`

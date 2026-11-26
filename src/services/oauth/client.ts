@@ -20,6 +20,7 @@ import {
 import type { AccountInfo } from '../../utils/config.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { getOauthProfileFromOauthToken } from './getOauthProfile.js'
 import type {
   BillingType,
@@ -639,25 +640,30 @@ export async function getOrganizationUUID(): Promise<string | null> {
 
 // Official 2.1.325 #2376: deduplicate concurrent `populateOAuthAccountInfoIfNeeded()`
 // calls (e.g., startup fire-and-forget in `init.ts` joined by
-// `waitForCachedAccountDataBeforePrint()` in `print.ts`) so only one profile
-// fetch is in flight at a time.
-let inFlightPopulateOAuthAccountInfo: Promise<boolean> | null = null
+// `waitForCachedAccountDataBeforePrint()` in `print.ts`) per SessionHost so
+// only one profile fetch is in flight at a time per host.
+const oauthClientStateByHost = new HostSlot<{
+  inFlightPopulateOAuthAccountInfo: Promise<boolean> | null
+}>(() => ({
+  inFlightPopulateOAuthAccountInfo: null,
+}))
 
 /**
  * Populate the OAuth account info if it has not already been cached in config.
- * Reuses an in-flight singleton promise so concurrent callers share one fetch.
+ * Reuses an in-flight per-host promise so concurrent callers share one fetch.
  * @returns Whether or not the oauth account info was populated.
  */
 export function populateOAuthAccountInfoIfNeeded(): Promise<boolean> {
-  if (inFlightPopulateOAuthAccountInfo !== null) {
-    return inFlightPopulateOAuthAccountInfo
+  const hostState = oauthClientStateByHost.of(getBootstrapSessionHost())
+  if (hostState.inFlightPopulateOAuthAccountInfo !== null) {
+    return hostState.inFlightPopulateOAuthAccountInfo
   }
   const run = populateOAuthAccountInfoIfNeededImpl().finally(() => {
-    if (inFlightPopulateOAuthAccountInfo === run) {
-      inFlightPopulateOAuthAccountInfo = null
+    if (hostState.inFlightPopulateOAuthAccountInfo === run) {
+      hostState.inFlightPopulateOAuthAccountInfo = null
     }
   })
-  inFlightPopulateOAuthAccountInfo = run
+  hostState.inFlightPopulateOAuthAccountInfo = run
   return run
 }
 

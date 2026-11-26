@@ -31,6 +31,7 @@ import { createAgentId } from '../../utils/uuid.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { pdSessionEffort } from '../../utils/effort.js'
 import { runWithCwdOverride } from '../../utils/cwd.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import {
   createAgentWorktree,
   hasWorktreeChanges,
@@ -220,22 +221,36 @@ async function cleanupWorkflowWorktree(
  * Official #1648 — guard against re-running an already-completed workflow agent
  * when a workflow resumes/recovers after a usage-limit pause.
  */
-const completedAgentResults = new Map<string, AgentRunResult>()
-const usageLimitRecoveryRuns = new Set<string>()
+type WorkflowBackendRecoveryHostState = {
+  completedAgentResults: Map<string, AgentRunResult>
+  usageLimitRecoveryRuns: Set<string>
+}
+
+const workflowBackendRecoveryHostSlot =
+  new HostSlot<WorkflowBackendRecoveryHostState>(() => ({
+    completedAgentResults: new Map(),
+    usageLimitRecoveryRuns: new Set(),
+  }))
+
+function getWorkflowBackendRecoveryHostState(): WorkflowBackendRecoveryHostState {
+  return workflowBackendRecoveryHostSlot.of(getBootstrapSessionHost())
+}
 
 function completedAgentKey(runId: string, agentId: number): string {
   return `${runId}\0${agentId}`
 }
 
 export function markWorkflowUsageLimitRecovery(runId: string): void {
-  usageLimitRecoveryRuns.add(runId)
+  getWorkflowBackendRecoveryHostState().usageLimitRecoveryRuns.add(runId)
 }
 
 export function getCompletedWorkflowAgentResult(
   runId: string,
   agentId: number,
 ): AgentRunResult | undefined {
-  return completedAgentResults.get(completedAgentKey(runId, agentId))
+  return getWorkflowBackendRecoveryHostState().completedAgentResults.get(
+    completedAgentKey(runId, agentId),
+  )
 }
 
 export function recordCompletedWorkflowAgentResult(
@@ -244,11 +259,16 @@ export function recordCompletedWorkflowAgentResult(
   result: AgentRunResult,
 ): void {
   if (result.kind === 'ok') {
-    completedAgentResults.set(completedAgentKey(runId, agentId), result)
+    getWorkflowBackendRecoveryHostState().completedAgentResults.set(
+      completedAgentKey(runId, agentId),
+      result,
+    )
   }
 }
 
 export function clearCompletedWorkflowAgentResults(runId?: string): void {
+  const { completedAgentResults, usageLimitRecoveryRuns } =
+    getWorkflowBackendRecoveryHostState()
   if (runId === undefined) {
     completedAgentResults.clear()
     usageLimitRecoveryRuns.clear()
@@ -421,7 +441,9 @@ export const claudeCodeBackend: AgentAdapter = {
     ctx: AgentAdapterContext,
   ): Promise<AgentRunResult> {
     const isRecovery =
-      usageLimitRecoveryRuns.has(ctx.runId) ||
+      getWorkflowBackendRecoveryHostState().usageLimitRecoveryRuns.has(
+        ctx.runId,
+      ) ||
       (ctx as { isUsageLimitRecovery?: boolean }).isUsageLimitRecovery === true
     if (isRecovery) {
       const priorCompleted = getCompletedWorkflowAgentResult(

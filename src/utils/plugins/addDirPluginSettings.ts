@@ -28,6 +28,7 @@ import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { findCanonicalGitRootUncached } from '../git.js'
 import { normalizePathForConfigKey } from '../path.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { parseSettingsFile } from '../settings/settings.js'
 import type {
   ExtraKnownMarketplaceSchema,
@@ -41,11 +42,11 @@ type ExtraKnownMarketplace = z.infer<
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'] as const
 const TAWNY_THRUSH_FLAG = 'tengu_tawny_thrush'
 
-const warnedUntrustedDirs = new Set<string>()
+const warnedUntrustedDirsHostSlot = new HostSlot<Set<string>>(() => new Set())
 
 /** Reset warning dedup cache for tests. */
 export function resetAddDirTrustWarningsForTesting(): void {
-  warnedUntrustedDirs.clear()
+  warnedUntrustedDirsHostSlot.of(getBootstrapSessionHost()).clear()
 }
 
 /**
@@ -115,6 +116,9 @@ function filterTrustedAddDirs(
     }
 
     const abs = resolve(dir)
+    const warnedUntrustedDirs = warnedUntrustedDirsHostSlot.of(
+      getBootstrapSessionHost(),
+    )
     if (warnedUntrustedDirs.has(abs)) {
       continue
     }

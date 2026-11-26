@@ -65,8 +65,19 @@ import {
 import {
   addInvokedSkill,
   getInvokedSkillsForAgent,
+  getSessionId,
 } from '../bootstrap/state.js'
 import { getAgentContext } from './agentContext.js'
+import {
+  getActiveSessionFromAls,
+  getActiveSubconversationFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  runWithSubconversationContext,
+  type Session,
+  type SubconversationAlsContext,
+} from './sessionRoot.js'
 import { WEB_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebFetchTool/prompt.js'
 import {
   isLoggableMessage,
@@ -106,14 +117,59 @@ export type CacheSafeParams = {
 // Slot written by handleStopHooks after each turn so post-turn forks
 // (promptSuggestion, postTurnSummary, /btw) can share the main loop's
 // prompt cache without each caller threading params through.
-let lastCacheSafeParams: CacheSafeParams | null = null
+// Official 2.1.331: `var yAs = new $e(() => new U8n)` (`RootSessionSlot` on `getBootstrapSession()`).
+type CacheSafeParamsSlotState = {
+  sessionId: string | null
+  params: CacheSafeParams | null
+}
+
+const cacheSafeParamsSlot = new RootSessionSlot<CacheSafeParamsSlotState>(
+  () => ({
+    sessionId: null,
+    params: null,
+  }),
+)
+
+type CapturedParamsAlsContext = {
+  session: Session | undefined
+  subconversation: SubconversationAlsContext | undefined
+}
+
+const paramsContextMap = new WeakMap<
+  CacheSafeParams,
+  CapturedParamsAlsContext
+>()
+const paramsToolUseContextMap = new WeakMap<object, CapturedParamsAlsContext>()
+
+function recordParamsContext(params: CacheSafeParams): void {
+  const session = getActiveSessionFromAls()
+  const subconversation = getActiveSubconversationFromAls()
+  if (!session && !subconversation) return
+  const captured: CapturedParamsAlsContext = { session, subconversation }
+  paramsContextMap.set(params, captured)
+  if (
+    typeof params.toolUseContext === 'object' &&
+    params.toolUseContext !== null
+  ) {
+    paramsToolUseContextMap.set(params.toolUseContext, captured)
+  }
+}
 
 export function saveCacheSafeParams(params: CacheSafeParams | null): void {
-  lastCacheSafeParams = params
+  const slot = cacheSafeParamsSlot.of(getBootstrapSession())
+  slot.params = params
+  slot.sessionId = params ? getSessionId() : null
+  if (params) {
+    recordParamsContext(params)
+  }
 }
 
 export function getLastCacheSafeParams(): CacheSafeParams | null {
-  return lastCacheSafeParams
+  const slot = cacheSafeParamsSlot.of(getBootstrapSession())
+  if (!slot.params || slot.sessionId !== getSessionId()) {
+    return null
+  }
+  return slot.params
 }
 
 export type ForkedAgentParams = {
@@ -183,13 +239,15 @@ export type ForkedAgentResult = {
 export function createCacheSafeParams(
   context: REPLHookContext,
 ): CacheSafeParams {
-  return {
+  const params: CacheSafeParams = {
     systemPrompt: context.systemPrompt,
     userContext: context.userContext,
     systemContext: context.systemContext,
     toolUseContext: context.toolUseContext,
     forkContextMessages: context.messages,
   }
+  recordParamsContext(params)
+  return params
 }
 
 export type OverlayForkedCommandAppStateOptions = {
@@ -919,7 +977,39 @@ const FORKED_TRANSCRIPT_TYPES = new Set([
   'system',
 ])
 
-export async function runForkedAgent({
+export async function runForkedAgent(
+  forkedAgentParams: ForkedAgentParams,
+): Promise<ForkedAgentResult> {
+  const { cacheSafeParams } = forkedAgentParams
+  const captured =
+    paramsContextMap.get(cacheSafeParams) ??
+    (typeof cacheSafeParams.toolUseContext === 'object' &&
+    cacheSafeParams.toolUseContext !== null
+      ? paramsToolUseContextMap.get(cacheSafeParams.toolUseContext)
+      : undefined)
+  const targetSession = captured?.session
+  const targetSubconversation = captured?.subconversation
+  const currentSession = getActiveSessionFromAls()
+  const currentSubconversation = getActiveSubconversationFromAls()
+  const runImpl = () => runForkedAgentImpl(forkedAgentParams)
+
+  if (targetSession !== undefined && currentSession !== targetSession) {
+    return runWithSession(targetSession, () =>
+      targetSubconversation !== undefined
+        ? runWithSubconversationContext(targetSubconversation, runImpl)
+        : runImpl(),
+    )
+  }
+  if (
+    targetSubconversation !== undefined &&
+    currentSubconversation !== targetSubconversation
+  ) {
+    return runWithSubconversationContext(targetSubconversation, runImpl)
+  }
+  return runImpl()
+}
+
+async function runForkedAgentImpl({
   promptMessages,
   cacheSafeParams,
   canUseTool,

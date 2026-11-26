@@ -48,6 +48,10 @@ import {
   restrictedAlwaysCodeRunningNames,
   restrictedDenyToolNames,
 } from '../../utils/restricted.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { saveReplMode } from '../../utils/sessionStorage.js'
 import {
   buildCodeModeMcpStatusDelta,
@@ -2135,7 +2139,25 @@ type PersistentCodeModeVmSession = {
 }
 
 const MAX_PERSISTENT_VM_SESSIONS = 32
-const persistentVmSessionsByKey = new Map<string, PersistentCodeModeVmSession>()
+
+type CodeModeExecutorSessionState = {
+  persistentVmSessionsByKey: Map<string, PersistentCodeModeVmSession>
+  codeModeAutoVerdictTracker: CodeModeAutoVerdictTracker
+  sessionUnsetVarsByKey: Map<string, Set<string>>
+  codeModeScriptSeq: number
+}
+
+const codeModeExecutorSessionSlot =
+  new RootSessionSlot<CodeModeExecutorSessionState>(() => ({
+    persistentVmSessionsByKey: new Map<string, PersistentCodeModeVmSession>(),
+    codeModeAutoVerdictTracker: new CodeModeAutoVerdictTracker(),
+    sessionUnsetVarsByKey: new Map<string, Set<string>>(),
+    codeModeScriptSeq: 0,
+  }))
+
+function getExecutorSessionState(): CodeModeExecutorSessionState {
+  return codeModeExecutorSessionSlot.of(getBootstrapSession())
+}
 
 let cachedReplTranspiler:
   | { transformSync: (code: string) => string }
@@ -2637,6 +2659,8 @@ function sealAsyncForRealm(
 function getOrCreatePersistentVmSession(
   sessionKey: string,
 ): PersistentCodeModeVmSession {
+  const { persistentVmSessionsByKey, sessionUnsetVarsByKey } =
+    getExecutorSessionState()
   const existing = persistentVmSessionsByKey.get(sessionKey)
   if (existing) {
     // Refresh LRU order
@@ -2663,6 +2687,8 @@ function getOrCreatePersistentVmSession(
  * reset, clear, or eviction).
  */
 export function clearCodeModeVmSession(sessionKey?: string): void {
+  const { persistentVmSessionsByKey, sessionUnsetVarsByKey } =
+    getExecutorSessionState()
   if (sessionKey !== undefined) {
     persistentVmSessionsByKey.get(sessionKey)?.clearAllTimers()
     persistentVmSessionsByKey.delete(sessionKey)
@@ -2736,6 +2762,11 @@ export function endMainThreadConversation(
     ) => PollEventQueueCommandLike[]
   },
 ): void {
+  const {
+    persistentVmSessionsByKey,
+    sessionUnsetVarsByKey,
+    codeModeAutoVerdictTracker,
+  } = getExecutorSessionState()
   const sessions = getReplSessions()
   const hasMainState =
     isCodeModeAccepted() ||
@@ -2810,6 +2841,8 @@ export function endSubagentRepl(
     ) => PollEventQueueCommandLike[]
   },
 ): void {
+  const { persistentVmSessionsByKey, sessionUnsetVarsByKey } =
+    getExecutorSessionState()
   const sessions = getReplSessions()
   const hasAgentState =
     isCodeModeAccepted() ||
@@ -4621,22 +4654,19 @@ const CODE_MODE_VISIBLE_TOOL_NAMES = new Set([
   'StructuredOutput',
 ])
 
-const codeModeAutoVerdictTracker = new CodeModeAutoVerdictTracker()
-const sessionUnsetVarsByKey = new Map<string, Set<string>>()
-let codeModeScriptSeq = 0
-
 export function getCodeModeAutoVerdictTracker(): CodeModeAutoVerdictTracker {
-  return codeModeAutoVerdictTracker
+  return getExecutorSessionState().codeModeAutoVerdictTracker
 }
 
 export function resetCodeModeRuntimeStateForTests(): void {
-  for (const s of persistentVmSessionsByKey.values()) {
+  const state = getExecutorSessionState()
+  for (const s of state.persistentVmSessionsByKey.values()) {
     s.clearAllTimers()
   }
-  persistentVmSessionsByKey.clear()
-  sessionUnsetVarsByKey.clear()
-  codeModeAutoVerdictTracker.reset()
-  codeModeScriptSeq = 0
+  state.persistentVmSessionsByKey.clear()
+  state.sessionUnsetVarsByKey.clear()
+  state.codeModeAutoVerdictTracker.reset()
+  state.codeModeScriptSeq = 0
 }
 
 /**
@@ -5117,7 +5147,11 @@ export function wrapReplToolForCodeMode(
           }
         }
       }
-      const scriptId = context.toolUseId ?? `repl-${++codeModeScriptSeq}`
+      const executorState = getExecutorSessionState()
+      const { codeModeAutoVerdictTracker, sessionUnsetVarsByKey } =
+        executorState
+      const scriptId =
+        context.toolUseId ?? `repl-${++executorState.codeModeScriptSeq}`
       const unsetKey = context.agentId ?? 'main'
       const priorUnsetVars = sessionUnsetVarsByKey.get(unsetKey)
 

@@ -1,4 +1,3 @@
-import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import { basename, dirname, join } from 'path'
 import { fileSuffixForOauthConfig } from '../constants/oauth.js'
@@ -7,13 +6,58 @@ import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { findExecutable } from './findExecutable.js'
 import { getFsImplementation } from './fsOperations.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { which } from './which.js'
 
 type Platform = 'win32' | 'darwin' | 'linux'
 
 export type GlobalClaudeFileSeed = 'seeded' | 'unchanged' | 'conflict'
 
-let globalClaudeFile: string | undefined
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
+
+const globalClaudeFileHostSlot = new HostSlot<{
+  globalClaudeFile: string | undefined
+}>(() => ({
+  globalClaudeFile: undefined,
+}))
+
+function getGlobalClaudeFileHostState(): {
+  globalClaudeFile: string | undefined
+} {
+  return globalClaudeFileHostSlot.of(getBootstrapSessionHost())
+}
 
 function isEnoent(err: unknown): boolean {
   return (
@@ -119,7 +163,8 @@ function computeGlobalClaudeFile(): string {
  * `this.globalClaudeFile ??= Xt()`.
  */
 export function getGlobalClaudeFile(): string {
-  return (globalClaudeFile ??= computeGlobalClaudeFile())
+  const hostState = getGlobalClaudeFileHostState()
+  return (hostState.globalClaudeFile ??= computeGlobalClaudeFile())
 }
 
 /**
@@ -127,18 +172,19 @@ export function getGlobalClaudeFile(): string {
  * unset → pin + "seeded"; same path → "unchanged"; else "conflict".
  */
 export function seedGlobalClaudeFile(path: string): GlobalClaudeFileSeed {
-  if (globalClaudeFile === undefined) {
-    globalClaudeFile = path
+  const hostState = getGlobalClaudeFileHostState()
+  if (hostState.globalClaudeFile === undefined) {
+    hostState.globalClaudeFile = path
     return 'seeded'
   }
-  return globalClaudeFile === path ? 'unchanged' : 'conflict'
+  return hostState.globalClaudeFile === path ? 'unchanged' : 'conflict'
 }
 
 export function resetGlobalClaudeFileForTests(): void {
-  globalClaudeFile = undefined
+  getGlobalClaudeFileHostState().globalClaudeFile = undefined
 }
 
-const hasInternetAccess = memoize(async (): Promise<boolean> => {
+const hasInternetAccess = memoizePerHost(async (): Promise<boolean> => {
   try {
     const { default: axiosClient } = await import('axios')
     await axiosClient.head('http://1.1.1.1', {
@@ -159,7 +205,7 @@ async function isCommandAvailable(command: string): Promise<boolean> {
   }
 }
 
-const detectPackageManagers = memoize(async (): Promise<string[]> => {
+const detectPackageManagers = memoizePerHost(async (): Promise<string[]> => {
   const packageManagers = []
 
   if (await isCommandAvailable('npm')) packageManagers.push('npm')
@@ -169,7 +215,7 @@ const detectPackageManagers = memoize(async (): Promise<string[]> => {
   return packageManagers
 })
 
-const detectRuntimes = memoize(async (): Promise<string[]> => {
+const detectRuntimes = memoizePerHost(async (): Promise<string[]> => {
   const runtimes = []
 
   if (await isCommandAvailable('bun')) runtimes.push('bun')
@@ -183,7 +229,7 @@ const detectRuntimes = memoize(async (): Promise<string[]> => {
  * Checks if we're running in a WSL environment
  * @returns true if running in WSL, false otherwise
  */
-const isWslEnvironment = memoize((): boolean => {
+const isWslEnvironment = memoizePerHost((): boolean => {
   try {
     // Check for WSLInterop file which is a reliable indicator of WSL
     return getFsImplementation().existsSync(
@@ -199,7 +245,7 @@ const isWslEnvironment = memoize((): boolean => {
  * Checks if the npm executable is located in the Windows filesystem within WSL
  * @returns true if npm is from Windows (starts with /mnt/c/), false otherwise
  */
-const isNpmFromWindowsPath = memoize((): boolean => {
+const isNpmFromWindowsPath = memoizePerHost((): boolean => {
   try {
     // Only relevant in WSL environment
     if (!isWslEnvironment()) {
@@ -354,7 +400,7 @@ function detectTerminal(): string | null {
  * Detects the deployment environment/platform based on environment variables
  * @returns The deployment platform name, or 'unknown' if not detected
  */
-export const detectDeploymentEnvironment = memoize((): string => {
+export const detectDeploymentEnvironment = memoizePerHost((): string => {
   // Cloud development environments
   if (isEnvTruthy(process.env.CODESPACES)) return 'codespaces'
   if (process.env.GITPOD_WORKSPACE_ID) return 'gitpod'
@@ -442,7 +488,7 @@ export const env = {
   isSSH: isSSHSession,
   getPackageManagers: detectPackageManagers,
   getRuntimes: detectRuntimes,
-  isRunningWithBun: memoize(isRunningWithBun),
+  isRunningWithBun: memoizePerHost(isRunningWithBun),
   isWslEnvironment,
   isNpmFromWindowsPath,
   isConductor,

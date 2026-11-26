@@ -27,7 +27,6 @@
 
 import { feature } from 'bun:bundle'
 import ignore from 'ignore'
-import memoize from 'lodash-es/memoize.js'
 import {
   Lexer,
   Tokenizer,
@@ -66,6 +65,7 @@ import {
   getUserClaudeRulesDir,
 } from './config.js'
 import { randomUUID } from 'crypto'
+import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
@@ -89,6 +89,7 @@ import {
   type InstructionsLoadReason,
   type InstructionsMemoryType,
 } from './hooks.js'
+import { RootSessionSlot } from './hostSlot.js'
 import type { MemoryType } from './memory/types.js'
 import { expandPath, isUnsafeNetworkOrNtIncludePath } from './path.js'
 import {
@@ -97,6 +98,7 @@ import {
   pathInWorkingPath,
   workingDirPathsForPermission,
 } from './permissions/filesystem.js'
+import { getBootstrapSession, runWithSession } from './sessionRoot.js'
 import {
   getEnabledSettingSources,
   isSettingSourceEnabled,
@@ -114,7 +116,82 @@ const teamMemPaths = feature('TEAMMEM')
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
-let hasLoggedInitialLoad = false
+type SessionMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerRootSession<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): SessionMemoized<Args, Result> {
+  const slot = new RootSessionSlot(() => new Map<unknown, Result>())
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSession())
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSession()),
+    set: (next: Map<unknown, Result>) => {
+      const current = slot.of(getBootstrapSession())
+      if (current === next) return
+      current.clear()
+      for (const [k, v] of next.entries()) {
+        current.set(k, v)
+      }
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as SessionMemoized<Args, Result>
+}
+
+type ClaudeMdPermissionContextSourceEntry = {
+  getter: () => ToolPermissionContext | undefined
+}
+
+type ClaudeMdSessionState = {
+  hasLoggedInitialLoad: boolean
+  nextEagerLoadReason: InstructionsLoadReason
+  shouldFireHook: boolean
+  claudeMdPermissionContext: ToolPermissionContext | undefined
+  getLiveClaudeMdPermissionContext:
+    | (() => ToolPermissionContext | undefined)
+    | undefined
+  liveClaudeMdPermissionContextStack: ClaudeMdPermissionContextSourceEntry[]
+  withheldMemoryState: {
+    owed: Map<string, WithheldMemoryEntry>
+    logged: Set<string>
+    token: string
+    seen: Set<string>
+  }
+}
+
+const claudeMdSessionSlot = new RootSessionSlot<ClaudeMdSessionState>(() => ({
+  hasLoggedInitialLoad: false,
+  nextEagerLoadReason: 'session_start',
+  shouldFireHook: true,
+  claudeMdPermissionContext: undefined,
+  getLiveClaudeMdPermissionContext: undefined,
+  liveClaudeMdPermissionContextStack: [],
+  withheldMemoryState: {
+    owed: new Map(),
+    logged: new Set(),
+    token: randomUUID(),
+    seen: new Set(),
+  },
+}))
+
+function getClaudeMdSessionState(): ClaudeMdSessionState {
+  return claudeMdSessionSlot.of(getBootstrapSession())
+}
 
 const MEMORY_INSTRUCTION_PROMPT =
   'Codebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.'
@@ -521,19 +598,6 @@ export type MemoryFilePermissionReader = (
   maxBytes: number,
 ) => Promise<string | undefined>
 
-let claudeMdPermissionContext: ToolPermissionContext | undefined
-
-let getLiveClaudeMdPermissionContext:
-  | (() => ToolPermissionContext | undefined)
-  | undefined
-
-type ClaudeMdPermissionContextSourceEntry = {
-  getter: () => ToolPermissionContext | undefined
-}
-
-const liveClaudeMdPermissionContextStack: ClaudeMdPermissionContextSourceEntry[] =
-  []
-
 /**
  * Official 2.1.328 (`Wut`): register the session's launch ToolPermissionContext
  * (`judgedBy`) so recursive CLAUDE.md / @include / rules loading checks Read
@@ -544,8 +608,9 @@ const liveClaudeMdPermissionContextStack: ClaudeMdPermissionContextSourceEntry[]
 export function setClaudeMdPermissionContext(
   context: ToolPermissionContext | undefined,
 ): void {
-  if (claudeMdPermissionContext !== context) {
-    claudeMdPermissionContext = context
+  const state = getClaudeMdSessionState()
+  if (state.claudeMdPermissionContext !== context) {
+    state.claudeMdPermissionContext = context
     clearMemoryFileCaches()
   }
 }
@@ -561,35 +626,40 @@ export function setClaudeMdPermissionContext(
 export function registerClaudeMdPermissionContextSource(
   getter: (() => ToolPermissionContext | undefined) | undefined,
 ): () => void {
+  const ownerSession = getBootstrapSession()
+  const ownerRoot = ownerSession.root ?? ownerSession
+  const state = claudeMdSessionSlot.of(ownerRoot)
   if (getter === undefined) {
-    liveClaudeMdPermissionContextStack.length = 0
-    if (getLiveClaudeMdPermissionContext !== undefined) {
-      getLiveClaudeMdPermissionContext = undefined
+    state.liveClaudeMdPermissionContextStack.length = 0
+    if (state.getLiveClaudeMdPermissionContext !== undefined) {
+      state.getLiveClaudeMdPermissionContext = undefined
       clearMemoryFileCaches()
     }
     return () => {}
   }
   const entry: ClaudeMdPermissionContextSourceEntry = { getter }
-  liveClaudeMdPermissionContextStack.push(entry)
-  if (getLiveClaudeMdPermissionContext !== getter) {
-    getLiveClaudeMdPermissionContext = getter
+  state.liveClaudeMdPermissionContextStack.push(entry)
+  if (state.getLiveClaudeMdPermissionContext !== getter) {
+    state.getLiveClaudeMdPermissionContext = getter
     clearMemoryFileCaches()
   }
   let active = true
   return () => {
     if (!active) return
     active = false
-    const idx = liveClaudeMdPermissionContextStack.lastIndexOf(entry)
+    const idx = state.liveClaudeMdPermissionContextStack.lastIndexOf(entry)
     if (idx !== -1) {
-      liveClaudeMdPermissionContextStack.splice(idx, 1)
+      state.liveClaudeMdPermissionContextStack.splice(idx, 1)
     }
     const next =
-      liveClaudeMdPermissionContextStack[
-        liveClaudeMdPermissionContextStack.length - 1
+      state.liveClaudeMdPermissionContextStack[
+        state.liveClaudeMdPermissionContextStack.length - 1
       ]?.getter
-    if (getLiveClaudeMdPermissionContext !== next) {
-      getLiveClaudeMdPermissionContext = next
-      clearMemoryFileCaches()
+    if (state.getLiveClaudeMdPermissionContext !== next) {
+      state.getLiveClaudeMdPermissionContext = next
+      runWithSession(ownerRoot, () => {
+        getMemoryFiles.cache?.clear?.()
+      })
     }
   }
 }
@@ -648,6 +718,31 @@ function buildSettingsPermissionContextForMemory():
   }
 }
 
+function readEngineStorePermissionContext(): ToolPermissionContext | undefined {
+  const store = getBootstrapSession().engineStore.current
+  if (
+    typeof store !== 'object' ||
+    store === null ||
+    !('getState' in store) ||
+    typeof (store as { getState?: unknown }).getState !== 'function'
+  ) {
+    return undefined
+  }
+  const state = (
+    store as { getState: () => { toolPermissionContext?: unknown } | undefined }
+  ).getState()
+  const ctx = state?.toolPermissionContext
+  if (
+    typeof ctx !== 'object' ||
+    ctx === null ||
+    !('alwaysDenyRules' in ctx) ||
+    !('mode' in ctx)
+  ) {
+    return undefined
+  }
+  return ctx as ToolPermissionContext
+}
+
 function resolveEffectiveMemoryPermissionContext():
   | ToolPermissionContext
   | undefined {
@@ -655,9 +750,11 @@ function resolveEffectiveMemoryPermissionContext():
   // registered via Wut) → default. The settings-source builder is our
   // `md()`-style default for entrypoints that never register a session
   // context (print mode before store creation, standalone loaders).
+  const state = getClaudeMdSessionState()
   const ctx =
-    getLiveClaudeMdPermissionContext?.() ??
-    claudeMdPermissionContext ??
+    state.getLiveClaudeMdPermissionContext?.() ??
+    readEngineStorePermissionContext() ??
+    state.claudeMdPermissionContext ??
     buildSettingsPermissionContextForMemory()
   if (!ctx) return undefined
   if (
@@ -1364,8 +1461,6 @@ export async function processMdRules({
   }
 }
 
-let lastMemoryHoldSignature: string | undefined
-
 /**
  * Official 2.1.328 `qC` (`Dq()` hold signature): fingerprint permission hold
  * state (Read deny rules, restricted/outside-read fence, additional working
@@ -1400,7 +1495,7 @@ function getMemoryPermissionHoldSignature(): string {
   ].join('|')
 }
 
-export const getMemoryFiles = memoize(
+export const getMemoryFiles = memoizePerRootSession(
   async (forceIncludeExternal: boolean = false): Promise<MemoryFileInfo[]> => {
     const startTime = Date.now()
     logForDiagnosticsNoPII('info', 'memory_files_started')
@@ -1694,8 +1789,9 @@ export const getMemoryFiles = memoize(
       typeCounts[f.type] = (typeCounts[f.type] ?? 0) + 1
     }
 
-    if (!hasLoggedInitialLoad) {
-      hasLoggedInitialLoad = true
+    const sessionState = getClaudeMdSessionState()
+    if (!sessionState.hasLoggedInitialLoad) {
+      sessionState.hasLoggedInitialLoad = true
       logEvent('tengu_claudemd__initial_load', {
         file_count: result.length,
         total_content_length: totalContentLength,
@@ -1745,15 +1841,8 @@ export const getMemoryFiles = memoize(
     return result
   },
   (forceIncludeExternal: boolean = false): string => {
-    const hold = getMemoryPermissionHoldSignature()
-    if (
-      lastMemoryHoldSignature !== undefined &&
-      lastMemoryHoldSignature !== hold
-    ) {
-      getMemoryFiles.cache?.clear?.()
-    }
-    lastMemoryHoldSignature = hold
-    return `${forceIncludeExternal ? '1' : '0'}:${hold}`
+    const holdSignature = getMemoryPermissionHoldSignature()
+    return `${getOriginalCwd()}::${getCwd()}::${Boolean(forceIncludeExternal)}::${holdSignature}`
   },
 )
 
@@ -1768,25 +1857,12 @@ function isInstructionsMemoryType(
   )
 }
 
-// Load reason to report for top-level (non-included) files on the next eager
-// getMemoryFiles() pass. Set to 'compact' by resetGetMemoryFilesCache when
-// compaction clears the cache, so the InstructionsLoaded hook reports the
-// reload correctly instead of misreporting it as 'session_start'. One-shot:
-// reset to 'session_start' after being read.
-let nextEagerLoadReason: InstructionsLoadReason = 'session_start'
-
-// Whether the InstructionsLoaded hook should fire on the next cache miss.
-// true initially (for session_start), consumed after firing, re-enabled only
-// by resetGetMemoryFilesCache(). Callers that only need cache invalidation
-// for correctness (e.g. worktree enter/exit, settings sync, /memory dialog)
-// should use clearMemoryFileCaches() instead to avoid spurious hook fires.
-let shouldFireHook = true
-
 function consumeNextEagerLoadReason(): InstructionsLoadReason | undefined {
-  if (!shouldFireHook) return undefined
-  shouldFireHook = false
-  const reason = nextEagerLoadReason
-  nextEagerLoadReason = 'session_start'
+  const state = getClaudeMdSessionState()
+  if (!state.shouldFireHook) return undefined
+  state.shouldFireHook = false
+  const reason = state.nextEagerLoadReason
+  state.nextEagerLoadReason = 'session_start'
   return reason
 }
 
@@ -1800,7 +1876,6 @@ function consumeNextEagerLoadReason(): InstructionsLoadReason | undefined {
  * compaction), use resetGetMemoryFilesCache() instead.
  */
 export function clearMemoryFileCaches(): void {
-  lastMemoryHoldSignature = undefined
   // ?.cache because tests spyOn this, which replaces the memoize wrapper.
   getMemoryFiles.cache?.clear?.()
 }
@@ -1808,8 +1883,9 @@ export function clearMemoryFileCaches(): void {
 export function resetGetMemoryFilesCache(
   reason: InstructionsLoadReason = 'session_start',
 ): void {
-  nextEagerLoadReason = reason
-  shouldFireHook = true
+  const state = getClaudeMdSessionState()
+  state.nextEagerLoadReason = reason
+  state.shouldFireHook = true
   clearMemoryFileCaches()
 }
 
@@ -2253,20 +2329,14 @@ export const WITHHELD_MEMORY_REASON_LABELS: Record<WithheldMemoryWhy, string> =
 const MAX_WITHHELD_TRACKED = 200
 const WITHHELD_SHOWN_LIMIT = 20
 
-const withheldMemoryState = {
-  owed: new Map<string, WithheldMemoryEntry>(),
-  logged: new Set<string>(),
-  token: randomUUID(),
-  seen: new Set<string>(),
-}
-
 export function getWithheldMemoryToken(): string {
-  return withheldMemoryState.token
+  return getClaudeMdSessionState().withheldMemoryState.token
 }
 
 export function logWithheldMemoryPaths(
   entries: readonly WithheldMemoryEntry[],
 ): void {
+  const { withheldMemoryState } = getClaudeMdSessionState()
   for (const { path, why } of entries) {
     if (
       !withheldMemoryState.logged.has(path) &&
@@ -2286,6 +2356,7 @@ export function recordWithheldMemoryPaths(
 ): void {
   logWithheldMemoryPaths(entries)
   if (isNonInteractive) return
+  const { withheldMemoryState } = getClaudeMdSessionState()
   for (const entry of entries) {
     if (
       !withheldMemoryState.owed.has(entry.path) &&
@@ -2297,6 +2368,7 @@ export function recordWithheldMemoryPaths(
 }
 
 export function markWithheldMemoryLoaded(paths: readonly string[]): void {
+  const { withheldMemoryState } = getClaudeMdSessionState()
   for (const p of paths) {
     withheldMemoryState.owed.delete(p)
   }
@@ -2305,6 +2377,7 @@ export function markWithheldMemoryLoaded(paths: readonly string[]): void {
 export function drainWithheldMemoryOwed(
   excludePaths: ReadonlySet<string> | readonly string[],
 ): WithheldMemoryEntry[] {
+  const { withheldMemoryState } = getClaudeMdSessionState()
   for (const p of excludePaths) {
     withheldMemoryState.owed.delete(p)
   }
@@ -2313,8 +2386,9 @@ export function drainWithheldMemoryOwed(
 
 export function collectWithheldMemorySeen(
   attachments: ReadonlyArray<{ type: string; [key: string]: unknown }>,
-  token = withheldMemoryState.token,
+  token = getClaudeMdSessionState().withheldMemoryState.token,
 ): Set<string> {
+  const { withheldMemoryState } = getClaudeMdSessionState()
   const fromAttachments = new Set<string>()
   for (const att of attachments) {
     if (att.type !== 'withheld_memory' || att.by !== token) continue
@@ -2337,6 +2411,7 @@ export function collectWithheldMemorySeen(
 }
 
 export function resetWithheldMemoryStateForTests(): void {
+  const { withheldMemoryState } = getClaudeMdSessionState()
   withheldMemoryState.owed.clear()
   withheldMemoryState.logged.clear()
   withheldMemoryState.seen.clear()

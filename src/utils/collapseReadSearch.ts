@@ -8,6 +8,13 @@ import { getCwdState, getMainThreadAgentId } from '../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { findToolByName, type Tool, type Tools } from '../Tool.js'
 import { getPlansDirectory } from './plans.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+} from './sessionHost.js'
 import { isPluginToolServerKeyMinted } from './plugins/pluginToolRegistry.js'
 import { getScratchpadDir, isScratchpadFile } from './permissions/filesystem.js'
 import { DENSABLE_EHL_CATALOG } from './model/densableEhlCatalog.219.js'
@@ -972,23 +979,53 @@ const leftoverIhrDefault: LeftoverIhrSlice = Object.freeze({
   defaultVerb: leftoverIhrPickVerb(),
 })
 
-/** densable `Ihr` `n=Ds({})` — subscribeable session map, not a silent Map. */
-let leftoverIhrState: Record<string, LeftoverIhrSlice> = {}
-const leftoverIhrListeners = new Set<() => void>()
+function defaultLeftoverIhrOnMalformed(kind: string): void {
+  throw new LeftoverMalformedRetryStatusError(
+    `Spinner ignored an API retry status it could not draw (session unaffected): ${kind}`,
+  )
+}
 
-function leftoverIhrNotify(): void {
-  for (const listener of leftoverIhrListeners) listener()
+class CollapseIhrSessionState {
+  leftoverIhrState: Record<string, LeftoverIhrSlice> = {}
+  leftoverIhrListeners = new Set<() => void>()
+  leftoverXeListeners = new Set<(event: LeftoverXeEvent) => void>()
+  leftoverXeStarted = false
+  leftoverIhrMalformedSeen = new Set<string>()
+  leftoverIhrOnMalformed: (kind: string) => void = defaultLeftoverIhrOnMalformed
+  leftoverIhrStoreMounts = 0
+}
+
+const fallbackCollapseIhrSession = { root: {} as object }
+const collapseIhrBySession = new RootSessionSlot<CollapseIhrSessionState>(
+  () => new CollapseIhrSessionState(),
+)
+
+function getCollapseIhrState(): CollapseIhrSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return collapseIhrBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return collapseIhrBySession.of(fallbackCollapseIhrSession)
+}
+
+function leftoverIhrNotify(
+  state: CollapseIhrSessionState = getCollapseIhrState(),
+): void {
+  for (const listener of state.leftoverIhrListeners) listener()
 }
 
 export function leftoverIhrSubscribe(listener: () => void): () => void {
-  leftoverIhrListeners.add(listener)
+  const listeners = getCollapseIhrState().leftoverIhrListeners
+  listeners.add(listener)
   return () => {
-    leftoverIhrListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function leftoverIhrGetSnapshot(): Record<string, LeftoverIhrSlice> {
-  return leftoverIhrState
+  return getCollapseIhrState().leftoverIhrState
 }
 
 function leftoverIhrFreshSlice(): LeftoverIhrSlice {
@@ -1004,39 +1041,41 @@ function leftoverIhrPatch(
   update: (prev: LeftoverIhrSlice) => LeftoverIhrSlice,
   materialize = true,
 ): void {
-  const has = Object.hasOwn(leftoverIhrState, sessionId)
+  const state = getCollapseIhrState()
+  const has = Object.hasOwn(state.leftoverIhrState, sessionId)
   if (!has && !materialize) return
-  const prev = leftoverIhrState[sessionId] ?? leftoverIhrFreshSlice()
+  const prev = state.leftoverIhrState[sessionId] ?? leftoverIhrFreshSlice()
   const next = update(prev)
   if (next === prev && has) return
-  leftoverIhrState = { ...leftoverIhrState, [sessionId]: next }
-  leftoverIhrNotify()
+  state.leftoverIhrState = { ...state.leftoverIhrState, [sessionId]: next }
+  leftoverIhrNotify(state)
 }
 
 /** densable `Phn` / `$xe` / `Uxe` — teammate spinner bus. */
 export type LeftoverXeEvent = LeftoverIhrEvent
 
-const leftoverXeListeners = new Set<(event: LeftoverXeEvent) => void>()
-let leftoverXeStarted = false
-
 export function leftoverIhrXeSubscribe(
   listener: (event: LeftoverXeEvent) => void,
 ): () => void {
-  leftoverXeListeners.add(listener)
+  const listeners = getCollapseIhrState().leftoverXeListeners
+  listeners.add(listener)
   return () => {
-    leftoverXeListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function leftoverIhrXeEmit(event: LeftoverXeEvent): void {
   leftoverIhrStartXe()
-  for (const listener of leftoverXeListeners) listener(event)
+  for (const listener of getCollapseIhrState().leftoverXeListeners) {
+    listener(event)
+  }
 }
 
 /** densable `$xe.subscribe(this._spinnerStore.applyEvent)`. */
 export function leftoverIhrStartXe(): void {
-  if (leftoverXeStarted) return
-  leftoverXeStarted = true
+  const state = getCollapseIhrState()
+  if (state.leftoverXeStarted) return
+  state.leftoverXeStarted = true
   leftoverIhrXeSubscribe(event => {
     leftoverIhrApplyEvent(event)
   })
@@ -1087,7 +1126,7 @@ export function leftoverIhrStampTurnEffort(
   model: unknown,
 ): void {
   if (agentId === undefined) return
-  if (!Object.hasOwn(leftoverIhrState, agentId)) return
+  if (!Object.hasOwn(getCollapseIhrState().leftoverIhrState, agentId)) return
   leftoverIhrPhn(agentId).setTurnEffort(effort, model)
 }
 
@@ -1123,23 +1162,11 @@ export class LeftoverMalformedRetryStatusError extends Error {
   override name = 'MalformedRetryStatusError'
 }
 
-const leftoverIhrMalformedSeen = new Set<string>()
-let leftoverIhrOnMalformed: (kind: string) => void = kind => {
-  throw new LeftoverMalformedRetryStatusError(
-    `Spinner ignored an API retry status it could not draw (session unaffected): ${kind}`,
-  )
-}
-
 export function leftoverIhrSetOnMalformed(
   handler: ((kind: string) => void) | null,
 ): void {
-  leftoverIhrOnMalformed =
-    handler ??
-    (kind => {
-      throw new LeftoverMalformedRetryStatusError(
-        `Spinner ignored an API retry status it could not draw (session unaffected): ${kind}`,
-      )
-    })
+  getCollapseIhrState().leftoverIhrOnMalformed =
+    handler ?? defaultLeftoverIhrOnMalformed
 }
 
 /** densable `Y` then `w` — sanitize retry status. */
@@ -1249,24 +1276,23 @@ function leftoverIhrRetryMalformedKind(status: unknown): string | null {
 
 // Several AppStateProviders can be mounted at once (exportRenderer renders a
 // throwaway tree while the REPL is live), so mounted-ness is a count.
-let leftoverIhrStoreMounts = 0
-
 /** densable `GMn` — Xae throws outside AppStateProvider. */
 export function leftoverIhrRetainStore(): void {
-  leftoverIhrStoreMounts++
+  getCollapseIhrState().leftoverIhrStoreMounts++
 }
 
 export function leftoverIhrReleaseStore(): void {
-  leftoverIhrStoreMounts = Math.max(0, leftoverIhrStoreMounts - 1)
+  const state = getCollapseIhrState()
+  state.leftoverIhrStoreMounts = Math.max(0, state.leftoverIhrStoreMounts - 1)
 }
 
 /** Test hook: force the mounted state regardless of provider count. */
 export function leftoverIhrMarkStoreMounted(on: boolean): void {
-  leftoverIhrStoreMounts = on ? 1 : 0
+  getCollapseIhrState().leftoverIhrStoreMounts = on ? 1 : 0
 }
 
 export function leftoverIhrRequireStore(): void {
-  if (leftoverIhrStoreMounts === 0) {
+  if (getCollapseIhrState().leftoverIhrStoreMounts === 0) {
     throw new ReferenceError(
       'useSpinnerStore cannot be called outside of a SpinnerStoreContext provider (mounted by <AppStateProvider />)',
     )
@@ -1332,10 +1358,14 @@ export function leftoverIhrBind(sessionId: string): {
     },
     setRetryStatus(status) {
       const { status: next, malformed } = leftoverIhrSanitizeRetry(status)
-      if (malformed !== null && !leftoverIhrMalformedSeen.has(malformed)) {
-        leftoverIhrMalformedSeen.add(malformed)
+      const state = getCollapseIhrState()
+      if (
+        malformed !== null &&
+        !state.leftoverIhrMalformedSeen.has(malformed)
+      ) {
+        state.leftoverIhrMalformedSeen.add(malformed)
         try {
-          leftoverIhrOnMalformed(malformed)
+          state.leftoverIhrOnMalformed(malformed)
         } catch {
           // gold: session unaffected
         }
@@ -1473,7 +1503,7 @@ export function leftoverHhr(sessionId: string): number | null {
 /** densable `Ohr` — `xe(Xae(), …)` throws outside GMn. */
 export function leftoverIhrGet(sessionId: string): LeftoverIhrSlice {
   leftoverIhrRequireStore()
-  return leftoverIhrState[sessionId] ?? leftoverIhrDefault
+  return getCollapseIhrState().leftoverIhrState[sessionId] ?? leftoverIhrDefault
 }
 
 /**
@@ -1482,21 +1512,22 @@ export function leftoverIhrGet(sessionId: string): LeftoverIhrSlice {
  */
 export function leftoverIhrPeek(sessionId?: string): LeftoverIhrSlice {
   const id = sessionId ?? getMainThreadAgentId()
-  return leftoverIhrState[id] ?? leftoverIhrDefault
+  return getCollapseIhrState().leftoverIhrState[id] ?? leftoverIhrDefault
 }
 
 /** True when Ihr has materialized this session (not freeze `y`). */
 export function leftoverIhrHas(sessionId: string): boolean {
   leftoverIhrRequireStore()
-  return Object.hasOwn(leftoverIhrState, sessionId)
+  return Object.hasOwn(getCollapseIhrState().leftoverIhrState, sessionId)
 }
 
 /** densable `Ihr` `evict(t)`. */
 export function leftoverIhrEvict(sessionId: string): void {
-  if (!Object.hasOwn(leftoverIhrState, sessionId)) return
-  const { [sessionId]: _dropped, ...rest } = leftoverIhrState
-  leftoverIhrState = rest
-  leftoverIhrNotify()
+  const state = getCollapseIhrState()
+  if (!Object.hasOwn(state.leftoverIhrState, sessionId)) return
+  const { [sessionId]: _dropped, ...rest } = state.leftoverIhrState
+  state.leftoverIhrState = rest
+  leftoverIhrNotify(state)
 }
 
 /** densable `Ihr` `applyEvent(t)`. */
@@ -1631,25 +1662,10 @@ type LeftoverQrrSlot = {
   org?: string | null
 }
 
-let leftoverD2ClientData: Record<string, unknown> | null = null
-let leftoverD2ClientModel: string | undefined
-/** Isolation fallback when `le()` / config is unbound. Gold slots live on `le()`. */
-let leftoverQrrSlotsIsolation: Record<string, LeftoverQrrSlot> | null = null
-let leftoverQrrWindowSeed: {
-  key: string
-  data: Record<string, unknown>
-} | null = null
-let leftoverQrrReadGate: (() => boolean) | null = null
-let leftoverQrrStrictReadGate: (() => boolean) | null = null
-let leftoverQrrCacheKey: ((model?: string) => string) | null = null
-let leftoverQrrOverride:
-  | ((
-      data: Record<string, unknown> | null,
-      model?: string,
-    ) => Record<string, unknown> | null)
-  | null = null
-let leftoverQrrStaleMatchGetter: (() => LeftoverQrrStaleNeedle | null) | null =
-  null
+type LeftoverQrrOverrideFn = (
+  data: Record<string, unknown> | null,
+  model?: string,
+) => Record<string, unknown> | null
 
 type LeftoverQrrStaleNeedle = {
   entrypoint: string | null
@@ -1657,10 +1673,97 @@ type LeftoverQrrStaleNeedle = {
   org: string | null
 }
 
+/**
+ * Boot-installed client-data defaults registered outside ALS (e.g. `init.ts:366`).
+ * Fresh `CollapseD2HostState` instances inherit these defaults unless the host
+ * sets an explicit per-host override (including an explicit `null` override).
+ */
+let defaultReadGate: (() => boolean) | null = null
+let defaultStrictReadGate: (() => boolean) | null = null
+let defaultOverride: LeftoverQrrOverrideFn | null = null
+let defaultStaleMatchGetter: (() => LeftoverQrrStaleNeedle | null) | null = null
+
+function isOutsideCollapseSessionAls(): boolean {
+  try {
+    return getActiveSessionFromAls() === undefined
+  } catch {
+    return true
+  }
+}
+
+class CollapseD2HostState {
+  leftoverD2ClientData: Record<string, unknown> | null = null
+  leftoverD2ClientModel: string | undefined = undefined
+  /** Isolation fallback when `le()` / config is unbound. Gold slots live on `le()`. */
+  leftoverQrrSlotsIsolation: Record<string, LeftoverQrrSlot> | null = null
+  leftoverQrrWindowSeed: {
+    key: string
+    data: Record<string, unknown>
+  } | null = null
+  leftoverQrrReadGate: (() => boolean) | null | undefined = undefined
+  leftoverQrrStrictReadGate: (() => boolean) | null | undefined = undefined
+  leftoverQrrCacheKey: ((model?: string) => string) | null = null
+  leftoverQrrOverride: LeftoverQrrOverrideFn | null | undefined = undefined
+  leftoverQrrStaleMatchGetter:
+    | (() => LeftoverQrrStaleNeedle | null)
+    | null
+    | undefined = undefined
+  leftoverD2Logged = new Set<string>()
+  leftoverFetchesClientData = false
+  leftoverClientDataFetches = new Map<string, Promise<unknown> | 'over'>()
+  leftoverD2DiskHydrated = false
+}
+
+function getEffectiveQrrReadGate(
+  hostState: CollapseD2HostState,
+): (() => boolean) | null {
+  return hostState.leftoverQrrReadGate !== undefined
+    ? hostState.leftoverQrrReadGate
+    : defaultReadGate
+}
+
+function getEffectiveQrrStrictReadGate(
+  hostState: CollapseD2HostState,
+): (() => boolean) | null {
+  return hostState.leftoverQrrStrictReadGate !== undefined
+    ? hostState.leftoverQrrStrictReadGate
+    : defaultStrictReadGate
+}
+
+function getEffectiveQrrOverride(
+  hostState: CollapseD2HostState,
+): LeftoverQrrOverrideFn | null {
+  return hostState.leftoverQrrOverride !== undefined
+    ? hostState.leftoverQrrOverride
+    : defaultOverride
+}
+
+function getEffectiveQrrStaleMatchGetter(
+  hostState: CollapseD2HostState,
+): (() => LeftoverQrrStaleNeedle | null) | null {
+  return hostState.leftoverQrrStaleMatchGetter !== undefined
+    ? hostState.leftoverQrrStaleMatchGetter
+    : defaultStaleMatchGetter
+}
+
+const fallbackCollapseD2Host: object = {}
+const collapseD2ByHost = new HostSlot<CollapseD2HostState>(
+  () => new CollapseD2HostState(),
+)
+
+function getCollapseD2HostState(): CollapseD2HostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return collapseD2ByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return collapseD2ByHost.of(fallbackCollapseD2Host)
+}
+
 /** densable xE window: 7d behind, 5min ahead. */
 const LEFTOVER_QRR_STALE_PAST_MS = 604_800_000
 const LEFTOVER_QRR_STALE_FUTURE_MS = 300_000
-const leftoverD2Logged = new Set<string>()
 
 function leftoverQrrLeConfig(): {
   getGlobalConfig: () => {
@@ -1692,7 +1795,7 @@ function leftoverQrrLeConfig(): {
 /** densable `le().clientDataCacheSlots`. Isolation only when `le()` is unbound. */
 function leftoverQrrReadSlots(): Record<string, LeftoverQrrSlot> | null {
   const cfg = leftoverQrrLeConfig()
-  if (cfg === null) return leftoverQrrSlotsIsolation
+  if (cfg === null) return getCollapseD2HostState().leftoverQrrSlotsIsolation
   return cfg.getGlobalConfig().clientDataCacheSlots ?? null
 }
 
@@ -1700,7 +1803,7 @@ function leftoverQrrReadSlots(): Record<string, LeftoverQrrSlot> | null {
 function leftoverQrrWriteSlots(
   slots: Record<string, LeftoverQrrSlot> | null,
 ): void {
-  leftoverQrrSlotsIsolation = slots
+  getCollapseD2HostState().leftoverQrrSlotsIsolation = slots
   const cfg = leftoverQrrLeConfig()
   if (cfg === null) return
   cfg.saveGlobalConfig(current => ({
@@ -1712,24 +1815,25 @@ function leftoverQrrWriteSlots(
 /** densable `le().clientDataCache` fallback for `Sw`. */
 function leftoverQrrReadLegacyCache(): Record<string, unknown> | null {
   const cfg = leftoverQrrLeConfig()
-  if (cfg === null) return leftoverD2ClientData
+  if (cfg === null) return getCollapseD2HostState().leftoverD2ClientData
   const cache = cfg.getGlobalConfig().clientDataCache
   if (cache !== null && cache !== undefined && typeof cache === 'object') {
     return cache
   }
-  return leftoverD2ClientData
+  return getCollapseD2HostState().leftoverD2ClientData
 }
 
 export function leftoverD2SetClientData(
   data: Record<string, unknown> | null,
   model?: string,
 ): void {
-  leftoverD2DiskHydrated = true
-  leftoverD2ClientData = data
-  leftoverD2ClientModel = model
+  const hostState = getCollapseD2HostState()
+  hostState.leftoverD2DiskHydrated = true
+  hostState.leftoverD2ClientData = data
+  hostState.leftoverD2ClientModel = model
   leftoverQrrInstallCacheKey()
   leftoverQrrSeedWindow(data)
-  const key = leftoverQrrCacheKey?.(model) ?? 'default'
+  const key = hostState.leftoverQrrCacheKey?.(model) ?? 'default'
   const at = Date.now()
   const identity = leftoverQrrIdentity()
   const slot: LeftoverQrrSlot = {
@@ -1739,7 +1843,7 @@ export function leftoverD2SetClientData(
     entrypoint: identity.entrypoint,
     org: identity.org,
   }
-  leftoverQrrSlotsIsolation = {
+  hostState.leftoverQrrSlotsIsolation = {
     default: slot,
     [key]: slot,
   }
@@ -1748,7 +1852,7 @@ export function leftoverD2SetClientData(
     cfg.saveGlobalConfig(current => ({
       ...current,
       clientDataCache: data ?? undefined,
-      clientDataCacheSlots: leftoverQrrSlotsIsolation ?? undefined,
+      clientDataCacheSlots: hostState.leftoverQrrSlotsIsolation ?? undefined,
     }))
   }
 }
@@ -1762,23 +1866,41 @@ export function leftoverQrrSetSlots(
 export function leftoverQrrSetWindowSeed(
   seed: { key: string; data: Record<string, unknown> } | null,
 ): void {
-  leftoverQrrWindowSeed = seed
+  getCollapseD2HostState().leftoverQrrWindowSeed = seed
 }
 
 export function leftoverQrrSetReadGate(gate: (() => boolean) | null): void {
-  leftoverQrrReadGate = gate
+  const hostState = getCollapseD2HostState()
+  if (isOutsideCollapseSessionAls()) {
+    defaultReadGate = gate
+    hostState.leftoverQrrReadGate = undefined
+    return
+  }
+  hostState.leftoverQrrReadGate = gate
 }
 
 export function leftoverQrrSetStrictReadGate(
   gate: (() => boolean) | null,
 ): void {
-  leftoverQrrStrictReadGate = gate
+  const hostState = getCollapseD2HostState()
+  if (isOutsideCollapseSessionAls()) {
+    defaultStrictReadGate = gate
+    hostState.leftoverQrrStrictReadGate = undefined
+    return
+  }
+  hostState.leftoverQrrStrictReadGate = gate
 }
 
 export function leftoverQrrSetStaleMatchGetter(
   getter: (() => LeftoverQrrStaleNeedle | null) | null,
 ): void {
-  leftoverQrrStaleMatchGetter = getter
+  const hostState = getCollapseD2HostState()
+  if (isOutsideCollapseSessionAls()) {
+    defaultStaleMatchGetter = getter
+    hostState.leftoverQrrStaleMatchGetter = undefined
+    return
+  }
+  hostState.leftoverQrrStaleMatchGetter = getter
 }
 
 /** densable Cu + le().oauthAccount — kYr/xE needle. */
@@ -1811,7 +1933,7 @@ function leftoverQrrIdentity(): LeftoverQrrStaleNeedle {
 export function leftoverQrrSetCacheKey(
   getter: ((model?: string) => string) | null,
 ): void {
-  leftoverQrrCacheKey = getter
+  getCollapseD2HostState().leftoverQrrCacheKey = getter
 }
 
 const LEFTOVER_QRR_KEY_PREFIX = 'bi1-'
@@ -1841,7 +1963,7 @@ export function leftoverGrr(input: {
 
 /** densable `et()` / `bYr(Grr)` — install cache key getter. */
 export function leftoverQrrInstallCacheKey(): void {
-  if (leftoverQrrCacheKey !== null) return
+  if (getCollapseD2HostState().leftoverQrrCacheKey !== null) return
   leftoverQrrSetCacheKey(model => {
     try {
       return leftoverGrr({
@@ -1859,7 +1981,7 @@ export function leftoverQrrSeedWindow(
   data: Record<string, unknown> | null,
 ): void {
   leftoverQrrInstallCacheKey()
-  const key = leftoverQrrCacheKey?.()
+  const key = getCollapseD2HostState().leftoverQrrCacheKey?.()
   leftoverQrrSetWindowSeed(
     key === undefined || data === null ? null : { key, data },
   )
@@ -1902,7 +2024,7 @@ function leftoverQrrDefaultStrictReadGate(): boolean {
 
 /** densable `et()` companion `EYr`. */
 export function leftoverQrrInstallReadGate(): void {
-  if (leftoverQrrReadGate !== null) return
+  if (getEffectiveQrrReadGate(getCollapseD2HostState()) !== null) return
   leftoverQrrSetReadGate(() => leftoverQrrDefaultReadGate())
 }
 
@@ -1911,7 +2033,7 @@ export function leftoverQrrInstallReadGate(): void {
  * No-op if leftoverQrrStrictReadGate already set.
  */
 export function leftoverQrrInstallStrictReadGate(): void {
-  if (leftoverQrrStrictReadGate !== null) return
+  if (getEffectiveQrrStrictReadGate(getCollapseD2HostState()) !== null) return
   leftoverQrrSetStrictReadGate(() => leftoverQrrDefaultStrictReadGate())
 }
 
@@ -1920,7 +2042,7 @@ export function leftoverQrrInstallStrictReadGate(): void {
  * No-op if leftoverQrrOverride already set.
  */
 export function leftoverQrrInstallOverride(): void {
-  if (leftoverQrrOverride !== null) return
+  if (getEffectiveQrrOverride(getCollapseD2HostState()) !== null) return
   leftoverQrrSetOverride((data, model) => {
     try {
       /* eslint-disable @typescript-eslint/no-require-imports */
@@ -1940,7 +2062,7 @@ export function leftoverQrrInstallOverride(): void {
  * No-op if leftoverQrrStaleMatchGetter already set.
  */
 export function leftoverQrrInstallStaleMatch(): void {
-  if (leftoverQrrStaleMatchGetter !== null) return
+  if (getEffectiveQrrStaleMatchGetter(getCollapseD2HostState()) !== null) return
   leftoverQrrSetStaleMatchGetter(() => {
     try {
       if (!leftoverQrrProviderAllowsClientData()) return null
@@ -1967,9 +2089,15 @@ export function leftoverQrrInstallClientData(): void {
 }
 
 export function leftoverQrrSetOverride(
-  override: typeof leftoverQrrOverride,
+  override: LeftoverQrrOverrideFn | null,
 ): void {
-  leftoverQrrOverride = override
+  const hostState = getCollapseD2HostState()
+  if (isOutsideCollapseSessionAls()) {
+    defaultOverride = override
+    hostState.leftoverQrrOverride = undefined
+    return
+  }
+  hostState.leftoverQrrOverride = override
 }
 
 function leftoverQrrSlotLooksValid(slot: LeftoverQrrSlot | undefined): boolean {
@@ -2012,8 +2140,10 @@ function leftoverQrrPickStaleSlot(
 /** densable `Sw` then optional override. */
 export function leftoverQrr(model?: string): LeftoverQrrSlot | null {
   leftoverD2HydrateFromDiskOnce()
-  if (leftoverQrrReadGate && !leftoverQrrReadGate()) return null
-  const key = leftoverQrrCacheKey?.(model) ?? 'default'
+  const hostState = getCollapseD2HostState()
+  const readGate = getEffectiveQrrReadGate(hostState)
+  if (readGate && !readGate()) return null
+  const key = hostState.leftoverQrrCacheKey?.(model) ?? 'default'
   const slots = leftoverQrrReadSlots()
   let resolved: LeftoverQrrSlot | null = null
   if (slots != null && Object.hasOwn(slots, key)) {
@@ -2022,27 +2152,28 @@ export function leftoverQrr(model?: string): LeftoverQrrSlot | null {
       ? { data: slot.data ?? null, model: slot.model }
       : null
   } else {
-    const needle = leftoverQrrStaleMatchGetter?.()
+    const needle = getEffectiveQrrStaleMatchGetter(hostState)?.()
     if (needle && slots != null) {
       const stale = leftoverQrrPickStaleSlot(slots, needle)
       if (stale) resolved = { data: stale.data ?? null }
     }
     if (
       resolved === null &&
-      leftoverQrrWindowSeed !== null &&
-      leftoverQrrWindowSeed.key === key
+      hostState.leftoverQrrWindowSeed !== null &&
+      hostState.leftoverQrrWindowSeed.key === key
     ) {
-      resolved = { data: leftoverQrrWindowSeed.data }
+      resolved = { data: hostState.leftoverQrrWindowSeed.data }
     } else if (resolved === null) {
       const legacy = leftoverQrrReadLegacyCache()
       if (legacy !== null && typeof legacy === 'object') {
-        resolved = { data: legacy, model: leftoverD2ClientModel }
+        resolved = { data: legacy, model: hostState.leftoverD2ClientModel }
       }
     }
   }
-  if (!leftoverQrrOverride) return resolved
+  const override = getEffectiveQrrOverride(hostState)
+  if (!override) return resolved
   const data = resolved?.data ?? null
-  const next = leftoverQrrOverride(data, model)
+  const next = override(data, model)
   if (next === data) return resolved
   return { data: next, model: resolved?.model ?? model }
 }
@@ -2053,9 +2184,11 @@ export function leftoverQrr(model?: string): LeftoverQrrSlot | null {
  */
 export function leftoverQrrStrict(): Record<string, unknown> | null {
   leftoverD2HydrateFromDiskOnce()
-  if (!leftoverQrrStrictReadGate || !leftoverQrrStrictReadGate()) return null
-  if (!leftoverQrrCacheKey) return null
-  const key = leftoverQrrCacheKey()
+  const hostState = getCollapseD2HostState()
+  const strictReadGate = getEffectiveQrrStrictReadGate(hostState)
+  if (!strictReadGate || !strictReadGate()) return null
+  if (!hostState.leftoverQrrCacheKey) return null
+  const key = hostState.leftoverQrrCacheKey()
   const slots = leftoverQrrReadSlots()
   if (slots == null || !Object.hasOwn(slots, key)) {
     return null
@@ -2069,73 +2202,71 @@ export function leftoverQrrStrict(): Record<string, unknown> | null {
  * densable `yyo` / `Ost` / `eor` / `nWe` — inflight client-data fetch map.
  * Not a second client_data store; leftoverQrr remains the payload cache.
  */
-let leftoverFetchesClientData = false
-const leftoverClientDataFetches = new Map<string, Promise<unknown> | 'over'>()
-
 /** densable `yyo`. */
 export function setFetchesClientData(on: boolean): void {
-  leftoverFetchesClientData = on
+  getCollapseD2HostState().leftoverFetchesClientData = on
 }
 
 export function fetchesClientDataEnabled(): boolean {
-  return leftoverFetchesClientData
+  return getCollapseD2HostState().leftoverFetchesClientData
 }
 
 /** densable logout `clientDataFetches.clear()`. */
 export function clearClientDataFetches(): void {
-  leftoverClientDataFetches.clear()
+  getCollapseD2HostState().leftoverClientDataFetches.clear()
 }
 
 /** densable `eor`. Does not install the getter. */
 export function leftoverQrrCacheKeyNow(model?: string): string | undefined {
-  return leftoverQrrCacheKey?.(model)
+  return getCollapseD2HostState().leftoverQrrCacheKey?.(model)
 }
 
 /** densable `nWe` — getter exists and the slot has `data` + numeric `at`. */
 export function leftoverQrrHasTimedSlot(model?: string): boolean {
-  if (leftoverQrrCacheKey === null) return false
-  const key = leftoverQrrCacheKey(model)
+  const hostState = getCollapseD2HostState()
+  if (hostState.leftoverQrrCacheKey === null) return false
+  const key = hostState.leftoverQrrCacheKey(model)
   const slot = leftoverQrrReadSlots()?.[key]
   return leftoverQrrSlotLooksValid(slot) && typeof slot?.at === 'number'
 }
 
 /** densable `Ost`. */
 export function trackClientDataFetch(promise: Promise<unknown>): void {
+  const hostState = getCollapseD2HostState()
   leftoverQrrInstallCacheKey()
-  const key = leftoverQrrCacheKey?.()
+  const key = hostState.leftoverQrrCacheKey?.()
   if (key === undefined) return
-  const existing = leftoverClientDataFetches.get(key)
+  const existing = hostState.leftoverClientDataFetches.get(key)
   if (existing instanceof Promise) return
-  const getter = leftoverQrrCacheKey
-  leftoverClientDataFetches.set(key, promise)
+  const getter = hostState.leftoverQrrCacheKey
+  hostState.leftoverClientDataFetches.set(key, promise)
   void promise.finally(() => {
-    if (leftoverClientDataFetches.get(key) !== promise) return
-    if (leftoverQrrCacheKey === getter)
-      leftoverClientDataFetches.set(key, 'over')
-    else leftoverClientDataFetches.delete(key)
+    if (hostState.leftoverClientDataFetches.get(key) !== promise) return
+    if (hostState.leftoverQrrCacheKey === getter)
+      hostState.leftoverClientDataFetches.set(key, 'over')
+    else hostState.leftoverClientDataFetches.delete(key)
   })
 }
 
 export function peekClientDataFetch(
   key: string,
 ): Promise<unknown> | 'over' | undefined {
-  return leftoverClientDataFetches.get(key)
+  return getCollapseD2HostState().leftoverClientDataFetches.get(key)
 }
 
-let leftoverD2DiskHydrated = false
-
 function leftoverD2HydrateFromDiskOnce(): void {
-  if (leftoverQrrCacheKey === null) leftoverQrrInstallCacheKey()
-  if (leftoverD2DiskHydrated) return
-  leftoverD2DiskHydrated = true
+  const hostState = getCollapseD2HostState()
+  if (hostState.leftoverQrrCacheKey === null) leftoverQrrInstallCacheKey()
+  if (hostState.leftoverD2DiskHydrated) return
+  hostState.leftoverD2DiskHydrated = true
   const cfg = leftoverQrrLeConfig()
   if (cfg === null) return
   const g = cfg.getGlobalConfig()
-  leftoverQrrSlotsIsolation =
-    g.clientDataCacheSlots ?? leftoverQrrSlotsIsolation
+  hostState.leftoverQrrSlotsIsolation =
+    g.clientDataCacheSlots ?? hostState.leftoverQrrSlotsIsolation
   const cache = g.clientDataCache
   if (cache !== null && cache !== undefined && typeof cache === 'object') {
-    leftoverD2ClientData = cache
+    hostState.leftoverD2ClientData = cache
   }
 }
 
@@ -2147,10 +2278,11 @@ export function leftoverD2HydrateFromDisk(
   cache: unknown,
   model?: string,
 ): void {
-  leftoverD2DiskHydrated = true
+  const hostState = getCollapseD2HostState()
+  hostState.leftoverD2DiskHydrated = true
   if (cache !== null && typeof cache === 'object' && !Array.isArray(cache)) {
-    leftoverD2ClientData = cache as Record<string, unknown>
-    leftoverD2ClientModel = model
+    hostState.leftoverD2ClientData = cache as Record<string, unknown>
+    hostState.leftoverD2ClientModel = model
   }
 }
 
@@ -2184,6 +2316,7 @@ function leftoverCqr(family: string): Map<string, boolean> {
 
 /** densable `go` — one-shot tengu_model_capability(_off)_from_client_data. */
 function leftoverGo(off: boolean, capability: string, model: string): void {
+  const leftoverD2Logged = getCollapseD2HostState().leftoverD2Logged
   const key = `${off ? '-' : ''}${capability}:${model}`
   if (leftoverD2Logged.has(key)) return
   leftoverD2Logged.add(key)
@@ -2220,7 +2353,8 @@ export function leftoverD2(
     leftoverCatalogCap(family, 'opus_5_5_prompt_bundle') === true
   const qrr = leftoverQrr(model)
   const slot = qrr?.data
-  const loggedModel = qrr?.model ?? leftoverD2ClientModel ?? model
+  const loggedModel =
+    qrr?.model ?? getCollapseD2HostState().leftoverD2ClientModel ?? model
   if (defaultOn) {
     if (slot?.[capability] !== false) return true
     leftoverGo(true, capability, loggedModel)

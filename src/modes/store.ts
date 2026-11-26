@@ -7,12 +7,25 @@ import {
   updateSettingsForSource,
 } from '../utils/settings/settings.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { DEFAULT_MODES } from './defaults.js'
 import type { CCBMode } from './types.js'
 
-let currentModeSlug: string | null = null
-let customModes: CCBMode[] | null = null
-const modeListeners = new Set<() => void>()
+type ModeStoreHostState = {
+  currentModeSlug: string | null
+  customModes: CCBMode[] | null
+  modeListeners: Set<() => void>
+}
+
+const modeStoreHostSlot = new HostSlot<ModeStoreHostState>(() => ({
+  currentModeSlug: null,
+  customModes: null,
+  modeListeners: new Set<() => void>(),
+}))
+
+function getModeStoreHostState(): ModeStoreHostState {
+  return modeStoreHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Converts a human-readable name to a URL-safe slug.
@@ -48,8 +61,9 @@ function parseMarkdownFrontmatter(raw: string): {
 }
 
 function loadCustomModes(): CCBMode[] {
-  if (customModes !== null) return customModes
-  customModes = []
+  const state = getModeStoreHostState()
+  if (state.customModes !== null) return state.customModes
+  state.customModes = []
   try {
     const modesDir = join(getClaudeConfigHomeDir(), 'modes')
     if (!existsSync(modesDir)) {
@@ -73,7 +87,7 @@ function loadCustomModes(): CCBMode[] {
           data = parseYaml(raw) as Record<string, unknown>
         }
         if (!data.slug || !data.name) continue
-        customModes.push({
+        state.customModes.push({
           name: String(data.name),
           slug: String(data.slug),
           description: String(data.description || ''),
@@ -112,7 +126,7 @@ function loadCustomModes(): CCBMode[] {
   } catch {
     // modes directory may not exist
   }
-  return customModes
+  return state.customModes
 }
 
 function getAllModes(): CCBMode[] {
@@ -124,11 +138,12 @@ function getAllModes(): CCBMode[] {
 }
 
 export function getCurrentModeSlug(): string {
-  if (currentModeSlug === null) {
+  const state = getModeStoreHostState()
+  if (state.currentModeSlug === null) {
     const settings = getInitialSettings() as Record<string, unknown>
-    currentModeSlug = (settings.ccbMode as string) || 'default'
+    state.currentModeSlug = (settings.ccbMode as string) || 'default'
   }
-  return currentModeSlug
+  return state.currentModeSlug
 }
 
 export function getCurrentMode(): CCBMode {
@@ -145,17 +160,19 @@ export function setCurrentMode(slug: string): void {
       `Unknown mode: ${slug}. Available: ${modes.map(m => m.slug).join(', ')}`,
     )
   }
-  currentModeSlug = slug
+  const state = getModeStoreHostState()
+  state.currentModeSlug = slug
   updateSettingsForSource('userSettings', { ccbMode: slug } as Record<
     string,
     unknown
   >)
-  for (const listener of modeListeners) listener()
+  for (const listener of state.modeListeners) listener()
 }
 
 function subscribeMode(listener: () => void): () => void {
-  modeListeners.add(listener)
-  return () => modeListeners.delete(listener)
+  const state = getModeStoreHostState()
+  state.modeListeners.add(listener)
+  return () => state.modeListeners.delete(listener)
 }
 
 /** Reactive hook — re-renders the component when the mode changes. */

@@ -12,14 +12,26 @@
  * so the shim defaults to active (matching isCseShimEnabled()'s own default).
  */
 
-let _isCseShimEnabled: (() => boolean) | undefined
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
+
+type SessionIdCompatHostState = {
+  isCseShimEnabled: (() => boolean) | undefined
+}
+
+const sessionIdCompatHostSlot = new HostSlot<SessionIdCompatHostState>(() => ({
+  isCseShimEnabled: undefined,
+}))
+
+function getSessionIdCompatHostState(): SessionIdCompatHostState {
+  return sessionIdCompatHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Register the GrowthBook gate for the cse_ shim. Called from bridge
  * init code that already imports bridgeEnabled.ts.
  */
 export function setCseShimGate(gate: () => boolean): void {
-  _isCseShimEnabled = gate
+  getSessionIdCompatHostState().isCseShimEnabled = gate
 }
 
 /**
@@ -37,7 +49,8 @@ export function setCseShimGate(gate: () => boolean): void {
  */
 export function toCompatSessionId(id: string): string {
   if (!id.startsWith('cse_')) return id
-  if (_isCseShimEnabled && !_isCseShimEnabled()) return id
+  const isCseShimEnabled = getSessionIdCompatHostState().isCseShimEnabled
+  if (isCseShimEnabled && !isCseShimEnabled()) return id
   return 'session_' + id.slice('cse_'.length)
 }
 

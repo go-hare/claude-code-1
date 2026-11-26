@@ -6,6 +6,7 @@
  * Tip hosts wire `setWatchUrlDeps({ callTool })` when a webhook-triggers MCP
  * client is connected (CLAUDE_CODE_REMOTE durable subscribe).
  */
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { publishDurableRegistry } from './durable.js'
 import { un } from './store.js'
 
@@ -43,14 +44,16 @@ export type WatchUrlDeps = {
   callTool?: WatchUrlCallTool
 }
 
-let watchUrlDeps: WatchUrlDeps = {}
+const watchUrlHostSlot = new HostSlot<{ watchUrlDeps: WatchUrlDeps }>(() => ({
+  watchUrlDeps: {},
+}))
 
 export function setWatchUrlDeps(deps: WatchUrlDeps): void {
-  watchUrlDeps = deps
+  watchUrlHostSlot.of(getBootstrapSessionHost()).watchUrlDeps = deps
 }
 
 export function resetWatchUrlDepsForTests(): void {
-  watchUrlDeps = {}
+  watchUrlHostSlot.of(getBootstrapSessionHost()).watchUrlDeps = {}
 }
 
 /** densable HGi */
@@ -129,7 +132,8 @@ export async function callWatchUrlTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<WatchUrlToolResult | null> {
-  const call = watchUrlDeps.callTool
+  const call = watchUrlHostSlot.of(getBootstrapSessionHost()).watchUrlDeps
+    .callTool
   if (!call) return null
   try {
     return await call(name, args)

@@ -32,7 +32,7 @@ import {
   type ScrollViewport,
   TerminalSizeContext,
   Text,
-  instances,
+  Ns,
   stringWidth,
   useApp,
   useSelection,
@@ -1878,7 +1878,7 @@ export function FullscreenLayout({
   // intercepts clicks before the terminal can open OSC 8 links natively.
   useLayoutEffect(() => {
     if (!isFullscreenEnvEnabled()) return;
-    const ink = instances.get(process.stdout);
+    const ink = Ns().get(process.stdout);
     if (!ink) return;
     ink.onHyperlinkClick = url => {
       // Most OSC 8 links emitted by Claude Code are file:// URLs from

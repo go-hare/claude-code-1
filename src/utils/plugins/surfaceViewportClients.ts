@@ -14,9 +14,10 @@
  * / `E1e`.
  */
 
-import { createSignal } from '../signal.js'
+import { createSignal, type Signal } from '../signal.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 export type SurfaceViewport = {
   columns?: number
@@ -456,8 +457,20 @@ export type ParsedUiClientFaultRequest =
     }
   | { ok: false; error: string }
 
-const clients = new Map<string, SurfaceViewportClient>()
-const detachSignal = createSignal<[clientId: string]>()
+type SurfaceViewportClientsHostState = {
+  clients: Map<string, SurfaceViewportClient>
+  detachSignal: Signal<[clientId: string]>
+}
+
+const surfaceViewportClientsHostSlot =
+  new HostSlot<SurfaceViewportClientsHostState>(() => ({
+    clients: new Map(),
+    detachSignal: createSignal<[clientId: string]>(),
+  }))
+
+function getSurfaceViewportClientsHostState(): SurfaceViewportClientsHostState {
+  return surfaceViewportClientsHostSlot.of(getBootstrapSessionHost())
+}
 
 function isPositiveInt(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0
@@ -1536,6 +1549,7 @@ export function defaultClientIdForSurface(surface: string): string {
 export function attachSurfaceViewportClient(
   client: SurfaceViewportClient,
 ): boolean {
+  const { clients } = getSurfaceViewportClientsHostState()
   const prior = clients.get(client.clientId)
   if (prior === undefined) {
     clients.set(client.clientId, { ...client })
@@ -1557,6 +1571,7 @@ export function attachSurfaceViewportClient(
 export function detachSurfaceViewportClient(
   clientId: string,
 ): SurfaceViewportClient | undefined {
+  const { clients, detachSignal } = getSurfaceViewportClientsHostState()
   const prior = clients.get(clientId)
   if (prior === undefined) return undefined
   clients.delete(clientId)
@@ -1566,7 +1581,7 @@ export function detachSurfaceViewportClient(
 
 /** densable `ae().list`. */
 export function listSurfaceViewportClients(): SurfaceViewportClient[] {
-  return [...clients.values()]
+  return [...getSurfaceViewportClientsHostState().clients.values()]
 }
 
 /** densable `ae().hasSurface`. */
@@ -1597,7 +1612,7 @@ export function listDrawingSurfaces(): string[] {
 export function onSurfaceViewportClientDetach(
   listener: (clientId: string) => void,
 ): () => void {
-  return detachSignal.subscribe(listener)
+  return getSurfaceViewportClientsHostState().detachSignal.subscribe(listener)
 }
 
 /** densable `xe` — clients with a viewport object present. */
@@ -1705,6 +1720,7 @@ export async function detachRemoteUiSurface(
 
 /** Test / dispose — clear registry. */
 export function resetSurfaceViewportClientsForTests(): void {
+  const { clients, detachSignal } = getSurfaceViewportClientsHostState()
   clients.clear()
   detachSignal.clear()
 }

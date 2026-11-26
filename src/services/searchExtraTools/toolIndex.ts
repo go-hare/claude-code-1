@@ -1,12 +1,13 @@
+import { isDeferredTool } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
 import type { Tools } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import {
-  tokenizeAndStem,
-  computeWeightedTf,
   computeIdf,
+  computeWeightedTf,
   cosineSimilarity,
+  tokenizeAndStem,
 } from '../skillSearch/localSearch.js'
-import { isDeferredTool } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
 
 export interface ToolIndexEntry {
   name: string
@@ -208,26 +209,57 @@ export function searchTools(
   return results.slice(0, limit)
 }
 
-let cachedIndex: ToolIndexEntry[] | null = null
-let cachedToolNames: string | null = null
+type ToolIndexHostState = {
+  cachedIndex: ToolIndexEntry[] | null
+  cachedToolNames: string | null
+}
+
+const fallbackToolIndexHost: object = {}
+
+function getActiveToolIndexHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackToolIndexHost
+}
+
+const toolIndexHostSlot = new HostSlot<ToolIndexHostState>(() => ({
+  cachedIndex: null,
+  cachedToolNames: null,
+}))
+
+function getToolIndexHostState(): ToolIndexHostState {
+  return toolIndexHostSlot.of(getActiveToolIndexHost())
+}
 
 export async function getToolIndex(tools: Tools): Promise<ToolIndexEntry[]> {
+  const state = getToolIndexHostState()
   const currentKey = tools
     .map(t => t.name)
     .sort()
     .join(',')
 
-  if (cachedIndex && cachedToolNames === currentKey) {
-    return cachedIndex
+  if (state.cachedIndex && state.cachedToolNames === currentKey) {
+    return state.cachedIndex
   }
 
-  cachedIndex = await buildToolIndex(tools)
-  cachedToolNames = currentKey
-  return cachedIndex
+  const built = await buildToolIndex(tools)
+  state.cachedIndex = built
+  state.cachedToolNames = currentKey
+  return built
 }
 
 export function clearToolIndexCache(): void {
-  cachedIndex = null
-  cachedToolNames = null
+  const state = getToolIndexHostState()
+  state.cachedIndex = null
+  state.cachedToolNames = null
   logForDebugging('[search-extra-tools] index cache cleared')
 }

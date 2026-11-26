@@ -4,7 +4,7 @@ import {
   formatPastedTextRef,
   getPastedTextRefNumLines,
 } from '../history.js'
-import { instances } from '@anthropic/ink'
+import { Ns } from '@anthropic/ink'
 import type { PastedContent } from './config.js'
 import { classifyGuiEditor, getExternalEditor } from './editor.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -30,7 +30,7 @@ export type EditorResult = {
 // sync IO: called from sync context (React components, sync command handlers)
 export function editFileInEditor(filePath: string): EditorResult {
   const fs = getFsImplementation()
-  const inkInstance = instances.get(process.stdout)
+  const inkInstance = Ns().get(process.stdout)
   if (!inkInstance) {
     throw new Error('Ink instance not found - cannot pause rendering')
   }

@@ -1,7 +1,6 @@
 import type { ChildProcess, ExecFileException } from 'child_process'
 import { execFile, spawn, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
-import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import * as path from 'path'
 import { logEvent } from 'src/services/analytics/index.js'
@@ -17,8 +16,43 @@ import { execFileNoThrow } from './execFileNoThrow.js'
 import { findExecutable } from './findExecutable.js'
 import { logError } from './log.js'
 import { getPlatform } from './platform.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { countCharInString, truncateCodeUnitsSafe } from './stringUtils.js'
 import { internalToolSubprocessEnv } from './subprocessEnv.js'
+
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
 
 const __dirname = (() => {
   if (process.env.NODE_ENV === 'test') return path.resolve(distRoot)
@@ -147,7 +181,7 @@ function isRipgrep14_1(version: string | null): boolean {
   return version !== null && version.startsWith('14.1.')
 }
 
-export const getRipgrepConfig = memoize((): RipgrepConfig => {
+export const getRipgrepConfig = memoizePerHost((): RipgrepConfig => {
   const userWantsSystemRipgrep = isEnvDefinedFalsy(
     process.env.USE_BUILTIN_RIPGREP,
   )
@@ -993,7 +1027,7 @@ export async function ripGrep(
  * @param ignorePatterns Optional additional patterns to ignore (beyond .gitignore)
  * @returns Approximate file count rounded to the nearest power of 10
  */
-export const countFilesRoundedRg = memoize(
+export const countFilesRoundedRg = memoizePerHost(
   async (
     dirPath: string,
     abortSignal: AbortSignal,
@@ -1041,13 +1075,24 @@ export const countFilesRoundedRg = memoize(
     `${dirPath}|${ignorePatterns.join(',')}`,
 )
 
-// Singleton to store ripgrep availability status
-let ripgrepStatus: {
-  working: boolean
-  lastTested: number
-  config: RipgrepConfig
-  note?: string
-} | null = null
+type RipgrepRuntimeHostState = {
+  ripgrepStatus: {
+    working: boolean
+    lastTested: number
+    config: RipgrepConfig
+    note?: string
+  } | null
+  alreadyDoneSignCheck: boolean
+}
+
+const ripgrepRuntimeHostSlot = new HostSlot<RipgrepRuntimeHostState>(() => ({
+  ripgrepStatus: null,
+  alreadyDoneSignCheck: false,
+}))
+
+function getRipgrepRuntimeHostState(): RipgrepRuntimeHostState {
+  return ripgrepRuntimeHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Get ripgrep status and configuration info
@@ -1060,6 +1105,7 @@ export function getRipgrepStatus(): {
   note?: string
 } {
   const config = getRipgrepConfig()
+  const { ripgrepStatus } = getRipgrepRuntimeHostState()
   return {
     mode: config.mode,
     path: config.command,
@@ -1071,9 +1117,10 @@ export function getRipgrepStatus(): {
 /**
  * Test ripgrep availability on first use and cache the result
  */
-const testRipgrepOnFirstUse = memoize(async (): Promise<void> => {
+const testRipgrepOnFirstUse = memoizePerHost(async (): Promise<void> => {
+  const hostState = getRipgrepRuntimeHostState()
   // Already tested
-  if (ripgrepStatus !== null) {
+  if (hostState.ripgrepStatus !== null) {
     return
   }
 
@@ -1114,7 +1161,7 @@ const testRipgrepOnFirstUse = memoize(async (): Promise<void> => {
     const working =
       test.code === 0 && !!test.stdout && test.stdout.startsWith('ripgrep ')
 
-    ripgrepStatus = {
+    hostState.ripgrepStatus = {
       working,
       lastTested: Date.now(),
       config,
@@ -1131,7 +1178,7 @@ const testRipgrepOnFirstUse = memoize(async (): Promise<void> => {
       using_system: config.mode === 'system' ? 1 : 0,
     })
   } catch (error) {
-    ripgrepStatus = {
+    hostState.ripgrepStatus = {
       working: false,
       lastTested: Date.now(),
       config,
@@ -1141,13 +1188,13 @@ const testRipgrepOnFirstUse = memoize(async (): Promise<void> => {
   }
 })
 
-let alreadyDoneSignCheck = false
 async function codesignRipgrepIfNecessary() {
-  if (process.platform !== 'darwin' || alreadyDoneSignCheck) {
+  const hostState = getRipgrepRuntimeHostState()
+  if (process.platform !== 'darwin' || hostState.alreadyDoneSignCheck) {
     return
   }
 
-  alreadyDoneSignCheck = true
+  hostState.alreadyDoneSignCheck = true
 
   // Only sign the standalone vendored rg binary (npm builds)
   const config = getRipgrepConfig()

@@ -12,22 +12,33 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logEvent } from '../services/analytics/index.js'
 import { logError } from '../utils/log.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 
-let sdkRapidFollowupPreemptDeclared: boolean | undefined
+const rapidFollowupPreemptHostSlot = new HostSlot<{
+  sdkRapidFollowupPreemptDeclared: boolean | undefined
+}>(() => ({
+  sdkRapidFollowupPreemptDeclared: undefined,
+}))
 
 /** First-attached-client-wins capability declaration from `initialize`. */
 export function declareSdkRapidFollowupPreempt(enabled: boolean): void {
-  if (sdkRapidFollowupPreemptDeclared === undefined) {
-    sdkRapidFollowupPreemptDeclared = enabled
+  const hostState = rapidFollowupPreemptHostSlot.of(getBootstrapSessionHost())
+  if (hostState.sdkRapidFollowupPreemptDeclared === undefined) {
+    hostState.sdkRapidFollowupPreemptDeclared = enabled
   }
 }
 
 export function getSdkRapidFollowupPreempt(): boolean {
-  return sdkRapidFollowupPreemptDeclared === true
+  return (
+    rapidFollowupPreemptHostSlot.of(getBootstrapSessionHost())
+      .sdkRapidFollowupPreemptDeclared === true
+  )
 }
 
 export function resetSdkRapidFollowupPreemptForTesting(): void {
-  sdkRapidFollowupPreemptDeclared = undefined
+  rapidFollowupPreemptHostSlot.of(
+    getBootstrapSessionHost(),
+  ).sdkRapidFollowupPreemptDeclared = undefined
 }
 
 /** Official `uQi()` — requires both initialize capability and rollout gate. */

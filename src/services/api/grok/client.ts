@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionRoot.js'
 
 /**
  * Environment variables:
@@ -10,14 +11,17 @@ import { getProxyFetchOptions } from 'src/utils/proxy.js'
 
 const DEFAULT_BASE_URL = 'https://api.x.ai/v1'
 
-let cachedClient: OpenAI | null = null
+const grokClientHostSlot = new HostSlot<{ cachedClient: OpenAI | null }>(
+  () => ({ cachedClient: null }),
+)
 
 export function getGrokClient(options?: {
   maxRetries?: number
   fetchOverride?: typeof fetch
   source?: string
 }): OpenAI {
-  if (cachedClient) return cachedClient
+  const hostState = grokClientHostSlot.of(getBootstrapSessionHost())
+  if (hostState.cachedClient) return hostState.cachedClient
 
   const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || ''
   const baseURL = process.env.GROK_BASE_URL || DEFAULT_BASE_URL
@@ -33,12 +37,15 @@ export function getGrokClient(options?: {
   })
 
   if (!options?.fetchOverride) {
-    cachedClient = client
+    hostState.cachedClient = client
   }
 
   return client
 }
 
 export function clearGrokClientCache(): void {
-  cachedClient = null
+  const hostState = grokClientHostSlot.peek(getBootstrapSessionHost())
+  if (hostState) {
+    hostState.cachedClient = null
+  }
 }

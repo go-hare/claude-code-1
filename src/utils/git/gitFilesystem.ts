@@ -20,17 +20,46 @@ import { registerCleanup } from '../cleanupRegistry.js'
 import { getCwd } from '../cwd.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { findGitRoot, gitExe } from '../git.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import { parseGitConfigValue } from './gitConfigParser.js'
 
 // ---------------------------------------------------------------------------
 // resolveGitDir — find the actual .git directory
 // ---------------------------------------------------------------------------
 
-const resolveGitDirCache = new Map<string, string | null>()
+class GitFilesystemHostState {
+  resolveGitDirCache = new Map<string, string | null>()
+  gitWatcher: GitFileWatcher | null = null
+}
+
+const fallbackGitFilesystemHost: object = {}
+const gitFilesystemByHost = new HostSlot<GitFilesystemHostState>(
+  () => new GitFilesystemHostState(),
+)
+
+function getGitFilesystemHostState(): GitFilesystemHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return gitFilesystemByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return gitFilesystemByHost.of(fallbackGitFilesystemHost)
+}
+
+function getGitWatcher(): GitFileWatcher {
+  const state = getGitFilesystemHostState()
+  return (state.gitWatcher ??= new GitFileWatcher())
+}
 
 /** Clear cached git dir resolutions. Exported for testing only. */
 export function clearResolveGitDirCache(): void {
-  resolveGitDirCache.clear()
+  getGitFilesystemHostState().resolveGitDirCache.clear()
 }
 
 /**
@@ -41,6 +70,7 @@ export function clearResolveGitDirCache(): void {
 export async function resolveGitDir(
   startPath?: string,
 ): Promise<string | null> {
+  const resolveGitDirCache = getGitFilesystemHostState().resolveGitDirCache
   const cwd = resolve(startPath ?? getCwd())
   const cached = resolveGitDirCache.get(cwd)
   if (cached !== undefined) {
@@ -423,8 +453,10 @@ class GitFileWatcher {
   private commonDir: string | null = null
   private initialized = false
   private initPromise: Promise<void> | null = null
-  private watchedPaths: string[] = []
+  private watchedPaths: Array<{ path: string; listener: () => void }> = []
   private branchRefPath: string | null = null
+  private branchRefListener: (() => void) | null = null
+  private unregisterCleanup: (() => void) | null = null
   private cache = new Map<string, CacheEntry<unknown>>()
 
   async ensureStarted(): Promise<void> {
@@ -462,14 +494,28 @@ class GitFileWatcher {
     // Watch the current branch's ref file for commit changes
     await this.watchCurrentBranchRef()
 
-    registerCleanup(async () => {
+    this.unregisterCleanup?.()
+    this.unregisterCleanup = registerCleanup(async () => {
       this.stopWatching()
     })
   }
 
-  private watchPath(path: string, callback: () => void): void {
-    this.watchedPaths.push(path)
-    watchFile(path, { interval: WATCH_INTERVAL_MS }, callback)
+  private watchPath(path: string, callback: () => void): () => void {
+    const captured = getActiveSessionFromAls()
+    const listener = (): void => {
+      if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+        runWithSession(captured, callback)
+      } else {
+        callback()
+      }
+    }
+    this.watchedPaths.push({ path, listener })
+    watchFile(
+      path,
+      { interval: WATCH_INTERVAL_MS, persistent: false },
+      listener,
+    )
+    return listener
   }
 
   /**
@@ -494,11 +540,26 @@ class GitFileWatcher {
 
     // Stop watching old branch ref. Runs for branch→branch AND
     // branch→detached (checkout --detach, rebase, bisect).
+    // Always pass the exact listener to unwatchFile() so sibling hosts watching
+    // the same repo never have their watchFile listeners stripped.
     if (this.branchRefPath) {
-      unwatchFile(this.branchRefPath)
-      this.watchedPaths = this.watchedPaths.filter(
-        p => p !== this.branchRefPath,
-      )
+      const oldPath = this.branchRefPath
+      const oldListener = this.branchRefListener
+      if (oldListener) {
+        unwatchFile(oldPath, oldListener)
+        this.watchedPaths = this.watchedPaths.filter(
+          entry => !(entry.path === oldPath && entry.listener === oldListener),
+        )
+      } else {
+        this.watchedPaths = this.watchedPaths.filter(entry => {
+          if (entry.path === oldPath) {
+            unwatchFile(entry.path, entry.listener)
+            return false
+          }
+          return true
+        })
+      }
+      this.branchRefListener = null
     }
 
     this.branchRefPath = refPath
@@ -509,7 +570,7 @@ class GitFileWatcher {
 
     // The ref file may not exist yet (new branch before first commit).
     // watchFile works on nonexistent files — it fires when the file appears.
-    this.watchPath(refPath, () => {
+    this.branchRefListener = this.watchPath(refPath, () => {
       this.invalidate()
     })
   }
@@ -532,11 +593,14 @@ class GitFileWatcher {
   }
 
   private stopWatching(): void {
-    for (const path of this.watchedPaths) {
-      unwatchFile(path)
+    for (const entry of this.watchedPaths) {
+      unwatchFile(entry.path, entry.listener)
     }
     this.watchedPaths = []
     this.branchRefPath = null
+    this.branchRefListener = null
+    this.unregisterCleanup?.()
+    this.unregisterCleanup = null
   }
 
   /**
@@ -582,8 +646,6 @@ class GitFileWatcher {
     this.commonDir = null
   }
 }
-
-const gitWatcher = new GitFileWatcher()
 
 async function computeBranch(): Promise<string> {
   const gitDir = await resolveGitDir()
@@ -654,24 +716,24 @@ async function computeDefaultBranch(): Promise<string> {
 }
 
 export function getCachedBranch(): Promise<string> {
-  return gitWatcher.get('branch', computeBranch)
+  return getGitWatcher().get('branch', computeBranch)
 }
 
 export function getCachedHead(): Promise<string> {
-  return gitWatcher.get('head', computeHead)
+  return getGitWatcher().get('head', computeHead)
 }
 
 export function getCachedRemoteUrl(): Promise<string | null> {
-  return gitWatcher.get('remoteUrl', computeRemoteUrl)
+  return getGitWatcher().get('remoteUrl', computeRemoteUrl)
 }
 
 export function getCachedDefaultBranch(): Promise<string> {
-  return gitWatcher.get('defaultBranch', computeDefaultBranch)
+  return getGitWatcher().get('defaultBranch', computeDefaultBranch)
 }
 
 /** Reset the git file watcher state. For testing only. */
 export function resetGitFileWatcher(): void {
-  gitWatcher.reset()
+  getGitFilesystemHostState().gitWatcher?.reset()
 }
 
 /**
@@ -681,7 +743,7 @@ export function resetGitFileWatcher(): void {
  */
 export function reanchorGitFileWatcher(): void {
   clearResolveGitDirCache()
-  gitWatcher.reset()
+  getGitFilesystemHostState().gitWatcher?.reset()
 }
 
 /**

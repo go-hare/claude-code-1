@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from 'async_hooks'
 import { appendFile, lstat, mkdir, symlink, unlink } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join, resolve } from 'path'
 import { getSessionId } from 'src/bootstrap/state.js'
 
@@ -13,7 +12,15 @@ import {
 } from './debugFilter.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { getFsImplementation } from './fsOperations.js'
+import { HostSlot } from './hostSlot.js'
 import { writeToStderr } from './process.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  ofDefaultHost,
+  runWithSession,
+  type Session,
+} from './sessionRoot.js'
 import { jsonStringify } from './slowOperations.js'
 
 export type DebugLogLevel = 'verbose' | 'debug' | 'info' | 'warn' | 'error'
@@ -26,13 +33,143 @@ const LEVEL_ORDER: Record<DebugLogLevel, number> = {
   error: 4,
 }
 
+type HostMemoizedZeroArg<Result> = (() => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Result>(fn: () => Result): HostMemoizedZeroArg<Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (): Result => {
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(undefined)) {
+      return cache.get(undefined) as Result
+    }
+    const result = fn()
+    cache.set(undefined, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoizedZeroArg<Result>
+}
+
+type UnflushedChunk = {
+  target: string | null
+  content: string
+  queued?: {
+    at: number
+    target: string
+    needMkdir: boolean
+    sessionId: string
+  }
+}
+
+type DebugBacklog = {
+  chain: Promise<void>
+  length: number
+  appendSince: number
+  stuck: 'no' | 'suspected' | 'yes'
+  droppedCount: number
+  droppedTotal: number
+}
+
+type DebugHostState = {
+  runtimeDebugEnabled: boolean | undefined
+  hasFormattedOutput: boolean | undefined
+  debugWriter: BufferedWriter | null
+  unflushedChunks: UnflushedChunk[]
+  backlog: DebugBacklog
+  exiting: boolean
+  resolvedLogPath: string | null
+  lastSessionId: string | null
+  symlinkUpdatePromise: Promise<void> | null
+  trackedInLiveStates: boolean
+  sessionRef: WeakRef<Session> | undefined
+}
+
+function createEmptyDebugBacklog(): DebugBacklog {
+  return {
+    chain: Promise.resolve(),
+    length: 0,
+    appendSince: 0,
+    stuck: 'no',
+    droppedCount: 0,
+    droppedTotal: 0,
+  }
+}
+
+const debugHostSlot = new HostSlot<DebugHostState>(() => ({
+  runtimeDebugEnabled: undefined,
+  hasFormattedOutput: undefined,
+  debugWriter: null,
+  unflushedChunks: [],
+  backlog: createEmptyDebugBacklog(),
+  exiting: false,
+  resolvedLogPath: null,
+  lastSessionId: null,
+  symlinkUpdatePromise: null,
+  trackedInLiveStates: false,
+  sessionRef: undefined,
+}))
+
+function getDebugHostState(): DebugHostState {
+  return debugHostSlot.of(getBootstrapSessionHost())
+}
+
+function isRuntimeDebugEnabled(): boolean {
+  const state = getDebugHostState()
+  return (
+    state.runtimeDebugEnabled ??
+    ofDefaultHost(debugHostSlot).runtimeDebugEnabled ??
+    false
+  )
+}
+
+// Single process-level exit listener iterating WeakRefs so ephemeral hosts
+// never accumulate process 'exit' listeners.
+const liveDebugHostStates = new Set<WeakRef<DebugHostState>>()
+let sharedDebugExitHandlerRegistered = false
+
+function pruneDeadDebugHostStates(): void {
+  for (const ref of liveDebugHostStates) {
+    if (ref.deref() === undefined) {
+      liveDebugHostStates.delete(ref)
+    }
+  }
+}
+
+function onSharedDebugExit(): void {
+  for (const ref of liveDebugHostStates) {
+    const state = ref.deref()
+    if (!state) {
+      liveDebugHostStates.delete(ref)
+      continue
+    }
+    handleDebugExit(state)
+  }
+}
+
+function ensureSharedDebugExitHandlerRegistered(): void {
+  if (sharedDebugExitHandlerRegistered) return
+  sharedDebugExitHandlerRegistered = true
+  process.on('exit', onSharedDebugExit)
+}
+
 /**
  * Minimum log level to include in debug output. Defaults to 'debug', which
  * filters out 'verbose' messages. Set CLAUDE_CODE_DEBUG_LOG_LEVEL=verbose to
  * include high-volume diagnostics (e.g. full statusLine command, shell, cwd,
  * stdout/stderr) that would otherwise drown out useful debug output.
  */
-export const getMinDebugLogLevel = memoize((): DebugLogLevel => {
+export const getMinDebugLogLevel = memoizePerHost((): DebugLogLevel => {
   const raw = process.env.CLAUDE_CODE_DEBUG_LOG_LEVEL?.toLowerCase().trim()
   if (raw && Object.hasOwn(LEVEL_ORDER, raw)) {
     return raw as DebugLogLevel
@@ -40,11 +177,8 @@ export const getMinDebugLogLevel = memoize((): DebugLogLevel => {
   return 'debug'
 })
 
-let runtimeDebugEnabled = false
-
-export const isDebugMode = memoize((): boolean => {
+const isDebugModeEnvOrArgv = memoizePerHost((): boolean => {
   return (
-    runtimeDebugEnabled ||
     isEnvTruthy(process.env.DEBUG) ||
     isEnvTruthy(process.env.DEBUG_SDK) ||
     process.argv.includes('--debug') ||
@@ -57,6 +191,22 @@ export const isDebugMode = memoize((): boolean => {
   )
 })
 
+const isDebugModeImpl = (): boolean => {
+  return isRuntimeDebugEnabled() || isDebugModeEnvOrArgv()
+}
+
+Object.defineProperty(isDebugModeImpl, 'cache', {
+  get: () => isDebugModeEnvOrArgv.cache,
+  set: (next: Map<unknown, boolean>) => {
+    isDebugModeEnvOrArgv.cache = next
+  },
+  configurable: true,
+  enumerable: true,
+})
+
+export const isDebugMode =
+  isDebugModeImpl as unknown as HostMemoizedZeroArg<boolean>
+
 /**
  * Enables debug logging mid-session (e.g. via /debug). Non-ants don't write
  * debug logs by default, so this lets them start capturing without restarting
@@ -64,14 +214,14 @@ export const isDebugMode = memoize((): boolean => {
  */
 export function enableDebugLogging(): boolean {
   const wasActive = isDebugMode() || process.env.USER_TYPE === 'ant'
-  runtimeDebugEnabled = true
+  getDebugHostState().runtimeDebugEnabled = true
   isDebugMode.cache.clear?.()
   return wasActive
 }
 
 // Extract and parse debug filter from command line arguments
 // Exported for testing purposes
-export const getDebugFilter = memoize((): DebugFilter | null => {
+export const getDebugFilter = memoizePerHost((): DebugFilter | null => {
   // Look for --debug=pattern in argv
   const debugArg = process.argv.find(arg => arg.startsWith('--debug='))
   if (!debugArg) {
@@ -83,11 +233,11 @@ export const getDebugFilter = memoize((): DebugFilter | null => {
   return parseDebugFilter(filterPattern)
 })
 
-export const isDebugToStdErr = memoize((): boolean => {
+export const isDebugToStdErr = memoizePerHost((): boolean => {
   return process.argv.includes('--debug-to-stderr')
 })
 
-export const getDebugFilePath = memoize((): string | null => {
+export const getDebugFilePath = memoizePerHost((): string | null => {
   for (let i = 0; i < process.argv.length; i++) {
     const arg = process.argv[i]!
     if (arg.startsWith('--debug-file=')) {
@@ -123,12 +273,16 @@ function shouldLogDebugMessage(message: string): boolean {
   return shouldShowDebugMessage(message, filter)
 }
 
-let hasFormattedOutput = false
 export function setHasFormattedOutput(value: boolean): void {
-  hasFormattedOutput = value
+  getDebugHostState().hasFormattedOutput = value
 }
 export function getHasFormattedOutput(): boolean {
-  return hasFormattedOutput
+  const state = getDebugHostState()
+  return (
+    state.hasFormattedOutput ??
+    ofDefaultHost(debugHostSlot).hasFormattedOutput ??
+    false
+  )
 }
 
 const runInRootContext: <T>(fn: () => T) => T =
@@ -141,39 +295,6 @@ const BACKLOG_STUCK_AGE_MS = 10_000 // 10 s (rn)
 const APPEND_CHUNK_BYTES = 262144 // 256 KiB (sn)
 const APPEND_STUCK_MS = 5000 // (on)
 const DRAIN_POLL_MS = 100 // (lt)
-
-type UnflushedChunk = {
-  target: string | null
-  content: string
-  queued?: {
-    at: number
-    target: string
-    needMkdir: boolean
-  }
-}
-
-type DebugBacklog = {
-  chain: Promise<void>
-  length: number
-  appendSince: number
-  stuck: 'no' | 'suspected' | 'yes'
-  droppedCount: number
-  droppedTotal: number
-}
-
-let debugWriter: BufferedWriter | null = null
-let unflushedChunks: UnflushedChunk[] = []
-let backlog: DebugBacklog = {
-  chain: Promise.resolve(),
-  length: 0,
-  appendSince: 0,
-  stuck: 'no',
-  droppedCount: 0,
-  droppedTotal: 0,
-}
-let exiting = false
-let exitHandlerRegistered = false
-let resolvedLogPath: string | null = null
 
 function noop(): void {}
 
@@ -194,7 +315,8 @@ function raceWithTimeout(p: Promise<boolean>, ms: number): Promise<boolean> {
   })
 }
 
-function isAppendStuck(): boolean {
+function isAppendStuck(state: DebugHostState): boolean {
+  const { backlog } = state
   const { appendSince } = backlog
   if (
     backlog.stuck === 'no' &&
@@ -215,18 +337,18 @@ function isAppendStuck(): boolean {
   return backlog.stuck === 'yes'
 }
 
-async function drained(): Promise<void> {
-  if (isAppendStuck()) return
-  const done = backlog.chain.then(() => true)
+async function drained(state: DebugHostState): Promise<void> {
+  if (isAppendStuck(state)) return
+  const done = state.backlog.chain.then(() => true)
   do {
     if (await raceWithTimeout(done, DRAIN_POLL_MS)) return
-  } while (!isAppendStuck())
+  } while (!isAppendStuck(state))
 }
 
-function takeDroppedNote(): string {
-  const { droppedCount } = backlog
+function takeDroppedNote(state: DebugHostState): string {
+  const { droppedCount } = state.backlog
   if (droppedCount === 0) return ''
-  backlog.droppedCount = 0
+  state.backlog.droppedCount = 0
   return `${new Date().toISOString()} [WARN] debug messages not logged: ${droppedCount} since the line above, because writes to this log were over 10 s behind, with over 1 MiB waiting\n`
 }
 
@@ -239,29 +361,52 @@ function isEisdir(err: unknown): boolean {
   )
 }
 
-function resolveDirToFile(dirPath: string): string {
-  resolvedLogPath = join(dirPath, `${getSessionId()}.txt`)
-  return resolvedLogPath
+function resolveDirToFile(
+  state: DebugHostState,
+  dirPath: string,
+  sessionId?: string,
+): string {
+  const sid = sessionId ?? state.lastSessionId ?? getSessionId()
+  state.resolvedLogPath = join(dirPath, `${sid}.txt`)
+  return state.resolvedLogPath
+}
+
+function updateLatestDebugLogSymlinkOnce(
+  state: DebugHostState,
+  targetPath: string,
+): Promise<void> {
+  if (state.symlinkUpdatePromise !== null) {
+    return state.symlinkUpdatePromise
+  }
+  state.symlinkUpdatePromise = updateLatestDebugLogSymlinkForPath(
+    state.resolvedLogPath ?? targetPath,
+  ).then(() => undefined)
+  return state.symlinkUpdatePromise
 }
 
 async function appendGroup(
+  state: DebugHostState,
   target: string,
   content: string,
   needMkdir: boolean,
+  sessionId: string,
 ): Promise<void> {
   if (needMkdir) {
     await mkdir(dirname(target), { recursive: true }).catch(noop)
   }
+  let writtenTarget = target
   try {
     await appendFile(target, content)
   } catch (err) {
     if (!isEisdir(err)) throw err
-    await appendFile(resolveDirToFile(target), content)
+    writtenTarget = resolveDirToFile(state, target, sessionId)
+    await appendFile(writtenTarget, content)
   }
-  void updateLatestDebugLogSymlink()
+  void updateLatestDebugLogSymlinkOnce(state, writtenTarget)
 }
 
-async function appendOldestChunks(): Promise<void> {
+async function appendOldestChunks(state: DebugHostState): Promise<void> {
+  const { unflushedChunks, backlog } = state
   const first = unflushedChunks[0]
   const queued = first?.queued
   if (queued === undefined) return
@@ -286,7 +431,13 @@ async function appendOldestChunks(): Promise<void> {
     .map(c => c.content)
     .join('')
   backlog.appendSince = Date.now()
-  await appendGroup(queued.target, combined, needMkdir).catch(noop)
+  await appendGroup(
+    state,
+    queued.target,
+    combined,
+    needMkdir,
+    queued.sessionId,
+  ).catch(noop)
   backlog.appendSince = 0
   backlog.stuck = 'no'
   if (unflushedChunks[0] === first) {
@@ -295,10 +446,11 @@ async function appendOldestChunks(): Promise<void> {
   }
 }
 
-function drainSync(): void {
+function drainSyncImpl(state: DebugHostState): void {
+  const { unflushedChunks, backlog } = state
   if (unflushedChunks.length === 0) return
   backlog.length = 0
-  if (isAppendStuck()) {
+  if (isAppendStuck(state)) {
     unflushedChunks.length = 0
     return
   }
@@ -325,7 +477,7 @@ function drainSync(): void {
       if (isEisdir(err)) {
         try {
           getFsImplementation().appendFileSync(
-            resolveDirToFile(group.target),
+            resolveDirToFile(state, group.target),
             content,
           )
         } catch {
@@ -336,108 +488,153 @@ function drainSync(): void {
   }
 }
 
-function handleDebugExit(): void {
-  exiting = true
-  if (backlog.droppedCount > 0) {
-    try {
-      getDebugWriter().write('')
-    } catch {
-      // ignore
-    }
+function drainSync(state: DebugHostState): void {
+  const rootSession = state.sessionRef?.deref()
+  if (rootSession !== undefined && getActiveSessionFromAls() !== rootSession) {
+    runWithSession(rootSession, () => drainSyncImpl(state))
+    return
   }
-  debugWriter?.flush()
-  drainSync()
+  drainSyncImpl(state)
 }
 
-function getDebugWriter(): BufferedWriter {
-  if (!debugWriter) {
+function handleDebugExit(state: DebugHostState): void {
+  const run = () => {
+    state.exiting = true
+    if (state.backlog.droppedCount > 0 && state.debugWriter) {
+      try {
+        state.debugWriter.write('')
+      } catch {
+        // ignore
+      }
+    }
+    state.debugWriter?.flush()
+    drainSync(state)
+  }
+  const rootSession = state.sessionRef?.deref()
+  if (rootSession !== undefined && getActiveSessionFromAls() !== rootSession) {
+    runWithSession(rootSession, run)
+  } else {
+    run()
+  }
+}
+
+function getDebugWriter(state: DebugHostState): BufferedWriter {
+  const activeSession = getActiveSessionFromAls()
+  if (
+    activeSession !== undefined &&
+    state.sessionRef?.deref() !== activeSession.root
+  ) {
+    state.sessionRef = new WeakRef(activeSession.root)
+  }
+  if (!state.debugWriter) {
     let ensuredDir: string | null = null
-    debugWriter = createBufferedWriter({
+    const capturedRootRef = state.sessionRef
+    state.debugWriter = createBufferedWriter({
       writeFn: content => {
-        const target = getDebugLogPath()
-        if (exiting) {
-          unflushedChunks.push({
+        const execWrite = () => {
+          const target = getDebugLogPath()
+          const sessionId = getSessionId()
+          state.lastSessionId = sessionId
+          if (state.exiting) {
+            state.unflushedChunks.push({
+              target,
+              content: takeDroppedNote(state) + content,
+            })
+            drainSync(state)
+            return
+          }
+          isAppendStuck(state)
+          if (
+            state.backlog.droppedCount > 0
+              ? state.backlog.length >= BACKLOG_MAX_BYTES / 2
+              : state.backlog.length >= BACKLOG_MAX_BYTES &&
+                Date.now() -
+                  (state.unflushedChunks[0]?.queued?.at ?? Infinity) >=
+                  BACKLOG_STUCK_AGE_MS
+          ) {
+            state.backlog.droppedCount++
+            state.backlog.droppedTotal++
+            return
+          }
+          const out = takeDroppedNote(state) + content
+          if (out === '') return
+          const dir = dirname(target)
+          const needMkdir = ensuredDir !== dir
+          ensuredDir = dir
+          state.unflushedChunks.push({
             target,
-            content: takeDroppedNote() + content,
+            content: out,
+            queued: {
+              at: Date.now(),
+              target,
+              needMkdir,
+              sessionId,
+            },
           })
-          drainSync()
-          return
+          state.backlog.length += out.length
+          state.backlog.chain = runInRootContext(() =>
+            state.backlog.chain.then(() => appendOldestChunks(state)),
+          )
         }
-        isAppendStuck()
+        const ownerSession = capturedRootRef?.deref()
         if (
-          backlog.droppedCount > 0
-            ? backlog.length >= BACKLOG_MAX_BYTES / 2
-            : backlog.length >= BACKLOG_MAX_BYTES &&
-              Date.now() - (unflushedChunks[0]?.queued?.at ?? Infinity) >=
-                BACKLOG_STUCK_AGE_MS
+          ownerSession !== undefined &&
+          getActiveSessionFromAls() !== ownerSession
         ) {
-          backlog.droppedCount++
-          backlog.droppedTotal++
-          return
+          runWithSession(ownerSession, execWrite)
+        } else {
+          execWrite()
         }
-        const out = takeDroppedNote() + content
-        if (out === '') return
-        const dir = dirname(target)
-        const needMkdir = ensuredDir !== dir
-        ensuredDir = dir
-        unflushedChunks.push({
-          target,
-          content: out,
-          queued: {
-            at: Date.now(),
-            target,
-            needMkdir,
-          },
-        })
-        backlog.length += out.length
-        backlog.chain = runInRootContext(() =>
-          backlog.chain.then(appendOldestChunks),
-        )
       },
       flushIntervalMs: 1000,
       maxBufferSize: 100,
       immediateMode: isDebugMode(),
     })
     registerCleanup(async () => {
-      debugWriter?.dispose()
-      await drained()
+      state.debugWriter?.dispose()
+      await drained(state)
     })
-    if (!exitHandlerRegistered) {
-      exitHandlerRegistered = true
-      process.on('exit', handleDebugExit)
+    if (!state.trackedInLiveStates) {
+      state.trackedInLiveStates = true
+      if (liveDebugHostStates.size > 64) {
+        pruneDeadDebugHostStates()
+      }
+      liveDebugHostStates.add(new WeakRef(state))
     }
+    ensureSharedDebugExitHandlerRegistered()
   }
-  return debugWriter
+  return state.debugWriter
 }
 
 export async function flushDebugLogs(): Promise<void> {
-  debugWriter?.flush()
-  await drained()
-  if (backlog.droppedCount > 0 && backlog.length === 0) {
-    getDebugWriter().write('')
-    debugWriter?.flush()
-    await drained()
+  const state = getDebugHostState()
+  state.debugWriter?.flush()
+  await drained(state)
+  if (state.backlog.droppedCount > 0 && state.backlog.length === 0) {
+    getDebugWriter(state).write('')
+    state.debugWriter?.flush()
+    await drained(state)
   }
 }
 
 export function getDebugFileDroppedTotal(): number {
-  return backlog.droppedTotal
+  return getDebugHostState().backlog.droppedTotal
 }
 
 export function _resetDebugLoggerForTesting(): void {
-  debugWriter?.dispose()
-  debugWriter = null
-  unflushedChunks = []
-  backlog = {
-    chain: Promise.resolve(),
-    length: 0,
-    appendSince: 0,
-    stuck: 'no',
-    droppedCount: 0,
-    droppedTotal: 0,
-  }
-  exiting = false
-  resolvedLogPath = null
+  const state = getDebugHostState()
+  state.debugWriter?.dispose()
+  state.debugWriter = null
+  state.unflushedChunks = []
+  state.backlog = createEmptyDebugBacklog()
+  state.exiting = false
+  state.resolvedLogPath = null
+  state.lastSessionId = null
+  state.symlinkUpdatePromise = null
+  state.runtimeDebugEnabled = undefined
+  state.hasFormattedOutput = undefined
+  state.sessionRef = undefined
+  isDebugMode.cache.clear?.()
 }
 
 export function logForDebugging(
@@ -453,8 +650,9 @@ export function logForDebugging(
     return
   }
 
+  const state = getDebugHostState()
   // Multiline messages break the jsonl output format, so make any multiline messages JSON.
-  if (hasFormattedOutput && message.includes('\n')) {
+  if (getHasFormattedOutput() && message.includes('\n')) {
     message = jsonStringify(message)
   }
   const timestamp = new Date().toISOString()
@@ -464,13 +662,13 @@ export function logForDebugging(
     return
   }
 
-  getDebugWriter().write(output)
+  getDebugWriter(state).write(output)
 }
 
 export function getDebugLogPath(): string {
   return (
     getDebugFilePath() ??
-    resolvedLogPath ??
+    getDebugHostState().resolvedLogPath ??
     (process.env.CLAUDE_CODE_DEBUG_LOGS_DIR
       ? resolve(process.env.CLAUDE_CODE_DEBUG_LOGS_DIR)
       : null) ??
@@ -512,14 +710,6 @@ export async function updateLatestDebugLogSymlinkForPath(
     return false
   }
 }
-
-/**
- * Updates the latest debug log symlink to point to the current debug log file.
- * Creates or updates a symlink at ~/.claude/debug/latest
- */
-const updateLatestDebugLogSymlink = memoize(async (): Promise<void> => {
-  await updateLatestDebugLogSymlinkForPath(getDebugLogPath())
-})
 
 /**
  * Logs errors for Ants only, always visible in production.

@@ -1,8 +1,9 @@
 import { logForDebugging } from './debug.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { which } from './which.js'
 
-// Session cache to avoid repeated checks
-const binaryCache = new Map<string, boolean>()
+// Per-host cache to avoid repeated checks
+const binaryCacheHostSlot = new HostSlot<Map<string, boolean>>(() => new Map())
 
 /**
  * Check if a binary/command is installed and available on the system.
@@ -20,6 +21,7 @@ export async function isBinaryInstalled(command: string): Promise<boolean> {
 
   // Trim the command to handle whitespace
   const trimmedCommand = command.trim()
+  const binaryCache = binaryCacheHostSlot.of(getBootstrapSessionHost())
 
   // Check cache first
   const cached = binaryCache.get(trimmedCommand)

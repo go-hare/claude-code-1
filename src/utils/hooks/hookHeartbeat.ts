@@ -11,6 +11,13 @@ import {
 } from '../../bootstrap/state.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { logError } from '../log.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
+import type { Session } from '../sessionRoot.js'
 
 export const DEFAULT_HOOK_HEARTBEAT_INTERVAL_MS = 30_000
 const MAX_HEARTBEAT_WINDOW_MS = 2_147_483_647
@@ -36,29 +43,40 @@ export type HookHeartbeatEvent = {
 
 export type HookHeartbeatSink = (event: HookHeartbeatEvent) => void
 
-let registeredSink: HookHeartbeatSink | undefined
-let currentTurnId = 0
-let turnPastResult: number | undefined
-const activeHeartbeatsBySession = new Map<string, Set<HookProgressHeartbeat>>()
+class HostHookHeartbeatState {
+  registeredSink: HookHeartbeatSink | undefined
+  currentTurnId = 0
+  turnPastResult: number | undefined
+  activeHeartbeatsBySession = new Map<string, Set<HookProgressHeartbeat>>()
+}
+
+const hostHookHeartbeatSlot = new HostSlot<HostHookHeartbeatState>(
+  () => new HostHookHeartbeatState(),
+)
+
+function getHostHookHeartbeatState(): HostHookHeartbeatState {
+  return hostHookHeartbeatSlot.of(getBootstrapSessionHost())
+}
 
 export function registerHookHeartbeatSink(
   sink: HookHeartbeatSink | undefined,
 ): () => void {
-  const prev = registeredSink
-  registeredSink = sink
+  const state = getHostHookHeartbeatState()
+  const prev = state.registeredSink
+  state.registeredSink = sink
   return () => {
-    if (registeredSink === sink) {
-      registeredSink = prev
+    if (state.registeredSink === sink) {
+      state.registeredSink = prev
     }
   }
 }
 
 export function setHookHeartbeatTurn(turnId: number): void {
-  currentTurnId = turnId
+  getHostHookHeartbeatState().currentTurnId = turnId
 }
 
 export function markHookHeartbeatTurnPastResult(turnId: number): void {
-  turnPastResult = turnId
+  getHostHookHeartbeatState().turnPastResult = turnId
 }
 
 export function getHookHeartbeatIntervalMs(): number {
@@ -80,6 +98,9 @@ export class HookProgressHeartbeat {
   readonly sessionId: string
   readonly startTime: number = Date.now()
   readonly maxTicks: number
+  private readonly hostState: HostHookHeartbeatState
+  private readonly capturedSession: Session | undefined
+  private readonly explicitSink: HookHeartbeatSink | undefined
   private timer: ReturnType<typeof setInterval>
   private ticks = 0
   private beats = 0
@@ -92,25 +113,29 @@ export class HookProgressHeartbeat {
     turn: number,
     signal: AbortSignal | undefined,
     maxWindowMs: number,
-    sink: HookHeartbeatSink,
+    sink?: HookHeartbeatSink,
     intervalMs: number = getHookHeartbeatIntervalMs(),
   ) {
     this.hookEvent = hookEvent
     this.toolUseID = toolUseID
     this.turn = turn
     this.signal = signal
+    this.hostState = getHostHookHeartbeatState()
+    this.capturedSession = getActiveSessionFromAls()
+    this.explicitSink = sink
     this.sessionId = getSessionId()
     this.maxTicks = Math.max(
       1,
       Math.ceil(Math.min(maxWindowMs, MAX_HEARTBEAT_WINDOW_MS) / intervalMs),
     )
-    this.timer = setInterval(() => this.tick(sink), intervalMs)
+    this.timer = setInterval(() => this.tick(), intervalMs)
     if (typeof this.timer.unref === 'function') {
       this.timer.unref()
     }
-    const set = activeHeartbeatsBySession.get(this.sessionId) ?? new Set()
+    const set =
+      this.hostState.activeHeartbeatsBySession.get(this.sessionId) ?? new Set()
     set.add(this)
-    activeHeartbeatsBySession.set(this.sessionId, set)
+    this.hostState.activeHeartbeatsBySession.set(this.sessionId, set)
   }
 
   get beatCount(): number {
@@ -121,10 +146,10 @@ export class HookProgressHeartbeat {
     if (this.stopped) return
     this.stopped = true
     clearInterval(this.timer)
-    const set = activeHeartbeatsBySession.get(this.sessionId)
+    const set = this.hostState.activeHeartbeatsBySession.get(this.sessionId)
     set?.delete(this)
     if (set?.size === 0) {
-      activeHeartbeatsBySession.delete(this.sessionId)
+      this.hostState.activeHeartbeatsBySession.delete(this.sessionId)
     }
   }
 
@@ -132,13 +157,13 @@ export class HookProgressHeartbeat {
     this.stop()
   }
 
-  private tick(sink: HookHeartbeatSink): void {
+  private tick(): void {
     try {
       if (this.signal?.aborted) {
         this.stop()
         return
       }
-      if (currentTurnId !== this.turn) {
+      if (this.hostState.currentTurnId !== this.turn) {
         this.stop()
         return
       }
@@ -147,14 +172,24 @@ export class HookProgressHeartbeat {
         this.stop()
         return
       }
-      sink({
+      const targetSink = this.explicitSink ?? this.hostState.registeredSink
+      if (!targetSink) {
+        this.stop()
+        return
+      }
+      const event: HookHeartbeatEvent = {
         type: 'tool_progress',
         tool_use_id: `hook-${this.hookEvent}-${this.toolUseID}-heartbeat-${this.beats++}`,
         tool_name: this.hookEvent,
         parent_tool_use_id: this.toolUseID,
         elapsed_time_seconds: Math.floor((Date.now() - this.startTime) / 1000),
         heartbeat: true,
-      })
+      }
+      if (this.capturedSession) {
+        runWithSession(this.capturedSession, () => targetSink(event))
+      } else {
+        targetSink(event)
+      }
     } catch (err) {
       this.outcome = 'threw'
       this.stop()
@@ -175,14 +210,15 @@ export function startHookHeartbeat(params: {
   forceNonInteractiveForTest?: boolean
 }): HookProgressHeartbeat | undefined {
   try {
+    const state = getHostHookHeartbeatState()
     const isHeadless =
       params.forceNonInteractiveForTest ?? getIsNonInteractiveSession()
-    const sink = params.sink ?? registeredSink
+    const sink = params.sink ?? state.registeredSink
     if (
       !isHeadless ||
       !sink ||
       isEnvTruthy(process.env.CLAUDE_CODE_REMOTE_SEND_KEEPALIVES) ||
-      currentTurnId === turnPastResult ||
+      state.currentTurnId === state.turnPastResult ||
       params.agentId !== undefined ||
       params.besideTheTurn === true ||
       params.matchedHookCount === 0 ||
@@ -193,10 +229,10 @@ export function startHookHeartbeat(params: {
     return new HookProgressHeartbeat(
       params.hookEvent,
       params.toolUseID,
-      currentTurnId,
+      state.currentTurnId,
       params.signal,
       params.maxTimeoutMs,
-      sink,
+      params.sink,
     )
   } catch (err) {
     logError(err)
@@ -205,8 +241,9 @@ export function startHookHeartbeat(params: {
 }
 
 export function stopAllHookHeartbeatsForSession(sessionId?: string): void {
+  const state = getHostHookHeartbeatState()
   const id = sessionId ?? getSessionId()
-  const set = activeHeartbeatsBySession.get(id)
+  const set = state.activeHeartbeatsBySession.get(id)
   if (!set) return
   for (const hb of [...set]) {
     hb.stop()

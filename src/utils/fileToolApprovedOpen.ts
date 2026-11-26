@@ -24,7 +24,7 @@ import {
   isWslUncPath,
 } from './path.js'
 import { getPlatform, type Platform } from './platform.js'
-import { getBootstrapSession } from './sessionRoot.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 import { WRITE_STASH_EXPIRED } from './sessionSlots.js'
 
 export class SymlinkResolutionChangedError extends Error {
@@ -101,7 +101,20 @@ export function pathIsApproved(
   }
 }
 
-const pendingApproval = new Map<string, Set<string>>()
+const fallbackFileToolApprovedOpenSession = { root: {} as object }
+const pendingApprovalBySession = new RootSessionSlot<Map<string, Set<string>>>(
+  () => new Map(),
+)
+
+function getPendingApprovalMap(): Map<string, Set<string>> {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return pendingApprovalBySession.of(session)
+  } catch {
+    // Fall back when sessionRoot is mocked
+  }
+  return pendingApprovalBySession.of(fallbackFileToolApprovedOpenSession)
+}
 
 /** densable i3 expired throw @176443388 */
 export function permissionCheckExpiredWriteMessage(filePath: string): string {
@@ -122,7 +135,7 @@ export function noteApprovedFileToolPath(
 ): void {
   const absolute = expandPath(filePath)
   const hops = approvedPathSetFor(absolute)
-  pendingApproval.set(absolute, hops)
+  getPendingApprovalMap().set(absolute, hops)
   if (toolUseId !== undefined) {
     getBootstrapSession().writePermissionStash.stash(toolUseId, absolute, [
       ...hops,
@@ -140,6 +153,7 @@ export function takeApprovedFileToolPath(
   lane: 'write' | 'read' = 'read',
 ): Set<string> {
   const absolute = expandPath(filePath)
+  const pendingApproval = getPendingApprovalMap()
   if (toolUseId !== undefined && lane === 'write') {
     const consumed = getBootstrapSession().writePermissionStash.consume(
       toolUseId,
@@ -164,7 +178,7 @@ export function takeApprovedFileToolPath(
 }
 
 export function clearApprovedFileToolPathsForTests(): void {
-  pendingApproval.clear()
+  getPendingApprovalMap().clear()
 }
 
 /** densable `jn(t)&&!Ds(t)||yr(t)` — UNC (not WSL) or NT-object. */

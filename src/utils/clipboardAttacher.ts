@@ -5,11 +5,15 @@
 
 import { setClipboardAttacherCapsGetter } from '@anthropic/ink'
 import { getAttacherCaps } from '../bootstrap/state.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
-let wired = false
+const clipboardAttacherWiredHostSlot = new HostSlot<{ wired: boolean }>(() => ({
+  wired: false,
+}))
 
 export function wireClipboardAttacherCaps(): void {
-  if (wired) return
-  wired = true
+  const hostState = clipboardAttacherWiredHostSlot.of(getBootstrapSessionHost())
+  if (hostState.wired) return
+  hostState.wired = true
   setClipboardAttacherCapsGetter(() => getAttacherCaps())
 }

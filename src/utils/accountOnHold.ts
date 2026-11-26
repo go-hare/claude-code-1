@@ -6,6 +6,11 @@ import { logEvent } from 'src/services/analytics/index.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
 import { getSecureStorage } from './secureStorage/index.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+} from './sessionHost.js'
 
 export const ACCOUNT_ON_HOLD_GATE = 'tengu_lively_beaver'
 export const ACCOUNT_ON_HOLD = 'account_on_hold'
@@ -35,18 +40,71 @@ class AccountOnHoldGateSlot {
   }
 }
 
-const gateSlot = new AccountOnHoldGateSlot()
+/**
+ * Module-load default gate reader registered once at import time by
+ * `growthbook.ts`. Per-host `registerAccountOnHoldGateReader` calls inside an
+ * active ALS session override only that host; hosts without an override fall
+ * back to this default reader so module-load wiring keeps working.
+ */
+let defaultGateReader: AccountOnHoldGateReader | null = null
+
+class AccountOnHoldHostState {
+  gateSlot = new AccountOnHoldGateSlot()
+  hasGateReaderOverride = false
+  /** densable `Hs` — refreshToken → sanitized appeal URL. */
+  oauthAccountOnHoldByRefreshToken = new Map<string, string>()
+  /** densable `$s` — refresh tokens marked dead after invalid_grant. */
+  oauthDeadInvalidGrantRefreshTokens = new Set<string>()
+  /** densable `oi` / `K0=32` — refresh tokens that already tried scope expansion. */
+  oauthScopeExpansionRefreshTokens = new Set<string>()
+}
+
+const fallbackAccountOnHoldHost: object = {}
+const accountOnHoldByHost = new HostSlot<AccountOnHoldHostState>(
+  () => new AccountOnHoldHostState(),
+)
+
+function getAccountOnHoldHostState(): AccountOnHoldHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return accountOnHoldByHost.of(host)
+  } catch {
+    // Fall back to module-local sentinel if sessionHost is mocked
+  }
+  return accountOnHoldByHost.of(fallbackAccountOnHoldHost)
+}
 
 /** densable `de` — swap the `tengu_lively_beaver` reader; returns the previous. */
 export function registerAccountOnHoldGateReader(
   reader: AccountOnHoldGateReader | null,
 ): AccountOnHoldGateReader | null {
-  return gateSlot.register(reader)
+  const hostState = getAccountOnHoldHostState()
+  const prev = hostState.hasGateReaderOverride
+    ? hostState.gateSlot.reader
+    : defaultGateReader
+  let outsideAls = true
+  try {
+    outsideAls = getActiveSessionFromAls() === undefined
+  } catch {
+    outsideAls = true
+  }
+  if (outsideAls) {
+    defaultGateReader = reader
+    hostState.hasGateReaderOverride = false
+    hostState.gateSlot.register(null)
+  } else {
+    hostState.hasGateReaderOverride = true
+    hostState.gateSlot.register(reader)
+  }
+  return prev
 }
 
 /** densable `v`. */
 export function isAccountOnHoldGateEnabled(): boolean {
-  const reader = gateSlot.reader
+  const hostState = getAccountOnHoldHostState()
+  const reader = hostState.hasGateReaderOverride
+    ? hostState.gateSlot.reader
+    : defaultGateReader
   if (!reader) return false
   try {
     return reader(ACCOUNT_ON_HOLD_GATE, false) === true
@@ -241,14 +299,6 @@ export function getOAuthRefreshAccountOnHoldUrl(error: unknown): string {
   )
 }
 
-/** densable `Hs` — refreshToken → sanitized appeal URL. */
-const oauthAccountOnHoldByRefreshToken = new Map<string, string>()
-
-/** densable `$s` — refresh tokens marked dead after invalid_grant. */
-const oauthDeadInvalidGrantRefreshTokens = new Set<string>()
-
-/** densable `oi` / `K0=32` — refresh tokens that already tried scope expansion. */
-const oauthScopeExpansionRefreshTokens = new Set<string>()
 const OAUTH_SCOPE_EXPANSION_ATTEMPTS_MAX = 32
 
 /** densable `Hs.set`. */
@@ -256,12 +306,17 @@ export function rememberOAuthAccountOnHold(
   refreshToken: string,
   url: string,
 ): void {
-  oauthAccountOnHoldByRefreshToken.set(refreshToken, url)
+  getAccountOnHoldHostState().oauthAccountOnHoldByRefreshToken.set(
+    refreshToken,
+    url,
+  )
 }
 
 /** densable `Hs.has`. */
 export function isOAuthRefreshTokenOnHold(refreshToken: string): boolean {
-  return oauthAccountOnHoldByRefreshToken.has(refreshToken)
+  return getAccountOnHoldHostState().oauthAccountOnHoldByRefreshToken.has(
+    refreshToken,
+  )
 }
 
 /**
@@ -274,7 +329,10 @@ export function getOAuthAccountOnHold(): { url: string } | null {
     require('./auth.js') as typeof import('./auth.js')
   const refreshToken = getClaudeAIOAuthTokens()?.refreshToken
   if (!refreshToken) return null
-  const url = oauthAccountOnHoldByRefreshToken.get(refreshToken)
+  const url =
+    getAccountOnHoldHostState().oauthAccountOnHoldByRefreshToken.get(
+      refreshToken,
+    )
   return url === undefined ? null : { url }
 }
 
@@ -282,20 +340,21 @@ export function getOAuthAccountOnHold(): { url: string } | null {
  * densable `G0` — `oi.has`. Official caller is `jwo` (plugins_scope_expansion).
  */
 export function isOAuthScopeExpansionAttempted(refreshToken: string): boolean {
-  return oauthScopeExpansionRefreshTokens.has(refreshToken)
+  return getAccountOnHoldHostState().oauthScopeExpansionRefreshTokens.has(
+    refreshToken,
+  )
 }
 
 /**
  * densable `$0` — cap `oi` at `K0=32` (FIFO), then add.
  */
 export function recordOAuthScopeExpansionAttempt(refreshToken: string): void {
-  if (
-    oauthScopeExpansionRefreshTokens.size >= OAUTH_SCOPE_EXPANSION_ATTEMPTS_MAX
-  ) {
-    const oldest = oauthScopeExpansionRefreshTokens.values().next().value
-    if (oldest !== undefined) oauthScopeExpansionRefreshTokens.delete(oldest)
+  const scopeSet = getAccountOnHoldHostState().oauthScopeExpansionRefreshTokens
+  if (scopeSet.size >= OAUTH_SCOPE_EXPANSION_ATTEMPTS_MAX) {
+    const oldest = scopeSet.values().next().value
+    if (oldest !== undefined) scopeSet.delete(oldest)
   }
-  oauthScopeExpansionRefreshTokens.add(refreshToken)
+  scopeSet.add(refreshToken)
 }
 
 /**
@@ -303,9 +362,10 @@ export function recordOAuthScopeExpansionAttempt(refreshToken: string): void {
  * caller (plugins skill-search scope expansion); local has no `jwo`.
  */
 export function clearOAuthAccountOnHoldCaches(): void {
-  oauthDeadInvalidGrantRefreshTokens.clear()
-  oauthScopeExpansionRefreshTokens.clear()
-  oauthAccountOnHoldByRefreshToken.clear()
+  const state = getAccountOnHoldHostState()
+  state.oauthDeadInvalidGrantRefreshTokens.clear()
+  state.oauthScopeExpansionRefreshTokens.clear()
+  state.oauthAccountOnHoldByRefreshToken.clear()
 }
 
 /**
@@ -345,7 +405,9 @@ export function isOAuthRefreshDeadInvalidGrant(error: unknown): boolean {
 
 /** densable `$s.has`. */
 export function isOAuthRefreshTokenKnownDead(refreshToken: string): boolean {
-  return oauthDeadInvalidGrantRefreshTokens.has(refreshToken)
+  return getAccountOnHoldHostState().oauthDeadInvalidGrantRefreshTokens.has(
+    refreshToken,
+  )
 }
 
 /**
@@ -359,7 +421,10 @@ export function isOAuthRefreshTokenDead(
     const refreshToken = tokens.refreshToken
     return (
       refreshToken === '' ||
-      (!!refreshToken && oauthDeadInvalidGrantRefreshTokens.has(refreshToken))
+      (!!refreshToken &&
+        getAccountOnHoldHostState().oauthDeadInvalidGrantRefreshTokens.has(
+          refreshToken,
+        ))
     )
   }
   if (process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) return false
@@ -399,7 +464,9 @@ export function applyDeadOAuthRefreshTokenMutate<
 export async function markDeadOAuthRefreshToken(
   refreshToken: string,
 ): Promise<void> {
-  oauthDeadInvalidGrantRefreshTokens.add(refreshToken)
+  getAccountOnHoldHostState().oauthDeadInvalidGrantRefreshTokens.add(
+    refreshToken,
+  )
   logEvent('tengu_oauth_refresh_token_marked_dead_invalid_grant', {})
   try {
     const storage = getSecureStorage()

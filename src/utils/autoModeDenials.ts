@@ -4,6 +4,7 @@
  */
 
 import { feature } from 'bun:bundle'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import { jsonStringify } from './slowOperations.js'
 
 export type AutoModeDenial = {
@@ -20,7 +21,26 @@ export type AutoModeDenial = {
   timestamp: number
 }
 
-let DENIALS: readonly AutoModeDenial[] = []
+type AutoModeDenialsSessionState = {
+  denials: readonly AutoModeDenial[]
+}
+
+const fallbackAutoModeDenialsSession = { root: {} as object }
+const autoModeDenialsBySession =
+  new RootSessionSlot<AutoModeDenialsSessionState>(() => ({
+    denials: [],
+  }))
+
+function getAutoModeDenialsState(): AutoModeDenialsSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return autoModeDenialsBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return autoModeDenialsBySession.of(fallbackAutoModeDenialsSession)
+}
+
 const MAX_DENIALS = 20
 
 const STRIPPED_SHELL_KEYS = new Set(['description', 'timeout'])
@@ -63,7 +83,8 @@ export function computeAutoModeDenialInputKey(
 
 export function recordAutoModeDenial(denial: AutoModeDenial): void {
   if (!feature('TRANSCRIPT_CLASSIFIER')) return
-  DENIALS = [denial, ...DENIALS.slice(0, MAX_DENIALS - 1)]
+  const state = getAutoModeDenialsState()
+  state.denials = [denial, ...state.denials.slice(0, MAX_DENIALS - 1)]
 }
 
 export function removeAutoModeDenial(
@@ -71,7 +92,8 @@ export function removeAutoModeDenial(
   inputKey: string | undefined,
 ): void {
   if (inputKey === undefined) return
-  DENIALS = DENIALS.filter(
+  const state = getAutoModeDenialsState()
+  state.denials = state.denials.filter(
     d => d.toolName !== toolName || d.inputKey !== inputKey,
   )
 }
@@ -80,7 +102,8 @@ export function markAutoModeDenialApproved(
   denial: Pick<AutoModeDenial, 'toolName' | 'inputKey' | 'timestamp'>,
 ): void {
   if (!feature('TRANSCRIPT_CLASSIFIER')) return
-  DENIALS = DENIALS.map(d => {
+  const state = getAutoModeDenialsState()
+  state.denials = state.denials.map(d => {
     const match =
       denial.inputKey !== undefined
         ? d.toolName === denial.toolName && d.inputKey === denial.inputKey
@@ -94,18 +117,19 @@ export function consumeApprovedAutoModeDenial(
   inputKey: string,
 ): AutoModeDenial | undefined {
   if (!feature('TRANSCRIPT_CLASSIFIER')) return undefined
-  const match = DENIALS.find(
+  const state = getAutoModeDenialsState()
+  const match = state.denials.find(
     d => d.toolName === toolName && d.inputKey === inputKey && d.approved,
   )
   if (!match) return undefined
-  DENIALS = DENIALS.filter(d => d !== match)
+  state.denials = state.denials.filter(d => d !== match)
   return match
 }
 
 export function getAutoModeDenials(): readonly AutoModeDenial[] {
-  return DENIALS
+  return getAutoModeDenialsState().denials
 }
 
 export function clearAutoModeDenialsForTesting(): void {
-  DENIALS = []
+  getAutoModeDenialsState().denials = []
 }

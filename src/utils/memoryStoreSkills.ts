@@ -22,7 +22,7 @@ import {
   isSkillModelInvocationBlockedByOverride,
   resolveSkillOverrideMode,
 } from './residualFinalEnvGates.js'
-import { getBootstrapSessionHost } from './sessionRoot.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionRoot.js'
 import { isRestrictedToPluginOnly } from './settings/pluginOnlyPolicy.js'
 
 class MemoryStoreSkillBag {
@@ -39,21 +39,27 @@ class MemoryStoreSkillBag {
   }
 }
 
-const bag = new MemoryStoreSkillBag()
+const skillBagByHost = new HostSlot<MemoryStoreSkillBag>(
+  () => new MemoryStoreSkillBag(),
+)
+
+function getSkillBag(): MemoryStoreSkillBag {
+  return skillBagByHost.of(getBootstrapSessionHost())
+}
 
 /** densable `Eae`. */
 export function getMemoryStoreSkillCommands(): Command[] {
-  return bag.commands
+  return getSkillBag().commands
 }
 
 /** Test / loader hook for densable `Vw.replace`. */
 export function replaceMemoryStoreSkillCommands(next: Command[]): boolean {
-  return bag.replace(next)
+  return getSkillBag().replace(next)
 }
 
 /** densable `oz` filter used by xMn's `Eae().filter`. */
 export function invocableMemoryStoreSkillCommands(): Command[] {
-  return bag.commands.filter(
+  return getSkillBag().commands.filter(
     cmd =>
       !cmd.disableModelInvocation &&
       !isSkillModelInvocationBlockedByOverride(resolveSkillOverrideMode(cmd)),
@@ -122,10 +128,12 @@ export class MemoryStoresHost {
   }
 }
 
-const memoryStoresHost = new MemoryStoresHost()
+const memoryStoresHostByHost = new HostSlot<MemoryStoresHost>(
+  () => new MemoryStoresHost(),
+)
 
 export function getMemoryStoresHost(): MemoryStoresHost {
-  return memoryStoresHost
+  return memoryStoresHostByHost.of(getBootstrapSessionHost())
 }
 
 /** densable `lhe` @179544800 — realpath(path) === canonical, or under it. */
@@ -453,7 +461,7 @@ export async function registerMemoryStoreSkills(
         reason:
           'plugin_only_policy' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
-      bag.replace([])
+      getSkillBag().replace([])
       return
     }
     let skipped = false
@@ -581,7 +589,7 @@ export async function registerMemoryStoreSkills(
         truncated ||= ye.truncated
       }
     }
-    if (bag.replace(loaded) && loaded.length > 0) {
+    if (getSkillBag().replace(loaded) && loaded.length > 0) {
       logForDebugging(
         `memory-skills: registered ${loaded.length} skill(s) under memories::`,
       )

@@ -1,5 +1,4 @@
 import axios from 'axios'
-import memoize from 'lodash-es/memoize.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -9,6 +8,7 @@ import { logForDebugging } from 'src/utils/debug.js'
 import { gracefulShutdown } from 'src/utils/gracefulShutdown.js'
 import { isEssentialTrafficOnly } from 'src/utils/privacyLevel.js'
 import { writeToStderr } from 'src/utils/process.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionRoot.js'
 import { getOauthConfig } from '../../constants/oauth.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import {
@@ -42,16 +42,19 @@ export type GroveConfig = {
  */
 export type ApiResult<T> = { success: true; data: T } | { success: false }
 
-/**
- * Get the current Grove settings for the user account.
- * Returns ApiResult to distinguish between API failure and success.
- * Uses existing OAuth 401 retry, then returns failure if that doesn't help.
- *
- * Memoized for the session to avoid redundant per-render requests.
- * Cache is invalidated in updateGroveSettings() so post-toggle reads are fresh.
- */
-export const getGroveSettings = memoize(
-  async (): Promise<ApiResult<AccountSettings>> => {
+type GroveHostState = {
+  settingsCache: Map<unknown, Promise<ApiResult<AccountSettings>>>
+  noticeConfigCache: Map<unknown, Promise<ApiResult<GroveConfig>>>
+}
+
+const groveHostSlot = new HostSlot<GroveHostState>(() => ({
+  settingsCache: new Map(),
+  noticeConfigCache: new Map(),
+}))
+
+function getGroveSettingsUncached(): Promise<ApiResult<AccountSettings>> {
+  const host = getBootstrapSessionHost()
+  return (async (): Promise<ApiResult<AccountSettings>> => {
     // Grove is a notification feature; during an outage, skipping it is correct.
     if (isEssentialTrafficOnly()) {
       return { success: false }
@@ -79,11 +82,46 @@ export const getGroveSettings = memoize(
       // out of privacy settings for the entire session (deadlock: dialog needs
       // success to render the toggle, toggle calls updateGroveSettings which
       // is the only other place the cache is cleared).
-      getGroveSettings.cache.clear?.()
+      groveHostSlot.peek(host)?.settingsCache.clear()
       return { success: false }
     }
+  })()
+}
+
+function getGroveSettingsImpl(): Promise<ApiResult<AccountSettings>> {
+  const cache = groveHostSlot.of(getBootstrapSessionHost()).settingsCache
+  const existing = cache.get(undefined)
+  if (existing !== undefined) {
+    return existing
+  }
+  const pending = getGroveSettingsUncached()
+  cache.set(undefined, pending)
+  return pending
+}
+
+Object.defineProperty(getGroveSettingsImpl, 'cache', {
+  get: () => groveHostSlot.of(getBootstrapSessionHost()).settingsCache,
+  set: (next: Map<unknown, Promise<ApiResult<AccountSettings>>>) => {
+    groveHostSlot.of(getBootstrapSessionHost()).settingsCache = next
   },
-)
+  configurable: true,
+  enumerable: true,
+})
+
+/**
+ * Get the current Grove settings for the user account.
+ * Returns ApiResult to distinguish between API failure and success.
+ * Uses existing OAuth 401 retry, then returns failure if that doesn't help.
+ *
+ * Memoized per SessionHost to avoid redundant per-render requests.
+ * Cache is invalidated in updateGroveSettings() so post-toggle reads are fresh.
+ */
+export const getGroveSettings =
+  getGroveSettingsImpl as unknown as (() => Promise<
+    ApiResult<AccountSettings>
+  >) & {
+    cache: Map<unknown, Promise<ApiResult<AccountSettings>>>
+  }
 
 /**
  * Mark that the Grove notice has been viewed by the user
@@ -248,13 +286,9 @@ async function fetchAndStoreGroveConfig(accountId: string): Promise<void> {
   }
 }
 
-/**
- * Get Grove Statsig configuration from the API.
- * Returns ApiResult to distinguish between API failure and success.
- * Uses existing OAuth 401 retry, then returns failure if that doesn't help.
- */
-export const getGroveNoticeConfig = memoize(
-  async (): Promise<ApiResult<GroveConfig>> => {
+function getGroveNoticeConfigUncached(): Promise<ApiResult<GroveConfig>> {
+  const host = getBootstrapSessionHost()
+  return (async (): Promise<ApiResult<GroveConfig>> => {
     // Grove is a notification feature; during an outage, skipping it is correct.
     if (isEssentialTrafficOnly()) {
       return { success: false }
@@ -299,11 +333,43 @@ export const getGroveNoticeConfig = memoize(
       }
     } catch (err) {
       logForDebugging(`Failed to fetch Grove notice config: ${err}`)
-      getGroveNoticeConfig.cache.clear?.()
+      groveHostSlot.peek(host)?.noticeConfigCache.clear()
       return { success: false }
     }
+  })()
+}
+
+function getGroveNoticeConfigImpl(): Promise<ApiResult<GroveConfig>> {
+  const cache = groveHostSlot.of(getBootstrapSessionHost()).noticeConfigCache
+  const existing = cache.get(undefined)
+  if (existing !== undefined) {
+    return existing
+  }
+  const pending = getGroveNoticeConfigUncached()
+  cache.set(undefined, pending)
+  return pending
+}
+
+Object.defineProperty(getGroveNoticeConfigImpl, 'cache', {
+  get: () => groveHostSlot.of(getBootstrapSessionHost()).noticeConfigCache,
+  set: (next: Map<unknown, Promise<ApiResult<GroveConfig>>>) => {
+    groveHostSlot.of(getBootstrapSessionHost()).noticeConfigCache = next
   },
-)
+  configurable: true,
+  enumerable: true,
+})
+
+/**
+ * Get Grove Statsig configuration from the API (memoized per SessionHost).
+ * Returns ApiResult to distinguish between API failure and success.
+ * Uses existing OAuth 401 retry, then returns failure if that doesn't help.
+ */
+export const getGroveNoticeConfig =
+  getGroveNoticeConfigImpl as unknown as (() => Promise<
+    ApiResult<GroveConfig>
+  >) & {
+    cache: Map<unknown, Promise<ApiResult<GroveConfig>>>
+  }
 
 /**
  * Determines whether the Grove dialog should be shown.

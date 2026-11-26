@@ -1,22 +1,30 @@
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
+
 /**
  * Session-scoped environment variables set via /env.
  * Applied only to spawned child processes (via bash provider env overrides),
  * not to the REPL process itself.
  */
-const sessionEnvVars = new Map<string, string>()
+const sessionEnvVarsSlot = new RootSessionSlot<Map<string, string>>(
+  () => new Map<string, string>(),
+)
+
+function getSessionEnvVarsMap(): Map<string, string> {
+  return sessionEnvVarsSlot.of(getBootstrapSession())
+}
 
 export function getSessionEnvVars(): ReadonlyMap<string, string> {
-  return sessionEnvVars
+  return getSessionEnvVarsMap()
 }
 
 export function setSessionEnvVar(name: string, value: string): void {
-  sessionEnvVars.set(name, value)
+  getSessionEnvVarsMap().set(name, value)
 }
 
 export function deleteSessionEnvVar(name: string): void {
-  sessionEnvVars.delete(name)
+  getSessionEnvVarsMap().delete(name)
 }
 
 export function clearSessionEnvVars(): void {
-  sessionEnvVars.clear()
+  getSessionEnvVarsMap().clear()
 }

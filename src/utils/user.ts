@@ -1,5 +1,4 @@
 import { execa } from 'execa'
-import memoize from 'lodash-es/memoize.js'
 import { getSessionId } from '../bootstrap/state.js'
 import {
   getOauthAccountInfo,
@@ -10,10 +9,57 @@ import { getGlobalConfig, getOrCreateUserID } from './config.js'
 import { getCwd } from './cwd.js'
 import { type env, getHostPlatformForAnalytics } from './env.js'
 import { isEnvTruthy } from './envUtils.js'
+import { RootSessionSlot } from './hostSlot.js'
+import { getBootstrapSession } from './sessionRoot.js'
 
-// Cache for email fetched asynchronously at startup
-let cachedEmail: string | undefined | null = null // null means not fetched yet
-let emailFetchPromise: Promise<string | undefined> | null = null
+type SessionMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerRootSession<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): SessionMemoized<Args, Result> {
+  const slot = new RootSessionSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSession()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSession()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSession()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as SessionMemoized<Args, Result>
+}
+
+type UserSessionState = {
+  // null means not fetched yet
+  cachedEmail: string | undefined | null
+  emailFetchPromise: Promise<string | undefined> | null
+}
+
+const userSessionSlot = new RootSessionSlot<UserSessionState>(() => ({
+  cachedEmail: null,
+  emailFetchPromise: null,
+}))
+
+function getUserSessionState(): UserSessionState {
+  return userSessionSlot.of(getBootstrapSession())
+}
 
 /**
  * GitHub Actions metadata when running in CI
@@ -51,12 +97,26 @@ export type CoreUserData = {
  * This pre-fetches the email so getUser() can remain synchronous.
  */
 export async function initUser(): Promise<void> {
-  if (cachedEmail === null && !emailFetchPromise) {
-    emailFetchPromise = getEmailAsync()
-    cachedEmail = await emailFetchPromise
-    emailFetchPromise = null
-    // Clear memoization cache so next call picks up the email
-    getCoreUserData.cache.clear?.()
+  const state = getUserSessionState()
+  if (state.cachedEmail === null && !state.emailFetchPromise) {
+    const fetchPromise = getEmailAsync()
+    state.emailFetchPromise = fetchPromise
+    try {
+      const email = await fetchPromise
+      if (state.emailFetchPromise === fetchPromise) {
+        state.cachedEmail = email
+        state.emailFetchPromise = null
+        // Clear memoization cache so next call picks up the email
+        getCoreUserData.cache.clear?.()
+      }
+    } catch (err) {
+      if (state.emailFetchPromise === fetchPromise) {
+        state.emailFetchPromise = null
+      }
+      throw err
+    }
+  } else if (state.emailFetchPromise) {
+    await state.emailFetchPromise
   }
 }
 
@@ -65,8 +125,9 @@ export async function initUser(): Promise<void> {
  * so the next getCoreUserData() call picks up fresh credentials and email.
  */
 export function resetUserCache(): void {
-  cachedEmail = null
-  emailFetchPromise = null
+  const state = getUserSessionState()
+  state.cachedEmail = null
+  state.emailFetchPromise = null
   getCoreUserData.cache.clear?.()
   getGitEmail.cache.clear?.()
 }
@@ -75,7 +136,7 @@ export function resetUserCache(): void {
  * Get core user data.
  * This is the base representation that gets transformed for different analytics providers.
  */
-export const getCoreUserData = memoize(
+export const getCoreUserData = memoizePerRootSession(
   (includeAnalyticsMetadata?: boolean): CoreUserData => {
     const deviceId = getOrCreateUserID()
     const config = getGlobalConfig()
@@ -105,7 +166,7 @@ export const getCoreUserData = memoize(
       deviceId,
       sessionId: getSessionId(),
       email: getEmail(),
-      appVersion: MACRO.VERSION,
+      appVersion: typeof MACRO !== 'undefined' ? MACRO.VERSION : '0.0.0',
       platform: getHostPlatformForAnalytics(),
       organizationUuid,
       accountUuid,
@@ -125,6 +186,8 @@ export const getCoreUserData = memoize(
       }),
     }
   },
+  (includeAnalyticsMetadata?: boolean) =>
+    `${String(includeAnalyticsMetadata)}::${getSessionId()}`,
 )
 
 /**
@@ -135,6 +198,7 @@ export function getUserForGrowthBook(): CoreUserData {
 }
 
 function getEmail(): string | undefined {
+  const { cachedEmail } = getUserSessionState()
   // Return cached email if available (from async initialization)
   if (cachedEmail !== null) {
     return cachedEmail
@@ -180,15 +244,19 @@ async function getEmailAsync(): Promise<string | undefined> {
 
 /**
  * Get the user's git email from `git config user.email`.
- * Memoized so the subprocess only spawns once per process.
+ * Memoized per root session and cwd so concurrent multi-host sessions never
+ * leak repository-local git email across hosts.
  */
-export const getGitEmail = memoize(async (): Promise<string | undefined> => {
-  const result = await execa('git config --get user.email', {
-    shell: true,
-    reject: false,
-    cwd: getCwd(),
-  })
-  return result.exitCode === 0 && result.stdout
-    ? result.stdout.trim()
-    : undefined
-})
+export const getGitEmail = memoizePerRootSession(
+  async (): Promise<string | undefined> => {
+    const result = await execa('git config --get user.email', {
+      shell: true,
+      reject: false,
+      cwd: getCwd(),
+    })
+    return result.exitCode === 0 && result.stdout
+      ? result.stdout.trim()
+      : undefined
+  },
+  () => getCwd(),
+)

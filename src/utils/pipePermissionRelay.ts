@@ -7,49 +7,68 @@ import type {
   PipePermissionResponsePayload,
 } from './pipeTransport.js'
 import type { PermissionUpdate } from './permissions/PermissionUpdateSchema.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 type PendingPipePermission = {
   onResponse: (payload: PipePermissionResponsePayload) => void
 }
 
-const pendingPipePermissions = new Map<string, PendingPipePermission>()
-
-// Module-level singleton for the relay function to master.
-// Replaces the old (globalThis as any).__pipeSendToMaster pattern.
+// Host-scoped singleton for the relay function to master.
+// Replaces the old globalThis.__pipeSendToMaster pattern.
 type PipeRelayFn = (message: PipeMessage) => void
-let _pipeRelay: PipeRelayFn | null = null
 
-// Slave-side mute flag: when true, relayPipeMessage() and permission
-// relay functions will short-circuit. Set by relay_mute / relay_unmute
-// control messages from master.
-let _relayMuted = false
+class PipePermissionRelayHostState {
+  pendingPipePermissions = new Map<string, PendingPipePermission>()
+  pipeRelay: PipeRelayFn | null = null
+  // Slave-side mute flag: when true, relayPipeMessage() and permission
+  // relay functions will short-circuit. Set by relay_mute / relay_unmute
+  // control messages from master.
+  relayMuted = false
+}
+
+const fallbackPipePermissionRelayHost: object = {}
+const pipePermissionRelayByHost = new HostSlot<PipePermissionRelayHostState>(
+  () => new PipePermissionRelayHostState(),
+)
+
+function getPipePermissionRelayHostState(): PipePermissionRelayHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return pipePermissionRelayByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return pipePermissionRelayByHost.of(fallbackPipePermissionRelayHost)
+}
 
 export function setRelayMuted(muted: boolean): void {
-  _relayMuted = muted
+  getPipePermissionRelayHostState().relayMuted = muted
 }
 
 export function isRelayMuted(): boolean {
-  return _relayMuted
+  return getPipePermissionRelayHostState().relayMuted
 }
 
 export function setPipeRelay(fn: PipeRelayFn | null): void {
-  _pipeRelay = fn
-  if (!fn) _relayMuted = false // reset on disconnect
+  const state = getPipePermissionRelayHostState()
+  state.pipeRelay = fn
+  if (!fn) state.relayMuted = false // reset on disconnect
 }
 
 export function getPipeRelay(): PipeRelayFn | null {
-  return _pipeRelay
+  return getPipePermissionRelayHostState().pipeRelay
 }
 
 function getPipeSender(): ((message: PipeMessage) => void) | null {
-  return _pipeRelay ?? null
+  return getPipePermissionRelayHostState().pipeRelay ?? null
 }
 
 export function tryRelayPipePermissionRequest(
   toolUseConfirm: ToolUseConfirm,
   onResponse: (payload: PipePermissionResponsePayload) => void,
 ): string | null {
-  if (_relayMuted) return null
+  const state = getPipePermissionRelayHostState()
+  if (state.relayMuted) return null
   const send = getPipeSender()
   if (!send) return null
 
@@ -64,7 +83,7 @@ export function tryRelayPipePermissionRequest(
     permissionPromptStartTimeMs: toolUseConfirm.permissionPromptStartTimeMs,
   }
 
-  pendingPipePermissions.set(requestId, { onResponse })
+  state.pendingPipePermissions.set(requestId, { onResponse })
   send({ type: 'permission_request', data: JSON.stringify(payload) })
   return requestId
 }
@@ -72,6 +91,8 @@ export function tryRelayPipePermissionRequest(
 export function resolvePipePermissionResponse(
   payload: PipePermissionResponsePayload,
 ): boolean {
+  const pendingPipePermissions =
+    getPipePermissionRelayHostState().pendingPipePermissions
   const pending = pendingPipePermissions.get(payload.requestId)
   if (!pending) return false
   pendingPipePermissions.delete(payload.requestId)
@@ -83,6 +104,8 @@ export function cancelPipePermissionRequest(
   requestId: string,
   reason?: string,
 ): boolean {
+  const pendingPipePermissions =
+    getPipePermissionRelayHostState().pendingPipePermissions
   const pending = pendingPipePermissions.get(requestId)
   if (!pending) return false
   pendingPipePermissions.delete(requestId)
@@ -98,7 +121,7 @@ export function forgetPipePermissionRequest(
   requestId: string | null | undefined,
 ): void {
   if (!requestId) return
-  pendingPipePermissions.delete(requestId)
+  getPipePermissionRelayHostState().pendingPipePermissions.delete(requestId)
 }
 
 export function notifyPipePermissionCancel(
@@ -106,7 +129,7 @@ export function notifyPipePermissionCancel(
   reason?: string,
 ): void {
   if (!requestId) return
-  if (_relayMuted) return
+  if (getPipePermissionRelayHostState().relayMuted) return
   const send = getPipeSender()
   if (!send) return
   send({
@@ -118,6 +141,8 @@ export function notifyPipePermissionCancel(
 export function clearPendingPipePermissions(
   reason = 'Pipe permission relay was disconnected.',
 ): void {
+  const pendingPipePermissions =
+    getPipePermissionRelayHostState().pendingPipePermissions
   for (const requestId of [...pendingPipePermissions.keys()]) {
     cancelPipePermissionRequest(requestId, reason)
   }

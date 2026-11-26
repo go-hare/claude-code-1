@@ -9,7 +9,7 @@ import type { InstinctDomain, SkillObservationOutcome } from './types.js'
 import {
   analyzeWithActiveBackend,
   getActiveObserverBackend,
-  registerObserverBackend,
+  registerDefaultObserverBackend,
   type ObserverBackend,
   type ObserverBackendContext,
 } from './observerBackend.js'
@@ -43,8 +43,8 @@ export const heuristicObserverBackend: ObserverBackend = {
   },
 }
 
-registerObserverBackend(heuristicObserverBackend)
-registerObserverBackend(llmObserverBackend)
+registerDefaultObserverBackend(heuristicObserverBackend)
+registerDefaultObserverBackend(llmObserverBackend)
 
 export function analyzeObservations(
   observations: StoredSkillObservation[],

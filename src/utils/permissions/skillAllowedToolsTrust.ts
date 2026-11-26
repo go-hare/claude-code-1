@@ -22,6 +22,7 @@ import {
   SYNCED_MARKETPLACE_NAME,
 } from '../plugins/pluginIdentifier.js'
 import { isSourceAdminTrusted } from '../settings/pluginOnlyPolicy.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { shouldAllowManagedPermissionRulesOnly } from './permissionsLoader.js'
 
 /** densable `Kc` — `--plugin-dir` / SDK inline plugin origin. */
@@ -55,7 +56,12 @@ export type SkillAllowedToolsPluginInfo = {
   home?: unknown
 }
 
-const withheldThisHost = new Set<string>()
+// Official 2.1.331 [W-128]: per-host withheld skill label dedupe set (gold `_s.of(host)`).
+const withheldByHost = new HostSlot<Set<string>>(() => new Set())
+
+function getWithheldThisHost(): Set<string> {
+  return withheldByHost.of(getBootstrapSessionHost())
+}
 
 function pluginOriginFromId(id: string | undefined): string | undefined {
   if (id === undefined) return undefined
@@ -133,6 +139,7 @@ export function withholdUntrustedSkillAllowedTools(
     `Ignoring allowed-tools ${tools.join(', ')} from ${label}: permission rules are restricted to managed settings (allowManagedPermissionRulesOnly).`,
     { level: 'warn' },
   )
+  const withheldThisHost = getWithheldThisHost()
   if (!withheldThisHost.has(label)) {
     withheldThisHost.add(label)
     logEvent('tengu_frontmatter_grant_withheld', {
@@ -215,5 +222,5 @@ export function wrapSkillAllowedToolsGetter(
 
 /** Test-only: gold `_s` host set. */
 export function resetSkillAllowedToolsWithheldForTests(): void {
-  withheldThisHost.clear()
+  withheldByHost.peek(getBootstrapSessionHost())?.clear()
 }

@@ -13,33 +13,16 @@ import {
 import { isProcessRunning } from './genericProcessUtils.js'
 import { getPlatform } from './platform.js'
 import { isAlternateScreenDisabled } from './residualUiEnvGates.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
+import type { Session } from './sessionRoot.js'
 import type { GlobalConfig } from './config.js'
 
-let loggedTmuxCcDisable = false
-let loggedWinSshDisable = false
-/** Test-only override for official yMi windows check (process.platform). */
-let windowsPlatformOverride: boolean | undefined
-
-/**
- * Official 2.1.326 (#140 / #182 / #183) session TUI state (328 `class d` / `x9t`).
- * - `sessionKeptTui` latches settings.tui for the live session so `/tui default`
- *   or editing settings in another window cannot flip the active renderer mid-session.
- * - `tuiEnvLatched` latches and clears CLAUDE_CODE_TUI_TRIAL and CLAUDE_CODE_TUI_ASKED.
- * - `freshInstallCached` caches the new-account first-session renderer check.
- */
-let sessionKeptTui: { tui: 'default' | 'fullscreen' | undefined } | undefined
-let tuiEnvLatched = false
-let tuiTrialMode: 'fullscreen' | undefined
-let tuiAsked: 'fullscreen' | 'default' | undefined
-let freshInstallCached: boolean | undefined
-
 export const FULLSCREEN_UPSELL_MAX_SESSIONS = 3
-
-/**
- * densable Rse.crashAutoOff — session latch set by iIh reconcile / sticky honour.
- * Honoured by Ps/isFullscreenEnvEnabled after env force-on, before host checks.
- */
-let crashAutoOff = false
 
 /** densable Qbw — sticky strike threshold. */
 export const FULLSCREEN_BOOT_STICKY_STRIKES = 2
@@ -124,14 +107,71 @@ type CanaryState =
       healthyAfterMs: number
       firstFrameAt: number | undefined
       timer: ReturnType<typeof setTimeout> | undefined
+      capturedSession: Session | undefined
     }
   | { status: 'settled' }
 
-/** densable hQ — canary FSM. */
-let canaryState: CanaryState = { status: 'idle' }
-/** densable h_r — last armed pid for exit-hook withdraw. */
-let canaryArmedPid: number | undefined
-let canaryExitHook: (() => void) | undefined
+type ArmedCanaryExitEntry = {
+  pid: number
+  capturedSession: Session | undefined
+}
+
+type FullscreenHostState = {
+  loggedTmuxCcDisable: boolean
+  loggedWinSshDisable: boolean
+  /** Test-only override for official yMi windows check (process.platform). */
+  windowsPlatformOverride: boolean | undefined
+  /**
+   * Official 2.1.326 (#140 / #182 / #183) session TUI state (328 `class d` / `x9t`).
+   * - `sessionKeptTui` latches settings.tui for the live session so `/tui default`
+   *   or editing settings in another window cannot flip the active renderer mid-session.
+   * - `tuiEnvLatched` latches and clears CLAUDE_CODE_TUI_TRIAL and CLAUDE_CODE_TUI_ASKED.
+   * - `freshInstallCached` caches the new-account first-session renderer check.
+   */
+  sessionKeptTui: { tui: 'default' | 'fullscreen' | undefined } | undefined
+  tuiEnvLatched: boolean
+  tuiTrialMode: 'fullscreen' | undefined
+  tuiAsked: 'fullscreen' | 'default' | undefined
+  freshInstallCached: boolean | undefined
+  /**
+   * densable Rse.crashAutoOff — session latch set by iIh reconcile / sticky honour.
+   * Honoured by Ps/isFullscreenEnvEnabled after env force-on, before host checks.
+   */
+  crashAutoOff: boolean
+  /** densable hQ — canary FSM. */
+  canaryState: CanaryState
+  /** densable h_r — last armed pid for exit-hook withdraw. */
+  canaryArmedPid: number | undefined
+  /**
+   * Cached result from `tmux display-message -p '#{client_control_mode}'`.
+   * undefined = not yet queried (or probe failed) — env heuristic stays authoritative.
+   */
+  tmuxControlModeProbed: boolean | undefined
+}
+
+const fullscreenHostSlot = new HostSlot<FullscreenHostState>(() => ({
+  loggedTmuxCcDisable: false,
+  loggedWinSshDisable: false,
+  windowsPlatformOverride: undefined,
+  sessionKeptTui: undefined,
+  tuiEnvLatched: false,
+  tuiTrialMode: undefined,
+  tuiAsked: undefined,
+  freshInstallCached: undefined,
+  crashAutoOff: false,
+  canaryState: { status: 'idle' },
+  canaryArmedPid: undefined,
+  tmuxControlModeProbed: undefined,
+}))
+
+function getFullscreenHostState(): FullscreenHostState {
+  return fullscreenHostSlot.of(getBootstrapSessionHost())
+}
+
+// Single process-level exit hook shared across all hosts so arming canaries on
+// many hosts never leaks process listeners.
+let canaryExitHookInstalled = false
+const activeArmedCanaries = new Set<ArmedCanaryExitEntry>()
 
 function isTuiModeMarkerPresent(): boolean {
   try {
@@ -148,12 +188,6 @@ function isTuiModeMarkerPresent(): boolean {
 function packageVersion(): string {
   return typeof MACRO !== 'undefined' ? MACRO.VERSION : '0.0.0-test'
 }
-
-/**
- * Cached result from `tmux display-message -p '#{client_control_mode}'`.
- * undefined = not yet queried (or probe failed) — env heuristic stays authoritative.
- */
-let tmuxControlModeProbed: boolean | undefined
 
 /**
  * Env-var heuristic for iTerm2's tmux integration mode (`tmux -CC` / `tmux -2CC`).
@@ -195,13 +229,13 @@ function isTmuxControlModeEnvHeuristic(): boolean {
  * The TMUX env check MUST come first — without it, display-message would
  * query whatever tmux server happens to be running rather than our client.
  */
-function probeTmuxControlModeSync(): void {
+function probeTmuxControlModeSync(state: FullscreenHostState): void {
   // Seed cache with heuristic result so early returns below don't leave it
   // undefined — isTmuxControlMode() is called 15+ times per render, and an
   // undefined cache would re-enter this function (re-spawning tmux in the
   // failure case) on every call.
-  tmuxControlModeProbed = isTmuxControlModeEnvHeuristic()
-  if (tmuxControlModeProbed) return
+  state.tmuxControlModeProbed = isTmuxControlModeEnvHeuristic()
+  if (state.tmuxControlModeProbed) return
   if (!process.env.TMUX) return
   // Only probe when iTerm might be involved: TERM_PROGRAM is iTerm.app
   // (covered above) or not set (SSH often doesn't propagate it). When
@@ -224,7 +258,7 @@ function probeTmuxControlModeSync(): void {
   // Non-zero exit / spawn error: tmux too old (format var added in 2.4) or
   // unavailable. Keep the heuristic result cached.
   if (result.status !== 0) return
-  tmuxControlModeProbed = result.stdout.trim() === '1'
+  state.tmuxControlModeProbed = result.stdout.trim() === '1'
 }
 
 /**
@@ -237,15 +271,18 @@ function probeTmuxControlModeSync(): void {
  * Lazily probes tmux on first call when the env heuristic can't decide.
  */
 export function isTmuxControlMode(): boolean {
-  if (tmuxControlModeProbed === undefined) probeTmuxControlModeSync()
-  return tmuxControlModeProbed ?? false
+  const state = getFullscreenHostState()
+  if (state.tmuxControlModeProbed === undefined) probeTmuxControlModeSync(state)
+  return state.tmuxControlModeProbed ?? false
 }
 
 export function _resetTmuxControlModeProbeForTesting(): void {
-  tmuxControlModeProbed = undefined
-  loggedTmuxCcDisable = false
-  loggedWinSshDisable = false
-  windowsPlatformOverride = undefined
+  const state = fullscreenHostSlot.peek(getBootstrapSessionHost())
+  if (!state) return
+  state.tmuxControlModeProbed = undefined
+  state.loggedTmuxCcDisable = false
+  state.loggedWinSshDisable = false
+  state.windowsPlatformOverride = undefined
 }
 
 /**
@@ -254,7 +291,10 @@ export function _resetTmuxControlModeProbeForTesting(): void {
  * + SSH_* env triple.
  */
 export function isWindowsOverSSH(): boolean {
-  const isWindows = windowsPlatformOverride ?? process.platform === 'win32'
+  const override = fullscreenHostSlot.peek(
+    getBootstrapSessionHost(),
+  )?.windowsPlatformOverride
+  const isWindows = override ?? process.platform === 'win32'
   if (!isWindows) return false
   return Boolean(
     process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY,
@@ -265,7 +305,7 @@ export function isWindowsOverSSH(): boolean {
 export function _setWindowsPlatformForTesting(
   isWindows: boolean | undefined,
 ): void {
-  windowsPlatformOverride = isWindows
+  getFullscreenHostState().windowsPlatformOverride = isWindows
 }
 
 function readLiveSettingsTui(): 'default' | 'fullscreen' | undefined {
@@ -283,30 +323,33 @@ function readLiveSettingsTui(): 'default' | 'fullscreen' | undefined {
 
 /** Official 2.1.326 `Z0a` — latch CLAUDE_CODE_TUI_TRIAL / CLAUDE_CODE_TUI_ASKED once. */
 export function latchTuiFromEnv(): void {
-  if (tuiEnvLatched) return
-  tuiEnvLatched = true
-  tuiTrialMode =
+  const state = getFullscreenHostState()
+  if (state.tuiEnvLatched) return
+  state.tuiEnvLatched = true
+  state.tuiTrialMode =
     process.env.CLAUDE_CODE_TUI_TRIAL === 'fullscreen'
       ? 'fullscreen'
       : undefined
   delete process.env.CLAUDE_CODE_TUI_TRIAL
   const asked = process.env.CLAUDE_CODE_TUI_ASKED
-  tuiAsked = asked === 'fullscreen' || asked === 'default' ? asked : undefined
+  state.tuiAsked =
+    asked === 'fullscreen' || asked === 'default' ? asked : undefined
   delete process.env.CLAUDE_CODE_TUI_ASKED
 }
 
 /** Official 2.1.326 `eDa` (#182) — consume one-shot asked renderer after relaunch. */
 export function consumeTuiAsked(): 'fullscreen' | 'default' | undefined {
   latchTuiFromEnv()
-  const asked = tuiAsked
-  tuiAsked = undefined
+  const state = getFullscreenHostState()
+  const asked = state.tuiAsked
+  state.tuiAsked = undefined
   return asked
 }
 
 /** Official 2.1.326 `IEn` — trial mode from latched CLAUDE_CODE_TUI_TRIAL. */
 export function getTuiTrialMode(): 'fullscreen' | undefined {
   latchTuiFromEnv()
-  return tuiTrialMode
+  return getFullscreenHostState().tuiTrialMode
 }
 
 /**
@@ -315,19 +358,22 @@ export function getTuiTrialMode(): 'fullscreen' | undefined {
  * switch the live renderer and scramble the terminal.
  */
 export function latchSessionTuiSetting(): void {
-  sessionKeptTui ??= { tui: readLiveSettingsTui() }
+  const state = getFullscreenHostState()
+  state.sessionKeptTui ??= { tui: readLiveSettingsTui() }
 }
 
 /** Official 2.1.326 `u()` — session-latched settings.tui, or live when unlatched. */
 export function getEffectiveTuiSetting(): 'default' | 'fullscreen' | undefined {
-  return sessionKeptTui !== undefined
-    ? sessionKeptTui.tui
-    : readLiveSettingsTui()
+  const kept = fullscreenHostSlot.peek(
+    getBootstrapSessionHost(),
+  )?.sessionKeptTui
+  return kept !== undefined ? kept.tui : readLiveSettingsTui()
 }
 
 /** Official 2.1.326 `c()`/`S()` (#183) — new-account first-session consistency. */
 export function isFreshInstallFullscreen(): boolean {
-  if (freshInstallCached !== undefined) return freshInstallCached
+  const state = getFullscreenHostState()
+  if (state.freshInstallCached !== undefined) return state.freshInstallCached
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getGlobalConfig } =
@@ -339,7 +385,7 @@ export function isFreshInstallFullscreen(): boolean {
     const result =
       cfg.firstStartVersion !== undefined &&
       (cfg.fullscreenUpsellSeenCount ?? 0) < FULLSCREEN_UPSELL_MAX_SESSIONS
-    freshInstallCached = result
+    state.freshInstallCached = result
     return result
   } catch {
     return false
@@ -348,7 +394,8 @@ export function isFreshInstallFullscreen(): boolean {
 
 /** Official 2.1.326 `nDa` — clear cached fresh-install / GB gate readings. */
 export function resetFullscreenGateCache(): void {
-  freshInstallCached = undefined
+  const state = fullscreenHostSlot.peek(getBootstrapSessionHost())
+  if (state) state.freshInstallCached = undefined
 }
 
 /** Official 2.1.326 `Wft` — human label for renderer mode. */
@@ -528,12 +575,13 @@ export function isFullscreenEnvEnabled(): boolean {
   } catch {
     if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return true
   }
+  const state = getFullscreenHostState()
   // densable Ps: crashAutoOff session latch (sticky NDn honoured via iIh/aIh → latch).
-  if (crashAutoOff) return false
+  if (state.crashAutoOff) return false
   // Official yMi: Windows over SSH auto-off (before settings.tui / after force-on).
   if (isWindowsOverSSH()) {
-    if (!loggedWinSshDisable) {
-      loggedWinSshDisable = true
+    if (!state.loggedWinSshDisable) {
+      state.loggedWinSshDisable = true
       logForDebugging(
         'fullscreen disabled: Windows over SSH (ConPTY re-rendering) detected · set CLAUDE_CODE_NO_FLICKER=1 to override',
       )
@@ -544,8 +592,8 @@ export function isFullscreenEnvEnabled(): boolean {
   // terminal state on double-click and mouse wheel is dead. Official P8t:
   // before settings.tui so settings cannot re-enable a broken host.
   if (isTmuxControlMode()) {
-    if (!loggedTmuxCcDisable) {
-      loggedTmuxCcDisable = true
+    if (!state.loggedTmuxCcDisable) {
+      state.loggedTmuxCcDisable = true
       logForDebugging(
         'fullscreen disabled: tmux -CC (iTerm2 integration mode) detected · set CLAUDE_CODE_NO_FLICKER=1 to override',
       )
@@ -586,7 +634,7 @@ export function isFullscreenFeatureGateEnabled(): boolean {
     if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return true
   }
   // densable bQt: crashAutoOff || NDn() force-off before host/settings/GB.
-  if (crashAutoOff || isFullscreenStickyAutoDisabled()) return false
+  if (getCrashAutoOff() || isFullscreenStickyAutoDisabled()) return false
   if (isTmuxControlMode()) return false
   if (isWindowsOverSSH()) return false
   const tui = getEffectiveTuiSetting() ?? getTuiTrialMode()
@@ -649,7 +697,7 @@ export function getFullscreenGateReason(opts?: {
     if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return 'env_on'
   }
   // densable xse: crashAutoOff before host auto-offs.
-  if (crashAutoOff) return 'crash_auto_off'
+  if (getCrashAutoOff()) return 'crash_auto_off'
   if (isTmuxControlMode()) return 'tmux_cc_auto_off'
   if (isWindowsOverSSH()) return 'win_ssh_auto_off'
   const tui = opts?.ignoreSessionLatch
@@ -767,23 +815,27 @@ export async function maybeGetTmuxMouseHint(): Promise<string | null> {
   return null
 }
 
-/** Test-only: reset module-level once-per-session flags. */
+/** Test-only: reset host-level once-per-session flags. */
 export function _resetForTesting(): void {
-  loggedTmuxCcDisable = false
-  loggedWinSshDisable = false
-  windowsPlatformOverride = undefined
-  crashAutoOff = false
-  sessionKeptTui = undefined
-  tuiEnvLatched = false
-  tuiTrialMode = undefined
-  tuiAsked = undefined
-  freshInstallCached = undefined
-  if (canaryState.status === 'armed') {
-    canaryState.cleanup()
-    if (canaryState.timer !== undefined) clearTimeout(canaryState.timer)
+  const state = fullscreenHostSlot.peek(getBootstrapSessionHost())
+  if (!state) return
+  state.loggedTmuxCcDisable = false
+  state.loggedWinSshDisable = false
+  state.windowsPlatformOverride = undefined
+  state.crashAutoOff = false
+  state.sessionKeptTui = undefined
+  state.tuiEnvLatched = false
+  state.tuiTrialMode = undefined
+  state.tuiAsked = undefined
+  state.freshInstallCached = undefined
+  if (state.canaryState.status === 'armed') {
+    state.canaryState.cleanup()
+    if (state.canaryState.timer !== undefined) {
+      clearTimeout(state.canaryState.timer)
+    }
   }
-  canaryState = { status: 'idle' }
-  canaryArmedPid = undefined
+  state.canaryState = { status: 'idle' }
+  state.canaryArmedPid = undefined
 }
 
 // ── densable 2.1.236 GAP #5 fullscreen boot canary ──────────────────────────
@@ -803,11 +855,13 @@ export function isFullscreenStickyAutoDisabled(): boolean {
 }
 
 export function getCrashAutoOff(): boolean {
-  return crashAutoOff
+  return (
+    fullscreenHostSlot.peek(getBootstrapSessionHost())?.crashAutoOff ?? false
+  )
 }
 
 export function setCrashAutoOff(value: boolean): void {
-  crashAutoOff = value
+  getFullscreenHostState().crashAutoOff = value
 }
 
 /** densable oIh */
@@ -1049,7 +1103,7 @@ export function reconcileFullscreenBootAtLaunch(
     decision.kind === 'tripped' ||
     decision.kind === 'disabled'
   ) {
-    crashAutoOff = true
+    getFullscreenHostState().crashAutoOff = true
     const wouldBeFullscreen =
       fullscreenModeForGateReason(reason) === 'fullscreen'
     if (decision.kind !== 'disabled') {
@@ -1087,25 +1141,40 @@ export function reconcileFullscreenBootAtLaunch(
   return decision
 }
 
+function runInCapturedSession<T>(
+  capturedSession: Session | undefined,
+  fn: () => T,
+): T {
+  if (
+    capturedSession !== undefined &&
+    getActiveSessionFromAls() !== capturedSession
+  ) {
+    return runWithSession(capturedSession, fn)
+  }
+  return fn()
+}
+
 function ensureCanaryExitHook(): void {
-  if (canaryExitHook !== undefined) return
+  if (canaryExitHookInstalled) return
+  canaryExitHookInstalled = true
   // densable backup withdraw — no self-pid isProcessRunning gate (always true).
   // Primary SEA $a dispose is registered in armFullscreenBootCanary cleanup.
-  canaryExitHook = () => {
-    if (canaryArmedPid === undefined) return
-    const pid = canaryArmedPid
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { saveGlobalConfig } =
-        require('./config.js') as typeof import('./config.js')
-      saveGlobalConfig(current =>
-        clearFullscreenBootHealthy(current, pid, false),
-      )
-    } catch {
-      // ignore
+  process.on('exit', () => {
+    for (const entry of activeArmedCanaries) {
+      runInCapturedSession(entry.capturedSession, () => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { saveGlobalConfig } =
+            require('./config.js') as typeof import('./config.js')
+          saveGlobalConfig(current =>
+            clearFullscreenBootHealthy(current, entry.pid, false),
+          )
+        } catch {
+          // ignore
+        }
+      })
     }
-  }
-  process.on('exit', canaryExitHook)
+  })
 }
 
 /**
@@ -1118,8 +1187,9 @@ export async function armFullscreenBootCanary(options?: {
 }): Promise<boolean> {
   // Official 2.1.326 (#140): latch session TUI setting at interactive startup.
   latchSessionTuiSetting()
-  if (canaryState.status !== 'idle') {
-    return canaryState.status === 'armed'
+  const state = getFullscreenHostState()
+  if (state.canaryState.status !== 'idle') {
+    return state.canaryState.status === 'armed'
   }
   // densable HM() ≈ alt-screen capable interactive path; tip uses isFullscreenActive helpers.
   if (
@@ -1130,11 +1200,11 @@ export async function armFullscreenBootCanary(options?: {
   }
   const stickyReason = getFullscreenGateReason()
   if (
-    !crashAutoOff &&
+    !state.crashAutoOff &&
     isFullscreenStickyAutoDisabled() &&
     isFullscreenCanaryArmReason(stickyReason)
   ) {
-    crashAutoOff = true
+    state.crashAutoOff = true
     logForDebugging(
       'fullscreen disabled: turned off on this machine after repeated failed starts (recorded sticky auto-disable, honoured at REPL mount) · /tui fullscreen or CLAUDE_CODE_NO_FLICKER=1 to override',
     )
@@ -1146,6 +1216,7 @@ export async function armFullscreenBootCanary(options?: {
   }
 
   const pid = process.pid
+  const capturedSession = getActiveSessionFromAls()
   const stamp: FullscreenBootPendingEntry = {
     startedAt: Date.now(),
     version: packageVersion(),
@@ -1155,13 +1226,16 @@ export async function armFullscreenBootCanary(options?: {
   // densable $a → cIh(healthy|withdrawn): dispose while still armed settles.
   // healthy when firstFrameAt seen and clean exitCode; else withdrawn.
   // Do not invent uv()/_1s(); backup process.exit hook still withdraws only.
+  const exitEntry: ArmedCanaryExitEntry = { pid, capturedSession }
+  activeArmedCanaries.add(exitEntry)
   let disposeExit: (() => void) | undefined
   const cleanup = () => {
+    activeArmedCanaries.delete(exitEntry)
     disposeExit?.()
     disposeExit = undefined
   }
   ensureCanaryExitHook()
-  canaryState = {
+  state.canaryState = {
     status: 'armed',
     pid,
     cleanup,
@@ -1169,15 +1243,18 @@ export async function armFullscreenBootCanary(options?: {
     healthyAfterMs: options?.healthyAfterMs ?? FULLSCREEN_BOOT_HEALTHY_AFTER_MS,
     firstFrameAt: undefined,
     timer: undefined,
+    capturedSession,
   }
-  canaryArmedPid = pid
+  state.canaryArmedPid = pid
   disposeExit = onExit((exitCode, _signal) => {
-    if (canaryState.status !== 'armed') return
-    const firstFrameAt = canaryState.firstFrameAt
-    const clean = exitCode === undefined || exitCode === 0
-    const outcome =
-      firstFrameAt !== undefined && clean ? 'healthy' : 'withdrawn'
-    void settleFullscreenBootCanary(outcome).catch(() => {})
+    runInCapturedSession(capturedSession, () => {
+      if (state.canaryState.status !== 'armed') return
+      const firstFrameAt = state.canaryState.firstFrameAt
+      const clean = exitCode === undefined || exitCode === 0
+      const outcome =
+        firstFrameAt !== undefined && clean ? 'healthy' : 'withdrawn'
+      void settleFullscreenBootCanary(outcome).catch(() => {})
+    })
   })
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1206,38 +1283,45 @@ export async function armFullscreenBootCanary(options?: {
       }`,
     )
   }
-  return canaryState.status === 'armed'
+  return state.canaryState.status === 'armed'
 }
 
 /** densable lIh — note first frame; schedule healthy settle. */
 export function noteFullscreenBootFirstFrame(now: number = Date.now()): void {
+  const state = fullscreenHostSlot.peek(getBootstrapSessionHost())
   if (
-    canaryState.status !== 'armed' ||
-    canaryState.firstFrameAt !== undefined
+    !state ||
+    state.canaryState.status !== 'armed' ||
+    state.canaryState.firstFrameAt !== undefined
   ) {
     return
   }
-  canaryState.firstFrameAt = now
-  const healthyAfterMs = canaryState.healthyAfterMs
-  canaryState.timer = setTimeout(() => {
-    void settleFullscreenBootCanary('healthy').catch(err => {
-      logForDebugging(
-        `fullscreen boot canary healthy settle failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      )
+  state.canaryState.firstFrameAt = now
+  const healthyAfterMs = state.canaryState.healthyAfterMs
+  const capturedSession =
+    getActiveSessionFromAls() ?? state.canaryState.capturedSession
+  state.canaryState.timer = setTimeout(() => {
+    runInCapturedSession(capturedSession, () => {
+      void settleFullscreenBootCanary('healthy').catch(err => {
+        logForDebugging(
+          `fullscreen boot canary healthy settle failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
     })
   }, healthyAfterMs)
-  canaryState.timer.unref?.()
+  state.canaryState.timer.unref?.()
 }
 
 /** densable cIh */
 export async function settleFullscreenBootCanary(
   outcome: 'healthy' | 'withdrawn',
 ): Promise<void> {
-  if (canaryState.status !== 'armed') return
-  const { pid, cleanup, timer, onHealthy } = canaryState
-  canaryState = { status: 'settled' }
+  const state = fullscreenHostSlot.peek(getBootstrapSessionHost())
+  if (!state || state.canaryState.status !== 'armed') return
+  const { pid, cleanup, timer, onHealthy } = state.canaryState
+  state.canaryState = { status: 'settled' }
   cleanup()
   if (timer !== undefined) clearTimeout(timer)
   try {
@@ -1252,7 +1336,7 @@ export async function settleFullscreenBootCanary(
   } catch {
     // ignore
   }
-  if (canaryArmedPid === pid) canaryArmedPid = undefined
+  if (state.canaryArmedPid === pid) state.canaryArmedPid = undefined
   logForDebugging(`fullscreen boot canary: ${outcome}`)
   if (outcome === 'healthy' && onHealthy) {
     try {
@@ -1272,12 +1356,13 @@ export async function settleFullscreenBootCanary(
  * Returns true when a pending entry was updated.
  */
 export async function markFullscreenBootRenderError(): Promise<boolean> {
-  if (canaryState.status !== 'armed') return false
-  const { pid, cleanup, timer } = canaryState
-  canaryState = { status: 'settled' }
+  const state = fullscreenHostSlot.peek(getBootstrapSessionHost())
+  if (!state || state.canaryState.status !== 'armed') return false
+  const { pid, cleanup, timer } = state.canaryState
+  state.canaryState = { status: 'settled' }
   cleanup()
   if (timer !== undefined) clearTimeout(timer)
-  if (canaryArmedPid === pid) canaryArmedPid = undefined
+  if (state.canaryArmedPid === pid) state.canaryArmedPid = undefined
   let updated = false
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1305,5 +1390,8 @@ export async function markFullscreenBootRenderError(): Promise<boolean> {
 }
 
 export function getFullscreenBootCanaryStatus(): CanaryState['status'] {
-  return canaryState.status
+  return (
+    fullscreenHostSlot.peek(getBootstrapSessionHost())?.canaryState.status ??
+    'idle'
+  )
 }

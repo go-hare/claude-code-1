@@ -30,6 +30,7 @@ import {
 } from '../../utils/model/providers.js'
 import { firstPartyNameToCanonical } from '../../utils/model/model.js'
 import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionRoot.js'
 import { getSettingsForSource } from '../../utils/settings/settings.js'
 
 const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
@@ -41,17 +42,31 @@ export type AutoModeClassifierTransport =
   | 'arbiterWithLocalFallback'
   | 'off'
 
-/** densable leftover `Oo.userServerClassifierSwitch` */
-let userServerClassifierSwitch: boolean | null | undefined
-/** densable leftover `Oo.thirdPartyServerClassifierEnabled` */
-let thirdPartyServerClassifierEnabled: boolean | undefined
-/** densable leftover `Oo.autoModeContextEnabled` */
-let autoModeContextEnabled: boolean | undefined
+type AutoModeClassifierTransportHostState = {
+  /** densable leftover `Oo.userServerClassifierSwitch` */
+  userServerClassifierSwitch: boolean | null | undefined
+  /** densable leftover `Oo.thirdPartyServerClassifierEnabled` */
+  thirdPartyServerClassifierEnabled: boolean | undefined
+  /** densable leftover `Oo.autoModeContextEnabled` */
+  autoModeContextEnabled: boolean | undefined
+}
+
+const autoModeClassifierTransportHostSlot =
+  new HostSlot<AutoModeClassifierTransportHostState>(() => ({
+    userServerClassifierSwitch: undefined,
+    thirdPartyServerClassifierEnabled: undefined,
+    autoModeContextEnabled: undefined,
+  }))
+
+function getAutoModeClassifierTransportHostState(): AutoModeClassifierTransportHostState {
+  return autoModeClassifierTransportHostSlot.of(getBootstrapSessionHost())
+}
 
 export function resetAutoModeClassifierTransportForTests(): void {
-  userServerClassifierSwitch = undefined
-  thirdPartyServerClassifierEnabled = undefined
-  autoModeContextEnabled = undefined
+  const state = getAutoModeClassifierTransportHostState()
+  state.userServerClassifierSwitch = undefined
+  state.thirdPartyServerClassifierEnabled = undefined
+  state.autoModeContextEnabled = undefined
 }
 
 /**
@@ -281,20 +296,22 @@ function readRawUserServerClassifierSwitch(
 export function readUserServerClassifierSwitch(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean | null {
-  if (userServerClassifierSwitch !== undefined) {
-    return userServerClassifierSwitch
+  const state = getAutoModeClassifierTransportHostState()
+  if (state.userServerClassifierSwitch !== undefined) {
+    return state.userServerClassifierSwitch
   }
-  userServerClassifierSwitch = readRawUserServerClassifierSwitch(env)
-  return userServerClassifierSwitch
+  state.userServerClassifierSwitch = readRawUserServerClassifierSwitch(env)
+  return state.userServerClassifierSwitch
 }
 
 /** Official 2.1.319 `NHr`: peek without latching if unset. */
 export function peekUserServerClassifierSwitch(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean | null {
-  return userServerClassifierSwitch === undefined
+  const state = getAutoModeClassifierTransportHostState()
+  return state.userServerClassifierSwitch === undefined
     ? readRawUserServerClassifierSwitch(env)
-    : userServerClassifierSwitch
+    : state.userServerClassifierSwitch
 }
 
 /**
@@ -381,18 +398,19 @@ export function isLocalAutoModeClassifierSwitchedOff(
 export function thirdPartyServerClassifierOn(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (thirdPartyServerClassifierEnabled !== undefined) {
-    return thirdPartyServerClassifierEnabled
+  const state = getAutoModeClassifierTransportHostState()
+  if (state.thirdPartyServerClassifierEnabled !== undefined) {
+    return state.thirdPartyServerClassifierEnabled
   }
   const userSwitch = readUserServerClassifierSwitch(env)
-  thirdPartyServerClassifierEnabled =
+  state.thirdPartyServerClassifierEnabled =
     userSwitch ??
     !(
       Boolean(env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
       !env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST &&
       getAPIProvider() !== 'firstParty'
     )
-  return thirdPartyServerClassifierEnabled
+  return state.thirdPartyServerClassifierEnabled
 }
 
 /** densable `spo` — empty. */
@@ -435,17 +453,26 @@ function readAutoModeContextFlag(): boolean {
  * observed so config changes unstick auto mode from the local classifier.
  */
 export function autoModeContextOn(): boolean {
-  if (autoModeContextEnabled === undefined && isStaleDiskAutoModeContextOff()) {
+  const state = getAutoModeClassifierTransportHostState()
+  if (
+    state.autoModeContextEnabled === undefined &&
+    isStaleDiskAutoModeContextOff()
+  ) {
     return true
   }
-  if (autoModeContextEnabled !== undefined) return autoModeContextEnabled
-  autoModeContextEnabled = readAutoModeContextFlag()
-  return autoModeContextEnabled
+  if (state.autoModeContextEnabled !== undefined) {
+    return state.autoModeContextEnabled
+  }
+  state.autoModeContextEnabled = readAutoModeContextFlag()
+  return state.autoModeContextEnabled
 }
 
 /** Official 2.1.326 #56 (`qAn`): peek without latching `autoModeContextEnabled`. */
 export function peekAutoModeContextOn(): boolean {
-  return autoModeContextEnabled ?? readAutoModeContextFlag()
+  return (
+    getAutoModeClassifierTransportHostState().autoModeContextEnabled ??
+    readAutoModeContextFlag()
+  )
 }
 
 /** densable `HOe` — tengu_iridescent_crystal default false. */

@@ -13,7 +13,7 @@
  * so no manual cleanup or state management is needed.
  */
 import { useContext, useEffect, useLayoutEffect } from 'react';
-import { instances } from '@anthropic/ink';
+import { Ns } from '@anthropic/ink';
 import { AppStoreContext, type AppStateStore, useAppState } from '../state/AppState.js';
 
 // Non-modal overlays that shouldn't disable TextInput focus
@@ -82,7 +82,8 @@ export function useRegisterOverlay(id: string, enabled = true): void {
   // resetAfterCommit; passive-effect cleanup would land after it).
   useLayoutEffect(() => {
     if (!enabled) return;
-    return () => instances.get(process.stdout)?.invalidatePrevFrame();
+    const registry = Ns();
+    return () => registry.get(process.stdout)?.invalidatePrevFrame();
   }, [enabled]);
 }
 

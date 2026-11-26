@@ -6,13 +6,21 @@
  * densable ids.
  */
 
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
+
 export type CommandRunWaitHandle = {
   origin?: unknown
   settle: (result: unknown) => void
   fail: (error: unknown) => void
 }
 
-const waits = new Map<string, CommandRunWaitHandle>()
+const waitsSessionSlot = new RootSessionSlot<Map<string, CommandRunWaitHandle>>(
+  () => new Map(),
+)
+
+function getCommandRunWaits(): Map<string, CommandRunWaitHandle> {
+  return waitsSessionSlot.of(getBootstrapSession())
+}
 
 export const COMMAND_REMOVED_BEFORE_RUN =
   'the command was removed from the queue before it ran'
@@ -31,6 +39,7 @@ export function recordCommandRunWait(
   uuid: string,
   origin?: unknown,
 ): Promise<unknown> {
+  const waits = getCommandRunWaits()
   return new Promise((resolve, reject) => {
     waits.set(uuid, { origin, settle: resolve, fail: reject })
   })
@@ -41,6 +50,7 @@ export function takeCommandRunWait(
   uuid?: string,
 ): CommandRunWaitHandle | undefined {
   if (uuid === undefined) return undefined
+  const waits = getCommandRunWaits()
   const handle = waits.get(uuid)
   waits.delete(uuid)
   return handle
@@ -51,6 +61,7 @@ export function failCommandRunWaits(
   commands: readonly { uuid?: string }[],
   message: string,
 ): void {
+  const waits = getCommandRunWaits()
   for (const command of commands) {
     if (command.uuid === undefined) continue
     const handle = waits.get(command.uuid)
@@ -91,5 +102,5 @@ export function wrapCommandRunWait(handle?: CommandRunWaitHandle): {
 
 /** Test / queue-reset cleanup. */
 export function resetCommandRunWaits(): void {
-  waits.clear()
+  getCommandRunWaits().clear()
 }

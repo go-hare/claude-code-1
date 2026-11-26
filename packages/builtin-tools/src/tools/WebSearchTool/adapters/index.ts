@@ -7,6 +7,7 @@
  *   3. Default: tavily
  */
 
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
 import { ApiSearchAdapter } from './apiAdapter.js'
 import { BingSearchAdapter } from './bingAdapter.js'
@@ -24,10 +25,18 @@ export type {
 
 export type SearchAdapterKey = 'api' | 'bing' | 'brave' | 'exa' | 'tavily'
 
-let cachedAdapter: WebSearchAdapter | null = null
-let cachedAdapterKey: SearchAdapterKey | null = null
+type WebSearchAdapterHostCache = {
+  cachedAdapter: WebSearchAdapter | null
+  cachedAdapterKey: SearchAdapterKey | null
+}
+
+const adapterHostCacheSlot = new HostSlot<WebSearchAdapterHostCache>(() => ({
+  cachedAdapter: null,
+  cachedAdapterKey: null,
+}))
 
 export function createAdapter(): WebSearchAdapter {
+  const hostCache = adapterHostCacheSlot.of(getBootstrapSessionHost())
   // 1. Explicit env override
   const envAdapter = process.env.WEB_SEARCH_ADAPTER
   // 2. Settings preference (set via /web-tools panel)
@@ -48,27 +57,29 @@ export function createAdapter(): WebSearchAdapter {
         ? settingsAdapter
         : 'tavily' // 3. Default
 
-  if (cachedAdapter && cachedAdapterKey === adapterKey) return cachedAdapter
+  if (hostCache.cachedAdapter && hostCache.cachedAdapterKey === adapterKey) {
+    return hostCache.cachedAdapter
+  }
 
   switch (adapterKey) {
     case 'api':
-      cachedAdapter = new ApiSearchAdapter()
+      hostCache.cachedAdapter = new ApiSearchAdapter()
       break
     case 'bing':
-      cachedAdapter = new BingSearchAdapter()
+      hostCache.cachedAdapter = new BingSearchAdapter()
       break
     case 'brave':
-      cachedAdapter = new BraveSearchAdapter()
+      hostCache.cachedAdapter = new BraveSearchAdapter()
       break
     case 'exa':
-      cachedAdapter = new ExaSearchAdapter()
+      hostCache.cachedAdapter = new ExaSearchAdapter()
       break
     case 'tavily':
     default:
-      cachedAdapter = new TavilySearchAdapter()
+      hostCache.cachedAdapter = new TavilySearchAdapter()
       break
   }
 
-  cachedAdapterKey = adapterKey
-  return cachedAdapter
+  hostCache.cachedAdapterKey = adapterKey
+  return hostCache.cachedAdapter
 }

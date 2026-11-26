@@ -2,6 +2,12 @@
  * Product bootstrap — install Qem+Cji arm deps + watch_url MCP dialer.
  */
 import type { MCPServerConnection } from '../mcp/types.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
 import { setArtifactLiveArmDeps, type ArmLiveDeps } from './arm.js'
 import { createFrameLiveTransform, openFrameLiveSocket } from './cji.js'
 import { mintSubscriptionToken, renewWatchToken } from './mint.js'
@@ -40,10 +46,12 @@ export type InstallProductOpts = {
   frameRelayHostDeps?: CcrGatewayArtifactFrameRelayHostDeps
 }
 
-let productInstalled = false
+const bootstrapHostSlot = new HostSlot<{ productInstalled: boolean }>(() => ({
+  productInstalled: false,
+}))
 
 export function isArtifactAutoReactProductInstalled(): boolean {
-  return productInstalled
+  return bootstrapHostSlot.of(getBootstrapSessionHost()).productInstalled
 }
 
 /**
@@ -52,6 +60,7 @@ export function isArtifactAutoReactProductInstalled(): boolean {
 export function installArtifactAutoReactProduct(
   opts: InstallProductOpts = {},
 ): void {
+  const capturedInstallSession = getActiveSessionFromAls()
   setArtifactLiveArmDeps({
     mintSubscription: mintSubscriptionToken,
     renewWatchToken: async (slug, signal) => {
@@ -66,30 +75,43 @@ export function installArtifactAutoReactProduct(
       }
     },
     openLiveSocket: async input => {
+      const capturedSocketSession = getActiveSessionFromAls()
+      const runInSocketSession = (fn: () => void): void => {
+        if (
+          capturedSocketSession !== undefined &&
+          getActiveSessionFromAls() !== capturedSocketSession
+        ) {
+          runWithSession(capturedSocketSession, fn)
+        } else {
+          fn()
+        }
+      }
       const transform =
         opts.withTransform !== false
           ? createFrameLiveTransform({
               slug: input.slug,
               url: input.url,
-              onComment: () => {
-                if (!mI()) return
-                const sup = un().live.supervisors.get(input.slug)
-                const title =
-                  (sup?.autoReactWiring?.title as string | undefined) ??
-                  input.slug
-                yWt({ slug: input.slug, url: input.url, title })
-              },
-              onSurfaced: ver => {
-                const sup = un().live.supervisors.get(input.slug)
-                notifyArtifactChanged({
-                  slug: input.slug,
-                  url: input.url,
-                  ver,
-                  title:
+              onComment: () =>
+                runInSocketSession(() => {
+                  if (!mI()) return
+                  const sup = un().live.supervisors.get(input.slug)
+                  const title =
                     (sup?.autoReactWiring?.title as string | undefined) ??
-                    undefined,
-                })
-              },
+                    input.slug
+                  yWt({ slug: input.slug, url: input.url, title })
+                }),
+              onSurfaced: ver =>
+                runInSocketSession(() => {
+                  const sup = un().live.supervisors.get(input.slug)
+                  notifyArtifactChanged({
+                    slug: input.slug,
+                    url: input.url,
+                    ver,
+                    title:
+                      (sup?.autoReactWiring?.title as string | undefined) ??
+                      undefined,
+                  })
+                }),
             })
           : undefined
       return openFrameLiveSocket({
@@ -103,11 +125,21 @@ export function installArtifactAutoReactProduct(
   // densable defaults: qPw/KPw compose + aDw/lDw attemptEdit; host scan overrides
   void Promise.all([import('./compose.js'), import('./edit.js')]).then(
     ([{ defaultComposeAutoReply }, { defaultAttemptEdit }]) => {
-      setArtifactScanDeps({
-        composeAutoReply: defaultComposeAutoReply,
-        attemptEdit: defaultAttemptEdit,
-        ...opts.scan,
-      })
+      const applyScanDeps = (): void => {
+        setArtifactScanDeps({
+          composeAutoReply: defaultComposeAutoReply,
+          attemptEdit: defaultAttemptEdit,
+          ...opts.scan,
+        })
+      }
+      if (
+        capturedInstallSession !== undefined &&
+        getActiveSessionFromAls() !== capturedInstallSession
+      ) {
+        runWithSession(capturedInstallSession, applyScanDeps)
+      } else {
+        applyScanDeps()
+      }
     },
   )
 
@@ -171,7 +203,7 @@ export function installArtifactAutoReactProduct(
     )
   }
 
-  productInstalled = true
+  bootstrapHostSlot.of(getBootstrapSessionHost()).productInstalled = true
 }
 
 /** Alias used by installDefaults / tests. */
@@ -182,7 +214,7 @@ export function installDefaultArtifactLiveArmDeps(
 }
 
 export function resetArtifactAutoReactProductForTests(): void {
-  productInstalled = false
+  bootstrapHostSlot.of(getBootstrapSessionHost()).productInstalled = false
   resetArtifactLiveEditVfForTests()
   resetArtifactFrameRelayHostForTests()
 }

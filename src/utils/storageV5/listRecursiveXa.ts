@@ -9,6 +9,7 @@ import { join, relative, sep } from 'path'
 import { isENOENT } from '../errors.js'
 import { isValidStoragePathSegment } from '../sessionNameJobSidecar.js'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   mapNamespaceListEntry,
   rankListEntriesForSort,
@@ -106,10 +107,11 @@ function isUnrepresentableNodeTt(e: Dirent | Stats): boolean {
   )
 }
 
-const listingLogOnce = new Set<string>()
+const listingLogOnceHostSlot = new HostSlot<Set<string>>(() => new Set())
 
 /** densable leftover `Sn` @207421938. */
 function noteListingSkipSn(path: string, message: string): void {
+  const listingLogOnce = listingLogOnceHostSlot.of(getBootstrapSessionHost())
   if (listingLogOnce.has(path) || listingLogOnce.size >= 64) return
   listingLogOnce.add(path)
   logForDebugging(message)

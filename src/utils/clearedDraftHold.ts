@@ -10,6 +10,7 @@
 import type { PastedContent } from './config.js'
 import type { PromptInputMode } from '../types/textInputTypes.js'
 import { keepClearedDraftToHistory } from '../history.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 export type HeldClearedDraft = {
   text: string
@@ -19,14 +20,33 @@ export type HeldClearedDraft = {
   intoHistory: boolean
 }
 
-let held: HeldClearedDraft | null = null
-let justHeld = false
+class ClearedDraftHoldSessionState {
+  held: HeldClearedDraft | null = null
+  justHeld = false
+}
+
+const fallbackClearedDraftHoldSession = { root: {} as object }
+const clearedDraftHoldBySession =
+  new RootSessionSlot<ClearedDraftHoldSessionState>(
+    () => new ClearedDraftHoldSessionState(),
+  )
+
+function getClearedDraftHoldState(): ClearedDraftHoldSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return clearedDraftHoldBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return clearedDraftHoldBySession.of(fallbackClearedDraftHoldSession)
+}
 
 function flushHeldClearedDraftToHistory(): void {
-  const prev = held
-  held = null
-  const wasJustHeld = justHeld
-  justHeld = false
+  const state = getClearedDraftHoldState()
+  const prev = state.held
+  state.held = null
+  const wasJustHeld = state.justHeld
+  state.justHeld = false
   if (prev === null || wasJustHeld || !prev.intoHistory) return
   const display = prev.mode === 'bash' ? `!${prev.text}` : prev.text
   keepClearedDraftToHistory(
@@ -46,16 +66,17 @@ export function holdCleared(draft: {
   intoHistory?: boolean
 }): void {
   if (draft.text.trim() === '') return
-  justHeld = false
+  const state = getClearedDraftHoldState()
+  state.justHeld = false
   flushHeldClearedDraftToHistory()
-  held = {
+  state.held = {
     text: draft.text,
     mode: draft.mode,
     pastedContents: { ...draft.pastedContents },
     clearedAt: Date.now(),
     intoHistory: draft.intoHistory ?? true,
   }
-  justHeld = true
+  state.justHeld = true
 }
 
 /**
@@ -63,10 +84,11 @@ export function holdCleared(draft: {
  * hold exists. Returns the held payload after clearing the slot.
  */
 export function restoreCleared(currentValue: string): HeldClearedDraft | null {
-  if (held === null || currentValue !== '') return null
-  const out = held
-  held = null
-  justHeld = false
+  const state = getClearedDraftHoldState()
+  if (state.held === null || currentValue !== '') return null
+  const out = state.held
+  state.held = null
+  state.justHeld = false
   return out
 }
 
@@ -76,15 +98,16 @@ export function restoreCleared(currentValue: string): HeldClearedDraft | null {
  * message still reaches the cleared prompt).
  */
 export function clearHeldClearedDraft(): void {
-  justHeld = false
+  getClearedDraftHoldState().justHeld = false
   flushHeldClearedDraftToHistory()
 }
 
 export function peekHeldClearedDraftForTests(): HeldClearedDraft | null {
-  return held
+  return getClearedDraftHoldState().held
 }
 
 export function resetHeldClearedDraftForTests(): void {
-  held = null
-  justHeld = false
+  const state = getClearedDraftHoldState()
+  state.held = null
+  state.justHeld = false
 }

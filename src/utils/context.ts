@@ -22,6 +22,7 @@ import {
 } from './model/modelCatalogCapabilities.js'
 import { firstPartyNameToCanonical } from './model/model.js'
 import { isFirstPartyAnthropicBaseUrl } from './model/providers.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 // Model context window size (200k tokens for all models right now)
 export const MODEL_CONTEXT_WINDOW_DEFAULT = 200_000
@@ -280,13 +281,27 @@ export function getUnknownModelWindowEnforcementNotice(
 }
 
 /**
- * densable 2.1.223 #16/#17 — log startup notices once per process for the session model.
+ * densable 2.1.223 #16/#17 — log startup notices once per session for the session model.
  */
-let contextWindowEnforcementNoticesLogged = false
+const fallbackContextSession = { root: {} as object }
+const contextNoticesBySession = new RootSessionSlot<{ logged: boolean }>(
+  () => ({ logged: false }),
+)
+
+function getContextNoticesState(): { logged: boolean } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return contextNoticesBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return contextNoticesBySession.of(fallbackContextSession)
+}
 
 export function logContextWindowEnforcementStartupNotices(model: string): void {
-  if (contextWindowEnforcementNoticesLogged) return
-  contextWindowEnforcementNoticesLogged = true
+  const state = getContextNoticesState()
+  if (state.logged) return
+  state.logged = true
   const disable1m = getDisable1mContextNotEnforcedWarning(model)
   if (disable1m) {
     logForDebugging(disable1m, { level: 'warn' })
@@ -299,7 +314,7 @@ export function logContextWindowEnforcementStartupNotices(model: string): void {
 
 /** Test helper — reset one-shot startup notice latch. */
 export function clearContextWindowEnforcementNoticesLatchForTests(): void {
-  contextWindowEnforcementNoticesLogged = false
+  getContextNoticesState().logged = false
 }
 
 export function getContextWindowForModel(

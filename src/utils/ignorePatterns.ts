@@ -4,12 +4,46 @@
  * treat as matching nothing.
  */
 import ignore from 'ignore'
-import memoize from 'lodash-es/memoize.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
 import { logForDebugging } from './debug.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
+
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
 
 export type IgnorePatternSite =
   | 'claudemd_rule_globs'
@@ -31,7 +65,7 @@ export function splitIgnoreFileLines(content: string): string[] {
  * still drop empty patterns (they match nothing useful and used to throw on
  * older ignore versions / path checks).
  */
-export const probeIgnorePatternCompileError = memoize(
+export const probeIgnorePatternCompileError = memoizePerHost(
   (pattern: string): string | null => {
     if (typeof pattern !== 'string' || pattern.trim() === '') {
       return 'empty pattern'
@@ -45,7 +79,7 @@ export const probeIgnorePatternCompileError = memoize(
   },
 )
 
-const warnUncompilableIgnorePattern = memoize(
+const warnUncompilableIgnorePattern = memoizePerHost(
   (site: IgnorePatternSite, pattern: string): void => {
     const detail = probeIgnorePatternCompileError(pattern) ?? 'unknown'
     logForDebugging(

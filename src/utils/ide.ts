@@ -2,7 +2,6 @@ import type { Client } from '@modelcontextprotocol/client'
 import axios from 'axios'
 import { execa } from 'execa'
 import capitalize from 'lodash-es/capitalize.js'
-import memoize from 'lodash-es/memoize.js'
 import { realpath } from 'fs/promises'
 import { createConnection } from 'net'
 import * as os from 'os'
@@ -28,6 +27,55 @@ import { isJetBrainsPluginInstalledCached } from './jetbrains.js'
 import { logError } from './log.js'
 import { getPlatform } from './platform.js'
 import { lt } from './semver.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
+
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
+
+type IdeSearchHostState = {
+  currentIDESearch: AbortController | null
+  cachedRunningIDEs: IdeType[] | null
+}
+
+const ideSearchHostSlot = new HostSlot<IdeSearchHostState>(() => ({
+  currentIDESearch: null,
+  cachedRunningIDEs: null,
+}))
+
+function getIdeSearchHostState(): IdeSearchHostState {
+  return ideSearchHostSlot.of(getBootstrapSessionHost())
+}
 
 // Lazy: IdeOnboardingDialog.tsx pulls React/ink; only needed in interactive onboarding path
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -332,15 +380,15 @@ export function isJetBrainsIde(ide: IdeType | null): boolean {
   return config && config.ideKind === 'jetbrains'
 }
 
-export const isSupportedVSCodeTerminal = memoize(() => {
+export const isSupportedVSCodeTerminal = memoizePerHost(() => {
   return isVSCodeIde(env.terminal as IdeType)
 })
 
-export const isSupportedJetBrainsTerminal = memoize(() => {
+export const isSupportedJetBrainsTerminal = memoizePerHost(() => {
   return isJetBrainsIde(envDynamic.terminal as IdeType)
 })
 
-export const isSupportedTerminal = memoize(() => {
+export const isSupportedTerminal = memoizePerHost(() => {
   return (
     isSupportedVSCodeTerminal() ||
     isSupportedJetBrainsTerminal() ||
@@ -501,20 +549,22 @@ async function checkIdeConnection(
  * through, so fall back to shelling out to powershell.exe. That spawn is
  * ~500ms–2s cold; the value is static per session.
  */
-const getWindowsUserProfile = memoize(async (): Promise<string | undefined> => {
-  if (process.env.USERPROFILE) return process.env.USERPROFILE
-  const { stdout, code } = await execFileNoThrow('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    '$env:USERPROFILE',
-  ])
-  if (code === 0 && stdout.trim()) return stdout.trim()
-  logForDebugging(
-    'Unable to get Windows USERPROFILE via PowerShell - IDE detection may be incomplete',
-  )
-  return undefined
-})
+const getWindowsUserProfile = memoizePerHost(
+  async (): Promise<string | undefined> => {
+    if (process.env.USERPROFILE) return process.env.USERPROFILE
+    const { stdout, code } = await execFileNoThrow('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      '$env:USERPROFILE',
+    ])
+    if (code === 0 && stdout.trim()) return stdout.trim()
+    logForDebugging(
+      'Unable to get Windows USERPROFILE via PowerShell - IDE detection may be incomplete',
+    )
+    return undefined
+  },
+)
 
 /**
  * Gets the potential IDE lockfiles directories path based on platform.
@@ -689,20 +739,20 @@ export async function maybeInstallIDEExtension(
   }
 }
 
-let currentIDESearch: AbortController | null = null
-
 /** densable n7n — abort in-flight IDE lockfile search. */
 export function cancelCurrentIDESearch(): void {
-  currentIDESearch?.abort()
-  currentIDESearch = null
+  const hostState = getIdeSearchHostState()
+  hostState.currentIDESearch?.abort()
+  hostState.currentIDESearch = null
 }
 
 export async function findAvailableIDE(): Promise<DetectedIDEInfo | null> {
-  if (currentIDESearch) {
-    currentIDESearch.abort()
+  const hostState = getIdeSearchHostState()
+  if (hostState.currentIDESearch) {
+    hostState.currentIDESearch.abort()
   }
-  currentIDESearch = createAbortController()
-  const signal = currentIDESearch.signal
+  hostState.currentIDESearch = createAbortController()
+  const signal = hostState.currentIDESearch.signal
 
   // Clean up stale IDE lockfiles first so we don't check them at all.
   await cleanupStaleIdeLockfiles()
@@ -1171,9 +1221,6 @@ export async function isVSCodeInstalled(): Promise<boolean> {
   )
 }
 
-// Cache for IDE detection results
-let cachedRunningIDEs: IdeType[] | null = null
-
 /**
  * Internal implementation of IDE detection.
  */
@@ -1258,7 +1305,7 @@ async function detectRunningIDEsImpl(): Promise<IdeType[]> {
  */
 export async function detectRunningIDEs(): Promise<IdeType[]> {
   const result = await detectRunningIDEsImpl()
-  cachedRunningIDEs = result
+  getIdeSearchHostState().cachedRunningIDEs = result
   return result
 }
 
@@ -1267,6 +1314,7 @@ export async function detectRunningIDEs(): Promise<IdeType[]> {
  * Use this for performance-sensitive paths like tips where fresh results aren't needed.
  */
 export async function detectRunningIDEsCached(): Promise<IdeType[]> {
+  const cachedRunningIDEs = getIdeSearchHostState().cachedRunningIDEs
   if (cachedRunningIDEs === null) {
     return detectRunningIDEs()
   }
@@ -1278,7 +1326,7 @@ export async function detectRunningIDEsCached(): Promise<IdeType[]> {
  * Exported for testing - allows resetting state between tests.
  */
 export function resetDetectRunningIDEs(): void {
-  cachedRunningIDEs = null
+  getIdeSearchHostState().cachedRunningIDEs = null
 }
 
 export function getConnectedIdeName(
@@ -1469,7 +1517,7 @@ export async function initializeIdeIntegration(
 /**
  * Detects the host IP to use to connect to the extension.
  */
-const detectHostIP = memoize(
+const detectHostIP = memoizePerHost(
   async (isIdeRunningInWindows: boolean, port: number) => {
     if (process.env.CLAUDE_CODE_IDE_HOST_OVERRIDE) {
       return process.env.CLAUDE_CODE_IDE_HOST_OVERRIDE

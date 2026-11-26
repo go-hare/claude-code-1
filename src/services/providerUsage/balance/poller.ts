@@ -1,3 +1,10 @@
+import { registerCleanup } from '../../../utils/cleanupRegistry.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../../../utils/sessionHost.js'
 import { setProviderBalance } from '../store.js'
 import { deepseekBalanceProvider } from './deepseek.js'
 import { genericBalanceProvider } from './generic.js'
@@ -24,55 +31,106 @@ function intervalMs(): number {
   return Math.floor(n * 60_000)
 }
 
-let timer: ReturnType<typeof setInterval> | null = null
-let inflight: AbortController | null = null
-let active: BalanceProvider | null = null
+type BalancePollerState = {
+  timer: ReturnType<typeof setInterval> | null
+  inflight: AbortController | null
+  active: BalanceProvider | null
+  unregisterCleanup: (() => void) | null
+}
+
+const balancePollerHostSlot = new HostSlot<BalancePollerState>(() => ({
+  timer: null,
+  inflight: null,
+  active: null,
+  unregisterCleanup: null,
+}))
+
+function getBalancePollerState(): BalancePollerState {
+  return balancePollerHostSlot.of(getBootstrapSessionHost())
+}
 
 const FETCH_TIMEOUT_MS = 10_000
 
-async function tick(): Promise<void> {
-  if (!active) return
-  inflight?.abort()
-  inflight = new AbortController()
-  const timeout = setTimeout(() => inflight?.abort(), FETCH_TIMEOUT_MS)
+async function tick(state: BalancePollerState): Promise<void> {
+  const provider = state.active
+  if (!provider) return
+  state.inflight?.abort()
+  const controller = new AbortController()
+  state.inflight = controller
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
-    const balance = await active.fetchBalance(inflight.signal)
-    setProviderBalance(active.providerId, balance)
+    const balance = await provider.fetchBalance(controller.signal)
+    if (state.active === provider) {
+      setProviderBalance(provider.providerId, balance)
+    }
   } catch {
     // Never bubble into the host process.
   } finally {
     clearTimeout(timeout)
+    if (state.inflight === controller) {
+      state.inflight = null
+    }
   }
+}
+
+function stopBalancePollingForState(state: BalancePollerState): void {
+  if (state.timer !== null) {
+    clearInterval(state.timer)
+    state.timer = null
+  }
+  state.inflight?.abort()
+  state.inflight = null
+  state.active = null
+  const unregister = state.unregisterCleanup
+  state.unregisterCleanup = null
+  unregister?.()
 }
 
 /** Start polling if a provider is configured. Idempotent. */
 export function startBalancePolling(): void {
-  if (timer !== null) return
-  active = selectProvider()
-  if (!active) return
+  const state = getBalancePollerState()
+  if (state.timer !== null) return
+  state.active = selectProvider()
+  if (!state.active) return
+  const capturedSession = getActiveSessionFromAls()
+  const sessionRef = capturedSession
+    ? new WeakRef(capturedSession.root)
+    : undefined
+  const runTick = () => {
+    if (sessionRef !== undefined) {
+      const liveSession = sessionRef.deref()
+      if (liveSession === undefined) {
+        stopBalancePollingForState(state)
+        return
+      }
+      if (getActiveSessionFromAls() !== liveSession) {
+        runWithSession(liveSession, () => {
+          void tick(state)
+        })
+        return
+      }
+    }
+    void tick(state)
+  }
   // Kick off immediately, then on interval.
-  void tick()
-  timer = setInterval(() => {
-    void tick()
-  }, intervalMs())
+  void tick(state)
+  state.timer = setInterval(runTick, intervalMs())
   // Don't keep the event loop alive just for the poller.
   if (
-    typeof (timer as unknown as { unref?: () => void }).unref === 'function'
+    typeof (state.timer as unknown as { unref?: () => void }).unref ===
+    'function'
   ) {
-    ;(timer as unknown as { unref: () => void }).unref()
+    ;(state.timer as unknown as { unref: () => void }).unref()
   }
+  state.unregisterCleanup = registerCleanup(() => {
+    stopBalancePollingForState(state)
+  })
 }
 
 export function stopBalancePolling(): void {
-  if (timer !== null) {
-    clearInterval(timer)
-    timer = null
-  }
-  inflight?.abort()
-  inflight = null
-  active = null
+  stopBalancePollingForState(getBalancePollerState())
 }
 
 export function getActiveBalanceProviderId(): string | null {
-  return active?.providerId ?? null
+  return getBalancePollerState().active?.providerId ?? null
 }

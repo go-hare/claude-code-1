@@ -22,6 +22,7 @@ import {
 import { permissionRuleValueToString } from '../../utils/permissions/permissionRuleParser.js'
 import { getSettingSourceDisplayNameLowercase } from '../../utils/settings/constants.js'
 import { getCwd } from '../../utils/cwd.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
 /** densable S7p — tool name used in Cd permission rules. */
 export const CD_TOOL_NAME = 'Cd'
@@ -123,11 +124,16 @@ const QOY_CANDIDATE_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['/usr/sbin', '/sbin'],
 ]
 
-let qoyCache: Map<string, string> | null = null
+const cdPathRewriteHostSlot = new HostSlot<{
+  qoyCache: Map<string, string> | null
+}>(() => ({
+  qoyCache: null,
+}))
 
 /** densable QOy — realpath-gated private→public rewrite map. */
 export function getCdPathRewriteMap(): Map<string, string> {
-  if (qoyCache) return qoyCache
+  const hostState = cdPathRewriteHostSlot.of(getBootstrapSessionHost())
+  if (hostState.qoyCache) return hostState.qoyCache
   const map = new Map<string, string>()
   for (const [privatePath, publicPath] of QOY_CANDIDATE_PAIRS) {
     try {
@@ -138,13 +144,13 @@ export function getCdPathRewriteMap(): Map<string, string> {
       // public path missing or unreadable — skip pair
     }
   }
-  qoyCache = map
+  hostState.qoyCache = map
   return map
 }
 
 /** Test-only: drop QOy cache so realpath probes re-run. */
 export function resetCdPathRewriteMapForTests(): void {
-  qoyCache = null
+  cdPathRewriteHostSlot.of(getBootstrapSessionHost()).qoyCache = null
 }
 
 /**

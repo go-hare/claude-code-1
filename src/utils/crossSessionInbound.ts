@@ -14,6 +14,7 @@ import { isSessionBypassClass } from './permissions/planBypass.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import {
   type CrossSessionInbound,
   type CrossSessionInboundDecidedBy,
@@ -188,14 +189,37 @@ export function decideSessionInboundPolicy(opts: {
 
 type PeerModeGetter = () => PeerModeSnapshot | null
 
-let modeGetter: PeerModeGetter | null = null
+type CrossSessionInboundSessionState = {
+  modeGetter: PeerModeGetter | null
+  holdBuffer: HeldPeerInboundMessage[]
+  holdListeners: HoldListeners<unknown>
+  sessionSendLimiter: CrossSessionSendLimiter
+  sessionRelayCounters: CrossSessionRelayCounters
+}
+
+const crossSessionInboundSessionSlot =
+  new RootSessionSlot<CrossSessionInboundSessionState>(() => ({
+    modeGetter: null,
+    holdBuffer: [],
+    holdListeners: {},
+    sessionSendLimiter: new CrossSessionSendLimiter(),
+    sessionRelayCounters: {
+      forwardsSincePrompt: 0,
+      localSends: 0,
+      bridgeSends: 0,
+    },
+  }))
+
+function getCrossSessionInboundState(): CrossSessionInboundSessionState {
+  return crossSessionInboundSessionSlot.of(getBootstrapSession())
+}
 
 /**
  * densable xRn — register session permission-mode getter.
  * When non-null, immediately attempts release of held messages (mode-changed).
  */
 export function setPeerInboundModeGetter(getter: PeerModeGetter | null): void {
-  modeGetter = getter
+  getCrossSessionInboundState().modeGetter = getter
   if (getter !== null) {
     releaseHeldPeerInboundMessages('mode-changed')
   }
@@ -203,6 +227,7 @@ export function setPeerInboundModeGetter(getter: PeerModeGetter | null): void {
 
 /** densable dya — read current self mode via getter (fail-closed → null). */
 export function getPeerInboundSelfMode(): PeerModeSnapshot | null {
+  const { modeGetter } = getCrossSessionInboundState()
   if (modeGetter === null) {
     logForDebugging(
       '[cross-session-inbound] permission-mode getter not wired (fail-closed → hold)',
@@ -262,28 +287,28 @@ type HoldListeners<T> = {
   onReleased?: (entries: HeldPeerInboundMessage<T>[], reason: string) => void
 }
 
-const holdBuffer: HeldPeerInboundMessage[] = []
-let holdListeners: HoldListeners<unknown> = {}
-
 export function setPeerInboundHoldListeners<T = unknown>(
   listeners: HoldListeners<T>,
 ): void {
-  holdListeners = listeners as HoldListeners<unknown>
+  getCrossSessionInboundState().holdListeners =
+    listeners as HoldListeners<unknown>
 }
 
 export function clearPeerInboundHoldBuffer(): void {
-  holdBuffer.length = 0
+  getCrossSessionInboundState().holdBuffer.length = 0
 }
 
 /** Test / teardown helper — drop mode getter without release. */
 export function clearPeerInboundModeGetter(): void {
-  modeGetter = null
+  getCrossSessionInboundState().modeGetter = null
 }
 
 export function getHeldPeerInboundMessages<
   T = unknown,
 >(): HeldPeerInboundMessage<T>[] {
-  return [...holdBuffer] as HeldPeerInboundMessage<T>[]
+  return [
+    ...getCrossSessionInboundState().holdBuffer,
+  ] as HeldPeerInboundMessage<T>[]
 }
 
 /** densable sendPeerReceipt — lazy to keep this module free of UDS/pacer imports. */
@@ -343,6 +368,7 @@ export function applyPeerInboundPolicy<T>(
       firePeerReceipt(message, 'refused')
       return 'refused'
     case 'hold': {
+      const { holdBuffer, holdListeners } = getCrossSessionInboundState()
       if (holdBuffer.length >= PEER_INBOUND_HOLD_BUFFER_MAX) {
         const evicted = holdBuffer.shift()
         if (evicted) {
@@ -453,6 +479,7 @@ export function releaseHeldPeerInboundMessages(
     honorFromMode?: boolean
   } = {},
 ): number {
+  const { holdBuffer, holdListeners } = getCrossSessionInboundState()
   if (holdBuffer.length === 0) return 0
 
   let explicit: CrossSessionInbound | undefined
@@ -536,6 +563,7 @@ export function resolveHeldPeerInboundMessage(
   entry: HeldPeerInboundMessage,
   action: 'approve' | 'deny' | 'expire',
 ): 'delivered' | 'dropped' | 'gone' {
+  const { holdBuffer, holdListeners } = getCrossSessionInboundState()
   const idx = holdBuffer.indexOf(entry)
   if (idx === -1) return 'gone'
   const [removed] = holdBuffer.splice(idx, 1)
@@ -696,19 +724,12 @@ export type CrossSessionRelayCounters = {
   bridgeSends: number
 }
 
-const sessionSendLimiter = new CrossSessionSendLimiter()
-const sessionRelayCounters: CrossSessionRelayCounters = {
-  forwardsSincePrompt: 0,
-  localSends: 0,
-  bridgeSends: 0,
-}
-
 export function getCrossSessionSendLimiter(): CrossSessionSendLimiter {
-  return sessionSendLimiter
+  return getCrossSessionInboundState().sessionSendLimiter
 }
 
 export function getCrossSessionRelayCounters(): CrossSessionRelayCounters {
-  return sessionRelayCounters
+  return getCrossSessionInboundState().sessionRelayCounters
 }
 
 /**
@@ -717,6 +738,8 @@ export function getCrossSessionRelayCounters(): CrossSessionRelayCounters {
  * counters so outbound cross-session sends do not remain paused.
  */
 export function personWrote(): void {
+  const { sessionSendLimiter, sessionRelayCounters } =
+    getCrossSessionInboundState()
   sessionSendLimiter.personWrote()
   sessionRelayCounters.forwardsSincePrompt = 0
   sessionRelayCounters.localSends = 0
@@ -725,6 +748,8 @@ export function personWrote(): void {
 
 /** Reset cross-session send limiter and relay counters (for tests). */
 export function resetCrossSessionRateLimitStateForTests(): void {
+  const { sessionSendLimiter, sessionRelayCounters } =
+    getCrossSessionInboundState()
   sessionSendLimiter.personWrote()
   sessionRelayCounters.forwardsSincePrompt = 0
   sessionRelayCounters.localSends = 0

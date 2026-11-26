@@ -3,29 +3,56 @@
  * without a circular import (racer imports showDiff from the hook).
  */
 
-const closeByToolUseId = new Map<string, () => void>()
-const racerListeners = new Set<() => void>()
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  type Session,
+} from '../utils/sessionRoot.js'
 
-function notify(): void {
-  for (const listener of racerListeners) {
-    listener()
+type IdeDiffRacerSessionState = {
+  closeByToolUseId: Map<string, () => void>
+  racerListeners: Map<() => void, Session | undefined>
+}
+
+const ideDiffRacerBySession = new RootSessionSlot<IdeDiffRacerSessionState>(
+  () => ({
+    closeByToolUseId: new Map(),
+    racerListeners: new Map(),
+  }),
+)
+
+function getIdeDiffRacerState(): IdeDiffRacerSessionState {
+  return ideDiffRacerBySession.of(getBootstrapSession())
+}
+
+function notify(state: IdeDiffRacerSessionState): void {
+  for (const [listener, captured] of state.racerListeners) {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, listener)
+    } else {
+      listener()
+    }
   }
 }
 
 export function getIdeDiffRacerCloseTab(
   toolUseID: string,
 ): (() => void) | undefined {
-  return closeByToolUseId.get(toolUseID)
+  return getIdeDiffRacerState().closeByToolUseId.get(toolUseID)
 }
 
 export function hasIdeDiffRacer(toolUseID: string): boolean {
-  return closeByToolUseId.has(toolUseID)
+  return getIdeDiffRacerState().closeByToolUseId.has(toolUseID)
 }
 
 export function subscribeIdeDiffRacers(onStoreChange: () => void): () => void {
-  racerListeners.add(onStoreChange)
+  const state = getIdeDiffRacerState()
+  const captured = getActiveSessionFromAls()
+  state.racerListeners.set(onStoreChange, captured)
   return () => {
-    racerListeners.delete(onStoreChange)
+    state.racerListeners.delete(onStoreChange)
   }
 }
 
@@ -33,11 +60,13 @@ export function setIdeDiffRacerCloseTab(
   toolUseID: string,
   closeTab: () => void,
 ): void {
-  closeByToolUseId.set(toolUseID, closeTab)
-  notify()
+  const state = getIdeDiffRacerState()
+  state.closeByToolUseId.set(toolUseID, closeTab)
+  notify(state)
 }
 
 export function clearIdeDiffRacerCloseTab(toolUseID: string): void {
-  if (!closeByToolUseId.delete(toolUseID)) return
-  notify()
+  const state = getIdeDiffRacerState()
+  if (!state.closeByToolUseId.delete(toolUseID)) return
+  notify(state)
 }

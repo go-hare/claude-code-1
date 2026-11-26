@@ -1,14 +1,47 @@
 import { readdir, readFile } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { release as osRelease } from 'os'
 import { getFsImplementation } from './fsOperations.js'
 import { logError } from './log.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
+
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result>(
+  fn: (...args: Args) => Result,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
 
 export type Platform = 'macos' | 'windows' | 'wsl' | 'linux' | 'unknown'
 
 export const SUPPORTED_PLATFORMS: Platform[] = ['macos', 'wsl']
 
-export const getPlatform = memoize((): Platform => {
+export const getPlatform = memoizePerHost((): Platform => {
   try {
     if (process.platform === 'darwin') {
       return 'macos'
@@ -48,7 +81,7 @@ export const getPlatform = memoize((): Platform => {
   }
 })
 
-export const getWslVersion = memoize((): string | undefined => {
+export const getWslVersion = memoizePerHost((): string | undefined => {
   // Only check for WSL on Linux systems
   if (process.platform !== 'linux') {
     return undefined
@@ -84,7 +117,7 @@ export type LinuxDistroInfo = {
   linuxKernel?: string
 }
 
-export const getLinuxDistroInfo = memoize(
+export const getLinuxDistroInfo = memoizePerHost(
   async (): Promise<LinuxDistroInfo | undefined> => {
     if (process.platform !== 'linux') {
       return undefined

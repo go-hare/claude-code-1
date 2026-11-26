@@ -9,9 +9,22 @@
 import { sep } from 'path'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
-let cached: Map<string, string> | null = null
-let cachedBaseRefs: Map<string, string> | null = null
+/** Official 2.1.331 [W-11] — per-host multi-checkout and base-ref caches. */
+type RepoCheckoutsHostState = {
+  cached: Map<string, string> | null
+  cachedBaseRefs: Map<string, string> | null
+}
+
+const repoCheckoutsHostSlot = new HostSlot<RepoCheckoutsHostState>(() => ({
+  cached: null,
+  cachedBaseRefs: null,
+}))
+
+function getRepoCheckoutsHostState(): RepoCheckoutsHostState {
+  return repoCheckoutsHostSlot.of(getBootstrapSessionHost())
+}
 
 /** Official hSc — parse JSON env map of string→string. */
 export function parseEnvPathMap(raw: string | undefined): Map<string, string> {
@@ -41,24 +54,26 @@ export function getRepoCheckouts(
   env: NodeJS.ProcessEnv = process.env,
   cwd: string = getCwd(),
 ): Map<string, string> {
-  if (cached) return cached
+  const hostState = getRepoCheckoutsHostState()
+  if (hostState.cached) return hostState.cached
   const raw = env.CLAUDE_CODE_REPO_CHECKOUTS
   if (!raw) {
-    cached = new Map([['', cwd]])
-    return cached
+    hostState.cached = new Map([['', cwd]])
+    return hostState.cached
   }
-  cached = parseEnvPathMap(raw)
-  if (cached.size === 0) cached = new Map([['', cwd]])
-  return cached
+  hostState.cached = parseEnvPathMap(raw)
+  if (hostState.cached.size === 0) hostState.cached = new Map([['', cwd]])
+  return hostState.cached
 }
 
 /** Official gSc — CLAUDE_CODE_BASE_REFS label → ref. */
 export function getBaseRefs(
   env: NodeJS.ProcessEnv = process.env,
 ): Map<string, string> {
-  if (cachedBaseRefs) return cachedBaseRefs
-  cachedBaseRefs = parseEnvPathMap(env.CLAUDE_CODE_BASE_REFS)
-  return cachedBaseRefs
+  const hostState = getRepoCheckoutsHostState()
+  if (hostState.cachedBaseRefs) return hostState.cachedBaseRefs
+  hostState.cachedBaseRefs = parseEnvPathMap(env.CLAUDE_CODE_BASE_REFS)
+  return hostState.cachedBaseRefs
 }
 
 /**
@@ -76,6 +91,7 @@ export function getRepoCheckoutLabelForPath(
 
 /** Test / re-read env after mutation. */
 export function clearRepoCheckoutCaches(): void {
-  cached = null
-  cachedBaseRefs = null
+  const hostState = getRepoCheckoutsHostState()
+  hostState.cached = null
+  hostState.cachedBaseRefs = null
 }

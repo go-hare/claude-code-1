@@ -7,27 +7,50 @@
  * This is local master state only — not part of the socket protocol.
  */
 
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
+
+class PipeMuteHostState {
+  mutedPipes = new Set<string>()
+  sendOverrides = new Set<string>()
+  sendOverrideVersion = 0
+  sendOverrideListeners = new Set<() => void>()
+}
+
+const fallbackPipeMuteHost: object = {}
+const pipeMuteStateByHost = new HostSlot<PipeMuteHostState>(
+  () => new PipeMuteHostState(),
+)
+
+function getPipeMuteHostState(): PipeMuteHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return pipeMuteStateByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return pipeMuteStateByHost.of(fallbackPipeMuteHost)
+}
+
 // ---------------------------------------------------------------------------
 // Muted set: slaves whose business messages should be dropped by master
 // ---------------------------------------------------------------------------
 
-const _mutedPipes = new Set<string>()
-
 export function setMasterMutedPipes(names: Iterable<string>): void {
-  _mutedPipes.clear()
-  for (const n of names) _mutedPipes.add(n)
+  const muted = getPipeMuteHostState().mutedPipes
+  muted.clear()
+  for (const n of names) muted.add(n)
 }
 
 export function isMasterPipeMuted(name: string): boolean {
-  return _mutedPipes.has(name)
+  return getPipeMuteHostState().mutedPipes.has(name)
 }
 
 export function removeMasterPipeMute(name: string): void {
-  _mutedPipes.delete(name)
+  getPipeMuteHostState().mutedPipes.delete(name)
 }
 
 export function clearMasterMutedPipes(): void {
-  _mutedPipes.clear()
+  getPipeMuteHostState().mutedPipes.clear()
 }
 
 // ---------------------------------------------------------------------------
@@ -35,46 +58,48 @@ export function clearMasterMutedPipes(): void {
 // Override lasts until the slave emits `done` or `error`.
 // ---------------------------------------------------------------------------
 
-const _sendOverrides = new Set<string>()
-let _sendOverrideVersion = 0
-const _sendOverrideListeners = new Set<() => void>()
-
-function emitSendOverrideChanged(): void {
-  _sendOverrideVersion += 1
-  for (const listener of _sendOverrideListeners) {
+function emitSendOverrideChanged(
+  state: PipeMuteHostState = getPipeMuteHostState(),
+): void {
+  state.sendOverrideVersion += 1
+  for (const listener of state.sendOverrideListeners) {
     listener()
   }
 }
 
 export function addSendOverride(name: string): void {
-  _sendOverrides.add(name)
-  emitSendOverrideChanged()
+  const state = getPipeMuteHostState()
+  state.sendOverrides.add(name)
+  emitSendOverrideChanged(state)
 }
 
 export function removeSendOverride(name: string): void {
-  if (_sendOverrides.delete(name)) {
-    emitSendOverrideChanged()
+  const state = getPipeMuteHostState()
+  if (state.sendOverrides.delete(name)) {
+    emitSendOverrideChanged(state)
   }
 }
 
 export function hasSendOverride(name: string): boolean {
-  return _sendOverrides.has(name)
+  return getPipeMuteHostState().sendOverrides.has(name)
 }
 
 export function clearSendOverrides(): void {
-  if (_sendOverrides.size > 0) {
-    _sendOverrides.clear()
-    emitSendOverrideChanged()
+  const state = getPipeMuteHostState()
+  if (state.sendOverrides.size > 0) {
+    state.sendOverrides.clear()
+    emitSendOverrideChanged(state)
   }
 }
 
 export function subscribeSendOverride(listener: () => void): () => void {
-  _sendOverrideListeners.add(listener)
+  const listeners = getPipeMuteHostState().sendOverrideListeners
+  listeners.add(listener)
   return () => {
-    _sendOverrideListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function getSendOverrideVersion(): number {
-  return _sendOverrideVersion
+  return getPipeMuteHostState().sendOverrideVersion
 }

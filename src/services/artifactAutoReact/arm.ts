@@ -8,6 +8,7 @@
  * offline) or returns skipped `no_subscription_token` matching SEA.
  */
 import type { SetAppState } from '../../Task.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { Gso, SN } from './gates.js'
 import { armCommentMonitorIntent } from './intent.js'
 import { interruptLedgerSlug, ensureLedgerHydrated } from './ledger.js'
@@ -105,22 +106,33 @@ export type ArmLiveDeps = {
   isLiveSubscribeEnabled?: () => boolean
 }
 
-let armDeps: ArmLiveDeps = {}
+type ArmLiveHostState = {
+  armDeps: ArmLiveDeps
+}
+
+const armLiveHostSlot = new HostSlot<ArmLiveHostState>(() => ({
+  armDeps: {},
+}))
+
+function getArmLiveHostState(): ArmLiveHostState {
+  return armLiveHostSlot.of(getBootstrapSessionHost())
+}
 
 /** Inject mint/socket (tests + product hosts). */
 export function setArtifactLiveArmDeps(deps: ArmLiveDeps): void {
-  armDeps = { ...deps }
+  getArmLiveHostState().armDeps = { ...deps }
 }
 
 export function getArtifactLiveArmDeps(): Readonly<ArmLiveDeps> {
-  return armDeps
+  return getArmLiveHostState().armDeps
 }
 
 export function resetArtifactLiveArmDepsForTests(): void {
-  armDeps = {}
+  getArmLiveHostState().armDeps = {}
 }
 
 export function isArtifactLiveArmDepsInstalled(): boolean {
+  const { armDeps } = getArmLiveHostState()
   return (
     armDeps.mintSubscription !== undefined ||
     armDeps.openLiveSocket !== undefined ||
@@ -147,6 +159,7 @@ export function liveSubscribeGateReason(
     return 'stop_latched'
   if (!isPublishContextWatchable(publishContext)) return 'publish_context'
   if (process.env.CLAUDE_CODE_REMOTE) return 'remote'
+  const { armDeps } = getArmLiveHostState()
   const enabled =
     armDeps.isLiveSubscribeEnabled?.() ??
     (Gso() || process.env.CLAUDE_CODE_ARTIFACT_LIVE_SUBSCRIBE === '1')
@@ -319,6 +332,7 @@ export async function armLiveSubscribe(input: WtArmInput): Promise<ArmOutcome> {
   try {
     if (u.aborted) return { outcome: 'skipped', reason: 'cancelled' }
 
+    const { armDeps } = getArmLiveHostState()
     let token: string | undefined
     let mintMeta: {
       renewable?: boolean

@@ -3,6 +3,7 @@
  * gold `Tno` / `Rno` @189694374.
  */
 import { artifactViewerUrlFor, parseArtifactUrl } from '../utils/artifactUrl.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 
 const ARTIFACT_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -40,14 +41,17 @@ export function parseWatchArtifactArg(raw: string): WatchArtifactParse {
   return { slug: parsed.slug, url: artifactViewerUrlFor(parsed) }
 }
 
-let pendingWatch: (WatchArtifactParse & { slug: string; url: string }) | null =
-  null
+const watchArtifactHostSlot = new HostSlot<{
+  pendingWatch: (WatchArtifactParse & { slug: string; url: string }) | null
+}>(() => ({
+  pendingWatch: null,
+}))
 
 /** gold `Rno` */
 export function setPendingWatchArtifact(
   value: { slug: string; url: string; autoReactDisarmed?: boolean } | null,
 ): void {
-  pendingWatch = value
+  watchArtifactHostSlot.of(getBootstrapSessionHost()).pendingWatch = value
 }
 
 /** gold `xno` — take once */
@@ -56,8 +60,9 @@ export function takePendingWatchArtifact(): {
   url: string
   autoReactDisarmed?: boolean
 } | null {
-  const a = pendingWatch
-  pendingWatch = null
+  const hostState = watchArtifactHostSlot.of(getBootstrapSessionHost())
+  const a = hostState.pendingWatch
+  hostState.pendingWatch = null
   return a
 }
 
@@ -67,5 +72,5 @@ export function peekPendingWatchArtifact(): {
   url: string
   autoReactDisarmed?: boolean
 } | null {
-  return pendingWatch
+  return watchArtifactHostSlot.of(getBootstrapSessionHost()).pendingWatch
 }

@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import { isBgSession, updateSessionActivity } from './concurrentSessions.js'
 import { logForDebugging } from './debug.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 /**
  * Minimum interval between task summary generations (ms).
@@ -8,7 +9,20 @@ import { logForDebugging } from './debug.js'
  */
 const SUMMARY_INTERVAL_MS = 30_000
 
-let lastSummaryTime = 0
+const fallbackTaskSummarySession = { root: {} as object }
+const taskSummaryStateBySession = new RootSessionSlot<{
+  lastSummaryTime: number
+}>(() => ({ lastSummaryTime: 0 }))
+
+function getTaskSummarySessionState(): { lastSummaryTime: number } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return taskSummaryStateBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return taskSummaryStateBySession.of(fallbackTaskSummarySession)
+}
 
 /**
  * Whether a task summary should be generated this turn.
@@ -19,7 +33,9 @@ export function shouldGenerateTaskSummary(): boolean {
   if (!isBgSession()) return false
 
   const now = Date.now()
-  return now - lastSummaryTime >= SUMMARY_INTERVAL_MS
+  return (
+    now - getTaskSummarySessionState().lastSummaryTime >= SUMMARY_INTERVAL_MS
+  )
 }
 
 /**
@@ -31,7 +47,7 @@ export function shouldGenerateTaskSummary(): boolean {
 export function maybeGenerateTaskSummary(
   options: Record<string, unknown>,
 ): void {
-  lastSummaryTime = Date.now()
+  getTaskSummarySessionState().lastSummaryTime = Date.now()
 
   try {
     const messages = options.forkContextMessages as

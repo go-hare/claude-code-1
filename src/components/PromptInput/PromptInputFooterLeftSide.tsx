@@ -61,6 +61,13 @@ import { FeedbackDraftFooter } from '../FeedbackDraftFooter.js';
 import { useSessionDraftCount } from '../../utils/feedbackDrafts/useSessionDraftCount.js';
 import { plural } from '../../utils/stringUtils.js';
 import { isBgSession } from '../../utils/concurrentSessions.js';
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  type Session,
+} from '../../utils/sessionRoot.js';
 
 // Dead code elimination: conditional import for proactive mode
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -73,12 +80,41 @@ const MAX_VOICE_HINT_SHOWS = 3;
 /**
  * Session-level guard so remounting PromptInputFooterLeftSide (e.g. toggling
  * transcript or opening an overlay) does not re-increment the 3-showings cap
- * within the same session (#1499).
+ * within the same session (#1499). Stored in a per-root-session
+ * `RootSessionSlot` for 2.1.331 multi-host isolation.
  */
-let voiceFooterHintCounted = false;
+type PromptFooterLeftSessionState = {
+  voiceFooterHintCounted: boolean;
+  agentsHintExpiredState: boolean;
+  agentsHintTimerStarted: boolean;
+  agentsHintTimer: ReturnType<typeof setTimeout> | null;
+  agentsHintListeners: Map<() => void, Session | undefined>;
+};
+
+const promptFooterLeftStateBySession = new RootSessionSlot<PromptFooterLeftSessionState>(() => ({
+  voiceFooterHintCounted: false,
+  agentsHintExpiredState: false,
+  agentsHintTimerStarted: false,
+  agentsHintTimer: null,
+  agentsHintListeners: new Map(),
+}));
+
+function getPromptFooterLeftState(): PromptFooterLeftSessionState {
+  return promptFooterLeftStateBySession.of(getBootstrapSession());
+}
+
+function notifyAgentsHintListeners(state: PromptFooterLeftSessionState): void {
+  for (const [listener, captured] of state.agentsHintListeners) {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, listener);
+    } else {
+      listener();
+    }
+  }
+}
 
 export function resetVoiceFooterHintCountedForTests(): void {
-  voiceFooterHintCounted = false;
+  getPromptFooterLeftState().voiceFooterHintCounted = false;
 }
 
 /** Official Hzp — flash duration after needsInput increase / succeeded increase. */
@@ -86,41 +122,55 @@ const FLEET_NUDGE_FLASH_MS = 2_500;
 /** Official 2.1.302 (#926): hide `← for agents` 10s after session opens. */
 const AGENTS_HINT_TIMEOUT_MS = 10_000;
 
-let agentsHintExpiredState = false;
-let agentsHintTimerStarted = false;
-const agentsHintListeners = new Set<() => void>();
-
 function ensureAgentsHintTimer(): void {
-  if (agentsHintTimerStarted || agentsHintExpiredState) return;
-  agentsHintTimerStarted = true;
+  const state = getPromptFooterLeftState();
+  if (state.agentsHintTimerStarted || state.agentsHintExpiredState) return;
+  state.agentsHintTimerStarted = true;
+  const captured = getActiveSessionFromAls();
   const timer = setTimeout(() => {
-    agentsHintExpiredState = true;
-    for (const listener of agentsHintListeners) listener();
+    state.agentsHintTimer = null;
+    const expire = (): void => {
+      state.agentsHintExpiredState = true;
+      notifyAgentsHintListeners(state);
+    };
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, expire);
+    } else {
+      expire();
+    }
   }, AGENTS_HINT_TIMEOUT_MS);
   if (typeof timer === 'object' && 'unref' in timer) {
     timer.unref();
   }
+  state.agentsHintTimer = timer;
 }
 
 function subscribeAgentsHintExpired(listener: () => void): () => void {
-  agentsHintListeners.add(listener);
+  const state = getPromptFooterLeftState();
+  state.agentsHintListeners.set(listener, getActiveSessionFromAls());
   return () => {
-    agentsHintListeners.delete(listener);
+    state.agentsHintListeners.delete(listener);
   };
 }
 
 function getAgentsHintExpiredSnapshot(): boolean {
-  return agentsHintExpiredState;
+  return getPromptFooterLeftState().agentsHintExpiredState;
 }
 
 export function resetAgentsHintExpiredForTest(): void {
-  agentsHintExpiredState = false;
-  agentsHintTimerStarted = false;
+  const state = getPromptFooterLeftState();
+  if (state.agentsHintTimer !== null) {
+    clearTimeout(state.agentsHintTimer);
+    state.agentsHintTimer = null;
+  }
+  state.agentsHintExpiredState = false;
+  state.agentsHintTimerStarted = false;
 }
 
 export function setAgentsHintExpiredForTest(expired: boolean): void {
-  agentsHintExpiredState = expired;
-  for (const listener of agentsHintListeners) listener();
+  const state = getPromptFooterLeftState();
+  state.agentsHintExpiredState = expired;
+  notifyAgentsHintListeners(state);
 }
 
 /**
@@ -713,18 +763,19 @@ function ModeIndicator({
     () => (getGlobalConfig().voiceFooterHintSeenCount ?? 0) < MAX_VOICE_HINT_SHOWS,
   );
   const voiceHintUnderCap = feature('VOICE_MODE') ? voiceHintUnderCapRaw : false;
+  const [footerState] = useState(() => getPromptFooterLeftState());
   useEffect(() => {
     if (feature('VOICE_MODE')) {
       if (!voiceEnabled || !voiceHintUnderCap || voiceKeyShortcut === '') return;
-      if (voiceFooterHintCounted) return;
-      voiceFooterHintCounted = true;
+      if (footerState.voiceFooterHintCounted) return;
+      footerState.voiceFooterHintCounted = true;
       const newCount = (getGlobalConfig().voiceFooterHintSeenCount ?? 0) + 1;
       saveGlobalConfig(prev => {
         if ((prev.voiceFooterHintSeenCount ?? 0) >= newCount) return prev;
         return { ...prev, voiceFooterHintSeenCount: newCount };
       });
     }
-  }, [voiceEnabled, voiceHintUnderCap, voiceKeyShortcut]);
+  }, [footerState, voiceEnabled, voiceHintUnderCap, voiceKeyShortcut]);
 
   const viewedTask = viewingAgentTaskId ? tasks[viewingAgentTaskId] : undefined;
   const isViewingTeammate = viewSelectionMode === 'viewing-agent' && viewedTask?.type === 'in_process_teammate';

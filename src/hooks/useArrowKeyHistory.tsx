@@ -7,6 +7,7 @@ import { countHistoryForProject, getHistory, renumberHistoryEntryPastes } from '
 import { Text } from '@anthropic/ink';
 import type { PromptInputMode } from '../types/textInputTypes.js';
 import type { HistoryEntry, PastedContent } from '../utils/config.js';
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js';
 
 export type HistoryMode = PromptInputMode;
 
@@ -27,31 +28,44 @@ export function formatHistoryBorderLabel(
 // Load history entries in chunks to reduce disk reads on rapid keypresses
 const HISTORY_CHUNK_SIZE = 10;
 
-// Shared state for batching concurrent load requests into a single disk read
+// Shared state per root session for batching concurrent load requests into a single disk read
 // Mode filter is included to ensure we don't mix filtered and unfiltered caches
-let pendingLoad: Promise<HistoryEntry[]> | null = null;
-let pendingLoadTarget = 0;
-let pendingLoadModeFilter: HistoryMode | undefined;
+type ArrowKeyHistoryLoadState = {
+  pendingLoad: Promise<HistoryEntry[]> | null;
+  pendingLoadTarget: number;
+  pendingLoadModeFilter: HistoryMode | undefined;
+};
+
+const historyLoadStateBySession = new RootSessionSlot<ArrowKeyHistoryLoadState>(() => ({
+  pendingLoad: null,
+  pendingLoadTarget: 0,
+  pendingLoadModeFilter: undefined,
+}));
+
+function getHistoryLoadState(): ArrowKeyHistoryLoadState {
+  return historyLoadStateBySession.of(getBootstrapSession());
+}
 
 async function loadHistoryEntries(minCount: number, modeFilter?: HistoryMode): Promise<HistoryEntry[]> {
+  const state = getHistoryLoadState();
   // Round up to next chunk to avoid repeated small reads
   const target = Math.ceil(minCount / HISTORY_CHUNK_SIZE) * HISTORY_CHUNK_SIZE;
 
   // If a load is already pending with the same mode filter and will satisfy our needs, wait for it
-  if (pendingLoad && pendingLoadTarget >= target && pendingLoadModeFilter === modeFilter) {
-    return pendingLoad;
+  if (state.pendingLoad && state.pendingLoadTarget >= target && state.pendingLoadModeFilter === modeFilter) {
+    return state.pendingLoad;
   }
 
   // If a load is pending but won't satisfy our needs or has different filter, we need to wait for it
   // to complete first, then start a new one (can't interrupt an ongoing read)
-  if (pendingLoad) {
-    await pendingLoad;
+  if (state.pendingLoad) {
+    await state.pendingLoad;
   }
 
   // Start a new load
-  pendingLoadTarget = target;
-  pendingLoadModeFilter = modeFilter;
-  pendingLoad = (async () => {
+  state.pendingLoadTarget = target;
+  state.pendingLoadModeFilter = modeFilter;
+  const loadPromise = (async () => {
     const entries: HistoryEntry[] = [];
     let loaded = 0;
     for await (const entry of getHistory({ withClearedDrafts: true })) {
@@ -64,17 +78,20 @@ async function loadHistoryEntries(minCount: number, modeFilter?: HistoryMode): P
       }
       entries.push(entry);
       loaded++;
-      if (loaded >= pendingLoadTarget) break;
+      if (loaded >= state.pendingLoadTarget) break;
     }
     return entries;
   })();
+  state.pendingLoad = loadPromise;
 
   try {
-    return await pendingLoad;
+    return await loadPromise;
   } finally {
-    pendingLoad = null;
-    pendingLoadTarget = 0;
-    pendingLoadModeFilter = undefined;
+    if (state.pendingLoad === loadPromise) {
+      state.pendingLoad = null;
+      state.pendingLoadTarget = 0;
+      state.pendingLoadModeFilter = undefined;
+    }
   }
 }
 

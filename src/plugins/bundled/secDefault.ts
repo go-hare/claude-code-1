@@ -12,6 +12,7 @@ import {
 } from '../../utils/plugins/pluginIdentifier.js'
 import { isMarketplaceSourceDeclaredInManagedSettings } from '../../utils/plugins/marketplaceHelpers.js'
 import { ALLOWED_OFFICIAL_MARKETPLACE_NAMES } from '../../utils/plugins/schemas.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { getEnabledSettingSources } from '../../utils/settings/constants.js'
 import {
   getSettingsForSource,
@@ -105,16 +106,29 @@ type VouchedTierCache = {
   managedIds: Set<string>
   order: PluginHookTierOrder
 }
-let vouchedTierCache: VouchedTierCache | undefined
+
+type SecDefaultHostState = {
+  vouchedTierCache: VouchedTierCache | undefined
+  vouchedManagedPluginIds: Set<string>
+}
+
+const secDefaultHostSlot = new HostSlot<SecDefaultHostState>(() => ({
+  vouchedTierCache: undefined,
+  vouchedManagedPluginIds: new Set(),
+}))
+
+function getSecDefaultHostState(): SecDefaultHostState {
+  return secDefaultHostSlot.of(getBootstrapSessionHost())
+}
 
 /** densable `ASt()`. */
 function readVouchedTierCache(): VouchedTierCache | undefined {
-  return vouchedTierCache
+  return getSecDefaultHostState().vouchedTierCache
 }
 
 /** densable `Rtr.set`. `undefined` clears the slot. */
 export function setVouchedTierCache(next: VouchedTierCache | undefined): void {
-  vouchedTierCache = next
+  getSecDefaultHostState().vouchedTierCache = next
 }
 
 /**
@@ -136,18 +150,13 @@ function collectManagedEnabledPluginIds(): Set<string> | null {
 }
 
 /**
- * densable `dt().vouchedManagedPluginIds`. `Ejo` fills this with the managed
- * plugins it seated (read in place from a declared marketplace source).
- */
-const vouchedManagedPluginIds = new Set<string>()
-
-/**
  * densable `aF()` — `iF`, then keep `@builtin` or vouched ids. A VG-cache
  * hit (`e===null||ASt()`) returns `iF` unfiltered.
  */
 export function getManagedEnabledPluginIds(): Set<string> | null {
   const managed = collectManagedEnabledPluginIds()
   if (managed === null || readVouchedTierCache() !== undefined) return managed
+  const { vouchedManagedPluginIds } = getSecDefaultHostState()
   const filtered = [...managed].filter(
     id =>
       marketplaceSuffixFromSource(id) === BUILTIN_MARKETPLACE_NAME ||
@@ -244,6 +253,7 @@ export function seatManagedPlugins(plugins: readonly LoadedPlugin[]): void {
   const unseatedIds = new Set(
     unseated.map(plugin => foldPluginName(plugin.source)),
   )
+  const { vouchedManagedPluginIds } = getSecDefaultHostState()
   vouchedManagedPluginIds.clear()
   for (const plugin of enabled) {
     const id = foldPluginName(plugin.source)

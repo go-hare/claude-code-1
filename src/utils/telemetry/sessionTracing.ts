@@ -33,6 +33,8 @@ import { getAPIProvider } from '../model/providers.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { AssistantMessage, UserMessage } from '../../types/message.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
+import { RootSessionSlot } from '../hostSlot.js'
+import { getBootstrapSession } from '../sessionRoot.js'
 import { getTelemetryAttributes } from '../telemetryAttributes.js'
 import { formatUserPromptForOTel, type OTelPromptOriginLike } from './events.js'
 import {
@@ -82,6 +84,8 @@ interface SpanContext {
   attributes: Record<string, string | number | boolean>
   ended?: boolean
   perfettoSpanId?: string
+  /** Root session object that owns this span context (prevents enterWith leaks across hosts). */
+  ownerRoot?: object
 }
 
 // ALS stores SpanContext directly so it holds a strong reference while a span
@@ -91,6 +95,30 @@ interface SpanContext {
 const interactionContext = new AsyncLocalStorage<SpanContext | undefined>()
 const toolContext = new AsyncLocalStorage<SpanContext | undefined>()
 
+function getCurrentInteractionContext(): SpanContext | undefined {
+  const store = interactionContext.getStore()
+  if (!store) return undefined
+  if (
+    store.ownerRoot !== undefined &&
+    store.ownerRoot !== getBootstrapSession().root
+  ) {
+    return undefined
+  }
+  return store
+}
+
+function getCurrentToolContext(): SpanContext | undefined {
+  const store = toolContext.getStore()
+  if (!store) return undefined
+  if (
+    store.ownerRoot !== undefined &&
+    store.ownerRoot !== getBootstrapSession().root
+  ) {
+    return undefined
+  }
+  return store
+}
+
 /**
  * densable 2.1.214 #41 — OTel Context from interaction ALS when the active
  * OTel async context has no span (timers / fire-and-forget after turn fork).
@@ -99,7 +127,7 @@ const toolContext = new AsyncLocalStorage<SpanContext | undefined>()
 export function getInteractionOTelContext():
   | ReturnType<typeof otelContext.active>
   | undefined {
-  const store = interactionContext.getStore()
+  const store = getCurrentInteractionContext()
   if (!store || store.ended) return undefined
   const sc = store.span.spanContext()
   if (!trace.isSpanContextValid(sc)) return undefined
@@ -109,18 +137,45 @@ export function getInteractionOTelContext():
 function syncInteractionOTelBridge(): void {
   setActiveInteractionOTelContext(getInteractionOTelContext())
 }
-const activeSpans = new Map<string, WeakRef<SpanContext>>()
-// Spans not stored in ALS (LLM request, blocked-on-user, tool execution, hook)
-// need a strong reference to prevent GC from collecting the SpanContext before
-// the corresponding end* function retrieves it.
-const strongSpans = new Map<string, SpanContext>()
-let interactionSequence = 0
-let _cleanupIntervalStarted = false
+
+type SessionTracingState = {
+  activeSpans: Map<string, WeakRef<SpanContext>>
+  // Spans not stored in ALS (LLM request, blocked-on-user, tool execution, hook)
+  // need a strong reference to prevent GC from collecting the SpanContext before
+  // the corresponding end* function retrieves it.
+  strongSpans: Map<string, SpanContext>
+  interactionSequence: number
+  trackedInCleanup: boolean
+}
+
+const sessionTracingSlot = new RootSessionSlot<SessionTracingState>(() => ({
+  activeSpans: new Map<string, WeakRef<SpanContext>>(),
+  strongSpans: new Map<string, SpanContext>(),
+  interactionSequence: 0,
+  trackedInCleanup: false,
+}))
+
+function getSessionTracingState(): SessionTracingState {
+  return sessionTracingSlot.of(getBootstrapSession())
+}
+
+// Single shared cleanup interval across all live sessions (WeakRef-tracked so
+// ephemeral sessions remain GC-able and never leak timers).
+const liveSessionTracingStates = new Set<WeakRef<SessionTracingState>>()
+let sharedCleanupIntervalStarted = false
 
 const SPAN_TTL_MS = 30 * 60 * 1000 // 30 minutes
 
 function getSpanId(span: Span): string {
   return span.spanContext().spanId || ''
+}
+
+function pruneDeadSessionTracingStates(): void {
+  for (const ref of liveSessionTracingStates) {
+    if (ref.deref() === undefined) {
+      liveSessionTracingStates.delete(ref)
+    }
+  }
 }
 
 /**
@@ -138,20 +193,34 @@ function getSpanId(span: Span): string {
  * unref() prevents the timer from keeping the process alive after all other
  * work is done.
  */
-function ensureCleanupInterval(): void {
-  if (_cleanupIntervalStarted) return
-  _cleanupIntervalStarted = true
+function ensureCleanupInterval(state: SessionTracingState): void {
+  if (!state.trackedInCleanup) {
+    state.trackedInCleanup = true
+    if (liveSessionTracingStates.size > 64) {
+      pruneDeadSessionTracingStates()
+    }
+    liveSessionTracingStates.add(new WeakRef(state))
+  }
+  if (sharedCleanupIntervalStarted) return
+  sharedCleanupIntervalStarted = true
   const interval = setInterval(() => {
     const cutoff = Date.now() - SPAN_TTL_MS
-    for (const [spanId, weakRef] of activeSpans) {
-      const ctx = weakRef.deref()
-      if (ctx === undefined) {
-        activeSpans.delete(spanId)
-        strongSpans.delete(spanId)
-      } else if (ctx.startTime < cutoff) {
-        if (!ctx.ended) ctx.span.end() // flush any recorded attributes to the exporter
-        activeSpans.delete(spanId)
-        strongSpans.delete(spanId)
+    for (const ref of liveSessionTracingStates) {
+      const s = ref.deref()
+      if (s === undefined) {
+        liveSessionTracingStates.delete(ref)
+        continue
+      }
+      for (const [spanId, weakRef] of s.activeSpans) {
+        const ctx = weakRef.deref()
+        if (ctx === undefined) {
+          s.activeSpans.delete(spanId)
+          s.strongSpans.delete(spanId)
+        } else if (ctx.startTime < cutoff) {
+          if (!ctx.ended) ctx.span.end() // flush any recorded attributes to the exporter
+          s.activeSpans.delete(spanId)
+          s.strongSpans.delete(spanId)
+        }
       }
     }
   }, 60_000)
@@ -347,7 +416,9 @@ export function startInteractionSpan(
   traceContexts?: InteractionTraceContexts,
   origin?: OTelPromptOriginLike,
 ): Span {
-  ensureCleanupInterval()
+  const state = getSessionTracingState()
+  const ownerRoot = getBootstrapSession().root
+  ensureCleanupInterval(state)
 
   // Start Perfetto span regardless of OTel tracing state
   const perfettoSpanId = isPerfettoTracingEnabled()
@@ -364,8 +435,9 @@ export function startInteractionSpan(
         startTime: Date.now(),
         attributes: {},
         perfettoSpanId,
+        ownerRoot,
       }
-      activeSpans.set(spanId, new WeakRef(spanContextObj))
+      state.activeSpans.set(spanId, new WeakRef(spanContextObj))
       interactionContext.enterWith(spanContextObj)
       syncInteractionOTelBridge()
       return dummySpan
@@ -378,7 +450,7 @@ export function startInteractionSpan(
   // on interaction spans when `OTEL_LOG_ASSISTANT_RESPONSES=0`.
   const promptToLog = formatUserPromptForOTel(userPrompt, origin).prompt
 
-  interactionSequence++
+  state.interactionSequence++
 
   // densable: dn()&&Z.TRACEPARENT ? propagation.extract(...) : active
   // so headless/SDK interaction spans inherit parent trace_id/span_id.
@@ -424,7 +496,7 @@ export function startInteractionSpan(
     'gen_ai.operation.name': 'invoke_agent',
     user_prompt: promptToLog,
     user_prompt_length: userPrompt.length,
-    'interaction.sequence': interactionSequence,
+    'interaction.sequence': state.interactionSequence,
     'gen_ai.conversation.id': getSessionId(),
     'parent.source': parentSource,
     queued_sends: links.length,
@@ -448,8 +520,9 @@ export function startInteractionSpan(
     startTime: Date.now(),
     attributes,
     perfettoSpanId,
+    ownerRoot,
   }
-  activeSpans.set(spanId, new WeakRef(spanContextObj))
+  state.activeSpans.set(spanId, new WeakRef(spanContextObj))
 
   interactionContext.enterWith(spanContextObj)
   syncInteractionOTelBridge()
@@ -458,7 +531,7 @@ export function startInteractionSpan(
 }
 
 export function endInteractionSpan(): void {
-  const spanContext = interactionContext.getStore()
+  const spanContext = getCurrentInteractionContext()
   if (!spanContext) {
     return
   }
@@ -467,6 +540,8 @@ export function endInteractionSpan(): void {
     return
   }
 
+  const state = getSessionTracingState()
+
   // End Perfetto span
   if (spanContext.perfettoSpanId) {
     endInteractionPerfettoSpan(spanContext.perfettoSpanId)
@@ -474,7 +549,7 @@ export function endInteractionSpan(): void {
 
   if (!isAnyTracingEnabled()) {
     spanContext.ended = true
-    activeSpans.delete(getSpanId(spanContext.span))
+    state.activeSpans.delete(getSpanId(spanContext.span))
     // Clear the store so async continuations created after this point (timers,
     // promise callbacks, I/O) do not inherit a reference to the ended span.
     // enterWith(undefined) is intentional: exit(() => {}) is a no-op because it
@@ -491,7 +566,7 @@ export function endInteractionSpan(): void {
 
   spanContext.span.end()
   spanContext.ended = true
-  activeSpans.delete(getSpanId(spanContext.span))
+  state.activeSpans.delete(getSpanId(spanContext.span))
   interactionContext.enterWith(undefined)
   syncInteractionOTelBridge()
 }
@@ -502,6 +577,7 @@ export function startLLMRequestSpan(
   messagesForAPI?: APIMessage[],
   fastMode?: boolean,
 ): Span {
+  const state = getSessionTracingState()
   // Start Perfetto span regardless of OTel tracing state
   const perfettoSpanId = isPerfettoTracingEnabled()
     ? startLLMRequestPerfettoSpan({
@@ -522,15 +598,15 @@ export function startLLMRequestSpan(
         attributes: { model },
         perfettoSpanId,
       }
-      activeSpans.set(spanId, new WeakRef(spanContextObj))
-      strongSpans.set(spanId, spanContextObj)
+      state.activeSpans.set(spanId, new WeakRef(spanContextObj))
+      state.strongSpans.set(spanId, spanContextObj)
       return dummySpan
     }
     return trace.getActiveSpan() || getTracer().startSpan('dummy')
   }
 
   const tracer = getTracer()
-  const parentSpanCtx = interactionContext.getStore()
+  const parentSpanCtx = getCurrentInteractionContext()
 
   const attributes = createSpanAttributes('llm_request', {
     model: model,
@@ -561,8 +637,8 @@ export function startLLMRequestSpan(
     attributes,
     perfettoSpanId,
   }
-  activeSpans.set(spanId, new WeakRef(spanContextObj))
-  strongSpans.set(spanId, spanContextObj)
+  state.activeSpans.set(spanId, new WeakRef(spanContextObj))
+  state.strongSpans.set(spanId, spanContextObj)
 
   return span
 }
@@ -622,16 +698,17 @@ export function endLLMRequestSpan(
     traceresponse?: string
   },
 ): void {
+  const state = getSessionTracingState()
   let llmSpanContext: SpanContext | undefined
 
   if (span) {
     // Use the provided span directly - this is the correct approach for parallel requests
     const spanId = getSpanId(span)
-    llmSpanContext = activeSpans.get(spanId)?.deref()
+    llmSpanContext = state.activeSpans.get(spanId)?.deref()
   } else {
     // Legacy fallback: find the most recent llm_request span
     // WARNING: This can cause mismatched responses when multiple requests are in flight
-    llmSpanContext = Array.from(activeSpans.values())
+    llmSpanContext = Array.from(state.activeSpans.values())
       .findLast(r => {
         const ctx = r.deref()
         return (
@@ -667,8 +744,8 @@ export function endLLMRequestSpan(
 
   if (!isAnyTracingEnabled()) {
     const spanId = getSpanId(llmSpanContext.span)
-    activeSpans.delete(spanId)
-    strongSpans.delete(spanId)
+    state.activeSpans.delete(spanId)
+    state.strongSpans.delete(spanId)
     return
   }
 
@@ -736,8 +813,8 @@ export function endLLMRequestSpan(
   llmSpanContext.span.end()
 
   const spanId = getSpanId(llmSpanContext.span)
-  activeSpans.delete(spanId)
-  strongSpans.delete(spanId)
+  state.activeSpans.delete(spanId)
+  state.strongSpans.delete(spanId)
 }
 
 export function startToolSpan(
@@ -745,6 +822,8 @@ export function startToolSpan(
   toolAttributes?: Record<string, string | number | boolean>,
   toolInput?: string,
 ): Span {
+  const state = getSessionTracingState()
+  const ownerRoot = getBootstrapSession().root
   // Start Perfetto span regardless of OTel tracing state
   const perfettoSpanId = isPerfettoTracingEnabled()
     ? startToolPerfettoSpan(toolName, toolAttributes)
@@ -760,8 +839,9 @@ export function startToolSpan(
         startTime: Date.now(),
         attributes: { 'span.type': 'tool', tool_name: toolName },
         perfettoSpanId,
+        ownerRoot,
       }
-      activeSpans.set(spanId, new WeakRef(spanContextObj))
+      state.activeSpans.set(spanId, new WeakRef(spanContextObj))
       toolContext.enterWith(spanContextObj)
       return dummySpan
     }
@@ -769,7 +849,7 @@ export function startToolSpan(
   }
 
   const tracer = getTracer()
-  const parentSpanCtx = interactionContext.getStore()
+  const parentSpanCtx = getCurrentInteractionContext()
 
   const mcpTool = parseMcpToolNameForGenAi(toolName)
   const toolCallId =
@@ -811,8 +891,9 @@ export function startToolSpan(
     startTime: Date.now(),
     attributes,
     perfettoSpanId,
+    ownerRoot,
   }
-  activeSpans.set(spanId, new WeakRef(spanContextObj))
+  state.activeSpans.set(spanId, new WeakRef(spanContextObj))
 
   toolContext.enterWith(spanContextObj)
 
@@ -820,6 +901,7 @@ export function startToolSpan(
 }
 
 export function startToolBlockedOnUserSpan(): Span {
+  const state = getSessionTracingState()
   // Start Perfetto span regardless of OTel tracing state
   const perfettoSpanId = isPerfettoTracingEnabled()
     ? startUserInputPerfettoSpan('tool_permission')
@@ -836,15 +918,15 @@ export function startToolBlockedOnUserSpan(): Span {
         attributes: { 'span.type': 'tool.blocked_on_user' },
         perfettoSpanId,
       }
-      activeSpans.set(spanId, new WeakRef(spanContextObj))
-      strongSpans.set(spanId, spanContextObj)
+      state.activeSpans.set(spanId, new WeakRef(spanContextObj))
+      state.strongSpans.set(spanId, spanContextObj)
       return dummySpan
     }
     return trace.getActiveSpan() || getTracer().startSpan('dummy')
   }
 
   const tracer = getTracer()
-  const parentSpanCtx = toolContext.getStore()
+  const parentSpanCtx = getCurrentToolContext()
 
   const attributes = createSpanAttributes('tool.blocked_on_user')
 
@@ -864,8 +946,8 @@ export function startToolBlockedOnUserSpan(): Span {
     attributes,
     perfettoSpanId,
   }
-  activeSpans.set(spanId, new WeakRef(spanContextObj))
-  strongSpans.set(spanId, spanContextObj)
+  state.activeSpans.set(spanId, new WeakRef(spanContextObj))
+  state.strongSpans.set(spanId, spanContextObj)
 
   return span
 }
@@ -874,7 +956,8 @@ export function endToolBlockedOnUserSpan(
   decision?: string,
   source?: string,
 ): void {
-  const blockedSpanContext = Array.from(activeSpans.values())
+  const state = getSessionTracingState()
+  const blockedSpanContext = Array.from(state.activeSpans.values())
     .findLast(
       r => r.deref()?.attributes['span.type'] === 'tool.blocked_on_user',
     )
@@ -894,8 +977,8 @@ export function endToolBlockedOnUserSpan(
 
   if (!isAnyTracingEnabled()) {
     const spanId = getSpanId(blockedSpanContext.span)
-    activeSpans.delete(spanId)
-    strongSpans.delete(spanId)
+    state.activeSpans.delete(spanId)
+    state.strongSpans.delete(spanId)
     return
   }
 
@@ -915,8 +998,8 @@ export function endToolBlockedOnUserSpan(
   blockedSpanContext.span.end()
 
   const spanId = getSpanId(blockedSpanContext.span)
-  activeSpans.delete(spanId)
-  strongSpans.delete(spanId)
+  state.activeSpans.delete(spanId)
+  state.strongSpans.delete(spanId)
 }
 
 export function startToolExecutionSpan(): Span {
@@ -924,8 +1007,9 @@ export function startToolExecutionSpan(): Span {
     return trace.getActiveSpan() || getTracer().startSpan('dummy')
   }
 
+  const state = getSessionTracingState()
   const tracer = getTracer()
-  const parentSpanCtx = toolContext.getStore()
+  const parentSpanCtx = getCurrentToolContext()
 
   const attributes = createSpanAttributes('tool.execution')
 
@@ -944,8 +1028,8 @@ export function startToolExecutionSpan(): Span {
     startTime: Date.now(),
     attributes,
   }
-  activeSpans.set(spanId, new WeakRef(spanContextObj))
-  strongSpans.set(spanId, spanContextObj)
+  state.activeSpans.set(spanId, new WeakRef(spanContextObj))
+  state.strongSpans.set(spanId, spanContextObj)
 
   return span
 }
@@ -960,7 +1044,8 @@ export function endToolExecutionSpan(metadata?: {
     return
   }
 
-  const executionSpanContext = Array.from(activeSpans.values())
+  const state = getSessionTracingState()
+  const executionSpanContext = Array.from(state.activeSpans.values())
     .findLast(r => r.deref()?.attributes['span.type'] === 'tool.execution')
     ?.deref()
 
@@ -991,16 +1076,18 @@ export function endToolExecutionSpan(metadata?: {
   executionSpanContext.span.end()
 
   const spanId = getSpanId(executionSpanContext.span)
-  activeSpans.delete(spanId)
-  strongSpans.delete(spanId)
+  state.activeSpans.delete(spanId)
+  state.strongSpans.delete(spanId)
 }
 
 export function endToolSpan(toolResult?: string, resultTokens?: number): void {
-  const toolSpanContext = toolContext.getStore()
+  const toolSpanContext = getCurrentToolContext()
 
   if (!toolSpanContext) {
     return
   }
+
+  const state = getSessionTracingState()
 
   // End Perfetto span
   if (toolSpanContext.perfettoSpanId) {
@@ -1012,7 +1099,7 @@ export function endToolSpan(toolResult?: string, resultTokens?: number): void {
 
   if (!isAnyTracingEnabled()) {
     const spanId = getSpanId(toolSpanContext.span)
-    activeSpans.delete(spanId)
+    state.activeSpans.delete(spanId)
     // Same reasoning as interactionContext above: clear so subsequent async
     // work doesn't hold a stale reference to the ended tool span.
     toolContext.enterWith(undefined)
@@ -1038,7 +1125,7 @@ export function endToolSpan(toolResult?: string, resultTokens?: number): void {
   toolSpanContext.span.end()
 
   const spanId = getSpanId(toolSpanContext.span)
-  activeSpans.delete(spanId)
+  state.activeSpans.delete(spanId)
   toolContext.enterWith(undefined)
 }
 
@@ -1059,7 +1146,7 @@ export function addToolContentEvent(
     return
   }
 
-  const currentSpanCtx = toolContext.getStore()
+  const currentSpanCtx = getCurrentToolContext()
   if (!currentSpanCtx) {
     return
   }
@@ -1088,7 +1175,9 @@ export function getCurrentSpan(): Span | null {
   }
 
   return (
-    toolContext.getStore()?.span ?? interactionContext.getStore()?.span ?? null
+    getCurrentToolContext()?.span ??
+    getCurrentInteractionContext()?.span ??
+    null
   )
 }
 
@@ -1101,8 +1190,10 @@ export async function executeInSpan<T>(
     return fn(trace.getActiveSpan() || getTracer().startSpan('dummy'))
   }
 
+  const state = getSessionTracingState()
   const tracer = getTracer()
-  const parentSpanCtx = toolContext.getStore() ?? interactionContext.getStore()
+  const parentSpanCtx =
+    getCurrentToolContext() ?? getCurrentInteractionContext()
 
   const finalAttributes = createSpanAttributes('tool', {
     ...attributes,
@@ -1119,22 +1210,22 @@ export async function executeInSpan<T>(
     startTime: Date.now(),
     attributes: finalAttributes,
   }
-  activeSpans.set(spanId, new WeakRef(spanContextObj))
-  strongSpans.set(spanId, spanContextObj)
+  state.activeSpans.set(spanId, new WeakRef(spanContextObj))
+  state.strongSpans.set(spanId, spanContextObj)
 
   try {
     const result = await fn(span)
     span.end()
-    activeSpans.delete(spanId)
-    strongSpans.delete(spanId)
+    state.activeSpans.delete(spanId)
+    state.strongSpans.delete(spanId)
     return result
   } catch (error) {
     if (error instanceof Error) {
       span.recordException(error)
     }
     span.end()
-    activeSpans.delete(spanId)
-    strongSpans.delete(spanId)
+    state.activeSpans.delete(spanId)
+    state.strongSpans.delete(spanId)
     throw error
   }
 }
@@ -1158,8 +1249,10 @@ export function startHookSpan(
     return trace.getActiveSpan() || getTracer().startSpan('dummy')
   }
 
+  const state = getSessionTracingState()
   const tracer = getTracer()
-  const parentSpanCtx = toolContext.getStore() ?? interactionContext.getStore()
+  const parentSpanCtx =
+    getCurrentToolContext() ?? getCurrentInteractionContext()
 
   const attributes = createSpanAttributes('hook', {
     hook_event: hookEvent,
@@ -1179,8 +1272,8 @@ export function startHookSpan(
     startTime: Date.now(),
     attributes,
   }
-  activeSpans.set(spanId, new WeakRef(spanContextObj))
-  strongSpans.set(spanId, spanContextObj)
+  state.activeSpans.set(spanId, new WeakRef(spanContextObj))
+  state.strongSpans.set(spanId, spanContextObj)
 
   return span
 }
@@ -1204,8 +1297,9 @@ export function endHookSpan(
     return
   }
 
+  const state = getSessionTracingState()
   const spanId = getSpanId(span)
-  const spanContext = activeSpans.get(spanId)?.deref()
+  const spanContext = state.activeSpans.get(spanId)?.deref()
 
   if (!spanContext) {
     return
@@ -1229,6 +1323,6 @@ export function endHookSpan(
 
   spanContext.span.setAttributes(endAttributes)
   spanContext.span.end()
-  activeSpans.delete(spanId)
-  strongSpans.delete(spanId)
+  state.activeSpans.delete(spanId)
+  state.strongSpans.delete(spanId)
 }

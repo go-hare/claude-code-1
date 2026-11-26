@@ -13,26 +13,32 @@
  */
 
 import { isEnvTruthy } from './envUtils.js'
+import { HostSlot } from './hostSlot.js'
 import type { QuerySourceFamily } from './observerAgents.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 import type { ScopedMcpServerConfig } from '../services/mcp/types.js'
 
 const OFFICIAL_MARKETPLACE_SUFFIX = '@claude-plugins-official'
-const loggableMcpServers = new Set<string>()
+const loggableMcpServersHostSlot = new HostSlot<Set<string>>(() => new Set())
+
+function getLoggableMcpServers(): Set<string> {
+  return loggableMcpServersHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Gold `pPa` (#1338): mark an MCP server as safe to log by real name in OTel
  * (`mcp_server.name`) instead of `'custom'`.
  */
 export function markMcpServerLoggable(serverName: string): void {
-  loggableMcpServers.add(serverName)
+  getLoggableMcpServers().add(serverName)
 }
 
 export function isMcpServerLoggable(serverName: string): boolean {
-  return loggableMcpServers.has(serverName)
+  return getLoggableMcpServers().has(serverName)
 }
 
 export function clearLoggableMcpServersForTests(): void {
-  loggableMcpServers.clear()
+  getLoggableMcpServers().clear()
 }
 
 /**

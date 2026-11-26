@@ -9,6 +9,14 @@ import { feature } from 'bun:bundle'
 import { isClaudeCodeHintLine } from './claudeCodeHints.js'
 import { formatDuration } from './format.js'
 import { notifyTaskNotification } from './adoptFailNotify.js'
+import {
+  getActiveSessionFromAls,
+  getActiveSubconversationFromAls,
+  runWithSession,
+  runWithSubconversationContext,
+  type Session,
+  type SubconversationAlsContext,
+} from './sessionRoot.js'
 import { plural } from './stringUtils.js'
 
 /** densable `pnt` */
@@ -276,6 +284,34 @@ export function monitorEventBody(
   return hint !== undefined ? { event, eventHint: hint } : { event }
 }
 
+function runInMonitorSessionContext<T>(
+  session: Session | undefined,
+  subconversation: SubconversationAlsContext | undefined,
+  fn: () => T,
+): T {
+  if (session === undefined) {
+    if (
+      subconversation === undefined ||
+      getActiveSubconversationFromAls() === subconversation
+    ) {
+      return fn()
+    }
+    return runWithSubconversationContext(subconversation, fn)
+  }
+  if (
+    getActiveSessionFromAls() === session &&
+    (subconversation === undefined ||
+      getActiveSubconversationFromAls() === subconversation)
+  ) {
+    return fn()
+  }
+  return runWithSession(session, () =>
+    subconversation !== undefined
+      ? runWithSubconversationContext(subconversation, fn)
+      : fn(),
+  )
+}
+
 /** densable `j6` */
 export function notifyMonitorStreamEvent(
   description: string,
@@ -286,20 +322,26 @@ export function notifyMonitorStreamEvent(
     agentId?: string
     /** densable vIt j6 `turnAttribution:"none"`; default inherit. */
     turnAttribution?: 'inherit' | 'none'
+    session?: Session
   },
 ): string {
-  const body = monitorEventBody(event, opts?.isHousekeeping === true)
-  return notifyTaskNotification({
-    taskId,
-    summary: `${MONITOR_EVENT_SUMMARY_PREFIX}${description}"`,
-    event: body.event,
-    eventHint: body.eventHint,
-    agentId: opts?.agentId,
-    // gold j6 omits shouldQuery (model turn). Adopt path keeps false.
-    shouldQuery: 'omit',
-    ...(opts?.turnAttribution === 'none'
-      ? {}
-      : { turnAttribution: 'inherit' as const }),
+  const session = opts?.session ?? getActiveSessionFromAls()
+  const subconversation =
+    opts?.session !== undefined ? undefined : getActiveSubconversationFromAls()
+  return runInMonitorSessionContext(session, subconversation, () => {
+    const body = monitorEventBody(event, opts?.isHousekeeping === true)
+    return notifyTaskNotification({
+      taskId,
+      summary: `${MONITOR_EVENT_SUMMARY_PREFIX}${description}"`,
+      event: body.event,
+      eventHint: body.eventHint,
+      agentId: opts?.agentId,
+      // gold j6 omits shouldQuery (model turn). Adopt path keeps false.
+      shouldQuery: 'omit',
+      ...(opts?.turnAttribution === 'none'
+        ? {}
+        : { turnAttribution: 'inherit' as const }),
+    })
   })
 }
 
@@ -383,6 +425,8 @@ export type MonitorStreamPumpOpts = {
   now?: () => number
   bucket?: { capacity: number; refillMs: number }
   schedule?: LineDebounceSchedule
+  /** Optional isolated Session bound to this monitor stream pump across OS/socket events. */
+  session?: Session
 }
 
 const MONITOR_STREAM_SUPPRESSED_SAMPLE_MAX_LINES = 5
@@ -391,6 +435,12 @@ const MONITOR_STREAM_SUPPRESSED_SAMPLE_MAX_LINES = 5
 export function createMonitorStreamPump(
   opts: MonitorStreamPumpOpts,
 ): MonitorStreamPump {
+  const capturedSession = opts.session ?? getActiveSessionFromAls()
+  const capturedSubconversation =
+    opts.session !== undefined ? undefined : getActiveSubconversationFromAls()
+  const withCapturedAls = <T>(fn: () => T): T =>
+    runInMonitorSessionContext(capturedSession, capturedSubconversation, fn)
+
   const now = opts.now ?? Date.now
   const { capacity, refillMs } = opts.bucket ?? {
     capacity: MONITOR_STREAM_TOKEN_CAPACITY,
@@ -451,6 +501,7 @@ export function createMonitorStreamPump(
         {
           isHousekeeping: true,
           agentId: opts.agentId,
+          session: capturedSession,
         },
       )
       suppressed = 0
@@ -461,127 +512,144 @@ export function createMonitorStreamPump(
   }
 
   function onBatch(batch: string): void {
-    if (closed || opts.isStopped?.()) {
-      closed = true
-      return
-    }
-    if (tryAdmit(batch)) {
-      notifyMonitorStreamEvent(opts.description, batch, opts.taskRef.id, {
-        agentId: opts.agentId,
-      })
-      return
-    }
-    if (
-      firstSuppressedAt !== undefined &&
-      now() - firstSuppressedAt > MONITOR_STREAM_KILL_AFTER_MS
-    ) {
-      closed = true
-      if (opts.killTask()) {
-        const elapsedS = Math.round((now() - firstSuppressedAt) / 1000)
-        notifyMonitorStreamEvent(
-          opts.description,
-          `[Monitor stopped — too much output (${suppressed} events suppressed over ${elapsedS}s). Restart with a more selective source.]`,
-          opts.taskRef.id,
-          { isHousekeeping: true, agentId: opts.agentId },
-        )
+    withCapturedAls(() => {
+      if (closed || opts.isStopped?.()) {
+        closed = true
+        return
       }
-    }
+      if (tryAdmit(batch)) {
+        notifyMonitorStreamEvent(opts.description, batch, opts.taskRef.id, {
+          agentId: opts.agentId,
+          session: capturedSession,
+        })
+        return
+      }
+      if (
+        firstSuppressedAt !== undefined &&
+        now() - firstSuppressedAt > MONITOR_STREAM_KILL_AFTER_MS
+      ) {
+        closed = true
+        if (opts.killTask()) {
+          const elapsedS = Math.round((now() - firstSuppressedAt) / 1000)
+          notifyMonitorStreamEvent(
+            opts.description,
+            `[Monitor stopped — too much output (${suppressed} events suppressed over ${elapsedS}s). Restart with a more selective source.]`,
+            opts.taskRef.id,
+            {
+              isHousekeeping: true,
+              agentId: opts.agentId,
+              session: capturedSession,
+            },
+          )
+        }
+      }
+    })
   }
 
   const debouncer = createLineDebouncer(onBatch, opts.schedule)
 
-  async function reportExit(
+  function reportExit(
     settled?: MonitorExitSettlement,
     extraBody?: string,
   ): Promise<void> {
-    if (opts.isStopped?.()) {
-      debouncer.drain()
-      closed = true
-      return
-    }
-    const leftover = closed ? undefined : debouncer.drain()
-    closed = true
-    let terminal: MonitorTerminalNotification | undefined
-    if (settled !== undefined) {
-      try {
-        const promise =
-          typeof settled === 'object' &&
-          settled !== null &&
-          'settled' in settled
-            ? settled.settled
-            : settled
-        const resolved = await promise
-        terminal = resolved.terminalNotification
-      } catch {
-        terminal = undefined
+    return withCapturedAls(async () => {
+      if (opts.isStopped?.()) {
+        debouncer.drain()
+        closed = true
+        return
       }
-    }
-    if (opts.isStopped?.()) return
-    const admitted = leftover !== undefined && tryAdmit(leftover)
-    if (terminal !== undefined) {
-      const combined = [
-        admitted ? leftover : undefined,
-        extraBody,
-        ...suppressedSample,
-      ]
-        .filter((part): part is string => part !== undefined && part !== '')
-        .join('\n')
-      suppressedSample = []
-      const body =
-        combined !== '' ? monitorEventBody(combined, false) : undefined
-      let stopNote: string | undefined
-      if (terminal.stopCause !== undefined) {
+      const leftover = closed ? undefined : debouncer.drain()
+      closed = true
+      let terminal: MonitorTerminalNotification | undefined
+      if (settled !== undefined) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { STOP_CAUSE_LONG } =
-            require('./bashTaskDelivery.js') as typeof import('./bashTaskDelivery.js')
-          stopNote = STOP_CAUSE_LONG[terminal.stopCause]
+          const promise =
+            typeof settled === 'object' &&
+            settled !== null &&
+            'settled' in settled
+              ? settled.settled
+              : settled
+          const resolved = await promise
+          terminal = resolved.terminalNotification
         } catch {
-          stopNote = undefined
+          terminal = undefined
         }
       }
-      notifyTaskNotification({
-        taskId: terminal.taskId,
-        toolUseId: terminal.toolUseId,
-        agentId: terminal.agentId ?? opts.agentId,
-        status: terminal.status,
-        summary: terminal.summary,
-        outputFile: terminal.outputFile,
-        note: stopNote,
-        event: body?.event,
-        eventHint: body?.eventHint,
-        taskDelivery: terminal.snapshot,
-        shouldQuery: 'omit',
-        turnAttribution: 'inherit',
-        emitSdk: false,
+      withCapturedAls(() => {
+        if (opts.isStopped?.()) return
+        const admitted = leftover !== undefined && tryAdmit(leftover)
+        if (terminal !== undefined) {
+          const combined = [
+            admitted ? leftover : undefined,
+            extraBody,
+            ...suppressedSample,
+          ]
+            .filter((part): part is string => part !== undefined && part !== '')
+            .join('\n')
+          suppressedSample = []
+          const body =
+            combined !== '' ? monitorEventBody(combined, false) : undefined
+          let stopNote: string | undefined
+          if (terminal.stopCause !== undefined) {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { STOP_CAUSE_LONG } =
+                require('./bashTaskDelivery.js') as typeof import('./bashTaskDelivery.js')
+              stopNote = STOP_CAUSE_LONG[terminal.stopCause]
+            } catch {
+              stopNote = undefined
+            }
+          }
+          notifyTaskNotification({
+            taskId: terminal.taskId,
+            toolUseId: terminal.toolUseId,
+            agentId: terminal.agentId ?? opts.agentId,
+            status: terminal.status,
+            summary: terminal.summary,
+            outputFile: terminal.outputFile,
+            note: stopNote,
+            event: body?.event,
+            eventHint: body?.eventHint,
+            taskDelivery: terminal.snapshot,
+            shouldQuery: 'omit',
+            turnAttribution: 'inherit',
+            emitSdk: false,
+          })
+          return
+        }
+        if (admitted) {
+          notifyMonitorStreamEvent(
+            opts.description,
+            leftover as string,
+            opts.taskRef.id,
+            {
+              agentId: opts.agentId,
+              session: capturedSession,
+            },
+          )
+        }
       })
-      return
-    }
-    if (admitted) {
-      notifyMonitorStreamEvent(
-        opts.description,
-        leftover as string,
-        opts.taskRef.id,
-        {
-          agentId: opts.agentId,
-        },
-      )
-    }
+    })
   }
 
   return {
-    onData: debouncer.onData,
-    flush: includePartial => debouncer.flush(includePartial),
+    onData: chunk => withCapturedAls(() => debouncer.onData(chunk)),
+    flush: includePartial =>
+      withCapturedAls(() => debouncer.flush(includePartial)),
     isClosed: () => closed,
     eventCount: () => eventCount,
     reportExit,
     flushAndClose: () => {
-      debouncer.flush(true)
-      closed = true
+      withCapturedAls(() => {
+        debouncer.flush(true)
+        closed = true
+      })
     },
     dropAndClose: () => {
-      debouncer.drain()
-      closed = true
+      withCapturedAls(() => {
+        debouncer.drain()
+        closed = true
+      })
     },
   }
 }

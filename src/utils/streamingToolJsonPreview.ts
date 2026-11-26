@@ -8,6 +8,7 @@
 
 import { isCodeModeEnabled } from '../services/codeMode/optIn.js'
 import { isEnvTruthy } from './envUtils.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 /** densable XAb — min ms between REPL code preview flushes */
 export const REPL_STREAM_PREVIEW_FLUSH_MS = 100
@@ -22,7 +23,20 @@ export const REPL_STREAM_TOOL_NAME = 'REPL'
 
 type PreviewBuf = { raw: string; flushedAt: number }
 
-const previewByIndex = new Map<number, PreviewBuf>()
+const fallbackStreamingPreviewSession = { root: {} as object }
+const previewByIndexBySession = new RootSessionSlot<Map<number, PreviewBuf>>(
+  () => new Map(),
+)
+
+function getPreviewByIndex(): Map<number, PreviewBuf> {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return previewByIndexBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return previewByIndexBySession.of(fallbackStreamingPreviewSession)
+}
 
 /**
  * densable g4e — REPL verbose streaming preview gate.
@@ -75,7 +89,7 @@ export function decodePartialReplCodeJson(raw: string): string {
 
 /** densable CLp */
 export function clearStreamingToolJsonPreview(): void {
-  previewByIndex.clear()
+  getPreviewByIndex().clear()
 }
 
 /**
@@ -93,6 +107,7 @@ export function updateStreamingToolJsonPreview<
   onStreamingToolUses?: ((f: (tools: T[]) => T[]) => void) | null,
 ): void {
   if (!onStreamingToolUses || !isReplStreamingPreviewEnabled()) return
+  const previewByIndex = getPreviewByIndex()
   let n = previewByIndex.get(index)
   if (!n) {
     n = { raw: '', flushedAt: 0 }

@@ -14,6 +14,7 @@ import {
   getSessionIngressAuthHeaders,
   getSessionIngressAuthToken,
 } from '../../utils/sessionIngressAuth.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { un } from './store.js'
 
 const ARTIFACT_MOUNT = 'artifact_mount'
@@ -206,20 +207,24 @@ export type ArtifactFrameRelayHost = {
   }) => Promise<FrameRelayFetchResult>
 }
 
-let relayHost: ArtifactFrameRelayHost | null = null
+const frameRelayHostSlot = new HostSlot<{
+  relayHost: ArtifactFrameRelayHost | null
+}>(() => ({
+  relayHost: null,
+}))
 
 export function getArtifactFrameRelayHost(): ArtifactFrameRelayHost | null {
-  return relayHost
+  return frameRelayHostSlot.of(getBootstrapSessionHost()).relayHost
 }
 
 export function setArtifactFrameRelayHost(
   host: ArtifactFrameRelayHost | null,
 ): void {
-  relayHost = host
+  frameRelayHostSlot.of(getBootstrapSessionHost()).relayHost = host
 }
 
 export function resetArtifactFrameRelayHostForTests(): void {
-  relayHost = null
+  frameRelayHostSlot.of(getBootstrapSessionHost()).relayHost = null
 }
 
 /**

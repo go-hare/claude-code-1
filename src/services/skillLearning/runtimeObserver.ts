@@ -42,39 +42,64 @@ import { checkPromotion } from './promotion.js'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 
 export const RUNTIME_SESSION_ID = 'runtime-session'
 
-let initialized = false
-let runtimeTurn = 0
-// Timestamp watermark for consumed tool-hook observations — enables replay of
-// only the records that arrived since the previous post-sampling pass.
-let lastConsumedToolHookTimestamp = ''
-
-// --- H5: LLM call throttle ---
-let llmCallsThisSession = 0
-let lastLlmCallTimestamp = 0
-
-// --- H6: message watermark dedup ---
-// Key: `${sessionId}:${messageId}` — prevents reprocessing the same message
-// across repeated post-sampling calls in one REPL session.
-const lastProcessedMessageIds = new Set<string>()
 const MAX_PROCESSED_IDS = 1000
 const TRIM_PROCESSED_IDS_TO = 500
 
+const runtimeObserverHostSlot = new HostSlot<{ initialized: boolean }>(() => ({
+  initialized: false,
+}))
+
+type RuntimeObserverSessionState = {
+  runtimeTurn: number
+  // Timestamp watermark for consumed tool-hook observations — enables replay of
+  // only the records that arrived since the previous post-sampling pass.
+  lastConsumedToolHookTimestamp: string
+  // --- H5: LLM call throttle ---
+  llmCallsThisSession: number
+  lastLlmCallTimestamp: number
+  // --- H6: message watermark dedup ---
+  // Key: `${sessionId}:${messageId}` — prevents reprocessing the same message
+  // across repeated post-sampling calls in one REPL session.
+  lastProcessedMessageIds: Set<string>
+}
+
+const runtimeObserverSessionSlot =
+  new RootSessionSlot<RuntimeObserverSessionState>(() => ({
+    runtimeTurn: 0,
+    lastConsumedToolHookTimestamp: '',
+    llmCallsThisSession: 0,
+    lastLlmCallTimestamp: 0,
+    lastProcessedMessageIds: new Set<string>(),
+  }))
+
+function getRuntimeObserverSessionState(): RuntimeObserverSessionState {
+  return runtimeObserverSessionSlot.of(getBootstrapSession())
+}
+
 export function resetRuntimeLLMBookkeeping(): void {
-  llmCallsThisSession = 0
-  lastLlmCallTimestamp = 0
-  lastProcessedMessageIds.clear()
+  const state = getRuntimeObserverSessionState()
+  state.llmCallsThisSession = 0
+  state.lastLlmCallTimestamp = 0
+  state.lastProcessedMessageIds.clear()
 }
 
 export function getRuntimeTurn(): number {
-  return runtimeTurn
+  return getRuntimeObserverSessionState().runtimeTurn
 }
 
 export function initSkillLearning(): void {
-  if (initialized) return
-  initialized = true
+  const hostState = runtimeObserverHostSlot.of(getBootstrapSessionHost())
+  if (hostState.initialized) return
+  hostState.initialized = true
   // Resolve the active observer backend from SKILL_LEARNING_OBSERVER_BACKEND
   // env. Without this call the registry stays on whichever backend was
   // registered first (heuristic) — which means the env switch would silently
@@ -128,9 +153,10 @@ export async function runSkillLearningPostSampling(
   const cwd = process.cwd()
   if (isInsideSkillLearningStorage(cwd)) return
 
+  const sessionState = getRuntimeObserverSessionState()
   const project = resolveProjectContext(cwd)
   const options = { project }
-  ++runtimeTurn
+  ++sessionState.runtimeTurn
 
   const observations: StoredSkillObservation[] = []
 
@@ -152,12 +178,12 @@ export async function runSkillLearningPostSampling(
       o.source === 'tool-hook' &&
       o.sessionId === RUNTIME_SESSION_ID &&
       typeof o.timestamp === 'string' &&
-      o.timestamp > lastConsumedToolHookTimestamp,
+      o.timestamp > sessionState.lastConsumedToolHookTimestamp,
   )
   observations.push(...fresh)
   for (const o of fresh) {
-    if (o.timestamp > lastConsumedToolHookTimestamp) {
-      lastConsumedToolHookTimestamp = o.timestamp
+    if (o.timestamp > sessionState.lastConsumedToolHookTimestamp) {
+      sessionState.lastConsumedToolHookTimestamp = o.timestamp
     }
   }
 
@@ -170,13 +196,13 @@ export async function runSkillLearningPostSampling(
   const { llm } = getSkillLearningConfig()
   const shouldCallLLM =
     observations.length >= minObservations &&
-    llmCallsThisSession < llm.maxCallsPerSession &&
-    now - lastLlmCallTimestamp >= llm.cooldownMs
+    sessionState.llmCallsThisSession < llm.maxCallsPerSession &&
+    now - sessionState.lastLlmCallTimestamp >= llm.cooldownMs
 
   let candidates
   if (shouldCallLLM) {
-    llmCallsThisSession++
-    lastLlmCallTimestamp = now
+    sessionState.llmCallsThisSession++
+    sessionState.lastLlmCallTimestamp = now
     candidates = await analyzeWithActiveBackend(observations, { project })
   } else {
     // Fall back to the heuristic backend without consuming an LLM call.
@@ -193,8 +219,9 @@ export async function runSkillLearningPostSampling(
 }
 
 export function resetRuntimeObserverForTest(): void {
-  runtimeTurn = 0
-  lastConsumedToolHookTimestamp = ''
+  const state = getRuntimeObserverSessionState()
+  state.runtimeTurn = 0
+  state.lastConsumedToolHookTimestamp = ''
   resetRuntimeLLMBookkeeping()
 }
 
@@ -266,6 +293,7 @@ function observationsFromMessages(
     source: 'hook' as const,
   }
 
+  const { lastProcessedMessageIds } = getRuntimeObserverSessionState()
   return messages.flatMap((message): StoredSkillObservation[] => {
     // H6: watermark dedup — skip messages already processed in this session.
     const msgKey = `${sessionId}:${String(message.uuid)}`

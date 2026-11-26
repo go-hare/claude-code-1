@@ -14,6 +14,7 @@ import { buildCliLaunch, spawnCli } from '../../utils/cliLaunch.js';
 import type { ToolUseContext } from '../../Tool.js';
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
 import { errorMessage } from '../../utils/errors.js';
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js';
 
 type ServerStatus = 'stopped' | 'starting' | 'running' | 'error';
 
@@ -32,19 +33,32 @@ type Props = {
  * and options to stop or continue.
  */
 
-// Module-level state to track the daemon process across invocations
-let daemonProcess: ChildProcess | null = null;
-let daemonStatus: ServerStatus = 'stopped';
-let daemonLogs: string[] = [];
+type RemoteControlServerHostState = {
+  daemonProcess: ChildProcess | null;
+  daemonStatus: ServerStatus;
+  daemonLogs: string[];
+};
+
+const remoteControlServerHostSlot = new HostSlot<RemoteControlServerHostState>(() => ({
+  daemonProcess: null,
+  daemonStatus: 'stopped',
+  daemonLogs: [],
+}));
+
+function getRemoteControlServerHostState(): RemoteControlServerHostState {
+  return remoteControlServerHostSlot.of(getBootstrapSessionHost());
+}
+
 const MAX_LOG_LINES = 50;
 
 function RemoteControlServer({ onDone }: Props): React.ReactNode {
-  const [status, setStatus] = useState<ServerStatus>(daemonStatus);
+  const hostState = getRemoteControlServerHostState();
+  const [status, setStatus] = useState<ServerStatus>(hostState.daemonStatus);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // If already running, show management dialog
-    if (daemonProcess && !daemonProcess.killed) {
+    if (hostState.daemonProcess && !hostState.daemonProcess.killed) {
       setStatus('running');
       return;
     }
@@ -62,10 +76,10 @@ function RemoteControlServer({ onDone }: Props): React.ReactNode {
       // Start the daemon
       setStatus('starting');
       try {
-        startDaemon();
+        startDaemon(hostState);
         if (!cancelled) {
           setStatus('running');
-          daemonStatus = 'running';
+          hostState.daemonStatus = 'running';
           onDone('Remote Control Server started. Use /remote-control-server to manage.', { display: 'system' });
         }
       } catch (err) {
@@ -73,7 +87,7 @@ function RemoteControlServer({ onDone }: Props): React.ReactNode {
           const msg = errorMessage(err);
           setStatus('error');
           setError(msg);
-          daemonStatus = 'error';
+          hostState.daemonStatus = 'error';
           onDone(`Remote Control Server failed to start: ${msg}`, {
             display: 'system',
           });
@@ -86,7 +100,7 @@ function RemoteControlServer({ onDone }: Props): React.ReactNode {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (status === 'running' && daemonProcess && !daemonProcess.killed) {
+  if (status === 'running' && hostState.daemonProcess && !hostState.daemonProcess.killed) {
     return <ServerManagementDialog onDone={onDone} />;
   }
 
@@ -102,19 +116,20 @@ function RemoteControlServer({ onDone }: Props): React.ReactNode {
  */
 function ServerManagementDialog({ onDone }: Props): React.ReactNode {
   useRegisterOverlay('remote-control-server-dialog');
+  const hostState = getRemoteControlServerHostState();
   const [focusIndex, setFocusIndex] = useState(2);
 
-  const logPreview = daemonLogs.slice(-5);
+  const logPreview = hostState.daemonLogs.slice(-5);
 
   function handleStop(): void {
-    stopDaemon();
+    stopDaemon(hostState);
     onDone('Remote Control Server stopped.', { display: 'system' });
   }
 
   function handleRestart(): void {
-    stopDaemon();
+    stopDaemon(hostState);
     try {
-      startDaemon();
+      startDaemon(hostState);
       onDone('Remote Control Server restarted.', { display: 'system' });
     } catch (err) {
       onDone(`Failed to restart: ${errorMessage(err)}`, { display: 'system' });
@@ -152,7 +167,7 @@ function ServerManagementDialog({ onDone }: Props): React.ReactNode {
           <Text bold color="success">
             running
           </Text>
-          {daemonProcess ? ` (PID: ${daemonProcess.pid})` : ''}
+          {hostState.daemonProcess ? ` (PID: ${hostState.daemonProcess.pid})` : ''}
         </Text>
         {logPreview.length > 0 && (
           <Box flexDirection="column">
@@ -200,7 +215,7 @@ async function checkPrerequisites(): Promise<string | null> {
 /**
  * Start the daemon supervisor as a child process.
  */
-function startDaemon(): void {
+function startDaemon(hostState: RemoteControlServerHostState = getRemoteControlServerHostState()): void {
   const dir = resolve('.');
 
   const launch = buildCliLaunch(['daemon', 'start', `--dir=${dir}`]);
@@ -211,15 +226,15 @@ function startDaemon(): void {
     detached: false,
   });
 
-  daemonProcess = child;
-  daemonLogs = [];
+  hostState.daemonProcess = child;
+  hostState.daemonLogs = [];
 
   child.stdout?.on('data', (data: Buffer) => {
     const lines = data.toString().trimEnd().split('\n');
     for (const line of lines) {
-      daemonLogs.push(line);
-      if (daemonLogs.length > MAX_LOG_LINES) {
-        daemonLogs.shift();
+      hostState.daemonLogs.push(line);
+      if (hostState.daemonLogs.length > MAX_LOG_LINES) {
+        hostState.daemonLogs.shift();
       }
     }
   });
@@ -227,47 +242,53 @@ function startDaemon(): void {
   child.stderr?.on('data', (data: Buffer) => {
     const lines = data.toString().trimEnd().split('\n');
     for (const line of lines) {
-      daemonLogs.push(`[err] ${line}`);
-      if (daemonLogs.length > MAX_LOG_LINES) {
-        daemonLogs.shift();
+      hostState.daemonLogs.push(`[err] ${line}`);
+      if (hostState.daemonLogs.length > MAX_LOG_LINES) {
+        hostState.daemonLogs.shift();
       }
     }
   });
 
   child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
-    daemonProcess = null;
-    daemonStatus = 'stopped';
-    daemonLogs.push(`[daemon] exited (code=${code ?? 'unknown'}, signal=${signal})`);
+    if (hostState.daemonProcess === child) {
+      hostState.daemonProcess = null;
+      hostState.daemonStatus = 'stopped';
+    }
+    hostState.daemonLogs.push(`[daemon] exited (code=${code ?? 'unknown'}, signal=${signal})`);
   });
 
   child.on('error', (err: Error) => {
-    daemonProcess = null;
-    daemonStatus = 'error';
-    daemonLogs.push(`[daemon] error: ${err.message}`);
+    if (hostState.daemonProcess === child) {
+      hostState.daemonProcess = null;
+      hostState.daemonStatus = 'error';
+    }
+    hostState.daemonLogs.push(`[daemon] error: ${err.message}`);
   });
 }
 
 /**
  * Stop the daemon supervisor.
  */
-function stopDaemon(): void {
-  if (daemonProcess && !daemonProcess.killed) {
-    daemonProcess.kill('SIGTERM');
+function stopDaemon(hostState: RemoteControlServerHostState = getRemoteControlServerHostState()): void {
+  const proc = hostState.daemonProcess;
+  if (proc && !proc.killed) {
+    proc.kill('SIGTERM');
     // Force kill after 10s grace
-    const pid = daemonProcess.pid;
-    setTimeout(() => {
+    const pid = proc.pid;
+    const timer = setTimeout(() => {
       try {
         if (pid) process.kill(pid, 0); // Check if still alive
-        if (daemonProcess && !daemonProcess.killed) {
-          daemonProcess.kill('SIGKILL');
+        if (!proc.killed) {
+          proc.kill('SIGKILL');
         }
       } catch {
         // Process already gone
       }
     }, 10_000);
+    timer.unref?.();
   }
-  daemonProcess = null;
-  daemonStatus = 'stopped';
+  hostState.daemonProcess = null;
+  hostState.daemonStatus = 'stopped';
 }
 
 export async function call(

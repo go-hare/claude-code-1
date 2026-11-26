@@ -1,4 +1,11 @@
 import { randomUUID } from 'crypto'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  type Session,
+} from '../utils/sessionRoot.js'
 
 /** densable toast record. Text only — no second React node, no pre-split lines. */
 export type ToastItem = {
@@ -17,50 +24,86 @@ const HOLD_MS = TOAST_HOLD_MAX_MS
 const FADE_MS = TOAST_FADE_MS
 /** densable `A8` — stacked toast cap. */
 const TOAST_STACK_MAX = 50
-let items: ToastItem[] = []
-let pausedAt: number | undefined
-let pendingExpiryTimer: ReturnType<typeof setTimeout> | undefined
-const listeners = new Set<() => void>()
+
+type ToastSessionState = {
+  items: ToastItem[]
+  pausedAt: number | undefined
+  pendingExpiryTimer: ReturnType<typeof setTimeout> | undefined
+  listeners: Map<() => void, Session | undefined>
+}
+
+const toastStateBySession = new RootSessionSlot<ToastSessionState>(() => ({
+  items: [],
+  pausedAt: undefined,
+  pendingExpiryTimer: undefined,
+  listeners: new Map(),
+}))
+
+function getToastState(): ToastSessionState {
+  return toastStateBySession.of(getBootstrapSession())
+}
+
+function runInCapturedSession(
+  captured: Session | undefined,
+  fn: () => void,
+): void {
+  if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+    runWithSession(captured, fn)
+  } else {
+    fn()
+  }
+}
 
 /** densable `M8` — wake at the earliest `leavesAt` or `heldAt + 30_000`. */
-function scheduleExpiry(now: number): void {
-  if (pendingExpiryTimer !== undefined) {
-    clearTimeout(pendingExpiryTimer)
-    pendingExpiryTimer = undefined
+function scheduleExpiry(state: ToastSessionState, now: number): void {
+  if (state.pendingExpiryTimer !== undefined) {
+    clearTimeout(state.pendingExpiryTimer)
+    state.pendingExpiryTimer = undefined
   }
-  if (pausedAt !== undefined || items.length === 0) return
+  if (state.pausedAt !== undefined || state.items.length === 0) return
   let earliest = Infinity
-  for (const item of items) {
+  for (const item of state.items) {
     const wakeAt =
       (item.heldAt ?? item.leavesAt) + (item.heldAt === undefined ? 0 : HOLD_MS)
     if (wakeAt < earliest) earliest = wakeAt
   }
   if (!Number.isFinite(earliest)) return
-  pendingExpiryTimer = setTimeout(
+  const captured = getActiveSessionFromAls()
+  state.pendingExpiryTimer = setTimeout(
     () => {
-      pendingExpiryTimer = undefined
-      expireToasts(Date.now())
+      state.pendingExpiryTimer = undefined
+      runInCapturedSession(captured, () => {
+        expireToastsInState(state, Date.now())
+      })
     },
     Math.max(1, earliest - now),
   )
-  pendingExpiryTimer.unref?.()
+  state.pendingExpiryTimer.unref?.()
 }
 
-function publish(next: ToastItem[], now = Date.now()): void {
-  items = next
-  for (const listener of listeners) listener()
-  scheduleExpiry(now)
+function publish(
+  state: ToastSessionState,
+  next: ToastItem[],
+  now = Date.now(),
+): void {
+  state.items = next
+  for (const [listener, captured] of state.listeners) {
+    runInCapturedSession(captured, listener)
+  }
+  scheduleExpiry(state, now)
 }
 
 export function subscribeToasts(listener: () => void): () => void {
-  listeners.add(listener)
+  const state = getToastState()
+  const captured = getActiveSessionFromAls()
+  state.listeners.set(listener, captured)
   return () => {
-    listeners.delete(listener)
+    state.listeners.delete(listener)
   }
 }
 
 export function getToasts(): ToastItem[] {
-  return items
+  return getToastState().items
 }
 
 /** densable `pRe` — push a stacked plugin toast (`$.ui.toast`). */
@@ -70,68 +113,79 @@ export function pushToast(
   plugin?: string,
   timeoutMs = HOLD_MS,
 ): void {
+  const state = getToastState()
   const now = Date.now()
   const next: ToastItem[] = [
-    ...items,
+    ...state.items,
     {
       id: id || randomUUID(),
       plugin,
       text,
       phase: 'shown',
       shownAt: now,
-      leavesAt: (pausedAt ?? now) + timeoutMs,
+      leavesAt: (state.pausedAt ?? now) + timeoutMs,
     },
   ]
-  publish(next.length > TOAST_STACK_MAX ? next.slice(-TOAST_STACK_MAX) : next)
+  publish(
+    state,
+    next.length > TOAST_STACK_MAX ? next.slice(-TOAST_STACK_MAX) : next,
+  )
 }
 
-function toastIdFor(key: string): string | undefined {
-  for (let index = items.length - 1; index >= 0; index--) {
-    const item = items[index]
+function toastIdFor(state: ToastSessionState, key: string): string | undefined {
+  for (let index = state.items.length - 1; index >= 0; index--) {
+    const item = state.items[index]
     if (item !== undefined && item.id === key) return item.id
   }
   return undefined
 }
 
 export function holdToastItem(key: string, held: boolean): void {
-  const id = toastIdFor(key)
+  const state = getToastState()
+  const id = toastIdFor(state, key)
   if (id === undefined) return
   const now = Date.now()
   let changed = false
-  const next = items.map(item => {
+  const next = state.items.map(item => {
     if (item.id !== id || (item.heldAt !== undefined) === held) return item
     changed = true
     if (held) return { ...item, phase: 'shown' as const, heldAt: now }
     const extra = item.heldAt === undefined ? 0 : now - item.heldAt
     return { ...item, heldAt: undefined, leavesAt: item.leavesAt + extra }
   })
-  if (changed) publish(next, now)
+  if (changed) publish(state, next, now)
 }
 
 /** Click removes the toast. Expiry is what enters `leaving`. */
 export function dismissToastItem(key: string): void {
-  const id = toastIdFor(key)
+  const state = getToastState()
+  const id = toastIdFor(state, key)
   if (id === undefined) return
-  publish(items.filter(item => item.id !== id))
+  publish(
+    state,
+    state.items.filter(item => item.id !== id),
+  )
 }
 
 export function pauseToasts(paused: boolean): void {
+  const state = getToastState()
   const now = Date.now()
   if (paused) {
-    if (pausedAt !== undefined) return
-    pausedAt = now
-    scheduleExpiry(now)
+    if (state.pausedAt !== undefined) return
+    state.pausedAt = now
+    scheduleExpiry(state, now)
     return
   }
-  if (pausedAt === undefined) return
-  const extra = now - pausedAt
-  pausedAt = undefined
+  if (state.pausedAt === undefined) return
+  const extra = now - state.pausedAt
+  state.pausedAt = undefined
   if (extra === 0) {
-    scheduleExpiry(now)
+    scheduleExpiry(state, now)
     return
   }
   publish(
-    items.map(item => ({
+    state,
+    state.items.map(item => ({
       ...item,
       leavesAt: item.leavesAt + extra,
       ...(item.heldAt !== undefined ? { heldAt: item.heldAt + extra } : {}),
@@ -140,12 +194,8 @@ export function pauseToasts(paused: boolean): void {
   )
 }
 
-/**
- * densable expiry. A due toast enters `leaving` for 240ms instead of vanishing.
- * A hover that has lasted 30s is released first, then judged the same way.
- */
-export function expireToasts(now: number): void {
-  const next = items
+function expireToastsInState(state: ToastSessionState, now: number): void {
+  const next = state.items
   let changed = false
   const stepped: ToastItem[] = []
   for (const item of next) {
@@ -174,8 +224,16 @@ export function expireToasts(now: number): void {
     }
     kept.push(item)
   }
-  if (changed) publish(kept, now)
-  else scheduleExpiry(now)
+  if (changed) publish(state, kept, now)
+  else scheduleExpiry(state, now)
+}
+
+/**
+ * densable expiry. A due toast enters `leaving` for 240ms instead of vanishing.
+ * A hover that has lasted 30s is released first, then judged the same way.
+ */
+export function expireToasts(now: number): void {
+  expireToastsInState(getToastState(), now)
 }
 
 export const PLUGIN_TOAST_KEY_PREFIX = 'plugin-toast-'
@@ -211,5 +269,9 @@ export function parsePluginToastOwner(
 }
 
 export function dropToast(id: string): void {
-  publish(items.filter(item => item.id !== id))
+  const state = getToastState()
+  publish(
+    state,
+    state.items.filter(item => item.id !== id),
+  )
 }

@@ -1,11 +1,44 @@
 import { createHash, X509Certificate } from 'crypto'
-import memoize from 'lodash-es/memoize.js'
 import { logForDebugging } from './debug.js'
 import { hasNodeOption, isEnvTruthy } from './envUtils.js'
 import { getFsImplementation } from './fsOperations.js'
 import { parseCertStoreSources } from './residualFinalEnvGates.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
-const warnedExtraCerts = new Set<string>()
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result>(
+  fn: (...args: Args) => Result,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
+
+const warnedExtraCertsHostSlot = new HostSlot<Set<string>>(() => new Set())
 
 const PEM_BLOCK_RE = /-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?-----END \1-----/g
 
@@ -14,6 +47,9 @@ function warnExtraCertsOnce(
   fingerprintOrHash: string,
   fingerprint?: string,
 ): void {
+  const warnedExtraCerts = warnedExtraCertsHostSlot.of(
+    getBootstrapSessionHost(),
+  )
   const key = `${reason}:${fingerprintOrHash}`
   if (warnedExtraCerts.has(key)) return
   warnedExtraCerts.add(key)
@@ -253,7 +289,7 @@ export function filterLoopedCrossCertificates(
  * that env var from settings.json at CLI init; this module stays config-free
  * so `proxy.ts`/`mtls.ts` don't transitively pull in the command registry.
  */
-export const getCACertificates = memoize((): string[] | undefined => {
+export const getCACertificates = memoizePerHost((): string[] | undefined => {
   // Official JEm densable — CLAUDE_CODE_CERT_STORE=bundled,system (order unique).
   const certStoreSources = parseCertStoreSources({
     onUnrecognized: token => {
@@ -383,6 +419,6 @@ export const getCACertificates = memoize((): string[] | undefined => {
  */
 export function clearCACertsCache(): void {
   getCACertificates.cache.clear?.()
-  warnedExtraCerts.clear()
+  warnedExtraCertsHostSlot.of(getBootstrapSessionHost()).clear()
   logForDebugging('Cleared CA certificates cache')
 }

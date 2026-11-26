@@ -72,7 +72,14 @@ import {
 } from '../../utils/task/framework.js';
 import { createTaskRegistry, type TaskRegistry, updateTaskTranscriptMessage } from '../../utils/taskRegistry.js';
 import { emitTaskProgress } from '../../utils/task/sdkProgress.js';
-import { createSignal } from '../../utils/signal.js';
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js';
+import { createSignal, type Signal } from '../../utils/signal.js';
 import { roughTokenCountEstimationForMessages } from '../../services/tokenEstimation.js';
 import { validateWorkerResult } from '../../coordinator/workerResultValidator.js';
 import { escapeXml } from '../../utils/xml.js';
@@ -100,8 +107,23 @@ function xm(setAppState: SetAppState, getAppState: (() => AppState) | undefined)
 /**
  * densable Weo (`vs()` signal): fire agentId when DSu completes with
  * non-empty pendingMessages so REPL luf-hook can Qeo→Aye resume.
+ * Scoped per root session via RootSessionSlot.
  */
-export const strandedAgentResume = createSignal<[agentId: string]>();
+const strandedAgentResumeBySession = new RootSessionSlot<Signal<[agentId: string]>>(() =>
+  createSignal<[agentId: string]>(),
+);
+
+export const strandedAgentResume: Signal<[agentId: string]> = {
+  subscribe(listener) {
+    return strandedAgentResumeBySession.of(getBootstrapSession()).subscribe(listener);
+  },
+  emit(agentId) {
+    strandedAgentResumeBySession.peek(getBootstrapSession())?.emit(agentId);
+  },
+  clear() {
+    strandedAgentResumeBySession.peek(getBootstrapSession())?.clear();
+  },
+};
 
 /**
  * densable sqe pending entry: `{text, origin, isMeta}`.
@@ -517,28 +539,40 @@ export function getProgressUpdate(tracker: ProgressTracker, messages?: readonly 
  * Generation tokens also invalidate in-flight queueMicrotask callbacks that
  * clearTimeout cannot cancel.
  */
-const deferredProgressRebuildTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
-const deferredProgressRebuildGeneration = new Map<string, number>();
+type DeferredProgressRebuildSessionState = {
+  timers: Map<string, ReturnType<typeof setTimeout>[]>;
+  generation: Map<string, number>;
+};
+
+const deferredProgressRebuildBySession = new RootSessionSlot<DeferredProgressRebuildSessionState>(() => ({
+  timers: new Map<string, ReturnType<typeof setTimeout>[]>(),
+  generation: new Map<string, number>(),
+}));
+
+function getDeferredProgressRebuildState(): DeferredProgressRebuildSessionState {
+  return deferredProgressRebuildBySession.of(getBootstrapSession());
+}
 
 /** Cancel deferred progress rebuild timers for one agent (complete/kill/fail). */
 export function clearDeferredAgentProgressRebuild(taskId: string): void {
-  const timers = deferredProgressRebuildTimers.get(taskId);
+  const state = getDeferredProgressRebuildState();
+  const timers = state.timers.get(taskId);
   if (timers) {
     for (const t of timers) clearTimeout(t);
-    deferredProgressRebuildTimers.delete(taskId);
+    state.timers.delete(taskId);
   }
   // Bump generation so already-queued microtasks no-op even if timers were empty.
-  deferredProgressRebuildGeneration.set(taskId, (deferredProgressRebuildGeneration.get(taskId) ?? 0) + 1);
+  state.generation.set(taskId, (state.generation.get(taskId) ?? 0) + 1);
 }
 
 /** @internal test helper — clear all deferred rebuild timers. */
 export function clearAllDeferredAgentProgressRebuildsForTests(): void {
-  for (const taskId of [
-    ...new Set([...deferredProgressRebuildTimers.keys(), ...deferredProgressRebuildGeneration.keys()]),
-  ]) {
+  const state = deferredProgressRebuildBySession.peek(getBootstrapSession());
+  if (!state) return;
+  for (const taskId of [...new Set([...state.timers.keys(), ...state.generation.keys()])]) {
     clearDeferredAgentProgressRebuild(taskId);
   }
-  deferredProgressRebuildGeneration.clear();
+  state.generation.clear();
 }
 
 export function scheduleDeferredAgentProgressRebuild(
@@ -550,11 +584,13 @@ export function scheduleDeferredAgentProgressRebuild(
   tools?: Tools,
 ): void {
   clearDeferredAgentProgressRebuild(taskId);
-  const generation = (deferredProgressRebuildGeneration.get(taskId) ?? 0) + 1;
-  deferredProgressRebuildGeneration.set(taskId, generation);
-  const run = (): void => {
+  const state = getDeferredProgressRebuildState();
+  const generation = (state.generation.get(taskId) ?? 0) + 1;
+  state.generation.set(taskId, generation);
+  const rootSessionRef = new WeakRef(getBootstrapSession().root);
+  const runImpl = (): void => {
     // Cancelled by clearDeferred / re-schedule (microtasks are not clearTimeout-able).
-    if (deferredProgressRebuildGeneration.get(taskId) !== generation) return;
+    if (state.generation.get(taskId) !== generation) return;
     // Skip after task left running (complete/kill/fail), even if a timeout races.
     let stillRunning = false;
     setAppState(prev => {
@@ -563,9 +599,17 @@ export function scheduleDeferredAgentProgressRebuild(
       return prev;
     });
     if (!stillRunning) return;
-    if (deferredProgressRebuildGeneration.get(taskId) !== generation) return;
+    if (state.generation.get(taskId) !== generation) return;
     rebuildProgressFromMessages(tracker, messages, resolveActivityDescription, tools);
     updateAgentProgress(taskId, getProgressUpdate(tracker, messages), setAppState);
+  };
+  const run = (): void => {
+    const session = rootSessionRef.deref();
+    if (session) {
+      runWithSession(session, runImpl);
+    } else {
+      runImpl();
+    }
   };
   // Two ticks: message_delta is applied after the yield returns into the
   // generator; a single queueMicrotask can still race the mutation.
@@ -573,7 +617,7 @@ export function scheduleDeferredAgentProgressRebuild(
     queueMicrotask(run);
   });
   const timers: ReturnType<typeof setTimeout>[] = [setTimeout(run, 0), setTimeout(run, 50), setTimeout(run, 250)];
-  deferredProgressRebuildTimers.set(taskId, timers);
+  state.timers.set(taskId, timers);
 }
 
 /**
@@ -749,7 +793,13 @@ export type AgentAskNoticeAttachment = {
   open: string[];
 };
 
-const agentPermissionWaitsBySession = new Map<string, Map<string, AgentPermissionWaitEntry>>();
+const agentPermissionWaitsByHost = new HostSlot<Map<string, Map<string, AgentPermissionWaitEntry>>>(
+  () => new Map<string, Map<string, AgentPermissionWaitEntry>>(),
+);
+
+function getAgentPermissionWaitsBySession(): Map<string, Map<string, AgentPermissionWaitEntry>> {
+  return agentPermissionWaitsByHost.of(getBootstrapSessionHost());
+}
 
 function formatPermissionWaitToolLabel(tool: { name: string; isMcp?: boolean } | string): string {
   if (typeof tool === 'string') {
@@ -772,10 +822,11 @@ export function registerAgentPermissionWait(
   tool: { name: string; isMcp?: boolean } | string,
   openedAt: number = Date.now(),
 ): () => void {
-  let map = agentPermissionWaitsBySession.get(sessionKey);
+  const waitsBySession = getAgentPermissionWaitsBySession();
+  let map = waitsBySession.get(sessionKey);
   if (!map) {
     map = new Map();
-    agentPermissionWaitsBySession.set(sessionKey, map);
+    waitsBySession.set(sessionKey, map);
   }
   const entry: AgentPermissionWaitEntry = {
     agentId,
@@ -784,32 +835,36 @@ export function registerAgentPermissionWait(
   };
   map.set(requestId, entry);
   return () => {
-    const cur = agentPermissionWaitsBySession.get(sessionKey);
+    const cur = waitsBySession.get(sessionKey);
     if (cur?.get(requestId) === entry) {
       cur.delete(requestId);
-      if (cur.size === 0) agentPermissionWaitsBySession.delete(sessionKey);
+      if (cur.size === 0) waitsBySession.delete(sessionKey);
     }
   };
 }
 
 export function clearAgentPermissionWaits(sessionKey?: string): void {
+  const waitsBySession = agentPermissionWaitsByHost.peek(getBootstrapSessionHost());
+  if (!waitsBySession) return;
   if (sessionKey === undefined) {
-    agentPermissionWaitsBySession.clear();
+    waitsBySession.clear();
     return;
   }
-  agentPermissionWaitsBySession.delete(sessionKey);
+  waitsBySession.delete(sessionKey);
 }
 
 /** Remove all tracked permission waits belonging to a specific subagent on teardown. */
 export function clearAgentPermissionWaitsForAgent(agentId: string): void {
-  for (const [sessionKey, map] of agentPermissionWaitsBySession.entries()) {
+  const waitsBySession = agentPermissionWaitsByHost.peek(getBootstrapSessionHost());
+  if (!waitsBySession) return;
+  for (const [sessionKey, map] of waitsBySession.entries()) {
     for (const [reqId, entry] of map.entries()) {
       if (entry.agentId === agentId) {
         map.delete(reqId);
       }
     }
     if (map.size === 0) {
-      agentPermissionWaitsBySession.delete(sessionKey);
+      waitsBySession.delete(sessionKey);
     }
   }
 }
@@ -855,7 +910,7 @@ export function getAgentAskNoticeAttachment(
   recentMessages: readonly unknown[] = messages,
   nowMs: number = Date.now(),
 ): AgentAskNoticeAttachment[] {
-  const entries = agentPermissionWaitsBySession.get(sessionKey);
+  const entries = agentPermissionWaitsByHost.peek(getBootstrapSessionHost())?.get(sessionKey);
   const open: string[] = [];
   const lines: string[] = [];
   if (entries && entries.size > 0) {
@@ -1176,7 +1231,11 @@ export function getPanelParentAgentId(
   return (parent as LocalAgentTaskState).isObserver === true ? undefined : parentId;
 }
 
-const chatPinForfeitedAgentIds = new Set<string>();
+const chatPinForfeitedAgentIdsBySession = new RootSessionSlot<Set<string>>(() => new Set<string>());
+
+function getChatPinForfeitedAgentIds(): Set<string> {
+  return chatPinForfeitedAgentIdsBySession.of(getBootstrapSession());
+}
 
 /**
  * Official m4 — true when a completed backgrounded subagent was engaged in chat
@@ -1219,7 +1278,10 @@ export function hasForfeitedChatPin(
     const parent = tasks[id] as LocalAgentTaskState | undefined;
     if (parent?.chatPinForfeited === true) return true;
   }
-  return typeof task.agentId === 'string' && chatPinForfeitedAgentIds.has(task.agentId);
+  return (
+    typeof task.agentId === 'string' &&
+    (chatPinForfeitedAgentIdsBySession.peek(getBootstrapSession())?.has(task.agentId) ?? false)
+  );
 }
 
 /**
@@ -1256,9 +1318,10 @@ export function forfeitChatPins(
  */
 export function forfeitAllChatPins(setAppState: SetAppState, now: number = Date.now()): void {
   setAppState(prev => {
+    const forfeitedIds = getChatPinForfeitedAgentIds();
     for (const raw of Object.values(prev.tasks)) {
       if (isLocalAgentTask(raw) && raw.agentId) {
-        chatPinForfeitedAgentIds.add(raw.agentId);
+        forfeitedIds.add(raw.agentId);
       }
     }
     let nextTasks = forfeitChatPins(prev.tasks, now);
@@ -2112,10 +2175,14 @@ export function markAgentsNotified(taskId: string, setAppState: SetAppState): vo
 export const SUBAGENT_TOKEN_THROTTLE_RUNNING_THRESHOLD = 20;
 export const SUBAGENT_TOKEN_THROTTLE_INTERVAL_MS = 5_000;
 
-const lastSubagentTokenFlushMs = new Map<string, number>();
+const lastSubagentTokenFlushMsBySession = new RootSessionSlot<Map<string, number>>(() => new Map<string, number>());
+
+function getLastSubagentTokenFlushMs(): Map<string, number> {
+  return lastSubagentTokenFlushMsBySession.of(getBootstrapSession());
+}
 
 export function resetSubagentTokenThrottleState(): void {
-  lastSubagentTokenFlushMs.clear();
+  lastSubagentTokenFlushMsBySession.peek(getBootstrapSession())?.clear();
 }
 
 export function shouldThrottleSubagentTokenUpdate(options: {
@@ -2129,11 +2196,12 @@ export function shouldThrottleSubagentTokenUpdate(options: {
   if (options.runningSubagentCount <= SUBAGENT_TOKEN_THROTTLE_RUNNING_THRESHOLD) return false;
   if (options.viewingAgentTaskId === options.taskId) return false;
   const now = options.nowMs ?? Date.now();
-  const last = lastSubagentTokenFlushMs.get(options.taskId);
+  const flushMs = getLastSubagentTokenFlushMs();
+  const last = flushMs.get(options.taskId);
   if (last !== undefined && now - last < SUBAGENT_TOKEN_THROTTLE_INTERVAL_MS) {
     return true;
   }
-  lastSubagentTokenFlushMs.set(options.taskId, now);
+  flushMs.set(options.taskId, now);
   return false;
 }
 
@@ -2220,7 +2288,7 @@ export function updateAgentProgress(taskId: string, progress: AgentProgress, set
         return prev;
       }
     } else if (tokenChanged) {
-      lastSubagentTokenFlushMs.set(taskId, Date.now());
+      getLastSubagentTokenFlushMs().set(taskId, Date.now());
     }
     return {
       ...prev,
@@ -2360,24 +2428,33 @@ export function rewireOrphanedOwnerNotifications(
 
 /**
  * densable XYi — per-agent idle-window timer map (okg after CSu).
- * Module-level so complete/kill/fail/tests share one timer table.
+ * Scoped per root session via RootSessionSlot so concurrent hosts/sessions don't collide.
  */
-const idleWindowTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const idleWindowTimersBySession = new RootSessionSlot<Map<string, ReturnType<typeof setTimeout>>>(
+  () => new Map<string, ReturnType<typeof setTimeout>>(),
+);
+
+function getIdleWindowTimers(): Map<string, ReturnType<typeof setTimeout>> {
+  return idleWindowTimersBySession.of(getBootstrapSession());
+}
 
 /** Test/cleanup: clear all idle-window timers (densable XYi). */
 export function clearAllIdleWindowTimersForTests(): void {
-  for (const timer of idleWindowTimers.values()) {
+  const timers = idleWindowTimersBySession.peek(getBootstrapSession());
+  if (!timers) return;
+  for (const timer of timers.values()) {
     clearTimeout(timer);
   }
-  idleWindowTimers.clear();
+  timers.clear();
 }
 
 /** densable: clear XYi entry for one agent (kill/fail/re-arm). */
 export function clearIdleWindowTimer(taskId: string): void {
-  const existing = idleWindowTimers.get(taskId);
+  const timers = idleWindowTimersBySession.peek(getBootstrapSession());
+  const existing = timers?.get(taskId);
   if (existing !== undefined) {
     clearTimeout(existing);
-    idleWindowTimers.delete(taskId);
+    timers?.delete(taskId);
   }
 }
 
@@ -2395,7 +2472,7 @@ export function expireIdleWindowKeepalive(
   setAppState: SetAppState,
   getAppState?: () => AppState,
 ): void {
-  idleWindowTimers.delete(taskId);
+  idleWindowTimersBySession.peek(getBootstrapSession())?.delete(taskId);
   const bot = idleWindowKeepaliveReason();
   const registry = xm(setAppState, getAppState);
   if (registry) {
@@ -2457,12 +2534,19 @@ export function expireIdleWindowKeepalive(
  */
 export function armIdleWindowTimer(taskId: string, setAppState: SetAppState, getAppState?: () => AppState): void {
   clearIdleWindowTimer(taskId);
+  const timers = getIdleWindowTimers();
+  const rootSessionRef = new WeakRef(getBootstrapSession().root);
   const timer = setTimeout(() => {
-    expireIdleWindowKeepalive(taskId, setAppState, getAppState);
+    const session = rootSessionRef.deref();
+    if (session) {
+      runWithSession(session, () => expireIdleWindowKeepalive(taskId, setAppState, getAppState));
+    } else {
+      expireIdleWindowKeepalive(taskId, setAppState, getAppState);
+    }
   }, IDLE_WINDOW_MS);
   // densable: u.unref?.()
   timer.unref?.();
-  idleWindowTimers.set(taskId, timer);
+  timers.set(taskId, timer);
 }
 
 /**
@@ -2811,9 +2895,15 @@ export function registerAsyncAgent({
   return taskState;
 }
 
-// Map of taskId -> resolve function for background signals
+// Map of taskId -> resolve function for background signals (per root session)
 // When backgroundAgentTask is called, it resolves the corresponding promise
-const backgroundSignalResolvers = new Map<string, () => void>();
+const backgroundSignalResolversBySession = new RootSessionSlot<Map<string, () => void>>(
+  () => new Map<string, () => void>(),
+);
+
+function getBackgroundSignalResolvers(): Map<string, () => void> {
+  return backgroundSignalResolversBySession.of(getBootstrapSession());
+}
 
 /**
  * Register a foreground agent task that could be backgrounded later.
@@ -2932,7 +3022,7 @@ export function registerAgentForeground({
   const backgroundSignal = new Promise<void>(resolve => {
     resolveBackgroundSignal = resolve;
   });
-  backgroundSignalResolvers.set(agentId, resolveBackgroundSignal!);
+  getBackgroundSignalResolvers().set(agentId, resolveBackgroundSignal!);
 
   registerTask(taskState, setAppState);
 
@@ -3038,10 +3128,11 @@ export function backgroundAgentTask(taskId: string, registry: TaskRegistry): boo
   // Resolve the background signal only when we actually flipped (official
   // J5r refuse paths already returned false). If already bg, leave resolver.
   if (didBackground) {
-    const resolver = backgroundSignalResolvers.get(taskId);
+    const resolvers = backgroundSignalResolversBySession.peek(getBootstrapSession());
+    const resolver = resolvers?.get(taskId);
     if (resolver) {
       resolver();
-      backgroundSignalResolvers.delete(taskId);
+      resolvers?.delete(taskId);
     }
   }
 
@@ -3058,7 +3149,7 @@ export function unregisterAgentForeground(
   getAppState?: () => AppState,
 ): void {
   // Clean up the background signal resolver
-  backgroundSignalResolvers.delete(taskId);
+  backgroundSignalResolversBySession.peek(getBootstrapSession())?.delete(taskId);
 
   // densable JXt gate before remove
   const registry = xm(setAppState, getAppState);

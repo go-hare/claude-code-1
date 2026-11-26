@@ -8,6 +8,7 @@ import { readFile } from 'fs/promises'
 import { basename, extname } from 'path'
 import { getOauthConfig } from '../../constants/oauth.js'
 import { getClaudeAIOAuthTokens } from '../../utils/auth.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { DL } from './frameDl.js'
 import { isArtifactToolRegistered } from '../../utils/artifactUrl.js'
 import { isValidArtifactSlug } from './arm.js'
@@ -1303,19 +1304,23 @@ export type ArtifactRoomHost = {
   sendRoomEvent: (slug: string, topic: string, data: unknown) => RoomSendResult
 }
 
-let roomHost: ArtifactRoomHost | null = null
+const roomHostSlot = new HostSlot<{ roomHost: ArtifactRoomHost | null }>(
+  () => ({
+    roomHost: null,
+  }),
+)
 
 /** densable jRm */
 export function getArtifactRoomHost(): ArtifactRoomHost | null {
-  return roomHost
+  return roomHostSlot.of(getBootstrapSessionHost()).roomHost
 }
 
 export function setArtifactRoomHost(host: ArtifactRoomHost | null): void {
-  roomHost = host
+  roomHostSlot.of(getBootstrapSessionHost()).roomHost = host
 }
 
 export function resetArtifactRoomHostForTests(): void {
-  roomHost = null
+  roomHostSlot.of(getBootstrapSessionHost()).roomHost = null
 }
 
 /** densable room_send call body when host present; else unavailable. */

@@ -15,6 +15,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionRoot.js'
 
 export type TranscriptWriterDegraded = {
   code: string
@@ -53,12 +54,25 @@ type FailureStamp = {
   lastAtMs: number
 }
 
-let degraded: TranscriptWriterDegraded | null = null
-const failureByPath = new Map<string, FailureStamp>()
-const listeners = new Set<() => void>()
+type TranscriptWriterHealthHostState = {
+  degraded: TranscriptWriterDegraded | null
+  failureByPath: Map<string, FailureStamp>
+  listeners: Set<() => void>
+}
 
-function emit(): void {
-  for (const l of listeners) {
+const transcriptWriterHealthSlot =
+  new HostSlot<TranscriptWriterHealthHostState>(() => ({
+    degraded: null,
+    failureByPath: new Map(),
+    listeners: new Set(),
+  }))
+
+function getHealthState(): TranscriptWriterHealthHostState {
+  return transcriptWriterHealthSlot.of(getBootstrapSessionHost())
+}
+
+function emit(state: TranscriptWriterHealthHostState): void {
+  for (const l of state.listeners) {
     try {
       l()
     } catch {
@@ -69,13 +83,14 @@ function emit(): void {
 
 /** densable Bsn */
 export function getTranscriptWriterDegraded(): TranscriptWriterDegraded | null {
-  return degraded
+  return getHealthState().degraded
 }
 
 /** densable wUs */
 export function subscribeTranscriptWriterHealth(
   listener: () => void,
 ): () => void {
+  const { listeners } = getHealthState()
   listeners.add(listener)
   return () => {
     listeners.delete(listener)
@@ -110,8 +125,9 @@ export function recordTranscriptWriteFailure(
   filePath = '<no-file>',
   now = Date.now(),
 ): void {
+  const state = getHealthState()
   const code = errnoCode(err) ?? 'unknown'
-  const prev = failureByPath.get(filePath)
+  const prev = state.failureByPath.get(filePath)
   const stamp: FailureStamp =
     prev !== undefined && now - prev.lastAtMs < CONSECUTIVE_GAP_MS
       ? {
@@ -120,11 +136,11 @@ export function recordTranscriptWriteFailure(
           lastAtMs: now,
         }
       : { consecutive: 1, firstAtMs: now, lastAtMs: now }
-  failureByPath.set(filePath, stamp)
+  state.failureByPath.set(filePath, stamp)
 
   let becameDegraded = false
   if (
-    degraded === null &&
+    state.degraded === null &&
     filePath !== '<no-file>' &&
     TRACKED_SOURCES.has(source)
   ) {
@@ -132,7 +148,7 @@ export function recordTranscriptWriteFailure(
       stamp.consecutive >= CONSECUTIVE_THRESHOLD &&
       now - stamp.firstAtMs >= CONSECUTIVE_WINDOW_MS
     if (isImmediateTranscriptDegradeCode(code) || consecutiveHit) {
-      degraded = { code, source, filePath }
+      state.degraded = { code, source, filePath }
       becameDegraded = true
     }
   }
@@ -145,31 +161,33 @@ export function recordTranscriptWriteFailure(
     errno_enospc: code === 'ENOSPC',
     errno_emfile: code === 'EMFILE',
     consecutive_failures: stamp.consecutive,
-    degraded: degraded !== null,
+    degraded: state.degraded !== null,
   })
 
-  if (becameDegraded) emit()
+  if (becameDegraded) emit(state)
 }
 
 /** densable EVd — clear failure stamp for path; recover if matching */
 export function recordTranscriptWriteSuccess(filePath: string): void {
-  failureByPath.delete(filePath)
-  if (degraded?.filePath === filePath) {
-    const prev = degraded
-    degraded = null
+  const state = getHealthState()
+  state.failureByPath.delete(filePath)
+  if (state.degraded?.filePath === filePath) {
+    const prev = state.degraded
+    state.degraded = null
     logEvent('tengu_transcript_writer_recovered', {
       source:
         prev.source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
-    emit()
+    emit(state)
   }
 }
 
 /** densable AVd — test reset */
 export function resetTranscriptWriterHealthForTest(): void {
-  failureByPath.clear()
-  degraded = null
-  emit()
+  const state = getHealthState()
+  state.failureByPath.clear()
+  state.degraded = null
+  emit(state)
 }
 
 /**
@@ -182,6 +200,7 @@ export function remapTranscriptWriterPaths(
   to: string | null,
 ): void {
   if (from === null || from === to) return
+  const state = getHealthState()
   const sideOf = (p: string): string | null =>
     p.endsWith('.jsonl') ? `${p.slice(0, -6)}/` : null
   const fromSide = sideOf(from)
@@ -193,22 +212,22 @@ export function remapTranscriptWriterPaths(
     }
     return p
   }
-  for (const [key, stamp] of Array.from(failureByPath.entries())) {
+  for (const [key, stamp] of Array.from(state.failureByPath.entries())) {
     const next = mapPath(key)
     if (next !== key) {
-      failureByPath.delete(key)
-      if (next !== null) failureByPath.set(next, stamp)
+      state.failureByPath.delete(key)
+      if (next !== null) state.failureByPath.set(next, stamp)
     }
   }
-  if (degraded !== null) {
-    const next = mapPath(degraded.filePath)
-    if (next !== degraded.filePath) {
+  if (state.degraded !== null) {
+    const next = mapPath(state.degraded.filePath)
+    if (next !== state.degraded.filePath) {
       if (next === null) {
-        degraded = null
+        state.degraded = null
       } else {
-        degraded = { ...degraded, filePath: next }
+        state.degraded = { ...state.degraded, filePath: next }
       }
-      emit()
+      emit(state)
     }
   }
 }

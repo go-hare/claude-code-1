@@ -5,13 +5,24 @@ import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { errorMessage, getErrnoCode } from './errors.js'
 import { getPlatform } from './platform.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
-// Cache states:
-// undefined = not yet loaded (need to check disk)
-// null = checked disk, no files exist (don't check again)
-// string = loaded and cached (use cached value)
-let sessionEnvScript: string | null | undefined
-let sessionEnvOwner: string | undefined
+class HostSessionEnvironmentState {
+  // Cache states:
+  // undefined = not yet loaded (need to check disk)
+  // null = checked disk, no files exist (don't check again)
+  // string = loaded and cached (use cached value)
+  sessionEnvScript: string | null | undefined
+  sessionEnvOwner: string | undefined
+}
+
+const hostSessionEnvSlot = new HostSlot<HostSessionEnvironmentState>(
+  () => new HostSessionEnvironmentState(),
+)
+
+function getHostSessionEnvState(): HostSessionEnvironmentState {
+  return hostSessionEnvSlot.of(getBootstrapSessionHost())
+}
 
 export async function getSessionEnvDirPath(
   sessionIdOverride?: string,
@@ -61,14 +72,16 @@ export async function clearCwdEnvFiles(): Promise<void> {
 
 export function invalidateSessionEnvCache(): void {
   logForDebugging('Invalidating session environment cache')
-  sessionEnvScript = undefined
-  sessionEnvOwner = undefined
+  const state = getHostSessionEnvState()
+  state.sessionEnvScript = undefined
+  state.sessionEnvOwner = undefined
 }
 
 export async function getSessionEnvironmentScript(): Promise<string | null> {
+  const state = getHostSessionEnvState()
   const owner = getSessionId()
-  if (sessionEnvScript !== undefined && sessionEnvOwner === owner) {
-    return sessionEnvScript
+  if (state.sessionEnvScript !== undefined && state.sessionEnvOwner === owner) {
+    return state.sessionEnvScript
   }
 
   const scripts: string[] = []
@@ -94,7 +107,7 @@ export async function getSessionEnvironmentScript(): Promise<string | null> {
   }
 
   // Load hook environment files from session directory
-  const sessionEnvDir = await getSessionEnvDirPath()
+  const sessionEnvDir = await getSessionEnvDirPath(owner)
   try {
     const files = await readdir(sessionEnvDir)
     // We are sorting the hook env files by the order in which they are listed
@@ -136,17 +149,17 @@ export async function getSessionEnvironmentScript(): Promise<string | null> {
 
   if (scripts.length === 0) {
     logForDebugging('No session environment scripts found')
-    sessionEnvScript = null
-    sessionEnvOwner = owner
-    return sessionEnvScript
+    state.sessionEnvScript = null
+    state.sessionEnvOwner = owner
+    return state.sessionEnvScript
   }
 
-  sessionEnvScript = scripts.join('\n')
-  sessionEnvOwner = owner
+  state.sessionEnvScript = scripts.join('\n')
+  state.sessionEnvOwner = owner
   logForDebugging(
-    `Session environment script ready (${sessionEnvScript.length} chars total)`,
+    `Session environment script ready (${state.sessionEnvScript.length} chars total)`,
   )
-  return sessionEnvScript
+  return state.sessionEnvScript
 }
 
 const PLAIN_ASSIGNMENT_RE =

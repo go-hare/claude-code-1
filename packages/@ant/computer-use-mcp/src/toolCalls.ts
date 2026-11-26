@@ -853,28 +853,55 @@ function parseKeyChord(text: string): string[] {
 // left_mouse_down / left_mouse_up held-state tracking
 // ---------------------------------------------------------------------------
 
-/**
- * Errors on double-down but not on up-without-down. Module-level, but
- * reset on every lock acquire (handleToolCall → acquireCuLock branch) so
- * a session interrupted mid-drag (overlay stop during left_mouse_down)
- * doesn't leave the flag true for the next lock holder.
- *
- * Still scoped wrong within a single lock cycle if sessions could interleave
- * tool calls, but the lock enforces at-most-one-session-uses-CU so they
- * can't. The per-turn reset is the correctness boundary.
- */
-let mouseButtonHeld = false
-/** Whether mouse_move occurred between left_mouse_down and left_mouse_up.
- *  When false at mouseUp, the decomposed sequence is a click-release (not a
- *  drop) — hit-test at "mouse", not "mouse_full". */
-let mouseMoved = false
+type MouseDragHostState = {
+  /**
+   * Errors on double-down but not on up-without-down. Scoped per session host
+   * (with a standalone fallback when src/utils/sessionRoot is unbound) and
+   * reset on every lock acquire so an interrupted drag never leaks across
+   * hosts or lock holders.
+   */
+  mouseButtonHeld: boolean
+  /** Whether mouse_move occurred between left_mouse_down and left_mouse_up.
+   *  When false at mouseUp, the decomposed sequence is a click-release (not a
+   *  drop) — hit-test at "mouse", not "mouse_full". */
+  mouseMoved: boolean
+}
+
+const defaultCuMcpHost: object = {}
+const mouseDragStateByHost = new WeakMap<object, MouseDragHostState>()
+
+function getCurrentCuMcpHost(): object {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('../../../../src/utils/sessionRoot.js') as {
+      getBootstrapSessionHost?: () => object
+    }
+    if (typeof mod.getBootstrapSessionHost === 'function') {
+      return mod.getBootstrapSessionHost()
+    }
+  } catch {
+    // Standalone package execution/tests without src/ bound
+  }
+  return defaultCuMcpHost
+}
+
+function getMouseDragState(): MouseDragHostState {
+  const host = getCurrentCuMcpHost()
+  let state = mouseDragStateByHost.get(host)
+  if (state === undefined) {
+    state = { mouseButtonHeld: false, mouseMoved: false }
+    mouseDragStateByHost.set(host, state)
+  }
+  return state
+}
 
 /** Clears the cross-call drag flags. Called from Gate-3 on lock-acquire and
  *  from `bindSessionContext` in mcpServer.ts — a fresh lock holder must not
  *  inherit a prior session's mid-drag state. */
 export function resetMouseButtonHeld(): void {
-  mouseButtonHeld = false
-  mouseMoved = false
+  const state = getMouseDragState()
+  state.mouseButtonHeld = false
+  state.mouseMoved = false
 }
 
 /** If a left_mouse_down set the OS button without a matching left_mouse_up
@@ -883,10 +910,11 @@ export function resetMouseButtonHeld(): void {
 async function releaseHeldMouse(
   adapter: ComputerUseHostAdapter,
 ): Promise<void> {
-  if (!mouseButtonHeld) return
+  const state = getMouseDragState()
+  if (!state.mouseButtonHeld) return
   await adapter.executor.mouseUp()
-  mouseButtonHeld = false
-  mouseMoved = false
+  state.mouseButtonHeld = false
+  state.mouseMoved = false
 }
 
 /**
@@ -2507,10 +2535,11 @@ async function handleClickVariant(
   // "mouse_full" actionKind + hit-test), causing spurious rejections on
   // click-tier and read-tier windows. Release first so click() gets a clean
   // slate.
-  if (mouseButtonHeld) {
+  const dragState = getMouseDragState()
+  if (dragState.mouseButtonHeld) {
     await adapter.executor.mouseUp()
-    mouseButtonHeld = false
-    mouseMoved = false
+    dragState.mouseButtonHeld = false
+    dragState.mouseMoved = false
   }
 
   const coord = extractCoordinate(args)
@@ -2787,16 +2816,17 @@ async function handleScroll(
   // hit-test to "mouse_full" so scroll can't be used to drag-drop text onto
   // a click-tier terminal, and mark mouseMoved so the subsequent
   // left_mouse_up hit-tests as a drop not a click-release.
+  const dragState = getMouseDragState()
   const hitGate = await runHitTestGate(
     adapter,
     overrides,
     subGates,
     x,
     y,
-    mouseButtonHeld ? 'mouse_full' : 'mouse',
+    dragState.mouseButtonHeld ? 'mouse_full' : 'mouse',
   )
   if (hitGate) return hitGate
-  if (mouseButtonHeld) mouseMoved = true
+  if (dragState.mouseButtonHeld) dragState.mouseMoved = true
 
   await adapter.executor.scroll(x, y, dx, dy)
   return okText('Scrolled.')
@@ -2813,10 +2843,11 @@ async function handleDrag(
   // across the drag and desyncs the flag from OS state — same mechanism as
   // the handleClickVariant clear above. Release first so drag() gets a
   // clean slate.
-  if (mouseButtonHeld) {
+  const dragState = getMouseDragState()
+  if (dragState.mouseButtonHeld) {
     await adapter.executor.mouseUp()
-    mouseButtonHeld = false
-    mouseMoved = false
+    dragState.mouseButtonHeld = false
+    dragState.mouseMoved = false
   }
 
   // `coordinate` is the END point
@@ -2910,7 +2941,10 @@ async function handleMoveMouse(
   // Upgrade to "mouse" and hit-test the destination. When the button is NOT
   // held: pure positioning, passes at any tier, no hit-test (mouseDown/Up
   // hit-test the cursor to close the mouse_move→left_mouse_down decomposition).
-  const actionKind: CuActionKind = mouseButtonHeld ? 'mouse' : 'mouse_position'
+  const dragState = getMouseDragState()
+  const actionKind: CuActionKind = dragState.mouseButtonHeld
+    ? 'mouse'
+    : 'mouse_position'
   const gate = await runInputActionGates(
     adapter,
     overrides,
@@ -2931,7 +2965,7 @@ async function handleMoveMouse(
     adapter.logger,
   )
 
-  if (mouseButtonHeld) {
+  if (dragState.mouseButtonHeld) {
     // "mouse_full" — same as left_click_drag's to-endpoint. Dragging onto a
     // click-tier terminal is text injection regardless of which primitive
     // (atomic drag vs. decomposed down/move/up) delivers the events.
@@ -2947,7 +2981,7 @@ async function handleMoveMouse(
   }
 
   await adapter.executor.moveMouse(x, y)
-  if (mouseButtonHeld) mouseMoved = true
+  if (dragState.mouseButtonHeld) dragState.mouseMoved = true
   return okText('Moved.')
 }
 
@@ -3047,7 +3081,14 @@ async function handleVirtualMouse(
     ? args.start_coordinate
     : undefined
   const ok = await adapter.executor.virtualMouse({
-    action: action as any,
+    action: action as
+      | 'click'
+      | 'double_click'
+      | 'right_click'
+      | 'move'
+      | 'drag'
+      | 'down'
+      | 'up',
     x: coord[0],
     y: coord[1],
     startX: startCoord?.[0],
@@ -3095,7 +3136,7 @@ async function handleVirtualKeyboard(
   const repeat = typeof args.repeat === 'number' ? args.repeat : undefined
 
   const ok = await adapter.executor.virtualKeyboard({
-    action: action as any,
+    action: action as 'type' | 'combo' | 'press' | 'release' | 'hold',
     text,
     duration,
     repeat,
@@ -3141,7 +3182,10 @@ async function handleStatusIndicator(
   if (action === 'show' && !message) {
     return errorResult("'show' requires a message parameter.", 'bad_args')
   }
-  const result = await adapter.executor.statusIndicator(action as any, message)
+  const result = await adapter.executor.statusIndicator(
+    action as 'show' | 'hide' | 'status',
+    message,
+  )
   if (action === 'status') {
     return okText(
       result.active
@@ -3246,10 +3290,16 @@ async function handlePromptRespond(
   }
 
   const ok = await adapter.executor.respondToPrompt({
-    responseType: responseType as any,
+    responseType: responseType as
+      | 'yes'
+      | 'no'
+      | 'enter'
+      | 'escape'
+      | 'select'
+      | 'type',
     arrowDirection:
-      typeof args.arrow_direction === 'string'
-        ? (args.arrow_direction as any)
+      args.arrow_direction === 'up' || args.arrow_direction === 'down'
+        ? args.arrow_direction
         : undefined,
     arrowCount:
       typeof args.arrow_count === 'number' ? args.arrow_count : undefined,
@@ -3305,10 +3355,14 @@ async function handleOpenTerminal(
   }
 
   const result = await adapter.executor.openTerminal({
-    agent: agent as any,
+    agent: agent as 'claude' | 'codex' | 'gemini' | 'custom',
     command: typeof args.command === 'string' ? args.command : undefined,
     terminal:
-      typeof args.terminal === 'string' ? (args.terminal as any) : undefined,
+      args.terminal === 'wt' ||
+      args.terminal === 'powershell' ||
+      args.terminal === 'cmd'
+        ? args.terminal
+        : undefined,
     workingDirectory:
       typeof args.working_directory === 'string'
         ? args.working_directory
@@ -3884,7 +3938,8 @@ async function handleLeftMouseDown(
   overrides: ComputerUseOverrides,
   subGates: CuSubGates,
 ): Promise<CuCallToolResult> {
-  if (mouseButtonHeld) {
+  const dragState = getMouseDragState()
+  if (dragState.mouseButtonHeld) {
     return errorResult(
       'mouse button already held, call left_mouse_up first',
       'state_conflict',
@@ -3911,8 +3966,8 @@ async function handleLeftMouseDown(
   if (hitGate) return hitGate
 
   await adapter.executor.mouseDown()
-  mouseButtonHeld = true
-  mouseMoved = false
+  dragState.mouseButtonHeld = true
+  dragState.mouseMoved = false
   return okText('Mouse button pressed.')
 }
 
@@ -3925,6 +3980,7 @@ async function handleLeftMouseUp(
   overrides: ComputerUseOverrides,
   subGates: CuSubGates,
 ): Promise<CuCallToolResult> {
+  const dragState = getMouseDragState()
   // Any gate rejection here must release the button FIRST — otherwise the
   // OS button stays pressed and mouseButtonHeld stays true. Recovery
   // attempts (mouse_move back to a safe app) would generate leftMouseDragged
@@ -3939,8 +3995,8 @@ async function handleLeftMouseUp(
     err: CuCallToolResult,
   ): Promise<CuCallToolResult> => {
     await adapter.executor.mouseUp()
-    mouseButtonHeld = false
-    mouseMoved = false
+    dragState.mouseButtonHeld = false
+    dragState.mouseMoved = false
     return err
   }
 
@@ -3961,13 +4017,13 @@ async function handleLeftMouseUp(
     subGates,
     cursor.x,
     cursor.y,
-    mouseMoved ? 'mouse_full' : 'mouse',
+    dragState.mouseMoved ? 'mouse_full' : 'mouse',
   )
   if (hitGate) return releaseFirst(hitGate)
 
   await adapter.executor.mouseUp()
-  mouseButtonHeld = false
-  mouseMoved = false
+  dragState.mouseButtonHeld = false
+  dragState.mouseMoved = false
   return okText('Mouse button released.')
 }
 

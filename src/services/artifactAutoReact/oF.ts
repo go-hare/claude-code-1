@@ -2,25 +2,32 @@
  * densable oF — stop monitor_ws task + disarm autoReact (quiet path for Prs).
  * Source: gold-oF-239.txt
  */
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { SN } from './gates.js'
 import { dollarSo } from './intent.js'
 import { Dso } from './supervisors.js'
 import { un } from './store.js'
 
-const socketMap = new Map<string, { close: () => void }>()
+const socketMapByHost = new HostSlot(
+  () => new Map<string, { close: () => void }>(),
+)
+
+function getSocketMap(): Map<string, { close: () => void }> {
+  return socketMapByHost.of(getBootstrapSessionHost())
+}
 
 export const monitorSocketRegistry = {
   get(taskId: string) {
-    return socketMap.get(taskId)
+    return getSocketMap().get(taskId)
   },
   delete(taskId: string) {
-    socketMap.delete(taskId)
+    getSocketMap().delete(taskId)
   },
   set(taskId: string, socket: { close: () => void }) {
-    socketMap.set(taskId, socket)
+    getSocketMap().set(taskId, socket)
   },
   clear() {
-    socketMap.clear()
+    getSocketMap().clear()
   },
 }
 

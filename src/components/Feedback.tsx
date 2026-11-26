@@ -27,6 +27,7 @@ import { type GitRepoState, getGitState, getIsGit } from '../utils/git.js';
 import { getAuthHeaders, getUserAgent } from '../utils/http.js';
 import { getInMemoryErrors, logError } from '../utils/log.js';
 import { isEssentialTrafficOnly } from '../utils/privacyLevel.js';
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js';
 import { formatFeedbackWithIssueFallback, getFeedbackCommandDisabledReason } from '../utils/feedbackDrafts/gates.js';
 import {
   extractTeammateTranscriptsFromTasks,
@@ -541,22 +542,27 @@ async function loadRawTranscriptJsonl(): Promise<string | null> {
  * Official 2.1.326 #44: preserve typed `/feedback` draft across Ctrl+O/Ctrl+Z
  * remounts, cleared on submit or explicit cancel.
  */
-const feedbackDraftBySession = new Map<string, string>();
+const feedbackDraftsBySession = new RootSessionSlot<Map<string, string>>(() => new Map());
+
+function getFeedbackDraftMap(): Map<string, string> {
+  return feedbackDraftsBySession.of(getBootstrapSession());
+}
 
 export function getFeedbackDraft(sessionId: string): string {
-  return feedbackDraftBySession.get(sessionId) ?? '';
+  return getFeedbackDraftMap().get(sessionId) ?? '';
 }
 
 export function setFeedbackDraft(sessionId: string, draft: string): void {
+  const drafts = getFeedbackDraftMap();
   if (draft.length === 0) {
-    feedbackDraftBySession.delete(sessionId);
+    drafts.delete(sessionId);
   } else {
-    feedbackDraftBySession.set(sessionId, draft);
+    drafts.set(sessionId, draft);
   }
 }
 
 export function clearFeedbackDraft(sessionId: string): void {
-  feedbackDraftBySession.delete(sessionId);
+  getFeedbackDraftMap().delete(sessionId);
 }
 
 export function Feedback({

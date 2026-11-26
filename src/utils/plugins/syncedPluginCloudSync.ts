@@ -21,7 +21,7 @@ import {
 } from 'fs/promises'
 import { tmpdir } from 'os'
 import { monitorEventLoopDelay } from 'perf_hooks'
-import { basename, join, relative } from 'path'
+import { basename, join, relative, resolve } from 'path'
 import { Transform } from 'stream'
 import { pipeline } from 'stream/promises'
 import { z } from 'zod'
@@ -38,6 +38,12 @@ import {
   resolveSyncPluginsDownloadStallMs,
 } from '../residualFinalEnvGates.js'
 import { isSessionRefsSyncEnabled } from '../sessionRefsGate.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import { sleep } from '../sleep.js'
 import { getOAuthHeaders, prepareApiRequest } from '../teleport/api.js'
 import { getPluginsDirectory } from './pluginDirectories.js'
@@ -671,39 +677,59 @@ type PluginsSyncState = {
   lastCompleteList: LastCompleteSyncedList | null
 }
 
-const pluginsSync: PluginsSyncState = {
-  syncErrors: [],
-  pendingTrashRemovals: [],
-  changesLanded: 0,
-  changesReloaded: 0,
-  reloadsCompleted: 0,
-  holdsSet: 0,
-  reloadHeld: false,
-  lastSyncedLaneLoad: null,
-  syncedLaneOpened: false,
-  syncedDirsLoadedHere: new Set(),
-  dirsNewHere: new Set(),
-  awaitsFirstRun: false,
-  lastCompleteList: null,
+type SyncedPluginCloudSyncHostState = {
+  pluginsSync: PluginsSyncState
+  firstSyncPromise: Promise<void> | null
+}
+
+const syncedPluginCloudSyncHostSlot =
+  new HostSlot<SyncedPluginCloudSyncHostState>(() => ({
+    pluginsSync: {
+      syncErrors: [],
+      pendingTrashRemovals: [],
+      changesLanded: 0,
+      changesReloaded: 0,
+      reloadsCompleted: 0,
+      holdsSet: 0,
+      reloadHeld: false,
+      lastSyncedLaneLoad: null,
+      syncedLaneOpened: false,
+      syncedDirsLoadedHere: new Set(),
+      dirsNewHere: new Set(),
+      awaitsFirstRun: false,
+      lastCompleteList: null,
+    },
+    firstSyncPromise: null,
+  }))
+
+function getSyncedPluginCloudSyncHostState(): SyncedPluginCloudSyncHostState {
+  return syncedPluginCloudSyncHostSlot.of(getBootstrapSessionHost())
+}
+
+function getMutablePluginsSyncState(): PluginsSyncState {
+  return getSyncedPluginCloudSyncHostState().pluginsSync
 }
 
 export function getPluginsSyncState(): Readonly<PluginsSyncState> {
-  return pluginsSync
+  return getMutablePluginsSyncState()
 }
 
 export function holdSyncedPluginReload(): number {
+  const pluginsSync = getMutablePluginsSyncState()
   pluginsSync.reloadHeld = true
   pluginsSync.holdsSet++
   return pluginsSync.holdsSet
 }
 
 export function endSyncedPluginReloadHold(holdToken: number): void {
+  const pluginsSync = getMutablePluginsSyncState()
   if (pluginsSync.holdsSet === holdToken) {
     pluginsSync.reloadHeld = false
   }
 }
 
 export function markSyncedPluginsReloaded(landedStamp: number): void {
+  const pluginsSync = getMutablePluginsSyncState()
   pluginsSync.changesReloaded = Math.max(
     pluginsSync.changesReloaded,
     landedStamp,
@@ -712,6 +738,7 @@ export function markSyncedPluginsReloaded(landedStamp: number): void {
 }
 
 export function markSyncedDirsLoaded(dirs: readonly string[]): void {
+  const pluginsSync = getMutablePluginsSyncState()
   for (const dir of dirs) {
     pluginsSync.syncedDirsLoadedHere.add(dir)
     pluginsSync.dirsNewHere.delete(dir)
@@ -724,6 +751,7 @@ export function markSyncedDirsLoaded(dirs: readonly string[]): void {
 }
 
 export function resetSyncedLaneState(): void {
+  const pluginsSync = getMutablePluginsSyncState()
   pluginsSync.syncedLaneOpened = false
   pluginsSync.syncedDirsLoadedHere.clear()
   pluginsSync.dirsNewHere.clear()
@@ -747,7 +775,7 @@ export function checkSyncedPluginListStatus(
   roots: readonly string[],
   pluginPath: string,
   readList: () => LastCompleteSyncedList | null = () =>
-    pluginsSync.lastCompleteList,
+    getMutablePluginsSyncState().lastCompleteList,
 ): 'not_listed' | 'list_unreadable' | undefined {
   try {
     const lastList = readList()
@@ -779,6 +807,7 @@ export function recordCompleteSyncedPluginsList(
   listed: readonly SyncedCloudPlugin[],
   root = getSyncedPluginsRoot(),
 ): LastCompleteSyncedList {
+  const pluginsSync = getMutablePluginsSyncState()
   const prev = pluginsSync.lastCompleteList
   const dirsById = new Map<string, Set<string>>()
   for (const row of listed) {
@@ -1040,7 +1069,7 @@ export function formatSyncedRootRefusedError(
 }
 
 export function getSyncedPluginSyncErrors(): readonly SyncErrorRow[] {
-  return pluginsSync.syncErrors
+  return getMutablePluginsSyncState().syncErrors
 }
 
 /** leftover 239 Gyo */
@@ -1049,6 +1078,7 @@ export function recordSyncedPluginError(
   type: 'network-error' | 'generic-error',
   detail: string,
 ): void {
+  const pluginsSync = getMutablePluginsSyncState()
   const source = `${plugin.name}@${SYNCED_MARKETPLACE_NAME}`
   if (type === 'network-error') {
     pluginsSync.syncErrors.push({
@@ -1263,7 +1293,7 @@ async function extractAndPromoteSyncedPlugin(
         return promotionFailed(getErrnoCode(err))
       }
       if (displaced !== undefined) {
-        pluginsSync.pendingTrashRemovals.push(
+        getMutablePluginsSyncState().pendingTrashRemovals.push(
           rm(displaced, { recursive: true, force: true }).catch(() => {}),
         )
       }
@@ -1411,7 +1441,49 @@ function timingSummary(timings: { downloadMs: number[]; extractMs: number[] }) {
   }
 }
 
+// Process-global per-staging-dir lock so concurrent ALS hosts sharing the same
+// synced plugins `.staging/<pid>` directory serialize staging/promotion/sweep
+// operations and never `rm` each other's in-flight extraction tree.
+const syncedStagingLocksByDir = new Map<string, Promise<void>>()
+
+async function withSyncedStagingLock<T>(
+  stagingDir: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = resolve(stagingDir)
+  const capturedSession = getActiveSessionFromAls()
+  const prev = syncedStagingLocksByDir.get(key) ?? Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>(r => {
+    release = r
+  })
+  const tail = prev.then(() => gate)
+  syncedStagingLocksByDir.set(key, tail)
+  try {
+    await prev
+    return capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+      ? await runWithSession(capturedSession, fn)
+      : await fn()
+  } finally {
+    release()
+    void tail.finally(() => {
+      if (syncedStagingLocksByDir.get(key) === tail) {
+        syncedStagingLocksByDir.delete(key)
+      }
+    })
+  }
+}
+
 export async function syncCloudSyncedPlugins(): Promise<void> {
+  return withSyncedStagingLock(
+    getSyncedStagingDir(),
+    syncCloudSyncedPluginsImpl,
+  )
+}
+
+async function syncCloudSyncedPluginsImpl(): Promise<void> {
+  const pluginsSync = getMutablePluginsSyncState()
   const started = Date.now()
   pluginsSync.syncErrors = []
   let loopDelay: ReturnType<typeof monitorEventLoopDelay> | undefined
@@ -1725,11 +1797,10 @@ export async function syncCloudSyncedPlugins(): Promise<void> {
         }
       })
       pluginsSync.pendingTrashRemovals.push(sweep)
+      await sweep
     }
   }
 }
-
-let firstSyncPromise: Promise<void> | null = null
 
 /** leftover 239 qyo — L1h/N1h/$1h callers. */
 export function isSyncedPluginSyncKickEnabled(): boolean {
@@ -1738,7 +1809,8 @@ export function isSyncedPluginSyncKickEnabled(): boolean {
 
 /** leftover 239 L1h */
 export function kickFirstSyncedPluginSync(): void {
-  firstSyncPromise ??= syncCloudSyncedPlugins().catch(err => {
+  const hostState = getSyncedPluginCloudSyncHostState()
+  hostState.firstSyncPromise ??= syncCloudSyncedPlugins().catch(err => {
     logForDebugging(
       `plugins_sync_unexpected_error: ${err instanceof Error ? err.message : String(err)}`,
       { level: 'error' },
@@ -1752,7 +1824,9 @@ export function kickFirstSyncedPluginSync(): void {
 /** leftover 239 N1h — official always kicks zXl (env only gates AZn under Fhr). */
 export function awaitFirstSyncedPluginSync(): Promise<void> {
   kickFirstSyncedPluginSync()
-  return firstSyncPromise ?? Promise.resolve()
+  return (
+    getSyncedPluginCloudSyncHostState().firstSyncPromise ?? Promise.resolve()
+  )
 }
 
 /**
@@ -1761,9 +1835,12 @@ export function awaitFirstSyncedPluginSync(): Promise<void> {
  */
 export function remintFirstSyncedPluginSync(): Promise<void> {
   getSessionRefsStore().discardInflight()
+  const hostState = getSyncedPluginCloudSyncHostState()
+  let firstSyncPromise = hostState.firstSyncPromise
   firstSyncPromise = (firstSyncPromise ?? Promise.resolve())
     .catch(() => {})
     .then(() => syncCloudSyncedPlugins())
+  hostState.firstSyncPromise = firstSyncPromise
   return firstSyncPromise
 }
 
@@ -1774,5 +1851,5 @@ export async function ensureSyncedPluginDirsHydrated(): Promise<void> {
 }
 
 export function resetFirstSyncedPluginSyncForTests(): void {
-  firstSyncPromise = null
+  getSyncedPluginCloudSyncHostState().firstSyncPromise = null
 }

@@ -10,9 +10,28 @@
  * subscribe returns unsubscribe; emit fans out to listeners.
  */
 
+import {
+  HostSlot,
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
+
 type Listener = (serverName: string) => void
 
-const listeners = new Set<Listener>()
+type HostMcpReauthSignalState = {
+  reauthListeners: Set<Listener>
+  headersHelperConfigIdentity: WeakSet<object>
+}
+
+const hostMcpReauthSignalSlot = new HostSlot<HostMcpReauthSignalState>(() => ({
+  reauthListeners: new Set<Listener>(),
+  headersHelperConfigIdentity: new WeakSet<object>(),
+}))
+
+function getHostMcpReauthSignalState(): HostMcpReauthSignalState {
+  return hostMcpReauthSignalSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable `prg` / `DYt(e)` — object-identity WeakSet of MCP server configs
@@ -23,10 +42,8 @@ const listeners = new Set<Listener>()
  * **Not** "truthy `headersHelper` string" — densable `oKn` does not treat
  * `headersHelper` as skip; only `n5e` / `DYt` / design-URL / XAA.
  */
-const headersHelperConfigIdentity = new WeakSet<object>()
-
 export function markMcpHeadersHelperConfig(config: object): void {
-  headersHelperConfigIdentity.add(config)
+  getHostMcpReauthSignalState().headersHelperConfigIdentity.add(config)
 }
 
 /** densable `DYt(e)` */
@@ -34,20 +51,27 @@ export function isMcpHeadersHelperConfig(config: unknown): config is object {
   return (
     typeof config === 'object' &&
     config !== null &&
-    headersHelperConfigIdentity.has(config)
+    getHostMcpReauthSignalState().headersHelperConfigIdentity.has(config)
   )
 }
 
 export function subscribeMcpNeedsReauth(listener: Listener): () => void {
-  listeners.add(listener)
+  const state = getHostMcpReauthSignalState()
+  const capturedSession = getActiveSessionFromAls()
+  const wrapped: Listener =
+    capturedSession !== undefined
+      ? serverName =>
+          runWithSession(capturedSession, () => listener(serverName))
+      : listener
+  state.reauthListeners.add(wrapped)
   return () => {
-    listeners.delete(listener)
+    state.reauthListeners.delete(wrapped)
   }
 }
 
 export function emitMcpNeedsReauth(serverName: string): void {
   const errors: unknown[] = []
-  for (const listener of listeners) {
+  for (const listener of getHostMcpReauthSignalState().reauthListeners) {
     try {
       listener(serverName)
     } catch (error) {
@@ -155,5 +179,5 @@ export function isAnthropicDesignMcpUrl(url: string): boolean {
 
 /** Test helper — clear subscribers between cases. */
 export function clearMcpNeedsReauthListenersForTests(): void {
-  listeners.clear()
+  getHostMcpReauthSignalState().reauthListeners.clear()
 }

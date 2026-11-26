@@ -12,6 +12,7 @@ import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import { count } from 'src/utils/array.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { formatFileSize } from 'src/utils/format.js';
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js';
 import {
   commandHasGitStateSwitch,
   getOmittedBashEditDiffPaths,
@@ -62,11 +63,13 @@ const CONCURRENT_COMMAND_NOTE =
   '(another command ran in this repository at the same time; a change made by either may show under either result)';
 const TREE_MOVED_NOTE =
   '(a git step in this command can move the working tree, so these may be its changes, not edits)';
-let firstExplainedDiffRef: WeakRef<BashEditDiff> | null = null;
+const firstExplainedDiffSlot = new RootSessionSlot<{
+  ref: WeakRef<BashEditDiff> | null;
+}>(() => ({ ref: null }));
 
 /** Clear the tracked first-explained diff (e.g. for tests or session reset). */
 export function resetFirstExplainedDiff(): void {
-  firstExplainedDiffRef = null;
+  firstExplainedDiffSlot.of(getBootstrapSession()).ref = null;
 }
 
 function formatFileCount(n: number): string {
@@ -124,9 +127,10 @@ function BashEditDiffView({
       </MessageResponse>
     );
   }
-  let firstDiff = firstExplainedDiffRef?.deref();
+  const diffState = firstExplainedDiffSlot.of(getBootstrapSession());
+  let firstDiff = diffState.ref?.deref();
   if (firstDiff === undefined) {
-    firstExplainedDiffRef = new WeakRef(diff);
+    diffState.ref = new WeakRef(diff);
     firstDiff = diff;
   }
   const convenienceNote =

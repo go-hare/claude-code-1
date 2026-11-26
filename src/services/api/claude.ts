@@ -433,6 +433,10 @@ import {
   startSessionActivity,
   stopSessionActivity,
 } from '../../utils/sessionActivity.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionRoot.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   isBetaTracingEnabled,
@@ -1655,14 +1659,64 @@ export async function* executeNonStreamingRequest(
 }
 
 /**
- * Module-level cache of deferred-tool lines that have already been announced
+ * Per-root-session cache of deferred-tool lines that have already been announced
  * via <available-deferred-tools>. Because the injection is ephemeral (appended
  * to a local `messagesForAPI` that is never persisted back into the caller's
  * message history), we cannot scan history to detect prior injections — the
- * injected message is gone after each API call. Instead we keep this Set so we
- * only re-inject when new deferred tools appear (e.g. MCP server connects).
+ * injected message is gone after each API call. Scoped via `RootSessionSlot`
+ * so concurrent host sessions announce independently on Turn 1.
  */
-const lastAnnouncedDeferredTools = new Set<string>()
+const lastAnnouncedDeferredToolsSlot = new RootSessionSlot(
+  () => new Set<string>(),
+)
+
+export function getLastAnnouncedDeferredTools(): Set<string> {
+  return lastAnnouncedDeferredToolsSlot.of(getBootstrapSession())
+}
+
+export function resetLastAnnouncedDeferredTools(): void {
+  getLastAnnouncedDeferredTools().clear()
+}
+
+export function maybeAppendDeferredToolsAnnouncement<T>(
+  messagesForAPI: T[],
+  tools: Tools,
+  deferredToolNames: ReadonlySet<string>,
+): (T | UserMessage)[] {
+  // Diff current deferred tools against what's already been announced in
+  // prior <available-deferred-tools> injections. Only re-inject when new
+  // tools appear (e.g. MCP server connects mid-session).
+  const deferredToolList = tools
+    .filter(t => deferredToolNames.has(t.name))
+    .map(formatDeferredToolLine)
+    .sort()
+    .join('\n')
+
+  if (!deferredToolList) {
+    return messagesForAPI
+  }
+
+  const lastAnnouncedDeferredTools = getLastAnnouncedDeferredTools()
+  const currentTools = new Set(deferredToolList.split('\n'))
+  const hasNewTools = [...currentTools].some(
+    t => !lastAnnouncedDeferredTools.has(t),
+  )
+
+  if (!hasNewTools) {
+    return messagesForAPI
+  }
+
+  lastAnnouncedDeferredTools.clear()
+  for (const t of currentTools) lastAnnouncedDeferredTools.add(t)
+
+  return [
+    ...messagesForAPI,
+    createUserMessage({
+      content: `<system-reminder>\n<available-deferred-tools>\n${deferredToolList}\n</available-deferred-tools>\nDeferred tools appear by name above. Their schemas are NOT loaded — calling them directly will fail with InputValidationError. Use ${SEARCH_EXTRA_TOOLS_TOOL_NAME} with query "select:<name>[,<name>...]" to load tool schemas, then call each tool directly (do not wrap through ExecuteExtraTool).\n</system-reminder>`,
+      isMeta: true,
+    }),
+  ]
+}
 
 /** Official c0e — output-content-filter streaming retry cap (#14). */
 const OUTPUT_FILTERED_RETRY_CAP = 1
@@ -1683,13 +1737,17 @@ type MediaItemCapEntry = {
   gaveUp: boolean
 }
 
-const mediaItemCapBySession = new Map<string, MediaItemCapEntry>()
+const mediaItemCapBySessionSlot = new RootSessionSlot<
+  Map<string, MediaItemCapEntry>
+>(() => new Map<string, MediaItemCapEntry>())
 
 export function getSessionMediaItemCap(
   sessionId: string,
   model: string,
 ): MediaItemCapEntry | undefined {
-  const entry = mediaItemCapBySession.get(sessionId)
+  const entry = mediaItemCapBySessionSlot
+    .peek(getBootstrapSession())
+    ?.get(sessionId)
   return entry?.model === model ? entry : undefined
 }
 
@@ -1697,11 +1755,11 @@ export function setSessionMediaItemCap(
   sessionId: string,
   entry: MediaItemCapEntry,
 ): void {
-  mediaItemCapBySession.set(sessionId, entry)
+  mediaItemCapBySessionSlot.of(getBootstrapSession()).set(sessionId, entry)
 }
 
 export function clearSessionMediaItemCap(sessionId: string): void {
-  mediaItemCapBySession.delete(sessionId)
+  mediaItemCapBySessionSlot.peek(getBootstrapSession())?.delete(sessionId)
 }
 
 function isMediaBlock(block: unknown): boolean {
@@ -2342,34 +2400,11 @@ async function* queryModel(
   // via persisted deferred_tools_delta attachments instead of this
   // ephemeral prepend (which busts cache whenever the pool changes).
   if (useSearchExtraTools && !isDeferredToolsDeltaEnabled()) {
-    // Diff current deferred tools against what's already been announced in
-    // prior <available-deferred-tools> injections. Only re-inject when new
-    // tools appear (e.g. MCP server connects mid-session).
-    const deferredToolList = tools
-      .filter(t => deferredToolNames.has(t.name))
-      .map(formatDeferredToolLine)
-      .sort()
-      .join('\n')
-
-    if (deferredToolList) {
-      const currentTools = new Set(deferredToolList.split('\n'))
-      const hasNewTools = [...currentTools].some(
-        t => !lastAnnouncedDeferredTools.has(t),
-      )
-
-      if (hasNewTools) {
-        lastAnnouncedDeferredTools.clear()
-        for (const t of currentTools) lastAnnouncedDeferredTools.add(t)
-
-        messagesForAPI = [
-          ...messagesForAPI,
-          createUserMessage({
-            content: `<system-reminder>\n<available-deferred-tools>\n${deferredToolList}\n</available-deferred-tools>\nDeferred tools appear by name above. Their schemas are NOT loaded — calling them directly will fail with InputValidationError. Use ${SEARCH_EXTRA_TOOLS_TOOL_NAME} with query "select:<name>[,<name>...]" to load tool schemas, then call each tool directly (do not wrap through ExecuteExtraTool).\n</system-reminder>`,
-            isMeta: true,
-          }),
-        ]
-      }
-    }
+    messagesForAPI = maybeAppendDeferredToolsAnnouncement(
+      messagesForAPI,
+      tools,
+      deferredToolNames,
+    )
   }
 
   // Chrome tool-search instructions: when the delta attachment is enabled,

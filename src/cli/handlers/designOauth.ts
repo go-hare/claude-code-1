@@ -12,6 +12,7 @@ import { getAPIProvider } from '../../utils/model/providers.js'
 import { isPolicyAllowed } from '../../services/policyLimits/index.js'
 import { OAuthService } from '../../services/oauth/index.js'
 import { getSecureStorage } from '../../utils/secureStorage/index.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -31,7 +32,11 @@ export type DesignOauthSlot = {
   clientId: string
 }
 
-let designOauth: DesignOauthSlot | null = null
+const designOauthHostSlot = new HostSlot<{
+  designOauth: DesignOauthSlot | null
+}>(() => ({
+  designOauth: null,
+}))
 
 /** densable `Pqt` @195244333 */
 export function designOAuthClientId(): string {
@@ -97,11 +102,12 @@ export async function readDesignOauth(
         if (isDesignOauthSlot(stored?.designOauth)) return stored.designOauth
       }
     }
-    if (designOauth) return designOauth
+    const hostState = designOauthHostSlot.of(getBootstrapSessionHost())
+    if (hostState.designOauth) return hostState.designOauth
     const bag = await getSecureStorage().readAsync()
     const slot = (bag as { designOauth?: unknown } | null)?.designOauth
     if (!isDesignOauthSlot(slot)) return null
-    designOauth = slot
+    hostState.designOauth = slot
     return slot
   } catch (err) {
     logForDebugging(
@@ -153,7 +159,7 @@ export async function readClaudeAiOauthFromCredentials(
 export async function writeDesignOauth(
   slot: DesignOauthSlot,
 ): Promise<{ success: boolean }> {
-  designOauth = slot
+  designOauthHostSlot.of(getBootstrapSessionHost()).designOauth = slot
   try {
     const store = getSecureStorage()
     const bag = ((await store.readAsync()) ?? {}) as Record<string, unknown>
@@ -328,7 +334,7 @@ export function grantDesignOauthSlot(
 }
 
 export function resetDesignOauthForTests(): void {
-  designOauth = null
+  designOauthHostSlot.of(getBootstrapSessionHost()).designOauth = null
 }
 
 export type DesignLoginIqtResult =

@@ -14,6 +14,10 @@ import {
 } from '../../utils/messages.js'
 import { getMainLoopModel } from '../../utils/model/model.js'
 import { getSessionMemoryPath } from '../../utils/permissions/filesystem.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { processSessionStartHooks } from '../../utils/sessionStart.js'
 import { getTranscriptPath } from '../../utils/sessionPaths.js'
 import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js'
@@ -62,13 +66,21 @@ export const DEFAULT_SM_COMPACT_CONFIG: SessionMemoryCompactConfig = {
   maxTokens: 40_000,
 }
 
-// Current configuration (starts with defaults)
-let smCompactConfig: SessionMemoryCompactConfig = {
-  ...DEFAULT_SM_COMPACT_CONFIG,
+type SessionMemoryCompactState = {
+  config: SessionMemoryCompactConfig
+  configInitialized: boolean
 }
 
-// Track whether config has been initialized from remote
-let configInitialized = false
+const smCompactStateBySession = new RootSessionSlot<SessionMemoryCompactState>(
+  () => ({
+    config: { ...DEFAULT_SM_COMPACT_CONFIG },
+    configInitialized: false,
+  }),
+)
+
+function getSmCompactState(): SessionMemoryCompactState {
+  return smCompactStateBySession.of(getBootstrapSession())
+}
 
 /**
  * Set the session memory compact configuration
@@ -76,8 +88,9 @@ let configInitialized = false
 export function setSessionMemoryCompactConfig(
   config: Partial<SessionMemoryCompactConfig>,
 ): void {
-  smCompactConfig = {
-    ...smCompactConfig,
+  const state = getSmCompactState()
+  state.config = {
+    ...state.config,
     ...config,
   }
 }
@@ -86,15 +99,16 @@ export function setSessionMemoryCompactConfig(
  * Get the current session memory compact configuration
  */
 export function getSessionMemoryCompactConfig(): SessionMemoryCompactConfig {
-  return { ...smCompactConfig }
+  return { ...getSmCompactState().config }
 }
 
 /**
  * Reset config state (useful for testing)
  */
 export function resetSessionMemoryCompactConfig(): void {
-  smCompactConfig = { ...DEFAULT_SM_COMPACT_CONFIG }
-  configInitialized = false
+  const state = getSmCompactState()
+  state.config = { ...DEFAULT_SM_COMPACT_CONFIG }
+  state.configInitialized = false
 }
 
 /**
@@ -102,10 +116,11 @@ export function resetSessionMemoryCompactConfig(): void {
  * Only fetches once per session - subsequent calls return immediately.
  */
 async function initSessionMemoryCompactConfig(): Promise<void> {
-  if (configInitialized) {
+  const state = getSmCompactState()
+  if (state.configInitialized) {
     return
   }
-  configInitialized = true
+  state.configInitialized = true
 
   // Load config from GrowthBook, merging with defaults
   const remoteConfig = await getDynamicConfig_BLOCKS_ON_INIT<

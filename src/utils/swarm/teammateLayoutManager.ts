@@ -1,11 +1,23 @@
 import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js'
 import { AGENT_COLORS } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { detectAndGetBackend } from './backends/registry.js'
 import type { PaneBackend } from './backends/types.js'
 
-// Track color assignments for teammates (persisted per session)
-const teammateColorAssignments = new Map<string, AgentColorName>()
-let colorIndex = 0
+type TeammateLayoutHostState = {
+  // Track color assignments for teammates (persisted per host)
+  teammateColorAssignments: Map<string, AgentColorName>
+  colorIndex: number
+}
+
+const teammateLayoutHostSlot = new HostSlot<TeammateLayoutHostState>(() => ({
+  teammateColorAssignments: new Map<string, AgentColorName>(),
+  colorIndex: 0,
+}))
+
+function getTeammateLayoutHostState(): TeammateLayoutHostState {
+  return teammateLayoutHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Gets the appropriate backend for the current environment.
@@ -20,14 +32,15 @@ async function getBackend(): Promise<PaneBackend> {
  * Colors are assigned in round-robin order.
  */
 export function assignTeammateColor(teammateId: string): AgentColorName {
-  const existing = teammateColorAssignments.get(teammateId)
+  const hostState = getTeammateLayoutHostState()
+  const existing = hostState.teammateColorAssignments.get(teammateId)
   if (existing) {
     return existing
   }
 
-  const color = AGENT_COLORS[colorIndex % AGENT_COLORS.length]!
-  teammateColorAssignments.set(teammateId, color)
-  colorIndex++
+  const color = AGENT_COLORS[hostState.colorIndex % AGENT_COLORS.length]!
+  hostState.teammateColorAssignments.set(teammateId, color)
+  hostState.colorIndex++
 
   return color
 }
@@ -38,7 +51,7 @@ export function assignTeammateColor(teammateId: string): AgentColorName {
 export function getTeammateColor(
   teammateId: string,
 ): AgentColorName | undefined {
-  return teammateColorAssignments.get(teammateId)
+  return getTeammateLayoutHostState().teammateColorAssignments.get(teammateId)
 }
 
 /**
@@ -46,8 +59,9 @@ export function getTeammateColor(
  * Called during team cleanup to reset state for potential new teams.
  */
 export function clearTeammateColors(): void {
-  teammateColorAssignments.clear()
-  colorIndex = 0
+  const hostState = getTeammateLayoutHostState()
+  hostState.teammateColorAssignments.clear()
+  hostState.colorIndex = 0
 }
 
 /**

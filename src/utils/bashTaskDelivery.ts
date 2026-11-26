@@ -6,10 +6,13 @@ import { createHash, randomUUID, type UUID } from 'crypto'
 import { z } from 'zod/v4'
 import type { AssistantMessage, UserMessage } from '../types/message.js'
 import {
+  BashTaskDeliveryBag,
+  bashTaskDeliveryBagOf,
+  type BashTaskDeliveryOutcome,
+  type BashTaskSnapshotEntry,
   GET_TASK_TOOL_NAME,
-  reportedBashTaskDeliveries,
-  setBashTaskDeliveryOutcome,
 } from './bashTaskDeliveryOutcomes.js'
+import { getBootstrapSessionHost } from './sessionHost.js'
 import { NO_CONTENT_MESSAGE } from '../constants/messages.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -20,6 +23,87 @@ import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTo
 import { jsonStringify } from './slowOperations.js'
 import { getDefaultBashTimeoutMs, getMaxBashTimeoutMs } from './timeouts.js'
 import { formatDuration } from './format.js'
+
+export {
+  BashTaskDeliveryBag,
+  bashTaskDeliveryBagOf,
+  type BashTaskDeliveryOutcome,
+  type BashTaskSnapshotEntry,
+  GET_TASK_TOOL_NAME,
+}
+
+/**
+ * Official 2.1.331 @305046105 `yn()` — per-`SessionHost` `BashTaskDeliveryBag`
+ * (`dx.of(N().host)`), delegating directly to `bashTaskDeliveryOutcomes.ts` so
+ * both modules share the exact same bag per `SessionHost` regardless of active
+ * ALS context.
+ */
+export function getBashTaskDeliveryBag(): BashTaskDeliveryBag {
+  return bashTaskDeliveryBagOf(getBootstrapSessionHost())
+}
+
+export function bashTaskDeliveryOutcomes(): Map<
+  string,
+  BashTaskDeliveryOutcome
+> {
+  return getBashTaskDeliveryBag().bashTaskDeliveryOutcomes
+}
+
+export function reportedBashTaskDeliveries(): Set<string> {
+  return getBashTaskDeliveryBag().reportedBashTaskDeliveries
+}
+
+export function setBashTaskDeliveryOutcome(
+  messageId: string,
+  outcome: BashTaskDeliveryOutcome,
+): void {
+  getBashTaskDeliveryBag().bashTaskDeliveryOutcomes.set(messageId, outcome)
+}
+
+export function isBashTaskDeliveryHosted(
+  messageId: string | undefined,
+): boolean {
+  if (messageId === undefined) return true
+  return (
+    getBashTaskDeliveryBag().bashTaskDeliveryOutcomes.get(messageId) !==
+    'no_host'
+  )
+}
+
+export function rememberBashTaskSnapshot(
+  taskId: string,
+  snapshot: unknown,
+  agentId?: string,
+): void {
+  getBashTaskDeliveryBag().rememberBashTaskSnapshot(taskId, snapshot, agentId)
+}
+
+export function lookupBashTaskSnapshot(
+  taskId: string,
+  agentId?: string,
+): BashTaskSnapshotEntry | undefined {
+  const entry = getBashTaskDeliveryBag().bashTaskSnapshots.get(taskId)
+  if (!entry) return undefined
+  let caller = agentId
+  if (caller !== undefined) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getMainThreadAgentId } =
+        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+      if (caller === getMainThreadAgentId()) caller = undefined
+    } catch {
+      // ignore
+    }
+  }
+  if (caller !== undefined && entry.agentId !== caller) {
+    return undefined
+  }
+  return entry
+}
+
+export function resetBashTaskDeliveryForTests(): void {
+  getBashTaskDeliveryBag().reset()
+}
 
 /** densable `gF` — GB `tengu_violin_rosin` && !qd() && !q4t() && !Or(). */
 export function isBashTaskGetDeliveryEnabled(): boolean {
@@ -774,8 +858,9 @@ export function spliceBashTaskDelivery(
   const parsed = parseSnapshot(snapshot)
   if (!parsed) {
     if (opts.report) {
-      setBashTaskDeliveryOutcome(messageId, 'no_host')
-      const reported = reportedBashTaskDeliveries()
+      const bag = getBashTaskDeliveryBag()
+      bag.bashTaskDeliveryOutcomes.set(messageId, 'no_host')
+      const reported = bag.reportedBashTaskDeliveries
       if (!reported.has(messageId)) {
         reported.add(messageId)
         logEvent('tengu_bash_task_delivered', {
@@ -819,8 +904,9 @@ export function spliceBashTaskDelivery(
   const structure = afterTurn ? 'after_turn' : append ? 'append' : 'new_turn'
   if (opts.report) {
     const outcome = hosted ? 'spliced' : 'no_host'
-    setBashTaskDeliveryOutcome(messageId, outcome)
-    const reported = reportedBashTaskDeliveries()
+    const bag = getBashTaskDeliveryBag()
+    bag.bashTaskDeliveryOutcomes.set(messageId, outcome)
+    const reported = bag.reportedBashTaskDeliveries
     if (!reported.has(messageId)) {
       reported.add(messageId)
       logEvent('tengu_bash_task_delivered', {

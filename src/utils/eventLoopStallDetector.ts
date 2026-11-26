@@ -11,23 +11,50 @@
  * the call site. This module is the real implementation (was a stub).
  */
 
-import { instances } from '@anthropic/ink'
+import { Ns } from '@anthropic/ink'
+import { registerCleanup } from './cleanupRegistry.js'
+import { HostSlot } from './hostSlot.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 
 const INTERVAL_MS = 200
 const STALL_THRESHOLD_MS = 500
 /** densable e1S — stalls longer than this are treated as sleep/wake. */
 const SLEEP_THRESHOLD_MS = 5000
 
-let timer: ReturnType<typeof setInterval> | null = null
-let lastTickAt = 0
-let totalStalls = 0
-let cumulativeStallMs = 0
-let tickCount = 0
-let lastCpuSample: CpuSample | null = null
-
 type CpuSample = {
   cpuTimeMs: number
   majorPageFaults: number
+}
+
+type EventLoopStallHostState = {
+  timer: ReturnType<typeof setInterval> | null
+  lastTickAt: number
+  totalStalls: number
+  cumulativeStallMs: number
+  tickCount: number
+  lastCpuSample: CpuSample | null
+  cleanupRegistered: boolean
+}
+
+const eventLoopStallHostSlot = new HostSlot<EventLoopStallHostState>(() => ({
+  timer: null,
+  lastTickAt: 0,
+  totalStalls: 0,
+  cumulativeStallMs: 0,
+  tickCount: 0,
+  lastCpuSample: null,
+  cleanupRegistered: false,
+}))
+
+function getEventLoopStallHostState(): EventLoopStallHostState {
+  return eventLoopStallHostSlot.of(getBootstrapSessionHost())
+}
+
+function stopDetectorState(state: EventLoopStallHostState): void {
+  if (state.timer !== null) {
+    clearInterval(state.timer)
+    state.timer = null
+  }
 }
 
 /**
@@ -81,36 +108,40 @@ export function sampleRss(): {
  * Idempotent. Interval is unref'd so it does not keep the process alive.
  */
 export function startEventLoopStallDetector(): void {
-  if (timer !== null) return
-  lastTickAt = Date.now()
-  lastCpuSample = sampleCpuAndPageFaults()
+  const state = getEventLoopStallHostState()
+  if (state.timer !== null) return
+  const registry = Ns()
+  state.lastTickAt = Date.now()
+  state.lastCpuSample = sampleCpuAndPageFaults()
   if (process.env.CLAUDE_CODE_DEBUG) {
     console.error(
       `[event-loop-stall] detector started (interval=${INTERVAL_MS}ms, threshold=${STALL_THRESHOLD_MS}ms)`,
     )
   }
-  timer = setInterval(() => {
+  state.timer = setInterval(() => {
     const now = Date.now()
-    const actual = now - lastTickAt
+    const actual = now - state.lastTickAt
     const over = actual - INTERVAL_MS
-    tickCount++
+    state.tickCount++
     const cpu = sampleCpuAndPageFaults()
     if (over > STALL_THRESHOLD_MS) {
-      totalStalls++
-      cumulativeStallMs += over
+      state.totalStalls++
+      state.cumulativeStallMs += over
       const likelySleep = over > SLEEP_THRESHOLD_MS
       const mem = sampleRss()
       const cpuDelta =
-        cpu && lastCpuSample
+        cpu && state.lastCpuSample
           ? {
-              cpu_delta_ms: Math.round(cpu.cpuTimeMs - lastCpuSample.cpuTimeMs),
+              cpu_delta_ms: Math.round(
+                cpu.cpuTimeMs - state.lastCpuSample.cpuTimeMs,
+              ),
               major_fault_delta:
-                cpu.majorPageFaults - lastCpuSample.majorPageFaults,
+                cpu.majorPageFaults - state.lastCpuSample.majorPageFaults,
             }
           : null
       if (process.env.CLAUDE_CODE_DEBUG) {
         console.error(
-          `[event-loop-stall] blocked for ${over}ms (expected ${INTERVAL_MS}ms, actual ${actual}ms). Total stalls: ${totalStalls}, cumulative: ${cumulativeStallMs}ms${likelySleep ? ' [likely sleep/wake]' : ''}` +
+          `[event-loop-stall] blocked for ${over}ms (expected ${INTERVAL_MS}ms, actual ${actual}ms). Total stalls: ${state.totalStalls}, cumulative: ${state.cumulativeStallMs}ms${likelySleep ? ' [likely sleep/wake]' : ''}` +
             (cpuDelta
               ? ` cpu=${cpuDelta.cpu_delta_ms}ms majflt=${cpuDelta.major_fault_delta}`
               : '') +
@@ -124,26 +155,30 @@ export function startEventLoopStallDetector(): void {
       // densable: if (likely_sleep) reassertTerminalModes() — default false
       // includeAltScreen (stdin-gap style; does NOT erase alt buffer).
       if (likelySleep) {
-        instances.get(process.stdout)?.reassertTerminalModes()
+        registry.get(process.stdout)?.reassertTerminalModes()
       }
     }
-    lastTickAt = now
-    lastCpuSample = cpu
+    state.lastTickAt = now
+    state.lastCpuSample = cpu
   }, INTERVAL_MS)
-  timer.unref?.()
+  state.timer.unref?.()
+  if (!state.cleanupRegistered) {
+    state.cleanupRegistered = true
+    registerCleanup(() => {
+      stopDetectorState(state)
+    })
+  }
 }
 
 /** Test-only stop. densable has no public stop; process exit clears. */
 export function _stopEventLoopStallDetectorForTesting(): void {
-  if (timer !== null) {
-    clearInterval(timer)
-    timer = null
-  }
-  lastTickAt = 0
-  totalStalls = 0
-  cumulativeStallMs = 0
-  tickCount = 0
-  lastCpuSample = null
+  const state = getEventLoopStallHostState()
+  stopDetectorState(state)
+  state.lastTickAt = 0
+  state.totalStalls = 0
+  state.cumulativeStallMs = 0
+  state.tickCount = 0
+  state.lastCpuSample = null
 }
 
 export function _getEventLoopStallStatsForTesting(): {
@@ -152,10 +187,11 @@ export function _getEventLoopStallStatsForTesting(): {
   tickCount: number
   running: boolean
 } {
+  const state = getEventLoopStallHostState()
   return {
-    totalStalls,
-    cumulativeStallMs,
-    tickCount,
-    running: timer !== null,
+    totalStalls: state.totalStalls,
+    cumulativeStallMs: state.cumulativeStallMs,
+    tickCount: state.tickCount,
+    running: state.timer !== null,
   }
 }

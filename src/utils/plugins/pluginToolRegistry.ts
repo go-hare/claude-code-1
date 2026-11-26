@@ -4,6 +4,7 @@
  * Semantic exports only — never export minify Xj|KLo|te.
  */
 import { isDeepStrictEqual } from 'util'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 export type PluginRegisteredToolSpec = {
   name: string
@@ -17,16 +18,31 @@ type PluginBag = {
   serverKey?: string
 }
 
-const bags = new Map<string, PluginBag>()
-const mintedServerKeys = new Set<string>()
-/**
- * densable: after Xj.forget + removeMcpServer, host.mcpServers() may still
- * list the old name briefly (async print remove, or REPL mcp.clients lag).
- * Keys here skip densable r_o so the same plugin can remount / replace.
- */
-const pendingPluginToolServerRemovals = new Set<string>()
+type HostPluginToolRegistryState = {
+  bags: Map<string, PluginBag>
+  mintedServerKeys: Set<string>
+  /**
+   * densable: after Xj.forget + removeMcpServer, host.mcpServers() may still
+   * list the old name briefly (async print remove, or REPL mcp.clients lag).
+   * Keys here skip densable r_o so the same plugin can remount / replace.
+   */
+  pendingPluginToolServerRemovals: Set<string>
+}
+
+const hostPluginToolRegistrySlot = new HostSlot<HostPluginToolRegistryState>(
+  () => ({
+    bags: new Map(),
+    mintedServerKeys: new Set(),
+    pendingPluginToolServerRemovals: new Set(),
+  }),
+)
+
+function registryState(): HostPluginToolRegistryState {
+  return hostPluginToolRegistrySlot.of(getBootstrapSessionHost())
+}
 
 function bagOf(plugin: string): PluginBag {
+  const { bags } = registryState()
   let bag = bags.get(plugin)
   if (!bag) {
     bag = { tools: new Map() }
@@ -36,19 +52,19 @@ function bagOf(plugin: string): PluginBag {
 }
 
 function markPendingPluginToolServerRemoval(key: string): void {
-  pendingPluginToolServerRemovals.add(key)
+  registryState().pendingPluginToolServerRemovals.add(key)
 }
 
 /** densable — r_o ignore while host still lists a just-forgotten Xj key. */
 export function isPendingPluginToolServerRemoval(key: string): boolean {
-  return pendingPluginToolServerRemovals.has(key)
+  return registryState().pendingPluginToolServerRemovals.has(key)
 }
 
 /** densable Xj.list / KLo */
 export function listPluginRegisteredTools(
   plugin: string,
 ): PluginRegisteredToolSpec[] {
-  return [...(bags.get(plugin)?.tools.values() ?? [])]
+  return [...(registryState().bags.get(plugin)?.tools.values() ?? [])]
 }
 
 /** densable Xj.own — mutable map of tool specs for a plugin. */
@@ -62,7 +78,7 @@ export function getPluginRegisteredTool(
   plugin: string,
   name: string,
 ): PluginRegisteredToolSpec | undefined {
-  return bags.get(plugin)?.tools.get(name)
+  return registryState().bags.get(plugin)?.tools.get(name)
 }
 
 export function setPluginRegisteredTool(
@@ -82,25 +98,26 @@ export function pluginToolSpecsEqual(
 
 /** densable Xj.serverKey */
 export function getPluginToolServerKey(plugin: string): string | undefined {
-  return bags.get(plugin)?.serverKey
+  return registryState().bags.get(plugin)?.serverKey
 }
 
 /** densable Xj.keyed */
 export function setPluginToolServerKey(plugin: string, key: string): void {
+  const state = registryState()
   const bag = bagOf(plugin)
   bag.serverKey = key
-  mintedServerKeys.add(key)
-  pendingPluginToolServerRemovals.delete(key)
+  state.mintedServerKeys.add(key)
+  state.pendingPluginToolServerRemovals.delete(key)
 }
 
 /** densable Xj.minted */
 export function isPluginToolServerKeyMinted(key: string): boolean {
-  return mintedServerKeys.has(key)
+  return registryState().mintedServerKeys.has(key)
 }
 
 /** densable Xj.ownerOfKey */
 export function ownerOfPluginToolServerKey(key: string): string | undefined {
-  for (const [plugin, bag] of bags.entries()) {
+  for (const [plugin, bag] of registryState().bags.entries()) {
     if (bag.serverKey === key) return plugin
   }
   return undefined
@@ -116,11 +133,12 @@ export function ownerOfPluginToolServerKey(key: string): string | undefined {
 export function forgetPluginRegisteredTools(
   plugin: string,
 ): string | undefined {
-  const bag = bags.get(plugin)
-  bags.delete(plugin)
+  const state = registryState()
+  const bag = state.bags.get(plugin)
+  state.bags.delete(plugin)
   const key = bag?.serverKey
   if (key !== undefined && ownerOfPluginToolServerKey(key) === undefined) {
-    mintedServerKeys.delete(key)
+    state.mintedServerKeys.delete(key)
     markPendingPluginToolServerRemoval(key)
   }
   return key
@@ -133,19 +151,21 @@ export function forgetPluginRegisteredTools(
  * nuclear setLoaded / SAME_THREAD teardown (not the test-only clearer alone).
  */
 export function forgetAllPluginRegisteredTools(): string[] {
+  const state = registryState()
   const keys: string[] = []
-  for (const bag of bags.values()) {
+  for (const bag of state.bags.values()) {
     if (bag.serverKey !== undefined) keys.push(bag.serverKey)
   }
-  bags.clear()
-  mintedServerKeys.clear()
+  state.bags.clear()
+  state.mintedServerKeys.clear()
   const distinct = [...new Set(keys)]
   for (const key of distinct) markPendingPluginToolServerRemoval(key)
   return distinct
 }
 
 export function clearPluginToolRegistryForTests(): void {
-  bags.clear()
-  mintedServerKeys.clear()
-  pendingPluginToolServerRemovals.clear()
+  const state = registryState()
+  state.bags.clear()
+  state.mintedServerKeys.clear()
+  state.pendingPluginToolServerRemovals.clear()
 }

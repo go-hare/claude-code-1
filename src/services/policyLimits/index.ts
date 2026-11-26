@@ -32,6 +32,12 @@ import { safeParseJSON } from '../../utils/json.js'
 import { isFirstPartyAnthropicBaseUrl } from '../../utils/model/providers.js'
 import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
 import { getOrgPolicyAxiosProxyConfig } from '../../utils/proxy.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
 import { sleep } from '../../utils/sleep.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
@@ -66,39 +72,53 @@ const DEFAULT_MAX_RETRIES = 5
 const POLLING_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
 export const REVALIDATE_IN_FULL_AFTER_MS = 6 * 60 * 60 * 1000 // 6 hours (Official BVa)
 
-// Background polling state
-let pollingIntervalId: ReturnType<typeof setInterval> | null = null
-let cleanupRegistered = false
-
-// Promise that resolves when initial policy limits loading completes
-let loadingCompletePromise: Promise<void> | null = null
-let loadingCompleteResolve: (() => void) | null = null
-
 // Timeout for the loading promise to prevent deadlocks
 const LOADING_PROMISE_TIMEOUT_MS = 30000 // 30 seconds
 
-// Session-level cache for policy restrictions
-let sessionCache: PolicyLimitsResponse['restrictions'] | null = null
-let sessionArtifactCreateNotice: PolicyLimitsResponse['artifact_create_notice'] =
-  null
+// Official 2.1.331 [W-247 Zod]: per-host policy limits state (`HostSlot` on `getBootstrapSessionHost()`).
+type PolicyLimitsHostState = {
+  pollingIntervalId: ReturnType<typeof setInterval> | null
+  cleanupRegistered: boolean
+  loadingCompletePromise: Promise<void> | null
+  loadingCompleteResolve: (() => void) | null
+  sessionCache: PolicyLimitsResponse['restrictions'] | null
+  sessionArtifactCreateNotice: PolicyLimitsResponse['artifact_create_notice']
+}
+
+const policyLimitsStateByHost = new HostSlot<PolicyLimitsHostState>(() => ({
+  pollingIntervalId: null,
+  cleanupRegistered: false,
+  loadingCompletePromise: null,
+  loadingCompleteResolve: null,
+  sessionCache: null,
+  sessionArtifactCreateNotice: null,
+}))
+
+function getPolicyLimitsHostState(): PolicyLimitsHostState {
+  return policyLimitsStateByHost.of(getBootstrapSessionHost())
+}
 
 /**
  * Test-only sync reset. clearPolicyLimitsCache() does file I/O and is too
- * expensive for preload beforeEach; this only clears the module-level
+ * expensive for preload beforeEach; this only clears the host-scoped
  * singleton so downstream tests in the same shard see a clean slate.
  */
 export function _resetPolicyLimitsForTesting(): void {
   stopBackgroundPolling()
-  sessionCache = null
-  sessionArtifactCreateNotice = null
-  loadingCompletePromise = null
-  loadingCompleteResolve = null
+  const state = policyLimitsStateByHost.peek(getBootstrapSessionHost())
+  if (!state) {
+    return
+  }
+  state.sessionCache = null
+  state.sessionArtifactCreateNotice = null
+  state.loadingCompletePromise = null
+  state.loadingCompleteResolve = null
 }
 
 export function _setArtifactCreateNoticeForTesting(
   notice: NonNullable<PolicyLimitsResponse['artifact_create_notice']> | null,
 ): void {
-  sessionArtifactCreateNotice = notice
+  getPolicyLimitsHostState().sessionArtifactCreateNotice = notice
 }
 
 /**
@@ -110,23 +130,25 @@ export function _setArtifactCreateNoticeForTesting(
  * Includes a timeout to prevent deadlocks if loadPolicyLimits() is never called.
  */
 export function initializePolicyLimitsLoadingPromise(): void {
-  if (loadingCompletePromise) {
+  const state = getPolicyLimitsHostState()
+  if (state.loadingCompletePromise) {
     return
   }
 
   if (isPolicyLimitsEligible() && !shouldSkipPolicyLimitsForProMaxStartup()) {
-    loadingCompletePromise = new Promise(resolve => {
-      loadingCompleteResolve = resolve
+    state.loadingCompletePromise = new Promise(resolve => {
+      state.loadingCompleteResolve = resolve
 
-      setTimeout(() => {
-        if (loadingCompleteResolve) {
+      const timer = setTimeout(() => {
+        if (state.loadingCompleteResolve) {
           logForDebugging(
             'Policy limits: Loading promise timed out, resolving anyway',
           )
-          loadingCompleteResolve()
-          loadingCompleteResolve = null
+          state.loadingCompleteResolve()
+          state.loadingCompleteResolve = null
         }
       }, LOADING_PROMISE_TIMEOUT_MS)
+      timer.unref?.()
     })
   }
 }
@@ -248,8 +270,10 @@ export async function primePolicyLimitsCache(
       safeParseJSON(raw, false),
     )
     if (parsed.success) {
-      sessionCache = parsed.data.restrictions
-      sessionArtifactCreateNotice = parsed.data.artifact_create_notice ?? null
+      const hostState = getPolicyLimitsHostState()
+      hostState.sessionCache = parsed.data.restrictions
+      hostState.sessionArtifactCreateNotice =
+        parsed.data.artifact_create_notice ?? null
       leftoverPolicyLimitsHost().sessionCache = parsed.data.restrictions
     }
   } catch (error) {
@@ -262,8 +286,11 @@ export async function primePolicyLimitsCache(
  * Returns immediately if user is not eligible or loading has already completed
  */
 export async function waitForPolicyLimitsToLoad(): Promise<void> {
-  if (loadingCompletePromise) {
-    await loadingCompletePromise
+  const promise = policyLimitsStateByHost.peek(
+    getBootstrapSessionHost(),
+  )?.loadingCompletePromise
+  if (promise) {
+    await promise
   }
 }
 
@@ -618,12 +645,13 @@ async function fetchAndLoadPolicyLimits(): Promise<
 
   try {
     const result = await fetchWithRetry(cachedChecksum)
+    const hostState = getPolicyLimitsHostState()
 
     if (!result.success) {
       if (cachedRestrictions) {
         logForDebugging('Policy limits: Using stale cache after fetch failure')
-        sessionCache = cachedRestrictions
-        sessionArtifactCreateNotice = cachedNotice
+        hostState.sessionCache = cachedRestrictions
+        hostState.sessionArtifactCreateNotice = cachedNotice
         leftoverPolicyLimitsHost().sessionCache = cachedRestrictions
         leftoverPolicyLimitsHost().sessionFromServerFetch = false
         leftoverPolicyLimitsHost().sessionAttributed = true
@@ -635,8 +663,8 @@ async function fetchAndLoadPolicyLimits(): Promise<
     // Handle 304 Not Modified
     if (result.restrictions === null && cachedRestrictions) {
       logForDebugging('Policy limits: Cache still valid (304 Not Modified)')
-      sessionCache = cachedRestrictions
-      sessionArtifactCreateNotice = cachedNotice
+      hostState.sessionCache = cachedRestrictions
+      hostState.sessionArtifactCreateNotice = cachedNotice
       leftoverPolicyLimitsHost().sessionCache = cachedRestrictions
       leftoverPolicyLimitsHost().sessionFromServerFetch = true
       leftoverPolicyLimitsHost().sessionAttributed = true
@@ -649,8 +677,8 @@ async function fetchAndLoadPolicyLimits(): Promise<
       Object.keys(newRestrictions).length > 0 || newNotice !== null
 
     if (hasContent) {
-      sessionCache = newRestrictions
-      sessionArtifactCreateNotice = newNotice
+      hostState.sessionCache = newRestrictions
+      hostState.sessionArtifactCreateNotice = newNotice
       leftoverPolicyLimitsHost().sessionCache = newRestrictions
       leftoverPolicyLimitsHost().sessionFromServerFetch = true
       leftoverPolicyLimitsHost().sessionAttributed = true
@@ -660,8 +688,8 @@ async function fetchAndLoadPolicyLimits(): Promise<
     }
 
     // Empty restrictions (404 response) - delete cached file if it exists
-    sessionCache = newRestrictions
-    sessionArtifactCreateNotice = null
+    hostState.sessionCache = newRestrictions
+    hostState.sessionArtifactCreateNotice = null
     leftoverPolicyLimitsHost().sessionCache = newRestrictions
     leftoverPolicyLimitsHost().sessionFromServerFetch = true
     leftoverPolicyLimitsHost().sessionAttributed = true
@@ -679,8 +707,9 @@ async function fetchAndLoadPolicyLimits(): Promise<
   } catch {
     if (cachedRestrictions) {
       logForDebugging('Policy limits: Using stale cache after error')
-      sessionCache = cachedRestrictions
-      sessionArtifactCreateNotice = cachedNotice
+      const hostState = getPolicyLimitsHostState()
+      hostState.sessionCache = cachedRestrictions
+      hostState.sessionArtifactCreateNotice = cachedNotice
       leftoverPolicyLimitsHost().sessionCache = cachedRestrictions
       leftoverPolicyLimitsHost().sessionFromServerFetch = false
       leftoverPolicyLimitsHost().sessionAttributed = true
@@ -811,20 +840,22 @@ function getRestrictionsFromCache():
     return null
   }
 
-  if (sessionCache) {
-    return sessionCache
+  const hostState = getPolicyLimitsHostState()
+  if (hostState.sessionCache) {
+    return hostState.sessionCache
   }
 
   const leftover = leftoverPolicyLimitsHost().sessionCache
   if (leftover) {
-    sessionCache = leftover
+    hostState.sessionCache = leftover
     return leftover
   }
 
   const cachedPayload = loadCachedPolicyLimits()
   if (cachedPayload) {
-    sessionCache = cachedPayload.restrictions
-    sessionArtifactCreateNotice = cachedPayload.artifact_create_notice ?? null
+    hostState.sessionCache = cachedPayload.restrictions
+    hostState.sessionArtifactCreateNotice =
+      cachedPayload.artifact_create_notice ?? null
     leftoverPolicyLimitsHost().sessionCache = cachedPayload.restrictions
     leftoverPolicyLimitsHost().sessionAttributed = true
     return cachedPayload.restrictions
@@ -841,7 +872,10 @@ function getRestrictionsFromCache():
  */
 export function getArtifactCreateNotice(): string | null {
   getRestrictionsFromCache()
-  return sessionArtifactCreateNotice?.text ?? null
+  return (
+    policyLimitsStateByHost.peek(getBootstrapSessionHost())
+      ?.sessionArtifactCreateNotice?.text ?? null
+  )
 }
 
 /**
@@ -850,9 +884,10 @@ export function getArtifactCreateNotice(): string | null {
  * Also starts background polling to pick up changes mid-session
  */
 export async function loadPolicyLimits(): Promise<void> {
-  if (isPolicyLimitsEligible() && !loadingCompletePromise) {
-    loadingCompletePromise = new Promise(resolve => {
-      loadingCompleteResolve = resolve
+  const hostState = getPolicyLimitsHostState()
+  if (isPolicyLimitsEligible() && !hostState.loadingCompletePromise) {
+    hostState.loadingCompletePromise = new Promise(resolve => {
+      hostState.loadingCompleteResolve = resolve
     })
   }
 
@@ -863,9 +898,9 @@ export async function loadPolicyLimits(): Promise<void> {
       startBackgroundPolling()
     }
   } finally {
-    if (loadingCompleteResolve) {
-      loadingCompleteResolve()
-      loadingCompleteResolve = null
+    if (hostState.loadingCompleteResolve) {
+      hostState.loadingCompleteResolve()
+      hostState.loadingCompleteResolve = null
     }
   }
 }
@@ -891,14 +926,16 @@ export async function refreshPolicyLimits(): Promise<void> {
 export async function clearPolicyLimitsCache(): Promise<void> {
   stopBackgroundPolling()
 
-  sessionCache = null
-  sessionArtifactCreateNotice = null
+  const hostState = policyLimitsStateByHost.peek(getBootstrapSessionHost())
+  if (hostState) {
+    hostState.sessionCache = null
+    hostState.sessionArtifactCreateNotice = null
+    hostState.loadingCompletePromise = null
+    hostState.loadingCompleteResolve = null
+  }
   leftoverPolicyLimitsHost().sessionCache = null
   leftoverPolicyLimitsHost().sessionFromServerFetch = false
   leftoverPolicyLimitsHost().sessionAttributed = false
-
-  loadingCompletePromise = null
-  loadingCompleteResolve = null
 
   try {
     await unlink(getCachePath())
@@ -915,12 +952,17 @@ async function pollPolicyLimits(): Promise<void> {
     return
   }
 
-  const previousCache = sessionCache ? jsonStringify(sessionCache) : null
+  const hostState = getPolicyLimitsHostState()
+  const previousCache = hostState.sessionCache
+    ? jsonStringify(hostState.sessionCache)
+    : null
 
   try {
     await fetchAndLoadPolicyLimits()
 
-    const newCache = sessionCache ? jsonStringify(sessionCache) : null
+    const newCache = hostState.sessionCache
+      ? jsonStringify(hostState.sessionCache)
+      : null
     if (newCache !== previousCache) {
       logForDebugging('Policy limits: Changed during background poll')
     }
@@ -933,7 +975,8 @@ async function pollPolicyLimits(): Promise<void> {
  * Start background polling for policy limits
  */
 export function startBackgroundPolling(): void {
-  if (pollingIntervalId !== null) {
+  const hostState = getPolicyLimitsHostState()
+  if (hostState.pollingIntervalId !== null) {
     return
   }
 
@@ -941,14 +984,38 @@ export function startBackgroundPolling(): void {
     return
   }
 
-  pollingIntervalId = setInterval(() => {
-    void pollPolicyLimits()
+  const sessionRef = new WeakRef(getBootstrapSession().root)
+  const intervalId = setInterval(() => {
+    const rootSession = sessionRef.deref()
+    if (!rootSession) {
+      clearInterval(intervalId)
+      if (hostState.pollingIntervalId === intervalId) {
+        hostState.pollingIntervalId = null
+      }
+      return
+    }
+    runWithSession(rootSession, () => {
+      void pollPolicyLimits()
+    })
   }, POLLING_INTERVAL_MS)
-  pollingIntervalId.unref()
+  intervalId.unref()
+  hostState.pollingIntervalId = intervalId
 
-  if (!cleanupRegistered) {
-    cleanupRegistered = true
-    registerCleanup(async () => stopBackgroundPolling())
+  if (!hostState.cleanupRegistered) {
+    hostState.cleanupRegistered = true
+    registerCleanup(async () => {
+      const rootSession = sessionRef.deref()
+      if (!rootSession) {
+        if (hostState.pollingIntervalId !== null) {
+          clearInterval(hostState.pollingIntervalId)
+          hostState.pollingIntervalId = null
+        }
+        return
+      }
+      runWithSession(rootSession, () => {
+        stopBackgroundPolling()
+      })
+    })
   }
 }
 
@@ -956,8 +1023,9 @@ export function startBackgroundPolling(): void {
  * Stop background polling for policy limits
  */
 export function stopBackgroundPolling(): void {
-  if (pollingIntervalId !== null) {
-    clearInterval(pollingIntervalId)
-    pollingIntervalId = null
+  const hostState = policyLimitsStateByHost.peek(getBootstrapSessionHost())
+  if (hostState && hostState.pollingIntervalId !== null) {
+    clearInterval(hostState.pollingIntervalId)
+    hostState.pollingIntervalId = null
   }
 }

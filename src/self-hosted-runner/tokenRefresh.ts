@@ -3,6 +3,8 @@
  * 1:1 from SEA `/tmp/shr-extract-224/token-*.js`.
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
+
 /** densable `Zo_` — default refresh buffer (5 min) */
 export const DEFAULT_REFRESH_BUFFER_MS = 300_000
 /** densable `ei_` — default max consecutive no-oauth failures */
@@ -326,7 +328,9 @@ export function sweepPendingTokenAcks(opts: {
   }
 }
 
-let tokenPushSeq = 0
+const tokenRefreshHostSlot = new HostSlot<{ tokenPushSeq: number }>(() => ({
+  tokenPushSeq: 0,
+}))
 
 /**
  * densable `q2h` — push refreshed env var to child via stdin control message.
@@ -355,8 +359,9 @@ export function pushTokenToChild(opts: {
   }
   let requestId: string | undefined
   if (opts.pendingAcks) {
-    tokenPushSeq++
-    requestId = `shr-token-${opts.label}-${tokenPushSeq}`
+    const hostState = tokenRefreshHostSlot.of(getBootstrapSessionHost())
+    hostState.tokenPushSeq++
+    requestId = `shr-token-${opts.label}-${hostState.tokenPushSeq}`
     opts.pendingAcks.set(requestId, {
       label: opts.label,
       sentAtMs: opts.nowMs ?? Date.now(),
@@ -376,5 +381,5 @@ export function pushTokenToChild(opts: {
 
 /** test helper — reset push sequence */
 export function __resetTokenPushSeqForTests(): void {
-  tokenPushSeq = 0
+  tokenRefreshHostSlot.of(getBootstrapSessionHost()).tokenPushSeq = 0
 }

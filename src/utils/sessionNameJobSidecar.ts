@@ -17,6 +17,7 @@ import {
   type BgJobState,
 } from '../daemon/jobState.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { sanitizeSessionTitle } from './sessionTitleSanitize.js'
 
 /** densable leftover `j` in `_467`. */
@@ -31,7 +32,20 @@ const JOB_ID_ASIDE = /^\.[0-9a-f]{16}\.aside$/
 /** densable leftover host `Uv.bgTakeover`. */
 export type BgJobTakeover = { jobDir: string }
 
-let bgJobTakeover: BgJobTakeover | null = null
+const fallbackSessionNameSidecarHost: object = {}
+const bgJobTakeoverByHost = new HostSlot<{
+  bgJobTakeover: BgJobTakeover | null
+}>(() => ({ bgJobTakeover: null }))
+
+function getBgJobTakeoverSlot(): { bgJobTakeover: BgJobTakeover | null } {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return bgJobTakeoverByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return bgJobTakeoverByHost.of(fallbackSessionNameSidecarHost)
+}
 
 type JobStorageV5Key = {
   namespace: 'job'
@@ -117,12 +131,12 @@ export function resolveJobDirStorageV5Key(
 
 /** densable leftover `wp`. */
 export function getBgJobTakeover(): BgJobTakeover | null {
-  return bgJobTakeover
+  return getBgJobTakeoverSlot().bgJobTakeover
 }
 
 /** densable leftover `Uv.setBgTakeover`. Official JS has no caller. */
 export function setBgJobTakeover(value: BgJobTakeover | null): void {
-  bgJobTakeover = value
+  getBgJobTakeoverSlot().bgJobTakeover = value
 }
 
 /** densable leftover `uC` / `getBgJobDir`. */
@@ -131,7 +145,7 @@ export function getBgJobDirectory(): string | undefined {
 }
 
 export function resetBgJobTakeoverForTests(): void {
-  bgJobTakeover = null
+  getBgJobTakeoverSlot().bgJobTakeover = null
 }
 
 function asStorageV5Write(value: unknown): StorageV5WriteHandle | undefined {

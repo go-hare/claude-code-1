@@ -4,6 +4,7 @@
  */
 
 import { isExperimentalObserverAgentsEnabled } from './residualFinalEnvGates.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 export type ObserverAgentDefinitionLike = {
   agentType: string
@@ -257,24 +258,49 @@ export type ObserverPairing = {
 }
 
 /**
- * Official sge — process-local pairing table.
+ * Official sge — session-local pairing table + runtime host state.
  * Primary key is observerTaskId (WOu/report path); observedKey index for YOu.
  */
-const observerPairings = new Map<string, ObserverPairing>()
-/** Official sge observedKey → observerTaskId. */
-const observerPairingsByObservedKey = new Map<string, string>()
-
-function indexPairing(pairing: ObserverPairing): void {
-  const key =
-    pairing.observedKey ?? pairing.observedTaskId ?? pairing.observerTaskId
-  observerPairingsByObservedKey.set(key, pairing.observerTaskId)
+class ObserverAgentsSessionState {
+  observerPairings = new Map<string, ObserverPairing>()
+  observerPairingsByObservedKey = new Map<string, string>()
+  mainSessionEnsureInFlight = false
+  observerRuntimeHost: ObserverRuntimeHost | null = null
+  mainSessionObserverBlocked = false
 }
 
-function unindexPairing(pairing: ObserverPairing): void {
+const fallbackObserverAgentsSession = { root: {} as object }
+const observerAgentsBySession = new RootSessionSlot<ObserverAgentsSessionState>(
+  () => new ObserverAgentsSessionState(),
+)
+
+function getObserverAgentsSessionState(): ObserverAgentsSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return observerAgentsBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return observerAgentsBySession.of(fallbackObserverAgentsSession)
+}
+
+function indexPairing(
+  pairing: ObserverPairing,
+  state: ObserverAgentsSessionState = getObserverAgentsSessionState(),
+): void {
   const key =
     pairing.observedKey ?? pairing.observedTaskId ?? pairing.observerTaskId
-  if (observerPairingsByObservedKey.get(key) === pairing.observerTaskId) {
-    observerPairingsByObservedKey.delete(key)
+  state.observerPairingsByObservedKey.set(key, pairing.observerTaskId)
+}
+
+function unindexPairing(
+  pairing: ObserverPairing,
+  state: ObserverAgentsSessionState = getObserverAgentsSessionState(),
+): void {
+  const key =
+    pairing.observedKey ?? pairing.observedTaskId ?? pairing.observerTaskId
+  if (state.observerPairingsByObservedKey.get(key) === pairing.observerTaskId) {
+    state.observerPairingsByObservedKey.delete(key)
   }
 }
 
@@ -282,6 +308,7 @@ function unindexPairing(pairing: ObserverPairing): void {
 export function armObserverPairing(
   pairing: Omit<ObserverPairing, 'state'>,
 ): void {
+  const state = getObserverAgentsSessionState()
   const full: ObserverPairing = {
     ...pairing,
     state: 'armed',
@@ -289,37 +316,40 @@ export function armObserverPairing(
     delivering: pairing.delivering ?? false,
     firstRunDone: pairing.firstRunDone ?? false,
   }
-  const prev = observerPairings.get(full.observerTaskId)
-  if (prev) unindexPairing(prev)
-  observerPairings.set(full.observerTaskId, full)
-  indexPairing(full)
+  const prev = state.observerPairings.get(full.observerTaskId)
+  if (prev) unindexPairing(prev, state)
+  state.observerPairings.set(full.observerTaskId, full)
+  indexPairing(full, state)
 }
 
 export function setObserverPairingState(
   observerTaskId: string,
   state: ObserverPairingState,
 ): void {
-  const cur = observerPairings.get(observerTaskId)
+  const sessionState = getObserverAgentsSessionState()
+  const cur = sessionState.observerPairings.get(observerTaskId)
   if (!cur) return
-  observerPairings.set(observerTaskId, { ...cur, state })
+  sessionState.observerPairings.set(observerTaskId, { ...cur, state })
 }
 
 export function clearObserverPairing(observerTaskId: string): void {
-  const cur = observerPairings.get(observerTaskId)
-  if (cur) unindexPairing(cur)
-  observerPairings.delete(observerTaskId)
+  const sessionState = getObserverAgentsSessionState()
+  const cur = sessionState.observerPairings.get(observerTaskId)
+  if (cur) unindexPairing(cur, sessionState)
+  sessionState.observerPairings.delete(observerTaskId)
 }
 
 export function clearAllObserverPairings(): void {
-  observerPairings.clear()
-  observerPairingsByObservedKey.clear()
+  const sessionState = getObserverAgentsSessionState()
+  sessionState.observerPairings.clear()
+  sessionState.observerPairingsByObservedKey.clear()
 }
 
 /** Official WOu — armed pairing for this observer task, if any. */
 export function getArmedObserverPairing(
   observerTaskId: string,
 ): ObserverPairing | undefined {
-  const p = observerPairings.get(observerTaskId)
+  const p = getObserverAgentsSessionState().observerPairings.get(observerTaskId)
   if (!p || p.state !== 'armed') return undefined
   return p
 }
@@ -328,14 +358,16 @@ export function getArmedObserverPairing(
 export function getObserverPairingByObservedKey(
   observedKey: string,
 ): ObserverPairing | undefined {
-  const observerTaskId = observerPairingsByObservedKey.get(observedKey)
+  const sessionState = getObserverAgentsSessionState()
+  const observerTaskId =
+    sessionState.observerPairingsByObservedKey.get(observedKey)
   if (!observerTaskId) return undefined
-  return observerPairings.get(observerTaskId)
+  return sessionState.observerPairings.get(observerTaskId)
 }
 
 /** Official RZi — whether this task id is an observer (any state). */
 export function isObserverTaskId(taskId: string): boolean {
-  for (const p of observerPairings.values()) {
+  for (const p of getObserverAgentsSessionState().observerPairings.values()) {
     if (p.observerTaskId === taskId) return true
   }
   return false
@@ -443,7 +475,7 @@ export function kickObserverDeliveryLoop(
     log?: (msg: string) => void
   },
 ): void {
-  if (!observerRuntimeHost) return
+  if (!getObserverAgentsSessionState().observerRuntimeHost) return
   if (pairing.delivering) {
     pairing.drainDirty = true
     return
@@ -741,12 +773,14 @@ export async function drainObserverActivityBuffer(input: {
             )
             // Best-effort abort if spawn registered an observer task.
             try {
-              observerRuntimeHost?.abortObserver?.({
-                observerTaskId: pairing.observerTaskId,
-                ...(pairing.setAppState !== undefined
-                  ? { setAppState: pairing.setAppState }
-                  : {}),
-              })
+              getObserverAgentsSessionState().observerRuntimeHost?.abortObserver?.(
+                {
+                  observerTaskId: pairing.observerTaskId,
+                  ...(pairing.setAppState !== undefined
+                    ? { setAppState: pairing.setAppState }
+                    : {}),
+                },
+              )
             } catch {
               // best-effort
             }
@@ -1055,7 +1089,8 @@ export async function installObserverPairing(input: {
   log?: (msg: string) => void
 }): Promise<ObserverPairing | undefined> {
   const requireHost = input.requireHost !== false
-  if (requireHost && !observerRuntimeHost) return undefined
+  if (requireHost && !getObserverAgentsSessionState().observerRuntimeHost)
+    return undefined
 
   const pairing = planObserverPairingInstall(input)
   if (
@@ -1184,7 +1219,7 @@ export function planMainSessionObserverEnsure(input: {
   const mainKey = input.mainSessionKey ?? MAIN_SESSION_OBSERVED_KEY
   const def = input.mainAgentDefinition
   if (!def?.observer) return { status: 'skip', reason: 'no_observer' }
-  if (mainSessionObserverBlocked) {
+  if (getObserverAgentsSessionState().mainSessionObserverBlocked) {
     return { status: 'skip', reason: 'blocked' }
   }
   const existing = getObserverPairingByObservedKey(mainKey)
@@ -1212,14 +1247,12 @@ export function planMainSessionObserverEnsure(input: {
 
 /**
  * Official VOu ensure densable — resolve + reattach plan + install for main.
- * AZi in-flight guard is process-local like official.
+ * AZi in-flight guard is session-local.
  *
  * Main-session HXt pointer densable: when `persistPointer` is not false,
  * load prior observerTaskId from `${sessionId}.observer.meta.json` (or
  * injectables) and rewrite after arm — including cold remint of a fresh id.
  */
-let mainSessionEnsureInFlight = false
-
 export async function ensureMainSessionObserver(input: {
   mainAgentDefinition?: ObserverAgentDefinitionLike | null
   activeAgents: readonly ObserverAgentDefinitionLike[]
@@ -1273,8 +1306,9 @@ export async function ensureMainSessionObserver(input: {
 }): Promise<ObserverPairing | undefined> {
   const plan = planMainSessionObserverEnsure(input)
   if (plan.status === 'skip') return undefined
-  if (mainSessionEnsureInFlight) return undefined
-  mainSessionEnsureInFlight = true
+  const sessionState = getObserverAgentsSessionState()
+  if (sessionState.mainSessionEnsureInFlight) return undefined
+  sessionState.mainSessionEnsureInFlight = true
   try {
     const persistPointer = input.persistPointer !== false
     let pointer: {
@@ -1364,7 +1398,7 @@ export async function ensureMainSessionObserver(input: {
       log: input.log,
     })
     if (reattach.mode === 'blocked') {
-      mainSessionObserverBlocked = true
+      sessionState.mainSessionObserverBlocked = true
       return undefined
     }
     ensureObserverRuntimeHost()
@@ -1459,7 +1493,7 @@ export async function ensureMainSessionObserver(input: {
     )
     return undefined
   } finally {
-    mainSessionEnsureInFlight = false
+    sessionState.mainSessionEnsureInFlight = false
   }
 }
 
@@ -1620,7 +1654,9 @@ export async function deliverObserverBatchWithHost(input: {
   allocateObserverTaskId?: () => string
   log?: (msg: string) => void
 }): Promise<'spawned' | 'delivered' | 'stopped' | 'restarted' | 'disabled'> {
-  const host = input.host === undefined ? observerRuntimeHost : input.host
+  const sessionState = getObserverAgentsSessionState()
+  const host =
+    input.host === undefined ? sessionState.observerRuntimeHost : input.host
   if (!host) return 'disabled'
   const pairing = input.pairing
   const framing = buildObserverFramingPrompt(pairing)
@@ -1659,11 +1695,11 @@ export async function deliverObserverBatchWithHost(input: {
       const nextId =
         input.allocateObserverTaskId?.() ?? `obs-${Date.now().toString(36)}`
       // Re-index under new observerTaskId
-      unindexPairing(pairing)
-      observerPairings.delete(pairing.observerTaskId)
+      unindexPairing(pairing, sessionState)
+      sessionState.observerPairings.delete(pairing.observerTaskId)
       pairing.observerTaskId = nextId
-      observerPairings.set(nextId, pairing)
-      indexPairing(pairing)
+      sessionState.observerPairings.set(nextId, pairing)
+      indexPairing(pairing, sessionState)
       // Restart is a new first-run; clear so drain re-validates gen before
       // advancing firstRunDone again.
       pairing.firstRunDone = false
@@ -1679,26 +1715,21 @@ export async function deliverObserverBatchWithHost(input: {
   }
 }
 
-/** Official G0t — optional installed runtime host. */
-let observerRuntimeHost: ObserverRuntimeHost | null = null
-/** Official pto — main-session ensure blocked / already stopped. */
-let mainSessionObserverBlocked = false
-
 /** Official jOu — install observer runtime host (AgentTool wires spawn/deliver). */
 export function setObserverRuntimeHost(host: ObserverRuntimeHost | null): void {
-  observerRuntimeHost = host
+  getObserverAgentsSessionState().observerRuntimeHost = host
 }
 
 export function getObserverRuntimeHost(): ObserverRuntimeHost | null {
-  return observerRuntimeHost
+  return getObserverAgentsSessionState().observerRuntimeHost
 }
 
 export function isMainSessionObserverBlocked(): boolean {
-  return mainSessionObserverBlocked
+  return getObserverAgentsSessionState().mainSessionObserverBlocked
 }
 
 export function setMainSessionObserverBlocked(blocked: boolean): void {
-  mainSessionObserverBlocked = blocked
+  getObserverAgentsSessionState().mainSessionObserverBlocked = blocked
 }
 
 /**
@@ -1707,7 +1738,7 @@ export function setMainSessionObserverBlocked(blocked: boolean): void {
 export function getObserverPairingByObserverTaskId(
   observerTaskId: string,
 ): ObserverPairing | undefined {
-  return observerPairings.get(observerTaskId)
+  return getObserverAgentsSessionState().observerPairings.get(observerTaskId)
 }
 
 /**
@@ -1767,7 +1798,8 @@ export async function stopObserverPairing(
     log?: (msg: string) => void
   },
 ): Promise<ObserverPairing | undefined> {
-  const pairing = observerPairings.get(observerTaskId)
+  const sessionState = getObserverAgentsSessionState()
+  const pairing = sessionState.observerPairings.get(observerTaskId)
   if (pairing) {
     pairing.state = 'stopped'
     if (pairing.buffer) pairing.buffer.length = 0
@@ -1776,9 +1808,9 @@ export async function stopObserverPairing(
   }
   const agentType = pairing?.observerAgentType ?? opts?.agentType
   // Abort the observer async agent process (densable; official leaves sidecar).
-  if (pairing && observerRuntimeHost?.abortObserver) {
+  if (pairing && sessionState.observerRuntimeHost?.abortObserver) {
     try {
-      observerRuntimeHost.abortObserver({
+      sessionState.observerRuntimeHost.abortObserver({
         observerTaskId,
         ...(pairing.setAppState !== undefined
           ? { setAppState: pairing.setAppState }
@@ -1790,7 +1822,7 @@ export async function stopObserverPairing(
   }
   if (opts?.skipTombstone !== true) {
     const tombstone =
-      observerRuntimeHost?.writeTombstone ??
+      sessionState.observerRuntimeHost?.writeTombstone ??
       (async (args: { observerTaskId: string; observerAgentType?: string }) => {
         await writeObserverStoppedTombstone({
           observerTaskId: args.observerTaskId,
@@ -1826,7 +1858,7 @@ export async function stopMainSessionObserver(
   await stopObserverPairing(pairing.observerTaskId, {
     agentType: pairing.observerAgentType,
   })
-  mainSessionObserverBlocked = true
+  getObserverAgentsSessionState().mainSessionObserverBlocked = true
   return true
 }
 
@@ -1876,7 +1908,7 @@ export async function drainObserverActivityBufferWithHost(input: {
   gate: () => Promise<ObserverDeliveryGate> | ObserverDeliveryGate
   log?: (msg: string) => void
 }): Promise<'ok' | 'denied' | 'error' | 'empty' | 'busy' | 'disabled'> {
-  const host = observerRuntimeHost
+  const host = getObserverAgentsSessionState().observerRuntimeHost
   if (!host) return 'disabled'
   // Official vOg densable for both first-run and subsequent deliver.
   return drainObserverActivityBuffer({
@@ -1917,9 +1949,10 @@ export async function drainObserverActivityBufferWithHost(input: {
 
 /** Test-only reset for host + block flags. */
 export function resetObserverRuntimeHostForTests(): void {
-  observerRuntimeHost = null
-  mainSessionObserverBlocked = false
-  mainSessionEnsureInFlight = false
+  const sessionState = getObserverAgentsSessionState()
+  sessionState.observerRuntimeHost = null
+  sessionState.mainSessionObserverBlocked = false
+  sessionState.mainSessionEnsureInFlight = false
 }
 
 export type EnsureObserverRuntimeHostOptions = {
@@ -2006,17 +2039,18 @@ export function planObserverSpawnFirstRun(input: {
 export function ensureObserverRuntimeHost(
   opts?: EnsureObserverRuntimeHostOptions,
 ): ObserverRuntimeHost {
+  const sessionState = getObserverAgentsSessionState()
   // Merge injectables into existing host instead of force-clobbering, so a
-  // second AgentTool observer install does not steal the process host.
-  if (observerRuntimeHost && !opts?.force) {
-    const cur = observerRuntimeHost
+  // second AgentTool observer install does not steal the session host.
+  if (sessionState.observerRuntimeHost && !opts?.force) {
+    const cur = sessionState.observerRuntimeHost
     if (
       opts?.spawnFirstRun ||
       opts?.deliver ||
       opts?.writeTombstone ||
       opts?.abortObserver
     ) {
-      observerRuntimeHost = {
+      sessionState.observerRuntimeHost = {
         spawnFirstRun: opts.spawnFirstRun ?? cur.spawnFirstRun,
         deliver: opts.deliver ?? cur.deliver,
         writeTombstone:
@@ -2035,7 +2069,7 @@ export function ensureObserverRuntimeHost(
             }
           : {}),
       }
-      return observerRuntimeHost
+      return sessionState.observerRuntimeHost
     }
     // Ensure default HXt tombstone exists even when host was installed thin.
     if (!cur.writeTombstone) {
@@ -2088,7 +2122,7 @@ export function ensureObserverRuntimeHost(
       }),
     ...(opts?.abortObserver ? { abortObserver: opts.abortObserver } : {}),
   }
-  observerRuntimeHost = host
+  sessionState.observerRuntimeHost = host
   return host
 }
 

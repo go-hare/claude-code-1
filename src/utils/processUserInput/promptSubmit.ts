@@ -43,6 +43,7 @@ import {
   runFunctionHookChain,
 } from '../plugins/functionHooksModules.js'
 import { getSettingsForSource } from '../settings/settings.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import type {
   PromptInputMode,
   QueuedCommand,
@@ -221,27 +222,43 @@ export function wrapQueuedSettle(handle?: {
   }
 }
 
-const objectTokens = new WeakMap<object, number>()
-const functionTokens = new WeakMap<Function, number>()
-let nextObjectToken = 0
-let nextFunctionToken = 0
+type PromptSubmitTokenSessionState = {
+  objectTokens: WeakMap<object, number>
+  functionTokens: WeakMap<Function, number>
+  nextObjectToken: number
+  nextFunctionToken: number
+}
+
+const promptSubmitTokenSessionSlot =
+  new RootSessionSlot<PromptSubmitTokenSessionState>(() => ({
+    objectTokens: new WeakMap<object, number>(),
+    functionTokens: new WeakMap<Function, number>(),
+    nextObjectToken: 0,
+    nextFunctionToken: 0,
+  }))
+
+function getPromptSubmitTokenState(): PromptSubmitTokenSessionState {
+  return promptSubmitTokenSessionSlot.of(getBootstrapSession())
+}
 
 function tokenForObject(obj: object): number {
-  let token = objectTokens.get(obj)
+  const state = getPromptSubmitTokenState()
+  let token = state.objectTokens.get(obj)
   if (token === undefined) {
-    nextObjectToken += 1
-    token = nextObjectToken
-    objectTokens.set(obj, token)
+    state.nextObjectToken += 1
+    token = state.nextObjectToken
+    state.objectTokens.set(obj, token)
   }
   return token
 }
 
 function tokenForFunction(fn: Function): number {
-  let token = functionTokens.get(fn)
+  const state = getPromptSubmitTokenState()
+  let token = state.functionTokens.get(fn)
   if (token === undefined) {
-    nextFunctionToken += 1
-    token = nextFunctionToken
-    functionTokens.set(fn, token)
+    state.nextFunctionToken += 1
+    token = state.nextFunctionToken
+    state.functionTokens.set(fn, token)
   }
   return token
 }

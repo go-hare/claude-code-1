@@ -29,35 +29,53 @@
 
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
+import { RootSessionSlot } from './hostSlot.js'
 import { formatMs, formatTimelineLine, getPerformance } from './profilerBase.js'
+import { getBootstrapSession } from './sessionRoot.js'
 
-// Module-level state - initialized once when the module loads
 // eslint-disable-next-line custom-rules/no-process-env-top-level
 const ENABLED = isEnvTruthy(process.env.CLAUDE_CODE_PROFILE_QUERY)
 
-// Track memory snapshots separately (perf_hooks doesn't track memory)
-const memorySnapshots = new Map<string, NodeJS.MemoryUsage>()
+function isQueryProfilingEnabled(): boolean {
+  return ENABLED || isEnvTruthy(process.env.CLAUDE_CODE_PROFILE_QUERY)
+}
 
-// Track query count for reporting
-let queryCount = 0
+type QueryProfilerSessionState = {
+  marks: Map<string, number>
+  // Track memory snapshots separately (perf_hooks doesn't track memory)
+  memorySnapshots: Map<string, NodeJS.MemoryUsage>
+  // Track query count for reporting
+  queryCount: number
+  // Track first token received time separately for summary
+  firstTokenTime: number | null
+}
 
-// Track first token received time separately for summary
-let firstTokenTime: number | null = null
+const queryProfilerSessionSlot = new RootSessionSlot<QueryProfilerSessionState>(
+  () => ({
+    marks: new Map<string, number>(),
+    memorySnapshots: new Map<string, NodeJS.MemoryUsage>(),
+    queryCount: 0,
+    firstTokenTime: null,
+  }),
+)
+
+function getQueryProfilerState(): QueryProfilerSessionState {
+  return queryProfilerSessionSlot.of(getBootstrapSession())
+}
 
 /**
  * Start profiling a new query session
  */
 export function startQueryProfile(): void {
-  if (!ENABLED) return
+  if (!isQueryProfilingEnabled()) return
 
-  const perf = getPerformance()
-
+  const state = getQueryProfilerState()
   // Clear previous marks and memory snapshots
-  perf.clearMarks()
-  memorySnapshots.clear()
-  firstTokenTime = null
+  state.marks.clear()
+  state.memorySnapshots.clear()
+  state.firstTokenTime = null
 
-  queryCount++
+  state.queryCount++
 
   // Record the start checkpoint
   queryCheckpoint('query_user_input_received')
@@ -67,19 +85,16 @@ export function startQueryProfile(): void {
  * Record a checkpoint with the given name
  */
 export function queryCheckpoint(name: string): void {
-  if (!ENABLED) return
+  if (!isQueryProfilingEnabled()) return
 
-  const perf = getPerformance()
-  perf.mark(name)
-  memorySnapshots.set(name, process.memoryUsage())
+  const state = getQueryProfilerState()
+  const now = getPerformance().now()
+  state.marks.set(name, now)
+  state.memorySnapshots.set(name, process.memoryUsage())
 
   // Track first token specially
-  if (name === 'query_first_chunk_received' && firstTokenTime === null) {
-    const marks = perf.getEntriesByType('mark')
-    if (marks.length > 0) {
-      const lastMark = marks[marks.length - 1]
-      firstTokenTime = lastMark?.startTime ?? 0
-    }
+  if (name === 'query_first_chunk_received' && state.firstTokenTime === null) {
+    state.firstTokenTime = now
   }
 }
 
@@ -87,7 +102,7 @@ export function queryCheckpoint(name: string): void {
  * End the current query profiling session
  */
 export function endQueryProfile(): void {
-  if (!ENABLED) return
+  if (!isQueryProfilingEnabled()) return
 
   queryCheckpoint('query_profile_end')
 }
@@ -127,19 +142,22 @@ function getSlowWarning(deltaMs: number, name: string): string {
  * Get a formatted report of all checkpoints for the current/last query
  */
 function getQueryProfileReport(): string {
-  if (!ENABLED) {
+  if (!isQueryProfilingEnabled()) {
     return 'Query profiling not enabled (set CLAUDE_CODE_PROFILE_QUERY=1)'
   }
 
-  const perf = getPerformance()
-  const marks = perf.getEntriesByType('mark')
+  const state = getQueryProfilerState()
+  const marks = Array.from(state.marks.entries(), ([name, startTime]) => ({
+    name,
+    startTime,
+  }))
   if (marks.length === 0) {
     return 'No query profiling checkpoints recorded'
   }
 
   const lines: string[] = []
   lines.push('='.repeat(80))
-  lines.push(`QUERY PROFILING REPORT - Query #${queryCount}`)
+  lines.push(`QUERY PROFILING REPORT - Query #${state.queryCount}`)
   lines.push('='.repeat(80))
   lines.push('')
 
@@ -157,7 +175,7 @@ function getQueryProfileReport(): string {
         relativeTime,
         deltaMs,
         mark.name,
-        memorySnapshots.get(mark.name),
+        state.memorySnapshots.get(mark.name),
         10,
         9,
         getSlowWarning(deltaMs, mark.name),
@@ -296,6 +314,6 @@ function getPhaseSummary(
  * Log the query profile report to debug output
  */
 export function logQueryProfileReport(): void {
-  if (!ENABLED) return
+  if (!isQueryProfilingEnabled()) return
   logForDebugging(getQueryProfileReport())
 }

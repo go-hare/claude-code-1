@@ -1,6 +1,7 @@
 import chalk, { Chalk } from 'chalk'
 import { colorize } from '@anthropic/ink'
 import { env } from './env.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 export type Theme = {
   autoAccept: string
@@ -173,13 +174,16 @@ export function mergeThemeOverrides(
   return next
 }
 
-let customThemeOverrides: Record<string, unknown> | undefined
+const customThemeOverridesHostSlot = new HostSlot<{
+  overrides: Record<string, unknown> | undefined
+}>(() => ({ overrides: undefined }))
 
 /** Ink / ThemeProvider injects the active custom-theme overrides (d$e). */
 export function setCustomThemeOverrides(
   overrides: Record<string, unknown> | undefined,
 ): void {
-  customThemeOverrides = overrides
+  customThemeOverridesHostSlot.of(getBootstrapSessionHost()).overrides =
+    overrides
 }
 
 export function isBuiltinThemeName(name: string): name is ThemeName {
@@ -721,7 +725,10 @@ export function getTheme(themeName: ThemeName): Theme {
       base = darkTheme
   }
   // densable d$e — ZGn(base, custom overrides) so effortUltra etc. apply.
-  return mergeThemeOverrides(base, customThemeOverrides)
+  return mergeThemeOverrides(
+    base,
+    customThemeOverridesHostSlot.peek(getBootstrapSessionHost())?.overrides,
+  )
 }
 
 // Create a chalk instance with 256-color level for Apple Terminal

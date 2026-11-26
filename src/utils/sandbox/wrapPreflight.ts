@@ -19,23 +19,50 @@ import { mkdir } from 'fs/promises'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { getCwdState, getOriginalCwd } from '../../bootstrap/state.js'
+import { registerCleanup } from '../cleanupRegistry.js'
 import { getCwd } from '../cwd.js'
 import { addFileGlobRuleToGitignore } from '../git/gitignore.js'
 import { logForDebugging } from '../debug.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { errorMessage, getErrnoCode } from '../errors.js'
 import { getSettingsFilePathForSource } from '../settings/settings.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { CLAUDE_ATOMIC_STAGING_LEAF } from '../symlinkWriteGuard.js'
 
 const O_RDONLY = fsConstants.O_RDONLY
 const O_DIRECTORY = fsConstants.O_DIRECTORY ?? 0
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
 const STAGING_DIR_MODE = 448
-let stagingDirGitignoreFired = false
 
 /** densable `Ue` — `had`/`wv`. Key is `resolve` (`we`=`te`). */
 type StagingDirIdentity = { dev: number; ino: number; fd: number }
-const stagingDirIdentities = new Map<string, StagingDirIdentity>()
+
+type WrapPreflightHostState = {
+  stagingDirGitignoreFired: boolean
+  stagingDirIdentities: Map<string, StagingDirIdentity>
+  cleanupRegistered: boolean
+}
+
+const wrapPreflightStateByHost = new HostSlot<WrapPreflightHostState>(() => ({
+  stagingDirGitignoreFired: false,
+  stagingDirIdentities: new Map<string, StagingDirIdentity>(),
+  cleanupRegistered: false,
+}))
+
+function getWrapPreflightHostState(): WrapPreflightHostState {
+  return wrapPreflightStateByHost.of(getBootstrapSessionHost())
+}
+
+function closeStagingDirIdentities(hostState: WrapPreflightHostState): void {
+  for (const { fd } of hostState.stagingDirIdentities.values()) {
+    try {
+      closeSync(fd)
+    } catch {
+      // official swallows
+    }
+  }
+  hostState.stagingDirIdentities.clear()
+}
 
 /** densable `_r` / `Ue.record`. Keeps `fd` open; closes the previous fd. */
 export function recordStagingDirIdentity(
@@ -44,6 +71,18 @@ export function recordStagingDirIdentity(
   ino: number,
   fd: number,
 ): void {
+  const hostState = getWrapPreflightHostState()
+  if (!hostState.cleanupRegistered) {
+    hostState.cleanupRegistered = true
+    const stateRef = new WeakRef(hostState)
+    registerCleanup(() => {
+      const liveState = stateRef.deref()
+      if (!liveState) return
+      closeStagingDirIdentities(liveState)
+      liveState.cleanupRegistered = false
+    })
+  }
+  const { stagingDirIdentities } = hostState
   const key = resolve(path)
   const prev = stagingDirIdentities.get(key)
   if (prev) {
@@ -60,19 +99,16 @@ export function recordStagingDirIdentity(
 export function getStagingDirIdentity(
   path: string,
 ): StagingDirIdentity | undefined {
-  return stagingDirIdentities.get(resolve(path))
+  return wrapPreflightStateByHost
+    .peek(getBootstrapSessionHost())
+    ?.stagingDirIdentities.get(resolve(path))
 }
 
 /** densable `Ue.reset`. */
 export function resetStagingDirIdentities(): void {
-  for (const { fd } of stagingDirIdentities.values()) {
-    try {
-      closeSync(fd)
-    } catch {
-      // official swallows
-    }
-  }
-  stagingDirIdentities.clear()
+  const hostState = wrapPreflightStateByHost.peek(getBootstrapSessionHost())
+  if (!hostState) return
+  closeStagingDirIdentities(hostState)
 }
 
 /** densable `Qd` */
@@ -198,9 +234,10 @@ export function ensureAtomicWriteStagingDirs(): void {
       }
     }
   }
-  // densable kv / Rt — once per process (hN.stagingDirGitignoreFired)
-  if (!stagingDirGitignoreFired) {
-    stagingDirGitignoreFired = true
+  // densable kv / Rt — once per host (hN.stagingDirGitignoreFired)
+  const preflightState = getWrapPreflightHostState()
+  if (!preflightState.stagingDirGitignoreFired) {
+    preflightState.stagingDirGitignoreFired = true
     void addFileGlobRuleToGitignore(
       `.claude/${CLAUDE_ATOMIC_STAGING_LEAF}/`,
       getOriginalCwd(),

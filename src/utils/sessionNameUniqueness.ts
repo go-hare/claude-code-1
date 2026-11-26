@@ -11,7 +11,12 @@ import { feature } from 'bun:bundle'
 import { getSessionId, isTeleportedSessionId } from '../bootstrap/state.js'
 import { getReplBridgeHandle } from '../bridge/replBridgeHandle.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { getBootstrapSession } from './sessionRoot.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 import {
   getRegisteredSessionName,
   listLiveSessionRecords,
@@ -432,8 +437,52 @@ export class SessionNameState {
   }
 }
 
-/** densable `zD` singleton. */
-export const sessionNameState = new SessionNameState()
+type SessionNameUniquenessHostState = {
+  sessionNameState: SessionNameState
+  surfaceCapabilities: SurfaceCapabilities
+}
+
+const sessionNameUniquenessHostSlot =
+  new HostSlot<SessionNameUniquenessHostState>(() => ({
+    sessionNameState: new SessionNameState(),
+    surfaceCapabilities: createDefaultSurfaceCapabilities(),
+  }))
+
+function getSessionNameUniquenessHostState(): SessionNameUniquenessHostState {
+  return sessionNameUniquenessHostSlot.of(getBootstrapSessionHost())
+}
+
+function getCurrentSessionNameState(): SessionNameState {
+  return getSessionNameUniquenessHostState().sessionNameState
+}
+
+/** densable `zD` per-host singleton proxy over `HostSlot<SessionNameState>`. */
+export const sessionNameState: SessionNameState = new Proxy(
+  new SessionNameState(),
+  {
+    get(_target, prop, _receiver) {
+      const current = getCurrentSessionNameState()
+      const value = Reflect.get(current, prop, current)
+      return typeof value === 'function' ? value.bind(current) : value
+    },
+    set(_target, prop, value, _receiver) {
+      const current = getCurrentSessionNameState()
+      return Reflect.set(current, prop, value, current)
+    },
+    has(_target, prop) {
+      return Reflect.has(getCurrentSessionNameState(), prop)
+    },
+    ownKeys() {
+      return Reflect.ownKeys(getCurrentSessionNameState())
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      return Reflect.getOwnPropertyDescriptor(
+        getCurrentSessionNameState(),
+        prop,
+      )
+    },
+  },
+)
 
 /** densable `$id` — note UDS peer that messaged us (or we messaged). */
 export function noteSessionNameCorrespondent(
@@ -1000,11 +1049,9 @@ function createDefaultSurfaceCapabilities(): SurfaceCapabilities {
   }
 }
 
-let currentSurfaceCapabilities = createDefaultSurfaceCapabilities()
-
 /** densable leftover `At` / `Nx` — `surfaceCapabilities.caps()`. */
 export function getSurfaceCapabilities(): SurfaceCapabilities {
-  return currentSurfaceCapabilities
+  return getSessionNameUniquenessHostState().surfaceCapabilities
 }
 
 /** densable leftover `fj` / `pt` / `br`. */
@@ -1018,11 +1065,12 @@ export function getSurfaceRemoteHandle(): SurfaceRemoteHandle | null {
 
 /** densable leftover `Kx` — `replaceCaps`. Official JS has no caller. */
 export function replaceSurfaceCapabilities(next: SurfaceCapabilities): void {
-  currentSurfaceCapabilities = next
+  getSessionNameUniquenessHostState().surfaceCapabilities = next
 }
 
 export function resetSurfaceCapabilitiesForTests(): void {
-  currentSurfaceCapabilities = createDefaultSurfaceCapabilities()
+  getSessionNameUniquenessHostState().surfaceCapabilities =
+    createDefaultSurfaceCapabilities()
 }
 
 /**
@@ -1203,7 +1251,12 @@ export async function applyLeftoverS8nUserName(
 
 /** densable `Uid` — schedule recheck after eO_=3000ms. */
 export function scheduleSessionNameRecheck(fn: () => void): void {
-  const t = setTimeout(fn, SESSION_NAME_RECHECK_MS)
+  const sessionRef = new WeakRef(getBootstrapSession().root)
+  const t = setTimeout(() => {
+    const session = sessionRef.deref()
+    if (session === undefined) return
+    runWithSession(session, fn)
+  }, SESSION_NAME_RECHECK_MS)
   t.unref?.()
 }
 

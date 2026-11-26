@@ -5,6 +5,7 @@ import { stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, dirname, isAbsolute, join } from 'path'
 import { createInterface } from 'readline'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import { resolveChildLogsDirSync } from './childLogsDir.js'
 import { debugTruncate } from './debugUtils.js'
@@ -365,12 +366,17 @@ function inputPreview(input: Record<string, unknown>): string {
 // Official 2.1.323 #2118: single in-flight guard for `stat(dir)` on spawn
 // ENOENT so repeated failed spawns on an unresponsive filesystem cannot
 // exhaust the libuv threadpool and stall the Remote Control host.
-let dirStatInFlight = false
+const sessionRunnerHostSlot = new HostSlot<{ dirStatInFlight: boolean }>(
+  () => ({
+    dirStatInFlight: false,
+  }),
+)
 const DIR_STAT_TIMEOUT_MS = 1000
 
 export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
   return {
     spawn(opts: SessionSpawnOpts, dir: string): SessionHandle {
+      const hostState = sessionRunnerHostSlot.of(getBootstrapSessionHost())
       // Debug file resolution:
       // 1. If deps.debugFile is provided, use it with session ID suffix for uniqueness
       // 2. If verbose or ant build, auto-generate a temp file path
@@ -680,8 +686,8 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
           const errCode = (err as NodeJS.ErrnoException).code
           const isEnoent = errCode === 'ENOENT'
           let checkDir: Promise<boolean | undefined>
-          if (isEnoent && !dirStatInFlight) {
-            dirStatInFlight = true
+          if (isEnoent && !hostState.dirStatInFlight) {
+            hostState.dirStatInFlight = true
             const statPromise = stat(dir)
               .then(
                 s => !s.isDirectory(),
@@ -689,7 +695,7 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
                   (e as NodeJS.ErrnoException)?.code === 'ENOENT' || undefined,
               )
               .finally(() => {
-                dirStatInFlight = false
+                hostState.dirStatInFlight = false
               })
             checkDir = Promise.race([
               statPromise,

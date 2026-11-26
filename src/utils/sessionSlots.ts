@@ -2690,6 +2690,26 @@ export class Proactivity {
   }
 }
 
+/**
+ * Official 2.1.331 `EngineStore` — per-root-session live engine store handle
+ * (`Session.engineStore`), inherited by `withProject` forks.
+ */
+export class EngineStore {
+  #current: unknown = undefined
+
+  get current(): unknown {
+    return this.#current
+  }
+
+  adopt(store: unknown): void {
+    this.#current = store
+  }
+
+  reset(): void {
+    this.#current = undefined
+  }
+}
+
 export type OTelAuthErrorCategory = {
   kind: 'auth' | 'timeout' | 'network' | 'http' | 'other'
   status?: number

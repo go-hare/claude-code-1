@@ -25,6 +25,7 @@ import { logError } from '../../utils/log.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
 import { extractTag, extractTextContent } from '../../utils/messages.js';
 import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js';
+import { getBootstrapSessionHost, hasActiveSessionAls, HostSlot } from '../../utils/sessionHost.js';
 import {
   deleteRemoteAgentMetadata,
   listRemoteAgentMetadata,
@@ -121,14 +122,72 @@ export type RemoteTaskCompletionChecker = (
   remoteTaskMetadata: RemoteTaskMetadata | undefined,
 ) => Promise<string | null>;
 
-const completionCheckers = new Map<RemoteTaskType, RemoteTaskCompletionChecker>();
+type RemoteAgentTaskRegistriesHostState = {
+  completionCheckers: Map<RemoteTaskType, RemoteTaskCompletionChecker>;
+  completionHooks: Map<RemoteTaskType, RemoteTaskCompletionHook>;
+  contentExtractors: Map<RemoteTaskType, RemoteTaskContentExtractor>;
+};
+
+// Boot-default registries populated when registration runs outside ALS (module
+// load or exitSessionContext, e.g. autofix-pr). Fresh isolated hosts inherit
+// and fall back to these registrations while still allowing per-host overrides.
+const bootDefaultCompletionCheckers = new Map<RemoteTaskType, RemoteTaskCompletionChecker>();
+const bootDefaultCompletionHooks = new Map<RemoteTaskType, RemoteTaskCompletionHook>();
+const bootDefaultContentExtractors = new Map<RemoteTaskType, RemoteTaskContentExtractor>();
+
+const remoteAgentRegistriesByHost = new HostSlot<RemoteAgentTaskRegistriesHostState>(() => ({
+  completionCheckers: new Map<RemoteTaskType, RemoteTaskCompletionChecker>(bootDefaultCompletionCheckers),
+  completionHooks: new Map<RemoteTaskType, RemoteTaskCompletionHook>(bootDefaultCompletionHooks),
+  contentExtractors: new Map<RemoteTaskType, RemoteTaskContentExtractor>(bootDefaultContentExtractors),
+}));
+
+function getRemoteAgentRegistries(): RemoteAgentTaskRegistriesHostState {
+  return remoteAgentRegistriesByHost.of(getBootstrapSessionHost());
+}
+
+function getCompletionChecker(remoteTaskType: RemoteTaskType): RemoteTaskCompletionChecker | undefined {
+  return (
+    remoteAgentRegistriesByHost.peek(getBootstrapSessionHost())?.completionCheckers.get(remoteTaskType) ??
+    bootDefaultCompletionCheckers.get(remoteTaskType)
+  );
+}
+
+function getContentExtractor(remoteTaskType: RemoteTaskType): RemoteTaskContentExtractor | undefined {
+  return (
+    remoteAgentRegistriesByHost.peek(getBootstrapSessionHost())?.contentExtractors.get(remoteTaskType) ??
+    bootDefaultContentExtractors.get(remoteTaskType)
+  );
+}
+
+function getCompletionHook(remoteTaskType: RemoteTaskType): RemoteTaskCompletionHook | undefined {
+  return (
+    remoteAgentRegistriesByHost.peek(getBootstrapSessionHost())?.completionHooks.get(remoteTaskType) ??
+    bootDefaultCompletionHooks.get(remoteTaskType)
+  );
+}
+
+/** Test helper: inspect effective registered handlers for the current host (including boot-default fallbacks). */
+export function getRegisteredRemoteTaskHandlersForTests(remoteTaskType: RemoteTaskType): {
+  completionChecker: RemoteTaskCompletionChecker | undefined;
+  completionHook: RemoteTaskCompletionHook | undefined;
+  contentExtractor: RemoteTaskContentExtractor | undefined;
+} {
+  return {
+    completionChecker: getCompletionChecker(remoteTaskType),
+    completionHook: getCompletionHook(remoteTaskType),
+    contentExtractor: getContentExtractor(remoteTaskType),
+  };
+}
 
 /**
  * Register a completion checker for a remote task type. Invoked on every poll
  * tick; survives --resume via the sidecar's remoteTaskType + remoteTaskMetadata.
  */
 export function registerCompletionChecker(remoteTaskType: RemoteTaskType, checker: RemoteTaskCompletionChecker): void {
-  completionCheckers.set(remoteTaskType, checker);
+  getRemoteAgentRegistries().completionCheckers.set(remoteTaskType, checker);
+  if (!hasActiveSessionAls()) {
+    bootDefaultCompletionCheckers.set(remoteTaskType, checker);
+  }
 }
 
 /**
@@ -140,8 +199,6 @@ export function registerCompletionChecker(remoteTaskType: RemoteTaskType, checke
  */
 export type RemoteTaskCompletionHook = (taskId: string, remoteTaskMetadata: RemoteTaskMetadata | undefined) => void;
 
-const completionHooks = new Map<RemoteTaskType, RemoteTaskCompletionHook>();
-
 /**
  * Inspect a completed remote task's accumulated log and return an XML fragment
  * to inject inline into the completion task-notification. Returning null falls
@@ -151,8 +208,6 @@ const completionHooks = new Map<RemoteTaskType, RemoteTaskCompletionHook>();
  */
 export type RemoteTaskContentExtractor = (log: SDKMessage[]) => string | null;
 
-const contentExtractors = new Map<RemoteTaskType, RemoteTaskContentExtractor>();
-
 /**
  * Register a content extractor for a remote task type. Called once per
  * completion in the generic completion branches (archived, completionChecker,
@@ -161,11 +216,14 @@ const contentExtractors = new Map<RemoteTaskType, RemoteTaskContentExtractor>();
  * back to generic notification.
  */
 export function registerContentExtractor(remoteTaskType: RemoteTaskType, extractor: RemoteTaskContentExtractor): void {
-  contentExtractors.set(remoteTaskType, extractor);
+  getRemoteAgentRegistries().contentExtractors.set(remoteTaskType, extractor);
+  if (!hasActiveSessionAls()) {
+    bootDefaultContentExtractors.set(remoteTaskType, extractor);
+  }
 }
 
 function tryExtractRichContent(task: RemoteAgentTaskState, log: SDKMessage[]): string | null {
-  const extractor = contentExtractors.get(task.remoteTaskType);
+  const extractor = getContentExtractor(task.remoteTaskType);
   if (!extractor) return null;
   try {
     return extractor(log);
@@ -183,11 +241,14 @@ function tryExtractRichContent(task: RemoteAgentTaskState, log: SDKMessage[]): s
  * framework to reverse-import from the command package.
  */
 export function registerCompletionHook(remoteTaskType: RemoteTaskType, hook: RemoteTaskCompletionHook): void {
-  completionHooks.set(remoteTaskType, hook);
+  getRemoteAgentRegistries().completionHooks.set(remoteTaskType, hook);
+  if (!hasActiveSessionAls()) {
+    bootDefaultCompletionHooks.set(remoteTaskType, hook);
+  }
 }
 
 function runCompletionHook(taskId: string, task: RemoteAgentTaskState): void {
-  const hook = completionHooks.get(task.remoteTaskType);
+  const hook = getCompletionHook(task.remoteTaskType);
   if (!hook) return;
   try {
     hook(taskId, task.remoteTaskMetadata);
@@ -842,7 +903,7 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
         return;
       }
 
-      const checker = completionCheckers.get(task.remoteTaskType);
+      const checker = getCompletionChecker(task.remoteTaskType);
       if (checker) {
         const completionResult = await checker(task.remoteTaskMetadata);
         if (completionResult !== null) {

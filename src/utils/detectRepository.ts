@@ -2,6 +2,7 @@ import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { getRemoteUrl, gitExe } from './git.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 export type ParsedRepository = {
   host: string
@@ -9,10 +10,16 @@ export type ParsedRepository = {
   name: string
 }
 
-const repositoryWithHostCache = new Map<string, ParsedRepository | null>()
+const repositoryWithHostCacheHostSlot = new HostSlot<
+  Map<string, ParsedRepository | null>
+>(() => new Map())
+
+function getRepositoryWithHostCache(): Map<string, ParsedRepository | null> {
+  return repositoryWithHostCacheHostSlot.of(getBootstrapSessionHost())
+}
 
 export function clearRepositoryCaches(): void {
-  repositoryWithHostCache.clear()
+  getRepositoryWithHostCache().clear()
 }
 
 export async function detectCurrentRepository(): Promise<string | null> {
@@ -35,6 +42,7 @@ export async function detectCurrentRepository(): Promise<string | null> {
 export async function detectCurrentRepositoryWithHost(
   cwd: string = getCwd(),
 ): Promise<ParsedRepository | null> {
+  const repositoryWithHostCache = getRepositoryWithHostCache()
   if (repositoryWithHostCache.has(cwd)) {
     return repositoryWithHostCache.get(cwd) ?? null
   }
@@ -81,14 +89,14 @@ export async function detectCurrentRepositoryWithHost(
  * Callers construct github.com URLs, so GHE hosts are filtered out here.
  */
 export function getCachedRepository(): string | null {
-  const parsed = repositoryWithHostCache.get(getCwd())
+  const parsed = getRepositoryWithHostCache().get(getCwd())
   if (!parsed || parsed.host !== 'github.com') return null
   return `${parsed.owner}/${parsed.name}`
 }
 
 /** densable `Iar` — cached origin host for cwd, or null if unresolved. */
 export function getCachedRepositoryHost(): string | null {
-  return repositoryWithHostCache.get(getCwd())?.host ?? null
+  return getRepositoryWithHostCache().get(getCwd())?.host ?? null
 }
 
 /** densable SEA `f8y` / `fTt` — owner/repo path segment. */

@@ -14,30 +14,49 @@ import { errorMessage, getErrnoCode } from './errors.js'
 import { lazySchema } from './lazySchema.js'
 import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
+import { getBootstrapSessionHost } from './sessionHost.js'
 import { createSignal } from './signal.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import { getTeamName } from './teammate.js'
 import { getTeammateContext } from './teammateContext.js'
 
-// Listeners for task list updates (used for immediate UI refresh in same process)
-const tasksUpdated = createSignal()
-
 /**
- * Team name set by the leader when creating a team.
- * Used by getTaskListId() so the leader's tasks are stored under the team name
- * (matching where tmux/iTerm2 teammates look), not under the session ID.
+ * Official 2.1.331 `Jo().taskList` — per-`SessionHost` task-list state bag so
+ * concurrent hosts in the same process never collide on `leaderTeamName`,
+ * `sessionTaskListId`, `ownTaskListId`, or update subscribers.
  */
-let leaderTeamName: string | undefined
-let sessionTaskListId: string | undefined
-let ownTaskListId: string | undefined
+type HostTaskListState = {
+  leaderTeamName: string | undefined
+  sessionTaskListId: string | undefined
+  ownTaskListId: string | undefined
+  tasksUpdated: ReturnType<typeof createSignal>
+}
+
+const taskListStateByHost = new WeakMap<object, HostTaskListState>()
+
+function getHostTaskListState(): HostTaskListState {
+  const host = getBootstrapSessionHost()
+  let state = taskListStateByHost.get(host)
+  if (!state) {
+    state = {
+      leaderTeamName: undefined,
+      sessionTaskListId: undefined,
+      ownTaskListId: undefined,
+      tasksUpdated: createSignal(),
+    }
+    taskListStateByHost.set(host, state)
+  }
+  return state
+}
 
 /**
  * Sets the leader's team name for task list resolution.
  * Called when the session team is initialized.
  */
 export function setLeaderTeamName(teamName: string): void {
-  if (leaderTeamName === teamName) return
-  leaderTeamName = teamName
+  const state = getHostTaskListState()
+  if (state.leaderTeamName === teamName) return
+  state.leaderTeamName = teamName
   // Changing the task list ID is a "tasks updated" event for subscribers —
   // they're now looking at a different directory.
   notifyTasksUpdated()
@@ -49,13 +68,14 @@ export function setLeaderTeamName(teamName: string): void {
  * Called when a team is deleted.
  */
 export function clearLeaderTeamName(): void {
-  if (leaderTeamName === undefined) return
-  leaderTeamName = undefined
+  const state = getHostTaskListState()
+  if (state.leaderTeamName === undefined) return
+  state.leaderTeamName = undefined
   notifyTasksUpdated()
 }
 
 export function getLeaderTeamName(): string | undefined {
-  return leaderTeamName
+  return getHostTaskListState().leaderTeamName
 }
 
 /**
@@ -65,8 +85,9 @@ export function setSessionTaskListId(
   listId: string | undefined,
   opts?: { persist?: boolean },
 ): void {
-  if (sessionTaskListId === listId) return
-  sessionTaskListId = listId
+  const state = getHostTaskListState()
+  if (state.sessionTaskListId === listId) return
+  state.sessionTaskListId = listId
   notifyTasksUpdated()
   if (opts?.persist !== false && listId !== undefined) {
     void persistSessionTaskListId()
@@ -74,35 +95,37 @@ export function setSessionTaskListId(
 }
 
 export function getSessionTaskListId(): string | undefined {
-  return sessionTaskListId
+  return getHostTaskListState().sessionTaskListId
 }
 
 /**
  * Sets or clears the session's own task list ID override (gold `ownTaskListId`).
  */
 export function setOwnTaskListId(listId: string | undefined): void {
-  if (ownTaskListId === listId) return
-  ownTaskListId = listId
+  const state = getHostTaskListState()
+  if (state.ownTaskListId === listId) return
+  state.ownTaskListId = listId
   notifyTasksUpdated()
 }
 
 export function getOwnTaskListId(
   fallbackSessionId: string = getSessionId(),
 ): string {
-  return ownTaskListId ?? fallbackSessionId
+  return getHostTaskListState().ownTaskListId ?? fallbackSessionId
 }
 
 export function resetTaskListState(): void {
+  const state = getHostTaskListState()
   if (
-    leaderTeamName === undefined &&
-    sessionTaskListId === undefined &&
-    ownTaskListId === undefined
+    state.leaderTeamName === undefined &&
+    state.sessionTaskListId === undefined &&
+    state.ownTaskListId === undefined
   ) {
     return
   }
-  leaderTeamName = undefined
-  sessionTaskListId = undefined
-  ownTaskListId = undefined
+  state.leaderTeamName = undefined
+  state.sessionTaskListId = undefined
+  state.ownTaskListId = undefined
   notifyTasksUpdated()
 }
 
@@ -129,7 +152,8 @@ function sessionTeamKeyForTasks(sessionId: string): string {
 export async function noteSessionTaskListAfterClear(
   sessionId: string = getSessionId(),
 ): Promise<void> {
-  const listId = sessionTaskListId ?? leaderTeamName
+  const state = getHostTaskListState()
+  const listId = state.sessionTaskListId ?? state.leaderTeamName
   if (!listId || process.env.CLAUDE_CODE_TASK_LIST_ID) return
   if (!VALID_SESSION_TASK_LIST_ID_RE.test(listId)) return
   try {
@@ -166,7 +190,8 @@ export async function noteSessionTaskListAfterClear(
 export async function persistSessionTaskListId(
   sessionId: string = getSessionId(),
 ): Promise<void> {
-  const activeListId = sessionTaskListId ?? leaderTeamName
+  const state = getHostTaskListState()
+  const activeListId = state.sessionTaskListId ?? state.leaderTeamName
   if (!activeListId || process.env.CLAUDE_CODE_TASK_LIST_ID) return
   if (!VALID_SESSION_TASK_LIST_ID_RE.test(activeListId)) return
   try {
@@ -213,10 +238,12 @@ export async function restoreSessionTaskListId(
 }
 
 /**
- * Register a listener to be called when tasks are updated in this process.
+ * Register a listener to be called when tasks are updated in this host.
  * Returns an unsubscribe function.
  */
-export const onTasksUpdated = tasksUpdated.subscribe
+export function onTasksUpdated(listener: () => void): () => void {
+  return getHostTaskListState().tasksUpdated.subscribe(listener)
+}
 
 /**
  * Notify listeners that tasks have been updated.
@@ -226,7 +253,7 @@ export const onTasksUpdated = tasksUpdated.subscribe
  */
 export function notifyTasksUpdated(): void {
   try {
-    tasksUpdated.emit()
+    getHostTaskListState().tasksUpdated.emit()
   } catch {
     // Ignore listener errors — task mutations must not fail due to notification issues
   }
@@ -550,16 +577,17 @@ export function getTaskListId(): string {
   if (process.env.CLAUDE_CODE_TASK_LIST_ID) {
     return process.env.CLAUDE_CODE_TASK_LIST_ID
   }
+  const state = getHostTaskListState()
   // In-process teammates use the leader's team name (unless sessionListId overrides it)
   // so teammates share the same task list that tmux/iTerm2 teammates also resolve to.
   const teammateCtx = getTeammateContext()
   if (teammateCtx) {
-    return sessionTaskListId ?? teammateCtx.teamName
+    return state.sessionTaskListId ?? teammateCtx.teamName
   }
   return (
     getTeamName() ||
-    sessionTaskListId ||
-    leaderTeamName ||
+    state.sessionTaskListId ||
+    state.leaderTeamName ||
     getOwnTaskListId(getSessionId())
   )
 }
@@ -1181,7 +1209,7 @@ export async function unassignTeammateTasks(
   teammateName: string,
   reason: 'terminated' | 'shutdown',
 ): Promise<UnassignTasksResult> {
-  const taskListId = sessionTaskListId ?? teamName
+  const taskListId = getHostTaskListState().sessionTaskListId ?? teamName
   const tasks = await listTasks(taskListId)
   const unresolvedAssignedTasks = tasks.filter(
     t =>

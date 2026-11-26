@@ -5,7 +5,9 @@ import { callIdeRpc } from '../services/mcp/client.js'
 import type { MCPServerConnection } from '../services/mcp/types.js'
 import { ClaudeError } from '../utils/errors.js'
 import { normalizePathForComparison, pathsEqual } from '../utils/file.js'
+import { HostSlot } from '../utils/hostSlot.js'
 import { getConnectedIdeClient } from '../utils/ide.js'
+import { getBootstrapSessionHost } from '../utils/sessionRoot.js'
 import { every } from '../utils/set.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import { withTimeout } from '../utils/sleep.js'
@@ -83,8 +85,20 @@ export function diagnosticFingerprint(d: Diagnostic): string {
  * WeakSet for object payloads (incl. the files array when counting drops);
  * Set for non-array kind tags ("missing" | "non-array").
  */
-const sanitizedDiagnosticObjectPayloads = new WeakSet<object>()
-const nonArrayDiagnosticsPayloadKinds = new Set<string>()
+type DiagnosticSanitizeLatchesState = {
+  sanitizedDiagnosticObjectPayloads: WeakSet<object>
+  nonArrayDiagnosticsPayloadKinds: Set<string>
+}
+
+const diagnosticSanitizeLatchesSlot =
+  new HostSlot<DiagnosticSanitizeLatchesState>(() => ({
+    sanitizedDiagnosticObjectPayloads: new WeakSet<object>(),
+    nonArrayDiagnosticsPayloadKinds: new Set<string>(),
+  }))
+
+function getDiagnosticSanitizeLatchesState(): DiagnosticSanitizeLatchesState {
+  return diagnosticSanitizeLatchesSlot.of(getBootstrapSessionHost())
+}
 
 export type DiagnosticSeverity = 'Error' | 'Warning' | 'Info' | 'Hint'
 
@@ -121,12 +135,14 @@ export function mapDiagnosticSeverity(
 
 /** Test helper — reset densable OOo/pvd drop-log latches. */
 export function clearDiagnosticSanitizeLatchesForTests(): void {
-  nonArrayDiagnosticsPayloadKinds.clear()
+  getDiagnosticSanitizeLatchesState().nonArrayDiagnosticsPayloadKinds.clear()
   // WeakSet cannot be cleared; tests that need re-log should use fresh objects.
 }
 
 export class DiagnosticTrackingService {
-  private static instance: DiagnosticTrackingService | undefined
+  private static hostInstances = new HostSlot<DiagnosticTrackingService>(
+    () => new DiagnosticTrackingService(),
+  )
   private baseline: Map<string, Diagnostic[]> = new Map()
 
   private initialized = false
@@ -144,10 +160,7 @@ export class DiagnosticTrackingService {
   private rightFileDiagnosticsState: Map<string, Diagnostic[]> = new Map()
 
   static getInstance(): DiagnosticTrackingService {
-    if (!DiagnosticTrackingService.instance) {
-      DiagnosticTrackingService.instance = new DiagnosticTrackingService()
-    }
-    return DiagnosticTrackingService.instance
+    return DiagnosticTrackingService.hostInstances.of(getBootstrapSessionHost())
   }
 
   initialize(mcpClient: MCPServerConnection) {
@@ -512,6 +525,10 @@ export class DiagnosticTrackingService {
    * - `Dropped N malformed file(s) and M malformed diagnostic(s) from a replayed diagnostics attachment`
    */
   static sanitizeDiagnosticFiles(files: unknown): DiagnosticFile[] {
+    const {
+      sanitizedDiagnosticObjectPayloads,
+      nonArrayDiagnosticsPayloadKinds,
+    } = getDiagnosticSanitizeLatchesState()
     if (!Array.isArray(files)) {
       const kind = files === undefined ? 'missing' : 'non-array'
       const isObjectPayload = typeof files === 'object' && files !== null
@@ -671,4 +688,32 @@ export class DiagnosticTrackingService {
   }
 }
 
-export const diagnosticTracker = DiagnosticTrackingService.getInstance()
+export const diagnosticTracker: DiagnosticTrackingService = new Proxy(
+  {} as DiagnosticTrackingService,
+  {
+    get(_target, prop) {
+      const instance = DiagnosticTrackingService.getInstance()
+      const value = Reflect.get(instance, prop, instance)
+      return typeof value === 'function' ? value.bind(instance) : value
+    },
+    set(_target, prop, value) {
+      const instance = DiagnosticTrackingService.getInstance()
+      return Reflect.set(instance, prop, value, instance)
+    },
+    has(_target, prop) {
+      return prop in DiagnosticTrackingService.getInstance()
+    },
+    ownKeys() {
+      return Reflect.ownKeys(DiagnosticTrackingService.getInstance())
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      return Reflect.getOwnPropertyDescriptor(
+        DiagnosticTrackingService.getInstance(),
+        prop,
+      )
+    },
+    getPrototypeOf() {
+      return DiagnosticTrackingService.prototype
+    },
+  },
+)

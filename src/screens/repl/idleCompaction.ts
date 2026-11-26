@@ -4,6 +4,12 @@ import { currentLimits } from '../../services/claudeAiLimits.js'
 import { isAutoCompactEnabled } from '../../services/compact/autoCompact.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { logError } from '../../utils/log.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
 import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 
 /** Official 2.1.325 constants for idle compaction (`n1r`, `o1r`, `s1r`, `l1r`). */
@@ -341,16 +347,24 @@ export class IdleCompactionRunner {
       cache.lastActivityAt +
       (cache.expiresAt - cache.lastActivityAt) * IDLE_COMPACT_CACHE_FRACTION
     const delayMs = Math.max(0, fireAtMs - Date.now())
+    const captured = getActiveSessionFromAls()
     this.timer = setTimeout(() => {
-      void runSafe(() =>
-        this.fire(
-          turnEndMs,
-          fireAtMs,
-          getPrefixToken,
-          options?.getContextTokens,
-          options?.getAutoCompactWindowLoadTokens,
-        ),
-      )
+      const run = () => {
+        void runSafe(() =>
+          this.fire(
+            turnEndMs,
+            fireAtMs,
+            getPrefixToken,
+            options?.getContextTokens,
+            options?.getAutoCompactWindowLoadTokens,
+          ),
+        )
+      }
+      if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+        runWithSession(captured, run)
+      } else {
+        run()
+      }
     }, delayMs)
     this.timer.unref?.()
     return 'pending'
@@ -428,11 +442,10 @@ export class IdleCompactionRunner {
   }
 }
 
-let sharedIdleCompactionRunner: IdleCompactionRunner | null = null
+const idleCompactionRunnerBySession = new RootSessionSlot<IdleCompactionRunner>(
+  () => new IdleCompactionRunner(),
+)
 
 export function getIdleCompactionRunner(): IdleCompactionRunner {
-  if (!sharedIdleCompactionRunner) {
-    sharedIdleCompactionRunner = new IdleCompactionRunner()
-  }
-  return sharedIdleCompactionRunner
+  return idleCompactionRunnerBySession.of(getBootstrapSession())
 }

@@ -16,6 +16,7 @@ import type {
 } from '../../Tool.js'
 import { getCwd } from '../cwd.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { SettingSource } from '../settings/constants.js'
 import {
   getEnabledSettingSources,
@@ -1518,14 +1519,12 @@ export async function initializeToolPermissionContext({
   // Official 2.1.327 #511/#512: if a worktree launch folder was pinned, resolve
   // relative CLI `--add-dir` entries against the launch folder (mapping dirs
   // above the launch folder to only the worktree).
+  const pinState = getWorktreeAddDirPinStateInternal()
   const resolvedCliAddDirs =
-    worktreeAddDirPinState.launchFolder !== undefined
+    pinState.launchFolder !== undefined
       ? addDirs.map(dir =>
-          resolveWorktreeAddDirEntry(
-            dir,
-            worktreeAddDirPinState.launchFolder!,
-            true,
-            rel => join(getCwd(), rel),
+          resolveWorktreeAddDirEntry(dir, pinState.launchFolder!, true, rel =>
+            join(getCwd(), rel),
           ),
         )
       : addDirs
@@ -1902,16 +1901,23 @@ function isAutoModeDisabledBySettings(): boolean {
  * Order: circuit-breaker → settings disable → modelSupportsAutoMode (u3e).
  * Synchronous. Classifier feature off → closed (fork DCE).
  */
-let autoModeGateEnabledOverride: boolean | undefined
+// Official 2.1.331 [W-268]: per-host autoModeGateEnabledOverride slot.
+const autoModeGateEnabledOverrideByHost = new HostSlot<{
+  override: boolean | undefined
+}>(() => ({ override: undefined }))
 
 /** Unit-test only. Classifier is off in bun:test, so sR cannot open otherwise. */
 export function _setAutoModeGateEnabledForTesting(
   value: boolean | undefined,
 ): void {
-  autoModeGateEnabledOverride = value
+  autoModeGateEnabledOverrideByHost.of(getBootstrapSessionHost()).override =
+    value
 }
 
 export function isAutoModeGateEnabled(): boolean {
+  const autoModeGateEnabledOverride = autoModeGateEnabledOverrideByHost.peek(
+    getBootstrapSessionHost(),
+  )?.override
   if (autoModeGateEnabledOverride !== undefined) {
     return autoModeGateEnabledOverride
   }
@@ -2561,10 +2567,17 @@ type WorktreeAddDirPinState = {
   launchFolder?: string
 }
 
-const worktreeAddDirPinState: WorktreeAddDirPinState = {
-  typed: [],
-  pinned: [],
-  launchFolder: undefined,
+// Official 2.1.331 [W-268]: per-host worktree `--add-dir` pin state.
+const worktreeAddDirPinStateByHost = new HostSlot<WorktreeAddDirPinState>(
+  () => ({
+    typed: [],
+    pinned: [],
+    launchFolder: undefined,
+  }),
+)
+
+function getWorktreeAddDirPinStateInternal(): WorktreeAddDirPinState {
+  return worktreeAddDirPinStateByHost.of(getBootstrapSessionHost())
 }
 
 function stripGlobTailRelativeTo(targetPath: string, baseDir: string): string {
@@ -2638,6 +2651,7 @@ export function pinAddDirsForWorktreeLaunch(
 ): string[] {
   const current = getAdditionalDirectoriesForClaudeMd()
   if (current.length === 0) return []
+  const worktreeAddDirPinState = getWorktreeAddDirPinStateInternal()
   worktreeAddDirPinState.typed = [...current]
   worktreeAddDirPinState.launchFolder = launchFolder
   worktreeAddDirPinState.pinned = current.map(entry =>
@@ -2651,6 +2665,7 @@ export function pinAddDirsForWorktreeLaunch(
 
 /** Official `cEa(worktreeDir)` — re-pin previously pinned `--add-dir` entries once worktree cwd is known. */
 export function repinAddDirsAfterWorktreeEnter(worktreeDir: string): string[] {
+  const worktreeAddDirPinState = getWorktreeAddDirPinStateInternal()
   const { launchFolder, typed } = worktreeAddDirPinState
   if (launchFolder === undefined) return getAdditionalDirectoriesForClaudeMd()
   worktreeAddDirPinState.launchFolder = undefined
@@ -2748,10 +2763,14 @@ export function rewriteAddDirForBgWorktree(
 }
 
 export function getWorktreeAddDirPinState(): Readonly<WorktreeAddDirPinState> {
-  return worktreeAddDirPinState
+  return getWorktreeAddDirPinStateInternal()
 }
 
 export function _resetWorktreeAddDirPinStateForTesting(): void {
+  const worktreeAddDirPinState = worktreeAddDirPinStateByHost.peek(
+    getBootstrapSessionHost(),
+  )
+  if (!worktreeAddDirPinState) return
   worktreeAddDirPinState.typed = []
   worktreeAddDirPinState.pinned = []
   worktreeAddDirPinState.launchFolder = undefined

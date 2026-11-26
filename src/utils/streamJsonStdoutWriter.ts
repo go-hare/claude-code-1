@@ -8,23 +8,28 @@
  * onProgress callback).
  */
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 export type StreamJsonStdoutWriter = {
   write(message: StdoutMessage): Promise<void>
 }
 
-let streamJsonStdoutWriter: StreamJsonStdoutWriter | undefined
+const streamJsonStdoutWriterHostSlot = new HostSlot<{
+  writer: StreamJsonStdoutWriter | undefined
+}>(() => ({
+  writer: undefined,
+}))
 
 /** densable `_Is(e)` */
 export function setStreamJsonStdoutWriter(
   writer: StreamJsonStdoutWriter | undefined,
 ): void {
-  streamJsonStdoutWriter = writer
+  streamJsonStdoutWriterHostSlot.of(getBootstrapSessionHost()).writer = writer
 }
 
 /** densable `Yud()` */
 export function getStreamJsonStdoutWriter():
   | StreamJsonStdoutWriter
   | undefined {
-  return streamJsonStdoutWriter
+  return streamJsonStdoutWriterHostSlot.of(getBootstrapSessionHost()).writer
 }

@@ -13,18 +13,31 @@
  */
 import { createServer } from 'http'
 import { getPlatform } from '../../utils/platform.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 
-/**
- * densable Qpi — one AbortController per callback port.
- * Re-claiming the same port aborts the previous listener so two MCP OAuth
- * flows cannot share a localhost callback.
- */
-const oauthPortAbort = new Map<number, AbortController>()
-/** Resolves when the previous listener on this port has closed. */
-const oauthPortReleased = new Map<number, Promise<void>>()
+type HostOAuthPortState = {
+  /**
+   * densable Qpi — one AbortController per callback port.
+   * Re-claiming the same port aborts the previous listener so two MCP OAuth
+   * flows cannot share a localhost callback.
+   */
+  oauthPortAbort: Map<number, AbortController>
+  /** Resolves when the previous listener on this port has closed. */
+  oauthPortReleased: Map<number, Promise<void>>
+}
+
+const hostOAuthPortSlot = new HostSlot<HostOAuthPortState>(() => ({
+  oauthPortAbort: new Map<number, AbortController>(),
+  oauthPortReleased: new Map<number, Promise<void>>(),
+}))
+
+function getHostOAuthPortState(): HostOAuthPortState {
+  return hostOAuthPortSlot.of(getBootstrapSessionHost())
+}
 
 /** densable `Qpi.get(y)?.abort(); Qpi.set(y, b)` */
 export function claimOAuthRedirectPort(port: number): AbortController {
+  const { oauthPortAbort } = getHostOAuthPortState()
   oauthPortAbort.get(port)?.abort()
   const next = new AbortController()
   oauthPortAbort.set(port, next)
@@ -33,7 +46,8 @@ export function claimOAuthRedirectPort(port: number): AbortController {
 
 /** Wait until a previous claim's listener has unbound this port. */
 export function waitForOAuthRedirectPortRelease(port: number): Promise<void> {
-  return oauthPortReleased.get(port) ?? Promise.resolve()
+  const state = hostOAuthPortSlot.peek(getBootstrapSessionHost())
+  return state?.oauthPortReleased.get(port) ?? Promise.resolve()
 }
 
 /** Register the close-promise for the listener currently bound to `port`. */
@@ -41,6 +55,7 @@ export function setOAuthRedirectPortRelease(
   port: number,
   closed: Promise<void>,
 ): void {
+  const { oauthPortReleased } = getHostOAuthPortState()
   oauthPortReleased.set(port, closed)
   void closed.finally(() => {
     if (oauthPortReleased.get(port) === closed) {
@@ -53,16 +68,19 @@ export function releaseOAuthRedirectPort(
   port: number,
   controller: AbortController,
 ): void {
-  if (oauthPortAbort.get(port) === controller) {
-    oauthPortAbort.delete(port)
+  const state = hostOAuthPortSlot.peek(getBootstrapSessionHost())
+  if (state?.oauthPortAbort.get(port) === controller) {
+    state.oauthPortAbort.delete(port)
   }
 }
 
-/** Test helper — drop the per-port abort map. */
+/** Test helper — drop the per-port abort map for the current host. */
 export function resetOAuthRedirectPortAborts(): void {
-  for (const c of oauthPortAbort.values()) c.abort()
-  oauthPortAbort.clear()
-  oauthPortReleased.clear()
+  const state = hostOAuthPortSlot.peek(getBootstrapSessionHost())
+  if (!state) return
+  for (const c of state.oauthPortAbort.values()) c.abort()
+  state.oauthPortAbort.clear()
+  state.oauthPortReleased.clear()
 }
 
 // densable tLv — Windows dynamic range 49152–65535 is reserved

@@ -7,7 +7,7 @@ import {
 } from 'fs'
 import { lstat, open, readdir, realpath, stat } from 'fs/promises'
 import * as platformPath from 'path'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { getIsRemoteMode, getOriginalCwd } from '../../bootstrap/state.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage, getErrnoCode } from '../errors.js'
@@ -16,7 +16,17 @@ import {
   executeConfigChangeHooks,
   hasBlockingResult,
 } from '../hooks.js'
-import { createSignal } from '../signal.js'
+import {
+  exitSessionContext,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  runWithSession,
+  type SessionHost,
+} from '../sessionHost.js'
+import type { Session } from '../sessionRoot.js'
+import { createSignal, type Signal } from '../signal.js'
 import { SETTING_SOURCES, type SettingSource } from './constants.js'
 import {
   probeNativeFileWatching,
@@ -45,7 +55,7 @@ import {
   getSettingsWithErrors,
 } from './settings.js'
 import type { ValidationError } from './validation.js'
-import { resetSettingsCache } from './settingsCache.js'
+import { resetAllLiveHostSettingsCaches } from './settingsCache.js'
 
 const FILE_STABILITY_THRESHOLD_MS = 1000
 const FILE_STABILITY_POLL_INTERVAL_MS = 500
@@ -75,6 +85,10 @@ const appearedDirs = new Set<string>()
 const creationWatchers = new Map<string, { close(): void }>()
 let directoryCheckTimer: ReturnType<typeof setInterval> | undefined
 let realpathToCanonical = new Map<string, string>()
+const watchedProjectCwds = new Set<string>()
+const sourceByPath = new Map<string, SettingSource>()
+let activeSettingsFiles = new Set<string>()
+let activeWatchedDirs = new Set<string>()
 const closingWatchers = new Set<Promise<void>>()
 let unregisterCleanup: (() => void) | undefined
 let firstReadsChecked = false
@@ -101,12 +115,65 @@ export type SettingsFileErrorNotice = {
   cleared?: boolean
 }
 
-const settingsFileErrorNotices =
-  createSignal<[notice: SettingsFileErrorNotice]>()
-const activeMidSessionSettingsErrors = new Map<
-  string,
-  SettingsFileErrorNotice
->()
+type SettingsFileErrorNoticeHostState = {
+  notices: Signal<[notice: SettingsFileErrorNotice]>
+  activeErrors: Map<string, SettingsFileErrorNotice>
+  subscriberCount: number
+}
+
+const settingsFileErrorNoticeHostSlot =
+  new HostSlot<SettingsFileErrorNoticeHostState>(() => ({
+    notices: createSignal<[notice: SettingsFileErrorNotice]>(),
+    activeErrors: new Map(),
+    subscriberCount: 0,
+  }))
+
+/**
+ * Process-wide weak set of isolated ALS root sessions subscribed to mid-session
+ * settings error notices so process-wide chokidar / outside-ALS checks fan out
+ * into every live subscribed host inside its own ALS context.
+ */
+const subscribedErrorNoticeHosts = new Set<WeakRef<Session>>()
+
+function pruneDeadSubscribedErrorNoticeHosts(): void {
+  for (const ref of subscribedErrorNoticeHosts) {
+    const session = ref.deref()
+    if (session === undefined) {
+      subscribedErrorNoticeHosts.delete(ref)
+      continue
+    }
+    const hostState = settingsFileErrorNoticeHostSlot.peek(session.host)
+    if (!hostState || hostState.subscriberCount <= 0) {
+      subscribedErrorNoticeHosts.delete(ref)
+    }
+  }
+}
+
+function collectSubscribedIsolatedRootSessions(): Session[] {
+  const seenHosts = new Set<SessionHost>()
+  const sessions: Session[] = []
+  for (const ref of subscribedErrorNoticeHosts) {
+    const session = ref.deref()
+    if (session === undefined) {
+      subscribedErrorNoticeHosts.delete(ref)
+      continue
+    }
+    const hostState = settingsFileErrorNoticeHostSlot.peek(session.host)
+    if (!hostState || hostState.subscriberCount <= 0) {
+      subscribedErrorNoticeHosts.delete(ref)
+      continue
+    }
+    if (!seenHosts.has(session.host)) {
+      seenHosts.add(session.host)
+      sessions.push(session)
+    }
+  }
+  return sessions
+}
+
+function getSettingsFileErrorNoticeHostState(): SettingsFileErrorNoticeHostState {
+  return settingsFileErrorNoticeHostSlot.of(getBootstrapSessionHost())
+}
 
 function isBlockingSettingsLoadError(err: ValidationError): boolean {
   if (err.severity === 'warning') return false
@@ -123,15 +190,14 @@ function displayNameForSettingsFile(filePath: string): string {
   return base || filePath
 }
 
-/**
- * Official 2.1.326 (#20): inspect current settings errors after a mid-session
- * reload for `source`. Emits a warning naming each file that newly failed to
- * load, and clears notices for files that recovered.
- */
-export function checkMidSessionSettingsFileErrors(
+function checkMidSessionSettingsFileErrorsForCurrentHost(
   source: SettingSource,
   errors?: ValidationError[],
 ): SettingsFileErrorNotice[] {
+  const {
+    activeErrors: activeMidSessionSettingsErrors,
+    notices: settingsFileErrorNotices,
+  } = getSettingsFileErrorNoticeHostState()
   const currentErrors = errors ?? getSettingsWithErrors().errors
   const blockingFiles = new Set<string>()
   for (const err of currentErrors) {
@@ -176,14 +242,102 @@ export function checkMidSessionSettingsFileErrors(
   return emitted
 }
 
+function fanOutMidSessionSettingsFileErrors(
+  source: SettingSource,
+  errors?: ValidationError[],
+): SettingsFileErrorNotice[] {
+  const currentHost = getBootstrapSessionHost()
+  const visitedHosts = new Set<SessionHost>([currentHost])
+  const emitted = checkMidSessionSettingsFileErrorsForCurrentHost(
+    source,
+    errors,
+  )
+  for (const rootSession of collectSubscribedIsolatedRootSessions()) {
+    if (visitedHosts.has(rootSession.host)) continue
+    visitedHosts.add(rootSession.host)
+    try {
+      runWithSession(rootSession, () => {
+        checkMidSessionSettingsFileErrorsForCurrentHost(source, errors)
+      })
+    } catch (err) {
+      logForDebugging(
+        `[settings] mid-session error check failed for isolated host: ${errorMessage(err)}`,
+        { level: 'warn' },
+      )
+    }
+  }
+  if (hasActiveSessionAls()) {
+    exitSessionContext(() => {
+      const defaultHost = getBootstrapSessionHost()
+      if (visitedHosts.has(defaultHost)) return
+      visitedHosts.add(defaultHost)
+      const defaultState = settingsFileErrorNoticeHostSlot.peek(defaultHost)
+      if (
+        defaultState &&
+        (defaultState.subscriberCount > 0 || defaultState.activeErrors.size > 0)
+      ) {
+        try {
+          checkMidSessionSettingsFileErrorsForCurrentHost(source, errors)
+        } catch (err) {
+          logForDebugging(
+            `[settings] mid-session error check failed for default host: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        }
+      }
+    })
+  }
+  return emitted
+}
+
+/**
+ * Official 2.1.326 (#20): inspect current settings errors after a mid-session
+ * reload for `source`. Emits a warning naming each file that newly failed to
+ * load, and clears notices for files that recovered.
+ *
+ * When fired outside ALS (e.g. from the process-wide chokidar watcher), fans
+ * out into every live isolated host subscribed via
+ * `subscribeSettingsFileErrorNotices()` inside its own root session context.
+ */
+export function checkMidSessionSettingsFileErrors(
+  source: SettingSource,
+  errors?: ValidationError[],
+): SettingsFileErrorNotice[] {
+  if (!hasActiveSessionAls()) {
+    return fanOutMidSessionSettingsFileErrors(source, errors)
+  }
+  return checkMidSessionSettingsFileErrorsForCurrentHost(source, errors)
+}
+
 export function subscribeSettingsFileErrorNotices(
   listener: (notice: SettingsFileErrorNotice) => void,
 ): () => void {
-  return settingsFileErrorNotices.subscribe(listener)
+  const hostState = getSettingsFileErrorNoticeHostState()
+  const unsub = hostState.notices.subscribe(listener)
+  hostState.subscriberCount++
+  let sessionRef: WeakRef<Session> | undefined
+  if (hasActiveSessionAls()) {
+    const rootSession = getBootstrapSession().root
+    sessionRef = new WeakRef(rootSession)
+    if (subscribedErrorNoticeHosts.size > 64) {
+      pruneDeadSubscribedErrorNoticeHosts()
+    }
+    subscribedErrorNoticeHosts.add(sessionRef)
+  }
+  let unsubscribed = false
+  return () => {
+    if (unsubscribed) return
+    unsubscribed = true
+    unsub()
+    hostState.subscriberCount = Math.max(0, hostState.subscriberCount - 1)
+    if (sessionRef !== undefined) {
+      subscribedErrorNoticeHosts.delete(sessionRef)
+    }
+  }
 }
 
 export function getActiveSettingsFileErrorNotices(): SettingsFileErrorNotice[] {
-  return [...activeMidSessionSettingsErrors.values()]
+  return [...getSettingsFileErrorNoticeHostState().activeErrors.values()]
 }
 
 type TimingOverrides = {
@@ -202,6 +356,7 @@ type WatchTargets = {
   pendingDirs: Set<string>
   dropInDir: string | null
   realpathToCanonical: Map<string, string>
+  sourceByPath: Map<string, SettingSource>
 }
 
 function stabilityThreshold(): number {
@@ -235,6 +390,12 @@ function attachWatchTargets(targets: WatchTargets, generation: number): void {
   const lifecycle = lifecycleGeneration
   const { dirs, settingsFiles, dropInDir } = targets
   realpathToCanonical = targets.realpathToCanonical
+  sourceByPath.clear()
+  for (const [path, source] of targets.sourceByPath) {
+    sourceByPath.set(path, source)
+  }
+  activeSettingsFiles = new Set(settingsFiles)
+  activeWatchedDirs = new Set(dirs)
   for (const dir of pendingDirs) {
     if (!targets.pendingDirs.has(dir)) appearedDirs.add(dir)
   }
@@ -270,7 +431,7 @@ function attachWatchTargets(targets: WatchTargets, generation: number): void {
       if (path.split(/[/\\]/).some(dir => dir === '.git')) return true
       if (!stats || stats.isDirectory()) return false
       const normalized = platformPath.normalize(path)
-      if (settingsFiles.has(normalized)) return false
+      if (activeSettingsFiles.has(normalized)) return false
       if (
         dropInDir &&
         platformPath.dirname(normalized) === dropInDir &&
@@ -587,11 +748,134 @@ async function rebuildWatchTargets(): Promise<void> {
   attachWatchTargets(targets, generation)
 }
 
+function getProjectSettingsFilesForCwd(
+  cwd: string,
+): Array<{ path: string; source: 'projectSettings' | 'localSettings' }> {
+  const resolved = platformPath.resolve(cwd)
+  return [
+    {
+      path: platformPath.normalize(
+        platformPath.join(resolved, '.claude', 'settings.json'),
+      ),
+      source: 'projectSettings',
+    },
+    {
+      path: platformPath.normalize(
+        platformPath.join(resolved, '.claude', 'settings.local.json'),
+      ),
+      source: 'localSettings',
+    },
+  ]
+}
+
+async function resolveSettingsFileAlias(
+  path: string,
+  dir: string,
+  knownFiles: ReadonlySet<string>,
+): Promise<string | null> {
+  try {
+    const target = platformPath.normalize(await realpath(path))
+    const realDir = await realpath(dir)
+    if (
+      target === path ||
+      platformPath.join(realDir, platformPath.basename(path)) === target
+    ) {
+      return null
+    }
+    const targetDir = platformPath.dirname(target)
+    const alias =
+      targetDir === realDir
+        ? platformPath.join(dir, platformPath.basename(target))
+        : target
+    if (knownFiles.has(alias)) return null
+    return alias
+  } catch {
+    /* Missing files have no symlink target yet. */
+    return null
+  }
+}
+
+export async function ensureProjectWatchedForCurrentHost(): Promise<void> {
+  if (getIsRemoteMode() || !initialized || disposed) return
+  const cwd = platformPath.resolve(getOriginalCwd())
+  if (watchedProjectCwds.has(cwd)) return
+  watchedProjectCwds.add(cwd)
+
+  const lifecycle = lifecycleGeneration
+  const entries = getProjectSettingsFilesForCwd(cwd)
+  const dirsToAdd: string[] = []
+  const newlyAddedFiles: string[] = []
+
+  for (const { path, source } of entries) {
+    if (!sourceByPath.has(path)) {
+      sourceByPath.set(path, source)
+    }
+    const dir = platformPath.dirname(path)
+    let dirExists = false
+    try {
+      dirExists = (await stat(dir)).isDirectory()
+    } catch {
+      dirExists = false
+    }
+    if (disposed || lifecycle !== lifecycleGeneration) return
+
+    if (dirExists) {
+      activeSettingsFiles.add(path)
+      newlyAddedFiles.push(path)
+      if (!activeWatchedDirs.has(dir)) {
+        activeWatchedDirs.add(dir)
+        dirsToAdd.push(dir)
+      }
+    } else if (!pendingDirs.has(dir)) {
+      try {
+        if ((await stat(platformPath.dirname(dir))).isDirectory()) {
+          if (disposed || lifecycle !== lifecycleGeneration) return
+          pendingDirs.add(dir)
+          watchForDirectory(dir)
+        }
+      } catch {
+        /* No existing parent to watch. */
+      }
+    }
+
+    const alias = await resolveSettingsFileAlias(path, dir, activeSettingsFiles)
+    if (disposed || lifecycle !== lifecycleGeneration) return
+    if (alias) {
+      realpathToCanonical.set(alias, path)
+      activeSettingsFiles.add(alias)
+      newlyAddedFiles.push(alias)
+      const aliasDir = platformPath.dirname(alias)
+      if (!activeWatchedDirs.has(aliasDir)) {
+        activeWatchedDirs.add(aliasDir)
+        dirsToAdd.push(aliasDir)
+      }
+    }
+  }
+
+  if (dirsToAdd.length === 0) return
+
+  if (watcher) {
+    watcher.add(dirsToAdd)
+    logForDebugging(
+      `Added project settings watch paths for ${cwd}: ${newlyAddedFiles.join(', ')}`,
+    )
+  } else {
+    await rebuildWatchTargets()
+  }
+}
+
 export async function initialize(): Promise<void> {
-  if (getIsRemoteMode() || initialized || disposed) return
+  if (getIsRemoteMode() || disposed) return
+  if (initialized) {
+    await ensureProjectWatchedForCurrentHost()
+    return
+  }
   initialized = true
   lifecycleGeneration++
-  unregisterCleanup = registerCleanup(dispose)
+  // Attach process-wide settings watcher disposal to the process-default host's
+  // cleanup bag so tearing down an isolated ALS host never kills watching for
+  // surviving hosts.
+  unregisterCleanup = exitSessionContext(() => registerCleanup(dispose))
   startMdmPolling()
   await rebuildWatchTargets()
 }
@@ -622,6 +906,10 @@ export async function dispose(): Promise<void> {
   pendingDirs.clear()
   appearedDirs.clear()
   realpathToCanonical.clear()
+  watchedProjectCwds.clear()
+  sourceByPath.clear()
+  activeSettingsFiles.clear()
+  activeWatchedDirs.clear()
   firstReadsChecked = false
   firstReadHandledStats.clear()
   lastWatchStats.clear()
@@ -644,11 +932,29 @@ async function getWatchTargets(): Promise<WatchTargets> {
   const dirs = new Set<string>()
   const missing = new Set<string>()
   const aliases = new Map<string, string>()
+  const nextSourceByPath = new Map<string, SettingSource>()
+  const fileSet = new Set<string>()
   const files: string[] = []
+  const addTrackedFile = (path: string, source: SettingSource) => {
+    const normalized = platformPath.normalize(path)
+    if (!nextSourceByPath.has(normalized)) {
+      nextSourceByPath.set(normalized, source)
+    }
+    if (!fileSet.has(normalized)) {
+      fileSet.add(normalized)
+      files.push(normalized)
+    }
+  }
+  watchedProjectCwds.add(platformPath.resolve(getOriginalCwd()))
   for (const source of SETTING_SOURCES) {
     if (source === 'flagSettings') continue
     const path = getSettingsFilePathForSource(source)
-    if (path) files.push(platformPath.normalize(path))
+    if (path) addTrackedFile(path, source)
+  }
+  for (const cwd of watchedProjectCwds) {
+    for (const entry of getProjectSettingsFilesForCwd(cwd)) {
+      addTrackedFile(entry.path, entry.source)
+    }
   }
   const addFile = (dir: string, path: string) => {
     if (!byDir.has(dir)) byDir.set(dir, new Set())
@@ -669,25 +975,11 @@ async function getWatchTargets(): Promise<WatchTargets> {
         }
       }
     }
-    try {
-      const target = platformPath.normalize(await realpath(path))
-      const realDir = await realpath(dir)
-      if (
-        target === path ||
-        platformPath.join(realDir, platformPath.basename(path)) === target
-      )
-        continue
-      const targetDir = platformPath.dirname(target)
-      const alias =
-        targetDir === realDir
-          ? platformPath.join(dir, platformPath.basename(target))
-          : target
-      if (files.includes(alias)) continue
+    const alias = await resolveSettingsFileAlias(path, dir, fileSet)
+    if (alias) {
       aliases.set(alias, path)
       addFile(platformPath.dirname(alias), alias)
       dirs.add(platformPath.dirname(alias))
-    } catch {
-      /* Missing files have no symlink target yet. */
     }
   }
   const settingsFiles = new Set<string>()
@@ -719,6 +1011,7 @@ async function getWatchTargets(): Promise<WatchTargets> {
     pendingDirs: missing,
     dropInDir: watchedDropIn,
     realpathToCanonical: aliases,
+    sourceByPath: nextSourceByPath,
   }
 }
 
@@ -919,9 +1212,11 @@ function getSourceForPath(path: string): SettingSource | undefined {
     normalized.endsWith('.json')
   )
     return 'policySettings'
-  return SETTING_SOURCES.find(
+  const currentMatch = SETTING_SOURCES.find(
     source => getSettingsFilePathForSource(source) === normalized,
   )
+  if (currentMatch) return currentMatch
+  return sourceByPath.get(normalized)
 }
 
 /** Official fc: refresh both OS policy caches before invalidating merged state.
@@ -957,14 +1252,14 @@ function startMdmPolling(): void {
 }
 
 function fanOut(source: SettingSource, extra?: SettingsChangeExtra): void {
-  resetSettingsCache()
+  resetAllLiveHostSettingsCaches()
   // Official 2.1.325 #2332: clear cached skills/agents when managed
   // strictPluginOnlyCustomization changes in a running session.
   notifyStrictPluginOnlyPolicyIfChanged()
   // Official 2.1.326 (#20): warn naming the file if a mid-session edit broke
   // a settings file so it failed to load, and clear once fixed.
   try {
-    checkMidSessionSettingsFileErrors(source)
+    fanOutMidSessionSettingsFileErrors(source)
   } catch (err) {
     logForDebugging(
       `[settings] mid-session error check failed: ${errorMessage(err)}`,
@@ -998,11 +1293,22 @@ export async function resetForTesting(
   watchStartedAt = undefined
   catchUpSince = undefined
   mdmRefreshing = false
-  activeMidSessionSettingsErrors.clear()
+  getSettingsFileErrorNoticeHostState().activeErrors.clear()
+  for (const rootSession of collectSubscribedIsolatedRootSessions()) {
+    settingsFileErrorNoticeHostSlot.peek(rootSession.host)?.activeErrors.clear()
+  }
+  if (hasActiveSessionAls()) {
+    exitSessionContext(() => {
+      settingsFileErrorNoticeHostSlot
+        .peek(getBootstrapSessionHost())
+        ?.activeErrors.clear()
+    })
+  }
   testOverrides = overrides ?? null
 }
 export const settingsChangeDetector = {
   initialize,
+  ensureProjectWatchedForCurrentHost,
   dispose,
   rehome,
   subscribe,

@@ -30,6 +30,7 @@ import { isEnvTruthy } from './envUtils.js'
 import { getErrnoCode, toError } from './errors.js'
 import { formatFileSize } from './format.js'
 import { logError } from './log.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { getProjectDir } from './sessionPaths.js'
 import { jsonStringify } from './slowOperations.js'
 
@@ -112,27 +113,35 @@ export type PersistToolResultError = {
  * in a session-scoped ephemeral directory and removed on normal exit, Ctrl+C
  * (SIGINT), or SIGTERM.
  */
-const ephemeralToolResultsDirs = new Map<string, string>()
-let ephemeralCleanupRegistered = false
-
-export function isEphemeralToolResultsMode(): boolean {
-  return (
-    isSessionPersistenceDisabled() ||
-    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
-  )
+class ToolResultStorageHostState {
+  ephemeralToolResultsDirs = new Map<string, string>()
+  cleanupRegistered = false
+  unregisterCleanup: (() => void) | null = null
 }
 
-export async function cleanupEphemeralToolResultsDirs(): Promise<void> {
-  const dirs = [...ephemeralToolResultsDirs.values()]
-  ephemeralToolResultsDirs.clear()
-  for (const dir of dirs) {
-    await rm(dir, { recursive: true, force: true }).catch(logError)
+const fallbackToolResultStorageHost: object = {}
+const toolResultStorageByHost = new HostSlot<ToolResultStorageHostState>(
+  () => new ToolResultStorageHostState(),
+)
+
+function getToolResultStorageHostState(): ToolResultStorageHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return toolResultStorageByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
   }
+  return toolResultStorageByHost.of(fallbackToolResultStorageHost)
 }
 
-function cleanupEphemeralToolResultsDirsSync(): void {
-  const dirs = [...ephemeralToolResultsDirs.values()]
-  ephemeralToolResultsDirs.clear()
+// Single process-wide exit backstop so multi-host sessions never leak
+// process.on('exit') listeners while still cleaning any surviving temp dirs.
+const liveEphemeralDirsForProcessExit = new Set<string>()
+let processExitHookRegistered = false
+
+function cleanupAllLiveEphemeralDirsOnProcessExit(): void {
+  const dirs = [...liveEphemeralDirsForProcessExit]
+  liveEphemeralDirsForProcessExit.clear()
   for (const dir of dirs) {
     try {
       rmSync(dir, { recursive: true, force: true })
@@ -142,9 +151,43 @@ function cleanupEphemeralToolResultsDirsSync(): void {
   }
 }
 
+export function isEphemeralToolResultsMode(): boolean {
+  return (
+    isSessionPersistenceDisabled() ||
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
+  )
+}
+
+async function cleanupEphemeralToolResultsDirsForState(
+  hostState: ToolResultStorageHostState,
+): Promise<void> {
+  const dirs = [...hostState.ephemeralToolResultsDirs.values()]
+  hostState.ephemeralToolResultsDirs.clear()
+  hostState.cleanupRegistered = false
+  const unregister = hostState.unregisterCleanup
+  hostState.unregisterCleanup = null
+  unregister?.()
+  for (const dir of dirs) {
+    liveEphemeralDirsForProcessExit.delete(dir)
+    await rm(dir, { recursive: true, force: true }).catch(logError)
+  }
+}
+
+export async function cleanupEphemeralToolResultsDirs(): Promise<void> {
+  await cleanupEphemeralToolResultsDirsForState(getToolResultStorageHostState())
+}
+
 /** @internal Reset ephemeral tool-results registry between tests. */
 export function _resetEphemeralToolResultsForTests(): void {
-  ephemeralToolResultsDirs.clear()
+  const hostState = getToolResultStorageHostState()
+  for (const dir of hostState.ephemeralToolResultsDirs.values()) {
+    liveEphemeralDirsForProcessExit.delete(dir)
+  }
+  hostState.ephemeralToolResultsDirs.clear()
+  hostState.cleanupRegistered = false
+  const unregister = hostState.unregisterCleanup
+  hostState.unregisterCleanup = null
+  unregister?.()
 }
 
 function resolveSessionProjectDir(): string {
@@ -164,15 +207,26 @@ function getSessionDir(): string {
   if (!isEphemeralToolResultsMode()) {
     return join(projectDir, sessionId)
   }
-  let ephemeralDir = ephemeralToolResultsDirs.get(sessionId)
+  const hostState = getToolResultStorageHostState()
+  let ephemeralDir = hostState.ephemeralToolResultsDirs.get(sessionId)
   if (ephemeralDir === undefined) {
-    if (!ephemeralCleanupRegistered) {
-      ephemeralCleanupRegistered = true
-      registerCleanup(() => cleanupEphemeralToolResultsDirs())
-      process.on('exit', cleanupEphemeralToolResultsDirsSync)
+    if (!hostState.cleanupRegistered) {
+      hostState.cleanupRegistered = true
+      const stateRef = new WeakRef(hostState)
+      hostState.unregisterCleanup = registerCleanup(async () => {
+        const s = stateRef.deref()
+        if (s) {
+          await cleanupEphemeralToolResultsDirsForState(s)
+        }
+      })
+    }
+    if (!processExitHookRegistered) {
+      processExitHookRegistered = true
+      process.on('exit', cleanupAllLiveEphemeralDirsOnProcessExit)
     }
     ephemeralDir = join(projectDir, randomUUID())
-    ephemeralToolResultsDirs.set(sessionId, ephemeralDir)
+    hostState.ephemeralToolResultsDirs.set(sessionId, ephemeralDir)
+    liveEphemeralDirsForProcessExit.add(ephemeralDir)
   }
   return ephemeralDir
 }

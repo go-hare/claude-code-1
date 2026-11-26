@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { logError } from '../../utils/log.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { ProvidersFileSchema, type ProviderConfig } from './types.js'
 
 /**
@@ -55,13 +56,21 @@ export function getProvidersFilePath(): string {
   return join(getClaudeConfigHomeDir(), 'providers.json')
 }
 
-// ── J1: per-process memoization with stale-on-invalidate ─────────────────────
+// ── J1: per-host memoization with cross-host generation invalidation ─────────
 
-let _cachedProviders: ProviderConfig[] | null = null
+let cacheGeneration = 0
 
-/** Invalidate the in-process provider cache (called after saveProviders). */
+const cachedProvidersSlot = new HostSlot<{
+  providers: ProviderConfig[] | null
+  generation: number
+}>(() => ({ providers: null, generation: -1 }))
+
+/** Invalidate the provider cache across hosts (called after saveProviders). */
 export function _invalidateProviderCache(): void {
-  _cachedProviders = null
+  cacheGeneration += 1
+  const slot = cachedProvidersSlot.of(getBootstrapSessionHost())
+  slot.providers = null
+  slot.generation = -1
 }
 
 /**
@@ -75,16 +84,21 @@ export function _invalidateProviderCache(): void {
  * 3. Empty providers.json: return defaults.
  *
  * A1 fix: returns load diagnostics so callers (ProviderView) can surface errors.
- * J1 fix: memoized per-process; invalidated after saveProviders().
+ * J1 fix: memoized per-host with process-wide cacheGeneration invalidated after saveProviders().
  *
  * This function never throws — corrupt files produce a warning + fallback.
  */
 export function loadProviders(): ProviderConfig[] {
-  // J1: return cached result if available (prevents repeated disk reads on findProvider)
-  if (_cachedProviders !== null) return _cachedProviders
+  const slot = cachedProvidersSlot.of(getBootstrapSessionHost())
+  // J1: return cached result if available and generation matches (prevents repeated disk reads on findProvider)
+  if (slot.providers !== null && slot.generation === cacheGeneration) {
+    return slot.providers
+  }
 
+  const generation = cacheGeneration
   const result = _loadProvidersInternal()
-  _cachedProviders = result.providers
+  slot.providers = result.providers
+  slot.generation = generation
   return result.providers
 }
 
@@ -97,8 +111,11 @@ export function loadProvidersWithDiagnostic(): {
   providers: ProviderConfig[]
   error?: string
 } {
+  const generation = cacheGeneration
   const result = _loadProvidersInternal()
-  _cachedProviders = result.providers
+  const slot = cachedProvidersSlot.of(getBootstrapSessionHost())
+  slot.providers = result.providers
+  slot.generation = generation
   return result
 }
 

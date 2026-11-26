@@ -10,6 +10,7 @@ import {
   isSettingSourceEnabled,
 } from '../settings/constants.js'
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import { SandboxManager } from '../sandbox/sandbox-adapter.js'
 import { isAutoModeActive } from './autoModeState.js'
 import { isBgSession } from '../concurrentSessions.js'
@@ -262,15 +263,18 @@ export class OutsideReadPrompt {
   }
 }
 
-const sessionOutsideReadPrompt = new OutsideReadPrompt()
+const outsideReadPromptBySession = new RootSessionSlot<OutsideReadPrompt>(
+  () => new OutsideReadPrompt(),
+)
 
 export function getOutsideReadPrompt(): OutsideReadPrompt {
-  return sessionOutsideReadPrompt
+  return outsideReadPromptBySession.of(getBootstrapSession())
 }
 
 export function resetOutsideReadPromptForTests(): void {
-  sessionOutsideReadPrompt.openToolUseId = undefined
-  sessionOutsideReadPrompt.answeredThisSession = false
+  const prompt = getOutsideReadPrompt()
+  prompt.openToolUseId = undefined
+  prompt.answeredThisSession = false
 }
 
 /**

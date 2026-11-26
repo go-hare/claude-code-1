@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
 export type ProgramUseCaseChoice = {
   id: string
@@ -12,24 +13,38 @@ export type ProgramUseCaseChoiceMode = 'per_user' | 'per_grant'
 
 const USE_CASE_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/
 
-let offeredChoices: ProgramUseCaseChoice[] = []
-let choiceMode: ProgramUseCaseChoiceMode = 'per_user'
-let sessionSelectedUseCaseId: string | null = null
+type UseCaseStoreHostState = {
+  offeredChoices: ProgramUseCaseChoice[]
+  choiceMode: ProgramUseCaseChoiceMode
+  sessionSelectedUseCaseId: string | null
+}
+
+/** Official 2.1.331 `[W-67]` — HostSlot-scoped program use-case choices & selection. */
+const useCaseStoreHostSlot = new HostSlot<UseCaseStoreHostState>(() => ({
+  offeredChoices: [],
+  choiceMode: 'per_user',
+  sessionSelectedUseCaseId: null,
+}))
+
+function getUseCaseStoreHostState(): UseCaseStoreHostState {
+  return useCaseStoreHostSlot.of(getBootstrapSessionHost())
+}
 
 export function getProgramUseCaseChoices(): readonly ProgramUseCaseChoice[] {
-  return offeredChoices
+  return getUseCaseStoreHostState().offeredChoices
 }
 
 export function setProgramUseCaseChoices(
   choices: readonly ProgramUseCaseChoice[],
   mode: ProgramUseCaseChoiceMode = 'per_user',
 ): void {
-  offeredChoices = [...choices]
-  choiceMode = mode
+  const hostState = getUseCaseStoreHostState()
+  hostState.offeredChoices = [...choices]
+  hostState.choiceMode = mode
 }
 
 export function getProgramUseCaseChoiceMode(): ProgramUseCaseChoiceMode {
-  return choiceMode
+  return getUseCaseStoreHostState().choiceMode
 }
 
 export function getEnvLockedProgramUseCaseId(
@@ -68,7 +83,7 @@ export function getCurrentProgramUseCaseId(
 ): string | null {
   return (
     getEnvLockedProgramUseCaseId() ??
-    sessionSelectedUseCaseId ??
+    getUseCaseStoreHostState().sessionSelectedUseCaseId ??
     readSavedProgramUseCaseId(configDir)
   )
 }
@@ -77,10 +92,11 @@ export function selectProgramUseCase(
   useCaseId: string,
   configDir: string = getClaudeConfigHomeDir(),
 ): 'saved' | 'session_only' | 'not_offered' {
-  if (!offeredChoices.some(c => c.id === useCaseId)) {
+  const hostState = getUseCaseStoreHostState()
+  if (!hostState.offeredChoices.some(c => c.id === useCaseId)) {
     return 'not_offered'
   }
-  sessionSelectedUseCaseId = useCaseId
+  hostState.sessionSelectedUseCaseId = useCaseId
   try {
     const filePath = getProgramUseCaseFilePath(configDir)
     mkdirSync(dirname(filePath), { recursive: true })
@@ -98,7 +114,7 @@ export function selectProgramUseCase(
 export function forgetSavedProgramUseCase(
   configDir: string = getClaudeConfigHomeDir(),
 ): boolean {
-  sessionSelectedUseCaseId = null
+  getUseCaseStoreHostState().sessionSelectedUseCaseId = null
   try {
     const filePath = getProgramUseCaseFilePath(configDir)
     if (existsSync(filePath)) {
@@ -111,7 +127,8 @@ export function forgetSavedProgramUseCase(
 }
 
 export function resetProgramUseCaseStoreForTesting(): void {
-  offeredChoices = []
-  choiceMode = 'per_user'
-  sessionSelectedUseCaseId = null
+  const hostState = getUseCaseStoreHostState()
+  hostState.offeredChoices = []
+  hostState.choiceMode = 'per_user'
+  hostState.sessionSelectedUseCaseId = null
 }

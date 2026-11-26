@@ -20,6 +20,7 @@ import {
   persistBinaryContent,
 } from 'src/utils/mcpOutputStorage.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 import { asSystemPrompt } from 'src/utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
@@ -67,38 +68,61 @@ type CacheEntry = {
 const DEFAULT_WEBFETCH_CACHE_TTL_MS = 15 * 60 * 1000 // densable $J_
 const MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024 // 50MB
 
-let cachedWebFetchTtlMs: number | undefined
+type WebFetchCacheHostState = {
+  cachedTtlMs: number | undefined
+  urlCache: LRUCache<string, CacheEntry> | null
+}
 
-/** densable C9s — resolve WebFetch URL cache TTL once (env or default). */
+const webFetchCacheStateByHost = new HostSlot<WebFetchCacheHostState>(() => ({
+  cachedTtlMs: undefined,
+  urlCache: null,
+}))
+
+function getWebFetchCacheHostState(): WebFetchCacheHostState {
+  return webFetchCacheStateByHost.of(getBootstrapSessionHost())
+}
+
+/** densable C9s — resolve WebFetch URL cache TTL once per host (env or default). */
 export function getWebFetchCacheTtlMs(): number {
-  if (cachedWebFetchTtlMs !== undefined) {
-    return cachedWebFetchTtlMs
+  const state = getWebFetchCacheHostState()
+  if (state.cachedTtlMs !== undefined) {
+    return state.cachedTtlMs
   }
   const raw = process.env.CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS
   if (raw !== undefined && raw !== '') {
     const n = Number(raw)
     if (Number.isFinite(n) && n > 0) {
-      cachedWebFetchTtlMs = n
+      state.cachedTtlMs = n
       return n
     }
   }
-  cachedWebFetchTtlMs = DEFAULT_WEBFETCH_CACHE_TTL_MS
+  state.cachedTtlMs = DEFAULT_WEBFETCH_CACHE_TTL_MS
   return DEFAULT_WEBFETCH_CACHE_TTL_MS
 }
 
 /** Test helper — clear memoized TTL so env changes apply. */
 export function resetWebFetchCacheTtlMsForTests(): void {
-  cachedWebFetchTtlMs = undefined
+  const state = webFetchCacheStateByHost.peek(getBootstrapSessionHost())
+  if (state) {
+    state.cachedTtlMs = undefined
+    state.urlCache = null
+  }
 }
 
-const URL_CACHE = new LRUCache<string, CacheEntry>({
-  maxSize: MAX_CACHE_SIZE_BYTES,
-  // densable: ttl:C9s() — evaluated at construction; C9s memoizes env
-  ttl: getWebFetchCacheTtlMs(),
-})
+function getUrlCache(): LRUCache<string, CacheEntry> {
+  const state = getWebFetchCacheHostState()
+  if (state.urlCache === null) {
+    state.urlCache = new LRUCache<string, CacheEntry>({
+      maxSize: MAX_CACHE_SIZE_BYTES,
+      // densable: ttl:C9s() — evaluated at construction; C9s memoizes env
+      ttl: getWebFetchCacheTtlMs(),
+    })
+  }
+  return state.urlCache
+}
 
 export function clearWebFetchCache(): void {
-  URL_CACHE.clear()
+  webFetchCacheStateByHost.peek(getBootstrapSessionHost())?.urlCache?.clear()
 }
 
 function responseHeaderToString(value: unknown): string | undefined {
@@ -621,7 +645,8 @@ export async function getURLMarkdownContent(
   }
 
   // Check cache (LRUCache handles TTL automatically)
-  const cachedEntry = URL_CACHE.get(url)
+  const urlCache = getUrlCache()
+  const cachedEntry = urlCache.get(url)
   if (cachedEntry) {
     return {
       bytes: cachedEntry.bytes,
@@ -672,7 +697,7 @@ export async function getURLMarkdownContent(
         codeText: 'OK',
         contentType: ccr.contentType,
       }
-      URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
+      urlCache.set(url, entry, { size: Math.max(1, bytes) })
       return entry
     }
   } catch (err) {
@@ -774,7 +799,7 @@ export async function getURLMarkdownContent(
     persistedSize,
   }
   // lru-cache requires positive integers; clamp to 1 for empty responses.
-  URL_CACHE.set(url, entry, { size: Math.max(1, contentBytes) })
+  urlCache.set(url, entry, { size: Math.max(1, contentBytes) })
   return entry
 }
 
@@ -792,7 +817,8 @@ export async function fetchContentWithTavily(
   }
 
   // Check cache (LRUCache handles TTL automatically)
-  const cachedEntry = URL_CACHE.get(url)
+  const urlCache = getUrlCache()
+  const cachedEntry = urlCache.get(url)
   if (cachedEntry) {
     return {
       bytes: cachedEntry.bytes,
@@ -877,7 +903,7 @@ export async function fetchContentWithTavily(
     content: markdownContent,
     contentType: 'text/markdown',
   }
-  URL_CACHE.set(url, entry, { size: Math.max(1, contentBytes) })
+  urlCache.set(url, entry, { size: Math.max(1, contentBytes) })
   return entry
 }
 

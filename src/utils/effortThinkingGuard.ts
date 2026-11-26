@@ -22,7 +22,7 @@ import {
 } from './sessionRoot.js'
 
 /** densable `i5n` — `au((e,t)=>{if(t==="cd"||t==="hydrate")return;Du().resetStreamNoEventsWarningLatch()})` */
-onSessionSwitch(resetOnceLatchesOnSessionSwitch)
+onSessionSwitch(resetOnceLatchesOnSessionSwitch, { scope: 'global' })
 
 /** densable `Wht` */
 export const EFFORT_CLAMPED_WHEN_THINKING_DISABLED = 'high' as const

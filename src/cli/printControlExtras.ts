@@ -24,6 +24,7 @@ import {
 } from 'src/services/tools/remoteToolHost.js'
 import type { ToolStateSlots } from 'src/utils/toolState.js'
 import { checkGate_CACHED_OR_BLOCKING } from 'src/services/analytics/growthbook.js'
+import { isSharedBackend } from 'src/utils/sessionHost.js'
 
 export const NOT_AVAILABLE_ON_CONNECTION = (subtype: string): string =>
   `${subtype} is not available on this connection`
@@ -1269,6 +1270,7 @@ export function resolveTurnHandoffAdmission(input: {
   remoteSessionId?: string
   environmentKind?: string
   disabled?: boolean
+  sharedBackend?: boolean
 }): { admitted: boolean; reason?: string; tools?: string[] } {
   if (
     !input.sdkUrl ||
@@ -1280,10 +1282,33 @@ export function resolveTurnHandoffAdmission(input: {
   if (input.disabled) {
     return { admitted: false, reason: TURN_HANDOFF_DISABLED_REASON }
   }
+  if (input.sharedBackend === true) {
+    return { admitted: false, reason: 'shared_backend' }
+  }
   return {
     admitted: true,
     tools: [...TURN_HANDOFF_ADMITTED_TOOLS],
   }
+}
+
+/**
+ * Official 2.1.331 `g5r` — relay marker is only enabled when turn handoff is
+ * admitted, relay is configured, transcripts persist, and the process is NOT
+ * running in shared-backend mode (`!isSharedBackend()`).
+ */
+export function shouldUseTurnHandoffRelayMarker(input: {
+  admission: { admitted: boolean }
+  relayConfigured: boolean
+  persistsTranscript: boolean
+  sharedBackend?: boolean
+}): boolean {
+  const shared = input.sharedBackend ?? isSharedBackend()
+  return (
+    input.admission.admitted &&
+    input.relayConfigured &&
+    input.persistsTranscript &&
+    !shared
+  )
 }
 export const DEVICE_HOOKS_NOT_READY =
   'hook_forwarding_not_ready: internal_error; retry'
@@ -3102,6 +3127,7 @@ export function dispatchPrintControlExtra(
         disabled:
           process.env.CLAUDE_CODE_DISABLE_TURN_HANDOFF === '1' ||
           process.env.CLAUDE_CODE_DISABLE_TURN_HANDOFF === 'true',
+        sharedBackend: isSharedBackend(),
       })
     if (!admission.admitted) {
       deps.sendError(`${TURN_HANDOFF_DISABLED_PREFIX}${admission.reason}`)

@@ -14,6 +14,7 @@
 
 import { createHash } from 'crypto'
 import { normalize } from 'path'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 type InternalWriteRecord = {
   markedAt: number
@@ -27,10 +28,23 @@ export type FirstReadStatSnapshot = {
   ctimeMs?: number
 }
 
-const writes = new Map<string, InternalWriteRecord>()
-const firstReads = new Map<string, FirstReadStatSnapshot | null>()
-const ownWritesBeforeFirstCheck = new Map<string, { contentHash: string }>()
-let firstReadsClosed = false
+type HostInternalWritesState = {
+  writes: Map<string, InternalWriteRecord>
+  firstReads: Map<string, FirstReadStatSnapshot | null>
+  ownWritesBeforeFirstCheck: Map<string, { contentHash: string }>
+  firstReadsClosed: boolean
+}
+
+const hostInternalWritesSlot = new HostSlot<HostInternalWritesState>(() => ({
+  writes: new Map(),
+  firstReads: new Map(),
+  ownWritesBeforeFirstCheck: new Map(),
+  firstReadsClosed: false,
+}))
+
+function getHostInternalWritesState(): HostInternalWritesState {
+  return hostInternalWritesSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Normalize line endings (CRLF -> LF, matching SEA `sV`) and hash with SHA-256
@@ -47,15 +61,16 @@ export function markInternalWrite(
   path: string,
   content?: string | Buffer,
 ): void {
+  const state = getHostInternalWritesState()
   const key = normalize(path)
   const contentHash =
     content !== undefined ? hashSettingsContent(content) : undefined
-  writes.set(key, {
+  state.writes.set(key, {
     markedAt: Date.now(),
     contentHash,
   })
-  if (!firstReadsClosed && contentHash !== undefined) {
-    ownWritesBeforeFirstCheck.set(key, { contentHash })
+  if (!state.firstReadsClosed && contentHash !== undefined) {
+    state.ownWritesBeforeFirstCheck.set(key, { contentHash })
   }
 }
 
@@ -63,32 +78,36 @@ export function recordFirstReadStat(
   path: string,
   stat: FirstReadStatSnapshot | null,
 ): void {
+  const state = getHostInternalWritesState()
   const key = normalize(path)
-  if (!firstReadsClosed && !firstReads.has(key)) {
-    firstReads.set(key, stat)
+  if (!state.firstReadsClosed && !state.firstReads.has(key)) {
+    state.firstReads.set(key, stat)
   }
 }
 
 export function hasFirstReadStat(path: string): boolean {
-  return firstReads.has(normalize(path))
+  return getHostInternalWritesState().firstReads.has(normalize(path))
 }
 
 export function getFirstReadStat(
   path: string,
 ): FirstReadStatSnapshot | null | undefined {
-  return firstReads.get(normalize(path))
+  return getHostInternalWritesState().firstReads.get(normalize(path))
 }
 
 export function getOwnWriteBeforeFirstCheck(
   path: string,
 ): { contentHash: string } | undefined {
-  return ownWritesBeforeFirstCheck.get(normalize(path))
+  return getHostInternalWritesState().ownWritesBeforeFirstCheck.get(
+    normalize(path),
+  )
 }
 
 export function forgetFirstReads(): void {
-  firstReadsClosed = true
-  firstReads.clear()
-  ownWritesBeforeFirstCheck.clear()
+  const state = getHostInternalWritesState()
+  state.firstReadsClosed = true
+  state.firstReads.clear()
+  state.ownWritesBeforeFirstCheck.clear()
 }
 
 /**
@@ -100,18 +119,20 @@ export function consumeInternalWrite(
   path: string,
   windowMs: number,
 ): string | undefined {
+  const state = getHostInternalWritesState()
   const key = normalize(path)
-  const rec = writes.get(key)
+  const rec = state.writes.get(key)
   if (rec !== undefined && Date.now() - rec.markedAt < windowMs) {
-    writes.delete(key)
+    state.writes.delete(key)
     return rec.contentHash ?? ''
   }
   return undefined
 }
 
 export function clearInternalWrites(): void {
-  writes.clear()
-  firstReads.clear()
-  ownWritesBeforeFirstCheck.clear()
-  firstReadsClosed = false
+  const state = getHostInternalWritesState()
+  state.writes.clear()
+  state.firstReads.clear()
+  state.ownWritesBeforeFirstCheck.clear()
+  state.firstReadsClosed = false
 }

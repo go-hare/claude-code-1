@@ -26,6 +26,7 @@ import {
 } from '../utils/markdown.js';
 import { stripPromptXMLTags } from '../utils/messages.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js';
 import { countCharInString } from '../utils/stringUtils.js';
 import type { ThemeName } from '../utils/theme.js';
 import { MarkdownTable } from './MarkdownTable.js';
@@ -88,18 +89,28 @@ type Props = {
   hint?: string;
 };
 
-// Module-level token cache — marked.lexer is the hot cost on virtual-scroll
-// remounts (~3ms per message). useMemo doesn't survive unmount→remount, so
-// scrolling back to a previously-visible message re-parses. Messages are
-// immutable in history; same content → same tokens. Keyed by hash to avoid
-// retaining full content strings (turn50→turn99 RSS regression, #24180).
-const tokenCache = new LRUCache<string, Token[]>({ max: 500 });
+type MarkdownHostCaches = {
+  // Host-scoped token cache — marked.lexer is the hot cost on virtual-scroll
+  // remounts (~3ms per message). useMemo doesn't survive unmount→remount, so
+  // scrolling back to a previously-visible message re-parses. Messages are
+  // immutable in history; same content → same tokens. Keyed by hash to avoid
+  // retaining full content strings (turn50→turn99 RSS regression, #24180).
+  tokenCache: LRUCache<string, Token[]>;
+  // Official 2.1.296 (#537): syntax-highlighted code cache so ctrl+o
+  // transcript toggles don't re-run cliHighlight on every code block.
+  highlightCache: LRUCache<string, { variant: string; code: string; highlighted: string }>;
+};
 
-// Official 2.1.296 (#537): module-level syntax-highlighted code cache so ctrl+o
-// transcript toggles don't re-run cliHighlight on every code block.
-const highlightCache = new LRUCache<string, { variant: string; code: string; highlighted: string }>({
-  max: 500,
-});
+const markdownCachesByHost = new HostSlot<MarkdownHostCaches>(() => ({
+  tokenCache: new LRUCache<string, Token[]>({ max: 500 }),
+  highlightCache: new LRUCache<string, { variant: string; code: string; highlighted: string }>({
+    max: 500,
+  }),
+}));
+
+function getMarkdownHostCaches(): MarkdownHostCaches {
+  return markdownCachesByHost.of(getBootstrapSessionHost());
+}
 
 // Official 2.1.295 (#398) & 2.1.328 (`Cr` @307762583): cap per-message highlight
 // work via the shared `{ left }` budget passed down to highlight.js, and window
@@ -131,6 +142,7 @@ export function wrapHighlightWithCacheAndBudget(
       }
       const variant = `${normalizedLang}\x00${theme}`;
       const cacheKey = skipHighlightCache ? '' : `${code.length}:${hashContent(`${variant}\x00${code}`)}`;
+      const { highlightCache } = getMarkdownHostCaches();
       if (!skipHighlightCache) {
         const hit = highlightCache.get(cacheKey);
         if (hit !== undefined && hit.code === code && hit.variant === variant) {
@@ -160,7 +172,7 @@ export function wrapHighlightWithCacheAndBudget(
 }
 
 export function _clearHighlightCacheForTest(): void {
-  highlightCache.clear();
+  getMarkdownHostCaches().highlightCache.clear();
 }
 
 /**
@@ -378,6 +390,7 @@ function safeLex(lexer: Marked | typeof marked, content: string): Token[] {
 
 function lexMarkdown(content: string, useCache: boolean, promptMode = false): Token[] {
   // densable mn: cache lookup first (LRU refresh), then fast path, then safe lex.
+  const { tokenCache } = getMarkdownHostCaches();
   const key = useCache ? `${promptMode ? '_' : ''}${content.length}:${hashContent(content)}` : '';
   if (useCache) {
     const hit = tokenCache.get(key);

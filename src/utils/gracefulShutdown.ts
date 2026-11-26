@@ -22,7 +22,7 @@ import {
   CLEAR_ITERM2_PROGRESS,
   CLEAR_TAB_STATUS,
   clearTerminalTitle,
-  instances,
+  Ns,
   RESET_SCROLL_REGION,
   flushNonBlockingStdout,
   printsUnknownSequences,
@@ -49,6 +49,12 @@ import {
   markStdoutDrainExternallyClocked,
 } from './process.js'
 import { sessionIdExists } from './sessionStorage.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 import { sleep } from './sleep.js'
 import { closeSentry } from './sentry.js'
 import { emitScrollTelemetrySummary } from './scrollTelemetry.js'
@@ -96,12 +102,13 @@ export function cleanupTerminalModes(): void {
   }
 
   try {
-    const inst = instances.get(process.stdout)
+    const registry = Ns()
+    const inst = registry.get(process.stdout)
     // Official 2.1.327 (#448/#449) b2: flush queued non-blocking stdout writes
     // and retain the instance reference so forceExit can still drainStdin even
     // after detachForShutdown/unmount (e.g. Ctrl+C right after ← handoff or trust).
     flushNonBlockingStdout()
-    instances.restoredAtExit = inst ?? instances.restoredAtExit
+    registry.restoredAtExit = inst ?? registry.restoredAtExit
     // Disable mouse tracking FIRST, before the React unmount tree-walk.
     // The terminal needs a round-trip to process this and stop sending
     // events; doing it now (not after unmount) gives that time while
@@ -215,16 +222,53 @@ export function cleanupTerminalModes(): void {
   }
 }
 
-let resumeHintPrinted = false
-let resumeHintOmitsWorktree = false
-let resumeHintLaunchFlags: string | undefined
+type OwedSandboxCleanupEntry = {
+  promise: Promise<void>
+  resolve: () => void
+}
+
+/**
+ * Official 2.1.331 [W-259] — host-scoped shutdown state isolated via HostSlot
+ * on SessionHost. Live instances are tracked via WeakRef so process-level
+ * SIGTERM / gracefulShutdown can still abort/drain all live hosts on exit.
+ */
+type GracefulShutdownHostState = {
+  resumeHintPrinted: boolean
+  resumeHintOmitsWorktree: boolean
+  resumeHintLaunchFlags: string | undefined
+  interactiveShutdownAbort: (() => void) | null
+  owedSandboxCleanups: Map<unknown, OwedSandboxCleanupEntry>
+}
+
+const shutdownHostStateRefs = new Set<WeakRef<GracefulShutdownHostState>>()
+
+const gracefulShutdownHostSlot = new HostSlot<GracefulShutdownHostState>(() => {
+  const state: GracefulShutdownHostState = {
+    resumeHintPrinted: false,
+    resumeHintOmitsWorktree: false,
+    resumeHintLaunchFlags: undefined,
+    interactiveShutdownAbort: null,
+    owedSandboxCleanups: new Map(),
+  }
+  for (const ref of shutdownHostStateRefs) {
+    if (ref.deref() === undefined) {
+      shutdownHostStateRefs.delete(ref)
+    }
+  }
+  shutdownHostStateRefs.add(new WeakRef(state))
+  return state
+})
+
+function getShutdownHostState(): GracefulShutdownHostState {
+  return gracefulShutdownHostSlot.of(getBootstrapSessionHost())
+}
 
 export function setResumeHintLaunchFlags(flags: string | undefined): void {
-  resumeHintLaunchFlags = flags
+  getShutdownHostState().resumeHintLaunchFlags = flags
 }
 
 export function getResumeHintLaunchFlags(): string | undefined {
-  return resumeHintLaunchFlags
+  return getShutdownHostState().resumeHintLaunchFlags
 }
 
 const RESUME_HINT_IGNORED_OPTIONS = new Set([
@@ -511,8 +555,9 @@ export function formatResumeHint({
  * Only shown for interactive sessions with persistence enabled.
  */
 function printResumeHint(): void {
+  const hostState = getShutdownHostState()
   // Only print once (failsafe timer may call this again after normal shutdown)
-  if (resumeHintPrinted) {
+  if (hostState.resumeHintPrinted) {
     return
   }
   // Only show with TTY, interactive sessions, and persistence
@@ -528,7 +573,7 @@ function printResumeHint(): void {
         return
       }
 
-      const worktreeSession = resumeHintOmitsWorktree
+      const worktreeSession = hostState.resumeHintOmitsWorktree
         ? undefined
         : getCurrentWorktreeSession()
       const worktreeName =
@@ -542,7 +587,7 @@ function printResumeHint(): void {
           ? { name: worktreeName, recordCleared: true }
           : undefined,
         columns: process.stdout.columns,
-        launchFlags: resumeHintLaunchFlags,
+        launchFlags: hostState.resumeHintLaunchFlags,
         launcherProgram: process.env.CLAUDE_CODE_RESUME_HINT_COMMAND,
       })
 
@@ -552,7 +597,7 @@ function printResumeHint(): void {
           ['', ...advice, 'Resume this session with:', command, ''].join('\n'),
         ),
       )
-      resumeHintPrinted = true
+      hostState.resumeHintPrinted = true
     } catch {
       // Ignore write errors
     }
@@ -582,7 +627,8 @@ function forceExit(exitCode: number): never {
   // class method knows about it; the standalone function defaults to
   // process.stdin which would early-return on isTTY=false.
   try {
-    ;(instances.get(process.stdout) ?? instances.restoredAtExit)?.drainStdin()
+    const registry = Ns()
+    ;(registry.get(process.stdout) ?? registry.restoredAtExit)?.drainStdin()
   } catch {
     // Terminal may be gone (SIGHUP). Ignore — we are about to exit.
   }
@@ -631,7 +677,7 @@ function preemptTerminalForShutdown(): void {
   }
   try {
     writeSync(1, DISABLE_MOUSE_TRACKING)
-    instances.get(process.stdout)?.drainStdin()
+    Ns().get(process.stdout)?.drainStdin()
   } catch {
     // Terminal may already be gone.
   }
@@ -662,16 +708,14 @@ export function isPrintModeSignalHandlersRegistered(): boolean {
  * Interactive REPL: abort in-flight query with remote-cancel on SIGTERM
  * (print owns its own handlers via markPrintModeSignalHandlersRegistered).
  */
-let interactiveShutdownAbort: (() => void) | null = null
-
 export function registerInteractiveShutdownAbort(
   fn: (() => void) | null,
 ): void {
-  interactiveShutdownAbort = fn
+  getShutdownHostState().interactiveShutdownAbort = fn
 }
 
 export function getInteractiveShutdownAbortForTests(): (() => void) | null {
-  return interactiveShutdownAbort
+  return getShutdownHostState().interactiveShutdownAbort
 }
 
 export const setupGracefulShutdown = memoize(() => {
@@ -741,10 +785,17 @@ export const setupGracefulShutdown = memoize(() => {
     }
     // densable #27 interactive: abort in-flight query as remote-cancel
     // before exit so StreamingToolExecutor does not emit synthetic denials.
-    try {
-      interactiveShutdownAbort?.()
-    } catch {
-      // abort must not block shutdown
+    for (const ref of shutdownHostStateRefs) {
+      const hostState = ref.deref()
+      if (hostState === undefined) {
+        shutdownHostStateRefs.delete(ref)
+        continue
+      }
+      try {
+        hostState.interactiveShutdownAbort?.()
+      } catch {
+        // abort must not block shutdown
+      }
     }
     preemptTerminalForShutdown()
     void gracefulShutdown(143) // Exit code 143 (128 + 15) for SIGTERM
@@ -821,10 +872,6 @@ let startupActionStarted = false
 let startupExpectsUiMount = false
 let startupUiMounted = false
 const startupWatchdogTimers = new Set<ReturnType<typeof setTimeout>>()
-const owedSandboxCleanups = new Map<
-  unknown,
-  { promise: Promise<void>; resolve: () => void }
->()
 
 function hasStackFrame(stack: unknown, needle: string): boolean {
   return (
@@ -1177,24 +1224,44 @@ export function handleUnhandledRejection(
 
 /** Register an in-flight sandbox cleanup task so shutdown drains up to `SANDBOX_CLEANUP_WAIT_MS`. */
 export function registerOwedSandboxCleanup(key: unknown): void {
-  if (!owedSandboxCleanups.has(key)) {
+  const cleanups = getShutdownHostState().owedSandboxCleanups
+  if (!cleanups.has(key)) {
     const { promise, resolve } = Promise.withResolvers<void>()
-    owedSandboxCleanups.set(key, { promise, resolve })
+    cleanups.set(key, { promise, resolve })
   }
 }
 
 /** Resolve a registered sandbox cleanup task (official `A0(e)`). */
 export function resolveOwedSandboxCleanup(key: unknown): void {
-  owedSandboxCleanups.get(key)?.resolve()
-  owedSandboxCleanups.delete(key)
+  const cleanups = getShutdownHostState().owedSandboxCleanups
+  cleanups.get(key)?.resolve()
+  cleanups.delete(key)
 }
 
-/** Official `Len()`: combined promise of active sandbox cleanups, or null if none. */
+/** Official `Len()`: combined promise of active host's sandbox cleanups, or null if none. */
 export function getOwedSandboxCleanupPromise(): Promise<void> | null {
-  if (owedSandboxCleanups.size === 0) return null
+  const cleanups = getShutdownHostState().owedSandboxCleanups
+  if (cleanups.size === 0) return null
   return Promise.all(
-    Array.from(owedSandboxCleanups.values(), entry => entry.promise),
+    Array.from(cleanups.values(), entry => entry.promise),
   ).then(() => {})
+}
+
+/** Process-exit drain across all live hosts' owed sandbox cleanups. */
+function getAllHostsOwedSandboxCleanupPromise(): Promise<void> | null {
+  const promises: Promise<void>[] = []
+  for (const ref of shutdownHostStateRefs) {
+    const hostState = ref.deref()
+    if (hostState === undefined) {
+      shutdownHostStateRefs.delete(ref)
+      continue
+    }
+    for (const entry of hostState.owedSandboxCleanups.values()) {
+      promises.push(entry.promise)
+    }
+  }
+  if (promises.length === 0) return null
+  return Promise.all(promises).then(() => {})
 }
 
 export function isUncaughtBreakerTrippedForTesting(): boolean {
@@ -1298,11 +1365,17 @@ function armShutdownFailsafe(budgetMs: number, exitCode: number): void {
     clearTimeout(failsafeTimer)
     failsafeTimer = undefined
   }
+  const sessionRef = new WeakRef(getBootstrapSession().root)
   failsafeFiresAtMs = Date.now() + budgetMs
   failsafeTimer = setTimeout(
     (code: number) => {
       cleanupTerminalModes()
-      printResumeHint()
+      const targetSession = sessionRef.deref()
+      if (targetSession !== undefined) {
+        runWithSession(targetSession, printResumeHint)
+      } else {
+        printResumeHint()
+      }
       // densable EDs body: fVt(500,{scaleBudgetToQueue:!1}).then(()=>ADs(r))
       markStdoutDrainExternallyClocked()
       void drainStdoutBeforeExit(500, { scaleBudgetToQueue: false })
@@ -1380,9 +1453,11 @@ export function getFailsafeFiresAtMsForTesting(): number | undefined {
 export function resetShutdownState(): void {
   shutdownInProgress = false
   resetShutdownCommittedForTests()
-  resumeHintPrinted = false
-  resumeHintOmitsWorktree = false
-  resumeHintLaunchFlags = undefined
+  const hostState = getShutdownHostState()
+  hostState.resumeHintPrinted = false
+  hostState.resumeHintOmitsWorktree = false
+  hostState.resumeHintLaunchFlags = undefined
+  hostState.interactiveShutdownAbort = null
   printModeSignalHandlersRegistered = false
   ownsControllingTerminal = false
   uncaughtCount = 0
@@ -1398,7 +1473,7 @@ export function resetShutdownState(): void {
     clearTimeout(timer)
   }
   startupWatchdogTimers.clear()
-  owedSandboxCleanups.clear()
+  hostState.owedSandboxCleanups.clear()
   if (failsafeTimer !== undefined) {
     clearTimeout(failsafeTimer)
     failsafeTimer = undefined
@@ -1519,10 +1594,11 @@ export async function gracefulShutdown(
   process.exitCode = exitCode
 
   // Official background handoff suppresses the resume hint (session continues).
+  const hostState = getShutdownHostState()
   if (options?.suppressResumeHint) {
-    resumeHintPrinted = true
+    hostState.resumeHintPrinted = true
   }
-  resumeHintOmitsWorktree = options?.removeWorktree !== undefined
+  hostState.resumeHintOmitsWorktree = options?.removeWorktree !== undefined
 
   // Exit alt screen and print resume hint FIRST, before any async operations
   // (including dynamic import of hooks). Previously we awaited import('./hooks.js')
@@ -1709,7 +1785,7 @@ export async function gracefulShutdown(
   // Drain active sandbox cleanup (owed sandbox cleanups / SandboxManager reset
   // when sandbox was active) bounded by SANDBOX_CLEANUP_WAIT_MS (500ms).
   try {
-    const owedSandbox = getOwedSandboxCleanupPromise()
+    const owedSandbox = getAllHostsOwedSandboxCleanupPromise()
     let activeSandboxReset: Promise<void> | null = null
     if (owedSandbox === null) {
       const { hasSandboxStartedOnce, SandboxManager } = await import(

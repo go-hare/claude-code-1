@@ -4,7 +4,8 @@
  *
  * Semantic names only — never export minify
  * `QLe|$Ve|HVe|UVe|jVe|Pwr|Fpn|FVe|WLt|BVe|I5|O5|Mv|moe`.
- * `QLe` is a session-object WeakMap bag (`Ct.of(session)`), not `session.root`.
+ * `QLe` is a `RootSessionSlot` bag (`$e.of(session)`), so `withProject` forks
+ * share the root session's spawn ledger.
  */
 import { getMainThreadAgentId } from '../bootstrap/state.js'
 import { logEvent } from '../services/analytics/index.js'
@@ -21,32 +22,13 @@ import {
   someInFlightDrainCommand,
 } from './messageQueueManager.js'
 import { wrapInSystemReminder } from './messages.js'
-import { getBootstrapSession } from './sessionRoot.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 import type { WorkerCheckinBag } from './sessionSlots.js'
 import { plural } from './stringUtils.js'
 import { isParkedKeepaliveAgent } from './task/framework.js'
 import { isTerminalTaskStatus, type TaskStatus } from '../Task.js'
 
 const WEB_FETCH_AGENT_TYPE = 'web-fetch'
-
-/**
- * densable `Ct` — WeakMap keyed on the owner object itself.
- * Copied from settingsCache (`!== undefined` check); not `Ln` (`session.root`).
- */
-class WeakOwnerCache<T> {
-  #e: () => T
-  #t = new WeakMap<object, T>()
-  constructor(e: () => T) {
-    this.#e = e
-  }
-  of(e: object): T {
-    const t = this.#t.get(e)
-    if (t !== undefined) return t
-    const o = this.#e()
-    this.#t.set(e, o)
-    return o
-  }
-}
 
 function isBuiltInWebFetchAgent(agent: {
   source?: string
@@ -168,10 +150,18 @@ class SubagentSpawnLedger {
   }
 }
 
-const spawnLedgers = new WeakOwnerCache(() => new SubagentSpawnLedger())
+const spawnLedgers = new RootSessionSlot(() => new SubagentSpawnLedger())
+
+function asRootSessionOwner(session: object): { readonly root: object } {
+  const maybeRoot = (session as { readonly root?: unknown }).root
+  if (typeof maybeRoot === 'object' && maybeRoot !== null) {
+    return session as { readonly root: object }
+  }
+  return { root: session }
+}
 
 export function subagentSpawnLedgerOf(session: object): SubagentSpawnLedger {
-  return spawnLedgers.of(session)
+  return spawnLedgers.of(asRootSessionOwner(session))
 }
 
 export function recordSubagentSpawn(

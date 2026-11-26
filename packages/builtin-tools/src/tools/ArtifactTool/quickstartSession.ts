@@ -1,8 +1,11 @@
 /**
  * densable 2.1.289 Artifact quickstart session bag analog
  * (`X().quickstartRan` / `quickstartGuidanceToolUseId`).
+ * Official 2.1.331 Chunk 2825 `$e` (`RootSessionSlot`).
  * Semantic names only — do not export minify X.
  */
+
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 
 export type QuickstartRanRecord = {
   toolUseId?: string
@@ -25,7 +28,36 @@ function emptyState(): QuickstartSessionState {
   }
 }
 
-let state = emptyState()
+const fallbackQuickstartSession: { readonly root: object } = {
+  get root() {
+    return fallbackQuickstartSession
+  },
+}
+
+function getActiveQuickstartSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (
+      session !== null &&
+      typeof session === 'object' &&
+      session.root !== null &&
+      typeof session.root === 'object'
+    ) {
+      return session
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackQuickstartSession
+}
+
+const quickstartSessionSlot = new RootSessionSlot<QuickstartSessionState>(
+  emptyState,
+)
+
+function getQuickstartSessionState(): QuickstartSessionState {
+  return quickstartSessionSlot.of(getActiveQuickstartSession())
+}
 
 function truthyFlag(value: unknown): boolean {
   return value === true || (typeof value === 'number' && value > 0)
@@ -138,24 +170,26 @@ export function recordQuickstartRan(
   slug: string,
   rec: QuickstartRanRecord,
 ): void {
-  state.quickstartRan.set(slug, { ...rec })
+  getQuickstartSessionState().quickstartRan.set(slug, { ...rec })
 }
 
 export function getQuickstartRan(
   slug: string,
 ): QuickstartRanRecord | undefined {
-  return state.quickstartRan.get(slug)
+  return getQuickstartSessionState().quickstartRan.get(slug)
 }
 
 /** Gold `X().quickstartGuidanceToolUseId = s.toolUseId` analog. */
 export function setQuickstartGuidanceToolUseId(id: string | undefined): void {
-  state.quickstartGuidanceToolUseId = id
+  getQuickstartSessionState().quickstartGuidanceToolUseId = id
 }
 
 export function getQuickstartGuidanceToolUseId(): string | undefined {
-  return state.quickstartGuidanceToolUseId
+  return getQuickstartSessionState().quickstartGuidanceToolUseId
 }
 
 export function clearQuickstartSession(): void {
-  state = emptyState()
+  const s = getQuickstartSessionState()
+  s.quickstartRan.clear()
+  s.quickstartGuidanceToolUseId = undefined
 }

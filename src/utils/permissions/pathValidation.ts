@@ -1,9 +1,9 @@
-import memoize from 'lodash-es/memoize.js'
 import { homedir, hostname, networkInterfaces } from 'os'
 import { dirname, isAbsolute, resolve } from 'path'
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import type { ToolPermissionContext } from '../../Tool.js'
 import { getPlatform } from '../../utils/platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { posixPathToWindowsPath } from '../windowsPaths.js'
 import {
   getFsImplementation,
@@ -143,10 +143,48 @@ export function isPathInSandboxWriteAllowlist(resolvedPath: string): boolean {
   })
 }
 
-// Sandbox config paths are session-stable; memoize their resolved forms to
-// avoid repeated lstat/realpath syscalls on every write-target check.
-// Matches the getResolvedWorkingDirPaths pattern in filesystem.ts.
-const getResolvedSandboxConfigPath = memoize(getPathsForPermissionCheck)
+type PathValidationHostState = {
+  resolvedSandboxConfigPathCache: Map<string, string[]>
+  canonicalHomedirByHome: Map<string, string>
+}
+
+const pathValidationStateByHost = new HostSlot<PathValidationHostState>(() => ({
+  resolvedSandboxConfigPathCache: new Map<string, string[]>(),
+  canonicalHomedirByHome: new Map<string, string>(),
+}))
+
+function getPathValidationHostState(): PathValidationHostState {
+  return pathValidationStateByHost.of(getBootstrapSessionHost())
+}
+
+// Sandbox config paths are session-stable; memoize their resolved forms per
+// SessionHost to avoid repeated lstat/realpath syscalls on every write-target
+// check. Matches the getResolvedWorkingDirPaths pattern in filesystem.ts.
+function getResolvedSandboxConfigPathImpl(path: string): string[] {
+  const cache = getPathValidationHostState().resolvedSandboxConfigPathCache
+  if (cache.has(path)) {
+    return cache.get(path)!
+  }
+  const result = getPathsForPermissionCheck(path)
+  cache.set(path, result)
+  return result
+}
+
+Object.defineProperty(getResolvedSandboxConfigPathImpl, 'cache', {
+  get: () => getPathValidationHostState().resolvedSandboxConfigPathCache,
+  set: (next: Map<string, string[]>) => {
+    getPathValidationHostState().resolvedSandboxConfigPathCache = next
+  },
+  configurable: true,
+  enumerable: true,
+})
+
+const getResolvedSandboxConfigPath =
+  getResolvedSandboxConfigPathImpl as unknown as ((
+    path: string,
+  ) => string[]) & {
+    cache: Map<string, string[]>
+  }
 
 /**
  * Checks if a resolved path is allowed for the given operation type.
@@ -436,8 +474,6 @@ const DRIVE_RELATIVE_REGEX = /^[a-z]:(?![\\/]|$)/
 const WSL_HOST_SET = new Set(['wsl.localhost', 'wsl$'])
 const BIDI_ZERO_WIDTH_REGEX = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g
 const NETBIOS_NAME_MAX = 15
-
-const canonicalHomedirByHome = new Map<string, string>()
 
 function foldCaseUnicode(value: string): string {
   return value
@@ -758,6 +794,8 @@ function normalizeWindowsLikeSpelling(input: string): string {
 }
 
 function getCanonicalHomedir(home: string): string {
+  const canonicalHomedirByHome =
+    getPathValidationHostState().canonicalHomedirByHome
   const cached = canonicalHomedirByHome.get(home)
   if (cached !== undefined) return cached
   const resolved = normalizeWindowsLikeSpelling(

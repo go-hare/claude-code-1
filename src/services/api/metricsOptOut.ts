@@ -11,6 +11,7 @@ import {
 } from '../../utils/http.js'
 import { logError } from '../../utils/log.js'
 import { memoizeWithTTLAsync } from '../../utils/memoize.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionRoot.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 
 /** densable `h` — relative path; host from `pn().BASE_API_URL`. */
@@ -100,11 +101,14 @@ async function _checkMetricsEnabledAPI(): Promise<MetricsStatus> {
   }
 }
 
-// Create memoized version with custom error handling
-const memoizedCheckMetrics = memoizeWithTTLAsync(
-  _checkMetricsEnabledAPI,
-  CACHE_TTL_MS,
+// Official 2.1.331 [W-408/409]: per-host memoized metrics opt-out check on SessionHost.
+const memoizedCheckMetricsHostSlot = new HostSlot(() =>
+  memoizeWithTTLAsync(_checkMetricsEnabledAPI, CACHE_TTL_MS),
 )
+
+function memoizedCheckMetrics(): Promise<MetricsStatus> {
+  return memoizedCheckMetricsHostSlot.of(getBootstrapSessionHost())()
+}
 
 /**
  * Fetch (in-memory memoized) and persist to disk on change.

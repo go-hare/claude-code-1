@@ -54,6 +54,7 @@ import {
   canonicalizePath,
 } from '../../../utils/sessionStoragePortable.js'
 import { getOriginalCwd } from '../../../bootstrap/state.js'
+import { runWithSession, type Session } from '../../../utils/sessionRoot.js'
 import type { AcpSession } from './sessionTypes.js'
 
 // ── Agent class ───────────────────────────────────────────────────
@@ -70,6 +71,7 @@ export class AcpAgent implements Agent {
   private conn: AgentSideConnection
   sessions = new Map<string, AcpSession>()
   private clientCapabilities?: ClientCapabilities
+  private lastSessionCwd?: string
 
   constructor(conn: AgentSideConnection) {
     this.conn = conn
@@ -153,6 +155,7 @@ export class AcpAgent implements Agent {
 
   async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
     const result = await this.createSession(params)
+    this.lastSessionCwd = params.cwd
     this.scheduleAvailableCommandsUpdate(result.sessionId)
     return result
   }
@@ -167,6 +170,7 @@ export class AcpAgent implements Agent {
     // Only restore context + MCP connections, then return immediately. This
     // differs from session/load which DOES replay history.
     const result = await this.getOrCreateSession({ ...params, replay: false })
+    this.lastSessionCwd = params.cwd
     this.scheduleAvailableCommandsUpdate(result.sessionId)
     return result
   }
@@ -175,6 +179,7 @@ export class AcpAgent implements Agent {
 
   async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
     const result = await this.getOrCreateSession(params)
+    this.lastSessionCwd = params.cwd
     this.scheduleAvailableCommandsUpdate(result.sessionId)
     return result
   }
@@ -200,7 +205,7 @@ export class AcpAgent implements Agent {
     // with empty params and no cwd — without a fallback, listSessionsImpl
     // treats undefined dir as "all projects" and returns every session on
     // disk, which is unrelated to the workspace the user actually has open.
-    const requestedCwd = params.cwd || getOriginalCwd()
+    const requestedCwd = params.cwd || this.lastSessionCwd || getOriginalCwd()
     const canonicalRequested = await canonicalizePath(requestedCwd)
 
     const candidates = await listSessionsImpl({
@@ -240,15 +245,19 @@ export class AcpAgent implements Agent {
     // Load the source session's messages so the fork actually branches from
     // the source conversation rather than starting a blank session. Per the
     // unstable ForkSessionRequest, params.sessionId is the ID to fork from.
-    const { initialMessages } = await loadForkSourceMessages(params.sessionId)
+    const { initialMessages } = await this.loadForkSourceMessages({
+      sessionId: params.sessionId,
+      cwd: params.cwd,
+    })
     const response = await this.createSession(
       {
         cwd: params.cwd,
         mcpServers: params.mcpServers ?? [],
         _meta: params._meta,
       },
-      { initialMessages },
+      { initialMessages, parentSessionId: params.sessionId },
     )
+    this.lastSessionCwd = params.cwd
     this.scheduleAvailableCommandsUpdate(response.sessionId)
     return response
   }
@@ -271,9 +280,22 @@ export class AcpAgent implements Agent {
   async unstable_deleteSession(params: {
     sessionId: string
   }): Promise<Record<string, never>> {
+    const active = this.sessions.get(params.sessionId)
+    // Tear down in-memory session first if present so any running prompt is
+    // cancelled and buffered writes flush before unlinking the transcript.
+    if (active) {
+      await this.teardownSession(params.sessionId)
+    }
     // Per session-delete.mdx §Semantics: idempotent — deleting a session
     // that doesn't exist (or was already deleted) MUST succeed silently.
-    const resolved = await resolveSessionFilePath(params.sessionId)
+    const resolved = active
+      ? await runWithSession(
+          active.hostSession,
+          async () =>
+            (await resolveSessionFilePath(params.sessionId, active.cwd)) ??
+            (await resolveSessionFilePath(params.sessionId)),
+        )
+      : await resolveSessionFilePath(params.sessionId)
     if (resolved) {
       try {
         await unlink(resolved.filePath)
@@ -282,11 +304,6 @@ export class AcpAgent implements Agent {
         // (EACCES, EISDIR, ...) we propagate.
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
       }
-    }
-    // Tear down in-memory session if present (e.g., session was active in
-    // another connection). teardownSession is a no-op if not loaded.
-    if (this.sessions.has(params.sessionId)) {
-      await this.teardownSession(params.sessionId)
     }
     return {}
   }
@@ -313,24 +330,35 @@ export class AcpAgent implements Agent {
 
   // ── cancel ────────────────────────────────────────────────────
 
+  cancelSession(session: AcpSession): void {
+    runWithSession(session.hostSession, () => {
+      // Set cancelled flag — checked by prompt() loop to break out
+      session.cancelled = true
+      session.cancelGeneration += 1
+
+      // Cancel any queued prompts
+      for (const [, pending] of session.pendingMessages) {
+        pending.resolve(true)
+      }
+      session.pendingMessages.clear()
+      session.pendingQueue = []
+      session.pendingQueueHead = 0
+
+      // Abort any attached controller + interrupt the query engine inside
+      // session.hostSession's ALS context so synchronous 'abort' listeners
+      // observe the right session/host.
+      const maybeWithAbort = session as AcpSession & {
+        abortController?: AbortController
+      }
+      maybeWithAbort.abortController?.abort()
+      session.queryEngine.interrupt()
+    })
+  }
+
   async cancel(params: CancelNotification): Promise<void> {
     const session = this.sessions.get(params.sessionId)
     if (!session) return
-
-    // Set cancelled flag — checked by prompt() loop to break out
-    session.cancelled = true
-    session.cancelGeneration += 1
-
-    // Cancel any queued prompts
-    for (const [, pending] of session.pendingMessages) {
-      pending.resolve(true)
-    }
-    session.pendingMessages.clear()
-    session.pendingQueue = []
-    session.pendingQueueHead = 0
-
-    // Interrupt the query engine to abort the current API call
-    session.queryEngine.interrupt()
+    this.cancelSession(session)
   }
 
   // ── setSessionMode ──────────────────────────────────────────────
@@ -343,20 +371,22 @@ export class AcpAgent implements Agent {
       throw new Error('Session not found')
     }
 
-    this.applySessionMode(params.sessionId, params.modeId)
-    // Per session-modes.mdx: when the Agent changes its own mode it MUST send
-    // a current_mode_update notification so mode-only Clients learn the
-    // switch. Mirrors the current_mode_update sent by setSessionConfigOption
-    // when configId === 'mode'.
-    await this.conn.sessionUpdate({
-      sessionId: params.sessionId,
-      update: {
-        sessionUpdate: 'current_mode_update',
-        currentModeId: params.modeId,
-      },
+    return runWithSession(session.hostSession, async () => {
+      this.applySessionMode(params.sessionId, params.modeId)
+      // Per session-modes.mdx: when the Agent changes its own mode it MUST send
+      // a current_mode_update notification so mode-only Clients learn the
+      // switch. Mirrors the current_mode_update sent by setSessionConfigOption
+      // when configId === 'mode'.
+      await this.conn.sessionUpdate({
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'current_mode_update',
+          currentModeId: params.modeId,
+        },
+      })
+      await this.updateConfigOption(params.sessionId, 'mode', params.modeId)
+      return {}
     })
-    await this.updateConfigOption(params.sessionId, 'mode', params.modeId)
-    return {}
   }
 
   // ── setSessionModel ─────────────────────────────────────────────
@@ -368,11 +398,13 @@ export class AcpAgent implements Agent {
     if (!session) {
       throw new Error('Session not found')
     }
-    // Store the raw value — QueryEngine.submitMessage() calls
-    // parseUserSpecifiedModel() to resolve aliases (e.g. "sonnet" → "glm-5.1-turbo")
-    session.queryEngine.setModel(params.modelId)
-    await this.updateConfigOption(params.sessionId, 'model', params.modelId)
-    return {}
+    return runWithSession(session.hostSession, async () => {
+      // Store the raw value — QueryEngine.submitMessage() calls
+      // parseUserSpecifiedModel() to resolve aliases (e.g. "sonnet" → "glm-5.1-turbo")
+      session.queryEngine.setModel(params.modelId)
+      await this.updateConfigOption(params.sessionId, 'model', params.modelId)
+      return {}
+    })
   }
 
   // ── Private helpers (lightweight, kept with the class) ──────────
@@ -381,23 +413,27 @@ export class AcpAgent implements Agent {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
-    const availableCommands = session.commands
-      .filter(
-        cmd =>
-          cmd.type === 'prompt' && !cmd.isHidden && cmd.userInvocable !== false,
-      )
-      .map(cmd => ({
-        name: cmd.name,
-        description: cmd.description,
-        input: cmd.argumentHint ? { hint: cmd.argumentHint } : undefined,
-      }))
+    await runWithSession(session.hostSession, async () => {
+      const availableCommands = session.commands
+        .filter(
+          cmd =>
+            cmd.type === 'prompt' &&
+            !cmd.isHidden &&
+            cmd.userInvocable !== false,
+        )
+        .map(cmd => ({
+          name: cmd.name,
+          description: cmd.description,
+          input: cmd.argumentHint ? { hint: cmd.argumentHint } : undefined,
+        }))
 
-    await this.conn.sessionUpdate({
-      sessionId,
-      update: {
-        sessionUpdate: 'available_commands_update',
-        availableCommands,
-      },
+      await this.conn.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands,
+        },
+      })
     })
   }
 
@@ -424,13 +460,16 @@ export interface AcpAgent {
     params: SetSessionConfigOptionRequest,
   ): Promise<SetSessionConfigOptionResponse>
 
-  // ── session lifecycle (sessionLifecycle.ts) ───────────────────
+  // ── session lifecycle (sessionLifecycle.ts / createSessionMethod.ts) ──
   createSession(
     params: NewSessionRequest,
     opts?: {
       forceNewId?: boolean
       sessionId?: string
+      parentSessionId?: string
       initialMessages?: Message[]
+      hostSession?: Session
+      projectDir?: string | null
     },
   ): Promise<NewSessionResponse>
   getOrCreateSession(params: {
@@ -451,29 +490,8 @@ export interface AcpAgent {
     configId: string,
     value: string,
   ): Promise<void>
-}
-
-// ── Module-local helpers used only by the class shell ────────────
-
-import { type UUID } from 'node:crypto'
-import { deserializeMessages } from '../../../utils/conversationRecovery.js'
-import { getLastSessionLog } from '../../../utils/sessionStorage.js'
-
-/**
- * Load the source session's persisted messages for forkSession.
- * Extracted as a module-local helper to keep the fork handler compact.
- */
-async function loadForkSourceMessages(
-  sessionId: string,
-): Promise<{ initialMessages: Message[] | undefined }> {
-  let initialMessages: Message[] | undefined
-  try {
-    const log = await getLastSessionLog(sessionId as UUID)
-    if (log && log.messages.length > 0) {
-      initialMessages = deserializeMessages(log.messages)
-    }
-  } catch (err) {
-    console.error('[ACP] fork source load failed:', err)
-  }
-  return { initialMessages }
+  loadForkSourceMessages(params: {
+    sessionId: string
+    cwd: string
+  }): Promise<{ initialMessages: Message[] | undefined }>
 }

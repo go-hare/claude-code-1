@@ -6,17 +6,19 @@
  * skips the deeper subtree and logs once per walk kind.
  */
 import { logForDebugging } from '../utils/debug.js'
+import { InkHostSlot } from './instances.js'
 
 /** densable `Zlt = 256` */
 export const MAX_TREE_DEPTH = 256
 
-const warned = new Set<string>()
+const warnedHostSlot = new InkHostSlot<Set<string>>(() => new Set())
 
 /**
  * densable `yir` — once per walk kind (`hitTest`, `renderNodeToOutput`,
  * `renderNodeToScreenReaderOutput`, …).
  */
 export function warnTreeDepthExceeded(kind: string, nodeName: string): void {
+  const warned = warnedHostSlot.of()
   if (warned.has(kind)) return
   warned.add(kind)
   logForDebugging(
@@ -27,5 +29,5 @@ export function warnTreeDepthExceeded(kind: string, nodeName: string): void {
 
 /** Test helper — reset once-per-kind set. */
 export function resetTreeDepthWarningsForTests(): void {
-  warned.clear()
+  warnedHostSlot.peek()?.clear()
 }

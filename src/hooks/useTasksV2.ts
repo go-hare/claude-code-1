@@ -7,6 +7,13 @@ import {
 } from '../state/AppState.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  type Session,
+} from '../utils/sessionRoot.js'
 import { createSignal } from '../utils/signal.js'
 import type { Task } from '../utils/tasks.js'
 import {
@@ -51,10 +58,19 @@ export class TasksV2Store {
   #changed = createSignal()
   #subscriberCount = 0
   #started = false
+  #session: Session | undefined = undefined
   /** densable `#R` — generation issued by the latest #fetch start. */
   #issuedFetch = 0
   /** densable `#S` — generation of the fetch that last landed. */
   #appliedFetch = 0
+
+  #runInSession<T>(fn: () => T): T {
+    const captured = this.#session
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      return runWithSession(captured, fn)
+    }
+    return fn()
+  }
 
   /**
    * useSyncExternalStore snapshot. Returns the same Task[] reference between
@@ -69,10 +85,22 @@ export class TasksV2Store {
     // post-commit, so I/O here is safe (no render-phase side effects).
     // REPL.tsx keeps a subscription alive for the whole session, so
     // Spinner mount/unmount churn never drives the count to zero.
-    const unsubscribe = this.#changed.subscribe(fn)
+    const captured = getActiveSessionFromAls()
+    const wrapped =
+      captured !== undefined
+        ? () => {
+            if (getActiveSessionFromAls() !== captured) {
+              runWithSession(captured, fn)
+            } else {
+              fn()
+            }
+          }
+        : fn
+    const unsubscribe = this.#changed.subscribe(wrapped)
     this.#subscriberCount++
     if (!this.#started) {
       this.#started = true
+      this.#session = captured
       this.#unsubscribeTasksUpdated = onTasksUpdated(this.#debouncedFetch)
       // Fire-and-forget: subscribe is called post-commit (not in render),
       // and the store notifies subscribers when the fetch resolves.
@@ -89,7 +117,9 @@ export class TasksV2Store {
   }
 
   #notify(): void {
-    this.#changed.emit()
+    this.#runInSession(() => {
+      this.#changed.emit()
+    })
   }
 
   /**
@@ -105,7 +135,11 @@ export class TasksV2Store {
     this.#watcher = null
     this.#watchedDir = dir
     try {
-      this.#watcher = watch(dir, this.#debouncedFetch)
+      this.#watcher = watch(dir, () => {
+        this.#runInSession(() => {
+          this.#debouncedFetch()
+        })
+      })
       this.#watcher.unref()
     } catch {
       // Directory may not exist yet (ensureTasksDir is called by writers).
@@ -116,7 +150,11 @@ export class TasksV2Store {
 
   #debouncedFetch = (): void => {
     if (this.#debounceTimer) clearTimeout(this.#debounceTimer)
-    this.#debounceTimer = setTimeout(() => void this.#fetch(), DEBOUNCE_MS)
+    this.#debounceTimer = setTimeout(() => {
+      this.#runInSession(() => {
+        void this.#fetch()
+      })
+    }, DEBOUNCE_MS)
     this.#debounceTimer.unref()
   }
 
@@ -157,10 +195,11 @@ export class TasksV2Store {
       this.#clearHideTimer()
     } else if (this.#hideTimer === null && !this.#hidden) {
       // All tasks just became completed — schedule clear
-      this.#hideTimer = setTimeout(
-        this.#onHideTimerFired.bind(this, taskListId),
-        HIDE_DELAY_MS,
-      )
+      this.#hideTimer = setTimeout(() => {
+        this.#runInSession(() => {
+          this.#onHideTimerFired(taskListId)
+        })
+      }, HIDE_DELAY_MS)
       this.#hideTimer.unref()
     }
 
@@ -182,7 +221,11 @@ export class TasksV2Store {
       clearTimeout(this.#pollTimer)
       this.#pollTimer = null
     }
-    this.#pollTimer = setTimeout(this.#debouncedFetch, FALLBACK_POLL_MS)
+    this.#pollTimer = setTimeout(() => {
+      this.#runInSession(() => {
+        this.#debouncedFetch()
+      })
+    }, FALLBACK_POLL_MS)
     this.#pollTimer.unref()
   }
 
@@ -236,12 +279,15 @@ export class TasksV2Store {
     this.#debounceTimer = null
     this.#pollTimer = null
     this.#started = false
+    this.#session = undefined
   }
 }
 
-let _store: TasksV2Store | null = null
+const tasksV2StoreBySession = new RootSessionSlot<TasksV2Store>(
+  () => new TasksV2Store(),
+)
 function getStore(): TasksV2Store {
-  return (_store ??= new TasksV2Store())
+  return tasksV2StoreBySession.of(getBootstrapSession())
 }
 
 /** densable 2.1.289 jMn `k` — skip notify when the visible fields did not change. */

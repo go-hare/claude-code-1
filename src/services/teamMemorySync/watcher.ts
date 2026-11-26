@@ -20,6 +20,12 @@ import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { getGithubRepo } from '../../utils/git.js'
 import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
+import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../analytics/index.js'
@@ -34,21 +40,39 @@ import type { TeamMemorySyncPushResult } from './types.js'
 
 const DEBOUNCE_MS = 2000 // Wait 2s after last change before pushing
 
-// ─── Watcher state ──────────────────────────────────────────
-let watcher: FSWatcher | null = null
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
-let pushInProgress = false
-let hasPendingChanges = false
-let currentPushPromise: Promise<void> | null = null
-let watcherStarted = false
+// ─── Watcher state (HostSlot) ───────────────────────────────
+type TeamMemoryWatcherState = {
+  watcher: FSWatcher | null
+  debounceTimer: ReturnType<typeof setTimeout> | null
+  pushInProgress: boolean
+  hasPendingChanges: boolean
+  currentPushPromise: Promise<void> | null
+  watcherStarted: boolean
+  // Set after a push fails for a reason that can't self-heal on retry.
+  // Prevents watch events from other sessions' writes to the shared team
+  // dir driving an infinite retry loop (BQ Mar 14-16: one no_oauth device
+  // emitted 167K push events over 2.5 days). Cleared on unlink — file deletion
+  // is a recovery action for the too-many-entries case, and for no_oauth the
+  // suppression persisting until session restart is correct.
+  pushSuppressedReason: string | null
+  // Sync state owned by the watcher — shared across all sync operations.
+  syncState: SyncState | null
+}
 
-// Set after a push fails for a reason that can't self-heal on retry.
-// Prevents watch events from other sessions' writes to the shared team
-// dir driving an infinite retry loop (BQ Mar 14-16: one no_oauth device
-// emitted 167K push events over 2.5 days). Cleared on unlink — file deletion
-// is a recovery action for the too-many-entries case, and for no_oauth the
-// suppression persisting until session restart is correct.
-let pushSuppressedReason: string | null = null
+const watcherStateByHost = new HostSlot<TeamMemoryWatcherState>(() => ({
+  watcher: null,
+  debounceTimer: null,
+  pushInProgress: false,
+  hasPendingChanges: false,
+  currentPushPromise: null,
+  watcherStarted: false,
+  pushSuppressedReason: null,
+  syncState: null,
+}))
+
+function getWatcherState(): TeamMemoryWatcherState {
+  return watcherStateByHost.of(getBootstrapSessionHost())
+}
 
 /**
  * Permanent = retry without user action will fail the same way.
@@ -72,24 +96,21 @@ export function isPermanentFailure(r: TeamMemorySyncPushResult): boolean {
   return false
 }
 
-// Sync state owned by the watcher — shared across all sync operations.
-let syncState: SyncState | null = null
-
 /**
  * Execute the push and track its lifecycle.
  * Push is read-only on disk (delta+probe, no merge writes), so no event
  * suppression is needed — edits arriving mid-push hit schedulePush() and
  * the debounce re-arms after this push completes.
  */
-async function executePush(): Promise<void> {
-  if (!syncState) {
+async function executePush(state: TeamMemoryWatcherState): Promise<void> {
+  if (!state.syncState) {
     return
   }
-  pushInProgress = true
+  state.pushInProgress = true
   try {
-    const result = await pushTeamMemory(syncState)
+    const result = await pushTeamMemory(state.syncState)
     if (result.success) {
-      hasPendingChanges = false
+      state.hasPendingChanges = false
     }
     if (result.success && result.filesUploaded > 0) {
       logForDebugging(
@@ -100,18 +121,18 @@ async function executePush(): Promise<void> {
       logForDebugging(`team-memory-watcher: push failed: ${result.error}`, {
         level: 'warn',
       })
-      if (isPermanentFailure(result) && pushSuppressedReason === null) {
-        pushSuppressedReason =
+      if (isPermanentFailure(result) && state.pushSuppressedReason === null) {
+        state.pushSuppressedReason =
           result.httpStatus !== undefined
             ? `http_${result.httpStatus}`
             : (result.errorType ?? 'unknown')
         logForDebugging(
-          `team-memory-watcher: suppressing retry until next unlink or session restart (${pushSuppressedReason})`,
+          `team-memory-watcher: suppressing retry until next unlink or session restart (${state.pushSuppressedReason})`,
           { level: 'warn' },
         )
         logEvent('tengu_team_mem_push_suppressed', {
           reason:
-            pushSuppressedReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            state.pushSuppressedReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           ...(result.httpStatus && { status: result.httpStatus }),
         })
       }
@@ -121,27 +142,39 @@ async function executePush(): Promise<void> {
       level: 'warn',
     })
   } finally {
-    pushInProgress = false
-    currentPushPromise = null
+    state.pushInProgress = false
+    state.currentPushPromise = null
   }
 }
 
 /**
  * Debounced push: waits for writes to settle, then pushes once.
  */
-function schedulePush(): void {
-  if (pushSuppressedReason !== null) return
-  hasPendingChanges = true
-  if (debounceTimer) {
-    clearTimeout(debounceTimer)
+function schedulePush(state: TeamMemoryWatcherState): void {
+  if (state.pushSuppressedReason !== null) return
+  state.hasPendingChanges = true
+  if (state.debounceTimer) {
+    clearTimeout(state.debounceTimer)
   }
-  debounceTimer = setTimeout(() => {
-    if (pushInProgress) {
-      schedulePush()
-      return
+  const rootSessionRef = new WeakRef(getBootstrapSession().root)
+  const stateRef = new WeakRef(state)
+  const timer = setTimeout(() => {
+    const liveState = stateRef.deref()
+    if (!liveState) return
+    if (liveState.debounceTimer === timer) {
+      liveState.debounceTimer = null
     }
-    currentPushPromise = executePush()
+    const session = rootSessionRef.deref()
+    if (!session) return
+    runWithSession(session, () => {
+      if (liveState.pushInProgress) {
+        schedulePush(liveState)
+        return
+      }
+      liveState.currentPushPromise = executePush(liveState)
+    })
   }, DEBOUNCE_MS)
+  state.debounceTimer = timer
 }
 
 /**
@@ -165,10 +198,13 @@ function schedulePush(): void {
  * delete team memory files to recover, they restart with auth.
  */
 async function startFileWatcher(teamDir: string): Promise<void> {
-  if (watcherStarted) {
+  const state = getWatcherState()
+  if (state.watcherStarted) {
     return
   }
-  watcherStarted = true
+  state.watcherStarted = true
+  const rootSessionRef = new WeakRef(getBootstrapSession().root)
+  const stateRef = new WeakRef(state)
 
   try {
     // pullTeamMemory returns early without creating the dir for fresh repos
@@ -176,37 +212,47 @@ async function startFileWatcher(teamDir: string): Promise<void> {
     // recursive:true is idempotent — no existence check needed.
     await mkdir(teamDir, { recursive: true })
 
-    watcher = watch(
+    state.watcher = watch(
       teamDir,
       { persistent: true, recursive: true },
       (_eventType, filename) => {
-        if (filename === null) {
-          schedulePush()
-          return
-        }
-        if (pushSuppressedReason !== null) {
-          // Suppression is only cleared by unlink (recovery action for
-          // too-many-entries). fs.watch doesn't distinguish unlink from
-          // add/write — stat to disambiguate. ENOENT → file gone → clear.
-          void stat(join(teamDir, filename)).catch(
-            (err: NodeJS.ErrnoException) => {
-              if (err.code !== 'ENOENT') return
-              if (pushSuppressedReason !== null) {
-                logForDebugging(
-                  `team-memory-watcher: unlink cleared suppression (was: ${pushSuppressedReason})`,
-                  { level: 'info' },
-                )
-                pushSuppressedReason = null
-              }
-              schedulePush()
-            },
-          )
-          return
-        }
-        schedulePush()
+        const liveState = stateRef.deref()
+        const session = rootSessionRef.deref()
+        if (!liveState || !session) return
+        runWithSession(session, () => {
+          if (filename === null) {
+            schedulePush(liveState)
+            return
+          }
+          if (liveState.pushSuppressedReason !== null) {
+            // Suppression is only cleared by unlink (recovery action for
+            // too-many-entries). fs.watch doesn't distinguish unlink from
+            // add/write — stat to disambiguate. ENOENT → file gone → clear.
+            void stat(join(teamDir, filename)).catch(
+              (err: NodeJS.ErrnoException) => {
+                if (err.code !== 'ENOENT') return
+                const st = stateRef.deref()
+                const liveSession = rootSessionRef.deref()
+                if (!st || !liveSession) return
+                runWithSession(liveSession, () => {
+                  if (st.pushSuppressedReason !== null) {
+                    logForDebugging(
+                      `team-memory-watcher: unlink cleared suppression (was: ${st.pushSuppressedReason})`,
+                      { level: 'info' },
+                    )
+                    st.pushSuppressedReason = null
+                  }
+                  schedulePush(st)
+                })
+              },
+            )
+            return
+          }
+          schedulePush(liveState)
+        })
       },
     )
-    watcher.on('error', err => {
+    state.watcher.on('error', err => {
       logForDebugging(
         `team-memory-watcher: fs.watch error: ${errorMessage(err)}`,
         { level: 'warn' },
@@ -225,7 +271,16 @@ async function startFileWatcher(teamDir: string): Promise<void> {
     )
   }
 
-  registerCleanup(async () => stopTeamMemoryWatcher())
+  registerCleanup(async () => {
+    const st = stateRef.deref()
+    if (!st) return
+    const session = rootSessionRef.deref()
+    if (session) {
+      await runWithSession(session, () => stopWatcherState(st))
+    } else {
+      await stopWatcherState(st)
+    }
+  })
 }
 
 /**
@@ -265,7 +320,8 @@ export async function startTeamMemoryWatcher(): Promise<void> {
     return
   }
 
-  syncState = createSyncState()
+  const state = getWatcherState()
+  state.syncState = createSyncState()
 
   // Initial pull from server (runs before the watcher starts, so its disk
   // writes won't trigger schedulePush)
@@ -273,7 +329,7 @@ export async function startTeamMemoryWatcher(): Promise<void> {
   let initialFilesPulled = 0
   let serverHasContent = false
   try {
-    const pullResult = await pullTeamMemory(syncState)
+    const pullResult = await pullTeamMemory(state.syncState)
     initialPullSuccess = pullResult.success
     serverHasContent = pullResult.entryCount > 0
     if (pullResult.success && pullResult.filesWritten > 0) {
@@ -312,10 +368,42 @@ export async function startTeamMemoryWatcher(): Promise<void> {
  * If the watcher does fire, the debounce timer just resets.
  */
 export async function notifyTeamMemoryWrite(): Promise<void> {
-  if (!syncState) {
+  const state = watcherStateByHost.peek(getBootstrapSessionHost())
+  if (!state?.syncState) {
     return
   }
-  schedulePush()
+  schedulePush(state)
+}
+
+async function stopWatcherState(state: TeamMemoryWatcherState): Promise<void> {
+  if (state.debounceTimer) {
+    clearTimeout(state.debounceTimer)
+    state.debounceTimer = null
+  }
+  if (state.watcher) {
+    state.watcher.close()
+    state.watcher = null
+  }
+  // Await any in-flight push
+  if (state.currentPushPromise) {
+    try {
+      await state.currentPushPromise
+    } catch {
+      // Ignore errors during shutdown
+    }
+  }
+  // Flush pending changes that were debounced but not yet pushed
+  if (
+    state.hasPendingChanges &&
+    state.syncState &&
+    state.pushSuppressedReason === null
+  ) {
+    try {
+      await pushTeamMemory(state.syncState)
+    } catch {
+      // Best-effort — shutdown may kill this
+    }
+  }
 }
 
 /**
@@ -325,28 +413,9 @@ export async function notifyTeamMemoryWrite(): Promise<void> {
  * process.exit() will kill it.
  */
 export async function stopTeamMemoryWatcher(): Promise<void> {
-  if (debounceTimer) {
-    clearTimeout(debounceTimer)
-    debounceTimer = null
+  const state = watcherStateByHost.peek(getBootstrapSessionHost())
+  if (!state) {
+    return
   }
-  if (watcher) {
-    watcher.close()
-    watcher = null
-  }
-  // Await any in-flight push
-  if (currentPushPromise) {
-    try {
-      await currentPushPromise
-    } catch {
-      // Ignore errors during shutdown
-    }
-  }
-  // Flush pending changes that were debounced but not yet pushed
-  if (hasPendingChanges && syncState && pushSuppressedReason === null) {
-    try {
-      await pushTeamMemory(syncState)
-    } catch {
-      // Best-effort — shutdown may kill this
-    }
-  }
+  await stopWatcherState(state)
 }

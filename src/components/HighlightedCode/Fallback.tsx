@@ -6,6 +6,7 @@ import { getCliHighlightPromise } from '../../utils/cliHighlight.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { convertLeadingTabsToSpaces } from '../../utils/file.js';
 import { hashPair } from '../../utils/hash.js';
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js';
 
 type Props = {
   code: string;
@@ -14,15 +15,16 @@ type Props = {
   skipColoring?: boolean;
 };
 
-// Module-level highlight cache — hl.highlight() is the hot cost on virtual-
+// Host-scoped highlight cache — hl.highlight() is the hot cost on virtual-
 // scroll remounts. useMemo doesn't survive unmount→remount. Keyed by hash
 // of code+language to avoid retaining full source strings (#24180 RSS fix).
-const hlCache = new LRUCache<string, string>({ max: 500 });
+const hlCacheByHost = new HostSlot<LRUCache<string, string>>(() => new LRUCache<string, string>({ max: 500 }));
 function cachedHighlight(
   hl: NonNullable<Awaited<ReturnType<typeof getCliHighlightPromise>>>,
   code: string,
   language: string,
 ): string {
+  const hlCache = hlCacheByHost.of(getBootstrapSessionHost());
   const key = hashPair(language, code);
   const hit = hlCache.get(key);
   if (hit !== undefined) return hit;

@@ -13,9 +13,11 @@ import { homedir } from 'os'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { logEvent } from '../../services/analytics/index.js'
 import { getCwdState, getOriginalCwd } from '../../bootstrap/state.js'
+import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
 import { getClaudeTempDir } from '../permissions/filesystem.js'
 import { getPlatform } from '../platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime'
 import { resetStagingDirIdentities } from './wrapPreflight.js'
 
@@ -47,38 +49,60 @@ type RuntimeConfig = {
   filesystem: FilesystemConfig
 }
 
-const state = {
-  symlinkedDenyScrubPaths: [] as SymlinkedDenyScrubEntry[],
-  denyLiteralSymlinkCandidates: [] as string[],
-  wrapCwdsThisSession: new Set<string>(),
-  wrapWriteRootsThisSession: new Set<string>(),
-  unconfinedWrapThisSession: false,
+type SymlinkedDenyScrubHostState = {
+  symlinkedDenyScrubPaths: SymlinkedDenyScrubEntry[]
+  denyLiteralSymlinkCandidates: string[]
+  wrapCwdsThisSession: Set<string>
+  wrapWriteRootsThisSession: Set<string>
+  unconfinedWrapThisSession: boolean
   // densable Te() / mN — CLI session, not sandbox-runtime
-  builtConfigEnforcesAllowlist: new WeakMap<object, boolean>(),
-  installedFilterRequestEnforcesAllowlist: false,
-  installsSinceInitializeStartedAllEnforce: true,
-  initializationPromise: undefined as object | undefined,
+  builtConfigEnforcesAllowlist: WeakMap<object, boolean>
+  installedFilterRequestEnforcesAllowlist: boolean
+  installsSinceInitializeStartedAllEnforce: boolean
+  initializationPromise: object | undefined
+}
+
+const symlinkedDenyScrubStateByHost = new HostSlot<SymlinkedDenyScrubHostState>(
+  () => ({
+    symlinkedDenyScrubPaths: [],
+    denyLiteralSymlinkCandidates: [],
+    wrapCwdsThisSession: new Set<string>(),
+    wrapWriteRootsThisSession: new Set<string>(),
+    unconfinedWrapThisSession: false,
+    builtConfigEnforcesAllowlist: new WeakMap<object, boolean>(),
+    installedFilterRequestEnforcesAllowlist: false,
+    installsSinceInitializeStartedAllEnforce: true,
+    initializationPromise: undefined,
+  }),
+)
+
+function getSymlinkedDenyScrubState(): SymlinkedDenyScrubHostState {
+  return symlinkedDenyScrubStateByHost.of(getBootstrapSessionHost())
 }
 
 let collator: Intl.Collator | undefined
 
 export function getSymlinkedDenyScrubPaths(): readonly SymlinkedDenyScrubEntry[] {
-  return state.symlinkedDenyScrubPaths
+  return getSymlinkedDenyScrubState().symlinkedDenyScrubPaths
 }
 
 export function getDenyLiteralSymlinkCandidates(): readonly string[] {
-  return state.denyLiteralSymlinkCandidates
+  return getSymlinkedDenyScrubState().denyLiteralSymlinkCandidates
 }
 
 /** densable convert: wipe lists before C.map(Zt). Wrap sets stay session-long. */
 export function clearSymlinkedDenyLists(): void {
+  const state = getSymlinkedDenyScrubState()
   state.symlinkedDenyScrubPaths.length = 0
   state.denyLiteralSymlinkCandidates.length = 0
 }
 
 export function resetSymlinkedDenyScrubState(): void {
   resetStagingDirIdentities()
-  clearSymlinkedDenyLists()
+  const state = symlinkedDenyScrubStateByHost.peek(getBootstrapSessionHost())
+  if (!state) return
+  state.symlinkedDenyScrubPaths.length = 0
+  state.denyLiteralSymlinkCandidates.length = 0
   state.wrapCwdsThisSession.clear()
   state.wrapWriteRootsThisSession.clear()
   state.unconfinedWrapThisSession = false
@@ -93,19 +117,19 @@ export function rememberBuiltConfigAllowlist(
   cfg: object,
   enforces: boolean,
 ): void {
-  state.builtConfigEnforcesAllowlist.set(cfg, enforces)
+  getSymlinkedDenyScrubState().builtConfigEnforcesAllowlist.set(cfg, enforces)
 }
 
 /** densable Te().initializationPromise assignment / clear */
 export function setSandboxInitializationPromise(
   promise: object | undefined,
 ): void {
-  state.initializationPromise = promise
+  getSymlinkedDenyScrubState().initializationPromise = promise
 }
 
 /** densable init: `installsSinceInitializeStartedAllEnforce = true` */
 export function markInstallsSinceInitializeStarted(): void {
-  state.installsSinceInitializeStartedAllEnforce = true
+  getSymlinkedDenyScrubState().installsSinceInitializeStartedAllEnforce = true
 }
 
 /**
@@ -113,6 +137,7 @@ export function markInstallsSinceInitializeStarted(): void {
  * `installedFilter = (WeakMap.get(i) ?? false) && installsSince`
  */
 export function finishSandboxInitializeAllowlist(cfg: object): void {
+  const state = getSymlinkedDenyScrubState()
   state.installedFilterRequestEnforcesAllowlist =
     (state.builtConfigEnforcesAllowlist.get(cfg) ?? false) &&
     state.installsSinceInitializeStartedAllEnforce
@@ -120,11 +145,11 @@ export function finishSandboxInitializeAllowlist(cfg: object): void {
 
 /** densable init-fail: `installedFilterRequestEnforcesAllowlist = false` */
 export function failSandboxInitializeAllowlist(): void {
-  state.installedFilterRequestEnforcesAllowlist = false
+  getSymlinkedDenyScrubState().installedFilterRequestEnforcesAllowlist = false
 }
 
 export function getInstalledFilterRequestEnforcesAllowlist(): boolean {
-  return state.installedFilterRequestEnforcesAllowlist
+  return getSymlinkedDenyScrubState().installedFilterRequestEnforcesAllowlist
 }
 
 /**
@@ -134,6 +159,7 @@ export function applySandboxRuntimeConfig(
   cfg: SandboxRuntimeConfig,
   updateConfig: (cfg: SandboxRuntimeConfig) => void,
 ): void {
+  const state = getSymlinkedDenyScrubState()
   updateConfig(cfg)
   recordWrapWriteRoots(cfg)
   const n = state.builtConfigEnforcesAllowlist.get(cfg) ?? false
@@ -376,6 +402,7 @@ export function deriveScrubWriteRoots(
   cfg: RuntimeConfig | undefined | null,
 ): string[] | null {
   if (!isUnixLikeSandboxPlatform()) return null
+  const state = getSymlinkedDenyScrubState()
   if (!cfg || cfg.filesystem.disabled || state.unconfinedWrapThisSession) {
     return null
   }
@@ -386,7 +413,7 @@ export function deriveScrubWriteRoots(
     getOriginalCwd(),
   ])
   try {
-    cwds.add(process.cwd())
+    cwds.add(getCwd())
   } catch {
     // official swallows
   }
@@ -403,13 +430,14 @@ export function recordWrapWriteRoots(
   cfg: RuntimeConfig | undefined | null,
 ): void {
   if (!isUnixLikeSandboxPlatform()) return
+  const state = getSymlinkedDenyScrubState()
   if (!cfg || cfg.filesystem.disabled || isAlreadyInsideSandbox()) {
     state.unconfinedWrapThisSession = true
     return
   }
   let cwd: string
   try {
-    cwd = process.cwd()
+    cwd = getCwd()
   } catch {
     state.unconfinedWrapThisSession = true
     return
@@ -438,6 +466,7 @@ export function promoteDenyLiteralSymlinkTargets(opts: {
 }): void {
   const cfg = opts.getConfig()
   if (!cfg) return
+  const state = getSymlinkedDenyScrubState()
   const candidates = state.denyLiteralSymlinkCandidates
   const resolved = new Map<string, string>()
   for (const literal of candidates) {
@@ -489,6 +518,7 @@ export function promoteDenyLiteralSymlinkTargets(opts: {
 
 /** densable Zt */
 export function recordSymlinkedDenyPath(literal: string): string {
+  const state = getSymlinkedDenyScrubState()
   let link: string
   try {
     link = readlinkSync(literal)
@@ -532,6 +562,7 @@ function applySparedUnreachable(
   getConfig: () => RuntimeConfig | undefined,
   updateConfig: (cfg: SandboxRuntimeConfig) => void,
 ): void {
+  const state = getSymlinkedDenyScrubState()
   const nextTargets: string[] = []
   const nextLiterals: string[] = []
   for (let i = spared.length - 1; i >= 0; i--) {
@@ -597,7 +628,7 @@ export function scrubSymlinkedDenyPaths(opts: {
   getConfig: () => RuntimeConfig | undefined
   updateConfig: (cfg: SandboxRuntimeConfig) => void
 }): void {
-  const entries = state.symlinkedDenyScrubPaths
+  const entries = getSymlinkedDenyScrubState().symlinkedDenyScrubPaths
   const spared: ScrubSpare[] = []
   let writeRoots: string[] | null | undefined
   for (let i = 0; i < entries.length; i++) {

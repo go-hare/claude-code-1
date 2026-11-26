@@ -9,6 +9,7 @@
 import { HOOK_EVENTS } from 'src/entrypoints/sdk/coreTypes.js'
 
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost } from '../sessionHost.js'
 
 /**
  * Hook events that are always emitted regardless of the includeHookEvents
@@ -54,40 +55,73 @@ export type HookExecutionEvent =
   | HookResponseEvent
 export type HookEventHandler = (event: HookExecutionEvent) => void
 
-const pendingEvents: HookExecutionEvent[] = []
-let eventHandler: HookEventHandler | null = null
-let allHookEventsEnabled = false
+type HostHookEventState = {
+  pendingEvents: HookExecutionEvent[]
+  eventHandler: HookEventHandler | null
+  allHookEventsEnabled: boolean
+}
+
+const hookEventStateByHost = new WeakMap<object, HostHookEventState>()
+
+function getHostHookEventState(): HostHookEventState {
+  const host = getBootstrapSessionHost()
+  let state = hookEventStateByHost.get(host)
+  if (!state) {
+    state = {
+      pendingEvents: [],
+      eventHandler: null,
+      allHookEventsEnabled: false,
+    }
+    hookEventStateByHost.set(host, state)
+  }
+  return state
+}
 
 export function registerHookEventHandler(
   handler: HookEventHandler | null,
 ): void {
-  eventHandler = handler
-  if (handler && pendingEvents.length > 0) {
-    for (const event of pendingEvents.splice(0)) {
+  const state = getHostHookEventState()
+  state.eventHandler = handler
+  if (handler && state.pendingEvents.length > 0) {
+    for (const event of state.pendingEvents.splice(0)) {
       handler(event)
     }
   }
 }
 
-function emit(event: HookExecutionEvent): void {
-  if (eventHandler) {
-    eventHandler(event)
+function emitToState(
+  state: HostHookEventState,
+  event: HookExecutionEvent,
+): void {
+  if (state.eventHandler) {
+    state.eventHandler(event)
   } else {
-    pendingEvents.push(event)
-    if (pendingEvents.length > MAX_PENDING_EVENTS) {
-      pendingEvents.shift()
+    state.pendingEvents.push(event)
+    if (state.pendingEvents.length > MAX_PENDING_EVENTS) {
+      state.pendingEvents.shift()
     }
   }
 }
 
-function shouldEmit(hookEvent: string): boolean {
+function emit(event: HookExecutionEvent): void {
+  emitToState(getHostHookEventState(), event)
+}
+
+function shouldEmitForState(
+  state: HostHookEventState,
+  hookEvent: string,
+): boolean {
   if ((ALWAYS_EMITTED_HOOK_EVENTS as readonly string[]).includes(hookEvent)) {
     return true
   }
   return (
-    allHookEventsEnabled &&
+    state.allHookEventsEnabled &&
     (HOOK_EVENTS as readonly string[]).includes(hookEvent)
   )
+}
+
+function shouldEmit(hookEvent: string): boolean {
+  return shouldEmitForState(getHostHookEventState(), hookEvent)
 }
 
 export function emitHookStarted(
@@ -128,14 +162,17 @@ export function startHookProgressInterval(params: {
   getOutput: () => Promise<{ stdout: string; stderr: string; output: string }>
   intervalMs?: number
 }): () => void {
-  if (!shouldEmit(params.hookEvent)) return () => {}
+  const hostState = getHostHookEventState()
+  if (!shouldEmitForState(hostState, params.hookEvent)) return () => {}
 
   let lastEmittedOutput = ''
   const interval = setInterval(() => {
     void params.getOutput().then(({ stdout, stderr, output }) => {
       if (output === lastEmittedOutput) return
       lastEmittedOutput = output
-      emitHookProgress({
+      if (!shouldEmitForState(hostState, params.hookEvent)) return
+      emitToState(hostState, {
+        type: 'progress',
         hookId: params.hookId,
         hookName: params.hookName,
         hookEvent: params.hookEvent,
@@ -182,11 +219,12 @@ export function emitHookResponse(data: {
  * in CLAUDE_CODE_REMOTE mode.
  */
 export function setAllHookEventsEnabled(enabled: boolean): void {
-  allHookEventsEnabled = enabled
+  getHostHookEventState().allHookEventsEnabled = enabled
 }
 
 export function clearHookEventState(): void {
-  eventHandler = null
-  pendingEvents.length = 0
-  allHookEventsEnabled = false
+  const state = getHostHookEventState()
+  state.eventHandler = null
+  state.pendingEvents.length = 0
+  state.allHookEventsEnabled = false
 }

@@ -18,6 +18,11 @@ import type { BundledSkillDefinition } from '../skills/bundledSkills.js'
 import type { BuiltinPluginDefinition, LoadedPlugin } from '../types/plugin.js'
 import { errorMessage, toError } from '../utils/errors.js'
 import {
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+} from '../utils/sessionHost.js'
+import {
   getEnabledSettingSources,
   type SettingSource,
 } from '../utils/settings/constants.js'
@@ -25,9 +30,6 @@ import {
   getSettings_DEPRECATED,
   getSettingsForSource,
 } from '../utils/settings/settings.js'
-
-const BUILTIN_PLUGINS: Map<string, BuiltinPluginDefinition> = new Map()
-let builtinPluginsInitialized = false
 
 export type BuiltinPluginFailurePhase =
   | 'require'
@@ -41,14 +43,82 @@ export type BuiltinPluginFailure = {
   message: string
 }
 
-const builtinPluginFailures: Map<string, BuiltinPluginFailure> = new Map()
-let builtinPluginWiredSkills = new WeakMap<
-  BundledSkillDefinition,
-  {
-    skillRoot: string | undefined
-    getPromptForCommand: BundledSkillDefinition['getPromptForCommand']
+type BuiltinPluginsHostState = {
+  plugins: Map<string, BuiltinPluginDefinition>
+  initialized: boolean | undefined
+  failures: Map<string, BuiltinPluginFailure>
+  wiredSkills: WeakMap<
+    BundledSkillDefinition,
+    {
+      skillRoot: string | undefined
+      getPromptForCommand: BundledSkillDefinition['getPromptForCommand']
+    }
+  >
+  /** True when clearBuiltinPlugins() was called explicitly in an isolated host. */
+  cleared: boolean
+  /** Names explicitly removed in this host (e.g. failed register phase). */
+  deletedPlugins: Set<string>
+}
+
+// Boot-default catalog populated whenever registration runs outside ALS (on the
+// process-default host, e.g. startup initBuiltinPlugins()). Fresh isolated hosts
+// (such as --acp sessions) inherit this catalog while evaluating isAvailable()
+// and settings per host and still allowing per-host test overrides/clears.
+const bootDefaultPlugins = new Map<string, BuiltinPluginDefinition>()
+let bootDefaultInitialized = false
+const bootDefaultFailures = new Map<string, BuiltinPluginFailure>()
+
+const builtinPluginsHostSlot = new HostSlot<BuiltinPluginsHostState>(() => ({
+  plugins: new Map(bootDefaultPlugins),
+  initialized: undefined,
+  failures: new Map(bootDefaultFailures),
+  wiredSkills: new WeakMap(),
+  cleared: false,
+  deletedPlugins: new Set(),
+}))
+
+function getBuiltinPluginsHostState(): BuiltinPluginsHostState {
+  return builtinPluginsHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEffectiveBuiltinPlugins(
+  hostState: BuiltinPluginsHostState,
+): ReadonlyMap<string, BuiltinPluginDefinition> {
+  if (hostState.cleared || bootDefaultPlugins.size === 0) {
+    return hostState.plugins
   }
->()
+  const merged = new Map<string, BuiltinPluginDefinition>()
+  for (const [name, def] of bootDefaultPlugins) {
+    if (!hostState.deletedPlugins.has(name)) {
+      merged.set(name, def)
+    }
+  }
+  for (const [name, def] of hostState.plugins) {
+    merged.set(name, def)
+  }
+  return merged
+}
+
+function getEffectiveBuiltinPluginFailures(
+  hostState: BuiltinPluginsHostState,
+): ReadonlyMap<string, BuiltinPluginFailure> {
+  if (hostState.cleared || bootDefaultFailures.size === 0) {
+    return hostState.failures
+  }
+  let missingBoot = false
+  for (const key of bootDefaultFailures.keys()) {
+    if (!hostState.failures.has(key)) {
+      missingBoot = true
+      break
+    }
+  }
+  if (!missingBoot) return hostState.failures
+  const merged = new Map<string, BuiltinPluginFailure>(bootDefaultFailures)
+  for (const [name, failure] of hostState.failures) {
+    merged.set(name, failure)
+  }
+  return merged
+}
 
 export const BUILTIN_MARKETPLACE_NAME = 'builtin'
 
@@ -182,12 +252,17 @@ function recordBuiltinPluginFailure(
   phase: BuiltinPluginFailurePhase,
   error: unknown,
 ): void {
-  if (builtinPluginFailures.has(name)) return
-  builtinPluginFailures.set(name, {
+  const hostState = getBuiltinPluginsHostState()
+  if (getEffectiveBuiltinPluginFailures(hostState).has(name)) return
+  const failure: BuiltinPluginFailure = {
     name,
     phase,
     message: errorMessage(error),
-  })
+  }
+  hostState.failures.set(name, failure)
+  if (!hasActiveSessionAls()) {
+    bootDefaultFailures.set(name, failure)
+  }
   try {
     const { logError } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -213,18 +288,23 @@ function recordBuiltinPluginFailure(
 }
 
 export function isBuiltinPluginsInitialized(): boolean {
-  return builtinPluginsInitialized
+  const hostState = getBuiltinPluginsHostState()
+  if (hostState.initialized !== undefined) return hostState.initialized
+  return hostState.cleared ? false : bootDefaultInitialized
 }
 
 export function markBuiltinPluginsInitialized(): void {
-  builtinPluginsInitialized = true
+  getBuiltinPluginsHostState().initialized = true
+  if (!hasActiveSessionAls()) {
+    bootDefaultInitialized = true
+  }
 }
 
 export function getBuiltinPluginFailures(): ReadonlyMap<
   string,
   BuiltinPluginFailure
 > {
-  return builtinPluginFailures
+  return getEffectiveBuiltinPluginFailures(getBuiltinPluginsHostState())
 }
 
 /**
@@ -262,7 +342,12 @@ export function registerBuiltinPluginModule(
   try {
     shaped.registerPlugin()
   } catch (err) {
-    BUILTIN_PLUGINS.delete(name)
+    const hostState = getBuiltinPluginsHostState()
+    hostState.plugins.delete(name)
+    hostState.deletedPlugins.add(name)
+    if (!hasActiveSessionAls()) {
+      bootDefaultPlugins.delete(name)
+    }
     recordBuiltinPluginFailure(name, 'register', err)
   }
 }
@@ -271,8 +356,12 @@ export function registerBuiltinPluginModule(
  * densable `A5r(e)` — guarded `isAvailable()` check with failure recording.
  */
 export function isBuiltinPluginAvailable(name: string): boolean {
-  const definition = BUILTIN_PLUGINS.get(name)
-  if (definition === undefined || builtinPluginFailures.has(name)) {
+  const hostState = getBuiltinPluginsHostState()
+  const definition = getBuiltinPluginDefinition(name)
+  if (
+    definition === undefined ||
+    getEffectiveBuiltinPluginFailures(hostState).has(name)
+  ) {
     return false
   }
   if (definition.isAvailable === undefined) return true
@@ -290,7 +379,12 @@ export function isBuiltinPluginAvailable(name: string): boolean {
 export function registerBuiltinPlugin(
   definition: BuiltinPluginDefinition,
 ): void {
-  BUILTIN_PLUGINS.set(definition.name, definition)
+  const hostState = getBuiltinPluginsHostState()
+  hostState.deletedPlugins.delete(definition.name)
+  hostState.plugins.set(definition.name, definition)
+  if (!hasActiveSessionAls()) {
+    bootDefaultPlugins.set(definition.name, definition)
+  }
   try {
     const { leftoverUs } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -316,7 +410,11 @@ export function isBuiltinPluginId(pluginId: string): boolean {
 export function getBuiltinPluginDefinition(
   name: string,
 ): BuiltinPluginDefinition | undefined {
-  return BUILTIN_PLUGINS.get(name)
+  const hostState = getBuiltinPluginsHostState()
+  const local = hostState.plugins.get(name)
+  if (local !== undefined) return local
+  if (hostState.cleared || hostState.deletedPlugins.has(name)) return undefined
+  return bootDefaultPlugins.get(name)
 }
 
 /**
@@ -332,7 +430,9 @@ export function getBuiltinPlugins(): {
   const enabled: LoadedPlugin[] = []
   const disabled: LoadedPlugin[] = []
 
-  for (const [name, definition] of BUILTIN_PLUGINS) {
+  for (const [name, definition] of getEffectiveBuiltinPlugins(
+    getBuiltinPluginsHostState(),
+  )) {
     if (!isBuiltinPluginAvailable(name)) {
       continue
     }
@@ -401,10 +501,11 @@ export function getBuiltinPlugins(): {
  */
 export function getBuiltinPluginSkillCommands(): Command[] {
   const { enabled } = getBuiltinPlugins()
+  const plugins = getEffectiveBuiltinPlugins(getBuiltinPluginsHostState())
   const commands: Command[] = []
 
   for (const plugin of enabled) {
-    const definition = BUILTIN_PLUGINS.get(plugin.name)
+    const definition = plugins.get(plugin.name)
     if (!definition?.skills) continue
     for (const skill of definition.skills) {
       commands.push(skillDefinitionToCommand(skill))
@@ -418,10 +519,20 @@ export function getBuiltinPluginSkillCommands(): Command[] {
  * Clear built-in plugins registry (for testing).
  */
 export function clearBuiltinPlugins(): void {
-  BUILTIN_PLUGINS.clear()
-  builtinPluginsInitialized = false
-  builtinPluginFailures.clear()
-  builtinPluginWiredSkills = new WeakMap()
+  const hostState = getBuiltinPluginsHostState()
+  hostState.plugins.clear()
+  hostState.initialized = false
+  hostState.failures.clear()
+  hostState.deletedPlugins.clear()
+  hostState.wiredSkills = new WeakMap()
+  if (hasActiveSessionAls()) {
+    hostState.cleared = true
+  } else {
+    hostState.cleared = false
+    bootDefaultPlugins.clear()
+    bootDefaultInitialized = false
+    bootDefaultFailures.clear()
+  }
 }
 
 // --
@@ -508,13 +619,14 @@ function defineCommandPolicyGateGetter(command: object, value: unknown): void {
 /** densable Wh — bundled builtin-plugin skill → Command. */
 function skillDefinitionToCommand(definition: BundledSkillDefinition): Command {
   const skill = definition as BuiltinPluginBundledSkill
-  let wired = builtinPluginWiredSkills.get(definition)
+  const { wiredSkills } = getBuiltinPluginsHostState()
+  let wired = wiredSkills.get(definition)
   if (!wired) {
     const { wireSkillFilesExtraction } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../skills/bundledSkills.js') as typeof import('../skills/bundledSkills.js')
     wired = wireSkillFilesExtraction(definition)
-    builtinPluginWiredSkills.set(definition, wired)
+    wiredSkills.set(definition, wired)
   }
   const { skillRoot, getPromptForCommand } = wired
   const command: BuiltinPluginSkillCommand = {

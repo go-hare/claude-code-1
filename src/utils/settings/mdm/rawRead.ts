@@ -12,6 +12,11 @@
 import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import {
+  getBootstrapSessionHost,
+  HostSlot,
+  ofDefaultHost,
+} from '../../sessionHost.js'
+import {
   getMacOSPlistPaths,
   MDM_SUBPROCESS_TIMEOUT_MS,
   PLUTIL_ARGS_PREFIX,
@@ -54,7 +59,11 @@ type ExecOutcome = {
 
 const SPAWN_BUSY_ERRNOS = new Set(['EAGAIN', 'EMFILE', 'ENFILE', 'ENOMEM'])
 
-let rawReadPromise: Promise<RawReadResult> | null = null
+const mdmRawReadHostSlot = new HostSlot<{
+  rawReadPromise: Promise<RawReadResult> | null
+}>(() => ({
+  rawReadPromise: null,
+}))
 
 function classifyExecError(
   err: NodeJS.ErrnoException & { killed?: boolean; signal?: string | null },
@@ -285,13 +294,19 @@ export function fireRawRead(
  * Results are consumed via getMdmRawReadPromise().
  */
 export function startMdmRawRead(): void {
-  if (rawReadPromise) return
-  rawReadPromise = fireRawRead()
+  const hostState = mdmRawReadHostSlot.of(getBootstrapSessionHost())
+  if (hostState.rawReadPromise) return
+  hostState.rawReadPromise = fireRawRead()
 }
 
 /**
- * Get the startup promise. Returns null if startMdmRawRead() wasn't called.
+ * Get the startup promise. Falls back to the process-default host's boot
+ * prefetch when unset on an isolated host. Returns null if startMdmRawRead()
+ * wasn't called.
  */
 export function getMdmRawReadPromise(): Promise<RawReadResult> | null {
-  return rawReadPromise
+  return (
+    mdmRawReadHostSlot.peek(getBootstrapSessionHost())?.rawReadPromise ??
+    ofDefaultHost(mdmRawReadHostSlot).rawReadPromise
+  )
 }

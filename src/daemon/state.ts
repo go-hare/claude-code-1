@@ -6,6 +6,7 @@ import {
   isProcessRunning,
   processStartIdentityEquals,
 } from '../utils/genericProcessUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 
 /**
  * Daemon state persisted to disk so that `status` / `stop` can work
@@ -177,20 +178,28 @@ export async function stopDaemonByPid(
 }
 
 /**
- * Official 2.1.295 (#384): track process-level stop signals (SIGTERM/SIGHUP/SIGINT)
+ * Official 2.1.295 (#384): track host-level stop signals (SIGTERM/SIGHUP/SIGINT)
  * so `claude agents` exiting alongside a stopping daemon never spawns or
  * respawns a new background service on teardown.
  */
-let daemonShutdownSignaled = false
+const daemonStateHostSlot = new HostSlot<{ daemonShutdownSignaled: boolean }>(
+  () => ({
+    daemonShutdownSignaled: false,
+  }),
+)
+
+function getDaemonStateHostState(): { daemonShutdownSignaled: boolean } {
+  return daemonStateHostSlot.of(getBootstrapSessionHost())
+}
 
 export function markDaemonShutdownSignaled(): void {
-  daemonShutdownSignaled = true
+  getDaemonStateHostState().daemonShutdownSignaled = true
 }
 
 export function isDaemonShutdownSignaled(): boolean {
-  return daemonShutdownSignaled
+  return getDaemonStateHostState().daemonShutdownSignaled
 }
 
 export function resetDaemonShutdownSignaled(): void {
-  daemonShutdownSignaled = false
+  getDaemonStateHostState().daemonShutdownSignaled = false
 }

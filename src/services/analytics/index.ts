@@ -79,21 +79,47 @@ export type AnalyticsSink = {
   ) => Promise<void>
 }
 
+import { HostSlot } from '../../utils/hostSlot.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  ofDefaultHost,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
+
 // Event queue for events logged before sink is attached (densable u = 1000)
 const MAX_EVENT_QUEUE_SIZE = 1000
-const eventQueue: QueuedEvent[] = []
-let droppedEventCount = 0
 
-function enqueueEvent(entry: QueuedEvent): void {
-  if (eventQueue.length >= MAX_EVENT_QUEUE_SIZE) {
-    eventQueue.shift()
-    droppedEventCount++
-  }
-  eventQueue.push(entry)
+type AnalyticsHostState = {
+  eventQueue: QueuedEvent[]
+  droppedEventCount: number
+  sink: AnalyticsSink | null
 }
 
-// Sink - initialized during app startup
-let sink: AnalyticsSink | null = null
+// Official 2.1.331 `[W-10]` — host-keyed analytics sink & pre-attach event queue.
+const analyticsHostSlot = new HostSlot<AnalyticsHostState>(() => ({
+  eventQueue: [],
+  droppedEventCount: 0,
+  sink: null,
+}))
+
+function getAnalyticsHostState(): AnalyticsHostState {
+  return analyticsHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEffectiveAnalyticsSink(
+  state: AnalyticsHostState,
+): AnalyticsSink | null {
+  return state.sink ?? ofDefaultHost(analyticsHostSlot).sink
+}
+
+function enqueueEvent(state: AnalyticsHostState, entry: QueuedEvent): void {
+  if (state.eventQueue.length >= MAX_EVENT_QUEUE_SIZE) {
+    state.eventQueue.shift()
+    state.droppedEventCount++
+  }
+  state.eventQueue.push(entry)
+}
 
 /**
  * Attach the analytics sink that will receive all events.
@@ -105,23 +131,36 @@ let sink: AnalyticsSink | null = null
  * the default command) without coordination.
  */
 export function attachAnalyticsSink(newSink: AnalyticsSink): void {
-  if (sink !== null) {
+  const state = getAnalyticsHostState()
+  if (state.sink !== null) {
     return
   }
-  sink = newSink
+  state.sink = newSink
 
   // Drain the queue asynchronously to avoid blocking startup
-  if (eventQueue.length > 0) {
-    const queuedEvents = [...eventQueue]
-    eventQueue.length = 0
+  if (state.eventQueue.length > 0) {
+    const queuedEvents = [...state.eventQueue]
+    state.eventQueue.length = 0
+    const captured = getActiveSessionFromAls()
 
     queueMicrotask(() => {
-      for (const event of queuedEvents) {
-        if (event.async) {
-          void sink!.logEventAsync(event.eventName, event.metadata)
-        } else {
-          sink!.logEvent(event.eventName, event.metadata)
+      const drain = () => {
+        const activeSink = state.sink
+        if (activeSink === null) {
+          return
         }
+        for (const event of queuedEvents) {
+          if (event.async) {
+            void activeSink.logEventAsync(event.eventName, event.metadata)
+          } else {
+            activeSink.logEvent(event.eventName, event.metadata)
+          }
+        }
+      }
+      if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+        runWithSession(captured, drain)
+      } else {
+        drain()
       }
     })
   }
@@ -141,11 +180,13 @@ export function logEvent(
   // to avoid accidentally logging code/filepaths
   metadata: LogEventMetadata,
 ): void {
-  if (sink === null) {
-    enqueueEvent({ eventName, metadata, async: false })
+  const state = getAnalyticsHostState()
+  const effectiveSink = getEffectiveAnalyticsSink(state)
+  if (effectiveSink === null) {
+    enqueueEvent(state, { eventName, metadata, async: false })
     return
   }
-  sink.logEvent(eventName, metadata)
+  effectiveSink.logEvent(eventName, metadata)
 }
 
 /**
@@ -161,11 +202,13 @@ export async function logEventAsync(
   // intentionally no strings, to avoid accidentally logging code/filepaths
   metadata: LogEventMetadata,
 ): Promise<void> {
-  if (sink === null) {
-    enqueueEvent({ eventName, metadata, async: true })
+  const state = getAnalyticsHostState()
+  const effectiveSink = getEffectiveAnalyticsSink(state)
+  if (effectiveSink === null) {
+    enqueueEvent(state, { eventName, metadata, async: true })
     return
   }
-  await sink.logEventAsync(eventName, metadata)
+  await effectiveSink.logEventAsync(eventName, metadata)
 }
 
 /**
@@ -173,8 +216,9 @@ export async function logEventAsync(
  * @internal
  */
 export function _resetForTesting(): void {
-  sink = null
-  eventQueue.length = 0
-  droppedEventCount = 0
-  void droppedEventCount
+  const state = getAnalyticsHostState()
+  state.sink = null
+  state.eventQueue.length = 0
+  state.droppedEventCount = 0
+  void state.droppedEventCount
 }

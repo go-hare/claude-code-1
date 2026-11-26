@@ -43,6 +43,7 @@ import { createCombinedAbortSignal } from 'src/utils/combinedAbortSignal.js'
 import { stampIdLessAssistantEntry } from 'src/utils/conversationRecovery.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logForDiagnosticsNoPII } from 'src/utils/diagLogs.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 import {
   AbortError,
   ControlStreamClosedError,
@@ -324,15 +325,19 @@ export function isJsonRpcRequestMessage(message: JSONRPCMessage): boolean {
   return message.id !== null
 }
 
-let currentStructuredIO: StructuredIO | undefined
+const structuredIOHostSlot = new HostSlot<{
+  current: StructuredIO | undefined
+}>(() => ({
+  current: undefined,
+}))
 
 /** densable `r` for the live headless stream. prompt.read sends through it. */
 export function setCurrentStructuredIO(io: StructuredIO | undefined): void {
-  currentStructuredIO = io
+  structuredIOHostSlot.of(getBootstrapSessionHost()).current = io
 }
 
 export function getCurrentStructuredIO(): StructuredIO | undefined {
-  return currentStructuredIO
+  return structuredIOHostSlot.of(getBootstrapSessionHost()).current
 }
 
 export class StructuredIO {

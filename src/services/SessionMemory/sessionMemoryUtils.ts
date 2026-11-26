@@ -6,6 +6,10 @@
 import { isFsInaccessible } from '../../utils/errors.js'
 import { getFsImplementation } from '../../utils/fsOperations.js'
 import { getSessionMemoryPath } from '../../utils/permissions/filesystem.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { sleep } from '../../utils/sleep.js'
 import { logEvent } from '../analytics/index.js'
 
@@ -35,28 +39,32 @@ export const DEFAULT_SESSION_MEMORY_CONFIG: SessionMemoryConfig = {
   toolCallsBetweenUpdates: 3,
 }
 
-// Current session memory configuration
-let sessionMemoryConfig: SessionMemoryConfig = {
-  ...DEFAULT_SESSION_MEMORY_CONFIG,
+type SessionMemorySessionState = {
+  config: SessionMemoryConfig
+  lastSummarizedMessageId: string | undefined
+  extractionStartedAt: number | undefined
+  tokensAtLastExtraction: number
+  initialized: boolean
 }
 
-// Track the last summarized message ID (shared state)
-let lastSummarizedMessageId: string | undefined
+const sessionMemoryStateBySession =
+  new RootSessionSlot<SessionMemorySessionState>(() => ({
+    config: { ...DEFAULT_SESSION_MEMORY_CONFIG },
+    lastSummarizedMessageId: undefined,
+    extractionStartedAt: undefined,
+    tokensAtLastExtraction: 0,
+    initialized: false,
+  }))
 
-// Track extraction state with timestamp (set by sessionMemory.ts)
-let extractionStartedAt: number | undefined
-
-// Track context size at last memory extraction (for minimumTokensBetweenUpdate)
-let tokensAtLastExtraction = 0
-
-// Track whether session memory has been initialized (met minimumMessageTokensToInit)
-let sessionMemoryInitialized = false
+function getSessionMemoryState(): SessionMemorySessionState {
+  return sessionMemoryStateBySession.of(getBootstrapSession())
+}
 
 /**
  * Get the message ID up to which the session memory is current
  */
 export function getLastSummarizedMessageId(): string | undefined {
-  return lastSummarizedMessageId
+  return getSessionMemoryState().lastSummarizedMessageId
 }
 
 /**
@@ -65,21 +73,21 @@ export function getLastSummarizedMessageId(): string | undefined {
 export function setLastSummarizedMessageId(
   messageId: string | undefined,
 ): void {
-  lastSummarizedMessageId = messageId
+  getSessionMemoryState().lastSummarizedMessageId = messageId
 }
 
 /**
  * Mark extraction as started (called from sessionMemory.ts)
  */
 export function markExtractionStarted(): void {
-  extractionStartedAt = Date.now()
+  getSessionMemoryState().extractionStartedAt = Date.now()
 }
 
 /**
  * Mark extraction as completed (called from sessionMemory.ts)
  */
 export function markExtractionCompleted(): void {
-  extractionStartedAt = undefined
+  getSessionMemoryState().extractionStartedAt = undefined
 }
 
 /**
@@ -87,9 +95,10 @@ export function markExtractionCompleted(): void {
  * Returns immediately if no extraction is in progress or if extraction is stale (>1min old).
  */
 export async function waitForSessionMemoryExtraction(): Promise<void> {
+  const state = getSessionMemoryState()
   const startTime = Date.now()
-  while (extractionStartedAt) {
-    const extractionAge = Date.now() - extractionStartedAt
+  while (state.extractionStartedAt) {
+    const extractionAge = Date.now() - state.extractionStartedAt
     if (extractionAge > EXTRACTION_STALE_THRESHOLD_MS) {
       // Extraction is stale, don't wait
       return
@@ -131,8 +140,9 @@ export async function getSessionMemoryContent(): Promise<string | null> {
 export function setSessionMemoryConfig(
   config: Partial<SessionMemoryConfig>,
 ): void {
-  sessionMemoryConfig = {
-    ...sessionMemoryConfig,
+  const state = getSessionMemoryState()
+  state.config = {
+    ...state.config,
     ...config,
   }
 }
@@ -141,7 +151,7 @@ export function setSessionMemoryConfig(
  * Get the current session memory configuration
  */
 export function getSessionMemoryConfig(): SessionMemoryConfig {
-  return { ...sessionMemoryConfig }
+  return { ...getSessionMemoryState().config }
 }
 
 /**
@@ -149,21 +159,21 @@ export function getSessionMemoryConfig(): SessionMemoryConfig {
  * Used to measure context growth for minimumTokensBetweenUpdate threshold.
  */
 export function recordExtractionTokenCount(currentTokenCount: number): void {
-  tokensAtLastExtraction = currentTokenCount
+  getSessionMemoryState().tokensAtLastExtraction = currentTokenCount
 }
 
 /**
  * Check if session memory has been initialized (met minimumTokensToInit threshold)
  */
 export function isSessionMemoryInitialized(): boolean {
-  return sessionMemoryInitialized
+  return getSessionMemoryState().initialized
 }
 
 /**
  * Mark session memory as initialized
  */
 export function markSessionMemoryInitialized(): void {
-  sessionMemoryInitialized = true
+  getSessionMemoryState().initialized = true
 }
 
 /**
@@ -173,7 +183,10 @@ export function markSessionMemoryInitialized(): void {
 export function hasMetInitializationThreshold(
   currentTokenCount: number,
 ): boolean {
-  return currentTokenCount >= sessionMemoryConfig.minimumMessageTokensToInit
+  return (
+    currentTokenCount >=
+    getSessionMemoryState().config.minimumMessageTokensToInit
+  )
 }
 
 /**
@@ -182,26 +195,27 @@ export function hasMetInitializationThreshold(
  * (same metric as autocompact and initialization threshold).
  */
 export function hasMetUpdateThreshold(currentTokenCount: number): boolean {
-  const tokensSinceLastExtraction = currentTokenCount - tokensAtLastExtraction
-  return (
-    tokensSinceLastExtraction >= sessionMemoryConfig.minimumTokensBetweenUpdate
-  )
+  const state = getSessionMemoryState()
+  const tokensSinceLastExtraction =
+    currentTokenCount - state.tokensAtLastExtraction
+  return tokensSinceLastExtraction >= state.config.minimumTokensBetweenUpdate
 }
 
 /**
  * Get the configured number of tool calls between updates
  */
 export function getToolCallsBetweenUpdates(): number {
-  return sessionMemoryConfig.toolCallsBetweenUpdates
+  return getSessionMemoryState().config.toolCallsBetweenUpdates
 }
 
 /**
  * Reset session memory state (useful for testing)
  */
 export function resetSessionMemoryState(): void {
-  sessionMemoryConfig = { ...DEFAULT_SESSION_MEMORY_CONFIG }
-  tokensAtLastExtraction = 0
-  sessionMemoryInitialized = false
-  lastSummarizedMessageId = undefined
-  extractionStartedAt = undefined
+  const state = getSessionMemoryState()
+  state.config = { ...DEFAULT_SESSION_MEMORY_CONFIG }
+  state.tokensAtLastExtraction = 0
+  state.initialized = false
+  state.lastSummarizedMessageId = undefined
+  state.extractionStartedAt = undefined
 }

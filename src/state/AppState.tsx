@@ -125,6 +125,20 @@ export function AppStateProvider({
     return registerClaudeMdPermissionContextSource(() => store.getState().toolPermissionContext);
   }, [store, isStaticRender]);
   const [session] = useState(() => providedSession ?? getBootstrapSession());
+  useEffect(() => {
+    if (isStaticRender) return;
+    const prev = session.engineStore.current;
+    session.engineStore.adopt(store);
+    return () => {
+      if (session.engineStore.current === store) {
+        if (prev !== undefined) {
+          session.engineStore.adopt(prev);
+        } else {
+          session.engineStore.reset();
+        }
+      }
+    };
+  }, [session, store, isStaticRender]);
   const [sessionHooks] = useState(() => {
     const registry = providedSessionHooks ?? createSessionHooksRegistry();
     registry.bindStore(store);

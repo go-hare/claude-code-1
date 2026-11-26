@@ -17,6 +17,7 @@ import {
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../utils/errors.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import { isCliOwnedConfig } from './cliOwnedConfigs.js'
 
 /** densable `y0` default when MCP_TIMEOUT unset / non-positive. */
@@ -325,21 +326,48 @@ export const MCP_CCR_PROXY_PATH_MARKERS = [
 
 /**
  * densable `qxd`/`zxd` — capture ingress origin at module init
- * (`SESSION_INGRESS_URL ?? ANTHROPIC_BASE_URL`). `reset()` recaptures.
+ * (`SESSION_INGRESS_URL ?? ANTHROPIC_BASE_URL`). `reset()` recaptures for the
+ * active host.
  */
-let capturedCcrIngressBase =
+const INITIAL_CCR_INGRESS_BASE =
   process.env.SESSION_INGRESS_URL ?? process.env.ANTHROPIC_BASE_URL
+
+type StdioDiscoverVerdictEntry = {
+  observedAt: number
+  modernProtocolVersion: string
+}
+
+type HostMcpConnectTimeoutState = {
+  capturedCcrIngressBase: string | undefined
+  stdioDiscoverVerdictCache: Map<string, StdioDiscoverVerdictEntry>
+  stdioDiscoverVerdictsLoadPromise: Promise<void> | null
+  stdioDiscoverVerdictsWriteChain: Promise<void>
+}
+
+const hostMcpConnectTimeoutSlot = new HostSlot<HostMcpConnectTimeoutState>(
+  () => ({
+    capturedCcrIngressBase: INITIAL_CCR_INGRESS_BASE,
+    stdioDiscoverVerdictCache: new Map<string, StdioDiscoverVerdictEntry>(),
+    stdioDiscoverVerdictsLoadPromise: null,
+    stdioDiscoverVerdictsWriteChain: Promise.resolve(),
+  }),
+)
+
+function getHostMcpConnectTimeoutState(): HostMcpConnectTimeoutState {
+  return hostMcpConnectTimeoutSlot.of(getBootstrapSessionHost())
+}
 
 /** densable `qxd.reset` — tests only. */
 export function resetMcpCcrIngressCapture(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
-  capturedCcrIngressBase = env.SESSION_INGRESS_URL ?? env.ANTHROPIC_BASE_URL
+  getHostMcpConnectTimeoutState().capturedCcrIngressBase =
+    env.SESSION_INGRESS_URL ?? env.ANTHROPIC_BASE_URL
 }
 
 /** densable `M_.atStartup` ingress base — for carrier `oFn` / `xet`. */
 export function getCapturedCcrIngressBase(): string | undefined {
-  return capturedCcrIngressBase
+  return getHostMcpConnectTimeoutState().capturedCcrIngressBase
 }
 
 function originForCcrCompare(url: URL): string {
@@ -353,7 +381,7 @@ function originForCcrCompare(url: URL): string {
  * ingress base and pathname contains a `Gia` marker.
  */
 export function isMcpCcrProxyUrl(url: string): boolean {
-  const base = capturedCcrIngressBase
+  const base = getCapturedCcrIngressBase()
   if (!base) return false
   let parsed: URL
   let ingress: URL
@@ -1014,14 +1042,6 @@ export function getMcpErrorCause(error: unknown): unknown {
 export const STDIO_DISCOVER_VERDICT_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 604_800_000
 const STDIO_DISCOVER_VERDICTS_MAX_BYTES = 262_144
 
-type StdioDiscoverVerdictEntry = {
-  observedAt: number
-  modernProtocolVersion: string
-}
-
-const stdioDiscoverVerdictCache = new Map<string, StdioDiscoverVerdictEntry>()
-let stdioDiscoverVerdictsLoadPromise: Promise<void> | null = null
-let stdioDiscoverVerdictsWriteChain: Promise<void> = Promise.resolve()
 let stdioDiscoverVerdictsWriteSeq = 0
 
 function getStdioDiscoverVerdictsFilePath(): string {
@@ -1038,8 +1058,9 @@ export async function loadRememberedLegacyStdioFromDisk(
   now = Date.now(),
   options?: { once?: boolean },
 ): Promise<void> {
-  if (options?.once && stdioDiscoverVerdictsLoadPromise !== null) {
-    return stdioDiscoverVerdictsLoadPromise
+  const state = getHostMcpConnectTimeoutState()
+  if (options?.once && state.stdioDiscoverVerdictsLoadPromise !== null) {
+    return state.stdioDiscoverVerdictsLoadPromise
   }
   const load = (async () => {
     try {
@@ -1061,9 +1082,9 @@ export async function loadRememberedLegacyStdioFromDisk(
           const entry = val as StdioDiscoverVerdictEntry
           const age = now - entry.observedAt
           if (age >= 0 && age < STDIO_DISCOVER_VERDICT_TTL_MS) {
-            const existing = stdioDiscoverVerdictCache.get(key)
+            const existing = state.stdioDiscoverVerdictCache.get(key)
             if (!existing || entry.observedAt >= existing.observedAt) {
-              stdioDiscoverVerdictCache.set(key, entry)
+              state.stdioDiscoverVerdictCache.set(key, entry)
             }
           }
         }
@@ -1072,20 +1093,21 @@ export async function loadRememberedLegacyStdioFromDisk(
       // Missing or unreadable state file is non-fatal
     }
   })()
-  stdioDiscoverVerdictsLoadPromise = load
+  state.stdioDiscoverVerdictsLoadPromise = load
   return load
 }
 
 export function persistRememberedLegacyStdioToDisk(
   now = Date.now(),
 ): Promise<void> {
+  const state = getHostMcpConnectTimeoutState()
   const run = async (): Promise<void> => {
     try {
       const { mkdir, rename, writeFile } = await import('fs/promises')
       const { dirname } = await import('path')
       const filePath = getStdioDiscoverVerdictsFilePath()
       const payload: Record<string, StdioDiscoverVerdictEntry> = {}
-      for (const [key, entry] of stdioDiscoverVerdictCache.entries()) {
+      for (const [key, entry] of state.stdioDiscoverVerdictCache.entries()) {
         const age = now - entry.observedAt
         if (age >= 0 && age < STDIO_DISCOVER_VERDICT_TTL_MS) {
           payload[key] = entry
@@ -1102,15 +1124,16 @@ export function persistRememberedLegacyStdioToDisk(
       // Best-effort persistence
     }
   }
-  stdioDiscoverVerdictsWriteChain = stdioDiscoverVerdictsWriteChain.then(
-    run,
-    run,
-  )
-  return stdioDiscoverVerdictsWriteChain
+  state.stdioDiscoverVerdictsWriteChain =
+    state.stdioDiscoverVerdictsWriteChain.then(run, run)
+  return state.stdioDiscoverVerdictsWriteChain
 }
 
 export function flushRememberedLegacyStdioWritesForTest(): Promise<void> {
-  return stdioDiscoverVerdictsWriteChain
+  return (
+    hostMcpConnectTimeoutSlot.peek(getBootstrapSessionHost())
+      ?.stdioDiscoverVerdictsWriteChain ?? Promise.resolve()
+  )
 }
 
 export function getStdioDiscoverVerdictKey(config: {
@@ -1144,13 +1167,16 @@ export function isRememberedLegacyStdio(
   if (env.MCP_PROTOCOL_NEGOTIATION === 'auto') return false
   const key = getStdioDiscoverVerdictKey(config)
   if (!key) return false
-  const entry = stdioDiscoverVerdictCache.get(key)
+  const cache = hostMcpConnectTimeoutSlot.peek(
+    getBootstrapSessionHost(),
+  )?.stdioDiscoverVerdictCache
+  const entry = cache?.get(key)
   if (!entry) return false
   if (
     now - entry.observedAt > STDIO_DISCOVER_VERDICT_TTL_MS ||
     entry.observedAt > now + 300_000
   ) {
-    stdioDiscoverVerdictCache.delete(key)
+    cache?.delete(key)
     return false
   }
   return true
@@ -1167,7 +1193,7 @@ export function recordRememberedLegacyStdio(
 ): void {
   const key = getStdioDiscoverVerdictKey(config)
   if (!key) return
-  stdioDiscoverVerdictCache.set(key, {
+  getHostMcpConnectTimeoutState().stdioDiscoverVerdictCache.set(key, {
     observedAt: now,
     modernProtocolVersion: '2026-07-28',
   })
@@ -1181,14 +1207,20 @@ export function clearRememberedLegacyStdio(config: {
   env?: Readonly<Record<string, string>>
 }): void {
   const key = getStdioDiscoverVerdictKey(config)
-  if (key && stdioDiscoverVerdictCache.delete(key)) {
+  const cache = hostMcpConnectTimeoutSlot.peek(
+    getBootstrapSessionHost(),
+  )?.stdioDiscoverVerdictCache
+  if (key && cache?.delete(key)) {
     void persistRememberedLegacyStdioToDisk()
   }
 }
 
 export function resetStdioDiscoverVerdictCacheForTest(): void {
-  stdioDiscoverVerdictCache.clear()
-  stdioDiscoverVerdictsLoadPromise = null
+  const state = hostMcpConnectTimeoutSlot.peek(getBootstrapSessionHost())
+  if (state) {
+    state.stdioDiscoverVerdictCache.clear()
+    state.stdioDiscoverVerdictsLoadPromise = null
+  }
 }
 
 // ── 2.1.302 #911: 2026-07-28 result compatibility shim (SEA o0o) ─────────────

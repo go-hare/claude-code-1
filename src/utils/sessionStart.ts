@@ -20,6 +20,7 @@ import {
 } from './hooks.js'
 import { logError } from './log.js'
 import { loadPluginHooks } from './plugins/loadPluginHooks.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import { cacheSessionTitle, getCurrentSessionTitle } from './sessionStorage.js'
 import { sanitizeSessionTitle } from './sessionTitleSanitize.js'
 
@@ -39,7 +40,31 @@ export function createSessionStartCoverageState(): SessionStartCoverageState {
   }
 }
 
-const sessionCoverageState = createSessionStartCoverageState()
+type SessionStartSessionState = {
+  coverageState: SessionStartCoverageState
+  // Set by processSessionStartHooks when a hook emits initialUserMessage;
+  // consumed once by takeInitialUserMessage. This side channel avoids changing
+  // the Promise<HookResultMessage[]> return type that main.tsx and print.ts
+  // both already await on (sessionStartHooksPromise is kicked in main.tsx and
+  // joined later — rippling a structural return-type change through that
+  // handoff would touch five callsites for what is a print-mode-only value).
+  pendingInitialUserMessage: string | undefined
+  // Official 2.1.x: SessionStart sessionTitle is cached here for startup/resume
+  // and applied after the session is ready (takeSessionStartTitle).
+  pendingSessionTitle: string | undefined
+}
+
+const sessionStartSessionSlot = new RootSessionSlot<SessionStartSessionState>(
+  () => ({
+    coverageState: createSessionStartCoverageState(),
+    pendingInitialUserMessage: undefined,
+    pendingSessionTitle: undefined,
+  }),
+)
+
+function getSessionStartState(): SessionStartSessionState {
+  return sessionStartSessionSlot.of(getBootstrapSession())
+}
 
 function foldPluginKey(value: string): string {
   return value.trim().toLowerCase()
@@ -105,10 +130,11 @@ export function computeOwedSessionStartPlugins(
 }
 
 export function resetSessionStartCoverageForTesting(): void {
-  sessionCoverageState.pluginsCovered.clear()
-  sessionCoverageState.pluginsSucceeded.clear()
-  sessionCoverageState.hooksDispatched = 0
-  sessionCoverageState.hasDispatched = false
+  const { coverageState } = getSessionStartState()
+  coverageState.pluginsCovered.clear()
+  coverageState.pluginsSucceeded.clear()
+  coverageState.hooksDispatched = 0
+  coverageState.hasDispatched = false
 }
 
 type SessionStartHooksOptions = {
@@ -123,28 +149,32 @@ type SessionStartHooksOptions = {
   storageV5?: unknown
 }
 
-// Set by processSessionStartHooks when a hook emits initialUserMessage;
-// consumed once by takeInitialUserMessage. This side channel avoids changing
-// the Promise<HookResultMessage[]> return type that main.tsx and print.ts
-// both already await on (sessionStartHooksPromise is kicked in main.tsx and
-// joined later — rippling a structural return-type change through that
-// handoff would touch five callsites for what is a print-mode-only value).
-let pendingInitialUserMessage: string | undefined
-
-// Official 2.1.x: SessionStart sessionTitle is cached here for startup/resume
-// and applied after the session is ready (takeSessionStartTitle).
-let pendingSessionTitle: string | undefined
-
 export function takeInitialUserMessage(): string | undefined {
-  const v = pendingInitialUserMessage
-  pendingInitialUserMessage = undefined
+  const state = getSessionStartState()
+  const v = state.pendingInitialUserMessage
+  state.pendingInitialUserMessage = undefined
   return v
 }
 
 export function takeSessionStartTitle(): string | undefined {
-  const v = pendingSessionTitle
-  pendingSessionTitle = undefined
+  const state = getSessionStartState()
+  const v = state.pendingSessionTitle
+  state.pendingSessionTitle = undefined
   return v
+}
+
+/** Test-only helper to seed pending SessionStart side-channel values for the active root session. */
+export function _seedPendingSessionStartForTests(seed: {
+  initialUserMessage?: string
+  sessionTitle?: string
+}): void {
+  const state = getSessionStartState()
+  if (Object.hasOwn(seed, 'initialUserMessage')) {
+    state.pendingInitialUserMessage = seed.initialUserMessage
+  }
+  if (Object.hasOwn(seed, 'sessionTitle')) {
+    state.pendingSessionTitle = seed.sessionTitle
+  }
 }
 
 /**
@@ -328,6 +358,8 @@ export async function processSessionStartHooks(
     // Execute SessionStart hooks, ignoring blocking errors
     // Use the provided agentType or fall back to the one stored in bootstrap state
     const resolvedAgentType = agentType ?? getMainThreadAgentType()
+    const sessionStartState = getSessionStartState()
+    const sessionCoverageState = sessionStartState.coverageState
     sessionCoverageState.hasDispatched = true
     for await (const hookResult of executeSessionStartHooks(
       source,
@@ -376,7 +408,8 @@ export async function processSessionStartHooks(
         additionalContexts.push(...hookResult.additionalContexts)
       }
       if (hookResult.initialUserMessage) {
-        pendingInitialUserMessage = hookResult.initialUserMessage
+        sessionStartState.pendingInitialUserMessage =
+          hookResult.initialUserMessage
       }
       if (hookResult.sessionTitle) {
         sessionTitleFromHooks = hookResult.sessionTitle
@@ -405,7 +438,7 @@ export async function processSessionStartHooks(
       (source === 'startup' || source === 'resume' || source === 'fork') &&
       sessionTitleFromHooks
     ) {
-      pendingSessionTitle = sessionTitleFromHooks
+      sessionStartState.pendingSessionTitle = sessionTitleFromHooks
       // Also apply immediately so interactive UI can show it without waiting
       // for takeSessionStartTitle consumers.
       applyHookSessionTitle(sessionTitleFromHooks)

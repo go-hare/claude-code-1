@@ -10,6 +10,12 @@ import { getSessionId } from '../../bootstrap/state.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
 import { normalizeDotVersionedModelName } from '../../utils/model/canonicalName.js'
+import {
+  getBootstrapSessionHost,
+  HostSlot,
+  hasActiveSessionAls,
+  isSharedBackend,
+} from '../../utils/sessionHost.js'
 import { SETTING_SOURCES } from '../../utils/settings/constants.js'
 import { getSettingsForSource } from '../../utils/settings/settings.js'
 import {
@@ -117,31 +123,63 @@ export type CodeModeAccountIdentity = {
   rateLimitTier?: string
 }
 
-// Module-level session state (mirrors official `chunk-gwh19369`, `chunk-yw5xfhrq`, `chunk-xjqp3eha`)
-let accepted = false
-let settled: CodeModeOptInDecision | undefined
-let dialogOpen = false
-let foreseeFn: (() => CodeModeRefusalReason | undefined) | undefined
-let pinned: boolean | undefined
-let beforePin: boolean | undefined
-let replContextCreated = false
-let engineCheckDone = false
-let cachedEngineCheck: ReplEngineCheckResult | undefined
-let cachedRawEngineRealmCheck: ReplEngineCheckResult | undefined
-let engineCheckResultOverrideForTests: ReplEngineCheckResult | undefined
-let standaloneExecutableOverrideForTests: boolean | undefined
-let lastAskedIn: CodeModeOptInSource | undefined
-let sandboxCommandNetworkListsOffered = false
-let pollEventWiringMode: 'terminal' | 'print' | undefined
-let asyncReplEnabledForTests: boolean | undefined
-let optInReviewed = false
-let signedInAccount: CodeModeAccountIdentity | undefined
-let stateVersion = 0
-const stateListeners = new Set<() => void>()
+// Host-scoped Code Mode opt-in state (official 2.1.331 HostSlot on SessionHost)
+type CodeModeOptInHostState = {
+  accepted: boolean
+  settled: CodeModeOptInDecision | undefined
+  dialogOpen: boolean
+  foreseeFn: (() => CodeModeRefusalReason | undefined) | undefined
+  pinned: boolean | undefined
+  beforePin: boolean | undefined
+  replContextCreated: boolean
+  engineCheckDone: boolean
+  cachedEngineCheck: ReplEngineCheckResult | undefined
+  cachedRawEngineRealmCheck: ReplEngineCheckResult | undefined
+  engineCheckResultOverrideForTests: ReplEngineCheckResult | undefined
+  standaloneExecutableOverrideForTests: boolean | undefined
+  lastAskedIn: CodeModeOptInSource | undefined
+  sandboxCommandNetworkListsOffered: boolean
+  pollEventWiringMode: 'terminal' | 'print' | undefined
+  asyncReplEnabledForTests: boolean | undefined
+  optInReviewed: boolean
+  signedInAccount: CodeModeAccountIdentity | undefined
+  stateVersion: number
+  stateListeners: Set<() => void>
+  primitiveToolsResolver: CodeModePrimitiveToolsResolver | undefined
+}
+
+const codeModeOptInHostSlot = new HostSlot<CodeModeOptInHostState>(() => ({
+  accepted: false,
+  settled: undefined,
+  dialogOpen: false,
+  foreseeFn: undefined,
+  pinned: undefined,
+  beforePin: undefined,
+  replContextCreated: false,
+  engineCheckDone: false,
+  cachedEngineCheck: undefined,
+  cachedRawEngineRealmCheck: undefined,
+  engineCheckResultOverrideForTests: undefined,
+  standaloneExecutableOverrideForTests: undefined,
+  lastAskedIn: undefined,
+  sandboxCommandNetworkListsOffered: false,
+  pollEventWiringMode: undefined,
+  asyncReplEnabledForTests: undefined,
+  optInReviewed: false,
+  signedInAccount: undefined,
+  stateVersion: 0,
+  stateListeners: new Set<() => void>(),
+  primitiveToolsResolver: undefined,
+}))
+
+function getOptInHostState(): CodeModeOptInHostState {
+  return codeModeOptInHostSlot.of(getBootstrapSessionHost())
+}
 
 function notifyCodeModeStateChanged(): void {
-  stateVersion += 1
-  for (const listener of stateListeners) {
+  const hostState = getOptInHostState()
+  hostState.stateVersion += 1
+  for (const listener of hostState.stateListeners) {
     try {
       listener()
     } catch {
@@ -151,14 +189,15 @@ function notifyCodeModeStateChanged(): void {
 }
 
 export function subscribeCodeModeState(listener: () => void): () => void {
-  stateListeners.add(listener)
+  const listeners = getOptInHostState().stateListeners
+  listeners.add(listener)
   return () => {
-    stateListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function getCodeModeStateVersion(): number {
-  return stateVersion
+  return getOptInHostState().stateVersion
 }
 
 /**
@@ -168,6 +207,7 @@ export function getCodeModeStateVersion(): number {
  */
 function emitCodeModeOptInTelemetry(decision: CodeModeOptInDecision): void {
   if (decision.state !== 'on' && decision.state !== 'refused') return
+  const source = getOptInHostState().lastAskedIn
   try {
     void import('../analytics/index.js')
       .then(mod => {
@@ -175,7 +215,7 @@ function emitCodeModeOptInTelemetry(decision: CodeModeOptInDecision): void {
         mod.logEvent('tengu_repl_mode_opt_in', {
           state: decision.state,
           ...(decision.state === 'refused' ? { why: decision.why } : {}),
-          ...(lastAskedIn !== undefined ? { source: lastAskedIn } : {}),
+          ...(source !== undefined ? { source } : {}),
         })
       })
       .catch(() => {
@@ -260,14 +300,14 @@ export function isCodeModeDisabledByOrgOrManaged(
  * Official `le()` / `qc()`: whether Code Mode opt-in was accepted for this run.
  */
 export function isCodeModeAccepted(): boolean {
-  return accepted
+  return getOptInHostState().accepted
 }
 
 /**
  * Official `RNa(e)`: mark Code Mode opt-in accepted state.
  */
 export function setCodeModeAccepted(value: boolean): void {
-  accepted = value
+  getOptInHostState().accepted = value
   notifyCodeModeStateChanged()
 }
 
@@ -275,18 +315,19 @@ export function setCodeModeAccepted(value: boolean): void {
  * Official `aZ()`: current settled opt-in decision (defaults to `not_asked`).
  */
 export function getCodeModeOptInState(): CodeModeOptInDecision {
-  return settled ?? { state: 'not_asked' }
+  return getOptInHostState().settled ?? { state: 'not_asked' }
 }
 
 /**
  * Official `o$r(e)`: settle the opt-in decision once per run.
  */
 export function settleCodeModeOptIn(decision: CodeModeOptInDecision): void {
-  if (settled !== undefined) return
-  settled = decision
-  dialogOpen = false
+  const hostState = getOptInHostState()
+  if (hostState.settled !== undefined) return
+  hostState.settled = decision
+  hostState.dialogOpen = false
   if (decision.state === 'on') {
-    accepted = true
+    hostState.accepted = true
   }
   notifyCodeModeStateChanged()
   if (decision.state === 'on' || decision.state === 'refused') {
@@ -295,23 +336,27 @@ export function settleCodeModeOptIn(decision: CodeModeOptInDecision): void {
 }
 
 export function openCodeModeOptInDialog(): void {
-  dialogOpen = settled === undefined
+  const hostState = getOptInHostState()
+  hostState.dialogOpen = hostState.settled === undefined
 }
 
 export function isCodeModeOptInDialogOpen(): boolean {
-  return dialogOpen
+  return getOptInHostState().dialogOpen
 }
 
 export function setCodeModeForesee(
   fn: (() => CodeModeRefusalReason | undefined) | undefined,
 ): void {
-  foreseeFn = fn
+  getOptInHostState().foreseeFn = fn
 }
 
 export function foreseeCodeModeRefusal(): CodeModeRefusalReason | 'unknown' {
   try {
-    if (foreseeFn === undefined || settled === undefined) return 'unknown'
-    return foreseeFn() ?? 'unknown'
+    const hostState = getOptInHostState()
+    if (hostState.foreseeFn === undefined || hostState.settled === undefined) {
+      return 'unknown'
+    }
+    return hostState.foreseeFn() ?? 'unknown'
   } catch {
     return 'unknown'
   }
@@ -385,17 +430,20 @@ function classifyEngineCheckError(err: unknown): ReplEngineCheckResult {
  * `drainMicrotasks` from `bun:jsc`.
  */
 export function runReplEngineRealmCheck(): ReplEngineCheckResult {
-  if (cachedRawEngineRealmCheck !== undefined) return cachedRawEngineRealmCheck
+  const hostState = getOptInHostState()
+  if (hostState.cachedRawEngineRealmCheck !== undefined) {
+    return hostState.cachedRawEngineRealmCheck
+  }
   if (
     typeof vm.createContext !== 'function' ||
     typeof vm.runInContext !== 'function'
   ) {
-    cachedRawEngineRealmCheck = 'vm_unavailable'
-    return cachedRawEngineRealmCheck
+    hostState.cachedRawEngineRealmCheck = 'vm_unavailable'
+    return hostState.cachedRawEngineRealmCheck
   }
   if (typeof Bun === 'undefined') {
-    cachedRawEngineRealmCheck = 'not_bun'
-    return cachedRawEngineRealmCheck
+    hostState.cachedRawEngineRealmCheck = 'not_bun'
+    return hostState.cachedRawEngineRealmCheck
   }
   try {
     const jsc = require('bun:jsc') as { drainMicrotasks?: () => void }
@@ -420,18 +468,18 @@ export function runReplEngineRealmCheck(): ReplEngineCheckResult {
     }
     const asyncPassed = asyncReported === true
     if (syncPassed && asyncPassed) {
-      cachedRawEngineRealmCheck = 'passed'
+      hostState.cachedRawEngineRealmCheck = 'passed'
     } else if (!syncPassed && !asyncPassed) {
-      cachedRawEngineRealmCheck = 'both'
+      hostState.cachedRawEngineRealmCheck = 'both'
     } else {
-      cachedRawEngineRealmCheck = syncPassed
+      hostState.cachedRawEngineRealmCheck = syncPassed
         ? 'thenable_after_await'
         : 'rejected_definitions'
     }
   } catch (err) {
-    cachedRawEngineRealmCheck = classifyEngineCheckError(err)
+    hostState.cachedRawEngineRealmCheck = classifyEngineCheckError(err)
   }
-  return cachedRawEngineRealmCheck
+  return hostState.cachedRawEngineRealmCheck
 }
 
 /**
@@ -439,8 +487,9 @@ export function runReplEngineRealmCheck(): ReplEngineCheckResult {
  * compiled Bun executable (`Bun.isStandaloneExecutable === true`).
  */
 export function isStandaloneBunExecutable(): boolean {
-  if (standaloneExecutableOverrideForTests !== undefined) {
-    return standaloneExecutableOverrideForTests
+  const override = getOptInHostState().standaloneExecutableOverrideForTests
+  if (override !== undefined) {
+    return override
   }
   return (
     typeof Bun !== 'undefined' &&
@@ -456,9 +505,10 @@ export function isStandaloneBunExecutable(): boolean {
 export function setEngineCheckResultForTests(
   result?: ReplEngineCheckResult,
 ): void {
-  engineCheckResultOverrideForTests = result
-  cachedEngineCheck = undefined
-  engineCheckDone = result !== undefined
+  const hostState = getOptInHostState()
+  hostState.engineCheckResultOverrideForTests = result
+  hostState.cachedEngineCheck = undefined
+  hostState.engineCheckDone = result !== undefined
   notifyCodeModeStateChanged()
 }
 
@@ -467,7 +517,7 @@ export function setEngineCheckResultForTests(
  * Reset by `resetCodeModeOptInStateForTests()`.
  */
 export function setStandaloneExecutableForTests(value?: boolean): void {
-  standaloneExecutableOverrideForTests = value
+  getOptInHostState().standaloneExecutableOverrideForTests = value
   notifyCodeModeStateChanged()
 }
 
@@ -487,18 +537,21 @@ export function doesEngineResultHold(result: ReplEngineCheckResult): boolean {
  * silently coercing failures to `'passed'`.
  */
 export function engineCheckResult(): ReplEngineCheckResult {
-  if (engineCheckResultOverrideForTests !== undefined) {
-    engineCheckDone = true
-    return engineCheckResultOverrideForTests
+  const hostState = getOptInHostState()
+  if (hostState.engineCheckResultOverrideForTests !== undefined) {
+    hostState.engineCheckDone = true
+    return hostState.engineCheckResultOverrideForTests
   }
-  if (cachedEngineCheck !== undefined) return cachedEngineCheck
-  engineCheckDone = true
-  cachedEngineCheck = runReplEngineRealmCheck()
-  return cachedEngineCheck
+  if (hostState.cachedEngineCheck !== undefined) {
+    return hostState.cachedEngineCheck
+  }
+  hostState.engineCheckDone = true
+  hostState.cachedEngineCheck = runReplEngineRealmCheck()
+  return hostState.cachedEngineCheck
 }
 
 export function isEngineCheckDone(): boolean {
-  return engineCheckDone
+  return getOptInHostState().engineCheckDone
 }
 
 export function primeReplEngineCheck(): ReplEngineCheckResult {
@@ -580,11 +633,11 @@ export function resolveCodeModeOptInRequest(
   if (chosen === undefined) {
     if (orgBlocked) return { state: 'not_asked', turnedOffIn: 'managed' }
     if (sources[2]!.kind !== 'on') return { state: 'not_asked' }
-    lastAskedIn = 'shell'
+    getOptInHostState().lastAskedIn = 'shell'
     return { state: 'refused', why: 'own_settings' }
   }
 
-  lastAskedIn = chosen.source
+  getOptInHostState().lastAskedIn = chosen.source
   if (orgBlocked) return { state: 'refused', why: 'admin' }
 
   const effectiveKind = classifyCodeModeEnvValue(
@@ -741,9 +794,9 @@ export async function settleCodeModeOptInAtStartup(
  */
 export function answerCodeModeOptInDialog(
   acceptedChoice: boolean,
-  source: CodeModeOptInSource = lastAskedIn ?? 'shell',
+  source: CodeModeOptInSource = getOptInHostState().lastAskedIn ?? 'shell',
 ): 'none' | 'restart_into_mode' {
-  if (!dialogOpen) return 'none'
+  if (!getOptInHostState().dialogOpen) return 'none'
   if (!acceptedChoice) {
     settleCodeModeOptIn({ state: 'refused', why: 'declined' })
     return 'none'
@@ -806,7 +859,7 @@ export async function reviewCodeModeOptInAfterInit(
   if (!isCurrentlyOn && !isCodeModeOptInDialogOpen()) {
     return 'none'
   }
-  optInReviewed = true
+  getOptInHostState().optInReviewed = true
 
   let refusal: CodeModeRefusalReason | undefined
   if (
@@ -860,7 +913,7 @@ export async function reviewCodeModeOptInAfterInit(
  */
 export async function confirmCodeModeCaveatsDialog(
   acceptedChoice: boolean,
-  source: CodeModeOptInSource = lastAskedIn ?? 'shell',
+  source: CodeModeOptInSource = getOptInHostState().lastAskedIn ?? 'shell',
 ): Promise<'none' | 'restart_into_mode'> {
   if (!isCodeModeOptInDialogOpen()) return 'none'
   if (!acceptedChoice) {
@@ -883,7 +936,7 @@ export async function confirmCodeModeCaveatsDialog(
 export function recordCodeModeSignedInAccount(
   account: CodeModeAccountIdentity,
 ): void {
-  signedInAccount = { ...account }
+  getOptInHostState().signedInAccount = { ...account }
 }
 
 /**
@@ -893,6 +946,7 @@ export function recordCodeModeSignedInAccount(
 export function hasCodeModeAccountChanged(
   current: CodeModeAccountIdentity,
 ): boolean {
+  const signedInAccount = getOptInHostState().signedInAccount
   if (signedInAccount === undefined) return false
   return (
     signedInAccount.accountUuid !== current.accountUuid ||
@@ -903,7 +957,7 @@ export function hasCodeModeAccountChanged(
 }
 
 export function isCodeModeOptInReviewed(): boolean {
-  return optInReviewed
+  return getOptInHostState().optInReviewed
 }
 
 /**
@@ -1022,13 +1076,16 @@ export function doToolsOrSettingsLeaveReplOut(opts: {
  * the process.
  */
 export function setSandboxCommandNetworkListsOffered(offered: boolean): void {
-  if (sandboxCommandNetworkListsOffered === offered) return
-  sandboxCommandNetworkListsOffered = offered
+  const hostState = getOptInHostState()
+  if (hostState.sandboxCommandNetworkListsOffered === offered) return
+  hostState.sandboxCommandNetworkListsOffered = offered
   notifyCodeModeStateChanged()
 }
 
 export function sandboxHostListsBlockCodeMode(): boolean {
-  return sandboxCommandNetworkListsOffered === true
+  // Official 2.1.331 `WRo()`: outside ALS under shared backend, ignore default-host holdoff
+  if (isSharedBackend() && !hasActiveSessionAls()) return false
+  return getOptInHostState().sandboxCommandNetworkListsOffered === true
 }
 
 export function isCodeModeHeldOffBySandbox(): boolean {
@@ -1046,13 +1103,14 @@ export function codeModeSandboxHoldoffNotice(): string {
  */
 export function isCodeModeEnabled(): boolean {
   if (sandboxHostListsBlockCodeMode()) return false
-  if (pinned !== undefined) {
-    return pinned && doesEngineCheckAllowCodeMode()
+  const hostState = getOptInHostState()
+  if (hostState.pinned !== undefined) {
+    return hostState.pinned && doesEngineCheckAllowCodeMode()
   }
-  if (settled !== undefined) {
+  if (hostState.settled !== undefined) {
     return (
-      accepted &&
-      settled.state === 'on' &&
+      hostState.accepted &&
+      hostState.settled.state === 'on' &&
       !isCodeModeDisabledByOrgOrManaged() &&
       doesEngineCheckAllowCodeMode()
     )
@@ -1074,26 +1132,31 @@ export function isCodeModeOnlyToolsEnabled(): boolean {
 }
 
 export function pinCodeMode(value: boolean): void {
-  if (pinned === undefined) {
-    beforePin = isCodeModeEnabled()
+  const hostState = getOptInHostState()
+  if (hostState.pinned === undefined) {
+    hostState.beforePin = isCodeModeEnabled()
   }
-  pinned = value
+  hostState.pinned = value
   notifyCodeModeStateChanged()
 }
 
 export function unpinCodeMode(): void {
-  pinned = undefined
-  beforePin = undefined
+  const hostState = getOptInHostState()
+  hostState.pinned = undefined
+  hostState.beforePin = undefined
   notifyCodeModeStateChanged()
 }
 
 export function codeModeBeforePin(): boolean {
-  if (beforePin !== undefined) return beforePin
-  if (pinned !== undefined) return pinned && doesEngineCheckAllowCodeMode()
-  if (settled !== undefined) {
+  const hostState = getOptInHostState()
+  if (hostState.beforePin !== undefined) return hostState.beforePin
+  if (hostState.pinned !== undefined) {
+    return hostState.pinned && doesEngineCheckAllowCodeMode()
+  }
+  if (hostState.settled !== undefined) {
     return (
-      accepted &&
-      settled.state === 'on' &&
+      hostState.accepted &&
+      hostState.settled.state === 'on' &&
       !isCodeModeDisabledByOrgOrManaged() &&
       doesEngineCheckAllowCodeMode()
     )
@@ -1105,17 +1168,18 @@ export function codeModeBeforePin(): boolean {
 }
 
 export function noteReplContextCreated(): void {
-  if (isCodeModeEnabled() || accepted) {
-    replContextCreated = true
+  const hostState = getOptInHostState()
+  if (isCodeModeEnabled() || hostState.accepted) {
+    hostState.replContextCreated = true
   }
 }
 
 export function hasReplContextBeenCreated(): boolean {
-  return replContextCreated
+  return getOptInHostState().replContextCreated
 }
 
 export function hasCodeModeBeenUsed(): boolean {
-  return replContextCreated || isCodeModeEnabled()
+  return getOptInHostState().replContextCreated || isCodeModeEnabled()
 }
 
 /**
@@ -1123,7 +1187,9 @@ export function hasCodeModeBeenUsed(): boolean {
  * scripts may run in this session (including earlier in the run if accepted).
  */
 export function mayReplScriptsRun(): boolean {
-  return accepted ? hasCodeModeBeenUsed() : isCodeModeEnabled()
+  return getOptInHostState().accepted
+    ? hasCodeModeBeenUsed()
+    : isCodeModeEnabled()
 }
 
 /**
@@ -1165,7 +1231,7 @@ export function willHideCodeModeOnlyTools<T extends CodeModeToolLike>(
  * interactive terminal run.
  */
 export function markPollEventWiringForTerminalRun(): void {
-  pollEventWiringMode = 'terminal'
+  getOptInHostState().pollEventWiringMode = 'terminal'
 }
 
 /**
@@ -1173,14 +1239,14 @@ export function markPollEventWiringForTerminalRun(): void {
  * print / headless run.
  */
 export function markPollEventWiringForPrintRun(): void {
-  pollEventWiringMode = 'print'
+  getOptInHostState().pollEventWiringMode = 'print'
 }
 
 /**
  * Test-only override for `isAsyncReplEnabled()`. Reset by `resetCodeModeOptInStateForTests()`.
  */
 export function setAsyncReplEnabledForTests(val?: boolean): void {
-  asyncReplEnabledForTests = val
+  getOptInHostState().asyncReplEnabledForTests = val
 }
 
 /**
@@ -1188,9 +1254,14 @@ export function setAsyncReplEnabledForTests(val?: boolean): void {
  * async REPL / poll-event wiring (`wO`) is enabled.
  */
 export function isAsyncReplEnabled(): boolean {
+  // Official 2.1.331 `ACr()` / `Tde`: async REPL is disabled under shared-backend mode
+  if (isSharedBackend()) return false
   if (!isCodeModeEnabled()) return false
-  if (asyncReplEnabledForTests !== undefined) return asyncReplEnabledForTests
-  return pollEventWiringMode !== undefined
+  const hostState = getOptInHostState()
+  if (hostState.asyncReplEnabledForTests !== undefined) {
+    return hostState.asyncReplEnabledForTests
+  }
+  return hostState.pollEventWiringMode !== undefined
 }
 
 /**
@@ -1299,15 +1370,27 @@ export type CodeModePrimitiveToolsResolver<
   primitiveToolGrant?: ReadonlySet<string>,
 ) => readonly T[]
 
-let primitiveToolsResolver: CodeModePrimitiveToolsResolver | undefined
+// Process-wide default DI registration (registered once at module load by
+// src/tools.ts to break circular imports). Per-host calls inside an active ALS
+// session override only that SessionHost's HostSlot entry.
+let defaultPrimitiveToolsResolver: CodeModePrimitiveToolsResolver | undefined
 
 export function registerCodeModePrimitiveToolsResolver<
   T extends CodeModeToolLike,
 >(resolver: CodeModePrimitiveToolsResolver<T>): () => void {
-  const prev = primitiveToolsResolver
-  primitiveToolsResolver = resolver as unknown as CodeModePrimitiveToolsResolver
+  const cast = resolver as unknown as CodeModePrimitiveToolsResolver
+  if (!hasActiveSessionAls()) {
+    const prevDefault = defaultPrimitiveToolsResolver
+    defaultPrimitiveToolsResolver = cast
+    return () => {
+      defaultPrimitiveToolsResolver = prevDefault
+    }
+  }
+  const hostState = getOptInHostState()
+  const prev = hostState.primitiveToolsResolver
+  hostState.primitiveToolsResolver = cast
   return () => {
-    primitiveToolsResolver = prev
+    hostState.primitiveToolsResolver = prev
   }
 }
 
@@ -1316,8 +1399,10 @@ export function resolveCodeModePrimitiveTools<T extends CodeModeToolLike>(
   permissionContext: unknown,
   primitiveToolGrant?: ReadonlySet<string>,
 ): readonly T[] {
-  if (!primitiveToolsResolver) return []
-  return primitiveToolsResolver(
+  const resolver =
+    getOptInHostState().primitiveToolsResolver ?? defaultPrimitiveToolsResolver
+  if (!resolver) return []
+  return resolver(
     currentTools,
     permissionContext,
     primitiveToolGrant,
@@ -1532,24 +1617,25 @@ export function codeModeSignInRestartFailedNotice(reason: string): string {
 
 /** Test-only reset helper. */
 export function resetCodeModeOptInStateForTests(): void {
-  accepted = false
-  settled = undefined
-  dialogOpen = false
-  foreseeFn = undefined
-  pinned = undefined
-  beforePin = undefined
-  replContextCreated = false
-  engineCheckDone = false
-  cachedEngineCheck = undefined
-  cachedRawEngineRealmCheck = undefined
-  engineCheckResultOverrideForTests = undefined
-  standaloneExecutableOverrideForTests = undefined
-  lastAskedIn = undefined
-  sandboxCommandNetworkListsOffered = false
-  pollEventWiringMode = undefined
-  asyncReplEnabledForTests = undefined
-  optInReviewed = false
-  signedInAccount = undefined
+  const hostState = getOptInHostState()
+  hostState.accepted = false
+  hostState.settled = undefined
+  hostState.dialogOpen = false
+  hostState.foreseeFn = undefined
+  hostState.pinned = undefined
+  hostState.beforePin = undefined
+  hostState.replContextCreated = false
+  hostState.engineCheckDone = false
+  hostState.cachedEngineCheck = undefined
+  hostState.cachedRawEngineRealmCheck = undefined
+  hostState.engineCheckResultOverrideForTests = undefined
+  hostState.standaloneExecutableOverrideForTests = undefined
+  hostState.lastAskedIn = undefined
+  hostState.sandboxCommandNetworkListsOffered = false
+  hostState.pollEventWiringMode = undefined
+  hostState.asyncReplEnabledForTests = undefined
+  hostState.optInReviewed = false
+  hostState.signedInAccount = undefined
   notifyCodeModeStateChanged()
 }
 

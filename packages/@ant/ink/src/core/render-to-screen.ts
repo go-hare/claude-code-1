@@ -5,6 +5,7 @@ import { LegacyRoot } from 'react-reconciler/constants.js'
 const logForDebugging = (_message: string) => {}
 import { createNode, type DOMElement } from './dom.js'
 import { FocusManager } from './focus.js'
+import { InkHostSlot } from './instances.js'
 import Output from './output.js'
 import reconciler from './reconciler.js'
 import renderNodeToOutput, {
@@ -32,18 +33,36 @@ export type MatchPosition = {
   len: number
 }
 
-// Shared across calls. Pools accumulate style/char interns — reusing them
-// means later calls hit cache more. Root/container reuse saves the
+// Shared across calls within a host. Pools accumulate style/char interns —
+// reusing them means later calls hit cache more. Root/container reuse saves the
 // createContainer cost (~1ms). LegacyRoot: all work sync, no scheduling —
 // ConcurrentRoot's scheduler backlog leaks across roots via flushSyncWork.
-let root: DOMElement | undefined
-let container: ReturnType<typeof reconciler.createContainer> | undefined
-let stylePool: StylePool | undefined
-let charPool: CharPool | undefined
-let hyperlinkPool: HyperlinkPool | undefined
-let output: Output | undefined
+type RenderToScreenHostState = {
+  root: DOMElement | undefined
+  container: ReturnType<typeof reconciler.createContainer> | undefined
+  stylePool: StylePool | undefined
+  charPool: CharPool | undefined
+  hyperlinkPool: HyperlinkPool | undefined
+  output: Output | undefined
+  timing: {
+    reconcile: number
+    yoga: number
+    paint: number
+    scan: number
+    calls: number
+  }
+}
 
-const timing = { reconcile: 0, yoga: 0, paint: 0, scan: 0, calls: 0 }
+const renderToScreenHostSlot = new InkHostSlot<RenderToScreenHostState>(() => ({
+  root: undefined,
+  container: undefined,
+  stylePool: undefined,
+  charPool: undefined,
+  hyperlinkPool: undefined,
+  output: undefined,
+  timing: { reconcile: 0, yoga: 0, paint: 0, scan: 0, calls: 0 },
+}))
+
 const LOG_EVERY = 20
 
 /** Render a React element (wrapped in all contexts the component needs —
@@ -56,19 +75,20 @@ const LOG_EVERY = 20
  *  for on-demand single-message rendering, pathological for render-all-
  *  8k-upfront. Cache per (msg, query, width) upstream.
  *
- *  Unmounts between calls. Root/container/pools persist for reuse. */
+ *  Unmounts between calls. Root/container/pools persist per host for reuse. */
 export function renderToScreen(
   el: ReactElement,
   width: number,
 ): { screen: Screen; height: number } {
-  if (!root) {
-    root = createNode('ink-root')
-    root.focusManager = new FocusManager(() => false)
-    stylePool = new StylePool()
-    charPool = new CharPool()
-    hyperlinkPool = new HyperlinkPool()
-    container = reconciler.createContainer(
-      root,
+  const state = renderToScreenHostSlot.of()
+  if (!state.root) {
+    state.root = createNode('ink-root')
+    state.root.focusManager = new FocusManager(() => false)
+    state.stylePool = new StylePool()
+    state.charPool = new CharPool()
+    state.hyperlinkPool = new HyperlinkPool()
+    state.container = reconciler.createContainer(
+      state.root,
       LegacyRoot,
       null,
       false,
@@ -80,6 +100,12 @@ export function renderToScreen(
       noop,
     )
   }
+
+  const root = state.root
+  const container = state.container
+  const stylePool = state.stylePool!
+  const charPool = state.charPool!
+  const hyperlinkPool = state.hyperlinkPool!
 
   const t0 = performance.now()
   reconciler.updateContainerSync(el, container, null, noop)
@@ -97,28 +123,29 @@ export function renderToScreen(
   const screen = createScreen(
     width,
     Math.max(1, height), // avoid 0-height Screen (createScreen may choke)
-    stylePool!,
-    charPool!,
-    hyperlinkPool!,
+    stylePool,
+    charPool,
+    hyperlinkPool,
   )
-  if (!output) {
-    output = new Output({ width, height, stylePool: stylePool!, screen })
+  if (!state.output) {
+    state.output = new Output({ width, height, stylePool, screen })
   } else {
-    output.reset(width, height, screen)
+    state.output.reset(width, height, screen)
   }
-  renderNodeToOutput(root, output, createRenderFrameContext(), {
+  renderNodeToOutput(root, state.output, createRenderFrameContext(), {
     prevScreen: undefined,
   })
   // renderNodeToOutput queues writes into Output; .get() flushes the
   // queue into the Screen's cell arrays. Without this the screen is
   // blank (constructor-zero).
-  const rendered = output.get()
+  const rendered = state.output.get()
   const t3 = performance.now()
 
   // Unmount so next call gets a fresh tree. Leaves root/container/pools.
   reconciler.updateContainerSync(null, container, null, noop)
   reconciler.flushSyncWork()
 
+  const { timing } = state
   timing.reconcile += t1 - t0
   timing.yoga += t2 - t1
   timing.paint += t3 - t2
@@ -192,7 +219,7 @@ export function scanPositions(screen: Screen, query: string): MatchPosition[] {
       pos = text.indexOf(lq, pos + qlen)
     }
   }
-  timing.scan += performance.now() - t0
+  renderToScreenHostSlot.of().timing.scan += performance.now() - t0
 
   return positions
 }

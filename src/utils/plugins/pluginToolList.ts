@@ -4,6 +4,8 @@
  * removed by `tool.list` hooks apply uniformly to the model and every agent.
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
+
 export type PluginToolListAnswer = {
   added: readonly string[]
   removed: ReadonlySet<string>
@@ -18,20 +20,25 @@ export type PluginToolListState = {
   pass: Promise<void> | undefined
 }
 
-const state: PluginToolListState = {
+const hostPluginToolListSlot = new HostSlot<PluginToolListState>(() => ({
   answer: null,
   everAdded: new Set(),
   revision: 0,
   isInvalidated: false,
   hookFailures: 0,
   pass: undefined,
+}))
+
+function toolListState(): PluginToolListState {
+  return hostPluginToolListSlot.of(getBootstrapSessionHost())
 }
 
 export function getPluginToolListState(): Readonly<PluginToolListState> {
-  return state
+  return toolListState()
 }
 
 export function resetPluginToolListState(): void {
+  const state = toolListState()
   state.answer = null
   state.everAdded.clear()
   state.revision = 0
@@ -42,7 +49,7 @@ export function resetPluginToolListState(): void {
 
 /** Mark `tool.list` state invalidated (called by `$.ui.invalidate("tool.list")`). */
 export function invalidatePluginToolList(): void {
-  state.isInvalidated = true
+  toolListState().isInvalidated = true
 }
 
 /** Record the diff produced by a `tool.list` hook pass. */
@@ -50,6 +57,7 @@ export function recordPluginToolListAnswer(
   baseToolNames: readonly string[],
   resultingToolNames: readonly string[],
 ): PluginToolListAnswer {
+  const state = toolListState()
   const baseSet = new Set(baseToolNames)
   const resultSet = new Set(resultingToolNames)
   const added = resultingToolNames.filter(name => !baseSet.has(name))
@@ -76,7 +84,7 @@ export type ToolLike = {
  * the current session.
  */
 export function isToolRemovedByPlugin(tool: ToolLike): boolean {
-  const removed = state.answer?.removed
+  const removed = toolListState().answer?.removed
   if (removed === undefined || removed.size === 0) return false
   if (removed.has(tool.name)) return true
   if (
@@ -107,6 +115,7 @@ export function isToolRemovedByPlugin(tool: ToolLike): boolean {
 export function applyPluginToolListFilter<T extends ToolLike>(
   tools: readonly T[],
 ): T[] {
+  const state = toolListState()
   const removed = state.answer?.removed
   if (
     (removed === undefined || removed.size === 0) &&
@@ -125,7 +134,7 @@ export function applyPluginToolListFilter<T extends ToolLike>(
 export function applyPluginToolListDenyRules<
   T extends { alwaysDenyRules?: { session?: readonly string[] } },
 >(permissionContext: T): T {
-  const removed = state.answer?.removed
+  const removed = toolListState().answer?.removed
   if (removed === undefined || removed.size === 0) {
     return permissionContext
   }
@@ -172,6 +181,7 @@ export async function settlePluginToolList(
   baseToolNames: readonly string[],
   runHook: (base: readonly string[]) => Promise<readonly string[] | undefined>,
 ): Promise<PluginToolListAnswer> {
+  const state = toolListState()
   const work = (async () => {
     try {
       const nextNames = await runHook(baseToolNames)

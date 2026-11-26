@@ -6,6 +6,7 @@ import type {
   WorkingDirectorySource,
 } from '../../types/permissions.js'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { EditableSettingSource } from '../settings/constants.js'
 import { isLocalSettingsGitTracked } from '../settings/localSettingsGitTracked.js'
 import {
@@ -102,12 +103,27 @@ const ALLOW_RULE_SECRET_PATTERNS: readonly RegExp[] = [
   /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@'"]+:[^/\s@'"$]{6,}@[^\s/'"]+/i,
 ]
 
-let secretScannerOverrideForTesting: ((text: string) => boolean) | undefined
+const fallbackPermissionUpdateHost: object = {}
+const secretScannerOverrideByHost = new HostSlot<{
+  scanner: ((text: string) => boolean) | undefined
+}>(() => ({ scanner: undefined }))
+
+function getSecretScannerOverrideSlot(): {
+  scanner: ((text: string) => boolean) | undefined
+} {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return secretScannerOverrideByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return secretScannerOverrideByHost.of(fallbackPermissionUpdateHost)
+}
 
 export function _setAllowRuleSecretScannerForTesting(
   scanner: ((text: string) => boolean) | undefined,
 ): void {
-  secretScannerOverrideForTesting = scanner
+  getSecretScannerOverrideSlot().scanner = scanner
 }
 
 function scanAllowRuleForSecret(
@@ -115,8 +131,9 @@ function scanAllowRuleForSecret(
 ): 'holds_secret' | 'scan_failed' | undefined {
   const text = `${rule.toolName} ${rule.ruleContent ?? ''}`
   try {
-    if (secretScannerOverrideForTesting) {
-      return secretScannerOverrideForTesting(text) ? 'holds_secret' : undefined
+    const override = getSecretScannerOverrideSlot().scanner
+    if (override) {
+      return override(text) ? 'holds_secret' : undefined
     }
     const normalized = text.includes('\x00')
       ? text.replaceAll('\x00', '')

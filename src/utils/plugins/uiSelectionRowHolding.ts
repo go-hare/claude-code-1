@@ -11,7 +11,8 @@
  *
  * Plugin-facing host maps gold `requestId` → `instance_id` (ui_read_selection name).
  */
-import { instances, type DOMElement, type SelectionState } from '@anthropic/ink'
+import { Ns, type DOMElement, type SelectionState } from '@anthropic/ink'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 export type UiSelectionAnswer = {
   text: string
@@ -237,15 +238,32 @@ export type UiSelectionSource = {
   subscribeToSelectionChange?: (cb: () => void) => () => void
 }
 
-let rowHolding: UiSelectionRowHolding | undefined
-let keptSelection: UiSelectionAnswer | undefined
-let keptTakenAfter = 0
-let selectionRuns = 0
-let boundSelectionSource: UiSelectionSource | undefined
-let unbindSelectionSource: (() => void) | undefined
+type UiSelectionRowHoldingHostState = {
+  rowHolding: UiSelectionRowHolding | undefined
+  keptSelection: UiSelectionAnswer | undefined
+  keptTakenAfter: number
+  selectionRuns: number
+  boundSelectionSource: UiSelectionSource | undefined
+  unbindSelectionSource: (() => void) | undefined
+}
+
+const uiSelectionRowHoldingHostSlot =
+  new HostSlot<UiSelectionRowHoldingHostState>(() => ({
+    rowHolding: undefined,
+    keptSelection: undefined,
+    keptTakenAfter: 0,
+    selectionRuns: 0,
+    boundSelectionSource: undefined,
+    unbindSelectionSource: undefined,
+  }))
+
+function getUiSelectionRowHoldingHostState(): UiSelectionRowHoldingHostState {
+  return uiSelectionRowHoldingHostSlot.of(getBootstrapSessionHost())
+}
 
 function readSourceSelectionAnswer(
   source: UiSelectionSource | undefined,
+  hostState: UiSelectionRowHoldingHostState,
 ): UiSelectionAnswer | undefined {
   if (!source || typeof source.getSelectedText !== 'function') return undefined
   const text =
@@ -254,60 +272,63 @@ function readSourceSelectionAnswer(
       : source.getSelectedText()
   if (typeof text !== 'string' || text === '') return undefined
   const requestId =
-    rowHolding !== undefined && source.selection !== undefined
-      ? rowHolding(source.selection)
+    hostState.rowHolding !== undefined && source.selection !== undefined
+      ? hostState.rowHolding(source.selection)
       : undefined
   return selectionAnswer(text, requestId)
 }
 
 /** densable `YX` — drop snapshotted selection. */
 export function clearKeptUiSelection(): void {
-  keptSelection = undefined
+  getUiSelectionRowHoldingHostState().keptSelection = undefined
 }
 
 /** densable `rVe` — mark start of a prompt/command run. */
 export function beginKeptSelectionRun(): number {
-  selectionRuns += 1
-  return selectionRuns
+  const hostState = getUiSelectionRowHoldingHostState()
+  hostState.selectionRuns += 1
+  return hostState.selectionRuns
 }
 
 /** densable `oVe` — clear kept selection once a run started after takedown finishes. */
 export function endKeptSelectionRun(run: number | undefined): void {
-  if (run !== undefined && run > keptTakenAfter) {
-    keptSelection = undefined
+  const hostState = getUiSelectionRowHoldingHostState()
+  if (run !== undefined && run > hostState.keptTakenAfter) {
+    hostState.keptSelection = undefined
   }
 }
 
 export function getKeptUiSelection(): UiSelectionAnswer | undefined {
-  return keptSelection
+  return getUiSelectionRowHoldingHostState().keptSelection
 }
 
 /** densable `Prs` / `Cb` / `xb` — subscribe takedown + selection change on Ink instance. */
 export function bindUiSelectionSource(
   source: UiSelectionSource | undefined,
 ): void {
-  if (boundSelectionSource === source) return
-  unbindSelectionSource?.()
-  unbindSelectionSource = undefined
-  boundSelectionSource = source
-  keptSelection = undefined
+  const hostState = getUiSelectionRowHoldingHostState()
+  if (hostState.boundSelectionSource === source) return
+  hostState.unbindSelectionSource?.()
+  hostState.unbindSelectionSource = undefined
+  hostState.boundSelectionSource = source
+  hostState.keptSelection = undefined
   if (!source) return
   const unsubTakeDown = source.subscribeToSelectionTakeDown?.(() => {
-    const answer = readSourceSelectionAnswer(source)
+    const answer = readSourceSelectionAnswer(source, hostState)
     if (answer === undefined) return
-    keptSelection = answer
-    keptTakenAfter = selectionRuns
+    hostState.keptSelection = answer
+    hostState.keptTakenAfter = hostState.selectionRuns
   })
   const unsubChange = source.subscribeToSelectionChange?.(() => {
     if (
-      keptSelection !== undefined &&
+      hostState.keptSelection !== undefined &&
       source.hasTextSelection?.() === true &&
       (source.getSelectedText?.() ?? '') !== ''
     ) {
-      keptSelection = undefined
+      hostState.keptSelection = undefined
     }
   })
-  unbindSelectionSource = () => {
+  hostState.unbindSelectionSource = () => {
     unsubTakeDown?.()
     unsubChange?.()
   }
@@ -317,14 +338,14 @@ export function bindUiSelectionSource(
 export function setUiSelectionRowHolding(
   next: UiSelectionRowHolding | undefined,
 ): void {
-  rowHolding = next
+  getUiSelectionRowHoldingHostState().rowHolding = next
   if (next === undefined) {
     bindUiSelectionSource(undefined)
   } else {
-    bindUiSelectionSource(instances.get(process.stdout))
+    bindUiSelectionSource(Ns().get(process.stdout))
   }
 }
 
 export function getUiSelectionRowHolding(): UiSelectionRowHolding | undefined {
-  return rowHolding
+  return getUiSelectionRowHoldingHostState().rowHolding
 }

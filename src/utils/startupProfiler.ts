@@ -18,11 +18,13 @@ import {
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { getFsImplementation } from './fsOperations.js'
+import { HostSlot } from './hostSlot.js'
 import { formatMs, formatTimelineLine, getPerformance } from './profilerBase.js'
 import {
   isProfileStartupEnabled,
   resolveSpawnToFirstCheckpointMs,
 } from './residualFinalEnvGates.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 import { writeFileSync_DEPRECATED } from './slowOperations.js'
 
 // Module-level state - decided once at module load.
@@ -43,18 +45,54 @@ const STATSIG_SAMPLE_RATE = 0.005
 const STATSIG_LOGGING_SAMPLED =
   process.env.USER_TYPE === 'ant' || Math.random() < STATSIG_SAMPLE_RATE
 
-// Enable profiling if either detailed mode OR sampled for Statsig
-const SHOULD_PROFILE = DETAILED_PROFILING || STATSIG_LOGGING_SAMPLED
+function isDetailedProfilingActive(): boolean {
+  return (
+    DETAILED_PROFILING || isEnvTruthy(process.env.CLAUDE_CODE_PROFILE_STARTUP)
+  )
+}
 
-// Track memory snapshots separately (perf_hooks doesn't track memory).
-// Only used when DETAILED_PROFILING is enabled.
-// Stored as an array that appends in the same order as perf.mark() calls, so
-// memorySnapshots[i] corresponds to getEntriesByType('mark')[i]. Using a Map
-// keyed by checkpoint name is wrong because some checkpoints fire more than
-// once (e.g. loadSettingsFromDisk_start fires during init and again after
-// plugins reset the settings cache), and the second call would overwrite the
-// first's memory snapshot.
-const memorySnapshots: NodeJS.MemoryUsage[] = []
+function isStatsigLoggingSampled(): boolean {
+  return STATSIG_LOGGING_SAMPLED || process.env.USER_TYPE === 'ant'
+}
+
+function shouldProfile(): boolean {
+  return isDetailedProfilingActive() || isStatsigLoggingSampled()
+}
+
+type StartupMark = {
+  name: string
+  startTime: number
+}
+
+type StartupProfilerHostState = {
+  marks: StartupMark[]
+  // Track memory snapshots separately (perf_hooks doesn't track memory).
+  // Only used when DETAILED_PROFILING is enabled.
+  // Stored as an array that appends in the same order as marks, so
+  // memorySnapshots[i] corresponds to marks[i].
+  memorySnapshots: NodeJS.MemoryUsage[]
+  recordedPhases: Record<string, number>
+  recordedPhaseStarts: Record<string, number>
+  recordedPhasesConsumed: boolean
+  onceMarkedCheckpoints: Set<string>
+  startupContext: Record<string, unknown>
+  reported: boolean
+}
+
+const startupProfilerHostSlot = new HostSlot<StartupProfilerHostState>(() => ({
+  marks: [],
+  memorySnapshots: [],
+  recordedPhases: {},
+  recordedPhaseStarts: {},
+  recordedPhasesConsumed: false,
+  onceMarkedCheckpoints: new Set<string>(),
+  startupContext: {},
+  reported: false,
+}))
+
+function getStartupProfilerState(): StartupProfilerHostState {
+  return startupProfilerHostSlot.of(getBootstrapSessionHost())
+}
 
 // Phase definitions for Statsig logging: [startCheckpoint, endCheckpoint]
 const PHASE_DEFINITIONS = {
@@ -65,7 +103,7 @@ const PHASE_DEFINITIONS = {
 } as const
 
 // Record initial checkpoint if profiling is enabled
-if (SHOULD_PROFILE) {
+if (DETAILED_PROFILING || STATSIG_LOGGING_SAMPLED) {
   // eslint-disable-next-line custom-rules/no-top-level-side-effects
   profileCheckpoint('profiler_initialized')
 }
@@ -74,38 +112,38 @@ if (SHOULD_PROFILE) {
  * densable `Zo` / `recordPhase` @179674022.
  * `await_initialize_ms` is recorded from main preAction after zqr.
  */
-const recordedPhases: Record<string, number> = {}
-const recordedPhaseStarts: Record<string, number> = {}
-let recordedPhasesConsumed = false
-
 export function recordStartupPhase(
   name: string,
   durationMs: number,
   startMs?: number,
 ): void {
-  if (recordedPhasesConsumed) return
-  if (name === 'skills_load_ms' && recordedPhases[name] !== undefined) return
-  recordedPhases[name] = Math.round(durationMs)
+  const state = getStartupProfilerState()
+  if (state.recordedPhasesConsumed) return
+  if (name === 'skills_load_ms' && state.recordedPhases[name] !== undefined) {
+    return
+  }
+  state.recordedPhases[name] = Math.round(durationMs)
   if (startMs !== undefined) {
-    recordedPhaseStarts[name] = Math.round(startMs)
+    state.recordedPhaseStarts[name] = Math.round(startMs)
   }
 }
 
 export function getRecordedStartupPhase(name: string): number | undefined {
-  return recordedPhases[name]
+  return getStartupProfilerState().recordedPhases[name]
 }
 
 export function getRecordedStartupPhaseStart(name: string): number | undefined {
-  return recordedPhaseStarts[name]
+  return getStartupProfilerState().recordedPhaseStarts[name]
 }
 
 export function resetRecordedStartupPhasesForTesting(): void {
-  recordedPhasesConsumed = false
-  for (const key of Object.keys(recordedPhases)) {
-    delete recordedPhases[key]
+  const state = getStartupProfilerState()
+  state.recordedPhasesConsumed = false
+  for (const key of Object.keys(state.recordedPhases)) {
+    delete state.recordedPhases[key]
   }
-  for (const key of Object.keys(recordedPhaseStarts)) {
-    delete recordedPhaseStarts[key]
+  for (const key of Object.keys(state.recordedPhaseStarts)) {
+    delete state.recordedPhaseStarts[key]
   }
 }
 
@@ -113,26 +151,26 @@ export function resetRecordedStartupPhasesForTesting(): void {
  * Record a checkpoint with the given name
  */
 export function profileCheckpoint(name: string): void {
-  if (!SHOULD_PROFILE) return
+  if (!shouldProfile()) return
 
+  const state = getStartupProfilerState()
   const perf = getPerformance()
-  perf.mark(name)
+  state.marks.push({ name, startTime: perf.now() })
 
   // Only capture memory when detailed profiling enabled (env var)
-  if (DETAILED_PROFILING) {
-    memorySnapshots.push(process.memoryUsage())
+  if (isDetailedProfilingActive()) {
+    state.memorySnapshots.push(process.memoryUsage())
   }
 }
 
 /**
  * densable `Ur(e,{once})` @176644790 — `ne` claim_received / claim_validated / spare_claimed.
  */
-const onceMarkedCheckpoints = new Set<string>()
-
 export function profileCheckpointOnce(name: string): boolean {
-  if (!SHOULD_PROFILE) return false
-  if (onceMarkedCheckpoints.has(name)) return false
-  onceMarkedCheckpoints.add(name)
+  if (!shouldProfile()) return false
+  const state = getStartupProfilerState()
+  if (state.onceMarkedCheckpoints.has(name)) return false
+  state.onceMarkedCheckpoints.add(name)
   profileCheckpoint(name)
   return true
 }
@@ -140,21 +178,20 @@ export function profileCheckpointOnce(name: string): boolean {
 /**
  * densable `dN` @176644790 — merge into startupContext for tengu_spare_claimed extras.
  */
-const startupContext: Record<string, unknown> = {}
-
 export function assignStartupContext(fields: Record<string, unknown>): void {
-  if (!SHOULD_PROFILE) return
-  Object.assign(startupContext, fields)
+  if (!shouldProfile()) return
+  Object.assign(getStartupProfilerState().startupContext, fields)
 }
 
 export function getStartupContext(): Record<string, unknown> {
-  return startupContext
+  return getStartupProfilerState().startupContext
 }
 
 export function resetClaimProfilerForTests(): void {
-  onceMarkedCheckpoints.clear()
-  for (const key of Object.keys(startupContext)) {
-    delete startupContext[key]
+  const state = getStartupProfilerState()
+  state.onceMarkedCheckpoints.clear()
+  for (const key of Object.keys(state.startupContext)) {
+    delete state.startupContext[key]
   }
 }
 
@@ -162,13 +199,12 @@ export function resetClaimProfilerForTests(): void {
  * Get a formatted report of all checkpoints
  * Only available when DETAILED_PROFILING is enabled
  */
-function getReport(): string {
-  if (!DETAILED_PROFILING) {
+function getReport(state: StartupProfilerHostState): string {
+  if (!isDetailedProfilingActive()) {
     return 'Startup profiling not enabled'
   }
 
-  const perf = getPerformance()
-  const marks = perf.getEntriesByType('mark')
+  const marks = state.marks
   if (marks.length === 0) {
     return 'No profiling checkpoints recorded'
   }
@@ -186,7 +222,7 @@ function getReport(): string {
         mark.startTime,
         mark.startTime - prevTime,
         mark.name,
-        memorySnapshots[i],
+        state.memorySnapshots[i],
         8,
         7,
       ),
@@ -202,41 +238,40 @@ function getReport(): string {
   return lines.join('\n')
 }
 
-let reported = false
-
 export function profileReport(): void {
-  if (reported) return
-  reported = true
+  const state = getStartupProfilerState()
+  if (state.reported) return
+  state.reported = true
 
   // Log to Statsig (sampled: 100% ant, 0.1% external)
-  logStartupPerf()
+  logStartupPerf(state)
 
   // Output detailed report if CLAUDE_CODE_PROFILE_STARTUP=1
-  if (DETAILED_PROFILING) {
+  if (isDetailedProfilingActive()) {
     // Write to file
     const path = getStartupPerfLogPath()
     const dir = dirname(path)
     const fs = getFsImplementation()
     fs.mkdirSync(dir)
-    writeFileSync_DEPRECATED(path, getReport(), {
+    const report = getReport(state)
+    writeFileSync_DEPRECATED(path, report, {
       encoding: 'utf8',
       flush: true,
     })
 
     logForDebugging('Startup profiling report:')
-    logForDebugging(getReport())
+    logForDebugging(report)
   }
 
-  // Clear startup marks to prevent PerformanceMark accumulation in long-lived
-  // processes (daemon, cron). After this point startup marks are no longer needed
-  // — the report has been written and the Statsig event has been logged.
-  const perf = getPerformance()
-  perf.clearMarks()
-  memorySnapshots.length = 0
+  // Clear startup marks to prevent accumulation in long-lived processes
+  // (daemon, cron). After this point startup marks are no longer needed —
+  // the report has been written and the Statsig event has been logged.
+  state.marks.length = 0
+  state.memorySnapshots.length = 0
 }
 
 export function isDetailedProfilingEnabled(): boolean {
-  return DETAILED_PROFILING
+  return isDetailedProfilingActive()
 }
 
 export function getStartupPerfLogPath(): string {
@@ -247,12 +282,11 @@ export function getStartupPerfLogPath(): string {
  * Log startup performance phases to Statsig.
  * Only logs if this session was sampled at startup.
  */
-function logStartupPerf(): void {
-  // Only log if we were sampled (decision made at module load)
-  if (!STATSIG_LOGGING_SAMPLED) return
+function logStartupPerf(state: StartupProfilerHostState): void {
+  // Only log if we were sampled
+  if (!isStatsigLoggingSampled()) return
 
-  const perf = getPerformance()
-  const marks = perf.getEntriesByType('mark')
+  const marks = state.marks
   if (marks.length === 0) return
 
   // Build checkpoint lookup

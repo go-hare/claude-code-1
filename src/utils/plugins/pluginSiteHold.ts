@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
   type RefObject,
 } from 'react'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 /** densable `RZ`. */
 export const RZ = Object.freeze({ type: 'engine', ref: 0 })
@@ -61,8 +62,19 @@ export type ScreenSiteNode = {
   childNodes?: readonly { yogaNode?: { getComputedHeight(): number } }[]
 }
 
-const askedBySite = new Map<string, OnScreenRows | null>()
-const heldBySite = new Map<string, number>()
+type HostPluginSiteHoldState = {
+  askedBySite: Map<string, OnScreenRows | null>
+  heldBySite: Map<string, number>
+}
+
+const hostPluginSiteHoldSlot = new HostSlot<HostPluginSiteHoldState>(() => ({
+  askedBySite: new Map(),
+  heldBySite: new Map(),
+}))
+
+function siteHoldState(): HostPluginSiteHoldState {
+  return hostPluginSiteHoldSlot.of(getBootstrapSessionHost())
+}
 
 export function isG2eComponent(component: string): boolean {
   return (G2E_COMPONENTS as readonly string[]).includes(component)
@@ -161,14 +173,14 @@ export function Qe(
 }
 
 export function askedOnScreenOf(id: string): OnScreenRows | null | undefined {
-  return askedBySite.get(id)
+  return siteHoldState().askedBySite.get(id)
 }
 
 export function rememberAskedOnScreen(
   id: string,
   screen: OnScreenRows | null,
 ): void {
-  askedBySite.set(id, screen)
+  siteHoldState().askedBySite.set(id, screen)
 }
 
 /** densable `noteHeldRows` — only when onScreen is explicitly null. */
@@ -177,16 +189,17 @@ export function noteHeldRows(
   onScreen: OnScreenRows | null | undefined,
   rows: number,
 ): void {
-  if (onScreen === null) heldBySite.set(id, rows)
+  if (onScreen === null) siteHoldState().heldBySite.set(id, rows)
 }
 
 export function heldRowsOf(id: string): number | undefined {
-  return heldBySite.get(id)
+  return siteHoldState().heldBySite.get(id)
 }
 
 export function resetSiteHoldNotes(): void {
-  askedBySite.clear()
-  heldBySite.clear()
+  const state = siteHoldState()
+  state.askedBySite.clear()
+  state.heldBySite.clear()
 }
 
 /** densable `nr` — site is on; release held rows on fallback / new draw. */

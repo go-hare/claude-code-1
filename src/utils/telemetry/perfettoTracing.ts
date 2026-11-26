@@ -27,7 +27,7 @@ import { mkdirSync, writeFileSync } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import { getSessionId } from '../../bootstrap/state.js'
-import { registerCleanup } from '../cleanupRegistry.js'
+import { type CleanupUnregister, registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import {
   getClaudeConfigHomeDir,
@@ -36,6 +36,15 @@ import {
 } from '../envUtils.js'
 import { errorMessage } from '../errors.js'
 import { djb2Hash } from '../hash.js'
+import { HostSlot } from '../hostSlot.js'
+import {
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  ofDefaultHost,
+  runWithSession,
+  type Session,
+} from '../sessionRoot.js'
 import { jsonStringify } from '../slowOperations.js'
 import { getAgentId, getAgentName, getParentSessionId } from '../teammate.js'
 
@@ -90,37 +99,127 @@ type PendingSpan = {
   args: Record<string, unknown>
 }
 
-// Global state for the Perfetto tracer
-let isEnabled = false
-let tracePath: string | null = null
-// Metadata events (ph: 'M' — process/thread names, parent links) are kept
-// separate so they survive eviction — Perfetto UI needs them to label
-// tracks. Bounded by agent count (~3 events per agent).
-const metadataEvents: TraceEvent[] = []
-const events: TraceEvent[] = []
 // events[] cap. Cron-driven sessions run for days; 22 push sites × many
 // turns would otherwise grow unboundedly (periodicWrite flushes to disk but
 // does not truncate — it writes the full snapshot). At ~300B/event this is
 // ~30MB, enough trace history for any debugging session. Eviction drops the
 // oldest half when hit, amortized O(1).
 const MAX_EVENTS = 100_000
-const pendingSpans = new Map<string, PendingSpan>()
-const agentRegistry = new Map<string, AgentInfo>()
-let totalAgentCount = 0
-let startTimeMs = 0
-let spanIdCounter = 0
-let traceWritten = false // Flag to avoid double writes
-
-// Map agent IDs to numeric process IDs (Perfetto requires numeric IDs)
-let processIdCounter = 1
-const agentIdToProcessId = new Map<string, number>()
-
-// Periodic write interval handle
-let writeIntervalId: ReturnType<typeof setInterval> | null = null
-
 const STALE_SPAN_TTL_MS = 30 * 60 * 1000 // 30 minutes
 const STALE_SPAN_CLEANUP_INTERVAL_MS = 60 * 1000 // 1 minute
-let staleSpanCleanupId: ReturnType<typeof setInterval> | null = null
+
+type PerfettoHostState = {
+  isEnabled: boolean | undefined
+  tracePath: string | null
+  // Metadata events (ph: 'M' — process/thread names, parent links) are kept
+  // separate so they survive eviction — Perfetto UI needs them to label
+  // tracks. Bounded by agent count (~3 events per agent).
+  metadataEvents: TraceEvent[]
+  events: TraceEvent[]
+  pendingSpans: Map<string, PendingSpan>
+  agentRegistry: Map<string, AgentInfo>
+  totalAgentCount: number
+  startTimeMs: number
+  spanIdCounter: number
+  traceWritten: boolean // Flag to avoid double writes
+  // Map agent IDs to numeric process IDs (Perfetto requires numeric IDs)
+  processIdCounter: number
+  agentIdToProcessId: Map<string, number>
+  // Periodic write interval handle
+  writeIntervalId: ReturnType<typeof setInterval> | null
+  staleSpanCleanupId: ReturnType<typeof setInterval> | null
+  unregisterCleanup: CleanupUnregister | null
+  trackedInLiveStates: boolean
+  sessionIdSnapshot: string | null
+  sessionRef: WeakRef<Session> | undefined
+}
+
+const perfettoHostSlot = new HostSlot<PerfettoHostState>(() => ({
+  isEnabled: undefined,
+  tracePath: null,
+  metadataEvents: [],
+  events: [],
+  pendingSpans: new Map<string, PendingSpan>(),
+  agentRegistry: new Map<string, AgentInfo>(),
+  totalAgentCount: 0,
+  startTimeMs: 0,
+  spanIdCounter: 0,
+  traceWritten: false,
+  processIdCounter: 1,
+  agentIdToProcessId: new Map<string, number>(),
+  writeIntervalId: null,
+  staleSpanCleanupId: null,
+  unregisterCleanup: null,
+  trackedInLiveStates: false,
+  sessionIdSnapshot: null,
+  sessionRef: undefined,
+}))
+
+function getOwnPerfettoHostState(): PerfettoHostState {
+  return perfettoHostSlot.of(getBootstrapSessionHost())
+}
+
+function getActivePerfettoHostState(): PerfettoHostState {
+  const own = getOwnPerfettoHostState()
+  if (own.isEnabled !== undefined) {
+    return own
+  }
+  const defaultState = ofDefaultHost(perfettoHostSlot)
+  if (defaultState.isEnabled === true) {
+    return defaultState
+  }
+  return own
+}
+
+// Shared single process-level exit/beforeExit listeners iterating WeakRefs so
+// ephemeral hosts never accumulate process listeners.
+const livePerfettoHostStates = new Set<WeakRef<PerfettoHostState>>()
+let sharedPerfettoProcessHooksInstalled = false
+
+function pruneDeadPerfettoHostStates(): void {
+  for (const ref of livePerfettoHostStates) {
+    if (ref.deref() === undefined) {
+      livePerfettoHostStates.delete(ref)
+    }
+  }
+}
+
+function onSharedPerfettoBeforeExit(): void {
+  for (const ref of livePerfettoHostStates) {
+    const state = ref.deref()
+    if (!state) {
+      livePerfettoHostStates.delete(ref)
+      continue
+    }
+    if (state.isEnabled === true && !state.traceWritten) {
+      logForDebugging('[Perfetto] beforeExit handler invoked')
+      void writePerfettoTrace(state)
+    }
+  }
+}
+
+function onSharedPerfettoExit(): void {
+  for (const ref of livePerfettoHostStates) {
+    const state = ref.deref()
+    if (!state) {
+      livePerfettoHostStates.delete(ref)
+      continue
+    }
+    if (state.isEnabled === true && !state.traceWritten) {
+      logForDebugging(
+        '[Perfetto] exit handler invoked, writing trace synchronously',
+      )
+      writePerfettoTraceSync(state)
+    }
+  }
+}
+
+function ensureSharedPerfettoProcessHooksInstalled(): void {
+  if (sharedPerfettoProcessHooksInstalled) return
+  sharedPerfettoProcessHooksInstalled = true
+  process.on('beforeExit', onSharedPerfettoBeforeExit)
+  process.on('exit', onSharedPerfettoExit)
+}
 
 /**
  * Convert a string to a numeric hash for use as thread ID
@@ -132,65 +231,75 @@ function stringToNumericHash(str: string): number {
 /**
  * Get or create a numeric process ID for an agent
  */
-function getProcessIdForAgent(agentId: string): number {
-  const existing = agentIdToProcessId.get(agentId)
+function getProcessIdForAgent(
+  state: PerfettoHostState,
+  agentId: string,
+): number {
+  const existing = state.agentIdToProcessId.get(agentId)
   if (existing !== undefined) return existing
 
-  processIdCounter++
-  agentIdToProcessId.set(agentId, processIdCounter)
-  return processIdCounter
+  state.processIdCounter++
+  state.agentIdToProcessId.set(agentId, state.processIdCounter)
+  return state.processIdCounter
 }
 
 /**
  * Get current agent info
  */
-function getCurrentAgentInfo(): AgentInfo {
-  const agentId = getAgentId() ?? getSessionId()
+function getCurrentAgentInfo(state: PerfettoHostState): AgentInfo {
+  const sessionId = getSessionId()
+  if (state.sessionIdSnapshot === null) {
+    state.sessionIdSnapshot = sessionId
+  }
+  const agentId = getAgentId() ?? sessionId
   const agentName = getAgentName() ?? 'main'
   const parentSessionId = getParentSessionId()
 
   // Check if we've already registered this agent
-  const existing = agentRegistry.get(agentId)
+  const existing = state.agentRegistry.get(agentId)
   if (existing) return existing
 
   const info: AgentInfo = {
     agentId,
     agentName,
     parentAgentId: parentSessionId,
-    processId: agentId === getSessionId() ? 1 : getProcessIdForAgent(agentId),
+    processId:
+      agentId === state.sessionIdSnapshot
+        ? 1
+        : getProcessIdForAgent(state, agentId),
     threadId: stringToNumericHash(agentName),
   }
 
-  agentRegistry.set(agentId, info)
-  totalAgentCount++
+  state.agentRegistry.set(agentId, info)
+  state.totalAgentCount++
   return info
 }
 
 /**
  * Get timestamp in microseconds relative to trace start
  */
-function getTimestamp(): number {
-  return (Date.now() - startTimeMs) * 1000
+function getTimestamp(state: PerfettoHostState): number {
+  return (Date.now() - state.startTimeMs) * 1000
 }
 
 /**
  * Generate a unique span ID
  */
-function generateSpanId(): string {
-  return `span_${++spanIdCounter}`
+function generateSpanId(state: PerfettoHostState): string {
+  return `span_${++state.spanIdCounter}`
 }
 
 /**
  * Evict pending spans older than STALE_SPAN_TTL_MS.
  * Mirrors the TTL cleanup pattern in sessionTracing.ts.
  */
-function evictStaleSpans(): void {
-  const now = getTimestamp()
+function evictStaleSpans(state: PerfettoHostState): void {
+  const now = getTimestamp(state)
   const ttlUs = STALE_SPAN_TTL_MS * 1000 // Convert ms to microseconds
-  for (const [spanId, span] of pendingSpans) {
+  for (const [spanId, span] of state.pendingSpans) {
     if (now - span.startTime > ttlUs) {
       // Emit an end event so the span shows up in the trace as incomplete
-      events.push({
+      state.events.push({
         name: span.name,
         cat: span.category,
         ph: 'E',
@@ -203,7 +312,7 @@ function evictStaleSpans(): void {
           duration_ms: (now - span.startTime) / 1000,
         },
       })
-      pendingSpans.delete(spanId)
+      state.pendingSpans.delete(spanId)
     }
   }
 }
@@ -211,14 +320,14 @@ function evictStaleSpans(): void {
 /**
  * Build the full trace document (Chrome Trace JSON format).
  */
-function buildTraceDocument(): string {
+function buildTraceDocument(state: PerfettoHostState): string {
   return jsonStringify({
-    traceEvents: [...metadataEvents, ...events],
+    traceEvents: [...state.metadataEvents, ...state.events],
     metadata: {
-      session_id: getSessionId(),
-      trace_start_time: new Date(startTimeMs).toISOString(),
-      agent_count: totalAgentCount,
-      total_event_count: metadataEvents.length + events.length,
+      session_id: state.sessionIdSnapshot ?? getSessionId(),
+      trace_start_time: new Date(state.startTimeMs).toISOString(),
+      agent_count: state.totalAgentCount,
+      total_event_count: state.metadataEvents.length + state.events.length,
     },
   })
 }
@@ -229,10 +338,10 @@ function buildTraceDocument(): string {
  * amortized O(1) — we don't pay splice cost per-push. A synthetic marker
  * is inserted so the gap is visible in ui.perfetto.dev.
  */
-function evictOldestEvents(): void {
-  if (events.length < MAX_EVENTS) return
-  const dropped = events.splice(0, MAX_EVENTS / 2)
-  events.unshift({
+function evictOldestEvents(state: PerfettoHostState): void {
+  if (state.events.length < MAX_EVENTS) return
+  const dropped = state.events.splice(0, MAX_EVENTS / 2)
+  state.events.unshift({
     name: 'trace_truncated',
     cat: '__metadata',
     ph: 'i',
@@ -265,21 +374,31 @@ export function initializePerfettoTracing(): void {
       return
     }
 
-    isEnabled = true
-    startTimeMs = Date.now()
+    const state = getOwnPerfettoHostState()
+    stopWriteInterval(state)
+    state.isEnabled = true
+    state.traceWritten = false
+    state.startTimeMs = Date.now()
+    state.sessionIdSnapshot = getSessionId()
 
     // Determine trace file path
     if (isEnvTruthy(envValue)) {
       const tracesDir = join(getClaudeConfigHomeDir(), 'traces')
-      tracePath = join(tracesDir, `trace-${getSessionId()}.json`)
+      state.tracePath = join(tracesDir, `trace-${state.sessionIdSnapshot}.json`)
     } else {
       // Use the provided path
-      tracePath = envValue
+      state.tracePath = envValue
     }
 
     logForDebugging(
-      `[Perfetto] Tracing enabled, will write to: ${tracePath}, isEnabled=${isEnabled}`,
+      `[Perfetto] Tracing enabled, will write to: ${state.tracePath}, isEnabled=${state.isEnabled}`,
     )
+
+    const captured = getActiveSessionFromAls()
+    const capturedRootRef =
+      captured !== undefined ? new WeakRef(captured.root) : undefined
+    state.sessionRef = capturedRootRef
+    const stateRef = new WeakRef(state)
 
     // Start periodic full-trace write if CLAUDE_CODE_PERFETTO_WRITE_INTERVAL_S is a positive integer
     const intervalSec = parseInt(
@@ -287,61 +406,103 @@ export function initializePerfettoTracing(): void {
       10,
     )
     if (intervalSec > 0) {
-      writeIntervalId = setInterval(() => {
-        void periodicWrite()
-      }, intervalSec * 1000)
+      // Create intervals outside ALS so AsyncLocalStorage does not strongly pin
+      // `{ session }` for the lifetime of the timer; re-enter via WeakRef when alive.
+      const writeId = exitSessionContext(() =>
+        setInterval(() => {
+          const currentState = stateRef.deref()
+          if (currentState === undefined) {
+            clearInterval(writeId)
+            return
+          }
+          const run = () => {
+            void periodicWrite(currentState)
+          }
+          if (capturedRootRef !== undefined) {
+            const ownerSession = capturedRootRef.deref()
+            if (ownerSession === undefined) {
+              stopWriteInterval(currentState)
+              return
+            }
+            if (getActiveSessionFromAls() !== ownerSession) {
+              runWithSession(ownerSession, run)
+              return
+            }
+          }
+          run()
+        }, intervalSec * 1000),
+      )
+      state.writeIntervalId = writeId
       // Don't let the interval keep the process alive on its own
-      if (writeIntervalId.unref) writeIntervalId.unref()
+      if (writeId.unref) writeId.unref()
       logForDebugging(
         `[Perfetto] Periodic write enabled, interval: ${intervalSec}s`,
       )
     }
 
-    // Start stale span cleanup interval
-    staleSpanCleanupId = setInterval(() => {
-      evictStaleSpans()
-      evictOldestEvents()
-    }, STALE_SPAN_CLEANUP_INTERVAL_MS)
-    if (staleSpanCleanupId.unref) staleSpanCleanupId.unref()
+    // Start stale span cleanup interval (outside ALS so timer does not pin Session)
+    const cleanupId = exitSessionContext(() =>
+      setInterval(() => {
+        const currentState = stateRef.deref()
+        if (currentState === undefined) {
+          clearInterval(cleanupId)
+          return
+        }
+        const run = () => {
+          evictStaleSpans(currentState)
+          evictOldestEvents(currentState)
+        }
+        if (capturedRootRef !== undefined) {
+          const ownerSession = capturedRootRef.deref()
+          if (ownerSession === undefined) {
+            stopWriteInterval(currentState)
+            return
+          }
+          if (getActiveSessionFromAls() !== ownerSession) {
+            runWithSession(ownerSession, run)
+            return
+          }
+        }
+        run()
+      }, STALE_SPAN_CLEANUP_INTERVAL_MS),
+    )
+    state.staleSpanCleanupId = cleanupId
+    if (cleanupId.unref) cleanupId.unref()
 
-    // Register cleanup to write final trace on exit
-    registerCleanup(async () => {
-      logForDebugging('[Perfetto] Cleanup callback invoked')
-      await writePerfettoTrace()
-    })
+    // Register cleanup to write final trace on exit (once per host)
+    if (!state.unregisterCleanup) {
+      state.unregisterCleanup = registerCleanup(async () => {
+        logForDebugging('[Perfetto] Cleanup callback invoked')
+        await writePerfettoTrace(state)
+      })
+    }
 
-    // Also register a beforeExit handler as a fallback
-    // This ensures the trace is written even if cleanup registry is not called
-    process.on('beforeExit', () => {
-      logForDebugging('[Perfetto] beforeExit handler invoked')
-      void writePerfettoTrace()
-    })
-
-    // Register a synchronous exit handler as a last resort
-    // This is the final fallback to ensure trace is written before process exits
-    process.on('exit', () => {
-      if (!traceWritten) {
-        logForDebugging(
-          '[Perfetto] exit handler invoked, writing trace synchronously',
-        )
-        writePerfettoTraceSync()
+    if (!state.trackedInLiveStates) {
+      state.trackedInLiveStates = true
+      if (livePerfettoHostStates.size > 64) {
+        pruneDeadPerfettoHostStates()
       }
-    })
+      livePerfettoHostStates.add(new WeakRef(state))
+    }
+    ensureSharedPerfettoProcessHooksInstalled()
 
     // Emit process metadata events for main process
-    const mainAgent = getCurrentAgentInfo()
-    emitProcessMetadata(mainAgent)
+    const mainAgent = getCurrentAgentInfo(state)
+    emitProcessMetadata(state, mainAgent)
   }
 }
 
 /**
  * Emit metadata events for a process/agent
  */
-function emitProcessMetadata(agentInfo: AgentInfo): void {
-  if (!isEnabled) return
+function emitProcessMetadata(
+  state: PerfettoHostState,
+  agentInfo: AgentInfo,
+): void {
+  if (!state.isEnabled) return
 
   // Process name
-  metadataEvents.push({
+  state.metadataEvents.push({
     name: 'process_name',
     cat: '__metadata',
     ph: 'M',
@@ -352,7 +513,7 @@ function emitProcessMetadata(agentInfo: AgentInfo): void {
   })
 
   // Thread name (same as process for now)
-  metadataEvents.push({
+  state.metadataEvents.push({
     name: 'thread_name',
     cat: '__metadata',
     ph: 'M',
@@ -364,7 +525,7 @@ function emitProcessMetadata(agentInfo: AgentInfo): void {
 
   // Add parent info if available
   if (agentInfo.parentAgentId) {
-    metadataEvents.push({
+    state.metadataEvents.push({
       name: 'parent_agent',
       cat: '__metadata',
       ph: 'M',
@@ -382,7 +543,7 @@ function emitProcessMetadata(agentInfo: AgentInfo): void {
  * Check if Perfetto tracing is enabled
  */
 export function isPerfettoTracingEnabled(): boolean {
-  return isEnabled
+  return getActivePerfettoHostState().isEnabled === true
 }
 
 /**
@@ -394,19 +555,20 @@ export function registerAgent(
   agentName: string,
   parentAgentId?: string,
 ): void {
-  if (!isEnabled) return
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled) return
 
   const info: AgentInfo = {
     agentId,
     agentName,
     parentAgentId,
-    processId: getProcessIdForAgent(agentId),
+    processId: getProcessIdForAgent(state, agentId),
     threadId: stringToNumericHash(agentName),
   }
 
-  agentRegistry.set(agentId, info)
-  totalAgentCount++
-  emitProcessMetadata(info)
+  state.agentRegistry.set(agentId, info)
+  state.totalAgentCount++
+  emitProcessMetadata(state, info)
 }
 
 /**
@@ -414,9 +576,10 @@ export function registerAgent(
  * Call this when an agent completes, fails, or is aborted to free memory.
  */
 export function unregisterAgent(agentId: string): void {
-  if (!isEnabled) return
-  agentRegistry.delete(agentId)
-  agentIdToProcessId.delete(agentId)
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled) return
+  state.agentRegistry.delete(agentId)
+  state.agentIdToProcessId.delete(agentId)
 }
 
 /**
@@ -429,15 +592,16 @@ export function startLLMRequestPerfettoSpan(args: {
   isSpeculative?: boolean
   querySource?: string
 }): string {
-  if (!isEnabled) return ''
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled) return ''
 
-  const spanId = generateSpanId()
-  const agentInfo = getCurrentAgentInfo()
+  const spanId = generateSpanId(state)
+  const agentInfo = getCurrentAgentInfo(state)
 
-  pendingSpans.set(spanId, {
+  state.pendingSpans.set(spanId, {
     name: 'API Call',
     category: 'api',
-    startTime: getTimestamp(),
+    startTime: getTimestamp(state),
     agentInfo,
     args: {
       model: args.model,
@@ -449,14 +613,14 @@ export function startLLMRequestPerfettoSpan(args: {
   })
 
   // Emit begin event
-  events.push({
+  state.events.push({
     name: 'API Call',
     cat: 'api',
     ph: 'B',
-    ts: pendingSpans.get(spanId)!.startTime,
+    ts: state.pendingSpans.get(spanId)!.startTime,
     pid: agentInfo.processId,
     tid: agentInfo.threadId,
-    args: pendingSpans.get(spanId)!.args,
+    args: state.pendingSpans.get(spanId)!.args,
   })
 
   return spanId
@@ -483,12 +647,13 @@ export function endLLMRequestPerfettoSpan(
     attemptStartTimes?: number[]
   },
 ): void {
-  if (!isEnabled || !spanId) return
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled || !spanId) return
 
-  const pending = pendingSpans.get(spanId)
+  const pending = state.pendingSpans.get(spanId)
   if (!pending) return
 
-  const endTime = getTimestamp()
+  const endTime = getTimestamp(state)
   const duration = endTime - pending.startTime
 
   const promptTokens =
@@ -553,7 +718,7 @@ export function endLLMRequestPerfettoSpan(
   if (setupUs > 0) {
     const setupEndTs = pending.startTime + setupUs
 
-    events.push({
+    state.events.push({
       name: 'Request Setup',
       cat: 'api,setup',
       ph: 'B',
@@ -578,7 +743,7 @@ export function endLLMRequestPerfettoSpan(
         const attemptEndUs =
           pending.startTime + (attemptStartTimes[i + 1]! - baseWallMs) * 1000
 
-        events.push({
+        state.events.push({
           name: `Attempt ${i + 1} (retry)`,
           cat: 'api,retry',
           ph: 'B',
@@ -587,7 +752,7 @@ export function endLLMRequestPerfettoSpan(
           tid: pending.agentInfo.threadId,
           args: { attempt: i + 1 },
         })
-        events.push({
+        state.events.push({
           name: `Attempt ${i + 1} (retry)`,
           cat: 'api,retry',
           ph: 'E',
@@ -598,7 +763,7 @@ export function endLLMRequestPerfettoSpan(
       }
     }
 
-    events.push({
+    state.events.push({
       name: 'Request Setup',
       cat: 'api,setup',
       ph: 'E',
@@ -616,7 +781,7 @@ export function endLLMRequestPerfettoSpan(
     const firstTokenEndTs = firstTokenStartTs + ttftMs * 1000
 
     // First Token phase: from successful attempt start to first token
-    events.push({
+    state.events.push({
       name: 'First Token',
       cat: 'api,ttft',
       ph: 'B',
@@ -630,7 +795,7 @@ export function endLLMRequestPerfettoSpan(
         cache_hit_rate_pct: cacheHitRate,
       },
     })
-    events.push({
+    state.events.push({
       name: 'First Token',
       cat: 'api,ttft',
       ph: 'E',
@@ -646,7 +811,7 @@ export function endLLMRequestPerfettoSpan(
     const actualSamplingMs =
       ttltMs !== undefined ? ttltMs - ttftMs - setupUs / 1000 : undefined
     if (actualSamplingMs !== undefined && actualSamplingMs > 0) {
-      events.push({
+      state.events.push({
         name: 'Sampling',
         cat: 'api,sampling',
         ph: 'B',
@@ -659,7 +824,7 @@ export function endLLMRequestPerfettoSpan(
           otps,
         },
       })
-      events.push({
+      state.events.push({
         name: 'Sampling',
         cat: 'api,sampling',
         ph: 'E',
@@ -671,7 +836,7 @@ export function endLLMRequestPerfettoSpan(
   }
 
   // Emit API Call end event (after sub-spans)
-  events.push({
+  state.events.push({
     name: pending.name,
     cat: pending.category,
     ph: 'E',
@@ -681,7 +846,7 @@ export function endLLMRequestPerfettoSpan(
     args,
   })
 
-  pendingSpans.delete(spanId)
+  state.pendingSpans.delete(spanId)
 }
 
 /**
@@ -691,15 +856,16 @@ export function startToolPerfettoSpan(
   toolName: string,
   args?: Record<string, unknown>,
 ): string {
-  if (!isEnabled) return ''
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled) return ''
 
-  const spanId = generateSpanId()
-  const agentInfo = getCurrentAgentInfo()
+  const spanId = generateSpanId(state)
+  const agentInfo = getCurrentAgentInfo(state)
 
-  pendingSpans.set(spanId, {
+  state.pendingSpans.set(spanId, {
     name: `Tool: ${toolName}`,
     category: 'tool',
-    startTime: getTimestamp(),
+    startTime: getTimestamp(state),
     agentInfo,
     args: {
       tool_name: toolName,
@@ -708,14 +874,14 @@ export function startToolPerfettoSpan(
   })
 
   // Emit begin event
-  events.push({
+  state.events.push({
     name: `Tool: ${toolName}`,
     cat: 'tool',
     ph: 'B',
-    ts: pendingSpans.get(spanId)!.startTime,
+    ts: state.pendingSpans.get(spanId)!.startTime,
     pid: agentInfo.processId,
     tid: agentInfo.threadId,
-    args: pendingSpans.get(spanId)!.args,
+    args: state.pendingSpans.get(spanId)!.args,
   })
 
   return spanId
@@ -732,12 +898,13 @@ export function endToolPerfettoSpan(
     resultTokens?: number
   },
 ): void {
-  if (!isEnabled || !spanId) return
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled || !spanId) return
 
-  const pending = pendingSpans.get(spanId)
+  const pending = state.pendingSpans.get(spanId)
   if (!pending) return
 
-  const endTime = getTimestamp()
+  const endTime = getTimestamp(state)
   const duration = endTime - pending.startTime
 
   const args = {
@@ -749,7 +916,7 @@ export function endToolPerfettoSpan(
   }
 
   // Emit end event
-  events.push({
+  state.events.push({
     name: pending.name,
     cat: pending.category,
     ph: 'E',
@@ -759,22 +926,23 @@ export function endToolPerfettoSpan(
     args,
   })
 
-  pendingSpans.delete(spanId)
+  state.pendingSpans.delete(spanId)
 }
 
 /**
  * Start a user input waiting span
  */
 export function startUserInputPerfettoSpan(context?: string): string {
-  if (!isEnabled) return ''
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled) return ''
 
-  const spanId = generateSpanId()
-  const agentInfo = getCurrentAgentInfo()
+  const spanId = generateSpanId(state)
+  const agentInfo = getCurrentAgentInfo(state)
 
-  pendingSpans.set(spanId, {
+  state.pendingSpans.set(spanId, {
     name: 'Waiting for User Input',
     category: 'user_input',
-    startTime: getTimestamp(),
+    startTime: getTimestamp(state),
     agentInfo,
     args: {
       context,
@@ -782,14 +950,14 @@ export function startUserInputPerfettoSpan(context?: string): string {
   })
 
   // Emit begin event
-  events.push({
+  state.events.push({
     name: 'Waiting for User Input',
     cat: 'user_input',
     ph: 'B',
-    ts: pendingSpans.get(spanId)!.startTime,
+    ts: state.pendingSpans.get(spanId)!.startTime,
     pid: agentInfo.processId,
     tid: agentInfo.threadId,
-    args: pendingSpans.get(spanId)!.args,
+    args: state.pendingSpans.get(spanId)!.args,
   })
 
   return spanId
@@ -805,12 +973,13 @@ export function endUserInputPerfettoSpan(
     source?: string
   },
 ): void {
-  if (!isEnabled || !spanId) return
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled || !spanId) return
 
-  const pending = pendingSpans.get(spanId)
+  const pending = state.pendingSpans.get(spanId)
   if (!pending) return
 
-  const endTime = getTimestamp()
+  const endTime = getTimestamp(state)
   const duration = endTime - pending.startTime
 
   const args = {
@@ -821,7 +990,7 @@ export function endUserInputPerfettoSpan(
   }
 
   // Emit end event
-  events.push({
+  state.events.push({
     name: pending.name,
     cat: pending.category,
     ph: 'E',
@@ -831,7 +1000,7 @@ export function endUserInputPerfettoSpan(
     args,
   })
 
-  pendingSpans.delete(spanId)
+  state.pendingSpans.delete(spanId)
 }
 
 /**
@@ -842,15 +1011,16 @@ export function emitPerfettoInstant(
   category: string,
   args?: Record<string, unknown>,
 ): void {
-  if (!isEnabled) return
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled) return
 
-  const agentInfo = getCurrentAgentInfo()
+  const agentInfo = getCurrentAgentInfo(state)
 
-  events.push({
+  state.events.push({
     name,
     cat: category,
     ph: 'i',
-    ts: getTimestamp(),
+    ts: getTimestamp(state),
     pid: agentInfo.processId,
     tid: agentInfo.threadId,
     args,
@@ -864,15 +1034,16 @@ export function emitPerfettoCounter(
   name: string,
   values: Record<string, number>,
 ): void {
-  if (!isEnabled) return
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled) return
 
-  const agentInfo = getCurrentAgentInfo()
+  const agentInfo = getCurrentAgentInfo(state)
 
-  events.push({
+  state.events.push({
     name,
     cat: 'counter',
     ph: 'C',
-    ts: getTimestamp(),
+    ts: getTimestamp(state),
     pid: agentInfo.processId,
     tid: agentInfo.threadId,
     args: values,
@@ -883,15 +1054,16 @@ export function emitPerfettoCounter(
  * Start an interaction span (wraps a full user request cycle)
  */
 export function startInteractionPerfettoSpan(userPrompt?: string): string {
-  if (!isEnabled) return ''
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled) return ''
 
-  const spanId = generateSpanId()
-  const agentInfo = getCurrentAgentInfo()
+  const spanId = generateSpanId(state)
+  const agentInfo = getCurrentAgentInfo(state)
 
-  pendingSpans.set(spanId, {
+  state.pendingSpans.set(spanId, {
     name: 'Interaction',
     category: 'interaction',
-    startTime: getTimestamp(),
+    startTime: getTimestamp(state),
     agentInfo,
     args: {
       user_prompt_length: userPrompt?.length,
@@ -899,14 +1071,14 @@ export function startInteractionPerfettoSpan(userPrompt?: string): string {
   })
 
   // Emit begin event
-  events.push({
+  state.events.push({
     name: 'Interaction',
     cat: 'interaction',
     ph: 'B',
-    ts: pendingSpans.get(spanId)!.startTime,
+    ts: state.pendingSpans.get(spanId)!.startTime,
     pid: agentInfo.processId,
     tid: agentInfo.threadId,
-    args: pendingSpans.get(spanId)!.args,
+    args: state.pendingSpans.get(spanId)!.args,
   })
 
   return spanId
@@ -916,16 +1088,17 @@ export function startInteractionPerfettoSpan(userPrompt?: string): string {
  * End an interaction span
  */
 export function endInteractionPerfettoSpan(spanId: string): void {
-  if (!isEnabled || !spanId) return
+  const state = getActivePerfettoHostState()
+  if (!state.isEnabled || !spanId) return
 
-  const pending = pendingSpans.get(spanId)
+  const pending = state.pendingSpans.get(spanId)
   if (!pending) return
 
-  const endTime = getTimestamp()
+  const endTime = getTimestamp(state)
   const duration = endTime - pending.startTime
 
   // Emit end event
-  events.push({
+  state.events.push({
     name: pending.name,
     cat: pending.category,
     ph: 'E',
@@ -938,7 +1111,7 @@ export function endInteractionPerfettoSpan(spanId: string): void {
     },
   })
 
-  pendingSpans.delete(spanId)
+  state.pendingSpans.delete(spanId)
 }
 
 // ---------------------------------------------------------------------------
@@ -948,24 +1121,24 @@ export function endInteractionPerfettoSpan(spanId: string): void {
 /**
  * Stop the periodic write timer.
  */
-function stopWriteInterval(): void {
-  if (staleSpanCleanupId) {
-    clearInterval(staleSpanCleanupId)
-    staleSpanCleanupId = null
+function stopWriteInterval(state: PerfettoHostState): void {
+  if (state.staleSpanCleanupId) {
+    clearInterval(state.staleSpanCleanupId)
+    state.staleSpanCleanupId = null
   }
-  if (writeIntervalId) {
-    clearInterval(writeIntervalId)
-    writeIntervalId = null
+  if (state.writeIntervalId) {
+    clearInterval(state.writeIntervalId)
+    state.writeIntervalId = null
   }
 }
 
 /**
  * Force-close any remaining open spans at session end.
  */
-function closeOpenSpans(): void {
-  for (const [spanId, pending] of pendingSpans) {
-    const endTime = getTimestamp()
-    events.push({
+function closeOpenSpans(state: PerfettoHostState): void {
+  for (const [spanId, pending] of state.pendingSpans) {
+    const endTime = getTimestamp(state)
+    state.events.push({
       name: pending.name,
       cat: pending.category,
       ph: 'E',
@@ -978,7 +1151,7 @@ function closeOpenSpans(): void {
         duration_ms: (endTime - pending.startTime) / 1000,
       },
     })
-    pendingSpans.delete(spanId)
+    state.pendingSpans.delete(spanId)
   }
 }
 
@@ -987,14 +1160,14 @@ function closeOpenSpans(): void {
  * transient I/O problem does not crash the session — the next periodic tick
  * (or the final exit write) will retry with a complete snapshot.
  */
-async function periodicWrite(): Promise<void> {
-  if (!isEnabled || !tracePath || traceWritten) return
+async function periodicWrite(state: PerfettoHostState): Promise<void> {
+  if (!state.isEnabled || !state.tracePath || state.traceWritten) return
 
   try {
-    await mkdir(dirname(tracePath), { recursive: true })
-    await writeFile(tracePath, buildTraceDocument())
+    await mkdir(dirname(state.tracePath), { recursive: true })
+    await writeFile(state.tracePath, buildTraceDocument(state))
     logForDebugging(
-      `[Perfetto] Periodic write: ${events.length} events to ${tracePath}`,
+      `[Perfetto] Periodic write: ${state.events.length} events to ${state.tracePath}`,
     )
   } catch (error) {
     logForDebugging(
@@ -1008,26 +1181,29 @@ async function periodicWrite(): Promise<void> {
  * Final async write: close open spans and write the complete trace.
  * Idempotent — sets `traceWritten` on success so subsequent calls are no-ops.
  */
-async function writePerfettoTrace(): Promise<void> {
-  if (!isEnabled || !tracePath || traceWritten) {
+async function writePerfettoTrace(state: PerfettoHostState): Promise<void> {
+  if (!state.isEnabled || !state.tracePath || state.traceWritten) {
     logForDebugging(
-      `[Perfetto] Skipping final write: isEnabled=${isEnabled}, tracePath=${tracePath}, traceWritten=${traceWritten}`,
+      `[Perfetto] Skipping final write: isEnabled=${state.isEnabled}, tracePath=${state.tracePath}, traceWritten=${state.traceWritten}`,
     )
     return
   }
 
-  stopWriteInterval()
-  closeOpenSpans()
+  stopWriteInterval(state)
+  closeOpenSpans(state)
 
   logForDebugging(
-    `[Perfetto] writePerfettoTrace called: events=${events.length}`,
+    `[Perfetto] writePerfettoTrace called: events=${state.events.length}`,
   )
 
   try {
-    await mkdir(dirname(tracePath), { recursive: true })
-    await writeFile(tracePath, buildTraceDocument())
-    traceWritten = true
-    logForDebugging(`[Perfetto] Trace finalized at: ${tracePath}`)
+    await mkdir(dirname(state.tracePath), { recursive: true })
+    await writeFile(state.tracePath, buildTraceDocument(state))
+    state.traceWritten = true
+    const unregister = state.unregisterCleanup
+    state.unregisterCleanup = null
+    unregister?.()
+    logForDebugging(`[Perfetto] Trace finalized at: ${state.tracePath}`)
   } catch (error) {
     logForDebugging(
       `[Perfetto] Failed to write final trace: ${errorMessage(error)}`,
@@ -1039,29 +1215,34 @@ async function writePerfettoTrace(): Promise<void> {
 /**
  * Final synchronous write (fallback for process 'exit' handler where async is forbidden).
  */
-function writePerfettoTraceSync(): void {
-  if (!isEnabled || !tracePath || traceWritten) {
+function writePerfettoTraceSync(state: PerfettoHostState): void {
+  if (!state.isEnabled || !state.tracePath || state.traceWritten) {
     logForDebugging(
-      `[Perfetto] Skipping final sync write: isEnabled=${isEnabled}, tracePath=${tracePath}, traceWritten=${traceWritten}`,
+      `[Perfetto] Skipping final sync write: isEnabled=${state.isEnabled}, tracePath=${state.tracePath}, traceWritten=${state.traceWritten}`,
     )
     return
   }
 
-  stopWriteInterval()
-  closeOpenSpans()
+  stopWriteInterval(state)
+  closeOpenSpans(state)
 
   logForDebugging(
-    `[Perfetto] writePerfettoTraceSync called: events=${events.length}`,
+    `[Perfetto] writePerfettoTraceSync called: events=${state.events.length}`,
   )
 
   try {
-    const dir = dirname(tracePath)
+    const dir = dirname(state.tracePath)
     // eslint-disable-next-line custom-rules/no-sync-fs -- Only called from process.on('exit') handler
     mkdirSync(dir, { recursive: true })
     // eslint-disable-next-line custom-rules/no-sync-fs, eslint-plugin-n/no-sync -- Required for process 'exit' handler which doesn't support async
-    writeFileSync(tracePath, buildTraceDocument())
-    traceWritten = true
-    logForDebugging(`[Perfetto] Trace finalized synchronously at: ${tracePath}`)
+    writeFileSync(state.tracePath, buildTraceDocument(state))
+    state.traceWritten = true
+    const unregister = state.unregisterCleanup
+    state.unregisterCleanup = null
+    unregister?.()
+    logForDebugging(
+      `[Perfetto] Trace finalized synchronously at: ${state.tracePath}`,
+    )
   } catch (error) {
     logForDebugging(
       `[Perfetto] Failed to write final trace synchronously: ${errorMessage(error)}`,
@@ -1074,47 +1255,50 @@ function writePerfettoTraceSync(): void {
  * Get all recorded events (for testing)
  */
 export function getPerfettoEvents(): TraceEvent[] {
-  return [...metadataEvents, ...events]
+  const state = getActivePerfettoHostState()
+  return [...state.metadataEvents, ...state.events]
 }
 
 /**
  * Reset the tracer state (for testing)
  */
 export function resetPerfettoTracer(): void {
-  if (staleSpanCleanupId) {
-    clearInterval(staleSpanCleanupId)
-    staleSpanCleanupId = null
-  }
-  stopWriteInterval()
-  metadataEvents.length = 0
-  events.length = 0
-  pendingSpans.clear()
-  agentRegistry.clear()
-  agentIdToProcessId.clear()
-  totalAgentCount = 0
-  processIdCounter = 1
-  spanIdCounter = 0
-  isEnabled = false
-  tracePath = null
-  startTimeMs = 0
-  traceWritten = false
+  const state = getOwnPerfettoHostState()
+  stopWriteInterval(state)
+  const unregister = state.unregisterCleanup
+  state.unregisterCleanup = null
+  unregister?.()
+  state.metadataEvents.length = 0
+  state.events.length = 0
+  state.pendingSpans.clear()
+  state.agentRegistry.clear()
+  state.agentIdToProcessId.clear()
+  state.totalAgentCount = 0
+  state.processIdCounter = 1
+  state.spanIdCounter = 0
+  state.isEnabled = false
+  state.tracePath = null
+  state.startTimeMs = 0
+  state.traceWritten = false
+  state.sessionIdSnapshot = null
+  state.sessionRef = undefined
 }
 
 /**
  * Trigger a periodic write immediately (for testing)
  */
 export async function triggerPeriodicWriteForTesting(): Promise<void> {
-  await periodicWrite()
+  await periodicWrite(getActivePerfettoHostState())
 }
 
 /**
  * Evict stale spans immediately (for testing)
  */
 export function evictStaleSpansForTesting(): void {
-  evictStaleSpans()
+  evictStaleSpans(getActivePerfettoHostState())
 }
 
 export const MAX_EVENTS_FOR_TESTING = MAX_EVENTS
 export function evictOldestEventsForTesting(): void {
-  evictOldestEvents()
+  evictOldestEvents(getActivePerfettoHostState())
 }

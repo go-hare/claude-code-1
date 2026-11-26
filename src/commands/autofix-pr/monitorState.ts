@@ -1,3 +1,5 @@
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
+
 type MonitorState = {
   taskId: string
   owner: string
@@ -9,10 +11,18 @@ type MonitorState = {
   sessionId?: string
 }
 
-let active: MonitorState | null = null
+const monitorStateHostSlot = new HostSlot<{ active: MonitorState | null }>(
+  () => ({
+    active: null,
+  }),
+)
+
+function getMonitorHostState(): { active: MonitorState | null } {
+  return monitorStateHostSlot.of(getBootstrapSessionHost())
+}
 
 export function getActiveMonitor(): Readonly<MonitorState> | null {
-  return active
+  return getMonitorHostState().active
 }
 
 /**
@@ -21,8 +31,9 @@ export function getActiveMonitor(): Readonly<MonitorState> | null {
  * — those two together race because the caller may await between them.
  */
 export function trySetActiveMonitor(state: MonitorState): boolean {
-  if (active) return false
-  active = state
+  const hostState = getMonitorHostState()
+  if (hostState.active) return false
+  hostState.active = state
   return true
 }
 
@@ -31,9 +42,12 @@ export function trySetActiveMonitor(state: MonitorState): boolean {
  * active. Prefer trySetActiveMonitor for race-free acquisition.
  */
 export function setActiveMonitor(state: MonitorState): void {
-  if (active)
-    throw new Error(`Monitor already active: ${active.repo}#${active.prNumber}`)
-  active = state
+  const hostState = getMonitorHostState()
+  if (hostState.active)
+    throw new Error(
+      `Monitor already active: ${hostState.active.repo}#${hostState.active.prNumber}`,
+    )
+  hostState.active = state
 }
 
 /**
@@ -42,10 +56,11 @@ export function setActiveMonitor(state: MonitorState): void {
  * clobbering a freshly-acquired lock owned by a different task.
  */
 export function clearActiveMonitor(taskId?: string): void {
-  if (!active) return
-  if (taskId && active.taskId !== taskId) return
-  active.abortController.abort()
-  active = null
+  const hostState = getMonitorHostState()
+  if (!hostState.active) return
+  if (taskId && hostState.active.taskId !== taskId) return
+  hostState.active.abortController.abort()
+  hostState.active = null
 }
 
 /**
@@ -57,8 +72,9 @@ export function clearActiveMonitor(taskId?: string): void {
  * a lock keyed by the caller's tentative id.
  */
 export function updateActiveMonitor(partial: Partial<MonitorState>): boolean {
-  if (!active) return false
-  active = { ...active, ...partial }
+  const hostState = getMonitorHostState()
+  if (!hostState.active) return false
+  hostState.active = { ...hostState.active, ...partial }
   return true
 }
 
@@ -67,6 +83,7 @@ export function isMonitoring(
   repo: string,
   prNumber: number,
 ): boolean {
+  const active = getMonitorHostState().active
   return (
     active?.owner === owner &&
     active?.repo === repo &&

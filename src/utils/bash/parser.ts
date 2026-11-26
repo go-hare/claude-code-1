@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import { logEvent } from '../../services/analytics/index.js'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   ensureParserInitialized,
   getParserModule,
@@ -34,10 +35,14 @@ const SUBSTITUTION_TYPES = new Set([
 ])
 const COMMAND_TYPES = new Set(['command', 'declaration_command'])
 
-let logged = false
+const parserLoadLogHostSlot = new HostSlot<{ logged: boolean }>(() => ({
+  logged: false,
+}))
+
 function logLoadOnce(success: boolean): void {
-  if (logged) return
-  logged = true
+  const hostState = parserLoadLogHostSlot.of(getBootstrapSessionHost())
+  if (hostState.logged) return
+  hostState.logged = true
   logForDebugging(
     success ? 'tree-sitter: native module loaded' : 'tree-sitter: unavailable',
   )

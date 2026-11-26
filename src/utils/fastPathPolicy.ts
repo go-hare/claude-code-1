@@ -16,9 +16,27 @@ import {
   KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS,
   ensureKeychainPrefetchCompleted,
 } from './secureStorage/keychainPrefetch.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
-let settingsLoaded = false
-let policyCached: { error: string | null } | null = null
+class FastPathPolicyHostState {
+  settingsLoaded = false
+  policyCached: { error: string | null } | null = null
+}
+
+const fallbackFastPathPolicyHost: object = {}
+const fastPathPolicyByHost = new HostSlot<FastPathPolicyHostState>(
+  () => new FastPathPolicyHostState(),
+)
+
+function getFastPathPolicyHostState(): FastPathPolicyHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return fastPathPolicyByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return fastPathPolicyByHost.of(fallbackFastPathPolicyHost)
+}
 
 /**
  * densable `Ftn` — enable configs, await MDM, then keychain prefetch with
@@ -27,8 +45,9 @@ let policyCached: { error: string | null } | null = null
  * Idempotent.
  */
 export async function ensureFastPathSettingsLoaded(): Promise<void> {
-  if (settingsLoaded) return
-  settingsLoaded = true
+  const state = getFastPathPolicyHostState()
+  if (state.settingsLoaded) return
+  state.settingsLoaded = true
   enableConfigs()
   await ensureKeychainPrefetchCompleted(KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS)
   applySafeConfigEnvironmentVariables()
@@ -49,10 +68,11 @@ export function getFastPathPolicyHelperEnv(): Record<string, string> {
  * local reverse-build has no policyHelper path — always null (no error).
  */
 async function runFastPathPolicyHelper(): Promise<string | null> {
-  if (policyCached) return policyCached.error
-  policyCached = { error: null }
+  const state = getFastPathPolicyHostState()
+  if (state.policyCached) return state.policyCached.error
+  state.policyCached = { error: null }
   // densable: o8_.error = await vF_(p3_(), RpH()) with env = getFastPathPolicyHelperEnv() — omitted when no helper.
-  return policyCached.error
+  return state.policyCached.error
 }
 
 /**
@@ -65,6 +85,7 @@ export async function loadFastPathPolicy(): Promise<string | null> {
 
 /** Test-only reset (official sDO). */
 export function resetFastPathPolicyForTesting(): void {
-  settingsLoaded = false
-  policyCached = null
+  const state = getFastPathPolicyHostState()
+  state.settingsLoaded = false
+  state.policyCached = null
 }

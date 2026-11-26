@@ -10,9 +10,12 @@ import {
   AuthenticationError,
 } from '@anthropic-ai/sdk'
 import { getModelStrings } from './modelStrings.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionRoot.js'
 
-// Cache valid models to avoid repeated API calls
-const validModelCache = new Map<string, boolean>()
+// Cache valid models per SessionHost to avoid repeated API calls
+const validModelCacheHostSlot = new HostSlot<Map<string, boolean>>(
+  () => new Map(),
+)
 
 export type ValidateModelResult = {
   valid: boolean
@@ -77,6 +80,7 @@ export async function validateModel(
   }
 
   // Check cache first
+  const validModelCache = validModelCacheHostSlot.of(getBootstrapSessionHost())
   if (validModelCache.has(normalizedModel)) {
     return { valid: true }
   }

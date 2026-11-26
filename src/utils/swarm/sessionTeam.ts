@@ -14,6 +14,7 @@ import {
   provenSameProcessAsync,
 } from '../genericProcessUtils.js'
 import { logError } from '../log.js'
+import { getBootstrapSessionHost } from '../sessionHost.js'
 import {
   ensureTasksDir,
   getLeaderTeamName,
@@ -52,7 +53,7 @@ const BASE58_ALPHABET =
   '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 const MAX_CUSTOM_SESSION_SUFFIX_LEN = 120
 
-let inheritedTeamName: string | null | undefined
+const inheritedTeamNameByHost = new WeakMap<object, string | null | undefined>()
 
 /**
  * Official 2.1.331 `GE(e)` — decode an Anthropic tagged base58 session ID
@@ -118,20 +119,23 @@ export function isValidSessionTaskListId(id: string): boolean {
 
 /**
  * densable PQA — first call consumes CLAUDE_INTERNAL_ASSISTANT_TEAM_NAME
- * into the process latch (official inheritedTeamName host).
+ * into the per-host latch (official inheritedTeamName host).
  */
 function consumeInheritedTeamName(): string | null {
+  const host = getBootstrapSessionHost()
+  let inheritedTeamName = inheritedTeamNameByHost.get(host)
   if (inheritedTeamName === undefined) {
     const fromEnv = process.env.CLAUDE_INTERNAL_ASSISTANT_TEAM_NAME || null
     delete process.env.CLAUDE_INTERNAL_ASSISTANT_TEAM_NAME
     inheritedTeamName = fromEnv
+    inheritedTeamNameByHost.set(host, inheritedTeamName)
   }
   return inheritedTeamName ?? null
 }
 
 /** densable DQA / _resetInheritedTeamNameForTesting */
 export function _resetInheritedTeamNameForTesting(): void {
-  inheritedTeamName = undefined
+  inheritedTeamNameByHost.delete(getBootstrapSessionHost())
 }
 
 /** Official 2.1.331 `A()` — build current leader process claim metadata. */
@@ -443,7 +447,9 @@ async function rekeySessionTeam(): Promise<
 export async function rekeySessionTeamAtStartup(): Promise<
   InitializeSessionTeamResult | undefined
 > {
-  return inheritedTeamName ? undefined : rekeySessionTeam()
+  return inheritedTeamNameByHost.get(getBootstrapSessionHost())
+    ? undefined
+    : rekeySessionTeam()
 }
 
 /**
@@ -453,6 +459,6 @@ export async function rekeySessionTeamAtStartup(): Promise<
 export async function rekeySessionTeamInSession(): Promise<
   InitializeSessionTeamResult | undefined
 > {
-  inheritedTeamName = null
+  inheritedTeamNameByHost.set(getBootstrapSessionHost(), null)
   return rekeySessionTeam()
 }

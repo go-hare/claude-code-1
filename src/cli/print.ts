@@ -321,7 +321,7 @@ import {
 } from 'src/utils/gracefulShutdown.js'
 import { createAbortErrorReason } from 'src/utils/abortController.js'
 import { registerCleanup } from 'src/utils/cleanupRegistry.js'
-import { getBootstrapSession } from 'src/utils/sessionRoot.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionRoot.js'
 import { preferLiveMcpClients } from 'src/hooks/useMergedClients.js'
 import { createIdleTimeoutManager } from 'src/utils/idleTimeout.js'
 import type {
@@ -841,25 +841,36 @@ The user cannot receive your response until the team is completely shut down.
 
 Shut down your team and prepare your final response for the user.`
 
-// Track message UUIDs received during the current session runtime
+// Track message UUIDs received during the current root session runtime
 const MAX_RECEIVED_UUIDS = 10_000
-const receivedMessageUuids = new Set<UUID>()
-const receivedMessageUuidsOrder: UUID[] = []
+
+type ReceivedMessageUuidsSessionState = {
+  uuids: Set<UUID>
+  order: UUID[]
+}
+
+const receivedMessageUuidsSlot =
+  new RootSessionSlot<ReceivedMessageUuidsSessionState>(() => ({
+    uuids: new Set<UUID>(),
+    order: [],
+  }))
+
+function getReceivedMessageUuidsState(): ReceivedMessageUuidsSessionState {
+  return receivedMessageUuidsSlot.of(getBootstrapSession())
+}
 
 function trackReceivedMessageUuid(uuid: UUID): boolean {
-  if (receivedMessageUuids.has(uuid)) {
+  const { uuids, order } = getReceivedMessageUuidsState()
+  if (uuids.has(uuid)) {
     return false // duplicate
   }
-  receivedMessageUuids.add(uuid)
-  receivedMessageUuidsOrder.push(uuid)
+  uuids.add(uuid)
+  order.push(uuid)
   // Evict oldest entries when at capacity
-  if (receivedMessageUuidsOrder.length > MAX_RECEIVED_UUIDS) {
-    const toEvict = receivedMessageUuidsOrder.splice(
-      0,
-      receivedMessageUuidsOrder.length - MAX_RECEIVED_UUIDS,
-    )
+  if (order.length > MAX_RECEIVED_UUIDS) {
+    const toEvict = order.splice(0, order.length - MAX_RECEIVED_UUIDS)
     for (const old of toEvict) {
-      receivedMessageUuids.delete(old)
+      uuids.delete(old)
     }
   }
   return true // new UUID
@@ -11694,7 +11705,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         )
 
         // Check both historical duplicates (from file) and runtime duplicates (this session)
-        if (existsInSession || receivedMessageUuids.has(userMsg.uuid as UUID)) {
+        if (
+          existsInSession ||
+          getReceivedMessageUuidsState().uuids.has(userMsg.uuid as UUID)
+        ) {
           logForDebugging(`Skipping duplicate user message: ${userMsg.uuid}`)
           // Send acknowledgment for duplicate message if replay mode is enabled
           if (options.replayUserMessages) {

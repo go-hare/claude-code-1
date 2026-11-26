@@ -12,25 +12,38 @@
 import { readFileSync, statSync } from 'fs'
 import { isAbsolute, join, relative, resolve } from 'path'
 import { logError } from '../log.js'
-import { createSignal } from '../signal.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
+import { createSignal, type Signal } from '../signal.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { getPluginSeedDirs, getPluginsDirectory } from './pluginDirectories.js'
 import { isWindowsUncOrDevicePath } from './pluginCommandSource.js'
 
-/** densable gu().commandProducerDirsDenied */
-const commandProducerDirsDenied = new Set<string>()
+type HostCommandProducerDirsState = {
+  /** densable gu().commandProducerDirsDenied */
+  commandProducerDirsDenied: Set<string>
+  /** densable gu().commandProducerDirsComparable — null means recompute on next _qu */
+  commandProducerDirsComparable: string[] | null
+  /** densable gu().commandProducerDirsScannedAt */
+  commandProducerDirsScannedAt: number
+  /**
+   * densable cDs = xs() — pure event signal for command-producer deny bag changes.
+   * densable qvt() → cDs.emit(); sandbox bHo refreshConfig is the product subscriber.
+   */
+  commandProducerDirsChanged: Signal
+}
 
-/** densable gu().commandProducerDirsComparable — null means recompute on next _qu */
-let commandProducerDirsComparable: string[] | null = null
+const hostCommandProducerDirsSlot = new HostSlot<HostCommandProducerDirsState>(
+  () => ({
+    commandProducerDirsDenied: new Set(),
+    commandProducerDirsComparable: null,
+    commandProducerDirsScannedAt: 0,
+    commandProducerDirsChanged: createSignal(),
+  }),
+)
 
-/** densable gu().commandProducerDirsScannedAt */
-let commandProducerDirsScannedAt = 0
-
-/**
- * densable cDs = xs() — pure event signal for command-producer deny bag changes.
- * densable qvt() → cDs.emit(); sandbox bHo refreshConfig is the product subscriber.
- */
-const commandProducerDirsChanged = createSignal()
+function producerDirsState(): HostCommandProducerDirsState {
+  return hostCommandProducerDirsSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable qvt — notify subscribers that the producer-deny bag changed.
@@ -38,7 +51,7 @@ const commandProducerDirsChanged = createSignal()
  */
 export function emitCommandProducerDirsChanged(): void {
   try {
-    commandProducerDirsChanged.emit()
+    producerDirsState().commandProducerDirsChanged.emit()
   } catch (e) {
     logError(e)
   }
@@ -50,7 +63,7 @@ export function emitCommandProducerDirsChanged(): void {
 export function subscribeCommandProducerDirsChanged(
   listener: () => void,
 ): () => void {
-  return commandProducerDirsChanged.subscribe(listener)
+  return producerDirsState().commandProducerDirsChanged.subscribe(listener)
 }
 
 /**
@@ -77,9 +90,10 @@ export function denyCommandProducerDir(
   if (!isAbsolute(producerPath)) return
   if (isWindowsUncOrDevicePath(producerPath)) return
   if (isAutofsNetPath(producerPath)) return
-  if (commandProducerDirsDenied.has(producerPath)) return
-  commandProducerDirsDenied.add(producerPath)
-  commandProducerDirsComparable = null
+  const state = producerDirsState()
+  if (state.commandProducerDirsDenied.has(producerPath)) return
+  state.commandProducerDirsDenied.add(producerPath)
+  state.commandProducerDirsComparable = null
   if (options.emit !== false) {
     emitCommandProducerDirsChanged()
   }
@@ -87,14 +101,15 @@ export function denyCommandProducerDir(
 
 /** densable: read-only view of the deny set (tests + sandbox callers) */
 export function getCommandProducerDirsDenied(): ReadonlySet<string> {
-  return commandProducerDirsDenied
+  return producerDirsState().commandProducerDirsDenied
 }
 
 /** Test helper — clear session bag */
 export function clearCommandProducerDirsDeniedForTests(): void {
-  commandProducerDirsDenied.clear()
-  commandProducerDirsComparable = null
-  commandProducerDirsScannedAt = 0
+  const state = producerDirsState()
+  state.commandProducerDirsDenied.clear()
+  state.commandProducerDirsComparable = null
+  state.commandProducerDirsScannedAt = 0
 }
 
 /**
@@ -154,9 +169,10 @@ export function getCommandProducerScanRoots(): string[] {
 export function scanInstalledCommandProducerDirs(
   scanRoots: readonly string[],
 ): string[] {
-  const denied = commandProducerDirsDenied
-  commandProducerDirsScannedAt = Date.now()
-  commandProducerDirsComparable = null
+  const state = producerDirsState()
+  const denied = state.commandProducerDirsDenied
+  state.commandProducerDirsScannedAt = Date.now()
+  state.commandProducerDirsComparable = null
 
   for (const root of new Set(scanRoots)) {
     let raw: string
@@ -237,37 +253,40 @@ export function isPathUnderDeniedCommandProducer(
   scanRoots: readonly string[] = [],
   options: { maxAgeMs?: number } = {},
 ): boolean {
+  const state = producerDirsState()
   const maxAgeMs = options.maxAgeMs ?? 0
   const now = Date.now()
   const scanFresh =
-    maxAgeMs > 0 && now - commandProducerDirsScannedAt < maxAgeMs
+    maxAgeMs > 0 && now - state.commandProducerDirsScannedAt < maxAgeMs
 
-  if (!scanFresh || commandProducerDirsComparable === null) {
+  if (!scanFresh || state.commandProducerDirsComparable === null) {
     if (scanRoots.length > 0) {
       scanInstalledCommandProducerDirs(scanRoots)
     } else {
       // No disk scan — still rebuild comparable from session bag only
-      commandProducerDirsScannedAt = now
+      state.commandProducerDirsScannedAt = now
     }
 
-    const roots = [...commandProducerDirsDenied].filter(isSafeProducerPath)
+    const roots = [...state.commandProducerDirsDenied].filter(
+      isSafeProducerPath,
+    )
     // densable also folds scan-root paths outside home; keep producer bag only
     // for product deny (writing into ~/.claude/plugins cache is already gated
     // by other rules). Session zvt + lDs producers are the product surface.
     // Store foldCase-comparable roots (densable kgt) for _qu.
-    commandProducerDirsComparable = roots.map(d => toComparablePath(d))
+    state.commandProducerDirsComparable = roots.map(d => toComparablePath(d))
   }
 
   if (
-    !commandProducerDirsComparable ||
-    commandProducerDirsComparable.length === 0
+    !state.commandProducerDirsComparable ||
+    state.commandProducerDirsComparable.length === 0
   ) {
     return false
   }
 
   const target = toComparablePath(targetPath)
   // Comparable roots already foldCase-normalized; compare without re-fold.
-  return commandProducerDirsComparable.some(root => {
+  return state.commandProducerDirsComparable.some(root => {
     if (root === target) return true
     const rel = relative(root, target)
     return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)

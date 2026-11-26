@@ -22,6 +22,7 @@
  * ON returns true | undefined (never false).
  */
 
+import { getBootstrapSession, RootSessionSlot } from '../sessionRoot.js'
 import { firstPartyNameToCanonical } from './canonicalName.js'
 import { DENSABLE_EHL_CATALOG } from './densableEhlCatalog.219.js'
 
@@ -128,10 +129,6 @@ export type DensableModelCatalog = {
   readonly alias_migration: Readonly<Record<string, string>>
 }
 
-let activePublishedCatalog: DensableModelCatalog | null = null
-let activePublishedCatalogSource: string | null = null
-let catalogDecisionPromise: Promise<DensableModelCatalog> | null = null
-
 function rebuildCatalogIndices(catalog: DensableModelCatalog): {
   byId: Map<string, DensableCatalogModel>
   byProviderId: Map<string, string>
@@ -155,37 +152,59 @@ function rebuildCatalogIndices(catalog: DensableModelCatalog): {
   return { byId, byProviderId }
 }
 
-/** densable SQ() — active published catalog if verified, else baked EHl catalog. */
-export function getDensableModelCatalog(): DensableModelCatalog {
-  // Cast: as-const bake is structurally compatible; models[] is readonly tuple.
-  return (
-    activePublishedCatalog ??
-    (DENSABLE_EHL_CATALOG as unknown as DensableModelCatalog)
-  )
+const BAKED_MODEL_CATALOG =
+  DENSABLE_EHL_CATALOG as unknown as DensableModelCatalog
+const BAKED_CATALOG_INDICES = rebuildCatalogIndices(BAKED_MODEL_CATALOG)
+
+type ModelCatalogSessionState = {
+  activePublishedCatalog: DensableModelCatalog | null
+  activePublishedCatalogSource: string | null
+  catalogDecisionPromise: Promise<DensableModelCatalog> | null
+  /** densable Lqm — Map(catalog id → model). */
+  byId: Map<string, DensableCatalogModel>
+  /** densable Oqm — Map(provider id lower → catalog id). */
+  byProviderId: Map<string, string>
 }
 
-/** densable Lqm — Map(catalog id → model). */
-let Lqm: Map<string, DensableCatalogModel>
-/** densable Oqm — Map(provider id lower → catalog id). */
-let Oqm: Map<string, string>
-;({ byId: Lqm, byProviderId: Oqm } = rebuildCatalogIndices(
-  getDensableModelCatalog(),
-))
+// Official 2.1.331 [$e-007]: per-root-session published model catalog state.
+const modelCatalogSessionSlot = new RootSessionSlot<ModelCatalogSessionState>(
+  () => ({
+    activePublishedCatalog: null,
+    activePublishedCatalogSource: null,
+    catalogDecisionPromise: null,
+    byId: BAKED_CATALOG_INDICES.byId,
+    byProviderId: BAKED_CATALOG_INDICES.byProviderId,
+  }),
+)
+
+function getModelCatalogSessionState(): ModelCatalogSessionState {
+  return modelCatalogSessionSlot.of(getBootstrapSession())
+}
+
+/** densable SQ() — active published catalog if verified, else baked EHl catalog. */
+export function getDensableModelCatalog(): DensableModelCatalog {
+  return (
+    getModelCatalogSessionState().activePublishedCatalog ?? BAKED_MODEL_CATALOG
+  )
+}
 
 export function setActivePublishedModelCatalogForTesting(
   catalog: DensableModelCatalog | null,
   sourceKind: string | null = catalog ? 'test' : null,
 ): void {
-  activePublishedCatalog = catalog
-  activePublishedCatalogSource = sourceKind
-  catalogDecisionPromise = null
-  const rebuilt = rebuildCatalogIndices(getDensableModelCatalog())
-  Lqm = rebuilt.byId
-  Oqm = rebuilt.byProviderId
+  const state = getModelCatalogSessionState()
+  state.activePublishedCatalog = catalog
+  state.activePublishedCatalogSource = sourceKind
+  state.catalogDecisionPromise = null
+  const rebuilt = catalog
+    ? rebuildCatalogIndices(catalog)
+    : BAKED_CATALOG_INDICES
+  state.byId = rebuilt.byId
+  state.byProviderId = rebuilt.byProviderId
 }
 
 export function getActivePublishedModelCatalogSource(): string | null {
-  return activePublishedCatalogSource
+  return getModelCatalogSessionState().activePublishedCatalogSource
 }
 
 function isValidPublishedCatalogShape(
@@ -215,10 +234,11 @@ export async function ensurePublishedModelCatalogLoaded(opts?: {
   ignoreEnvUrl?: boolean
   timeoutMs?: number
 }): Promise<DensableModelCatalog> {
-  if (catalogDecisionPromise !== null) {
-    return catalogDecisionPromise
+  const state = getModelCatalogSessionState()
+  if (state.catalogDecisionPromise !== null) {
+    return state.catalogDecisionPromise
   }
-  catalogDecisionPromise = (async () => {
+  state.catalogDecisionPromise = (async () => {
     try {
       const { loadAndVerifyPublishedCatalog } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -231,32 +251,34 @@ export async function ensurePublishedModelCatalogLoaded(opts?: {
         timeoutMs: opts?.timeoutMs,
       })
       if (res.ok && isValidPublishedCatalogShape(res.document)) {
-        activePublishedCatalog = res.document
-        activePublishedCatalogSource = res.source.kind
         const rebuilt = rebuildCatalogIndices(res.document)
-        Lqm = rebuilt.byId
-        Oqm = rebuilt.byProviderId
+        state.activePublishedCatalog = res.document
+        state.activePublishedCatalogSource = res.source.kind
+        state.byId = rebuilt.byId
+        state.byProviderId = rebuilt.byProviderId
       }
     } catch {
       // Fail open to compiled catalog
     }
-    return getDensableModelCatalog()
+    return state.activePublishedCatalog ?? BAKED_MODEL_CATALOG
   })()
-  return catalogDecisionPromise
+  return state.catalogDecisionPromise
 }
 
 /** densable Aw(e) — exact catalog id lookup. */
 export function getDensableCatalogModel(
   catalogId: string,
 ): DensableCatalogModel | undefined {
-  return Lqm.get(catalogId)
+  return getModelCatalogSessionState().byId.get(catalogId)
 }
 
 /** densable RFr(e) — provider id → catalog id. */
 export function resolveCatalogIdFromProviderId(
   providerOrFullId: string,
 ): string | undefined {
-  return Oqm.get(providerOrFullId.toLowerCase())
+  return getModelCatalogSessionState().byProviderId.get(
+    providerOrFullId.toLowerCase(),
+  )
 }
 
 /**
@@ -387,7 +409,7 @@ export function resolveCatalogAlias(
 export const DENSABLE_CATALOG_CAPABILITIES: Readonly<
   Record<string, readonly string[]>
 > = Object.fromEntries(
-  getDensableModelCatalog().models.map(m => [m.id, m.capabilities]),
+  BAKED_MODEL_CATALOG.models.map(m => [m.id, m.capabilities]),
 )
 
 /** id → { id, capabilities, pricing key } for older Tig helpers. */
@@ -400,7 +422,7 @@ export type DensableCatalogEntry = {
 export const DENSABLE_CATALOG_MODELS: Readonly<
   Record<string, DensableCatalogEntry>
 > = Object.fromEntries(
-  getDensableModelCatalog().models.map(m => [
+  BAKED_MODEL_CATALOG.models.map(m => [
     m.id,
     {
       id: m.id,
@@ -417,7 +439,7 @@ export const DENSABLE_CATALOG_MODELS: Readonly<
 export const DENSABLE_PRICING_TIERS_FROM_CATALOG: Readonly<
   Record<string, CatalogModelCosts>
 > = Object.fromEntries(
-  Object.entries(getDensableModelCatalog().pricing_tiers).map(([k, v]) => [
+  Object.entries(BAKED_MODEL_CATALOG.pricing_tiers).map(([k, v]) => [
     k,
     nIcFromPricingTier(v),
   ]),

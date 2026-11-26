@@ -1,4 +1,5 @@
 import { logForDebugging } from '../debug.js'
+import { getActiveSessionFromAls, runWithSession } from '../sessionHost.js'
 import { releasePump, retainPump } from './drainRunLoop.js'
 import { requireComputerUseSwift } from './swiftLoader.js'
 
@@ -20,13 +21,38 @@ import { requireComputerUseSwift } from './swiftLoader.js'
  * doesn't eat the next user ESC.
  */
 
+type SwiftWithHotkey = {
+  hotkey?: {
+    registerEscape: (onEscape: () => void) => boolean
+    unregister: () => void
+    notifyExpectedEscape: () => void
+  }
+}
+
+// Process-global: macOS CGEventTap on CFRunLoopGetMain() is a single native
+// OS tap owned by the process. Callback re-enters the registering caller's ALS
+// session via capturedSession / runWithSession.
 let registered = false
+
+function getSwiftHotkey(): SwiftWithHotkey['hotkey'] {
+  return (requireComputerUseSwift() as unknown as SwiftWithHotkey).hotkey
+}
 
 export function registerEscHotkey(onEscape: () => void): boolean {
   if (process.platform !== 'darwin') return false
   if (registered) return true
-  const cu = requireComputerUseSwift()
-  if (!(cu as any).hotkey?.registerEscape(onEscape)) {
+  const capturedSession = getActiveSessionFromAls()
+  const wrappedOnEscape = (): void => {
+    if (
+      capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+    ) {
+      runWithSession(capturedSession, onEscape)
+    } else {
+      onEscape()
+    }
+  }
+  if (!getSwiftHotkey()?.registerEscape(wrappedOnEscape)) {
     // CGEvent.tapCreate failed — typically missing Accessibility permission.
     // CU still works, just without ESC abort. Mirrors Cowork's escAbort.ts:81.
     logForDebugging('[cu-esc] registerEscape returned false', { level: 'warn' })
@@ -41,7 +67,7 @@ export function registerEscHotkey(onEscape: () => void): boolean {
 export function unregisterEscHotkey(): void {
   if (!registered) return
   try {
-    ;(requireComputerUseSwift() as any).hotkey?.unregister()
+    getSwiftHotkey()?.unregister()
   } finally {
     releasePump()
     registered = false
@@ -51,5 +77,5 @@ export function unregisterEscHotkey(): void {
 
 export function notifyExpectedEscape(): void {
   if (!registered) return
-  ;(requireComputerUseSwift() as any).hotkey?.notifyExpectedEscape()
+  getSwiftHotkey()?.notifyExpectedEscape()
 }

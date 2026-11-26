@@ -9,6 +9,11 @@
  */
 
 import {
+  getBootstrapSessionHost,
+  HostSlot,
+  isSharedBackend,
+} from '../../utils/sessionHost.js'
+import {
   REPL_DETACH_AFTER_MS,
   REPL_MAIN_THREAD_KEY,
   REPL_SETTLE_WINDOW_MS,
@@ -1088,16 +1093,28 @@ export class ReplSessions {
   }
 }
 
-let replSessionsSingleton: ReplSessions | undefined
+type ReplSessionsHostState = {
+  singleton: ReplSessions | undefined
+}
+
+const replSessionsHostSlot = new HostSlot<ReplSessionsHostState>(() => ({
+  singleton: undefined,
+}))
+
+function getReplSessionsHostState(): ReplSessionsHostState {
+  return replSessionsHostSlot.of(getBootstrapSessionHost())
+}
 
 export function getReplSessions(): ReplSessions {
-  replSessionsSingleton ??= new ReplSessions()
-  return replSessionsSingleton
+  const hostState = getReplSessionsHostState()
+  hostState.singleton ??= new ReplSessions()
+  return hostState.singleton
 }
 
 export function resetReplSessionsForTests(): void {
-  replSessionsSingleton?.clear()
-  replSessionsSingleton = new ReplSessions()
+  const hostState = getReplSessionsHostState()
+  hostState.singleton?.clear()
+  hostState.singleton = new ReplSessions()
 }
 
 export function mainThreadStoppableWork(
@@ -1111,7 +1128,8 @@ export function mainThreadStoppableWork(
  * true when Code Mode opt-in is accepted and async REPL wiring is active.
  */
 export function isReplSpliceWaitEnabled(): boolean {
-  return isCodeModeAccepted() && isAsyncReplEnabled()
+  // Official 2.1.331 `Ize`: splice-wait is disabled under shared-backend mode
+  return !isSharedBackend() && isCodeModeAccepted() && isAsyncReplEnabled()
 }
 
 /**

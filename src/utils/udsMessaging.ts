@@ -43,6 +43,12 @@ import {
 import { isUncOrNtObjectPath } from './path.js'
 import { p, tGn } from './overflowuidTrust.js'
 import { getPlatform } from './platform.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 
 // ---------------------------------------------------------------------------
@@ -167,23 +173,9 @@ export function classifyInboundLocalHopChain(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Module state
+// Per-host module state (Official 2.1.331 HostSlot [W-110 Swn])
 // ---------------------------------------------------------------------------
 
-let server: Server | null = null
-let socketPath: string | null = null
-let onEnqueueCb: (() => void) | null = null
-const clients = new Set<Socket>()
-const inbox: UdsInboxEntry[] = []
-let nextId = 1
-let defaultSocketPath: string | null = null
-let authToken: string | null = null
-/** densable kWd.childToken — env inject / DWd "child". */
-let childToken: string | null = null
-/** densable ykh.authRequired — `requireAuth ?? mti()` (Windows-only default). */
-let authRequired = false
-/** densable lastStartDegradedCause — Unix key publish fail continues. */
-let lastStartDegradedCause: string | undefined
 /**
  * Official `s().lastStartFailureCause` / wZe @201218721.
  * SEA ye() assigns bind_failed / path_refused / key_publish_failed /
@@ -197,18 +189,186 @@ export type UdsStartFailureCause =
   | 'key_publish_failed'
   | 'post_bind_setup_failed'
 
-let lastStartFailureCause: UdsStartFailureCause | undefined
-let lastStartFailureDetail: string | undefined
-/** Official `s().startInFlight` — Wnr wrap; wZe stays silent while starting. */
-let startInFlight = false
-let capabilityFilePath: string | null = null
-/** Official 2.1.328 (`chunk@319503157.js @37128`): active & in-flight keyfiles unlinked synchronously on process exit. */
-let activeKeyFile: string | undefined
-let pendingKeyFile: string | undefined
-let inboxBytes = 0
+type UdsMessagingHostState = {
+  server: Server | null
+  socketPath: string | null
+  onEnqueueCb: (() => void) | null
+  clients: Set<Socket>
+  inbox: UdsInboxEntry[]
+  nextId: number
+  defaultSocketPath: string | null
+  authToken: string | null
+  /** densable kWd.childToken — env inject / DWd "child". */
+  childToken: string | null
+  /** densable ykh.authRequired — `requireAuth ?? mti()` (Windows-only default). */
+  authRequired: boolean
+  /** densable lastStartDegradedCause — Unix key publish fail continues. */
+  lastStartDegradedCause: string | undefined
+  lastStartFailureCause: UdsStartFailureCause | undefined
+  lastStartFailureDetail: string | undefined
+  /** Official `s().startInFlight` — Wnr wrap; wZe stays silent while starting. */
+  startInFlight: boolean
+  capabilityFilePath: string | null
+  /** Official 2.1.328 (`chunk@319503157.js @37128`): active & in-flight keyfiles unlinked synchronously on process exit. */
+  activeKeyFile: string | undefined
+  pendingKeyFile: string | undefined
+  inboxBytes: number
+  /** Official `s().firstLineDeadlineMs`. */
+  firstLineDeadlineMs: number
+  /** Official `s().silentDropReported` — one telemetry hit per host. */
+  silentDropReported: boolean
+  /** Unregister function for this host's active UDS cleanup registration. */
+  cleanupUnregister: (() => void) | null
+}
+
+const udsKeyFileOwners = new Set<WeakRef<UdsMessagingHostState>>()
+const liveUdsMessagingStates = new Set<WeakRef<UdsMessagingHostState>>()
+let processEnvUdsOwner: WeakRef<UdsMessagingHostState> | null = null
+
+const udsMessagingHostSlot = new HostSlot<UdsMessagingHostState>(() => ({
+  server: null,
+  socketPath: null,
+  onEnqueueCb: null,
+  clients: new Set<Socket>(),
+  inbox: [],
+  nextId: 1,
+  defaultSocketPath: null,
+  authToken: null,
+  childToken: null,
+  authRequired: false,
+  lastStartDegradedCause: undefined,
+  lastStartFailureCause: undefined,
+  lastStartFailureDetail: undefined,
+  startInFlight: false,
+  capabilityFilePath: null,
+  activeKeyFile: undefined,
+  pendingKeyFile: undefined,
+  inboxBytes: 0,
+  firstLineDeadlineMs: UDS_FIRST_LINE_DEADLINE_MS,
+  silentDropReported: false,
+  cleanupUnregister: null,
+}))
+
+function getUdsState(): UdsMessagingHostState {
+  return udsMessagingHostSlot.of(getBootstrapSessionHost())
+}
+
+function registerLiveUdsState(state: UdsMessagingHostState): void {
+  for (const ref of liveUdsMessagingStates) {
+    const owner = ref.deref()
+    if (owner === undefined) {
+      liveUdsMessagingStates.delete(ref)
+    } else if (owner === state) {
+      return
+    }
+  }
+  liveUdsMessagingStates.add(new WeakRef(state))
+}
+
+function unregisterLiveUdsState(state: UdsMessagingHostState): void {
+  for (const ref of liveUdsMessagingStates) {
+    const owner = ref.deref()
+    if (owner === undefined || owner === state) {
+      liveUdsMessagingStates.delete(ref)
+    }
+  }
+}
+
+function findSurvivingLiveUdsState(
+  exclude: UdsMessagingHostState,
+): UdsMessagingHostState | undefined {
+  for (const ref of liveUdsMessagingStates) {
+    const owner = ref.deref()
+    if (owner === undefined) {
+      liveUdsMessagingStates.delete(ref)
+      continue
+    }
+    if (
+      owner !== exclude &&
+      owner.server !== null &&
+      owner.socketPath !== null
+    ) {
+      return owner
+    }
+  }
+  return undefined
+}
+
+function claimProcessEnvUdsOwnershipIfUnowned(
+  state: UdsMessagingHostState,
+  socketPath: string,
+  childToken: string,
+): boolean {
+  const currentOwner = processEnvUdsOwner?.deref()
+  if (
+    currentOwner !== undefined &&
+    currentOwner !== state &&
+    currentOwner.server !== null &&
+    currentOwner.socketPath !== null &&
+    process.env.CLAUDE_CODE_MESSAGING_SOCKET === currentOwner.socketPath
+  ) {
+    return false
+  }
+  process.env.CLAUDE_CODE_MESSAGING_SOCKET = socketPath
+  process.env.CLAUDE_CODE_MESSAGING_TOKEN = childToken
+  processEnvUdsOwner = new WeakRef(state)
+  return true
+}
+
+function releaseProcessEnvUdsOwnership(
+  state: UdsMessagingHostState,
+  stoppedSocketPath: string,
+  stoppedChildToken: string | null,
+): void {
+  const ownedSocket =
+    process.env.CLAUDE_CODE_MESSAGING_SOCKET === stoppedSocketPath
+  const ownedToken =
+    stoppedChildToken !== null &&
+    process.env.CLAUDE_CODE_MESSAGING_TOKEN === stoppedChildToken
+  if (processEnvUdsOwner?.deref() === state) {
+    processEnvUdsOwner = null
+  }
+  if (!ownedSocket && !ownedToken) {
+    return
+  }
+  const survivor = findSurvivingLiveUdsState(state)
+  if (survivor !== undefined && survivor.socketPath !== null) {
+    if (ownedSocket) {
+      process.env.CLAUDE_CODE_MESSAGING_SOCKET = survivor.socketPath
+    }
+    if (ownedToken) {
+      if (survivor.childToken !== null) {
+        process.env.CLAUDE_CODE_MESSAGING_TOKEN = survivor.childToken
+      } else {
+        delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
+      }
+    }
+    processEnvUdsOwner = new WeakRef(survivor)
+    return
+  }
+  if (ownedSocket) {
+    delete process.env.CLAUDE_CODE_MESSAGING_SOCKET
+  }
+  if (ownedToken) {
+    delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
+  }
+}
+
+function trackKeyFileOwner(state: UdsMessagingHostState): void {
+  for (const ref of udsKeyFileOwners) {
+    const owner = ref.deref()
+    if (owner === undefined) {
+      udsKeyFileOwners.delete(ref)
+    } else if (owner === state) {
+      return
+    }
+  }
+  udsKeyFileOwners.add(new WeakRef(state))
+}
 
 /** Official `hn()` (`chunk@319503157.js @37128`) — register synchronous process exit handler once. */
-function registerKeyFileExitCleanup(): void {
+function registerKeyFileExitCleanup(state: UdsMessagingHostState): void {
+  trackKeyFileOwner(state)
   if (!process.listeners('exit').includes(unlinkUdsKeyFilesOnExit)) {
     process.on('exit', unlinkUdsKeyFilesOnExit)
   }
@@ -220,8 +380,23 @@ function registerKeyFileExitCleanup(): void {
  */
 export function unlinkUdsKeyFilesOnExit(): void {
   try {
-    for (const file of new Set([activeKeyFile, pendingKeyFile])) {
-      if (file === undefined) continue
+    const files = new Set<string>()
+    for (const ref of udsKeyFileOwners) {
+      const owner = ref.deref()
+      if (owner === undefined) {
+        udsKeyFileOwners.delete(ref)
+        continue
+      }
+      if (owner.activeKeyFile !== undefined) files.add(owner.activeKeyFile)
+      if (owner.pendingKeyFile !== undefined) files.add(owner.pendingKeyFile)
+    }
+    const current = udsMessagingHostSlot.peek(getBootstrapSessionHost())
+    if (current !== undefined) {
+      if (current.activeKeyFile !== undefined) files.add(current.activeKeyFile)
+      if (current.pendingKeyFile !== undefined)
+        files.add(current.pendingKeyFile)
+    }
+    for (const file of files) {
       try {
         unlinkSync(file)
       } catch {
@@ -317,28 +492,24 @@ export function formatUdsStartFailureReason(
 
 /** Official `Kmr`. */
 export function getUdsStartFailureCause(): UdsStartFailureCause | undefined {
-  return lastStartFailureCause
+  return getUdsState().lastStartFailureCause
 }
 
 /** Official `r0t` — `return wZe(s())`. */
 export function getUdsStartFailureReason(): string | undefined {
+  const state = getUdsState()
   return formatUdsStartFailureReason({
-    startInFlight,
-    activeSocketPath: socketPath ?? undefined,
-    lastStartFailureCause,
-    lastStartFailureDetail,
+    startInFlight: state.startInFlight,
+    activeSocketPath: state.socketPath ?? undefined,
+    lastStartFailureCause: state.lastStartFailureCause,
+    lastStartFailureDetail: state.lastStartFailureDetail,
   })
 }
 
 /** Official `s().lastStartFailureDetail` — named by socket-dir setup. */
 export function getUdsStartFailureDetail(): string | undefined {
-  return lastStartFailureDetail
+  return getUdsState().lastStartFailureDetail
 }
-
-/** Official `s().firstLineDeadlineMs`. */
-let firstLineDeadlineMs = UDS_FIRST_LINE_DEADLINE_MS
-/** Official `s().silentDropReported` — one telemetry hit per process. */
-let silentDropReported = false
 
 /** densable eFd — typed refuse when serialized UDS wire exceeds X1r. */
 export const UDS_MESSAGE_TOO_LARGE_ERROR_CLASS = 'message_too_large' as const
@@ -474,21 +645,22 @@ export function getUdsRuntimeDir(): string {
  * transparently, but we use the pipe format on Windows for Node.js compat.
  */
 export function getDefaultUdsSocketPath(): string {
-  if (defaultSocketPath) return defaultSocketPath
+  const state = getUdsState()
+  if (state.defaultSocketPath) return state.defaultSocketPath
   const nonce = randomBytes(8).toString('hex')
   if (process.platform === 'win32') {
-    defaultSocketPath = `\\\\.\\pipe\\claude-code-${process.pid}-${nonce}`
-    return defaultSocketPath
+    state.defaultSocketPath = `\\\\.\\pipe\\claude-code-${process.pid}-${nonce}`
+    return state.defaultSocketPath
   }
 
-  defaultSocketPath = join(
+  state.defaultSocketPath = join(
     getUdsRuntimeDir(),
     'cc-socks',
     `${process.pid}-${nonce}`,
     'messaging.sock',
   )
-  assertValidUnixSocketPath(defaultSocketPath)
-  return defaultSocketPath
+  assertValidUnixSocketPath(state.defaultSocketPath)
+  return state.defaultSocketPath
 }
 
 /**
@@ -496,7 +668,7 @@ export function getDefaultUdsSocketPath(): string {
  * if the server has not been started.
  */
 export function getUdsMessagingSocketPath(): string | undefined {
-  return socketPath ?? undefined
+  return getUdsState().socketPath ?? undefined
 }
 
 export function formatUdsAddress(socket: string): string {
@@ -1027,6 +1199,7 @@ async function writeCapabilityFile(
   socket: string,
   token: string,
   { sweepPermitted }: { sweepPermitted: boolean },
+  state: UdsMessagingHostState = getUdsState(),
 ): Promise<void> {
   const dir = getSessionsDir()
   await mkdir(dir, { recursive: true, mode: 0o700 })
@@ -1034,8 +1207,8 @@ async function writeCapabilityFile(
   const target = join(dir, deriveMessagingKeyName(process.pid, socket))
   // Official 2.1.328 (`chunk@319503157.js @31385`): track pendingKeyFile and arm
   // synchronous exit cleanup BEFORE publishing the keyfile.
-  pendingKeyFile = target
-  registerKeyFileExitCleanup()
+  state.pendingKeyFile = target
+  registerKeyFileExitCleanup(state)
   try {
     try {
       await unlink(target)
@@ -1050,10 +1223,10 @@ async function writeCapabilityFile(
       }),
       MESSAGING_KEY_MODE,
     )
-    capabilityFilePath = target
-    activeKeyFile = target
+    state.capabilityFilePath = target
+    state.activeKeyFile = target
   } finally {
-    pendingKeyFile = undefined
+    state.pendingKeyFile = undefined
   }
 }
 
@@ -1265,15 +1438,16 @@ export async function readUdsCapabilityToken(
  * Used by the print/SDK query loop to kick off processing.
  */
 export function setOnEnqueue(cb: (() => void) | null): void {
-  onEnqueueCb = cb
+  getUdsState().onEnqueueCb = cb
 }
 
 /**
  * Drain all pending inbox messages and release retained history.
  */
 export function drainInbox(): UdsInboxEntry[] {
-  const pending = inbox.splice(0, inbox.length)
-  inboxBytes = 0
+  const state = getUdsState()
+  const pending = state.inbox.splice(0, state.inbox.length)
+  state.inboxBytes = 0
   for (const entry of pending) {
     entry.status = 'processed'
   }
@@ -1284,34 +1458,40 @@ function getMessageBytes(message: UdsMessage): number {
   return Buffer.byteLength(jsonStringify(message), 'utf8')
 }
 
-function enqueueInboxEntry(entry: UdsInboxEntry): boolean {
+function enqueueInboxEntry(
+  entry: UdsInboxEntry,
+  state: UdsMessagingHostState = getUdsState(),
+): boolean {
   const entryBytes = getMessageBytes(entry.message)
   if (
     entryBytes > MAX_UDS_LINE_BYTES ||
-    inbox.length >= MAX_UDS_INBOX_ENTRIES ||
-    inboxBytes + entryBytes > MAX_UDS_INBOX_BYTES
+    state.inbox.length >= MAX_UDS_INBOX_ENTRIES ||
+    state.inboxBytes + entryBytes > MAX_UDS_INBOX_BYTES
   ) {
     logError(
       new Error(
-        `[udsMessaging] inbox full (${inbox.length}/${MAX_UDS_INBOX_ENTRIES}, ${inboxBytes}/${MAX_UDS_INBOX_BYTES} bytes); dropping message type=${entry.message.type}`,
+        `[udsMessaging] inbox full (${state.inbox.length}/${MAX_UDS_INBOX_ENTRIES}, ${state.inboxBytes}/${MAX_UDS_INBOX_BYTES} bytes); dropping message type=${entry.message.type}`,
       ),
     )
     return false
   }
-  inbox.push(entry)
-  inboxBytes += entryBytes
+  state.inbox.push(entry)
+  state.inboxBytes += entryBytes
   return true
 }
 
-function ensureAuthTokens(): { peerToken: string; childToken: string } {
-  if (!authToken) {
+function ensureAuthTokens(state: UdsMessagingHostState = getUdsState()): {
+  peerToken: string
+  childToken: string
+} {
+  if (!state.authToken) {
     // densable 2.1.239 R_a=16 → xYb 32 hex. kWd: peer + child.
-    authToken = randomBytes(UDS_PEER_TOKEN_BYTES).toString('hex')
+    state.authToken = randomBytes(UDS_PEER_TOKEN_BYTES).toString('hex')
   }
-  if (!childToken) {
-    childToken = randomBytes(UDS_PEER_TOKEN_BYTES).toString('hex')
+  if (!state.childToken) {
+    state.childToken = randomBytes(UDS_PEER_TOKEN_BYTES).toString('hex')
   }
-  return { peerToken: authToken, childToken }
+  return { peerToken: state.authToken, childToken: state.childToken }
 }
 
 function ensureAuthToken(): string {
@@ -1323,13 +1503,16 @@ function getMessageAuthToken(message: UdsMessage): string | undefined {
   return typeof token === 'string' ? token : undefined
 }
 
-function isAuthorizedMessage(message: UdsMessage): boolean {
+function isAuthorizedMessage(
+  message: UdsMessage,
+  state: UdsMessagingHostState = getUdsState(),
+): boolean {
   // Official F$E: drop missing/bad auth only when authRequired (mti/Windows).
-  if (!authRequired) return true
+  if (!state.authRequired) return true
   const provided = getMessageAuthToken(message)
-  if (!provided || !authToken) return false
+  if (!provided || !state.authToken) return false
   const providedBuffer = Buffer.from(provided, 'utf8')
-  const expectedBuffer = Buffer.from(authToken, 'utf8')
+  const expectedBuffer = Buffer.from(state.authToken, 'utf8')
   if (providedBuffer.length !== expectedBuffer.length) return false
   return timingSafeEqual(providedBuffer, expectedBuffer)
 }
@@ -1415,7 +1598,7 @@ function withRequestAuthToken(message: UdsMessage, token: string): UdsMessage {
  * processes (hooks, spawned agents) can discover and connect back.
  */
 export function getUdsStartDegradedCause(): string | undefined {
-  return lastStartDegradedCause
+  return getUdsState().lastStartDegradedCause
 }
 
 export async function startUdsMessaging(
@@ -1426,19 +1609,20 @@ export async function startUdsMessaging(
     firstLineDeadlineMs?: number
   },
 ): Promise<void> {
-  if (server) {
+  const state = getUdsState()
+  if (state.server) {
     logForDebugging('[udsMessaging] server already running, skipping start')
     return
   }
 
   // Official Wnr: startInFlight wrap. ye() stamps bind_failed first.
-  startInFlight = true
-  lastStartFailureCause = 'bind_failed'
-  lastStartFailureDetail = undefined
+  state.startInFlight = true
+  state.lastStartFailureCause = 'bind_failed'
+  state.lastStartFailureDetail = undefined
   try {
-    await startUdsMessagingBody(path, opts)
+    await startUdsMessagingBody(path, opts, state)
   } finally {
-    startInFlight = false
+    state.startInFlight = false
   }
 }
 
@@ -1449,8 +1633,18 @@ async function startUdsMessagingBody(
     requireAuth?: boolean
     firstLineDeadlineMs?: number
   },
+  state: UdsMessagingHostState = getUdsState(),
 ): Promise<void> {
   assertValidUnixSocketPath(path)
+  const sessionRef = new WeakRef(getBootstrapSession().root)
+  const stateRef = new WeakRef(state)
+  const runInCapturedSession = <T>(fn: () => T): T | undefined => {
+    const targetSession = sessionRef.deref()
+    if (targetSession === undefined) {
+      return undefined
+    }
+    return runWithSession(targetSession, fn)
+  }
 
   // Ensure parent directory exists (skip only for Windows named pipes).
   // Official leftover dir walk (Tn / Un / refuse-to-bind) names lastStartFailureDetail.
@@ -1458,8 +1652,8 @@ async function startUdsMessagingBody(
     try {
       await ensureSocketParent(path)
     } catch (error) {
-      lastStartFailureCause = 'socket_dir_refused'
-      lastStartFailureDetail =
+      state.lastStartFailureCause = 'socket_dir_refused'
+      state.lastStartFailureDetail =
         error instanceof Error ? error.message : String(error)
       throw error
     }
@@ -1474,289 +1668,325 @@ async function startUdsMessagingBody(
     }
   }
 
-  const tokens = ensureAuthTokens()
+  const tokens = ensureAuthTokens(state)
   const token = tokens.peerToken
   // Official Ckh: authRequired = t.requireAuth ?? mti()
-  authRequired = opts?.requireAuth ?? isMessagingLiveOwnerRequired()
+  state.authRequired = opts?.requireAuth ?? isMessagingLiveOwnerRequired()
   // Official `s().firstLineDeadlineMs = n.firstLineDeadlineMs ?? bn`
-  firstLineDeadlineMs = opts?.firstLineDeadlineMs ?? UDS_FIRST_LINE_DEADLINE_MS
-  lastStartDegradedCause = undefined
+  state.firstLineDeadlineMs =
+    opts?.firstLineDeadlineMs ?? UDS_FIRST_LINE_DEADLINE_MS
+  state.lastStartDegradedCause = undefined
   let startedServer: Server | null = null
   let exportedSocketEnv = false
+  let stampedHopAddress = false
   try {
     await new Promise<void>((resolve, reject) => {
       const srv = createServer(socket => {
-        if (clients.size >= MAX_UDS_CLIENTS) {
-          logForDebugging(
-            `[udsMessaging] rejected client: ${clients.size}/${MAX_UDS_CLIENTS} clients already connected`,
-          )
+        const targetSession = sessionRef.deref()
+        if (targetSession === undefined) {
           socket.destroy()
           return
         }
-        clients.add(socket)
-        logForDebugging(
-          `[udsMessaging] client connected (total: ${clients.size})`,
-        )
-        // densable F$E mli — stamp once per accepted socket, not per frame.
-        let kernelPeerPid: number | undefined
-        try {
-          const { readConnectedPeerPid } =
-            require('./udsClient.js') as typeof import('./udsClient.js')
-          kernelPeerPid = readConnectedPeerPid(socket)
-        } catch {
-          kernelPeerPid = undefined
-        }
-        let authenticated = !authRequired
-        /** densable F$E `a` — DWd role after first-line H_a. */
-        let authRole: 'peer' | 'child' | undefined
-        let sawFirstLine = false
-        let closing = false
-        const closeWithError = (data: string): void => {
-          if (closing || socket.destroyed) return
-          closing = true
-          socket.pause()
-          writeSocketErrorAndDestroy(socket, data)
-        }
-        const authTimer = authRequired
-          ? setTimeout(() => {
-              if (authenticated || socket.destroyed) return
-              logForDebugging(
-                '[udsMessaging] closing unauthenticated idle client',
-              )
-              closeWithError('authentication timeout')
-            }, UDS_AUTH_TIMEOUT_MS)
-          : undefined
-        if (authTimer !== undefined) unrefTimer(authTimer)
-        // Official It() — first complete line (including a blank line) clears
-        // the deadline. Not Node socket.setTimeout idle-on-any-data.
-        const deadlineMs = firstLineDeadlineMs
-        let firstLineTimer: ReturnType<typeof setTimeout> | undefined =
-          setTimeout(() => {
-            firstLineTimer = undefined
-            try {
-              logForDebugging(
-                `[uds-messaging] Closing a connection that sent no complete line within ${deadlineMs} ms`,
-              )
-              if (!silentDropReported) {
-                silentDropReported = true
-                logEvent('cross_session_inbox_auth', {
-                  reason:
-                    'silent_connection_deadline' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                })
-              }
-              socket.destroy()
-            } catch (error) {
-              logForDebugging(
-                `[uds-messaging] Failed to close a silent connection: ${error}`,
-                { level: 'warn' },
-              )
-            }
-          }, deadlineMs)
-        unrefTimer(firstLineTimer)
-        const clearFirstLineDeadline = (): void => {
-          if (firstLineTimer !== undefined) {
-            clearTimeout(firstLineTimer)
-            firstLineTimer = undefined
+        runWithSession(targetSession, () => {
+          if (state.clients.size >= MAX_UDS_CLIENTS) {
+            logForDebugging(
+              `[udsMessaging] rejected client: ${state.clients.size}/${MAX_UDS_CLIENTS} clients already connected`,
+            )
+            socket.destroy()
+            return
           }
-        }
-        socket.once('close', clearFirstLineDeadline)
-        socket.once('error', clearFirstLineDeadline)
-        const onDataForDeadline = (chunk: Buffer | string): void => {
-          const hasNewline =
-            typeof chunk === 'string'
-              ? chunk.includes('\n')
-              : chunk.includes(0x0a)
-          if (hasNewline) {
-            clearFirstLineDeadline()
-            socket.off('data', onDataForDeadline)
+          state.clients.add(socket)
+          logForDebugging(
+            `[udsMessaging] client connected (total: ${state.clients.size})`,
+          )
+          // densable F$E mli — stamp once per accepted socket, not per frame.
+          let kernelPeerPid: number | undefined
+          try {
+            const { readConnectedPeerPid } =
+              require('./udsClient.js') as typeof import('./udsClient.js')
+            kernelPeerPid = readConnectedPeerPid(socket)
+          } catch {
+            kernelPeerPid = undefined
           }
-        }
-        socket.on('data', onDataForDeadline)
-
-        attachNdjsonFramer<UdsMessage>(
-          socket,
-          msg => {
-            const first = !sawFirstLine
-            sawFirstLine = true
-            // densable F$E: first PWd frame is DWd; never inbox'd.
-            if (isUdsAuthFrame(msg)) {
-              if (first) {
-                authRole = classifyUdsAuthToken(msg.token, {
-                  peerToken: authToken,
-                  childToken,
-                })
-                if (authRole !== undefined) {
-                  authenticated = true
-                  if (authTimer !== undefined) clearTimeout(authTimer)
-                } else if (authRequired) {
-                  logForDebugging('[udsMessaging] rejected a bad auth frame')
-                  closeWithError('unauthorized')
+          let authenticated = !state.authRequired
+          /** densable F$E `a` — DWd role after first-line H_a. */
+          let authRole: 'peer' | 'child' | undefined
+          let sawFirstLine = false
+          let closing = false
+          const closeWithError = (data: string): void => {
+            if (closing || socket.destroyed) return
+            closing = true
+            socket.pause()
+            writeSocketErrorAndDestroy(socket, data)
+          }
+          const authTimer = state.authRequired
+            ? setTimeout(() => {
+                const liveSession = sessionRef.deref()
+                if (liveSession === undefined) {
+                  if (!authenticated && !socket.destroyed) {
+                    closeWithError('authentication timeout')
+                  }
+                  return
                 }
-              }
-              return
-            }
-            if (authRequired && authRole === undefined) {
-              // Official: no successful auth frame → drop the line.
-              // Local leftover: still accept meta.authToken (pre-H_a inject).
-              if (!isAuthorizedMessage(msg)) {
-                logForDebugging(
-                  `[udsMessaging] rejected unauthenticated message type=${msg.type}`,
-                )
-                closeWithError('unauthorized')
+                runWithSession(liveSession, () => {
+                  if (authenticated || socket.destroyed) return
+                  logForDebugging(
+                    '[udsMessaging] closing unauthenticated idle client',
+                  )
+                  closeWithError('authentication timeout')
+                })
+              }, UDS_AUTH_TIMEOUT_MS)
+            : undefined
+          if (authTimer !== undefined) unrefTimer(authTimer)
+          // Official It() — first complete line (including a blank line) clears
+          // the deadline. Not Node socket.setTimeout idle-on-any-data.
+          const deadlineMs = state.firstLineDeadlineMs
+          let firstLineTimer: ReturnType<typeof setTimeout> | undefined =
+            setTimeout(() => {
+              firstLineTimer = undefined
+              const liveSession = sessionRef.deref()
+              if (liveSession === undefined) {
+                if (!socket.destroyed) socket.destroy()
                 return
               }
-            }
-            if (!authenticated) {
-              authenticated = true
-              if (authTimer !== undefined) clearTimeout(authTimer)
-            }
-
-            // Handle ping with automatic pong
-            if (msg.type === 'ping') {
-              writeSocketMessage(socket, {
-                type: 'pong',
-                from: socketPath ?? undefined,
-                ts: new Date().toISOString(),
-              })
-              return
-            }
-
-            // densable 2.1.236 GAP #2 — control frames (notify_when_idle /
-            // peer_idle_notice) are handled out-of-band; never enter the text inbox.
-            if (msg.type === 'control') {
-              const sanitizedControl = stripAuthToken(msg)
-              try {
-                const { handleInboundControlFrame } =
-                  require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
-                void handleInboundControlFrame(
-                  sanitizedControl,
-                  socketPath ?? undefined,
-                )
-              } catch (err) {
-                logForDebugging(
-                  `[udsMessaging] control handler failed: ${errorMessage(err)}`,
-                )
-              }
-              writeSocketMessage(socket, {
-                type: 'response',
-                data: 'ok',
-                ts: new Date().toISOString(),
-              })
-              return
-            }
-
-            // Enqueue into inbox
-            const sanitizedMessage = stripAuthToken(msg)
-            const localHopMeta = classifyInboundLocalHopChain({
-              authRole,
-              from: sanitizedMessage.from,
-              localChain: sanitizedMessage.local_chain,
-              kernelPeerPid,
-              authRequired,
-            })
-            const entry: UdsInboxEntry = {
-              id: `uds-${nextId++}`,
-              message: sanitizedMessage,
-              receivedAt: Date.now(),
-              status: 'pending',
-              ...(kernelPeerPid !== undefined
-                ? { peerPid: kernelPeerPid }
-                : {}),
-              ...localHopMeta,
-            }
-            if (!enqueueInboxEntry(entry)) {
-              // densable 2.1.238 #30 — queue-full drop receipt; keep close string.
-              try {
-                const { noteInboxQueueFullDrop } =
-                  require('./peerReceipts.js') as typeof import('./peerReceipts.js')
-                noteInboxQueueFullDrop(sanitizedMessage)
-              } catch {
-                // optional
-              }
-              closeWithError('inbox full')
-              return
-            }
-            // densable $id / Nid.noteCorrespondent — track UDS peers for rename notice
-            try {
-              const fromRaw = sanitizedMessage.from
-              if (typeof fromRaw === 'string' && fromRaw.length > 0) {
-                const addr = fromRaw.startsWith('uds:')
-                  ? fromRaw
-                  : fromRaw.startsWith('/')
-                    ? `uds:${fromRaw}`
-                    : null
-                if (addr) {
-                  const sockPath = addr.slice(4)
-                  void import('./sessionNameUniqueness.js').then(
-                    async ({ noteSessionNameCorrespondent }) => {
-                      let peerPid = 0
-                      try {
-                        const { listLiveSessionRecords } = await import(
-                          './concurrentSessions.js'
-                        )
-                        const live = await listLiveSessionRecords()
-                        const hit = live.find(
-                          r => r.messagingSocketPath === sockPath,
-                        )
-                        if (hit) peerPid = hit.pid
-                      } catch {
-                        // optional
-                      }
-                      noteSessionNameCorrespondent(addr, peerPid)
-                    },
+              runWithSession(liveSession, () => {
+                try {
+                  logForDebugging(
+                    `[uds-messaging] Closing a connection that sent no complete line within ${deadlineMs} ms`,
+                  )
+                  if (!state.silentDropReported) {
+                    state.silentDropReported = true
+                    logEvent('cross_session_inbox_auth', {
+                      reason:
+                        'silent_connection_deadline' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    })
+                  }
+                  socket.destroy()
+                } catch (error) {
+                  logForDebugging(
+                    `[uds-messaging] Failed to close a silent connection: ${error}`,
+                    { level: 'warn' },
                   )
                 }
-              }
-            } catch {
-              // optional uniqueness tracking
+              })
+            }, deadlineMs)
+          unrefTimer(firstLineTimer)
+          const clearFirstLineDeadline = (): void => {
+            if (firstLineTimer !== undefined) {
+              clearTimeout(firstLineTimer)
+              firstLineTimer = undefined
             }
-            logForDebugging(
-              `[udsMessaging] enqueued message type=${msg.type} from=${msg.from ?? 'unknown'}`,
-            )
-            writeSocketMessage(socket, {
-              type: 'response',
-              data: 'ok',
-              ts: new Date().toISOString(),
-              meta: { id: entry.id },
-            })
-            onEnqueueCb?.()
-          },
-          text => jsonParse(text) as UdsMessage,
-          {
-            // densable X1r / BUt — gold recv counts JS string `.length` after
-            // utf8 (chars, not bytes). Byte budget stays a UTF-8 backstop.
-            // Do not socket.setEncoding('utf8') — framer expects Buffer.
-            maxFrameBytes: MAX_UDS_LINE_BYTES,
-            maxFrameChars: MAX_UDS_LINE_CHARS,
-            onFrameError: () => {
-              // densable recv drop: log + destroy (no silent tool success).
-              logForDebugging(
-                `[uds-messaging] Line exceeded ${MAX_UDS_LINE_CHARS} chars; dropping connection`,
-                { level: 'warn' },
-              )
-              if (!socket.destroyed) socket.destroy()
-            },
-            onInvalidFrame: error => {
-              logForDebugging(
-                `[udsMessaging] invalid client frame: ${errorMessage(error)}`,
-              )
-              closeWithError('invalid frame')
-            },
-            destroyOnFrameError: false,
-          },
-        )
+          }
+          socket.once('close', clearFirstLineDeadline)
+          socket.once('error', clearFirstLineDeadline)
+          const onDataForDeadline = (chunk: Buffer | string): void => {
+            const hasNewline =
+              typeof chunk === 'string'
+                ? chunk.includes('\n')
+                : chunk.includes(0x0a)
+            if (hasNewline) {
+              clearFirstLineDeadline()
+              socket.off('data', onDataForDeadline)
+            }
+          }
+          socket.on('data', onDataForDeadline)
 
-        socket.on('close', () => {
-          if (authTimer !== undefined) clearTimeout(authTimer)
-          clearFirstLineDeadline()
-          clients.delete(socket)
-        })
+          attachNdjsonFramer<UdsMessage>(
+            socket,
+            msg => {
+              const liveSession = sessionRef.deref()
+              if (liveSession === undefined) {
+                if (!socket.destroyed) socket.destroy()
+                return
+              }
+              runWithSession(liveSession, () => {
+                const first = !sawFirstLine
+                sawFirstLine = true
+                // densable F$E: first PWd frame is DWd; never inbox'd.
+                if (isUdsAuthFrame(msg)) {
+                  if (first) {
+                    authRole = classifyUdsAuthToken(msg.token, {
+                      peerToken: state.authToken,
+                      childToken: state.childToken,
+                    })
+                    if (authRole !== undefined) {
+                      authenticated = true
+                      if (authTimer !== undefined) clearTimeout(authTimer)
+                    } else if (state.authRequired) {
+                      logForDebugging(
+                        '[udsMessaging] rejected a bad auth frame',
+                      )
+                      closeWithError('unauthorized')
+                    }
+                  }
+                  return
+                }
+                if (state.authRequired && authRole === undefined) {
+                  // Official: no successful auth frame → drop the line.
+                  // Local leftover: still accept meta.authToken (pre-H_a inject).
+                  if (!isAuthorizedMessage(msg, state)) {
+                    logForDebugging(
+                      `[udsMessaging] rejected unauthenticated message type=${msg.type}`,
+                    )
+                    closeWithError('unauthorized')
+                    return
+                  }
+                }
+                if (!authenticated) {
+                  authenticated = true
+                  if (authTimer !== undefined) clearTimeout(authTimer)
+                }
 
-        socket.on('error', err => {
-          if (authTimer !== undefined) clearTimeout(authTimer)
-          clearFirstLineDeadline()
-          clients.delete(socket)
-          logForDebugging(`[udsMessaging] client error: ${errorMessage(err)}`)
+                // Handle ping with automatic pong
+                if (msg.type === 'ping') {
+                  writeSocketMessage(socket, {
+                    type: 'pong',
+                    from: state.socketPath ?? undefined,
+                    ts: new Date().toISOString(),
+                  })
+                  return
+                }
+
+                // densable 2.1.236 GAP #2 — control frames (notify_when_idle /
+                // peer_idle_notice) are handled out-of-band; never enter the text inbox.
+                if (msg.type === 'control') {
+                  const sanitizedControl = stripAuthToken(msg)
+                  try {
+                    const { handleInboundControlFrame } =
+                      require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
+                    void handleInboundControlFrame(
+                      sanitizedControl,
+                      state.socketPath ?? undefined,
+                    )
+                  } catch (err) {
+                    logForDebugging(
+                      `[udsMessaging] control handler failed: ${errorMessage(err)}`,
+                    )
+                  }
+                  writeSocketMessage(socket, {
+                    type: 'response',
+                    data: 'ok',
+                    ts: new Date().toISOString(),
+                  })
+                  return
+                }
+
+                // Enqueue into inbox
+                const sanitizedMessage = stripAuthToken(msg)
+                const localHopMeta = classifyInboundLocalHopChain({
+                  authRole,
+                  from: sanitizedMessage.from,
+                  localChain: sanitizedMessage.local_chain,
+                  kernelPeerPid,
+                  authRequired: state.authRequired,
+                })
+                const entry: UdsInboxEntry = {
+                  id: `uds-${state.nextId++}`,
+                  message: sanitizedMessage,
+                  receivedAt: Date.now(),
+                  status: 'pending',
+                  ...(kernelPeerPid !== undefined
+                    ? { peerPid: kernelPeerPid }
+                    : {}),
+                  ...localHopMeta,
+                }
+                if (!enqueueInboxEntry(entry, state)) {
+                  // densable 2.1.238 #30 — queue-full drop receipt; keep close string.
+                  try {
+                    const { noteInboxQueueFullDrop } =
+                      require('./peerReceipts.js') as typeof import('./peerReceipts.js')
+                    noteInboxQueueFullDrop(sanitizedMessage)
+                  } catch {
+                    // optional
+                  }
+                  closeWithError('inbox full')
+                  return
+                }
+                // densable $id / Nid.noteCorrespondent — track UDS peers for rename notice
+                try {
+                  const fromRaw = sanitizedMessage.from
+                  if (typeof fromRaw === 'string' && fromRaw.length > 0) {
+                    const addr = fromRaw.startsWith('uds:')
+                      ? fromRaw
+                      : fromRaw.startsWith('/')
+                        ? `uds:${fromRaw}`
+                        : null
+                    if (addr) {
+                      const sockPath = addr.slice(4)
+                      void import('./sessionNameUniqueness.js').then(
+                        async ({ noteSessionNameCorrespondent }) => {
+                          await runInCapturedSession(async () => {
+                            let peerPid = 0
+                            try {
+                              const { listLiveSessionRecords } = await import(
+                                './concurrentSessions.js'
+                              )
+                              const live = await listLiveSessionRecords()
+                              const hit = live.find(
+                                r => r.messagingSocketPath === sockPath,
+                              )
+                              if (hit) peerPid = hit.pid
+                            } catch {
+                              // optional
+                            }
+                            noteSessionNameCorrespondent(addr, peerPid)
+                          })
+                        },
+                      )
+                    }
+                  }
+                } catch {
+                  // optional uniqueness tracking
+                }
+                logForDebugging(
+                  `[udsMessaging] enqueued message type=${msg.type} from=${msg.from ?? 'unknown'}`,
+                )
+                writeSocketMessage(socket, {
+                  type: 'response',
+                  data: 'ok',
+                  ts: new Date().toISOString(),
+                  meta: { id: entry.id },
+                })
+                state.onEnqueueCb?.()
+              })
+            },
+            text => jsonParse(text) as UdsMessage,
+            {
+              // densable X1r / BUt — gold recv counts JS string `.length` after
+              // utf8 (chars, not bytes). Byte budget stays a UTF-8 backstop.
+              // Do not socket.setEncoding('utf8') — framer expects Buffer.
+              maxFrameBytes: MAX_UDS_LINE_BYTES,
+              maxFrameChars: MAX_UDS_LINE_CHARS,
+              onFrameError: () => {
+                // densable recv drop: log + destroy (no silent tool success).
+                logForDebugging(
+                  `[uds-messaging] Line exceeded ${MAX_UDS_LINE_CHARS} chars; dropping connection`,
+                  { level: 'warn' },
+                )
+                if (!socket.destroyed) socket.destroy()
+              },
+              onInvalidFrame: error => {
+                logForDebugging(
+                  `[udsMessaging] invalid client frame: ${errorMessage(error)}`,
+                )
+                closeWithError('invalid frame')
+              },
+              destroyOnFrameError: false,
+            },
+          )
+
+          socket.on('close', () => {
+            if (authTimer !== undefined) clearTimeout(authTimer)
+            clearFirstLineDeadline()
+            state.clients.delete(socket)
+          })
+
+          socket.on('error', err => {
+            if (authTimer !== undefined) clearTimeout(authTimer)
+            clearFirstLineDeadline()
+            state.clients.delete(socket)
+            logForDebugging(`[udsMessaging] client error: ${errorMessage(err)}`)
+          })
         })
       })
 
@@ -1804,7 +2034,7 @@ async function startUdsMessagingBody(
             }
             srv.off('error', rejectBeforeListen)
             srv.on('error', logRuntimeError)
-            server = srv
+            state.server = srv
             startedServer = srv
             resolve()
           } catch (error) {
@@ -1832,13 +2062,18 @@ async function startUdsMessagingBody(
     try {
       const { isRegistrySweepPermitted } =
         require('./concurrentSessions.js') as typeof import('./concurrentSessions.js')
-      await writeCapabilityFile(path, token, {
-        sweepPermitted: await isRegistrySweepPermitted(),
-      })
+      await writeCapabilityFile(
+        path,
+        token,
+        {
+          sweepPermitted: await isRegistrySweepPermitted(),
+        },
+        state,
+      )
     } catch (publishErr) {
       const detail =
         publishErr instanceof Error ? publishErr.message : String(publishErr)
-      if (authRequired) {
+      if (state.authRequired) {
         logForDebugging(
           `[uds-messaging] Failed to publish the inbox auth key (refusing to run an inbox no peer can authenticate to): ${detail}`,
         )
@@ -1846,30 +2081,35 @@ async function startUdsMessagingBody(
           `[uds-messaging] Failed to publish the inbox auth key (refusing to run an inbox no peer can authenticate to): ${detail}`,
         )
         ;(err as Error & { code?: string }).code = 'key_publish_failed'
-        lastStartFailureCause = 'key_publish_failed'
+        state.lastStartFailureCause = 'key_publish_failed'
         throw err
       }
       logForDebugging(
         `[uds-messaging] Failed to publish the inbox auth key; peers will send unauthenticated (accepted: auth is optional on this platform): ${detail}`,
       )
-      lastStartDegradedCause = 'key_publish_failed'
+      state.lastStartDegradedCause = 'key_publish_failed'
     }
-    socketPath = path
+    state.socketPath = path
+    registerLiveUdsState(state)
     // Export so child processes can discover the socket only after the
-    // capability file exists and the listener is ready.
-    process.env.CLAUDE_CODE_MESSAGING_SOCKET = path
-    exportedSocketEnv = true
+    // capability file exists and the listener is ready. If another live UDS
+    // host already owns process.env, keep that owner intact.
+    // densable Ckh: CLAUDE_CODE_MESSAGING_TOKEN is kWd.childToken (DWd "child").
+    // peerToken stays in the capability file / IWd. Do not invent a non-env path.
+    exportedSocketEnv = claimProcessEnvUdsOwnershipIfUnowned(
+      state,
+      path,
+      tokens.childToken,
+    )
     // densable q2r(EW(e)) — stamp own hop token for K2r hop-loop.
     try {
       const { setOwnUdsHopAddress } =
         require('./peerAdmission.js') as typeof import('./peerAdmission.js')
       setOwnUdsHopAddress(formatUdsAddress(path))
+      stampedHopAddress = true
     } catch {
       // peerAdmission optional at early boot / tests
     }
-    // densable Ckh: CLAUDE_CODE_MESSAGING_TOKEN is kWd.childToken (DWd "child").
-    // peerToken stays in the capability file / IWd. Do not invent a non-env path.
-    process.env.CLAUDE_CODE_MESSAGING_TOKEN = tokens.childToken
     // densable kla — stamp messagingSocketPath + features:["notify_idle"] voucher.
     try {
       const { updateSessionMessagingSocket } =
@@ -1913,7 +2153,9 @@ async function startUdsMessagingBody(
         const { setMainLoopBecameIdleListener } =
           require('./sessionActivity.js') as typeof import('./sessionActivity.js')
         setMainLoopBecameIdleListener(() => {
-          void flushIdleSubscribers({ state: 'idle' })
+          runInCapturedSession(() => {
+            void flushIdleSubscribers({ state: 'idle' })
+          })
         })
       } catch {
         // sessionActivity optional at early boot
@@ -1927,33 +2169,35 @@ async function startUdsMessagingBody(
       `[udsMessaging] Listening: ${path}${opts?.isExplicit ? ' (explicit)' : ''}`,
     )
     logForDebugging(
-      `[uds-messaging] Connect when the data is ready (run the command first, then connect and write its output as ONE line, as in the node recipe above): a connection that sends no complete line within ${firstLineDeadlineMs} ms is closed`,
+      `[uds-messaging] Connect when the data is ready (run the command first, then connect and write its output as ONE line, as in the node recipe above): a connection that sends no complete line within ${state.firstLineDeadlineMs} ms is closed`,
       { level: 'info' },
     )
     // Official ye(): lastStartFailureCause=void 0 after listen succeeds.
-    lastStartFailureCause = undefined
-    lastStartFailureDetail = undefined
+    state.lastStartFailureCause = undefined
+    state.lastStartFailureDetail = undefined
   } catch (error) {
-    if (capabilityFilePath) {
+    unregisterLiveUdsState(state)
+    if (state.capabilityFilePath) {
       try {
-        await unlink(capabilityFilePath)
+        await unlink(state.capabilityFilePath)
       } catch {
         // Already gone.
       }
-      capabilityFilePath = null
+      state.capabilityFilePath = null
     }
-    activeKeyFile = undefined
-    pendingKeyFile = undefined
+    state.activeKeyFile = undefined
+    state.pendingKeyFile = undefined
     if (startedServer) {
       await closeServer(startedServer)
     }
-    if (server === startedServer) {
-      server = null
+    if (state.server === startedServer) {
+      state.server = null
     }
     await removeSocketPath(path)
     if (exportedSocketEnv) {
-      delete process.env.CLAUDE_CODE_MESSAGING_SOCKET
-      delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
+      releaseProcessEnvUdsOwnership(state, path, tokens.childToken)
+    }
+    if (stampedHopAddress) {
       try {
         const { setOwnUdsHopAddress } =
           require('./peerAdmission.js') as typeof import('./peerAdmission.js')
@@ -1962,16 +2206,16 @@ async function startUdsMessagingBody(
         // optional
       }
     }
-    socketPath = null
-    defaultSocketPath = null
-    authToken = null
-    childToken = null
-    authRequired = false
+    state.socketPath = null
+    state.defaultSocketPath = null
+    state.authToken = null
+    state.childToken = null
+    state.authRequired = false
     const code = (error as { code?: string }).code
     if (code === 'key_publish_failed') {
-      lastStartFailureCause = 'key_publish_failed'
-    } else if (startedServer && lastStartFailureCause === 'bind_failed') {
-      lastStartFailureCause = 'post_bind_setup_failed'
+      state.lastStartFailureCause = 'key_publish_failed'
+    } else if (startedServer && state.lastStartFailureCause === 'bind_failed') {
+      state.lastStartFailureCause = 'post_bind_setup_failed'
     }
     logForDebugging(`[uds-messaging] Failed to start: ${error}`, {
       level: 'error',
@@ -1979,95 +2223,151 @@ async function startUdsMessagingBody(
     throw error
   }
 
-  // Register cleanup so the socket file is removed on exit
-  registerCleanup(async () => {
-    await stopUdsMessaging()
+  // Register cleanup so the socket file is removed on exit.
+  // If the captured root session is still alive, re-enter its ALS context and
+  // call stopUdsMessaging(). If the session was GC'd, close the orphaned state
+  // directly without touching the default bootstrap host.
+  state.cleanupUnregister?.()
+  state.cleanupUnregister = registerCleanup(() =>
+    cleanupCapturedUdsSession(sessionRef, stateRef),
+  )
+}
+
+type WeakRefLike<T extends object> = {
+  deref(): T | undefined
+}
+
+async function cleanupCapturedUdsSession(
+  sessionRef: WeakRefLike<ReturnType<typeof getBootstrapSession>>,
+  stateRef: WeakRefLike<UdsMessagingHostState>,
+): Promise<void> {
+  const targetSession = sessionRef.deref()
+  if (targetSession !== undefined) {
+    await runWithSession(targetSession, () => stopUdsMessaging())
+    return
+  }
+  const deadState = stateRef.deref()
+  if (deadState !== undefined) {
+    await stopUdsMessagingState(deadState, { detachHostCallbacks: false })
+  }
+}
+
+async function stopUdsMessagingState(
+  state: UdsMessagingHostState,
+  opts: { detachHostCallbacks: boolean },
+): Promise<void> {
+  state.defaultSocketPath = null
+  const unregisterCleanup = state.cleanupUnregister
+  state.cleanupUnregister = null
+  unregisterCleanup?.()
+  if (!state.server) return
+
+  unregisterLiveUdsState(state)
+
+  if (opts.detachHostCallbacks) {
+    // densable: on exit, fire one peer_idle_notice (state=exited) per inbound sub.
+    try {
+      const { flushIdleSubscribers, setPeerIdleNoticeSender } =
+        require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
+      await flushIdleSubscribers({ state: 'exited' })
+      setPeerIdleNoticeSender(null)
+    } catch {
+      // best-effort
+    }
+    try {
+      const { setSendPeerReceipt } =
+        require('./peerReceipts.js') as typeof import('./peerReceipts.js')
+      setSendPeerReceipt(null)
+    } catch {
+      // optional
+    }
+    try {
+      const { setMainLoopBecameIdleListener } =
+        require('./sessionActivity.js') as typeof import('./sessionActivity.js')
+      setMainLoopBecameIdleListener(null)
+    } catch {
+      // optional
+    }
+    try {
+      const { updateSessionMessagingSocket } =
+        require('./concurrentSessions.js') as typeof import('./concurrentSessions.js')
+      void updateSessionMessagingSocket(undefined)
+    } catch {
+      // optional
+    }
+  }
+
+  // Close all connected clients
+  for (const socket of state.clients) {
+    socket.destroy()
+  }
+  state.clients.clear()
+
+  const activeServer = state.server
+  await new Promise<void>(resolve => {
+    activeServer.close(() => resolve())
   })
+  state.server = null
+  state.inbox.length = 0
+  state.inboxBytes = 0
+  state.onEnqueueCb = null
+
+  // Remove socket file (skip on Windows — pipe paths aren't files)
+  if (state.socketPath) {
+    const stoppedSocketPath = state.socketPath
+    const stoppedChildToken = state.childToken
+    state.socketPath = null
+    state.authToken = null
+    state.childToken = null
+    state.authRequired = false
+    state.lastStartDegradedCause = undefined
+    await removeSocketPath(stoppedSocketPath)
+    releaseProcessEnvUdsOwnership(state, stoppedSocketPath, stoppedChildToken)
+    if (opts.detachHostCallbacks) {
+      try {
+        const { setOwnUdsHopAddress } =
+          require('./peerAdmission.js') as typeof import('./peerAdmission.js')
+        setOwnUdsHopAddress(undefined)
+      } catch {
+        // optional
+      }
+    }
+    logForDebugging(
+      `[udsMessaging] server stopped, socket removed: ${stoppedSocketPath}`,
+    )
+  }
+  if (state.capabilityFilePath) {
+    try {
+      await unlink(state.capabilityFilePath)
+    } catch {
+      // Already gone
+    }
+    state.capabilityFilePath = null
+  }
+  state.activeKeyFile = undefined
+  state.pendingKeyFile = undefined
 }
 
 /**
  * Stop the UDS messaging server and clean up the socket file.
  */
 export async function stopUdsMessaging(): Promise<void> {
-  defaultSocketPath = null
-  if (!server) return
+  await stopUdsMessagingState(getUdsState(), { detachHostCallbacks: true })
+}
 
-  // densable: on exit, fire one peer_idle_notice (state=exited) per inbound sub.
-  try {
-    const { flushIdleSubscribers, setPeerIdleNoticeSender } =
-      require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
-    await flushIdleSubscribers({ state: 'exited' })
-    setPeerIdleNoticeSender(null)
-  } catch {
-    // best-effort
-  }
-  try {
-    const { setSendPeerReceipt } =
-      require('./peerReceipts.js') as typeof import('./peerReceipts.js')
-    setSendPeerReceipt(null)
-  } catch {
-    // optional
-  }
-  try {
-    const { setMainLoopBecameIdleListener } =
-      require('./sessionActivity.js') as typeof import('./sessionActivity.js')
-    setMainLoopBecameIdleListener(null)
-  } catch {
-    // optional
-  }
-  try {
-    const { updateSessionMessagingSocket } =
-      require('./concurrentSessions.js') as typeof import('./concurrentSessions.js')
-    void updateSessionMessagingSocket(undefined)
-  } catch {
-    // optional
-  }
-
-  // Close all connected clients
-  for (const socket of clients) {
-    socket.destroy()
-  }
-  clients.clear()
-
-  await new Promise<void>(resolve => {
-    server!.close(() => resolve())
-  })
-  server = null
-  inbox.length = 0
-  inboxBytes = 0
-  onEnqueueCb = null
-
-  // Remove socket file (skip on Windows — pipe paths aren't files)
-  if (socketPath) {
-    await removeSocketPath(socketPath)
-    delete process.env.CLAUDE_CODE_MESSAGING_SOCKET
-    delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
-    try {
-      const { setOwnUdsHopAddress } =
-        require('./peerAdmission.js') as typeof import('./peerAdmission.js')
-      setOwnUdsHopAddress(undefined)
-    } catch {
-      // optional
-    }
-    logForDebugging(
-      `[udsMessaging] server stopped, socket removed: ${socketPath}`,
-    )
-    socketPath = null
-    authToken = null
-    childToken = null
-    authRequired = false
-    lastStartDegradedCause = undefined
-  }
-  if (capabilityFilePath) {
-    try {
-      await unlink(capabilityFilePath)
-    } catch {
-      // Already gone
-    }
-    capabilityFilePath = null
-  }
-  activeKeyFile = undefined
-  pendingKeyFile = undefined
+/**
+ * Test-only helper that exercises the dead-sessionRef cleanup path in
+ * `cleanupCapturedUdsSession` deterministically without relying on GC timing.
+ */
+export async function _runUdsDeadSessionCleanupForTests(
+  host: object,
+): Promise<void> {
+  const deadState = udsMessagingHostSlot.peek(host)
+  if (deadState === undefined) return
+  await cleanupCapturedUdsSession(
+    { deref: () => undefined },
+    new WeakRef(deadState),
+  )
 }
 
 /**
@@ -2079,6 +2379,7 @@ export async function sendUdsMessage(
   message: UdsMessage,
   opts: { authToken?: string } = {},
 ): Promise<void> {
+  const state = getUdsState()
   const { createConnection } = await import('net')
   // densable cmp: IWd(target) peerToken, then H_a prefix. Own token is fallback
   // for same-process sends before the key file is visible.
@@ -2086,13 +2387,13 @@ export async function sendUdsMessage(
   const token =
     opts.authToken ??
     (cap.kind === 'token' ? cap.token : undefined) ??
-    authToken
+    state.authToken
   if (!token) {
     throw new Error('Cannot send UDS message without auth token')
   }
   const outbound: UdsMessage = {
     ...message,
-    from: message.from ?? socketPath ?? undefined,
+    from: message.from ?? state.socketPath ?? undefined,
     ts: message.ts ?? new Date().toISOString(),
   }
   const payload = jsonStringify(outbound)

@@ -24,21 +24,28 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { validateKey } from '../../utils/localValidate.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
 // L8 fix: cache the result so repeated tool calls don't re-do homedir() +
 // join() on every list/fetch. Cache is keyed on the env var so a test that
 // changes CLAUDE_CONFIG_DIR mid-process still picks up the new dir.
-let _baseDirCache: { configDir: string; baseDir: string } | undefined
+type BaseDirCacheSlot = {
+  value: { configDir: string; baseDir: string } | undefined
+}
+const baseDirCacheByHost = new HostSlot<BaseDirCacheSlot>(() => ({
+  value: undefined,
+}))
 function getBaseDir(): string {
+  const cacheSlot = baseDirCacheByHost.of(getBootstrapSessionHost())
   const configDir =
     process.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude')
-  if (_baseDirCache && _baseDirCache.configDir === configDir) {
-    return _baseDirCache.baseDir
+  if (cacheSlot.value && cacheSlot.value.configDir === configDir) {
+    return cacheSlot.value.baseDir
   }
   const baseDir = join(configDir, 'local-memory')
-  _baseDirCache = { configDir, baseDir }
+  cacheSlot.value = { configDir, baseDir }
   return baseDir
 }
 

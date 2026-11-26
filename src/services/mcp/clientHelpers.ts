@@ -39,6 +39,7 @@ import {
   truncateMcpContentIfNeeded,
 } from '../../utils/mcpValidation.js'
 import { resolveMcpToolIdleTimeoutMs } from '../../utils/residualMsEnvGates.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   isPersistError,
@@ -672,10 +673,16 @@ export function extractToolUseId(
  */
 export const MAX_MCP_TOOL_NAME_LENGTH = 128
 const MAX_REPORTED_LONG_TOOL_NAMES = 256
-const reportedLongToolNames = new Set<string>()
+const hostReportedLongToolNamesSlot = new HostSlot<Set<string>>(
+  () => new Set<string>(),
+)
+
+function getReportedLongToolNames(): Set<string> {
+  return hostReportedLongToolNamesSlot.of(getBootstrapSessionHost())
+}
 
 export function resetReportedLongToolNamesForTest(): void {
-  reportedLongToolNames.clear()
+  hostReportedLongToolNamesSlot.peek(getBootstrapSessionHost())?.clear()
 }
 
 export function filterMcpToolsByNameLength<
@@ -688,6 +695,7 @@ export function filterMcpToolsByNameLength<
     }
     const serverName =
       tool.mcpInfo?.serverName ?? fallbackServerName ?? 'unknown'
+    const reportedLongToolNames = getReportedLongToolNames()
     if (
       reportedLongToolNames.size < MAX_REPORTED_LONG_TOOL_NAMES &&
       !reportedLongToolNames.has(tool.name)

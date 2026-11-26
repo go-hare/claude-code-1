@@ -1,11 +1,17 @@
 import {
-  getClaudeAIOAuthTokens,
   getAnthropicApiKeyWithSource,
+  getClaudeAIOAuthTokens,
 } from '../../utils/auth.js'
 import { getGlobalConfig } from '../../utils/config.js'
-import { isDisklessLaunch } from '../../utils/sessionHost.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logForDebugging } from '../../utils/debug.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  isDisklessLaunch,
+  runWithSession,
+} from '../../utils/sessionHost.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logEvent } from '../analytics/index.js'
 import type { ScopedMcpServerConfig } from './types.js'
 
@@ -29,17 +35,29 @@ type McpIdentityState = {
   identityChanged: boolean
   offLatched?: string
 }
-const state: McpIdentityState = {
-  identityEpoch: 0,
-  identityBaseline: undefined,
-  identitySeedAttempted: false,
-  lastResolvedAccountToken: undefined,
-  tripUnowned: false,
-  identityChanged: false,
+
+function createMcpIdentityState(): McpIdentityState {
+  return {
+    identityEpoch: 0,
+    identityBaseline: undefined,
+    identitySeedAttempted: false,
+    lastResolvedAccountToken: undefined,
+    tripUnowned: false,
+    identityChanged: false,
+  }
 }
 
-/** Gold Ha/Pdt: disabled and diskless states latch for the process. */
+const mcpIdentityHostSlot = new HostSlot<McpIdentityState>(
+  createMcpIdentityState,
+)
+
+function getMcpIdentityState(): McpIdentityState {
+  return mcpIdentityHostSlot.of(getBootstrapSessionHost())
+}
+
+/** Gold Ha/Pdt: disabled and diskless states latch per SessionHost. */
 export function isMcpIdentityBoundaryEnabled(): boolean {
+  const state = getMcpIdentityState()
   if (isDisklessLaunch()) state.offLatched = 'diskless'
   if (state.offLatched !== undefined) return false
   const raw = process.env.MCP_DISCOVERY_CACHE
@@ -63,6 +81,7 @@ export function isMcpIdentityBoundaryEnabled(): boolean {
 export function setMcpAccountIdentityResolver(
   resolver: () => McpAccountIdentity | undefined,
 ): void {
+  const state = getMcpIdentityState()
   state.accountResolver = resolver
   state.lastResolvedAccountToken = undefined
 }
@@ -79,6 +98,7 @@ function hasManagedAccountKey(): boolean {
 }
 
 export function ensureMcpAccountIdentityResolver(): void {
+  const state = getMcpIdentityState()
   if (state.accountResolver) return
   setMcpAccountIdentityResolver(() => {
     const account = getGlobalConfig().oauthAccount
@@ -93,6 +113,7 @@ export function ensureMcpAccountIdentityResolver(): void {
 }
 
 export function resolveMcpAccountIdentity(): McpResolvedAccount {
+  const state = getMcpIdentityState()
   if (!state.accountResolver) return { kind: 'unwired', token: 'acct:unwired' }
   const account = state.accountResolver()
   if (!account) return { kind: 'logged-out', token: 'acct:logged-out' }
@@ -110,6 +131,7 @@ export function resolveMcpAccountIdentity(): McpResolvedAccount {
 }
 
 export function markMcpIdentityChanged(): void {
+  const state = getMcpIdentityState()
   if (state.identityChanged) return
   state.identityChanged = true
   logEvent('tengu_feature_sad', {
@@ -118,11 +140,12 @@ export function markMcpIdentityChanged(): void {
   })
 }
 
-function notifyIdentityChange(): void {
+function notifyIdentityChange(state: McpIdentityState): void {
   if (!state.handler) {
     state.tripUnowned = true
     return
   }
+  const capturedSession = getActiveSessionFromAls()
   queueMicrotask(() => {
     const handler = state.handler
     if (!handler) {
@@ -130,7 +153,14 @@ function notifyIdentityChange(): void {
       return
     }
     try {
-      handler()
+      if (
+        capturedSession !== undefined &&
+        getActiveSessionFromAls() !== capturedSession
+      ) {
+        runWithSession(capturedSession, handler)
+      } else {
+        handler()
+      }
     } catch (error) {
       logForDebugging(`MCP identity-change handler failed: ${String(error)}`, {
         level: 'warn',
@@ -142,6 +172,7 @@ function notifyIdentityChange(): void {
 export function registerMcpIdentityChangeHandler(
   handler: () => void,
 ): () => void {
+  const state = getMcpIdentityState()
   state.handler = handler
   return () => {
     if (state.handler === handler) state.handler = undefined
@@ -149,6 +180,7 @@ export function registerMcpIdentityChangeHandler(
 }
 
 export function takeUnownedMcpIdentityChange(): boolean {
+  const state = getMcpIdentityState()
   const pending = state.tripUnowned
   state.tripUnowned = false
   return pending
@@ -159,12 +191,13 @@ function applyResolvedAccountIdentity(): McpResolvedAccount {
   if (account.kind !== 'resolved' || !isMcpIdentityBoundaryEnabled()) {
     return account
   }
+  const state = getMcpIdentityState()
   const previous = state.lastResolvedAccountToken
   state.lastResolvedAccountToken = account.token
   if (previous !== undefined && previous !== account.token) {
     state.identityEpoch += 1
     markMcpIdentityChanged()
-    notifyIdentityChange()
+    notifyIdentityChange(state)
   }
   return account
 }
@@ -178,6 +211,7 @@ export function currentMcpAccountToken(): string | undefined {
 
 export function seedMcpIdentityCheck(): void {
   ensureMcpAccountIdentityResolver()
+  const state = getMcpIdentityState()
   if (state.identitySeedAttempted) return
   state.identitySeedAttempted = true
   const token = currentMcpAccountToken()
@@ -185,6 +219,7 @@ export function seedMcpIdentityCheck(): void {
 }
 
 export function mcpIdentityChangedSinceLastCheck(): boolean {
+  const state = getMcpIdentityState()
   const token = currentMcpAccountToken()
   if (token === undefined) {
     state.identityBaseline = undefined
@@ -197,10 +232,11 @@ export function mcpIdentityChangedSinceLastCheck(): boolean {
 
 export function getMcpIdentityEpoch(): number {
   if (isMcpIdentityBoundaryEnabled()) applyResolvedAccountIdentity()
-  return state.identityEpoch
+  return getMcpIdentityState().identityEpoch
 }
 
 export function advanceMcpIdentityEpoch(): number {
+  const state = getMcpIdentityState()
   if (isMcpIdentityBoundaryEnabled()) state.identityEpoch += 1
   return state.identityEpoch
 }
@@ -208,7 +244,7 @@ export function advanceMcpIdentityEpoch(): number {
 export function rearmMcpIdentityBaseline(): void {
   if (!isMcpIdentityBoundaryEnabled()) return
   advanceMcpIdentityEpoch()
-  state.lastResolvedAccountToken = 'baseline:rearmed'
+  getMcpIdentityState().lastResolvedAccountToken = 'baseline:rearmed'
 }
 
 export function mcpConfigDependsOnAccountIdentity(
@@ -227,6 +263,7 @@ export function mcpConfigDependsOnAccountIdentity(
 }
 
 export function resetMcpIdentityStateForTests(): void {
+  const state = getMcpIdentityState()
   state.identityEpoch = 0
   state.identityBaseline = undefined
   state.identitySeedAttempted = false

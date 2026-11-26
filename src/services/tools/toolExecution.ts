@@ -45,8 +45,12 @@ import {
 import { registerForegroundToolCall } from '../../utils/foregroundToolCalls.js'
 import { areBackgroundTasksDisabled } from '../../utils/sessionBackgroundGates.js'
 import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
   isDisklessLaunch,
   isUserPromptWaiting,
+  RootSessionSlot,
 } from '../../utils/sessionHost.js'
 import { plural } from '../../utils/stringUtils.js'
 import { escapeXml } from '../../utils/xml.js'
@@ -861,31 +865,37 @@ export function extractRemoteBackgroundTaskId(
   }
 }
 
-// Cached import promise for the skill-learning wrapper — paid once, not per call.
-let _skillLearningWrapperCache:
-  | Promise<{
-      runToolCallWithSkillLearningHooks: <T>(
-        toolName: string,
-        input: unknown,
-        callContext: { sessionId?: string; turn?: number },
-        invoke: () => Promise<T>,
-      ) => Promise<T>
-    }>
-  | undefined
+// Cached import promise for the skill-learning wrapper — paid once per host, not per call.
+type SkillLearningWrapperPromise = Promise<{
+  runToolCallWithSkillLearningHooks: <T>(
+    toolName: string,
+    input: unknown,
+    callContext: { sessionId?: string; turn?: number },
+    invoke: () => Promise<T>,
+  ) => Promise<T>
+}>
+
+type SkillLearningWrapperHostSlot = {
+  cache: SkillLearningWrapperPromise | undefined
+}
+
+const skillLearningWrapperCacheByHost =
+  new HostSlot<SkillLearningWrapperHostSlot>(() => ({
+    cache: undefined,
+  }))
 
 function getSkillLearningWrapper() {
-  if (!_skillLearningWrapperCache) {
-    _skillLearningWrapperCache = import(
-      '../skillLearning/toolEventObserver.js'
-    ).catch(err => {
+  const slot = skillLearningWrapperCacheByHost.of(getBootstrapSessionHost())
+  if (!slot.cache) {
+    slot.cache = import('../skillLearning/toolEventObserver.js').catch(err => {
       // Clear the cache on rejection so the next tool call can retry the
       // import instead of reusing the same rejected promise forever (which
       // would break every flag-on tool call in the session).
-      _skillLearningWrapperCache = undefined
+      slot.cache = undefined
       throw err
     })
   }
-  return _skillLearningWrapperCache
+  return slot.cache
 }
 
 /** Minimum total hook duration (ms) to show inline timing summary */
@@ -929,13 +939,21 @@ export function classifyToolError(error: unknown): string {
 }
 
 /** Requests left standing after their first deadline, keyed by request id. */
-const standingRemoteTools = new Map<string, RemoteToolHeld>()
+const standingRemoteToolsBySession = new RootSessionSlot<
+  Map<string, RemoteToolHeld>
+>(() => new Map<string, RemoteToolHeld>())
+
+function getStandingRemoteTools(): Map<string, RemoteToolHeld> {
+  return standingRemoteToolsBySession.of(getBootstrapSession())
+}
 
 /** densable `h.held` — the standing request for this id, if it is still up. */
 export function standingRemoteTool(
   requestId: string,
 ): RemoteToolHeld | undefined {
-  return standingRemoteTools.get(requestId)
+  return standingRemoteToolsBySession
+    .peek(getBootstrapSession())
+    ?.get(requestId)
 }
 
 /**
@@ -1071,9 +1089,10 @@ function noteHeldRemoteTool(
   const holder = getCurrentStructuredIO()?.takeHeldRemoteTool(sent.requestId)
   if (!holder) return
   const requestId = sent.requestId
+  const standing = getStandingRemoteTools()
   const drop = () => {
     if (!requestId) return
-    standingRemoteTools.delete(requestId)
+    standing.delete(requestId)
   }
   const held: RemoteToolHeld = {
     late: classifyHeldBody(holder.late, {
@@ -1091,7 +1110,7 @@ function noteHeldRemoteTool(
     },
     accepted: () => holder.accepted(),
   }
-  if (requestId) standingRemoteTools.set(requestId, held)
+  if (requestId) standing.set(requestId, held)
   void held.late.then(late => {
     const envelope = late.response?.envelope
     const outcome =

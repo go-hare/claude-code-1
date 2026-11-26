@@ -21,24 +21,6 @@ const PIPE_GONE_CODES = new Set(['EPIPE', 'EIO', 'ENXIO', 'EBADF'])
 // densable I_m — stdin-unusable codes
 const STDIN_UNUSABLE_CODES = new Set(['EISDIR', 'ENOTCONN', 'ECONNRESET'])
 
-/** densable `dll` — any writeToStdout observed this process */
-let wroteToStdout = false
-/** densable `odi` — singleton stdout.end() promise */
-let stdoutEndPromise: Promise<void> | undefined
-/** densable `pll` — bytes accepted by write() (enqueued) */
-let bytesEnqueued = 0
-/** densable `fll` — bytes whose write callbacks fired (flushed to OS) */
-let bytesFlushed = 0
-/** densable `qRn` — notify when pending queue may be empty */
-let queueEmptyNotify: (() => void) | undefined
-/** densable `idi` — singleton wait-for-queue-empty promise */
-let queueEmptyPromise: Promise<void> | undefined
-/** densable `ldi` — stdout error latch (treat pending as 0) */
-let stdoutErrored = false
-/** densable `R_m` / `sdi` — external clock (failsafe path) */
-let externalClockPromise: Promise<void> | undefined
-let externalClockResolve: (() => void) | undefined
-
 function handleStreamGoneErrors(
   stream: NodeJS.ReadStream | NodeJS.WriteStream,
   onCode?: (code: string) => void,
@@ -47,42 +29,15 @@ function handleStreamGoneErrors(
   stream.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code !== undefined && PIPE_GONE_CODES.has(err.code)) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(stream as any).destroy?.()
+        if ('destroy' in stream && typeof stream.destroy === 'function') {
+          stream.destroy()
+        }
       } catch {
         // ignore
       }
       onCode?.(err.code)
     }
   })
-}
-
-/**
- * densable `adi` — register stdin/stdout/stderr gone-error handlers.
- * stdout error also latches ldi so pending-byte accounting zeros out.
- */
-export function registerProcessOutputErrorHandlers(): void {
-  // densable: dVt(stdin), dVt(stdout)+error latch, dVt(stderr)
-  handleStreamGoneErrors(process.stdin)
-  handleStreamGoneErrors(process.stdout)
-  process.stdout.on('error', () => {
-    stdoutErrored = true
-    queueEmptyNotify?.()
-  })
-  handleStreamGoneErrors(process.stderr)
-  process.stderr.on('error', () => {
-    stderrBuffer.giveUpOnUnflushed()
-  })
-}
-
-/** densable `jYr` — write if stream still writable; report dropped / backed-up / accepted */
-function safeWriteStream(
-  stream: NodeJS.WriteStream,
-  data: string,
-  cb?: () => void,
-): 'dropped' | 'backed-up' | 'accepted' {
-  if (stream.destroyed || stream.writableEnded) return 'dropped'
-  return stream.write(data, cb) === false ? 'backed-up' : 'accepted'
 }
 
 const STDERR_BACKLOG_LIMIT = 1048576 // 1 MiB
@@ -152,7 +107,62 @@ class StderrBackpressureTracker {
   }
 }
 
+// Process-global stdout/stderr accounting (fd 1 and fd 2 are single
+// process-wide OS streams, and drainStdoutBeforeExit() runs outside ALS at
+// process exit).
+
+/** densable `dll` — any writeToStdout observed this process */
+let wroteToStdout = false
+/** densable `odi` — singleton stdout.end() promise */
+let stdoutEndPromise: Promise<void> | undefined
+/** densable `pll` — bytes accepted by write() (enqueued) */
+let bytesEnqueued = 0
+/** densable `fll` — bytes whose write callbacks fired (flushed to OS) */
+let bytesFlushed = 0
+/** densable `qRn` — notify when pending queue may be empty */
+let queueEmptyNotify: (() => void) | undefined
+/** densable `idi` — singleton wait-for-queue-empty promise */
+let queueEmptyPromise: Promise<void> | undefined
+/** densable `ldi` — stdout error latch (treat pending as 0) */
+let stdoutErrored = false
+/** densable `R_m` / `sdi` — external clock (failsafe path) */
+let externalClockPromise: Promise<void> | undefined
+let externalClockResolve: (() => void) | undefined
 const stderrBuffer = new StderrBackpressureTracker()
+/** Process-wide guard preventing duplicate stream error listener registration. */
+let outputErrorHandlersRegistered = false
+
+/**
+ * densable `adi` — register stdin/stdout/stderr gone-error handlers once per
+ * process. stdout error also latches ldi so pending-byte accounting zeros out.
+ */
+export function registerProcessOutputErrorHandlers(): void {
+  if (outputErrorHandlersRegistered) {
+    return
+  }
+  outputErrorHandlersRegistered = true
+  // densable: dVt(stdin), dVt(stdout)+error latch, dVt(stderr)
+  handleStreamGoneErrors(process.stdin)
+  handleStreamGoneErrors(process.stdout)
+  process.stdout.on('error', () => {
+    stdoutErrored = true
+    queueEmptyNotify?.()
+  })
+  handleStreamGoneErrors(process.stderr)
+  process.stderr.on('error', () => {
+    stderrBuffer.giveUpOnUnflushed()
+  })
+}
+
+/** densable `jYr` — write if stream still writable; report dropped / backed-up / accepted */
+function safeWriteStream(
+  stream: NodeJS.WriteStream,
+  data: string,
+  cb?: () => void,
+): 'dropped' | 'backed-up' | 'accepted' {
+  if (stream.destroyed || stream.writableEnded) return 'dropped'
+  return stream.write(data, cb) === false ? 'backed-up' : 'accepted'
+}
 
 /**
  * densable `Ds` — write stdout and account pending bytes for exit drain.
@@ -223,7 +233,11 @@ function waitForStdoutQueueEmpty(): Promise<void> {
   if (queueEmptyPromise === undefined) {
     queueEmptyPromise = new Promise<void>(resolve => {
       const tick = () => {
-        if (getPendingStdoutBytes() <= 0) {
+        const pending =
+          process.stdout.destroyed || stdoutErrored
+            ? 0
+            : Math.max(0, bytesEnqueued - bytesFlushed)
+        if (pending <= 0) {
           queueEmptyNotify = undefined
           resolve()
         }

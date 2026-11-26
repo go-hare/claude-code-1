@@ -15,6 +15,7 @@ import { logForDebugging } from '../debug.js'
 import { withDiagnosticsTiming } from '../diagLogs.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { logError } from '../log.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   getInFlightManagedExternalPluginFetch,
   migrateFromEnabledPlugins,
@@ -41,8 +42,20 @@ import { syncMarketplacesToZipCache } from './zipCacheAdapters.js'
 /** Official 2.1.328 `b`/`D` (#644) — max 30s drain so short runs finish recording fresh git-marketplace plugins. */
 export const HEADLESS_PLUGIN_RECORD_DRAIN_MS = 30_000
 
-let headlessInstallPass: Promise<void> | undefined
-let activeHeadlessRecordPromise: Promise<void> | undefined
+type HeadlessPluginInstallHostState = {
+  headlessInstallPass: Promise<void> | undefined
+  activeHeadlessRecordPromise: Promise<void> | undefined
+}
+
+const headlessPluginInstallHostSlot =
+  new HostSlot<HeadlessPluginInstallHostState>(() => ({
+    headlessInstallPass: undefined,
+    activeHeadlessRecordPromise: undefined,
+  }))
+
+function getHeadlessPluginInstallHostState(): HeadlessPluginInstallHostState {
+  return headlessPluginInstallHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Official 2.1.328 (#644): wait up to `timeoutMs` (default 30s) for any
@@ -52,9 +65,12 @@ let activeHeadlessRecordPromise: Promise<void> | undefined
 export async function waitForHeadlessPluginInstallDrain(
   timeoutMs: number = HEADLESS_PLUGIN_RECORD_DRAIN_MS,
 ): Promise<boolean> {
+  const hostState = getHeadlessPluginInstallHostState()
   const pending: Promise<unknown>[] = []
-  if (headlessInstallPass) pending.push(headlessInstallPass)
-  if (activeHeadlessRecordPromise) pending.push(activeHeadlessRecordPromise)
+  if (hostState.headlessInstallPass) pending.push(hostState.headlessInstallPass)
+  if (hostState.activeHeadlessRecordPromise) {
+    pending.push(hostState.activeHeadlessRecordPromise)
+  }
   const bgFetch = getInFlightManagedExternalPluginFetch()
   if (bgFetch) pending.push(bgFetch)
   if (pending.length === 0) return true
@@ -99,6 +115,7 @@ async function recordEnabledPluginsForHeadless(
     return
   }
   logForDebugging('installPluginsForHeadless: recording enabled plugins')
+  const hostState = getHeadlessPluginInstallHostState()
   const recordPromise = withDiagnosticsTiming(
     'headless_enabled_plugins_record',
     () => migrateFromEnabledPlugins({ fetchMissing }),
@@ -108,7 +125,7 @@ async function recordEnabledPluginsForHeadless(
       { level: 'error' },
     )
   })
-  activeHeadlessRecordPromise = recordPromise
+  hostState.activeHeadlessRecordPromise = recordPromise
   const unregisterDrain = registerCleanup(() =>
     waitForHeadlessPluginInstallDrain(HEADLESS_PLUGIN_RECORD_DRAIN_MS).then(
       () => undefined,
@@ -117,8 +134,8 @@ async function recordEnabledPluginsForHeadless(
   try {
     await recordPromise
   } finally {
-    if (activeHeadlessRecordPromise === recordPromise) {
-      activeHeadlessRecordPromise = undefined
+    if (hostState.activeHeadlessRecordPromise === recordPromise) {
+      hostState.activeHeadlessRecordPromise = undefined
     }
     unregisterDrain()
   }
@@ -136,10 +153,11 @@ export function installPluginsForHeadless(opts?: {
   /** Official 2.1.328 (#643/#644): fetch missing managed external git plugins in background. Default true. */
   fetchMissing?: boolean
 }): Promise<boolean> {
-  const run = (headlessInstallPass ?? Promise.resolve()).then(() =>
+  const hostState = getHeadlessPluginInstallHostState()
+  const run = (hostState.headlessInstallPass ?? Promise.resolve()).then(() =>
     runInstallPluginsForHeadless(opts),
   )
-  headlessInstallPass = run.then(
+  hostState.headlessInstallPass = run.then(
     () => undefined,
     () => undefined,
   )

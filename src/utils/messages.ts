@@ -42,6 +42,7 @@ import {
   formatServerUnavailableInputTooLongDetail,
   SERVER_CALL_UNAVAILABLE_INPUT_TOO_LONG,
 } from './permissions/autoModeUnavailable.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -3991,7 +3992,18 @@ export function decomposeBatchedToolUses<T>(
 }
 
 /** densable `JOs.of(hn().host)` — one `reassemble_threw` per parent id. */
-const reassembleThrewLogged = new Set<string>()
+const fallbackReassembleHost: object = {}
+const reassembleThrewLoggedByHost = new HostSlot<Set<string>>(() => new Set())
+
+function getReassembleThrewLogged(): Set<string> {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return reassembleThrewLoggedByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return reassembleThrewLoggedByHost.of(fallbackReassembleHost)
+}
 
 /**
  * densable `eHr` — inverse of QOs. Group `${parent}_n` synthetics listed in
@@ -4036,8 +4048,9 @@ export function reassembleBatchedToolUses<T>(
         ...(first?.caller !== undefined && { caller: first.caller }),
       } as T)
     } catch {
-      if (!reassembleThrewLogged.has(ref.id)) {
-        reassembleThrewLogged.add(ref.id)
+      const loggedSet = getReassembleThrewLogged()
+      if (!loggedSet.has(ref.id)) {
+        loggedSet.add(ref.id)
         logBatchToolsEvent(ref.name, 'reassemble_threw')
       }
     }

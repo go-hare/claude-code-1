@@ -1,31 +1,47 @@
 import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { execFileNoThrow } from '../../../utils/execFileNoThrow.js'
+import {
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../../../utils/sessionHost.js'
 import { IT2_COMMAND, isInITerm2, isIt2CliAvailable } from './detection.js'
 import { registerITermBackend } from './registry.js'
 import type { CreatePaneResult, PaneBackend, PaneId } from './types.js'
 
-// Track session IDs for teammates
-const teammateSessionIds: string[] = []
+type ITermBackendHostState = {
+  // Track session IDs for teammates
+  teammateSessionIds: string[]
+  // Track whether the first pane has been used
+  firstPaneUsed: boolean
+  // Lock mechanism to prevent race conditions when spawning teammates in parallel
+  paneCreationLock: Promise<void>
+}
 
-// Track whether the first pane has been used
-let firstPaneUsed = false
+const iTermBackendHostSlot = new HostSlot<ITermBackendHostState>(() => ({
+  teammateSessionIds: [],
+  firstPaneUsed: false,
+  paneCreationLock: Promise.resolve(),
+}))
 
-// Lock mechanism to prevent race conditions when spawning teammates in parallel
-let paneCreationLock: Promise<void> = Promise.resolve()
+function getITermBackendHostState(): ITermBackendHostState {
+  return iTermBackendHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Acquires a lock for pane creation, ensuring sequential execution.
  * Returns a release function that must be called when done.
  */
-function acquirePaneCreationLock(): Promise<() => void> {
+function acquirePaneCreationLock(
+  hostState: ITermBackendHostState,
+): Promise<() => void> {
   let release: () => void
   const newLock = new Promise<void>(resolve => {
     release = resolve
   })
 
-  const previousLock = paneCreationLock
-  paneCreationLock = newLock
+  const previousLock = hostState.paneCreationLock
+  hostState.paneCreationLock = newLock
 
   return previousLock.then(() => release!)
 }
@@ -118,7 +134,8 @@ export class ITermBackend implements PaneBackend {
     logForDebugging(
       `[ITermBackend] createTeammatePaneInSwarmView called for ${name} with color ${color}`,
     )
-    const releaseLock = await acquirePaneCreationLock()
+    const hostState = getITermBackendHostState()
+    const releaseLock = await acquirePaneCreationLock(hostState)
 
     try {
       // Layout: Leader on left, teammates stacked vertically on the right
@@ -135,9 +152,9 @@ export class ITermBackend implements PaneBackend {
       // when empty → firstPaneUsed resets → next iteration has no target → throws.
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        const isFirstTeammate = !firstPaneUsed
+        const isFirstTeammate = !hostState.firstPaneUsed
         logForDebugging(
-          `[ITermBackend] Creating pane: isFirstTeammate=${isFirstTeammate}, existingPanes=${teammateSessionIds.length}`,
+          `[ITermBackend] Creating pane: isFirstTeammate=${isFirstTeammate}, existingPanes=${hostState.teammateSessionIds.length}`,
         )
 
         let splitArgs: string[]
@@ -159,7 +176,10 @@ export class ITermBackend implements PaneBackend {
           }
         } else {
           // Split from the last teammate's session to stack vertically
-          targetedTeammateId = teammateSessionIds[teammateSessionIds.length - 1]
+          targetedTeammateId =
+            hostState.teammateSessionIds[
+              hostState.teammateSessionIds.length - 1
+            ]
           if (targetedTeammateId) {
             splitArgs = ['session', 'split', '-s', targetedTeammateId]
             logForDebugging(
@@ -191,12 +211,13 @@ export class ITermBackend implements PaneBackend {
               logForDebugging(
                 `[ITermBackend] Split failed targeting dead session ${targetedTeammateId}, pruning and retrying: ${splitResult.stderr}`,
               )
-              const idx = teammateSessionIds.indexOf(targetedTeammateId)
+              const idx =
+                hostState.teammateSessionIds.indexOf(targetedTeammateId)
               if (idx !== -1) {
-                teammateSessionIds.splice(idx, 1)
+                hostState.teammateSessionIds.splice(idx, 1)
               }
-              if (teammateSessionIds.length === 0) {
-                firstPaneUsed = false
+              if (hostState.teammateSessionIds.length === 0) {
+                hostState.firstPaneUsed = false
               }
               continue
             }
@@ -208,7 +229,7 @@ export class ITermBackend implements PaneBackend {
         }
 
         if (isFirstTeammate) {
-          firstPaneUsed = true
+          hostState.firstPaneUsed = true
         }
 
         // Parse the session ID from split output
@@ -225,7 +246,7 @@ export class ITermBackend implements PaneBackend {
           `[ITermBackend] Created teammate pane for ${name}: ${paneId}`,
         )
 
-        teammateSessionIds.push(paneId)
+        hostState.teammateSessionIds.push(paneId)
 
         // Set pane color and title
         // Skip color and title for now - each it2 call is slow (Python process + API)
@@ -325,15 +346,16 @@ export class ITermBackend implements PaneBackend {
     // closing" preference and either shows a dialog or refuses when the session
     // still has a running process (the shell always is). tmux kill-pane has no
     // such prompt, which is why this was only broken for iTerm2.
+    const hostState = getITermBackendHostState()
     const result = await runIt2(['session', 'close', '-f', '-s', paneId])
-    // Clean up module state regardless of close result — even if the pane is
+    // Clean up host state regardless of close result — even if the pane is
     // already gone (e.g., user closed it manually), removing the stale ID is correct.
-    const idx = teammateSessionIds.indexOf(paneId)
+    const idx = hostState.teammateSessionIds.indexOf(paneId)
     if (idx !== -1) {
-      teammateSessionIds.splice(idx, 1)
+      hostState.teammateSessionIds.splice(idx, 1)
     }
-    if (teammateSessionIds.length === 0) {
-      firstPaneUsed = false
+    if (hostState.teammateSessionIds.length === 0) {
+      hostState.firstPaneUsed = false
     }
     return result.code === 0
   }

@@ -9,6 +9,7 @@ import { toError } from './errors.js'
 import { logError } from './log.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
 import { gt } from './semver.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 const MAX_RELEASE_NOTES_SHOWN = 5
 
@@ -40,11 +41,24 @@ function getChangelogCachePath(): string {
 
 // In-memory cache populated by async reads. Sync callers (React render, sync
 // helpers) read from this cache after setup.ts awaits checkForReleaseNotes().
-let changelogMemoryCache: string | null = null
+const fallbackReleaseNotesHost: object = {}
+const releaseNotesCacheByHost = new HostSlot<{
+  changelogMemoryCache: string | null
+}>(() => ({ changelogMemoryCache: null }))
+
+function getReleaseNotesHostState(): { changelogMemoryCache: string | null } {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return releaseNotesCacheByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return releaseNotesCacheByHost.of(fallbackReleaseNotesHost)
+}
 
 /** @internal exported for tests */
 export function _resetChangelogCacheForTesting(): void {
-  changelogMemoryCache = null
+  getReleaseNotesHostState().changelogMemoryCache = null
 }
 
 /**
@@ -96,7 +110,8 @@ export async function fetchAndStoreChangelog(): Promise<void> {
 
     // Skip write if content unchanged — writing Date.now() defeats the
     // dirty-check in saveGlobalConfig since the timestamp always differs.
-    if (changelogContent === changelogMemoryCache) {
+    const hostState = getReleaseNotesHostState()
+    if (changelogContent === hostState.changelogMemoryCache) {
       return
     }
 
@@ -107,7 +122,7 @@ export async function fetchAndStoreChangelog(): Promise<void> {
 
     // Write changelog to cache file
     await writeFile(cachePath, changelogContent, { encoding: 'utf-8' })
-    changelogMemoryCache = changelogContent
+    hostState.changelogMemoryCache = changelogContent
 
     // Update timestamp in config
     const changelogLastFetched = Date.now()
@@ -124,16 +139,17 @@ export async function fetchAndStoreChangelog(): Promise<void> {
  * @returns The cached changelog content or empty string if not available
  */
 export async function getStoredChangelog(): Promise<string> {
-  if (changelogMemoryCache !== null) {
-    return changelogMemoryCache
+  const hostState = getReleaseNotesHostState()
+  if (hostState.changelogMemoryCache !== null) {
+    return hostState.changelogMemoryCache
   }
   const cachePath = getChangelogCachePath()
   try {
     const content = await readFile(cachePath, 'utf-8')
-    changelogMemoryCache = content
+    hostState.changelogMemoryCache = content
     return content
   } catch {
-    changelogMemoryCache = ''
+    hostState.changelogMemoryCache = ''
     return ''
   }
 }
@@ -145,7 +161,7 @@ export async function getStoredChangelog(): Promise<string> {
  * the cache is populated before first render via `await checkForReleaseNotes()`.
  */
 export function getStoredChangelogFromMemory(): string {
-  return changelogMemoryCache ?? ''
+  return getReleaseNotesHostState().changelogMemoryCache ?? ''
 }
 
 /**

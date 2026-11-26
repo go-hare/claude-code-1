@@ -11,6 +11,8 @@
  *   sandbox > worker-sandbox > elicitation > managed-settings > permission > dialog
  */
 
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
+
 export type BgNeedsSource =
   | 'sandbox'
   | 'worker-sandbox'
@@ -37,22 +39,54 @@ const SOURCE_PRIORITY: readonly BgNeedsSource[] = [
 
 type Slot = BgNeedsPayload | null
 
-const slots: Record<BgNeedsSource, Slot> = {
-  sandbox: null,
-  'worker-sandbox': null,
-  elicitation: null,
-  'managed-settings': null,
-  permission: null,
-  dialog: null,
-}
-
-let lastEmitted: BgNeedsPayload | null = null
-const listeners = new Set<(payload: BgNeedsPayload | null) => void>()
-
 /** densable 2.1.248 rA hook-failure map. o=8, u=240. */
 const HOOK_FAILURE_CAP = 8
 const HOOK_FAILURE_LINE_CAP = 240
-const hookFailures = new Map<string, string>()
+
+type BgNeedsBridgeState = {
+  permissionBridgeSubscribed: boolean
+  bridgeWriteChain: Promise<void>
+  /** densable e.inFlight — optional promise awaited before each a7u write. */
+  inFlight?: Promise<void> | null
+}
+
+class BgNeedsSessionState {
+  slots: Record<BgNeedsSource, Slot> = {
+    sandbox: null,
+    'worker-sandbox': null,
+    elicitation: null,
+    'managed-settings': null,
+    permission: null,
+    dialog: null,
+  }
+  lastEmitted: BgNeedsPayload | null = null
+  listeners = new Set<(payload: BgNeedsPayload | null) => void>()
+  hookFailures = new Map<string, string>()
+  t7r: BgInFlightSnapshot = { tasks: 0, queued: 0, kinds: [], items: [] }
+  ihsListeners = new Set<() => void>()
+  bridgeState: BgNeedsBridgeState = {
+    permissionBridgeSubscribed: false,
+    bridgeWriteChain: Promise.resolve(),
+    inFlight: null,
+  }
+  tmoListeners = new Set<(meta: BgWorktreeMeta) => void>()
+  lastTmo: BgWorktreeMeta = null
+}
+
+const fallbackBgNeedsSession = { root: {} as object }
+const bgNeedsStateBySession = new RootSessionSlot<BgNeedsSessionState>(
+  () => new BgNeedsSessionState(),
+)
+
+function getBgNeedsState(): BgNeedsSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return bgNeedsStateBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return bgNeedsStateBySession.of(fallbackBgNeedsSession)
+}
 
 /** densable za — code-unit cap + ellipsis, drop lone high surrogate. */
 function za(text: string, max: number): string {
@@ -78,9 +112,12 @@ function collapseNeedsText(text: string): string {
 }
 
 /** densable 2.1.248 k() — prefix permission needs with hook+schema. */
-function attachHookFailure(payload: BgNeedsPayload): BgNeedsPayload {
+function attachHookFailure(
+  state: BgNeedsSessionState,
+  payload: BgNeedsPayload,
+): BgNeedsPayload {
   if (payload.toolUseID === undefined) return payload
-  const failure = hookFailures.get(payload.toolUseID)
+  const failure = state.hookFailures.get(payload.toolUseID)
   if (failure === undefined) return payload
   return {
     ...payload,
@@ -90,18 +127,18 @@ function attachHookFailure(payload: BgNeedsPayload): BgNeedsPayload {
   }
 }
 
-function recompute(): void {
+function recompute(state: BgNeedsSessionState = getBgNeedsState()): void {
   let next: BgNeedsPayload | null = null
   for (const src of SOURCE_PRIORITY) {
-    const s = slots[src]
+    const s = state.slots[src]
     if (s) {
-      next = attachHookFailure(s)
+      next = attachHookFailure(state, s)
       break
     }
   }
-  if (next?.text === lastEmitted?.text) return
-  lastEmitted = next
-  for (const fn of listeners) fn(next)
+  if (next?.text === state.lastEmitted?.text) return
+  state.lastEmitted = next
+  for (const fn of state.listeners) fn(next)
 }
 
 /**
@@ -109,23 +146,24 @@ function recompute(): void {
  * Evicts an older key (never the live permission toolUseID) when over cap.
  */
 export function noteHookFailure(toolUseID: string, message: string): void {
-  hookFailures.delete(toolUseID)
-  hookFailures.set(toolUseID, message)
-  if (hookFailures.size > HOOK_FAILURE_CAP) {
-    const keep = slots.permission?.toolUseID
-    for (const id of hookFailures.keys()) {
+  const state = getBgNeedsState()
+  state.hookFailures.delete(toolUseID)
+  state.hookFailures.set(toolUseID, message)
+  if (state.hookFailures.size > HOOK_FAILURE_CAP) {
+    const keep = state.slots.permission?.toolUseID
+    for (const id of state.hookFailures.keys()) {
       if (id !== keep) {
-        hookFailures.delete(id)
+        state.hookFailures.delete(id)
         break
       }
     }
   }
-  recompute()
+  recompute(state)
 }
 
 /** densable 2.1.248 rA.clearHookFailure(C) — no recompute. */
 export function clearHookFailure(toolUseID: string): void {
-  hookFailures.delete(toolUseID)
+  getBgNeedsState().hookFailures.delete(toolUseID)
 }
 
 /**
@@ -137,6 +175,7 @@ export function emitBgNeedsInput(
   source: BgNeedsSource = 'permission',
   extra?: Omit<BgNeedsPayload, 'text'>,
 ): void {
+  const state = getBgNeedsState()
   const next: Slot =
     text === null || text === ''
       ? null
@@ -145,14 +184,15 @@ export function emitBgNeedsInput(
           questions: extra?.questions,
           toolUseID: extra?.toolUseID,
         }
-  if (slots[source]?.text === next?.text) return
-  slots[source] = next
-  recompute()
+  if (state.slots[source]?.text === next?.text) return
+  state.slots[source] = next
+  recompute(state)
 }
 
 export function subscribeBgNeedsInput(
   listener: (payload: BgNeedsPayload | null) => void,
 ): () => void {
+  const listeners = getBgNeedsState().listeners
   listeners.add(listener)
   return () => {
     listeners.delete(listener)
@@ -160,7 +200,7 @@ export function subscribeBgNeedsInput(
 }
 
 export function getBgNeedsInputSnapshot(): BgNeedsPayload | null {
-  return lastEmitted
+  return getBgNeedsState().lastEmitted
 }
 
 /** densable Fi — true when this process is a bg job worker. */
@@ -258,20 +298,19 @@ export type BgInFlightSnapshot = {
   budget?: unknown
 }
 
-let t7r: BgInFlightSnapshot = { tasks: 0, queued: 0, kinds: [], items: [] }
-const ihsListeners = new Set<() => void>()
-
 /** densable tDt() */
 export function snapshotInFlight(): {
   tasks: number
   queued: number
   kinds: string[]
 } {
+  const t7r = getBgNeedsState().t7r
   return { tasks: t7r.tasks, queued: t7r.queued, kinds: [...t7r.kinds] }
 }
 
 /** densable Ror() — full registry clone for u7u fan/budget compare */
 export function getBgInFlightRegistry(): BgInFlightSnapshot {
+  const t7r = getBgNeedsState().t7r
   return {
     tasks: t7r.tasks,
     queued: t7r.queued,
@@ -288,14 +327,15 @@ export function getBgInFlightRegistry(): BgInFlightSnapshot {
  * items → []; omitted budget → cleared (void 0).
  */
 export function setBgInFlightRegistry(next: BgInFlightSnapshot): void {
-  t7r = {
+  const state = getBgNeedsState()
+  state.t7r = {
     tasks: next.tasks,
     queued: next.queued,
     kinds: [...(next.kinds ?? [])],
     items: next.items ? [...next.items] : [],
     budget: next.budget,
   }
-  for (const l of ihsListeners) {
+  for (const l of state.ihsListeners) {
     try {
       l()
     } catch {
@@ -306,6 +346,7 @@ export function setBgInFlightRegistry(next: BgInFlightSnapshot): void {
 
 /** densable ihs.subscribe */
 export function subscribeBgInFlight(listener: () => void): () => void {
+  const ihsListeners = getBgNeedsState().ihsListeners
   ihsListeners.add(listener)
   return () => {
     ihsListeners.delete(listener)
@@ -314,7 +355,7 @@ export function subscribeBgInFlight(listener: () => void): () => void {
 
 /** Test / reset helper */
 export function resetBgInFlightRegistry(): void {
-  t7r = { tasks: 0, queued: 0, kinds: [], items: [] }
+  getBgNeedsState().t7r = { tasks: 0, queued: 0, kinds: [], items: [] }
 }
 
 /**
@@ -404,23 +445,6 @@ export async function writeBgNeedsToJobState(
 }
 
 /**
- * densable c7u worker bridge state — permissionBridgeSubscribed + bridgeWriteChain
- * + optional inFlight await before each write (serialize with concurrent patches).
- */
-type BgNeedsBridgeState = {
-  permissionBridgeSubscribed: boolean
-  bridgeWriteChain: Promise<void>
-  /** densable e.inFlight — optional promise awaited before each a7u write. */
-  inFlight?: Promise<void> | null
-}
-
-const bridgeState: BgNeedsBridgeState = {
-  permissionBridgeSubscribed: false,
-  bridgeWriteChain: Promise.resolve(),
-  inFlight: null,
-}
-
-/**
  * densable Tmo — worktree session bus (hne → Tmo.emit → c7u → l7u).
  * Payload null clears worktree fields on job state.
  */
@@ -432,13 +456,11 @@ export type BgWorktreeMeta = {
   enteredExisting?: boolean
 } | null
 
-const tmoListeners = new Set<(meta: BgWorktreeMeta) => void>()
-let lastTmo: BgWorktreeMeta = null
-
 /** densable Tmo.emit */
 export function emitBgWorktreeMeta(meta: BgWorktreeMeta): void {
-  lastTmo = meta
-  for (const fn of tmoListeners) {
+  const state = getBgNeedsState()
+  state.lastTmo = meta
+  for (const fn of state.tmoListeners) {
     try {
       fn(meta)
     } catch {
@@ -451,6 +473,7 @@ export function emitBgWorktreeMeta(meta: BgWorktreeMeta): void {
 export function subscribeBgWorktreeMeta(
   listener: (meta: BgWorktreeMeta) => void,
 ): () => void {
+  const tmoListeners = getBgNeedsState().tmoListeners
   tmoListeners.add(listener)
   return () => {
     tmoListeners.delete(listener)
@@ -458,7 +481,7 @@ export function subscribeBgWorktreeMeta(
 }
 
 export function getBgWorktreeMetaSnapshot(): BgWorktreeMeta {
-  return lastTmo
+  return getBgNeedsState().lastTmo
 }
 
 /** densable Jat — stable compare key for fan items */
@@ -627,6 +650,8 @@ function resolveBgShort(): string {
  * Also seeds CLAUDE_BG_SHORT from job dir basename when missing (densable jZe).
  */
 export function ensureBgNeedsPermissionBridge(): void {
+  const state = getBgNeedsState()
+  const { bridgeState } = state
   if (bridgeState.permissionBridgeSubscribed) return
   if (!process.env.CLAUDE_JOB_DIR) return
   if (!process.env.CLAUDE_BG_SHORT) {
@@ -668,21 +693,22 @@ export function ensureBgNeedsPermissionBridge(): void {
   if (snap) {
     awaitInFlightThen(() => writeBgNeedsToJobState(snap))
   }
-  if (lastTmo) {
-    awaitInFlightThen(() => writeBgWorktreeMetaToJobState(lastTmo))
+  if (state.lastTmo) {
+    const tmo = state.lastTmo
+    awaitInFlightThen(() => writeBgWorktreeMetaToJobState(tmo))
   }
 }
 
 /** densable-compatible: await current bridge write chain (tests / callers). */
 export function awaitBgNeedsBridgeIdle(): Promise<void> {
-  return bridgeState.bridgeWriteChain.catch(() => {})
+  return getBgNeedsState().bridgeState.bridgeWriteChain.catch(() => {})
 }
 
 /** Test helper / advanced: set e.inFlight promise densable awaits before writes. */
 export function setBgNeedsBridgeInFlight(
   p: Promise<void> | null | undefined,
 ): void {
-  bridgeState.inFlight = p ?? null
+  getBgNeedsState().bridgeState.inFlight = p ?? null
 }
 
 /**
@@ -728,10 +754,11 @@ export function shouldSuppressTurnEndNeedsInput(opts: {
 export async function clearBgNeedsInputOnReply(
   jobShort?: string,
 ): Promise<void> {
+  const state = getBgNeedsState()
   for (const src of SOURCE_PRIORITY) {
-    slots[src] = null
+    state.slots[src] = null
   }
-  recompute()
+  recompute(state)
   const id = jobShort || resolveBgShort()
   if (!id) return
   try {
@@ -767,10 +794,11 @@ export async function clearBgNeedsInputOnReply(
 export async function clearStaleBgStatusOnResume(
   jobShort?: string,
 ): Promise<void> {
+  const state = getBgNeedsState()
   for (const src of SOURCE_PRIORITY) {
-    slots[src] = null
+    state.slots[src] = null
   }
-  recompute()
+  recompute(state)
   const id = jobShort || resolveBgShort()
   if (!id) return
   try {
@@ -796,13 +824,14 @@ export async function clearStaleBgStatusOnResume(
 
 /** Test helper. */
 export function _resetBgNeedsInputBridgeForTests(): void {
-  for (const k of SOURCE_PRIORITY) slots[k] = null
-  hookFailures.clear()
-  lastEmitted = null
-  bridgeState.permissionBridgeSubscribed = false
-  bridgeState.bridgeWriteChain = Promise.resolve()
-  bridgeState.inFlight = null
-  lastTmo = null
-  tmoListeners.clear()
+  const state = getBgNeedsState()
+  for (const k of SOURCE_PRIORITY) state.slots[k] = null
+  state.hookFailures.clear()
+  state.lastEmitted = null
+  state.bridgeState.permissionBridgeSubscribed = false
+  state.bridgeState.bridgeWriteChain = Promise.resolve()
+  state.bridgeState.inFlight = null
+  state.lastTmo = null
+  state.tmoListeners.clear()
   resetBgInFlightRegistry()
 }

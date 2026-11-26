@@ -1,8 +1,22 @@
 import { mkdir, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { lock } from './lockfile.js'
+import { sessionContextAls } from './sessionHost.js'
 
-const persistenceLocks = new Map<string, Promise<void>>()
+/**
+ * Process-global mutex map keyed by resolved `rootDir` so concurrent hosts
+ * targeting the same `.claude/autonomy/.lock` serialize cleanly without
+ * contending on `lockfile.lock()` (`ELOCKED`).
+ */
+const persistenceLocks = new Map<string, Promise<unknown>>()
+
+function safeGetAlsStore() {
+  try {
+    return sessionContextAls?.getStore?.()
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Two-phase persistence retention. Active records (queued/running, etc.) are
@@ -49,12 +63,13 @@ export async function withAutonomyPersistenceLock<T>(
   const previous = persistenceLocks.get(key) ?? Promise.resolve()
 
   let release!: () => void
-  const current = new Promise<void>(resolve => {
-    release = resolve
+  const current = new Promise<void>(resolveGate => {
+    release = resolveGate
   })
   const chained = previous.then(() => current)
   persistenceLocks.set(key, chained)
 
+  const callerStore = safeGetAlsStore()
   await previous
   try {
     await mkdir(join(key, '.claude', 'autonomy'), { recursive: true })
@@ -69,6 +84,13 @@ export async function withAutonomyPersistenceLock<T>(
       },
     })
     try {
+      const currentStore = safeGetAlsStore()
+      if (currentStore !== callerStore && sessionContextAls) {
+        if (callerStore !== undefined) {
+          return await sessionContextAls.run(callerStore, fn)
+        }
+        return await sessionContextAls.exit(fn)
+      }
       return await fn()
     } finally {
       await unlock().catch(() => {})

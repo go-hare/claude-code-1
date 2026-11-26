@@ -31,6 +31,7 @@ import {
 import { logEvent } from '../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logForDebugging } from './debug.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import {
   DEFAULT_CRON_JITTER_CONFIG,
   type CronJitterConfig,
@@ -466,17 +467,31 @@ export type LoopWakeupsCancelledEvent = {
   loopsCancelled: number
 }
 
-const loopWakeupsCancelledListeners = new Set<
+const fallbackLoopDynamicSession = { root: {} as object }
+const loopWakeupsCancelledListenersBySession = new RootSessionSlot<
+  Set<(event: LoopWakeupsCancelledEvent) => void>
+>(() => new Set())
+
+function getLoopWakeupsCancelledListeners(): Set<
   (event: LoopWakeupsCancelledEvent) => void
->()
+> {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return loopWakeupsCancelledListenersBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return loopWakeupsCancelledListenersBySession.of(fallbackLoopDynamicSession)
+}
 
 /** Official 2.1.295 (#382) `CDn.subscribe` — notify REPL/transcript when loop wakeups cancel. */
 export function subscribeLoopWakeupsCancelled(
   listener: (event: LoopWakeupsCancelledEvent) => void,
 ): () => void {
-  loopWakeupsCancelledListeners.add(listener)
+  const listeners = getLoopWakeupsCancelledListeners()
+  listeners.add(listener)
   return () => {
-    loopWakeupsCancelledListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
@@ -505,7 +520,7 @@ export function cancelLoopWakeupsOnUserAbort(
   )
   markLoopEnded(reason, { loops_cancelled: pending.length })
   logEvent('loop_cancel_all' as never, { reason } as never)
-  for (const listener of loopWakeupsCancelledListeners) {
+  for (const listener of getLoopWakeupsCancelledListeners()) {
     try {
       listener({ reason, loopsCancelled: pending.length })
     } catch {

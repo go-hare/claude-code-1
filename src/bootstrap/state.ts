@@ -19,7 +19,8 @@ import type { ModelStrings } from 'src/utils/model/modelStrings.js'
 import type { SettingSource } from 'src/utils/settings/constants.js'
 import { resetSettingsCache } from 'src/utils/settings/settingsCache.js'
 import type { PluginHookMatcher } from 'src/utils/settings/types.js'
-import { createSignal } from 'src/utils/signal.js'
+// eslint-disable-next-line custom-rules/bootstrap-isolation
+import { createSignal, type Signal } from 'src/utils/signal.js'
 // Path-alias import bypasses bootstrap-isolation (same pattern as crypto).
 // Official Ie/Fe/Oe wrappers go through n().host.launchOptions /
 // settingsSource / extensionsConfig.
@@ -30,16 +31,24 @@ import {
 } from 'src/utils/claudeInChrome/sessionState.js'
 // eslint-disable-next-line custom-rules/bootstrap-isolation
 import {
+  getActiveSubconversation,
   getBootstrapSession,
   getBootstrapSessionHost,
   getHostTeleportedSessionIds,
+  getSessionSwitchSignal,
+  HostSlot,
+  RootSessionSlot,
   resetSessionHostForTests,
+  runWithSession,
+  setSessionOverridesGetter,
 } from 'src/utils/sessionHost.js'
 // eslint-disable-next-line custom-rules/bootstrap-isolation
 import type {
   AutoModeUnavailableResponseRecord,
   ServerClassifierFallbackChoice,
 } from 'src/utils/sessionSlots.js'
+
+export { setSessionOverridesGetter }
 
 // Union type for registered hooks - can be SDK callbacks or native plugin hooks
 type RegisteredHookMatcher = HookCallbackMatcher | PluginHookMatcher
@@ -61,6 +70,10 @@ export type AttributedCounter = {
 }
 
 export function getSessionId(): SessionId {
+  const sub = getActiveSubconversation()
+  if (sub?.sessionId !== undefined) {
+    return sub.sessionId as SessionId
+  }
   return getBootstrapSession().id as SessionId
 }
 
@@ -80,7 +93,8 @@ export function getPendingBranchLinks(): Map<
   string,
   { cwd: string; branch: string; attempts: number }
 > {
-  return getBootstrapSession().sessionScratch.pendingBranchLinks() as Map<
+  return (getActiveSubconversation()?.pendingBranchLinks ??
+    getBootstrapSession().sessionScratch.pendingBranchLinks()) as Map<
     string,
     { cwd: string; branch: string; attempts: number }
   >
@@ -104,6 +118,10 @@ export function getPendingBranchLinks(): Map<
  * Call sites that need live session as string still use getSessionId().
  */
 export function getMainThreadAgentId(): import('src/types/ids.js').AgentId {
+  const subSessionId = getActiveSubconversation()?.sessionId
+  if (subSessionId) {
+    return subSessionId as import('src/types/ids.js').AgentId
+  }
   const s = getBootstrapSession()
   return s.identity.mainAgentId(s.id) as import('src/types/ids.js').AgentId
 }
@@ -130,16 +148,35 @@ export type SessionSwitchReason =
   | 'hydrate'
   | 'startup_custom_id'
 
+const globalSessionSwitchListeners =
+  createSignal<[id: SessionId, reason?: SessionSwitchReason]>()
+
+function emitSessionSwitchForSession(
+  session: ReturnType<typeof getBootstrapSession>,
+  sessionId: SessionId,
+  reason?: SessionSwitchReason,
+): void {
+  getSessionSwitchSignal(session).emit(sessionId, reason)
+  if (getBootstrapSession() === session) {
+    globalSessionSwitchListeners.emit(sessionId, reason)
+  } else {
+    runWithSession(session, () => {
+      globalSessionSwitchListeners.emit(sessionId, reason)
+    })
+  }
+}
+
 export function regenerateSessionId(
   options: { setCurrentAsParent?: boolean } = {},
 ): SessionId {
+  const session = getBootstrapSession()
   if (options.setCurrentAsParent) {
-    getBootstrapSession().update({ parentId: getSessionId() })
+    session.update({ parentId: getSessionId() })
   }
   // Drop the outgoing session's plan-slug entry so the Map doesn't
   // accumulate stale keys. Callers that need to carry the slug across
   // (REPL.tsx clearContext) read it before calling clearConversation.
-  getBootstrapSession().sessionScratch.forgetPlanSlug(getSessionId())
+  session.sessionScratch.forgetPlanSlug(getSessionId())
   // Official X8o + JUa densable on session clear/regenerate.
   clearRefusalFallbackOccurred()
   // Fable key-less consent is conversation-session scoped (/clear starts fresh).
@@ -148,10 +185,10 @@ export function regenerateSessionId(
   // Regenerated sessions live in the current project: reset projectDir to
   // null so getTranscriptPath() derives from originalCwd.
   const nextId = randomUUID() as SessionId
-  getBootstrapSession().update({ id: nextId })
-  getBootstrapSession().identity.replaceProjectDir(null)
+  session.update({ id: nextId })
+  session.identity.replaceProjectDir(null)
   // official uwn  - requestJournal.replacePromptIndex(0) on clear/regenerate
-  getBootstrapSession().requestJournal.replacePromptIndex(0)
+  session.requestJournal.replacePromptIndex(0)
   // Official BMg densable  - pure rebind plan available via latchReset for
   // callers with setAppState; override already restored by consume above.
   if (latchReset) {
@@ -170,12 +207,17 @@ export function regenerateSessionId(
     }
   }
   // leftover 239 oU('clear')  - /clear uses regenerate, not switchSession.
-  sessionSwitched.emit(nextId, 'clear')
+  emitSessionSwitchForSession(session, nextId, 'clear')
   return nextId
 }
 
 export function getParentSessionId(): SessionId | undefined {
-  return getBootstrapSession().parentId as SessionId | undefined
+  const sub = getActiveSubconversation()
+  return (
+    sub && 'parentSessionId' in sub
+      ? sub.parentSessionId
+      : getBootstrapSession().parentId
+  ) as SessionId | undefined
 }
 
 /**
@@ -195,36 +237,61 @@ export function switchSession(
   projectDir: string | null = null,
   reason?: SessionSwitchReason,
 ): void {
-  // Drop the outgoing session's plan-slug entry so the Map stays bounded
-  // across repeated /resume. Only the current session's slug is ever read
-  // (plans.ts getPlanSlug defaults to getSessionId()).
+  const session = getBootstrapSession()
   const currentId = getSessionId()
-  getBootstrapSession().sessionScratch.forgetPlanSlug(currentId)
-  // Official: when session id changes, clear refusalFallbackOccurred and
-  // consume latch (JUa restores previous override if still on fallback).
-  // Fable key-less consent is also conversation-session scoped (/resume).
+  // Official: when session id changes, drop the outgoing session's plan-slug
+  // entry (so the Map stays bounded across repeated /resume without wiping the
+  // active session's slug on same-ID calls), clear refusalFallbackOccurred,
+  // consume latch (JUa restores previous override if still on fallback), and
+  // reset conversation-session scoped Fable consent.
   if (currentId !== sessionId) {
+    session.sessionScratch.forgetPlanSlug(currentId)
     clearRefusalFallbackOccurred()
     setFableSessionFallbackConsented(false)
     void consumeRefusalFallbackModelLatch()
-    getBootstrapSession().update({ id: sessionId, parentId: undefined })
+    session.update({ id: sessionId, parentId: undefined })
+    session.identity.replaceProjectDir(projectDir)
+    emitSessionSwitchForSession(session, sessionId, reason)
   } else {
-    getBootstrapSession().update({ id: sessionId })
+    if (reason === 'clear') {
+      session.sessionScratch.forgetPlanSlug(currentId)
+    }
+    session.identity.replaceProjectDir(projectDir)
+    if (reason !== undefined) {
+      emitSessionSwitchForSession(session, sessionId, reason)
+    }
   }
-  getBootstrapSession().identity.replaceProjectDir(projectDir)
-  sessionSwitched.emit(sessionId, reason)
 }
 
-const sessionSwitched =
-  createSignal<[id: SessionId, reason?: SessionSwitchReason]>()
+export type SessionSwitchListener = (
+  id: SessionId,
+  reason?: SessionSwitchReason,
+) => void
 
 /**
  * Register a callback that fires when switchSession changes the active
  * sessionId. bootstrap can't import listeners directly (DAG leaf), so
  * callers register themselves. concurrentSessions.ts uses this to keep the
  * PID file's sessionId in sync with --resume.
+ *
+ * Pass `{ scope: 'global' }` for module-level cache-invalidation subscribers
+ * (`filesystem.ts`, `effortThinkingGuard.ts`, `withRetry.ts`) so they fire
+ * inside every switching ALS session's context. Default `'session'` subscribes
+ * exclusively to the active (or default) root session's own GC-able signal.
  */
-export const onSessionSwitch = sessionSwitched.subscribe
+export function onSessionSwitch(
+  listener: SessionSwitchListener,
+  options?: { scope?: 'session' | 'global' },
+): () => void {
+  if (options?.scope === 'global') {
+    return globalSessionSwitchListeners.subscribe(listener)
+  }
+  return (
+    getSessionSwitchSignal(getBootstrapSession()) as unknown as Signal<
+      [id: SessionId, reason?: SessionSwitchReason]
+    >
+  ).subscribe(listener)
+}
 
 /**
  * Project directory the current session's transcript lives in, or `null` if
@@ -232,11 +299,18 @@ export const onSessionSwitch = sessionSwitched.subscribe
  * originalCwd). See `switchSession()`.
  */
 export function getSessionProjectDir(): string | null {
+  const sub = getActiveSubconversation()
+  if (sub && 'sessionProjectDir' in sub) {
+    return sub.sessionProjectDir ?? null
+  }
   return getBootstrapSession().identity.projectDir()
 }
 
 export function getOriginalCwd(): string {
-  return getBootstrapSession().project.originalCwd
+  return (
+    getActiveSubconversation()?.originalCwd ??
+    getBootstrapSession().project.originalCwd
+  )
 }
 
 /**
@@ -247,7 +321,10 @@ export function getOriginalCwd(): string {
  * Use for project identity (history, skills, sessions) not file operations.
  */
 export function getProjectRoot(): string {
-  return getBootstrapSession().project.projectRoot
+  return (
+    getActiveSubconversation()?.projectRoot ??
+    getBootstrapSession().project.projectRoot
+  )
 }
 
 export function setOriginalCwd(cwd: string): void {
@@ -726,21 +803,23 @@ export function getMainLoopBusy(): boolean {
   return getBootstrapSession().surfaceCapabilities.mainLoopBusy()
 }
 
-const mainLoopBusyListeners = new Set<() => void>()
+const mainLoopBusyListeners = new RootSessionSlot(() => new Set<() => void>())
 
 /** useSyncExternalStore subscribe for densable vou() live busy. */
 export function subscribeMainLoopBusy(listener: () => void): () => void {
-  mainLoopBusyListeners.add(listener)
+  const listeners = mainLoopBusyListeners.of(getBootstrapSession())
+  listeners.add(listener)
   return () => {
-    mainLoopBusyListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 /** Official jGo  - set while REPL onQuery owns the queryGuard. */
 export function setMainLoopBusy(value: boolean): void {
-  if (getBootstrapSession().surfaceCapabilities.mainLoopBusy() === value) return
-  getBootstrapSession().surfaceCapabilities.replaceMainLoopBusy(value)
-  for (const listener of mainLoopBusyListeners) {
+  const session = getBootstrapSession()
+  if (session.surfaceCapabilities.mainLoopBusy() === value) return
+  session.surfaceCapabilities.replaceMainLoopBusy(value)
+  for (const listener of mainLoopBusyListeners.of(session)) {
     listener()
   }
 }
@@ -1016,10 +1095,19 @@ export function consumeRefusalFallbackModelLatch():
 }
 
 export function getSdkBetas(): string[] | undefined {
+  const sub = getActiveSubconversation()
+  if (sub && 'sdkBetas' in sub) {
+    return sub.sdkBetas
+  }
   return getBootstrapSession().surfaceCapabilities.sdkBetas()
 }
 
 export function setSdkBetas(betas: string[] | undefined): void {
+  const sub = getActiveSubconversation()
+  if (sub && 'sdkBetas' in sub) {
+    sub.sdkBetas = betas
+    return
+  }
   getBootstrapSession().surfaceCapabilities.replaceSdkBetas(betas)
 }
 
@@ -1113,7 +1201,7 @@ export function resetStateForTests(): void {
   if (process.env.NODE_ENV !== 'test') {
     throw new Error('resetStateForTests can only be called in tests')
   }
-  sessionSwitched.clear()
+  getSessionSwitchSignal().clear()
   resetSessionHostForTests()
 }
 
@@ -1573,7 +1661,7 @@ export function getAttacherCaps(): Record<string, unknown> | null {
 }
 
 /** densable Tci listeners  - REt = Tci.subscribe; Eci setAttacherCaps emits. */
-const attacherCapsListeners = new Set<() => void>()
+const attacherCapsListeners = new RootSessionSlot(() => new Set<() => void>())
 
 /**
  * densable REt / Tci.subscribe  - fire when attacher caps change (attach/detach).
@@ -1581,9 +1669,10 @@ const attacherCapsListeners = new Set<() => void>()
  * clear the parked needs and restore prior tempo.
  */
 export function subscribeAttacherCaps(listener: () => void): () => void {
-  attacherCapsListeners.add(listener)
+  const listeners = attacherCapsListeners.of(getBootstrapSession())
+  listeners.add(listener)
   return () => {
-    attacherCapsListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
@@ -1594,8 +1683,9 @@ export function subscribeAttacherCaps(listener: () => void): () => void {
 export function setAttacherCaps(
   caps: Record<string, unknown> | null | undefined,
 ): void {
-  getBootstrapSession().surfaceCapabilities.replaceAttacherCaps(caps ?? null)
-  for (const l of attacherCapsListeners) {
+  const session = getBootstrapSession()
+  session.surfaceCapabilities.replaceAttacherCaps(caps ?? null)
+  for (const l of attacherCapsListeners.of(session)) {
     try {
       l()
     } catch {
@@ -2149,10 +2239,19 @@ export function getLastClassifierRequests(): unknown[] | null {
 }
 
 export function setCachedClaudeMdContent(content: string | null): void {
+  const sub = getActiveSubconversation()
+  if (sub) {
+    sub.cachedClaudeMdContent = content
+    return
+  }
   getBootstrapSession().sessionFlags.replaceCachedClaudeMdContent(content)
 }
 
 export function getCachedClaudeMdContent(): string | null {
+  const sub = getActiveSubconversation()
+  if (sub && 'cachedClaudeMdContent' in sub) {
+    return sub.cachedClaudeMdContent ?? null
+  }
   return getBootstrapSession().sessionFlags.cachedClaudeMdContent()
 }
 
@@ -2705,7 +2804,8 @@ export function setPlanSlugCacheEntry(sessionId: string, slug: string): void {
 }
 
 export function getSessionCreatedTeams(): Set<string> {
-  return getBootstrapSession().sessionScratch.sessionCreatedTeams() as Set<string>
+  return (getActiveSubconversation()?.sessionCreatedTeams ??
+    getBootstrapSession().sessionScratch.sessionCreatedTeams()) as Set<string>
 }
 
 // Teleported session tracking for reliability logging
@@ -2887,12 +2987,21 @@ export function getDevBarAlert(): { timestamp: number } | undefined {
 }
 
 export function getMainThreadAgentType(): string | undefined {
+  const sub = getActiveSubconversation()
+  if (sub && 'mainThreadAgentType' in sub) {
+    return sub.mainThreadAgentType
+  }
   return getBootstrapSession().hookRegistry.mainThreadAgentType() as
     | string
     | undefined
 }
 
 export function setMainThreadAgentType(agentType: string | undefined): void {
+  const sub = getActiveSubconversation()
+  if (sub) {
+    sub.mainThreadAgentType = agentType
+    return
+  }
   getBootstrapSession().hookRegistry.replaceMainThreadAgentType(agentType)
 }
 
@@ -2900,6 +3009,12 @@ export function setMainThreadAgentType(agentType: string | undefined): void {
 export function getMainThreadAgentHooks():
   | import('../utils/settings/types.js').HooksSettings
   | undefined {
+  const sub = getActiveSubconversation()
+  if (sub && 'mainThreadAgentHooks' in sub) {
+    return sub.mainThreadAgentHooks as
+      | import('../utils/settings/types.js').HooksSettings
+      | undefined
+  }
   return getBootstrapSession().hookRegistry.mainThreadAgentHooks() as
     | import('../utils/settings/types.js').HooksSettings
     | undefined
@@ -2909,6 +3024,11 @@ export function getMainThreadAgentHooks():
 export function setMainThreadAgentHooks(
   hooks: import('../utils/settings/types.js').HooksSettings | undefined,
 ): void {
+  const sub = getActiveSubconversation()
+  if (sub) {
+    sub.mainThreadAgentHooks = hooks
+    return
+  }
   getBootstrapSession().hookRegistry.replaceMainThreadAgentHooks(hooks)
 }
 
@@ -3239,11 +3359,27 @@ export function setReplBridgeSessionId(sessionId: string | undefined): void {
   )
 }
 
+const subStickyBetasNormalized = new WeakMap<
+  Set<string>,
+  { sent: Set<string>; rejected: Set<string> }
+>()
+
 /**
- * Official Yd @178582915  - `g()?.stickyBetas??n().conversationLatches.stickyBetas()`.
- * Leftover C()/g() empty  - bag only.
+ * Official Yd @178582915  - `h()?.stickyBetas??n().conversationLatches.stickyBetas()`.
  */
 export function getStickyBetas(): { sent: Set<string>; rejected: Set<string> } {
+  const subBetas = getActiveSubconversation()?.stickyBetas
+  if (subBetas !== undefined) {
+    if (subBetas instanceof Set) {
+      let wrapped = subStickyBetasNormalized.get(subBetas)
+      if (!wrapped) {
+        wrapped = { sent: subBetas, rejected: new Set<string>() }
+        subStickyBetasNormalized.set(subBetas, wrapped)
+      }
+      return wrapped
+    }
+    return subBetas
+  }
   return getBootstrapSession().conversationLatches.stickyBetas() as {
     sent: Set<string>
     rejected: Set<string>
@@ -3252,9 +3388,19 @@ export function getStickyBetas(): { sent: Set<string>; rejected: Set<string> } {
 
 /**
  * Leftover resetStickyBetas (historical densable GRe name)  - bag unlatch.
- * SEA has no export resetStickyBetas; session clear sticky via Pvt.
+ * SEA has no export resetStickyBetas; session clear sticky via Pvt / uGr.
  */
 export function resetStickyBetas(): void {
+  const sub = getActiveSubconversation()
+  if (sub?.stickyBetas !== undefined) {
+    if (sub.stickyBetas instanceof Set) {
+      sub.stickyBetas.clear()
+      subStickyBetasNormalized.delete(sub.stickyBetas)
+    } else {
+      sub.stickyBetas = { sent: new Set(), rejected: new Set() }
+    }
+    return
+  }
   getBootstrapSession().conversationLatches.unlatchStickyBetas()
 }
 
@@ -3309,12 +3455,16 @@ export function resetRequestLatches(): void {
 }
 
 // #1083: LaunchOptions.autoCompactWindowSurface() (official kmi)
-const autoCompactWindowSurfaceByHost = new WeakMap<object, string | undefined>()
+const autoCompactWindowSurfaceByHost = new HostSlot<{
+  hasOverride: boolean
+  value: string | undefined
+}>(() => ({ hasOverride: false, value: undefined }))
 
 export function getAutoCompactWindowSurface(): string | undefined {
   const host = getBootstrapSessionHost()
-  if (autoCompactWindowSurfaceByHost.has(host)) {
-    return autoCompactWindowSurfaceByHost.get(host)
+  const slot = autoCompactWindowSurfaceByHost.peek(host)
+  if (slot?.hasOverride) {
+    return slot.value
   }
   return (
     host.launchOptions as {
@@ -3324,19 +3474,23 @@ export function getAutoCompactWindowSurface(): string | undefined {
 }
 
 export function setAutoCompactWindowSurface(surface: string | undefined): void {
-  autoCompactWindowSurfaceByHost.set(getBootstrapSessionHost(), surface)
+  const slot = autoCompactWindowSurfaceByHost.of(getBootstrapSessionHost())
+  slot.hasOverride = true
+  slot.value = surface
 }
 
 // #1120: SettingsSource.flagMcpConfigFilePaths() (official nLe / Opi)
-const flagMcpConfigFilePathsByHost = new WeakMap<object, readonly string[]>()
+const flagMcpConfigFilePathsByHost = new HostSlot<{
+  paths: readonly string[]
+}>(() => ({ paths: [] }))
 
 export function getFlagMcpConfigFilePaths(): readonly string[] {
-  return flagMcpConfigFilePathsByHost.get(getBootstrapSessionHost()) ?? []
+  return (
+    flagMcpConfigFilePathsByHost.peek(getBootstrapSessionHost())?.paths ?? []
+  )
 }
 
 export function setFlagMcpConfigFilePaths(paths: readonly string[]): void {
-  flagMcpConfigFilePathsByHost.set(
-    getBootstrapSessionHost(),
-    Object.freeze([...paths]),
-  )
+  flagMcpConfigFilePathsByHost.of(getBootstrapSessionHost()).paths =
+    Object.freeze([...paths])
 }

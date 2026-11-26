@@ -1,10 +1,15 @@
 import { feature } from 'bun:bundle'
-import memoize from 'lodash-es/memoize.js'
 import {
   getAdditionalDirectoriesForClaudeMd,
   setCachedClaudeMdContent,
 } from './bootstrap/state.js'
 import { getCwd } from './utils/cwd.js'
+import { RootSessionSlot } from './utils/hostSlot.js'
+import {
+  getActiveSessionFromAls,
+  getActiveSubconversation,
+  getBootstrapSession,
+} from './utils/sessionRoot.js'
 import { getLocalISODate } from './constants/common.js'
 import {
   filterInjectedMemoryFiles,
@@ -20,7 +25,14 @@ import {
 import { logForDiagnosticsNoPII } from './utils/diagLogs.js'
 import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
 import { execFileNoThrow } from './utils/execFileNoThrow.js'
-import { getBranch, getDefaultBranch, getIsGit, gitExe } from './utils/git.js'
+import {
+  getBranch,
+  getBranchForDir,
+  getDefaultBranch,
+  getDefaultBranchForDir,
+  getIsGit,
+  gitExe,
+} from './utils/git.js'
 import { shouldIncludeGitInstructions } from './utils/gitSettings.js'
 import { getOauthAccountInfo } from './utils/auth.js'
 import { logError } from './utils/log.js'
@@ -38,15 +50,84 @@ import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
 
 export const MAX_STATUS_CHARS = 2000
 
-// System prompt injection for cache breaking (ant-only, ephemeral debugging state)
-let systemPromptInjection: string | null = null
+type SessionMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerRootSession<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): SessionMemoized<Args, Result> {
+  const slot = new RootSessionSlot(() => new Map<unknown, Result>())
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSession())
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSession()),
+    set: (next: Map<unknown, Result>) => {
+      const current = slot.of(getBootstrapSession())
+      if (current === next) return
+      current.clear()
+      for (const [k, v] of next.entries()) {
+        current.set(k, v)
+      }
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as SessionMemoized<Args, Result>
+}
+
+type GitStatusPrefetchEntry = {
+  promise: Promise<string | null>
+  at: number
+  cwd: string
+}
+
+/**
+ * Official 2.1.328 (#527) `mrl` / `jxi`: share parsed `git status --short`
+ * summary per `(cwd, head)` across startup callers so non-interactive `-p`
+ * mode runs fewer duplicate git commands before the first model request.
+ */
+export type SharedGitStatusSummary = {
+  isCleanTree: boolean
+  changedFileCount: number
+  untrackedFileCount: number
+}
+
+type ContextSessionState = {
+  systemPromptInjection: string | null
+  activeGhStandinTag: string | undefined
+  pendingGitStatusPrefetch: GitStatusPrefetchEntry | null
+  sharedGitStatusByKey: Map<string, SharedGitStatusSummary>
+}
+
+const contextSessionSlot = new RootSessionSlot<ContextSessionState>(() => ({
+  systemPromptInjection: null,
+  activeGhStandinTag: undefined,
+  pendingGitStatusPrefetch: null,
+  sharedGitStatusByKey: new Map(),
+}))
+
+function getContextSessionState(): ContextSessionState {
+  return contextSessionSlot.of(getBootstrapSession())
+}
 
 export function getSystemPromptInjection(): string | null {
-  return systemPromptInjection
+  return getContextSessionState().systemPromptInjection
 }
 
 export function setSystemPromptInjection(value: string | null): void {
-  systemPromptInjection = value
+  getContextSessionState().systemPromptInjection = value
   // Clear context caches immediately when injection changes
   getUserContext.cache.clear?.()
   getSystemContext.cache.clear?.()
@@ -56,14 +137,13 @@ export function setSystemPromptInjection(value: string | null): void {
  * Official 2.1.328 `oWr` / `x6t` (chunk@294254613.js @123449):
  * Active agent-proxy `gh` stand-in tag (e.g. `builtin-api+runner+gh-only`).
  */
-let activeGhStandinTag: string | undefined
-
 export function setGhStandinTag(tag: string | undefined): void {
-  activeGhStandinTag = tag
+  getContextSessionState().activeGhStandinTag = tag
   getSystemContext.cache.clear?.()
 }
 
 export function getGhStandinTag(): string | undefined {
+  const activeGhStandinTag = getContextSessionState().activeGhStandinTag
   if (activeGhStandinTag !== undefined) return activeGhStandinTag
   const envTag = process.env.CLAUDE_CODE_GH_STANDIN_TAG?.trim()
   if (envTag) return envTag
@@ -79,27 +159,6 @@ export function getGhStandinTag(): string | undefined {
  * first message after compaction doesn't block waiting to re-run git status.
  */
 export const GIT_STATUS_PREFETCH_TTL_MS = 300_000
-
-type GitStatusPrefetchEntry = {
-  promise: Promise<string | null>
-  at: number
-  cwd: string
-}
-
-let pendingGitStatusPrefetch: GitStatusPrefetchEntry | null = null
-
-/**
- * Official 2.1.328 (#527) `mrl` / `jxi`: share parsed `git status --short`
- * summary per `(cwd, head)` across startup callers so non-interactive `-p`
- * mode runs fewer duplicate git commands before the first model request.
- */
-export type SharedGitStatusSummary = {
-  isCleanTree: boolean
-  changedFileCount: number
-  untrackedFileCount: number
-}
-
-const sharedGitStatusByKey = new Map<string, SharedGitStatusSummary>()
 
 export function parseGitStatusShortSummary(
   stdout: string,
@@ -126,22 +185,25 @@ export function recordSharedGitStatusSummary(
   cwd: string,
   summary: SharedGitStatusSummary,
 ): void {
-  sharedGitStatusByKey.set(cwd, summary)
+  getContextSessionState().sharedGitStatusByKey.set(cwd, summary)
 }
 
 export function getSharedGitStatusSummary(
   cwd: string = getCwd(),
 ): SharedGitStatusSummary | undefined {
-  return sharedGitStatusByKey.get(cwd)
+  return getContextSessionState().sharedGitStatusByKey.get(cwd)
 }
 
 export function clearSharedGitStatusSummaryForTests(): void {
-  sharedGitStatusByKey.clear()
+  getContextSessionState().sharedGitStatusByKey.clear()
 }
 
 async function computeGitStatusUncached(): Promise<string | null> {
-  if (process.env.NODE_ENV === 'test') {
-    // Avoid cycles in tests
+  if (
+    process.env.NODE_ENV === 'test' &&
+    getActiveSessionFromAls() === undefined
+  ) {
+    // Avoid cycles in tests outside explicit multi-host ALS sessions
     return null
   }
 
@@ -166,10 +228,15 @@ async function computeGitStatusUncached(): Promise<string | null> {
     const gitCmdsStart = Date.now()
     const cwd = getCwd()
     const [branch, mainBranch, status, log, userName] = await Promise.all([
-      getBranch(),
-      getDefaultBranch(),
+      typeof getBranchForDir === 'function'
+        ? getBranchForDir(cwd)
+        : getBranch(),
+      typeof getDefaultBranchForDir === 'function'
+        ? getDefaultBranchForDir(cwd)
+        : getDefaultBranch(),
       execFileNoThrow(gitExe(), ['--no-optional-locks', 'status', '--short'], {
         preserveOutputOnError: false,
+        useCwd: true,
       }).then(({ stdout, code }) => {
         if (code !== 0) return null
         recordSharedGitStatusSummary(cwd, parseGitStatusShortSummary(stdout))
@@ -180,10 +247,12 @@ async function computeGitStatusUncached(): Promise<string | null> {
         ['--no-optional-locks', 'log', '--oneline', '-n', '5'],
         {
           preserveOutputOnError: false,
+          useCwd: true,
         },
       ).then(({ stdout }) => stdout.trim()),
       execFileNoThrow(gitExe(), ['config', 'user.name'], {
         preserveOutputOnError: false,
+        useCwd: true,
       }).then(({ stdout }) => stdout.trim()),
     ])
 
@@ -231,9 +300,10 @@ export function prefetchGitStatusForCompaction(
 ): void {
   getGitStatus.cache.clear?.()
   getSystemContext.cache.clear?.()
+  const state = getContextSessionState()
   const cwd = getCwd()
   const promise = fetcher().catch(() => null)
-  pendingGitStatusPrefetch = {
+  state.pendingGitStatusPrefetch = {
     promise,
     at: Date.now(),
     cwd,
@@ -241,23 +311,25 @@ export function prefetchGitStatusForCompaction(
 }
 
 export function getPendingGitStatusPrefetchForTesting(): GitStatusPrefetchEntry | null {
-  return pendingGitStatusPrefetch
+  return getContextSessionState().pendingGitStatusPrefetch
 }
 
 export function clearGitStatusPrefetchForTesting(): void {
-  pendingGitStatusPrefetch = null
+  getContextSessionState().pendingGitStatusPrefetch = null
 }
 
-export const getGitStatus = memoize(
+export const getGitStatus = memoizePerRootSession(
   async (): Promise<string | null> => {
+    const state = getContextSessionState()
     const cwd = getCwd()
     if (
-      pendingGitStatusPrefetch !== null &&
-      pendingGitStatusPrefetch.cwd === cwd &&
-      Date.now() - pendingGitStatusPrefetch.at <= GIT_STATUS_PREFETCH_TTL_MS
+      state.pendingGitStatusPrefetch !== null &&
+      state.pendingGitStatusPrefetch.cwd === cwd &&
+      Date.now() - state.pendingGitStatusPrefetch.at <=
+        GIT_STATUS_PREFETCH_TTL_MS
     ) {
-      const entry = pendingGitStatusPrefetch
-      pendingGitStatusPrefetch = null
+      const entry = state.pendingGitStatusPrefetch
+      state.pendingGitStatusPrefetch = null
       return entry.promise
     }
     return computeGitStatusUncached()
@@ -269,7 +341,7 @@ export const getGitStatus = memoize(
  * This context is prepended to each conversation, and cached per-cwd (worktree)
  * for the duration of the conversation.
  */
-export const getSystemContext = memoize(
+export const getSystemContext = memoizePerRootSession(
   async (): Promise<{
     [k: string]: string
   }> => {
@@ -418,7 +490,7 @@ export async function applyPromptContextInstructionFiles(
 /**
  * This context is prepended to each conversation, and cached for the duration of the conversation.
  */
-export const getUserContext = memoize(
+export const getUserContext = memoizePerRootSession(
   async (): Promise<{
     [k: string]: string
   }> => {
@@ -516,4 +588,6 @@ export const getUserContext = memoize(
 
     return resultBlocks
   },
+  () =>
+    `${getActiveSubconversation()?.originalCwd ?? getBootstrapSession().project.originalCwd}::${getCwd()}`,
 )

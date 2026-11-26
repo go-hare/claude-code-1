@@ -5,6 +5,7 @@
  * Each backend implements the same unified interface.
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 import type {
   InputPlatform,
   ScreenshotPlatform,
@@ -21,26 +22,29 @@ export interface Platform {
   windowManagement?: WindowManagementPlatform
 }
 
-let cached: Platform | undefined
+const platformHostSlot = new HostSlot<{ cached: Platform | undefined }>(() => ({
+  cached: undefined,
+}))
 
 export function loadPlatform(): Platform {
-  if (cached) return cached
+  const hostState = platformHostSlot.of(getBootstrapSessionHost())
+  if (hostState.cached) return hostState.cached
 
   switch (process.platform) {
     case 'darwin':
-      cached = require('./darwin.js').platform
+      hostState.cached = require('./darwin.js').platform
       break
     case 'win32':
-      cached = require('./win32.js').platform
+      hostState.cached = require('./win32.js').platform
       break
     case 'linux':
-      cached = require('./linux.js').platform
+      hostState.cached = require('./linux.js').platform
       break
     default:
       throw new Error(`Computer Use not supported on ${process.platform}`)
   }
 
-  return cached!
+  return hostState.cached!
 }
 
 export type {

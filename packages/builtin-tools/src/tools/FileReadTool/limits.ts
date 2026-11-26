@@ -16,6 +16,7 @@ import memoize from 'lodash-es/memoize.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { MAX_OUTPUT_SIZE } from 'src/utils/file.js'
 import { resolveFileReadMaxOutputTokens } from 'src/utils/residualUiEnvGates.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 export const DEFAULT_MAX_OUTPUT_TOKENS = 25000
 
 /**
@@ -46,7 +47,7 @@ export type FileReadingLimits = {
  * Defensive: each field is individually validated; invalid values fall
  * through to the hardcoded defaults (no route to cap=0).
  */
-export const getDefaultFileReadingLimits = memoize((): FileReadingLimits => {
+function computeDefaultFileReadingLimits(): FileReadingLimits {
   const override =
     getFeatureValue_CACHED_MAY_BE_STALE<Partial<FileReadingLimits> | null>(
       'tengu_amber_wren',
@@ -85,4 +86,30 @@ export const getDefaultFileReadingLimits = memoize((): FileReadingLimits => {
     includeMaxSizeInPrompt,
     targetedRangeNudge,
   }
+}
+
+type MemoizedDefaultLimitsFn = ReturnType<
+  typeof memoize<() => FileReadingLimits>
+>
+
+const defaultFileReadingLimitsSlot =
+  new RootSessionSlot<MemoizedDefaultLimitsFn>(() =>
+    memoize(computeDefaultFileReadingLimits),
+  )
+
+const getDefaultFileReadingLimitsImpl = (): FileReadingLimits =>
+  defaultFileReadingLimitsSlot.of(getBootstrapSession())()
+
+Object.defineProperty(getDefaultFileReadingLimitsImpl, 'cache', {
+  get(): MemoizedDefaultLimitsFn['cache'] {
+    return defaultFileReadingLimitsSlot.of(getBootstrapSession()).cache
+  },
+  set(next: MemoizedDefaultLimitsFn['cache']) {
+    defaultFileReadingLimitsSlot.of(getBootstrapSession()).cache = next
+  },
+  configurable: true,
+  enumerable: true,
 })
+
+export const getDefaultFileReadingLimits: MemoizedDefaultLimitsFn =
+  getDefaultFileReadingLimitsImpl as MemoizedDefaultLimitsFn

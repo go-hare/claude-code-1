@@ -41,6 +41,10 @@ import { getPlatform } from '../../utils/platform.js'
 import { leftoverFu } from '../../utils/plugins/functionHooksModules.js'
 import { pluginDataDirPath } from '../../utils/plugins/pluginDirectories.js'
 import { safeParseJSON } from '../../utils/json.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { registerBuiltinPlugin } from '../builtinPlugins.js'
 import {
   type ClaudeTestSkillKey,
@@ -406,7 +410,9 @@ type NotedRunState = {
   isBusy: boolean
 }
 
-const notedRuns = new Map<string, NotedRunState>()
+const notedRunsSessionSlot = new RootSessionSlot<Map<string, NotedRunState>>(
+  () => new Map(),
+)
 const MAX_NOTED_RUNS = 64
 
 function isPathInsideRoot(root: string, target: string): boolean {
@@ -422,6 +428,7 @@ function isPathInsideRoot(root: string, target: string): boolean {
 export function noteClaudeTestRun(runFolder: string): void {
   try {
     if (!isAbsolute(runFolder)) return
+    const notedRuns = notedRunsSessionSlot.of(getBootstrapSession())
     const root = getOriginalCwd()
     const resolved = resolve(runFolder)
     if (
@@ -552,6 +559,7 @@ async function readJsonSafe(filePath: string): Promise<unknown> {
 }
 
 export async function reportClaudeTestRuns(): Promise<void> {
+  const notedRuns = notedRunsSessionSlot.of(getBootstrapSession())
   for (const [folder, entry] of notedRuns) {
     if (entry.isRunSent || entry.isBusy) continue
     entry.isBusy = true

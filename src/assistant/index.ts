@@ -10,6 +10,12 @@ import { getCwd } from '../utils/cwd.js'
 import { logForDebugging } from '../utils/debug.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+} from '../utils/sessionHost.js'
+import {
   TEAM_LEAD_NAME,
   assignTeammateColor,
   ensureTasksDir,
@@ -26,13 +32,17 @@ import {
 } from './deps.js'
 import type { TeamFile } from '../utils/swarm/teamHelpers.js'
 
-let assistantForced = false
-let assistantTeamContextCache:
-  | {
-      sessionId: string
-      context: NonNullable<AppState['teamContext']>
-    }
-  | undefined
+const assistantForcedHostSlot = new HostSlot<{ forced: boolean }>(() => ({
+  forced: false,
+}))
+const assistantTeamContextSlot = new RootSessionSlot<{
+  cache:
+    | {
+        sessionId: string
+        context: NonNullable<AppState['teamContext']>
+      }
+    | undefined
+}>(() => ({ cache: undefined }))
 
 /**
  * Whether the current session is in assistant (KAIROS) daemon mode.
@@ -47,11 +57,11 @@ export function isAssistantMode(): boolean {
  * Skips the GrowthBook gate check — daemon is pre-entitled.
  */
 export function markAssistantForced(): void {
-  assistantForced = true
+  assistantForcedHostSlot.of(getBootstrapSessionHost()).forced = true
 }
 
 export function isAssistantForced(): boolean {
-  return assistantForced
+  return assistantForcedHostSlot.of(getBootstrapSessionHost()).forced
 }
 
 function getAssistantNameSetting(): string | undefined {
@@ -92,10 +102,11 @@ export async function initializeAssistantTeam(
   requestedModel?: string,
 ): Promise<AppState['teamContext'] | undefined> {
   const sessionId = getSessionId()
+  const teamSlot = assistantTeamContextSlot.of(getBootstrapSession())
 
-  if (assistantTeamContextCache?.sessionId === sessionId) {
+  if (teamSlot.cache?.sessionId === sessionId) {
     setCliTeammateModeOverride('in-process')
-    return assistantTeamContextCache.context
+    return teamSlot.cache.context
   }
 
   const teamName = getAssistantTeamName(sessionId)
@@ -158,7 +169,7 @@ export async function initializeAssistantTeam(
     },
   }
 
-  assistantTeamContextCache = { sessionId, context }
+  teamSlot.cache = { sessionId, context }
   logForDebugging(
     `[assistant] initialized implicit in-process team ${teamName} for session ${sessionId}`,
   )
@@ -197,5 +208,5 @@ export function getAssistantSystemPromptAddendum(): string {
  */
 export function getAssistantActivationPath(): string | undefined {
   if (!isAssistantMode()) return undefined
-  return assistantForced ? 'daemon' : 'gate'
+  return isAssistantForced() ? 'daemon' : 'gate'
 }

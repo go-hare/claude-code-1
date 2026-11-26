@@ -13,6 +13,7 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { isForkSubagentDisabled } from 'src/utils/sessionBackgroundGates.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionRoot.js'
 import type {
   AssistantMessage,
   Message as MessageType,
@@ -49,11 +50,13 @@ import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
 type ForkProductSource = 'env' | 'default'
 
 /** densable Oo().forkSubagentEnabledSource — session sticky for Omo. */
-let forkProductSource: ForkProductSource | undefined
+const forkProductSourceSlot = new RootSessionSlot<{
+  source: ForkProductSource | undefined
+}>(() => ({ source: undefined }))
 
 /** Test helper — a new official session drops the sticky. */
 export function resetForkSubagentProductSource(): void {
-  forkProductSource = undefined
+  forkProductSourceSlot.of(getBootstrapSession()).source = undefined
 }
 
 export function resolveForkSubagentProductSource():
@@ -65,7 +68,8 @@ export function resolveForkSubagentProductSource():
   if (process.env.CLAUDE_CODE_ENTRYPOINT === 'mcp') return 'disabled'
   if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_FORK_SUBAGENT))
     return 'disabled'
-  if (forkProductSource !== undefined) return forkProductSource
+  const slot = forkProductSourceSlot.of(getBootstrapSession())
+  if (slot.source !== undefined) return slot.source
   // wLn (2.1.302 #924): on by default in claude -p / SDK / desktop / VS Code
   // unless tengu_federated_ullman disables non-interactive default-on.
   if (
@@ -80,7 +84,7 @@ export function resolveForkSubagentProductSource():
   )
     ? 'env'
     : 'default'
-  forkProductSource = source
+  slot.source = source
   logEvent('tengu_fork_subagent_enabled', {
     source:
       source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

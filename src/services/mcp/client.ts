@@ -177,6 +177,13 @@ import { WebSocketTransport } from '../../utils/mcpWebSocketTransport.js'
 import { memoizeWithLRU } from '../../utils/memoize.js'
 import { getWebSocketTLSOptions } from '../../utils/mtls.js'
 import {
+  HostSlot,
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
+import {
   getProxyFetchOptions,
   getWebSocketProxyAgent,
   getWebSocketProxyUrl,
@@ -456,6 +463,206 @@ import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 
+const MCP_FETCH_CACHE_SIZE = 20
+
+type BoundSession = ReturnType<typeof getBootstrapSession>
+
+type ConnectedClientWiringFn = (client: ConnectedMCPServer) => void
+
+type McpToolsSwapperFn = (
+  serverName: string,
+  tools: Tool[],
+  config: ScopedMcpServerConfig,
+  connectedClient?: ConnectedMCPServer,
+) => boolean
+
+type McpServerConnectedListener = (client: ConnectedMCPServer) => void
+
+function createHostCacheProxy<C extends object>(getTarget: () => C): C {
+  const proxy: C = new Proxy({} as C, {
+    get(_dummy, prop) {
+      const target = getTarget()
+      if (prop === 'set') {
+        const setFn = Reflect.get(target, prop, target)
+        if (typeof setFn === 'function') {
+          return (...args: unknown[]) => {
+            setFn.apply(target, args)
+            return proxy
+          }
+        }
+      }
+      const value = Reflect.get(target, prop, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+    set(_dummy, prop, value) {
+      const target = getTarget()
+      return Reflect.set(target, prop, value, target)
+    },
+    has(_dummy, prop) {
+      return Reflect.has(getTarget(), prop)
+    },
+    ownKeys() {
+      return Reflect.ownKeys(getTarget())
+    },
+    getOwnPropertyDescriptor(_dummy, prop) {
+      const desc = Object.getOwnPropertyDescriptor(getTarget(), prop)
+      if (!desc) return undefined
+      return { ...desc, configurable: true }
+    },
+  })
+  return proxy
+}
+
+function bindMcpClientHandlersToSession(
+  client: Client,
+  session: BoundSession,
+): void {
+  const wrapFn = <F extends (...args: never[]) => unknown>(fn: F): F =>
+    ((...args: Parameters<F>) =>
+      runWithSession(session, () => fn(...args))) as F
+
+  const origSetNotificationHandler = client.setNotificationHandler.bind(
+    client,
+  ) as (...args: unknown[]) => unknown
+  client.setNotificationHandler = ((
+    method: unknown,
+    schemasOrHandler: unknown,
+    maybeHandler?: unknown,
+  ) => {
+    if (typeof schemasOrHandler === 'function') {
+      return origSetNotificationHandler(
+        method,
+        wrapFn(schemasOrHandler as (...args: never[]) => unknown),
+      )
+    }
+    if (typeof maybeHandler === 'function') {
+      return origSetNotificationHandler(
+        method,
+        schemasOrHandler,
+        wrapFn(maybeHandler as (...args: never[]) => unknown),
+      )
+    }
+    return origSetNotificationHandler(method, schemasOrHandler, maybeHandler)
+  }) as Client['setNotificationHandler']
+
+  const origSetRequestHandler = client.setRequestHandler.bind(client) as (
+    ...args: unknown[]
+  ) => unknown
+  client.setRequestHandler = ((
+    method: unknown,
+    schemasOrHandler: unknown,
+    maybeHandler?: unknown,
+  ) => {
+    if (typeof schemasOrHandler === 'function') {
+      return origSetRequestHandler(
+        method,
+        wrapFn(schemasOrHandler as (...args: never[]) => unknown),
+      )
+    }
+    if (typeof maybeHandler === 'function') {
+      return origSetRequestHandler(
+        method,
+        schemasOrHandler,
+        wrapFn(maybeHandler as (...args: never[]) => unknown),
+      )
+    }
+    return origSetRequestHandler(method, schemasOrHandler, maybeHandler)
+  }) as Client['setRequestHandler']
+
+  for (const prop of [
+    'onclose',
+    'onerror',
+    'fallbackNotificationHandler',
+    'fallbackRequestHandler',
+  ] as const) {
+    const initial = client[prop]
+    let current =
+      typeof initial === 'function'
+        ? (wrapFn(initial as (...args: never[]) => unknown) as typeof initial)
+        : initial
+    Object.defineProperty(client, prop, {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return current
+      },
+      set(next) {
+        current =
+          typeof next === 'function'
+            ? (wrapFn(next as (...args: never[]) => unknown) as typeof current)
+            : next
+      },
+    })
+  }
+}
+
+function createConnectToServerMemo() {
+  const fn = memoize(connectToServerImpl, getServerCacheKey)
+  fn.cache = new Map() as unknown as typeof fn.cache
+  return fn
+}
+
+function createFetchToolsMemo() {
+  return memoizeWithLRU(
+    fetchToolsForClientImpl,
+    (client: MCPServerConnection) => client.name,
+    MCP_FETCH_CACHE_SIZE,
+  )
+}
+
+function createFetchResourcesMemo() {
+  return memoizeWithLRU(
+    fetchResourcesForClientImpl,
+    (client: MCPServerConnection) => client.name,
+    MCP_FETCH_CACHE_SIZE,
+  )
+}
+
+function createFetchCommandsMemo() {
+  return memoizeWithLRU(
+    fetchCommandsForClientImpl,
+    (client: MCPServerConnection) => client.name,
+    MCP_FETCH_CACHE_SIZE,
+  )
+}
+
+type HostMcpClientState = {
+  connectToServerMemo: ReturnType<typeof createConnectToServerMemo>
+  fetchToolsMemo: ReturnType<typeof createFetchToolsMemo>
+  fetchResourcesMemo: ReturnType<typeof createFetchResourcesMemo>
+  fetchCommandsMemo: ReturnType<typeof createFetchCommandsMemo>
+  liveMcpClients: Set<Client>
+  connectedClientWiring: ConnectedClientWiringFn | undefined
+  connectedClientWiringSession: BoundSession | undefined
+  mcpToolsSwapper: McpToolsSwapperFn | undefined
+  mcpToolsSwapperSession: BoundSession | undefined
+  mcpServerConnectedListeners: Map<string, Set<McpServerConnectedListener>>
+  removedMcpServerNames: Set<string>
+  removedMcpServerConfigs: WeakSet<object>
+}
+
+const hostMcpClientStateSlot = new HostSlot<HostMcpClientState>(() => ({
+  connectToServerMemo: createConnectToServerMemo(),
+  fetchToolsMemo: createFetchToolsMemo(),
+  fetchResourcesMemo: createFetchResourcesMemo(),
+  fetchCommandsMemo: createFetchCommandsMemo(),
+  liveMcpClients: new Set<Client>(),
+  connectedClientWiring: undefined,
+  connectedClientWiringSession: undefined,
+  mcpToolsSwapper: undefined,
+  mcpToolsSwapperSession: undefined,
+  mcpServerConnectedListeners: new Map<
+    string,
+    Set<McpServerConnectedListener>
+  >(),
+  removedMcpServerNames: new Set<string>(),
+  removedMcpServerConfigs: new WeakSet<object>(),
+}))
+
+function getHostMcpClientState(): HostMcpClientState {
+  return hostMcpClientStateSlot.of(getBootstrapSessionHost())
+}
+
 /**
  * TODO (ollie): The memoization here increases complexity by a lot, and im not sure it really improves performance
  * Attempts to connect to a single MCP server
@@ -463,261 +670,703 @@ import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
  * @param serverRef Scoped server configuration
  * @returns A wrapped client (either connected or failed)
  */
-const connectToServerMemo = memoize(
-  async (
-    name: string,
-    serverRef: ScopedMcpServerConfig,
-    serverStats?: {
-      totalServers: number
-      stdioCount: number
-      sseCount: number
-      httpCount: number
-      sseIdeCount: number
-      wsIdeCount: number
-    },
-  ): Promise<MCPServerConnection> => {
-    const connectStartTime = Date.now()
-    const connectClockSnapshot = captureConnectClockSnapshot()
-    // #644/#645: never spawn or dial a server blocked by managed policy.
-    if (
-      serverRef.type !== 'sdk' &&
-      !isMcpServerAllowedByPolicy(name, serverRef)
-    ) {
-      return {
+async function connectToServerImpl(
+  name: string,
+  serverRef: ScopedMcpServerConfig,
+  serverStats?: {
+    totalServers: number
+    stdioCount: number
+    sseCount: number
+    httpCount: number
+    sseIdeCount: number
+    wsIdeCount: number
+  },
+): Promise<MCPServerConnection> {
+  const hostState = getHostMcpClientState()
+  const capturedSession = getBootstrapSession()
+  const connectStartTime = Date.now()
+  const connectClockSnapshot = captureConnectClockSnapshot()
+  // #644/#645: never spawn or dial a server blocked by managed policy.
+  if (
+    serverRef.type !== 'sdk' &&
+    !isMcpServerAllowedByPolicy(name, serverRef)
+  ) {
+    return {
+      name,
+      type: 'failed',
+      config: serverRef,
+      error: 'Blocked by enterprise managed policy',
+      errorCode: 'POLICY_BLOCKED',
+    }
+  }
+  let inProcessServer:
+    | { connect(t: Transport): Promise<void>; close(): Promise<void> }
+    | undefined
+  let capturedStartupStderr = ''
+  try {
+    let transport: Transport
+    let legacySseFallback:
+      | ((opts: {
+          postMethodNotAllowed: boolean
+          dialSignal: AbortSignal
+          dialConnected: () => boolean
+        }) => Transport)
+      | undefined
+    let connectAuthFlags: ConnectAuthFlags | undefined
+    let connectAuthProvider: ClaudeAuthProvider | undefined
+    let useFirstPartyAuth = false
+    let lacksHelperHeaders = false
+    const firstPartyBearerBag: FirstPartyBearerBag = { last: 'none' }
+
+    // If we have the session ingress JWT, we will connect via the session ingress rather than
+    // to remote MCP's directly.
+    const sessionIngressToken = getSessionIngressAuthToken()
+
+    if (serverRef.type === 'sse') {
+      // Get combined headers (static + dynamic) before deciding on OAuth.
+      const combinedHeaders = await getMcpServerHeaders(name, serverRef, {
+        onHelperFailed: () => {
+          lacksHelperHeaders = true
+        },
+      })
+      const remoteAuth = await resolveRemoteConnectAuth(
         name,
-        type: 'failed',
-        config: serverRef,
-        error: 'Blocked by enterprise managed policy',
-        errorCode: 'POLICY_BLOCKED',
+        serverRef,
+        combinedHeaders,
+      )
+      connectAuthFlags = remoteAuth.flags
+      useFirstPartyAuth = remoteAuth.useFirstPartyAuth
+      const authProvider = remoteAuth.authProvider
+      const firstPartyBag = useFirstPartyAuth ? firstPartyBearerBag : undefined
+
+      // Use the auth provider with SSEClientTransport
+      const transportOptions: SSEClientTransportOptions = {
+        ...(authProvider
+          ? { authProvider, skipIssuerMetadataValidation: true }
+          : {}),
+        // Use fresh timeout per request to avoid stale AbortSignal bug.
+        // Step-up detection wraps innermost so the 403 is seen before the
+        // SDK's handler calls auth() → tokens().
+        fetch: wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
+        requestInit: {
+          ...((isMcpCcrProxyServerConfig(serverRef) ||
+            isFirstPartyAnthropicMcpUrl(serverRef.url)) && {
+            redirect: 'manual' as const,
+          }),
+          headers: {
+            'User-Agent': getMCPUserAgent(),
+            ...combinedHeaders,
+          },
+        },
+      }
+
+      // IMPORTANT: Always set eventSourceInit with a fetch that does NOT use the
+      // timeout wrapper. The EventSource connection is long-lived (stays open indefinitely
+      // to receive server-sent events), so applying a 60-second timeout would kill it.
+      // The timeout is only meant for individual API requests (POST, auth refresh), not
+      // the persistent SSE stream.
+      const sseEventSourceFetch: FetchLike = async (url, init) => {
+        // Get auth headers from the auth provider
+        const authHeaders: Record<string, string> = {}
+        const tokens = await authProvider?.tokens()
+        if (tokens) {
+          authHeaders.Authorization = `Bearer ${tokens.access_token}`
+        }
+
+        const proxyOptions = getProxyFetchOptions()
+        // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+        return fetch(url, {
+          ...init,
+          ...proxyOptions,
+          headers: {
+            'User-Agent': getMCPUserAgent(),
+            ...authHeaders,
+            ...init?.headers,
+            ...combinedHeaders,
+            Accept: 'text/event-stream',
+          },
+        })
+      }
+      // Gold: v?Trn(ve,v):X?Bt(ve,u,he):ve — L wrap, not timeout (GET SSE).
+      const sseFetch = firstPartyBag
+        ? wrapFirstPartyAutoAuthFetch(sseEventSourceFetch, firstPartyBag)
+        : sseEventSourceFetch
+      transportOptions.eventSourceInit = {
+        fetch: sseFetch,
+      }
+
+      transport = new SSEClientTransport(
+        new URL(serverRef.url),
+        transportOptions,
+      )
+      logMCPDebug(name, `SSE transport initialized, awaiting connection`)
+    } else if (serverRef.type === 'sse-ide') {
+      logMCPDebug(name, `Setting up SSE-IDE transport to ${serverRef.url}`)
+      // IDE servers don't need authentication
+      // TODO: Use the auth token provided in the lockfile
+      const proxyOptions = getProxyFetchOptions()
+      const transportOptions: SSEClientTransportOptions =
+        proxyOptions.dispatcher
+          ? {
+              eventSourceInit: {
+                fetch: async (url, init) => {
+                  // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+                  return fetch(url, {
+                    ...init,
+                    ...proxyOptions,
+                    headers: {
+                      'User-Agent': getMCPUserAgent(),
+                      ...init?.headers,
+                    },
+                  })
+                },
+              },
+            }
+          : {}
+
+      transport = new SSEClientTransport(
+        new URL(serverRef.url),
+        Object.keys(transportOptions).length > 0 ? transportOptions : undefined,
+      )
+    } else if (serverRef.type === 'ws-ide') {
+      const tlsOptions = getWebSocketTLSOptions()
+      const wsHeaders = {
+        'User-Agent': getMCPUserAgent(),
+        ...(serverRef.authToken && {
+          'X-Claude-Code-Ide-Authorization': serverRef.authToken,
+        }),
+      }
+
+      let wsClient: WsClientLike
+      if (typeof Bun !== 'undefined') {
+        // Bun's WebSocket supports headers/proxy/tls options but the DOM typings don't
+        // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+        wsClient = new globalThis.WebSocket(serverRef.url, {
+          protocols: ['mcp'],
+          headers: wsHeaders,
+          proxy: getWebSocketProxyUrl(serverRef.url),
+          tls: tlsOptions || undefined,
+        } as unknown as string[])
+      } else {
+        wsClient = await createNodeWsClient(serverRef.url, {
+          headers: wsHeaders,
+          agent: getWebSocketProxyAgent(serverRef.url),
+          ...(tlsOptions || {}),
+        })
+      }
+      transport = new WebSocketTransport(wsClient)
+    } else if (serverRef.type === 'ws') {
+      logMCPDebug(name, `Initializing WebSocket transport to ${serverRef.url}`)
+
+      const combinedHeaders = await getMcpServerHeaders(name, serverRef)
+
+      const tlsOptions = getWebSocketTLSOptions()
+      const wsHeaders = {
+        'User-Agent': getMCPUserAgent(),
+        ...(sessionIngressToken && {
+          Authorization: `Bearer ${sessionIngressToken}`,
+        }),
+        ...combinedHeaders,
+      }
+
+      // Redact sensitive headers before logging
+      const wsHeadersForLogging = mapValues(wsHeaders, (value, key) =>
+        key.toLowerCase() === 'authorization' ? '[REDACTED]' : value,
+      )
+
+      logMCPDebug(
+        name,
+        `WebSocket transport options: ${jsonStringify({
+          url: serverRef.url,
+          headers: wsHeadersForLogging,
+          hasSessionAuth: !!sessionIngressToken,
+        })}`,
+      )
+
+      let wsClient: WsClientLike
+      if (typeof Bun !== 'undefined') {
+        // Bun's WebSocket supports headers/proxy/tls options but the DOM typings don't
+        // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+        wsClient = new globalThis.WebSocket(serverRef.url, {
+          protocols: ['mcp'],
+          headers: wsHeaders,
+          proxy: getWebSocketProxyUrl(serverRef.url),
+          tls: tlsOptions || undefined,
+        } as unknown as string[])
+      } else {
+        wsClient = await createNodeWsClient(serverRef.url, {
+          headers: wsHeaders,
+          agent: getWebSocketProxyAgent(serverRef.url),
+          ...(tlsOptions || {}),
+        })
+      }
+      transport = new WebSocketTransport(wsClient)
+    } else if (serverRef.type === 'http') {
+      logMCPDebug(name, `Initializing HTTP transport to ${serverRef.url}`)
+      logMCPDebug(
+        name,
+        `Node version: ${process.version}, Platform: ${process.platform}`,
+      )
+      logMCPDebug(
+        name,
+        `Environment: ${jsonStringify({
+          NODE_OPTIONS: process.env.NODE_OPTIONS || 'not set',
+          UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || 'default',
+          HTTP_PROXY: process.env.HTTP_PROXY || 'not set',
+          HTTPS_PROXY: process.env.HTTPS_PROXY || 'not set',
+          NO_PROXY: process.env.NO_PROXY || 'not set',
+        })}`,
+      )
+
+      // Get combined headers (static + dynamic) before deciding on OAuth.
+      const combinedHeaders = await getMcpServerHeaders(name, serverRef, {
+        onHelperFailed: () => {
+          lacksHelperHeaders = true
+        },
+      })
+      const remoteAuth = await resolveRemoteConnectAuth(
+        name,
+        serverRef,
+        combinedHeaders,
+      )
+      connectAuthFlags = remoteAuth.flags
+      useFirstPartyAuth = remoteAuth.useFirstPartyAuth
+      const authProvider = remoteAuth.authProvider
+      connectAuthProvider = authProvider
+      const firstPartyBag = useFirstPartyAuth ? firstPartyBearerBag : undefined
+
+      // Check if this server has stored OAuth tokens. If so, the SDK's
+      // authProvider will set Authorization — don't override with the
+      // session ingress token (SDK merges requestInit AFTER authProvider).
+      // CCR proxy URLs (ccr_shttp_mcp) have no stored OAuth, so they still
+      // get the ingress token. See PR #24454 discussion.
+      const hasOAuthTokens = !!(await authProvider?.tokens())
+      // densable cliOwnedBearerProviders — bridge projects/meta mounts.
+      // Prefer owned bearer; do not overwrite Authorization already in headers.
+      const cliOwnedBearer = getCliOwnedBearerProvider(serverRef)?.()
+      const hasAuthHeader = Object.keys(combinedHeaders).some(
+        k => k.toLowerCase() === 'authorization',
+      )
+      const bearerToken =
+        !hasOAuthTokens && !hasAuthHeader
+          ? cliOwnedBearer || sessionIngressToken
+          : undefined
+
+      // Use the auth provider with StreamableHTTPClientTransport
+      const proxyOptions = getProxyFetchOptions()
+      logMCPDebug(
+        name,
+        `Proxy options: ${proxyOptions.dispatcher ? 'custom dispatcher' : 'default'}`,
+      )
+
+      const httpBaseFetch = wrapFetchWithResponseLimit(
+        wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
+      )
+      const allowLegacySse = shouldApplyLegacyHttpSseGet401Guard({
+        isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
+        isFirstPartyAnthropicMcp: isFirstPartyAnthropicMcpUrl(serverRef.url),
+        isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
+      })
+      const transportOptions: StreamableHTTPClientTransportOptions = {
+        ...(authProvider
+          ? { authProvider, skipIssuerMetadataValidation: true }
+          : {}),
+        // Use fresh timeout per request to avoid stale AbortSignal bug.
+        // Step-up detection wraps innermost so the 403 is seen before the
+        // SDK's handler calls auth() → tokens().
+        fetch: httpBaseFetch,
+        requestInit: {
+          ...proxyOptions,
+          ...((isMcpCcrProxyServerConfig(serverRef) ||
+            isFirstPartyAnthropicMcpUrl(serverRef.url)) && {
+            redirect: 'manual' as const,
+          }),
+          headers: {
+            'User-Agent': getMCPUserAgent(),
+            ...(bearerToken && {
+              Authorization: `Bearer ${bearerToken}`,
+            }),
+            ...combinedHeaders,
+          },
+        },
+      }
+
+      // Redact sensitive headers before logging
+      const headersForLogging = transportOptions.requestInit?.headers
+        ? mapValues(
+            transportOptions.requestInit.headers as Record<string, string>,
+            (value, key) =>
+              key.toLowerCase() === 'authorization' ? '[REDACTED]' : value,
+          )
+        : undefined
+
+      logMCPDebug(
+        name,
+        `HTTP transport options: ${jsonStringify({
+          url: serverRef.url,
+          headers: headersForLogging,
+          hasAuthProvider: !!authProvider,
+          timeoutMs: MCP_REQUEST_TIMEOUT_MS,
+        })}`,
+      )
+
+      transport = new StreamableHTTPClientTransport(
+        new URL(serverRef.url),
+        transportOptions,
+      )
+      logMCPDebug(name, `HTTP transport created successfully`)
+      // densable W — HTTP→legacy SSE rescue factory (!HEe && !o$ && !ce).
+      if (allowLegacySse) {
+        const sseUrl = new URL(serverRef.url)
+        const sseAuth = authProvider
+        const sseRequestInit = transportOptions.requestInit
+        legacySseFallback = ({
+          postMethodNotAllowed,
+          dialSignal,
+          dialConnected,
+        }) => {
+          const { fetch, eventSourceFetch } =
+            createLegacyHttpSseFallbackFetches({
+              baseFetch: httpBaseFetch,
+              postMethodNotAllowed,
+              dialSignal,
+              dialConnected,
+            })
+          return new SSEClientTransport(sseUrl, {
+            ...(sseAuth
+              ? { authProvider: sseAuth, skipIssuerMetadataValidation: true }
+              : {}),
+            fetch,
+            eventSourceInit: { fetch: eventSourceFetch },
+            requestInit: sseRequestInit,
+          })
+        }
+      }
+    } else if (serverRef.type === 'sdk') {
+      throw new Error('SDK servers should be handled in print.ts')
+    } else if (serverRef.type === 'claudeai-proxy') {
+      logMCPDebug(
+        name,
+        `Initializing claude.ai proxy transport for server ${serverRef.id}`,
+      )
+
+      const tokens = getClaudeAIOAuthTokens()
+      if (!tokens) {
+        throw new Error('No claude.ai OAuth token found')
+      }
+
+      const oauthConfig = getOauthConfig()
+      const proxyUrl = `${oauthConfig.MCP_PROXY_URL}${oauthConfig.MCP_PROXY_PATH.replace('{server_id}', serverRef.id)}`
+
+      logMCPDebug(name, `Using claude.ai proxy at ${proxyUrl}`)
+
+      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+      const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
+
+      const proxyOptions = getProxyFetchOptions()
+      const timedFetch = wrapFetchWithResponseLimit(
+        wrapFetchWithTimeout(fetchWithAuth),
+      )
+      const transportOptions: StreamableHTTPClientTransportOptions = {
+        // Wrap fetchWithAuth with fresh timeout per request.
+        // densable: oGn(t)?F_f(dGn(oe,t),re):dGn(oe,t) + Accept-Encoding identity.
+        fetch: isStatelessClaudeAiProxy(serverRef)
+          ? suppressGetSseOnEndpoint(timedFetch, proxyUrl)
+          : timedFetch,
+        requestInit: {
+          ...proxyOptions,
+          headers: {
+            'User-Agent': getMCPUserAgent(),
+            'Accept-Encoding': 'identity',
+            'X-Mcp-Client-Session-Id': getSessionId(),
+          },
+        },
+      }
+
+      transport = new StreamableHTTPClientTransport(
+        new URL(proxyUrl),
+        transportOptions,
+      )
+      logMCPDebug(name, `claude.ai proxy transport created successfully`)
+    } else if (
+      ((serverRef as ScopedMcpServerConfig).type === 'stdio' ||
+        !(serverRef as ScopedMcpServerConfig).type) &&
+      isClaudeInChromeMCPServer(name)
+    ) {
+      // Run the Chrome MCP server in-process to avoid spawning a ~325 MB subprocess
+      const { createChromeContext } = await import(
+        '../../utils/claudeInChrome/mcpServer.js'
+      )
+      const { createChromeSocketClient, createClaudeForChromeMcpServer } =
+        await import('@ant/claude-for-chrome-mcp')
+      const { createLinkedTransportPair } = await import(
+        './InProcessTransport.js'
+      )
+      const { registerChromeTabGroupCleanup, setChromeBinding } = await import(
+        '../../utils/claudeInChrome/tabGroupCleanup.js'
+      )
+      const context = createChromeContext(
+        (serverRef as McpStdioServerConfig).env,
+      )
+      const socketClient = createChromeSocketClient(context)
+      setChromeBinding(context, socketClient)
+      registerChromeTabGroupCleanup()
+      inProcessServer = createClaudeForChromeMcpServer(context, socketClient)
+      const [clientTransport, serverTransport] = createLinkedTransportPair()
+      await inProcessServer.connect(serverTransport)
+      transport = clientTransport
+      logMCPDebug(name, `In-process Chrome MCP server started`)
+    } else if (
+      feature('CHICAGO_MCP') &&
+      ((serverRef as ScopedMcpServerConfig).type === 'stdio' ||
+        !(serverRef as ScopedMcpServerConfig).type) &&
+      isComputerUseMCPServer!(name)
+    ) {
+      // Run the Computer Use MCP server in-process — same rationale as
+      // Chrome above. The package's CallTool handler is a stub; real
+      // dispatch goes through wrapper.tsx's .call() override.
+      const { createComputerUseMcpServerForCli } = await import(
+        '../../utils/computerUse/mcpServer.js'
+      )
+      const { createLinkedTransportPair } = await import(
+        './InProcessTransport.js'
+      )
+      inProcessServer = await createComputerUseMcpServerForCli()
+      const [clientTransport, serverTransport] = createLinkedTransportPair()
+      await inProcessServer.connect(serverTransport)
+      transport = clientTransport
+      logMCPDebug(name, `In-process Computer Use MCP server started`)
+    } else if (
+      (serverRef as ScopedMcpServerConfig).type === 'stdio' ||
+      !(serverRef as ScopedMcpServerConfig).type
+    ) {
+      const stdioRef = serverRef as McpStdioServerConfig
+      // Official SHELL_PREFIX densable.
+      let shellPrefix: string | null =
+        process.env.CLAUDE_CODE_SHELL_PREFIX || null
+      try {
+        const { resolveShellPrefix } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+        shellPrefix = resolveShellPrefix()
+      } catch {
+        // keep raw env fallback
+      }
+      const finalCommand = shellPrefix || stdioRef.command
+      const finalArgs = shellPrefix
+        ? [[stdioRef.command, ...stdioRef.args].join(' ')]
+        : stdioRef.args
+      // Official eUi densable consumer: eUi()?{...lqi(),...kVt()}:GO(), then
+      // strip CLAUDE_CODE_CHILD_SESSION and inject PROJECT_DIR/SESSION_ID/CLAUDECODE.
+      let stdioEnv: Record<string, string>
+      try {
+        const {
+          shouldEnforceMcpAllowlistEnv,
+          buildMcpStdioBaseEnv,
+          buildMcpStdioTransportEnv,
+        } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
+        const base = buildMcpStdioBaseEnv({
+          enforceAllowlist: shouldEnforceMcpAllowlistEnv(),
+          processEnv: process.env,
+          injectedEnv: getRegisteredUpstreamProxyEnv(),
+          managedEnv: subprocessEnv(),
+        })
+        stdioEnv = buildMcpStdioTransportEnv({
+          baseEnv: base,
+          projectDir: getProjectRoot(),
+          sessionId: getSessionId(),
+          serverEnv: stdioRef.env ?? null,
+        })
+      } catch {
+        // raw-env fallback when densables unavailable
+        const { CLAUDE_CODE_CHILD_SESSION: _child, ...rest } =
+          subprocessEnv() as Record<string, string | undefined>
+        stdioEnv = {
+          ...(Object.fromEntries(
+            Object.entries(rest).filter(
+              (e): e is [string, string] => e[1] !== undefined,
+            ),
+          ) as Record<string, string>),
+          CLAUDE_PROJECT_DIR: getProjectRoot(),
+          CLAUDE_CODE_SESSION_ID: getSessionId(),
+          CLAUDECODE: '1',
+          ...stdioRef.env,
+        }
+      }
+      unsetEmptyAwsBearerTokenBedrock(stdioEnv)
+      transport = new StdioClientTransport({
+        command: finalCommand,
+        args: finalArgs,
+        env: stdioEnv,
+        stderr: 'pipe', // prevents error output from the MCP server from printing to the UI
+      })
+    } else {
+      throw new Error(
+        `Unsupported server type: ${(serverRef as ScopedMcpServerConfig).type}`,
+      )
+    }
+
+    // Set up stderr logging for stdio transport before connecting in case there are any stderr
+    // outputs emitted during the connection start (this can be useful for debugging failed connections).
+    // Store handler reference for cleanup to prevent memory leaks
+    let stderrHandler: ((data: Buffer) => void) | undefined
+    let stderrOutput = ''
+    if (serverRef.type === 'stdio' || !serverRef.type) {
+      const stdioTransport = transport as StdioClientTransport
+      if (stdioTransport.stderr) {
+        stderrHandler = (data: Buffer) => {
+          // Cap stderr accumulation to prevent unbounded memory growth
+          if (stderrOutput.length < 64 * 1024 * 1024) {
+            try {
+              stderrOutput += data.toString()
+            } catch {
+              // Ignore errors from exceeding max string length
+            }
+          }
+        }
+        stdioTransport.stderr.on('data', stderrHandler)
       }
     }
-    let inProcessServer:
-      | { connect(t: Transport): Promise<void>; close(): Promise<void> }
-      | undefined
-    let capturedStartupStderr = ''
-    try {
-      let transport: Transport
-      let legacySseFallback:
-        | ((opts: {
-            postMethodNotAllowed: boolean
-            dialSignal: AbortSignal
-            dialConnected: () => boolean
-          }) => Transport)
-        | undefined
-      let connectAuthFlags: ConnectAuthFlags | undefined
-      let connectAuthProvider: ClaudeAuthProvider | undefined
-      let useFirstPartyAuth = false
-      let lacksHelperHeaders = false
-      const firstPartyBearerBag: FirstPartyBearerBag = { last: 'none' }
 
-      // If we have the session ingress JWT, we will connect via the session ingress rather than
-      // to remote MCP's directly.
-      const sessionIngressToken = getSessionIngressAuthToken()
+    // densable n_f(type, {inProcess, ccrProxy: pMn(config)}) for Pwi.
+    // sdk is handled earlier; n_f still maps it to sdk-control.
+    const negotiationTransportKind = resolveMcpNegotiationTransportKind(
+      serverRef.type,
+      {
+        inProcess: inProcessServer !== undefined,
+        ccrProxy: isMcpCcrProxyServerConfig(serverRef),
+      },
+    )
 
-      if (serverRef.type === 'sse') {
-        // Get combined headers (static + dynamic) before deciding on OAuth.
-        const combinedHeaders = await getMcpServerHeaders(name, serverRef, {
-          onHelperFailed: () => {
-            lacksHelperHeaders = true
-          },
-        })
-        const remoteAuth = await resolveRemoteConnectAuth(
+    // densable 2.1.232/238: Pwi(kind, serverConfig) — GB denylist after auto.
+    // SEA 325 #263 / #1628: lazily load persisted 7-day verdicts from disk
+    // once, then skip the probe for 7 days if this stdio server previously
+    // timed out/failed probe.
+    if (negotiationTransportKind === 'stdio') {
+      await loadRememberedLegacyStdioFromDisk(undefined, { once: true })
+    }
+    const protocolPlan: McpProtocolNegotiationPlan =
+      negotiationTransportKind === 'stdio' &&
+      isRememberedLegacyStdio(
+        serverRef as {
+          type?: string
+          command?: string
+          args?: readonly string[]
+          env?: Record<string, string>
+        },
+      )
+        ? { mode: 'legacy' }
+        : resolveMcpProtocolNegotiationPlan(
+            negotiationTransportKind,
+            process.env,
+            (key, def) => getFeatureValue_CACHED_MAY_BE_STALE(key, def),
+            serverRef,
+          )
+    // densable k(Z) — factory takes versionNegotiation plan (BVa)
+    // densable ze capability ternary + Lr initialize rewrite live in factory.
+    let bareElicitationRetry = false
+    const createMcpSdkClient = (
+      plan: typeof protocolPlan = protocolPlan,
+      opts: { forceBare?: boolean } = {},
+    ): Client => {
+      const c = createDensableMcpClient(plan, serverRef, {
+        forceBare: opts.forceBare === true || bareElicitationRetry,
+      })
+      bindMcpClientHandlersToSession(c, capturedSession)
+      // densable: setRequestHandler("roots/list", ...)
+      c.setRequestHandler('roots/list', async () => {
+        logMCPDebug(name, `Received ListRoots request from server`)
+        return buildMcpRootsList()
+      })
+      return c
+    }
+
+    // densable C — reassigned on pinned-legacy reconnect / bare elicitation retry.
+    let client = createMcpSdkClient()
+
+    // Add debug logging for client events if available
+    if (serverRef.type === 'http') {
+      logMCPDebug(name, `Client created, setting up request handler`)
+    }
+
+    // Add a timeout to connection attempts to prevent tests from hanging indefinitely
+    logMCPDebug(
+      name,
+      `Starting connection with timeout of ${getConnectionTimeoutMs()}ms`,
+    )
+
+    // For HTTP transport, try a basic connectivity test first
+    if (serverRef.type === 'http') {
+      logMCPDebug(name, `Testing basic HTTP connectivity to ${serverRef.url}`)
+      try {
+        const testUrl = new URL(serverRef.url)
+        logMCPDebug(
           name,
-          serverRef,
-          combinedHeaders,
+          `Parsed URL: host=${testUrl.hostname}, port=${testUrl.port || 'default'}, protocol=${testUrl.protocol}`,
         )
-        connectAuthFlags = remoteAuth.flags
-        useFirstPartyAuth = remoteAuth.useFirstPartyAuth
-        const authProvider = remoteAuth.authProvider
-        const firstPartyBag = useFirstPartyAuth
-          ? firstPartyBearerBag
-          : undefined
 
-        // Use the auth provider with SSEClientTransport
-        const transportOptions: SSEClientTransportOptions = {
-          ...(authProvider
-            ? { authProvider, skipIssuerMetadataValidation: true }
-            : {}),
-          // Use fresh timeout per request to avoid stale AbortSignal bug.
-          // Step-up detection wraps innermost so the 403 is seen before the
-          // SDK's handler calls auth() → tokens().
-          fetch: wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
-          requestInit: {
-            ...((isMcpCcrProxyServerConfig(serverRef) ||
-              isFirstPartyAnthropicMcpUrl(serverRef.url)) && {
-              redirect: 'manual' as const,
-            }),
-            headers: {
-              'User-Agent': getMCPUserAgent(),
-              ...combinedHeaders,
-            },
-          },
+        // Log DNS resolution attempt
+        if (
+          testUrl.hostname === '127.0.0.1' ||
+          testUrl.hostname === 'localhost'
+        ) {
+          logMCPDebug(name, `Using loopback address: ${testUrl.hostname}`)
         }
+      } catch (urlError) {
+        logMCPDebug(name, `Failed to parse URL: ${urlError}`)
+      }
+    }
 
-        // IMPORTANT: Always set eventSourceInit with a fetch that does NOT use the
-        // timeout wrapper. The EventSource connection is long-lived (stays open indefinitely
-        // to receive server-sent events), so applying a 60-second timeout would kill it.
-        // The timeout is only meant for individual API requests (POST, auth refresh), not
-        // the persistent SSE stream.
-        const sseEventSourceFetch: FetchLike = async (url, init) => {
-          // Get auth headers from the auth provider
-          const authHeaders: Record<string, string> = {}
-          const tokens = await authProvider?.tokens()
-          if (tokens) {
-            authHeaders.Authorization = `Bearer ${tokens.access_token}`
+    const initializeTimeoutMs = getMcpClientConnectTimeoutMs(protocolPlan.mode)
+    const outerTimeoutMs = getConnectionTimeoutMs()
+    // probeFellBack retained for densable analytics shape (negotiation.probeFellBack).
+    let probeFellBack: McpProbeFallbackReason | undefined
+    // densable `oe` — Re() timeout only transport.close().
+    let handshakeConnectTimedOut = false
+
+    const raceConnect = async (
+      c: Client,
+      t: Transport,
+      initTimeoutMs: number,
+      raceTimeoutMs: number,
+    ): Promise<void> => {
+      const connectPromise = c.connect(t, { timeout: initTimeoutMs })
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          const elapsed = Date.now() - connectStartTime
+          logMCPDebug(
+            name,
+            `Connection timeout triggered after ${elapsed}ms (limit: ${raceTimeoutMs}ms)`,
+          )
+          if (inProcessServer) {
+            inProcessServer.close().catch(() => {})
           }
-
-          const proxyOptions = getProxyFetchOptions()
-          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-          return fetch(url, {
-            ...init,
-            ...proxyOptions,
-            headers: {
-              'User-Agent': getMCPUserAgent(),
-              ...authHeaders,
-              ...init?.headers,
-              ...combinedHeaders,
-              Accept: 'text/event-stream',
-            },
-          })
-        }
-        // Gold: v?Trn(ve,v):X?Bt(ve,u,he):ve — L wrap, not timeout (GET SSE).
-        const sseFetch = firstPartyBag
-          ? wrapFirstPartyAutoAuthFetch(sseEventSourceFetch, firstPartyBag)
-          : sseEventSourceFetch
-        transportOptions.eventSourceInit = {
-          fetch: sseFetch,
-        }
-
-        transport = new SSEClientTransport(
-          new URL(serverRef.url),
-          transportOptions,
+          t.close().catch(() => {})
+          handshakeConnectTimedOut = true
+          // densable oMf — tag CONNECT_TIMEOUT when GB default true
+          reject(
+            createMcpConnectionTimeoutError(
+              `MCP server "${name}" connection timed out after ${outerTimeoutMs}ms`,
+            ),
+          )
+        }, raceTimeoutMs)
+        connectPromise.then(
+          () => {
+            clearTimeout(timeoutId)
+          },
+          _error => {
+            clearTimeout(timeoutId)
+          },
         )
-        logMCPDebug(name, `SSE transport initialized, awaiting connection`)
-      } else if (serverRef.type === 'sse-ide') {
-        logMCPDebug(name, `Setting up SSE-IDE transport to ${serverRef.url}`)
-        // IDE servers don't need authentication
-        // TODO: Use the auth token provided in the lockfile
-        const proxyOptions = getProxyFetchOptions()
-        const transportOptions: SSEClientTransportOptions =
-          proxyOptions.dispatcher
-            ? {
-                eventSourceInit: {
-                  fetch: async (url, init) => {
-                    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-                    return fetch(url, {
-                      ...init,
-                      ...proxyOptions,
-                      headers: {
-                        'User-Agent': getMCPUserAgent(),
-                        ...init?.headers,
-                      },
-                    })
-                  },
-                },
-              }
-            : {}
+      })
+      await Promise.race([connectPromise, timeoutPromise])
+    }
 
-        transport = new SSEClientTransport(
-          new URL(serverRef.url),
-          Object.keys(transportOptions).length > 0
-            ? transportOptions
-            : undefined,
-        )
-      } else if (serverRef.type === 'ws-ide') {
-        const tlsOptions = getWebSocketTLSOptions()
-        const wsHeaders = {
-          'User-Agent': getMCPUserAgent(),
-          ...(serverRef.authToken && {
-            'X-Claude-Code-Ide-Authorization': serverRef.authToken,
-          }),
-        }
-
-        let wsClient: WsClientLike
-        if (typeof Bun !== 'undefined') {
-          // Bun's WebSocket supports headers/proxy/tls options but the DOM typings don't
-          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-          wsClient = new globalThis.WebSocket(serverRef.url, {
-            protocols: ['mcp'],
-            headers: wsHeaders,
-            proxy: getWebSocketProxyUrl(serverRef.url),
-            tls: tlsOptions || undefined,
-          } as unknown as string[])
-        } else {
-          wsClient = await createNodeWsClient(serverRef.url, {
-            headers: wsHeaders,
-            agent: getWebSocketProxyAgent(serverRef.url),
-            ...(tlsOptions || {}),
-          })
-        }
-        transport = new WebSocketTransport(wsClient)
-      } else if (serverRef.type === 'ws') {
-        logMCPDebug(
-          name,
-          `Initializing WebSocket transport to ${serverRef.url}`,
-        )
-
-        const combinedHeaders = await getMcpServerHeaders(name, serverRef)
-
-        const tlsOptions = getWebSocketTLSOptions()
-        const wsHeaders = {
-          'User-Agent': getMCPUserAgent(),
-          ...(sessionIngressToken && {
-            Authorization: `Bearer ${sessionIngressToken}`,
-          }),
-          ...combinedHeaders,
-        }
-
-        // Redact sensitive headers before logging
-        const wsHeadersForLogging = mapValues(wsHeaders, (value, key) =>
-          key.toLowerCase() === 'authorization' ? '[REDACTED]' : value,
-        )
-
-        logMCPDebug(
-          name,
-          `WebSocket transport options: ${jsonStringify({
-            url: serverRef.url,
-            headers: wsHeadersForLogging,
-            hasSessionAuth: !!sessionIngressToken,
-          })}`,
-        )
-
-        let wsClient: WsClientLike
-        if (typeof Bun !== 'undefined') {
-          // Bun's WebSocket supports headers/proxy/tls options but the DOM typings don't
-          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-          wsClient = new globalThis.WebSocket(serverRef.url, {
-            protocols: ['mcp'],
-            headers: wsHeaders,
-            proxy: getWebSocketProxyUrl(serverRef.url),
-            tls: tlsOptions || undefined,
-          } as unknown as string[])
-        } else {
-          wsClient = await createNodeWsClient(serverRef.url, {
-            headers: wsHeaders,
-            agent: getWebSocketProxyAgent(serverRef.url),
-            ...(tlsOptions || {}),
-          })
-        }
-        transport = new WebSocketTransport(wsClient)
-      } else if (serverRef.type === 'http') {
-        logMCPDebug(name, `Initializing HTTP transport to ${serverRef.url}`)
-        logMCPDebug(
-          name,
-          `Node version: ${process.version}, Platform: ${process.platform}`,
-        )
-        logMCPDebug(
-          name,
-          `Environment: ${jsonStringify({
-            NODE_OPTIONS: process.env.NODE_OPTIONS || 'not set',
-            UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || 'default',
-            HTTP_PROXY: process.env.HTTP_PROXY || 'not set',
-            HTTPS_PROXY: process.env.HTTPS_PROXY || 'not set',
-            NO_PROXY: process.env.NO_PROXY || 'not set',
-          })}`,
-        )
-
-        // Get combined headers (static + dynamic) before deciding on OAuth.
+    const recreateTransportForPinnedLegacy = async (): Promise<Transport> => {
+      // densable `l=u()` / `l=new por(c)` — rebuild same transport kind for legacy.
+      if (serverRef.type === 'http') {
         const combinedHeaders = await getMcpServerHeaders(name, serverRef, {
           onHelperFailed: () => {
             lacksHelperHeaders = true
@@ -731,51 +1380,26 @@ const connectToServerMemo = memoize(
         connectAuthFlags = remoteAuth.flags
         useFirstPartyAuth = remoteAuth.useFirstPartyAuth
         const authProvider = remoteAuth.authProvider
-        connectAuthProvider = authProvider
         const firstPartyBag = useFirstPartyAuth
           ? firstPartyBearerBag
           : undefined
-
-        // Check if this server has stored OAuth tokens. If so, the SDK's
-        // authProvider will set Authorization — don't override with the
-        // session ingress token (SDK merges requestInit AFTER authProvider).
-        // CCR proxy URLs (ccr_shttp_mcp) have no stored OAuth, so they still
-        // get the ingress token. See PR #24454 discussion.
         const hasOAuthTokens = !!(await authProvider?.tokens())
-        // densable cliOwnedBearerProviders — bridge projects/meta mounts.
-        // Prefer owned bearer; do not overwrite Authorization already in headers.
-        const cliOwnedBearer = getCliOwnedBearerProvider(serverRef)?.()
-        const hasAuthHeader = Object.keys(combinedHeaders).some(
-          k => k.toLowerCase() === 'authorization',
-        )
-        const bearerToken =
-          !hasOAuthTokens && !hasAuthHeader
-            ? cliOwnedBearer || sessionIngressToken
-            : undefined
-
-        // Use the auth provider with StreamableHTTPClientTransport
         const proxyOptions = getProxyFetchOptions()
-        logMCPDebug(
-          name,
-          `Proxy options: ${proxyOptions.dispatcher ? 'custom dispatcher' : 'default'}`,
+        const httpFetch = wrapFetchWithResponseLimit(
+          wrapLegacyHttpSseGet401Guard(
+            wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
+            shouldApplyLegacyHttpSseGet401Guard({
+              isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
+              isFirstPartyAnthropicMcp: isFirstPartyAnthropicMcpUrl(
+                serverRef.url,
+              ),
+              isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
+            }),
+          ),
         )
-
-        const httpBaseFetch = wrapFetchWithResponseLimit(
-          wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
-        )
-        const allowLegacySse = shouldApplyLegacyHttpSseGet401Guard({
-          isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
-          isFirstPartyAnthropicMcp: isFirstPartyAnthropicMcpUrl(serverRef.url),
-          isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
-        })
         const transportOptions: StreamableHTTPClientTransportOptions = {
-          ...(authProvider
-            ? { authProvider, skipIssuerMetadataValidation: true }
-            : {}),
-          // Use fresh timeout per request to avoid stale AbortSignal bug.
-          // Step-up detection wraps innermost so the 403 is seen before the
-          // SDK's handler calls auth() → tokens().
-          fetch: httpBaseFetch,
+          ...(authProvider ? { authProvider } : {}),
+          fetch: httpFetch,
           requestInit: {
             ...proxyOptions,
             ...((isMcpCcrProxyServerConfig(serverRef) ||
@@ -784,93 +1408,33 @@ const connectToServerMemo = memoize(
             }),
             headers: {
               'User-Agent': getMCPUserAgent(),
-              ...(bearerToken && {
-                Authorization: `Bearer ${bearerToken}`,
-              }),
+              ...(sessionIngressToken &&
+                !hasOAuthTokens && {
+                  Authorization: `Bearer ${sessionIngressToken}`,
+                }),
               ...combinedHeaders,
             },
           },
         }
-
-        // Redact sensitive headers before logging
-        const headersForLogging = transportOptions.requestInit?.headers
-          ? mapValues(
-              transportOptions.requestInit.headers as Record<string, string>,
-              (value, key) =>
-                key.toLowerCase() === 'authorization' ? '[REDACTED]' : value,
-            )
-          : undefined
-
-        logMCPDebug(
-          name,
-          `HTTP transport options: ${jsonStringify({
-            url: serverRef.url,
-            headers: headersForLogging,
-            hasAuthProvider: !!authProvider,
-            timeoutMs: MCP_REQUEST_TIMEOUT_MS,
-          })}`,
-        )
-
-        transport = new StreamableHTTPClientTransport(
+        return new StreamableHTTPClientTransport(
           new URL(serverRef.url),
           transportOptions,
         )
-        logMCPDebug(name, `HTTP transport created successfully`)
-        // densable W — HTTP→legacy SSE rescue factory (!HEe && !o$ && !ce).
-        if (allowLegacySse) {
-          const sseUrl = new URL(serverRef.url)
-          const sseAuth = authProvider
-          const sseRequestInit = transportOptions.requestInit
-          legacySseFallback = ({
-            postMethodNotAllowed,
-            dialSignal,
-            dialConnected,
-          }) => {
-            const { fetch, eventSourceFetch } =
-              createLegacyHttpSseFallbackFetches({
-                baseFetch: httpBaseFetch,
-                postMethodNotAllowed,
-                dialSignal,
-                dialConnected,
-              })
-            return new SSEClientTransport(sseUrl, {
-              ...(sseAuth
-                ? { authProvider: sseAuth, skipIssuerMetadataValidation: true }
-                : {}),
-              fetch,
-              eventSourceInit: { fetch: eventSourceFetch },
-              requestInit: sseRequestInit,
-            })
-          }
-        }
-      } else if (serverRef.type === 'sdk') {
-        throw new Error('SDK servers should be handled in print.ts')
-      } else if (serverRef.type === 'claudeai-proxy') {
-        logMCPDebug(
-          name,
-          `Initializing claude.ai proxy transport for server ${serverRef.id}`,
-        )
-
+      }
+      if (serverRef.type === 'claudeai-proxy') {
         const tokens = getClaudeAIOAuthTokens()
         if (!tokens) {
           throw new Error('No claude.ai OAuth token found')
         }
-
         const oauthConfig = getOauthConfig()
         const proxyUrl = `${oauthConfig.MCP_PROXY_URL}${oauthConfig.MCP_PROXY_PATH.replace('{server_id}', serverRef.id)}`
-
-        logMCPDebug(name, `Using claude.ai proxy at ${proxyUrl}`)
-
         // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
         const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
-
         const proxyOptions = getProxyFetchOptions()
         const timedFetch = wrapFetchWithResponseLimit(
           wrapFetchWithTimeout(fetchWithAuth),
         )
         const transportOptions: StreamableHTTPClientTransportOptions = {
-          // Wrap fetchWithAuth with fresh timeout per request.
-          // densable: oGn(t)?F_f(dGn(oe,t),re):dGn(oe,t) + Accept-Encoding identity.
           fetch: isStatelessClaudeAiProxy(serverRef)
             ? suppressGetSseOnEndpoint(timedFetch, proxyUrl)
             : timedFetch,
@@ -883,643 +1447,363 @@ const connectToServerMemo = memoize(
             },
           },
         }
-
-        transport = new StreamableHTTPClientTransport(
+        return new StreamableHTTPClientTransport(
           new URL(proxyUrl),
           transportOptions,
         )
-        logMCPDebug(name, `claude.ai proxy transport created successfully`)
-      } else if (
-        ((serverRef as ScopedMcpServerConfig).type === 'stdio' ||
-          !(serverRef as ScopedMcpServerConfig).type) &&
-        isClaudeInChromeMCPServer(name)
-      ) {
-        // Run the Chrome MCP server in-process to avoid spawning a ~325 MB subprocess
-        const { createChromeContext } = await import(
-          '../../utils/claudeInChrome/mcpServer.js'
-        )
-        const { createChromeSocketClient, createClaudeForChromeMcpServer } =
-          await import('@ant/claude-for-chrome-mcp')
-        const { createLinkedTransportPair } = await import(
-          './InProcessTransport.js'
-        )
-        const { registerChromeTabGroupCleanup, setChromeBinding } =
-          await import('../../utils/claudeInChrome/tabGroupCleanup.js')
-        const context = createChromeContext(
-          (serverRef as McpStdioServerConfig).env,
-        )
-        const socketClient = createChromeSocketClient(context)
-        setChromeBinding(context, socketClient)
-        registerChromeTabGroupCleanup()
-        inProcessServer = createClaudeForChromeMcpServer(context, socketClient)
-        const [clientTransport, serverTransport] = createLinkedTransportPair()
-        await inProcessServer.connect(serverTransport)
-        transport = clientTransport
-        logMCPDebug(name, `In-process Chrome MCP server started`)
-      } else if (
-        feature('CHICAGO_MCP') &&
-        ((serverRef as ScopedMcpServerConfig).type === 'stdio' ||
-          !(serverRef as ScopedMcpServerConfig).type) &&
-        isComputerUseMCPServer!(name)
-      ) {
-        // Run the Computer Use MCP server in-process — same rationale as
-        // Chrome above. The package's CallTool handler is a stub; real
-        // dispatch goes through wrapper.tsx's .call() override.
-        const { createComputerUseMcpServerForCli } = await import(
-          '../../utils/computerUse/mcpServer.js'
-        )
-        const { createLinkedTransportPair } = await import(
-          './InProcessTransport.js'
-        )
-        inProcessServer = await createComputerUseMcpServerForCli()
-        const [clientTransport, serverTransport] = createLinkedTransportPair()
-        await inProcessServer.connect(serverTransport)
-        transport = clientTransport
-        logMCPDebug(name, `In-process Computer Use MCP server started`)
-      } else if (
-        (serverRef as ScopedMcpServerConfig).type === 'stdio' ||
-        !(serverRef as ScopedMcpServerConfig).type
-      ) {
-        const stdioRef = serverRef as McpStdioServerConfig
-        // Official SHELL_PREFIX densable.
-        let shellPrefix: string | null =
-          process.env.CLAUDE_CODE_SHELL_PREFIX || null
-        try {
-          const { resolveShellPrefix } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
-          shellPrefix = resolveShellPrefix()
-        } catch {
-          // keep raw env fallback
-        }
-        const finalCommand = shellPrefix || stdioRef.command
-        const finalArgs = shellPrefix
-          ? [[stdioRef.command, ...stdioRef.args].join(' ')]
-          : stdioRef.args
-        // Official eUi densable consumer: eUi()?{...lqi(),...kVt()}:GO(), then
-        // strip CLAUDE_CODE_CHILD_SESSION and inject PROJECT_DIR/SESSION_ID/CLAUDECODE.
-        let stdioEnv: Record<string, string>
-        try {
-          const {
-            shouldEnforceMcpAllowlistEnv,
-            buildMcpStdioBaseEnv,
-            buildMcpStdioTransportEnv,
-          } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
-          const base = buildMcpStdioBaseEnv({
-            enforceAllowlist: shouldEnforceMcpAllowlistEnv(),
-            processEnv: process.env,
-            injectedEnv: getRegisteredUpstreamProxyEnv(),
-            managedEnv: subprocessEnv(),
-          })
-          stdioEnv = buildMcpStdioTransportEnv({
-            baseEnv: base,
-            projectDir: getProjectRoot(),
-            sessionId: getSessionId(),
-            serverEnv: stdioRef.env ?? null,
-          })
-        } catch {
-          // raw-env fallback when densables unavailable
-          const { CLAUDE_CODE_CHILD_SESSION: _child, ...rest } =
-            subprocessEnv() as Record<string, string | undefined>
-          stdioEnv = {
-            ...(Object.fromEntries(
-              Object.entries(rest).filter(
-                (e): e is [string, string] => e[1] !== undefined,
-              ),
-            ) as Record<string, string>),
-            CLAUDE_PROJECT_DIR: getProjectRoot(),
-            CLAUDE_CODE_SESSION_ID: getSessionId(),
-            CLAUDECODE: '1',
-            ...stdioRef.env,
-          }
-        }
-        unsetEmptyAwsBearerTokenBedrock(stdioEnv)
-        transport = new StdioClientTransport({
-          command: finalCommand,
-          args: finalArgs,
-          env: stdioEnv,
-          stderr: 'pipe', // prevents error output from the MCP server from printing to the UI
-        })
-      } else {
-        throw new Error(
-          `Unsupported server type: ${(serverRef as ScopedMcpServerConfig).type}`,
-        )
       }
+      // stdio (or untyped stdio)
+      const stdioRef = serverRef as McpStdioServerConfig
+      let shellPrefix: string | null =
+        process.env.CLAUDE_CODE_SHELL_PREFIX || null
+      try {
+        const { resolveShellPrefix } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+        shellPrefix = resolveShellPrefix()
+      } catch {
+        // keep raw env fallback
+      }
+      const finalCommand = shellPrefix || stdioRef.command
+      const finalArgs = shellPrefix
+        ? [[stdioRef.command, ...stdioRef.args].join(' ')]
+        : stdioRef.args
+      let stdioEnv: Record<string, string>
+      try {
+        const {
+          shouldEnforceMcpAllowlistEnv,
+          buildMcpStdioBaseEnv,
+          buildMcpStdioTransportEnv,
+        } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
+        const base = buildMcpStdioBaseEnv({
+          enforceAllowlist: shouldEnforceMcpAllowlistEnv(),
+          processEnv: process.env,
+          injectedEnv: getRegisteredUpstreamProxyEnv(),
+          managedEnv: subprocessEnv(),
+        })
+        stdioEnv = buildMcpStdioTransportEnv({
+          baseEnv: base,
+          projectDir: getProjectRoot(),
+          sessionId: getSessionId(),
+          serverEnv: stdioRef.env ?? null,
+        })
+      } catch {
+        const { CLAUDE_CODE_CHILD_SESSION: _child, ...rest } =
+          subprocessEnv() as Record<string, string | undefined>
+        stdioEnv = {
+          ...(Object.fromEntries(
+            Object.entries(rest).filter(
+              (e): e is [string, string] => e[1] !== undefined,
+            ),
+          ) as Record<string, string>),
+          CLAUDE_PROJECT_DIR: getProjectRoot(),
+          CLAUDE_CODE_SESSION_ID: getSessionId(),
+          CLAUDECODE: '1',
+          ...stdioRef.env,
+        }
+      }
+      unsetEmptyAwsBearerTokenBedrock(stdioEnv)
+      return new StdioClientTransport({
+        command: finalCommand,
+        args: finalArgs,
+        env: stdioEnv,
+        stderr: 'pipe',
+      })
+    }
 
-      // Set up stderr logging for stdio transport before connecting in case there are any stderr
-      // outputs emitted during the connection start (this can be useful for debugging failed connections).
-      // Store handler reference for cleanup to prevent memory leaks
-      let stderrHandler: ((data: Buffer) => void) | undefined
-      let stderrOutput = ''
-      if (serverRef.type === 'stdio' || !serverRef.type) {
-        const stdioTransport = transport as StdioClientTransport
-        if (stdioTransport.stderr) {
+    const canRecreateForPinnedLegacy =
+      serverRef.type === 'http' ||
+      serverRef.type === 'claudeai-proxy' ||
+      serverRef.type === 'stdio' ||
+      !serverRef.type
+
+    // densable N_f(u,S,v) — claudeai-proxy send-intercept only (never stdio).
+    if (serverRef.type === 'claudeai-proxy') {
+      wrapStatelessClaudeAiProxyTransport(transport, serverRef, msg =>
+        logMCPDebug(name, msg),
+      )
+    }
+    if (protocolPlan.mode === 'auto') {
+      wrapModernProtocolResultCompat(
+        transport as unknown as ModernCompatTransportLike,
+        name,
+        msg => logMCPDebug(name, msg),
+      )
+    }
+
+    const recreateTransportAndClientForBareElicitation =
+      async (): Promise<void> => {
+        bareElicitationRetry = true
+        await transport.close().catch(() => {})
+        if (stderrHandler) {
+          const stdioT = transport as StdioClientTransport
+          stdioT.stderr?.off('data', stderrHandler)
+        }
+        if (stderrOutput) {
+          logMCPDebug(
+            name,
+            `stderr of the stdio server that refused elicitation form and url, before restarting it: ${stderrOutput}`,
+          )
+          stderrOutput = ''
+        }
+        transport = await recreateTransportForPinnedLegacy()
+        if (serverRef.type === 'claudeai-proxy') {
+          wrapStatelessClaudeAiProxyTransport(
+            transport,
+            serverRef,
+            msg => logMCPDebug(name, msg),
+            { includeDiscover: false },
+          )
+        }
+        if (
+          (serverRef.type === 'stdio' || !serverRef.type) &&
+          transport instanceof StdioClientTransport &&
+          transport.stderr
+        ) {
           stderrHandler = (data: Buffer) => {
-            // Cap stderr accumulation to prevent unbounded memory growth
             if (stderrOutput.length < 64 * 1024 * 1024) {
               try {
                 stderrOutput += data.toString()
               } catch {
-                // Ignore errors from exceeding max string length
+                // ignore
               }
             }
           }
-          stdioTransport.stderr.on('data', stderrHandler)
+          transport.stderr.on('data', stderrHandler)
         }
+        // densable ze(Ee?TDt()) — bare elicitation bag on Java reject retry.
+        client = createMcpSdkClient({ mode: 'legacy' }, { forceBare: true })
       }
 
-      // densable n_f(type, {inProcess, ccrProxy: pMn(config)}) for Pwi.
-      // sdk is handled earlier; n_f still maps it to sdk-control.
-      const negotiationTransportKind = resolveMcpNegotiationTransportKind(
-        serverRef.type,
-        {
-          inProcess: inProcessServer !== undefined,
-          ccrProxy: isMcpCcrProxyServerConfig(serverRef),
-        },
-      )
-
-      // densable 2.1.232/238: Pwi(kind, serverConfig) — GB denylist after auto.
-      // SEA 325 #263 / #1628: lazily load persisted 7-day verdicts from disk
-      // once, then skip the probe for 7 days if this stdio server previously
-      // timed out/failed probe.
-      if (negotiationTransportKind === 'stdio') {
-        await loadRememberedLegacyStdioFromDisk(undefined, { once: true })
-      }
-      const protocolPlan: McpProtocolNegotiationPlan =
-        negotiationTransportKind === 'stdio' &&
-        isRememberedLegacyStdio(
-          serverRef as {
-            type?: string
-            command?: string
-            args?: readonly string[]
-            env?: Record<string, string>
-          },
+    try {
+      try {
+        await raceConnect(
+          client,
+          transport,
+          initializeTimeoutMs,
+          outerTimeoutMs,
         )
-          ? { mode: 'legacy' }
-          : resolveMcpProtocolNegotiationPlan(
-              negotiationTransportKind,
-              process.env,
-              (key, def) => getFeatureValue_CACHED_MAY_BE_STALE(key, def),
-              serverRef,
-            )
-      // densable k(Z) — factory takes versionNegotiation plan (BVa)
-      // densable ze capability ternary + Lr initialize rewrite live in factory.
-      let bareElicitationRetry = false
-      const createMcpSdkClient = (
-        plan: typeof protocolPlan = protocolPlan,
-        opts: { forceBare?: boolean } = {},
-      ): Client => {
-        const c = createDensableMcpClient(plan, serverRef, {
-          forceBare: opts.forceBare === true || bareElicitationRetry,
-        })
-        // densable: setRequestHandler("roots/list", ...)
-        c.setRequestHandler('roots/list', async () => {
-          logMCPDebug(name, `Received ListRoots request from server`)
-          return buildMcpRootsList()
-        })
-        return c
-      }
-
-      // densable C — reassigned on pinned-legacy reconnect / bare elicitation retry.
-      let client = createMcpSdkClient()
-
-      // Add debug logging for client events if available
-      if (serverRef.type === 'http') {
-        logMCPDebug(name, `Client created, setting up request handler`)
-      }
-
-      // Add a timeout to connection attempts to prevent tests from hanging indefinitely
-      logMCPDebug(
-        name,
-        `Starting connection with timeout of ${getConnectionTimeoutMs()}ms`,
-      )
-
-      // For HTTP transport, try a basic connectivity test first
-      if (serverRef.type === 'http') {
-        logMCPDebug(name, `Testing basic HTTP connectivity to ${serverRef.url}`)
-        try {
-          const testUrl = new URL(serverRef.url)
+      } catch (firstError) {
+        const alreadyHttpInited =
+          transport instanceof StreamableHTTPClientTransport &&
+          (transport as { protocolVersion?: unknown }).protocolVersion !==
+            undefined
+        const gbLegacySse =
+          getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_mcp_legacy_sse_fallback',
+            true,
+          ) === true
+        if (
+          legacySseFallback !== undefined &&
+          !alreadyHttpInited &&
+          isLegacySseFallbackEligible(firstError) &&
+          gbLegacySse
+        ) {
+          const snippet =
+            firstError instanceof Error
+              ? firstError.message
+              : String(firstError)
           logMCPDebug(
             name,
-            `Parsed URL: host=${testUrl.hostname}, port=${testUrl.port || 'default'}, protocol=${testUrl.protocol}`,
+            `initialize POST rejected (${snippet.slice(0, 200)}); trying legacy HTTP+SSE`,
           )
-
-          // Log DNS resolution attempt
-          if (
-            testUrl.hostname === '127.0.0.1' ||
-            testUrl.hostname === 'localhost'
-          ) {
-            logMCPDebug(name, `Using loopback address: ${testUrl.hostname}`)
-          }
-        } catch (urlError) {
-          logMCPDebug(name, `Failed to parse URL: ${urlError}`)
-        }
-      }
-
-      const initializeTimeoutMs = getMcpClientConnectTimeoutMs(
-        protocolPlan.mode,
-      )
-      const outerTimeoutMs = getConnectionTimeoutMs()
-      // probeFellBack retained for densable analytics shape (negotiation.probeFellBack).
-      let probeFellBack: McpProbeFallbackReason | undefined
-      // densable `oe` — Re() timeout only transport.close().
-      let handshakeConnectTimedOut = false
-
-      const raceConnect = async (
-        c: Client,
-        t: Transport,
-        initTimeoutMs: number,
-        raceTimeoutMs: number,
-      ): Promise<void> => {
-        const connectPromise = c.connect(t, { timeout: initTimeoutMs })
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          const timeoutId = setTimeout(() => {
-            const elapsed = Date.now() - connectStartTime
-            logMCPDebug(
-              name,
-              `Connection timeout triggered after ${elapsed}ms (limit: ${raceTimeoutMs}ms)`,
-            )
-            if (inProcessServer) {
-              inProcessServer.close().catch(() => {})
-            }
-            t.close().catch(() => {})
-            handshakeConnectTimedOut = true
-            // densable oMf — tag CONNECT_TIMEOUT when GB default true
-            reject(
-              createMcpConnectionTimeoutError(
-                `MCP server "${name}" connection timed out after ${outerTimeoutMs}ms`,
-              ),
-            )
-          }, raceTimeoutMs)
-          connectPromise.then(
-            () => {
-              clearTimeout(timeoutId)
-            },
-            _error => {
-              clearTimeout(timeoutId)
-            },
-          )
-        })
-        await Promise.race([connectPromise, timeoutPromise])
-      }
-
-      const recreateTransportForPinnedLegacy = async (): Promise<Transport> => {
-        // densable `l=u()` / `l=new por(c)` — rebuild same transport kind for legacy.
-        if (serverRef.type === 'http') {
-          const combinedHeaders = await getMcpServerHeaders(name, serverRef, {
-            onHelperFailed: () => {
-              lacksHelperHeaders = true
-            },
+          const post405 =
+            firstError instanceof SdkHttpError && firstError.status === 405
+          await transport.close().catch(() => {})
+          const dial = new AbortController()
+          let sseConnected = false
+          transport = legacySseFallback({
+            postMethodNotAllowed: post405,
+            dialSignal: dial.signal,
+            dialConnected: () => sseConnected,
           })
-          const remoteAuth = await resolveRemoteConnectAuth(
-            name,
-            serverRef,
-            combinedHeaders,
-          )
-          connectAuthFlags = remoteAuth.flags
-          useFirstPartyAuth = remoteAuth.useFirstPartyAuth
-          const authProvider = remoteAuth.authProvider
-          const firstPartyBag = useFirstPartyAuth
-            ? firstPartyBearerBag
-            : undefined
-          const hasOAuthTokens = !!(await authProvider?.tokens())
-          const proxyOptions = getProxyFetchOptions()
-          const httpFetch = wrapFetchWithResponseLimit(
-            wrapLegacyHttpSseGet401Guard(
-              wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
-              shouldApplyLegacyHttpSseGet401Guard({
-                isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
-                isFirstPartyAnthropicMcp: isFirstPartyAnthropicMcpUrl(
-                  serverRef.url,
-                ),
-                isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
-              }),
+          client = createMcpSdkClient()
+          const remainingMs = Math.min(
+            5_000,
+            Math.max(
+              1_000,
+              getConnectionTimeoutMs() - (Date.now() - connectStartTime),
             ),
           )
-          const transportOptions: StreamableHTTPClientTransportOptions = {
-            ...(authProvider ? { authProvider } : {}),
-            fetch: httpFetch,
-            requestInit: {
-              ...proxyOptions,
-              ...((isMcpCcrProxyServerConfig(serverRef) ||
-                isFirstPartyAnthropicMcpUrl(serverRef.url)) && {
-                redirect: 'manual' as const,
-              }),
-              headers: {
-                'User-Agent': getMCPUserAgent(),
-                ...(sessionIngressToken &&
-                  !hasOAuthTokens && {
-                    Authorization: `Bearer ${sessionIngressToken}`,
-                  }),
-                ...combinedHeaders,
-              },
-            },
-          }
-          return new StreamableHTTPClientTransport(
-            new URL(serverRef.url),
-            transportOptions,
-          )
-        }
-        if (serverRef.type === 'claudeai-proxy') {
-          const tokens = getClaudeAIOAuthTokens()
-          if (!tokens) {
-            throw new Error('No claude.ai OAuth token found')
-          }
-          const oauthConfig = getOauthConfig()
-          const proxyUrl = `${oauthConfig.MCP_PROXY_URL}${oauthConfig.MCP_PROXY_PATH.replace('{server_id}', serverRef.id)}`
-          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-          const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
-          const proxyOptions = getProxyFetchOptions()
-          const timedFetch = wrapFetchWithResponseLimit(
-            wrapFetchWithTimeout(fetchWithAuth),
-          )
-          const transportOptions: StreamableHTTPClientTransportOptions = {
-            fetch: isStatelessClaudeAiProxy(serverRef)
-              ? suppressGetSseOnEndpoint(timedFetch, proxyUrl)
-              : timedFetch,
-            requestInit: {
-              ...proxyOptions,
-              headers: {
-                'User-Agent': getMCPUserAgent(),
-                'Accept-Encoding': 'identity',
-                'X-Mcp-Client-Session-Id': getSessionId(),
-              },
-            },
-          }
-          return new StreamableHTTPClientTransport(
-            new URL(proxyUrl),
-            transportOptions,
-          )
-        }
-        // stdio (or untyped stdio)
-        const stdioRef = serverRef as McpStdioServerConfig
-        let shellPrefix: string | null =
-          process.env.CLAUDE_CODE_SHELL_PREFIX || null
-        try {
-          const { resolveShellPrefix } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
-          shellPrefix = resolveShellPrefix()
-        } catch {
-          // keep raw env fallback
-        }
-        const finalCommand = shellPrefix || stdioRef.command
-        const finalArgs = shellPrefix
-          ? [[stdioRef.command, ...stdioRef.args].join(' ')]
-          : stdioRef.args
-        let stdioEnv: Record<string, string>
-        try {
-          const {
-            shouldEnforceMcpAllowlistEnv,
-            buildMcpStdioBaseEnv,
-            buildMcpStdioTransportEnv,
-          } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
-          const base = buildMcpStdioBaseEnv({
-            enforceAllowlist: shouldEnforceMcpAllowlistEnv(),
-            processEnv: process.env,
-            injectedEnv: getRegisteredUpstreamProxyEnv(),
-            managedEnv: subprocessEnv(),
-          })
-          stdioEnv = buildMcpStdioTransportEnv({
-            baseEnv: base,
-            projectDir: getProjectRoot(),
-            sessionId: getSessionId(),
-            serverEnv: stdioRef.env ?? null,
-          })
-        } catch {
-          const { CLAUDE_CODE_CHILD_SESSION: _child, ...rest } =
-            subprocessEnv() as Record<string, string | undefined>
-          stdioEnv = {
-            ...(Object.fromEntries(
-              Object.entries(rest).filter(
-                (e): e is [string, string] => e[1] !== undefined,
-              ),
-            ) as Record<string, string>),
-            CLAUDE_PROJECT_DIR: getProjectRoot(),
-            CLAUDE_CODE_SESSION_ID: getSessionId(),
-            CLAUDECODE: '1',
-            ...stdioRef.env,
-          }
-        }
-        unsetEmptyAwsBearerTokenBedrock(stdioEnv)
-        return new StdioClientTransport({
-          command: finalCommand,
-          args: finalArgs,
-          env: stdioEnv,
-          stderr: 'pipe',
-        })
-      }
-
-      const canRecreateForPinnedLegacy =
-        serverRef.type === 'http' ||
-        serverRef.type === 'claudeai-proxy' ||
-        serverRef.type === 'stdio' ||
-        !serverRef.type
-
-      // densable N_f(u,S,v) — claudeai-proxy send-intercept only (never stdio).
-      if (serverRef.type === 'claudeai-proxy') {
-        wrapStatelessClaudeAiProxyTransport(transport, serverRef, msg =>
-          logMCPDebug(name, msg),
-        )
-      }
-      if (protocolPlan.mode === 'auto') {
-        wrapModernProtocolResultCompat(
-          transport as unknown as ModernCompatTransportLike,
-          name,
-          msg => logMCPDebug(name, msg),
-        )
-      }
-
-      const recreateTransportAndClientForBareElicitation =
-        async (): Promise<void> => {
-          bareElicitationRetry = true
-          await transport.close().catch(() => {})
-          if (stderrHandler) {
-            const stdioT = transport as StdioClientTransport
-            stdioT.stderr?.off('data', stderrHandler)
-          }
-          if (stderrOutput) {
-            logMCPDebug(
-              name,
-              `stderr of the stdio server that refused elicitation form and url, before restarting it: ${stderrOutput}`,
-            )
-            stderrOutput = ''
-          }
-          transport = await recreateTransportForPinnedLegacy()
-          if (serverRef.type === 'claudeai-proxy') {
-            wrapStatelessClaudeAiProxyTransport(
-              transport,
-              serverRef,
-              msg => logMCPDebug(name, msg),
-              { includeDiscover: false },
-            )
-          }
-          if (
-            (serverRef.type === 'stdio' || !serverRef.type) &&
-            transport instanceof StdioClientTransport &&
-            transport.stderr
-          ) {
-            stderrHandler = (data: Buffer) => {
-              if (stderrOutput.length < 64 * 1024 * 1024) {
-                try {
-                  stderrOutput += data.toString()
-                } catch {
-                  // ignore
-                }
-              }
-            }
-            transport.stderr.on('data', stderrHandler)
-          }
-          // densable ze(Ee?TDt()) — bare elicitation bag on Java reject retry.
-          client = createMcpSdkClient({ mode: 'legacy' }, { forceBare: true })
-        }
-
-      try {
-        try {
-          await raceConnect(
-            client,
-            transport,
-            initializeTimeoutMs,
-            outerTimeoutMs,
-          )
-        } catch (firstError) {
-          const alreadyHttpInited =
-            transport instanceof StreamableHTTPClientTransport &&
-            (transport as { protocolVersion?: unknown }).protocolVersion !==
-              undefined
-          const gbLegacySse =
-            getFeatureValue_CACHED_MAY_BE_STALE(
-              'tengu_mcp_legacy_sse_fallback',
-              true,
-            ) === true
-          if (
-            legacySseFallback !== undefined &&
-            !alreadyHttpInited &&
-            isLegacySseFallbackEligible(firstError) &&
-            gbLegacySse
-          ) {
-            const snippet =
-              firstError instanceof Error
-                ? firstError.message
-                : String(firstError)
-            logMCPDebug(
-              name,
-              `initialize POST rejected (${snippet.slice(0, 200)}); trying legacy HTTP+SSE`,
-            )
-            const post405 =
-              firstError instanceof SdkHttpError && firstError.status === 405
+          // densable De = R?.sawAuthChallenge; Trn stamps the field.
+          const sawAuthChallengeBeforeFallback =
+            (connectAuthProvider as { sawAuthChallenge?: boolean } | undefined)
+              ?.sawAuthChallenge === true
+          handshakeConnectTimedOut = false
+          try {
+            await raceConnect(client, transport, remainingMs, remainingMs)
+            sseConnected = true
+            logMCPDebug(name, 'connected over legacy HTTP+SSE')
+          } catch (sseError) {
             await transport.close().catch(() => {})
-            const dial = new AbortController()
-            let sseConnected = false
-            transport = legacySseFallback({
-              postMethodNotAllowed: post405,
-              dialSignal: dial.signal,
-              dialConnected: () => sseConnected,
-            })
-            client = createMcpSdkClient()
-            const remainingMs = Math.min(
-              5_000,
-              Math.max(
-                1_000,
-                getConnectionTimeoutMs() - (Date.now() - connectStartTime),
-              ),
-            )
-            // densable De = R?.sawAuthChallenge; Trn stamps the field.
-            const sawAuthChallengeBeforeFallback =
+            dial.abort()
+            const newAuthChallenge =
+              !sawAuthChallengeBeforeFallback &&
               (
                 connectAuthProvider as
                   | { sawAuthChallenge?: boolean }
                   | undefined
               )?.sawAuthChallenge === true
-            handshakeConnectTimedOut = false
-            try {
-              await raceConnect(client, transport, remainingMs, remainingMs)
-              sseConnected = true
-              logMCPDebug(name, 'connected over legacy HTTP+SSE')
-            } catch (sseError) {
-              await transport.close().catch(() => {})
-              dial.abort()
-              const newAuthChallenge =
-                !sawAuthChallengeBeforeFallback &&
-                (
-                  connectAuthProvider as
-                    | { sawAuthChallenge?: boolean }
-                    | undefined
-                )?.sawAuthChallenge === true
-              const isAuthChallenge = isLegacySseAuthChallenge(
-                sseError,
-                getLegacySseErrorStatus(sseError),
-                newAuthChallenge,
+            const isAuthChallenge = isLegacySseAuthChallenge(
+              sseError,
+              getLegacySseErrorStatus(sseError),
+              newAuthChallenge,
+            )
+            if (handshakeConnectTimedOut && post405 && newAuthChallenge) {
+              logMCPDebug(
+                name,
+                'legacy HTTP+SSE stream GET answered with an auth challenge; its auth flow outran the fallback budget, so routing to needs-auth',
               )
-              if (handshakeConnectTimedOut && post405 && newAuthChallenge) {
-                logMCPDebug(
-                  name,
-                  'legacy HTTP+SSE stream GET answered with an auth challenge; its auth flow outran the fallback budget, so routing to needs-auth',
-                )
-                throw new UnauthorizedError(
-                  `MCP server "${name}" requires authorization: its legacy HTTP+SSE stream answered with an auth challenge and the authorization flow did not finish within the connect budget`,
-                )
-              }
-              if (
-                handshakeConnectTimedOut ||
-                (sseError instanceof SseError && !isAuthChallenge) ||
-                (isAuthChallenge && !post405)
-              ) {
-                const snippet = truncateMcpErrorSnippet(
-                  sseError instanceof Error
-                    ? sseError.message
-                    : String(sseError),
-                )
-                logMCPDebug(
-                  name,
-                  `legacy HTTP+SSE not confirmed (${snippet}); surfacing the POST failure`,
-                )
-                throw firstError
-              }
-              throw sseError
+              throw new UnauthorizedError(
+                `MCP server "${name}" requires authorization: its legacy HTTP+SSE stream answered with an auth challenge and the authorization flow did not finish within the connect budget`,
+              )
             }
-          } else {
-            const decision = classifyMcpAutoProbeFallback(
-              protocolPlan,
-              firstError,
-              {
-                transportType: serverRef.type,
-                transport: transport as McpProbeTimedOutTransport,
-                canRecreateTransport: canRecreateForPinnedLegacy,
-                elapsedMs: Date.now() - connectStartTime,
+            if (
+              handshakeConnectTimedOut ||
+              (sseError instanceof SseError && !isAuthChallenge) ||
+              (isAuthChallenge && !post405)
+            ) {
+              const snippet = truncateMcpErrorSnippet(
+                sseError instanceof Error ? sseError.message : String(sseError),
+              )
+              logMCPDebug(
+                name,
+                `legacy HTTP+SSE not confirmed (${snippet}); surfacing the POST failure`,
+              )
+              throw firstError
+            }
+            throw sseError
+          }
+        } else {
+          const decision = classifyMcpAutoProbeFallback(
+            protocolPlan,
+            firstError,
+            {
+              transportType: serverRef.type,
+              transport: transport as McpProbeTimedOutTransport,
+              canRecreateTransport: canRecreateForPinnedLegacy,
+              elapsedMs: Date.now() - connectStartTime,
+            },
+          )
+          if (decision.shouldFallback && negotiationTransportKind === 'stdio') {
+            recordRememberedLegacyStdio(
+              serverRef as {
+                type?: string
+                command?: string
+                args?: readonly string[]
+                env?: Record<string, string>
               },
             )
+          }
+          if (!decision.shouldFallback) {
+            // densable bn → reconnect once without elicitation form/url.
             if (
-              decision.shouldFallback &&
-              negotiationTransportKind === 'stdio'
+              canRecreateForPinnedLegacy &&
+              !bareElicitationRetry &&
+              isJavaMcpFormUrlElicitationReject(
+                firstError,
+                serverRef,
+                transport,
+              )
             ) {
-              recordRememberedLegacyStdio(
-                serverRef as {
-                  type?: string
-                  command?: string
-                  args?: readonly string[]
-                  env?: Record<string, string>
-                },
+              logMCPDebug(
+                name,
+                'server rejected elicitation form and url at initialize (Java MCP SDK 0.17.0 or older); reconnecting once without elicitation form and url',
+              )
+              await recreateTransportAndClientForBareElicitation()
+              const bareTimeoutMs =
+                getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
+              await raceConnect(client, transport, bareTimeoutMs, bareTimeoutMs)
+            } else {
+              throw firstError
+            }
+          } else {
+            probeFellBack = decision.reason
+            logMCPDebug(
+              name,
+              formatMcpProbeFallbackDebugMessage(
+                decision.reason,
+                serverRef.type || 'stdio',
+              ),
+            )
+            if (decision.reason === 'closed' && stderrOutput) {
+              logMCPDebug(name, `Probe-closed server stderr: ${stderrOutput}`)
+              stderrOutput = ''
+            }
+            await transport.close().catch(() => {})
+            if (stderrHandler) {
+              const stdioT = transport as StdioClientTransport
+              stdioT.stderr?.off('data', stderrHandler)
+            }
+            transport = await recreateTransportForPinnedLegacy()
+            // densable reconnect `_9a(u,M)` — init intercept only (discover omitted).
+            if (serverRef.type === 'claudeai-proxy') {
+              wrapStatelessClaudeAiProxyTransport(
+                transport,
+                serverRef,
+                msg => logMCPDebug(name, msg),
+                { includeDiscover: false },
               )
             }
-            if (!decision.shouldFallback) {
-              // densable bn → reconnect once without elicitation form/url.
+            if (
+              (serverRef.type === 'stdio' || !serverRef.type) &&
+              transport instanceof StdioClientTransport &&
+              transport.stderr
+            ) {
+              stderrHandler = (data: Buffer) => {
+                if (stderrOutput.length < 64 * 1024 * 1024) {
+                  try {
+                    stderrOutput += data.toString()
+                  } catch {
+                    // ignore
+                  }
+                }
+              }
+              transport.stderr.on('data', stderrHandler)
+            }
+            // densable C=k({mode:"legacy"}) — new client, pinned legacy mode.
+            client = createMcpSdkClient({ mode: 'legacy' })
+            const retryTimeoutMs =
+              getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
+            let outerTimedOut = false
+            try {
+              // densable: race remaining budget; oMf message still cites y0()
+              const connectPromise = client.connect(transport, {
+                timeout: retryTimeoutMs,
+              })
+              await Promise.race([
+                connectPromise,
+                new Promise<never>((_, reject) => {
+                  const timeoutId = setTimeout(() => {
+                    outerTimedOut = true
+                    transport.close().catch(() => {})
+                    reject(
+                      createMcpConnectionTimeoutError(
+                        `MCP server "${name}" connection timed out after ${outerTimeoutMs}ms`,
+                      ),
+                    )
+                  }, retryTimeoutMs)
+                  connectPromise.then(
+                    () => clearTimeout(timeoutId),
+                    () => clearTimeout(timeoutId),
+                  )
+                }),
+              ])
+            } catch (retryError) {
               if (
                 canRecreateForPinnedLegacy &&
                 !bareElicitationRetry &&
                 isJavaMcpFormUrlElicitationReject(
-                  firstError,
+                  retryError,
                   serverRef,
                   transport,
                 )
               ) {
                 logMCPDebug(
                   name,
-                  'server rejected elicitation form and url at initialize (Java MCP SDK 0.17.0 or older); reconnecting once without elicitation form and url',
+                  'server rejected elicitation form and url on the reconnect (Java MCP SDK 0.17.0 or older); reconnecting once more without elicitation form and url',
                 )
                 await recreateTransportAndClientForBareElicitation()
                 const bareTimeoutMs =
@@ -1530,674 +1814,585 @@ const connectToServerMemo = memoize(
                   bareTimeoutMs,
                   bareTimeoutMs,
                 )
-              } else {
-                throw firstError
-              }
-            } else {
-              probeFellBack = decision.reason
-              logMCPDebug(
-                name,
-                formatMcpProbeFallbackDebugMessage(
+              } else if (
+                shouldPreserveConnectTimeoutAfterPinnedLegacyRetry(
                   decision.reason,
-                  serverRef.type || 'stdio',
-                ),
-              )
-              if (decision.reason === 'closed' && stderrOutput) {
-                logMCPDebug(name, `Probe-closed server stderr: ${stderrOutput}`)
-                stderrOutput = ''
-              }
-              await transport.close().catch(() => {})
-              if (stderrHandler) {
-                const stdioT = transport as StdioClientTransport
-                stdioT.stderr?.off('data', stderrHandler)
-              }
-              transport = await recreateTransportForPinnedLegacy()
-              // densable reconnect `_9a(u,M)` — init intercept only (discover omitted).
-              if (serverRef.type === 'claudeai-proxy') {
-                wrapStatelessClaudeAiProxyTransport(
-                  transport,
-                  serverRef,
-                  msg => logMCPDebug(name, msg),
-                  { includeDiscover: false },
+                  retryError,
+                  { outerTimedOut },
                 )
-              }
-              if (
-                (serverRef.type === 'stdio' || !serverRef.type) &&
-                transport instanceof StdioClientTransport &&
-                transport.stderr
               ) {
-                stderrHandler = (data: Buffer) => {
-                  if (stderrOutput.length < 64 * 1024 * 1024) {
-                    try {
-                      stderrOutput += data.toString()
-                    } catch {
-                      // ignore
-                    }
-                  }
-                }
-                transport.stderr.on('data', stderrHandler)
-              }
-              // densable C=k({mode:"legacy"}) — new client, pinned legacy mode.
-              client = createMcpSdkClient({ mode: 'legacy' })
-              const retryTimeoutMs =
-                getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
-              let outerTimedOut = false
-              try {
-                // densable: race remaining budget; oMf message still cites y0()
-                const connectPromise = client.connect(transport, {
-                  timeout: retryTimeoutMs,
-                })
-                await Promise.race([
-                  connectPromise,
-                  new Promise<never>((_, reject) => {
-                    const timeoutId = setTimeout(() => {
-                      outerTimedOut = true
-                      transport.close().catch(() => {})
-                      reject(
-                        createMcpConnectionTimeoutError(
-                          `MCP server "${name}" connection timed out after ${outerTimeoutMs}ms`,
-                        ),
-                      )
-                    }, retryTimeoutMs)
-                    connectPromise.then(
-                      () => clearTimeout(timeoutId),
-                      () => clearTimeout(timeoutId),
-                    )
-                  }),
-                ])
-              } catch (retryError) {
-                if (
-                  canRecreateForPinnedLegacy &&
-                  !bareElicitationRetry &&
-                  isJavaMcpFormUrlElicitationReject(
-                    retryError,
-                    serverRef,
-                    transport,
-                  )
-                ) {
-                  logMCPDebug(
-                    name,
-                    'server rejected elicitation form and url on the reconnect (Java MCP SDK 0.17.0 or older); reconnecting once more without elicitation form and url',
-                  )
-                  await recreateTransportAndClientForBareElicitation()
-                  const bareTimeoutMs =
-                    getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
-                  await raceConnect(
-                    client,
-                    transport,
-                    bareTimeoutMs,
-                    bareTimeoutMs,
-                  )
-                } else if (
-                  shouldPreserveConnectTimeoutAfterPinnedLegacyRetry(
-                    decision.reason,
-                    retryError,
-                    { outerTimedOut },
-                  )
-                ) {
-                  const snippet = truncateMcpErrorSnippet(
-                    retryError instanceof Error
-                      ? retryError.message
-                      : String(retryError),
-                  )
-                  logMCPDebug(
-                    name,
-                    formatPinnedLegacyRetryPreserveTimeoutLog(snippet),
-                  )
-                  throw firstError
-                } else {
-                  throw retryError
-                }
+                const snippet = truncateMcpErrorSnippet(
+                  retryError instanceof Error
+                    ? retryError.message
+                    : String(retryError),
+                )
+                logMCPDebug(
+                  name,
+                  formatPinnedLegacyRetryPreserveTimeoutLog(snippet),
+                )
+                throw firstError
+              } else {
+                throw retryError
               }
             }
           }
         }
-        // silence unused until analytics wiring; densable passes probeFellBack out.
-        void probeFellBack
-        void bareElicitationRetry
+      }
+      // silence unused until analytics wiring; densable passes probeFellBack out.
+      void probeFellBack
+      void bareElicitationRetry
 
-        if (stderrOutput) {
-          logMCPError(name, `Server stderr: ${stderrOutput}`)
-          stderrOutput = '' // Release accumulated string to prevent memory growth
-        }
-        const elapsed = Date.now() - connectStartTime
+      if (stderrOutput) {
+        logMCPError(name, `Server stderr: ${stderrOutput}`)
+        stderrOutput = '' // Release accumulated string to prevent memory growth
+      }
+      const elapsed = Date.now() - connectStartTime
+      logMCPDebug(
+        name,
+        `Successfully connected (transport: ${serverRef.type || 'stdio'}) in ${elapsed}ms`,
+      )
+    } catch (caught) {
+      const elapsed = Date.now() - connectStartTime
+      // densable: !Ee && bn → rewrite failed-connect message to Java bare hint.
+      const error =
+        !bareElicitationRetry &&
+        isJavaMcpFormUrlElicitationReject(caught, serverRef, transport)
+          ? new Error(JAVA_MCP_BARE_ELICITATION_HINT, { cause: caught })
+          : caught
+      // SSE-specific error logging
+      if (serverRef.type === 'sse' && error instanceof Error) {
         logMCPDebug(
           name,
-          `Successfully connected (transport: ${serverRef.type || 'stdio'}) in ${elapsed}ms`,
+          `SSE Connection failed after ${elapsed}ms: ${jsonStringify({
+            url: serverRef.url,
+            error: error.message,
+            errorType: error.constructor.name,
+            stack: error.stack,
+          })}`,
         )
-      } catch (caught) {
-        const elapsed = Date.now() - connectStartTime
-        // densable: !Ee && bn → rewrite failed-connect message to Java bare hint.
-        const error =
-          !bareElicitationRetry &&
-          isJavaMcpFormUrlElicitationReject(caught, serverRef, transport)
-            ? new Error(JAVA_MCP_BARE_ELICITATION_HINT, { cause: caught })
-            : caught
-        // SSE-specific error logging
-        if (serverRef.type === 'sse' && error instanceof Error) {
-          logMCPDebug(
-            name,
-            `SSE Connection failed after ${elapsed}ms: ${jsonStringify({
-              url: serverRef.url,
-              error: error.message,
-              errorType: error.constructor.name,
-              stack: error.stack,
-            })}`,
-          )
-          logMCPError(name, error)
+        logMCPError(name, error)
 
-          const classified = maybeConnectAuthHeaderRejection(
+        const classified = maybeConnectAuthHeaderRejection(
+          error,
+          connectAuthFlags,
+        )
+        if (classified) {
+          return connectAuthRejectedResult(name, serverRef, 'sse', classified)
+        }
+        if (useFirstPartyAuth) {
+          const firstParty = classifyFirstPartyAuthRejection({
             error,
-            connectAuthFlags,
+            statusCode: connectAuthStatusCode(error),
+            serverRef,
+            firstPartyBearer: firstPartyBearerBag.last,
+          })
+          if (firstParty) {
+            return connectAuthRejectedResult(name, serverRef, 'sse', firstParty)
+          }
+        }
+        if (error instanceof UnauthorizedError) {
+          return markStoredTokenRejectedForRedial(name, serverRef, () =>
+            handleRemoteAuthFailure(name, serverRef, 'sse', {
+              lacksHelperHeaders,
+            }),
           )
-          if (classified) {
-            return connectAuthRejectedResult(name, serverRef, 'sse', classified)
-          }
-          if (useFirstPartyAuth) {
-            const firstParty = classifyFirstPartyAuthRejection({
-              error,
-              statusCode: connectAuthStatusCode(error),
-              serverRef,
-              firstPartyBearer: firstPartyBearerBag.last,
-            })
-            if (firstParty) {
-              return connectAuthRejectedResult(
-                name,
-                serverRef,
-                'sse',
-                firstParty,
-              )
-            }
-          }
-          if (error instanceof UnauthorizedError) {
-            return markStoredTokenRejectedForRedial(name, serverRef, () =>
-              handleRemoteAuthFailure(name, serverRef, 'sse', {
-                lacksHelperHeaders,
-              }),
-            )
-          }
-        } else if (serverRef.type === 'http' && error instanceof Error) {
-          const errorObj = error as Error & {
-            cause?: unknown
-            code?: string
-            errno?: string | number
-            syscall?: string
-          }
-          logMCPDebug(
-            name,
-            `HTTP Connection failed after ${elapsed}ms: ${error.message} (code: ${errorObj.code || 'none'}, errno: ${errorObj.errno || 'none'})`,
-          )
-          logMCPError(name, error)
+        }
+      } else if (serverRef.type === 'http' && error instanceof Error) {
+        const errorObj = error as Error & {
+          cause?: unknown
+          code?: string
+          errno?: string | number
+          syscall?: string
+        }
+        logMCPDebug(
+          name,
+          `HTTP Connection failed after ${elapsed}ms: ${error.message} (code: ${errorObj.code || 'none'}, errno: ${errorObj.errno || 'none'})`,
+        )
+        logMCPError(name, error)
 
-          const classified = maybeConnectAuthHeaderRejection(
+        const classified = maybeConnectAuthHeaderRejection(
+          error,
+          connectAuthFlags,
+        )
+        if (classified) {
+          return connectAuthRejectedResult(name, serverRef, 'http', classified)
+        }
+        if (useFirstPartyAuth) {
+          const firstParty = classifyFirstPartyAuthRejection({
             error,
-            connectAuthFlags,
-          )
-          if (classified) {
+            statusCode: connectAuthStatusCode(error),
+            serverRef,
+            firstPartyBearer: firstPartyBearerBag.last,
+          })
+          if (firstParty) {
             return connectAuthRejectedResult(
               name,
               serverRef,
               'http',
-              classified,
+              firstParty,
             )
           }
-          if (useFirstPartyAuth) {
-            const firstParty = classifyFirstPartyAuthRejection({
-              error,
-              statusCode: connectAuthStatusCode(error),
-              serverRef,
-              firstPartyBearer: firstPartyBearerBag.last,
-            })
-            if (firstParty) {
-              return connectAuthRejectedResult(
-                name,
-                serverRef,
-                'http',
-                firstParty,
-              )
-            }
-          }
-          if (error instanceof UnauthorizedError) {
-            return markStoredTokenRejectedForRedial(name, serverRef, () =>
-              handleRemoteAuthFailure(name, serverRef, 'http', {
-                lacksHelperHeaders,
-              }),
-            )
-          }
-        } else if (
-          serverRef.type === 'claudeai-proxy' &&
-          error instanceof Error
-        ) {
-          logMCPDebug(
-            name,
-            `claude.ai proxy connection failed after ${elapsed}ms: ${error.message}`,
+        }
+        if (error instanceof UnauthorizedError) {
+          return markStoredTokenRejectedForRedial(name, serverRef, () =>
+            handleRemoteAuthFailure(name, serverRef, 'http', {
+              lacksHelperHeaders,
+            }),
           )
-          // densable: CLAUDEAI_BEARER_REJECTED on connect is session-token scope
-          // (/login), not connector OAuth needs-auth cache.
-          if (isClaudeAiBearerRejectedError(error)) {
-            logMCPDebug(
-              name,
-              'claude.ai session token rejected during connect — run /login',
-            )
-          } else {
-            logMCPError(name, error)
-          }
-
-          // StreamableHTTPError has a `code` property with the HTTP status;
-          // SdkHttpError carries `status`. Both 401 and 403 are user_auth
-          // failures (early abort to needs-auth instead of retrying).
-          const errorCode =
-            error instanceof SdkHttpError
-              ? error.status
-              : (error as Error & { code?: number }).code
-          if (
-            (errorCode === 401 || errorCode === 403) &&
-            !isClaudeAiBearerRejectedError(error)
-          ) {
-            return handleRemoteAuthFailure(name, serverRef, 'claudeai-proxy')
-          }
-        } else if (
-          serverRef.type === 'sse-ide' ||
-          serverRef.type === 'ws-ide'
-        ) {
-          logEvent('tengu_mcp_ide_server_connection_failed', {
-            connectionDurationMs: elapsed,
-          })
         }
-        if (inProcessServer) {
-          inProcessServer.close().catch(() => {})
-        }
-        transport.close().catch(() => {})
-        if (stderrOutput) {
-          logMCPError(name, `Server stderr: ${stderrOutput}`)
-          // Official 2.1.326 #84: retain startup stderr snippet so `/mcp` can
-          // explain why a local (stdio) MCP server failed to start.
-          capturedStartupStderr = stderrOutput.trim().slice(-2000)
-        }
-        throw error
-      }
-
-      const capabilities = client.getServerCapabilities()
-      if (isSdkServerWithConnectorsOff(serverRef, capabilities)) {
-        client.close().catch(() => {})
-        logMCPDebug(name, 'Skipping connection (disableClaudeAiConnectors)')
-        logEvent(
-          'mcp_connectors_off_in_desktop' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          {},
-        )
-        return {
-          name,
-          config: serverRef,
-          type: 'failed',
-          error: 'Disabled by disableClaudeAiConnectors setting',
-          errorCode: CLAUDEAI_CONNECTORS_DISABLED_ERROR_CODE,
-        }
-      }
-      const serverVersion = client.getServerVersion()
-      const rawInstructions = client.getInstructions()
-      const maxInstructionsLength =
-        getMaxMcpDescriptionLengthForConfig(serverRef)
-      let instructions = rawInstructions
-      if (rawInstructions && rawInstructions.length > maxInstructionsLength) {
-        instructions =
-          rawInstructions.slice(0, maxInstructionsLength) + '… [truncated]'
+      } else if (
+        serverRef.type === 'claudeai-proxy' &&
+        error instanceof Error
+      ) {
         logMCPDebug(
           name,
-          `Server instructions truncated from ${rawInstructions.length} to ${maxInstructionsLength} chars`,
+          `claude.ai proxy connection failed after ${elapsed}ms: ${error.message}`,
         )
-      }
+        // densable: CLAUDEAI_BEARER_REJECTED on connect is session-token scope
+        // (/login), not connector OAuth needs-auth cache.
+        if (isClaudeAiBearerRejectedError(error)) {
+          logMCPDebug(
+            name,
+            'claude.ai session token rejected during connect — run /login',
+          )
+        } else {
+          logMCPError(name, error)
+        }
 
-      // Log successful connection details
+        // StreamableHTTPError has a `code` property with the HTTP status;
+        // SdkHttpError carries `status`. Both 401 and 403 are user_auth
+        // failures (early abort to needs-auth instead of retrying).
+        const errorCode =
+          error instanceof SdkHttpError
+            ? error.status
+            : (error as Error & { code?: number }).code
+        if (
+          (errorCode === 401 || errorCode === 403) &&
+          !isClaudeAiBearerRejectedError(error)
+        ) {
+          return handleRemoteAuthFailure(name, serverRef, 'claudeai-proxy')
+        }
+      } else if (serverRef.type === 'sse-ide' || serverRef.type === 'ws-ide') {
+        logEvent('tengu_mcp_ide_server_connection_failed', {
+          connectionDurationMs: elapsed,
+        })
+      }
+      if (inProcessServer) {
+        inProcessServer.close().catch(() => {})
+      }
+      transport.close().catch(() => {})
+      if (stderrOutput) {
+        logMCPError(name, `Server stderr: ${stderrOutput}`)
+        // Official 2.1.326 #84: retain startup stderr snippet so `/mcp` can
+        // explain why a local (stdio) MCP server failed to start.
+        capturedStartupStderr = stderrOutput.trim().slice(-2000)
+      }
+      throw error
+    }
+
+    const capabilities = client.getServerCapabilities()
+    if (isSdkServerWithConnectorsOff(serverRef, capabilities)) {
+      client.close().catch(() => {})
+      logMCPDebug(name, 'Skipping connection (disableClaudeAiConnectors)')
+      logEvent(
+        'mcp_connectors_off_in_desktop' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        {},
+      )
+      return {
+        name,
+        config: serverRef,
+        type: 'failed',
+        error: 'Disabled by disableClaudeAiConnectors setting',
+        errorCode: CLAUDEAI_CONNECTORS_DISABLED_ERROR_CODE,
+      }
+    }
+    const serverVersion = client.getServerVersion()
+    const rawInstructions = client.getInstructions()
+    const maxInstructionsLength = getMaxMcpDescriptionLengthForConfig(serverRef)
+    let instructions = rawInstructions
+    if (rawInstructions && rawInstructions.length > maxInstructionsLength) {
+      instructions =
+        rawInstructions.slice(0, maxInstructionsLength) + '… [truncated]'
       logMCPDebug(
         name,
-        `Connection established with capabilities: ${jsonStringify({
-          hasTools: !!capabilities?.tools,
-          hasPrompts: !!capabilities?.prompts,
-          hasResources: !!capabilities?.resources,
-          hasResourceSubscribe: !!capabilities?.resources?.subscribe,
-          serverVersion: serverVersion || 'unknown',
-        })}`,
+        `Server instructions truncated from ${rawInstructions.length} to ${maxInstructionsLength} chars`,
       )
-      logForDebugging(
-        `[MCP] Server "${name}" connected with subscribe=${!!capabilities?.resources?.subscribe}`,
-      )
+    }
 
-      // Register default elicitation handler that returns cancel during the
-      // window before registerElicitationHandler overwrites it in
-      // onConnectionAttempt (useManageMCPConnections).
-      // densable: setRequestHandler("elicitation/create", ...)
-      client.setRequestHandler('elicitation/create', async request => {
-        logMCPDebug(
-          name,
-          `Elicitation request received during initialization: ${jsonStringify(request)}`,
-        )
-        return { action: 'cancel' as const }
+    // Log successful connection details
+    logMCPDebug(
+      name,
+      `Connection established with capabilities: ${jsonStringify({
+        hasTools: !!capabilities?.tools,
+        hasPrompts: !!capabilities?.prompts,
+        hasResources: !!capabilities?.resources,
+        hasResourceSubscribe: !!capabilities?.resources?.subscribe,
+        serverVersion: serverVersion || 'unknown',
+      })}`,
+    )
+    logForDebugging(
+      `[MCP] Server "${name}" connected with subscribe=${!!capabilities?.resources?.subscribe}`,
+    )
+
+    // Register default elicitation handler that returns cancel during the
+    // window before registerElicitationHandler overwrites it in
+    // onConnectionAttempt (useManageMCPConnections).
+    // densable: setRequestHandler("elicitation/create", ...)
+    client.setRequestHandler('elicitation/create', async request => {
+      logMCPDebug(
+        name,
+        `Elicitation request received during initialization: ${jsonStringify(request)}`,
+      )
+      return { action: 'cancel' as const }
+    })
+
+    if (serverRef.type === 'sse-ide' || serverRef.type === 'ws-ide') {
+      const ideConnectionDurationMs = Date.now() - connectStartTime
+      logEvent('tengu_mcp_ide_server_connection_succeeded', {
+        connectionDurationMs: ideConnectionDurationMs,
+        serverVersion:
+          serverVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
-
-      if (serverRef.type === 'sse-ide' || serverRef.type === 'ws-ide') {
-        const ideConnectionDurationMs = Date.now() - connectStartTime
-        logEvent('tengu_mcp_ide_server_connection_succeeded', {
-          connectionDurationMs: ideConnectionDurationMs,
-          serverVersion:
-            serverVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        try {
-          void maybeNotifyIDEConnected(client)
-        } catch (error) {
-          logMCPError(
-            name,
-            `Failed to send ide_connected notification: ${error}`,
-          )
-        }
+      try {
+        void maybeNotifyIDEConnected(client)
+      } catch (error) {
+        logMCPError(name, `Failed to send ide_connected notification: ${error}`)
       }
+    }
 
-      // Enhanced connection drop detection and logging for all transport types
-      const connectionStartTime = Date.now()
-      let hasErrorOccurred = false
+    // Enhanced connection drop detection and logging for all transport types
+    const connectionStartTime = Date.now()
+    let hasErrorOccurred = false
 
-      // Store original handlers
-      const originalOnerror = client.onerror
-      const originalOnclose = client.onclose
+    // Store original handlers
+    const originalOnerror = client.onerror
+    const originalOnclose = client.onclose
 
-      // Official transportErrorState (O): mid-call drop detection for concurrent tools.
-      const transportErrorState = createMcpTransportErrorState()
+    // Official transportErrorState (O): mid-call drop detection for concurrent tools.
+    const transportErrorState = createMcpTransportErrorState()
 
-      // The SDK's transport calls onerror on connection failures but doesn't call onclose,
-      // which CC uses to trigger reconnection. We bridge this gap by tracking consecutive
-      // terminal errors and manually closing after MAX_ERRORS_BEFORE_RECONNECT failures.
-      let consecutiveConnectionErrors = 0
-      const MAX_ERRORS_BEFORE_RECONNECT = 3
+    // The SDK's transport calls onerror on connection failures but doesn't call onclose,
+    // which CC uses to trigger reconnection. We bridge this gap by tracking consecutive
+    // terminal errors and manually closing after MAX_ERRORS_BEFORE_RECONNECT failures.
+    let consecutiveConnectionErrors = 0
+    const MAX_ERRORS_BEFORE_RECONNECT = 3
 
-      // Guard against re-entry: close() aborts in-flight streams which may fire
-      // onerror again before the close chain completes.
-      let hasTriggeredClose = false
+    // Guard against re-entry: close() aborts in-flight streams which may fire
+    // onerror again before the close chain completes.
+    let hasTriggeredClose = false
 
-      // client.close() → transport.close() → transport.onclose → SDK's _onclose():
-      // rejects all pending request handlers (so hung callTool() promises fail with
-      // McpError -32000 "Connection closed") and then invokes our client.onclose
-      // handler below (which clears the memo cache so the next call reconnects).
-      // Calling client.onclose?.() directly would only clear the cache — pending
-      // tool calls would stay hung.
-      const closeTransportAndRejectPending = (reason: string) => {
-        if (hasTriggeredClose) return
-        hasTriggeredClose = true
-        logMCPDebug(name, `Closing transport (${reason})`)
-        void client.close().catch(e => {
-          logMCPDebug(name, `Error during close: ${errorMessage(e)}`)
-        })
-      }
+    // client.close() → transport.close() → transport.onclose → SDK's _onclose():
+    // rejects all pending request handlers (so hung callTool() promises fail with
+    // McpError -32000 "Connection closed") and then invokes our client.onclose
+    // handler below (which clears the memo cache so the next call reconnects).
+    // Calling client.onclose?.() directly would only clear the cache — pending
+    // tool calls would stay hung.
+    const closeTransportAndRejectPending = (reason: string) => {
+      if (hasTriggeredClose) return
+      hasTriggeredClose = true
+      logMCPDebug(name, `Closing transport (${reason})`)
+      void client.close().catch(e => {
+        logMCPDebug(name, `Error during close: ${errorMessage(e)}`)
+      })
+    }
 
-      // Enhanced error handler with detailed logging
-      client.onerror = (error: Error) => {
-        const transportType = serverRef.type || 'stdio'
-        if (
-          (transportType === 'sse' ||
-            transportType === 'http' ||
-            transportType === 'claudeai-proxy') &&
-          error instanceof SyntaxError
-        ) {
-          hasErrorOccurred = true
-          closeTransportAndRejectPending(
-            connectAuthProvider?.authChallengeOpen === true &&
-              transportErrorState.activeCallWatchdogs.size <= 1
-              ? 'malformed message after an auth challenge'
-              : 'malformed JSON-RPC message (response truncated)',
-          )
-          if (originalOnerror) {
-            originalOnerror(error)
-          }
-          return
-        }
-        const uptime = Date.now() - connectionStartTime
-        hasErrorOccurred = true
-
-        // Log the connection drop with context
-        logMCPDebug(
-          name,
-          `${transportType.toUpperCase()} connection dropped after ${Math.floor(uptime / 1000)}s uptime`,
-        )
-
-        // Log specific error details for debugging
-        if (error.message) {
-          if (error.message.includes('ECONNRESET')) {
-            logMCPDebug(
-              name,
-              `Connection reset - server may have crashed or restarted`,
-            )
-          } else if (error.message.includes('ETIMEDOUT')) {
-            logMCPDebug(
-              name,
-              `Connection timeout - network issue or server unresponsive`,
-            )
-          } else if (error.message.includes('ECONNREFUSED')) {
-            logMCPDebug(name, `Connection refused - server may be down`)
-          } else if (error.message.includes('EPIPE')) {
-            logMCPDebug(
-              name,
-              `Broken pipe - server closed connection unexpectedly`,
-            )
-          } else if (error.message.includes('EHOSTUNREACH')) {
-            logMCPDebug(name, `Host unreachable - network connectivity issue`)
-          } else if (error.message.includes('ESRCH')) {
-            logMCPDebug(
-              name,
-              `Process not found - stdio server process terminated`,
-            )
-          } else if (error.message.includes('spawn')) {
-            logMCPDebug(
-              name,
-              `Failed to spawn process - check command and permissions`,
-            )
-          } else {
-            logMCPDebug(name, `Connection error: ${error.message}`)
-          }
-        }
-
-        // For HTTP transports, detect session expiry (404 + JSON-RPC -32001)
-        // and close the transport so pending tool calls reject and the next
-        // call reconnects with a fresh session ID.
-        if (
-          (transportType === 'http' || transportType === 'claudeai-proxy') &&
-          isMcpSessionExpiredError(error)
-        ) {
-          logMCPDebug(
-            name,
-            `MCP session expired (server returned 404 with session-not-found), triggering reconnection`,
-          )
-          closeTransportAndRejectPending('session expired')
-          if (originalOnerror) {
-            originalOnerror(error)
-          }
-          return
-        }
-
-        // For remote transports (SSE/HTTP), track terminal connection errors
-        // and trigger reconnection via close if we see repeated failures.
-        if (
-          transportType === 'sse' ||
+    // Enhanced error handler with detailed logging
+    client.onerror = (error: Error) => {
+      const transportType = serverRef.type || 'stdio'
+      if (
+        (transportType === 'sse' ||
           transportType === 'http' ||
-          transportType === 'claudeai-proxy'
-        ) {
-          // The SDK's StreamableHTTP transport fires this after exhausting its
-          // own SSE reconnect attempts (default maxRetries: 2) — but it never
-          // calls onclose, so pending callTool() promises hang indefinitely.
-          // This is the definitive "transport gave up" signal.
-          if (error.message.includes('Maximum reconnection attempts')) {
-            closeTransportAndRejectPending('SSE reconnection exhausted')
-            if (originalOnerror) {
-              originalOnerror(error)
-            }
-            return
-          }
-
-          if (isTerminalConnectionError(error)) {
-            consecutiveConnectionErrors++
-            transportErrorState.consecutiveErrors = consecutiveConnectionErrors
-            // Official M(): arm in-flight callTool watchdogs so they abort if
-            // no progress arrives within 90s (response presumed lost).
-            armAllCallWatchdogs(transportErrorState)
-            logMCPDebug(
-              name,
-              `Terminal connection error ${consecutiveConnectionErrors}/${MAX_ERRORS_BEFORE_RECONNECT}`,
-            )
-
-            if (consecutiveConnectionErrors >= MAX_ERRORS_BEFORE_RECONNECT) {
-              consecutiveConnectionErrors = 0
-              transportErrorState.consecutiveErrors = 0
-              closeTransportAndRejectPending('max consecutive terminal errors')
-            }
-          } else {
-            // Non-terminal error (e.g., transient issue), reset counter
-            consecutiveConnectionErrors = 0
-            transportErrorState.consecutiveErrors = 0
-          }
-        }
-
-        // Call original handler
+          transportType === 'claudeai-proxy') &&
+        error instanceof SyntaxError
+      ) {
+        hasErrorOccurred = true
+        closeTransportAndRejectPending(
+          connectAuthProvider?.authChallengeOpen === true &&
+            transportErrorState.activeCallWatchdogs.size <= 1
+            ? 'malformed message after an auth challenge'
+            : 'malformed JSON-RPC message (response truncated)',
+        )
         if (originalOnerror) {
           originalOnerror(error)
         }
+        return
+      }
+      const uptime = Date.now() - connectionStartTime
+      hasErrorOccurred = true
+
+      // Log the connection drop with context
+      logMCPDebug(
+        name,
+        `${transportType.toUpperCase()} connection dropped after ${Math.floor(uptime / 1000)}s uptime`,
+      )
+
+      // Log specific error details for debugging
+      if (error.message) {
+        if (error.message.includes('ECONNRESET')) {
+          logMCPDebug(
+            name,
+            `Connection reset - server may have crashed or restarted`,
+          )
+        } else if (error.message.includes('ETIMEDOUT')) {
+          logMCPDebug(
+            name,
+            `Connection timeout - network issue or server unresponsive`,
+          )
+        } else if (error.message.includes('ECONNREFUSED')) {
+          logMCPDebug(name, `Connection refused - server may be down`)
+        } else if (error.message.includes('EPIPE')) {
+          logMCPDebug(
+            name,
+            `Broken pipe - server closed connection unexpectedly`,
+          )
+        } else if (error.message.includes('EHOSTUNREACH')) {
+          logMCPDebug(name, `Host unreachable - network connectivity issue`)
+        } else if (error.message.includes('ESRCH')) {
+          logMCPDebug(
+            name,
+            `Process not found - stdio server process terminated`,
+          )
+        } else if (error.message.includes('spawn')) {
+          logMCPDebug(
+            name,
+            `Failed to spawn process - check command and permissions`,
+          )
+        } else {
+          logMCPDebug(name, `Connection error: ${error.message}`)
+        }
       }
 
-      // Enhanced close handler with connection drop context
-      client.onclose = () => {
-        const uptime = Date.now() - connectionStartTime
-        const transportType = serverRef.type ?? 'unknown'
-
+      // For HTTP transports, detect session expiry (404 + JSON-RPC -32001)
+      // and close the transport so pending tool calls reject and the next
+      // call reconnects with a fresh session ID.
+      if (
+        (transportType === 'http' || transportType === 'claudeai-proxy') &&
+        isMcpSessionExpiredError(error)
+      ) {
         logMCPDebug(
           name,
-          `${transportType.toUpperCase()} connection closed after ${Math.floor(uptime / 1000)}s (${hasErrorOccurred ? 'with errors' : 'cleanly'})`,
+          `MCP session expired (server returned 404 with session-not-found), triggering reconnection`,
         )
-
-        // Clear the memoization cache so next operation reconnects
-        const key = getServerCacheKey(name, serverRef)
-
-        // Also clear fetch caches (keyed by server name). Reconnection
-        // creates a new connection object; without clearing, the next
-        // fetch would return stale tools/resources from the old connection.
-        fetchToolsForClient.cache.delete(name)
-        fetchResourcesForClient.cache.delete(name)
-        fetchCommandsForClient.cache.delete(name)
-        if (feature('MCP_SKILLS')) {
-          fetchMcpSkillsForClient!.cache.delete(name)
+        closeTransportAndRejectPending('session expired')
+        if (originalOnerror) {
+          originalOnerror(error)
         }
-
-        connectToServer.cache.delete(key)
-        logMCPDebug(name, `Cleared connection cache for reconnection`)
-
-        if (originalOnclose) {
-          originalOnclose()
-        }
+        return
       }
 
-      const cleanup = async () => {
-        // In-process servers (e.g. Chrome MCP) don't have child processes or stderr
-        if (inProcessServer) {
-          try {
-            await inProcessServer.close()
-          } catch (error) {
-            logMCPDebug(name, `Error closing in-process server: ${error}`)
-          }
-          try {
-            await client.close()
-          } catch (error) {
-            logMCPDebug(name, `Error closing client: ${error}`)
+      // For remote transports (SSE/HTTP), track terminal connection errors
+      // and trigger reconnection via close if we see repeated failures.
+      if (
+        transportType === 'sse' ||
+        transportType === 'http' ||
+        transportType === 'claudeai-proxy'
+      ) {
+        // The SDK's StreamableHTTP transport fires this after exhausting its
+        // own SSE reconnect attempts (default maxRetries: 2) — but it never
+        // calls onclose, so pending callTool() promises hang indefinitely.
+        // This is the definitive "transport gave up" signal.
+        if (error.message.includes('Maximum reconnection attempts')) {
+          closeTransportAndRejectPending('SSE reconnection exhausted')
+          if (originalOnerror) {
+            originalOnerror(error)
           }
           return
         }
 
-        // Remove stderr event listener to prevent memory leaks
-        if (stderrHandler && (serverRef.type === 'stdio' || !serverRef.type)) {
-          const stdioTransport = transport as StdioClientTransport
-          stdioTransport.stderr?.off('data', stderrHandler)
+        if (isTerminalConnectionError(error)) {
+          consecutiveConnectionErrors++
+          transportErrorState.consecutiveErrors = consecutiveConnectionErrors
+          // Official M(): arm in-flight callTool watchdogs so they abort if
+          // no progress arrives within 90s (response presumed lost).
+          armAllCallWatchdogs(transportErrorState)
+          logMCPDebug(
+            name,
+            `Terminal connection error ${consecutiveConnectionErrors}/${MAX_ERRORS_BEFORE_RECONNECT}`,
+          )
+
+          if (consecutiveConnectionErrors >= MAX_ERRORS_BEFORE_RECONNECT) {
+            consecutiveConnectionErrors = 0
+            transportErrorState.consecutiveErrors = 0
+            closeTransportAndRejectPending('max consecutive terminal errors')
+          }
+        } else {
+          // Non-terminal error (e.g., transient issue), reset counter
+          consecutiveConnectionErrors = 0
+          transportErrorState.consecutiveErrors = 0
         }
+      }
 
-        // For stdio transports, explicitly terminate the child process with proper signals
-        // NOTE: StdioClientTransport.close() only sends an abort signal, but many MCP servers
-        // (especially Docker containers) need explicit SIGINT/SIGTERM signals to trigger graceful shutdown
-        if (serverRef.type === 'stdio') {
-          try {
-            const stdioTransport = transport as StdioClientTransport
-            const stdioTransportWithProc = stdioTransport as unknown as {
-              _process?: import('child_process').ChildProcess
-              serverProcess?: import('child_process').ChildProcess
+      // Call original handler
+      if (originalOnerror) {
+        originalOnerror(error)
+      }
+    }
+
+    // Enhanced close handler with connection drop context
+    client.onclose = () => {
+      const uptime = Date.now() - connectionStartTime
+      const transportType = serverRef.type ?? 'unknown'
+
+      logMCPDebug(
+        name,
+        `${transportType.toUpperCase()} connection closed after ${Math.floor(uptime / 1000)}s (${hasErrorOccurred ? 'with errors' : 'cleanly'})`,
+      )
+
+      // Clear the memoization cache so next operation reconnects
+      const key = getServerCacheKey(name, serverRef)
+
+      // Also clear fetch caches (keyed by server name). Reconnection
+      // creates a new connection object; without clearing, the next
+      // fetch would return stale tools/resources from the old connection.
+      fetchToolsForClient.cache.delete(name)
+      fetchResourcesForClient.cache.delete(name)
+      fetchCommandsForClient.cache.delete(name)
+      if (feature('MCP_SKILLS')) {
+        fetchMcpSkillsForClient!.cache.delete(name)
+      }
+
+      connectToServer.cache.delete(key)
+      logMCPDebug(name, `Cleared connection cache for reconnection`)
+
+      if (originalOnclose) {
+        originalOnclose()
+      }
+    }
+
+    const cleanup = async () => {
+      // In-process servers (e.g. Chrome MCP) don't have child processes or stderr
+      if (inProcessServer) {
+        try {
+          await inProcessServer.close()
+        } catch (error) {
+          logMCPDebug(name, `Error closing in-process server: ${error}`)
+        }
+        try {
+          await client.close()
+        } catch (error) {
+          logMCPDebug(name, `Error closing client: ${error}`)
+        }
+        return
+      }
+
+      // Remove stderr event listener to prevent memory leaks
+      if (stderrHandler && (serverRef.type === 'stdio' || !serverRef.type)) {
+        const stdioTransport = transport as StdioClientTransport
+        stdioTransport.stderr?.off('data', stderrHandler)
+      }
+
+      // For stdio transports, explicitly terminate the child process with proper signals
+      // NOTE: StdioClientTransport.close() only sends an abort signal, but many MCP servers
+      // (especially Docker containers) need explicit SIGINT/SIGTERM signals to trigger graceful shutdown
+      if (serverRef.type === 'stdio') {
+        try {
+          const stdioTransport = transport as StdioClientTransport
+          const stdioTransportWithProc = stdioTransport as unknown as {
+            _process?: import('child_process').ChildProcess
+            serverProcess?: import('child_process').ChildProcess
+          }
+          const stdioProc =
+            stdioTransportWithProc.serverProcess ??
+            stdioTransportWithProc._process
+          const childPid = stdioTransport.pid
+
+          if (stdioProc && getPlatform() === 'windows') {
+            logMCPDebug(name, 'Closing MCP server stdin')
+            await gracefulShutdownWindowsStdio(stdioProc)
+          } else if (childPid) {
+            logMCPDebug(name, 'Sending SIGINT to MCP server process')
+
+            // First try SIGINT (like Ctrl+C)
+            try {
+              process.kill(childPid, 'SIGINT')
+            } catch (error) {
+              logMCPDebug(name, `Error sending SIGINT: ${error}`)
+              return
             }
-            const stdioProc =
-              stdioTransportWithProc.serverProcess ??
-              stdioTransportWithProc._process
-            const childPid = stdioTransport.pid
 
-            if (stdioProc && getPlatform() === 'windows') {
-              logMCPDebug(name, 'Closing MCP server stdin')
-              await gracefulShutdownWindowsStdio(stdioProc)
-            } else if (childPid) {
-              logMCPDebug(name, 'Sending SIGINT to MCP server process')
+            // Wait for graceful shutdown with rapid escalation (total 500ms to keep CLI responsive)
+            // biome-ignore lint/suspicious/noAsyncPromiseExecutor: async needed for sequential await inside executor
+            await new Promise<void>(async resolve => {
+              let resolved = false
 
-              // First try SIGINT (like Ctrl+C)
-              try {
-                process.kill(childPid, 'SIGINT')
-              } catch (error) {
-                logMCPDebug(name, `Error sending SIGINT: ${error}`)
-                return
-              }
-
-              // Wait for graceful shutdown with rapid escalation (total 500ms to keep CLI responsive)
-              // biome-ignore lint/suspicious/noAsyncPromiseExecutor: async needed for sequential await inside executor
-              await new Promise<void>(async resolve => {
-                let resolved = false
-
-                // Set up a timer to check if process still exists
-                const checkInterval = setInterval(() => {
-                  try {
-                    // process.kill(pid, 0) checks if process exists without killing it
-                    process.kill(childPid, 0)
-                  } catch {
-                    // Process no longer exists
-                    if (!resolved) {
-                      resolved = true
-                      clearInterval(checkInterval)
-                      clearTimeout(failsafeTimeout)
-                      logMCPDebug(name, 'MCP server process exited cleanly')
-                      resolve()
-                    }
-                  }
-                }, 50)
-
-                // Absolute failsafe: clear interval after 600ms no matter what
-                const failsafeTimeout = setTimeout(() => {
+              // Set up a timer to check if process still exists
+              const checkInterval = setInterval(() => {
+                try {
+                  // process.kill(pid, 0) checks if process exists without killing it
+                  process.kill(childPid, 0)
+                } catch {
+                  // Process no longer exists
                   if (!resolved) {
                     resolved = true
                     clearInterval(checkInterval)
-                    logMCPDebug(
-                      name,
-                      'Cleanup timeout reached, stopping process monitoring',
-                    )
+                    clearTimeout(failsafeTimeout)
+                    logMCPDebug(name, 'MCP server process exited cleanly')
                     resolve()
                   }
-                }, 600)
+                }
+              }, 50)
 
-                try {
-                  // Wait 100ms for SIGINT to work (usually much faster)
-                  await sleep(100)
+              // Absolute failsafe: clear interval after 600ms no matter what
+              const failsafeTimeout = setTimeout(() => {
+                if (!resolved) {
+                  resolved = true
+                  clearInterval(checkInterval)
+                  logMCPDebug(
+                    name,
+                    'Cleanup timeout reached, stopping process monitoring',
+                  )
+                  resolve()
+                }
+              }, 600)
+
+              try {
+                // Wait 100ms for SIGINT to work (usually much faster)
+                await sleep(100)
+
+                if (!resolved) {
+                  // Check if process still exists
+                  try {
+                    process.kill(childPid, 0)
+                    // Process still exists, SIGINT failed, try SIGTERM
+                    logMCPDebug(
+                      name,
+                      'SIGINT failed, sending SIGTERM to MCP server process',
+                    )
+                    try {
+                      process.kill(childPid, 'SIGTERM')
+                    } catch (termError) {
+                      logMCPDebug(name, `Error sending SIGTERM: ${termError}`)
+                      resolved = true
+                      clearInterval(checkInterval)
+                      clearTimeout(failsafeTimeout)
+                      resolve()
+                      return
+                    }
+                  } catch {
+                    // Process already exited
+                    resolved = true
+                    clearInterval(checkInterval)
+                    clearTimeout(failsafeTimeout)
+                    resolve()
+                    return
+                  }
+
+                  // Wait 400ms for SIGTERM to work (slower than SIGINT, often used for cleanup)
+                  await sleep(400)
 
                   if (!resolved) {
                     // Check if process still exists
                     try {
                       process.kill(childPid, 0)
-                      // Process still exists, SIGINT failed, try SIGTERM
+                      // Process still exists, SIGTERM failed, force kill with SIGKILL
                       logMCPDebug(
                         name,
-                        'SIGINT failed, sending SIGTERM to MCP server process',
+                        'SIGTERM failed, sending SIGKILL to MCP server process',
                       )
                       try {
-                        process.kill(childPid, 'SIGTERM')
-                      } catch (termError) {
-                        logMCPDebug(name, `Error sending SIGTERM: ${termError}`)
-                        resolved = true
-                        clearInterval(checkInterval)
-                        clearTimeout(failsafeTimeout)
-                        resolve()
-                        return
+                        process.kill(childPid, 'SIGKILL')
+                      } catch (killError) {
+                        logMCPDebug(name, `Error sending SIGKILL: ${killError}`)
                       }
                     } catch {
                       // Process already exited
@@ -2205,223 +2400,196 @@ const connectToServerMemo = memoize(
                       clearInterval(checkInterval)
                       clearTimeout(failsafeTimeout)
                       resolve()
-                      return
                     }
-
-                    // Wait 400ms for SIGTERM to work (slower than SIGINT, often used for cleanup)
-                    await sleep(400)
-
-                    if (!resolved) {
-                      // Check if process still exists
-                      try {
-                        process.kill(childPid, 0)
-                        // Process still exists, SIGTERM failed, force kill with SIGKILL
-                        logMCPDebug(
-                          name,
-                          'SIGTERM failed, sending SIGKILL to MCP server process',
-                        )
-                        try {
-                          process.kill(childPid, 'SIGKILL')
-                        } catch (killError) {
-                          logMCPDebug(
-                            name,
-                            `Error sending SIGKILL: ${killError}`,
-                          )
-                        }
-                      } catch {
-                        // Process already exited
-                        resolved = true
-                        clearInterval(checkInterval)
-                        clearTimeout(failsafeTimeout)
-                        resolve()
-                      }
-                    }
-                  }
-
-                  // Final timeout - always resolve after 500ms max (total cleanup time)
-                  if (!resolved) {
-                    resolved = true
-                    clearInterval(checkInterval)
-                    clearTimeout(failsafeTimeout)
-                    resolve()
-                  }
-                } catch {
-                  // Handle any errors in the escalation sequence
-                  if (!resolved) {
-                    resolved = true
-                    clearInterval(checkInterval)
-                    clearTimeout(failsafeTimeout)
-                    resolve()
                   }
                 }
-              })
-            }
-          } catch (processError) {
-            logMCPDebug(name, `Error terminating process: ${processError}`)
+
+                // Final timeout - always resolve after 500ms max (total cleanup time)
+                if (!resolved) {
+                  resolved = true
+                  clearInterval(checkInterval)
+                  clearTimeout(failsafeTimeout)
+                  resolve()
+                }
+              } catch {
+                // Handle any errors in the escalation sequence
+                if (!resolved) {
+                  resolved = true
+                  clearInterval(checkInterval)
+                  clearTimeout(failsafeTimeout)
+                  resolve()
+                }
+              }
+            })
           }
-        }
-
-        // Close the client connection (which also closes the transport)
-        try {
-          await client.close()
-        } catch (error) {
-          logMCPDebug(name, `Error closing client: ${error}`)
+        } catch (processError) {
+          logMCPDebug(name, `Error terminating process: ${processError}`)
         }
       }
 
-      // Register cleanup for all transport types - even network transports might need cleanup
-      // This ensures all MCP servers get properly terminated, not just stdio ones
-      const cleanupUnregister = registerCleanup(cleanup)
-
-      // Create the wrapped cleanup that includes unregistering
-      const wrappedCleanup = async () => {
-        liveMcpClients.delete(client)
-        cleanupUnregister?.()
-        await cleanup()
-      }
-      liveMcpClients.add(client)
-
-      const connectionDurationMs = Date.now() - connectStartTime
-      logEvent('tengu_mcp_server_connection_succeeded', {
-        connectionDurationMs,
-        transportType: (serverRef.type ??
-          'stdio') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        totalServers: serverStats?.totalServers,
-        stdioCount: serverStats?.stdioCount,
-        sseCount: serverStats?.sseCount,
-        httpCount: serverStats?.httpCount,
-        sseIdeCount: serverStats?.sseIdeCount,
-        wsIdeCount: serverStats?.wsIdeCount,
-        ...mcpBaseUrlAnalytics(serverRef),
-      })
-
-      // densable 2.1.233 #6 — hNf: subscriptions/listen re-open / park watcher.
-      // densable opS uses timeout:k0() ≡ getMcpTimeoutMs() (MCP_TIMEOUT / y0).
-      // No-ops on legacy era without autoOpenedSubscription (list_changed via
-      // unsolicited notifications + setNotificationHandler still works).
+      // Close the client connection (which also closes the transport)
       try {
-        const { attachMcpListenReopenWatcher } =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('./mcpListenReopen.js') as typeof import('./mcpListenReopen.js')
-        attachMcpListenReopenWatcher(
-          client as import('./mcpListenReopen.js').McpListenCapableClient,
-          name,
-          { timeoutMs: getMcpTimeoutMs() },
-        )
-      } catch (err) {
-        logMCPDebug(
-          name,
-          `subscriptions/listen re-open watcher attach failed: ${errorMessage(err)}`,
-        )
-      }
-
-      const connectedClientResult: ConnectedMCPServer = {
-        name,
-        client,
-        type: 'connected' as const,
-        capabilities: capabilities ?? {},
-        serverInfo: serverVersion,
-        instructions,
-        config: serverRef,
-        cleanup: wrappedCleanup,
-        transportErrorState,
-        // densable M.protocolEra — i3r/Yrf era gate. Unset is not modern.
-        protocolEra: readClientProtocolEra(client),
-      }
-      // Official 2.1.325 #2305 (`Hmi()?.(Os)`): immediately run session-level
-      // connected-client wiring (e.g. headless elicitation handler) before
-      // returning so a reconnect mid-tool-call never falls back to the cancel
-      // placeholder.
-      try {
-        connectedClientWiring?.(connectedClientResult)
-      } catch (wiringErr) {
-        logMCPError(
-          name,
-          `connected-client wiring failed (placeholder retained, adoption will retry): ${errorMessage(wiringErr)}`,
-        )
-      }
-      if (serverRef.type === 'http' || serverRef.type === 'sse') {
-        await clearMcpOAuthStubIfTokenless(name, serverRef)
-      }
-      // Official 2.1.325 #2308: notify background MCP task pollers that a fresh
-      // connection for this server is live so they resume updating.
-      notifyMcpServerConnected(connectedClientResult)
-      return connectedClientResult
-    } catch (error) {
-      const connectionDurationMs = Date.now() - connectStartTime
-      logEvent('tengu_mcp_server_connection_failed', {
-        connectionDurationMs,
-        totalServers: serverStats?.totalServers || 1,
-        stdioCount:
-          serverStats?.stdioCount || (serverRef.type === 'stdio' ? 1 : 0),
-        sseCount: serverStats?.sseCount || (serverRef.type === 'sse' ? 1 : 0),
-        httpCount:
-          serverStats?.httpCount || (serverRef.type === 'http' ? 1 : 0),
-        sseIdeCount:
-          serverStats?.sseIdeCount || (serverRef.type === 'sse-ide' ? 1 : 0),
-        wsIdeCount:
-          serverStats?.wsIdeCount || (serverRef.type === 'ws-ide' ? 1 : 0),
-        transportType: (serverRef.type ??
-          'stdio') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        ...mcpBaseUrlAnalytics(serverRef),
-      })
-      logMCPDebug(
-        name,
-        `Connection failed after ${connectionDurationMs}ms: ${errorMessage(error)}`,
-      )
-      logMCPError(name, `Connection failed: ${errorMessage(error)}`)
-
-      if (inProcessServer) {
-        inProcessServer.close().catch(() => {})
-      }
-      // densable 2.1.219: surface errorCode (HTTP / errno / ENDPOINT_NOT_FOUND)
-      // so mcp list / /mcp can show status — issue (fSp/mSp).
-      let errorText = errorMessage(error)
-      const issuerEchoDenied =
-        error instanceof IssuerEchoCrossOriginError ||
-        (error instanceof Error &&
-          error.cause instanceof IssuerEchoCrossOriginError)
-      let errorCode = issuerEchoDenied
-        ? 'ISSUER_ECHO_DENIED'
-        : extractMcpConnectionErrorCode(error, {
-            transportType: serverRef.type,
-            hasSessionId: false,
-          })
-      if (errorCode === 'CONNECT_TIMEOUT') {
-        const suspendedMessage = detectConnectSuspendedMessage(
-          name,
-          connectClockSnapshot,
-        )
-        if (suspendedMessage !== undefined) {
-          errorCode = 'CONNECT_SUSPENDED'
-          errorText = suspendedMessage
-        }
-      }
-      if (errorCode === 'ENDPOINT_NOT_FOUND' && 'url' in serverRef) {
-        // densable 2.1.234 #13 cHr — connection-failure details show only origin
-        const origin = getMcpServerUrlOrigin(serverRef) ?? '(unparseable url)'
-        errorText = `MCP endpoint not found at ${origin}. Check the URL in your MCP config.`
-      }
-      if (
-        (serverRef.type === undefined || serverRef.type === 'stdio') &&
-        capturedStartupStderr &&
-        !errorText.includes(capturedStartupStderr)
-      ) {
-        errorText = errorText
-          ? `${errorText}\n${capturedStartupStderr}`
-          : capturedStartupStderr
-      }
-      return {
-        name,
-        type: 'failed' as const,
-        config: serverRef,
-        error: errorText,
-        ...(errorCode !== undefined ? { errorCode } : {}),
+        await client.close()
+      } catch (error) {
+        logMCPDebug(name, `Error closing client: ${error}`)
       }
     }
-  },
-  getServerCacheKey,
-)
+
+    // Register cleanup for all transport types - even network transports might need cleanup
+    // This ensures all MCP servers get properly terminated, not just stdio ones
+    const cleanupUnregister = registerCleanup(cleanup)
+
+    // Create the wrapped cleanup that includes unregistering
+    const wrappedCleanup = async () => {
+      hostState.liveMcpClients.delete(client)
+      cleanupUnregister?.()
+      await cleanup()
+    }
+    hostState.liveMcpClients.add(client)
+
+    const connectionDurationMs = Date.now() - connectStartTime
+    logEvent('tengu_mcp_server_connection_succeeded', {
+      connectionDurationMs,
+      transportType: (serverRef.type ??
+        'stdio') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      totalServers: serverStats?.totalServers,
+      stdioCount: serverStats?.stdioCount,
+      sseCount: serverStats?.sseCount,
+      httpCount: serverStats?.httpCount,
+      sseIdeCount: serverStats?.sseIdeCount,
+      wsIdeCount: serverStats?.wsIdeCount,
+      ...mcpBaseUrlAnalytics(serverRef),
+    })
+
+    // densable 2.1.233 #6 — hNf: subscriptions/listen re-open / park watcher.
+    // densable opS uses timeout:k0() ≡ getMcpTimeoutMs() (MCP_TIMEOUT / y0).
+    // No-ops on legacy era without autoOpenedSubscription (list_changed via
+    // unsolicited notifications + setNotificationHandler still works).
+    try {
+      const { attachMcpListenReopenWatcher } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./mcpListenReopen.js') as typeof import('./mcpListenReopen.js')
+      attachMcpListenReopenWatcher(
+        client as import('./mcpListenReopen.js').McpListenCapableClient,
+        name,
+        { timeoutMs: getMcpTimeoutMs() },
+      )
+    } catch (err) {
+      logMCPDebug(
+        name,
+        `subscriptions/listen re-open watcher attach failed: ${errorMessage(err)}`,
+      )
+    }
+
+    const connectedClientResult: ConnectedMCPServer = {
+      name,
+      client,
+      type: 'connected' as const,
+      capabilities: capabilities ?? {},
+      serverInfo: serverVersion,
+      instructions,
+      config: serverRef,
+      cleanup: wrappedCleanup,
+      transportErrorState,
+      // densable M.protocolEra — i3r/Yrf era gate. Unset is not modern.
+      protocolEra: readClientProtocolEra(client),
+    }
+    // Official 2.1.325 #2305 (`Hmi()?.(Os)`): immediately run session-level
+    // connected-client wiring (e.g. headless elicitation handler) before
+    // returning so a reconnect mid-tool-call never falls back to the cancel
+    // placeholder.
+    try {
+      const wiring = hostState.connectedClientWiring
+      if (wiring) {
+        const wiringSession =
+          hostState.connectedClientWiringSession ?? capturedSession
+        runWithSession(wiringSession, () => wiring(connectedClientResult))
+      }
+    } catch (wiringErr) {
+      logMCPError(
+        name,
+        `connected-client wiring failed (placeholder retained, adoption will retry): ${errorMessage(wiringErr)}`,
+      )
+    }
+    if (serverRef.type === 'http' || serverRef.type === 'sse') {
+      await clearMcpOAuthStubIfTokenless(name, serverRef)
+    }
+    // Official 2.1.325 #2308: notify background MCP task pollers that a fresh
+    // connection for this server is live so they resume updating.
+    notifyMcpServerConnected(connectedClientResult)
+    return connectedClientResult
+  } catch (error) {
+    const connectionDurationMs = Date.now() - connectStartTime
+    logEvent('tengu_mcp_server_connection_failed', {
+      connectionDurationMs,
+      totalServers: serverStats?.totalServers || 1,
+      stdioCount:
+        serverStats?.stdioCount || (serverRef.type === 'stdio' ? 1 : 0),
+      sseCount: serverStats?.sseCount || (serverRef.type === 'sse' ? 1 : 0),
+      httpCount: serverStats?.httpCount || (serverRef.type === 'http' ? 1 : 0),
+      sseIdeCount:
+        serverStats?.sseIdeCount || (serverRef.type === 'sse-ide' ? 1 : 0),
+      wsIdeCount:
+        serverStats?.wsIdeCount || (serverRef.type === 'ws-ide' ? 1 : 0),
+      transportType: (serverRef.type ??
+        'stdio') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...mcpBaseUrlAnalytics(serverRef),
+    })
+    logMCPDebug(
+      name,
+      `Connection failed after ${connectionDurationMs}ms: ${errorMessage(error)}`,
+    )
+    logMCPError(name, `Connection failed: ${errorMessage(error)}`)
+
+    if (inProcessServer) {
+      inProcessServer.close().catch(() => {})
+    }
+    // densable 2.1.219: surface errorCode (HTTP / errno / ENDPOINT_NOT_FOUND)
+    // so mcp list / /mcp can show status — issue (fSp/mSp).
+    let errorText = errorMessage(error)
+    const issuerEchoDenied =
+      error instanceof IssuerEchoCrossOriginError ||
+      (error instanceof Error &&
+        error.cause instanceof IssuerEchoCrossOriginError)
+    let errorCode = issuerEchoDenied
+      ? 'ISSUER_ECHO_DENIED'
+      : extractMcpConnectionErrorCode(error, {
+          transportType: serverRef.type,
+          hasSessionId: false,
+        })
+    if (errorCode === 'CONNECT_TIMEOUT') {
+      const suspendedMessage = detectConnectSuspendedMessage(
+        name,
+        connectClockSnapshot,
+      )
+      if (suspendedMessage !== undefined) {
+        errorCode = 'CONNECT_SUSPENDED'
+        errorText = suspendedMessage
+      }
+    }
+    if (errorCode === 'ENDPOINT_NOT_FOUND' && 'url' in serverRef) {
+      // densable 2.1.234 #13 cHr — connection-failure details show only origin
+      const origin = getMcpServerUrlOrigin(serverRef) ?? '(unparseable url)'
+      errorText = `MCP endpoint not found at ${origin}. Check the URL in your MCP config.`
+    }
+    if (
+      (serverRef.type === undefined || serverRef.type === 'stdio') &&
+      capturedStartupStderr &&
+      !errorText.includes(capturedStartupStderr)
+    ) {
+      errorText = errorText
+        ? `${errorText}\n${capturedStartupStderr}`
+        : capturedStartupStderr
+    }
+    return {
+      name,
+      type: 'failed' as const,
+      config: serverRef,
+      error: errorText,
+      ...(errorCode !== undefined ? { errorCode } : {}),
+    }
+  }
+}
 
 export type EnsureConnectedClientOpts = {
   signal?: AbortSignal
@@ -2468,7 +2636,11 @@ export const connectToServer = Object.assign(
     connectOpts?: EnsureConnectedClientOpts,
   ) => {
     ensureMcpAccountIdentityResolver()
-    const work = connectToServerMemo(name, serverRef, serverStats)
+    const work = getHostMcpClientState().connectToServerMemo(
+      name,
+      serverRef,
+      serverStats,
+    )
     if (
       connectOpts?.timeoutMs === undefined &&
       connectOpts?.signal === undefined
@@ -2503,7 +2675,11 @@ export const connectToServer = Object.assign(
       if (onAbort) connectOpts.signal?.removeEventListener('abort', onAbort)
     })
   },
-  { cache: connectToServerMemo.cache },
+  {
+    cache: createHostCacheProxy(
+      () => getHostMcpClientState().connectToServerMemo.cache,
+    ),
+  },
 )
 
 /**
@@ -2864,8 +3040,6 @@ export function invokeToolRaw(
  * `additionalWorkingDirectories`, deduplicated by file:// URI, and broadcast
  * `notifications/roots/list_changed` to all live MCP clients when roots change.
  */
-const liveMcpClients = new Set<Client>()
-
 export function buildMcpRootsList(
   primaryDir: string | null = getOriginalCwd(),
   additionalDirs: readonly string[] = getAdditionalDirectoriesForClaudeMd(),
@@ -2896,7 +3070,7 @@ export function notifyMcpRootsListChanged(
   }>,
 ): void {
   const notified = new Set<unknown>()
-  for (const client of liveMcpClients) {
+  for (const client of getHostMcpClientState().liveMcpClients) {
     notified.add(client)
     client.sendRootsListChanged().catch(err => {
       logForDebugging(
@@ -2923,9 +3097,10 @@ export function notifyMcpRootsListChanged(
 }
 
 export function _registerLiveMcpClientForTests(client: Client): () => void {
-  liveMcpClients.add(client)
+  const state = getHostMcpClientState()
+  state.liveMcpClients.add(client)
   return () => {
-    liveMcpClients.delete(client)
+    state.liveMcpClients.delete(client)
   }
 }
 
@@ -2934,16 +3109,17 @@ export function _registerLiveMcpClientForTests(client: Client): () => void {
  * hook (e.g., headless elicitation handler registration) invoked synchronously
  * on every newly connected MCP client before `connectToServer` returns.
  */
-type ConnectedClientWiringFn = (client: ConnectedMCPServer) => void
-let connectedClientWiring: ConnectedClientWiringFn | undefined
-
 export function registerConnectedClientWiring(
   wiring: ConnectedClientWiringFn | undefined,
 ): () => void {
-  connectedClientWiring = wiring
+  const state = getHostMcpClientState()
+  state.connectedClientWiring = wiring
+  state.connectedClientWiringSession =
+    wiring !== undefined ? getActiveSessionFromAls() : undefined
   return () => {
-    if (connectedClientWiring === wiring) {
-      connectedClientWiring = undefined
+    if (state.connectedClientWiring === wiring) {
+      state.connectedClientWiring = undefined
+      state.connectedClientWiringSession = undefined
     }
   }
 }
@@ -2951,7 +3127,7 @@ export function registerConnectedClientWiring(
 export function getConnectedClientWiring():
   | ConnectedClientWiringFn
   | undefined {
-  return connectedClientWiring
+  return getHostMcpClientState().connectedClientWiring
 }
 
 /**
@@ -2959,21 +3135,17 @@ export function getConnectedClientWiring():
  * a mid-call reconnect so SDK host tool calls point to the fresh connection
  * instead of answering "Not connected".
  */
-type McpToolsSwapperFn = (
-  serverName: string,
-  tools: Tool[],
-  config: ScopedMcpServerConfig,
-  connectedClient?: ConnectedMCPServer,
-) => boolean
-let mcpToolsSwapper: McpToolsSwapperFn | undefined
-
 export function registerMcpToolsSwapper(
   swapper: McpToolsSwapperFn | undefined,
 ): () => void {
-  mcpToolsSwapper = swapper
+  const state = getHostMcpClientState()
+  state.mcpToolsSwapper = swapper
+  state.mcpToolsSwapperSession =
+    swapper !== undefined ? getActiveSessionFromAls() : undefined
   return () => {
-    if (mcpToolsSwapper === swapper) {
-      mcpToolsSwapper = undefined
+    if (state.mcpToolsSwapper === swapper) {
+      state.mcpToolsSwapper = undefined
+      state.mcpToolsSwapperSession = undefined
     }
   }
 }
@@ -2984,42 +3156,51 @@ export function swapMcpServerTools(
   config: ScopedMcpServerConfig,
   connectedClient?: ConnectedMCPServer,
 ): boolean {
-  if (!mcpToolsSwapper) return false
-  return mcpToolsSwapper(serverName, tools, config, connectedClient)
+  const state = getHostMcpClientState()
+  const swapper = state.mcpToolsSwapper
+  if (!swapper) return false
+  const session = state.mcpToolsSwapperSession
+  return session !== undefined
+    ? runWithSession(session, () =>
+        swapper(serverName, tools, config, connectedClient),
+      )
+    : swapper(serverName, tools, config, connectedClient)
 }
 
 /**
  * Official 2.1.325 #2308: per-server reconnect listener registry so background
  * MCP tasks immediately switch to the reconnected client and resume updates.
  */
-type McpServerConnectedListener = (client: ConnectedMCPServer) => void
-const mcpServerConnectedListeners = new Map<
-  string,
-  Set<McpServerConnectedListener>
->()
-
 export function onMcpServerConnected(
   serverName: string,
   listener: McpServerConnectedListener,
 ): () => void {
-  let set = mcpServerConnectedListeners.get(serverName)
+  const state = getHostMcpClientState()
+  const capturedSession = getActiveSessionFromAls()
+  const wrapped: McpServerConnectedListener =
+    capturedSession !== undefined
+      ? client => runWithSession(capturedSession, () => listener(client))
+      : listener
+  let set = state.mcpServerConnectedListeners.get(serverName)
   if (!set) {
     set = new Set()
-    mcpServerConnectedListeners.set(serverName, set)
+    state.mcpServerConnectedListeners.set(serverName, set)
   }
-  set.add(listener)
+  set.add(wrapped)
   return () => {
-    const existing = mcpServerConnectedListeners.get(serverName)
+    const existing = state.mcpServerConnectedListeners.get(serverName)
     if (!existing) return
-    existing.delete(listener)
+    existing.delete(wrapped)
     if (existing.size === 0) {
-      mcpServerConnectedListeners.delete(serverName)
+      state.mcpServerConnectedListeners.delete(serverName)
     }
   }
 }
 
 export function notifyMcpServerConnected(client: ConnectedMCPServer): void {
-  const listeners = mcpServerConnectedListeners.get(client.name)
+  const listeners = getHostMcpClientState().mcpServerConnectedListeners.get(
+    client.name,
+  )
   if (!listeners || listeners.size === 0) return
   for (const listener of [...listeners]) {
     try {
@@ -3127,16 +3308,14 @@ export {
  * from the active session (e.g. via SDK `mcp_set_servers`) so in-flight or
  * subsequent tool calls never reconnect to them or report `needs-auth`.
  */
-const removedMcpServerNames = new Set<string>()
-const removedMcpServerConfigs = new WeakSet<object>()
-
 export function markMcpServerRemovedFromSession(
   name: string,
   config?: object,
 ): void {
-  removedMcpServerNames.add(name)
+  const state = getHostMcpClientState()
+  state.removedMcpServerNames.add(name)
   if (config) {
-    removedMcpServerConfigs.add(config)
+    state.removedMcpServerConfigs.add(config)
   }
 }
 
@@ -3144,24 +3323,28 @@ export function unmarkMcpServerRemovedFromSession(
   name: string,
   config?: object,
 ): void {
-  if (config && removedMcpServerConfigs.has(config)) {
+  const state = getHostMcpClientState()
+  if (config && state.removedMcpServerConfigs.has(config)) {
     return
   }
-  removedMcpServerNames.delete(name)
+  state.removedMcpServerNames.delete(name)
 }
 
 export function isMcpServerRemovedFromSession(
   name: string,
   config?: object,
 ): boolean {
-  if (config && removedMcpServerConfigs.has(config)) {
+  const state = getHostMcpClientState()
+  if (config && state.removedMcpServerConfigs.has(config)) {
     return true
   }
-  return removedMcpServerNames.has(name)
+  return state.removedMcpServerNames.has(name)
 }
 
 export function clearRemovedMcpServersTracking(): void {
-  removedMcpServerNames.clear()
+  const state = getHostMcpClientState()
+  state.removedMcpServerNames.clear()
+  state.removedMcpServerConfigs = new WeakSet<object>()
 }
 
 export function formatMcpServerRemovedError(name: string): string {
@@ -3371,8 +3554,6 @@ export function classifyMcpToolCallAuthError(
     ? 'step_up'
     : 'credential_rejected'
 }
-
-const MCP_FETCH_CACHE_SIZE = 20
 
 /**
  * #2151: Official `droppedToolsSeqByConnection` (`Lc(e)`). Ensures an older
@@ -3983,14 +4164,17 @@ function composeMcpToolsFromRawListing(
                 connectedClient !== client &&
                 connectedClient.type === 'connected'
               ) {
+                const capturedCallSession = getBootstrapSession()
                 void fetchToolsForClient(connectedClient)
                   .then(freshTools => {
-                    swapMcpServerTools(
-                      client.name,
-                      freshTools,
-                      connectedClient.config,
-                      connectedClient,
-                    )
+                    runWithSession(capturedCallSession, () => {
+                      swapMcpServerTools(
+                        client.name,
+                        freshTools,
+                        connectedClient.config,
+                        connectedClient,
+                      )
+                    })
                   })
                   .catch(() => {})
               }
@@ -4391,14 +4575,17 @@ function composeMcpToolsFromRawListing(
                     // the live tool pool so SDK host calls point to the
                     // new connection instead of answering "Not connected".
                     preferredClient = reconnected
+                    const capturedReconnectSession = getBootstrapSession()
                     void fetchToolsForClient(reconnected)
                       .then(freshTools => {
-                        swapMcpServerTools(
-                          client.name,
-                          freshTools,
-                          reconnected.config,
-                          reconnected,
-                        )
+                        runWithSession(capturedReconnectSession, () => {
+                          swapMcpServerTools(
+                            client.name,
+                            freshTools,
+                            reconnected.config,
+                            reconnected,
+                          )
+                        })
                       })
                       .catch(() => {})
                     continue
@@ -4523,89 +4710,76 @@ function composeMcpToolsFromRawListing(
   return filterMcpToolsByNameLength(composedTools, client.name)
 }
 
-export const fetchToolsForClient = memoizeWithLRU(
-  async (client: MCPServerConnection): Promise<Tool[]> => {
-    if (client.type !== 'connected') return []
+async function fetchToolsForClientImpl(
+  client: MCPServerConnection,
+): Promise<Tool[]> {
+  if (client.type !== 'connected') return []
+  const hostState = getHostMcpClientState()
 
-    try {
-      if (!client.capabilities?.tools) {
-        const empty: Tool[] = []
-        if (isMcpDiscoveryCacheEnabled()) {
-          recordRawToolsForResult(empty, [])
-        }
-        return empty
-      }
-
-      // densable 2.1.289: modern `ai` listTools aggregate; else `$n` 20-page walk.
-      const listedTools = (
-        readClientProtocolEra(client.client) === 'modern'
-          ? await listMcpToolsAggregated(client.client, client.name)
-          : await listMcpCursorPages(
-              client.client,
-              client.name,
-              'tools/list',
-              page => (Array.isArray(page.tools) ? page.tools : undefined),
-            )
-      ) as NonNullable<
-        Awaited<ReturnType<typeof client.client.listTools>>['tools']
-      >
-
-      // densable: successful tools/list clears discovery degradation flags
-      client.toolsListError = undefined
-      client.discoveryAuthFailure = undefined
-      // Note: discoveryBearerRejected is sticky until reconnect with a good token
-
-      // #2055: Drop any null/undefined/non-object entries in tools/list (e.g. from
-      // an SDK host) before Unicode sanitization and schema/name inspection so
-      // headless sessions never crash on `t.name`.
-      const validListedTools = Array.isArray(listedTools)
-        ? listedTools.filter(
-            (entry): entry is (typeof listedTools)[number] =>
-              entry !== null &&
-              typeof entry === 'object' &&
-              typeof (entry as { name?: unknown }).name === 'string',
-          )
-        : []
-
-      const result = composeMcpToolsFromRawListing(client, validListedTools)
+  try {
+    if (!client.capabilities?.tools) {
+      const empty: Tool[] = []
       if (isMcpDiscoveryCacheEnabled()) {
-        recordRawToolsForResult(result, validListedTools)
+        recordRawToolsForResult(empty, [])
       }
-      return result
-    } catch (error) {
-      const msg = errorMessage(error)
-      // densable n4e catch: claudeai-proxy bearer reject → discoveryBearerRejected
-      // (stay connected + /login); generic 401/403 list auth → discoveryAuthFailure.
-      const isProxy = client.config.type === 'claudeai-proxy'
-      const bearerRejected = isProxy && isClaudeAiBearerRejectedError(error)
-      if (isProxy && !bearerRejected && isClaudeAiProxyListAuthError(error)) {
-        logEvent('tengu_mcp_server_needs_auth', {
-          transportType:
-            'claudeai-proxy' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          cause:
-            'discovery_tools_list' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        client.discoveryAuthFailure = true
-        logMCPDebug(
-          client.name,
-          'tools/list 401/403 on claude.ai proxy — flagging needs-auth',
+      return empty
+    }
+
+    // densable 2.1.289: modern `ai` listTools aggregate; else `$n` 20-page walk.
+    const listedTools = (
+      readClientProtocolEra(client.client) === 'modern'
+        ? await listMcpToolsAggregated(client.client, client.name)
+        : await listMcpCursorPages(
+            client.client,
+            client.name,
+            'tools/list',
+            page => (Array.isArray(page.tools) ? page.tools : undefined),
+          )
+    ) as NonNullable<
+      Awaited<ReturnType<typeof client.client.listTools>>['tools']
+    >
+
+    // densable: successful tools/list clears discovery degradation flags
+    client.toolsListError = undefined
+    client.discoveryAuthFailure = undefined
+    // Note: discoveryBearerRejected is sticky until reconnect with a good token
+
+    // #2055: Drop any null/undefined/non-object entries in tools/list (e.g. from
+    // an SDK host) before Unicode sanitization and schema/name inspection so
+    // headless sessions never crash on `t.name`.
+    const validListedTools = Array.isArray(listedTools)
+      ? listedTools.filter(
+          (entry): entry is (typeof listedTools)[number] =>
+            entry !== null &&
+            typeof entry === 'object' &&
+            typeof (entry as { name?: unknown }).name === 'string',
         )
-        fetchToolsForClient.cache.delete(client.name)
-        const empty: Tool[] = []
-        recordDiscoveryFetchErrorForResult(
-          empty,
-          error instanceof Error ? error : new Error(String(error)),
-        )
-        return empty
-      }
-      client.toolsListError = msg
-      if (bearerRejected) {
-        client.discoveryBearerRejected = true
-        logMCPDebug(client.name, `Failed to fetch tools: ${msg}`)
-      } else {
-        logMCPError(client.name, `Failed to fetch tools: ${msg}`)
-      }
-      fetchToolsForClient.cache.delete(client.name)
+      : []
+
+    const result = composeMcpToolsFromRawListing(client, validListedTools)
+    if (isMcpDiscoveryCacheEnabled()) {
+      recordRawToolsForResult(result, validListedTools)
+    }
+    return result
+  } catch (error) {
+    const msg = errorMessage(error)
+    // densable n4e catch: claudeai-proxy bearer reject → discoveryBearerRejected
+    // (stay connected + /login); generic 401/403 list auth → discoveryAuthFailure.
+    const isProxy = client.config.type === 'claudeai-proxy'
+    const bearerRejected = isProxy && isClaudeAiBearerRejectedError(error)
+    if (isProxy && !bearerRejected && isClaudeAiProxyListAuthError(error)) {
+      logEvent('tengu_mcp_server_needs_auth', {
+        transportType:
+          'claudeai-proxy' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        cause:
+          'discovery_tools_list' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      client.discoveryAuthFailure = true
+      logMCPDebug(
+        client.name,
+        'tools/list 401/403 on claude.ai proxy — flagging needs-auth',
+      )
+      hostState.fetchToolsMemo.cache.delete(client.name)
       const empty: Tool[] = []
       recordDiscoveryFetchErrorForResult(
         empty,
@@ -4613,67 +4787,100 @@ export const fetchToolsForClient = memoizeWithLRU(
       )
       return empty
     }
-  },
-  (client: MCPServerConnection) => client.name,
-  MCP_FETCH_CACHE_SIZE,
-)
+    client.toolsListError = msg
+    if (bearerRejected) {
+      client.discoveryBearerRejected = true
+      logMCPDebug(client.name, `Failed to fetch tools: ${msg}`)
+    } else {
+      logMCPError(client.name, `Failed to fetch tools: ${msg}`)
+    }
+    hostState.fetchToolsMemo.cache.delete(client.name)
+    const empty: Tool[] = []
+    recordDiscoveryFetchErrorForResult(
+      empty,
+      error instanceof Error ? error : new Error(String(error)),
+    )
+    return empty
+  }
+}
+
+export const fetchToolsForClient: ReturnType<typeof createFetchToolsMemo> =
+  Object.assign(
+    (client: MCPServerConnection): Promise<Tool[]> =>
+      getHostMcpClientState().fetchToolsMemo(client),
+    {
+      cache: createHostCacheProxy(
+        () => getHostMcpClientState().fetchToolsMemo.cache,
+      ),
+    },
+  )
 
 /**
  * densable fcn / isListAuthError — 401/403 on list that is *not* a
  * CLAUDEAI_BEARER_REJECTED throw (those stay connected + /login).
  */
-export const fetchResourcesForClient = memoizeWithLRU(
-  async (client: MCPServerConnection): Promise<ServerResource[]> => {
-    if (client.type !== 'connected') return []
+async function fetchResourcesForClientImpl(
+  client: MCPServerConnection,
+): Promise<ServerResource[]> {
+  if (client.type !== 'connected') return []
 
-    try {
-      if (!client.capabilities?.resources) {
-        const empty: ServerResource[] = []
-        if (isMcpDiscoveryCacheEnabled()) {
-          recordRawResourcesForResult(empty, [])
-        }
-        return empty
-      }
-
-      // densable 2.1.289 `$n` resources/list — 20-page clamp, not SDK 64 throw.
-      const resources = (await listMcpCursorPages(
-        client.client,
-        client.name,
-        'resources/list',
-        page => (Array.isArray(page.resources) ? page.resources : undefined),
-      )) as NonNullable<
-        Awaited<ReturnType<typeof client.client.listResources>>['resources']
-      >
-
-      if (resources.length === 0) {
-        const empty: ServerResource[] = []
-        if (isMcpDiscoveryCacheEnabled()) {
-          recordRawResourcesForResult(empty, [])
-        }
-        return empty
-      }
-
-      // Add server name to each resource
-      const mapped = resources.map(resource => ({
-        ...resource,
-        server: client.name,
-      }))
+  try {
+    if (!client.capabilities?.resources) {
+      const empty: ServerResource[] = []
       if (isMcpDiscoveryCacheEnabled()) {
-        recordRawResourcesForResult(mapped, resources)
+        recordRawResourcesForResult(empty, [])
       }
-      return mapped
-    } catch (error) {
-      logMCPError(
-        client.name,
-        `Failed to fetch resources: ${errorMessage(error)}`,
-      )
-      // densable #42: rethrow so list_changed can keep previous resources
-      // (soft-returning [] would cache empty and wipe slash resources).
-      throw error
+      return empty
     }
+
+    // densable 2.1.289 `$n` resources/list — 20-page clamp, not SDK 64 throw.
+    const resources = (await listMcpCursorPages(
+      client.client,
+      client.name,
+      'resources/list',
+      page => (Array.isArray(page.resources) ? page.resources : undefined),
+    )) as NonNullable<
+      Awaited<ReturnType<typeof client.client.listResources>>['resources']
+    >
+
+    if (resources.length === 0) {
+      const empty: ServerResource[] = []
+      if (isMcpDiscoveryCacheEnabled()) {
+        recordRawResourcesForResult(empty, [])
+      }
+      return empty
+    }
+
+    // Add server name to each resource
+    const mapped = resources.map(resource => ({
+      ...resource,
+      server: client.name,
+    }))
+    if (isMcpDiscoveryCacheEnabled()) {
+      recordRawResourcesForResult(mapped, resources)
+    }
+    return mapped
+  } catch (error) {
+    logMCPError(
+      client.name,
+      `Failed to fetch resources: ${errorMessage(error)}`,
+    )
+    // densable #42: rethrow so list_changed can keep previous resources
+    // (soft-returning [] would cache empty and wipe slash resources).
+    throw error
+  }
+}
+
+export const fetchResourcesForClient: ReturnType<
+  typeof createFetchResourcesMemo
+> = Object.assign(
+  (client: MCPServerConnection): Promise<ServerResource[]> =>
+    getHostMcpClientState().fetchResourcesMemo(client),
+  {
+    cache: createHostCacheProxy(
+      () => getHostMcpClientState().fetchResourcesMemo.cache,
+    ),
   },
-  (client: MCPServerConnection) => client.name,
-  MCP_FETCH_CACHE_SIZE,
 )
 
 /**
@@ -4781,54 +4988,61 @@ function composeMcpCommandsFromRawListing(
   })
 }
 
-export const fetchCommandsForClient = memoizeWithLRU(
-  async (client: MCPServerConnection): Promise<Command[]> => {
-    if (client.type !== 'connected') return []
+async function fetchCommandsForClientImpl(
+  client: MCPServerConnection,
+): Promise<Command[]> {
+  if (client.type !== 'connected') return []
 
-    try {
-      if (!client.capabilities?.prompts) {
-        const empty: Command[] = []
-        if (isMcpDiscoveryCacheEnabled()) {
-          recordRawCommandsForResult(empty, [])
-        }
-        return empty
-      }
-
-      // densable 2.1.289 `$n` prompts/list — 20-page clamp, not SDK 64 throw.
-      const listedPrompts = (await listMcpCursorPages(
-        client.client,
-        client.name,
-        'prompts/list',
-        page => (Array.isArray(page.prompts) ? page.prompts : undefined),
-      )) as NonNullable<
-        Awaited<ReturnType<typeof client.client.listPrompts>>['prompts']
-      >
-
-      if (listedPrompts.length === 0) {
-        const empty: Command[] = []
-        if (isMcpDiscoveryCacheEnabled()) {
-          recordRawCommandsForResult(empty, [])
-        }
-        return empty
-      }
-
-      const result = composeMcpCommandsFromRawListing(client, listedPrompts)
+  try {
+    if (!client.capabilities?.prompts) {
+      const empty: Command[] = []
       if (isMcpDiscoveryCacheEnabled()) {
-        recordRawCommandsForResult(result, listedPrompts)
+        recordRawCommandsForResult(empty, [])
       }
-      return result
-    } catch (error) {
-      logMCPError(
-        client.name,
-        `Failed to fetch commands: ${errorMessage(error)}`,
-      )
-      // densable #42: rethrow so list_changed can keep previous commands
-      // (soft-returning [] would cache empty and clear slash prompts).
-      throw error
+      return empty
     }
+
+    // densable 2.1.289 `$n` prompts/list — 20-page clamp, not SDK 64 throw.
+    const listedPrompts = (await listMcpCursorPages(
+      client.client,
+      client.name,
+      'prompts/list',
+      page => (Array.isArray(page.prompts) ? page.prompts : undefined),
+    )) as NonNullable<
+      Awaited<ReturnType<typeof client.client.listPrompts>>['prompts']
+    >
+
+    if (listedPrompts.length === 0) {
+      const empty: Command[] = []
+      if (isMcpDiscoveryCacheEnabled()) {
+        recordRawCommandsForResult(empty, [])
+      }
+      return empty
+    }
+
+    const result = composeMcpCommandsFromRawListing(client, listedPrompts)
+    if (isMcpDiscoveryCacheEnabled()) {
+      recordRawCommandsForResult(result, listedPrompts)
+    }
+    return result
+  } catch (error) {
+    logMCPError(client.name, `Failed to fetch commands: ${errorMessage(error)}`)
+    // densable #42: rethrow so list_changed can keep previous commands
+    // (soft-returning [] would cache empty and clear slash prompts).
+    throw error
+  }
+}
+
+export const fetchCommandsForClient: ReturnType<
+  typeof createFetchCommandsMemo
+> = Object.assign(
+  (client: MCPServerConnection): Promise<Command[]> =>
+    getHostMcpClientState().fetchCommandsMemo(client),
+  {
+    cache: createHostCacheProxy(
+      () => getHostMcpClientState().fetchCommandsMemo.cache,
+    ),
   },
-  (client: MCPServerConnection) => client.name,
-  MCP_FETCH_CACHE_SIZE,
 )
 
 /**
@@ -6260,6 +6474,7 @@ export async function setupSdkMcpClients(
   const clients: MCPServerConnection[] = []
   const tools: Tool[] = []
   const commands: Command[] = []
+  const capturedSdkSession = getBootstrapSession()
 
   // densable Rd — connect every SDK server in parallel; catch keeps only that
   // name failed so one handshake stall does not take down the batch.
@@ -6271,6 +6486,7 @@ export async function setupSdkMcpClients(
       // gold `co("sdk-control")` ABSENT as a discrete factory — mode:'legacy'
       // is the local densable plan equivalent.
       const client = createDensableMcpClient({ mode: 'legacy' })
+      bindMcpClientHandlersToSession(client, capturedSdkSession)
 
       try {
         await client.connect(transport)

@@ -30,6 +30,7 @@ import type {
   UserMessage,
 } from 'src/types/message.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import {
   formatSyncSkillNotMaterializedMessage,
   waitForSyncSkillMaterialization,
@@ -159,7 +160,9 @@ const remoteSkillModules = feature('EXPERIMENTAL_SKILL_SEARCH')
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const forkedSkillStackStorage = new AsyncLocalStorage<ReadonlySet<string>>()
-const activeForkedSkillByAgentId = new Map<string, ReadonlySet<string>>()
+const activeForkedSkillByAgentIdBySession = new RootSessionSlot<
+  Map<string, ReadonlySet<string>>
+>(() => new Map<string, ReadonlySet<string>>())
 
 /**
  * Official 2.1.328 `H6(e)` (`chunk@294254613.js@1279876`) — canonical skill name
@@ -194,9 +197,12 @@ export function getActiveForkedSkillNames(
     for (const name of stored) active.add(name)
   }
   const agentIds = [context?.agentId, getAgentContext()?.agentId]
+  const activeByAgent = activeForkedSkillByAgentIdBySession.peek(
+    getBootstrapSession(),
+  )
   for (const id of agentIds) {
     if (!id) continue
-    const forAgent = activeForkedSkillByAgentId.get(id)
+    const forAgent = activeByAgent?.get(id)
     if (forAgent) {
       for (const name of forAgent) active.add(name)
     }
@@ -241,9 +247,10 @@ export function isForkedSkillRecursiveInvocation(
     forkCtx.spawnedByForkedSkill === true ||
     forkCtx.options?.spawnedByForkedSkill === true ||
     (forkedSkillStackStorage.getStore()?.size ?? 0) > 0 ||
-    activeForkedSkillByAgentId.has(
-      context.agentId ?? getAgentContext()?.agentId ?? '',
-    )
+    (activeForkedSkillByAgentIdBySession
+      .peek(getBootstrapSession())
+      ?.has(context.agentId ?? getAgentContext()?.agentId ?? '') ??
+      false)
   const isForkSkill =
     command.context === 'fork' ||
     (command.getContext !== undefined && inForkedSkill)
@@ -691,6 +698,9 @@ async function executeForkedSkill(
 
   // Collect messages from the forked agent
   const agentMessages: Message[] = []
+  const activeForkedSkillByAgentId = activeForkedSkillByAgentIdBySession.of(
+    getBootstrapSession(),
+  )
   activeForkedSkillByAgentId.set(agentId, nextForkStack)
 
   try {

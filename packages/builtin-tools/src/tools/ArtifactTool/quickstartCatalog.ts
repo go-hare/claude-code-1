@@ -7,6 +7,7 @@ import { DL } from 'src/services/artifactAutoReact/frameDl.js'
 import { frameControlPlaneHeaders } from 'src/services/artifactAutoReact/mint.js'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { sleep } from 'src/utils/sleep.js'
 
 const CATALOG_MAX_BYTES = 4_194_304
@@ -122,11 +123,40 @@ export function isArtifactMultiFileOn(): boolean {
   )
 }
 
-/** Gold Kp session latch. First read wins until tests reset it. */
-let artifactToolsetLatch: boolean | null = null
+/** Gold Kp session latch (`RootSessionSlot` in official 2.1.331). First read wins per root session until tests reset it. */
+const fallbackToolsetSession: { readonly root: object } = {
+  get root() {
+    return fallbackToolsetSession
+  },
+}
+
+function getActiveToolsetSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (
+      session !== null &&
+      typeof session === 'object' &&
+      session.root !== null &&
+      typeof session.root === 'object'
+    ) {
+      return session
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackToolsetSession
+}
+
+const artifactToolsetLatchSlot = new RootSessionSlot<{
+  latch: boolean | null
+}>(() => ({ latch: null }))
+
+function getArtifactToolsetLatchState(): { latch: boolean | null } {
+  return artifactToolsetLatchSlot.of(getActiveToolsetSession())
+}
 
 export function resetArtifactToolsetLatchForTests(): void {
-  artifactToolsetLatch = null
+  getArtifactToolsetLatchState().latch = null
 }
 
 /**
@@ -134,22 +164,24 @@ export function resetArtifactToolsetLatchForTests(): void {
  * `tengu_cobalt_plinth_damson` (default false).
  */
 export function isArtifactDamsonToolset(): boolean {
-  if (artifactToolsetLatch !== null) return artifactToolsetLatch
+  const latchState = getArtifactToolsetLatchState()
+  if (latchState.latch !== null) return latchState.latch
   // Gold Kp: defined env wins, including an explicit false. Unset falls
-  // through to tengu_cobalt_plinth_damson === true. Latch once per process.
-  artifactToolsetLatch = artifactGateEnvOrGb(
+  // through to tengu_cobalt_plinth_damson === true. Latch once per root session.
+  const latched = artifactGateEnvOrGb(
     process.env.CLAUDE_CODE_ARTIFACT_TOOLSET,
     'tengu_cobalt_plinth_damson',
   )
+  latchState.latch = latched
   try {
     const { logEvent } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
-    logEvent('tengu_artifact_toolset', { on: artifactToolsetLatch })
+    logEvent('tengu_artifact_toolset', { on: latched })
   } catch {
     /* telemetry must not change the latch */
   }
-  return artifactToolsetLatch
+  return latched
 }
 
 /** Gold `yjn` / Qps / bu analog (frozen pin then env/GB). */

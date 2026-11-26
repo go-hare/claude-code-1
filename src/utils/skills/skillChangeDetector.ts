@@ -1,3 +1,4 @@
+import { clearAgentDefinitionsCache } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import chokidar, { type FSWatcher } from 'chokidar'
 import * as platformPath from 'path'
 import {
@@ -19,20 +20,28 @@ import {
   onDynamicSkillsLoaded,
   refreshMovedDirectorySkills,
 } from '../../skills/loadSkillsDir.js'
-import { clearAgentDefinitionsCache } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { forgetSentSkillNames, resetSentSkillNames } from '../attachments.js'
 import { registerCleanup } from '../cleanupRegistry.js'
+import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
-import { errorMessage } from '../errors.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { errorMessage } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { executeConfigChangeHooks, hasBlockingResult } from '../hooks.js'
-import { createSignal } from '../signal.js'
-import { sleep } from '../sleep.js'
 import {
   filterWatchedModDirs,
   isPluginDirWatchDisabledByEnv,
 } from '../plugins/pluginDevMods.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
+import type { Session } from '../sessionRoot.js'
+import { createSignal, type Signal } from '../signal.js'
+import { sleep } from '../sleep.js'
 
 /**
  * Time in milliseconds to wait for file writes to stabilize before processing.
@@ -100,39 +109,108 @@ type SkillChangeDetectorDeps = {
   dirExists?: (dirPath: string) => Promise<boolean>
 }
 
-let watcher: FSWatcher | null = null
-/** Official 2.1.326 #129: parent-directory watcher for not-yet-created `.claude/{skills,commands,agents}` folders. */
-let parentWatcher: FSWatcher | null = null
-let watchedParentDirs: string[] = []
-let reloadTimer: ReturnType<typeof setTimeout> | null = null
-let idleCheckTimer: ReturnType<typeof setInterval> | null = null
-/** #1863: Directories observed removed via `unlinkDir`, mapped to whether they were seen present on the prior poll. */
-const missingDirs = new Map<string, boolean>()
-let missingDirTimer: ReturnType<typeof setTimeout> | null = null
-let watcherHealthy = false
-const pendingChangedPaths = new Set<string>()
-let initialized = false
-let disposed = false
-let isIdle = false
-let lastFingerprint: Fingerprint | null = null
-let watchedPaths: string[] = []
-/** densable XoS `_` — generation so a stale rehome cannot replace a newer watch. */
-let watchGeneration = 0
-let dynamicSkillsCallbackRegistered = false
-let unregisterCleanup: (() => void) | null = null
-let unregisterDynamicSkills: (() => void) | null = null
-let unregisterInvalidation: (() => void) | null = null
-const skillsChanged = createSignal()
+type HostSkillChangeDetectorState = {
+  watcher: FSWatcher | null
+  /** Official 2.1.326 #129: parent-directory watcher for not-yet-created `.claude/{skills,commands,agents}` folders. */
+  parentWatcher: FSWatcher | null
+  watchedParentDirs: string[]
+  reloadTimer: ReturnType<typeof setTimeout> | null
+  idleCheckTimer: ReturnType<typeof setInterval> | null
+  /** #1863: Directories observed removed via `unlinkDir`, mapped to whether they were seen present on the prior poll. */
+  missingDirs: Map<string, boolean>
+  missingDirTimer: ReturnType<typeof setTimeout> | null
+  watcherHealthy: boolean
+  pendingChangedPaths: Set<string>
+  initialized: boolean
+  disposed: boolean
+  isIdle: boolean
+  lastFingerprint: Fingerprint | null
+  watchedPaths: string[]
+  /** densable XoS `_` — generation so a stale rehome cannot replace a newer watch. */
+  watchGeneration: number
+  dynamicSkillsCallbackRegistered: boolean
+  unregisterCleanup: (() => void) | null
+  unregisterDynamicSkills: (() => void) | null
+  unregisterInvalidation: (() => void) | null
+  skillsChanged: Signal
+  // densable U7 — external skill-list invalidation (plugin reload, --add-dir, etc.)
+  skillInvalidation: Signal
+  testOverrides: SkillChangeDetectorDeps | null
+  sessionRef: WeakRef<Session> | null
+}
 
-// densable U7 — external skill-list invalidation (plugin reload, --add-dir, etc.)
-const skillInvalidation = createSignal()
-export const notifySkillsInvalidated = skillInvalidation.emit
+const hostSkillChangeDetectorSlot = new HostSlot<HostSkillChangeDetectorState>(
+  () => ({
+    watcher: null,
+    parentWatcher: null,
+    watchedParentDirs: [],
+    reloadTimer: null,
+    idleCheckTimer: null,
+    missingDirs: new Map(),
+    missingDirTimer: null,
+    watcherHealthy: false,
+    pendingChangedPaths: new Set(),
+    initialized: false,
+    disposed: false,
+    isIdle: false,
+    lastFingerprint: null,
+    watchedPaths: [],
+    watchGeneration: 0,
+    dynamicSkillsCallbackRegistered: false,
+    unregisterCleanup: null,
+    unregisterDynamicSkills: null,
+    unregisterInvalidation: null,
+    skillsChanged: createSignal(),
+    skillInvalidation: createSignal(),
+    testOverrides: null,
+    sessionRef: null,
+  }),
+)
 
-let testOverrides: SkillChangeDetectorDeps | null = null
+function getHostSkillChangeDetectorState(): HostSkillChangeDetectorState {
+  return hostSkillChangeDetectorSlot.of(getBootstrapSessionHost())
+}
+
+function resolveDetectorCwd(): string {
+  return hasActiveSessionAls() ? getCwd() : process.cwd()
+}
+
+function captureRootSessionRef(state: HostSkillChangeDetectorState): void {
+  const currentSession = getBootstrapSession()
+  state.sessionRef = new WeakRef(currentSession.root ?? currentSession)
+}
+
+function runInStateSession(
+  state: HostSkillChangeDetectorState,
+  fn: () => void,
+): void {
+  const targetSession = state.sessionRef?.deref()
+  if (!targetSession) {
+    void disposeState(state)
+    return
+  }
+  runWithSession(targetSession, fn)
+}
+
+function registerWeakSkillWatcherCleanup(
+  state: HostSkillChangeDetectorState,
+): () => void {
+  const stateRef = new WeakRef(state)
+  return registerCleanup(async () => {
+    const target = stateRef.deref()
+    if (target) {
+      await disposeState(target)
+    }
+  })
+}
+
+export function notifySkillsInvalidated(): void {
+  getHostSkillChangeDetectorState().skillInvalidation.emit()
+}
 
 async function defaultGetFingerprint(): Promise<Fingerprint> {
   // densable JoS: Map of command name → contentHash (prompt) or ""
-  const commands = await getCommands(process.cwd())
+  const commands = await getCommands(getCwd())
   const map: Fingerprint = new Map()
   for (const cmd of commands) {
     map.set(cmd.name, cmd.type === 'prompt' ? (cmd.contentHash ?? '') : '')
@@ -145,23 +223,25 @@ async function defaultGetFingerprint(): Promise<Fingerprint> {
  * densable XoS().initialize (w)
  */
 export async function initialize(): Promise<void> {
-  if (initialized || disposed) return
-  initialized = true
-  watchGeneration++
+  const state = getHostSkillChangeDetectorState()
+  if (state.initialized || state.disposed) return
+  state.initialized = true
+  state.watchGeneration++
+  captureRootSessionRef(state)
 
   // densable: if (!E) E = Tmd(() => { wZ(); l.emit() })
-  if (!dynamicSkillsCallbackRegistered) {
-    dynamicSkillsCallbackRegistered = true
-    unregisterDynamicSkills = onDynamicSkillsLoaded(() => {
+  if (!state.dynamicSkillsCallbackRegistered) {
+    state.dynamicSkillsCallbackRegistered = true
+    state.unregisterDynamicSkills = onDynamicSkillsLoaded(() => {
       clearCommandMemoizationCaches()
-      skillsChanged.emit()
+      state.skillsChanged.emit()
     })
   }
 
   // densable U7.subscribe(() => l.emit())
-  if (!unregisterInvalidation) {
-    unregisterInvalidation = skillInvalidation.subscribe(() => {
-      skillsChanged.emit()
+  if (!state.unregisterInvalidation) {
+    state.unregisterInvalidation = state.skillInvalidation.subscribe(() => {
+      state.skillsChanged.emit()
     })
   }
 
@@ -171,36 +251,37 @@ export async function initialize(): Promise<void> {
   const filteredPaths = isPluginDirWatchDisabledByEnv()
     ? paths.filter(p => !p.endsWith(`${platformPath.sep}skills`))
     : filterWatchedModDirs(paths, { skillModDirs: paths })
-  watchedPaths = filteredPaths
+  state.watchedPaths = filteredPaths
 
-  const getFingerprint = testOverrides?.getFingerprint ?? defaultGetFingerprint
-  lastFingerprint = await getFingerprint().catch(() => null)
+  const getFingerprint =
+    state.testOverrides?.getFingerprint ?? defaultGetFingerprint
+  state.lastFingerprint = await getFingerprint().catch(() => null)
 
   const chokidarInterval =
-    testOverrides?.chokidarInterval ?? POLLING_INTERVAL_MS
+    state.testOverrides?.chokidarInterval ?? POLLING_INTERVAL_MS
 
   if (filteredPaths.length > 0) {
     logForDebugging(
       `Watching for changes in skill/command directories: ${filteredPaths.join(', ')}...`,
     )
-    watcher = createWatcher(chokidarInterval)
+    state.watcher = createWatcher(state, chokidarInterval)
   }
 
   // Official 2.1.326 #129: watch parent directories of any candidate
   // `.claude/{skills,commands,agents}` folders that do not exist yet, so the
   // first skill, command, or agent created during a session is discovered right away.
-  await refreshParentWatcher(chokidarInterval)
+  await refreshParentWatcher(state, chokidarInterval)
 
   // densable: if (fOf) p = setInterval(I, YoS)
-  idleCheckTimer = setInterval(() => {
-    checkIdleTransition()
-    void discoverNewlyCreatedSkillDirs()
+  state.idleCheckTimer = setInterval(() => {
+    runInStateSession(state, () => {
+      checkIdleTransition(state)
+      void discoverNewlyCreatedSkillDirs()
+    })
   }, IDLE_CHECK_INTERVAL_MS)
-  idleCheckTimer.unref?.()
+  state.idleCheckTimer.unref?.()
 
-  unregisterCleanup = registerCleanup(async () => {
-    await dispose()
-  })
+  state.unregisterCleanup = registerWeakSkillWatcherCleanup(state)
 }
 
 /**
@@ -209,7 +290,7 @@ export async function initialize(): Promise<void> {
  * and regular files not ending in `.md`.
  */
 export function shouldIgnoreSkillWatchPath(
-  filePath: string,
+  path: string,
   stats:
     | { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }
     | undefined,
@@ -223,15 +304,14 @@ export function shouldIgnoreSkillWatchPath(
   ) {
     return true
   }
-  if (filePath.split(/[/\\]/).some(dir => dir === '.git')) return true
+  if (path.split(/[/\\]/).some(dir => dir === '.git')) return true
   if (
-    platformPath
-      .relative(userSkillsDir, filePath)
-      .split(platformPath.sep)[0] === '.trash'
+    platformPath.relative(userSkillsDir, path).split(platformPath.sep)[0] ===
+    '.trash'
   ) {
     return true
   }
-  if (stats?.isFile()) return !filePath.endsWith('.md')
+  if (stats?.isFile()) return !path.endsWith('.md')
   return false
 }
 
@@ -244,15 +324,18 @@ async function defaultDirExists(dirPath: string): Promise<boolean> {
   }
 }
 
-function getActivePollInterval(): number {
-  return isIdle
-    ? (testOverrides?.idleChokidarInterval ?? IDLE_POLLING_INTERVAL_MS)
-    : (testOverrides?.chokidarInterval ?? POLLING_INTERVAL_MS)
+function getActivePollInterval(state: HostSkillChangeDetectorState): number {
+  return state.isIdle
+    ? (state.testOverrides?.idleChokidarInterval ?? IDLE_POLLING_INTERVAL_MS)
+    : (state.testOverrides?.chokidarInterval ?? POLLING_INTERVAL_MS)
 }
 
-function markRecoveredDir(dirPath: string): void {
-  missingDirs.delete(dirPath)
-  handleChange(dirPath)
+function markRecoveredDir(
+  state: HostSkillChangeDetectorState,
+  dirPath: string,
+): void {
+  state.missingDirs.delete(dirPath)
+  handleChange(state, dirPath)
 }
 
 /**
@@ -260,83 +343,98 @@ function markRecoveredDir(dirPath: string): void {
  * `git stash` or worktree switch) and poll until it reappears, rebuilding the
  * watcher and triggering a skill/command/agent reload when it comes back.
  */
-function handleWatchedDirUnlinked(dirPath: string): boolean {
-  const matched = watchedPaths.find(
+function handleWatchedDirUnlinked(
+  state: HostSkillChangeDetectorState,
+  dirPath: string,
+): boolean {
+  const matched = state.watchedPaths.find(
     p => platformPath.resolve(p) === platformPath.resolve(dirPath),
   )
   if (matched === undefined) {
     return false
   }
-  watcherHealthy = false
-  missingDirs.set(matched, false)
-  scheduleMissingDirPoll()
+  state.watcherHealthy = false
+  state.missingDirs.set(matched, false)
+  scheduleMissingDirPoll(state)
   return true
 }
 
-function scheduleMissingDirPoll(): void {
-  if (missingDirTimer) {
-    clearTimeout(missingDirTimer)
-    missingDirTimer = null
+function scheduleMissingDirPoll(state: HostSkillChangeDetectorState): void {
+  if (state.missingDirTimer) {
+    clearTimeout(state.missingDirTimer)
+    state.missingDirTimer = null
   }
-  if (disposed || missingDirs.size === 0) {
+  if (state.disposed || state.missingDirs.size === 0) {
     return
   }
-  const interval = getActivePollInterval()
-  const dirExists = testOverrides?.dirExists ?? defaultDirExists
-  const timer = setTimeout(async () => {
-    if (missingDirTimer !== timer || disposed) {
-      return
-    }
-    const present = new Set<string>()
-    for (const dir of missingDirs.keys()) {
-      if (await dirExists(dir)) {
-        present.add(dir)
-      }
-    }
-    if (missingDirTimer !== timer || disposed) {
-      return
-    }
-    const watched = watcher?.getWatched() ?? {}
-    let needsRebuild = false
-    for (const [dir, wasPresent] of [...missingDirs.entries()]) {
-      const existsNow = present.has(dir)
-      if (existsNow && !(wasPresent && platformPath.resolve(dir) in watched)) {
-        needsRebuild = true
-      }
-      if (wasPresent && existsNow) {
-        markRecoveredDir(dir)
-      } else {
-        missingDirs.set(dir, existsNow)
-      }
-    }
-    if (needsRebuild) {
-      if (watcher) {
-        void watcher.close().catch(err => {
-          logForDebugging(
-            `skillChangeDetector: could not close a watcher; went on without closing it: ${errorMessage(err)}`,
-            { level: 'warn' },
-          )
-        })
-      }
-      watcher = createWatcher(interval)
-    } else {
-      scheduleMissingDirPoll()
-    }
+  captureRootSessionRef(state)
+  const interval = getActivePollInterval(state)
+  const dirExists = state.testOverrides?.dirExists ?? defaultDirExists
+  const timer = setTimeout(() => {
+    runInStateSession(state, () => {
+      void (async () => {
+        if (state.missingDirTimer !== timer || state.disposed) {
+          return
+        }
+        const present = new Set<string>()
+        for (const dir of state.missingDirs.keys()) {
+          if (await dirExists(dir)) {
+            present.add(dir)
+          }
+        }
+        if (state.missingDirTimer !== timer || state.disposed) {
+          return
+        }
+        const watched = state.watcher?.getWatched() ?? {}
+        let needsRebuild = false
+        for (const [dir, wasPresent] of [...state.missingDirs.entries()]) {
+          const existsNow = present.has(dir)
+          if (
+            existsNow &&
+            !(wasPresent && platformPath.resolve(dir) in watched)
+          ) {
+            needsRebuild = true
+          }
+          if (wasPresent && existsNow) {
+            markRecoveredDir(state, dir)
+          } else {
+            state.missingDirs.set(dir, existsNow)
+          }
+        }
+        if (needsRebuild) {
+          if (state.watcher) {
+            void state.watcher.close().catch(err => {
+              logForDebugging(
+                `skillChangeDetector: could not close a watcher; went on without closing it: ${errorMessage(err)}`,
+                { level: 'warn' },
+              )
+            })
+          }
+          state.watcher = createWatcher(state, interval)
+        } else {
+          scheduleMissingDirPoll(state)
+        }
+      })()
+    })
   }, interval)
   timer.unref?.()
-  missingDirTimer = timer
+  state.missingDirTimer = timer
 }
 
-function createWatcher(interval: number): FSWatcher {
-  watcherHealthy = false
-  scheduleMissingDirPoll()
+function createWatcher(
+  state: HostSkillChangeDetectorState,
+  interval: number,
+): FSWatcher {
+  captureRootSessionRef(state)
+  state.watcherHealthy = false
+  scheduleMissingDirPoll(state)
   const stabilityThreshold =
-    testOverrides?.stabilityThreshold ?? FILE_STABILITY_THRESHOLD_MS
+    state.testOverrides?.stabilityThreshold ?? FILE_STABILITY_THRESHOLD_MS
   const pollInterval =
-    testOverrides?.pollInterval ?? FILE_STABILITY_POLL_INTERVAL_MS
+    state.testOverrides?.pollInterval ?? FILE_STABILITY_POLL_INTERVAL_MS
   const userSkillsDir = platformPath.join(getClaudeConfigHomeDir(), 'skills')
 
-  const w = chokidar.watch(watchedPaths, {
+  const w = chokidar.watch(state.watchedPaths, {
     persistent: true,
     ignoreInitial: true,
     depth: 2,
@@ -354,33 +452,39 @@ function createWatcher(interval: number): FSWatcher {
     atomic: true,
   })
 
-  w.on('add', handleChange)
-  w.on('change', handleChange)
-  w.on('unlink', handleChange)
+  w.on('add', p => runInStateSession(state, () => handleChange(state, p)))
+  w.on('change', p => runInStateSession(state, () => handleChange(state, p)))
+  w.on('unlink', p => runInStateSession(state, () => handleChange(state, p)))
   let sawUnlinkDir = false
   w.on('unlinkDir', (dirPath: string) => {
-    if (handleWatchedDirUnlinked(dirPath)) {
-      sawUnlinkDir = true
-    }
+    runInStateSession(state, () => {
+      if (handleWatchedDirUnlinked(state, dirPath)) {
+        sawUnlinkDir = true
+      }
+    })
   })
   w.once('ready', () => {
-    const watched = w.getWatched()
-    watcherHealthy =
-      !sawUnlinkDir &&
-      watchedPaths.every(p => platformPath.resolve(p) in watched)
-    if (watcherHealthy) {
-      for (const dir of [...missingDirs.keys()]) {
-        markRecoveredDir(dir)
+    runInStateSession(state, () => {
+      const watched = w.getWatched()
+      state.watcherHealthy =
+        !sawUnlinkDir &&
+        state.watchedPaths.every(p => platformPath.resolve(p) in watched)
+      if (state.watcherHealthy) {
+        for (const dir of [...state.missingDirs.keys()]) {
+          markRecoveredDir(state, dir)
+        }
+        if (state.missingDirTimer) {
+          clearTimeout(state.missingDirTimer)
+          state.missingDirTimer = null
+        }
       }
-      if (missingDirTimer) {
-        clearTimeout(missingDirTimer)
-        missingDirTimer = null
-      }
-    }
+    })
   })
   w.on('error', (err: unknown) => {
-    logForDebugging(`[skills] watcher error: ${errorMessage(err)}`, {
-      level: 'warn',
+    runInStateSession(state, () => {
+      logForDebugging(`[skills] watcher error: ${errorMessage(err)}`, {
+        level: 'warn',
+      })
     })
   })
   return w
@@ -389,23 +493,23 @@ function createWatcher(interval: number): FSWatcher {
 /**
  * densable XoS I — idle/active poll interval switch.
  */
-function checkIdleTransition(): void {
-  if (disposed || !watcher) return
-  const now = testOverrides?.now ?? Date.now
+function checkIdleTransition(state: HostSkillChangeDetectorState): void {
+  if (state.disposed || !state.watcher) return
+  const now = state.testOverrides?.now ?? Date.now
   const lastInteraction =
-    testOverrides?.lastInteractionTime ?? getLastInteractionTime
+    state.testOverrides?.lastInteractionTime ?? getLastInteractionTime
   const nextIdle = now() - lastInteraction() > IDLE_THRESHOLD_MS
-  if (nextIdle === isIdle) return
-  isIdle = nextIdle
+  if (nextIdle === state.isIdle) return
+  state.isIdle = nextIdle
   const interval = nextIdle ? IDLE_POLLING_INTERVAL_MS : POLLING_INTERVAL_MS
   logForDebugging(
     `[skills] ${nextIdle ? 'idle' : 'active'} — switching poll interval to ${interval}ms`,
   )
-  void watcher.close()
-  watcher = createWatcher(interval)
+  void state.watcher.close()
+  state.watcher = createWatcher(state, interval)
   // densable: if (!P) H(bGa)
   if (!nextIdle) {
-    scheduleReload(SKILL_WATCHER_IDLE_WAKE)
+    scheduleReload(state, SKILL_WATCHER_IDLE_WAKE)
   }
 }
 
@@ -429,94 +533,109 @@ function uniqueWatchPaths(paths: string[]): string[] {
  * watched (union length unchanged). Does not drop previously watched paths.
  */
 export async function rehome(): Promise<void> {
-  if (!initialized || disposed) return
+  const state = getHostSkillChangeDetectorState()
+  if (!state.initialized || state.disposed) return
+  captureRootSessionRef(state)
   const next = await getWatchablePaths()
-  if (disposed) return
-  const merged = uniqueWatchPaths([...watchedPaths, ...next])
-  const interval = getActivePollInterval()
-  await refreshParentWatcher(interval)
-  if (merged.length === watchedPaths.length) return
-  const generation = ++watchGeneration
-  watchedPaths = merged
+  if (state.disposed) return
+  const merged = uniqueWatchPaths([...state.watchedPaths, ...next])
+  const interval = getActivePollInterval(state)
+  await refreshParentWatcher(state, interval)
+  if (merged.length === state.watchedPaths.length) return
+  const generation = ++state.watchGeneration
+  state.watchedPaths = merged
   logForDebugging(
-    `[skills] session moved — watching skill/command directories: ${watchedPaths.join(', ')}`,
+    `[skills] session moved — watching skill/command directories: ${state.watchedPaths.join(', ')}`,
   )
-  if (watcher) void watcher.close()
-  watcher = createWatcher(interval)
-  const attached = watcher
+  if (state.watcher) void state.watcher.close()
+  state.watcher = createWatcher(state, interval)
+  const attached = state.watcher
   const ready = new Promise<void>(resolve => {
     attached.once('ready', () => resolve())
   })
   await Promise.race([ready, sleep(2000, undefined, { unref: true })])
-  if (disposed || generation !== watchGeneration) return
-  if (USE_POLLING && idleCheckTimer === null) {
-    idleCheckTimer = setInterval(checkIdleTransition, IDLE_CHECK_INTERVAL_MS)
-    idleCheckTimer.unref?.()
+  if (state.disposed || generation !== state.watchGeneration) return
+  if (USE_POLLING && state.idleCheckTimer === null) {
+    state.idleCheckTimer = setInterval(() => {
+      runInStateSession(state, () => {
+        checkIdleTransition(state)
+      })
+    }, IDLE_CHECK_INTERVAL_MS)
+    state.idleCheckTimer.unref?.()
   }
+}
+
+function disposeState(state: HostSkillChangeDetectorState): Promise<void> {
+  state.disposed = true
+  if (state.unregisterCleanup) {
+    state.unregisterCleanup()
+    state.unregisterCleanup = null
+  }
+  if (state.unregisterDynamicSkills) {
+    state.unregisterDynamicSkills()
+    state.unregisterDynamicSkills = null
+  }
+  state.dynamicSkillsCallbackRegistered = false
+  if (state.unregisterInvalidation) {
+    state.unregisterInvalidation()
+    state.unregisterInvalidation = null
+  }
+  if (state.idleCheckTimer) {
+    clearInterval(state.idleCheckTimer)
+    state.idleCheckTimer = null
+  }
+  if (state.missingDirTimer) {
+    clearTimeout(state.missingDirTimer)
+    state.missingDirTimer = null
+  }
+  state.missingDirs.clear()
+  state.watcherHealthy = false
+  let closePromise: Promise<void> = Promise.resolve()
+  if (state.watcher) {
+    closePromise = state.watcher.close()
+    state.watcher = null
+  }
+  if (state.parentWatcher) {
+    const parentClose = state.parentWatcher.close().catch(() => undefined)
+    state.parentWatcher = null
+    state.watchedParentDirs = []
+    closePromise = Promise.all([closePromise, parentClose]).then(
+      () => undefined,
+    )
+  }
+  if (state.reloadTimer) {
+    clearTimeout(state.reloadTimer)
+    state.reloadTimer = null
+  }
+  state.pendingChangedPaths.clear()
+  state.skillsChanged.clear()
+  state.sessionRef = null
+  // Keep skillInvalidation listeners across dispose only if re-init expected;
+  // densable D clears l (skillsChanged) and c() (U7 unsub), not U7 itself.
+  return closePromise
 }
 
 /**
  * densable XoS D — dispose
  */
 export function dispose(): Promise<void> {
-  disposed = true
-  if (unregisterCleanup) {
-    unregisterCleanup()
-    unregisterCleanup = null
-  }
-  if (unregisterDynamicSkills) {
-    unregisterDynamicSkills()
-    unregisterDynamicSkills = null
-  }
-  if (unregisterInvalidation) {
-    unregisterInvalidation()
-    unregisterInvalidation = null
-  }
-  if (idleCheckTimer) {
-    clearInterval(idleCheckTimer)
-    idleCheckTimer = null
-  }
-  if (missingDirTimer) {
-    clearTimeout(missingDirTimer)
-    missingDirTimer = null
-  }
-  missingDirs.clear()
-  watcherHealthy = false
-  let closePromise: Promise<void> = Promise.resolve()
-  if (watcher) {
-    closePromise = watcher.close()
-    watcher = null
-  }
-  if (parentWatcher) {
-    const parentClose = parentWatcher.close().catch(() => undefined)
-    parentWatcher = null
-    watchedParentDirs = []
-    closePromise = Promise.all([closePromise, parentClose]).then(
-      () => undefined,
-    )
-  }
-  if (reloadTimer) {
-    clearTimeout(reloadTimer)
-    reloadTimer = null
-  }
-  pendingChangedPaths.clear()
-  skillsChanged.clear()
-  // Keep skillInvalidation listeners across dispose only if re-init expected;
-  // densable D clears l (skillsChanged) and c() (U7 unsub), not U7 itself.
-  return closePromise
+  return disposeState(getHostSkillChangeDetectorState())
 }
 
-export const subscribe = skillsChanged.subscribe
+export function subscribe(listener: () => void): () => void {
+  return getHostSkillChangeDetectorState().skillsChanged.subscribe(listener)
+}
 
 /**
  * Official 2.1.326 #129: return all candidate skill/command/agent directories
  * (whether or not they currently exist on disk).
  */
 export function getCandidateSkillDirs(): string[] {
+  const cwd = resolveDetectorCwd()
   const candidates: string[] = []
   const pushResolved = (p: string | undefined, shouldResolve = false) => {
     if (!p) return
-    candidates.push(shouldResolve ? platformPath.resolve(p) : p)
+    candidates.push(shouldResolve ? platformPath.resolve(cwd, p) : p)
   }
 
   pushResolved(getSkillsPath('userSettings', 'skills'))
@@ -543,15 +662,20 @@ export function getCandidateSkillDirs(): string[] {
  */
 export async function getWatchableParentDirs(
   candidates: readonly string[] = getCandidateSkillDirs(),
-  existingWatched: readonly string[] = watchedPaths,
+  existingWatched: readonly string[] = getHostSkillChangeDetectorState()
+    .watchedPaths,
 ): Promise<{ missingTargets: string[]; parentDirs: string[] }> {
-  const dirExists = testOverrides?.dirExists ?? defaultDirExists
-  const watchedSet = new Set(existingWatched.map(p => platformPath.resolve(p)))
+  const state = getHostSkillChangeDetectorState()
+  const cwd = resolveDetectorCwd()
+  const dirExists = state.testOverrides?.dirExists ?? defaultDirExists
+  const watchedSet = new Set(
+    existingWatched.map(p => platformPath.resolve(cwd, p)),
+  )
   const missingTargets: string[] = []
   const parentDirs: string[] = []
 
   for (const target of candidates) {
-    const resolvedTarget = platformPath.resolve(target)
+    const resolvedTarget = platformPath.resolve(cwd, target)
     if (watchedSet.has(resolvedTarget)) continue
     if (await dirExists(resolvedTarget)) continue
     missingTargets.push(resolvedTarget)
@@ -575,24 +699,31 @@ export async function getWatchableParentDirs(
   }
 }
 
-async function refreshParentWatcher(interval: number): Promise<void> {
-  if (disposed) return
+async function refreshParentWatcher(
+  state: HostSkillChangeDetectorState,
+  interval: number,
+): Promise<void> {
+  if (state.disposed) return
+  captureRootSessionRef(state)
   const { missingTargets, parentDirs } = await getWatchableParentDirs()
-  if (disposed) return
+  if (state.disposed) return
 
   const sameParents =
-    parentDirs.length === watchedParentDirs.length &&
-    parentDirs.every((d, idx) => d === watchedParentDirs[idx])
-  if (sameParents && (parentDirs.length === 0 || parentWatcher !== null)) {
+    parentDirs.length === state.watchedParentDirs.length &&
+    parentDirs.every((d, idx) => d === state.watchedParentDirs[idx])
+  if (
+    sameParents &&
+    (parentDirs.length === 0 || state.parentWatcher !== null)
+  ) {
     return
   }
 
-  if (parentWatcher) {
-    const old = parentWatcher
-    parentWatcher = null
+  if (state.parentWatcher) {
+    const old = state.parentWatcher
+    state.parentWatcher = null
     void old.close().catch(() => undefined)
   }
-  watchedParentDirs = parentDirs
+  state.watchedParentDirs = parentDirs
   if (parentDirs.length === 0 || missingTargets.length === 0) {
     return
   }
@@ -648,16 +779,20 @@ async function refreshParentWatcher(interval: number): Promise<void> {
 
   const onParentActivity = (changedPath: string) => {
     if (!isRelevantParentEvent(changedPath)) return
-    void discoverNewlyCreatedSkillDirs(changedPath)
+    runInStateSession(state, () => {
+      void discoverNewlyCreatedSkillDirs(changedPath)
+    })
   }
   pw.on('addDir', onParentActivity)
   pw.on('add', onParentActivity)
   pw.on('error', (err: unknown) => {
-    logForDebugging(`[skills] parent watcher error: ${errorMessage(err)}`, {
-      level: 'warn',
+    runInStateSession(state, () => {
+      logForDebugging(`[skills] parent watcher error: ${errorMessage(err)}`, {
+        level: 'warn',
+      })
     })
   })
-  parentWatcher = pw
+  state.parentWatcher = pw
 }
 
 /**
@@ -668,45 +803,48 @@ async function refreshParentWatcher(interval: number): Promise<void> {
 export async function discoverNewlyCreatedSkillDirs(
   triggerPath?: string,
 ): Promise<string[]> {
-  if (!initialized || disposed) return []
+  const state = getHostSkillChangeDetectorState()
+  if (!state.initialized || state.disposed) return []
   const nextRaw = await getWatchablePaths()
-  if (disposed) return []
+  if (state.disposed) return []
   const nextFiltered = isPluginDirWatchDisabledByEnv()
     ? nextRaw.filter(p => !p.endsWith(`${platformPath.sep}skills`))
     : filterWatchedModDirs(nextRaw, { skillModDirs: nextRaw })
-  const existingSet = new Set(watchedPaths.map(p => platformPath.resolve(p)))
+  const existingSet = new Set(
+    state.watchedPaths.map(p => platformPath.resolve(p)),
+  )
   const newlyFound = nextFiltered.filter(
     p => !existingSet.has(platformPath.resolve(p)),
   )
   if (newlyFound.length === 0) {
     // Still refresh parent watcher in case `.claude/` itself was just created
     if (triggerPath) {
-      await refreshParentWatcher(getActivePollInterval())
+      await refreshParentWatcher(state, getActivePollInterval(state))
     }
     return []
   }
 
-  const generation = ++watchGeneration
-  watchedPaths = uniqueWatchPaths([...watchedPaths, ...newlyFound])
+  const generation = ++state.watchGeneration
+  state.watchedPaths = uniqueWatchPaths([...state.watchedPaths, ...newlyFound])
   logForDebugging(
     `[skills] now watching newly created skill/command directories: ${newlyFound.join(', ')}`,
   )
-  if (watcher) {
-    const old = watcher
+  if (state.watcher) {
+    const old = state.watcher
     void old.close().catch(() => undefined)
   }
-  const interval = getActivePollInterval()
-  watcher = createWatcher(interval)
-  const attached = watcher
+  const interval = getActivePollInterval(state)
+  state.watcher = createWatcher(state, interval)
+  const attached = state.watcher
   const ready = new Promise<void>(resolve => {
     attached.once('ready', () => resolve())
   })
   await Promise.race([ready, sleep(2000, undefined, { unref: true })])
-  if (disposed || generation !== watchGeneration) return newlyFound
+  if (state.disposed || generation !== state.watchGeneration) return newlyFound
 
-  await refreshParentWatcher(interval)
+  await refreshParentWatcher(state, interval)
   for (const dir of newlyFound) {
-    handleChange(triggerPath ?? dir)
+    handleChange(state, triggerPath ?? dir)
   }
   return newlyFound
 }
@@ -716,6 +854,7 @@ export async function discoverNewlyCreatedSkillDirs(
  */
 async function getWatchablePaths(): Promise<string[]> {
   const fs = getFsImplementation()
+  const cwd = resolveDetectorCwd()
   const paths: string[] = []
 
   async function tryPush(
@@ -724,7 +863,7 @@ async function getWatchablePaths(): Promise<string[]> {
   ): Promise<void> {
     if (!path) return
     try {
-      const absolute = resolve ? platformPath.resolve(path) : path
+      const absolute = resolve ? platformPath.resolve(cwd, path) : path
       await fs.stat(absolute)
       paths.push(absolute)
     } catch {
@@ -750,13 +889,13 @@ async function getWatchablePaths(): Promise<string[]> {
   return paths
 }
 
-function handleChange(path: string): void {
+function handleChange(state: HostSkillChangeDetectorState, path: string): void {
   logForDebugging(`Detected skill change: ${path}`)
   logEvent('tengu_skill_file_changed', {
     source:
       'chokidar' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
-  scheduleReload(path)
+  scheduleReload(state, path)
 }
 
 /**
@@ -768,111 +907,123 @@ function handleChange(path: string): void {
  *   $2(); poe(); if unchanged log skip re-announce else oNs(delta)+update fp;
  *   emit always (except idle-wake+unchanged early return).
  */
-function scheduleReload(changedPath: string): void {
-  pendingChangedPaths.add(changedPath)
-  if (reloadTimer) clearTimeout(reloadTimer)
-  reloadTimer = setTimeout(async () => {
-    reloadTimer = null
-    const paths = [...pendingChangedPaths]
-    pendingChangedPaths.clear()
+async function runScheduledReload(
+  state: HostSkillChangeDetectorState,
+): Promise<void> {
+  state.reloadTimer = null
+  const paths = [...state.pendingChangedPaths]
+  state.pendingChangedPaths.clear()
 
-    const idleWakeOnly =
-      paths.length === 1 && paths[0] === SKILL_WATCHER_IDLE_WAKE
-    if (!idleWakeOnly) {
-      const representative =
-        paths.find(p => p !== SKILL_WATCHER_IDLE_WAKE) ?? paths[0]!
-      const results = await executeConfigChangeHooks('skills', representative)
-      if (hasBlockingResult(results)) {
-        logForDebugging(
-          `ConfigChange hook blocked skill reload (${paths.length} paths)`,
-        )
-        return
-      }
-    }
-
-    // densable xLt — clear skill caches + command memo (ALt) before fingerprint
-    // so JoS/getCommands re-reads disk rather than returning stale memoized skills.
-    clearSkillCaches()
-    clearCommandMemoizationCaches()
-
-    const getFingerprint =
-      testOverrides?.getFingerprint ?? defaultGetFingerprint
-    const next = await getFingerprint().catch(() => null)
-
-    if (next === null) {
-      clearCommandsCache()
-      // densable poe ≈ agent cache clear + sent-skill reset
-      clearAgentDefinitionsCache()
-      resetSentSkillNames()
-      skillsChanged.emit()
+  const idleWakeOnly =
+    paths.length === 1 && paths[0] === SKILL_WATCHER_IDLE_WAKE
+  if (!idleWakeOnly) {
+    const representative =
+      paths.find(p => p !== SKILL_WATCHER_IDLE_WAKE) ?? paths[0]!
+    const results = await executeConfigChangeHooks('skills', representative)
+    if (hasBlockingResult(results)) {
+      logForDebugging(
+        `ConfigChange hook blocked skill reload (${paths.length} paths)`,
+      )
       return
     }
+  }
 
-    const unchanged =
-      lastFingerprint !== null &&
-      next.size === lastFingerprint.size &&
-      [...lastFingerprint].every(([k, v]) => next.get(k) === v)
+  // densable xLt — clear skill caches + command memo (ALt) before fingerprint
+  // so JoS/getCommands re-reads disk rather than returning stale memoized skills.
+  clearSkillCaches()
+  clearCommandMemoizationCaches()
 
-    // densable: if (q && F) { poe(); return }
-    if (unchanged && idleWakeOnly) {
-      clearAgentDefinitionsCache()
-      resetSentSkillNames()
-      return
-    }
+  const getFingerprint =
+    state.testOverrides?.getFingerprint ?? defaultGetFingerprint
+  const next = await getFingerprint().catch(() => null)
 
-    // densable always $2() + poe() + hZc/`ke` here, then maybe skip re-announce
+  if (next === null) {
     clearCommandsCache()
+    // densable poe ≈ agent cache clear + sent-skill reset
     clearAgentDefinitionsCache()
-    await refreshMovedDirectorySkills().catch(e => {
-      logForDebugging(
-        `[skills] re-reading the moved directory's skills failed: ${errorMessage(e)}`,
-        { level: 'warn' },
-      )
-    })
+    resetSentSkillNames()
+    state.skillsChanged.emit()
+    return
+  }
 
-    if (unchanged) {
-      logForDebugging(
-        `[skills] ${paths.length} fs event(s) but skill list unchanged — skipping re-announce`,
-      )
-      resetSentSkillNames()
-    } else {
-      if (lastFingerprint !== null) {
-        const changedNames = [...lastFingerprint]
-          .filter(([k, v]) => next.get(k) !== v)
-          .map(([k]) => k)
-        if (changedNames.length > 0) {
-          forgetSentSkillNames(changedNames)
-        } else {
-          resetSentSkillNames()
-        }
+  const unchanged =
+    state.lastFingerprint !== null &&
+    next.size === state.lastFingerprint.size &&
+    [...state.lastFingerprint].every(([k, v]) => next.get(k) === v)
+
+  // densable: if (q && F) { poe(); return }
+  if (unchanged && idleWakeOnly) {
+    clearAgentDefinitionsCache()
+    resetSentSkillNames()
+    return
+  }
+
+  // densable always $2() + poe() + hZc/`ke` here, then maybe skip re-announce
+  clearCommandsCache()
+  clearAgentDefinitionsCache()
+  await refreshMovedDirectorySkills().catch(e => {
+    logForDebugging(
+      `[skills] re-reading the moved directory's skills failed: ${errorMessage(e)}`,
+      { level: 'warn' },
+    )
+  })
+
+  if (unchanged) {
+    logForDebugging(
+      `[skills] ${paths.length} fs event(s) but skill list unchanged — skipping re-announce`,
+    )
+    resetSentSkillNames()
+  } else {
+    if (state.lastFingerprint !== null) {
+      const changedNames = [...state.lastFingerprint]
+        .filter(([k, v]) => next.get(k) !== v)
+        .map(([k]) => k)
+      if (changedNames.length > 0) {
+        forgetSentSkillNames(changedNames)
       } else {
         resetSentSkillNames()
       }
-      lastFingerprint = next
+    } else {
+      resetSentSkillNames()
     }
-    skillsChanged.emit()
-  }, testOverrides?.reloadDebounce ?? RELOAD_DEBOUNCE_MS)
+    state.lastFingerprint = next
+  }
+  state.skillsChanged.emit()
+}
+
+function scheduleReload(
+  state: HostSkillChangeDetectorState,
+  changedPath: string,
+): void {
+  captureRootSessionRef(state)
+  state.pendingChangedPaths.add(changedPath)
+  if (state.reloadTimer) clearTimeout(state.reloadTimer)
+  state.reloadTimer = setTimeout(() => {
+    runInStateSession(state, () => {
+      void runScheduledReload(state)
+    })
+  }, state.testOverrides?.reloadDebounce ?? RELOAD_DEBOUNCE_MS)
 }
 
 /**
  * densable XoS._checkIdleTransitionForTest
  */
 export function _checkIdleTransitionForTest(): void {
-  checkIdleTransition()
+  checkIdleTransition(getHostSkillChangeDetectorState())
 }
 
 /**
  * #1863 test helper: simulate an `unlinkDir` event on a watched directory.
  */
 export function _simulateUnlinkDirForTest(dirPath: string): boolean {
-  return handleWatchedDirUnlinked(dirPath)
+  return handleWatchedDirUnlinked(getHostSkillChangeDetectorState(), dirPath)
 }
 
 /**
  * #1863 test helper: inspect missingDirs state.
  */
 export function _getMissingDirsForTest(): Map<string, boolean> {
-  return new Map(missingDirs)
+  return new Map(getHostSkillChangeDetectorState().missingDirs)
 }
 
 /**
@@ -881,38 +1032,53 @@ export function _getMissingDirsForTest(): Map<string, boolean> {
 export async function resetForTesting(
   overrides?: SkillChangeDetectorDeps,
 ): Promise<void> {
-  if (watcher) {
-    await watcher.close()
-    watcher = null
+  const state = getHostSkillChangeDetectorState()
+  if (state.unregisterCleanup) {
+    state.unregisterCleanup()
+    state.unregisterCleanup = null
   }
-  if (parentWatcher) {
-    await parentWatcher.close()
-    parentWatcher = null
+  if (state.unregisterDynamicSkills) {
+    state.unregisterDynamicSkills()
+    state.unregisterDynamicSkills = null
   }
-  watchedParentDirs = []
-  if (reloadTimer) {
-    clearTimeout(reloadTimer)
-    reloadTimer = null
+  state.dynamicSkillsCallbackRegistered = false
+  if (state.unregisterInvalidation) {
+    state.unregisterInvalidation()
+    state.unregisterInvalidation = null
   }
-  if (idleCheckTimer) {
-    clearInterval(idleCheckTimer)
-    idleCheckTimer = null
+  if (state.watcher) {
+    await state.watcher.close()
+    state.watcher = null
   }
-  if (missingDirTimer) {
-    clearTimeout(missingDirTimer)
-    missingDirTimer = null
+  if (state.parentWatcher) {
+    await state.parentWatcher.close()
+    state.parentWatcher = null
   }
-  missingDirs.clear()
-  watcherHealthy = false
-  pendingChangedPaths.clear()
-  skillsChanged.clear()
-  lastFingerprint = null
-  watchedPaths = []
-  watchGeneration = 0
-  isIdle = false
-  initialized = false
-  disposed = false
-  testOverrides = overrides ?? null
+  state.watchedParentDirs = []
+  if (state.reloadTimer) {
+    clearTimeout(state.reloadTimer)
+    state.reloadTimer = null
+  }
+  if (state.idleCheckTimer) {
+    clearInterval(state.idleCheckTimer)
+    state.idleCheckTimer = null
+  }
+  if (state.missingDirTimer) {
+    clearTimeout(state.missingDirTimer)
+    state.missingDirTimer = null
+  }
+  state.missingDirs.clear()
+  state.watcherHealthy = false
+  state.pendingChangedPaths.clear()
+  state.skillsChanged.clear()
+  state.lastFingerprint = null
+  state.watchedPaths = []
+  state.watchGeneration = 0
+  state.isIdle = false
+  state.initialized = false
+  state.disposed = false
+  state.sessionRef = null
+  state.testOverrides = overrides ?? null
 }
 
 export const skillChangeDetector = {

@@ -1,8 +1,21 @@
 import { getActiveTimeCounter as getActiveTimeCounterImpl } from '../bootstrap/state.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 type ActivityManagerOptions = {
   getNow?: () => number
   getActiveTimeCounter?: typeof getActiveTimeCounterImpl
+}
+
+type ActivityManagerHostState = {
+  instance: ActivityManager | null
+}
+
+const activityManagerHostSlot = new HostSlot<ActivityManagerHostState>(() => ({
+  instance: null,
+}))
+
+function getActivityManagerHostState(): ActivityManagerHostState {
+  return activityManagerHostSlot.of(getBootstrapSessionHost())
 }
 
 /**
@@ -23,8 +36,6 @@ export class ActivityManager {
   private readonly getNow: () => number
   private readonly getActiveTimeCounter: typeof getActiveTimeCounterImpl
 
-  private static instance: ActivityManager | null = null
-
   constructor(options?: ActivityManagerOptions) {
     this.getNow = options?.getNow ?? (() => Date.now())
     this.getActiveTimeCounter =
@@ -33,25 +44,27 @@ export class ActivityManager {
   }
 
   static getInstance(): ActivityManager {
-    if (!ActivityManager.instance) {
-      ActivityManager.instance = new ActivityManager()
+    const slot = getActivityManagerHostState()
+    if (!slot.instance) {
+      slot.instance = new ActivityManager()
     }
-    return ActivityManager.instance
+    return slot.instance
   }
 
   /**
    * Reset the singleton instance (for testing purposes)
    */
   static resetInstance(): void {
-    ActivityManager.instance = null
+    getActivityManagerHostState().instance = null
   }
 
   /**
    * Create a new instance with custom options (for testing purposes)
    */
   static createInstance(options?: ActivityManagerOptions): ActivityManager {
-    ActivityManager.instance = new ActivityManager(options)
-    return ActivityManager.instance
+    const slot = getActivityManagerHostState()
+    slot.instance = new ActivityManager(options)
+    return slot.instance
   }
 
   /**
@@ -160,5 +173,30 @@ export class ActivityManager {
   }
 }
 
-// Export singleton instance
-export const activityManager = ActivityManager.getInstance()
+// Export per-host singleton proxy delegating to the active SessionHost's instance
+export const activityManager: ActivityManager = new Proxy(
+  new ActivityManager(),
+  {
+    get(_target, prop, _receiver) {
+      const current = ActivityManager.getInstance()
+      const value = Reflect.get(current, prop, current)
+      return typeof value === 'function' ? value.bind(current) : value
+    },
+    set(_target, prop, value, _receiver) {
+      const current = ActivityManager.getInstance()
+      return Reflect.set(current, prop, value, current)
+    },
+    has(_target, prop) {
+      return Reflect.has(ActivityManager.getInstance(), prop)
+    },
+    ownKeys() {
+      return Reflect.ownKeys(ActivityManager.getInstance())
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      return Reflect.getOwnPropertyDescriptor(
+        ActivityManager.getInstance(),
+        prop,
+      )
+    },
+  },
+)

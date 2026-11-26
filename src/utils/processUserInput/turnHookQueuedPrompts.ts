@@ -5,7 +5,13 @@
  * is turn.start | turn.complete. Never export densable ids.
  */
 
-const marked = new Set<string>()
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
+
+const markedSessionSlot = new RootSessionSlot<Set<string>>(() => new Set())
+
+function getMarkedTurnHookQueuedPrompts(): Set<string> {
+  return markedSessionSlot.of(getBootstrapSession())
+}
 
 /** densable `Noe`. */
 export function markTurnHookQueuedPrompt(
@@ -14,6 +20,7 @@ export function markTurnHookQueuedPrompt(
   queue: readonly { uuid?: string }[],
 ): void {
   if (rootEvent !== 'turn.start' && rootEvent !== 'turn.complete') return
+  const marked = getMarkedTurnHookQueuedPrompts()
   const live = new Set(
     queue
       .map(command => command.uuid)
@@ -27,7 +34,7 @@ export function markTurnHookQueuedPrompt(
 
 /** densable `tdo`. */
 export function isTurnHookQueuedPrompt(uuid?: string): boolean {
-  return uuid !== undefined && marked.has(uuid)
+  return uuid !== undefined && getMarkedTurnHookQueuedPrompts().has(uuid)
 }
 
 /** densable `vrs` — wait until the uuid is in the command queue. */
@@ -50,5 +57,5 @@ export function waitForTurnHookQueuedPrompt(uuid: string): Promise<void> {
 
 /** Test / queue-reset cleanup. densable `U5e.clear`. */
 export function resetTurnHookQueuedPrompts(): void {
-  marked.clear()
+  getMarkedTurnHookQueuedPrompts().clear()
 }

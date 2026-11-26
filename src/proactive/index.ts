@@ -8,20 +8,36 @@
  * control its own wake-up cadence.
  */
 
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionHost.js'
+
 // ---------------------------------------------------------------------------
-// State
+// State (per root session)
 // ---------------------------------------------------------------------------
 
-let active = false
-let paused = false
-let contextBlocked = false
-let nextTickAt: number | null = null
-let activationSource: string | undefined
+type ProactiveSessionState = {
+  active: boolean
+  paused: boolean
+  contextBlocked: boolean
+  nextTickAt: number | null
+  activationSource: string | undefined
+  listeners: Set<() => void>
+}
 
-const listeners = new Set<() => void>()
+const proactiveStateSlot = new RootSessionSlot<ProactiveSessionState>(() => ({
+  active: false,
+  paused: false,
+  contextBlocked: false,
+  nextTickAt: null,
+  activationSource: undefined,
+  listeners: new Set(),
+}))
 
-function notify(): void {
-  for (const cb of listeners) {
+function getProactiveState(): ProactiveSessionState {
+  return proactiveStateSlot.of(getBootstrapSession())
+}
+
+function notify(state: ProactiveSessionState): void {
+  for (const cb of state.listeners) {
     try {
       cb()
     } catch {
@@ -35,43 +51,47 @@ function notify(): void {
 // ---------------------------------------------------------------------------
 
 export function isProactiveActive(): boolean {
-  return active
+  return getProactiveState().active
 }
 
 export function activateProactive(source?: string): void {
-  if (active) return
-  active = true
-  paused = false
-  contextBlocked = false
-  activationSource = source
-  notify()
+  const state = getProactiveState()
+  if (state.active) return
+  state.active = true
+  state.paused = false
+  state.contextBlocked = false
+  state.activationSource = source
+  notify(state)
 }
 
 export function deactivateProactive(): void {
-  if (!active) return
-  active = false
-  paused = false
-  contextBlocked = false
-  nextTickAt = null
-  activationSource = undefined
-  notify()
+  const state = getProactiveState()
+  if (!state.active) return
+  state.active = false
+  state.paused = false
+  state.contextBlocked = false
+  state.nextTickAt = null
+  state.activationSource = undefined
+  notify(state)
 }
 
 export function isProactivePaused(): boolean {
-  return paused
+  return getProactiveState().paused
 }
 
 export function pauseProactive(): void {
-  if (!active || paused) return
-  paused = true
-  nextTickAt = null
-  notify()
+  const state = getProactiveState()
+  if (!state.active || state.paused) return
+  state.paused = true
+  state.nextTickAt = null
+  notify(state)
 }
 
 export function resumeProactive(): void {
-  if (!active || !paused) return
-  paused = false
-  notify()
+  const state = getProactiveState()
+  if (!state.active || !state.paused) return
+  state.paused = false
+  notify(state)
 }
 
 /**
@@ -81,16 +101,17 @@ export function resumeProactive(): void {
  * Cleared on successful response or after compaction.
  */
 export function setContextBlocked(blocked: boolean): void {
-  if (contextBlocked === blocked) return
-  contextBlocked = blocked
+  const state = getProactiveState()
+  if (state.contextBlocked === blocked) return
+  state.contextBlocked = blocked
   if (blocked) {
-    nextTickAt = null
+    state.nextTickAt = null
   }
-  notify()
+  notify(state)
 }
 
 export function isContextBlocked(): boolean {
-  return contextBlocked
+  return getProactiveState().contextBlocked
 }
 
 /**
@@ -98,8 +119,9 @@ export function isContextBlocked(): boolean {
  * Called by useProactive after submitting a tick.
  */
 export function setNextTickAt(ts: number | null): void {
-  nextTickAt = ts
-  notify()
+  const state = getProactiveState()
+  state.nextTickAt = ts
+  notify(state)
 }
 
 /**
@@ -107,12 +129,13 @@ export function setNextTickAt(ts: number | null): void {
  * Used by PromptInputFooterLeftSide to render a countdown.
  */
 export function getNextTickAt(): number | null {
-  if (!active || paused || contextBlocked) return null
-  return nextTickAt
+  const state = getProactiveState()
+  if (!state.active || state.paused || state.contextBlocked) return null
+  return state.nextTickAt
 }
 
 export function getActivationSource(): string | undefined {
-  return activationSource
+  return getProactiveState().activationSource
 }
 
 /**
@@ -120,6 +143,7 @@ export function getActivationSource(): string | undefined {
  * Returns an unsubscribe function.
  */
 export function subscribeToProactiveChanges(cb: () => void): () => void {
+  const { listeners } = getProactiveState()
   listeners.add(cb)
   return () => {
     listeners.delete(cb)
@@ -131,5 +155,6 @@ export function subscribeToProactiveChanges(cb: () => void): () => void {
  * Convenience predicate combining all blocking conditions.
  */
 export function shouldTick(): boolean {
-  return active && !paused && !contextBlocked
+  const state = getProactiveState()
+  return state.active && !state.paused && !state.contextBlocked
 }

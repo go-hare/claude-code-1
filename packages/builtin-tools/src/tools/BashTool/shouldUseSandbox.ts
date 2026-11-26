@@ -4,6 +4,12 @@ import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { getPlatform } from 'src/utils/platform.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+} from 'src/utils/sessionHost.js'
 import { isSettingSourceEnabled } from 'src/utils/settings/constants.js'
 import {
   getSettings_DEPRECATED,
@@ -692,19 +698,25 @@ export class SandboxPolicyRefusalError extends Error {
  * Official 2.1.326 #304 (`Sp().unsandboxedCommandsDisabled` @344406706):
  * When `claude mcp serve` runs, unsandboxed commands (including
  * `sandbox.excludedCommands` and `dangerouslyDisableSandbox`) are disabled.
+ * Official 2.1.331: scoped per `SessionHost` via `HostSlot`.
  */
-let unsandboxedCommandsDisabledForSession = false
+const unsandboxedCommandsDisabledByHost = new HostSlot<{ disabled: boolean }>(
+  () => ({ disabled: false }),
+)
 
 export function disableUnsandboxedCommandsForMcpServe(): void {
-  unsandboxedCommandsDisabledForSession = true
+  unsandboxedCommandsDisabledByHost.of(getBootstrapSessionHost()).disabled =
+    true
 }
 
 export function isUnsandboxedCommandsDisabled(): boolean {
-  return unsandboxedCommandsDisabledForSession
+  return unsandboxedCommandsDisabledByHost.of(getBootstrapSessionHost())
+    .disabled
 }
 
 export function _resetUnsandboxedCommandsDisabledForTesting(): void {
-  unsandboxedCommandsDisabledForSession = false
+  unsandboxedCommandsDisabledByHost.of(getBootstrapSessionHost()).disabled =
+    false
 }
 
 /**
@@ -731,10 +743,17 @@ type SandboxCheckRecord = {
   rewriteNoted?: SandboxCheckEntry
 }
 
-const sandboxCheckRecordsByToolUseId = new Map<string, SandboxCheckRecord>()
+const sandboxCheckRecordsBySession = new RootSessionSlot(
+  () => new Map<string, SandboxCheckRecord>(),
+)
 const MAX_SANDBOX_CHECK_RECORDS = 512
 
+function getSandboxCheckRecords(): Map<string, SandboxCheckRecord> {
+  return sandboxCheckRecordsBySession.of(getBootstrapSession())
+}
+
 function ensureSandboxRecordSlot(toolUseId: string): SandboxCheckRecord {
+  const sandboxCheckRecordsByToolUseId = getSandboxCheckRecords()
   const existing = sandboxCheckRecordsByToolUseId.get(toolUseId)
   if (existing) return existing
   if (sandboxCheckRecordsByToolUseId.size >= MAX_SANDBOX_CHECK_RECORDS) {
@@ -809,7 +828,7 @@ export function shouldKeepRewrittenCommandInSandbox(
   finalInput: Partial<SandboxInput>,
 ): boolean {
   if (!toolUseId) return false
-  const record = sandboxCheckRecordsByToolUseId.get(toolUseId)
+  const record = getSandboxCheckRecords().get(toolUseId)
   if (!record) return false
   const rewritten = record.rewriteNoted
   if (
@@ -832,11 +851,11 @@ export function shouldKeepRewrittenCommandInSandbox(
 }
 
 export function clearSandboxStateAtCheck(toolUseId: string | undefined): void {
-  if (toolUseId) sandboxCheckRecordsByToolUseId.delete(toolUseId)
+  if (toolUseId) getSandboxCheckRecords().delete(toolUseId)
 }
 
 export function _resetSandboxCheckRecordsForTesting(): void {
-  sandboxCheckRecordsByToolUseId.clear()
+  getSandboxCheckRecords().clear()
 }
 
 export type ShouldUseSandboxOptions = {
@@ -867,7 +886,7 @@ export function shouldUseSandbox(
 
   const disableUnsandboxed =
     options?.disableUnsandboxedCommands === true ||
-    unsandboxedCommandsDisabledForSession ||
+    isUnsandboxedCommandsDisabled() ||
     isEnvTruthy(process.env.CLAUDE_CODE_EVAL_CONFINED)
 
   // Don't sandbox if explicitly overridden AND unsandboxed commands are allowed by policy

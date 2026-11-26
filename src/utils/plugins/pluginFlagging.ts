@@ -18,6 +18,7 @@ import { join } from 'path'
 import { logForDebugging } from '../debug.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { logError } from '../log.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import { getPluginsDirectory } from './pluginDirectories.js'
 
@@ -30,8 +31,16 @@ export type FlaggedPlugin = {
 
 const SEEN_EXPIRY_MS = 48 * 60 * 60 * 1000 // 48 hours
 
-// Module-level cache — populated by loadFlaggedPlugins(), updated by writes.
-let cache: Record<string, FlaggedPlugin> | null = null
+// Host-scoped cache — populated by loadFlaggedPlugins(), updated by writes.
+const hostPluginFlaggingSlot = new HostSlot<{
+  cache: Record<string, FlaggedPlugin> | null
+}>(() => ({
+  cache: null,
+}))
+
+function flaggingState(): { cache: Record<string, FlaggedPlugin> | null } {
+  return hostPluginFlaggingSlot.of(getBootstrapSessionHost())
+}
 
 function getFlaggedPluginsPath(): string {
   return join(getPluginsDirectory(), FLAGGED_PLUGINS_FILENAME)
@@ -85,6 +94,7 @@ async function readFromDisk(): Promise<Record<string, FlaggedPlugin>> {
 
 async function writeToDisk(
   plugins: Record<string, FlaggedPlugin>,
+  state: { cache: Record<string, FlaggedPlugin> | null } = flaggingState(),
 ): Promise<void> {
   const filePath = getFlaggedPluginsPath()
   const tempPath = `${filePath}.${randomBytes(8).toString('hex')}.tmp`
@@ -98,7 +108,7 @@ async function writeToDisk(
       mode: 0o600,
     })
     await rename(tempPath, filePath)
-    cache = plugins
+    state.cache = plugins
   } catch (error) {
     logError(error)
     try {
@@ -115,6 +125,7 @@ async function writeToDisk(
  * meaningful data. Called by useManagePlugins during plugin refresh.
  */
 export async function loadFlaggedPlugins(): Promise<void> {
+  const state = flaggingState()
   const all = await readFromDisk()
   const now = Date.now()
   let changed = false
@@ -129,9 +140,9 @@ export async function loadFlaggedPlugins(): Promise<void> {
     }
   }
 
-  cache = all
+  state.cache = all
   if (changed) {
-    await writeToDisk(all)
+    await writeToDisk(all, state)
   }
 }
 
@@ -140,7 +151,7 @@ export async function loadFlaggedPlugins(): Promise<void> {
  * Returns an empty object if loadFlaggedPlugins() has not been called yet.
  */
 export function getFlaggedPlugins(): Record<string, FlaggedPlugin> {
-  return cache ?? {}
+  return flaggingState().cache ?? {}
 }
 
 /**
@@ -149,18 +160,19 @@ export function getFlaggedPlugins(): Record<string, FlaggedPlugin> {
  * @param pluginId "name@marketplace" format
  */
 export async function addFlaggedPlugin(pluginId: string): Promise<void> {
-  if (cache === null) {
-    cache = await readFromDisk()
+  const state = flaggingState()
+  if (state.cache === null) {
+    state.cache = await readFromDisk()
   }
 
   const updated = {
-    ...cache,
+    ...state.cache,
     [pluginId]: {
       flaggedAt: new Date().toISOString(),
     },
   }
 
-  await writeToDisk(updated)
+  await writeToDisk(updated, state)
   logForDebugging(`Flagged plugin: ${pluginId}`)
 }
 
@@ -172,13 +184,14 @@ export async function addFlaggedPlugin(pluginId: string): Promise<void> {
 export async function markFlaggedPluginsSeen(
   pluginIds: string[],
 ): Promise<void> {
-  if (cache === null) {
-    cache = await readFromDisk()
+  const state = flaggingState()
+  if (state.cache === null) {
+    state.cache = await readFromDisk()
   }
   const now = new Date().toISOString()
   let changed = false
 
-  const updated = { ...cache }
+  const updated = { ...state.cache }
   for (const id of pluginIds) {
     const entry = updated[id]
     if (entry && !entry.seenAt) {
@@ -188,7 +201,7 @@ export async function markFlaggedPluginsSeen(
   }
 
   if (changed) {
-    await writeToDisk(updated)
+    await writeToDisk(updated, state)
   }
 }
 
@@ -197,12 +210,13 @@ export async function markFlaggedPluginsSeen(
  * a flagged plugin notification in /plugins.
  */
 export async function removeFlaggedPlugin(pluginId: string): Promise<void> {
-  if (cache === null) {
-    cache = await readFromDisk()
+  const state = flaggingState()
+  if (state.cache === null) {
+    state.cache = await readFromDisk()
   }
-  if (!(pluginId in cache)) return
+  if (!(pluginId in state.cache)) return
 
-  const { [pluginId]: _, ...rest } = cache
-  cache = rest
-  await writeToDisk(rest)
+  const { [pluginId]: _, ...rest } = state.cache
+  state.cache = rest
+  await writeToDisk(rest, state)
 }

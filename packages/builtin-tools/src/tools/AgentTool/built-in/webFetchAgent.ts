@@ -3,6 +3,7 @@ import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { isPolicyAllowed } from 'src/services/policyLimits/index.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { TOOL_RESULTS_SUBDIR } from 'src/constants/toolResults.js'
 import { FILE_READ_TOOL_NAME } from '../../FileReadTool/constants.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../../SendMessageTool/constants.js'
@@ -201,29 +202,32 @@ function webFetchAgentRosterKind(): 'none' | 'coordinator' | 'default' {
  * Official `sAi` then `aAi`.
  * Env is `??` (any set string wins), not `isEnvTruthy`.
  */
-let cachedWebFetchAgentEnabled: boolean | undefined
+const webFetchAgentEnabledSlot = new RootSessionSlot<{
+  cached: boolean | undefined
+}>(() => ({ cached: undefined }))
 
 export function isWebFetchAgentEnabled(): boolean {
-  if (cachedWebFetchAgentEnabled !== undefined) {
-    return cachedWebFetchAgentEnabled
+  const slot = webFetchAgentEnabledSlot.of(getBootstrapSession())
+  if (slot.cached !== undefined) {
+    return slot.cached
   }
   const env = process.env.CLAUDE_CODE_WEB_FETCH_AGENT
   const gated =
     env ?? getFeatureValue_CACHED_MAY_BE_STALE('tengu_clever_orbit', false)
   // Official aAi: raw `V.CLAUDE_CODE_SIMPLE`, not isEnvTruthy.
   if (!gated || process.env.CLAUDE_CODE_SIMPLE) {
-    cachedWebFetchAgentEnabled = false
+    slot.cached = false
     return false
   }
   const enabled =
     isPolicyAllowed(ALLOW_WEB_FETCH_POLICY) &&
     webFetchAgentRosterKind() === 'default'
-  cachedWebFetchAgentEnabled = enabled
+  slot.cached = enabled
   return enabled
 }
 
 export function __resetWebFetchAgentEnabledForTests(): void {
-  cachedWebFetchAgentEnabled = undefined
+  webFetchAgentEnabledSlot.of(getBootstrapSession()).cached = undefined
 }
 
 /** Official `_hS`. */

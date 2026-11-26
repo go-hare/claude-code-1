@@ -18,6 +18,7 @@ import { getFsImplementation } from '../fsOperations.js'
 import { logError } from '../log.js'
 import { getPlatform } from '../platform.js'
 import { ripgrepCommand } from '../ripgrep.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { subprocessEnv } from '../subprocessEnv.js'
 import { windowsPathToPosixPath } from '../windowsPaths.js'
 import { quote } from './shellQuote.js'
@@ -109,14 +110,29 @@ export function parseShellExports(stdout: string): Map<string, string> {
   return result
 }
 
-let capturedShellExports: Record<string, string> | undefined
+type CapturedShellExportsSlot = {
+  exports: Record<string, string> | undefined
+}
+
+const capturedShellExportsByHost = new HostSlot<CapturedShellExportsSlot>(
+  () => ({
+    exports: undefined,
+  }),
+)
+
+function getCapturedShellExportsSlot(): CapturedShellExportsSlot {
+  return capturedShellExportsByHost.of(getBootstrapSessionHost())
+}
 
 export function getCapturedShellExports(): Record<string, string> | undefined {
-  return capturedShellExports
+  return capturedShellExportsByHost.peek(getBootstrapSessionHost())?.exports
 }
 
 export function clearCapturedShellExportsForTesting(): void {
-  capturedShellExports = undefined
+  const slot = capturedShellExportsByHost.peek(getBootstrapSessionHost())
+  if (slot) {
+    slot.exports = undefined
+  }
 }
 
 function isDesktopNonWindowsClient(): boolean {
@@ -825,6 +841,9 @@ export const createAndSaveSnapshot = async (
       await mkdir(snapshotsDir, { recursive: true })
 
       const captureShellExports = isDesktopNonWindowsClient()
+      const shellExportsSlot = captureShellExports
+        ? getCapturedShellExportsSlot()
+        : undefined
       const snapshotScript = await getSnapshotScript(
         binShell,
         shellSnapshotPath,
@@ -942,8 +961,8 @@ export const createAndSaveSnapshot = async (
                 }
               })
 
-              if (captureShellExports) {
-                capturedShellExports ??= Object.fromEntries(
+              if (captureShellExports && shellExportsSlot) {
+                shellExportsSlot.exports ??= Object.fromEntries(
                   parseShellExports(stdout),
                 )
               }

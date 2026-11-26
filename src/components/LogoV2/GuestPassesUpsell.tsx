@@ -9,6 +9,7 @@ import {
   getCachedRemainingPasses,
 } from '../../services/api/referral.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
+import { getBootstrapSession, RootSessionSlot } from '../../utils/sessionRoot.js';
 
 function resetIfPassesRefreshed(): void {
   const remaining = getCachedRemainingPasses();
@@ -44,7 +45,9 @@ export function useShowGuestPassesUpsell(): boolean {
   return show;
 }
 
-let countedThisSession = false;
+const guestPassesNoticeBySession = new RootSessionSlot<{ countedThisSession: boolean }>(() => ({
+  countedThisSession: false,
+}));
 
 export function incrementGuestPassesSeenCount(): void {
   let newCount = 0;
@@ -74,11 +77,12 @@ export function GuestPassesUpsell(): React.ReactNode {
 }
 
 export function GuestPassesNotice(): React.ReactNode {
+  const [sessionState] = useState(() => guestPassesNoticeBySession.of(getBootstrapSession()));
   useEffect(() => {
-    if (countedThisSession) return;
-    countedThisSession = true;
+    if (sessionState.countedThisSession) return;
+    sessionState.countedThisSession = true;
     incrementGuestPassesSeenCount();
-  }, []);
+  }, [sessionState]);
   return (
     <Box>
       <GuestPassesUpsell />

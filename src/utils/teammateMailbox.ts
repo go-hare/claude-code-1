@@ -19,7 +19,7 @@ import {
   verify as cryptoVerify,
 } from 'crypto'
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { z } from 'zod/v4'
 import { TEAMMATE_MESSAGE_TAG } from '../constants/xml.js'
 import { PermissionModeSchema } from '../entrypoints/sdk/coreSchemas.js'
@@ -33,6 +33,7 @@ import { getErrnoCode } from './errors.js'
 import { lazySchema } from './lazySchema.js'
 import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
+import { getBootstrapSessionHost, sessionContextAls } from './sessionHost.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { BackendType } from './swarm/backends/types.js'
 import { TEAM_LEAD_NAME } from './swarm/constants.js'
@@ -59,32 +60,54 @@ const LOCK_OPTIONS = {
 }
 
 /**
+ * Process-global in-process mutex map keyed by normalized inbox path so
+ * concurrent hosts/sessions targeting the same inbox file serialize cleanly
+ * before acquiring the filesystem lockfile (`ELOCKED` / critical-section overlap).
+ */
+const inProcessMailboxQueues = new Map<string, Promise<void>>()
+
+function safeGetMailboxAlsStore() {
+  try {
+    return sessionContextAls?.getStore?.()
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Official 2.1.328 (#656): serialize in-process mailbox operations targeting the
  * same inbox path BEFORE acquiring the filesystem lockfile so starting several
  * in-process teammates at once does not contend on `ELOCKED` ("Lock file is
  * already being held").
  */
-const inProcessMailboxQueues = new Map<string, Promise<unknown>>()
-
 export async function withInProcessMailboxLock<T>(
   inboxPath: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const prev = inProcessMailboxQueues.get(inboxPath) ?? Promise.resolve()
+  const key = resolve(inboxPath)
+  const prev = inProcessMailboxQueues.get(key) ?? Promise.resolve()
   let releaseQueue: () => void = () => {}
-  const gate = new Promise<void>(resolve => {
-    releaseQueue = resolve
+  const gate = new Promise<void>(resolveGate => {
+    releaseQueue = resolveGate
   })
   const tail = prev.then(() => gate)
-  inProcessMailboxQueues.set(inboxPath, tail)
+  inProcessMailboxQueues.set(key, tail)
 
+  const callerStore = safeGetMailboxAlsStore()
   await prev
   try {
+    const currentStore = safeGetMailboxAlsStore()
+    if (currentStore !== callerStore && sessionContextAls) {
+      if (callerStore !== undefined) {
+        return await sessionContextAls.run(callerStore, fn)
+      }
+      return await sessionContextAls.exit(fn)
+    }
     return await fn()
   } finally {
     releaseQueue()
-    if (inProcessMailboxQueues.get(inboxPath) === tail) {
-      inProcessMailboxQueues.delete(inboxPath)
+    if (inProcessMailboxQueues.get(key) === tail) {
+      inProcessMailboxQueues.delete(key)
     }
   }
 }
@@ -453,11 +476,50 @@ export async function readUnreadMessages(
   return unread
 }
 
+type PendingShutdownRequestEntry = {
+  addressee: string
+  byLead: boolean
+  used: boolean
+}
+
+type HostMailboxState = {
+  pendingShutdownRequests: Map<string, PendingShutdownRequestEntry>
+  shownPlanDigests: Map<string, string | null>
+  spentLeadMessageIds: Set<string>
+  leadSessionEpochStartMs: number
+  leadEntryKeys: Map<string, KeyObject>
+  processMailboxWriteLedger: Map<string, Map<string, string>>
+  activeLeadVerifyKeyOverride: string | undefined
+}
+
+const fallbackMailboxHost: object = {}
+const mailboxStateByHost = new WeakMap<object, HostMailboxState>()
+
+function getHostMailboxState(): HostMailboxState {
+  let host: object = fallbackMailboxHost
+  try {
+    const active = getBootstrapSessionHost()
+    if (active) host = active
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  let state = mailboxStateByHost.get(host)
+  if (!state) {
+    state = {
+      pendingShutdownRequests: new Map(),
+      shownPlanDigests: new Map(),
+      spentLeadMessageIds: new Set(),
+      leadSessionEpochStartMs: Date.now(),
+      leadEntryKeys: new Map(),
+      processMailboxWriteLedger: new Map(),
+      activeLeadVerifyKeyOverride: undefined,
+    }
+    mailboxStateByHost.set(host, state)
+  }
+  return state
+}
+
 const MAX_PENDING_SHUTDOWN_REQUESTS = 200
-const pendingShutdownRequests = new Map<
-  string,
-  { addressee: string; byLead: boolean; used: boolean }
->()
 
 /**
  * Official `YLr` / `d7r` (#1556) — record an outbound `shutdown_request` so a
@@ -469,6 +531,7 @@ export function recordPendingShutdownRequest(
   addressee: string,
   byLead = true,
 ): void {
+  const { pendingShutdownRequests } = getHostMailboxState()
   pendingShutdownRequests.set(requestId, { addressee, byLead, used: false })
   if (pendingShutdownRequests.size > MAX_PENDING_SHUTDOWN_REQUESTS) {
     const entries = [...pendingShutdownRequests]
@@ -482,13 +545,14 @@ export function recordPendingShutdownRequest(
 
 /** Official `cUa` — roll back a recorded shutdown request if mailbox write fails. */
 export function removePendingShutdownRequest(requestId: string): void {
-  pendingShutdownRequests.delete(requestId)
+  getHostMailboxState().pendingShutdownRequests.delete(requestId)
 }
 
 /** Official `g9o` — clear pending shutdown requests for a freshly spawned teammate. */
 export function clearPendingShutdownRequestsForAddressee(
   addressee: string,
 ): void {
+  const { pendingShutdownRequests } = getHostMailboxState()
   for (const [id, entry] of pendingShutdownRequests) {
     if (entry.addressee === addressee) {
       pendingShutdownRequests.delete(id)
@@ -501,7 +565,7 @@ export function hasPendingShutdownRequestForAddressee(
   requestId: string,
   addressee: string,
 ): boolean {
-  const entry = pendingShutdownRequests.get(requestId)
+  const entry = getHostMailboxState().pendingShutdownRequests.get(requestId)
   return entry !== undefined && entry.addressee === addressee && !entry.used
 }
 
@@ -516,7 +580,7 @@ export function consumePendingShutdownRequest(
   addressee: string,
   provenance?: MailboxEntryTrust,
 ): boolean {
-  const entry = pendingShutdownRequests.get(requestId)
+  const entry = getHostMailboxState().pendingShutdownRequests.get(requestId)
   const matchesUnused =
     entry !== undefined && entry.addressee === addressee && !entry.used
   const allowed =
@@ -528,7 +592,7 @@ export function consumePendingShutdownRequest(
 }
 
 export function resetPendingShutdownRequestsForTesting(): void {
-  pendingShutdownRequests.clear()
+  getHostMailboxState().pendingShutdownRequests.clear()
 }
 
 const SESSION_TEAM_NAME_RE = /^session-[a-z0-9-]+$/
@@ -1882,7 +1946,6 @@ export type PlanApprovalResponseMessage = z.infer<
 >
 
 const MAX_SHOWN_PLAN_DIGESTS = 1024
-const shownPlanDigests = new Map<string, string | null>()
 
 /** Official 2.1.331 `Dgo` — SHA-256 hex digest of a plan's content. */
 export function computePlanDigest(planContent: string): string {
@@ -1898,6 +1961,7 @@ export function recordShownPlanDigest(
   requestId: string,
   planContent: string,
 ): void {
+  const { shownPlanDigests } = getHostMailboxState()
   const digest = computePlanDigest(planContent)
   const existing = shownPlanDigests.get(requestId)
   if (existing === undefined) {
@@ -1916,11 +1980,12 @@ export function recordShownPlanDigest(
 
 /** Official 2.1.331 `fnl` — look up the unambiguous plan digest for `requestId`. */
 export function getShownPlanDigest(requestId: string): string | undefined {
-  return shownPlanDigests.get(requestId) ?? undefined
+  return getHostMailboxState().shownPlanDigests.get(requestId) ?? undefined
 }
 
 /** Official 2.1.331 `pnl` — invalidate all recorded plan digests without evicting keys. */
 export function invalidateAllShownPlanDigests(): void {
+  const { shownPlanDigests } = getHostMailboxState()
   for (const key of shownPlanDigests.keys()) {
     shownPlanDigests.set(key, null)
   }
@@ -1928,7 +1993,7 @@ export function invalidateAllShownPlanDigests(): void {
 
 /** Official 2.1.331 `Sdr` — clear all recorded plan digests (e.g. on `/clear` or in tests). */
 export function clearShownPlanDigests(): void {
-  shownPlanDigests.clear()
+  getHostMailboxState().shownPlanDigests.clear()
 }
 
 export type PlanApprovalBindingResult =
@@ -2505,16 +2570,6 @@ export const LEAD_MAILBOX_FRESHNESS_WINDOW_MS = 120_000
 
 const TEAM_LEAD_SENDER_NAMES = new Set(['team-lead', 'leader'])
 const LEAD_VERIFY_KEY_RE = /^(\d+)\.([\w-]+)$/
-const spentLeadMessageIds = new Set<string>()
-let leadSessionEpochStartMs = Date.now()
-
-/** Official `Bo().mailbox.leadEntryKeys` — Ed25519 private keys keyed by lowercased inbox path. */
-const leadEntryKeys = new Map<string, KeyObject>()
-
-/** Official `I()` write/verify ledger keyed by lowercased inbox path -> (msg_id -> canonical fingerprint). */
-const processMailboxWriteLedger = new Map<string, Map<string, string>>()
-
-let activeLeadVerifyKeyOverride: string | undefined
 
 function normalizeInboxKey(inboxPath: string): string {
   return inboxPath.toLowerCase()
@@ -2525,6 +2580,7 @@ function recordProcessMailboxWrite(
   entry: TeammateMessage,
 ): void {
   if (!entry.msg_id) return
+  const { processMailboxWriteLedger } = getHostMailboxState()
   const key = normalizeInboxKey(inboxPath)
   let bucket = processMailboxWriteLedger.get(key)
   if (!bucket) {
@@ -2550,7 +2606,9 @@ function wroteByProcessMailboxLedger(
   entry: TeammateMessage,
 ): boolean {
   if (!inboxPath || !entry.msg_id) return false
-  const bucket = processMailboxWriteLedger.get(normalizeInboxKey(inboxPath))
+  const bucket = getHostMailboxState().processMailboxWriteLedger.get(
+    normalizeInboxKey(inboxPath),
+  )
   if (!bucket) return false
   const recorded = bucket.get(entry.msg_id)
   if (recorded === undefined) return false
@@ -2570,6 +2628,7 @@ function retainProcessMailboxWrites(
   inboxPath: string,
   keepMsgIds: readonly string[],
 ): void {
+  const { processMailboxWriteLedger } = getHostMailboxState()
   const key = normalizeInboxKey(inboxPath)
   if (keepMsgIds.length === 0) {
     processMailboxWriteLedger.delete(key)
@@ -2585,7 +2644,9 @@ function retainProcessMailboxWrites(
 }
 
 function forgetProcessMailboxWrites(inboxPath: string): void {
-  processMailboxWriteLedger.delete(normalizeInboxKey(inboxPath))
+  getHostMailboxState().processMailboxWriteLedger.delete(
+    normalizeInboxKey(inboxPath),
+  )
 }
 
 /**
@@ -2593,7 +2654,7 @@ function forgetProcessMailboxWrites(inboxPath: string): void {
  * process (`<issuedAtMs>.<base64url-spki>` or bare `<base64url-spki>`).
  */
 export function setActiveLeadVerifyKey(key: string | undefined): void {
-  activeLeadVerifyKeyOverride = key
+  getHostMailboxState().activeLeadVerifyKeyOverride = key
 }
 
 /**
@@ -2604,6 +2665,7 @@ export function setActiveLeadVerifyKey(key: string | undefined): void {
  * 4. `--lead-verify-key` CLI argument
  */
 export function getActiveLeadVerifyKey(): string | undefined {
+  const { activeLeadVerifyKeyOverride } = getHostMailboxState()
   if (activeLeadVerifyKeyOverride !== undefined) {
     return activeLeadVerifyKeyOverride
   }
@@ -2658,7 +2720,10 @@ export type MailboxEntryTrust = 'verified' | 'forged' | 'unverifiable'
  */
 export function createTeamLeadEntryKeyForInbox(inboxPath: string): string {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519')
-  leadEntryKeys.set(normalizeInboxKey(inboxPath), privateKey)
+  getHostMailboxState().leadEntryKeys.set(
+    normalizeInboxKey(inboxPath),
+    privateKey,
+  )
   const spkiBase64Url = (
     publicKey.export({ type: 'spki', format: 'der' }) as Buffer
   ).toString('base64url')
@@ -2670,7 +2735,7 @@ export function registerTeamLeadPrivateKeyForInbox(
   inboxPath: string,
   privateKeyPem: string,
 ): void {
-  leadEntryKeys.set(
+  getHostMailboxState().leadEntryKeys.set(
     normalizeInboxKey(inboxPath),
     createPrivateKey(privateKeyPem),
   )
@@ -2683,12 +2748,12 @@ export function refreshLeadVerifyKeyTimestamp(leadVerifyKey: string): string {
 
 /** Official `unr` — remove the lead signing private key for an inbox. */
 export function clearTeamLeadEntryKeyForInbox(inboxPath: string): void {
-  leadEntryKeys.delete(normalizeInboxKey(inboxPath))
+  getHostMailboxState().leadEntryKeys.delete(normalizeInboxKey(inboxPath))
 }
 
 /** Official `lUa` — whether this process holds a lead signing key for `inboxPath`. */
 export function hasTeamLeadEntryKeyForInbox(inboxPath: string): boolean {
-  return leadEntryKeys.has(normalizeInboxKey(inboxPath))
+  return getHostMailboxState().leadEntryKeys.has(normalizeInboxKey(inboxPath))
 }
 
 export function generateTeamLeadKeyPair(): {
@@ -2747,7 +2812,9 @@ export function signLeadEntryForInbox(
   if (!TEAM_LEAD_SENDER_NAMES.has(entry.from.toLowerCase())) {
     return undefined
   }
-  const privateKey = leadEntryKeys.get(normalizeInboxKey(inboxPath))
+  const privateKey = getHostMailboxState().leadEntryKeys.get(
+    normalizeInboxKey(inboxPath),
+  )
   if (!privateKey) return undefined
   return cryptoSign(
     null,
@@ -2830,9 +2897,10 @@ function parseLeadVerifyKey(raw: string): {
 export function resetTeamLeadVerificationOnSessionBoundary(
   nowMs: number = Date.now(),
 ): void {
-  spentLeadMessageIds.clear()
-  processMailboxWriteLedger.clear()
-  leadSessionEpochStartMs = nowMs
+  const state = getHostMailboxState()
+  state.spentLeadMessageIds.clear()
+  state.processMailboxWriteLedger.clear()
+  state.leadSessionEpochStartMs = nowMs
 }
 
 /**
@@ -2848,7 +2916,8 @@ export function verifyTeamLeadMailboxEntry(
   if (ctx.leadAlive === false) return false
   if (!ctx.leadVerifyKey || !entry.msg_id || !entry.lead_sig) return false
   if (!TEAM_LEAD_SENDER_NAMES.has(entry.from.toLowerCase())) return false
-  if (spentLeadMessageIds.has(entry.msg_id)) {
+  const state = getHostMailboxState()
+  if (state.spentLeadMessageIds.has(entry.msg_id)) {
     // Official `mn`: allow idempotent re-read of the exact same un-pruned
     // message in the same inbox before markMessagesAsRead prunes it.
     return wroteByProcessMailboxLedger(ctx.inboxPath, entry)
@@ -2860,7 +2929,7 @@ export function verifyTeamLeadMailboxEntry(
   const issuedAt = ctx.leadIssuedAtMs ?? parsedKey.issuedAtMs
   const msgTs = Date.parse(entry.timestamp)
   const minAcceptedTs = Math.max(
-    leadSessionEpochStartMs,
+    state.leadSessionEpochStartMs,
     issuedAt !== undefined ? issuedAt - LEAD_MAILBOX_FRESHNESS_WINDOW_MS : 0,
   )
   if (!Number.isFinite(msgTs) || msgTs < minAcceptedTs) {
@@ -2883,7 +2952,7 @@ export function verifyTeamLeadMailboxEntry(
       Buffer.from(entry.lead_sig, 'base64url'),
     )
     if (!ok) return false
-    spentLeadMessageIds.add(entry.msg_id)
+    state.spentLeadMessageIds.add(entry.msg_id)
     if (ctx.inboxPath) {
       recordProcessMailboxWrite(ctx.inboxPath, entry)
     }

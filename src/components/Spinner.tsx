@@ -47,6 +47,7 @@ import { useAnimationFrame } from '@anthropic/ink';
 import { getGlobalConfig } from '../utils/config.js';
 import { FOCUS_TIP_ACTIVE, FOCUS_TIP_INVITE } from '../utils/focusView.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js';
 import { truncateToWidth } from '../utils/truncate.js';
 export type { SpinnerMode } from './Spinner/index.js';
 
@@ -57,11 +58,18 @@ export const EXPLANATORY_TIP_FULL = `${EXPLANATORY_TIP_PREFIX} · /${EXPLANATORY
 export const BTW_SPINNER_TIP = 'Use /btw to ask a side question without interrupting Claude';
 
 type SlashCommandLinkHandler = (fullCommand: string, origin: { kind: 'human' }) => void;
-let registeredSlashLinkHandler: SlashCommandLinkHandler | null = null;
+
+const slashLinkHandlerBySession = new RootSessionSlot<{
+  handler: SlashCommandLinkHandler | null;
+}>(() => ({ handler: null }));
+
+function getSlashLinkHandlerState(): { handler: SlashCommandLinkHandler | null } {
+  return slashLinkHandlerBySession.of(getBootstrapSession());
+}
 
 /** Official 2.1.328 `OJt`/`tkn` (`chunk@294254613.js:297820`): register slash-link runner. */
 export function registerSlashCommandLinkHandler(handler: SlashCommandLinkHandler | null): void {
-  registeredSlashLinkHandler = handler;
+  getSlashLinkHandlerState().handler = handler;
 }
 
 /**
@@ -79,7 +87,7 @@ export function SlashCommandLink({
 }): React.ReactNode {
   const full = args === undefined ? command : `${command} ${args}`;
   const [hovered, setHovered] = useState(false);
-  const runner = registeredSlashLinkHandler;
+  const runner = getSlashLinkHandlerState().handler;
   if (!runner) {
     return (
       <Text underline color={color}>

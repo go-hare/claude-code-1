@@ -23,6 +23,7 @@ import {
   createUserMessage,
   extractTextContent,
 } from './messages.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 // Pattern to detect "/btw" at start of input (case-insensitive, word boundary)
 const BTW_PATTERN = /^\/btw\b/gi
@@ -44,36 +45,49 @@ export function createBtwHistoryState(): BtwHistoryState {
   return { history: [] }
 }
 
-let globalBtwHistory: BtwHistoryState = createBtwHistoryState()
+const fallbackSideQuestionSession = { root: {} as object }
+const btwHistorySlotBySession = new RootSessionSlot<{ state: BtwHistoryState }>(
+  () => ({ state: createBtwHistoryState() }),
+)
+
+function getBtwHistorySlot(): { state: BtwHistoryState } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return btwHistorySlotBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return btwHistorySlotBySession.of(fallbackSideQuestionSession)
+}
 
 /** densable qI_ */
 export function _setGlobalBtwHistoryStateForTesting(
   state: BtwHistoryState,
 ): void {
-  globalBtwHistory = state
+  getBtwHistorySlot().state = state
 }
 
 /** densable lNt / getBtwHistory */
 export function getBtwHistory(): BtwHistoryEntry[] {
-  return globalBtwHistory.history
+  return getBtwHistorySlot().state.history
 }
 
 /** densable zI_ / clearBtwHistory */
 export function clearBtwHistory(): void {
-  globalBtwHistory.history = []
+  getBtwHistorySlot().state.history = []
 }
 
 /** densable zOo / resetBtwHistory — replace ring (e.g. clear-with-keep-current). */
 export function resetBtwHistory(entries: BtwHistoryEntry[]): void {
-  globalBtwHistory.history = entries
+  getBtwHistorySlot().state.history = entries
 }
 
 /** densable Scn / appendBtwHistory */
 export function appendBtwHistory(question: string, response: string): void {
-  globalBtwHistory.history = [
-    ...globalBtwHistory.history,
-    { question, response },
-  ].slice(-BTW_HISTORY_MAX)
+  const slot = getBtwHistorySlot()
+  slot.state.history = [...slot.state.history, { question, response }].slice(
+    -BTW_HISTORY_MAX,
+  )
 }
 
 /**
@@ -167,7 +181,7 @@ ${question}`
 
   // densable: thread prior Q&A as user/assistant pairs before the new question
   const historyMessages: Message[] = threadHistory
-    ? globalBtwHistory.history.flatMap(entry => [
+    ? getBtwHistory().flatMap(entry => [
         createUserMessage({ content: entry.question }),
         createAssistantMessage({ content: entry.response }),
       ])

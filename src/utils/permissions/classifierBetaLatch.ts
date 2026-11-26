@@ -17,19 +17,30 @@ import {
   isFirstPartyAnthropicBaseUrl,
   type APIProvider,
 } from '../model/providers.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { SideQueryOptions } from '../sideQuery.js'
 
 /** Official `$O` / `ASe` — null in 2.1.243; latch never matches. */
 const AUTO_MODE_CLASSIFIER_LATCH_BETA: string | null = null
 
-let controlMonitorsBetaRejected = false
+const classifierBetaLatchByHost = new HostSlot<{
+  controlMonitorsBetaRejected: boolean
+}>(() => ({
+  controlMonitorsBetaRejected: false,
+}))
+
+function getClassifierBetaLatchHostState(): {
+  controlMonitorsBetaRejected: boolean
+} {
+  return classifierBetaLatchByHost.of(getBootstrapSessionHost())
+}
 
 export function clearClassifierBetaLatchForTests(): void {
-  controlMonitorsBetaRejected = false
+  getClassifierBetaLatchHostState().controlMonitorsBetaRejected = false
 }
 
 export function isControlMonitorsBetaRejectedForTests(): boolean {
-  return controlMonitorsBetaRejected
+  return getClassifierBetaLatchHostState().controlMonitorsBetaRejected
 }
 
 /**
@@ -100,8 +111,9 @@ export function latchAutoModeClassifierBetaRejected(
   err: unknown,
   context: ClassifierBetaLatchContext,
 ): void {
-  if (controlMonitorsBetaRejected) return
-  controlMonitorsBetaRejected = true
+  const hostState = getClassifierBetaLatchHostState()
+  if (hostState.controlMonitorsBetaRejected) return
+  hostState.controlMonitorsBetaRejected = true
   const name = AUTO_MODE_CLASSIFIER_LATCH_BETA ?? 'auto_mode_classifier'
   logForDebugging(
     `Auto mode classifier: ${name} beta rejected (HTTP 400) and the retry without it succeeded \u2014 dropping the beta for the rest of the session`,

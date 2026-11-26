@@ -19,6 +19,7 @@ import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { parseGitRemote } from '../detectRepository.js'
 import { getUserAgent } from '../http.js'
 import { isEssentialTrafficOnly } from '../privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { resolveRepoVisibility } from './autoModeFlags.js'
 
 /** Official IDg — overall budget for repo visibility enrichment. */
@@ -43,9 +44,6 @@ export type RepoVisibilityEntry = {
   visibility: RepoVisibility
 }
 
-/** Official Ceo cache — host/owner/name → visibility. */
-const visibilityCache = new Map<string, RepoVisibility>()
-
 /**
  * Official lXt process-local origin snapshot cache (cwd → branch/host/slug/vis).
  * Populated by seedRepoOriginCache / resolve helpers to skip re-git under bPu races.
@@ -57,7 +55,21 @@ export type RepoOriginSnapshot = {
   visibility?: RepoVisibility
 }
 
-const originSnapshotCache = new Map<string, RepoOriginSnapshot>()
+type RepoVisibilityHostState = {
+  /** Official Ceo cache — host/owner/name → visibility. */
+  visibilityCache: Map<string, RepoVisibility>
+  originSnapshotCache: Map<string, RepoOriginSnapshot>
+}
+
+// Official 2.1.331 [W-214/215/216]: per-host repo visibility & origin snapshot caches.
+const repoVisibilityStateByHost = new HostSlot<RepoVisibilityHostState>(() => ({
+  visibilityCache: new Map<string, RepoVisibility>(),
+  originSnapshotCache: new Map<string, RepoOriginSnapshot>(),
+}))
+
+function getRepoVisibilityHostState(): RepoVisibilityHostState {
+  return repoVisibilityStateByHost.of(getBootstrapSessionHost())
+}
 
 /** Official Fm — github.com (strip www.). */
 export function isGithubDotComHost(host: string): boolean {
@@ -171,6 +183,7 @@ export async function lookupGithubRepoVisibility(
   name: string,
   signal?: AbortSignal,
 ): Promise<RepoVisibility> {
+  const { visibilityCache } = getRepoVisibilityHostState()
   const cacheKey = `${host}/${owner}/${name}`
   const cached = visibilityCache.get(cacheKey)
   if (cached !== undefined) return cached
@@ -226,8 +239,9 @@ export async function lookupGithubRepoVisibility(
 
 /** Test helper — clear Ceo + lXt caches. */
 export function clearRepoVisibilityCache(): void {
-  visibilityCache.clear()
-  originSnapshotCache.clear()
+  const hostState = repoVisibilityStateByHost.peek(getBootstrapSessionHost())
+  hostState?.visibilityCache.clear()
+  hostState?.originSnapshotCache.clear()
 }
 
 /** Official lXt seed — used by tests / CCR pre-warm. */
@@ -235,7 +249,7 @@ export function seedRepoOriginCache(
   cwd: string,
   snapshot: RepoOriginSnapshot,
 ): void {
-  originSnapshotCache.set(cwd, snapshot)
+  getRepoVisibilityHostState().originSnapshotCache.set(cwd, snapshot)
 }
 
 /**
@@ -245,6 +259,7 @@ export async function resolveCurrentBranch(
   cwd: string,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
+  const { originSnapshotCache } = getRepoVisibilityHostState()
   const snap = originSnapshotCache.get(cwd)
   if (snap?.branch !== undefined) return snap.branch
   const result = await execFileNoThrowWithCwd(
@@ -285,6 +300,7 @@ export async function resolveOriginRepoState(
   slug: string
   visibility: RepoVisibility
 } | null> {
+  const { originSnapshotCache } = getRepoVisibilityHostState()
   const snap = originSnapshotCache.get(cwd)
   if (snap?.host && snap.slug) {
     return {

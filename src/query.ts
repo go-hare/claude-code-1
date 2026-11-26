@@ -235,7 +235,7 @@ import {
   getPromptRenderEpoch,
   getSdkBetas,
 } from './bootstrap/state.js'
-import { getBootstrapSession } from './utils/sessionRoot.js'
+import { getBootstrapSession, RootSessionSlot } from './utils/sessionRoot.js'
 import type { Precompute } from './utils/sessionSlots.js'
 import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
 import { count } from './utils/array.js'
@@ -495,7 +495,9 @@ export function resolvePrecomputeBufferFraction(
 }
 
 const DEFAULT_PRECOMPUTE_BUFFER_FRACTION = 0.2
-let precomputeArmTableMalformedLogged = false
+const precomputeArmTableMalformedSlot = new RootSessionSlot<{
+  logged: boolean
+}>(() => ({ logged: false }))
 
 /** Official 2.1.328 `Pkt()` (`tengu_amber_rokovoko`, default `oBe = 0.2`). */
 export function getScalarPrecomputeBufferFraction(): number {
@@ -528,8 +530,11 @@ export function resolveLivePrecomputeBufferFraction(
     querySource,
     getScalarPrecomputeBufferFraction(),
   )
-  if (resolved.source === 'malformed' && !precomputeArmTableMalformedLogged) {
-    precomputeArmTableMalformedLogged = true
+  const malformedSlot = precomputeArmTableMalformedSlot.of(
+    getBootstrapSession(),
+  )
+  if (resolved.source === 'malformed' && !malformedSlot.logged) {
+    malformedSlot.logged = true
     logEvent('tengu_precompute_arm_table_malformed', {
       payloadType: (Array.isArray(rawTable)
         ? 'array'

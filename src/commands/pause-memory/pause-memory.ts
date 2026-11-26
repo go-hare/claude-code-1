@@ -6,12 +6,20 @@ import { logEvent } from '../../services/analytics/index.js'
 import type { LocalCommandCall } from '../../types/command.js'
 import { isBgSession } from '../../utils/concurrentSessions.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { getAgentId } from '../../utils/teammate.js'
 
-let cloudPauseTold = false
+const pauseMemorySessionSlot = new RootSessionSlot<{
+  cloudPauseTold: boolean
+}>(() => ({
+  cloudPauseTold: false,
+}))
 
 export function resetCloudPauseToldForTesting(): void {
-  cloudPauseTold = false
+  pauseMemorySessionSlot.of(getBootstrapSession()).cloudPauseTold = false
 }
 
 /**
@@ -58,7 +66,7 @@ export const call: LocalCommandCall = async (_args, _context) => {
   }
 
   replaceMemoryToggledOff(nextPaused)
-  void cloudPauseTold
+  void pauseMemorySessionSlot.of(getBootstrapSession()).cloudPauseTold
 
   logEvent('tengu_memory_toggled', {
     toggled_off: nextPaused,

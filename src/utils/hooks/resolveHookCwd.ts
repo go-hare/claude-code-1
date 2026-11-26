@@ -6,8 +6,13 @@
 import { homedir, tmpdir } from 'os'
 import { logForDebugging } from '../debug.js'
 import { pathExists } from '../file.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
-const warnedMissingHookCwds = new Set<string>()
+const hostWarnedMissingHookCwdsSlot = new HostSlot<Set<string>>(() => new Set())
+
+function warnedMissingHookCwds(): Set<string> {
+  return hostWarnedMissingHookCwdsSlot.of(getBootstrapSessionHost())
+}
 
 export async function resolveHookCwd(
   cwd: string,
@@ -27,8 +32,9 @@ export async function resolveHookCwd(
       break
     }
   }
-  if (!warnedMissingHookCwds.has(cwd)) {
-    warnedMissingHookCwds.add(cwd)
+  const warned = warnedMissingHookCwds()
+  if (!warned.has(cwd)) {
+    warned.add(cwd)
     logForDebugging(
       `Hooks: working directory ${cwd} no longer exists; running hooks from ${fallback} instead`,
       { level: 'warn' },
@@ -38,5 +44,5 @@ export async function resolveHookCwd(
 }
 
 export function resetHookCwdFallbackWarningsForTests(): void {
-  warnedMissingHookCwds.clear()
+  warnedMissingHookCwds().clear()
 }

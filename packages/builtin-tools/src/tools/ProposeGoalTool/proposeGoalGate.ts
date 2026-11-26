@@ -13,6 +13,7 @@ import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from 'src/services/analytics/index.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { getSecuritySensitiveSetting } from 'src/utils/settings/settings.js'
 import { PROPOSE_GOAL_GB_FLAG } from './constants.js'
 
@@ -38,14 +39,17 @@ export async function getModelProposedGoalsSettingAsync(): Promise<ModelProposed
   return getModelProposedGoalsSetting()
 }
 
-let loggedProposalAvailable = false
+const loggedProposalAvailableSlot = new RootSessionSlot<{
+  logged: boolean
+}>(() => ({ logged: false }))
 
 /** densable okw / vGs / SGs — once-per-session tengu_goal_proposal_available. */
 export function logGoalProposalAvailableOnce(
   setting: ModelProposedGoalsSetting,
 ): void {
-  if (loggedProposalAvailable) return
-  loggedProposalAvailable = true
+  const slot = loggedProposalAvailableSlot.of(getBootstrapSession())
+  if (slot.logged) return
+  slot.logged = true
   logEvent('tengu_goal_proposal_available', {
     setting:
       setting as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -54,7 +58,7 @@ export function logGoalProposalAvailableOnce(
 
 /** Test-only: reset the once-log latch. */
 export function resetGoalProposalAvailableLatchForTests(): void {
-  loggedProposalAvailable = false
+  loggedProposalAvailableSlot.of(getBootstrapSession()).logged = false
 }
 
 /**

@@ -7,6 +7,7 @@ import { errorMessage } from 'src/utils/errors.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { logError } from 'src/utils/log.js'
 import { expandPath } from 'src/utils/path.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 // Types
 export type DirectoryEntry = {
   name: string
@@ -45,17 +46,33 @@ type ParsedPath = {
 const CACHE_SIZE = 500
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
-// Initialize LRU cache for directory scans
-const directoryCache = new LRUCache<string, DirectoryEntry[]>({
-  max: CACHE_SIZE,
-  ttl: CACHE_TTL,
-})
+class DirectoryCompletionHostState {
+  // Initialize LRU cache for directory scans
+  directoryCache = new LRUCache<string, DirectoryEntry[]>({
+    max: CACHE_SIZE,
+    ttl: CACHE_TTL,
+  })
+  // Initialize LRU cache for path scans (files and directories)
+  pathCache = new LRUCache<string, PathEntry[]>({
+    max: CACHE_SIZE,
+    ttl: CACHE_TTL,
+  })
+}
 
-// Initialize LRU cache for path scans (files and directories)
-const pathCache = new LRUCache<string, PathEntry[]>({
-  max: CACHE_SIZE,
-  ttl: CACHE_TTL,
-})
+const fallbackDirectoryCompletionHost: object = {}
+const directoryCompletionByHost = new HostSlot<DirectoryCompletionHostState>(
+  () => new DirectoryCompletionHostState(),
+)
+
+function getDirectoryCompletionHostState(): DirectoryCompletionHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return directoryCompletionByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return directoryCompletionByHost.of(fallbackDirectoryCompletionHost)
+}
 
 /**
  * Parses a partial path into directory and prefix components
@@ -110,6 +127,7 @@ export function tryParsePartialPath(
 export async function scanDirectory(
   dirPath: string,
 ): Promise<DirectoryEntry[]> {
+  const { directoryCache } = getDirectoryCompletionHostState()
   // Check cache first
   const cached = directoryCache.get(dirPath)
   if (cached) {
@@ -171,7 +189,7 @@ export async function getDirectoryCompletions(
  * Clears the directory cache
  */
 export function clearDirectoryCache(): void {
-  directoryCache.clear()
+  getDirectoryCompletionHostState().directoryCache.clear()
 }
 
 /**
@@ -197,6 +215,7 @@ export async function scanDirectoryForPaths(
   dirPath: string,
   includeHidden = false,
 ): Promise<PathEntry[]> {
+  const { pathCache } = getDirectoryCompletionHostState()
   const cacheKey = `${dirPath}:${includeHidden}`
   const cached = pathCache.get(cacheKey)
   if (cached) {
@@ -292,6 +311,7 @@ export async function getPathCompletions(
  * Clears both directory and path caches
  */
 export function clearPathCache(): void {
-  directoryCache.clear()
-  pathCache.clear()
+  const state = getDirectoryCompletionHostState()
+  state.directoryCache.clear()
+  state.pathCache.clear()
 }

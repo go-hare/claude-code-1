@@ -10,7 +10,8 @@ import {
   isGatewayAuthExpired,
   isGatewayAuthPinned,
 } from '../gatewayEnv.js'
-import { createSignal } from '../signal.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
+import { createSignal, type Signal } from '../signal.js'
 import type { SettingsJson } from './types.js'
 
 export type StoredCopyRefusal = {
@@ -91,21 +92,29 @@ type RemoteSettingsRuntimeState = {
   loadBackstopReleased: boolean
   eligibilityMemo: boolean | undefined
   loadEpoch: number
+  loadStatusChanged: Signal<[]>
 }
 
-const state: RemoteSettingsRuntimeState = {
-  sessionCache: null,
-  verifiedPayload: null,
-  storedCopyTrust: 'not_asked',
-  storedCopyRefusal: null,
-  refusedCopyHelperTier: null,
-  droppedHelperTier: null,
-  lastLoadStatus: undefined,
-  loadCycleBegun: false,
-  loadCycleEnded: false,
-  loadBackstopReleased: false,
-  eligibilityMemo: undefined,
-  loadEpoch: 0,
+const remoteSettingsStateSlot = new HostSlot<RemoteSettingsRuntimeState>(
+  () => ({
+    sessionCache: null,
+    verifiedPayload: null,
+    storedCopyTrust: 'not_asked',
+    storedCopyRefusal: null,
+    refusedCopyHelperTier: null,
+    droppedHelperTier: null,
+    lastLoadStatus: undefined,
+    loadCycleBegun: false,
+    loadCycleEnded: false,
+    loadBackstopReleased: false,
+    eligibilityMemo: undefined,
+    loadEpoch: 0,
+    loadStatusChanged: createSignal<[]>(),
+  }),
+)
+
+function getRemoteSettingsHostState(): RemoteSettingsRuntimeState {
+  return remoteSettingsStateSlot.of(getBootstrapSessionHost())
 }
 
 function stringOnlyEnv(
@@ -149,6 +158,7 @@ export function recordStoredCopyRefusal(
   isRefreshable: boolean,
   nowMs: number = Date.now(),
 ): StoredCopyRefusal {
+  const state = getRemoteSettingsHostState()
   const forcesRefresh =
     isRefreshable && settings?.forceRemoteSettingsRefresh === true
   const refusal: StoredCopyRefusal = {
@@ -168,16 +178,17 @@ export function recordStoredCopyRefusal(
 }
 
 export function getStoredCopyRefusal(): StoredCopyRefusal | null {
-  return state.storedCopyRefusal
+  return getRemoteSettingsHostState().storedCopyRefusal
 }
 
 export function getStoredCopyTrust(): StoredCopyTrust {
-  return state.storedCopyTrust
+  return getRemoteSettingsHostState().storedCopyTrust
 }
 
 export function isForceRemoteSettingsRefreshBlocking(
   settings: SettingsJson | null | undefined,
-  refusal: StoredCopyRefusal | null = state.storedCopyRefusal,
+  refusal: StoredCopyRefusal | null = getRemoteSettingsHostState()
+    .storedCopyRefusal,
 ): boolean {
   return (
     settings?.forceRemoteSettingsRefresh === true ||
@@ -200,6 +211,7 @@ export function evaluateStoredRemoteSettingsCopy(
 ):
   | { admitted: true; settings: SettingsJson | null }
   | { admitted: false; refusal: StoredCopyRefusal; blocked: boolean } {
+  const state = getRemoteSettingsHostState()
   if (opts.trusted && storedSettings) {
     state.storedCopyTrust = { trusted: true, reason: opts.reason }
     state.storedCopyRefusal = null
@@ -226,6 +238,7 @@ export function evaluateStoredRemoteSettingsCopy(
  * in `droppedHelperTier` when resetting the remote settings session cache.
  */
 export function resetRemoteSettingsSessionCache(): void {
+  const state = getRemoteSettingsHostState()
   if (
     state.sessionCache !== null &&
     state.sessionCache === state.verifiedPayload
@@ -251,6 +264,7 @@ export function resetRemoteSettingsSessionCache(): void {
 export function setVerifiedRemoteSettingsForTesting(
   settings: SettingsJson | null,
 ): void {
+  const state = getRemoteSettingsHostState()
   state.sessionCache = settings
   state.verifiedPayload = settings
   state.storedCopyTrust = settings ? { trusted: true } : 'not_asked'
@@ -289,6 +303,7 @@ export function retainDroppedHelperBaseUrlEnv(
 export function resolveRemoteHelperTier(
   env: NodeJS.ProcessEnv = process.env,
 ): HelperTier | null {
+  const state = getRemoteSettingsHostState()
   const active = extractHelperTier(state.sessionCache)
   if (active !== null) {
     return active
@@ -317,6 +332,7 @@ export function resolveRemoteHelperTier(
  * Official `Psi` (#1429): report whether helper tier requires reload or restart.
  */
 export function getRemoteHelperTierStatus(): RemoteHelperTierStatus {
+  const state = getRemoteSettingsHostState()
   const active = extractHelperTier(state.sessionCache)
   if (active !== null) {
     return state.sessionCache === state.verifiedPayload
@@ -330,7 +346,7 @@ export function getRemoteHelperTierStatus(): RemoteHelperTierStatus {
 }
 
 export function getDroppedHelperTier(): HelperTier | null {
-  return state.droppedHelperTier
+  return getRemoteSettingsHostState().droppedHelperTier
 }
 
 /**
@@ -408,60 +424,69 @@ export const REMOTE_SETTINGS_DID_NOT_LOAD_MSG =
 export const REMOTE_SETTINGS_HAVE_LOADED_MSG =
   'Remote managed settings have now loaded'
 
-const loadStatusChanged = createSignal<[]>()
-
 /**
  * Subscribe to remote managed settings load status / lifecycle transitions
  * (Official `Wye` / `ysi`, #1531).
  */
-export const onRemoteSettingsLoadStatusChanged = loadStatusChanged.subscribe
+export function onRemoteSettingsLoadStatusChanged(
+  listener: () => void,
+): () => void {
+  return getRemoteSettingsHostState().loadStatusChanged.subscribe(listener)
+}
 
 export function getActiveRemoteSettings(): SettingsJson | null {
-  return state.sessionCache
+  return getRemoteSettingsHostState().sessionCache
 }
 
 export function setRemoteSettingsLoadStatus(
   status: RemoteSettingsLoadStatus | undefined,
 ): void {
+  const state = getRemoteSettingsHostState()
   state.lastLoadStatus = status
-  loadStatusChanged.emit()
+  state.loadStatusChanged.emit()
 }
 
 export function getRemoteSettingsLoadStatus():
   | RemoteSettingsLoadStatus
   | undefined {
-  return state.lastLoadStatus
+  return getRemoteSettingsHostState().lastLoadStatus
 }
 
 export function markRemoteSettingsLoadCycleBegun(): void {
+  const state = getRemoteSettingsHostState()
   state.loadCycleBegun = true
-  loadStatusChanged.emit()
+  state.loadStatusChanged.emit()
 }
 
 export function markRemoteSettingsLoadCycleEnded(): void {
+  const state = getRemoteSettingsHostState()
   state.loadCycleEnded = true
-  loadStatusChanged.emit()
+  state.loadStatusChanged.emit()
 }
 
 export function releaseRemoteSettingsLoadBackstop(): void {
+  const state = getRemoteSettingsHostState()
   state.loadBackstopReleased = true
-  loadStatusChanged.emit()
+  state.loadStatusChanged.emit()
 }
 
 export function setRemoteSettingsEligibilityMemo(
   eligible: boolean | undefined,
 ): void {
+  const state = getRemoteSettingsHostState()
   state.eligibilityMemo = eligible
-  loadStatusChanged.emit()
+  state.loadStatusChanged.emit()
 }
 
 export function bumpRemoteSettingsLoadEpoch(): number {
+  const state = getRemoteSettingsHostState()
   state.loadEpoch += 1
-  loadStatusChanged.emit()
+  state.loadStatusChanged.emit()
   return state.loadEpoch
 }
 
 export function isRemoteSettingsNoticeRelevant(): boolean {
+  const state = getRemoteSettingsHostState()
   const status = state.lastLoadStatus
   switch (status?.state) {
     case 'failed':
@@ -512,6 +537,7 @@ export function formatRemoteSettingsFailureReason(
 export function buildRemoteSettingsLoadNotice(
   prevSaid: RemoteSettingsNoticeSaid | undefined,
 ): RemoteSettingsNoticeResult | null {
+  const state = getRemoteSettingsHostState()
   const status = state.lastLoadStatus
   const epoch = state.loadEpoch
   const relevant = isRemoteSettingsNoticeRelevant()
@@ -580,7 +606,7 @@ export function shouldApplyRemoteSettingsConsentFree(opts: {
   hasDangerousSettingsChanged?: boolean
 }): boolean {
   if (opts.hasOpenReview) return false
-  if (state.storedCopyRefusal !== null) return false
+  if (getRemoteSettingsHostState().storedCopyRefusal !== null) return false
   if (!opts.hasDangerousSettingsChanged) return true
   return opts.isFirstPartyTrusted
 }
@@ -638,13 +664,14 @@ export function applyRemoteSettingsConsentFreeIfEligible(
     return { applied: true, outcome, persistedConsent: true }
   }
   if (outcome === 'deferred_non_interactive') {
-    state.sessionCache = settings
+    getRemoteSettingsHostState().sessionCache = settings
     return { applied: true, outcome, persistedConsent: false }
   }
   return { applied: false, outcome, persistedConsent: false }
 }
 
 export function resetRemoteSettingsStateForTesting(): void {
+  const state = getRemoteSettingsHostState()
   state.sessionCache = null
   state.verifiedPayload = null
   state.storedCopyTrust = 'not_asked'

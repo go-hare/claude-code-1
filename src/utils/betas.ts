@@ -1,10 +1,10 @@
 import { feature } from 'bun:bundle'
-import memoize from 'lodash-es/memoize.js'
 import {
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
   getFeatureValue_CACHED_MAY_BE_STALE,
 } from 'src/services/analytics/growthbook.js'
 import { getIsNonInteractiveSession, getSdkBetas } from '../bootstrap/state.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import {
   BEDROCK_EXTRA_PARAMS_HEADERS,
   CLAUDE_CODE_20250219_BETA_HEADER,
@@ -366,138 +366,205 @@ export function shouldUsePromptCachingScopeBeta(): boolean {
   return provider === 'firstParty' || provider === 'anthropicAws'
 }
 
-export const getAllModelBetas = memoize((model: string): string[] => {
-  const betaHeaders = []
-  const isHaiku = getCanonicalName(model).includes('haiku')
-  const provider = getAPIProvider()
-  const includeFirstPartyOnlyBetas = shouldIncludeFirstPartyOnlyBetas()
+export type BetasSessionMapCache<K, V> = {
+  clear(): void
+  delete(key: K): boolean
+  get(key: K): V | undefined
+  has(key: K): boolean
+  set(key: K, value: V): BetasSessionMapCache<K, V>
+  readonly size: number
+  keys(): MapIterator<K>
+  values(): MapIterator<V>
+  entries(): MapIterator<[K, V]>
+  forEach(
+    callbackfn: (value: V, key: K, map: Map<K, V>) => void,
+    thisArg?: unknown,
+  ): void
+  [Symbol.iterator](): MapIterator<[K, V]>
+}
 
-  if (!isHaiku) {
-    betaHeaders.push(CLAUDE_CODE_20250219_BETA_HEADER)
-    if (
-      process.env.USER_TYPE === 'ant' &&
-      process.env.CLAUDE_CODE_ENTRYPOINT === 'cli'
-    ) {
-      if (CLI_INTERNAL_BETA_HEADER) {
-        betaHeaders.push(CLI_INTERNAL_BETA_HEADER)
+type BetasCacheBag = {
+  allModelBetas: Map<string, string[]>
+  baseModelBetas: Map<string, string[]>
+  bedrockExtraBetas: Map<string, string[]>
+}
+
+const betasCacheSlot = new RootSessionSlot<BetasCacheBag>(() => ({
+  allModelBetas: new Map<string, string[]>(),
+  baseModelBetas: new Map<string, string[]>(),
+  bedrockExtraBetas: new Map<string, string[]>(),
+}))
+
+function createBetasSessionMemo(
+  selectMap: (bag: BetasCacheBag) => Map<string, string[]>,
+  replaceMap: (bag: BetasCacheBag, next: Map<string, string[]>) => void,
+  compute: (model: string) => string[],
+): ((model: string) => string[]) & {
+  cache: Map<string, string[]>
+} {
+  const resolveMap = (): Map<string, string[]> =>
+    selectMap(betasCacheSlot.of(getBootstrapSession()))
+  const memoized = (model: string): string[] => {
+    const map = resolveMap()
+    const cached = map.get(model)
+    if (cached !== undefined || map.has(model)) {
+      return cached as string[]
+    }
+    const next = compute(model)
+    map.set(model, next)
+    return next
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => resolveMap(),
+    set: (next: Map<string, string[]>) => {
+      replaceMap(betasCacheSlot.of(getBootstrapSession()), next)
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as ((model: string) => string[]) & {
+    cache: Map<string, string[]>
+  }
+}
+
+export const getAllModelBetas = createBetasSessionMemo(
+  bag => bag.allModelBetas,
+  (bag, next) => {
+    bag.allModelBetas = next
+  },
+  (model: string): string[] => {
+    const betaHeaders = []
+    const isHaiku = getCanonicalName(model).includes('haiku')
+    const provider = getAPIProvider()
+    const includeFirstPartyOnlyBetas = shouldIncludeFirstPartyOnlyBetas()
+
+    if (!isHaiku) {
+      betaHeaders.push(CLAUDE_CODE_20250219_BETA_HEADER)
+      if (
+        process.env.USER_TYPE === 'ant' &&
+        process.env.CLAUDE_CODE_ENTRYPOINT === 'cli'
+      ) {
+        if (CLI_INTERNAL_BETA_HEADER) {
+          betaHeaders.push(CLI_INTERNAL_BETA_HEADER)
+        }
       }
     }
-  }
-  if (isClaudeAISubscriber()) {
-    betaHeaders.push(OAUTH_BETA_HEADER)
-  }
-  if (has1mContext(model)) {
-    betaHeaders.push(CONTEXT_1M_BETA_HEADER)
-  }
-  if (
-    !isEnvTruthy(process.env.DISABLE_INTERLEAVED_THINKING) &&
-    modelSupportsISP(model)
-  ) {
-    betaHeaders.push(INTERLEAVED_THINKING_BETA_HEADER)
-  }
+    if (isClaudeAISubscriber()) {
+      betaHeaders.push(OAUTH_BETA_HEADER)
+    }
+    if (has1mContext(model)) {
+      betaHeaders.push(CONTEXT_1M_BETA_HEADER)
+    }
+    if (
+      !isEnvTruthy(process.env.DISABLE_INTERLEAVED_THINKING) &&
+      modelSupportsISP(model)
+    ) {
+      betaHeaders.push(INTERLEAVED_THINKING_BETA_HEADER)
+    }
 
-  // densable eP Hx.when @178437146 — thinking-token-count with interleaved thinking.
-  if (
-    modelSupportsISP(model) &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
-    !isHipaaPolicy() &&
-    (provider === 'firstParty' ||
-      ((provider === 'bedrock' || provider === 'mantle') &&
-        getCanonicalName(model) !== 'claude-opus-4-7'))
-  ) {
-    betaHeaders.push(THINKING_TOKEN_COUNT_BETA_HEADER)
-  }
+    // densable eP Hx.when @178437146 — thinking-token-count with interleaved thinking.
+    if (
+      modelSupportsISP(model) &&
+      !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
+      !isHipaaPolicy() &&
+      (provider === 'firstParty' ||
+        ((provider === 'bedrock' || provider === 'mantle') &&
+          getCanonicalName(model) !== 'claude-opus-4-7'))
+    ) {
+      betaHeaders.push(THINKING_TOKEN_COUNT_BETA_HEADER)
+    }
 
-  // Gv is sticky-sent from paramsFromContext `$h` (queryModel), not
-  // always-pushed here.
+    // Gv is sticky-sent from paramsFromContext `$h` (queryModel), not
+    // always-pushed here.
 
-  // Skip the API-side Haiku thinking summarizer — the summary is only used
-  // for ctrl+o display, which interactive users rarely open. The API returns
-  // redacted_thinking blocks instead; AssistantRedactedThinkingMessage already
-  // renders those as a stub. SDK / print-mode keep summaries because callers
-  // may iterate over thinking content. Users can opt back in via settings.json
-  // showThinkingSummaries.
-  if (
-    includeFirstPartyOnlyBetas &&
-    modelSupportsISP(model) &&
-    !getIsNonInteractiveSession() &&
-    getInitialSettings().showThinkingSummaries !== true
-  ) {
-    betaHeaders.push(REDACT_THINKING_BETA_HEADER)
-  }
+    // Skip the API-side Haiku thinking summarizer — the summary is only used
+    // for ctrl+o display, which interactive users rarely open. The API returns
+    // redacted_thinking blocks instead; AssistantRedactedThinkingMessage already
+    // renders those as a stub. SDK / print-mode keep summaries because callers
+    // may iterate over thinking content. Users can opt back in via settings.json
+    // showThinkingSummaries.
+    if (
+      includeFirstPartyOnlyBetas &&
+      modelSupportsISP(model) &&
+      !getIsNonInteractiveSession() &&
+      getInitialSettings().showThinkingSummaries !== true
+    ) {
+      betaHeaders.push(REDACT_THINKING_BETA_HEADER)
+    }
 
-  // Add context management beta for tool clearing or thinking preservation.
-  // Tool clearing is enabled by default for all users (upstream gates on ant);
-  // thinking preservation activates when the model supports context management.
-  const toolClearingOptIn =
-    isEnvTruthy(process.env.USE_API_CONTEXT_MANAGEMENT) ||
-    modelSupportsContextManagement(model)
+    // Add context management beta for tool clearing or thinking preservation.
+    // Tool clearing is enabled by default for all users (upstream gates on ant);
+    // thinking preservation activates when the model supports context management.
+    const toolClearingOptIn =
+      isEnvTruthy(process.env.USE_API_CONTEXT_MANAGEMENT) ||
+      modelSupportsContextManagement(model)
 
-  const thinkingPreservationEnabled = modelSupportsContextManagement(model)
+    const thinkingPreservationEnabled = modelSupportsContextManagement(model)
 
-  if (
-    shouldIncludeFirstPartyOnlyBetas() &&
-    (toolClearingOptIn || thinkingPreservationEnabled)
-  ) {
-    betaHeaders.push(CONTEXT_MANAGEMENT_BETA_HEADER)
-  }
-  // Add strict tool use beta if experiment is enabled.
-  // densable nee when: firstPartyCapabilityBetas(=y$&&!JK) && mCn(model) &&
-  // tengu_tool_pear. modelSupportsStructuredOutputs already encodes y$/JK/
-  // DISABLE/sr — do NOT re-gate on the narrower firstParty|foundry
-  // includeFirstPartyOnlyBetas (would FN anthropicAws/mantle).
-  const strictToolsEnabled =
-    checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_tool_pear')
-  // 3P default: false. API rejects strict + token-efficient-tools together
-  // (tool_use.py:139), so these are mutually exclusive — strict wins.
-  const tokenEfficientToolsEnabled =
-    !strictToolsEnabled &&
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_json_tools', false)
-  if (modelSupportsStructuredOutputs(model) && strictToolsEnabled) {
-    betaHeaders.push(STRUCTURED_OUTPUTS_BETA_HEADER)
-  }
-  // JSON tool_use format (FC v3) — ~4.5% output token reduction vs ANTML.
-  // Sends the v2 header (2026-03-28) added in anthropics/anthropic#337072 to
-  // isolate the CC A/B cohort from ~9.2M/week existing v1 senders. Ant-only
-  // while the restored JsonToolUseOutputParser soaks.
-  if (
-    process.env.USER_TYPE === 'ant' &&
-    includeFirstPartyOnlyBetas &&
-    tokenEfficientToolsEnabled
-  ) {
-    betaHeaders.push(TOKEN_EFFICIENT_TOOLS_BETA_HEADER)
-  }
+    if (
+      shouldIncludeFirstPartyOnlyBetas() &&
+      (toolClearingOptIn || thinkingPreservationEnabled)
+    ) {
+      betaHeaders.push(CONTEXT_MANAGEMENT_BETA_HEADER)
+    }
+    // Add strict tool use beta if experiment is enabled.
+    // densable nee when: firstPartyCapabilityBetas(=y$&&!JK) && mCn(model) &&
+    // tengu_tool_pear. modelSupportsStructuredOutputs already encodes y$/JK/
+    // DISABLE/sr — do NOT re-gate on the narrower firstParty|foundry
+    // includeFirstPartyOnlyBetas (would FN anthropicAws/mantle).
+    const strictToolsEnabled =
+      checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_tool_pear')
+    // 3P default: false. API rejects strict + token-efficient-tools together
+    // (tool_use.py:139), so these are mutually exclusive — strict wins.
+    const tokenEfficientToolsEnabled =
+      !strictToolsEnabled &&
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_json_tools', false)
+    if (modelSupportsStructuredOutputs(model) && strictToolsEnabled) {
+      betaHeaders.push(STRUCTURED_OUTPUTS_BETA_HEADER)
+    }
+    // JSON tool_use format (FC v3) — ~4.5% output token reduction vs ANTML.
+    // Sends the v2 header (2026-03-28) added in anthropics/anthropic#337072 to
+    // isolate the CC A/B cohort from ~9.2M/week existing v1 senders. Ant-only
+    // while the restored JsonToolUseOutputParser soaks.
+    if (
+      process.env.USER_TYPE === 'ant' &&
+      includeFirstPartyOnlyBetas &&
+      tokenEfficientToolsEnabled
+    ) {
+      betaHeaders.push(TOKEN_EFFICIENT_TOOLS_BETA_HEADER)
+    }
 
-  // Add web search beta for Vertex Claude 4.0+ models only
-  if (provider === 'vertex' && vertexModelSupportsWebSearch(model)) {
-    betaHeaders.push(WEB_SEARCH_BETA_HEADER)
-  }
-  // Foundry only ships models that already support Web Search
-  if (provider === 'foundry') {
-    betaHeaders.push(WEB_SEARCH_BETA_HEADER)
-  }
+    // Add web search beta for Vertex Claude 4.0+ models only
+    if (provider === 'vertex' && vertexModelSupportsWebSearch(model)) {
+      betaHeaders.push(WEB_SEARCH_BETA_HEADER)
+    }
+    // Foundry only ships models that already support Web Search
+    if (provider === 'foundry') {
+      betaHeaders.push(WEB_SEARCH_BETA_HEADER)
+    }
 
-  // densable J8t → push o3 (not firstParty-gated; xNi keeps o3 on 3P).
-  if (shouldUseMidConversationSystem({ model })) {
-    betaHeaders.push(MID_CONVERSATION_SYSTEM_BETA_HEADER)
-  }
+    // densable J8t → push o3 (not firstParty-gated; xNi keeps o3 on 3P).
+    if (shouldUseMidConversationSystem({ model })) {
+      betaHeaders.push(MID_CONVERSATION_SYSTEM_BETA_HEADER)
+    }
 
-  // Always send the beta header for 1P/anthropicAws with first-party base URL.
-  if (shouldUsePromptCachingScopeBeta()) {
-    betaHeaders.push(PROMPT_CACHING_SCOPE_BETA_HEADER)
-  }
+    // Always send the beta header for 1P/anthropicAws with first-party base URL.
+    if (shouldUsePromptCachingScopeBeta()) {
+      betaHeaders.push(PROMPT_CACHING_SCOPE_BETA_HEADER)
+    }
 
-  // If ANTHROPIC_BETAS is set, split it by commas and add to betaHeaders.
-  // This is an explicit user opt-in, so honor it regardless of model.
-  if (process.env.ANTHROPIC_BETAS) {
-    betaHeaders.push(
-      ...process.env.ANTHROPIC_BETAS.split(',')
-        .map(_ => _.trim())
-        .filter(Boolean),
-    )
-  }
-  return betaHeaders
-})
+    // If ANTHROPIC_BETAS is set, split it by commas and add to betaHeaders.
+    // This is an explicit user opt-in, so honor it regardless of model.
+    if (process.env.ANTHROPIC_BETAS) {
+      betaHeaders.push(
+        ...process.env.ANTHROPIC_BETAS.split(',')
+          .map(_ => _.trim())
+          .filter(Boolean),
+      )
+    }
+    return betaHeaders
+  },
+)
 
 /**
  * densable LLc — betas kept when xNi strips non-1P-ish provider lists.
@@ -541,22 +608,32 @@ function stripRefusedContext1mBeta(model: string, betas: string[]): string[] {
     : betas
 }
 
-const getBaseModelBetas = memoize((model: string): string[] => {
-  const modelBetas = getAllModelBetas(model)
-  let filtered =
-    getAPIProvider() === 'bedrock'
-      ? modelBetas.filter(b => !BEDROCK_EXTRA_PARAMS_HEADERS.has(b))
-      : modelBetas
-  // densable xNi on non-1P-ish (bedrock/vertex/gateway/openai/…): keep o3.
-  filtered = filterBetasForProvider(filtered)
-  return filtered
-})
+const getBaseModelBetas = createBetasSessionMemo(
+  bag => bag.baseModelBetas,
+  (bag, next) => {
+    bag.baseModelBetas = next
+  },
+  (model: string): string[] => {
+    const modelBetas = getAllModelBetas(model)
+    let filtered =
+      getAPIProvider() === 'bedrock'
+        ? modelBetas.filter(b => !BEDROCK_EXTRA_PARAMS_HEADERS.has(b))
+        : modelBetas
+    // densable xNi on non-1P-ish (bedrock/vertex/gateway/openai/…): keep o3.
+    filtered = filterBetasForProvider(filtered)
+    return filtered
+  },
+)
 
 export function getModelBetas(model: string): string[] {
   return stripRefusedContext1mBeta(model, getBaseModelBetas(model))
 }
 
-const getBaseBedrockExtraBodyParamsBetas = memoize(
+const getBaseBedrockExtraBodyParamsBetas = createBetasSessionMemo(
+  bag => bag.bedrockExtraBetas,
+  (bag, next) => {
+    bag.bedrockExtraBetas = next
+  },
   (model: string): string[] => {
     const modelBetas = getAllModelBetas(model)
     return modelBetas.filter(b => BEDROCK_EXTRA_PARAMS_HEADERS.has(b))
@@ -615,7 +692,9 @@ export function getMergedBetas(
 }
 
 export function clearBetasCaches(): void {
-  getAllModelBetas.cache?.clear?.()
-  getBaseModelBetas.cache?.clear?.()
-  getBaseBedrockExtraBodyParamsBetas.cache?.clear?.()
+  const bag = betasCacheSlot.peek(getBootstrapSession())
+  if (!bag) return
+  bag.allModelBetas.clear()
+  bag.baseModelBetas.clear()
+  bag.bedrockExtraBetas.clear()
 }

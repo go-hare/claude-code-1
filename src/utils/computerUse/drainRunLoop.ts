@@ -9,16 +9,21 @@ import { requireComputerUseSwift } from './swiftLoader.js'
  * DispatchQueue.main. Under libuv (Node/bun) that queue never drains — the
  * promises hang. Electron drains it via CFRunLoop so Cowork doesn't need this.
  *
- * One refcounted setInterval calls `_drainMainRunLoop` (RunLoop.main.run)
- * every 1ms while any main-queue-dependent call is pending. Multiple
- * concurrent drainRunLoop() calls share the single pump via retain/release.
+ * One process-global refcounted setInterval calls `_drainMainRunLoop`
+ * (RunLoop.main.run) every 1ms while any main-queue-dependent call is pending
+ * across any host. Multiple concurrent drainRunLoop() calls share the single
+ * pump via retain/release.
  */
 
 let pump: ReturnType<typeof setInterval> | undefined
 let pending = 0
 
+type SwiftWithDrainLoop = {
+  _drainMainRunLoop?: () => void
+}
+
 function drainTick(cu: ReturnType<typeof requireComputerUseSwift>): void {
-  ;(cu as any)?._drainMainRunLoop?.()
+  ;(cu as unknown as SwiftWithDrainLoop)?._drainMainRunLoop?.()
 }
 
 function retain(): void {
@@ -30,6 +35,10 @@ function retain(): void {
 }
 
 function release(): void {
+  if (pending <= 0) {
+    pending = 0
+    return
+  }
   pending--
   if (pending <= 0 && pump !== undefined) {
     clearInterval(pump)

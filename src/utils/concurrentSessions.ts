@@ -28,6 +28,7 @@ import {
   isProcessRunning,
 } from './genericProcessUtils.js'
 import { getPlatform } from './platform.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import { getAgentId } from './teammate.js'
 import { isDeadMessagingPid } from './udsMessaging.js'
@@ -88,8 +89,30 @@ export async function isSpareJobClaimed(
   }
 }
 
-/** densable bornSpare — in-process stamp so first busy can clear spare. */
-let sessionBornSpare = false
+type ConcurrentSessionsHostState = {
+  /** densable bornSpare — in-process stamp so first busy can clear spare. */
+  sessionBornSpare: boolean
+  /** densable $_a.registrySweepPermitted — first probe wins for the host. */
+  registrySweepPermitted: Promise<boolean> | undefined
+  registeredName: RegisteredSessionName | undefined
+  formerNames: FormerSessionName[]
+  /** densable `$_a.heldNames` — Vu(name) → last source. */
+  heldNames: Map<string, SessionNameSource>
+}
+
+const concurrentSessionsHostSlot = new HostSlot<ConcurrentSessionsHostState>(
+  () => ({
+    sessionBornSpare: false,
+    registrySweepPermitted: undefined,
+    registeredName: undefined,
+    formerNames: [],
+    heldNames: new Map<string, SessionNameSource>(),
+  }),
+)
+
+function getConcurrentSessionsHostState(): ConcurrentSessionsHostState {
+  return concurrentSessionsHostSlot.of(getBootstrapSessionHost())
+}
 
 function getSessionsDir(): string {
   return join(getClaudeConfigHomeDir(), 'sessions')
@@ -97,9 +120,6 @@ function getSessionsDir(): string {
 
 /** densable wYb — E_a requires this many /proc pid dirs. */
 const PROC_SWEEP_MIN_PIDS = 16
-
-/** densable $_a.registrySweepPermitted — first probe wins for the process. */
-let registrySweepPermitted: Promise<boolean> | undefined
 
 /**
  * densable E_a — /proc is a real pid namespace (linux/wsl only).
@@ -151,11 +171,12 @@ async function probeRegistrySweepPermitted(): Promise<boolean> {
 
 /** densable fBr / $_a.isRegistrySweepPermitted. */
 export function isRegistrySweepPermitted(): Promise<boolean> {
-  return (registrySweepPermitted ??= probeRegistrySweepPermitted())
+  const hostState = getConcurrentSessionsHostState()
+  return (hostState.registrySweepPermitted ??= probeRegistrySweepPermitted())
 }
 
 export function _resetRegistrySweepPermittedForTests(): void {
-  registrySweepPermitted = undefined
+  getConcurrentSessionsHostState().registrySweepPermitted = undefined
 }
 
 /**
@@ -260,8 +281,10 @@ export async function registerSession(storageV5?: unknown): Promise<boolean> {
       )
     }
     // densable 2.1.238 #28 — bornSpare in-process; spare:true only while unclaimed.
-    sessionBornSpare = kind === 'bg' && process.env.CLAUDE_BG_SOURCE === 'spare'
-    const spare = sessionBornSpare
+    const hostState = getConcurrentSessionsHostState()
+    hostState.sessionBornSpare =
+      kind === 'bg' && process.env.CLAUDE_BG_SOURCE === 'spare'
+    const spare = hostState.sessionBornSpare
       ? computeSpareFlag({
           kind,
           bgSource: process.env.CLAUDE_BG_SOURCE,
@@ -443,11 +466,6 @@ export const FORMER_NAME_MIN_HOLD_MS = 10_000
 /** densable `_ti` / MAX_FORMER_NAMES. */
 export const MAX_FORMER_NAMES = 3
 
-let registeredName: RegisteredSessionName | undefined
-let formerNames: FormerSessionName[] = []
-/** densable `$_a.heldNames` — Vu(name) → last source. */
-const heldNames = new Map<string, SessionNameSource>()
-
 /**
  * densable `$_a.setRegisteredName`.
  * Same-key rename keeps `since` and does not push held/former.
@@ -456,48 +474,52 @@ export function setRegisteredName(
   name: string,
   source: SessionNameSource,
 ): void {
-  const prev = registeredName
+  const hostState = getConcurrentSessionsHostState()
+  const prev = hostState.registeredName
   const now = Date.now()
   const key = vu(name)
   if (prev && vu(prev.name) === key) {
-    registeredName = { name, source, since: prev.since }
+    hostState.registeredName = { name, source, since: prev.since }
     return
   }
-  if (prev) heldNames.set(vu(prev.name), prev.source)
-  heldNames.delete(key)
-  formerNames = formerNames.filter(entry => vu(entry.name) !== key)
+  if (prev) hostState.heldNames.set(vu(prev.name), prev.source)
+  hostState.heldNames.delete(key)
+  hostState.formerNames = hostState.formerNames.filter(
+    entry => vu(entry.name) !== key,
+  )
   if (
     prev &&
     prev.source !== 'derived' &&
     now - prev.since >= FORMER_NAME_MIN_HOLD_MS
   ) {
     const prevKey = vu(prev.name)
-    formerNames = [
+    hostState.formerNames = [
       { name: prev.name, until: now },
-      ...formerNames.filter(entry => vu(entry.name) !== prevKey),
+      ...hostState.formerNames.filter(entry => vu(entry.name) !== prevKey),
     ].slice(0, MAX_FORMER_NAMES)
   }
-  registeredName = { name, source, since: now }
+  hostState.registeredName = { name, source, since: now }
 }
 
 /** densable `QV`. */
 export function getRegisteredSessionName(): RegisteredSessionName | undefined {
-  return registeredName
+  return getConcurrentSessionsHostState().registeredName
 }
 
 /** densable `UYb`. */
 export function getHeldSessionNames(): ReadonlyMap<string, SessionNameSource> {
-  return heldNames
+  return getConcurrentSessionsHostState().heldNames
 }
 
 export function getFormerSessionNames(): readonly FormerSessionName[] {
-  return formerNames
+  return getConcurrentSessionsHostState().formerNames
 }
 
 export function __resetRegisteredSessionNameForTests(): void {
-  registeredName = undefined
-  formerNames = []
-  heldNames.clear()
+  const hostState = getConcurrentSessionsHostState()
+  hostState.registeredName = undefined
+  hostState.formerNames = []
+  hostState.heldNames.clear()
 }
 
 /**
@@ -511,14 +533,16 @@ export async function updateSessionName(
 ): Promise<boolean> {
   if (!name) return true
   setRegisteredName(name, source)
+  const hostState = getConcurrentSessionsHostState()
   const persistSource =
     source === 'derived' || source === 'collision' ? source : undefined
   return updatePidFile(
     {
       name,
       nameSource: persistSource,
-      formerNames: formerNames.length > 0 ? formerNames : undefined,
-      nameSince: registeredName?.since ?? Date.now(),
+      formerNames:
+        hostState.formerNames.length > 0 ? hostState.formerNames : undefined,
+      nameSince: hostState.registeredName?.since ?? Date.now(),
       updatedAt: Date.now(),
     },
     storageV5,
@@ -588,7 +612,8 @@ export async function updateSessionActivity(patch: {
 }): Promise<void> {
   if (!feature('BG_SESSIONS')) return
   // densable zMn — first busy of a bornSpare worker clears spare:true.
-  const clearSpare = sessionBornSpare && patch.status === 'busy'
+  const clearSpare =
+    getConcurrentSessionsHostState().sessionBornSpare && patch.status === 'busy'
   // Official tMe @180542998 — status write also stamps statusUpdatedAt.
   const now = Date.now()
   await updatePidFile({

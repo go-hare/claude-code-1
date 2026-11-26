@@ -10,6 +10,10 @@ import { resetSentSkillNames } from '../../utils/attachments.js'
 import { clearClassifierApprovals } from '../../utils/classifierApprovals.js'
 import { resetGetMemoryFilesCache } from '../../utils/claudemd.js'
 import { logError } from '../../utils/log.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { clearSessionMessagesCache } from '../../utils/sessionStorage.js'
 import { clearBetaTracingState } from '../../utils/telemetry/betaSessionTracing.js'
 import { resetMicrocompactState } from './microCompact.js'
@@ -18,11 +22,18 @@ import { resetMicrocompactState } from './microCompact.js'
  * Compact-scoped cleanup callbacks registered by REPL or other long-lived
  * components. Called during runPostCompactCleanup() so instance-scoped state
  * (e.g. contentReplacementState) is freed alongside module-level caches.
+ * Official 2.1.331: scoped per root `Session` via `RootSessionSlot`.
  */
-const compactCleanupCallbacks: Array<() => void> = []
+const compactCleanupCallbacksBySession = new RootSessionSlot(
+  () => [] as Array<() => void>,
+)
 
 export function registerCompactCleanup(callback: () => void): void {
-  compactCleanupCallbacks.push(callback)
+  compactCleanupCallbacksBySession.of(getBootstrapSession()).push(callback)
+}
+
+export function clearCompactCleanupCallbacksForTesting(): void {
+  compactCleanupCallbacksBySession.of(getBootstrapSession()).length = 0
 }
 
 /**
@@ -92,7 +103,7 @@ export function runPostCompactCleanup(querySource?: QuerySource): void {
   resetSentSkillNames()
   clearBetaTracingState()
   clearSessionMessagesCache()
-  for (const cb of compactCleanupCallbacks) {
+  for (const cb of compactCleanupCallbacksBySession.of(getBootstrapSession())) {
     try {
       cb()
     } catch (error) {

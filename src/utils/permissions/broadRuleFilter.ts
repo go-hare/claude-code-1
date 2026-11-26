@@ -20,6 +20,7 @@
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { getSettingsForSource } from '../settings/settings.js'
 import { normalizeLegacyToolName } from './permissionRuleParser.js'
 
@@ -313,11 +314,14 @@ export function matchesWildcardBroadPrefix(
 }
 
 /**
- * Cache mirroring official `_L4`. Keyed by `${toolName}\x00${ruleContent ?? ''}`.
- * Map chosen (not WeakMap) because keys are strings; entries live for the
- * process lifetime, matching the official module-level singleton.
+ * Cache mirroring official `_L4`. Keyed by `${toolName}\x00${ruleContent ?? ''}`,
+ * isolated per SessionHost via `HostSlot`.
  */
-const broadRuleCache = new Map<string, boolean>()
+const broadRuleCacheByHost = new HostSlot<Map<string, boolean>>(() => new Map())
+
+function getBroadRuleCache(): Map<string, boolean> {
+  return broadRuleCacheByHost.of(getBootstrapSessionHost())
+}
 
 /**
  * Auto-mode detection (official `PL4` / densable xa @177386583).
@@ -558,7 +562,8 @@ export function isBroadRule(
   }
 
   const key = `${toolName}\x00${ruleContent ?? ''}`
-  const cached = broadRuleCache.get(key)
+  const cache = getBroadRuleCache()
+  const cached = cache.get(key)
   if (cached !== undefined) return cached
   // Official nWn: Q9n(Bash) || tWn(PowerShell) || k8a(Agent) || lpv(Monitor)
   const result =
@@ -566,7 +571,7 @@ export function isBroadRule(
     isPowerShellBroadRule(toolName, ruleContent) ||
     isAgentBroadRule(toolName) ||
     isMonitorBroadRule(toolName)
-  broadRuleCache.set(key, result)
+  cache.set(key, result)
   return result
 }
 
@@ -575,5 +580,9 @@ export function isBroadRule(
  * `autoModeState._resetForTesting()`.
  */
 export function _resetBroadRuleCacheForTesting(): void {
-  broadRuleCache.clear()
+  broadRuleCacheByHost.peek(getBootstrapSessionHost())?.clear()
+}
+
+export function _getBroadRuleCacheForTesting(): Map<string, boolean> {
+  return getBroadRuleCache()
 }

@@ -1,4 +1,5 @@
 import { queryHaiku } from '../api/claude.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { getSkillLearningConfig } from './config.js'
 import type { InstinctCandidate } from './instinctParser.js'
@@ -37,12 +38,24 @@ const MAX_OBSERVATIONS_PER_CALL = 30
 const MAX_CANDIDATES_PER_CALL = 3
 
 // --- Circuit breaker state ---
-let consecutiveFailures = 0
-let circuitOpenUntil = 0
+type CircuitBreakerHostState = {
+  consecutiveFailures: number
+  circuitOpenUntil: number
+}
+
+const circuitBreakerHostSlot = new HostSlot<CircuitBreakerHostState>(() => ({
+  consecutiveFailures: 0,
+  circuitOpenUntil: 0,
+}))
+
+function getCircuitBreakerState(): CircuitBreakerHostState {
+  return circuitBreakerHostSlot.of(getBootstrapSessionHost())
+}
 
 export function resetCircuitBreaker(): void {
-  consecutiveFailures = 0
-  circuitOpenUntil = 0
+  const state = getCircuitBreakerState()
+  state.consecutiveFailures = 0
+  state.circuitOpenUntil = 0
 }
 
 const LLM_OBSERVER_SYSTEM_PROMPT = `You analyse a short sequence of observations from a coding-assistant session (user messages, tool invocations with outcomes, assistant messages) and extract atomic, reusable "instincts" — behavioural patterns that would help the assistant act correctly in future similar situations.
@@ -82,7 +95,8 @@ async function analyseWithHaiku(
   if (observations.length === 0) return []
 
   // Circuit breaker: if the circuit is open, skip queryHaiku entirely.
-  if (Date.now() < circuitOpenUntil) {
+  const circuit = getCircuitBreakerState()
+  if (Date.now() < circuit.circuitOpenUntil) {
     return runHeuristicFallback(observations, ctx)
   }
 
@@ -106,14 +120,17 @@ async function analyseWithHaiku(
       },
     })
     // Success: reset failure counter.
-    consecutiveFailures = 0
+    circuit.consecutiveFailures = 0
     responseText = extractResponseText(response.message?.content)
   } catch {
     // Haiku failure (timeout / rate limit / bad response) — increment failure
     // counter and potentially open the circuit breaker.
-    consecutiveFailures++
-    if (consecutiveFailures >= getSkillLearningConfig().llm.failureThreshold) {
-      circuitOpenUntil =
+    circuit.consecutiveFailures++
+    if (
+      circuit.consecutiveFailures >=
+      getSkillLearningConfig().llm.failureThreshold
+    ) {
+      circuit.circuitOpenUntil =
         Date.now() + getSkillLearningConfig().llm.circuitCooldownMs
     }
     return runHeuristicFallback(observations, ctx)
@@ -124,9 +141,12 @@ async function analyseWithHaiku(
     // Empty / malformed LLM output — count as a failure so the circuit
     // breaker opens if Haiku is systematically returning garbage (e.g. the
     // model version drifted and no longer emits the expected JSON).
-    consecutiveFailures++
-    if (consecutiveFailures >= getSkillLearningConfig().llm.failureThreshold) {
-      circuitOpenUntil =
+    circuit.consecutiveFailures++
+    if (
+      circuit.consecutiveFailures >=
+      getSkillLearningConfig().llm.failureThreshold
+    ) {
+      circuit.circuitOpenUntil =
         Date.now() + getSkillLearningConfig().llm.circuitCooldownMs
     }
     return runHeuristicFallback(observations, ctx)

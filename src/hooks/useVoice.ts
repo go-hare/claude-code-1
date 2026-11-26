@@ -34,6 +34,7 @@ import { errorMessage, toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'
 import { logError } from '../utils/log.js'
 import { getPlatform, type Platform } from '../utils/platform.js'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import { sleep } from '../utils/sleep.js'
 
@@ -191,7 +192,13 @@ export function normalizeLanguageForSTT(language: string | undefined): {
 // On macOS, loading the native audio module can trigger a TCC microphone
 // permission prompt — we must avoid that until voice input is actually enabled.
 type VoiceModule = typeof import('../services/voice.js')
-let voiceModule: VoiceModule | null = null
+const voiceModuleBySession = new RootSessionSlot<{
+  module: VoiceModule | null
+}>(() => ({ module: null }))
+
+function getVoiceModuleSlot(): { module: VoiceModule | null } {
+  return voiceModuleBySession.of(getBootstrapSession())
+}
 
 type VoiceState = 'idle' | 'recording' | 'processing'
 
@@ -256,6 +263,7 @@ export function useVoice({
   focusMode,
 }: UseVoiceOptions): UseVoiceReturn {
   const [state, setState] = useState<VoiceState>('idle')
+  const [voiceModuleSlot] = useState(() => getVoiceModuleSlot())
   const stateRef = useRef<VoiceState>('idle')
   const connectionRef = useRef<VoiceStreamConnection | null>(null)
   const accumulatedRef = useRef('')
@@ -357,7 +365,7 @@ export function useVoice({
       focusSilenceTimerRef.current = null
     }
     silenceTimedOutRef.current = false
-    voiceModule?.stopRecording()
+    voiceModuleSlot.module?.stopRecording()
     if (connectionRef.current) {
       connectionRef.current.close()
       connectionRef.current = null
@@ -370,7 +378,7 @@ export function useVoice({
         return prev
       return { ...prev, voiceInterimTranscript: '', voiceAudioLevels: [] }
     })
-  }, [setVoiceState])
+  }, [setVoiceState, voiceModuleSlot])
 
   function finishRecording(): void {
     logForDebugging(
@@ -388,7 +396,7 @@ export function useVoice({
     const focusTriggered = focusTriggeredRef.current
     focusTriggeredRef.current = false
     updateState('processing')
-    voiceModule?.stopRecording()
+    voiceModuleSlot.module?.stopRecording()
     // Capture duration BEFORE the finalize round-trip so that the WebSocket
     // wait time is not included (otherwise a quick tap looks like > 2s).
     // All ref-backed values are captured here, BEFORE the async boundary —
@@ -596,12 +604,13 @@ export function useVoice({
   // (cold coreaudiod). setImmediate doesn't help: it yields one tick, then the
   // dlopen still blocks. The first voice keypress pays the dlopen cost instead.
   useEffect(() => {
-    if (enabled && !voiceModule) {
+    const slot = voiceModuleSlot
+    if (enabled && !slot.module) {
       void import('../services/voice.js').then(mod => {
-        voiceModule = mod
+        slot.module = mod
       })
     }
-  }, [enabled])
+  }, [enabled, voiceModuleSlot])
 
   // ── Focus silence timer ────────────────────────────────────────────
   // Arms (or resets) a timer that tears down the focus-mode session
@@ -673,13 +682,14 @@ export function useVoice({
         void startRecordingSession()
         armFocusSilenceTimer()
       }
-      if (voiceModule) {
+      const slot = voiceModuleSlot
+      if (slot.module) {
         beginFocusRecording()
       } else {
         // Voice module is loading (async import resolves from cache as a
         // microtask). Wait for it before starting the recording session.
         void import('../services/voice.js').then(mod => {
-          voiceModule = mod
+          slot.module = mod
           beginFocusRecording()
         })
       }
@@ -699,7 +709,8 @@ export function useVoice({
 
   // ── Start a new recording session (voice_stream connect + audio) ──
   async function startRecordingSession(): Promise<void> {
-    if (!voiceModule) {
+    const loadedVoiceModule = voiceModuleSlot.module
+    if (!loadedVoiceModule) {
       onErrorRef.current?.(
         'Voice module not loaded yet. Try again in a moment.',
       )
@@ -743,7 +754,7 @@ export function useVoice({
     const myGen = ++sessionGenRef.current
 
     // ── Pre-check: can we actually record audio? ──────────────
-    const availability = await voiceModule.checkRecordingAvailability()
+    const availability = await loadedVoiceModule.checkRecordingAvailability()
     if (!availability.available) {
       logForDebugging(
         `[voice] Recording not available: ${availability.reason ?? 'unknown'}`,
@@ -777,7 +788,7 @@ export function useVoice({
       '[voice] startRecording: buffering audio while WebSocket connects',
     )
     audioLevelsRef.current = []
-    const started = await voiceModule.startRecording(
+    const started = await loadedVoiceModule.startRecording(
       (chunk: Buffer) => {
         // Copy for fullAudioRef replay buffer. send() in voiceStreamSTT
         // copies again defensively — acceptable overhead at audio rates.

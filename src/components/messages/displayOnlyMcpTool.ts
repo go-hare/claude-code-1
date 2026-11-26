@@ -1,9 +1,14 @@
 import { MCPTool } from '@claude-code/builtin-tools/tools/MCPTool/MCPTool.js'
 import type { Tool } from '../../Tool.js'
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
 const DISPLAY_ONLY_CACHE_MAX = 256
-const displayOnlyCache = new Map<string, Tool>()
+const displayOnlyCacheByHost = new HostSlot<Map<string, Tool>>(() => new Map())
+
+function getDisplayOnlyCache(): Map<string, Tool> {
+  return displayOnlyCacheByHost.of(getBootstrapSessionHost())
+}
 
 export type ParsedMcpToolName = {
   serverName: string
@@ -43,6 +48,7 @@ export function getDisplayOnlyMcpTool(
   const parsed = parseDisplayMcpToolName(fullName)
   if (!parsed) return undefined
 
+  const displayOnlyCache = getDisplayOnlyCache()
   const cached = displayOnlyCache.get(fullName)
   if (cached) return cached
 

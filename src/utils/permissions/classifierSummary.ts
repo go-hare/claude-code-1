@@ -13,6 +13,7 @@
 import { CLASSIFIER_HAND_OFF_ADDENDUM } from '../../daemon/jobState.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { RequiresActionDetails } from '../sessionState.js'
 
 export type ClassifierSummaryMode = 'llm' | 'heuristic'
@@ -282,8 +283,21 @@ export type CompletedClassifierLlmHost = {
   ) => Promise<Partial<PostTurnSummaryPayload> | null | undefined>
 }
 
-let completedClassifierLlmHost: CompletedClassifierLlmHost | null = null
-let defaultCompletedClassifierLlmHostInstalled = false
+type ClassifierSummaryHostState = {
+  completedClassifierLlmHost: CompletedClassifierLlmHost | null
+  defaultCompletedClassifierLlmHostInstalled: boolean
+}
+
+const classifierSummaryStateByHost = new HostSlot<ClassifierSummaryHostState>(
+  () => ({
+    completedClassifierLlmHost: null,
+    defaultCompletedClassifierLlmHostInstalled: false,
+  }),
+)
+
+function getClassifierSummaryHostState(): ClassifierSummaryHostState {
+  return classifierSummaryStateByHost.of(getBootstrapSessionHost())
+}
 
 export const COMPLETED_CLASSIFIER_SYSTEM_PROMPT = `Write a short one-line status for a coding agent turn that just finished. It is shown in a sidebar / status bar.
 
@@ -377,7 +391,10 @@ export function createDefaultCompletedClassifierLlmHost(opts?: {
 export function ensureCompletedClassifierLlmHost(
   env: NodeJS.ProcessEnv = process.env,
 ): CompletedClassifierLlmHost | null {
-  if (completedClassifierLlmHost) return completedClassifierLlmHost
+  const hostState = getClassifierSummaryHostState()
+  if (hostState.completedClassifierLlmHost) {
+    return hostState.completedClassifierLlmHost
+  }
   const mode = resolveClassifierSummaryMode(
     resolveClassifierCaps(
       resolveClassifierSurfaces(env.CLAUDE_CODE_ENTRYPOINT),
@@ -386,28 +403,31 @@ export function ensureCompletedClassifierLlmHost(
     env,
   )
   if (mode !== 'llm') return null
-  if (!defaultCompletedClassifierLlmHostInstalled) {
-    completedClassifierLlmHost = createDefaultCompletedClassifierLlmHost()
-    defaultCompletedClassifierLlmHostInstalled = true
+  if (!hostState.defaultCompletedClassifierLlmHostInstalled) {
+    hostState.completedClassifierLlmHost =
+      createDefaultCompletedClassifierLlmHost()
+    hostState.defaultCompletedClassifierLlmHostInstalled = true
   }
-  return completedClassifierLlmHost
+  return hostState.completedClassifierLlmHost
 }
 
 export function setCompletedClassifierLlmHost(
   host: CompletedClassifierLlmHost | null,
 ): void {
-  completedClassifierLlmHost = host
-  // Explicit host (incl. null) wins over auto-install for this process.
-  defaultCompletedClassifierLlmHostInstalled = host !== null
+  const hostState = getClassifierSummaryHostState()
+  hostState.completedClassifierLlmHost = host
+  // Explicit host (incl. null) wins over auto-install for this host.
+  hostState.defaultCompletedClassifierLlmHostInstalled = host !== null
 }
 
 export function getCompletedClassifierLlmHost(): CompletedClassifierLlmHost | null {
-  return completedClassifierLlmHost
+  return getClassifierSummaryHostState().completedClassifierLlmHost
 }
 
 export function resetCompletedClassifierLlmHostForTests(): void {
-  completedClassifierLlmHost = null
-  defaultCompletedClassifierLlmHostInstalled = false
+  const hostState = getClassifierSummaryHostState()
+  hostState.completedClassifierLlmHost = null
+  hostState.defaultCompletedClassifierLlmHostInstalled = false
 }
 
 /**
@@ -429,7 +449,10 @@ export async function buildCompletedPostTurnSummaryWithHost(
     ),
     env,
   )
-  const host = opts?.host !== undefined ? opts.host : completedClassifierLlmHost
+  const host =
+    opts?.host !== undefined
+      ? opts.host
+      : getClassifierSummaryHostState().completedClassifierLlmHost
   if (mode === 'llm' && host) {
     try {
       const llm = await host.generate({

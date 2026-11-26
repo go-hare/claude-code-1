@@ -13,6 +13,7 @@ import { isAbsolute, join } from 'path'
 import { isInBundledMode } from './bundledMode.js'
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 export const PROCESS_WRAPPER_ENV_KEY = 'CLAUDE_CODE_PROCESS_WRAPPER'
 
@@ -198,10 +199,23 @@ export function validateProcessWrapperArgv(
   }
 }
 
-// --- process-level cache (official sUr / Btt / p5i) ---
+// --- host-level cache (official sUr / Btt / p5i) ---
 
-let cachedRaw: string | undefined
-let cachedResult: ProcessWrapperParseResult = EMPTY_RESULT
+type ProcessWrapperCacheHostState = {
+  cachedRaw: string | undefined
+  cachedResult: ProcessWrapperParseResult
+}
+
+const processWrapperCacheHostSlot = new HostSlot<ProcessWrapperCacheHostState>(
+  () => ({
+    cachedRaw: undefined,
+    cachedResult: EMPTY_RESULT,
+  }),
+)
+
+function getProcessWrapperCacheHostState(): ProcessWrapperCacheHostState {
+  return processWrapperCacheHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Official sUr — resolve PROCESS_WRAPPER from env with cache + log on new error.
@@ -212,29 +226,34 @@ export function resolveProcessWrapper(
   const raw = env[PROCESS_WRAPPER_ENV_KEY]
   if (!raw) return EMPTY_RESULT
 
-  // When using non-process env injection, skip process-level cache.
+  // When using non-process env injection, skip host-level cache.
   if (env !== process.env) {
     return validateProcessWrapperArgv(raw)
   }
 
-  const prevError = raw === cachedRaw ? cachedResult.error : null
-  if (raw === cachedRaw && prevError === null) {
-    return cachedResult
+  const hostState = getProcessWrapperCacheHostState()
+  const prevError =
+    raw === hostState.cachedRaw ? hostState.cachedResult.error : null
+  if (raw === hostState.cachedRaw && prevError === null) {
+    return hostState.cachedResult
   }
-  cachedRaw = raw
-  cachedResult = validateProcessWrapperArgv(raw)
-  if (cachedResult.error && cachedResult.error !== prevError) {
+  hostState.cachedRaw = raw
+  hostState.cachedResult = validateProcessWrapperArgv(raw)
+  if (
+    hostState.cachedResult.error &&
+    hostState.cachedResult.error !== prevError
+  ) {
     logForDebugging(
-      `${PROCESS_WRAPPER_ENV_KEY} is set but can't be used — self-spawns that require it will refuse to start rather than run unwrapped: ${cachedResult.error}`,
+      `${PROCESS_WRAPPER_ENV_KEY} is set but can't be used — self-spawns that require it will refuse to start rather than run unwrapped: ${hostState.cachedResult.error}`,
       { level: 'error' },
     )
-  } else if (cachedResult.platformIgnored) {
+  } else if (hostState.cachedResult.platformIgnored) {
     logForDebugging(
       `${PROCESS_WRAPPER_ENV_KEY} is set but ignored on Windows — the launcher must exec into Claude Code, which Windows can't do; sessions run unwrapped`,
       { level: 'warn' },
     )
   }
-  return cachedResult
+  return hostState.cachedResult
 }
 
 /** Official J_ — wrapper argv (empty if unset/invalid). */
@@ -258,10 +277,11 @@ export function getProcessWrapperRecord(
   return resolveProcessWrapper(env).record
 }
 
-/** Clear process-level cache (tests). */
+/** Clear host-level cache (tests). */
 export function resetProcessWrapperCache(): void {
-  cachedRaw = undefined
-  cachedResult = EMPTY_RESULT
+  const hostState = getProcessWrapperCacheHostState()
+  hostState.cachedRaw = undefined
+  hostState.cachedResult = EMPTY_RESULT
 }
 
 /**

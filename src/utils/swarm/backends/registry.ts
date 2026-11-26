@@ -5,6 +5,10 @@ import { errorMessage } from '../../../utils/errors.js'
 import { leftoverM, leftoverY } from '../../../utils/leftoverOt.js'
 import { getPlatform } from '../../../utils/platform.js'
 import {
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../../../utils/sessionHost.js'
+import {
   getInitialSettings,
   getSettingsForSource,
 } from '../../../utils/settings/settings.js'
@@ -28,39 +32,39 @@ import type {
   TeammateExecutor,
 } from './types.js'
 
-/**
- * Cached backend detection result.
- * Once detected, the backend selection is fixed for the lifetime of the process.
- */
-let cachedBackend: PaneBackend | null = null
+type BackendRegistryHostState = {
+  /** Cached backend detection result for this host. */
+  cachedBackend: PaneBackend | null
+  /** Cached detection result with additional metadata. */
+  cachedDetectionResult: BackendDetectionResult | null
+  /** Cached in-process backend instance. */
+  cachedInProcessBackend: TeammateExecutor | null
+  /** Cached pane backend executor instance wrapping the detected PaneBackend. */
+  cachedPaneBackendExecutor: TeammateExecutor | null
+  /**
+   * Tracks whether spawn fell back to in-process mode because no pane backend
+   * was available (e.g., iTerm2 without it2 or tmux installed). Once set,
+   * isInProcessEnabled() returns true so UI (banner, teams menu) reflects reality.
+   */
+  inProcessFallbackActive: boolean
+}
 
-/**
- * Cached detection result with additional metadata.
- */
-let cachedDetectionResult: BackendDetectionResult | null = null
+const backendRegistryHostSlot = new HostSlot<BackendRegistryHostState>(() => ({
+  cachedBackend: null,
+  cachedDetectionResult: null,
+  cachedInProcessBackend: null,
+  cachedPaneBackendExecutor: null,
+  inProcessFallbackActive: false,
+}))
+
+function getRegistryState(): BackendRegistryHostState {
+  return backendRegistryHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Flag to track if backends have been registered.
  */
 let backendsRegistered = false
-
-/**
- * Cached in-process backend instance.
- */
-let cachedInProcessBackend: TeammateExecutor | null = null
-
-/**
- * Cached pane backend executor instance.
- * Wraps the detected PaneBackend to provide TeammateExecutor interface.
- */
-let cachedPaneBackendExecutor: TeammateExecutor | null = null
-
-/**
- * Tracks whether spawn fell back to in-process mode because no pane backend
- * was available (e.g., iTerm2 without it2 or tmux installed). Once set,
- * isInProcessEnabled() returns true so UI (banner, teams menu) reflects reality.
- */
-let inProcessFallbackActive = false
 
 /**
  * Placeholder for TmuxBackend - will be replaced with actual implementation.
@@ -167,12 +171,13 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
   // Ensure backends are registered before detection
   await ensureBackendsRegistered()
 
+  const state = getRegistryState()
   // Return cached result if available
-  if (cachedDetectionResult) {
+  if (state.cachedDetectionResult) {
     logForDebugging(
-      `[BackendRegistry] Using cached backend: ${cachedDetectionResult.backend.type}`,
+      `[BackendRegistry] Using cached backend: ${state.cachedDetectionResult.backend.type}`,
     )
-    return cachedDetectionResult
+    return state.cachedDetectionResult
   }
 
   logForDebugging('[BackendRegistry] Starting backend detection...')
@@ -198,14 +203,14 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
       '[BackendRegistry] Selected: iterm2 (explicit teammateMode)',
     )
     const backend = createITermBackend()
-    cachedBackend = backend
-    cachedDetectionResult = {
+    state.cachedBackend = backend
+    state.cachedDetectionResult = {
       backend,
       isNative: true,
       needsIt2Setup: false,
     }
     leftoverY('swarm_backend_detect')
-    return cachedDetectionResult
+    return state.cachedDetectionResult
   }
 
   // Check all environment conditions upfront for logging
@@ -227,13 +232,13 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
       throw new Error('Windows Terminal teammate mode requires wt.exe in PATH')
     }
     const backend = createWindowsTerminalBackend()
-    cachedBackend = backend
-    cachedDetectionResult = {
+    state.cachedBackend = backend
+    state.cachedDetectionResult = {
       backend,
       isNative: inWindowsTerminal,
       needsIt2Setup: false,
     }
-    return cachedDetectionResult
+    return state.cachedDetectionResult
   }
 
   // Priority 1: If inside tmux, always use tmux
@@ -242,13 +247,13 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
       '[BackendRegistry] Selected: tmux (running inside tmux session)',
     )
     const backend = createTmuxBackend()
-    cachedBackend = backend
-    cachedDetectionResult = {
+    state.cachedBackend = backend
+    state.cachedDetectionResult = {
       backend,
       isNative: true,
       needsIt2Setup: false,
     }
-    return cachedDetectionResult
+    return state.cachedDetectionResult
   }
 
   // Priority 2: If in iTerm2, try to use native panes
@@ -270,13 +275,13 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
           '[BackendRegistry] Selected: iterm2 (native iTerm2 with it2 CLI)',
         )
         const backend = createITermBackend()
-        cachedBackend = backend
-        cachedDetectionResult = {
+        state.cachedBackend = backend
+        state.cachedDetectionResult = {
           backend,
           isNative: true,
           needsIt2Setup: false,
         }
-        return cachedDetectionResult
+        return state.cachedDetectionResult
       }
     }
 
@@ -293,13 +298,13 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
       // Return tmux as fallback. Only signal it2 setup if the user hasn't already
       // chosen to prefer tmux - otherwise they'd be re-prompted on every spawn.
       const backend = createTmuxBackend()
-      cachedBackend = backend
-      cachedDetectionResult = {
+      state.cachedBackend = backend
+      state.cachedDetectionResult = {
         backend,
         isNative: false,
         needsIt2Setup: !preferTmux,
       }
-      return cachedDetectionResult
+      return state.cachedDetectionResult
     }
 
     // In iTerm2 with no it2 and no tmux - it2 setup is required
@@ -324,13 +329,13 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
     if (wtAvailable) {
       logForDebugging('[BackendRegistry] Selected: Windows Terminal (wt.exe)')
       const backend = createWindowsTerminalBackend()
-      cachedBackend = backend
-      cachedDetectionResult = {
+      state.cachedBackend = backend
+      state.cachedDetectionResult = {
         backend,
         isNative: true,
         needsIt2Setup: false,
       }
-      return cachedDetectionResult
+      return state.cachedDetectionResult
     }
   }
 
@@ -343,13 +348,13 @@ export async function detectAndGetBackend(): Promise<BackendDetectionResult> {
   if (tmuxAvailable) {
     logForDebugging('[BackendRegistry] Selected: tmux (external session mode)')
     const backend = createTmuxBackend()
-    cachedBackend = backend
-    cachedDetectionResult = {
+    state.cachedBackend = backend
+    state.cachedDetectionResult = {
       backend,
       isNative: false,
       needsIt2Setup: false,
     }
-    return cachedDetectionResult
+    return state.cachedDetectionResult
   }
 
   // No backend available - tmux is not installed
@@ -412,7 +417,7 @@ export function getBackendByType(type: PaneBackendType): PaneBackend {
  * Returns null if no backend has been detected yet.
  */
 export function getCachedBackend(): PaneBackend | null {
-  return cachedBackend
+  return getRegistryState().cachedBackend
 }
 
 /**
@@ -421,7 +426,7 @@ export function getCachedBackend(): PaneBackend | null {
  * Use `isNative` to check if teammates are visible in native panes.
  */
 export function getCachedDetectionResult(): BackendDetectionResult | null {
-  return cachedDetectionResult
+  return getRegistryState().cachedDetectionResult
 }
 
 /**
@@ -431,7 +436,7 @@ export function getCachedDetectionResult(): BackendDetectionResult | null {
  */
 export function markInProcessFallback(): void {
   logForDebugging('[BackendRegistry] Marking in-process fallback as active')
-  inProcessFallbackActive = true
+  getRegistryState().inProcessFallbackActive = true
 }
 
 export type RegistryTeammateMode =
@@ -542,7 +547,7 @@ export function isInProcessEnabled(): boolean {
     // 'auto' mode - if a prior spawn fell back to in-process because no pane
     // backend was available, stay in-process (scoped to auto mode only so a
     // mid-session Settings change to explicit 'tmux' still takes effect).
-    if (inProcessFallbackActive) {
+    if (getRegistryState().inProcessFallbackActive) {
       logForDebugging(
         '[BackendRegistry] isInProcessEnabled: true (fallback after pane backend unavailable)',
       )
@@ -594,10 +599,11 @@ export function getResolvedTeammateMode():
  * Creates and caches the instance on first call.
  */
 export function getInProcessBackend(): TeammateExecutor {
-  if (!cachedInProcessBackend) {
-    cachedInProcessBackend = createInProcessBackend()
+  const state = getRegistryState()
+  if (!state.cachedInProcessBackend) {
+    state.cachedInProcessBackend = createInProcessBackend()
   }
-  return cachedInProcessBackend
+  return state.cachedInProcessBackend
 }
 
 /**
@@ -651,7 +657,8 @@ async function getPaneBackendExecutor(options?: {
     tmuxAvailable: boolean,
   ) => Promise<'installed' | 'use-tmux' | 'cancelled'>
 }): Promise<TeammateExecutor> {
-  if (!cachedPaneBackendExecutor) {
+  const state = getRegistryState()
+  if (!state.cachedPaneBackendExecutor) {
     const detection = await detectAndGetBackend()
     if (detection.needsIt2Setup && options?.onNeedsIt2Setup) {
       const setupResult = await options.onNeedsIt2Setup(await isTmuxAvailable())
@@ -661,12 +668,14 @@ async function getPaneBackendExecutor(options?: {
       resetBackendDetection()
       return getPaneBackendExecutor(options)
     }
-    cachedPaneBackendExecutor = createPaneBackendExecutor(detection.backend)
+    state.cachedPaneBackendExecutor = createPaneBackendExecutor(
+      detection.backend,
+    )
     logForDebugging(
       `[BackendRegistry] Created PaneBackendExecutor wrapping ${detection.backend.type}`,
     )
   }
-  return cachedPaneBackendExecutor
+  return state.cachedPaneBackendExecutor
 }
 
 /**
@@ -674,10 +683,11 @@ async function getPaneBackendExecutor(options?: {
  * Used for testing to allow re-detection.
  */
 export function resetBackendDetection(): void {
-  cachedBackend = null
-  cachedDetectionResult = null
-  cachedInProcessBackend = null
-  cachedPaneBackendExecutor = null
+  const state = getRegistryState()
+  state.cachedBackend = null
+  state.cachedDetectionResult = null
+  state.cachedInProcessBackend = null
+  state.cachedPaneBackendExecutor = null
   backendsRegistered = false
-  inProcessFallbackActive = false
+  state.inProcessFallbackActive = false
 }

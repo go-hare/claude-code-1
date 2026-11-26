@@ -23,6 +23,7 @@ import {
   isAnthropicProfileOauthExpiredError,
 } from './anthropicProfile.js'
 import { getProxyFetchOptions } from './proxy.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 export const JWT_BEARER_GRANT =
   'urn:ietf:params:oauth:grant-type:jwt-bearer' as const
@@ -717,13 +718,26 @@ class WifTokenCache {
   }
 }
 
-let tokenCache: WifTokenCache | null = null
-let cacheFetch: FetchLike = globalThis.fetch
-let cacheFingerprint = ''
+type OidcTokenCacheHostState = {
+  tokenCache: WifTokenCache | null
+  cacheFetch: FetchLike
+  cacheFingerprint: string
+}
+
+const oidcTokenCacheHostSlot = new HostSlot<OidcTokenCacheHostState>(() => ({
+  tokenCache: null,
+  cacheFetch: globalThis.fetch,
+  cacheFingerprint: '',
+}))
+
+function getOidcTokenCacheHostState(): OidcTokenCacheHostState {
+  return oidcTokenCacheHostSlot.of(getBootstrapSessionHost())
+}
 
 function resetOidcTokenCache(): void {
-  tokenCache = null
-  cacheFingerprint = ''
+  const hostState = getOidcTokenCacheHostState()
+  hostState.tokenCache = null
+  hostState.cacheFingerprint = ''
 }
 
 /** leftover 239 iZe / getWIFTokenCache */
@@ -731,18 +745,19 @@ function getOidcTokenCache(
   env: NodeJS.ProcessEnv,
   fetchFn: FetchLike,
 ): WifTokenCache {
+  const hostState = getOidcTokenCacheHostState()
   const fingerprint = oidcCacheFingerprint(env, fetchFn)
   if (
-    tokenCache &&
-    cacheFetch === fetchFn &&
-    cacheFingerprint === fingerprint
+    hostState.tokenCache &&
+    hostState.cacheFetch === fetchFn &&
+    hostState.cacheFingerprint === fingerprint
   ) {
-    return tokenCache
+    return hostState.tokenCache
   }
-  cacheFetch = fetchFn
-  cacheFingerprint = fingerprint
+  hostState.cacheFetch = fetchFn
+  hostState.cacheFingerprint = fingerprint
   const wrappedFetch = wrapOidcTokenFetch(fetchFn)
-  tokenCache = new WifTokenCache(async opts => {
+  hostState.tokenCache = new WifTokenCache(async opts => {
     const config = await loadOidcFederationConfig(env)
     if (config === null) {
       throw new AnthropicProfileOauthError(
@@ -757,16 +772,17 @@ function getOidcTokenCache(
       : exchange
     return provider(opts)
   })
-  return tokenCache
+  return hostState.tokenCache
 }
 
 /** densable TokenCache.cached.token — for lt before invalidate. */
 export function peekOidcCachedAccessToken(): string | null {
-  return tokenCache?.cached?.token ?? null
+  return getOidcTokenCacheHostState().tokenCache?.cached?.token ?? null
 }
 
 /** densable TokenCache.invalidate — next getToken forceRefresh. */
 export function invalidateOidcTokenCache(): void {
+  const { tokenCache } = getOidcTokenCacheHostState()
   if (tokenCache) tokenCache.invalidate()
 }
 
@@ -783,12 +799,13 @@ export async function invalidateOidcFederationCacheOnRetry(
   const status = error.statusCode
   if (status !== null && status !== 401 && status < 500) return false
   try {
-    if (tokenCache === null) {
+    const hostState = getOidcTokenCacheHostState()
+    if (hostState.tokenCache === null) {
       const config = await loadOidcFederationConfig()
       if (config === null) return false
     }
-    if (tokenCache?.cached?.token) {
-      recordWifFailedAccessToken(tokenCache.cached.token)
+    if (hostState.tokenCache?.cached?.token) {
+      recordWifFailedAccessToken(hostState.tokenCache.cached.token)
     }
     invalidateOidcTokenCache()
     return true
@@ -815,12 +832,11 @@ export async function resolveOidcFederationAccessToken(
 ): Promise<OidcAccessToken | null> {
   const config = await loadOidcFederationConfig(env)
   if (config === null) return null
-  return getOidcTokenCache(env, fetchFn)
-    .getToken()
-    .then(token => {
-      const cached = tokenCache?.cached
-      return cached ?? { token, expiresAt: null }
-    })
+  const cache = getOidcTokenCache(env, fetchFn)
+  return cache.getToken().then(token => {
+    const cached = cache.cached
+    return cached ?? { token, expiresAt: null }
+  })
 }
 
 export function clearOidcFederationCaches(): void {

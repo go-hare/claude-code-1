@@ -8,6 +8,7 @@
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { AssistantMessage } from '../../types/message.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { un } from './store.js'
 
 export type NztToolUse = {
@@ -55,24 +56,36 @@ export type NztHost = {
   getParentAssistantMessage?: () => AssistantMessage | null
 }
 
-let nztRunner: NztRunner | null = null
-let nztHost: NztHost | null = null
+type NztHostState = {
+  nztRunner: NztRunner | null
+  nztHost: NztHost | null
+}
+
+const nztHostSlot = new HostSlot<NztHostState>(() => ({
+  nztRunner: null,
+  nztHost: null,
+}))
+
+function getNztHostState(): NztHostState {
+  return nztHostSlot.of(getBootstrapSessionHost())
+}
 
 export function setNztRunner(runner: NztRunner | null): void {
-  nztRunner = runner
+  getNztHostState().nztRunner = runner
 }
 
 export function setNztHost(host: NztHost | null): void {
-  nztHost = host
+  getNztHostState().nztHost = host
 }
 
 export function getNztHost(): NztHost | null {
-  return nztHost
+  return getNztHostState().nztHost
 }
 
 export function resetNztRunnerForTests(): void {
-  nztRunner = null
-  nztHost = null
+  const state = getNztHostState()
+  state.nztRunner = null
+  state.nztHost = null
 }
 
 function abortControllerFromSignal(signal: AbortSignal): AbortController {
@@ -247,7 +260,7 @@ export async function* defaultNztReply(
     }
     return
   }
-  const host = nztHost
+  const host = getNztHostState().nztHost
   const can = opts?.canUseTool ?? host?.canUseTool
   if (host && can && host.getToolUseContext()?.options?.tools) {
     yield* nztViaRunToolUse(toolUse, signal, host, can)
@@ -290,6 +303,7 @@ export async function Ttn(input: {
     },
   }
 
+  const { nztHost, nztRunner } = getNztHostState()
   const canUseTool =
     input.canUseTool ?? (nztHost ? allowAllCanUseTool : undefined)
 

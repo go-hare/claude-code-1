@@ -15,15 +15,30 @@ import type {
 } from '@agentclientprotocol/sdk'
 import type { Message } from '../../../types/message.js'
 import { deserializeMessages } from '../../../utils/conversationRecovery.js'
-import { getLastSessionLog } from '../../../utils/sessionStorage.js'
+import {
+  flushSessionStorageIfInitialized,
+  getLastSessionLog,
+} from '../../../utils/sessionStorage.js'
+import { runCleanupFunctions } from '../../../utils/cleanupRegistry.js'
+import { clearAllAsyncHooks } from '../../../utils/hooks/AsyncHookRegistry.js'
+import { stopAllHookHeartbeatsForSession } from '../../../utils/hooks/hookHeartbeat.js'
+import { resetHooksConfigSnapshot } from '../../../utils/hooks/hooksConfigSnapshot.js'
 import type { PermissionMode } from '../../../types/permissions.js'
 import { setOriginalCwd, switchSession } from '../../../bootstrap/state.js'
 import type { SessionId } from '../../../types/ids.js'
 import { replayHistoryMessages } from '../bridge.js'
 import { computeSessionFingerprint } from '../utils.js'
+import { createSessionHost } from '../../../utils/sessionHost.js'
+import {
+  createRootSession,
+  runWithSession,
+} from '../../../utils/sessionRoot.js'
 import { resolveSessionFilePath } from '../../../utils/sessionStoragePortable.js'
 import { AcpAgent } from './AcpAgent.js'
-import type { AcpSession } from './sessionTypes.js'
+import {
+  rollbackAcpSessionEnv,
+  syncAcpSharedBackendMode,
+} from './createSessionMethod.js'
 import { isPermissionMode } from './permissionMode.js'
 import {
   getConnection,
@@ -57,87 +72,120 @@ async function getOrCreateSession(
         | undefined,
     })
     if (fingerprint === existingSession.sessionFingerprint) {
-      const resolved = await resolveSessionFilePath(
-        params.sessionId,
-        params.cwd,
-      )
-      switchSession(
-        params.sessionId as SessionId,
-        resolved ? dirname(resolved.filePath) : null,
-      )
-      setOriginalCwd(params.cwd)
+      return runWithSession(existingSession.hostSession, async () => {
+        const resolved = await resolveSessionFilePath(
+          params.sessionId,
+          params.cwd,
+        )
+        const projectDir = resolved ? dirname(resolved.filePath) : null
+        if (params.cwd !== existingSession.cwd) {
+          existingSession.cwd = params.cwd
+          existingSession.hostSession.update({
+            id: params.sessionId,
+            project: {
+              originalCwd: params.cwd,
+              projectRoot: params.cwd,
+              cwd: params.cwd,
+            },
+          })
+          setOriginalCwd(params.cwd)
+        } else if (existingSession.hostSession.id !== params.sessionId) {
+          existingSession.hostSession.update({ id: params.sessionId })
+        }
+        existingSession.hostSession.identity.replaceProjectDir(projectDir)
+        switchSession(params.sessionId as SessionId, projectDir)
 
-      if (shouldReplay) {
-        await this.replaySessionHistory(params)
-      }
+        if (shouldReplay) {
+          await this.replaySessionHistory(params)
+        }
 
-      return {
-        sessionId: params.sessionId,
-        modes: existingSession.modes,
-        // Carry models over on reconnect so the client keeps its model selector
-        // populated (standard clients gate supportsModelSelection on this field).
-        models: existingSession.models,
-        configOptions: existingSession.configOptions,
-      }
+        return {
+          sessionId: params.sessionId,
+          modes: existingSession.modes,
+          // Carry models over on reconnect so the client keeps its model selector
+          // populated (standard clients gate supportsModelSelection on this field).
+          models: existingSession.models,
+          configOptions: existingSession.configOptions,
+        }
+      })
     }
 
     await this.teardownSession(params.sessionId)
   }
 
-  // Locate the session file by sessionId. resolveSessionFilePath searches
-  // the requested cwd's project dir first, then falls back to sibling git
-  // worktrees — sessions created inside a repo (including from subdirectories
-  // or ephemeral test envs nested in the repo) all persist under the same
-  // parent project dir.
-  const resolved = await resolveSessionFilePath(params.sessionId, params.cwd)
-  const projectDir = resolved ? dirname(resolved.filePath) : null
-
-  switchSession(params.sessionId as SessionId, projectDir)
-  setOriginalCwd(params.cwd)
-
-  let initialMessages: Message[] | undefined
-  if (resolved) {
-    try {
-      const log = await getLastSessionLog(params.sessionId as UUID)
-      if (log && log.messages.length > 0) {
-        initialMessages = deserializeMessages(log.messages)
-      }
-    } catch (err) {
-      console.error('[ACP] Failed to load session history:', err)
-    }
-  }
-
-  const response = await this.createSession(
-    {
+  const hostSession = createRootSession({
+    host: createSessionHost(),
+    id: params.sessionId,
+    project: {
+      originalCwd: params.cwd,
+      projectRoot: params.cwd,
       cwd: params.cwd,
-      mcpServers: params.mcpServers ?? [],
-      _meta: params._meta,
     },
-    { sessionId: params.sessionId, initialMessages },
-  )
+  })
 
-  // Replay history to client if loaded. session/resume skips this block.
-  if (shouldReplay && initialMessages && initialMessages.length > 0) {
-    const session = this.sessions.get(params.sessionId)
-    if (session) {
-      await replayHistoryMessages(
-        params.sessionId,
-        initialMessages as unknown as Array<Record<string, unknown>>,
-        getConnection(this),
-        session.toolUseCache,
-        readClientCapabilities(this),
-        session.cwd,
-      )
+  return runWithSession(hostSession, async () => {
+    // Locate the session file by sessionId. resolveSessionFilePath searches
+    // the requested cwd's project dir first, then falls back to sibling git
+    // worktrees — sessions created inside a repo (including from subdirectories
+    // or ephemeral test envs nested in the repo) all persist under the same
+    // parent project dir.
+    const resolved = await resolveSessionFilePath(params.sessionId, params.cwd)
+    const projectDir = resolved ? dirname(resolved.filePath) : null
+
+    hostSession.identity.replaceProjectDir(projectDir)
+    hostSession.costLedger.scopeTo(params.sessionId)
+    switchSession(params.sessionId as SessionId, projectDir)
+    setOriginalCwd(params.cwd)
+
+    let initialMessages: Message[] | undefined
+    if (resolved) {
+      try {
+        const log = await getLastSessionLog(params.sessionId as UUID)
+        if (log && log.messages.length > 0) {
+          initialMessages = deserializeMessages(log.messages)
+        }
+      } catch (err) {
+        console.error('[ACP] Failed to load session history:', err)
+      }
     }
-  }
 
-  return {
-    sessionId: response.sessionId,
-    modes: response.modes,
-    // createSession already returns models; pass it through. Same reason as above.
-    models: response.models,
-    configOptions: response.configOptions,
-  }
+    const response = await this.createSession(
+      {
+        cwd: params.cwd,
+        mcpServers: params.mcpServers ?? [],
+        _meta: params._meta,
+      },
+      {
+        sessionId: params.sessionId,
+        initialMessages,
+        hostSession,
+        projectDir,
+      },
+    )
+
+    // Replay history to client if loaded. session/resume skips this block.
+    if (shouldReplay && initialMessages && initialMessages.length > 0) {
+      const session = this.sessions.get(params.sessionId)
+      if (session) {
+        await replayHistoryMessages(
+          params.sessionId,
+          initialMessages as unknown as Array<Record<string, unknown>>,
+          getConnection(this),
+          session.toolUseCache,
+          readClientCapabilities(this),
+          session.cwd,
+        )
+      }
+    }
+
+    return {
+      sessionId: response.sessionId,
+      modes: response.modes,
+      // createSession already returns models; pass it through. Same reason as above.
+      models: response.models,
+      configOptions: response.configOptions,
+    }
+  })
 }
 
 // ── teardownSession ──────────────────────────────────────────────
@@ -149,8 +197,44 @@ async function teardownSession(
   const session = this.sessions.get(sessionId)
   if (!session) return
 
-  await this.cancel({ sessionId })
+  // Delete BEFORE awaiting flush/cleanup so concurrent prompt() or
+  // getOrCreateSession() calls cannot grab a dying session.
   this.sessions.delete(sessionId)
+
+  try {
+    await runWithSession(session.hostSession, async () => {
+      this.cancelSession(session)
+      try {
+        await flushSessionStorageIfInitialized()
+      } catch {
+        // Best-effort storage flush during teardown
+      }
+      try {
+        await runCleanupFunctions()
+      } catch {
+        // Best-effort per-host cleanup drain (MCP child procs, cron locks, watchers, queue writers)
+      }
+      try {
+        stopAllHookHeartbeatsForSession(sessionId)
+      } catch {
+        // Best-effort hook heartbeat cleanup
+      }
+      try {
+        clearAllAsyncHooks()
+      } catch {
+        // Best-effort async hook cleanup
+      }
+      try {
+        resetHooksConfigSnapshot()
+      } catch {
+        // Best-effort hooks config snapshot cleanup
+      }
+      session.hostSession.engineStore.reset()
+    })
+  } finally {
+    rollbackAcpSessionEnv(this, session)
+    syncAcpSharedBackendMode(this)
+  }
 }
 
 // ── replaySessionHistory ─────────────────────────────────────────
@@ -167,26 +251,41 @@ async function replaySessionHistory(
     cwd: string
   },
 ): Promise<void> {
-  try {
-    const log = await getLastSessionLog(params.sessionId as UUID)
-    if (!log || log.messages.length === 0) return
-    const messages = deserializeMessages(log.messages)
-    if (messages.length === 0) return
+  const existingSession = this.sessions.get(params.sessionId)
+  const hostSession =
+    existingSession?.hostSession ??
+    createRootSession({
+      host: createSessionHost(),
+      id: params.sessionId,
+      project: {
+        originalCwd: params.cwd,
+        projectRoot: params.cwd,
+        cwd: params.cwd,
+      },
+    })
 
-    const session = this.sessions.get(params.sessionId)
-    if (!session) return
+  await runWithSession(hostSession, async () => {
+    try {
+      const log = await getLastSessionLog(params.sessionId as UUID)
+      if (!log || log.messages.length === 0) return
+      const messages = deserializeMessages(log.messages)
+      if (messages.length === 0) return
 
-    await replayHistoryMessages(
-      params.sessionId,
-      messages as unknown as Array<Record<string, unknown>>,
-      getConnection(this),
-      session.toolUseCache,
-      readClientCapabilities(this),
-      session.cwd,
-    )
-  } catch (err) {
-    console.error('[ACP] Failed to replay session history:', err)
-  }
+      const session = this.sessions.get(params.sessionId)
+      if (!session) return
+
+      await replayHistoryMessages(
+        params.sessionId,
+        messages as unknown as Array<Record<string, unknown>>,
+        getConnection(this),
+        session.toolUseCache,
+        readClientCapabilities(this),
+        session.cwd,
+      )
+    } catch (err) {
+      console.error('[ACP] Failed to replay session history:', err)
+    }
+  })
 }
 
 // ── applySessionMode ─────────────────────────────────────────────
@@ -201,29 +300,31 @@ function applySessionMode(
   }
   const session = this.sessions.get(sessionId)
   if (session) {
-    if (
-      modeId === 'bypassPermissions' &&
-      !session.appState.toolPermissionContext.isBypassPermissionsModeAvailable
-    ) {
-      throw new Error(`Mode not available: ${modeId}`)
-    }
-    const isAvailable = session.modes.availableModes.some(
-      mode => mode.id === modeId,
-    )
-    if (!isAvailable) {
-      throw new Error(`Mode not available: ${modeId}`)
-    }
+    runWithSession(session.hostSession, () => {
+      if (
+        modeId === 'bypassPermissions' &&
+        !session.appState.toolPermissionContext.isBypassPermissionsModeAvailable
+      ) {
+        throw new Error(`Mode not available: ${modeId}`)
+      }
+      const isAvailable = session.modes.availableModes.some(
+        mode => mode.id === modeId,
+      )
+      if (!isAvailable) {
+        throw new Error(`Mode not available: ${modeId}`)
+      }
 
-    session.modes = { ...session.modes, currentModeId: modeId }
-    const prev = session.appState.toolPermissionContext
-    const nextMode = modeId as PermissionMode
-    let next = { ...prev, mode: nextMode }
-    if (prev.mode !== 'plan' && nextMode === 'plan') {
-      next = { ...next, prePlanMode: prev.mode }
-    } else if (prev.mode === 'plan' && nextMode !== 'plan') {
-      next = { ...next, prePlanMode: undefined }
-    }
-    session.appState.toolPermissionContext = next
+      session.modes = { ...session.modes, currentModeId: modeId }
+      const prev = session.appState.toolPermissionContext
+      const nextMode = modeId as PermissionMode
+      let next = { ...prev, mode: nextMode }
+      if (prev.mode !== 'plan' && nextMode === 'plan') {
+        next = { ...next, prePlanMode: prev.mode }
+      } else if (prev.mode === 'plan' && nextMode !== 'plan') {
+        next = { ...next, prePlanMode: undefined }
+      }
+      session.appState.toolPermissionContext = next
+    })
   }
 }
 
@@ -238,24 +339,86 @@ async function updateConfigOption(
   const session = this.sessions.get(sessionId)
   if (!session) return
 
-  // Delegate to the shell's private syncSessionConfigState via a typed cast.
-  // The shell declares syncSessionConfigState as a private method; it is not
-  // part of the merged public interface, so we access it through the shared
-  // internal accessor to preserve exact original behavior.
-  syncSessionConfigState(this, session, configId, value)
+  await runWithSession(session.hostSession, async () => {
+    // Delegate to the shell's private syncSessionConfigState via a typed cast.
+    // The shell declares syncSessionConfigState as a private method; it is not
+    // part of the merged public interface, so we access it through the shared
+    // internal accessor to preserve exact original behavior.
+    syncSessionConfigState(this, session, configId, value)
 
-  session.configOptions = session.configOptions.map(o =>
-    o.id === configId && typeof o.currentValue === 'string'
-      ? { ...o, currentValue: value }
-      : o,
-  )
+    session.configOptions = session.configOptions.map(o =>
+      o.id === configId && typeof o.currentValue === 'string'
+        ? { ...o, currentValue: value }
+        : o,
+    )
 
-  await getConnection(this).sessionUpdate({
-    sessionId,
-    update: {
-      sessionUpdate: 'config_option_update',
-      configOptions: session.configOptions,
+    await getConnection(this).sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: 'config_option_update',
+        configOptions: session.configOptions,
+      },
+    })
+  })
+}
+
+// ── loadForkSourceMessages ───────────────────────────────────────
+
+/**
+ * Load the source session's persisted messages for forkSession inside an
+ * isolated ALS Session context so concurrent sessions are never clobbered.
+ */
+async function loadForkSourceMessages(
+  this: AcpAgent,
+  params: {
+    sessionId: string
+    cwd: string
+  },
+): Promise<{ initialMessages: Message[] | undefined }> {
+  const existingSource = this.sessions.get(params.sessionId)
+  if (existingSource) {
+    return runWithSession(existingSource.hostSession, async () => {
+      let initialMessages: Message[] | undefined
+      try {
+        const log = await getLastSessionLog(params.sessionId as UUID)
+        if (log && log.messages.length > 0) {
+          initialMessages = deserializeMessages(log.messages)
+        }
+      } catch (err) {
+        console.error('[ACP] fork source load failed:', err)
+      }
+      return { initialMessages }
+    })
+  }
+
+  const tempHostSession = createRootSession({
+    host: createSessionHost(),
+    id: params.sessionId,
+    project: {
+      originalCwd: params.cwd,
+      projectRoot: params.cwd,
+      cwd: params.cwd,
     },
+  })
+
+  return runWithSession(tempHostSession, async () => {
+    let initialMessages: Message[] | undefined
+    try {
+      const resolved = await resolveSessionFilePath(
+        params.sessionId,
+        params.cwd,
+      )
+      tempHostSession.identity.replaceProjectDir(
+        resolved ? dirname(resolved.filePath) : null,
+      )
+      const log = await getLastSessionLog(params.sessionId as UUID)
+      if (log && log.messages.length > 0) {
+        initialMessages = deserializeMessages(log.messages)
+      }
+    } catch (err) {
+      console.error('[ACP] fork source load failed:', err)
+    }
+    return { initialMessages }
   })
 }
 
@@ -267,4 +430,5 @@ Object.assign(AcpAgent.prototype, {
   replaySessionHistory,
   applySessionMode,
   updateConfigOption,
+  loadForkSourceMessages,
 })

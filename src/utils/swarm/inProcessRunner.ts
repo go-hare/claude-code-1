@@ -108,6 +108,7 @@ import type { PermissionUpdate } from '../permissions/PermissionUpdateSchema.js'
 import { hasPermissionsToUseTool } from '../permissions/permissions.js'
 import { restoreDangerousPermissions } from '../permissions/permissionSetup.js'
 import { emitTaskTerminatedSdk } from '../sdkEventQueue.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { jsonStringify } from '../slowOperations.js'
 import { asSystemPrompt } from '../systemPromptType.js'
 import {
@@ -159,7 +160,13 @@ type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
 
 const PERMISSION_POLL_INTERVAL_MS = 500
 
-const teammateWakeCallbacks = new Map<string, Set<() => void>>()
+const teammateWakeCallbacksHostSlot = new HostSlot<
+  Map<string, Set<() => void>>
+>(() => new Map())
+
+function getTeammateWakeCallbacks(): Map<string, Set<() => void>> {
+  return teammateWakeCallbacksHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Official 2.1.331 `nni` — wake an idle in-process teammate immediately after
@@ -188,7 +195,7 @@ export function wakeIdleTeammate(
     }
   }
 
-  const callbacks = teammateWakeCallbacks.get(agentId)
+  const callbacks = getTeammateWakeCallbacks().get(agentId)
   if (callbacks && callbacks.size > 0) {
     for (const wake of [...callbacks]) {
       wake()
@@ -204,6 +211,7 @@ function sleepOrWake(
   signal: AbortSignal,
 ): Promise<void> {
   if (signal.aborted) return Promise.resolve()
+  const wakeCallbacks = getTeammateWakeCallbacks()
   return new Promise<void>(resolve => {
     let settled = false
     const cleanup = () => {
@@ -211,24 +219,32 @@ function sleepOrWake(
       settled = true
       clearTimeout(timer)
       signal.removeEventListener('abort', cleanup)
-      const set = teammateWakeCallbacks.get(agentId)
+      const set = wakeCallbacks.get(agentId)
       if (set) {
         set.delete(cleanup)
         if (set.size === 0) {
-          teammateWakeCallbacks.delete(agentId)
+          wakeCallbacks.delete(agentId)
         }
       }
       resolve()
     }
-    let set = teammateWakeCallbacks.get(agentId)
+    let set = wakeCallbacks.get(agentId)
     if (!set) {
       set = new Set()
-      teammateWakeCallbacks.set(agentId, set)
+      wakeCallbacks.set(agentId, set)
     }
     set.add(cleanup)
     signal.addEventListener('abort', cleanup, { once: true })
     const timer = setTimeout(cleanup, ms)
   })
+}
+
+export function _sleepOrWakeForTesting(
+  ms: number,
+  agentId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  return sleepOrWake(ms, agentId, signal)
 }
 
 /**

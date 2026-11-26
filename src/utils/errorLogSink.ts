@@ -18,31 +18,55 @@ import { CACHE_PATHS } from './cachePaths.js'
 import { registerCleanup, registerPreExitFlush } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { getFsImplementation } from './fsOperations.js'
+import { HostSlot } from './hostSlot.js'
 import { attachErrorLogSink, dateToFilename } from './log.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  runWithSession,
+} from './sessionRoot.js'
 import { jsonStringify } from './slowOperations.js'
 import { captureException } from './sentry.js'
 import { formatMcpErrorString } from '../services/mcp/formatMcpServerLabel.js'
 
-const DATE = dateToFilename(new Date())
+type JsonlWriter = {
+  write: (obj: object) => void
+  flush: () => void
+  dispose: () => void
+}
+
+type ErrorLogSinkHostState = {
+  date: string
+  // Buffered writers for JSONL log files, keyed by path
+  logWriters: Map<string, JsonlWriter>
+  preExitFlushRegistered: boolean
+}
+
+const errorLogSinkHostSlot = new HostSlot<ErrorLogSinkHostState>(() => ({
+  date: dateToFilename(new Date()),
+  logWriters: new Map<string, JsonlWriter>(),
+  preExitFlushRegistered: false,
+}))
+
+function getErrorLogSinkHostState(): ErrorLogSinkHostState {
+  return errorLogSinkHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Gets the path to the errors log file.
  */
 export function getErrorsPath(): string {
-  return join(CACHE_PATHS.errors(), DATE + '.jsonl')
+  return join(CACHE_PATHS.errors(), getErrorLogSinkHostState().date + '.jsonl')
 }
 
 /**
  * Gets the path to MCP logs for a server.
  */
 export function getMCPLogsPath(serverName: string): string {
-  return join(CACHE_PATHS.mcpLogs(serverName), DATE + '.jsonl')
-}
-
-type JsonlWriter = {
-  write: (obj: object) => void
-  flush: () => void
-  dispose: () => void
+  return join(
+    CACHE_PATHS.mcpLogs(serverName),
+    getErrorLogSinkHostState().date + '.jsonl',
+  )
 }
 
 function createJsonlWriter(options: {
@@ -60,15 +84,12 @@ function createJsonlWriter(options: {
   }
 }
 
-// Buffered writers for JSONL log files, keyed by path
-const logWriters = new Map<string, JsonlWriter>()
-
 /**
  * Official TIn.flush / flushBeforeExit — drain all buffered writers.
  * Leftover: sync writers (no pendingWrites.fm invent); Vk registers this.
  */
-async function flushAllLogWriters(): Promise<void> {
-  for (const writer of logWriters.values()) {
+async function flushAllLogWriters(state: ErrorLogSinkHostState): Promise<void> {
+  for (const writer of state.logWriters.values()) {
     writer.flush()
   }
 }
@@ -78,7 +99,8 @@ async function flushAllLogWriters(): Promise<void> {
  * @internal
  */
 export function _flushLogWritersForTesting(): void {
-  for (const writer of logWriters.values()) {
+  const state = getErrorLogSinkHostState()
+  for (const writer of state.logWriters.values()) {
     writer.flush()
   }
 }
@@ -88,36 +110,50 @@ export function _flushLogWritersForTesting(): void {
  * @internal
  */
 export function _clearLogWritersForTesting(): void {
-  for (const writer of logWriters.values()) {
+  const state = getErrorLogSinkHostState()
+  for (const writer of state.logWriters.values()) {
     writer.dispose()
   }
-  logWriters.clear()
+  state.logWriters.clear()
 }
 
 function getLogWriter(path: string): JsonlWriter {
-  let writer = logWriters.get(path)
+  const state = getErrorLogSinkHostState()
+  let writer = state.logWriters.get(path)
   if (!writer) {
     const dir = dirname(path)
+    const captured = getActiveSessionFromAls()
     writer = createJsonlWriter({
       // sync IO: called from sync context
       writeFn: (content: string) => {
-        try {
-          // Happy-path: directory already exists
-          getFsImplementation().appendFileSync(path, content)
-        } catch {
-          // If any error occurs, assume it was due to missing directory
-          getFsImplementation().mkdirSync(dir)
-          // Retry appending
-          getFsImplementation().appendFileSync(path, content)
+        const execWrite = () => {
+          try {
+            // Happy-path: directory already exists
+            getFsImplementation().appendFileSync(path, content)
+          } catch {
+            // If any error occurs, assume it was due to missing directory
+            getFsImplementation().mkdirSync(dir)
+            // Retry appending
+            getFsImplementation().appendFileSync(path, content)
+          }
+        }
+        if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+          runWithSession(captured, execWrite)
+        } else {
+          execWrite()
         }
       },
       flushIntervalMs: 1000,
       maxBufferSize: 50,
     })
-    logWriters.set(path, writer)
+    state.logWriters.set(path, writer)
     // Official TIn.writerFor: Et(dispose+settle) + Vk(flushBeforeExit)
-    registerCleanup(async () => writer?.dispose())
-    registerPreExitFlush(flushAllLogWriters)
+    const createdWriter = writer
+    registerCleanup(async () => createdWriter.dispose())
+    if (!state.preExitFlushRegistered) {
+      state.preExitFlushRegistered = true
+      registerPreExitFlush(() => flushAllLogWriters(state))
+    }
   }
   return writer
 }

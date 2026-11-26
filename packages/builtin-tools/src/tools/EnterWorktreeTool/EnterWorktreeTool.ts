@@ -10,7 +10,7 @@ import { logEvent } from 'src/services/analytics/index.js'
 import type { Tool } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { clearMemoryFileCaches } from 'src/utils/claudemd.js'
-import { getCwd } from 'src/utils/cwd.js'
+import { getCwd, hasScopedCwd } from 'src/utils/cwd.js'
 import { findCanonicalGitRoot } from 'src/utils/git.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getPlanSlug, getPlansDirectory } from 'src/utils/plans.js'
@@ -18,6 +18,7 @@ import { captureSandboxRootMoveHold } from 'src/utils/sandbox/sandbox-adapter.js
 import { setCwd } from 'src/utils/Shell.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logError } from 'src/utils/log.js'
+import { hasActiveSessionAls } from 'src/utils/sessionRoot.js'
 import {
   relocateSessionTranscript,
   saveWorktreeState,
@@ -176,7 +177,9 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
       // entering a worktree whose repo settings lack sandbox.enabled cannot
       // silently weaken or drop an active sandbox.
       captureSandboxRootMoveHold()
-      process.chdir(worktreeSession.worktreePath)
+      if (!hasActiveSessionAls() && !hasScopedCwd()) {
+        process.chdir(worktreeSession.worktreePath)
+      }
       setCwd(worktreeSession.worktreePath)
       setOriginalCwd(getCwd())
       // densable tNt after chdir+mN — soft fail (Cin) so enter still succeeds
@@ -232,7 +235,9 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
     // Official 2.1.326 #299: capture sandbox hold before moving across root.
     captureSandboxRootMoveHold()
     if (mainRepoRoot && mainRepoRoot !== getCwd()) {
-      process.chdir(mainRepoRoot)
+      if (!hasActiveSessionAls() && !hasScopedCwd()) {
+        process.chdir(mainRepoRoot)
+      }
       setCwd(mainRepoRoot)
     }
 
@@ -247,7 +252,9 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
     }
 
     captureSandboxRootMoveHold()
-    process.chdir(worktreeSession.worktreePath)
+    if (!hasActiveSessionAls() && !hasScopedCwd()) {
+      process.chdir(worktreeSession.worktreePath)
+    }
     setCwd(worktreeSession.worktreePath)
     setOriginalCwd(getCwd())
     // densable tNt after chdir+mN — soft fail (Cin)

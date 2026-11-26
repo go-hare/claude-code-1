@@ -9,6 +9,7 @@ import {
   loadMarkdownFilesForSubdir,
 } from '../utils/markdownConfigLoader.js'
 import { clearPluginOutputStyleCache } from '../utils/plugins/loadPluginOutputStyles.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 
 /**
  * Loads markdown files from .claude/output-styles directories throughout the project
@@ -23,73 +24,86 @@ import { clearPluginOutputStyleCache } from '../utils/plugins/loadPluginOutputSt
  *
  * @param cwd Current working directory for project directory traversal
  */
-export const getOutputStyleDirStyles = memoize(
-  async (cwd: string): Promise<OutputStyleConfig[]> => {
-    try {
-      const markdownFiles = await loadMarkdownFilesForSubdir(
-        'output-styles',
-        cwd,
-      )
+async function loadOutputStyleDirStylesUncached(
+  cwd: string,
+): Promise<OutputStyleConfig[]> {
+  try {
+    const markdownFiles = await loadMarkdownFilesForSubdir('output-styles', cwd)
 
-      const styles = markdownFiles
-        .map(({ filePath, frontmatter, content, source }) => {
-          try {
-            const fileName = basename(filePath)
-            const styleName = fileName.replace(/\.md$/, '')
+    const styles = markdownFiles
+      .map(({ filePath, frontmatter, content, source }) => {
+        try {
+          const fileName = basename(filePath)
+          const styleName = fileName.replace(/\.md$/, '')
 
-            // Get style configuration from frontmatter
-            const name = (frontmatter['name'] || styleName) as string
-            const description =
-              coerceDescriptionToString(
-                frontmatter['description'],
-                styleName,
-              ) ??
-              extractDescriptionFromMarkdown(
-                content,
-                `Custom ${styleName} output style`,
-              )
+          // Get style configuration from frontmatter
+          const name = (frontmatter['name'] || styleName) as string
+          const description =
+            coerceDescriptionToString(frontmatter['description'], styleName) ??
+            extractDescriptionFromMarkdown(
+              content,
+              `Custom ${styleName} output style`,
+            )
 
-            // Parse keep-coding-instructions flag (supports both boolean and string values)
-            const keepCodingInstructionsRaw =
-              frontmatter['keep-coding-instructions']
-            const keepCodingInstructions =
-              keepCodingInstructionsRaw === true ||
-              keepCodingInstructionsRaw === 'true'
-                ? true
-                : keepCodingInstructionsRaw === false ||
-                    keepCodingInstructionsRaw === 'false'
-                  ? false
-                  : undefined
+          // Parse keep-coding-instructions flag (supports both boolean and string values)
+          const keepCodingInstructionsRaw =
+            frontmatter['keep-coding-instructions']
+          const keepCodingInstructions =
+            keepCodingInstructionsRaw === true ||
+            keepCodingInstructionsRaw === 'true'
+              ? true
+              : keepCodingInstructionsRaw === false ||
+                  keepCodingInstructionsRaw === 'false'
+                ? false
+                : undefined
 
-            // Warn if force-for-plugin is set on non-plugin output style
-            if (frontmatter['force-for-plugin'] !== undefined) {
-              logForDebugging(
-                `Output style "${name}" has force-for-plugin set, but this option only applies to plugin output styles. Ignoring.`,
-                { level: 'warn' },
-              )
-            }
-
-            return {
-              name,
-              description,
-              prompt: content.trim(),
-              source,
-              keepCodingInstructions,
-            }
-          } catch (error) {
-            logError(error)
-            return null
+          // Warn if force-for-plugin is set on non-plugin output style
+          if (frontmatter['force-for-plugin'] !== undefined) {
+            logForDebugging(
+              `Output style "${name}" has force-for-plugin set, but this option only applies to plugin output styles. Ignoring.`,
+              { level: 'warn' },
+            )
           }
-        })
-        .filter(style => style !== null)
 
-      return styles
-    } catch (error) {
-      logError(error)
-      return []
-    }
-  },
+          return {
+            name,
+            description,
+            prompt: content.trim(),
+            source,
+            keepCodingInstructions,
+          }
+        } catch (error) {
+          logError(error)
+          return null
+        }
+      })
+      .filter(style => style !== null)
+
+    return styles
+  } catch (error) {
+    logError(error)
+    return []
+  }
+}
+
+const getOutputStyleDirStylesHostSlot = new HostSlot(() =>
+  memoize(loadOutputStyleDirStylesUncached),
 )
+const getOutputStyleDirStylesImpl = ((cwd: string) =>
+  getOutputStyleDirStylesHostSlot.of(getBootstrapSessionHost())(
+    cwd,
+  )) as ReturnType<typeof memoize<typeof loadOutputStyleDirStylesUncached>>
+Object.defineProperty(getOutputStyleDirStylesImpl, 'cache', {
+  get() {
+    return getOutputStyleDirStylesHostSlot.of(getBootstrapSessionHost()).cache
+  },
+  set(next) {
+    getOutputStyleDirStylesHostSlot.of(getBootstrapSessionHost()).cache = next
+  },
+  configurable: true,
+  enumerable: true,
+})
+export const getOutputStyleDirStyles = getOutputStyleDirStylesImpl
 
 export function clearOutputStyleCaches(): void {
   getOutputStyleDirStyles.cache?.clear?.()

@@ -4,6 +4,11 @@
  * probes first. A send carries toolUseId, issuedAt, and deadlineMs.
  */
 
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
+
 export const REMOTE_TOOL_HEARD_MS = 60_000
 export const REMOTE_TOOL_DEADLINE_MS = 58_000
 
@@ -199,15 +204,21 @@ export type RemoteToolHeld = {
   accepted: () => boolean
 }
 
-let announced: RemoteToolHost | null = null
+type AnnouncedRemoteToolHostSlot = {
+  announced: RemoteToolHost | null
+}
+
+const announcedBySession = new RootSessionSlot<AnnouncedRemoteToolHostSlot>(
+  () => ({ announced: null }),
+)
 
 /** densable `e.host()` / `live()`. Announce is the only writer. */
 export function noteRemoteToolHost(host: RemoteToolHost | null): void {
-  announced = host
+  announcedBySession.of(getBootstrapSession()).announced = host
 }
 
 export function currentRemoteToolHost(): RemoteToolHost | null {
-  return announced
+  return announcedBySession.peek(getBootstrapSession())?.announced ?? null
 }
 
 export async function callRemoteTool(opts: {
@@ -237,7 +248,7 @@ export async function callRemoteTool(opts: {
 }): Promise<RemoteToolCallResult> {
   const now = opts.now ?? Date.now
   if (opts.signal.aborted) return { kind: 'cancelled' }
-  const host = opts.host ?? announced
+  const host = opts.host ?? currentRemoteToolHost()
   if (!host?.live) {
     return {
       kind: 'unreachable',
@@ -603,7 +614,7 @@ export async function callRemotePlumbing(opts: {
     throw new Error(REMOTE_PLUMBING_NOT_A_TOOL)
   }
   if (opts.signal.aborted) return { kind: 'cancelled' }
-  const host = opts.host ?? announced
+  const host = opts.host ?? currentRemoteToolHost()
   if (!host?.live) {
     return { kind: 'unreachable', detail: REMOTE_PLUMBING_NO_MACHINE }
   }

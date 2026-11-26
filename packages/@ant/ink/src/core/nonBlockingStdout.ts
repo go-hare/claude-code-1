@@ -18,6 +18,12 @@ import {
 import { createRequire } from 'node:module'
 import { logForDebugging } from '../utils/debug.js'
 import { STDOUT_BACKLOG_BYTES } from './constants.js'
+import {
+  captureInkAlsSession,
+  hasInkActiveSessionAls,
+  InkHostSlot,
+  runWithCapturedInkAlsSession,
+} from './instances.js'
 
 const MAX_QUEUE_BYTES = 4 * 1024 * 1024
 const MAX_RETRY_MS = 25
@@ -41,7 +47,14 @@ type ProbeResult =
   | { fd: number; reason?: undefined; errno?: undefined }
   | { fd?: undefined; reason: string; errno?: string }
 
+type SlotHolder = {
+  onEpisodeEnd: (episode: StdoutBackpressureEpisode) => void
+  capturedSession: object | undefined
+  restored: boolean
+}
+
 type Slot = {
+  stream: NodeJS.WriteStream
   fd: number
   originalWrite: typeof process.stdout.write
   installedWrite: typeof process.stdout.write | undefined
@@ -55,21 +68,51 @@ type Slot = {
     peakQueuedBytes: number
     droppedBytes: number
   }
-  onEpisodeEnd: (episode: StdoutBackpressureEpisode) => void
+  holders: Set<SlotHolder>
   onExit: () => void
+  capturedSession: object | undefined
 }
 
+// Physical stdout WriteStream registry is process-scoped so concurrent hosts
+// share one non-blocking fd wrapper per physical stream and never double-wrap
+// or corrupt `process.stdout.write` on out-of-order restores.
 const slots = new WeakMap<NodeJS.WriteStream, Slot>()
-const skippedReasons = new Set<string>()
+
+type NonBlockingStdoutHostState = {
+  skippedReasons: Set<string>
+  hasFlagOverride: boolean
+  flagOverride: (() => boolean) | undefined
+}
+
+const nonBlockingStdoutHostSlot = new InkHostSlot<NonBlockingStdoutHostState>(
+  () => ({
+    skippedReasons: new Set<string>(),
+    hasFlagOverride: false,
+    flagOverride: undefined,
+  }),
+)
+
+let probeFdOverrideForTests: (() => ProbeResult) | undefined
+
+/** Test-only helper to exercise install/restore lifecycle without a real TTY. */
+export function _setProbeFdOverrideForTests(
+  probe: (() => ProbeResult) | undefined,
+): void {
+  probeFdOverrideForTests = probe
+}
 
 /**
  * densable `k("tengu_event_loop_stall", !1)===!0`.
  * Tests may pin the getter; production calls GrowthBook with default false.
  */
-let getEventLoopStallFlagOverride: (() => boolean) | undefined
+let defaultEventLoopStallFlagOverride: (() => boolean) | undefined
 
 function kEventLoopStall(): boolean {
-  if (getEventLoopStallFlagOverride) return getEventLoopStallFlagOverride()
+  const hostState = nonBlockingStdoutHostSlot.peek()
+  const override = hostState?.hasFlagOverride
+    ? hostState.flagOverride
+    : defaultEventLoopStallFlagOverride
+  if (override) return override()
   try {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { getFeatureValue_CACHED_MAY_BE_STALE } =
@@ -87,11 +130,35 @@ function kEventLoopStall(): boolean {
 }
 
 export function bindNonBlockingStdoutRemoteFlag(getFlag: () => boolean): void {
-  getEventLoopStallFlagOverride = getFlag
+  if (hasInkActiveSessionAls()) {
+    const state = nonBlockingStdoutHostSlot.of()
+    state.hasFlagOverride = true
+    state.flagOverride = getFlag
+  } else {
+    defaultEventLoopStallFlagOverride = getFlag
+    const state = nonBlockingStdoutHostSlot.peek()
+    if (state) {
+      state.hasFlagOverride = false
+      state.flagOverride = undefined
+    }
+  }
 }
 
 export function resetNonBlockingStdoutRemoteFlagForTests(): void {
-  getEventLoopStallFlagOverride = undefined
+  if (hasInkActiveSessionAls()) {
+    const state = nonBlockingStdoutHostSlot.peek()
+    if (state) {
+      state.hasFlagOverride = true
+      state.flagOverride = undefined
+    }
+  } else {
+    defaultEventLoopStallFlagOverride = undefined
+    const state = nonBlockingStdoutHostSlot.peek()
+    if (state) {
+      state.hasFlagOverride = false
+      state.flagOverride = undefined
+    }
+  }
 }
 
 function errnoName(err: unknown): string | undefined {
@@ -244,22 +311,29 @@ function armRetry(slot: Slot, progressed: boolean): void {
   slot.retryMs = progressed
     ? 0
     : Math.min(Math.max(1, slot.retryMs * 2), MAX_RETRY_MS)
-  slot.timer = setTimeout(drainQueue, slot.retryMs, slot)
+  slot.timer = setTimeout(() => {
+    runWithCapturedInkAlsSession(slot.capturedSession, () => drainQueue(slot))
+  }, slot.retryMs)
   slot.timer.unref?.()
 }
 
 function finishEpisode(slot: Slot, endedBy: 'drain' | 'flush'): void {
   slot.dropping = false
   slot.retryMs = 0
-  try {
-    slot.onEpisodeEnd({
-      durationMs: Math.round(performance.now() - slot.episode.startedMs),
-      peakQueuedBytes: slot.episode.peakQueuedBytes,
-      droppedBytes: slot.episode.droppedBytes,
-      endedBy,
-    })
-  } catch {
-    // never throw from the episode callback
+  const episode: StdoutBackpressureEpisode = {
+    durationMs: Math.round(performance.now() - slot.episode.startedMs),
+    peakQueuedBytes: slot.episode.peakQueuedBytes,
+    droppedBytes: slot.episode.droppedBytes,
+    endedBy,
+  }
+  for (const holder of [...slot.holders]) {
+    try {
+      runWithCapturedInkAlsSession(holder.capturedSession, () => {
+        holder.onEpisodeEnd(episode)
+      })
+    } catch {
+      // never throw from the episode callback
+    }
   }
 }
 
@@ -297,7 +371,7 @@ function accept(slot: Slot, buf: Buffer): void {
       written = writeNonblock(slot.fd, buf)
     } catch (err) {
       abandon(slot, err)
-      process.stdout.write(buf)
+      slot.stream.write(buf)
       return
     }
     if (written === buf.length) return
@@ -340,7 +414,7 @@ function flushSlot(slot: Slot): void {
   slot.queuedBytes = 0
   try {
     for (const buf of pending) {
-      slot.originalWrite.call(process.stdout, buf)
+      slot.originalWrite.call(slot.stream, buf)
     }
   } catch (err) {
     abandon(slot, err)
@@ -351,11 +425,15 @@ function flushSlot(slot: Slot): void {
 
 function restoreSlot(slot: Slot): void {
   if (slot.installedWrite === undefined) return
-  if (process.stdout.write === slot.installedWrite) {
-    process.stdout.write = slot.originalWrite
+  if (slot.stream.write === slot.installedWrite) {
+    slot.stream.write = slot.originalWrite
   }
   slot.installedWrite = undefined
-  slots.delete(process.stdout)
+  for (const holder of slot.holders) {
+    holder.restored = true
+  }
+  slot.holders.clear()
+  slots.delete(slot.stream)
   process.off('exit', slot.onExit)
   try {
     closeSync(slot.fd)
@@ -363,6 +441,15 @@ function restoreSlot(slot: Slot): void {
     // ignore
   }
   flushSlot(slot)
+}
+
+function releaseHolder(slot: Slot, holder: SlotHolder): void {
+  if (holder.restored) return
+  holder.restored = true
+  slot.holders.delete(holder)
+  if (slot.holders.size === 0) {
+    restoreSlot(slot)
+  }
 }
 
 function abandon(slot: Slot, err: unknown): void {
@@ -374,7 +461,7 @@ function abandon(slot: Slot, err: unknown): void {
   slot.episode.droppedBytes += leftoverBytes
   try {
     for (const buf of leftover) {
-      slot.originalWrite.call(process.stdout, buf)
+      slot.originalWrite.call(slot.stream, buf)
     }
   } catch {
     // still failed — droppedBytes already counts the leftover
@@ -383,11 +470,11 @@ function abandon(slot: Slot, err: unknown): void {
   restoreSlot(slot)
 }
 
-function wrap(slot: Slot): NonBlockingStdoutHandle {
+function wrap(slot: Slot, holder: SlotHolder): NonBlockingStdoutHandle {
   return {
     flush: () => flushSlot(slot),
-    restore: () => restoreSlot(slot),
-    isActive: () => slot.installedWrite !== undefined,
+    restore: () => releaseHolder(slot, holder),
+    isActive: () => !holder.restored && slot.installedWrite !== undefined,
     queuedBytes: () => slot.queuedBytes,
   }
 }
@@ -398,12 +485,20 @@ function wrap(slot: Slot): NonBlockingStdoutHandle {
 export function installNonBlockingStdout(
   onEpisodeEnd: (episode: StdoutBackpressureEpisode) => void,
 ): NonBlockingStdoutHandle | null {
-  const existing = slots.get(process.stdout)
+  const hostState = nonBlockingStdoutHostSlot.of()
+  const stream = process.stdout
+  const capturedSession = captureInkAlsSession()
+  const existing = slots.get(stream)
   if (existing?.installedWrite !== undefined) {
-    existing.onEpisodeEnd = onEpisodeEnd
-    return wrap(existing)
+    const holder: SlotHolder = {
+      onEpisodeEnd,
+      capturedSession,
+      restored: false,
+    }
+    existing.holders.add(holder)
+    return wrap(existing, holder)
   }
-  const probed = probeFd()
+  const probed = probeFdOverrideForTests ? probeFdOverrideForTests() : probeFd()
   if (probed.fd === undefined) {
     logForDebugging(
       `nonBlockingStdout: not installed (${probed.reason}${probed.errno ? `, ${probed.errno}` : ''})`,
@@ -412,12 +507,20 @@ export function installNonBlockingStdout(
       result: 'skipped',
       reason: probed.reason,
     })
-    if (!skippedReasons.has(probed.reason)) skippedReasons.add(probed.reason)
+    if (!hostState.skippedReasons.has(probed.reason)) {
+      hostState.skippedReasons.add(probed.reason)
+    }
     return null
   }
+  const holder: SlotHolder = {
+    onEpisodeEnd,
+    capturedSession,
+    restored: false,
+  }
   const slot: Slot = {
+    stream,
     fd: probed.fd,
-    originalWrite: process.stdout.write.bind(process.stdout),
+    originalWrite: stream.write,
     installedWrite: undefined,
     queue: [],
     queuedBytes: 0,
@@ -425,15 +528,17 @@ export function installNonBlockingStdout(
     timer: undefined,
     retryMs: 0,
     episode: { startedMs: 0, peakQueuedBytes: 0, droppedBytes: 0 },
-    onEpisodeEnd,
-    onExit: () => restoreSlot(slot),
+    holders: new Set([holder]),
+    onExit: () =>
+      runWithCapturedInkAlsSession(capturedSession, () => restoreSlot(slot)),
+    capturedSession,
   }
   const installed: typeof process.stdout.write = ((chunk, encoding, cb) => {
     const enc = typeof encoding === 'string' ? encoding : undefined
     const done = typeof encoding === 'function' ? encoding : cb
     if (slot.installedWrite === undefined) {
       return slot.originalWrite.call(
-        process.stdout,
+        slot.stream,
         chunk,
         enc as BufferEncoding,
         done,
@@ -448,12 +553,12 @@ export function installNonBlockingStdout(
     return true
   }) as typeof process.stdout.write
   slot.installedWrite = installed
-  process.stdout.write = installed
-  slots.set(process.stdout, slot)
+  stream.write = installed
+  slots.set(stream, slot)
   process.on('exit', slot.onExit)
   logForDebugging('nonBlockingStdout: active')
   logForDebugging('tengu_nonblocking_stdout', { result: 'installed' })
-  return wrap(slot)
+  return wrap(slot, holder)
 }
 
 /** Test helper — gold `bSo` is 16384. */

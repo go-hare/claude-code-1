@@ -4,6 +4,11 @@ import { promises as fs } from 'fs'
 import { dirname, join } from 'path'
 import { getSessionId } from 'src/bootstrap/state.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import {
+  getActiveSessionFromAls,
+  getSessionOnceLatches,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 
 function hashString(str: string): string {
@@ -12,7 +17,6 @@ function hashString(str: string): string {
 
 // Cache last few API requests for ant users (e.g., for /issue command)
 const MAX_CACHED_REQUESTS = 5
-const cachedApiRequests: Array<{ timestamp: string; request: unknown }> = []
 
 type DumpState = {
   initialized: boolean
@@ -23,30 +27,38 @@ type DumpState = {
   lastInitFingerprint: string
 }
 
-// Track state per session to avoid duplicating data
-const dumpState = new Map<string, DumpState>()
+type DumpPromptsStore = {
+  recentRequests: Array<{ timestamp: string; request: unknown }>
+  stateByAgent: Map<string, DumpState>
+}
+
+// Track state per root session (`SessionOnceLatches.dumpPrompts`)
+function getDumpPromptsStore(): DumpPromptsStore {
+  return getSessionOnceLatches().dumpPrompts as unknown as DumpPromptsStore
+}
 
 export function getLastApiRequests(): Array<{
   timestamp: string
   request: unknown
 }> {
-  return [...cachedApiRequests]
+  return [...getDumpPromptsStore().recentRequests]
 }
 
 export function clearApiRequestCache(): void {
-  cachedApiRequests.length = 0
+  getDumpPromptsStore().recentRequests.length = 0
 }
 
 export function clearDumpState(agentIdOrSessionId: string): void {
-  dumpState.delete(agentIdOrSessionId)
+  getDumpPromptsStore().stateByAgent.delete(agentIdOrSessionId)
 }
 
 export function clearAllDumpState(): void {
-  dumpState.clear()
+  getDumpPromptsStore().stateByAgent.clear()
 }
 
 export function addApiRequestToCache(requestData: unknown): void {
   if (process.env.USER_TYPE !== 'ant') return
+  const cachedApiRequests = getDumpPromptsStore().recentRequests
   cachedApiRequests.push({
     timestamp: new Date().toISOString(),
     request: requestData,
@@ -149,6 +161,7 @@ export function createDumpPromptsFetch(
   const filePath = getDumpPromptsPath(agentIdOrSessionId)
 
   return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const dumpState = getDumpPromptsStore().stateByAgent
     const state = dumpState.get(agentIdOrSessionId) ?? {
       initialized: false,
       messageCountSeen: 0,
@@ -161,10 +174,21 @@ export function createDumpPromptsFetch(
 
     if (init?.method === 'POST' && init.body) {
       timestamp = new Date().toISOString()
+      const bodyStr = init.body as string
+      const capturedTs = timestamp
+      const capturedSession = getActiveSessionFromAls()
       // Parsing + stringifying the request (system prompt + tool schemas = MBs)
       // takes hundreds of ms. Defer so it doesn't block the actual API call —
       // this is debug tooling for /issue, not on the critical path.
-      setImmediate(dumpRequest, init.body as string, timestamp, state, filePath)
+      setImmediate(() => {
+        if (capturedSession !== undefined) {
+          runWithSession(capturedSession, () =>
+            dumpRequest(bodyStr, capturedTs, state, filePath),
+          )
+        } else {
+          dumpRequest(bodyStr, capturedTs, state, filePath)
+        }
+      })
     }
 
     // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins

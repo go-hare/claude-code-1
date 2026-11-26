@@ -37,8 +37,14 @@ import {
 } from 'src/services/analytics/index.js'
 import { getProjectRoot, getSessionId } from '../bootstrap/state.js'
 import { saveCurrentProjectConfig } from './config.js'
-import { getCwd } from './cwd.js'
+import { getCwd, hasScopedCwd, setCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
+import {
+  exitSessionContext,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+} from './sessionRoot.js'
 import { errorMessage, getErrnoCode, isENOENT } from './errors.js'
 import { isAutomountMapRoot } from './fsOperations.js'
 import { stripClaudeAuthEnvVars } from './subprocessEnv.js'
@@ -517,10 +523,41 @@ export type WorktreeSession = {
   extensionRoot?: string
 }
 
-let currentWorktreeSession: WorktreeSession | null = null
+type WorktreeHostState = {
+  currentWorktreeSession: WorktreeSession | null
+}
+
+const fallbackWorktreeHost: object = {}
+
+function getActiveWorktreeHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back to module-local sentinel when sessionRoot is mocked in tests
+  }
+  return fallbackWorktreeHost
+}
+
+const worktreeHostSlot = new HostSlot<WorktreeHostState>(() => ({
+  currentWorktreeSession: null,
+}))
+
+function getWorktreeHostState(): WorktreeHostState {
+  return worktreeHostSlot.of(getActiveWorktreeHost())
+}
+
+function setCurrentWorktreeSession(session: WorktreeSession | null): void {
+  getWorktreeHostState().currentWorktreeSession = session
+}
 
 export function getCurrentWorktreeSession(): WorktreeSession | null {
-  return currentWorktreeSession
+  return getWorktreeHostState().currentWorktreeSession
 }
 
 /**
@@ -528,7 +565,7 @@ export function getCurrentWorktreeSession(): WorktreeSession | null {
  * `extensionRoot` when inside a worktree entered from the launch project root.
  */
 export function getWorktreeExtensionRoot(): string | undefined {
-  return currentWorktreeSession?.extensionRoot
+  return getCurrentWorktreeSession()?.extensionRoot
 }
 
 /**
@@ -552,7 +589,9 @@ export function isLinkedGitWorktree(path: string): boolean {
 
 // densable 2.1.216: shell shared-checkout guard reads session via provider
 // (avoids worktree ↔ worktreeGitIsolation circular import).
-registerWorktreeSessionProvider(() => currentWorktreeSession)
+exitSessionContext(() => {
+  registerWorktreeSessionProvider(() => getCurrentWorktreeSession())
+})
 
 /**
  * Official 2.1.207: classify a path as a Claude-managed linked worktree
@@ -675,7 +714,7 @@ export async function enterExistingWorktreeSession(
   )
   const worktreeName = basename(worktreePath)
 
-  currentWorktreeSession = {
+  const enteredSession: WorktreeSession = {
     originalCwd,
     worktreePath,
     worktreeName,
@@ -687,13 +726,14 @@ export async function enterExistingWorktreeSession(
       ? { extensionRoot: prev.extensionRoot }
       : {}),
   }
+  setCurrentWorktreeSession(enteredSession)
 
   saveCurrentProjectConfig(current => ({
     ...current,
-    activeWorktreeSession: currentWorktreeSession ?? undefined,
+    activeWorktreeSession: enteredSession,
   }))
 
-  return currentWorktreeSession
+  return enteredSession
 }
 
 /**
@@ -702,7 +742,7 @@ export async function enterExistingWorktreeSession(
  * state (cwd, originalCwd).
  */
 export function restoreWorktreeSession(session: WorktreeSession | null): void {
-  currentWorktreeSession = session
+  setCurrentWorktreeSession(session)
 }
 
 /** densable 2.1.248 #35 `j` — job fields used at bg-boot adopt. */
@@ -2372,7 +2412,7 @@ export async function createWorktreeForSession(
     liveLaunchDirs(originalCwd, findCanonicalGitRoot(originalCwd)),
   )
 
-  currentWorktreeSession = session
+  setCurrentWorktreeSession(session)
   saveCurrentProjectConfig(current => ({
     ...current,
     activeWorktreeSession: session,
@@ -2468,12 +2508,12 @@ export function resolveWorktreeExitTargetDir(session: {
 }
 
 export async function keepWorktree(): Promise<void> {
-  if (!currentWorktreeSession) {
+  const session = getCurrentWorktreeSession()
+  if (!session) {
     return
   }
 
   try {
-    const session = currentWorktreeSession
     const { worktreePath, worktreeBranch } = session
     // 2.1.323 #1988: resolve fallback dir when originalCwd was deleted
     const { targetDir } = resolveWorktreeExitTargetDir(session)
@@ -2481,15 +2521,19 @@ export async function keepWorktree(): Promise<void> {
     const lockGitRoot = resolveWorktreeLockGitRoot(targetDir, worktreePath)
 
     // Change back to original directory (or fallback if deleted) first.
-    try {
-      process.chdir(
-        isExistingDirectorySync(lockGitRoot) ? lockGitRoot : targetDir,
-      )
-    } catch (error) {
-      logForDebugging(
-        `Could not chdir to original directory while keeping worktree: ${error}`,
-      )
-      process.chdir(targetDir)
+    if (!hasActiveSessionAls() && !hasScopedCwd()) {
+      try {
+        process.chdir(
+          isExistingDirectorySync(lockGitRoot) ? lockGitRoot : targetDir,
+        )
+      } catch (error) {
+        logForDebugging(
+          `Could not chdir to original directory while keeping worktree: ${error}`,
+        )
+        process.chdir(targetDir)
+      }
+    } else {
+      setCwd(targetDir)
     }
 
     // densable Qfr / Ejr — release our lock when we owned it (!enteredExisting && !hook).
@@ -2501,7 +2545,7 @@ export async function keepWorktree(): Promise<void> {
     }
 
     // Clear the session but keep the worktree intact
-    currentWorktreeSession = null
+    setCurrentWorktreeSession(null)
 
     // Update config
     saveCurrentProjectConfig(current => ({
@@ -2523,7 +2567,7 @@ export async function keepWorktree(): Promise<void> {
 }
 
 function clearActiveWorktreeSession(): void {
-  currentWorktreeSession = null
+  setCurrentWorktreeSession(null)
   saveCurrentProjectConfig(current => ({
     ...current,
     activeWorktreeSession: undefined,
@@ -2565,12 +2609,12 @@ export async function cleanupWorktree(persist?: {
   storageV5?: unknown
   credentials?: unknown
 }): Promise<boolean> {
-  if (!currentWorktreeSession) {
+  const session = getCurrentWorktreeSession()
+  if (!session) {
     return true
   }
 
   try {
-    const session = currentWorktreeSession
     const { worktreePath, worktreeBranch, hookBased } = session
     // 2.1.323 #1988: resolve fallback dir when originalCwd was deleted
     const { targetDir } = resolveWorktreeExitTargetDir(session)
@@ -2579,7 +2623,11 @@ export async function cleanupWorktree(persist?: {
       findCanonicalGitRoot(worktreePath) ??
       targetDir
 
-    process.chdir(targetDir)
+    if (!hasActiveSessionAls() && !hasScopedCwd()) {
+      process.chdir(targetDir)
+    } else {
+      setCwd(targetDir)
+    }
 
     let hookRemoved = false
     if (hookBased) {
@@ -3973,7 +4021,7 @@ export async function adoptWorktreeForBgBoot(
     hookBased: false,
     enteredExisting: false,
   }
-  currentWorktreeSession = session
+  setCurrentWorktreeSession(session)
   saveCurrentProjectConfig(current => ({
     ...current,
     activeWorktreeSession: session,
@@ -4033,7 +4081,7 @@ export async function releaseStaleClaudeWorktreeLocks(
       return [] as PorcelainWorktree[]
     },
   )
-  const currentPath = currentWorktreeSession?.worktreePath
+  const currentPath = getCurrentWorktreeSession()?.worktreePath
   const currentKey =
     currentPath === undefined
       ? undefined
@@ -4486,7 +4534,7 @@ export async function reapJobWorktreeIfSafe(
     return false
   }
   const realWorktree = await realpath(worktreePath).catch(() => worktreePath)
-  const currentPath = currentWorktreeSession?.worktreePath
+  const currentPath = getCurrentWorktreeSession()?.worktreePath
   if (currentPath) {
     const realCurrent = await realpath(currentPath).catch(() => currentPath)
     if (realWorktree === realCurrent) return false
@@ -4611,7 +4659,7 @@ export async function cleanupStaleAgentWorktrees(
   }
 
   const cutoffMs = cutoffDate.getTime()
-  const currentPath = currentWorktreeSession?.worktreePath
+  const currentPath = getCurrentWorktreeSession()?.worktreePath
   const originHeadRef = await resolveOriginHeadRef(gitRoot)
   let removed = 0
 
@@ -5035,7 +5083,7 @@ export async function execIntoTmuxWorktree(args: string[]): Promise<{
       )
       if (!result.existed) {
         console.log(
-          `Created worktree: ${worktreeDir} (based on ${(result as any).baseBranch})`,
+          `Created worktree: ${worktreeDir} (based on ${result.baseBranch})`,
         )
         await performPostCreationSetup(repoRoot, worktreeDir)
       }

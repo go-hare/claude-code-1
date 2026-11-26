@@ -28,6 +28,8 @@ import {
   parsePluginIdentifier,
 } from '../plugins/pluginIdentifier.js'
 import { SERVER_PLUGIN_ID_RE } from '../plugins/syncedPluginHydrate.js'
+import { HostSlot } from '../hostSlot.js'
+import { getBootstrapSessionHost } from '../sessionRoot.js'
 
 // builtinPlugins.ts:BUILTIN_MARKETPLACE_NAME — inlined to avoid the cycle
 // through commands.js. Marketplace schemas.ts enforces 'builtin' is reserved.
@@ -387,24 +389,30 @@ export function logPluginLoadErrors(
  * In-process registry of loaded official / default-bundle plugins -> marketplace
  * name, mirroring official `fPa` / `_r().firstPartyPlugins` (@282347000).
  */
-const firstPartyPluginsRegistry = new Map<string, string>()
+const firstPartyPluginsHostSlot = new HostSlot<Map<string, string>>(
+  () => new Map<string, string>(),
+)
+
+function getFirstPartyPluginsRegistry(): Map<string, string> {
+  return firstPartyPluginsHostSlot.of(getBootstrapSessionHost())
+}
 
 export function registerFirstPartyPluginForAttribution(
   pluginName: string,
   marketplaceName: string,
 ): void {
-  firstPartyPluginsRegistry.set(pluginName, marketplaceName)
+  getFirstPartyPluginsRegistry().set(pluginName, marketplaceName)
 }
 
 export function getFirstPartyPluginsForAttribution(): ReadonlyMap<
   string,
   string
 > {
-  return firstPartyPluginsRegistry
+  return getFirstPartyPluginsRegistry()
 }
 
 export function clearFirstPartyPluginsForAttributionForTests(): void {
-  firstPartyPluginsRegistry.clear()
+  getFirstPartyPluginsRegistry().clear()
 }
 
 export type OTelAttributionInput = {
@@ -494,7 +502,7 @@ export function sanitizeAttributionForOTel(
   attribution: OTelAttributionInput,
   firstPartyPlugins:
     | ReadonlyMap<string, string>
-    | ReadonlySet<string> = firstPartyPluginsRegistry,
+    | ReadonlySet<string> = getFirstPartyPluginsRegistry(),
 ): OTelAttributionInput {
   const {
     attributionAgent,
@@ -557,7 +565,7 @@ export function buildOTelAttributionAttributes(
   attribution: OTelAttributionInput,
   firstPartyPlugins:
     | ReadonlyMap<string, string>
-    | ReadonlySet<string> = firstPartyPluginsRegistry,
+    | ReadonlySet<string> = getFirstPartyPluginsRegistry(),
 ): Record<string, string> {
   const sanitized = sanitizeAttributionForOTel(
     querySource,

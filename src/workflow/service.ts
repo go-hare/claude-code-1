@@ -12,7 +12,9 @@ import {
 } from '@claude-code/workflow-engine'
 import { join } from 'node:path'
 import { getProjectRoot } from '../bootstrap/state.js'
+import { registerCleanup } from '../utils/cleanupRegistry.js'
 import { logForDebugging } from '../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { initBundledWorkflows } from './bundled/init.js'
 import { buildHostBundle, makeHostHandle } from './hostHandle.js'
 import { installWorkflowNotifications } from './notifications.js'
@@ -103,11 +105,57 @@ export type WorkflowService = {
   listNamed(workflowDir?: string): Promise<string[]>
 }
 
-let cached: WorkflowService | null = null
+type WorkflowServiceHostState = {
+  cached: WorkflowService | null
+  unregisterCleanup: (() => void) | null
+}
 
-/** Process singleton. Tool and panel share the same ports/registry/store. */
+const workflowServiceHostSlot = new HostSlot<WorkflowServiceHostState>(() => ({
+  cached: null,
+  unregisterCleanup: null,
+}))
+
+const liveWorkflowServices = new Set<WeakRef<WorkflowService>>()
+let exitHookInstalled = false
+
+function pruneDeadWorkflowServices(): void {
+  for (const ref of liveWorkflowServices) {
+    if (ref.deref() === undefined) {
+      liveWorkflowServices.delete(ref)
+    }
+  }
+}
+
+/**
+ * Shut down every live host's WorkflowService (best-effort). Installed once on
+ * `process.once('exit')` so isolated ALS hosts' running workflows never orphan
+ * on process exit.
+ */
+export function shutdownAllWorkflowServices(): void {
+  for (const ref of [...liveWorkflowServices]) {
+    const svc = ref.deref()
+    if (svc === undefined) {
+      liveWorkflowServices.delete(ref)
+      continue
+    }
+    try {
+      svc.shutdown()
+    } catch {
+      // best-effort shutdown on exit
+    }
+  }
+}
+
+function ensureWorkflowExitHook(): void {
+  if (exitHookInstalled) return
+  exitHookInstalled = true
+  process.once('exit', shutdownAllWorkflowServices)
+}
+
+/** Host singleton. Tool and panel share the same ports/registry/store per SessionHost. */
 export function getWorkflowService(): WorkflowService {
-  if (cached) return cached
+  const hostState = workflowServiceHostSlot.of(getBootstrapSessionHost())
+  if (hostState.cached) return hostState.cached
   // Official yOy / initBundledWorkflows — product workflows before first resolve.
   initBundledWorkflows()
   const bus = createProgressBus()
@@ -119,8 +167,23 @@ export function getWorkflowService(): WorkflowService {
   attachRunStatePersistence(bus, store)
   // Install the state-change notification bridge (commit 0768d4dc promised "auto-notify on completion" but the old implementation left it unfulfilled)
   installWorkflowNotifications(service)
-  cached = service
-  return cached
+  hostState.cached = service
+  if (liveWorkflowServices.size > 64) {
+    pruneDeadWorkflowServices()
+  }
+  const serviceRef = new WeakRef(service)
+  liveWorkflowServices.add(serviceRef)
+  ensureWorkflowExitHook()
+  hostState.unregisterCleanup?.()
+  hostState.unregisterCleanup = registerCleanup(() => {
+    service.shutdown()
+    liveWorkflowServices.delete(serviceRef)
+    if (hostState.cached === service) {
+      hostState.cached = null
+      hostState.unregisterCleanup = null
+    }
+  })
+  return hostState.cached
 }
 
 /**
@@ -369,7 +432,19 @@ export function makeService(
 
 /** For tests: reset the singleton (avoid cross-case contamination). */
 export function __resetWorkflowServiceForTests(): void {
-  cached = null
+  const hostState = workflowServiceHostSlot.of(getBootstrapSessionHost())
+  const prev = hostState.cached
+  hostState.unregisterCleanup?.()
+  hostState.unregisterCleanup = null
+  hostState.cached = null
+  if (prev) {
+    for (const ref of liveWorkflowServices) {
+      const target = ref.deref()
+      if (target === undefined || target === prev) {
+        liveWorkflowServices.delete(ref)
+      }
+    }
+  }
 }
 
 /**
@@ -377,5 +452,5 @@ export function __resetWorkflowServiceForTests(): void {
  * if workflow was never used, cached is still null — avoids side-effecting bus/ports creation in the exit hook.
  */
 export function peekWorkflowService(): WorkflowService | null {
-  return cached
+  return workflowServiceHostSlot.peek(getBootstrapSessionHost())?.cached ?? null
 }

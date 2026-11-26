@@ -47,6 +47,7 @@ import {
 } from '../utils/model/model.js'
 import { isObserverAgentTask } from '../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { TaskState } from '../tasks/types.js'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionHost.js'
 import type { AppState, SessionAppState, UIAppState } from './AppStateStore.js'
 
 /**
@@ -207,14 +208,16 @@ export type CcrSessionRulesRecord = {
   session_ask_rules: string[] | null
 }
 
-let ccrKeepsSessionRules: boolean | undefined
+const ccrKeepsSessionRulesSlot = new RootSessionSlot<{
+  value: boolean | undefined
+}>(() => ({ value: undefined }))
 
 export function setCcrKeepsSessionRules(value: boolean | undefined): void {
-  ccrKeepsSessionRules = value
+  ccrKeepsSessionRulesSlot.of(getBootstrapSession()).value = value
 }
 
 export function getCcrKeepsSessionRules(): boolean | undefined {
-  return ccrKeepsSessionRules
+  return ccrKeepsSessionRulesSlot.of(getBootstrapSession()).value
 }
 
 function isValidSessionRuleString(rule: unknown): rule is string {
@@ -648,8 +651,9 @@ export function onChangeAppState({
       record,
       buildCcrSessionRulesRecord(oldCtx).record,
     )
-    if (ccrKeepsSessionRules !== true) {
-      if (ccrKeepsSessionRules === false && !unchanged) {
+    const keepsSessionRules = getCcrKeepsSessionRules()
+    if (keepsSessionRules !== true) {
+      if (keepsSessionRules === false && !unchanged) {
         logForDiagnosticsNoPII('warn', 'ccr_kept_session_rules', {
           reason: 'write_held_record_not_restored',
         })

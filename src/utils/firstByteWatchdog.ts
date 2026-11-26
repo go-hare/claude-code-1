@@ -1,5 +1,7 @@
 import { logEvent } from 'src/services/analytics/index.js'
 import { logForDebugging } from './debug.js'
+import { RootSessionSlot } from './hostSlot.js'
+import { getBootstrapSession } from './sessionRoot.js'
 import {
   isByteWatchdogEnabled,
   resolveByteStreamIdleTimeoutMs,
@@ -31,7 +33,13 @@ export const BEDROCK_INVOKE_WITH_RESPONSE_STREAM =
 /** Official UYo — StreamNoResponse retries (one retry). */
 export const STREAM_NO_RESPONSE_RETRY_CAP = 1
 
-const armedRequestIds = new Map<string, true>()
+const armedRequestIdsSlot = new RootSessionSlot<Map<string, true>>(
+  () => new Map<string, true>(),
+)
+
+function getArmedRequestIds(): Map<string, true> {
+  return armedRequestIdsSlot.of(getBootstrapSession())
+}
 
 export class StreamNoResponseError extends Error {
   readonly timeoutMs: number
@@ -61,7 +69,7 @@ export class StreamSuspendedError extends Error {
 
 /** Official SEn — arm first-byte for this client request id. */
 export function armStreamFirstByte(clientRequestId: string): void {
-  armedRequestIds.set(clientRequestId, true)
+  getArmedRequestIds().set(clientRequestId, true)
 }
 
 /** Official eOo — consume the arm. Returns true if this id was armed. */
@@ -71,7 +79,7 @@ export function consumeStreamFirstByteArm(
   if (clientRequestId === undefined) {
     return false
   }
-  return armedRequestIds.delete(clientRequestId)
+  return getArmedRequestIds().delete(clientRequestId)
 }
 
 function parseTimeoutMs(raw: string | undefined, fallback: number): number {

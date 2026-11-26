@@ -8,6 +8,7 @@
 import { logEvent } from '../analytics/index.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 
 export const MCP_SWITCHED_OFF_MAX_SERVERS = 64
 export const MCP_SWITCHED_OFF_MAX_NAME_LENGTH = 256
@@ -255,21 +256,31 @@ export class McpSwitchedOffRecord {
   }
 }
 
-let activeMcpSwitchedOffRecord: McpSwitchedOffRecord | null = null
+type HostMcpSwitchedOffState = {
+  activeRecord: McpSwitchedOffRecord | null
+}
+
+const hostMcpSwitchedOffSlot = new HostSlot<HostMcpSwitchedOffState>(() => ({
+  activeRecord: null,
+}))
+
+function getHostMcpSwitchedOffState(): HostMcpSwitchedOffState {
+  return hostMcpSwitchedOffSlot.of(getBootstrapSessionHost())
+}
 
 export function getActiveMcpSwitchedOffRecord(): McpSwitchedOffRecord | null {
-  return activeMcpSwitchedOffRecord
+  return getHostMcpSwitchedOffState().activeRecord
 }
 
 export function setActiveMcpSwitchedOffRecord(
   record: McpSwitchedOffRecord | null,
 ): void {
-  activeMcpSwitchedOffRecord = record
+  getHostMcpSwitchedOffState().activeRecord = record
 }
 
 export function notifyMcpSwitchedOffSaved(
   serverName: string,
   enabled: boolean,
 ): void {
-  activeMcpSwitchedOffRecord?.switchSaved(serverName, enabled)
+  getHostMcpSwitchedOffState().activeRecord?.switchSaved(serverName, enabled)
 }

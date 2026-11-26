@@ -24,7 +24,25 @@ export {
 
 import type { AppState } from '../state/AppState.js'
 import { isEnvTruthy } from './envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { getTeammateContext } from './teammateContext.js'
+
+type DynamicTeamContext = {
+  agentId: string
+  agentName: string
+  teamName: string
+  color?: string
+  planModeRequired: boolean
+  parentSessionId?: string
+}
+
+/**
+ * Dynamic team context for runtime team joining (Official 2.1.331 [W-072 Gsd]).
+ * Scoped per SessionHost via HostSlot.
+ */
+const dynamicTeamContextHostSlot = new HostSlot<{
+  context: DynamicTeamContext | null
+}>(() => ({ context: null }))
 
 /**
  * Returns the parent session ID for this teammate.
@@ -34,50 +52,30 @@ import { getTeammateContext } from './teammateContext.js'
 export function getParentSessionId(): string | undefined {
   const inProcessCtx = getTeammateContext()
   if (inProcessCtx) return inProcessCtx.parentSessionId
-  return dynamicTeamContext?.parentSessionId
+  return getDynamicTeamContext()?.parentSessionId
 }
-
-/**
- * Dynamic team context for runtime team joining.
- * When set, these values take precedence over environment variables.
- */
-let dynamicTeamContext: {
-  agentId: string
-  agentName: string
-  teamName: string
-  color?: string
-  planModeRequired: boolean
-  parentSessionId?: string
-} | null = null
 
 /**
  * Set the dynamic team context (called when joining a team at runtime)
  */
 export function setDynamicTeamContext(
-  context: {
-    agentId: string
-    agentName: string
-    teamName: string
-    color?: string
-    planModeRequired: boolean
-    parentSessionId?: string
-  } | null,
+  context: DynamicTeamContext | null,
 ): void {
-  dynamicTeamContext = context
+  dynamicTeamContextHostSlot.of(getBootstrapSessionHost()).context = context
 }
 
 /**
  * Clear the dynamic team context (called when leaving a team)
  */
 export function clearDynamicTeamContext(): void {
-  dynamicTeamContext = null
+  dynamicTeamContextHostSlot.of(getBootstrapSessionHost()).context = null
 }
 
 /**
  * Get the current dynamic team context (for inspection/debugging)
  */
-export function getDynamicTeamContext(): typeof dynamicTeamContext {
-  return dynamicTeamContext
+export function getDynamicTeamContext(): DynamicTeamContext | null {
+  return dynamicTeamContextHostSlot.of(getBootstrapSessionHost()).context
 }
 
 /**
@@ -88,7 +86,7 @@ export function getDynamicTeamContext(): typeof dynamicTeamContext {
 export function getAgentId(): string | undefined {
   const inProcessCtx = getTeammateContext()
   if (inProcessCtx) return inProcessCtx.agentId
-  return dynamicTeamContext?.agentId
+  return getDynamicTeamContext()?.agentId
 }
 
 /**
@@ -98,7 +96,7 @@ export function getAgentId(): string | undefined {
 export function getAgentName(): string | undefined {
   const inProcessCtx = getTeammateContext()
   if (inProcessCtx) return inProcessCtx.agentName
-  return dynamicTeamContext?.agentName
+  return getDynamicTeamContext()?.agentName
 }
 
 /**
@@ -113,7 +111,8 @@ export function getTeamName(teamContext?: {
 }): string | undefined {
   const inProcessCtx = getTeammateContext()
   if (inProcessCtx) return inProcessCtx.teamName
-  if (dynamicTeamContext?.teamName) return dynamicTeamContext.teamName
+  const dynamicCtx = getDynamicTeamContext()
+  if (dynamicCtx?.teamName) return dynamicCtx.teamName
   return teamContext?.teamName
 }
 
@@ -127,6 +126,7 @@ export function isTeammate(): boolean {
   const inProcessCtx = getTeammateContext()
   if (inProcessCtx) return true
   // Tmux teammates require both agent ID and team name
+  const dynamicTeamContext = getDynamicTeamContext()
   return !!(dynamicTeamContext?.agentId && dynamicTeamContext?.teamName)
 }
 
@@ -138,7 +138,7 @@ export function isTeammate(): boolean {
 export function getTeammateColor(): string | undefined {
   const inProcessCtx = getTeammateContext()
   if (inProcessCtx) return inProcessCtx.color
-  return dynamicTeamContext?.color
+  return getDynamicTeamContext()?.color
 }
 
 /**
@@ -149,8 +149,9 @@ export function getTeammateColor(): string | undefined {
 export function isPlanModeRequired(): boolean {
   const inProcessCtx = getTeammateContext()
   if (inProcessCtx) return inProcessCtx.planModeRequired
-  if (dynamicTeamContext !== null) {
-    return dynamicTeamContext.planModeRequired
+  const dynamicCtx = getDynamicTeamContext()
+  if (dynamicCtx !== null) {
+    return dynamicCtx.planModeRequired
   }
   // Official Nkr densable — CLAUDE_CODE_PLAN_MODE_REQUIRED env fallback.
   try {

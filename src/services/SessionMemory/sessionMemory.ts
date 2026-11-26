@@ -5,7 +5,6 @@
  */
 
 import { writeFile } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { feature } from 'bun:bundle'
 import { getIsRemoteMode } from '../../bootstrap/state.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
@@ -38,6 +37,10 @@ import {
   getSessionMemoryPath,
 } from '../../utils/permissions/filesystem.js'
 import { sequential } from '../../utils/sequential.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { getTokenUsage, tokenCountWithEstimation } from '../../utils/tokens.js'
 import { logEvent } from '../analytics/index.js'
@@ -94,16 +97,33 @@ function getSessionMemoryRemoteConfig(): Partial<SessionMemoryConfig> {
 }
 
 // ============================================================================
-// Module State
+// Per-Session State (RootSessionSlot)
 // ============================================================================
 
-let lastMemoryMessageUuid: string | undefined
+type SessionMemoryRuntimeState = {
+  lastMemoryMessageUuid: string | undefined
+  configInitialized: boolean
+  hasLoggedGateFailure: boolean
+  extractSequential: (context: REPLHookContext) => Promise<void>
+}
+
+const sessionMemoryRuntimeStateBySession =
+  new RootSessionSlot<SessionMemoryRuntimeState>(() => ({
+    lastMemoryMessageUuid: undefined,
+    configInitialized: false,
+    hasLoggedGateFailure: false,
+    extractSequential: sequential(extractSessionMemoryImpl),
+  }))
+
+function getSessionMemoryRuntimeState(): SessionMemoryRuntimeState {
+  return sessionMemoryRuntimeStateBySession.of(getBootstrapSession())
+}
 
 /**
  * Reset the last memory message UUID (for testing)
  */
 export function resetLastMemoryMessageUuid(): void {
-  lastMemoryMessageUuid = undefined
+  getSessionMemoryRuntimeState().lastMemoryMessageUuid = undefined
 }
 
 function countToolCallsSince(
@@ -148,9 +168,10 @@ export function shouldExtractMemory(messages: Message[]): boolean {
   const hasMetTokenThreshold = hasMetUpdateThreshold(currentTokenCount)
 
   // Check if we've met the tool calls threshold
+  const runtimeState = getSessionMemoryRuntimeState()
   const toolCallsSinceLastUpdate = countToolCallsSince(
     messages,
-    lastMemoryMessageUuid,
+    runtimeState.lastMemoryMessageUuid,
   )
   const hasMetToolCallThreshold =
     toolCallsSinceLastUpdate >= getToolCallsBetweenUpdates()
@@ -173,7 +194,7 @@ export function shouldExtractMemory(messages: Message[]): boolean {
   if (shouldExtract) {
     const lastMessage = messages[messages.length - 1]
     if (lastMessage?.uuid) {
-      lastMemoryMessageUuid = lastMessage.uuid
+      runtimeState.lastMemoryMessageUuid = lastMessage.uuid
     }
     return true
   }
@@ -235,10 +256,15 @@ async function setupSessionMemoryFile(
 
 /**
  * Initialize session memory config from remote config (lazy initialization).
- * Memoized - only runs once per session, subsequent calls return immediately.
+ * Memoized per root session - only runs once per session, subsequent calls return immediately.
  * Uses cached config values - non-blocking.
  */
-const initSessionMemoryConfigIfNeeded = memoize((): void => {
+function initSessionMemoryConfigIfNeeded(): void {
+  const runtimeState = getSessionMemoryRuntimeState()
+  if (runtimeState.configInitialized) {
+    return
+  }
+
   // Load config from cache (non-blocking, may be stale)
   const remoteConfig = getSessionMemoryRemoteConfig()
 
@@ -262,15 +288,13 @@ const initSessionMemoryConfigIfNeeded = memoize((): void => {
         : DEFAULT_SESSION_MEMORY_CONFIG.toolCallsBetweenUpdates,
   }
   setSessionMemoryConfig(config)
-})
+  runtimeState.configInitialized = true
+}
 
 /**
  * Session memory post-sampling hook that extracts and updates session notes
  */
-// Track if we've logged the gate check failure this session (to avoid spam)
-let hasLoggedGateFailure = false
-
-const extractSessionMemory = sequential(async function (
+async function extractSessionMemoryImpl(
   context: REPLHookContext,
 ): Promise<void> {
   const { messages, toolUseContext, querySource } = context
@@ -283,9 +307,10 @@ const extractSessionMemory = sequential(async function (
 
   // Check gate lazily when hook runs (cached, non-blocking)
   if (!isSessionMemoryGateEnabled()) {
+    const runtimeState = getSessionMemoryRuntimeState()
     // Log gate failure once per session (ant-only)
-    if (process.env.USER_TYPE === 'ant' && !hasLoggedGateFailure) {
-      hasLoggedGateFailure = true
+    if (process.env.USER_TYPE === 'ant' && !runtimeState.hasLoggedGateFailure) {
+      runtimeState.hasLoggedGateFailure = true
       logEvent('tengu_session_memory_gate_disabled', {})
     }
     return
@@ -348,7 +373,10 @@ const extractSessionMemory = sequential(async function (
   updateLastSummarizedMessageIdIfSafe(messages)
 
   markExtractionCompleted()
-})
+}
+
+const extractSessionMemory = (context: REPLHookContext): Promise<void> =>
+  getSessionMemoryRuntimeState().extractSequential(context)
 
 /**
  * Initialize session memory by registering the post-sampling hook.

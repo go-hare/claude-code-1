@@ -40,7 +40,13 @@ import {
   shouldSkipFastModeNetworkErrors,
   shouldSkipFastModeOrgCheck,
 } from './residualMoreEnvGates.js'
-import { getSessionOnceLatches } from './sessionRoot.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  getSessionOnceLatches,
+  HostSlot,
+  RootSessionSlot,
+} from './sessionRoot.js'
 import {
   getInitialSettings,
   getSettingsForSource,
@@ -153,6 +159,7 @@ export function getFastModeUnavailableReason(): string | null {
     return null
   }
 
+  const orgStatus = getFastModeHostState().orgStatus
   if (orgStatus.status === 'disabled') {
     // Official CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK — bypass org disable.
     if (shouldSkipFastModeOrgCheck()) {
@@ -515,9 +522,29 @@ export type CooldownReason =
  * Models for which fast mode was refused (e.g. 400 on Vertex or API) fall back
  * to standard speed on the same model for the rest of the session.
  */
-const fastRejectedSessionModels = new Set<string>()
+class FastModeSessionState {
+  fastRejectedSessionModels = new Set<string>()
+  overageRejection = createSignal<[message: string]>()
+}
+
+const fallbackFastModeSession = { root: {} as object }
+const fastModeSessionStateBySession = new RootSessionSlot<FastModeSessionState>(
+  () => new FastModeSessionState(),
+)
+
+function getFastModeSessionState(): FastModeSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return fastModeSessionStateBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return fastModeSessionStateBySession.of(fallbackFastModeSession)
+}
 
 export function markModelFastModeRejectedForSession(model: string): void {
+  const fastRejectedSessionModels =
+    getFastModeSessionState().fastRejectedSessionModels
   const key = model.replace(/\[1m\]$/i, '').toLowerCase()
   if (fastRejectedSessionModels.has(key)) return
   fastRejectedSessionModels.add(key)
@@ -528,11 +555,11 @@ export function markModelFastModeRejectedForSession(model: string): void {
 
 export function isModelFastModeRejectedForSession(model: string): boolean {
   const key = model.replace(/\[1m\]$/i, '').toLowerCase()
-  return fastRejectedSessionModels.has(key)
+  return getFastModeSessionState().fastRejectedSessionModels.has(key)
 }
 
 export function clearSessionFastModeRejections(): void {
-  fastRejectedSessionModels.clear()
+  getFastModeSessionState().fastRejectedSessionModels.clear()
 }
 
 /**
@@ -617,23 +644,27 @@ export function clearFastModeCooldown(): void {
  * the same flow as when the prefetch discovers the org has it disabled.
  */
 export function handleFastModeRejectedByAPI(): void {
-  if (orgStatus.status === 'disabled') {
+  const hostState = getFastModeHostState()
+  if (hostState.orgStatus.status === 'disabled') {
     return
   }
-  orgStatus = { status: 'disabled', reason: 'preference' }
+  hostState.orgStatus = { status: 'disabled', reason: 'preference' }
   updateSettingsForSource('userSettings', { fastMode: undefined })
   saveGlobalConfig(current => ({
     ...current,
     penguinModeOrgEnabled: false,
   }))
-  orgFastModeChange.emit(false)
+  hostState.orgFastModeChange.emit(false)
 }
 
 // --- Overage rejection listeners ---
 // Fired when a 429 indicates fast mode was rejected because extra usage
 // (overage billing) is not available. Distinct from org-level disabling.
-const overageRejection = createSignal<[message: string]>()
-export const onFastModeOverageRejection = overageRejection.subscribe
+export function onFastModeOverageRejection(
+  listener: (message: string) => void,
+): () => void {
+  return getFastModeSessionState().overageRejection.subscribe(listener)
+}
 
 function getOverageDisabledMessage(reason: string | null): string {
   switch (reason) {
@@ -684,7 +715,7 @@ export function handleFastModeOverageRejection(reason: string | null): void {
       penguinModeOrgEnabled: false,
     }))
   }
-  overageRejection.emit(message)
+  getFastModeSessionState().overageRejection.emit(message)
 }
 
 export function isFastModeCooldown(): boolean {
@@ -728,11 +759,34 @@ type FastModeOrgStatus =
   | { status: 'enabled' }
   | { status: 'disabled'; reason: FastModeDisabledReason }
 
-let orgStatus: FastModeOrgStatus = { status: 'pending' }
+class FastModeHostState {
+  orgStatus: FastModeOrgStatus = { status: 'pending' }
+  orgFastModeChange = createSignal<[orgEnabled: boolean]>()
+  lastPrefetchAt = 0
+  inflightPrefetch: Promise<void> | null = null
+}
+
+const fallbackFastModeHost: object = {}
+const fastModeHostStateByHost = new HostSlot<FastModeHostState>(
+  () => new FastModeHostState(),
+)
+
+function getFastModeHostState(): FastModeHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return fastModeHostStateByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return fastModeHostStateByHost.of(fallbackFastModeHost)
+}
 
 // Listeners notified when org-level fast mode status changes
-const orgFastModeChange = createSignal<[orgEnabled: boolean]>()
-export const onOrgFastModeChanged = orgFastModeChange.subscribe
+export function onOrgFastModeChanged(
+  listener: (orgEnabled: boolean) => void,
+): () => void {
+  return getFastModeHostState().orgFastModeChange.subscribe(listener)
+}
 
 type FastModeResponse = {
   enabled: boolean
@@ -756,8 +810,6 @@ async function fetchFastModeStatus(
 }
 
 const PREFETCH_MIN_INTERVAL_MS = 30_000
-let lastPrefetchAt = 0
-let inflightPrefetch: Promise<void> | null = null
 
 /**
  * Resolve orgStatus from the persisted cache without making any API calls.
@@ -768,12 +820,13 @@ export function resolveFastModeStatusFromCache(): void {
   if (!isFastModeEnabled()) {
     return
   }
-  if (orgStatus.status !== 'pending') {
+  const hostState = getFastModeHostState()
+  if (hostState.orgStatus.status !== 'pending') {
     return
   }
   const isAnt = process.env.USER_TYPE === 'ant'
   const cachedEnabled = getGlobalConfig().penguinModeOrgEnabled === true
-  orgStatus =
+  hostState.orgStatus =
     isAnt || cachedEnabled
       ? { status: 'enabled' }
       : { status: 'disabled', reason: 'unknown' }
@@ -789,11 +842,12 @@ export async function prefetchFastModeStatus(): Promise<void> {
     return
   }
 
-  if (inflightPrefetch) {
+  const hostState = getFastModeHostState()
+  if (hostState.inflightPrefetch) {
     logForDebugging(
       'Fast mode prefetch in progress, returning in-flight promise',
     )
-    return inflightPrefetch
+    return hostState.inflightPrefetch
   }
 
   // Service key OAuth sessions lack user:profile scope → endpoint 403s.
@@ -808,7 +862,7 @@ export async function prefetchFastModeStatus(): Promise<void> {
     const isAnt = process.env.USER_TYPE === 'ant'
     const cachedEnabled = getGlobalConfig().penguinModeOrgEnabled === true
     const isKeylessConsole = isProfileAuthActive()
-    orgStatus =
+    hostState.orgStatus =
       isAnt || cachedEnabled
         ? { status: 'enabled' }
         : {
@@ -819,11 +873,11 @@ export async function prefetchFastModeStatus(): Promise<void> {
   }
 
   const now = Date.now()
-  if (now - lastPrefetchAt < PREFETCH_MIN_INTERVAL_MS) {
+  if (now - hostState.lastPrefetchAt < PREFETCH_MIN_INTERVAL_MS) {
     logForDebugging('Skipping fast mode prefetch, fetched recently')
     return
   }
-  lastPrefetchAt = now
+  hostState.lastPrefetchAt = now
 
   const fetchWithCurrentAuth = async (): Promise<FastModeResponse> => {
     const currentTokens = getClaudeAIOAuthTokens()
@@ -865,10 +919,10 @@ export async function prefetchFastModeStatus(): Promise<void> {
       }
 
       const previousEnabled =
-        orgStatus.status !== 'pending'
-          ? orgStatus.status === 'enabled'
+        hostState.orgStatus.status !== 'pending'
+          ? hostState.orgStatus.status === 'enabled'
           : getGlobalConfig().penguinModeOrgEnabled
-      orgStatus = status.enabled
+      hostState.orgStatus = status.enabled
         ? { status: 'enabled' }
         : {
             status: 'disabled',
@@ -883,7 +937,7 @@ export async function prefetchFastModeStatus(): Promise<void> {
           ...current,
           penguinModeOrgEnabled: status.enabled,
         }))
-        orgFastModeChange.emit(status.enabled)
+        hostState.orgFastModeChange.emit(status.enabled)
       }
       logForDebugging(
         `Org fast mode: ${status.enabled ? 'enabled' : `disabled (${status.disabled_reason ?? 'preference'})`}`,
@@ -894,20 +948,20 @@ export async function prefetchFastModeStatus(): Promise<void> {
       // if no positive cache, disable with network_error reason.
       const isAnt = process.env.USER_TYPE === 'ant'
       const cachedEnabled = getGlobalConfig().penguinModeOrgEnabled === true
-      orgStatus =
+      hostState.orgStatus =
         isAnt || cachedEnabled
           ? { status: 'enabled' }
           : { status: 'disabled', reason: 'network_error' }
       logForDebugging(
-        `Failed to fetch org fast mode status, defaulting to ${orgStatus.status === 'enabled' ? 'enabled (cached)' : 'disabled (network_error)'}: ${err}`,
+        `Failed to fetch org fast mode status, defaulting to ${hostState.orgStatus.status === 'enabled' ? 'enabled (cached)' : 'disabled (network_error)'}: ${err}`,
         { level: 'error' },
       )
       logEvent('tengu_org_penguin_mode_fetch_failed', {})
     } finally {
-      inflightPrefetch = null
+      hostState.inflightPrefetch = null
     }
   }
 
-  inflightPrefetch = doFetch()
-  return inflightPrefetch
+  hostState.inflightPrefetch = doFetch()
+  return hostState.inflightPrefetch
 }

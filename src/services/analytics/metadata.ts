@@ -31,6 +31,7 @@ import {
 } from '../../utils/platform.js'
 import type { CoreUserData } from 'src/utils/user.js'
 import { getAgentContext } from '../../utils/agentContext.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import type { EnvironmentMetadata } from '../../types/generated/events_mono/claude_code/v1/claude_code_internal_event.js'
 import type { PublicApiAuth } from '../../types/generated/events_mono/common/v1/auth.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
@@ -569,10 +570,14 @@ const getVersionBase = memoize((): string | undefined => {
   return match ? match[0] : undefined
 })
 
+const envContextCacheSlot = new HostSlot<{
+  cache: Map<unknown, Promise<EnvContext>>
+}>(() => ({ cache: new Map() }))
+
 /**
- * Builds the environment context object
+ * Builds the environment context object (memoized per SessionHost)
  */
-const buildEnvContext = memoize(async (): Promise<EnvContext> => {
+async function buildEnvContextUncached(): Promise<EnvContext> {
   const [packageManagers, runtimes, linuxDistroInfo, vcs] = await Promise.all([
     env.getPackageManagers(),
     env.getRuntimes(),
@@ -649,7 +654,32 @@ const buildEnvContext = memoize(async (): Promise<EnvContext> => {
     ...(linuxDistroInfo ?? {}),
     ...(vcs.length > 0 ? { vcs: vcs.join(',') } : {}),
   }
+}
+
+function buildEnvContextImpl(): Promise<EnvContext> {
+  const map = envContextCacheSlot.of(getBootstrapSessionHost()).cache
+  const cached = map.get(undefined)
+  if (cached !== undefined) {
+    return cached
+  }
+  const pending = buildEnvContextUncached()
+  map.set(undefined, pending)
+  return pending
+}
+
+Object.defineProperty(buildEnvContextImpl, 'cache', {
+  get: () => envContextCacheSlot.of(getBootstrapSessionHost()).cache,
+  set: (next: Map<unknown, Promise<EnvContext>>) => {
+    envContextCacheSlot.of(getBootstrapSessionHost()).cache = next
+  },
+  configurable: true,
+  enumerable: true,
 })
+
+const buildEnvContext =
+  buildEnvContextImpl as unknown as (() => Promise<EnvContext>) & {
+    cache: Map<unknown, Promise<EnvContext>>
+  }
 
 // --
 // CPU% delta tracking — inherently process-global, same pattern as logBatch/flushTimer in datadog.ts

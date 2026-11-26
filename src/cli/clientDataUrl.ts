@@ -9,7 +9,7 @@
 import axios from 'axios'
 import { createHash, createPublicKey } from 'crypto'
 import { mkdir, open, readFile } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { stripVTControlCharacters } from 'util'
 import { z } from 'zod/v4'
@@ -20,6 +20,14 @@ import { safeParseJSON } from '../utils/json.js'
 import { lazySchema } from '../utils/lazySchema.js'
 import { logError } from '../utils/log.js'
 import { getAPIProvider, type APIProvider } from '../utils/model/providers.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  ofDefaultHost,
+  runWithSession,
+} from '../utils/sessionHost.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { atomicWriteFile } from '../utils/storageV5/atomicWrite.js'
 import {
@@ -149,9 +157,6 @@ const sidecarSchema = lazySchema(() =>
     .passthrough(),
 )
 
-let loadedDocument: ClientDataDocument | undefined
-let hostedFetchOverride: HostedFetchFn | undefined
-
 /** gold `Ydr` / chunk-2rcwkatq.js — session marks + disk floor. */
 const PUBLISHED_FLOOR_FILE = 'published-floor.json'
 const PUBLISHED_FLOOR_SCHEMA_VERSION = 1
@@ -164,9 +169,38 @@ type PublishedCatalogFloorMark = {
   recordedAt: number
 }
 
-const publishedCatalogFloorMarks = new Map<string, PublishedCatalogFloorMark>()
-let publishedCatalogFloorRead: Promise<void> | undefined
-let publishedCatalogFloorWrite: Promise<void> | undefined
+type ClientDataUrlHostState = {
+  /** `undefined` = inherit process-default host; `null` = explicitly cleared in isolated host */
+  loadedDocument: ClientDataDocument | null | undefined
+  hostedFetchOverride: HostedFetchFn | undefined
+  publishedCatalogFloorMarks: Map<string, PublishedCatalogFloorMark>
+  publishedCatalogFloorRead: Promise<void> | undefined
+}
+
+const clientDataUrlHostSlot = new HostSlot<ClientDataUrlHostState>(() => ({
+  loadedDocument: undefined,
+  hostedFetchOverride: undefined,
+  publishedCatalogFloorMarks: new Map(),
+  publishedCatalogFloorRead: undefined,
+}))
+
+// Process-global per-floor-file write queue so concurrent ALS hosts targeting
+// the same published-floor.json serialize read-merge-write without losing marks.
+const publishedCatalogFloorWritesByPath = new Map<string, Promise<void>>()
+
+function getClientDataUrlHostState(): ClientDataUrlHostState {
+  return clientDataUrlHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEffectiveLoadedClientDataDocument():
+  | ClientDataDocument
+  | undefined {
+  const local = clientDataUrlHostSlot.peek(getBootstrapSessionHost())
+  if (local !== undefined && local.loadedDocument !== undefined) {
+    return local.loadedDocument ?? undefined
+  }
+  return ofDefaultHost(clientDataUrlHostSlot).loadedDocument ?? undefined
+}
 
 const publishedFloorFileSchema = lazySchema(() =>
   z.object({
@@ -183,34 +217,35 @@ const publishedFloorFileSchema = lazySchema(() =>
 )
 
 export function resetClientDataUrlStateForTests(): void {
-  loadedDocument = undefined
-  hostedFetchOverride = undefined
-  publishedCatalogFloorMarks.clear()
-  publishedCatalogFloorRead = undefined
-  publishedCatalogFloorWrite = undefined
+  const hostState = getClientDataUrlHostState()
+  hostState.loadedDocument = hasActiveSessionAls() ? null : undefined
+  hostState.hostedFetchOverride = undefined
+  hostState.publishedCatalogFloorMarks.clear()
+  hostState.publishedCatalogFloorRead = undefined
 }
 
 export function setClientDataHostedFetchForTests(
   fetchFn: HostedFetchFn | undefined,
 ): void {
-  hostedFetchOverride = fetchFn
+  getClientDataUrlHostState().hostedFetchOverride = fetchFn
 }
 
 export function getLoadedClientDataDocument(): ClientDataDocument | undefined {
-  return loadedDocument
+  return getEffectiveLoadedClientDataDocument()
 }
 
 export function setLoadedClientDataDocumentForTests(
   document: ClientDataDocument | undefined,
 ): void {
-  loadedDocument = document
+  getClientDataUrlHostState().loadedDocument =
+    document ?? (hasActiveSessionAls() ? null : undefined)
 }
 
 export function setClientDataVersionFloorForTests(
   cacheKey: string,
   version: number,
 ): void {
-  publishedCatalogFloorMarks.set(cacheKey, {
+  getClientDataUrlHostState().publishedCatalogFloorMarks.set(cacheKey, {
     version,
     issuedAt: '',
     recordedAt: 0,
@@ -229,12 +264,13 @@ export function getPublishedCatalogFloorPath(): string {
 
 function mergePublishedCatalogFloorMarks(
   loaded: Map<string, PublishedCatalogFloorMark> | undefined,
+  hostState: ClientDataUrlHostState = getClientDataUrlHostState(),
 ): void {
   if (loaded === undefined) return
   for (const [key, mark] of loaded) {
-    const current = publishedCatalogFloorMarks.get(key)
+    const current = hostState.publishedCatalogFloorMarks.get(key)
     if (current === undefined || mark.version > current.version) {
-      publishedCatalogFloorMarks.set(key, mark)
+      hostState.publishedCatalogFloorMarks.set(key, mark)
     }
   }
 }
@@ -282,17 +318,23 @@ async function readPublishedCatalogFloorFile(): Promise<
 }
 
 function hydratePublishedCatalogFloor(): Promise<void> {
-  publishedCatalogFloorRead ??= readPublishedCatalogFloorFile().then(
-    mergePublishedCatalogFloorMarks,
+  const hostState = getClientDataUrlHostState()
+  hostState.publishedCatalogFloorRead ??= readPublishedCatalogFloorFile().then(
+    loaded => mergePublishedCatalogFloorMarks(loaded, hostState),
   )
-  return publishedCatalogFloorRead
+  return hostState.publishedCatalogFloorRead
 }
 
-async function writePublishedCatalogFloorFile(): Promise<void> {
+async function writePublishedCatalogFloorFile(
+  hostState: ClientDataUrlHostState = getClientDataUrlHostState(),
+): Promise<void> {
   try {
-    mergePublishedCatalogFloorMarks(await readPublishedCatalogFloorFile())
+    mergePublishedCatalogFloorMarks(
+      await readPublishedCatalogFloorFile(),
+      hostState,
+    )
     const sources = Object.fromEntries(
-      [...publishedCatalogFloorMarks.entries()]
+      [...hostState.publishedCatalogFloorMarks.entries()]
         .sort(([, a], [, b]) => b.recordedAt - a.recordedAt)
         .slice(0, PUBLISHED_FLOOR_MAX_SOURCES),
     )
@@ -314,11 +356,26 @@ async function writePublishedCatalogFloorFile(): Promise<void> {
 }
 
 function enqueuePublishedCatalogFloorWrite(): Promise<void> {
-  const next = (publishedCatalogFloorWrite ?? Promise.resolve()).then(
-    writePublishedCatalogFloorFile,
-    writePublishedCatalogFloorFile,
-  )
-  publishedCatalogFloorWrite = next
+  const hostState = getClientDataUrlHostState()
+  const floorKey = resolve(getPublishedCatalogFloorPath())
+  const capturedSession = getActiveSessionFromAls()
+  const write = () =>
+    capturedSession !== undefined &&
+    getActiveSessionFromAls() !== capturedSession
+      ? runWithSession(capturedSession, () =>
+          writePublishedCatalogFloorFile(hostState),
+        )
+      : writePublishedCatalogFloorFile(hostState)
+  const prev =
+    publishedCatalogFloorWritesByPath.get(floorKey) ?? Promise.resolve()
+  const next = prev.then(write, write)
+  const settled = next.catch(() => {})
+  publishedCatalogFloorWritesByPath.set(floorKey, settled)
+  void settled.finally(() => {
+    if (publishedCatalogFloorWritesByPath.get(floorKey) === settled) {
+      publishedCatalogFloorWritesByPath.delete(floorKey)
+    }
+  })
   return next
 }
 
@@ -327,7 +384,10 @@ export async function getPublishedCatalogFloorVersion(
   cacheKey: string,
 ): Promise<number> {
   await hydratePublishedCatalogFloor()
-  return publishedCatalogFloorMarks.get(cacheKey)?.version ?? 0
+  return (
+    getClientDataUrlHostState().publishedCatalogFloorMarks.get(cacheKey)
+      ?.version ?? 0
+  )
 }
 
 /** gold `cet` — persist a higher version mark to session Map + disk. */
@@ -337,9 +397,10 @@ export async function persistPublishedCatalogFloor(
   recordedAt = Date.now(),
 ): Promise<void> {
   await hydratePublishedCatalogFloor()
-  const current = publishedCatalogFloorMarks.get(cacheKey)
+  const marks = getClientDataUrlHostState().publishedCatalogFloorMarks
+  const current = marks.get(cacheKey)
   if (current !== undefined && current.version >= document.version) return
-  publishedCatalogFloorMarks.set(cacheKey, {
+  marks.set(cacheKey, {
     version: document.version,
     issuedAt: (document.issued_at ?? '').slice(0, 64),
     recordedAt,
@@ -544,6 +605,7 @@ export function mergeLoadedClientDataInto(
   base: Record<string, unknown> | null | undefined,
   model: string = sessionModel(),
 ): Record<string, unknown> | null | undefined {
+  const loadedDocument = getEffectiveLoadedClientDataDocument()
   if (loadedDocument === undefined) return base
   const extra = clientDataForModel(loadedDocument, model)
   if (extra === null) return base
@@ -577,6 +639,7 @@ export function readMergedClientData(
 export function describeLoadedClientDataStatus(
   model: string = sessionModel(),
 ): string | undefined {
+  const loadedDocument = getEffectiveLoadedClientDataDocument()
   if (loadedDocument === undefined) return
   return clientDataForModel(loadedDocument, model) !== null
     ? `applied to ${sanitizeClientDataText(model)} (document v${loadedDocument.version})`
@@ -921,18 +984,21 @@ export async function loadClientDataUrl(
   try {
     const resolution = resolveClientDataUrlSource()
     if (resolution.kind === 'unset') return
+    const hostState = getClientDataUrlHostState()
     const result = await loadDocument(resolution, runsOnAnotherMachine, {
       getProvider: deps?.getProvider ?? getAPIProvider,
       isCatalogAllowed: deps?.isCatalogAllowed ?? (() => true),
       fetchHosted:
-        deps?.fetchHosted ?? hostedFetchOverride ?? defaultHostedFetch,
+        deps?.fetchHosted ??
+        hostState.hostedFetchOverride ??
+        defaultHostedFetch,
     })
     if ('failure' in result) {
       return formatClientDataUrlError(
         describeClientDataUrlFailure(result.failure, result.httpStatus),
       )
     }
-    loadedDocument = result.document
+    hostState.loadedDocument = result.document
     logForDebugging(
       `[clientDataUrl] loaded document v${result.document.version} covering ${result.document.entries.length} model pattern(s)`,
     )
@@ -947,6 +1013,7 @@ export async function loadClientDataUrl(
 export function coverLoadedClientDataDocument(
   model: string = sessionModel(),
 ): string | undefined {
+  const loadedDocument = getEffectiveLoadedClientDataDocument()
   if (loadedDocument === undefined) return
   const detail = coverClientDataDocument(loadedDocument, model)
   return detail === undefined ? undefined : formatClientDataUrlError(detail)

@@ -1,10 +1,79 @@
-import memoize from 'lodash-es/memoize.js'
+import { HostSlot } from './hostSlot.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 
 export type DebugFilter = {
   include: string[]
   exclude: string[]
   isExclusive: boolean
 }
+
+type ParseDebugFilterMemoized = ((
+  filterString?: string,
+) => DebugFilter | null) & {
+  cache: Map<unknown, DebugFilter | null>
+}
+
+const parseDebugFilterCacheSlot = new HostSlot<{
+  cache: Map<unknown, DebugFilter | null>
+}>(() => ({
+  cache: new Map<unknown, DebugFilter | null>(),
+}))
+
+function parseDebugFilterCore(filterString?: string): DebugFilter | null {
+  if (!filterString || filterString.trim() === '') {
+    return null
+  }
+
+  const filters = filterString
+    .split(',')
+    .map(f => f.trim())
+    .filter(Boolean)
+
+  // If no valid filters remain, return null
+  if (filters.length === 0) {
+    return null
+  }
+
+  // Check for mixed inclusive/exclusive filters
+  const hasExclusive = filters.some(f => f.startsWith('!'))
+  const hasInclusive = filters.some(f => !f.startsWith('!'))
+
+  if (hasExclusive && hasInclusive) {
+    // For now, we'll treat this as an error case and show all messages
+    // Log error using logForDebugging to avoid console.error lint rule
+    // We'll import and use it later when the circular dependency is resolved
+    // For now, just return null silently
+    return null
+  }
+
+  // Clean up filters (remove ! prefix) and normalize
+  const cleanFilters = filters.map(f => f.replace(/^!/, '').toLowerCase())
+
+  return {
+    include: hasExclusive ? [] : cleanFilters,
+    exclude: hasExclusive ? cleanFilters : [],
+    isExclusive: hasExclusive,
+  }
+}
+
+const parseDebugFilterImpl = (filterString?: string): DebugFilter | null => {
+  const cache = parseDebugFilterCacheSlot.of(getBootstrapSessionHost()).cache
+  if (cache.has(filterString)) {
+    return cache.get(filterString) ?? null
+  }
+  const result = parseDebugFilterCore(filterString)
+  cache.set(filterString, result)
+  return result
+}
+
+Object.defineProperty(parseDebugFilterImpl, 'cache', {
+  get: () => parseDebugFilterCacheSlot.of(getBootstrapSessionHost()).cache,
+  set: (next: Map<unknown, DebugFilter | null>) => {
+    parseDebugFilterCacheSlot.of(getBootstrapSessionHost()).cache = next
+  },
+  configurable: true,
+  enumerable: true,
+})
 
 /**
  * Parse debug filter string into a filter configuration
@@ -13,44 +82,8 @@ export type DebugFilter = {
  * - "!1p,!file" -> exclude logging and file categories
  * - undefined/empty -> no filtering (show all)
  */
-export const parseDebugFilter = memoize(
-  (filterString?: string): DebugFilter | null => {
-    if (!filterString || filterString.trim() === '') {
-      return null
-    }
-
-    const filters = filterString
-      .split(',')
-      .map(f => f.trim())
-      .filter(Boolean)
-
-    // If no valid filters remain, return null
-    if (filters.length === 0) {
-      return null
-    }
-
-    // Check for mixed inclusive/exclusive filters
-    const hasExclusive = filters.some(f => f.startsWith('!'))
-    const hasInclusive = filters.some(f => !f.startsWith('!'))
-
-    if (hasExclusive && hasInclusive) {
-      // For now, we'll treat this as an error case and show all messages
-      // Log error using logForDebugging to avoid console.error lint rule
-      // We'll import and use it later when the circular dependency is resolved
-      // For now, just return null silently
-      return null
-    }
-
-    // Clean up filters (remove ! prefix) and normalize
-    const cleanFilters = filters.map(f => f.replace(/^!/, '').toLowerCase())
-
-    return {
-      include: hasExclusive ? [] : cleanFilters,
-      exclude: hasExclusive ? cleanFilters : [],
-      isExclusive: hasExclusive,
-    }
-  },
-)
+export const parseDebugFilter =
+  parseDebugFilterImpl as unknown as ParseDebugFilterMemoized
 
 /**
  * Extract debug categories from a message

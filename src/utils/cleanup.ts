@@ -25,6 +25,7 @@ import { logError } from './log.js'
 import { cleanupOldVersions } from './nativeInstaller/index.js'
 import { cleanupOldPastes } from './pasteStore.js'
 import { getClaudeTempDir } from './permissions/filesystem.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { getProjectsDir } from './sessionPaths.js'
 import {
   LITE_READ_BUF_SIZE,
@@ -443,8 +444,8 @@ const PINS_JSON_MAX_BYTES = 8_388_608
 /** densable T.jobPins() — storageV5 key, not the disk path. */
 const JOB_PINS_STORAGE_KEY = { namespace: 'jobsRoot', file: 'pins' } as const
 
-/** densable Dt() pins screen — per-path ok/refused. */
-const pinsScreens = new Map<string, string>()
+/** densable Dt() pins screen — per-path ok/refused, scoped per SessionHost. */
+const pinsScreensHostSlot = new HostSlot<Map<string, string>>(() => new Map())
 
 type StorageV5PinsHost = {
   statMeta: (
@@ -513,6 +514,7 @@ async function healPinsJson(opts?: {
 async function readPinsViaStorageV5(
   storage: StorageV5PinsHost,
 ): Promise<string | null> {
+  const pinsScreens = pinsScreensHostSlot.of(getBootstrapSessionHost())
   const key = JOB_PINS_STORAGE_KEY
   const screenKey = pinsJsonPath()
   if (pinsScreens.get(screenKey) !== 'ok') {

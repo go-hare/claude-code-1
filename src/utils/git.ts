@@ -24,8 +24,10 @@ import {
   resolveGitDir,
   resolveRef,
 } from './git/gitFilesystem.js'
+import { RootSessionSlot } from './hostSlot.js'
 import { logError } from './log.js'
 import { memoizeWithLRU } from './memoize.js'
+import { getBootstrapSession } from './sessionRoot.js'
 import { internalToolSubprocessEnv } from './subprocessEnv.js'
 import { whichSync } from './which.js'
 import {
@@ -450,18 +452,63 @@ export const gitExe = memoize((): string => {
  */
 export const RAW_GIT_DIFF_FLAGS = ['--no-ext-diff', '--no-textconv'] as const
 
-export const getIsGit = memoize(async (): Promise<boolean> => {
-  const startTime = Date.now()
-  logForDiagnosticsNoPII('info', 'is_git_check_started')
+type SessionMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
 
-  const isGit = findGitRoot(getCwd()) !== null
-
-  logForDiagnosticsNoPII('info', 'is_git_check_completed', {
-    duration_ms: Date.now() - startTime,
-    is_git: isGit,
+function memoizePerRootSession<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): SessionMemoized<Args, Result> {
+  const slot = new RootSessionSlot(() => new Map<unknown, Result>())
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSession())
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSession()),
+    set: (next: Map<unknown, Result>) => {
+      const current = slot.of(getBootstrapSession())
+      if (current === next) return
+      current.clear()
+      for (const [k, v] of next.entries()) {
+        current.set(k, v)
+      }
+    },
+    configurable: true,
+    enumerable: true,
   })
-  return isGit
-})
+  return memoized as unknown as SessionMemoized<Args, Result>
+}
+
+/**
+ * Official 2.1.331 `JWr = new $e(() => new Map)` — scoped per root `Session`
+ * and `cwd` so concurrent hosts in non-git vs git directories never poison
+ * each other's `getIsGit()` result.
+ */
+export const getIsGit = memoizePerRootSession(
+  async (): Promise<boolean> => {
+    const startTime = Date.now()
+    logForDiagnosticsNoPII('info', 'is_git_check_started')
+
+    const isGit = findGitRoot(getCwd()) !== null
+
+    logForDiagnosticsNoPII('info', 'is_git_check_completed', {
+      duration_ms: Date.now() - startTime,
+      is_git: isGit,
+    })
+    return isGit
+  },
+  () => getCwd(),
+)
 
 export function getGitDir(cwd: string): Promise<string | null> {
   return resolveGitDir(cwd)

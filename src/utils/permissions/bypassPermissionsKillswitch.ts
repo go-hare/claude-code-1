@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { toError } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
 import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   useAppState,
   useAppStateStore,
@@ -26,7 +27,20 @@ export {
   isModeBlockedByHeldToAuto,
 }
 
-let bypassPermissionsCheckRan = false
+type KillswitchHostState = {
+  bypassPermissionsCheckRan: boolean
+  autoModeCheckRan: boolean
+}
+
+// Official 2.1.331 [W-381]: per-host run-once latches for bypassPermissions & autoMode checks.
+const killswitchStateByHost = new HostSlot<KillswitchHostState>(() => ({
+  bypassPermissionsCheckRan: false,
+  autoModeCheckRan: false,
+}))
+
+function getKillswitchHostState(): KillswitchHostState {
+  return killswitchStateByHost.of(getBootstrapSessionHost())
+}
 
 /**
  * Checks whether bypassPermissions mode is disabled by policy/settings/gate/
@@ -41,10 +55,11 @@ export async function checkAndDisableBypassPermissionsIfNeeded(
     ) => import('../../state/AppState.js').AppState,
   ) => void,
 ): Promise<void> {
-  if (bypassPermissionsCheckRan) {
+  const hostState = getKillswitchHostState()
+  if (hostState.bypassPermissionsCheckRan) {
     return
   }
-  bypassPermissionsCheckRan = true
+  hostState.bypassPermissionsCheckRan = true
 
   const disabledReason = getBypassPermissionsDisabledReason()
   if (disabledReason === undefined && !isBypassPermissionsModeDisabled()) {
@@ -84,7 +99,7 @@ export async function checkAndDisableBypassPermissionsIfNeeded(
  * Reset the run-once flag for checkAndDisableBypassPermissionsIfNeeded.
  */
 export function resetBypassPermissionsCheck(): void {
-  bypassPermissionsCheckRan = false
+  getKillswitchHostState().bypassPermissionsCheckRan = false
 }
 
 /**
@@ -110,8 +125,6 @@ export function useKickOffCheckAndDisableBypassPermissionsIfNeeded(): void {
   }, [])
 }
 
-let autoModeCheckRan = false
-
 export async function checkAndDisableAutoModeIfNeeded(
   toolPermissionContext: ToolPermissionContext,
   setAppState: (
@@ -122,10 +135,11 @@ export async function checkAndDisableAutoModeIfNeeded(
   fastMode?: boolean,
 ): Promise<void> {
   if (feature('TRANSCRIPT_CLASSIFIER')) {
-    if (autoModeCheckRan) {
+    const hostState = getKillswitchHostState()
+    if (hostState.autoModeCheckRan) {
       return
     }
-    autoModeCheckRan = true
+    hostState.autoModeCheckRan = true
 
     const { updateContext, notification } = await verifyAutoModeGateAccess(
       toolPermissionContext,
@@ -162,7 +176,7 @@ export async function checkAndDisableAutoModeIfNeeded(
  * Call this after /login so the gate check re-runs with the new org.
  */
 export function resetAutoModeGateCheck(): void {
-  autoModeCheckRan = false
+  getKillswitchHostState().autoModeCheckRan = false
 }
 
 export function useKickOffCheckAndDisableAutoModeIfNeeded(): void {

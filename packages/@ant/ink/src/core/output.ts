@@ -13,6 +13,7 @@ import {
   DEFAULT_TAB_WIDTH,
 } from './cell-segmenter.js'
 import { filterItalicOffTokens } from './colorize.js'
+import { InkHostSlot } from './instances.js'
 import { type Rectangle, unionRect } from './layout/geometry.js'
 import {
   blitRegion,
@@ -58,14 +59,27 @@ type CalibratedSliceCache = {
   columns: CalibratedColumns
 }
 
-let calSeg: CellSegmenter | undefined
-let calScratch: { cells: Int32Array; runs: Int32Array } | undefined
-let calCache: CalibratedSliceCache | undefined
+type CalibratedSliceHostState = {
+  calSeg: CellSegmenter | undefined
+  calScratch: { cells: Int32Array; runs: Int32Array } | undefined
+  calCache: CalibratedSliceCache | undefined
+}
 
-function clearCalibratedSliceCache(): void {
-  calCache = undefined
-  if (calSeg && calSeg.graphemes.length > CELL_SEGMENTER_TABLE_CAP) {
-    calSeg = undefined
+const calibratedSliceHostSlot = new InkHostSlot<CalibratedSliceHostState>(
+  () => ({
+    calSeg: undefined,
+    calScratch: undefined,
+    calCache: undefined,
+  }),
+)
+
+function clearCalibratedSliceCache(state: CalibratedSliceHostState): void {
+  state.calCache = undefined
+  if (
+    state.calSeg &&
+    state.calSeg.graphemes.length > CELL_SEGMENTER_TABLE_CAP
+  ) {
+    state.calSeg = undefined
   }
 }
 
@@ -76,13 +90,15 @@ function mapCalibratedColumn(cols: CalibratedColumns, target: number): number {
 }
 
 function getCalibratedColumns(text: string): CalibratedColumns {
-  if (calCache?.text === text) return calCache.columns
-  if (calCache) clearCalibratedSliceCache()
-  else queueMicrotask(clearCalibratedSliceCache)
+  const state = calibratedSliceHostSlot.of()
+  if (state.calCache?.text === text) return state.calCache.columns
+  if (state.calCache) clearCalibratedSliceCache(state)
+  else queueMicrotask(() => clearCalibratedSliceCache(state))
 
-  if (!calSeg) {
-    calSeg = createCellSegmenter([])
+  if (!state.calSeg) {
+    state.calSeg = createCellSegmenter([])
   }
+  const calSeg = state.calSeg
   const safeText =
     typeof text.isWellFormed === 'function' && text.isWellFormed()
       ? text
@@ -93,7 +109,7 @@ function getCalibratedColumns(text: string): CalibratedColumns {
           cells: new Int32Array(2 * safeText.length),
           runs: new Int32Array(2 * safeText.length),
         }
-      : (calScratch ??= {
+      : (state.calScratch ??= {
           cells: new Int32Array(2 * CALIBRATED_SLICE_SCRATCH_CAP),
           runs: new Int32Array(2 * CALIBRATED_SLICE_SCRATCH_CAP),
         })
@@ -124,7 +140,7 @@ function getCalibratedColumns(text: string): CalibratedColumns {
     ours.push(ours[i]! + baseW + extra)
   }
   const columns: CalibratedColumns = { ours, buns }
-  calCache = { text, columns }
+  state.calCache = { text, columns }
   return columns
 }
 

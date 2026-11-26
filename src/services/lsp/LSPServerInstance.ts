@@ -6,6 +6,12 @@ import { getCwd } from '../../utils/cwd.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage, getErrnoCode } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
 import { sleep } from '../../utils/sleep.js'
 import type { createLSPClient as createLSPClientType } from './LSPClient.js'
 import type { LspServerState, ScopedLspServerConfig } from './types.js'
@@ -59,8 +65,13 @@ type LspStartFailureWarningListener = (
   warning: string,
 ) => void
 
-const lspStartFailureWarningListeners =
-  new Set<LspStartFailureWarningListener>()
+const lspStartFailureWarningListenersSlot = new RootSessionSlot<
+  Set<LspStartFailureWarningListener>
+>(() => new Set())
+
+function getLspStartFailureWarningListeners(): Set<LspStartFailureWarningListener> {
+  return lspStartFailureWarningListenersSlot.of(getBootstrapSession())
+}
 
 /**
  * Subscribe to immediate LSP server start failure warnings (#1974) so UI /
@@ -69,9 +80,10 @@ const lspStartFailureWarningListeners =
 export function subscribeLspStartFailureWarnings(
   listener: LspStartFailureWarningListener,
 ): () => void {
-  lspStartFailureWarningListeners.add(listener)
+  const listeners = getLspStartFailureWarningListeners()
+  listeners.add(listener)
   return () => {
-    lspStartFailureWarningListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
@@ -81,7 +93,7 @@ function emitLspStartFailureWarning(
   error: unknown,
 ): string {
   const warning = formatLspServerStartFailureWarning(serverName, command, error)
-  for (const listener of lspStartFailureWarningListeners) {
+  for (const listener of getLspStartFailureWarningListeners()) {
     try {
       listener(serverName, warning)
     } catch {
@@ -550,7 +562,17 @@ export function createLSPServerInstance(
     method: string,
     handler: (params: unknown) => void,
   ): void {
-    client.onNotification(method, handler)
+    const capturedSession = getActiveSessionFromAls()
+    client.onNotification(method, params => {
+      if (
+        capturedSession !== undefined &&
+        getActiveSessionFromAls() !== capturedSession
+      ) {
+        runWithSession(capturedSession, () => handler(params))
+        return
+      }
+      handler(params)
+    })
   }
 
   /**
@@ -566,7 +588,16 @@ export function createLSPServerInstance(
     method: string,
     handler: (params: TParams) => TResult | Promise<TResult>,
   ): void {
-    client.onRequest(method, handler)
+    const capturedSession = getActiveSessionFromAls()
+    client.onRequest(method, (params: TParams) => {
+      if (
+        capturedSession !== undefined &&
+        getActiveSessionFromAls() !== capturedSession
+      ) {
+        return runWithSession(capturedSession, () => handler(params))
+      }
+      return handler(params)
+    })
   }
 
   // Return public API

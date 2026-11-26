@@ -25,6 +25,7 @@ import { logForDebugging } from './debug.js'
 import { parseGitRemote } from './detectRepository.js'
 import { getErrnoCode } from './errors.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import {
   deriveReviewState,
   fetchGitlabMrStatus,
@@ -1104,11 +1105,30 @@ export function createPrStatusShared(): PrStatusShared {
   return new PrStatusShared()
 }
 
-let shared: PrStatusShared | undefined
+class PrStatusPollerHostState {
+  shared: PrStatusShared | undefined = undefined
+  githubAuthByHost = new Map<string, Promise<GithubAuthResult>>()
+}
+
+const fallbackPrStatusPollerHost: object = {}
+const prStatusPollerByHost = new HostSlot<PrStatusPollerHostState>(
+  () => new PrStatusPollerHostState(),
+)
+
+function getPrStatusPollerHostState(): PrStatusPollerHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return prStatusPollerByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return prStatusPollerByHost.of(fallbackPrStatusPollerHost)
+}
 
 export function getPrStatusShared(): PrStatusShared {
-  if (!shared) shared = new PrStatusShared()
-  return shared
+  const state = getPrStatusPollerHostState()
+  if (!state.shared) state.shared = new PrStatusShared()
+  return state.shared
 }
 
 /**
@@ -1177,15 +1197,13 @@ export async function resolveGithubAuthResult(
   return token.length > 0 ? { kind: 'token', token } : { kind: 'no-token' }
 }
 
-/** densable _ke process cache of Kfn. */
-const githubAuthByHost = new Map<string, Promise<GithubAuthResult>>()
-
 /**
- * densable _ke — process-local Kfn cache (in-flight + resolved).
+ * densable _ke — host-local Kfn cache (in-flight + resolved).
  */
 export function resolveGithubAuthCached(
   host: string,
 ): Promise<GithubAuthResult> {
+  const githubAuthByHost = getPrStatusPollerHostState().githubAuthByHost
   let pending = githubAuthByHost.get(host)
   if (!pending) {
     pending = resolveGithubAuthResult(host)
@@ -1198,12 +1216,12 @@ export function resolveGithubAuthCached(
  * densable bke — drop cached Kfn for host (401 / needs-auth path).
  */
 export function invalidateGithubAuthCache(host: string): void {
-  githubAuthByHost.delete(host)
+  getPrStatusPollerHostState().githubAuthByHost.delete(host)
 }
 
 /** Test helper — clear densable _ke map. */
 export function clearGithubAuthCacheForTests(): void {
-  githubAuthByHost.clear()
+  getPrStatusPollerHostState().githubAuthByHost.clear()
 }
 
 /**

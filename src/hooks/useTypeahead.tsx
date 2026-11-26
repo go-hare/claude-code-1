@@ -58,6 +58,7 @@ import {
 import { getInitialSettings } from '../utils/settings/settings.js';
 import { DM_AT_MENTION_RE, mentionNameMatchesFoldedQuery } from '../utils/dmAtMention.js';
 import { normalizeSessionNameKey } from '../utils/sessionNameUniqueness.js';
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js';
 
 // Unicode-aware character class for file path tokens:
 // \p{L} = letters (CJK, Latin, Cyrillic, etc.)
@@ -350,19 +351,22 @@ function applyTriggerSuggestion(
   setCursorOffset(before.length + suggestion.displayText.length + 1);
 }
 
-let currentShellCompletionAbortController: AbortController | null = null;
+const shellCompletionAbortBySession = new RootSessionSlot<{
+  controller: AbortController | null;
+}>(() => ({ controller: null }));
 
 /**
  * Generate bash shell completion suggestions
  */
 async function generateBashSuggestions(input: string, cursorOffset: number): Promise<SuggestionItem[]> {
   try {
-    if (currentShellCompletionAbortController) {
-      currentShellCompletionAbortController.abort();
+    const abortState = shellCompletionAbortBySession.of(getBootstrapSession());
+    if (abortState.controller) {
+      abortState.controller.abort();
     }
 
-    currentShellCompletionAbortController = new AbortController();
-    const suggestions = await getShellCompletions(input, cursorOffset, currentShellCompletionAbortController.signal);
+    abortState.controller = new AbortController();
+    const suggestions = await getShellCompletions(input, cursorOffset, abortState.controller.signal);
 
     return suggestions;
   } catch {

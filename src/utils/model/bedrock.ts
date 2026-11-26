@@ -1,4 +1,3 @@
-import memoize from 'lodash-es/memoize.js'
 import {
   getDefaultAwsProviderChain,
   refreshAndGetAwsCredentials,
@@ -7,10 +6,23 @@ import {
 import { getAWSRegion, isEnvTruthy } from '../envUtils.js'
 import { logError } from '../log.js'
 import { getAWSClientProxyConfig } from '../proxy.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionRoot.js'
 
-export const getBedrockInferenceProfiles = memoize(async function (): Promise<
-  string[]
-> {
+type BedrockHostState = {
+  inferenceProfilesCache: Map<unknown, Promise<string[]>>
+  backingModelCache: Map<string, Promise<string | null>>
+}
+
+const bedrockHostSlot = new HostSlot<BedrockHostState>(() => ({
+  inferenceProfilesCache: new Map(),
+  backingModelCache: new Map(),
+}))
+
+function getBedrockHostState(): BedrockHostState {
+  return bedrockHostSlot.of(getBootstrapSessionHost())
+}
+
+async function getBedrockInferenceProfilesUncached(): Promise<string[]> {
   const [client, { ListInferenceProfilesCommand }] = await Promise.all([
     createBedrockClient(),
     import('@aws-sdk/client-bedrock'),
@@ -42,7 +54,32 @@ export const getBedrockInferenceProfiles = memoize(async function (): Promise<
     logError(error as Error)
     throw error
   }
+}
+
+function getBedrockInferenceProfilesImpl(): Promise<string[]> {
+  const cache = getBedrockHostState().inferenceProfilesCache
+  const existing = cache.get(undefined)
+  if (existing !== undefined) {
+    return existing
+  }
+  const pending = getBedrockInferenceProfilesUncached()
+  cache.set(undefined, pending)
+  return pending
+}
+
+Object.defineProperty(getBedrockInferenceProfilesImpl, 'cache', {
+  get: () => getBedrockHostState().inferenceProfilesCache,
+  set: (next: Map<unknown, Promise<string[]>>) => {
+    getBedrockHostState().inferenceProfilesCache = next
+  },
+  configurable: true,
+  enumerable: true,
 })
+
+export const getBedrockInferenceProfiles =
+  getBedrockInferenceProfilesImpl as unknown as (() => Promise<string[]>) & {
+    cache: Map<unknown, Promise<string[]>>
+  }
 
 export function findFirstMatch(
   profiles: string[],
@@ -173,7 +210,7 @@ export async function createBedrockRuntimeClient() {
   return new BedrockRuntimeClient(clientConfig)
 }
 
-export const getInferenceProfileBackingModel = memoize(async function (
+async function getInferenceProfileBackingModelUncached(
   profileId: string,
 ): Promise<string | null> {
   try {
@@ -208,7 +245,36 @@ export const getInferenceProfileBackingModel = memoize(async function (
     logError(error as Error)
     return null
   }
+}
+
+function getInferenceProfileBackingModelImpl(
+  profileId: string,
+): Promise<string | null> {
+  const cache = getBedrockHostState().backingModelCache
+  const existing = cache.get(profileId)
+  if (existing !== undefined) {
+    return existing
+  }
+  const pending = getInferenceProfileBackingModelUncached(profileId)
+  cache.set(profileId, pending)
+  return pending
+}
+
+Object.defineProperty(getInferenceProfileBackingModelImpl, 'cache', {
+  get: () => getBedrockHostState().backingModelCache,
+  set: (next: Map<string, Promise<string | null>>) => {
+    getBedrockHostState().backingModelCache = next
+  },
+  configurable: true,
+  enumerable: true,
 })
+
+export const getInferenceProfileBackingModel =
+  getInferenceProfileBackingModelImpl as unknown as ((
+    profileId: string,
+  ) => Promise<string | null>) & {
+    cache: Map<string, Promise<string | null>>
+  }
 
 /**
  * Check if a model ID is a foundation model (e.g., "anthropic.claude-sonnet-4-5-20250929-v1:0")

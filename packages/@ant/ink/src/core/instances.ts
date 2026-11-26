@@ -10,8 +10,27 @@
 
 import type Ink from './ink.js'
 
-/** densable process-level everMounted (Zjn/Yhp) — set on first instances.set. */
-let everMountedFlag = false
+type SessionRootModule =
+  typeof import('../../../../../src/utils/sessionRoot.js')
+type InkSessionObject = { host: object; root?: object }
+
+let cachedSessionRootModule: SessionRootModule | null | undefined
+
+function getSessionRootModule(): SessionRootModule | undefined {
+  if (cachedSessionRootModule !== undefined) {
+    return cachedSessionRootModule ?? undefined
+  }
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    cachedSessionRootModule =
+      require('../../../../../src/utils/sessionRoot.js') as SessionRootModule
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    return cachedSessionRootModule
+  } catch {
+    cachedSessionRootModule = null
+    return undefined
+  }
+}
 
 /**
  * densable `U()` — `return n()`. Local `n()` is `getBootstrapSession()`.
@@ -19,29 +38,67 @@ let everMountedFlag = false
  */
 const inkDefaultHost: object = {}
 /** densable `U()` fallback when src is unbound — stable so `C.of(U())` keys. */
-const inkDefaultSession: { host: object } = { host: inkDefaultHost }
+const inkDefaultSession: InkSessionObject = { host: inkDefaultHost }
 let getInkSessionHostOverride: (() => object) | undefined
 
-const overrideSessions = new WeakMap<object, { host: object }>()
+const overrideSessions = new WeakMap<object, InkSessionObject>()
 
-function U(): { host: object } {
+function unwrapSessionRoot(session: InkSessionObject): InkSessionObject {
+  const maybeRoot = session.root
+  return typeof maybeRoot === 'object' && maybeRoot !== null
+    ? (maybeRoot as InkSessionObject)
+    : session
+}
+
+function U(): InkSessionObject {
   if (getInkSessionHostOverride) {
     const host = getInkSessionHostOverride()
     const existing = overrideSessions.get(host)
     if (existing) return existing
-    const session = { host }
+    const session: InkSessionObject = { host }
     overrideSessions.set(host, session)
     return session
   }
-  try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { getBootstrapSession } =
-      require('../../../../../src/utils/sessionRoot.js') as typeof import('../../../../../src/utils/sessionRoot.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    return getBootstrapSession()
-  } catch {
-    return inkDefaultSession
+  const mod = getSessionRootModule()
+  if (mod) {
+    return unwrapSessionRoot(mod.getBootstrapSession())
   }
+  return inkDefaultSession
+}
+
+/**
+ * True when running inside an active ALS session/subconversation context or
+ * when a standalone Ink test has bound a host override via `bindInkSessionHost`.
+ */
+export function hasInkActiveSessionAls(): boolean {
+  if (getInkSessionHostOverride !== undefined) return true
+  return getSessionRootModule()?.hasActiveSessionAls() ?? false
+}
+
+/**
+ * Capture the active ALS `Session` (if any) without falling back to the
+ * process-default bootstrap session, so non-ALS single-host CLI mode keeps
+ * `hasActiveSessionAls() === false`.
+ */
+export function captureInkAlsSession(): object | undefined {
+  return getSessionRootModule()?.getActiveSessionFromAls()
+}
+
+/**
+ * Re-enter a previously captured ALS `Session` only when it is defined and
+ * differs from the currently active ALS session.
+ */
+export function runWithCapturedInkAlsSession<T>(
+  captured: object | undefined,
+  fn: () => T,
+): T {
+  if (captured === undefined) return fn()
+  const mod = getSessionRootModule()
+  if (!mod || mod.getActiveSessionFromAls() === captured) return fn()
+  return mod.runWithSession(
+    captured as Parameters<SessionRootModule['runWithSession']>[0],
+    fn,
+  )
 }
 
 /** Test helper — gold has no bind; tests pin `U().host`. */
@@ -55,6 +112,22 @@ export function resetInkSessionHostForTests(): void {
 }
 
 /**
+ * Synchronously execute `fn` with `inkSessionHost()` pinned to `host`.
+ * Fast-paths when `host` is already active so non-ALS single-host CLI mode
+ * keeps `hasInkActiveSessionAls() === false`.
+ */
+export function runWithInkSessionHost<T>(host: object, fn: () => T): T {
+  if (inkSessionHost() === host) return fn()
+  const prevOverride = getInkSessionHostOverride
+  getInkSessionHostOverride = () => host
+  try {
+    return fn()
+  } finally {
+    getInkSessionHostOverride = prevOverride
+  }
+}
+
+/**
  * densable `$yf` / `it extends Map` — Ink registry keyed by stdout WriteStream.
  * Gold `set` throws when a second root is registered while the occupant
  * `holdsRawMode` (`(appRef.current?.rawModeEnabledCount??0)>0`).
@@ -65,14 +138,8 @@ class InkInstancesMap extends Map<NodeJS.WriteStream, Ink> {
   restoredAtExit: Ink | undefined = undefined
   /** densable `it.treeRoots` — stdout → Ink for `tree()` roots. */
   readonly treeRoots = new Map<NodeJS.WriteStream, Ink>()
-
-  get everMounted(): boolean {
-    return everMountedFlag
-  }
-
-  set everMounted(value: boolean) {
-    everMountedFlag = value
-  }
+  /** Per-host everMounted flag (densable Zjn/Yhp) — set on first instances.set. */
+  everMounted = false
 
   set(key: NodeJS.WriteStream, value: Ink): this {
     this.everMounted = true
@@ -127,6 +194,75 @@ class HostKeyedFactory<K extends object, V> {
   }
 }
 
+/**
+ * Host-keyed WeakMap slot for Ink modules (official 2.1.331 `HostSlot` parity).
+ * Defaults to the active `inkSessionHost()` (`U().host`).
+ */
+export class InkHostSlot<T> {
+  #create: () => T
+  #map = new WeakMap<object, T>()
+
+  constructor(create: () => T) {
+    this.#create = create
+  }
+
+  of(host: object = inkSessionHost()): T {
+    const existing = this.#map.get(host)
+    if (existing !== undefined) return existing
+    if (this.#map.has(host)) return existing as T
+    const created = this.#create()
+    this.#map.set(host, created)
+    return created
+  }
+
+  peek(host: object = inkSessionHost()): T | undefined {
+    return this.#map.get(host)
+  }
+
+  delete(host: object = inkSessionHost()): boolean {
+    return this.#map.delete(host)
+  }
+}
+
+/**
+ * Root-session-keyed WeakMap slot for Ink modules (official 2.1.331
+ * `RootSessionSlot` parity). Unwraps `session.root ?? session` so
+ * `withProject` forks share the root session slot.
+ */
+export class InkSessionSlot<T> {
+  #create: () => T
+  #map = new WeakMap<object, T>()
+
+  constructor(create: () => T) {
+    this.#create = create
+  }
+
+  #resolveKey(session: object): object {
+    const maybeRoot = (session as { root?: unknown }).root
+    return typeof maybeRoot === 'object' && maybeRoot !== null
+      ? maybeRoot
+      : session
+  }
+
+  of(session: object = inkSession()): T {
+    const key = this.#resolveKey(session)
+    const existing = this.#map.get(key)
+    if (existing !== undefined) return existing
+    if (this.#map.has(key)) return existing as T
+    const created = this.#create()
+    this.#map.set(key, created)
+    return created
+  }
+
+  peek(session: object = inkSession()): T | undefined {
+    return this.#map.get(this.#resolveKey(session))
+  }
+
+  delete(session: object = inkSession()): boolean {
+    return this.#map.delete(this.#resolveKey(session))
+  }
+}
+
 /** densable `Ht` — `new z(() => new it)`. */
 const Ht = new HostKeyedFactory<object, InkInstancesMap>(
   () => new InkInstancesMap(),
@@ -142,9 +278,9 @@ export function inkSessionHost(): object {
   return U().host
 }
 
-/** densable `U()` — session bag key for `Oo` (`r.of(U())`). */
+/** densable `U()` — root session bag key for `Oo` (`r.of(U())`). */
 export function inkSession(): object {
-  return U()
+  return unwrapSessionRoot(U())
 }
 
 /**
@@ -215,13 +351,25 @@ export function resetDualInkCurrentForTests(): void {
   getDualInkCurrentBag().current = undefined
 }
 
-/** Test helper — reset densable everMounted process flag. */
+/** Test helper — reset densable everMounted state. */
 export function resetEverMountedForTests(): void {
-  everMountedFlag = false
-  instances.standaloneRender = null
-  instances.restoredAtExit = undefined
-  instances.treeRoots.clear()
-  instances.clear()
+  const clearMap = (map: InkInstancesMap): void => {
+    map.everMounted = false
+    map.standaloneRender = null
+    map.restoredAtExit = undefined
+    map.treeRoots.clear()
+    map.clear()
+  }
+  const current = Ns()
+  clearMap(current)
+  if (instances !== current) {
+    clearMap(instances)
+  }
+  resetDualInkCurrentForTests()
   resetInkSessionHostForTests()
+  const afterReset = Ns()
+  if (afterReset !== current && afterReset !== instances) {
+    clearMap(afterReset)
+  }
   resetDualInkCurrentForTests()
 }

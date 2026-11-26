@@ -8,6 +8,12 @@ import { isEnvTruthy } from '../../utils/envUtils.js'
 import { logError } from '../../utils/log.js'
 import { sequential } from '../../utils/sequential.js'
 import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.js'
+import {
+  getBootstrapSession,
+  getSessionOnceLatches,
+  RootSessionSlot,
+  sessionOnceLatchesOf,
+} from '../../utils/sessionRoot.js'
 import { sleep } from '../../utils/sleep.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { getOAuthHeaders } from '../../utils/teleport/api.js'
@@ -19,35 +25,49 @@ interface SessionIngressError {
   }
 }
 
-// Module-level state
-const lastUuidMap: Map<string, UUID> = new Map()
+type SequentialAppendFn = (
+  entry: TranscriptMessage,
+  url: string,
+  headers: Record<string, string>,
+) => Promise<boolean>
 
 const MAX_RETRIES = 10
 const BASE_DELAY_MS = 500
 
-// Per-session sequential wrappers to prevent concurrent log writes
-const sequentialAppendBySession: Map<
-  string,
-  (
-    entry: TranscriptMessage,
-    url: string,
-    headers: Record<string, string>,
-  ) => Promise<boolean>
-> = new Map()
+// Per-root-session sequential wrappers to prevent concurrent log writes
+const sequentialAppendSlot = new RootSessionSlot<
+  Map<string, SequentialAppendFn>
+>(() => new Map())
+
+function getLastUuidMap(): Map<string, UUID> {
+  return getSessionOnceLatches().lastIngressUuidBySession as unknown as Map<
+    string,
+    UUID
+  >
+}
+
+function getSequentialAppendBySession(): Map<string, SequentialAppendFn> {
+  return sequentialAppendSlot.of(getBootstrapSession())
+}
 
 /**
  * Gets or creates a sequential wrapper for a session
  * This ensures that log appends for a session are processed one at a time
  */
-function getOrCreateSequentialAppend(sessionId: string) {
+function getOrCreateSequentialAppend(sessionId: string): SequentialAppendFn {
+  const rootSession = getBootstrapSession()
+  const sequentialAppendBySession = sequentialAppendSlot.of(rootSession)
   let sequentialAppend = sequentialAppendBySession.get(sessionId)
   if (!sequentialAppend) {
+    const lastUuidMap = sessionOnceLatchesOf(rootSession)
+      .lastIngressUuidBySession as unknown as Map<string, UUID>
     sequentialAppend = sequential(
       async (
         entry: TranscriptMessage,
         url: string,
         headers: Record<string, string>,
-      ) => await appendSessionLogImpl(sessionId, entry, url, headers),
+      ) =>
+        await appendSessionLogImpl(sessionId, entry, url, headers, lastUuidMap),
     )
     sequentialAppendBySession.set(sessionId, sequentialAppend)
   }
@@ -65,6 +85,7 @@ async function appendSessionLogImpl(
   entry: TranscriptMessage,
   url: string,
   headers: Record<string, string>,
+  lastUuidMap: Map<string, UUID> = getLastUuidMap(),
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -232,7 +253,7 @@ export async function getSessionLogs(
     // Update our lastUuid to the last entry's UUID
     const lastEntry = logs.at(-1)
     if (lastEntry && 'uuid' in lastEntry && lastEntry.uuid) {
-      lastUuidMap.set(sessionId, lastEntry.uuid as UUID)
+      getLastUuidMap().set(sessionId, lastEntry.uuid as UUID)
     }
   }
 
@@ -500,8 +521,8 @@ function findLastUuid(logs: Entry[] | null): UUID | undefined {
  * Clear cached state for a session
  */
 export function clearSession(sessionId: string): void {
-  lastUuidMap.delete(sessionId)
-  sequentialAppendBySession.delete(sessionId)
+  getLastUuidMap().delete(sessionId)
+  getSequentialAppendBySession().delete(sessionId)
 }
 
 /**
@@ -509,6 +530,6 @@ export function clearSession(sessionId: string): void {
  * Use this on /clear to free sub-agent session entries.
  */
 export function clearAllSessions(): void {
-  lastUuidMap.clear()
-  sequentialAppendBySession.clear()
+  getLastUuidMap().clear()
+  getSequentialAppendBySession().clear()
 }

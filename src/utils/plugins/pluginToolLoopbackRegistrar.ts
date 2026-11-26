@@ -19,6 +19,13 @@ import type { ScopedMcpServerConfig } from 'src/services/mcp/types.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
+import type { Session } from '../sessionRoot.js'
+import {
   listPluginRegisteredTools,
   type PluginRegisteredToolSpec,
 } from './pluginToolRegistry.js'
@@ -43,57 +50,68 @@ type LoopbackState = {
   secret: string
 }
 
-type RegistrarSlot = {
-  current: PluginToolRegistrar | undefined
-}
-
-const registrarSlot: RegistrarSlot = { current: undefined }
-
-/** densable Ais — install registrar into the YLo slot. */
-export function installPluginToolRegistrar(
-  registrar: PluginToolRegistrar = createBunPluginToolRegistrar(),
-): void {
-  registrarSlot.current = registrar
-}
-
-/** densable YLo */
-export function getPluginToolRegistrar(): PluginToolRegistrar | undefined {
-  return registrarSlot.current
-}
-
-/** densable YNo — install once if missing. */
-export function ensurePluginToolRegistrarInstalled(): void {
-  if (registrarSlot.current) return
-  installPluginToolRegistrar()
-}
-
-export function clearPluginToolRegistrarForTests(): void {
-  registrarSlot.current = undefined
-  stopLoopbackServerForTests()
-}
-
 type LoopbackServer = {
   readonly port: number
   stop(closeActiveConnections?: boolean): void
 }
 
-let loopback:
-  | {
-      state: LoopbackState
-      server: LoopbackServer
-      /** plugin → generation (MCP Server.version suffix) */
-      generations: Map<string, number>
-    }
-  | undefined
+type LoopbackInstance = {
+  state: LoopbackState
+  server: LoopbackServer
+  /** plugin → generation (MCP Server.version suffix) */
+  generations: Map<string, number>
+}
 
-function stopLoopbackServerForTests(): void {
-  if (!loopback) return
+type HostPluginToolLoopbackState = {
+  current: PluginToolRegistrar | undefined
+  loopback: LoopbackInstance | undefined
+}
+
+const hostPluginToolLoopbackSlot = new HostSlot<HostPluginToolLoopbackState>(
+  () => ({
+    current: undefined,
+    loopback: undefined,
+  }),
+)
+
+function loopbackHostState(): HostPluginToolLoopbackState {
+  return hostPluginToolLoopbackSlot.of(getBootstrapSessionHost())
+}
+
+/** densable Ais — install registrar into the YLo slot. */
+export function installPluginToolRegistrar(
+  registrar: PluginToolRegistrar = createBunPluginToolRegistrar(),
+): void {
+  loopbackHostState().current = registrar
+}
+
+/** densable YLo */
+export function getPluginToolRegistrar(): PluginToolRegistrar | undefined {
+  return loopbackHostState().current
+}
+
+/** densable YNo — install once if missing. */
+export function ensurePluginToolRegistrarInstalled(): void {
+  if (loopbackHostState().current) return
+  installPluginToolRegistrar()
+}
+
+export function clearPluginToolRegistrarForTests(): void {
+  const hostState = loopbackHostState()
+  hostState.current = undefined
+  stopLoopbackServerForState(hostState)
+}
+
+function stopLoopbackServerForState(
+  hostState: HostPluginToolLoopbackState,
+): void {
+  if (!hostState.loopback) return
   try {
-    loopback.server.stop(true)
+    hostState.loopback.server.stop(true)
   } catch {
     // ignore
   }
-  loopback = undefined
+  hostState.loopback = undefined
 }
 
 /**
@@ -302,15 +320,28 @@ async function writeWebResponseToNode(
   }
 }
 
+function runWithLoopbackSession<T>(
+  session: Session | undefined,
+  fn: () => T,
+): T {
+  if (session !== undefined && getActiveSessionFromAls() !== session) {
+    return runWithSession(session, fn)
+  }
+  return fn()
+}
+
 async function handleNodeLoopbackRequest(
   req: IncomingMessage,
   res: ServerResponse,
   state: LoopbackState,
   generations: Map<string, number>,
+  session: Session | undefined,
 ): Promise<void> {
   try {
     const request = await nodeRequestToWebRequest(req, state.port)
-    const response = await handleLoopbackFetch(request, state, generations)
+    const response = await runWithLoopbackSession(session, () =>
+      handleLoopbackFetch(request, state, generations),
+    )
     await writeWebResponseToNode(response, res)
   } catch (err) {
     logForDebugging(
@@ -329,6 +360,7 @@ async function handleNodeLoopbackRequest(
 function createNodeLoopbackServer(
   state: LoopbackState,
   generations: Map<string, number>,
+  session: Session | undefined,
 ): LoopbackServer {
   const httpServer = createServer((req, res) => {
     if (
@@ -339,7 +371,7 @@ function createNodeLoopbackServer(
       res.end('not found')
       return
     }
-    void handleNodeLoopbackRequest(req, res, state, generations)
+    void handleNodeLoopbackRequest(req, res, state, generations, session)
   })
   httpServer.on('connection', socket => {
     if (socket.remoteAddress && !isLoopbackAddress(socket.remoteAddress)) {
@@ -374,6 +406,7 @@ function createNodeLoopbackServer(
 function createLoopbackServer(
   state: LoopbackState,
   generations: Map<string, number>,
+  session: Session | undefined,
   forceNode = false,
 ): LoopbackServer {
   if (
@@ -384,7 +417,10 @@ function createLoopbackServer(
     const bunServer = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
-      fetch: (req: Request) => handleLoopbackFetch(req, state, generations),
+      fetch: (req: Request) =>
+        runWithLoopbackSession(session, () =>
+          handleLoopbackFetch(req, state, generations),
+        ),
     })
     bunServer.unref()
     return {
@@ -394,19 +430,23 @@ function createLoopbackServer(
       },
     }
   }
-  return createNodeLoopbackServer(state, generations)
+  return createNodeLoopbackServer(state, generations, session)
 }
 
-function ensureLoopbackListening(forceNode = false): LoopbackState {
-  if (loopback) return loopback.state
+function ensureLoopbackListening(
+  hostState: HostPluginToolLoopbackState,
+  forceNode = false,
+): LoopbackState {
+  if (hostState.loopback) return hostState.loopback.state
   const state: LoopbackState = { port: 0, secret: randomUUID() }
   const generations = new Map<string, number>()
-  const server = createLoopbackServer(state, generations, forceNode)
+  const session = getActiveSessionFromAls()?.root
+  const server = createLoopbackServer(state, generations, session, forceNode)
   registerCleanup(() => {
-    stopLoopbackServerForTests()
+    stopLoopbackServerForState(hostState)
   })
   state.port = server.port
-  loopback = { state, server, generations }
+  hostState.loopback = { state, server, generations }
   logForDebugging(
     `$.tool.register: loopback MCP server listening on 127.0.0.1:${state.port}`,
   )
@@ -416,12 +456,13 @@ function ensureLoopbackListening(forceNode = false): LoopbackState {
 function createPluginToolRegistrar(forceNode: boolean): PluginToolRegistrar {
   return Object.assign(
     (plugin: string, tools: PluginRegisteredToolSpec[]) => {
-      const state = ensureLoopbackListening(forceNode)
-      if (!loopback) {
+      const hostState = loopbackHostState()
+      const state = ensureLoopbackListening(hostState, forceNode)
+      if (!hostState.loopback) {
         throw new Error('plugin tool loopback failed to start')
       }
-      const next = (loopback.generations.get(plugin) ?? 0) + 1
-      loopback.generations.set(plugin, next)
+      const next = (hostState.loopback.generations.get(plugin) ?? 0) + 1
+      hostState.loopback.generations.set(plugin, next)
       logForDebugging(
         `$.tool.register (${plugin}): ${tools.length} tool(s) served at 127.0.0.1:${state.port}/${plugin} v${next}`,
       )
@@ -433,9 +474,13 @@ function createPluginToolRegistrar(forceNode: boolean): PluginToolRegistrar {
       })
     },
     {
-      serves: (url: string): boolean =>
-        loopback !== undefined &&
-        URL.parse(url)?.origin === `http://127.0.0.1:${loopback.state.port}`,
+      serves: (url: string): boolean => {
+        const current = loopbackHostState().loopback
+        return (
+          current !== undefined &&
+          URL.parse(url)?.origin === `http://127.0.0.1:${current.state.port}`
+        )
+      },
     },
   )
 }

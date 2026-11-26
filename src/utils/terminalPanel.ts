@@ -17,10 +17,11 @@
 
 import { spawn, spawnSync } from 'child_process'
 import { getSessionId } from '../bootstrap/state.js'
-import { instances } from '@anthropic/ink'
+import { Ns } from '@anthropic/ink'
 import { registerCleanup } from './cleanupRegistry.js'
 import { pwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 
 const TMUX_SESSION = 'panel'
 
@@ -35,16 +36,19 @@ export function getTerminalPanelSocket(): string {
   return `claude-panel-${sessionId.slice(0, 8)}`
 }
 
-let instance: TerminalPanel | undefined
+const terminalPanelSessionSlot = new RootSessionSlot<{
+  instance: TerminalPanel | undefined
+}>(() => ({ instance: undefined }))
 
 /**
- * Return the singleton TerminalPanel, creating it lazily on first use.
+ * Return the per-root-session TerminalPanel, creating it lazily on first use.
  */
 export function getTerminalPanel(): TerminalPanel {
-  if (!instance) {
-    instance = new TerminalPanel()
+  const slot = terminalPanelSessionSlot.of(getBootstrapSession())
+  if (!slot.instance) {
+    slot.instance = new TerminalPanel()
   }
-  return instance
+  return slot.instance
 }
 
 class TerminalPanel {
@@ -152,7 +156,7 @@ class TerminalPanel {
   // ── show shell ────────────────────────────────────────────────────
 
   private showShell(): void {
-    const inkInstance = instances.get(process.stdout)
+    const inkInstance = Ns().get(process.stdout)
     if (!inkInstance) {
       logForDebugging('Terminal panel: no Ink instance found, aborting')
       return

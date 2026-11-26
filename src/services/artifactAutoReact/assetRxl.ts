@@ -10,6 +10,7 @@ import {
   getSessionIngressAuthToken,
 } from '../../utils/sessionIngressAuth.js'
 import { resolveCcrIngressBaseUrl } from '../../utils/ccrProxyGates.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import {
   artifactRelayFramePath,
   isArtifactFrameRelayOpen,
@@ -69,10 +70,14 @@ export type AssetRxlDeps = {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
 }
 
-let depsOverride: AssetRxlDeps | null = null
+const assetRxlHostSlot = new HostSlot<{ depsOverride: AssetRxlDeps | null }>(
+  () => ({
+    depsOverride: null,
+  }),
+)
 
 export function setAssetRxlDepsForTests(deps: AssetRxlDeps | null): void {
-  depsOverride = deps
+  assetRxlHostSlot.of(getBootstrapSessionHost()).depsOverride = deps
   // densable Lwt uses the same gs/DL transport stack — keep test fetch/auth in sync.
   if (deps === null) {
     setFrameDlDepsForTests(null)
@@ -102,7 +107,7 @@ export function setAssetRxlDepsForTests(deps: AssetRxlDeps | null): void {
 }
 
 function d(): AssetRxlDeps {
-  return depsOverride ?? {}
+  return assetRxlHostSlot.of(getBootstrapSessionHost()).depsOverride ?? {}
 }
 
 /** densable wMw */

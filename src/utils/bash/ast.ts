@@ -23,6 +23,7 @@ import { hasUnquotedGlobInText } from '../worktreeGitIsolation.js'
 import { SHELL_KEYWORDS } from './bashParser.js'
 import type { Node } from './parser.js'
 import { AsyncLocalStorage } from 'async_hooks'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { PARSE_ABORTED, parseCommandRaw } from './parser.js'
 
 export type Redirect = {
@@ -716,7 +717,21 @@ function checkTopLevelParserCoverage(cmd: string, root: Node): string | null {
   return null
 }
 
-let currentPlainUnquotedHeredocs = false
+type BashAstWalkHostState = {
+  currentPlainUnquotedHeredocs: boolean
+  activeUncertainWrite: boolean
+  activeUsesAssignedValue: boolean
+}
+
+const bashAstWalkHostSlot = new HostSlot<BashAstWalkHostState>(() => ({
+  currentPlainUnquotedHeredocs: false,
+  activeUncertainWrite: false,
+  activeUsesAssignedValue: false,
+}))
+
+function getBashAstWalkState(): BashAstWalkHostState {
+  return bashAstWalkHostSlot.of(getBootstrapSessionHost())
+}
 
 export function parseForSecurityFromAst(
   cmd: string,
@@ -849,17 +864,16 @@ export function parseForSecurityFromAst(
     }
   }
 
-  const prevPlain = currentPlainUnquotedHeredocs
-  currentPlainUnquotedHeredocs = options?.plainUnquotedHeredocs === true
+  const walkState = getBashAstWalkState()
+  const prevPlain = walkState.currentPlainUnquotedHeredocs
+  walkState.currentPlainUnquotedHeredocs =
+    options?.plainUnquotedHeredocs === true
   try {
     return walkProgram(root)
   } finally {
-    currentPlainUnquotedHeredocs = prevPlain
+    walkState.currentPlainUnquotedHeredocs = prevPlain
   }
 }
-
-let activeUncertainWrite = false
-let activeUsesAssignedValue = false
 
 function walkProgram(root: Node): ParseForSecurityResult {
   // ERROR-node check folded into collectCommands — any unhandled node type
@@ -878,10 +892,11 @@ function walkProgram(root: Node): ParseForSecurityResult {
   // `NOW=$(date) && jq --arg now "$NOW" ...` — $NOW is known to be the
   // $(date) output (already extracted as inner command).
   const varScope = new Map<string, string>()
-  const prevUncertain = activeUncertainWrite
-  const prevAssigned = activeUsesAssignedValue
-  activeUncertainWrite = false
-  activeUsesAssignedValue = false
+  const walkState = getBashAstWalkState()
+  const prevUncertain = walkState.activeUncertainWrite
+  const prevAssigned = walkState.activeUsesAssignedValue
+  walkState.activeUncertainWrite = false
+  walkState.activeUsesAssignedValue = false
   try {
     const err = collectCommands(root, commands, varScope, bareAssignmentNames)
     if (err) return err
@@ -889,12 +904,12 @@ function walkProgram(root: Node): ParseForSecurityResult {
       kind: 'simple',
       commands,
       bareAssignmentNames,
-      ...(activeUncertainWrite ? { uncertainWrite: true } : {}),
-      ...(activeUsesAssignedValue ? { usesAssignedValue: true } : {}),
+      ...(walkState.activeUncertainWrite ? { uncertainWrite: true } : {}),
+      ...(walkState.activeUsesAssignedValue ? { usesAssignedValue: true } : {}),
     }
   } finally {
-    activeUncertainWrite = prevUncertain
-    activeUsesAssignedValue = prevAssigned
+    walkState.activeUncertainWrite = prevUncertain
+    walkState.activeUsesAssignedValue = prevAssigned
   }
 }
 
@@ -2084,13 +2099,13 @@ function walkRedirectedStatement(
     // relative to the pre-body snapshot as uncertain.
     for (const [k, v] of varScope) {
       if (redirectScope.get(k) !== v) {
-        activeUncertainWrite = true
+        getBashAstWalkState().activeUncertainWrite = true
         varScope.set(k, VAR_PLACEHOLDER)
       }
     }
     for (const k of redirectScope.keys()) {
       if (!varScope.has(k)) {
-        activeUncertainWrite = true
+        getBashAstWalkState().activeUncertainWrite = true
         varScope.set(k, VAR_PLACEHOLDER)
       }
     }
@@ -2464,7 +2479,7 @@ function walkHeredocRedirect(
       ? body.children.filter(m => m?.type !== 'heredoc_content')
       : []
     const canAllowPlain =
-      currentPlainUnquotedHeredocs &&
+      getBashAstWalkState().currentPlainUnquotedHeredocs &&
       varScope !== undefined &&
       body !== null &&
       startText !== null &&
@@ -2725,7 +2740,7 @@ function walkCommand(
         : undefined
     for (const [k, v] of varScope) {
       if (redirectScope.get(k) !== v) {
-        activeUncertainWrite = true
+        getBashAstWalkState().activeUncertainWrite = true
         const literal =
           !redirectScope.has(k) && envLiteralByName !== undefined
             ? envLiteralByName.get(k)
@@ -2740,7 +2755,7 @@ function walkCommand(
     }
     for (const k of redirectScope.keys()) {
       if (!varScope.has(k)) {
-        activeUncertainWrite = true
+        getBashAstWalkState().activeUncertainWrite = true
         varScope.set(k, VAR_PLACEHOLDER)
       }
     }
@@ -3947,7 +3962,7 @@ function resolveSimpleExpansion(
       // (walkString's solo-placeholder gate rejects `"$VAR"` alone).
       if (!insideString) return tooComplex(node)
       if (trackedValue !== VAR_PLACEHOLDER) {
-        activeUsesAssignedValue = true
+        getBashAstWalkState().activeUsesAssignedValue = true
       }
       return VAR_PLACEHOLDER
     }
@@ -3955,7 +3970,7 @@ function resolveSimpleExpansion(
       if (trackedValue === '') return tooComplex(node)
       if (BARE_VAR_UNSAFE_RE.test(trackedValue)) return tooComplex(node)
     }
-    activeUsesAssignedValue = true
+    getBashAstWalkState().activeUsesAssignedValue = true
     return trackedValue
   }
   // SAFE_ENV_VARS + special vars ($?, $$, $@, $1, etc.): value unknown

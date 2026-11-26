@@ -20,6 +20,7 @@ import type { AssistantMessage, Message } from '../types/message.js'
 import type { OrphanedPermission } from '../types/textInputTypes.js'
 import type { HookDeferredToolAttachment } from './attachments.js'
 import { logForDebugging } from './debug.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import {
   extractTraceparentContext,
   withOtelContext,
@@ -115,7 +116,20 @@ export function isResultSuccessful(
 // Keep only the last 100 entries to prevent unbounded growth
 const MAX_TOOL_PROGRESS_TRACKING_ENTRIES = 100
 const TOOL_PROGRESS_THROTTLE_MS = 30000
-const toolProgressLastSentTime = new Map<string, number>()
+const fallbackQueryHelpersSession = { root: {} as object }
+const toolProgressLastSentTimeBySession = new RootSessionSlot<
+  Map<string, number>
+>(() => new Map())
+
+function getToolProgressLastSentTime(): Map<string, number> {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return toolProgressLastSentTimeBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return toolProgressLastSentTimeBySession.of(fallbackQueryHelpersSession)
+}
 
 export function* normalizeMessage(message: Message): Generator<SDKMessage> {
   switch (message.type) {
@@ -224,6 +238,7 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
         }
 
         // Use parentToolUseID as the key since toolUseID changes for each progress message
+        const toolProgressLastSentTime = getToolProgressLastSentTime()
         const trackingKey = message.parentToolUseID as string
         const now = Date.now()
         const lastSent = toolProgressLastSentTime.get(trackingKey) || 0

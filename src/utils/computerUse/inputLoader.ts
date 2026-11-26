@@ -2,8 +2,13 @@ import type {
   ComputerUseInput,
   ComputerUseInputAPI,
 } from '@ant/computer-use-input'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
-let cached: ComputerUseInputAPI | undefined
+const inputLoaderHostSlot = new HostSlot<{
+  cached: ComputerUseInputAPI | undefined
+}>(() => ({
+  cached: undefined,
+}))
 
 /**
  * Package's js/index.js reads COMPUTER_USE_INPUT_NODE_PATH (baked by
@@ -20,11 +25,12 @@ let cached: ComputerUseInputAPI | undefined
  * calls these inside drainRunLoop().
  */
 export function requireComputerUseInput(): ComputerUseInputAPI {
-  if (cached) return cached
+  const hostState = inputLoaderHostSlot.of(getBootstrapSessionHost())
+  if (hostState.cached) return hostState.cached
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const input = require('@ant/computer-use-input') as ComputerUseInput
   if (!input.isSupported) {
     throw new Error('@ant/computer-use-input is not supported on this platform')
   }
-  return (cached = input)
+  return (hostState.cached = input)
 }

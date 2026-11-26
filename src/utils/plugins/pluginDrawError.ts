@@ -11,6 +11,7 @@ import {
 } from '../../services/analytics/index.js'
 import { logForDebugging } from '../debug.js'
 import { logForDiagnosticsNoPII } from '../diagLogs.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 
 /** densable `oBr`. */
@@ -55,7 +56,7 @@ const LINE_SCRUB = new RegExp(
 )
 
 /** densable `x3`. */
-const reported = new Set<string>()
+const reportedDrawErrorsHostSlot = new HostSlot<Set<string>>(() => new Set())
 
 /** densable `qre` — `tL` → `?`. */
 export function qre(text: string): string {
@@ -227,6 +228,7 @@ export function L1t(
   teller: DrawErrorTeller,
   kind: string,
 ): string | null {
+  const reported = reportedDrawErrorsHostSlot.of(getBootstrapSessionHost())
   const key = `reported ${kind} ${Xmn(component, teller)}`
   if (reported.has(key)) return null
   reported.add(key)
@@ -263,6 +265,7 @@ export function Jmn(input: {
   teller: DrawErrorTeller
   error: unknown
 }): { key: string; lead: string; text: string } | null {
+  const reported = reportedDrawErrorsHostSlot.of(getBootstrapSessionHost())
   const key = Xmn(input.component, input.teller)
   if (reported.has(`noted ${key}`)) return null
   reported.add(`noted ${key}`)
@@ -279,7 +282,7 @@ export function Jmn(input: {
 }
 
 export function resetDrawErrorNotes(): void {
-  reported.clear()
+  reportedDrawErrorsHostSlot.of(getBootstrapSessionHost()).clear()
 }
 
 export function tellerOf(names: readonly string[]): DrawErrorTeller {

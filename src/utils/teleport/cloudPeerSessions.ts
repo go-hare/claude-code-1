@@ -9,6 +9,7 @@ import { isRemoteControlPeerUnreachableFromHere } from '../../bridge/trustedDevi
 import { stripSessionPrefix } from '@claude-code/builtin-tools/tools/SendMessageTool/nameResolve.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { hasCloudPeerAccess } from './cloudPeerAccess.js'
 import {
   walkCcrSessionList,
@@ -46,8 +47,25 @@ type Memo = {
   truncated: boolean
 }
 
-let memo: Memo | undefined
-let inFlight: Promise<CloudPeerListResult> | undefined
+class CloudPeerSessionsHostState {
+  memo: Memo | undefined = undefined
+  inFlight: Promise<CloudPeerListResult> | undefined = undefined
+}
+
+const fallbackCloudPeerHost: object = {}
+const cloudPeerStateByHost = new HostSlot<CloudPeerSessionsHostState>(
+  () => new CloudPeerSessionsHostState(),
+)
+
+function getCloudPeerHostState(): CloudPeerSessionsHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return cloudPeerStateByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return cloudPeerStateByHost.of(fallbackCloudPeerHost)
+}
 
 /** Official D5v row map + self-session filter. */
 export function mapD5vCloudPeerSessions(
@@ -86,7 +104,9 @@ function mapRow(
   }
 }
 
-async function fetchCloudPeerSessionsFresh(): Promise<CloudPeerListResult> {
+async function fetchCloudPeerSessionsFresh(
+  hostState: CloudPeerSessionsHostState,
+): Promise<CloudPeerListResult> {
   const status = { truncated: false }
   // Official D5v: r = CLAUDE_CODE_REMOTE===true
   const remote = process.env.CLAUDE_CODE_REMOTE === 'true'
@@ -108,7 +128,7 @@ async function fetchCloudPeerSessionsFresh(): Promise<CloudPeerListResult> {
       selfSessionId: selfId,
       unreachableFromHere: unreachable,
     })
-    memo = {
+    hostState.memo = {
       at: Date.now(),
       sessions,
       truncated: status.truncated,
@@ -135,20 +155,21 @@ export async function listCloudPeerSessions(): Promise<CloudPeerListResult> {
   if (!hasCloudPeerAccess()) {
     return { sessions: [], unavailable: 'gate_off' }
   }
+  const hostState = getCloudPeerHostState()
   if (
-    memo !== undefined &&
-    Date.now() - memo.at < CLOUD_PEER_LIST_MEMO_TTL_MS
+    hostState.memo !== undefined &&
+    Date.now() - hostState.memo.at < CLOUD_PEER_LIST_MEMO_TTL_MS
   ) {
     return {
-      sessions: memo.sessions,
+      sessions: hostState.memo.sessions,
       unavailable: undefined,
-      ...(memo.truncated ? { truncated: true } : {}),
+      ...(hostState.memo.truncated ? { truncated: true } : {}),
     }
   }
-  const pending = inFlight ?? fetchCloudPeerSessionsFresh()
-  if (!inFlight) {
-    inFlight = pending.finally(() => {
-      inFlight = undefined
+  const pending = hostState.inFlight ?? fetchCloudPeerSessionsFresh(hostState)
+  if (!hostState.inFlight) {
+    hostState.inFlight = pending.finally(() => {
+      hostState.inFlight = undefined
     })
   }
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -181,6 +202,7 @@ export function isCloudListFailed(
 
 /** @internal */
 export function __resetCloudPeerSessionsMemoForTests(): void {
-  memo = undefined
-  inFlight = undefined
+  const hostState = getCloudPeerHostState()
+  hostState.memo = undefined
+  hostState.inFlight = undefined
 }

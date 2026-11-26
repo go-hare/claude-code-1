@@ -40,6 +40,7 @@ import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getPlatform } from '../platform.js'
 import { quote } from '../bash/shellQuote.js'
 import { buildCliLaunch, isVersionedNativeBinary } from '../cliLaunch.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { jsonStringify } from '../slowOperations.js'
 import { getUserBinDir } from '../xdg.js'
 import {
@@ -256,7 +257,11 @@ export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
   return false
 }
 
-let shouldAutoEnable: boolean | undefined
+const chromeSetupHostSlot = new HostSlot<{
+  shouldAutoEnable: boolean | undefined
+}>(() => ({
+  shouldAutoEnable: undefined,
+}))
 
 /**
  * densable 2.1.211 `YOs` ≈ `IRo() && (de_() || HRo()) && tengu_chrome_auto_enable`.
@@ -266,16 +271,17 @@ let shouldAutoEnable: boolean | undefined
  * HRo/de_: extension install cache or paired device evidence.
  */
 export function shouldAutoEnableClaudeInChrome(): boolean {
-  if (shouldAutoEnable !== undefined) {
-    return shouldAutoEnable
+  const hostState = chromeSetupHostSlot.of(getBootstrapSessionHost())
+  if (hostState.shouldAutoEnable !== undefined) {
+    return hostState.shouldAutoEnable
   }
 
-  shouldAutoEnable =
+  hostState.shouldAutoEnable =
     hasBaseChromeAutoEnableEligibility() &&
     hasChromeExtensionEvidence() &&
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_chrome_auto_enable', false)
 
-  return shouldAutoEnable
+  return hostState.shouldAutoEnable
 }
 
 /**

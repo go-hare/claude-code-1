@@ -35,11 +35,12 @@ import type {
 } from '@ant/computer-use-mcp'
 
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { sleep } from '../sleep.js'
 import { CLI_CU_CAPABILITIES, CLI_HOST_BUNDLE_ID } from './common.js'
 import { assertSafeKeyChord, trackHeldChord } from './keyChordSafety.js'
 import { validateHwnd } from './win32/shared.js'
-import { loadPlatform } from './platforms/index.js'
+import { loadPlatform, type WindowAction } from './platforms/index.js'
 
 // ---------------------------------------------------------------------------
 // Helpers for HWND-bound mode
@@ -119,9 +120,22 @@ $pt.X = 0; $pt.Y = 0
   }
 }
 
-// Cache non-client offset (recalculate on bind change)
-let _ncOffset: { dx: number; dy: number } | null = null
-let _ncOffsetHwnd: string | null = null
+// Cache non-client offset per host (recalculate on bind change)
+type NcOffsetHostState = {
+  ncOffset: { dx: number; dy: number } | null
+  ncOffsetHwnd: string | null
+}
+
+const ncOffsetHostSlot = new HostSlot<NcOffsetHostState>(() => ({
+  ncOffset: null,
+  ncOffsetHwnd: null,
+}))
+
+function clearCachedNcOffset(): void {
+  const state = ncOffsetHostSlot.of(getBootstrapSessionHost())
+  state.ncOffset = null
+  state.ncOffsetHwnd = null
+}
 
 function getCachedNcOffset(): { dx: number; dy: number } {
   if (process.platform !== 'win32') return { dx: 0, dy: 0 }
@@ -130,10 +144,11 @@ function getCachedNcOffset(): { dx: number; dy: number } {
       require('./platforms/win32.js') as typeof import('./platforms/win32.js')
     const hwnd = getBoundHwnd()
     if (!hwnd) return { dx: 0, dy: 0 }
-    if (_ncOffset && _ncOffsetHwnd === hwnd) return _ncOffset
-    _ncOffset = getNonClientOffset()
-    _ncOffsetHwnd = hwnd
-    return _ncOffset
+    const state = ncOffsetHostSlot.of(getBootstrapSessionHost())
+    if (state.ncOffset && state.ncOffsetHwnd === hwnd) return state.ncOffset
+    state.ncOffset = getNonClientOffset()
+    state.ncOffsetHwnd = hwnd
+    return state.ncOffset
   } catch {
     return { dx: 0, dy: 0 }
   }
@@ -210,7 +225,7 @@ export function createCrossPlatformExecutor(opts: {
     `[computer-use] cross-platform executor for ${process.platform}`,
   )
 
-  return {
+  const executor: ComputerExecutor = {
     capabilities: {
       ...CLI_CU_CAPABILITIES,
       hostBundleId: CLI_HOST_BUNDLE_ID,
@@ -566,12 +581,12 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
         await sleep(16)
       }
       // mouseDown
-      await (this as any).mouseDown()
+      await executor.mouseDown()
       await sleep(50)
       await platform.input.moveMouse(to.x, to.y)
       await sleep(16)
       // mouseUp
-      await (this as any).mouseUp()
+      await executor.mouseUp()
     },
 
     async scroll(
@@ -626,17 +641,18 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
     async openApp(bundleId: string): Promise<void> {
       await platform.apps.open(bundleId)
       // Invalidate NC offset cache on new bind
-      _ncOffset = null
-      _ncOffsetHwnd = null
+      clearCachedNcOffset()
     },
 
     // ── Window management (Windows only) ──────────────────────────────
     async manageWindow(action: string, opts?): Promise<boolean> {
       if (!platform.windowManagement) return false
-      const result = platform.windowManagement.manageWindow(action as any, opts)
+      const result = platform.windowManagement.manageWindow(
+        action as WindowAction,
+        opts,
+      )
       // Invalidate NC offset cache on window state change
-      _ncOffset = null
-      _ncOffsetHwnd = null
+      clearCachedNcOffset()
       return result
     },
 
@@ -716,8 +732,7 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
         // Bind to new terminal
         const win = enumWindows().find(w => w.hwnd === newHwnd)
         bindWindow(newHwnd, win?.pid)
-        _ncOffset = null
-        _ncOffsetHwnd = null
+        clearCachedNcOffset()
 
         // Wait for agent to initialize
         await sleep(2000)
@@ -748,8 +763,7 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
 
       if (!target) return null
       bindWindow(target.hwnd, target.pid)
-      _ncOffset = null
-      _ncOffsetHwnd = null
+      clearCachedNcOffset()
       return target
     },
 
@@ -758,8 +772,7 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
       const { unbindWindow } =
         require('./platforms/win32.js') as typeof import('./platforms/win32.js')
       unbindWindow()
-      _ncOffset = null
-      _ncOffsetHwnd = null
+      clearCachedNcOffset()
     },
 
     async hasBoundWindow() {
@@ -1144,7 +1157,7 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
           hwnd: string
           title: string
         }[]
-        const win = windows.find((w: any) => w.hwnd === hwnd)
+        const win = windows.find(w => w.hwnd === hwnd)
         if (win && node.automationId) {
           if (uiaClick(win.title, node.automationId)) return true
         }
@@ -1180,7 +1193,7 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
           hwnd: string
           title: string
         }[]
-        const win = windows.find((w: any) => w.hwnd === hwnd)
+        const win = windows.find(w => w.hwnd === hwnd)
         if (win) {
           const { setValue, findElement } =
             require('./win32/uiAutomation.js') as typeof import('./win32/uiAutomation.js')
@@ -1218,6 +1231,7 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
       }
     },
   }
+  return executor
 }
 
 /**

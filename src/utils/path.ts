@@ -13,6 +13,7 @@ import {
 import { getCwd } from './cwd.js'
 import { getFsImplementation } from './fsOperations.js'
 import { getPlatform } from './platform.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { posixPathToWindowsPath } from './windowsPaths.js'
 
 /**
@@ -480,10 +481,16 @@ const DEFAULT_DARWIN_HOME_AUTOMOUNT_DEPS: DarwinHomeAutomountDeps = {
   },
 }
 
-let cachedDarwinHomeAutomounted: boolean | undefined
+const darwinHomeAutomountHostSlot = new HostSlot<{
+  cachedDarwinHomeAutomounted: boolean | undefined
+}>(() => ({
+  cachedDarwinHomeAutomounted: undefined,
+}))
 
 export function resetDarwinHomeAutomountedForTesting(): void {
-  cachedDarwinHomeAutomounted = undefined
+  darwinHomeAutomountHostSlot.of(
+    getBootstrapSessionHost(),
+  ).cachedDarwinHomeAutomounted = undefined
 }
 
 /**
@@ -495,8 +502,14 @@ export function isDarwinHomeAutomounted(
   deps: DarwinHomeAutomountDeps = DEFAULT_DARWIN_HOME_AUTOMOUNT_DEPS,
 ): boolean {
   const useDefault = deps === DEFAULT_DARWIN_HOME_AUTOMOUNT_DEPS
-  if (useDefault && cachedDarwinHomeAutomounted !== undefined) {
-    return cachedDarwinHomeAutomounted
+  const hostState = useDefault
+    ? darwinHomeAutomountHostSlot.of(getBootstrapSessionHost())
+    : undefined
+  if (
+    hostState !== undefined &&
+    hostState.cachedDarwinHomeAutomounted !== undefined
+  ) {
+    return hostState.cachedDarwinHomeAutomounted
   }
   let result: boolean
   try {
@@ -516,8 +529,8 @@ export function isDarwinHomeAutomounted(
   } catch {
     return true
   }
-  if (useDefault) {
-    cachedDarwinHomeAutomounted = result
+  if (hostState !== undefined) {
+    hostState.cachedDarwinHomeAutomounted = result
   }
   return result
 }

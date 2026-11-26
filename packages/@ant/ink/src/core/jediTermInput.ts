@@ -3,6 +3,7 @@
  * Gold `M1` / `eag` arrow-burst lives on App (`trackAppArrowBurst`), not here.
  * Ported constants: Hog=75, Cog=250, j3i=200.
  */
+import { InkHostSlot } from './instances.js'
 import type { ParsedInput, ParsedKey } from './parse-keypress.js'
 
 /** Official Hog — bare up/down within this of last wheel is treated as flood. */
@@ -24,15 +25,23 @@ export function isJediTermEnv(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.TERMINAL_EMULATOR === 'JetBrains-JediTerm'
 }
 
-/**
- * Official X9n densable — JetBrains terminal command-blocks env, or sticky
- * after first detection during arrow-flood rewrite.
- */
-let jediBugConfirmed = false
-/** Official B3i / kJc — arrow-flood active (wheel-as-arrows in progress). */
-let jediArrowFloodActive = false
-/** Official Y9n — pending burst count consumed by FSp jb path. */
-let jediArrowBurstPending = 0
+type JediTermHostState = {
+  /**
+   * Official X9n densable — JetBrains terminal command-blocks env, or sticky
+   * after first detection during arrow-flood rewrite.
+   */
+  bugConfirmed: boolean
+  /** Official B3i / kJc — arrow-flood active (wheel-as-arrows in progress). */
+  arrowFloodActive: boolean
+  /** Official Y9n — pending burst count consumed by FSp jb path. */
+  arrowBurstPending: number
+}
+
+const jediTermHostSlot = new InkHostSlot<JediTermHostState>(() => ({
+  bugConfirmed: false,
+  arrowFloodActive: false,
+  arrowBurstPending: 0,
+}))
 
 export function createJediTermInputState(): JediTermInputState {
   return { lastWheelTime: 0, lastWheelDownTime: 0, notified: false }
@@ -40,21 +49,26 @@ export function createJediTermInputState(): JediTermInputState {
 
 /** Official Tog densable. */
 export function noteJediTermArrowFlood(): void {
-  jediBugConfirmed = true
-  jediArrowFloodActive = true
-  jediArrowBurstPending++
+  const state = jediTermHostSlot.of()
+  state.bugConfirmed = true
+  state.arrowFloodActive = true
+  state.arrowBurstPending++
 }
 
 /** Official CJc densable. */
 export function clearJediTermArrowFlood(): void {
-  jediArrowFloodActive = false
-  jediArrowBurstPending = 0
+  const state = jediTermHostSlot.peek()
+  if (!state) return
+  state.arrowFloodActive = false
+  state.arrowBurstPending = 0
 }
 
 /** Official xJc densable — drain and zero pending burst count. */
 export function consumeJediTermArrowBurstCount(): number {
-  const n = jediArrowBurstPending
-  jediArrowBurstPending = 0
+  const state = jediTermHostSlot.peek()
+  if (!state) return 0
+  const n = state.arrowBurstPending
+  state.arrowBurstPending = 0
   return n
 }
 
@@ -62,12 +76,13 @@ export function consumeJediTermArrowBurstCount(): number {
 export function isJediTermBugConfirmed(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (jediBugConfirmed) return true
+  const state = jediTermHostSlot.of()
+  if (state.bugConfirmed) return true
   if (
     env.INTELLIJ_TERMINAL_COMMAND_BLOCKS_REWORKED !== undefined ||
     env.INTELLIJ_TERMINAL_COMMAND_BLOCKS !== undefined
   ) {
-    jediBugConfirmed = true
+    state.bugConfirmed = true
     return true
   }
   return false
@@ -75,7 +90,7 @@ export function isJediTermBugConfirmed(
 
 /** Official kJc densable. */
 export function isJediTermArrowFloodActive(): boolean {
-  return jediArrowFloodActive
+  return jediTermHostSlot.peek()?.arrowFloodActive ?? false
 }
 
 /**
@@ -145,7 +160,9 @@ export function rewriteJediTermInput(
 
 /** Test-only reset. */
 export function _resetJediTermInputForTesting(): void {
-  jediBugConfirmed = false
-  jediArrowFloodActive = false
-  jediArrowBurstPending = 0
+  const state = jediTermHostSlot.peek()
+  if (!state) return
+  state.bugConfirmed = false
+  state.arrowFloodActive = false
+  state.arrowBurstPending = 0
 }

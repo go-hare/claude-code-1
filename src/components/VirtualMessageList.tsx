@@ -13,7 +13,7 @@ import {
 import { useVirtualScroll } from '../hooks/useVirtualScroll.js';
 import {
   Box,
-  instances,
+  Ns,
   useApp,
   type DOMElement,
   type ScrollBoxHandle,
@@ -1458,7 +1458,7 @@ export function VirtualMessageList({
       }
       // Official 2.1.299 (#595): delay collapsing an expanded row by 250ms so
       // a double-click that starts a word selection cancels the collapse.
-      const ink = instances.get(process.stdout);
+      const ink = Ns().get(process.stdout);
       const unsub = ink?.subscribeToSelectionChange(() => {
         if (ink.hasTextSelection()) pendingClicks.get(k)?.(false);
       });

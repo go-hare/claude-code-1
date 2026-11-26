@@ -17,6 +17,10 @@ import {
   createUserMessage,
   getLastAssistantMessage,
 } from '../../utils/messages.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { isTeammate } from '../../utils/teammate.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
@@ -26,8 +30,6 @@ import {
 } from '../analytics/index.js'
 import { currentLimits } from '../claudeAiLimits.js'
 import { isSpeculationEnabled, startSpeculation } from './speculation.js'
-
-let currentAbortController: AbortController | null = null
 
 /**
  * Official 2.1.325 #2366 (`M = 8`, `I(e, n)`, `h8i`):
@@ -54,10 +56,28 @@ export type UnattendedPromptSuggestionState = {
   unattendedTurns: number
 }
 
-let lastPersonActivityAt = 0
-const defaultUnattendedState: UnattendedPromptSuggestionState = {
-  personSeenAt: 0,
-  unattendedTurns: 0,
+type PromptSuggestionSessionState = {
+  currentAbortController: AbortController | null
+  lastPersonActivityAt: number
+  defaultUnattendedState: UnattendedPromptSuggestionState
+}
+
+const promptSuggestionBySession =
+  new RootSessionSlot<PromptSuggestionSessionState>(() => ({
+    currentAbortController: null,
+    lastPersonActivityAt: 0,
+    defaultUnattendedState: {
+      personSeenAt: 0,
+      unattendedTurns: 0,
+    },
+  }))
+
+function getPromptSuggestionSessionState(): PromptSuggestionSessionState {
+  return promptSuggestionBySession.of(getBootstrapSession())
+}
+
+export function getPromptSuggestionAbortControllerForTests(): AbortController | null {
+  return getPromptSuggestionSessionState().currentAbortController
 }
 
 /**
@@ -67,13 +87,18 @@ const defaultUnattendedState: UnattendedPromptSuggestionState = {
 export function markPersonActivityForPromptSuggestion(
   timestamp: number = Date.now(),
 ): void {
-  lastPersonActivityAt = Math.max(lastPersonActivityAt, timestamp)
+  const sessionState = getPromptSuggestionSessionState()
+  sessionState.lastPersonActivityAt = Math.max(
+    sessionState.lastPersonActivityAt,
+    timestamp,
+  )
 }
 
 export function resetUnattendedPromptSuggestionStateForTests(): void {
-  lastPersonActivityAt = 0
-  defaultUnattendedState.personSeenAt = 0
-  defaultUnattendedState.unattendedTurns = 0
+  const sessionState = getPromptSuggestionSessionState()
+  sessionState.lastPersonActivityAt = 0
+  sessionState.defaultUnattendedState.personSeenAt = 0
+  sessionState.defaultUnattendedState.unattendedTurns = 0
 }
 
 /**
@@ -123,20 +148,22 @@ export function isLastTurnUserStarted(messages: readonly Message[]): boolean {
  */
 export function shouldBackOffUnattendedPromptSuggestion(
   messages: readonly Message[],
-  state: UnattendedPromptSuggestionState = defaultUnattendedState,
+  state?: UnattendedPromptSuggestionState,
 ): boolean {
+  const sessionState = getPromptSuggestionSessionState()
+  const targetState = state ?? sessionState.defaultUnattendedState
   if (isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)) {
     return false
   }
   if (isLastTurnUserStarted(messages)) {
-    state.unattendedTurns = 0
+    targetState.unattendedTurns = 0
     return false
   }
-  if (lastPersonActivityAt !== state.personSeenAt) {
-    state.personSeenAt = lastPersonActivityAt
-    state.unattendedTurns = 0
+  if (sessionState.lastPersonActivityAt !== targetState.personSeenAt) {
+    targetState.personSeenAt = sessionState.lastPersonActivityAt
+    targetState.unattendedTurns = 0
   }
-  const countAfter = ++state.unattendedTurns
+  const countAfter = ++targetState.unattendedTurns
   const isPowerOfTwo = (countAfter & (countAfter - 1)) === 0
   return (
     countAfter > UNATTENDED_PROMPT_SUGGESTION_BACKOFF_THRESHOLD && !isPowerOfTwo
@@ -249,9 +276,10 @@ export function shouldEnablePromptSuggestion(): boolean {
 }
 
 export function abortPromptSuggestion(): void {
-  if (currentAbortController) {
-    currentAbortController.abort()
-    currentAbortController = null
+  const sessionState = getPromptSuggestionSessionState()
+  if (sessionState.currentAbortController) {
+    sessionState.currentAbortController.abort()
+    sessionState.currentAbortController = null
   }
 }
 
@@ -295,12 +323,17 @@ export function getSuggestionSuppressReason(
  * Shared guard + generation logic used by both CLI TUI and SDK push paths.
  * Returns the suggestion with metadata, or null if suppressed/filtered.
  */
+export type ExecutePromptSuggestionOptions = {
+  generateSuggestionFn?: typeof generateSuggestion
+}
+
 export async function tryGenerateSuggestion(
   abortController: AbortController,
   messages: Message[],
   getAppState: () => AppState,
   cacheSafeParams: CacheSafeParams,
   source?: 'cli' | 'sdk',
+  options?: ExecutePromptSuggestionOptions,
 ): Promise<{
   suggestion: string
   promptId: PromptVariant
@@ -343,7 +376,8 @@ export async function tryGenerateSuggestion(
   }
 
   const promptId = getPromptVariant()
-  const { suggestion, generationRequestId } = await generateSuggestion(
+  const runGenerate = options?.generateSuggestionFn ?? generateSuggestion
+  const { suggestion, generationRequestId } = await runGenerate(
     abortController,
     promptId,
     cacheSafeParams,
@@ -363,11 +397,14 @@ export async function tryGenerateSuggestion(
 
 export async function executePromptSuggestion(
   context: REPLHookContext,
+  options?: ExecutePromptSuggestionOptions,
 ): Promise<void> {
   if (context.querySource !== 'repl_main_thread') return
 
-  currentAbortController = new AbortController()
-  const abortController = currentAbortController
+  const sessionState = getPromptSuggestionSessionState()
+  sessionState.currentAbortController?.abort()
+  const abortController = new AbortController()
+  sessionState.currentAbortController = abortController
   const cacheSafeParams = createCacheSafeParams(context)
 
   try {
@@ -377,6 +414,7 @@ export async function executePromptSuggestion(
       context.toolUseContext.getAppState,
       cacheSafeParams,
       'cli',
+      options,
     )
     if (!result) return
 
@@ -410,8 +448,8 @@ export async function executePromptSuggestion(
     }
     logError(toError(error))
   } finally {
-    if (currentAbortController === abortController) {
-      currentAbortController = null
+    if (sessionState.currentAbortController === abortController) {
+      sessionState.currentAbortController = null
     }
   }
 }

@@ -67,6 +67,14 @@ import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
 import { sandboxHelperSubprocessEnv } from '../subprocessEnv.js'
 import { expandPath } from '../path.js'
 import { getAutoMemPath } from '../../memdir/paths.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
+import type { Session } from '../sessionRoot.js'
 import { getProjectDir } from '../sessionPaths.js'
 import { settingsHaveBlockReadsOutsideWorkingDirectories } from '../permissions/outsideReads.js'
 import { isWorktreePathNetworkRelativeToCwd } from '../worktree.js'
@@ -203,35 +211,19 @@ export const DENY_READ_ENV_GLOBS = ['**/.env', '**/.env*'] as const
 /**
  * Official 2.1.326 #23: track 0-byte placeholder files created by the sandbox
  * on Linux/WSL (including `.git/config.lock`, `.git/config.worktree`,
- * `.git/config.worktree.lock`) so they are removed on cleanup AND if Claude
- * Code is stopped mid-command (SIGINT/SIGTERM/exit).
+ * `.git/config.worktree.lock`) per SessionHost so Host A teardown only removes
+ * Host A's placeholder files, and process exit cleans up any remaining live
+ * hosts' placeholder files.
  */
-const createdLinuxPlaceholderFiles = new Set<string>()
-let placeholderExitHookInstalled = false
+let placeholderProcessExitHookInstalled = false
 
-function installLinuxPlaceholderExitHook(): void {
-  if (placeholderExitHookInstalled) return
-  placeholderExitHookInstalled = true
-  const onExit = (): void => {
-    cleanupLinuxSandboxPlaceholderFiles()
-  }
-  process.once('exit', onExit)
-  registerCleanup(() => {
-    cleanupLinuxSandboxPlaceholderFiles()
-  })
-}
-
-/**
- * Official 2.1.326 #23: remove tracked 0-byte placeholder files (such as
- * `.git/config.lock` or `.git/config.worktree`) left by Linux bwrap when a
- * command ends or Claude Code is stopped. Never deletes non-empty user files.
- */
-export function cleanupLinuxSandboxPlaceholderFiles(
+function cleanupLinuxSandboxPlaceholderFilesForSet(
+  trackedFiles: Set<string>,
   extraPaths?: readonly string[],
 ): string[] {
   const candidates = extraPaths
-    ? new Set([...createdLinuxPlaceholderFiles, ...extraPaths])
-    : new Set(createdLinuxPlaceholderFiles)
+    ? new Set([...trackedFiles, ...extraPaths])
+    : new Set(trackedFiles)
   const removed: string[] = []
   for (const p of candidates) {
     try {
@@ -242,12 +234,51 @@ export function cleanupLinuxSandboxPlaceholderFiles(
         unlinkSync(p)
         removed.push(p)
       }
-      createdLinuxPlaceholderFiles.delete(p)
+      trackedFiles.delete(p)
     } catch {
-      createdLinuxPlaceholderFiles.delete(p)
+      trackedFiles.delete(p)
     }
   }
   return removed
+}
+
+function installLinuxPlaceholderExitHook(hostState: SandboxHostState): void {
+  if (!placeholderProcessExitHookInstalled) {
+    placeholderProcessExitHookInstalled = true
+    const onExit = (): void => {
+      for (const liveState of getLiveSandboxHostStates()) {
+        cleanupLinuxSandboxPlaceholderFilesForSet(
+          liveState.createdLinuxPlaceholderFiles,
+        )
+      }
+    }
+    process.once('exit', onExit)
+  }
+  if (!hostState.placeholderCleanupRegistered) {
+    hostState.placeholderCleanupRegistered = true
+    const stateRef = new WeakRef(hostState)
+    registerCleanup(() => {
+      const liveState = stateRef.deref()
+      if (!liveState) return
+      cleanupLinuxSandboxPlaceholderFilesForSet(
+        liveState.createdLinuxPlaceholderFiles,
+      )
+    })
+  }
+}
+
+/**
+ * Official 2.1.326 #23: remove tracked 0-byte placeholder files (such as
+ * `.git/config.lock` or `.git/config.worktree`) left by Linux bwrap when a
+ * command ends or Claude Code is stopped. Never deletes non-empty user files.
+ */
+export function cleanupLinuxSandboxPlaceholderFiles(
+  extraPaths?: readonly string[],
+): string[] {
+  return cleanupLinuxSandboxPlaceholderFilesForSet(
+    getSandboxHostState().createdLinuxPlaceholderFiles,
+    extraPaths,
+  )
 }
 
 /**
@@ -264,8 +295,9 @@ export function ensureLinuxGitWorktreeConfigPlaceholder(path: string): void {
     if (!lstatSync(dirname(path)).isDirectory()) return
     // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
     closeSync(openSync(path, 'wx'))
-    createdLinuxPlaceholderFiles.add(path)
-    installLinuxPlaceholderExitHook()
+    const hostState = getSandboxHostState()
+    hostState.createdLinuxPlaceholderFiles.add(path)
+    installLinuxPlaceholderExitHook(hostState)
   } catch {
     // exists, or parent is gone — official G() swallows
   }
@@ -432,7 +464,6 @@ function readGitDirSymlinkTarget(fullPath: string): string {
   }
 }
 
-const gitDirSnapshotsBeforeWrap = new Map<string, GitDirSnapshotEntry>()
 /** Official 2.1.328 `jS = 512` — max symref scan buffer size in bytes. */
 const GIT_SYMREF_SCAN_BYTES = 512
 /** Loose-object fanout directory names under `.git/objects/` (`00`..`ff`). */
@@ -622,6 +653,8 @@ export function snapshotGitDirBeforeSandboxWrap(
   cwd: string,
   additionalWorkingDirectories?: readonly string[],
 ): void {
+  const gitDirSnapshotsBeforeWrap =
+    getSandboxHostState().gitDirSnapshotsBeforeWrap
   for (const gitDir of resolveUniqueGitDirs(
     cwd,
     additionalWorkingDirectories,
@@ -644,7 +677,7 @@ export function snapshotGitDirBeforeSandboxWrap(
 }
 
 export function getActiveGitDirSnapshotCountForTesting(): number {
-  return gitDirSnapshotsBeforeWrap.size
+  return getSandboxHostState().gitDirSnapshotsBeforeWrap.size
 }
 
 const GIT_TOP_LEVEL_REF_NAME_RE =
@@ -684,6 +717,8 @@ export function quarantineUnexpectedGitDirEntries(
 } {
   const quarantined: string[] = []
   const removedSymlinks: string[] = []
+  const gitDirSnapshotsBeforeWrap =
+    getSandboxHostState().gitDirSnapshotsBeforeWrap
   const targets = cwd
     ? resolveUniqueGitDirs(cwd, additionalWorkingDirectories)
     : Array.from(gitDirSnapshotsBeforeWrap.keys())
@@ -1133,7 +1168,7 @@ function guardWorktreeCommonDirDotGit(
   } else if (st?.isDirectory()) {
     pushGitDirMetadataDenyWrite(denyWrite, nestedDotGit)
   } else {
-    bareGitRepoScrubPaths.push(nestedDotGit)
+    getSandboxHostState().bareGitRepoScrubPaths.push(nestedDotGit)
     if (st === undefined && getPlatform() === 'macos') {
       denyWrite.push(nestedDotGit)
       if (!/[*?]/.test(commonDir)) {
@@ -1727,14 +1762,178 @@ export type DisabledFsDiagnosticLists = {
   denyWrite: string[]
 }
 
-let disabledFsDiagnostic: DisabledFsDiagnosticLists | null = null
+const RELAUNCH_SANDBOX_HOLD_ENV = 'CLAUDE_CODE_RELAUNCH_SANDBOX_HOLD'
+
+function readInitialSandboxRootMoveHold(): SandboxRootMoveHold | undefined {
+  const raw = process.env[RELAUNCH_SANDBOX_HOLD_ENV]
+  if (!raw) return undefined
+  delete process.env[RELAUNCH_SANDBOX_HOLD_ENV]
+  const parts = raw.split(',')
+  return {
+    isStrict: parts.includes('isStrict'),
+    isStrictByFailedRead: parts.includes('isStrictByFailedRead'),
+    isRequired: parts.includes('isRequired'),
+    isAutoAllowOff: parts.includes('isAutoAllowOff'),
+  }
+}
+
+type SandboxHostState = {
+  disabledFsDiagnostic: DisabledFsDiagnosticLists | null
+  sessionAllowedHosts: Set<string>
+  droppedRepoNetworkAllowancesLogged: boolean
+  worktreeMainRepoPath: string | null | undefined
+  bareGitRepoScrubPaths: string[]
+  sandboxWasEnabled: boolean
+  isHeldOnByFailedSettingsRead: boolean
+  sandboxStartedOnce: boolean
+  hostedToolContainer: boolean
+  sandboxDisabledThisSession: boolean
+  initFailureReason: string | undefined
+  forcedInitFailureForTesting: string | undefined
+  lastSandboxAskCallback: SandboxAskCallback | undefined
+  sandboxRootMoveHold: SandboxRootMoveHold | undefined
+  fsReadConfigMemo:
+    | { cfg: unknown; result: FsReadRestrictionConfig }
+    | undefined
+  createdLinuxPlaceholderFiles: Set<string>
+  placeholderCleanupRegistered: boolean
+  gitDirSnapshotsBeforeWrap: Map<string, GitDirSnapshotEntry>
+  sessionRef?: WeakRef<Session>
+}
+
+const liveSandboxHostStates = new Set<WeakRef<SandboxHostState>>()
+
+// Host whose ALS initialized the shared BaseSandboxManager proxy server.
+// Proxy callbacks run in that host's captured ALS, so if it resets (or joined
+// without an ask callback), we must fall through to surviving started hosts
+// instead of permanently failing closed for them.
+let proxyOwnerHostStateRef: WeakRef<SandboxHostState> | undefined
+
+function pruneDeadSandboxHostStates(): void {
+  for (const ref of liveSandboxHostStates) {
+    if (ref.deref() === undefined) {
+      liveSandboxHostStates.delete(ref)
+    }
+  }
+}
+
+function getLiveSandboxHostStates(): SandboxHostState[] {
+  const live: SandboxHostState[] = []
+  for (const ref of liveSandboxHostStates) {
+    const state = ref.deref()
+    if (state === undefined) {
+      liveSandboxHostStates.delete(ref)
+    } else {
+      live.push(state)
+    }
+  }
+  return live
+}
+
+function hasMultipleStartedSandboxHosts(): boolean {
+  let startedCount = 0
+  for (const state of getLiveSandboxHostStates()) {
+    if (state.sandboxStartedOnce) {
+      startedCount++
+      if (startedCount > 1) return true
+    }
+  }
+  return false
+}
+
+const sandboxStateByHost = new HostSlot<SandboxHostState>(() => {
+  const initialHold = !hasActiveSessionAls()
+    ? readInitialSandboxRootMoveHold()
+    : undefined
+  const state: SandboxHostState = {
+    disabledFsDiagnostic: null,
+    sessionAllowedHosts: new Set<string>(),
+    droppedRepoNetworkAllowancesLogged: false,
+    worktreeMainRepoPath: undefined,
+    bareGitRepoScrubPaths: [],
+    sandboxWasEnabled: false,
+    isHeldOnByFailedSettingsRead: false,
+    sandboxStartedOnce: false,
+    hostedToolContainer: false,
+    sandboxDisabledThisSession: false,
+    initFailureReason: undefined,
+    forcedInitFailureForTesting: undefined,
+    lastSandboxAskCallback: undefined,
+    sandboxRootMoveHold: initialHold,
+    fsReadConfigMemo: undefined,
+    createdLinuxPlaceholderFiles: new Set<string>(),
+    placeholderCleanupRegistered: false,
+    gitDirSnapshotsBeforeWrap: new Map<string, GitDirSnapshotEntry>(),
+    sessionRef: new WeakRef(getBootstrapSession().root),
+  }
+  if (liveSandboxHostStates.size > 64) {
+    pruneDeadSandboxHostStates()
+  }
+  liveSandboxHostStates.add(new WeakRef(state))
+  return state
+})
+
+function getSandboxHostState(): SandboxHostState {
+  const state = sandboxStateByHost.of(getBootstrapSessionHost())
+  if (state.sessionRef?.deref() === undefined) {
+    state.sessionRef = new WeakRef(getBootstrapSession().root)
+  }
+  return state
+}
 
 /**
- * densable `CFd.sessionAllowedHosts` / `zvb` — hosts allowed for this session
- * (UI/SDK allow) merged into runtime allowedDomains so the package skips
- * re-asking after compact clears classifier maps.
+ * Merge `sessionAllowedHosts` across all live `SandboxHostState` instances when
+ * syncing config into the process-singleton `BaseSandboxManager`, so one host's
+ * `addSessionAllowedHost()` / `refreshConfig()` never drops another live host's
+ * allowed domains. Skipped under `allowManagedDomainsOnly`.
  */
-const sessionAllowedHosts = new Set<string>()
+function withMergedLiveSessionAllowedHosts(
+  cfg: SandboxRuntimeConfig,
+): SandboxRuntimeConfig {
+  if (shouldAllowManagedSandboxDomainsOnly()) {
+    return cfg
+  }
+  const baseAllowed = cfg.network?.allowedDomains ?? []
+  const merged = new Set<string>(baseAllowed)
+  let added = false
+  for (const state of getLiveSandboxHostStates()) {
+    for (const host of state.sessionAllowedHosts) {
+      if (!merged.has(host)) {
+        merged.add(host)
+        added = true
+      }
+    }
+  }
+  if (!added) {
+    return cfg
+  }
+  return {
+    ...cfg,
+    network: {
+      ...cfg.network,
+      allowedDomains: [...merged],
+    },
+  }
+}
+
+function resolveActiveSandboxAskCallback(): SandboxAskCallback | undefined {
+  const currentState = getSandboxHostState()
+  if (currentState.lastSandboxAskCallback) {
+    return currentState.lastSandboxAskCallback
+  }
+  if (
+    hasActiveSessionAls() &&
+    currentState !== proxyOwnerHostStateRef?.deref()
+  ) {
+    return undefined
+  }
+  for (const state of getLiveSandboxHostStates()) {
+    if (state.sandboxStartedOnce && state.lastSandboxAskCallback) {
+      return state.lastSandboxAskCallback
+    }
+  }
+  return undefined
+}
 
 /** densable `KXt` — bracket bare IPv6 for domain list / rule content. */
 export function normalizeSandboxSessionHost(host: string): string {
@@ -1747,6 +1946,7 @@ export function normalizeSandboxSessionHost(host: string): string {
  */
 export function addSessionAllowedHost(host: string): void {
   const normalized = normalizeSandboxSessionHost(host)
+  const { sessionAllowedHosts } = getSandboxHostState()
   if (sessionAllowedHosts.has(normalized)) return
   sessionAllowedHosts.add(normalized)
   refreshConfig()
@@ -1754,17 +1954,24 @@ export function addSessionAllowedHost(host: string): void {
 
 /** Test helper — densable session bag contents. */
 export function getSessionAllowedHosts(): ReadonlySet<string> {
-  return sessionAllowedHosts
+  return getSandboxHostState().sessionAllowedHosts
 }
 
 /** Test helper — clear densable session host bag without full reset. */
 export function clearSessionAllowedHostsForTests(): void {
-  sessionAllowedHosts.clear()
+  getSandboxHostState().sessionAllowedHosts.clear()
+}
+
+/** Test helper — inspect per-host sandbox ask callback. */
+export function getLastSandboxAskCallbackForTests():
+  | SandboxAskCallback
+  | undefined {
+  return getSandboxHostState().lastSandboxAskCallback
 }
 
 /** Test/diagnostic access to last convert dual-facade stash. */
 export function getDisabledFsDiagnosticLists(): DisabledFsDiagnosticLists | null {
-  return disabledFsDiagnostic
+  return getSandboxHostState().disabledFsDiagnostic
 }
 
 /**
@@ -1988,7 +2195,7 @@ export function convertToSandboxRuntimeConfig(
     }
     // densable LOr: for (let Be of t.sessionAllowedHosts) s.push(Be)
     // Only outside allowManagedDomainsOnly — policy path ignores session bag.
-    for (const host of sessionAllowedHosts) {
+    for (const host of getSandboxHostState().sessionAllowedHosts) {
       allowedDomains.push(host)
     }
   }
@@ -2078,7 +2285,8 @@ export function convertToSandboxRuntimeConfig(
   // So: if a file exists, denyWrite (ro-bind in place, no stub). If not, scrub
   // it post-command in scrubBareGitRepoFiles() — planted files are gone before
   // unsandboxed git runs; inside the command, git is itself sandboxed.
-  bareGitRepoScrubPaths.length = 0
+  const hostState = getSandboxHostState()
+  hostState.bareGitRepoScrubPaths.length = 0
   const bareGitRepoFiles = ['HEAD', 'objects', 'refs', 'hooks', 'config']
   for (const dir of cwd === originalCwd ? [originalCwd] : [originalCwd, cwd]) {
     for (const gitFile of bareGitRepoFiles) {
@@ -2088,7 +2296,7 @@ export function convertToSandboxRuntimeConfig(
         statSync(p)
         denyWrite.push(p)
       } catch {
-        bareGitRepoScrubPaths.push(p)
+        hostState.bareGitRepoScrubPaths.push(p)
       }
     }
   }
@@ -2445,8 +2653,8 @@ export function convertToSandboxRuntimeConfig(
       worktreeCheckDirs.add(addedDir)
     }
   }
-  if (worktreeMainRepoPath) {
-    linkedWorktreeCommonDirs.add(worktreeMainRepoPath)
+  if (hostState.worktreeMainRepoPath) {
+    linkedWorktreeCommonDirs.add(hostState.worktreeMainRepoPath)
   }
   for (const dir of worktreeCheckDirs) {
     const detected = detectWorktreeMainRepoPath(dir)
@@ -2794,14 +3002,14 @@ export function convertToSandboxRuntimeConfig(
   // returns raw diagnostic lists from this stash.
   const filesystemDisabled = resolveSandboxFilesystemDisabled()
   if (filesystemDisabled) {
-    disabledFsDiagnostic = {
+    hostState.disabledFsDiagnostic = {
       denyRead: [...denyRead],
       allowRead: [...allowRead],
       allowWrite: [...allowWrite],
       denyWrite: [...denyWrite],
     }
   } else {
-    disabledFsDiagnostic = null
+    hostState.disabledFsDiagnostic = null
   }
 
   // densable FQt tlsTerminate: policy → flag → enabled userSettings only
@@ -2895,8 +3103,6 @@ const SANDBOX_NETWORK_BYPASS_KEYS = [
 ] as const
 
 const SANDBOX_PROXY_PORT_KEYS = ['httpProxyPort', 'socksProxyPort'] as const
-
-let droppedRepoNetworkAllowancesLogged = false
 
 function pickTrustedSandboxValue<T>(
   getter: (sandbox: NonNullable<SettingsJson['sandbox']>) => T | undefined,
@@ -3077,8 +3283,9 @@ export function resolveTrustedSandboxSettings(
     }
   }
 
-  if (!droppedRepoNetworkAllowancesLogged) {
-    droppedRepoNetworkAllowancesLogged = true
+  const hostState = getSandboxHostState()
+  if (!hostState.droppedRepoNetworkAllowancesLogged) {
+    hostState.droppedRepoNetworkAllowancesLogged = true
     const repoSources = (['projectSettings', 'localSettings'] as const).map(
       src => (isSettingSourceEnabled(src) ? getSettingsForSource(src) : null),
     )
@@ -3349,22 +3556,13 @@ function getMaskCredentialWarning(): string | undefined {
 let initializationPromise: Promise<void> | undefined
 let settingsSubscriptionCleanup: (() => void) | undefined
 
-// Cached main repo path for git worktrees, resolved once during initialize().
-// In a worktree, .git is a file containing "gitdir: /path/to/main/repo/.git/worktrees/name".
-// undefined = not yet resolved; null = not a worktree or detection failed.
-let worktreeMainRepoPath: string | null | undefined
-
-// Bare-repo files at cwd that didn't exist at config time and should be
-// scrubbed if they appear after a sandboxed command. See anthropics/claude-code#29316.
-const bareGitRepoScrubPaths: string[] = []
-
 /**
  * Delete bare-repo files planted at cwd during a sandboxed command, before
  * Claude's unsandboxed git calls can see them. See the SECURITY block above
  * bareGitRepoFiles. anthropics/claude-code#29316.
  */
 function scrubBareGitRepoFiles(): void {
-  for (const p of bareGitRepoScrubPaths) {
+  for (const p of getSandboxHostState().bareGitRepoScrubPaths) {
     try {
       // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand must be sync (Shell.ts:367)
       rmSync(p, { recursive: true })
@@ -3602,25 +3800,9 @@ const checkDependencies = memoize((): SandboxDependencyCheck => {
   return base
 })
 
-// Official 2.1.323 #2017 (`Da` / `cV`): keep the sandbox on if it was already
-// enabled during the session and settings subsequently fail to read. While held
-// on by unreadable settings, auto-allow is off and dangerouslyDisableSandbox is
-// ignored until settings can be read again.
-let sandboxWasEnabled = false
-let isHeldOnByFailedSettingsRead = false
-// Official 2.1.325 #2374 (`startedOnce` / `hostedToolContainer` / `W3` / `V3`):
-// Track whether the sandbox started once in this session and whether this
-// process is running inside Anthropic's hosted cloud container.
-let sandboxStartedOnce = false
-let hostedToolContainer = false
-// Official 2.1.328 #676 (`TPe` / `sandboxDisabledThisSession` / `initFailureReason`):
-// When sandbox fails to initialize and failIfUnavailable is not set, refuse
-// the next sandboxed Bash command and disable sandboxing for the session.
-let sandboxDisabledThisSession = false
-let initFailureReason: string | undefined
-let forcedInitFailureForTesting: string | undefined
-let lastSandboxAskCallback: SandboxAskCallback | undefined
-
+// Official 2.1.323 #2017 (`Da` / `cV`) + 2.1.325 #2374 + 2.1.328 #676 + 2.1.331:
+// Per-host sandbox state lives in `sandboxStateByHost` (`HostSlot` on
+// `getBootstrapSessionHost()`), so concurrent hosts never bleed session state.
 export class SandboxInitFailedError extends Error {
   constructor(message: string) {
     super(message)
@@ -3629,46 +3811,50 @@ export class SandboxInitFailedError extends Error {
 }
 
 export function _resetSandboxHeldStateForTesting(): void {
-  sandboxWasEnabled = false
-  isHeldOnByFailedSettingsRead = false
-  sandboxStartedOnce = false
-  hostedToolContainer = false
-  sandboxDisabledThisSession = false
-  initFailureReason = undefined
-  forcedInitFailureForTesting = undefined
-  lastSandboxAskCallback = undefined
+  const hostState = getSandboxHostState()
+  hostState.sandboxWasEnabled = false
+  hostState.isHeldOnByFailedSettingsRead = false
+  hostState.sandboxStartedOnce = false
+  hostState.hostedToolContainer = false
+  hostState.sandboxDisabledThisSession = false
+  hostState.initFailureReason = undefined
+  hostState.forcedInitFailureForTesting = undefined
+  hostState.lastSandboxAskCallback = undefined
+  hostState.fsReadConfigMemo = undefined
 }
 
 export function isSandboxDisabledThisSession(): boolean {
-  return sandboxDisabledThisSession
+  return getSandboxHostState().sandboxDisabledThisSession
 }
 
 export function getSandboxInitFailureReason(): string | undefined {
-  return initFailureReason
+  return getSandboxHostState().initFailureReason
 }
 
 export function _setSandboxInitFailureForTesting(
   reason: string | undefined,
 ): void {
-  forcedInitFailureForTesting = reason
-  initFailureReason = reason
-  if (reason !== undefined) {
+  const hostState = getSandboxHostState()
+  hostState.forcedInitFailureForTesting = reason
+  hostState.initFailureReason = reason
+  if (reason !== undefined && !hasActiveSessionAls()) {
     initializationPromise = undefined
   }
 }
 
 export function markHostedToolContainer(value = true): void {
-  hostedToolContainer = value
+  getSandboxHostState().hostedToolContainer = value
 }
 
 export function isSandboxHeldOnByFailedSettingsRead(): boolean {
   getSandboxEnabledSetting()
-  return isHeldOnByFailedSettingsRead
+  return getSandboxHostState().isHeldOnByFailedSettingsRead
 }
 
 function setSandboxHeldOnByFailedRead(held: boolean): void {
-  if (held === isHeldOnByFailedSettingsRead) return
-  isHeldOnByFailedSettingsRead = held
+  const hostState = getSandboxHostState()
+  if (held === hostState.isHeldOnByFailedSettingsRead) return
+  hostState.isHeldOnByFailedSettingsRead = held
   logForDebugging(
     held
       ? '[sandbox] The settings could not be read, so the sandbox stays on; auto-allow is off and dangerouslyDisableSandbox is ignored until they can be read again'
@@ -3678,22 +3864,23 @@ function setSandboxHeldOnByFailedRead(held: boolean): void {
 }
 
 function getSandboxEnabledSetting(): boolean {
+  const hostState = getSandboxHostState()
   try {
     const settings = getSettings_DEPRECATED()
     if (settings == null) {
-      setSandboxHeldOnByFailedRead(sandboxWasEnabled)
-      return sandboxWasEnabled
+      setSandboxHeldOnByFailedRead(hostState.sandboxWasEnabled)
+      return hostState.sandboxWasEnabled
     }
     const enabled = settings?.sandbox?.enabled ?? false
     if (enabled) {
-      sandboxWasEnabled = true
+      hostState.sandboxWasEnabled = true
     }
     setSandboxHeldOnByFailedRead(false)
     return enabled
   } catch (error) {
     logForDebugging(`Failed to get settings for sandbox check: ${error}`)
-    setSandboxHeldOnByFailedRead(sandboxWasEnabled)
-    return sandboxWasEnabled
+    setSandboxHeldOnByFailedRead(hostState.sandboxWasEnabled)
+    return hostState.sandboxWasEnabled
   }
 }
 
@@ -3717,45 +3904,31 @@ export type SandboxRootMoveHold = {
   isAutoAllowOff: boolean
 }
 
-const RELAUNCH_SANDBOX_HOLD_ENV = 'CLAUDE_CODE_RELAUNCH_SANDBOX_HOLD'
-
-function readInitialSandboxRootMoveHold(): SandboxRootMoveHold | undefined {
-  const raw = process.env[RELAUNCH_SANDBOX_HOLD_ENV]
-  if (!raw) return undefined
-  delete process.env[RELAUNCH_SANDBOX_HOLD_ENV]
-  const parts = raw.split(',')
-  return {
-    isStrict: parts.includes('isStrict'),
-    isStrictByFailedRead: parts.includes('isStrictByFailedRead'),
-    isRequired: parts.includes('isRequired'),
-    isAutoAllowOff: parts.includes('isAutoAllowOff'),
-  }
-}
-
-let sandboxRootMoveHold: SandboxRootMoveHold | undefined =
-  readInitialSandboxRootMoveHold()
-
 export function getSandboxRootMoveHold(): SandboxRootMoveHold | undefined {
-  return sandboxRootMoveHold
+  return getSandboxHostState().sandboxRootMoveHold
 }
 
 export function isSandboxHeldOnByRootMove(): boolean {
   return (
-    sandboxRootMoveHold !== undefined &&
+    getSandboxHostState().sandboxRootMoveHold !== undefined &&
     getSettings_DEPRECATED()?.sandbox?.enabled !== true
   )
 }
 
 export function captureSandboxRootMoveHold(): void {
-  if (!getSandboxEnabledSetting() && sandboxRootMoveHold === undefined) {
+  const hostState = getSandboxHostState()
+  if (
+    !getSandboxEnabledSetting() &&
+    hostState.sandboxRootMoveHold === undefined
+  ) {
     return
   }
   try {
-    sandboxRootMoveHold = {
+    hostState.sandboxRootMoveHold = {
       isStrict: !areUnsandboxedCommandsAllowed(),
       isStrictByFailedRead:
         isSandboxHeldOnByFailedSettingsRead() ||
-        sandboxRootMoveHold?.isStrictByFailedRead === true,
+        hostState.sandboxRootMoveHold?.isStrictByFailedRead === true,
       isRequired: isSandboxRequiredBySettings(),
       isAutoAllowOff: !isAutoAllowBashIfSandboxedEnabled(),
     }
@@ -3764,7 +3937,7 @@ export function captureSandboxRootMoveHold(): void {
       `Could not read the sandbox settings before a move, so keeping the sandbox at its strictest: ${err}`,
       { level: 'error' },
     )
-    sandboxRootMoveHold = {
+    hostState.sandboxRootMoveHold = {
       isStrict: true,
       isStrictByFailedRead: true,
       isRequired: true,
@@ -3774,14 +3947,15 @@ export function captureSandboxRootMoveHold(): void {
 }
 
 export function clearSandboxRootMoveHold(): void {
-  sandboxRootMoveHold = undefined
+  getSandboxHostState().sandboxRootMoveHold = undefined
 }
 
 export function serializeSandboxRootMoveHoldEnv(): Record<string, string> {
-  if (!sandboxRootMoveHold) return {}
+  const hold = getSandboxHostState().sandboxRootMoveHold
+  if (!hold) return {}
   const flags = [
     'on',
-    ...Object.entries(sandboxRootMoveHold)
+    ...Object.entries(hold)
       .filter(([, v]) => v)
       .map(([k]) => k),
   ]
@@ -3802,7 +3976,10 @@ function isAutoAllowBashIfSandboxedEnabled(): boolean {
   if (isSandboxHeldOnByFailedSettingsRead()) {
     return false
   }
-  if (sandboxRootMoveHold?.isAutoAllowOff || isSandboxHeldOnByRootMove()) {
+  if (
+    getSandboxHostState().sandboxRootMoveHold?.isAutoAllowOff ||
+    isSandboxHeldOnByRootMove()
+  ) {
     return false
   }
   const policySandbox = getSettingsForSource('policySettings')?.sandbox
@@ -3817,7 +3994,10 @@ function isAutoAllowBashIfSandboxedEnabled(): boolean {
 }
 
 function areUnsandboxedCommandsAllowed(): boolean {
-  if (isSandboxHeldOnByFailedSettingsRead() || sandboxRootMoveHold?.isStrict) {
+  if (
+    isSandboxHeldOnByFailedSettingsRead() ||
+    getSandboxHostState().sandboxRootMoveHold?.isStrict
+  ) {
     return false
   }
   const settings = getSettings_DEPRECATED()
@@ -3825,7 +4005,7 @@ function areUnsandboxedCommandsAllowed(): boolean {
 }
 
 function isSandboxRequiredBySettings(): boolean {
-  if (sandboxRootMoveHold?.isRequired) {
+  if (getSandboxHostState().sandboxRootMoveHold?.isRequired) {
     return true
   }
   const settings = getSettings_DEPRECATED()
@@ -3844,17 +4024,20 @@ function isSandboxRequiredBySettings(): boolean {
  * with a warning instead of exiting fatally.
  */
 function wouldSetAsideSandboxRequirementInHostedWorker(): boolean {
+  const hostState = getSandboxHostState()
   const isHostedLinuxContainer =
     getPlatform() === 'linux' &&
     process.env.CLAUDE_CODE_ENVIRONMENT_KIND === undefined &&
-    (hostedToolContainer ||
+    (hostState.hostedToolContainer ||
       (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
         Boolean(
           process.env.CLAUDE_CODE_REMOTE_SESSION_ID ||
             process.env.CLAUDE_CODE_CONTAINER_ID,
         )))
   if (!isHostedLinuxContainer) return false
-  if (!isSandboxRequiredBySettings() || sandboxStartedOnce) return false
+  if (!isSandboxRequiredBySettings() || hostState.sandboxStartedOnce) {
+    return false
+  }
   const deps = checkDependencies()
   return deps.errors.length > 0
 }
@@ -3916,7 +4099,8 @@ function isPlatformInEnabledList(): boolean {
  * This checks the user's enabled setting, platform support, and enabledPlatforms restriction
  */
 function isSandboxingEnabled(): boolean {
-  if (sandboxDisabledThisSession) {
+  const hostState = getSandboxHostState()
+  if (hostState.sandboxDisabledThisSession) {
     return false
   }
   if (!isSupportedPlatform()) {
@@ -3932,7 +4116,9 @@ function isSandboxingEnabled(): boolean {
     return false
   }
 
-  return getSandboxEnabledSetting() || sandboxRootMoveHold !== undefined
+  return (
+    getSandboxEnabledSetting() || hostState.sandboxRootMoveHold !== undefined
+  )
 }
 
 /**
@@ -4262,18 +4448,19 @@ async function setSandboxSettings(options: {
     },
   })
   if (!result.error) {
+    const hostState = getSandboxHostState()
     if (options.enabled === false) {
-      sandboxWasEnabled = false
+      hostState.sandboxWasEnabled = false
       setSandboxHeldOnByFailedRead(false)
-      sandboxRootMoveHold = undefined
-    } else if (sandboxRootMoveHold !== undefined) {
-      sandboxRootMoveHold = {
-        ...sandboxRootMoveHold,
+      hostState.sandboxRootMoveHold = undefined
+    } else if (hostState.sandboxRootMoveHold !== undefined) {
+      hostState.sandboxRootMoveHold = {
+        ...hostState.sandboxRootMoveHold,
         isStrict:
-          sandboxRootMoveHold.isStrict &&
+          hostState.sandboxRootMoveHold.isStrict &&
           options.allowUnsandboxedCommands !== true,
         isAutoAllowOff:
-          sandboxRootMoveHold.isAutoAllowOff &&
+          hostState.sandboxRootMoveHold.isAutoAllowOff &&
           options.autoAllowBashIfSandboxed !== true,
       }
     }
@@ -4306,26 +4493,40 @@ export async function ensureInitializedForWrap(options?: {
   if (!isSandboxingEnabled()) {
     return
   }
-  if (!initializationPromise && !sandboxDisabledThisSession) {
-    await initialize(lastSandboxAskCallback)
+  const hostState = getSandboxHostState()
+  if (
+    (!initializationPromise ||
+      !hostState.sandboxStartedOnce ||
+      hostState.forcedInitFailureForTesting !== undefined) &&
+    !hostState.sandboxDisabledThisSession
+  ) {
+    await initialize(hostState.lastSandboxAskCallback)
   }
-  const currentInit = initializationPromise
+  const currentInit =
+    hostState.forcedInitFailureForTesting !== undefined
+      ? undefined
+      : initializationPromise
   if (currentInit) {
     await currentInit
   }
   if (!currentInit || initializationPromise !== currentInit) {
-    const suffix = initFailureReason ? `: ${initFailureReason}` : ''
+    const suffix = hostState.initFailureReason
+      ? `: ${hostState.initFailureReason}`
+      : ''
     if (isSandboxRequired()) {
       throw new SandboxInitFailedError(
         `Sandbox is required but failed to initialize${suffix}. Restart to retry. Running it outside the sandbox (dangerouslyDisableSandbox) is not allowed either.`,
       )
     }
-    if (options?.keepsSandboxOn !== false && !sandboxDisabledThisSession) {
+    if (
+      options?.keepsSandboxOn !== false &&
+      !hostState.sandboxDisabledThisSession
+    ) {
       throw new SandboxInitFailedError(
         `Sandbox is enabled but failed to initialize${suffix}. This command of Claude Code's own was not run; the sandbox stays on, and the next command tries to start it again.`,
       )
     }
-    sandboxDisabledThisSession = true
+    hostState.sandboxDisabledThisSession = true
     throw new SandboxInitFailedError(
       `Sandbox is enabled but failed to initialize${suffix}. Sandboxing is disabled for the rest of this session; restart to retry.`,
     )
@@ -4342,6 +4543,7 @@ async function wrapWithSandbox(
   abortSignal?: AbortSignal,
   wrapOptions?: { keepsSandboxOn?: boolean },
 ): Promise<string> {
+  let hostScopedConfig: SandboxRuntimeConfig | undefined
   // If sandboxing is enabled, ensure initialization is complete
   if (isSandboxingEnabled()) {
     await ensureInitializedForWrap(wrapOptions)
@@ -4367,19 +4569,28 @@ async function wrapWithSandbox(
     if (configuredAddDirs.length > 0) {
       precreateMissingLinuxAddDirs(configuredAddDirs)
     }
-    promoteDenyLiteralSymlinkTargets({
-      getConfig: () => BaseSandboxManager.getConfig?.(),
-      updateConfig: cfg => {
+    hostScopedConfig =
+      customConfig === undefined && hasMultipleStartedSandboxHosts()
+        ? convertToSandboxRuntimeConfig(getSettings_DEPRECATED())
+        : undefined
+    const getActiveConfig = (): SandboxRuntimeConfig | undefined =>
+      hostScopedConfig ?? BaseSandboxManager.getConfig?.()
+    const updateActiveConfig = (cfg: SandboxRuntimeConfig): void => {
+      if (hostScopedConfig !== undefined) {
+        hostScopedConfig = cfg
+      } else {
         BaseSandboxManager.updateConfig(cfg)
-      },
+      }
+    }
+    promoteDenyLiteralSymlinkTargets({
+      getConfig: getActiveConfig,
+      updateConfig: updateActiveConfig,
     })
     recheckReadDenyAndCredentialMasksBeforeWrap({
-      getConfig: () => BaseSandboxManager.getConfig?.(),
-      updateConfig: cfg => {
-        BaseSandboxManager.updateConfig(cfg)
-      },
+      getConfig: getActiveConfig,
+      updateConfig: updateActiveConfig,
     })
-    recordWrapWriteRoots(BaseSandboxManager.getConfig?.())
+    recordWrapWriteRoots(getActiveConfig())
   }
 
   // densable Bou / sandbox-runtime@0.0.70: package wrapWithSandbox itself
@@ -4387,10 +4598,16 @@ async function wrapWithSandbox(
   // override.disabled??false, else session). When disabled, package skips FS
   // mounts while still applying credentials.envVars unset/set (Vzi). No host
   // rewrite of path lists needed.
+  const effectiveCustomConfig =
+    customConfig ??
+    hostScopedConfig ??
+    (hasMultipleStartedSandboxHosts()
+      ? convertToSandboxRuntimeConfig(getSettings_DEPRECATED())
+      : undefined)
   const wrapped = await BaseSandboxManager.wrapWithSandbox(
     command,
     binShell,
-    customConfig,
+    effectiveCustomConfig,
     abortSignal,
   )
   const plat = getPlatform()
@@ -4421,7 +4638,7 @@ async function wrapWithSandbox(
 
 /** Whether sandbox initialization completed at least once in this session. */
 export function hasSandboxStartedOnce(): boolean {
-  return sandboxStartedOnce
+  return getSandboxHostState().sandboxStartedOnce
 }
 
 /**
@@ -4430,12 +4647,40 @@ export function hasSandboxStartedOnce(): boolean {
 async function initialize(
   sandboxAskCallback?: SandboxAskCallback,
 ): Promise<void> {
+  const hostState = getSandboxHostState()
   if (sandboxAskCallback !== undefined) {
-    lastSandboxAskCallback = sandboxAskCallback
+    hostState.lastSandboxAskCallback = sandboxAskCallback
   }
-  // If already initializing or initialized, return the promise
+  if (hostState.forcedInitFailureForTesting !== undefined) {
+    hostState.initFailureReason = hostState.forcedInitFailureForTesting
+    if (!hasActiveSessionAls()) {
+      initializationPromise = undefined
+    }
+    return
+  }
+  // If already initializing or initialized, await the shared singleton init and
+  // join this host into the active sandbox (setting sandboxStartedOnce/WasEnabled
+  // and refreshing merged config if this host hasn't joined yet).
   if (initializationPromise) {
-    return initializationPromise
+    const pending = initializationPromise
+    await pending
+    if (initializationPromise === pending && isSandboxingEnabled()) {
+      const joiningNewHost = !hostState.sandboxStartedOnce
+      hostState.sandboxWasEnabled = true
+      hostState.sandboxStartedOnce = true
+      if (sandboxAskCallback !== undefined) {
+        hostState.lastSandboxAskCallback = sandboxAskCallback
+      }
+      if (joiningNewHost) {
+        if (hostState.worktreeMainRepoPath === undefined) {
+          hostState.worktreeMainRepoPath = detectWorktreeMainRepoPath(
+            getCwdState(),
+          )
+        }
+        refreshConfig()
+      }
+    }
+    return
   }
 
   // Check if sandboxing is enabled in settings
@@ -4443,46 +4688,47 @@ async function initialize(
     return
   }
 
-  if (forcedInitFailureForTesting !== undefined) {
-    initFailureReason = forcedInitFailureForTesting
-    initializationPromise = undefined
-    return
+  // Always install a delegating callback on the singleton BaseSandboxManager so
+  // that if Host A initializes without a callback and Host B later joins with
+  // askB, Host B's callback is live. Also enforces allowManagedDomainsOnly +
+  // densable 2.1.219 strictAllowlist (deny without prompt).
+  const wrappedCallback: SandboxAskCallback = async (
+    hostPattern: NetworkHostPattern,
+  ) => {
+    if (shouldAllowManagedSandboxDomainsOnly()) {
+      logForDebugging(
+        `[sandbox] Blocked network request to ${hostPattern.host} (allowManagedDomainsOnly)`,
+      )
+      return false
+    }
+    if (resolveSandboxStrictAllowlist()) {
+      logForDebugging(
+        `[sandbox] Blocked network request to ${hostPattern.host} (strictAllowlist)`,
+      )
+      return false
+    }
+    const activeAsk = resolveActiveSandboxAskCallback()
+    if (!activeAsk) {
+      return false
+    }
+    return activeAsk(hostPattern)
   }
-
-  // Wrap the callback to enforce allowManagedDomainsOnly + densable 2.1.219
-  // strictAllowlist (deny without prompt). Package 0.0.70 lacks the field check
-  // densable dSu has (`!r||kl.network.strictAllowlist`); host enforces here so
-  // all code paths (REPL, print/SDK) are covered even when the field is stripped.
-  const wrappedCallback: SandboxAskCallback | undefined = sandboxAskCallback
-    ? async (hostPattern: NetworkHostPattern) => {
-        if (shouldAllowManagedSandboxDomainsOnly()) {
-          logForDebugging(
-            `[sandbox] Blocked network request to ${hostPattern.host} (allowManagedDomainsOnly)`,
-          )
-          return false
-        }
-        if (resolveSandboxStrictAllowlist()) {
-          logForDebugging(
-            `[sandbox] Blocked network request to ${hostPattern.host} (strictAllowlist)`,
-          )
-          return false
-        }
-        return sandboxAskCallback(hostPattern)
-      }
-    : undefined
 
   // Create the initialization promise synchronously (before any await) to prevent
   // race conditions where wrapWithSandbox() is called before the promise is assigned.
   // densable Te().initializationPromise is set before Pa/initialize so ro() &&= n.
   const initToken = {}
-  initFailureReason = undefined
+  hostState.initFailureReason = undefined
+  proxyOwnerHostStateRef = new WeakRef(hostState)
   setSandboxInitializationPromise(initToken)
   initializationPromise = (async () => {
     try {
       markInstallsSinceInitializeStarted()
       // Resolve worktree main `.git` once (densable WZ). Cached for refreshConfig().
-      if (worktreeMainRepoPath === undefined) {
-        worktreeMainRepoPath = detectWorktreeMainRepoPath(getCwdState())
+      if (hostState.worktreeMainRepoPath === undefined) {
+        hostState.worktreeMainRepoPath = detectWorktreeMainRepoPath(
+          getCwdState(),
+        )
       }
 
       // densable windows init: pN(), await fN() before Re.initialize
@@ -4504,8 +4750,12 @@ async function initialize(
       setSandboxCommandNetworkListsOffered(hasNetworkLists)
 
       // Log monitor is automatically enabled for macOS
-      await BaseSandboxManager.initialize(runtimeConfig, wrappedCallback)
-      sandboxStartedOnce = true
+      await BaseSandboxManager.initialize(
+        withMergedLiveSessionAllowedHosts(runtimeConfig),
+        wrappedCallback,
+      )
+      hostState.sandboxWasEnabled = true
+      hostState.sandboxStartedOnce = true
       finishSandboxInitializeAllowlist(runtimeConfig)
       // densable FZ — record wrap write roots after init (yN)
       recordWrapWriteRoots(runtimeConfig)
@@ -4514,21 +4764,57 @@ async function initialize(
       // densable: also cDs.subscribe(() => bHo()) — command-producer deny bag
       // changes (zvt/qvt) must refresh sandbox config so write deny tracks producers.
       const unsubSettings = settingsChangeDetector.subscribe(() => {
-        const settings = getSettings_DEPRECATED()
-        const nextConfig = convertToSandboxRuntimeConfig(settings)
-        const currentPlat = getPlatform()
-        if (currentPlat === 'linux' || currentPlat === 'wsl') {
-          process.env[SRT_ALLOW_NESTED_USERNS_ENV] =
-            getSrtAllowNestedUsernsEnv(settings)[SRT_ALLOW_NESTED_USERNS_ENV]
+        const refreshActiveHost = () => {
+          const settings = getSettings_DEPRECATED()
+          const nextConfig = convertToSandboxRuntimeConfig(settings)
+          const currentPlat = getPlatform()
+          if (currentPlat === 'linux' || currentPlat === 'wsl') {
+            process.env[SRT_ALLOW_NESTED_USERNS_ENV] =
+              getSrtAllowNestedUsernsEnv(settings)[SRT_ALLOW_NESTED_USERNS_ENV]
+          }
+          applySandboxRuntimeConfig(nextConfig, cfg => {
+            BaseSandboxManager.updateConfig(
+              withMergedLiveSessionAllowedHosts(cfg),
+            )
+          })
         }
-        applySandboxRuntimeConfig(nextConfig, cfg => {
-          BaseSandboxManager.updateConfig(cfg)
-        })
+
+        const startedSessions = new Set<Session>()
+        for (const state of getLiveSandboxHostStates()) {
+          if (!state.sandboxStartedOnce) continue
+          const targetSession = state.sessionRef?.deref()
+          if (targetSession) {
+            startedSessions.add(targetSession)
+          }
+        }
+        if (startedSessions.size > 0) {
+          for (const targetSession of startedSessions) {
+            runWithSession(targetSession, refreshActiveHost)
+          }
+        } else {
+          refreshActiveHost()
+        }
         logForDebugging('Sandbox configuration updated from settings change')
       })
       const unsubCommandProducers = subscribeCommandProducerDirsChanged(() => {
         // densable bHo: if sandboxing enabled, rebuild runtime config from settings
-        refreshConfig()
+        const startedSessions = new Set<Session>()
+        for (const state of getLiveSandboxHostStates()) {
+          if (!state.sandboxStartedOnce) continue
+          const targetSession = state.sessionRef?.deref()
+          if (targetSession) {
+            startedSessions.add(targetSession)
+          }
+        }
+        if (startedSessions.size > 0) {
+          for (const targetSession of startedSessions) {
+            runWithSession(targetSession, () => {
+              refreshConfig()
+            })
+          }
+        } else {
+          refreshConfig()
+        }
       })
       settingsSubscriptionCleanup = () => {
         unsubSettings()
@@ -4537,12 +4823,15 @@ async function initialize(
     } catch (error) {
       // Clear the promise on error so initialization can be retried
       initializationPromise = undefined
+      proxyOwnerHostStateRef = undefined
       setSandboxInitializationPromise(undefined)
       failSandboxInitializeAllowlist()
-      initFailureReason = errorMessage(error)
+      hostState.initFailureReason = errorMessage(error)
 
       // Log error but don't throw - let sandboxing fail gracefully
-      logForDebugging(`Failed to initialize sandbox: ${initFailureReason}`)
+      logForDebugging(
+        `Failed to initialize sandbox: ${hostState.initFailureReason}`,
+      )
     }
   })()
 
@@ -4558,7 +4847,7 @@ function refreshConfig(): void {
   applySandboxRuntimeConfig(
     convertToSandboxRuntimeConfig(getSettings_DEPRECATED()),
     cfg => {
-      BaseSandboxManager.updateConfig(cfg)
+      BaseSandboxManager.updateConfig(withMergedLiveSessionAllowedHosts(cfg))
     },
   )
 }
@@ -4567,26 +4856,48 @@ function refreshConfig(): void {
  * Reset sandbox state and clear memoized values
  */
 async function reset(): Promise<void> {
+  const hostState = getSandboxHostState()
+  hostState.worktreeMainRepoPath = undefined
+  hostState.bareGitRepoScrubPaths.length = 0
+  hostState.disabledFsDiagnostic = null
+  hostState.fsReadConfigMemo = undefined
+  resetSymlinkedDenyScrubState()
+  // densable mSb drops whole CFd (sessionAllowedHosts with it)
+  hostState.sessionAllowedHosts.clear()
+  hostState.sandboxStartedOnce = false
+  hostState.droppedRepoNetworkAllowancesLogged = false
+  hostState.hostedToolContainer = false
+  hostState.sandboxDisabledThisSession = false
+  hostState.initFailureReason = undefined
+  hostState.lastSandboxAskCallback = undefined
+  setSandboxCommandNetworkListsOffered(false)
+
+  if (hasActiveSessionAls()) {
+    const otherStartedHosts = getLiveSandboxHostStates().filter(
+      state => state !== hostState && state.sandboxStartedOnce,
+    )
+    if (otherStartedHosts.length > 0) {
+      const survivorSession = otherStartedHosts
+        .map(s => s.sessionRef?.deref())
+        .find((s): s is Session => s !== undefined)
+      if (survivorSession) {
+        runWithSession(survivorSession, () => {
+          refreshConfig()
+        })
+      }
+      return
+    }
+  }
+
   // Clean up settings subscription
   settingsSubscriptionCleanup?.()
   settingsSubscriptionCleanup = undefined
-  worktreeMainRepoPath = undefined
-  bareGitRepoScrubPaths.length = 0
-  resetSymlinkedDenyScrubState()
-  // densable mSb drops whole CFd (sessionAllowedHosts with it)
-  sessionAllowedHosts.clear()
 
   // Clear memoized caches
   checkDependencies.cache.clear?.()
   isSupportedPlatform.cache.clear?.()
   initializationPromise = undefined
-  sandboxStartedOnce = false
-  droppedRepoNetworkAllowancesLogged = false
-  hostedToolContainer = false
-  sandboxDisabledThisSession = false
-  initFailureReason = undefined
-  lastSandboxAskCallback = undefined
-  setSandboxCommandNetworkListsOffered(false)
+  proxyOwnerHostStateRef = undefined
 
   // Reset the base sandbox manager
   return BaseSandboxManager.reset()
@@ -4748,10 +5059,6 @@ export interface ISandboxManager {
  * see raw lists when package getConfig() is not yet populated; shape matches
  * densable `e.filesystem.denyRead` (no credential-file paths).
  */
-let fsReadConfigMemo:
-  | { cfg: unknown; result: FsReadRestrictionConfig }
-  | undefined
-
 function stripTrailingGlob(p: string): string {
   return p.endsWith('/**') ? p.slice(0, -3) : p
 }
@@ -4775,10 +5082,11 @@ function buildRawFsReadConfig(
 }
 
 export function clearFsReadConfigMemoForTests(): void {
-  fsReadConfigMemo = undefined
+  getSandboxHostState().fsReadConfigMemo = undefined
 }
 
 function getFsReadConfig(): FsReadRestrictionConfig {
+  const hostState = getSandboxHostState()
   const cfg = BaseSandboxManager.getConfig?.()
   if (cfg?.filesystem?.disabled) {
     return {
@@ -4787,15 +5095,16 @@ function getFsReadConfig(): FsReadRestrictionConfig {
     }
   }
   if (resolveSandboxFilesystemDisabled()) {
-    if (disabledFsDiagnostic) {
+    if (hostState.disabledFsDiagnostic) {
       return {
-        denyOnly: disabledFsDiagnostic.denyRead,
-        allowWithinDeny: disabledFsDiagnostic.allowRead,
+        denyOnly: hostState.disabledFsDiagnostic.denyRead,
+        allowWithinDeny: hostState.disabledFsDiagnostic.allowRead,
       }
     }
     // convert not yet run — densable empty until hl is set
     return getDisabledSandboxFsReadConfig()
   }
+  const fsReadConfigMemo = hostState.fsReadConfigMemo
   if (fsReadConfigMemo !== undefined && fsReadConfigMemo.cfg === cfg) {
     return fsReadConfigMemo.result
   }
@@ -4824,12 +5133,12 @@ function getFsReadConfig(): FsReadRestrictionConfig {
     ].some(p => hasGlobCharacters(stripTrailingGlob(p)))
   ) {
     const result = buildRawFsReadConfig(cfg, denyCredPaths)
-    fsReadConfigMemo = { cfg, result }
+    hostState.fsReadConfigMemo = { cfg, result }
     return result
   }
   try {
     const result = BaseSandboxManager.getFsReadConfig()
-    fsReadConfigMemo = { cfg, result }
+    hostState.fsReadConfigMemo = { cfg, result }
     return result
   } catch (err) {
     logForDebugging(
@@ -4839,7 +5148,7 @@ function getFsReadConfig(): FsReadRestrictionConfig {
       cfg,
       credFiles.map(f => f.path),
     )
-    fsReadConfigMemo = { cfg, result }
+    hostState.fsReadConfigMemo = { cfg, result }
     return result
   }
 }
@@ -4858,6 +5167,7 @@ function getFsWriteConfig(): FsWriteRestrictionConfig {
     }
   }
   if (resolveSandboxFilesystemDisabled()) {
+    const disabledFsDiagnostic = getSandboxHostState().disabledFsDiagnostic
     if (disabledFsDiagnostic) {
       return {
         allowOnly: disabledFsDiagnostic.allowWrite,

@@ -1,7 +1,7 @@
+import { AsyncLocalStorage } from 'async_hooks'
 import { execFileSync, spawn, type ChildProcess } from 'child_process'
 import { constants as fsConstants, readFileSync } from 'fs'
 import { type FileHandle, mkdir, open, realpath, stat } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { tmpdir } from 'os'
 import {
   delimiter as pathDelimiter,
@@ -12,11 +12,7 @@ import {
 } from 'path'
 import { join as posixJoin } from 'path/posix'
 import { logEvent } from 'src/services/analytics/index.js'
-import {
-  getOriginalCwd,
-  getSessionId,
-  setCwdState,
-} from '../bootstrap/state.js'
+import { getOriginalCwd, getSessionId } from '../bootstrap/state.js'
 import { generateTaskId } from '../Task.js'
 import {
   appendPluginBinPathsToPath,
@@ -32,7 +28,8 @@ import {
   checkAgentWorktreeGoneRecovery,
   resolveIsolationRoot,
 } from './bgIsolationContainment.js'
-import { getCwdOverride, pwd } from './cwd.js'
+import { getCwdOverride, pwd, setCwd as setScopedCwd } from './cwd.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode, isENOENT } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -355,7 +352,84 @@ export async function resolvePluginBinPaths(): Promise<string[]> {
   }
 }
 
-export const getPowerShellPluginBinPaths = memoize(resolvePluginBinPaths)
+type ShellHostState = {
+  shellConfigCache: Map<unknown, Promise<ShellConfig>>
+  psProviderCache: Map<unknown, Promise<ShellProvider>>
+  psPluginBinPathsCache: Map<unknown, Promise<string[]>>
+  snapshotStartedAheadAt: number | null
+  snapshotSettled: boolean
+  snapshotHeadStartSkipReason: string | null
+}
+
+const fallbackShellHost: object = {}
+
+function getActiveShellHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back to module-local sentinel if sessionHost is mocked
+  }
+  return fallbackShellHost
+}
+
+const shellHostStateByHost = new HostSlot<ShellHostState>(() => ({
+  shellConfigCache: new Map(),
+  psProviderCache: new Map(),
+  psPluginBinPathsCache: new Map(),
+  snapshotStartedAheadAt: null,
+  snapshotSettled: false,
+  snapshotHeadStartSkipReason: null,
+}))
+
+function getShellHostState(): ShellHostState {
+  return shellHostStateByHost.of(getActiveShellHost())
+}
+
+function createHostZeroArgMemo<R>(
+  compute: () => R,
+  selectCache: (state: ShellHostState) => Map<unknown, R>,
+) {
+  const fn = Object.assign(
+    (): R => {
+      const cache = selectCache(getShellHostState())
+      if (cache.has(undefined)) {
+        return cache.get(undefined)!
+      }
+      const value = compute()
+      cache.set(undefined, value)
+      return value
+    },
+    {
+      cache: new Map<unknown, R>(),
+    },
+  )
+  Object.defineProperty(fn, 'cache', {
+    configurable: true,
+    enumerable: true,
+    get(): Map<unknown, R> {
+      return selectCache(getShellHostState())
+    },
+    set(next: Map<unknown, R>): void {
+      const cache = selectCache(getShellHostState())
+      cache.clear()
+      for (const [k, v] of next) {
+        cache.set(k, v)
+      }
+    },
+  })
+  return fn
+}
+
+export const getPowerShellPluginBinPaths = createHostZeroArgMemo(
+  resolvePluginBinPaths,
+  state => state.psPluginBinPathsCache,
+)
 
 /**
  * densable `J6n` (#981): return captured shell startup exports only for
@@ -449,8 +523,12 @@ async function getShellConfigImpl(): Promise<ShellConfig> {
   return { provider }
 }
 
-// Memoize the entire shell config so it only happens once per session
-export const getShellConfig = memoize(getShellConfigImpl)
+// Memoize the entire shell config per SessionHost so concurrent hosts never share
+// mutable ShellProvider snapshot/sandbox state.
+export const getShellConfig = createHostZeroArgMemo(
+  getShellConfigImpl,
+  state => state.shellConfigCache,
+)
 
 /**
  * Official 2.1.326 #244 (`Aqs` / `l0s` @298076800):
@@ -459,9 +537,6 @@ export const getShellConfig = memoize(getShellConfigImpl)
  * Bash command consumes it, invalidate the stale snapshot and rebuild fresh.
  */
 export const SNAPSHOT_HEAD_START_MAX_AGE_MS = 20_000
-let snapshotStartedAheadAt: number | null = null
-let snapshotSettled = false
-let snapshotHeadStartSkipReason: string | null = null
 
 export type BashSnapshotHeadStartSkipReason =
   | 'switched_off'
@@ -504,23 +579,24 @@ export function startBashSnapshotHeadStart(
     isSandboxEnabled?: boolean
   },
 ): boolean {
-  if (snapshotSettled) return false
+  const state = getShellHostState()
+  if (state.snapshotSettled) return false
   const skipReason = evaluateBashSnapshotHeadStartSkip(opts)
   if (skipReason !== null) {
-    snapshotHeadStartSkipReason = skipReason
+    state.snapshotHeadStartSkipReason = skipReason
     return false
   }
-  snapshotStartedAheadAt = now()
-  snapshotHeadStartSkipReason = null
+  state.snapshotStartedAheadAt = now()
+  state.snapshotHeadStartSkipReason = null
   void getShellConfig()
     .then(() => {
-      snapshotSettled = true
+      state.snapshotSettled = true
     })
     .catch(() => {
       // Non-fatal: clear memoized rejected promise and head-start timestamp so
       // next exec() retries fresh instead of reusing a poisoned promise.
-      getShellConfig.cache.clear?.()
-      snapshotStartedAheadAt = null
+      state.shellConfigCache.clear()
+      state.snapshotStartedAheadAt = null
     })
   return true
 }
@@ -529,15 +605,16 @@ export function consumeBashSnapshotHeadStart(now: () => number = Date.now): {
   startedAhead: boolean
   discardedStale: boolean
 } {
-  const startedAt = snapshotStartedAheadAt
+  const state = getShellHostState()
+  const startedAt = state.snapshotStartedAheadAt
   if (startedAt === null) {
     return { startedAhead: false, discardedStale: false }
   }
-  snapshotStartedAheadAt = null
+  state.snapshotStartedAheadAt = null
   if (now() - startedAt > SNAPSHOT_HEAD_START_MAX_AGE_MS) {
-    snapshotHeadStartSkipReason = 'too_old'
-    snapshotSettled = false
-    getShellConfig.cache.clear?.()
+    state.snapshotHeadStartSkipReason = 'too_old'
+    state.snapshotSettled = false
+    state.shellConfigCache.clear()
     return { startedAhead: true, discardedStale: true }
   }
   return { startedAhead: true, discardedStale: false }
@@ -548,27 +625,32 @@ export function getBashSnapshotHeadStartState(): {
   snapshotSettled: boolean
   skipReason: string | null
 } {
+  const state = getShellHostState()
   return {
-    snapshotStartedAheadAt,
-    snapshotSettled,
-    skipReason: snapshotHeadStartSkipReason,
+    snapshotStartedAheadAt: state.snapshotStartedAheadAt,
+    snapshotSettled: state.snapshotSettled,
+    skipReason: state.snapshotHeadStartSkipReason,
   }
 }
 
 export function resetBashSnapshotHeadStartForTesting(): void {
-  snapshotStartedAheadAt = null
-  snapshotSettled = false
-  snapshotHeadStartSkipReason = null
-  getShellConfig.cache.clear?.()
+  const state = getShellHostState()
+  state.snapshotStartedAheadAt = null
+  state.snapshotSettled = false
+  state.snapshotHeadStartSkipReason = null
+  state.shellConfigCache.clear()
 }
 
-export const getPsProvider = memoize(async (): Promise<ShellProvider> => {
-  const psPath = await getCachedPowerShellPath()
-  if (!psPath) {
-    throw new Error('PowerShell is not available')
-  }
-  return createPowerShellProvider(psPath)
-})
+export const getPsProvider = createHostZeroArgMemo(
+  async (): Promise<ShellProvider> => {
+    const psPath = await getCachedPowerShellPath()
+    if (!psPath) {
+      throw new Error('PowerShell is not available')
+    }
+    return createPowerShellProvider(psPath)
+  },
+  state => state.psProviderCache,
+)
 
 const resolveProvider: Record<ShellType, () => Promise<ShellProvider>> = {
   bash: async () => (await getShellConfig()).provider,
@@ -639,6 +721,9 @@ export async function exec(
   } = options ?? {}
   const commandTimeout = timeout || DEFAULT_TIMEOUT
 
+  const shellHostState = getShellHostState()
+  const runInCallerContext = AsyncLocalStorage.snapshot()
+
   // Official 2.1.326 #244 (`PXe` @298077500): if a head-started snapshot is
   // older than SNAPSHOT_HEAD_START_MAX_AGE_MS (20s), discard it and rebuild.
   if (shellType === 'bash') {
@@ -647,12 +732,12 @@ export async function exec(
 
   const provider = await resolveProvider[shellType]()
   if (shellType === 'bash') {
-    snapshotSettled = true
+    shellHostState.snapshotSettled = true
   }
 
-  const id = Math.floor(Math.random() * 0x10000)
+  const id = Math.floor(Math.random() * 0x100000000)
     .toString(16)
-    .padStart(4, '0')
+    .padStart(8, '0')
 
   // Sandbox temp directory - use per-user directory name to prevent multi-user permission conflicts.
   // tmpdir() honors $TMPDIR so non-/tmp environments (Termux/Android, containers) work out of the box.
@@ -788,7 +873,7 @@ export async function exec(
     logForDebugging(
       `Shell CWD "${cwd}" no longer exists, recovering to "${recovered}"`,
     )
-    setCwdState(recovered)
+    setScopedCwd(recovered)
     // Official 2.1.325 #2267: never silently run the command in the recovered
     // launch/home directory after the working directory was deleted — fail
     // with a message so the command can be re-issued from the recovered directory.
@@ -1063,53 +1148,55 @@ export async function exec(
         ? posixPathToWindowsPath(cwdFilePath)
         : cwdFilePath
 
-    shellCommand.result = shellCommand.result.then(async result => {
-      // On Linux, bwrap creates 0-byte mount-point files on the host to deny
-      // writes to non-existent paths (.bashrc, HEAD, etc.). These persist after
-      // bwrap exits as ghost dotfiles in cwd. Cleanup is synchronous and a no-op
-      // on macOS. Keep before any await so callers awaiting .result see a clean
-      // working tree in the same microtask.
-      if (shouldUseSandbox) {
-        SandboxManager.cleanupAfterCommand()
-      }
-      // Only foreground tasks update the cwd
-      if (result && !preventCwdChanges && !result.backgroundTaskId) {
-        try {
-          let newCwd = readFileSync(nativeCwdFilePath, {
-            encoding: 'utf8',
-          }).trim()
-          if (getPlatform() === 'windows') {
-            newCwd = preserveWindowsDriveLetterCase(
-              posixPathToWindowsPath(newCwd),
-              cwd,
-            )
-          }
-          // densable lMp: reject unsafe shell cwd read-back before setCwd
-          if (!isSafeShellCwdReadBack(newCwd, cwd)) {
-            // already logged inside helper
-          } else if (newCwd.normalize('NFC') !== cwd) {
-            // cwd is NFC-normalized (setCwdState); newCwd from `pwd -P` may be
-            // NFD on macOS APFS. Normalize before comparing so Unicode paths
-            // don't false-positive as "changed" on every command.
-            setCwd(newCwd, cwd)
-            invalidateSessionEnvCache()
-            void onCwdChangedForHooks(cwd, newCwd)
-          }
-        } catch {
-          logEvent('tengu_shell_set_cwd', { success: false })
+    shellCommand.result = shellCommand.result.then(result =>
+      runInCallerContext(async () => {
+        // On Linux, bwrap creates 0-byte mount-point files on the host to deny
+        // writes to non-existent paths (.bashrc, HEAD, etc.). These persist after
+        // bwrap exits as ghost dotfiles in cwd. Cleanup is synchronous and a no-op
+        // on macOS. Keep before any await so callers awaiting .result see a clean
+        // working tree in the same microtask.
+        if (shouldUseSandbox) {
+          SandboxManager.cleanupAfterCommand()
         }
-      }
-      // densable `$0f`: if the child is still running, unlink on exit so
-      // kill/timeout/interrupt still remove `/tmp/claude-*-cwd`.
-      if (childProcess && shouldDeferCwdTrackingUnlink(childProcess)) {
-        childProcess.once('exit', () => {
-          void unlinkCwdTrackingFile(nativeCwdFilePath)
-        })
-      } else {
-        await unlinkCwdTrackingFile(nativeCwdFilePath)
-      }
-      return result
-    })
+        // Only foreground tasks update the cwd
+        if (result && !preventCwdChanges && !result.backgroundTaskId) {
+          try {
+            let newCwd = readFileSync(nativeCwdFilePath, {
+              encoding: 'utf8',
+            }).trim()
+            if (getPlatform() === 'windows') {
+              newCwd = preserveWindowsDriveLetterCase(
+                posixPathToWindowsPath(newCwd),
+                cwd,
+              )
+            }
+            // densable lMp: reject unsafe shell cwd read-back before setCwd
+            if (!isSafeShellCwdReadBack(newCwd, cwd)) {
+              // already logged inside helper
+            } else if (newCwd.normalize('NFC') !== cwd) {
+              // cwd is NFC-normalized (setCwdState); newCwd from `pwd -P` may be
+              // NFD on macOS APFS. Normalize before comparing so Unicode paths
+              // don't false-positive as "changed" on every command.
+              setCwd(newCwd, cwd)
+              invalidateSessionEnvCache()
+              void onCwdChangedForHooks(cwd, newCwd)
+            }
+          } catch {
+            logEvent('tengu_shell_set_cwd', { success: false })
+          }
+        }
+        // densable `$0f`: if the child is still running, unlink on exit so
+        // kill/timeout/interrupt still remove `/tmp/claude-*-cwd`.
+        if (childProcess && shouldDeferCwdTrackingUnlink(childProcess)) {
+          childProcess.once('exit', () => {
+            void unlinkCwdTrackingFile(nativeCwdFilePath)
+          })
+        } else {
+          await unlinkCwdTrackingFile(nativeCwdFilePath)
+        }
+        return result
+      }),
+    )
 
     return shellCommand
   } catch (error) {
@@ -1252,7 +1339,7 @@ export function setCwd(path: string, relativeTo?: string): void {
     throw e
   }
 
-  setCwdState(physicalPath)
+  setScopedCwd(physicalPath)
   if (process.env.NODE_ENV !== 'test') {
     try {
       logEvent('tengu_shell_set_cwd', {

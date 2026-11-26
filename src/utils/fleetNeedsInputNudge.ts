@@ -31,6 +31,12 @@ export {
 import { logEvent } from '../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getIsRemoteMode } from '../bootstrap/state.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 
 export type FleetNudgeSnapshot = {
   needsInput: number
@@ -303,9 +309,19 @@ class FleetNeedsInputNudgeStore {
 
   private scheduleSweep(): void {
     this.clearSweep()
+    const capturedSession = getActiveSessionFromAls()
     this.sweepTimer = setTimeout(() => {
       this.sweepTimer = null
-      void this.poll()
+      if (
+        capturedSession !== undefined &&
+        getActiveSessionFromAls() !== capturedSession
+      ) {
+        runWithSession(capturedSession, () => {
+          void this.poll()
+        })
+      } else {
+        void this.poll()
+      }
     }, this.sweepMs)
     this.sweepTimer.unref?.()
   }
@@ -319,12 +335,23 @@ class FleetNeedsInputNudgeStore {
 
   private armIgnore(): void {
     this.clearIgnore()
+    const capturedSession = getActiveSessionFromAls()
     this.ignoreTimer = setTimeout(() => {
       this.ignoreTimer = null
-      logEvent('tengu_fleet_needs_input_nudge', {
-        ignored: true,
-      })
-      this.increasedAt = 0
+      const runBody = () => {
+        logEvent('tengu_fleet_needs_input_nudge', {
+          ignored: true,
+        })
+        this.increasedAt = 0
+      }
+      if (
+        capturedSession !== undefined &&
+        getActiveSessionFromAls() !== capturedSession
+      ) {
+        runWithSession(capturedSession, runBody)
+      } else {
+        runBody()
+      }
     }, this.ignoredAfterMs)
     this.ignoreTimer.unref?.()
   }
@@ -355,16 +382,33 @@ class FleetNeedsInputNudgeStore {
   }
 }
 
-let singleton: FleetNeedsInputNudgeStore | null = null
+const fallbackFleetNudgeHost: object = {}
+const fleetNudgeSlotByHost = new HostSlot<{
+  singleton: FleetNeedsInputNudgeStore | null
+}>(() => ({ singleton: null }))
+
+function getFleetNudgeSlot(): {
+  singleton: FleetNeedsInputNudgeStore | null
+} {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return fleetNudgeSlotByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return fleetNudgeSlotByHost.of(fallbackFleetNudgeHost)
+}
 
 export function getFleetNeedsInputNudgeStore(): FleetNeedsInputNudgeStore {
-  return (singleton ??= new FleetNeedsInputNudgeStore())
+  const slot = getFleetNudgeSlot()
+  return (slot.singleton ??= new FleetNeedsInputNudgeStore())
 }
 
 /** Test helper — stop timers then drop singleton. */
 export function _resetFleetNeedsInputNudgeStoreForTests(): void {
-  singleton?._disposeForTests()
-  singleton = null
+  const slot = getFleetNudgeSlot()
+  slot.singleton?._disposeForTests()
+  slot.singleton = null
 }
 
 export function subscribeFleetNeedsInputNudge(listener: Listener): () => void {

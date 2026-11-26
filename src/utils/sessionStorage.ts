@@ -1,7 +1,16 @@
 import { feature } from 'bun:bundle'
 import { createHash, randomUUID, type UUID } from 'crypto'
 import type { Dirent } from 'fs'
-import { getSessionOnceLatches } from './sessionRoot.js'
+import {
+  getActiveSubconversationFromAls,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  isSharedBackend,
+  runWithSession,
+} from './sessionHost.js'
+import { getSessionOnceLatches, type Session } from './sessionRoot.js'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
 // imports above. Named (not wildcard) per CLAUDE.md style; no collisions
 // with the async-suffixed names.
@@ -307,14 +316,164 @@ function getEntrypoint(): string | undefined {
   return process.env.CLAUDE_CODE_ENTRYPOINT
 }
 
-let project: Project | null = null
-let cleanupRegistered = false
-let exitReStampRan = false
-const exitDrains = new Set<() => void | Promise<void>>()
+type HostSessionStorageState = {
+  hostRef?: WeakRef<object>
+  sessionRef?: WeakRef<Session>
+  lastKnownSessionId: UUID | undefined
+  lastSkipPersistence: boolean | undefined
+  cleanupUnregister: (() => void) | undefined
+  project: Project | null
+  exitReStampRan: boolean
+  exitFlushInFlight: Promise<void> | undefined
+  exitDrains: Set<() => void | Promise<void>>
+  liveBridgeSuppressionProbe: (() => boolean) | undefined
+  liveForeignBindingProbe: (() => ForeignSessionBinding | undefined) | undefined
+  leftoverAppendSerial: ReturnType<typeof leftoverSerialByPath>
+  transcriptFullDiskState: TranscriptFullDiskState
+  defaultNfsAppendFlusher: NfsAppendFlusher
+  notChainParentUuids: Set<string>
+  inFlightSidechainWrites: Map<string, Promise<void>>
+  localGcEnabledState: boolean
+  lowYieldCompactSkipEnabledState: boolean
+  toolResultCopiesOnDiskState: 'whole' | 'slim'
+  sessionMessagesCache: Map<UUID, Promise<Set<UUID>>>
+  resumeHeadWriteChains: Map<string, Promise<void>>
+}
+
+const liveHostStorageStates = new Set<WeakRef<HostSessionStorageState>>()
+
+function pruneDeadHostStorageStates(): void {
+  for (const ref of liveHostStorageStates) {
+    if (ref.deref() === undefined) {
+      liveHostStorageStates.delete(ref)
+    }
+  }
+}
+
+const hostSessionStorageSlot = new HostSlot<HostSessionStorageState>(() => {
+  const state: HostSessionStorageState = {
+    hostRef: undefined,
+    sessionRef: undefined,
+    lastKnownSessionId: undefined,
+    lastSkipPersistence: undefined,
+    cleanupUnregister: undefined,
+    project: null,
+    exitReStampRan: false,
+    exitFlushInFlight: undefined,
+    exitDrains: new Set(),
+    liveBridgeSuppressionProbe: undefined,
+    liveForeignBindingProbe: undefined,
+    leftoverAppendSerial: leftoverSerialByPath(),
+    transcriptFullDiskState: {
+      fullDiskCode: undefined,
+      fullDiskPaths: new Set<string>(),
+    },
+    defaultNfsAppendFlusher: new NfsAppendFlusher(),
+    notChainParentUuids: new Set(),
+    inFlightSidechainWrites: new Map(),
+    localGcEnabledState: false,
+    lowYieldCompactSkipEnabledState: true,
+    toolResultCopiesOnDiskState: 'whole',
+    sessionMessagesCache: new Map(),
+    resumeHeadWriteChains: new Map(),
+  }
+  if (liveHostStorageStates.size > 64) {
+    pruneDeadHostStorageStates()
+  }
+  liveHostStorageStates.add(new WeakRef(state))
+  return state
+})
+
+function refreshHostStorageSessionRef(
+  state: HostSessionStorageState,
+  host?: object,
+): void {
+  if (host && state.hostRef?.deref() !== host) {
+    state.hostRef = new WeakRef(host)
+  }
+  try {
+    const session = getBootstrapSession()
+    const rootSession = session?.root ?? session
+    const ownerHost = host ?? state.hostRef?.deref()
+    if (rootSession && (!ownerHost || rootSession.host === ownerHost)) {
+      if (state.sessionRef?.deref() !== rootSession) {
+        state.sessionRef = new WeakRef(rootSession)
+      }
+      state.lastKnownSessionId = rootSession.id as UUID
+      state.lastSkipPersistence = getPersistenceSuppressCause() !== null
+    }
+  } catch {
+    // Ignore when sessionHost is mocked in isolated unit tests
+  }
+}
+
+function getHostSessionStorageState(): HostSessionStorageState {
+  const host = getBootstrapSessionHost()
+  const state = hostSessionStorageSlot.of(host)
+  refreshHostStorageSessionRef(state, host)
+  return state
+}
+
+function collectLiveHostStorageStates(): HostSessionStorageState[] {
+  let currentState: HostSessionStorageState | undefined
+  try {
+    currentState = hostSessionStorageSlot.peek(getBootstrapSessionHost())
+  } catch {
+    currentState = undefined
+  }
+  const states: HostSessionStorageState[] = []
+  const seen = new Set<HostSessionStorageState>()
+  for (const ref of liveHostStorageStates) {
+    const state = ref.deref()
+    if (!state) {
+      liveHostStorageStates.delete(ref)
+      continue
+    }
+    if (!seen.has(state)) {
+      seen.add(state)
+      states.push(state)
+    }
+  }
+  if (currentState && !seen.has(currentState)) {
+    states.push(currentState)
+  }
+  return states
+}
+
+function runWithHostStorageSession<T>(
+  state: HostSessionStorageState,
+  fn: (hasLiveSession: boolean) => T,
+): T {
+  const targetSession = state.sessionRef?.deref()
+  if (!targetSession) {
+    // If sessionRef was previously recorded and has since been GC'd, never fall
+    // back to defaultBootstrapSession (which would stamp defaultSession.id into
+    // this host's JSONL transcript). Likewise in shared-backend mode outside ALS.
+    if (
+      state.sessionRef !== undefined ||
+      (isSharedBackend() && !hasActiveSessionAls())
+    ) {
+      return fn(false)
+    }
+    return fn(true)
+  }
+  try {
+    if (
+      getBootstrapSession() === targetSession &&
+      getActiveSubconversationFromAls() === undefined
+    ) {
+      return fn(true)
+    }
+  } catch {
+    // Fall through to runWithSession
+  }
+  return runWithSession(targetSession, () => fn(true))
+}
 
 export function registerSessionExitDrain(
   fn: () => void | Promise<void>,
 ): () => void {
+  const { exitDrains } = getHostSessionStorageState()
   exitDrains.add(fn)
   return () => {
     exitDrains.delete(fn)
@@ -338,7 +497,9 @@ export function noteTranscriptWriterDegraded(
   recordTranscriptWriteFailure(
     mappedSource,
     err,
-    filePath ?? project?.sessionFile ?? '<session-transcript>',
+    filePath ??
+      getHostSessionStorageState().project?.sessionFile ??
+      '<session-transcript>',
   )
 }
 
@@ -358,6 +519,54 @@ export function isPromptFlushTranscriptEntry(entry: Entry): boolean {
   return false
 }
 
+function syncExitReStampState(state: HostSessionStorageState): void {
+  if (state.exitReStampRan) return
+  state.exitReStampRan = true
+  runWithHostStorageSession(state, hasLiveSession => {
+    try {
+      if (hasLiveSession) {
+        state.project?.flushQueuedWritesSync()
+      } else {
+        state.project?.flushQueuedWritesSync(
+          state.lastSkipPersistence ?? false,
+          true,
+        )
+      }
+    } catch {
+      // Best-effort — don't let sync drain crash process exit
+    }
+    if (!hasLiveSession) {
+      // Owning Session was GC'd — never call reAppendSessionMetadata() under
+      // defaultBootstrapSession (which would stamp defaultSession.id into this
+      // host's JSONL).
+      return
+    }
+    try {
+      state.project?.reAppendSessionMetadata(false, true)
+    } catch {
+      // Best-effort — don't let metadata re-append crash process exit
+    }
+  })
+}
+
+function targetHostStorageStatesForExit(): HostSessionStorageState[] {
+  if (hasActiveSessionAls()) {
+    return [getHostSessionStorageState()]
+  }
+  return collectLiveHostStorageStates()
+}
+
+/**
+ * Unconditionally synchronously drain + re-stamp ALL live hosts (ignoring
+ * `hasActiveSessionAls()`), used by `process.on('exit')` so `process.exit()`
+ * triggered inside one host's ALS never leaves sibling hosts unflushed.
+ */
+export function syncExitReStampAllLiveHostStorageStates(): void {
+  for (const state of collectLiveHostStorageStates()) {
+    syncExitReStampState(state)
+  }
+}
+
 /**
  * Official XAs + 2.1.325 #2266 — synchronous exit drain + re-stamp (called both
  * from `process.on('exit')` and from `flushSessionStorageAtExit` finally,
@@ -365,63 +574,113 @@ export function isPromptFlushTranscriptEntry(entry: Entry): boolean {
  * before process exit even when shutdown was not clean.
  */
 export function syncExitReStamp(): void {
-  if (exitReStampRan) return
-  exitReStampRan = true
-  try {
-    project?.flushQueuedWritesSync()
-  } catch {
-    // Best-effort — don't let sync drain crash process exit
+  if (isSharedBackend() && !hasActiveSessionAls()) return
+  syncExitReStampAllLiveHostStorageStates()
+}
+
+async function flushHostStorageStateAtExit(
+  state: HostSessionStorageState,
+): Promise<void> {
+  if (state.exitFlushInFlight) {
+    await state.exitFlushInFlight
+    return
   }
+  const runFlush = (async () => {
+    await runWithHostStorageSession(state, async hasLiveSession => {
+      try {
+        if (state.exitDrains.size > 0) {
+          const drains = [...state.exitDrains]
+          state.exitDrains.clear()
+          await Promise.race([
+            Promise.allSettled(drains.map(fn => Promise.resolve().then(fn))),
+            new Promise<void>(resolve => setTimeout(resolve, 500)),
+          ])
+        }
+        if (hasLiveSession) {
+          await state.project?.flush()
+        } else {
+          // Owning Session was GC'd — flush raw queued writes synchronously
+          // without materializing or reading defaultBootstrapSession.
+          state.project?.flushQueuedWritesSync(
+            state.lastSkipPersistence ?? false,
+            true,
+          )
+        }
+      } catch {
+        // Best-effort flush at exit
+      } finally {
+        syncExitReStampState(state)
+        if (hasLiveSession) {
+          const degraded = getTranscriptWriterDegraded()
+          if (degraded !== null) {
+            logForDebugging(
+              `flushSessionStorageAtExit: transcript writer degraded (${degraded.code} at ${degraded.source}) — entries since the failure window may be missing from the transcript`,
+              { level: 'error' },
+            )
+          }
+        }
+      }
+    })
+  })()
+  state.exitFlushInFlight = runFlush
   try {
-    project?.reAppendSessionMetadata(false, true)
-  } catch {
-    // Best-effort — don't let metadata re-append crash process exit
+    await runFlush
+  } finally {
+    if (state.exitFlushInFlight === runFlush) {
+      state.exitFlushInFlight = undefined
+    }
   }
+}
+
+/**
+ * Unconditionally flush ALL live hosts' storage states and exit drains, even if
+ * shutdown was triggered while `hasActiveSessionAls()` is true.
+ */
+export async function flushAllLiveHostStorageStatesAtExit(): Promise<void> {
+  const states = collectLiveHostStorageStates()
+  await Promise.allSettled(
+    states.map(state => flushHostStorageStateAtExit(state)),
+  )
 }
 
 /**
  * Official f6a — async exit flush registered via `registerCleanup` and called on
  * graceful shutdown so the last messages of a session are never lost on quit.
+ * When called directly inside an active ALS host, flushes only that host; when
+ * called outside ALS in CLI mode, flushes all live hosts; in shared-backend mode
+ * outside ALS (`isSharedBackend() && !hasActiveSessionAls()`), returns early.
  */
 export async function flushSessionStorageAtExit(): Promise<void> {
-  try {
-    if (exitDrains.size > 0) {
-      await Promise.race([
-        Promise.allSettled(
-          [...exitDrains].map(fn => Promise.resolve().then(fn)),
-        ),
-        new Promise<void>(resolve => setTimeout(resolve, 500)),
-      ])
-    }
-    await project?.flush()
-  } catch {
-    // Best-effort flush at exit
-  } finally {
-    syncExitReStamp()
-    const degraded = getTranscriptWriterDegraded()
-    if (degraded !== null) {
-      logForDebugging(
-        `flushSessionStorageAtExit: transcript writer degraded (${degraded.code} at ${degraded.source}) — entries since the failure window may be missing from the transcript`,
-        { level: 'error' },
-      )
-    }
-  }
+  if (isSharedBackend() && !hasActiveSessionAls()) return
+  const states = targetHostStorageStatesForExit()
+  await Promise.allSettled(
+    states.map(state => flushHostStorageStateAtExit(state)),
+  )
 }
 
 export function getProject(): Project {
-  if (!project) {
-    project = new Project()
+  const state = getHostSessionStorageState()
+  if (!state.project) {
+    state.project = new Project(state)
 
-    // Register flush as a cleanup handler (only once)
-    if (!cleanupRegistered) {
-      registerCleanup(flushSessionStorageAtExit)
-      if (!process.listeners('exit').includes(syncExitReStamp)) {
-        process.on('exit', syncExitReStamp)
-      }
-      cleanupRegistered = true
+    // Register ONLY the per-host weak cleanup into cleanupRegistry for BOTH
+    // default and isolated hosts. On out-of-ALS process shutdown,
+    // cleanupRegistry.runCleanupFunctions() already iterates and drains every
+    // live host — registering a global sweep on the default host would double-
+    // execute isolated hosts' exitDrains!
+    if (!state.cleanupUnregister) {
+      const stateRef = new WeakRef(state)
+      state.cleanupUnregister = registerCleanup(async () => {
+        const liveState = stateRef.deref()
+        if (!liveState) return
+        await flushHostStorageStateAtExit(liveState)
+      })
+    }
+    if (!process.listeners('exit').includes(syncExitReStamp)) {
+      process.on('exit', syncExitReStamp)
     }
   }
-  return project
+  return state.project
 }
 
 /**
@@ -429,8 +688,10 @@ export function getProject(): Project {
  * This ensures tests don't interfere with each other via shared counter state.
  */
 export function resetProjectFlushStateForTesting(): void {
-  project?._resetFlushState()
-  exitReStampRan = false
+  const state = getHostSessionStorageState()
+  state.project?._resetFlushState()
+  state.exitReStampRan = false
+  state.exitFlushInFlight = undefined
   resetTranscriptWriterHealthForTest()
 }
 
@@ -440,8 +701,12 @@ export function resetProjectFlushStateForTesting(): void {
  * don't share stale sessionFile paths.
  */
 export function resetProjectForTesting(): void {
-  project = null
-  exitReStampRan = false
+  const state = getHostSessionStorageState()
+  state.cleanupUnregister?.()
+  state.cleanupUnregister = undefined
+  state.project = null
+  state.exitReStampRan = false
+  state.exitFlushInFlight = undefined
   resetTranscriptWriterHealthForTest()
 }
 
@@ -477,18 +742,16 @@ type InternalEventWriter = (
  * isCompactPairWithheldFromRemote so mid-session compact pairs are not
  * re-uploaded to CCR when the remote session was minted without prior history.
  */
-let liveBridgeSuppressionProbe: (() => boolean) | undefined
-
 /** densable qCt — register (or clear with undefined) the live suppression probe. */
 export function registerLiveSuppressionProbe(
   probe: (() => boolean) | undefined,
 ): void {
-  liveBridgeSuppressionProbe = probe
+  getHostSessionStorageState().liveBridgeSuppressionProbe = probe
 }
 
 /** densable Dtf — true when the live probe reports history-backfill suppression. */
 export function isLiveBridgeSuppressed(): boolean {
-  return liveBridgeSuppressionProbe?.() === true
+  return getHostSessionStorageState().liveBridgeSuppressionProbe?.() === true
 }
 
 /**
@@ -501,20 +764,16 @@ export type ForeignSessionBinding = {
   boundSid?: string
 }
 
-let liveForeignBindingProbe:
-  | (() => ForeignSessionBinding | undefined)
-  | undefined
-
 /** leftover host hook matching official optional eQe. */
 export function registerForeignSessionBindingProbe(
   probe: (() => ForeignSessionBinding | undefined) | undefined,
 ): void {
-  liveForeignBindingProbe = probe
+  getHostSessionStorageState().liveForeignBindingProbe = probe
 }
 
 /** densable eQe?.() */
 export function getForeignSessionBinding(): ForeignSessionBinding | undefined {
-  return liveForeignBindingProbe?.()
+  return getHostSessionStorageState().liveForeignBindingProbe?.()
 }
 
 /** densable t9s / He */
@@ -1137,8 +1396,6 @@ function leftoverSerialByPath(): {
   }
 }
 
-const leftoverAppendSerial = leftoverSerialByPath()
-
 // Limit the number of cached session-file lookups to prevent unbounded Map growth
 // in long-running daemon / swarm sessions that spawn many sub-agents.
 const MAX_CACHED_SESSION_FILES = 200
@@ -1165,11 +1422,6 @@ export type TranscriptFullDiskState = {
   fullDiskPaths: Set<string>
 }
 
-const transcriptFullDiskState: TranscriptFullDiskState = {
-  fullDiskCode: undefined,
-  fullDiskPaths: new Set<string>(),
-}
-
 export function isFullDiskError(
   err: unknown,
 ): TranscriptFullDiskCode | undefined {
@@ -1186,6 +1438,7 @@ export function recordTranscriptFullDiskError(
 ): TranscriptFullDiskCode | undefined {
   const code = isFullDiskError(err)
   if (code === undefined) return undefined
+  const { transcriptFullDiskState } = getHostSessionStorageState()
   if (transcriptFullDiskState.fullDiskCode === undefined || code === 'EDQUOT') {
     transcriptFullDiskState.fullDiskCode = code
   }
@@ -1196,10 +1449,11 @@ export function recordTranscriptFullDiskError(
 }
 
 export function getTranscriptFullDiskState(): TranscriptFullDiskState {
-  return transcriptFullDiskState
+  return getHostSessionStorageState().transcriptFullDiskState
 }
 
 export function resetTranscriptFullDiskState(): void {
+  const { transcriptFullDiskState } = getHostSessionStorageState()
   transcriptFullDiskState.fullDiskCode = undefined
   transcriptFullDiskState.fullDiskPaths.clear()
 }
@@ -1305,8 +1559,6 @@ export class NfsAppendFlusher {
   }
 }
 
-const defaultNfsAppendFlusher = new NfsAppendFlusher()
-
 /**
  * #1912 / official `VYt` — append with `handle.sync()` when on Linux NFS so
  * delayed NFS quota/full-disk errors (`ENOSPC`/`EDQUOT`) are surfaced.
@@ -1314,7 +1566,8 @@ const defaultNfsAppendFlusher = new NfsAppendFlusher()
 export async function appendAndSyncOnNfs(
   filePath: string,
   data: string,
-  flusher: NfsAppendFlusher = defaultNfsAppendFlusher,
+  flusher: NfsAppendFlusher = getHostSessionStorageState()
+    .defaultNfsAppendFlusher,
 ): Promise<boolean> {
   const shouldFlush = await flusher.flushesAppendsIn(dirname(filePath))
   if (!shouldFlush) {
@@ -1453,8 +1706,13 @@ class Project {
   private minCompactFileBytes = TRANSCRIPT_COMPACT_MIN_BYTES
   /** densable Project.mirrors — SessionStore transcript_mirror callbacks. */
   private mirrors: Array<(filePath: string, entries: Entry[]) => void> = []
+  private readonly hostState: HostSessionStorageState
 
-  constructor() {}
+  constructor(
+    hostState: HostSessionStorageState = getHostSessionStorageState(),
+  ) {
+    this.hostState = hostState
+  }
 
   /** @internal Reset flush/queue state for testing. */
   _resetFlushState(): void {
@@ -1518,6 +1776,7 @@ class Project {
   }
 
   private enqueueWrite(filePath: string, entry: Entry): Promise<void> {
+    refreshHostStorageSessionRef(this.hostState)
     return new Promise<void>(resolve => {
       let queue = this.writeQueues.get(filePath)
       if (!queue) {
@@ -1565,8 +1824,15 @@ class Project {
    * `writeQueues` during `process.on('exit')` so an unclean exit (e.g.
    * direct `process.exit()` without awaiting async flush) does not drop them.
    */
-  flushQueuedWritesSync(): void {
-    if (this.shouldSkipPersistence() || this.writeQueues.size === 0) {
+  flushQueuedWritesSync(
+    skipPersistenceOverride?: boolean,
+    skipHealthReporting = false,
+  ): void {
+    const skipPersistence =
+      skipPersistenceOverride !== undefined
+        ? skipPersistenceOverride
+        : this.shouldSkipPersistence()
+    if (skipPersistence || this.writeQueues.size === 0) {
       return
     }
     if (this.flushTimer) {
@@ -1586,10 +1852,14 @@ class Project {
           if (filePath === this.sessionFile) {
             this.bytesSinceCompact += Buffer.byteLength(content, 'utf8')
           }
-          recordTranscriptWriteSuccess(filePath)
+          if (!skipHealthReporting) {
+            recordTranscriptWriteSuccess(filePath)
+          }
         } catch (err) {
-          recordTranscriptFullDiskError(err, filePath)
-          recordTranscriptWriteFailure('drain', err, filePath)
+          if (!skipHealthReporting) {
+            recordTranscriptFullDiskError(err, filePath)
+            recordTranscriptWriteFailure('drain', err, filePath)
+          }
         }
       }
       for (const { resolve } of batch) {
@@ -1617,6 +1887,7 @@ class Project {
 
   private async appendToFile(filePath: string, data: string): Promise<void> {
     try {
+      const { leftoverAppendSerial } = this.hostState
       // densable drain pye third arg is storageV5 (hover-rest backend).
       await leftoverAppendSerial.run(filePath, async () => {
         const pinnedV5 = getPinnedStorageV5()
@@ -2166,6 +2437,7 @@ class Project {
       })
       await this.drainWriteQueue()
     }
+    const { leftoverAppendSerial } = this.hostState
     await leftoverAppendSerial.settle()
   }
 
@@ -2475,6 +2747,7 @@ class Project {
   }
 
   async appendEntry(entry: Entry, sessionId: UUID = getSessionId() as UUID) {
+    refreshHostStorageSessionRef(this.hostState)
     if (this.shouldSkipPersistence()) {
       return
     }
@@ -2641,7 +2914,7 @@ class Project {
           // when disk toolResult copies mode is 'slim', strip duplicated
           // toolUseResult payloads before enqueuing the local transcript write.
           let entryToWrite: TranscriptMessage = entry
-          if (toolResultCopiesOnDiskState === 'slim') {
+          if (this.hostState.toolResultCopiesOnDiskState === 'slim') {
             this.appendToolUseWindow ??= new ToolUseNameWindow()
             entryToWrite = slimToolUseResultForResume(
               entry,
@@ -2973,10 +3246,10 @@ export type TeamInfo = {
  * messages that were not resumed, or out-of-order reordered transcript rows.
  */
 const MAX_NOT_CHAIN_PARENT_UUIDS = 4096
-const notChainParentUuids = new Set<string>()
 
 export function markNotChainParent(uuid: string): void {
   if (!uuid) return
+  const { notChainParentUuids } = getHostSessionStorageState()
   notChainParentUuids.delete(uuid)
   notChainParentUuids.add(uuid)
   if (notChainParentUuids.size > MAX_NOT_CHAIN_PARENT_UUIDS) {
@@ -2986,12 +3259,15 @@ export function markNotChainParent(uuid: string): void {
 }
 
 export function isNotChainParent(uuid: string | undefined): boolean {
-  return typeof uuid === 'string' && notChainParentUuids.has(uuid)
+  return (
+    typeof uuid === 'string' &&
+    getHostSessionStorageState().notChainParentUuids.has(uuid)
+  )
 }
 
 /** @internal Clear notChainParent registry between tests. */
 export function clearNotChainParentForTests(): void {
-  notChainParentUuids.clear()
+  getHostSessionStorageState().notChainParentUuids.clear()
 }
 
 /**
@@ -3245,11 +3521,9 @@ export async function recordTranscript(
   return (lastRecorded?.uuid as UUID | undefined) ?? startingParentUuid ?? null
 }
 
-// In-flight sidechain transcript writes keyed by agentId so `getAgentTranscript`
-// (official 2.1.331 `bde` / `_td` @316271011) awaits pending writes before
-// reading `agent-<id>.jsonl` instead of racing ENOENT right after spawn.
-const inFlightSidechainWrites = new Map<string, Promise<void>>()
-
+// In-flight sidechain transcript writes keyed by agentId on each host so
+// `getAgentTranscript` (official 2.1.331 `bde` / `_td` @316271011) awaits
+// pending writes before reading `agent-<id>.jsonl` instead of racing ENOENT.
 async function awaitWithOptionalAbort(
   promise: Promise<void>,
   signal?: AbortSignal,
@@ -3280,6 +3554,7 @@ export async function recordSidechainTranscript(
   agentId?: string,
   startingParentUuid?: UUID | null,
 ) {
+  const { inFlightSidechainWrites } = getHostSessionStorageState()
   const work = getProject().insertMessageChain(
     cleanMessagesForLogging(messages),
     true,
@@ -3327,7 +3602,7 @@ export async function removeTranscriptMessageIfPersisted(
     return
   }
   await getProject().removeMessageByUuid(targetUuid)
-  const cached = sessionMessagesCache.get(sessionId)
+  const cached = getSessionMessagesCache().get(sessionId)
   if (cached !== undefined) {
     void cached.then(set => set.delete(targetUuid))
   }
@@ -3494,6 +3769,7 @@ async function setAsideExistingTranscript(
 export async function relocateSessionTranscript(): Promise<void> {
   const sessionId = getSessionId()
   const targetProjectDir = getProjectDir(getOriginalCwd())
+  const { leftoverAppendSerial } = getHostSessionStorageState()
   const project = getProject()
   const currentFile = project.sessionFile
 
@@ -3736,26 +4012,35 @@ export async function flushSessionStorage(): Promise<void> {
   await getProject().flush()
 }
 
+/**
+ * Flush the active host's `Project` ONLY if one has already been initialized
+ * (without lazily instantiating `new Project` on sessions that never persisted
+ * anything).
+ */
+export async function flushSessionStorageIfInitialized(): Promise<void> {
+  const state = hostSessionStorageSlot.peek(getBootstrapSessionHost())
+  if (!state || state.project === null) {
+    return
+  }
+  await state.project.flush()
+}
+
 // ── Official CLAUDE_CODE_TRANSCRIPT_LOCAL_GC (#530, #543, #968) ──────────────
 const TRANSCRIPT_COMPACT_MIN_BYTES = 5_242_880 // SEA L9i (5 MiB)
 const TRANSCRIPT_COMPACT_BACKSTOP_BYTES = 20_971_520 // SEA O4 (20 MiB)
 const LOW_YIELD_COMPACT_RATIO = 0.1
-let localGcEnabledState = false
-// Official 2.1.328 (`chunk@294254613.js @505802`): lowYieldCompactSkipEnabled defaults to true.
-let lowYieldCompactSkipEnabledState = true
-// Official 2.1.328 (`chunk@294254613.js @505802`): toolResultCopiesOnDisk defaults to 'whole'.
-let toolResultCopiesOnDiskState: 'whole' | 'slim' = 'whole'
 
 export function setToolResultCopiesOnDisk(mode: 'whole' | 'slim'): void {
-  toolResultCopiesOnDiskState = mode
-  if (project) {
-    project.appendToolUseWindow =
+  const state = getHostSessionStorageState()
+  state.toolResultCopiesOnDiskState = mode
+  if (state.project) {
+    state.project.appendToolUseWindow =
       mode === 'slim' ? new ToolUseNameWindow() : undefined
   }
 }
 
 export function getToolResultCopiesOnDisk(): 'whole' | 'slim' {
-  return toolResultCopiesOnDiskState
+  return getHostSessionStorageState().toolResultCopiesOnDiskState
 }
 
 /**
@@ -3767,7 +4052,10 @@ export function slimEntriesForResumeHydration<T extends TranscriptMessage>(
   entries: readonly T[],
   opts?: { force?: boolean },
 ): T[] {
-  if (!opts?.force && toolResultCopiesOnDiskState !== 'slim') {
+  if (
+    !opts?.force &&
+    getHostSessionStorageState().toolResultCopiesOnDiskState !== 'slim'
+  ) {
     return entries as T[]
   }
   const window = new ToolUseNameWindow()
@@ -4071,22 +4359,22 @@ function defaultTranscriptGcKeepLine(line: string): boolean {
 }
 
 export function setLocalGcEnabled(enabled: boolean): void {
-  localGcEnabledState = enabled
+  getHostSessionStorageState().localGcEnabledState = enabled
 }
 
 export function isLocalGcEnabled(): boolean {
   return (
-    localGcEnabledState ||
+    getHostSessionStorageState().localGcEnabledState ||
     isEnvTruthy(process.env.CLAUDE_CODE_TRANSCRIPT_LOCAL_GC)
   )
 }
 
 export function setLowYieldCompactSkipEnabled(enabled: boolean): void {
-  lowYieldCompactSkipEnabledState = enabled
+  getHostSessionStorageState().lowYieldCompactSkipEnabledState = enabled
 }
 
 export function isLowYieldCompactSkipEnabled(): boolean {
-  return lowYieldCompactSkipEnabledState
+  return getHostSessionStorageState().lowYieldCompactSkipEnabledState
 }
 
 /**
@@ -4107,7 +4395,8 @@ export function shouldSkipLowYieldCompact(
   bytesBefore: number,
   reclaimableBytes: number,
 ): boolean {
-  if (!lowYieldCompactSkipEnabledState) return false
+  if (!getHostSessionStorageState().lowYieldCompactSkipEnabledState)
+    return false
   if (!isLowYieldCompact(bytesBefore, reclaimableBytes)) return false
   logEvent('tengu_transcript_compact_skipped', {
     bytesBefore,
@@ -8690,6 +8979,7 @@ function leftoverAppendEntryToFileAsync(
       ? jsonStringify(opts.tornTailEntry) + '\n'
       : undefined
   // densable KC does not call WDr; leftoverPye reads tornTailSealPending.
+  const { leftoverAppendSerial } = getHostSessionStorageState()
   const job = leftoverAppendSerial.run(filePath, async () => {
     const result = await leftoverPye(
       filePath,
@@ -10061,7 +10351,7 @@ export async function loadTranscriptFile(
     const progressBridge = new Map<UUID, UUID | null>()
     const hydrateToolUseWindow =
       opts?.slimToolUseResults === true ||
-      toolResultCopiesOnDiskState === 'slim'
+      getHostSessionStorageState().toolResultCopiesOnDiskState === 'slim'
         ? new ToolUseNameWindow()
         : undefined
 
@@ -10501,17 +10791,8 @@ async function loadSessionFile(
 }
 
 /**
- * Bounded cache for {@link getSessionMessages}. Bounded at
- * {@link MAX_CACHED_SESSION_FILES} to prevent unbounded Map growth in
- * long-running daemon / swarm sessions that spawn many agents — mirrors
- * the existingSessionFiles pattern above. Entries are evicted in FIFO
- * order via `Map` insertion order.
- */
-const sessionMessagesCache = new Map<UUID, Promise<Set<UUID>>>()
-
-/**
  * Gets message UUIDs for a specific session without loading all sessions.
- * Cached (bounded) to avoid re-reading the same session file multiple
+ * Cached (bounded per host) to avoid re-reading the same session file multiple
  * times. Concurrent calls for the same `sessionId` share one in-flight
  * load promise.
  *
@@ -10519,6 +10800,7 @@ const sessionMessagesCache = new Map<UUID, Promise<Set<UUID>>>()
  * intended as a public API — prefer {@link doesMessageExistInSession}.
  */
 export async function getSessionMessages(sessionId: UUID): Promise<Set<UUID>> {
+  const sessionMessagesCache = getHostSessionStorageState().sessionMessagesCache
   const existing = sessionMessagesCache.get(sessionId)
   if (existing !== undefined) {
     return existing
@@ -10552,7 +10834,7 @@ export async function getSessionMessages(sessionId: UUID): Promise<Set<UUID>> {
 
 /** Underlying cache for direct manipulation (priming, clearing, tests). */
 export function getSessionMessagesCache(): Map<UUID, Promise<Set<UUID>>> {
-  return sessionMessagesCache
+  return getHostSessionStorageState().sessionMessagesCache
 }
 
 /**
@@ -10560,7 +10842,7 @@ export function getSessionMessagesCache(): Map<UUID, Promise<Set<UUID>>> {
  * Call after compaction when old message UUIDs are no longer valid.
  */
 export function clearSessionMessagesCache(): void {
-  sessionMessagesCache.clear()
+  getHostSessionStorageState().sessionMessagesCache.clear()
 }
 
 /**
@@ -10975,15 +11257,16 @@ export async function getAgentTranscript(
   // Official 2.1.331 `bde` / `_td` (@316271011): settle in-flight sidechain
   // writes and flush queued writes for this file before reading disk so
   // entering a newly spawned subagent's view never races ENOENT.
-  const pendingWrite = inFlightSidechainWrites.get(agentId)
+  const hostState = getHostSessionStorageState()
+  const pendingWrite = hostState.inFlightSidechainWrites.get(agentId)
   if (pendingWrite) {
     await awaitWithOptionalAbort(pendingWrite, signal)
     if (signal?.aborted) {
       return null
     }
   }
-  if (project?.hasPendingWritesForFile(agentFile)) {
-    await awaitWithOptionalAbort(project.flush(), signal)
+  if (hostState.project?.hasPendingWritesForFile(agentFile)) {
+    await awaitWithOptionalAbort(hostState.project.flush(), signal)
     if (signal?.aborted) {
       return null
     }
@@ -12671,8 +12954,6 @@ export async function tryLoadResumeHeadRows(
   }
 }
 
-const resumeHeadWriteChains = new Map<string, Promise<void>>()
-
 /**
  * Official 2.1.328 `Nmr` / `Lmr` (`chunk@294254613.js @420598`):
  * Write or remove `<projectDir>/<sessionId>/resume-head.jsonl` using
@@ -12716,6 +12997,7 @@ export function scheduleWriteResumeHead(
   head: ResumeHeadData | null,
   tableKey = 'v1',
 ): Promise<void> {
+  const { resumeHeadWriteChains } = getHostSessionStorageState()
   const prev = resumeHeadWriteChains.get(headPath) ?? Promise.resolve()
   const next = prev
     .catch(() => {})

@@ -5,23 +5,39 @@
  * new recording sessions are suppressed until one succeeds (transcript arrives).
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
+
 /** Official eQp: rolling window for early failures (ms). */
 export const VOICE_CIRCUIT_WINDOW_MS = 10_000
 /** Official tQp: failures within the window that trip the breaker. */
 export const VOICE_CIRCUIT_FAILURE_THRESHOLD = 3
 
-const failureTimestamps: number[] = []
-let tripLogged = false
+type VoiceCircuitBreakerHostState = {
+  failureTimestamps: number[]
+  tripLogged: boolean
+}
+
+const voiceCircuitBreakerHostSlot = new HostSlot<VoiceCircuitBreakerHostState>(
+  () => ({
+    failureTimestamps: [],
+    tripLogged: false,
+  }),
+)
+
+function getVoiceCircuitBreakerState(): VoiceCircuitBreakerHostState {
+  return voiceCircuitBreakerHostSlot.of(getBootstrapSessionHost())
+}
 
 /** Official Dpn: record an early session failure. */
 export function recordVoiceEarlyFailure(now = Date.now()): void {
-  failureTimestamps.push(now)
+  getVoiceCircuitBreakerState().failureTimestamps.push(now)
 }
 
 /** Official rgb: clear failures after a successful transcript. */
 export function resetVoiceCircuitBreaker(): void {
-  failureTimestamps.length = 0
-  tripLogged = false
+  const state = getVoiceCircuitBreakerState()
+  state.failureTimestamps.length = 0
+  state.tripLogged = false
 }
 
 export type VoiceCircuitGate =
@@ -39,6 +55,8 @@ export type VoiceCircuitGate =
  * Matches official startRecordingSession gate at the top of `ie()`.
  */
 export function checkVoiceCircuitBreaker(now = Date.now()): VoiceCircuitGate {
+  const state = getVoiceCircuitBreakerState()
+  const { failureTimestamps } = state
   while (
     failureTimestamps.length > 0 &&
     now - (failureTimestamps[0] ?? 0) > VOICE_CIRCUIT_WINDOW_MS
@@ -46,11 +64,11 @@ export function checkVoiceCircuitBreaker(now = Date.now()): VoiceCircuitGate {
     failureTimestamps.shift()
   }
   if (failureTimestamps.length < VOICE_CIRCUIT_FAILURE_THRESHOLD) {
-    tripLogged = false
+    state.tripLogged = false
   }
   if (failureTimestamps.length >= VOICE_CIRCUIT_FAILURE_THRESHOLD) {
-    const firstTrip = !tripLogged
-    if (firstTrip) tripLogged = true
+    const firstTrip = !state.tripLogged
+    if (firstTrip) state.tripLogged = true
     return {
       open: false,
       firstTrip,
@@ -66,5 +84,9 @@ export function getVoiceCircuitBreakerStateForTests(): {
   failures: number[]
   tripLogged: boolean
 } {
-  return { failures: [...failureTimestamps], tripLogged }
+  const state = getVoiceCircuitBreakerState()
+  return {
+    failures: [...state.failureTimestamps],
+    tripLogged: state.tripLogged,
+  }
 }

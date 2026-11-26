@@ -1,3 +1,4 @@
+import { InkSessionSlot } from '../instances.js'
 import { stringWidth } from '../stringWidth.js'
 import { wrapAnsi } from '../wrapAnsi.js'
 import {
@@ -8,60 +9,74 @@ import {
 
 /**
  * Kill ring for storing killed (cut) text that can be yanked (pasted) with Ctrl+Y.
- * This is global state that shares one kill ring across all input fields.
+ * Scoped per root session so all input fields within a session share one kill
+ * ring while concurrent hosts/sessions stay isolated.
  *
  * Consecutive kills accumulate in the kill ring until the user types some
  * other key. Alt+Y cycles through previous kills after a yank.
  */
 const KILL_RING_MAX_SIZE = 10
-let killRing: string[] = []
-let killRingIndex = 0
-let lastActionWasKill = false
 
-// Track yank state for yank-pop (alt-y)
-let lastYankStart = 0
-let lastYankLength = 0
-let lastActionWasYank = false
+type KillRingSessionState = {
+  killRing: string[]
+  killRingIndex: number
+  lastActionWasKill: boolean
+  lastYankStart: number
+  lastYankLength: number
+  lastActionWasYank: boolean
+}
+
+const killRingSessionSlot = new InkSessionSlot<KillRingSessionState>(() => ({
+  killRing: [],
+  killRingIndex: 0,
+  lastActionWasKill: false,
+  lastYankStart: 0,
+  lastYankLength: 0,
+  lastActionWasYank: false,
+}))
 
 export function pushToKillRing(
   text: string,
   direction: 'prepend' | 'append' = 'append',
 ): void {
   if (text.length > 0) {
-    if (lastActionWasKill && killRing.length > 0) {
+    const state = killRingSessionSlot.of()
+    if (state.lastActionWasKill && state.killRing.length > 0) {
       // Accumulate with the most recent kill
       if (direction === 'prepend') {
-        killRing[0] = text + killRing[0]
+        state.killRing[0] = text + state.killRing[0]
       } else {
-        killRing[0] = killRing[0] + text
+        state.killRing[0] = state.killRing[0] + text
       }
     } else {
       // Add new entry to front of ring
-      killRing.unshift(text)
-      if (killRing.length > KILL_RING_MAX_SIZE) {
-        killRing.pop()
+      state.killRing.unshift(text)
+      if (state.killRing.length > KILL_RING_MAX_SIZE) {
+        state.killRing.pop()
       }
     }
-    lastActionWasKill = true
+    state.lastActionWasKill = true
     // Reset yank state when killing new text
-    lastActionWasYank = false
+    state.lastActionWasYank = false
   }
 }
 
 export function getLastKill(): string {
-  return killRing[0] ?? ''
+  return killRingSessionSlot.peek()?.killRing[0] ?? ''
 }
 
 export function resetKillAccumulation(): void {
-  lastActionWasKill = false
+  const state = killRingSessionSlot.peek()
+  if (state) state.lastActionWasKill = false
 }
 
 // Yank tracking for yank-pop
 export function recordYank(start: number, length: number): void {
-  lastYankStart = start
-  lastYankLength = length
-  lastActionWasYank = true
-  killRingIndex = 0
+  const state = killRingSessionSlot.of()
+  state.lastYankStart = start
+  state.lastYankLength = length
+  state.lastActionWasYank = true
+  state.killRingIndex = 0
 }
 
 export function yankPop(): {
@@ -69,21 +84,24 @@ export function yankPop(): {
   start: number
   length: number
 } | null {
-  if (!lastActionWasYank || killRing.length <= 1) {
+  const state = killRingSessionSlot.peek()
+  if (!state || !state.lastActionWasYank || state.killRing.length <= 1) {
     return null
   }
   // Cycle to next item in kill ring
-  killRingIndex = (killRingIndex + 1) % killRing.length
-  const text = killRing[killRingIndex] ?? ''
-  return { text, start: lastYankStart, length: lastYankLength }
+  state.killRingIndex = (state.killRingIndex + 1) % state.killRing.length
+  const text = state.killRing[state.killRingIndex] ?? ''
+  return { text, start: state.lastYankStart, length: state.lastYankLength }
 }
 
 export function updateYankLength(length: number): void {
-  lastYankLength = length
+  const state = killRingSessionSlot.peek()
+  if (state) state.lastYankLength = length
 }
 
 export function resetYankState(): void {
-  lastActionWasYank = false
+  const state = killRingSessionSlot.peek()
+  if (state) state.lastActionWasYank = false
 }
 
 /**

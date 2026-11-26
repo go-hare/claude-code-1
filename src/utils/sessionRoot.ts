@@ -6,6 +6,25 @@ import { createHash } from 'crypto'
 import { realpathSync } from 'fs'
 import { cwd } from 'process'
 import { randomUUID } from './crypto.js'
+import { HostSlot, RootSessionSlot } from './hostSlot.js'
+import {
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getActiveSubconversationFromAls,
+  getSessionAlsStore,
+  hasActiveSessionAls,
+  isSharedBackend,
+  type NewHostSessionOptions,
+  type RootSessionAlsContext,
+  runWithNewHostSession,
+  runWithSession,
+  runWithSubconversationContext,
+  type SessionAlsContext,
+  sessionContextAls,
+  setSharedBackendMode,
+  type SubconversationAlsContext,
+  type SubconversationStickyBetas,
+} from './sessionContextAls.js'
 import { createSessionHost, type SessionHost } from './sessionHost.js'
 import {
   AutonomousLoopPreamble,
@@ -13,6 +32,7 @@ import {
   CcrRecap,
   ConversationLatches,
   CostLedger,
+  EngineStore,
   FableConsentSlots,
   HookRegistry,
   InvokedSkills,
@@ -28,8 +48,8 @@ import {
   SessionFlags,
   SessionIdentity,
   SessionObservers,
-  SessionRefsGate,
   SessionOnceLatches,
+  SessionRefsGate,
   SessionScratch,
   SurfaceCapabilities,
   ToolProgressThrottle,
@@ -38,7 +58,29 @@ import {
   WorkflowUsageConsent,
   WritePermissionStash,
 } from './sessionSlots.js'
-import { createSignal } from './signal.js'
+import { createSignal, type Signal } from './signal.js'
+
+export {
+  EngineStore,
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getActiveSubconversationFromAls,
+  getSessionAlsStore,
+  hasActiveSessionAls,
+  HostSlot,
+  isSharedBackend,
+  type NewHostSessionOptions,
+  type RootSessionAlsContext,
+  RootSessionSlot,
+  runWithNewHostSession,
+  runWithSession,
+  runWithSubconversationContext,
+  type SessionAlsContext,
+  sessionContextAls,
+  setSharedBackendMode,
+  type SubconversationAlsContext,
+  type SubconversationStickyBetas,
+}
 
 function nfcPath(e: string): string {
   return e.normalize('NFC')
@@ -138,6 +180,7 @@ export type Session = {
   ccrRecap: CcrRecap
   conversationLatches: ConversationLatches
   costLedger: CostLedger
+  engineStore: EngineStore
   fableConsentSlots: FableConsentSlots
   hookRegistry: HookRegistry
   identity: SessionIdentity
@@ -238,6 +281,7 @@ export function bindSession(
         ? e.root.conversationLatches
         : new ConversationLatches(),
     costLedger: e.kind === 'fork' ? e.root.costLedger : new CostLedger(),
+    engineStore: e.kind === 'fork' ? e.root.engineStore : new EngineStore(),
     fableConsentSlots:
       e.kind === 'fork' ? e.root.fableConsentSlots : new FableConsentSlots(),
     hookRegistry: e.kind === 'fork' ? e.root.hookRegistry : new HookRegistry(),
@@ -414,46 +458,87 @@ export function createBootstrapSession(): Session {
   })
 }
 
+export type SessionContextReader = () => SessionAlsContext | undefined
+
+function sessionContextReaderSlot(): {
+  reader: SessionContextReader | undefined
+} {
+  const holder = sessionContextReaderSlot as unknown as {
+    slot?: { reader: SessionContextReader | undefined }
+  }
+  return (holder.slot ??= { reader: undefined })
+}
+
+/**
+ * Official 2.1.331 `Ayd` (`setSessionOverridesGetter`):
+ * `var b; function Ayd(e){b=e}`
+ */
+export function registerSessionContextReader(
+  reader: SessionContextReader | undefined,
+): void {
+  sessionContextReaderSlot().reader = reader
+}
+
+export const setSessionOverridesGetter = registerSessionContextReader
+
 let bootstrapSession: Session | undefined
 
-/** Official n() @178548576 `function n(){return C()?.session??v}` — leftover C() empty. */
-export function getBootstrapSession(): Session {
+function getDefaultBootstrapSession(): Session {
   return (bootstrapSession ??= createBootstrapSession())
 }
 
-/** Official k.host */
+/**
+ * Official n() @178548576 `function n(){return C()?.session??v}`.
+ * Official 2.1.331: `function N(){return n()} function n(){return b?.()?.session??y}`.
+ */
+export function getBootstrapSession(): Session {
+  const sessionContextReader = sessionContextReaderSlot().reader
+  return (
+    sessionContextReader?.()?.session ??
+    (bootstrapSession ??= createBootstrapSession())
+  )
+}
+
+/** Official k.host / n().host */
 export function getBootstrapSessionHost(): SessionHost {
   return getBootstrapSession().host
 }
 
 /**
- * densable `Ln` — WeakMap keyed on `session.root`.
- * Gold: `of(e){let t=e.root,o=this.#t.get(t);if(o!==void 0)return o;let r=this.#e();return this.#t.set(t,r),r}`
+ * Official 2.1.331 `Do(e)` (`function Do(e){return e.of(y.host)}`):
+ * Resolves a `HostSlot` against the process-default bootstrap `SessionHost`.
  */
-class RootKeyedBag<T extends object> {
-  #e: () => T
-  #t = new WeakMap<object, T>()
-  constructor(e: () => T) {
-    this.#e = e
-  }
-  peek(e: { root: object }): T | undefined {
-    return this.#t.get(e.root)
-  }
-  of(e: { root: object }): T {
-    const t = e.root
-    const o = this.#t.get(t)
-    if (o !== undefined) return o
-    const r = this.#e()
-    this.#t.set(t, r)
-    return r
-  }
-  drop(e: { root: object }): void {
-    this.#t.delete(e.root)
-  }
+export function ofDefaultHost<T>(slot: { of(host: SessionHost): T }): T {
+  return slot.of(getDefaultBootstrapSession().host)
+}
+
+/**
+ * Official 2.1.331 `h()` (`function h(){let e=b?.();return e?.session?void 0:e}`):
+ * Returns the active subconversation ALS overlay when present, or `undefined`
+ * when running in the default session or a full `{ session }` ALS context.
+ */
+export function getActiveSubconversation():
+  | SubconversationAlsContext
+  | undefined {
+  const store = sessionContextReaderSlot().reader?.()
+  if (!store) return undefined
+  return store.session ? store.subconversation : store
 }
 
 /** densable `jt = new Ln(() => new Ge)` */
-const sessionOnceLatchBag = new RootKeyedBag(() => new SessionOnceLatches())
+const sessionOnceLatchBag = new RootSessionSlot(() => new SessionOnceLatches())
+
+/** Official 2.1.331 `bt = new $e(() => Ue())` — per-root-session switch signal. */
+const sessionSwitchSignalBag = new RootSessionSlot(() =>
+  createSignal<[id: string, reason?: string, payload?: unknown]>(),
+)
+
+/** Official 2.1.331 `bt.of(session)` — forks share the root session's switch signal. */
+export function getSessionSwitchSignal(
+  session: Session = getBootstrapSession(),
+): Signal<[id: string, reason?: string, payload?: unknown]> {
+  return sessionSwitchSignalBag.of(session)
+}
 
 /**
  * densable `Du()` — `jt.of(G())`. `G()` is `n()` (bootstrap session).
@@ -480,7 +565,10 @@ export function resetOnceLatchesOnSessionSwitch(
 }
 
 export function resetSessionHostForTests(): void {
-  if (bootstrapSession) sessionOnceLatchBag.drop(bootstrapSession)
+  if (bootstrapSession) {
+    sessionOnceLatchBag.drop(bootstrapSession)
+    sessionSwitchSignalBag.drop(bootstrapSession)
+  }
   bootstrapSession = undefined
 }
 

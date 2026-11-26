@@ -11,10 +11,23 @@
 
 import * as nodeFs from 'fs'
 import type { CheckOptions, LockOptions, UnlockOptions } from 'proper-lockfile'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 type Lockfile = typeof import('proper-lockfile')
 
-let _lockfile: Lockfile | undefined
+type LockfileHostState = {
+  lockfile: Lockfile | undefined
+  tolerantFs: typeof nodeFs | undefined
+}
+
+const lockfileHostSlot = new HostSlot<LockfileHostState>(() => ({
+  lockfile: undefined,
+  tolerantFs: undefined,
+}))
+
+function getLockfileHostState(): LockfileHostState {
+  return lockfileHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Official 2.1.326 (#60): error codes returned when a filesystem (e.g. SMB,
@@ -87,13 +100,12 @@ export function createTimestampTolerantLockFs(
   }
 }
 
-let _tolerantFs: typeof nodeFs | undefined
-
 function getTolerantFs(): typeof nodeFs {
-  if (!_tolerantFs) {
-    _tolerantFs = createTimestampTolerantLockFs(nodeFs)
+  const hostState = getLockfileHostState()
+  if (!hostState.tolerantFs) {
+    hostState.tolerantFs = createTimestampTolerantLockFs(nodeFs)
   }
-  return _tolerantFs
+  return hostState.tolerantFs
 }
 
 function withTolerantFs<T extends { fs?: unknown }>(options?: T): T {
@@ -104,11 +116,12 @@ function withTolerantFs<T extends { fs?: unknown }>(options?: T): T {
 }
 
 function getLockfile(): Lockfile {
-  if (!_lockfile) {
+  const hostState = getLockfileHostState()
+  if (!hostState.lockfile) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    _lockfile = require('proper-lockfile') as Lockfile
+    hostState.lockfile = require('proper-lockfile') as Lockfile
   }
-  return _lockfile
+  return hostState.lockfile
 }
 
 export function lock(

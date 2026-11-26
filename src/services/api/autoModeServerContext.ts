@@ -51,7 +51,11 @@ import { getAllowRules } from '../../utils/permissions/permissions.js'
 import { getPlatform } from '../../utils/platform.js'
 import { SETTING_SOURCES } from '../../utils/settings/constants.js'
 import { getAutoModeConfig } from '../../utils/settings/settings.js'
-import { isDisklessLaunch } from '../../utils/sessionHost.js'
+import {
+  getBootstrapSession,
+  isDisklessLaunch,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { getGitEmail } from '../../utils/user.js'
 import {
@@ -204,17 +208,32 @@ const defaultTimers = {
   },
 }
 
-/** densable leftover `Y5t` — artifact consent latch, default true → holdback false. */
-let artifactConsentGranted: (() => boolean) | undefined
+type AutoModeServerContextSessionState = {
+  /** densable leftover `Y5t` — artifact consent latch, default true → holdback false. */
+  artifactConsentGranted: (() => boolean) | undefined
+  lastIncompleteCwd: string | undefined
+}
+
+const autoModeServerContextSessionSlot =
+  new RootSessionSlot<AutoModeServerContextSessionState>(() => ({
+    artifactConsentGranted: undefined,
+    lastIncompleteCwd: undefined,
+  }))
+
+function getAutoModeServerContextSessionState(): AutoModeServerContextSessionState {
+  return autoModeServerContextSessionSlot.of(getBootstrapSession())
+}
 
 export function setArtifactConsentGrantedReader(
   reader: (() => boolean) | undefined,
 ): void {
-  artifactConsentGranted = reader
+  getAutoModeServerContextSessionState().artifactConsentGranted = reader
 }
 
 function artifactConsentGrantedNow(): boolean {
-  return artifactConsentGranted?.() ?? true
+  return (
+    getAutoModeServerContextSessionState().artifactConsentGranted?.() ?? true
+  )
 }
 
 /** densable `Une` */
@@ -573,8 +592,6 @@ async function classifierUserIdentity(): Promise<string | null> {
   return raw?.replace(USER_IDENTITY_SANITIZE, '').slice(0, 64) || null
 }
 
-let lastIncompleteCwd: string | undefined
-
 /**
  * densable `qc` @195397185.
  */
@@ -662,9 +679,10 @@ export async function buildClassifierContextJson(
     ),
   }
   return shedClassifierContext(built, stats => {
+    const state = getAutoModeServerContextSessionState()
     const cwd = getCwd()
-    if (lastIncompleteCwd === cwd) return
-    lastIncompleteCwd = cwd
+    if (state.lastIncompleteCwd === cwd) return
+    state.lastIncompleteCwd = cwd
     logEvent('tengu_auto_mode_context_incomplete', {
       bytes: stats.bytes,
       bytes_before_shedding: stats.bytesBeforeShedding,

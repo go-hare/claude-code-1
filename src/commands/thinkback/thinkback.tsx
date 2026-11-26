@@ -7,7 +7,7 @@ import type { CommandResultDisplay } from '../../commands.js';
 import { Select } from '../../components/CustomSelect/select.js';
 import { Dialog } from '@anthropic/ink';
 import { Spinner } from '../../components/Spinner.js';
-import { Box, Text, instances } from '@anthropic/ink';
+import { Box, Ns, Text } from '@anthropic/ink';
 import { enablePluginOp } from '../../services/plugins/pluginOperations.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { isENOENT, toError } from '../../utils/errors.js';
@@ -113,7 +113,7 @@ export async function playAnimation(skillDir: string): Promise<{
   }
 
   // Get ink instance for terminal takeover
-  const inkInstance = instances.get(process.stdout);
+  const inkInstance = Ns().get(process.stdout);
   if (!inkInstance) {
     return { success: false, message: 'Failed to access terminal instance' };
   }

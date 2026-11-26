@@ -13,15 +13,15 @@ import {
   getOriginalCwd,
   resetStickyBetas,
   setCachedClaudeMdContent,
-  setCwdState,
   setOriginalCwd,
   setProjectRoot,
 } from '../../bootstrap/state.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import { getGlobalConfig, getProjectPathForConfig, isPathTrusted, saveGlobalConfig } from '../../utils/config.js';
-import { getCwd } from '../../utils/cwd.js';
+import { getCwd, hasScopedCwd, setCwd } from '../../utils/cwd.js';
 import { logForDebugging } from '../../utils/debug.js';
+import { hasActiveSessionAls } from '../../utils/sessionHost.js';
 import { findCanonicalGitRootUncached, findGitRootUncached, getIsGit } from '../../utils/git.js';
 import { clearResolveGitDirCache, reanchorGitFileWatcher } from '../../utils/git/gitFilesystem.js';
 import { uniq } from '../../utils/array.js';
@@ -244,8 +244,10 @@ export async function relocateSessionCwd(
   if (projectTrustConfigKey(previousOriginal) !== projectTrustConfigKey(directory)) {
     captureSandboxRootMoveHold();
   }
-  process.chdir(directory);
-  setCwdState(directory);
+  if (!hasActiveSessionAls() && !hasScopedCwd()) {
+    process.chdir(directory);
+  }
+  setCwd(directory);
   setOriginalCwd(directory);
   resetLocalSettingsGitTrackedCache();
 
@@ -258,7 +260,9 @@ export async function relocateSessionCwd(
     transcriptRelocated = false;
     let rolledBack = false;
     try {
-      process.chdir(previous);
+      if (!hasActiveSessionAls() && !hasScopedCwd()) {
+        process.chdir(previous);
+      }
       rolledBack = true;
     } catch {
       logForDebugging(
@@ -267,7 +271,7 @@ export async function relocateSessionCwd(
       );
     }
     if (rolledBack) {
-      setCwdState(previous);
+      setCwd(previous);
       setOriginalCwd(previousOriginal);
       throw e;
     }

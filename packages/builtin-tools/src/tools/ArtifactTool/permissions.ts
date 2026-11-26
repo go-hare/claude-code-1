@@ -29,6 +29,7 @@ import {
   getAgentContext,
   isDelegatedObservation,
 } from 'src/utils/agentContext.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 
 export type ArtifactActionInput = {
   action?: string
@@ -1955,15 +1956,22 @@ export function publishSourcePinMatches(
 
 const MAX_APPROVED_PUBLISH_SOURCE_PINS = 64
 
-const approvedPublishSourcePins = new Map<
+const approvedPublishSourcePinsSlot = new RootSessionSlot<
+  Map<string, ArtifactApprovedSourceRecord>
+>(() => new Map())
+
+function getApprovedPublishSourcePins(): Map<
   string,
   ArtifactApprovedSourceRecord
->()
+> {
+  return approvedPublishSourcePinsSlot.of(getBootstrapSession())
+}
 
 function setApprovedPublishSourcePin(
   key: string,
   record: ArtifactApprovedSourceRecord,
 ): void {
+  const approvedPublishSourcePins = getApprovedPublishSourcePins()
   if (approvedPublishSourcePins.has(key)) {
     approvedPublishSourcePins.delete(key)
   } else if (
@@ -1987,6 +1995,7 @@ export function recordApprovedPublishSourcePin(
 export function consumeApprovedPublishSourcePin(
   key: string,
 ): ArtifactApprovedSourceRecord | undefined {
+  const approvedPublishSourcePins = getApprovedPublishSourcePins()
   const rec = approvedPublishSourcePins.get(key)
   if (rec !== undefined) {
     approvedPublishSourcePins.delete(key)
@@ -2334,10 +2343,17 @@ export function checkNewArtifactOrgApprovalSurface(
 }
 
 const MAX_RECORDED_PERSON_ONLY_ASKS = 128
-const recordedPersonOnlyAskToolUseIds = new Set<string>()
+const recordedPersonOnlyAskToolUseIdsSlot = new RootSessionSlot<Set<string>>(
+  () => new Set(),
+)
+
+function getRecordedPersonOnlyAskToolUseIds(): Set<string> {
+  return recordedPersonOnlyAskToolUseIdsSlot.of(getBootstrapSession())
+}
 
 export function recordNewArtifactPersonOnlyAsk(toolUseId?: string): void {
   if (!toolUseId) return
+  const recordedPersonOnlyAskToolUseIds = getRecordedPersonOnlyAskToolUseIds()
   recordedPersonOnlyAskToolUseIds.add(toolUseId)
   if (recordedPersonOnlyAskToolUseIds.size > MAX_RECORDED_PERSON_ONLY_ASKS) {
     const oldest = recordedPersonOnlyAskToolUseIds.values().next().value
@@ -2349,7 +2365,7 @@ export function recordNewArtifactPersonOnlyAsk(toolUseId?: string): void {
 
 export function consumeNewArtifactPersonOnlyAsk(toolUseId?: string): boolean {
   if (!toolUseId) return false
-  return recordedPersonOnlyAskToolUseIds.delete(toolUseId)
+  return getRecordedPersonOnlyAskToolUseIds().delete(toolUseId)
 }
 
 export type NewArtifactApprovalDecisionCheck = {

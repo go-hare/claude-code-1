@@ -35,6 +35,7 @@ import {
 import { containsVulnerableUncPath } from '../shell/readOnlyCommandValidation.js'
 import { DEFAULT_STAGE_FILE_ROOT } from '../syncedFileSyncer.js'
 import { getPlatform } from '../platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 /** densable Fps */
 export const FILE_UPLOAD_MAX_TOTAL_BYTES = 10 * 1024 * 1024
@@ -74,12 +75,17 @@ const MIME_BY_EXT: Record<string, string> = {
 }
 
 /** densable jzu / Wzu — optional attachment content binding. */
-const attachmentDigests = new Map<string, string>()
+const attachmentDigestsByHost = new HostSlot(() => new Map<string, string>())
+
+function getAttachmentDigests(): Map<string, string> {
+  return attachmentDigestsByHost.of(getBootstrapSessionHost())
+}
 
 export function registerChromeUploadAttachmentDigest(
   absolutePath: string,
   sha256Hex: string,
 ): void {
+  const attachmentDigests = getAttachmentDigests()
   const key = expandPath(absolutePath)
   if (
     !attachmentDigests.has(key) &&
@@ -94,12 +100,12 @@ export function registerChromeUploadAttachmentDigest(
 export function getChromeUploadAttachmentDigest(
   absolutePath: string,
 ): string | undefined {
-  return attachmentDigests.get(expandPath(absolutePath))
+  return getAttachmentDigests().get(expandPath(absolutePath))
 }
 
 /** Test helper — clear digest registry. */
 export function clearChromeUploadAttachmentDigestsForTests(): void {
-  attachmentDigests.clear()
+  getAttachmentDigests().clear()
 }
 
 export function sha256Hex(buf: Buffer | string): string {

@@ -27,6 +27,7 @@ import { getFsImplementation } from './fsOperations.js'
 import { getProcessStartTime } from './genericProcessUtils.js'
 import { safeParseJSON } from './json.js'
 import { logError } from './log.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { jsonStringify } from './slowOperations.js'
 import {
   CLAUDE_ATOMIC_STAGING_LEAF,
@@ -457,20 +458,36 @@ export async function writeCronTasks(
  * scheduler merges session tasks into its tick loop directly, so no file
  * change event is needed.
  */
-let cachedOwnProcStartToken: string | undefined
+const fallbackCronTasksHost: object = {}
+const cronTasksStateByHost = new HostSlot<{
+  cachedOwnProcStartToken: string | undefined
+}>(() => ({ cachedOwnProcStartToken: undefined }))
+
+function getCronTasksHostState(): {
+  cachedOwnProcStartToken: string | undefined
+} {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return cronTasksStateByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return cronTasksStateByHost.of(fallbackCronTasksHost)
+}
 
 /**
  * Gold `FTe()` — memoized process start token (`NTe.token ?? NTe.set(plt(process.pid))`).
  */
 export function getOwnProcStartToken(): string | undefined {
-  return (cachedOwnProcStartToken ??= getProcessStartTime(process.pid))
+  const state = getCronTasksHostState()
+  return (state.cachedOwnProcStartToken ??= getProcessStartTime(process.pid))
 }
 
 /**
  * Gold `NTe.token` — peek cached process start token without spawning `ps`.
  */
 export function peekOwnProcStartToken(): string | undefined {
-  return cachedOwnProcStartToken
+  return getCronTasksHostState().cachedOwnProcStartToken
 }
 
 export async function addCronTask(

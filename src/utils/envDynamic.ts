@@ -5,15 +5,53 @@ import { env, JETBRAINS_IDES } from './env.js'
 import { isEnvTruthy } from './envUtils.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
 import { getAncestorCommandsAsync } from './genericProcessUtils.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 // Functions that require execFileNoThrow and thus cannot be in env.ts
 
-const getIsDocker = memoize(async (): Promise<boolean> => {
+async function computeIsDocker(): Promise<boolean> {
   if (process.platform !== 'linux') return false
   // Check for .dockerenv file
   const { code } = await execFileNoThrow('test', ['-f', '/.dockerenv'])
   return code === 0
-})
+}
+
+class EnvDynamicHostState {
+  getIsDocker = memoize(computeIsDocker)
+  jetBrainsIDECache: string | null | undefined = undefined
+}
+
+const fallbackEnvDynamicHost: object = {}
+const envDynamicStateByHost = new HostSlot<EnvDynamicHostState>(
+  () => new EnvDynamicHostState(),
+)
+
+function getEnvDynamicHostState(): EnvDynamicHostState {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return envDynamicStateByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return envDynamicStateByHost.of(fallbackEnvDynamicHost)
+}
+
+const getIsDocker = Object.defineProperty(
+  function getIsDocker(): Promise<boolean> {
+    return getEnvDynamicHostState().getIsDocker()
+  },
+  'cache',
+  {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return getEnvDynamicHostState().getIsDocker.cache
+    },
+    set(v) {
+      getEnvDynamicHostState().getIsDocker.cache = v
+    },
+  },
+) as ReturnType<typeof memoize<typeof computeIsDocker>>
 
 function getIsBubblewrapSandbox(): boolean {
   return (
@@ -58,18 +96,16 @@ function isMuslEnvironment(): boolean {
   return muslRuntimeCache ?? false
 }
 
-// Cache for async JetBrains detection
-let jetBrainsIDECache: string | null | undefined
-
 async function detectJetBrainsIDEFromParentProcessAsync(): Promise<
   string | null
 > {
-  if (jetBrainsIDECache !== undefined) {
-    return jetBrainsIDECache
+  const hostState = getEnvDynamicHostState()
+  if (hostState.jetBrainsIDECache !== undefined) {
+    return hostState.jetBrainsIDECache
   }
 
   if (process.platform === 'darwin') {
-    jetBrainsIDECache = null
+    hostState.jetBrainsIDECache = null
     return null // macOS uses bundle ID detection which is already handled
   }
 
@@ -82,7 +118,7 @@ async function detectJetBrainsIDEFromParentProcessAsync(): Promise<
       // Check for specific JetBrains IDEs in the command line
       for (const ide of JETBRAINS_IDES) {
         if (lowerCommand.includes(ide)) {
-          jetBrainsIDECache = ide
+          hostState.jetBrainsIDECache = ide
           return ide
         }
       }
@@ -91,7 +127,7 @@ async function detectJetBrainsIDEFromParentProcessAsync(): Promise<
     // Silently fail - this is a best-effort detection
   }
 
-  jetBrainsIDECache = null
+  hostState.jetBrainsIDECache = null
   return null
 }
 
@@ -118,8 +154,9 @@ export function getTerminalWithJetBrainsDetection(): string | null {
     if (env.platform !== 'darwin') {
       // Return cached value if available, otherwise fall back to generic detection
       // The async version should be called early in app initialization to populate cache
-      if (jetBrainsIDECache !== undefined) {
-        return jetBrainsIDECache || 'pycharm'
+      const cached = getEnvDynamicHostState().jetBrainsIDECache
+      if (cached !== undefined) {
+        return cached || 'pycharm'
       }
       // Fall back to generic 'pycharm' if cache not populated yet
       return 'pycharm'

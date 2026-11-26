@@ -1,5 +1,9 @@
 import { env } from '../../../utils/env.js'
 import { execFileNoThrow } from '../../../utils/execFileNoThrow.js'
+import {
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../../../utils/sessionHost.js'
 import { TMUX_COMMAND } from '../constants.js'
 
 /**
@@ -18,14 +22,26 @@ const ORIGINAL_USER_TMUX = process.env.TMUX
 // eslint-disable-next-line custom-rules/no-process-env-top-level
 const ORIGINAL_TMUX_PANE = process.env.TMUX_PANE
 
-/** Cached result for isInsideTmux */
-let isInsideTmuxCached: boolean | null = null
+type BackendDetectionHostState = {
+  /** Cached result for isInsideTmux */
+  isInsideTmuxCached: boolean | null
+  /** Cached result for isInITerm2 */
+  isInITerm2Cached: boolean | null
+  /** Cached result for isInWindowsTerminal */
+  isInWindowsTerminalCached: boolean | null
+}
 
-/** Cached result for isInITerm2 */
-let isInITerm2Cached: boolean | null = null
+const backendDetectionHostSlot = new HostSlot<BackendDetectionHostState>(
+  () => ({
+    isInsideTmuxCached: null,
+    isInITerm2Cached: null,
+    isInWindowsTerminalCached: null,
+  }),
+)
 
-/** Cached result for isInWindowsTerminal */
-let isInWindowsTerminalCached: boolean | null = null
+function getBackendDetectionHostState(): BackendDetectionHostState {
+  return backendDetectionHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Checks if we're currently running inside a tmux session (synchronous version).
@@ -51,15 +67,16 @@ export function isInsideTmuxSync(): boolean {
  * on the system, not just if THIS process is inside tmux.
  */
 export async function isInsideTmux(): Promise<boolean> {
-  if (isInsideTmuxCached !== null) {
-    return isInsideTmuxCached
+  const hostState = getBackendDetectionHostState()
+  if (hostState.isInsideTmuxCached !== null) {
+    return hostState.isInsideTmuxCached
   }
 
   // Check the original TMUX env var (captured at module load)
   // This tells us if the user started Claude from within their tmux session
   // If TMUX is not set, we are NOT inside tmux - period.
-  isInsideTmuxCached = !!ORIGINAL_USER_TMUX
-  return isInsideTmuxCached
+  hostState.isInsideTmuxCached = !!ORIGINAL_USER_TMUX
+  return hostState.isInsideTmuxCached
 }
 
 /**
@@ -105,8 +122,9 @@ export async function isWindowsTerminalAvailable(): Promise<boolean> {
  * so no external CLI tool installation is required.
  */
 export function isInITerm2(): boolean {
-  if (isInITerm2Cached !== null) {
-    return isInITerm2Cached
+  const hostState = getBackendDetectionHostState()
+  if (hostState.isInITerm2Cached !== null) {
+    return hostState.isInITerm2Cached
   }
 
   // Check multiple indicators for iTerm2
@@ -114,10 +132,10 @@ export function isInITerm2(): boolean {
   const hasItermSessionId = !!process.env.ITERM_SESSION_ID
   const terminalIsITerm = env.terminal === 'iTerm.app'
 
-  isInITerm2Cached =
+  hostState.isInITerm2Cached =
     termProgram === 'iTerm.app' || hasItermSessionId || terminalIsITerm
 
-  return isInITerm2Cached
+  return hostState.isInITerm2Cached
 }
 
 /**
@@ -125,11 +143,12 @@ export function isInITerm2(): boolean {
  * Windows Terminal sets WT_SESSION for child processes.
  */
 export function isInWindowsTerminal(): boolean {
-  if (isInWindowsTerminalCached !== null) {
-    return isInWindowsTerminalCached
+  const hostState = getBackendDetectionHostState()
+  if (hostState.isInWindowsTerminalCached !== null) {
+    return hostState.isInWindowsTerminalCached
   }
-  isInWindowsTerminalCached = !!process.env.WT_SESSION
-  return isInWindowsTerminalCached
+  hostState.isInWindowsTerminalCached = !!process.env.WT_SESSION
+  return hostState.isInWindowsTerminalCached
 }
 
 /**
@@ -149,10 +168,11 @@ export async function isIt2CliAvailable(): Promise<boolean> {
 }
 
 /**
- * Resets all cached detection results. Used for testing.
+ * Resets all cached detection results for the current host. Used for testing.
  */
 export function resetDetectionCache(): void {
-  isInsideTmuxCached = null
-  isInITerm2Cached = null
-  isInWindowsTerminalCached = null
+  const hostState = getBackendDetectionHostState()
+  hostState.isInsideTmuxCached = null
+  hostState.isInITerm2Cached = null
+  hostState.isInWindowsTerminalCached = null
 }

@@ -25,19 +25,35 @@
 
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { isForkSubagentDisabled } from './sessionBackgroundGates.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 export type ForkSubagentSource = 'env' | 'default' | 'disabled' | 'disabled_ant'
 
 /**
- * densable UL().forkSubagentEnabledSource — process/session sticky.
+ * densable UL().forkSubagentEnabledSource — session sticky.
  * Only the live (no-input) path writes/reads it. Explicit `{env,isAnt}`
  * injection is Drb-only so tests do not pin the session.
  */
-let forkSubagentEnabledSource: ForkSubagentSource | undefined
+const fallbackForkSubagentSession = { root: {} as object }
+const forkSubagentSourceBySession = new RootSessionSlot<{
+  source: ForkSubagentSource | undefined
+}>(() => ({ source: undefined }))
+
+function getForkSubagentSourceSlot(): {
+  source: ForkSubagentSource | undefined
+} {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return forkSubagentSourceBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return forkSubagentSourceBySession.of(fallbackForkSubagentSession)
+}
 
 /** Test helper — gold new UL() drops the sticky. */
 export function resetForkSubagentSessionSource(): void {
-  forkSubagentEnabledSource = undefined
+  getForkSubagentSourceSlot().source = undefined
 }
 
 /**
@@ -79,12 +95,13 @@ export function resolveForkSubagentSource(input?: {
   // densable FDd: CLAUDE_CODE_FORK_SUBAGENT===false → "disabled" (before sticky)
   if (isEnvDefinedFalsy(env.CLAUDE_CODE_FORK_SUBAGENT)) return 'disabled'
   const useSticky = input?.env === undefined && input?.isAnt === undefined
-  if (useSticky && forkSubagentEnabledSource !== undefined) {
-    return forkSubagentEnabledSource
+  const slot = useSticky ? getForkSubagentSourceSlot() : undefined
+  if (slot && slot.source !== undefined) {
+    return slot.source
   }
   const resolved = resolveForkSubagentDrb(input)
-  if (useSticky && resolved !== 'disabled' && resolved !== 'disabled_ant') {
-    forkSubagentEnabledSource = resolved
+  if (slot && resolved !== 'disabled' && resolved !== 'disabled_ant') {
+    slot.source = resolved
   }
   return resolved
 }

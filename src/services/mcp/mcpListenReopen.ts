@@ -21,7 +21,6 @@
  */
 
 import { createHash } from 'crypto'
-import { z } from 'zod/v4'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -29,7 +28,14 @@ import {
 } from 'src/services/analytics/index.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { errorMessage } from 'src/utils/errors.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from 'src/utils/sessionRoot.js'
 import { sleep } from 'src/utils/sleep.js'
+import { z } from 'zod/v4'
 
 /**
  * densable `wce`/`hu` — sha256 hex slice(0,12) of server name for analytics.
@@ -199,10 +205,18 @@ function buildListChangedFilter(
  */
 export type McpListenListKind = 'tools' | 'prompts' | 'resources'
 
-const postReopenHandlers = new Map<
+type PostReopenHandlerMap = Map<
   string,
   Partial<Record<McpListenListKind, () => void | Promise<void>>>
->()
+>
+
+const postReopenHandlersByHost = new HostSlot<PostReopenHandlerMap>(
+  () => new Map(),
+)
+
+function getPostReopenHandlers(): PostReopenHandlerMap {
+  return postReopenHandlersByHost.of(getBootstrapSessionHost())
+}
 
 /** densable LVa */
 export function registerMcpListenPostReopenHandler(
@@ -210,13 +224,21 @@ export function registerMcpListenPostReopenHandler(
   kind: McpListenListKind,
   handler: () => void | Promise<void>,
 ): void {
+  const postReopenHandlers = getPostReopenHandlers()
+  const capturedSession = getActiveSessionFromAls()
   const entry = postReopenHandlers.get(serverName) ?? {}
-  entry[kind] = handler
+  entry[kind] =
+    capturedSession !== undefined
+      ? () =>
+          getActiveSessionFromAls() === capturedSession
+            ? handler()
+            : runWithSession(capturedSession, handler)
+      : handler
   postReopenHandlers.set(serverName, entry)
 }
 
 export function clearMcpListenPostReopenHandlers(serverName: string): void {
-  postReopenHandlers.delete(serverName)
+  getPostReopenHandlers().delete(serverName)
 }
 
 /** densable rpS */
@@ -224,7 +246,7 @@ export function invokeMcpListenPostReopenRefetch(
   serverName: string,
   filter: Record<string, boolean>,
 ): void {
-  const entry = postReopenHandlers.get(serverName)
+  const entry = getPostReopenHandlers().get(serverName)
   if (entry === undefined) return
   const pairs: Array<[string, McpListenListKind]> = [
     ['toolsListChanged', 'tools'],

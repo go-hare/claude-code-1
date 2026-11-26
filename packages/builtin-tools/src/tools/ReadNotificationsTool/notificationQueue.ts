@@ -2,6 +2,7 @@
  * Official 2.1.331 queued notifications registry & result formatter (`Den` / `Sja`).
  */
 
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 import {
   READ_NOTIFICATIONS_CLOCK_SKEW_MINUTES,
   READ_NOTIFICATIONS_DRAIN_BUDGET_CHARS,
@@ -163,15 +164,36 @@ export function createQueuedNotificationsRegistry(): QueuedNotificationsRegistry
   }
 }
 
-let defaultRegistry: QueuedNotificationsRegistry =
-  createQueuedNotificationsRegistry()
+const fallbackNotificationsHost: object = {}
+
+function getActiveNotificationsHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackNotificationsHost
+}
+
+const defaultRegistryByHost = new HostSlot<{
+  registry: QueuedNotificationsRegistry
+}>(() => ({
+  registry: createQueuedNotificationsRegistry(),
+}))
 
 export function getDefaultQueuedNotificationsRegistry(): QueuedNotificationsRegistry {
-  return defaultRegistry
+  return defaultRegistryByHost.of(getActiveNotificationsHost()).registry
 }
 
 export function resetDefaultQueuedNotificationsRegistryForTests(): void {
-  defaultRegistry = createQueuedNotificationsRegistry()
+  defaultRegistryByHost.of(getActiveNotificationsHost()).registry =
+    createQueuedNotificationsRegistry()
 }
 
 /**

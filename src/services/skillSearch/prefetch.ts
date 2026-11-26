@@ -1,18 +1,26 @@
-import type { Attachment } from '../../utils/attachments.js'
-import type { Message } from '../../types/message.js'
-import type { ToolUseContext } from '../../Tool.js'
-import type { DiscoverySignal } from './signals.js'
-import { isSkillSearchEnabled } from './featureCheck.js'
-import {
-  getSkillIndex,
-  searchSkills,
-  type SearchResult,
-} from './localSearch.js'
-import { normalizeQueryIntent } from './intentNormalize.js'
-import { logForDebugging } from '../../utils/debug.js'
+import { realpathSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { getSessionId } from '../../bootstrap/state.js'
+import type { ToolUseContext } from '../../Tool.js'
+import type { Message } from '../../types/message.js'
+import type { Attachment } from '../../utils/attachments.js'
+import { getCwd, hasScopedCwd } from '../../utils/cwd.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { parseFrontmatter } from '../../utils/frontmatterParser.js'
+import {
+  getBootstrapSession,
+  hasActiveSessionAls,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
+import { isSkillSearchEnabled } from './featureCheck.js'
+import { normalizeQueryIntent } from './intentNormalize.js'
+import {
+  getSkillIndex,
+  type SearchResult,
+  searchSkills,
+} from './localSearch.js'
+import type { DiscoverySignal } from './signals.js'
 
 /**
  * Per-session memoization to avoid re-emitting the same skill discovery /
@@ -27,8 +35,90 @@ import { parseFrontmatter } from '../../utils/frontmatterParser.js'
  */
 const SESSION_TRACKING_MAX = 1000
 const SESSION_TRACKING_TRIM_TO = 750
-const discoveredThisSession = new Set<string>()
-const recordedGapSignals = new Set<string>()
+
+type SkillPrefetchSessionState = {
+  discoveredThisSession: Set<string>
+  recordedGapSignals: Set<string>
+}
+
+const fallbackSkillPrefetchRootSession: { readonly root: object } = {
+  get root() {
+    return fallbackSkillPrefetchRootSession
+  },
+}
+
+function getActiveSkillPrefetchSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (
+      session !== null &&
+      typeof session === 'object' &&
+      session.root !== null &&
+      typeof session.root === 'object'
+    ) {
+      return session
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackSkillPrefetchRootSession
+}
+
+const skillPrefetchSessionSlot = new RootSessionSlot<SkillPrefetchSessionState>(
+  () => ({
+    discoveredThisSession: new Set<string>(),
+    recordedGapSignals: new Set<string>(),
+  }),
+)
+
+function getSkillPrefetchSessionState(): SkillPrefetchSessionState {
+  return skillPrefetchSessionSlot.of(getActiveSkillPrefetchSession())
+}
+
+export function clearSkillDiscoveryPrefetchSessionForTests(): void {
+  const state = getSkillPrefetchSessionState()
+  state.discoveredThisSession.clear()
+  state.recordedGapSignals.clear()
+}
+
+const MODULE_LOAD_RAW_CWD = (() => {
+  try {
+    return process.cwd().normalize('NFC')
+  } catch {
+    return ''
+  }
+})()
+const MODULE_LOAD_REAL_CWD = (() => {
+  try {
+    return realpathSync(MODULE_LOAD_RAW_CWD).normalize('NFC')
+  } catch {
+    return MODULE_LOAD_RAW_CWD
+  }
+})()
+
+function resolvePrefetchCwd(context: ToolUseContext): string {
+  const explicit = (context as { cwd?: string }).cwd
+  if (explicit) return explicit
+  if (hasActiveSessionAls() || hasScopedCwd()) {
+    return getCwd()
+  }
+  const sessionCwd = getCwd()
+  if (
+    sessionCwd !== MODULE_LOAD_REAL_CWD &&
+    sessionCwd !== MODULE_LOAD_RAW_CWD
+  ) {
+    return sessionCwd
+  }
+  try {
+    const procCwd = process.cwd().normalize('NFC')
+    if (procCwd !== MODULE_LOAD_RAW_CWD && procCwd !== MODULE_LOAD_REAL_CWD) {
+      return procCwd
+    }
+  } catch {
+    // Ignore if process.cwd() fails
+  }
+  return sessionCwd
+}
 
 function addBoundedSessionEntry(set: Set<string>, value: string): void {
   set.add(value)
@@ -209,9 +299,10 @@ async function maybeRecordSkillGap(
   if (trigger !== 'user_input') return undefined
   if (!queryText.trim()) return undefined
 
+  const sessionState = getSkillPrefetchSessionState()
   const gapSignalKey = `${trigger}:${queryText.trim().toLowerCase()}`
-  if (recordedGapSignals.has(gapSignalKey)) return undefined
-  addBoundedSessionEntry(recordedGapSignals, gapSignalKey)
+  if (sessionState.recordedGapSignals.has(gapSignalKey)) return undefined
+  addBoundedSessionEntry(sessionState.recordedGapSignals, gapSignalKey)
 
   try {
     const [{ isSkillLearningEnabled }, { recordSkillGap }] = await Promise.all([
@@ -221,11 +312,10 @@ async function maybeRecordSkillGap(
     if (!isSkillLearningEnabled()) return undefined
     const gap = await recordSkillGap({
       prompt: queryText,
-      cwd:
-        ((context as Record<string, unknown>).cwd as string) ?? process.cwd(),
+      cwd: resolvePrefetchCwd(context),
       sessionId:
-        ((context as Record<string, unknown>).sessionId as string) ??
-        'unknown-session',
+        (context as { sessionId?: string }).sessionId ??
+        (getSessionId() || 'unknown-session'),
       recommendations: results,
     })
     const status = gap.status
@@ -258,17 +348,18 @@ export async function startSkillDiscoveryPrefetch(
   if (!queryText.trim()) return []
 
   try {
-    const cwd =
-      ((toolUseContext as Record<string, unknown>).cwd as string) ??
-      process.cwd()
+    const sessionState = getSkillPrefetchSessionState()
+    const cwd = resolvePrefetchCwd(toolUseContext)
     const index = await getSkillIndex(cwd)
     const results = searchSkills(queryText, index)
 
-    const newResults = results.filter(r => !discoveredThisSession.has(r.name))
+    const newResults = results.filter(
+      r => !sessionState.discoveredThisSession.has(r.name),
+    )
     if (newResults.length === 0) return []
 
     for (const r of newResults)
-      addBoundedSessionEntry(discoveredThisSession, r.name)
+      addBoundedSessionEntry(sessionState.discoveredThisSession, r.name)
 
     const signal: DiscoverySignal = {
       trigger: 'assistant_turn',
@@ -316,8 +407,8 @@ export async function getTurnZeroSkillDiscovery(
   const startedAt = Date.now()
 
   try {
-    const cwd =
-      ((context as Record<string, unknown>).cwd as string) ?? process.cwd()
+    const sessionState = getSkillPrefetchSessionState()
+    const cwd = resolvePrefetchCwd(context)
     const index = await getSkillIndex(cwd)
     // Intent normalization (feature-flagged, ASCII-only fast path, graceful
     // fallback to original). Turn-zero is the one blocking entry — acceptable
@@ -333,7 +424,7 @@ export async function getTurnZeroSkillDiscovery(
     if (results.length === 0 && !gap) return null
 
     for (const r of results)
-      addBoundedSessionEntry(discoveredThisSession, r.name)
+      addBoundedSessionEntry(sessionState.discoveredThisSession, r.name)
 
     const signal: DiscoverySignal = {
       trigger: 'user_input',

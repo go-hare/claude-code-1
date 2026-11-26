@@ -30,6 +30,12 @@ import { toError } from './errors.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
 import { logError } from './log.js'
 import { getPlatform } from './platform.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 
 // Constants for tmux socket management
 const TMUX_COMMAND = 'tmux'
@@ -69,30 +75,52 @@ async function execTmux(
   }
 }
 
-// Socket state - initialized lazily when Tmux tool is first used or a tmux command is run
-let socketName: string | null = null
-let socketPath: string | null = null
-let serverPid: number | null = null
-let isInitializing = false
-let initPromise: Promise<void> | null = null
+type TmuxSocketHostState = {
+  socketName: string | null
+  socketPath: string | null
+  serverPid: number | null
+  isInitializing: boolean
+  initPromise: Promise<void> | null
+  tmuxAvailabilityChecked: boolean
+  tmuxAvailable: boolean
+  tmuxToolUsed: boolean
+}
 
-// tmux availability - checked once upfront
-let tmuxAvailabilityChecked = false
-let tmuxAvailable = false
+const tmuxSocketHostSlot = new HostSlot<TmuxSocketHostState>(() => ({
+  socketName: null,
+  socketPath: null,
+  serverPid: null,
+  isInitializing: false,
+  initPromise: null,
+  tmuxAvailabilityChecked: false,
+  tmuxAvailable: false,
+  tmuxToolUsed: false,
+}))
 
-// Track whether the Tmux tool has been used at least once
-// Used to defer socket initialization until actually needed
-let tmuxToolUsed = false
+function getTmuxSocketHostState(): TmuxSocketHostState {
+  return tmuxSocketHostSlot.of(getBootstrapSessionHost())
+}
+
+let isolatedHostSocketSeq = 0
 
 /**
  * Gets the socket name for Claude's isolated tmux session.
- * Format: claude-<PID>
+ * Format:
+ * - Default host (no active ALS session): `claude-<PID>`
+ * - Isolated ALS host: `claude-<PID>-<seq>` so per-host cleanup only kills
+ *   its own tmux server and never kills sibling hosts or the default host.
  */
 export function getClaudeSocketName(): string {
-  if (!socketName) {
-    socketName = `${CLAUDE_SOCKET_PREFIX}-${process.pid}`
+  const hostState = getTmuxSocketHostState()
+  if (!hostState.socketName) {
+    if (getActiveSessionFromAls() !== undefined) {
+      isolatedHostSocketSeq += 1
+      hostState.socketName = `${CLAUDE_SOCKET_PREFIX}-${process.pid}-${isolatedHostSocketSeq}`
+    } else {
+      hostState.socketName = `${CLAUDE_SOCKET_PREFIX}-${process.pid}`
+    }
   }
-  return socketName
+  return hostState.socketName
 }
 
 /**
@@ -100,7 +128,7 @@ export function getClaudeSocketName(): string {
  * Returns null if not yet initialized.
  */
 export function getClaudeSocketPath(): string | null {
-  return socketPath
+  return getTmuxSocketHostState().socketPath
 }
 
 /**
@@ -108,15 +136,17 @@ export function getClaudeSocketPath(): string | null {
  * Called after the tmux session is created.
  */
 export function setClaudeSocketInfo(path: string, pid: number): void {
-  socketPath = path
-  serverPid = pid
+  const hostState = getTmuxSocketHostState()
+  hostState.socketPath = path
+  hostState.serverPid = pid
 }
 
 /**
  * Returns whether the socket has been initialized.
  */
 export function isSocketInitialized(): boolean {
-  return socketPath !== null && serverPid !== null
+  const hostState = getTmuxSocketHostState()
+  return hostState.socketPath !== null && hostState.serverPid !== null
 }
 
 /**
@@ -133,15 +163,16 @@ export function isSocketInitialized(): boolean {
  * When null, Shell.ts does not override TMUX, preserving user's environment.
  */
 export function getClaudeTmuxEnv(): string | null {
-  if (!socketPath || serverPid === null) {
+  const hostState = getTmuxSocketHostState()
+  if (!hostState.socketPath || hostState.serverPid === null) {
     return null
   }
-  return `${socketPath},${serverPid},0`
+  return `${hostState.socketPath},${hostState.serverPid},0`
 }
 
 /**
  * Checks if tmux is available on this system.
- * This is checked once and cached for the lifetime of the process.
+ * This is checked once and cached for the lifetime of the host.
  *
  * When tmux is not available:
  * - TungstenTool (Tmux) will not work
@@ -149,7 +180,8 @@ export function getClaudeTmuxEnv(): string | null {
  * - Bash commands will run without tmux isolation
  */
 export async function checkTmuxAvailable(): Promise<boolean> {
-  if (!tmuxAvailabilityChecked) {
+  const hostState = getTmuxSocketHostState()
+  if (!hostState.tmuxAvailabilityChecked) {
     const result =
       getPlatform() === 'windows'
         ? await execFileNoThrow('wsl', ['-e', TMUX_COMMAND, '-V'], {
@@ -159,15 +191,15 @@ export async function checkTmuxAvailable(): Promise<boolean> {
         : await execFileNoThrow('which', [TMUX_COMMAND], {
             useCwd: false,
           })
-    tmuxAvailable = result.code === 0
-    if (!tmuxAvailable) {
+    hostState.tmuxAvailable = result.code === 0
+    if (!hostState.tmuxAvailable) {
       logForDebugging(
         `[Socket] tmux is not installed. The Tmux tool and Teammate tool will not be available.`,
       )
     }
-    tmuxAvailabilityChecked = true
+    hostState.tmuxAvailabilityChecked = true
   }
-  return tmuxAvailable
+  return hostState.tmuxAvailable
 }
 
 /**
@@ -176,7 +208,8 @@ export async function checkTmuxAvailable(): Promise<boolean> {
  * Use checkTmuxAvailable() to perform the check.
  */
 export function isTmuxAvailable(): boolean {
-  return tmuxAvailabilityChecked && tmuxAvailable
+  const hostState = getTmuxSocketHostState()
+  return hostState.tmuxAvailabilityChecked && hostState.tmuxAvailable
 }
 
 /**
@@ -185,7 +218,7 @@ export function isTmuxAvailable(): boolean {
  * After this is called, Shell.ts will initialize the socket for subsequent Bash commands.
  */
 export function markTmuxToolUsed(): void {
-  tmuxToolUsed = true
+  getTmuxSocketHostState().tmuxToolUsed = true
 }
 
 /**
@@ -193,7 +226,7 @@ export function markTmuxToolUsed(): void {
  * Used by Shell.ts to decide whether to initialize the socket.
  */
 export function hasTmuxToolBeenUsed(): boolean {
-  return tmuxToolUsed
+  return getTmuxSocketHostState().tmuxToolUsed
 }
 
 /**
@@ -217,22 +250,23 @@ export async function ensureSocketInitialized(): Promise<void> {
     return
   }
 
+  const hostState = getTmuxSocketHostState()
   // Another call is already initializing - wait for it but don't propagate errors
   // The original caller handles the error and sets up graceful degradation
-  if (isInitializing && initPromise) {
+  if (hostState.isInitializing && hostState.initPromise) {
     try {
-      await initPromise
+      await hostState.initPromise
     } catch {
       // Ignore - the original caller logs the error
     }
     return
   }
 
-  isInitializing = true
-  initPromise = doInitialize()
+  hostState.isInitializing = true
+  hostState.initPromise = doInitialize()
 
   try {
-    await initPromise
+    await hostState.initPromise
   } catch (error) {
     // Log error but don't throw - graceful degradation
     const err = toError(error)
@@ -241,7 +275,7 @@ export async function ensureSocketInitialized(): Promise<void> {
       `[Socket] Failed to initialize tmux socket: ${err.message}. Tmux isolation will be disabled.`,
     )
   } finally {
-    isInitializing = false
+    hostState.isInitializing = false
   }
 }
 
@@ -249,8 +283,7 @@ export async function ensureSocketInitialized(): Promise<void> {
  * Kills the tmux server for Claude's isolated socket.
  * Called during graceful shutdown to clean up resources.
  */
-async function killTmuxServer(): Promise<void> {
-  const socket = getClaudeSocketName()
+async function killTmuxServer(socket = getClaudeSocketName()): Promise<void> {
   logForDebugging(`[Socket] Killing tmux server for socket: ${socket}`)
 
   const result = await execTmux(['-L', socket, 'kill-server'])
@@ -311,7 +344,13 @@ async function doInitialize(): Promise<void> {
   }
 
   // Register cleanup to kill the tmux server on exit
-  registerCleanup(killTmuxServer)
+  const captured = getActiveSessionFromAls()
+  registerCleanup(() => {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      return runWithSession(captured, () => killTmuxServer(socket))
+    }
+    return killTmuxServer(socket)
+  })
 
   // Set CLAUDE_CODE_SKIP_PROMPT_HISTORY in the tmux GLOBAL environment (-g).
   // Without -g this would only apply to the 'base' session, and new sessions
@@ -416,12 +455,13 @@ async function doInitialize(): Promise<void> {
 
 // For testing purposes
 export function resetSocketState(): void {
-  socketName = null
-  socketPath = null
-  serverPid = null
-  isInitializing = false
-  initPromise = null
-  tmuxAvailabilityChecked = false
-  tmuxAvailable = false
-  tmuxToolUsed = false
+  const hostState = getTmuxSocketHostState()
+  hostState.socketName = null
+  hostState.socketPath = null
+  hostState.serverPid = null
+  hostState.isInitializing = false
+  hostState.initPromise = null
+  hostState.tmuxAvailabilityChecked = false
+  hostState.tmuxAvailable = false
+  hostState.tmuxToolUsed = false
 }

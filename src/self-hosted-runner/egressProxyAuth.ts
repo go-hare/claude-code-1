@@ -28,6 +28,12 @@ import { getCACertificates } from 'src/utils/caCerts.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/utils/errors.js'
 import { getMTLSConfig } from 'src/utils/mtls.js'
 import { configureGlobalAgents } from 'src/utils/proxy.js'
+import {
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  ofDefaultHost,
+} from 'src/utils/sessionHost.js'
 import type {
   ProxyAuthorizationConfig,
   ProxyAuthorizationSource,
@@ -123,10 +129,29 @@ export type EgressProxyCallbacks = {
   onDebug?: (msg: string) => void
 }
 
-/** densable `GAt` */
-let rewriteState: RewriteState | undefined
-/** densable `opu` */
-let activeHandle: EgressProxyHandle | undefined
+type EgressProxyAuthHostState = {
+  /** densable `GAt` (`undefined` = inherit process-default host; `null` = explicitly cleared in isolated host) */
+  rewriteState: RewriteState | null | undefined
+  /** densable `opu` */
+  activeHandle: EgressProxyHandle | undefined
+}
+
+const egressProxyAuthHostSlot = new HostSlot<EgressProxyAuthHostState>(() => ({
+  rewriteState: undefined,
+  activeHandle: undefined,
+}))
+
+function getEgressProxyAuthHostState(): EgressProxyAuthHostState {
+  return egressProxyAuthHostSlot.of(getBootstrapSessionHost())
+}
+
+function getEffectiveRewriteState(): RewriteState | undefined {
+  const local = egressProxyAuthHostSlot.peek(getBootstrapSessionHost())
+  if (local !== undefined && local.rewriteState !== undefined) {
+    return local.rewriteState ?? undefined
+  }
+  return ofDefaultHost(egressProxyAuthHostSlot).rewriteState ?? undefined
+}
 
 /** densable `WAt` */
 export class ProxyAuthorizationMintError extends Error {
@@ -1214,13 +1239,14 @@ export function rewriteProcessProxyEnv(
       rewritten.push(key)
     }
   }
-  rewriteState = { url: listenerUrl, rewritten, original }
-  return rewriteState
+  const hostState = getEgressProxyAuthHostState()
+  hostState.rewriteState = { url: listenerUrl, rewritten, original }
+  return hostState.rewriteState
 }
 
-/** densable `trC` */
-export function commandEnvWithOriginalProxy(
-  env: NodeJS.ProcessEnv = process.env,
+function applyOriginalProxyEnv(
+  env: NodeJS.ProcessEnv,
+  rewriteState: RewriteState | undefined,
 ): NodeJS.ProcessEnv {
   if (!rewriteState) return { ...env }
   const out = { ...env }
@@ -1232,10 +1258,18 @@ export function commandEnvWithOriginalProxy(
   return out
 }
 
+/** densable `trC` */
+export function commandEnvWithOriginalProxy(
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return applyOriginalProxyEnv(env, getEffectiveRewriteState())
+}
+
 /** densable `H4y` */
 export function sessionChildProxyEnvOverlay(
   env: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
+  const rewriteState = getEffectiveRewriteState()
   if (!rewriteState) return {}
   const overlay: NodeJS.ProcessEnv = {
     [PROXY_AUTH_COMMAND_ENV]: undefined,
@@ -1282,11 +1316,15 @@ export async function enableEgressProxyAuth(
 ): Promise<EgressProxyHandle> {
   const mtls = getMTLSConfig()
   const ca = getCACertificates()
+  let capturedRewritten: RewriteState | undefined
   const minter = createProxyAuthorizationMinter({
     source: config.source,
     upstreamProxyUrl: config.upstreamProxyUrl,
     commandEnv: () => ({
-      ...commandEnvWithOriginalProxy(),
+      ...applyOriginalProxyEnv(
+        process.env,
+        capturedRewritten ?? getEffectiveRewriteState(),
+      ),
       SELF_HOSTED_RUNNER_POOL_SECRET: undefined,
       SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET: undefined,
     }),
@@ -1304,6 +1342,7 @@ export async function enableEgressProxyAuth(
     onDebug: callbacks.onDebug,
   })
   const rewritten = rewriteProcessProxyEnv(listener.url)
+  capturedRewritten = rewritten
   if (
     new Set(rewritten.rewritten.map(k => rewritten.original[k as ProxyEnvKey]))
       .size > 1
@@ -1321,19 +1360,23 @@ export async function enableEgressProxyAuth(
   callbacks.onStatus(
     `[runner:egress-proxy] enabled: minting Proxy-Authorization from the configured ${config.source.kind} for every CONNECT to the upstream proxy ${redactEgressProxyText(config.upstreamProxyUrl)}; this runner and its sessions now use the loopback listener 127.0.0.1:${listener.port} (rewrote ${rewritten.rewritten.join(', ')})`,
   )
-  activeHandle = {
+  const hostState = getEgressProxyAuthHostState()
+  const enabledInAls = hasActiveSessionAls()
+  hostState.activeHandle = {
     ...listener,
     close: async () => {
       await listener.close()
-      rewriteState = undefined
-      activeHandle = undefined
+      capturedRewritten = undefined
+      hostState.rewriteState = enabledInAls ? null : undefined
+      hostState.activeHandle = undefined
     },
   }
-  return activeHandle
+  return hostState.activeHandle
 }
 
 /** Test helper — does not close a live listener. */
 export function _resetEgressProxyAuthForTesting(): void {
-  rewriteState = undefined
-  activeHandle = undefined
+  const hostState = getEgressProxyAuthHostState()
+  hostState.rewriteState = hasActiveSessionAls() ? null : undefined
+  hostState.activeHandle = undefined
 }

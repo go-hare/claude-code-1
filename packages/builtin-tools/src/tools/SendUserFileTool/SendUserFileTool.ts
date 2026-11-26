@@ -7,6 +7,7 @@ import { isBridgeEnabled } from 'src/bridge/bridgeEnabled.js'
 import { expandPath, isDeviceOrNtNamespacePath } from 'src/utils/path.js'
 import { pathInOutsideReadFenceWorkingPath } from 'src/utils/permissions/filesystem.js'
 import { isRestrictedSession } from 'src/utils/restricted.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import {
   formatUnsaveableSkillRefusal,
   isSkillAttachmentPath,
@@ -142,10 +143,13 @@ type ListedSendUserFileSnapshot = {
 }
 
 const MAX_LISTED_SEND_FILE_ENTRIES = 256
-const listedSendUserFileArgsByToolUseId = new Map<
-  string,
-  ListedSendUserFileSnapshot
->()
+const listedSendUserFileArgsSlot = new RootSessionSlot<
+  Map<string, ListedSendUserFileSnapshot>
+>(() => new Map())
+
+function getListedSendUserFileArgs(): Map<string, ListedSendUserFileSnapshot> {
+  return listedSendUserFileArgsSlot.of(getBootstrapSession())
+}
 
 /**
  * Official 2.1.331 `O(files)`: canonical sorted deduplicated file-list key.
@@ -173,6 +177,7 @@ export function recordListedSendUserFileArgs(
   toolUseId: string,
   paths: readonly string[],
 ): void {
+  const listedSendUserFileArgsByToolUseId = getListedSendUserFileArgs()
   listedSendUserFileArgsByToolUseId.set(
     toolUseId,
     buildListedSendUserFileSnapshot(paths),
@@ -196,6 +201,7 @@ export function verifySendUserFileArgsUnchanged(
   if (!toolUseId) {
     return { ok: true }
   }
+  const listedSendUserFileArgsByToolUseId = getListedSendUserFileArgs()
   const stashed = listedSendUserFileArgsByToolUseId.get(toolUseId)
   if (stashed === undefined) {
     return { ok: true }
@@ -212,7 +218,7 @@ export function verifySendUserFileArgsUnchanged(
 }
 
 export function clearSendUserFileArgsStashForTesting(): void {
-  listedSendUserFileArgsByToolUseId.clear()
+  getListedSendUserFileArgs().clear()
 }
 
 export function normalizeSendUserFilePaths(

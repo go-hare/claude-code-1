@@ -21,7 +21,6 @@
 import axios from 'axios'
 import { readlink, stat, writeFile } from 'fs/promises'
 import isEqual from 'lodash-es/isEqual.js'
-import memoize from 'lodash-es/memoize.js'
 import {
   basename,
   dirname,
@@ -32,6 +31,7 @@ import {
   resolve,
   sep,
 } from 'path'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { getCwd } from '../cwd.js'
 import { getPlatform } from '../platform.js'
 import { isValidStoragePathSegment } from '../sessionNameJobSidecar.js'
@@ -389,7 +389,7 @@ export function getDeclaredMarketplaces(): Record<string, DeclaredMarketplace> {
     ...(skipRepoSettings
       ? getNonRepoExtraKnownMarketplaces()
       : (getInitialSettings().extraKnownMarketplaces ?? {})),
-  } as any
+  } as unknown as Record<string, DeclaredMarketplace>
 }
 
 /**
@@ -4700,7 +4700,48 @@ export async function getMarketplaceCacheOnly(
  * @param name - The marketplace name to fetch
  * @returns The marketplace object or null if not found/failed
  */
-export const getMarketplace = memoize(
+type CachedGetMarketplaceFn = ((
+  name: string,
+  storageV5?: unknown,
+) => Promise<PluginMarketplace>) & {
+  cache: Map<string, Promise<PluginMarketplace>>
+}
+
+const hostMarketplaceCacheSlot = new HostSlot<{
+  cache: Map<string, Promise<PluginMarketplace>>
+}>(() => ({
+  cache: new Map(),
+}))
+
+function memoizePerHost(
+  impl: (name: string, storageV5?: unknown) => Promise<PluginMarketplace>,
+): CachedGetMarketplaceFn {
+  const fn = (
+    name: string,
+    storageV5?: unknown,
+  ): Promise<PluginMarketplace> => {
+    const cache = hostMarketplaceCacheSlot.of(getBootstrapSessionHost()).cache
+    if (cache.has(name)) {
+      return cache.get(name)!
+    }
+    const pending = impl(name, storageV5)
+    cache.set(name, pending)
+    return pending
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<string, Promise<PluginMarketplace>> {
+      return hostMarketplaceCacheSlot.of(getBootstrapSessionHost()).cache
+    },
+    set(next: Map<string, Promise<PluginMarketplace>>) {
+      hostMarketplaceCacheSlot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedGetMarketplaceFn
+}
+
+export const getMarketplace = memoizePerHost(
   async (name: string, storageV5?: unknown): Promise<PluginMarketplace> => {
     const config = await loadKnownMarketplacesConfig(storageV5)
     const entry = getOwnMarketplaceEntry(config, name)

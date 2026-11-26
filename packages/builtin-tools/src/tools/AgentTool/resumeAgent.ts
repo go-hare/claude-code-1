@@ -50,6 +50,7 @@ import {
 import { getAgentModel } from 'src/utils/model/agent.js'
 import { waitForInitialPluginsLoaded } from 'src/utils/plugins/pluginLoader.js'
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import {
   getAgentTranscript,
   readAgentMetadata,
@@ -183,10 +184,12 @@ export class AgentStillStoppingError extends ResumeAgentStateError {
   }
 }
 
-const resumesInFlight = new Set<string>()
+const resumesInFlightBySession = new RootSessionSlot<Set<string>>(
+  () => new Set<string>(),
+)
 
 export function clearResumesInFlightForTests(): void {
-  resumesInFlight.clear()
+  resumesInFlightBySession.peek(getBootstrapSession())?.clear()
 }
 
 /**
@@ -451,6 +454,7 @@ export async function resumeAgentBackground({
   const { tryClaimAgentResume, clearAgentResuming } = await import(
     'src/tasks/LocalAgentTask/LocalAgentTask.js'
   )
+  const resumesInFlight = resumesInFlightBySession.of(getBootstrapSession())
   if (resumesInFlight.has(agentId)) {
     throw new AgentResumeInProgressError(
       `Agent ${agentId} is already running or being resumed`,

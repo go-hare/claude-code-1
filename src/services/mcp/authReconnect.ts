@@ -7,6 +7,7 @@
  */
 
 import { SdkError, SdkErrorCode } from '@modelcontextprotocol/client'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 
 export type AuthReconnectKind = 'mcp_headers_helper' | 'mcp_oauth_refresh'
 
@@ -96,18 +97,29 @@ export function isConnectionClosedWhileReconnecting(
   return isMcpConnectionClosedError(error)
 }
 
-/** In-flight reconnect promises keyed by getServerCacheKey (official OHs). */
-const authReconnectInFlight = new Map<
+/** In-flight reconnect promises keyed by getServerCacheKey (official OHs), host-scoped. */
+type AuthReconnectInFlightMap = Map<
   string,
   Promise<{ type: string; [k: string]: unknown }>
->()
+>
+
+const hostAuthReconnectSlot = new HostSlot<{
+  authReconnectInFlight: AuthReconnectInFlightMap
+}>(() => ({
+  authReconnectInFlight: new Map(),
+}))
+
+function getAuthReconnectInFlightMap(): AuthReconnectInFlightMap {
+  return hostAuthReconnectSlot.of(getBootstrapSessionHost())
+    .authReconnectInFlight
+}
 
 export function getAuthReconnectInFlightKeysForTests(): string[] {
-  return [...authReconnectInFlight.keys()]
+  return [...getAuthReconnectInFlightMap().keys()]
 }
 
 export function clearAuthReconnectInFlight(): void {
-  authReconnectInFlight.clear()
+  getAuthReconnectInFlightMap().clear()
 }
 
 export function clearAuthReconnectInFlightForTests(): void {
@@ -115,7 +127,7 @@ export function clearAuthReconnectInFlightForTests(): void {
 }
 
 export function hasAuthReconnectInFlight(cacheKey: string): boolean {
-  return authReconnectInFlight.has(cacheKey)
+  return getAuthReconnectInFlightMap().has(cacheKey)
 }
 
 /**
@@ -128,7 +140,8 @@ export async function joinOrStartAuthReconnect<T extends { type: string }>(
   runReconnect: () => Promise<T>,
   log: (join: AuthReconnectJoin) => void,
 ): Promise<T> {
-  const existing = authReconnectInFlight.get(cacheKey) as Promise<T> | undefined
+  const inFlight = getAuthReconnectInFlightMap()
+  const existing = inFlight.get(cacheKey) as Promise<T> | undefined
   if (existing) {
     log({ role: 'collateral', kind })
     return existing
@@ -136,13 +149,13 @@ export async function joinOrStartAuthReconnect<T extends { type: string }>(
 
   log({ role: 'leader', kind })
   const promise = (async () => runReconnect())()
-  authReconnectInFlight.set(
+  inFlight.set(
     cacheKey,
     promise as Promise<{ type: string; [k: string]: unknown }>,
   )
   try {
     return await promise
   } finally {
-    authReconnectInFlight.delete(cacheKey)
+    inFlight.delete(cacheKey)
   }
 }

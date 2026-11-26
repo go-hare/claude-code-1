@@ -23,6 +23,12 @@ import {
   getCommandQueue,
 } from '../messageQueueManager.js'
 import { emitTaskTerminatedSdk, enqueueSdkEvent } from '../sdkEventQueue.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import { escapeXml } from '../xml.js'
 import { getTaskOutputDelta, getTaskOutputPath } from './diskOutput.js'
 
@@ -316,17 +322,35 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
  * live tasks + command queue so c7u→u7u can patch fan/budget/inFlight.
  * Debounced microtask; no-op outside CLAUDE_JOB_DIR sessions.
  */
-let bgInFlightStampScheduled = false
-let bgInFlightStampTasks: Record<string, TaskState> | null = null
+type BgInFlightStampHostState = {
+  scheduled: boolean
+  tasks: Record<string, TaskState> | null
+}
+
+const bgInFlightStampByHost = new HostSlot<BgInFlightStampHostState>(() => ({
+  scheduled: false,
+  tasks: null,
+}))
+
 function scheduleBgInFlightStamp(tasks: Record<string, TaskState>): void {
-  bgInFlightStampTasks = tasks
-  if (bgInFlightStampScheduled) return
-  bgInFlightStampScheduled = true
+  const state = bgInFlightStampByHost.of(getBootstrapSessionHost())
+  state.tasks = tasks
+  if (state.scheduled) return
+  state.scheduled = true
+  const rootSessionRef = new WeakRef(getBootstrapSession().root)
   queueMicrotask(() => {
-    bgInFlightStampScheduled = false
-    const snap = bgInFlightStampTasks
-    bgInFlightStampTasks = null
-    if (snap) void stampBgInFlightFromLiveState(snap)
+    state.scheduled = false
+    const snap = state.tasks
+    state.tasks = null
+    if (!snap) return
+    const session = rootSessionRef.deref()
+    if (session) {
+      runWithSession(session, () => {
+        void stampBgInFlightFromLiveState(snap)
+      })
+    } else {
+      void stampBgInFlightFromLiveState(snap)
+    }
   })
 }
 

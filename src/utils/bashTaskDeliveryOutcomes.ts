@@ -210,12 +210,16 @@ export class BashTaskDeliveryBag {
 const bags = new WeakOwnerCache(() => new BashTaskDeliveryBag())
 let testFallback: BashTaskDeliveryBag | undefined
 
+export function bashTaskDeliveryBagOf(host: object): BashTaskDeliveryBag {
+  return bags.of(host)
+}
+
 export function getBashTaskDeliveryBag(): BashTaskDeliveryBag {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getBootstrapSessionHost } =
       require('./sessionRoot.js') as typeof import('./sessionRoot.js')
-    return bags.of(getBootstrapSessionHost())
+    return bashTaskDeliveryBagOf(getBootstrapSessionHost())
   } catch {
     return (testFallback ??= new BashTaskDeliveryBag())
   }

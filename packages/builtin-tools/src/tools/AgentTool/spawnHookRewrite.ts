@@ -20,6 +20,7 @@ import {
   getDenyRules,
 } from 'src/utils/permissions/permissions.js'
 import { autoModeHasDenyRules } from 'src/utils/permissions/nhoGates.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { WEB_FETCH_TOOL_NAME } from '../WebFetchTool/prompt.js'
 import { shouldSkipTeammateSpawnForWebFetch } from './built-in/webFetchAgent.js'
 
@@ -212,14 +213,18 @@ export async function spawnRewriteRuling(
   return { behavior: 'ask', message: next.message }
 }
 
-const unreviewedWebFetch = new Set<string>()
+const unreviewedWebFetchSlot = new RootSessionSlot<Set<string>>(() => new Set())
+
+function getUnreviewedWebFetch(): Set<string> {
+  return unreviewedWebFetchSlot.of(getBootstrapSession())
+}
 
 /** densable Mt — true once, then the stamp is spent. */
 export function consumeUnreviewedWebFetch(
   toolUseId: string | undefined,
 ): boolean {
   if (toolUseId === undefined || toolUseId === '') return false
-  return unreviewedWebFetch.delete(toolUseId)
+  return getUnreviewedWebFetch().delete(toolUseId)
 }
 
 // densable Awt — stop the match at C0 controls and ellipsis.
@@ -272,7 +277,7 @@ export async function maybeStampUnreviewedWebFetch(input: {
   context: ToolUseContext
 }): Promise<void> {
   const id = input.toolUseId
-  if (id !== undefined && id !== '') unreviewedWebFetch.delete(id)
+  if (id !== undefined && id !== '') getUnreviewedWebFetch().delete(id)
   if (id === undefined || id === '') return
   if (input.context.getAppState().toolPermissionContext.mode !== 'auto') {
     return
@@ -310,5 +315,5 @@ export async function maybeStampUnreviewedWebFetch(input: {
   } catch {
     return
   }
-  unreviewedWebFetch.add(id)
+  getUnreviewedWebFetch().add(id)
 }

@@ -4,23 +4,45 @@
  * different value "conflict".
  */
 
-let hoverRestOn: boolean | undefined
+import {
+  getBootstrapSessionHost,
+  HostSlot,
+  ofDefaultHost,
+} from '../sessionHost.js'
+
+const hoverRestPinHostSlot = new HostSlot<{
+  hoverRestOn: boolean | undefined
+}>(() => ({
+  hoverRestOn: undefined,
+}))
+
+function getHoverRestPinState(): { hoverRestOn: boolean | undefined } {
+  return hoverRestPinHostSlot.of(getBootstrapSessionHost())
+}
 
 export type HoverRestPinResult = 'pinned' | 'unchanged' | 'conflict'
 
 export function isHoverRestOn(): boolean {
-  return hoverRestOn === true
+  const own = hoverRestPinHostSlot.peek(getBootstrapSessionHost())
+  if (own !== undefined && own.hoverRestOn !== undefined) {
+    return own.hoverRestOn === true
+  }
+  return ofDefaultHost(hoverRestPinHostSlot).hoverRestOn === true
 }
 
 export function pinHoverRest(value: unknown): HoverRestPinResult {
+  const state = getHoverRestPinState()
   const on = value === true
-  if (hoverRestOn === undefined) {
-    hoverRestOn = on
+  if (state.hoverRestOn === undefined) {
+    state.hoverRestOn = on
     return 'pinned'
   }
-  return hoverRestOn === on ? 'unchanged' : 'conflict'
+  return state.hoverRestOn === on ? 'unchanged' : 'conflict'
 }
 
 export function resetHoverRestPinForTests(): void {
-  hoverRestOn = undefined
+  const slot = hoverRestPinHostSlot.peek(getBootstrapSessionHost())
+  if (slot) {
+    slot.hoverRestOn = undefined
+  }
 }

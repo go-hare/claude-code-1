@@ -32,6 +32,7 @@ import type { ProcessUserInputContext } from '../../utils/processUserInput/proce
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { logForDebugging } from '../../utils/debug.js';
+import { getBootstrapSession, RootSessionSlot } from '../../utils/sessionHost.js';
 import {
   type BtwHistoryEntry,
   getBtwHistory,
@@ -70,21 +71,27 @@ type InFlightBtwEntry = {
   abort: () => void;
 };
 
-let inFlightBtwQuestions: InFlightBtwEntry[] = [];
+const inFlightBtwSessionSlot = new RootSessionSlot<{
+  questions: InFlightBtwEntry[];
+}>(() => ({
+  questions: [],
+}));
 
 export function getInFlightBtw(): InFlightBtwEntry | null {
-  return inFlightBtwQuestions.at(-1) ?? null;
+  return inFlightBtwSessionSlot.of(getBootstrapSession()).questions.at(-1) ?? null;
 }
 
 function setInFlightBtw(entry: InFlightBtwEntry): void {
-  if (!inFlightBtwQuestions.includes(entry)) {
-    inFlightBtwQuestions = [...inFlightBtwQuestions, entry];
+  const slot = inFlightBtwSessionSlot.of(getBootstrapSession());
+  if (!slot.questions.includes(entry)) {
+    slot.questions = [...slot.questions, entry];
   }
 }
 
 function clearInFlightBtw(entry: InFlightBtwEntry): void {
-  if (inFlightBtwQuestions.includes(entry)) {
-    inFlightBtwQuestions = inFlightBtwQuestions.filter(e => e !== entry);
+  const slot = inFlightBtwSessionSlot.of(getBootstrapSession());
+  if (slot.questions.includes(entry)) {
+    slot.questions = slot.questions.filter(e => e !== entry);
   }
 }
 

@@ -10,6 +10,7 @@ import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { gitExe } from '../git.js'
 import * as lockfile from '../lockfile.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import { getAgentName, getTeamName, isTeammate } from '../teammate.js'
 import {
@@ -912,23 +913,27 @@ export function unregisterTeamForSessionCleanup(teamName: string): void {
 }
 
 /**
- * Process-owned pane tracking (official 2.1.331 `sNi` / `fVs`).
- * Ensures session cleanup only kills panes spawned by THIS leader process,
+ * Host-owned pane tracking (official 2.1.331 `sNi` / `fVs`).
+ * Ensures session cleanup only kills panes spawned by THIS leader host,
  * never panes owned by another session sharing or reclaiming a team name.
  */
-const spawnedTeammatePanes = new Set<string>()
+const spawnedTeammatePanesHostSlot = new HostSlot<Set<string>>(() => new Set())
+
+function getSpawnedTeammatePanes(): Set<string> {
+  return spawnedTeammatePanesHostSlot.of(getBootstrapSessionHost())
+}
 
 function paneOwnershipKey(backendType: BackendType, paneId: string): string {
   return `${backendType}:${paneId}`
 }
 
-/** Official 2.1.331 `sNi` — record a pane spawned by this leader process. */
+/** Official 2.1.331 `sNi` — record a pane spawned by this leader host. */
 export function recordSpawnedTeammatePane(
   backendType: BackendType,
   paneId: string,
 ): void {
   if (isPaneBackend(backendType) && paneId) {
-    spawnedTeammatePanes.add(paneOwnershipKey(backendType, paneId))
+    getSpawnedTeammatePanes().add(paneOwnershipKey(backendType, paneId))
   }
 }
 
@@ -937,12 +942,12 @@ export function untrackSpawnedTeammatePane(
   paneId: string,
 ): void {
   if (isPaneBackend(backendType) && paneId) {
-    spawnedTeammatePanes.delete(paneOwnershipKey(backendType, paneId))
+    getSpawnedTeammatePanes().delete(paneOwnershipKey(backendType, paneId))
   }
 }
 
 export function _resetSpawnedTeammatePanesForTesting(): void {
-  spawnedTeammatePanes.clear()
+  getSpawnedTeammatePanes().clear()
 }
 
 /**
@@ -976,7 +981,7 @@ export async function killOrphanedTeammatePanes(
   const teamFile = await readTeamFileAsync(teamName)
   if (!teamFile) return
 
-  const owned = ownedPanes ?? spawnedTeammatePanes
+  const owned = ownedPanes ?? getSpawnedTeammatePanes()
   const paneMembers = teamFile.members.filter(
     m =>
       m.name !== TEAM_LEAD_NAME &&

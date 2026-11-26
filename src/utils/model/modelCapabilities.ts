@@ -1,7 +1,6 @@
 import { readFileSync } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
 import isEqual from 'lodash-es/isEqual.js'
-import memoize from 'lodash-es/memoize.js'
 import { join } from 'path'
 import { z } from 'zod/v4'
 import { OAUTH_BETA_HEADER } from '../../constants/oauth.js'
@@ -12,6 +11,7 @@ import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { safeParseJSON } from '../json.js'
 import { lazySchema } from '../lazySchema.js'
 import { isEssentialTrafficOnly } from '../privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { jsonStringify } from '../slowOperations.js'
 import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './providers.js'
 
@@ -64,20 +64,45 @@ function sortForMatching(models: ModelCapability[]): ModelCapability[] {
   )
 }
 
-// Keyed on cache path so tests that set CLAUDE_CONFIG_DIR get a fresh read
-const loadCache = memoize(
-  (path: string): ModelCapability[] | null => {
+const loadCacheHostSlot = new HostSlot<{
+  cache: Map<string, ModelCapability[] | null>
+}>(() => ({
+  cache: new Map(),
+}))
+
+type LoadCacheFn = ((path: string) => ModelCapability[] | null) & {
+  cache: Map<string, ModelCapability[] | null>
+}
+
+// Keyed on cache path per SessionHost so concurrent hosts and CLAUDE_CONFIG_DIR overrides stay isolated
+const loadCache: LoadCacheFn = (() => {
+  const fn = (path: string): ModelCapability[] | null => {
+    const cache = loadCacheHostSlot.of(getBootstrapSessionHost()).cache
+    if (cache.has(path)) {
+      return cache.get(path) ?? null
+    }
+    let result: ModelCapability[] | null = null
     try {
       // eslint-disable-next-line custom-rules/no-sync-fs -- memoized; called from sync getContextWindowForModel
       const raw = readFileSync(path, 'utf-8')
       const parsed = CacheFileSchema().safeParse(safeParseJSON(raw, false))
-      return parsed.success ? parsed.data.models : null
+      result = parsed.success ? parsed.data.models : null
     } catch {
-      return null
+      result = null
     }
-  },
-  path => path,
-)
+    cache.set(path, result)
+    return result
+  }
+  Object.defineProperty(fn, 'cache', {
+    get: () => loadCacheHostSlot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<string, ModelCapability[] | null>) => {
+      loadCacheHostSlot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as LoadCacheFn
+})()
 
 export function getModelCapability(model: string): ModelCapability | undefined {
   if (!isModelCapabilitiesEligible()) return undefined

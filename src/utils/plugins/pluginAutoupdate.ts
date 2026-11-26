@@ -19,6 +19,7 @@ import { shouldSkipPluginAutoupdate } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { sleep } from '../sleep.js'
 import {
   getPendingUpdatesDetails,
@@ -39,12 +40,21 @@ import { isMarketplaceAutoUpdate, type PluginScope } from './schemas.js'
  */
 export type PluginAutoUpdateCallback = (updatedPlugins: string[]) => void
 
-// Store callback for plugin update notifications
-let pluginUpdateCallback: PluginAutoUpdateCallback | null = null
+type PluginAutoupdateHostState = {
+  pluginUpdateCallback: PluginAutoUpdateCallback | null
+  pendingNotification: string[] | null
+}
 
-// Store pending updates that occurred before callback was registered
-// This handles the race condition where updates complete before REPL mounts
-let pendingNotification: string[] | null = null
+const pluginAutoupdateHostSlot = new HostSlot<PluginAutoupdateHostState>(
+  () => ({
+    pluginUpdateCallback: null,
+    pendingNotification: null,
+  }),
+)
+
+function getPluginAutoupdateHostState(): PluginAutoupdateHostState {
+  return pluginAutoupdateHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Register a callback to be notified when plugins are auto-updated.
@@ -56,16 +66,22 @@ let pendingNotification: string[] | null = null
 export function onPluginsAutoUpdated(
   callback: PluginAutoUpdateCallback,
 ): () => void {
-  pluginUpdateCallback = callback
+  const hostState = getPluginAutoupdateHostState()
+  hostState.pluginUpdateCallback = callback
 
   // If there are pending updates that happened before registration, deliver them now
-  if (pendingNotification !== null && pendingNotification.length > 0) {
-    callback(pendingNotification)
-    pendingNotification = null
+  if (
+    hostState.pendingNotification !== null &&
+    hostState.pendingNotification.length > 0
+  ) {
+    callback(hostState.pendingNotification)
+    hostState.pendingNotification = null
   }
 
   return () => {
-    pluginUpdateCallback = null
+    if (hostState.pluginUpdateCallback === callback) {
+      hostState.pluginUpdateCallback = null
+    }
   }
 }
 
@@ -355,12 +371,13 @@ export function autoUpdateMarketplacesAndPluginsInBackground(
       stats.plugins_updated = updatedPlugins.length
 
       if (updatedPlugins.length > 0) {
-        if (pluginUpdateCallback) {
+        const hostState = getPluginAutoupdateHostState()
+        if (hostState.pluginUpdateCallback) {
           // Callback is already registered, invoke it immediately
-          pluginUpdateCallback(updatedPlugins)
+          hostState.pluginUpdateCallback(updatedPlugins)
         } else {
           // Callback not yet registered (REPL not mounted), store for later delivery
-          pendingNotification = updatedPlugins
+          hostState.pendingNotification = updatedPlugins
         }
       }
 

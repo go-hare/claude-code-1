@@ -16,6 +16,14 @@ import {
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { errorMessage } from '../errors.js'
+import { HostSlot, RootSessionSlot } from '../hostSlot.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  ofDefaultHost,
+  runWithSession,
+} from '../sessionRoot.js'
 import { withDeadline } from '../sleep.js'
 import { getTelemetryAttributes } from '../telemetryAttributes.js'
 import { getActiveInteractionOTelContext } from './interactionOtelContext.js'
@@ -60,10 +68,31 @@ export function getOTelEventParentContext(): Context | undefined {
 }
 
 // Monotonically increasing counter for ordering events within a session
-let eventSequence = 0
+const eventSequenceSessionSlot = new RootSessionSlot<{
+  eventSequence: number
+}>(() => ({
+  eventSequence: 0,
+}))
 
-// Track whether we've already warned about a null event logger to avoid spamming
-let hasWarnedNoEventLogger = false
+// Track whether we've already warned about a null event logger per host to avoid spamming
+type EventsHostState = {
+  hasWarnedNoEventLogger: boolean
+  collectorRoad: InternalCollectorTelemetryRoad
+}
+
+const eventsHostSlot: HostSlot<EventsHostState> = new HostSlot<EventsHostState>(
+  (): EventsHostState => ({
+    hasWarnedNoEventLogger: false,
+    collectorRoad: createInternalCollectorTelemetryRoad(
+      (): InternalCollectorTelemetryRoad =>
+        ofDefaultHost(eventsHostSlot).collectorRoad,
+    ),
+  }),
+)
+
+function getEventsHostState(): EventsHostState {
+  return eventsHostSlot.of(getBootstrapSessionHost())
+}
 
 /** densable Dtg / official bLh — default max chars for OTEL content. */
 export const OTEL_CONTENT_TRUNCATE_LIMIT = 61440
@@ -342,16 +371,31 @@ function sendCollectorEntryOnRoad(
     )
 }
 
-/**
- * densable Z / Xue — serialized 3P collector road (`telemetry.log` `{ to: "collector" }`).
- */
-export function createCollectorTelemetryRoad(): CollectorTelemetryRoad {
+type InternalCollectorTelemetryRoad = CollectorTelemetryRoad & {
+  waitForRoad: () => Promise<CollectorTelemetryRoadEndpoint>
+}
+
+function createInternalCollectorTelemetryRoad(
+  getDefaultRoad?: () => InternalCollectorTelemetryRoad,
+): InternalCollectorTelemetryRoad {
   let currentRoad: CollectorTelemetryRoadEndpoint | null = null
+  let ownRoadSet = false
   let waitingForRoad = false
   let pendingRoad = createDeferred<CollectorTelemetryRoadEndpoint>()
   let inFlight: Promise<void> | null = null
   let abortController = new AbortController()
   let waitingCount = 0
+
+  function resolveFallbackRoad(): InternalCollectorTelemetryRoad | null {
+    if (ownRoadSet || !getDefaultRoad) return null
+    const defaultRoad = getDefaultRoad()
+    return defaultRoad === self ? null : defaultRoad
+  }
+
+  function getEffectiveRoad(): CollectorTelemetryRoadEndpoint | null {
+    const fallback = resolveFallbackRoad()
+    return fallback !== null ? fallback.getRoad() : currentRoad
+  }
 
   async function settled(): Promise<void> {
     while (inFlight !== null) {
@@ -369,8 +413,9 @@ export function createCollectorTelemetryRoad(): CollectorTelemetryRoad {
     inFlight = null
   }
 
-  return {
+  const self: InternalCollectorTelemetryRoad = {
     setRoad: (road: CollectorTelemetryRoadEndpoint | null) => {
+      ownRoadSet = true
       currentRoad = road
       if (road === null) {
         waitingForRoad = true
@@ -381,14 +426,21 @@ export function createCollectorTelemetryRoad(): CollectorTelemetryRoad {
         pendingRoad.resolve(road)
       }
     },
-    getRoad: () => currentRoad,
-    isWaitingForRoad: () => waitingForRoad,
+    getRoad: () => getEffectiveRoad(),
+    isWaitingForRoad: () => {
+      const fallback = resolveFallbackRoad()
+      return fallback !== null ? fallback.isWaitingForRoad() : waitingForRoad
+    },
+    waitForRoad: () =>
+      currentRoad !== null ? Promise.resolve(currentRoad) : pendingRoad.promise,
     route: (
       buildEntry: () => OTelCollectorLogEntry,
       parentContext?: Context,
     ) => {
-      const roadMissing = currentRoad === null
-      if (roadMissing && waitingCount >= MAX_WAITING_COLLECTOR_RECORDS) {
+      const roadMissing = getEffectiveRoad() === null
+      if (!roadMissing) {
+        waitingCount = 0
+      } else if (waitingCount >= MAX_WAITING_COLLECTOR_RECORDS) {
         logForDebugging(
           '[3P telemetry] Event record dropped: no road installed and too many already waiting for one',
           { level: 'warn' },
@@ -404,15 +456,39 @@ export function createCollectorTelemetryRoad(): CollectorTelemetryRoad {
         parentContext,
         initialSpan,
       }
+      const captured = getActiveSessionFromAls()
       const next = (inFlight ?? Promise.resolve())
-        .then(() => currentRoad ?? pendingRoad.promise)
-        .then(road => sendCollectorEntryOnRoad(road, item))
-        .catch((err: unknown) =>
-          logForDebugging(
-            `[3P telemetry] Event record dropped: ${errorMessage(err)}`,
-            { level: 'warn' },
-          ),
+        .then(() => {
+          const effective = getEffectiveRoad()
+          if (effective !== null) return effective
+          const fallback = resolveFallbackRoad()
+          if (fallback !== null) {
+            return Promise.race([pendingRoad.promise, fallback.waitForRoad()])
+          }
+          return pendingRoad.promise
+        })
+        .then(road =>
+          captured !== undefined && getActiveSessionFromAls() !== captured
+            ? runWithSession(captured, () =>
+                sendCollectorEntryOnRoad(road, item),
+              )
+            : sendCollectorEntryOnRoad(road, item),
         )
+        .catch((err: unknown) => {
+          const logErr = () =>
+            logForDebugging(
+              `[3P telemetry] Event record dropped: ${errorMessage(err)}`,
+              { level: 'warn' },
+            )
+          if (
+            captured !== undefined &&
+            getActiveSessionFromAls() !== captured
+          ) {
+            runWithSession(captured, logErr)
+          } else {
+            logErr()
+          }
+        })
       inFlight = next
       void next.then(() => {
         if (inFlight === next) inFlight = null
@@ -423,10 +499,26 @@ export function createCollectorTelemetryRoad(): CollectorTelemetryRoad {
     settledWithin: (ms: number) =>
       withDeadline(settled(), ms).then(stopWaitingOnFlush),
   }
+
+  return self
 }
 
-export const collectorTelemetryRoad: CollectorTelemetryRoad =
-  createCollectorTelemetryRoad()
+/**
+ * densable Z / Xue — serialized 3P collector road (`telemetry.log` `{ to: "collector" }`).
+ */
+export function createCollectorTelemetryRoad(): CollectorTelemetryRoad {
+  return createInternalCollectorTelemetryRoad()
+}
+
+export const collectorTelemetryRoad: CollectorTelemetryRoad = {
+  setRoad: road => getEventsHostState().collectorRoad.setRoad(road),
+  getRoad: () => getEventsHostState().collectorRoad.getRoad(),
+  isWaitingForRoad: () => getEventsHostState().collectorRoad.isWaitingForRoad(),
+  route: (buildEntry, parentContext) =>
+    getEventsHostState().collectorRoad.route(buildEntry, parentContext),
+  settled: () => getEventsHostState().collectorRoad.settled(),
+  settledWithin: ms => getEventsHostState().collectorRoad.settledWithin(ms),
+}
 
 function isCollectorAttributeValue(
   value: unknown,
@@ -496,8 +588,9 @@ export function emitOTelCollectorLogRecord(
     eventLogger.emit(record)
     return
   }
-  if (!hasWarnedNoEventLogger) {
-    hasWarnedNoEventLogger = true
+  const hostState = getEventsHostState()
+  if (!hostState.hasWarnedNoEventLogger) {
+    hostState.hasWarnedNoEventLogger = true
     logForDebugging(
       `[3P telemetry] Event dropped (no event logger initialized): ${eventName}`,
       {
@@ -643,11 +736,12 @@ function buildHostOTelAttributes(
   eventName: string,
   metadata: { [key: string]: string | undefined },
 ): Attributes {
+  const seqState = eventSequenceSessionSlot.of(getBootstrapSession())
   const attributes: Attributes = {
     ...safeGetTelemetryAttributes(),
     'event.name': eventName,
     'event.timestamp': new Date().toISOString(),
-    'event.sequence': eventSequence++,
+    'event.sequence': seqState.eventSequence++,
   }
 
   // Add prompt ID to events (but not metrics, where it would cause unbounded cardinality)
@@ -688,8 +782,9 @@ export async function logOTelEvent(
   if (!useCollectorRoad) {
     const eventLogger = getEventLogger()
     if (!eventLogger) {
-      if (!hasWarnedNoEventLogger) {
-        hasWarnedNoEventLogger = true
+      const hostState = getEventsHostState()
+      if (!hostState.hasWarnedNoEventLogger) {
+        hostState.hasWarnedNoEventLogger = true
         logForDebugging(
           `[3P telemetry] Event dropped (no event logger initialized): ${eventName}`,
           {

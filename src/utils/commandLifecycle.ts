@@ -1,4 +1,5 @@
 import { enqueueSdkEvent } from './sdkEventQueue.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 /**
  * densable S8o / Host command_lifecycle states (2.1.218 #11).
@@ -18,12 +19,27 @@ type CommandLifecycleListener = (
   state: CommandLifecycleState,
 ) => void
 
-let listener: CommandLifecycleListener | null = null
+const fallbackCommandLifecycleSession = { root: {} as object }
+const commandLifecycleBySession = new RootSessionSlot<{
+  listener: CommandLifecycleListener | null
+}>(() => ({ listener: null }))
+
+function getCommandLifecycleState(): {
+  listener: CommandLifecycleListener | null
+} {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return commandLifecycleBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return commandLifecycleBySession.of(fallbackCommandLifecycleSession)
+}
 
 export function setCommandLifecycleListener(
   cb: CommandLifecycleListener | null,
 ): void {
-  listener = cb
+  getCommandLifecycleState().listener = cb
 }
 
 /**
@@ -36,7 +52,7 @@ export function notifyCommandLifecycle(
   uuid: string,
   state: CommandLifecycleState,
 ): void {
-  listener?.(uuid, state)
+  getCommandLifecycleState().listener?.(uuid, state)
   if (!uuid) return
   enqueueSdkEvent({
     type: 'command_lifecycle',

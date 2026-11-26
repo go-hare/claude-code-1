@@ -20,6 +20,7 @@ import { getClaudeConfigHomeDir } from '../../utils/envUtils.js';
 import { getDisplayPath } from '../../utils/file.js';
 import { formatRelativeTimeAgo } from '../../utils/format.js';
 import { projectIsInGitRepo } from '../../utils/memory/versions.js';
+import { getBootstrapSession, RootSessionSlot } from '../../utils/sessionRoot.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 import { ItemList } from '../ItemList.js';
 
@@ -34,8 +35,14 @@ interface ExtendedMemoryFileInfo extends MemoryFileInfo {
   exists: boolean;
 }
 
-// Remember last selected path
-let lastSelectedPath: string | undefined;
+// Remember last selected path per root session
+const memoryFileSelectorStateBySession = new RootSessionSlot<{
+  lastSelectedPath: string | undefined;
+}>(() => ({ lastSelectedPath: undefined }));
+
+function getMemoryFileSelectorState(): { lastSelectedPath: string | undefined } {
+  return memoryFileSelectorStateBySession.of(getBootstrapSession());
+}
 
 const OPEN_FOLDER_PREFIX = '__open_folder__';
 
@@ -174,7 +181,9 @@ export function MemoryFileSelector({ onSelect, onCancel }: Props): React.ReactNo
 
   memoryOptions.push(...folderOptions);
 
+  const [selectorState] = useState(() => getMemoryFileSelectorState());
   // Initialize with last selected path if it's still in the options, otherwise use first option
+  const lastSelectedPath = selectorState.lastSelectedPath;
   const initialPath =
     lastSelectedPath && memoryOptions.some(opt => opt.value === lastSelectedPath)
       ? lastSelectedPath
@@ -328,7 +337,7 @@ export function MemoryFileSelector({ onSelect, onCancel }: Props): React.ReactNo
               .then(() => openPath(folderPath));
             return;
           }
-          lastSelectedPath = value;
+          selectorState.lastSelectedPath = value;
           onSelect(value);
         }}
         onCancel={onCancel}

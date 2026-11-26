@@ -23,6 +23,10 @@
 import { queryHaiku } from '../api/claude.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { logForDebugging } from '../../utils/debug.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 
 const INTENT_SYSTEM_PROMPT = `You are a query normalizer for a skill-search index.
 
@@ -57,10 +61,17 @@ const MAX_KEYWORDS_CHARS = 120
 const CACHE_MAX_ENTRIES = 200
 const CACHE_TRIM_TO = 150
 
-/** Process-level cache. Keyed by the original (trimmed) query. */
-const cache = new Map<string, string>()
+/** Per-root-session cache. Keyed by the original (trimmed) query. */
+const intentNormalizeCacheSlot = new RootSessionSlot<Map<string, string>>(
+  () => new Map(),
+)
+
+function getIntentNormalizeCache(): Map<string, string> {
+  return intentNormalizeCacheSlot.of(getBootstrapSession())
+}
 
 function setCachedQueryIntent(key: string, value: string): void {
+  const cache = getIntentNormalizeCache()
   // Refresh insertion order on hit-then-write so frequently-used keys
   // stay alive (delete + set is the canonical Map-LRU idiom).
   if (cache.has(key)) cache.delete(key)
@@ -82,7 +93,7 @@ export function isIntentNormalizeEnabled(): boolean {
 
 /** Only reset between tests. */
 export function clearIntentNormalizeCache(): void {
-  cache.clear()
+  getIntentNormalizeCache().clear()
 }
 
 /**
@@ -98,6 +109,7 @@ export async function normalizeQueryIntent(query: string): Promise<string> {
   // ASCII-only queries are already in the right shape for the index.
   if (!/[\u4e00-\u9fff]/.test(trimmed)) return trimmed
 
+  const cache = getIntentNormalizeCache()
   const cached = cache.get(trimmed)
   if (cached !== undefined) {
     // Refresh LRU position so frequently-queried strings survive eviction.

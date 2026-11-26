@@ -22,6 +22,11 @@ import {
 } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js'
 import type { LocalJSXCommandCall } from '../../types/command.js'
 import { detectCurrentRepositoryWithHost } from '../../utils/detectRepository.js'
+import {
+  exitSessionContext,
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../../utils/sessionHost.js'
 import { archiveRemoteSession, teleportToRemote } from '../../utils/teleport.js'
 import {
   type AutofixPhase,
@@ -46,54 +51,67 @@ import { detectAutofixSkills, formatSkillsHint } from './skillDetect.js'
 // PR per CHECK_INTERVAL_MS, regardless of the framework's 1s poll cadence.
 // Key is `${owner}/${repo}#${prNumber}`. Cleared when the completion hook
 // fires so a re-launched monitor starts with a fresh budget.
-const lastCheckAt = new Map<string, number>()
+const lastCheckAtHostSlot = new HostSlot<Map<string, number>>(() => new Map())
 const CHECK_INTERVAL_MS = 5_000
 
 function throttleKey(meta: AutofixPrRemoteTaskMetadata): string {
   return `${meta.owner}/${meta.repo}#${meta.prNumber}`
 }
 
-// Register the completionChecker once at module load. The framework calls it
-// on every poll tick for tasks with remoteTaskType==='autofix-pr'; throttle
-// inside so we don't fire gh CLI 60×/min. Returns the summary string on
-// completion (becomes the task-notification body) or null to keep polling.
-registerCompletionChecker('autofix-pr', async metadata => {
-  const meta = metadata as AutofixPrRemoteTaskMetadata | undefined
-  if (!meta) return null
+// Register the autofix-pr completionChecker, completionHook, and contentExtractor
+// into RemoteAgentTask's boot-default catalog (outside ALS) so they remain
+// visible across all isolated hosts even if this command module is lazily
+// imported for the first time inside an active ALS session.
+exitSessionContext(() => {
+  // Register the completionChecker once at module load. The framework calls it
+  // on every poll tick for tasks with remoteTaskType==='autofix-pr'; throttle
+  // inside so we don't fire gh CLI 60×/min. Returns the summary string on
+  // completion (becomes the task-notification body) or null to keep polling.
+  registerCompletionChecker('autofix-pr', async metadata => {
+    const meta = metadata as AutofixPrRemoteTaskMetadata | undefined
+    if (!meta) return null
 
-  const key = throttleKey(meta)
-  const now = Date.now()
-  if (now - (lastCheckAt.get(key) ?? 0) < CHECK_INTERVAL_MS) return null
-  lastCheckAt.set(key, now)
+    const lastCheckAt = lastCheckAtHostSlot.of(getBootstrapSessionHost())
+    const key = throttleKey(meta)
+    const now = Date.now()
+    if (now - (lastCheckAt.get(key) ?? 0) < CHECK_INTERVAL_MS) return null
+    lastCheckAt.set(key, now)
 
-  const result = await checkPrAutofixOutcome({
-    owner: meta.owner,
-    repo: meta.repo,
-    prNumber: meta.prNumber,
-    initialHeadSha: meta.initialHeadSha,
+    const result = await checkPrAutofixOutcome({
+      owner: meta.owner,
+      repo: meta.repo,
+      prNumber: meta.prNumber,
+      initialHeadSha: meta.initialHeadSha,
+    })
+    return result.completed ? result.summary : null
   })
-  return result.completed ? result.summary : null
-})
 
-// Release the singleton monitor lock when the framework transitions the
-// autofix task to a terminal state. Without this, the lock — keyed by the
-// framework-assigned taskId (after callAutofixPr's updateActiveMonitor swap)
-// — would dangle past natural completion, blocking subsequent /autofix-pr
-// invocations until the process restarts. Registered at module load; the
-// framework's runCompletionHook invokes it once per terminal transition.
-// Also clear the per-PR throttle entry so a re-launch starts fresh.
-registerCompletionHook('autofix-pr', (taskId, metadata) => {
-  clearActiveMonitor(taskId)
-  const meta = metadata as AutofixPrRemoteTaskMetadata | undefined
-  if (meta) lastCheckAt.delete(throttleKey(meta))
-})
+  // Release the singleton monitor lock when the framework transitions the
+  // autofix task to a terminal state. Without this, the lock — keyed by the
+  // framework-assigned taskId (after callAutofixPr's updateActiveMonitor swap)
+  // — would dangle past natural completion, blocking subsequent /autofix-pr
+  // invocations until the process restarts. Registered at module load; the
+  // framework's runCompletionHook invokes it once per terminal transition.
+  // Also clear the per-PR throttle entry so a re-launch starts fresh.
+  registerCompletionHook('autofix-pr', (taskId, metadata) => {
+    clearActiveMonitor(taskId)
+    const meta = metadata as AutofixPrRemoteTaskMetadata | undefined
+    if (meta) {
+      lastCheckAtHostSlot
+        .of(getBootstrapSessionHost())
+        .delete(throttleKey(meta))
+    }
+  })
 
-// Phase 3 content return: extract the <autofix-result> tag from the session
-// log so the local model sees the agent's structured outcome (commits
-// pushed, files changed, CI status) inline in the completion task-
-// notification — instead of just a file-path pointer. The framework falls
-// back to the generic notification if extraction returns null.
-registerContentExtractor('autofix-pr', log => extractAutofixResultFromLog(log))
+  // Phase 3 content return: extract the <autofix-result> tag from the session
+  // log so the local model sees the agent's structured outcome (commits
+  // pushed, files changed, CI status) inline in the completion task-
+  // notification — instead of just a file-path pointer. The framework falls
+  // back to the generic notification if extraction returns null.
+  registerContentExtractor('autofix-pr', log =>
+    extractAutofixResultFromLog(log),
+  )
+})
 
 function makeErrorText(message: string, code: string): string {
   logEvent('tengu_autofix_pr_result', {

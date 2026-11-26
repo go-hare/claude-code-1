@@ -2,6 +2,10 @@
 import type { Message } from '../../types/message.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { QuerySource } from '../../constants/querySource.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 
 export interface ContextCollapseHealth {
   totalSpawns: number
@@ -40,10 +44,12 @@ export const getStats: () => ContextCollapseStats = () => ({
   },
 })
 
-let _contextCollapseEnabled = false
+const contextCollapseSlot = new RootSessionSlot<{ enabled: boolean }>(() => ({
+  enabled: false,
+}))
 
 export function isContextCollapseEnabled(): boolean {
-  return _contextCollapseEnabled
+  return contextCollapseSlot.of(getBootstrapSession()).enabled
 }
 
 export const subscribe: (callback: () => void) => () => void =
@@ -67,9 +73,9 @@ export const recoverFromOverflow: (
 ) => DrainResult = (messages: Message[]) => ({ committed: 0, messages })
 
 export function resetContextCollapse(): void {
-  _contextCollapseEnabled = false
+  contextCollapseSlot.of(getBootstrapSession()).enabled = false
 }
 
 export function initContextCollapse(): void {
-  _contextCollapseEnabled = true
+  contextCollapseSlot.of(getBootstrapSession()).enabled = true
 }

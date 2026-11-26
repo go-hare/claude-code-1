@@ -13,15 +13,34 @@
 
 import { shouldSkipEarlyInputForPipedHelp } from '../cli/promptAfterListOption.js'
 import { lastGrapheme } from './intl.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 
-// Buffer for early input characters
-let earlyInputBuffer = ''
-// Flag to track if we're currently capturing
-let isCapturing = false
-// Reference to the readable handler so we can remove it later
-let readableHandler: (() => void) | null = null
-// Safety valve: auto-cleanup after timeout so stdin.ref() never leaks
-let safetyTimer: ReturnType<typeof setTimeout> | null = null
+type EarlyInputHostState = {
+  // Buffer for early input characters
+  earlyInputBuffer: string
+  // Flag to track if we're currently capturing
+  isCapturing: boolean
+  // Reference to the readable handler so we can remove it later
+  readableHandler: (() => void) | null
+  // Safety valve: auto-cleanup after timeout so stdin.ref() never leaks
+  safetyTimer: ReturnType<typeof setTimeout> | null
+}
+
+const earlyInputHostSlot = new HostSlot<EarlyInputHostState>(() => ({
+  earlyInputBuffer: '',
+  isCapturing: false,
+  readableHandler: null,
+  safetyTimer: null,
+}))
+
+function getEarlyInputHostState(): EarlyInputHostState {
+  return earlyInputHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Start capturing stdin data early, before the REPL is initialized.
@@ -30,12 +49,13 @@ let safetyTimer: ReturnType<typeof setTimeout> | null = null
  * Only captures if stdin is a TTY (interactive terminal).
  */
 export function startCapturingEarlyInput(): void {
+  const state = getEarlyInputHostState()
   // Only capture in interactive mode: stdin must be a TTY, and we must not
   // be in print mode. Raw mode disables ISIG (terminal Ctrl+C → SIGINT),
   // which would make -p uninterruptible.
   if (
     !process.stdin.isTTY ||
-    isCapturing ||
+    state.isCapturing ||
     process.argv.includes('-p') ||
     process.argv.includes('--print') ||
     shouldSkipEarlyInputForPipedHelp(process.argv.slice(2))
@@ -43,8 +63,14 @@ export function startCapturingEarlyInput(): void {
     return
   }
 
-  isCapturing = true
-  earlyInputBuffer = ''
+  state.isCapturing = true
+  state.earlyInputBuffer = ''
+  const capturedSession = getActiveSessionFromAls()
+  const runInHost = <T>(fn: () => T): T =>
+    capturedSession !== undefined &&
+    getActiveSessionFromAls() !== capturedSession
+      ? runWithSession(capturedSession, fn)
+      : fn()
 
   // Set stdin to raw mode and use 'readable' event like Ink does
   // This ensures compatibility with how the REPL will handle stdin later
@@ -53,45 +79,49 @@ export function startCapturingEarlyInput(): void {
     process.stdin.setRawMode(true)
     process.stdin.ref()
 
-    readableHandler = () => {
-      let chunk = process.stdin.read()
-      while (chunk !== null) {
-        if (typeof chunk === 'string') {
-          processChunk(chunk)
+    state.readableHandler = () => {
+      runInHost(() => {
+        let chunk = process.stdin.read()
+        while (chunk !== null) {
+          if (typeof chunk === 'string') {
+            processChunk(state, chunk)
+          }
+          chunk = process.stdin.read()
         }
-        chunk = process.stdin.read()
-      }
+      })
     }
 
-    process.stdin.on('readable', readableHandler)
+    process.stdin.on('readable', state.readableHandler)
 
     // Safety valve: if Ink never takes over within 10s (e.g. setup dialog
     // stalls, or an error prevents Ink mount on Windows), unref stdin so
     // the process doesn't hang forever. The REPL's Ink App normally calls
     // consumeEarlyInput() → stopCapturingEarlyInput() long before this.
-    safetyTimer = setTimeout(() => {
-      if (isCapturing) {
-        stopCapturingEarlyInput()
-      }
+    state.safetyTimer = setTimeout(() => {
+      runInHost(() => {
+        if (state.isCapturing) {
+          stopCapturingEarlyInputFor(state)
+        }
+      })
     }, 10_000)
     // Don't let the timer itself keep the event loop alive
     if (
-      safetyTimer &&
-      typeof safetyTimer === 'object' &&
-      'unref' in safetyTimer
+      state.safetyTimer &&
+      typeof state.safetyTimer === 'object' &&
+      'unref' in state.safetyTimer
     ) {
-      safetyTimer.unref()
+      state.safetyTimer.unref()
     }
   } catch {
     // If we can't set raw mode, just silently continue without early capture
-    isCapturing = false
+    state.isCapturing = false
   }
 }
 
 /**
  * Process a chunk of input data
  */
-function processChunk(str: string): void {
+function processChunk(state: EarlyInputHostState, str: string): void {
   let i = 0
   while (i < str.length) {
     const char = str[i]!
@@ -101,7 +131,7 @@ function processChunk(str: string): void {
     // We use process.exit here instead of gracefulShutdown because at this
     // early stage of startup, the shutdown machinery isn't initialized yet.
     if (code === 3) {
-      stopCapturingEarlyInput()
+      stopCapturingEarlyInputFor(state)
       // eslint-disable-next-line custom-rules/no-process-exit
       process.exit(130) // Standard exit code for Ctrl+C
       return
@@ -109,15 +139,18 @@ function processChunk(str: string): void {
 
     // Ctrl+D (code 4) - EOF, stop capturing
     if (code === 4) {
-      stopCapturingEarlyInput()
+      stopCapturingEarlyInputFor(state)
       return
     }
 
     // Backspace (code 127 or 8) - remove last grapheme cluster
     if (code === 127 || code === 8) {
-      if (earlyInputBuffer.length > 0) {
-        const last = lastGrapheme(earlyInputBuffer)
-        earlyInputBuffer = earlyInputBuffer.slice(0, -(last.length || 1))
+      if (state.earlyInputBuffer.length > 0) {
+        const last = lastGrapheme(state.earlyInputBuffer)
+        state.earlyInputBuffer = state.earlyInputBuffer.slice(
+          0,
+          -(last.length || 1),
+        )
       }
       i++
       continue
@@ -194,37 +227,33 @@ function processChunk(str: string): void {
 
     // Convert carriage return to newline
     if (code === 13) {
-      earlyInputBuffer += '\n'
+      state.earlyInputBuffer += '\n'
       i++
       continue
     }
 
     // Add printable characters and allowed control chars to buffer
-    earlyInputBuffer += char
+    state.earlyInputBuffer += char
     i++
   }
 }
 
-/**
- * Stop capturing early input.
- * Called automatically when input is consumed, or can be called manually.
- */
-export function stopCapturingEarlyInput(): void {
-  if (!isCapturing) {
+function stopCapturingEarlyInputFor(state: EarlyInputHostState): void {
+  if (!state.isCapturing) {
     return
   }
 
-  isCapturing = false
+  state.isCapturing = false
 
   // Clear safety timer
-  if (safetyTimer) {
-    clearTimeout(safetyTimer)
-    safetyTimer = null
+  if (state.safetyTimer) {
+    clearTimeout(state.safetyTimer)
+    state.safetyTimer = null
   }
 
-  if (readableHandler) {
-    process.stdin.removeListener('readable', readableHandler)
-    readableHandler = null
+  if (state.readableHandler) {
+    process.stdin.removeListener('readable', state.readableHandler)
+    state.readableHandler = null
   }
 
   // Undo the ref() from startCapturingEarlyInput so the event loop isn't
@@ -247,6 +276,16 @@ export function stopCapturingEarlyInput(): void {
 }
 
 /**
+ * Stop capturing early input.
+ * Called automatically when input is consumed, or can be called manually.
+ */
+export function stopCapturingEarlyInput(): void {
+  const state = earlyInputHostSlot.peek(getBootstrapSessionHost())
+  if (!state) return
+  stopCapturingEarlyInputFor(state)
+}
+
+/**
  * Detach the startup stdin listener without discarding buffered text.
  *
  * Setup dialogs render before the REPL consumes the buffer. Their arrow
@@ -254,20 +293,21 @@ export function stopCapturingEarlyInput(): void {
  * listener is gone. Raw mode stays on: Ink sets it again.
  */
 export function releaseEarlyInputCapture(): void {
-  if (!isCapturing) {
+  const state = earlyInputHostSlot.peek(getBootstrapSessionHost())
+  if (!state || !state.isCapturing) {
     return
   }
 
-  isCapturing = false
+  state.isCapturing = false
 
-  if (safetyTimer) {
-    clearTimeout(safetyTimer)
-    safetyTimer = null
+  if (state.safetyTimer) {
+    clearTimeout(state.safetyTimer)
+    state.safetyTimer = null
   }
 
-  if (readableHandler) {
-    process.stdin.removeListener('readable', readableHandler)
-    readableHandler = null
+  if (state.readableHandler) {
+    process.stdin.removeListener('readable', state.readableHandler)
+    state.readableHandler = null
   }
 
   try {
@@ -279,7 +319,9 @@ export function releaseEarlyInputCapture(): void {
 
 /** Check if early input capture is currently active. */
 export function isCapturingEarlyInput(): boolean {
-  return isCapturing
+  return (
+    earlyInputHostSlot.peek(getBootstrapSessionHost())?.isCapturing ?? false
+  )
 }
 
 /**
@@ -288,9 +330,11 @@ export function isCapturingEarlyInput(): boolean {
  * Automatically stops capturing when called.
  */
 export function consumeEarlyInput(): string {
-  stopCapturingEarlyInput()
-  const input = earlyInputBuffer.trim()
-  earlyInputBuffer = ''
+  const state = earlyInputHostSlot.peek(getBootstrapSessionHost())
+  if (!state) return ''
+  stopCapturingEarlyInputFor(state)
+  const input = state.earlyInputBuffer.trim()
+  state.earlyInputBuffer = ''
   return input
 }
 
@@ -298,7 +342,8 @@ export function consumeEarlyInput(): string {
  * Check if there is any early input available without consuming it.
  */
 export function hasEarlyInput(): boolean {
-  return earlyInputBuffer.trim().length > 0
+  const state = earlyInputHostSlot.peek(getBootstrapSessionHost())
+  return state ? state.earlyInputBuffer.trim().length > 0 : false
 }
 
 /**
@@ -306,5 +351,5 @@ export function hasEarlyInput(): boolean {
  * in the prompt input when the REPL renders. Does not auto-submit.
  */
 export function seedEarlyInput(text: string): void {
-  earlyInputBuffer = text
+  getEarlyInputHostState().earlyInputBuffer = text
 }

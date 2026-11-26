@@ -7,15 +7,24 @@
  */
 
 import type { Context } from '@opentelemetry/api'
+import { RootSessionSlot } from '../hostSlot.js'
+import { getBootstrapSession } from '../sessionRoot.js'
 
-let activeInteractionContext: Context | undefined
+const interactionOtelContextSlot = new RootSessionSlot<{
+  activeInteractionContext: Context | undefined
+}>(() => ({
+  activeInteractionContext: undefined,
+}))
 
 export function setActiveInteractionOTelContext(
   ctx: Context | undefined,
 ): void {
-  activeInteractionContext = ctx
+  interactionOtelContextSlot.of(
+    getBootstrapSession(),
+  ).activeInteractionContext = ctx
 }
 
 export function getActiveInteractionOTelContext(): Context | undefined {
-  return activeInteractionContext
+  return interactionOtelContextSlot.of(getBootstrapSession())
+    .activeInteractionContext
 }

@@ -3,6 +3,7 @@ import type { ToolUseContext } from '../../Tool.js'
 import type { Message } from '../../types/message.js'
 import { toError } from '../errors.js'
 import { logError } from '../log.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { SystemPrompt } from '../systemPromptType.js'
 
 // Post-sampling hook - not exposed in settings.json config (yet), only used programmatically
@@ -21,22 +22,26 @@ export type PostSamplingHook = (
   context: REPLHookContext,
 ) => Promise<void> | void
 
-// Internal registry for post-sampling hooks
-const postSamplingHooks: PostSamplingHook[] = []
+// Internal host-scoped registry for post-sampling hooks
+const hostPostSamplingHooksSlot = new HostSlot<PostSamplingHook[]>(() => [])
+
+function postSamplingHooks(): PostSamplingHook[] {
+  return hostPostSamplingHooksSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Register a post-sampling hook that will be called after model sampling completes
  * This is an internal API not exposed through settings
  */
 export function registerPostSamplingHook(hook: PostSamplingHook): void {
-  postSamplingHooks.push(hook)
+  postSamplingHooks().push(hook)
 }
 
 /**
  * Clear all registered post-sampling hooks (for testing)
  */
 export function clearPostSamplingHooks(): void {
-  postSamplingHooks.length = 0
+  postSamplingHooks().length = 0
 }
 
 /**
@@ -59,7 +64,7 @@ export async function executePostSamplingHooks(
     querySource,
   }
 
-  for (const hook of postSamplingHooks) {
+  for (const hook of [...postSamplingHooks()]) {
     try {
       await hook(context)
     } catch (error) {

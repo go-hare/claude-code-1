@@ -8,6 +8,7 @@ import { buildTool, type Tool } from '../Tool.js'
 import { isWorkflowsDisabled } from '../utils/workflowDisableGate.js'
 import { formatWorkflowSizeGuidelineToolSuffix } from '../utils/workflowSizeGuideline.js'
 import { getGlobalConfig } from '../utils/config.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { getWorkflowService } from './service.js'
 import { workflowReadableRoots } from './readableRoots.js'
 
@@ -37,13 +38,21 @@ function getWorkflowSizeGuidelineToolSuffix(): string {
  * matches by reference), and the ports singleton is guaranteed by getWorkflowService.
  */
 function buildWorkflowTool(): Tool {
-  let cachedDescriptor: WorkflowToolDescriptor | null = null
+  const descriptorHostSlot = new HostSlot<{
+    ports: ReturnType<typeof getWorkflowService>['ports'] | null
+    cachedDescriptor: WorkflowToolDescriptor | null
+  }>(() => ({
+    ports: null,
+    cachedDescriptor: null,
+  }))
   const descriptor = (): WorkflowToolDescriptor => {
-    if (!cachedDescriptor) {
-      const { ports } = getWorkflowService()
-      cachedDescriptor = createWorkflowTool(ports)
+    const { ports } = getWorkflowService()
+    const hostState = descriptorHostSlot.of(getBootstrapSessionHost())
+    if (!hostState.cachedDescriptor || hostState.ports !== ports) {
+      hostState.ports = ports
+      hostState.cachedDescriptor = createWorkflowTool(ports)
     }
-    return cachedDescriptor
+    return hostState.cachedDescriptor
   }
   return buildTool({
     name: WORKFLOW_TOOL_NAME,
@@ -184,10 +193,13 @@ function buildWorkflowTool(): Tool {
   })
 }
 
-// Singleton: tools.ts registration and PermissionRequest must reference the same instance (switch matches by reference).
-let cached: Tool | null = null
+// Process-wide singleton: tools.ts registration, PermissionRequest, and
+// selectPermissionDialog match WorkflowTool by object reference identity.
+// Per-host WorkflowService / ports binding is isolated via descriptorHostSlot
+// inside buildWorkflowTool().
+let cachedWorkflowTool: Tool | null = null
 
 export function createWorkflowToolCore(): Tool {
-  if (!cached) cached = buildWorkflowTool()
-  return cached
+  if (!cachedWorkflowTool) cachedWorkflowTool = buildWorkflowTool()
+  return cachedWorkflowTool
 }

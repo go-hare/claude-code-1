@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks'
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js'
 import type { AppState } from 'src/state/AppState.js'
 import {
@@ -12,8 +13,170 @@ import {
 import type { Message } from 'src/types/message.js'
 import { logForDebugging } from '../debug.js'
 import type { AggregatedHookResult } from '../hooks.js'
+import { getBootstrapSession, getBootstrapSessionHost } from '../sessionHost.js'
 import type { HookCommand } from '../settings/types.js'
 import { isHookEqual } from './hooksSettings.js'
+
+/**
+ * Official 2.1.331 `class W` (`06_W_host_slot_class.js`) — lazy per-host/object
+ * `WeakMap` slot so concurrent `SessionHost` instances never share mutable state.
+ */
+class WeakOwnerSlot<T> {
+  #create: () => T
+  #values = new WeakMap<object, T>()
+
+  constructor(create: () => T) {
+    this.#create = create
+  }
+
+  of(owner: object): T {
+    const existing = this.#values.get(owner)
+    if (existing !== undefined) return existing
+    const created = this.#create()
+    this.#values.set(owner, created)
+    return created
+  }
+
+  delete(owner: object): void {
+    this.#values.delete(owner)
+  }
+}
+
+/**
+ * Official 2.1.331 `GWo(set, item)` (`02_host_slot_als.js`) — add `item` as a
+ * `WeakRef` to `set` if not already live, pruning collected `WeakRef` entries.
+ */
+export function addWeakRef<T extends object>(
+  set: Set<WeakRef<T>>,
+  item: T,
+): boolean {
+  let found = false
+  for (const ref of set) {
+    const deref = ref.deref()
+    if (deref === undefined) {
+      set.delete(ref)
+    } else if (deref === item) {
+      found = true
+    }
+  }
+  if (found) return false
+  set.add(new WeakRef(item))
+  return true
+}
+
+/**
+ * Official 2.1.331 `kDt(set)` (`02_host_slot_als.js`) — return live `T[]` from
+ * a `Set<WeakRef<T>>`, deleting garbage-collected `WeakRef` entries in place.
+ */
+export function collectWeakRefs<T extends object>(set: Set<WeakRef<T>>): T[] {
+  const live: T[] = []
+  for (const ref of set) {
+    const deref = ref.deref()
+    if (deref === undefined) {
+      set.delete(ref)
+    } else {
+      live.push(deref)
+    }
+  }
+  return live
+}
+
+export type HookExecutionContext = {
+  hookEvent?: HookEvent | string
+  sessionId?: string
+  hookId?: string
+  hookName?: string
+}
+
+const hookExecutionStorage = new AsyncLocalStorage<HookExecutionContext>()
+let hookExecutionEverEntered = false
+const hostHookExecutionEntrySlot = new WeakOwnerSlot(() => ({
+  hasEntered: false,
+}))
+
+/** Official 2.1.331 `o7()` — whether any hook execution scope has been entered. */
+export function hasEnteredHookExecution(): boolean {
+  return hookExecutionEverEntered
+}
+
+/** Official 2.1.331 `H` per-host slot — whether the active `SessionHost` has entered hook execution. */
+export function hasHostEnteredHookExecution(): boolean {
+  return hostHookExecutionEntrySlot.of(getBootstrapSessionHost()).hasEntered
+}
+
+/** Official 2.1.331 `Xye()` — whether the current async call chain is inside a hook execution scope. */
+export function isInsideHookExecution(): boolean {
+  return hookExecutionStorage.getStore() !== undefined
+}
+
+export function getHookExecutionContext(): HookExecutionContext | undefined {
+  return hookExecutionStorage.getStore()
+}
+
+/** Enter an `AsyncLocalStorage` hook execution scope (`p.run(...)`). */
+export function runInsideHookExecution<T>(
+  fn: () => T,
+  context: HookExecutionContext = {},
+): T {
+  hookExecutionEverEntered = true
+  hostHookExecutionEntrySlot.of(getBootstrapSessionHost()).hasEntered = true
+  return hookExecutionStorage.run(context, fn)
+}
+
+/** Exit any enclosing `AsyncLocalStorage` hook execution scope (`p.exit(...)`). */
+export function exitHookExecution<T>(fn: () => T): T {
+  return hookExecutionStorage.exit(fn)
+}
+
+export function _resetHookExecutionStateForTesting(): void {
+  hookExecutionEverEntered = false
+  hostHookExecutionEntrySlot.delete(getBootstrapSessionHost())
+}
+
+export type HostHookRegistryOwner = {
+  session?: {
+    hookRegistry?: {
+      holder(): { registeredHooks: unknown }
+      mainThreadAgentHooks(): unknown
+    }
+  }
+  registeredHooks?: unknown
+  mainThreadAgentHooks?: unknown
+}
+
+const hostHookOwnersSlot = new WeakOwnerSlot(
+  () => new Set<WeakRef<HostHookRegistryOwner>>(),
+)
+
+/**
+ * Official 2.1.331 `GWo(S(), owner)` (`02_host_slot_als.js`) — register a
+ * session/hook registry owner on the active `SessionHost` via `WeakRef`.
+ */
+export function registerHostHookOwner(owner: HostHookRegistryOwner): boolean {
+  return addWeakRef(hostHookOwnersSlot.of(getBootstrapSessionHost()), owner)
+}
+
+/** Official 2.1.331 `kDt(S())` — return live hook owners for the active `SessionHost`. */
+export function getHostHookOwners(): HostHookRegistryOwner[] {
+  return collectWeakRefs(hostHookOwnersSlot.of(getBootstrapSessionHost()))
+}
+
+/**
+ * Official 2.1.331 `Q8l()` (`02_host_slot_als.js`) — collect
+ * `[registeredHooks, mainThreadAgentHooks, ...]` across all live hook owners on
+ * the active `SessionHost`.
+ */
+export function collectHostRegisteredHooks(): unknown[] {
+  const out: unknown[] = []
+  for (const owner of getHostHookOwners()) {
+    const reg = owner.session?.hookRegistry
+    out.push(
+      reg ? reg.holder().registeredHooks : owner.registeredHooks,
+      reg ? reg.mainThreadAgentHooks() : owner.mainThreadAgentHooks,
+    )
+  }
+  return out
+}
 
 export type OnHookSuccess = (
   hook: HookCommand | FunctionHook,
@@ -70,6 +233,32 @@ export type SessionStore = {
  */
 export type SessionHooksState = Map<string, SessionStore>
 
+const hostSessionHookStoresSlot = new WeakOwnerSlot(
+  () => new Set<WeakRef<SessionHooksState>>(),
+)
+const sessionHooksStateByRootSession = new WeakOwnerSlot<SessionHooksState>(
+  () => new Map(),
+)
+
+function trackHostSessionHooksState(storeMap: SessionHooksState): void {
+  addWeakRef(hostSessionHookStoresSlot.of(getBootstrapSessionHost()), storeMap)
+}
+
+/** Live `SessionHooksState` maps registered under the active `SessionHost`. */
+export function getHostSessionHookStores(): SessionHooksState[] {
+  return collectWeakRefs(
+    hostSessionHookStoresSlot.of(getBootstrapSessionHost()),
+  )
+}
+
+/** Per-`Session.root` ephemeral `SessionHooksState` map (registered on its `SessionHost`). */
+export function getBootstrapSessionHooksState(): SessionHooksState {
+  const rootSession = getBootstrapSession().root
+  const storeMap = sessionHooksStateByRootSession.of(rootSession)
+  trackHostSessionHooksState(storeMap)
+  return storeMap
+}
+
 /**
  * Add a command or prompt hook to the session.
  * Session hooks are temporary, in-memory only, and cleared when session ends.
@@ -111,27 +300,36 @@ export function addFunctionHook(
     id?: string
   },
 ): string {
+  const id = options?.id || `function-hook-${Date.now()}-${Math.random()}`
+  const wrappedCallback: FunctionHookCallback = (messages, signal) =>
+    isInsideHookExecution()
+      ? callback(messages, signal)
+      : runInsideHookExecution(() => callback(messages, signal), {
+          hookEvent: event,
+          sessionId,
+          hookId: id,
+        })
   const registry = getSessionHooksRegistry(setAppState)
   if (registry) {
-    const id = registry.addFunctionHook(
+    trackHostSessionHooksState(registry.sessions)
+    const registeredId = registry.addFunctionHook(
       sessionId,
       event,
       matcher,
-      callback,
+      wrappedCallback,
       errorMessage,
-      options,
+      { ...options, id },
     )
     logForDebugging(
       `Added session hook for event ${event} in session ${sessionId}`,
     )
-    return id
+    return registeredId
   }
-  const id = options?.id || `function-hook-${Date.now()}-${Math.random()}`
   const hook: FunctionHook = {
     type: 'function',
     id,
     timeout: options?.timeout || 5000,
-    callback,
+    callback: wrappedCallback,
     errorMessage,
   }
   addHookToSession(setAppState, sessionId, event, matcher, hook)
@@ -191,29 +389,48 @@ function addHookToSession(
   onHookSuccess?: OnHookSuccess,
   skillRoot?: string,
 ): void {
+  const wrappedOnHookSuccess: OnHookSuccess | undefined = onHookSuccess
+    ? (firedHook, result) =>
+        isInsideHookExecution()
+          ? onHookSuccess(firedHook, result)
+          : runInsideHookExecution(() => onHookSuccess(firedHook, result), {
+              hookEvent: event,
+              sessionId,
+            })
+    : undefined
   const registry = getSessionHooksRegistry(setAppState)
   if (registry) {
-    registry.addHook(sessionId, event, matcher, hook, onHookSuccess, skillRoot)
+    trackHostSessionHooksState(registry.sessions)
+    registry.addHook(
+      sessionId,
+      event,
+      matcher,
+      hook,
+      wrappedOnHookSuccess,
+      skillRoot,
+    )
   } else {
     setAppState(prev => {
+      trackHostSessionHooksState(prev.sessionHooks)
       applyAddHookToMap(
         prev.sessionHooks,
         sessionId,
         event,
         matcher,
         hook,
-        onHookSuccess,
+        wrappedOnHookSuccess,
         skillRoot,
       )
       const bound = getSessionHooksRegistry(prev.sessionHooks)
       if (bound) {
+        trackHostSessionHooksState(bound.sessions)
         applyAddHookToMap(
           bound.sessions,
           sessionId,
           event,
           matcher,
           hook,
-          onHookSuccess,
+          wrappedOnHookSuccess,
           skillRoot,
         )
         bound.changed.emit()
@@ -439,11 +656,14 @@ export type SkillHookSourceDraw = {
   unfitTexts: number
 }
 
-const skillDrawsBySession = new Map<string, Map<string, SkillHookSourceDraw>>()
+const skillDrawsByHost = new WeakOwnerSlot(
+  () => new Map<string, Map<string, SkillHookSourceDraw>>(),
+)
 
 export function getSkillHookDraws(
   sessionId: string,
 ): Map<string, SkillHookSourceDraw> {
+  const skillDrawsBySession = skillDrawsByHost.of(getBootstrapSessionHost())
   let map = skillDrawsBySession.get(sessionId)
   if (!map) {
     map = new Map()
@@ -461,7 +681,10 @@ export function clearSessionHooks(
   setAppState: (updater: (prev: AppState) => AppState) => void,
   sessionId: string,
 ): void {
-  skillDrawsBySession.delete(sessionId)
+  skillDrawsByHost.of(getBootstrapSessionHost()).delete(sessionId)
+  sessionHooksStateByRootSession
+    .of(getBootstrapSession().root)
+    .delete(sessionId)
   const registry = getSessionHooksRegistry(setAppState)
   if (registry) {
     registry.clearSession(sessionId)
@@ -482,6 +705,9 @@ export function clearSessionHooks(
       }
       const next = new Map(prev.sessionHooks)
       next.delete(sessionId)
+      if (next.size > 0) {
+        trackHostSessionHooksState(next)
+      }
       return { ...prev, sessionHooks: next }
     })
   }

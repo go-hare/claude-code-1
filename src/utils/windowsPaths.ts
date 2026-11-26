@@ -1,14 +1,97 @@
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from 'fs'
-import memoize from 'lodash-es/memoize.js'
+import { LRUCache } from 'lru-cache'
 import * as path from 'path'
 import * as pathWin32 from 'path/win32'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
 import { execSync_DEPRECATED } from './execSyncWrapper.js'
-import { memoizeWithLRU } from './memoize.js'
 import { getPlatform } from './platform.js'
 import { isTestNoGitBash } from './residualFinalEnvGates.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
+
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result>(
+  fn: (...args: Args) => Result,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
+
+type HostLRUMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: {
+    clear: () => void
+    size: () => number
+    delete: (key: string) => boolean
+    get: (key: string) => Result | undefined
+    set: (key: string, value: Result) => void
+    has: (key: string) => boolean
+  }
+}
+
+function memoizeWithLRUPerHost<
+  Args extends unknown[],
+  Result extends NonNullable<unknown>,
+>(
+  f: (...args: Args) => Result,
+  cacheFn: (...args: Args) => string,
+  maxCacheSize: number = 100,
+): HostLRUMemoized<Args, Result> {
+  const slot = new HostSlot<LRUCache<string, Result>>(
+    () => new LRUCache<string, Result>({ max: maxCacheSize }),
+  )
+  const getCache = (): LRUCache<string, Result> =>
+    slot.of(getBootstrapSessionHost())
+  const memoized = (...args: Args): Result => {
+    const cache = getCache()
+    const key = cacheFn(...args)
+    const cached = cache.get(key)
+    if (cached !== undefined) {
+      return cached
+    }
+    const result = f(...args)
+    cache.set(key, result)
+    return result
+  }
+  memoized.cache = {
+    clear: () => getCache().clear(),
+    size: () => getCache().size,
+    delete: (key: string) => getCache().delete(key),
+    get: (key: string) => getCache().peek(key),
+    set: (key: string, value: Result) => {
+      getCache().set(key, value)
+    },
+    has: (key: string) => getCache().has(key),
+  }
+  return memoized
+}
 
 /**
  * If Windows, set the SHELL environment variable to git-bash path.
@@ -368,10 +451,20 @@ type WindowsPathCache = {
   exts: string[]
 }
 
-let windowsPathCache: WindowsPathCache | null = null
+const windowsPathCacheHostSlot = new HostSlot<{
+  windowsPathCache: WindowsPathCache | null
+}>(() => ({
+  windowsPathCache: null,
+}))
+
+function getWindowsPathCacheHostState(): {
+  windowsPathCache: WindowsPathCache | null
+} {
+  return windowsPathCacheHostSlot.of(getBootstrapSessionHost())
+}
 
 export function clearWindowsPathCacheForTesting(): void {
-  windowsPathCache = null
+  getWindowsPathCacheHostState().windowsPathCache = null
 }
 
 /**
@@ -480,6 +573,7 @@ export function shouldFallbackToWhereExe(
   rawPath: string | undefined = process.env.PATH ?? process.env.Path,
 ): boolean {
   if (!rawPath) return true
+  const { windowsPathCache } = getWindowsPathCacheHostState()
   if (windowsPathCache?.namesMaybeMissed.has(executable.toLowerCase())) {
     return true
   }
@@ -613,9 +707,10 @@ export function resolveWindowsExecutableOnPath(
     opts?.lstatFn !== undefined ||
     opts?.realpathFn !== undefined
 
+  const hostState = getWindowsPathCacheHostState()
   let cache: WindowsPathCache
-  if (!isCustomFs && windowsPathCache?.key === cacheKey) {
-    cache = windowsPathCache
+  if (!isCustomFs && hostState.windowsPathCache?.key === cacheKey) {
+    cache = hostState.windowsPathCache
   } else {
     cache = {
       key: cacheKey,
@@ -626,7 +721,7 @@ export function resolveWindowsExecutableOnPath(
       exts: parseWindowsPathExts(rawPathExt),
     }
     if (!isCustomFs) {
-      windowsPathCache = cache
+      hostState.windowsPathCache = cache
     }
   }
 
@@ -889,7 +984,7 @@ export function findGitBashPathOrNullWithDeps(
  * Memoized so repeated calls within the same process only search once.
  * Test-friendly variant: does NOT call `process.exit`, unlike `findGitBashPath`.
  */
-export const findGitBashPathOrNull = memoize(() =>
+export const findGitBashPathOrNull = memoizePerHost(() =>
   findGitBashPathOrNullWithDeps(),
 )
 
@@ -931,7 +1026,7 @@ export function findGitBashPath(): string {
 }
 
 /** Convert a Windows path to a POSIX path using pure JS. */
-export const windowsPathToPosixPath = memoizeWithLRU(
+export const windowsPathToPosixPath = memoizeWithLRUPerHost(
   (windowsPath: string): string => {
     // Handle UNC paths: \\server\share -> //server/share
     if (windowsPath.startsWith('\\\\')) {
@@ -951,7 +1046,7 @@ export const windowsPathToPosixPath = memoizeWithLRU(
 )
 
 /** Convert a POSIX path to a Windows path using pure JS. */
-export const posixPathToWindowsPath = memoizeWithLRU(
+export const posixPathToWindowsPath = memoizeWithLRUPerHost(
   (posixPath: string): string => {
     // Handle UNC paths: //server/share -> \\server\share
     if (posixPath.startsWith('//')) {

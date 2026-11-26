@@ -37,6 +37,7 @@ import { markInternalWrite } from '../../utils/settings/internalWrites.js'
 import { shouldSkipRemoteManagedSettingsPollForExpiredGateway } from '../../utils/settings/remoteSettingsState.js'
 import { getSettingsFilePathForSource } from '../../utils/settings/settings.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { sleep } from '../../utils/sleep.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
@@ -112,13 +113,15 @@ export async function uploadUserSettingsInBackground(): Promise<void> {
   }
 }
 
-// Cached so the fire-and-forget at runHeadless entry and the await in
+// Cached per host so the fire-and-forget at runHeadless entry and the await in
 // installPluginsAndApplyMcpInBackground share one fetch.
-let downloadPromise: Promise<boolean> | null = null
+const downloadPromiseSlot = new HostSlot<{
+  promise: Promise<boolean> | null
+}>(() => ({ promise: null }))
 
 /** Test-only: clear the cached download promise between tests. */
 export function _resetDownloadPromiseForTesting(): void {
-  downloadPromise = null
+  downloadPromiseSlot.of(getBootstrapSessionHost()).promise = null
 }
 
 /**
@@ -129,11 +132,12 @@ export function _resetDownloadPromiseForTesting(): void {
  * Returns true if settings were applied, false otherwise.
  */
 export function downloadUserSettings(): Promise<boolean> {
-  if (downloadPromise) {
-    return downloadPromise
+  const slot = downloadPromiseSlot.of(getBootstrapSessionHost())
+  if (slot.promise) {
+    return slot.promise
   }
-  downloadPromise = doDownloadUserSettings()
-  return downloadPromise
+  slot.promise = doDownloadUserSettings()
+  return slot.promise
 }
 
 /**
@@ -152,8 +156,9 @@ export function downloadUserSettings(): Promise<boolean> {
  * settingsSync → changeDetector cycle edge.
  */
 export function redownloadUserSettings(): Promise<boolean> {
-  downloadPromise = doDownloadUserSettings(0)
-  return downloadPromise
+  const slot = downloadPromiseSlot.of(getBootstrapSessionHost())
+  slot.promise = doDownloadUserSettings(0)
+  return slot.promise
 }
 
 async function doDownloadUserSettings(

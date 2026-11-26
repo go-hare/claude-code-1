@@ -84,6 +84,7 @@ import {
   resolveFileOutDests,
 } from 'src/services/artifactAutoReact/outDirPaths.js'
 import { getCwd } from 'src/utils/cwd.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import {
   getAgentContext,
   isDelegatedObservation,
@@ -231,12 +232,42 @@ export type ArtifactOutput = z.infer<OutputSchema>
 
 export { formatPathPinConflictUiMessage } from 'src/services/artifactAutoReact/store.js'
 
-const storedDbAccessRules = new Map<string, ArtifactDbAccessRule[]>()
+const fallbackArtifactDbRulesSession: { readonly root: object } = {
+  get root() {
+    return fallbackArtifactDbRulesSession
+  },
+}
+
+function getActiveArtifactDbRulesSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (
+      session !== null &&
+      typeof session === 'object' &&
+      session.root !== null &&
+      typeof session.root === 'object'
+    ) {
+      return session
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackArtifactDbRulesSession
+}
+
+const storedDbAccessRulesSlot = new RootSessionSlot<
+  Map<string, ArtifactDbAccessRule[]>
+>(() => new Map())
+
+function getStoredDbAccessRules(): Map<string, ArtifactDbAccessRule[]> {
+  return storedDbAccessRulesSlot.of(getActiveArtifactDbRulesSession())
+}
 
 export function recordStoredDbAccessRules(
   slug: string,
   rules: readonly ArtifactDbAccessRule[],
 ): void {
+  const storedDbAccessRules = getStoredDbAccessRules()
   if (rules.length === 0) {
     storedDbAccessRules.delete(slug)
   } else {
@@ -245,7 +276,7 @@ export function recordStoredDbAccessRules(
 }
 
 export function _resetStoredDbAccessRulesForTesting(): void {
-  storedDbAccessRules.clear()
+  getStoredDbAccessRules().clear()
 }
 
 function formatArtifactOutputDbRulesNote(content: ArtifactOutput): string {
@@ -3867,6 +3898,7 @@ async function callUpload(
     rawCaps !== null && typeof rawCaps === 'object' && !Array.isArray(rawCaps)
       ? (rawCaps as Record<string, unknown>).db
       : undefined
+  const storedDbAccessRules = getStoredDbAccessRules()
   const storedRulesForSlug = targetSlugForDbRules
     ? storedDbAccessRules.get(targetSlugForDbRules)
     : undefined

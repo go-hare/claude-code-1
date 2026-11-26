@@ -9,6 +9,10 @@
  * tests and isolated mocks do not need a full session runtime.
  */
 import { randomUUID } from 'crypto'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../../utils/sessionRoot.js'
 
 /**
  * Build a stable OpenAI `prompt_cache_key` for a session.
@@ -25,25 +29,27 @@ export function formatOpenAIPromptCacheKey(sessionId: string): string {
 }
 
 /**
- * Process-scoped sticky key. OpenAI uses this for cache-node routing, not as a
- * content hash — it only needs to be stable across multi-turn requests in the
- * same CCB process. Avoids a bootstrap/state import so pure unit tests and
- * partial mocks stay isolated.
+ * Root-session-scoped sticky key. OpenAI uses this for cache-node routing, not
+ * as a content hash — stable across multi-turn requests and withProject forks
+ * in the same root session, isolated across concurrent host sessions.
  */
-let processPromptCacheKey: string | null = null
+const promptCacheKeySlot = new RootSessionSlot<{
+  processPromptCacheKey: string | null
+}>(() => ({ processPromptCacheKey: null }))
 
 /**
- * Stable OpenAI `prompt_cache_key` for this process.
+ * Stable OpenAI `prompt_cache_key` for this root session.
  * Prefer an explicit override (session id) when the caller already has one.
  */
 export function getOpenAIPromptCacheKey(sessionIdOverride?: string): string {
   if (sessionIdOverride) {
     return formatOpenAIPromptCacheKey(sessionIdOverride)
   }
-  if (!processPromptCacheKey) {
-    processPromptCacheKey = formatOpenAIPromptCacheKey(randomUUID())
+  const slot = promptCacheKeySlot.of(getBootstrapSession())
+  if (!slot.processPromptCacheKey) {
+    slot.processPromptCacheKey = formatOpenAIPromptCacheKey(randomUUID())
   }
-  return processPromptCacheKey
+  return slot.processPromptCacheKey
 }
 
 import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'

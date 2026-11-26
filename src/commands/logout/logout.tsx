@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { clearTrustedDeviceTokenCache } from '../../bridge/trustedDevice.js';
 import { formatRevokeUnconfirmedMessage, revokeOAuthRefreshTokenWithRetry } from '../../cli/handlers/designOauth.js';
-import { instances, Text } from '@anthropic/ink';
+import { Ns, Text } from '@anthropic/ink';
 import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growthbook.js';
 import { getGroveNoticeConfig, getGroveSettings } from '../../services/api/grove.js';
 // flushTelemetry is loaded lazily to avoid pulling in ~1.1MB of OpenTelemetry at startup
@@ -187,7 +187,7 @@ export async function fleetHostLogout({ exit, setError, setInfo }: FleetHostLogo
 export async function call(): Promise<React.ReactNode> {
   logOTelAuthEvent({ action: 'logout', success: true, authMethod: 'oauth' });
   const outcome = await performLogout({ clearOnboarding: true });
-  const isAltScreen = instances.get(process.stdout)?.isAltScreenActive === true;
+  const isAltScreen = Ns().get(process.stdout)?.isAltScreenActive === true;
 
   // Official 2.1.326 #238 & #67: surface revoke-unconfirmed notice and pass
   // `finalMessage` to gracefulShutdown so fullscreen exits leave the message on screen.

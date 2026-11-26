@@ -1,16 +1,21 @@
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
+
 export type ModifierKey = 'shift' | 'command' | 'control' | 'option'
 
-let prewarmed = false
+const modifiersPrewarmHostSlot = new HostSlot<{ prewarmed: boolean }>(() => ({
+  prewarmed: false,
+}))
 
 /**
  * Pre-warm the native module by loading it in advance.
  * Call this early to avoid delay on first use.
  */
 export function prewarmModifiers(): void {
-  if (prewarmed || process.platform !== 'darwin') {
+  const hostState = modifiersPrewarmHostSlot.of(getBootstrapSessionHost())
+  if (hostState.prewarmed || process.platform !== 'darwin') {
     return
   }
-  prewarmed = true
+  hostState.prewarmed = true
   void import('modifiers-napi').then(({ prewarm }) => prewarm()).catch(() => {})
 }
 

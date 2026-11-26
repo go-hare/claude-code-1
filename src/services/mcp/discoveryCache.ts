@@ -10,6 +10,12 @@ import type {
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { leftoverP, leftoverY } from '../../utils/leftoverOt.js'
 import { logMCPDebug } from '../../utils/log.js'
+import {
+  HostSlot,
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  runWithSession,
+} from '../../utils/sessionRoot.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -92,7 +98,24 @@ export type SettledCachedDialFailure = {
   ownStrike: boolean
 }
 
-const discoveryCacheStore = new Map<string, CachedDiscoveryListing>()
+type HostDiscoveryCacheState = {
+  discoveryCacheStore: Map<string, CachedDiscoveryListing>
+  settledCachedDialFailures: Map<string, SettledCachedDialFailure>
+  cachedAdoptListeners: Set<CachedAdoptListener>
+  cachedDialFailedListeners: Set<CachedDialFailedListener>
+}
+
+const hostDiscoveryCacheSlot = new HostSlot<HostDiscoveryCacheState>(() => ({
+  discoveryCacheStore: new Map(),
+  settledCachedDialFailures: new Map(),
+  cachedAdoptListeners: new Set(),
+  cachedDialFailedListeners: new Set(),
+}))
+
+function getHostDiscoveryCacheState(): HostDiscoveryCacheState {
+  return hostDiscoveryCacheSlot.of(getBootstrapSessionHost())
+}
+
 const rawToolsByResult = new WeakMap<object, McpWireTool[]>()
 const rawCommandsByResult = new WeakMap<object, CachedMcpPromptEntry[]>()
 const rawResourcesByResult = new WeakMap<object, Resource[]>()
@@ -101,9 +124,6 @@ const persistedDiscoveryRounds = new WeakSet<object>()
 const discoveryFetchErrors = new WeakMap<object, Error>()
 const cachedFirstDialArmsRan = new WeakSet<object>()
 const swrRefreshDialsInFlight = new WeakSet<Promise<MCPServerConnection>>()
-const settledCachedDialFailures = new Map<string, SettledCachedDialFailure>()
-const cachedAdoptListeners = new Set<CachedAdoptListener>()
-const cachedDialFailedListeners = new Set<CachedDialFailedListener>()
 
 /**
  * Check whether MCP discovery caching is enabled via env or GrowthBook.
@@ -267,23 +287,37 @@ export function getDiscoveryFetchError(result: object): Error | undefined {
 export function subscribeCachedAdopt(
   listener: CachedAdoptListener,
 ): () => void {
-  cachedAdoptListeners.add(listener)
+  const state = getHostDiscoveryCacheState()
+  const capturedSession = getActiveSessionFromAls()
+  const wrapped: CachedAdoptListener =
+    capturedSession !== undefined
+      ? (name, config) =>
+          runWithSession(capturedSession, () => listener(name, config))
+      : listener
+  state.cachedAdoptListeners.add(wrapped)
   return () => {
-    cachedAdoptListeners.delete(listener)
+    state.cachedAdoptListeners.delete(wrapped)
   }
 }
 
 export function subscribeCachedDialFailed(
   listener: CachedDialFailedListener,
 ): () => void {
-  cachedDialFailedListeners.add(listener)
+  const state = getHostDiscoveryCacheState()
+  const capturedSession = getActiveSessionFromAls()
+  const wrapped: CachedDialFailedListener =
+    capturedSession !== undefined
+      ? (failure, ownStrike) =>
+          runWithSession(capturedSession, () => listener(failure, ownStrike))
+      : listener
+  state.cachedDialFailedListeners.add(wrapped)
   return () => {
-    cachedDialFailedListeners.delete(listener)
+    state.cachedDialFailedListeners.delete(wrapped)
   }
 }
 
 function emitCachedAdopt(name: string, config: ScopedMcpServerConfig): void {
-  for (const listener of cachedAdoptListeners) {
+  for (const listener of getHostDiscoveryCacheState().cachedAdoptListeners) {
     try {
       listener(name, config)
     } catch {
@@ -296,9 +330,10 @@ function emitCachedDialFailed(
   failure: FailedMCPServer,
   ownStrike: boolean,
 ): void {
+  const state = getHostDiscoveryCacheState()
   const key = getServerCacheKey(failure.name, failure.config)
-  settledCachedDialFailures.set(key, { failure, ownStrike })
-  for (const listener of cachedDialFailedListeners) {
+  state.settledCachedDialFailures.set(key, { failure, ownStrike })
+  for (const listener of state.cachedDialFailedListeners) {
     try {
       listener(failure, ownStrike)
     } catch {
@@ -312,6 +347,7 @@ export function takeSettledCachedDialFailure(
   name: string,
   config: ScopedMcpServerConfig,
 ): SettledCachedDialFailure | undefined {
+  const { settledCachedDialFailures } = getHostDiscoveryCacheState()
   const key = getServerCacheKey(name, config)
   const entry = settledCachedDialFailures.get(key)
   if (entry !== undefined) {
@@ -357,6 +393,7 @@ export function readDiscoveryCacheEntry(
   if (!isDiscoveryCacheEligibleConfig(config)) {
     return { kind: 'miss', reason: 'transport' }
   }
+  const { discoveryCacheStore } = getHostDiscoveryCacheState()
   const key = getServerCacheKey(name, config)
   const entry = discoveryCacheStore.get(key)
   if (!entry) {
@@ -403,6 +440,7 @@ export function writeDiscoveryCacheEntry(
   if (!isDiscoveryCacheEligibleConfig(config)) {
     return 'superseded'
   }
+  const { discoveryCacheStore } = getHostDiscoveryCacheState()
   const now = context.now ?? Date.now()
   const key = getServerCacheKey(name, config)
   const existing = discoveryCacheStore.get(key)
@@ -437,6 +475,7 @@ export function recordDiscoveryRefreshStrike(
   name: string,
   config: ScopedMcpServerConfig,
 ): number {
+  const { discoveryCacheStore } = getHostDiscoveryCacheState()
   const key = getServerCacheKey(name, config)
   const existing = discoveryCacheStore.get(key)
   if (!existing) return 0
@@ -454,15 +493,17 @@ export function dropDiscoveryCacheEntry(
   name: string,
   config: ScopedMcpServerConfig,
 ): void {
+  const state = getHostDiscoveryCacheState()
   const key = getServerCacheKey(name, config)
-  discoveryCacheStore.delete(key)
-  settledCachedDialFailures.delete(key)
+  state.discoveryCacheStore.delete(key)
+  state.settledCachedDialFailures.delete(key)
 }
 
 /** Clear all discovery cache entries (for tests and identity boundary eviction). */
 export function clearAllDiscoveryCacheEntries(): void {
-  discoveryCacheStore.clear()
-  settledCachedDialFailures.clear()
+  const state = getHostDiscoveryCacheState()
+  state.discoveryCacheStore.clear()
+  state.settledCachedDialFailures.clear()
 }
 
 export type RunCachedFirstDialArmsDeps = {

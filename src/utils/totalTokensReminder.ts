@@ -8,6 +8,7 @@
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import { getInitialSettings } from './settings/settings.js'
 
 export const TOTAL_TOKENS_REMINDER_MODES = [
@@ -27,8 +28,20 @@ export const TOTAL_TOKENS_REMINDER_FIXED = 5_000_000
 /** Official kZc — default padded-countdown budget. */
 export const TOTAL_TOKENS_REMINDER_BUDGET_DEFAULT = 15_000_000
 
-const sessionUsedAtAnchorByScope = new Map<string, number>()
-const peakTaskUsedByScope = new Map<string, number>()
+type TotalTokensReminderSessionState = {
+  sessionUsedAtAnchorByScope: Map<string, number>
+  peakTaskUsedByScope: Map<string, number>
+}
+
+const totalTokensReminderStateBySession =
+  new RootSessionSlot<TotalTokensReminderSessionState>(() => ({
+    sessionUsedAtAnchorByScope: new Map<string, number>(),
+    peakTaskUsedByScope: new Map<string, number>(),
+  }))
+
+function getTotalTokensReminderState(): TotalTokensReminderSessionState {
+  return totalTokensReminderStateBySession.of(getBootstrapSession())
+}
 
 export function isTotalTokensReminderMode(
   value: unknown,
@@ -142,8 +155,9 @@ export function reanchorTotalTokensReminder(
   scopeId: string,
   sessionUsedTokens: number,
 ): void {
-  sessionUsedAtAnchorByScope.set(scopeId, sessionUsedTokens)
-  peakTaskUsedByScope.set(scopeId, 0)
+  const state = getTotalTokensReminderState()
+  state.sessionUsedAtAnchorByScope.set(scopeId, sessionUsedTokens)
+  state.peakTaskUsedByScope.set(scopeId, 0)
 }
 
 /**
@@ -154,18 +168,21 @@ export function peakTaskUsedSinceAnchor(
   scopeId: string,
   sessionUsedTokens: number,
 ): number {
-  const anchored = sessionUsedAtAnchorByScope.get(scopeId) ?? 0
+  const state = getTotalTokensReminderState()
+  const anchored = state.sessionUsedAtAnchorByScope.get(scopeId) ?? 0
   const taskUsed = sessionUsedTokens - anchored
-  const prev = peakTaskUsedByScope.get(scopeId) ?? 0
+  const prev = state.peakTaskUsedByScope.get(scopeId) ?? 0
   const peak = Math.max(prev, taskUsed)
-  peakTaskUsedByScope.set(scopeId, peak)
+  state.peakTaskUsedByScope.set(scopeId, peak)
   return peak
 }
 
-/** Test helper — clear process-local maps. */
+/** Test helper — clear per-session reminder maps. */
 export function resetTotalTokensReminderStateForTests(): void {
-  sessionUsedAtAnchorByScope.clear()
-  peakTaskUsedByScope.clear()
+  const state = totalTokensReminderStateBySession.peek(getBootstrapSession())
+  if (!state) return
+  state.sessionUsedAtAnchorByScope.clear()
+  state.peakTaskUsedByScope.clear()
 }
 
 /**

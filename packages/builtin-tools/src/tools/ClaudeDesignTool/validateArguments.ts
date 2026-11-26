@@ -3,6 +3,8 @@
  * Public names are semantic — do not export minify `le`/`W`/`G`/`N`/`K`.
  */
 
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
+
 type ScalarEnum = Set<string> | { accepts: Set<string>; serverNormalizes: true }
 
 type ArrayFieldSchema = {
@@ -146,10 +148,16 @@ export const readOpSchemas: Record<string, OpArgumentSchema> = {
 /** Gold `eHt` — finalize_plan project_id length cap (reject when length > cap-2). */
 export const DESIGN_PROJECT_ID_LENGTH_CAP = 80
 
-const discoveredHints = new Map<string, DesignOpHints>()
+const discoveredHintsSlot = new RootSessionSlot<Map<string, DesignOpHints>>(
+  () => new Map(),
+)
+
+function getDiscoveredHints(): Map<string, DesignOpHints> {
+  return discoveredHintsSlot.of(getBootstrapSession())
+}
 
 export function resetDiscoveredOperationHints(): void {
-  discoveredHints.clear()
+  getDiscoveredHints().clear()
 }
 
 export function recordDiscoveredOperationHints(
@@ -158,6 +166,7 @@ export function recordDiscoveredOperationHints(
     annotations?: { readOnlyHint?: unknown; destructiveHint?: unknown }
   }>,
 ): void {
+  const discoveredHints = getDiscoveredHints()
   for (const tool of tools) {
     if (typeof tool.name !== 'string') continue
     const catalog = operationHints[tool.name]
@@ -181,7 +190,7 @@ export function recordDiscoveredOperationHints(
 
 /** Gold `N(op) ?? K(op)`. */
 export function getOperationHints(op: string): DesignOpHints | undefined {
-  return discoveredHints.get(op) ?? operationHints[op]
+  return getDiscoveredHints().get(op) ?? operationHints[op]
 }
 
 export function isDesignOperationReadOnly(op: string): boolean {
@@ -216,7 +225,7 @@ export function validateWriteOpArgs(
       ? readOpSchemas[operation]
       : undefined
   if (!schema) {
-    const hints = discoveredHints.get(operation)
+    const hints = getDiscoveredHints().get(operation)
     if (hints?.readOnly === true) return null
     if (hints !== undefined) {
       return `ClaudeDesign ${operation}: the server reports this operation as write-capable, and this client version can't validate its arguments (it needs a WRITE_OP_SCHEMAS entry). Update Claude Code to use it.`

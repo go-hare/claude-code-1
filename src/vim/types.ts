@@ -30,6 +30,8 @@
 // Core Types
 // ============================================================================
 
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js'
+
 export type Operator = 'delete' | 'change' | 'yank'
 
 export type FindType = 'f' | 'F' | 't' | 'T'
@@ -274,18 +276,21 @@ export type VimSharedState = {
   registerIsLinewise: boolean
 }
 
-let vimSharedState: VimSharedState | null = null
+const vimSharedStateSlot = new RootSessionSlot<{
+  vimSharedState: VimSharedState | null
+}>(() => ({ vimSharedState: null }))
 
-/** densable `vES` — lazy singleton; subsequent mounts reuse the same object. */
+/** densable `vES` — lazy per-root-session singleton; subsequent mounts reuse the same object. */
 export function getOrCreateVimSharedState(): VimSharedState {
-  if (vimSharedState) return vimSharedState
+  const slot = vimSharedStateSlot.of(getBootstrapSession())
+  if (slot.vimSharedState) return slot.vimSharedState
   // densable jLf()
-  vimSharedState = {
+  slot.vimSharedState = {
     lastFind: null,
     register: '',
     registerIsLinewise: false,
   }
-  return vimSharedState
+  return slot.vimSharedState
 }
 
 /**
@@ -319,5 +324,6 @@ export function createInitialPersistentState(): PersistentState {
 
 /** Test / reset helper — not a product API. */
 export function resetSessionYankRegisterForTests(): void {
-  vimSharedState = null
+  const slot = vimSharedStateSlot.peek(getBootstrapSession())
+  if (slot) slot.vimSharedState = null
 }

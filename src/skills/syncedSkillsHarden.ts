@@ -17,6 +17,7 @@ import { getCommandName } from '../types/command.js'
 import type { Command } from '../types/command.js'
 import { AbortError } from '../utils/errors.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionHost.js'
 
 export const CLAUDE_AI_SYNC_LABEL = 'claude.ai sync'
 
@@ -275,7 +276,13 @@ type PendingSkillDownloadEntry = {
   controller: AbortController
 }
 
-const pendingSkillDownloads = new Map<string, PendingSkillDownloadEntry>()
+const pendingSkillDownloadsSlot = new RootSessionSlot<
+  Map<string, PendingSkillDownloadEntry>
+>(() => new Map())
+
+function getPendingSkillDownloads(): Map<string, PendingSkillDownloadEntry> {
+  return pendingSkillDownloadsSlot.of(getBootstrapSession())
+}
 
 /**
  * Official nGi (#1226) — register a pending skill download with an AbortController
@@ -285,6 +292,7 @@ export function registerPendingSkillDownload(
   skillName: string,
   start?: (signal?: AbortSignal) => void,
 ): (outcome: PendingSkillDownloadOutcome) => void {
+  const pendingSkillDownloads = getPendingSkillDownloads()
   let resolve!: (outcome: PendingSkillDownloadOutcome) => void
   const promise = new Promise<PendingSkillDownloadOutcome>(r => {
     resolve = r
@@ -311,6 +319,7 @@ export function awaitPendingSkillDownload(
   skillName: string,
   signal?: AbortSignal,
 ): Promise<PendingSkillDownloadOutcome> {
+  const pendingSkillDownloads = getPendingSkillDownloads()
   if (signal?.aborted) {
     const entry = pendingSkillDownloads.get(skillName)
     if (entry) {
@@ -359,10 +368,11 @@ export function awaitPendingSkillDownload(
 }
 
 export function hasPendingSkillDownload(skillName: string): boolean {
-  return pendingSkillDownloads.has(skillName)
+  return getPendingSkillDownloads().has(skillName)
 }
 
 export function clearPendingSkillDownloads(): void {
+  const pendingSkillDownloads = getPendingSkillDownloads()
   for (const entry of pendingSkillDownloads.values()) {
     entry.controller.abort()
   }

@@ -23,6 +23,13 @@ import {
 } from './functionHooksSurfaceRuntime.js'
 import { qre } from './pluginDrawError.js'
 import { logForDebugging } from '../debug.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../sessionHost.js'
+import type { Session } from '../sessionRoot.js'
 
 const LOADING = Object.freeze({ status: 'loading' as const })
 const UNPROMPTED_RENDER_CAP = 3
@@ -87,13 +94,11 @@ export type ClientFaultReport = {
 
 type ClientFaultReporter = (report: ClientFaultReport) => void
 
-let clientFaultReporter: ClientFaultReporter | undefined
-
 /** densable 2.1.289 — modules installs the owning-plugin `ui.fault` dispatcher. */
 export function setClientFaultReporter(
   reporter: ClientFaultReporter | undefined,
 ): void {
-  clientFaultReporter = reporter
+  clientState().clientFaultReporter = reporter
 }
 
 /** densable `tgn` / `N1t` — Client `host.post` → owning plugin `ui.message`. */
@@ -118,19 +123,16 @@ type ClientMessagePostHandler = (
   reply: (value: unknown) => void,
 ) => void
 
-let clientMessagePostHandler: ClientMessagePostHandler | undefined
-let clientMessageCancelHandler: ((id: string) => void) | undefined
-
 export function setClientMessagePostHandler(
   handler: ClientMessagePostHandler | undefined,
 ): void {
-  clientMessagePostHandler = handler
+  clientState().clientMessagePostHandler = handler
 }
 
 export function setClientMessageCancelHandler(
   handler: ((id: string) => void) | undefined,
 ): void {
-  clientMessageCancelHandler = handler
+  clientState().clientMessageCancelHandler = handler
 }
 
 /** densable `xYe` (`TP()`) — bridge Client surface held handles into `pressHandlers`. */
@@ -140,12 +142,25 @@ export type ClientPressBridge = {
   forget: (plugin?: string) => void
 }
 
-let clientPressBridge: ClientPressBridge | undefined
+let defaultClientPressBridge: ClientPressBridge | undefined
+
+function getClientPressBridge(
+  state: SessionFunctionHooksClientState,
+): ClientPressBridge | undefined {
+  return state.clientPressBridgeOverride !== undefined
+    ? state.clientPressBridgeOverride.value
+    : defaultClientPressBridge
+}
 
 export function setClientPressBridge(
   bridge: ClientPressBridge | undefined,
 ): void {
-  clientPressBridge = bridge
+  if (getActiveSessionFromAls() === undefined) {
+    defaultClientPressBridge = bridge
+    clientState().clientPressBridgeOverride = undefined
+    return
+  }
+  clientState().clientPressBridgeOverride = { value: bridge }
 }
 
 export type ClientInstance = {
@@ -219,6 +234,8 @@ type MountedSurface = {
 
 type ClientRecord = {
   id: string
+  session: Session | undefined
+  state: SessionFunctionHooksClientState
   plugin: string
   module: string
   element: string
@@ -255,17 +272,10 @@ type ClientRecord = {
   frameOutcome: 'unmeasured' | 'measured' | 'passed over'
 }
 
-const instances = new Map<string, ClientRecord>()
 /** densable `se` — per-instance measurings cap before skip. */
 const MEASURE_INSTANCE_CAP = 8
 /** densable `ne` — frame-wide pass-over cap after laidOut. */
 const MEASURE_FRAME_CAP = 20
-/** densable factory `u` — host called `laidOut()` this measure window. */
-let laidOutLive = false
-/** densable factory `a` — pass-overs counted after laidOut. */
-let measurePassOvers = 0
-/** densable `m` — reset measurings at end of frame. */
-let measureResetTimer: ReturnType<typeof setImmediate> | undefined
 
 /**
  * densable `d3` slice used by Client `L()`.
@@ -277,26 +287,68 @@ export type ClientTerminalSize = {
   conversationColumns: number
 }
 
-let clientTerminalSize: ClientTerminalSize | undefined
+type SessionFunctionHooksClientState = {
+  clientFaultReporter: ClientFaultReporter | undefined
+  clientMessagePostHandler: ClientMessagePostHandler | undefined
+  clientMessageCancelHandler: ((id: string) => void) | undefined
+  clientPressBridgeOverride:
+    | { value: ClientPressBridge | undefined }
+    | undefined
+  instances: Map<string, ClientRecord>
+  /** densable factory `u` — host called `laidOut()` this measure window. */
+  laidOutLive: boolean
+  /** densable factory `a` — pass-overs counted after laidOut. */
+  measurePassOvers: number
+  /** densable `m` — reset measurings at end of frame. */
+  measureResetTimer: ReturnType<typeof setImmediate> | undefined
+  clientTerminalSize: ClientTerminalSize | undefined
+  environments: Map<string, { loading: Promise<SurfaceEnvironment> }>
+  pluginSurfaces: Map<string, { root: string; modules: SurfaceModuleScan[] }>
+}
+
+const sessionClientStateSlot =
+  new RootSessionSlot<SessionFunctionHooksClientState>(() => ({
+    clientFaultReporter: undefined,
+    clientMessagePostHandler: undefined,
+    clientMessageCancelHandler: undefined,
+    clientPressBridgeOverride: undefined,
+    instances: new Map(),
+    laidOutLive: false,
+    measurePassOvers: 0,
+    measureResetTimer: undefined,
+    clientTerminalSize: undefined,
+    environments: new Map(),
+    pluginSurfaces: new Map(),
+  }))
+
+function clientState(): SessionFunctionHooksClientState {
+  return sessionClientStateSlot.of(getBootstrapSession())
+}
 
 /** densable `sst` / `d3.set` — panes host writes the three-part `L()` stamp. */
 export function setClientTerminalSize(
   next: ClientTerminalSize | undefined,
 ): void {
-  clientTerminalSize = next
+  clientState().clientTerminalSize = next
 }
 
-/**
- * densable `L()` — three-part stamp for thrownAt / Z skip.
- */
-export function clientTerminalStamp(): string {
-  const r = clientTerminalSize
+function clientTerminalStampFor(
+  state: SessionFunctionHooksClientState,
+): string {
+  const r = state.clientTerminalSize
   if (r !== undefined) {
     return [r.columns, r.rows, r.conversationColumns].join('x')
   }
   const columns = process.stdout.columns ?? 0
   const rows = process.stdout.rows ?? 0
   return [columns, rows, Math.max(1, columns)].join('x')
+}
+
+/**
+ * densable `L()` — three-part stamp for thrownAt / Z skip.
+ */
+export function clientTerminalStamp(): string {
+  return clientTerminalStampFor(clientState())
 }
 
 /** densable `Bn({props})` slice of `P(e,o)`. */
@@ -313,11 +365,11 @@ function clientThrowStamp(record: ClientRecord, size: string): string {
   return `${size} ${clientPropsStamp(record.props)}`
 }
 
-function scheduleMeasureReset(): void {
-  measureResetTimer ??= setImmediate(() => {
-    measureResetTimer = undefined
-    measurePassOvers = 0
-    for (const record of instances.values()) {
+function scheduleMeasureReset(state: SessionFunctionHooksClientState): void {
+  state.measureResetTimer ??= setImmediate(() => {
+    state.measureResetTimer = undefined
+    state.measurePassOvers = 0
+    for (const record of state.instances.values()) {
       // densable Y: `isUnsettled &&= frameOutcome!=="measured"`
       record.isUnsettled =
         record.isUnsettled && record.frameOutcome !== 'measured'
@@ -326,38 +378,36 @@ function scheduleMeasureReset(): void {
     }
   })
 }
-const environments = new Map<string, { loading: Promise<SurfaceEnvironment> }>()
-const pluginSurfaces = new Map<
-  string,
-  { root: string; modules: SurfaceModuleScan[] }
->()
 
 export function setPluginSurfaceModules(
   plugin: string,
   root: string | undefined,
   modules: readonly SurfaceModuleScan[],
 ): void {
-  pluginSurfaces.set(plugin, { root: root ?? '', modules: [...modules] })
-  environments.delete(plugin)
+  const state = clientState()
+  state.pluginSurfaces.set(plugin, { root: root ?? '', modules: [...modules] })
+  state.environments.delete(plugin)
 }
 
 export function forgetPluginSurfaceModules(plugin?: string): void {
+  const state = clientState()
+  const pressBridge = getClientPressBridge(state)
   if (plugin === undefined) {
-    pluginSurfaces.clear()
-    environments.clear()
-    clientPressBridge?.forget()
+    state.pluginSurfaces.clear()
+    state.environments.clear()
+    pressBridge?.forget()
     return
   }
-  pluginSurfaces.delete(plugin)
-  environments.delete(plugin)
-  clientPressBridge?.forget(plugin)
+  state.pluginSurfaces.delete(plugin)
+  state.environments.delete(plugin)
+  pressBridge?.forget(plugin)
 }
 
 /** densable `FS.moduleFor` lookup of scanned surface modules. */
 export function getPluginSurfaceModules(
   plugin: string,
 ): { root: string; modules: SurfaceModuleScan[] } | undefined {
-  const held = pluginSurfaces.get(plugin)
+  const held = clientState().pluginSurfaces.get(plugin)
   if (held === undefined || held.modules.length === 0) return undefined
   return { root: held.root, modules: [...held.modules] }
 }
@@ -442,6 +492,16 @@ export function scrubClientFaultReason(
   return `${truncateUtf16(body, CLIENT_FAULT_REASON_CHARS - 1)}…`
 }
 
+function runInRecordSession<T>(record: ClientRecord, fn: () => T): T {
+  if (
+    record.session !== undefined &&
+    getActiveSessionFromAls() !== record.session
+  ) {
+    return runWithSession(record.session, fn)
+  }
+  return fn()
+}
+
 function failRecord(
   record: ClientRecord,
   detail: string,
@@ -453,15 +513,17 @@ function failRecord(
     text: `${record.plugin}: ${clientDetail(record.plugin, record.module, detail)}`,
   })
   // densable 2.1.289: owning plugin's `ui.fault` chain alone (terminal surface).
-  clientFaultReporter?.({
-    plugin: record.plugin,
-    surface: record.surfaceName,
-    component: record.component,
-    requestId: record.requestId,
-    element: record.element,
-    module: record.module,
-    phase,
-    reason: scrubClientFaultReason(record.plugin, record.module, detail),
+  runInRecordSession(record, () => {
+    record.state.clientFaultReporter?.({
+      plugin: record.plugin,
+      surface: record.surfaceName,
+      component: record.component,
+      requestId: record.requestId,
+      element: record.element,
+      module: record.module,
+      phase,
+      reason: scrubClientFaultReason(record.plugin, record.module, detail),
+    })
   })
 }
 
@@ -470,10 +532,12 @@ function releaseRecordHeld(
   list: ReadonlyArray<{ surfaceHandle: number; environmentHandle: number }>,
 ): void {
   if (list.length === 0) return
-  clientPressBridge?.release(
-    record.plugin,
-    list.map(item => item.surfaceHandle),
-  )
+  runInRecordSession(record, () => {
+    getClientPressBridge(record.state)?.release(
+      record.plugin,
+      list.map(item => item.surfaceHandle),
+    )
+  })
   try {
     record.surface?.dropHeld(list.map(item => item.environmentHandle))
   } catch {
@@ -498,11 +562,16 @@ function unmountSurface(record: ClientRecord): void {
   }
   record.surface = undefined
   // densable `v()`: `f.cancel(e.id)` after surface.unmount
-  clientMessageCancelHandler?.(record.id)
+  runInRecordSession(record, () => {
+    record.state.clientMessageCancelHandler?.(record.id)
+  })
 }
 
-function resetUnprompted(plugin: string): void {
-  for (const record of instances.values()) {
+function resetUnprompted(
+  state: SessionFunctionHooksClientState,
+  plugin: string,
+): void {
+  for (const record of state.instances.values()) {
     if (record.plugin === plugin) record.unpromptedRenders = 0
   }
 }
@@ -517,27 +586,30 @@ function paint(record: ClientRecord): void {
   let tree: unknown
   try {
     tree = stampHeldPress(record.plugin, surface.render(), (envHandle, key) => {
-      if (!clientPressBridge) return envHandle
-      const surfaceHandle = clientPressBridge.hold(record.plugin, event => {
-        resetUnprompted(record.plugin)
-        if (!record.surface || record.isDestroyed) return
-        const baseEvent = {
-          plugin: record.plugin,
-          element: key,
-          component: record.component,
-          requestId: record.requestId,
-          surface: record.surfaceName,
-        }
-        const payload =
-          event !== null && typeof event === 'object'
-            ? { ...baseEvent, ...(event as Record<string, unknown>) }
-            : baseEvent
-        try {
-          record.surface.runHeld(envHandle, payload)
-        } catch (err) {
-          failRecord(record, errorMessage(err), 'run')
-        }
-      })
+      const pressBridge = getClientPressBridge(record.state)
+      if (!pressBridge) return envHandle
+      const surfaceHandle = runInRecordSession(record, () =>
+        pressBridge.hold(record.plugin, event => {
+          resetUnprompted(record.state, record.plugin)
+          if (!record.surface || record.isDestroyed) return
+          const baseEvent = {
+            plugin: record.plugin,
+            element: key,
+            component: record.component,
+            requestId: record.requestId,
+            surface: record.surfaceName,
+          }
+          const payload =
+            event !== null && typeof event === 'object'
+              ? { ...baseEvent, ...(event as Record<string, unknown>) }
+              : baseEvent
+          try {
+            record.surface.runHeld(envHandle, payload)
+          } catch (err) {
+            failRecord(record, errorMessage(err), 'run')
+          }
+        }),
+      )
       nextHeld.push({ surfaceHandle, environmentHandle: envHandle })
       return surfaceHandle
     })
@@ -551,7 +623,7 @@ function paint(record: ClientRecord): void {
   const prevHeld = record.held
   record.held = nextHeld
   releaseRecordHeld(record, prevHeld)
-  record.renderedAt = clientTerminalStamp()
+  record.renderedAt = clientTerminalStampFor(record.state)
   setSnapshot(record, { status: 'drawn', tree })
 }
 
@@ -562,7 +634,10 @@ function measureSkipReason(
   if (record.measurings >= (record.isUnsettled ? 1 : MEASURE_INSTANCE_CAP)) {
     return 'instance'
   }
-  if (record.measurings > 0 && measurePassOvers > MEASURE_FRAME_CAP) {
+  if (
+    record.measurings > 0 &&
+    record.state.measurePassOvers > MEASURE_FRAME_CAP
+  ) {
     return 'frame'
   }
   return undefined
@@ -578,15 +653,17 @@ function resizeRecord(
   rows: number,
 ): void {
   if (columns === record.columns && rows === record.rows) return
-  const stamp = clientTerminalStamp()
+  const state = record.state
+  const stamp = clientTerminalStampFor(state)
   const terminalChanged = stamp !== record.terminal
-  const afterLayout = laidOutLive && !terminalChanged && record.measurings > 0
+  const afterLayout =
+    state.laidOutLive && !terminalChanged && record.measurings > 0
   record.terminal = stamp
   record.columns = columns
   record.rows = rows
   if (afterLayout) {
-    measurePassOvers += 1
-    laidOutLive = false
+    state.measurePassOvers += 1
+    state.laidOutLive = false
   }
   const skip = terminalChanged ? undefined : measureSkipReason(record)
   if (skip !== undefined) {
@@ -608,8 +685,8 @@ function resizeRecord(
   }
   if (!terminalChanged) record.measurings += 1
   if (record.frameOutcome === 'unmeasured') record.frameOutcome = 'measured'
-  scheduleMeasureReset()
-  if (terminalChanged) resetUnprompted(record.plugin)
+  scheduleMeasureReset(state)
+  if (terminalChanged) resetUnprompted(state, record.plugin)
   if (!record.surface) return
   try {
     record.surface.resize(columns, rows)
@@ -619,8 +696,8 @@ function resizeRecord(
   paint(record)
 }
 
-function markLaidOut(): void {
-  laidOutLive = true
+function markLaidOut(state: SessionFunctionHooksClientState): void {
+  state.laidOutLive = true
 }
 
 function threwRecord(record: ClientRecord, error: unknown): void {
@@ -638,7 +715,10 @@ function drawnAgainRecord(record: ClientRecord): void {
   ) {
     return
   }
-  if (record.thrownAt === clientThrowStamp(record, clientTerminalStamp())) {
+  if (
+    record.thrownAt ===
+    clientThrowStamp(record, clientTerminalStampFor(record.state))
+  ) {
     return
   }
   if (record.surface) return
@@ -1271,9 +1351,10 @@ function pickComponent(
 }
 
 async function buildEnvironment(
+  state: SessionFunctionHooksClientState,
   pluginName: string,
 ): Promise<SurfaceEnvironment> {
-  const held = pluginSurfaces.get(pluginName)
+  const held = state.pluginSurfaces.get(pluginName)
   if (!held) {
     throw new Error(`${pluginName}: Client: the plugin is not loaded`)
   }
@@ -1449,11 +1530,14 @@ async function buildEnvironment(
   }
 }
 
-function environmentFor(plugin: string): Promise<SurfaceEnvironment> {
-  const held = environments.get(plugin)
+function environmentFor(
+  state: SessionFunctionHooksClientState,
+  plugin: string,
+): Promise<SurfaceEnvironment> {
+  const held = state.environments.get(plugin)
   if (held) return held.loading
-  const loading = buildEnvironment(plugin)
-  environments.set(plugin, { loading })
+  const loading = buildEnvironment(state, plugin)
+  state.environments.set(plugin, { loading })
   return loading
 }
 
@@ -1471,7 +1555,7 @@ function attach(record: ClientRecord): ClientInstance {
     getSnapshot: () => record.snapshot,
     setProps(next) {
       record.props = next
-      resetUnprompted(record.plugin)
+      resetUnprompted(record.state, record.plugin)
       try {
         record.surface?.setProps(next)
       } catch (err) {
@@ -1480,7 +1564,7 @@ function attach(record: ClientRecord): ClientInstance {
       }
       paint(record)
     },
-    laidOut: () => markLaidOut(),
+    laidOut: () => markLaidOut(record.state),
     resize(columns, rows) {
       resizeRecord(record, columns, rows)
     },
@@ -1491,7 +1575,7 @@ function attach(record: ClientRecord): ClientInstance {
       drawnAgainRecord(record)
     },
     pointer(event) {
-      resetUnprompted(record.plugin)
+      resetUnprompted(record.state, record.plugin)
       try {
         record.surface?.pointer(event)
       } catch (err) {
@@ -1499,7 +1583,7 @@ function attach(record: ClientRecord): ClientInstance {
       }
     },
     key(event) {
-      resetUnprompted(record.plugin)
+      resetUnprompted(record.state, record.plugin)
       try {
         record.surface?.key(event)
       } catch (err) {
@@ -1509,7 +1593,7 @@ function attach(record: ClientRecord): ClientInstance {
     acceptsPointer: () => record.surface?.hasPointerListener() === true,
     acceptsKeys: () => record.surface?.hasKeyListener() === true,
     runHeld(handle, event) {
-      resetUnprompted(record.plugin)
+      resetUnprompted(record.state, record.plugin)
       try {
         record.surface?.runHeld(handle, event)
       } catch (err) {
@@ -1540,20 +1624,23 @@ function destroy(record: ClientRecord): void {
   record.isDestroyed = true
   clearTimeout(record.destroyTimer)
   unmountSurface(record)
-  if (instances.get(record.id) === record) instances.delete(record.id)
+  if (record.state.instances.get(record.id) === record) {
+    record.state.instances.delete(record.id)
+  }
 }
 
 function mountWhenReady(record: ClientRecord): void {
   record.mountGeneration += 1
   const generation = record.mountGeneration
-  environmentFor(record.plugin).then(
+  environmentFor(record.state, record.plugin).then(
     env => {
       if (generation !== record.mountGeneration || record.isDestroyed) return
       if (record.surface) return
       // densable ue: same throw stamp as current L() → do not remount.
       if (
         record.thrownAt !== undefined &&
-        record.thrownAt === clientThrowStamp(record, clientTerminalStamp())
+        record.thrownAt ===
+          clientThrowStamp(record, clientTerminalStampFor(record.state))
       ) {
         return
       }
@@ -1567,44 +1654,46 @@ function mountWhenReady(record: ClientRecord): void {
             post: data => {
               // densable `pe`: `f.post(e.id, tgn(...), s => V(e, s.props))`
               const generation = record.mountGeneration
-              clientMessagePostHandler?.(
-                {
-                  id: record.id,
-                  plugin: record.plugin,
-                  surface: record.surfaceName,
-                  component: record.component,
-                  requestId: record.requestId,
-                  element: record.element,
-                  module: record.module,
-                  data,
-                },
-                reply => {
-                  if (
-                    record.isDestroyed ||
-                    record.mountGeneration !== generation
-                  ) {
-                    return
-                  }
-                  if (
-                    typeof reply !== 'object' ||
-                    reply === null ||
-                    Array.isArray(reply) ||
-                    !Object.hasOwn(reply, 'props')
-                  ) {
-                    return
-                  }
-                  const next = (reply as { props: unknown }).props
-                  record.props = next
-                  resetUnprompted(record.plugin)
-                  try {
-                    record.surface?.setProps(next)
-                  } catch (err) {
-                    failRecord(record, errorMessage(err), 'run')
-                    return
-                  }
-                  paint(record)
-                },
-              )
+              runInRecordSession(record, () => {
+                record.state.clientMessagePostHandler?.(
+                  {
+                    id: record.id,
+                    plugin: record.plugin,
+                    surface: record.surfaceName,
+                    component: record.component,
+                    requestId: record.requestId,
+                    element: record.element,
+                    module: record.module,
+                    data,
+                  },
+                  reply => {
+                    if (
+                      record.isDestroyed ||
+                      record.mountGeneration !== generation
+                    ) {
+                      return
+                    }
+                    if (
+                      typeof reply !== 'object' ||
+                      reply === null ||
+                      Array.isArray(reply) ||
+                      !Object.hasOwn(reply, 'props')
+                    ) {
+                      return
+                    }
+                    const next = (reply as { props: unknown }).props
+                    record.props = next
+                    resetUnprompted(record.state, record.plugin)
+                    try {
+                      record.surface?.setProps(next)
+                    } catch (err) {
+                      failRecord(record, errorMessage(err), 'run')
+                      return
+                    }
+                    paint(record)
+                  },
+                )
+              })
             },
             startTimer: (ms, tick) => {
               const id = setInterval(tick, Math.max(ms, CLOCK_MIN_MS))
@@ -1633,6 +1722,8 @@ function mountWhenReady(record: ClientRecord): void {
 }
 
 function createRecord(input: {
+  session: Session | undefined
+  state: SessionFunctionHooksClientState
   plugin: string
   surface: string
   requestId: string
@@ -1642,8 +1733,11 @@ function createRecord(input: {
   props: unknown
 }): ClientRecord {
   const id = clientInstanceKey(input)
+  const terminalStamp = clientTerminalStampFor(input.state)
   return {
     id,
+    session: input.session,
+    state: input.state,
     plugin: input.plugin,
     module: input.module,
     element: input.key,
@@ -1665,9 +1759,9 @@ function createRecord(input: {
     renderTimer: undefined,
     mountGeneration: 0,
     destroyTimer: undefined,
-    renderedAt: clientTerminalStamp(),
+    renderedAt: terminalStamp,
     thrownAt: undefined,
-    terminal: clientTerminalStamp(),
+    terminal: terminalStamp,
     measurings: 0,
     isUnsettled: false,
     frameOutcome: 'unmeasured',
@@ -1706,6 +1800,10 @@ export function acquirePluginClient(input: {
   module: string
   props?: unknown
 }): ClientInstance {
+  const activeSession = getActiveSessionFromAls()
+  const state = sessionClientStateSlot.of(
+    activeSession ?? getBootstrapSession(),
+  )
   const surface = input.surface ?? 'terminal'
   const requestId = input.requestId ?? 'detached'
   const id = clientInstanceKey({
@@ -1714,7 +1812,7 @@ export function acquirePluginClient(input: {
     requestId,
     key: input.key,
   })
-  const held = instances.get(id)
+  const held = state.instances.get(id)
   if (held !== undefined && !held.isDestroyed && held.module === input.module) {
     clearTimeout(held.destroyTimer)
     held.destroyTimer = undefined
@@ -1729,6 +1827,8 @@ export function acquirePluginClient(input: {
   }
   if (held) destroy(held)
   const created = createRecord({
+    session: activeSession,
+    state,
     plugin: input.plugin,
     surface,
     requestId,
@@ -1737,16 +1837,23 @@ export function acquirePluginClient(input: {
     component: input.component ?? 'Client',
     props: input.props,
   })
-  instances.set(id, created)
+  state.instances.set(id, created)
   mountWhenReady(created)
   return attach(created)
 }
 
 export function disposePluginClients(): void {
-  for (const record of [...instances.values()]) destroy(record)
-  instances.clear()
-  environments.clear()
-  pluginSurfaces.clear()
+  const state = clientState()
+  if (state.measureResetTimer !== undefined) {
+    clearImmediate(state.measureResetTimer)
+    state.measureResetTimer = undefined
+  }
+  state.laidOutLive = false
+  state.measurePassOvers = 0
+  for (const record of [...state.instances.values()]) destroy(record)
+  state.instances.clear()
+  state.environments.clear()
+  state.pluginSurfaces.clear()
 }
 
 const CLIENT_RELATIVE = /^\.\.?(?:\/|$)/

@@ -26,12 +26,16 @@
 import { getOauthConfig } from '../constants/oauth.js'
 import { isEnvTruthy } from './envUtils.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
-let fired = false
+const preconnectFiredHostSlot = new HostSlot<{ fired: boolean }>(() => ({
+  fired: false,
+}))
 
 export function preconnectAnthropicApi(): void {
-  if (fired) return
-  fired = true
+  const hostState = preconnectFiredHostSlot.of(getBootstrapSessionHost())
+  if (hostState.fired) return
+  hostState.fired = true
 
   // Also skip when non-essential traffic is disabled via
   // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC / DISABLE_TELEMETRY / proxy env.

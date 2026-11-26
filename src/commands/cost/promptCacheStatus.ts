@@ -1,6 +1,10 @@
 import type { StatusLineCommandInput } from '../../types/statusLine.js'
 import { formatRelativeTimeAgo, formatTokens } from '../../utils/format.js'
 import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
+import {
   estimatePromptCacheRecacheTokens,
   resetPromptCacheSessionBagForTests,
   summarizePromptCache,
@@ -54,29 +58,44 @@ export function snapshotFromSummary(
  * snapshot without going through record. Production paths always call
  * summarizePromptCache / estimatePromptCacheRecacheTokens directly.
  */
-let testOverride: {
+type PromptCacheStatusTestOverride = {
   snapshot: PromptCacheTrackerSnapshot
   cold: number | null
-} | null = null
+}
+
+const promptCacheStatusOverrideSlot = new RootSessionSlot<{
+  testOverride: PromptCacheStatusTestOverride | null
+}>(() => ({
+  testOverride: null,
+}))
 
 export function setPromptCacheTrackerForTests(
   next: PromptCacheTrackerSnapshot,
   cold: number | null,
 ): void {
-  testOverride = { snapshot: next, cold }
+  promptCacheStatusOverrideSlot.of(getBootstrapSession()).testOverride = {
+    snapshot: next,
+    cold,
+  }
 }
 
 export function resetPromptCacheTrackerForTests(): void {
-  testOverride = null
+  promptCacheStatusOverrideSlot.of(getBootstrapSession()).testOverride = null
   resetPromptCacheSessionBagForTests()
 }
 
 function liveSnapshot(now = Date.now()): PromptCacheTrackerSnapshot {
+  const testOverride = promptCacheStatusOverrideSlot.of(
+    getBootstrapSession(),
+  ).testOverride
   if (testOverride !== null) return testOverride.snapshot
   return snapshotFromSummary(summarizePromptCache(undefined, now))
 }
 
 function liveColdTokens(): number | null {
+  const testOverride = promptCacheStatusOverrideSlot.of(
+    getBootstrapSession(),
+  ).testOverride
   if (testOverride !== null) return testOverride.cold
   return estimatePromptCacheRecacheTokens()
 }

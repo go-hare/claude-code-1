@@ -1,4 +1,5 @@
 import { logForDebugging } from '../../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
 export interface SkillIndexEntry {
   name: string
@@ -284,19 +285,50 @@ function splitHyphenatedName(name: string): string[] {
     .filter(p => p.length >= 3)
 }
 
-let cachedIndex: SkillIndexEntry[] | null = null
-let cachedIdf: Map<string, number> | null = null
-let cachedCwd: string | null = null
+type SkillIndexHostState = {
+  cachedIndex: SkillIndexEntry[] | null
+  cachedIdf: Map<string, number> | null
+  cachedCwd: string | null
+}
+
+const fallbackSkillIndexHost: object = {}
+
+function getActiveSkillIndexHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackSkillIndexHost
+}
+
+const skillIndexHostSlot = new HostSlot<SkillIndexHostState>(() => ({
+  cachedIndex: null,
+  cachedIdf: null,
+  cachedCwd: null,
+}))
+
+function getSkillIndexHostState(): SkillIndexHostState {
+  return skillIndexHostSlot.of(getActiveSkillIndexHost())
+}
 
 export function clearSkillIndexCache(): void {
-  cachedIndex = null
-  cachedIdf = null
-  cachedCwd = null
+  const state = getSkillIndexHostState()
+  state.cachedIndex = null
+  state.cachedIdf = null
+  state.cachedCwd = null
   logForDebugging('[skill-search] index cache cleared')
 }
 
 export async function getSkillIndex(cwd: string): Promise<SkillIndexEntry[]> {
-  if (cachedIndex && cachedCwd === cwd) return cachedIndex
+  const state = getSkillIndexHostState()
+  if (state.cachedIndex && state.cachedCwd === cwd) return state.cachedIndex
 
   const { getCommands } = await import('../../commands.js')
   const commands = await getCommands(cwd)
@@ -371,9 +403,9 @@ export async function getSkillIndex(cwd: string): Promise<SkillIndexEntry[]> {
     }
   }
 
-  cachedIndex = entries
-  cachedIdf = idf
-  cachedCwd = cwd
+  state.cachedIndex = entries
+  state.cachedIdf = idf
+  state.cachedCwd = cwd
   logForDebugging(
     `[skill-search] indexed ${entries.length} skills from ${commands.length} commands`,
   )
@@ -397,7 +429,11 @@ export function searchSkills(
   for (const v of freq.values()) if (v > max) max = v
   for (const [term, count] of freq) queryTf.set(term, count / max)
 
-  const idf = cachedIndex === index && cachedIdf ? cachedIdf : computeIdf(index)
+  const state = getSkillIndexHostState()
+  const idf =
+    state.cachedIndex === index && state.cachedIdf
+      ? state.cachedIdf
+      : computeIdf(index)
   const queryTfIdf = new Map<string, number>()
   for (const [term, tf] of queryTf) {
     queryTfIdf.set(term, tf * (idf.get(term) ?? 0))

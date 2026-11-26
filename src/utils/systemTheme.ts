@@ -11,6 +11,7 @@
  * updated by the watcher once the OSC 11 response arrives.
  */
 
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import {
   isBuiltinThemeName,
   type ThemeName,
@@ -19,17 +20,20 @@ import {
 
 export type SystemTheme = 'dark' | 'light'
 
-let cachedSystemTheme: SystemTheme | undefined
+const systemThemeHostSlot = new HostSlot<{
+  cachedSystemTheme: SystemTheme | undefined
+}>(() => ({ cachedSystemTheme: undefined }))
 
 /**
- * Get the current terminal theme. Cached after first detection; the watcher
+ * Get the current terminal theme. Cached per host after first detection; the watcher
  * updates the cache on live changes.
  */
 export function getSystemThemeName(): SystemTheme {
-  if (cachedSystemTheme === undefined) {
-    cachedSystemTheme = detectFromColorFgBg() ?? 'dark'
+  const state = systemThemeHostSlot.of(getBootstrapSessionHost())
+  if (state.cachedSystemTheme === undefined) {
+    state.cachedSystemTheme = detectFromColorFgBg() ?? 'dark'
   }
-  return cachedSystemTheme
+  return state.cachedSystemTheme
 }
 
 /**
@@ -37,7 +41,7 @@ export function getSystemThemeName(): SystemTheme {
  * query returns so non-React call sites stay in sync.
  */
 export function setCachedSystemTheme(theme: SystemTheme): void {
-  cachedSystemTheme = theme
+  systemThemeHostSlot.of(getBootstrapSessionHost()).cachedSystemTheme = theme
 }
 
 /**

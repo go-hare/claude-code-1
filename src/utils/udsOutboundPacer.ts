@@ -11,6 +11,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growt
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
 import { lazySchema } from './lazySchema.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import { canonicalSocketKey } from './udsIdleNotify.js'
 
 /**
@@ -384,14 +385,23 @@ export function shouldPaceOutboundSend(input: {
   return isHarborKitePacingEnabled(input.env)
 }
 
-let sharedPacer: OutboundPacer | undefined
+type OutboundPacerSessionState = {
+  sharedPacer: OutboundPacer | undefined
+}
 
-/** densable jLb — lazy process-wide outbound pacer. */
+const outboundPacerSessionSlot = new RootSessionSlot<OutboundPacerSessionState>(
+  () => ({
+    sharedPacer: undefined,
+  }),
+)
+
+/** densable jLb — lazy per-root-session outbound pacer. */
 export function getOutboundPacer(): OutboundPacer {
-  return (sharedPacer ??= createOutboundPacer(getHarborKiteLimits))
+  const state = outboundPacerSessionSlot.of(getBootstrapSession())
+  return (state.sharedPacer ??= createOutboundPacer(getHarborKiteLimits))
 }
 
 /** Test-only: drop the shared singleton so limits/clock inject cleanly. */
 export function resetOutboundPacerForTests(): void {
-  sharedPacer = undefined
+  outboundPacerSessionSlot.of(getBootstrapSession()).sharedPacer = undefined
 }

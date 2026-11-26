@@ -582,13 +582,9 @@ export function configureMarked(): void {
   // rows that still expand past the header (2.1.234 #10).
   marked.use({
     tokenizer: {
-      ...(supportsStrikethrough()
-        ? {}
-        : {
-            del() {
-              return undefined
-            },
-          }),
+      del() {
+        return supportsStrikethrough() ? false : undefined
+      },
       blockquote(this: Tokenizer, src: string) {
         return this.rules.other.blockquoteStart.test(src)
           ? lexAtLevel(this.lexer, () =>

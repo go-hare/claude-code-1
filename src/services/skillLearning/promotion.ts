@@ -1,6 +1,10 @@
 import { readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import type { Instinct, StoredInstinct } from './instinctParser.js'
 import {
   getInstinctsDir,
@@ -32,9 +36,14 @@ export type PromotionOptions = {
  */
 const SESSION_PROMOTED_IDS_MAX = 256
 const SESSION_PROMOTED_IDS_TRIM_TO = 192
-const sessionPromotedIds = new Set<string>()
+const sessionPromotedIdsSlot = new RootSessionSlot(() => new Set<string>())
+
+function getSessionPromotedIds(): Set<string> {
+  return sessionPromotedIdsSlot.of(getBootstrapSession())
+}
 
 function recordSessionPromoted(id: string): void {
+  const sessionPromotedIds = getSessionPromotedIds()
   sessionPromotedIds.add(id)
   if (sessionPromotedIds.size > SESSION_PROMOTED_IDS_MAX) {
     const toDrop = sessionPromotedIds.size - SESSION_PROMOTED_IDS_TRIM_TO
@@ -48,7 +57,7 @@ function recordSessionPromoted(id: string): void {
 }
 
 export function resetPromotionBookkeeping(): void {
-  sessionPromotedIds.clear()
+  getSessionPromotedIds().clear()
 }
 
 export function findPromotionCandidates(
@@ -101,6 +110,7 @@ export async function checkPromotion(
   )
   const promoted: PromotionCandidate[] = []
 
+  const sessionPromotedIds = getSessionPromotedIds()
   for (const candidate of candidates) {
     if (sessionPromotedIds.has(candidate.instinctId)) continue
 

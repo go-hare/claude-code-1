@@ -18,6 +18,11 @@ import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
 import { logForDebugging } from '../debug.js'
 import { logError } from '../log.js'
 import {
+  getBootstrapSessionHost,
+  HostSlot,
+  ofDefaultHost,
+} from '../sessionHost.js'
+import {
   createLocalFsBackend,
   type CreateLocalFsBackendOptions,
   type StorageV5,
@@ -50,7 +55,20 @@ export {
   tryCreateCredentialsStore,
 } from './credentialsStore.js'
 
-let lastPinned: StorageV5 | undefined
+const pinnedStorageV5HostSlot = new HostSlot<{
+  hasOverride: boolean
+  lastPinned: StorageV5 | undefined
+}>(() => ({
+  hasOverride: false,
+  lastPinned: undefined,
+}))
+
+function getPinnedStorageV5State(): {
+  hasOverride: boolean
+  lastPinned: StorageV5 | undefined
+} {
+  return pinnedStorageV5HostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable Ub — pin CLAUDE_CODE_HOVER_REST / tengu_hover_rest.
@@ -199,15 +217,25 @@ export function pinStorageV5(
       result = backend
     }
   }
-  lastPinned = result
+  const state = getPinnedStorageV5State()
+  state.hasOverride = true
+  state.lastPinned = result
   registerPluginUsageStorageV5(result)
   return result
 }
 
 export function getPinnedStorageV5(): StorageV5 | undefined {
-  return lastPinned
+  const own = pinnedStorageV5HostSlot.peek(getBootstrapSessionHost())
+  if (own?.hasOverride) {
+    return own.lastPinned
+  }
+  return ofDefaultHost(pinnedStorageV5HostSlot).lastPinned
 }
 
 export function resetPinnedStorageV5ForTests(): void {
-  lastPinned = undefined
+  const slot = pinnedStorageV5HostSlot.peek(getBootstrapSessionHost())
+  if (slot) {
+    slot.hasOverride = false
+    slot.lastPinned = undefined
+  }
 }

@@ -6,6 +6,7 @@
  */
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { ToolUseContext } from '../../Tool.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/index.js'
 import type {
   McpHTTPServerConfig,
@@ -36,10 +37,21 @@ const STEP_UP_CHOICES = [
   },
 ]
 
-const flights = new Map<string, Promise<McpStepUpReauthResult>>()
-const exhausted = new Map<string, Set<string>>()
-
 export type McpStepUpReauthResult = 'reauthenticated' | 'declined' | 'failed'
+
+type HostMcpStepUpReauthState = {
+  flights: Map<string, Promise<McpStepUpReauthResult>>
+  exhausted: Map<string, Set<string>>
+}
+
+const hostMcpStepUpReauthSlot = new HostSlot<HostMcpStepUpReauthState>(() => ({
+  flights: new Map(),
+  exhausted: new Map(),
+}))
+
+function getHostMcpStepUpReauthState(): HostMcpStepUpReauthState {
+  return hostMcpStepUpReauthSlot.of(getBootstrapSessionHost())
+}
 
 function normalizeScope(scope: string): string {
   return scope.split(' ').filter(Boolean).sort().join(' ')
@@ -80,7 +92,11 @@ export function isMcpStepUpReauthExhausted(
   cacheKey: string,
   scope: string,
 ): boolean {
-  return exhausted.get(cacheKey)?.has(normalizeScope(scope)) ?? false
+  return (
+    getHostMcpStepUpReauthState()
+      .exhausted.get(cacheKey)
+      ?.has(normalizeScope(scope)) ?? false
+  )
 }
 
 export function markMcpStepUpReauthExhausted(
@@ -88,6 +104,7 @@ export function markMcpStepUpReauthExhausted(
   previous: string,
   next: string,
 ): void {
+  const { exhausted } = getHostMcpStepUpReauthState()
   const key = normalizeScope(previous)
   const set = exhausted.get(cacheKey) ?? new Set<string>()
   if (normalizeScope(next) !== key || set.has(key)) return
@@ -168,12 +185,13 @@ export async function requestMcpStepUpReauth(input: {
   signal: AbortSignal
   cacheKey: string
 }): Promise<McpStepUpReauthResult> {
-  const existing = flights.get(input.cacheKey)
+  const state = getHostMcpStepUpReauthState()
+  const existing = state.flights.get(input.cacheKey)
   if (existing !== undefined) return existing
   const flight = runMcpStepUpReauth(input).finally(() => {
-    flights.delete(input.cacheKey)
+    state.flights.delete(input.cacheKey)
   })
-  flights.set(input.cacheKey, flight)
+  state.flights.set(input.cacheKey, flight)
   return flight
 }
 

@@ -45,6 +45,7 @@ import {
 } from './replBridgeTransport.js'
 import { updateSessionIngressAuthToken } from '../utils/sessionIngressAuth.js'
 import { setSessionMetadataChangedListener } from '../utils/sessionState.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { isEnvTruthy, isInProtectedNamespace } from '../utils/envUtils.js'
 import { validateBridgeId } from './bridgeApi.js'
 import {
@@ -405,8 +406,16 @@ const POLL_ERROR_INITIAL_DELAY_MS = 2_000
 const POLL_ERROR_MAX_DELAY_MS = 60_000
 const POLL_ERROR_GIVE_UP_MS = 15 * 60 * 1000
 
-// Monotonically increasing counter for distinguishing init calls in logs
-let initSequence = 0
+// Monotonically increasing counter per host for distinguishing init calls in logs
+const replBridgeHostSlot = new HostSlot<{ initSequence: number }>(() => ({
+  initSequence: 0,
+}))
+
+function nextInitSequence(): number {
+  const hostState = replBridgeHostSlot.of(getBootstrapSessionHost())
+  hostState.initSequence += 1
+  return hostState.initSequence
+}
 
 /**
  * Bootstrap-free core: env registration → session creation → poll loop →
@@ -465,7 +474,7 @@ export async function initBridgeCore(
   const outboundOnly = outboundOnlyParam ?? false
   const sessionGroupingId = sessionGroupingIdParam
 
-  const seq = ++initSequence
+  const seq = nextInitSequence()
 
   // bridgePointer import hoisted: perpetual mode reads it before register;
   // non-perpetual writes it after session create; both use clear at teardown.

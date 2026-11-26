@@ -26,6 +26,7 @@ import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { logError } from './log.js'
 import { shouldUseMidConversationSystem } from './midConversationSystem.js'
 import { getCanonicalName } from './model/model.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import type { Message } from '../types/message.js'
 
 /**
@@ -85,12 +86,26 @@ type SessionLatch = {
   byModel: Map<string, ResolvedReminder>
 }
 
-const sessionLatches = new Map<string, SessionLatch>()
-let ignoredClientDataWarned = false
+type BatchingReminderSessionState = {
+  sessionLatches: Map<string, SessionLatch>
+  ignoredClientDataWarned: boolean
+}
+
+const batchingReminderStateBySession =
+  new RootSessionSlot<BatchingReminderSessionState>(() => ({
+    sessionLatches: new Map<string, SessionLatch>(),
+    ignoredClientDataWarned: false,
+  }))
+
+function getBatchingReminderState(): BatchingReminderSessionState {
+  return batchingReminderStateBySession.of(getBootstrapSession())
+}
 
 export function resetBatchingReminderLatch(): void {
-  sessionLatches.clear()
-  ignoredClientDataWarned = false
+  const state = batchingReminderStateBySession.peek(getBootstrapSession())
+  if (!state) return
+  state.sessionLatches.clear()
+  state.ignoredClientDataWarned = false
 }
 
 export type BatchingReminderInject = {
@@ -180,6 +195,7 @@ export function resolveBatchingReminderText(
   if (!shouldUseMidConversationSystem({ model })) return null
   const resolved = resolveToastyThimble(model)
   if (resolved === null) return null
+  const { sessionLatches } = getBatchingReminderState()
   let latch = sessionLatches.get(session.id)
   if (latch?.conversationId !== session.id) {
     latch = { conversationId: session.id, byModel: new Map() }
@@ -301,8 +317,9 @@ function wildcardSubsequence(pattern: string, model: string): boolean {
 }
 
 function warnBadClientData(detail: string): void {
-  if (ignoredClientDataWarned) return
-  ignoredClientDataWarned = true
+  const state = getBatchingReminderState()
+  if (state.ignoredClientDataWarned) return
+  state.ignoredClientDataWarned = true
   logForDebugging(
     `[batching reminder] ignoring client_data ${TOASTY_THIMBLE_FEATURE}: ${detail}`,
     { level: 'warn' },

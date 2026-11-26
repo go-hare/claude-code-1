@@ -10,6 +10,7 @@ import { logForDebugging } from './debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import type { PackageManager } from './nativeInstaller/packageManagers.js'
 import { getEssentialTrafficOnlyReason } from './privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { jsonStringify } from './slowOperations.js'
 
 /**
@@ -32,7 +33,11 @@ export function resolvePackageManagerAutoUpdateFromEnv(
 /** Cooldown after a failed package-manager update attempt (30 minutes). */
 export const PACKAGE_MANAGER_FAILURE_COOLDOWN_MS = 1_800_000
 
-let packageManagerUpdateLastFailedAt = 0
+const packageManagerUpdateHostSlot = new HostSlot<{
+  packageManagerUpdateLastFailedAt: number
+}>(() => ({
+  packageManagerUpdateLastFailedAt: 0,
+}))
 
 /**
  * Opt-in gate for spawning package manager upgrades (`brew`/`winget`).
@@ -97,15 +102,20 @@ export function getPackageManagerManualUpgradeCommand(
 }
 
 export function getPackageManagerUpdateLastFailedAt(): number {
-  return packageManagerUpdateLastFailedAt
+  return packageManagerUpdateHostSlot.of(getBootstrapSessionHost())
+    .packageManagerUpdateLastFailedAt
 }
 
 export function recordPackageManagerUpdateFailure(now?: number): void {
-  packageManagerUpdateLastFailedAt = now ?? Date.now()
+  packageManagerUpdateHostSlot.of(
+    getBootstrapSessionHost(),
+  ).packageManagerUpdateLastFailedAt = now ?? Date.now()
 }
 
 export function resetPackageManagerUpdateStateForTests(): void {
-  packageManagerUpdateLastFailedAt = 0
+  packageManagerUpdateHostSlot.of(
+    getBootstrapSessionHost(),
+  ).packageManagerUpdateLastFailedAt = 0
 }
 
 /**

@@ -14,6 +14,10 @@ import {
 } from '../mcp/mcpConnectTimeout.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { logForDebugging } from '../../utils/debug.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import type { ToolStateSlots } from '../../utils/toolState.js'
 import {
   logEvent,
@@ -277,11 +281,31 @@ export class RemoteSessionRegistry {
   }
 }
 
-export const defaultSessionRegistry = new RemoteSessionRegistry()
+const defaultSessionRegistryBySession =
+  new RootSessionSlot<RemoteSessionRegistry>(() => new RemoteSessionRegistry())
 
-/** densable ZO: per-session slot when present, else the process fallback. */
+function getDefaultSessionRegistry(): RemoteSessionRegistry {
+  return defaultSessionRegistryBySession.of(getBootstrapSession())
+}
+
+export const defaultSessionRegistry: RemoteSessionRegistry = new Proxy(
+  new RemoteSessionRegistry(),
+  {
+    get(_target, prop) {
+      const active = getDefaultSessionRegistry()
+      const value = Reflect.get(active, prop, active)
+      return typeof value === 'function' ? value.bind(active) : value
+    },
+    set(_target, prop, value) {
+      const active = getDefaultSessionRegistry()
+      return Reflect.set(active, prop, value, active)
+    },
+  },
+)
+
+/** densable ZO: per-session slot when present, else the session fallback. */
 function sessionRegistry(toolState?: ToolStateSlots): RemoteSessionRegistry {
-  return toolState?.get(RemoteSessionRegistry) ?? defaultSessionRegistry
+  return toolState?.get(RemoteSessionRegistry) ?? getDefaultSessionRegistry()
 }
 
 /** densable `rU` — session channel explicitly off. */
@@ -2692,7 +2716,9 @@ export class RemoteToolsReannounce {
   }
 }
 
-const defaultReannounce = new RemoteToolsReannounce()
+const defaultReannounceBySession = new RootSessionSlot<RemoteToolsReannounce>(
+  () => new RemoteToolsReannounce(),
+)
 
 export function askRemoteToolsReannounce(
   send: (request: {
@@ -2712,7 +2738,9 @@ export function askRemoteToolsReannounce(
   ) {
     return false
   }
-  const slot = toolState?.get(RemoteToolsReannounce) ?? defaultReannounce
+  const slot =
+    toolState?.get(RemoteToolsReannounce) ??
+    defaultReannounceBySession.of(getBootstrapSession())
   return slot.askOnce(() => {
     send({ subtype: 'remote_tools_reannounce', workerEpoch: epoch, deadlineMs })
   })

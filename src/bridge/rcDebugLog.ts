@@ -6,6 +6,7 @@
 import { appendFileSync, mkdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 
 const LOG_PATH = join(homedir(), '.claude', 'rc-debug.log')
 
@@ -14,17 +15,20 @@ function ensureLogDir() {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 }
 
-let headerWritten = false
+const rcDebugLogHostSlot = new HostSlot<{ headerWritten: boolean }>(() => ({
+  headerWritten: false,
+}))
 
 export function rcLog(msg: string): void {
   try {
-    if (!headerWritten) {
+    const hostState = rcDebugLogHostSlot.of(getBootstrapSessionHost())
+    if (!hostState.headerWritten) {
       ensureLogDir()
       appendFileSync(
         LOG_PATH,
         `\n===== RC-DEBUG session ${new Date().toISOString()} =====\n`,
       )
-      headerWritten = true
+      hostState.headerWritten = true
     }
     const ts = new Date().toISOString().slice(11, 23) // HH:mm:ss.SSS
     appendFileSync(LOG_PATH, `[${ts}] ${msg}\n`)

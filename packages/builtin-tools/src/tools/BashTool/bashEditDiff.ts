@@ -10,6 +10,12 @@ import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js'
 import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from 'src/utils/sessionHost.js'
+import {
   getInitialSettings,
   getSettingsForSource,
 } from 'src/utils/settings/settings.js'
@@ -473,7 +479,13 @@ type PrewarmedSnapshotEntry = {
   startedAt: number
   timer: ReturnType<typeof setTimeout>
 }
-const prewarmedSnapshots = new Map<string, PrewarmedSnapshotEntry>()
+const prewarmedSnapshotsSlot = new RootSessionSlot<
+  Map<string, PrewarmedSnapshotEntry>
+>(() => new Map())
+
+function getPrewarmedSnapshots(): Map<string, PrewarmedSnapshotEntry> {
+  return prewarmedSnapshotsSlot.of(getBootstrapSession())
+}
 
 function cleanupPrewarmedSnapshotPromise(
   promise: Promise<BashEditDiffSnapshot | 'unavailable' | null>,
@@ -491,10 +503,13 @@ function prewarmSnapshotKey(cwd: string, toolUseId?: string): string {
   return toolUseId ? `${toolUseId}\0${cwd}` : cwd
 }
 
-function sweepExpiredPrewarmedSnapshots(nowMs: number): void {
-  for (const [key, entry] of prewarmedSnapshots) {
+function sweepExpiredPrewarmedSnapshots(
+  snapshots: Map<string, PrewarmedSnapshotEntry>,
+  nowMs: number,
+): void {
+  for (const [key, entry] of snapshots) {
     if (nowMs - entry.startedAt >= PREWARM_SNAPSHOT_TTL_MS) {
-      prewarmedSnapshots.delete(key)
+      snapshots.delete(key)
       clearTimeout(entry.timer)
       cleanupPrewarmedSnapshotPromise(entry.promise)
     }
@@ -512,28 +527,40 @@ export function prewarmBashEditDiffSnapshot(
   toolUseId?: string,
   now: () => number = Date.now,
 ): Promise<BashEditDiffSnapshot | 'unavailable' | null> {
+  const snapshots = getPrewarmedSnapshots()
   const nowMs = now()
-  sweepExpiredPrewarmedSnapshots(nowMs)
+  sweepExpiredPrewarmedSnapshots(snapshots, nowMs)
   const key = prewarmSnapshotKey(cwd, toolUseId)
-  const existing = prewarmedSnapshots.get(key)
+  const existing = snapshots.get(key)
   if (existing) {
     if (nowMs - existing.startedAt < PREWARM_SNAPSHOT_TTL_MS) {
       return existing.promise
     }
-    prewarmedSnapshots.delete(key)
+    snapshots.delete(key)
     clearTimeout(existing.timer)
     cleanupPrewarmedSnapshotPromise(existing.promise)
   }
   const promise = takeBashEditDiffSnapshot(cwd)
+  const capturedSession = getActiveSessionFromAls()
   const timer = setTimeout(() => {
-    const current = prewarmedSnapshots.get(key)
-    if (current?.promise === promise) {
-      prewarmedSnapshots.delete(key)
-      cleanupPrewarmedSnapshotPromise(promise)
+    const expire = () => {
+      const current = snapshots.get(key)
+      if (current?.promise === promise) {
+        snapshots.delete(key)
+        cleanupPrewarmedSnapshotPromise(promise)
+      }
     }
+    if (
+      capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+    ) {
+      runWithSession(capturedSession, expire)
+      return
+    }
+    expire()
   }, PREWARM_SNAPSHOT_TTL_MS)
   timer.unref()
-  prewarmedSnapshots.set(key, { promise, startedAt: nowMs, timer })
+  snapshots.set(key, { promise, startedAt: nowMs, timer })
   return promise
 }
 
@@ -542,11 +569,12 @@ export function consumePrewarmedBashEditDiffSnapshot(
   toolUseId?: string,
   now: () => number = Date.now,
 ): Promise<BashEditDiffSnapshot | 'unavailable' | null> {
+  const snapshots = getPrewarmedSnapshots()
   const nowMs = now()
   const key = prewarmSnapshotKey(cwd, toolUseId)
-  const existing = prewarmedSnapshots.get(key)
+  const existing = snapshots.get(key)
   if (existing) {
-    prewarmedSnapshots.delete(key)
+    snapshots.delete(key)
     clearTimeout(existing.timer)
     if (nowMs - existing.startedAt < PREWARM_SNAPSHOT_TTL_MS) {
       return existing.promise
@@ -560,20 +588,22 @@ export function discardPrewarmedBashEditDiffSnapshot(
   cwd: string,
   toolUseId?: string,
 ): void {
+  const snapshots = getPrewarmedSnapshots()
   const key = prewarmSnapshotKey(cwd, toolUseId)
-  const existing = prewarmedSnapshots.get(key)
+  const existing = snapshots.get(key)
   if (!existing) return
-  prewarmedSnapshots.delete(key)
+  snapshots.delete(key)
   clearTimeout(existing.timer)
   cleanupPrewarmedSnapshotPromise(existing.promise)
 }
 
 export function _resetPrewarmedBashEditDiffSnapshotsForTesting(): void {
-  for (const entry of prewarmedSnapshots.values()) {
+  const snapshots = getPrewarmedSnapshots()
+  for (const entry of snapshots.values()) {
     clearTimeout(entry.timer)
     cleanupPrewarmedSnapshotPromise(entry.promise)
   }
-  prewarmedSnapshots.clear()
+  snapshots.clear()
 }
 
 /**

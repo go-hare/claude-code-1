@@ -2,6 +2,12 @@ import { unlink } from 'fs/promises'
 import { CircularBuffer } from '../CircularBuffer.js'
 import { logForDebugging } from '../debug.js'
 import { tailFile } from '../fsOperations.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import { getMaxOutputLength } from '../shell/outputLimits.js'
 import { safeJoinLines } from '../stringUtils.js'
 import {
@@ -22,6 +28,24 @@ type ProgressCallback = (
   totalBytes: number,
   isIncomplete: boolean,
 ) => void
+
+type TaskOutputHostState = {
+  /** Registry of all file-mode TaskOutput instances with onProgress callbacks. */
+  registry: Map<string, TaskOutput>
+  /** Subset of registry currently being polled (visibility-driven by React). */
+  activePolling: Map<string, TaskOutput>
+  pollInterval: ReturnType<typeof setInterval> | null
+}
+
+const taskOutputStateByHost = new HostSlot<TaskOutputHostState>(() => ({
+  registry: new Map<string, TaskOutput>(),
+  activePolling: new Map<string, TaskOutput>(),
+  pollInterval: null,
+}))
+
+function getTaskOutputHostState(): TaskOutputHostState {
+  return taskOutputStateByHost.of(getBootstrapSessionHost())
+}
 
 /**
  * Single source of truth for a shell command's output.
@@ -52,14 +76,8 @@ export class TaskOutput {
   #outputFileRedundant = false
   /** Set by getStdout() — total file size in bytes. */
   #outputFileSize = 0
-
-  // --- Shared poller state ---
-
-  /** Registry of all file-mode TaskOutput instances with onProgress callbacks. */
-  static #registry = new Map<string, TaskOutput>()
-  /** Subset of #registry currently being polled (visibility-driven by React). */
-  static #activePolling = new Map<string, TaskOutput>()
-  static #pollInterval: ReturnType<typeof setInterval> | null = null
+  /** Host state this instance registered into (so clear() cleans the right host). */
+  #ownerHostState: TaskOutputHostState | null = null
 
   constructor(
     taskId: string,
@@ -76,7 +94,9 @@ export class TaskOutput {
     // Register for polling when stdout goes to a file and progress is needed.
     // Actual polling is started/stopped by React via startPolling/stopPolling.
     if (stdoutToFile && onProgress) {
-      TaskOutput.#registry.set(taskId, this)
+      const state = getTaskOutputHostState()
+      this.#ownerHostState = state
+      state.registry.set(taskId, this)
     }
   }
 
@@ -85,14 +105,43 @@ export class TaskOutput {
    * useEffect when the progress component mounts.
    */
   static startPolling(taskId: string): void {
-    const instance = TaskOutput.#registry.get(taskId)
+    const state = taskOutputStateByHost.peek(getBootstrapSessionHost())
+    if (!state) {
+      return
+    }
+    const instance = state.registry.get(taskId)
     if (!instance || !instance.#onProgress) {
       return
     }
-    TaskOutput.#activePolling.set(taskId, instance)
-    if (!TaskOutput.#pollInterval) {
-      TaskOutput.#pollInterval = setInterval(TaskOutput.#tick, POLL_INTERVAL_MS)
-      TaskOutput.#pollInterval.unref()
+    state.activePolling.set(taskId, instance)
+    if (!state.pollInterval) {
+      const stateRef = new WeakRef(state)
+      const rootSessionRef = new WeakRef(getBootstrapSession().root)
+      const interval = setInterval(() => {
+        const liveState = stateRef.deref()
+        if (!liveState || liveState.pollInterval !== interval) {
+          clearInterval(interval)
+          return
+        }
+        const session = rootSessionRef.deref()
+        if (session) {
+          runWithSession(session, () => {
+            TaskOutput.#tick(liveState)
+          })
+        } else {
+          TaskOutput.#tick(liveState)
+        }
+      }, POLL_INTERVAL_MS)
+      interval.unref()
+      state.pollInterval = interval
+    }
+  }
+
+  static #stopPollingInState(state: TaskOutputHostState, taskId: string): void {
+    state.activePolling.delete(taskId)
+    if (state.activePolling.size === 0 && state.pollInterval) {
+      clearInterval(state.pollInterval)
+      state.pollInterval = null
     }
   }
 
@@ -101,19 +150,19 @@ export class TaskOutput {
    * when the progress component unmounts.
    */
   static stopPolling(taskId: string): void {
-    TaskOutput.#activePolling.delete(taskId)
-    if (TaskOutput.#activePolling.size === 0 && TaskOutput.#pollInterval) {
-      clearInterval(TaskOutput.#pollInterval)
-      TaskOutput.#pollInterval = null
+    const state = taskOutputStateByHost.peek(getBootstrapSessionHost())
+    if (!state) {
+      return
     }
+    TaskOutput.#stopPollingInState(state, taskId)
   }
 
   /**
    * Shared tick: reads the file tail for every actively-polled task.
    * Non-async body (.then) to avoid stacking if I/O is slow.
    */
-  static #tick(): void {
-    for (const [, entry] of TaskOutput.#activePolling) {
+  static #tick(state: TaskOutputHostState): void {
+    for (const [, entry] of state.activePolling) {
       if (!entry.#onProgress) {
         continue
       }
@@ -431,7 +480,19 @@ export class TaskOutput {
     this.#recentLines.clear()
     this.#onProgress = null
     this.#disk?.cancel()
-    TaskOutput.stopPolling(this.taskId)
-    TaskOutput.#registry.delete(this.taskId)
+    const ownerState = this.#ownerHostState
+    if (ownerState) {
+      this.#ownerHostState = null
+      TaskOutput.#stopPollingInState(ownerState, this.taskId)
+      if (ownerState.registry.get(this.taskId) === this) {
+        ownerState.registry.delete(this.taskId)
+      }
+    } else {
+      TaskOutput.stopPolling(this.taskId)
+      const currentState = taskOutputStateByHost.peek(getBootstrapSessionHost())
+      if (currentState?.registry.get(this.taskId) === this) {
+        currentState.registry.delete(this.taskId)
+      }
+    }
   }
 }

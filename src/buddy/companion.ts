@@ -1,4 +1,5 @@
 import { getGlobalConfig } from '../utils/config.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import {
   type Companion,
   type CompanionBones,
@@ -100,13 +101,17 @@ function rollFrom(rng: () => number): Roll {
 }
 
 // Called from three hot paths (500ms sprite tick, per-keystroke PromptInput,
-// per-turn observer) with the same userId → cache the deterministic result.
-let rollCache: { key: string; value: Roll } | undefined
+// per-turn observer) with the same userId → cache the deterministic result per host.
+const rollCacheHostSlot = new HostSlot<{
+  entry: { key: string; value: Roll } | undefined
+}>(() => ({ entry: undefined }))
+
 export function roll(userId: string): Roll {
   const key = userId + SALT
-  if (rollCache?.key === key) return rollCache.value
+  const cache = rollCacheHostSlot.of(getBootstrapSessionHost())
+  if (cache.entry?.key === key) return cache.entry.value
   const value = rollFrom(mulberry32(hashString(key)))
-  rollCache = { key, value }
+  cache.entry = { key, value }
   return value
 }
 

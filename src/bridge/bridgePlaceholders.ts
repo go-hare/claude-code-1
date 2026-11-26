@@ -33,6 +33,7 @@ import {
   processLstartMatches,
 } from '../utils/genericProcessUtils.js'
 import { isEssentialTrafficOnly } from '../utils/privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { sleep } from '../utils/sleep.js'
 
 /** densable vLb — min age before a placeholder is eligible for sweep. */
@@ -82,15 +83,29 @@ export type SweepBridgePlaceholdersOpts = {
   }>
 }
 
-/** densable Lpa — serialise GlobalConfig mutations for placeholders. */
-let writeQueue: Promise<unknown> = Promise.resolve()
-/** densable LLp — once-per-process sweep gate. */
-let sweepStarted = false
+type BridgePlaceholdersHostState = {
+  /** densable Lpa — serialise GlobalConfig mutations for placeholders. */
+  writeQueue: Promise<unknown>
+  /** densable LLp — once-per-host sweep gate. */
+  sweepStarted: boolean
+}
+
+const bridgePlaceholdersHostSlot = new HostSlot<BridgePlaceholdersHostState>(
+  () => ({
+    writeQueue: Promise.resolve(),
+    sweepStarted: false,
+  }),
+)
+
+function getBridgePlaceholdersHostState(): BridgePlaceholdersHostState {
+  return bridgePlaceholdersHostSlot.of(getBootstrapSessionHost())
+}
 
 function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
-  const next = writeQueue.then(fn, fn)
+  const hostState = getBridgePlaceholdersHostState()
+  const next = hostState.writeQueue.then(fn, fn)
   // Keep the chain alive even if a write rejects.
-  writeQueue = next.then(
+  hostState.writeQueue = next.then(
     () => undefined,
     () => undefined,
   )
@@ -264,8 +279,9 @@ async function processPlaceholderEntry(
 export function sweepBridgePlaceholders(
   opts: SweepBridgePlaceholdersOpts,
 ): Promise<void> {
-  if (sweepStarted) return Promise.resolve()
-  sweepStarted = true
+  const hostState = getBridgePlaceholdersHostState()
+  if (hostState.sweepStarted) return Promise.resolve()
+  hostState.sweepStarted = true
   return (async () => {
     await sleep(opts.startDelayMs ?? PLACEHOLDER_SWEEP_START_DELAY_MS)
     if (!(await isPlaceholderSweepEnabled())) return
@@ -309,8 +325,9 @@ export function sweepBridgePlaceholders(
   })
 }
 
-/** Test helper — reset once-per-process gate + write queue. */
+/** Test helper — reset once-per-host gate + write queue. */
 export function resetBridgePlaceholdersForTests(): void {
-  sweepStarted = false
-  writeQueue = Promise.resolve()
+  const hostState = getBridgePlaceholdersHostState()
+  hostState.sweepStarted = false
+  hostState.writeQueue = Promise.resolve()
 }

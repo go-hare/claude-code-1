@@ -16,6 +16,7 @@ import {
   dequeuePermissionConfirm,
   enqueuePermissionConfirm,
 } from '../../hooks/toolPermission/PermissionContext.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 
 export type SetToolUseConfirmQueueFn = (
   updater: (prev: ToolUseConfirm[]) => ToolUseConfirm[],
@@ -26,57 +27,75 @@ export type SetToolPermissionContextFn = (
   options?: { preserveMode?: boolean },
 ) => void
 
-let registeredSetter: SetToolUseConfirmQueueFn | null = null
-let registeredDialogStore: DialogStore | null = null
-let registeredPermissionContextSetter: SetToolPermissionContextFn | null = null
+type LeaderPermissionBridgeState = {
+  registeredSetter: SetToolUseConfirmQueueFn | null
+  registeredDialogStore: DialogStore | null
+  registeredPermissionContextSetter: SetToolPermissionContextFn | null
+}
+
+/** Official 2.1.331 [$e-187 OYo] — per-root-session leader permission bridge. */
+const leaderPermissionBridgeSlot =
+  new RootSessionSlot<LeaderPermissionBridgeState>(() => ({
+    registeredSetter: null,
+    registeredDialogStore: null,
+    registeredPermissionContextSetter: null,
+  }))
+
+function getBridgeState(): LeaderPermissionBridgeState {
+  return leaderPermissionBridgeSlot.of(getBootstrapSession())
+}
 
 export function registerLeaderToolUseConfirmQueue(
   setter: SetToolUseConfirmQueueFn,
   dialogStore?: DialogStore | null,
 ): void {
-  registeredSetter = setter
-  registeredDialogStore = dialogStore ?? null
+  const state = getBridgeState()
+  state.registeredSetter = setter
+  state.registeredDialogStore = dialogStore ?? null
 }
 
 export function getLeaderToolUseConfirmQueue(): SetToolUseConfirmQueueFn | null {
-  return registeredSetter
+  return getBridgeState().registeredSetter
 }
 
 /** densable NMs mirror push — prefer over raw setQueue append */
 export function pushLeaderToolUseConfirm(item: ToolUseConfirm): boolean {
-  if (!registeredSetter) return false
+  const state = getBridgeState()
+  if (!state.registeredSetter) return false
   enqueuePermissionConfirm(
-    registeredSetter as never,
-    registeredDialogStore,
+    state.registeredSetter as never,
+    state.registeredDialogStore,
     item,
   )
   return true
 }
 
 export function removeLeaderToolUseConfirm(toolUseID: string): void {
-  if (!registeredSetter) return
+  const state = getBridgeState()
+  if (!state.registeredSetter) return
   dequeuePermissionConfirm(
-    registeredSetter as never,
-    registeredDialogStore,
+    state.registeredSetter as never,
+    state.registeredDialogStore,
     toolUseID,
   )
 }
 
 export function unregisterLeaderToolUseConfirmQueue(): void {
-  registeredSetter = null
-  registeredDialogStore = null
+  const state = getBridgeState()
+  state.registeredSetter = null
+  state.registeredDialogStore = null
 }
 
 export function registerLeaderSetToolPermissionContext(
   setter: SetToolPermissionContextFn,
 ): void {
-  registeredPermissionContextSetter = setter
+  getBridgeState().registeredPermissionContextSetter = setter
 }
 
 export function getLeaderSetToolPermissionContext(): SetToolPermissionContextFn | null {
-  return registeredPermissionContextSetter
+  return getBridgeState().registeredPermissionContextSetter
 }
 
 export function unregisterLeaderSetToolPermissionContext(): void {
-  registeredPermissionContextSetter = null
+  getBridgeState().registeredPermissionContextSetter = null
 }

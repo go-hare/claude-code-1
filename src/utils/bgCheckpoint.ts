@@ -11,6 +11,12 @@
 import { createHash, randomBytes } from 'crypto'
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from './sessionHost.js'
 
 export const ADOPT_JSON_NAME = 'adopt.json'
 
@@ -2888,8 +2894,33 @@ type DeferredAdoptStash = {
   workflows: AdoptedWorkflowEntry[]
 }
 
-/** Official TAo — one-shot stash until MCP settle resumes them. */
-let deferredAdoptStash: DeferredAdoptStash | null = null
+class BgCheckpointSessionState {
+  /** Official TAo — one-shot stash until MCP settle resumes them. */
+  deferredAdoptStash: DeferredAdoptStash | null = null
+  /**
+   * Official aAf keeps CAo live across Jlr write then calls checkpointAgents +
+   * disown in-process. Local left-arrow unmounts REPL first, so the collected
+   * PortableCheckpointResult (with abort closures) is stashed here and consumed
+   * after adopt.json write in openAgentsViaLeftArrow.
+   */
+  leftArrowCheckpointLive: PortableCheckpointResult | null = null
+}
+
+const fallbackBgCheckpointSession = { root: {} as object }
+const bgCheckpointStateBySession =
+  new RootSessionSlot<BgCheckpointSessionState>(
+    () => new BgCheckpointSessionState(),
+  )
+
+function getBgCheckpointSessionState(): BgCheckpointSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return bgCheckpointStateBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return bgCheckpointStateBySession.of(fallbackBgCheckpointSession)
+}
 
 /**
  * Official t4d — stash successfully rehydrated agents/workflows for deferred
@@ -2900,11 +2931,12 @@ export function stashDeferredAdoptResume(
   agents: AdoptedAgentEntry[],
   workflows: AdoptedWorkflowEntry[],
 ): void {
+  const state = getBgCheckpointSessionState()
   if (!jobDir) {
-    deferredAdoptStash = null
+    state.deferredAdoptStash = null
     return
   }
-  deferredAdoptStash =
+  state.deferredAdoptStash =
     agents.length > 0 || workflows.length > 0
       ? { jobDir, agents, workflows }
       : null
@@ -2917,15 +2949,16 @@ export function takeDeferredAdoptStash(jobDir: string | null | undefined): {
   agents: AdoptedAgentEntry[]
   workflows: AdoptedWorkflowEntry[]
 } {
+  const state = getBgCheckpointSessionState()
   if (
     jobDir === undefined ||
     jobDir === null ||
-    deferredAdoptStash?.jobDir !== jobDir
+    state.deferredAdoptStash?.jobDir !== jobDir
   ) {
     return { agents: [], workflows: [] }
   }
-  const { agents, workflows } = deferredAdoptStash
-  deferredAdoptStash = null
+  const { agents, workflows } = state.deferredAdoptStash
+  state.deferredAdoptStash = null
   return { agents, workflows }
 }
 
@@ -2936,39 +2969,32 @@ export function peekDeferredAdoptStash(jobDir: string | null | undefined): {
   agents: AdoptedAgentEntry[]
   workflows: AdoptedWorkflowEntry[]
 } {
+  const state = getBgCheckpointSessionState()
   if (
     jobDir === undefined ||
     jobDir === null ||
-    deferredAdoptStash?.jobDir !== jobDir
+    state.deferredAdoptStash?.jobDir !== jobDir
   ) {
     return { agents: [], workflows: [] }
   }
   return {
-    agents: deferredAdoptStash.agents,
-    workflows: deferredAdoptStash.workflows,
+    agents: state.deferredAdoptStash.agents,
+    workflows: state.deferredAdoptStash.workflows,
   }
 }
 
 /** Test helper — clear TAo without matching jobDir. */
 export function resetDeferredAdoptStash(): void {
-  deferredAdoptStash = null
+  getBgCheckpointSessionState().deferredAdoptStash = null
 }
 
 // ── Left-arrow live CAo handle (parent → openAgentsViaLeftArrow) ────────────
-
-/**
- * Official aAf keeps CAo live across Jlr write then calls checkpointAgents +
- * disown in-process. Local left-arrow unmounts REPL first, so the collected
- * PortableCheckpointResult (with abort closures) is stashed here and consumed
- * after adopt.json write in openAgentsViaLeftArrow.
- */
-let leftArrowCheckpointLive: PortableCheckpointResult | null = null
 
 /** Stash live CAo handle from REPL left-arrow before unmount. */
 export function stashLeftArrowCheckpointLive(
   cp: PortableCheckpointResult | null | undefined,
 ): void {
-  leftArrowCheckpointLive = cp ?? null
+  getBgCheckpointSessionState().leftArrowCheckpointLive = cp ?? null
 }
 
 /**
@@ -2976,14 +3002,15 @@ export function stashLeftArrowCheckpointLive(
  * Call after adopt write (official: after Jlr, before/with disown).
  */
 export function takeLeftArrowCheckpointLive(): PortableCheckpointResult | null {
-  const cp = leftArrowCheckpointLive
-  leftArrowCheckpointLive = null
+  const state = getBgCheckpointSessionState()
+  const cp = state.leftArrowCheckpointLive
+  state.leftArrowCheckpointLive = null
   return cp
 }
 
 /** Test helper — drop stashed left-arrow handle. */
 export function resetLeftArrowCheckpointLive(): void {
-  leftArrowCheckpointLive = null
+  getBgCheckpointSessionState().leftArrowCheckpointLive = null
 }
 
 /**
@@ -3129,38 +3156,50 @@ export function waitForStorePredicate(
   } catch {
     /* fall through to wait */
   }
+  const capturedSession = getActiveSessionFromAls()
+  const runInCaptured = <R>(fn: () => R): R =>
+    capturedSession !== undefined &&
+    getActiveSessionFromAls() !== capturedSession
+      ? runWithSession(capturedSession, fn)
+      : fn()
   const subscribe = opts.subscribe
   if (!subscribe) {
     return new Promise(resolve => {
       setTimeout(() => {
-        try {
-          resolve(predicate(getState()))
-        } catch {
-          resolve(false)
-        }
+        runInCaptured(() => {
+          try {
+            resolve(predicate(getState()))
+          } catch {
+            resolve(false)
+          }
+        })
       }, opts.timeoutMs)
     })
   }
   return new Promise(resolve => {
     let unsub: () => void = () => {}
     const timer = setTimeout(() => {
-      unsub()
-      try {
-        resolve(predicate(getState()))
-      } catch {
-        resolve(false)
-      }
+      runInCaptured(() => {
+        unsub()
+        try {
+          resolve(predicate(getState()))
+        } catch {
+          resolve(false)
+        }
+      })
     }, opts.timeoutMs)
     unsub = subscribe(() => {
-      try {
-        if (predicate(getState())) {
-          clearTimeout(timer)
-          unsub()
-          resolve(true)
+      runInCaptured(() => {
+        try {
+          if (predicate(getState())) {
+            clearTimeout(timer)
+            unsub()
+            resolve(true)
+          }
+        } catch {
+          /* keep waiting */
         }
-      } catch {
-        /* keep waiting */
-      }
+      })
     })
   })
 }

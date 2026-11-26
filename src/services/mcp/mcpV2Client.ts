@@ -25,6 +25,7 @@ import { PRODUCT_URL } from '../../constants/product.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isDisklessLaunch } from '../../utils/sessionHost.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -54,22 +55,34 @@ export const MCP_TASKS_EXTENSION_KEY = 'io.modelcontextprotocol/tasks'
 export const MCP_V1_COMPAT_WARNING =
   'The v1 MCP client was selected, but this build has only the v2 client. It uses the older handshake and relaxed sign-in checks.'
 
-const mcpSdkGenerationLatch: {
+type McpSdkGenerationLatch = {
   latched: 'v2' | undefined
   v1Selected: boolean
-} = {
-  latched: undefined,
-  v1Selected: false,
+}
+
+const hostMcpSdkGenerationLatchSlot = new HostSlot<McpSdkGenerationLatch>(
+  () => ({
+    latched: undefined,
+    v1Selected: false,
+  }),
+)
+
+function getMcpSdkGenerationLatch(): McpSdkGenerationLatch {
+  return hostMcpSdkGenerationLatchSlot.of(getBootstrapSessionHost())
 }
 
 export function resetMcpSdkGenerationForTests(): void {
-  mcpSdkGenerationLatch.latched = undefined
-  mcpSdkGenerationLatch.v1Selected = false
+  const latch = hostMcpSdkGenerationLatchSlot.peek(getBootstrapSessionHost())
+  if (latch) {
+    latch.latched = undefined
+    latch.v1Selected = false
+  }
 }
 
 export function getMcpSdkGeneration(
   env: NodeJS.ProcessEnv = process.env,
 ): 'v2' {
+  const mcpSdkGenerationLatch = getMcpSdkGenerationLatch()
   if (mcpSdkGenerationLatch.latched !== undefined) {
     return mcpSdkGenerationLatch.latched
   }
@@ -108,7 +121,7 @@ export function isMcpV1CompatMode(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   getMcpSdkGeneration(env)
-  return mcpSdkGenerationLatch.v1Selected
+  return getMcpSdkGenerationLatch().v1Selected
 }
 
 /**
@@ -400,7 +413,10 @@ export function isJavaMcpFormUrlElicitationReject(
  * with a temporary bag.
  */
 export function patchMcpInitializeCapabilities(
-  client: { send: (...args: never[]) => unknown },
+  client: {
+    send?: (...args: never[]) => unknown
+    connect?: (...args: never[]) => unknown
+  },
   serverConfig: DensableElicitationCapabilityServerConfig | undefined,
   opts: {
     denylisted?: boolean
@@ -408,7 +424,36 @@ export function patchMcpInitializeCapabilities(
   } = {},
 ): void {
   const mutable = client as {
-    send: (...args: unknown[]) => unknown
+    send?: (...args: unknown[]) => unknown
+    connect?: (...args: unknown[]) => unknown
+  }
+  if (
+    typeof mutable.send !== 'function' &&
+    typeof mutable.connect === 'function'
+  ) {
+    const originalConnect = mutable.connect.bind(client)
+    const patchedTransports = new WeakSet<object>()
+    mutable.connect = (...connectArgs: unknown[]) => {
+      const transport = connectArgs[0]
+      if (
+        transport &&
+        typeof transport === 'object' &&
+        !patchedTransports.has(transport) &&
+        typeof (transport as { send?: unknown }).send === 'function'
+      ) {
+        patchedTransports.add(transport)
+        patchMcpInitializeCapabilities(
+          transport as { send: (...args: never[]) => unknown },
+          serverConfig,
+          opts,
+        )
+      }
+      return originalConnect(...connectArgs)
+    }
+    return
+  }
+  if (typeof mutable.send !== 'function') {
+    return
   }
   const originalSend = mutable.send.bind(client)
   mutable.send = (...args: unknown[]) => {

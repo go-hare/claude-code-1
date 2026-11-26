@@ -5,21 +5,27 @@
  * returns undefined (no-op). Do not invent ownTool mapping.
  */
 import type { Tool } from '../../Tool.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 
 export type PluginHookRunner = {
   ownTool?: (toolName: string) => Tool | undefined
   holds?: (pluginId: string) => boolean
 }
 
-let pluginHookRunner: PluginHookRunner | undefined
+const sessionPluginHookRunnerSlot = new RootSessionSlot<{
+  pluginHookRunner: PluginHookRunner | undefined
+}>(() => ({
+  pluginHookRunner: undefined,
+}))
 
 /** densable Jve */
 export function getPluginHookRunner(): PluginHookRunner | undefined {
-  return pluginHookRunner
+  return sessionPluginHookRunnerSlot.of(getBootstrapSession()).pluginHookRunner
 }
 
 export function setPluginHookRunner(
   runner: PluginHookRunner | undefined,
 ): void {
-  pluginHookRunner = runner
+  sessionPluginHookRunnerSlot.of(getBootstrapSession()).pluginHookRunner =
+    runner
 }

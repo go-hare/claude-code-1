@@ -4,6 +4,7 @@ import {
 } from './execFileNoThrow.js'
 import { logForDebugging } from './debug.js'
 import { getErrnoCode } from './errors.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 // This file contains platform-agnostic implementations of common `ps` type commands.
 // When adding new code to this file, make sure to handle:
@@ -36,25 +37,42 @@ type Kernel32ProcTimes = {
   CloseHandle: (handle: unknown) => number
 }
 
-/** densable `p7r` — undefined not tried, null failed, else symbols */
-let kernel32Symbols: Kernel32ProcTimes | null | undefined
-/** densable `GWg` — force-disable FFI path (tests) */
-let win32ProcTimesFfiDisabled = false
+type GenericProcessUtilsHostState = {
+  /** densable `p7r` — undefined not tried, null failed, else symbols */
+  kernel32Symbols: Kernel32ProcTimes | null | undefined
+  /** densable `GWg` — force-disable FFI path (tests) */
+  win32ProcTimesFfiDisabled: boolean
+  /** densable `YId` / `OMn` — memoized own process start identity. */
+  ownProcStartToken: string | undefined
+}
+
+const genericProcessUtilsHostSlot = new HostSlot<GenericProcessUtilsHostState>(
+  () => ({
+    kernel32Symbols: undefined,
+    win32ProcTimesFfiDisabled: false,
+    ownProcStartToken: undefined,
+  }),
+)
+
+function getGenericProcessUtilsHostState(): GenericProcessUtilsHostState {
+  return genericProcessUtilsHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable `B8c` — lazy-load kernel32 OpenProcess/GetProcessTimes/CloseHandle.
  * Returns null when not win32 or bun:ffi unavailable.
  */
 function loadKernel32ProcTimes(): Kernel32ProcTimes | null {
-  if (kernel32Symbols !== undefined) return kernel32Symbols
-  if (process.platform !== 'win32' || win32ProcTimesFfiDisabled) {
-    kernel32Symbols = null
+  const hostState = getGenericProcessUtilsHostState()
+  if (hostState.kernel32Symbols !== undefined) return hostState.kernel32Symbols
+  if (process.platform !== 'win32' || hostState.win32ProcTimesFfiDisabled) {
+    hostState.kernel32Symbols = null
     return null
   }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const ffi = require('bun:ffi') as typeof import('bun:ffi')
-    kernel32Symbols = ffi.dlopen('kernel32.dll', {
+    hostState.kernel32Symbols = ffi.dlopen('kernel32.dll', {
       OpenProcess: { args: ['u32', 'i32', 'u32'], returns: 'ptr' },
       GetProcessTimes: {
         args: ['ptr', 'ptr', 'ptr', 'ptr', 'ptr'],
@@ -69,14 +87,17 @@ function loadKernel32ProcTimes(): Kernel32ProcTimes | null {
         e instanceof Error ? e.message : String(e)
       }`,
     )
-    kernel32Symbols = null
+    hostState.kernel32Symbols = null
   }
-  return kernel32Symbols
+  return hostState.kernel32Symbols
 }
 
 /** densable `BMt` — FFI path usable? */
 export function isWin32ProcTimesFfiAvailable(): boolean {
-  return !win32ProcTimesFfiDisabled && loadKernel32ProcTimes() !== null
+  return (
+    !getGenericProcessUtilsHostState().win32ProcTimesFfiDisabled &&
+    loadKernel32ProcTimes() !== null
+  )
 }
 
 /**
@@ -183,20 +204,18 @@ export function processStartIdentityEquals(
   )
 }
 
-/** densable `YId` / `OMn` — memoized own process start identity. */
-let ownProcStartToken: string | undefined
-
 /** Test seam: reset lazy FFI + optional force-disable (densable GWg). */
 export function _resetWin32ProcTimesForTesting(opts?: {
   disableFfi?: boolean
 }): void {
-  kernel32Symbols = undefined
-  win32ProcTimesFfiDisabled = opts?.disableFfi === true
+  const hostState = getGenericProcessUtilsHostState()
+  hostState.kernel32Symbols = undefined
+  hostState.win32ProcTimesFfiDisabled = opts?.disableFfi === true
 }
 
 /** Test seam: reset densable `OMn` own-procStart memo. */
 export function _resetOwnProcStartForTesting(): void {
-  ownProcStartToken = undefined
+  getGenericProcessUtilsHostState().ownProcStartToken = undefined
 }
 
 /**
@@ -444,9 +463,10 @@ export const isSameProcessAsync = processLstartMatches
  * `undefined` is not cached (`??` retries) so a transient `ps` miss can recover.
  */
 export async function ownProcStartAsync(): Promise<string | undefined> {
+  const hostState = getGenericProcessUtilsHostState()
   return (
-    ownProcStartToken ??
-    (ownProcStartToken = await getProcessLstartString(process.pid))
+    hostState.ownProcStartToken ??
+    (hostState.ownProcStartToken = await getProcessLstartString(process.pid))
   )
 }
 

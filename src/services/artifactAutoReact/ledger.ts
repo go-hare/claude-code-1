@@ -10,6 +10,12 @@ import { mkdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getSessionId } from '../../bootstrap/state.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
 import { Jj, M2 } from './gates.js'
 import { type LedgerArtifactSnapshot, type PendingLedger, un } from './store.js'
 
@@ -100,7 +106,11 @@ async function readLedgerFile(
  * densable A3i — hydrate pendingLedger from on-disk ledger for current sid.
  * Sync API: kicks async load once; returns current in-memory slugs map or null.
  */
-let hydrateInFlight: Promise<void> | null = null
+const ledgerHydrateSlot = new RootSessionSlot<{
+  hydrateInFlight: Promise<void> | null
+}>(() => ({
+  hydrateInFlight: null,
+}))
 
 export function hydratePendingLedger(): Map<
   string,
@@ -112,8 +122,9 @@ export function hydratePendingLedger(): Map<
   if (e.pendingLedger?.sid === t && e.pendingLedger.accountUuid === n) {
     return e.pendingLedger.slugs
   }
-  if (hydrateInFlight === null) {
-    hydrateInFlight = (async () => {
+  const hydrateState = ledgerHydrateSlot.of(getBootstrapSession())
+  if (hydrateState.hydrateInFlight === null) {
+    hydrateState.hydrateInFlight = (async () => {
       const file = await readLedgerFile(t)
       if (!file || file.sessionId !== t) return
       const slugs = new Map<string, LedgerArtifactSnapshot>()
@@ -137,7 +148,7 @@ export function hydratePendingLedger(): Map<
       }
       ar.ledgerSupersedable = true
     })().finally(() => {
-      hydrateInFlight = null
+      hydrateState.hydrateInFlight = null
     })
   }
   const o = e.pendingLedger
@@ -191,7 +202,11 @@ export function buildLedgerEnvelope(
       turnTimestamps: (art.turnTimestamps ?? [])
         .filter(a => nowMs - a < 3_600_000)
         .slice(-600),
-      threads: scrub ? [] : art.threads,
+      threads: scrub
+        ? []
+        : Array.isArray(art.threads)
+          ? art.threads
+          : undefined,
       ...(interrupted ? { interrupted: true } : {}),
     }
   }
@@ -254,11 +269,13 @@ function fingerprintArtifacts(
       {
         ...r,
         savedAt: 0,
-        threads: r.threads?.map(n => ({
-          ...n,
-          seen: n.seen.length > 0,
-          sent: n.sent.filter(([, o]) => o !== null),
-        })),
+        threads: Array.isArray(r.threads)
+          ? r.threads.map(n => ({
+              ...n,
+              seen: n.seen.length > 0,
+              sent: n.sent.filter(([, o]) => o !== null),
+            }))
+          : undefined,
       },
     ]),
   )
@@ -330,7 +347,17 @@ export function scheduleLedgerDebounce(): void {
   const { autoReact: e } = un()
   const t = e.ledgerDebounceMsOverride ?? LEDGER_DEBOUNCE_MS
   if (e.ledgerTimer === undefined && t > 0) {
-    e.ledgerTimer = setTimeout(() => flushLedgerNow(), t)
+    const capturedSession = getActiveSessionFromAls()
+    e.ledgerTimer = setTimeout(() => {
+      if (
+        capturedSession !== undefined &&
+        getActiveSessionFromAls() !== capturedSession
+      ) {
+        runWithSession(capturedSession, () => flushLedgerNow())
+      } else {
+        flushLedgerNow()
+      }
+    }, t)
     e.ledgerTimer.unref?.()
   }
 }

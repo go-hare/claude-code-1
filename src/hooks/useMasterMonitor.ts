@@ -23,6 +23,13 @@ import {
   hasSendOverride,
   removeSendOverride,
 } from '../utils/pipeMuteState.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  type Session,
+} from '../utils/sessionRoot.js'
 
 /** Session history entry for pipe IPC monitoring. */
 export type SessionEntry = {
@@ -90,17 +97,44 @@ export function applyPipeEntryToSlaveState(
   }
 }
 
+type MasterMonitorSessionState = {
+  slaveClients: Map<string, PipeClient>
+  slaveClientRegistryListeners: Map<() => void, Session | undefined>
+  pipeEntryListeners: Map<
+    (slaveName: string, entry: SessionEntry) => void,
+    Session | undefined
+  >
+  pipeEntryHandlers: Map<string, (msg: PipeMessage) => void>
+  slaveClientRegistryVersion: number
+}
+
 /**
- * Module-level registry of connected slave PipeClients.
+ * Per-session registry of connected slave PipeClients.
  * Keyed by slave pipe name. Managed by /attach and /detach commands.
  */
-const _slaveClients = new Map<string, PipeClient>()
-const _slaveClientRegistryListeners = new Set<() => void>()
-const _pipeEntryListeners = new Set<
-  (slaveName: string, entry: SessionEntry) => void
->()
-const _pipeEntryHandlers = new Map<string, (msg: PipeMessage) => void>()
-let _slaveClientRegistryVersion = 0
+const masterMonitorStateBySession =
+  new RootSessionSlot<MasterMonitorSessionState>(() => ({
+    slaveClients: new Map(),
+    slaveClientRegistryListeners: new Map(),
+    pipeEntryListeners: new Map(),
+    pipeEntryHandlers: new Map(),
+    slaveClientRegistryVersion: 0,
+  }))
+
+function getMasterMonitorState(): MasterMonitorSessionState {
+  return masterMonitorStateBySession.of(getBootstrapSession())
+}
+
+function runInCapturedSession(
+  captured: Session | undefined,
+  fn: () => void,
+): void {
+  if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+    runWithSession(captured, fn)
+  } else {
+    fn()
+  }
+}
 
 const MONITORED_PIPE_ENTRY_TYPES = [
   'prompt_ack',
@@ -156,112 +190,135 @@ function pipeMessageToSessionEntry(
   }
 }
 
-function emitPipeEntry(slaveName: string, entry: SessionEntry): void {
-  for (const listener of _pipeEntryListeners) {
-    listener(slaveName, entry)
+function emitPipeEntry(
+  state: MasterMonitorSessionState,
+  slaveName: string,
+  entry: SessionEntry,
+): void {
+  for (const [listener, captured] of state.pipeEntryListeners) {
+    runInCapturedSession(captured, () => {
+      listener(slaveName, entry)
+    })
   }
 }
 
 export function subscribePipeEntries(
   listener: (slaveName: string, entry: SessionEntry) => void,
 ): () => void {
-  _pipeEntryListeners.add(listener)
+  const state = getMasterMonitorState()
+  state.pipeEntryListeners.set(listener, getActiveSessionFromAls())
   return () => {
-    _pipeEntryListeners.delete(listener)
+    state.pipeEntryListeners.delete(listener)
   }
 }
 
-function detachPipeEntryEmitter(name: string, client?: PipeClient): void {
-  const handler = _pipeEntryHandlers.get(name)
+function detachPipeEntryEmitter(
+  state: MasterMonitorSessionState,
+  name: string,
+  client?: PipeClient,
+): void {
+  const handler = state.pipeEntryHandlers.get(name)
   if (!handler) return
   client?.removeListener?.('message', handler)
-  _pipeEntryHandlers.delete(name)
+  state.pipeEntryHandlers.delete(name)
 }
 
-function attachPipeEntryEmitter(name: string, client: PipeClient): void {
-  detachPipeEntryEmitter(name, _slaveClients.get(name))
+function attachPipeEntryEmitter(
+  state: MasterMonitorSessionState,
+  name: string,
+  client: PipeClient,
+): void {
+  detachPipeEntryEmitter(state, name, state.slaveClients.get(name))
   if (typeof client.on !== 'function') return
+  const captured = getActiveSessionFromAls()
   const handler = (msg: PipeMessage) => {
-    if (!isMonitoredPipeEntryType(msg.type)) return
+    runInCapturedSession(captured, () => {
+      if (!isMonitoredPipeEntryType(msg.type)) return
 
-    // Mute gate: drop business messages from muted slaves
-    if (shouldDropMutedMessage(name, msg.type)) {
-      // Auto-deny permission_request to prevent slave deadlock
-      if (msg.type === 'permission_request') {
-        try {
-          const payload = JSON.parse(msg.data ?? '{}')
-          if (payload.requestId) {
-            client.send({
-              type: 'permission_response',
-              data: JSON.stringify({
-                requestId: payload.requestId,
-                behavior: 'deny',
-                feedback:
-                  'Permission auto-denied: pipe is logically disconnected.',
-              }),
-            })
+      // Mute gate: drop business messages from muted slaves
+      if (shouldDropMutedMessage(name, msg.type)) {
+        // Auto-deny permission_request to prevent slave deadlock
+        if (msg.type === 'permission_request') {
+          try {
+            const payload = JSON.parse(msg.data ?? '{}')
+            if (payload.requestId) {
+              client.send({
+                type: 'permission_response',
+                data: JSON.stringify({
+                  requestId: payload.requestId,
+                  behavior: 'deny',
+                  feedback:
+                    'Permission auto-denied: pipe is logically disconnected.',
+                }),
+              })
+            }
+          } catch {
+            // Malformed payload — safe to ignore
           }
-        } catch {
-          // Malformed payload — safe to ignore
         }
+        return
       }
-      return
-    }
 
-    // Clear /send override when slave turn completes
-    if (
-      (msg.type === 'done' || msg.type === 'error') &&
-      hasSendOverride(name)
-    ) {
-      removeSendOverride(name)
-    }
+      // Clear /send override when slave turn completes
+      if (
+        (msg.type === 'done' || msg.type === 'error') &&
+        hasSendOverride(name)
+      ) {
+        removeSendOverride(name)
+      }
 
-    emitPipeEntry(name, pipeMessageToSessionEntry(name, msg))
+      emitPipeEntry(state, name, pipeMessageToSessionEntry(name, msg))
+    })
   }
-  _pipeEntryHandlers.set(name, handler)
+  state.pipeEntryHandlers.set(name, handler)
   client.on('message', handler)
 }
 
-function emitSlaveClientRegistryChanged(): void {
-  _slaveClientRegistryVersion += 1
-  for (const listener of _slaveClientRegistryListeners) {
-    listener()
+function emitSlaveClientRegistryChanged(
+  state: MasterMonitorSessionState,
+): void {
+  state.slaveClientRegistryVersion += 1
+  for (const [listener, captured] of state.slaveClientRegistryListeners) {
+    runInCapturedSession(captured, listener)
   }
 }
 
 export function subscribeToSlaveClientRegistry(
   listener: () => void,
 ): () => void {
-  _slaveClientRegistryListeners.add(listener)
+  const state = getMasterMonitorState()
+  state.slaveClientRegistryListeners.set(listener, getActiveSessionFromAls())
   return () => {
-    _slaveClientRegistryListeners.delete(listener)
+    state.slaveClientRegistryListeners.delete(listener)
   }
 }
 
 export function getSlaveClientRegistryVersion(): number {
-  return _slaveClientRegistryVersion
+  return getMasterMonitorState().slaveClientRegistryVersion
 }
 
 export function addSlaveClient(name: string, client: PipeClient): void {
-  attachPipeEntryEmitter(name, client)
-  _slaveClients.set(name, client)
-  emitSlaveClientRegistryChanged()
+  const state = getMasterMonitorState()
+  attachPipeEntryEmitter(state, name, client)
+  state.slaveClients.set(name, client)
+  emitSlaveClientRegistryChanged(state)
 }
 
 export function removeSlaveClient(name: string): PipeClient | undefined {
-  const client = _slaveClients.get(name)
-  detachPipeEntryEmitter(name, client)
-  _slaveClients.delete(name)
-  emitSlaveClientRegistryChanged()
+  const state = getMasterMonitorState()
+  const client = state.slaveClients.get(name)
+  detachPipeEntryEmitter(state, name, client)
+  state.slaveClients.delete(name)
+  emitSlaveClientRegistryChanged(state)
   return client
 }
 
 export function getSlaveClient(name: string): PipeClient | undefined {
-  return _slaveClients.get(name)
+  return getMasterMonitorState().slaveClients.get(name)
 }
 
 export function getAllSlaveClients(): Map<string, PipeClient> {
-  return _slaveClients
+  return getMasterMonitorState().slaveClients
 }
 
 export type ConnectedSlaveTarget = {
@@ -278,9 +335,10 @@ export type ConnectedSlaveTarget = {
 export function getConnectedSlaveTargets(
   selectedNames: string[],
 ): ConnectedSlaveTarget[] {
+  const state = getMasterMonitorState()
   const targets: ConnectedSlaveTarget[] = []
   for (const name of selectedNames) {
-    const client = _slaveClients.get(name)
+    const client = state.slaveClients.get(name)
     if (client?.connected) {
       targets.push({ name, client })
     }
@@ -289,11 +347,12 @@ export function getConnectedSlaveTargets(
 }
 
 export function resetSlaveClientsForTesting(): void {
-  for (const [name, client] of _slaveClients.entries()) {
-    detachPipeEntryEmitter(name, client)
+  const state = getMasterMonitorState()
+  for (const [name, client] of state.slaveClients.entries()) {
+    detachPipeEntryEmitter(state, name, client)
   }
-  _slaveClients.clear()
-  emitSlaveClientRegistryChanged()
+  state.slaveClients.clear()
+  emitSlaveClientRegistryChanged(state)
 }
 
 export function useMasterMonitor(): void {
@@ -306,88 +365,96 @@ export function useMasterMonitor(): void {
   )
 
   useEffect(() => {
-    if (role !== 'master' && _slaveClients.size === 0) return
+    const state = getMasterMonitorState()
+    if (role !== 'master' && state.slaveClients.size === 0) return
 
+    const captured = getActiveSessionFromAls()
     // Set up listeners for each connected slave client
     const cleanups: (() => void)[] = []
 
-    for (const [slaveName, client] of _slaveClients.entries()) {
+    for (const [slaveName, client] of state.slaveClients.entries()) {
       const handler = (msg: PipeMessage) => {
-        // Only record relevant message types
-        if (!isMonitoredPipeEntryType(msg.type)) {
-          return
-        }
+        runInCapturedSession(captured, () => {
+          // Only record relevant message types
+          if (!isMonitoredPipeEntryType(msg.type)) {
+            return
+          }
 
-        // Mute gate (second gate, same helper as attachPipeEntryEmitter)
-        if (shouldDropMutedMessage(slaveName, msg.type)) {
-          return
-        }
+          // Mute gate (second gate, same helper as attachPipeEntryEmitter)
+          if (shouldDropMutedMessage(slaveName, msg.type)) {
+            return
+          }
 
-        // Clear /send override when slave turn completes
-        if (
-          (msg.type === 'done' || msg.type === 'error') &&
-          hasSendOverride(slaveName)
-        ) {
-          removeSendOverride(slaveName)
-        }
+          // Clear /send override when slave turn completes
+          if (
+            (msg.type === 'done' || msg.type === 'error') &&
+            hasSendOverride(slaveName)
+          ) {
+            removeSendOverride(slaveName)
+          }
 
-        const entry = pipeMessageToSessionEntry(slaveName, msg)
+          const entry = pipeMessageToSessionEntry(slaveName, msg)
 
-        setAppState(prev => {
-          const slave = getPipeIpc(prev).slaves[slaveName]
-          if (!slave) return prev
+          setAppState(prev => {
+            const slave = getPipeIpc(prev).slaves[slaveName]
+            if (!slave) return prev
 
-          const newStatus =
-            msg.type === 'done' || msg.type === 'error'
-              ? 'idle'
-              : msg.type === 'prompt'
-                ? 'busy'
-                : slave.status
+            const newStatus =
+              msg.type === 'done' || msg.type === 'error'
+                ? 'idle'
+                : msg.type === 'prompt'
+                  ? 'busy'
+                  : slave.status
 
-          return {
-            ...prev,
-            pipeIpc: {
-              ...getPipeIpc(prev),
-              slaves: {
-                ...getPipeIpc(prev).slaves,
-                [slaveName]: applyPipeEntryToSlaveState(
-                  {
-                    ...slave,
-                    status: newStatus,
-                  },
-                  entry,
-                ),
+            return {
+              ...prev,
+              pipeIpc: {
+                ...getPipeIpc(prev),
+                slaves: {
+                  ...getPipeIpc(prev).slaves,
+                  [slaveName]: applyPipeEntryToSlaveState(
+                    {
+                      ...slave,
+                      status: newStatus,
+                    },
+                    entry,
+                  ),
+                },
               },
-            },
+            }
+          })
+
+          if (msg.type === 'done') {
+            logForDebugging(
+              `[MasterMonitor] Slave "${slaveName}" turn complete`,
+            )
           }
         })
-
-        if (msg.type === 'done') {
-          logForDebugging(`[MasterMonitor] Slave "${slaveName}" turn complete`)
-        }
       }
 
       client.on('message', handler)
 
       // Handle slave disconnect
       const onDisconnect = () => {
-        logForDebugging(`[MasterMonitor] Slave "${slaveName}" disconnected`)
-        // Clear any lingering /send override before removing client
-        removeSendOverride(slaveName)
-        removeSlaveClient(slaveName)
-        setAppState(prev => {
-          const { [slaveName]: _removed, ...remainingSlaves } =
-            getPipeIpc(prev).slaves
-          const hasSlaves = Object.keys(remainingSlaves).length > 0
-          return {
-            ...prev,
-            pipeIpc: {
-              ...getPipeIpc(prev),
-              role: hasSlaves ? 'master' : 'main',
-              displayRole: hasSlaves ? 'master' : 'main',
-              slaves: remainingSlaves,
-            },
-          }
+        runInCapturedSession(captured, () => {
+          logForDebugging(`[MasterMonitor] Slave "${slaveName}" disconnected`)
+          // Clear any lingering /send override before removing client
+          removeSendOverride(slaveName)
+          removeSlaveClient(slaveName)
+          setAppState(prev => {
+            const { [slaveName]: _removed, ...remainingSlaves } =
+              getPipeIpc(prev).slaves
+            const hasSlaves = Object.keys(remainingSlaves).length > 0
+            return {
+              ...prev,
+              pipeIpc: {
+                ...getPipeIpc(prev),
+                role: hasSlaves ? 'master' : 'main',
+                displayRole: hasSlaves ? 'master' : 'main',
+                slaves: remainingSlaves,
+              },
+            }
+          })
         })
       }
 

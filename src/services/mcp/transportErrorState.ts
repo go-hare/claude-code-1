@@ -3,6 +3,7 @@
  * Pure — call sites own the Set/state object.
  */
 
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import type { McpCallWatchdog, McpTransportErrorState } from './types.js'
 
 /** Official: after transport error, response presumed lost after this long. */
@@ -18,28 +19,39 @@ export function createMcpTransportErrorState(): McpTransportErrorState {
 }
 
 /**
- * densable `$cy` hasPendingElicitation — process-wide count of MCP URL
+ * densable `$cy` hasPendingElicitation — host-scoped count of MCP URL
  * elicitations currently awaiting user/hook resolution. Auto-background
  * must not fire while > 0 (call site defers another full timeout window).
  */
-let processPendingMcpElicitations = 0
+const hostPendingMcpElicitationsSlot = new HostSlot<{ count: number }>(() => ({
+  count: 0,
+}))
+
+function getPendingMcpElicitationsState(): { count: number } {
+  return hostPendingMcpElicitationsSlot.of(getBootstrapSessionHost())
+}
 
 export function beginMcpElicitation(): void {
-  processPendingMcpElicitations += 1
+  getPendingMcpElicitationsState().count += 1
 }
 
 export function endMcpElicitation(): void {
-  processPendingMcpElicitations = Math.max(0, processPendingMcpElicitations - 1)
+  const state = getPendingMcpElicitationsState()
+  state.count = Math.max(0, state.count - 1)
 }
 
 /** densable hasPendingElicitation callback body */
 export function hasPendingMcpElicitation(): boolean {
-  return processPendingMcpElicitations > 0
+  const state = hostPendingMcpElicitationsSlot.peek(getBootstrapSessionHost())
+  return (state?.count ?? 0) > 0
 }
 
 /** Test-only */
 export function _resetPendingMcpElicitationsForTests(): void {
-  processPendingMcpElicitations = 0
+  const state = hostPendingMcpElicitationsSlot.peek(getBootstrapSessionHost())
+  if (state) {
+    state.count = 0
+  }
 }
 
 /** Official M(): arm every unarmed in-flight call watchdog. */

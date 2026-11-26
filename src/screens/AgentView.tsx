@@ -50,6 +50,7 @@ import {
 } from '../components/ScrollKeybindingHandler.js';
 import type { Root } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
+import { getBootstrapSession, getBootstrapSessionHost, HostSlot, RootSessionSlot } from '../utils/sessionRoot.js';
 import { logEvent } from '../services/analytics/index.js';
 import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
@@ -267,9 +268,30 @@ const REFRESH_INTERVAL_MS = 3000;
 /** Official `Oy` when `Z` is false — `nt=Z?xe:Oy`. */
 const EMPTY_REMOTE_JOBS: FleetRemoteJob[] = [];
 
-/** Module-level arm for densable double-enter force fresh after tYo. */
-let forceFreshNextShort: string | null = null;
-let restartOfferedJobId: string | null = null;
+type AgentViewSessionState = {
+  /** Per-session arm for densable double-enter force fresh after tYo. */
+  forceFreshNextShort: string | null;
+  /** Per-session restart offer arm (#49). */
+  restartOfferedJobId: string | null;
+  /** densable h.deadEpochOfferedJobId + #u timestamp. */
+  deadEpochOfferedJobId: string | null;
+  deadEpochOfferedAt: number;
+  /** densable h.deadEpochGoneJobId — gone-row after dead_epoch_transcript_gone. */
+  deadEpochGoneJobId: string | null;
+};
+
+const agentViewStateBySession = new RootSessionSlot<AgentViewSessionState>(() => ({
+  forceFreshNextShort: null,
+  restartOfferedJobId: null,
+  deadEpochOfferedJobId: null,
+  deadEpochOfferedAt: 0,
+  deadEpochGoneJobId: null,
+}));
+
+function getAgentViewSessionState(): AgentViewSessionState {
+  return agentViewStateBySession.of(getBootstrapSession());
+}
+
 const FLEET_RESTART_OFFER_MSG =
   "Press enter again to restart this session — it isn't responding (its conversation is saved and resumes).";
 const FLEET_RESTART_STOP_UNCONFIRMED_MSG =
@@ -411,12 +433,6 @@ export function findPinnedSessionToAutoRelaunch(opts: {
   }
   return null;
 }
-/** densable h.deadEpochOfferedJobId + #u timestamp. */
-let deadEpochOfferedJobId: string | null = null;
-let deadEpochOfferedAt = 0;
-/** densable h.deadEpochGoneJobId — gone-row after dead_epoch_transcript_gone. */
-let deadEpochGoneJobId: string | null = null;
-
 type ResumePickerEntry = {
   sessionId: string;
   title: string;
@@ -511,7 +527,7 @@ function computeJobLabel(job: BgJobState, currentSessionId?: string): string {
 // PR auto-detection (rate-limited)
 // ---------------------------------------------------------------------------
 
-const prCheckCache = new Map<number, number>(); // pid -> last check timestamp
+const prCheckCacheByHost = new HostSlot<Map<number, number>>(() => new Map()); // pid -> last check timestamp
 const PR_CHECK_INTERVAL_MS = 60_000; // Only check once per minute per session
 
 /**
@@ -532,6 +548,7 @@ function deriveNameFromIntent(intent: string): string {
 }
 
 async function detectPrForSession(session: SessionEntry): Promise<void> {
+  const prCheckCache = prCheckCacheByHost.of(getBootstrapSessionHost());
   const lastCheck = prCheckCache.get(session.pid) ?? 0;
   if (Date.now() - lastCheck < PR_CHECK_INTERVAL_MS) return;
   prCheckCache.set(session.pid, Date.now());
@@ -1460,7 +1477,7 @@ function AgentViewApp({
   const [info, setInfo] = useState<string | null>(null);
   // densable: when remounted with tYo, keep force arm for next enter on same short
   useEffect(() => {
-    if (initialError === FLEET_FORCE_RESTART_MSG && forceFreshNextShort) {
+    if (initialError === FLEET_FORCE_RESTART_MSG && getAgentViewSessionState().forceFreshNextShort) {
       // already armed by attachToPtySession
     }
   }, [initialError]);
@@ -3717,6 +3734,7 @@ function AgentViewApp({
           },
           terminalHolders,
         ) !== undefined;
+      const viewState = getAgentViewSessionState();
       const gate = decideFleetOpenGate({
         heldInTerminal: held,
         deadEpochReapedAt: session.deadEpochReapedAt,
@@ -3726,11 +3744,13 @@ function AgentViewApp({
         }),
         isExec,
         jobId,
-        forkRefusedJobId: forceFreshNextShort,
-        deadEpochGoneJobId,
-        deadEpochOfferedJobId,
+        forkRefusedJobId: viewState.forceFreshNextShort,
+        deadEpochGoneJobId: viewState.deadEpochGoneJobId,
+        deadEpochOfferedJobId: viewState.deadEpochOfferedJobId,
         deadEpochOfferAgeMs:
-          deadEpochOfferedJobId === null ? Number.POSITIVE_INFINITY : Date.now() - deadEpochOfferedAt,
+          viewState.deadEpochOfferedJobId === null
+            ? Number.POSITIVE_INFINITY
+            : Date.now() - viewState.deadEpochOfferedAt,
         offerArmed: isFleetDeadEpochOfferArmed({
           error,
           previewOpen,
@@ -3746,29 +3766,29 @@ function AgentViewApp({
         return;
       }
       if (gate.action === 'offer') {
-        forceFreshNextShort = null;
-        restartOfferedJobId = null;
-        deadEpochOfferedJobId = jobId;
-        deadEpochOfferedAt = Date.now();
+        viewState.forceFreshNextShort = null;
+        viewState.restartOfferedJobId = null;
+        viewState.deadEpochOfferedJobId = jobId;
+        viewState.deadEpochOfferedAt = Date.now();
         setErr(gate.error);
         return;
       }
       if (gate.action === 'debounce') {
-        deadEpochOfferedJobId = jobId;
+        viewState.deadEpochOfferedJobId = jobId;
         return;
       }
       if (gate.clearOffered) {
-        deadEpochOfferedJobId = null;
+        viewState.deadEpochOfferedJobId = null;
       }
       // Official #49: only confirm unresponsive restart on non-Esc trigger when offer banner is active
       const forceUnresponsive =
         trigger !== 'esc' &&
         (error === FLEET_RESTART_OFFER_MSG || error === FLEET_RESTART_STOP_UNCONFIRMED_MSG) &&
-        restartOfferedJobId === jobId &&
+        viewState.restartOfferedJobId === jobId &&
         !isExec;
-      const afterNoResponse = restartOfferedJobId === jobId;
+      const afterNoResponse = viewState.restartOfferedJobId === jobId;
       if (afterNoResponse) {
-        restartOfferedJobId = null;
+        viewState.restartOfferedJobId = null;
       }
       // Official: Enter → respawnJob → onAction({type:'open'})
       // Attach goes through daemon control socket, no need to probe PTY socket directly
@@ -5806,9 +5826,10 @@ async function attachToPtySession(
   const { sendControlRequest } = await import('../daemon/controlSocket.js');
   const { listAllJobs } = await import('../daemon/jobState.js');
 
+  const viewState = getAgentViewSessionState();
   // densable tYo: second enter while force-armed → force fresh prompt
-  const forceFresh = forceFreshNextShort === short;
-  if (forceFresh) forceFreshNextShort = null;
+  const forceFresh = viewState.forceFreshNextShort === short;
+  if (forceFresh) viewState.forceFreshNextShort = null;
 
   const forceUnresponsive = Boolean(opts?.forceUnresponsive);
   const replyOnResume = Boolean(opts?.replyOnResume);
@@ -5886,7 +5907,7 @@ async function attachToPtySession(
           // densable remount restore: BwH (enterAlt + 2J + H [+ extended keys])
           process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
           if (forceUnresponsive && /couldn't stop/i.test(preflight.error)) {
-            restartOfferedJobId = attachShort;
+            viewState.restartOfferedJobId = attachShort;
             return { error: FLEET_RESTART_STOP_UNCONFIRMED_MSG };
           }
           return { error: preflight.error };
@@ -5911,10 +5932,10 @@ async function attachToPtySession(
         if (!gate.allow) {
           process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
           if (gate.errorCode === DEAD_EPOCH_TRANSCRIPT_GONE) {
-            deadEpochGoneJobId = job.short || short;
+            viewState.deadEpochGoneJobId = job.short || short;
             return { error: FLEET_DEAD_EPOCH_GONE };
           }
-          forceFreshNextShort = short;
+          viewState.forceFreshNextShort = short;
           return { error: FLEET_FORCE_RESTART_MSG };
         }
 
@@ -6005,11 +6026,11 @@ async function attachToPtySession(
           const errMsg = (resp as { error?: string; errorCode?: string; code?: string }).error ?? 'respawn failed';
           const code = (resp as { errorCode?: string; code?: string }).errorCode ?? (resp as { code?: string }).code;
           if (code === 'kill_unconfirmed') {
-            restartOfferedJobId = job.short || short;
+            viewState.restartOfferedJobId = job.short || short;
             return { error: FLEET_RESTART_STOP_UNCONFIRMED_MSG };
           }
           if (code === DEAD_EPOCH_TRANSCRIPT_GONE || code === 'dead_epoch_transcript_gone') {
-            deadEpochGoneJobId = job.short || short;
+            viewState.deadEpochGoneJobId = job.short || short;
             return { error: FLEET_DEAD_EPOCH_GONE };
           }
           if (
@@ -6017,7 +6038,7 @@ async function attachToPtySession(
             code === 'fork_transcript_never_materialized' ||
             errMsg.includes('no saved transcript')
           ) {
-            forceFreshNextShort = short;
+            viewState.forceFreshNextShort = short;
             return { error: FLEET_FORCE_RESTART_MSG };
           }
           return { error: formatAttachError(errMsg) };
@@ -6041,7 +6062,7 @@ async function attachToPtySession(
       result.msg &&
       /did not respond|not responding|unresponsive/i.test(result.msg)
     ) {
-      restartOfferedJobId = short;
+      viewState.restartOfferedJobId = short;
       return { error: FLEET_RESTART_OFFER_MSG };
     }
     return { error: formatAttachError(result.msg) };

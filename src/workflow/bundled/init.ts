@@ -11,6 +11,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerBundledWorkflow } from '@claude-code/workflow-engine'
 
+// Process-global flag matching the process-global `bundled` map inside
+// `@claude-code/workflow-engine` so bundled workflows are only read and
+// registered once per process rather than re-reading disk per ALS host.
 let initialized = false
 
 export function initBundledWorkflows(): void {

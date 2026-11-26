@@ -4,6 +4,7 @@ import {
 } from '../services/analytics/index.js'
 import { logForDebugging } from './debug.js'
 import type { ModelCosts } from './modelCost.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import {
   getPolicySettingsOrigin,
   getSettingsForSource,
@@ -38,10 +39,20 @@ type ModelPricingSetting = {
   >
 }
 
-let cachedOrgPricing: { value: CompiledOrgPricing | undefined } | undefined
+const orgPricingHostSlot = new HostSlot<{
+  cachedOrgPricing: { value: CompiledOrgPricing | undefined } | undefined
+}>(() => ({
+  cachedOrgPricing: undefined,
+}))
+
+function getOrgPricingHostState(): {
+  cachedOrgPricing: { value: CompiledOrgPricing | undefined } | undefined
+} {
+  return orgPricingHostSlot.of(getBootstrapSessionHost())
+}
 
 export function resetOrgPricingCache(): void {
-  cachedOrgPricing = undefined
+  getOrgPricingHostState().cachedOrgPricing = undefined
 }
 
 /**
@@ -113,18 +124,19 @@ export function lookupOrgModelCosts(
  * densable `sy()` — latch compiled org pricing on policy settings.
  */
 export function getCompiledOrgPricing(): CompiledOrgPricing | undefined {
-  if (cachedOrgPricing !== undefined) {
-    return cachedOrgPricing.value
+  const hostState = getOrgPricingHostState()
+  if (hostState.cachedOrgPricing !== undefined) {
+    return hostState.cachedOrgPricing.value
   }
 
-  cachedOrgPricing = { value: undefined }
+  hostState.cachedOrgPricing = { value: undefined }
   try {
     const origin = getPolicySettingsOrigin()
     const policy = getSettingsForSource('policySettings')
     const trusted = isModelPricingOriginTrusted(origin)
     const raw = trusted ? policy?.modelPricing : undefined
     const compiled = raw ? compileModelPricing(raw) : undefined
-    cachedOrgPricing.value = compiled
+    hostState.cachedOrgPricing.value = compiled
     if (compiled) {
       logEvent('settings_model_pricing', {
         rows: compiled.exact.size,

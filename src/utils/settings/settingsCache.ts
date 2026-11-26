@@ -8,7 +8,7 @@ import isEqual from 'lodash-es/isEqual.js'
 import type { SettingSource } from './constants.js'
 import type { SettingsJson } from './types.js'
 import type { SettingsWithErrors, ValidationError } from './validation.js'
-import { getBootstrapSessionHost } from '../sessionRoot.js'
+import { getBootstrapSessionHost } from '../sessionHost.js'
 import { createSignal } from '../signal.js'
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import type { SettingsPrimer } from './settingsPrimer.js'
@@ -162,6 +162,11 @@ export class SettingsOwner {
   invalidatePolicyLayer(): void {
     this.mergedSettings = null
     this.perSource.delete('policySettings')
+    this.parsedFiles.clear()
+    this.primedFiles.clear()
+    this.folderListings.clear()
+    this.walkedFolders.clear()
+    this.policyWalks = 0
     this.policy = {}
   }
   onInvalidate(e: () => void): () => void {
@@ -307,11 +312,51 @@ export class SettingsOwner {
   }
 }
 
-/** Official mGt */
-const settingsOwners = new WeakOwnerCache(() => new SettingsOwner())
+const liveSettingsOwners = new Set<WeakRef<SettingsOwner>>()
 
-function owner(): SettingsOwner {
-  return settingsOwners.of(getBootstrapSessionHost())
+function trackLiveSettingsOwner(instance: SettingsOwner): SettingsOwner {
+  if (liveSettingsOwners.size > 64) {
+    for (const ref of liveSettingsOwners) {
+      if (ref.deref() === undefined) {
+        liveSettingsOwners.delete(ref)
+      }
+    }
+  }
+  liveSettingsOwners.add(new WeakRef(instance))
+  return instance
+}
+
+/** Official mGt / v2r = new W(() => new ECe) — per-host WeakMap cache */
+const settingsOwners = new WeakOwnerCache(() =>
+  trackLiveSettingsOwner(new SettingsOwner()),
+)
+const fallbackSettingsHostKey: object = {}
+
+function resolveSettingsHostKey(host?: object): object {
+  if (host !== undefined && host !== null) {
+    return host
+  }
+  try {
+    const activeHost = getBootstrapSessionHost()
+    if (
+      activeHost !== null &&
+      (typeof activeHost === 'object' || typeof activeHost === 'function')
+    ) {
+      return activeHost
+    }
+  } catch {
+    // Fall back to module-local sentinel when sessionHost is mocked in tests
+  }
+  return fallbackSettingsHostKey
+}
+
+function owner(host?: object): SettingsOwner {
+  return settingsOwners.of(resolveSettingsHostKey(host))
+}
+
+/** Official v2r.of(host) — direct host-scoped SettingsOwner lookup. */
+export function getSettingsOwnerForHost(host: object): SettingsOwner {
+  return settingsOwners.of(host)
 }
 
 /** Official ra() — mGt.of(z().host) */
@@ -356,6 +401,34 @@ export function setCachedParsedFile(path: string, value: ParsedSettings): void {
 export function resetSettingsCache(e?: { userLayer?: string }): void {
   owner().invalidateAll(e)
 }
+
+/**
+ * Invalidate settings caches across every live `SessionHost`'s `SettingsOwner`.
+ * Used by process-wide watchers (e.g. `changeDetector.fanOut`) so isolated
+ * hosts that read settings before subscribing still see live disk updates.
+ */
+export function resetAllLiveHostSettingsCaches(e?: {
+  userLayer?: string
+}): void {
+  const activeOwner = owner()
+  let activeReset = false
+  for (const ref of liveSettingsOwners) {
+    const target = ref.deref()
+    if (target === undefined) {
+      liveSettingsOwners.delete(ref)
+      continue
+    }
+    if (target === activeOwner) {
+      activeReset = true
+    }
+    target.invalidateAll(e)
+  }
+  if (!activeReset) {
+    activeOwner.invalidateAll(e)
+  }
+}
+
+export const clearSettingsCache = resetSettingsCache
 
 export function getPluginSettingsBase(): Record<string, unknown> | undefined {
   return owner().pluginBase

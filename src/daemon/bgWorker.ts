@@ -39,6 +39,12 @@ import { homedir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawn as nodeSpawn } from 'child_process'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../utils/sessionHost.js'
 import { restrictedSpawnEnv } from '../utils/restricted.js'
 import { isInBundledMode } from '../utils/bundledMode.js'
 import {
@@ -770,25 +776,43 @@ function getNamedPipe(name: string): string {
   return `\\\\.\\pipe\\ccd-${pipeKey}-${name}`
 }
 
-let _pipeKey: string | undefined
+type BgWorkerHostState = {
+  pipeKey: string | undefined
+  procStartCache: Map<number, { at: number; p: Promise<string | undefined> }>
+}
+
+const bgWorkerHostSlot = new HostSlot<BgWorkerHostState>(() => ({
+  pipeKey: undefined,
+  procStartCache: new Map(),
+}))
+
+// Process-global per-roster-path write queue so concurrent ALS hosts targeting
+// the same on-disk roster.json serialize read-modify-write without losing updates.
+const rosterWriteChainsByPath = new Map<string, Promise<void>>()
+
+function getBgWorkerHostState(): BgWorkerHostState {
+  return bgWorkerHostSlot.of(getBootstrapSessionHost())
+}
+
 function getPipeKey(): string {
-  if (_pipeKey) return _pipeKey
+  const hostState = getBgWorkerHostState()
+  if (hostState.pipeKey) return hostState.pipeKey
   const keyFile = join(getDaemonConfigDir(), 'pipe.key')
   try {
-    _pipeKey = readFileSync(keyFile, 'utf8').trim()
-    return _pipeKey
+    hostState.pipeKey = readFileSync(keyFile, 'utf8').trim()
+    return hostState.pipeKey
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
   }
-  _pipeKey = randomBytes(8).toString('hex')
+  hostState.pipeKey = randomBytes(8).toString('hex')
   mkdirSync(getDaemonConfigDir(), { recursive: true, mode: 0o700 })
   try {
-    writeFileSync(keyFile, _pipeKey, { flag: 'wx', mode: 0o600 })
+    writeFileSync(keyFile, hostState.pipeKey, { flag: 'wx', mode: 0o600 })
   } catch {
     // Race: another process wrote it first
-    _pipeKey = readFileSync(keyFile, 'utf8').trim()
+    hostState.pipeKey = readFileSync(keyFile, 'utf8').trim()
   }
-  return _pipeKey
+  return hostState.pipeKey
 }
 
 // ---------------------------------------------------------------------------
@@ -956,16 +980,13 @@ export function killPtyHost(sockPath: string): Promise<boolean> {
 }
 
 /** Get process start time (for PID recycling detection) — official ey */
-const procStartCache = new Map<
-  number,
-  { at: number; p: Promise<string | undefined> }
->()
 const PROC_START_CACHE_TTL = 5000
 
 export async function getProcessStartTime(
   pid: number,
   opts?: { skipCache?: boolean },
 ): Promise<string | undefined> {
+  const procStartCache = getBgWorkerHostState().procStartCache
   const now = Date.now()
   if (!opts?.skipCache) {
     const cached = procStartCache.get(pid)
@@ -3738,12 +3759,13 @@ export async function readRoster(opts?: {
   return parsed as RosterFile
 }
 
-let rosterWriteChain = Promise.resolve()
-
 export async function updateRoster(
   fn: (roster: RosterFile) => RosterFile | undefined,
 ): Promise<void> {
-  const op = rosterWriteChain.then(async () => {
+  const rosterKey = resolve(getRosterPath())
+  const capturedSession = getActiveSessionFromAls()
+  const prev = rosterWriteChainsByPath.get(rosterKey) ?? Promise.resolve()
+  const runBody = async (): Promise<void> => {
     const roster = await readRoster()
     const result = fn(roster) ?? roster
     result.supervisorPid = process.pid
@@ -3751,7 +3773,19 @@ export async function updateRoster(
     const rosterPath = getRosterPath()
     mkdirSync(dirname(rosterPath), { recursive: true })
     writeFileSync(rosterPath, JSON.stringify(result))
+  }
+  const op = prev.then(() =>
+    capturedSession !== undefined &&
+    getActiveSessionFromAls() !== capturedSession
+      ? runWithSession(capturedSession, runBody)
+      : runBody(),
+  )
+  const settled = op.catch(() => {})
+  rosterWriteChainsByPath.set(rosterKey, settled)
+  void settled.finally(() => {
+    if (rosterWriteChainsByPath.get(rosterKey) === settled) {
+      rosterWriteChainsByPath.delete(rosterKey)
+    }
   })
-  rosterWriteChain = op.catch(() => {})
   return op
 }

@@ -21,24 +21,46 @@ import { unlink } from 'fs/promises'
 import { StringDecoder } from 'string_decoder'
 import {
   getAttachStampMs,
-  instances,
   markDetachedSinceLastAttach,
+  Ns,
   stampAttachTime,
 } from '@anthropic/ink'
 import { snapshotInFlight } from '../utils/bgNeedsInputBridge.js'
 import { enqueue } from '../utils/messageQueueManager.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import { plural } from '../utils/stringUtils.js'
 
 // ---------------------------------------------------------------------------
-// State
+// State (Host-scoped via HostSlot on SessionHost)
 // ---------------------------------------------------------------------------
 
-let server: Server | undefined
-let client: Socket | undefined
-let heartbeatTimer: ReturnType<typeof setInterval> | undefined
-let wedgeTimer: ReturnType<typeof setTimeout> | undefined
-let wedgeDisarmed = false
+type PeerQuestionHandler = (text: string) => boolean
+type ImmediateCommandRunner = (text: string) => boolean
+
+type RendezvousHostState = {
+  server: Server | undefined
+  client: Socket | undefined
+  heartbeatTimer: ReturnType<typeof setInterval> | undefined
+  wedgeTimer: ReturnType<typeof setTimeout> | undefined
+  wedgeDisarmed: boolean
+  peerQuestionHandler: PeerQuestionHandler | null
+  immediateCommandRunner: ImmediateCommandRunner | null
+}
+
+const rendezvousHostSlot = new HostSlot<RendezvousHostState>(() => ({
+  server: undefined,
+  client: undefined,
+  heartbeatTimer: undefined,
+  wedgeTimer: undefined,
+  wedgeDisarmed: false,
+  peerQuestionHandler: null,
+  immediateCommandRunner: null,
+}))
+
+function getRendezvousHostState(): RendezvousHostState {
+  return rendezvousHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable `e5a` / `rPt` — default startup detail. Wedge only fires while
@@ -65,25 +87,26 @@ function jobShortFromDir(jobDir: string): string {
  * environment variable (set by daemon when spawning bg sessions).
  */
 export async function startRendezvousServer(): Promise<void> {
+  const hostState = getRendezvousHostState()
   const sockPath = process.env.CLAUDE_BG_RENDEZVOUS_SOCK
-  if (!sockPath || server) return
+  if (!sockPath || hostState.server) return
 
   delete process.env.CLAUDE_BG_RENDEZVOUS_SOCK
   await unlink(sockPath).catch(() => {})
 
-  server = createServer((socket: Socket) => {
+  const server = createServer((socket: Socket) => {
     // Only one client at a time (daemon supervisor)
-    client?.destroy()
-    client = socket
+    hostState.client?.destroy()
+    hostState.client = socket
 
     socket.on('error', () => socket.destroy())
     socket.once('close', () => {
-      if (client === socket) client = undefined
+      if (hostState.client === socket) hostState.client = undefined
     })
 
     // densable onConnection → clearPreBootState re-evaluates the wedge.
     const jobDir = process.env.CLAUDE_JOB_DIR
-    if (jobDir) maybeArmStartupWedge(jobDir)
+    if (jobDir) maybeArmStartupWedgeForHost(jobDir, hostState)
 
     let buf = ''
     const decoder = new StringDecoder('utf8')
@@ -93,7 +116,7 @@ export async function startRendezvousServer(): Promise<void> {
       while ((nl = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, nl)
         buf = buf.slice(nl + 1)
-        if (line) handleMessage(line)
+        if (line) handleMessage(line, hostState)
       }
       if (buf.length > 1_048_576) {
         buf = ''
@@ -101,6 +124,7 @@ export async function startRendezvousServer(): Promise<void> {
       }
     })
   })
+  hostState.server = server
 
   server.on('error', (err: Error) => {
     // Log but don't crash — rv is best-effort
@@ -113,27 +137,45 @@ export async function startRendezvousServer(): Promise<void> {
   server.unref()
 
   // Heartbeat every 30s so daemon knows we're alive
-  heartbeatTimer = setInterval(() => sendRv({ type: 'heartbeat' }), 30_000)
-  heartbeatTimer.unref()
+  hostState.heartbeatTimer = setInterval(
+    () => sendRvForHost(hostState, { type: 'heartbeat' }),
+    30_000,
+  )
+  hostState.heartbeatTimer.unref()
 
   // densable z8n: if the job is already working + rPt, start the 45s clock.
   const jobDir = process.env.CLAUDE_JOB_DIR
-  if (jobDir) maybeArmStartupWedge(jobDir)
+  if (jobDir) maybeArmStartupWedgeForHost(jobDir, hostState)
 }
 
 /**
  * Stop the rendezvous server and clean up.
  */
 export function stopRendezvousServer(): void {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer)
-    heartbeatTimer = undefined
+  const hostState = getRendezvousHostState()
+  if (hostState.heartbeatTimer) {
+    clearInterval(hostState.heartbeatTimer)
+    hostState.heartbeatTimer = undefined
   }
   disarmStartupWedgeWatchdog()
-  client?.destroy()
-  client = undefined
-  server?.close()
-  server = undefined
+  hostState.client?.destroy()
+  hostState.client = undefined
+  hostState.server?.close()
+  hostState.server = undefined
+}
+
+function armStartupWedgeWatchdogForHost(
+  jobDir: string,
+  hostState: RendezvousHostState,
+): void {
+  if (hostState.wedgeDisarmed) return
+  clearTimeout(hostState.wedgeTimer)
+  const ms = Number(process.env.CLAUDE_BG_STARTUP_WEDGE_MS || 45000)
+  hostState.wedgeTimer = setTimeout(
+    () => void onStartupWedgeTimeoutForHost(jobDir, hostState),
+    ms,
+  )
+  hostState.wedgeTimer.unref()
 }
 
 /**
@@ -141,28 +183,24 @@ export function stopRendezvousServer(): void {
  * `CLAUDE_BG_STARTUP_WEDGE_MS || 45000`.
  */
 export function armStartupWedgeWatchdog(jobDir: string): void {
-  if (wedgeDisarmed) return
-  clearTimeout(wedgeTimer)
-  const ms = Number(process.env.CLAUDE_BG_STARTUP_WEDGE_MS || 45000)
-  wedgeTimer = setTimeout(() => void onStartupWedgeTimeout(jobDir), ms)
-  wedgeTimer.unref()
+  armStartupWedgeWatchdogForHost(jobDir, getRendezvousHostState())
 }
 
 /** densable `z8n.disarmStartupWedgeWatchdog`. */
 export function disarmStartupWedgeWatchdog(): void {
-  wedgeDisarmed = true
-  clearTimeout(wedgeTimer)
-  wedgeTimer = undefined
+  const hostState = getRendezvousHostState()
+  hostState.wedgeDisarmed = true
+  clearTimeout(hostState.wedgeTimer)
+  hostState.wedgeTimer = undefined
 }
 
-/**
- * densable `z8n.onStartupWedgeTimeout`: still `working` + `detail===rPt`
- * and not already blocked → tempo blocked + stuck-dialog copy.
- */
-export async function onStartupWedgeTimeout(jobDir: string): Promise<void> {
+async function onStartupWedgeTimeoutForHost(
+  jobDir: string,
+  hostState: RendezvousHostState,
+): Promise<void> {
   try {
     const { readBgJobState, writeBgJobState } = await import('./jobState.js')
-    if (wedgeDisarmed) return
+    if (hostState.wedgeDisarmed) return
     const short = jobShortFromDir(jobDir)
     const t = readBgJobState(short)
     if (
@@ -181,7 +219,7 @@ export async function onStartupWedgeTimeout(jobDir: string): Promise<void> {
       needs: STUCK_STARTUP_NEEDS,
       updatedAt,
     })
-    sendRv({
+    sendRvForHost(hostState, {
       type: 'state',
       patch: {
         tempo: 'blocked',
@@ -194,30 +232,46 @@ export async function onStartupWedgeTimeout(jobDir: string): Promise<void> {
   }
 }
 
-/** densable: `if (t.state==="working" && t.detail===rPt) arm…` */
-export function maybeArmStartupWedge(jobDir: string): void {
+/**
+ * densable `z8n.onStartupWedgeTimeout`: still `working` + `detail===rPt`
+ * and not already blocked → tempo blocked + stuck-dialog copy.
+ */
+export async function onStartupWedgeTimeout(jobDir: string): Promise<void> {
+  return onStartupWedgeTimeoutForHost(jobDir, getRendezvousHostState())
+}
+
+function maybeArmStartupWedgeForHost(
+  jobDir: string,
+  hostState: RendezvousHostState,
+): void {
   void import('./jobState.js')
     .then(({ readBgJobState }) => {
       const t = readBgJobState(jobShortFromDir(jobDir))
       if (t?.state === 'working' && t.detail === STARTUP_DETAIL_RPT) {
-        armStartupWedgeWatchdog(jobDir)
+        armStartupWedgeWatchdogForHost(jobDir, hostState)
       }
     })
     .catch(() => {})
 }
 
-/** Test helper — reset latch so the next arm can fire. */
-export function resetStartupWedgeForTests(): void {
-  clearTimeout(wedgeTimer)
-  wedgeTimer = undefined
-  wedgeDisarmed = false
+/** densable: `if (t.state==="working" && t.detail===rPt) arm…` */
+export function maybeArmStartupWedge(jobDir: string): void {
+  maybeArmStartupWedgeForHost(jobDir, getRendezvousHostState())
 }
 
-/**
- * Send a message to the daemon via the rendezvous connection.
- * Returns true if the message was sent, false if no client is connected.
- */
-export function sendRv(msg: Record<string, unknown>): boolean {
+/** Test helper — reset latch so the next arm can fire. */
+export function resetStartupWedgeForTests(): void {
+  const hostState = getRendezvousHostState()
+  clearTimeout(hostState.wedgeTimer)
+  hostState.wedgeTimer = undefined
+  hostState.wedgeDisarmed = false
+}
+
+function sendRvForHost(
+  hostState: RendezvousHostState,
+  msg: Record<string, unknown>,
+): boolean {
+  const client = hostState.client
   if (!client || client.destroyed) return false
   try {
     client.write(jsonStringify(msg) + '\n')
@@ -225,6 +279,14 @@ export function sendRv(msg: Record<string, unknown>): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Send a message to the daemon via the rendezvous connection.
+ * Returns true if the message was sent, false if no client is connected.
+ */
+export function sendRv(msg: Record<string, unknown>): boolean {
+  return sendRvForHost(getRendezvousHostState(), msg)
 }
 
 /** densable dSH / Hr8 / FLK — APC fallback when YK/sendRv fails. */
@@ -293,7 +355,7 @@ export function createOnBgDetach(): () => void {
 // Message handling — official bg3
 // ---------------------------------------------------------------------------
 
-function handleMessage(line: string): void {
+function handleMessage(line: string, hostState: RendezvousHostState): void {
   let msg: Record<string, unknown>
   try {
     msg = jsonParse(line) as Record<string, unknown>
@@ -305,7 +367,7 @@ function handleMessage(line: string): void {
 
   switch (msg.type) {
     case 'shutdown':
-      sendRv({ type: 'shutting-down' })
+      sendRvForHost(hostState, { type: 'shutting-down' })
       // Graceful shutdown
       setTimeout(() => process.exit(0), 5000).unref()
       process.exit(0)
@@ -317,14 +379,14 @@ function handleMessage(line: string): void {
       const { getAttacherCaps } =
         require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
       if (getAttacherCaps() !== null) stampAttachTime(Date.now())
-      const ink = instances.get(process.stdout)
+      const ink = Ns().get(process.stdout)
       if (!ink?.forceRedraw({ flushReact: true })) {
         // Ink not ready yet — write a fallback message
         process.stdout.write(
           '\x1B[2J\x1B[H\n  \x1B[2mSession can\u2019t redraw right now \u2014 Ctrl+Z to detach\x1B[0m\n',
         )
       }
-      sendRv({ type: 'repaint-done' })
+      sendRvForHost(hostState, { type: 'repaint-done' })
       break
     }
 
@@ -361,10 +423,10 @@ function handleMessage(line: string): void {
         //   if (nZK(text)) return  // peer answered an in-session question
         //   if (A(w(), text)) return  // immediate /model /effort /rename /usage
         //   mw({ mode: pR(text), value: Vh(text), priority: 'next' })
-        if (tryAnswerPeerQuestion(msg.text)) {
+        if (tryAnswerPeerQuestion(msg.text, hostState)) {
           break
         }
-        if (tryImmediateCommand(msg.text)) {
+        if (tryImmediateCommand(msg.text, hostState)) {
           break
         }
         enqueueReplyAsQueuedCommand(msg.text)
@@ -406,18 +468,18 @@ export function replyToQueuedCommand(text: string): {
  * Official nZK — optional peer-question interceptor (registered by REPL).
  * When a question UI is open, the reply answers it instead of enqueueing.
  */
-type PeerQuestionHandler = (text: string) => boolean
-let peerQuestionHandler: PeerQuestionHandler | null = null
-
 export function setPeerQuestionHandler(
   handler: PeerQuestionHandler | null,
 ): void {
-  peerQuestionHandler = handler
+  getRendezvousHostState().peerQuestionHandler = handler
 }
 
-function tryAnswerPeerQuestion(text: string): boolean {
+function tryAnswerPeerQuestion(
+  text: string,
+  hostState: RendezvousHostState,
+): boolean {
   try {
-    return peerQuestionHandler?.(text) ?? false
+    return hostState.peerQuestionHandler?.(text) ?? false
   } catch {
     return false
   }
@@ -426,18 +488,18 @@ function tryAnswerPeerQuestion(text: string): boolean {
 /**
  * Official Kns — immediate command runner for peer replies (/model, /effort, /rename, /usage).
  */
-type ImmediateCommandRunner = (text: string) => boolean
-let immediateCommandRunner: ImmediateCommandRunner | null = null
-
 export function registerImmediateCommandRunner(
   runner: ImmediateCommandRunner | null,
 ): void {
-  immediateCommandRunner = runner
+  getRendezvousHostState().immediateCommandRunner = runner
 }
 
-function tryImmediateCommand(text: string): boolean {
+function tryImmediateCommand(
+  text: string,
+  hostState: RendezvousHostState,
+): boolean {
   try {
-    return immediateCommandRunner?.(text) ?? false
+    return hostState.immediateCommandRunner?.(text) ?? false
   } catch {
     return false
   }

@@ -1,4 +1,5 @@
 import React, { useContext } from 'react';
+import { hasInkActiveSessionAls, InkHostSlot } from '../core/instances.js';
 import { useAnimationFrame } from '../hooks/use-animation-frame.js';
 import { AccessibilityContext, Box, Text } from '../index.js';
 
@@ -21,11 +22,19 @@ function getSpinnerPingPongFrames(): string[] {
 
 // densable Ws `Em(Ko(cr))` — settings.prefersReducedMotion. Ink cannot import
 // src settings, so the host injects the reader at startup.
-let _prefersReducedMotion: () => boolean = () => false;
+let defaultPrefersReducedMotion: () => boolean = () => false;
+const spinnerReducedMotionHostSlot = new InkHostSlot<{
+  getter: (() => boolean) | undefined;
+}>(() => ({ getter: undefined }));
 
 /** Inject the `prefersReducedMotion` settings reader. Call once at startup. */
 export function setSpinnerReducedMotionGetter(getter: () => boolean): void {
-  _prefersReducedMotion = getter;
+  if (hasInkActiveSessionAls()) {
+    spinnerReducedMotionHostSlot.of().getter = getter;
+  } else {
+    defaultPrefersReducedMotion = getter;
+    spinnerReducedMotionHostSlot.delete();
+  }
 }
 
 /**
@@ -33,7 +42,8 @@ export function setSpinnerReducedMotionGetter(getter: () => boolean): void {
  */
 export function Spinner(): React.ReactNode {
   const isScreenReader = useContext(AccessibilityContext);
-  const reducedMotion = _prefersReducedMotion() || isScreenReader;
+  const prefersReducedMotion = spinnerReducedMotionHostSlot.peek()?.getter ?? defaultPrefersReducedMotion;
+  const reducedMotion = prefersReducedMotion() || isScreenReader;
   const [ref, time] = useAnimationFrame(reducedMotion ? null : 120);
 
   if (reducedMotion) {

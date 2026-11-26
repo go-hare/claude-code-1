@@ -15,6 +15,7 @@ import {
   isEnvTruthy,
 } from '../envUtils.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { SettingSource } from '../settings/constants.js'
 import {
   getInitialSettings,
@@ -157,11 +158,13 @@ type MemoEntry = {
   headers: Promise<Record<string, string>>
 }
 
-const marketplaceHelperMemo = new Map<string, MemoEntry>()
+const marketplaceHelperMemoHostSlot = new HostSlot<Map<string, MemoEntry>>(
+  () => new Map(),
+)
 
 /** Test helper — clear marketplace helper memo. */
 export function clearMarketplaceHeadersHelperMemo(): void {
-  marketplaceHelperMemo.clear()
+  marketplaceHelperMemoHostSlot.of(getBootstrapSessionHost()).clear()
 }
 
 /**
@@ -356,6 +359,9 @@ export async function runMarketplaceHeadersHelperMemoized(
   const key = `${command}\0${marketplaceUrl}\0${marketplaceName ?? ''}\0${
     operatorAuthored ? 'operator' : 'repo'
   }`
+  const marketplaceHelperMemo = marketplaceHelperMemoHostSlot.of(
+    getBootstrapSessionHost(),
+  )
   const now = Date.now()
   const hit = marketplaceHelperMemo.get(key)
   if (hit && hit.expiresAt > now) {

@@ -13,7 +13,7 @@ import {
   isProcessRunning,
 } from './genericProcessUtils.js'
 import { jsonParse } from './slowOperations.js'
-import { getBootstrapSessionHost } from './sessionRoot.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionRoot.js'
 
 /** Official size cap on host creds file. */
 export const HOST_CREDS_MAX_BYTES = 65_536
@@ -332,11 +332,23 @@ export type HostAuthTokenRefreshCallback = (
   signal?: AbortSignal,
 ) => Promise<string | null>
 
-// Module state for host-creds apply + 401 recovery (official afa / Gan / cLp).
+// Per-host state for host-creds apply + 401 recovery (official 2.1.331 [W-058] / afa / Gan / cLp).
 // densable 2.1.248: refresh callback lives on credentialSlots.
-let lockedHostEndpoints: Map<string, string> | null = null
-let appliedHostSecretKeys = new Set<string>()
-let hostAuth401SameTokenCount = 0
+type HostCredsHostState = {
+  lockedHostEndpoints: Map<string, string> | null
+  appliedHostSecretKeys: Set<string>
+  hostAuth401SameTokenCount: number
+}
+
+const hostCredsHostSlot = new HostSlot<HostCredsHostState>(() => ({
+  lockedHostEndpoints: null,
+  appliedHostSecretKeys: new Set(),
+  hostAuth401SameTokenCount: 0,
+}))
+
+function getHostCredsHostState(): HostCredsHostState {
+  return hostCredsHostSlot.of(getBootstrapSessionHost())
+}
 
 /** Official ASr */
 export function setHostAuthTokenRefreshCallback(
@@ -365,14 +377,15 @@ export function isHostAuthTokenRefreshAvailable(): boolean {
  * drift, apply secret/header env, return the host auth token value.
  */
 export async function refreshHostCredsToken(): Promise<string | null> {
+  const state = getHostCredsHostState()
   const data = await readHostCredsFile()
   if (!data) return null
 
   const { endpoints, rest } = splitHostCredsEnv(data.env)
-  if (lockedHostEndpoints) {
+  if (state.lockedHostEndpoints) {
     const drifted = hostCredsEndpointChanged(
       { ...endpoints, ...rest },
-      lockedHostEndpoints,
+      state.lockedHostEndpoints,
     )
     if (drifted) {
       logForDebugging(
@@ -382,13 +395,16 @@ export async function refreshHostCredsToken(): Promise<string | null> {
       return null
     }
   } else {
-    lockedHostEndpoints = new Map(Object.entries(endpoints))
+    state.lockedHostEndpoints = new Map(Object.entries(endpoints))
     for (const [k, v] of Object.entries(endpoints)) {
       process.env[k] = v
     }
   }
 
-  appliedHostSecretKeys = applyHostCredsEnvDiff(rest, appliedHostSecretKeys)
+  state.appliedHostSecretKeys = applyHostCredsEnvDiff(
+    rest,
+    state.appliedHostSecretKeys,
+  )
   return rest[getHostAuthEnvVarName()] ?? null
 }
 
@@ -405,6 +421,7 @@ export async function tryHostAuth401Recovery(
   signal?: AbortSignal,
 ): Promise<'updated' | 'same' | 'exhausted' | 'unavailable' | 'failed'> {
   if (signal?.aborted) return 'failed'
+  const state = getHostCredsHostState()
   const cb = getHostAuthTokenRefreshCallback()
   if (!cb) return 'unavailable'
 
@@ -433,13 +450,13 @@ export async function tryHostAuth401Recovery(
 
   if (next && next !== previous) {
     process.env[envVar] = next
-    hostAuth401SameTokenCount = 0
+    state.hostAuth401SameTokenCount = 0
     logForDebugging('host_auth_401_recovery: token updated')
     return 'updated'
   }
 
-  hostAuth401SameTokenCount++
-  if (hostAuth401SameTokenCount >= HOST_AUTH_401_MAX_SAME_TOKEN) {
+  state.hostAuth401SameTokenCount++
+  if (state.hostAuth401SameTokenCount >= HOST_AUTH_401_MAX_SAME_TOKEN) {
     logForDebugging(
       next === null
         ? 'host_auth_401_recovery: callback returned null (exhausted)'
@@ -478,6 +495,7 @@ export async function applyHostCredsFromFileIfManaged(): Promise<Record<
   }
   if (!process.env.CLAUDE_CODE_HOST_CREDS_FILE) return null
 
+  const state = getHostCredsHostState()
   const data = await readHostCredsFile()
   if (!data) {
     logForDebugging(
@@ -488,11 +506,14 @@ export async function applyHostCredsFromFileIfManaged(): Promise<Record<
   }
 
   const { endpoints, rest } = splitHostCredsEnv(data.env)
-  lockedHostEndpoints = new Map(Object.entries(endpoints))
+  state.lockedHostEndpoints = new Map(Object.entries(endpoints))
   for (const [k, v] of Object.entries(endpoints)) {
     process.env[k] = v
   }
-  appliedHostSecretKeys = applyHostCredsEnvDiff(rest, appliedHostSecretKeys)
+  state.appliedHostSecretKeys = applyHostCredsEnvDiff(
+    rest,
+    state.appliedHostSecretKeys,
+  )
   setHostAuthTokenRefreshCallback(refreshHostCredsToken)
   // Official CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH — mark host 401 refresh path.
   process.env.CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH = '1'
@@ -502,7 +523,8 @@ export async function applyHostCredsFromFileIfManaged(): Promise<Record<
 /** Test helper — reset module state between cases. */
 export function resetHostCredsModuleStateForTests(): void {
   setHostAuthTokenRefreshCallback(null)
-  lockedHostEndpoints = null
-  appliedHostSecretKeys = new Set()
-  hostAuth401SameTokenCount = 0
+  const state = getHostCredsHostState()
+  state.lockedHostEndpoints = null
+  state.appliedHostSecretKeys = new Set()
+  state.hostAuth401SameTokenCount = 0
 }

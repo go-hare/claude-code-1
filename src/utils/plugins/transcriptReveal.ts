@@ -6,6 +6,8 @@
  * Do **not** export minify `vat` / `px` / `Xi` / `dZ`.
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
+
 export type TranscriptRevealBlock = 'start' | 'center' | 'end' | 'nearest'
 
 export type TranscriptRevealResult = 'revealed' | 'unknown' | 'unscrollable'
@@ -24,17 +26,21 @@ export type TranscriptRevealHost = {
   release?: () => void
 }
 
-let host: TranscriptRevealHost | undefined
+const transcriptRevealHostSlot = new HostSlot<{
+  host: TranscriptRevealHost | undefined
+}>(() => ({
+  host: undefined,
+}))
 
 /** densable VirtualMessageList / REPL registration for FH vat. */
 export function setTranscriptRevealHost(
   next: TranscriptRevealHost | undefined,
 ): void {
-  host = next
+  transcriptRevealHostSlot.of(getBootstrapSessionHost()).host = next
 }
 
 export function getTranscriptRevealHost(): TranscriptRevealHost | undefined {
-  return host
+  return transcriptRevealHostSlot.of(getBootstrapSessionHost()).host
 }
 
 /**
@@ -44,7 +50,7 @@ export async function revealInTranscript(
   requestId: string,
   block: TranscriptRevealBlock = 'nearest',
 ): Promise<TranscriptRevealResult> {
-  const held = host
+  const held = getTranscriptRevealHost()
   if (!held) return 'unscrollable'
   const pending = held.reveal(requestId, block)
   if (!pending) return 'unknown'
@@ -90,7 +96,7 @@ export async function scrollTranscriptByRequestId(
     rootEvent?: string
   },
 ): Promise<{ deny?: string }> {
-  if (!host) {
+  if (!getTranscriptRevealHost()) {
     return { deny: 'transcript not scrollable here' }
   }
   if (!isPersonInitiatedUiScroll(ctx)) {

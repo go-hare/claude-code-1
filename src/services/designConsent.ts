@@ -10,6 +10,7 @@ import {
 } from '../utils/auth.js'
 import { getAPIProvider } from '../utils/model/providers.js'
 import { isEssentialTrafficOnly } from '../utils/privacyLevel.js'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionHost.js'
 import { isHoverRestOn } from '../utils/storageV5/hoverRestPin.js'
 import { getOAuthHeaders } from '../utils/teleport/api.js'
 import type { DesignSessionState } from './designProjectGrant.js'
@@ -87,27 +88,45 @@ export const DESIGN_CONSENT_DECISION_REASON =
  * `null` means "do not override". A set value is copied onto each state
  * the next time `$Pt` reads it, so two tool states do not share one cache.
  */
-let consentSeed: boolean | Record<string, boolean> | null = null
-let consentSeedEpoch = 0
-const consentSeedApplied = new WeakMap<DesignSessionState, number>()
+type DesignConsentSeedState = {
+  consentSeed: boolean | Record<string, boolean> | null
+  consentSeedEpoch: number
+  consentSeedApplied: WeakMap<DesignSessionState, number>
+}
+
+const designConsentSeedSlot = new RootSessionSlot<DesignConsentSeedState>(
+  () => ({
+    consentSeed: null,
+    consentSeedEpoch: 0,
+    consentSeedApplied: new WeakMap(),
+  }),
+)
+
+function getDesignConsentSeedState(): DesignConsentSeedState {
+  return designConsentSeedSlot.of(getBootstrapSession())
+}
 
 export function seedDesignConsentCache(
   value: boolean | Record<string, boolean> | null,
 ): void {
-  consentSeedEpoch += 1
-  consentSeed = value
+  const seedState = getDesignConsentSeedState()
+  seedState.consentSeedEpoch += 1
+  seedState.consentSeed = value
 }
 
 function applyConsentSeed(state: DesignSessionState): void {
-  if (consentSeed === null) return
-  if (consentSeedApplied.get(state) === consentSeedEpoch) return
+  const seedState = getDesignConsentSeedState()
+  if (seedState.consentSeed === null) return
+  if (seedState.consentSeedApplied.get(state) === seedState.consentSeedEpoch) {
+    return
+  }
   state.consentFetch = null
   state.consentCacheGeneration += 1
   state.consentCache =
-    typeof consentSeed === 'boolean'
-      ? { [DESIGN_CONSENT_BIT]: consentSeed }
-      : { ...consentSeed }
-  consentSeedApplied.set(state, consentSeedEpoch)
+    typeof seedState.consentSeed === 'boolean'
+      ? { [DESIGN_CONSENT_BIT]: seedState.consentSeed }
+      : { ...seedState.consentSeed }
+  seedState.consentSeedApplied.set(state, seedState.consentSeedEpoch)
 }
 
 async function fetchDesignConsent(
@@ -150,7 +169,7 @@ export async function missingDesignConsentBit(
     return null
   }
   applyConsentSeed(state)
-  if (consentSeed !== null) {
+  if (getDesignConsentSeedState().consentSeed !== null) {
     return state.consentCache?.[DESIGN_CONSENT_BIT] === false
       ? DESIGN_CONSENT_BIT
       : null

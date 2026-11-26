@@ -8,7 +8,6 @@
 
 import { readFileSync } from 'fs'
 import { rename, unlink, writeFile } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { join } from 'path'
 import {
   CLAUDE_AI_INFERENCE_SCOPE,
@@ -20,6 +19,7 @@ import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { isBareMode, isEnvTruthy } from './envUtils.js'
 import { getAPIProvider } from './model/providers.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import {
   type WifTokenProvider,
   isWifFailedAccessToken,
@@ -141,8 +141,81 @@ function resolveAnthropicProfileSource(
   return null
 }
 
-/** densable A5 / leftover 239 Szb — memoized like gold iu()/PJo. */
-export const getAnthropicProfileSource = memoize(
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+type AnthropicProfileAccountInfo = {
+  organizationUuid?: unknown
+  organizationName?: unknown
+  accountEmail?: unknown
+  workspaceName?: unknown
+} | null
+
+type AnthropicProfileHostState = {
+  profileSourceCache: Map<unknown, AnthropicProfileSource>
+  profileAuthKindCache: Map<unknown, string | null>
+  profileAccountInfoCache: Map<unknown, AnthropicProfileAccountInfo>
+  warnImplicitProfileSkippedCache: Map<unknown, void>
+  infoUsingProfileAuthCache: Map<unknown, void>
+  pendingProfileRefresh: Promise<ProfileUserOauthToken> | null
+  profileRefreshCleanupRegistered: boolean
+  profileUserOauthForceRefresh: boolean
+  lastIssuedProfileUserOauthAccessToken: string | undefined
+  lastIssuedProfileUserOauthExpiresAt: number | null | undefined
+}
+
+const anthropicProfileStateByHost = new HostSlot<AnthropicProfileHostState>(
+  () => ({
+    profileSourceCache: new Map<unknown, AnthropicProfileSource>(),
+    profileAuthKindCache: new Map<unknown, string | null>(),
+    profileAccountInfoCache: new Map<unknown, AnthropicProfileAccountInfo>(),
+    warnImplicitProfileSkippedCache: new Map<unknown, void>(),
+    infoUsingProfileAuthCache: new Map<unknown, void>(),
+    pendingProfileRefresh: null,
+    profileRefreshCleanupRegistered: false,
+    profileUserOauthForceRefresh: false,
+    lastIssuedProfileUserOauthAccessToken: undefined,
+    lastIssuedProfileUserOauthExpiresAt: undefined,
+  }),
+)
+
+function getAnthropicProfileHostState(): AnthropicProfileHostState {
+  return anthropicProfileStateByHost.of(getBootstrapSessionHost())
+}
+
+function memoizePerHost<Args extends unknown[], Result>(
+  getCache: () => Map<unknown, Result>,
+  setCache: (next: Map<unknown, Result>) => void,
+  fn: (...args: Args) => Result,
+): HostMemoized<Args, Result> {
+  const memoized = (...args: Args): Result => {
+    const key = args[0]
+    const cache = getCache()
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: getCache,
+    set: setCache,
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
+
+/** densable A5 / leftover 239 Szb — memoized per SessionHost like gold iu()/PJo. */
+export const getAnthropicProfileSource = memoizePerHost(
+  () => getAnthropicProfileHostState().profileSourceCache,
+  next => {
+    getAnthropicProfileHostState().profileSourceCache = next
+  },
   (env: NodeJS.ProcessEnv = process.env): AnthropicProfileSource =>
     resolveAnthropicProfileSource(env),
 )
@@ -163,16 +236,21 @@ function resolveAnthropicProfileAuthKind(
 }
 
 /** densable uzs / leftover 239 wzb */
-export const getAnthropicProfileAuthKind = memoize(
+export const getAnthropicProfileAuthKind = memoizePerHost(
+  () => getAnthropicProfileHostState().profileAuthKindCache,
+  next => {
+    getAnthropicProfileHostState().profileAuthKindCache = next
+  },
   (env: NodeJS.ProcessEnv = process.env): string | null =>
     resolveAnthropicProfileAuthKind(env),
 )
 
 /** densable I$o / leftover 239 DJo — drop A5/uzs/o1_ caches. */
 export function clearAnthropicProfileCaches(): void {
-  profileUserOauthForceRefresh = false
-  lastIssuedProfileUserOauthAccessToken = undefined
-  lastIssuedProfileUserOauthExpiresAt = undefined
+  const hostState = getAnthropicProfileHostState()
+  hostState.profileUserOauthForceRefresh = false
+  hostState.lastIssuedProfileUserOauthAccessToken = undefined
+  hostState.lastIssuedProfileUserOauthExpiresAt = undefined
   try {
     const { clearOidcFederationCaches } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -283,15 +361,12 @@ export function describeAnthropicProfile(
 }
 
 /** densable o1_ / leftover 239 accountInfo */
-export const getAnthropicProfileAccountInfo = memoize(
-  (
-    env: NodeJS.ProcessEnv = process.env,
-  ): {
-    organizationUuid?: unknown
-    organizationName?: unknown
-    accountEmail?: unknown
-    workspaceName?: unknown
-  } | null => {
+export const getAnthropicProfileAccountInfo = memoizePerHost(
+  () => getAnthropicProfileHostState().profileAccountInfoCache,
+  next => {
+    getAnthropicProfileHostState().profileAccountInfoCache = next
+  },
+  (env: NodeJS.ProcessEnv = process.env): AnthropicProfileAccountInfo => {
     const source = getAnthropicProfileSource(env)
     if (source === null || source === 'env-quad') return null
     const dir = getAnthropicConfigDir(env)
@@ -353,28 +428,40 @@ export function isAnthropicProfileOauthExpiredError(err: unknown): boolean {
 }
 
 /** densable Vmd */
-const warnImplicitProfileSkipped = memoize((): void => {
-  logForDebugging(
-    'An Anthropic profile (~/.config/anthropic) is configured, but a claude.ai login exists — using the claude.ai login. Set ANTHROPIC_PROFILE=<name> to use the profile instead.',
-    { level: 'warn' },
-  )
-  queueMicrotask(() => {
-    logEvent('tengu_wif_implicit_profile_skipped_stored_login', {})
-  })
-})
+const warnImplicitProfileSkipped = memoizePerHost(
+  () => getAnthropicProfileHostState().warnImplicitProfileSkippedCache,
+  next => {
+    getAnthropicProfileHostState().warnImplicitProfileSkippedCache = next
+  },
+  (): void => {
+    logForDebugging(
+      'An Anthropic profile (~/.config/anthropic) is configured, but a claude.ai login exists — using the claude.ai login. Set ANTHROPIC_PROFILE=<name> to use the profile instead.',
+      { level: 'warn' },
+    )
+    queueMicrotask(() => {
+      logEvent('tengu_wif_implicit_profile_skipped_stored_login', {})
+    })
+  },
+)
 
 /** densable qmd */
-const infoUsingProfileAuth = memoize((): void => {
-  const source = getAnthropicProfileSource() ?? 'profile'
-  logForDebugging(
-    `Using Anthropic profile auth (${source}); ${
-      isProfileImplicitUserOauth()
-        ? 'a claude.ai login (/login) would take precedence over it'
-        : 'this takes precedence over any stored claude.ai login'
-    }`,
-    { level: 'info' },
-  )
-})
+const infoUsingProfileAuth = memoizePerHost(
+  () => getAnthropicProfileHostState().infoUsingProfileAuthCache,
+  next => {
+    getAnthropicProfileHostState().infoUsingProfileAuthCache = next
+  },
+  (): void => {
+    const source = getAnthropicProfileSource() ?? 'profile'
+    logForDebugging(
+      `Using Anthropic profile auth (${source}); ${
+        isProfileImplicitUserOauth()
+          ? 'a claude.ai login (/login) would take precedence over it'
+          : 'this takes precedence over any stored claude.ai login'
+      }`,
+      { level: 'info' },
+    )
+  },
+)
 
 /** densable `YH` — implicit profile skipped because stored claude.ai login. */
 export function noteImplicitProfileSkippedStoredLogin(): void {
@@ -607,20 +694,13 @@ async function writeCredentialsAtomic(
   }
 }
 
-let pendingProfileRefresh: Promise<ProfileUserOauthToken> | null = null
-
 const PROFILE_REFRESH_DRAIN_TIMEOUT_MS = 5000
 
-/**
- * Official 2.1.323 (#1984): Wait for an in-flight Console profile token renewal
- * before short-lived CLI commands (`claude plugin`, `claude mcp list`) exit, so
- * a rotated refresh token is always written atomically to disk instead of
- * signing the user out.
- */
-export async function drainPendingProfileRefresh(
+async function drainPendingProfileRefreshForState(
+  hostState: AnthropicProfileHostState,
   timeoutMs: number = PROFILE_REFRESH_DRAIN_TIMEOUT_MS,
 ): Promise<void> {
-  const inflight = pendingProfileRefresh
+  const inflight = hostState.pendingProfileRefresh
   if (!inflight) return
   await Promise.race([
     inflight.catch(() => {}),
@@ -631,31 +711,55 @@ export async function drainPendingProfileRefresh(
   ])
 }
 
-registerCleanup(() => drainPendingProfileRefresh())
-/** densable lt → next user_oauth resolve must forceRefresh through H. */
-let profileUserOauthForceRefresh = false
 /**
- * densable TokenCache.cached for user_oauth — last bearer handed to the API
- * client. Must NOT re-read credentials disk on 401 (sibling may have rotated).
+ * Official 2.1.323 (#1984): Wait for an in-flight Console profile token renewal
+ * before short-lived CLI commands (`claude plugin`, `claude mcp list`) exit, so
+ * a rotated refresh token is always written atomically to disk instead of
+ * signing the user out.
  */
-let lastIssuedProfileUserOauthAccessToken: string | undefined
-let lastIssuedProfileUserOauthExpiresAt: number | null | undefined
+export async function drainPendingProfileRefresh(
+  timeoutMs: number = PROFILE_REFRESH_DRAIN_TIMEOUT_MS,
+): Promise<void> {
+  const hostState = anthropicProfileStateByHost.peek(getBootstrapSessionHost())
+  if (!hostState) return
+  await drainPendingProfileRefreshForState(hostState, timeoutMs)
+}
+
+function ensureProfileRefreshCleanupRegistered(
+  hostState: AnthropicProfileHostState,
+): void {
+  if (hostState.profileRefreshCleanupRegistered) return
+  hostState.profileRefreshCleanupRegistered = true
+  const stateRef = new WeakRef(hostState)
+  registerCleanup(async () => {
+    const liveState = stateRef.deref()
+    if (!liveState) return
+    await drainPendingProfileRefreshForState(liveState)
+    liveState.profileRefreshCleanupRegistered = false
+  })
+}
+
+registerCleanup(() => drainPendingProfileRefresh())
 
 function rememberIssuedProfileUserOauthToken(
   token: string,
   expiresAt: number | null,
+  hostState: AnthropicProfileHostState = getAnthropicProfileHostState(),
 ): void {
-  lastIssuedProfileUserOauthAccessToken = token
-  lastIssuedProfileUserOauthExpiresAt = expiresAt
+  hostState.lastIssuedProfileUserOauthAccessToken = token
+  hostState.lastIssuedProfileUserOauthExpiresAt = expiresAt
 }
 
-function lastIssuedMemoryNeedsRefresh(): boolean {
-  if (lastIssuedProfileUserOauthAccessToken === undefined) return true
-  if (lastIssuedProfileUserOauthExpiresAt === undefined) return true
-  if (lastIssuedProfileUserOauthExpiresAt === null) return false
+function lastIssuedMemoryNeedsRefresh(
+  hostState: AnthropicProfileHostState = getAnthropicProfileHostState(),
+): boolean {
+  if (hostState.lastIssuedProfileUserOauthAccessToken === undefined) return true
+  if (hostState.lastIssuedProfileUserOauthExpiresAt === undefined) return true
+  if (hostState.lastIssuedProfileUserOauthExpiresAt === null) return false
   return (
     nowUnixSec() >=
-    lastIssuedProfileUserOauthExpiresAt - PROFILE_OAUTH_REFRESH_SKEW_SEC
+    hostState.lastIssuedProfileUserOauthExpiresAt -
+      PROFILE_OAUTH_REFRESH_SKEW_SEC
   )
 }
 
@@ -664,8 +768,10 @@ function lastIssuedMemoryNeedsRefresh(): boolean {
  * or OIDC TokenCache.cached. Never falls back to disk (sibling race).
  */
 export function getLastIssuedWifAccessToken(): string | undefined {
-  if (lastIssuedProfileUserOauthAccessToken) {
-    return lastIssuedProfileUserOauthAccessToken
+  const lastIssued =
+    getAnthropicProfileHostState().lastIssuedProfileUserOauthAccessToken
+  if (lastIssued) {
+    return lastIssued
   }
   try {
     const { peekOidcCachedAccessToken } =
@@ -690,9 +796,10 @@ export async function invalidateWifToken(
 ): Promise<void> {
   const token = failedAccessToken || getLastIssuedWifAccessToken()
   recordWifFailedAccessToken(token)
-  profileUserOauthForceRefresh = true
-  lastIssuedProfileUserOauthAccessToken = undefined
-  lastIssuedProfileUserOauthExpiresAt = undefined
+  const hostState = getAnthropicProfileHostState()
+  hostState.profileUserOauthForceRefresh = true
+  hostState.lastIssuedProfileUserOauthAccessToken = undefined
+  hostState.lastIssuedProfileUserOauthExpiresAt = undefined
   try {
     const { invalidateOidcTokenCache } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -874,27 +981,28 @@ export async function resolveProfileUserOauthAccessToken(
   env: NodeJS.ProcessEnv = process.env,
   fetchFn: ProfileFetchFn = globalThis.fetch,
 ): Promise<ProfileUserOauthToken | null> {
-  const force = profileUserOauthForceRefresh
-  if (force) profileUserOauthForceRefresh = false
+  const hostState = getAnthropicProfileHostState()
+  const force = hostState.profileUserOauthForceRefresh
+  if (force) hostState.profileUserOauthForceRefresh = false
 
   // densable TokenCache hit: return memory bearer; never clobber from disk
   // (sibling may have rotated credentials before lt records the failed bearer).
   if (
     !force &&
-    lastIssuedProfileUserOauthAccessToken &&
-    !lastIssuedMemoryNeedsRefresh()
+    hostState.lastIssuedProfileUserOauthAccessToken &&
+    !lastIssuedMemoryNeedsRefresh(hostState)
   ) {
     const loaded = loadProfileFileConfig(env)
     if (loaded === null) return null
     return {
-      token: lastIssuedProfileUserOauthAccessToken,
-      expiresAt: lastIssuedProfileUserOauthExpiresAt ?? null,
+      token: hostState.lastIssuedProfileUserOauthAccessToken,
+      expiresAt: hostState.lastIssuedProfileUserOauthExpiresAt ?? null,
       credentialsPath: loaded.credentialsPath,
     }
   }
 
   // Official: join in-flight refresh before a disk pin (cached==null path).
-  if (pendingProfileRefresh) return pendingProfileRefresh
+  if (hostState.pendingProfileRefresh) return hostState.pendingProfileRefresh
 
   const read = readProfileUserOauthAccessToken(env)
   if (read === null) return null
@@ -902,17 +1010,21 @@ export async function resolveProfileUserOauthAccessToken(
   // First observe: pin a fresh disk token. After lt, skip a bearer already
   // in failedAccessTokens (TokenCache cached==null → refresh, not re-pin).
   if (!force && !read.needsRefresh && !isWifFailedAccessToken(read.token)) {
-    rememberIssuedProfileUserOauthToken(read.token, read.expiresAt)
+    rememberIssuedProfileUserOauthToken(read.token, read.expiresAt, hostState)
     return read
   }
 
-  pendingProfileRefresh = refreshProfileUserOauthAccessToken(env, fetchFn)
+  ensureProfileRefreshCleanupRegistered(hostState)
+  const refreshPromise = refreshProfileUserOauthAccessToken(env, fetchFn)
     .then(tok => {
-      rememberIssuedProfileUserOauthToken(tok.token, tok.expiresAt)
+      rememberIssuedProfileUserOauthToken(tok.token, tok.expiresAt, hostState)
       return tok
     })
     .finally(() => {
-      pendingProfileRefresh = null
+      if (hostState.pendingProfileRefresh === refreshPromise) {
+        hostState.pendingProfileRefresh = null
+      }
     })
-  return pendingProfileRefresh
+  hostState.pendingProfileRefresh = refreshPromise
+  return refreshPromise
 }

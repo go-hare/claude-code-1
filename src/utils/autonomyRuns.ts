@@ -34,15 +34,15 @@ import {
 import { getFsImplementation } from './fsOperations.js'
 import { isProcessRunning } from './genericProcessUtils.js'
 import { logError } from './log.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 const AUTONOMY_RUNS_MAX = 200
 // Diagnostic threshold for active (queued/running) runs. Active records are
 // deliberately exempt from AUTONOMY_RUNS_MAX so a leak in finalization cannot
 // silently evict in-flight work; that exemption only makes sense if a leak is
-// loud when it appears. Crossing this threshold warns once per process so
+// loud when it appears. Crossing this threshold warns once per session so
 // operators see the divergence in logs before runs.json grows pathologically.
 const AUTONOMY_ACTIVE_RUNS_WARN_THRESHOLD = 100
-let warnedActiveRunsThresholdCrossed = false
 const AUTONOMY_RUNS_RELATIVE_PATH = join(AUTONOMY_DIR, 'runs.json')
 // Sentinel string surfaced to operators via runs.json error fields and
 // referenced literally by the HEARTBEAT.md `stale-recovery-health` task.
@@ -52,9 +52,28 @@ const AUTONOMY_RUNS_RELATIVE_PATH = join(AUTONOMY_DIR, 'runs.json')
 export const STALE_ACTIVE_RUN_ERROR_PREFIX =
   'Recovered stale active autonomy run'
 
-// Guards the legacy-block warning so it fires once per (process, runId) instead
-// of every dedup tick while a no-owner record sits there.
-const warnedLegacyBlockRunIds = new Set<string>()
+class AutonomyRunsSessionState {
+  warnedActiveRunsThresholdCrossed = false
+  // Guards the legacy-block warning so it fires once per (session, runId)
+  // instead of every dedup tick while a no-owner record sits there.
+  warnedLegacyBlockRunIds = new Set<string>()
+}
+
+const fallbackAutonomyRunsSession = { root: {} as object }
+const autonomyRunsStateBySession =
+  new RootSessionSlot<AutonomyRunsSessionState>(
+    () => new AutonomyRunsSessionState(),
+  )
+
+function getAutonomyRunsSessionState(): AutonomyRunsSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return autonomyRunsStateBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return autonomyRunsStateBySession.of(fallbackAutonomyRunsSession)
+}
 
 export type AutonomyRunStatus =
   | 'queued'
@@ -142,11 +161,12 @@ function selectPersistedAutonomyRuns(
 ): AutonomyRunRecord[] {
   const cloned = runs.map(cloneRunRecord)
   const activeCount = cloned.filter(isAutonomyRunActive).length
+  const runState = getAutonomyRunsSessionState()
   if (
-    !warnedActiveRunsThresholdCrossed &&
+    !runState.warnedActiveRunsThresholdCrossed &&
     activeCount >= AUTONOMY_ACTIVE_RUNS_WARN_THRESHOLD
   ) {
-    warnedActiveRunsThresholdCrossed = true
+    runState.warnedActiveRunsThresholdCrossed = true
     logError(
       new Error(
         `autonomy: ${activeCount} active runs exceed warn threshold ${AUTONOMY_ACTIVE_RUNS_WARN_THRESHOLD}; check for finalize leaks`,
@@ -428,6 +448,8 @@ async function persistAutonomyRunRecord(
           staleRecoveriesApplied = true
           continue
         }
+        const warnedLegacyBlockRunIds =
+          getAutonomyRunsSessionState().warnedLegacyBlockRunIds
         if (
           run.ownerProcessId === undefined &&
           !warnedLegacyBlockRunIds.has(run.runId)

@@ -44,6 +44,7 @@ import {
 } from '../../utils/logoV2Utils.js';
 import { parseUserSpecifiedModel, renderModelSetting } from '../../utils/model/model.js';
 import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
+import { getBootstrapSession, RootSessionSlot } from '../../utils/sessionRoot.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
 import { OffscreenFreeze } from '../OffscreenFreeze.js';
 import { getNativeSelectionHoldKey } from '../ScrollKeybindingHandler.js';
@@ -74,7 +75,7 @@ const APPLE_TERMINAL_ENTRANCE_NAMES: readonly ClawdAnimationSequenceName[] = ALL
   name => name !== 'turn' && name !== 'coin-hop',
 );
 
-let clawdEntranceTaken = false;
+const clawdEntranceBySession = new RootSessionSlot<{ taken: boolean }>(() => ({ taken: false }));
 
 function hasForceFirstLaunchEnv(): boolean {
   const raw = process.env.CLAUDE_CODE_FORCE_FIRST_LAUNCH;
@@ -84,12 +85,13 @@ function hasForceFirstLaunchEnv(): boolean {
 }
 
 function takeClawdEntrance(): ClawdAnimationSequenceName | undefined {
-  if (clawdEntranceTaken) return undefined;
+  const state = clawdEntranceBySession.of(getBootstrapSession());
+  if (state.taken) return undefined;
   const lastSeen = (getGlobalConfig() as GlobalConfig & { lastClawdEntranceVersion?: string }).lastClawdEntranceVersion;
   if (!hasForceFirstLaunchEnv() && !hasUnseenReleaseVersion(lastSeen)) {
     return undefined;
   }
-  clawdEntranceTaken = true;
+  state.taken = true;
   const pool = isNonAppleTerminal() ? ALL_ENTRANCE_NAMES : APPLE_TERMINAL_ENTRANCE_NAMES;
   return pool[Math.floor(Math.random() * pool.length)];
 }

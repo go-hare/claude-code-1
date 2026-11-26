@@ -11,7 +11,7 @@
 import { randomUUID } from 'crypto'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import type { ScopedMcpServerConfig } from '../services/mcp/types.js'
-import { getBootstrapSessionHost } from '../utils/sessionHost.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 
 export type SpareClaimState = 'parked' | 'claiming' | 'claimed' | 'failed'
@@ -197,20 +197,25 @@ export function markSpareClaimFailed(): void {
  * (`Mk()?Qr(nt, stdio && !chrome && !computer-use && scope!==project/local)`).
  * Connected on claim via print host `startDeferredMcpServers`.
  */
-let heldBackMcpConfigs: Record<string, ScopedMcpServerConfig> | undefined
+const spareClaimHostSlot = new HostSlot<{
+  heldBackMcpConfigs: Record<string, ScopedMcpServerConfig> | undefined
+}>(() => ({
+  heldBackMcpConfigs: undefined,
+}))
 
 export function holdBackMcpConfigsForClaim(
   configs: Record<string, ScopedMcpServerConfig>,
 ): void {
-  heldBackMcpConfigs = configs
+  spareClaimHostSlot.of(getBootstrapSessionHost()).heldBackMcpConfigs = configs
 }
 
 export function takeHeldBackMcpConfigs(): Record<
   string,
   ScopedMcpServerConfig
 > {
-  const next = heldBackMcpConfigs ?? {}
-  heldBackMcpConfigs = undefined
+  const hostState = spareClaimHostSlot.of(getBootstrapSessionHost())
+  const next = hostState.heldBackMcpConfigs ?? {}
+  hostState.heldBackMcpConfigs = undefined
   return next
 }
 

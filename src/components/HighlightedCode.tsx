@@ -6,6 +6,7 @@ import { useSettings } from '../hooks/useSettings.js';
 import { Ansi, Box, type DOMElement, measureElement, NoSelect, RawAnsi, Text, useTheme } from '@anthropic/ink';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js';
 import sliceAnsi from '../utils/sliceAnsi.js';
 import { countCharInString } from '../utils/stringUtils.js';
 import { HighlightedCodeFallback } from './HighlightedCode/Fallback.js';
@@ -57,10 +58,14 @@ function convertLeadingTabsToSpaces(content: string): string {
   return content.replace(/^\t+/gm, _ => '  '.repeat(_.length));
 }
 
-// Module-level LRU cache for ColorFile instances to avoid recreating
+// Host-scoped LRU cache for ColorFile instances to avoid recreating
 // them for the same (filePath, code) across component instances.
-const colorFileCache = new Map<string, { colorFile: ColorFileType; code: string }>();
+const colorFileCacheByHost = new HostSlot<Map<string, { colorFile: ColorFileType; code: string }>>(() => new Map());
 const COLOR_FILE_CACHE_MAX = 50;
+
+function getColorFileCache(): Map<string, { colorFile: ColorFileType; code: string }> {
+  return colorFileCacheByHost.of(getBootstrapSessionHost());
+}
 
 type Props = {
   code: string;
@@ -99,6 +104,7 @@ export function HighlightedCode({
     }
     const normalized = convertLeadingTabsToSpaces(code);
     const cacheKey = `${filePath}\0${normalized.length}`;
+    const colorFileCache = getColorFileCache();
     const cached = colorFileCache.get(cacheKey);
     if (cached && cached.code === normalized) {
       // Move to end (most recently used)

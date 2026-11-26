@@ -4,25 +4,32 @@
  * toolUseID / requestId (permission_prompt payload.requestId).
  */
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js'
 
-const confirms = new Map<string, ToolUseConfirm>()
+const confirmsBySession = new RootSessionSlot<Map<string, ToolUseConfirm>>(
+  () => new Map(),
+)
+
+function getConfirms(): Map<string, ToolUseConfirm> {
+  return confirmsBySession.of(getBootstrapSession())
+}
 
 export function registerPermissionConfirm(item: ToolUseConfirm): void {
-  confirms.set(item.toolUseID, item)
+  getConfirms().set(item.toolUseID, item)
 }
 
 export function unregisterPermissionConfirm(toolUseID: string): void {
-  confirms.delete(toolUseID)
+  getConfirms().delete(toolUseID)
 }
 
 export function getPermissionConfirm(
   toolUseID: string,
 ): ToolUseConfirm | undefined {
-  return confirms.get(toolUseID)
+  return getConfirms().get(toolUseID)
 }
 
 export function clearPermissionConfirms(): void {
-  confirms.clear()
+  getConfirms().clear()
 }
 
 /** @deprecated tests — prefer clearPermissionConfirms */

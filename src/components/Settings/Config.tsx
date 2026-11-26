@@ -41,6 +41,7 @@ import { readFileSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { hostname } from 'os';
 import { dirname, join } from 'path';
+import { getBootstrapSession, getBootstrapSessionHost, HostSlot, RootSessionSlot } from '../../utils/sessionRoot.js';
 
 /**
  * Official 2.1.299 (#652): sync `/config` push notification toggles to the
@@ -484,7 +485,11 @@ function pluginConfigOptionLockReason(pluginId: string, key: string): string | u
   return undefined;
 }
 
-const pluginConfigPersistInFlight = new Map<string, PluginConfigOptionValue>();
+const pluginConfigPersistInFlightByHost = new HostSlot<Map<string, PluginConfigOptionValue>>(() => new Map());
+
+function getPluginConfigPersistInFlight(): Map<string, PluginConfigOptionValue> {
+  return pluginConfigPersistInFlightByHost.of(getBootstrapSessionHost());
+}
 
 function samePluginConfigValue(a: unknown, b: unknown): boolean {
   return jsonStringify(a) === jsonStringify(b);
@@ -501,6 +506,7 @@ export async function persistPluginConfigOption(
   storageV5?: unknown,
   reloadPlugins?: () => Promise<void>,
 ): Promise<ConfigSettingChange | undefined> {
+  const pluginConfigPersistInFlight = getPluginConfigPersistInFlight();
   const pluginId = getPluginStorageId(plugin);
   const next = Array.isArray(value) ? [...value] : value;
   const inflightKey = `${pluginId}\0${key}`;
@@ -1262,18 +1268,32 @@ export type AlwaysDeliverBinding = {
   set: (next: { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' } | undefined) => void;
 };
 
-let sessionAlwaysDeliverState: { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' } | undefined;
+type ConfigSessionState = {
+  sessionAlwaysDeliverState: { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' } | undefined;
+  orgMemoryReadRowSeen: boolean;
+  orgMemoryWritesRowSeen: boolean;
+};
+
+const configStateBySession = new RootSessionSlot<ConfigSessionState>(() => ({
+  sessionAlwaysDeliverState: undefined,
+  orgMemoryReadRowSeen: false,
+  orgMemoryWritesRowSeen: false,
+}));
+
+function getConfigSessionState(): ConfigSessionState {
+  return configStateBySession.of(getBootstrapSession());
+}
 
 export function getAlwaysDeliverInSessionState():
   | { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' }
   | undefined {
-  return sessionAlwaysDeliverState;
+  return getConfigSessionState().sessionAlwaysDeliverState;
 }
 
 export function setAlwaysDeliverInSessionState(
   next: { scope: 'mine' | 'anyone'; madeIn: 'bypass' | 'prompting' } | undefined,
 ): void {
-  sessionAlwaysDeliverState = next;
+  getConfigSessionState().sessionAlwaysDeliverState = next;
 }
 
 function getRemoteMessageReceiptsWithSource(): { value: 'on' | 'always' | 'off'; source: SettingSource } | undefined {
@@ -1314,13 +1334,11 @@ function isOrgMemoryWritesActive(): boolean {
   );
 }
 
-let orgMemoryReadRowSeen = false;
-let orgMemoryWritesRowSeen = false;
-
 export function resetConfigRowSeenFlagsForTesting(): void {
-  orgMemoryReadRowSeen = false;
-  orgMemoryWritesRowSeen = false;
-  sessionAlwaysDeliverState = undefined;
+  const state = getConfigSessionState();
+  state.orgMemoryReadRowSeen = false;
+  state.orgMemoryWritesRowSeen = false;
+  state.sessionAlwaysDeliverState = undefined;
 }
 
 function getClawdFileProgressNotice(settingsData: SettingsJson | undefined): string | undefined {
@@ -1807,8 +1825,10 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[]; dialogFieldRows: Se
     remoteToolServingOn;
   const clawdNotice = getClawdFileProgressNotice(settingsData);
   const projectConfig = getCurrentProjectConfig();
-  const showOrgMemoryRead = (orgMemoryReadRowSeen ||= projectConfig.orgMemoryRead === false || isOrgMemorySyncOpen());
-  const showOrgMemoryWrites = (orgMemoryWritesRowSeen ||=
+  const configSessionState = getConfigSessionState();
+  const showOrgMemoryRead = (configSessionState.orgMemoryReadRowSeen ||=
+    projectConfig.orgMemoryRead === false || isOrgMemorySyncOpen());
+  const showOrgMemoryWrites = (configSessionState.orgMemoryWritesRowSeen ||=
     isOrgMemoryWritesEligible() || projectConfig.orgMemoryWrites === true);
   const remoteReceiptsInfo = getRemoteMessageReceiptsWithSource();
   const showRemoteMessageReceipts =

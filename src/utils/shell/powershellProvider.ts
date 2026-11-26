@@ -17,6 +17,7 @@ import { getErrnoCode } from '../errors.js'
 import { getPlatform } from '../platform.js'
 import { buildPowerShellInvocationFlags } from '../powershellExecutionPolicy.js'
 import { getSessionEnvVars } from '../sessionEnvVars.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import type { ShellProvider } from './shellProvider.js'
 
@@ -334,7 +335,7 @@ export type PowerShellHeadStartState = {
   commandsEnded: number
 }
 
-const headStartState: PowerShellHeadStartState = {
+const headStartStateByHost = new HostSlot<PowerShellHeadStartState>(() => ({
   isPowerShellHeadStartAsked: false,
   lastPowerShellLaunch: undefined,
   waitingPowerShell: undefined,
@@ -344,6 +345,10 @@ const headStartState: PowerShellHeadStartState = {
   idleWaitingPowerShells: 0,
   powerShellStartsToSkip: 0,
   commandsEnded: 0,
+}))
+
+function getHeadStartState(): PowerShellHeadStartState {
+  return headStartStateByHost.of(getBootstrapSessionHost())
 }
 
 /** Official `uSe`: stable JSON fingerprint of launch env excluding volatile keys. */
@@ -436,7 +441,7 @@ export class WaitingPowerShell {
     handOverFile: { path: string; key: string; fd: number },
     launch: WaitingPowerShellLaunch,
     child: ChildProcess,
-    state: PowerShellHeadStartState = headStartState,
+    state: PowerShellHeadStartState = getHeadStartState(),
     now: () => number = Date.now,
   ) {
     this.taskId = taskId
@@ -637,6 +642,7 @@ export class WaitingPowerShell {
 export function recordPowerShellCommandLaunch(
   launch: WaitingPowerShellLaunch,
 ): void {
+  const headStartState = getHeadStartState()
   const prev = headStartState.lastPowerShellLaunch
   if (prev !== undefined && waitingPowerShellLaunchesMatch(prev, launch)) {
     headStartState.unfitWaitingPowerShells = 0
@@ -645,7 +651,7 @@ export function recordPowerShellCommandLaunch(
 }
 
 export function markPowerShellCommandEnded(): void {
-  headStartState.commandsEnded++
+  getHeadStartState().commandsEnded++
 }
 
 export type StartWaitingPowerShellOptions = {
@@ -662,6 +668,7 @@ export type StartWaitingPowerShellOptions = {
 export async function startWaitingPowerShell(
   opts: StartWaitingPowerShellOptions,
 ): Promise<boolean> {
+  const headStartState = getHeadStartState()
   headStartState.isPowerShellHeadStartAsked = true
   const platform = opts.platform ?? getPlatform()
   if (platform !== 'windows') return false
@@ -767,6 +774,7 @@ export async function takeWaitingPowerShell(
   cwd: string,
   signal?: AbortSignal,
 ): Promise<WaitingPowerShell | undefined> {
+  const headStartState = getHeadStartState()
   const waiting = headStartState.waitingPowerShell
   if (waiting === undefined || !waiting.isIn(cwd)) return undefined
   headStartState.waitingPowerShell = undefined
@@ -786,10 +794,11 @@ export async function takeWaitingPowerShell(
 }
 
 export function getWaitingPowerShellState(): Readonly<PowerShellHeadStartState> {
-  return headStartState
+  return getHeadStartState()
 }
 
 export async function resetWaitingPowerShellForTesting(): Promise<void> {
+  const headStartState = getHeadStartState()
   const existing = headStartState.waitingPowerShell
   headStartState.waitingPowerShell = undefined
   await existing?.discard('unused')

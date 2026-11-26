@@ -9,6 +9,7 @@ import {
 } from 'fs'
 import { basename, join, resolve } from 'path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import type {
   ProjectContextSource,
   SkillLearningProjectContext,
@@ -54,14 +55,27 @@ export function getProjectContextPath(projectId: string): string {
 // "无淘汰机制（非 GB 级主因）" — this fix closes that gap.
 const PROJECT_CONTEXT_CACHE_MAX = 32
 const PROJECT_CONTEXT_CACHE_TRIM_TO = 24
-const contextCache = new Map<string, SkillLearningProjectContext>()
 const PERSIST_INTERVAL_MS = 5 * 60 * 1000
-let lastPersistAt = 0
+
+type ProjectContextHostState = {
+  contextCache: Map<string, SkillLearningProjectContext>
+  lastPersistAt: number
+}
+
+const projectContextHostSlot = new HostSlot<ProjectContextHostState>(() => ({
+  contextCache: new Map<string, SkillLearningProjectContext>(),
+  lastPersistAt: 0,
+}))
+
+function getProjectContextHostState(): ProjectContextHostState {
+  return projectContextHostSlot.of(getBootstrapSessionHost())
+}
 
 function setProjectContextCache(
   cwd: string,
   ctx: SkillLearningProjectContext,
 ): void {
+  const { contextCache } = getProjectContextHostState()
   if (contextCache.has(cwd)) contextCache.delete(cwd)
   contextCache.set(cwd, ctx)
   if (contextCache.size > PROJECT_CONTEXT_CACHE_MAX) {
@@ -78,6 +92,8 @@ function setProjectContextCache(
 export function resolveProjectContext(
   cwd = process.cwd(),
 ): SkillLearningProjectContext {
+  const state = getProjectContextHostState()
+  const { contextCache } = state
   const cached = contextCache.get(cwd)
   if (cached) {
     // Refresh insertion order so frequently-accessed cwds survive eviction.
@@ -87,8 +103,8 @@ export function resolveProjectContext(
     // reasonably fresh, but throttle the write so it doesn't fire on every
     // tool call.
     const now = Date.now()
-    if (now - lastPersistAt > PERSIST_INTERVAL_MS) {
-      lastPersistAt = now
+    if (now - state.lastPersistAt > PERSIST_INTERVAL_MS) {
+      state.lastPersistAt = now
       persistProjectContext(cached)
     }
     return cached
@@ -96,7 +112,7 @@ export function resolveProjectContext(
   const resolved = resolveContext(cwd)
   setProjectContextCache(cwd, resolved)
   persistProjectContext(resolved)
-  lastPersistAt = Date.now()
+  state.lastPersistAt = Date.now()
   return resolved
 }
 

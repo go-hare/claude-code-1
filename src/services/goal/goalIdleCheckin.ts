@@ -21,6 +21,11 @@ import {
 } from '../../utils/messageQueueManager.js'
 import { wrapInSystemReminder } from '../../utils/messages.js'
 import { logForDebugging } from '../../utils/debug.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
 import { logEvent } from '../analytics/index.js'
 import {
   escapeGoalCheckinXml,
@@ -91,12 +96,21 @@ export type GoalIdleCheckinContext = {
   nowMs?: () => number
 }
 
-let pendingGoalIdleCheckin: ReturnType<typeof setTimeout> | undefined
+const pendingGoalIdleCheckinSlot = new RootSessionSlot<{
+  timer: ReturnType<typeof setTimeout> | undefined
+}>(() => ({ timer: undefined }))
+
+function getPendingGoalIdleCheckinSlot(): {
+  timer: ReturnType<typeof setTimeout> | undefined
+} {
+  return pendingGoalIdleCheckinSlot.of(getBootstrapSession())
+}
 
 function clearPendingTimerOnly(): void {
-  if (pendingGoalIdleCheckin !== undefined) {
-    clearTimeout(pendingGoalIdleCheckin)
-    pendingGoalIdleCheckin = undefined
+  const slot = getPendingGoalIdleCheckinSlot()
+  if (slot.timer !== undefined) {
+    clearTimeout(slot.timer)
+    slot.timer = undefined
   }
 }
 
@@ -110,13 +124,13 @@ export function replacePendingGoalIdleCheckin(
   // densable hygiene: always clear the prior timer before replacing so callers
   // cannot leak a deferred fire when they forget cancelPendingGoalIdleCheckin.
   clearPendingTimerOnly()
-  pendingGoalIdleCheckin = timer
+  getPendingGoalIdleCheckinSlot().timer = timer
 }
 
 export function getPendingGoalIdleCheckin():
   | ReturnType<typeof setTimeout>
   | undefined {
-  return pendingGoalIdleCheckin
+  return getPendingGoalIdleCheckinSlot().timer
 }
 
 /** densable Yht — queued idle check-in still waiting to drain. */
@@ -168,12 +182,21 @@ function defaultHasQueued(pred: (cmd: QueuedCommand) => boolean): boolean {
 }
 
 function scheduleFire(ctx: GoalIdleCheckinContext, delayMs: number): void {
+  const slot = getPendingGoalIdleCheckinSlot()
+  const sessionRef = new WeakRef(getBootstrapSession().root)
   const timer = setTimeout(() => {
-    pendingGoalIdleCheckin = undefined
-    fireGoalIdleCheckin(ctx)
+    if (slot.timer === timer) {
+      slot.timer = undefined
+    }
+    const targetSession = sessionRef.deref()
+    if (targetSession !== undefined) {
+      runWithSession(targetSession, () => fireGoalIdleCheckin(ctx))
+    } else {
+      fireGoalIdleCheckin(ctx)
+    }
   }, delayMs)
   timer.unref()
-  pendingGoalIdleCheckin = timer
+  slot.timer = timer
 }
 
 /**

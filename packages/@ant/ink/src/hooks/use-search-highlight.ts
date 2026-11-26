@@ -1,7 +1,7 @@
 import { useContext, useMemo } from 'react'
 import StdinContext from '../components/StdinContext.js'
 import type { DOMElement } from '../core/dom.js'
-import instances from '../core/instances.js'
+import { Ns } from '../core/instances.js'
 import type { MatchPosition } from '../core/render-to-screen.js'
 
 /**
@@ -35,7 +35,7 @@ export function useSearchHighlight(): {
   ) => void
 } {
   useContext(StdinContext) // anchor to App subtree for hook rules
-  const ink = instances.get(process.stdout)
+  const ink = Ns().get(process.stdout)
   return useMemo(() => {
     if (!ink) {
       return {

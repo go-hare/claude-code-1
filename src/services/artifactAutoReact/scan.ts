@@ -10,6 +10,12 @@
  */
 import { createHash } from 'crypto'
 import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
+import {
   CONSECUTIVE_AUTO_BREAKER,
   FAST_ACK_TEXT,
   PIPELINE_DENIAL_CAP,
@@ -130,18 +136,25 @@ export type ScanDeps = {
   }) => Promise<'edited' | 'unavailable' | 'skipped' | 'timed_out'>
 }
 
-let scanDeps: ScanDeps = {}
+const scanDepsHostSlot = new HostSlot<{ scanDeps: ScanDeps }>(() => ({
+  scanDeps: {},
+}))
+
+function getScanHostState(): { scanDeps: ScanDeps } {
+  return scanDepsHostSlot.of(getBootstrapSessionHost())
+}
 
 export function setArtifactScanDeps(deps: ScanDeps): void {
-  scanDeps = { ...scanDeps, ...deps }
+  const state = getScanHostState()
+  state.scanDeps = { ...state.scanDeps, ...deps }
 }
 
 export function resetArtifactScanDepsForTests(): void {
-  scanDeps = {}
+  getScanHostState().scanDeps = {}
 }
 
 export function getArtifactScanDeps(): Readonly<ScanDeps> {
-  return scanDeps
+  return getScanHostState().scanDeps
 }
 
 type WakeSlot = {
@@ -234,11 +247,22 @@ export function scheduleCommentScan(args: WakeArgs): void {
   }
   slot.lastWakeArgs = args
 
+  const capturedSession = getActiveSessionFromAls()
   const fireLatest = (): void => {
-    slot.coalesceTimer = undefined
-    // Gold VTm closes over the armed wake; portable latest-wins so a
-    // non-kick that only wrote lastWakeArgs is not dropped.
-    void runUPw(slot.lastWakeArgs ?? args)
+    const run = (): void => {
+      slot.coalesceTimer = undefined
+      // Gold VTm closes over the armed wake; portable latest-wins so a
+      // non-kick that only wrote lastWakeArgs is not dropped.
+      void runUPw(slot.lastWakeArgs ?? args)
+    }
+    if (
+      capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+    ) {
+      runWithSession(capturedSession, run)
+    } else {
+      run()
+    }
   }
 
   if (slot.coalesceTimer || getArtifactScanState(args.slug).scanning) {
@@ -535,6 +559,7 @@ export async function zPw(input: {
   })
 
   // densable editCapable — optional aDw/lDw host; tip does not invent HTML rewrite
+  const scanDeps = getScanHostState().scanDeps
   if (
     o.editCapable === true &&
     o.claudeActivated === true &&
@@ -629,6 +654,7 @@ export async function runAutoReplyPipeline(input: {
     return
   }
 
+  const scanDeps = getScanHostState().scanDeps
   const mode = scanDeps.getPermissionMode?.() ?? 'default'
   if (mode === 'plan') {
     l.lastProbeAllowed = false

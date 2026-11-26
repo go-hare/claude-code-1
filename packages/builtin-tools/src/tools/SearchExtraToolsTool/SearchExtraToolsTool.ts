@@ -1,10 +1,14 @@
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import memoize from 'lodash-es/memoize.js'
 import { z } from 'zod/v4'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+import type { SearchExtraToolsResult } from 'src/services/searchExtraTools/toolIndex.js'
+import {
+  getToolIndex,
+  searchTools,
+} from 'src/services/searchExtraTools/toolIndex.js'
 import {
   buildTool,
   findToolByName,
@@ -14,18 +18,14 @@ import {
 } from 'src/Tool.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
-import { escapeRegExp } from 'src/utils/stringUtils.js'
 import { isSearchExtraToolsEnabledOptimistic } from 'src/utils/searchExtraTools.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
+import { escapeRegExp } from 'src/utils/stringUtils.js'
 import {
   getPrompt,
   isDeferredTool,
   SEARCH_EXTRA_TOOLS_TOOL_NAME,
 } from './prompt.js'
-import {
-  getToolIndex,
-  searchTools,
-} from 'src/services/searchExtraTools/toolIndex.js'
-import type { SearchExtraToolsResult } from 'src/services/searchExtraTools/toolIndex.js'
 
 const KEYWORD_WEIGHT = Number(
   process.env.SEARCH_EXTRA_TOOLS_WEIGHT_KEYWORD ?? '0.4',
@@ -64,8 +64,38 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
 
-// Track deferred tool names to detect when cache should be cleared
-let cachedDeferredToolNames: string | null = null
+type SearchExtraToolsHostState = {
+  cachedDeferredToolNames: string | null
+  descriptionCache: Map<string, Promise<string>>
+}
+
+const fallbackSearchExtraToolsHost: object = {}
+
+function getActiveSearchExtraToolsHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackSearchExtraToolsHost
+}
+
+const searchExtraToolsHostSlot = new HostSlot<SearchExtraToolsHostState>(
+  () => ({
+    cachedDeferredToolNames: null,
+    descriptionCache: new Map<string, Promise<string>>(),
+  }),
+)
+
+function getSearchExtraToolsHostState(): SearchExtraToolsHostState {
+  return searchExtraToolsHostSlot.of(getActiveSearchExtraToolsHost())
+}
 
 /**
  * Get a cache key representing the current set of deferred tools.
@@ -77,49 +107,79 @@ function getDeferredToolsCacheKey(deferredTools: Tools): string {
     .join(',')
 }
 
+type HostMemoizedDescriptionFn = ((
+  toolName: string,
+  tools: Tools,
+) => Promise<string>) & {
+  cache: Map<string, Promise<string>>
+}
+
+async function computeToolDescription(
+  toolName: string,
+  tools: Tools,
+): Promise<string> {
+  const tool = findToolByName(tools, toolName)
+  if (!tool) {
+    return ''
+  }
+  return tool.prompt({
+    getToolPermissionContext: async () => ({
+      mode: 'default' as const,
+      additionalWorkingDirectories: new Map(),
+      alwaysAllowRules: {},
+      alwaysDenyRules: {},
+      alwaysAskRules: {},
+      isBypassPermissionsModeAvailable: false,
+    }),
+    tools,
+    agents: [],
+  })
+}
+
 /**
- * Get tool description, memoized by tool name.
+ * Get tool description, memoized per SessionHost by tool name.
  * Used for keyword search scoring.
  */
-const getToolDescriptionMemoized = memoize(
-  async (toolName: string, tools: Tools): Promise<string> => {
-    const tool = findToolByName(tools, toolName)
-    if (!tool) {
-      return ''
+export const getToolDescriptionMemoized: HostMemoizedDescriptionFn = (() => {
+  const fn = ((toolName: string, tools: Tools): Promise<string> => {
+    const cache = getSearchExtraToolsHostState().descriptionCache
+    const cached = cache.get(toolName)
+    if (cached !== undefined) {
+      return cached
     }
-    return tool.prompt({
-      getToolPermissionContext: async () => ({
-        mode: 'default' as const,
-        additionalWorkingDirectories: new Map(),
-        alwaysAllowRules: {},
-        alwaysDenyRules: {},
-        alwaysAskRules: {},
-        isBypassPermissionsModeAvailable: false,
-      }),
-      tools,
-      agents: [],
-    })
-  },
-  (toolName: string) => toolName,
-)
+    const pending = computeToolDescription(toolName, tools)
+    cache.set(toolName, pending)
+    return pending
+  }) as HostMemoizedDescriptionFn
+  Object.defineProperty(fn, 'cache', {
+    configurable: true,
+    enumerable: true,
+    get(): Map<string, Promise<string>> {
+      return getSearchExtraToolsHostState().descriptionCache
+    },
+  })
+  return fn
+})()
 
 /**
  * Invalidate the description cache if deferred tools have changed.
  */
 function maybeInvalidateCache(deferredTools: Tools): void {
+  const state = getSearchExtraToolsHostState()
   const currentKey = getDeferredToolsCacheKey(deferredTools)
-  if (cachedDeferredToolNames !== currentKey) {
+  if (state.cachedDeferredToolNames !== currentKey) {
     logForDebugging(
       `SearchExtraToolsTool: cache invalidated - deferred tools changed`,
     )
-    getToolDescriptionMemoized.cache.clear?.()
-    cachedDeferredToolNames = currentKey
+    getToolDescriptionMemoized.cache.clear()
+    state.cachedDeferredToolNames = currentKey
   }
 }
 
 export function clearSearchExtraToolsDescriptionCache(): void {
-  getToolDescriptionMemoized.cache.clear?.()
-  cachedDeferredToolNames = null
+  const state = getSearchExtraToolsHostState()
+  getToolDescriptionMemoized.cache.clear()
+  state.cachedDeferredToolNames = null
 }
 
 /**

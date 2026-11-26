@@ -43,6 +43,12 @@ import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
 } from './model/providers.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+} from './sessionRoot.js'
 import { jsonStringify } from './slowOperations.js'
 import { zodToJsonSchema } from './zodToJsonSchema.js'
 
@@ -261,35 +267,51 @@ export function shouldDeferToolForSearch(tool: Tool): boolean {
   return isDeferredTool(tool)
 }
 
-const getDeferredToolTokenCount = memoize(
-  async (
-    tools: Tools,
-    getToolPermissionContext: () => Promise<ToolPermissionContext>,
-    agents: AgentDefinition[],
-    model: string,
-  ): Promise<number | null> => {
-    const deferredTools = tools.filter(t => shouldDeferToolForSearch(t))
-    if (deferredTools.length === 0) return 0
+const deferredToolTokenCountByHost = new HostSlot(() =>
+  memoize(
+    async (
+      tools: Tools,
+      getToolPermissionContext: () => Promise<ToolPermissionContext>,
+      agents: AgentDefinition[],
+      model: string,
+    ): Promise<number | null> => {
+      const deferredTools = tools.filter(t => shouldDeferToolForSearch(t))
+      if (deferredTools.length === 0) return 0
 
-    try {
-      const total = await countToolDefinitionTokens(
-        deferredTools,
-        getToolPermissionContext,
-        { activeAgents: agents, allAgents: agents },
-        model,
-      )
-      if (total === 0) return null // API unavailable
-      return Math.max(0, total - TOOL_TOKEN_COUNT_OVERHEAD)
-    } catch {
-      return null // Fall back to char heuristic
-    }
-  },
-  (tools: Tools) =>
-    tools
-      .filter(t => shouldDeferToolForSearch(t))
-      .map(t => t.name)
-      .join(','),
+      try {
+        const total = await countToolDefinitionTokens(
+          deferredTools,
+          getToolPermissionContext,
+          { activeAgents: agents, allAgents: agents },
+          model,
+        )
+        if (total === 0) return null // API unavailable
+        return Math.max(0, total - TOOL_TOKEN_COUNT_OVERHEAD)
+      } catch {
+        return null // Fall back to char heuristic
+      }
+    },
+    (tools: Tools) =>
+      tools
+        .filter(t => shouldDeferToolForSearch(t))
+        .map(t => t.name)
+        .join(','),
+  ),
 )
+
+function getDeferredToolTokenCount(
+  tools: Tools,
+  getToolPermissionContext: () => Promise<ToolPermissionContext>,
+  agents: AgentDefinition[],
+  model: string,
+): Promise<number | null> {
+  return deferredToolTokenCountByHost.of(getBootstrapSessionHost())(
+    tools,
+    getToolPermissionContext,
+    agents,
+    model,
+  )
+}
 
 /**
  * Tool search mode. Determines how densable-TX deferred tools are surfaced:
@@ -493,23 +515,35 @@ export function shouldKeepToolSearchOnRefresh(
   )
 }
 
-let autoToolSearchLatched = false
-let toolSearchNotAllowedSessionLatch = false
+type ToolSearchSessionLatchState = {
+  autoToolSearchLatched: boolean
+  toolSearchNotAllowedSessionLatch: boolean
+}
+
+const toolSearchSessionLatchesSlot =
+  new RootSessionSlot<ToolSearchSessionLatchState>(() => ({
+    autoToolSearchLatched: false,
+    toolSearchNotAllowedSessionLatch: false,
+  }))
+
+function getToolSearchSessionLatches(): ToolSearchSessionLatchState {
+  return toolSearchSessionLatchesSlot.of(getBootstrapSession())
+}
 
 export function resetAutoToolSearchLatch(): void {
-  autoToolSearchLatched = false
+  getToolSearchSessionLatches().autoToolSearchLatched = false
 }
 
 export function isToolSearchSessionLatchedOff(): boolean {
-  return toolSearchNotAllowedSessionLatch
+  return getToolSearchSessionLatches().toolSearchNotAllowedSessionLatch
 }
 
 export function latchToolSearchOffForSession(): void {
-  toolSearchNotAllowedSessionLatch = true
+  getToolSearchSessionLatches().toolSearchNotAllowedSessionLatch = true
 }
 
 export function resetToolSearchSessionLatch(): void {
-  toolSearchNotAllowedSessionLatch = false
+  getToolSearchSessionLatches().toolSearchNotAllowedSessionLatch = false
 }
 
 export async function isSearchExtraToolsEnabled(
@@ -560,7 +594,8 @@ export async function isSearchExtraToolsEnabled(
     return false
   }
 
-  if (toolSearchNotAllowedSessionLatch) {
+  const sessionLatches = getToolSearchSessionLatches()
+  if (sessionLatches.toolSearchNotAllowedSessionLatch) {
     logForDebugging(
       `Tool search disabled${source ? ` (${source})` : ''}: session latched off after tool_reference refusal.`,
     )
@@ -608,11 +643,12 @@ export async function isSearchExtraToolsEnabled(
     !toolAvailable &&
     !shouldKeepToolSearchOnRefresh(model, {
       toolSearchToolFilteredOut: true,
-      toolPoolRefreshes: options?.toolPoolRefreshes ?? autoToolSearchLatched,
+      toolPoolRefreshes:
+        options?.toolPoolRefreshes ?? sessionLatches.autoToolSearchLatched,
       aheadOfRequest: false,
       hasDeclaredTools:
         options?.recordedToolNames?.has(SEARCH_EXTRA_TOOLS_TOOL_NAME) ||
-        (source === 'query' && autoToolSearchLatched),
+        (source === 'query' && sessionLatches.autoToolSearchLatched),
     })
   ) {
     logForDebugging(
@@ -640,7 +676,7 @@ export async function isSearchExtraToolsEnabled(
     case 'tst-auto': {
       if (
         heldDecision === true ||
-        (source === 'query' && autoToolSearchLatched)
+        (source === 'query' && sessionLatches.autoToolSearchLatched)
       ) {
         logForDebugging(
           'Auto tool search enabled: this conversation already declared ToolSearch',
@@ -658,7 +694,7 @@ export async function isSearchExtraToolsEnabled(
 
       if (enabled) {
         if (source === 'query') {
-          autoToolSearchLatched = true
+          sessionLatches.autoToolSearchLatched = true
         }
         logForDebugging(
           `Auto tool search enabled: ${debugDescription}` +

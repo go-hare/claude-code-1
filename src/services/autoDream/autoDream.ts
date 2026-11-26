@@ -27,6 +27,13 @@ import { logEvent } from '../analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { isAutoMemoryEnabled, getAutoMemPath } from '../../memdir/paths.js'
 import { isAutoDreamEnabled } from './config.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  hasActiveSessionAls,
+  RootSessionSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
 import { getProjectDir } from '../../utils/sessionPaths.js'
 import {
   getOriginalCwd,
@@ -109,169 +116,273 @@ function isForced(): boolean {
 
 type AppendSystemMessageFn = NonNullable<ToolUseContext['appendSystemMessage']>
 
-let runner:
-  | ((
-      context: REPLHookContext,
-      appendSystemMessage?: AppendSystemMessageFn,
-    ) => Promise<void>)
-  | null = null
+export type AutoDreamStateSnapshot = {
+  lastSessionScanAt: number
+  inFlight: boolean
+}
 
-/**
- * Call once at startup (from backgroundHousekeeping alongside
- * initExtractMemories), or per-test in beforeEach for a fresh closure.
- */
-export function initAutoDream(): void {
+export type AutoDreamRunner = {
+  execute: (
+    context: REPLHookContext,
+    appendSystemMessage?: AppendSystemMessageFn,
+  ) => Promise<void>
+  getStateForTesting: () => AutoDreamStateSnapshot
+}
+
+export type AutoDreamDeps = {
+  getConfigFn?: () => AutoDreamConfig
+  isGateOpenFn?: () => boolean
+  readLastConsolidatedAtFn?: typeof readLastConsolidatedAt
+  listSessionsTouchedSinceFn?: typeof listSessionsTouchedSince
+  tryAcquireConsolidationLockFn?: typeof tryAcquireConsolidationLock
+  rollbackConsolidationLockFn?: typeof rollbackConsolidationLock
+  runForkedAgentFn?: typeof runForkedAgent
+}
+
+export function createAutoDreamRunner(deps?: AutoDreamDeps): AutoDreamRunner {
   let lastSessionScanAt = 0
+  let inFlight = false
 
-  runner = async function runAutoDream(context, appendSystemMessage) {
-    const cfg = getConfig()
-    const force = isForced()
-    if (!force && !isGateOpen()) return
-
-    // --- Time gate ---
-    let lastAt: number
+  async function runAutoDreamImpl(
+    context: REPLHookContext,
+    appendSystemMessage?: AppendSystemMessageFn,
+  ): Promise<void> {
+    if (inFlight) return
+    inFlight = true
     try {
-      lastAt = await readLastConsolidatedAt()
-    } catch (e: unknown) {
-      logForDebugging(
-        `[autoDream] readLastConsolidatedAt failed: ${(e as Error).message}`,
-      )
-      return
-    }
-    const hoursSince = (Date.now() - lastAt) / 3_600_000
-    if (!force && hoursSince < cfg.minHours) return
+      const cfg = deps?.getConfigFn ? deps.getConfigFn() : getConfig()
+      const force = isForced()
+      const gateOpen = deps?.isGateOpenFn ? deps.isGateOpenFn() : isGateOpen()
+      if (!force && !gateOpen) return
 
-    // --- Scan throttle ---
-    const sinceScanMs = Date.now() - lastSessionScanAt
-    if (!force && sinceScanMs < SESSION_SCAN_INTERVAL_MS) {
-      logForDebugging(
-        `[autoDream] scan throttle — time-gate passed but last scan was ${Math.round(sinceScanMs / 1000)}s ago`,
-      )
-      return
-    }
-    lastSessionScanAt = Date.now()
-
-    // --- Session gate ---
-    let sessionIds: string[]
-    try {
-      sessionIds = await listSessionsTouchedSince(lastAt)
-    } catch (e: unknown) {
-      logForDebugging(
-        `[autoDream] listSessionsTouchedSince failed: ${(e as Error).message}`,
-      )
-      return
-    }
-    // Exclude the current session (its mtime is always recent).
-    const currentSession = getSessionId()
-    sessionIds = sessionIds.filter(id => id !== currentSession)
-    if (!force && sessionIds.length < cfg.minSessions) {
-      logForDebugging(
-        `[autoDream] skip — ${sessionIds.length} sessions since last consolidation, need ${cfg.minSessions}`,
-      )
-      return
-    }
-
-    // --- Lock ---
-    // Under force, skip acquire entirely — use the existing mtime so
-    // kill's rollback is a no-op (rewinds to where it already is).
-    // The lock file stays untouched; next non-force turn sees it as-is.
-    let priorMtime: number | null
-    if (force) {
-      priorMtime = lastAt
-    } else {
+      // --- Time gate ---
+      let lastAt: number
       try {
-        priorMtime = await tryAcquireConsolidationLock()
+        const readLast =
+          deps?.readLastConsolidatedAtFn ?? readLastConsolidatedAt
+        lastAt = await readLast()
       } catch (e: unknown) {
         logForDebugging(
-          `[autoDream] lock acquire failed: ${(e as Error).message}`,
+          `[autoDream] readLastConsolidatedAt failed: ${(e as Error).message}`,
         )
         return
       }
-      if (priorMtime === null) return
-    }
+      const hoursSince = (Date.now() - lastAt) / 3_600_000
+      if (!force && hoursSince < cfg.minHours) return
 
-    logForDebugging(
-      `[autoDream] firing — ${hoursSince.toFixed(1)}h since last, ${sessionIds.length} sessions to review`,
-    )
-    logEvent('tengu_auto_dream_fired', {
-      hours_since: Math.round(hoursSince),
-      sessions_since: sessionIds.length,
-    })
+      // --- Scan throttle ---
+      const sinceScanMs = Date.now() - lastSessionScanAt
+      if (!force && sinceScanMs < SESSION_SCAN_INTERVAL_MS) {
+        logForDebugging(
+          `[autoDream] scan throttle — time-gate passed but last scan was ${Math.round(sinceScanMs / 1000)}s ago`,
+        )
+        return
+      }
+      lastSessionScanAt = Date.now()
 
-    const setAppState =
-      context.toolUseContext.setAppStateForTasks ??
-      context.toolUseContext.setAppState
-    const abortController = new AbortController()
-    const taskId = registerDreamTask(setAppState, {
-      sessionsReviewing: sessionIds.length,
-      priorMtime,
-      abortController,
-    })
+      // --- Session gate ---
+      let sessionIds: string[]
+      try {
+        const listSessions =
+          deps?.listSessionsTouchedSinceFn ?? listSessionsTouchedSince
+        sessionIds = await listSessions(lastAt)
+      } catch (e: unknown) {
+        logForDebugging(
+          `[autoDream] listSessionsTouchedSince failed: ${(e as Error).message}`,
+        )
+        return
+      }
+      // Exclude the current session (its mtime is always recent).
+      const currentSession = getSessionId()
+      sessionIds = sessionIds.filter(id => id !== currentSession)
+      if (!force && sessionIds.length < cfg.minSessions) {
+        logForDebugging(
+          `[autoDream] skip — ${sessionIds.length} sessions since last consolidation, need ${cfg.minSessions}`,
+        )
+        return
+      }
 
-    try {
-      const memoryRoot = getAutoMemPath()
-      const transcriptDir = getProjectDir(getOriginalCwd())
-      // Tool constraints note goes in `extra`, not the shared prompt body —
-      // manual /dream runs in the main loop with normal permissions and this
-      // would be misleading there.
-      const extra = `
+      // --- Lock ---
+      // Under force, skip acquire entirely — use the existing mtime so
+      // kill's rollback is a no-op (rewinds to where it already is).
+      // The lock file stays untouched; next non-force turn sees it as-is.
+      let priorMtime: number | null
+      if (force) {
+        priorMtime = lastAt
+      } else {
+        try {
+          const acquireLock =
+            deps?.tryAcquireConsolidationLockFn ?? tryAcquireConsolidationLock
+          priorMtime = await acquireLock()
+        } catch (e: unknown) {
+          logForDebugging(
+            `[autoDream] lock acquire failed: ${(e as Error).message}`,
+          )
+          return
+        }
+        if (priorMtime === null) return
+      }
+
+      logForDebugging(
+        `[autoDream] firing — ${hoursSince.toFixed(1)}h since last, ${sessionIds.length} sessions to review`,
+      )
+      logEvent('tengu_auto_dream_fired', {
+        hours_since: Math.round(hoursSince),
+        sessions_since: sessionIds.length,
+      })
+
+      const setAppState =
+        context.toolUseContext.setAppStateForTasks ??
+        context.toolUseContext.setAppState
+      const abortController = new AbortController()
+      const taskId = registerDreamTask(setAppState, {
+        sessionsReviewing: sessionIds.length,
+        priorMtime,
+        abortController,
+      })
+
+      try {
+        const memoryRoot = getAutoMemPath()
+        const transcriptDir = getProjectDir(getOriginalCwd())
+        // Tool constraints note goes in `extra`, not the shared prompt body —
+        // manual /dream runs in the main loop with normal permissions and this
+        // would be misleading there.
+        const extra = `
 
 **Tool constraints for this run:** Bash is restricted to read-only commands (\`ls\`, \`find\`, \`grep\`, \`cat\`, \`stat\`, \`wc\`, \`head\`, \`tail\`, and similar). Anything that writes, redirects to a file, or modifies state will be denied. Plan your exploration with this in mind — no need to probe.
 
 Sessions since last consolidation (${sessionIds.length}):
 ${sessionIds.map(id => `- ${id}`).join('\n')}`
-      const prompt = buildConsolidationPrompt(memoryRoot, transcriptDir, extra)
+        const prompt = buildConsolidationPrompt(
+          memoryRoot,
+          transcriptDir,
+          extra,
+        )
 
-      const result = await runForkedAgent({
-        promptMessages: [createUserMessage({ content: prompt })],
-        cacheSafeParams: createCacheSafeParams(context),
-        canUseTool: createAutoMemCanUseTool(memoryRoot),
-        querySource: 'auto_dream',
-        forkLabel: 'auto_dream',
-        maxTurns: 20,
-        skipTranscript: true,
-        overrides: { abortController },
-        onMessage: makeDreamProgressWatcher(taskId, setAppState),
-      })
-
-      completeDreamTask(taskId, setAppState)
-      // Inline completion summary in the main transcript (same surface as
-      // extractMemories's "Saved N memories" message).
-      const dreamState = context.toolUseContext.getAppState().tasks?.[taskId]
-      if (
-        appendSystemMessage &&
-        isDreamTask(dreamState) &&
-        dreamState.filesTouched.length > 0
-      ) {
-        ;(appendSystemMessage as (msg: Message) => void)({
-          ...createMemorySavedMessage(dreamState.filesTouched),
-          verb: 'Improved',
+        const runFork = deps?.runForkedAgentFn ?? runForkedAgent
+        const result = await runFork({
+          promptMessages: [createUserMessage({ content: prompt })],
+          cacheSafeParams: createCacheSafeParams(context),
+          canUseTool: createAutoMemCanUseTool(memoryRoot),
+          querySource: 'auto_dream',
+          forkLabel: 'auto_dream',
+          maxTurns: 20,
+          skipTranscript: true,
+          overrides: { abortController },
+          onMessage: makeDreamProgressWatcher(taskId, setAppState),
         })
+
+        completeDreamTask(taskId, setAppState)
+        // Inline completion summary in the main transcript (same surface as
+        // extractMemories's "Saved N memories" message).
+        const dreamState = context.toolUseContext.getAppState().tasks?.[taskId]
+        if (
+          appendSystemMessage &&
+          isDreamTask(dreamState) &&
+          dreamState.filesTouched.length > 0
+        ) {
+          ;(appendSystemMessage as (msg: Message) => void)({
+            ...createMemorySavedMessage(dreamState.filesTouched),
+            verb: 'Improved',
+          })
+        }
+        logForDebugging(
+          `[autoDream] completed — cache: read=${result.totalUsage.cache_read_input_tokens} created=${result.totalUsage.cache_creation_input_tokens}`,
+        )
+        logEvent('tengu_auto_dream_completed', {
+          cache_read: result.totalUsage.cache_read_input_tokens,
+          cache_created: result.totalUsage.cache_creation_input_tokens,
+          output: result.totalUsage.output_tokens,
+          sessions_reviewed: sessionIds.length,
+        })
+      } catch (e: unknown) {
+        // If the user killed from the bg-tasks dialog, DreamTask.kill already
+        // aborted, rolled back the lock, and set status=killed. Don't overwrite
+        // or double-rollback.
+        if (abortController.signal.aborted) {
+          logForDebugging('[autoDream] aborted by user')
+          return
+        }
+        logForDebugging(`[autoDream] fork failed: ${(e as Error).message}`)
+        logEvent('tengu_auto_dream_failed', {})
+        failDreamTask(taskId, setAppState)
+        // Rewind mtime so time-gate passes again. Scan throttle is the backoff.
+        const rollbackLock =
+          deps?.rollbackConsolidationLockFn ?? rollbackConsolidationLock
+        await rollbackLock(priorMtime)
       }
-      logForDebugging(
-        `[autoDream] completed — cache: read=${result.totalUsage.cache_read_input_tokens} created=${result.totalUsage.cache_creation_input_tokens}`,
-      )
-      logEvent('tengu_auto_dream_completed', {
-        cache_read: result.totalUsage.cache_read_input_tokens,
-        cache_created: result.totalUsage.cache_creation_input_tokens,
-        output: result.totalUsage.output_tokens,
-        sessions_reviewed: sessionIds.length,
-      })
-    } catch (e: unknown) {
-      // If the user killed from the bg-tasks dialog, DreamTask.kill already
-      // aborted, rolled back the lock, and set status=killed. Don't overwrite
-      // or double-rollback.
-      if (abortController.signal.aborted) {
-        logForDebugging('[autoDream] aborted by user')
-        return
-      }
-      logForDebugging(`[autoDream] fork failed: ${(e as Error).message}`)
-      logEvent('tengu_auto_dream_failed', {})
-      failDreamTask(taskId, setAppState)
-      // Rewind mtime so time-gate passes again. Scan throttle is the backoff.
-      await rollbackConsolidationLock(priorMtime)
+    } finally {
+      inFlight = false
     }
   }
+
+  return {
+    execute: async (context, appendSystemMessage) => {
+      const capturedAlsSession = getActiveSessionFromAls()
+      if (
+        capturedAlsSession !== undefined &&
+        getActiveSessionFromAls() !== capturedAlsSession
+      ) {
+        await runWithSession(capturedAlsSession, () =>
+          runAutoDreamImpl(context, appendSystemMessage),
+        )
+        return
+      }
+      await runAutoDreamImpl(context, appendSystemMessage)
+    },
+    getStateForTesting: () => ({
+      lastSessionScanAt,
+      inFlight,
+    }),
+  }
+}
+
+type SessionAutoDreamSlot = {
+  initialized: boolean
+  runner: AutoDreamRunner
+}
+
+let globalAutoDreamInitialized = false
+let defaultAutoDreamDeps: AutoDreamDeps | undefined
+
+const autoDreamBySession = new RootSessionSlot<SessionAutoDreamSlot>(() => ({
+  initialized: false,
+  runner: createAutoDreamRunner(defaultAutoDreamDeps),
+}))
+
+/**
+ * Call once at startup (from backgroundHousekeeping alongside
+ * initExtractMemories), or per-test in beforeEach for a fresh closure.
+ */
+export function initAutoDream(deps?: AutoDreamDeps): void {
+  if (!hasActiveSessionAls()) {
+    defaultAutoDreamDeps = deps
+  }
+  const slot = autoDreamBySession.of(getBootstrapSession())
+  slot.initialized = true
+  slot.runner = createAutoDreamRunner(deps ?? defaultAutoDreamDeps)
+  if (!hasActiveSessionAls()) {
+    globalAutoDreamInitialized = true
+  }
+}
+
+export function getAutoDreamStateForTesting(): AutoDreamStateSnapshot {
+  const existing = autoDreamBySession.peek(getBootstrapSession())
+  if (!existing) {
+    return {
+      lastSessionScanAt: 0,
+      inFlight: false,
+    }
+  }
+  return existing.runner.getStateForTesting()
+}
+
+export function resetAutoDreamForTests(): void {
+  if (!hasActiveSessionAls()) {
+    globalAutoDreamInitialized = false
+    defaultAutoDreamDeps = undefined
+  }
+  autoDreamBySession.drop(getBootstrapSession())
 }
 
 /**
@@ -323,5 +434,10 @@ export async function executeAutoDream(
   context: REPLHookContext,
   appendSystemMessage?: AppendSystemMessageFn,
 ): Promise<void> {
-  await runner?.(context, appendSystemMessage)
+  const session = getBootstrapSession()
+  const existing = autoDreamBySession.peek(session)
+  if (!existing && !globalAutoDreamInitialized) return
+  const slot = existing ?? autoDreamBySession.of(session)
+  if (!slot.initialized && !globalAutoDreamInitialized) return
+  await slot.runner.execute(context, appendSystemMessage)
 }

@@ -19,7 +19,9 @@ import {
 } from '../services/analytics/index.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
+import { RootSessionSlot } from './hostSlot.js'
 import { getPerformance } from './profilerBase.js'
+import { getBootstrapSession } from './sessionRoot.js'
 import { jsonStringify } from './slowOperations.js'
 
 // Detailed profiling mode - same env var as startupProfiler
@@ -33,26 +35,35 @@ const STATSIG_SAMPLE_RATE = 0.05
 const STATSIG_LOGGING_SAMPLED =
   process.env.USER_TYPE === 'ant' || Math.random() < STATSIG_SAMPLE_RATE
 
-// Enable profiling if either detailed mode OR sampled for Statsig
-const SHOULD_PROFILE = DETAILED_PROFILING || STATSIG_LOGGING_SAMPLED
+function isDetailedProfiling(): boolean {
+  return (
+    DETAILED_PROFILING || isEnvTruthy(process.env.CLAUDE_CODE_PROFILE_STARTUP)
+  )
+}
 
-// Use a unique prefix to avoid conflicts with other profiler marks
-const MARK_PREFIX = 'headless_'
+function isStatsigSampled(): boolean {
+  return STATSIG_LOGGING_SAMPLED || process.env.USER_TYPE === 'ant'
+}
 
-// Track current turn number (auto-incremented by headlessProfilerStartTurn)
-let currentTurnNumber = -1
+function shouldProfile(): boolean {
+  return isDetailedProfiling() || isStatsigSampled()
+}
 
-/**
- * Clear all headless profiler marks from performance timeline
- */
-function clearHeadlessMarks(): void {
-  const perf = getPerformance()
-  const allMarks = perf.getEntriesByType('mark')
-  for (const mark of allMarks) {
-    if (mark.name.startsWith(MARK_PREFIX)) {
-      perf.clearMarks(mark.name)
-    }
-  }
+type HeadlessProfilerSessionState = {
+  // Track current turn number (auto-incremented by headlessProfilerStartTurn)
+  currentTurnNumber: number
+  // Per-session marks map (avoids cross-session clobbering on shared perf singleton)
+  marks: Map<string, number>
+}
+
+const headlessProfilerSessionSlot =
+  new RootSessionSlot<HeadlessProfilerSessionState>(() => ({
+    currentTurnNumber: -1,
+    marks: new Map<string, number>(),
+  }))
+
+function getHeadlessProfilerState(): HeadlessProfilerSessionState {
+  return headlessProfilerSessionSlot.of(getBootstrapSession())
 }
 
 /**
@@ -63,16 +74,19 @@ export function headlessProfilerStartTurn(): void {
   // Only profile in headless/non-interactive mode
   if (!getIsNonInteractiveSession()) return
   // Only profile if enabled
-  if (!SHOULD_PROFILE) return
+  if (!shouldProfile()) return
 
-  currentTurnNumber++
-  clearHeadlessMarks()
+  const state = getHeadlessProfilerState()
+  state.currentTurnNumber++
+  state.marks.clear()
 
   const perf = getPerformance()
-  perf.mark(`${MARK_PREFIX}turn_start`)
+  state.marks.set('turn_start', perf.now())
 
-  if (DETAILED_PROFILING) {
-    logForDebugging(`[headlessProfiler] Started turn ${currentTurnNumber}`)
+  if (isDetailedProfiling()) {
+    logForDebugging(
+      `[headlessProfiler] Started turn ${state.currentTurnNumber}`,
+    )
   }
 }
 
@@ -84,14 +98,16 @@ export function headlessProfilerCheckpoint(name: string): void {
   // Only profile in headless/non-interactive mode
   if (!getIsNonInteractiveSession()) return
   // Only profile if enabled
-  if (!SHOULD_PROFILE) return
+  if (!shouldProfile()) return
 
+  const state = getHeadlessProfilerState()
   const perf = getPerformance()
-  perf.mark(`${MARK_PREFIX}${name}`)
+  const now = perf.now()
+  state.marks.set(name, now)
 
-  if (DETAILED_PROFILING) {
+  if (isDetailedProfiling()) {
     logForDebugging(
-      `[headlessProfiler] Checkpoint: ${name} at ${perf.now().toFixed(1)}ms`,
+      `[headlessProfiler] Checkpoint: ${name} at ${now.toFixed(1)}ms`,
     )
   }
 }
@@ -104,34 +120,24 @@ export function logHeadlessProfilerTurn(): void {
   // Only log in headless mode
   if (!getIsNonInteractiveSession()) return
   // Only log if enabled
-  if (!SHOULD_PROFILE) return
+  if (!shouldProfile()) return
 
-  const perf = getPerformance()
-  const allMarks = perf.getEntriesByType('mark')
+  const state = getHeadlessProfilerState()
+  if (state.marks.size === 0) return
 
-  // Filter to only our headless marks
-  const marks = allMarks.filter(mark => mark.name.startsWith(MARK_PREFIX))
-  if (marks.length === 0) return
-
-  // Build checkpoint lookup (strip prefix for easier access)
-  const checkpointTimes = new Map<string, number>()
-  for (const mark of marks) {
-    const name = mark.name.slice(MARK_PREFIX.length)
-    checkpointTimes.set(name, mark.startTime)
-  }
-
+  const checkpointTimes = state.marks
   const turnStart = checkpointTimes.get('turn_start')
   if (turnStart === undefined) return
 
   // Compute phase durations relative to turn_start
   const metadata: Record<string, number | string | undefined> = {
-    turn_number: currentTurnNumber,
+    turn_number: state.currentTurnNumber,
   }
 
   // Time to system message from process start (only meaningful for turn 0)
   // Use absolute time since perf_hooks startTime is relative to process start
   const systemMessageTime = checkpointTimes.get('system_message_yielded')
-  if (systemMessageTime !== undefined && currentTurnNumber === 0) {
+  if (systemMessageTime !== undefined && state.currentTurnNumber === 0) {
     metadata.time_to_system_message_ms = Math.round(systemMessageTime)
   }
 
@@ -154,7 +160,7 @@ export function logHeadlessProfilerTurn(): void {
   }
 
   // Add checkpoint count for debugging
-  metadata.checkpoint_count = marks.length
+  metadata.checkpoint_count = state.marks.size
 
   // Add entrypoint for segmentation (sdk-ts, sdk-py, sdk-cli, or undefined)
   if (process.env.CLAUDE_CODE_ENTRYPOINT) {
@@ -162,7 +168,7 @@ export function logHeadlessProfilerTurn(): void {
   }
 
   // Log to Statsig if sampled
-  if (STATSIG_LOGGING_SAMPLED) {
+  if (isStatsigSampled()) {
     logEvent(
       'tengu_headless_latency',
       metadata as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -170,9 +176,9 @@ export function logHeadlessProfilerTurn(): void {
   }
 
   // Log detailed output if CLAUDE_CODE_PROFILE_STARTUP=1
-  if (DETAILED_PROFILING) {
+  if (isDetailedProfiling()) {
     logForDebugging(
-      `[headlessProfiler] Turn ${currentTurnNumber} metrics: ${jsonStringify(metadata)}`,
+      `[headlessProfiler] Turn ${state.currentTurnNumber} metrics: ${jsonStringify(metadata)}`,
     )
   }
 }

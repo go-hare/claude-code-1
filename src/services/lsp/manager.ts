@@ -3,6 +3,11 @@ import { isBareMode } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
 import {
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+} from '../../utils/sessionHost.js'
+import {
   createLSPServerManager,
   type LSPServerManager,
 } from './LSPServerManager.js'
@@ -14,41 +19,66 @@ import { registerLSPNotificationHandlers } from './passiveFeedback.js'
 type InitializationState = 'not-started' | 'pending' | 'success' | 'failed'
 
 /**
- * Global singleton instance of the LSP server manager.
- * Initialized during Claude Code startup.
+ * Per-host LSP state (`HostSlot` on `getBootstrapSessionHost()` in official 2.1.331):
+ * - `lspManagerInstance`: LSPServerManager instance for this host
+ * - `initializationState` / `initializationError` / `initializationGeneration` / `initializationPromise`
+ * - `everConnectedLatch`: sticky latch (`hasEverConnected` / GUr) per host so mid-session
+ *   reconnect does not flip toolSchemasChanged → tengu_prompt_cache_break.
  */
-let lspManagerInstance: LSPServerManager | undefined
+type LspHostState = {
+  lspManagerInstance: LSPServerManager | undefined
+  initializationState: InitializationState
+  initializationError: Error | undefined
+  initializationGeneration: number
+  initializationPromise: Promise<void> | undefined
+  everConnectedLatch: boolean
+}
+
+const fallbackLspHost: object = {}
+
+function getActiveLspHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackLspHost
+}
+
+const liveLspStates = new Set<WeakRef<LspHostState>>()
+
+const lspHostSlot = new HostSlot<LspHostState>(() => {
+  if (liveLspStates.size > 64) {
+    for (const ref of liveLspStates) {
+      if (ref.deref() === undefined) {
+        liveLspStates.delete(ref)
+      }
+    }
+  }
+  const state: LspHostState = {
+    lspManagerInstance: undefined,
+    initializationState: 'not-started',
+    initializationError: undefined,
+    initializationGeneration: 0,
+    initializationPromise: undefined,
+    everConnectedLatch: false,
+  }
+  liveLspStates.add(new WeakRef(state))
+  return state
+})
+
+function getLspHostState(): LspHostState {
+  return lspHostSlot.of(getActiveLspHost())
+}
 
 /**
- * Current initialization state
- */
-let initializationState: InitializationState = 'not-started'
-
-/**
- * Error from last initialization attempt, if any
- */
-let initializationError: Error | undefined
-
-/**
- * Generation counter to prevent stale initialization promises from updating state
- */
-let initializationGeneration = 0
-
-/**
- * Promise that resolves when initialization completes (success or failure)
- */
-let initializationPromise: Promise<void> | undefined
-
-/**
- * Sticky latch (densable SEA `hasEverConnected` / GUr): once any non-error LSP
- * server has been observed connected, stays true for the process lifetime even
- * across disconnect/reinitialize. Keeps LSPTool.isEnabled stable so mid-session
- * reconnect does not flip toolSchemasChanged → tengu_prompt_cache_break.
- */
-let everConnectedLatch = false
-
-/**
- * Get the singleton LSP server manager instance.
+ * Get the host's LSP server manager instance.
  * Returns undefined if not yet initialized, initialization failed, or still pending.
  *
  * Callers should check for undefined and handle gracefully, as initialization happens
@@ -56,11 +86,12 @@ let everConnectedLatch = false
  * distinguish between pending, failed, and not-started states.
  */
 export function getLspServerManager(): LSPServerManager | undefined {
+  const state = getLspHostState()
   // Don't return a broken instance if initialization failed
-  if (initializationState === 'failed') {
+  if (state.initializationState === 'failed') {
     return undefined
   }
-  return lspManagerInstance
+  return state.lspManagerInstance
 }
 
 /**
@@ -73,16 +104,17 @@ export function getInitializationStatus():
   | { status: 'pending' }
   | { status: 'success' }
   | { status: 'failed'; error: Error } {
-  if (initializationState === 'failed') {
+  const state = getLspHostState()
+  if (state.initializationState === 'failed') {
     return {
       status: 'failed',
-      error: initializationError || new Error('Initialization failed'),
+      error: state.initializationError || new Error('Initialization failed'),
     }
   }
-  if (initializationState === 'not-started') {
+  if (state.initializationState === 'not-started') {
     return { status: 'not-started' }
   }
-  if (initializationState === 'pending') {
+  if (state.initializationState === 'pending') {
     return { status: 'pending' }
   }
   return { status: 'success' }
@@ -93,7 +125,8 @@ export function getInitializationStatus():
  * densable SEA `isConnected` / ZMA — not used for LSPTool.isEnabled.
  */
 export function isLspConnected(): boolean {
-  if (initializationState === 'failed') return false
+  const state = getLspHostState()
+  if (state.initializationState === 'failed') return false
   const manager = getLspServerManager()
   if (!manager) return false
   const servers = manager.getAllServers()
@@ -110,10 +143,11 @@ export function isLspConnected(): boolean {
  * completes with zero servers and no config load failure (densable 243 #28).
  */
 export function hasEverConnected(): boolean {
-  if (!everConnectedLatch && isLspConnected()) {
-    everConnectedLatch = true
+  const state = getLspHostState()
+  if (!state.everConnectedLatch && isLspConnected()) {
+    state.everConnectedLatch = true
   }
-  return everConnectedLatch
+  return state.everConnectedLatch
 }
 
 /**
@@ -133,16 +167,17 @@ export function shouldDeferLspTool(tool: { isLsp?: boolean }): boolean {
 }
 
 /**
- * Test-only: clear singleton + sticky latch so *235* unit tests can start fresh.
- * densable SEA has no reset; process-lifetime latch is the product behavior.
+ * Test-only: clear host state + sticky latch so *235* unit tests can start fresh.
+ * densable SEA has no reset; host-lifetime latch is the product behavior.
  */
 export function resetLspManagerForTests(): void {
-  lspManagerInstance = undefined
-  initializationState = 'not-started'
-  initializationError = undefined
-  initializationPromise = undefined
-  initializationGeneration++
-  everConnectedLatch = false
+  const state = getLspHostState()
+  state.lspManagerInstance = undefined
+  state.initializationState = 'not-started'
+  state.initializationError = undefined
+  state.initializationPromise = undefined
+  state.initializationGeneration++
+  state.everConnectedLatch = false
 }
 
 /**
@@ -153,15 +188,16 @@ export function setLspManagerForTests(opts: {
   status?: InitializationState
   error?: Error
 }): void {
+  const state = getLspHostState()
   if ('manager' in opts) {
-    lspManagerInstance = opts.manager
+    state.lspManagerInstance = opts.manager
   }
   if (opts.status !== undefined) {
-    initializationState = opts.status
+    state.initializationState = opts.status
     if (opts.status !== 'failed') {
-      initializationError = undefined
+      state.initializationError = undefined
     } else if (opts.error) {
-      initializationError = opts.error
+      state.initializationError = opts.error
     }
   }
 }
@@ -176,21 +212,25 @@ export function setLspManagerForTests(opts: {
  * @returns Promise that resolves when initialization is complete
  */
 export async function waitForInitialization(): Promise<void> {
+  const state = getLspHostState()
   // If already initialized or failed, return immediately
-  if (initializationState === 'success' || initializationState === 'failed') {
+  if (
+    state.initializationState === 'success' ||
+    state.initializationState === 'failed'
+  ) {
     return
   }
 
   // If pending and we have a promise, wait for it
-  if (initializationState === 'pending' && initializationPromise) {
-    await initializationPromise
+  if (state.initializationState === 'pending' && state.initializationPromise) {
+    await state.initializationPromise
   }
 
   // If not started, return immediately (nothing to wait for)
 }
 
 /**
- * Initialize the LSP server manager singleton.
+ * Initialize the LSP server manager for the active SessionHost.
  *
  * This function is called during Claude Code startup. It synchronously creates
  * the manager instance, then starts async initialization (loading LSP configs)
@@ -207,8 +247,13 @@ export function initializeLspServerManager(): void {
   }
   logForDebugging('[LSP MANAGER] initializeLspServerManager() called')
 
+  const state = getLspHostState()
+
   // Skip if already initialized or currently initializing
-  if (lspManagerInstance !== undefined && initializationState !== 'failed') {
+  if (
+    state.lspManagerInstance !== undefined &&
+    state.initializationState !== 'failed'
+  ) {
     logForDebugging(
       '[LSP MANAGER] Already initialized or initializing, skipping',
     )
@@ -216,55 +261,56 @@ export function initializeLspServerManager(): void {
   }
 
   // Reset state for retry if previous initialization failed
-  if (initializationState === 'failed') {
-    lspManagerInstance = undefined
-    initializationError = undefined
+  if (state.initializationState === 'failed') {
+    state.lspManagerInstance = undefined
+    state.initializationError = undefined
   }
 
   // Create the manager instance and mark as pending
-  lspManagerInstance = createLSPServerManager()
-  initializationState = 'pending'
+  const manager = createLSPServerManager()
+  state.lspManagerInstance = manager
+  state.initializationState = 'pending'
   logForDebugging('[LSP MANAGER] Created manager instance, state=pending')
 
   // Increment generation to invalidate any pending initializations
-  const currentGeneration = ++initializationGeneration
+  const currentGeneration = ++state.initializationGeneration
   logForDebugging(
     `[LSP MANAGER] Starting async initialization (generation ${currentGeneration})`,
   )
 
   // Start initialization asynchronously without blocking
   // Store the promise so callers can await it via waitForInitialization()
-  initializationPromise = lspManagerInstance
+  state.initializationPromise = manager
     .initialize()
     .then(() => {
       // Only update state if this is still the current initialization
-      if (currentGeneration === initializationGeneration) {
-        initializationState = 'success'
+      if (currentGeneration === state.initializationGeneration) {
+        state.initializationState = 'success'
         logForDebugging('LSP server manager initialized successfully')
 
         // densable 243 #28: clear sticky latch when reinit finds zero servers
         // without a config load failure (LSP tool may drop after last plugin off).
         if (
-          lspManagerInstance &&
-          lspManagerInstance.getAllServers().size === 0 &&
-          !lspManagerInstance.didLastConfigLoadFail()
+          state.lspManagerInstance &&
+          state.lspManagerInstance.getAllServers().size === 0 &&
+          !state.lspManagerInstance.didLastConfigLoadFail()
         ) {
-          everConnectedLatch = false
+          state.everConnectedLatch = false
         }
 
         // Register passive notification handlers for diagnostics
-        if (lspManagerInstance) {
-          registerLSPNotificationHandlers(lspManagerInstance)
+        if (state.lspManagerInstance) {
+          registerLSPNotificationHandlers(state.lspManagerInstance)
         }
       }
     })
     .catch((error: unknown) => {
       // Only update state if this is still the current initialization
-      if (currentGeneration === initializationGeneration) {
-        initializationState = 'failed'
-        initializationError = error as Error
+      if (currentGeneration === state.initializationGeneration) {
+        state.initializationState = 'failed'
+        state.initializationError = error as Error
         // Clear the instance since it's not usable
-        lspManagerInstance = undefined
+        state.lspManagerInstance = undefined
 
         logError(error as Error)
         logForDebugging(
@@ -278,20 +324,10 @@ export function initializeLspServerManager(): void {
  * Force re-initialization of the LSP server manager, even after a prior
  * successful init. Called from refreshActivePlugins() after plugin caches
  * are cleared, so newly-loaded plugin LSP servers are picked up.
- *
- * Fixes https://github.com/anthropics/claude-code/issues/15521:
- * loadAllPlugins() is memoized and can be called very early in startup
- * (via getCommands prefetch in setup.ts) before marketplaces are reconciled,
- * caching an empty plugin list. initializeLspServerManager() then reads that
- * stale memoized result and initializes with 0 servers. Unlike commands/agents/
- * hooks/MCP, LSP was never re-initialized on plugin refresh.
- *
- * Safe to call when no LSP plugins changed: initialize() is just config
- * parsing (servers are lazy-started on first use). Also safe during pending
- * init: the generation counter invalidates the in-flight promise.
  */
 export function reinitializeLspServerManager(): void {
-  if (initializationState === 'not-started') {
+  const state = getLspHostState()
+  if (state.initializationState === 'not-started') {
     // initializeLspServerManager() was never called (e.g. headless subcommand
     // path). Don't start it now.
     return
@@ -302,8 +338,8 @@ export function reinitializeLspServerManager(): void {
   // Best-effort shutdown of any running servers on the old instance so
   // /reload-plugins doesn't leak child processes. Fire-and-forget: the
   // primary use case (issue #15521) has 0 servers so this is usually a no-op.
-  if (lspManagerInstance) {
-    void lspManagerInstance.shutdown().catch(err => {
+  if (state.lspManagerInstance) {
+    void state.lspManagerInstance.shutdown().catch(err => {
       logForDebugging(
         `[LSP MANAGER] old instance shutdown during reinit failed: ${errorMessage(err)}`,
       )
@@ -312,32 +348,21 @@ export function reinitializeLspServerManager(): void {
 
   // Force the idempotence check in initializeLspServerManager() to fall
   // through. Generation counter handles invalidating any in-flight init.
-  lspManagerInstance = undefined
-  initializationState = 'not-started'
-  initializationError = undefined
+  state.lspManagerInstance = undefined
+  state.initializationState = 'not-started'
+  state.initializationError = undefined
 
   initializeLspServerManager()
 }
 
-/**
- * Shutdown the LSP server manager and clean up resources.
- *
- * This should be called during Claude Code shutdown. Stops all running LSP servers
- * and clears internal state. Safe to call when not initialized (no-op).
- *
- * NOTE: Errors during shutdown are logged for monitoring but NOT propagated to the caller.
- * State is always cleared even if shutdown fails, to prevent resource accumulation.
- * This is acceptable during application exit when recovery is not possible.
- *
- * @returns Promise that resolves when shutdown completes (errors are swallowed)
- */
-export async function shutdownLspServerManager(): Promise<void> {
-  if (lspManagerInstance === undefined) {
+async function shutdownSingleLspHostState(state: LspHostState): Promise<void> {
+  const instance = state.lspManagerInstance
+  if (instance === undefined) {
     return
   }
 
   try {
-    await lspManagerInstance.shutdown()
+    await instance.shutdown()
     logForDebugging('LSP server manager shut down successfully')
   } catch (error: unknown) {
     logError(error as Error)
@@ -346,11 +371,37 @@ export async function shutdownLspServerManager(): Promise<void> {
     )
   } finally {
     // Always clear state even if shutdown failed
-    lspManagerInstance = undefined
-    initializationState = 'not-started'
-    initializationError = undefined
-    initializationPromise = undefined
+    state.lspManagerInstance = undefined
+    state.initializationState = 'not-started'
+    state.initializationError = undefined
+    state.initializationPromise = undefined
     // Increment generation to invalidate any pending initializations
-    initializationGeneration++
+    state.initializationGeneration++
   }
+}
+
+/**
+ * Shutdown the LSP server manager and clean up resources.
+ *
+ * Inside an active ALS session (`hasActiveSessionAls()`), shuts down only that
+ * host's LSP server manager so concurrent hosts stay alive. Outside ALS (e.g.
+ * process-exit cleanup), shuts down every live host's LSP server manager tracked
+ * via `Set<WeakRef<LspHostState>>` so no child LSP processes leak on exit.
+ */
+export async function shutdownLspServerManager(): Promise<void> {
+  if (hasActiveSessionAls()) {
+    await shutdownSingleLspHostState(getLspHostState())
+    return
+  }
+
+  const targets = new Set<LspHostState>([getLspHostState()])
+  for (const ref of liveLspStates) {
+    const derefed = ref.deref()
+    if (derefed === undefined) {
+      liveLspStates.delete(ref)
+    } else {
+      targets.add(derefed)
+    }
+  }
+  await Promise.all([...targets].map(s => shutdownSingleLspHostState(s)))
 }

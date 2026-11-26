@@ -6,7 +6,8 @@ import { logError } from './log.js'
 import { applyRelaunchTerminalSizeFromEnv } from './residualFinalEnvGates.js'
 import { isScreenReaderModeEnabled } from './screenReaderGate.js'
 
-// Cached stdin override - computed once per process
+// Cached stdin override - process-scoped because there is only one controlling
+// terminal (/dev/tty) per process; opening per host would leak unclosed FDs.
 let cachedStdinOverride: ReadStream | undefined | null = null
 
 /**

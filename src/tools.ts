@@ -18,24 +18,26 @@ import { WebFetchTool } from '@claude-code/builtin-tools/tools/WebFetchTool/WebF
 import { TaskStopTool } from '@claude-code/builtin-tools/tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
 import { PollTool } from '@claude-code/builtin-tools/tools/PollTool/PollTool.js'
+import { getBootstrapSession, RootSessionSlot } from './utils/sessionHost.js'
 // Dead code elimination: conditional import for ant-only / Code Mode REPL tool
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-let cachedReplTool: Tool | null | undefined
+const replToolSessionSlot = new RootSessionSlot<{
+  tool: Tool | null | undefined
+}>(() => ({ tool: undefined }))
+
 function getReplTool(): Tool | null {
-  if (cachedReplTool !== undefined) return cachedReplTool
+  const slot = replToolSessionSlot.of(getBootstrapSession())
+  if (slot.tool !== undefined) return slot.tool
   const baseReplTool =
     require('@claude-code/builtin-tools/tools/REPLTool/REPLTool.js')
       .REPLTool as Tool | null
   if (!baseReplTool) {
-    cachedReplTool = null
+    slot.tool = null
     return null
   }
-  cachedReplTool = wrapReplToolForCodeMode(baseReplTool, () =>
-    getAllBaseTools(),
-  )
-  return cachedReplTool
+  slot.tool = wrapReplToolForCodeMode(baseReplTool, () => getAllBaseTools())
+  return slot.tool
 }
-const REPLTool = process.env.USER_TYPE === 'ant' ? getReplTool() : null
 // densable 2.1.289: SuggestBackgroundPR is d_e-removed (no tool BODY in SEA).
 // Keep SuggestBackgroundPRTool module for fork internals; never register in base pool.
 const SleepTool =
@@ -313,11 +315,14 @@ export function getAllBaseTools(): Tools {
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
     ReportFindingsTool,
     ObserverReportTool,
-    ...(process.env.USER_TYPE === 'ant' && REPLTool
-      ? [REPLTool]
-      : (isCodeModeEnabled() || isReplModeEnabled()) && getReplTool()
-        ? [getReplTool()!]
-        : []),
+    ...(process.env.USER_TYPE === 'ant' ||
+    isCodeModeEnabled() ||
+    isReplModeEnabled()
+      ? (() => {
+          const replTool = getReplTool()
+          return replTool ? [replTool] : []
+        })()
+      : []),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
     EndConversationTool,
@@ -361,7 +366,13 @@ export function getAllBaseTools(): Tools {
  * server-prefix rules like `mcp__server` strip all tools from that server
  * before the model sees them — not just at call time.
  */
-const withheldOutsideLaunchListLogged = new Set<string>()
+const withheldOutsideLaunchListLoggedSlot = new RootSessionSlot<Set<string>>(
+  () => new Set(),
+)
+
+function getWithheldOutsideLaunchListLogged(): Set<string> {
+  return withheldOutsideLaunchListLoggedSlot.of(getBootstrapSession())
+}
 
 /**
  * #379 SEA `yln`: Returns true if `tool` should be withheld because it is not
@@ -447,8 +458,9 @@ export function filterToolsByDenyRules<
     if (!isWithheldOutsideLaunchList(effectivePermissionContext, tool)) {
       return true
     }
-    if (!withheldOutsideLaunchListLogged.has(tool.name)) {
-      withheldOutsideLaunchListLogged.add(tool.name)
+    const withheldLogged = getWithheldOutsideLaunchListLogged()
+    if (!withheldLogged.has(tool.name)) {
+      withheldLogged.add(tool.name)
       logForDebugging(
         `${tool.name} is not on this session's --tools list and no deny rule names it; withheld. Name it in --tools to offer it`,
         { level: 'warn' },
@@ -470,10 +482,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     // return REPL instead of the raw primitives. Matches the non-bare path
     // below which also hides REPL_ONLY_TOOLS / CODE_MODE_ONLY_TOOLS when active.
     const activeReplTool =
-      (isCodeModeEnabled() || isReplModeEnabled()) &&
-      (REPLTool ?? getReplTool())
-        ? (REPLTool ?? getReplTool())
-        : null
+      isCodeModeEnabled() || isReplModeEnabled() ? getReplTool() : null
     if (activeReplTool) {
       const replSimple: Tool[] = [activeReplTool]
       if (isCodeModeEnabled() && PollTool.isEnabled()) {

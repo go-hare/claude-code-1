@@ -8,38 +8,47 @@
  * Env: CLAUDE_AX_STARTUP_QUIET_MS (int, min 0; capped at hug)
  */
 
+import { InkHostSlot } from './instances.js'
+
 export const AX_STARTUP_QUIET_ENV_KEY = 'CLAUDE_AX_STARTUP_QUIET_MS'
 /** densable mug — default quiet ms */
 export const SR_STARTUP_QUIET_DEFAULT_MS = 3000
 /** densable hug — hard cap */
 export const SR_STARTUP_QUIET_MAX_MS = 600_000
 
-let quietStartedAtMs: number | null = null
-let quietEnded = false
+const quietHostSlot = new InkHostSlot<{
+  quietStartedAtMs: number | null
+  quietEnded: boolean
+}>(() => ({
+  quietStartedAtMs: null,
+  quietEnded: false,
+}))
 
 /** densable Yqc — mark quiet start once (idempotent). */
 export function markScreenReaderStartupQuietStart(
   nowMs: number = performance.now(),
 ): void {
-  if (quietStartedAtMs === null) {
-    quietStartedAtMs = nowMs
+  const state = quietHostSlot.of()
+  if (state.quietStartedAtMs === null) {
+    state.quietStartedAtMs = nowMs
   }
 }
 
 /** densable qXn — end quiet window (subsequent Xqc returns 0). */
 export function endScreenReaderStartupQuiet(): void {
-  quietEnded = true
+  quietHostSlot.of().quietEnded = true
 }
 
 /**
  * densable Xqc — remaining quiet ms, or 0 when unset/ended/expired.
- * Pure relative to process-level state + env.
+ * Pure relative to host-level state + env.
  */
 export function getScreenReaderStartupQuietRemainingMs(
   nowMs: number = performance.now(),
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  if (quietStartedAtMs === null || quietEnded) {
+  const state = quietHostSlot.peek()
+  if (!state || state.quietStartedAtMs === null || state.quietEnded) {
     return 0
   }
   const raw = env[AX_STARTUP_QUIET_ENV_KEY]
@@ -54,12 +63,14 @@ export function getScreenReaderStartupQuietRemainingMs(
     configured ?? SR_STARTUP_QUIET_DEFAULT_MS,
     SR_STARTUP_QUIET_MAX_MS,
   )
-  const remaining = quietStartedAtMs + quietMs - nowMs
+  const remaining = state.quietStartedAtMs + quietMs - nowMs
   return remaining > 0 ? remaining : 0
 }
 
-/** Test / process-reset helper (not densable). */
+/** Test / host-reset helper (not densable). */
 export function resetScreenReaderStartupQuietForTests(): void {
-  quietStartedAtMs = null
-  quietEnded = false
+  const state = quietHostSlot.peek()
+  if (!state) return
+  state.quietStartedAtMs = null
+  state.quietEnded = false
 }

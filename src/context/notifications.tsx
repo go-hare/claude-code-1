@@ -3,6 +3,7 @@ import { useCallback, useEffect } from 'react';
 import { type AppState, useAppStateStore, useSetAppState } from '../state/AppState.js';
 import { dismissToastItem, holdToastItem } from '../components/toastStore.js';
 import { notificationsHoldToasts } from '../utils/replDiffMouseHost.js';
+import { getActiveSessionFromAls, getBootstrapSession, RootSessionSlot, runWithSession } from '../utils/sessionHost.js';
 import type { Theme } from '../utils/theme.js';
 
 type Priority = 'low' | 'medium' | 'high' | 'immediate';
@@ -87,24 +88,49 @@ const DEFAULT_TIMEOUT_MS = 8000;
  */
 export const STICKY_NOTIFICATION_TIMEOUT_MS = 3_600_000;
 
-// Track current timeout to clear it when preempted or when the last consumer unmounts
-let currentTimeoutId: NodeJS.Timeout | null = null;
-let activeNotificationMounts = 0;
+// Track current timeout per root session to clear it when preempted or when the last consumer unmounts
+type NotificationSessionState = {
+  currentTimeoutId: NodeJS.Timeout | null;
+  activeNotificationMounts: number;
+};
 
-function clearCurrentNotificationTimeout(): void {
-  if (currentTimeoutId) {
-    clearTimeout(currentTimeoutId);
-    currentTimeoutId = null;
+const notificationSessionSlot = new RootSessionSlot<NotificationSessionState>(() => ({
+  currentTimeoutId: null,
+  activeNotificationMounts: 0,
+}));
+
+function getNotificationSessionState(): NotificationSessionState {
+  return notificationSessionSlot.of(getBootstrapSession());
+}
+
+function clearNotificationTimeoutFor(state: NotificationSessionState): void {
+  if (state.currentTimeoutId) {
+    clearTimeout(state.currentTimeoutId);
+    state.currentTimeoutId = null;
   }
 }
 
+function clearCurrentNotificationTimeout(): void {
+  const state = notificationSessionSlot.peek(getBootstrapSession());
+  if (state) clearNotificationTimeoutFor(state);
+}
+
 function scheduleCurrentNotificationTimeout(timeoutMs: number, callback: () => void): void {
-  clearCurrentNotificationTimeout();
-  currentTimeoutId = setTimeout(() => {
-    currentTimeoutId = null;
-    callback();
+  const state = getNotificationSessionState();
+  clearNotificationTimeoutFor(state);
+  const capturedSession = getActiveSessionFromAls();
+  const id = setTimeout(() => {
+    if (state.currentTimeoutId === id) {
+      state.currentTimeoutId = null;
+    }
+    if (capturedSession !== undefined && getActiveSessionFromAls() !== capturedSession) {
+      runWithSession(capturedSession, callback);
+    } else {
+      callback();
+    }
   }, timeoutMs);
-  currentTimeoutId.unref?.();
+  state.currentTimeoutId = id;
+  id.unref?.();
 }
 
 export function isStickyNotification(notice: Notification | null): boolean {
@@ -396,14 +422,15 @@ export function useNotifications(): {
   // effect would be vestigial and make every caller re-render on queue changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    activeNotificationMounts += 1;
+    const state = getNotificationSessionState();
+    state.activeNotificationMounts += 1;
     if (store.getState().notifications.queue.length > 0) {
       processQueue();
     }
     return () => {
-      activeNotificationMounts = Math.max(0, activeNotificationMounts - 1);
-      if (activeNotificationMounts === 0) {
-        clearCurrentNotificationTimeout();
+      state.activeNotificationMounts = Math.max(0, state.activeNotificationMounts - 1);
+      if (state.activeNotificationMounts === 0) {
+        clearNotificationTimeoutFor(state);
       }
     };
   }, []);

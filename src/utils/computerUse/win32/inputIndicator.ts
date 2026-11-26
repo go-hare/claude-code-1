@@ -15,6 +15,8 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
+import { registerCleanup } from '../../cleanupRegistry.js'
+import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 import { validateHwnd, getTmpDir } from './shared.js'
 
 const INDICATOR_WIDTH = 350
@@ -23,10 +25,82 @@ const FADE_AFTER_MS = 2000
 const BG_COLOR = '30, 30, 30' // dark background
 const TEXT_COLOR = '220, 220, 220' // light text
 
-let indicatorProc: ReturnType<typeof Bun.spawn> | null = null
-let stopFile: string | null = null
-let scriptFile: string | null = null
-let msgFile: string | null = null
+type InputIndicatorHostState = {
+  indicatorProc: ReturnType<typeof Bun.spawn> | null
+  stopFile: string | null
+  scriptFile: string | null
+  msgFile: string | null
+  unregisterCleanup: (() => void) | null
+}
+
+const inputIndicatorHostSlot = new HostSlot<InputIndicatorHostState>(() => ({
+  indicatorProc: null,
+  stopFile: null,
+  scriptFile: null,
+  msgFile: null,
+  unregisterCleanup: null,
+}))
+
+// Process-wide tracking of all hosts with a live input indicator subprocess so
+// process exit/SIGINT/SIGTERM cleans up every host's subprocess and temp files.
+const activeIndicatorStates = new Set<InputIndicatorHostState>()
+
+function getIndicatorHostState(): InputIndicatorHostState {
+  return inputIndicatorHostSlot.of(getBootstrapSessionHost())
+}
+
+function hideIndicatorState(
+  state: InputIndicatorHostState,
+  immediate: boolean,
+): void {
+  const procToKill = state.indicatorProc
+  const stopToDelete = state.stopFile
+  const scriptToDelete = state.scriptFile
+  const msgToDelete = state.msgFile
+  state.indicatorProc = null
+  state.stopFile = null
+  state.scriptFile = null
+  state.msgFile = null
+  activeIndicatorStates.delete(state)
+  const unregister = state.unregisterCleanup
+  state.unregisterCleanup = null
+  unregister?.()
+
+  const forceCleanup = () => {
+    try {
+      procToKill?.kill()
+    } catch {}
+    try {
+      if (scriptToDelete) fs.unlinkSync(scriptToDelete)
+    } catch {}
+    try {
+      if (stopToDelete) fs.unlinkSync(stopToDelete)
+    } catch {}
+    try {
+      if (msgToDelete) fs.unlinkSync(msgToDelete)
+    } catch {}
+  }
+
+  if (immediate) {
+    if (stopToDelete) {
+      try {
+        fs.writeFileSync(stopToDelete, 'STOP', 'utf-8')
+      } catch {}
+    }
+    forceCleanup()
+    return
+  }
+
+  if (stopToDelete) {
+    try {
+      fs.writeFileSync(stopToDelete, 'STOP', 'utf-8')
+    } catch {}
+    const timer = setTimeout(forceCleanup, 2000)
+    timer.unref?.()
+  } else if (procToKill || scriptToDelete || msgToDelete) {
+    forceCleanup()
+  }
+}
 
 function buildIndicatorScript(hwnd: string, sf: string): string {
   const sfEsc = sf.replace(/\\/g, '\\\\')
@@ -156,14 +230,16 @@ $timer.Start()
 export function showIndicator(hwnd: string): boolean {
   hwnd = validateHwnd(hwnd)
   hideIndicator()
+  const state = getIndicatorHostState()
+  let scriptFile: string | null = null
   try {
     const tmpDir = getTmpDir()
     const ts = Date.now()
-    stopFile = path.join(tmpDir, `cu_indicator_stop_${ts}`)
+    const stopFile = path.join(tmpDir, `cu_indicator_stop_${ts}`)
     scriptFile = path.join(tmpDir, `cu_indicator_${ts}.ps1`)
-    msgFile = stopFile + '.msg'
+    const msgFile = stopFile + '.msg'
     fs.writeFileSync(scriptFile, buildIndicatorScript(hwnd, stopFile), 'utf-8')
-    indicatorProc = Bun.spawn(
+    const proc = Bun.spawn(
       [
         'powershell',
         '-NoProfile',
@@ -174,45 +250,61 @@ export function showIndicator(hwnd: string): boolean {
       ],
       { stdout: 'ignore', stderr: 'ignore' },
     )
+    state.stopFile = stopFile
+    state.scriptFile = scriptFile
+    state.msgFile = msgFile
+    state.indicatorProc = proc
+    activeIndicatorStates.add(state)
+    state.unregisterCleanup?.()
+    state.unregisterCleanup = registerCleanup(() => {
+      hideIndicatorState(state, true)
+    })
+    if (proc.exited && typeof proc.exited.then === 'function') {
+      void proc.exited.then(
+        () => {
+          if (state.indicatorProc === proc) {
+            hideIndicatorState(state, true)
+          }
+        },
+        () => {
+          if (state.indicatorProc === proc) {
+            hideIndicatorState(state, true)
+          }
+        },
+      )
+    }
     return true
   } catch {
+    hideIndicatorState(state, true)
+    if (scriptFile) {
+      try {
+        fs.unlinkSync(scriptFile)
+      } catch {}
+    }
     return false
   }
 }
 
 /** Update the indicator message */
 export function updateIndicator(message: string): void {
+  const { msgFile } = getIndicatorHostState()
   if (!msgFile) return
   try {
     fs.writeFileSync(msgFile, message, 'utf-8')
   } catch {}
 }
 
-/** Hide and destroy the indicator */
+/** Hide and destroy the indicator for the current host */
 export function hideIndicator(): void {
-  if (stopFile) {
-    try {
-      fs.writeFileSync(stopFile, 'STOP', 'utf-8')
-    } catch {}
-    setTimeout(() => {
-      try {
-        indicatorProc?.kill()
-      } catch {}
-      try {
-        if (scriptFile) fs.unlinkSync(scriptFile)
-      } catch {}
-      try {
-        if (stopFile) fs.unlinkSync(stopFile)
-      } catch {}
-      try {
-        if (msgFile) fs.unlinkSync(msgFile)
-      } catch {}
-    }, 2000)
+  hideIndicatorState(getIndicatorHostState(), false)
+}
+
+/** Hide and immediately destroy all active indicators across every host (used on process exit) */
+export function hideAllIndicators(): void {
+  for (const state of [...activeIndicatorStates]) {
+    hideIndicatorState(state, true)
   }
-  indicatorProc = null
-  stopFile = null
-  scriptFile = null
-  msgFile = null
+  hideIndicatorState(getIndicatorHostState(), true)
 }
 
 // ── Convenience methods for common actions ──

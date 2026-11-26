@@ -18,6 +18,8 @@
  * PTY `kill(0)` — gold checkPid only probes when `!this.pty`.
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
+
 /** Official ct / kn */
 export const EHOSTDEAD = 'EHOSTDEAD'
 
@@ -59,12 +61,24 @@ type Kernel32ExitCode = {
   CloseHandle: (handle: unknown) => number
 }
 
-let kernel32Exit: Kernel32ExitCode | null | undefined
-/** Test seam — force the Node spawn adapter (densable GWg analogue). */
-let win32HostDeathFfiDisabled = false
-let win32HostLivenessProbe:
-  | ((pid: number) => Promise<'alive' | 'gone' | undefined>)
-  | undefined
+type HostDeathHostState = {
+  kernel32Exit: Kernel32ExitCode | null | undefined
+  /** Test seam — force the Node spawn adapter (densable GWg analogue). */
+  win32HostDeathFfiDisabled: boolean
+  win32HostLivenessProbe:
+    | ((pid: number) => Promise<'alive' | 'gone' | undefined>)
+    | undefined
+}
+
+const hostDeathHostSlot = new HostSlot<HostDeathHostState>(() => ({
+  kernel32Exit: undefined,
+  win32HostDeathFfiDisabled: false,
+  win32HostLivenessProbe: undefined,
+}))
+
+function getHostDeathHostState(): HostDeathHostState {
+  return hostDeathHostSlot.of(getBootstrapSessionHost())
+}
 
 export type Win32HostProcessProbe =
   | { kind: 'exit-code'; code: number }
@@ -95,21 +109,23 @@ export function _resetWin32HostDeathForTesting(opts?: {
   disableFfi?: boolean
   probe?: (pid: number) => Promise<'alive' | 'gone' | undefined>
 }): void {
-  kernel32Exit = undefined
-  win32HostDeathFfiDisabled = opts?.disableFfi === true
-  win32HostLivenessProbe = opts?.probe
+  const hostState = getHostDeathHostState()
+  hostState.kernel32Exit = undefined
+  hostState.win32HostDeathFfiDisabled = opts?.disableFfi === true
+  hostState.win32HostLivenessProbe = opts?.probe
 }
 
 function loadKernel32ExitCode(): Kernel32ExitCode | null {
-  if (kernel32Exit !== undefined) return kernel32Exit
-  if (process.platform !== 'win32' || win32HostDeathFfiDisabled) {
-    kernel32Exit = null
+  const hostState = getHostDeathHostState()
+  if (hostState.kernel32Exit !== undefined) return hostState.kernel32Exit
+  if (process.platform !== 'win32' || hostState.win32HostDeathFfiDisabled) {
+    hostState.kernel32Exit = null
     return null
   }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const ffi = require('bun:ffi') as typeof import('bun:ffi')
-    kernel32Exit = ffi.dlopen('kernel32.dll', {
+    hostState.kernel32Exit = ffi.dlopen('kernel32.dll', {
       OpenProcess: { args: ['u32', 'i32', 'u32'], returns: 'ptr' },
       GetExitCodeProcess: { args: ['ptr', 'ptr'], returns: 'i32' },
       CloseHandle: { args: ['ptr'], returns: 'i32' },
@@ -127,9 +143,9 @@ function loadKernel32ExitCode(): Kernel32ExitCode | null {
     } catch {
       // debug.ts pulls bootstrap state; ignore if that graph is not ready
     }
-    kernel32Exit = null
+    hostState.kernel32Exit = null
   }
-  return kernel32Exit
+  return hostState.kernel32Exit
 }
 
 /** Official Ge — /proc/<pid>/stat state token after comm. */
@@ -219,7 +235,9 @@ export async function getHostProcessState(
     }
     // FFI loaded: OpenProcess/GetExitCode fail-open matches official Di.
     if (loadKernel32ExitCode() != null) return undefined
-    const probe = win32HostLivenessProbe ?? probeWin32HostLivenessViaSpawn
+    const probe =
+      getHostDeathHostState().win32HostLivenessProbe ??
+      probeWin32HostLivenessViaSpawn
     const listing = await probe(pid)
     return classifyWin32HostProcessState(
       listing === 'gone'

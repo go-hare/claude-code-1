@@ -11,6 +11,10 @@ import { SHELL_TOOL_NAMES } from 'src/utils/shell/shellToolUtils.js'
 import type { Message } from '../../types/message.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 
 // Official 2.1.328 `SHe` / `Tis` (`chunk@294254613.js:2025684, 2029283`)
@@ -53,11 +57,18 @@ const CLEAR_TOOL_USES_REFUSED_RE =
   /^\S{1,128} does not support the \W?clear_tool_uses_20250919\W? context management strategy/
 
 /**
- * Official 2.1.328 `modelsThatRefusedTheEdit` (`_I().modelsThatRefusedTheEdit`) —
- * process-lifetime latch per normalized model name so unsupported models stop
- * receiving `clear_tool_uses_20250919` after a 400 refusal.
+ * Official 2.1.328 `modelsThatRefusedTheEdit` + 2.1.331 `sys = new $e(...)` —
+ * per-session latch per normalized model name so unsupported models stop
+ * receiving `clear_tool_uses_20250919` after a 400 refusal without bleeding
+ * across concurrent sessions.
  */
-const modelsThatRefusedTheEdit = new Set<string>()
+const modelsThatRefusedTheEditBySession = new RootSessionSlot(
+  () => new Set<string>(),
+)
+
+function getModelsThatRefusedTheEdit(): Set<string> {
+  return modelsThatRefusedTheEditBySession.of(getBootstrapSession())
+}
 
 function normalizeModelForRefusalLatch(model: string): string {
   return model
@@ -68,16 +79,16 @@ function normalizeModelForRefusalLatch(model: string): string {
 
 export function recordClearToolUsesRefusal(model: string): void {
   if (!model) return
-  modelsThatRefusedTheEdit.add(normalizeModelForRefusalLatch(model))
+  getModelsThatRefusedTheEdit().add(normalizeModelForRefusalLatch(model))
 }
 
 export function hasModelRefusedClearToolUses(model: string): boolean {
   if (!model) return false
-  return modelsThatRefusedTheEdit.has(normalizeModelForRefusalLatch(model))
+  return getModelsThatRefusedTheEdit().has(normalizeModelForRefusalLatch(model))
 }
 
 export function clearRefusedClearToolUsesModelsForTesting(): void {
-  modelsThatRefusedTheEdit.clear()
+  getModelsThatRefusedTheEdit().clear()
 }
 
 /** Official 2.1.328 `wFt(e)` — extract inner API error headline. */

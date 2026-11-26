@@ -3,7 +3,6 @@ import chalk from 'chalk'
 import { exec } from 'child_process'
 import { execa } from 'execa'
 import { mkdir, readdir, rm, stat, unlink } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { CLAUDE_AI_PROFILE_SCOPE, getOauthConfig } from 'src/constants/oauth.js'
@@ -111,7 +110,7 @@ import { isSafeModeEnabled } from './safeMode.js'
 import { createSignal } from './signal.js'
 import { memoizeWithTTLAsync } from './memoize.js'
 import { getSecureStorage } from './secureStorage/index.js'
-import { getBootstrapSessionHost } from './sessionHost.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { isHoverRestOn } from './storageV5/hoverRestPin.js'
 import {
   clearLegacyApiKeyPrefetch,
@@ -664,18 +663,30 @@ function shouldForceRefreshApiKeyHelperJwt(): boolean {
 
 // Async API key helper with sync cache for non-blocking reads.
 // Epoch bumps on clearApiKeyHelperCache() — orphaned executions check their
-// captured epoch before touching module state so a settings-change or 401-retry
+// captured epoch before touching host state so a settings-change or 401-retry
 // mid-flight can't clobber the newer cache/inflight.
-let _apiKeyHelperCache: { value: string; timestamp: number } | null = null
-let _apiKeyHelperInflight: {
-  promise: Promise<string | null>
-  // Only set on cold launches (user is waiting); null for SWR background refreshes.
-  startedAt: number | null
-} | null = null
-let _apiKeyHelperEpoch = 0
+type ApiKeyHelperHostState = {
+  cache: { value: string; timestamp: number } | null
+  inflight: {
+    promise: Promise<string | null>
+    // Only set on cold launches (user is waiting); null for SWR background refreshes.
+    startedAt: number | null
+  } | null
+  epoch: number
+}
+
+const apiKeyHelperHostStates = new HostSlot<ApiKeyHelperHostState>(() => ({
+  cache: null,
+  inflight: null,
+  epoch: 0,
+}))
+
+function getApiKeyHelperHostState(): ApiKeyHelperHostState {
+  return apiKeyHelperHostStates.of(getBootstrapSessionHost())
+}
 
 export function getApiKeyHelperElapsedMs(): number {
-  const startedAt = _apiKeyHelperInflight?.startedAt
+  const startedAt = getApiKeyHelperHostState().inflight?.startedAt
   return startedAt ? Date.now() - startedAt : 0
 }
 
@@ -683,64 +694,68 @@ export async function getApiKeyFromApiKeyHelper(
   isNonInteractiveSession: boolean,
 ): Promise<string | null> {
   if (!getConfiguredApiKeyHelper()) return null
+  const state = getApiKeyHelperHostState()
   const ttl = calculateApiKeyHelperTTL()
-  if (_apiKeyHelperCache) {
+  if (state.cache) {
     // Official IR: !QK(cache)&&ie()&&Hs()&&!dr() → await Yw(..., true).
     if (
-      !isApiKeyHelperJwtCacheValid(_apiKeyHelperCache) &&
+      !isApiKeyHelperJwtCacheValid(state.cache) &&
       shouldForceRefreshApiKeyHelperJwt()
     ) {
-      if (_apiKeyHelperInflight) return _apiKeyHelperInflight.promise
-      _apiKeyHelperInflight = {
+      if (state.inflight) return state.inflight.promise
+      state.inflight = {
         promise: _runAndCache(
           isNonInteractiveSession,
           true,
-          _apiKeyHelperEpoch,
+          state.epoch,
+          state,
         ),
         startedAt: Date.now(),
       }
-      return _apiKeyHelperInflight.promise
+      return state.inflight.promise
     }
-    if (Date.now() - _apiKeyHelperCache.timestamp < ttl) {
-      return _apiKeyHelperCache.value
+    if (Date.now() - state.cache.timestamp < ttl) {
+      return state.cache.value
     }
     // Stale — return stale value now, refresh in the background.
     // `??=` banned here by eslint no-nullish-assign-object-call (bun bug).
-    if (!_apiKeyHelperInflight) {
-      _apiKeyHelperInflight = {
+    if (!state.inflight) {
+      state.inflight = {
         promise: _runAndCache(
           isNonInteractiveSession,
           false,
-          _apiKeyHelperEpoch,
+          state.epoch,
+          state,
         ),
         startedAt: null,
       }
     }
-    return _apiKeyHelperCache.value
+    return state.cache.value
   }
   // Cold cache — deduplicate concurrent calls
-  if (_apiKeyHelperInflight) return _apiKeyHelperInflight.promise
-  _apiKeyHelperInflight = {
-    promise: _runAndCache(isNonInteractiveSession, true, _apiKeyHelperEpoch),
+  if (state.inflight) return state.inflight.promise
+  state.inflight = {
+    promise: _runAndCache(isNonInteractiveSession, true, state.epoch, state),
     startedAt: Date.now(),
   }
-  return _apiKeyHelperInflight.promise
+  return state.inflight.promise
 }
 
 async function _runAndCache(
   isNonInteractiveSession: boolean,
   isCold: boolean,
   epoch: number,
+  state: ApiKeyHelperHostState,
 ): Promise<string | null> {
   try {
     const value = await _executeApiKeyHelper(isNonInteractiveSession)
-    if (epoch !== _apiKeyHelperEpoch) return value
+    if (epoch !== state.epoch) return value
     if (value !== null) {
-      _apiKeyHelperCache = { value, timestamp: Date.now() }
+      state.cache = { value, timestamp: Date.now() }
     }
     return value
   } catch (e) {
-    if (epoch !== _apiKeyHelperEpoch) return ' '
+    if (epoch !== state.epoch) return ' '
     const detail = e instanceof Error ? e.message : String(e)
     console.error(chalk.red(`apiKeyHelper failed: ${detail}`))
     logForDebugging(`Error getting API key from apiKeyHelper: ${detail}`, {
@@ -749,16 +764,16 @@ async function _runAndCache(
     // SWR path: a transient failure shouldn't replace a working key with
     // the ' ' sentinel — keep serving the stale value and bump timestamp
     // so we don't hammer-retry every call.
-    if (!isCold && _apiKeyHelperCache && _apiKeyHelperCache.value !== ' ') {
-      _apiKeyHelperCache = { ..._apiKeyHelperCache, timestamp: Date.now() }
-      return _apiKeyHelperCache.value
+    if (!isCold && state.cache && state.cache.value !== ' ') {
+      state.cache = { ...state.cache, timestamp: Date.now() }
+      return state.cache.value
     }
     // Cold cache or prior error — cache ' ' so callers don't fall back to OAuth
-    _apiKeyHelperCache = { value: ' ', timestamp: Date.now() }
+    state.cache = { value: ' ', timestamp: Date.now() }
     return ' '
   } finally {
-    if (epoch === _apiKeyHelperEpoch) {
-      _apiKeyHelperInflight = null
+    if (epoch === state.epoch) {
+      state.inflight = null
     }
   }
 }
@@ -807,13 +822,14 @@ async function _executeApiKeyHelper(
  * Returns null only if the async fetch hasn't completed yet.
  */
 export function getApiKeyFromApiKeyHelperCached(): string | null {
-  return _apiKeyHelperCache?.value ?? null
+  return getApiKeyHelperHostState().cache?.value ?? null
 }
 
 export function clearApiKeyHelperCache(): void {
-  _apiKeyHelperEpoch++
-  _apiKeyHelperCache = null
-  _apiKeyHelperInflight = null
+  const state = getApiKeyHelperHostState()
+  state.epoch++
+  state.cache = null
+  state.inflight = null
 }
 
 export function prefetchApiKeyFromApiKeyHelperIfSafe(
@@ -835,18 +851,33 @@ export function prefetchApiKeyFromApiKeyHelperIfSafe(
 const AWS_AUTH_REFRESH_TIMEOUT_MS = 3 * 60 * 1000
 
 /**
- * Cooldown after an interactive awsAuthRefresh finishes so every subsequent
- * API call does not re-spawn `aws sso login` when STS is still failing
- * (official 2.1.207 BBn/FTh).
+ * Cooldown after an interactive awsAuthRefresh / gcpAuthRefresh finishes so
+ * every subsequent API call does not re-spawn SSO login when STS is still
+ * failing (official 2.1.207 BBn/FTh, 2.1.323 #2007, 2.1.331 [W-080/082/096/097/098]).
  */
-let awsAuthRefreshLastFinishedAt: number | null = null
-/** Bumped by resetAwsAuthRefreshCooldown so in-flight finally does not stamp cooldown. */
-let awsAuthRefreshCooldownEpoch = 0
-/** In-flight refresh promise — concurrent callers share one SSO spawn. */
-let awsAuthRefreshInflight: Promise<boolean> | null = null
-/** Official 2.1.323 (#2007): GCP auth refresh coalescing & cooldown (mirrors AWS). */
-let gcpAuthRefreshLastFinishedAt: number | null = null
-let gcpAuthRefreshInflight: Promise<boolean> | null = null
+type CloudAuthRefreshHostState = {
+  awsAuthRefreshLastFinishedAt: number | null
+  awsAuthRefreshCooldownEpoch: number
+  awsAuthRefreshInflight: Promise<boolean> | null
+  gcpAuthRefreshLastFinishedAt: number | null
+  gcpAuthRefreshInflight: Promise<boolean> | null
+  defaultAwsProviderChainLastInvalidate: Map<string, number>
+}
+
+const cloudAuthRefreshHostSlot = new HostSlot<CloudAuthRefreshHostState>(
+  () => ({
+    awsAuthRefreshLastFinishedAt: null,
+    awsAuthRefreshCooldownEpoch: 0,
+    awsAuthRefreshInflight: null,
+    gcpAuthRefreshLastFinishedAt: null,
+    gcpAuthRefreshInflight: null,
+    defaultAwsProviderChainLastInvalidate: new Map(),
+  }),
+)
+
+function getCloudAuthRefreshHostState(): CloudAuthRefreshHostState {
+  return cloudAuthRefreshHostSlot.of(getBootstrapSessionHost())
+}
 
 const AUTH_REFRESH_LOCK_STALE_MS = 5 * 60 * 1000
 const AUTH_REFRESH_LOCK_POLL_MS = 150
@@ -974,8 +1005,6 @@ function defaultAwsProviderChainCacheKey(region: string): string {
   return `${process.env.AWS_PROFILE ?? ''}\0${region}`
 }
 
-const defaultAwsProviderChainLastInvalidate = new Map<string, number>()
-
 /**
  * Run awsAuthRefresh to perform interactive authentication (e.g., aws sso login)
  * Streams output in real-time for user visibility.
@@ -984,8 +1013,9 @@ const defaultAwsProviderChainLastInvalidate = new Map<string, number>()
  * cooldown so Bedrock does not re-request SSO credentials on every API call.
  */
 async function runAwsAuthRefresh(): Promise<boolean> {
+  const cloudState = getCloudAuthRefreshHostState()
   const awsAuthRefresh = getConfiguredAwsAuthRefresh()
-  const cooldownEpoch = awsAuthRefreshCooldownEpoch
+  const cooldownEpoch = cloudState.awsAuthRefreshCooldownEpoch
 
   if (!awsAuthRefresh) {
     return false // Not configured, treat as success
@@ -1005,8 +1035,8 @@ async function runAwsAuthRefresh(): Promise<boolean> {
     }
   }
 
-  if (awsAuthRefreshInflight) {
-    return awsAuthRefreshInflight
+  if (cloudState.awsAuthRefreshInflight) {
+    return cloudState.awsAuthRefreshInflight
   }
 
   try {
@@ -1017,28 +1047,29 @@ async function runAwsAuthRefresh(): Promise<boolean> {
     )
     return false
   } catch {
-    if (awsAuthRefreshInflight) {
-      return awsAuthRefreshInflight
+    if (cloudState.awsAuthRefreshInflight) {
+      return cloudState.awsAuthRefreshInflight
     }
     if (
-      awsAuthRefreshLastFinishedAt !== null &&
-      Date.now() - awsAuthRefreshLastFinishedAt < AWS_AUTH_REFRESH_COOLDOWN_MS
+      cloudState.awsAuthRefreshLastFinishedAt !== null &&
+      Date.now() - cloudState.awsAuthRefreshLastFinishedAt <
+        AWS_AUTH_REFRESH_COOLDOWN_MS
     ) {
       return false
     }
-    awsAuthRefreshInflight = (async () => {
+    cloudState.awsAuthRefreshInflight = (async () => {
       try {
         return await runWithCrossProcessAuthRefreshLock('aws', () =>
           refreshAwsAuth(awsAuthRefresh),
         )
       } finally {
-        if (cooldownEpoch === awsAuthRefreshCooldownEpoch) {
-          awsAuthRefreshLastFinishedAt = Date.now()
+        if (cooldownEpoch === cloudState.awsAuthRefreshCooldownEpoch) {
+          cloudState.awsAuthRefreshLastFinishedAt = Date.now()
         }
-        awsAuthRefreshInflight = null
+        cloudState.awsAuthRefreshInflight = null
       }
     })()
-    return awsAuthRefreshInflight
+    return cloudState.awsAuthRefreshInflight
   }
 }
 
@@ -1175,31 +1206,57 @@ async function getAwsCredsFromCredentialExport(): Promise<AwsResolvedCredentials
  * Refresh AWS authentication and get credentials with cache clearing.
  * Official 2.1.207: TTL follows credential Expiration when present; after a
  * successful interactive refresh, clears the default-chain cache + INI cache.
+ * Official 2.1.331: per-host memoized instance on SessionHost.
  */
-export const refreshAndGetAwsCredentials = memoizeWithTTLAsync(
-  async (): Promise<AwsResolvedCredentials | null> => {
-    const started = performance.now()
-    logForDebugging('[API:auth] AWS credential resolve start')
-    // First run auth refresh if needed
-    const refreshed = await runAwsAuthRefresh()
+const refreshAndGetAwsCredentialsHostSlot = new HostSlot(() =>
+  memoizeWithTTLAsync(
+    async (): Promise<AwsResolvedCredentials | null> => {
+      const started = performance.now()
+      logForDebugging('[API:auth] AWS credential resolve start')
+      // First run auth refresh if needed
+      const refreshed = await runAwsAuthRefresh()
 
-    // Get credentials from export (always when configured)
-    const credentials = await getAwsCredsFromCredentialExport()
+      // Get credentials from export (always when configured)
+      const credentials = await getAwsCredsFromCredentialExport()
 
-    // Clear AWS INI + default-chain caches so ambient chain sees fresh SSO
-    if (refreshed) {
-      await clearAwsIniCache()
-      getDefaultAwsProviderChain.cache.clear?.()
-      defaultAwsProviderChainLastInvalidate.clear()
-    }
+      // Clear AWS INI + default-chain caches so ambient chain sees fresh SSO
+      if (refreshed) {
+        await clearAwsIniCache()
+        getDefaultAwsProviderChain.cache.clear?.()
+        getCloudAuthRefreshHostState().defaultAwsProviderChainLastInvalidate.clear()
+      }
 
-    logForDebugging(
-      `[API:auth] AWS credential resolve done in ${Math.round(performance.now() - started)}ms`,
-    )
-    return credentials
-  },
-  value => awsCredentialCacheTtlMs(value?.expiration),
+      logForDebugging(
+        `[API:auth] AWS credential resolve done in ${Math.round(performance.now() - started)}ms`,
+      )
+      return credentials
+    },
+    value => awsCredentialCacheTtlMs(value?.expiration),
+  ),
 )
+
+function refreshAndGetAwsCredentialsImpl(): Promise<AwsResolvedCredentials | null> {
+  return refreshAndGetAwsCredentialsHostSlot.of(getBootstrapSessionHost())()
+}
+
+Object.defineProperty(refreshAndGetAwsCredentialsImpl, 'cache', {
+  get: () =>
+    refreshAndGetAwsCredentialsHostSlot.of(getBootstrapSessionHost()).cache,
+  set: (next: { clear: () => void; delete: (key: string) => boolean }) => {
+    refreshAndGetAwsCredentialsHostSlot.of(getBootstrapSessionHost()).cache =
+      next
+  },
+  configurable: true,
+  enumerable: true,
+})
+
+export const refreshAndGetAwsCredentials =
+  refreshAndGetAwsCredentialsImpl as unknown as (() => Promise<AwsResolvedCredentials | null>) & {
+    cache: {
+      clear: () => void
+      delete: (key: string) => boolean
+    }
+  }
 
 /**
  * Official 2.1.325 #2294: AWS `credential_process` helpers and Google Cloud
@@ -1232,14 +1289,18 @@ export function ensureHomeEnvForCloudCredentials(
   return undefined
 }
 
-/**
- * Memoized AWS default provider chain for Bedrock when awsCredentialExport
- * is not configured. Official 2.1.207 A4 + resolveWithStallGuard: cache
- * resolved credentials by profile+region and hard-timeout the resolve so
- * Windows Credential Manager stalls cannot block every API call.
- */
-export const getDefaultAwsProviderChain = memoize(
-  async (region: string): Promise<() => Promise<AwsResolvedCredentials>> => {
+type DefaultAwsProviderChainResult = Promise<
+  () => Promise<AwsResolvedCredentials>
+>
+
+const defaultAwsProviderChainCacheSlot = new HostSlot<{
+  cache: Map<string, DefaultAwsProviderChainResult>
+}>(() => ({ cache: new Map() }))
+
+function getDefaultAwsProviderChainUncached(
+  region: string,
+): DefaultAwsProviderChainResult {
+  return (async (): Promise<() => Promise<AwsResolvedCredentials>> => {
     const resolveOnce = memoizeWithTTLAsync(
       async (): Promise<AwsResolvedCredentials> => {
         ensureHomeEnvForCloudCredentials()
@@ -1289,9 +1350,47 @@ export const getDefaultAwsProviderChain = memoize(
       value => awsCredentialCacheTtlMs(value.expiration),
     )
     return () => resolveOnce()
+  })()
+}
+
+function getDefaultAwsProviderChainImpl(
+  region: string,
+): DefaultAwsProviderChainResult {
+  const key = defaultAwsProviderChainCacheKey(region)
+  const map = defaultAwsProviderChainCacheSlot.of(
+    getBootstrapSessionHost(),
+  ).cache
+  const cached = map.get(key)
+  if (cached !== undefined || map.has(key)) {
+    return cached as DefaultAwsProviderChainResult
+  }
+  const result = getDefaultAwsProviderChainUncached(region)
+  map.set(key, result)
+  return result
+}
+
+Object.defineProperty(getDefaultAwsProviderChainImpl, 'cache', {
+  get: () =>
+    defaultAwsProviderChainCacheSlot.of(getBootstrapSessionHost()).cache,
+  set: (next: Map<string, DefaultAwsProviderChainResult>) => {
+    defaultAwsProviderChainCacheSlot.of(getBootstrapSessionHost()).cache = next
   },
-  defaultAwsProviderChainCacheKey,
-)
+  configurable: true,
+  enumerable: true,
+})
+
+/**
+ * Memoized AWS default provider chain for Bedrock when awsCredentialExport
+ * is not configured. Official 2.1.207 A4 + resolveWithStallGuard: cache
+ * resolved credentials by profile+region and hard-timeout the resolve so
+ * Windows Credential Manager stalls cannot block every API call.
+ */
+export const getDefaultAwsProviderChain =
+  getDefaultAwsProviderChainImpl as unknown as ((
+    region: string,
+  ) => DefaultAwsProviderChainResult) & {
+    cache: Map<string, DefaultAwsProviderChainResult>
+  }
 
 /**
  * Debounced invalidation of the default-chain cache for a region
@@ -1300,6 +1399,8 @@ export const getDefaultAwsProviderChain = memoize(
 export function invalidateDefaultAwsProviderChainDebounced(
   region: string,
 ): boolean {
+  const { defaultAwsProviderChainLastInvalidate } =
+    getCloudAuthRefreshHostState()
   const key = defaultAwsProviderChainCacheKey(region)
   const now = Date.now()
   if (
@@ -1316,7 +1417,7 @@ export function invalidateDefaultAwsProviderChainDebounced(
 export function clearAwsCredentialsCache(): void {
   refreshAndGetAwsCredentials.cache.clear()
   getDefaultAwsProviderChain.cache.clear?.()
-  defaultAwsProviderChainLastInvalidate.clear()
+  getCloudAuthRefreshHostState().defaultAwsProviderChainLastInvalidate.clear()
 }
 
 /** Clear only the export/refresh memo (keep default-chain cache). */
@@ -1337,8 +1438,9 @@ export {
  * awsAuthRefresh immediately (official resetAwsAuthRefreshCooldown / WTt).
  */
 export function resetAwsAuthRefreshCooldown(): void {
-  awsAuthRefreshLastFinishedAt = null
-  awsAuthRefreshCooldownEpoch++
+  const cloudState = getCloudAuthRefreshHostState()
+  cloudState.awsAuthRefreshLastFinishedAt = null
+  cloudState.awsAuthRefreshCooldownEpoch++
 }
 
 /**
@@ -1405,6 +1507,7 @@ const DEFAULT_GCP_CREDENTIAL_TTL = 60 * 60 * 1000
  * Streams output in real-time for user visibility
  */
 async function runGcpAuthRefresh(): Promise<boolean> {
+  const cloudState = getCloudAuthRefreshHostState()
   const gcpAuthRefresh = getConfiguredGcpAuthRefresh()
 
   if (!gcpAuthRefresh) {
@@ -1426,8 +1529,8 @@ async function runGcpAuthRefresh(): Promise<boolean> {
     }
   }
 
-  if (gcpAuthRefreshInflight) {
-    return gcpAuthRefreshInflight
+  if (cloudState.gcpAuthRefreshInflight) {
+    return cloudState.gcpAuthRefreshInflight
   }
 
   try {
@@ -1443,27 +1546,28 @@ async function runGcpAuthRefresh(): Promise<boolean> {
     // Credentials check failed, proceed with refresh
   }
 
-  if (gcpAuthRefreshInflight) {
-    return gcpAuthRefreshInflight
+  if (cloudState.gcpAuthRefreshInflight) {
+    return cloudState.gcpAuthRefreshInflight
   }
   if (
-    gcpAuthRefreshLastFinishedAt !== null &&
-    Date.now() - gcpAuthRefreshLastFinishedAt < AWS_AUTH_REFRESH_COOLDOWN_MS
+    cloudState.gcpAuthRefreshLastFinishedAt !== null &&
+    Date.now() - cloudState.gcpAuthRefreshLastFinishedAt <
+      AWS_AUTH_REFRESH_COOLDOWN_MS
   ) {
     return false
   }
 
-  gcpAuthRefreshInflight = (async () => {
+  cloudState.gcpAuthRefreshInflight = (async () => {
     try {
       return await runWithCrossProcessAuthRefreshLock('gcp', () =>
         refreshGcpAuth(gcpAuthRefresh),
       )
     } finally {
-      gcpAuthRefreshLastFinishedAt = Date.now()
-      gcpAuthRefreshInflight = null
+      cloudState.gcpAuthRefreshLastFinishedAt = Date.now()
+      cloudState.gcpAuthRefreshInflight = null
     }
   })()
-  return gcpAuthRefreshInflight
+  return cloudState.gcpAuthRefreshInflight
 }
 
 // Timeout for GCP auth refresh command (3 minutes).
@@ -1524,16 +1628,38 @@ export function refreshGcpAuth(gcpAuthRefresh: string): Promise<boolean> {
 /**
  * Refresh GCP authentication if needed.
  * This function checks if credentials are valid and runs the refresh command if not.
- * Memoized with TTL to avoid excessive refresh attempts.
+ * Memoized with TTL per SessionHost to avoid excessive refresh attempts.
  */
-export const refreshGcpCredentialsIfNeeded = memoizeWithTTLAsync(
-  async (): Promise<boolean> => {
+const refreshGcpCredentialsIfNeededHostSlot = new HostSlot(() =>
+  memoizeWithTTLAsync(async (): Promise<boolean> => {
     // Run auth refresh if needed
     const refreshed = await runGcpAuthRefresh()
     return refreshed
-  },
-  DEFAULT_GCP_CREDENTIAL_TTL,
+  }, DEFAULT_GCP_CREDENTIAL_TTL),
 )
+
+function refreshGcpCredentialsIfNeededImpl(): Promise<boolean> {
+  return refreshGcpCredentialsIfNeededHostSlot.of(getBootstrapSessionHost())()
+}
+
+Object.defineProperty(refreshGcpCredentialsIfNeededImpl, 'cache', {
+  get: () =>
+    refreshGcpCredentialsIfNeededHostSlot.of(getBootstrapSessionHost()).cache,
+  set: (next: { clear: () => void; delete: (key: string) => boolean }) => {
+    refreshGcpCredentialsIfNeededHostSlot.of(getBootstrapSessionHost()).cache =
+      next
+  },
+  configurable: true,
+  enumerable: true,
+})
+
+export const refreshGcpCredentialsIfNeeded =
+  refreshGcpCredentialsIfNeededImpl as unknown as (() => Promise<boolean>) & {
+    cache: {
+      clear: () => void
+      delete: (key: string) => boolean
+    }
+  }
 
 export function clearGcpCredentialsCache(): void {
   refreshGcpCredentialsIfNeeded.cache.clear()
@@ -1602,44 +1728,79 @@ export function prefetchAwsCredentialsAndBedRockInfoIfSafe(): void {
   getModelStrings()
 }
 
-/** @private Use {@link getAnthropicApiKey} or {@link getAnthropicApiKeyWithSource} */
-export const getApiKeyFromConfigOrMacOSKeychain = memoize(
-  (): { key: string; source: ApiKeySource } | null => {
-    if (isBareMode()) return null
-    // TODO: migrate to SecureStorage
-    if (process.platform === 'darwin') {
-      // keychainPrefetch.ts fires this read at main.tsx top-level in parallel
-      // with module imports. If it completed, use that instead of spawning a
-      // sync `security` subprocess here (~33ms).
-      const prefetch = getLegacyApiKeyPrefetchResult()
-      if (prefetch) {
-        if (prefetch.stdout) {
-          return { key: prefetch.stdout, source: '/login managed key' }
+type ApiKeyFromConfigOrKeychainResult = {
+  key: string
+  source: ApiKeySource
+} | null
+
+const apiKeyFromConfigOrKeychainCacheSlot = new HostSlot<{
+  cache: Map<unknown, ApiKeyFromConfigOrKeychainResult>
+}>(() => ({ cache: new Map() }))
+
+function readApiKeyFromConfigOrMacOSKeychainUncached(): ApiKeyFromConfigOrKeychainResult {
+  if (isBareMode()) return null
+  // TODO: migrate to SecureStorage
+  if (process.platform === 'darwin') {
+    // keychainPrefetch.ts fires this read at main.tsx top-level in parallel
+    // with module imports. If it completed, use that instead of spawning a
+    // sync `security` subprocess here (~33ms).
+    const prefetch = getLegacyApiKeyPrefetchResult()
+    if (prefetch) {
+      if (prefetch.stdout) {
+        return { key: prefetch.stdout, source: '/login managed key' }
+      }
+      // Prefetch completed with no key — fall through to config, not keychain.
+    } else {
+      const storageServiceName = getMacOsKeychainStorageServiceName()
+      try {
+        const result = execSyncWithDefaults_DEPRECATED(
+          `security find-generic-password -a $USER -w -s "${storageServiceName}"`,
+        )
+        if (result) {
+          return { key: result, source: '/login managed key' }
         }
-        // Prefetch completed with no key — fall through to config, not keychain.
-      } else {
-        const storageServiceName = getMacOsKeychainStorageServiceName()
-        try {
-          const result = execSyncWithDefaults_DEPRECATED(
-            `security find-generic-password -a $USER -w -s "${storageServiceName}"`,
-          )
-          if (result) {
-            return { key: result, source: '/login managed key' }
-          }
-        } catch (e) {
-          logError(e)
-        }
+      } catch (e) {
+        logError(e)
       }
     }
+  }
 
-    const config = getGlobalConfig()
-    if (!config.primaryApiKey) {
-      return null
-    }
+  const config = getGlobalConfig()
+  if (!config.primaryApiKey) {
+    return null
+  }
 
-    return { key: config.primaryApiKey, source: '/login managed key' }
+  return { key: config.primaryApiKey, source: '/login managed key' }
+}
+
+function getApiKeyFromConfigOrMacOSKeychainImpl(): ApiKeyFromConfigOrKeychainResult {
+  const map = apiKeyFromConfigOrKeychainCacheSlot.of(
+    getBootstrapSessionHost(),
+  ).cache
+  if (map.has(undefined)) {
+    return map.get(undefined) ?? null
+  }
+  const result = readApiKeyFromConfigOrMacOSKeychainUncached()
+  map.set(undefined, result)
+  return result
+}
+
+Object.defineProperty(getApiKeyFromConfigOrMacOSKeychainImpl, 'cache', {
+  get: () =>
+    apiKeyFromConfigOrKeychainCacheSlot.of(getBootstrapSessionHost()).cache,
+  set: (next: Map<unknown, ApiKeyFromConfigOrKeychainResult>) => {
+    apiKeyFromConfigOrKeychainCacheSlot.of(getBootstrapSessionHost()).cache =
+      next
   },
-)
+  configurable: true,
+  enumerable: true,
+})
+
+/** @private Use {@link getAnthropicApiKey} or {@link getAnthropicApiKeyWithSource} */
+export const getApiKeyFromConfigOrMacOSKeychain =
+  getApiKeyFromConfigOrMacOSKeychainImpl as unknown as (() => ApiKeyFromConfigOrKeychainResult) & {
+    cache: Map<unknown, ApiKeyFromConfigOrKeychainResult>
+  }
 
 function isValidApiKey(apiKey: string): boolean {
   // Only allow alphanumeric characters, dashes, and underscores
@@ -2076,19 +2237,28 @@ export const getClaudeAIOAuthTokens = Object.assign(readClaudeAIOAuthTokens, {
  * This handles the case where the local expiration check disagrees with the
  * server (e.g., due to clock corrections after token was issued).
  */
-// Official 2.1.326 (#336): auth state change listeners notified when OAuth
-// credentials/account change or clear (login, logout, account switch).
-const authStateChangeListeners = new Set<() => void>()
+// Official 2.1.326 (#336) / 2.1.331: per-host auth state change listeners
+// notified when OAuth credentials/account change or clear (login, logout, account switch).
+const authStateChangeListenersHostSlot = new HostSlot<Set<() => void>>(
+  () => new Set(),
+)
 
 export function subscribeAuthStateChanged(listener: () => void): () => void {
-  authStateChangeListeners.add(listener)
+  const listeners = authStateChangeListenersHostSlot.of(
+    getBootstrapSessionHost(),
+  )
+  listeners.add(listener)
   return () => {
-    authStateChangeListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function notifyAuthStateChanged(): void {
-  for (const listener of [...authStateChangeListeners]) {
+  const listeners = authStateChangeListenersHostSlot.peek(
+    getBootstrapSessionHost(),
+  )
+  if (!listeners) return
+  for (const listener of [...listeners]) {
     try {
       listener()
     } catch {
@@ -2135,15 +2305,20 @@ async function invalidateOAuthCacheIfDiskChanged(): Promise<void> {
   }
 }
 
-/** Official YPr densable — first unrecovered remote OAuth 401 timestamp. */
-let remoteAuthFailFirstAtMs: number | null = null
+/** Official YPr densable — first unrecovered remote OAuth 401 timestamp (per host). */
+const remoteAuthFailStateByHost = new HostSlot<{
+  firstAtMs: number | null
+}>(() => ({
+  firstAtMs: null,
+}))
 
 function recordRemoteAuthFailExit(recovered: boolean): 'continue' | 'exit' {
+  const slot = remoteAuthFailStateByHost.of(getBootstrapSessionHost())
   const result = evaluateRemoteAuthFailExit(
-    { firstFailAtMs: remoteAuthFailFirstAtMs },
+    { firstFailAtMs: slot.firstAtMs },
     { recovered },
   )
-  remoteAuthFailFirstAtMs = result.state.firstFailAtMs
+  slot.firstAtMs = result.state.firstFailAtMs
   return result.decision
 }
 
@@ -2153,12 +2328,14 @@ function recordRemoteAuthFailExit(recovered: boolean): 'continue' | 'exit' {
  * should reset the zombie-exit clock without going through WYt).
  */
 export function clearRemoteAuthFailExitTimer(): void {
-  remoteAuthFailFirstAtMs = null
+  const slot = remoteAuthFailStateByHost.peek(getBootstrapSessionHost())
+  if (slot) slot.firstAtMs = null
 }
 
 /** Test helper — reset official cjt state. */
 export function _resetRemoteAuthFailExitStateForTesting(): void {
-  remoteAuthFailFirstAtMs = null
+  const slot = remoteAuthFailStateByHost.peek(getBootstrapSessionHost())
+  if (slot) slot.firstAtMs = null
 }
 
 // In-flight dedup: when N claude.ai proxy connectors hit 401 with the same
@@ -3695,17 +3872,8 @@ type OtelHeadersHelperState = {
   prefetched: boolean
 }
 
-const otelHeadersHelperStates = new Map<string, OtelHeadersHelperState>()
-
-function otelHeadersHelperHostKey(): string {
-  return process.env.CLAUDE_CODE_HOST ?? 'default'
-}
-
-function getOtelHeadersHelperState(): OtelHeadersHelperState {
-  const key = otelHeadersHelperHostKey()
-  const existing = otelHeadersHelperStates.get(key)
-  if (existing) return existing
-  const created: OtelHeadersHelperState = {
+function createOtelHeadersHelperState(): OtelHeadersHelperState {
+  return {
     cache: null,
     timestamp: 0,
     inflight: null,
@@ -3713,8 +3881,21 @@ function getOtelHeadersHelperState(): OtelHeadersHelperState {
     failed: createSignal<[string]>(),
     prefetched: false,
   }
-  otelHeadersHelperStates.set(key, created)
-  return created
+}
+
+const otelHeadersHelperStates = new HostSlot<
+  Map<string, OtelHeadersHelperState>
+>(() => new Map())
+
+function getOtelHeadersHelperState(): OtelHeadersHelperState {
+  const byHostKey = otelHeadersHelperStates.of(getBootstrapSessionHost())
+  const hostKey = process.env.CLAUDE_CODE_HOST ?? 'default'
+  let state = byHostKey.get(hostKey)
+  if (!state) {
+    state = createOtelHeadersHelperState()
+    byHostKey.set(hostKey, state)
+  }
+  return state
 }
 
 const DEFAULT_OTEL_HEADERS_DEBOUNCE_MS = 1_740_000

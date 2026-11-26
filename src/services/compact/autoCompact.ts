@@ -24,6 +24,10 @@ import type { CacheSafeParams } from '../../utils/forkedAgent.js'
 import { leftoverP, leftoverY } from '../../utils/leftoverOt.js'
 import { logError } from '../../utils/log.js'
 import { isCompactBoundaryMessage } from '../../utils/messages.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import type {
   Precompute,
   PrecomputeArmTrigger,
@@ -529,18 +533,20 @@ export function recordAutoCompactFailure(
   }
 }
 
-let lastSentClaudeMdTokens: number | undefined
+const lastSentClaudeMdTokensBySession = new RootSessionSlot<{
+  latest: number | undefined
+}>(() => ({ latest: undefined }))
 
 export function recordSentClaudeMdTokens(tokens: number): void {
-  lastSentClaudeMdTokens = tokens
+  lastSentClaudeMdTokensBySession.of(getBootstrapSession()).latest = tokens
 }
 
 export function getLastSentClaudeMdTokens(): number | undefined {
-  return lastSentClaudeMdTokens
+  return lastSentClaudeMdTokensBySession.of(getBootstrapSession()).latest
 }
 
 export function resetSentClaudeMdTokensForTesting(): void {
-  lastSentClaudeMdTokens = undefined
+  lastSentClaudeMdTokensBySession.of(getBootstrapSession()).latest = undefined
 }
 
 /**
@@ -550,6 +556,7 @@ export function resetSentClaudeMdTokensForTesting(): void {
 export async function getClaudeMdGrowthTokens(
   providedClaudeMd?: string,
 ): Promise<number> {
+  const lastSentClaudeMdTokens = getLastSentClaudeMdTokens()
   if (lastSentClaudeMdTokens === undefined) {
     return 0
   }

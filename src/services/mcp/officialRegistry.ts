@@ -3,6 +3,7 @@ import { getOauthConfig } from '../../constants/oauth.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
+import { HostSlot, getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -30,11 +31,27 @@ const DIRECTORY_MAX_CONTENT_LENGTH = 1_048_576
 
 // URLs stripped of credentials, query string, and trailing slash — matches the
 // normalization done by getLoggingSafeMcpBaseUrl so direct Set.has() lookup works.
-let officialUrls: Set<string> | undefined
-let officialUrlsFetchInFlight: Promise<void> | undefined
-let officialUrlsFetchAwaitsLookup = false
-let listableUrlLookedUp = false
-const urlsRegistryCannotList = new Set<string>()
+type HostOfficialRegistryState = {
+  officialUrls: Set<string> | undefined
+  officialUrlsFetchInFlight: Promise<void> | undefined
+  officialUrlsFetchAwaitsLookup: boolean
+  listableUrlLookedUp: boolean
+  urlsRegistryCannotList: Set<string>
+}
+
+const hostOfficialRegistrySlot = new HostSlot<HostOfficialRegistryState>(
+  () => ({
+    officialUrls: undefined,
+    officialUrlsFetchInFlight: undefined,
+    officialUrlsFetchAwaitsLookup: false,
+    listableUrlLookedUp: false,
+    urlsRegistryCannotList: new Set<string>(),
+  }),
+)
+
+function getHostOfficialRegistryState(): HostOfficialRegistryState {
+  return hostOfficialRegistrySlot.of(getBootstrapSessionHost())
+}
 
 export function normalizeOfficialMcpUrl(url: string): string | undefined {
   try {
@@ -64,7 +81,9 @@ export function getOfficialMcpDirectoryUrlsEndpoint(): string {
   return `${origin}/api/directory/server-urls`
 }
 
-async function fetchOfficialDirectoryUrlsNow(): Promise<void> {
+async function fetchOfficialDirectoryUrlsNow(
+  state: HostOfficialRegistryState,
+): Promise<void> {
   if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)) {
     return
   }
@@ -72,7 +91,7 @@ async function fetchOfficialDirectoryUrlsNow(): Promise<void> {
   const source =
     'bff' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
   if (getMcpDirectoryVisibility().length === 0) {
-    officialUrls = new Set<string>()
+    state.officialUrls = new Set<string>()
     logEvent('tengu_mcp_registry_fetch', {
       source,
       success: true,
@@ -110,7 +129,7 @@ async function fetchOfficialDirectoryUrlsNow(): Promise<void> {
         urls.add(normalized)
       }
     }
-    officialUrls = urls
+    state.officialUrls = urls
     logForDebugging(`[mcp-registry] Loaded ${urls.size} official MCP URLs`)
     logEvent('tengu_mcp_registry_fetch', {
       source,
@@ -139,11 +158,14 @@ export async function prefetchOfficialMcpUrls(): Promise<void> {
   if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)) {
     return
   }
-  officialUrlsFetchAwaitsLookup = false
-  officialUrlsFetchInFlight ??= fetchOfficialDirectoryUrlsNow().finally(() => {
-    officialUrlsFetchInFlight = undefined
+  const state = getHostOfficialRegistryState()
+  state.officialUrlsFetchAwaitsLookup = false
+  state.officialUrlsFetchInFlight ??= fetchOfficialDirectoryUrlsNow(
+    state,
+  ).finally(() => {
+    state.officialUrlsFetchInFlight = undefined
   })
-  return officialUrlsFetchInFlight
+  return state.officialUrlsFetchInFlight
 }
 
 /**
@@ -152,19 +174,23 @@ export async function prefetchOfficialMcpUrls(): Promise<void> {
  * while triggering a deferred fetch if startup deferred until first lookup.
  */
 export function isOfficialMcpUrl(normalizedUrl: string): boolean {
-  if (officialUrls !== undefined) {
-    return officialUrls.has(normalizedUrl)
+  const state = getHostOfficialRegistryState()
+  if (state.officialUrls !== undefined) {
+    return state.officialUrls.has(normalizedUrl)
   }
-  if (listableUrlLookedUp || urlsRegistryCannotList.has(normalizedUrl)) {
+  if (
+    state.listableUrlLookedUp ||
+    state.urlsRegistryCannotList.has(normalizedUrl)
+  ) {
     return false
   }
   if (normalizedUrl.startsWith('https://')) {
-    listableUrlLookedUp = true
-    if (officialUrlsFetchAwaitsLookup) {
+    state.listableUrlLookedUp = true
+    if (state.officialUrlsFetchAwaitsLookup) {
       void prefetchOfficialMcpUrls()
     }
   } else {
-    urlsRegistryCannotList.add(normalizedUrl)
+    state.urlsRegistryCannotList.add(normalizedUrl)
   }
   return false
 }
@@ -172,8 +198,9 @@ export function isOfficialMcpUrl(normalizedUrl: string): boolean {
 export function setOfficialMcpUrlsForTesting(
   urls: Iterable<string> | undefined,
 ): void {
+  const state = getHostOfficialRegistryState()
   if (urls === undefined) {
-    officialUrls = undefined
+    state.officialUrls = undefined
     return
   }
   const set = new Set<string>()
@@ -181,13 +208,9 @@ export function setOfficialMcpUrlsForTesting(
     const normalized = normalizeOfficialMcpUrl(u)
     if (normalized) set.add(normalized)
   }
-  officialUrls = set
+  state.officialUrls = set
 }
 
 export function resetOfficialMcpUrlsForTesting(): void {
-  officialUrls = undefined
-  officialUrlsFetchInFlight = undefined
-  officialUrlsFetchAwaitsLookup = false
-  listableUrlLookedUp = false
-  urlsRegistryCannotList.clear()
+  hostOfficialRegistrySlot.drop(getBootstrapSessionHost())
 }

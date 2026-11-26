@@ -47,6 +47,7 @@ import {
 } from './foundryCapabilities.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { isHipaaPolicy } from './midConversationSystem.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 
 /** densable `g$e` @177609369. */
 export const THINKING_DISPLAY_CHOICES = [
@@ -444,21 +445,24 @@ export function emitRelayThinkingStripped(
 }
 
 /** densable query-local `sk` / `Xue` pending until Zue yields. */
-let pendingThinkingStripped: ThinkingStrippedAttachment | undefined
+const pendingThinkingStrippedSlot = new RootSessionSlot<{
+  pending: ThinkingStrippedAttachment | undefined
+}>(() => ({ pending: undefined }))
 
 /** densable `Xue(Ps.from)` — stash until query yields the attachment. */
 export function setPendingThinkingStripped(
   att: ThinkingStrippedAttachment,
 ): void {
-  pendingThinkingStripped = att
+  pendingThinkingStrippedSlot.of(getBootstrapSession()).pending = att
 }
 
 /** densable `Zue()` consume — once, then NU. */
 export function takePendingThinkingStripped():
   | ThinkingStrippedAttachment
   | undefined {
-  const att = pendingThinkingStripped
-  pendingThinkingStripped = undefined
+  const slot = pendingThinkingStrippedSlot.of(getBootstrapSession())
+  const att = slot.pending
+  slot.pending = undefined
   return att
 }
 

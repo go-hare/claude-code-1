@@ -1,4 +1,3 @@
-import { memoize } from 'lodash-es'
 import type { Command } from 'src/commands.js'
 import {
   findCommand,
@@ -8,11 +7,13 @@ import {
 } from 'src/commands.js'
 import { COMMAND_NAME_TAG } from 'src/constants/xml.js'
 import { stringWidth } from '@anthropic/ink'
+import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { toError } from 'src/utils/errors.js'
 import { logError } from 'src/utils/log.js'
 import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
 import { resolveSkillOverrideMode } from 'src/utils/residualFinalEnvGates.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 import { getInitialSettings } from 'src/utils/settings/settings.js'
 import {
   getSkillDescReframeBody,
@@ -242,16 +243,46 @@ export const COORDINATOR_SKILL_APPENDIX = `
 In a coordinator session, the coordinator's own use of this tool is read-only: it loads the skill's instructions to inform replies, triage, and coordination but does not run the skill — no fork, no permission grants, no hooks, no preamble shell commands. Execution happens in workers: hand the skill to one worker, or when its recipe is orchestration, spawn workers per that recipe and synthesize their results. Worker skill invocations execute normally. A \`<${COMMAND_NAME_TAG}>\` block that arrived with only a delegation summary (no skill content) does not mean the skill is loaded — calling this tool to load it is still appropriate then.
 `
 
-export const getPrompt = memoize(async (_cwd?: string): Promise<string> => {
-  // Official skill_desc_reframe arm: denser Skill tool description emphasizing
-  // exact names, directory-scoped variants, and no inventing skill names.
-  if (isSkillDescReframeEnabled()) {
-    return getSkillDescReframeBody(COMMAND_NAME_TAG)
+type CachedSkillPromptFn = ((_cwd?: string) => Promise<string>) & {
+  cache: Map<string, Promise<string>>
+}
+
+const promptCacheByHost = new HostSlot<Map<string, Promise<string>>>(
+  () => new Map(),
+)
+
+function createGetPrompt(): CachedSkillPromptFn {
+  const fn = (_cwd?: string): Promise<string> => {
+    const cache = promptCacheByHost.of(getBootstrapSessionHost())
+    const key = _cwd ?? getCwd()
+    const existing = cache.get(key)
+    if (existing !== undefined) {
+      return existing
+    }
+    const pending = (async (): Promise<string> => {
+      // Official skill_desc_reframe arm: denser Skill tool description emphasizing
+      // exact names, directory-scoped variants, and no inventing skill names.
+      if (isSkillDescReframeEnabled()) {
+        return getSkillDescReframeBody(COMMAND_NAME_TAG)
+      }
+      return isCoordinatorMode()
+        ? BASE_SKILL_PROMPT + COORDINATOR_SKILL_APPENDIX
+        : BASE_SKILL_PROMPT
+    })()
+    cache.set(key, pending)
+    return pending
   }
-  return isCoordinatorMode()
-    ? BASE_SKILL_PROMPT + COORDINATOR_SKILL_APPENDIX
-    : BASE_SKILL_PROMPT
-})
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<string, Promise<string>> {
+      return promptCacheByHost.of(getBootstrapSessionHost())
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedSkillPromptFn
+}
+
+export const getPrompt: CachedSkillPromptFn = createGetPrompt()
 
 export async function getSkillToolInfo(cwd: string): Promise<{
   totalCommands: number

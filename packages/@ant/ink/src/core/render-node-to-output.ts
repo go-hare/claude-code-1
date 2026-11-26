@@ -3,6 +3,7 @@ import indentString from 'indent-string'
 import { applyTextStyles, colorize } from './colorize.js'
 import type { DOMElement, DOMNode } from './dom.js'
 import getMaxWidth from './get-max-width.js'
+import { InkHostSlot } from './instances.js'
 import type { Rectangle } from './layout/geometry.js'
 import { LayoutDisplay, LayoutEdge, type LayoutNode } from './layout/node.js'
 import type Output from './output.js'
@@ -754,16 +755,19 @@ export function leftoverGsRewriteRawAnsiBg(text: string, color: Color): string {
 }
 
 /** densable `M.sequenceFor` — `${color}|${chalk.level}` then DualInk colorize bg prefix. */
-const leftoverGsBgSequenceCache = new Map<string, string>()
+const leftoverGsBgSequenceCacheSlot = new InkHostSlot<Map<string, string>>(
+  () => new Map(),
+)
 
 function leftoverGsBgSequence(color: Color): string {
+  const cache = leftoverGsBgSequenceCacheSlot.of()
   const key = `${color}|${chalk.level}`
-  const cached = leftoverGsBgSequenceCache.get(key)
+  const cached = cache.get(key)
   if (cached !== undefined) return cached
   const wrapped = colorize('\0', color, 'background')
   const idx = wrapped.indexOf('\0')
   const seq = idx <= 0 ? '' : wrapped.slice(0, idx)
-  leftoverGsBgSequenceCache.set(key, seq)
+  cache.set(key, seq)
   return seq
 }
 

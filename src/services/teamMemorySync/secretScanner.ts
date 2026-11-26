@@ -19,6 +19,7 @@
  */
 
 import { logError } from '../../utils/log.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { capitalize } from '../../utils/stringUtils.js'
 
 type SecretRule = {
@@ -388,11 +389,31 @@ type CompiledRule = {
   re: RegExp
 }
 
-// Lazily compiled pattern caches — densable `jKc` / `$hy`.
-let scanRules: CompiledRule[] | null = null
-let fullRedactRules: CompiledRule[] | null = null
-let displayRedactRules: CompiledRule[] | null = null
-const redactResultCache = new Map<string, string>()
+type SecretScannerErrorReporter = (err: unknown) => void
+
+type SecretScannerHostState = {
+  scanRules: CompiledRule[] | null
+  fullRedactRules: CompiledRule[] | null
+  displayRedactRules: CompiledRule[] | null
+  redactResultCache: Map<string, string>
+  errorReporter: SecretScannerErrorReporter | undefined
+  memoryProbeOverrideForTest: (() => void) | undefined
+}
+
+// Lazily compiled pattern caches — densable `jKc` / `$hy`, per-host via HostSlot.
+const secretScannerStateByHost = new HostSlot<SecretScannerHostState>(() => ({
+  scanRules: null,
+  fullRedactRules: null,
+  displayRedactRules: null,
+  redactResultCache: new Map<string, string>(),
+  errorReporter: undefined,
+  memoryProbeOverrideForTest: undefined,
+}))
+
+function getSecretScannerState(): SecretScannerHostState {
+  return secretScannerStateByHost.of(getBootstrapSessionHost())
+}
+
 const REDACT_CACHE_MAX = 512
 const REDACT_CACHE_VALUE_MAX = 512
 
@@ -471,27 +492,30 @@ function compileDisplayRules(): CompiledRule[] {
 }
 
 function getScanRules(): CompiledRule[] {
-  if (scanRules === null) {
+  const state = getSecretScannerState()
+  if (state.scanRules === null) {
     assertSecretScannerMemoryHeadroom()
-    scanRules = compileRules(false)
+    state.scanRules = compileRules(false)
   }
-  return scanRules
+  return state.scanRules
 }
 
 function getFullRedactRules(): CompiledRule[] {
-  if (fullRedactRules === null) {
+  const state = getSecretScannerState()
+  if (state.fullRedactRules === null) {
     assertSecretScannerMemoryHeadroom()
-    fullRedactRules = compileRules(true)
+    state.fullRedactRules = compileRules(true)
   }
-  return fullRedactRules
+  return state.fullRedactRules
 }
 
 function getDisplayRedactRules(): CompiledRule[] {
-  if (displayRedactRules === null) {
+  const state = getSecretScannerState()
+  if (state.displayRedactRules === null) {
     assertSecretScannerMemoryHeadroom()
-    displayRedactRules = compileDisplayRules()
+    state.displayRedactRules = compileDisplayRules()
   }
-  return displayRedactRules
+  return state.displayRedactRules
 }
 
 /**
@@ -601,19 +625,17 @@ function ruleIdToLabel(ruleId: string): string {
  */
 export const SECRET_REDACTION_OOM_FALLBACK = '[hidden for privacy]'
 
-type SecretScannerErrorReporter = (err: unknown) => void
-let secretScannerErrorReporter: SecretScannerErrorReporter | undefined
-
 export function setSecretScannerErrorReporter(
   reporter: SecretScannerErrorReporter | undefined,
 ): void {
-  secretScannerErrorReporter = reporter
+  getSecretScannerState().errorReporter = reporter
 }
 
 function reportSecretScannerError(err: unknown): void {
   try {
-    if (secretScannerErrorReporter !== undefined) {
-      secretScannerErrorReporter(err)
+    const reporter = getSecretScannerState().errorReporter
+    if (reporter !== undefined) {
+      reporter(err)
     } else {
       logError(err)
     }
@@ -627,23 +649,23 @@ function reportSecretScannerError(err: unknown): void {
  * headroom exists before running regex compilation/redaction in low-memory
  * environments, freeing the probe buffer immediately via `ArrayBuffer.transfer(0)`.
  */
-let memoryProbeOverrideForTest: (() => void) | undefined
-
 export function setSecretScannerMemoryProbeForTest(
   probe: (() => void) | undefined,
 ): void {
-  memoryProbeOverrideForTest = probe
-  scanRules = null
-  fullRedactRules = null
-  displayRedactRules = null
-  redactResultCache.clear()
+  const state = getSecretScannerState()
+  state.memoryProbeOverrideForTest = probe
+  state.scanRules = null
+  state.fullRedactRules = null
+  state.displayRedactRules = null
+  state.redactResultCache.clear()
 }
 
 const OOM_PROBE_BYTES = 2 * 1024 * 1024
 
 function assertSecretScannerMemoryHeadroom(): void {
-  if (memoryProbeOverrideForTest !== undefined) {
-    memoryProbeOverrideForTest()
+  const probeOverride = getSecretScannerState().memoryProbeOverrideForTest
+  if (probeOverride !== undefined) {
+    probeOverride()
     return
   }
   if (
@@ -766,6 +788,7 @@ export function scanForSecrets(content: string): SecretMatch[] {
  * Never crashes on OOM (#627): falls back to `[hidden for privacy]`.
  */
 export function redactSecrets(content: string): string {
+  const { redactResultCache } = getSecretScannerState()
   const cacheable = content.length <= REDACT_CACHE_VALUE_MAX
   if (cacheable) {
     const hit = redactResultCache.get(content)

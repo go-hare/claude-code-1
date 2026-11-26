@@ -6,12 +6,20 @@
  * record — screening uses `settleScreening`. Never export densable ids.
  */
 
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
+
 export type PromptSubmitWaitHandle = {
   origin?: unknown
   settle: (result: unknown) => void
 }
 
-const waits = new Map<string, PromptSubmitWaitHandle>()
+const waitsSessionSlot = new RootSessionSlot<
+  Map<string, PromptSubmitWaitHandle>
+>(() => new Map())
+
+function getPromptSubmitWaits(): Map<string, PromptSubmitWaitHandle> {
+  return waitsSessionSlot.of(getBootstrapSession())
+}
 
 const REMOVED_BEFORE_RUN = 'the prompt was removed from the queue before it ran'
 
@@ -23,6 +31,7 @@ export function recordPromptSubmitWait(
   uuid: string,
   origin?: unknown,
 ): Promise<unknown> {
+  const waits = getPromptSubmitWaits()
   return new Promise(resolve => {
     waits.set(uuid, { origin, settle: resolve })
   })
@@ -33,6 +42,7 @@ export function takePromptSubmitWait(
   uuid?: string,
 ): PromptSubmitWaitHandle | undefined {
   if (uuid === undefined) return undefined
+  const waits = getPromptSubmitWaits()
   const handle = waits.get(uuid)
   waits.delete(uuid)
   return handle
@@ -46,6 +56,7 @@ export function settlePromptSubmitWaitsEach(
   commands: readonly { uuid?: string }[],
   result: () => unknown,
 ): void {
+  const waits = getPromptSubmitWaits()
   for (const command of commands) {
     if (command.uuid === undefined) continue
     const handle = waits.get(command.uuid)
@@ -72,16 +83,21 @@ export function settlePromptSubmitWaitsRemoved(
 export function batchPromptSubmitWaitGuard(
   commands: readonly { uuid?: string }[],
 ): Disposable {
+  const waits = getPromptSubmitWaits()
   return {
     [Symbol.dispose]() {
-      settlePromptSubmitWaitsEach(commands, () => ({
-        drop: EARLIER_PROMPT_IN_BATCH_FAILED,
-      }))
+      for (const command of commands) {
+        if (command.uuid === undefined) continue
+        const handle = waits.get(command.uuid)
+        if (!handle) continue
+        waits.delete(command.uuid)
+        handle.settle({ drop: EARLIER_PROMPT_IN_BATCH_FAILED })
+      }
     },
   }
 }
 
 /** Test / queue-reset cleanup. */
 export function resetPromptSubmitWaits(): void {
-  waits.clear()
+  getPromptSubmitWaits().clear()
 }

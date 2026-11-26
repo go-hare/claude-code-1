@@ -454,7 +454,10 @@ export type { Props as BoxProps } from './theme/ThemedBox.js'
 export { default as Text, TextHoverColorContext } from './theme/ThemedText.js'
 export type { Props as TextProps } from './theme/ThemedText.js'
 export { color } from './theme/color.js'
-export { subscribeSystemTheme } from './theme/systemTheme.js'
+export {
+  registerSystemThemeMirror,
+  subscribeSystemTheme,
+} from './theme/systemTheme.js'
 
 // Theme sub-components
 export { SearchBox } from './theme/SearchBox.js'

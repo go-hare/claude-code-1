@@ -168,6 +168,7 @@ import {
   pathInAllowedWorkingPath,
 } from './permissions/filesystem.js'
 import { restrictedAttachmentOutsideMessage } from './restricted.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 import {
   generateTaskAttachments,
   applyTaskOffsetsAndEvictions,
@@ -1282,8 +1283,9 @@ export async function getAttachments(
               )
             ? [
                 maybe('skill_discovery', async () => {
-                  if (suppressNextDiscovery) {
-                    suppressNextDiscovery = false
+                  const skillAttState = getSentSkillAttachmentState()
+                  if (skillAttState.suppressNextDiscovery) {
+                    skillAttState.suppressNextDiscovery = false
                     return []
                   }
                   const result =
@@ -1307,7 +1309,7 @@ export async function getAttachments(
               )
             ? [
                 maybe('tool_discovery', async () => {
-                  if (suppressNextDiscovery) {
+                  if (getSentSkillAttachmentState().suppressNextDiscovery) {
                     return []
                   }
                   const result =
@@ -4317,15 +4319,33 @@ async function getDynamicSkillAttachments(
 // (empty string = main thread) so subagents get their own turn-0 listing —
 // without per-agent scoping, the main thread populating this Set would cause
 // every subagent's filterToBundledAndMcp result to dedup to empty.
-const sentSkillNames = new Map<string, Set<string>>()
+// Scoped per root session via `RootSessionSlot` so concurrent multi-host
+// sessions maintain isolated skill-listing & resume-suppression state.
+export type SentSkillAttachmentState = {
+  sentSkillNames: Map<string, Set<string>>
+  suppressNext: boolean
+  suppressNextDiscovery: boolean
+}
+
+const sentSkillAttachmentStateSlot =
+  new RootSessionSlot<SentSkillAttachmentState>(() => ({
+    sentSkillNames: new Map<string, Set<string>>(),
+    suppressNext: false,
+    suppressNextDiscovery: false,
+  }))
+
+export function getSentSkillAttachmentState(): SentSkillAttachmentState {
+  return sentSkillAttachmentStateSlot.of(getBootstrapSession())
+}
 
 // Called when the skill set genuinely changes (plugin reload, skill file
 // change on disk) so new skills get announced. NOT called on compact —
 // post-compact re-injection costs ~4K tokens/event for marginal benefit.
 export function resetSentSkillNames(): void {
-  sentSkillNames.clear()
-  suppressNext = false
-  suppressNextDiscovery = false
+  const state = getSentSkillAttachmentState()
+  state.sentSkillNames.clear()
+  state.suppressNext = false
+  state.suppressNextDiscovery = false
 }
 
 /**
@@ -4334,7 +4354,7 @@ export function resetSentSkillNames(): void {
  */
 export function forgetSentSkillNames(names: string[]): void {
   if (names.length === 0) return
-  for (const set of sentSkillNames.values()) {
+  for (const set of getSentSkillAttachmentState().sentSkillNames.values()) {
     for (const name of names) {
       set.delete(name)
     }
@@ -4346,11 +4366,11 @@ export function forgetSentSkillNames(names: string[]): void {
  * on --resume when a skill_listing attachment already exists in the
  * transcript.
  *
- * `sentSkillNames` is module-scope — process-local. Each `claude -p` spawn
- * starts with an empty Map, so without this every resume re-injects the
- * full ~600-token listing even though it's already in the conversation from
- * the prior process. Shows up on every --resume; particularly loud for
- * daemons that respawn frequently.
+ * `sentSkillNames` is root-session-scoped. Each fresh root session starts with
+ * an empty Map, so without this every resume re-injects the full ~600-token
+ * listing even though it's already in the conversation from the prior process.
+ * Shows up on every --resume; particularly loud for daemons that respawn
+ * frequently.
  *
  * Trade-off: skills added between sessions won't be announced until the
  * next non-resume session. Acceptable — skill_listing was never meant to
@@ -4358,9 +4378,8 @@ export function forgetSentSkillNames(names: string[]): void {
  * in the Skill tool's runtime registry regardless).
  */
 export function suppressNextSkillListing(): void {
-  suppressNext = true
+  getSentSkillAttachmentState().suppressNext = true
 }
-let suppressNext = false
 
 /**
  * Suppress the next skill-discovery injection on resume. Same rationale as
@@ -4370,9 +4389,8 @@ let suppressNext = false
  * inject duplicate content and bust the prompt cache prefix.
  */
 export function suppressNextSkillDiscovery(): void {
-  suppressNextDiscovery = true
+  getSentSkillAttachmentState().suppressNextDiscovery = true
 }
-let suppressNextDiscovery = false
 
 // When skill-search is enabled and the filtered (bundled + MCP) listing exceeds
 // this count, fall back to bundled-only. Protects MCP-heavy users (100+ servers)
@@ -4494,18 +4512,19 @@ export async function getSkillListingAttachments(
     }
   }
 
+  const skillAttState = getSentSkillAttachmentState()
   const agentKey = toolUseContext.agentId ?? ''
-  let sent = sentSkillNames.get(agentKey)
+  let sent = skillAttState.sentSkillNames.get(agentKey)
   if (!sent) {
     sent = new Set()
-    sentSkillNames.set(agentKey, sent)
+    skillAttState.sentSkillNames.set(agentKey, sent)
   }
 
   // Resume path: prior process already injected a listing; it's in the
   // transcript. Mark everything current as sent so only post-resume deltas
   // (skills loaded later via /reload-plugins etc) get announced.
-  if (suppressNext) {
-    suppressNext = false
+  if (skillAttState.suppressNext) {
+    skillAttState.suppressNext = false
     for (const cmd of allCommands) {
       sent.add(cmd.name)
     }

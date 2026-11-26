@@ -1,5 +1,6 @@
 import { logForDebugging } from './debug.js'
 import { isTelemetryDisabledInEnv } from './privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 /**
  * Environment variables that control inference routing: which provider to use,
@@ -991,10 +992,16 @@ function isRepoReEnablingTelemetry(key: string, value: unknown): boolean {
   return !isTelemetryDisabledInEnv({ [upper]: strVal })
 }
 
-const cloudRepoStripWarnedKeys = new Set<string>()
+const cloudRepoStripWarnedKeysHostSlot = new HostSlot<Set<string>>(
+  () => new Set(),
+)
+
+function getCloudRepoStripWarnedKeys(): Set<string> {
+  return cloudRepoStripWarnedKeysHostSlot.of(getBootstrapSessionHost())
+}
 
 export function clearCloudSessionRepoStripWarnsForTests(): void {
-  cloudRepoStripWarnedKeys.clear()
+  getCloudRepoStripWarnedKeys().clear()
 }
 
 /**
@@ -1020,7 +1027,7 @@ export function stripProjectScopeBlockedEnv(
     opts?.cloudSession !== undefined
       ? opts.cloudSession
       : isAnthropicHostedCloudSession()
-  const warned = opts?.warnedKeys ?? cloudRepoStripWarnedKeys
+  const warned = opts?.warnedKeys ?? getCloudRepoStripWarnedKeys()
   let stripped: Record<string, string> | undefined
   let shouldDisableTelemetry = false
 

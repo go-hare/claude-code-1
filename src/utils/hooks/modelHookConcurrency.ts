@@ -1,4 +1,5 @@
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 /**
  * Upstream v2.1.302 (`fJe = 12`): at most 12 prompt/agent hooks of one event
@@ -18,9 +19,16 @@ type EventSlotState = {
   waiters: Waiter[]
 }
 
-const eventSlots = new Map<string, EventSlotState>()
+const eventSlotsByHost = new HostSlot<Map<string, EventSlotState>>(
+  () => new Map(),
+)
+
+function getHostEventSlots(): Map<string, EventSlotState> {
+  return eventSlotsByHost.of(getBootstrapSessionHost())
+}
 
 function getSlotState(key: string): EventSlotState {
+  const eventSlots = getHostEventSlots()
   let state = eventSlots.get(key)
   if (!state) {
     state = { active: 0, waiters: [] }
@@ -91,9 +99,9 @@ export function acquireModelHookSlot(
 }
 
 export function getActiveModelHookCount(hookEvent: HookEvent | string): number {
-  return eventSlots.get(hookEvent)?.active ?? 0
+  return getHostEventSlots().get(hookEvent)?.active ?? 0
 }
 
 export function resetModelHookConcurrencyForTests(): void {
-  eventSlots.clear()
+  getHostEventSlots().clear()
 }

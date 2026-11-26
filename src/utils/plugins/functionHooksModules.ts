@@ -36,7 +36,7 @@ import type { EffortValue } from '../effort.js'
 import { densableThinkingForceParams } from '../thinking.js'
 import { PERMISSION_MODES } from '../../types/permissions.js'
 import type { AppState } from '../../state/AppStateStore.js'
-import { getClipboardPath, instances, stringWidth } from '@anthropic/ink'
+import { getClipboardPath, Ns, stringWidth } from '@anthropic/ink'
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { findCodeModePrimitiveTool } from '../../services/codeMode/optIn.js'
 import {
@@ -85,6 +85,13 @@ import {
 import { logForDebugging } from '../debug.js'
 import { KITTY_PLACEHOLDER_MAX } from './kittyGraphics.js'
 import { createSignal } from '../signal.js'
+import {
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+} from '../sessionHost.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
 import {
   beginKeptSelectionRun,
@@ -331,8 +338,310 @@ export type LoadedFunctionHooksModule = {
   environmentId?: string
 }
 
-let loadedModules: LoadedFunctionHooksModule[] = []
-const environmentArgs = new Map<string, LoadedFunctionHooksModule>()
+function slotVal<T>(value: T): T {
+  return value
+}
+
+function createSessionFunctionHooksModulesState() {
+  const pluginState = new Map<string, { value: unknown; version: number }>()
+  const pluginSession = {
+    values: pluginState,
+    readers: new Map<string, DrawingReaderRecord>(),
+    readersOf: new Map<string, Set<string>>(),
+    mounted: new Map<string, number>(),
+    faultRuns: new Map<string, ClientFaultRun>(),
+    bumps: 0,
+    versionFloor: 0,
+    folds: {
+      steady: emptyClientFaultFold(),
+      live: emptyClientFaultFold(),
+    },
+  }
+  const paneOpenIds = new Set<string>()
+  let shownPaneId: string | null = null
+  let focusedPaneId: string | null = null
+  const paneClosing = new Set<string>()
+  const askedPanes: AskedPaneRef[] = []
+  const hdPluginLiveBump = scheduleHdPluginBump('live')
+  const hdPluginSteadyBump = scheduleHdPluginBump('steady', {
+    onBump: (plugin, at) => hdPluginLiveBump.bump(plugin, at, true),
+  })
+  const rasterAdmission: RasterAdmission = {
+    tokens: RASTER_ADMISSION_TOKENS,
+    refilledAt: 0,
+  }
+  const sharedRasterPalette = createRasterPalette(Date.now, rasterAdmission)
+  return {
+    loadedModules: slotVal<LoadedFunctionHooksModule[]>([]),
+    environmentArgs: new Map<string, LoadedFunctionHooksModule>(),
+    laterLoadedSessionStart: slotVal<
+      ((mods: readonly LoadedFunctionHooksModule[]) => void) | undefined
+    >(undefined),
+    lastUiRenderPlugin: '',
+    hookRegistrationEpoch: 0,
+    agentSpawnLaunchDepth: 0,
+    skipFirstLog: new Map<string, number>(),
+    skipPersistOnce: new Set<string>(),
+    functionHooksHost: slotVal<FunctionHooksHost>({
+      log() {},
+      hookFailed(report) {
+        noteHookSkipFirst(fillUnappliedRewriteEffect(report))
+      },
+    }),
+    hooksPassedBySessions: new Map<string, Map<string, PassedByRecord>>(),
+    hooksPassedByLines: slotVal<
+      Array<{
+        plugin: string
+        event: string
+        by: string
+        line: string
+      }>
+    >([]),
+    pluginState,
+    pluginSession,
+    pluginAgents: new Map<string, PluginAgentRecord>(),
+    pluginAgentSpawns: new Map<string, number>(),
+    pluginSpawnCallers: new Map<string, string>(),
+    pluginCommands: new Map<
+      string,
+      { plugin: string; spec: PluginCommandSpec }
+    >(),
+    commandRunHandler: slotVal<
+      ((slash: string) => Promise<unknown> | unknown) | undefined
+    >(undefined),
+    pluginStore: new Map<string, unknown>(),
+    promptBoxText: '',
+    promptBoxCursor: 0,
+    promptBoxBound: false,
+    uiResolvePressCounter: 0,
+    sessionAuthEntries: new Map<string, SessionAuthHandleEntry>(),
+    sessionAuthHandlesByPlugin: new Map<string, string[]>(),
+    clockCallbacks: slotVal<Array<{ cancel: () => void }>>([]),
+    audioPlays: new Map<string, number>(),
+    configOverlay: new Map<string, ConfigOverlayValue>(),
+    settingsOverlay: new Map<string, Map<string, unknown>>(),
+    personalPluginEnvWrites: new Map<string, PersonalPluginEnvWrite>(),
+    envIsolationOpen: false,
+    hookedMergeState: slotVal<HookedMergeState>(
+      createInitialHookedMergeState(),
+    ),
+    hostOpPorts: new Map<string, HostOpPort>(),
+    hostOpCounter: 0,
+    pendingHostOps: new Map<
+      number,
+      { resolve: (value: unknown) => void; reject: (err: Error) => void }
+    >(),
+    promptMediaEntries: new Map<
+      string,
+      () => Promise<
+        | { type: 'image' | 'document'; mediaType: string; bytes: Buffer }
+        | { deny: string }
+        | { unreadable: string }
+      >
+    >(),
+    promptMediaSeq: 0,
+    uiViewHostHandler: slotVal<
+      ((args: { agentId?: string }) => Promise<UiViewShowResult>) | undefined
+    >(undefined),
+    turnCacheSafeParams: new Map<
+      string,
+      import('../forkedAgent.js').CacheSafeParams
+    >(),
+    functionHooksToolUseContext: slotVal<
+      FunctionHooksToolUseContext | undefined
+    >(undefined),
+    pluginOwnedMcpServers: new Map<string, Set<string>>(),
+    pluginMcpConnections: new Map<
+      string,
+      Promise<import('./pluginToolSessionHost.js').PluginMcpConnection>
+    >(),
+    backgroundCeilingProvider: slotVal<(() => string | undefined) | undefined>(
+      undefined,
+    ),
+    stoppedSessionForPluginInput: slotVal<
+      { sessionKey: object; stoppedAt: number } | undefined
+    >(undefined),
+    spawnedTurnTakenCallback: slotVal<(() => void) | undefined>(undefined),
+    toolCallHandler: slotVal<
+      ((input: Record<string, unknown>) => Promise<unknown>) | undefined
+    >(undefined),
+    toolCheckHandler: slotVal<
+      ((input: Record<string, unknown>) => Promise<unknown>) | undefined
+    >(undefined),
+    turnAbortHandler: slotVal<
+      ((input: { turnId: string }) => Promise<unknown>) | undefined
+    >(undefined),
+    promptSubmitHandler: slotVal<
+      ((input: { text: string }) => Promise<unknown>) | undefined
+    >(undefined),
+    sessionCompactHandler: slotVal<
+      ((input: { instructions: string }) => Promise<unknown>) | undefined
+    >(undefined),
+    turnRunningReader: slotVal<
+      (() => { turnId: string } | undefined) | undefined
+    >(undefined),
+    pendingUiInvalidations: new Set<string>(),
+    defaultUiInvalidationHandlers: slotVal<Partial<Record<string, () => void>>>(
+      {},
+    ),
+    pluginPanes: slotVal<
+      Array<{
+        id: string
+        plugin: string
+        title: string
+        closeOnEscape?: boolean
+        holdToasts?: boolean
+        rows?: number
+        columns?: number
+      }>
+    >([]),
+    paneOpenIds,
+    get shownPaneId(): string | null {
+      return shownPaneId
+    },
+    set shownPaneId(v: string | null) {
+      shownPaneId = v
+    },
+    get focusedPaneId(): string | null {
+      return focusedPaneId
+    },
+    set focusedPaneId(v: string | null) {
+      focusedPaneId = v
+    },
+    paneClosing,
+    unplacedPanes: slotVal<PluginPaneEntry[]>([]),
+    askedPanes,
+    askedPanesSeeded: false,
+    panesTerminalSize: slotVal<PanesTerminalSize | undefined>(undefined),
+    paneFocusRequest: slotVal<string | null>(null),
+    panePlacements: 0,
+    panesListeners: new Set<PanesListener>(),
+    pluginSites: slotVal<PluginSite[]>([]),
+    ideSites: new Map<string, PluginSite>(),
+    focusSiteDraws: createSignal(),
+    pluginFocusSites: new Map<string, PluginFocusSite>(),
+    pluginDrawings: slotVal<PluginDrawingTree[]>([]),
+    uiRenderEvalCache: new Map<string, UiRenderEvalRecord>(),
+    uiRenderEvalHd: slotVal<Map<string, number> | undefined>(undefined),
+    uiRenderEvalEngineVersion: 0,
+    uiRenderEvalReuseCount: 0,
+    mountedRasters: new Map<string, RasterSite>(),
+    mountedImages: new Map<string, ImageSite>(),
+    rasterFrameVersion: 0,
+    rasterFrameListeners: new Set<() => void>(),
+    rasterAdmission,
+    sharedRasterPalette,
+    pluginInputSeatStore: createStore<PluginFieldSeatBucket>(new Map()),
+    pluginSelectSeatStore: createStore<PluginFieldSeatBucket>(new Map()),
+    pluginFieldSeatGenerationStore: createStore<Map<string, number>>(new Map()),
+    paneRemountGeneration: new Map<string, number>(),
+    pendingPromptSelectionRun: slotVal<number | undefined>(undefined),
+    ownedTables: new Map<string, Record<string, Record<string, unknown>>>(),
+    finalizedEnvironments: new Set<string>(),
+    resolvedTables: new Map<string, unknown>(),
+    resolvedByKey: new Map<string, Map<string, unknown>>(),
+    lastInterfaceCallers: slotVal<unknown[]>([]),
+    interfaceCallerStack: slotVal<unknown[][]>([]),
+    recordedPresses: slotVal<
+      Array<{
+        environmentId: string
+        handle: unknown
+        event: unknown
+      }>
+    >([]),
+    pressHandlers: new Map<string, (event: unknown) => unknown>(),
+    nextClientPressHandle: 0,
+    heldPressStore: createHeldPressStore(),
+    clientPressHandlesByPlugin: new Map<string, Set<number>>(),
+    uiAskHandler: slotVal<
+      ((question: string, options: string[]) => Promise<string>) | undefined
+    >(undefined),
+    uiAskHostHandler: slotVal<
+      ((input: UiAskHostInput) => Promise<UiAskHostResult>) | undefined
+    >(undefined),
+    uiToastShowHandler: slotVal<
+      | ((input: { plugin: string; text: string; timeoutMs?: number }) => void)
+      | undefined
+    >(undefined),
+    uiNotifyHandler: slotVal<
+      | ((input: {
+          plugin: string
+          message: string
+          title: string
+          notificationType: 'plugin_notification'
+          key?: string
+          delayMs?: number
+          at?: number
+          untilBack?: boolean
+        }) => Promise<UiNotifyChannelResult> | UiNotifyChannelResult)
+      | undefined
+    >(undefined),
+    uiCancelNotifyHandler: slotVal<
+      | ((input: { plugin: string; key: string }) => Promise<boolean> | boolean)
+      | undefined
+    >(undefined),
+    uiStatusHandler: slotVal<
+      | ((input: { plugin: string; text: string | undefined }) => void)
+      | undefined
+    >(undefined),
+    pluginToastLastAt: new Map<string, number>(),
+    functionHooksAppStateReader: slotVal<
+      (() => AppState | undefined) | undefined
+    >(undefined),
+    functionHooksAppStateWriter: slotVal<
+      ((updater: (prev: AppState) => AppState) => void) | undefined
+    >(undefined),
+    agentSpawnHandler: slotVal<
+      ((input: Record<string, unknown>) => Promise<unknown>) | undefined
+    >(undefined),
+    pluginHostCalls: slotVal<
+      Array<{
+        namespace: string
+        method: string
+        args: unknown[]
+      }>
+    >([]),
+    functionHooksWorker: slotVal<FunctionHooksWorkerClient | null>(null),
+    workerOwnsDispatch: false,
+    workerReplacementPromise: slotVal<Promise<void> | undefined>(undefined),
+    resolveWorkerReplacement: slotVal<(() => void) | undefined>(undefined),
+    sessionStartDedupStore: new Map<string, SessionStartDedupRecord>(),
+    inFlightByModule: new Map<string, number>(),
+    pluginRenderCooldownUntil: new Map<string, number>(),
+    faultRenderVersions: new Map<string, number>(),
+    hdPluginLiveBump,
+    hdPluginSteadyBump,
+    pluginBandExpanded: true,
+    clientMessagePosts: new Map<string, ClientMessageQueued>(),
+    clientMessageDrain: slotVal<ReturnType<typeof setTimeout> | undefined>(
+      undefined,
+    ),
+    clientMessagesDispatched: 0,
+    headlessPluginOutputFormat: slotVal<string | null>(null),
+    pendingHeadlessModStderrLines: slotVal<string[]>([]),
+    emittedHeadlessModStderrLines: new Set<string>(),
+    sessionTheme: slotVal<SessionThemeState | undefined>(undefined),
+    sessionThemeListeners: new Set<() => void>(),
+    themeTurns: {
+      taken: 0,
+      landed: 0,
+      gone: new Map<string, number>(),
+    },
+  }
+}
+
+type SessionFunctionHooksModulesState = ReturnType<
+  typeof createSessionFunctionHooksModulesState
+>
+
+const sessionFunctionHooksSlot =
+  new RootSessionSlot<SessionFunctionHooksModulesState>(
+    createSessionFunctionHooksModulesState,
+  )
+
+function fhState(): SessionFunctionHooksModulesState {
+  return sessionFunctionHooksSlot.of(getBootstrapSession())
+}
 
 export type HookServingContext = {
   cwd?: string
@@ -520,29 +829,25 @@ export function assertHookValueDepth(
  * (`Azn.set`); a module replace calls `Azn.get()?.(e)`. The callback lives
  * here so the hub never imports the hooks module.
  */
-let laterLoadedSessionStart:
-  | ((mods: readonly LoadedFunctionHooksModule[]) => void)
-  | undefined
 
 /** densable `Azn.set`. `undefined` clears the slot (`et(js(), e => e.set(void 0))`). */
 export function setLaterLoadedSessionStart(
   callback: ((mods: readonly LoadedFunctionHooksModule[]) => void) | undefined,
 ): void {
-  laterLoadedSessionStart = callback
+  fhState().laterLoadedSessionStart = callback
 }
 
 /** densable `dse` / `Azn.get()?.(e)`. */
 export function notifyFunctionHooksModulesLoaded(
   mods?: readonly LoadedFunctionHooksModule[],
 ): void {
-  laterLoadedSessionStart?.(mods ?? loadedModules)
+  fhState().laterLoadedSessionStart?.(mods ?? fhState().loadedModules)
 }
 /** densable last hook that returned a `ui.render` tree (`Te` restamp). */
-let lastUiRenderPlugin = ''
 
 /** densable lead for `L1t` / `Imt` — empty when no hook returned a tree. */
 export function getLastUiRenderPlugin(): string {
-  return lastUiRenderPlugin
+  return fhState().lastUiRenderPlugin
 }
 
 /**
@@ -572,7 +877,7 @@ function noteStateRead(key: string, version: number): void {
 }
 
 export function getLoadedFunctionHooksModules(): readonly LoadedFunctionHooksModule[] {
-  return loadedModules
+  return fhState().loadedModules
 }
 
 /**
@@ -598,10 +903,10 @@ export async function awaitPluginToolSessionUnmount(
 export function setLoadedFunctionHooksModules(
   modules: readonly LoadedFunctionHooksModule[],
 ): string[] {
-  workerOwnsDispatch = false
-  pluginAgents.clear()
-  pluginAgentSpawns.clear()
-  pluginSpawnCallers.clear()
+  fhState().workerOwnsDispatch = false
+  fhState().pluginAgents.clear()
+  fhState().pluginAgentSpawns.clear()
+  fhState().pluginSpawnCallers.clear()
   forgetPluginCommands()
   // densable: nuclear replace must removeMcpServer for every prior Xj key —
   // clearPluginToolRegistryForTests alone leaves orphan MCP mounts (r_o).
@@ -609,69 +914,67 @@ export function setLoadedFunctionHooksModules(
   // Pending-removal set skips densable r_o until remount.
   const removedKeys = forgetAllPluginRegisteredTools()
   void awaitPluginToolSessionUnmount(removedKeys)
-  for (const name of pluginOwnedMcpServers.keys()) {
+  for (const name of fhState().pluginOwnedMcpServers.keys()) {
     forgetPluginOwnedMcpServers(name)
   }
-  pluginMcpConnections.clear()
-  pluginStore.clear()
-  skipFirstLog.clear()
-  skipPersistOnce.clear()
-  promptBoxText = ''
-  promptBoxCursor = 0
+  fhState().pluginMcpConnections.clear()
+  fhState().pluginStore.clear()
+  fhState().skipFirstLog.clear()
+  fhState().skipPersistOnce.clear()
+  fhState().promptBoxText = ''
+  fhState().promptBoxCursor = 0
   setPromptInputStoreValue('')
   clearSessionAuthHandles()
-  uiResolvePressCounter = 0
-  for (const entry of clockCallbacks) entry.cancel()
-  clockCallbacks.length = 0
-  configOverlay.clear()
-  settingsOverlay.clear()
-  pluginPanes.length = 0
-  paneOpenIds.clear()
-  shownPaneId = null
-  focusedPaneId = null
-  paneClosing.clear()
-  unplacedPanes.length = 0
-  askedPanes.length = 0
-  paneFocusRequest = null
-  panePlacements = 0
-  askedPanesSeeded = false
-  panesTerminalSize = undefined
+  fhState().uiResolvePressCounter = 0
+  for (const entry of fhState().clockCallbacks) entry.cancel()
+  fhState().clockCallbacks.length = 0
+  fhState().configOverlay.clear()
+  fhState().settingsOverlay.clear()
+  fhState().pluginPanes.length = 0
+  fhState().paneOpenIds.clear()
+  fhState().shownPaneId = null
+  fhState().focusedPaneId = null
+  fhState().paneClosing.clear()
+  fhState().unplacedPanes.length = 0
+  fhState().askedPanes.length = 0
+  fhState().paneFocusRequest = null
+  fhState().panePlacements = 0
+  fhState().askedPanesSeeded = false
+  fhState().panesTerminalSize = undefined
   setClientTerminalSize(undefined)
-  ideSites.clear()
-  paneRemountGeneration.clear()
-  pluginInputSeatStore.setState(() => new Map())
-  pluginSelectSeatStore.setState(() => new Map())
-  pluginFieldSeatGenerationStore.setState(() => new Map())
+  fhState().ideSites.clear()
+  fhState().paneRemountGeneration.clear()
+  fhState().pluginInputSeatStore.setState(() => new Map())
+  fhState().pluginSelectSeatStore.setState(() => new Map())
+  fhState().pluginFieldSeatGenerationStore.setState(() => new Map())
   notifyPanesListeners()
   resetClientFaultRuns()
   resetClientMessageQueue()
-  pluginDrawings.length = 0
-  lastUiRenderPlugin = ''
-  pluginSites.length = 0
-  pluginFocusSites.clear()
-  focusSiteDraws.clear()
-  pressHandlers.clear()
-  clientPressHandlesByPlugin.clear()
-  pluginToastLastAt.clear()
-  resolvedTables.clear()
-  resolvedByKey.clear()
-  finalizedEnvironments.clear()
-  lastInterfaceCallers = []
-  interfaceCallerStack.length = 0
+  fhState().pluginDrawings.length = 0
+  fhState().lastUiRenderPlugin = ''
+  fhState().pluginSites.length = 0
+  fhState().pluginFocusSites.clear()
+  fhState().focusSiteDraws.clear()
+  fhState().pressHandlers.clear()
+  fhState().clientPressHandlesByPlugin.clear()
+  fhState().pluginToastLastAt.clear()
+  fhState().resolvedTables.clear()
+  fhState().resolvedByKey.clear()
+  fhState().finalizedEnvironments.clear()
+  fhState().lastInterfaceCallers = []
+  fhState().interfaceCallerStack.length = 0
   disposePluginClients()
   forgetPluginSurfaceModules()
   replaceLoadedFunctionHooksModules(modules)
   return removedKeys
 }
 
-let hookRegistrationEpoch = 0
-
 function replaceLoadedFunctionHooksModules(
   modules: readonly LoadedFunctionHooksModule[],
 ): void {
-  hookRegistrationEpoch += 1
-  environmentArgs.clear()
-  loadedModules = modules.map(mod => {
+  fhState().hookRegistrationEpoch += 1
+  fhState().environmentArgs.clear()
+  fhState().loadedModules = modules.map(mod => {
     const entry: LoadedFunctionHooksModule = {
       name: mod.name,
       root: mod.root,
@@ -694,11 +997,11 @@ function replaceLoadedFunctionHooksModules(
       }),
     }
     if (entry.status !== 'unloaded') {
-      environmentArgs.set(entry.environmentId ?? entry.name, entry)
+      fhState().environmentArgs.set(entry.environmentId ?? entry.name, entry)
     }
     return entry
   })
-  for (const mod of loadedModules) {
+  for (const mod of fhState().loadedModules) {
     setPluginSurfaceModules(mod.name, mod.root, mod.surfaceModules ?? [])
   }
   // densable 2.1.289: load/reload pushes ui_invalidate for ui.render so mounted
@@ -707,7 +1010,7 @@ function replaceLoadedFunctionHooksModules(
   bumpRasterFrames()
   // densable 2.1.289: Client fail → owning plugin ui.fault only
   setClientFaultReporter(
-    loadedModules.length > 0
+    fhState().loadedModules.length > 0
       ? report => {
           void dispatchClientFault(report).catch(err => {
             logForDebugging(
@@ -719,21 +1022,21 @@ function replaceLoadedFunctionHooksModules(
       : undefined,
   )
   setClientMessagePostHandler(
-    loadedModules.length > 0 ? enqueueClientMessage : undefined,
+    fhState().loadedModules.length > 0 ? enqueueClientMessage : undefined,
   )
   setClientMessageCancelHandler(
-    loadedModules.length > 0 ? cancelClientMessage : undefined,
+    fhState().loadedModules.length > 0 ? cancelClientMessage : undefined,
   )
   // densable `dse` — `Azn.get()?.(e)` after a module replace. `yn` owns the
   // callback (`Azn.set`); this hub does not raise session.start itself.
-  notifyFunctionHooksModulesLoaded(loadedModules)
+  notifyFunctionHooksModulesLoaded(fhState().loadedModules)
 }
 
 /** densable `cLo` — exact `classic.<event>` on a loaded module. */
 export function hasClassicFunctionHook(event: string): boolean {
-  if (workerReplacementPromise !== undefined) return true
+  if (fhState().workerReplacementPromise !== undefined) return true
   const needle = `classic.${event}`
-  return loadedModules.some(mod => mod.patterns.includes(needle))
+  return fhState().loadedModules.some(mod => mod.patterns.includes(needle))
 }
 
 /**
@@ -767,11 +1070,11 @@ export function hasMatchingFunctionHook(
 ): boolean {
   // #305: while the hooks worker is restarting, don't skip classic.* events
   // before runFunctionHookChain can wait for the replacement modules.
-  if (among === undefined && workerReplacementPromise !== undefined) {
+  if (among === undefined && fhState().workerReplacementPromise !== undefined) {
     return true
   }
   const needle = event.includes('.') ? event : `classic.${event}`
-  return (among ?? loadedModules).some(mod =>
+  return (among ?? fhState().loadedModules).some(mod =>
     (mod.hooks ?? []).some(hook => {
       if (!functionHookPatternMatches(hook.pattern, needle)) return false
       if (payload === undefined) return true
@@ -787,11 +1090,11 @@ function hasMatchingFunctionHookForOp(
   hookOrigin: readonly HookOriginEntry[],
 ): boolean {
   const needle = event.includes('.') ? event : `classic.${event}`
-  return loadedModules.some(mod => {
+  return fhState().loadedModules.some(mod => {
     if (mod.status === 'unloaded') return false
     if (
       mod.status === 'retiring' &&
-      (inFlightByModule.get(mod.name) ?? 0) === 0
+      (fhState().inFlightByModule.get(mod.name) ?? 0) === 0
     ) {
       return false
     }
@@ -810,10 +1113,9 @@ function hasMatchingFunctionHookForOp(
  * densable `iVn` / `CLt.perform` — AgentTool.call is the launch core.
  * `$.agent.spawn` already ran the chain; skip a second `bn` wrap.
  */
-let agentSpawnLaunchDepth = 0
 
 export function isInsideAgentSpawnLaunch(): boolean {
-  return agentSpawnLaunchDepth > 0
+  return fhState().agentSpawnLaunchDepth > 0
 }
 
 export type PromptEditBox = { text: string; cursor: number }
@@ -857,7 +1159,7 @@ export function createPromptEditComposer(host: {
 } {
   const abort = new AbortController()
   let hooked = false
-  promptBoxBound = true
+  fhState().promptBoxBound = true
   let queued: PromptEditRecord[] = []
   let inFlight: PromptEditRecord | undefined
   let scheduled = false
@@ -928,7 +1230,7 @@ export function createPromptEditComposer(host: {
     dispose() {
       queued = []
       abort.abort()
-      promptBoxBound = false
+      fhState().promptBoxBound = false
     },
   }
 }
@@ -1195,13 +1497,11 @@ type FunctionHooksHost = {
  * densable `Xae` — first unique skip English per gold `LLe` key
  * (`${plugin}#${environmentId ?? ''} ${event} ${kind}`).
  */
-const skipFirstLog = new Map<string, number>()
 
 /**
  * densable `NLe` — persist skip English once per
  * `${plugin} ${event} ${hook|hook skipped}` (not per environmentId).
  */
-const skipPersistOnce = new Set<string>()
 
 /** densable `Aa` unapplied rewrite effect. */
 const UNAPPLIED_REWRITE_EFFECT = 'the rest of its rewrite went on'
@@ -1238,10 +1538,10 @@ function persistHookSkipOnce(
   label: string,
   line: string,
 ): void {
-  if (skipPersistOnce.has(label)) return
-  const known = loadedModules.some(mod => mod.name === plugin)
+  if (fhState().skipPersistOnce.has(label)) return
+  const known = fhState().loadedModules.some(mod => mod.name === plugin)
   if (!known && !existsSync(pluginStorePath(plugin))) return
-  skipPersistOnce.add(label)
+  fhState().skipPersistOnce.add(label)
   try {
     const data = readPluginStoreFile(plugin)
     const key = '__hookSkip'
@@ -1255,7 +1555,7 @@ function persistHookSkipOnce(
     lines.push(line)
     const next = { ...data, [key]: lines }
     writePluginStoreFile(plugin, next)
-    pluginStore.set(pluginStoreSlot(plugin, key), lines)
+    fhState().pluginStore.set(pluginStoreSlot(plugin, key), lines)
   } catch {
     // skip persist must not fail the hook
   }
@@ -1272,8 +1572,8 @@ function noteHookSkipFirst(report: FunctionHookFailedReport): void {
   if (skip === undefined || event === 'engine.create') return
   const kind = skip.kind
   const r = skipFirstKey(report, kind)
-  const s = (skipFirstLog.get(r) ?? 0) + 1
-  skipFirstLog.set(r, s)
+  const s = (fhState().skipFirstLog.get(r) ?? 0) + 1
+  fhState().skipFirstLog.set(r, s)
   if (s !== 1) return
   const why = skip.why ?? ''
   const g = kind === 'unapplied' ? 'hook' : 'hook skipped'
@@ -1281,7 +1581,7 @@ function noteHookSkipFirst(report: FunctionHookFailedReport): void {
     kind === 'unapplied'
       ? `${event} hook: ${why}`
       : `${event} hook skipped: ${why}`
-  functionHooksHost.log(h, 'error')
+  fhState().functionHooksHost.log(h, 'error')
   logForDebugging(h, { level: 'error' })
   const plugin = report.plugin
   const b = `${plugin} ${event} ${g}`
@@ -1289,15 +1589,9 @@ function noteHookSkipFirst(report: FunctionHookFailedReport): void {
 }
 
 /** densable `pc` / `oGt`. In-process default runs `xBt`; worker host posts. */
-let functionHooksHost: FunctionHooksHost = {
-  log() {},
-  hookFailed(report) {
-    noteHookSkipFirst(fillUnappliedRewriteEffect(report))
-  },
-}
 
 export function setFunctionHooksHost(host: FunctionHooksHost): void {
-  functionHooksHost = host
+  fhState().functionHooksHost = host
 }
 
 function prefixPluginReason(plugin: string, reason: string): string {
@@ -1324,8 +1618,11 @@ function watchHookBudget(
       plugin,
       `still running ${HOOK_BUDGET_MS}ms after its budget ran out; ignores its signal`,
     )
-    functionHooksHost.log(`hook overran: ${reason} (${event})`, 'error')
-    functionHooksHost.hookFailed({
+    fhState().functionHooksHost.log(
+      `hook overran: ${reason} (${event})`,
+      'error',
+    )
+    fhState().functionHooksHost.hookFailed({
       plugin,
       event,
       reason,
@@ -1341,12 +1638,12 @@ function notifyHookFailed(
   thrown: string,
 ): void {
   fillUnappliedRewriteEffect(report)
-  functionHooksHost.log(
+  fhState().functionHooksHost.log(
     `hook failed: ${report.plugin}: ${thrown} ` +
       `(${report.event}; ${report.effect})`,
     'error',
   )
-  functionHooksHost.hookFailed(report)
+  fhState().functionHooksHost.hookFailed(report)
 }
 
 /**
@@ -1370,14 +1667,6 @@ type PassedByRecord = {
   count: number
 }
 
-const hooksPassedBySessions = new Map<string, Map<string, PassedByRecord>>()
-const hooksPassedByLines: Array<{
-  plugin: string
-  event: string
-  by: string
-  line: string
-}> = []
-
 export function formatHookPassedByLine(
   event: string,
   byPlugin: string,
@@ -1386,20 +1675,20 @@ export function formatHookPassedByLine(
 }
 
 function getPassedBySessionMap(sessionId: string): Map<string, PassedByRecord> {
-  const existing = hooksPassedBySessions.get(sessionId)
+  const existing = fhState().hooksPassedBySessions.get(sessionId)
   if (existing !== undefined) {
-    hooksPassedBySessions.delete(sessionId)
-    hooksPassedBySessions.set(sessionId, existing)
+    fhState().hooksPassedBySessions.delete(sessionId)
+    fhState().hooksPassedBySessions.set(sessionId, existing)
     return existing
   }
   const created = new Map<string, PassedByRecord>()
-  if (hooksPassedBySessions.size >= MAX_PASSED_BY_SESSIONS) {
-    const oldest = hooksPassedBySessions.keys().next()
+  if (fhState().hooksPassedBySessions.size >= MAX_PASSED_BY_SESSIONS) {
+    const oldest = fhState().hooksPassedBySessions.keys().next()
     if (!oldest.done) {
-      hooksPassedBySessions.delete(oldest.value)
+      fhState().hooksPassedBySessions.delete(oldest.value)
     }
   }
-  hooksPassedBySessions.set(sessionId, created)
+  fhState().hooksPassedBySessions.set(sessionId, created)
   return created
 }
 
@@ -1431,7 +1720,12 @@ export function recordHooksPassedBy(opts: {
     if (prev !== undefined) continue
     const line = formatHookPassedByLine(opts.event, opts.by)
     newlyEmitted.push(line)
-    hooksPassedByLines.push({ plugin, event: opts.event, by: opts.by, line })
+    fhState().hooksPassedByLines.push({
+      plugin,
+      event: opts.event,
+      by: opts.by,
+      line,
+    })
     try {
       const { recordPluginUiLog } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1450,12 +1744,12 @@ export function getHooksPassedByLines(): ReadonlyArray<{
   by: string
   line: string
 }> {
-  return hooksPassedByLines
+  return fhState().hooksPassedByLines
 }
 
 export function resetHooksPassedByForTests(): void {
-  hooksPassedBySessions.clear()
-  hooksPassedByLines.length = 0
+  fhState().hooksPassedBySessions.clear()
+  fhState().hooksPassedByLines.length = 0
 }
 
 export async function runFunctionHookChain(
@@ -1497,7 +1791,7 @@ export async function runFunctionHookChain(
   }
   // #305: wait for a pending worker replacement BEFORE computing moduleSteps
   // so classic.* and other hooks on the replacement modules are never skipped.
-  if (workerReplacementPromise !== undefined) {
+  if (fhState().workerReplacementPromise !== undefined) {
     await waitForWorkerReplacement(event, callOptions?.signal)
   }
   // #381: validate payload nesting depth iteratively before handing to hooks.
@@ -1538,19 +1832,19 @@ export async function runFunctionHookChain(
   // function events (`plugin.register`, `tool.call`, …) are the dotted name.
   const needle = event.includes('.') ? event : `classic.${event}`
   if (event === 'ui.render' || needle === 'classic.ui.render') {
-    lastUiRenderPlugin = ''
+    fhState().lastUiRenderPlugin = ''
   }
   const selectionRun =
     event === 'command.run' || event === 'prompt.submit'
       ? beginKeptSelectionRun()
       : undefined
   if (selectionRun !== undefined && event === 'prompt.submit') {
-    endKeptSelectionRun(pendingPromptSelectionRun)
-    pendingPromptSelectionRun = selectionRun
+    endKeptSelectionRun(fhState().pendingPromptSelectionRun)
+    fhState().pendingPromptSelectionRun = selectionRun
   }
   if (event === 'turn.complete' || event === 'turn.end') {
-    endKeptSelectionRun(pendingPromptSelectionRun)
-    pendingPromptSelectionRun = undefined
+    endKeptSelectionRun(fhState().pendingPromptSelectionRun)
+    fhState().pendingPromptSelectionRun = undefined
   }
   if (
     (event === 'session.compact' || needle === 'classic.session.compact') &&
@@ -1580,7 +1874,7 @@ export async function runFunctionHookChain(
     }
     return { mod, hook, registration: -1 }
   })
-  const moduleSteps = loadedModules.flatMap(mod => {
+  const moduleSteps = fhState().loadedModules.flatMap(mod => {
     // densable u8e: g.name !== (n ?? g.name)
     if (only !== undefined && mod.name !== only) return []
     if (environments !== undefined && !environments.includes(mod.name))
@@ -1588,7 +1882,7 @@ export async function runFunctionHookChain(
     if (mod.status === 'unloaded') return []
     if (
       mod.status === 'retiring' &&
-      (inFlightByModule.get(mod.name) ?? 0) === 0
+      (fhState().inFlightByModule.get(mod.name) ?? 0) === 0
     )
       return []
     const leftOut = leftOutRegistrationsForModule(outerHookOrigin, mod.name)
@@ -1614,7 +1908,9 @@ export async function runFunctionHookChain(
   const rawMatched = [...hostSteps, ...moduleSteps]
   // Coalesce consecutive hooks belonging to the same worker module so mixing
   // native + worker modules dispatches once per worker module instead of k^2.
-  const collapseWorkerSteps = Boolean(workerOwnsDispatch && functionHooksWorker)
+  const collapseWorkerSteps = Boolean(
+    fhState().workerOwnsDispatch && fhState().functionHooksWorker,
+  )
   const matched = collapseWorkerSteps
     ? rawMatched.filter((entry, idx) => {
         if (entry.mod.native === true) return true
@@ -1631,12 +1927,16 @@ export async function runFunctionHookChain(
       entry.mod.isManaged === true ||
       entry.hook.isManaged === true,
   )
-  if (workerOwnsDispatch && workerReplacementPromise !== undefined) {
+  if (
+    fhState().workerOwnsDispatch &&
+    fhState().workerReplacementPromise !== undefined
+  ) {
     await waitForWorkerReplacement(event, callOptions?.signal)
   }
-  if (workerOwnsDispatch && functionHooksWorker) {
-    if (functionHooksWorker.died !== undefined) {
-      throw new Error(functionHooksWorker.died)
+  const dispatchWorker = fhState().functionHooksWorker
+  if (fhState().workerOwnsDispatch && dispatchWorker) {
+    if (dispatchWorker.died !== undefined) {
+      throw new Error(dispatchWorker.died)
     }
     if (
       !hasNativeMatched &&
@@ -1646,18 +1946,20 @@ export async function runFunctionHookChain(
       const workerEnvironments =
         environments !== undefined
           ? environments.filter(name =>
-              loadedModules.some(
+              fhState().loadedModules.some(
                 mod =>
                   mod.name === name &&
                   mod.status !== 'unloaded' &&
                   mod.native !== true,
               ),
             )
-          : loadedModules
-              .filter(mod => mod.status !== 'unloaded' && mod.native !== true)
+          : fhState()
+              .loadedModules.filter(
+                mod => mod.status !== 'unloaded' && mod.native !== true,
+              )
               .filter(mod => only === undefined || mod.name === only)
               .map(mod => mod.name)
-      const reply = await functionHooksWorker
+      const reply = await dispatchWorker
         .dispatch(event, payload, workerEnvironments, tail, only, {
           ...(callOptions?.origin !== undefined && {
             origin: callOptions.origin,
@@ -1675,12 +1977,12 @@ export async function runFunctionHookChain(
           reply.returned.block !== undefined)
       ) {
         endKeptSelectionRun(selectionRun)
-        if (pendingPromptSelectionRun === selectionRun) {
-          pendingPromptSelectionRun = undefined
+        if (fhState().pendingPromptSelectionRun === selectionRun) {
+          fhState().pendingPromptSelectionRun = undefined
         }
       }
       if (event === 'ui.render' || needle === 'classic.ui.render') {
-        lastUiRenderPlugin =
+        fhState().lastUiRenderPlugin =
           pluginFromDrawing(reply.returned) ??
           (isEngineDrawing(reply.returned)
             ? ''
@@ -1848,7 +2150,7 @@ export async function runFunctionHookChain(
         }
         const unapplied = callOptions.site.unappliedArgument?.(candidate, value)
         if (unapplied !== undefined) {
-          functionHooksHost.hookFailed({
+          fhState().functionHooksHost.hookFailed({
             plugin: step.mod.name,
             environmentId: step.mod.environmentId ?? step.mod.name,
             event,
@@ -1917,13 +2219,14 @@ export async function runFunctionHookChain(
       get: () => makeStepBudget(stepBudgetMs, stepDeadline, stepBudgetTracker),
       enumerable: true,
     })
+    const stepWorker = fhState().functionHooksWorker
     if (
       hasWorkerMatched &&
       step.mod.native !== true &&
-      workerOwnsDispatch &&
-      functionHooksWorker
+      fhState().workerOwnsDispatch &&
+      stepWorker
     ) {
-      return functionHooksWorker
+      return stepWorker
         .dispatch(
           event,
           value,
@@ -1986,10 +2289,13 @@ export async function runFunctionHookChain(
             (event === 'ui.render' || needle === 'classic.ui.render') &&
             workerReturned !== undefined
           ) {
-            lastUiRenderPlugin =
+            fhState().lastUiRenderPlugin =
               pluginFromDrawing(workerReturned) ??
               (isEngineDrawing(workerReturned) ? '' : step.mod.name)
-            return stampPluginOnDrawing(workerReturned, lastUiRenderPlugin)
+            return stampPluginOnDrawing(
+              workerReturned,
+              fhState().lastUiRenderPlugin,
+            )
           }
           return workerReturned
         })
@@ -2184,7 +2490,7 @@ export async function runFunctionHookChain(
           (event === 'ui.render' || needle === 'classic.ui.render') &&
           returned !== undefined
         ) {
-          lastUiRenderPlugin = step.mod.name
+          fhState().lastUiRenderPlugin = step.mod.name
           return stampPluginOnDrawing(returned, step.mod.name)
         }
         return returned
@@ -2204,7 +2510,7 @@ export async function runFunctionHookChain(
         )
         if (
           step.hook.catch &&
-          (workerReplacementPromise !== undefined ||
+          (fhState().workerReplacementPromise !== undefined ||
             (err instanceof Error && err.message.includes('hooks worker')))
         ) {
           // #399: a .catch must not silently pass a guard hook when the worker
@@ -2312,7 +2618,7 @@ export async function runFunctionHookChain(
               (event === 'ui.render' || needle === 'classic.ui.render') &&
               returned !== undefined
             ) {
-              lastUiRenderPlugin = step.mod.name
+              fhState().lastUiRenderPlugin = step.mod.name
               return stampPluginOnDrawing(returned, step.mod.name)
             }
             return returned
@@ -2420,8 +2726,8 @@ export async function runFunctionHookChain(
           (returned.drop !== undefined || returned.block !== undefined)
         ) {
           endKeptSelectionRun(selectionRun)
-          if (pendingPromptSelectionRun === selectionRun) {
-            pendingPromptSelectionRun = undefined
+          if (fhState().pendingPromptSelectionRun === selectionRun) {
+            fhState().pendingPromptSelectionRun = undefined
           }
         }
         if (event === 'plugin.register' && isEventRecord(returned)) {
@@ -2549,11 +2855,11 @@ export async function runFunctionHookHop(
   const needle = event.includes('.') ? event : `classic.${event}`
   const outerHookOrigin =
     extra?.hookOrigin ?? activeHookOriginAls.getStore() ?? []
-  const rawFromLoaded = loadedModules.flatMap(mod => {
+  const rawFromLoaded = fhState().loadedModules.flatMap(mod => {
     if (mod.status === 'unloaded') return []
     if (
       mod.status === 'retiring' &&
-      (inFlightByModule.get(mod.name) ?? 0) === 0
+      (fhState().inFlightByModule.get(mod.name) ?? 0) === 0
     ) {
       return []
     }
@@ -2569,7 +2875,9 @@ export async function runFunctionHookHop(
       )
       .map(({ hook, registration }) => hopHandlerOf(mod, hook, registration))
   })
-  const collapseWorkerSteps = Boolean(workerOwnsDispatch && functionHooksWorker)
+  const collapseWorkerSteps = Boolean(
+    fhState().workerOwnsDispatch && fhState().functionHooksWorker,
+  )
   const fromLoaded = collapseWorkerSteps
     ? rawFromLoaded.filter((entry, idx) => {
         if (entry.mod.native === true) return true
@@ -2727,14 +3035,15 @@ export async function runFunctionHookHop(
       get: () => makeStepBudget(budgetMs, stepDeadline),
       enumerable: true,
     })
+    const hopWorker = fhState().functionHooksWorker
     if (
       step.mod !== undefined &&
       step.mod.native !== true &&
-      workerOwnsDispatch &&
-      functionHooksWorker
+      fhState().workerOwnsDispatch &&
+      hopWorker
     ) {
       enterModule(step.name)
-      return functionHooksWorker
+      return hopWorker
         .dispatch(
           event,
           value,
@@ -2945,7 +3254,7 @@ function resolveHookCallOrigin(callerPlugin?: string): HookCallOrigin {
   if (callerPlugin === undefined || callerPlugin === '') {
     return ENGINE_HOOK_ORIGIN
   }
-  const found = loadedModules.find(mod => mod.name === callerPlugin)
+  const found = fhState().loadedModules.find(mod => mod.name === callerPlugin)
   const tier =
     found !== undefined
       ? handlerTier({
@@ -2992,9 +3301,9 @@ export async function runEngineCreateLocalInProcess(
     }
     if (Object.keys(extraTable).length > 0 && environments) {
       for (const envId of environments) {
-        if (!finalizedEnvironments.has(envId)) {
+        if (!fhState().finalizedEnvironments.has(envId)) {
           setOwnedTable(envId, {
-            ...(ownedTables.get(envId) ?? {}),
+            ...(fhState().ownedTables.get(envId) ?? {}),
             ...extraTable,
           })
         }
@@ -3006,13 +3315,13 @@ export async function runEngineCreateLocalInProcess(
 
 /** densable `engine.create` fold — initializes `$` extensions (e.g. `cc-plugin-telemetry` batcher). */
 export async function runEngineCreateFold(): Promise<unknown> {
-  const remaining = loadedModules
-    .filter(mod => mod.status !== 'unloaded')
+  const remaining = fhState()
+    .loadedModules.filter(mod => mod.status !== 'unloaded')
     .map(mod => mod.name)
   const tried = new Set<string>()
   let folded: unknown
   while (true) {
-    const activeMods = loadedModules.filter(
+    const activeMods = fhState().loadedModules.filter(
       mod => mod.status !== 'unloaded' && remaining.includes(mod.name),
     )
     const payload: Record<string, unknown> = {
@@ -3033,7 +3342,9 @@ export async function runEngineCreateFold(): Promise<unknown> {
         ),
     )
     if (hookingMods.length === 0 && tried.size === 0) return undefined
-    const useWorker = Boolean(workerOwnsDispatch && functionHooksWorker)
+    const useWorker = Boolean(
+      fhState().workerOwnsDispatch && fhState().functionHooksWorker,
+    )
     const nativeHooking = hookingMods
       .filter(mod => !(useWorker && mod.native !== true))
       .map(mod => mod.name)
@@ -3050,8 +3361,9 @@ export async function runEngineCreateFold(): Promise<unknown> {
           nativeHooking,
         )
       }
-      if (workerHooking.length > 0 && functionHooksWorker) {
-        const workerReply = await functionHooksWorker.engineCreate(
+      const createWorker = fhState().functionHooksWorker
+      if (workerHooking.length > 0 && createWorker) {
+        const workerReply = await createWorker.engineCreate(
           payload,
           workerHooking,
         )
@@ -3094,14 +3406,14 @@ export async function* runFunctionHookStreamChain<TChunk, TReturn = unknown>(
   environments?: readonly string[],
 ): AsyncGenerator<TChunk, TReturn, unknown> {
   const needle = event.includes('.') ? event : `classic.${event}`
-  const rawMatched = loadedModules.flatMap(mod => {
+  const rawMatched = fhState().loadedModules.flatMap(mod => {
     if (only !== undefined && mod.name !== only) return []
     if (environments !== undefined && !environments.includes(mod.name))
       return []
     if (mod.status === 'unloaded') return []
     if (
       mod.status === 'retiring' &&
-      (inFlightByModule.get(mod.name) ?? 0) === 0
+      (fhState().inFlightByModule.get(mod.name) ?? 0) === 0
     ) {
       return []
     }
@@ -3114,7 +3426,9 @@ export async function* runFunctionHookStreamChain<TChunk, TReturn = unknown>(
       )
       .map(({ hook, registration }) => ({ mod, hook, registration }))
   })
-  const collapseWorkerSteps = Boolean(workerOwnsDispatch && functionHooksWorker)
+  const collapseWorkerSteps = Boolean(
+    fhState().workerOwnsDispatch && fhState().functionHooksWorker,
+  )
   const matched = collapseWorkerSteps
     ? rawMatched.filter((entry, idx) => {
         if (entry.mod.native === true) return true
@@ -3153,8 +3467,12 @@ export async function* runFunctionHookStreamChain<TChunk, TReturn = unknown>(
       get: () => makeStepBudget(budgetMs, stepDeadline),
       enumerable: true,
     })
-    if (step.mod.native !== true && workerOwnsDispatch && functionHooksWorker) {
-      const workerClient = functionHooksWorker
+    const workerClient = fhState().functionHooksWorker
+    if (
+      step.mod.native !== true &&
+      fhState().workerOwnsDispatch &&
+      workerClient
+    ) {
       return (async function* (): AsyncGenerator<TChunk, TReturn, unknown> {
         enterModule(step.mod.name)
         try {
@@ -3293,8 +3611,6 @@ installDefaultCollectorTelemetryRoad()
 
 type StateRef = { plugin: string; key: string; id?: string }
 
-const pluginState = new Map<string, { value: unknown; version: number }>()
-
 /** densable MD site `{surface, component, requestId}`. */
 type ClientFaultSite = {
   surface: string
@@ -3337,19 +3653,6 @@ function emptyClientFaultFold(): ClientFaultFold {
  * `values` is `$.state`; `faultRuns`/`mounted`/`bumps` are cO/uO/BC.
  * `folds` is Amt/Zc live=34ms / steady=100ms debounce.
  */
-const pluginSession = {
-  values: pluginState,
-  readers: new Map<string, DrawingReaderRecord>(),
-  readersOf: new Map<string, Set<string>>(),
-  mounted: new Map<string, number>(),
-  faultRuns: new Map<string, ClientFaultRun>(),
-  bumps: 0,
-  versionFloor: 0,
-  folds: {
-    steady: emptyClientFaultFold(),
-    live: emptyClientFaultFold(),
-  },
-}
 
 function stateKey(ref: StateRef): string {
   return `${ref.plugin}\0${ref.key}\0${ref.id ?? ''}`
@@ -3542,11 +3845,8 @@ type PluginAgentRecord = {
   spec: Record<string, unknown>
 }
 
-const pluginAgents = new Map<string, PluginAgentRecord>()
 /** densable K3n — in-flight $.agent.spawn launches per plugin. */
-const pluginAgentSpawns = new Map<string, number>()
 /** densable spawnProvenance.hookCaller — agentId → plugin that spawned it. */
-const pluginSpawnCallers = new Map<string, string>()
 
 /** densable `I_` — plugin → name → spec for `$.command.register`. */
 type PluginCommandSpec = {
@@ -3556,36 +3856,27 @@ type PluginCommandSpec = {
   immediate?: unknown
 }
 
-const pluginCommands = new Map<
-  string,
-  { plugin: string; spec: PluginCommandSpec }
->()
-
-let commandRunHandler:
-  | ((slash: string) => Promise<unknown> | unknown)
-  | undefined
-
 /** densable host `command.run` — REPL queues `/${command}` (or with args). */
 export function setCommandRunHandler(
   handler: ((slash: string) => Promise<unknown> | unknown) | undefined,
 ): void {
-  commandRunHandler = handler
+  fhState().commandRunHandler = handler
 }
 
 export function getPluginRegisteredCommands(): ReadonlyArray<{
   plugin: string
   spec: PluginCommandSpec
 }> {
-  return [...pluginCommands.values()]
+  return [...fhState().pluginCommands.values()]
 }
 
 function forgetPluginCommands(plugin?: string): void {
   if (plugin === undefined) {
-    pluginCommands.clear()
+    fhState().pluginCommands.clear()
     return
   }
-  for (const [name, record] of [...pluginCommands.entries()]) {
-    if (record.plugin === plugin) pluginCommands.delete(name)
+  for (const [name, record] of [...fhState().pluginCommands.entries()]) {
+    if (record.plugin === plugin) fhState().pluginCommands.delete(name)
   }
 }
 
@@ -3603,12 +3894,7 @@ const STORE_NAME_MAX = 64
 const STORE_HASH = 12
 const STORE_PLUGIN_RE = /^[a-z0-9._-]+$/
 const STORE_DOS_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
-const pluginStore = new Map<string, unknown>()
-let promptBoxText = ''
-let promptBoxCursor = 0
 /** densable `px()?.surface==="terminal"` — set when a composer is bound. */
-let promptBoxBound = false
-let uiResolvePressCounter = 0
 
 const SESSION_AUTHORIZE_ENDPOINT = 'https://api.anthropic.com'
 const SESSION_AUTHORIZE_PER_PLUGIN_CAP = 4
@@ -3619,19 +3905,16 @@ type SessionAuthHandleEntry = {
   host: string
 }
 
-const sessionAuthEntries = new Map<string, SessionAuthHandleEntry>()
-const sessionAuthHandlesByPlugin = new Map<string, string[]>()
-
 function clearSessionAuthHandles(): void {
-  sessionAuthEntries.clear()
-  sessionAuthHandlesByPlugin.clear()
+  fhState().sessionAuthEntries.clear()
+  fhState().sessionAuthHandlesByPlugin.clear()
 }
 
 function forgetPluginSessionAuthHandles(plugin: string): void {
-  const handles = sessionAuthHandlesByPlugin.get(plugin)
+  const handles = fhState().sessionAuthHandlesByPlugin.get(plugin)
   if (!handles) return
-  for (const handle of handles) sessionAuthEntries.delete(handle)
-  sessionAuthHandlesByPlugin.delete(plugin)
+  for (const handle of handles) fhState().sessionAuthEntries.delete(handle)
+  fhState().sessionAuthHandlesByPlugin.delete(plugin)
 }
 
 function mintSessionAuthHandle(
@@ -3642,13 +3925,16 @@ function mintSessionAuthHandle(
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { randomUUID } = require('crypto') as typeof import('crypto')
   const handle = `auth_${randomUUID().replace(/-/g, '')}`
-  sessionAuthEntries.set(handle, { plugin, headers, host })
-  const list = [...(sessionAuthHandlesByPlugin.get(plugin) ?? []), handle]
+  fhState().sessionAuthEntries.set(handle, { plugin, headers, host })
+  const list = [
+    ...(fhState().sessionAuthHandlesByPlugin.get(plugin) ?? []),
+    handle,
+  ]
   while (list.length > SESSION_AUTHORIZE_PER_PLUGIN_CAP) {
     const oldest = list.shift()
-    if (oldest !== undefined) sessionAuthEntries.delete(oldest)
+    if (oldest !== undefined) fhState().sessionAuthEntries.delete(oldest)
   }
-  sessionAuthHandlesByPlugin.set(plugin, list)
+  fhState().sessionAuthHandlesByPlugin.set(plugin, list)
   return handle
 }
 
@@ -3656,7 +3942,7 @@ function resolveSessionAuthHandle(
   plugin: string,
   handle: string,
 ): SessionAuthHandleEntry | undefined {
-  const entry = sessionAuthEntries.get(handle)
+  const entry = fhState().sessionAuthEntries.get(handle)
   return entry?.plugin === plugin ? entry : undefined
 }
 
@@ -3726,9 +4012,6 @@ async function runSessionAuthorize(
   }
 }
 
-const clockCallbacks: Array<{ cancel: () => void }> = []
-const audioPlays = new Map<string, number>()
-
 /** densable `dOt` — config.set value. */
 function configValueCheck(value: unknown): string | undefined {
   const scalar =
@@ -3750,9 +4033,6 @@ function uiLogToCheck(value: unknown): string | undefined {
 }
 
 type ConfigOverlayValue = boolean | string | number | string[]
-
-const configOverlay = new Map<string, ConfigOverlayValue>()
-const settingsOverlay = new Map<string, Map<string, unknown>>()
 
 /** densable `qV` — short source names accepted by `$.settings.read({ source })`. */
 const SETTINGS_READ_SOURCE_ALIASES: Readonly<
@@ -3799,10 +4079,10 @@ function settingsSourceCheck(
 }
 
 function overlayForSource(source: string): Map<string, unknown> {
-  const held = settingsOverlay.get(source)
+  const held = fhState().settingsOverlay.get(source)
   if (held) return held
   const next = new Map<string, unknown>()
-  settingsOverlay.set(source, next)
+  fhState().settingsOverlay.set(source, next)
   return next
 }
 
@@ -3812,7 +4092,7 @@ function mergeSettings(
 ): Record<string, unknown> {
   const extra =
     source === undefined
-      ? [...settingsOverlay.values()].reduce<Record<string, unknown>>(
+      ? [...fhState().settingsOverlay.values()].reduce<Record<string, unknown>>(
           (acc, map) => Object.assign(acc, Object.fromEntries(map)),
           {},
         )
@@ -3878,9 +4158,6 @@ export type PersonalPluginEnvWrite = {
   writer?: string
 }
 
-const personalPluginEnvWrites = new Map<string, PersonalPluginEnvWrite>()
-let envIsolationOpen = false
-
 function normalizeEnvKeyForMatch(key: string): string {
   return process.platform === 'win32' ? key.toUpperCase() : key
 }
@@ -3889,7 +4166,7 @@ function entriesMatchingEnvKey(
   key: string,
 ): Array<[string, PersonalPluginEnvWrite]> {
   const target = normalizeEnvKeyForMatch(key)
-  return [...personalPluginEnvWrites.entries()].filter(
+  return [...fhState().personalPluginEnvWrites.entries()].filter(
     ([, entry]) => normalizeEnvKeyForMatch(entry.name) === target,
   )
 }
@@ -3899,8 +4176,10 @@ function isPersonalEnvWriteActive(entry: PersonalPluginEnvWrite): boolean {
 }
 
 function activePersonalEnvWrites(): PersonalPluginEnvWrite[] {
-  const entries = [...personalPluginEnvWrites.values()]
-  return envIsolationOpen ? entries : entries.filter(isPersonalEnvWriteActive)
+  const entries = [...fhState().personalPluginEnvWrites.values()]
+  return fhState().envIsolationOpen
+    ? entries
+    : entries.filter(isPersonalEnvWriteActive)
 }
 
 function setOrDeleteProcessEnv(name: string, value: string | undefined): void {
@@ -3915,26 +4194,26 @@ function beginPersonalEnvSetTrack(
   name: string,
   writer: string | undefined,
 ): () => void {
-  if (!envIsolationOpen) {
+  if (!fhState().envIsolationOpen) {
     for (const [key, entry] of entriesMatchingEnvKey(name)) {
       if (!isPersonalEnvWriteActive(entry)) {
-        personalPluginEnvWrites.delete(key)
+        fhState().personalPluginEnvWrites.delete(key)
       }
     }
   }
-  const existing = personalPluginEnvWrites.get(name) ?? {
+  const existing = fhState().personalPluginEnvWrites.get(name) ?? {
     name,
     before: process.env[name],
     theirs: undefined,
   }
   return () => {
-    personalPluginEnvWrites.set(name, {
+    fhState().personalPluginEnvWrites.set(name, {
       ...existing,
       theirs: undefined,
       writer,
     })
     for (const [key, entry] of entriesMatchingEnvKey(name)) {
-      personalPluginEnvWrites.set(key, {
+      fhState().personalPluginEnvWrites.set(key, {
         ...entry,
         theirs: process.env[entry.name],
         writer,
@@ -3948,7 +4227,7 @@ function clearPersonalEnvSetTrack(name: string): () => void {
     const current = process.env[name]
     for (const [key, entry] of entriesMatchingEnvKey(name)) {
       if (process.env[entry.name] === current) {
-        personalPluginEnvWrites.delete(key)
+        fhState().personalPluginEnvWrites.delete(key)
       }
     }
   }
@@ -3957,12 +4236,12 @@ function clearPersonalEnvSetTrack(name: string): () => void {
 export function dropPersonalPluginEnvSetIfMatches(
   env: Record<string, string | undefined>,
 ): void {
-  if (envIsolationOpen) return
+  if (fhState().envIsolationOpen) return
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined) continue
     for (const [key, entry] of entriesMatchingEnvKey(name)) {
       if (process.env[entry.name] === value) {
-        personalPluginEnvWrites.delete(key)
+        fhState().personalPluginEnvWrites.delete(key)
       }
     }
   }
@@ -3987,7 +4266,7 @@ export function withPersonalPluginEnvIsolated<T>(
   fn: () => T,
   allowWriter?: (writer: string) => boolean,
 ): T {
-  if (envIsolationOpen) return fn()
+  if (fhState().envIsolationOpen) return fn()
   const active = activePersonalEnvWrites()
   if (active.length === 0) return fn()
   const isolated = active.filter(
@@ -4000,20 +4279,20 @@ export function withPersonalPluginEnvIsolated<T>(
     const entry = isolated[i]!
     setOrDeleteProcessEnv(entry.name, entry.before)
   }
-  envIsolationOpen = true
+  fhState().envIsolationOpen = true
   try {
     return fn()
   } finally {
     for (const entry of isolated) {
       setOrDeleteProcessEnv(entry.name, entry.theirs)
     }
-    envIsolationOpen = false
+    fhState().envIsolationOpen = false
   }
 }
 
 export function clearPersonalPluginEnvSetKeysForReset(): void {
-  personalPluginEnvWrites.clear()
-  envIsolationOpen = false
+  fhState().personalPluginEnvWrites.clear()
+  fhState().envIsolationOpen = false
 }
 
 async function runSettingsRead(
@@ -4095,14 +4374,12 @@ function createInitialHookedMergeState(): HookedMergeState {
   }
 }
 
-let hookedMergeState: HookedMergeState = createInitialHookedMergeState()
-
 export function getHookedMergeState(): HookedMergeState {
-  return hookedMergeState
+  return fhState().hookedMergeState
 }
 
 export function resetHookedMergeState(): void {
-  hookedMergeState = createInitialHookedMergeState()
+  fhState().hookedMergeState = createInitialHookedMergeState()
 }
 
 function mergeAnswersFingerprint(values: Map<string, unknown>): string {
@@ -4112,8 +4389,8 @@ function mergeAnswersFingerprint(values: Map<string, unknown>): string {
 
 export function settingsReadPlugins(): string[] {
   const hookOrigin = buildOpHookOrigin(undefined)
-  return loadedModules
-    .filter(
+  return fhState()
+    .loadedModules.filter(
       mod =>
         mod.status !== 'unloaded' &&
         mod.patterns.some(pat =>
@@ -4133,7 +4410,7 @@ export async function engineMergeRead(): Promise<
   const hookOrigin = buildOpHookOrigin(undefined)
   const layers: Array<{ source: string; settings: Record<string, unknown> }> =
     []
-  let base: Record<string, unknown> = hookedMergeState.computed ?? {}
+  let base: Record<string, unknown> = fhState().hookedMergeState.computed ?? {}
   try {
     const { getSettingsForSource, getInitialSettings } = await import(
       '../settings/settings.js'
@@ -4146,7 +4423,7 @@ export async function engineMergeRead(): Promise<
         layers.push({ source, settings: { ...s } })
       }
     }
-    if (hookedMergeState.computed === null) {
+    if (fhState().hookedMergeState.computed === null) {
       base = (getInitialSettings() ?? {}) as Record<string, unknown>
     }
   } catch {
@@ -4209,14 +4486,14 @@ export async function raiseEngineSettingsMerge(
     notifyChange?: (source: (typeof SETTINGS_READ_SOURCES)[number]) => void
   },
 ): Promise<void> {
-  const state = hookedMergeState
+  const state = fhState().hookedMergeState
   state.queuedFor = undefined
   try {
     const prevAnswers = state.answers
-    if (loadedModules.length === 0 && prevAnswers === null) return
+    if (fhState().loadedModules.length === 0 && prevAnswers === null) return
 
     const askedOf = JSON.stringify(
-      loadedModules.map(mod => mod.environmentId ?? mod.name),
+      fhState().loadedModules.map(mod => mod.environmentId ?? mod.name),
     )
     const askedAbout = state.computed
     if (
@@ -4294,7 +4571,7 @@ export async function raiseEngineSettingsMerge(
 
     state.answers = nextAnswers
     state.isAnnouncing = true
-    const regBefore = hookRegistrationEpoch
+    const regBefore = fhState().hookRegistrationEpoch
     try {
       const changedSource =
         SETTINGS_READ_SOURCES.findLast(
@@ -4304,7 +4581,7 @@ export async function raiseEngineSettingsMerge(
     } finally {
       state.isAnnouncing = false
     }
-    const didReload = hookRegistrationEpoch !== regBefore
+    const didReload = fhState().hookRegistrationEpoch !== regBefore
     state.visited = didReload
       ? [...state.visited, mergeAnswersFingerprint(prevValues)]
       : []
@@ -4319,7 +4596,7 @@ export function scheduleEngineSettingsMerge(
   reason: string,
   deps?: Parameters<typeof raiseEngineSettingsMerge>[1],
 ): Promise<void> {
-  const state = hookedMergeState
+  const state = fhState().hookedMergeState
   if (state.queuedFor === undefined && !state.isAnnouncing) {
     state.queuedFor = reason
     state.pass = state.pass.then(() => raiseEngineSettingsMerge(reason, deps))
@@ -4330,8 +4607,8 @@ export function scheduleEngineSettingsMerge(
 export function onSettingsChangedForMerge(
   deps?: Parameters<typeof raiseEngineSettingsMerge>[1],
 ): Promise<void> {
-  if (!hookedMergeState.isAnnouncing) {
-    hookedMergeState.unsettled = new Set()
+  if (!fhState().hookedMergeState.isAnnouncing) {
+    fhState().hookedMergeState.unsettled = new Set()
   }
   return scheduleEngineSettingsMerge('the settings changed', deps)
 }
@@ -5010,10 +5287,10 @@ function engineClock(
       cancel() {
         if (timer !== undefined) clearTimeout(timer)
         timer = undefined
-        const at = clockCallbacks.findIndex(
+        const at = fhState().clockCallbacks.findIndex(
           entry => entry.cancel === handle.cancel,
         )
-        if (at >= 0) clockCallbacks.splice(at, 1)
+        if (at >= 0) fhState().clockCallbacks.splice(at, 1)
       },
     }
     const tick = (): void => {
@@ -5028,7 +5305,7 @@ function engineClock(
         handle.cancel()
       }
     }
-    clockCallbacks.push(handle)
+    fhState().clockCallbacks.push(handle)
     void hostOp(environmentId, shouldRepeat ? 'clock.every' : 'clock.after', [
       { ms: delay },
     ]).then(() => {
@@ -5290,7 +5567,7 @@ function pluginEngine(
     state: {
       async get(ref: unknown) {
         const key = stateKey(readStateRef(ref, 'get'))
-        const slot = pluginState.get(key)
+        const slot = fhState().pluginState.get(key)
         // densable Gpr: missing key is { value: undefined, version: 0 }
         const version = slot?.version ?? 0
         noteStateRead(key, version)
@@ -5301,7 +5578,7 @@ function pluginEngine(
       },
       async set(ref: unknown, value: unknown, opts?: { ifVersion?: number }) {
         const key = stateKey(readStateRef(ref, 'set'))
-        const current = pluginState.get(key)
+        const current = fhState().pluginState.get(key)
         if (
           opts?.ifVersion !== undefined &&
           (current?.version ?? 0) !== opts.ifVersion
@@ -5309,7 +5586,7 @@ function pluginEngine(
           return { isSet: false, version: current?.version ?? 0 }
         }
         const version = (current?.version ?? 0) + 1
-        pluginState.set(key, { value, version })
+        fhState().pluginState.set(key, { value, version })
         notifyDrawingReadersOfKeys([key])
         return { isSet: true, version }
       },
@@ -5404,7 +5681,7 @@ function pluginEngine(
         // In worker mode, resolve element constructors locally inside the worker
         // so functions never cross MessagePort (and press handles register in the
         // worker's pressHandlers table, invoked via PressMessage).
-        if (hostOpPorts.has(environmentId) && isEventRecord(input)) {
+        if (fhState().hostOpPorts.has(environmentId) && isEventRecord(input)) {
           const surface = String(input.surface)
           const component = String(input.component)
           const stored = getResolvedAnswer(environmentId, surface, component)
@@ -5728,22 +6005,16 @@ type HostOpPort = {
   on?: (event: 'message', listener: (value: unknown) => void) => void
 }
 
-const hostOpPorts = new Map<string, HostOpPort>()
-let hostOpCounter = 0
-const pendingHostOps = new Map<
-  number,
-  { resolve: (value: unknown) => void; reject: (err: Error) => void }
->()
-
 export function bindHostOpPort(environmentId: string, port: HostOpPort): void {
-  hostOpPorts.set(environmentId, port)
+  const state = fhState()
+  state.hostOpPorts.set(environmentId, port)
   port.on?.('message', (raw: unknown) => {
     const message = isEventRecord(raw) ? raw : undefined
     if (!message) return
     if (message.type === 'op_result' || message.type === 'op_error') {
-      const pending = pendingHostOps.get(Number(message.opId))
+      const pending = state.pendingHostOps.get(Number(message.opId))
       if (!pending) return
-      pendingHostOps.delete(Number(message.opId))
+      state.pendingHostOps.delete(Number(message.opId))
       if (message.type === 'op_error')
         pending.reject(new Error(String(message.error ?? 'op_error')))
       else pending.resolve(message.value)
@@ -5752,7 +6023,7 @@ export function bindHostOpPort(environmentId: string, port: HostOpPort): void {
 }
 
 export function unbindHostOpPort(environmentId: string): void {
-  hostOpPorts.delete(environmentId)
+  fhState().hostOpPorts.delete(environmentId)
 }
 
 /** densable hostOps: `$` methods that are not local go through the environment port. */
@@ -5761,9 +6032,9 @@ function hostOp(
   op: string,
   args: unknown[],
 ): Promise<unknown> {
-  const port = hostOpPorts.get(environmentId)
+  const port = fhState().hostOpPorts.get(environmentId)
   if (!port) return handleHostOp(op, args, environmentId)
-  const opId = ++hostOpCounter
+  const opId = ++fhState().hostOpCounter
   const activeOrigin = activeHookOriginAls.getStore()
   const activeFrame = activeOrigin?.at(-1)
   const registration =
@@ -5774,7 +6045,7 @@ function hostOp(
       : undefined
   const activeServing = activeHookServingAls.getStore()
   return new Promise((resolve, reject) => {
-    pendingHostOps.set(opId, { resolve, reject })
+    fhState().pendingHostOps.set(opId, { resolve, reject })
     port.postMessage({
       type: 'op',
       opId,
@@ -6366,16 +6637,6 @@ export type PromptMediaAttachmentInput = {
   >
 }
 
-const promptMediaEntries = new Map<
-  string,
-  () => Promise<
-    | { type: 'image' | 'document'; mediaType: string; bytes: Buffer }
-    | { deny: string }
-    | { unreadable: string }
-  >
->()
-let promptMediaSeq = 0
-
 function slicePromptMediaChunk(
   entry:
     | { type: 'image' | 'document'; mediaType: string; bytes: Buffer }
@@ -6410,9 +6671,9 @@ export async function withPromptSubmitMedia<T>(
 ): Promise<T> {
   const ids: string[] = []
   for (const item of items) {
-    const id = `media_${++promptMediaSeq}`
+    const id = `media_${++fhState().promptMediaSeq}`
     let cached: ReturnType<PromptMediaAttachmentInput['read']> | undefined
-    promptMediaEntries.set(id, () => (cached ??= item.read()))
+    fhState().promptMediaEntries.set(id, () => (cached ??= item.read()))
     ids.push(id)
   }
   const prev = activeHookServingAls.getStore()
@@ -6422,7 +6683,7 @@ export async function withPromptSubmitMedia<T>(
       () => fn(ids),
     )
   } finally {
-    for (const id of ids) promptMediaEntries.delete(id)
+    for (const id of ids) fhState().promptMediaEntries.delete(id)
   }
 }
 
@@ -6430,10 +6691,10 @@ export async function readPromptMediaById(
   id: string,
   offset = 0,
 ): Promise<Record<string, unknown>> {
-  const reader = promptMediaEntries.get(id)
+  const reader = fhState().promptMediaEntries.get(id)
   if (!reader) return PROMPT_MEDIA_ABSENT
   const entry = await reader()
-  if (!promptMediaEntries.has(id)) return PROMPT_MEDIA_ABSENT
+  if (!fhState().promptMediaEntries.has(id)) return PROMPT_MEDIA_ABSENT
   return slicePromptMediaChunk(entry, offset)
 }
 
@@ -6445,16 +6706,12 @@ export type UiViewShowResult =
   | 'moved'
   | 'elsewhere'
 
-let uiViewHostHandler:
-  | ((args: { agentId?: string }) => Promise<UiViewShowResult>)
-  | undefined
-
 export function setUiViewHost(
   handler:
     | ((args: { agentId?: string }) => Promise<UiViewShowResult>)
     | undefined,
 ): void {
-  uiViewHostHandler = handler
+  fhState().uiViewHostHandler = handler
 }
 
 export async function handleHostOp(
@@ -6480,7 +6737,7 @@ async function handleHostOpInner(
   serving?: HookServingContext,
 ): Promise<unknown> {
   const [namespace, method] = op.split('.')
-  pluginHostCalls.push({
+  fhState().pluginHostCalls.push({
     namespace: namespace ?? op,
     method: method ?? op,
     args,
@@ -6640,7 +6897,9 @@ async function handleHostOpInner(
     const toastText = String(rec?.text ?? '')
     const now = Date.now()
     if (
-      now - (pluginToastLastAt.get(pluginName) ?? Number.NEGATIVE_INFINITY) <
+      now -
+        (fhState().pluginToastLastAt.get(pluginName) ??
+          Number.NEGATIVE_INFINITY) <
       UI_TOAST_COOLDOWN_MS
     ) {
       logForDebugging(
@@ -6648,8 +6907,8 @@ async function handleHostOpInner(
       )
       return undefined
     }
-    pluginToastLastAt.set(pluginName, now)
-    uiToastShowHandler?.({
+    fhState().pluginToastLastAt.set(pluginName, now)
+    fhState().uiToastShowHandler?.({
       plugin: pluginName,
       text: toastText,
       ...(typeof timeoutMs === 'number' ? { timeoutMs } : {}),
@@ -6665,8 +6924,9 @@ async function handleHostOpInner(
       typeof rec?.title === 'string' && rec.title !== ''
         ? rec.title
         : pluginName
-    const channel = uiNotifyHandler
-      ? await uiNotifyHandler({
+    const notifyHandler = fhState().uiNotifyHandler
+    const channel = notifyHandler
+      ? await notifyHandler({
           plugin: pluginName,
           message: text,
           title,
@@ -6689,9 +6949,10 @@ async function handleHostOpInner(
     const err = validateNotifyKey(rec?.key)
     if (err !== undefined) hostCheck(op, err, plugin)
     const pluginName = plugin ?? ''
-    const isSent = uiCancelNotifyHandler
+    const cancelNotifyHandler = fhState().uiCancelNotifyHandler
+    const isSent = cancelNotifyHandler
       ? Boolean(
-          await uiCancelNotifyHandler({
+          await cancelNotifyHandler({
             plugin: pluginName,
             key: String(rec?.key),
           }),
@@ -6726,11 +6987,11 @@ async function handleHostOpInner(
       const { getInitialSettings } = await import('../settings/settings.js')
       const keys = new Set([
         ...Object.keys(getInitialSettings() ?? {}),
-        ...configOverlay.keys(),
+        ...fhState().configOverlay.keys(),
       ])
       return [...keys]
     } catch {
-      return [...configOverlay.keys()]
+      return [...fhState().configOverlay.keys()]
     }
   }
   if (op === 'config.set') {
@@ -6745,7 +7006,7 @@ async function handleHostOpInner(
     }
     const valueCheck = configValueCheck(value)
     if (valueCheck !== undefined) hostCheck(op, valueCheck, plugin)
-    configOverlay.set(key, value as ConfigOverlayValue)
+    fhState().configOverlay.set(key, value as ConfigOverlayValue)
     return undefined
   }
   if (op === 'flag.value') {
@@ -6785,7 +7046,9 @@ async function handleHostOpInner(
       )
     }
     const mod = plugin
-      ? loadedModules.find(m => m.name === plugin && m.status !== 'unloaded')
+      ? fhState().loadedModules.find(
+          m => m.name === plugin && m.status !== 'unloaded',
+        )
       : undefined
     const isTrustedEnvWriter =
       mod !== undefined &&
@@ -6827,7 +7090,9 @@ async function handleHostOpInner(
       )
     }
     const mod = plugin
-      ? loadedModules.find(m => m.name === plugin && m.status !== 'unloaded')
+      ? fhState().loadedModules.find(
+          m => m.name === plugin && m.status !== 'unloaded',
+        )
       : undefined
     const isManaged =
       mod !== undefined &&
@@ -6845,7 +7110,9 @@ async function handleHostOpInner(
   }
   if (op === 'session.identity') {
     const mod = plugin
-      ? loadedModules.find(m => m.name === plugin && m.status !== 'unloaded')
+      ? fhState().loadedModules.find(
+          m => m.name === plugin && m.status !== 'unloaded',
+        )
       : undefined
     const isManaged =
       mod !== undefined &&
@@ -6900,13 +7167,14 @@ async function handleHostOpInner(
         plugin,
       )
     }
-    if (!uiViewHostHandler) {
+    const viewHostHandler = fhState().uiViewHostHandler
+    if (!viewHostHandler) {
       return { deny: 'no main view here' }
     }
     if (serving?.isPersonInitiated === false) {
       return { deny: 'not person-initiated' }
     }
-    const status = await uiViewHostHandler(
+    const status = await viewHostHandler(
       'agentId' in rec ? { agentId: rec.agentId as string } : {},
     )
     switch (status) {
@@ -7003,9 +7271,9 @@ async function handleHostOpInner(
     const text =
       storeState.active || storeState.value !== ''
         ? storeState.value
-        : promptBoxText
+        : fhState().promptBoxText
     const cursor =
-      storeState.cursor !== null ? storeState.cursor : promptBoxCursor
+      storeState.cursor !== null ? storeState.cursor : fhState().promptBoxCursor
     return { text, cursor: Math.min(Math.max(0, cursor), text.length) }
   }
   if (op === 'prompt.fill') {
@@ -7031,7 +7299,8 @@ async function handleHostOpInner(
       })
       return { isFilled: filled === true }
     }
-    if (!promptBoxBound) return { isFilled: false, refusal: 'no_composer' }
+    if (!fhState().promptBoxBound)
+      return { isFilled: false, refusal: 'no_composer' }
     return runPromptFill(rec ?? {}, plugin)
   }
   if (op === 'prompt.suggest') {
@@ -7167,7 +7436,8 @@ async function handleHostOpInner(
     const activeMod = activeHookModuleAls.getStore()
     if (
       activeMod !== undefined &&
-      (!loadedModules.includes(activeMod) || activeMod.status === 'unloaded')
+      (!fhState().loadedModules.includes(activeMod) ||
+        activeMod.status === 'unloaded')
     ) {
       const who = plugin ?? activeMod.name
       throw new Error(
@@ -7395,7 +7665,7 @@ async function handleHostOpInner(
   }
   if (op === 'state.get') {
     const key = stateKey(readStateRef(args[0], 'get'))
-    const slot = pluginState.get(key)
+    const slot = fhState().pluginState.get(key)
     // densable Gpr: missing key is { value: undefined, version: 0 }
     const version = slot?.version ?? 0
     noteStateRead(key, version)
@@ -7409,7 +7679,7 @@ async function handleHostOpInner(
     const value =
       rec && 'value' in rec && args.length === 1 ? rec.value : args[1]
     const opts = isEventRecord(args[2]) ? args[2] : undefined
-    const current = pluginState.get(key)
+    const current = fhState().pluginState.get(key)
     const ifVersion = opts?.ifVersion
     if (
       typeof ifVersion === 'number' &&
@@ -7418,7 +7688,7 @@ async function handleHostOpInner(
       return { isSet: false, version: current?.version ?? 0 }
     }
     const version = (current?.version ?? 0) + 1
-    pluginState.set(key, { value, version })
+    fhState().pluginState.set(key, { value, version })
     notifyDrawingReadersOfKeys([key])
     return { isSet: true, version }
   }
@@ -7435,17 +7705,19 @@ async function runUiAsk(args: unknown[], plugin?: string): Promise<unknown> {
   const questions = Array.isArray(input.questions)
     ? (input.questions as UiAskHostInput['questions'])
     : []
-  if (uiAskHostHandler) {
-    return uiAskHostHandler({
+  const askHostHandler = fhState().uiAskHostHandler
+  if (askHostHandler) {
+    return askHostHandler({
       tool: 'AskUserQuestion',
       questions,
     })
   }
-  if (uiAskHandler) {
+  const askHandler = fhState().uiAskHandler
+  if (askHandler) {
     const first = questions[0]
     const question = first?.question ?? ''
     const options = (first?.options ?? []).map(option => option.label)
-    const answer = await uiAskHandler(question, options)
+    const answer = await askHandler(question, options)
     return { result: { answers: { [question]: answer } } }
   }
   const answers: Record<string, string> = {}
@@ -7803,20 +8075,15 @@ function forkUsageOf(usage: {
   }
 }
 
-const turnCacheSafeParams = new Map<
-  string,
-  import('../forkedAgent.js').CacheSafeParams
->()
-
 export function setTurnRequestCacheSafeParams(
   turnId: string,
   params: import('../forkedAgent.js').CacheSafeParams,
 ): void {
-  turnCacheSafeParams.set(turnId, params)
+  fhState().turnCacheSafeParams.set(turnId, params)
 }
 
 export function clearTurnRequestCacheSafeParams(turnId: string): void {
-  turnCacheSafeParams.delete(turnId)
+  fhState().turnCacheSafeParams.delete(turnId)
 }
 
 /** densable `T_t` `$.model.fork`. */
@@ -7829,8 +8096,9 @@ async function runModelFork(
   )
   const heldTurn = getCurrentHeldTurnId()
   const params =
-    (heldTurn !== undefined ? turnCacheSafeParams.get(heldTurn) : undefined) ??
-    getLastCacheSafeParams()
+    (heldTurn !== undefined
+      ? fhState().turnCacheSafeParams.get(heldTurn)
+      : undefined) ?? getLastCacheSafeParams()
   if (!params) {
     return { isAnswered: false, reason: 'nothing-to-fork' }
   }
@@ -8102,8 +8370,6 @@ type FunctionHooksToolUseContext = {
   getParentAssistantMessage?: () => unknown
 }
 
-let functionHooksToolUseContext: FunctionHooksToolUseContext | undefined
-
 /**
  * #1938 (2.1.321): Permission-mode policy for Claude-authored dev mods.
  * - `dontAsk`: never load mods (`block-dont-ask`).
@@ -8266,15 +8532,16 @@ async function runHostToolCallXL(
   }
   const args = hostToolArgsFromCall(input)
 
-  const ctxHostEarly = functionHooksToolUseContext
+  const ctxHostEarly = fhState().functionHooksToolUseContext
   const baseCtxEarly = ctxHostEarly?.getToolUseContext?.()
   const ctxToolsEarly = Array.isArray(baseCtxEarly?.options?.tools)
     ? baseCtxEarly.options.tools
     : []
   // densable XL always streams $3 when the session has tools; handler is the
   // test/compat stand-in only when no tool-use context is bound.
-  if (!(ctxHostEarly && ctxToolsEarly.length > 0) && toolCallHandler) {
-    const called = await toolCallHandler({ tool: toolName, ...args })
+  const earlyToolCallHandler = fhState().toolCallHandler
+  if (!(ctxHostEarly && ctxToolsEarly.length > 0) && earlyToolCallHandler) {
+    const called = await earlyToolCallHandler({ tool: toolName, ...args })
     if (isEventRecord(called) && called.deny !== undefined) {
       return { deny: String(called.deny) }
     }
@@ -8296,10 +8563,10 @@ async function runHostToolCallXL(
     return { result: called, text: '' }
   }
 
-  const app = functionHooksAppStateReader?.()
+  const app = fhState().functionHooksAppStateReader?.()
   const mcpTools = (app?.mcp?.tools ?? []) as McpListedTool[]
   const listed = [...sessionTools(), ...mcpTools]
-  const ctxHost = functionHooksToolUseContext
+  const ctxHost = fhState().functionHooksToolUseContext
   const baseCtx = ctxHost?.getToolUseContext?.()
   const ctxTools = Array.isArray(baseCtx?.options?.tools)
     ? (baseCtx.options.tools as Array<{ name?: string }>)
@@ -8488,9 +8755,9 @@ async function runMcpCall(
   const argsBag = isEventRecord(callArgs) ? callArgs : {}
   // densable eU always executes the shared tool host; a listed MCP client
   // alone is not an execution context and must never bypass permissions/hooks.
-  const context = functionHooksToolUseContext?.getToolUseContext()
+  const context = fhState().functionHooksToolUseContext?.getToolUseContext()
   if (
-    !toolCallHandler &&
+    !fhState().toolCallHandler &&
     !(
       Array.isArray(context?.options?.tools) && context.options.tools.length > 0
     )
@@ -8514,16 +8781,10 @@ async function runMcpCall(
   return { content, isError: result.isError === true }
 }
 
-const pluginOwnedMcpServers = new Map<string, Set<string>>()
-const pluginMcpConnections = new Map<
-  string,
-  Promise<import('./pluginToolSessionHost.js').PluginMcpConnection>
->()
-
 function forgetPluginOwnedMcpServers(pluginName: string): void {
-  const owned = pluginOwnedMcpServers.get(pluginName)
+  const owned = fhState().pluginOwnedMcpServers.get(pluginName)
   if (!owned) return
-  pluginOwnedMcpServers.delete(pluginName)
+  fhState().pluginOwnedMcpServers.delete(pluginName)
   const host = getPluginToolSessionHost()
   for (const name of owned) {
     void host?.removeMcpServer?.(name)
@@ -8581,32 +8842,32 @@ async function runMcpConnect(
             message: result.message,
           }
     }
-    const ownedByAnyPlugin = [...pluginOwnedMcpServers.values()].some(set =>
-      set.has(name),
+    const ownedByAnyPlugin = [...fhState().pluginOwnedMcpServers.values()].some(
+      set => set.has(name),
     )
     const preExistingInSession =
       !ownedByAnyPlugin && Boolean(host.mcpServers?.().includes(name))
     if (!preExistingInSession) {
-      let owned = pluginOwnedMcpServers.get(prefix)
+      let owned = fhState().pluginOwnedMcpServers.get(prefix)
       if (!owned) {
         owned = new Set()
-        pluginOwnedMcpServers.set(prefix, owned)
+        fhState().pluginOwnedMcpServers.set(prefix, owned)
       }
       owned.add(name)
     }
-    let connection = pluginMcpConnections.get(name)
+    let connection = fhState().pluginMcpConnections.get(name)
     if (!connection) {
       connection = Promise.resolve().then(() =>
         host.connectMcpServer!(name, resolved.config),
       )
-      pluginMcpConnections.set(name, connection)
+      fhState().pluginMcpConnections.set(name, connection)
     }
     let result: import('./pluginToolSessionHost.js').PluginMcpConnection
     try {
       result = await connection
     } finally {
-      if (pluginMcpConnections.get(name) === connection) {
-        pluginMcpConnections.delete(name)
+      if (fhState().pluginMcpConnections.get(name) === connection) {
+        fhState().pluginMcpConnections.delete(name)
       }
     }
     if (!result.isConnected) {
@@ -8617,7 +8878,7 @@ async function runMcpConnect(
       }
     }
     if (
-      !loadedModules.some(
+      !fhState().loadedModules.some(
         mod => mod.name === prefix && mod.status !== 'unloaded',
       )
     ) {
@@ -8726,7 +8987,7 @@ function pluginAgentHasActiveBackgroundWork(
 }
 
 function listPluginAgents(): Array<Record<string, unknown>> {
-  const tasks = functionHooksAppStateReader?.()?.tasks ?? {}
+  const tasks = fhState().functionHooksAppStateReader?.()?.tasks ?? {}
   const listed: Array<Record<string, unknown>> = []
   for (const task of Object.values(tasks) as unknown[]) {
     if (!isEventRecord(task)) continue
@@ -8748,7 +9009,7 @@ function listPluginAgents(): Array<Record<string, unknown>> {
         : typeof identity?.agentName === 'string'
           ? identity.agentName
           : undefined
-    const spawnedBy = pluginSpawnCallers.get(id)
+    const spawnedBy = fhState().pluginSpawnCallers.get(id)
     let status = remapPluginAgentListStatus(task, name !== undefined)
     if (
       status === 'idle' &&
@@ -8792,11 +9053,11 @@ function registerPluginAgent(
       `${prefix !== '' ? `${prefix}: ` : ''}$.agent.register: "${name}" refused: ${specError}`,
     )
   }
-  const held = pluginAgents.get(id)
+  const held = fhState().pluginAgents.get(id)
   if (held !== undefined && jsonEqual(held.spec, input)) {
     return { agent: id }
   }
-  pluginAgents.set(id, { plugin: prefix, spec: { ...input } })
+  fhState().pluginAgents.set(id, { plugin: prefix, spec: { ...input } })
   writePluginAgentDefinition(toPluginAgentDefinition(prefix, name, input))
   return { agent: id }
 }
@@ -8885,7 +9146,7 @@ function upsertAgentDefinition(
 }
 
 function writePluginAgentDefinition(def: AgentDefinition): void {
-  functionHooksAppStateWriter?.(prev => {
+  fhState().functionHooksAppStateWriter?.(prev => {
     const current = prev.agentDefinitions ?? {
       activeAgents: [],
       allAgents: [],
@@ -8903,7 +9164,7 @@ function writePluginAgentDefinition(def: AgentDefinition): void {
 
 function dropPluginAgentDefinitions(plugin: string): void {
   const prefix = `${plugin}:`
-  functionHooksAppStateWriter?.(prev => {
+  fhState().functionHooksAppStateWriter?.(prev => {
     const current = prev.agentDefinitions
     if (!current) return prev
     const keep = (item: AgentDefinition) =>
@@ -8920,7 +9181,7 @@ function dropPluginAgentDefinitions(plugin: string): void {
 }
 
 export function getRegisteredPluginAgentDefinitions(): AgentDefinition[] {
-  return [...pluginAgents.values()].map(record =>
+  return [...fhState().pluginAgents.values()].map(record =>
     toPluginAgentDefinition(
       record.plugin,
       String(record.spec.name ?? ''),
@@ -8940,7 +9201,7 @@ function agentSpawnCountKey(plugin?: string): string {
 function waitForSpawnedAgent(agentId: string): Promise<void> {
   return new Promise(resolve => {
     const tick = (): void => {
-      const task = functionHooksAppStateReader?.()?.tasks?.[agentId]
+      const task = fhState().functionHooksAppStateReader?.()?.tasks?.[agentId]
       if (
         !isEventRecord(task) ||
         task.status === 'completed' ||
@@ -8987,7 +9248,8 @@ async function launchAgentSpawn(
   input: Record<string, unknown>,
   plugin?: string,
 ): Promise<unknown> {
-  if (!agentSpawnHandler) {
+  const spawnHandler = fhState().agentSpawnHandler
+  if (!spawnHandler) {
     return {
       isError: true,
       text: 'Agent tool is not available',
@@ -8998,31 +9260,35 @@ async function launchAgentSpawn(
   )
   const cap = resolveMaxConcurrentSubagents()
   const key = agentSpawnCountKey(plugin)
-  const running = pluginAgentSpawns.get(key) ?? 0
+  const running = fhState().pluginAgentSpawns.get(key) ?? 0
   if (running >= cap) {
     const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
     throw new Error(
       `${prefix}$.agent.spawn refused: ${cap} spawns are running at once`,
     )
   }
-  pluginAgentSpawns.set(key, running + 1)
+  fhState().pluginAgentSpawns.set(key, running + 1)
   const release = (): void => {
-    pluginAgentSpawns.set(key, (pluginAgentSpawns.get(key) ?? 1) - 1)
+    fhState().pluginAgentSpawns.set(
+      key,
+      (fhState().pluginAgentSpawns.get(key) ?? 1) - 1,
+    )
   }
   let handedOff = false
-  agentSpawnLaunchDepth += 1
+  fhState().agentSpawnLaunchDepth += 1
   try {
-    const raw = await agentSpawnHandler(input)
+    const raw = await spawnHandler(input)
     const reply = isEventRecord(raw) ? raw : undefined
     const nested = isEventRecord(reply?.result) ? reply.result : reply
     const agentId =
       isEventRecord(nested) && typeof nested.agentId === 'string'
         ? nested.agentId
         : undefined
-    if (agentId !== undefined && plugin) pluginSpawnCallers.set(agentId, plugin)
+    if (agentId !== undefined && plugin)
+      fhState().pluginSpawnCallers.set(agentId, plugin)
     const task =
       agentId !== undefined
-        ? functionHooksAppStateReader?.()?.tasks?.[agentId]
+        ? fhState().functionHooksAppStateReader?.()?.tasks?.[agentId]
         : undefined
     if (
       agentId !== undefined &&
@@ -9034,7 +9300,7 @@ async function launchAgentSpawn(
     }
     return raw
   } finally {
-    agentSpawnLaunchDepth -= 1
+    fhState().agentSpawnLaunchDepth -= 1
     if (!handedOff) release()
   }
 }
@@ -9236,60 +9502,54 @@ export async function runWorkflowAgentSpawn(
 
 // #969 (official `qbs` / `Xae` / `Vgt` / `wO` / `mus`): background-ceiling and
 // Stop/inputClosed refusal helpers for plugin subagent spawns & inputs.
-let backgroundCeilingProvider: (() => string | undefined) | undefined
-let stoppedSessionForPluginInput:
-  | { sessionKey: object; stoppedAt: number }
-  | undefined
-let spawnedTurnTakenCallback: (() => void) | undefined
 const DEFAULT_PLUGIN_INPUT_SESSION_KEY = {}
 
 export function setBackgroundCeilingProvider(
   provider: (() => string | undefined) | undefined,
 ): void {
-  backgroundCeilingProvider = provider
+  fhState().backgroundCeilingProvider = provider
 }
 
 export function markSessionStoppedForPluginInput(
   sessionKey: object = DEFAULT_PLUGIN_INPUT_SESSION_KEY,
   stoppedAt = Date.now(),
 ): void {
-  stoppedSessionForPluginInput = { sessionKey, stoppedAt }
+  fhState().stoppedSessionForPluginInput = { sessionKey, stoppedAt }
 }
 
 export function clearSessionStoppedForPluginInput(): void {
-  stoppedSessionForPluginInput = undefined
+  fhState().stoppedSessionForPluginInput = undefined
 }
 
 export function setSpawnedTurnTakenCallback(
   cb: (() => void) | undefined,
 ): void {
-  spawnedTurnTakenCallback = cb
+  fhState().spawnedTurnTakenCallback = cb
 }
 
 export function notePluginSpawnedTurnTaken(): void {
-  spawnedTurnTakenCallback?.()
+  fhState().spawnedTurnTakenCallback?.()
 }
 
 export function getPluginInputRefusalReason(
   sessionKey: object = DEFAULT_PLUGIN_INPUT_SESSION_KEY,
 ): string | undefined {
-  if (
-    stoppedSessionForPluginInput !== undefined &&
-    stoppedSessionForPluginInput.sessionKey === sessionKey
-  ) {
+  const stopped = fhState().stoppedSessionForPluginInput
+  if (stopped !== undefined && stopped.sessionKey === sessionKey) {
     return 'the session was stopped and nobody has sent input since'
   }
-  return backgroundCeilingProvider?.()
+  return fhState().backgroundCeilingProvider?.()
 }
 
 export function checkPluginInputRefusal(
   opts: { plugin: string; vouchedPressAt?: number; sessionKey?: object },
   opName: string,
 ): string | undefined {
+  const stopped = fhState().stoppedSessionForPluginInput
   if (
-    stoppedSessionForPluginInput !== undefined &&
+    stopped !== undefined &&
     opts.vouchedPressAt !== undefined &&
-    opts.vouchedPressAt >= stoppedSessionForPluginInput.stoppedAt
+    opts.vouchedPressAt >= stopped.stoppedAt
   ) {
     clearSessionStoppedForPluginInput()
   }
@@ -9551,30 +9811,8 @@ export function createRemoteAutocompleteDispatcher(
   }
 }
 
-let toolCallHandler:
-  | ((input: Record<string, unknown>) => Promise<unknown>)
-  | undefined
-
-let toolCheckHandler:
-  | ((input: Record<string, unknown>) => Promise<unknown>)
-  | undefined
-
-let turnAbortHandler:
-  | ((input: { turnId: string }) => Promise<unknown>)
-  | undefined
-
-let promptSubmitHandler:
-  | ((input: { text: string }) => Promise<unknown>)
-  | undefined
-
-let sessionCompactHandler:
-  | ((input: { instructions: string }) => Promise<unknown>)
-  | undefined
-
-let turnRunningReader: (() => { turnId: string } | undefined) | undefined
-
 function commandOwnerOf(name: string): string | undefined {
-  return pluginCommands.get(name)?.plugin
+  return fhState().pluginCommands.get(name)?.plugin
 }
 
 function sessionSlashCommands(): Array<{
@@ -9583,7 +9821,7 @@ function sessionSlashCommands(): Array<{
   argumentHint?: unknown
   immediate?: unknown
 }> {
-  const state = functionHooksAppStateReader?.() as
+  const state = fhState().functionHooksAppStateReader?.() as
     | (AppState & { commands?: unknown })
     | undefined
   if (!state) return []
@@ -9629,7 +9867,7 @@ function listPluginCommands(): Array<{
   argumentHint?: unknown
   immediate?: unknown
 }> {
-  const listed = [...pluginCommands.values()].map(({ spec }) => ({
+  const listed = [...fhState().pluginCommands.values()].map(({ spec }) => ({
     command: spec.name,
     description: spec.description,
     ...(spec.argumentHint !== undefined && { argumentHint: spec.argumentHint }),
@@ -9669,10 +9907,13 @@ function registerPluginCommand(
     }),
     ...(input.immediate !== undefined && { immediate: input.immediate }),
   }
-  if (owner === prefix && jsonEqual(pluginCommands.get(name)?.spec, spec)) {
+  if (
+    owner === prefix &&
+    jsonEqual(fhState().pluginCommands.get(name)?.spec, spec)
+  ) {
     return { command: name }
   }
-  pluginCommands.set(name, { plugin: prefix, spec })
+  fhState().pluginCommands.set(name, { plugin: prefix, spec })
   return { command: name }
 }
 
@@ -9698,7 +9939,8 @@ async function runPluginCommand(
   if (refused !== undefined) {
     return Promise.reject(new Error(`${prefix}: $.command.run: ${refused}`))
   }
-  if (commandRunHandler) return commandRunHandler(slash)
+  const cmdRunHandler = fhState().commandRunHandler
+  if (cmdRunHandler) return cmdRunHandler(slash)
   // densable W0n / Loe / Noe / Nv later.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { randomUUID } = require('crypto') as typeof import('crypto')
@@ -9738,7 +9980,7 @@ type SessionListedTool = {
 }
 
 function sessionUserMessages(): unknown[] {
-  const app = functionHooksAppStateReader?.() as
+  const app = fhState().functionHooksAppStateReader?.() as
     | { messages?: unknown[] }
     | undefined
   const messages = app?.messages
@@ -9763,7 +10005,7 @@ function agentConversationDeny(agentId: string): { deny: string } {
 }
 
 function liveAgentMessages(agentId: string): unknown[] | undefined {
-  const tasks = functionHooksAppStateReader?.()?.tasks ?? {}
+  const tasks = fhState().functionHooksAppStateReader?.()?.tasks ?? {}
   const matches: Record<string, unknown>[] = []
   for (const task of Object.values(tasks) as unknown[]) {
     if (!isEventRecord(task)) continue
@@ -10065,7 +10307,7 @@ async function listSessionMessages(
 }
 
 function sessionTools(): SessionListedTool[] {
-  const app = functionHooksAppStateReader?.() as
+  const app = fhState().functionHooksAppStateReader?.() as
     | { tools?: SessionListedTool[] }
     | undefined
   return Array.isArray(app?.tools) ? app.tools : []
@@ -10215,26 +10457,23 @@ const UI_INVALIDATE_EVENTS = [
   'command.describe',
   'config.describe',
 ] as const
-const pendingUiInvalidations = new Set<string>()
 
 export function getPendingUiInvalidations(): ReadonlySet<string> {
-  return pendingUiInvalidations
+  return fhState().pendingUiInvalidations
 }
-
-const defaultUiInvalidationHandlers: Partial<Record<string, () => void>> = {}
 
 export function registerUiInvalidationHandlers(
   handlers: Partial<Record<string, () => void>>,
 ): void {
-  Object.assign(defaultUiInvalidationHandlers, handlers)
+  Object.assign(fhState().defaultUiInvalidationHandlers, handlers)
 }
 
 export function applyPendingUiInvalidations(
   handlers: Partial<Record<string, () => void>> = {},
 ): string[] {
-  const merged = { ...defaultUiInvalidationHandlers, ...handlers }
+  const merged = { ...fhState().defaultUiInvalidationHandlers, ...handlers }
   const applied: string[] = []
-  for (const event of pendingUiInvalidations) {
+  for (const event of fhState().pendingUiInvalidations) {
     try {
       merged[event]?.()
       applied.push(event)
@@ -10245,18 +10484,9 @@ export function applyPendingUiInvalidations(
       )
     }
   }
-  pendingUiInvalidations.clear()
+  fhState().pendingUiInvalidations.clear()
   return applied
 }
-const pluginPanes: Array<{
-  id: string
-  plugin: string
-  title: string
-  closeOnEscape?: boolean
-  holdToasts?: boolean
-  rows?: number
-  columns?: number
-}> = []
 
 /**
  * densable Chat panes shape (`Si`/`JSn` / `EMPTY_PANES`) — semantic store over
@@ -10302,20 +10532,13 @@ export const EMPTY_PANES: PanesState = Object.freeze({
   closing: Object.freeze([]) as unknown as string[],
 })
 
-const paneOpenIds = new Set<string>()
-let shownPaneId: string | null = null
-let focusedPaneId: string | null = null
 /** densable `closing` — `aTt` re-entry while the ui.close chain runs. */
-const paneClosing = new Set<string>()
 /** densable `unplaced` — waiters placed by `placeWaitingPanes` / remote. */
-const unplacedPanes: PluginPaneEntry[] = []
 /** densable `asked` — ask latch (+ soft persist via pluginPanes.asked). */
-const askedPanes: AskedPaneRef[] = []
 /**
  * densable askedLatch `H` — one-shot seed gate. Soft persist via
  * `GlobalConfig.pluginPanes.asked` (`mL` / `keptAsked` / `keepAsked`).
  */
-let askedPanesSeeded = false
 /** densable `ASKED_MAX` / `G` — soft-persist asked rows cap. */
 export const PANE_ASKED_MAX = 64
 /** densable `d3` — columns / rows / conversationColumns for placeWaiting + Client `L()`. */
@@ -10325,15 +10548,11 @@ export type PanesTerminalSize = {
   conversationColumns: number
 }
 
-let panesTerminalSize: PanesTerminalSize | undefined
-
 export function getPanesTerminalSize(): PanesTerminalSize | undefined {
-  return panesTerminalSize
+  return fhState().panesTerminalSize
 }
 /** densable `focusRequest` — pending id for `settleFocusRequest` (`a4n`). */
-let paneFocusRequest: string | null = null
 /** densable `placements` — refcount from `offerPlacement` (`QFt`). */
-let panePlacements = 0
 
 /** densable `D9` — openFloor when the person has asked this pane before. */
 export const PANE_OPEN_FLOOR_ASKED = 110
@@ -10341,10 +10560,9 @@ export const PANE_OPEN_FLOOR_ASKED = 110
 export const PANE_OPEN_FLOOR_DEFAULT = 144
 
 type PanesListener = () => void
-const panesListeners = new Set<PanesListener>()
 
 function notifyPanesListeners(): void {
-  for (const listener of panesListeners) listener()
+  for (const listener of fhState().panesListeners) listener()
 }
 
 function clonePaneEntry(pane: PluginPaneEntry): PluginPaneEntry {
@@ -10362,23 +10580,27 @@ function clonePaneEntry(pane: PluginPaneEntry): PluginPaneEntry {
 /** Snapshot of densable `JSn`-shaped panes state. */
 export function getPanesState(): PanesState {
   return {
-    open: pluginPanes
-      .filter(pane => paneOpenIds.has(pane.id))
+    open: fhState()
+      .pluginPanes.filter(pane => fhState().paneOpenIds.has(pane.id))
       .map(clonePaneEntry),
-    unplaced: unplacedPanes.map(clonePaneEntry),
-    asked: askedPanes.map(row => ({ plugin: row.plugin, id: row.id })),
-    shownId: shownPaneId,
-    focusedId: focusedPaneId,
-    focusRequest: paneFocusRequest,
-    placements: panePlacements,
-    closing: [...paneClosing],
+    unplaced: fhState().unplacedPanes.map(clonePaneEntry),
+    asked: fhState().askedPanes.map(row => ({
+      plugin: row.plugin,
+      id: row.id,
+    })),
+    shownId: fhState().shownPaneId,
+    focusedId: fhState().focusedPaneId,
+    focusRequest: fhState().paneFocusRequest,
+    placements: fhState().panePlacements,
+    closing: [...fhState().paneClosing],
   }
 }
 
 export function subscribePanes(listener: PanesListener): () => void {
-  panesListeners.add(listener)
+  const listeners = fhState().panesListeners
+  listeners.add(listener)
   return () => {
-    panesListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
@@ -10390,44 +10612,46 @@ export function setPanesState(
   next: PanesState | ((prev: PanesState) => PanesState),
 ): void {
   const state = typeof next === 'function' ? next(getPanesState()) : next
-  pluginPanes.length = 0
-  paneOpenIds.clear()
+  fhState().pluginPanes.length = 0
+  fhState().paneOpenIds.clear()
   for (const pane of state.open) {
     const entry = clonePaneEntry(pane)
-    pluginPanes.push(entry)
-    paneOpenIds.add(entry.id)
+    fhState().pluginPanes.push(entry)
+    fhState().paneOpenIds.add(entry.id)
   }
-  unplacedPanes.length = 0
-  for (const pane of state.unplaced) unplacedPanes.push(clonePaneEntry(pane))
-  askedPanes.length = 0
+  fhState().unplacedPanes.length = 0
+  for (const pane of state.unplaced)
+    fhState().unplacedPanes.push(clonePaneEntry(pane))
+  fhState().askedPanes.length = 0
   for (const row of state.asked) {
-    askedPanes.push({ plugin: row.plugin, id: row.id })
+    fhState().askedPanes.push({ plugin: row.plugin, id: row.id })
   }
-  shownPaneId = state.shownId
-  focusedPaneId = state.focusedId
-  paneFocusRequest = state.focusRequest
-  panePlacements = state.placements
-  paneClosing.clear()
-  for (const id of state.closing) paneClosing.add(id)
+  fhState().shownPaneId = state.shownId
+  fhState().focusedPaneId = state.focusedId
+  fhState().paneFocusRequest = state.focusRequest
+  fhState().panePlacements = state.placements
+  fhState().paneClosing.clear()
+  for (const id of state.closing) fhState().paneClosing.add(id)
   notifyPanesListeners()
   bumpRasterFrames()
 }
 
 /** densable `u3` focusPane — set focusedId/shownId, clear focusRequest. */
 export function focusPane(id: string | null): void {
-  const openHas = id === null || pluginPanes.some(pane => pane.id === id)
-  const nextFocused = openHas ? id : focusedPaneId
-  const nextShown = openHas && id !== null ? id : shownPaneId
+  const openHas =
+    id === null || fhState().pluginPanes.some(pane => pane.id === id)
+  const nextFocused = openHas ? id : fhState().focusedPaneId
+  const nextShown = openHas && id !== null ? id : fhState().shownPaneId
   if (
-    focusedPaneId === nextFocused &&
-    shownPaneId === nextShown &&
-    paneFocusRequest === null
+    fhState().focusedPaneId === nextFocused &&
+    fhState().shownPaneId === nextShown &&
+    fhState().paneFocusRequest === null
   ) {
     return
   }
-  focusedPaneId = nextFocused
-  shownPaneId = nextShown
-  paneFocusRequest = null
+  fhState().focusedPaneId = nextFocused
+  fhState().shownPaneId = nextShown
+  fhState().paneFocusRequest = null
   notifyPanesListeners()
   bumpRasterFrames()
 }
@@ -10564,8 +10788,8 @@ export function keptAskedPanesFromConfig(): AskedPaneRef[] {
  * Default source: `keptAskedPanesFromConfig()` (`mL` disk).
  */
 export function seedAskedPanes(persisted?: readonly AskedPaneRef[]): void {
-  if (askedPanesSeeded) return
-  askedPanesSeeded = true
+  if (fhState().askedPanesSeeded) return
+  fhState().askedPanesSeeded = true
   const rows = persisted ?? keptAskedPanesFromConfig()
   if (rows.length === 0) return
   setPanesState(state => ({
@@ -10705,7 +10929,7 @@ export function placementAtOpen(
   pane: AskedPaneRef,
   force = false,
 ): { isPlaced: true } | { isPlaced: false; reason: string } {
-  const columns = panesTerminalSize?.columns
+  const columns = fhState().panesTerminalSize?.columns
   const floor = paneOpenFloor(state, pane)
   if (columns === undefined) {
     // densable: Epn() ?? { isPlaced: true }
@@ -10726,14 +10950,14 @@ export function placementAtOpen(
  */
 export function placeWaitingPanes(columns: number): void {
   // densable oNo — place waiters only. d3 is sst's write; bootstrap L() if unset.
-  if (panesTerminalSize === undefined) {
+  if (fhState().panesTerminalSize === undefined) {
     const rows = process.stdout.rows ?? 0
-    panesTerminalSize = {
+    fhState().panesTerminalSize = {
       columns,
       rows,
       conversationColumns: Math.max(1, columns),
     }
-    setClientTerminalSize(panesTerminalSize)
+    setClientTerminalSize(fhState().panesTerminalSize)
   }
   // gold logs each placed waiter via `t(\`ui.open … (waiting, ${columns} columns): placed\`)`
   setPanesState(state =>
@@ -10778,34 +11002,39 @@ export function settlePanesTerminalColumns(
       ? Math.floor(rows)
       : (process.stdout.rows ?? 0)
   const conversationColumns = Math.max(1, columns - Math.max(0, chromeColumns))
-  panesTerminalSize = { columns, rows: terminalRows, conversationColumns }
-  setClientTerminalSize(panesTerminalSize)
+  fhState().panesTerminalSize = {
+    columns,
+    rows: terminalRows,
+    conversationColumns,
+  }
+  setClientTerminalSize(fhState().panesTerminalSize)
   placeWaitingPanes(columns)
 }
 
 /** densable `QFt` offerPlacement — placements++ with disposer placements--. */
 export function offerPlacement(): () => void {
-  panePlacements += 1
+  fhState().panePlacements += 1
   notifyPanesListeners()
-  if (panesTerminalSize !== undefined) {
-    placeWaitingPanes(panesTerminalSize.columns)
+  const termSize = fhState().panesTerminalSize
+  if (termSize !== undefined) {
+    placeWaitingPanes(termSize.columns)
   }
   let disposed = false
   return () => {
     if (disposed) return
     disposed = true
-    panePlacements -= 1
+    fhState().panePlacements -= 1
     notifyPanesListeners()
   }
 }
 
 /** densable `a4n` settleFocusRequest — ok? focusPane(req) : clear. */
 export function settleFocusRequest(ok: boolean): void {
-  const request = paneFocusRequest
+  const request = fhState().paneFocusRequest
   if (request === null) return
   if (ok) focusPane(request)
   else {
-    paneFocusRequest = null
+    fhState().paneFocusRequest = null
     notifyPanesListeners()
   }
 }
@@ -10834,9 +11063,13 @@ export function getPanesStore(): {
 
 /** densable `l4n` showPane — set shownId; keep/move focusedId when already set. */
 export function showPane(id: string): void {
-  if (shownPaneId === id || !pluginPanes.some(pane => pane.id === id)) return
-  shownPaneId = id
-  if (focusedPaneId !== null) focusedPaneId = id
+  if (
+    fhState().shownPaneId === id ||
+    !fhState().pluginPanes.some(pane => pane.id === id)
+  )
+    return
+  fhState().shownPaneId = id
+  if (fhState().focusedPaneId !== null) fhState().focusedPaneId = id
   notifyPanesListeners()
   bumpRasterFrames()
 }
@@ -10937,9 +11170,7 @@ export type ScrollSiteLayoutNode = {
     getComputedHeight(): number
   }
 }
-const pluginSites: PluginSite[] = []
 /** densable `Ide` / `Fj(component, requestId)` — Map index over `pluginSites`. */
-const ideSites = new Map<string, PluginSite>()
 
 function ideSiteKey(
   component: PluginSite['component'],
@@ -10952,7 +11183,7 @@ function ideGet(
   component: PluginSite['component'],
   requestId: string,
 ): PluginSite | undefined {
-  return ideSites.get(ideSiteKey(component, requestId))
+  return fhState().ideSites.get(ideSiteKey(component, requestId))
 }
 
 /**
@@ -10988,10 +11219,6 @@ type PluginFocusSite = {
   host?: PluginFocusHostBind
 }
 
-const focusSiteDraws = createSignal()
-
-const pluginFocusSites = new Map<string, PluginFocusSite>()
-
 function focusSiteMapKey(
   component: PluginSite['component'],
   requestId: string,
@@ -11006,7 +11233,7 @@ function holdPluginFocusSite(
   keys: Set<string>,
 ): PluginFocusSite {
   const mapKey = focusSiteMapKey(component, requestId)
-  const held = pluginFocusSites.get(mapKey)
+  const held = fhState().pluginFocusSites.get(mapKey)
   if (held) {
     held.plugin = plugin
     held.owner = plugin
@@ -11020,27 +11247,29 @@ function holdPluginFocusSite(
     component,
     keys,
   }
-  pluginFocusSites.set(mapKey, next)
-  focusSiteDraws.emit()
+  fhState().pluginFocusSites.set(mapKey, next)
+  fhState().focusSiteDraws.emit()
   return next
 }
 
 function dropPluginFocusSite(plugin: string, requestId: string): void {
   let dropped = false
-  for (const [mapKey, site] of pluginFocusSites) {
+  for (const [mapKey, site] of fhState().pluginFocusSites) {
     if (site.plugin === plugin && site.requestId === requestId) {
-      pluginFocusSites.delete(mapKey)
+      fhState().pluginFocusSites.delete(mapKey)
       dropped = true
     }
   }
-  if (dropped) focusSiteDraws.emit()
+  if (dropped) fhState().focusSiteDraws.emit()
 }
 
 function focusSiteIsHeldNow(site: PluginFocusSite): boolean {
   if (site.host) return site.host.isHeldNow()
-  if (site.component === 'AbovePrompt') return focusedPaneId === null
-  if (focusedPaneId !== null) return focusedPaneId === site.requestId
-  if (shownPaneId !== null) return shownPaneId === site.requestId
+  if (site.component === 'AbovePrompt') return fhState().focusedPaneId === null
+  if (fhState().focusedPaneId !== null)
+    return fhState().focusedPaneId === site.requestId
+  if (fhState().shownPaneId !== null)
+    return fhState().shownPaneId === site.requestId
   return true
 }
 
@@ -11057,7 +11286,7 @@ function focusSiteHolderNow(site: PluginFocusSite): string | undefined {
 export function bindPluginFocusHost(bind: PluginFocusHostBind): () => void {
   const mapKey = focusSiteMapKey(bind.component, bind.requestId)
   const owner = bind.owner ?? ''
-  const held = pluginFocusSites.get(mapKey)
+  const held = fhState().pluginFocusSites.get(mapKey)
   const keys = held?.keys ?? new Set<string>()
   const site: PluginFocusSite = {
     plugin: owner,
@@ -11068,13 +11297,13 @@ export function bindPluginFocusHost(bind: PluginFocusHostBind): () => void {
     holder: held?.holder,
     host: bind,
   }
-  pluginFocusSites.set(mapKey, site)
-  focusSiteDraws.emit()
+  fhState().pluginFocusSites.set(mapKey, site)
+  fhState().focusSiteDraws.emit()
   return () => {
     // densable XHo cleanup: `g9e().delete(Ge)` — drop the live host entry.
-    if (pluginFocusSites.get(mapKey)?.host === bind) {
-      pluginFocusSites.delete(mapKey)
-      focusSiteDraws.emit()
+    if (fhState().pluginFocusSites.get(mapKey)?.host === bind) {
+      fhState().pluginFocusSites.delete(mapKey)
+      fhState().focusSiteDraws.emit()
     }
   }
 }
@@ -11083,7 +11312,7 @@ export function bindPluginFocusHost(bind: PluginFocusHostBind): () => void {
 export function subscribePluginFocusSiteDraws(
   listener: () => void,
 ): () => void {
-  return focusSiteDraws.subscribe(listener)
+  return fhState().focusSiteDraws.subscribe(listener)
 }
 
 /** densable `yat` — foreign plugin origin vs site owner. */
@@ -11126,7 +11355,7 @@ export function getPluginFocusSite(
   plugin: string,
   requestId: string,
 ): PluginFocusSiteSnapshot | undefined {
-  for (const site of pluginFocusSites.values()) {
+  for (const site of fhState().pluginFocusSites.values()) {
     if (site.plugin === plugin && site.requestId === requestId) {
       return {
         plugin: site.plugin,
@@ -11171,10 +11400,9 @@ export type PluginDrawingTree = {
   component?: string
   tree: unknown
 }
-const pluginDrawings: PluginDrawingTree[] = []
 
 export function getPluginDrawingTrees(): readonly PluginDrawingTree[] {
-  return pluginDrawings
+  return fhState().pluginDrawings
 }
 
 /** densable `c9` — AbovePrompt `xI` requestId. */
@@ -11257,10 +11485,10 @@ function stampPluginOnDrawing(node: unknown, plugin: string): unknown {
   if (isEventRecord(node.press) && node.press.plugin === '') {
     const handle = node.press.handle
     const emptySlot = pressSlot('', handle)
-    const held = pressHandlers.get(emptySlot)
+    const held = fhState().pressHandlers.get(emptySlot)
     if (held !== undefined) {
-      pressHandlers.delete(emptySlot)
-      pressHandlers.set(pressSlot(plugin, handle), held)
+      fhState().pressHandlers.delete(emptySlot)
+      fhState().pressHandlers.set(pressSlot(plugin, handle), held)
     }
     return {
       ...node,
@@ -11286,13 +11514,9 @@ type UiRenderEvalRecord = {
 }
 
 /** densable `sBo` — per-MD eval cache; drop on abort if still this record. */
-const uiRenderEvalCache = new Map<string, UiRenderEvalRecord>()
 /** densable `sBo` `n` — last stamped HD Map identity. */
-let uiRenderEvalHd: Map<string, number> | undefined
 /** densable `sBo` `r` — last stamped Fv engineVersion. */
-let uiRenderEvalEngineVersion = 0
 /** densable `sBo` `s` / `reused()`. */
-let uiRenderEvalReuseCount = 0
 
 /** densable `d8n` — `props.onScreen` `{first,last,of}` or null. */
 function uiRenderOnScreen(input: Record<string, unknown>): unknown {
@@ -11334,6 +11558,7 @@ function uiRenderEvalFits(
   propsKey: string,
   version: string,
 ): boolean {
+  const { faultRenderVersions } = fhState()
   return (
     rec.settled !== undefined &&
     rec.propsKey === propsKey &&
@@ -11344,23 +11569,23 @@ function uiRenderEvalFits(
 
 /** densable `sBo` `countReuse`. */
 function countReuse(): void {
-  uiRenderEvalReuseCount += 1
+  fhState().uiRenderEvalReuseCount += 1
 }
 
 function rememberUiRenderEval(md: string, rec: UiRenderEvalRecord): void {
   if (
-    rec.versions !== uiRenderEvalHd ||
-    rec.engineVersion !== uiRenderEvalEngineVersion
+    rec.versions !== fhState().uiRenderEvalHd ||
+    rec.engineVersion !== fhState().uiRenderEvalEngineVersion
   ) {
-    uiRenderEvalCache.clear()
-    uiRenderEvalHd = rec.versions
-    uiRenderEvalEngineVersion = rec.engineVersion
+    fhState().uiRenderEvalCache.clear()
+    fhState().uiRenderEvalHd = rec.versions
+    fhState().uiRenderEvalEngineVersion = rec.engineVersion
   }
-  uiRenderEvalCache.delete(md)
-  uiRenderEvalCache.set(md, rec)
-  for (const key of uiRenderEvalCache.keys()) {
-    if (uiRenderEvalCache.size <= UI_RENDER_EVAL_CAP) break
-    uiRenderEvalCache.delete(key)
+  fhState().uiRenderEvalCache.delete(md)
+  fhState().uiRenderEvalCache.set(md, rec)
+  for (const key of fhState().uiRenderEvalCache.keys()) {
+    if (fhState().uiRenderEvalCache.size <= UI_RENDER_EVAL_CAP) break
+    fhState().uiRenderEvalCache.delete(key)
   }
 }
 
@@ -11370,17 +11595,17 @@ function rememberUiRenderDrawing(
   requestId: string,
   tree: unknown,
 ): void {
-  const outgoing = pluginDrawings.filter(
+  const outgoing = fhState().pluginDrawings.filter(
     drawing =>
       drawing.component === component && drawing.requestId === requestId,
   )
   for (const drawing of outgoing) {
     releaseDrawingButtons(drawing.tree, drawing.plugin, component, requestId)
   }
-  pluginDrawings.splice(
+  fhState().pluginDrawings.splice(
     0,
-    pluginDrawings.length,
-    ...pluginDrawings.filter(
+    fhState().pluginDrawings.length,
+    ...fhState().pluginDrawings.filter(
       drawing =>
         !(drawing.component === component && drawing.requestId === requestId),
     ),
@@ -11393,8 +11618,8 @@ function rememberUiRenderDrawing(
     typeof tree === 'string'
   ) {
     // densable bo(e): release held presses when site reverts to engine/empty.
-    for (const name of heldPressStore.holdersOf(site)) {
-      const { released } = heldPressStore.holdDrawing(name, site, [])
+    for (const name of fhState().heldPressStore.holdersOf(site)) {
+      const { released } = fhState().heldPressStore.holdDrawing(name, site, [])
       if (released.length > 0) {
         releasePresses(name, released, { component, requestId })
       }
@@ -11402,7 +11627,7 @@ function rememberUiRenderDrawing(
     bumpRasterFrames()
     return
   }
-  pluginDrawings.push({
+  fhState().pluginDrawings.push({
     plugin,
     requestId,
     component,
@@ -11410,12 +11635,12 @@ function rememberUiRenderDrawing(
   })
   const grouped = collectHeldPressButtons(tree)
   const plugins = new Set([
-    ...heldPressStore.holdersOf(site),
+    ...fhState().heldPressStore.holdersOf(site),
     ...grouped.keys(),
   ])
   const drawnFingerprint = computeDrawingFingerprint(tree)
   for (const name of plugins) {
-    const { released } = heldPressStore.holdDrawing(
+    const { released } = fhState().heldPressStore.holdDrawing(
       name,
       { ...site, drawn: drawnFingerprint },
       grouped.get(name) ?? [],
@@ -11479,7 +11704,9 @@ export async function evaluateUiRender(
   const propsKey = uiRenderPropsKey(input)
   const version = clientFaultLue(drawingSite)
   const previous =
-    skipCache || requestId === '' ? undefined : uiRenderEvalCache.get(md)
+    skipCache || requestId === ''
+      ? undefined
+      : fhState().uiRenderEvalCache.get(md)
   if (
     !skipCache &&
     previous !== undefined &&
@@ -11507,9 +11734,9 @@ export async function evaluateUiRender(
           propsKey,
           version,
           settled: undefined,
-          versions: faultRenderVersions,
+          versions: fhState().faultRenderVersions,
           engineVersion:
-            faultRenderVersions.get(FAULT_RENDER_FV) ??
+            fhState().faultRenderVersions.get(FAULT_RENDER_FV) ??
             getRenderVersion(FAULT_RENDER_FV) ??
             0,
         }
@@ -11518,9 +11745,9 @@ export async function evaluateUiRender(
     if (!settled) {
       if (
         evalRecord !== undefined &&
-        uiRenderEvalCache.get(md) === evalRecord
+        fhState().uiRenderEvalCache.get(md) === evalRecord
       ) {
-        uiRenderEvalCache.delete(md)
+        fhState().uiRenderEvalCache.delete(md)
       }
       noteAbortedUiRender(liveNames, Date.now() - startedAt)
     }
@@ -11542,7 +11769,7 @@ export async function evaluateUiRender(
   signal?.removeEventListener('abort', onAbort)
   // densable FBr: `if(e.requestId!==""&&!n.aborted)jC(g)` after the chain.
   if (requestId !== '' && !signal?.aborted) recordDrawingReaders(drawing)
-  const plugin = lastUiRenderPlugin
+  const plugin = fhState().lastUiRenderPlugin
   const tree = stampPluginOnDrawing(drawn, plugin)
   const treeReason = uiRenderTreeCheck(tree)
   if (treeReason !== undefined) {
@@ -11970,25 +12197,22 @@ type ImageSite = {
 }
 
 /** densable `AL` / `CL` — keyed by IL(requestId, key, plugin). */
-const mountedRasters = new Map<string, RasterSite>()
-const mountedImages = new Map<string, ImageSite>()
-let rasterFrameVersion = 0
-const rasterFrameListeners = new Set<() => void>()
 
 export function bumpRasterFrames(): void {
-  rasterFrameVersion += 1
-  for (const listener of rasterFrameListeners) listener()
+  fhState().rasterFrameVersion += 1
+  for (const listener of fhState().rasterFrameListeners) listener()
 }
 
 export function subscribeRasterFrames(listener: () => void): () => void {
-  rasterFrameListeners.add(listener)
+  const listeners = fhState().rasterFrameListeners
+  listeners.add(listener)
   return () => {
-    rasterFrameListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function getRasterFrameVersion(): number {
-  return rasterFrameVersion
+  return fhState().rasterFrameVersion
 }
 
 function mountSiteKey(requestId: string, key: string, plugin: string): string {
@@ -12220,10 +12444,6 @@ function defaultRasterSgr(): string {
 }
 
 /** densable `Tmt` / `Emt` — shared admission bucket. */
-const rasterAdmission: RasterAdmission = {
-  tokens: RASTER_ADMISSION_TOKENS,
-  refilledAt: 0,
-}
 
 function createRasterPaletteState(): RasterPaletteState {
   return {
@@ -12324,7 +12544,7 @@ function admitRasterToken(
  */
 export function createRasterPalette(
   now: () => number = Date.now,
-  admission: RasterAdmission = rasterAdmission,
+  admission: RasterAdmission = fhState().rasterAdmission,
 ): RasterPalette {
   const state = createRasterPaletteState()
   const aliasLive = (alias: RasterPaletteAlias | undefined): boolean =>
@@ -12533,7 +12753,6 @@ export function rasterWordsToAnsi(
 }
 
 /** densable compositor `PLo` shared across mounted-frame snapshots. */
-const sharedRasterPalette = createRasterPalette()
 
 export function getMountedRasterFrames(): Array<{
   plugin: string
@@ -12552,7 +12771,7 @@ export function getMountedRasterFrames(): Array<{
     ansi: string
   }> = []
   const seen = new Set<MountedRaster>()
-  for (const site of mountedRasters.values()) {
+  for (const site of fhState().mountedRasters.values()) {
     for (const mount of site.rasters) {
       if (seen.has(mount)) continue
       seen.add(mount)
@@ -12587,7 +12806,7 @@ export function getMountedImageFrames(): Array<{
     lastSource?: unknown
   }> = []
   const seen = new Set<MountedImage>()
-  for (const site of mountedImages.values()) {
+  for (const site of fhState().mountedImages.values()) {
     for (const mount of site.images) {
       if (seen.has(mount)) continue
       seen.add(mount)
@@ -12611,7 +12830,7 @@ export function getPluginPanes(): Array<{
   rows?: number
   columns?: number
 }> {
-  return pluginPanes.map(pane => ({
+  return fhState().pluginPanes.map(pane => ({
     id: pane.id,
     plugin: pane.plugin,
     title: pane.title,
@@ -12634,15 +12853,17 @@ export function getShownPluginPane():
       closeOnEscape?: boolean
     }
   | undefined {
-  if (shownPaneId === null) return undefined
-  const pane = pluginPanes.find(item => item.id === shownPaneId)
+  if (fhState().shownPaneId === null) return undefined
+  const pane = fhState().pluginPanes.find(
+    item => item.id === fhState().shownPaneId,
+  )
   if (pane === undefined) return undefined
   const site = ideGet('Pane', pane.id)
   return {
     id: pane.id,
     plugin: pane.plugin,
     title: pane.title,
-    isFocused: focusedPaneId === pane.id,
+    isFocused: fhState().focusedPaneId === pane.id,
     ...(pane.rows !== undefined && { rows: pane.rows }),
     ...(pane.columns !== undefined && { columns: pane.columns }),
     offset: site?.offset ?? 0,
@@ -12661,19 +12882,13 @@ export function pluginFieldSeatKey(
 
 type PluginFieldSeatBucket = Map<string, Map<string, string>>
 
-const pluginInputSeatStore = createStore<PluginFieldSeatBucket>(new Map())
-const pluginSelectSeatStore = createStore<PluginFieldSeatBucket>(new Map())
-const pluginFieldSeatGenerationStore = createStore<Map<string, number>>(
-  new Map(),
-)
-
 export function pluginFieldSeatGeneration(
   component: string,
   requestId: string,
 ): number {
   return (
-    pluginFieldSeatGenerationStore
-      .getState()
+    fhState()
+      .pluginFieldSeatGenerationStore.getState()
       .get(pluginFieldSeatKey(component, requestId)) ?? 0
   )
 }
@@ -12687,65 +12902,70 @@ export function bumpPluginFieldSeatGeneration(
 ): void {
   const key = pluginFieldSeatKey(component, requestId)
   const nextGen = pluginFieldSeatGeneration(component, requestId) + 1
-  pluginInputSeatStore.setState(prev => {
+  fhState().pluginInputSeatStore.setState(prev => {
     if (!prev.has(key)) return prev
     const next = new Map(prev)
     next.delete(key)
     return next
   })
-  pluginSelectSeatStore.setState(prev => {
+  fhState().pluginSelectSeatStore.setState(prev => {
     if (!prev.has(key)) return prev
     const next = new Map(prev)
     next.delete(key)
     return next
   })
-  pluginFieldSeatGenerationStore.setState(prev =>
+  fhState().pluginFieldSeatGenerationStore.setState(prev =>
     new Map(prev).set(key, nextGen),
   )
 }
 
-export function getPluginInputSeatStore(): typeof pluginInputSeatStore {
-  return pluginInputSeatStore
+export function getPluginInputSeatStore(): SessionFunctionHooksModulesState['pluginInputSeatStore'] {
+  return fhState().pluginInputSeatStore
 }
 
-export function getPluginSelectSeatStore(): typeof pluginSelectSeatStore {
-  return pluginSelectSeatStore
+export function getPluginSelectSeatStore(): SessionFunctionHooksModulesState['pluginSelectSeatStore'] {
+  return fhState().pluginSelectSeatStore
 }
 
-export function getPluginFieldSeatGenerationStore(): typeof pluginFieldSeatGenerationStore {
-  return pluginFieldSeatGenerationStore
+export function getPluginFieldSeatGenerationStore(): SessionFunctionHooksModulesState['pluginFieldSeatGenerationStore'] {
+  return fhState().pluginFieldSeatGenerationStore
 }
 
 /** densable `ift`/`NFr` — Pane remount generation for QT/BO resetKey. */
-const paneRemountGeneration = new Map<string, number>()
 
 /** densable `ift("Pane", id)` — host key / ErrorBoundary resetKey. */
 export function getPaneRemountGeneration(id: string): number {
-  return paneRemountGeneration.get(id) ?? 0
+  return fhState().paneRemountGeneration.get(id) ?? 0
 }
 
 function bumpPaneRemountGeneration(id: string): void {
-  paneRemountGeneration.set(id, (paneRemountGeneration.get(id) ?? 0) + 1)
+  fhState().paneRemountGeneration.set(
+    id,
+    (fhState().paneRemountGeneration.get(id) ?? 0) + 1,
+  )
 }
 
 function dropPluginPane(id: string): void {
-  const at = pluginPanes.findIndex(pane => pane.id === id)
-  if (at >= 0) pluginPanes.splice(at, 1)
-  paneOpenIds.delete(id)
+  const at = fhState().pluginPanes.findIndex(pane => pane.id === id)
+  if (at >= 0) fhState().pluginPanes.splice(at, 1)
+  fhState().paneOpenIds.delete(id)
   // densable V/JFt: shownId falls back to open.at(-1); focusedId/focusRequest
   // are membership-only → null when the closed id was focused/pending.
-  if (shownPaneId === id) {
-    shownPaneId = paneOpenIds.size ? [...paneOpenIds].at(-1)! : null
+  if (fhState().shownPaneId === id) {
+    fhState().shownPaneId = fhState().paneOpenIds.size
+      ? [...fhState().paneOpenIds].at(-1)!
+      : null
   }
-  if (focusedPaneId === id) focusedPaneId = null
-  if (paneFocusRequest === id) paneFocusRequest = null
-  for (let i = unplacedPanes.length - 1; i >= 0; i--) {
-    if (unplacedPanes[i]?.id === id) unplacedPanes.splice(i, 1)
+  if (fhState().focusedPaneId === id) fhState().focusedPaneId = null
+  if (fhState().paneFocusRequest === id) fhState().paneFocusRequest = null
+  for (let i = fhState().unplacedPanes.length - 1; i >= 0; i--) {
+    if (fhState().unplacedPanes[i]?.id === id)
+      fhState().unplacedPanes.splice(i, 1)
   }
   // densable JFt — Ide/Fj + g9e keyed Pane:id only; shared requestId
   // AbovePrompt sites stay (gold Fj(component, requestId)).
-  for (let i = pluginSites.length - 1; i >= 0; i--) {
-    const site = pluginSites[i]
+  for (let i = fhState().pluginSites.length - 1; i >= 0; i--) {
+    const site = fhState().pluginSites[i]
     if (site?.requestId === id && site.component === 'Pane') {
       releaseClientFaultMount(
         clientFaultSiteKey({
@@ -12754,18 +12974,18 @@ function dropPluginPane(id: string): void {
           requestId: id,
         }),
       )
-      pluginSites.splice(i, 1)
+      fhState().pluginSites.splice(i, 1)
     }
   }
-  for (const [mapKey, site] of pluginFocusSites) {
+  for (const [mapKey, site] of fhState().pluginFocusSites) {
     if (site.requestId === id && site.component === 'Pane') {
-      pluginFocusSites.delete(mapKey)
+      fhState().pluginFocusSites.delete(mapKey)
     }
   }
   // densable JFt → NFr("Pane", id) — bump remount gen so BO resets.
   bumpPaneRemountGeneration(id)
   bumpPluginFieldSeatGeneration('Pane', id)
-  ideSites.delete(ideSiteKey('Pane', id))
+  fhState().ideSites.delete(ideSiteKey('Pane', id))
   unmountRequest(id)
   notifyPanesListeners()
   bumpRasterFrames()
@@ -12780,15 +13000,15 @@ export async function closePluginPane(
   id?: string,
   origin: { kind: string } = { kind: 'person' },
 ): Promise<void> {
-  const target = id ?? shownPaneId
+  const target = id ?? fhState().shownPaneId
   if (target === null || target === undefined) return
-  const already = paneClosing.has(target)
-  const pane = pluginPanes.find(item => item.id === target)
+  const already = fhState().paneClosing.has(target)
+  const pane = fhState().pluginPanes.find(item => item.id === target)
   const unload = origin.kind === 'unload'
   if (unload) dropPluginPane(target)
   if (already) return
   const owner = pane?.plugin
-  const hasCloseHook = loadedModules.some(
+  const hasCloseHook = fhState().loadedModules.some(
     mod =>
       !(unload && owner !== undefined && mod.name === owner) &&
       (mod.hooks ?? []).some(hook =>
@@ -12803,7 +13023,7 @@ export async function closePluginPane(
     }
     return
   }
-  paneClosing.add(target)
+  fhState().paneClosing.add(target)
   notifyPanesListeners()
   try {
     let closedId: string | undefined
@@ -12814,8 +13034,8 @@ export async function closePluginPane(
       return Promise.resolve({ value: undefined })
     })
     if (
-      paneClosing.has(target) &&
-      pluginPanes.some(item => item.id === target)
+      fhState().paneClosing.has(target) &&
+      fhState().pluginPanes.some(item => item.id === target)
     ) {
       /* gold: kept open by a hook that never called next */
     } else if (
@@ -12826,7 +13046,7 @@ export async function closePluginPane(
       forgetAskedPane({ plugin: owner, id: closedId })
     }
   } finally {
-    paneClosing.delete(target)
+    fhState().paneClosing.delete(target)
     notifyPanesListeners()
   }
 }
@@ -12835,8 +13055,9 @@ export async function closePluginPane(
 export function scrollPluginPane(
   to: 'up' | 'down' | 'pageUp' | 'pageDown' | 'top' | 'bottom',
 ): void {
-  if (shownPaneId === null) return
-  const site = ideGet('Pane', shownPaneId)
+  const shown = fhState().shownPaneId
+  if (shown === null) return
+  const site = ideGet('Pane', shown)
   if (site === undefined) return
   const max = Math.max(0, site.contentRows - site.bodyRows, site.maxOffset)
   const page = Math.max(1, site.bodyRows)
@@ -13018,7 +13239,7 @@ function holdMounted<T>(opts: {
 
 export function mountRaster(mount: MountedRaster): () => void {
   return holdMounted({
-    sites: mountedRasters,
+    sites: fhState().mountedRasters,
     siteKey: mountSiteKey(mount.requestId, mount.key, mount.plugin),
     mount,
     mountsOf: site => site.rasters,
@@ -13028,7 +13249,7 @@ export function mountRaster(mount: MountedRaster): () => void {
 
 function mountImage(mount: MountedImage): () => void {
   return holdMounted({
-    sites: mountedImages,
+    sites: fhState().mountedImages,
     siteKey: mountSiteKey(mount.requestId, mount.key, mount.plugin),
     mount,
     mountsOf: site => site.images,
@@ -13041,7 +13262,9 @@ function existingRasterMount(
   requestId: string,
   key: string,
 ): MountedRaster | undefined {
-  const site = mountedRasters.get(mountSiteKey(requestId, key, plugin))
+  const site = fhState().mountedRasters.get(
+    mountSiteKey(requestId, key, plugin),
+  )
   if (!site) return undefined
   return [...site.rasters].find(
     item =>
@@ -13056,7 +13279,7 @@ function existingImageMount(
   requestId: string,
   key: string,
 ): MountedImage | undefined {
-  const site = mountedImages.get(mountSiteKey(requestId, key, plugin))
+  const site = fhState().mountedImages.get(mountSiteKey(requestId, key, plugin))
   if (!site) return undefined
   return [...site.images].find(
     item =>
@@ -13077,7 +13300,9 @@ export function attachRasterWidgetPaint(
   key: string,
   paint: (words: Uint32Array) => void,
 ): () => void {
-  const site = mountedRasters.get(mountSiteKey(requestId, key, plugin))
+  const site = fhState().mountedRasters.get(
+    mountSiteKey(requestId, key, plugin),
+  )
   const mount = site
     ? [...site.rasters].find(
         item =>
@@ -13121,7 +13346,7 @@ export function attachImageWidgetSwap(
   key: string,
   swap: (source: unknown) => string | undefined,
 ): () => void {
-  const site = mountedImages.get(mountSiteKey(requestId, key, plugin))
+  const site = fhState().mountedImages.get(mountSiteKey(requestId, key, plugin))
   const mount = site
     ? [...site.images].find(
         item =>
@@ -13166,7 +13391,8 @@ function anotherPluginOwns(
   key: string,
   plugin: string,
 ): boolean {
-  const sites = kind === 'Raster' ? mountedRasters : mountedImages
+  const sites =
+    kind === 'Raster' ? fhState().mountedRasters : fhState().mountedImages
   for (const site of sites.values()) {
     const mounts =
       kind === 'Raster'
@@ -13274,7 +13500,7 @@ function walkUiMounts(
             words,
             raster.columns,
             raster.rows,
-            sharedRasterPalette,
+            fhState().sharedRasterPalette,
           )
         },
       }
@@ -13323,25 +13549,26 @@ function walkUiMounts(
 }
 
 function unmountRequest(requestId: string): void {
-  for (let i = pluginDrawings.length - 1; i >= 0; i--) {
-    if (pluginDrawings[i]?.requestId === requestId) pluginDrawings.splice(i, 1)
+  for (let i = fhState().pluginDrawings.length - 1; i >= 0; i--) {
+    if (fhState().pluginDrawings[i]?.requestId === requestId)
+      fhState().pluginDrawings.splice(i, 1)
   }
-  for (const [siteKey, site] of [...mountedRasters.entries()]) {
+  for (const [siteKey, site] of [...fhState().mountedRasters.entries()]) {
     for (const mount of [...site.rasters]) {
       if (mount.requestId === requestId) site.rasters.delete(mount)
     }
-    if (site.rasters.size === 0) mountedRasters.delete(siteKey)
+    if (site.rasters.size === 0) fhState().mountedRasters.delete(siteKey)
   }
-  for (const [siteKey, site] of [...mountedImages.entries()]) {
+  for (const [siteKey, site] of [...fhState().mountedImages.entries()]) {
     for (const mount of [...site.images]) {
       if (mount.requestId === requestId) site.images.delete(mount)
     }
-    if (site.images.size === 0) mountedImages.delete(siteKey)
+    if (site.images.size === 0) fhState().mountedImages.delete(siteKey)
   }
 }
 
 function sitesOf(plugin: string, inn?: string): PluginSite[] {
-  return pluginSites.filter(
+  return fhState().pluginSites.filter(
     site =>
       site.plugin === plugin && (inn === undefined || site.requestId === inn),
   )
@@ -13371,8 +13598,8 @@ function holdPluginSite(
     contentRows: 0,
     followEnd: false,
   }
-  pluginSites.push(next)
-  ideSites.set(ideSiteKey(component, requestId), next)
+  fhState().pluginSites.push(next)
+  fhState().ideSites.set(ideSiteKey(component, requestId), next)
   holdClientFaultMount(
     clientFaultSiteKey({
       surface: 'terminal',
@@ -13644,14 +13871,14 @@ export function unregisterPluginScrollSite(
   requestId: string,
   component?: PluginSite['component'],
 ): void {
-  for (let i = pluginSites.length - 1; i >= 0; i--) {
-    const site = pluginSites[i]
+  for (let i = fhState().pluginSites.length - 1; i >= 0; i--) {
+    const site = fhState().pluginSites[i]
     if (
       site?.plugin === plugin &&
       site.requestId === requestId &&
       (component === undefined || site.component === component)
     ) {
-      ideSites.delete(ideSiteKey(site.component, site.requestId))
+      fhState().ideSites.delete(ideSiteKey(site.component, site.requestId))
       releaseClientFaultMount(
         clientFaultSiteKey({
           surface: 'terminal',
@@ -13659,7 +13886,7 @@ export function unregisterPluginScrollSite(
           requestId: site.requestId,
         }),
       )
-      pluginSites.splice(i, 1)
+      fhState().pluginSites.splice(i, 1)
     }
   }
   if (component === undefined) dropPluginFocusSite(plugin, requestId)
@@ -13940,7 +14167,7 @@ export function clientModuleFor(plugin: string):
       files: Array<{ key: string; source: string }>
     }
   | undefined {
-  const mod = loadedModules.find(
+  const mod = fhState().loadedModules.find(
     item => item.name === plugin && item.status !== 'unloaded',
   )
   const scanned =
@@ -13992,7 +14219,7 @@ export type RemoteClientPressInput = {
 export async function runRemoteClientPress(
   input: RemoteClientPressInput,
 ): Promise<{ reached?: unknown } | undefined> {
-  const loaded = loadedModules.some(
+  const loaded = fhState().loadedModules.some(
     item => item.name === input.plugin && item.status !== 'unloaded',
   )
   if (!loaded) {
@@ -14059,7 +14286,7 @@ export type RemoteClientMessageInput = {
 export async function runRemoteClientMessage(
   input: RemoteClientMessageInput,
 ): Promise<{ props?: unknown } | undefined> {
-  const loaded = loadedModules.some(
+  const loaded = fhState().loadedModules.some(
     item => item.name === input.plugin && item.status !== 'unloaded',
   )
   if (!loaded) return undefined
@@ -14100,7 +14327,7 @@ export function noteDrawnElement(
     requestId,
     scrollSiteComponent(requestId, component),
   ).keys.add(key)
-  focusSiteDraws.emit()
+  fhState().focusSiteDraws.emit()
 }
 
 function paneIdCheck(id: unknown): string | undefined {
@@ -14248,7 +14475,7 @@ function makeUiResolveTable(
         if (typeof rest.onPress === 'function') {
           const onPress = rest.onPress as (event: unknown) => unknown
           delete rest.onPress
-          const handle = ++uiResolvePressCounter
+          const handle = ++fhState().uiResolvePressCounter
           holdPress(plugin, handle, onPress)
           pressStamp = { plugin, handle }
         }
@@ -14260,7 +14487,7 @@ function makeUiResolveTable(
             event: unknown,
           ) => unknown
           delete rest.onSelect
-          const handle = ++uiResolvePressCounter
+          const handle = ++fhState().uiResolvePressCounter
           holdPress(plugin, handle, (e: unknown) => {
             const val =
               isEventRecord(e) && typeof e.value === 'string'
@@ -14283,7 +14510,7 @@ function makeUiResolveTable(
         delete rest.onInput
         delete rest.onSubmit
         if (onInput !== undefined || onSubmit !== undefined) {
-          const handle = ++uiResolvePressCounter
+          const handle = ++fhState().uiResolvePressCounter
           holdPress(plugin, handle, (e: unknown) => {
             if (!isEventRecord(e)) return undefined
             const val = typeof e.value === 'string' ? e.value : ''
@@ -14300,7 +14527,7 @@ function makeUiResolveTable(
             event: unknown,
           ) => unknown
           delete rest.onLinkPress
-          const handle = ++uiResolvePressCounter
+          const handle = ++fhState().uiResolvePressCounter
           holdPress(plugin, handle, (e: unknown) => {
             if (!isEventRecord(e)) return undefined
             const link = isEventRecord(e.link)
@@ -15672,12 +15899,12 @@ export async function runUiHost(
       case 'prompt.attachment':
       case 'tool.describe':
       case 'tool.list':
-        pendingUiInvalidations.add(event)
+        fhState().pendingUiInvalidations.add(event)
         invalidatePluginToolList()
         break
       case 'command.describe':
       case 'config.describe':
-        pendingUiInvalidations.add(event)
+        fhState().pendingUiInvalidations.add(event)
         break
     }
     return undefined
@@ -15723,7 +15950,7 @@ export async function runUiHost(
     // has no hookOrigin bag — treat explicit force:true as person open.
     const force = input.force === true
     // densable eNo: already in open → skip ee (`x=ie?{isPlaced:!0}:ee`).
-    const alreadyOpen = paneOpenIds.has(id)
+    const alreadyOpen = fhState().paneOpenIds.has(id)
     const placement = alreadyOpen
       ? ({ isPlaced: true } as const)
       : placementAtOpen(getPanesState(), askedRef, force)
@@ -15743,21 +15970,22 @@ export async function runUiHost(
       // densable `b(e,r,n)`: already-open keeps shownId; new open uses
       // focusedId ?? id. focusedId is never written here — only focus:true
       // queues focusRequest for AbovePrompt a4n settle.
-      const held = pluginPanes.find(pane => pane.id === id)
+      const held = fhState().pluginPanes.find(pane => pane.id === id)
       if (held) {
-        const at = pluginPanes.indexOf(held)
-        pluginPanes[at] = { ...next, plugin: held.plugin }
+        const at = fhState().pluginPanes.indexOf(held)
+        fhState().pluginPanes[at] = { ...next, plugin: held.plugin }
       } else {
-        pluginPanes.push(next)
+        fhState().pluginPanes.push(next)
       }
       holdPluginSite(next.plugin, id, 'Pane')
-      paneOpenIds.add(id)
+      fhState().paneOpenIds.add(id)
       if (!alreadyOpen) {
-        shownPaneId = focusedPaneId ?? id
+        fhState().shownPaneId = fhState().focusedPaneId ?? id
       }
-      if (input.focus === true) paneFocusRequest = id
-      for (let i = unplacedPanes.length - 1; i >= 0; i--) {
-        if (unplacedPanes[i]?.id === id) unplacedPanes.splice(i, 1)
+      if (input.focus === true) fhState().paneFocusRequest = id
+      for (let i = fhState().unplacedPanes.length - 1; i >= 0; i--) {
+        if (fhState().unplacedPanes[i]?.id === id)
+          fhState().unplacedPanes.splice(i, 1)
       }
       notifyPanesListeners()
       bumpRasterFrames()
@@ -15765,9 +15993,9 @@ export async function runUiHost(
     }
     // Below openFloor — park in unplaced; placeWaiting when columns widen.
     // already-open never reaches here (gold short-circuit).
-    const atUnplaced = unplacedPanes.findIndex(pane => pane.id === id)
-    if (atUnplaced >= 0) unplacedPanes[atUnplaced] = next
-    else unplacedPanes.push(next)
+    const atUnplaced = fhState().unplacedPanes.findIndex(pane => pane.id === id)
+    if (atUnplaced >= 0) fhState().unplacedPanes[atUnplaced] = next
+    else fhState().unplacedPanes.push(next)
     notifyPanesListeners()
     bumpRasterFrames()
     return { isPlaced: false, reason: placement.reason }
@@ -15787,14 +16015,14 @@ export async function runUiHost(
     // densable `rNo` / `fue` — open ∪ unplaced; isPlaced = open membership.
     // Never export minify `rNo`/`fue`.
     const owner = plugin ?? ''
-    return [...pluginPanes, ...unplacedPanes]
+    return [...fhState().pluginPanes, ...fhState().unplacedPanes]
       .filter(pane => pane.plugin === owner)
       .map(pane => ({
         id: pane.id,
         title: pane.title,
-        isShown: shownPaneId === pane.id,
-        isFocused: focusedPaneId === pane.id,
-        isPlaced: paneOpenIds.has(pane.id),
+        isShown: fhState().shownPaneId === pane.id,
+        isFocused: fhState().focusedPaneId === pane.id,
+        isPlaced: fhState().paneOpenIds.has(pane.id),
       }))
   }
   if (op === 'ui.scroll') {
@@ -15969,7 +16197,7 @@ export async function runUiHost(
     const kind = input.source !== undefined ? 'Image' : 'Raster'
     const siteKey = mountSiteKey(requestId, key, owner)
     if (kind === 'Raster') {
-      const site = mountedRasters.get(siteKey)
+      const site = fhState().mountedRasters.get(siteKey)
       const rasters = [...(site?.rasters ?? [])]
       const first = rasters[0]
       if (site === undefined || first === undefined) {
@@ -16002,7 +16230,7 @@ export async function runUiHost(
       bumpRasterFrames()
       return {}
     }
-    const site = mountedImages.get(siteKey)
+    const site = fhState().mountedImages.get(siteKey)
     const images = [...(site?.images ?? [])]
     const first = images[0]
     if (site === undefined || first === undefined) {
@@ -16255,8 +16483,8 @@ async function runToolCheck(
     name: string
     requiresUserInteraction?: () => boolean
   }>
-  const baseCtx = functionHooksToolUseContext?.getToolUseContext?.()
-  const app = functionHooksAppStateReader?.()
+  const baseCtx = fhState().functionHooksToolUseContext?.getToolUseContext?.()
+  const app = fhState().functionHooksAppStateReader?.()
   const permissionContext =
     (
       baseCtx as
@@ -16281,7 +16509,7 @@ async function runToolCheck(
           requiresUserInteraction?: () => boolean
         }
       | undefined)
-  if (!toolCheckHandler && tools.length > 0 && !matchedTool) {
+  if (!fhState().toolCheckHandler && tools.length > 0 && !matchedTool) {
     const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
     throw new Error(
       `${prefix}$.tool.check: no tool named "${toolName}" in this session`,
@@ -16295,14 +16523,16 @@ async function runToolCheck(
   }
   const hookOrigin = buildOpHookOrigin(plugin)
   if (!hasMatchingFunctionHookForOp('tool.check', payload, hookOrigin)) {
-    if (toolCheckHandler) {
-      return toolCheckHandler({ tool: toolName, input: toolArgs })
+    const checkHandler = fhState().toolCheckHandler
+    if (checkHandler) {
+      return checkHandler({ tool: toolName, input: toolArgs })
     }
     return { decision: 'allow' }
   }
   const coreTail = async (): Promise<Record<string, unknown>> => {
-    if (toolCheckHandler) {
-      const custom = await toolCheckHandler({
+    const checkHandler = fhState().toolCheckHandler
+    if (checkHandler) {
+      const custom = await checkHandler({
         tool: toolName,
         input: toolArgs,
       })
@@ -16655,7 +16885,8 @@ function runTurnAbort(
   const who = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
   const running = getMainThreadTurn()
   if (!running) {
-    if (turnAbortHandler) return turnAbortHandler({ turnId })
+    const abortHandler = fhState().turnAbortHandler
+    if (abortHandler) return abortHandler({ turnId })
     return Promise.reject(
       new Error(`${who}$.turn.abort: no turn is running (asked for ${turnId})`),
     )
@@ -16681,7 +16912,8 @@ function runPromptSubmit(
   plugin?: string,
 ): Promise<unknown> {
   const text = typeof input.text === 'string' ? input.text : ''
-  if (promptSubmitHandler) return promptSubmitHandler({ text })
+  const submitHandler = fhState().promptSubmitHandler
+  if (submitHandler) return submitHandler({ text })
   // densable Boo / LBn: record waiter then enqueue. Art Ios(hss) settles it.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { randomUUID } = require('crypto') as typeof import('crypto')
@@ -16742,7 +16974,7 @@ async function runPromptFill(
   const currentText =
     storeState.active || getPromptInputStoreValue() !== ''
       ? storeState.value
-      : promptBoxText
+      : fhState().promptBoxText
   const currentCursor = Math.max(
     0,
     Math.min(
@@ -16750,7 +16982,7 @@ async function runPromptFill(
         ? storeState.cursor
         : storeState.active || getPromptInputStoreValue() !== ''
           ? currentText.length
-          : promptBoxCursor,
+          : fhState().promptBoxCursor,
       currentText.length,
     ),
   )
@@ -16769,8 +17001,8 @@ async function runPromptFill(
     return { text: fillText, cursor: fillText.length }
   }
   const commitDraft = (nextText: string, nextCursor: number) => {
-    promptBoxText = nextText
-    promptBoxCursor = nextCursor
+    fhState().promptBoxText = nextText
+    fhState().promptBoxCursor = nextCursor
     setPromptInputStoreValue(nextText)
     savePromptInputCursorOffset(nextCursor)
     return {
@@ -16905,7 +17137,7 @@ function runSessionCompact(
       ),
     )
   }
-  const running = turnRunningReader?.() ?? getMainThreadTurn()
+  const running = fhState().turnRunningReader?.() ?? getMainThreadTurn()
   if (running !== undefined) {
     return Promise.reject(
       new Error(
@@ -16913,8 +17145,9 @@ function runSessionCompact(
       ),
     )
   }
-  if (sessionCompactHandler) {
-    return sessionCompactHandler({ instructions }).catch((error: unknown) => {
+  const compactHandler = fhState().sessionCompactHandler
+  if (compactHandler) {
+    return compactHandler({ instructions }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`${who}: $.session.compact: ${message}`)
     })
@@ -16974,13 +17207,14 @@ async function runSessionSend(
       reason: `no live session on this machine has id ${String(input.to)} (a session that exited, or another machine's; a Remote Control or cloud session is addressed by its session_... id)`,
     }
   }
-  if (!toolCallHandler) {
+  const sendToolCallHandler = fhState().toolCallHandler
+  if (!sendToolCallHandler) {
     return {
       isDelivered: false,
       reason: `no live session on this machine has id ${to} (a session that exited, or another machine's; a Remote Control or cloud session is addressed by its session_... id)`,
     }
   }
-  const raw = await toolCallHandler({
+  const raw = await sendToolCallHandler({
     tool: 'SendMessage',
     to,
     message: input.text,
@@ -17016,7 +17250,7 @@ function runPluginStore(
       )
     }
     writePluginStoreFile(owner, next)
-    pluginStore.set(pluginStoreSlot(owner, key), input.value)
+    fhState().pluginStore.set(pluginStoreSlot(owner, key), input.value)
     return undefined
   }
   if (op === 'store.delete') {
@@ -17024,7 +17258,7 @@ function runPluginStore(
     const next = { ...data }
     delete next[key]
     writePluginStoreFile(owner, next)
-    pluginStore.delete(pluginStoreSlot(owner, key))
+    fhState().pluginStore.delete(pluginStoreSlot(owner, key))
     return undefined
   }
   return Object.keys(data)
@@ -17088,7 +17322,7 @@ async function runAudioPlay(
     )
   }
   const owner = plugin ?? ''
-  const running = audioPlays.get(owner) ?? 0
+  const running = fhState().audioPlays.get(owner) ?? 0
   if (running >= AUDIO_PLAYS_AT_ONCE) {
     throw new Error(
       `${owner}: $.audio.play: refused: ${AUDIO_PLAYS_AT_ONCE} plays are going at once`,
@@ -17108,11 +17342,11 @@ async function runAudioPlay(
       )
     }
   }
-  audioPlays.set(owner, running + 1)
+  fhState().audioPlays.set(owner, running + 1)
   try {
     return await playAudioClip(input, owner)
   } finally {
-    audioPlays.set(owner, (audioPlays.get(owner) ?? 1) - 1)
+    fhState().audioPlays.set(owner, (fhState().audioPlays.get(owner) ?? 1) - 1)
   }
 }
 
@@ -17460,7 +17694,7 @@ function lookupFocusSite(
   component: PluginSite['component'],
   requestId: string,
 ): PluginFocusSite | undefined {
-  return pluginFocusSites.get(focusSiteMapKey(component, requestId))
+  return fhState().pluginFocusSites.get(focusSiteMapKey(component, requestId))
 }
 
 function siteHasElement(
@@ -17474,8 +17708,8 @@ function siteHasElement(
 
 /** densable `dUe` — plugins whose `ui.render` matcher matches `{component}`. */
 function pluginsWithUiRenderComponent(component: string): string[] {
-  return loadedModules
-    .filter(mod => {
+  return fhState()
+    .loadedModules.filter(mod => {
       const builtin = isBuiltinTierMod(mod)
       return (mod.hooks ?? []).some(
         hook =>
@@ -17607,10 +17841,10 @@ function fallbackFocusCommit(
   if (!site.keys.has(element)) {
     return `no element of ${input.plugin ?? ''} is drawn under that key`
   }
-  focusedPaneId = site.requestId
-  if (site.component === 'Pane') shownPaneId = site.requestId
+  fhState().focusedPaneId = site.requestId
+  if (site.component === 'Pane') fhState().shownPaneId = site.requestId
   site.holder = input.plugin ?? site.holder
-  paneFocusRequest = null
+  fhState().paneFocusRequest = null
   notifyPanesListeners()
   bumpRasterFrames()
   return undefined
@@ -17748,14 +17982,12 @@ function osc52Payload(text: string): string {
   return `\x1b]52;c;${encoded}\x07`
 }
 
-let pendingPromptSelectionRun: number | undefined
-
 /**
  * densable 2.1.289 `ui.selection` terminal core (`Ga` / `xrs`).
  * Gold: `iqn(text, rowHolding(selection))` → `{ text }` or `{ text, requestId }`.
  */
 function runUiSelection(): { text: string; instance_id?: string } | undefined {
-  const ink = instances.get(process.stdout)
+  const ink = Ns().get(process.stdout)
   if (!ink || typeof ink.getSelectedText !== 'function') return undefined
   bindUiSelectionSource(ink)
   const text =
@@ -17778,7 +18010,7 @@ function runUiSelection(): { text: string; instance_id?: string } | undefined {
  * Desktop/vscode surfaces stay Drop.
  */
 function attachedCopySurfaces(): string[] {
-  return promptBoxBound ? ['terminal'] : []
+  return fhState().promptBoxBound ? ['terminal'] : []
 }
 
 /** densable `Y7` — terminal only while a composer is bound. */
@@ -17975,22 +18207,19 @@ function hostTable(
     table[method] = async (...args: unknown[]) => {
       if (environmentId)
         return hostOp(environmentId, `${namespace}.${method}`, args)
-      pluginHostCalls.push({ namespace, method, args })
+      fhState().pluginHostCalls.push({ namespace, method, args })
       return handleHostOp(`${namespace}.${method}`, args)
     }
   }
   return table
 }
 
-const ownedTables = new Map<string, Record<string, Record<string, unknown>>>()
-const finalizedEnvironments = new Set<string>()
-
 export function setOwnedTable(
   environmentId: string,
   table: Record<string, Record<string, unknown>>,
 ): void {
-  ownedTables.set(environmentId, table)
-  finalizedEnvironments.delete(environmentId)
+  fhState().ownedTables.set(environmentId, table)
+  fhState().finalizedEnvironments.delete(environmentId)
 }
 
 /** densable `Oa` / `wo` — Proxy method names that are not interface ops. */
@@ -18036,7 +18265,7 @@ function suppressedInterface(
  * Second finalize throws `$ is already built`. Freezes the owned table.
  */
 function moduleTierRank(name: string): number {
-  const mod = loadedModules.find(m => m.name === name)
+  const mod = fhState().loadedModules.find(m => m.name === name)
   if (!mod) return 0
   if (mod.isCore === true) return 3
   if (
@@ -18054,18 +18283,20 @@ export function finalizeOwnedTable(
   table: unknown,
   suppressed?: unknown,
 ): void {
-  if (finalizedEnvironments.has(environmentId)) {
+  if (fhState().finalizedEnvironments.has(environmentId)) {
     throw new Error(`${environmentId}: $ is already built`)
   }
-  const identity = new Set(Object.keys(ownedTables.get(environmentId) ?? {}))
+  const identity = new Set(
+    Object.keys(fhState().ownedTables.get(environmentId) ?? {}),
+  )
   const next: Record<string, Record<string, unknown>> = {
-    ...(ownedTables.get(environmentId) ?? {}),
+    ...(fhState().ownedTables.get(environmentId) ?? {}),
   }
   if (isEventRecord(table)) {
     const incomingRank = moduleTierRank(environmentId)
     for (const [name, methods] of Object.entries(table)) {
       if (!isEventRecord(methods)) continue
-      for (const [otherEnvId, otherTable] of ownedTables.entries()) {
+      for (const [otherEnvId, otherTable] of fhState().ownedTables.entries()) {
         if (otherEnvId === environmentId) continue
         if (!Object.hasOwn(otherTable, name)) continue
         const otherRank = moduleTierRank(otherEnvId)
@@ -18102,13 +18333,11 @@ export function finalizeOwnedTable(
     }
   }
   for (const methods of Object.values(next)) Object.freeze(methods)
-  ownedTables.set(environmentId, Object.freeze(next))
-  finalizedEnvironments.add(environmentId)
+  fhState().ownedTables.set(environmentId, Object.freeze(next))
+  fhState().finalizedEnvironments.add(environmentId)
 }
 
-const resolvedTables = new Map<string, unknown>()
 /** densable `$xr` / `yi` — `${surface}:${component}` → answer. */
-const resolvedByKey = new Map<string, Map<string, unknown>>()
 
 function resolvedKey(surface: string, component: string): string {
   return `${surface}:${component}`
@@ -18122,7 +18351,7 @@ export function storeResolvedTables(
   environmentId: string,
   requests: unknown,
 ): void {
-  resolvedTables.set(environmentId, requests)
+  fhState().resolvedTables.set(environmentId, requests)
   const byKey = new Map<string, unknown>()
   if (Array.isArray(requests)) {
     for (const item of requests) {
@@ -18135,11 +18364,11 @@ export function storeResolvedTables(
       byKey.set(resolvedKey(surface, component), item.answer)
     }
   }
-  resolvedByKey.set(environmentId, byKey)
+  fhState().resolvedByKey.set(environmentId, byKey)
 }
 
 export function getResolvedTables(environmentId: string): unknown {
-  return resolvedTables.get(environmentId)
+  return fhState().resolvedTables.get(environmentId)
 }
 
 export function getResolvedAnswer(
@@ -18147,32 +18376,32 @@ export function getResolvedAnswer(
   surface: string,
   component: string,
 ): unknown {
-  return resolvedByKey.get(environmentId)?.get(resolvedKey(surface, component))
+  return fhState()
+    .resolvedByKey.get(environmentId)
+    ?.get(resolvedKey(surface, component))
 }
 
 export function getOwnedTable(
   environmentId: string,
 ): Record<string, Record<string, unknown>> | undefined {
-  return ownedTables.get(environmentId)
+  return fhState().ownedTables.get(environmentId)
 }
 
 export function isOwnedTableFinalized(environmentId: string): boolean {
-  return finalizedEnvironments.has(environmentId)
+  return fhState().finalizedEnvironments.has(environmentId)
 }
 
 /**
  * densable Gy.call / `_vo` callers: nested interface.call sees the callers
  * stack written for this call.
  */
-let lastInterfaceCallers: unknown[] = []
-const interfaceCallerStack: unknown[][] = []
 
 export function getLastInterfaceCallers(): unknown[] {
-  return lastInterfaceCallers
+  return fhState().lastInterfaceCallers
 }
 
 export function getCurrentInterfaceCallers(): unknown[] {
-  return interfaceCallerStack.at(-1) ?? lastInterfaceCallers
+  return fhState().interfaceCallerStack.at(-1) ?? fhState().lastInterfaceCallers
 }
 
 /** densable same-thread `cloneIn` is identity for plain data. */
@@ -18187,17 +18416,17 @@ export async function callPluginInterface(
   callers: unknown[] = [],
   hookOrigin?: readonly HookOriginEntry[],
 ): Promise<unknown> {
-  if (workerReplacementPromise !== undefined) {
+  if (fhState().workerReplacementPromise !== undefined) {
     await waitForWorkerReplacement('interface.call')
   }
   const resolvedOrigin = hookOrigin ?? activeHookOriginAls.getStore()
   const resolvedServing = activeHookServingAls.getStore()
   const invoke = async (): Promise<unknown> => {
     const clonedArgs = args.map(cloneIn)
-    lastInterfaceCallers = [...callers]
-    interfaceCallerStack.push(lastInterfaceCallers)
+    fhState().lastInterfaceCallers = [...callers]
+    fhState().interfaceCallerStack.push(fhState().lastInterfaceCallers)
     try {
-      const own = ownedTables.get(environmentId)
+      const own = fhState().ownedTables.get(environmentId)
       const table = own?.[call.name]
       const method = table?.[call.method]
       if (typeof method === 'function') {
@@ -18218,7 +18447,7 @@ export async function callPluginInterface(
       }
       return await fn(...clonedArgs)
     } finally {
-      interfaceCallerStack.pop()
+      fhState().interfaceCallerStack.pop()
     }
   }
   const runWithOrigin = () =>
@@ -18276,15 +18505,7 @@ export function getLivePressEvent(): PressEventKind | undefined {
     : undefined
 }
 
-const recordedPresses: Array<{
-  environmentId: string
-  handle: unknown
-  event: unknown
-}> = []
-
 /** densable worker `x` — handle → press callback. */
-const pressHandlers = new Map<string, (event: unknown) => unknown>()
-let nextClientPressHandle = 0
 
 type HeldPressSite = {
   component: string
@@ -18508,25 +18729,23 @@ export function createHeldPressStore(): {
   }
 }
 
-const heldPressStore = createHeldPressStore()
-
 export function heldPress(
   plugin: string,
   handle: unknown,
   element?: string,
 ): HeldPressRecord | undefined {
-  return heldPressStore.heldPress(plugin, handle, element)
+  return fhState().heldPressStore.heldPress(plugin, handle, element)
 }
 
 export function hostedButtonsOf(
   plugin: string,
   element: string,
 ): Array<{ hosted: number; button: HeldPressRecord }> {
-  return heldPressStore.hostedButtonsOf(plugin, element)
+  return fhState().heldPressStore.hostedButtonsOf(plugin, element)
 }
 
 export function heldPressCount(): number {
-  return heldPressStore.heldPressCount()
+  return fhState().heldPressStore.heldPressCount()
 }
 
 export function heldByKeyOf(key: {
@@ -18537,48 +18756,50 @@ export function heldByKeyOf(key: {
   component: string
   requestId?: string
 }): HeldPressRecord | undefined {
-  return heldPressStore.heldByKeyOf(key)
+  return fhState().heldPressStore.heldByKeyOf(key)
 }
-const clientPressHandlesByPlugin = new Map<string, Set<number>>()
 
 function pressSlot(environmentId: string, handle: unknown): string {
   return `${environmentId}\0${JSON.stringify(handle)}`
 }
 
-setClientPressBridge({
-  hold(plugin, run) {
-    const handle = -++nextClientPressHandle
-    pressHandlers.set(pressSlot(plugin, handle), run)
-    const set = clientPressHandlesByPlugin.get(plugin) ?? new Set<number>()
-    set.add(handle)
-    clientPressHandlesByPlugin.set(plugin, set)
-    return handle
-  },
-  release(plugin, handles) {
-    const set = clientPressHandlesByPlugin.get(plugin)
-    for (const handle of handles) {
-      pressHandlers.delete(pressSlot(plugin, handle))
-      set?.delete(handle)
-    }
-    if (set?.size === 0) clientPressHandlesByPlugin.delete(plugin)
-  },
-  forget(plugin) {
-    if (plugin === undefined) {
-      for (const [owner, handles] of clientPressHandlesByPlugin) {
-        for (const handle of handles) {
-          pressHandlers.delete(pressSlot(owner, handle))
-        }
+exitSessionContext(() => {
+  setClientPressBridge({
+    hold(plugin, run) {
+      const handle = -++fhState().nextClientPressHandle
+      fhState().pressHandlers.set(pressSlot(plugin, handle), run)
+      const set =
+        fhState().clientPressHandlesByPlugin.get(plugin) ?? new Set<number>()
+      set.add(handle)
+      fhState().clientPressHandlesByPlugin.set(plugin, set)
+      return handle
+    },
+    release(plugin, handles) {
+      const set = fhState().clientPressHandlesByPlugin.get(plugin)
+      for (const handle of handles) {
+        fhState().pressHandlers.delete(pressSlot(plugin, handle))
+        set?.delete(handle)
       }
-      clientPressHandlesByPlugin.clear()
-      return
-    }
-    const set = clientPressHandlesByPlugin.get(plugin)
-    if (!set) return
-    for (const handle of set) {
-      pressHandlers.delete(pressSlot(plugin, handle))
-    }
-    clientPressHandlesByPlugin.delete(plugin)
-  },
+      if (set?.size === 0) fhState().clientPressHandlesByPlugin.delete(plugin)
+    },
+    forget(plugin) {
+      if (plugin === undefined) {
+        for (const [owner, handles] of fhState().clientPressHandlesByPlugin) {
+          for (const handle of handles) {
+            fhState().pressHandlers.delete(pressSlot(owner, handle))
+          }
+        }
+        fhState().clientPressHandlesByPlugin.clear()
+        return
+      }
+      const set = fhState().clientPressHandlesByPlugin.get(plugin)
+      if (!set) return
+      for (const handle of set) {
+        fhState().pressHandlers.delete(pressSlot(plugin, handle))
+      }
+      fhState().clientPressHandlesByPlugin.delete(plugin)
+    },
+  })
 })
 
 /**
@@ -18591,17 +18812,21 @@ export async function invokePress(
   handle: unknown,
   event: unknown,
 ): Promise<unknown> {
-  const held = pressHandlers.get(pressSlot(environmentId, handle))
+  const held = fhState().pressHandlers.get(pressSlot(environmentId, handle))
   if (held === undefined) {
-    if (workerOwnsDispatch && workerReplacementPromise !== undefined) {
+    if (
+      fhState().workerOwnsDispatch &&
+      fhState().workerReplacementPromise !== undefined
+    ) {
       await waitForWorkerReplacement('ui.press')
     }
-    if (workerOwnsDispatch && functionHooksWorker) {
-      const mod = loadedModules.find(
+    const pressWorker = fhState().functionHooksWorker
+    if (fhState().workerOwnsDispatch && pressWorker) {
+      const mod = fhState().loadedModules.find(
         item => item.name === environmentId && item.status !== 'unloaded',
       )
       if (mod && mod.native !== true) {
-        return functionHooksWorker.press(environmentId, handle, event)
+        return pressWorker.press(environmentId, handle, event)
       }
     }
     throw new Error(
@@ -18621,7 +18846,7 @@ export function holdPress(
   handle: unknown,
   fn: (event: unknown) => unknown,
 ): void {
-  pressHandlers.set(pressSlot(environmentId, handle), fn)
+  fhState().pressHandlers.set(pressSlot(environmentId, handle), fn)
 }
 
 /** densable worker `releasePresses` / `Lmn`. */
@@ -18634,7 +18859,7 @@ export function releasePresses(
     handle => !(typeof handle === 'number' && handle < 0),
   )
   if (hookHandles.length === 0) return
-  const mod = loadedModules.find(
+  const mod = fhState().loadedModules.find(
     item => item.name === environmentId && item.status !== 'unloaded',
   )
   if (!mod) {
@@ -18646,10 +18871,11 @@ export function releasePresses(
     return
   }
   for (const handle of hookHandles) {
-    pressHandlers.delete(pressSlot(environmentId, handle))
+    fhState().pressHandlers.delete(pressSlot(environmentId, handle))
   }
-  if (mod.native !== true && workerOwnsDispatch && functionHooksWorker) {
-    functionHooksWorker.releasePresses(environmentId, hookHandles)
+  const releaseWorker = fhState().functionHooksWorker
+  if (mod.native !== true && fhState().workerOwnsDispatch && releaseWorker) {
+    releaseWorker.releasePresses(environmentId, hookHandles)
   }
 }
 
@@ -18796,7 +19022,7 @@ export function recordPress(
   handle: unknown,
   event: unknown,
 ): void {
-  recordedPresses.push({ environmentId, handle, event })
+  fhState().recordedPresses.push({ environmentId, handle, event })
 }
 
 export function getRecordedPresses(): readonly {
@@ -18804,20 +19030,8 @@ export function getRecordedPresses(): readonly {
   handle: unknown
   event: unknown
 }[] {
-  return recordedPresses
+  return fhState().recordedPresses
 }
-
-let uiAskHandler:
-  | ((question: string, options: string[]) => Promise<string>)
-  | undefined
-
-let uiAskHostHandler:
-  | ((input: UiAskHostInput) => Promise<UiAskHostResult>)
-  | undefined
-
-let uiToastShowHandler:
-  | ((input: { plugin: string; text: string; timeoutMs?: number }) => void)
-  | undefined
 
 export type UiNotifyChannelResult =
   | 'no_surface'
@@ -18832,31 +19046,16 @@ export type UiNotifyChannelResult =
   | 'no_method_available'
   | 'error'
 
-let uiNotifyHandler:
-  | ((input: {
-      plugin: string
-      message: string
-      title: string
-      notificationType: 'plugin_notification'
-      key?: string
-      delayMs?: number
-      at?: number
-      untilBack?: boolean
-    }) => Promise<UiNotifyChannelResult> | UiNotifyChannelResult)
-  | undefined
-
-let uiCancelNotifyHandler:
-  | ((input: { plugin: string; key: string }) => Promise<boolean> | boolean)
-  | undefined
-
-export function setUiNotifyHandler(handler: typeof uiNotifyHandler): void {
-  uiNotifyHandler = handler
+export function setUiNotifyHandler(
+  handler: SessionFunctionHooksModulesState['uiNotifyHandler'],
+): void {
+  fhState().uiNotifyHandler = handler
 }
 
 export function setUiCancelNotifyHandler(
-  handler: typeof uiCancelNotifyHandler,
+  handler: SessionFunctionHooksModulesState['uiCancelNotifyHandler'],
 ): void {
-  uiCancelNotifyHandler = handler
+  fhState().uiCancelNotifyHandler = handler
 }
 
 const UI_NOTIFY_KEY_MAX = 64
@@ -18936,15 +19135,10 @@ function mapUiNotifyChannel(
   }
 }
 
-let uiStatusHandler:
-  | ((input: { plugin: string; text: string | undefined }) => void)
-  | undefined
-
 /** densable `dLe` — ui.toast timeoutMs upper bound. */
 const UI_TOAST_TIMEOUT_MS_MAX = 60_000
 /** densable `yIe` — per-plugin `budgets.toasts` cooldown (`Goo`). */
 const UI_TOAST_COOLDOWN_MS = 2000
-const pluginToastLastAt = new Map<string, number>()
 
 /** densable `I9e(plugin, text)` — status/toast text prefix. */
 export function formatPluginStatusText(plugin: string, text: string): string {
@@ -18956,19 +19150,20 @@ export function formatPluginStatusText(plugin: string, text: string): string {
 /** densable `oRt` + REPL `status(v, M)` — add/remove pinned status notification. */
 function runUiStatus(plugin: string, text: string | undefined): void {
   const label = text ?? '(cleared)'
-  if (!uiStatusHandler && !functionHooksAppStateWriter) {
+  if (!fhState().uiStatusHandler && !fhState().functionHooksAppStateWriter) {
     logForDebugging(
       `$.ui.status (${plugin}): no session bound; dropped: ${label}`,
     )
     return
   }
   logForDebugging(`$.ui.status (${plugin}): ${label}`)
-  if (uiStatusHandler) {
-    uiStatusHandler({ plugin, text })
+  const statusHandler = fhState().uiStatusHandler
+  if (statusHandler) {
+    statusHandler({ plugin, text })
     return
   }
   const key = `plugin-status-${plugin}`
-  functionHooksAppStateWriter?.(prev => {
+  fhState().functionHooksAppStateWriter?.(prev => {
     const isCurrent = prev.notifications.current?.key === key
     const inQueue = prev.notifications.queue.some(n => n.key === key)
     const inPinned = prev.notifications.pinned.some(n => n.key === key)
@@ -19002,29 +19197,19 @@ function runUiStatus(plugin: string, text: string | undefined): void {
   })
 }
 
-let functionHooksAppStateReader: (() => AppState | undefined) | undefined
-
-let functionHooksAppStateWriter:
-  | ((updater: (prev: AppState) => AppState) => void)
-  | undefined
-
-let agentSpawnHandler:
-  | ((input: Record<string, unknown>) => Promise<unknown>)
-  | undefined
-
 export function setUiAskHandler(
   handler:
     | ((question: string, options: string[]) => Promise<string>)
     | undefined,
 ): void {
-  uiAskHandler = handler
+  fhState().uiAskHandler = handler
 }
 
 /** densable host `ui.ask` — AskUserQuestion tool input, not the $ wrapper. */
 export function setUiAskHostHandler(
   handler: ((input: UiAskHostInput) => Promise<UiAskHostResult>) | undefined,
 ): void {
-  uiAskHostHandler = handler
+  fhState().uiAskHostHandler = handler
 }
 
 /** densable `budgets.toasts.show(plugin, n)` — Notifications host. */
@@ -19033,8 +19218,8 @@ export function setUiToastShowHandler(
     | ((input: { plugin: string; text: string; timeoutMs?: number }) => void)
     | undefined,
 ): void {
-  uiToastShowHandler = handler
-  pluginToastLastAt.clear()
+  fhState().uiToastShowHandler = handler
+  fhState().pluginToastLastAt.clear()
 }
 
 /** densable `oRt` — optional status host override (default uses AppState pinned notifications). */
@@ -19043,33 +19228,33 @@ export function setUiStatusHandler(
     | ((input: { plugin: string; text: string | undefined }) => void)
     | undefined,
 ): void {
-  uiStatusHandler = handler
+  fhState().uiStatusHandler = handler
 }
 
 export function setFunctionHooksAppStateReader(
   reader: (() => AppState | undefined) | undefined,
 ): void {
-  functionHooksAppStateReader = reader
+  fhState().functionHooksAppStateReader = reader
 }
 
 export function setFunctionHooksAppStateWriter(
   writer: ((updater: (prev: AppState) => AppState) => void) | undefined,
 ): void {
-  functionHooksAppStateWriter = writer
+  fhState().functionHooksAppStateWriter = writer
 }
 
 /** densable host `agent.spawn` — Agent tool input, not the $ wrapper. */
 export function setAgentSpawnHandler(
   handler: ((input: Record<string, unknown>) => Promise<unknown>) | undefined,
 ): void {
-  agentSpawnHandler = handler
+  fhState().agentSpawnHandler = handler
 }
 
 /** densable host `tool.call` — event bag `{ tool, ...args }`. */
 export function setToolCallHandler(
   handler: ((input: Record<string, unknown>) => Promise<unknown>) | undefined,
 ): void {
-  toolCallHandler = handler
+  fhState().toolCallHandler = handler
 }
 
 /**
@@ -19079,55 +19264,49 @@ export function setToolCallHandler(
 export function setFunctionHooksToolUseContext(
   host: FunctionHooksToolUseContext | undefined,
 ): void {
-  functionHooksToolUseContext = host
+  fhState().functionHooksToolUseContext = host
 }
 
 /** densable host `tool.check` — `{ tool, input }`. */
 export function setToolCheckHandler(
   handler: ((input: Record<string, unknown>) => Promise<unknown>) | undefined,
 ): void {
-  toolCheckHandler = handler
+  fhState().toolCheckHandler = handler
 }
 
 /** densable host `turn.abort` — cancel the running turn, if any. */
 export function setTurnAbortHandler(
   handler: ((input: { turnId: string }) => Promise<unknown>) | undefined,
 ): void {
-  turnAbortHandler = handler
+  fhState().turnAbortHandler = handler
 }
 
 export function setPromptSubmitHandler(
   handler: ((input: { text: string }) => Promise<unknown>) | undefined,
 ): void {
-  promptSubmitHandler = handler
+  fhState().promptSubmitHandler = handler
 }
 
 /** densable `zFn` host — REPL/headless bound compact. */
 export function setSessionCompactHandler(
   handler: ((input: { instructions: string }) => Promise<unknown>) | undefined,
 ): void {
-  sessionCompactHandler = handler
+  fhState().sessionCompactHandler = handler
 }
 
 /** densable `C0e` — running turn, if any. */
 export function setFunctionHooksTurnReader(
   reader: (() => { turnId: string } | undefined) | undefined,
 ): void {
-  turnRunningReader = reader
+  fhState().turnRunningReader = reader
 }
-
-const pluginHostCalls: Array<{
-  namespace: string
-  method: string
-  args: unknown[]
-}> = []
 
 export function getPluginHostCalls(): readonly {
   namespace: string
   method: string
   args: unknown[]
 }[] {
-  return pluginHostCalls
+  return fhState().pluginHostCalls
 }
 
 const CLAUDE_CODE_EXPORTS = [
@@ -19284,7 +19463,7 @@ function claudeCodeModule(context: object): SyntheticModule {
       ) => {
         const ref = isAtom(target) ? target.ref : readStateRef(target, 'set')
         for (let tries = 0; tries < UPDATE_TRIES_MAX; tries += 1) {
-          const held = pluginState.get(stateKey(ref))
+          const held = fhState().pluginState.get(stateKey(ref))
           const current = isAtom(target)
             ? atomValueOf(target, held?.value)
             : held?.value
@@ -20042,21 +20221,17 @@ class FunctionHooksWorkerClient {
   }
 }
 
-let functionHooksWorker: FunctionHooksWorkerClient | null = null
-let workerOwnsDispatch = false
-let workerReplacementPromise: Promise<void> | undefined
-let resolveWorkerReplacement: (() => void) | undefined
-
 export function beginFunctionHooksWorkerReplacement(): () => void {
-  if (workerReplacementPromise === undefined) {
-    workerReplacementPromise = new Promise<void>(resolve => {
-      resolveWorkerReplacement = resolve
+  const state = fhState()
+  if (state.workerReplacementPromise === undefined) {
+    state.workerReplacementPromise = new Promise<void>(resolve => {
+      state.resolveWorkerReplacement = resolve
     })
   }
   return () => {
-    const resolve = resolveWorkerReplacement
-    workerReplacementPromise = undefined
-    resolveWorkerReplacement = undefined
+    const resolve = state.resolveWorkerReplacement
+    state.workerReplacementPromise = undefined
+    state.resolveWorkerReplacement = undefined
     resolve?.()
   }
 }
@@ -20065,7 +20240,7 @@ async function waitForWorkerReplacement(
   event: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  const pending = workerReplacementPromise
+  const pending = fhState().workerReplacementPromise
   if (pending === undefined) return
   logForDebugging(
     `hooks module: ${event} waits for the hooks worker's replacement`,
@@ -20091,15 +20266,16 @@ async function waitForWorkerReplacement(
 }
 
 async function ensureFunctionHooksWorker(): Promise<FunctionHooksWorkerClient> {
-  if (!functionHooksWorker)
-    functionHooksWorker = new FunctionHooksWorkerClient()
-  return functionHooksWorker
+  const state = fhState()
+  if (!state.functionHooksWorker)
+    state.functionHooksWorker = new FunctionHooksWorkerClient()
+  return state.functionHooksWorker
 }
 
 export async function stopFunctionHooksWorker(): Promise<void> {
-  workerOwnsDispatch = false
-  const worker = functionHooksWorker
-  functionHooksWorker = null
+  fhState().workerOwnsDispatch = false
+  const worker = fhState().functionHooksWorker
+  fhState().functionHooksWorker = null
   if (worker) await worker.stop()
 }
 
@@ -20116,8 +20292,6 @@ type SessionStartDedupRecord = {
   calls: Record<SessionStartDedupOp, SessionStartDedupEntry[]>
   copies: Set<string>
 }
-
-const sessionStartDedupStore = new Map<string, SessionStartDedupRecord>()
 
 function isSessionStartDedupAbortedOrDenied(
   entry: SessionStartDedupEntry,
@@ -20141,10 +20315,10 @@ export function recordSessionStartLoad({
 }): boolean {
   const { isDeepStrictEqual } = require('util') as typeof import('util')
   const load = { args, shown }
-  const existing = sessionStartDedupStore.get(name)
+  const existing = fhState().sessionStartDedupStore.get(name)
   const same = existing !== undefined && isDeepStrictEqual(existing.load, load)
   if (!same) {
-    sessionStartDedupStore.set(name, {
+    fhState().sessionStartDedupStore.set(name, {
       load,
       calls: {
         'prompt.submit': [],
@@ -20169,7 +20343,7 @@ export function withSessionStartDedup(
 ): Promise<unknown> {
   const rec =
     getLiveHookEvent() === 'session.start'
-      ? sessionStartDedupStore.get(plugin)
+      ? fhState().sessionStartDedupStore.get(plugin)
       : undefined
   const envId = environmentId ?? plugin
   if (rec === undefined || !rec.copies.has(envId)) {
@@ -20221,35 +20395,36 @@ export function withSessionStartDedup(
   })
 }
 
-const inFlightByModule = new Map<string, number>()
-
 function enterModule(name: string): void {
-  inFlightByModule.set(name, (inFlightByModule.get(name) ?? 0) + 1)
+  fhState().inFlightByModule.set(
+    name,
+    (fhState().inFlightByModule.get(name) ?? 0) + 1,
+  )
 }
 
 function leaveModule(name: string): void {
-  const next = (inFlightByModule.get(name) ?? 1) - 1
-  if (next <= 0) inFlightByModule.delete(name)
-  else inFlightByModule.set(name, next)
-  const mod = loadedModules.find(item => item.name === name)
+  const next = (fhState().inFlightByModule.get(name) ?? 1) - 1
+  if (next <= 0) fhState().inFlightByModule.delete(name)
+  else fhState().inFlightByModule.set(name, next)
+  const mod = fhState().loadedModules.find(item => item.name === name)
   if (mod?.status === 'retiring' && next <= 0) unloadModule(name)
 }
 
 function unloadModule(name: string): void {
   forgetPluginOwnedMcpServers(name)
-  loadedModules = loadedModules.map(mod =>
+  fhState().loadedModules = fhState().loadedModules.map(mod =>
     mod.name === name
       ? { ...mod, status: 'unloaded', hooks: [], patterns: [] }
       : mod,
   )
-  for (const key of [...pluginState.keys()]) {
-    if (key.startsWith(`${name}\0`)) pluginState.delete(key)
+  for (const key of [...fhState().pluginState.keys()]) {
+    if (key.startsWith(`${name}\0`)) fhState().pluginState.delete(key)
   }
-  for (const key of [...pluginAgents.keys()]) {
-    if (key.startsWith(`${name}:`)) pluginAgents.delete(key)
+  for (const key of [...fhState().pluginAgents.keys()]) {
+    if (key.startsWith(`${name}:`)) fhState().pluginAgents.delete(key)
   }
-  for (const [agentId, caller] of [...pluginSpawnCallers.entries()]) {
-    if (caller === name) pluginSpawnCallers.delete(agentId)
+  for (const [agentId, caller] of [...fhState().pluginSpawnCallers.entries()]) {
+    if (caller === name) fhState().pluginSpawnCallers.delete(agentId)
   }
   dropPluginAgentDefinitions(name)
   forgetPluginCommands(name)
@@ -20257,15 +20432,15 @@ function unloadModule(name: string): void {
   if (previousServerKey !== undefined) {
     void awaitPluginToolSessionUnmount([previousServerKey])
   }
-  for (const key of [...pluginStore.keys()]) {
-    if (key.startsWith(`${name}\0`)) pluginStore.delete(key)
+  for (const key of [...fhState().pluginStore.keys()]) {
+    if (key.startsWith(`${name}\0`)) fhState().pluginStore.delete(key)
   }
   forgetPluginSessionAuthHandles(name)
   themeClearOnUnload(name)
-  ownedTables.delete(name)
-  resolvedTables.delete(name)
-  resolvedByKey.delete(name)
-  finalizedEnvironments.delete(name)
+  fhState().ownedTables.delete(name)
+  fhState().resolvedTables.delete(name)
+  fhState().resolvedByKey.delete(name)
+  fhState().finalizedEnvironments.delete(name)
 }
 
 /**
@@ -20273,15 +20448,16 @@ function unloadModule(name: string): void {
  * Forgets plugin state. The worker gets `unload` when it owns dispatch.
  */
 export async function retireFunctionHooksModule(name: string): Promise<void> {
-  const mod = loadedModules.find(item => item.name === name)
+  const mod = fhState().loadedModules.find(item => item.name === name)
   if (!mod || mod.status === 'unloaded') return
-  loadedModules = loadedModules.map(item =>
+  fhState().loadedModules = fhState().loadedModules.map(item =>
     item.name === name ? { ...item, status: 'retiring' } : item,
   )
-  if (functionHooksWorker) {
-    functionHooksWorker.unload(name)
+  const retireWorker = fhState().functionHooksWorker
+  if (retireWorker) {
+    retireWorker.unload(name)
   }
-  if ((inFlightByModule.get(name) ?? 0) === 0) unloadModule(name)
+  if ((fhState().inFlightByModule.get(name) ?? 0) === 0) unloadModule(name)
 }
 
 function isEventRecord(value: unknown): value is Record<string, unknown> {
@@ -20364,18 +20540,19 @@ const FAULT_RENDER_FOLD_MS = {
   live: FAULT_RENDER_LIVE_MS,
 } as const
 /** densable `Qm`. */
-const pluginRenderCooldownUntil = new Map<string, number>()
 /** densable `HD()` / `dt().renderVersions`. */
-const faultRenderVersions = new Map<string, number>()
 
-function pluginSessionState(): typeof pluginSession {
-  return pluginSession
+function pluginSessionState(): SessionFunctionHooksModulesState['pluginSession'] {
+  return fhState().pluginSession
 }
 
 /** densable `bh` / `E1t(plugin, pace)` — HD plugin live/steady keys. Lue still reads them. */
 function bumpHdPlugin(name: string, pace: 'live' | 'steady'): void {
   const key = pace === 'live' ? `${name}${FAULT_RENDER_LIVE}` : name
-  faultRenderVersions.set(key, (faultRenderVersions.get(key) ?? 0) + 1)
+  fhState().faultRenderVersions.set(
+    key,
+    (fhState().faultRenderVersions.get(key) ?? 0) + 1,
+  )
 }
 
 /** densable `Zm`. */
@@ -20384,13 +20561,16 @@ function notePluginRenderCooldown(
   now = Date.now(),
 ): void {
   for (const name of names) {
-    pluginRenderCooldownUntil.set(name, now + PLUGIN_RENDER_COOLDOWN_MS)
+    fhState().pluginRenderCooldownUntil.set(
+      name,
+      now + PLUGIN_RENDER_COOLDOWN_MS,
+    )
   }
 }
 
 /** densable `jP`. */
 function pluginOnCooldown(name: string, now: number): boolean {
-  const until = pluginRenderCooldownUntil.get(name)
+  const until = fhState().pluginRenderCooldownUntil.get(name)
   return until !== undefined && now < until
 }
 
@@ -20459,7 +20639,14 @@ function scheduleHdPluginBump(
       bump(plugin, t)
       return true
     }
-    const timer = setTimeout(() => bump(plugin, nowFn()), delay)
+    const captured = getActiveSessionFromAls()
+    const timer = setTimeout(() => {
+      if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+        runWithSession(captured, () => bump(plugin, nowFn()))
+        return
+      }
+      bump(plugin, nowFn())
+    }, delay)
     timer.unref?.()
     pending.set(plugin, timer)
     return false
@@ -20475,10 +20662,6 @@ function scheduleHdPluginBump(
 }
 
 /** densable `jis()` live/steady pair; steady `onBump` is live.bump. */
-const hdPluginLiveBump = scheduleHdPluginBump('live')
-const hdPluginSteadyBump = scheduleHdPluginBump('steady', {
-  onBump: (plugin, at) => hdPluginLiveBump.bump(plugin, at, true),
-})
 
 /** densable `Amt` — flush one fold: Qc `\0state` then one staleListener bump. */
 function flushClientFaultFolds(pace: ClientFaultFoldPace, now: number): void {
@@ -20518,10 +20701,16 @@ function noteClientFaultStale(instanceKeys: readonly string[]): void {
     const delay = FAULT_RENDER_FOLD_MS[pace] - Math.max(0, now - fold.lastAt)
     if (delay <= 0) flushClientFaultFolds(pace, now)
     else {
-      const timer = setTimeout(
-        () => flushClientFaultFolds(pace, Date.now()),
-        delay,
-      )
+      const captured = getActiveSessionFromAls()
+      const timer = setTimeout(() => {
+        if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+          runWithSession(captured, () =>
+            flushClientFaultFolds(pace, Date.now()),
+          )
+          return
+        }
+        flushClientFaultFolds(pace, Date.now())
+      }, delay)
       timer.unref?.()
       fold.pending = timer
     }
@@ -20567,7 +20756,7 @@ function recordDrawingReaders(drawing: UiRenderDrawing): void {
     const of = session.readersOf.get(key) ?? new Set<string>()
     of.add(drawing.instanceKey)
     session.readersOf.set(key, of)
-    if ((pluginState.get(key)?.version ?? 0) !== version) stale = true
+    if ((fhState().pluginState.get(key)?.version ?? 0) !== version) stale = true
   }
   for (const key of [...session.readers.keys()]) {
     if (session.readers.size <= DRAWING_READERS_CAP) break
@@ -20578,9 +20767,9 @@ function recordDrawingReaders(drawing: UiRenderDrawing): void {
 
 /** densable `bh(Fv)` / `E1t()` — bump HD `ui.render`; React observes via invalidateRender. */
 function bumpFaultRenderFv(): void {
-  faultRenderVersions.set(
+  fhState().faultRenderVersions.set(
     FAULT_RENDER_FV,
-    (faultRenderVersions.get(FAULT_RENDER_FV) ?? 0) + 1,
+    (fhState().faultRenderVersions.get(FAULT_RENDER_FV) ?? 0) + 1,
   )
   invalidateRender('ui.render')
 }
@@ -20597,16 +20786,15 @@ function clientFaultStateKey(md: string): string {
 function qcFaultSite(md: string): void {
   const session = pluginSessionState()
   session.bumps += 1
-  faultRenderVersions.set(clientFaultStateKey(md), session.bumps)
+  fhState().faultRenderVersions.set(clientFaultStateKey(md), session.bumps)
 }
 
 /**
  * densable `Xm` — band not collapsed. Default true (`v1t.get()!==!0`).
  */
-let pluginBandExpanded = true
 
 export function setPluginBandExpanded(next: boolean): void {
-  pluginBandExpanded = next
+  fhState().pluginBandExpanded = next
 }
 
 function uiRenderMatcherMatches(
@@ -20631,8 +20819,8 @@ function uiRenderMatcherMatches(
 
 /** densable `Amn`/`uUe` — ui.render hook plugins matching the site. */
 function uiRenderPluginNames(site: ClientFaultSite): string[] {
-  return loadedModules
-    .filter(mod => mod.status !== 'unloaded')
+  return fhState()
+    .loadedModules.filter(mod => mod.status !== 'unloaded')
     .filter(mod => {
       const builtin = isBuiltinTierMod(mod)
       return (mod.hooks ?? []).some(
@@ -20650,18 +20838,19 @@ function uiRenderPluginNames(site: ClientFaultSite): string[] {
  */
 function pluginVisibleLive(name: string): boolean {
   const above =
-    pluginBandExpanded &&
+    fhState().pluginBandExpanded &&
     uiRenderPluginNames({
       surface: 'terminal',
       component: 'AbovePrompt',
       requestId: '',
     }).includes(name)
+  const shownId = fhState().shownPaneId
   const pane =
-    shownPaneId !== null &&
+    shownId !== null &&
     uiRenderPluginNames({
       surface: 'terminal',
       component: 'Pane',
-      requestId: shownPaneId,
+      requestId: shownId,
     }).includes(name)
   const hint = uiRenderPluginNames({
     surface: 'terminal',
@@ -20677,20 +20866,21 @@ function pluginVisibleLive(name: string): boolean {
  */
 function invalidatePluginRender(plugin: string): void {
   if (
-    !hdPluginSteadyBump.call(plugin) &&
+    !fhState().hdPluginSteadyBump.call(plugin) &&
     !pluginOnCooldown(plugin, Date.now()) &&
     pluginVisibleLive(plugin)
   ) {
-    hdPluginLiveBump.call(plugin)
+    fhState().hdPluginLiveBump.call(plugin)
   }
 }
 
 /** densable `cS` — live vs steady HD key pace. */
 function clientFaultPace(site: ClientFaultSite): 'live' | 'steady' {
   if (site.surface !== 'terminal') return 'steady'
-  const above = site.component === 'AbovePrompt' && pluginBandExpanded
+  const above = site.component === 'AbovePrompt' && fhState().pluginBandExpanded
   const hint = site.component === 'PromptHint'
-  const pane = site.component === 'Pane' && shownPaneId === site.requestId
+  const pane =
+    site.component === 'Pane' && fhState().shownPaneId === site.requestId
   return above || hint || pane ? 'live' : 'steady'
 }
 
@@ -20700,7 +20890,7 @@ function clientFaultPace(site: ClientFaultSite): 'live' | 'steady' {
  * `DY`: if `${MD}\0state` exists, append `\0\0${s}`.
  */
 function clientFaultLue(site: ClientFaultSite): string {
-  const hd = faultRenderVersions
+  const hd = fhState().faultRenderVersions
   const names = uiRenderPluginNames(site)
   const pace = clientFaultPace(site)
   let stamp = String(hd.get(FAULT_RENDER_FV) ?? 0)
@@ -20732,7 +20922,7 @@ function releaseClientFaultMount(md: string): void {
   }
   session.mounted.delete(md)
   if (!session.readers.has(md)) {
-    faultRenderVersions.delete(clientFaultStateKey(md))
+    fhState().faultRenderVersions.delete(clientFaultStateKey(md))
   }
 }
 
@@ -20748,7 +20938,7 @@ function dropClientFaultRenderKey(site: ClientFaultSite): void {
   const md = clientFaultSiteKey(site)
   const session = pluginSessionState()
   if ((session.mounted.get(md) ?? 0) > 0 || session.readers.has(md)) return
-  faultRenderVersions.delete(clientFaultStateKey(md))
+  fhState().faultRenderVersions.delete(clientFaultStateKey(md))
 }
 
 function resetClientFaultRuns(): void {
@@ -20758,20 +20948,20 @@ function resetClientFaultRuns(): void {
     if (fold.pending !== undefined) clearTimeout(fold.pending)
     session.folds[pace] = emptyClientFaultFold()
   }
-  hdPluginLiveBump.reset()
-  hdPluginSteadyBump.reset()
+  fhState().hdPluginLiveBump.reset()
+  fhState().hdPluginSteadyBump.reset()
   session.faultRuns.clear()
   session.mounted.clear()
   session.readers.clear()
   session.readersOf.clear()
   session.bumps = 0
   session.versionFloor = 0
-  faultRenderVersions.clear()
-  pluginRenderCooldownUntil.clear()
-  uiRenderEvalCache.clear()
-  uiRenderEvalHd = undefined
-  uiRenderEvalEngineVersion = 0
-  uiRenderEvalReuseCount = 0
+  fhState().faultRenderVersions.clear()
+  fhState().pluginRenderCooldownUntil.clear()
+  fhState().uiRenderEvalCache.clear()
+  fhState().uiRenderEvalHd = undefined
+  fhState().uiRenderEvalEngineVersion = 0
+  fhState().uiRenderEvalReuseCount = 0
 }
 
 /** densable `Q_().faultRuns.size`. */
@@ -20782,7 +20972,7 @@ export function getPluginFaultRunsSize(): number {
 /** densable HD `\0state` occupancy after `Qc` / `kS`. */
 export function getPluginFaultRenderStateSize(): number {
   let count = 0
-  for (const key of faultRenderVersions.keys()) {
+  for (const key of fhState().faultRenderVersions.keys()) {
     if (key.endsWith(FAULT_RENDER_STATE_SUFFIX)) count += 1
   }
   return count
@@ -20790,7 +20980,7 @@ export function getPluginFaultRenderStateSize(): number {
 
 function ownerHeardUiFault(report: ClientFaultReport): boolean {
   const needle = 'ui.fault'
-  return loadedModules.some(mod => {
+  return fhState().loadedModules.some(mod => {
     if (mod.name !== report.plugin) return false
     if (mod.status === 'unloaded') return false
     const builtin = isBuiltinTierMod(mod)
@@ -20872,16 +21062,13 @@ type ClientMessageQueued = {
   post: ClientMessageEnqueue
   reply: (value: unknown) => void
 }
-const clientMessagePosts = new Map<string, ClientMessageQueued>()
-let clientMessageDrain: ReturnType<typeof setTimeout> | undefined
-let clientMessagesDispatched = 0
 
 function drainClientMessages(): void {
-  clientMessageDrain = undefined
-  const batch = [...clientMessagePosts.values()]
-  clientMessagePosts.clear()
+  fhState().clientMessageDrain = undefined
+  const batch = [...fhState().clientMessagePosts.values()]
+  fhState().clientMessagePosts.clear()
   for (const item of batch) {
-    clientMessagesDispatched += 1
+    fhState().clientMessagesDispatched += 1
     void dispatchClientMessage(item.post).then(item.reply, err => {
       logForDebugging(
         `ui.message ${item.post.plugin}/${item.post.element}: the chain threw (${describeThrown(err)}); no reply`,
@@ -20898,33 +21085,41 @@ export function enqueueClientMessage(
   post: ClientMessageEnqueue,
   reply: (value: unknown) => void,
 ): void {
-  clientMessagePosts.set(post.id, { post, reply })
-  clientMessageDrain ??= setTimeout(
-    drainClientMessages,
-    CLIENT_MESSAGE_COALESCE_MS,
-  )
+  const state = fhState()
+  const captured = getActiveSessionFromAls()
+  state.clientMessagePosts.set(post.id, { post, reply })
+  state.clientMessageDrain ??= setTimeout(() => {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, drainClientMessages)
+      return
+    }
+    drainClientMessages()
+  }, CLIENT_MESSAGE_COALESCE_MS)
 }
 
 export function cancelClientMessage(id: string): void {
-  clientMessagePosts.delete(id)
-  if (clientMessagePosts.size === 0 && clientMessageDrain !== undefined) {
-    clearTimeout(clientMessageDrain)
-    clientMessageDrain = undefined
+  fhState().clientMessagePosts.delete(id)
+  if (
+    fhState().clientMessagePosts.size === 0 &&
+    fhState().clientMessageDrain !== undefined
+  ) {
+    clearTimeout(fhState().clientMessageDrain)
+    fhState().clientMessageDrain = undefined
   }
 }
 
 function resetClientMessageQueue(): void {
-  clientMessagePosts.clear()
-  if (clientMessageDrain !== undefined) {
-    clearTimeout(clientMessageDrain)
-    clientMessageDrain = undefined
+  fhState().clientMessagePosts.clear()
+  if (fhState().clientMessageDrain !== undefined) {
+    clearTimeout(fhState().clientMessageDrain)
+    fhState().clientMessageDrain = undefined
   }
-  clientMessagesDispatched = 0
+  fhState().clientMessagesDispatched = 0
 }
 
 /** densable `Wbr().dispatched()`. */
 export function getClientMessagesDispatched(): number {
-  return clientMessagesDispatched
+  return fhState().clientMessagesDispatched
 }
 
 /**
@@ -21012,23 +21207,20 @@ function matchFieldValue(expected: unknown, actual: unknown): boolean {
  * Lines arriving before output format is settled are buffered and flushed when
  * `setHeadlessPluginOutputFormat('text')` or `flushHeadlessInlineModStderr()` runs.
  */
-let headlessPluginOutputFormat: string | null = null
-const pendingHeadlessModStderrLines: string[] = []
-const emittedHeadlessModStderrLines = new Set<string>()
 
 function isHeadlessTextStderrActive(): boolean {
   return (
-    headlessPluginOutputFormat === 'text' &&
+    fhState().headlessPluginOutputFormat === 'text' &&
     process.env.CLAUDE_CODE_SESSION_KIND !== 'bg'
   )
 }
 
 export function setHeadlessPluginOutputFormat(format: string | null): void {
-  headlessPluginOutputFormat = format
+  fhState().headlessPluginOutputFormat = format
   if (format === 'text') {
     flushHeadlessInlineModStderr()
   } else if (format !== null) {
-    pendingHeadlessModStderrLines.length = 0
+    fhState().pendingHeadlessModStderrLines.length = 0
   }
 }
 
@@ -21041,7 +21233,7 @@ export function flushHeadlessInlineModStderr(
     }
   },
 ): string[] {
-  const queued = pendingHeadlessModStderrLines.splice(0)
+  const queued = fhState().pendingHeadlessModStderrLines.splice(0)
   if (!isHeadlessTextStderrActive()) return []
   for (const line of queued) {
     write(`${line}\n`)
@@ -21065,10 +21257,10 @@ export function reportHeadlessInlineModStderr(
       ch === '\n' ? '\n' : '',
     )
     .replaceAll('\n', '\n  ')
-  if (emittedHeadlessModStderrLines.has(clean)) return false
-  emittedHeadlessModStderrLines.add(clean)
-  if (headlessPluginOutputFormat === null) {
-    pendingHeadlessModStderrLines.push(clean)
+  if (fhState().emittedHeadlessModStderrLines.has(clean)) return false
+  fhState().emittedHeadlessModStderrLines.add(clean)
+  if (fhState().headlessPluginOutputFormat === null) {
+    fhState().pendingHeadlessModStderrLines.push(clean)
     return true
   }
   if (isHeadlessTextStderrActive()) {
@@ -21088,9 +21280,9 @@ export function reportHeadlessInlineModStderr(
 }
 
 export function resetHeadlessInlineModStderrState(): void {
-  headlessPluginOutputFormat = null
-  pendingHeadlessModStderrLines.length = 0
-  emittedHeadlessModStderrLines.clear()
+  fhState().headlessPluginOutputFormat = null
+  fhState().pendingHeadlessModStderrLines.length = 0
+  fhState().emittedHeadlessModStderrLines.clear()
 }
 
 /** A non-object matcher matches everything. Object/array/RegExp fields match gold `vSt`. */
@@ -21515,7 +21707,7 @@ export function leftoverBuiltinHooksModule(
 }
 
 function resolvePluginStorageId(pluginName: string): string {
-  const mod = loadedModules.find(m => m.name === pluginName)
+  const mod = fhState().loadedModules.find(m => m.name === pluginName)
   return mod?.pluginStorageId ?? pluginName
 }
 
@@ -21667,10 +21859,10 @@ async function admitUserPluginIfAllowed(
     provenance: plugin.source ?? plugin.name,
     uses: { events: scannedEvents, calls: [] },
   }
-  const prevLoaded = loadedModules
-  const prevWorkerOwns = workerOwnsDispatch
-  loadedModules = [...activeJudges]
-  workerOwnsDispatch = activeJudges.some(mod => mod.native !== true)
+  const prevLoaded = fhState().loadedModules
+  const prevWorkerOwns = fhState().workerOwnsDispatch
+  fhState().loadedModules = [...activeJudges]
+  fhState().workerOwnsDispatch = activeJudges.some(mod => mod.native !== true)
   try {
     const verdict = await runPluginRegister(shown, plugin.name)
     if (verdict !== undefined && !('allow' in verdict)) {
@@ -21681,8 +21873,8 @@ async function admitUserPluginIfAllowed(
     }
     return true
   } finally {
-    loadedModules = prevLoaded
-    workerOwnsDispatch = prevWorkerOwns
+    fhState().loadedModules = prevLoaded
+    fhState().workerOwnsDispatch = prevWorkerOwns
   }
 }
 
@@ -21692,7 +21884,10 @@ export async function recordFunctionHookPlugins(
   const next: LoadedFunctionHooksModule[] = []
   for (const plugin of plugins) {
     if (
-      !(await admitUserPluginIfAllowed(plugin, [...loadedModules, ...next]))
+      !(await admitUserPluginIfAllowed(plugin, [
+        ...fhState().loadedModules,
+        ...next,
+      ]))
     ) {
       continue
     }
@@ -21706,17 +21901,17 @@ export async function loadFunctionHooksInProcess(
   plugins: readonly FunctionHookPlugin[],
 ): Promise<LoadedFunctionHooksModule[]> {
   const recorded = await recordFunctionHookPlugins(plugins)
-  const ownedByWorker = workerOwnsDispatch
+  const ownedByWorker = fhState().workerOwnsDispatch
   // densable worker load is per-plugin; merge so {only} isolation still
   // sees every live module (not last-write-wins).
   const byName = new Map(
-    loadedModules
-      .filter(mod => mod.status !== 'unloaded')
+    fhState()
+      .loadedModules.filter(mod => mod.status !== 'unloaded')
       .map(mod => [mod.name, mod] as const),
   )
   for (const mod of recorded) byName.set(mod.name, mod)
   replaceLoadedFunctionHooksModules([...byName.values()])
-  workerOwnsDispatch = ownedByWorker
+  fhState().workerOwnsDispatch = ownedByWorker
   return recorded
 }
 
@@ -21853,15 +22048,17 @@ export async function loadFunctionHooksModules(
   // densable reload: retire modules that disappeared so Xj.forget +
   // removeMcpServer run (replace alone left orphan MCP mounts model-visible).
   const nextNames = new Set(loaded.map(mod => mod.name))
-  const removed = loadedModules
-    .filter(mod => mod.status !== 'unloaded' && !nextNames.has(mod.name))
+  const removed = fhState()
+    .loadedModules.filter(
+      mod => mod.status !== 'unloaded' && !nextNames.has(mod.name),
+    )
     .map(mod => mod.name)
   for (const name of removed) {
     forgetPluginOwnedMcpServers(name)
     await retireFunctionHooksModule(name)
   }
   replaceLoadedFunctionHooksModules(loaded)
-  workerOwnsDispatch = loadedAnyWorkerPlugin
+  fhState().workerOwnsDispatch = loadedAnyWorkerPlugin
 }
 
 type WorkerModule = {
@@ -22454,13 +22651,6 @@ export type SessionThemeState = {
   colors?: Record<string, unknown>
 }
 
-let sessionTheme: SessionThemeState | undefined
-const sessionThemeListeners = new Set<() => void>()
-const themeTurns = {
-  taken: 0,
-  landed: 0,
-  gone: new Map<string, number>(),
-}
 const themeImageKey = randomBytes(32)
 
 function setSessionThemeState(
@@ -22468,9 +22658,9 @@ function setSessionThemeState(
     prev: SessionThemeState | undefined,
   ) => SessionThemeState | undefined,
 ): void {
-  const next = updater(sessionTheme)
-  sessionTheme = next
-  for (const listener of sessionThemeListeners) {
+  const next = updater(fhState().sessionTheme)
+  fhState().sessionTheme = next
+  for (const listener of fhState().sessionThemeListeners) {
     try {
       listener()
     } catch {
@@ -22480,27 +22670,28 @@ function setSessionThemeState(
 }
 
 export function getSessionTheme(): SessionThemeState | undefined {
-  return sessionTheme
+  return fhState().sessionTheme
 }
 
 export function subscribeSessionTheme(listener: () => void): () => void {
-  sessionThemeListeners.add(listener)
+  const listeners = fhState().sessionThemeListeners
+  listeners.add(listener)
   return () => {
-    sessionThemeListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function resetSessionThemeForTests(): void {
-  sessionTheme = undefined
-  themeTurns.taken = 0
-  themeTurns.landed = 0
-  themeTurns.gone.clear()
+  fhState().sessionTheme = undefined
+  fhState().themeTurns.taken = 0
+  fhState().themeTurns.landed = 0
+  fhState().themeTurns.gone.clear()
 }
 
 export function getBackdropRenderProps(
   instanceId: string,
 ): Record<string, unknown> | undefined {
-  const theme = sessionTheme
+  const theme = fhState().sessionTheme
   const backdrop = theme?.backdrop
   if (
     theme !== undefined &&
@@ -22523,7 +22714,7 @@ export function getBackdropRenderProps(
 export function getThemeRenderProps(
   instanceId: string,
 ): Record<string, unknown> | undefined {
-  const theme = sessionTheme
+  const theme = fhState().sessionTheme
   if (theme === undefined) return undefined
   if (instanceId.startsWith('image:')) {
     const img = theme.image
@@ -22987,8 +23178,8 @@ async function runThemeSet(
   plugin?: string,
 ): Promise<{ isDrawn: boolean; requestId?: string; reason?: string }> {
   const pluginName = plugin && plugin !== '' ? plugin : 'unattributed'
-  const mod = loadedModules.find(m => m.name === pluginName)
-  const turn = (themeTurns.taken += 1)
+  const mod = fhState().loadedModules.find(m => m.name === pluginName)
+  const turn = (fhState().themeTurns.taken += 1)
   const backdropRec = isEventRecord(input.backdrop) ? input.backdrop : undefined
   const imageRec =
     backdropRec && isEventRecord(backdropRec.image)
@@ -23021,15 +23212,15 @@ async function runThemeSet(
     loadedImage = await readThemeImage(imageSource, pluginName, root)
   }
 
-  const goneTurn = themeTurns.gone.get(pluginName) ?? 0
-  if (turn < themeTurns.landed || turn < goneTurn) {
+  const goneTurn = fhState().themeTurns.gone.get(pluginName) ?? 0
+  if (turn < fhState().themeTurns.landed || turn < goneTurn) {
     return {
       isDrawn: false,
       reason:
         'nothing was set: a later $.theme.set or $.theme.clear came first, this mod unloaded, or the call was aborted',
     }
   }
-  themeTurns.landed = turn
+  fhState().themeTurns.landed = turn
 
   const scene =
     backdropRec && typeof backdropRec.scene === 'string'
@@ -23072,7 +23263,7 @@ async function runThemeSet(
     }),
   }
 
-  if (!isDeepStrictEqual(sessionTheme, nextState)) {
+  if (!isDeepStrictEqual(fhState().sessionTheme, nextState)) {
     setSessionThemeState(() => nextState)
   }
 
@@ -23084,9 +23275,9 @@ async function runThemeSet(
 }
 
 function runThemeClear(): { isDrawn: false; reason: string } {
-  themeTurns.taken += 1
-  themeTurns.landed = themeTurns.taken
-  const stood = sessionTheme !== undefined
+  fhState().themeTurns.taken += 1
+  fhState().themeTurns.landed = fhState().themeTurns.taken
+  const stood = fhState().sessionTheme !== undefined
   if (stood) {
     setSessionThemeState(() => undefined)
   }
@@ -23099,9 +23290,9 @@ function runThemeClear(): { isDrawn: false; reason: string } {
 }
 
 function themeClearOnUnload(pluginName: string): void {
-  themeTurns.taken += 1
-  themeTurns.gone.set(pluginName, themeTurns.taken)
-  if (sessionTheme?.plugin === pluginName) {
+  fhState().themeTurns.taken += 1
+  fhState().themeTurns.gone.set(pluginName, fhState().themeTurns.taken)
+  if (fhState().sessionTheme?.plugin === pluginName) {
     setSessionThemeState(prev =>
       prev?.plugin === pluginName ? undefined : prev,
     )

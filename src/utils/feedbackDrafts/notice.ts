@@ -1,5 +1,6 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import {
   DEFAULT_MAX_DRAFT_PROMPTS_PER_SESSION,
   DEFAULT_MAX_TOOL_CALLS_PER_SESSION,
@@ -42,7 +43,25 @@ const initialNoticeState: FeedbackNoticeState = {
   toolCallCount: 0,
 }
 
-let noticeState: FeedbackNoticeState = { ...initialNoticeState }
+class FeedbackNoticeSessionState {
+  noticeState: FeedbackNoticeState = { ...initialNoticeState }
+  noticeListeners = new Set<() => void>()
+}
+
+const fallbackFeedbackNoticeSession = { root: {} as object }
+const feedbackNoticeBySession = new RootSessionSlot<FeedbackNoticeSessionState>(
+  () => new FeedbackNoticeSessionState(),
+)
+
+function getFeedbackNoticeSessionState(): FeedbackNoticeSessionState {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return feedbackNoticeBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return feedbackNoticeBySession.of(fallbackFeedbackNoticeSession)
+}
 
 function clampInt(
   value: unknown,
@@ -89,37 +108,39 @@ export function getMaxDraftPromptsPerSession(): number {
   )
 }
 
-const noticeListeners = new Set<() => void>()
-
-function emitNoticeChange(): void {
-  for (const listener of noticeListeners) listener()
+function emitNoticeChange(
+  state: FeedbackNoticeSessionState = getFeedbackNoticeSessionState(),
+): void {
+  for (const listener of state.noticeListeners) listener()
 }
 
 export function getFeedbackNoticeState(): FeedbackNoticeState {
-  return noticeState
+  return getFeedbackNoticeSessionState().noticeState
 }
 
 /** densable leftover `_6` store subscribe. */
 export function subscribeFeedbackNotice(listener: () => void): () => void {
-  noticeListeners.add(listener)
+  const listeners = getFeedbackNoticeSessionState().noticeListeners
+  listeners.add(listener)
   return () => {
-    noticeListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 export function setFeedbackNoticeState(
   update: (prev: FeedbackNoticeState) => FeedbackNoticeState,
 ): FeedbackNoticeState {
-  const next = update(noticeState)
-  if (next !== noticeState) {
-    noticeState = next
-    emitNoticeChange()
+  const state = getFeedbackNoticeSessionState()
+  const next = update(state.noticeState)
+  if (next !== state.noticeState) {
+    state.noticeState = next
+    emitNoticeChange(state)
   }
-  return noticeState
+  return state.noticeState
 }
 
 export function resetFeedbackNoticeStateForTests(): void {
-  noticeState = { ...initialNoticeState }
+  getFeedbackNoticeSessionState().noticeState = { ...initialNoticeState }
 }
 
 /** densable leftover Rgr */

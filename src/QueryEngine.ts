@@ -168,6 +168,15 @@ import {
   recordTranscript,
   removeTranscriptMessage,
 } from './utils/sessionStorage.js'
+import {
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getActiveSubconversationFromAls,
+  runWithSession,
+  runWithSubconversationContext,
+  type Session,
+  type SubconversationAlsContext,
+} from './utils/sessionRoot.js'
 import { resolveChromeAppendSystemPrompt } from './utils/claudeInChrome/prompt.js'
 import { asSystemPrompt } from './utils/systemPromptType.js'
 import { resolveThemeSetting } from './utils/systemTheme.js'
@@ -1316,6 +1325,8 @@ export type QueryEngineConfig = {
   taskRegistry?: TaskRegistry
   /** Session credentials handle. Headless falls back to the pinned store. */
   credentials?: ToolUseContext['credentials']
+  /** Optional isolated Session bound to this QueryEngine across yields and turns. */
+  session?: Session
   /**
    * Snip-boundary handler: receives each yielded system message plus the
    * current mutableMessages store. Returns undefined if the message is not a
@@ -1331,6 +1342,125 @@ export type QueryEngineConfig = {
     yieldedSystemMsg: Message,
     store: Message[],
   ) => { messages: Message[]; executed: boolean } | undefined
+}
+
+function runInCapturedSessionContext<T>(
+  session: Session | undefined,
+  subconversation: SubconversationAlsContext | undefined,
+  fn: () => T,
+): T {
+  if (session === undefined) {
+    if (subconversation === undefined) {
+      return fn()
+    }
+    if (
+      getActiveSessionFromAls() === undefined &&
+      getActiveSubconversationFromAls() === subconversation
+    ) {
+      return fn()
+    }
+    return exitSessionContext(() =>
+      runWithSubconversationContext(subconversation, fn),
+    )
+  }
+  if (
+    getActiveSessionFromAls() === session &&
+    getActiveSubconversationFromAls() === subconversation
+  ) {
+    return fn()
+  }
+  return runWithSession(session, () =>
+    subconversation !== undefined
+      ? runWithSubconversationContext(subconversation, fn)
+      : fn(),
+  )
+}
+
+/**
+ * Bind an `AsyncGenerator` to a captured `Session` / `SubconversationAlsContext`
+ * so every `.next()`, `.return()`, `.throw()`, and `[Symbol.asyncDispose]()`
+ * resumption runs inside the engine's ALS store — even when an external caller
+ * iterates `for await (const msg of engine.submitMessage(...))` outside
+ * `runWithSession(...)` (fixing the JS/V8/JSC caller-ALS generator resumption trap).
+ */
+function bindGeneratorToSessionContext<T, TNext = unknown>(
+  createGen: () => AsyncGenerator<T, void, TNext>,
+  session: Session | undefined,
+  subconversation?: SubconversationAlsContext,
+): AsyncGenerator<T, void, TNext> {
+  if (session === undefined && subconversation === undefined) {
+    return createGen()
+  }
+  const inner = runInCapturedSessionContext(session, subconversation, createGen)
+  const bound: AsyncGenerator<T, void, TNext> = {
+    next(...args: [] | [TNext]) {
+      return runInCapturedSessionContext(session, subconversation, () =>
+        inner.next(...args),
+      )
+    },
+    return(value: void | PromiseLike<void>) {
+      return runInCapturedSessionContext(session, subconversation, () =>
+        inner.return(value),
+      )
+    },
+    throw(e: unknown) {
+      return runInCapturedSessionContext(session, subconversation, () =>
+        inner.throw(e),
+      )
+    },
+    [Symbol.asyncIterator]() {
+      return bound
+    },
+    async [Symbol.asyncDispose]() {
+      await runInCapturedSessionContext(session, subconversation, () =>
+        inner.return(undefined),
+      )
+    },
+  }
+  return bound
+}
+
+type SubmitMessageOptions = {
+  uuid?: string
+  isMeta?: boolean
+  skipSlashCommands?: boolean
+  skipAttachments?: boolean
+  skipSubmissionHooks?: boolean
+  /** Official drain: seed query() stopHookActive from the SDK host. */
+  stopHookActive?: boolean
+  bridgeOrigin?: boolean
+  /** densable 2.1.221 modelScheduledOrigin fire stamp */
+  modelScheduledOrigin?: boolean
+  /** densable 2.1.221 wakeupSource fire stamp */
+  wakeupSource?: string
+  origin?: MessageOrigin
+  /** Official 2.1.323 #2199: host-provided prompt provenance for workflow gating. */
+  isHumanTypedPrompt?: boolean
+  suppressWorkflowKeyword?: boolean
+  shouldQuery?: boolean
+  /** densable 2.1.289 print task-notification coalesce hold stamp */
+  queryHeldForNextTurn?: boolean
+  localStdinOrigin?: boolean
+  sessionChannelPersonTyped?: boolean
+  hostInitiator?: unknown
+  artifactCommentTurn?: unknown
+  verifiedSlackHumanTurn?: boolean
+  projectsUserTurn?: boolean
+  hearthRelayRows?: unknown
+  hearthRelayThreadTs?: unknown
+  hearthRelayMessageIds?: unknown
+  inlinedImagePaths?: string[]
+  stampThreadState?: boolean
+  pollEventDelivery?: boolean
+  pollEventProvenance?: unknown[]
+  pollEventDeclared?: unknown
+  skipSkillPermissionReset?: boolean
+  pollEmptyDispatch?: boolean
+  fileAttachments?: unknown[]
+  frameTiming?: { enqueuedWallMs: number }
+  clientPlatform?: string
+  /** densable BX `taskDelivery` — GetTask snapshot on As. */
+  taskDelivery?: unknown
 }
 
 /**
@@ -1355,6 +1485,8 @@ function headlessCredentials(
  */
 export class QueryEngine {
   private config: QueryEngineConfig
+  private readonly boundSession: Session | undefined
+  private readonly boundSubconversation: SubconversationAlsContext | undefined
   private mutableMessages: Message[]
   private abortController: AbortController
   private permissionDenials: SDKPermissionDenial[]
@@ -1376,70 +1508,68 @@ export class QueryEngine {
 
   constructor(config: QueryEngineConfig) {
     this.config = config
+    this.boundSession = config.session ?? getActiveSessionFromAls()
+    this.boundSubconversation =
+      config.session !== undefined
+        ? undefined
+        : getActiveSubconversationFromAls()
     this.sessionToolState = config.toolState ?? new ToolStateSlots()
     this.taskRegistry =
       config.taskRegistry ??
-      createTaskRegistry(config.getAppState, config.setAppState)
+      this.runInBoundSession(() =>
+        createTaskRegistry(config.getAppState, config.setAppState),
+      )
     this.mutableMessages = config.initialMessages ?? []
-    this.abortController = config.abortController ?? createAbortController()
+    this.abortController = this.runInBoundSession(
+      () => config.abortController ?? createAbortController(),
+    )
     this.permissionDenials = []
     this.readFileState = config.readFileCache
     this.totalUsage = EMPTY_USAGE
-    try {
-      /* eslint-disable @typescript-eslint/no-require-imports */
-      const { leftoverIhrStartXe } =
-        require('./utils/collapseReadSearch.js') as typeof import('./utils/collapseReadSearch.js')
-      /* eslint-enable @typescript-eslint/no-require-imports */
-      leftoverIhrStartXe()
-    } catch {
-      // isolation — optional
-    }
+    this.runInBoundSession(() => {
+      try {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const { leftoverIhrStartXe } =
+          require('./utils/collapseReadSearch.js') as typeof import('./utils/collapseReadSearch.js')
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        leftoverIhrStartXe()
+      } catch {
+        // isolation — optional
+      }
+    })
   }
 
-  async *submitMessage(
+  private runInBoundSession<T>(fn: () => T): T {
+    return runInCapturedSessionContext(
+      this.boundSession,
+      this.boundSubconversation,
+      fn,
+    )
+  }
+
+  getBoundSession(): Session | undefined {
+    return this.boundSession
+  }
+
+  submitMessage(
     prompt: string | ContentBlockParam[],
-    options?: {
-      uuid?: string
-      isMeta?: boolean
-      skipSlashCommands?: boolean
-      skipAttachments?: boolean
-      skipSubmissionHooks?: boolean
-      /** Official drain: seed query() stopHookActive from the SDK host. */
-      stopHookActive?: boolean
-      bridgeOrigin?: boolean
-      /** densable 2.1.221 modelScheduledOrigin fire stamp */
-      modelScheduledOrigin?: boolean
-      /** densable 2.1.221 wakeupSource fire stamp */
-      wakeupSource?: string
-      origin?: MessageOrigin
-      /** Official 2.1.323 #2199: host-provided prompt provenance for workflow gating. */
-      isHumanTypedPrompt?: boolean
-      suppressWorkflowKeyword?: boolean
-      shouldQuery?: boolean
-      /** densable 2.1.289 print task-notification coalesce hold stamp */
-      queryHeldForNextTurn?: boolean
-      localStdinOrigin?: boolean
-      sessionChannelPersonTyped?: boolean
-      hostInitiator?: unknown
-      artifactCommentTurn?: unknown
-      verifiedSlackHumanTurn?: boolean
-      projectsUserTurn?: boolean
-      hearthRelayRows?: unknown
-      hearthRelayThreadTs?: unknown
-      hearthRelayMessageIds?: unknown
-      inlinedImagePaths?: string[]
-      stampThreadState?: boolean
-      pollEventDelivery?: boolean
-      pollEventProvenance?: unknown[]
-      pollEventDeclared?: unknown
-      skipSkillPermissionReset?: boolean
-      pollEmptyDispatch?: boolean
-      fileAttachments?: unknown[]
-      frameTiming?: { enqueuedWallMs: number }
-      clientPlatform?: string
-      /** densable BX `taskDelivery` — GetTask snapshot on As. */
-      taskDelivery?: unknown
-    },
+    options?: SubmitMessageOptions,
+  ): AsyncGenerator<SDKMessage, void, unknown> {
+    const session = this.boundSession ?? getActiveSessionFromAls()
+    const subconversation =
+      this.boundSession !== undefined
+        ? this.boundSubconversation
+        : (this.boundSubconversation ?? getActiveSubconversationFromAls())
+    return bindGeneratorToSessionContext(
+      () => this.submitMessageInner(prompt, options),
+      session,
+      subconversation,
+    )
+  }
+
+  private async *submitMessageInner(
+    prompt: string | ContentBlockParam[],
+    options?: SubmitMessageOptions,
   ): AsyncGenerator<SDKMessage, void, unknown> {
     const {
       cwd,
@@ -3637,13 +3767,17 @@ export class QueryEngine {
   }
 
   interrupt(): void {
-    this.abortController.abort()
+    this.runInBoundSession(() => {
+      this.abortController.abort()
+    })
   }
 
   /** Reset the abort controller so the next submitMessage() call can start
    *  with a fresh, non-aborted signal. Must be called after interrupt(). */
   resetAbortController(): void {
-    this.abortController = createAbortController()
+    this.runInBoundSession(() => {
+      this.abortController = createAbortController()
+    })
   }
 
   /** Expose the current abort signal for external consumers (e.g. ACP bridge). */
@@ -3660,11 +3794,13 @@ export class QueryEngine {
   }
 
   getSessionId(): string {
-    return getSessionId()
+    return this.runInBoundSession(() => getSessionId())
   }
 
   setModel(model: string): void {
-    this.config.userSpecifiedModel = model
+    this.runInBoundSession(() => {
+      this.config.userSpecifiedModel = model
+    })
   }
 }
 
@@ -3715,6 +3851,7 @@ export async function* ask({
   toolState,
   taskRegistry,
   credentials,
+  session,
   cwd,
   tools,
   mcpClients,
@@ -3795,6 +3932,7 @@ export async function* ask({
   toolState?: ToolStateSlots
   taskRegistry?: TaskRegistry
   credentials?: ToolUseContext['credentials']
+  session?: Session
   cwd: string
   tools: Tools
   verbose?: boolean
@@ -3872,6 +4010,7 @@ export async function* ask({
     toolState,
     taskRegistry,
     credentials,
+    session,
     ...(feature('HISTORY_SNIP')
       ? {
           snipReplay: (yielded: Message, store: Message[]) => {

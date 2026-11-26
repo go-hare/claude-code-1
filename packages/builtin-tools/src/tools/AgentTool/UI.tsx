@@ -23,6 +23,7 @@ import { buildSubagentLookups, createAssistantMessage, EMPTY_LOOKUPS } from 'src
 import type { ModelAlias } from 'src/utils/model/aliases.js';
 import { getMainLoopModel, parseUserSpecifiedModel, renderModelName } from 'src/utils/model/model.js';
 import { isScreenReaderModeEnabled } from 'src/utils/screenReaderGate.js';
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js';
 import type { Theme, ThemeName } from 'src/utils/theme.js';
 import type { outputSchema, Progress, RemoteLaunchedOutput } from './AgentTool.js';
 import { inputSchema } from './AgentTool.js';
@@ -285,7 +286,11 @@ export function getProcessedProgressMessages(state: ProgressTrailState, isAgentR
 }
 
 const PROGRESS_TRAIL_CACHE_MAX = 64;
-const progressTrailCache = new Map<string, ProgressTrailState>();
+const progressTrailCacheSlot = new RootSessionSlot<Map<string, ProgressTrailState>>(() => new Map());
+
+function getProgressTrailCache(): Map<string, ProgressTrailState> {
+  return progressTrailCacheSlot.of(getBootstrapSession());
+}
 
 function getOrAdvanceProgressTrail(
   messages: ProgressMessage<Progress>[],
@@ -296,6 +301,7 @@ function getOrAdvanceProgressTrail(
   if (!first) {
     return [];
   }
+  const progressTrailCache = getProgressTrailCache();
   const key = String(first.parentToolUseID ?? first.uuid);
   let state = progressTrailCache.get(key);
   if (!state) {

@@ -8,6 +8,7 @@
 
 import { logForDebugging } from './debug.js'
 import { parseAddress } from './peerAddress.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import {
   canonicalOutboundPaceKey,
   getOutboundPacer,
@@ -71,17 +72,29 @@ const DROP_REASONS = new Set<PeerReceiptDropReason>([
   'queue-full',
 ])
 
-let sendPeerReceiptImpl: SendPeerReceipt | null = null
-let onPeerMessageStatus:
-  | ((
-      status: PeerReceiptStatus,
-      destination: string,
-      extra?: { dropReason?: PeerReceiptDropReason; droppedCount?: number },
-    ) => void)
-  | null = null
+type PeerMessageStatusListener = (
+  status: PeerReceiptStatus,
+  destination: string,
+  extra?: { dropReason?: PeerReceiptDropReason; droppedCount?: number },
+) => void
 
-const outstandingSends: OutstandingRow[] = []
-const awaitingTerminal: OutstandingRow[] = []
+type PeerReceiptsHostState = {
+  sendPeerReceiptImpl: SendPeerReceipt | null
+  onPeerMessageStatus: PeerMessageStatusListener | null
+  outstandingSends: OutstandingRow[]
+  awaitingTerminal: OutstandingRow[]
+}
+
+const peerReceiptsHostSlot = new HostSlot<PeerReceiptsHostState>(() => ({
+  sendPeerReceiptImpl: null,
+  onPeerMessageStatus: null,
+  outstandingSends: [],
+  awaitingTerminal: [],
+}))
+
+function getPeerReceiptsHostState(): PeerReceiptsHostState {
+  return peerReceiptsHostSlot.of(getBootstrapSessionHost())
+}
 
 /** densable fiw — verbatim sender-visible reasons. */
 export function peerReceiptReason(status: PeerReceiptStatus): string {
@@ -159,7 +172,7 @@ export function buildPeerReceiptControlFields(args: {
 
 /** densable afl */
 export function setSendPeerReceipt(cb: SendPeerReceipt | null): void {
-  sendPeerReceiptImpl = cb
+  getPeerReceiptsHostState().sendPeerReceiptImpl = cb
 }
 
 export function sendPeerReceipt(
@@ -167,17 +180,18 @@ export function sendPeerReceipt(
   status: PeerReceiptStatus,
   extra?: PeerReceiptDropExtra,
 ): void {
-  sendPeerReceiptImpl?.(message, status, extra)
+  getPeerReceiptsHostState().sendPeerReceiptImpl?.(message, status, extra)
 }
 
 export function setOnPeerMessageStatus(
-  cb: NonNullable<typeof onPeerMessageStatus> | null,
+  cb: PeerMessageStatusListener | null,
 ): void {
-  onPeerMessageStatus = cb
+  getPeerReceiptsHostState().onPeerMessageStatus = cb
 }
 
 /** densable fXd */
 export function noteOutstandingSend(msgId: string, to: string): void {
+  const { outstandingSends } = getPeerReceiptsHostState()
   if (outstandingSends.length >= PEER_RECEIPT_OUTSTANDING_CAP) {
     outstandingSends.shift()
   }
@@ -185,6 +199,7 @@ export function noteOutstandingSend(msgId: string, to: string): void {
 }
 
 export function forgetOutstandingSend(msgId: string): void {
+  const { outstandingSends, awaitingTerminal } = getPeerReceiptsHostState()
   const drop = (rows: OutstandingRow[]): void => {
     const idx = rows.findIndex(r => r.msgId === msgId)
     if (idx !== -1) rows.splice(idx, 1)
@@ -199,6 +214,7 @@ export function matchOutstandingSend(
   status: string,
 ): { destination: string; wasHeld: boolean } | undefined {
   if (typeof msgId !== 'string') return undefined
+  const { outstandingSends, awaitingTerminal } = getPeerReceiptsHostState()
   const idx = outstandingSends.findIndex(r => r.msgId === msgId)
   if (idx !== -1) {
     const [row] = outstandingSends.splice(idx, 1)
@@ -225,6 +241,7 @@ export function dropOutstandingSends(
 ): Map<string, { dropped: number; wereHeld: number }> {
   const map = new Map<string, { dropped: number; wereHeld: number }>()
   if (ids.size === 0) return map
+  const { outstandingSends, awaitingTerminal } = getPeerReceiptsHostState()
   const bump = (to: string, wereHeld: boolean): void => {
     const cur = map.get(to) ?? { dropped: 0, wereHeld: 0 }
     cur.dropped += 1
@@ -439,6 +456,7 @@ export function handlePeerMessageStatusFrame(
         `[uds-messaging] peer_message_status dropped: neither orig_msg_id=${id} nor any named id matches an outstanding send`,
       )
     }
+    const { onPeerMessageStatus } = getPeerReceiptsHostState()
     for (const [dest, counts] of byDest) {
       onPeerMessageStatus?.('dropped', dest, {
         dropReason,
@@ -460,13 +478,14 @@ export function handlePeerMessageStatusFrame(
   else if (status === 'delivered' && matched.wasHeld) {
     debitPacer(matched.destination)
   }
-  onPeerMessageStatus?.(status, matched.destination)
+  getPeerReceiptsHostState().onPeerMessageStatus?.(status, matched.destination)
   return true
 }
 
 export function resetPeerReceiptsForTests(): void {
-  sendPeerReceiptImpl = null
-  onPeerMessageStatus = null
-  outstandingSends.length = 0
-  awaitingTerminal.length = 0
+  const hostState = getPeerReceiptsHostState()
+  hostState.sendPeerReceiptImpl = null
+  hostState.onPeerMessageStatus = null
+  hostState.outstandingSends.length = 0
+  hostState.awaitingTerminal.length = 0
 }

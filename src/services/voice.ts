@@ -10,6 +10,12 @@ import { logForDebugging } from '../utils/debug.js'
 import { isEnvTruthy, isRunningOnHomespace } from '../utils/envUtils.js'
 import { logError } from '../utils/log.js'
 import { getPlatform } from '../utils/platform.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../utils/sessionHost.js'
 
 // Lazy-loaded native audio module. audio-capture.node links against
 // CoreAudio.framework + AudioUnit.framework; dlopen is synchronous and
@@ -18,21 +24,62 @@ import { getPlatform } from '../utils/platform.js'
 // preload, because there's no way to make dlopen non-blocking and a
 // startup freeze is worse than a first-press delay.
 type AudioNapi = typeof import('audio-capture-napi')
-let audioNapi: AudioNapi | null = null
-let audioNapiPromise: Promise<AudioNapi> | null = null
+type ArecordProbeResult = { ok: boolean; stderr: string }
+
+type VoiceHostState = {
+  audioNapi: AudioNapi | null
+  audioNapiPromise: Promise<AudioNapi> | null
+  arecordProbe: Promise<ArecordProbeResult> | null
+  linuxAlsaCardsMemo: Promise<boolean> | null
+  activeRecorder: ChildProcess | null
+  nativeRecordingActive: boolean
+}
+
+const voiceHostSlot = new HostSlot<VoiceHostState>(() => ({
+  audioNapi: null,
+  audioNapiPromise: null,
+  arecordProbe: null,
+  linuxAlsaCardsMemo: null,
+  activeRecorder: null,
+  nativeRecordingActive: false,
+}))
+
+// Process-wide owner of the singleton native CoreAudio/cpal recording stream so
+// a host with stale `nativeRecordingActive` never kills another host's live
+// native recording.
+let activeNativeOwnerHost: object | null = null
+
+function getVoiceHostState(): VoiceHostState {
+  return voiceHostSlot.of(getBootstrapSessionHost())
+}
+
+/** Test-only: inject or clear native audio module without process-global mock.module. */
+export function _setAudioNapiForTesting(napi: AudioNapi | null): void {
+  const host = getBootstrapSessionHost()
+  const hostState = voiceHostSlot.of(host)
+  hostState.audioNapi = napi
+  hostState.audioNapiPromise = napi ? Promise.resolve(napi) : null
+  if (napi === null) {
+    hostState.nativeRecordingActive = false
+    if (activeNativeOwnerHost === host) {
+      activeNativeOwnerHost = null
+    }
+  }
+}
 
 function loadAudioNapi(): Promise<AudioNapi> {
-  audioNapiPromise ??= (async () => {
+  const hostState = getVoiceHostState()
+  hostState.audioNapiPromise ??= (async () => {
     const t0 = Date.now()
     const mod = await import('audio-capture-napi')
     // vendor/audio-capture-src/index.ts defers require(...node) until the
     // first function call — trigger it here so timing reflects real cost.
     mod.isNativeAudioAvailable()
-    audioNapi = mod
+    hostState.audioNapi = mod
     logForDebugging(`[voice] audio-capture-napi loaded in ${Date.now() - t0}ms`)
     return mod
   })()
-  return audioNapiPromise
+  return hostState.audioNapiPromise
 }
 
 // ─── Constants ───────────────────────────────────────────────────────
@@ -69,11 +116,9 @@ function hasCommand(cmd: string): boolean {
 // device; if it exits early the stderr tells us why. Memoized — audio
 // device availability does not change mid-session, and this is called on
 // every voice keypress via checkRecordingAvailability().
-type ArecordProbeResult = { ok: boolean; stderr: string }
-let arecordProbe: Promise<ArecordProbeResult> | null = null
-
 function probeArecord(): Promise<ArecordProbeResult> {
-  arecordProbe ??= new Promise(resolve => {
+  const hostState = getVoiceHostState()
+  hostState.arecordProbe ??= new Promise(resolve => {
     const child = spawn(
       'arecord',
       [
@@ -114,32 +159,31 @@ function probeArecord(): Promise<ArecordProbeResult> {
       void resolve({ ok: false, stderr: 'arecord: command not found' })
     })
   })
-  return arecordProbe
+  return hostState.arecordProbe
 }
 
 export function _resetArecordProbeForTesting(): void {
-  arecordProbe = null
+  getVoiceHostState().arecordProbe = null
 }
 
 // cpal's ALSA backend writes to our process stderr when it can't find any
 // sound cards (it runs in-process — no subprocess pipe to capture it). The
 // spawn fallbacks below pipe stderr correctly, so skip native when ALSA has
 // nothing to open. Memoized: card presence doesn't change mid-session.
-let linuxAlsaCardsMemo: Promise<boolean> | null = null
-
 function linuxHasAlsaCards(): Promise<boolean> {
-  linuxAlsaCardsMemo ??= readFile('/proc/asound/cards', 'utf8').then(
+  const hostState = getVoiceHostState()
+  hostState.linuxAlsaCardsMemo ??= readFile('/proc/asound/cards', 'utf8').then(
     cards => {
       const c = cards.trim()
       return c !== '' && !c.includes('no soundcards')
     },
     () => false,
   )
-  return linuxAlsaCardsMemo
+  return hostState.linuxAlsaCardsMemo
 }
 
 export function _resetAlsaCardsForTesting(): void {
-  linuxAlsaCardsMemo = null
+  getVoiceHostState().linuxAlsaCardsMemo = null
 }
 
 type PackageManagerInfo = {
@@ -339,14 +383,21 @@ export async function checkRecordingAvailability(): Promise<RecordingAvailabilit
 
 // ─── Recording (native audio on macOS/Linux/Windows, SoX/arecord fallback on Linux) ─────────────
 
-let activeRecorder: ChildProcess | null = null
-let nativeRecordingActive = false
-
 export async function startRecording(
   onData: (chunk: Buffer) => void,
   onEnd: () => void,
   options?: { silenceDetection?: boolean },
 ): Promise<boolean> {
+  const host = getBootstrapSessionHost()
+  const hostState = voiceHostSlot.of(host)
+  const captured = getActiveSessionFromAls()
+  const runInCaptured = (fn: () => void): void => {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, fn)
+    } else {
+      fn()
+    }
+  }
   logForDebugging(`[voice] startRecording called, platform=${process.platform}`)
 
   // Try native audio module first (macOS, Linux, Windows via cpal)
@@ -356,19 +407,34 @@ export async function startRecording(
     (process.platform !== 'linux' || (await linuxHasAlsaCards()))
   const useSilenceDetection = options?.silenceDetection !== false
   if (nativeAvailable) {
-    // Ensure any previous recording is fully stopped
-    if (nativeRecordingActive || napi.isNativeRecordingActive()) {
+    // Ensure any previous recording is fully stopped and clear any previous
+    // host's stale active flag before taking ownership of the native stream.
+    if (
+      activeNativeOwnerHost !== null ||
+      hostState.nativeRecordingActive ||
+      napi.isNativeRecordingActive()
+    ) {
+      if (activeNativeOwnerHost !== null) {
+        const prevOwnerState = voiceHostSlot.peek(activeNativeOwnerHost)
+        if (prevOwnerState) {
+          prevOwnerState.nativeRecordingActive = false
+        }
+        activeNativeOwnerHost = null
+      }
       napi.stopNativeRecording()
-      nativeRecordingActive = false
+      hostState.nativeRecordingActive = false
     }
     const started = napi.startNativeRecording(
       (data: Buffer) => {
-        onData(data)
+        runInCaptured(() => onData(data))
       },
       () => {
         if (useSilenceDetection) {
-          nativeRecordingActive = false
-          onEnd()
+          hostState.nativeRecordingActive = false
+          if (activeNativeOwnerHost === host) {
+            activeNativeOwnerHost = null
+          }
+          runInCaptured(() => onEnd())
         }
         // In push-to-talk mode, ignore the native module's silence-triggered
         // onEnd.  Recording continues until the caller explicitly calls
@@ -376,7 +442,8 @@ export async function startRecording(
       },
     )
     if (started) {
-      nativeRecordingActive = true
+      hostState.nativeRecordingActive = true
+      activeNativeOwnerHost = host
       return true
     }
     // Native recording failed — fall through to platform fallbacks
@@ -410,6 +477,15 @@ function startSoxRecording(
   onEnd: () => void,
   options?: { silenceDetection?: boolean },
 ): boolean {
+  const hostState = getVoiceHostState()
+  const captured = getActiveSessionFromAls()
+  const runInCaptured = (fn: () => void): void => {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, fn)
+    } else {
+      fn()
+    }
+  }
   const useSilenceDetection = options?.silenceDetection !== false
 
   // Record raw PCM: 16 kHz, 16-bit signed, mono, to stdout.
@@ -452,24 +528,30 @@ function startSoxRecording(
     stdio: ['pipe', 'pipe', 'pipe'],
   })
 
-  activeRecorder = child
+  hostState.activeRecorder = child
 
   child.stdout?.on('data', (chunk: Buffer) => {
-    onData(chunk)
+    runInCaptured(() => onData(chunk))
   })
 
   // Consume stderr to prevent backpressure
   child.stderr?.on('data', () => {})
 
   child.on('close', () => {
-    activeRecorder = null
-    onEnd()
+    if (hostState.activeRecorder === child) {
+      hostState.activeRecorder = null
+    }
+    runInCaptured(() => onEnd())
   })
 
   child.on('error', err => {
-    logError(err)
-    activeRecorder = null
-    onEnd()
+    runInCaptured(() => {
+      logError(err)
+      if (hostState.activeRecorder === child) {
+        hostState.activeRecorder = null
+      }
+      onEnd()
+    })
   })
 
   return true
@@ -479,6 +561,15 @@ function startArecordRecording(
   onData: (chunk: Buffer) => void,
   onEnd: () => void,
 ): boolean {
+  const hostState = getVoiceHostState()
+  const captured = getActiveSessionFromAls()
+  const runInCaptured = (fn: () => void): void => {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, fn)
+    } else {
+      fn()
+    }
+  }
   // Record raw PCM: 16 kHz, 16-bit signed little-endian, mono, to stdout.
   // arecord does not support built-in silence detection, so this backend
   // is best suited for push-to-talk (silenceDetection: false).
@@ -499,37 +590,48 @@ function startArecordRecording(
     stdio: ['pipe', 'pipe', 'pipe'],
   })
 
-  activeRecorder = child
+  hostState.activeRecorder = child
 
   child.stdout?.on('data', (chunk: Buffer) => {
-    onData(chunk)
+    runInCaptured(() => onData(chunk))
   })
 
   // Consume stderr to prevent backpressure
   child.stderr?.on('data', () => {})
 
   child.on('close', () => {
-    activeRecorder = null
-    onEnd()
+    if (hostState.activeRecorder === child) {
+      hostState.activeRecorder = null
+    }
+    runInCaptured(() => onEnd())
   })
 
   child.on('error', err => {
-    logError(err)
-    activeRecorder = null
-    onEnd()
+    runInCaptured(() => {
+      logError(err)
+      if (hostState.activeRecorder === child) {
+        hostState.activeRecorder = null
+      }
+      onEnd()
+    })
   })
 
   return true
 }
 
 export function stopRecording(): void {
-  if (nativeRecordingActive && audioNapi) {
-    audioNapi.stopNativeRecording()
-    nativeRecordingActive = false
-    return
+  const host = getBootstrapSessionHost()
+  const hostState = voiceHostSlot.of(host)
+  if (hostState.nativeRecordingActive) {
+    hostState.nativeRecordingActive = false
+    if (activeNativeOwnerHost === host && hostState.audioNapi) {
+      activeNativeOwnerHost = null
+      hostState.audioNapi.stopNativeRecording()
+      return
+    }
   }
-  if (activeRecorder) {
-    activeRecorder.kill('SIGTERM')
-    activeRecorder = null
+  if (hostState.activeRecorder) {
+    hostState.activeRecorder.kill('SIGTERM')
+    hostState.activeRecorder = null
   }
 }

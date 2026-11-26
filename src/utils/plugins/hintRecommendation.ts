@@ -23,6 +23,7 @@ import {
 } from '../claudeCodeHints.js'
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import { isPluginInstalled } from './installedPluginsManager.js'
 import { getPluginById } from './marketplaceManager.js'
 import {
@@ -82,17 +83,18 @@ export function maybeRecordPluginHint(hint: ClaudeCodeHint): void {
 
   // Bound repeat lookups on the same slug — a CLI that emits on every
   // invocation shouldn't trigger N resolve cycles for the same plugin.
+  const triedThisSession = triedThisSessionSlot.of(getBootstrapSession())
   if (triedThisSession.has(pluginId)) return
   triedThisSession.add(pluginId)
 
   setPendingHint(hint)
 }
 
-const triedThisSession = new Set<string>()
+const triedThisSessionSlot = new RootSessionSlot<Set<string>>(() => new Set())
 
 /** Test-only reset. */
 export function _resetHintRecommendationForTesting(): void {
-  triedThisSession.clear()
+  triedThisSessionSlot.of(getBootstrapSession()).clear()
 }
 
 /**

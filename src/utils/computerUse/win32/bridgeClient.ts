@@ -10,6 +10,8 @@
 
 import * as path from 'path'
 import type { Writable } from 'stream'
+import { registerCleanup } from '../../cleanupRegistry.js'
+import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 
 interface BridgeRequest {
   id: number
@@ -23,25 +25,70 @@ interface BridgeResponse {
   error?: string
 }
 
-let bridgeProc: ReturnType<typeof Bun.spawn> | null = null
-let requestId = 0
-const pendingRequests = new Map<
-  number,
-  {
-    resolve: (value: unknown) => void
-    reject: (error: Error) => void
+type FlushableWritable = Writable & { flush?: () => void }
+
+type BridgeClientHostState = {
+  bridgeProc: ReturnType<typeof Bun.spawn> | null
+  requestId: number
+  pendingRequests: Map<
+    number,
+    {
+      resolve: (value: unknown) => void
+      reject: (error: Error) => void
+    }
+  >
+  outputBuffer: string
+  unregisterCleanup: (() => void) | null
+}
+
+const bridgeClientHostSlot = new HostSlot<BridgeClientHostState>(() => ({
+  bridgeProc: null,
+  requestId: 0,
+  pendingRequests: new Map(),
+  outputBuffer: '',
+  unregisterCleanup: null,
+}))
+
+// Process-wide tracking of all hosts with a live Python bridge subprocess so
+// process exit/SIGINT/SIGTERM cleanup terminates every host's subprocess.
+const activeBridgeStates = new Set<BridgeClientHostState>()
+
+function getBridgeHostState(): BridgeClientHostState {
+  return bridgeClientHostSlot.of(getBootstrapSessionHost())
+}
+
+function stopBridgeState(state: BridgeClientHostState): void {
+  const proc = state.bridgeProc
+  state.bridgeProc = null
+  activeBridgeStates.delete(state)
+  const unregister = state.unregisterCleanup
+  state.unregisterCleanup = null
+  unregister?.()
+  if (proc) {
+    try {
+      const stdin = proc.stdin
+      if (stdin) {
+        const writable = stdin as unknown as Writable
+        if (typeof writable.end === 'function') {
+          writable.end()
+        }
+      }
+      proc.kill()
+    } catch {}
   }
->()
-let outputBuffer = ''
+  state.pendingRequests.clear()
+  state.outputBuffer = ''
+}
 
 /**
  * Start the Python bridge process if not already running.
  */
 export function ensureBridge(): boolean {
-  if (bridgeProc) return true
+  const state = getBridgeHostState()
+  if (state.bridgeProc) return true
   try {
     const scriptPath = path.join(__dirname, 'bridge.py')
-    bridgeProc = Bun.spawn(['python', '-u', scriptPath], {
+    const proc = Bun.spawn(['python', '-u', scriptPath], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'ignore',
@@ -49,26 +96,48 @@ export function ensureBridge(): boolean {
       // LOCAL: keep the Python bridge from flashing a console window on Windows.
       windowsHide: true,
     })
+    state.bridgeProc = proc
+    activeBridgeStates.add(state)
+    state.unregisterCleanup?.()
+    state.unregisterCleanup = registerCleanup(() => {
+      stopBridgeState(state)
+    })
+    if (proc.exited && typeof proc.exited.then === 'function') {
+      void proc.exited.then(
+        () => {
+          if (state.bridgeProc === proc) {
+            stopBridgeState(state)
+          }
+        },
+        () => {
+          if (state.bridgeProc === proc) {
+            stopBridgeState(state)
+          }
+        },
+      )
+    }
 
     // Read stdout lines asynchronously
-    const reader = (bridgeProc.stdout as ReadableStream<Uint8Array>).getReader()
+    const reader = (
+      state.bridgeProc.stdout as ReadableStream<Uint8Array>
+    ).getReader()
     const readLoop = async () => {
       try {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
-          outputBuffer += new TextDecoder().decode(value)
+          state.outputBuffer += new TextDecoder().decode(value)
           // Process complete lines
           let newlineIdx: number
-          while ((newlineIdx = outputBuffer.indexOf('\n')) !== -1) {
-            const line = outputBuffer.slice(0, newlineIdx).trim()
-            outputBuffer = outputBuffer.slice(newlineIdx + 1)
+          while ((newlineIdx = state.outputBuffer.indexOf('\n')) !== -1) {
+            const line = state.outputBuffer.slice(0, newlineIdx).trim()
+            state.outputBuffer = state.outputBuffer.slice(newlineIdx + 1)
             if (!line) continue
             try {
               const resp: BridgeResponse = JSON.parse(line)
-              const pending = pendingRequests.get(resp.id)
+              const pending = state.pendingRequests.get(resp.id)
               if (pending) {
-                pendingRequests.delete(resp.id)
+                state.pendingRequests.delete(resp.id)
                 if (resp.error) {
                   pending.reject(new Error(resp.error))
                 } else {
@@ -84,7 +153,7 @@ export function ensureBridge(): boolean {
 
     return true
   } catch {
-    bridgeProc = null
+    stopBridgeState(state)
     return false
   }
 }
@@ -101,25 +170,26 @@ export async function call<T = unknown>(
     throw new Error('Python bridge not available')
   }
 
-  const id = ++requestId
+  const state = getBridgeHostState()
+  const id = ++state.requestId
   const req: BridgeRequest = { id, method, params }
 
   return new Promise<T>((resolve, reject) => {
-    pendingRequests.set(id, {
+    state.pendingRequests.set(id, {
       resolve: resolve as (v: unknown) => void,
       reject,
     })
 
     // Timeout
     const timer = setTimeout(() => {
-      pendingRequests.delete(id)
+      state.pendingRequests.delete(id)
       reject(new Error(`Bridge call ${method} timed out after ${timeoutMs}ms`))
     }, timeoutMs)
 
     // Clear timeout on resolve/reject
     const origResolve = resolve as (v: unknown) => void
     const origReject = reject
-    pendingRequests.set(id, {
+    state.pendingRequests.set(id, {
       resolve: v => {
         clearTimeout(timer)
         origResolve(v)
@@ -131,17 +201,17 @@ export async function call<T = unknown>(
     })
 
     try {
-      const stdin = bridgeProc!.stdin
+      const stdin = state.bridgeProc!.stdin
       if (stdin) {
-        const writable = stdin as unknown as Writable
+        const writable = stdin as unknown as FlushableWritable
         writable.write(JSON.stringify(req) + '\n')
-        if (typeof (writable as any).flush === 'function') {
-          ;(writable as any).flush()
+        if (typeof writable.flush === 'function') {
+          writable.flush()
         }
       }
     } catch (err) {
       clearTimeout(timer)
-      pendingRequests.delete(id)
+      state.pendingRequests.delete(id)
       reject(new Error(`Bridge write failed: ${err}`))
     }
   })
@@ -180,24 +250,20 @@ export function callSync<T = unknown>(
 }
 
 /**
- * Kill the bridge process.
+ * Kill the bridge process for the current host.
  */
 export function stopBridge(): void {
-  if (bridgeProc) {
-    try {
-      const stdin = bridgeProc.stdin
-      if (stdin) {
-        const writable = stdin as unknown as Writable
-        if (typeof writable.end === 'function') {
-          writable.end()
-        }
-      }
-      bridgeProc.kill()
-    } catch {}
-    bridgeProc = null
+  stopBridgeState(getBridgeHostState())
+}
+
+/**
+ * Kill all live bridge processes across every host (used on process exit).
+ */
+export function stopAllBridges(): void {
+  for (const state of [...activeBridgeStates]) {
+    stopBridgeState(state)
   }
-  pendingRequests.clear()
-  outputBuffer = ''
+  stopBridge()
 }
 
 // NOTE: No process exit handlers here — the platform-level win32.ts

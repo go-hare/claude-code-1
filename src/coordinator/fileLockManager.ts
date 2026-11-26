@@ -7,6 +7,7 @@
 
 import { realpathSync } from 'fs'
 import { basename, dirname, join, resolve } from 'path'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionHost.js'
 
 export type FileLockEntry = {
   key: string
@@ -41,12 +42,23 @@ export type FileLockStats = {
   lastConflictAt?: number
 }
 
-const fileLocks = new Map<string, FileLockEntry>()
-const fileLockStats: FileLockStats = {
-  activeLocks: 0,
-  totalAcquisitions: 0,
-  totalConflicts: 0,
-  totalTransfers: 0,
+type FileLockSessionState = {
+  fileLocks: Map<string, FileLockEntry>
+  fileLockStats: FileLockStats
+}
+
+const fileLockStateSlot = new RootSessionSlot<FileLockSessionState>(() => ({
+  fileLocks: new Map<string, FileLockEntry>(),
+  fileLockStats: {
+    activeLocks: 0,
+    totalAcquisitions: 0,
+    totalConflicts: 0,
+    totalTransfers: 0,
+  },
+}))
+
+function getFileLockState(): FileLockSessionState {
+  return fileLockStateSlot.of(getBootstrapSession())
 }
 
 function normalizeCanonicalPath(filePath: string): string {
@@ -80,8 +92,8 @@ export function canonicalizeFileLockPath(filePath: string): string {
   }
 }
 
-function refreshStats(): void {
-  fileLockStats.activeLocks = fileLocks.size
+function refreshStats(state: FileLockSessionState): void {
+  state.fileLockStats.activeLocks = state.fileLocks.size
 }
 
 export function acquireFileLock(
@@ -89,8 +101,9 @@ export function acquireFileLock(
   agentId: string,
   metadata: FileLockAcquireMetadata = {},
 ): FileLockAcquireResult {
+  const state = getFileLockState()
   const key = canonicalizeFileLockPath(filePath)
-  const existing = fileLocks.get(key)
+  const existing = state.fileLocks.get(key)
 
   if (existing === undefined) {
     const entry: FileLockEntry = {
@@ -100,9 +113,9 @@ export function acquireFileLock(
       sourceTool: metadata.sourceTool,
       acquiredAt: Date.now(),
     }
-    fileLocks.set(key, entry)
-    fileLockStats.totalAcquisitions += 1
-    refreshStats()
+    state.fileLocks.set(key, entry)
+    state.fileLockStats.totalAcquisitions += 1
+    refreshStats(state)
     return { success: true, key, entry }
   }
 
@@ -110,9 +123,9 @@ export function acquireFileLock(
     return { success: true, key, entry: existing }
   }
 
-  fileLockStats.totalConflicts += 1
-  fileLockStats.lastConflictAt = Date.now()
-  refreshStats()
+  state.fileLockStats.totalConflicts += 1
+  state.fileLockStats.lastConflictAt = Date.now()
+  refreshStats(state)
 
   return {
     success: false,
@@ -123,16 +136,17 @@ export function acquireFileLock(
 }
 
 export function releaseAgentLocks(agentId: string): number {
+  const state = getFileLockState()
   let released = 0
 
-  for (const [key, entry] of fileLocks.entries()) {
+  for (const [key, entry] of state.fileLocks.entries()) {
     if (entry.agentId === agentId) {
-      fileLocks.delete(key)
+      state.fileLocks.delete(key)
       released += 1
     }
   }
 
-  refreshStats()
+  refreshStats(state)
   return released
 }
 
@@ -144,9 +158,10 @@ export function transferAgentLocks(
     return 0
   }
 
+  const state = getFileLockState()
   let transferred = 0
 
-  for (const entry of fileLocks.values()) {
+  for (const entry of state.fileLocks.values()) {
     if (entry.agentId === fromAgentId) {
       entry.agentId = toAgentId
       transferred += 1
@@ -154,39 +169,42 @@ export function transferAgentLocks(
   }
 
   if (transferred > 0) {
-    fileLockStats.totalTransfers += transferred
+    state.fileLockStats.totalTransfers += transferred
   }
 
-  refreshStats()
+  refreshStats(state)
   return transferred
 }
 
 export function getFileLockOwner(filePath: string): string | null {
   const key = canonicalizeFileLockPath(filePath)
-  return fileLocks.get(key)?.agentId ?? null
+  return getFileLockState().fileLocks.get(key)?.agentId ?? null
 }
 
 export function getAllLocks(): ReadonlyMap<string, Readonly<FileLockEntry>> {
-  return new Map(fileLocks)
+  return new Map(getFileLockState().fileLocks)
 }
 
 export function getFileLockStats(): Readonly<FileLockStats> {
+  const state = getFileLockState()
   return {
-    ...fileLockStats,
-    activeLocks: fileLocks.size,
+    ...state.fileLockStats,
+    activeLocks: state.fileLocks.size,
   }
 }
 
 export function clearAllLocks(): void {
-  fileLocks.clear()
-  fileLockStats.activeLocks = 0
+  const state = getFileLockState()
+  state.fileLocks.clear()
+  state.fileLockStats.activeLocks = 0
 }
 
 export function resetFileLockStateForTests(): void {
-  fileLocks.clear()
-  fileLockStats.activeLocks = 0
-  fileLockStats.totalAcquisitions = 0
-  fileLockStats.totalConflicts = 0
-  fileLockStats.totalTransfers = 0
-  delete fileLockStats.lastConflictAt
+  const state = getFileLockState()
+  state.fileLocks.clear()
+  state.fileLockStats.activeLocks = 0
+  state.fileLockStats.totalAcquisitions = 0
+  state.fileLockStats.totalConflicts = 0
+  state.fileLockStats.totalTransfers = 0
+  delete state.fileLockStats.lastConflictAt
 }

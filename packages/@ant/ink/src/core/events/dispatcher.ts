@@ -4,16 +4,32 @@ import {
   DiscreteEventPriority,
   NoEventPriority,
 } from 'react-reconciler/constants.js'
+import { hasInkActiveSessionAls, InkHostSlot } from '../instances.js'
 import { HANDLER_FOR_EVENT } from './event-handlers.js'
 import type { EventTarget, TerminalEvent } from './terminal-event.js'
 
-// logError stub — replaced from business dependency via setDispatcherLogError
-let logError = (error: unknown): void => {
+// logError stub — replaced from business dependency via setDispatcherLogError.
+// Boot-time wiring outside ALS updates the process default inherited by all hosts;
+// calls inside ALS isolate overrides per host.
+let defaultLogError = (error: unknown): void => {
   console.error(error)
 }
 
+const hostLogErrorSlot = new InkHostSlot<{
+  fn: ((error: unknown) => void) | undefined
+}>(() => ({ fn: undefined }))
+
+function getLogError(): (error: unknown) => void {
+  return hostLogErrorSlot.peek()?.fn ?? defaultLogError
+}
+
 export function setDispatcherLogError(fn: (error: unknown) => void): void {
-  logError = fn
+  if (hasInkActiveSessionAls()) {
+    hostLogErrorSlot.of().fn = fn
+  } else {
+    defaultLogError = fn
+    hostLogErrorSlot.delete()
+  }
 }
 
 // --
@@ -114,7 +130,7 @@ function processDispatchQueue(
     try {
       handler(event)
     } catch (error) {
-      logError(error)
+      getLogError()(error)
     }
 
     previousNode = node
@@ -168,9 +184,30 @@ type DiscreteUpdates = <A, B>(
  * to break the import cycle.
  */
 export class Dispatcher {
-  currentEvent: TerminalEvent | null = null
-  currentUpdatePriority: number = DefaultEventPriority as number
+  #hostState = new InkHostSlot<{
+    currentEvent: TerminalEvent | null
+    currentUpdatePriority: number
+  }>(() => ({
+    currentEvent: null,
+    currentUpdatePriority: DefaultEventPriority as number,
+  }))
   discreteUpdates: DiscreteUpdates | null = null
+
+  get currentEvent(): TerminalEvent | null {
+    return this.#hostState.of().currentEvent
+  }
+
+  set currentEvent(value: TerminalEvent | null) {
+    this.#hostState.of().currentEvent = value
+  }
+
+  get currentUpdatePriority(): number {
+    return this.#hostState.of().currentUpdatePriority
+  }
+
+  set currentUpdatePriority(value: number) {
+    this.#hostState.of().currentUpdatePriority = value
+  }
 
   /**
    * Infer event priority from the currently-dispatching event.

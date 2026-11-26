@@ -12,15 +12,23 @@ import {
   logEvent,
 } from '../../services/analytics/index.js';
 import { type PermissionMode, permissionModeTitle } from '../../utils/permissions/PermissionMode.js';
+import { getBootstrapSession, RootSessionSlot } from '../../utils/sessionRoot.js';
 
 export type AutoDefaultNudgeResult = 'accepted' | 'declined' | 'cancelled';
 
-let pendingStrayDraft = '';
+const autoDefaultNudgeStateBySession = new RootSessionSlot<{ pendingStrayDraft: string }>(() => ({
+  pendingStrayDraft: '',
+}));
+
+function getAutoDefaultNudgeState(): { pendingStrayDraft: string } {
+  return autoDefaultNudgeStateBySession.of(getBootstrapSession());
+}
 
 /** Consume any stray text typed while AutoDefaultNudgeDialog was open (#26). */
 export function consumePendingAutoDefaultNudgeDraft(): string {
-  const out = pendingStrayDraft;
-  pendingStrayDraft = '';
+  const state = getAutoDefaultNudgeState();
+  const out = state.pendingStrayDraft;
+  state.pendingStrayDraft = '';
   return out;
 }
 
@@ -71,6 +79,10 @@ type Props = {
 
 export function AutoDefaultNudgeDialog({ currentMode, onAnswer }: Props): React.ReactNode {
   const [openedAt] = useState(() => Date.now());
+  const sessionStateRef = useRef<{ pendingStrayDraft: string } | null>(null);
+  if (sessionStateRef.current === null) {
+    sessionStateRef.current = getAutoDefaultNudgeState();
+  }
   const guardRef = useRef<StrayTypingGuard | null>(null);
   if (guardRef.current === null) {
     guardRef.current = createAutoDefaultNudgeStrayTypingGuard();
@@ -92,7 +104,8 @@ export function AutoDefaultNudgeDialog({ currentMode, onAnswer }: Props): React.
   const flushDraft = () => {
     const text = guardRef.current?.getDraft() ?? '';
     if (text.length > 0) {
-      pendingStrayDraft = pendingStrayDraft ? `${pendingStrayDraft}${text}` : text;
+      const state = sessionStateRef.current ?? getAutoDefaultNudgeState();
+      state.pendingStrayDraft = state.pendingStrayDraft ? `${state.pendingStrayDraft}${text}` : text;
     }
   };
 

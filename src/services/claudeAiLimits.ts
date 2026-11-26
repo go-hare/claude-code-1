@@ -9,6 +9,7 @@ import { logError } from '../utils/log.js'
 import { getSmallFastModel } from '../utils/model/model.js'
 import { getAPIProvider } from '../utils/model/providers.js'
 import { isEssentialTrafficOnly } from '../utils/privacyLevel.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionRoot.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './analytics/index.js'
 import { logEvent } from './analytics/index.js'
 import { getAPIMetadata } from './api/claude.js'
@@ -191,61 +192,17 @@ export type ClaudeAILimits = {
   surpassedThreshold?: number
 }
 
-// Exported for testing only
-export let currentLimits: ClaudeAILimits = {
-  status: 'allowed',
-  unifiedRateLimitFallbackAvailable: false,
-  isUsingOverage: false,
-}
+type StatusChangeListener = (limits: ClaudeAILimits) => void
 
 /**
- * densable 2.1.251 `pm.limitsObserved` / `HPe`.
- * Set true on a non-stale observation apply and on `emitStatusChange`.
- * Cleared by `resetCurrentLimits` (account epoch bump).
- * `/usage` Dl empty arm: `HPe() ? null : "Spend limit · shown once…"`.
+ * densable aZ.quotaRejected / yYp — 429 error path only (not headers).
+ * Second arg is densable hAm bucket: `main_thread` | `other`.
  */
-let limitsObserved = false
-let lastAppliedObservationAtMs = 0
-/** densable `pm.accountEpoch` — bumped on `resetCurrentLimits`. */
-let accountEpoch = 0
-
-/**
- * densable `HPe` — `return pm.limitsObserved`.
- */
-export function areLimitsObserved(): boolean {
-  return limitsObserved
-}
-
-/**
- * densable `pm.isStaleObservation(e)`.
- * Stale if `e < lastAppliedObservationAtMs`. Else latch observed + timestamp.
- */
-export function isStaleObservation(observationAtMs: number): boolean {
-  if (observationAtMs < lastAppliedObservationAtMs) return true
-  lastAppliedObservationAtMs = observationAtMs
-  limitsObserved = true
-  return false
-}
-
-/**
- * densable `pm.resetCurrentLimits`.
- * Clears windows, bumps account epoch, rewinds the observation latch.
- */
-export function resetCurrentLimits(): void {
-  currentLimits = {
-    status: 'allowed',
-    unifiedRateLimitFallbackAvailable: false,
-    isUsingOverage: false,
-  }
-  rawUtilization = {}
-  accountEpoch++
-  lastAppliedObservationAtMs = Date.now()
-  limitsObserved = false
-}
-
-export function getLimitsAccountEpoch(): number {
-  return accountEpoch
-}
+export type QuotaRejectedQuerySourceBucket = 'main_thread' | 'other'
+type QuotaRejectedListener = (
+  limits: ClaudeAILimits,
+  querySourceBucket: QuotaRejectedQuerySourceBucket,
+) => void
 
 /**
  * Raw per-window utilization from response headers, tracked on every API
@@ -278,7 +235,133 @@ export type RawUtilization = {
   /** densable 2.1.251 jL().overage — 0–1 utilization, unix-seconds reset. */
   overage?: RawWindowUtilization
 }
-let rawUtilization: RawUtilization = {}
+
+type ClaudeAiLimitsHostState = {
+  currentLimits: ClaudeAILimits
+  /**
+   * densable 2.1.251 `pm.limitsObserved` / `HPe`.
+   * Set true on a non-stale observation apply and on `emitStatusChange`.
+   * Cleared by `resetCurrentLimits` (account epoch bump).
+   */
+  limitsObserved: boolean
+  lastAppliedObservationAtMs: number
+  /** densable `pm.accountEpoch` — bumped on `resetCurrentLimits`. */
+  accountEpoch: number
+  rawUtilization: RawUtilization
+  statusListeners: Set<StatusChangeListener>
+  quotaRejectedListeners: Set<QuotaRejectedListener>
+}
+
+// Official 2.1.331 [W-169]: per-host Claude.ai rate-limit state on SessionHost.
+const claudeAiLimitsHostSlot = new HostSlot<ClaudeAiLimitsHostState>(() => ({
+  currentLimits: {
+    status: 'allowed',
+    unifiedRateLimitFallbackAvailable: false,
+    isUsingOverage: false,
+  },
+  limitsObserved: false,
+  lastAppliedObservationAtMs: 0,
+  accountEpoch: 0,
+  rawUtilization: {},
+  statusListeners: new Set(),
+  quotaRejectedListeners: new Set(),
+}))
+
+function getClaudeAiLimitsHostState(): ClaudeAiLimitsHostState {
+  return claudeAiLimitsHostSlot.of(getBootstrapSessionHost())
+}
+
+function createHostSetProxy<T>(getSet: () => Set<T>): Set<T> {
+  const dummy = new Set<T>()
+  return new Proxy(dummy, {
+    get(_target, prop) {
+      const set = getSet()
+      const value = Reflect.get(set, prop, set)
+      return typeof value === 'function' ? value.bind(set) : value
+    },
+    has(_target, prop) {
+      return Reflect.has(getSet(), prop)
+    },
+    ownKeys() {
+      return Reflect.ownKeys(getSet())
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      const desc = Reflect.getOwnPropertyDescriptor(getSet(), prop)
+      return desc ? { ...desc, configurable: true } : undefined
+    },
+  })
+}
+
+// Live per-host proxy so callers reading `currentLimits.*` stay isolated across SessionHosts
+export const currentLimits: ClaudeAILimits = new Proxy({} as ClaudeAILimits, {
+  get(_target, prop) {
+    const current = getClaudeAiLimitsHostState().currentLimits
+    const value = Reflect.get(current, prop, current)
+    return typeof value === 'function' ? value.bind(current) : value
+  },
+  set(_target, prop, value) {
+    return Reflect.set(getClaudeAiLimitsHostState().currentLimits, prop, value)
+  },
+  deleteProperty(_target, prop) {
+    return Reflect.deleteProperty(
+      getClaudeAiLimitsHostState().currentLimits,
+      prop,
+    )
+  },
+  has(_target, prop) {
+    return Reflect.has(getClaudeAiLimitsHostState().currentLimits, prop)
+  },
+  ownKeys() {
+    return Reflect.ownKeys(getClaudeAiLimitsHostState().currentLimits)
+  },
+  getOwnPropertyDescriptor(_target, prop) {
+    const desc = Reflect.getOwnPropertyDescriptor(
+      getClaudeAiLimitsHostState().currentLimits,
+      prop,
+    )
+    return desc ? { ...desc, configurable: true } : undefined
+  },
+})
+
+/**
+ * densable `HPe` — `return pm.limitsObserved`.
+ */
+export function areLimitsObserved(): boolean {
+  return getClaudeAiLimitsHostState().limitsObserved
+}
+
+/**
+ * densable `pm.isStaleObservation(e)`.
+ * Stale if `e < lastAppliedObservationAtMs`. Else latch observed + timestamp.
+ */
+export function isStaleObservation(observationAtMs: number): boolean {
+  const state = getClaudeAiLimitsHostState()
+  if (observationAtMs < state.lastAppliedObservationAtMs) return true
+  state.lastAppliedObservationAtMs = observationAtMs
+  state.limitsObserved = true
+  return false
+}
+
+/**
+ * densable `pm.resetCurrentLimits`.
+ * Clears windows, bumps account epoch, rewinds the observation latch.
+ */
+export function resetCurrentLimits(): void {
+  const state = getClaudeAiLimitsHostState()
+  state.currentLimits = {
+    status: 'allowed',
+    unifiedRateLimitFallbackAvailable: false,
+    isUsingOverage: false,
+  }
+  state.rawUtilization = {}
+  state.accountEpoch++
+  state.lastAppliedObservationAtMs = Date.now()
+  state.limitsObserved = false
+}
+
+export function getLimitsAccountEpoch(): number {
+  return getClaudeAiLimitsHostState().accountEpoch
+}
 
 const RAW_UTILIZATION_KEYS = [
   'five_hour',
@@ -322,7 +405,7 @@ export function selectOpenRawUtilization(
 }
 
 export function getRawUtilization(): RawUtilization {
-  return selectOpenRawUtilization(rawUtilization)
+  return selectOpenRawUtilization(getClaudeAiLimitsHostState().rawUtilization)
 }
 
 /**
@@ -413,25 +496,19 @@ export function extractRawUtilization(
   return result
 }
 
-type StatusChangeListener = (limits: ClaudeAILimits) => void
-export const statusListeners: Set<StatusChangeListener> = new Set()
+export const statusListeners: Set<StatusChangeListener> = createHostSetProxy(
+  () => getClaudeAiLimitsHostState().statusListeners,
+)
 
-/**
- * densable aZ.quotaRejected / yYp — 429 error path only (not headers).
- * Second arg is densable hAm bucket: `main_thread` | `other`.
- */
-export type QuotaRejectedQuerySourceBucket = 'main_thread' | 'other'
-type QuotaRejectedListener = (
-  limits: ClaudeAILimits,
-  querySourceBucket: QuotaRejectedQuerySourceBucket,
-) => void
-export const quotaRejectedListeners: Set<QuotaRejectedListener> = new Set()
+export const quotaRejectedListeners: Set<QuotaRejectedListener> =
+  createHostSetProxy(() => getClaudeAiLimitsHostState().quotaRejectedListeners)
 
 export function emitStatusChange(limits: ClaudeAILimits) {
-  currentLimits = limits
+  const state = getClaudeAiLimitsHostState()
+  state.currentLimits = limits
   // densable emitStatusChange: `this.limitsObserved=!0` before listeners.
-  limitsObserved = true
-  statusListeners.forEach(listener => listener(limits))
+  state.limitsObserved = true
+  state.statusListeners.forEach(listener => listener(limits))
   const hoursTillReset = Math.round(
     (limits.resetsAt ? limits.resetsAt - Date.now() / 1000 : 0) / (60 * 60),
   )
@@ -449,7 +526,7 @@ export function emitQuotaRejected(
   limits: ClaudeAILimits,
   querySourceBucket: QuotaRejectedQuerySourceBucket,
 ): void {
-  for (const listener of quotaRejectedListeners) {
+  for (const listener of getClaudeAiLimitsHostState().quotaRejectedListeners) {
     try {
       listener(limits, querySourceBucket)
     } catch (e) {
@@ -1060,14 +1137,18 @@ export function extractQuotaStatusFromHeaders(
   observationAtMs: number = Date.now(),
   opts?: { querySource?: string },
 ): void {
+  const state = getClaudeAiLimitsHostState()
   // Check if we need to process rate limits
   const isSubscriber = isClaudeAISubscriber()
 
   if (!shouldProcessRateLimits(isSubscriber)) {
     // If we have any rate limit state, clear it
-    rawUtilization = {}
+    state.rawUtilization = {}
     updateProviderBuckets('anthropic', [])
-    if (currentLimits.status !== 'allowed' || currentLimits.resetsAt) {
+    if (
+      state.currentLimits.status !== 'allowed' ||
+      state.currentLimits.resetsAt
+    ) {
       const defaultLimits: ClaudeAILimits = {
         status: 'allowed',
         unifiedRateLimitFallbackAvailable: false,
@@ -1087,7 +1168,7 @@ export function extractQuotaStatusFromHeaders(
   if (isStaleObservation(observationAtMs)) {
     return
   }
-  rawUtilization = extractRawUtilization(headersToUse)
+  state.rawUtilization = extractRawUtilization(headersToUse)
   updateProviderBuckets(
     'anthropic',
     anthropicAdapter.parseHeaders(headersToUse),
@@ -1098,22 +1179,22 @@ export function extractQuotaStatusFromHeaders(
   // past the weekly Fable limit) or suppress/repeat "Now using usage credits".
   if (
     isSideRequestQuerySourceForRateLimits(opts?.querySource) &&
-    currentLimits.isUsingOverage === true &&
+    state.currentLimits.isUsingOverage === true &&
     !newLimits.isUsingOverage
   ) {
     newLimits = {
       ...newLimits,
       isUsingOverage: true,
-      ...(currentLimits.rateLimitType !== undefined && {
-        rateLimitType: currentLimits.rateLimitType,
+      ...(state.currentLimits.rateLimitType !== undefined && {
+        rateLimitType: state.currentLimits.rateLimitType,
       }),
-      ...(currentLimits.resetsAt !== undefined && {
-        resetsAt: currentLimits.resetsAt,
+      ...(state.currentLimits.resetsAt !== undefined && {
+        resetsAt: state.currentLimits.resetsAt,
       }),
     }
   }
 
-  if (!isEqual(currentLimits, newLimits)) {
+  if (!isEqual(state.currentLimits, newLimits)) {
     emitStatusChange(newLimits)
   }
 }
@@ -1143,15 +1224,16 @@ export function extractQuotaStatusFromError(
     return
   }
 
+  const state = getClaudeAiLimitsHostState()
   try {
     // densable: `d=this.isStaleObservation(r)` — stale skips raw/emit/rejected.
     const stale = isStaleObservation(observationAtMs)
-    let newLimits = { ...currentLimits }
+    let newLimits = { ...state.currentLimits }
     if (error.headers) {
       // Process headers (applies mocks from /mock-limits command if active)
       const headersToUse = processRateLimitHeaders(error.headers)
       if (!stale) {
-        rawUtilization = extractRawUtilization(headersToUse)
+        state.rawUtilization = extractRawUtilization(headersToUse)
       }
       updateProviderBuckets(
         'anthropic',
@@ -1172,7 +1254,7 @@ export function extractQuotaStatusFromError(
     // densable: quotaRejected.emit(u, t) even when statusChanged is deduped
     emitQuotaRejected(newLimits, querySourceBucket)
 
-    if (!isEqual(currentLimits, newLimits)) {
+    if (!isEqual(state.currentLimits, newLimits)) {
       emitStatusChange(newLimits)
     }
   } catch (e) {

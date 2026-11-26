@@ -47,6 +47,7 @@ import { parseZipModes, unzipFile } from '../dxt/zip.js'
 import { isPluginZipCacheEnvEnabled } from '../residualFinalEnvGates.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { expandTilde } from '../permissions/pathValidation.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import type { MarketplaceSource } from './schemas.js'
 
 /**
@@ -115,28 +116,42 @@ export function getZipCachePluginsDir(): string {
 
 // Session plugin cache: a temp directory on local disk (NOT in the mounted zip cache)
 // that holds extracted plugins for the duration of the session.
-let sessionPluginCachePath: string | null = null
-let sessionPluginCachePromise: Promise<string> | null = null
+type SessionPluginCacheSlotState = {
+  path: string | null
+  promise: Promise<string> | null
+}
+
+const sessionPluginCacheSlot = new RootSessionSlot<SessionPluginCacheSlotState>(
+  () => ({
+    path: null,
+    promise: null,
+  }),
+)
+
+function getSessionPluginCacheState(): SessionPluginCacheSlotState {
+  return sessionPluginCacheSlot.of(getBootstrapSession())
+}
 
 /**
  * Get or create the session plugin cache directory.
  * This is a temp directory on local disk where plugins are extracted for the session.
  */
 export async function getSessionPluginCachePath(): Promise<string> {
-  if (sessionPluginCachePath) {
-    return sessionPluginCachePath
+  const slot = getSessionPluginCacheState()
+  if (slot.path) {
+    return slot.path
   }
-  if (!sessionPluginCachePromise) {
-    sessionPluginCachePromise = (async () => {
+  if (!slot.promise) {
+    slot.promise = (async () => {
       const suffix = randomBytes(8).toString('hex')
       const dir = join(tmpdir(), `claude-plugin-session-${suffix}`)
       await getFsImplementation().mkdir(dir)
-      sessionPluginCachePath = dir
+      slot.path = dir
       logForDebugging(`Created session plugin cache at ${dir}`)
       return dir
     })()
   }
-  return sessionPluginCachePromise
+  return slot.promise
 }
 
 /**
@@ -144,19 +159,18 @@ export async function getSessionPluginCachePath(): Promise<string> {
  * Should be called when the session ends.
  */
 export async function cleanupSessionPluginCache(): Promise<void> {
-  if (!sessionPluginCachePath) {
+  const slot = getSessionPluginCacheState()
+  if (!slot.path) {
     return
   }
   try {
-    await rm(sessionPluginCachePath, { recursive: true, force: true })
-    logForDebugging(
-      `Cleaned up session plugin cache at ${sessionPluginCachePath}`,
-    )
+    await rm(slot.path, { recursive: true, force: true })
+    logForDebugging(`Cleaned up session plugin cache at ${slot.path}`)
   } catch (error) {
     logForDebugging(`Failed to clean up session plugin cache: ${error}`)
   } finally {
-    sessionPluginCachePath = null
-    sessionPluginCachePromise = null
+    slot.path = null
+    slot.promise = null
   }
 }
 
@@ -164,8 +178,9 @@ export async function cleanupSessionPluginCache(): Promise<void> {
  * Reset the session plugin cache path (for testing).
  */
 export function resetSessionPluginCache(): void {
-  sessionPluginCachePath = null
-  sessionPluginCachePromise = null
+  const slot = getSessionPluginCacheState()
+  slot.path = null
+  slot.promise = null
 }
 
 /**

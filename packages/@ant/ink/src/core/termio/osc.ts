@@ -7,6 +7,7 @@ import { spawn } from 'child_process'
 import { readFileSync } from 'fs'
 import { isAbsolute, win32 } from 'path'
 import { logForDebugging } from '../../utils/debug.js'
+import { hasInkActiveSessionAls, InkHostSlot } from '../instances.js'
 import { envTerminalName } from '../terminalCapabilities.js'
 import { BEL, ESC, ESC_TYPE, SEP } from './ansi.js'
 
@@ -31,19 +32,54 @@ export type ClipboardAttacherCaps = {
   printsUnknownSequences?: boolean
 }
 
-let attacherCapsGetter:
+type AttacherCapsGetter =
   | (() => ClipboardAttacherCaps | null | undefined)
-  | null = null
+  | null
+type ClipboardHostPlatform = 'macos' | 'windows' | 'wsl' | 'linux' | 'unknown'
+type LinuxCopyTool = 'wl-copy' | 'xclip' | 'xsel' | null | undefined
+
+type OscHostState = {
+  hasAttacherOverride: boolean
+  attacherCapsGetter: AttacherCapsGetter
+  clipboardHostPlatformCache: ClipboardHostPlatform | undefined
+  linuxCopy: LinuxCopyTool
+  waylandCopyGen: number
+}
+
+let defaultAttacherCapsGetter: AttacherCapsGetter = null
+
+const oscHostSlot = new InkHostSlot<OscHostState>(() => ({
+  hasAttacherOverride: false,
+  attacherCapsGetter: null,
+  clipboardHostPlatformCache: undefined,
+  linuxCopy: undefined,
+  waylandCopyGen: 0,
+}))
 
 /** Inject attacher caps (opened bg session) for h()/zue/p(). */
 export function setClipboardAttacherCapsGetter(
-  getter: (() => ClipboardAttacherCaps | null | undefined) | null,
+  getter: AttacherCapsGetter,
 ): void {
-  attacherCapsGetter = getter
+  if (hasInkActiveSessionAls()) {
+    const state = oscHostSlot.of()
+    state.hasAttacherOverride = true
+    state.attacherCapsGetter = getter
+  } else {
+    defaultAttacherCapsGetter = getter
+    const state = oscHostSlot.peek()
+    if (state) {
+      state.hasAttacherOverride = false
+      state.attacherCapsGetter = null
+    }
+  }
 }
 
 export function attacherCaps(): ClipboardAttacherCaps | null {
-  return attacherCapsGetter?.() ?? null
+  const state = oscHostSlot.peek()
+  const getter = state?.hasAttacherOverride
+    ? state.attacherCapsGetter
+    : defaultAttacherCapsGetter
+  return getter?.() ?? null
 }
 
 /**
@@ -144,10 +180,6 @@ async function commandOnPath(bin: string): Promise<boolean> {
  * here (darwin→macos, win32→windows, linux+/proc/version microsoft|wsl→wsl).
  * Test override: `process.env.__CLAUDE_INK_PLATFORM_TEST__`.
  */
-type ClipboardHostPlatform = 'macos' | 'windows' | 'wsl' | 'linux' | 'unknown'
-
-let clipboardHostPlatformCache: ClipboardHostPlatform | undefined
-
 function getClipboardHostPlatform(): ClipboardHostPlatform {
   const testOverride = process.env['__CLAUDE_INK_PLATFORM_TEST__']
   if (
@@ -159,17 +191,18 @@ function getClipboardHostPlatform(): ClipboardHostPlatform {
   ) {
     return testOverride
   }
-  if (clipboardHostPlatformCache !== undefined) {
-    return clipboardHostPlatformCache
+  const state = oscHostSlot.of()
+  if (state.clipboardHostPlatformCache !== undefined) {
+    return state.clipboardHostPlatformCache
   }
   try {
     if (process.platform === 'darwin') {
-      clipboardHostPlatformCache = 'macos'
-      return clipboardHostPlatformCache
+      state.clipboardHostPlatformCache = 'macos'
+      return state.clipboardHostPlatformCache
     }
     if (process.platform === 'win32') {
-      clipboardHostPlatformCache = 'windows'
-      return clipboardHostPlatformCache
+      state.clipboardHostPlatformCache = 'windows'
+      return state.clipboardHostPlatformCache
     }
     if (process.platform === 'linux') {
       try {
@@ -178,20 +211,20 @@ function getClipboardHostPlatform(): ClipboardHostPlatform {
           encoding: 'utf8',
         }).toLowerCase()
         if (procVersion.includes('microsoft') || procVersion.includes('wsl')) {
-          clipboardHostPlatformCache = 'wsl'
-          return clipboardHostPlatformCache
+          state.clipboardHostPlatformCache = 'wsl'
+          return state.clipboardHostPlatformCache
         }
       } catch {
         // not WSL / unreadable — fall through to linux
       }
-      clipboardHostPlatformCache = 'linux'
-      return clipboardHostPlatformCache
+      state.clipboardHostPlatformCache = 'linux'
+      return state.clipboardHostPlatformCache
     }
-    clipboardHostPlatformCache = 'unknown'
-    return clipboardHostPlatformCache
+    state.clipboardHostPlatformCache = 'unknown'
+    return state.clipboardHostPlatformCache
   } catch {
-    clipboardHostPlatformCache = 'unknown'
-    return clipboardHostPlatformCache
+    state.clipboardHostPlatformCache = 'unknown'
+    return state.clipboardHostPlatformCache
   }
 }
 
@@ -271,7 +304,8 @@ function muxFromAttacherOrEnv(): unknown {
 
 /** @internal test-only — clear densable Wt cache for clipboard host */
 export function _resetClipboardHostPlatformCache(): void {
-  clipboardHostPlatformCache = undefined
+  const state = oscHostSlot.peek()
+  if (state) state.clipboardHostPlatformCache = undefined
 }
 
 /** @internal test-only densable Wt snapshot for clipboard */
@@ -346,7 +380,7 @@ export function getClipboardPath(): ClipboardPath {
     if (host === 'macos' || host === 'windows' || host === 'wsl') {
       return 'native'
     }
-    if (host === 'linux' && typeof linuxCopy === 'string') {
+    if (host === 'linux' && typeof oscHostSlot.peek()?.linuxCopy === 'string') {
       return 'native'
     }
   }
@@ -506,7 +540,7 @@ export async function setClipboard(text: string): Promise<string> {
   // Official 2.1.296: probe Linux clipboard tool before copyNative so
   // nativeCopied accurately reflects whether a native tool handled the copy.
   if (!ssh) {
-    if (host === 'linux' && typeof linuxCopy !== 'string') {
+    if (host === 'linux' && typeof oscHostSlot.peek()?.linuxCopy !== 'string') {
       await probeLinuxClipboardTool()
     }
     nativeCopied = copyNative(text)
@@ -545,37 +579,35 @@ export async function setClipboard(text: string): Promise<string> {
   return osc(OSC.CLIPBOARD, 'c', b64)
 }
 
-// densable kDe — Linux clipboard tool: undefined = not yet probed, null = none.
-// densable Xws probe: WAYLAND_DISPLAY→wl-copy else DISPLAY→xclip/xsel.
-let linuxCopy: 'wl-copy' | 'xclip' | 'xsel' | null | undefined
-// densable D3u — generation counter so a newer copy aborts a stale primary write
-let waylandCopyGen = 0
-
 /**
  * densable Xws / jt / YZb — probe once which Linux native clipboard tool
  * is available. Env-gated (not fire-and-write): WAYLAND_DISPLAY first,
  * then DISPLAY. Login calls this (Vo) while the URL is visible.
  */
 export async function probeLinuxClipboardTool(): Promise<void> {
+  const state = oscHostSlot.of()
   // densable Xws: only on Wt()==="linux" (not wsl)
-  if (getClipboardHostPlatform() !== 'linux' || typeof linuxCopy === 'string') {
+  if (
+    getClipboardHostPlatform() !== 'linux' ||
+    typeof state.linuxCopy === 'string'
+  ) {
     return
   }
   if (process.env['WAYLAND_DISPLAY'] && (await commandOnPath('wl-copy'))) {
-    linuxCopy = 'wl-copy'
+    state.linuxCopy = 'wl-copy'
     return
   }
   if (process.env['DISPLAY']) {
     if (await commandOnPath('xclip')) {
-      linuxCopy = 'xclip'
+      state.linuxCopy = 'xclip'
       return
     }
     if (await commandOnPath('xsel')) {
-      linuxCopy = 'xsel'
+      state.linuxCopy = 'xsel'
       return
     }
   }
-  linuxCopy = null
+  state.linuxCopy = null
 }
 
 /**
@@ -668,10 +700,11 @@ async function copyLinuxClipboardAndPrimary(
   tool: 'wl-copy' | 'xclip' | 'xsel',
   text: string,
 ): Promise<void> {
-  const gen = ++waylandCopyGen
+  const state = oscHostSlot.of()
+  const gen = ++state.waylandCopyGen
   const [clipArgs, primaryArgs] = LINUX_CLIPBOARD_ARGS[tool]
   await spawnDetachedClipboardCopy(tool, clipArgs, 2000, text)
-  if (gen !== waylandCopyGen) return
+  if (gen !== state.waylandCopyGen) return
   await spawnDetachedClipboardCopy(tool, primaryArgs, 2000, text)
 }
 
@@ -690,14 +723,15 @@ function copyNative(text: string): boolean {
       void execFileNoThrow('pbcopy', [], opts)
       return true
     case 'linux': {
-      if (linuxCopy === null) return false
-      if (typeof linuxCopy !== 'string') {
+      const state = oscHostSlot.of()
+      if (state.linuxCopy === null) return false
+      if (typeof state.linuxCopy !== 'string') {
         void probeLinuxClipboardTool().then(() => {
-          if (typeof linuxCopy === 'string') copyNative(text)
+          if (typeof state.linuxCopy === 'string') copyNative(text)
         })
         return false
       }
-      void copyLinuxClipboardAndPrimary(linuxCopy, text)
+      void copyLinuxClipboardAndPrimary(state.linuxCopy, text)
       return true
     }
     case 'wsl': {
@@ -778,25 +812,38 @@ export async function readNativeClipboard(
 
 /** @internal test-only */
 export function _resetLinuxCopyCache(): void {
-  linuxCopy = undefined
-  waylandCopyGen = 0
-  attacherCapsGetter = null
-  _resetClipboardHostPlatformCache()
+  const state = oscHostSlot.peek()
+  if (state) {
+    state.linuxCopy = undefined
+    state.waylandCopyGen = 0
+    state.clipboardHostPlatformCache = undefined
+  }
+  if (hasInkActiveSessionAls()) {
+    const active = oscHostSlot.of()
+    active.hasAttacherOverride = true
+    active.attacherCapsGetter = null
+  } else {
+    defaultAttacherCapsGetter = null
+    if (state) {
+      state.hasAttacherOverride = false
+      state.attacherCapsGetter = null
+    }
+  }
 }
 
 /** @internal test-only densable kDe snapshot */
-export function _getLinuxCopyTool(): typeof linuxCopy {
-  return linuxCopy
+export function _getLinuxCopyTool(): LinuxCopyTool {
+  return oscHostSlot.peek()?.linuxCopy
 }
 
 /** @internal test-only — pin densable kDe so dt() linux native can be asserted. */
-export function _setLinuxCopyToolForTesting(tool: typeof linuxCopy): void {
-  linuxCopy = tool
+export function _setLinuxCopyToolForTesting(tool: LinuxCopyTool): void {
+  oscHostSlot.of().linuxCopy = tool
 }
 
 /** @internal test-only densable D3u snapshot */
 export function _getWaylandCopyGen(): number {
-  return waylandCopyGen
+  return oscHostSlot.peek()?.waylandCopyGen ?? 0
 }
 
 /**

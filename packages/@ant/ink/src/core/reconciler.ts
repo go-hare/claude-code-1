@@ -27,6 +27,7 @@ import {
   EVENT_HANDLER_PROPS,
   type EventHandlerProps,
 } from './events/event-handlers.js'
+import { InkHostSlot } from './instances.js'
 import { LayoutDisplay } from './layout/node.js'
 import applyStyles, { type Styles, type TextStyles } from './styles.js'
 
@@ -304,42 +305,56 @@ export function getOwnerChain(fiber: unknown): string[] {
   return chain
 }
 
-let debugRepaints: boolean | undefined
+type ReconcilerHostState = {
+  debugRepaints: boolean | undefined
+  lastYogaMs: number
+  lastCommitMs: number
+  commitStart: number
+}
+
+const reconcilerHostSlot = new InkHostSlot<ReconcilerHostState>(() => ({
+  debugRepaints: undefined,
+  lastYogaMs: 0,
+  lastCommitMs: 0,
+  commitStart: 0,
+}))
+
 export function isDebugRepaintsEnabled(): boolean {
-  if (debugRepaints === undefined) {
-    debugRepaints = process.env.CLAUDE_CODE_DEBUG_REPAINTS === '1'
+  const state = reconcilerHostSlot.of()
+  if (state.debugRepaints === undefined) {
+    state.debugRepaints = process.env.CLAUDE_CODE_DEBUG_REPAINTS === '1'
   }
-  return debugRepaints
+  return state.debugRepaints
 }
 
 export const dispatcher = new Dispatcher()
 
 // --- SCROLL PROFILING (bench/scroll-e2e.sh reads via getLastYogaMs) ---
 // Set by onComputeLayout wrapper in ink.tsx; read by onRender for phases.
-let _lastYogaMs = 0
-let _lastCommitMs = 0
-let _commitStart = 0
 export function recordYogaMs(ms: number): void {
-  _lastYogaMs = ms
+  reconcilerHostSlot.of().lastYogaMs = ms
 }
 export function getLastYogaMs(): number {
-  return _lastYogaMs
+  return reconcilerHostSlot.peek()?.lastYogaMs ?? 0
 }
 export function markCommitStart(node?: DOMElement): void {
-  _commitStart = performance.now()
+  const now = performance.now()
+  reconcilerHostSlot.of().commitStart = now
   if (node) {
     let cur = node
     while (cur.parentNode) cur = cur.parentNode
-    cur.scrollCommitStartedAt = _commitStart
+    cur.scrollCommitStartedAt = now
   }
 }
 export function getLastCommitMs(): number {
-  return _lastCommitMs
+  return reconcilerHostSlot.peek()?.lastCommitMs ?? 0
 }
 export function resetProfileCounters(): void {
-  _lastYogaMs = 0
-  _lastCommitMs = 0
-  _commitStart = 0
+  const state = reconcilerHostSlot.peek()
+  if (!state) return
+  state.lastYogaMs = 0
+  state.lastCommitMs = 0
+  state.commitStart = 0
 }
 // --- END ---
 
@@ -369,7 +384,7 @@ const reconciler = createReconciler<
     const startedAt = rootNode.scrollCommitStartedAt
     rootNode.lastCommitMs =
       startedAt === undefined ? 0 : performance.now() - startedAt
-    _lastCommitMs = rootNode.lastCommitMs
+    reconcilerHostSlot.of().lastCommitMs = rootNode.lastCommitMs
     rootNode.scrollCommitStartedAt = undefined
     rootNode.layoutStale = false
     if (typeof rootNode.onComputeLayout === 'function') {

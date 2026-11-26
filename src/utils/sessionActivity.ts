@@ -14,131 +14,186 @@
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { isRemoteSendKeepalivesEnvEnabled } from './residualFinalEnvGates.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 
 const SESSION_ACTIVITY_INTERVAL_MS = 30_000
 
 export type SessionActivityReason = 'api_call' | 'tool_exec' | 'hook_exec'
 
-let activityCallback: (() => void) | null = null
-let refcount = 0
-/**
- * Official mainLoopRefcount — counts only main-thread activity ($Qn second
- * arg undefined). Nested agent activity increments refcount but not this.
- * Wired to Imn.setMainLoopRefcount via onMainLoopRefcountChanged.
- */
-let mainLoopRefcount = 0
-const activeReasons = new Map<SessionActivityReason, number>()
-let oldestActivityStartedAt: number | null = null
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null
-let idleTimer: ReturnType<typeof setTimeout> | null = null
-let cleanupRegistered = false
-/** Official FYi / BYi — mainLoopRefcount change listener. */
-let onMainLoopRefcountChanged: ((n: number) => void) | null = null
-/**
- * densable 2.1.236 — fire when mainLoopRefcount transitions to 0 (turn idle).
- * Used by notify_when_idle inbound subscriptions (peer_idle_notice).
- */
-let onMainLoopBecameIdle: (() => void) | null = null
-/** Official GRu / UYi — dropNestedBlockedChain listener (agent cancel). */
-let onDropNestedBlockedChain: ((agentId: string) => void) | null = null
-
-function startHeartbeatTimer(): void {
-  clearIdleTimer()
-  heartbeatTimer = setInterval(() => {
-    logForDiagnosticsNoPII('debug', 'session_keepalive_heartbeat', {
-      refcount,
-    })
-    if (isRemoteSendKeepalivesEnvEnabled()) {
-      activityCallback?.()
-    }
-  }, SESSION_ACTIVITY_INTERVAL_MS)
+type SessionActivityHostState = {
+  activityCallback: (() => void) | null
+  refcount: number
+  /**
+   * Official mainLoopRefcount — counts only main-thread activity ($Qn second
+   * arg undefined). Nested agent activity increments refcount but not this.
+   * Wired to Imn.setMainLoopRefcount via onMainLoopRefcountChanged.
+   */
+  mainLoopRefcount: number
+  activeReasons: Map<SessionActivityReason, number>
+  oldestActivityStartedAt: number | null
+  heartbeatTimer: ReturnType<typeof setInterval> | null
+  idleTimer: ReturnType<typeof setTimeout> | null
+  cleanupRegistered: boolean
+  /** Official FYi / BYi — mainLoopRefcount change listener. */
+  onMainLoopRefcountChanged: ((n: number) => void) | null
+  /**
+   * densable 2.1.236 — fire when mainLoopRefcount transitions to 0 (turn idle).
+   * Used by notify_when_idle inbound subscriptions (peer_idle_notice).
+   */
+  onMainLoopBecameIdle: (() => void) | null
+  /** Official GRu / UYi — dropNestedBlockedChain listener (agent cancel). */
+  onDropNestedBlockedChain: ((agentId: string) => void) | null
 }
 
-function startIdleTimer(): void {
-  clearIdleTimer()
-  if (activityCallback === null) {
+const sessionActivityHostSlot = new HostSlot<SessionActivityHostState>(() => ({
+  activityCallback: null,
+  refcount: 0,
+  mainLoopRefcount: 0,
+  activeReasons: new Map<SessionActivityReason, number>(),
+  oldestActivityStartedAt: null,
+  heartbeatTimer: null,
+  idleTimer: null,
+  cleanupRegistered: false,
+  onMainLoopRefcountChanged: null,
+  onMainLoopBecameIdle: null,
+  onDropNestedBlockedChain: null,
+}))
+
+function getSessionActivityHostState(): SessionActivityHostState {
+  return sessionActivityHostSlot.of(getBootstrapSessionHost())
+}
+
+function startHeartbeatTimer(state: SessionActivityHostState): void {
+  clearIdleTimer(state)
+  const sessionRef = new WeakRef(getBootstrapSession().root)
+  const stateRef = new WeakRef(state)
+  const timer = setInterval(() => {
+    const session = sessionRef.deref()
+    const current = stateRef.deref()
+    if (session === undefined || current === undefined) {
+      clearInterval(timer)
+      if (current !== undefined && current.heartbeatTimer === timer) {
+        current.heartbeatTimer = null
+      }
+      return
+    }
+    runWithSession(session, () => {
+      logForDiagnosticsNoPII('debug', 'session_keepalive_heartbeat', {
+        refcount: current.refcount,
+      })
+      if (isRemoteSendKeepalivesEnvEnabled()) {
+        current.activityCallback?.()
+      }
+    })
+  }, SESSION_ACTIVITY_INTERVAL_MS)
+  state.heartbeatTimer = timer
+}
+
+function startIdleTimer(state: SessionActivityHostState): void {
+  clearIdleTimer(state)
+  if (state.activityCallback === null) {
     return
   }
-  idleTimer = setTimeout(() => {
-    logForDiagnosticsNoPII('info', 'session_idle_30s')
-    idleTimer = null
+  const sessionRef = new WeakRef(getBootstrapSession().root)
+  const stateRef = new WeakRef(state)
+  const timer = setTimeout(() => {
+    const current = stateRef.deref()
+    if (current !== undefined && current.idleTimer === timer) {
+      current.idleTimer = null
+    }
+    const session = sessionRef.deref()
+    if (session === undefined) {
+      return
+    }
+    runWithSession(session, () => {
+      logForDiagnosticsNoPII('info', 'session_idle_30s')
+    })
   }, SESSION_ACTIVITY_INTERVAL_MS)
+  state.idleTimer = timer
 }
 
-function clearIdleTimer(): void {
-  if (idleTimer !== null) {
-    clearTimeout(idleTimer)
-    idleTimer = null
+function clearIdleTimer(state: SessionActivityHostState): void {
+  if (state.idleTimer !== null) {
+    clearTimeout(state.idleTimer)
+    state.idleTimer = null
   }
 }
 
 export function registerSessionActivityCallback(cb: () => void): void {
-  activityCallback = cb
+  const state = getSessionActivityHostState()
+  state.activityCallback = cb
   // Restart timer if work is already in progress (e.g. reconnect during streaming)
-  if (refcount > 0 && heartbeatTimer === null) {
-    startHeartbeatTimer()
+  if (state.refcount > 0 && state.heartbeatTimer === null) {
+    startHeartbeatTimer(state)
   }
 }
 
 export function unregisterSessionActivityCallback(): void {
-  activityCallback = null
+  const state = getSessionActivityHostState()
+  state.activityCallback = null
   // Stop timer if the callback is removed
-  if (heartbeatTimer !== null) {
-    clearInterval(heartbeatTimer)
-    heartbeatTimer = null
+  if (state.heartbeatTimer !== null) {
+    clearInterval(state.heartbeatTimer)
+    state.heartbeatTimer = null
   }
-  clearIdleTimer()
+  clearIdleTimer(state)
 }
 
 export function sendSessionActivitySignal(): void {
+  const state = getSessionActivityHostState()
   if (isRemoteSendKeepalivesEnvEnabled()) {
-    activityCallback?.()
+    state.activityCallback?.()
   }
 }
 
 export function isSessionActivityTrackingActive(): boolean {
-  return activityCallback !== null
+  return getSessionActivityHostState().activityCallback !== null
 }
 
 /** Official BYi — register mainLoopRefcount listener (Imn.setMainLoopRefcount). */
 export function setMainLoopRefcountListener(
   cb: ((n: number) => void) | null,
 ): void {
-  onMainLoopRefcountChanged = cb
+  getSessionActivityHostState().onMainLoopRefcountChanged = cb
 }
 
 /** densable notify_when_idle — register main-loop idle (refcount → 0) listener. */
 export function setMainLoopBecameIdleListener(cb: (() => void) | null): void {
-  onMainLoopBecameIdle = cb
+  getSessionActivityHostState().onMainLoopBecameIdle = cb
 }
 
 /** Official UYi — register dropNestedBlockedChain listener. */
 export function setDropNestedBlockedChainListener(
   cb: ((agentId: string) => void) | null,
 ): void {
-  onDropNestedBlockedChain = cb
+  getSessionActivityHostState().onDropNestedBlockedChain = cb
 }
 
 /** Official QRu — notify dropNestedBlockedChain for cancelled agent. */
 export function notifyDropNestedBlockedChain(agentId: string): void {
-  onDropNestedBlockedChain?.(agentId)
+  getSessionActivityHostState().onDropNestedBlockedChain?.(agentId)
 }
 
 /** Official ZRu — current mainLoopRefcount. */
 export function getMainLoopRefcount(): number {
-  return mainLoopRefcount
+  return getSessionActivityHostState().mainLoopRefcount
 }
 
 /** densable `VKo` — `activeReasons.get(reason)??0 > 0`. */
 export function isSessionActivityReasonActive(
   reason: SessionActivityReason,
 ): boolean {
-  return (activeReasons.get(reason) ?? 0) > 0
+  return (getSessionActivityHostState().activeReasons.get(reason) ?? 0) > 0
 }
 
 /** Test-only — official `n.refcount` (keepalive hold, including hook_exec). */
 export function getSessionActivityRefcountForTests(): number {
-  return refcount
+  return getSessionActivityHostState().refcount
 }
 
 /**
@@ -178,29 +233,39 @@ export function startSessionActivity(
   reason: SessionActivityReason,
   agentId?: string,
 ): void {
-  refcount++
+  const state = getSessionActivityHostState()
+  state.refcount++
   if (agentId === undefined) {
-    mainLoopRefcount++
-    onMainLoopRefcountChanged?.(mainLoopRefcount)
+    state.mainLoopRefcount++
+    state.onMainLoopRefcountChanged?.(state.mainLoopRefcount)
   }
-  activeReasons.set(reason, (activeReasons.get(reason) ?? 0) + 1)
-  if (refcount === 1) {
-    oldestActivityStartedAt = Date.now()
-    if (activityCallback !== null && heartbeatTimer === null) {
-      startHeartbeatTimer()
+  state.activeReasons.set(reason, (state.activeReasons.get(reason) ?? 0) + 1)
+  if (state.refcount === 1) {
+    state.oldestActivityStartedAt = Date.now()
+    if (state.activityCallback !== null && state.heartbeatTimer === null) {
+      startHeartbeatTimer(state)
     }
   }
-  if (!cleanupRegistered) {
-    cleanupRegistered = true
+  if (!state.cleanupRegistered) {
+    state.cleanupRegistered = true
+    const sessionRef = new WeakRef(getBootstrapSession().root)
+    const stateRef = new WeakRef(state)
     registerCleanup(async () => {
-      logForDiagnosticsNoPII('info', 'session_activity_at_shutdown', {
-        refcount,
-        active: Object.fromEntries(activeReasons),
-        // Only meaningful while work is in-flight; stale otherwise.
-        oldest_activity_ms:
-          refcount > 0 && oldestActivityStartedAt !== null
-            ? Date.now() - oldestActivityStartedAt
-            : null,
+      const current = stateRef.deref()
+      const session = sessionRef.deref()
+      if (current === undefined || session === undefined) {
+        return
+      }
+      runWithSession(session, () => {
+        logForDiagnosticsNoPII('info', 'session_activity_at_shutdown', {
+          refcount: current.refcount,
+          active: Object.fromEntries(current.activeReasons),
+          // Only meaningful while work is in-flight; stale otherwise.
+          oldest_activity_ms:
+            current.refcount > 0 && current.oldestActivityStartedAt !== null
+              ? Date.now() - current.oldestActivityStartedAt
+              : null,
+        })
       })
     })
   }
@@ -217,15 +282,16 @@ export function stopSessionActivity(
   reason: SessionActivityReason,
   agentId?: string,
 ): void {
-  if (refcount > 0) {
-    refcount--
+  const state = getSessionActivityHostState()
+  if (state.refcount > 0) {
+    state.refcount--
   }
   if (agentId === undefined) {
-    if (mainLoopRefcount > 0) {
-      mainLoopRefcount--
-      onMainLoopRefcountChanged?.(mainLoopRefcount)
-      if (mainLoopRefcount === 0) {
-        onMainLoopBecameIdle?.()
+    if (state.mainLoopRefcount > 0) {
+      state.mainLoopRefcount--
+      state.onMainLoopRefcountChanged?.(state.mainLoopRefcount)
+      if (state.mainLoopRefcount === 0) {
+        state.onMainLoopBecameIdle?.()
       }
     } else {
       logForDiagnosticsNoPII('warn', 'session_activity_main_loop_underflow', {
@@ -233,30 +299,31 @@ export function stopSessionActivity(
       })
     }
   }
-  const n = (activeReasons.get(reason) ?? 0) - 1
-  if (n > 0) activeReasons.set(reason, n)
-  else activeReasons.delete(reason)
-  if (refcount === 0 && heartbeatTimer !== null) {
-    clearInterval(heartbeatTimer)
-    heartbeatTimer = null
-    startIdleTimer()
+  const n = (state.activeReasons.get(reason) ?? 0) - 1
+  if (n > 0) state.activeReasons.set(reason, n)
+  else state.activeReasons.delete(reason)
+  if (state.refcount === 0 && state.heartbeatTimer !== null) {
+    clearInterval(state.heartbeatTimer)
+    state.heartbeatTimer = null
+    startIdleTimer(state)
   }
 }
 
 /** Test-only reset. */
 export function resetSessionActivityForTests(): void {
-  activityCallback = null
-  refcount = 0
-  mainLoopRefcount = 0
-  activeReasons.clear()
-  oldestActivityStartedAt = null
-  if (heartbeatTimer !== null) {
-    clearInterval(heartbeatTimer)
-    heartbeatTimer = null
+  const state = getSessionActivityHostState()
+  state.activityCallback = null
+  state.refcount = 0
+  state.mainLoopRefcount = 0
+  state.activeReasons.clear()
+  state.oldestActivityStartedAt = null
+  if (state.heartbeatTimer !== null) {
+    clearInterval(state.heartbeatTimer)
+    state.heartbeatTimer = null
   }
-  clearIdleTimer()
-  cleanupRegistered = false
-  onMainLoopRefcountChanged = null
-  onMainLoopBecameIdle = null
-  onDropNestedBlockedChain = null
+  clearIdleTimer(state)
+  state.cleanupRegistered = false
+  state.onMainLoopRefcountChanged = null
+  state.onMainLoopBecameIdle = null
+  state.onDropNestedBlockedChain = null
 }

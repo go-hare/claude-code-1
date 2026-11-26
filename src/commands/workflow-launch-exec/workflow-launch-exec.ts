@@ -1,5 +1,6 @@
 import type { LocalCommandCall } from '../../types/command.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { runRemoteWorkflowScript } from '../remote-workflow/remoteWorkflowRunner.js'
 
 export type WorkflowLaunchHandoff = {
@@ -10,18 +11,21 @@ export type WorkflowLaunchHandoff = {
   postResultLine: (line: string) => void
 }
 
-const pendingHandoffs = new Map<string, WorkflowLaunchHandoff>()
+const pendingHandoffsHostSlot = new HostSlot<
+  Map<string, WorkflowLaunchHandoff>
+>(() => new Map())
 
 export function registerWorkflowLaunchHandoff(
   token: string,
   handoff: WorkflowLaunchHandoff,
 ): void {
-  pendingHandoffs.set(token, handoff)
+  pendingHandoffsHostSlot.of(getBootstrapSessionHost()).set(token, handoff)
 }
 
 export function takeWorkflowLaunchHandoff(
   token: string,
 ): WorkflowLaunchHandoff | undefined {
+  const pendingHandoffs = pendingHandoffsHostSlot.of(getBootstrapSessionHost())
   const entry = pendingHandoffs.get(token)
   if (entry !== undefined) {
     pendingHandoffs.delete(token)
@@ -30,7 +34,7 @@ export function takeWorkflowLaunchHandoff(
 }
 
 export function clearWorkflowLaunchHandoffsForTests(): void {
-  pendingHandoffs.clear()
+  pendingHandoffsHostSlot.of(getBootstrapSessionHost()).clear()
 }
 
 export const NO_PENDING_HANDOFF_MESSAGE =

@@ -6,7 +6,7 @@
  */
 import { feature } from 'bun:bundle';
 import { useCallback, useEffect } from 'react';
-import { bootstrapXtermAtlas, instances } from '@anthropic/ink';
+import { bootstrapXtermAtlas, Ns } from '@anthropic/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import type { Screen } from '../screens/REPL.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
@@ -220,7 +220,7 @@ export function GlobalKeybindingHandlers({
   // terminal was cleared externally (macOS Cmd+K) and Ink's diff engine
   // thinks unchanged cells don't need repainting.
   const handleRedraw = useCallback(() => {
-    instances.get(process.stdout)?.forceRedraw();
+    Ns().get(process.stdout)?.forceRedraw();
   }, []);
   useKeybinding('app:redraw', handleRedraw, { context: 'Global' });
 

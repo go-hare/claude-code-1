@@ -17,6 +17,7 @@ import { shouldHideCwd } from './hideCwd.js'
 import { type APIProvider, getAPIProvider } from './model/providers.js'
 import { getStoredChangelogFromMemory, parseChangelog } from './releaseNotes.js'
 import { gt } from './semver.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 import { loadMessageLogs } from './sessionStorage.js'
 import { getInitialSettings } from './settings/settings.js'
 import { plural } from './stringUtils.js'
@@ -208,23 +209,36 @@ export function truncatePath(path: string, maxLength: number): string {
   return `${first}${separator}${ellipsis}${separator}${middleParts.join(separator)}${separator}${last}`
 }
 
-// Simple cache for preloaded activity
-let cachedActivity: LogOption[] = []
-let cachePromise: Promise<LogOption[]> | null = null
+type LogoV2SessionState = {
+  cachedActivity: LogOption[]
+  cachePromise: Promise<LogOption[]> | null
+  cachedStartupUpdateSummary: string | null | undefined
+}
+
+const logoV2SessionSlot = new RootSessionSlot<LogoV2SessionState>(() => ({
+  cachedActivity: [],
+  cachePromise: null,
+  cachedStartupUpdateSummary: undefined,
+}))
+
+function getLogoV2SessionState(): LogoV2SessionState {
+  return logoV2SessionSlot.of(getBootstrapSession())
+}
 
 /**
  * Preloads recent conversations for display in Logo v2
  */
 export async function getRecentActivity(): Promise<LogOption[]> {
+  const state = getLogoV2SessionState()
   // Return existing promise if already loading
-  if (cachePromise) {
-    return cachePromise
+  if (state.cachePromise) {
+    return state.cachePromise
   }
 
   const currentSessionId = getSessionId()
-  cachePromise = loadMessageLogs(10)
+  state.cachePromise = loadMessageLogs(10)
     .then(logs => {
-      cachedActivity = logs
+      state.cachedActivity = logs
         .filter(log => {
           if (log.isSidechain) return false
           if (log.sessionId === currentSessionId) return false
@@ -237,21 +251,21 @@ export async function getRecentActivity(): Promise<LogOption[]> {
           return hasSummary || hasFirstPrompt
         })
         .slice(0, 3)
-      return cachedActivity
+      return state.cachedActivity
     })
     .catch(() => {
-      cachedActivity = []
-      return cachedActivity
+      state.cachedActivity = []
+      return state.cachedActivity
     })
 
-  return cachePromise
+  return state.cachePromise
 }
 
 /**
  * Gets cached activity synchronously
  */
 export function getRecentActivitySync(): LogOption[] {
-  return cachedActivity
+  return logoV2SessionSlot.peek(getBootstrapSession())?.cachedActivity ?? []
 }
 
 /**
@@ -556,17 +570,17 @@ function getEntriesBetweenVersions(
   return out
 }
 
-let cachedStartupUpdateSummary: string | null | undefined
-
 export function _resetStartupUpdateSummaryForTesting(): void {
-  cachedStartupUpdateSummary = undefined
+  const state = logoV2SessionSlot.peek(getBootstrapSession())
+  if (state) state.cachedStartupUpdateSummary = undefined
 }
 
 export function getStartupUpdateSummary(
   currentVersion: string = MACRO.VERSION,
 ): string | null {
-  if (cachedStartupUpdateSummary !== undefined) {
-    return cachedStartupUpdateSummary
+  const state = getLogoV2SessionState()
+  if (state.cachedStartupUpdateSummary !== undefined) {
+    return state.cachedStartupUpdateSummary
   }
   try {
     const forced = parseForceFirstLaunchEnv()
@@ -577,8 +591,8 @@ export function getStartupUpdateSummary(
         forced.pretendLastSeen,
         currentVersion,
       )
-      cachedStartupUpdateSummary = summarizeReleaseNotes({ entries })
-      return cachedStartupUpdateSummary
+      state.cachedStartupUpdateSummary = summarizeReleaseNotes({ entries })
+      return state.cachedStartupUpdateSummary
     }
 
     const lastSeen = getGlobalConfig().lastReleaseNotesSeen
@@ -586,7 +600,7 @@ export function getStartupUpdateSummary(
       !isValidSemver(lastSeen) ||
       !hasUnseenReleaseVersion(lastSeen, currentVersion)
     ) {
-      cachedStartupUpdateSummary = null
+      state.cachedStartupUpdateSummary = null
       return null
     }
 
@@ -595,10 +609,10 @@ export function getStartupUpdateSummary(
       lastSeen,
       currentVersion,
     )
-    cachedStartupUpdateSummary = summarizeReleaseNotes({ entries })
-    return cachedStartupUpdateSummary
+    state.cachedStartupUpdateSummary = summarizeReleaseNotes({ entries })
+    return state.cachedStartupUpdateSummary
   } catch {
-    cachedStartupUpdateSummary = null
+    state.cachedStartupUpdateSummary = null
     return null
   }
 }

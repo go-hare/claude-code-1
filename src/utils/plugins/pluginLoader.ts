@@ -45,8 +45,8 @@ import {
   stat,
   symlink,
 } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join, relative, resolve, sep } from 'path'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   getInlinePluginUrls,
   getInlinePlugins,
@@ -4429,19 +4429,63 @@ export function mergePluginSources(sources: {
  *   - disabled: Array of disabled LoadedPlugin objects
  *   - errors: Array of loading errors with source information
  */
-export const loadAllPlugins = memoize(async (): Promise<PluginLoadResult> => {
-  const result = await assemblePluginLoadResult(() =>
-    loadPluginsFromMarketplaces({ cacheOnly: false }),
-  )
-  // A fresh full-load result is strictly valid for cache-only callers
-  // (both variants share assemblePluginLoadResult). Warm the separate
-  // memoize so refreshActivePlugins()'s downstream getPluginCommands() /
-  // getAgentDefinitionsWithOverrides() — which now call
-  // loadAllPluginsCacheOnly — see just-cloned plugins instead of reading
-  // an installed_plugins.json that nothing writes mid-session.
-  loadAllPluginsCacheOnly.cache?.set(undefined, Promise.resolve(result))
-  return result
-})
+type CachedPluginLoaderFn = (() => Promise<PluginLoadResult>) & {
+  cache: Map<unknown, Promise<PluginLoadResult>>
+}
+
+type HostPluginLoaderState = {
+  allPluginsCache: Map<unknown, Promise<PluginLoadResult>>
+  allPluginsCacheOnlyCache: Map<unknown, Promise<PluginLoadResult>>
+  pluginAgentSettingSource: string | undefined
+  initialPluginLoadPromise: Promise<void> | undefined
+  initialPluginsLoaded: boolean
+}
+
+const hostPluginLoaderSlot = new HostSlot<HostPluginLoaderState>(() => ({
+  allPluginsCache: new Map(),
+  allPluginsCacheOnlyCache: new Map(),
+  pluginAgentSettingSource: undefined,
+  initialPluginLoadPromise: undefined,
+  initialPluginsLoaded: false,
+}))
+
+function hostPluginLoaderState(): HostPluginLoaderState {
+  return hostPluginLoaderSlot.of(getBootstrapSessionHost())
+}
+
+function createLoadAllPlugins(): CachedPluginLoaderFn {
+  const fn = (): Promise<PluginLoadResult> => {
+    const state = hostPluginLoaderState()
+    if (state.allPluginsCache.has(undefined)) {
+      return state.allPluginsCache.get(undefined)!
+    }
+    const pending = (async (): Promise<PluginLoadResult> => {
+      const result = await assemblePluginLoadResult(() =>
+        loadPluginsFromMarketplaces({ cacheOnly: false }),
+      )
+      // A fresh full-load result is strictly valid for cache-only callers
+      // (both variants share assemblePluginLoadResult). Warm the separate
+      // memoize so refreshActivePlugins()'s downstream getPluginCommands() /
+      // getAgentDefinitionsWithOverrides() — which now call
+      // loadAllPluginsCacheOnly — see just-cloned plugins instead of reading
+      // an installed_plugins.json that nothing writes mid-session.
+      state.allPluginsCacheOnlyCache.set(undefined, Promise.resolve(result))
+      return result
+    })()
+    state.allPluginsCache.set(undefined, pending)
+    return pending
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<unknown, Promise<PluginLoadResult>> {
+      return hostPluginLoaderState().allPluginsCache
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedPluginLoaderFn
+}
+
+export const loadAllPlugins: CachedPluginLoaderFn = createLoadAllPlugins()
 
 /**
  * Cache-only variant of loadAllPlugins.
@@ -4470,16 +4514,35 @@ export const loadAllPlugins = memoize(async (): Promise<PluginLoadResult> => {
  * the full loader don't get plugin-cache-miss from their downstream
  * cache-only consumers.
  */
-export const loadAllPluginsCacheOnly = memoize(
-  async (): Promise<PluginLoadResult> => {
-    if (isSyncPluginInstallEnabled()) {
-      return loadAllPlugins()
+function createLoadAllPluginsCacheOnly(): CachedPluginLoaderFn {
+  const fn = (): Promise<PluginLoadResult> => {
+    const state = hostPluginLoaderState()
+    if (state.allPluginsCacheOnlyCache.has(undefined)) {
+      return state.allPluginsCacheOnlyCache.get(undefined)!
     }
-    return assemblePluginLoadResult(() =>
-      loadPluginsFromMarketplaces({ cacheOnly: true }),
-    )
-  },
-)
+    const pending = (async (): Promise<PluginLoadResult> => {
+      if (isSyncPluginInstallEnabled()) {
+        return loadAllPlugins()
+      }
+      return assemblePluginLoadResult(() =>
+        loadPluginsFromMarketplaces({ cacheOnly: true }),
+      )
+    })()
+    state.allPluginsCacheOnlyCache.set(undefined, pending)
+    return pending
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<unknown, Promise<PluginLoadResult>> {
+      return hostPluginLoaderState().allPluginsCacheOnlyCache
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as CachedPluginLoaderFn
+}
+
+export const loadAllPluginsCacheOnly: CachedPluginLoaderFn =
+  createLoadAllPluginsCacheOnly()
 
 /**
  * Shared body of loadAllPlugins and loadAllPluginsCacheOnly.
@@ -4686,7 +4749,7 @@ export function clearPluginCache(reason?: string): void {
     resetSettingsCache()
   }
   clearPluginSettingsBase()
-  pluginAgentSettingSource = undefined
+  hostPluginLoaderState().pluginAgentSettingSource = undefined
   // TODO: Clear installed plugins cache when installedPluginsManager is implemented
 }
 
@@ -4722,19 +4785,15 @@ function mergePluginSettings(
   return merged
 }
 
-/** Official 2.1.323 #2211 (`uLa`): last enabled plugin supplying deprecated `settings.agent`. */
-let pluginAgentSettingSource: string | undefined
-
 /** Official 2.1.323 #2211: returns the plugin name that set `settings.agent`, if any. */
 export function getPluginAgentSettingSource(): string | undefined {
-  return pluginAgentSettingSource
+  return hostPluginLoaderState().pluginAgentSettingSource
 }
 
 /** Official 2.1.323 #2211: returns startup deprecation notice if an enabled plugin set `settings.agent`. */
 export function getPluginAgentStartupNotice(): string | undefined {
-  return pluginAgentSettingSource
-    ? formatPluginAgentStartupNotice(pluginAgentSettingSource)
-    : undefined
+  const source = hostPluginLoaderState().pluginAgentSettingSource
+  return source ? formatPluginAgentStartupNotice(source) : undefined
 }
 
 /**
@@ -4781,7 +4840,7 @@ export function isPluginEnabledOnlyByProjectSettings(
  */
 export function cachePluginSettings(plugins: LoadedPlugin[]): void {
   const settings = mergePluginSettings(plugins)
-  pluginAgentSettingSource = plugins.findLast(
+  hostPluginLoaderState().pluginAgentSettingSource = plugins.findLast(
     p => p.settings?.agent !== undefined,
   )?.name
   setPluginSettingsBase(settings)
@@ -4802,31 +4861,28 @@ export function cachePluginSettings(plugins: LoadedPlugin[]): void {
  * Official 2.1.327 (#524) — initial plugin load readiness gate (`_O`).
  * Restarted background subagents and autonomous turns await this barrier so
  * they do not run before initial plugins finish loading.
- */
-let initialPluginLoadPromise: Promise<void> | undefined
-let initialPluginsLoaded = false
-
-/**
+ *
  * Register the in-flight initial plugin load promise. Subsequent callers of
  * `waitForInitialPluginsLoaded` will wait until it settles (or until aborted).
  */
 export function beginInitialPluginLoad(loadPromise: Promise<unknown>): void {
-  initialPluginsLoaded = false
+  const state = hostPluginLoaderState()
+  state.initialPluginsLoaded = false
   const tracked = Promise.resolve(loadPromise).then(
     () => {
-      if (initialPluginLoadPromise === tracked) {
-        initialPluginsLoaded = true
-        initialPluginLoadPromise = undefined
+      if (state.initialPluginLoadPromise === tracked) {
+        state.initialPluginsLoaded = true
+        state.initialPluginLoadPromise = undefined
       }
     },
     () => {
-      if (initialPluginLoadPromise === tracked) {
-        initialPluginsLoaded = true
-        initialPluginLoadPromise = undefined
+      if (state.initialPluginLoadPromise === tracked) {
+        state.initialPluginsLoaded = true
+        state.initialPluginLoadPromise = undefined
       }
     },
   )
-  initialPluginLoadPromise = tracked
+  state.initialPluginLoadPromise = tracked
 }
 
 /**
@@ -4834,8 +4890,9 @@ export function beginInitialPluginLoad(loadPromise: Promise<unknown>): void {
  * `refreshActivePlugins` resolves).
  */
 export function markInitialPluginsLoaded(): void {
-  initialPluginsLoaded = true
-  initialPluginLoadPromise = undefined
+  const state = hostPluginLoaderState()
+  state.initialPluginsLoaded = true
+  state.initialPluginLoadPromise = undefined
 }
 
 /**
@@ -4845,10 +4902,14 @@ export function markInitialPluginsLoaded(): void {
 export function waitForInitialPluginsLoaded(
   signal?: AbortSignal,
 ): Promise<void> | undefined {
-  if (initialPluginsLoaded || initialPluginLoadPromise === undefined) {
+  const state = hostPluginLoaderState()
+  if (
+    state.initialPluginsLoaded ||
+    state.initialPluginLoadPromise === undefined
+  ) {
     return undefined
   }
-  const pending = initialPluginLoadPromise
+  const pending = state.initialPluginLoadPromise
   if (!signal) return pending
   if (signal.aborted) {
     return Promise.reject(
@@ -4874,12 +4935,16 @@ export function waitForInitialPluginsLoaded(
 }
 
 export function isInitialPluginLoadPending(): boolean {
-  return !initialPluginsLoaded && initialPluginLoadPromise !== undefined
+  const state = hostPluginLoaderState()
+  return (
+    !state.initialPluginsLoaded && state.initialPluginLoadPromise !== undefined
+  )
 }
 
 export function resetInitialPluginLoadForTests(): void {
-  initialPluginLoadPromise = undefined
-  initialPluginsLoaded = false
+  const state = hostPluginLoaderState()
+  state.initialPluginLoadPromise = undefined
+  state.initialPluginsLoaded = false
 }
 
 /**

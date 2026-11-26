@@ -7,6 +7,7 @@
  * Legacy name: originally AWS-only; now used by all cloud auth refresh flows.
  */
 
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { createSignal } from './signal.js'
 
 export type AwsAuthStatus = {
@@ -15,8 +16,11 @@ export type AwsAuthStatus = {
   error?: string
 }
 
+const awsAuthStatusManagerByHost = new HostSlot<{
+  instance: AwsAuthStatusManager | null
+}>(() => ({ instance: null }))
+
 export class AwsAuthStatusManager {
-  private static instance: AwsAuthStatusManager | null = null
   private status: AwsAuthStatus = {
     isAuthenticating: false,
     output: [],
@@ -24,10 +28,11 @@ export class AwsAuthStatusManager {
   private changed = createSignal<[status: AwsAuthStatus]>()
 
   static getInstance(): AwsAuthStatusManager {
-    if (!AwsAuthStatusManager.instance) {
-      AwsAuthStatusManager.instance = new AwsAuthStatusManager()
+    const slot = awsAuthStatusManagerByHost.of(getBootstrapSessionHost())
+    if (!slot.instance) {
+      slot.instance = new AwsAuthStatusManager()
     }
-    return AwsAuthStatusManager.instance
+    return slot.instance
   }
 
   getStatus(): AwsAuthStatus {
@@ -73,9 +78,10 @@ export class AwsAuthStatusManager {
 
   // Clean up for testing
   static reset(): void {
-    if (AwsAuthStatusManager.instance) {
-      AwsAuthStatusManager.instance.changed.clear()
-      AwsAuthStatusManager.instance = null
+    const slot = awsAuthStatusManagerByHost.peek(getBootstrapSessionHost())
+    if (slot?.instance) {
+      slot.instance.changed.clear()
+      slot.instance = null
     }
   }
 }

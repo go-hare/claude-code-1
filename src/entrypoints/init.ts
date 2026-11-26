@@ -2,7 +2,6 @@ import { profileCheckpoint } from '../utils/startupProfiler.js'
 import '../bootstrap/state.js'
 import '../utils/config.js'
 import type { Attributes, MetricOptions } from '@opentelemetry/api'
-import memoize from 'lodash-es/memoize.js'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import type { AttributedCounter } from '../bootstrap/state.js'
 import {
@@ -74,13 +73,14 @@ import { getTelemetryAttributes } from '../utils/telemetryAttributes.js'
 import { isSpareParked } from '../cli/spareClaim.js'
 import { setShellIfWindows } from '../utils/windowsPaths.js'
 import { initSentry } from '../utils/sentry.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { initUser } from '../utils/user.js'
 import { initLangfuse, shutdownLangfuse } from '../services/langfuse/index.js'
 import {
+  registerSystemThemeMirror,
   setAppCallbacks,
   setSpinnerReducedMotionGetter,
   setThemeConfigCallbacks,
-  subscribeSystemTheme,
 } from '@anthropic/ink'
 import { stopCapturingEarlyInput } from '../utils/earlyInput.js'
 import { setCachedSystemTheme } from '../utils/systemTheme.js'
@@ -89,26 +89,75 @@ import { getThemeSetting, saveThemeSetting } from '../utils/themeSetting.js'
 // densable Ns()=Ht.of(U().host) and gbo k("tengu_event_loop_stall",!1) live
 // inside Ink. Do not bind host or GB after load.
 
-// Ink owns the OSC 11 cache. Mirror it into src so resolveThemeSetting('auto')
-// sees the same value ThemeProvider paints.
-subscribeSystemTheme(setCachedSystemTheme)
+// Ink owns the OSC 11 cache. Mirror it into src across all hosts so
+// resolveThemeSetting('auto') sees the same value ThemeProvider paints.
+registerSystemThemeMirror(setCachedSystemTheme)
 
 // initialize1PEventLogging is dynamically imported to defer OpenTelemetry sdk-logs/resources
 
-// Track if telemetry has been initialized to prevent double initialization
-let telemetryInitialized = false
-let sessionCountRecorded = false
-// Official 2.1.326 (#333): Cowork cloud sessions hold org OTel export
-// (and `claude_code.session.count`) until the first turn arrives.
-let deferredTelemetryPending = false
-let firstTurnTelemetryReleased = false
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
+
+// Host-scoped telemetry initialization state (official 2.1.331 HostSlot)
+type InitTelemetryHostState = {
+  telemetryInitialized: boolean
+  sessionCountRecorded: boolean
+  // Official 2.1.326 (#333): Cowork cloud sessions hold org OTel export
+  // (and `claude_code.session.count`) until the first turn arrives.
+  deferredTelemetryPending: boolean
+  firstTurnTelemetryReleased: boolean
+  remoteManagedSettingsLoadPromise: Promise<void> | null
+  pendingTelemetryInitPromise: Promise<void> | null
+  telemetryInitializerHookForTesting: (() => Promise<void>) | null
+}
+
+const initTelemetryHostSlot = new HostSlot<InitTelemetryHostState>(() => ({
+  telemetryInitialized: false,
+  sessionCountRecorded: false,
+  deferredTelemetryPending: false,
+  firstTurnTelemetryReleased: false,
+  remoteManagedSettingsLoadPromise: null,
+  pendingTelemetryInitPromise: null,
+  telemetryInitializerHookForTesting: null,
+}))
+
+function getInitTelemetryHostState(): InitTelemetryHostState {
+  return initTelemetryHostSlot.of(getBootstrapSessionHost())
+}
 
 /** Official 2.1.328 `QDe` bounded remote-settings wait timeout before telemetry init. */
 export const REMOTE_SETTINGS_TELEMETRY_WAIT_TIMEOUT_MS = 10_000
-
-let remoteManagedSettingsLoadPromise: Promise<void> | null = null
-let pendingTelemetryInitPromise: Promise<void> | null = null
-let telemetryInitializerHookForTesting: (() => Promise<void>) | null = null
 
 const PROXY_ENV_KEYS = [
   'https_proxy',
@@ -199,17 +248,17 @@ export function validateStartupProxyConfig(
 export function registerRemoteManagedSettingsLoadPromise(
   promise: Promise<void> | null,
 ): void {
-  remoteManagedSettingsLoadPromise = promise
+  getInitTelemetryHostState().remoteManagedSettingsLoadPromise = promise
 }
 
 export function getPendingTelemetryInitPromiseForTesting(): Promise<void> | null {
-  return pendingTelemetryInitPromise
+  return getInitTelemetryHostState().pendingTelemetryInitPromise
 }
 
 export function setTelemetryInitializerForTesting(
   fn: (() => Promise<void>) | null,
 ): void {
-  telemetryInitializerHookForTesting = fn
+  getInitTelemetryHostState().telemetryInitializerHookForTesting = fn
 }
 
 const COWORK_CLOUD_ENTRYPOINTS = new Set([
@@ -233,7 +282,7 @@ export function isCoworkCloudEntrypoint(
 export function shouldDeferTelemetryUntilFirstTurn(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (firstTurnTelemetryReleased) return false
+  if (getInitTelemetryHostState().firstTurnTelemetryReleased) return false
   if (isEnvTruthy(env.CLAUDE_CODE_DISABLE_STARTUP_WORK_GATE)) return false
   if (isBetaTracingEnabled()) return false
   return isCoworkCloudEntrypoint(env)
@@ -245,11 +294,12 @@ export function shouldDeferTelemetryUntilFirstTurn(
  * ever receiving a turn never initialize OTel or emit `claude_code.session.count`.
  */
 export function releaseDeferredTelemetryForFirstTurn(): boolean {
-  firstTurnTelemetryReleased = true
-  if (!deferredTelemetryPending) {
+  const hostState = getInitTelemetryHostState()
+  hostState.firstTurnTelemetryReleased = true
+  if (!hostState.deferredTelemetryPending) {
     return false
   }
-  deferredTelemetryPending = false
+  hostState.deferredTelemetryPending = false
   logForDebugging(
     '[3P telemetry] First turn started — releasing deferred Cowork cloud telemetry init',
   )
@@ -263,39 +313,41 @@ export function releaseDeferredTelemetryForFirstTurn(): boolean {
 }
 
 export function isTelemetryDeferredForFirstTurn(): boolean {
-  return deferredTelemetryPending
+  return getInitTelemetryHostState().deferredTelemetryPending
 }
 
 /**
  * Official 2.1.319 (#1759): record `claude_code.session.count` at most once per
- * process. Parked `--await-claim` / `prewarm()` processes defer this until
+ * host. Parked `--await-claim` / `prewarm()` processes defer this until
  * `claim_session` binds the spare to a real session.
  */
 export function recordSessionCountMetricOnce(): boolean {
-  if (sessionCountRecorded) {
+  const hostState = getInitTelemetryHostState()
+  if (hostState.sessionCountRecorded) {
     return false
   }
   const counter = getSessionCounter()
   if (!counter) {
     return false
   }
-  sessionCountRecorded = true
+  hostState.sessionCountRecorded = true
   counter.add(1)
   return true
 }
 
 /** Test-only helper for `#1759`, `#333`, and remote-settings telemetry init tests. */
 export function resetSessionCountMetricForTesting(): void {
-  sessionCountRecorded = false
-  deferredTelemetryPending = false
-  firstTurnTelemetryReleased = false
-  telemetryInitialized = false
-  remoteManagedSettingsLoadPromise = null
-  pendingTelemetryInitPromise = null
-  telemetryInitializerHookForTesting = null
+  const hostState = getInitTelemetryHostState()
+  hostState.sessionCountRecorded = false
+  hostState.deferredTelemetryPending = false
+  hostState.firstTurnTelemetryReleased = false
+  hostState.telemetryInitialized = false
+  hostState.remoteManagedSettingsLoadPromise = null
+  hostState.pendingTelemetryInitPromise = null
+  hostState.telemetryInitializerHookForTesting = null
 }
 
-export const init = memoize(async (): Promise<void> => {
+export const init = memoizePerHost(async (): Promise<void> => {
   const initStartTime = Date.now()
   logForDiagnosticsNoPII('info', 'init_started')
   profileCheckpoint('init_function_start')
@@ -699,11 +751,12 @@ function didTelemetryTransportEnvChange(
 }
 
 async function waitForRemoteManagedSettingsSettlement(
+  hostState: InitTelemetryHostState,
   timeoutMs: number = REMOTE_SETTINGS_TELEMETRY_WAIT_TIMEOUT_MS,
 ): Promise<void> {
   const waits: Promise<unknown>[] = []
-  if (remoteManagedSettingsLoadPromise !== null) {
-    waits.push(remoteManagedSettingsLoadPromise)
+  if (hostState.remoteManagedSettingsLoadPromise !== null) {
+    waits.push(hostState.remoteManagedSettingsLoadPromise)
   }
   if (isPolicyLimitsEligible()) {
     waits.push(waitForPolicyLimitsToLoad())
@@ -722,7 +775,7 @@ async function waitForRemoteManagedSettingsSettlement(
       new Promise<void>(resolve => {
         // Also resolve early if remote settings status settles via state machine
         // when no explicit promise was provided.
-        if (remoteManagedSettingsLoadPromise === null) {
+        if (hostState.remoteManagedSettingsLoadPromise === null) {
           unsubStatus = onRemoteSettingsLoadStatusChanged(() => {
             if (getRemoteSettingsLoadStatus() !== undefined) {
               resolve()
@@ -754,10 +807,11 @@ async function waitForRemoteManagedSettingsSettlement(
 export function initializeTelemetryAfterTrust(opts?: {
   timeoutMs?: number
 }): void {
+  const hostState = getInitTelemetryHostState()
   // Official 2.1.326 (#333): Cowork cloud sessions hold OTel export until the
   // first turn so idle/unused sessions send nothing (including session.count).
   if (shouldDeferTelemetryUntilFirstTurn()) {
-    deferredTelemetryPending = true
+    hostState.deferredTelemetryPending = true
     logForDebugging(
       '[3P telemetry] Deferring OpenTelemetry init in Cowork cloud session until first turn',
     )
@@ -765,7 +819,8 @@ export function initializeTelemetryAfterTrust(opts?: {
   }
 
   const shouldWaitForRemote =
-    remoteManagedSettingsLoadPromise !== null || isPolicyLimitsEligible()
+    hostState.remoteManagedSettingsLoadPromise !== null ||
+    isPolicyLimitsEligible()
 
   if (shouldWaitForRemote) {
     if (getIsNonInteractiveSession() && isBetaTracingEnabled()) {
@@ -779,59 +834,64 @@ export function initializeTelemetryAfterTrust(opts?: {
     logForDebugging(
       '[3P telemetry] Waiting for remote managed settings fetch before telemetry init',
     )
-    pendingTelemetryInitPromise = waitForRemoteManagedSettingsSettlement(
-      opts?.timeoutMs ?? REMOTE_SETTINGS_TELEMETRY_WAIT_TIMEOUT_MS,
-    )
-      .then(async () => {
-        logForDebugging(
-          '[3P telemetry] Remote managed settings fetch settled, initializing telemetry',
-        )
-        const envBefore = snapshotTelemetryTransportEnv()
-        applyConfigEnvironmentVariables()
-        applyExtraCACertsFromConfig()
-        configureGlobalMTLS()
-        if (didTelemetryTransportEnvChange(envBefore)) {
-          try {
-            validateStartupProxyConfig()
-            configureGlobalAgents()
-          } catch (proxyErr) {
-            logForDebugging(
-              `[3P telemetry] Proxy reconfiguration skipped after remote settings: ${errorMessage(proxyErr)}`,
-              { level: 'error' },
-            )
+    hostState.pendingTelemetryInitPromise =
+      waitForRemoteManagedSettingsSettlement(
+        hostState,
+        opts?.timeoutMs ?? REMOTE_SETTINGS_TELEMETRY_WAIT_TIMEOUT_MS,
+      )
+        .then(async () => {
+          logForDebugging(
+            '[3P telemetry] Remote managed settings fetch settled, initializing telemetry',
+          )
+          const envBefore = snapshotTelemetryTransportEnv()
+          applyConfigEnvironmentVariables()
+          applyExtraCACertsFromConfig()
+          configureGlobalMTLS()
+          if (didTelemetryTransportEnvChange(envBefore)) {
+            try {
+              validateStartupProxyConfig()
+              configureGlobalAgents()
+            } catch (proxyErr) {
+              logForDebugging(
+                `[3P telemetry] Proxy reconfiguration skipped after remote settings: ${errorMessage(proxyErr)}`,
+                { level: 'error' },
+              )
+            }
           }
-        }
-        await doInitializeTelemetry()
-      })
-      .catch(error => {
-        logForDebugging(
-          `[3P telemetry] Telemetry init failed (remote settings path): ${errorMessage(error)}`,
-          { level: 'error' },
-        )
-      })
+          await doInitializeTelemetry()
+        })
+        .catch(error => {
+          logForDebugging(
+            `[3P telemetry] Telemetry init failed (remote settings path): ${errorMessage(error)}`,
+            { level: 'error' },
+          )
+        })
     return
   }
 
-  pendingTelemetryInitPromise = doInitializeTelemetry().catch(error => {
-    logForDebugging(
-      `[3P telemetry] Telemetry init failed: ${errorMessage(error)}`,
-      { level: 'error' },
-    )
-  })
+  hostState.pendingTelemetryInitPromise = doInitializeTelemetry().catch(
+    error => {
+      logForDebugging(
+        `[3P telemetry] Telemetry init failed: ${errorMessage(error)}`,
+        { level: 'error' },
+      )
+    },
+  )
 }
 
 async function doInitializeTelemetry(): Promise<void> {
-  if (telemetryInitialized) {
+  const hostState = getInitTelemetryHostState()
+  if (hostState.telemetryInitialized) {
     // Already initialized, nothing to do
     return
   }
 
-  if (telemetryInitializerHookForTesting !== null) {
-    telemetryInitialized = true
+  if (hostState.telemetryInitializerHookForTesting !== null) {
+    hostState.telemetryInitialized = true
     try {
-      await telemetryInitializerHookForTesting()
+      await hostState.telemetryInitializerHookForTesting()
     } catch (error) {
-      telemetryInitialized = false
+      hostState.telemetryInitialized = false
       throw error
     }
     return
@@ -860,12 +920,12 @@ async function doInitializeTelemetry(): Promise<void> {
   }
 
   // Set flag before init to prevent double initialization
-  telemetryInitialized = true
+  hostState.telemetryInitialized = true
   try {
     await setMeterState()
   } catch (error) {
     // Reset flag on failure so subsequent calls can retry
-    telemetryInitialized = false
+    hostState.telemetryInitialized = false
     throw error
   }
 }

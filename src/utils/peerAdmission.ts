@@ -8,6 +8,7 @@
 
 import { createHmac, randomBytes } from 'crypto'
 import type { PeerReceiptDropReason } from './peerReceipts.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 export type { PeerReceiptDropReason }
 import {
@@ -227,16 +228,39 @@ export function getPeerAdmissionLimits(): PeerAdmissionLimits {
   return getHarborKiteLimits()
 }
 
-/** Process-wide zo — densable `zo = z2r({}, WUt)`. */
-let sharedGuard: PeerAdmissionGuard | undefined
+type PeerAdmissionHostState = {
+  sharedGuard: PeerAdmissionGuard | undefined
+  sharedDesktopForwardGuard: DesktopForwardGuard | undefined
+  ownUdsHopToken: string | undefined
+  ownBridgeHopResolver: (() => string | undefined) | undefined
+  ownHopTokensProvider: (() => ReadonlySet<string>) | undefined
+}
 
+const peerAdmissionHostSlot = new HostSlot<PeerAdmissionHostState>(() => ({
+  sharedGuard: undefined,
+  sharedDesktopForwardGuard: undefined,
+  ownUdsHopToken: undefined,
+  ownBridgeHopResolver: undefined,
+  ownHopTokensProvider: undefined,
+}))
+
+function getPeerAdmissionHostState(): PeerAdmissionHostState {
+  return peerAdmissionHostSlot.of(getBootstrapSessionHost())
+}
+
+/** Per-host zo — densable `zo = z2r({}, WUt)`. */
 export function getPeerAdmissionGuard(): PeerAdmissionGuard {
-  return (sharedGuard ??= createPeerAdmissionGuard({}, getPeerAdmissionLimits))
+  const hostState = getPeerAdmissionHostState()
+  return (hostState.sharedGuard ??= createPeerAdmissionGuard(
+    {},
+    getPeerAdmissionLimits,
+  ))
 }
 
 export function resetPeerAdmissionGuardForTests(): void {
-  sharedGuard?.reset()
-  sharedGuard = undefined
+  const hostState = getPeerAdmissionHostState()
+  hostState.sharedGuard?.reset()
+  hostState.sharedGuard = undefined
 }
 
 export type DesktopForwardCheckResult =
@@ -289,16 +313,15 @@ export function createDesktopForwardGuard(
   }
 }
 
-let sharedDesktopForwardGuard: DesktopForwardGuard | undefined
-
 export function getDesktopForwardGuard(): DesktopForwardGuard {
-  return (sharedDesktopForwardGuard ??= createDesktopForwardGuard(
+  const hostState = getPeerAdmissionHostState()
+  return (hostState.sharedDesktopForwardGuard ??= createDesktopForwardGuard(
     getPeerAdmissionLimits,
   ))
 }
 
 export function resetDesktopForwardGuardForTests(): void {
-  sharedDesktopForwardGuard = undefined
+  getPeerAdmissionHostState().sharedDesktopForwardGuard = undefined
 }
 
 /**
@@ -395,18 +418,15 @@ export function resolveHostSessionIdForCrossSession(): string | undefined {
  * densable `q2r` / `jUt` / `spe` / `K2r`.
  * Test provider still replaces the whole set (hop-loop unit tests).
  */
-let ownUdsHopToken: string | undefined
-let ownBridgeHopResolver: (() => string | undefined) | undefined
-let ownHopTokensProvider: (() => ReadonlySet<string>) | undefined
 
 /** Gold `q2r(e)` — `e===void 0` clears; else `cBe(e)`. */
 export function setOwnUdsHopAddress(address: string | undefined): void {
-  ownUdsHopToken =
+  getPeerAdmissionHostState().ownUdsHopToken =
     address === undefined ? undefined : hashAddressToHopToken(address)
 }
 
 export function getOwnUdsHopToken(): string | undefined {
-  return ownUdsHopToken
+  return getPeerAdmissionHostState().ownUdsHopToken
 }
 
 /**
@@ -416,7 +436,7 @@ export function getOwnUdsHopToken(): string | undefined {
 export function setOwnBridgeHopAddressResolver(
   resolver: (() => string | undefined) | undefined,
 ): void {
-  ownBridgeHopResolver = resolver
+  getPeerAdmissionHostState().ownBridgeHopResolver = resolver
 }
 
 /** Gold `spe` — remote session id → `bridge:${id}` then HMAC in K2r. */
@@ -437,18 +457,20 @@ function remoteSessionHopAddress(): string | undefined {
 export function setOwnHopTokensProviderForTests(
   provider: (() => ReadonlySet<string>) | null,
 ): void {
-  ownHopTokensProvider = provider ?? undefined
+  const hostState = getPeerAdmissionHostState()
+  hostState.ownHopTokensProvider = provider ?? undefined
   if (provider === null) {
-    ownUdsHopToken = undefined
-    ownBridgeHopResolver = undefined
+    hostState.ownUdsHopToken = undefined
+    hostState.ownBridgeHopResolver = undefined
   }
 }
 
 export function getOwnHopTokens(): ReadonlySet<string> {
-  if (ownHopTokensProvider) return ownHopTokensProvider()
+  const hostState = getPeerAdmissionHostState()
+  if (hostState.ownHopTokensProvider) return hostState.ownHopTokensProvider()
   const tokens = new Set<string>()
-  if (ownUdsHopToken) tokens.add(ownUdsHopToken)
-  const bridge = ownBridgeHopResolver?.()
+  if (hostState.ownUdsHopToken) tokens.add(hostState.ownUdsHopToken)
+  const bridge = hostState.ownBridgeHopResolver?.()
   if (bridge) tokens.add(hashAddressToHopToken(bridge))
   const remote = remoteSessionHopAddress()
   if (remote) tokens.add(hashAddressToHopToken(remote))

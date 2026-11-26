@@ -79,6 +79,54 @@ import {
   SHELL_PRESSURE_SKIP_LOG_THROTTLE_MS,
   shouldRegisterShellPressureReap,
 } from './shellPressureReap.js';
+import {
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getActiveSubconversationFromAls,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  runWithSession,
+  runWithSubconversationContext,
+  type Session,
+  type SubconversationAlsContext,
+} from '../../utils/sessionRoot.js';
+
+type CapturedShellAls = {
+  session: Session | undefined;
+  subconversation: SubconversationAlsContext | undefined;
+};
+
+const shellAlsByCommand = new WeakMap<object, CapturedShellAls>();
+
+function captureCurrentShellAls(): CapturedShellAls {
+  return {
+    session: getActiveSessionFromAls(),
+    subconversation: getActiveSubconversationFromAls(),
+  };
+}
+
+function withCapturedShellAls<T>(captured: CapturedShellAls | undefined, fn: () => T): T {
+  if (captured === undefined) {
+    return fn();
+  }
+  const { session, subconversation } = captured;
+  if (session === undefined && subconversation === undefined) {
+    if (hasActiveSessionAls()) {
+      return exitSessionContext(fn);
+    }
+    return fn();
+  }
+  if (getActiveSessionFromAls() === session && getActiveSubconversationFromAls() === subconversation) {
+    return fn();
+  }
+  if (session === undefined) {
+    return exitSessionContext(() => runWithSubconversationContext(subconversation!, fn));
+  }
+  return runWithSession(session, () =>
+    subconversation !== undefined ? runWithSubconversationContext(subconversation, fn) : fn(),
+  );
+}
 
 /** Prefix that identifies a LocalShellTask summary to the UI collapse transform. */
 export const BACKGROUND_BASH_SUMMARY_PREFIX = 'Background command ';
@@ -185,6 +233,7 @@ function startStallWatchdog(
   agentId?: AgentId,
 ): () => void {
   if (kind === 'monitor') return () => {};
+  const capturedAls = captureCurrentShellAls();
   const outputPath = getTaskOutputPath(taskId);
   let lastSize = 0;
   let lastGrowth = Date.now();
@@ -212,16 +261,19 @@ function startStallWatchdog(
             // overlapping tick's callback sees cancelled=true and bails.
             cancelled = true;
             clearInterval(timer);
-            const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>` : '';
-            const summary = truncateNotificationSummary(
-              `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" appears to be waiting for interactive input`,
-            );
-            const cleanedTail = stripAnsi(content).trimEnd();
-            // No <status> tag — print.ts treats <status> as a terminal
-            // signal and an unknown value falls through to 'completed',
-            // falsely closing the task for SDK consumers. Statusless
-            // notifications are skipped by the SDK emitter (progress ping).
-            const message = `<${TASK_NOTIFICATION_TAG}>
+            withCapturedShellAls(capturedAls, () => {
+              const toolUseIdLine = toolUseId
+                ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>`
+                : '';
+              const summary = truncateNotificationSummary(
+                `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" appears to be waiting for interactive input`,
+              );
+              const cleanedTail = stripAnsi(content).trimEnd();
+              // No <status> tag — print.ts treats <status> as a terminal
+              // signal and an unknown value falls through to 'completed',
+              // falsely closing the task for SDK consumers. Statusless
+              // notifications are skipped by the SDK emitter (progress ping).
+              const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
 <${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
@@ -230,17 +282,18 @@ Last output:
 ${cleanedTail}
 
 The command is likely blocked on an interactive prompt. Stop this task and re-run with piped input (e.g., \`echo y | command\`) or a non-interactive flag if one exists.`;
-            enqueuePendingNotification(
-              {
-                value: message,
-                mode: 'task-notification',
-                skipAttachments: true,
-                priority: 'next',
-                agentId: agentId ?? getMainThreadAgentId(),
-              },
-              { turnAttribution: 'inherit' },
-            );
-            leftoverY('task_local_shell_stall_detected');
+              enqueuePendingNotification(
+                {
+                  value: message,
+                  mode: 'task-notification',
+                  skipAttachments: true,
+                  priority: 'next',
+                  agentId: agentId ?? getMainThreadAgentId(),
+                },
+                { turnAttribution: 'inherit' },
+              );
+              leftoverY('task_local_shell_stall_detected');
+            });
           },
           () => {},
         );
@@ -311,6 +364,7 @@ type QuietCheckinWatch = {
   agentId?: AgentId;
   owner: QuietShellOwnerState;
   queue: MessageQueueInstance;
+  capturedAls: CapturedShellAls;
   lastSize: number;
   lastOutputAt: number;
   getOutputSize: (taskId: string) => Promise<number>;
@@ -331,17 +385,37 @@ type QuietShellOwnerState = {
   previousCheckinAt: number;
 };
 
-const quietShellOwners = new Map<AgentId, QuietShellOwnerState>();
+const allQuietShellOwnerMaps = new Set<WeakRef<Map<AgentId, QuietShellOwnerState>>>();
+const quietShellOwnersByHost = new HostSlot<Map<AgentId, QuietShellOwnerState>>(() => {
+  const map = new Map<AgentId, QuietShellOwnerState>();
+  if (allQuietShellOwnerMaps.size > 64) {
+    for (const ref of allQuietShellOwnerMaps) {
+      if (ref.deref() === undefined) {
+        allQuietShellOwnerMaps.delete(ref);
+      }
+    }
+  }
+  allQuietShellOwnerMaps.add(new WeakRef(map));
+  return map;
+});
 
 export function resetQuietCheckinOwnersForTests(): void {
-  for (const owner of quietShellOwners.values()) {
-    if (owner.timer !== undefined) clearInterval(owner.timer);
-    owner.watches.clear();
+  for (const ref of allQuietShellOwnerMaps) {
+    const map = ref.deref();
+    if (map === undefined) {
+      allQuietShellOwnerMaps.delete(ref);
+      continue;
+    }
+    for (const owner of map.values()) {
+      if (owner.timer !== undefined) clearInterval(owner.timer);
+      owner.watches.clear();
+    }
+    map.clear();
   }
-  quietShellOwners.clear();
 }
 
 function getQuietShellOwner(agentId: AgentId): QuietShellOwnerState {
+  const quietShellOwners = quietShellOwnersByHost.of(getBootstrapSessionHost());
   const existing = quietShellOwners.get(agentId);
   if (existing !== undefined) return existing;
   const mainId = getMainThreadAgentId();
@@ -479,19 +553,24 @@ This is a check-in, not a completion. The command may be working quietly, or it 
 function pollQuietCheckinOwner(owner: QuietShellOwnerState): void {
   const watches = [...owner.watches];
   if (watches.length === 0) return;
-  const thresholdMs = watches[0]!.getThresholdMs();
+  const capturedAls = watches[0]!.capturedAls;
+  const thresholdMs = withCapturedShellAls(capturedAls, () => watches[0]!.getThresholdMs());
   if (thresholdMs <= 0) {
     watches.forEach(detachQuietWatch);
     return;
   }
-  void Promise.all(watches.map(w => w.getOutputSize(w.taskId).catch(() => undefined))).then(sizes => {
-    try {
-      evaluateQuietCheckinTick(owner, watches, sizes);
-    } catch (err) {
-      watches.forEach(detachQuietWatch);
-      leftoverM('task_local_shell_quiet_checkin', 'threw');
-      logError(err);
-    }
+  void Promise.all(
+    watches.map(w => withCapturedShellAls(w.capturedAls, () => w.getOutputSize(w.taskId)).catch(() => undefined)),
+  ).then(sizes => {
+    withCapturedShellAls(capturedAls, () => {
+      try {
+        evaluateQuietCheckinTick(owner, watches, sizes);
+      } catch (err) {
+        watches.forEach(detachQuietWatch);
+        leftoverM('task_local_shell_quiet_checkin', 'threw');
+        logError(err);
+      }
+    });
   });
 }
 
@@ -520,6 +599,7 @@ export function startQuietCheckin(
   },
 ): () => void {
   if (opts.kind === 'monitor') return () => {};
+  const capturedAls = captureCurrentShellAls();
   const getThresholdMs = deps?.thresholdMs !== undefined ? () => deps.thresholdMs! : getQuietCheckinThresholdMs;
   const thresholdMs = getThresholdMs();
   if (thresholdMs <= 0) return () => {};
@@ -539,6 +619,7 @@ export function startQuietCheckin(
     agentId: opts.agentId,
     owner,
     queue,
+    capturedAls,
     lastSize: 0,
     lastOutputAt: now,
     getOutputSize: deps?.getOutputSize ?? getTaskOutputSize,
@@ -557,12 +638,14 @@ export function startQuietCheckin(
   }
 
   return () => {
-    detachQuietWatch(watch);
-    const removed = queue.removeByFilter(cmd => isQuietCheckinCommandForOwner(cmd, owner));
-    if (removed.length > 0) {
-      owner.checkins = Math.max(0, owner.checkins - 1);
-      owner.lastCheckinAt = owner.previousCheckinAt;
-    }
+    withCapturedShellAls(capturedAls, () => {
+      detachQuietWatch(watch);
+      const removed = queue.removeByFilter(cmd => isQuietCheckinCommandForOwner(cmd, owner));
+      if (removed.length > 0) {
+        owner.checkins = Math.max(0, owner.checkins - 1);
+        owner.lastCheckinAt = owner.previousCheckinAt;
+      }
+    });
   };
 }
 
@@ -588,6 +671,7 @@ export function installShellPressureReap(
     checkHostMemory?: () => { scarce: boolean; detail: string };
   },
 ): () => void {
+  const capturedAls = captureCurrentShellAls();
   if (
     !shouldRegisterShellPressureReap({
       agentId,
@@ -606,69 +690,73 @@ export function installShellPressureReap(
   const skipLoggedAt = new Map<string, number>();
 
   const onPressure = (level?: string): void => {
-    try {
-      const task = registry.get(taskId);
-      if (
-        !isLocalShellTask(task) ||
-        task.status !== 'running' ||
-        task.notified ||
-        (task.shellCommand && task.shellCommand.status !== 'backgrounded')
-      ) {
-        return;
-      }
-      const now = testOverrides?.getNow ? testOverrides.getNow() : Date.now();
-      const lastInteraction = testOverrides?.getLastInteraction
-        ? testOverrides.getLastInteraction()
-        : getLastInteractionTime();
-      const decision = evaluateMemoryPressureReap({
-        level,
-        status: task.status,
-        notified: task.notified,
-        shellCommandStatus: task.shellCommand?.status,
-        lastInteractionTime: lastInteraction,
-        now,
-        mainLoopBusy: testOverrides?.isMainLoopBusy ? testOverrides.isMainLoopBusy() : getMainLoopBusy(),
-        hasActiveAgentTasks: hasActiveAgentishTasks(registry.all()),
-        lastPressureReapAt: getLastPressureReapAt(),
-        taskStartTime: task.startTime,
-        checkHostMemory: testOverrides?.checkHostMemory,
-      });
-      if (!decision.shouldReap) {
-        if (decision.skipReason !== undefined) {
-          const prev = skipLoggedAt.get(decision.skipReason);
-          if (prev === undefined || now - prev >= SHELL_PRESSURE_SKIP_LOG_THROTTLE_MS) {
-            skipLoggedAt.set(decision.skipReason, now);
-            logForDebugging(
-              `LocalShellTask ${taskId}: memory-pressure reap skipped: ${decision.skipReason}${
-                decision.memoryDetail ? ` (${decision.memoryDetail})` : ''
-              }`,
-            );
-          }
+    withCapturedShellAls(capturedAls, () => {
+      try {
+        const task = registry.get(taskId);
+        if (
+          !isLocalShellTask(task) ||
+          task.status !== 'running' ||
+          task.notified ||
+          (task.shellCommand && task.shellCommand.status !== 'backgrounded')
+        ) {
+          return;
         }
-        return;
+        const now = testOverrides?.getNow ? testOverrides.getNow() : Date.now();
+        const lastInteraction = testOverrides?.getLastInteraction
+          ? testOverrides.getLastInteraction()
+          : getLastInteractionTime();
+        const decision = evaluateMemoryPressureReap({
+          level,
+          status: task.status,
+          notified: task.notified,
+          shellCommandStatus: task.shellCommand?.status,
+          lastInteractionTime: lastInteraction,
+          now,
+          mainLoopBusy: testOverrides?.isMainLoopBusy ? testOverrides.isMainLoopBusy() : getMainLoopBusy(),
+          hasActiveAgentTasks: hasActiveAgentishTasks(registry.all()),
+          lastPressureReapAt: getLastPressureReapAt(),
+          taskStartTime: task.startTime,
+          checkHostMemory: testOverrides?.checkHostMemory,
+        });
+        if (!decision.shouldReap) {
+          if (decision.skipReason !== undefined) {
+            const prev = skipLoggedAt.get(decision.skipReason);
+            if (prev === undefined || now - prev >= SHELL_PRESSURE_SKIP_LOG_THROTTLE_MS) {
+              skipLoggedAt.set(decision.skipReason, now);
+              logForDebugging(
+                `LocalShellTask ${taskId}: memory-pressure reap skipped: ${decision.skipReason}${
+                  decision.memoryDetail ? ` (${decision.memoryDetail})` : ''
+                }`,
+              );
+            }
+          }
+          return;
+        }
+        logForDebugging(
+          `LocalShellTask ${taskId}: reaped under critical memory pressure after ${Math.floor((now - lastInteraction) / 60_000)}m idle (${decision.memoryDetail})`,
+        );
+        leftoverY('task_local_shell_pressure_reap');
+        setLastPressureReapAt(now);
+        // Official F9r then t5e — notify first, then kill.
+        void enqueueShellNotification(
+          taskId,
+          description,
+          'killed',
+          undefined,
+          registry,
+          toolUseId,
+          kind ?? 'bash',
+          agentId,
+          'memory_pressure',
+          undefined,
+          capturedAls,
+        );
+        killTask(taskId, registry);
+      } catch (err) {
+        leftoverM('task_local_shell_pressure_reap', 'threw');
+        logError(err);
       }
-      logForDebugging(
-        `LocalShellTask ${taskId}: reaped under critical memory pressure after ${Math.floor((now - lastInteraction) / 60_000)}m idle (${decision.memoryDetail})`,
-      );
-      leftoverY('task_local_shell_pressure_reap');
-      setLastPressureReapAt(now);
-      // Official F9r then t5e — notify first, then kill.
-      void enqueueShellNotification(
-        taskId,
-        description,
-        'killed',
-        undefined,
-        registry,
-        toolUseId,
-        kind ?? 'bash',
-        agentId,
-        'memory_pressure',
-      );
-      killTask(taskId, registry);
-    } catch (err) {
-      leftoverM('task_local_shell_pressure_reap', 'threw');
-      logError(err);
-    }
+    });
   };
 
   proc.on('memoryPressure', onPressure);
@@ -691,59 +779,66 @@ export function installBackgroundDeadline(
   agentId: AgentId | undefined,
   requestedTimeoutMs?: number,
 ): (outcome?: string) => void {
+  const capturedAls = captureCurrentShellAls();
   const startedAt = Date.now();
   const deadlineMs = backgroundShellDeadlineMs(requestedTimeoutMs);
   const bag: { cause?: BashTaskStopCause } = {};
   let timer: ReturnType<typeof setTimeout> | undefined;
   if (deadlineMs !== undefined) {
     timer = setTimeout(() => {
-      try {
-        // densable Cvr: re-check gUr at fire.
-        if (!isBackgroundShellDeadlineEnabled()) return;
-        const task = registry.get(taskId);
-        if (
-          !isLocalShellTask(task) ||
-          task.status !== 'running' ||
-          task.notified ||
-          task.shellCommand?.status !== 'backgrounded'
-        ) {
-          return;
-        }
-        bag.cause = 'deadline';
-        // densable Cvr → Rmn: try notify, finally kill.
+      withCapturedShellAls(capturedAls, () => {
         try {
-          void enqueueShellNotification(
-            taskId,
-            description,
-            'killed',
-            undefined,
-            registry,
-            toolUseId,
-            kind ?? 'bash',
-            agentId,
-            'deadline',
-          );
-        } finally {
-          killTask(taskId, registry);
+          // densable Cvr: re-check gUr at fire.
+          if (!isBackgroundShellDeadlineEnabled()) return;
+          const task = registry.get(taskId);
+          if (
+            !isLocalShellTask(task) ||
+            task.status !== 'running' ||
+            task.notified ||
+            task.shellCommand?.status !== 'backgrounded'
+          ) {
+            return;
+          }
+          bag.cause = 'deadline';
+          // densable Cvr → Rmn: try notify, finally kill.
+          try {
+            void enqueueShellNotification(
+              taskId,
+              description,
+              'killed',
+              undefined,
+              registry,
+              toolUseId,
+              kind ?? 'bash',
+              agentId,
+              'deadline',
+              undefined,
+              capturedAls,
+            );
+          } finally {
+            killTask(taskId, registry);
+          }
+          leftoverY('task_local_shell_background_deadline');
+          logForDebugging(`LocalShellTask ${taskId}: stopped at its ${deadlineMs}ms background deadline`);
+        } catch (err) {
+          leftoverM('task_local_shell_background_deadline', 'threw');
+          logError(err);
         }
-        leftoverY('task_local_shell_background_deadline');
-        logForDebugging(`LocalShellTask ${taskId}: stopped at its ${deadlineMs}ms background deadline`);
-      } catch (err) {
-        leftoverM('task_local_shell_background_deadline', 'threw');
-        logError(err);
-      }
+      });
     }, deadlineMs);
     timer.unref();
   }
   return outcome => {
     if (timer !== undefined) clearTimeout(timer);
-    logEvent('tengu_background_shell_settled', {
-      elapsed_ms: Date.now() - startedAt,
-      requested_timeout_ms: requestedTimeoutMs ?? 0,
-      deadline_ms: deadlineMs ?? 0,
-      outcome: (bag.cause ? 'killed' : (outcome ?? '')) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      stop_cause: (bag.cause ?? '') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      subagent_owned: agentId !== undefined,
+    withCapturedShellAls(capturedAls, () => {
+      logEvent('tengu_background_shell_settled', {
+        elapsed_ms: Date.now() - startedAt,
+        requested_timeout_ms: requestedTimeoutMs ?? 0,
+        deadline_ms: deadlineMs ?? 0,
+        outcome: (bag.cause ? 'killed' : (outcome ?? '')) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        stop_cause: (bag.cause ?? '') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        subagent_owned: agentId !== undefined,
+      });
     });
   };
 }
@@ -828,7 +923,29 @@ export async function enqueueShellNotification(
   agentId?: AgentId,
   stopCause?: BashTaskStopCause,
   exitNote?: string,
+  capturedAls?: CapturedShellAls,
 ): Promise<ShellTerminalNotification | undefined> {
+  if (
+    capturedAls !== undefined &&
+    (getActiveSessionFromAls() !== capturedAls.session ||
+      getActiveSubconversationFromAls() !== capturedAls.subconversation)
+  ) {
+    return withCapturedShellAls(capturedAls, () =>
+      enqueueShellNotification(
+        taskId,
+        description,
+        status,
+        exitCode,
+        registry,
+        toolUseId,
+        kind,
+        agentId,
+        stopCause,
+        exitNote,
+        capturedAls,
+      ),
+    );
+  }
   // Atomically check and set notified flag to prevent duplicate notifications.
   // If the task was already marked as notified (e.g., by TaskStopTool), skip
   // enqueueing to avoid sending redundant messages to the model.
@@ -1014,6 +1131,10 @@ export async function spawnShellTask(
 ): Promise<ShellTaskHandle> {
   const { command, description, shellCommand, toolUseId, agentId, kind, timeout, innerCall, shell, stopsOnExit } =
     input as typeof input & { stopsOnExit?: boolean };
+  const capturedAls = shellAlsByCommand.get(shellCommand) ?? captureCurrentShellAls();
+  if (!shellAlsByCommand.has(shellCommand)) {
+    shellAlsByCommand.set(shellCommand, capturedAls);
+  }
   const { setAppState, getAppState } = context;
   const registry = createTaskRegistry(getAppState, setAppState);
 
@@ -1022,7 +1143,9 @@ export async function spawnShellTask(
   const taskId = taskOutput.taskId;
 
   const unregisterCleanup = registerCleanup(async () => {
-    killTask(taskId, registry);
+    withCapturedShellAls(capturedAls, () => {
+      killTask(taskId, registry);
+    });
   });
 
   const taskState: LocalShellTaskState = {
@@ -1073,52 +1196,55 @@ export async function spawnShellTask(
     agentId,
   });
 
-  const settled = shellCommand.result.then(async result => {
-    cancelStallWatchdog();
-    disposeQuietCheckin();
-    disposePressureReap();
-    await flushAndCleanup(shellCommand);
-    let wasKilled = false;
-    let settledExit = interpretShellExitResult(result, shell !== undefined ? { shell, command } : undefined);
+  const settled = shellCommand.result.then(result =>
+    withCapturedShellAls(capturedAls, async () => {
+      cancelStallWatchdog();
+      disposeQuietCheckin();
+      disposePressureReap();
+      await flushAndCleanup(shellCommand);
+      let wasKilled = false;
+      let settledExit = interpretShellExitResult(result, shell !== undefined ? { shell, command } : undefined);
 
-    updateTaskState<LocalShellTaskState>(taskId, setAppState, task => {
-      if (task.status === 'killed') {
-        wasKilled = true;
-        return task;
-      }
-      settledExit = interpretShellExitResult(result, task);
+      updateTaskState<LocalShellTaskState>(taskId, setAppState, task => {
+        if (task.status === 'killed') {
+          wasKilled = true;
+          return task;
+        }
+        settledExit = interpretShellExitResult(result, task);
 
-      return {
-        ...task,
-        status: settledExit.status,
-        result: { code: result.code, interrupted: result.interrupted },
-        shellCommand: null,
-        unregisterCleanup: undefined,
-        endTime: Date.now(),
-      };
-    });
+        return {
+          ...task,
+          status: settledExit.status,
+          result: { code: result.code, interrupted: result.interrupted },
+          shellCommand: null,
+          unregisterCleanup: undefined,
+          endTime: Date.now(),
+        };
+      });
 
-    const finalStatus = wasKilled ? 'killed' : settledExit.status;
-    const terminalNotification = await enqueueShellNotification(
-      taskId,
-      description,
-      finalStatus,
-      result.code,
-      registry,
-      toolUseId,
-      kind,
-      agentId,
-      wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
-      wasKilled ? undefined : settledExit.exitNote,
-    );
+      const finalStatus = wasKilled ? 'killed' : settledExit.status;
+      const terminalNotification = await enqueueShellNotification(
+        taskId,
+        description,
+        finalStatus,
+        result.code,
+        registry,
+        toolUseId,
+        kind,
+        agentId,
+        wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
+        wasKilled ? undefined : settledExit.exitNote,
+        capturedAls,
+      );
 
-    // densable bXi: l?.() releaseBgCap after notify (tB bash|monitor:id)
-    releaseShellKeepalive();
-    disposeDeadline(finalStatus);
+      // densable bXi: l?.() releaseBgCap after notify (tB bash|monitor:id)
+      releaseShellKeepalive();
+      disposeDeadline(finalStatus);
 
-    void evictTaskOutput(taskId);
-    return { terminalNotification };
-  });
+      void evictTaskOutput(taskId);
+      return { terminalNotification };
+    }),
+  );
 
   return {
     taskId,
@@ -1144,12 +1270,18 @@ export function registerForeground(
   getAppState: () => AppState,
 ): string {
   const { command, description, shellCommand, agentId, innerCall, shell, onlyWaitsByLooking } = input;
+  const capturedAls = captureCurrentShellAls();
+  if (!shellAlsByCommand.has(shellCommand)) {
+    shellAlsByCommand.set(shellCommand, capturedAls);
+  }
 
   const taskId = shellCommand.taskOutput.taskId;
 
   const unregisterCleanup = registerCleanup(async () => {
     // densable zN(id, Xm) — kill always has registry. Production callers pass getAppState.
-    killTask(taskId, createTaskRegistry(getAppState, setAppState));
+    withCapturedShellAls(capturedAls, () => {
+      killTask(taskId, createTaskRegistry(getAppState, setAppState));
+    });
   });
 
   const taskState: LocalShellTaskState = {
@@ -1191,102 +1323,111 @@ export function backgroundTask(
   }
 
   const shellCommand = task.shellCommand;
+  const capturedAls = shellAlsByCommand.get(shellCommand) ?? captureCurrentShellAls();
+  if (!shellAlsByCommand.has(shellCommand)) {
+    shellAlsByCommand.set(shellCommand, capturedAls);
+  }
   const description = task.description;
   const { toolUseId, kind, agentId } = task;
 
-  // Transition to backgrounded — TaskOutput continues receiving data automatically
-  // densable Tsn: background(e, { capMs: fkd(agentId) }) — Ctrl+B same cap as spawn
-  if (
-    !shellCommand.background(taskId, {
-      capMs: resolveSubagentBgShellCapMs(agentId),
-    })
-  ) {
-    return false;
-  }
-
-  let didBackground = false;
-  registry.update(taskId, prevTask => {
-    if (!isLocalShellTask(prevTask) || prevTask.isBackgrounded) {
-      return prevTask;
+  return withCapturedShellAls(capturedAls, () => {
+    // Transition to backgrounded — TaskOutput continues receiving data automatically
+    // densable Tsn: background(e, { capMs: fkd(agentId) }) — Ctrl+B same cap as spawn
+    if (
+      !shellCommand.background(taskId, {
+        capMs: resolveSubagentBgShellCapMs(agentId),
+      })
+    ) {
+      return false;
     }
-    didBackground = true;
-    return { ...prevTask, isBackgrounded: true, ...extras };
-  });
-  // densable `_un` s.update → updateTaskState already emits task_updated.
 
-  const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
-  const disposeQuietCheckin = startQuietCheckin({
-    taskId,
-    description,
-    taskRegistry: registry,
-    toolUseId,
-    kind,
-    agentId,
-  });
-
-  // densable xmn on Ctrl+B / tNr: pressure + h9n(undefined)
-  const disposePressureReap = installShellPressureReap(taskId, description, registry, toolUseId, kind, agentId);
-  const disposeDeadline = installBackgroundDeadline(taskId, description, registry, toolUseId, kind, agentId);
-
-  // densable Ovu on mid-bg: Gge only once the shell is backgrounded
-  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, kind, registry);
-
-  // Set up result handler
-  void shellCommand.result.then(async result => {
-    cancelStallWatchdog();
-    disposeQuietCheckin();
-    disposePressureReap();
-    await flushAndCleanup(shellCommand);
-    let wasKilled = false;
-    let cleanupFn: (() => void) | undefined;
-    let settledExit = interpretShellExitResult(result, task);
-
-    registry.update<LocalShellTaskState>(taskId, t => {
-      if (t.status === 'killed') {
-        wasKilled = true;
-        return t;
+    let didBackground = false;
+    registry.update(taskId, prevTask => {
+      if (!isLocalShellTask(prevTask) || prevTask.isBackgrounded) {
+        return prevTask;
       }
-      settledExit = interpretShellExitResult(result, t);
-
-      // Capture cleanup function to call outside of updater
-      cleanupFn = t.unregisterCleanup;
-
-      return {
-        ...t,
-        status: settledExit.status,
-        result: { code: result.code, interrupted: result.interrupted },
-        shellCommand: null,
-        unregisterCleanup: undefined,
-        endTime: Date.now(),
-      };
+      didBackground = true;
+      return { ...prevTask, isBackgrounded: true, ...extras };
     });
+    // densable `_un` s.update → updateTaskState already emits task_updated.
 
-    // Call cleanup outside of the state updater (avoid side effects in updater)
-    cleanupFn?.();
-
-    const finalStatus = wasKilled ? 'killed' : settledExit.status;
-    await enqueueShellNotification(
+    const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
+    const disposeQuietCheckin = startQuietCheckin({
       taskId,
       description,
-      finalStatus,
-      result.code,
-      registry,
+      taskRegistry: registry,
       toolUseId,
       kind,
       agentId,
-      wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
-      wasKilled ? undefined : settledExit.exitNote,
+    });
+
+    // densable xmn on Ctrl+B / tNr: pressure + h9n(undefined)
+    const disposePressureReap = installShellPressureReap(taskId, description, registry, toolUseId, kind, agentId);
+    const disposeDeadline = installBackgroundDeadline(taskId, description, registry, toolUseId, kind, agentId);
+
+    // densable Ovu on mid-bg: Gge only once the shell is backgrounded
+    const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, kind, registry);
+
+    // Set up result handler
+    void shellCommand.result.then(result =>
+      withCapturedShellAls(capturedAls, async () => {
+        cancelStallWatchdog();
+        disposeQuietCheckin();
+        disposePressureReap();
+        await flushAndCleanup(shellCommand);
+        let wasKilled = false;
+        let cleanupFn: (() => void) | undefined;
+        let settledExit = interpretShellExitResult(result, task);
+
+        registry.update<LocalShellTaskState>(taskId, t => {
+          if (t.status === 'killed') {
+            wasKilled = true;
+            return t;
+          }
+          settledExit = interpretShellExitResult(result, t);
+
+          // Capture cleanup function to call outside of updater
+          cleanupFn = t.unregisterCleanup;
+
+          return {
+            ...t,
+            status: settledExit.status,
+            result: { code: result.code, interrupted: result.interrupted },
+            shellCommand: null,
+            unregisterCleanup: undefined,
+            endTime: Date.now(),
+          };
+        });
+
+        // Call cleanup outside of the state updater (avoid side effects in updater)
+        cleanupFn?.();
+
+        const finalStatus = wasKilled ? 'killed' : settledExit.status;
+        await enqueueShellNotification(
+          taskId,
+          description,
+          finalStatus,
+          result.code,
+          registry,
+          toolUseId,
+          kind,
+          agentId,
+          wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
+          wasKilled ? undefined : settledExit.exitNote,
+          capturedAls,
+        );
+
+        releaseShellKeepalive();
+        disposeDeadline(finalStatus);
+        void evictTaskOutput(taskId);
+      }),
     );
 
-    releaseShellKeepalive();
-    disposeDeadline(finalStatus);
-    void evictTaskOutput(taskId);
+    // Official densable NZ6 returns true after shell.background succeeds; if
+    // AppState was already backgrounded (race), still true — shell left FG.
+    // Prefer reporting actual state flip for Host background_tasks response.
+    return didBackground;
   });
-
-  // Official densable NZ6 returns true after shell.background succeeds; if
-  // AppState was already backgrounded (race), still true — shell left FG.
-  // Prefer reporting actual state flip for Host background_tasks response.
-  return didBackground;
 }
 
 /**
@@ -1382,124 +1523,140 @@ export function backgroundExistingForegroundTask(
   toolUseId: string | undefined,
   getAppState: () => AppState,
 ): boolean {
-  // Peek agentId before background so densable fkd cap can arm on auto-bg too.
-  // densable YP/xmn always have Xm; production callers pass getAppState.
-  let agentId: AgentId | undefined;
-  const peek = getAppState().tasks[taskId];
-  if (isLocalShellTask(peek)) {
-    agentId = peek.agentId;
+  const capturedAls = shellAlsByCommand.get(shellCommand) ?? captureCurrentShellAls();
+  if (!shellAlsByCommand.has(shellCommand)) {
+    shellAlsByCommand.set(shellCommand, capturedAls);
   }
-
-  if (
-    !shellCommand.background(taskId, {
-      capMs: resolveSubagentBgShellCapMs(agentId),
-    })
-  ) {
-    return false;
-  }
-
-  let didBackground = false;
-  setAppState(prev => {
-    const prevTask = prev.tasks[taskId];
-    if (!isLocalShellTask(prevTask) || prevTask.isBackgrounded) {
-      return prev;
+  return withCapturedShellAls(capturedAls, () => {
+    // Peek agentId before background so densable fkd cap can arm on auto-bg too.
+    // densable YP/xmn always have Xm; production callers pass getAppState.
+    let agentId: AgentId | undefined;
+    const peek = getAppState().tasks[taskId];
+    if (isLocalShellTask(peek)) {
+      agentId = peek.agentId;
     }
-    agentId = prevTask.agentId;
-    didBackground = true;
-    return {
-      ...prev,
-      tasks: {
-        ...prev.tasks,
-        [taskId]: { ...prevTask, isBackgrounded: true },
-      },
-    };
-  });
-  // Official 2.1 task_updated only when state actually flipped.
-  if (didBackground) {
-    try {
-      const { emitTaskUpdatedSdk } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
-      emitTaskUpdatedSdk(taskId, { is_backgrounded: true });
-    } catch {
-      // optional
+
+    if (
+      !shellCommand.background(taskId, {
+        capMs: resolveSubagentBgShellCapMs(agentId),
+      })
+    ) {
+      return false;
     }
-  }
 
-  const cancelStallWatchdog = startStallWatchdog(taskId, description, undefined, toolUseId, agentId);
-
-  // Official YJn → $xu: pressure reap on auto-backgrounded foreground tasks
-  // densable xmn/Ovu always have Xm — do not skip Gge when owner keepalive should attach.
-  const autoBgRegistry = createTaskRegistry(getAppState, setAppState);
-  const disposeQuietCheckin = startQuietCheckin({
-    taskId,
-    description,
-    taskRegistry: autoBgRegistry,
-    toolUseId,
-    agentId,
-  });
-  const disposePressureReap = installShellPressureReap(
-    taskId,
-    description,
-    autoBgRegistry,
-    toolUseId,
-    undefined,
-    agentId,
-  );
-  const disposeDeadline = installBackgroundDeadline(taskId, description, autoBgRegistry, toolUseId, undefined, agentId);
-
-  // densable Ovu on auto-bg: YP(agentId, bash:id, Xm) once backgrounded
-  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, undefined, autoBgRegistry);
-
-  // Set up result handler (mirrors backgroundTask's handler)
-  void shellCommand.result.then(async result => {
-    cancelStallWatchdog();
-    disposeQuietCheckin();
-    disposePressureReap();
-    await flushAndCleanup(shellCommand);
-    let wasKilled = false;
-    let cleanupFn: (() => void) | undefined;
-    let settledExit = interpretShellExitResult(result, isLocalShellTask(peek) ? peek : undefined);
-
-    updateTaskState<LocalShellTaskState>(taskId, setAppState, t => {
-      if (t.status === 'killed') {
-        wasKilled = true;
-        return t;
+    let didBackground = false;
+    setAppState(prev => {
+      const prevTask = prev.tasks[taskId];
+      if (!isLocalShellTask(prevTask) || prevTask.isBackgrounded) {
+        return prev;
       }
-      settledExit = interpretShellExitResult(result, t);
-      cleanupFn = t.unregisterCleanup;
+      agentId = prevTask.agentId;
+      didBackground = true;
       return {
-        ...t,
-        status: settledExit.status,
-        result: { code: result.code, interrupted: result.interrupted },
-        shellCommand: null,
-        unregisterCleanup: undefined,
-        endTime: Date.now(),
+        ...prev,
+        tasks: {
+          ...prev.tasks,
+          [taskId]: { ...prevTask, isBackgrounded: true },
+        },
       };
     });
+    // Official 2.1 task_updated only when state actually flipped.
+    if (didBackground) {
+      try {
+        const { emitTaskUpdatedSdk } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
+        emitTaskUpdatedSdk(taskId, { is_backgrounded: true });
+      } catch {
+        // optional
+      }
+    }
 
-    cleanupFn?.();
+    const cancelStallWatchdog = startStallWatchdog(taskId, description, undefined, toolUseId, agentId);
 
-    const finalStatus = wasKilled ? 'killed' : settledExit.status;
-    await enqueueShellNotification(
+    // Official YJn → $xu: pressure reap on auto-backgrounded foreground tasks
+    // densable xmn/Ovu always have Xm — do not skip Gge when owner keepalive should attach.
+    const autoBgRegistry = createTaskRegistry(getAppState, setAppState);
+    const disposeQuietCheckin = startQuietCheckin({
       taskId,
       description,
-      finalStatus,
-      result.code,
+      taskRegistry: autoBgRegistry,
+      toolUseId,
+      agentId,
+    });
+    const disposePressureReap = installShellPressureReap(
+      taskId,
+      description,
       autoBgRegistry,
       toolUseId,
       undefined,
       agentId,
-      wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
-      wasKilled ? undefined : settledExit.exitNote,
+    );
+    const disposeDeadline = installBackgroundDeadline(
+      taskId,
+      description,
+      autoBgRegistry,
+      toolUseId,
+      undefined,
+      agentId,
     );
 
-    releaseShellKeepalive();
-    disposeDeadline(finalStatus);
-    void evictTaskOutput(taskId);
-  });
+    // densable Ovu on auto-bg: YP(agentId, bash:id, Xm) once backgrounded
+    const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, undefined, autoBgRegistry);
 
-  return didBackground;
+    // Set up result handler (mirrors backgroundTask's handler)
+    void shellCommand.result.then(result =>
+      withCapturedShellAls(capturedAls, async () => {
+        cancelStallWatchdog();
+        disposeQuietCheckin();
+        disposePressureReap();
+        await flushAndCleanup(shellCommand);
+        let wasKilled = false;
+        let cleanupFn: (() => void) | undefined;
+        let settledExit = interpretShellExitResult(result, isLocalShellTask(peek) ? peek : undefined);
+
+        updateTaskState<LocalShellTaskState>(taskId, setAppState, t => {
+          if (t.status === 'killed') {
+            wasKilled = true;
+            return t;
+          }
+          settledExit = interpretShellExitResult(result, t);
+          cleanupFn = t.unregisterCleanup;
+          return {
+            ...t,
+            status: settledExit.status,
+            result: { code: result.code, interrupted: result.interrupted },
+            shellCommand: null,
+            unregisterCleanup: undefined,
+            endTime: Date.now(),
+          };
+        });
+
+        cleanupFn?.();
+
+        const finalStatus = wasKilled ? 'killed' : settledExit.status;
+        await enqueueShellNotification(
+          taskId,
+          description,
+          finalStatus,
+          result.code,
+          autoBgRegistry,
+          toolUseId,
+          undefined,
+          agentId,
+          wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
+          wasKilled ? undefined : settledExit.exitNote,
+          capturedAls,
+        );
+
+        releaseShellKeepalive();
+        disposeDeadline(finalStatus);
+        void evictTaskOutput(taskId);
+      }),
+    );
+
+    return didBackground;
+  });
 }
 
 /**

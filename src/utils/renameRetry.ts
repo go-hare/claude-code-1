@@ -13,6 +13,7 @@
 import { lstatSync, renameSync } from 'fs'
 import { lstat, rename } from 'fs/promises'
 import { getErrnoCode } from './errors.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 /** densable LTr — codes eligible for rename retry */
 export const RENAME_TRANSIENT_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
@@ -46,20 +47,31 @@ export const RENAME_LONG_RETRY_DELAYS_MS: readonly number[] = [100, 500, 2000]
 const RENAME_FALLBACK_RETRY_DELAYS_MS: readonly number[] = [50, 50]
 
 /** Official `V`: paths where extended rename retry previously timed out */
-const timedOutRenameTargets = new Set<string>()
+const fallbackRenameRetryHost: object = {}
+const timedOutRenameTargetsByHost = new HostSlot<Set<string>>(() => new Set())
+
+function getTimedOutRenameTargets(): Set<string> {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return timedOutRenameTargetsByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return timedOutRenameTargetsByHost.of(fallbackRenameRetryHost)
+}
 
 export function clearTimedOutRenameTargetsForTesting(): void {
-  timedOutRenameTargets.clear()
+  getTimedOutRenameTargets().clear()
 }
 
 export function hasTimedOutRenameTarget(targetPath: string): boolean {
-  return timedOutRenameTargets.has(targetPath)
+  return getTimedOutRenameTargets().has(targetPath)
 }
 
 function recordTimedOutRenameTarget(err: unknown, targetPath: string): void {
   const code = getErrnoCode(err)
   if (code !== undefined && RENAME_TRANSIENT_CODES.has(code)) {
-    timedOutRenameTargets.add(targetPath)
+    getTimedOutRenameTargets().add(targetPath)
   }
 }
 
@@ -204,7 +216,7 @@ export async function renameWithAdaptiveRetry(
   skipExtended = false,
   sleepFn: (ms: number) => Promise<void> = sleepMs,
 ): Promise<void> {
-  let useExtended = !skipExtended && !timedOutRenameTargets.has(to)
+  let useExtended = !skipExtended && !getTimedOutRenameTargets().has(to)
   try {
     await renameFn(from, to)
     return
@@ -245,7 +257,7 @@ export function renameSyncWithAdaptiveRetry(
   renameFn: RenameFn = renameSync,
   sleepFn: (ms: number) => void = sleepSyncMs,
 ): void {
-  let useExtended = !timedOutRenameTargets.has(to)
+  let useExtended = !getTimedOutRenameTargets().has(to)
   try {
     renameFn(from, to)
     return

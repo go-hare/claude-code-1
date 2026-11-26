@@ -5,6 +5,8 @@
  * file storage.
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
+
 export class KeychainUnavailableError extends Error {
   constructor(reason: string) {
     super(`OS keychain not available: ${reason}`)
@@ -24,26 +26,37 @@ type KeyringModule = {
   Entry: new (service: string, account: string) => KeyringEntry
 }
 
-let _mod: KeyringModule | null | 'not-tried' = 'not-tried'
+const keyringModuleHostSlot = new HostSlot<{
+  mod: KeyringModule | null | 'not-tried'
+}>(() => ({
+  mod: 'not-tried',
+}))
+
+function getKeyringModuleHostState(): {
+  mod: KeyringModule | null | 'not-tried'
+} {
+  return keyringModuleHostSlot.of(getBootstrapSessionHost())
+}
 
 async function loadModule(): Promise<KeyringModule> {
-  if (_mod !== 'not-tried') {
-    if (_mod === null)
+  const hostState = getKeyringModuleHostState()
+  if (hostState.mod !== 'not-tried') {
+    if (hostState.mod === null)
       throw new KeychainUnavailableError('module load failed previously')
-    return _mod
+    return hostState.mod
   }
   try {
     // Dynamic import so the rest of the codebase compiles even without the module.
     const m = (await import('@napi-rs/keyring')) as unknown as KeyringModule
     if (!m || typeof m.Entry !== 'function') {
-      _mod = null
+      hostState.mod = null
       throw new KeychainUnavailableError('module does not export Entry')
     }
-    _mod = m
+    hostState.mod = m
     return m
   } catch (err: unknown) {
     if (err instanceof KeychainUnavailableError) throw err
-    _mod = null
+    hostState.mod = null
     throw new KeychainUnavailableError(
       err instanceof Error ? err.message : String(err),
     )
@@ -57,7 +70,7 @@ async function loadModule(): Promise<KeyringModule> {
  * @internal
  */
 export function _resetKeychainModuleCache(): void {
-  _mod = 'not-tried'
+  getKeyringModuleHostState().mod = 'not-tried'
 }
 
 export const tryKeychain = {

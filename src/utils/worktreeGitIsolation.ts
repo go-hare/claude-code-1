@@ -17,6 +17,11 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growt
 import { parseForSecurityFromAst, type SimpleCommand } from './bash/ast.js'
 import { ensureParserInitialized, getParserModule } from './bash/bashParser.js'
 import { getCwd, getCwdOverride } from './cwd.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+} from './sessionHost.js'
 
 /**
  * Lazy densable nKr — avoid module-init cycle:
@@ -38,12 +43,52 @@ type WorktreeSessionLike = {
   worktreePath: string
   originalCwd: string
 }
-let worktreeSessionProvider: (() => WorktreeSessionLike | null) | undefined
+type WorktreeSessionProvider = () => WorktreeSessionLike | null
+
+// Module-load default provider registered once at import time by `worktree.ts`.
+// Per-host calls inside an active ALS scope override only that host while
+// hosts without an explicit override continue reading the default provider.
+let defaultWorktreeSessionProvider: WorktreeSessionProvider | undefined
+
+const fallbackWorktreeIsolationHost: object = {}
+const worktreeProviderByHost = new HostSlot<{
+  provider: WorktreeSessionProvider | undefined
+}>(() => ({ provider: undefined }))
+
+function getWorktreeProviderSlot(): {
+  provider: WorktreeSessionProvider | undefined
+} {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return worktreeProviderByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return worktreeProviderByHost.of(fallbackWorktreeIsolationHost)
+}
 
 export function registerWorktreeSessionProvider(
-  provider: () => WorktreeSessionLike | null,
+  provider: WorktreeSessionProvider,
 ): void {
-  worktreeSessionProvider = provider
+  const slot = getWorktreeProviderSlot()
+  let outsideAls = true
+  try {
+    outsideAls = getActiveSessionFromAls() === undefined
+  } catch {
+    outsideAls = true
+  }
+  if (outsideAls) {
+    defaultWorktreeSessionProvider = provider
+    slot.provider = undefined
+  } else {
+    slot.provider = provider
+  }
+}
+
+function getEffectiveWorktreeSessionProvider():
+  | WorktreeSessionProvider
+  | undefined {
+  return getWorktreeProviderSlot().provider ?? defaultWorktreeSessionProvider
 }
 
 /** densable XB — scrub worktree-redirecting git env for subprocesses. */
@@ -633,7 +678,7 @@ export type WorktreeGitIsolationContext = {
 export function getWorktreeGitIsolationContext(
   cwd: string = getCwd(),
 ): WorktreeGitIsolationContext | null {
-  const session = worktreeSessionProvider?.() ?? null
+  const session = getEffectiveWorktreeSessionProvider()?.() ?? null
   if (session) {
     return {
       worktreePath: session.worktreePath,

@@ -11,6 +11,7 @@ import {
   getStickyBetas,
   onSessionSwitch,
 } from 'src/bootstrap/state.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionRoot.js'
 import type { QuerySource } from 'src/constants/querySource.js'
 import type { SystemAPIErrorMessage } from 'src/types/message.js'
 import {
@@ -389,9 +390,12 @@ export function clearCachedModelMaxTokensCeilings(): void {
 }
 
 // Clear learned ceilings on /resume, /clear, and session switch (`switchSession` / `regenerateSessionId`).
-onSessionSwitch(() => {
-  clearCachedModelMaxTokensCeilings()
-})
+onSessionSwitch(
+  () => {
+    clearCachedModelMaxTokensCeilings()
+  },
+  { scope: 'global' },
+)
 
 export function parseApiMaxTokensCeilingError(
   error: unknown,
@@ -2830,7 +2834,9 @@ export function shouldRetry(error: APIError): boolean {
 const DEFAULT_RETRY_WATCHDOG_MAX = 300
 /** Official ufa — non-watchdog MAX_RETRIES clamp ceiling. */
 const MAX_RETRIES_CLAMP = 15
-let maxRetriesClampWarned = false
+const maxRetriesClampWarnedSlot = new HostSlot<{ warned: boolean }>(() => ({
+  warned: false,
+}))
 
 /**
  * Official 2.1.328 `zHe()`: `CLAUDE_CODE_RETRY_WATCHDOG` is truthy/enabled,
@@ -2890,8 +2896,11 @@ export function getDefaultMaxRetries(): number {
   if (parsed !== null) {
     // Official: if (t > ufa && !oMe()) clamp to ufa
     if (parsed > MAX_RETRIES_CLAMP && !watchdogActive) {
-      if (!maxRetriesClampWarned) {
-        maxRetriesClampWarned = true
+      const clampWarnState = maxRetriesClampWarnedSlot.of(
+        getBootstrapSessionHost(),
+      )
+      if (!clampWarnState.warned) {
+        clampWarnState.warned = true
         logForDebugging(
           `CLAUDE_CODE_MAX_RETRIES=${parsed} clamped to ${MAX_RETRIES_CLAMP}`,
           { level: 'warn' },

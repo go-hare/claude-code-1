@@ -1,6 +1,5 @@
 import { statSync, type Stats } from 'fs'
 import { lstat, readdir, readFile, realpath, stat } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import { dirname, join, resolve, sep } from 'path'
 import {
@@ -18,6 +17,7 @@ import { parseFrontmatter } from './frontmatterParser.js'
 import { findCanonicalGitRoot, findGitRoot } from './git.js'
 import { parseToolListFromCLI } from './permissions/permissionSetup.js'
 import { ripGrep } from './ripgrep.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import {
   isSettingSourceEnabled,
   type SettingSource,
@@ -316,13 +316,52 @@ export function getProjectDirsUpToHome(
   return dirs
 }
 
+type HostMemoizedFn<Args extends unknown[], Result, Key = string> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<Key, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = string>(
+  func: (...args: Args) => Result,
+  resolver: (...args: Args) => Key,
+): HostMemoizedFn<Args, Result, Key> {
+  const caches = new HostSlot<Map<Key, Result>>(() => new Map())
+  const fn = (...args: Args): Result => {
+    const cache = caches.of(getBootstrapSessionHost())
+    const key = resolver(...args)
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = func(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<Key, Result> {
+      return caches.of(getBootstrapSessionHost())
+    },
+    set(next: Map<Key, Result>) {
+      const current = caches.of(getBootstrapSessionHost())
+      if (current === next) return
+      current.clear()
+      for (const [k, v] of next.entries()) {
+        current.set(k, v)
+      }
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as HostMemoizedFn<Args, Result, Key>
+}
+
 /**
  * Loads markdown files from managed, user, and project directories
  * @param subdir Subdirectory (eg. "agents" or "commands")
  * @param cwd Current working directory for project directory traversal
  * @returns Array of parsed markdown files with metadata
  */
-export const loadMarkdownFilesForSubdir = memoize(
+export const loadMarkdownFilesForSubdir = memoizePerHost(
   async function (
     subdir: ClaudeConfigDirectory,
     cwd: string,

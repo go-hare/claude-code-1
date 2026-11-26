@@ -9,6 +9,7 @@ import { basename, extname, join } from 'path'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { toError } from './errors.js'
 import { logForDebugging } from './debug.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { jsonParse } from './slowOperations.js'
 import {
   CUSTOM_THEME_PREFIX,
@@ -32,8 +33,19 @@ export type CustomTheme = {
   source: CustomThemeSource
 }
 
-let cachedUserThemes: CustomTheme[] = []
-let cachedPluginThemes: CustomTheme[] = []
+type CustomThemesHostState = {
+  cachedUserThemes: CustomTheme[]
+  cachedPluginThemes: CustomTheme[]
+}
+
+const customThemesHostSlot = new HostSlot<CustomThemesHostState>(() => ({
+  cachedUserThemes: [],
+  cachedPluginThemes: [],
+}))
+
+function getCustomThemesHostState(): CustomThemesHostState {
+  return customThemesHostSlot.of(getBootstrapSessionHost())
+}
 
 /** densable k2t */
 export function getThemesDir(): string {
@@ -113,6 +125,7 @@ async function readThemeFile(
 
 /** densable Ghf user-dir fs path (no v5 listEntries). */
 export async function loadCustomThemes(): Promise<CustomTheme[]> {
+  const state = getCustomThemesHostState()
   const dir = getThemesDir()
   let names: string[]
   try {
@@ -122,8 +135,8 @@ export async function loadCustomThemes(): Promise<CustomTheme[]> {
     if (code !== 'ENOENT' && code !== 'ENOTDIR') {
       logForDebugging(`[theme] readdir ${dir} failed`, { level: 'warn' })
     }
-    cachedUserThemes = []
-    return cachedUserThemes
+    state.cachedUserThemes = []
+    return state.cachedUserThemes
   }
   const loaded: CustomTheme[] = []
   for (const name of names) {
@@ -133,8 +146,8 @@ export async function loadCustomThemes(): Promise<CustomTheme[]> {
     if (theme) loaded.push(theme)
   }
   loaded.sort((a, b) => a.name.localeCompare(b.name))
-  cachedUserThemes = loaded
-  return cachedUserThemes
+  state.cachedUserThemes = loaded
+  return state.cachedUserThemes
 }
 
 /** densable nUn — read themes from a directory (or single .json file). */
@@ -180,6 +193,7 @@ export async function loadPluginCustomThemes(
     themesPaths?: readonly string[]
   }>,
 ): Promise<CustomTheme[]> {
+  const state = getCustomThemesHostState()
   const loaded: CustomTheme[] = []
   for (const plugin of plugins) {
     const source: CustomThemeSource = { plugin: plugin.name }
@@ -194,30 +208,37 @@ export async function loadPluginCustomThemes(
     }
   }
   loaded.sort((a, b) => a.name.localeCompare(b.name))
-  cachedPluginThemes = loaded
-  return cachedPluginThemes
+  state.cachedPluginThemes = loaded
+  return state.cachedPluginThemes
 }
 
 export function setCachedPluginThemes(themes: readonly CustomTheme[]): void {
-  cachedPluginThemes = [...themes]
+  getCustomThemesHostState().cachedPluginThemes = [...themes]
 }
 
 export function getCachedPluginThemes(): CustomTheme[] {
-  return cachedPluginThemes
+  return (
+    customThemesHostSlot.peek(getBootstrapSessionHost())?.cachedPluginThemes ??
+    []
+  )
 }
 
 /** densable BTi / ele().customThemes — user themes followed by plugin themes. */
 export function getCachedCustomThemes(): CustomTheme[] {
-  return cachedPluginThemes.length === 0
-    ? cachedUserThemes
-    : [...cachedUserThemes, ...cachedPluginThemes]
+  const state = customThemesHostSlot.peek(getBootstrapSessionHost())
+  if (!state) return []
+  return state.cachedPluginThemes.length === 0
+    ? state.cachedUserThemes
+    : [...state.cachedUserThemes, ...state.cachedPluginThemes]
 }
 
 /** densable DKa / skr */
 export function findCustomTheme(slug: string): CustomTheme | undefined {
+  const state = customThemesHostSlot.peek(getBootstrapSessionHost())
+  if (!state) return undefined
   return (
-    cachedUserThemes.find(t => t.slug === slug) ??
-    cachedPluginThemes.find(t => t.slug === slug)
+    state.cachedUserThemes.find(t => t.slug === slug) ??
+    state.cachedPluginThemes.find(t => t.slug === slug)
   )
 }
 

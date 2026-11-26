@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { appendFile, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { getProjectRoot, getSessionId } from './bootstrap/state.js'
 import {
   getFeatureValue_CACHED_MAY_BE_STALE,
@@ -20,6 +20,13 @@ import {
   retrievePastedText,
   storePastedText,
 } from './utils/pasteStore.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  sessionContextAls,
+} from './utils/sessionHost.js'
 import { sleep } from './utils/sleep.js'
 import { jsonParse, jsonStringify } from './utils/slowOperations.js'
 
@@ -602,13 +609,23 @@ export function isValidPasteId(id: number): boolean {
   return Number.isInteger(id) && id > 0 && id < 4294967296
 }
 
-const pasteIdState = {
+type PasteIdState = {
+  next: number
+  minted: Set<number>
+}
+
+const pasteIdStateSlot = new RootSessionSlot<PasteIdState>(() => ({
   next: 1,
   minted: new Set<number>(),
+}))
+
+function getPasteIdState(): PasteIdState {
+  return pasteIdStateSlot.of(getBootstrapSession())
 }
 
 /** densable I$o — bump next past a seen id (session-floor ids only). */
 export function notePasteId(id: number): void {
+  const pasteIdState = getPasteIdState()
   if (
     isValidPasteId(id) &&
     id < PASTE_ID_EPOCH_FLOOR &&
@@ -632,6 +649,7 @@ export function mintPasteId(
   display?: string,
   pastedContents?: Record<number, unknown>,
 ): number {
+  const pasteIdState = getPasteIdState()
   if (display) notePasteIdsFromText(display)
   if (pastedContents) {
     for (const key of Object.keys(pastedContents)) {
@@ -648,6 +666,7 @@ export function mintPasteId(
 
 /** Seed allocator from resume max (local getInitialPasteId). */
 export function seedPasteIdCounter(nextId: number): void {
+  const pasteIdState = getPasteIdState()
   if (isValidPasteId(nextId) && nextId > pasteIdState.next) {
     pasteIdState.next = nextId
   }
@@ -655,6 +674,7 @@ export function seedPasteIdCounter(nextId: number): void {
 
 /** Test / session reset helper. */
 export function resetPasteIdAllocatorForTests(): void {
+  const pasteIdState = getPasteIdState()
   pasteIdState.next = 1
   pasteIdState.minted.clear()
 }
@@ -718,6 +738,7 @@ export function renumberHistoryEntryPastes(entry: {
   const keep: Record<number, PastedContent> = {}
   const toRenumber: Array<[number, PastedContent]> = []
 
+  const pasteIdState = getPasteIdState()
   for (const [key, content] of entries) {
     const id = Number(key)
     // densable: invalid ids or session-minted keep as-is
@@ -755,9 +776,10 @@ function historySkipKey(entry: {
 }
 
 async function* makeLogEntryReader(): AsyncGenerator<LogEntry> {
+  const historyState = getHistorySessionState()
   // Start with entries that have yet to be flushed to disk
-  for (let i = pendingEntries.length - 1; i >= 0; i--) {
-    yield pendingEntries[i]!
+  for (let i = historyState.pendingEntries.length - 1; i >= 0; i--) {
+    yield historyState.pendingEntries[i]!
   }
 
   // Read from global history file (shared across all projects)
@@ -770,7 +792,7 @@ async function* makeLogEntryReader(): AsyncGenerator<LogEntry> {
         // removeLastFromHistory slow path: entry was flushed before removal
         // (or removed while in-flight flush UFs), so filter here so both
         // getHistory (Up-arrow) and makeHistoryReader (ctrl+r) skip it.
-        if (skippedHistoryKeys.has(historySkipKey(entry))) {
+        if (historyState.skippedHistoryKeys.has(historySkipKey(entry))) {
           continue
         }
         yield entry
@@ -852,8 +874,6 @@ type ClearedDraftEntry = {
   length: number
 }
 
-let clearedDrafts: ClearedDraftEntry[] = []
-
 function clearedDraftKey(entry: HistoryEntry): string {
   const pasteKeys = Object.keys(entry.pastedContents ?? {})
     .sort()
@@ -874,10 +894,11 @@ export function keepClearedDraftToHistory(
   entry: HistoryEntry,
   timestamp: number = Date.now(),
 ): void {
+  const historyState = getHistorySessionState()
   const project = getProjectRoot()
   const sessionId = getSessionId()
   const key = clearedDraftKey(entry)
-  clearedDrafts = clearedDrafts.filter(
+  historyState.clearedDrafts = historyState.clearedDrafts.filter(
     item =>
       item.project !== project ||
       item.sessionId !== sessionId ||
@@ -887,19 +908,29 @@ export function keepClearedDraftToHistory(
     (sum, p) => sum + (p.content?.length ?? 0),
     entry.display.length,
   )
-  clearedDrafts.push({ entry, timestamp, project, sessionId, length })
-  let totalChars = clearedDrafts.reduce((sum, item) => sum + item.length, 0)
+  historyState.clearedDrafts.push({
+    entry,
+    timestamp,
+    project,
+    sessionId,
+    length,
+  })
+  let totalChars = historyState.clearedDrafts.reduce(
+    (sum, item) => sum + item.length,
+    0,
+  )
   while (
-    clearedDrafts.length > MAX_CLEARED_DRAFTS ||
+    historyState.clearedDrafts.length > MAX_CLEARED_DRAFTS ||
     totalChars > MAX_CLEARED_DRAFTS_CHARS
   ) {
-    totalChars -= clearedDrafts.shift()!.length
+    totalChars -= historyState.clearedDrafts.shift()!.length
   }
 }
 
 export async function countHistoryForProject(
   predicate?: (display: string) => boolean,
 ): Promise<number | null> {
+  const historyState = getHistorySessionState()
   const currentProject = getProjectRoot()
   let scanned = 0
   let matched = 0
@@ -915,7 +946,7 @@ export async function countHistoryForProject(
     return null
   }
   const currentSession = getSessionId()
-  for (const item of clearedDrafts) {
+  for (const item of historyState.clearedDrafts) {
     if (
       item.project === currentProject &&
       item.sessionId === currentSession &&
@@ -938,12 +969,13 @@ export async function countHistoryForProject(
 export async function* getHistory(options?: {
   withClearedDrafts?: boolean
 }): AsyncGenerator<HistoryEntry> {
+  const historyState = getHistorySessionState()
   const currentProject = getProjectRoot()
   const currentSession = getSessionId()
   const otherSessionEntries: LogEntry[] = []
   let yielded = 0
   const matchingDrafts = options?.withClearedDrafts
-    ? clearedDrafts.filter(
+    ? historyState.clearedDrafts.filter(
         item =>
           item.project === currentProject && item.sessionId === currentSession,
       )
@@ -1065,26 +1097,47 @@ async function logEntryToHistoryEntry(entry: LogEntry): Promise<HistoryEntry> {
   }
 }
 
-let pendingEntries: LogEntry[] = []
-let isWriting = false
-let currentFlushPromise: Promise<void> | null = null
-let cleanupRegistered = false
-let lastAddedEntry: LogEntry | null = null
-/**
- * densable `VDo`: last addToHistory was a consecutive-duplicate suppress.
- * removeLastFromHistory then only clears this flag (no entry to undo).
- */
-let lastAddWasDeduped = false
-/**
- * densable `$Fs` — skip keys for entries written then undone (or undone while
- * in-flight flush). Key = `${timestamp}\0${sessionId}`.
- */
-const skippedHistoryKeys = new Set<string>()
-/**
- * densable `UFs` — snapshot currently being written; removeLast while in-flight
- * still marks skip so the soon-to-land disk line is filtered.
- */
-let inFlightFlushEntries: Set<LogEntry> | null = null
+type HistorySessionState = {
+  clearedDrafts: ClearedDraftEntry[]
+  pendingEntries: LogEntry[]
+  isWriting: boolean
+  currentFlushPromise: Promise<void> | null
+  cleanupRegistered: boolean
+  lastAddedEntry: LogEntry | null
+  /**
+   * densable `VDo`: last addToHistory was a consecutive-duplicate suppress.
+   * removeLastFromHistory then only clears this flag (no entry to undo).
+   */
+  lastAddWasDeduped: boolean
+  /**
+   * densable `$Fs` — skip keys for entries written then undone (or undone while
+   * in-flight flush). Key = `${timestamp}\0${sessionId}`.
+   */
+  skippedHistoryKeys: Set<string>
+  /**
+   * densable `UFs` — snapshot currently being written; removeLast while in-flight
+   * still marks skip so the soon-to-land disk line is filtered.
+   */
+  inFlightFlushEntries: Set<LogEntry> | null
+}
+
+const historySessionStateSlot = new RootSessionSlot<HistorySessionState>(
+  () => ({
+    clearedDrafts: [],
+    pendingEntries: [],
+    isWriting: false,
+    currentFlushPromise: null,
+    cleanupRegistered: false,
+    lastAddedEntry: null,
+    lastAddWasDeduped: false,
+    skippedHistoryKeys: new Set<string>(),
+    inFlightFlushEntries: null,
+  }),
+)
+
+function getHistorySessionState(): HistorySessionState {
+  return historySessionStateSlot.of(getBootstrapSession())
+}
 
 /**
  * densable `_ty` — suppress consecutive identical prompts (same display /
@@ -1106,57 +1159,110 @@ function isConsecutiveDuplicateHistory(
 }
 
 /**
+ * Process-global per-historyPath async queue serializing disk lock + append so
+ * concurrent sessions draining via `runCleanupFunctions()` never lose entries
+ * to `ELOCKED` contention on shared `history.jsonl`.
+ */
+const historyWriteQueues = new Map<string, Promise<void>>()
+
+function safeGetHistoryAlsStore() {
+  try {
+    return sessionContextAls?.getStore?.()
+  } catch {
+    return undefined
+  }
+}
+
+async function withHistoryFileWriteLock<T>(
+  historyPath: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = resolve(historyPath)
+  const prev = historyWriteQueues.get(key) ?? Promise.resolve()
+  let releaseQueue!: () => void
+  const gate = new Promise<void>(resolveGate => {
+    releaseQueue = resolveGate
+  })
+  const tail = prev.then(() => gate)
+  historyWriteQueues.set(key, tail)
+
+  const callerStore = safeGetHistoryAlsStore()
+  await prev
+  try {
+    const currentStore = safeGetHistoryAlsStore()
+    if (currentStore !== callerStore && sessionContextAls) {
+      if (callerStore !== undefined) {
+        return await sessionContextAls.run(callerStore, fn)
+      }
+      return await sessionContextAls.exit(fn)
+    }
+    return await fn()
+  } finally {
+    releaseQueue()
+    if (historyWriteQueues.get(key) === tail) {
+      historyWriteQueues.delete(key)
+    }
+  }
+}
+
+/**
  * densable `gty` — snapshot pending, write snapshot, then remove only those
  * entries from the queue. Never clear the queue before append succeeds
  * (densable 2.1.218 #20 race fix).
  * @returns true on success
  */
-async function immediateFlushHistory(): Promise<boolean> {
-  if (pendingEntries.length === 0) {
+async function immediateFlushHistory(
+  state: HistorySessionState,
+): Promise<boolean> {
+  if (state.pendingEntries.length === 0) {
     return true
   }
 
   // Snapshot — concurrent adds may push to pendingEntries during the write.
-  const snapshot = pendingEntries.slice()
-  inFlightFlushEntries = new Set(snapshot)
-  let release: (() => Promise<void>) | undefined
+  const snapshot = state.pendingEntries.slice()
+  state.inFlightFlushEntries = new Set(snapshot)
+  const historyPath = join(getClaudeConfigHomeDir(), 'history.jsonl')
   try {
-    const historyPath = join(getClaudeConfigHomeDir(), 'history.jsonl')
+    return await withHistoryFileWriteLock(historyPath, async () => {
+      let release: (() => Promise<void>) | undefined
+      try {
+        // Ensure the file exists before acquiring lock (append mode creates if missing)
+        await writeFile(historyPath, '', {
+          encoding: 'utf8',
+          mode: 0o600,
+          flag: 'a',
+        })
 
-    // Ensure the file exists before acquiring lock (append mode creates if missing)
-    await writeFile(historyPath, '', {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'a',
+        release = await lock(historyPath, {
+          stale: 10000,
+          retries: {
+            retries: 3,
+            minTimeout: 50,
+          },
+          onCompromised: (err: unknown) => {
+            logForDebugging(`History lock compromised: ${err}`)
+          },
+        })
+
+        const jsonLines = snapshot.map(entry => jsonStringify(entry) + '\n')
+        await appendFile(historyPath, jsonLines.join(''), { mode: 0o600 })
+
+        // densable: only drop the snapshotted entries (identity), keep concurrent adds
+        const written = new Set(snapshot)
+        state.pendingEntries = state.pendingEntries.filter(e => !written.has(e))
+        return true
+      } catch (error) {
+        logForDebugging(`Failed to write prompt history: ${error}`)
+        // Keep pendingEntries intact so retry / cleanup can re-attempt.
+        return false
+      } finally {
+        if (release) {
+          await release().catch(() => {})
+        }
+      }
     })
-
-    release = await lock(historyPath, {
-      stale: 10000,
-      retries: {
-        retries: 3,
-        minTimeout: 50,
-      },
-      onCompromised: (err: unknown) => {
-        logForDebugging(`History lock compromised: ${err}`)
-      },
-    })
-
-    const jsonLines = snapshot.map(entry => jsonStringify(entry) + '\n')
-    await appendFile(historyPath, jsonLines.join(''), { mode: 0o600 })
-
-    // densable: only drop the snapshotted entries (identity), keep concurrent adds
-    const written = new Set(snapshot)
-    pendingEntries = pendingEntries.filter(e => !written.has(e))
-    return true
-  } catch (error) {
-    logForDebugging(`Failed to write prompt history: ${error}`)
-    // Keep pendingEntries intact so retry / cleanup can re-attempt.
-    return false
   } finally {
-    inFlightFlushEntries = null
-    if (release) {
-      await release().catch(() => {})
-    }
+    state.inFlightFlushEntries = null
   }
 }
 
@@ -1164,8 +1270,11 @@ async function immediateFlushHistory(): Promise<boolean> {
  * densable `cLd` — serialize flushes; on success with more pending, reset
  * retry counter so a successful write doesn't burn the retry budget.
  */
-async function flushPromptHistory(retries: number): Promise<void> {
-  if (isWriting || pendingEntries.length === 0) {
+async function flushPromptHistory(
+  state: HistorySessionState,
+  retries: number,
+): Promise<void> {
+  if (state.isWriting || state.pendingEntries.length === 0) {
     return
   }
 
@@ -1174,20 +1283,23 @@ async function flushPromptHistory(retries: number): Promise<void> {
     return
   }
 
-  isWriting = true
+  state.isWriting = true
   let ok = false
 
   try {
-    ok = await immediateFlushHistory()
+    ok = await immediateFlushHistory(state)
   } finally {
-    isWriting = false
+    state.isWriting = false
 
-    if (pendingEntries.length > 0) {
+    if (state.pendingEntries.length > 0) {
       // Avoid trying again in a hot loop
       await sleep(500)
       // densable: success → reset retries; failure → increment
-      currentFlushPromise = flushPromptHistory(ok ? 0 : retries + 1)
-      void currentFlushPromise
+      state.currentFlushPromise = flushPromptHistory(
+        state,
+        ok ? 0 : retries + 1,
+      )
+      void state.currentFlushPromise
     }
   }
 }
@@ -1196,6 +1308,7 @@ async function addToPromptHistory(
   command: HistoryEntry | string,
   options?: { armUndo?: boolean },
 ): Promise<void> {
+  const state = getHistorySessionState()
   const entry =
     typeof command === 'string'
       ? { display: command, pastedContents: {} }
@@ -1207,10 +1320,15 @@ async function addToPromptHistory(
 
   // densable `_ty` / VDo — consecutive duplicate suppress
   if (
-    isConsecutiveDuplicateHistory(lastAddedEntry, entry, project, sessionId)
+    isConsecutiveDuplicateHistory(
+      state.lastAddedEntry,
+      entry,
+      project,
+      sessionId,
+    )
   ) {
     if (armUndo) {
-      lastAddWasDeduped = true
+      state.lastAddWasDeduped = true
     }
     return
   }
@@ -1257,13 +1375,13 @@ async function addToPromptHistory(
     sessionId,
   }
 
-  pendingEntries.push(logEntry)
+  state.pendingEntries.push(logEntry)
   if (armUndo) {
-    lastAddedEntry = logEntry
-    lastAddWasDeduped = false
+    state.lastAddedEntry = logEntry
+    state.lastAddWasDeduped = false
   }
-  currentFlushPromise = flushPromptHistory(0)
-  void currentFlushPromise
+  state.currentFlushPromise = flushPromptHistory(state, 0)
+  void state.currentFlushPromise
 }
 
 /**
@@ -1547,19 +1665,35 @@ export function addToHistory(
     return
   }
 
+  const state = getHistorySessionState()
   // Register cleanup on first use
-  if (!cleanupRegistered) {
-    cleanupRegistered = true
+  if (!state.cleanupRegistered) {
+    state.cleanupRegistered = true
+    const capturedSession = getActiveSessionFromAls()
     registerCleanup(async () => {
-      // densable `bty`: drain in-flight flush chain, then final flush
-      let seen: Promise<void> | null = null
-      while (currentFlushPromise && currentFlushPromise !== seen) {
-        seen = currentFlushPromise
-        await seen
+      state.cleanupRegistered = false
+      const drain = async () => {
+        // densable `bty`: drain in-flight flush chain, then final flush
+        let seen: Promise<void> | null = null
+        while (
+          state.currentFlushPromise &&
+          state.currentFlushPromise !== seen
+        ) {
+          seen = state.currentFlushPromise
+          await seen
+        }
+        if (state.pendingEntries.length > 0) {
+          await immediateFlushHistory(state)
+        }
       }
-      if (pendingEntries.length > 0) {
-        await immediateFlushHistory()
+      if (
+        capturedSession !== undefined &&
+        getActiveSessionFromAls() !== capturedSession
+      ) {
+        await runWithSession(capturedSession, drain)
+        return
       }
+      await drain()
     })
   }
 
@@ -1567,12 +1701,13 @@ export function addToHistory(
 }
 
 export function clearPendingHistoryEntries(): void {
-  pendingEntries = []
-  clearedDrafts = []
-  lastAddedEntry = null
-  lastAddWasDeduped = false
-  skippedHistoryKeys.clear()
-  inFlightFlushEntries = null
+  const state = getHistorySessionState()
+  state.pendingEntries = []
+  state.clearedDrafts = []
+  state.lastAddedEntry = null
+  state.lastAddWasDeduped = false
+  state.skippedHistoryKeys.clear()
+  state.inFlightFlushEntries = null
 }
 
 /**
@@ -1585,23 +1720,24 @@ export function clearPendingHistoryEntries(): void {
  * If last add was consecutive-deduped (VDo), only clear that flag.
  */
 export function removeLastFromHistory(): void {
-  if (lastAddWasDeduped) {
-    lastAddWasDeduped = false
+  const state = getHistorySessionState()
+  if (state.lastAddWasDeduped) {
+    state.lastAddWasDeduped = false
     return
   }
-  if (!lastAddedEntry) return
-  const entry = lastAddedEntry
-  lastAddedEntry = null
+  if (!state.lastAddedEntry) return
+  const entry = state.lastAddedEntry
+  state.lastAddedEntry = null
 
-  const idx = pendingEntries.lastIndexOf(entry)
+  const idx = state.pendingEntries.lastIndexOf(entry)
   if (idx !== -1) {
-    pendingEntries.splice(idx, 1)
+    state.pendingEntries.splice(idx, 1)
     // densable: if this entry is also in the in-flight write snapshot, the
     // disk line will still land — mark skip.
-    if (inFlightFlushEntries?.has(entry)) {
-      skippedHistoryKeys.add(historySkipKey(entry))
+    if (state.inFlightFlushEntries?.has(entry)) {
+      state.skippedHistoryKeys.add(historySkipKey(entry))
     }
   } else {
-    skippedHistoryKeys.add(historySkipKey(entry))
+    state.skippedHistoryKeys.add(historySkipKey(entry))
   }
 }

@@ -7,13 +7,32 @@
  * Never export densable ids.
  */
 
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
+
 const DID_NOT_ENTER =
   'prompt.submit: the prompt did not enter the session (its batch ended before its turn)'
 
-const waitersByUuid = new Map<
-  string,
-  Set<ReturnType<typeof Promise.withResolvers<void>>>
->()
+type PromptSubmitEntriesSessionState = {
+  waitersByUuid: Map<
+    string,
+    Set<ReturnType<typeof Promise.withResolvers<void>>>
+  >
+  sessionStartLatch: Promise<void> | undefined
+  sessionStartResolve: (() => void) | undefined
+  aheadOfSessionStartUuids: Set<string>
+}
+
+const promptSubmitEntriesSessionSlot =
+  new RootSessionSlot<PromptSubmitEntriesSessionState>(() => ({
+    waitersByUuid: new Map(),
+    sessionStartLatch: undefined,
+    sessionStartResolve: undefined,
+    aheadOfSessionStartUuids: new Set(),
+  }))
+
+function getPromptSubmitEntriesState(): PromptSubmitEntriesSessionState {
+  return promptSubmitEntriesSessionSlot.of(getBootstrapSession())
+}
 
 export type PromptSubmitEntries = Disposable & {
   awaitEntry(uuid: string): Promise<void>
@@ -22,6 +41,7 @@ export type PromptSubmitEntries = Disposable & {
 
 /** densable `Cpr`. */
 export function createPromptSubmitEntries(): PromptSubmitEntries {
+  const { waitersByUuid } = getPromptSubmitEntriesState()
   const owned = new Map<
     ReturnType<typeof Promise.withResolvers<void>>,
     string
@@ -72,30 +92,23 @@ export function registerPromptSubmitEntry(
   return stamped?.uuid ? entries.awaitEntry(stamped.uuid) : Promise.resolve()
 }
 
-/**
- * densable `jq` / `pG` / `ipr` — session-start latch Unn awaits unless
- * the uuid is ahead of session start. Unset when no session-start is in flight.
- */
-let sessionStartLatch: Promise<void> | undefined
-let sessionStartResolve: (() => void) | undefined
-const aheadOfSessionStartUuids = new Set<string>()
-
 /** densable `ipr` — start or reuse the session-start promise. */
 export function beginSessionStartLatch(): { complete: () => void } {
-  if (sessionStartLatch && sessionStartResolve) {
+  const state = getPromptSubmitEntriesState()
+  if (state.sessionStartLatch && state.sessionStartResolve) {
     return { complete: () => {} }
   }
   const pending = Promise.withResolvers<void>()
-  sessionStartLatch = pending.promise
-  sessionStartResolve = pending.resolve
+  state.sessionStartLatch = pending.promise
+  state.sessionStartResolve = pending.resolve
   const owned = pending.promise
   return {
     complete() {
-      if (sessionStartLatch !== owned) return
+      if (state.sessionStartLatch !== owned) return
       pending.resolve()
-      sessionStartLatch = undefined
-      sessionStartResolve = undefined
-      aheadOfSessionStartUuids.clear()
+      state.sessionStartLatch = undefined
+      state.sessionStartResolve = undefined
+      state.aheadOfSessionStartUuids.clear()
     },
   }
 }
@@ -108,16 +121,20 @@ export function markAheadOfSessionStart(
   uuid: string,
   rootEvent?: string,
 ): void {
-  if (!sessionStartLatch) return
+  const state = getPromptSubmitEntriesState()
+  if (!state.sessionStartLatch) return
   if (rootEvent !== undefined && rootEvent !== 'session.start') return
-  aheadOfSessionStartUuids.add(uuid)
+  state.aheadOfSessionStartUuids.add(uuid)
 }
 
 export function isAheadOfSessionStart(uuid?: string): boolean {
-  return uuid !== undefined && aheadOfSessionStartUuids.has(uuid)
+  return (
+    uuid !== undefined &&
+    getPromptSubmitEntriesState().aheadOfSessionStartUuids.has(uuid)
+  )
 }
 
 /** densable `jq.get()`. */
 export function getPromptSubmitLatch(): Promise<void> | undefined {
-  return sessionStartLatch
+  return getPromptSubmitEntriesState().sessionStartLatch
 }

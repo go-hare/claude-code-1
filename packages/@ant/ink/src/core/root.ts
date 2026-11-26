@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Stream } from 'stream'
 import type { FrameEvent } from './frame.js'
 import Ink, { type Options as InkOptions } from './ink.js'
-import instances from './instances.js'
+import { inkSessionHost, Ns, runWithInkSessionHost } from './instances.js'
 import { isNativeCursorEnabled } from './terminal.js'
 
 export type RenderOptions = {
@@ -109,20 +109,23 @@ export const renderSync = (
     nativeCursor: opts.nativeCursor ?? isNativeCursorEnabled(),
   }
 
+  const mountedHost = inkSessionHost()
+  const registry = Ns()
   const instance: Ink = getInstance(
     inkOptions.stdout,
     () => new Ink(inkOptions),
+    registry,
   )
 
   instance.render(node)
 
   return {
     rerender: instance.render,
-    unmount() {
-      instance.unmount()
+    unmount(error?: Error | number | null) {
+      runWithInkSessionHost(mountedHost, () => instance.unmount(error))
     },
     waitUntilExit: instance.waitUntilExit,
-    cleanup: () => instances.delete(inkOptions.stdout),
+    cleanup: () => registry.delete(inkOptions.stdout),
     handoffRawMode: () => instance.handoffRawMode(),
   }
 }
@@ -132,8 +135,8 @@ const wrappedRender = async (
   options?: NodeJS.WriteStream | RenderOptions,
 ): Promise<Instance> => {
   // densable pAS: wait out claimed standalone consent render before mounting.
-  while (instances.pendingStandaloneRender) {
-    await instances.pendingStandaloneRender
+  while (Ns().pendingStandaloneRender) {
+    await Ns().pendingStandaloneRender
   }
   // Preserve the microtask boundary that `await loadYoga()` used to provide.
   // Without it, the first render fires synchronously before async startup work
@@ -171,9 +174,11 @@ export async function createRoot({
   // See wrappedRender — preserve microtask boundary from the old WASM await.
   await Promise.resolve()
   // densable createRoot: while (Yp.pendingStandaloneRender) await …
-  while (instances.pendingStandaloneRender) {
-    await instances.pendingStandaloneRender
+  while (Ns().pendingStandaloneRender) {
+    await Ns().pendingStandaloneRender
   }
+  const mountedHost = inkSessionHost()
+  const registry = Ns()
   const instance = new Ink({
     stdout,
     stdin,
@@ -188,13 +193,13 @@ export async function createRoot({
     newRenderer,
   })
 
-  // Register in the instances map so that code that looks up the Ink
+  // Register in the active host's Ns() map so that code that looks up the Ink
   // instance by stdout (e.g. external editor pause/resume) can find it.
-  instances.set(stdout, instance)
+  registry.set(stdout, instance)
 
   return {
     render: node => instance.render(node),
-    unmount: () => instance.unmount(),
+    unmount: () => runWithInkSessionHost(mountedHost, () => instance.unmount()),
     waitUntilExit: () => instance.waitUntilExit(),
     handoffRawMode: () => instance.handoffRawMode(),
     handoffAltScreen: () => instance.handoffAltScreen(),
@@ -217,12 +222,13 @@ const getOptions = (
 const getInstance = (
   stdout: NodeJS.WriteStream,
   createInstance: () => Ink,
+  registry = Ns(),
 ): Ink => {
-  let instance = instances.get(stdout)
+  let instance = registry.get(stdout)
 
   if (!instance) {
     instance = createInstance()
-    instances.set(stdout, instance)
+    registry.set(stdout, instance)
   }
 
   return instance

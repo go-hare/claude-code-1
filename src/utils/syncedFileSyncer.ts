@@ -10,6 +10,12 @@
 
 import { mkdir, readdir, lstat, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionHost.js'
 
 /** Official xxe — 25 MiB. */
 export const MAX_WORKING_FILE_BYTES = 26_214_400
@@ -751,15 +757,29 @@ export type SyncedFileSyncerHandle = {
   getSeenState: () => ReadonlyMap<string, number>
 }
 
-let active: SyncedFileSyncerHandle | null = null
+const fallbackSyncedFileSyncerHost: object = {}
+const activeSyncerByHost = new HostSlot<{
+  active: SyncedFileSyncerHandle | null
+}>(() => ({ active: null }))
+
+function getActiveSyncerSlot(): { active: SyncedFileSyncerHandle | null } {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return activeSyncerByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return activeSyncerByHost.of(fallbackSyncedFileSyncerHost)
+}
 
 export function stopActiveSyncerForTest(): void {
-  active?.stop()
-  active = null
+  const slot = getActiveSyncerSlot()
+  slot.active?.stop()
+  slot.active = null
 }
 
 export function getActiveSyncerForTest(): SyncedFileSyncerHandle | null {
-  return active
+  return getActiveSyncerSlot().active
 }
 
 async function ensureSyncRoot(root: string): Promise<boolean> {
@@ -919,10 +939,21 @@ export async function startSyncedFileSyncer(
     }
   }
 
+  const hostSlot = getActiveSyncerSlot()
+  const capturedSession = getActiveSessionFromAls()
   const initialReconcile = flush()
   const timer = setInterval(() => {
     if (concurrentScans > 0 || Date.now() < pollBackoffUntil) return
-    void flush()
+    if (
+      capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+    ) {
+      runWithSession(capturedSession, () => {
+        void flush()
+      })
+    } else {
+      void flush()
+    }
   }, WORKING_SYNC_POLL_MS)
   timer.unref?.()
 
@@ -934,10 +965,10 @@ export async function startSyncedFileSyncer(
     stop() {
       stopped = true
       clearInterval(timer)
-      if (active === handle) active = null
+      if (hostSlot.active === handle) hostSlot.active = null
     },
     getSeenState: () => seen,
   }
-  active = handle
+  hostSlot.active = handle
   return handle
 }

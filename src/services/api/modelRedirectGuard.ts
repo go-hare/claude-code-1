@@ -21,6 +21,7 @@ import {
   isEnvTruthy,
 } from 'src/utils/envUtils.js'
 import { getNoProxy, getProxyUrl, shouldBypassProxy } from 'src/utils/proxy.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionHost.js'
 
 /** Official `vr`: Anthropic first-party API hostnames subject to redirect check. */
 const ANTHROPIC_API_HOST_RE = /^api(-staging)?\.anthropic\.com$/i
@@ -44,7 +45,9 @@ export type ModelRedirectTrackingState = {
 }
 
 const redirectTrackingAls = new AsyncLocalStorage<ModelRedirectTrackingState>()
-const countedRedirects = new Set<string>()
+const countedRedirectsByHost = new HostSlot<Set<string>>(
+  () => new Set<string>(),
+)
 
 /** Official `oVl`: run callback under ALS tracking whether any model call redirect was refused. */
 export function runWithModelRedirectTracking<T>(
@@ -69,7 +72,7 @@ export function getModelRedirectTrackingState():
 }
 
 export function resetApiRedirectCountsForTests(): void {
-  countedRedirects.clear()
+  countedRedirectsByHost.peek(getBootstrapSessionHost())?.clear()
 }
 
 /** Official `DUr(e)`: true when URL hostname is `api.anthropic.com` or `api-staging.anthropic.com`. */
@@ -112,6 +115,9 @@ export function recordApiRedirect(
           : 'other'
         : 'unknown'
     const bucket = `${isSettings ? 'settings_request' : kind}_${originLabel}_origin`
+    const countedRedirects = countedRedirectsByHost.of(
+      getBootstrapSessionHost(),
+    )
     if (isAnthropicApiHost(requestUrl) && !countedRedirects.has(bucket)) {
       countedRedirects.add(bucket)
       logEvent('tengu_api_redirect', {

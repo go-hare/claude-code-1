@@ -3,6 +3,8 @@
  * guardrails (aligned with official `chunk-sks3v3p9` `Z`/`Q`/`ee`/`fen`/`le`/`ue`).
  */
 
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
+
 const MODIFIER_ALIASES: Record<string, 'ctrl' | 'alt' | 'shift' | 'meta'> = {
   meta: 'meta',
   super: 'meta',
@@ -229,11 +231,12 @@ export type KeyChordValidationOptions = {
 }
 
 /**
- * Active held chords across concurrent computer-use calls in this process.
+ * Active held chords across concurrent computer-use calls per host.
  */
-const activeHeldChords = new Set<string[]>()
+const activeHeldChordsByHost = new HostSlot(() => new Set<string[]>())
 
 export function getActiveHeldKeys(): string[] {
+  const activeHeldChords = activeHeldChordsByHost.of(getBootstrapSessionHost())
   const out: string[] = []
   for (const chord of activeHeldChords) {
     out.push(...chord)
@@ -242,6 +245,7 @@ export function getActiveHeldKeys(): string[] {
 }
 
 export function trackHeldChord(keys: readonly string[]): () => void {
+  const activeHeldChords = activeHeldChordsByHost.of(getBootstrapSessionHost())
   const copy = [...keys]
   activeHeldChords.add(copy)
   return () => {

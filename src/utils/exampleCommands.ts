@@ -1,10 +1,10 @@
-import memoize from 'lodash-es/memoize.js'
 import { getCwd } from '../utils/cwd.js'
 import { getCurrentProjectConfig, saveCurrentProjectConfig } from './config.js'
 import { env } from './env.js'
 import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { getIsGit, gitExe } from './git.js'
 import { logError } from './log.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import { getGitEmail } from './user.js'
 
 // Patterns that mark a file as non-core (auto-generated, dependency, or config).
@@ -150,11 +150,81 @@ export function leftoverJee(text: string): number {
   return hash
 }
 
+const fallbackExampleRootObj: object = {}
+const fallbackExampleSession = { root: fallbackExampleRootObj }
+
+function getActiveExampleSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) {
+      return session
+    }
+  } catch {
+    // Fall back to module-local sentinel if sessionHost is mocked
+  }
+  return fallbackExampleSession
+}
+
+function resolveExampleMemoKey(key: unknown): unknown {
+  return key === undefined ? getCwd() : key
+}
+
+class ExampleCwdMemoMap<R> extends Map<unknown, R> {
+  override get(key: unknown): R | undefined {
+    return super.get(resolveExampleMemoKey(key))
+  }
+  override has(key: unknown): boolean {
+    return super.has(resolveExampleMemoKey(key))
+  }
+  override set(key: unknown, value: R): this {
+    return super.set(resolveExampleMemoKey(key), value)
+  }
+  override delete(key: unknown): boolean {
+    return super.delete(resolveExampleMemoKey(key))
+  }
+}
+
+function createRootSessionZeroArgMemo<R>(compute: () => R) {
+  const slot = new RootSessionSlot<Map<unknown, R>>(
+    () => new ExampleCwdMemoMap(),
+  )
+  const fn = Object.assign(
+    (): R => {
+      const cache = slot.of(getActiveExampleSession())
+      const key = getCwd()
+      if (cache.has(key)) {
+        return cache.get(key)!
+      }
+      const result = compute()
+      cache.set(key, result)
+      return result
+    },
+    {
+      cache: new Map<unknown, R>(),
+    },
+  )
+  Object.defineProperty(fn, 'cache', {
+    configurable: true,
+    enumerable: true,
+    get(): Map<unknown, R> {
+      return slot.of(getActiveExampleSession())
+    },
+    set(next: Map<unknown, R>): void {
+      const cache = slot.of(getActiveExampleSession())
+      cache.clear()
+      for (const [k, v] of next) {
+        cache.set(k, v)
+      }
+    },
+  })
+  return fn
+}
+
 /**
  * densable `Slo(q())`. Gold: `o=Math.abs(jee(e))`, file `r[o%r.length]`,
  * command `h[(o>>>8)%h.length]`. `e` is cwd (`q()`).
  */
-export const getExampleCommandFromCache = memoize(() => {
+export const getExampleCommandFromCache = createRootSessionZeroArgMemo(() => {
   const seed = Math.abs(leftoverJee(getCwd()))
   const files = getCurrentProjectConfig().exampleFiles ?? []
   const frequentFile = files[seed % files.length] ?? '<filepath>'
@@ -171,26 +241,28 @@ export const getExampleCommandFromCache = memoize(() => {
   return `Try "${commands[(seed >>> 8) % commands.length]}"`
 })
 
-export const refreshExampleCommands = memoize(async (): Promise<void> => {
-  const projectConfig = getCurrentProjectConfig()
-  const now = Date.now()
-  const lastGenerated = projectConfig.exampleFilesGeneratedAt ?? 0
+export const refreshExampleCommands = createRootSessionZeroArgMemo(
+  async (): Promise<void> => {
+    const projectConfig = getCurrentProjectConfig()
+    const now = Date.now()
+    const lastGenerated = projectConfig.exampleFilesGeneratedAt ?? 0
 
-  // Regenerate examples if they're over a week old
-  if (now - lastGenerated > ONE_WEEK_IN_MS) {
-    projectConfig.exampleFiles = []
-  }
+    // Regenerate examples if they're over a week old
+    if (now - lastGenerated > ONE_WEEK_IN_MS) {
+      projectConfig.exampleFiles = []
+    }
 
-  // If no example files cached, kickstart fetch in background
-  if (!projectConfig.exampleFiles?.length) {
-    void getFrequentlyModifiedFiles().then(files => {
-      if (files.length) {
-        saveCurrentProjectConfig(current => ({
-          ...current,
-          exampleFiles: files,
-          exampleFilesGeneratedAt: Date.now(),
-        }))
-      }
-    })
-  }
-})
+    // If no example files cached, kickstart fetch in background
+    if (!projectConfig.exampleFiles?.length) {
+      void getFrequentlyModifiedFiles().then(files => {
+        if (files.length) {
+          saveCurrentProjectConfig(current => ({
+            ...current,
+            exampleFiles: files,
+            exampleFilesGeneratedAt: Date.now(),
+          }))
+        }
+      })
+    }
+  },
+)

@@ -30,6 +30,7 @@ import { getSessionId } from '../../bootstrap/state.js';
 import type { Tool, ToolUseContext } from '../../Tool.js';
 import { logForDebugging } from '../debug.js';
 import { detectImageFormatFromBase64 } from '../imageResizer.js';
+import { getActiveSessionFromAls, getBootstrapSessionHost, HostSlot, runWithSession } from '../sessionHost.js';
 import { checkComputerUseLock, tryAcquireComputerUseLock } from './computerUseLock.js';
 import { registerEscHotkey } from './escHotkey.js';
 import { getChicagoCoordinateMode } from './gates.js';
@@ -56,13 +57,24 @@ type Binding = {
  * its internal screenshot blob survives, but `ToolUseContext` is per-call.
  * Tests will need to either inject the cache or run serially.
  */
-let binding: Binding | undefined;
-let currentToolUseContext: ToolUseContext | undefined;
+type WrapperHostState = {
+  binding: Binding | undefined;
+  currentToolUseContext: ToolUseContext | undefined;
+};
+
+const wrapperHostSlot = new HostSlot<WrapperHostState>(() => ({
+  binding: undefined,
+  currentToolUseContext: undefined,
+}));
+
+function getWrapperHostState(): WrapperHostState {
+  return wrapperHostSlot.of(getBootstrapSessionHost());
+}
 
 function tuc(): ToolUseContext {
   // Safe: `binding` is only populated when `currentToolUseContext` is set.
   // Called only from within `ctx` callbacks, which only fire during dispatch.
-  return currentToolUseContext!;
+  return getWrapperHostState().currentToolUseContext!;
 }
 
 function formatLockHeld(holder: string): string {
@@ -243,9 +255,17 @@ export function buildSessionContext(): ComputerUseSessionContext {
         // injection can't dismiss dialogs with Escape). The CGEventTap's
         // CFRunLoopSource is processed by the drainRunLoop pump, so this
         // holds a pump retain until unregisterEscHotkey() in cleanup.ts.
+        const capturedSession = getActiveSessionFromAls();
         const escRegistered = registerEscHotkey(() => {
-          logForDebugging('[cu-esc] user escape, aborting turn');
-          tuc().abortController.abort();
+          const abortTurn = (): void => {
+            logForDebugging('[cu-esc] user escape, aborting turn');
+            tuc().abortController.abort();
+          };
+          if (capturedSession !== undefined && getActiveSessionFromAls() !== capturedSession) {
+            runWithSession(capturedSession, abortTurn);
+          } else {
+            abortTurn();
+          }
         });
         tuc().sendOSNotification?.({
           message: escRegistered
@@ -261,16 +281,19 @@ export function buildSessionContext(): ComputerUseSessionContext {
 }
 
 function getOrBind(): Binding {
-  if (binding) return binding;
+  const hostState = getWrapperHostState();
+  if (hostState.binding) return hostState.binding;
   const ctx = buildSessionContext();
   // Wire live session grantFlags.systemKeyCombos into hostAdapter's executor
   // (official 2.1.328 `le`: `!o?.ctx.getGrantFlags().systemKeyCombos`).
-  setComputerUseSystemKeyCombosReader(() => (currentToolUseContext ? ctx.getGrantFlags().systemKeyCombos : false));
-  binding = {
+  setComputerUseSystemKeyCombosReader(() =>
+    getWrapperHostState().currentToolUseContext ? ctx.getGrantFlags().systemKeyCombos : false,
+  );
+  hostState.binding = {
     ctx,
     dispatch: bindSessionContext(getComputerUseHostAdapter(), getChicagoCoordinateMode(), ctx),
   };
-  return binding;
+  return hostState.binding;
 }
 
 /**
@@ -284,7 +307,7 @@ type ComputerUseMCPToolOverrides = ReturnType<typeof getComputerUseMCPRenderingO
 
 export function getComputerUseMCPToolOverrides(toolName: string): ComputerUseMCPToolOverrides {
   const call: CallOverride = async (args, context: ToolUseContext) => {
-    currentToolUseContext = context;
+    getWrapperHostState().currentToolUseContext = context;
     const { dispatch } = getOrBind();
 
     const { telemetry, ...result } = await dispatch(toolName, args);

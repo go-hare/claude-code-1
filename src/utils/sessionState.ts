@@ -43,6 +43,7 @@ import { isEnvTruthy } from './envUtils.js'
 import { NestedChainIdleTracker } from './nestedChainIdle.js'
 import type { PermissionMode } from './permissions/PermissionMode.js'
 import { enqueueSdkEvent } from './sdkEventQueue.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 // CCR external_metadata keys — push in onChangeAppState, restore in
 // externalMetadataToAppState.
@@ -90,62 +91,93 @@ type SessionInternalMetadataChangedListener = (
   metadata: Record<string, unknown>,
 ) => void
 
-let stateListener: SessionStateChangedListener | null = null
-let metadataListener: SessionMetadataChangedListener | null = null
-let permissionModeListener: PermissionModeChangedListener | null = null
-let waitingOnUserListener: WaitingOnUserChangedListener | null = null
-let internalMetadataListener: SessionInternalMetadataChangedListener | null =
-  null
-let workerPermissionModeRecordEnabled = false
-let ultracodeActiveSent: boolean | undefined = false
-let ultracodeActiveWritten = false
+type SessionStateHostState = {
+  stateListener: SessionStateChangedListener | null
+  metadataListener: SessionMetadataChangedListener | null
+  permissionModeListener: PermissionModeChangedListener | null
+  waitingOnUserListener: WaitingOnUserChangedListener | null
+  internalMetadataListener: SessionInternalMetadataChangedListener | null
+  workerPermissionModeRecordEnabled: boolean
+  ultracodeActiveSent: boolean | undefined
+  ultracodeActiveWritten: boolean
+  /**
+   * Official Imn nested-chain idle densable tracker (per-host).
+   * waitingOnUser = requires_action && mainLoopRefcount - nestedBlocked <= 0.
+   */
+  nestedChainIdleTracker: NestedChainIdleTracker
+  hasPendingAction: boolean
+  currentState: SessionState
+  currentAutomationState: AutomationStateMetadata | null
+  currentMetadata: SessionExternalMetadata
+}
 
-/**
- * Official Imn nested-chain idle densable tracker (module singleton).
- * waitingOnUser = requires_action && mainLoopRefcount - nestedBlocked <= 0.
- */
-const nestedChainIdleTracker = new NestedChainIdleTracker({
-  onWaitingOnUserChanged: waiting => {
-    waitingOnUserListener?.(waiting)
-  },
+const sessionStateHostSlot = new HostSlot<SessionStateHostState>(() => {
+  const hostState: SessionStateHostState = {
+    stateListener: null,
+    metadataListener: null,
+    permissionModeListener: null,
+    waitingOnUserListener: null,
+    internalMetadataListener: null,
+    workerPermissionModeRecordEnabled: false,
+    ultracodeActiveSent: false,
+    ultracodeActiveWritten: false,
+    nestedChainIdleTracker: new NestedChainIdleTracker({
+      onWaitingOnUserChanged: waiting => {
+        hostState.waitingOnUserListener?.(waiting)
+      },
+    }),
+    hasPendingAction: false,
+    currentState: 'idle',
+    currentAutomationState: null,
+    currentMetadata: {},
+  }
+  return hostState
 })
+
+function getSessionStateHost(): SessionStateHostState {
+  return sessionStateHostSlot.of(getBootstrapSessionHost())
+}
 
 export function setSessionStateChangedListener(
   cb: SessionStateChangedListener | null,
 ): void {
-  stateListener = cb
+  getSessionStateHost().stateListener = cb
 }
 
 /** Official onWaitingOnUserChanged densable consumer registration. */
 export function setWaitingOnUserChangedListener(
   cb: WaitingOnUserChangedListener | null,
 ): void {
-  waitingOnUserListener = cb
+  getSessionStateHost().waitingOnUserListener = cb
 }
 
 /** Official waitingOnUser densable — requires_action with no open main-loop refs beyond nested blocks. */
 export function isWaitingOnUser(): boolean {
-  return nestedChainIdleTracker.waitingOnUser
+  return getSessionStateHost().nestedChainIdleTracker.waitingOnUser
 }
 
 /** Official setMainLoopRefcount densable. */
 export function setMainLoopRefcount(n: number): void {
-  nestedChainIdleTracker.setMainLoopRefcount(n)
+  getSessionStateHost().nestedChainIdleTracker.setMainLoopRefcount(n)
 }
 
 /** Official notifyNestedPromptBlocking densable. */
 export function notifyNestedPromptBlocking(agentId: string): void {
-  nestedChainIdleTracker.notifyNestedPromptBlocking(agentId)
+  getSessionStateHost().nestedChainIdleTracker.notifyNestedPromptBlocking(
+    agentId,
+  )
 }
 
 /** Official notifyNestedPromptUnblocking densable. */
 export function notifyNestedPromptUnblocking(agentId: string): void {
-  nestedChainIdleTracker.notifyNestedPromptUnblocking(agentId)
+  getSessionStateHost().nestedChainIdleTracker.notifyNestedPromptUnblocking(
+    agentId,
+  )
 }
 
 /** Official dropNestedBlockedChain densable. */
 export function dropNestedBlockedChain(agentId: string): void {
-  nestedChainIdleTracker.dropNestedBlockedChain(agentId)
+  getSessionStateHost().nestedChainIdleTracker.dropNestedBlockedChain(agentId)
 }
 
 /**
@@ -153,7 +185,7 @@ export function dropNestedBlockedChain(agentId: string): void {
  * (e.g. after one of several concurrent parks resolves).
  */
 export function reteeWaitingOnUser(): void {
-  nestedChainIdleTracker.reteeWaitingOnUser()
+  getSessionStateHost().nestedChainIdleTracker.reteeWaitingOnUser()
 }
 
 /**
@@ -161,7 +193,7 @@ export function reteeWaitingOnUser(): void {
  * metadata without a full state transition (multi-prompt race).
  */
 export function republishPendingAction(details: RequiresActionDetails): void {
-  hasPendingAction = true
+  getSessionStateHost().hasPendingAction = true
   notifySessionMetadataChanged({ pending_action: details })
 }
 
@@ -169,7 +201,7 @@ export function setSessionMetadataChangedListener(
   cb: SessionMetadataChangedListener | null,
   options?: SessionMetadataListenerOptions,
 ): void {
-  metadataListener = cb
+  getSessionStateHost().metadataListener = cb
   if (!cb || !options?.replayCurrent) {
     return
   }
@@ -192,13 +224,8 @@ export function setSessionMetadataChangedListener(
 export function setPermissionModeChangedListener(
   cb: PermissionModeChangedListener | null,
 ): void {
-  permissionModeListener = cb
+  getSessionStateHost().permissionModeListener = cb
 }
-
-let hasPendingAction = false
-let currentState: SessionState = 'idle'
-let currentAutomationState: AutomationStateMetadata | null = null
-let currentMetadata: SessionExternalMetadata = {}
 
 function normalizeAutomationState(
   state: AutomationStateMetadata | null | undefined,
@@ -225,7 +252,8 @@ function automationStateKey(state: AutomationStateMetadata | null): string {
 }
 
 function applyMetadataUpdate(metadata: SessionExternalMetadata): void {
-  const nextMetadata = { ...currentMetadata }
+  const hostState = getSessionStateHost()
+  const nextMetadata = { ...hostState.currentMetadata }
   for (const key of Object.keys(metadata) as Array<
     keyof SessionExternalMetadata
   >) {
@@ -236,37 +264,40 @@ function applyMetadataUpdate(metadata: SessionExternalMetadata): void {
     }
     ;(nextMetadata as Record<string, unknown>)[key] = value
   }
-  currentMetadata = nextMetadata
+  hostState.currentMetadata = nextMetadata
 }
 
 export function getSessionMetadataSnapshot(): SessionExternalMetadata {
-  const snapshot: SessionExternalMetadata = { ...currentMetadata }
-  if (currentAutomationState) {
-    snapshot.automation_state = { ...currentAutomationState }
-  } else if ('automation_state' in currentMetadata) {
-    snapshot.automation_state = currentMetadata.automation_state ?? null
+  const hostState = getSessionStateHost()
+  const snapshot: SessionExternalMetadata = { ...hostState.currentMetadata }
+  if (hostState.currentAutomationState) {
+    snapshot.automation_state = { ...hostState.currentAutomationState }
+  } else if ('automation_state' in hostState.currentMetadata) {
+    snapshot.automation_state =
+      hostState.currentMetadata.automation_state ?? null
   }
   return snapshot
 }
 
 export function getSessionState(): SessionState {
-  return currentState
+  return getSessionStateHost().currentState
 }
 
 export function notifySessionStateChanged(
   state: SessionState,
   details?: RequiresActionDetails,
 ): void {
-  currentState = state
+  const hostState = getSessionStateHost()
+  hostState.currentState = state
   // Official Imn.notifyStateChanged — keep nested-chain waitingOnUser in sync.
-  nestedChainIdleTracker.setState(state)
-  stateListener?.(state, details)
+  hostState.nestedChainIdleTracker.setState(state)
+  hostState.stateListener?.(state, details)
 
   // Mirror details into external_metadata so GetSession carries the
   // pending-action context without proto changes. Cleared via RFC 7396
   // null on the next non-blocked transition.
   if (state === 'requires_action' && details) {
-    hasPendingAction = true
+    hostState.hasPendingAction = true
     // Official GMg — blocked post_turn_summary for host UIs (CCR sidebar).
     // Lazy require avoids bootstrap cycles (classifierSummary → sessionState types).
     let postTurn: SessionExternalMetadata['post_turn_summary']
@@ -287,8 +318,8 @@ export function notifySessionStateChanged(
       pending_action: details,
       ...(postTurn !== undefined ? { post_turn_summary: postTurn } : {}),
     })
-  } else if (hasPendingAction) {
-    hasPendingAction = false
+  } else if (hostState.hasPendingAction) {
+    hostState.hasPendingAction = false
     notifySessionMetadataChanged({
       pending_action: null,
       post_turn_summary: null,
@@ -303,8 +334,8 @@ export function notifySessionStateChanged(
     let completedSummary: SessionExternalMetadata['post_turn_summary']
     // Capture any prior task_summary before clear (LLM completed context).
     const priorTaskSummary =
-      typeof currentMetadata.task_summary === 'string'
-        ? currentMetadata.task_summary
+      typeof hostState.currentMetadata.task_summary === 'string'
+        ? hostState.currentMetadata.task_summary
         : null
     try {
       const {
@@ -401,11 +432,12 @@ export function notifySessionStateChanged(
 export function notifySessionMetadataChanged(
   metadata: SessionExternalMetadata,
 ): void {
+  const hostState = getSessionStateHost()
   applyMetadataUpdate(metadata)
-  metadataListener?.(metadata)
-  if ('is_ultracode_active' in metadata && metadataListener) {
-    ultracodeActiveSent = metadata.is_ultracode_active === true
-    ultracodeActiveWritten = true
+  hostState.metadataListener?.(metadata)
+  if ('is_ultracode_active' in metadata && hostState.metadataListener) {
+    hostState.ultracodeActiveSent = metadata.is_ultracode_active === true
+    hostState.ultracodeActiveWritten = true
   }
   // densable 2.1.211 notifyMetadataChanged: stream system/task_summary so
   // non-CCR Hosts mirror external_metadata.task_summary (detail null = clear).
@@ -430,16 +462,18 @@ export function notifySessionMetadataChanged(
 export function notifyAutomationStateChanged(
   state: AutomationStateMetadata | null | undefined,
 ): void {
+  const hostState = getSessionStateHost()
   const nextState = normalizeAutomationState(state)
   if (
-    automationStateKey(nextState) === automationStateKey(currentAutomationState)
+    automationStateKey(nextState) ===
+    automationStateKey(hostState.currentAutomationState)
   ) {
     return
   }
 
-  currentAutomationState = nextState
+  hostState.currentAutomationState = nextState
   applyMetadataUpdate({ automation_state: nextState })
-  metadataListener?.({ automation_state: nextState })
+  hostState.metadataListener?.({ automation_state: nextState })
 }
 
 /**
@@ -449,19 +483,19 @@ export function notifyAutomationStateChanged(
  * silently bypass them.
  */
 export function notifyPermissionModeChanged(mode: PermissionMode): void {
-  permissionModeListener?.(mode)
+  getSessionStateHost().permissionModeListener?.(mode)
 }
 
 /** Official `Aio.enableWorkerPermissionModeRecord`. */
 export function enableWorkerPermissionModeRecord(): void {
-  workerPermissionModeRecordEnabled = true
+  getSessionStateHost().workerPermissionModeRecordEnabled = true
 }
 
 /** Official 2.1.325 `ultracodeActivePatch` (#1373). */
 export function ultracodeActivePatch(active: boolean): {
   is_ultracode_active?: boolean | null
 } {
-  return active === ultracodeActiveSent
+  return active === getSessionStateHost().ultracodeActiveSent
     ? {}
     : { is_ultracode_active: active || null }
 }
@@ -479,9 +513,10 @@ export function settleUltracodeActive(
   active: boolean,
   restored?: RestoredWorkerState,
 ): void {
-  if (!ultracodeActiveWritten) {
+  const hostState = getSessionStateHost()
+  if (!hostState.ultracodeActiveWritten) {
     const ext = restored?.external as Record<string, unknown> | null | undefined
-    ultracodeActiveSent =
+    hostState.ultracodeActiveSent =
       restored?.readFailed === true
         ? undefined
         : ext?.is_ultracode_active === true
@@ -490,38 +525,40 @@ export function settleUltracodeActive(
 }
 
 export function resetUltracodeActiveForTesting(): void {
-  ultracodeActiveSent = false
-  ultracodeActiveWritten = false
+  const hostState = getSessionStateHost()
+  hostState.ultracodeActiveSent = false
+  hostState.ultracodeActiveWritten = false
 }
 
 /** Official `Aio.isWorkerPermissionModeRecordEnabled`. */
 export function isWorkerPermissionModeRecordEnabled(): boolean {
-  return workerPermissionModeRecordEnabled
+  return getSessionStateHost().workerPermissionModeRecordEnabled
 }
 
 export function setInternalMetadataChangedListener(
   cb: SessionInternalMetadataChangedListener | null,
 ): void {
-  internalMetadataListener = cb
+  getSessionStateHost().internalMetadataListener = cb
 }
 
 /** Official `Aio.notifyInternalMetadataChanged`. */
 export function notifyInternalMetadataChanged(
   metadata: Record<string, unknown>,
 ): void {
-  internalMetadataListener?.(metadata)
+  getSessionStateHost().internalMetadataListener?.(metadata)
 }
 
 export function resetSessionStateForTests(): void {
-  stateListener = null
-  metadataListener = null
-  permissionModeListener = null
-  waitingOnUserListener = null
-  internalMetadataListener = null
-  workerPermissionModeRecordEnabled = false
-  hasPendingAction = false
-  currentState = 'idle'
-  currentAutomationState = null
-  currentMetadata = {}
-  nestedChainIdleTracker.reset()
+  const hostState = getSessionStateHost()
+  hostState.stateListener = null
+  hostState.metadataListener = null
+  hostState.permissionModeListener = null
+  hostState.waitingOnUserListener = null
+  hostState.internalMetadataListener = null
+  hostState.workerPermissionModeRecordEnabled = false
+  hostState.hasPendingAction = false
+  hostState.currentState = 'idle'
+  hostState.currentAutomationState = null
+  hostState.currentMetadata = {}
+  hostState.nestedChainIdleTracker.reset()
 }

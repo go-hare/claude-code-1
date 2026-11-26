@@ -17,6 +17,10 @@ import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
 import { createSystemMessage } from '../../utils/messages.js'
 import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
+import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../analytics/index.js'
@@ -36,15 +40,17 @@ import {
 const AUTO_MODE_SETUP_FEATURE = 'auto_mode_setup_wizard'
 
 /** densable uBo / rWs — wrapping-up latch while llg runs after scan completes */
-let autoModeSetupWrappingUp = false
+const autoModeSetupWrappingUpSlot = new RootSessionSlot<{
+  wrappingUp: boolean
+}>(() => ({ wrappingUp: false }))
 
 /** densable alg / rWs */
 export function isAutoModeSetupWrappingUp(): boolean {
-  return autoModeSetupWrappingUp
+  return autoModeSetupWrappingUpSlot.of(getBootstrapSession()).wrappingUp
 }
 
 function setAutoModeSetupWrappingUp(value: boolean): void {
-  autoModeSetupWrappingUp = value
+  autoModeSetupWrappingUpSlot.of(getBootstrapSession()).wrappingUp = value
 }
 
 /** densable Ss(...) → tip createSystemMessage */

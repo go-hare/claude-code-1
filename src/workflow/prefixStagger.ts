@@ -13,6 +13,7 @@
 import { sleep } from '../utils/sleep.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { logForDebugging } from '../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 
 /** densable m_S */
 export const WORKFLOW_PREFIX_STAGGER_DEFAULT_MS = 5000
@@ -155,18 +156,24 @@ export class WorkflowPrefixStagger {
   }
 }
 
-let singleton: WorkflowPrefixStagger | undefined
+const workflowPrefixStaggerHostSlot = new HostSlot<{
+  singleton: WorkflowPrefixStagger | undefined
+}>(() => ({
+  singleton: undefined,
+}))
 
 /** densable BZp */
 export function getWorkflowPrefixStagger(): WorkflowPrefixStagger {
-  return (singleton ??= new WorkflowPrefixStagger())
+  const hostState = workflowPrefixStaggerHostSlot.of(getBootstrapSessionHost())
+  return (hostState.singleton ??= new WorkflowPrefixStagger())
 }
 
 /** @internal tests */
 export function resetWorkflowPrefixStaggerForTests(
   instance?: WorkflowPrefixStagger,
 ): void {
-  singleton = instance
+  workflowPrefixStaggerHostSlot.of(getBootstrapSessionHost()).singleton =
+    instance
 }
 
 /** densable $Zp — env value or default 5000 */

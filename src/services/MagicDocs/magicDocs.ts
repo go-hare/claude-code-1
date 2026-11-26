@@ -26,6 +26,10 @@ import {
   hasToolCallsInLastAssistantTurn,
 } from '../../utils/messages.js'
 import { sequential } from '../../utils/sequential.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { buildMagicDocsUpdatePrompt } from './prompts.js'
 
 // Magic Doc header pattern: # MAGIC DOC: [title]
@@ -34,15 +38,27 @@ const MAGIC_DOC_HEADER_PATTERN = /^#\s*MAGIC\s+DOC:\s*(.+)$/im
 // Pattern to match italics on the line immediately after the header
 const ITALICS_PATTERN = /^[_*](.+?)[_*]\s*$/m
 
-// Track magic docs
+// Track magic docs per root session
 type MagicDocInfo = {
   path: string
 }
 
-const trackedMagicDocs = new Map<string, MagicDocInfo>()
+type MagicDocsSessionState = {
+  trackedMagicDocs: Map<string, MagicDocInfo>
+  updateMagicDocs: (context: REPLHookContext) => Promise<void>
+}
+
+const magicDocsStateSlot = new RootSessionSlot<MagicDocsSessionState>(() => ({
+  trackedMagicDocs: new Map<string, MagicDocInfo>(),
+  updateMagicDocs: sequential(runUpdateMagicDocs),
+}))
+
+function getMagicDocsState(): MagicDocsSessionState {
+  return magicDocsStateSlot.of(getBootstrapSession())
+}
 
 export function clearTrackedMagicDocs(): void {
-  trackedMagicDocs.clear()
+  getMagicDocsState().trackedMagicDocs.clear()
 }
 
 /**
@@ -85,6 +101,7 @@ export function detectMagicDocHeader(
  * Only registers once per file path - the hook always reads latest content
  */
 export function registerMagicDoc(filePath: string): void {
+  const { trackedMagicDocs } = getMagicDocsState()
   // Only register if not already tracked
   if (!trackedMagicDocs.has(filePath)) {
     trackedMagicDocs.set(filePath, {
@@ -146,7 +163,7 @@ async function updateMagicDoc(
       isFsInaccessible(e) ||
       (e instanceof Error && e.message.startsWith('File does not exist'))
     ) {
-      trackedMagicDocs.delete(docInfo.path)
+      getMagicDocsState().trackedMagicDocs.delete(docInfo.path)
       return
     }
     throw e
@@ -156,7 +173,7 @@ async function updateMagicDoc(
   const detected = detectMagicDocHeader(currentDoc)
   if (!detected) {
     // File no longer has magic doc header, remove from tracking
-    trackedMagicDocs.delete(docInfo.path)
+    getMagicDocsState().trackedMagicDocs.delete(docInfo.path)
     return
   }
 
@@ -214,9 +231,7 @@ async function updateMagicDoc(
 /**
  * Magic Docs post-sampling hook that updates all tracked Magic Docs
  */
-const updateMagicDocs = sequential(async function (
-  context: REPLHookContext,
-): Promise<void> {
+async function runUpdateMagicDocs(context: REPLHookContext): Promise<void> {
   const { messages, querySource } = context
 
   if (querySource !== 'repl_main_thread') {
@@ -229,6 +244,7 @@ const updateMagicDocs = sequential(async function (
     return
   }
 
+  const { trackedMagicDocs } = getMagicDocsState()
   const docCount = trackedMagicDocs.size
   if (docCount === 0) {
     return
@@ -237,7 +253,7 @@ const updateMagicDocs = sequential(async function (
   for (const docInfo of Array.from(trackedMagicDocs.values())) {
     await updateMagicDoc(docInfo, context)
   }
-})
+}
 
 export async function initMagicDocs(): Promise<void> {
   if (process.env.USER_TYPE === 'ant') {
@@ -249,6 +265,8 @@ export async function initMagicDocs(): Promise<void> {
       }
     })
 
-    registerPostSamplingHook(updateMagicDocs)
+    registerPostSamplingHook(context =>
+      getMagicDocsState().updateMagicDocs(context),
+    )
   }
 }

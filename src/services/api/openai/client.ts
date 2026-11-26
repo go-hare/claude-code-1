@@ -2,6 +2,7 @@ import OpenAI from 'openai'
 import { openaiAdapter } from 'src/services/providerUsage/adapters/openai.js'
 import { updateProviderBuckets } from 'src/services/providerUsage/store.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
+import { getBootstrapSessionHost, HostSlot } from 'src/utils/sessionRoot.js'
 
 /**
  * Environment variables:
@@ -12,7 +13,9 @@ import { getProxyFetchOptions } from 'src/utils/proxy.js'
  * OPENAI_PROJECT_ID: Optional. Project ID.
  */
 
-let cachedClient: OpenAI | null = null
+const openAIClientHostSlot = new HostSlot<{ cachedClient: OpenAI | null }>(
+  () => ({ cachedClient: null }),
+)
 
 /**
  * Wrap a fetch so that every response's rate-limit headers are fed into the
@@ -41,7 +44,8 @@ export function getOpenAIClient(options?: {
   fetchOverride?: typeof fetch
   source?: string
 }): OpenAI {
-  if (cachedClient) return cachedClient
+  const hostState = openAIClientHostSlot.of(getBootstrapSessionHost())
+  if (hostState.cachedClient) return hostState.cachedClient
 
   const apiKey = process.env.OPENAI_API_KEY || ''
   const baseURL = process.env.OPENAI_BASE_URL
@@ -66,7 +70,7 @@ export function getOpenAIClient(options?: {
   })
 
   if (!options?.fetchOverride) {
-    cachedClient = client
+    hostState.cachedClient = client
   }
 
   return client
@@ -74,5 +78,8 @@ export function getOpenAIClient(options?: {
 
 /** Clear the cached client (useful when env vars change). */
 export function clearOpenAIClientCache(): void {
-  cachedClient = null
+  const hostState = openAIClientHostSlot.peek(getBootstrapSessionHost())
+  if (hostState) {
+    hostState.cachedClient = null
+  }
 }

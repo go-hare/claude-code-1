@@ -1,5 +1,6 @@
 // Auto mode state functions — lives in its own module so callers can
 // conditionally require() it on feature('TRANSCRIPT_CLASSIFIER').
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 export type AutoModeState = {
   active: boolean
@@ -20,30 +21,37 @@ export function createAutoModeState(): AutoModeState {
   }
 }
 
-let autoModeState = createAutoModeState()
+// Official 2.1.331 [W-068]: per-host AutoModeState slot.
+const autoModeStateByHost = new HostSlot<{ state: AutoModeState }>(() => ({
+  state: createAutoModeState(),
+}))
+
+function getAutoModeState(): AutoModeState {
+  return autoModeStateByHost.of(getBootstrapSessionHost()).state
+}
 
 export function setAutoModeActive(active: boolean): void {
-  autoModeState.active = active
+  getAutoModeState().active = active
 }
 
 export function isAutoModeActive(): boolean {
-  return autoModeState.active
+  return getAutoModeState().active
 }
 
 export function setAutoModeFlagCli(passed: boolean): void {
-  autoModeState.flagCli = passed
+  getAutoModeState().flagCli = passed
 }
 
 export function getAutoModeFlagCli(): boolean {
-  return autoModeState.flagCli
+  return getAutoModeState().flagCli
 }
 
 export function setAutoModeCircuitBroken(broken: boolean): void {
-  autoModeState.circuitBroken = broken
+  getAutoModeState().circuitBroken = broken
 }
 
 export function isAutoModeCircuitBroken(): boolean {
-  return autoModeState.circuitBroken
+  return getAutoModeState().circuitBroken
 }
 
 /**
@@ -52,27 +60,28 @@ export function isAutoModeCircuitBroken(): boolean {
  * setAutoModeFlagCli treat this differently from explicit auto.
  */
 export function setAutoModeFromFallback(fromFallback: boolean): void {
-  autoModeState.fromFallback = fromFallback
+  getAutoModeState().fromFallback = fromFallback
 }
 
 export function isAutoModeFromFallback(): boolean {
-  return autoModeState.fromFallback
+  return getAutoModeState().fromFallback
 }
 
 /** Official 2.1.326 #297 (`HLn`): record whether startup auto default awaits served policy settings. */
 export function setAutoDefaultAwaitsServedSettings(awaits: boolean): void {
-  autoModeState.autoDefaultAwaitsServedSettings = awaits
+  getAutoModeState().autoDefaultAwaitsServedSettings = awaits
 }
 
 /** Official 2.1.326 #297 (`xOi`): true while startup auto default awaits served policy settings. */
 export function isAutoDefaultAwaitsServedSettings(): boolean {
-  return autoModeState.autoDefaultAwaitsServedSettings
+  return getAutoModeState().autoDefaultAwaitsServedSettings
 }
 
 export function _setGlobalAutoModeStateForTesting(state: AutoModeState): void {
-  autoModeState = state
+  autoModeStateByHost.of(getBootstrapSessionHost()).state = state
 }
 
 export function _resetForTesting(): void {
-  autoModeState = createAutoModeState()
+  autoModeStateByHost.of(getBootstrapSessionHost()).state =
+    createAutoModeState()
 }

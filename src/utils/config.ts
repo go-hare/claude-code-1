@@ -2,10 +2,14 @@ import { feature } from 'bun:bundle'
 import { randomBytes } from 'crypto'
 import { unwatchFile, watchFile, writeFileSync } from 'fs'
 import { homedir } from 'os'
-import memoize from 'lodash-es/memoize.js'
 import pickBy from 'lodash-es/pickBy.js'
 import { basename, dirname, join, resolve } from 'path'
 import { getOriginalCwd, getSessionTrustAccepted } from '../bootstrap/state.js'
+import {
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+} from './sessionHost.js'
 import { getAutoMemEntrypoint } from '../memdir/paths.js'
 import {
   logEvent,
@@ -59,10 +63,73 @@ import type { ImageDimensions } from './imageResizer.js'
 import type { ModelOption } from './model/modelOptions.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 
-// Re-entrancy guard: prevents getConfig → logEvent → getGlobalConfig → getConfig
-// infinite recursion when the config file is corrupted. logEvent's sampling check
-// reads GrowthBook features from the global config, which calls getConfig again.
-let insideGetConfig = false
+type LastGetConfigOutcome = 'parsed' | 'enoent' | 'parse-error' | 'read-error'
+
+// Process-boot flag propagated to new hosts spawned after boot `enableConfigs()`
+// ran outside ALS, so isolated hosts do not throw 'Config accessed before allowed.'
+let defaultConfigReadingAllowed = false
+
+type ConfigHostState = {
+  // Re-entrancy guard: prevents getConfig → logEvent → getGlobalConfig → getConfig
+  // infinite recursion when the config file is corrupted. logEvent's sampling check
+  // reads GrowthBook features from the global config, which calls getConfig again.
+  insideGetConfig: boolean
+  fullDiskSaveCode: string | undefined
+  lastGetConfigOutcome: LastGetConfigOutcome
+  fallbackReadFoundNoFile: boolean
+  doubtsNoFile: boolean
+  configCreateRefused: boolean
+  createRefusedThisProcess: boolean
+  lookedAgainForMissingFile: boolean
+  reloadThroughStorageOwed: boolean
+  reloadThroughStoragePromise: Promise<void> | null
+  startupParseErrorBackupPath: string | null | undefined
+  unparseableFileLeftAlone: boolean
+  globalConfigCache: { config: GlobalConfig | null; mtime: number }
+  lastReadFileStats: { mtime: number; size: number } | null
+  configCacheHits: number
+  configCacheMisses: number
+  globalConfigWriteCount: number
+  freshnessWatcherStarted: boolean
+  /** Official I.freshnessResubscribed — one resubscribe per watch generation. */
+  globalConfigFreshnessResubscribed: boolean
+  globalConfigFreshnessCleanup: CleanupUnregister | undefined
+  freshnessWatchedFile: string | undefined
+  freshnessWatcherListener:
+    | ((curr: { mtimeMs: number; size: number }) => void)
+    | undefined
+  configReadingAllowed: boolean
+}
+
+const configStateByHost = new HostSlot<ConfigHostState>(() => ({
+  insideGetConfig: false,
+  fullDiskSaveCode: undefined,
+  lastGetConfigOutcome: 'parsed',
+  fallbackReadFoundNoFile: false,
+  doubtsNoFile: false,
+  configCreateRefused: false,
+  createRefusedThisProcess: false,
+  lookedAgainForMissingFile: false,
+  reloadThroughStorageOwed: false,
+  reloadThroughStoragePromise: null,
+  startupParseErrorBackupPath: undefined,
+  unparseableFileLeftAlone: false,
+  globalConfigCache: { config: null, mtime: 0 },
+  lastReadFileStats: null,
+  configCacheHits: 0,
+  configCacheMisses: 0,
+  globalConfigWriteCount: 0,
+  freshnessWatcherStarted: false,
+  globalConfigFreshnessResubscribed: false,
+  globalConfigFreshnessCleanup: undefined,
+  freshnessWatchedFile: undefined,
+  freshnessWatcherListener: undefined,
+  configReadingAllowed: defaultConfigReadingAllowed,
+}))
+
+function getConfigHostState(): ConfigHostState {
+  return configStateByHost.of(getBootstrapSessionHost())
+}
 
 // Image dimension info for coordinate mapping (only set when image was resized)
 export type PastedContent = {
@@ -1097,18 +1164,38 @@ export type ProjectConfigKey = (typeof PROJECT_CONFIG_KEYS)[number]
  *
  * @returns Whether the trust dialog has been accepted (i.e. "should not be shown")
  */
-let _trustAccepted = false
+const fallbackConfigHost: object = {}
+
+function getActiveConfigHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back to module-local sentinel if sessionHost is mocked
+  }
+  return fallbackConfigHost
+}
+
+const trustAcceptedByHost = new HostSlot<{ accepted: boolean }>(() => ({
+  accepted: false,
+}))
 
 export function resetTrustDialogAcceptedCacheForTesting(): void {
-  _trustAccepted = false
+  trustAcceptedByHost.of(getActiveConfigHost()).accepted = false
 }
 
 export function checkHasTrustDialogAccepted(): boolean {
   // Trust only transitions false→true during a session (never the reverse),
-  // so once true we can latch it. false is not cached — it gets re-checked
-  // on every call so that trust dialog acceptance is picked up mid-session.
+  // so once true we can latch it per SessionHost. false is not cached — it gets
+  // re-checked on every call so that trust dialog acceptance is picked up mid-session.
   // (lodash memoize doesn't fit here because it would also cache false.)
-  return (_trustAccepted ||= computeTrustDialogAccepted())
+  const slot = trustAcceptedByHost.of(getActiveConfigHost())
+  return (slot.accepted ||= computeTrustDialogAccepted())
 }
 
 /**
@@ -1411,7 +1498,7 @@ function wouldLoseAuthState(fresh: {
   oauthAccount?: unknown
   hasCompletedOnboarding?: boolean
 }): boolean {
-  const cached = globalConfigCache.config
+  const cached = getConfigHostState().globalConfigCache.config
   if (!cached) return false
   const lostOauth =
     cached.oauthAccount !== undefined && fresh.oauthAccount === undefined
@@ -1514,8 +1601,9 @@ export function saveGlobalConfig(
     // Official 2.1.323 (#1986): If saving failed with Out of memory / ENOMEM,
     // degrade gracefully without re-throwing so startup and sign-out credential
     // clearing still complete.
+    const hostState = getConfigHostState()
     if (isConfigSaveOutOfMemoryError(error)) {
-      doubtsNoFile = true
+      hostState.doubtsNoFile = true
       logForDebugging(
         'saveGlobalConfig: skipping fallback write after Out of memory error; continuing without persisting.',
         { level: 'error' },
@@ -1530,7 +1618,7 @@ export function saveGlobalConfig(
     // the now-visible file, and suppress unlocked fallback when disk is
     // unreadable or ENOENT is doubted.
     const MAX_CREATE_REFUSED_RETRIES = 4
-    configCreateRefused = false
+    hostState.configCreateRefused = false
     for (let attempt = 0; attempt < MAX_CREATE_REFUSED_RETRIES; attempt++) {
       let currentConfig: GlobalConfig
       let next: GlobalConfig
@@ -1541,18 +1629,18 @@ export function saveGlobalConfig(
           createDefaultGlobalConfig,
         )
         if (
-          lastGetConfigOutcome === 'read-error' ||
-          lastGetConfigOutcome === 'parse-error'
+          hostState.lastGetConfigOutcome === 'read-error' ||
+          hostState.lastGetConfigOutcome === 'parse-error'
         ) {
-          doubtsNoFile = true
+          hostState.doubtsNoFile = true
           logForDebugging(
             'Config re-read was rejected (disk unreadable); suppressing the unlocked fallback write (saveGlobalConfig).',
             { level: 'error' },
           )
           return false
         }
-        const foundNoFile = lastGetConfigOutcome === 'enoent'
-        if (foundNoFile && doubtsNoFile) {
+        const foundNoFile = hostState.lastGetConfigOutcome === 'enoent'
+        if (foundNoFile && hostState.doubtsNoFile) {
           logForDebugging(
             'saveGlobalConfig fallback: global config read as missing though there is reason to doubt it; refusing to overwrite.',
             { level: 'warn' },
@@ -1560,10 +1648,10 @@ export function saveGlobalConfig(
           return false
         }
         if (foundNoFile) {
-          fallbackReadFoundNoFile = true
+          hostState.fallbackReadFoundNoFile = true
         }
         if (wouldLoseAuthState(currentConfig)) {
-          fallbackReadFoundNoFile = false
+          hostState.fallbackReadFoundNoFile = false
           logForDebugging(
             'saveGlobalConfig fallback: re-read config is missing auth that cache has; refusing to write. See GH #3117.',
             { level: 'error' },
@@ -1574,7 +1662,7 @@ export function saveGlobalConfig(
         const config = updater(currentConfig)
         // Skip if no changes (same reference returned)
         if (config === currentConfig) {
-          fallbackReadFoundNoFile = false
+          hostState.fallbackReadFoundNoFile = false
           return true
         }
         next = {
@@ -1582,30 +1670,30 @@ export function saveGlobalConfig(
           projects: removeProjectHistory(currentConfig.projects),
         }
         if (jsonStringify(next) === jsonStringify(currentConfig)) {
-          fallbackReadFoundNoFile = false
+          hostState.fallbackReadFoundNoFile = false
           return true
         }
         written = next
-        useCreateOnly = fallbackReadFoundNoFile
+        useCreateOnly = hostState.fallbackReadFoundNoFile
         saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG, {
           createOnly: useCreateOnly,
         })
-        fallbackReadFoundNoFile = false
+        hostState.fallbackReadFoundNoFile = false
         writeThroughGlobalConfigCache(written)
         return true
       } catch (fallbackError) {
-        fallbackReadFoundNoFile = false
+        hostState.fallbackReadFoundNoFile = false
         const code = getErrnoCode(fallbackError)
         if (useCreateOnly && code === 'EEXIST') {
-          configCreateRefused = true
-          createRefusedThisProcess = true
-          doubtsNoFile = true
+          hostState.configCreateRefused = true
+          hostState.createRefusedThisProcess = true
+          hostState.doubtsNoFile = true
           if (attempt + 1 < MAX_CREATE_REFUSED_RETRIES) {
             logForDebugging(
               'A create was refused, so the file is there: saving once more, onto it.',
               { level: 'warn' },
             )
-            configCreateRefused = false
+            hostState.configCreateRefused = false
             continue
           }
           logForDebugging(
@@ -1614,12 +1702,12 @@ export function saveGlobalConfig(
           )
           return false
         }
-        doubtsNoFile = true
+        hostState.doubtsNoFile = true
         if (
-          fullDiskSaveCode === undefined &&
+          hostState.fullDiskSaveCode === undefined &&
           (code === 'ENOSPC' || code === 'EDQUOT')
         ) {
-          fullDiskSaveCode = code
+          hostState.fullDiskSaveCode = code
         }
         logForDebugging(
           `Config fallback write also failed; continuing without persisting: ${fallbackError}`,
@@ -1632,56 +1720,29 @@ export function saveGlobalConfig(
   }
 }
 
-let fullDiskSaveCode: string | undefined
-let lastGetConfigOutcome: 'parsed' | 'enoent' | 'parse-error' | 'read-error' =
-  'parsed'
-let fallbackReadFoundNoFile = false
-let doubtsNoFile = false
-let configCreateRefused = false
-let createRefusedThisProcess = false
-let lookedAgainForMissingFile = false
-let reloadThroughStorageOwed = false
-let reloadThroughStoragePromise: Promise<void> | null = null
-let startupParseErrorBackupPath: string | null | undefined
-let unparseableFileLeftAlone = false
-
 /** Official 2.1.301 (#851) `pQs()` — ENOSPC/EDQUOT code from config fallback write. */
 export function getFullDiskSaveCode(): string | undefined {
-  return fullDiskSaveCode
+  return getConfigHostState().fullDiskSaveCode
 }
-
-// Cache for global config
-let globalConfigCache: { config: GlobalConfig | null; mtime: number } = {
-  config: null,
-  mtime: 0,
-}
-
-// Tracking for config file operations (telemetry)
-let lastReadFileStats: { mtime: number; size: number } | null = null
-let configCacheHits = 0
-let configCacheMisses = 0
-// Session-total count of actual disk writes to the global config file.
-// Exposed for ant-only dev diagnostics (see inc-4552) so anomalous write
-// rates surface in the UI before they corrupt ~/.claude.json.
-let globalConfigWriteCount = 0
 
 export function getGlobalConfigWriteCount(): number {
-  return globalConfigWriteCount
+  return getConfigHostState().globalConfigWriteCount
 }
 
 export const CONFIG_WRITE_DISPLAY_THRESHOLD = 20
 
 function reportConfigCacheStats(): void {
-  const total = configCacheHits + configCacheMisses
+  const hostState = getConfigHostState()
+  const total = hostState.configCacheHits + hostState.configCacheMisses
   if (total > 0) {
     logEvent('tengu_config_cache_stats', {
-      cache_hits: configCacheHits,
-      cache_misses: configCacheMisses,
-      hit_rate: configCacheHits / total,
+      cache_hits: hostState.configCacheHits,
+      cache_misses: hostState.configCacheMisses,
+      hit_rate: hostState.configCacheHits / total,
     })
   }
-  configCacheHits = 0
-  configCacheMisses = 0
+  hostState.configCacheHits = 0
+  hostState.configCacheMisses = 0
 }
 
 // Register cleanup to report cache stats at session end
@@ -1775,10 +1836,6 @@ function removeProjectHistory(
 
 // fs.watchFile poll interval for detecting writes from other instances (ms)
 const CONFIG_FRESHNESS_POLL_MS = 1000
-let freshnessWatcherStarted = false
-/** Official I.freshnessResubscribed — one resubscribe per watch generation. */
-let globalConfigFreshnessResubscribed = false
-let globalConfigFreshnessCleanup: CleanupUnregister | undefined
 
 function formatGlobalConfigFreshnessWatchError(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -1786,32 +1843,37 @@ function formatGlobalConfigFreshnessWatchError(error: unknown): string {
 }
 
 /** Official claimFreshnessResubscribe @ global config cache. */
-function claimGlobalConfigFreshnessResubscribe(): boolean {
-  if (globalConfigFreshnessResubscribed) return false
-  globalConfigFreshnessResubscribed = true
+function claimGlobalConfigFreshnessResubscribe(
+  state: ConfigHostState = getConfigHostState(),
+): boolean {
+  if (state.globalConfigFreshnessResubscribed) return false
+  state.globalConfigFreshnessResubscribed = true
   return true
 }
 
-function applyGlobalConfigFreshnessStat(curr: {
-  mtimeMs: number
-  size: number
-}): void {
-  if (curr.mtimeMs <= globalConfigCache.mtime) return
-  const file = getGlobalClaudeFile()
+function applyGlobalConfigFreshnessStat(
+  curr: {
+    mtimeMs: number
+    size: number
+  },
+  state: ConfigHostState = getConfigHostState(),
+  file: string = getGlobalClaudeFile(),
+): void {
+  if (curr.mtimeMs <= state.globalConfigCache.mtime) return
   void getFsImplementation()
     .readFile(file, { encoding: 'utf-8' })
     .then(content => {
-      if (curr.mtimeMs <= globalConfigCache.mtime) return
+      if (curr.mtimeMs <= state.globalConfigCache.mtime) return
       const parsed = safeParseJSON(stripBOM(content))
       if (parsed === null || typeof parsed !== 'object') return
-      globalConfigCache = {
+      state.globalConfigCache = {
         config: migrateConfigFields({
           ...createDefaultGlobalConfig(),
           ...(parsed as Partial<GlobalConfig>),
         }),
         mtime: curr.mtimeMs,
       }
-      lastReadFileStats = { mtime: curr.mtimeMs, size: curr.size }
+      state.lastReadFileStats = { mtime: curr.mtimeMs, size: curr.size }
     })
     .catch(error => {
       if (getErrnoCode(error) === 'ENOENT') return
@@ -1831,45 +1893,66 @@ function ensureGlobalConfigFreshnessMa(options?: {
 function startGlobalConfigFreshnessWatchCd(options?: {
   allowInTest?: boolean
 }): void {
-  if (freshnessWatcherStarted) return
+  const hostState = getConfigHostState()
+  if (hostState.freshnessWatcherStarted) return
   if (!options?.allowInTest && process.env.NODE_ENV === 'test') return
   if (cleanupDrainStarted()) return
-  freshnessWatcherStarted = true
-  globalConfigFreshnessResubscribed = false
+  hostState.freshnessWatcherStarted = true
+  hostState.globalConfigFreshnessResubscribed = false
   const file = getGlobalClaudeFile()
-  if (globalConfigFreshnessCleanup === undefined) {
-    globalConfigFreshnessCleanup = registerCleanup(async () => {
-      unwatchFile(file)
-      freshnessWatcherStarted = false
-      globalConfigFreshnessCleanup = undefined
+  const listener = (curr: { mtimeMs: number; size: number }) => {
+    // Our own writes fire this too — the write-through's Date.now()
+    // overshoot makes cache.mtime > file mtime, so we skip the re-read.
+    // Bun/Node also fire with curr.mtimeMs=0 when the file doesn't exist
+    // (initial callback or deletion) — the <= handles that too.
+    applyGlobalConfigFreshnessStat(curr, hostState, file)
+  }
+  hostState.freshnessWatchedFile = file
+  hostState.freshnessWatcherListener = listener
+  if (hostState.globalConfigFreshnessCleanup === undefined) {
+    const stateRef = new WeakRef(hostState)
+    hostState.globalConfigFreshnessCleanup = registerCleanup(async () => {
+      const liveState = stateRef.deref()
+      if (!liveState) return
+      if (liveState.freshnessWatchedFile !== undefined) {
+        unwatchFile(
+          liveState.freshnessWatchedFile,
+          liveState.freshnessWatcherListener,
+        )
+        liveState.freshnessWatchedFile = undefined
+        liveState.freshnessWatcherListener = undefined
+      }
+      liveState.freshnessWatcherStarted = false
+      liveState.globalConfigFreshnessCleanup = undefined
     })
   }
   watchFile(
     file,
     { interval: CONFIG_FRESHNESS_POLL_MS, persistent: false },
-    curr => {
-      // Our own writes fire this too — the write-through's Date.now()
-      // overshoot makes cache.mtime > file mtime, so we skip the re-read.
-      // Bun/Node also fire with curr.mtimeMs=0 when the file doesn't exist
-      // (initial callback or deletion) — the <= handles that too.
-      applyGlobalConfigFreshnessStat(curr)
-    },
+    listener,
   )
 }
 
 /** Official kD (!e.ok) — resubscribe on watch/read failure; gated by DYe. */
 function handleGlobalConfigFreshnessWatchEnded(error: unknown): void {
   if (cleanupDrainStarted()) return
+  const hostState = getConfigHostState()
   logForDebugging(
     `Watching ~/.claude.json through the storage interface ended: ${formatGlobalConfigFreshnessWatchError(error)}`,
     { level: 'warn' },
   )
-  const file = getGlobalClaudeFile()
-  unwatchFile(file)
-  freshnessWatcherStarted = false
+  const watchedFile = hostState.freshnessWatchedFile ?? getGlobalClaudeFile()
+  if (hostState.freshnessWatcherListener !== undefined) {
+    unwatchFile(watchedFile, hostState.freshnessWatcherListener)
+  } else {
+    unwatchFile(watchedFile)
+  }
+  hostState.freshnessWatchedFile = undefined
+  hostState.freshnessWatcherListener = undefined
+  hostState.freshnessWatcherStarted = false
   const allowInTest =
     process.env.NODE_ENV === 'test' ? { allowInTest: true } : {}
-  if (claimGlobalConfigFreshnessResubscribe()) {
+  if (claimGlobalConfigFreshnessResubscribe(hostState)) {
     ensureGlobalConfigFreshnessMa(allowInTest)
   } else {
     ensureGlobalConfigFreshnessMa(allowInTest)
@@ -1886,8 +1969,9 @@ function startGlobalConfigFreshnessWatcher(): void {
 // the file's real mtime (Date.now() is recorded after the write) so the
 // freshness watcher skips re-reading our own write on its next tick.
 function writeThroughGlobalConfigCache(config: GlobalConfig): void {
-  globalConfigCache = { config, mtime: Date.now() }
-  lastReadFileStats = null
+  const hostState = getConfigHostState()
+  hostState.globalConfigCache = { config, mtime: Date.now() }
+  hostState.lastReadFileStats = null
 }
 
 /**
@@ -1932,7 +2016,8 @@ export function readGlobalConfigFromDisk(): GlobalConfig | undefined {
     const raw = getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig)
     // Official `hMe` (#1661): if ENOENT is doubted (prior create refused /
     // unreadable disk), refuse to treat the config as absent defaults.
-    if (lastGetConfigOutcome === 'enoent' && doubtsNoFile) {
+    const hostState = getConfigHostState()
+    if (hostState.lastGetConfigOutcome === 'enoent' && hostState.doubtsNoFile) {
       return undefined
     }
     return migrateConfigFields(raw)
@@ -1942,7 +2027,7 @@ export function readGlobalConfigFromDisk(): GlobalConfig | undefined {
 }
 
 function triggerOwedReloadThroughPinnedStorage(): void {
-  if (!reloadThroughStorageOwed || !isHoverRestOn()) {
+  if (!getConfigHostState().reloadThroughStorageOwed || !isHoverRestOn()) {
     return
   }
   try {
@@ -1969,18 +2054,19 @@ export function getGlobalConfig(): GlobalConfig {
   // pinned, perform the owed one-shot reload through storage once available.
   triggerOwedReloadThroughPinnedStorage()
 
+  const hostState = getConfigHostState()
   // Fast path: pure memory read. After startup, this always hits — our own
   // writes go write-through and other instances' writes are picked up by the
   // background freshness watcher (never blocks this path).
-  if (globalConfigCache.config) {
-    configCacheHits++
-    return globalConfigCache.config
+  if (hostState.globalConfigCache.config) {
+    hostState.configCacheHits++
+    return hostState.globalConfigCache.config
   }
 
   // Slow path: startup load. Sync I/O here is acceptable because it runs
   // exactly once, before any UI is rendered. Stat before read so any race
   // self-corrects (old mtime + new content → watcher re-reads next tick).
-  configCacheMisses++
+  hostState.configCacheMisses++
   try {
     let stats: { mtimeMs: number; size: number } | null = null
     try {
@@ -1991,11 +2077,11 @@ export function getGlobalConfig(): GlobalConfig {
     const config = migrateConfigFields(
       getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig),
     )
-    globalConfigCache = {
+    hostState.globalConfigCache = {
       config,
       mtime: stats?.mtimeMs ?? Date.now(),
     }
-    lastReadFileStats = stats
+    hostState.lastReadFileStats = stats
       ? { mtime: stats.mtimeMs, size: stats.size }
       : null
     startGlobalConfigFreshnessWatcher()
@@ -2523,7 +2609,7 @@ function saveConfig<A extends object>(
     })
   }
   if (file === getGlobalClaudeFile()) {
-    globalConfigWriteCount++
+    getConfigHostState().globalConfigWriteCount++
   }
 }
 
@@ -2572,6 +2658,7 @@ function saveConfigWithLock<A extends object>(
 
     // Check for stale write - file changed since we last read it
     // Only check for global config file since lastReadFileStats tracks that specific file
+    const { lastReadFileStats } = getConfigHostState()
     if (lastReadFileStats && file === getGlobalClaudeFile()) {
       try {
         const currentStats = fs.statSync(file)
@@ -2703,7 +2790,7 @@ function saveConfigWithLock<A extends object>(
       },
     )
     if (file === getGlobalClaudeFile()) {
-      globalConfigWriteCount++
+      getConfigHostState().globalConfigWriteCount++
     }
     return true
   } finally {
@@ -2713,11 +2800,12 @@ function saveConfigWithLock<A extends object>(
   }
 }
 
-// Flag to track if config reading is allowed
-let configReadingAllowed = false
-
 export function enableConfigs(storageV5?: StorageV5): void {
-  if (configReadingAllowed) {
+  const hostState = getConfigHostState()
+  if (!hasActiveSessionAls()) {
+    defaultConfigReadingAllowed = true
+  }
+  if (hostState.configReadingAllowed) {
     // Official `h3t` (#1662): when called again once StorageV5 is handed in,
     // settle the owed one-shot reload through storage.
     if (storageV5 !== undefined && isHoverRestOn()) {
@@ -2733,7 +2821,7 @@ export function enableConfigs(storageV5?: StorageV5): void {
 
   // Any reads to configuration before this flag is set show an console warning
   // to prevent us from adding config reading during module initialization
-  configReadingAllowed = true
+  hostState.configReadingAllowed = true
   // We only check the global config because currently all the configs share a file
   getConfig(
     getGlobalClaudeFile(),
@@ -2747,9 +2835,10 @@ export function enableConfigs(storageV5?: StorageV5): void {
     // Official `WF` / `orn` (chunk@286370035.js @94979): when `storageV5` is
     // already supplied on the initial `enableConfigs(storageV5)` call, refresh
     // directly through storage instead of short-circuiting on `reloadThroughStorageOwed === false`.
-    reloadThroughStorageOwed = false
-    reloadThroughStoragePromise = refreshGlobalConfigFromStorage(storageV5)
-    void reloadThroughStoragePromise
+    hostState.reloadThroughStorageOwed = false
+    hostState.reloadThroughStoragePromise =
+      refreshGlobalConfigFromStorage(storageV5)
+    void hostState.reloadThroughStoragePromise
   }
 
   logForDiagnosticsNoPII('info', 'enable_configs_completed', {
@@ -2775,21 +2864,22 @@ const IMPORTANT_BACKUP_KEYS = [
 ] as const
 
 export function oweReloadThroughStorage(): void {
-  reloadThroughStorageOwed = true
+  getConfigHostState().reloadThroughStorageOwed = true
 }
 
 export function hasOwedReloadThroughStorage(): boolean {
-  return reloadThroughStorageOwed
+  return getConfigHostState().reloadThroughStorageOwed
 }
 
 export function reloadThroughStorageOnce(
   reload: () => Promise<void>,
 ): Promise<void> {
-  if (reloadThroughStorageOwed) {
-    reloadThroughStorageOwed = false
-    reloadThroughStoragePromise = reload()
+  const hostState = getConfigHostState()
+  if (hostState.reloadThroughStorageOwed) {
+    hostState.reloadThroughStorageOwed = false
+    hostState.reloadThroughStoragePromise = reload()
   }
-  return reloadThroughStoragePromise ?? Promise.resolve()
+  return hostState.reloadThroughStoragePromise ?? Promise.resolve()
 }
 
 /**
@@ -2799,6 +2889,7 @@ export function reloadThroughStorageOnce(
 export async function refreshGlobalConfigFromStorage(
   storageV5: StorageV5,
 ): Promise<void> {
+  const hostState = getConfigHostState()
   try {
     const res = await storageV5.readText([
       { key: { namespace: 'globalConfig' } },
@@ -2818,11 +2909,11 @@ export async function refreshGlobalConfigFromStorage(
       ...createDefaultGlobalConfig(),
       ...(parsed as Partial<GlobalConfig>),
     })
-    globalConfigCache = {
+    hostState.globalConfigCache = {
       config: merged,
       mtime: item.mtimeMs ?? Date.now(),
     }
-    lastReadFileStats = {
+    hostState.lastReadFileStats = {
       mtime: item.mtimeMs ?? Date.now(),
       size: item.totalBytes,
     }
@@ -2834,11 +2925,11 @@ export async function refreshGlobalConfigFromStorage(
 }
 
 export function leaveUnparseableFileAlone(): void {
-  unparseableFileLeftAlone = true
+  getConfigHostState().unparseableFileLeftAlone = true
 }
 
 export function isUnparseableFileLeftAlone(): boolean {
-  return unparseableFileLeftAlone
+  return getConfigHostState().unparseableFileLeftAlone
 }
 
 export function getGlobalConfigWriteFlagsForTesting(): {
@@ -2846,35 +2937,41 @@ export function getGlobalConfigWriteFlagsForTesting(): {
   doubtsNoFile: boolean
   configCreateRefused: boolean
   createRefusedThisProcess: boolean
-  lastGetConfigOutcome: typeof lastGetConfigOutcome
+  lastGetConfigOutcome: LastGetConfigOutcome
 } {
+  const hostState = getConfigHostState()
   return {
-    fallbackReadFoundNoFile,
-    doubtsNoFile,
-    configCreateRefused,
-    createRefusedThisProcess,
-    lastGetConfigOutcome,
+    fallbackReadFoundNoFile: hostState.fallbackReadFoundNoFile,
+    doubtsNoFile: hostState.doubtsNoFile,
+    configCreateRefused: hostState.configCreateRefused,
+    createRefusedThisProcess: hostState.createRefusedThisProcess,
+    lastGetConfigOutcome: hostState.lastGetConfigOutcome,
   }
 }
 
 export function resetEnableConfigsForTesting(): void {
-  configReadingAllowed = false
-  reloadThroughStorageOwed = false
-  reloadThroughStoragePromise = null
+  if (!hasActiveSessionAls()) {
+    defaultConfigReadingAllowed = false
+  }
+  const hostState = getConfigHostState()
+  hostState.configReadingAllowed = false
+  hostState.reloadThroughStorageOwed = false
+  hostState.reloadThroughStoragePromise = null
 }
 
 export function resetGlobalConfigWriteFlagsForTesting(): void {
-  fallbackReadFoundNoFile = false
-  doubtsNoFile = false
-  configCreateRefused = false
-  createRefusedThisProcess = false
-  lookedAgainForMissingFile = false
-  reloadThroughStorageOwed = false
-  reloadThroughStoragePromise = null
-  startupParseErrorBackupPath = undefined
-  unparseableFileLeftAlone = false
-  lastGetConfigOutcome = 'parsed'
-  globalConfigCache = { config: null, mtime: 0 }
+  const hostState = getConfigHostState()
+  hostState.fallbackReadFoundNoFile = false
+  hostState.doubtsNoFile = false
+  hostState.configCreateRefused = false
+  hostState.createRefusedThisProcess = false
+  hostState.lookedAgainForMissingFile = false
+  hostState.reloadThroughStorageOwed = false
+  hostState.reloadThroughStoragePromise = null
+  hostState.startupParseErrorBackupPath = undefined
+  hostState.unparseableFileLeftAlone = false
+  hostState.lastGetConfigOutcome = 'parsed'
+  hostState.globalConfigCache = { config: null, mtime: 0 }
 }
 
 function formatBackupRestoreAdvice(file: string, backupPath: string): string {
@@ -2892,7 +2989,7 @@ export function getUnparseableConfigAdvice(): {
 } {
   leaveUnparseableFileAlone()
   const file = getGlobalClaudeFile()
-  const backupPath = startupParseErrorBackupPath
+  const backupPath = getConfigHostState().startupParseErrorBackupPath
   if (backupPath != null) {
     return {
       advice: formatBackupRestoreAdvice(file, backupPath),
@@ -3113,17 +3210,18 @@ function readConfigWithNfsRetry(
   allowSecondLook: boolean,
 ): string {
   const fs = getFsImplementation()
+  const hostState = getConfigHostState()
   try {
     return fs.readFileSync(file, { encoding: 'utf-8' })
   } catch (err) {
     if (
       !allowSecondLook ||
       getErrnoCode(err) !== 'ENOENT' ||
-      lookedAgainForMissingFile
+      hostState.lookedAgainForMissingFile
     ) {
       throw err
     }
-    lookedAgainForMissingFile = true
+    hostState.lookedAgainForMissingFile = true
     logForDebugging('Config file read as missing at start-up: looking again.')
     try {
       fs.readdirStringSync(dirname(file))
@@ -3148,8 +3246,9 @@ function getConfig<A>(
   createDefault: () => A,
   throwOnInvalid?: boolean,
 ): A {
+  const hostState = getConfigHostState()
   // Log a warning if config is accessed before it's allowed
-  if (!configReadingAllowed && process.env.NODE_ENV !== 'test') {
+  if (!hostState.configReadingAllowed && process.env.NODE_ENV !== 'test') {
     throw new Error('Config accessed before allowed.')
   }
 
@@ -3162,7 +3261,7 @@ function getConfig<A>(
       EMPTY_OR_NULL_RE.test(fileContent) &&
       findMostRecentBackup(file) === null
     ) {
-      lastGetConfigOutcome = throwOnInvalid ? 'enoent' : 'parse-error'
+      hostState.lastGetConfigOutcome = throwOnInvalid ? 'enoent' : 'parse-error'
       if (throwOnInvalid) {
         process.stderr.write(
           `Claude configuration file at ${file} was empty and no backup holds anything: starting with defaults.\n`,
@@ -3180,7 +3279,7 @@ function getConfig<A>(
       ) {
         throw new Error('Configuration file root must be a JSON object')
       }
-      lastGetConfigOutcome = 'parsed'
+      hostState.lastGetConfigOutcome = 'parsed'
       return {
         ...createDefault(),
         ...parsedConfig,
@@ -3194,7 +3293,7 @@ function getConfig<A>(
   } catch (error) {
     // Handle file not found - check for backup and return default
     const errCode = getErrnoCode(error)
-    lastGetConfigOutcome =
+    hostState.lastGetConfigOutcome =
       error instanceof ConfigParseError
         ? 'parse-error'
         : errCode === 'ENOENT'
@@ -3202,7 +3301,7 @@ function getConfig<A>(
           : 'read-error'
     if (errCode === 'ENOENT') {
       const backupPath = findMostRecentBackup(file)
-      if (backupPath && !createRefusedThisProcess) {
+      if (backupPath && !hostState.createRefusedThisProcess) {
         process.stderr.write(
           `\nClaude configuration file not found at: ${file}\n` +
             formatBackupRestoreAdvice(file, backupPath) +
@@ -3239,7 +3338,7 @@ function getConfig<A>(
     // Re-throw ConfigParseError if throwOnInvalid is true
     if (error instanceof ConfigParseError && throwOnInvalid) {
       if (file === getGlobalClaudeFile()) {
-        startupParseErrorBackupPath = findMostRecentBackup(file)
+        hostState.startupParseErrorBackupPath = findMostRecentBackup(file)
       }
       throw error
     }
@@ -3255,8 +3354,8 @@ function getConfig<A>(
       // causes infinite recursion when the config file is corrupted, because
       // the sampling check reads a GrowthBook feature from global config.
       // Only log analytics on the outermost call.
-      if (!insideGetConfig) {
-        insideGetConfig = true
+      if (!hostState.insideGetConfig) {
+        hostState.insideGetConfig = true
         try {
           // Log the error for monitoring
           logError(error)
@@ -3273,7 +3372,7 @@ function getConfig<A>(
             has_backup: hasBackup,
           })
         } finally {
-          insideGetConfig = false
+          hostState.insideGetConfig = false
         }
       }
 
@@ -3358,9 +3457,11 @@ function getConfig<A>(
   }
 }
 
-// Memoized function to get the project path for config lookup
-export const getProjectPathForConfig = memoize((): string => {
-  const originalCwd = getOriginalCwd()
+const projectPathForConfigByHost = new HostSlot<Map<string, string>>(
+  () => new Map(),
+)
+
+function computeProjectPathForConfig(originalCwd: string): string {
   const gitRoot = findCanonicalGitRoot(originalCwd)
 
   if (gitRoot) {
@@ -3371,7 +3472,43 @@ export const getProjectPathForConfig = memoize((): string => {
 
   // Not in a git repo
   return normalizePathForConfigKey(resolve(originalCwd))
-})
+}
+
+function createGetProjectPathForConfig() {
+  const fn = Object.assign(
+    function getProjectPathForConfig(): string {
+      const originalCwd = getOriginalCwd()
+      const cache = projectPathForConfigByHost.of(getActiveConfigHost())
+      if (cache.has(originalCwd)) {
+        return cache.get(originalCwd)!
+      }
+      const computed = computeProjectPathForConfig(originalCwd)
+      cache.set(originalCwd, computed)
+      return computed
+    },
+    {
+      cache: new Map<string, string>(),
+    },
+  )
+  Object.defineProperty(fn, 'cache', {
+    configurable: true,
+    enumerable: true,
+    get(): Map<string, string> {
+      return projectPathForConfigByHost.of(getActiveConfigHost())
+    },
+    set(next: Map<string, string>): void {
+      const cache = projectPathForConfigByHost.of(getActiveConfigHost())
+      cache.clear()
+      for (const [k, v] of next) {
+        cache.set(k, v)
+      }
+    },
+  })
+  return fn
+}
+
+// Host-scoped memoized function to get the project path for config lookup
+export const getProjectPathForConfig = createGetProjectPathForConfig()
 
 export function getCurrentProjectConfig(): ProjectConfig {
   if (process.env.NODE_ENV === 'test') {
@@ -3456,8 +3593,9 @@ export function saveCurrentProjectConfig(
     logForDebugging(`Failed to save config with lock: ${error}`, {
       level: 'error',
     })
+    const hostState = getConfigHostState()
     if (isConfigSaveOutOfMemoryError(error)) {
-      doubtsNoFile = true
+      hostState.doubtsNoFile = true
       logForDebugging(
         'saveCurrentProjectConfig: skipping fallback write after Out of memory error; continuing without persisting.',
         { level: 'error' },
@@ -3470,11 +3608,11 @@ export function saveCurrentProjectConfig(
     try {
       const config = getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig)
       if (
-        lastGetConfigOutcome === 'read-error' ||
-        lastGetConfigOutcome === 'parse-error' ||
-        (lastGetConfigOutcome === 'enoent' && doubtsNoFile)
+        hostState.lastGetConfigOutcome === 'read-error' ||
+        hostState.lastGetConfigOutcome === 'parse-error' ||
+        (hostState.lastGetConfigOutcome === 'enoent' && hostState.doubtsNoFile)
       ) {
-        doubtsNoFile = true
+        hostState.doubtsNoFile = true
         logForDebugging(
           'saveCurrentProjectConfig fallback: config re-read was rejected or ENOENT is doubted; refusing to write.',
           { level: 'error' },
@@ -3716,8 +3854,9 @@ export const _wouldLoseAuthStateForTesting = wouldLoseAuthState
 export function _setGlobalConfigCacheForTesting(
   config: GlobalConfig | null,
 ): void {
-  globalConfigCache.config = config
-  globalConfigCache.mtime = config ? Date.now() : 0
+  const hostState = getConfigHostState()
+  hostState.globalConfigCache.config = config
+  hostState.globalConfigCache.mtime = config ? Date.now() : 0
 }
 
 export function _ensureGlobalConfigFreshnessMaForTesting(): void {
@@ -3735,19 +3874,29 @@ export function _handleGlobalConfigFreshnessWatchEndedForTesting(
 }
 
 export function _isGlobalConfigFreshnessWatcherStartedForTesting(): boolean {
-  return freshnessWatcherStarted
+  return getConfigHostState().freshnessWatcherStarted
 }
 
 export function _resetGlobalConfigFreshnessWatchForTesting(): void {
+  const hostState = getConfigHostState()
   try {
-    unwatchFile(getGlobalClaudeFile())
+    if (hostState.freshnessWatchedFile !== undefined) {
+      unwatchFile(
+        hostState.freshnessWatchedFile,
+        hostState.freshnessWatcherListener,
+      )
+    } else if (hostState.freshnessWatcherStarted) {
+      unwatchFile(getGlobalClaudeFile())
+    }
   } catch {
     // file may never have been watched
   }
-  freshnessWatcherStarted = false
-  globalConfigFreshnessResubscribed = false
-  globalConfigFreshnessCleanup?.()
-  globalConfigFreshnessCleanup = undefined
+  hostState.freshnessWatchedFile = undefined
+  hostState.freshnessWatcherListener = undefined
+  hostState.freshnessWatcherStarted = false
+  hostState.globalConfigFreshnessResubscribed = false
+  hostState.globalConfigFreshnessCleanup?.()
+  hostState.globalConfigFreshnessCleanup = undefined
 }
 
 const MAX_SEEN_SECURITY_WARNINGS = 256

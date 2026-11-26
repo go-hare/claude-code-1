@@ -32,6 +32,8 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/gr
 import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.js'
 import type { AssistantMessage, UserMessage } from '../../types/message.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { RootSessionSlot } from '../hostSlot.js'
+import { getBootstrapSession } from '../sessionRoot.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import {
   getOTelContentMaxLength,
@@ -45,33 +47,46 @@ type APIMessage =
   | AssistantMessage
   | { type: string; message?: { role?: string; content?: unknown } }
 
-/**
- * Track hashes we've already logged this session (system prompts, tools, etc).
- *
- * WHY: System prompts and tool schemas are large and rarely change within a session.
- * Sending full content on every request would be wasteful. Instead, we hash and
- * only log the full content once per unique hash.
- */
-const seenHashes = new Set<string>()
+type BetaTracingSessionState = {
+  /**
+   * Track hashes we've already logged this session (system prompts, tools, etc).
+   *
+   * WHY: System prompts and tool schemas are large and rarely change within a session.
+   * Sending full content on every request would be wasteful. Instead, we hash and
+   * only log the full content once per unique hash.
+   */
+  seenHashes: Set<string>
+  /**
+   * Track the last reported message hash per querySource (agent) for incremental context.
+   *
+   * WHY: When debugging traces, we want to see what NEW information was added each turn,
+   * not the entire conversation history (which can be huge). By tracking the last message
+   * we reported per agent, we can compute and send only the delta (new messages since
+   * the last request). This is tracked per-agent (querySource) because different agents
+   * (main thread, subagents, warmup requests) have independent conversation contexts.
+   */
+  lastReportedMessageHash: Map<string, string>
+}
 
-/**
- * Track the last reported message hash per querySource (agent) for incremental context.
- *
- * WHY: When debugging traces, we want to see what NEW information was added each turn,
- * not the entire conversation history (which can be huge). By tracking the last message
- * we reported per agent, we can compute and send only the delta (new messages since
- * the last request). This is tracked per-agent (querySource) because different agents
- * (main thread, subagents, warmup requests) have independent conversation contexts.
- */
-const lastReportedMessageHash = new Map<string, string>()
+const betaTracingSessionSlot = new RootSessionSlot<BetaTracingSessionState>(
+  () => ({
+    seenHashes: new Set<string>(),
+    lastReportedMessageHash: new Map<string, string>(),
+  }),
+)
+
+function getBetaTracingState(): BetaTracingSessionState {
+  return betaTracingSessionSlot.of(getBootstrapSession())
+}
 
 /**
  * Clear tracking state after compaction.
  * Old hashes are irrelevant once messages have been replaced.
  */
 export function clearBetaTracingState(): void {
-  seenHashes.clear()
-  lastReportedMessageHash.clear()
+  const state = getBetaTracingState()
+  state.seenHashes.clear()
+  state.lastReportedMessageHash.clear()
 }
 
 /**
@@ -249,6 +264,8 @@ export function addBetaLLMRequestAttributes(
   if (!isBetaTracingEnabled()) {
     return
   }
+
+  const { seenHashes, lastReportedMessageHash } = getBetaTracingState()
 
   // Add system prompt info to the span
   if (newContext?.systemPrompt) {

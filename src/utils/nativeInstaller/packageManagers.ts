@@ -4,10 +4,44 @@
 
 import { realpathSync } from 'fs'
 import { readFile } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { logForDebugging } from '../debug.js'
 import { execFileNoThrow } from '../execFileNoThrow.js'
 import { getPlatform } from '../platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
+
+type HostMemoized<Args extends unknown[], Result> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<unknown, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = Args[0]>(
+  fn: (...args: Args) => Result,
+  resolver?: (...args: Args) => Key,
+): HostMemoized<Args, Result> {
+  const slot = new HostSlot<{ cache: Map<unknown, Result> }>(() => ({
+    cache: new Map<unknown, Result>(),
+  }))
+  const memoized = (...args: Args): Result => {
+    const key = resolver ? resolver(...args) : args[0]
+    const cache = slot.of(getBootstrapSessionHost()).cache
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(memoized, 'cache', {
+    get: () => slot.of(getBootstrapSessionHost()).cache,
+    set: (next: Map<unknown, Result>) => {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return memoized as unknown as HostMemoized<Args, Result>
+}
 
 export type PackageManager =
   | 'homebrew'
@@ -27,7 +61,7 @@ export type PackageManager =
  * Returns null if the file is unreadable (pre-systemd or non-standard systems);
  * callers fall through to the exec in that case as a conservative fallback.
  */
-export const getOsRelease = memoize(
+export const getOsRelease = memoizePerHost(
   async (): Promise<{ id: string; idLike: string[] } | null> => {
     try {
       const content = await readFile('/etc/os-release', 'utf8')
@@ -187,7 +221,7 @@ export function detectWinget(): boolean {
  * like Ubuntu/Debian, 'pacman' in PATH may resolve to the pacman game
  * (/usr/games/pacman) rather than the Arch package manager.
  */
-export const detectPacman = memoize(async (): Promise<boolean> => {
+export const detectPacman = memoizePerHost(async (): Promise<boolean> => {
   const platform = getPlatform()
 
   if (platform !== 'linux') {
@@ -220,7 +254,7 @@ export const detectPacman = memoize(async (): Promise<boolean> => {
  *
  * We use `dpkg -S <execPath>` to check if the executable is owned by a dpkg-managed package.
  */
-export const detectDeb = memoize(async (): Promise<boolean> => {
+export const detectDeb = memoizePerHost(async (): Promise<boolean> => {
   const platform = getPlatform()
 
   if (platform !== 'linux') {
@@ -253,7 +287,7 @@ export const detectDeb = memoize(async (): Promise<boolean> => {
  *
  * We use `rpm -qf <execPath>` to check if the executable is owned by an RPM package.
  */
-export const detectRpm = memoize(async (): Promise<boolean> => {
+export const detectRpm = memoizePerHost(async (): Promise<boolean> => {
   const platform = getPlatform()
 
   if (platform !== 'linux') {
@@ -287,7 +321,7 @@ export const detectRpm = memoize(async (): Promise<boolean> => {
  * We use `apk info --who-owns <execPath>` to check if the executable is owned
  * by an apk-managed package.
  */
-export const detectApk = memoize(async (): Promise<boolean> => {
+export const detectApk = memoizePerHost(async (): Promise<boolean> => {
   const platform = getPlatform()
 
   if (platform !== 'linux') {
@@ -322,38 +356,40 @@ export const detectApk = memoize(async (): Promise<boolean> => {
  * Memoized function to detect which package manager installed Claude
  * Returns 'unknown' if no package manager is detected
  */
-export const getPackageManager = memoize(async (): Promise<PackageManager> => {
-  if (detectHomebrew()) {
-    return 'homebrew'
-  }
+export const getPackageManager = memoizePerHost(
+  async (): Promise<PackageManager> => {
+    if (detectHomebrew()) {
+      return 'homebrew'
+    }
 
-  if (detectWinget()) {
-    return 'winget'
-  }
+    if (detectWinget()) {
+      return 'winget'
+    }
 
-  if (detectMise()) {
-    return 'mise'
-  }
+    if (detectMise()) {
+      return 'mise'
+    }
 
-  if (detectAsdf()) {
-    return 'asdf'
-  }
+    if (detectAsdf()) {
+      return 'asdf'
+    }
 
-  if (await detectPacman()) {
-    return 'pacman'
-  }
+    if (await detectPacman()) {
+      return 'pacman'
+    }
 
-  if (await detectApk()) {
-    return 'apk'
-  }
+    if (await detectApk()) {
+      return 'apk'
+    }
 
-  if (await detectDeb()) {
-    return 'deb'
-  }
+    if (await detectDeb()) {
+      return 'deb'
+    }
 
-  if (await detectRpm()) {
-    return 'rpm'
-  }
+    if (await detectRpm()) {
+      return 'rpm'
+    }
 
-  return 'unknown'
-})
+    return 'unknown'
+  },
+)

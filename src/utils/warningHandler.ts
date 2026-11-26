@@ -5,11 +5,17 @@ import {
 } from 'src/services/analytics/index.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
+import { HostSlot } from './hostSlot.js'
 import { getPlatform } from './platform.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 
 // Track warnings to avoid spam — bounded to prevent unbounded memory growth
 export const MAX_WARNING_KEYS = 1000
-const warningCounts = new Map<string, number>()
+const warningCountsHostSlot = new HostSlot<Map<string, number>>(() => new Map())
+
+function getWarningCounts(): Map<string, number> {
+  return warningCountsHostSlot.of(getBootstrapSessionHost())
+}
 
 // Check if running from a build directory (development mode)
 // This is a sync version of the logic in getCurrentInstallationType()
@@ -65,9 +71,10 @@ export function initializeWarningHandler(): void {
     process.removeAllListeners('warning')
   }
 
-  // Create and store our warning handler
+  // Create and store our warning handler (single process listener, per-host counts)
   warningHandler = (warning: Error) => {
     try {
+      const warningCounts = getWarningCounts()
       const warningKey = `${warning.name}: ${warning.message.slice(0, 50)}`
       const count = warningCounts.get(warningKey) || 0
 

@@ -1,5 +1,6 @@
 import chalk, { Chalk } from 'chalk'
 import { colorize } from '../core/colorize.js'
+import { InkHostSlot } from '../core/instances.js'
 // env import replaced with process.env
 
 export type Theme = {
@@ -168,12 +169,14 @@ export function mergeThemeOverrides(
   return next
 }
 
-let customThemeOverrides: Record<string, unknown> | undefined
+const customThemeOverridesHostSlot = new InkHostSlot<{
+  overrides: Record<string, unknown> | undefined
+}>(() => ({ overrides: undefined }))
 
 export function setCustomThemeOverrides(
   overrides: Record<string, unknown> | undefined,
 ): void {
-  customThemeOverrides = overrides
+  customThemeOverridesHostSlot.of().overrides = overrides
 }
 
 export function isBuiltinThemeName(name: string): name is ThemeName {
@@ -712,7 +715,10 @@ export function getTheme(themeName: ThemeName): Theme {
     default:
       base = darkTheme
   }
-  return mergeThemeOverrides(base, customThemeOverrides)
+  return mergeThemeOverrides(
+    base,
+    customThemeOverridesHostSlot.peek()?.overrides,
+  )
 }
 
 // Create a chalk instance with 256-color level for Apple Terminal

@@ -19,7 +19,6 @@
 import { feature } from 'bun:bundle'
 import type { Dirent } from 'fs'
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { dirname, join } from 'path'
 import {
   getOriginalCwd,
@@ -34,6 +33,7 @@ import { getClaudeConfigHomeDir } from './envUtils.js'
 import { isFsInaccessible } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
 import { sanitizePath } from './path.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import {
   getProjectDirNameOverride,
   projectDirNameOverrideCacheKey,
@@ -127,20 +127,32 @@ export function getTranscriptPathForSession(sessionId: string): string {
 // read the raw transcript must bail out above this threshold to avoid OOM.
 export const MAX_TRANSCRIPT_READ_BYTES = 50 * 1024 * 1024
 
+type SessionPathsHostState = {
+  agentTranscriptSubdirs: Map<string, string>
+  projectDirCache: Map<string, string>
+}
+
+const sessionPathsHostSlot = new HostSlot<SessionPathsHostState>(() => ({
+  agentTranscriptSubdirs: new Map<string, string>(),
+  projectDirCache: new Map<string, string>(),
+}))
+
+function getSessionPathsHostState(): SessionPathsHostState {
+  return sessionPathsHostSlot.of(getBootstrapSessionHost())
+}
+
 // In-memory map of agentId → subdirectory for grouping related subagent
 // transcripts (e.g. workflow runs write to subagents/workflows/<runId>/).
 // Populated before the agent runs; consulted by getAgentTranscriptPath.
-const agentTranscriptSubdirs = new Map<string, string>()
-
 export function setAgentTranscriptSubdir(
   agentId: string,
   subdir: string,
 ): void {
-  agentTranscriptSubdirs.set(agentId, subdir)
+  getSessionPathsHostState().agentTranscriptSubdirs.set(agentId, subdir)
 }
 
 export function clearAgentTranscriptSubdir(agentId: string): void {
-  agentTranscriptSubdirs.delete(agentId)
+  getSessionPathsHostState().agentTranscriptSubdirs.delete(agentId)
 }
 
 export function getAgentTranscriptPath(agentId: AgentId): string {
@@ -149,7 +161,7 @@ export function getAgentTranscriptPath(agentId: AgentId): string {
   // transcript is at sessionProjectDir, subagent transcripts are too.
   const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
   const sessionId = getSessionId()
-  const subdir = agentTranscriptSubdirs.get(agentId)
+  const subdir = getSessionPathsHostState().agentTranscriptSubdirs.get(agentId)
   const base = subdir
     ? join(projectDir, sessionId, 'subagents', subdir)
     : join(projectDir, sessionId, 'subagents')
@@ -640,17 +652,37 @@ export function isCustomTitleEnabled(): boolean {
 }
 
 // ── getProjectDir ──
-// Memoized: called 12+ times per turn via hooks.ts createBaseHookInput
-// (PostToolUse path, 5×/turn) + various save* functions. Input is a cwd
-// string; homedir/env/regex are all session-invariant so the result is
-// stable for a given input. Worktree switches just change the key — no
-// cache clear needed.
+// Memoized per SessionHost: called 12+ times per turn via hooks.ts
+// createBaseHookInput (PostToolUse path, 5×/turn) + various save* functions.
+// Worktree switches just change the key — no cache clear needed.
 // densable 2.1.234 #1 / XLe: honor CLAUDE_CODE_PROJECT_DIR_NAME when
 // CLAUDE_CONFIG_DIR is set. Memo key includes both env vars (densable ify).
-export const getProjectDir = memoize(
-  (projectDir: string): string => {
-    const override = getProjectDirNameOverride()
-    return join(getProjectsDir(), override ?? sanitizePath(projectDir))
+type GetProjectDirMemoized = ((projectDir: string) => string) & {
+  cache: Map<string, string>
+}
+
+function getProjectDirImpl(projectDir: string): string {
+  const cache = getSessionPathsHostState().projectDirCache
+  const key = `${projectDir}\0${projectDirNameOverrideCacheKey()}`
+  const cached = cache.get(key)
+  if (cached !== undefined) {
+    return cached
+  }
+  const override = getProjectDirNameOverride()
+  const result = join(getProjectsDir(), override ?? sanitizePath(projectDir))
+  cache.set(key, result)
+  return result
+}
+
+Object.defineProperty(getProjectDirImpl, 'cache', {
+  get(): Map<string, string> {
+    return getSessionPathsHostState().projectDirCache
   },
-  (projectDir: string) => `${projectDir}\0${projectDirNameOverrideCacheKey()}`,
-)
+  set(next: Map<string, string>) {
+    getSessionPathsHostState().projectDirCache = next
+  },
+  configurable: true,
+  enumerable: true,
+})
+
+export const getProjectDir = getProjectDirImpl as GetProjectDirMemoized

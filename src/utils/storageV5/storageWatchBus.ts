@@ -16,6 +16,7 @@ import { dirname, resolve } from 'path'
 import { logForDebugging } from '../debug.js'
 import { isENOENT } from '../errors.js'
 import { getPlatform } from '../platform.js'
+import { getActiveSessionFromAls, runWithSession } from '../sessionHost.js'
 import { getReadSymlinkClass, isStreamNamespaceKey } from './writeValidate.js'
 
 /** densable leftover `Ti` @207367379. */
@@ -290,14 +291,35 @@ class StorageDirectoryWatches {
         callbacksSinceCheck: 0,
         checkedShape: undefined,
       } satisfies WatchRecord)
-    record.listeners.add(listener)
-    record.healthListeners.add(health)
+    const captured = getActiveSessionFromAls()
+    const wrappedListener =
+      captured === undefined
+        ? listener
+        : (filename: string | null) => {
+            if (getActiveSessionFromAls() !== captured) {
+              runWithSession(captured, () => listener(filename))
+            } else {
+              listener(filename)
+            }
+          }
+    const wrappedHealth =
+      captured === undefined
+        ? health
+        : () => {
+            if (getActiveSessionFromAls() !== captured) {
+              runWithSession(captured, health)
+            } else {
+              health()
+            }
+          }
+    record.listeners.add(wrappedListener)
+    record.healthListeners.add(wrappedHealth)
     record.references += 1
     this.watches.set(id, record)
     try {
       await this.rearm(id, record)
     } catch (error) {
-      await this.unwatch(id, record, listener, health)
+      await this.unwatch(id, record, wrappedListener, wrappedHealth)
       throw error
     }
     let released = false
@@ -310,7 +332,7 @@ class StorageDirectoryWatches {
       release: async () => {
         if (!released) {
           released = true
-          await this.unwatch(id, record, listener, health)
+          await this.unwatch(id, record, wrappedListener, wrappedHealth)
         }
       },
     }
@@ -526,9 +548,20 @@ export class StorageWatchBus {
   addListener(
     listener: (change: unknown, sourceInstanceId: string) => void,
   ): () => void {
-    this.listeners.add(listener)
+    const captured = getActiveSessionFromAls()
+    const wrapped =
+      captured === undefined
+        ? listener
+        : (change: unknown, sourceInstanceId: string) => {
+            if (getActiveSessionFromAls() !== captured) {
+              runWithSession(captured, () => listener(change, sourceInstanceId))
+            } else {
+              listener(change, sourceInstanceId)
+            }
+          }
+    this.listeners.add(wrapped)
     return () => {
-      this.listeners.delete(listener)
+      this.listeners.delete(wrapped)
     }
   }
 
@@ -549,6 +582,8 @@ export class StorageWatchBus {
   }
 }
 
+// Process-global watch bus registry keyed by resolved configHome so cross-host
+// acquire/release share native fs.watch descriptors and echo suppression.
 const buses = new Map<string, StorageWatchBus>()
 
 /**

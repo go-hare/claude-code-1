@@ -4,7 +4,7 @@ import { access, copyFile, lstat, mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { dirname, join, relative, sep } from 'path'
 import { getOriginalCwd, getSessionStartTime } from '../bootstrap/state.js'
-import { getCwd, getCwdOverride } from './cwd.js'
+import { getCwd, getCwdOverride, hasScopedCwd } from './cwd.js'
 import { getCachedRepository } from './detectRepository.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { isFileWithinReadSizeLimit } from './file.js'
@@ -19,6 +19,7 @@ import {
 } from './git.js'
 import { isReftableRepo } from './git/gitFilesystem.js'
 import type { DiffBaseMode } from './replDiffTab.js'
+import { hasActiveSessionAls } from './sessionHost.js'
 
 export type GitDiffStats = {
   filesCount: number
@@ -77,9 +78,16 @@ const UNTRACKED_LSTAT_CAP = 500
 
 const privateGitIndexEnvStore = new AsyncLocalStorage<NodeJS.ProcessEnv>()
 
+function isScopedGitCwdActive(): boolean {
+  return (
+    hasActiveSessionAls() ||
+    (typeof hasScopedCwd === 'function' && hasScopedCwd()) ||
+    getCwdOverride() !== undefined
+  )
+}
+
 function activeGitRoot(): string {
-  const override = getCwdOverride()
-  if (override !== undefined) return override
+  if (isScopedGitCwdActive()) return getCwd()
   try {
     return process.cwd()
   } catch {
@@ -91,7 +99,7 @@ function gitOpts(abort?: AbortSignal, envOverride?: NodeJS.ProcessEnv) {
   return {
     timeout: GIT_TIMEOUT_MS,
     preserveOutputOnError: false,
-    useCwd: getCwdOverride() !== undefined,
+    useCwd: isScopedGitCwdActive(),
     abortSignal: abort,
     env: {
       ...process.env,

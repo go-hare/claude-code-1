@@ -21,11 +21,18 @@ import {
   getSettingsForSource,
   projectSettingsAliasesUserSettings,
 } from '../settings/settings.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { PermissionRule } from './PermissionRule.js'
 
-const warned = new Set<string>()
+// Official 2.1.331 [W-130]: per-host once-warning set.
+const warnedByHost = new HostSlot<Set<string>>(() => new Set())
+
+function getWarnedSet(): Set<string> {
+  return warnedByHost.of(getBootstrapSessionHost())
+}
 
 function firstTimeFor(key: string): boolean {
+  const warned = getWarnedSet()
   if (warned.has(key)) {
     return false
   }
@@ -240,5 +247,5 @@ export function collectUngatedAdditionalDirectories(): string[] {
 }
 
 export function resetProjectGrantsGateWarningsForTests(): void {
-  warned.clear()
+  warnedByHost.peek(getBootstrapSessionHost())?.clear()
 }

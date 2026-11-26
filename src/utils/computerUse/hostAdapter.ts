@@ -5,6 +5,7 @@ import type {
 } from '@ant/computer-use-mcp/types'
 import { format } from 'util'
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { COMPUTER_USE_MCP_SERVER_NAME } from './common.js'
 import { createCliExecutor } from './executor.js'
 import { getChicagoEnabled, getChicagoSubGates } from './gates.js'
@@ -64,8 +65,26 @@ function checkScreenRecordingJXA(): boolean {
   }
 }
 
-let cached: ComputerUseHostAdapter | undefined
-let systemKeyCombosGrantReader: () => boolean = () => false
+type SwiftWithTcc = {
+  tcc?: {
+    checkAccessibility: () => boolean
+    checkScreenRecording: () => boolean
+  }
+}
+
+type HostAdapterHostState = {
+  cached: ComputerUseHostAdapter | undefined
+  systemKeyCombosGrantReader: () => boolean
+}
+
+const hostAdapterHostSlot = new HostSlot<HostAdapterHostState>(() => ({
+  cached: undefined,
+  systemKeyCombosGrantReader: () => false,
+}))
+
+function getHostAdapterHostState(): HostAdapterHostState {
+  return hostAdapterHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Register the live `systemKeyCombos` grant reader from the bound Computer Use
@@ -74,7 +93,7 @@ let systemKeyCombosGrantReader: () => boolean = () => false
 export function setComputerUseSystemKeyCombosReader(
   reader: (() => boolean) | undefined,
 ): void {
-  systemKeyCombosGrantReader = reader ?? (() => false)
+  getHostAdapterHostState().systemKeyCombosGrantReader = reader ?? (() => false)
 }
 
 /**
@@ -82,21 +101,22 @@ export function setComputerUseSystemKeyCombosReader(
  */
 export function isComputerUseSystemKeyCombosGranted(): boolean {
   try {
-    return systemKeyCombosGrantReader() === true
+    return getHostAdapterHostState().systemKeyCombosGrantReader() === true
   } catch {
     return false
   }
 }
 
 /**
- * Process-lifetime singleton. Built once on first CU tool call; native modules
+ * Per-host singleton. Built once on first CU tool call; native modules
  * (both `@ant/computer-use-input` and `@ant/computer-use-swift`) are loaded
  * here via the executor factory, which throws on load failure — there is no
  * degraded mode.
  */
 export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
-  if (cached) return cached
-  cached = {
+  const hostState = getHostAdapterHostState()
+  if (hostState.cached) return hostState.cached
+  hostState.cached = {
     serverName: COMPUTER_USE_MCP_SERVER_NAME,
     logger: new DebugLogger(),
     executor: createCliExecutor({
@@ -107,7 +127,7 @@ export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
     ensureOsPermissions: async () => {
       if (process.platform !== 'darwin') return { granted: true }
       const cu = requireComputerUseSwift()
-      const tcc = (cu as any).tcc
+      const tcc = (cu as unknown as SwiftWithTcc).tcc
       // Native Swift .node module provides tcc.checkAccessibility/checkScreenRecording.
       // When absent (decompiled/reverse-engineered build), fall back to JXA probes.
       if (tcc) {
@@ -137,5 +157,5 @@ export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
     // The sub-gate defaults to false anyway.
     cropRawPatch: () => null,
   }
-  return cached
+  return hostState.cached
 }

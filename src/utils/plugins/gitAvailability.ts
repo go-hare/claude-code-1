@@ -6,6 +6,7 @@
  */
 
 import memoize from 'lodash-es/memoize.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { which } from '../which.js'
 
 /**
@@ -26,11 +27,34 @@ async function isCommandAvailable(command: string): Promise<boolean> {
   }
 }
 
+async function checkGitAvailableUncached(): Promise<boolean> {
+  return isCommandAvailable('git')
+}
+
+const checkGitAvailableHostSlot = new HostSlot(() =>
+  memoize(checkGitAvailableUncached),
+)
+const checkGitAvailableImpl = (() =>
+  checkGitAvailableHostSlot.of(getBootstrapSessionHost())()) as ReturnType<
+  typeof memoize<typeof checkGitAvailableUncached>
+>
+Object.defineProperty(checkGitAvailableImpl, 'cache', {
+  get() {
+    return checkGitAvailableHostSlot.of(getBootstrapSessionHost()).cache
+  },
+  set(next) {
+    checkGitAvailableHostSlot.of(getBootstrapSessionHost()).cache = next
+  },
+  configurable: true,
+  enumerable: true,
+})
+
 /**
  * Check if git is available on the system.
  *
- * This is memoized so repeated calls within a session return the cached result.
- * Git availability is unlikely to change during a single CLI session.
+ * This is memoized per SessionHost so repeated calls within a host return the
+ * cached result. Git availability is unlikely to change during a single CLI
+ * session.
  *
  * Only checks PATH — does not exec git. On macOS this means the /usr/bin/git
  * xcrun shim passes even without Xcode CLT installed; callers that hit
@@ -39,9 +63,7 @@ async function isCommandAvailable(command: string): Promise<boolean> {
  *
  * @returns True if git is installed and executable
  */
-export const checkGitAvailable = memoize(async (): Promise<boolean> => {
-  return isCommandAvailable('git')
-})
+export const checkGitAvailable = checkGitAvailableImpl
 
 /**
  * Force the memoized git-availability check to return false for the rest of

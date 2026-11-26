@@ -49,6 +49,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { errorMessage, isENOENT } from '../utils/errors.js'
 import { safeParseJSON } from '../utils/json.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 
 /** leftover `u` @180888421 next leftover `Yle` */
@@ -72,12 +73,10 @@ export function leftoverTaintsInclude(taint: string): boolean {
   )
 }
 
-/**
- * densable PJo — `t().registerVerdict(e)`. Gold init pins leftoverGas /
- * leftoverVk / leftoverMas / leftoverVkr / leftoverCer.
- */
-export function leftoverRegisterPolicyLimitsVerdict(): void {
-  leftoverPolicyLimitsHost().verdict = {
+function createPolicyLimitsVerdict(): NonNullable<
+  PolicyLimitsHostCache['verdict']
+> {
+  return {
     isPolicyAllowed: (e: string) => isPolicyLimitsAllowed(e),
     commandPolicyGateAllows: leftoverGas,
     policyDenyKind: (e: string) => leftoverPolicyLimitsRh(e),
@@ -90,6 +89,14 @@ export function leftoverRegisterPolicyLimitsVerdict(): void {
     coreSkills: leftoverHas,
     rememberedCoreSkills: leftoverYas,
   }
+}
+
+/**
+ * densable PJo — `t().registerVerdict(e)`. Gold init pins leftoverGas /
+ * leftoverVk / leftoverMas / leftoverVkr / leftoverCer.
+ */
+export function leftoverRegisterPolicyLimitsVerdict(): void {
+  leftoverPolicyLimitsHost().verdict = createPolicyLimitsVerdict()
 }
 
 /**
@@ -1556,44 +1563,54 @@ export type PolicyLimitsHostCache = {
   } | null
 }
 
-const EMPTY_HIPAA_EVIDENCE: HipaaEvidence = {
-  seen: [],
-  incomplete: false,
-  ruledOut: [],
+function createEmptyHipaaEvidence(): HipaaEvidence {
+  return {
+    seen: [],
+    incomplete: false,
+    ruledOut: [],
+  }
 }
 
-const policyLimitsHost: PolicyLimitsHostCache = {
-  hintedEnforcedKeys: [],
-  hintedDeniedKeys: [],
-  hintedTaints: [],
-  sessionAttributed: false,
-  sessionCache: null,
-  complianceTaints: [],
-  sessionFromServerFetch: false,
-  hipaaEvidenceLoaded: false,
-  hipaaEvidence: EMPTY_HIPAA_EVIDENCE,
-  hipaaSeenUnreadable: false,
-  attributedBearerDigest: null,
-  evidenceRereadForBearer: null,
-  failOpenVerdict: false,
-  diskAdoptionSuppressed: false,
-  lastServedCoreSkills: null,
-  sessionCoreSkills: null,
-  verdictEnvBearerDigest: null,
-  lastFetchOutcome: null,
-  settledWithoutVerdictFor: null,
-  principalFromOAuthBearer: false,
-  tunnelSocket: undefined,
-  wifAccountDiverged: false,
-  wifSourceLocation: undefined,
-  wifRecordProfile: undefined,
-  wifRecordedOrg: undefined,
-  oauthPrincipalMemo: null,
+function createPolicyLimitsHostCache(): PolicyLimitsHostCache {
+  return {
+    hintedEnforcedKeys: [],
+    hintedDeniedKeys: [],
+    hintedTaints: [],
+    sessionAttributed: false,
+    sessionCache: null,
+    complianceTaints: [],
+    sessionFromServerFetch: false,
+    hipaaEvidenceLoaded: false,
+    hipaaEvidence: createEmptyHipaaEvidence(),
+    hipaaSeenUnreadable: false,
+    attributedBearerDigest: null,
+    evidenceRereadForBearer: null,
+    failOpenVerdict: false,
+    diskAdoptionSuppressed: false,
+    lastServedCoreSkills: null,
+    sessionCoreSkills: null,
+    verdictEnvBearerDigest: null,
+    lastFetchOutcome: null,
+    verdict: createPolicyLimitsVerdict(),
+    settledWithoutVerdictFor: null,
+    principalFromOAuthBearer: false,
+    tunnelSocket: undefined,
+    wifAccountDiverged: false,
+    wifSourceLocation: undefined,
+    wifRecordProfile: undefined,
+    wifRecordedOrg: undefined,
+    oauthPrincipalMemo: null,
+  }
 }
+
+// Official 2.1.331 [W-119 erd]: per-host PolicyLimitsHostCache slot (`HostSlot` on `getBootstrapSessionHost()`).
+const policyLimitsHostByHost = new HostSlot<PolicyLimitsHostCache>(
+  createPolicyLimitsHostCache,
+)
 
 /** leftover `h()` @179070612 */
 export function leftoverPolicyLimitsHost(): PolicyLimitsHostCache {
-  return policyLimitsHost
+  return policyLimitsHostByHost.of(getBootstrapSessionHost())
 }
 
 // densable PJo({...}) at module init — gold pins the full verdict once.
@@ -2386,9 +2403,10 @@ export function leftoverPolicyLimitsIe(e: PolicyLimitsFetchOutcome): boolean {
 
 /** leftover `dropHintedTaints` @179069387 */
 export function dropLeftoverPolicyHints(): void {
-  policyLimitsHost.hintedEnforcedKeys = []
-  policyLimitsHost.hintedDeniedKeys = []
-  policyLimitsHost.hintedTaints = []
+  const host = leftoverPolicyLimitsHost()
+  host.hintedEnforcedKeys = []
+  host.hintedDeniedKeys = []
+  host.hintedTaints = []
 }
 
 function uniqueCap(values: string[], cap: number): string[] {

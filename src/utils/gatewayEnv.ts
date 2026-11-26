@@ -12,7 +12,12 @@
 import { readGatewayTokenFromDescriptor } from './authFileDescriptor.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
-import { getBootstrapSessionHost } from './sessionRoot.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from './sessionRoot.js'
 import { getClaudeCodeUserAgent } from './userAgent.js'
 
 export type GatewayAuthSession = {
@@ -38,7 +43,7 @@ export type ResolveGatewayFromEnvResult =
 // Official o_/XFe store is n().host.credentialSlots.gatewayAuth().
 
 /**
- * Process-level cache for default secure-storage restore.
+ * Per-host cache for default secure-storage restore.
  * - Successful restore into memory: permanent skip until clear/invalidate
  *   (session already in gatewayAuth; ensureGatewayAuthApplied short-circuits).
  * - no_credential / untrusted / expired: TTL miss so long-lived daemon/bridge
@@ -46,30 +51,44 @@ export type ResolveGatewayFromEnvResult =
  * - storage_read_failed: shorter backoff for transient IO.
  * Env bootstrap still runs every ensureGatewayAuthApplied call.
  */
-/** Permanent only after a successful in-memory restore. */
-let secureStorageRestoreSucceeded = false
-/** ms epoch until which default-host miss/fail skips re-read. */
-let secureStorageSkipUntilMs = 0
-/** Why skipUntil is active — for distinct skip reasons in results. */
-let secureStorageSkipKind: 'miss' | 'read_fail' | null = null
-/**
- * densable VPr: at most one background live TLS pin probe per process from
- * ensureGatewayAuthApplied cold path (avoid thrashing on every getAPIProvider).
- */
-let gatewayLiveTlsProbeScheduled = false
-/**
- * After store-path IdP refresh transient failure: ms epoch at which
- * expired+idpRefreshToken permanent skip reopens so external re-login can
- * replace a dead refreshable session. 0 = no reopen scheduled.
- */
-let gatewayIdpTransientRereadAfterMs = 0
+type GatewayHostRestoreState = {
+  /** Permanent only after a successful in-memory restore. */
+  secureStorageRestoreSucceeded: boolean
+  /** ms epoch until which default-host miss/fail skips re-read. */
+  secureStorageSkipUntilMs: number
+  /** Why skipUntil is active — for distinct skip reasons in results. */
+  secureStorageSkipKind: 'miss' | 'read_fail' | null
+  /**
+   * densable VPr: at most one background live TLS pin probe per host from
+   * ensureGatewayAuthApplied cold path (avoid thrashing on every getAPIProvider).
+   */
+  gatewayLiveTlsProbeScheduled: boolean
+  /**
+   * After store-path IdP refresh transient failure: ms epoch at which
+   * expired+idpRefreshToken permanent skip reopens so external re-login can
+   * replace a dead refreshable session. 0 = no reopen scheduled.
+   */
+  gatewayIdpTransientRereadAfterMs: number
+  /**
+   * Store-path HTTP IdP refresh backoff: ms epoch until which maybeRefreshGatewayIdp
+   * returns retryable error without awaiting axios. Prevents thrashing
+   * getAnthropicClient when IdP is down. 0 = no backoff.
+   */
+  gatewayIdpRefreshBackoffUntilMs: number
+}
 
-/**
- * Store-path HTTP IdP refresh backoff: ms epoch until which maybeRefreshGatewayIdp
- * returns retryable error without awaiting axios. Prevents thrashing
- * getAnthropicClient when IdP is down. 0 = no backoff.
- */
-let gatewayIdpRefreshBackoffUntilMs = 0
+const gatewayHostRestoreStates = new HostSlot<GatewayHostRestoreState>(() => ({
+  secureStorageRestoreSucceeded: false,
+  secureStorageSkipUntilMs: 0,
+  secureStorageSkipKind: null,
+  gatewayLiveTlsProbeScheduled: false,
+  gatewayIdpTransientRereadAfterMs: 0,
+  gatewayIdpRefreshBackoffUntilMs: 0,
+}))
+
+function getGatewayHostRestoreState(): GatewayHostRestoreState {
+  return gatewayHostRestoreStates.of(getBootstrapSessionHost())
+}
 
 /** TTL after a successful empty/blocked secure-storage read (default host). */
 export const GATEWAY_SECURE_STORAGE_MISS_TTL_MS = 30_000
@@ -121,12 +140,14 @@ let testGatewayIdpPostToken:
   | null = null
 
 function clearSecureStorageRestoreSkipState(): void {
-  secureStorageRestoreSucceeded = false
-  secureStorageSkipUntilMs = 0
-  secureStorageSkipKind = null
-  gatewayIdpTransientRereadAfterMs = 0
-  gatewayIdpRefreshBackoffUntilMs = 0
-  gatewayLiveTlsProbeScheduled = false
+  const state = gatewayHostRestoreStates.peek(getBootstrapSessionHost())
+  if (!state) return
+  state.secureStorageRestoreSucceeded = false
+  state.secureStorageSkipUntilMs = 0
+  state.secureStorageSkipKind = null
+  state.gatewayIdpTransientRereadAfterMs = 0
+  state.gatewayIdpRefreshBackoffUntilMs = 0
+  state.gatewayLiveTlsProbeScheduled = false
 }
 
 /**
@@ -138,19 +159,20 @@ function clearSecureStorageRestoreSkipState(): void {
 function noteGatewayIdpRefreshTransientFailure(
   nowMs: number = gatewaySecureStorageNowMs(),
 ): void {
+  const state = getGatewayHostRestoreState()
   const after = nowMs + GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS
   if (
-    gatewayIdpTransientRereadAfterMs === 0 ||
-    after < gatewayIdpTransientRereadAfterMs
+    state.gatewayIdpTransientRereadAfterMs === 0 ||
+    after < state.gatewayIdpTransientRereadAfterMs
   ) {
-    gatewayIdpTransientRereadAfterMs = after
+    state.gatewayIdpTransientRereadAfterMs = after
   }
   const backoffUntil = nowMs + GATEWAY_IDP_REFRESH_HTTP_BACKOFF_MS
   if (
-    gatewayIdpRefreshBackoffUntilMs === 0 ||
-    backoffUntil > gatewayIdpRefreshBackoffUntilMs
+    state.gatewayIdpRefreshBackoffUntilMs === 0 ||
+    backoffUntil > state.gatewayIdpRefreshBackoffUntilMs
   ) {
-    gatewayIdpRefreshBackoffUntilMs = backoffUntil
+    state.gatewayIdpRefreshBackoffUntilMs = backoffUntil
   }
 }
 
@@ -253,8 +275,11 @@ export function setGatewayAuth(session: GatewayAuthSession | null): void {
   // Non-null replace (login / restore / refresh apply): drop stale transient
   // reread + HTTP backoff scheduled against a prior session.
   if (session !== null) {
-    gatewayIdpTransientRereadAfterMs = 0
-    gatewayIdpRefreshBackoffUntilMs = 0
+    const state = gatewayHostRestoreStates.peek(getBootstrapSessionHost())
+    if (state) {
+      state.gatewayIdpTransientRereadAfterMs = 0
+      state.gatewayIdpRefreshBackoffUntilMs = 0
+    }
   }
 }
 
@@ -445,8 +470,9 @@ export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
     // for the race window; when pin present we only apply after probe (or
     // clear on mismatch). Cold path still uses sync restore only when the
     // one-shot probe is already in flight / completed for this process.
-    if (!gatewayLiveTlsProbeScheduled) {
-      gatewayLiveTlsProbeScheduled = true
+    const hostState = getGatewayHostRestoreState()
+    if (!hostState.gatewayLiveTlsProbeScheduled) {
+      hostState.gatewayLiveTlsProbeScheduled = true
       // Capture memory before probe so a concurrent /login or IdP refresh
       // is not clobbered by a stale disk restore completing later.
       // Critical: restoreGatewayAuth applies via setGatewayAuth *before* the
@@ -454,27 +480,34 @@ export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
       // clobber. CAS in apply so we only write when memory is still empty or
       // still the pre-probe identity (stillLoser).
       const beforeProbe = getGatewayAuth()
+      const capturedSession = getActiveSessionFromAls()
+      const withCapturedSession = <T>(fn: () => T): T =>
+        capturedSession !== undefined
+          ? runWithSession(capturedSession, fn)
+          : fn()
       void restoreGatewayAuth({
         quiet: true,
         apply: session => {
-          const cur = getGatewayAuth()
-          if (!cur) {
-            setGatewayAuth(session)
-            return
-          }
-          if (beforeProbe) {
-            // Only replace if memory still holds the pre-probe session.
-            if (
-              cur.jwt === beforeProbe.jwt &&
-              cur.idpRefreshToken === beforeProbe.idpRefreshToken
-            ) {
+          withCapturedSession(() => {
+            const cur = getGatewayAuth()
+            if (!cur) {
               setGatewayAuth(session)
+              return
             }
-            // else concurrent /login or IdP refresh — keep memory
-            return
-          }
-          // beforeProbe empty: do not clobber a session that appeared while
-          // the probe/read was in flight (login race).
+            if (beforeProbe) {
+              // Only replace if memory still holds the pre-probe session.
+              if (
+                cur.jwt === beforeProbe.jwt &&
+                cur.idpRefreshToken === beforeProbe.idpRefreshToken
+              ) {
+                setGatewayAuth(session)
+              }
+              // else concurrent /login or IdP refresh — keep memory
+              return
+            }
+            // beforeProbe empty: do not clobber a session that appeared while
+            // the probe/read was in flight (login race).
+          })
         },
       })
         .then(result => {
@@ -482,17 +515,19 @@ export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
             // restoreGatewayAuth already CAS-clears when memory still matches
             // the rejected disk credential. Extra ensure-path clear only when
             // memory still holds the pre-probe identity (not a concurrent login).
-            const cur = getGatewayAuth()
-            if (
-              cur &&
-              beforeProbe &&
-              cur.jwt === beforeProbe.jwt &&
-              cur.idpRefreshToken === beforeProbe.idpRefreshToken
-            ) {
-              clearGatewayAuth()
-            }
-            // Do NOT clear when beforeProbe was empty: concurrent /login may
-            // have filled memory during the probe window.
+            withCapturedSession(() => {
+              const cur = getGatewayAuth()
+              if (
+                cur &&
+                beforeProbe &&
+                cur.jwt === beforeProbe.jwt &&
+                cur.idpRefreshToken === beforeProbe.idpRefreshToken
+              ) {
+                clearGatewayAuth()
+              }
+              // Do NOT clear when beforeProbe was empty: concurrent /login may
+              // have filled memory during the probe window.
+            })
           }
         })
         .catch(() => {
@@ -869,9 +904,10 @@ export async function maybeRefreshGatewayIdp(input?: {
       return { status: 'skipped', reason: 'not_due' }
     }
     // Transient IdP failure backoff: skip HTTP refresh without awaiting axios.
+    const hostState = getGatewayHostRestoreState()
     if (
-      gatewayIdpRefreshBackoffUntilMs > 0 &&
-      nowMs < gatewayIdpRefreshBackoffUntilMs
+      hostState.gatewayIdpRefreshBackoffUntilMs > 0 &&
+      nowMs < hostState.gatewayIdpRefreshBackoffUntilMs
     ) {
       return {
         status: 'error',
@@ -994,8 +1030,11 @@ async function runGatewayIdpRefresh(
       // secureStorage densable optional — in-memory already applied
     }
     // Successful refresh: no need to reopen secure-storage / HTTP backoff.
-    gatewayIdpTransientRereadAfterMs = 0
-    gatewayIdpRefreshBackoffUntilMs = 0
+    const hostState = gatewayHostRestoreStates.peek(getBootstrapSessionHost())
+    if (hostState) {
+      hostState.gatewayIdpTransientRereadAfterMs = 0
+      hostState.gatewayIdpRefreshBackoffUntilMs = 0
+    }
     log('[gateway-refresh] refreshed gateway JWT')
     return { status: 'refreshed', session: next }
   } catch (err) {
@@ -1035,13 +1074,14 @@ async function runGatewayIdpRefresh(
       // Permanent skip until explicit invalidate (login/logout/credential write).
       // 30s miss TTL alone thrash-loops when persist(cleared) fails and disk
       // still holds the rejected refresh token.
+      const hostState = getGatewayHostRestoreState()
       if (opts.usesStoreSession) {
-        secureStorageRestoreSucceeded = false
-        secureStorageSkipUntilMs = Number.MAX_SAFE_INTEGER
-        secureStorageSkipKind = 'miss'
+        hostState.secureStorageRestoreSucceeded = false
+        hostState.secureStorageSkipUntilMs = Number.MAX_SAFE_INTEGER
+        hostState.secureStorageSkipKind = 'miss'
       }
-      gatewayIdpTransientRereadAfterMs = 0
-      gatewayIdpRefreshBackoffUntilMs = 0
+      hostState.gatewayIdpTransientRereadAfterMs = 0
+      hostState.gatewayIdpRefreshBackoffUntilMs = 0
       return { status: 'invalid_grant', clearedRefresh: clear }
     }
     log(
@@ -1521,8 +1561,9 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
 }): RestoreGatewayAuthResult {
   const useDefaultHost = !input?.storage
   const nowMs = gatewaySecureStorageNowMs()
+  const hostState = getGatewayHostRestoreState()
   if (useDefaultHost && !input?.force) {
-    if (secureStorageRestoreSucceeded) {
+    if (hostState.secureStorageRestoreSucceeded) {
       const current = getGatewayAuth()
       // Permanent skip while restored identity is still usable:
       // - JWT not expired, or
@@ -1541,26 +1582,29 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
         current.idpRefreshToken
       ) {
         if (
-          gatewayIdpTransientRereadAfterMs > 0 &&
-          nowMs >= gatewayIdpTransientRereadAfterMs
+          hostState.gatewayIdpTransientRereadAfterMs > 0 &&
+          nowMs >= hostState.gatewayIdpTransientRereadAfterMs
         ) {
           // Reopen: consume schedule and fall through to disk read.
-          secureStorageRestoreSucceeded = false
-          gatewayIdpTransientRereadAfterMs = 0
-          secureStorageSkipUntilMs = 0
-          secureStorageSkipKind = null
+          hostState.secureStorageRestoreSucceeded = false
+          hostState.gatewayIdpTransientRereadAfterMs = 0
+          hostState.secureStorageSkipUntilMs = 0
+          hostState.secureStorageSkipKind = null
         } else {
           return { status: 'skipped', reason: 'already_attempted' }
         }
       } else {
-        secureStorageRestoreSucceeded = false
+        hostState.secureStorageRestoreSucceeded = false
       }
     }
-    if (secureStorageSkipUntilMs > 0 && nowMs < secureStorageSkipUntilMs) {
+    if (
+      hostState.secureStorageSkipUntilMs > 0 &&
+      nowMs < hostState.secureStorageSkipUntilMs
+    ) {
       return {
         status: 'skipped',
         reason:
-          secureStorageSkipKind === 'read_fail'
+          hostState.secureStorageSkipKind === 'read_fail'
             ? 'storage_read_backoff'
             : 'miss_ttl',
       }
@@ -1587,10 +1631,10 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   } catch {
     if (useDefaultHost) {
       // Transient IO failure: short backoff, not permanent negative cache.
-      secureStorageRestoreSucceeded = false
-      secureStorageSkipUntilMs =
+      hostState.secureStorageRestoreSucceeded = false
+      hostState.secureStorageSkipUntilMs =
         nowMs + GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS
-      secureStorageSkipKind = 'read_fail'
+      hostState.secureStorageSkipKind = 'read_fail'
     }
     return { status: 'skipped', reason: 'storage_read_failed' }
   }
@@ -1606,20 +1650,21 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
     const session = plan.session
     ;(input?.apply ?? setGatewayAuth)(session)
     if (useDefaultHost) {
-      secureStorageRestoreSucceeded = true
-      secureStorageSkipUntilMs = 0
-      secureStorageSkipKind = null
+      hostState.secureStorageRestoreSucceeded = true
+      hostState.secureStorageSkipUntilMs = 0
+      hostState.secureStorageSkipKind = null
       // Fresh restore supersedes any prior IdP-transient reopen schedule.
-      gatewayIdpTransientRereadAfterMs = 0
+      hostState.gatewayIdpTransientRereadAfterMs = 0
     }
     return { status: 'restored', session }
   }
   if (plan.status === 'untrusted' || plan.status === 'expired') {
     if (useDefaultHost) {
       // TTL miss — external login/pin write may unblock later.
-      secureStorageRestoreSucceeded = false
-      secureStorageSkipUntilMs = nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
-      secureStorageSkipKind = 'miss'
+      hostState.secureStorageRestoreSucceeded = false
+      hostState.secureStorageSkipUntilMs =
+        nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+      hostState.secureStorageSkipKind = 'miss'
     }
     if (input?.quiet !== true) {
       ;(input?.writeStderr ?? (m => process.stderr.write(m)))(
@@ -1630,9 +1675,10 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   }
   if (useDefaultHost) {
     // no_credential / other misses — TTL so daemon can see external login.
-    secureStorageRestoreSucceeded = false
-    secureStorageSkipUntilMs = nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
-    secureStorageSkipKind = 'miss'
+    hostState.secureStorageRestoreSucceeded = false
+    hostState.secureStorageSkipUntilMs =
+      nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+    hostState.secureStorageSkipKind = 'miss'
   }
   return { status: 'skipped', reason: plan.status }
 }

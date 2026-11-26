@@ -7,6 +7,7 @@ import { logForDebugging } from '../debug.js'
 import { isFsInaccessible } from '../errors.js'
 import { execFileNoThrow } from '../execFileNoThrow.js'
 import { getPlatform } from '../platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { which } from '../which.js'
 
 export const CLAUDE_IN_CHROME_MCP_SERVER_NAME = 'claude-in-chrome'
@@ -413,9 +414,14 @@ export function isClaudeInChromeMCPServer(name: string): boolean {
 }
 
 const MAX_TRACKED_TABS = 200
-const trackedTabIds = new Set<number>()
+const trackedTabIdsByHost = new HostSlot(() => new Set<number>())
+
+function getTrackedTabIds(): Set<number> {
+  return trackedTabIdsByHost.of(getBootstrapSessionHost())
+}
 
 export function trackClaudeInChromeTabId(tabId: number): void {
+  const trackedTabIds = getTrackedTabIds()
   if (trackedTabIds.size >= MAX_TRACKED_TABS && !trackedTabIds.has(tabId)) {
     trackedTabIds.clear()
   }
@@ -423,7 +429,7 @@ export function trackClaudeInChromeTabId(tabId: number): void {
 }
 
 export function isTrackedClaudeInChromeTabId(tabId: number): boolean {
-  return trackedTabIds.has(tabId)
+  return getTrackedTabIds().has(tabId)
 }
 
 export async function openInChrome(url: string): Promise<boolean> {

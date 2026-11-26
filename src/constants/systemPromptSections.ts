@@ -5,6 +5,7 @@ import {
   getSystemPromptSectionCache,
   setSystemPromptSectionCacheEntry,
 } from '../bootstrap/state.js'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js'
 
 type ComputeFn = () => string | null | Promise<string | null>
 
@@ -20,9 +21,23 @@ type PromptSectionResolverFn = (
   hookOrigin?: string,
 ) => Promise<string | null>
 
-let promptSectionResolver: PromptSectionResolverFn | undefined
-let promptSectionInvalidator: (() => void) | undefined
-let sectionGeneration = 0
+type PromptSectionSlotState = {
+  resolver: PromptSectionResolverFn | null
+  invalidator: (() => void) | null
+  generation: number
+}
+
+const promptSectionStateSlot = new RootSessionSlot<PromptSectionSlotState>(
+  () => ({
+    resolver: null,
+    invalidator: null,
+    generation: 0,
+  }),
+)
+
+function getPromptSectionState(): PromptSectionSlotState {
+  return promptSectionStateSlot.of(getBootstrapSession())
+}
 
 /**
  * densable fEn — register a resolver for `prompt.section` hook evaluation.
@@ -30,7 +45,7 @@ let sectionGeneration = 0
 export function setPromptSectionResolver(
   resolver: PromptSectionResolverFn | undefined,
 ): void {
-  promptSectionResolver = resolver
+  getPromptSectionState().resolver = resolver ?? null
 }
 
 /**
@@ -42,7 +57,8 @@ export function resolvePromptSection(
   hookOrigin?: string,
 ): Promise<string | null> {
   return (
-    promptSectionResolver?.(name, text, hookOrigin) ?? Promise.resolve(text)
+    getPromptSectionState().resolver?.(name, text, hookOrigin) ??
+    Promise.resolve(text)
   )
 }
 
@@ -52,14 +68,14 @@ export function resolvePromptSection(
 export function setPromptSectionInvalidator(
   invalidator: (() => void) | undefined,
 ): void {
-  promptSectionInvalidator = invalidator
+  getPromptSectionState().invalidator = invalidator ?? null
 }
 
 /**
  * densable BQe — invoke registered prompt section invalidator if present.
  */
 export function invalidatePromptSections(): void {
-  promptSectionInvalidator?.()
+  getPromptSectionState().invalidator?.()
 }
 
 /**
@@ -98,7 +114,7 @@ export function DANGEROUS_uncachedSystemPromptSection(
 function getCurrentSectionEpoch(): number {
   const hostEpoch =
     typeof getPromptRenderEpoch === 'function' ? getPromptRenderEpoch() : 0
-  return hostEpoch + sectionGeneration
+  return hostEpoch + getPromptSectionState().generation
 }
 
 async function computeAndCacheSection(
@@ -168,7 +184,7 @@ export function resolveStaticSystemPromptSection(
  * evaluation of AFK/fast-mode/cache-editing headers.
  */
 export function clearSystemPromptSections(): void {
-  sectionGeneration++
+  getPromptSectionState().generation++
   clearSystemPromptSectionState()
   clearBetaHeaderLatches()
   invalidatePromptSections()

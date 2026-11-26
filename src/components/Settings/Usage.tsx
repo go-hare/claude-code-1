@@ -7,6 +7,7 @@ import { usageCredits as usageCreditsCommand } from 'src/commands/extra-usage/in
 import { getOauthConfig } from 'src/constants/oauth.js';
 import { getSubscriptionType, hasProfileScope, isClaudeAISubscriber } from 'src/utils/auth.js';
 import { getGatewayAuth } from '../../utils/gatewayEnv.js';
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js';
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js';
 import { formatTotalCost } from '../../cost-tracker.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
@@ -1361,17 +1362,29 @@ export function formatGatewayUnlimitedSpend(spend: Extract<GatewaySpendReading, 
 
 const GATEWAY_SPEND_PERIODS = ['daily', 'weekly', 'monthly'] as const;
 
-let cachedGatewaySpend: { key: string; value: GatewaySpendReading | null } | null = null;
-let inFlightGatewaySpend: Promise<GatewaySpendReading | null> | null = null;
+type GatewaySpendHostState = {
+  cachedGatewaySpend: { key: string; value: GatewaySpendReading | null } | null;
+  inFlightGatewaySpend: Promise<GatewaySpendReading | null> | null;
+};
+
+const gatewaySpendStateByHost = new HostSlot<GatewaySpendHostState>(() => ({
+  cachedGatewaySpend: null,
+  inFlightGatewaySpend: null,
+}));
+
+function getGatewaySpendHostState(): GatewaySpendHostState {
+  return gatewaySpendStateByHost.of(getBootstrapSessionHost());
+}
 
 function gatewaySpendCacheKey(auth: { url: string; jwt: string } | null): string | null {
   return auth ? `${auth.url}\0${auth.jwt}` : null;
 }
 
 export function getCachedGatewaySpendReading(): GatewaySpendReading | null {
+  const state = getGatewaySpendHostState();
   const key = gatewaySpendCacheKey(getGatewayAuth());
-  if (!key || cachedGatewaySpend?.key !== key) return null;
-  return cachedGatewaySpend.value;
+  if (!key || state.cachedGatewaySpend?.key !== key) return null;
+  return state.cachedGatewaySpend.value;
 }
 
 /**
@@ -1439,17 +1452,18 @@ export function parseGatewaySpendReading(data: unknown): GatewaySpendReading | n
 
 /** Official `Qrn` (2.1.319 #1706): fetch gateway spend reading from `${gateway.url}/api/oauth/usage`. */
 export async function fetchGatewaySpendReading(): Promise<GatewaySpendReading | null> {
+  const state = getGatewaySpendHostState();
   const gateway = getGatewayAuth();
   const key = gatewaySpendCacheKey(gateway);
   if (!gateway || !key) {
-    cachedGatewaySpend = null;
+    state.cachedGatewaySpend = null;
     return null;
   }
-  if (inFlightGatewaySpend) {
-    return inFlightGatewaySpend;
+  if (state.inFlightGatewaySpend) {
+    return state.inFlightGatewaySpend;
   }
   const url = `${gateway.url.replace(/\/+$/, '')}/api/oauth/usage`;
-  inFlightGatewaySpend = axios
+  const requestPromise = axios
     .get<unknown>(url, {
       headers: {
         Authorization: `Bearer ${gateway.jwt}`,
@@ -1461,14 +1475,17 @@ export async function fetchGatewaySpendReading(): Promise<GatewaySpendReading | 
     })
     .then(res => {
       const parsed = res.status === 200 ? parseGatewaySpendReading(res.data) : null;
-      cachedGatewaySpend = { key, value: parsed };
+      state.cachedGatewaySpend = { key, value: parsed };
       return parsed;
     })
-    .catch(() => (cachedGatewaySpend?.key === key ? cachedGatewaySpend.value : null))
+    .catch(() => (state.cachedGatewaySpend?.key === key ? state.cachedGatewaySpend.value : null))
     .finally(() => {
-      inFlightGatewaySpend = null;
+      if (state.inFlightGatewaySpend === requestPromise) {
+        state.inFlightGatewaySpend = null;
+      }
     });
-  return inFlightGatewaySpend;
+  state.inFlightGatewaySpend = requestPromise;
+  return requestPromise;
 }
 
 /** densable 2.1.251 Dl / 2.1.319 #1706 — Spend limit bar / unlimited Spend (UTC) / HPe empty arm. */

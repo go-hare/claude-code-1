@@ -1,4 +1,5 @@
 import { createContext, useContext, useLayoutEffect } from 'react'
+import { InkHostSlot } from '../core/instances.js'
 
 /** Official 2.1.327 (#520) `jR = 150`: grace window after SIGCONT resume. */
 export const SIGCONT_RESUME_GRACE_MS = 150
@@ -13,24 +14,27 @@ export type InputClock = (() => number) & {
   wantEveryKey?: (owner: unknown) => () => void
 }
 
-let moduleResumedAt: number | undefined
+const resumeGraceHostSlot = new InkHostSlot<{ resumedAt: number | undefined }>(
+  () => ({ resumedAt: undefined }),
+)
 
 /**
  * Official 2.1.327 (#520) `noteResumed`: record a SIGCONT resume timestamp so
  * prompts ignore non-Escape answers for `SIGCONT_RESUME_GRACE_MS` ms after `fg`.
  */
 export function noteResumed(now: number = Date.now()): void {
-  moduleResumedAt = now
+  resumeGraceHostSlot.of().resumedAt = now
 }
 
-/** Return the most recent module-level SIGCONT resume timestamp (ms). */
+/** Return the most recent host-level SIGCONT resume timestamp (ms). */
 export function getLastResumedAt(): number | undefined {
-  return moduleResumedAt
+  return resumeGraceHostSlot.peek()?.resumedAt
 }
 
 /** Test helper — clear the SIGCONT resume grace timestamp. */
 export function _resetSigcontResumeGraceForTesting(): void {
-  moduleResumedAt = undefined
+  const slot = resumeGraceHostSlot.peek()
+  if (slot) slot.resumedAt = undefined
 }
 
 function isWithinResumeWindow(
@@ -53,7 +57,7 @@ export function isInSigcontResumeGrace(
   graceMs: number = SIGCONT_RESUME_GRACE_MS,
 ): boolean {
   const inputNow = clock ?? (() => Date.now())
-  const stamp = clock?.resumedAt?.() ?? moduleResumedAt
+  const stamp = clock?.resumedAt?.() ?? resumeGraceHostSlot.peek()?.resumedAt
   return stamp !== undefined && isWithinResumeWindow(inputNow, stamp, graceMs)
 }
 

@@ -31,6 +31,7 @@ import {
   getProjectTempDir,
 } from '../permissions/filesystem.js'
 import { getPlatform } from '../platform.js'
+import { getBootstrapSessionHost } from '../sessionHost.js'
 import { sleep } from '../sleep.js'
 
 // SECURITY: O_NOFOLLOW prevents following symlinks when opening task output files.
@@ -86,53 +87,95 @@ export function formatLostOutputNotice(sizeKB: number, path: string): string {
  * instances still hold old-session paths — open() would ENOENT. Background
  * bash tasks surviving /clear need their output files to stay reachable.
  */
-let _taskOutputDir: string | undefined
-export function getTaskOutputDir(): string {
-  if (_taskOutputDir === undefined) {
-    _taskOutputDir = join(getProjectTempDir(), getSessionId(), 'tasks')
-  }
-  return _taskOutputDir
+// Official 2.1.331 (@305046105) `yn()` — per-SessionHost task output state bag:
+// `diskOutputs`, `outputPathBindings`, `pendingOutputOps`, `linkedOutputs`,
+// `linksInheritedBefore` / `inheritedLinkLines`, and memoized `taskOutputDir`.
+const PROCESS_START_MS = Date.now() - process.uptime() * 1000
+
+type HostDiskOutputState = {
+  taskOutputDir: string | undefined
+  diskOutputs: Map<string, DiskTaskOutput>
+  outputPathBindings: Map<
+    string,
+    { dev: number | bigint; ino: number | bigint }
+  >
+  pendingOutputOps: Set<Promise<unknown>>
+  linkedOutputs: Map<string, string>
+  linksInheritedBefore: number
+  inheritedLinkLines: Map<string, number>
 }
 
-// Official 2.1.331 `yn().linkedOutputs` + `K` (linked target identity map) +
-// `linksInheritedBefore` / `inheritedLinkLines` for pre-session symlink inheritance.
-const PROCESS_START_MS = Date.now() - process.uptime() * 1000
-const linkedOutputs = new Map<string, string>()
-const linkedTargetIdentities = new Map<
-  string,
-  { dev: number | bigint; ino: number | bigint }
->()
-let linksInheritedBefore = PROCESS_START_MS
-const inheritedLinkLines = new Map<string, number>()
+const hostDiskOutputStates = new WeakMap<object, HostDiskOutputState>()
+
+function getHostDiskOutputState(): HostDiskOutputState {
+  const host = getBootstrapSessionHost()
+  let state = hostDiskOutputStates.get(host)
+  if (!state) {
+    state = {
+      taskOutputDir: undefined,
+      diskOutputs: new Map(),
+      outputPathBindings: new Map(),
+      pendingOutputOps: new Set(),
+      linkedOutputs: new Map(),
+      linksInheritedBefore: PROCESS_START_MS,
+      inheritedLinkLines: new Map(),
+    }
+    hostDiskOutputStates.set(host, state)
+  }
+  return state
+}
+
+function getTaskOutputDirForState(state: HostDiskOutputState): string {
+  if (state.taskOutputDir === undefined) {
+    state.taskOutputDir = join(getProjectTempDir(), getSessionId(), 'tasks')
+  }
+  return state.taskOutputDir
+}
+
+export function getTaskOutputDir(): string {
+  return getTaskOutputDirForState(getHostDiskOutputState())
+}
 
 export function inheritPredecessorTaskOutputLinks(
   dir: string,
   cutoffMs: number,
 ): void {
   if (!Number.isFinite(cutoffMs)) return
-  inheritedLinkLines.set(
+  getHostDiskOutputState().inheritedLinkLines.set(
     dir,
     Math.max(PROCESS_START_MS, Math.min(Date.now(), cutoffMs)),
   )
 }
 
+function getLinksInheritedBeforeForState(
+  state: HostDiskOutputState,
+  dir: string,
+): number {
+  return Math.max(
+    state.linksInheritedBefore,
+    state.inheritedLinkLines.get(dir) ?? 0,
+  )
+}
+
 export function getLinksInheritedBeforeFor(dir: string): number {
-  return Math.max(linksInheritedBefore, inheritedLinkLines.get(dir) ?? 0)
+  return getLinksInheritedBeforeForState(getHostDiskOutputState(), dir)
 }
 
 /** Test helper — override the pre-session inheritance cutoff timestamp. */
 export function _setLinksInheritedBeforeForTest(cutoffMs?: number): void {
-  linksInheritedBefore = cutoffMs ?? PROCESS_START_MS
-  inheritedLinkLines.clear()
+  const state = getHostDiskOutputState()
+  state.linksInheritedBefore = cutoffMs ?? PROCESS_START_MS
+  state.inheritedLinkLines.clear()
 }
 
 /** Test helper — clears the memoized dir and symlink registration state. */
 export function _resetTaskOutputDirForTest(): void {
-  _taskOutputDir = undefined
-  linkedOutputs.clear()
-  linkedTargetIdentities.clear()
-  linksInheritedBefore = PROCESS_START_MS
-  inheritedLinkLines.clear()
+  const state = getHostDiskOutputState()
+  state.taskOutputDir = undefined
+  state.linkedOutputs.clear()
+  state.outputPathBindings.clear()
+  state.linksInheritedBefore = PROCESS_START_MS
+  state.inheritedLinkLines.clear()
 }
 
 const SESSION_UUID_RE =
@@ -152,8 +195,10 @@ function isSessionIdSegment(segment: string): boolean {
   )
 }
 
-function getTaskOutputRootDirNormalized(): string {
-  return dirname(dirname(dirname(resolve(getTaskOutputDir()))))
+function getTaskOutputRootDirNormalized(
+  state: HostDiskOutputState = getHostDiskOutputState(),
+): string {
+  return dirname(dirname(dirname(resolve(getTaskOutputDirForState(state)))))
 }
 
 function safeRealpathSync(p: string): string {
@@ -176,8 +221,11 @@ function isUnderTaskOutputRoot(targetPath: string): boolean {
 }
 
 /** Official 2.1.331 `Rt(e)` — canonicalize task output path across root aliases (e.g. /tmp -> /private/tmp). */
-function canonicalizeTaskOutputPath(filePath: string): string {
-  const root = getTaskOutputRootDirNormalized()
+function canonicalizeTaskOutputPath(
+  filePath: string,
+  state: HostDiskOutputState = getHostDiskOutputState(),
+): string {
+  const root = getTaskOutputRootDirNormalized(state)
   const resolved = resolve(filePath)
   if (resolved.startsWith(root + sep)) {
     return resolved
@@ -190,12 +238,11 @@ function canonicalizeTaskOutputPath(filePath: string): string {
   return resolved
 }
 
-/**
- * Official 2.1.331 `f6t` (`isTaskOutputFilePath`) — true when any spelling of
- * `filePath` sits directly inside `<taskOutputRoot>/<project>/<sessionId>/tasks/`.
- */
-export function isTaskOutputFilePath(filePath: string): boolean {
-  const root = getTaskOutputRootDirNormalized()
+function isTaskOutputFilePathForState(
+  filePath: string,
+  state: HostDiskOutputState,
+): boolean {
+  const root = getTaskOutputRootDirNormalized(state)
   const roots = new Set(
     [root, safeRealpathSync(root)].map(r => foldCaseForPlatform(r)),
   )
@@ -209,6 +256,14 @@ export function isTaskOutputFilePath(filePath: string): boolean {
       roots.has(foldCaseForPlatform(rootDir))
     )
   })
+}
+
+/**
+ * Official 2.1.331 `f6t` (`isTaskOutputFilePath`) — true when any spelling of
+ * `filePath` sits directly inside `<taskOutputRoot>/<project>/<sessionId>/tasks/`.
+ */
+export function isTaskOutputFilePath(filePath: string): boolean {
+  return isTaskOutputFilePathForState(filePath, getHostDiskOutputState())
 }
 
 function sessionGlobPatterns(): string[] {
@@ -308,7 +363,10 @@ async function lstatOrNull(filePath: string) {
   }
 }
 
-async function recordTargetIdentity(targetPath: string): Promise<void> {
+async function recordTargetIdentity(
+  targetPath: string,
+  state: HostDiskOutputState,
+): Promise<void> {
   const fh = await open(
     targetPath,
     process.platform === 'win32'
@@ -325,7 +383,7 @@ async function recordTargetIdentity(targetPath: string): Promise<void> {
         'link target is not a regular single-link file',
       )
     }
-    linkedTargetIdentities.set(targetPath, { dev: st.dev, ino: st.ino })
+    state.outputPathBindings.set(targetPath, { dev: st.dev, ino: st.ino })
   } finally {
     await fh.close()
   }
@@ -334,18 +392,25 @@ async function recordTargetIdentity(targetPath: string): Promise<void> {
 async function registerLinkedOutput(
   linkPath: string,
   targetPath: string,
+  state: HostDiskOutputState,
 ): Promise<void> {
   if (isUnderTaskOutputRoot(targetPath)) {
-    await recordTargetIdentity(targetPath)
+    await recordTargetIdentity(targetPath, state)
   }
-  linkedOutputs.set(canonicalizeTaskOutputPath(linkPath), targetPath)
+  state.linkedOutputs.set(
+    canonicalizeTaskOutputPath(linkPath, state),
+    targetPath,
+  )
 }
 
-function getRecordedTargetIdentity(targetPath: string): {
+function getRecordedTargetIdentity(
+  targetPath: string,
+  state: HostDiskOutputState,
+): {
   dev: number | bigint
   ino: number | bigint
 } {
-  const id = linkedTargetIdentities.get(targetPath)
+  const id = state.outputPathBindings.get(targetPath)
   if (id === undefined) {
     throw new TaskOutputSwapRefusedError(
       targetPath,
@@ -364,6 +429,7 @@ async function inheritPreSessionOutputSymlink(
   canonicalLinkPath: string,
   ioPath: string,
   rawTarget: string,
+  state: HostDiskOutputState,
 ): Promise<string> {
   const configRoot = resolve(getClaudeConfigHomeDir())
   const inConfigDir =
@@ -380,14 +446,15 @@ async function inheritPreSessionOutputSymlink(
   const st = await lstat(ioPath)
   if (
     !st.isSymbolicLink() ||
-    st.ctimeMs >= getLinksInheritedBeforeFor(dirname(canonicalLinkPath))
+    st.ctimeMs >=
+      getLinksInheritedBeforeForState(state, dirname(canonicalLinkPath))
   ) {
     throw new TaskOutputSwapRefusedError(
       canonicalLinkPath,
       'output is an unregistered symlink made during this session',
     )
   }
-  await registerLinkedOutput(canonicalLinkPath, rawTarget)
+  await registerLinkedOutput(canonicalLinkPath, rawTarget, state)
   return rawTarget
 }
 
@@ -395,11 +462,12 @@ async function inheritPreSessionOutputSymlink(
 async function resolveAuthorizedOutputSymlink(
   linkPath: string,
   ioPath: string,
+  state: HostDiskOutputState,
 ): Promise<string | null> {
-  const canonical = canonicalizeTaskOutputPath(linkPath)
-  let expected = linkedOutputs.get(canonical)
+  const canonical = canonicalizeTaskOutputPath(linkPath, state)
+  let expected = state.linkedOutputs.get(canonical)
   if (expected === undefined) {
-    if (!isTaskOutputFilePath(canonical)) {
+    if (!isTaskOutputFilePathForState(canonical, state)) {
       throw new TaskOutputSwapRefusedError(
         canonical,
         'output is an unregistered symlink outside any tasks directory',
@@ -407,7 +475,12 @@ async function resolveAuthorizedOutputSymlink(
     }
     const raw = await readlinkOrNull(ioPath)
     if (raw === null) return null
-    expected = await inheritPreSessionOutputSymlink(canonical, ioPath, raw)
+    expected = await inheritPreSessionOutputSymlink(
+      canonical,
+      ioPath,
+      raw,
+      state,
+    )
   }
   const current = await readlinkOrNull(ioPath)
   if (current === null) return null
@@ -449,10 +522,12 @@ export async function repointTaskOutputSymlinks(
   oldSideDir: string,
   newSideDir: string,
 ): Promise<void> {
-  if (_taskOutputDir === undefined) return
+  const state = getHostDiskOutputState()
+  const taskOutputDir = state.taskOutputDir
+  if (taskOutputDir === undefined) return
   let entries: string[]
   try {
-    entries = await readdir(_taskOutputDir)
+    entries = await readdir(taskOutputDir)
   } catch (e) {
     const code = getErrnoCode(e)
     if (code !== 'ENOENT') {
@@ -463,13 +538,21 @@ export async function repointTaskOutputSymlinks(
   const oldPrefix = oldSideDir.endsWith(sep) ? oldSideDir : oldSideDir + sep
   for (const name of entries) {
     if (!name.endsWith('.output')) continue
-    const linkPath = canonicalizeTaskOutputPath(join(_taskOutputDir, name))
-    let expected = linkedOutputs.get(linkPath)
+    const linkPath = canonicalizeTaskOutputPath(
+      join(taskOutputDir, name),
+      state,
+    )
+    let expected = state.linkedOutputs.get(linkPath)
     try {
       if (expected === undefined) {
         const raw = await readlinkOrNull(linkPath)
         if (raw === null) continue
-        expected = await inheritPreSessionOutputSymlink(linkPath, linkPath, raw)
+        expected = await inheritPreSessionOutputSymlink(
+          linkPath,
+          linkPath,
+          raw,
+          state,
+        )
       }
       if (!expected.startsWith(oldPrefix) && expected !== oldSideDir) continue
       const next =
@@ -484,27 +567,30 @@ export async function repointTaskOutputSymlinks(
           'output symlink was re-pointed',
         )
       }
-      await pinWriteTarget(_taskOutputDir)
+      await pinWriteTarget(taskOutputDir)
       await unlink(linkPath)
-      if (linkedOutputs.get(linkPath) === expected) {
-        await registerLinkedOutput(linkPath, next)
+      if (state.linkedOutputs.get(linkPath) === expected) {
+        await registerLinkedOutput(linkPath, next, state)
       }
       try {
         await symlink(next, linkPath).catch(async e => {
           if (getErrnoCode(e) !== 'EEXIST') throw e
           const nowTarget = await readlinkOrNull(linkPath).catch(() => null)
-          if (nowTarget !== next && nowTarget !== linkedOutputs.get(linkPath)) {
+          if (
+            nowTarget !== next &&
+            nowTarget !== state.linkedOutputs.get(linkPath)
+          ) {
             throw e
           }
         })
       } catch (e) {
-        if (linkedOutputs.get(linkPath) === next) {
-          linkedOutputs.delete(linkPath)
+        if (state.linkedOutputs.get(linkPath) === next) {
+          state.linkedOutputs.delete(linkPath)
         }
         throw e
       }
       if ((await readlinkOrNull(linkPath).catch(() => null)) === next) {
-        linkedOutputs.set(linkPath, next)
+        state.linkedOutputs.set(linkPath, next)
       }
     } catch (e) {
       if (getErrnoCode(e) !== 'ENOENT' && !isTaskOutputSwapRefusal(e)) {
@@ -688,46 +774,54 @@ export async function pinWriteTarget(dir: string): Promise<void> {
 /**
  * Ensure the task output directory exists
  */
-async function ensureOutputDir(): Promise<void> {
-  const dir = getTaskOutputDir()
+async function ensureOutputDir(
+  state: HostDiskOutputState = getHostDiskOutputState(),
+): Promise<void> {
+  const dir = getTaskOutputDirForState(state)
   await mkdir(dir, { recursive: true })
   await pinWriteTarget(dir)
+}
+
+function getTaskOutputPathForState(
+  taskId: string,
+  state: HostDiskOutputState,
+): string {
+  return join(getTaskOutputDirForState(state), `${taskId}.output`)
 }
 
 /**
  * Get the output file path for a task
  */
 export function getTaskOutputPath(taskId: string): string {
-  return join(getTaskOutputDir(), `${taskId}.output`)
+  return getTaskOutputPathForState(taskId, getHostDiskOutputState())
 }
 
 /** Official 2.1.331 — read refuses unregistered symlinks, chained symlinks, or unix nlink≠1 leaf. */
 const TASK_OUTPUT_NOT_REGULAR = 'not a regular nlink-1 file'
 
-/**
- * Official 2.1.331 `resolveTaskOutputReadPath` — validates the leaf against the
- * `linkedOutputs` allowlist + pre-session symlink inheritance bound (`linksInheritedBeforeFor`),
- * refuses unregistered session-created symlinks, symlink chains, symlinks leading
- * back into the tasks tree, non-files, and Unix `nlink !== 1` hardlinks.
- */
-export async function resolveTaskOutputReadPath(
+async function resolveTaskOutputReadPathWithState(
   path: string,
-  depth = 0,
+  depth: number,
+  state: HostDiskOutputState,
 ): Promise<string | null> {
-  const canonical = canonicalizeTaskOutputPath(path)
+  const canonical = canonicalizeTaskOutputPath(path, state)
   const st = await lstatOrNull(canonical)
   if (st === null) return null
 
   if (st.isSymbolicLink()) {
-    const target = await resolveAuthorizedOutputSymlink(canonical, canonical)
+    const target = await resolveAuthorizedOutputSymlink(
+      canonical,
+      canonical,
+      state,
+    )
     if (target === null) {
-      return resolveTaskOutputReadPath(path, depth)
+      return resolveTaskOutputReadPathWithState(path, depth, state)
     }
     if (isUnderTaskOutputRoot(target)) {
       if (depth > 0) {
         throw new TaskOutputSwapRefusedError(canonical, 'output links chain')
       }
-      return resolveTaskOutputReadPath(target, depth + 1)
+      return resolveTaskOutputReadPathWithState(target, depth + 1, state)
     }
     let resolvedTarget: string
     try {
@@ -763,23 +857,40 @@ export async function resolveTaskOutputReadPath(
 }
 
 /**
- * Official 2.1.331 `$Xe` (`openTaskOutputRead` / `openTaskOutputForRead`):
- * Validates leaf + authorized symlink allowlist, opens with `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`
- * (Windows `"r"`), and verifies handle identity via `vt`. Caller must close.
+ * Official 2.1.331 `resolveTaskOutputReadPath` — validates the leaf against the
+ * `linkedOutputs` allowlist + pre-session symlink inheritance bound (`linksInheritedBeforeFor`),
+ * refuses unregistered session-created symlinks, symlink chains, symlinks leading
+ * back into the tasks tree, non-files, and Unix `nlink !== 1` hardlinks.
  */
-export async function openTaskOutputRead(
+export async function resolveTaskOutputReadPath(
   path: string,
   depth = 0,
-  relooked = false,
+): Promise<string | null> {
+  return resolveTaskOutputReadPathWithState(
+    path,
+    depth,
+    getHostDiskOutputState(),
+  )
+}
+
+async function openTaskOutputReadWithState(
+  path: string,
+  depth: number,
+  relooked: boolean,
+  state: HostDiskOutputState,
 ): Promise<FileHandle | null> {
-  const canonical = canonicalizeTaskOutputPath(path)
+  const canonical = canonicalizeTaskOutputPath(path, state)
   const st = await lstatOrNull(canonical)
   if (st === null) {
     return null
   }
 
   if (st.isSymbolicLink()) {
-    const target = await resolveAuthorizedOutputSymlink(canonical, canonical)
+    const target = await resolveAuthorizedOutputSymlink(
+      canonical,
+      canonical,
+      state,
+    )
     if (target === null) {
       if (relooked) {
         throw new TaskOutputSwapRefusedError(
@@ -787,13 +898,13 @@ export async function openTaskOutputRead(
           'output leaf changed during open',
         )
       }
-      return openTaskOutputRead(canonical, depth, true)
+      return openTaskOutputReadWithState(canonical, depth, true, state)
     }
     if (isUnderTaskOutputRoot(target)) {
       if (depth > 0) {
         throw new TaskOutputSwapRefusedError(canonical, 'output links chain')
       }
-      return openTaskOutputRead(target, depth + 1, false)
+      return openTaskOutputReadWithState(target, depth + 1, false, state)
     }
     // Authorized symlink to external transcript (e.g. ~/.claude/projects/.../*.jsonl)
     let resolvedTarget: string
@@ -861,7 +972,7 @@ export async function openTaskOutputRead(
     try {
       const checkStatus = await vt(fh, st, path, {
         registeredIdentity:
-          depth > 0 ? getRecordedTargetIdentity(canonical) : undefined,
+          depth > 0 ? getRecordedTargetIdentity(canonical, state) : undefined,
         anyLinkCount: process.platform === 'win32',
         unlinkedIsGone: depth === 0,
       })
@@ -885,6 +996,24 @@ export async function openTaskOutputRead(
 }
 
 /**
+ * Official 2.1.331 `$Xe` (`openTaskOutputRead` / `openTaskOutputForRead`):
+ * Validates leaf + authorized symlink allowlist, opens with `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`
+ * (Windows `"r"`), and verifies handle identity via `vt`. Caller must close.
+ */
+export async function openTaskOutputRead(
+  path: string,
+  depth = 0,
+  relooked = false,
+): Promise<FileHandle | null> {
+  return openTaskOutputReadWithState(
+    path,
+    depth,
+    relooked,
+    getHostDiskOutputState(),
+  )
+}
+
+/**
  * Official 2.1.331 `uTr` (`bindTaskOutputForRead`):
  * Safely binds a task output file for reading via `openTaskOutputRead`
  * (O_NOFOLLOW + registered-symlink allowlist + nlink=1 + fstat recheck) and
@@ -897,8 +1026,9 @@ export async function bindTaskOutputForRead(filePath: string): Promise<{
   handle: FileHandle
   close: () => Promise<void>
 }> {
-  const canonical = canonicalizeTaskOutputPath(filePath)
-  const handle = await openTaskOutputRead(canonical)
+  const state = getHostDiskOutputState()
+  const canonical = canonicalizeTaskOutputPath(filePath, state)
+  const handle = await openTaskOutputReadWithState(canonical, 0, false, state)
   if (handle === null) {
     // Throw ENOENT if the entry itself doesn't exist; otherwise the link target vanished.
     await lstat(canonical)
@@ -928,23 +1058,19 @@ export async function bindTaskOutputForRead(filePath: string): Promise<{
   }
 }
 
-/**
- * Official 2.1.331 `N` (`openTaskOutputForAppend`) — safe append/create opener
- * verifying pre-open `lstat` (plain file, `nlink === 1`, or authorized symlink
- * under tasks root) + `O_NOFOLLOW` + post-open `fstat` identity & `nlink === 1`.
- */
-export async function openTaskOutputForAppend(
+async function openTaskOutputForAppendWithState(
   filePath: string,
   opts: {
     exclusive?: boolean
     windowsFlags?: string
     retried?: boolean
     relooked?: boolean
-  } = {},
-  depth = 0,
+  },
+  depth: number,
+  state: HostDiskOutputState,
 ): Promise<FileHandle> {
-  const canonical = isTaskOutputFilePath(filePath)
-    ? canonicalizeTaskOutputPath(filePath)
+  const canonical = isTaskOutputFilePathForState(filePath, state)
+    ? canonicalizeTaskOutputPath(filePath, state)
     : filePath
   const parentDir = dirname(canonical)
 
@@ -955,9 +1081,9 @@ export async function openTaskOutputForAppend(
 
   if (
     foldCaseForPlatform(resolve(parentDir)) ===
-    foldCaseForPlatform(resolve(getTaskOutputDir()))
+    foldCaseForPlatform(resolve(getTaskOutputDirForState(state)))
   ) {
-    await ensureOutputDir()
+    await ensureOutputDir(state)
   } else {
     await mkdir(parentDir, { recursive: true })
     const parentStat = await lstat(parentDir)
@@ -968,7 +1094,11 @@ export async function openTaskOutputForAppend(
 
   const existing = await lstatOrNull(canonical)
   if (existing?.isSymbolicLink()) {
-    const target = await resolveAuthorizedOutputSymlink(canonical, canonical)
+    const target = await resolveAuthorizedOutputSymlink(
+      canonical,
+      canonical,
+      state,
+    )
     if (target === null) {
       if (opts.relooked) {
         throw new TaskOutputSwapRefusedError(
@@ -976,10 +1106,11 @@ export async function openTaskOutputForAppend(
           'output leaf changed during open',
         )
       }
-      return openTaskOutputForAppend(
+      return openTaskOutputForAppendWithState(
         canonical,
         { ...opts, relooked: true },
         depth,
+        state,
       )
     }
     if (opts.exclusive || depth > 0 || !isUnderTaskOutputRoot(target)) {
@@ -988,10 +1119,11 @@ export async function openTaskOutputForAppend(
         'output link is not appendable',
       )
     }
-    return openTaskOutputForAppend(
+    return openTaskOutputForAppendWithState(
       target,
       { exclusive: opts.exclusive, windowsFlags: opts.windowsFlags },
       depth + 1,
+      state,
     )
   }
 
@@ -1018,10 +1150,11 @@ export async function openTaskOutputForAppend(
     fh = await open(canonical, flags)
   } catch (e) {
     if (!opts.exclusive && getErrnoCode(e) === 'EEXIST' && !opts.retried) {
-      return openTaskOutputForAppend(
+      return openTaskOutputForAppendWithState(
         canonical,
         { ...opts, retried: true },
         depth,
+        state,
       )
     }
     throw wrapSwapOpenError(e, canonical)
@@ -1029,19 +1162,42 @@ export async function openTaskOutputForAppend(
 
   if (depth > 0 && existing === null) {
     const st = await fh.stat()
-    linkedTargetIdentities.set(canonical, { dev: st.dev, ino: st.ino })
+    state.outputPathBindings.set(canonical, { dev: st.dev, ino: st.ino })
   }
 
   try {
     await vt(fh, existing, canonical, {
       registeredIdentity:
-        depth > 0 ? getRecordedTargetIdentity(canonical) : undefined,
+        depth > 0 ? getRecordedTargetIdentity(canonical, state) : undefined,
     })
   } catch (e) {
     await fh.close().catch(() => {})
     throw e
   }
   return fh
+}
+
+/**
+ * Official 2.1.331 `N` (`openTaskOutputForAppend`) — safe append/create opener
+ * verifying pre-open `lstat` (plain file, `nlink === 1`, or authorized symlink
+ * under tasks root) + `O_NOFOLLOW` + post-open `fstat` identity & `nlink === 1`.
+ */
+export async function openTaskOutputForAppend(
+  filePath: string,
+  opts: {
+    exclusive?: boolean
+    windowsFlags?: string
+    retried?: boolean
+    relooked?: boolean
+  } = {},
+  depth = 0,
+): Promise<FileHandle> {
+  return openTaskOutputForAppendWithState(
+    filePath,
+    opts,
+    depth,
+    getHostDiskOutputState(),
+  )
 }
 
 /**
@@ -1175,15 +1331,17 @@ async function tailTaskOutput(
 }
 
 // Tracks fire-and-forget promises (initTaskOutput, initTaskOutputAsSymlink,
-// evictTaskOutput, #drain) so tests can drain before teardown. Prevents the
-// async-ENOENT-after-teardown flake class (#24957, #25065): a voided async
-// resumes after preload's afterEach nuked the temp dir → ENOENT → unhandled
-// rejection → flaky test failure. allSettled so a rejection doesn't short-
-// circuit the drain and leave other ops racing the rmSync.
-const _pendingOps = new Set<Promise<unknown>>()
-function track<T>(p: Promise<T>): Promise<T> {
-  _pendingOps.add(p)
-  void p.finally(() => _pendingOps.delete(p)).catch(() => {})
+// evictTaskOutput, #drain) per SessionHost so tests can drain before teardown.
+// Prevents the async-ENOENT-after-teardown flake class (#24957, #25065): a
+// voided async resumes after preload's afterEach nuked the temp dir → ENOENT →
+// unhandled rejection → flaky test failure. allSettled so a rejection doesn't
+// short-circuit the drain and leave other ops racing the rmSync.
+function track<T>(
+  p: Promise<T>,
+  state: HostDiskOutputState = getHostDiskOutputState(),
+): Promise<T> {
+  state.pendingOutputOps.add(p)
+  void p.finally(() => state.pendingOutputOps.delete(p)).catch(() => {})
   return p
 }
 
@@ -1197,6 +1355,7 @@ function track<T>(p: Promise<T>): Promise<T> {
  */
 export class DiskTaskOutput {
   #path: string
+  #hostState: HostDiskOutputState
   #fileHandle: FileHandle | null = null
   #queue: string[] = []
   #bytesWritten = 0
@@ -1212,7 +1371,9 @@ export class DiskTaskOutput {
   #flushResolve: (() => void) | null = null
 
   constructor(taskId: string, outputPath?: string) {
-    this.#path = outputPath ?? getTaskOutputPath(taskId)
+    this.#hostState = getHostDiskOutputState()
+    this.#path =
+      outputPath ?? getTaskOutputPathForState(taskId, this.#hostState)
   }
 
   append(content: string): void {
@@ -1234,7 +1395,7 @@ export class DiskTaskOutput {
       this.#flushPromise = new Promise<void>(resolve => {
         this.#flushResolve = resolve
       })
-      void track(this.#drain())
+      void track(this.#drain(), this.#hostState)
     }
   }
 
@@ -1274,7 +1435,12 @@ export class DiskTaskOutput {
     while (true) {
       try {
         if (!this.#fileHandle) {
-          this.#fileHandle = await openTaskOutputForAppend(this.#path)
+          this.#fileHandle = await openTaskOutputForAppendWithState(
+            this.#path,
+            {},
+            0,
+            this.#hostState,
+          )
         }
         while (true) {
           const generation = this.#generation
@@ -1461,8 +1627,6 @@ export class DiskTaskOutput {
   }
 }
 
-const outputs = new Map<string, DiskTaskOutput>()
-
 /**
  * Test helper — cancel pending writes, await in-flight ops, clear the map.
  * backgroundShells.test.ts and other task tests spawn real shells that
@@ -1474,20 +1638,22 @@ const outputs = new Map<string, DiskTaskOutput>()
  * Call this in afterEach BEFORE rmSync to avoid async-ENOENT-after-teardown.
  */
 export async function _clearOutputsForTest(): Promise<void> {
-  for (const output of outputs.values()) {
+  const state = getHostDiskOutputState()
+  for (const output of state.diskOutputs.values()) {
     output.cancel()
   }
-  while (_pendingOps.size > 0) {
-    await Promise.allSettled([..._pendingOps])
+  while (state.pendingOutputOps.size > 0) {
+    await Promise.allSettled([...state.pendingOutputOps])
   }
-  outputs.clear()
+  state.diskOutputs.clear()
 }
 
 function getOrCreateOutput(taskId: string): DiskTaskOutput {
-  let output = outputs.get(taskId)
+  const { diskOutputs } = getHostDiskOutputState()
+  let output = diskOutputs.get(taskId)
   if (!output) {
     output = new DiskTaskOutput(taskId)
-    outputs.set(taskId, output)
+    diskOutputs.set(taskId, output)
   }
   return output
 }
@@ -1524,7 +1690,7 @@ export function appendTaskOutputTrailer(
  * Useful before reading output to ensure all data is flushed.
  */
 export async function flushTaskOutput(taskId: string): Promise<void> {
-  const output = outputs.get(taskId)
+  const output = getHostDiskOutputState().diskOutputs.get(taskId)
   if (output) {
     await output.flush()
   }
@@ -1536,9 +1702,10 @@ export async function flushTaskOutput(taskId: string): Promise<void> {
  * Call this when a task completes and its output has been consumed.
  */
 export function evictTaskOutput(taskId: string): Promise<void> {
+  const state = getHostDiskOutputState()
   return track(
     (async () => {
-      const output = outputs.get(taskId)
+      const output = state.diskOutputs.get(taskId)
       if (output) {
         await output.flush()
         if (output.failing && output.unwrittenChars > 0) {
@@ -1547,9 +1714,10 @@ export function evictTaskOutput(taskId: string): Promise<void> {
             { level: 'error' },
           )
         }
-        outputs.delete(taskId)
+        state.diskOutputs.delete(taskId)
       }
     })(),
+    state,
   )
 }
 
@@ -1664,17 +1832,21 @@ export async function getTaskOutputSize(taskId: string): Promise<number> {
  * Clean up a task's output file and write queue.
  */
 export async function cleanupTaskOutput(taskId: string): Promise<void> {
-  const output = outputs.get(taskId)
+  const state = getHostDiskOutputState()
+  const output = state.diskOutputs.get(taskId)
   if (output) {
     output.cancel()
-    outputs.delete(taskId)
+    state.diskOutputs.delete(taskId)
   }
 
-  const outputPath = canonicalizeTaskOutputPath(getTaskOutputPath(taskId))
-  const prevTarget = linkedOutputs.get(outputPath)
-  linkedOutputs.delete(outputPath)
+  const outputPath = canonicalizeTaskOutputPath(
+    getTaskOutputPathForState(taskId, state),
+    state,
+  )
+  const prevTarget = state.linkedOutputs.get(outputPath)
+  state.linkedOutputs.delete(outputPath)
   if (prevTarget !== undefined) {
-    linkedTargetIdentities.delete(prevTarget)
+    state.outputPathBindings.delete(prevTarget)
   }
 
   try {
@@ -1688,15 +1860,14 @@ export async function cleanupTaskOutput(taskId: string): Promise<void> {
   }
 }
 
-/**
- * Initialize output file for a new task.
- * Creates an empty file to ensure the path exists.
- */
-export function initTaskOutput(taskId: string): Promise<string> {
+function initTaskOutputForState(
+  taskId: string,
+  state: HostDiskOutputState,
+): Promise<string> {
   return track(
     (async () => {
-      await ensureOutputDir()
-      const outputPath = getTaskOutputPath(taskId)
+      await ensureOutputDir(state)
+      const outputPath = getTaskOutputPathForState(taskId, state)
       // SECURITY: O_NOFOLLOW prevents symlink-following attacks from the sandbox.
       // O_EXCL ensures we create a new file and fail if something already exists at this path.
       // On Windows, use string flags — numeric O_EXCL can produce EINVAL through libuv.
@@ -1712,7 +1883,16 @@ export function initTaskOutput(taskId: string): Promise<string> {
       await fh.close()
       return outputPath
     })(),
+    state,
   )
+}
+
+/**
+ * Initialize output file for a new task.
+ * Creates an empty file to ensure the path exists.
+ */
+export function initTaskOutput(taskId: string): Promise<string> {
+  return initTaskOutputForState(taskId, getHostDiskOutputState())
 }
 
 /**
@@ -1725,16 +1905,20 @@ export function initTaskOutputAsSymlink(
   taskId: string,
   targetPath: string,
 ): Promise<string> {
+  const state = getHostDiskOutputState()
   return track(
     (async () => {
       try {
-        await ensureOutputDir()
-        const outputPath = canonicalizeTaskOutputPath(getTaskOutputPath(taskId))
+        await ensureOutputDir(state)
+        const outputPath = canonicalizeTaskOutputPath(
+          getTaskOutputPathForState(taskId, state),
+          state,
+        )
 
         if (isUnderTaskOutputRoot(targetPath)) {
-          await recordTargetIdentity(targetPath)
+          await recordTargetIdentity(targetPath, state)
         }
-        linkedOutputs.set(outputPath, targetPath)
+        state.linkedOutputs.set(outputPath, targetPath)
         try {
           try {
             await symlink(targetPath, outputPath)
@@ -1746,15 +1930,15 @@ export function initTaskOutputAsSymlink(
             await symlink(targetPath, outputPath)
           }
         } catch (err) {
-          if (linkedOutputs.get(outputPath) === targetPath) {
-            linkedOutputs.delete(outputPath)
+          if (state.linkedOutputs.get(outputPath) === targetPath) {
+            state.linkedOutputs.delete(outputPath)
           }
           throw err
         }
         if (
           (await readlinkOrNull(outputPath).catch(() => null)) === targetPath
         ) {
-          linkedOutputs.set(outputPath, targetPath)
+          state.linkedOutputs.set(outputPath, targetPath)
         }
 
         return outputPath
@@ -1762,8 +1946,9 @@ export function initTaskOutputAsSymlink(
         if (!isTaskOutputSwapRefusal(error)) {
           logError(error)
         }
-        return initTaskOutput(taskId)
+        return initTaskOutputForState(taskId, state)
       }
     })(),
+    state,
   )
 }

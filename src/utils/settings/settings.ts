@@ -26,6 +26,7 @@ import { addFileGlobRuleToGitignore } from '../git/gitignore.js'
 import { safeParseJSON } from '../json.js'
 import { logError } from '../log.js'
 import { getPlatform } from '../platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { clone, jsonStringify } from '../slowOperations.js'
 import { profileCheckpoint } from '../startupProfiler.js'
 import {
@@ -2039,8 +2040,27 @@ export function getManagedSettingsKeysForLogging(
   return allKeys.sort()
 }
 
-// Flag to prevent infinite recursion when loading settings
-let isLoadingSettings = false
+type HostSettingsPipelineState = {
+  isLoadingSettings: boolean
+  managedRereadInFlight: Promise<boolean> | undefined
+  managedRereadGivenUp: boolean
+  managedMdmRereadFailedAt: number
+  managedMdmRereadFailedFor: object | undefined
+}
+
+const hostSettingsPipelineSlot = new HostSlot<HostSettingsPipelineState>(
+  () => ({
+    isLoadingSettings: false,
+    managedRereadInFlight: undefined,
+    managedRereadGivenUp: false,
+    managedMdmRereadFailedAt: 0,
+    managedMdmRereadFailedFor: undefined,
+  }),
+)
+
+function getHostSettingsPipelineState(): HostSettingsPipelineState {
+  return hostSettingsPipelineSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Load settings from disk without using cache
@@ -2048,7 +2068,8 @@ let isLoadingSettings = false
  */
 function loadSettingsFromDisk(): SettingsWithErrors {
   // Prevent recursive calls to loadSettingsFromDisk
-  if (isLoadingSettings) {
+  const pipelineState = getHostSettingsPipelineState()
+  if (pipelineState.isLoadingSettings) {
     return { settings: {}, errors: [] }
   }
 
@@ -2056,7 +2077,7 @@ function loadSettingsFromDisk(): SettingsWithErrors {
   profileCheckpoint('loadSettingsFromDisk_start')
   logForDiagnosticsNoPII('info', 'settings_load_started')
 
-  isLoadingSettings = true
+  pipelineState.isLoadingSettings = true
   try {
     // Start with plugin settings as the lowest priority base.
     // All file-based sources (user, project, local, flag, policy) override these.
@@ -2208,7 +2229,7 @@ function loadSettingsFromDisk(): SettingsWithErrors {
 
     return { settings: mergedSettings, errors: allErrors }
   } finally {
-    isLoadingSettings = false
+    pipelineState.isLoadingSettings = false
   }
 }
 
@@ -2869,38 +2890,35 @@ const MANAGED_REREAD_TIMEOUT_MS = 5000
 const MANAGED_REREAD_MAX_RETRIES = 2
 const MANAGED_MDM_REREAD_COOLDOWN_MS = 60_000
 
-let _managedRereadInFlight: Promise<boolean> | undefined
-let _managedRereadGivenUp = false
-let _managedMdmRereadFailedAt = 0
-let _managedMdmRereadFailedFor: object | undefined
-
 export function managedRereadInFlight(): Promise<boolean> | undefined {
-  return _managedRereadInFlight
+  return getHostSettingsPipelineState().managedRereadInFlight
 }
 
 export function beginManagedReread(promise: Promise<boolean>): void {
-  _managedRereadInFlight = promise
+  getHostSettingsPipelineState().managedRereadInFlight = promise
 }
 
 export function releaseManagedReread(promise: Promise<boolean>): void {
-  if (_managedRereadInFlight === promise) {
-    _managedRereadInFlight = undefined
+  const pipelineState = getHostSettingsPipelineState()
+  if (pipelineState.managedRereadInFlight === promise) {
+    pipelineState.managedRereadInFlight = undefined
   }
 }
 
 export function giveUpManagedReread(): void {
-  _managedRereadGivenUp = true
+  getHostSettingsPipelineState().managedRereadGivenUp = true
 }
 
 export function managedRereadGivenUp(): boolean {
-  return _managedRereadGivenUp
+  return getHostSettingsPipelineState().managedRereadGivenUp
 }
 
 export function resetManagedRereadStateForTesting(): void {
-  _managedRereadInFlight = undefined
-  _managedRereadGivenUp = false
-  _managedMdmRereadFailedAt = 0
-  _managedMdmRereadFailedFor = undefined
+  const pipelineState = getHostSettingsPipelineState()
+  pipelineState.managedRereadInFlight = undefined
+  pipelineState.managedRereadGivenUp = false
+  pipelineState.managedMdmRereadFailedAt = 0
+  pipelineState.managedMdmRereadFailedFor = undefined
 }
 
 /**
@@ -2994,10 +3012,11 @@ function loadManagedFileSettingsFresh(): {
 export async function rereadManagedSettingsIfNeeded(
   timeoutMs: number = MANAGED_REREAD_TIMEOUT_MS,
 ): Promise<boolean> {
-  if (_managedRereadInFlight !== undefined) {
-    return _managedRereadInFlight
+  const pipelineState = getHostSettingsPipelineState()
+  if (pipelineState.managedRereadInFlight !== undefined) {
+    return pipelineState.managedRereadInFlight
   }
-  if (_managedRereadGivenUp) {
+  if (pipelineState.managedRereadGivenUp) {
     return false
   }
   const run = (async (): Promise<boolean> => {
@@ -3012,8 +3031,9 @@ export async function rereadManagedSettingsIfNeeded(
     if (
       retryableMdmCause !== undefined &&
       !(
-        _managedMdmRereadFailedFor === prevMdm &&
-        Date.now() - _managedMdmRereadFailedAt < MANAGED_MDM_REREAD_COOLDOWN_MS
+        pipelineState.managedMdmRereadFailedFor === prevMdm &&
+        Date.now() - pipelineState.managedMdmRereadFailedAt <
+          MANAGED_MDM_REREAD_COOLDOWN_MS
       )
     ) {
       const startedAt = Date.now()
@@ -3032,13 +3052,13 @@ export async function rereadManagedSettingsIfNeeded(
             changed = true
           }
         } else {
-          _managedMdmRereadFailedFor = prevMdm
-          _managedMdmRereadFailedAt = startedAt
+          pipelineState.managedMdmRereadFailedFor = prevMdm
+          pipelineState.managedMdmRereadFailedAt = startedAt
         }
       } catch (e) {
         logError(e)
-        _managedMdmRereadFailedFor = prevMdm
-        _managedMdmRereadFailedAt = startedAt
+        pipelineState.managedMdmRereadFailedFor = prevMdm
+        pipelineState.managedMdmRereadFailedAt = startedAt
       }
     }
 

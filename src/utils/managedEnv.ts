@@ -2,6 +2,8 @@ import { clearCACertsCache } from './caCerts.js'
 import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
 import { logForDebugging } from './debug.js'
+import { HostSlot } from './hostSlot.js'
+import { getBootstrapSessionHost, hasActiveSessionAls } from './sessionRoot.js'
 import {
   isCoworkCloudBlockedEnvVar,
   isHostProxyEnvVar,
@@ -34,8 +36,84 @@ import {
   getSettingsForSource,
 } from './settings/settings.js'
 
-/** densable $Ss — warn once per stripped settings.env key under host-managed. */
-const hostManagedStripWarnedKeys = new Set<string>()
+type ManagedEnvHostState = {
+  /** densable $Ss — warn once per stripped settings.env key under host-managed. */
+  hostManagedStripWarnedKeys: Set<string>
+  /**
+   * Snapshot of env keys present before any settings.env is applied — for CCD,
+   * these are the keys the desktop host set to orchestrate the subprocess.
+   * Lazy-captured on first applySafeConfigEnvironmentVariables() call.
+   * densable `ndr` — also consulted by OTEL supremacy drop.
+   */
+  ccdSpawnEnvKeys: Set<string> | null | undefined
+  /**
+   * densable VQr / gyo — freeze process.env before settings.env is applied.
+   */
+  frozenStartupEnv: Readonly<Record<string, string>> | undefined
+  /** densable `_612` `appliedGlobalConfigEnv` / `Tn` / `QYb` */
+  appliedGlobalConfigEnv: Record<string, string> | undefined
+  /**
+   * Official 2.1.323 (#2076): Retain organization's managed proxy and CA
+   * transport env vars (`V7r`) across startup reloads.
+   */
+  latchedPolicyTransportEnv: Record<string, string>
+  /** densable wDs — warn once per dropped key per host. */
+  otelManagedDropWarned: Set<string>
+}
+
+/**
+ * Clean process startup env snapshot captured at module evaluation time —
+ * BEFORE `entry.ts` / `init.ts` mutates `process.env` with `userSettings.env`
+ * or `globalConfig.env`.
+ */
+const PROCESS_BOOT_ENV_SNAPSHOT: Readonly<Record<string, string | undefined>> =
+  Object.freeze({ ...process.env })
+
+/**
+ * Pre-settings startup env snapshot latched when the default boot host runs
+ * `applySafeConfigEnvironmentVariables()` / `applyConfigEnvironmentVariables()`.
+ */
+let bootStartupEnvSnapshot: Readonly<Record<string, string>> | undefined
+
+/**
+ * Global config env applied on the default boot host (`!hasActiveSessionAls()`),
+ * used as fallback for isolated ACP hosts whose own host state has not called
+ * `applySafeConfigEnvironmentVariables()`.
+ */
+let bootAppliedGlobalConfigEnv: Record<string, string> | undefined
+
+/**
+ * Tracks whether `clearFrozenStartupEnvForTests()` reset the boot snapshot on
+ * the default host so tests setting synthetic `process.env` vars before freeze
+ * can re-capture them cleanly.
+ */
+let bootEnvClearedForTests = false
+
+function snapshotDefinedEnv(
+  source: Readonly<Record<string, string | undefined>>,
+): Readonly<Record<string, string>> {
+  const copy: Record<string, string> = {}
+  for (const [key, value] of Object.entries(source)) {
+    if (value !== undefined) {
+      copy[key] = value
+    }
+  }
+  return Object.freeze(copy)
+}
+
+// Official 2.1.331 [W-062]: per-host managed env state on SessionHost.
+const managedEnvHostSlot = new HostSlot<ManagedEnvHostState>(() => ({
+  hostManagedStripWarnedKeys: new Set(),
+  ccdSpawnEnvKeys: undefined,
+  frozenStartupEnv: undefined,
+  appliedGlobalConfigEnv: undefined,
+  latchedPolicyTransportEnv: {},
+  otelManagedDropWarned: new Set(),
+}))
+
+function getManagedEnvHostState(): ManagedEnvHostState {
+  return managedEnvHostSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * densable s_o — warn that settings-sourced provider/auth/transport env is ignored.
@@ -44,6 +122,7 @@ export function warnHostManagedSettingsEnvIgnored(
   key: string,
   source: string,
 ): void {
+  const { hostManagedStripWarnedKeys } = getManagedEnvHostState()
   if (hostManagedStripWarnedKeys.has(key)) return
   hostManagedStripWarnedKeys.add(key)
   logForDebugging(
@@ -54,7 +133,7 @@ export function warnHostManagedSettingsEnvIgnored(
 
 /** Test helper densable kyy fragment — clear strip-warn set. */
 export function clearHostManagedSettingsEnvStripWarnsForTests(): void {
-  hostManagedStripWarnedKeys.clear()
+  getManagedEnvHostState().hostManagedStripWarnedKeys.clear()
 }
 
 /**
@@ -267,35 +346,6 @@ function withoutHostManagedProviderVars(
   })
 }
 
-/**
- * Snapshot of env keys present before any settings.env is applied — for CCD,
- * these are the keys the desktop host set to orchestrate the subprocess.
- * Settings must not override them (OTEL_LOGS_EXPORTER=console would corrupt
- * the stdio JSON-RPC transport). Keys added LATER by user/project settings
- * are not in this set, so mid-session settings.json changes still apply.
- * Lazy-captured on first applySafeConfigEnvironmentVariables() call.
- *
- * densable `ndr` — also consulted by OTEL supremacy drop so host-orchestrated
- * spawn keys are never deleted.
- */
-let ccdSpawnEnvKeys: Set<string> | null | undefined
-
-/**
- * densable VQr / gyo — freeze process.env before settings.env is applied.
- * Managed MCP allow/deny `${VAR}` expansion (2.1.219 #19) reads this snapshot
- * plus managed-settings env (Y6u), not live settings-file env on process.env.
- */
-let frozenStartupEnv: Readonly<Record<string, string>> | undefined
-/** densable `_612` `appliedGlobalConfigEnv` / `Tn` / `QYb` */
-let appliedGlobalConfigEnv: Record<string, string> | undefined
-
-/**
- * Official 2.1.323 (#2076): Retain organization's managed proxy and CA
- * transport env vars (`V7r`) across startup reloads so a transient read failure
- * of managed-settings.json does not switch startup requests to user-set proxy/CA.
- */
-let latchedPolicyTransportEnv: Record<string, string> = {}
-
 function pickPolicyTransportEnv(
   env: Record<string, string> | undefined,
 ): Record<string, string> {
@@ -322,28 +372,45 @@ export function getPolicyHelperEnv(): Record<string, string> {
 /**
  * densable VQr — capture and freeze process.env on first call.
  * Safe to call repeatedly; subsequent calls return the same snapshot.
+ * Fresh isolated SessionHosts initialize from the clean pre-settings boot
+ * snapshot (`bootStartupEnvSnapshot` / `PROCESS_BOOT_ENV_SNAPSHOT`) so they are
+ * never polluted by `entry.ts`'s `userSettings.env` / `globalConfig.env`.
  */
 export function getFrozenStartupEnv(): Readonly<Record<string, string>> {
-  if (frozenStartupEnv === undefined) {
-    frozenStartupEnv = Object.freeze({ ...process.env }) as Readonly<
-      Record<string, string>
-    >
+  const state = getManagedEnvHostState()
+  if (state.frozenStartupEnv === undefined) {
+    if (bootStartupEnvSnapshot !== undefined) {
+      state.frozenStartupEnv = Object.freeze({ ...bootStartupEnvSnapshot })
+    } else if (!bootEnvClearedForTests) {
+      state.frozenStartupEnv = snapshotDefinedEnv(PROCESS_BOOT_ENV_SNAPSHOT)
+    } else {
+      state.frozenStartupEnv = snapshotDefinedEnv(process.env)
+    }
   }
-  return frozenStartupEnv
+  return state.frozenStartupEnv
 }
 
 /** Test helper densable Qmy/q_s — clear VQr freeze so tests can re-capture. */
 export function clearFrozenStartupEnvForTests(): void {
-  frozenStartupEnv = undefined
-  appliedGlobalConfigEnv = undefined
-  latchedPolicyTransportEnv = {}
+  const state = getManagedEnvHostState()
+  state.frozenStartupEnv = undefined
+  state.appliedGlobalConfigEnv = undefined
+  state.latchedPolicyTransportEnv = {}
+  if (!hasActiveSessionAls()) {
+    bootStartupEnvSnapshot = undefined
+    bootAppliedGlobalConfigEnv = undefined
+    bootEnvClearedForTests = true
+  }
 }
 
 /** densable `rt` / `QYb` / `Tn` — latch written by applySafeConfigEnvironmentVariables. */
 export function getAppliedGlobalConfigEnv():
   | Record<string, string>
   | undefined {
-  return appliedGlobalConfigEnv
+  return (
+    getManagedEnvHostState().appliedGlobalConfigEnv ??
+    bootAppliedGlobalConfigEnv
+  )
 }
 
 /**
@@ -421,8 +488,6 @@ const OTEL_NON_ENDPOINT_SUFFIXES = new Set([
   'CLIENT_KEY',
   'CLIENT_CERTIFICATE',
 ])
-/** densable wDs — warn once per dropped key per process. */
-const otelManagedDropWarned = new Set<string>()
 
 /**
  * densable `dropDominatedOtelKey` / `tdr` — delete process.env[key] when not
@@ -441,6 +506,7 @@ function dropLowerTrustOtelEnvKey(
   // densable hostSpawnEnvKeys?.has(t.toUpperCase()) — case-insensitive protect.
   if (hostSpawnHasKey(key)) return
   if (process.env[key] === undefined) return
+  const { otelManagedDropWarned } = getManagedEnvHostState()
   if (!otelManagedDropWarned.has(key)) {
     otelManagedDropWarned.add(key)
     logForDebugging(
@@ -463,6 +529,7 @@ const OTEL_LOGS_OR_TRACES_EXPORTER = new Set([
 ])
 
 function hostSpawnHasKey(key: string): boolean {
+  const { ccdSpawnEnvKeys } = getManagedEnvHostState()
   if (!ccdSpawnEnvKeys) return false
   const upper = key.toUpperCase()
   for (const spawnKey of ccdSpawnEnvKeys) {
@@ -505,6 +572,7 @@ export function dropDominatedBetaTracingEndpoint(
  */
 function hostSpawnOtelClaims(): Map<string, string> {
   const claims = new Map<string, string>()
+  const { ccdSpawnEnvKeys } = getManagedEnvHostState()
   if (!ccdSpawnEnvKeys) return claims
   const pinned = [...ccdSpawnEnvKeys].some(key => {
     const upper = key.toUpperCase()
@@ -671,7 +739,7 @@ export function applyManagedOtelEndpointSupremacy(): void {
 
 /** Test helper — clear densable wDs warn set. */
 export function clearManagedOtelDropWarnsForTests(): void {
-  otelManagedDropWarned.clear()
+  getManagedEnvHostState().otelManagedDropWarned.clear()
 }
 
 /** densable `I` — strip keys present in host spawn (case-insensitive). */
@@ -679,6 +747,7 @@ function withoutCcdSpawnEnvKeys(
   env: Record<string, string> | undefined,
   source = 'settings',
 ): Record<string, string> {
+  const { ccdSpawnEnvKeys } = getManagedEnvHostState()
   if (!env || !ccdSpawnEnvKeys) return env || {}
   const allowManagedSubagent =
     source === 'policySettings' && isDesktopCodeTabSession()
@@ -769,12 +838,17 @@ const TRUSTED_SETTING_SOURCES = [
  * fully established via applyConfigEnvironmentVariables().
  */
 export function applySafeConfigEnvironmentVariables(): void {
+  const state = getManagedEnvHostState()
+  const isDefaultBootHost = !hasActiveSessionAls()
   // densable Put/VQr — freeze process.env before any settings.env Object.assign.
-  getFrozenStartupEnv()
+  const startupSnapshot = getFrozenStartupEnv()
+  if (isDefaultBootHost && bootStartupEnvSnapshot === undefined) {
+    bootStartupEnvSnapshot = startupSnapshot
+  }
 
   // Capture CCD spawn-env keys before any settings.env is applied (once).
-  if (ccdSpawnEnvKeys === undefined) {
-    ccdSpawnEnvKeys =
+  if (state.ccdSpawnEnvKeys === undefined) {
+    state.ccdSpawnEnvKeys =
       process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'
         ? new Set(Object.keys(process.env))
         : null
@@ -784,11 +858,14 @@ export function applySafeConfigEnvironmentVariables(): void {
   // filterSettingsEnv strips keys that were in the spawn env snapshot so
   // the desktop host's operational vars (OTEL, etc.) are not overridden.
   // densable Tn latch: appliedGlobalConfigEnv = filterSettingsEnv(L().env)
-  appliedGlobalConfigEnv = filterSettingsEnv(
+  state.appliedGlobalConfigEnv = filterSettingsEnv(
     getGlobalConfig().env,
     'globalConfig',
   )
-  Object.assign(process.env, appliedGlobalConfigEnv)
+  if (isDefaultBootHost) {
+    bootAppliedGlobalConfigEnv = state.appliedGlobalConfigEnv
+  }
+  Object.assign(process.env, state.appliedGlobalConfigEnv)
 
   // Apply ALL env vars from trusted setting sources, policySettings last.
   // Gate on isSettingSourceEnabled so SDK settingSources: [] (isolation mode)
@@ -805,12 +882,12 @@ export function applySafeConfigEnvironmentVariables(): void {
 
   const policySettings = getSettingsForSource('policySettings')
   if (policySettings !== null) {
-    latchedPolicyTransportEnv = pickPolicyTransportEnv(policySettings.env)
+    state.latchedPolicyTransportEnv = pickPolicyTransportEnv(policySettings.env)
   }
   Object.assign(
     process.env,
     filterSettingsEnv(
-      { ...policySettings?.env, ...latchedPolicyTransportEnv },
+      { ...policySettings?.env, ...state.latchedPolicyTransportEnv },
       'policySettings',
     ),
   )
@@ -842,6 +919,63 @@ export function applySafeConfigEnvironmentVariables(): void {
 }
 
 /**
+ * Apply safe config environment variables for a sole ACP session (including
+ * project-scoped `<repo>/.claude/settings.json` and `settings.local.json` safe
+ * `env` vars) while snapshotting the previous `process.env` value of every
+ * modified key. Returns an idempotent rollback callback that restores
+ * `process.env` cleanly on teardown (or if a second concurrent session starts).
+ */
+export function applySafeConfigEnvironmentVariablesForAcpSession(
+  preloadedMergedSettingsEnv?: Record<string, string>,
+): () => void {
+  const state = getManagedEnvHostState()
+  getFrozenStartupEnv()
+
+  if (state.ccdSpawnEnvKeys === undefined) {
+    state.ccdSpawnEnvKeys =
+      process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'
+        ? new Set(Object.keys(process.env))
+        : null
+  }
+
+  const previousValues = new Map<string, string | undefined>()
+  const setTracked = (key: string, value: string): void => {
+    if (!previousValues.has(key)) {
+      previousValues.set(
+        key,
+        Object.hasOwn(process.env, key) ? process.env[key] : undefined,
+      )
+    }
+    process.env[key] = value
+  }
+
+  const mergedEnv =
+    preloadedMergedSettingsEnv !== undefined
+      ? preloadedMergedSettingsEnv
+      : getSettings_DEPRECATED()?.env
+  const settingsEnv = filterSettingsEnv(mergedEnv, 'settings')
+  for (const [key, value] of Object.entries(settingsEnv)) {
+    if (isSafeManagedEnv(key, value)) {
+      setTracked(key, value)
+    }
+  }
+
+  let rolledBack = false
+  return () => {
+    if (rolledBack) return
+    rolledBack = true
+    for (const [key, prev] of previousValues) {
+      if (prev === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = prev
+      }
+    }
+    previousValues.clear()
+  }
+}
+
+/**
  * Apply environment variables from settings to process.env.
  * This applies ALL environment variables (except provider-routing vars when
  * CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST is set — see filterSettingsEnv) and
@@ -849,19 +983,27 @@ export function applySafeConfigEnvironmentVariables(): void {
  * dangerous environment variables such as LD_PRELOAD, PATH, etc.
  */
 export function applyConfigEnvironmentVariables(): void {
+  const isDefaultBootHost = !hasActiveSessionAls()
   // densable pz/Put — ensure VQr freeze even if safe-path was skipped.
-  getFrozenStartupEnv()
+  const startupSnapshot = getFrozenStartupEnv()
+  if (isDefaultBootHost && bootStartupEnvSnapshot === undefined) {
+    bootStartupEnvSnapshot = startupSnapshot
+  }
 
   // Official 2.1.327 (#436) `V_l` / `Rxl`: snapshot provider/routing env before
   // applying project settings so setting ANTHROPIC_BASE_URL to an LLM gateway
   // invalidates stale first-party model caches.
   const previousProviderRoute = getProviderBoundRouteSnapshot()
 
-  appliedGlobalConfigEnv = filterSettingsEnv(
+  const state = getManagedEnvHostState()
+  state.appliedGlobalConfigEnv = filterSettingsEnv(
     getGlobalConfig().env,
     'globalConfig',
   )
-  Object.assign(process.env, appliedGlobalConfigEnv)
+  if (isDefaultBootHost) {
+    bootAppliedGlobalConfigEnv = state.appliedGlobalConfigEnv
+  }
+  Object.assign(process.env, state.appliedGlobalConfigEnv)
 
   Object.assign(
     process.env,

@@ -15,6 +15,7 @@
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { isEnvTruthy } from './envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { getSettingsForSource } from './settings/settings.js'
 
 export const SCREEN_READER_GB_FEATURE = 'tengu_ax_screen_reader'
@@ -37,7 +38,9 @@ type Resolved = {
   source: ScreenReaderActivationSource | undefined
 }
 
-let cached: Resolved | undefined
+const screenReaderGateHostSlot = new HostSlot<{
+  cached: Resolved | undefined
+}>(() => ({ cached: undefined }))
 
 function hasAxScreenReaderFlag(argv: readonly string[]): boolean {
   return argv.includes(AX_SCREEN_READER_FLAG)
@@ -106,7 +109,7 @@ export function resolveScreenReaderMode(
 }
 
 function getCached(input?: ScreenReaderGateInput): Resolved {
-  // Skip process-level cache when any injection is provided (tests / pure).
+  // Skip host-level cache when any injection is provided (tests / pure).
   if (
     input?.env !== undefined ||
     input?.argv !== undefined ||
@@ -115,9 +118,10 @@ function getCached(input?: ScreenReaderGateInput): Resolved {
   ) {
     return resolveScreenReaderMode(input)
   }
-  if (cached !== undefined) return cached
-  cached = resolveScreenReaderMode()
-  return cached
+  const slot = screenReaderGateHostSlot.of(getBootstrapSessionHost())
+  if (slot.cached !== undefined) return slot.cached
+  slot.cached = resolveScreenReaderMode()
+  return slot.cached
 }
 
 /** Official uU() — screen-reader mode enabled. */
@@ -156,9 +160,10 @@ export function getScreenReaderChildEnv(
   return { [AX_SCREEN_READER_ENV_KEY]: '1' }
 }
 
-/** Official zBn.reset — clear process-level cache. */
+/** Official zBn.reset — clear host-level cache. */
 export function resetScreenReaderModeCache(): void {
-  cached = undefined
+  const slot = screenReaderGateHostSlot.peek(getBootstrapSessionHost())
+  if (slot) slot.cached = undefined
 }
 
 /**

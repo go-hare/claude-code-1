@@ -6,6 +6,7 @@
  * EYc (setSessionBriefTranscript) so prompts/settings can read without AppState.
  */
 import { getGlobalConfig, saveGlobalConfig } from './config.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionRoot.js'
 import {
   getInitialSettings,
   getSettingsForSource,
@@ -54,16 +55,19 @@ export function resolveVerboseFromViewMode(opts: {
 }
 
 /** densable EYc — session-scoped briefTranscript mirror (m3r / f7n). */
-let sessionBriefTranscript: boolean | undefined
+const focusViewSessionSlot = new RootSessionSlot<{
+  sessionBriefTranscript: boolean | undefined
+}>(() => ({ sessionBriefTranscript: undefined }))
 
 /** densable m3r */
 export function setSessionBriefTranscript(value: boolean): void {
-  sessionBriefTranscript = value
+  focusViewSessionSlot.of(getBootstrapSession()).sessionBriefTranscript = value
 }
 
 /** densable f7n */
 export function getSessionBriefTranscript(): boolean | undefined {
-  return sessionBriefTranscript
+  return focusViewSessionSlot.peek(getBootstrapSession())
+    ?.sessionBriefTranscript
 }
 
 /**
@@ -83,7 +87,7 @@ export function resolveFocusViewActiveFromSession(opts: {
   const settings = getInitialSettings()
   return isFocusViewActive(
     settings.viewMode,
-    sessionBriefTranscript ?? settings.briefTranscript,
+    getSessionBriefTranscript() ?? settings.briefTranscript,
   )
 }
 

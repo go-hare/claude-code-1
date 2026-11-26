@@ -16,6 +16,7 @@ import { logEvent } from '../../services/analytics/index.js'
 import { resolveSessionGatewayBaseUrl } from '../../services/artifactAutoReact/frameRelay.js'
 import { logForDebugging } from '../debug.js'
 import { classifyAxiosError } from '../errors.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   getSessionIngressAuthHeaders,
   getSessionIngressAuthToken,
@@ -129,18 +130,25 @@ async function defaultSkillManifestGsGet(): Promise<SkillManifestGsResult> {
   return { ok: true, status: res.status, data: res.data }
 }
 
-let skillManifestGsGet: SkillManifestGsGet = defaultSkillManifestGsGet
+const skillManifestGsGetHostSlot = new HostSlot<{
+  skillManifestGsGet: SkillManifestGsGet
+}>(() => ({
+  skillManifestGsGet: defaultSkillManifestGsGet,
+}))
 
 export function setSkillManifestGsGetForTests(
   fn: SkillManifestGsGet | null,
 ): void {
-  skillManifestGsGet = fn ?? defaultSkillManifestGsGet
+  skillManifestGsGetHostSlot.of(getBootstrapSessionHost()).skillManifestGsGet =
+    fn ?? defaultSkillManifestGsGet
 }
 
 /** leftover 239 uCh */
 export async function fetchSkillManifestOnce(): Promise<SkillManifestFetch> {
   try {
-    const res = await skillManifestGsGet()
+    const res = await skillManifestGsGetHostSlot
+      .of(getBootstrapSessionHost())
+      .skillManifestGsGet()
     if (!res.ok) {
       if (res.reason === 'no-auth') {
         logForDebugging('session_refs_manifest_no_auth', { level: 'warn' })
@@ -355,17 +363,20 @@ export function inspectPluginHooksUnloadableGuards(
   return { notes, unloadableGuards }
 }
 
-/** leftover 239 Uln — process singleton (leftover has no session-host object). */
-const Uln = new SessionRefsStore()
+/** Official 2.1.331 — HostSlot-scoped SessionRefsStore (`Uln`). */
+const sessionRefsStoreHostSlot = new HostSlot<SessionRefsStore>(
+  () => new SessionRefsStore(),
+)
 
 export function getSessionRefsStore(): SessionRefsStore {
-  return Uln
+  return sessionRefsStoreHostSlot.of(getBootstrapSessionHost())
 }
 
 export function resetSessionRefsStoreForTests(): void {
-  Uln.discardInflight()
-  Uln.featureEventReported.clear()
-  Uln.isPinnedPluginListFailed = false
-  Uln.pinnedPluginNames = undefined
+  const store = getSessionRefsStore()
+  store.discardInflight()
+  store.featureEventReported.clear()
+  store.isPinnedPluginListFailed = false
+  store.pinnedPluginNames = undefined
   setSkillManifestGsGetForTests(null)
 }

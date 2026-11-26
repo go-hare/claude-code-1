@@ -18,6 +18,7 @@ import { createHash } from 'crypto'
 import { userInfo } from 'os'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import type { SecureStorageData } from './types.js'
 
 // Suffix distinguishing the OAuth credentials keychain entry from the legacy
@@ -78,7 +79,7 @@ export const KEYCHAIN_READ_FAILURE_COOLDOWN_MS = 1000
 export const KEYCHAIN_READ_FAILED = Symbol('secureStorage.READ_FAILED')
 export type KeychainReadFailed = typeof KEYCHAIN_READ_FAILED
 
-export const keychainCacheState: {
+type KeychainCacheHostState = {
   cache: { data: SecureStorageData | null; cachedAt: number } // cachedAt 0 = invalid
   // Incremented on every cache invalidation. readAsync() captures this before
   // spawning and skips its cache write if a newer generation exists, preventing
@@ -100,19 +101,59 @@ export const keychainCacheState: {
    * falling back to plaintext and leaving a stale keychain entry behind.
    */
   keychainHoldsItem: boolean
-} = {
+}
+
+const keychainCacheStateByHost = new HostSlot<KeychainCacheHostState>(() => ({
   cache: { data: null, cachedAt: 0 },
   generation: 0,
   readInFlight: null,
   lastReadFailure: null,
   keychainHoldsItem: false,
+}))
+
+function getKeychainCacheHostState(): KeychainCacheHostState {
+  return keychainCacheStateByHost.of(getBootstrapSessionHost())
+}
+
+export const keychainCacheState: KeychainCacheHostState = {
+  get cache() {
+    return getKeychainCacheHostState().cache
+  },
+  set cache(value) {
+    getKeychainCacheHostState().cache = value
+  },
+  get generation() {
+    return getKeychainCacheHostState().generation
+  },
+  set generation(value) {
+    getKeychainCacheHostState().generation = value
+  },
+  get readInFlight() {
+    return getKeychainCacheHostState().readInFlight
+  },
+  set readInFlight(value) {
+    getKeychainCacheHostState().readInFlight = value
+  },
+  get lastReadFailure() {
+    return getKeychainCacheHostState().lastReadFailure
+  },
+  set lastReadFailure(value) {
+    getKeychainCacheHostState().lastReadFailure = value
+  },
+  get keychainHoldsItem() {
+    return getKeychainCacheHostState().keychainHoldsItem
+  },
+  set keychainHoldsItem(value) {
+    getKeychainCacheHostState().keychainHoldsItem = value
+  },
 }
 
 export function clearKeychainCache(): void {
-  keychainCacheState.cache = { data: null, cachedAt: 0 }
-  keychainCacheState.generation++
-  keychainCacheState.readInFlight = null
-  keychainCacheState.lastReadFailure = null
+  const hostState = getKeychainCacheHostState()
+  hostState.cache = { data: null, cachedAt: 0 }
+  hostState.generation++
+  hostState.readInFlight = null
+  hostState.lastReadFailure = null
 }
 
 /**
@@ -125,10 +166,8 @@ export function primeKeychainCacheFromPrefetch(
   stdout: string | null,
   generation: number,
 ): void {
-  if (
-    keychainCacheState.cache.cachedAt !== 0 ||
-    keychainCacheState.generation !== generation
-  ) {
+  const hostState = getKeychainCacheHostState()
+  if (hostState.cache.cachedAt !== 0 || hostState.generation !== generation) {
     return
   }
   let data: SecureStorageData | null = null
@@ -141,5 +180,5 @@ export function primeKeychainCacheFromPrefetch(
       return
     }
   }
-  keychainCacheState.cache = { data, cachedAt: Date.now() }
+  hostState.cache = { data, cachedAt: Date.now() }
 }

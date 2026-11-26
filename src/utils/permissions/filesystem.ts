@@ -8,7 +8,6 @@ import {
   statSync,
 } from 'fs'
 import ignore from 'ignore'
-import memoize from 'lodash-es/memoize.js'
 import { homedir, tmpdir } from 'os'
 import {
   basename,
@@ -31,16 +30,19 @@ import {
 } from '@claude-code/builtin-tools/tools/FileEditTool/constants.js'
 import type { z } from 'zod/v4'
 import {
+  getFlagMcpConfigFilePaths,
   getOriginalCwd,
   getSessionId,
   memoryToggledOff,
   onSessionSwitch,
+  setFlagMcpConfigFilePaths,
 } from '../../bootstrap/state.js'
 import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { AnyObject, Tool, ToolPermissionContext } from '../../Tool.js'
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { GLOB_TOOL_NAME } from '@claude-code/builtin-tools/tools/GlobTool/prompt.js'
 import { getCwd } from '../cwd.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   getActiveAnthropicProfileName,
   getAnthropicConfigDir,
@@ -531,22 +533,12 @@ export function toPosixPath(path: string): string {
   return path
 }
 
-let flagMcpConfigFilePathsList: readonly string[] = []
-
 /**
- * Official 325 `Opi(e)` — registers `--mcp-config` file paths for settings
- * write protection and sandbox `denyWrite` (#1120).
+ * Official 325 `Opi(e)` / `nLe()` — registers & returns `--mcp-config` file
+ * paths for settings write protection and sandbox `denyWrite` (#1120).
+ * Single source of truth in `bootstrap/state.ts` (`flagMcpConfigFilePathsByHost`).
  */
-export function setFlagMcpConfigFilePaths(paths: readonly string[]): void {
-  flagMcpConfigFilePathsList = [...paths]
-}
-
-/**
- * Official 325 `nLe()` — returns `--mcp-config` file paths (#1120).
- */
-export function getFlagMcpConfigFilePaths(): readonly string[] {
-  return flagMcpConfigFilePathsList
-}
+export { getFlagMcpConfigFilePaths, setFlagMcpConfigFilePaths }
 
 const PROFILE_STORE_SUBDIRS = ['configs', 'credentials'] as const
 const PROFILE_STORE_FILES = ['active_config'] as const
@@ -1010,26 +1002,97 @@ export function getClaudeTempDirName(): string {
  * in permission checks. On macOS, /tmp is a symlink to /private/tmp, so without
  * resolution, paths like /tmp/claude-{uid}/... wouldn't match /private/tmp/claude-{uid}/...
  */
-// Memoized: called per-tool from permission checks (yoloClassifier, sandbox-adapter)
+type FilesystemHostState = {
+  claudeTempDirCache: Map<undefined, string>
+  bundledSkillsRootCache: Map<undefined, string>
+  resolvedWorkingDirPathsCache: Map<string, string[]>
+  workingDirPathsHeldAsNamed: Set<string>
+  resolvedWorkingDirPaths: Map<string, string[]>
+}
+
+const fallbackFilesystemHostKey: object = {}
+
+function getActiveFilesystemHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back to module-local sentinel when sessionHost is mocked in tests
+  }
+  return fallbackFilesystemHostKey
+}
+
+// Official 2.1.331 [W-166]: per-host filesystem memo caches & named working-dir registries.
+const filesystemHostStateByHost = new HostSlot<FilesystemHostState>(() => ({
+  claudeTempDirCache: new Map<undefined, string>(),
+  bundledSkillsRootCache: new Map<undefined, string>(),
+  resolvedWorkingDirPathsCache: new Map<string, string[]>(),
+  workingDirPathsHeldAsNamed: new Set<string>(),
+  resolvedWorkingDirPaths: new Map<string, string[]>(),
+}))
+
+function getFilesystemHostState(): FilesystemHostState {
+  return filesystemHostStateByHost.of(getActiveFilesystemHost())
+}
+
+type HostMemoizedFn<Args extends unknown[], Result, Key = Args[0]> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<Key, Result>
+}
+
+function createHostMemoized<Args extends unknown[], Result, Key = Args[0]>(
+  getCache: () => Map<Key, Result>,
+  fn: (...args: Args) => Result,
+): HostMemoizedFn<Args, Result, Key> {
+  const wrapped = ((...args: Args): Result => {
+    const cache = getCache()
+    const key = args[0] as Key
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }) as HostMemoizedFn<Args, Result, Key>
+  Object.defineProperty(wrapped, 'cache', {
+    configurable: true,
+    enumerable: true,
+    get(): Map<Key, Result> {
+      return getCache()
+    },
+  })
+  return wrapped
+}
+
+// Memoized per-host: called per-tool from permission checks (yoloClassifier, sandbox-adapter)
 // and per-turn from BashTool prompt. Inputs (CLAUDE_CODE_TMPDIR env + platform) are
 // fixed at startup, and the realpath of the system tmp dir does not change mid-session.
-export const getClaudeTempDir = memoize(function getClaudeTempDir(): string {
-  // tmpdir() honors $TMPDIR so non-/tmp environments (Termux/Android, containers)
-  // work out of the box; CLAUDE_CODE_TMPDIR still wins if explicitly set.
-  const baseTmpDir = process.env.CLAUDE_CODE_TMPDIR || tmpdir()
+export const getClaudeTempDir = createHostMemoized<[], string, undefined>(
+  () => getFilesystemHostState().claudeTempDirCache,
+  function getClaudeTempDir(): string {
+    // tmpdir() honors $TMPDIR so non-/tmp environments (Termux/Android, containers)
+    // work out of the box; CLAUDE_CODE_TMPDIR still wins if explicitly set.
+    const baseTmpDir = process.env.CLAUDE_CODE_TMPDIR || tmpdir()
 
-  // Resolve symlinks in the base temp directory (e.g., /tmp -> /private/tmp on macOS)
-  // This ensures the path matches resolved paths in permission checks
-  const fs = getFsImplementation()
-  let resolvedBaseTmpDir = baseTmpDir
-  try {
-    resolvedBaseTmpDir = fs.realpathSync(baseTmpDir)
-  } catch {
-    // If resolution fails, use the original path
-  }
+    // Resolve symlinks in the base temp directory (e.g., /tmp -> /private/tmp on macOS)
+    // This ensures the path matches resolved paths in permission checks
+    const fs = getFsImplementation()
+    let resolvedBaseTmpDir = baseTmpDir
+    try {
+      resolvedBaseTmpDir = fs.realpathSync(baseTmpDir)
+    } catch {
+      // If resolution fails, use the original path
+    }
 
-  return join(resolvedBaseTmpDir, getClaudeTempDirName()) + sep
-})
+    return join(resolvedBaseTmpDir, getClaudeTempDirName()) + sep
+  },
+)
 
 /**
  * Root for bundled-skill file extraction (see bundledSkills.ts).
@@ -1043,11 +1106,12 @@ export const getClaudeTempDir = memoize(function getClaudeTempDir(): string {
  * injection via the read allowlist. diskOutput.ts gets the same property from
  * the session-ID UUID in its path.
  *
- * Memoized so the extraction writes and the permission check agree on the
- * path for the life of the process. Version-scoped so stale extractions from
+ * Memoized per-host so the extraction writes and the permission check agree on the
+ * path for the life of the host. Version-scoped so stale extractions from
  * other binaries don't fall under the allowlist.
  */
-export const getBundledSkillsRoot = memoize(
+export const getBundledSkillsRoot = createHostMemoized<[], string, undefined>(
+  () => getFilesystemHostState().bundledSkillsRootCache,
   function getBundledSkillsRoot(): string {
     const nonce = randomBytes(16).toString('hex')
     const version = typeof MACRO !== 'undefined' ? MACRO.VERSION : '0.0.0'
@@ -1149,27 +1213,63 @@ export function isCurrentSessionTaskOutputPath(
 }
 
 // Official 2.1.331 `scratchpadDirBySessionId` (@5334013 / @6239271):
+// per-host (`WeakMap<object, Map<string, string>>` keyed on `getBootstrapSessionHost()`)
 // per-session scratchpad path cache reset on session switch (`onSessionSwitch`).
-const scratchpadDirBySessionId = new Map<string, string>()
+const scratchpadDirBySessionIdByHost = new WeakMap<
+  object,
+  Map<string, string>
+>()
+const fallbackScratchpadHostKey: object = {}
+
+export function getScratchpadDirCacheForHost(
+  host: object,
+): Map<string, string> {
+  let map = scratchpadDirBySessionIdByHost.get(host)
+  if (map === undefined) {
+    map = new Map<string, string>()
+    scratchpadDirBySessionIdByHost.set(host, map)
+  }
+  return map
+}
+
+function getScratchpadDirBySessionId(): Map<string, string> {
+  let hostKey: object = fallbackScratchpadHostKey
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      hostKey = host
+    }
+  } catch {
+    // Fall back to module-local sentinel when sessionHost is mocked in tests
+  }
+  return getScratchpadDirCacheForHost(hostKey)
+}
 
 /**
  * Reset cached per-session scratchpad paths and memoized working-dir paths.
  * Invoked automatically on `onSessionSwitch` and exported for tests.
  */
 export function resetScratchpadDirCache(): void {
-  scratchpadDirBySessionId.clear()
+  getScratchpadDirBySessionId().clear()
   getResolvedWorkingDirPaths.cache.clear?.()
 }
 
-onSessionSwitch(() => {
-  resetScratchpadDirCache()
-})
+onSessionSwitch(
+  () => {
+    resetScratchpadDirCache()
+  },
+  { scope: 'global' },
+)
 
 /**
  * Returns the scratchpad directory path for the current (or given) session.
  * Path format: /tmp/claude-{uid}/{sanitized-cwd}/{sessionId}/scratchpad/
  */
 export function getScratchpadDir(sessionId: string = getSessionId()): string {
+  const scratchpadDirBySessionId = getScratchpadDirBySessionId()
   const cacheKey = `${sessionId}\0${getOriginalCwd()}`
   const cached = scratchpadDirBySessionId.get(cacheKey)
   if (cached !== undefined) {
@@ -1741,28 +1841,55 @@ export function workingDirectoriesForOutsideReadFence(
   ])
 }
 
-// Working directories are session-stable; memoize their resolved forms to
+// Working directories are session-stable; memoize their resolved forms per-host to
 // avoid repeated existsSync/lstatSync/realpathSync syscalls on every
 // permission check. Keyed by path string — getPathsForPermissionCheck is
 // deterministic for existing directories within a session.
 // Exported for test/preload.ts cache clearing (shard-isolation).
-export const getResolvedWorkingDirPaths = memoize(getPathsForPermissionCheck)
+export const getResolvedWorkingDirPaths = createHostMemoized<
+  [string],
+  string[],
+  string
+>(
+  () => getFilesystemHostState().resolvedWorkingDirPathsCache,
+  getPathsForPermissionCheck,
+)
 
 /**
  * Official resolvedWorkingDirPaths / workingDirPathsHeldAsNamed (#1496):
  * paths registered by register_repo_root / EnterWorktree are held as named
- * (un-expanded) working dir paths.
+ * (un-expanded) working dir paths. Backed by per-host `HostSlot` proxies.
  */
-export const workingDirPathsHeldAsNamed = new Set<string>()
-export const resolvedWorkingDirPaths = new Map<string, string[]>()
+export const workingDirPathsHeldAsNamed: Set<string> = new Proxy(
+  new Set<string>(),
+  {
+    get(_target, prop) {
+      const actual = getFilesystemHostState().workingDirPathsHeldAsNamed
+      const value = Reflect.get(actual, prop, actual)
+      return typeof value === 'function' ? value.bind(actual) : value
+    },
+  },
+)
+
+export const resolvedWorkingDirPaths: Map<string, string[]> = new Proxy(
+  new Map<string, string[]>(),
+  {
+    get(_target, prop) {
+      const actual = getFilesystemHostState().resolvedWorkingDirPaths
+      const value = Reflect.get(actual, prop, actual)
+      return typeof value === 'function' ? value.bind(actual) : value
+    },
+  },
+)
 
 export function holdWorkingDirPathAsNamed(path: string): void {
-  resolvedWorkingDirPaths.set(path, [path])
-  workingDirPathsHeldAsNamed.add(path)
+  const hostState = getFilesystemHostState()
+  hostState.resolvedWorkingDirPaths.set(path, [path])
+  hostState.workingDirPathsHeldAsNamed.add(path)
 }
 
 export function isWorkingDirPathHeldAsNamed(path: string): boolean {
-  return workingDirPathsHeldAsNamed.has(path)
+  return getFilesystemHostState().workingDirPathsHeldAsNamed.has(path)
 }
 
 /**
@@ -1798,7 +1925,10 @@ export function workingDirPathsForPermission(path: string): string[] {
   if (isEvalConfined() && path === getOriginalCwd()) {
     return [path]
   }
-  return resolvedWorkingDirPaths.get(path) ?? getResolvedWorkingDirPaths(path)
+  return (
+    getFilesystemHostState().resolvedWorkingDirPaths.get(path) ??
+    getResolvedWorkingDirPaths(path)
+  )
 }
 
 function pathInWorkingDirectorySet(

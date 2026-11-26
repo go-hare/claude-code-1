@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
+import { statSync } from 'fs'
 import { dirname, win32 as pathWin32 } from 'path'
 import {
   getMainLoopModelOverride,
@@ -39,7 +40,12 @@ import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.js'
 import { renameRecordingForSession } from './asciicast.js'
 import { clearMemoryFileCaches } from './claudemd.js'
 import { updateSessionName } from './concurrentSessions.js'
-import { getCwd } from './cwd.js'
+import { getCwd, hasScopedCwd } from './cwd.js'
+import {
+  getBootstrapSession,
+  hasActiveSessionAls,
+  RootSessionSlot,
+} from './sessionHost.js'
 import { isNetworkUncPath, isNtObjectNamespacePath } from './path.js'
 import { getErrnoCode } from './errors.js'
 import {
@@ -117,7 +123,13 @@ function extractTodosFromTranscript(messages: Message[]): TodoList {
   return []
 }
 
-let pendingRestoredAgentModel: string | undefined
+const pendingRestoredAgentModelSlot = new RootSessionSlot<{
+  model: string | undefined
+}>(() => ({ model: undefined }))
+
+function getPendingRestoredAgentModelState(): { model: string | undefined } {
+  return pendingRestoredAgentModelSlot.of(getBootstrapSession())
+}
 
 /**
  * Official 2.1.328 (`chunk@319736883.js @430550, @480074, @499088`):
@@ -177,8 +189,9 @@ function hydrateResumedTranscriptState(
           !!options?.forkSession,
         ))
       : restoredFallback.model
-  const agentModelToSync = pendingRestoredAgentModel
-  pendingRestoredAgentModel = undefined
+  const pendingModelState = getPendingRestoredAgentModelState()
+  const agentModelToSync = pendingModelState.model
+  pendingModelState.model = undefined
   const targetModel = effectiveSessionModel ?? agentModelToSync
   if (targetModel) {
     setAppState(prev =>
@@ -367,7 +380,7 @@ export function restoreAgentFromSession(
   agentType: string | undefined
   restoredModel?: string
 } {
-  pendingRestoredAgentModel = undefined
+  getPendingRestoredAgentModelState().model = undefined
 
   // If user already specified --agent on CLI, keep that definition
   if (currentAgentDefinition) {
@@ -415,7 +428,7 @@ export function restoreAgentFromSession(
           : { ...prev, mainLoopModel: resolvedModel },
       )
     } else {
-      pendingRestoredAgentModel = resolvedModel
+      getPendingRestoredAgentModelState().model = resolvedModel
     }
   }
 
@@ -615,7 +628,19 @@ export function restoreWorktreeForResume(
   }
 
   try {
-    process.chdir(worktreeSession.worktreePath)
+    if (!hasActiveSessionAls() && !hasScopedCwd()) {
+      process.chdir(worktreeSession.worktreePath)
+    } else {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- TOCTOU existence check without mutating process.cwd() under ALS
+      const st = statSync(worktreeSession.worktreePath)
+      if (!st.isDirectory()) {
+        const notDir = new Error(
+          `ENOTDIR: not a directory, stat '${worktreeSession.worktreePath}'`,
+        ) as NodeJS.ErrnoException
+        notDir.code = 'ENOTDIR'
+        throw notDir
+      }
+    }
   } catch (err) {
     const code = getErrnoCode(err)
     if (code === 'ENOENT' || code === 'ENOTDIR') {
@@ -671,7 +696,14 @@ export function exitRestoredWorktree(): void {
   getPlansDirectory.cache.clear?.()
 
   try {
-    process.chdir(current.originalCwd)
+    if (!hasActiveSessionAls() && !hasScopedCwd()) {
+      process.chdir(current.originalCwd)
+    } else {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- existence check without mutating process.cwd() under ALS
+      if (!statSync(current.originalCwd).isDirectory()) {
+        return
+      }
+    }
   } catch {
     // Original dir is gone (rare). Stay put — restoreWorktreeForResume
     // will cd into the target worktree next if there is one.
@@ -840,7 +872,7 @@ export async function processResumedConversation(
     context.agentDefinitions,
   )
   if (resumedAgentModel) {
-    pendingRestoredAgentModel = undefined
+    getPendingRestoredAgentModelState().model = undefined
   }
 
   // Persist the current mode so future resumes know what mode this session was in.

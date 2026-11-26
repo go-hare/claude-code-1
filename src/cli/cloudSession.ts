@@ -61,7 +61,7 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { getRemoteHomeSettingsMode } from '../utils/config.js'
-import { getBootstrapSessionHost } from '../utils/sessionHost.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import {
   isTrustedDeviceActiveForOrg,
   trustedDeviceTokenForBind as d5oTrustedDeviceTokenForBind,
@@ -4055,13 +4055,16 @@ export type DirSyncPendingSeed = {
   cutBeforeArmedLine?: string
 }
 
-const pendingDirSyncSeeds = new Map<string, DirSyncPendingSeed>()
+const pendingDirSyncSeedsHostSlot = new HostSlot<
+  Map<string, DirSyncPendingSeed>
+>(() => new Map())
 
 export function takePendingDirSyncSeed(
   sessionId: string,
 ): DirSyncPendingSeed | null {
-  const h = pendingDirSyncSeeds.get(sessionId) ?? null
-  if (h) pendingDirSyncSeeds.delete(sessionId)
+  const seeds = pendingDirSyncSeedsHostSlot.of(getBootstrapSessionHost())
+  const h = seeds.get(sessionId) ?? null
+  if (h) seeds.delete(sessionId)
   return h
 }
 
@@ -4069,7 +4072,7 @@ export function notePendingDirSyncSeed(
   sessionId: string,
   seed: DirSyncPendingSeed,
 ): void {
-  pendingDirSyncSeeds.set(sessionId, seed)
+  pendingDirSyncSeedsHostSlot.of(getBootstrapSessionHost()).set(sessionId, seed)
 }
 
 /** densable `wn` @202414900 */

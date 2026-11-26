@@ -1,4 +1,3 @@
-import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import { isAbsolute, join, normalize, sep } from 'path'
 import {
@@ -6,6 +5,12 @@ import {
   getProjectRoot,
 } from '../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import {
+  getActiveSubconversation,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+} from '../utils/sessionHost.js'
 import {
   getClaudeConfigHomeDir,
   isBareMode,
@@ -249,29 +254,55 @@ export function getAutoMemPathSettingSource():
   return entry.source
 }
 
-// Official 2.1.328 `Oe` / `Foo()` / `vHt()` (chunk@288398886.js @22541):
-// process-level latch once blockReadsOutsideWorkingDirectories is enabled.
-let outsideReadBlockLatched = false
-const seenGitTrackedLocalSettingsRoots = new Set<string>()
+const fallbackMemdirHost: object = {}
 
-/** Official `Foo()` — latch blockReadsOutsideWorkingDirectories for the process. */
+function getActiveMemdirHost(): object {
+  try {
+    const host = getBootstrapSessionHost()
+    if (
+      host !== null &&
+      (typeof host === 'object' || typeof host === 'function')
+    ) {
+      return host
+    }
+  } catch {
+    // Fall back to module-local sentinel if sessionHost is mocked
+  }
+  return fallbackMemdirHost
+}
+
+type OutsideReadBlockHostState = {
+  outsideReadBlockLatched: boolean
+  seenGitTrackedLocalSettingsRoots: Set<string>
+}
+
+// Official 2.1.328 `Oe` / `Foo()` / `vHt()` (chunk@288398886.js @22541):
+// host-scoped latch once blockReadsOutsideWorkingDirectories is enabled.
+const outsideReadBlockByHost = new HostSlot<OutsideReadBlockHostState>(() => ({
+  outsideReadBlockLatched: false,
+  seenGitTrackedLocalSettingsRoots: new Set<string>(),
+}))
+
+/** Official `Foo()` — latch blockReadsOutsideWorkingDirectories for the active host. */
 export function latchBlockReadsOutsideWorkingDirectories(): void {
-  outsideReadBlockLatched = true
+  outsideReadBlockByHost.of(getActiveMemdirHost()).outsideReadBlockLatched =
+    true
 }
 
 /** Official `vHt()` — true once blockReadsOutsideWorkingDirectories is active or latched. */
 export function isBlockReadsOutsideWorkingDirectoriesLatched(): boolean {
+  const state = outsideReadBlockByHost.of(getActiveMemdirHost())
   if (
-    !outsideReadBlockLatched &&
+    !state.outsideReadBlockLatched &&
     getEnabledSettingSources().some(
       source =>
         getSettingsForSource(source)?.permissions
           ?.blockReadsOutsideWorkingDirectories === true,
     )
   ) {
-    outsideReadBlockLatched = true
+    state.outsideReadBlockLatched = true
   }
-  return outsideReadBlockLatched
+  return state.outsideReadBlockLatched
 }
 
 function isFlagBlockFileToolReadsOutsideWorkingDirsActive(): boolean {
@@ -298,6 +329,7 @@ export function getRepoScopedSettingSources(): readonly (
   if (!root) {
     return ['projectSettings', 'localSettings']
   }
+  const state = outsideReadBlockByHost.of(getActiveMemdirHost())
   let trackedNow = false
   try {
     const { isLocalSettingsGitTracked } =
@@ -305,7 +337,7 @@ export function getRepoScopedSettingSources(): readonly (
       require('../utils/settings/localSettingsGitTracked.js') as typeof import('../utils/settings/localSettingsGitTracked.js')
     trackedNow = isLocalSettingsGitTracked({ onIndeterminate: 'tracked' })
     if (trackedNow) {
-      seenGitTrackedLocalSettingsRoots.add(root)
+      state.seenGitTrackedLocalSettingsRoots.add(root)
     }
   } catch {
     // fallback if helper unavailable
@@ -325,7 +357,7 @@ export function getRepoScopedSettingSources(): readonly (
     // config may not be enabled yet
   }
   return trackedNow ||
-    seenGitTrackedLocalSettingsRoots.has(root) ||
+    state.seenGitTrackedLocalSettingsRoots.has(root) ||
     persistedTracked
     ? ['projectSettings', 'localSettings']
     : ['projectSettings']
@@ -366,8 +398,9 @@ export function isAutoMemoryHeldByOutsideReadBlock(context?: {
 }
 
 export function _resetOutsideReadBlockLatchForTests(): void {
-  outsideReadBlockLatched = false
-  seenGitTrackedLocalSettingsRoots.clear()
+  const state = outsideReadBlockByHost.of(getActiveMemdirHost())
+  state.outsideReadBlockLatched = false
+  state.seenGitTrackedLocalSettingsRoots.clear()
 }
 
 /**
@@ -405,19 +438,73 @@ function getAutoMemBase(): string {
  * env vars / settings.json / CLAUDE_CONFIG_DIR are session-stable in
  * production and covered by per-test cache.clear.
  */
-export const getAutoMemPath = memoize(
-  (): string => {
-    const override = getAutoMemPathOverride() ?? getAutoMemPathSetting()
-    if (override) {
-      return override
-    }
-    const projectsDir = join(getMemoryBaseDir(), 'projects')
-    return (
-      join(projectsDir, sanitizePath(getAutoMemBase()), AUTO_MEM_DIRNAME) + sep
-    ).normalize('NFC')
-  },
-  () => getProjectRoot(),
-)
+const autoMemPathByHost = new HostSlot<Map<string, string>>(() => new Map())
+
+function resolveAutoMemCacheKey(): string {
+  const projectRoot = getProjectRoot()
+  let originalCwd = projectRoot
+  try {
+    originalCwd =
+      getActiveSubconversation()?.originalCwd ??
+      getBootstrapSession()?.project?.originalCwd ??
+      projectRoot
+  } catch {
+    // Fall back to projectRoot if sessionHost is mocked
+  }
+  return originalCwd === projectRoot
+    ? projectRoot
+    : `${projectRoot}\0${originalCwd}`
+}
+
+function computeAutoMemPath(): string {
+  const override = getAutoMemPathOverride() ?? getAutoMemPathSetting()
+  if (override) {
+    return override
+  }
+  const projectsDir = join(getMemoryBaseDir(), 'projects')
+  return (
+    join(projectsDir, sanitizePath(getAutoMemBase()), AUTO_MEM_DIRNAME) + sep
+  ).normalize('NFC')
+}
+
+function createGetAutoMemPath() {
+  const fn = Object.assign(
+    function getAutoMemPath(): string {
+      const key = resolveAutoMemCacheKey()
+      const cache = autoMemPathByHost.of(getActiveMemdirHost())
+      if (cache.has(key)) {
+        return cache.get(key)!
+      }
+      const computed = computeAutoMemPath()
+      cache.set(key, computed)
+      return computed
+    },
+    {
+      cache: new Map<string, string>(),
+    },
+  )
+  Object.defineProperty(fn, 'cache', {
+    configurable: true,
+    enumerable: true,
+    get(): Map<string, string> {
+      return autoMemPathByHost.of(getActiveMemdirHost())
+    },
+    set(next: Map<string, string>): void {
+      const cache = autoMemPathByHost.of(getActiveMemdirHost())
+      cache.clear()
+      for (const [k, v] of next) {
+        cache.set(k, v)
+      }
+    },
+  })
+  return fn
+}
+
+export const getAutoMemPath = createGetAutoMemPath()
+
+export function clearAutoMemPathCache(): void {
+  getAutoMemPath.cache.clear()
+}
 
 /**
  * Returns the auto-memory entrypoint (MEMORY.md inside the auto-memory dir).

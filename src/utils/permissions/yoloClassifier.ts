@@ -44,6 +44,7 @@ import {
   parseUserSpecifiedModel,
 } from '../model/model.js'
 import { isModelAllowed } from '../model/modelAllowlist.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import {
   getAutoModeConfig,
   stripDefaultsFromFlagAutoModeSection,
@@ -1782,10 +1783,17 @@ const CLASSIFIER_UNSUPPORTED_ESCALATION_CANONICAL_MODELS = [
   'claude-opus-5',
 ]
 
-const loggedClassifierPolicySkips = new Set<string>()
+// Official 2.1.331 [$e-153]: per-root-session dedupe set for classifier policy skip logs.
+const loggedClassifierPolicySkipsBySession = new RootSessionSlot<Set<string>>(
+  () => new Set(),
+)
+
+function getLoggedClassifierPolicySkips(): Set<string> {
+  return loggedClassifierPolicySkipsBySession.of(getBootstrapSession())
+}
 
 export function clearClassifierPolicySkipsForTesting(): void {
-  loggedClassifierPolicySkips.clear()
+  loggedClassifierPolicySkipsBySession.peek(getBootstrapSession())?.clear()
 }
 
 /**
@@ -1821,6 +1829,7 @@ export function vetClassifierModel(
       : undefined
   if (rejection === undefined) return model
   const key = `${source}:${model}`
+  const loggedClassifierPolicySkips = getLoggedClassifierPolicySkips()
   if (!loggedClassifierPolicySkips.has(key)) {
     loggedClassifierPolicySkips.add(key)
     logForDebugging(
@@ -1856,6 +1865,7 @@ export function getClassifierModel(): string {
 
   if (serverModel) {
     const envModel = process.env.CLAUDE_CODE_AUTO_MODE_MODEL
+    const loggedClassifierPolicySkips = getLoggedClassifierPolicySkips()
     if (envModel && !loggedClassifierPolicySkips.has('env:shadowed')) {
       loggedClassifierPolicySkips.add('env:shadowed')
       logForDebugging(

@@ -1,3 +1,4 @@
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionRoot.js'
 import type {
   ProviderBalance,
   ProviderUsage,
@@ -6,15 +7,26 @@ import type {
 
 type Listener = (snapshot: ProviderUsage) => void
 
-let current: ProviderUsage = {
-  providerId: 'unknown',
-  buckets: [],
+type ProviderUsageHostState = {
+  current: ProviderUsage
+  listeners: Set<Listener>
 }
 
-const listeners: Set<Listener> = new Set()
+// Per-host provider usage store on SessionHost.
+const providerUsageHostSlot = new HostSlot<ProviderUsageHostState>(() => ({
+  current: {
+    providerId: 'unknown',
+    buckets: [],
+  },
+  listeners: new Set(),
+}))
+
+function getProviderUsageHostState(): ProviderUsageHostState {
+  return providerUsageHostSlot.of(getBootstrapSessionHost())
+}
 
 export function getProviderUsage(): ProviderUsage {
-  return current
+  return getProviderUsageHostState().current
 }
 
 /**
@@ -25,27 +37,30 @@ export function updateProviderBuckets(
   providerId: string,
   buckets: ProviderUsageBucket[],
 ): void {
-  current = {
-    ...current,
+  const state = getProviderUsageHostState()
+  state.current = {
+    ...state.current,
     providerId,
     buckets,
   }
-  emit()
+  emit(state)
 }
 
 export function setProviderBalance(
   providerId: string,
   balance: ProviderBalance | null,
 ): void {
-  current = {
-    ...current,
+  const state = getProviderUsageHostState()
+  state.current = {
+    ...state.current,
     providerId,
     ...(balance === null ? { balance: undefined } : { balance }),
   }
-  emit()
+  emit(state)
 }
 
 export function subscribeProviderUsage(listener: Listener): () => void {
+  const { listeners } = getProviderUsageHostState()
   listeners.add(listener)
   return () => {
     listeners.delete(listener)
@@ -53,14 +68,15 @@ export function subscribeProviderUsage(listener: Listener): () => void {
 }
 
 export function resetProviderUsage(): void {
-  current = { providerId: 'unknown', buckets: [] }
-  emit()
+  const state = getProviderUsageHostState()
+  state.current = { providerId: 'unknown', buckets: [] }
+  emit(state)
 }
 
-function emit(): void {
-  for (const listener of listeners) {
+function emit(state: ProviderUsageHostState): void {
+  for (const listener of state.listeners) {
     try {
-      listener(current)
+      listener(state.current)
     } catch {
       // Listener errors must not break the publish loop.
     }

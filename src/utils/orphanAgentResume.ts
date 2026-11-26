@@ -15,6 +15,8 @@
  * terminal orphans (multi F$a + singles).
  */
 
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
+
 import {
   COMMAND_ARGS_TAG,
   COMMAND_MESSAGE_TAG,
@@ -441,28 +443,42 @@ export type OrphanClassifyInput = OrphanAgentEntry & {
  * densable relies on Aye Wl(_) CAS once a task is in-registry; this set
  * covers the pre-registry window shared by claim+orphan paths.
  */
-const agentResumeInFlight = new Set<string>()
+const fallbackOrphanResumeSession = { root: {} as object }
+const agentResumeInFlightBySession = new RootSessionSlot<Set<string>>(
+  () => new Set(),
+)
+
+function getAgentResumeInFlight(): Set<string> {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return agentResumeInFlightBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return agentResumeInFlightBySession.of(fallbackOrphanResumeSession)
+}
 
 /** Try to claim agentId for deferred resume. Returns false if already claimed. */
 export function tryClaimAgentResumeInFlight(agentId: string): boolean {
   if (!agentId) return false
-  if (agentResumeInFlight.has(agentId)) return false
-  agentResumeInFlight.add(agentId)
+  const inFlight = getAgentResumeInFlight()
+  if (inFlight.has(agentId)) return false
+  inFlight.add(agentId)
   return true
 }
 
 /** Release agentId after deferred resume attempt finishes (success or fail). */
 export function releaseAgentResumeInFlight(agentId: string): void {
-  agentResumeInFlight.delete(agentId)
+  getAgentResumeInFlight().delete(agentId)
 }
 
 export function isAgentResumeInFlight(agentId: string): boolean {
-  return agentResumeInFlight.has(agentId)
+  return getAgentResumeInFlight().has(agentId)
 }
 
-/** Test helper — clear process-local claim set. */
+/** Test helper — clear session-local claim set. */
 export function clearAgentResumeInFlightForTests(): void {
-  agentResumeInFlight.clear()
+  getAgentResumeInFlight().clear()
 }
 
 export type ScannedAsyncAgents = {

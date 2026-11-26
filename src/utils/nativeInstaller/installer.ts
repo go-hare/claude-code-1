@@ -62,6 +62,7 @@ import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getShellType } from '../localInstaller.js'
 import * as lockfile from '../lockfile.js'
 import { logError } from '../log.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { gt, gte } from '../semver.js'
 import {
   filterClaudeAliases,
@@ -610,14 +611,31 @@ async function installVersion(
   }
 }
 
-/**
- * Official 2.1.328 `Xr`: in-process cache of manifest-signature-verified
- * versions and their certified SHA-256 checksums.
- */
-const retainedSignatureVerificationCache = new Map<
-  string,
-  { enforcingRelease: boolean; checksum?: string }
->()
+type NativeInstallerHostState = {
+  retainedSignatureVerificationCache: Map<
+    string,
+    { enforcingRelease: boolean; checksum?: string }
+  >
+  verifiedVersionsCache: Map<
+    string,
+    { installPath: string; size: number; mtimeMs: number }
+  >
+}
+
+const nativeInstallerHostSlot = new HostSlot<NativeInstallerHostState>(() => ({
+  retainedSignatureVerificationCache: new Map(),
+  verifiedVersionsCache: new Map(),
+}))
+
+function getNativeInstallerHostState(): NativeInstallerHostState {
+  return nativeInstallerHostSlot.of(getBootstrapSessionHost())
+}
+
+// Process-global download deduplication and periodic PID-lock maintenance timer:
+// deduplicates 271MB binary downloads across concurrent hosts and avoids pinning
+// a SessionHost inside an uncleaned 5-minute setInterval.
+let inFlightInstall: Promise<InstallLatestResult> | null = null
+let versionLockMaintenanceTimer: ReturnType<typeof setInterval> | null = null
 
 /**
  * Performs the core update operation: download (if needed), install, and update symlink.
@@ -654,6 +672,8 @@ async function performVersionUpdate(
   const isOfficialGcsPath =
     process.env.USER_TYPE !== 'ant' && !isTestFixtureVersion
 
+  const retainedSignatureVerificationCache =
+    getNativeInstallerHostState().retainedSignatureVerificationCache
   const cachedSig = retainedSignatureVerificationCache.get(version)
   const needsSignatureReverify = !(
     cachedSig &&
@@ -780,25 +800,18 @@ async function performVersionUpdate(
   return { wasNewInstall: needsInstall, skippedUnverifiedRelease: false }
 }
 
-/**
- * Official 2.1.321 (#1923, `Yr` @16697040):
- * In-process cache of verified version binary paths & sizes so repeated install
- * / update checks within a single process skip redundant verification work.
- */
-const verifiedVersionsCache = new Map<
-  string,
-  { installPath: string; size: number; mtimeMs: number }
->()
-
 export function clearVerifiedVersionsCacheForTesting(): void {
-  verifiedVersionsCache.clear()
-  retainedSignatureVerificationCache.clear()
+  const hostState = getNativeInstallerHostState()
+  hostState.verifiedVersionsCache.clear()
+  hostState.retainedSignatureVerificationCache.clear()
 }
 
 export async function isVersionBinaryVerifiedCached(
   version: string,
   installPath: string,
 ): Promise<boolean> {
+  const verifiedVersionsCache =
+    getNativeInstallerHostState().verifiedVersionsCache
   const cached = verifiedVersionsCache.get(version)
   if (cached && cached.installPath === installPath) {
     try {
@@ -1478,8 +1491,6 @@ export type InstallLatestResult = {
 // isUpdating guard does not survive the remount. Each remount kicked off a
 // fresh 271MB binary download while previous ones were still in flight.
 // Telemetry: session 42fed33f saw arrayBuffers climb to 91GB at ~650MB/s.
-let inFlightInstall: Promise<InstallLatestResult> | null = null
-
 export function installLatest(
   channelOrVersion: string,
   forceReinstall: boolean = false,
@@ -1494,7 +1505,9 @@ export function installLatest(
   const promise = installLatestImpl(channelOrVersion, forceReinstall)
   inFlightInstall = promise
   const clear = (): void => {
-    inFlightInstall = null
+    if (inFlightInstall === promise) {
+      inFlightInstall = null
+    }
   }
   void promise.then(clear, clear)
   return promise
@@ -1578,7 +1591,6 @@ function getLockFilePathFromVersionPath(
 }
 
 const LOCK_MAINTENANCE_INTERVAL_MS = 300_000
-let versionLockMaintenanceTimer: ReturnType<typeof setInterval> | null = null
 
 /** Official 2.1.328 `si()`: periodic unref'd lock maintenance timer. */
 function startVersionLockMaintenance(): void {

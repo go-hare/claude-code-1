@@ -57,6 +57,7 @@ import {
   splitReportForPersistedToolResultFiles,
 } from 'src/utils/harnessTextSanitize.js'
 import type { WebFetchSavedFiles } from 'src/utils/subagentSpawnLedger.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionRoot.js'
 import { isBackgroundAbortReason } from 'src/utils/abortController.js'
 import {
   normalizeModelStringForAPI,
@@ -708,18 +709,24 @@ export function parseHandbackBodyParts(body: string): {
  * whose repeat SubagentHandback call was refused so the completion notification
  * informs the caller and tells it how to ask via SendMessage.
  */
-const laterReportRefusedAgents = new Set<string>()
+const laterReportRefusedAgentsSlot = new RootSessionSlot(
+  () => new Set<string>(),
+)
+
+function getLaterReportRefusedAgents(): Set<string> {
+  return laterReportRefusedAgentsSlot.of(getBootstrapSession())
+}
 
 export function markHandbackLaterReportRefused(agentId: string): void {
-  laterReportRefusedAgents.add(agentId)
+  getLaterReportRefusedAgents().add(agentId)
 }
 
 export function wasHandbackLaterReportRefused(agentId: string): boolean {
-  return laterReportRefusedAgents.has(agentId)
+  return getLaterReportRefusedAgents().has(agentId)
 }
 
 export function clearHandbackLaterReportRefused(agentId: string): void {
-  laterReportRefusedAgents.delete(agentId)
+  getLaterReportRefusedAgents().delete(agentId)
 }
 
 export function formatLaterReportRefusedNotice(
@@ -751,30 +758,37 @@ export const HANDBACK_FOLLOWUP_DROPPED_HINTS: Record<
   wait: ' It cannot answer sooner: ask again after the notification that it finished.',
 }
 
-const handbackFollowUpDroppedAgents = new Map<
+const handbackFollowUpDroppedAgentsSlot = new RootSessionSlot(
+  () => new Map<string, HandbackFollowUpDroppedHint | undefined>(),
+)
+
+function getHandbackFollowUpDroppedAgents(): Map<
   string,
   HandbackFollowUpDroppedHint | undefined
->()
+> {
+  return handbackFollowUpDroppedAgentsSlot.of(getBootstrapSession())
+}
 
 export function markHandbackFollowUpDropped(
   agentId: string,
   hint?: HandbackFollowUpDroppedHint,
 ): void {
-  handbackFollowUpDroppedAgents.set(agentId, hint)
+  getHandbackFollowUpDroppedAgents().set(agentId, hint)
 }
 
 export function getHandbackFollowUpDropped(agentId: string): {
   dropped: boolean
   hint?: HandbackFollowUpDroppedHint
 } {
-  if (!handbackFollowUpDroppedAgents.has(agentId)) {
+  const droppedAgents = getHandbackFollowUpDroppedAgents()
+  if (!droppedAgents.has(agentId)) {
     return { dropped: false }
   }
-  return { dropped: true, hint: handbackFollowUpDroppedAgents.get(agentId) }
+  return { dropped: true, hint: droppedAgents.get(agentId) }
 }
 
 export function clearHandbackFollowUpDropped(agentId: string): void {
-  handbackFollowUpDroppedAgents.delete(agentId)
+  getHandbackFollowUpDroppedAgents().delete(agentId)
 }
 
 export function formatHandbackFollowUpDroppedNotice(

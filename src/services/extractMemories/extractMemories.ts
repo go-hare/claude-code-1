@@ -52,6 +52,14 @@ import {
   createMemorySavedMessage,
   createUserMessage,
 } from '../../utils/messages.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  hasActiveSessionAls,
+  RootSessionSlot,
+  runWithSession,
+} from '../../utils/sessionHost.js'
+import type { Session } from '../../utils/sessionRoot.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logEvent } from '../analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../analytics/metadata.js'
@@ -318,29 +326,45 @@ function extractWrittenPaths(agentMessages: Message[]): string[] {
 }
 
 // ============================================================================
-// Initialization & Closure-scoped State
+// Initialization & Per-Session State
 // ============================================================================
 
 type AppendSystemMessageFn = (msg: SystemMessage) => void
 
-/** The active extractor function, set by initExtractMemories(). */
-let extractor:
-  | ((
-      context: REPLHookContext,
-      appendSystemMessage?: AppendSystemMessageFn,
-    ) => Promise<void>)
-  | null = null
+export type MemoryExtractorStateSnapshot = {
+  lastMemoryMessageUuid: string | undefined
+  inProgress: boolean
+  hasPendingContext: boolean
+  inFlightCount: number
+  turnsSinceLastExtraction: number
+}
 
-/** The active drain function, set by initExtractMemories(). No-op until init. */
-let drainer: (timeoutMs?: number) => Promise<void> = async () => {}
+export type MemoryExtractor = {
+  execute: (
+    context: REPLHookContext,
+    appendSystemMessage?: AppendSystemMessageFn,
+  ) => Promise<void>
+  drain: (timeoutMs?: number) => Promise<void>
+  getStateForTesting: () => MemoryExtractorStateSnapshot
+}
+
+export type MemoryExtractorDeps = {
+  runForkedAgentFn?: typeof runForkedAgent
+  scanMemoryFilesFn?: typeof scanMemoryFiles
+  isGateEnabledFn?: () => boolean
+  isAutoMemoryEnabledFn?: () => boolean
+  isRemoteModeFn?: () => boolean
+  throttleTurnsFn?: () => number
+}
 
 /**
- * Initialize the memory extraction system.
- * Creates a fresh closure that captures all mutable state (cursor position,
- * overlap guard, pending context). Call once at startup alongside
- * initConfidenceRating/initPromptCoaching, or per-test in beforeEach.
+ * Create a standalone memory extractor closure with isolated mutable state
+ * (cursor position, overlap guard, pending context, in-flight promise set).
+ * Preserves active ALS `Session` across async `.finally` and trailing runs.
  */
-export function initExtractMemories(): void {
+export function createMemoryExtractor(
+  deps?: MemoryExtractorDeps,
+): MemoryExtractor {
   // --- Closure-scoped mutable state ---
 
   /** Every promise handed out by the extractor that hasn't settled yet.
@@ -369,6 +393,7 @@ export function initExtractMemories(): void {
    *  and run one trailing extraction after the current one finishes. */
   let pendingContext:
     | {
+        session: Session | undefined
         context: REPLHookContext
         appendSystemMessage?: AppendSystemMessageFn
       }
@@ -465,10 +490,11 @@ export function initExtractMemories(): void {
     // process already-committed work that should not be throttled.
     if (!isTrailingRun) {
       turnsSinceLastExtraction++
-      if (
-        turnsSinceLastExtraction <
-        (getFeatureValue_CACHED_MAY_BE_STALE('tengu_bramble_lintel', null) ?? 1)
-      ) {
+      const minTurns = deps?.throttleTurnsFn
+        ? deps.throttleTurnsFn()
+        : (getFeatureValue_CACHED_MAY_BE_STALE('tengu_bramble_lintel', null) ??
+          1)
+      if (turnsSinceLastExtraction < minTurns) {
         return
       }
     }
@@ -484,12 +510,13 @@ export function initExtractMemories(): void {
       // Pre-inject the memory directory manifest so the agent doesn't spend
       // a turn on `ls`. Reuses findRelevantMemories' frontmatter scan.
       // Placed after the throttle gate so skipped turns don't pay the scan cost.
+      const scanFn = deps?.scanMemoryFilesFn ?? scanMemoryFiles
       const existingMemories = formatMemoryManifest(
-        await scanMemoryFiles(memoryDir, createAbortController().signal),
+        await scanFn(memoryDir, createAbortController().signal),
       )
 
-      const userPrompt =
-        feature('TEAMMEM') && teamMemoryEnabled
+      const userPrompt = feature('TEAMMEM')
+        ? teamMemoryEnabled
           ? buildExtractCombinedPrompt(
               newMessageCount,
               existingMemories,
@@ -500,8 +527,14 @@ export function initExtractMemories(): void {
               existingMemories,
               skipIndex,
             )
+        : buildExtractAutoOnlyPrompt(
+            newMessageCount,
+            existingMemories,
+            skipIndex,
+          )
 
-      const result = await runForkedAgent({
+      const runFork = deps?.runForkedAgentFn ?? runForkedAgent
+      const result = await runFork({
         promptMessages: [createUserMessage({ content: userPrompt })],
         cacheSafeParams,
         canUseTool,
@@ -601,20 +634,27 @@ export function initExtractMemories(): void {
       inProgress = false
 
       // If a call arrived while we were running, run a trailing extraction
-      // with the latest stashed context. The trailing run will compute its
-      // newMessageCount relative to the cursor we just advanced — so it only
-      // picks up messages added between the two calls, not the full history.
+      // with the latest stashed context under its captured ALS Session (if any).
       const trailing = pendingContext
       pendingContext = undefined
       if (trailing) {
         logForDebugging(
           '[extractMemories] running trailing extraction for stashed context',
         )
-        await runExtraction({
-          context: trailing.context,
-          appendSystemMessage: trailing.appendSystemMessage,
-          isTrailingRun: true,
-        })
+        const runTrailing = () =>
+          runExtraction({
+            context: trailing.context,
+            appendSystemMessage: trailing.appendSystemMessage,
+            isTrailingRun: true,
+          })
+        if (
+          trailing.session !== undefined &&
+          getActiveSessionFromAls() !== trailing.session
+        ) {
+          await runWithSession(trailing.session, runTrailing)
+        } else {
+          await runTrailing()
+        }
       }
     }
   }
@@ -622,6 +662,7 @@ export function initExtractMemories(): void {
   // --- Public entry point (captured by extractor) ---
 
   async function executeExtractMemoriesImpl(
+    session: Session | undefined,
     context: REPLHookContext,
     appendSystemMessage?: AppendSystemMessageFn,
   ): Promise<void> {
@@ -630,7 +671,10 @@ export function initExtractMemories(): void {
       return
     }
 
-    if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_passport_quail', false)) {
+    const gateOpen = deps?.isGateEnabledFn
+      ? deps.isGateEnabledFn()
+      : getFeatureValue_CACHED_MAY_BE_STALE('tengu_passport_quail', false)
+    if (!gateOpen) {
       if (process.env.USER_TYPE === 'ant' && !hasLoggedGateFailure) {
         hasLoggedGateFailure = true
         logEvent('tengu_extract_memories_gate_disabled', {})
@@ -639,12 +683,18 @@ export function initExtractMemories(): void {
     }
 
     // Check auto-memory is enabled
-    if (!isAutoMemoryEnabled()) {
+    const autoMemOpen = deps?.isAutoMemoryEnabledFn
+      ? deps.isAutoMemoryEnabledFn()
+      : isAutoMemoryEnabled()
+    if (!autoMemOpen) {
       return
     }
 
     // Skip in remote mode
-    if (getIsRemoteMode()) {
+    const remoteMode = deps?.isRemoteModeFn
+      ? deps.isRemoteModeFn()
+      : getIsRemoteMode()
+    if (remoteMode) {
       return
     }
 
@@ -656,31 +706,132 @@ export function initExtractMemories(): void {
         '[extractMemories] extraction in progress — stashing for trailing run',
       )
       logEvent('tengu_extract_memories_coalesced', {})
-      pendingContext = { context, appendSystemMessage }
+      pendingContext = { session, context, appendSystemMessage }
       return
     }
 
     await runExtraction({ context, appendSystemMessage })
   }
 
-  extractor = async (context, appendSystemMessage) => {
-    const p = executeExtractMemoriesImpl(context, appendSystemMessage)
-    inFlightExtractions.add(p)
-    try {
-      await p
-    } finally {
-      inFlightExtractions.delete(p)
+  let registeredInLiveSet = false
+  const extractor: MemoryExtractor = {
+    execute: async (context, appendSystemMessage) => {
+      if (!registeredInLiveSet) {
+        registeredInLiveSet = true
+        trackLiveMemoryExtractor(extractor)
+      }
+      const capturedAlsSession = getActiveSessionFromAls()
+      const run = () =>
+        executeExtractMemoriesImpl(
+          capturedAlsSession,
+          context,
+          appendSystemMessage,
+        )
+      const p =
+        capturedAlsSession !== undefined &&
+        getActiveSessionFromAls() !== capturedAlsSession
+          ? runWithSession(capturedAlsSession, run)
+          : run()
+      inFlightExtractions.add(p)
+      activeInFlightExtractors.add(extractor)
+      try {
+        await p
+      } finally {
+        inFlightExtractions.delete(p)
+        if (inFlightExtractions.size === 0) {
+          activeInFlightExtractors.delete(extractor)
+        }
+      }
+    },
+    drain: async (timeoutMs = 60_000) => {
+      if (inFlightExtractions.size === 0) return
+      await Promise.race([
+        Promise.all(inFlightExtractions).catch(() => {}),
+        // eslint-disable-next-line no-restricted-syntax -- sleep() has no .unref(); timer must not block exit
+        new Promise<void>(r => setTimeout(r, timeoutMs).unref()),
+      ])
+    },
+    getStateForTesting: () => ({
+      lastMemoryMessageUuid,
+      inProgress,
+      hasPendingContext: pendingContext !== undefined,
+      inFlightCount: inFlightExtractions.size,
+      turnsSinceLastExtraction,
+    }),
+  }
+  return extractor
+}
+
+const liveMemoryExtractors = new Set<WeakRef<MemoryExtractor>>()
+const activeInFlightExtractors = new Set<MemoryExtractor>()
+
+function pruneDeadMemoryExtractors(): void {
+  for (const ref of liveMemoryExtractors) {
+    if (ref.deref() === undefined) {
+      liveMemoryExtractors.delete(ref)
     }
   }
+}
 
-  drainer = async (timeoutMs = 60_000) => {
-    if (inFlightExtractions.size === 0) return
-    await Promise.race([
-      Promise.all(inFlightExtractions).catch(() => {}),
-      // eslint-disable-next-line no-restricted-syntax -- sleep() has no .unref(); timer must not block exit
-      new Promise<void>(r => setTimeout(r, timeoutMs).unref()),
-    ])
+function trackLiveMemoryExtractor(extractor: MemoryExtractor): void {
+  if (liveMemoryExtractors.size > 64) {
+    pruneDeadMemoryExtractors()
   }
+  liveMemoryExtractors.add(new WeakRef(extractor))
+}
+
+type SessionMemoryExtractorSlot = {
+  initialized: boolean
+  extractor: MemoryExtractor
+}
+
+let globalExtractMemoriesInitialized = false
+let defaultExtractorDeps: MemoryExtractorDeps | undefined
+
+const memoryExtractorBySession =
+  new RootSessionSlot<SessionMemoryExtractorSlot>(() => ({
+    initialized: false,
+    extractor: createMemoryExtractor(defaultExtractorDeps),
+  }))
+
+/**
+ * Initialize the memory extraction system for the active session.
+ * Creates a fresh closure that captures all mutable state (cursor position,
+ * overlap guard, pending context). Call once at startup alongside
+ * initConfidenceRating/initPromptCoaching, or per-test in beforeEach.
+ */
+export function initExtractMemories(deps?: MemoryExtractorDeps): void {
+  if (!hasActiveSessionAls()) {
+    defaultExtractorDeps = deps
+  }
+  const slot = memoryExtractorBySession.of(getBootstrapSession())
+  slot.initialized = true
+  slot.extractor = createMemoryExtractor(deps ?? defaultExtractorDeps)
+  if (!hasActiveSessionAls()) {
+    globalExtractMemoriesInitialized = true
+  }
+}
+
+export function getMemoryExtractorStateForTesting(): MemoryExtractorStateSnapshot {
+  const existing = memoryExtractorBySession.peek(getBootstrapSession())
+  if (!existing) {
+    return {
+      lastMemoryMessageUuid: undefined,
+      inProgress: false,
+      hasPendingContext: false,
+      inFlightCount: 0,
+      turnsSinceLastExtraction: 0,
+    }
+  }
+  return existing.extractor.getStateForTesting()
+}
+
+export function resetExtractMemoriesForTests(): void {
+  if (!hasActiveSessionAls()) {
+    globalExtractMemoriesInitialized = false
+    defaultExtractorDeps = undefined
+  }
+  memoryExtractorBySession.drop(getBootstrapSession())
 }
 
 // ============================================================================
@@ -696,7 +847,12 @@ export async function executeExtractMemories(
   context: REPLHookContext,
   appendSystemMessage?: AppendSystemMessageFn,
 ): Promise<void> {
-  await extractor?.(context, appendSystemMessage)
+  const session = getBootstrapSession()
+  const existing = memoryExtractorBySession.peek(session)
+  if (!existing && !globalExtractMemoriesInitialized) return
+  const slot = existing ?? memoryExtractorBySession.of(session)
+  if (!slot.initialized && !globalExtractMemoriesInitialized) return
+  await slot.extractor.execute(context, appendSystemMessage)
 }
 
 /**
@@ -708,5 +864,37 @@ export async function executeExtractMemories(
 export async function drainPendingExtraction(
   timeoutMs?: number,
 ): Promise<void> {
-  await drainer(timeoutMs)
+  if (hasActiveSessionAls()) {
+    const session = getBootstrapSession()
+    const existing = memoryExtractorBySession.peek(session)
+    if (!existing) return
+    if (!existing.initialized && !globalExtractMemoriesInitialized) return
+    await existing.extractor.drain(timeoutMs)
+    return
+  }
+
+  // Outside ALS (process shutdown): drain ALL live hosts' in-flight extractions.
+  const extractorsToDrain = new Set<MemoryExtractor>()
+  for (const extractor of activeInFlightExtractors) {
+    extractorsToDrain.add(extractor)
+  }
+  for (const ref of liveMemoryExtractors) {
+    const extractor = ref.deref()
+    if (!extractor) {
+      liveMemoryExtractors.delete(ref)
+      continue
+    }
+    extractorsToDrain.add(extractor)
+  }
+  const defaultExisting = memoryExtractorBySession.peek(getBootstrapSession())
+  if (
+    defaultExisting &&
+    (defaultExisting.initialized || globalExtractMemoriesInitialized)
+  ) {
+    extractorsToDrain.add(defaultExisting.extractor)
+  }
+  if (extractorsToDrain.size === 0) return
+  await Promise.allSettled(
+    [...extractorsToDrain].map(extractor => extractor.drain(timeoutMs)),
+  )
 }

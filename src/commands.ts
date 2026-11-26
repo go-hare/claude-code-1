@@ -291,6 +291,7 @@ import {
   getSkillDirCommands,
   clearSkillCaches,
   getDynamicSkills,
+  onDynamicSkillsLoaded,
 } from './skills/loadSkillsDir.js'
 import { getBundledSkills } from './skills/bundledSkills.js'
 import { getBuiltinPluginSkillCommands } from './plugins/builtinPlugins.js'
@@ -307,7 +308,7 @@ import {
   runFunctionHookChain,
 } from './utils/plugins/functionHooksModules.js'
 import { isFullscreenEnvEnabled } from './utils/fullscreen.js'
-import memoize from 'lodash-es/memoize.js'
+import { getBootstrapSessionHost, HostSlot } from './utils/sessionHost.js'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { isUsing3PServices, isClaudeAISubscriber } from './utils/auth.js'
 import { isFirstPartyAnthropicBaseUrl } from './utils/model/providers.js'
@@ -382,9 +383,39 @@ export const INTERNAL_ONLY_COMMANDS = [
   oauthRefresh,
 ].filter(Boolean)
 
+type HostCachedFn<Args extends unknown[], Result, Key = Args[0]> = ((
+  ...args: Args
+) => Result) & {
+  cache: Map<Key, Result>
+}
+
+function memoizePerHost<Args extends unknown[], Result, Key = Args[0]>(
+  func: (...args: Args) => Result,
+): HostCachedFn<Args, Result, Key> {
+  const caches = new HostSlot<Map<Key, Result>>(() => new Map())
+  const fn = (...args: Args): Result => {
+    const cache = caches.of(getBootstrapSessionHost())
+    const key = args[0] as Key
+    if (cache.has(key)) {
+      return cache.get(key) as Result
+    }
+    const result = func(...args)
+    cache.set(key, result)
+    return result
+  }
+  Object.defineProperty(fn, 'cache', {
+    get(): Map<Key, Result> {
+      return caches.of(getBootstrapSessionHost())
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return fn as unknown as HostCachedFn<Args, Result, Key>
+}
+
 // Declared as a function so that we don't run this until getCommands is called,
 // since underlying functions read from config, which can't be read at module initialization time
-const COMMANDS = memoize((): Command[] => [
+const COMMANDS = memoizePerHost<[], Command[], undefined>((): Command[] => [
   addDir,
   advisor,
   autocompact,
@@ -573,7 +604,7 @@ export function getBuiltinCommands(): Command[] {
   return COMMANDS()
 }
 
-export const builtInCommandNames = memoize(
+export const builtInCommandNames = memoizePerHost<[], Set<string>, undefined>(
   (): Set<string> =>
     new Set(COMMANDS().flatMap(_ => [_.name, ...(_.aliases ?? [])])),
 )
@@ -795,60 +826,65 @@ export function filterValidCommands(commands: Command[]): Command[] {
  * Loads all command sources (skills, plugins, workflows). Memoized by cwd
  * because loading is expensive (disk I/O, dynamic imports).
  */
-const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
-  const [
-    { skillDirCommands, pluginSkills, bundledSkills, builtinPluginSkills },
-    pluginCommands,
-    workflowCommands,
-  ] = await Promise.all([
-    getSkills(cwd),
-    getPluginCommands().catch(err => {
-      logError(toError(err))
-      logForDebugging('Plugin commands failed to load, continuing without them')
-      return []
-    }),
-    (getWorkflowCommands
-      ? getWorkflowCommands(cwd)
-      : Promise.resolve([])
-    ).catch(err => {
-      logError(toError(err))
-      logForDebugging(
-        'Workflow commands failed to load, continuing without them',
-      )
-      return []
-    }),
-  ])
+const loadAllCommands = memoizePerHost(
+  async (cwd: string): Promise<Command[]> => {
+    ensureDynamicSkillsInvalidationSubscribed()
+    const [
+      { skillDirCommands, pluginSkills, bundledSkills, builtinPluginSkills },
+      pluginCommands,
+      workflowCommands,
+    ] = await Promise.all([
+      getSkills(cwd),
+      getPluginCommands().catch(err => {
+        logError(toError(err))
+        logForDebugging(
+          'Plugin commands failed to load, continuing without them',
+        )
+        return []
+      }),
+      (getWorkflowCommands
+        ? getWorkflowCommands(cwd)
+        : Promise.resolve([])
+      ).catch(err => {
+        logError(toError(err))
+        logForDebugging(
+          'Workflow commands failed to load, continuing without them',
+        )
+        return []
+      }),
+    ])
 
-  // densable Hxb after assemble (skills/plugins/… then builtins).
-  // densable 2.1.228 #12 Vyn/ULo: drop syncedSkills that shadow local/plugin/MCP/builtins.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { applySyncedSkillShadowFilter } =
-    require('./skills/syncedSkillsHarden.js') as typeof import('./skills/syncedSkillsHarden.js')
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { disambiguateAddDirSkills } =
-    require('./skills/loadSkillsDir.js') as typeof import('./skills/loadSkillsDir.js')
-  const headless = getIsNonInteractiveSession()
-  const filteredPluginCommands = headless
-    ? (pluginCommands as Command[]).filter(isCommandAvailableInHeadless)
-    : (pluginCommands as Command[])
+    // densable Hxb after assemble (skills/plugins/… then builtins).
+    // densable 2.1.228 #12 Vyn/ULo: drop syncedSkills that shadow local/plugin/MCP/builtins.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { applySyncedSkillShadowFilter } =
+      require('./skills/syncedSkillsHarden.js') as typeof import('./skills/syncedSkillsHarden.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { disambiguateAddDirSkills } =
+      require('./skills/loadSkillsDir.js') as typeof import('./skills/loadSkillsDir.js')
+    const headless = getIsNonInteractiveSession()
+    const filteredPluginCommands = headless
+      ? (pluginCommands as Command[]).filter(isCommandAvailableInHeadless)
+      : (pluginCommands as Command[])
 
-  return applySyncedSkillShadowFilter(
-    disambiguateAddDirSkills(
-      stripCollidingPluginAliases(
-        filterValidCommands([
-          ...bundledSkills,
-          ...builtinPluginSkills,
-          ...skillDirCommands,
-          ...(workflowCommands as Command[]),
-          ...filteredPluginCommands,
-          ...pluginSkills,
-          ...COMMANDS(),
-        ]),
+    return applySyncedSkillShadowFilter(
+      disambiguateAddDirSkills(
+        stripCollidingPluginAliases(
+          filterValidCommands([
+            ...bundledSkills,
+            ...builtinPluginSkills,
+            ...skillDirCommands,
+            ...(workflowCommands as Command[]),
+            ...filteredPluginCommands,
+            ...pluginSkills,
+            ...COMMANDS(),
+          ]),
+        ),
+        cwd,
       ),
-      cwd,
-    ),
-  )
-})
+    )
+  },
+)
 
 /**
  * densable `KLn` + `Jln` — convert a `$.command.register` entry (`Fst`) into a
@@ -979,6 +1015,7 @@ function finalizeCommandList(commands: Command[]): Command[] {
  * auth changes (e.g. /login) take effect immediately.
  */
 export async function getCommands(cwd: string): Promise<Command[]> {
+  ensureDynamicSkillsInvalidationSubscribed()
   const allCommands = await loadAllCommands(cwd)
 
   // Get dynamic skills discovered during file operations
@@ -1127,11 +1164,31 @@ export async function mergeSkillToolCommands(
   return { merged, included }
 }
 
+type HostCommandsState = {
+  dynamicSkillsInvalidationSubscribed: boolean
+}
+
+const hostCommandsSlot = new HostSlot<HostCommandsState>(() => ({
+  dynamicSkillsInvalidationSubscribed: false,
+}))
+
+function ensureDynamicSkillsInvalidationSubscribed(): void {
+  const state = hostCommandsSlot.of(getBootstrapSessionHost())
+  if (state.dynamicSkillsInvalidationSubscribed) return
+  state.dynamicSkillsInvalidationSubscribed = true
+  onDynamicSkillsLoaded(() => {
+    getSkillToolCommands.cache?.clear?.()
+    getSlashCommandToolSkills.cache?.clear?.()
+    clearSkillIndexCache?.()
+  })
+}
+
 // SkillTool shows ALL prompt-based commands that the model can invoke
 // This includes both skills (from /skills/) and commands (from /commands/)
 // Official Lqe densable — skillOverrides / disableBundledSkills may hide items.
-export const getSkillToolCommands = memoize(
+export const getSkillToolCommands = memoizePerHost(
   async (cwd: string): Promise<Command[]> => {
+    ensureDynamicSkillsInvalidationSubscribed()
     const allCommands = await getCommands(cwd)
     let skillOverrides:
       | Readonly<
@@ -1171,8 +1228,9 @@ export const getSkillToolCommands = memoize(
 // Filters commands to include only skills. Skills are commands that provide
 // specialized capabilities for the model to use. They are identified by
 // loadedFrom being 'skills', 'plugin', or 'bundled', or having disableModelInvocation set.
-export const getSlashCommandToolSkills = memoize(
+export const getSlashCommandToolSkills = memoizePerHost(
   async (cwd: string): Promise<Command[]> => {
+    ensureDynamicSkillsInvalidationSubscribed()
     try {
       const allCommands = await getCommands(cwd)
       return allCommands.filter(

@@ -19,24 +19,32 @@ import { closeSync, openSync, writeSync } from 'node:fs'
 import { isatty } from 'node:tty'
 import { buildCliLaunch } from './cliLaunch.js'
 import { getScreenReaderChildEnv } from './screenReaderGate.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 /**
  * Official 2.1.328 (#401) `oat` / `o5i`: latch tracking whether a startup
  * relaunch (e.g., gateway sign-in or Code Mode) has already been committed so
  * outer startup handlers do not race or return to the shell prematurely.
  */
-let startupRelaunchStarted = false
+const startupRelaunchHostSlot = new HostSlot<{
+  startupRelaunchStarted: boolean
+}>(() => ({
+  startupRelaunchStarted: false,
+}))
 
 export function isStartupRelaunchStarted(): boolean {
-  return startupRelaunchStarted
+  return startupRelaunchHostSlot.of(getBootstrapSessionHost())
+    .startupRelaunchStarted
 }
 
 export function markStartupRelaunchStarted(): void {
-  startupRelaunchStarted = true
+  startupRelaunchHostSlot.of(getBootstrapSessionHost()).startupRelaunchStarted =
+    true
 }
 
 export function resetStartupRelaunchStartedForTests(): void {
-  startupRelaunchStarted = false
+  startupRelaunchHostSlot.of(getBootstrapSessionHost()).startupRelaunchStarted =
+    false
 }
 
 /**

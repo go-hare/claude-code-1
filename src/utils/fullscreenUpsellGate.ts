@@ -36,13 +36,16 @@ import {
 } from './fullscreen.js'
 import { isForceFullscreenUpsellEnabled } from './residualUiEnvGates.js'
 import { isScreenReaderModeEnabled } from './screenReaderGate.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 import { getSettingsForSource } from './settings/settings.js'
 
 /** Official M4r / VHe — max times the fullscreen upsell may be shown. */
 export const FULLSCREEN_UPSELL_MAX_SEEN = 3
 
-/** Official Mhp.upsellImpression — one increment per process. */
-let upsellImpression: number | undefined
+/** Official Mhp.upsellImpression — one increment per host. */
+const fullscreenUpsellHostSlot = new HostSlot<{
+  upsellImpression: number | undefined
+}>(() => ({ upsellImpression: undefined }))
 
 /**
  * Official uft($T()) — auto-off gate reasons that suppress the upsell.
@@ -242,21 +245,22 @@ export function incrementFullscreenUpsellSeen(prev: {
 }
 
 /**
- * Official udc / Zng — count a dialog impression once per process.
+ * Official udc / Zng — count a dialog impression once per host.
  * Unanswered prompts still increment so the offer stops after M4r=3 launches.
  */
 export function recordFullscreenUpsellImpression(prev: {
   fullscreenUpsellSeenCount?: number
 }): { fullscreenUpsellSeenCount: number } {
-  if (upsellImpression !== undefined) {
+  const state = fullscreenUpsellHostSlot.of(getBootstrapSessionHost())
+  if (state.upsellImpression !== undefined) {
     return {
       fullscreenUpsellSeenCount:
-        prev.fullscreenUpsellSeenCount ?? upsellImpression,
+        prev.fullscreenUpsellSeenCount ?? state.upsellImpression,
     }
   }
   const cur = prev.fullscreenUpsellSeenCount ?? 0
   const next = Math.min(cur + 1, FULLSCREEN_UPSELL_MAX_SEEN)
-  upsellImpression = next
+  state.upsellImpression = next
   if (cur >= next) {
     return { fullscreenUpsellSeenCount: cur }
   }
@@ -265,5 +269,6 @@ export function recordFullscreenUpsellImpression(prev: {
 
 /** Test-only: clear official Mhp.upsellImpression latch. */
 export function _resetFullscreenUpsellImpressionForTesting(): void {
-  upsellImpression = undefined
+  const state = fullscreenUpsellHostSlot.peek(getBootstrapSessionHost())
+  if (state) state.upsellImpression = undefined
 }

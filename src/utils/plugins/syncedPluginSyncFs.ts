@@ -17,7 +17,15 @@ import {
   rmdir,
   stat,
 } from 'fs/promises'
-import { basename, dirname, isAbsolute, join, relative, sep } from 'path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'path'
 import { logForDebugging } from '../debug.js'
 import { getErrnoCode, isENOENT } from '../errors.js'
 import {
@@ -232,6 +240,9 @@ type TrashPruneQueueState = {
   }
 }
 
+// Process-global per-trash-root prune queue so concurrent ALS hosts targeting
+// the same .trash directory coalesce justMoved protections and serialize disk
+// pruning instead of racing rm() against each other's newly trashed batches.
 const trashPruneQueues = new Map<string, TrashPruneQueueState>()
 
 function hashTrashKey(relPath: string): string {
@@ -262,17 +273,28 @@ export function pruneSyncedTrash(
   justMovedName?: string,
   maxEntries = MAX_SYNCED_TRASH_ENTRIES,
 ): Promise<{ removed: number; errors: number }> {
-  const state: TrashPruneQueueState = trashPruneQueues.get(trashRoot) ?? {
+  const queueKey = resolve(trashRoot)
+  const state: TrashPruneQueueState = trashPruneQueues.get(queueKey) ?? {
     running: Promise.resolve({ removed: 0, errors: 0 }),
   }
-  trashPruneQueues.set(trashRoot, state)
+  trashPruneQueues.set(queueKey, state)
   const queued = state.queued ?? {
     justMoved: new Set<string>(),
     countsUntagged: false,
     outcome: state.running.then(() => {
       state.queued = undefined
-      state.running = runPruneSyncedTrash(trashRoot, queued, maxEntries)
-      return state.running
+      const next = runPruneSyncedTrash(trashRoot, queued, maxEntries)
+      state.running = next
+      void next.finally(() => {
+        if (
+          state.running === next &&
+          state.queued === undefined &&
+          trashPruneQueues.get(queueKey) === state
+        ) {
+          trashPruneQueues.delete(queueKey)
+        }
+      })
+      return next
     }),
   }
   state.queued = queued

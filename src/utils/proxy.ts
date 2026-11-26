@@ -10,7 +10,6 @@ import {
   type AgentOptions as HttpsAgentOptions,
 } from 'https'
 import { type Socket } from 'net'
-import memoize from 'lodash-es/memoize.js'
 import type * as undici from 'undici'
 import { getIsNonInteractiveSession } from '../bootstrap/state.js'
 import { getCACertificates } from './caCerts.js'
@@ -27,6 +26,7 @@ import {
   type HardenedHttpsProxyAgentOptions,
   SecureHttpsProxyAgent,
 } from './proxyConnectAgent.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionRoot.js'
 export {
   assertSafeIdpProxyTarget,
   buildConnectRequestLines,
@@ -54,27 +54,42 @@ export {
   type SsrfBlockedError,
 } from './proxyConnectAgent.js'
 
-// Disable fetch keep-alive after a stale-pool ECONNRESET so retries open a
-// fresh TCP connection instead of reusing the dead pooled socket. Sticky for
-// the process lifetime — once the pool is known-bad, don't trust it again.
-// Works under Bun (native fetch respects keepalive:false for pooling).
-// Under Node/undici, keepalive is a no-op for pooling, but undici
-// naturally evicts dead sockets from the pool on ECONNRESET.
-let keepAliveDisabled = false
+// Official 2.1.331 [W-053]: per-host proxy & keep-alive transport state on SessionHost.
+type ProxyHostState = {
+  // Disable fetch keep-alive after a stale-pool ECONNRESET so retries open a
+  // fresh TCP connection instead of reusing the dead pooled socket.
+  keepAliveDisabled: boolean
+  closesAfterServerError: boolean
+  trackedHttpsAgents: Set<HttpsAgent>
+  completedBareProxyRepairUrl: string | undefined
+  getProxyAgentCache: Map<string, undici.Dispatcher>
+  proxyInterceptorId: number | undefined
+}
+
+const proxyHostSlot = new HostSlot<ProxyHostState>(() => ({
+  keepAliveDisabled: false,
+  closesAfterServerError: false,
+  trackedHttpsAgents: new Set(),
+  completedBareProxyRepairUrl: undefined,
+  getProxyAgentCache: new Map(),
+  proxyInterceptorId: undefined,
+}))
+
+function getProxyHostState(): ProxyHostState {
+  return proxyHostSlot.of(getBootstrapSessionHost())
+}
 
 export function disableKeepAlive(): void {
-  keepAliveDisabled = true
+  getProxyHostState().keepAliveDisabled = true
 }
 
 export function _resetKeepAliveForTesting(): void {
-  keepAliveDisabled = false
-  closesAfterServerError = false
-  trackedHttpsAgents.clear()
+  const state = getProxyHostState()
+  state.keepAliveDisabled = false
+  state.closesAfterServerError = false
+  state.trackedHttpsAgents.clear()
   setMtlsErrorClosingAgentFactory(null, false)
 }
-
-let closesAfterServerError = false
-const trackedHttpsAgents = new Set<HttpsAgent>()
 
 /**
  * Official `r5t(e)` (#1588/#1589/#1590) — 5xx status codes that should drop the
@@ -149,11 +164,12 @@ export class KeepAliveErrorClosingAgent extends HttpsAgent {
  * and retire/destroy idle sockets on existing tracked agents.
  */
 export function enableClosesAfterServerError(): void {
-  closesAfterServerError = true
-  for (const agent of trackedHttpsAgents) {
+  const state = getProxyHostState()
+  state.closesAfterServerError = true
+  for (const agent of state.trackedHttpsAgents) {
     retireKeepAliveAgent(agent)
   }
-  trackedHttpsAgents.clear()
+  state.trackedHttpsAgents.clear()
   retireKeepAliveAgent(
     axios.defaults.httpsAgent as
       | (Pick<HttpsAgent, 'freeSockets'> & { maxFreeSockets?: number })
@@ -174,16 +190,17 @@ export function enableClosesAfterServerError(): void {
 }
 
 export function shouldCloseAfterServerError(): boolean {
-  return closesAfterServerError
+  return getProxyHostState().closesAfterServerError
 }
 
 export function createKeepAliveHttpsAgent(
   options: HttpsAgentOptions = {},
 ): HttpsAgent {
-  const agent = closesAfterServerError
+  const state = getProxyHostState()
+  const agent = state.closesAfterServerError
     ? new KeepAliveErrorClosingAgent({ keepAlive: true, ...options })
     : new HttpsAgent({ keepAlive: true, ...options })
-  trackedHttpsAgents.add(agent)
+  state.trackedHttpsAgents.add(agent)
   return agent
 }
 
@@ -218,7 +235,7 @@ export function destroyFreeSocketsForUrl(
  * and axios default agents.
  */
 export function destroyAllFreeSockets(): void {
-  for (const agent of trackedHttpsAgents) {
+  for (const agent of getProxyHostState().trackedHttpsAgents) {
     destroyAgentFreeSockets(agent)
   }
   destroyAgentFreeSockets(
@@ -268,14 +285,12 @@ const REPAIRED_SCHEME_SENSITIVE_PROXY_KEYS = [
   'GRPC_PROXY',
 ] as const
 
-let completedBareProxyRepairUrl: string | undefined
-
 export function resetBareProxyRepairStateForTests(): void {
-  completedBareProxyRepairUrl = undefined
+  getProxyHostState().completedBareProxyRepairUrl = undefined
 }
 
 export function getCompletedBareProxyRepairUrl(): string | undefined {
-  return completedBareProxyRepairUrl
+  return getProxyHostState().completedBareProxyRepairUrl
 }
 
 function parseUrlHostname(raw: string): string | undefined {
@@ -369,7 +384,7 @@ export function repairBareProxySchemeAtStartup(opts?: {
   for (const key of matchingKeys) {
     env[key] = repaired
   }
-  completedBareProxyRepairUrl = repaired
+  getProxyHostState().completedBareProxyRepairUrl = repaired
   logForDebugging(
     `[proxy] ${matchingKeys.join(', ')} had no scheme: used as an http:// proxy`,
   )
@@ -390,7 +405,7 @@ export function preserveRepairedProxyIfBare(
   key: string,
   value: string,
 ): string {
-  const repaired = completedBareProxyRepairUrl
+  const repaired = getProxyHostState().completedBareProxyRepairUrl
   if (
     repaired === undefined ||
     !REPAIRED_SCHEME_SENSITIVE_PROXY_KEYS.some(
@@ -592,11 +607,7 @@ export function createAxiosInstance(
   return instance
 }
 
-/**
- * Get or create a memoized proxy agent for the given URI
- * Now respects NO_PROXY environment variable
- */
-export const getProxyAgent = memoize((uri: string): undici.Dispatcher => {
+function createProxyAgentForUri(uri: string): undici.Dispatcher {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const undiciMod = require('undici') as typeof undici
   const mtlsConfig = getMTLSConfig()
@@ -666,7 +677,37 @@ export const getProxyAgent = memoize((uri: string): undici.Dispatcher => {
   }
 
   return new undiciMod.EnvHttpProxyAgent(proxyOptions)
+}
+
+function getProxyAgentImpl(uri: string): undici.Dispatcher {
+  const cache = getProxyHostState().getProxyAgentCache
+  const existing = cache.get(uri)
+  if (existing !== undefined) {
+    return existing
+  }
+  const created = createProxyAgentForUri(uri)
+  cache.set(uri, created)
+  return created
+}
+
+Object.defineProperty(getProxyAgentImpl, 'cache', {
+  get: () => getProxyHostState().getProxyAgentCache,
+  set: (next: Map<string, undici.Dispatcher>) => {
+    getProxyHostState().getProxyAgentCache = next
+  },
+  configurable: true,
+  enumerable: true,
 })
+
+/**
+ * Get or create a memoized proxy agent for the given URI (per SessionHost).
+ * Now respects NO_PROXY environment variable
+ */
+export const getProxyAgent = getProxyAgentImpl as unknown as ((
+  uri: string,
+) => undici.Dispatcher) & {
+  cache: Map<string, undici.Dispatcher>
+}
 
 /**
  * Get an HTTP agent configured for WebSocket proxy support
@@ -789,7 +830,9 @@ export function getProxyFetchOptions(
     keepalive?: false
     timeout?: false | number
   } = {
-    ...(keepAliveDisabled ? ({ keepalive: false } as const) : {}),
+    ...(getProxyHostState().keepAliveDisabled
+      ? ({ keepalive: false } as const)
+      : {}),
     ...(timeoutOpt !== undefined ? { timeout: timeoutOpt } : {}),
   }
 
@@ -858,9 +901,8 @@ export function getProxyFetchOptions(
  * Configure global HTTP agents for both axios and undici
  * This ensures all HTTP requests use the proxy and/or mTLS if configured
  */
-let proxyInterceptorId: number | undefined
-
 export function configureGlobalAgents(): void {
+  const state = getProxyHostState()
   const proxyUrl = getProxyUrl()
   const mtlsAgent = getMTLSAgent()
   const directKeepAliveAgent =
@@ -869,9 +911,9 @@ export function configureGlobalAgents(): void {
       : undefined
 
   // Eject previous interceptor to avoid stacking on repeated calls
-  if (proxyInterceptorId !== undefined) {
-    axios.interceptors.request.eject(proxyInterceptorId)
-    proxyInterceptorId = undefined
+  if (state.proxyInterceptorId !== undefined) {
+    axios.interceptors.request.eject(state.proxyInterceptorId)
+    state.proxyInterceptorId = undefined
   }
 
   // Reset proxy-related defaults so reconfiguration is clean
@@ -887,7 +929,7 @@ export function configureGlobalAgents(): void {
     const proxyAgent = createHttpsProxyAgent(proxyUrl)
 
     // Add axios request interceptor to handle NO_PROXY
-    proxyInterceptorId = axios.interceptors.request.use(config => {
+    state.proxyInterceptorId = axios.interceptors.request.use(config => {
       // Check if URL should bypass proxy based on NO_PROXY
       if (config.url && shouldBypassProxy(config.url)) {
         // Bypass proxy - use mTLS agent or error-closing keep-alive agent if configured

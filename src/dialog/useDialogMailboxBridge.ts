@@ -1,7 +1,8 @@
 /**
  * densable hLo — bridge dialog mailbox → DialogStore.
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { getBootstrapSession, RootSessionSlot } from '../utils/sessionRoot.js'
 import type { DialogMailbox } from './dialogMailbox.js'
 import { useDialogStore } from './DialogStoreContext.js'
 
@@ -11,19 +12,25 @@ import { useDialogStore } from './DialogStoreContext.js'
  * unmounting the Ink tree must NOT resolve pending background/subagent permission
  * dialogs as a user refusal.
  */
-let sessionExiting = false
+const dialogMailboxBridgeBySession = new RootSessionSlot<{
+  sessionExiting: boolean
+}>(() => ({ sessionExiting: false }))
+
+function getDialogMailboxBridgeState(): { sessionExiting: boolean } {
+  return dialogMailboxBridgeBySession.of(getBootstrapSession())
+}
 
 export function markSessionExiting(): void {
-  sessionExiting = true
+  getDialogMailboxBridgeState().sessionExiting = true
 }
 
 export function isSessionExiting(): boolean {
-  return sessionExiting
+  return getDialogMailboxBridgeState().sessionExiting
 }
 
 /** @internal test helper */
 export function resetSessionExitingForTest(): void {
-  sessionExiting = false
+  getDialogMailboxBridgeState().sessionExiting = false
 }
 
 /** densable hLo(channel) */
@@ -31,6 +38,7 @@ export function useDialogMailboxBridge(
   mailbox: DialogMailbox | undefined,
 ): void {
   const store = useDialogStore()
+  const [bridgeState] = useState(() => getDialogMailboxBridgeState())
   useEffect(() => {
     if (!mailbox) return
     const owned = new Set<string>()
@@ -59,11 +67,11 @@ export function useDialogMailboxBridge(
       unsubClosed()
       for (const id of owned) {
         store.dismiss(id)
-        if (!sessionExiting) {
+        if (!bridgeState.sessionExiting) {
           mailbox.reply({ id, cancelled: true })
         }
       }
       owned.clear()
     }
-  }, [mailbox, store])
+  }, [bridgeState, mailbox, store])
 }

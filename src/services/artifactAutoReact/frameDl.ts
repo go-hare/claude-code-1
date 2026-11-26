@@ -17,6 +17,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../analytics/index.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import {
   artifactRelayFramePath,
   declineFrameRelay,
@@ -98,14 +99,18 @@ export type FrameDlDeps = {
   isRelayOpen?: () => boolean
 }
 
-let depsOverride: FrameDlDeps | null = null
+const frameDlHostSlot = new HostSlot<{ depsOverride: FrameDlDeps | null }>(
+  () => ({
+    depsOverride: null,
+  }),
+)
 
 export function setFrameDlDepsForTests(deps: FrameDlDeps | null): void {
-  depsOverride = deps
+  frameDlHostSlot.of(getBootstrapSessionHost()).depsOverride = deps
 }
 
 function d(): FrameDlDeps {
-  return depsOverride ?? {}
+  return frameDlHostSlot.of(getBootstrapSessionHost()).depsOverride ?? {}
 }
 
 async function resolveOauthBearer(): Promise<string | null> {

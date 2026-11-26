@@ -5,6 +5,7 @@ import type { OutputStyle } from '../utils/config.js'
 import { getCwd } from '../utils/cwd.js'
 import { logForDebugging } from '../utils/debug.js'
 import { loadPluginOutputStyles } from '../utils/plugins/loadPluginOutputStyles.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 import type { SettingSource } from '../utils/settings/constants.js'
 import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 
@@ -171,47 +172,70 @@ ${EXPLANATORY_FEATURE_PROMPT}`,
   },
 }
 
-export const getAllOutputStyles = memoize(async function getAllOutputStyles(
-  cwd: string,
-): Promise<{ [styleName: string]: OutputStyleConfig | null }> {
-  const customStyles = await getOutputStyleDirStyles(cwd)
-  const pluginStyles = await loadPluginOutputStyles()
+function memoizePerHost<T extends (...args: never[]) => unknown>(
+  fn: T,
+): ReturnType<typeof memoize<T>> {
+  const slot = new HostSlot(() => memoize(fn))
+  const wrapped = ((...args: Parameters<T>) =>
+    slot.of(getBootstrapSessionHost())(...args)) as ReturnType<
+    typeof memoize<T>
+  >
+  Object.defineProperty(wrapped, 'cache', {
+    get() {
+      return slot.of(getBootstrapSessionHost()).cache
+    },
+    set(next) {
+      slot.of(getBootstrapSessionHost()).cache = next
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return wrapped
+}
 
-  // Start with built-in modes
-  const allStyles = {
-    ...OUTPUT_STYLE_CONFIG,
-  }
+export const getAllOutputStyles = memoizePerHost(
+  async function getAllOutputStyles(
+    cwd: string,
+  ): Promise<{ [styleName: string]: OutputStyleConfig | null }> {
+    const customStyles = await getOutputStyleDirStyles(cwd)
+    const pluginStyles = await loadPluginOutputStyles()
 
-  const managedStyles = customStyles.filter(
-    style => style.source === 'policySettings',
-  )
-  const userStyles = customStyles.filter(
-    style => style.source === 'userSettings',
-  )
-  const projectStyles = customStyles.filter(
-    style => style.source === 'projectSettings',
-  )
+    // Start with built-in modes
+    const allStyles = {
+      ...OUTPUT_STYLE_CONFIG,
+    }
 
-  // Add styles in priority order (lowest to highest): built-in, plugin, managed, user, project
-  const styleGroups = [pluginStyles, userStyles, projectStyles, managedStyles]
+    const managedStyles = customStyles.filter(
+      style => style.source === 'policySettings',
+    )
+    const userStyles = customStyles.filter(
+      style => style.source === 'userSettings',
+    )
+    const projectStyles = customStyles.filter(
+      style => style.source === 'projectSettings',
+    )
 
-  for (const styles of styleGroups) {
-    for (const style of styles) {
-      allStyles[style.name] = {
-        name: style.name,
-        description: style.description,
-        prompt: style.prompt,
-        source: style.source,
-        keepCodingInstructions: style.keepCodingInstructions,
-        forceForPlugin: style.forceForPlugin,
-        // densable 2.1.237 Concise BAT / turnReminder — preserve on merge.
-        turnReminder: style.turnReminder,
+    // Add styles in priority order (lowest to highest): built-in, plugin, managed, user, project
+    const styleGroups = [pluginStyles, userStyles, projectStyles, managedStyles]
+
+    for (const styles of styleGroups) {
+      for (const style of styles) {
+        allStyles[style.name] = {
+          name: style.name,
+          description: style.description,
+          prompt: style.prompt,
+          source: style.source,
+          keepCodingInstructions: style.keepCodingInstructions,
+          forceForPlugin: style.forceForPlugin,
+          // densable 2.1.237 Concise BAT / turnReminder — preserve on merge.
+          turnReminder: style.turnReminder,
+        }
       }
     }
-  }
 
-  return allStyles
-})
+    return allStyles
+  },
+)
 
 export function clearAllOutputStylesCache(): void {
   getAllOutputStyles.cache?.clear?.()

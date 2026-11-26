@@ -13,6 +13,11 @@ import {
 import { mkdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getSessionId } from 'src/bootstrap/state.js'
+import {
+  getActiveSessionFromAls,
+  getSessionOnceLatches,
+  runWithSession,
+} from 'src/utils/sessionRoot.js'
 import type { AgentId } from 'src/types/ids.js'
 import type { Message } from 'src/types/message.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -142,17 +147,21 @@ type PendingChanges = {
   prevDiffableContent: string
 }
 
-const previousStateBySource = new Map<string, PreviousState>()
+type PromptCacheBreakStore = {
+  previousStateBySource: Map<string, PreviousState>
+  hydrationAttempted: boolean
+  pendingPersist: Promise<void>
+  latestQueuedPersist: PromptCacheBreakPersistAction | null
+}
 
 /**
- * densable DJd.promptCacheBreak (W$t): hydrationAttempted + persist queue.
+ * densable DJd.promptCacheBreak (W$t): hydrationAttempted + persist queue
+ * on RootSessionSlot (`SessionOnceLatches.promptCacheBreak`).
  * previousStateBySource stays the in-memory map; persist is gated by XLf.
  */
-const promptCacheBreakStore = {
-  previousStateBySource,
-  hydrationAttempted: false,
-  pendingPersist: Promise.resolve() as Promise<void>,
-  latestQueuedPersist: null as PromptCacheBreakPersistAction | null,
+function getPromptCacheBreakStore(): PromptCacheBreakStore {
+  return getSessionOnceLatches()
+    .promptCacheBreak as unknown as PromptCacheBreakStore
 }
 
 type PromptCacheBreakPersistAction =
@@ -425,7 +434,7 @@ function fromPersistableState(raw: PersistablePreviousState): PreviousState {
 
 /** densable NQa — hydrate once, cowork/desktop only. */
 function hydratePromptCacheBreakState(): void {
-  const store = promptCacheBreakStore
+  const store = getPromptCacheBreakStore()
   if (store.hydrationAttempted || !isPromptCacheBreakPersistEnabled()) return
   store.hydrationAttempted = true
   const map = store.previousStateBySource
@@ -453,7 +462,7 @@ function hydratePromptCacheBreakState(): void {
 function persistPromptCacheBreakState(): void {
   if (!isPromptCacheBreakPersistEnabled()) return
   try {
-    const store = promptCacheBreakStore
+    const store = getPromptCacheBreakStore()
     const payload: Record<string, PersistablePreviousState> = {}
     for (const [key, state] of store.previousStateBySource) {
       if (!isPersistableSourceKey(key)) continue
@@ -467,18 +476,26 @@ function persistPromptCacheBreakState(): void {
       Object.keys(payload).length === 0
         ? { action: 'remove' }
         : { action: 'write', payload: jsonStringify(payload) }
+    const capturedSession = getActiveSessionFromAls()
     store.latestQueuedPersist = action
     store.pendingPersist = store.pendingPersist
       .then(async () => {
-        if (action.action === 'remove') {
+        const runPersistIo = async () => {
+          if (action.action === 'remove') {
+            ensureClaudeTempDirSafe(getClaudeTempDir())
+            await rm(path, { force: true })
+            return
+          }
+          if (store.latestQueuedPersist !== action) return
+          await mkdir(getClaudeTempDir(), { recursive: true, mode: 0o700 })
           ensureClaudeTempDirSafe(getClaudeTempDir())
-          await rm(path, { force: true })
-          return
+          await writeFile(path, action.payload, { encoding: 'utf8' })
         }
-        if (store.latestQueuedPersist !== action) return
-        await mkdir(getClaudeTempDir(), { recursive: true, mode: 0o700 })
-        ensureClaudeTempDirSafe(getClaudeTempDir())
-        await writeFile(path, action.payload, { encoding: 'utf8' })
+        if (capturedSession !== undefined) {
+          await runWithSession(capturedSession, runPersistIo)
+        } else {
+          await runPersistIo()
+        }
       })
       .catch(() => {})
   } catch {
@@ -851,6 +868,7 @@ export function recordPromptState(snapshot: PromptStateSnapshot): void {
         )
       : []
 
+    const { previousStateBySource } = getPromptCacheBreakStore()
     const prev = previousStateBySource.get(key)
 
     if (!prev) {
@@ -1060,7 +1078,7 @@ export async function checkResponseForCacheBreak(
     const key = getTrackingKey(querySource, agentId)
     if (!key) return
 
-    const state = previousStateBySource.get(key)
+    const state = getPromptCacheBreakStore().previousStateBySource.get(key)
     if (!state) return
 
     // Skip excluded models (e.g., haiku has different caching behavior)
@@ -1347,7 +1365,9 @@ export function notifyCacheDeletion(
 ): void {
   hydratePromptCacheBreakState()
   const key = getTrackingKey(querySource, agentId)
-  const state = key ? previousStateBySource.get(key) : undefined
+  const state = key
+    ? getPromptCacheBreakStore().previousStateBySource.get(key)
+    : undefined
   if (state) {
     state.cacheDeletionsPending = true
     persistPromptCacheBreakState()
@@ -1365,7 +1385,9 @@ export function notifyCompaction(
 ): void {
   hydratePromptCacheBreakState()
   const key = getTrackingKey(querySource, agentId)
-  const state = key ? previousStateBySource.get(key) : undefined
+  const state = key
+    ? getPromptCacheBreakStore().previousStateBySource.get(key)
+    : undefined
   if (state) {
     state.prevCacheReadTokens = null
     persistPromptCacheBreakState()
@@ -1373,13 +1395,13 @@ export function notifyCompaction(
 }
 
 export function cleanupAgentTracking(agentId: AgentId): void {
-  if (previousStateBySource.delete(agentId)) {
+  if (getPromptCacheBreakStore().previousStateBySource.delete(agentId)) {
     persistPromptCacheBreakState()
   }
 }
 
 export function resetPromptCacheBreakDetection(): void {
-  const store = promptCacheBreakStore
+  const store = getPromptCacheBreakStore()
   const empty =
     store.previousStateBySource.size === 0 && !store.hydrationAttempted
   store.previousStateBySource.clear()
@@ -1394,7 +1416,7 @@ export function getPromptCacheBreakStatePathForTesting(): string | null {
 
 /** Test helper: await q$t queued persist. */
 export async function flushPromptCacheBreakPersistForTesting(): Promise<void> {
-  await promptCacheBreakStore.pendingPersist
+  await getPromptCacheBreakStore().pendingPersist
 }
 
 async function writeCacheBreakDiff(

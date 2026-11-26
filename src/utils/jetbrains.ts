@@ -2,6 +2,7 @@ import { homedir, platform } from 'os'
 import { join } from 'path'
 import { getFsImplementation } from '../utils/fsOperations.js'
 import type { IdeType } from './ide.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 const PLUGIN_PREFIX = 'claude-code-jetbrains-plugin'
 
@@ -144,24 +145,36 @@ export async function isJetBrainsPluginInstalled(
   return false
 }
 
-const pluginInstalledCache = new Map<IdeType, boolean>()
-const pluginInstalledPromiseCache = new Map<IdeType, Promise<boolean>>()
+type JetBrainsPluginHostState = {
+  pluginInstalledCache: Map<IdeType, boolean>
+  pluginInstalledPromiseCache: Map<IdeType, Promise<boolean>>
+}
+
+const jetBrainsPluginHostSlot = new HostSlot<JetBrainsPluginHostState>(() => ({
+  pluginInstalledCache: new Map(),
+  pluginInstalledPromiseCache: new Map(),
+}))
+
+function getJetBrainsPluginHostState(): JetBrainsPluginHostState {
+  return jetBrainsPluginHostSlot.of(getBootstrapSessionHost())
+}
 
 async function isJetBrainsPluginInstalledMemoized(
   ideType: IdeType,
   forceRefresh = false,
 ): Promise<boolean> {
+  const hostState = getJetBrainsPluginHostState()
   if (!forceRefresh) {
-    const existing = pluginInstalledPromiseCache.get(ideType)
+    const existing = hostState.pluginInstalledPromiseCache.get(ideType)
     if (existing) {
       return existing
     }
   }
   const promise = isJetBrainsPluginInstalled(ideType).then(result => {
-    pluginInstalledCache.set(ideType, result)
+    hostState.pluginInstalledCache.set(ideType, result)
     return result
   })
-  pluginInstalledPromiseCache.set(ideType, promise)
+  hostState.pluginInstalledPromiseCache.set(ideType, promise)
   return promise
 }
 
@@ -170,8 +183,9 @@ export async function isJetBrainsPluginInstalledCached(
   forceRefresh = false,
 ): Promise<boolean> {
   if (forceRefresh) {
-    pluginInstalledCache.delete(ideType)
-    pluginInstalledPromiseCache.delete(ideType)
+    const hostState = getJetBrainsPluginHostState()
+    hostState.pluginInstalledCache.delete(ideType)
+    hostState.pluginInstalledPromiseCache.delete(ideType)
   }
   return isJetBrainsPluginInstalledMemoized(ideType, forceRefresh)
 }
@@ -184,5 +198,7 @@ export async function isJetBrainsPluginInstalledCached(
 export function isJetBrainsPluginInstalledCachedSync(
   ideType: IdeType,
 ): boolean {
-  return pluginInstalledCache.get(ideType) ?? false
+  return (
+    getJetBrainsPluginHostState().pluginInstalledCache.get(ideType) ?? false
+  )
 }

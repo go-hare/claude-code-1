@@ -3,6 +3,7 @@ import { Box, Text, useInput } from '@anthropic/ink';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
 import { isClaudeAISubscriber } from '../../utils/auth.js';
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js';
 
 export type MemberProgramLine = {
   text: string;
@@ -17,13 +18,18 @@ export type MemberProgramSection = {
 
 export type ServedProgramsResult = MemberProgramSection[] | 'unavailable' | 'failed';
 
-let programFetcherOverride: (() => Promise<ServedProgramsResult>) | null = null;
+const accessHostSlot = new HostSlot<{
+  programFetcherOverride: (() => Promise<ServedProgramsResult>) | null;
+}>(() => ({
+  programFetcherOverride: null,
+}));
 
 export function setMemberProgramsFetcherForTesting(fetcher: (() => Promise<ServedProgramsResult>) | null): void {
-  programFetcherOverride = fetcher;
+  accessHostSlot.of(getBootstrapSessionHost()).programFetcherOverride = fetcher;
 }
 
 export async function fetchMemberPrograms(): Promise<ServedProgramsResult> {
+  const programFetcherOverride = accessHostSlot.of(getBootstrapSessionHost()).programFetcherOverride;
   if (programFetcherOverride) {
     return programFetcherOverride();
   }

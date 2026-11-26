@@ -10,6 +10,13 @@ import {
 import { logForDebugging } from '../debug.js'
 import type { ShellCommand } from '../ShellCommand.js'
 import { invalidateSessionEnvCache } from '../sessionEnvironment.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
+import type { Session } from '../sessionRoot.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import { emitHookResponse, startHookProgressInterval } from './hookEvents.js'
 
@@ -26,10 +33,74 @@ export type PendingAsyncHook = {
   responseAttachmentSent: boolean
   shellCommand?: ShellCommand
   stopProgressInterval: () => void
+  capturedSession?: Session
 }
 
-// Global registry state
-const pendingHooks = new Map<string, PendingAsyncHook>()
+class HostAsyncHookRegistry {
+  pendingHooks = new Map<string, PendingAsyncHook>()
+}
+
+const hostAsyncHookRegistrySlot = new HostSlot<HostAsyncHookRegistry>(
+  () => new HostAsyncHookRegistry(),
+)
+const liveAsyncHookRegistries = new Set<WeakRef<HostAsyncHookRegistry>>()
+let exitHandlerRegistered = false
+
+function collectLiveRegistries(): HostAsyncHookRegistry[] {
+  const live: HostAsyncHookRegistry[] = []
+  for (const ref of liveAsyncHookRegistries) {
+    const reg = ref.deref()
+    if (reg === undefined) {
+      liveAsyncHookRegistries.delete(ref)
+    } else {
+      live.push(reg)
+    }
+  }
+  return live
+}
+
+function ensureProcessExitCleanupRegistered(): void {
+  if (exitHandlerRegistered) return
+  exitHandlerRegistered = true
+  if (typeof process !== 'undefined' && typeof process.once === 'function') {
+    process.once('exit', () => {
+      for (const reg of collectLiveRegistries()) {
+        for (const hook of reg.pendingHooks.values()) {
+          hook.stopProgressInterval()
+          if (
+            hook.shellCommand &&
+            hook.shellCommand.status !== 'killed' &&
+            hook.shellCommand.status !== 'completed' &&
+            typeof hook.shellCommand.kill === 'function'
+          ) {
+            hook.shellCommand.kill()
+          }
+        }
+        reg.pendingHooks.clear()
+      }
+    })
+  }
+}
+
+function trackLiveRegistry(registry: HostAsyncHookRegistry): void {
+  let found = false
+  for (const ref of liveAsyncHookRegistries) {
+    const deref = ref.deref()
+    if (deref === undefined) {
+      liveAsyncHookRegistries.delete(ref)
+    } else if (deref === registry) {
+      found = true
+    }
+  }
+  if (!found) {
+    liveAsyncHookRegistries.add(new WeakRef(registry))
+  }
+  ensureProcessExitCleanupRegistered()
+}
+
+function getHostAsyncHookRegistry(): HostAsyncHookRegistry {
+  return hostAsyncHookRegistrySlot.of(getBootstrapSessionHost())
+}
 
 export function registerPendingAsyncHook({
   processId,
@@ -52,25 +123,35 @@ export function registerPendingAsyncHook({
   toolName?: string
   pluginId?: string
 }): void {
+  const registry = getHostAsyncHookRegistry()
+  trackLiveRegistry(registry)
+  const capturedSession = getActiveSessionFromAls()
+  const runInCapturedSession = <T>(fn: () => T): T =>
+    capturedSession ? runWithSession(capturedSession, fn) : fn()
+
   const timeout = asyncResponse.asyncTimeout || 15000 // Default 15s
   logForDebugging(
     `Hooks: Registering async hook ${processId} (${hookName}) with timeout ${timeout}ms`,
   )
-  const stopProgressInterval = startHookProgressInterval({
-    hookId,
-    hookName,
-    hookEvent,
-    getOutput: async () => {
-      const taskOutput = pendingHooks.get(processId)?.shellCommand?.taskOutput
-      if (!taskOutput) {
-        return { stdout: '', stderr: '', output: '' }
-      }
-      const stdout = await taskOutput.getStdout()
-      const stderr = taskOutput.getStderr()
-      return { stdout, stderr, output: stdout + stderr }
-    },
-  })
-  pendingHooks.set(processId, {
+  const stopProgressInterval = runInCapturedSession(() =>
+    startHookProgressInterval({
+      hookId,
+      hookName,
+      hookEvent,
+      getOutput: async () =>
+        runInCapturedSession(async () => {
+          const taskOutput =
+            registry.pendingHooks.get(processId)?.shellCommand?.taskOutput
+          if (!taskOutput) {
+            return { stdout: '', stderr: '', output: '' }
+          }
+          const stdout = await taskOutput.getStdout()
+          const stderr = taskOutput.getStderr()
+          return { stdout, stderr, output: stdout + stderr }
+        }),
+    }),
+  )
+  registry.pendingHooks.set(processId, {
     processId,
     hookId,
     hookName,
@@ -83,10 +164,12 @@ export function registerPendingAsyncHook({
     responseAttachmentSent: false,
     shellCommand,
     stopProgressInterval,
+    capturedSession,
   })
 }
 
 export function getPendingAsyncHooks(): PendingAsyncHook[] {
+  const { pendingHooks } = getHostAsyncHookRegistry()
   return Array.from(pendingHooks.values()).filter(
     hook => !hook.responseAttachmentSent,
   )
@@ -102,16 +185,22 @@ async function finalizeHook(
   const stdout = taskOutput ? await taskOutput.getStdout() : ''
   const stderr = taskOutput?.getStderr() ?? ''
   hook.shellCommand?.cleanup()
-  emitHookResponse({
-    hookId: hook.hookId,
-    hookName: hook.hookName,
-    hookEvent: hook.hookEvent,
-    output: stdout + stderr,
-    stdout,
-    stderr,
-    exitCode,
-    outcome,
-  })
+  const emit = () =>
+    emitHookResponse({
+      hookId: hook.hookId,
+      hookName: hook.hookName,
+      hookEvent: hook.hookEvent,
+      output: stdout + stderr,
+      stdout,
+      stderr,
+      exitCode,
+      outcome,
+    })
+  if (hook.capturedSession) {
+    runWithSession(hook.capturedSession, emit)
+  } else {
+    emit()
+  }
 }
 
 // densable pmt: validate the full response first; on malformed responses retain
@@ -249,6 +338,7 @@ export async function checkForAsyncHookResponses(): Promise<
     exitCode?: number
   }[] = []
 
+  const { pendingHooks } = getHostAsyncHookRegistry()
   const pendingCount = pendingHooks.size
   logForDebugging(`Hooks: Found ${pendingCount} total hooks in registry`)
 
@@ -386,6 +476,7 @@ export async function checkForAsyncHookResponses(): Promise<
 }
 
 export function removeDeliveredAsyncHooks(processIds: string[]): void {
+  const { pendingHooks } = getHostAsyncHookRegistry()
   for (const processId of processIds) {
     const hook = pendingHooks.get(processId)
     if (hook && hook.responseAttachmentSent) {
@@ -397,6 +488,7 @@ export function removeDeliveredAsyncHooks(processIds: string[]): void {
 }
 
 export async function finalizePendingAsyncHooks(): Promise<void> {
+  const { pendingHooks } = getHostAsyncHookRegistry()
   const hooks = Array.from(pendingHooks.values())
   await Promise.all(
     hooks.map(async hook => {
@@ -420,6 +512,7 @@ export async function finalizePendingAsyncHooks(): Promise<void> {
 
 // Test utility function to clear all hooks
 export function clearAllAsyncHooks(): void {
+  const { pendingHooks } = getHostAsyncHookRegistry()
   for (const hook of pendingHooks.values()) {
     hook.stopProgressInterval()
   }

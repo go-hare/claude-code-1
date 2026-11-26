@@ -14,6 +14,7 @@ import type {
 } from './voiceStreamSTT.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logError } from '../utils/log.js'
+import { getBootstrapSessionHost, HostSlot } from '../utils/sessionHost.js'
 
 // Re-export FinalizeSource so useVoice can import from either module
 export type { FinalizeSource } from './voiceStreamSTT.js'
@@ -77,23 +78,33 @@ class AudioChunkQueue {
 
 // ─── Availability ────────────────────────────────────────────────────────
 
-let doubaoAvailable: boolean | null = null
+const doubaoAvailableHostSlot = new HostSlot<{
+  doubaoAvailable: boolean | null
+}>(() => ({
+  doubaoAvailable: null,
+}))
+
+function getDoubaoHostState(): { doubaoAvailable: boolean | null } {
+  return doubaoAvailableHostSlot.of(getBootstrapSessionHost())
+}
 
 export async function isDoubaoAvailable(): Promise<boolean> {
-  if (doubaoAvailable !== null) return doubaoAvailable
+  const hostState = getDoubaoHostState()
+  if (hostState.doubaoAvailable !== null) return hostState.doubaoAvailable
   try {
     await import('doubaoime-asr')
-    doubaoAvailable = true
+    hostState.doubaoAvailable = true
   } catch {
-    doubaoAvailable = false
+    hostState.doubaoAvailable = false
   }
-  return doubaoAvailable
+  return hostState.doubaoAvailable
 }
 
 // Synchronous check — returns cached result or optimistic true when
 // VOICE_PROVIDER=doubao is set and no cached result exists yet.
 // The actual import happens in connectDoubaoStream which reports errors.
 export function isDoubaoAvailableSync(): boolean {
+  const { doubaoAvailable } = getDoubaoHostState()
   if (doubaoAvailable !== null) return doubaoAvailable
   return true
 }

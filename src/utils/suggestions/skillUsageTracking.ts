@@ -1,12 +1,26 @@
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { emitSkillInvoked } from '../plugins/pluginMonitors.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 const SKILL_USAGE_DEBOUNCE_MS = 60_000
 const DAY_MS = 86_400_000
 
-// Process-lifetime debounce cache — avoids lock + read + parse on debounced
+// Host-lifetime debounce cache — avoids lock + read + parse on debounced
 // calls. Same pattern as lastConfigStatTime / globalConfigWriteCount in config.ts.
-const lastWriteBySkill = new Map<string, number>()
+const fallbackSkillUsageHost: object = {}
+const lastWriteBySkillByHost = new HostSlot<Map<string, number>>(
+  () => new Map(),
+)
+
+function getLastWriteBySkill(): Map<string, number> {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return lastWriteBySkillByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return lastWriteBySkillByHost.of(fallbackSkillUsageHost)
+}
 
 type SkillUsageEntry = { usageCount: number; lastUsedAt: number }
 
@@ -24,6 +38,7 @@ function lookupUsage(
  */
 export function recordSkillUsage(skillName: string): void {
   emitSkillInvoked(skillName)
+  const lastWriteBySkill = getLastWriteBySkill()
   const now = Date.now()
   const lastWrite = lastWriteBySkill.get(skillName)
   // The ranking algorithm uses a 7-day half-life, so sub-minute granularity

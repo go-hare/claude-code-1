@@ -4,6 +4,7 @@ import type {
   BetaToolUnion,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import { createHash } from 'crypto'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from 'src/constants/prompts.js'
 import { getSystemContext, getUserContext } from 'src/context.js'
 import { isAnalyticsDisabled } from 'src/services/analytics/config.js'
@@ -400,10 +401,25 @@ export async function toolToAPISchema(
   return schema as BetaTool
 }
 
-let loggedStrip = false
+const fallbackApiSession = { root: {} as object }
+const apiSessionStateBySession = new RootSessionSlot(() => ({
+  loggedStrip: false,
+}))
+
+function getApiSessionState(): { loggedStrip: boolean } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return apiSessionStateBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return apiSessionStateBySession.of(fallbackApiSession)
+}
+
 function logStripOnce(stripped: string[]): void {
-  if (loggedStrip) return
-  loggedStrip = true
+  const state = getApiSessionState()
+  if (state.loggedStrip) return
+  state.loggedStrip = true
   logForDebugging(
     `[betas] Stripped from tool schemas: [${stripped.join(', ')}] (CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1)`,
   )

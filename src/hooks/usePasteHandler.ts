@@ -12,6 +12,13 @@ import {
 } from '../utils/imagePaste.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
 import { getPlatform } from '../utils/platform.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  RootSessionSlot,
+  runWithSession,
+  type Session,
+} from '../utils/sessionRoot.js'
 
 const CLIPBOARD_CHECK_DEBOUNCE_MS = 50
 /**
@@ -90,7 +97,13 @@ export function splitPastedLinesForImages(pastedText: string): {
   return { lines, imagePaths }
 }
 
-const imageReadStartListeners = new Set<() => void>()
+const imageReadStartListenersBySession = new RootSessionSlot<
+  Map<() => void, Session | undefined>
+>(() => new Map())
+
+function getImageReadStartListeners(): Map<() => void, Session | undefined> {
+  return imageReadStartListenersBySession.of(getBootstrapSession())
+}
 
 /**
  * #147 (2.1.326): subscribe to synchronous notifications when an async image
@@ -98,16 +111,21 @@ const imageReadStartListeners = new Set<() => void>()
  * cursor anchor before subsequent keystrokes arrive.
  */
 export function subscribeImageReadStart(listener: () => void): () => void {
-  imageReadStartListeners.add(listener)
+  const listeners = getImageReadStartListeners()
+  listeners.set(listener, getActiveSessionFromAls())
   return () => {
-    imageReadStartListeners.delete(listener)
+    listeners.delete(listener)
   }
 }
 
 function notifyImageReadStart(cb?: () => void): void {
   cb?.()
-  for (const listener of imageReadStartListeners) {
-    listener()
+  for (const [listener, captured] of getImageReadStartListeners()) {
+    if (captured !== undefined && getActiveSessionFromAls() !== captured) {
+      runWithSession(captured, listener)
+    } else {
+      listener()
+    }
   }
 }
 

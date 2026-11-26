@@ -7,7 +7,7 @@
  */
 
 import React, { type PropsWithChildren, useContext, useInsertionEffect } from 'react';
-import instances from '../core/instances.js';
+import { Ns } from '../core/instances.js';
 import { DISABLE_MOUSE_TRACKING, enableMouseTracking, type MouseTrackingMode } from '../core/termio/dec.js';
 import { TerminalWriteContext } from '../hooks/useTerminalNotification.js';
 import Box from './Box.js';
@@ -38,7 +38,7 @@ export function MainScreenShell({ children, mouseTracking = true }: Props): Reac
   const trackingOn = mode !== 'off';
 
   useInsertionEffect(() => {
-    const ink = instances.get(process.stdout);
+    const ink = Ns().get(process.stdout);
     if (!writeRaw) return;
 
     writeRaw(enableMouseTracking(mode));

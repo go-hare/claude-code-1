@@ -11,6 +11,7 @@ import { getCwd } from './cwd.js'
 import { getFsImplementation } from './fsOperations.js'
 import { wrapScheduledTaskDisclaimer } from './scheduledTaskDisclaimer.js'
 import { normalizePathForConfigKey } from './path.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 
 export const AUTONOMY_DIR = join('.claude', 'autonomy')
 export const AUTONOMY_DIR_POSIX = '.claude/autonomy'
@@ -67,7 +68,20 @@ export type PreparedAutonomyTurn = {
   nowMs: number
 }
 
-const heartbeatTaskLastRunByKey = new Map<string, number>()
+const fallbackAutonomyAuthoritySession = { root: {} as object }
+const heartbeatTaskLastRunBySession = new RootSessionSlot<Map<string, number>>(
+  () => new Map(),
+)
+
+function getHeartbeatTaskLastRunByKey(): Map<string, number> {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return heartbeatTaskLastRunBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return heartbeatTaskLastRunBySession.of(fallbackAutonomyAuthoritySession)
+}
 
 function isPathWithinRoot(rootDir: string, currentDir: string): boolean {
   const delta = relative(rootDir, currentDir)
@@ -386,7 +400,7 @@ function collectDueHeartbeatTasks(
       continue
     }
     const key = heartbeatTaskKey(snapshot.rootDir, task)
-    const lastRunMs = heartbeatTaskLastRunByKey.get(key)
+    const lastRunMs = getHeartbeatTaskLastRunByKey().get(key)
     if (lastRunMs !== undefined && nowMs - lastRunMs < intervalMs) {
       continue
     }
@@ -400,16 +414,14 @@ function markHeartbeatTasksConsumed(
   tasks: HeartbeatAuthorityTask[],
   nowMs: number,
 ): void {
+  const map = getHeartbeatTaskLastRunByKey()
   for (const task of tasks) {
-    heartbeatTaskLastRunByKey.set(
-      heartbeatTaskKey(snapshot.rootDir, task),
-      nowMs,
-    )
+    map.set(heartbeatTaskKey(snapshot.rootDir, task), nowMs)
   }
 }
 
 export function resetAutonomyAuthorityForTests(): void {
-  heartbeatTaskLastRunByKey.clear()
+  getHeartbeatTaskLastRunByKey().clear()
 }
 
 export function hasAutonomyConfig(rootDir?: string): boolean {

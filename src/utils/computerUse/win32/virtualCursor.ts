@@ -15,6 +15,8 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
+import { registerCleanup } from '../../cleanupRegistry.js'
+import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 import { validateHwnd, getTmpDir } from './shared.js'
 
 const CURSOR_SIZE = 20
@@ -23,9 +25,79 @@ const CURSOR_COLOR_G = 50
 const CURSOR_COLOR_B = 50
 const CURSOR_OPACITY = 0.9
 
-let cursorProc: ReturnType<typeof Bun.spawn> | null = null
-let cursorStopFile: string | null = null
-let cursorScriptFile: string | null = null
+type VirtualCursorHostState = {
+  cursorProc: ReturnType<typeof Bun.spawn> | null
+  cursorStopFile: string | null
+  cursorScriptFile: string | null
+  unregisterCleanup: (() => void) | null
+}
+
+const virtualCursorHostSlot = new HostSlot<VirtualCursorHostState>(() => ({
+  cursorProc: null,
+  cursorStopFile: null,
+  cursorScriptFile: null,
+  unregisterCleanup: null,
+}))
+
+// Process-wide tracking of all hosts with a live virtual cursor subprocess so
+// process exit/SIGINT/SIGTERM cleans up every host's subprocess and temp files.
+const activeVirtualCursorStates = new Set<VirtualCursorHostState>()
+
+function getVirtualCursorHostState(): VirtualCursorHostState {
+  return virtualCursorHostSlot.of(getBootstrapSessionHost())
+}
+
+function hideVirtualCursorState(
+  state: VirtualCursorHostState,
+  immediate: boolean,
+): void {
+  const procToKill = state.cursorProc
+  const stopToDelete = state.cursorStopFile
+  const scriptToDelete = state.cursorScriptFile
+  const posToDelete = stopToDelete ? stopToDelete + '.pos' : null
+  state.cursorProc = null
+  state.cursorStopFile = null
+  state.cursorScriptFile = null
+  activeVirtualCursorStates.delete(state)
+  const unregister = state.unregisterCleanup
+  state.unregisterCleanup = null
+  unregister?.()
+
+  const forceCleanup = () => {
+    try {
+      procToKill?.kill()
+    } catch {}
+    try {
+      if (scriptToDelete) fs.unlinkSync(scriptToDelete)
+    } catch {}
+    try {
+      if (stopToDelete) fs.unlinkSync(stopToDelete)
+    } catch {}
+    try {
+      if (posToDelete) fs.unlinkSync(posToDelete)
+    } catch {}
+  }
+
+  if (immediate) {
+    if (stopToDelete) {
+      try {
+        fs.writeFileSync(stopToDelete, 'STOP', 'utf-8')
+      } catch {}
+    }
+    forceCleanup()
+    return
+  }
+
+  if (stopToDelete) {
+    try {
+      fs.writeFileSync(stopToDelete, 'STOP', 'utf-8')
+    } catch {}
+    const timer = setTimeout(forceCleanup, 2000)
+    timer.unref?.()
+  } else if (procToKill || scriptToDelete) {
+    forceCleanup()
+  }
+}
 
 function buildCursorScript(hwnd: string, stopFile: string): string {
   const stopFileEscaped = stopFile.replace(/\\/g, '\\\\')
@@ -190,15 +262,17 @@ $timer.Start()
 export function showVirtualCursor(hwnd: string): boolean {
   hwnd = validateHwnd(hwnd)
   hideVirtualCursor()
+  const state = getVirtualCursorHostState()
+  let scriptFile: string | null = null
   try {
     const tmpDir = getTmpDir()
     const ts = Date.now()
     const stopFile = path.join(tmpDir, `cu_vcursor_stop_${ts}`)
-    const scriptFile = path.join(tmpDir, `cu_vcursor_${ts}.ps1`)
+    scriptFile = path.join(tmpDir, `cu_vcursor_${ts}.ps1`)
     const script = buildCursorScript(hwnd, stopFile)
     fs.writeFileSync(scriptFile, script, 'utf-8')
 
-    cursorProc = Bun.spawn(
+    const proc = Bun.spawn(
       [
         'powershell',
         '-NoProfile',
@@ -209,10 +283,36 @@ export function showVirtualCursor(hwnd: string): boolean {
       ],
       { stdout: 'ignore', stderr: 'ignore' },
     )
-    cursorStopFile = stopFile
-    cursorScriptFile = scriptFile
+    state.cursorProc = proc
+    state.cursorStopFile = stopFile
+    state.cursorScriptFile = scriptFile
+    activeVirtualCursorStates.add(state)
+    state.unregisterCleanup?.()
+    state.unregisterCleanup = registerCleanup(() => {
+      hideVirtualCursorState(state, true)
+    })
+    if (proc.exited && typeof proc.exited.then === 'function') {
+      void proc.exited.then(
+        () => {
+          if (state.cursorProc === proc) {
+            hideVirtualCursorState(state, true)
+          }
+        },
+        () => {
+          if (state.cursorProc === proc) {
+            hideVirtualCursorState(state, true)
+          }
+        },
+      )
+    }
     return true
   } catch {
+    hideVirtualCursorState(state, true)
+    if (scriptFile) {
+      try {
+        fs.unlinkSync(scriptFile)
+      } catch {}
+    }
     return false
   }
 }
@@ -225,6 +325,7 @@ export function moveVirtualCursor(
   y: number,
   isClick: boolean = false,
 ): void {
+  const { cursorStopFile } = getVirtualCursorHostState()
   if (!cursorStopFile) return
   const posFile = cursorStopFile + '.pos'
   try {
@@ -236,33 +337,26 @@ export function moveVirtualCursor(
 }
 
 /**
- * Hide and destroy the virtual cursor.
+ * Hide and destroy the virtual cursor for the current host.
  */
 export function hideVirtualCursor(): void {
-  if (cursorStopFile) {
-    try {
-      fs.writeFileSync(cursorStopFile, 'STOP', 'utf-8')
-    } catch {}
-    setTimeout(() => {
-      try {
-        cursorProc?.kill()
-      } catch {}
-      try {
-        if (cursorScriptFile) fs.unlinkSync(cursorScriptFile)
-      } catch {}
-      try {
-        if (cursorStopFile) fs.unlinkSync(cursorStopFile)
-      } catch {}
-    }, 2000)
+  hideVirtualCursorState(getVirtualCursorHostState(), false)
+}
+
+/**
+ * Hide and immediately destroy all active virtual cursors across every host
+ * (used on process exit).
+ */
+export function hideAllVirtualCursors(): void {
+  for (const state of [...activeVirtualCursorStates]) {
+    hideVirtualCursorState(state, true)
   }
-  cursorProc = null
-  cursorStopFile = null
-  cursorScriptFile = null
+  hideVirtualCursorState(getVirtualCursorHostState(), true)
 }
 
 /**
  * Check if virtual cursor is active.
  */
 export function isVirtualCursorActive(): boolean {
-  return cursorProc !== null
+  return getVirtualCursorHostState().cursorProc !== null
 }

@@ -20,6 +20,7 @@ import { getAbortReasonMessage } from 'src/utils/abortController.js'
 import type { AgentContext } from 'src/utils/agentContext.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { type EffortValue, isUltracodeModeActive } from 'src/utils/effort.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionRoot.js'
 import { recordSubagentSpawnRefused } from 'src/utils/subagentSpawnLedger.js'
 import { createTaskRegistry } from 'src/utils/taskRegistry.js'
 
@@ -45,15 +46,28 @@ export const HAZEL_TRELLIS_FEATURE = 'tengu_hazel_trellis'
 /** densable tengu_amber_kestrel — concurrent cap kill-switch */
 export const AMBER_KESTREL_FEATURE = 'tengu_amber_kestrel'
 
-let totalAgentSpawns = 0
-let webSearchCalls = 0
-/**
- * Test-only process counter. Production takeConcurrencySlot writes
- * AppState.runningSubagents via densable Xm (`createTaskRegistry`).
- */
-let concurrentSubagents = 0
-/** densable Hts — cache GB hazel once resolved */
-let hazelTrellisCache: number | null = null
+type SessionSpawnCapState = {
+  totalAgentSpawns: number
+  webSearchCalls: number
+  /**
+   * Test-only fallback counter. Production takeConcurrencySlot writes
+   * AppState.runningSubagents via densable Xm (`createTaskRegistry`).
+   */
+  concurrentSubagents: number
+  /** densable Hts — cache GB hazel once resolved per root session */
+  hazelTrellisCache: number | null
+}
+
+const sessionSpawnCapSlot = new RootSessionSlot<SessionSpawnCapState>(() => ({
+  totalAgentSpawns: 0,
+  webSearchCalls: 0,
+  concurrentSubagents: 0,
+  hazelTrellisCache: null,
+}))
+
+function getSessionSpawnCapState(): SessionSpawnCapState {
+  return sessionSpawnCapSlot.of(getBootstrapSession())
+}
 
 /**
  * densable 2.1.224 #23 — CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION when set;
@@ -104,22 +118,23 @@ export function resolveMaxSubagentSpawnDepth(
     const n = Number(raw)
     if (Number.isFinite(n) && n >= 0) return Math.floor(n)
   }
-  if (hazelTrellisCache === null) {
+  const state = getSessionSpawnCapState()
+  if (state.hazelTrellisCache === null) {
     const r = getFeatureValue_CACHED_MAY_BE_STALE(
       HAZEL_TRELLIS_FEATURE,
       DEFAULT_MAX_SUBAGENT_SPAWN_DEPTH,
     )
-    hazelTrellisCache =
+    state.hazelTrellisCache =
       typeof r === 'number' && Number.isInteger(r) && r >= 1
         ? r
         : DEFAULT_MAX_SUBAGENT_SPAWN_DEPTH
   }
-  return hazelTrellisCache
+  return state.hazelTrellisCache
 }
 
 /** Test /clear helper — reset GB cache between cases */
 export function resetHazelTrellisCache(): void {
-  hazelTrellisCache = null
+  getSessionSpawnCapState().hazelTrellisCache = null
 }
 
 function parseSessionCap(raw: string | undefined, fallback: number): number {
@@ -132,34 +147,36 @@ function parseSessionCap(raw: string | undefined, fallback: number): number {
 // --- densable taskRegistry counter API ---
 
 export function getTotalAgentSpawns(): number {
-  return totalAgentSpawns
+  return getSessionSpawnCapState().totalAgentSpawns
 }
 
 export function incrementTotalAgentSpawns(): number {
-  totalAgentSpawns += 1
-  return totalAgentSpawns
+  const state = getSessionSpawnCapState()
+  state.totalAgentSpawns += 1
+  return state.totalAgentSpawns
 }
 
 export function resetTotalAgentSpawns(): void {
-  totalAgentSpawns = 0
+  getSessionSpawnCapState().totalAgentSpawns = 0
 }
 
 export function getWebSearchCalls(): number {
-  return webSearchCalls
+  return getSessionSpawnCapState().webSearchCalls
 }
 
 export function incrementWebSearchCalls(): number {
-  webSearchCalls += 1
-  return webSearchCalls
+  const state = getSessionSpawnCapState()
+  state.webSearchCalls += 1
+  return state.webSearchCalls
 }
 
 export function resetWebSearchCalls(): void {
-  webSearchCalls = 0
+  getSessionSpawnCapState().webSearchCalls = 0
 }
 
 /** densable getConcurrentSubagents */
 export function getConcurrentSubagents(): number {
-  return concurrentSubagents
+  return getSessionSpawnCapState().concurrentSubagents
 }
 
 type ConcurrencySlotOptions = {
@@ -207,18 +224,19 @@ export function takeConcurrencySlot(
       released = true
     }
   }
-  // No-arg: test-only module counter.
-  concurrentSubagents += 1
+  // No-arg: test-only root-session counter.
+  const state = getSessionSpawnCapState()
+  state.concurrentSubagents += 1
   let released = false
   return () => {
     if (released) return
     released = true
-    concurrentSubagents = Math.max(0, concurrentSubagents - 1)
+    state.concurrentSubagents = Math.max(0, state.concurrentSubagents - 1)
   }
 }
 
 export function resetConcurrentSubagents(): void {
-  concurrentSubagents = 0
+  getSessionSpawnCapState().concurrentSubagents = 0
 }
 
 /** densable /clear — all budgets */

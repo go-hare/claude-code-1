@@ -70,9 +70,17 @@ import {
   setOwnTaskListId,
 } from '../../utils/tasks.js'
 import { getCurrentWorktreeSession } from '../../utils/worktree.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { clearSessionCaches } from './caches.js'
 
-let activeClearSessionStartController: AbortController | null = null
+const clearSessionStartSlot = new RootSessionSlot<{
+  controller: AbortController | null
+}>(() => ({
+  controller: null,
+}))
 
 /**
  * Official 2.1.328 (#393): move the session-scoped task list directory when
@@ -716,17 +724,19 @@ export async function clearConversation({
 
   // Execute classic SessionStart settings hooks after clearing (function-hook
   // `session.start` does not fire on `'clear'`, per gold `claude-code.d.ts`).
+  const clearSlot = clearSessionStartSlot.of(getBootstrapSession())
+  const activeClearSessionStartController = clearSlot.controller
   activeClearSessionStartController?.abort()
   const orphanedController = new AbortController()
-  activeClearSessionStartController = orphanedController
+  clearSlot.controller = orphanedController
   let hookMessages: Awaited<ReturnType<typeof processSessionStartHooks>>
   try {
     hookMessages = await processSessionStartHooks('clear', {
       orphaned: orphanedController.signal,
     })
   } finally {
-    if (activeClearSessionStartController === orphanedController) {
-      activeClearSessionStartController = null
+    if (clearSlot.controller === orphanedController) {
+      clearSlot.controller = null
     }
   }
 

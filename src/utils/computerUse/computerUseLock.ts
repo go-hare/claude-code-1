@@ -6,12 +6,26 @@ import { logForDebugging } from '../../utils/debug.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { getErrnoCode } from '../errors.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  runWithSession,
+} from '../sessionHost.js'
 
 const LOCK_FILENAME = 'computer-use.lock'
 
-// Holds the unregister function for the shutdown cleanup handler.
+// Holds the unregister function for the shutdown cleanup handler per host.
 // Set when the lock is acquired, cleared when released.
-let unregisterCleanup: (() => void) | undefined
+const computerUseLockHostSlot = new HostSlot<{
+  unregisterCleanup: (() => void) | undefined
+}>(() => ({
+  unregisterCleanup: undefined,
+}))
+
+function getLockHostState(): { unregisterCleanup: (() => void) | undefined } {
+  return computerUseLockHostSlot.of(getBootstrapSessionHost())
+}
 
 type ComputerUseLock = {
   readonly sessionId: string
@@ -92,9 +106,18 @@ async function tryCreateExclusive(lock: ComputerUseLock): Promise<boolean> {
  * a tool call is in progress).
  */
 function registerLockCleanup(): void {
-  unregisterCleanup?.()
-  unregisterCleanup = registerCleanup(async () => {
-    await releaseComputerUseLock()
+  const hostState = getLockHostState()
+  hostState.unregisterCleanup?.()
+  const capturedSession = getActiveSessionFromAls()
+  hostState.unregisterCleanup = registerCleanup(async () => {
+    if (
+      capturedSession !== undefined &&
+      getActiveSessionFromAls() !== capturedSession
+    ) {
+      await runWithSession(capturedSession, () => releaseComputerUseLock())
+    } else {
+      await releaseComputerUseLock()
+    }
   })
 }
 
@@ -128,7 +151,7 @@ export async function checkComputerUseLock(): Promise<CheckResult> {
  * non-CU turns don't touch disk.
  */
 export function isLockHeldLocally(): boolean {
-  return unregisterCleanup !== undefined
+  return getLockHostState().unregisterCleanup !== undefined
 }
 
 /**
@@ -200,8 +223,9 @@ export async function tryAcquireComputerUseLock(): Promise<AcquireResult> {
  * exit notifications on this. Idempotent: subsequent calls return `false`.
  */
 export async function releaseComputerUseLock(): Promise<boolean> {
-  unregisterCleanup?.()
-  unregisterCleanup = undefined
+  const hostState = getLockHostState()
+  hostState.unregisterCleanup?.()
+  hostState.unregisterCleanup = undefined
 
   const existing = await readLock()
   if (!existing || existing.sessionId !== getSessionId()) return false

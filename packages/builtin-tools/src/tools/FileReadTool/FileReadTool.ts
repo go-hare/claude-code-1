@@ -58,6 +58,7 @@ import {
 } from 'src/utils/imageResizer.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logError } from 'src/utils/log.js'
+import { getBootstrapSession, RootSessionSlot } from 'src/utils/sessionHost.js'
 import { isAutoMemFile } from 'src/utils/memoryFileDetection.js'
 import { createUserMessage } from 'src/utils/messages.js'
 import {
@@ -166,15 +167,18 @@ function getAlternateScreenshotPath(filePath: string): string | undefined {
 
 // File read listeners - allows other services to be notified when files are read
 type FileReadListener = (filePath: string, content: string) => void
-const fileReadListeners: FileReadListener[] = []
+const fileReadListenersBySession = new RootSessionSlot<FileReadListener[]>(
+  () => [],
+)
 
 export function registerFileReadListener(
   listener: FileReadListener,
 ): () => void {
-  fileReadListeners.push(listener)
+  const listeners = fileReadListenersBySession.of(getBootstrapSession())
+  listeners.push(listener)
   return () => {
-    const i = fileReadListeners.indexOf(listener)
-    if (i >= 0) fileReadListeners.splice(i, 1)
+    const i = listeners.indexOf(listener)
+    if (i >= 0) listeners.splice(i, 1)
   }
 }
 
@@ -1532,8 +1536,11 @@ async function callInner(
 
   // Snapshot before iterating — a listener that unsubscribes mid-callback
   // would splice the live array and skip the next listener.
-  for (const listener of fileReadListeners.slice()) {
-    listener(resolvedFilePath, outContent)
+  const listeners = fileReadListenersBySession.peek(getBootstrapSession())
+  if (listeners) {
+    for (const listener of listeners.slice()) {
+      listener(resolvedFilePath, outContent)
+    }
   }
 
   const data = {

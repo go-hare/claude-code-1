@@ -202,6 +202,84 @@ import { resolveAgentTools } from './agentToolUtils.js'
 import { FORK_SUBAGENT_TYPE } from './forkSubagent.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
 import { omitClaudeMdUserContext } from 'src/utils/omitClaudeMd.js'
+import {
+  exitSessionContext,
+  getActiveSessionFromAls,
+  getActiveSubconversationFromAls,
+  runWithSession,
+  runWithSubconversationContext,
+  type Session,
+  type SubconversationAlsContext,
+} from 'src/utils/sessionRoot.js'
+
+function runInAgentCapturedSession<T>(
+  session: Session | undefined,
+  subconversation: SubconversationAlsContext | undefined,
+  fn: () => T,
+): T {
+  if (session === undefined) {
+    if (subconversation === undefined) {
+      return fn()
+    }
+    if (
+      getActiveSessionFromAls() === undefined &&
+      getActiveSubconversationFromAls() === subconversation
+    ) {
+      return fn()
+    }
+    return exitSessionContext(() =>
+      runWithSubconversationContext(subconversation, fn),
+    )
+  }
+  if (
+    getActiveSessionFromAls() === session &&
+    getActiveSubconversationFromAls() === subconversation
+  ) {
+    return fn()
+  }
+  return runWithSession(session, () =>
+    subconversation !== undefined
+      ? runWithSubconversationContext(subconversation, fn)
+      : fn(),
+  )
+}
+
+function bindAgentGeneratorToSession<T, TNext = unknown>(
+  createGen: () => AsyncGenerator<T, void, TNext>,
+  session: Session | undefined,
+  subconversation: SubconversationAlsContext | undefined,
+): AsyncGenerator<T, void, TNext> {
+  if (session === undefined && subconversation === undefined) {
+    return createGen()
+  }
+  const inner = runInAgentCapturedSession(session, subconversation, createGen)
+  const bound: AsyncGenerator<T, void, TNext> = {
+    next(...args: [] | [TNext]) {
+      return runInAgentCapturedSession(session, subconversation, () =>
+        inner.next(...args),
+      )
+    },
+    return(value: void | PromiseLike<void>) {
+      return runInAgentCapturedSession(session, subconversation, () =>
+        inner.return(value),
+      )
+    },
+    throw(e: unknown) {
+      return runInAgentCapturedSession(session, subconversation, () =>
+        inner.throw(e),
+      )
+    },
+    [Symbol.asyncIterator]() {
+      return bound
+    },
+    async [Symbol.asyncDispose]() {
+      await runInAgentCapturedSession(session, subconversation, () =>
+        inner.return(undefined),
+      )
+    },
+  }
+  return bound
+}
 
 export type AgentInlineMcpGateReason =
   | 'plugin-only-restricted'
@@ -1238,48 +1316,7 @@ export function sanitizeToolUseContextForResumeWake(
   }
 }
 
-export async function* runAgent({
-  agentDefinition,
-  promptMessages,
-  toolUseContext,
-  canUseTool,
-  isAsync,
-  canShowPermissionPrompts,
-  forkContextMessages,
-  querySource,
-  override,
-  model,
-  isResume,
-  maxTurns,
-  preserveToolUseResults,
-  availableTools,
-  allowedTools,
-  onCacheSafeParams,
-  contentReplacementState,
-  useExactTools,
-  webFetchReadmissionAllowed = true,
-  worktreePath,
-  worktreeBranch,
-  cwd,
-  spawnMode,
-  description,
-  name,
-  toolUseId,
-  parentAgentId,
-  spawnDepth,
-  taskKind,
-  teamName,
-  color,
-  planModeRequired,
-  customAgentType,
-  transcriptSubdir,
-  onQueryProgress,
-  onStreamTokenEstimate,
-  handbackOptIn,
-  handbackTool,
-  forkedSkillName,
-  sameCwdWriteCapableSibling,
-}: {
+type RunAgentParams = {
   agentDefinition: AgentDefinition
   promptMessages: Message[]
   toolUseContext: ToolUseContext
@@ -1395,7 +1432,67 @@ export async function* runAgent({
   forkedSkillName?: string
   /** densable ALo — inject CLo before the TRe sharesCwd stamp. */
   sameCwdWriteCapableSibling?: boolean
-}): AsyncGenerator<Message | RunAgentSpinnerMode, void> {
+  /** Optional isolated Session bound to this subagent run across yields and detached wakeups. */
+  session?: Session
+}
+
+export function runAgent(
+  params: RunAgentParams,
+): AsyncGenerator<Message | RunAgentSpinnerMode, void> {
+  const capturedSession = params.session ?? getActiveSessionFromAls()
+  const capturedSubconversation =
+    params.session !== undefined ? undefined : getActiveSubconversationFromAls()
+  return bindAgentGeneratorToSession(
+    () => runAgentInner(params),
+    capturedSession,
+    capturedSubconversation,
+  )
+}
+
+async function* runAgentInner({
+  agentDefinition,
+  promptMessages,
+  toolUseContext,
+  canUseTool,
+  isAsync,
+  canShowPermissionPrompts,
+  forkContextMessages,
+  querySource,
+  override,
+  model,
+  isResume,
+  maxTurns,
+  preserveToolUseResults,
+  availableTools,
+  allowedTools,
+  onCacheSafeParams,
+  contentReplacementState,
+  useExactTools,
+  webFetchReadmissionAllowed = true,
+  worktreePath,
+  worktreeBranch,
+  cwd,
+  spawnMode,
+  description,
+  name,
+  toolUseId,
+  parentAgentId,
+  spawnDepth,
+  taskKind,
+  teamName,
+  color,
+  planModeRequired,
+  customAgentType,
+  transcriptSubdir,
+  onQueryProgress,
+  onStreamTokenEstimate,
+  handbackOptIn,
+  handbackTool,
+  forkedSkillName,
+  sameCwdWriteCapableSibling,
+}: RunAgentParams): AsyncGenerator<Message | RunAgentSpinnerMode, void> {
+  const boundAgentSession = getActiveSessionFromAls()
+  const boundAgentSubconversation = getActiveSubconversationFromAls()
   // Track subagent usage for feature discovery
 
   // Official 2.1.328 (`T0o`, `chunk@303426333.js @14729`): on wake/resume,
@@ -1508,7 +1605,7 @@ export async function* runAgent({
   // For async agents, also set shouldAvoidPermissionPrompts since they can't show UI
   // Live-read selectedAgent.permissionMode so local plan_approval can exit plan
   // mid-run (SendMessage stamps task.selectedAgent.permissionMode).
-  const agentGetAppState = () => {
+  const computeAgentAppState = () => {
     const state = toolUseContext.getAppState()
     let toolPermissionContext = state.toolPermissionContext
 
@@ -1682,6 +1779,12 @@ export async function* runAgent({
       sessionEffort,
     }
   }
+  const agentGetAppState = () =>
+    runInAgentCapturedSession(
+      boundAgentSession,
+      boundAgentSubconversation,
+      computeAgentAppState,
+    )
 
   // Official observer tool pool densable — ObserverReport only when this
   // run is an observer agent (querySource agent:observer:*).
@@ -2066,21 +2169,29 @@ export async function* runAgent({
       toolUseContext.options.appendSubagentSystemPrompt,
     tools: allTools,
     ...(!useExactTools && {
-      refreshTools: createSubagentRefreshTools(
-        allTools,
-        () => toolUseContext.getAppState().mcp.tools,
-        () =>
-          toolUseContext.options.refreshTools?.() ??
-          toolUseContext.options.tools,
-        candidates =>
-          resolveAgentTools(
-            agentDefinition,
-            candidates,
-            isAsync,
-            false,
-            isObserverAgent,
-          ).resolvedTools,
-      ),
+      refreshTools: (() => {
+        const refreshSubagentTools = createSubagentRefreshTools(
+          allTools,
+          () => toolUseContext.getAppState().mcp.tools,
+          () =>
+            toolUseContext.options.refreshTools?.() ??
+            toolUseContext.options.tools,
+          candidates =>
+            resolveAgentTools(
+              agentDefinition,
+              candidates,
+              isAsync,
+              false,
+              isObserverAgent,
+            ).resolvedTools,
+        )
+        return () =>
+          runInAgentCapturedSession(
+            boundAgentSession,
+            boundAgentSubconversation,
+            refreshSubagentTools,
+          )
+      })(),
     }),
     commands: [],
     debug: toolUseContext.options.debug,

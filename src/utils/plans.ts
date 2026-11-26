@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto'
 import { constants as fsConstants } from 'fs'
 import { lstat, mkdir, open, readFile, realpath } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join, resolve, sep } from 'path'
 import type { AgentId, SessionId } from 'src/types/ids.js'
 import type { LogOption } from 'src/types/logs.js'
@@ -25,6 +24,7 @@ import { getEnvironmentKind } from './filePersistence/outputsScanner.js'
 import { getFsImplementation } from './fsOperations.js'
 import { logError } from './log.js'
 import { getPlatform } from './platform.js'
+import { getBootstrapSession, RootSessionSlot } from './sessionHost.js'
 import { getInitialSettings } from './settings/settings.js'
 import { generateWordSlug } from './words.js'
 
@@ -71,20 +71,13 @@ export function clearPlanSlug(sessionId?: SessionId): void {
 }
 
 /**
- * Clear ALL plan slug entries (all sessions).
+ * Clear ALL plan slug entries (for the active root session).
  * Use this on /clear to free sub-session slug entries.
  */
 export function clearAllPlanSlugs(): void {
   getPlanSlugCache().clear()
-  slugsInDefault.clear()
+  getPlansSessionState().slugsInDefault.clear()
 }
-
-/**
- * 2.1.325 #2268 (SEA `kl.slugsInDefault` @284739188):
- * Plan slugs that fell back to `~/.claude/plans` because a configured
- * `plansDirectory` could not accept the approved plan edit.
- */
-const slugsInDefault = new Set<string>()
 
 /**
  * 2.1.323 #2014 (SEA `wl` / `Rl` / `Yo` / `El` / `Pl` @284739743):
@@ -101,7 +94,78 @@ type VettedPlansRoot = {
   plansDir: string
 }
 
-let vettedCustomPlansRoot: VettedPlansRoot | undefined
+function resolvePlansDirCacheKey(key: unknown): unknown {
+  return key === undefined ? getCwd() : key
+}
+
+class SessionPlansDirCache extends Map<unknown, string> {
+  #state: PlansSessionState
+  constructor(state: PlansSessionState) {
+    super()
+    this.#state = state
+  }
+  override get(key: unknown): string | undefined {
+    return super.get(resolvePlansDirCacheKey(key))
+  }
+  override has(key: unknown): boolean {
+    return super.has(resolvePlansDirCacheKey(key))
+  }
+  override set(key: unknown, value: string): this {
+    return super.set(resolvePlansDirCacheKey(key), value)
+  }
+  override delete(key: unknown): boolean {
+    const resolvedKey = resolvePlansDirCacheKey(key)
+    if (typeof resolvedKey === 'string') {
+      this.#state.vettedCustomPlansRoots.delete(resolvedKey)
+    }
+    return super.delete(resolvedKey)
+  }
+  override clear(): void {
+    this.#state.vettedCustomPlansRoots.clear()
+    this.#state.slugsInDefault.clear()
+    super.clear()
+  }
+}
+
+class PlansSessionState {
+  plansDirCache: SessionPlansDirCache
+  vettedCustomPlansRoots = new Map<string, VettedPlansRoot>()
+  /**
+   * 2.1.325 #2268 (SEA `kl.slugsInDefault` @284739188):
+   * Plan slugs that fell back to `~/.claude/plans` because a configured
+   * `plansDirectory` could not accept the approved plan edit.
+   */
+  slugsInDefault = new Set<string>()
+  planFileCache: Map<string, string | null> | null = null
+  planFileBackend: PlanFileBackend | null = null
+
+  constructor() {
+    this.plansDirCache = new SessionPlansDirCache(this)
+  }
+}
+
+const fallbackPlansRootObj: object = {}
+const fallbackPlansSession = { root: fallbackPlansRootObj }
+
+function getActivePlansSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) {
+      return session
+    }
+  } catch {
+    // Fall back to module-local sentinel if sessionHost is mocked
+  }
+  return fallbackPlansSession
+}
+
+const plansStateBySession = new RootSessionSlot<PlansSessionState>(
+  () => new PlansSessionState(),
+)
+
+function getPlansSessionState(): PlansSessionState {
+  return plansStateBySession.of(getActivePlansSession())
+}
 
 function isCanonicalPathWithin(
   candidate: string,
@@ -134,17 +198,17 @@ function isDanglingSymlinkSync(targetPath: string): boolean {
  * realpath stays inside `canonicalCwd` without traversing a dangling symlink.
  */
 export function isPlansDirectoryContained(
-  resolvedPath: string,
+  resolved: string,
   cwd: string,
   canonicalCwd: string,
 ): boolean {
-  if (resolvedPath !== cwd && !resolvedPath.startsWith(cwd + sep)) {
+  if (resolved !== cwd && !resolved.startsWith(cwd + sep)) {
     return false
   }
-  if (getPlatform() !== 'windows' && resolvedPath.includes('\\')) {
+  if (getPlatform() !== 'windows' && resolved.includes('\\')) {
     return false
   }
-  let cursor = resolvedPath
+  let cursor = resolved
   for (;;) {
     const real = tryRealpathSync(cursor)
     if (real !== null) {
@@ -176,7 +240,7 @@ export async function assertPlanWriteContained(
   if (parentDir === defaultDir) {
     return null
   }
-  const vetted = vettedCustomPlansRoot
+  const vetted = getPlansSessionState().vettedCustomPlansRoots.get(getCwd())
   if (!vetted || parentDir !== vetted.plansDir) {
     throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
   }
@@ -241,20 +305,19 @@ export async function writePlanFileContained(
   }
 }
 
-// Memoized: called from render bodies (FileReadTool/FileEditTool/FileWriteTool UI.tsx)
+// Memoized per RootSession: called from render bodies (FileReadTool/FileEditTool/FileWriteTool UI.tsx)
 // and permission checks. Inputs (initial settings + cwd) are fixed at startup, so the
 // mkdirSync result is stable for the session. Without memoization, each rendered tool
 // message triggers a mkdirSync syscall (regressed in #20005).
-const getPlansDirectoryMemoized = memoize(function getPlansDirectory(): string {
+function computePlansDirectory(state: PlansSessionState, cwd: string): string {
   const settings = getInitialSettings()
   const settingsDir = settings.plansDirectory
   const defaultPlansPath = join(getClaudeConfigHomeDir(), 'plans')
   let plansPath: string
-  vettedCustomPlansRoot = undefined
+  state.vettedCustomPlansRoots.delete(cwd)
 
   if (settingsDir) {
     // Settings.json (relative to project root)
-    const cwd = getCwd()
     const resolved = resolve(cwd, settingsDir)
     const canonicalCwd = tryRealpathSync(cwd)
 
@@ -265,7 +328,11 @@ const getPlansDirectoryMemoized = memoize(function getPlansDirectory(): string {
       canonicalCwd !== null &&
       isPlansDirectoryContained(resolved, cwd, canonicalCwd)
     ) {
-      vettedCustomPlansRoot = { cwd, canonicalCwd, plansDir: resolved }
+      state.vettedCustomPlansRoots.set(cwd, {
+        cwd,
+        canonicalCwd,
+        plansDir: resolved,
+      })
       plansPath = resolved
     } else {
       logError(
@@ -282,14 +349,11 @@ const getPlansDirectoryMemoized = memoize(function getPlansDirectory(): string {
 
   // Ensure directory exists (re-verify containment before creating custom dir)
   try {
+    const vetted = state.vettedCustomPlansRoots.get(cwd)
     if (
-      vettedCustomPlansRoot &&
-      plansPath === vettedCustomPlansRoot.plansDir &&
-      !isPlansDirectoryContained(
-        plansPath,
-        vettedCustomPlansRoot.cwd,
-        vettedCustomPlansRoot.canonicalCwd,
-      )
+      vetted &&
+      plansPath === vetted.plansDir &&
+      !isPlansDirectoryContained(plansPath, vetted.cwd, vetted.canonicalCwd)
     ) {
       throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
     }
@@ -299,26 +363,51 @@ const getPlansDirectoryMemoized = memoize(function getPlansDirectory(): string {
   }
 
   return plansPath
-})
+}
 
-export const getPlansDirectory = Object.assign(
-  function getPlansDirectory(slug?: string): string {
-    const activeSlug = slug ?? getPlanSlugCache().get(getSessionId())
-    if (activeSlug !== undefined && slugsInDefault.has(activeSlug)) {
-      return join(getClaudeConfigHomeDir(), 'plans')
-    }
-    return getPlansDirectoryMemoized()
-  },
-  {
-    cache: {
-      clear() {
-        vettedCustomPlansRoot = undefined
-        slugsInDefault.clear()
-        getPlansDirectoryMemoized.cache.clear?.()
-      },
+function getPlansDirectoryMemoized(): string {
+  const state = getPlansSessionState()
+  const cwd = getCwd()
+  if (state.plansDirCache.has(cwd)) {
+    return state.plansDirCache.get(cwd)!
+  }
+  const computed = computePlansDirectory(state, cwd)
+  state.plansDirCache.set(cwd, computed)
+  return computed
+}
+
+function createGetPlansDirectory() {
+  const fn = Object.assign(
+    function getPlansDirectory(slug?: string): string {
+      const state = getPlansSessionState()
+      const activeSlug = slug ?? getPlanSlugCache().get(getSessionId())
+      if (activeSlug !== undefined && state.slugsInDefault.has(activeSlug)) {
+        return join(getClaudeConfigHomeDir(), 'plans')
+      }
+      return getPlansDirectoryMemoized()
     },
-  },
-)
+    {
+      cache: new Map<unknown, string>(),
+    },
+  )
+  Object.defineProperty(fn, 'cache', {
+    configurable: true,
+    enumerable: true,
+    get(): Map<unknown, string> {
+      return getPlansSessionState().plansDirCache
+    },
+    set(next: Map<unknown, string>): void {
+      const cache = getPlansSessionState().plansDirCache
+      cache.clear()
+      for (const [k, v] of next) {
+        cache.set(k, v)
+      }
+    },
+  })
+  return fn
+}
+
+export const getPlansDirectory = createGetPlansDirectory()
 
 /**
  * 2.1.325 #2268 (SEA `N6s` @284740124):
@@ -381,7 +470,7 @@ export async function persistApprovedPlanEdit(
       }
     }
 
-    slugsInDefault.add(fallbackSlug)
+    getPlansSessionState().slugsInDefault.add(fallbackSlug)
     setPlanSlug(getSessionId(), fallbackSlug)
     notePlanFileWritten(fallbackPath, content)
     return {
@@ -423,9 +512,6 @@ export type PlanFileBackend = {
   writeText?: (key: string, content: string) => Promise<void>
 }
 
-let planFileCache: Map<string, string | null> | null = null
-let planFileBackend: PlanFileBackend | null = null
-
 function planCacheKeyForPath(filePath: string): string | null {
   const plansDir = getPlansDirectory()
   if (dirname(filePath) !== plansDir) return null
@@ -433,24 +519,27 @@ function planCacheKeyForPath(filePath: string): string | null {
 }
 
 export function activatePlanFileCache(backend: PlanFileBackend): void {
-  planFileCache ??= new Map()
-  planFileBackend = backend
+  const state = getPlansSessionState()
+  state.planFileCache ??= new Map()
+  state.planFileBackend = backend
 }
 
 export function notePlanFileWritten(filePath: string, content: string): void {
   const key = planCacheKeyForPath(filePath)
   if (!key) return
-  planFileCache ??= new Map()
-  planFileCache.set(key, content)
-  if (planFileBackend?.writeText) {
-    void planFileBackend.writeText(key, content).catch(() => {})
+  const state = getPlansSessionState()
+  state.planFileCache ??= new Map()
+  state.planFileCache.set(key, content)
+  if (state.planFileBackend?.writeText) {
+    void state.planFileBackend.writeText(key, content).catch(() => {})
   }
 }
 
 export function notePlanFileForgotten(filePath: string): void {
   const key = planCacheKeyForPath(filePath)
-  if (!key || !planFileCache) return
-  planFileCache.delete(key)
+  const state = getPlansSessionState()
+  if (!key || !state.planFileCache) return
+  state.planFileCache.delete(key)
 }
 
 export async function hydratePlanFromBackend(
@@ -458,12 +547,13 @@ export async function hydratePlanFromBackend(
 ): Promise<string | null> {
   const filePath = getPlanFilePath(agentId)
   const key = planCacheKeyForPath(filePath)
-  if (!key || !planFileBackend?.readText) return null
+  const state = getPlansSessionState()
+  if (!key || !state.planFileBackend?.readText) return null
   try {
-    const content = await planFileBackend.readText(key)
+    const content = await state.planFileBackend.readText(key)
     if (typeof content === 'string') {
-      planFileCache ??= new Map()
-      planFileCache.set(key, content)
+      state.planFileCache ??= new Map()
+      state.planFileCache.set(key, content)
       return content
     }
   } catch {
@@ -473,8 +563,9 @@ export async function hydratePlanFromBackend(
 }
 
 export function resetPlanFileCacheForTests(): void {
-  planFileCache = null
-  planFileBackend = null
+  const state = getPlansSessionState()
+  state.planFileCache = null
+  state.planFileBackend = null
 }
 
 export function getPlan(agentId?: AgentId): string | null {
@@ -484,7 +575,9 @@ export function getPlan(agentId?: AgentId): string | null {
   } catch (error) {
     if (isENOENT(error)) {
       const key = planCacheKeyForPath(filePath)
-      const cached = key ? planFileCache?.get(key) : undefined
+      const cached = key
+        ? getPlansSessionState().planFileCache?.get(key)
+        : undefined
       if (typeof cached === 'string') {
         return cached
       }

@@ -1,13 +1,16 @@
+import { InkHostSlot } from './instances.js'
 import { stringWidth } from './stringWidth.js'
 
 // During streaming, text grows but completed lines are immutable.
 // Caching stringWidth per-line avoids re-measuring hundreds of
 // unchanged lines on every token (~50x reduction in stringWidth calls).
-const cache = new Map<string, number>()
+// Scoped per host because stringWidth depends on per-host emoji width calibration.
+const lineWidthCacheSlot = new InkHostSlot<Map<string, number>>(() => new Map())
 
 const MAX_CACHE_SIZE = 4096
 
 export function lineWidth(line: string): number {
+  const cache = lineWidthCacheSlot.of()
   const cached = cache.get(line)
   if (cached !== undefined) return cached
 
@@ -28,7 +31,7 @@ export function lineWidth(line: string): number {
  * when terminal emoji width calibration is installed or updated.
  */
 export function resetLineWidthCache(): void {
-  cache.clear()
+  lineWidthCacheSlot.peek()?.clear()
 }
 
 export { resetLineWidthCache as reset }

@@ -1,13 +1,17 @@
-import type { Attachment } from '../../utils/attachments.js'
-import type { Message } from '../../types/message.js'
 import type { Tools } from '../../Tool.js'
+import type { Message } from '../../types/message.js'
+import type { Attachment } from '../../utils/attachments.js'
+import { logForDebugging } from '../../utils/debug.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
+import { extractQueryFromMessages } from '../skillSearch/prefetch.js'
 import {
   getToolIndex,
-  searchTools,
   type SearchExtraToolsResult,
+  searchTools,
 } from './toolIndex.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { extractQueryFromMessages } from '../skillSearch/prefetch.js'
 
 export type ToolDiscoveryResult = {
   name: string
@@ -21,32 +25,78 @@ export type ToolDiscoveryResult = {
 
 const SESSION_TRACKING_MAX = 500
 const SESSION_TRACKING_TRIM_TO = 400
-const discoveredToolsThisSession = new Set<string>()
 
-// Latest prefetch result for UI subscription (useSyncExternalStore)
-let latestPrefetchResult: ToolDiscoveryResult[] = []
-const prefetchListeners = new Set<() => void>()
+type SearchExtraToolsPrefetchSessionState = {
+  discoveredToolsThisSession: Set<string>
+  latestPrefetchResult: ToolDiscoveryResult[]
+  prefetchListeners: Set<() => void>
+}
 
-function notifyPrefetchListeners(): void {
-  for (const listener of prefetchListeners) listener()
+const fallbackSearchExtraToolsSession: { readonly root: object } = {
+  get root() {
+    return fallbackSearchExtraToolsSession
+  },
+}
+
+function getActiveSearchExtraToolsSession(): { readonly root: object } {
+  try {
+    const session = getBootstrapSession()
+    if (
+      session !== null &&
+      typeof session === 'object' &&
+      session.root !== null &&
+      typeof session.root === 'object'
+    ) {
+      return session
+    }
+  } catch {
+    // Fall back when sessionHost is mocked in tests
+  }
+  return fallbackSearchExtraToolsSession
+}
+
+const searchExtraToolsPrefetchSlot =
+  new RootSessionSlot<SearchExtraToolsPrefetchSessionState>(() => ({
+    discoveredToolsThisSession: new Set<string>(),
+    latestPrefetchResult: [],
+    prefetchListeners: new Set<() => void>(),
+  }))
+
+function getSearchExtraToolsPrefetchState(): SearchExtraToolsPrefetchSessionState {
+  return searchExtraToolsPrefetchSlot.of(getActiveSearchExtraToolsSession())
+}
+
+function notifyPrefetchListeners(
+  state: SearchExtraToolsPrefetchSessionState = getSearchExtraToolsPrefetchState(),
+): void {
+  for (const listener of state.prefetchListeners) listener()
 }
 
 export function subscribeToSearchExtraToolsPrefetch(
   listener: () => void,
 ): () => void {
-  prefetchListeners.add(listener)
+  const state = getSearchExtraToolsPrefetchState()
+  state.prefetchListeners.add(listener)
   return () => {
-    prefetchListeners.delete(listener)
+    state.prefetchListeners.delete(listener)
   }
 }
 
 export function getSearchExtraToolsPrefetchSnapshot(): ToolDiscoveryResult[] {
-  return latestPrefetchResult
+  return getSearchExtraToolsPrefetchState().latestPrefetchResult
 }
 
 export function clearSearchExtraToolsPrefetchResults(): void {
-  latestPrefetchResult = []
-  notifyPrefetchListeners()
+  const state = getSearchExtraToolsPrefetchState()
+  state.latestPrefetchResult = []
+  notifyPrefetchListeners(state)
+}
+
+export function clearSearchExtraToolsSessionTrackingForTests(): void {
+  const state = getSearchExtraToolsPrefetchState()
+  state.discoveredToolsThisSession.clear()
+  state.latestPrefetchResult = []
+  notifyPrefetchListeners(state)
 }
 
 function addBoundedSessionEntry(set: Set<string>, value: string): void {
@@ -100,16 +150,17 @@ export async function startSearchExtraToolsPrefetch(
   if (!queryText.trim()) return []
 
   try {
+    const state = getSearchExtraToolsPrefetchState()
     const index = await getToolIndex(tools)
     const results = searchTools(queryText, index, 3)
 
     const newResults = results.filter(
-      r => !discoveredToolsThisSession.has(r.name),
+      r => !state.discoveredToolsThisSession.has(r.name),
     )
     if (newResults.length === 0) return []
 
     for (const r of newResults)
-      addBoundedSessionEntry(discoveredToolsThisSession, r.name)
+      addBoundedSessionEntry(state.discoveredToolsThisSession, r.name)
 
     const durationMs = Date.now() - startedAt
     logForDebugging(
@@ -117,8 +168,8 @@ export async function startSearchExtraToolsPrefetch(
     )
 
     const discoveryResults = newResults.map(toDiscoveryResult)
-    latestPrefetchResult = discoveryResults
-    notifyPrefetchListeners()
+    state.latestPrefetchResult = discoveryResults
+    notifyPrefetchListeners(state)
 
     return [
       buildToolDiscoveryAttachment(

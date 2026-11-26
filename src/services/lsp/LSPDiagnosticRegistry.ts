@@ -3,6 +3,10 @@ import { LRUCache } from 'lru-cache'
 import { logForDebugging } from '../../utils/debug.js'
 import { toError } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
+import {
+  getBootstrapSession,
+  RootSessionSlot,
+} from '../../utils/sessionHost.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import type { DiagnosticFile } from '../diagnosticTracking.js'
 
@@ -45,15 +49,26 @@ const MAX_TOTAL_DIAGNOSTICS = 30
 // Max files to track for deduplication - prevents unbounded memory growth
 const MAX_DELIVERED_FILES = 500
 
-// Global registry state
-const pendingDiagnostics = new Map<string, PendingLSPDiagnostic>()
+type LspDiagnosticSessionState = {
+  pendingDiagnostics: Map<string, PendingLSPDiagnostic>
+  // Cross-turn deduplication: tracks diagnostics that have been delivered
+  // Maps file URI to a set of diagnostic keys (hash of message+severity+range)
+  // Using LRUCache to prevent unbounded growth in long sessions
+  deliveredDiagnostics: LRUCache<string, Set<string>>
+}
 
-// Cross-turn deduplication: tracks diagnostics that have been delivered
-// Maps file URI to a set of diagnostic keys (hash of message+severity+range)
-// Using LRUCache to prevent unbounded growth in long sessions
-const deliveredDiagnostics = new LRUCache<string, Set<string>>({
-  max: MAX_DELIVERED_FILES,
-})
+const lspDiagnosticStateSlot = new RootSessionSlot<LspDiagnosticSessionState>(
+  () => ({
+    pendingDiagnostics: new Map<string, PendingLSPDiagnostic>(),
+    deliveredDiagnostics: new LRUCache<string, Set<string>>({
+      max: MAX_DELIVERED_FILES,
+    }),
+  }),
+)
+
+function getLspDiagnosticState(): LspDiagnosticSessionState {
+  return lspDiagnosticStateSlot.of(getBootstrapSession())
+}
 
 /**
  * Register LSP diagnostics received from a server.
@@ -76,6 +91,7 @@ export function registerPendingLSPDiagnostic({
     `LSP Diagnostics: Registering ${files.length} diagnostic file(s) from ${serverName} (ID: ${diagnosticId})`,
   )
 
+  const { pendingDiagnostics } = getLspDiagnosticState()
   pendingDiagnostics.set(diagnosticId, {
     serverName,
     files,
@@ -135,6 +151,7 @@ function createDiagnosticKey(diag: {
  */
 function deduplicateDiagnosticFiles(
   allFiles: DiagnosticFile[],
+  deliveredDiagnostics: LRUCache<string, Set<string>>,
 ): DiagnosticFile[] {
   // Group diagnostics by file URI
   const fileMap = new Map<string, Set<string>>()
@@ -194,6 +211,7 @@ export function checkForLSPDiagnostics(): Array<{
   serverName: string
   files: DiagnosticFile[]
 }> {
+  const { pendingDiagnostics, deliveredDiagnostics } = getLspDiagnosticState()
   logForDebugging(
     `LSP Diagnostics: Checking registry - ${pendingDiagnostics.size} pending`,
   )
@@ -218,7 +236,7 @@ export function checkForLSPDiagnostics(): Array<{
   // Deduplicate diagnostics across all files
   let dedupedFiles: DiagnosticFile[]
   try {
-    dedupedFiles = deduplicateDiagnosticFiles(allFiles)
+    dedupedFiles = deduplicateDiagnosticFiles(allFiles, deliveredDiagnostics)
   } catch (error: unknown) {
     const err = toError(error)
     logError(new Error(`Failed to deduplicate LSP diagnostics: ${err.message}`))
@@ -344,6 +362,7 @@ export function checkForLSPDiagnostics(): Array<{
  * and should only be cleared when files are edited or on session reset.
  */
 export function clearAllLSPDiagnostics(): void {
+  const { pendingDiagnostics } = getLspDiagnosticState()
   logForDebugging(
     `LSP Diagnostics: Clearing ${pendingDiagnostics.size} pending diagnostic(s)`,
   )
@@ -355,6 +374,7 @@ export function clearAllLSPDiagnostics(): void {
  * Used on session reset or for testing.
  */
 export function resetAllLSPDiagnosticState(): void {
+  const { pendingDiagnostics, deliveredDiagnostics } = getLspDiagnosticState()
   logForDebugging(
     `LSP Diagnostics: Resetting all state (${pendingDiagnostics.size} pending, ${deliveredDiagnostics.size} files tracked)`,
   )
@@ -370,6 +390,7 @@ export function resetAllLSPDiagnosticState(): void {
  * @param fileUri - URI of the file that was edited
  */
 export function clearDeliveredDiagnosticsForFile(fileUri: string): void {
+  const { deliveredDiagnostics } = getLspDiagnosticState()
   if (deliveredDiagnostics.has(fileUri)) {
     logForDebugging(
       `LSP Diagnostics: Clearing delivered diagnostics for ${fileUri}`,

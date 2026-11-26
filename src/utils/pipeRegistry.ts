@@ -14,6 +14,7 @@ import { createHash } from 'crypto'
 import { isPipeAlive, getPipesDir } from './pipeTransport.js'
 import type { TcpEndpoint } from './pipeTransport.js'
 import type { LanAnnounce } from './lanBeacon.js'
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,10 +66,24 @@ function getLockPath(): string {
 // Machine ID — stable OS-level fingerprint
 // ---------------------------------------------------------------------------
 
-let _cachedMachineId: string | null = null
+const fallbackPipeRegistryHost: object = {}
+const pipeRegistryStateByHost = new HostSlot<{
+  cachedMachineId: string | null
+}>(() => ({ cachedMachineId: null }))
+
+function getPipeRegistryHostState(): { cachedMachineId: string | null } {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return pipeRegistryStateByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return pipeRegistryStateByHost.of(fallbackPipeRegistryHost)
+}
 
 export async function getMachineId(): Promise<string> {
-  if (_cachedMachineId) return _cachedMachineId
+  const state = getPipeRegistryHostState()
+  if (state.cachedMachineId) return state.cachedMachineId
 
   let raw: string | null = null
 
@@ -92,8 +107,8 @@ export async function getMachineId(): Promise<string> {
       })
       const match = raw.match(/MachineGuid\s+REG_SZ\s+(\S+)/)
       if (match) {
-        _cachedMachineId = match[1]!
-        return _cachedMachineId
+        state.cachedMachineId = match[1]!
+        return state.cachedMachineId
       }
     } catch {}
   } else if (process.platform === 'linux') {
@@ -102,8 +117,8 @@ export async function getMachineId(): Promise<string> {
       raw = await readFile('/etc/machine-id', 'utf8')
       raw = raw.trim()
       if (raw) {
-        _cachedMachineId = raw
-        return _cachedMachineId
+        state.cachedMachineId = raw
+        return state.cachedMachineId
       }
     } catch {}
   } else if (process.platform === 'darwin') {
@@ -124,15 +139,15 @@ export async function getMachineId(): Promise<string> {
       })
       const match = raw.match(/"IOPlatformSerialNumber"\s*=\s*"(\S+)"/)
       if (match) {
-        _cachedMachineId = match[1]!
-        return _cachedMachineId
+        state.cachedMachineId = match[1]!
+        return state.cachedMachineId
       }
     } catch {}
   }
 
   // Fallback: hash hostname + MAC addresses
-  _cachedMachineId = generateFallbackId()
-  return _cachedMachineId
+  state.cachedMachineId = generateFallbackId()
+  return state.cachedMachineId
 }
 
 function generateFallbackId(): string {

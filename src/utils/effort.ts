@@ -9,6 +9,12 @@ import {
 import type { SettingsJson } from './settings/types.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getAPIProvider } from './model/providers.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  HostSlot,
+  RootSessionSlot,
+} from './sessionHost.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import { isAlwaysEnableEffortEnvEnabled } from './residualFinalEnvGates.js'
 import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
@@ -248,19 +254,33 @@ function isStandardClaudeModelWithoutTrailer(model: string): boolean {
   return STANDARD_CLAUDE_TRAILER_RE.test(rest)
 }
 
-const legacyUserEffortModelCache = new Map<string, boolean>()
+const fallbackEffortHost: object = {}
+const legacyUserEffortModelCacheByHost = new HostSlot<Map<string, boolean>>(
+  () => new Map(),
+)
+
+function getLegacyUserEffortModelCache(): Map<string, boolean> {
+  try {
+    const host = getBootstrapSessionHost()
+    if (host) return legacyUserEffortModelCacheByHost.of(host)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return legacyUserEffortModelCacheByHost.of(fallbackEffortHost)
+}
 
 /** densable a3r — legacy top-level userSettings.effortLevel applies to pre-5.5 Claude models and custom/3P IDs. */
 function allowsLegacyUserEffort(canonicalKey: string): boolean {
   if (Object.hasOwn(Object.prototype, canonicalKey)) {
     return false
   }
-  let cached = legacyUserEffortModelCache.get(canonicalKey)
+  const cache = getLegacyUserEffortModelCache()
+  let cached = cache.get(canonicalKey)
   if (cached === undefined) {
     cached =
       LEGACY_USER_EFFORT_MODELS.has(canonicalKey) ||
       !isStandardClaudeModelWithoutTrailer(canonicalKey)
-    legacyUserEffortModelCache.set(canonicalKey, cached)
+    cache.set(canonicalKey, cached)
   }
   return cached
 }
@@ -1469,14 +1489,27 @@ type SessionOrgEffortCapEntry = {
   told: boolean
 }
 
-const sessionOrgEffortCaps = new Map<string, SessionOrgEffortCapEntry>()
+const fallbackEffortSession = { root: {} as object }
+const sessionOrgEffortCapsBySession = new RootSessionSlot<
+  Map<string, SessionOrgEffortCapEntry>
+>(() => new Map())
+
+function getSessionOrgEffortCaps(): Map<string, SessionOrgEffortCapEntry> {
+  try {
+    const session = getBootstrapSession()
+    if (session?.root) return sessionOrgEffortCapsBySession.of(session)
+  } catch {
+    // Fall back when sessionHost is mocked
+  }
+  return sessionOrgEffortCapsBySession.of(fallbackEffortSession)
+}
 
 /**
  * Official 2.1.328 (`S9e().clear()`): clear session-learned org effort caps
  * when session effort changes (or on `/clear` / `/login`).
  */
 export function clearSessionOrgEffortCaps(): void {
-  sessionOrgEffortCaps.clear()
+  getSessionOrgEffortCaps().clear()
 }
 
 export function _resetSessionOrgEffortCapsForTesting(): void {
@@ -1531,6 +1564,7 @@ export function getSessionOrgEffortCap(
   model: string,
   querySource?: string,
 ): EffortLevel | undefined {
+  const sessionOrgEffortCaps = getSessionOrgEffortCaps()
   if (
     sessionOrgEffortCaps.size === 0 ||
     isNonInteractiveCapExemptQuerySource(querySource)
@@ -1569,6 +1603,7 @@ export function stepDownOrgEffortCap(
   model: string,
   currentEffort: EffortLevel,
 ): EffortLevel | undefined {
+  const sessionOrgEffortCaps = getSessionOrgEffortCaps()
   const key = getOrgEffortCapKey(model)
   const existing = sessionOrgEffortCaps.get(key)?.level
   const idx = EFFORT_LEVELS.indexOf(currentEffort)
@@ -1591,6 +1626,7 @@ export function stepDownOrgEffortCap(
  * densable 2.1.314 KWn — mark the org effort cap notice as shown once.
  */
 export function markOrgEffortCapNotified(model: string): boolean {
+  const sessionOrgEffortCaps = getSessionOrgEffortCaps()
   const key = getOrgEffortCapKey(model)
   const entry = sessionOrgEffortCaps.get(key)
   if (entry === undefined || entry.told) return false

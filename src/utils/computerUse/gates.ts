@@ -3,6 +3,7 @@ import type { CoordinateMode, CuSubGates } from '@ant/computer-use-mcp/types'
 import { getDynamicConfig_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { isCodeModeEnabled } from '../../services/codeMode/optIn.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 
 type ChicagoConfig = CuSubGates & {
   enabled: boolean
@@ -64,11 +65,18 @@ export function getChicagoSubGates(): CuSubGates {
   return subGates
 }
 
-// Frozen at first read — setup.ts builds tool descriptions and executor.ts
-// scales coordinates off the same value. A live read here lets a mid-session
-// GB flip tell the model "pixels" while transforming clicks as normalized.
-let frozenCoordinateMode: CoordinateMode | undefined
+// Frozen at first read per host — setup.ts builds tool descriptions and
+// executor.ts scales coordinates off the same value. A live read here lets a
+// mid-session GB flip tell the model "pixels" while transforming clicks as
+// normalized.
+const gatesHostSlot = new HostSlot<{
+  frozenCoordinateMode: CoordinateMode | undefined
+}>(() => ({
+  frozenCoordinateMode: undefined,
+}))
+
 export function getChicagoCoordinateMode(): CoordinateMode {
-  frozenCoordinateMode ??= readConfig().coordinateMode
-  return frozenCoordinateMode
+  const hostState = gatesHostSlot.of(getBootstrapSessionHost())
+  hostState.frozenCoordinateMode ??= readConfig().coordinateMode
+  return hostState.frozenCoordinateMode
 }

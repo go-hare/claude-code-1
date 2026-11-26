@@ -20,6 +20,7 @@ import {
 import { resolveAutoCompactWindow } from '../autoCompactWindow.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import { recognizePrintModel, suggestClosestModelId } from './printSetModel.js'
 
 export const MODEL_CONFIG_DOCS_URL =
@@ -81,8 +82,14 @@ export function buildUnrecognizedModelNotice(
 export const UNRECOGNIZED_MODEL_SIGNAL_TAG =
   '[claude-code:unrecognized_model]' as const
 
-/** densable ZE.claim keys for this signal */
-const claimedStrippedIds = new Set<string>()
+/** densable ZE.claim keys for this signal — scoped per root Session. */
+const claimedStrippedIdsSessionSlot = new RootSessionSlot<Set<string>>(
+  () => new Set(),
+)
+
+function getClaimedStrippedIds(): Set<string> {
+  return claimedStrippedIdsSessionSlot.of(getBootstrapSession())
+}
 
 /** densable kd — strip [1m]/[2m] context suffixes for claim key */
 export function stripModelContextSuffixes(model: string): string {
@@ -146,6 +153,7 @@ export function signalUnrecognizedModel(
     if (!model || isIncompleteInferenceProfile(model)) return
     const stripped = stripModelContextSuffixes(model)
     const claimKey = `unrecognized-model-signal:${stripped}`
+    const claimedStrippedIds = getClaimedStrippedIds()
     if (claimedStrippedIds.has(claimKey)) return
     claimedStrippedIds.add(claimKey)
 
@@ -188,5 +196,5 @@ export function signalUnrecognizedModel(
 
 /** Test helper */
 export function resetUnrecognizedModelSignalClaimsForTests(): void {
-  claimedStrippedIds.clear()
+  getClaimedStrippedIds().clear()
 }

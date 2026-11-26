@@ -17,13 +17,22 @@
 
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'path'
 import { ripGrep } from '../ripgrep.js'
+import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import { getPluginsDirectory } from './pluginDirectories.js'
 
 // Inlined from cacheUtils.ts to avoid a circular dep through commands.js.
 const ORPHANED_AT_FILENAME = '.orphaned_at'
 
 /** Session-scoped cache. Frozen once computed — only cleared by explicit /reload-plugins. */
-let cachedExclusions: string[] | null = null
+const hostOrphanedPluginFilterSlot = new HostSlot<{
+  cachedExclusions: string[] | null
+}>(() => ({
+  cachedExclusions: null,
+}))
+
+function filterState(): { cachedExclusions: string[] | null } {
+  return hostOrphanedPluginFilterSlot.of(getBootstrapSessionHost())
+}
 
 /**
  * Get ripgrep glob exclusion patterns for orphaned plugin versions.
@@ -44,8 +53,9 @@ export async function getGlobExclusionsForPluginCache(
     return []
   }
 
-  if (cachedExclusions !== null) {
-    return cachedExclusions
+  const state = filterState()
+  if (state.cachedExclusions !== null) {
+    return state.cachedExclusions
   }
 
   try {
@@ -69,7 +79,7 @@ export async function getGlobExclusionsForPluginCache(
       new AbortController().signal,
     )
 
-    cachedExclusions = markers.map(markerPath => {
+    state.cachedExclusions = markers.map(markerPath => {
       // ripgrep may return absolute or relative — normalize to relative.
       const versionDir = dirname(markerPath)
       const rel = isAbsolute(versionDir)
@@ -79,16 +89,16 @@ export async function getGlobExclusionsForPluginCache(
       const posixRelative = rel.replace(/\\/g, '/')
       return `!**/${posixRelative}/**`
     })
-    return cachedExclusions
+    return state.cachedExclusions
   } catch {
     // Best-effort — don't break core search tools if ripgrep fails here
-    cachedExclusions = []
-    return cachedExclusions
+    state.cachedExclusions = []
+    return state.cachedExclusions
   }
 }
 
 export function clearPluginCacheExclusions(): void {
-  cachedExclusions = null
+  filterState().cachedExclusions = null
 }
 
 /**

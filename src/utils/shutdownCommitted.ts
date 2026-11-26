@@ -1,19 +1,23 @@
+import { getBootstrapSessionHost, HostSlot } from './sessionHost.js'
+
 /**
- * densable `Wa` / `Mr` / `qse` — process-committed latch.
+ * densable `Wa` / `Mr` / `qse` — host-committed shutdown latch.
  * `Ft` ORs this with mid-turn fold suspend.
  */
-let committed = false
+const shutdownCommittedHostSlot = new HostSlot<{ committed: boolean }>(() => ({
+  committed: false,
+}))
 
 /** densable `qse`. */
 export function markShutdownCommitted(): void {
-  committed = true
+  shutdownCommittedHostSlot.of(getBootstrapSessionHost()).committed = true
 }
 
 /** densable `Mr`. */
 export function isShutdownCommitted(): boolean {
-  return committed
+  return shutdownCommittedHostSlot.of(getBootstrapSessionHost()).committed
 }
 
 export function resetShutdownCommittedForTests(): void {
-  committed = false
+  shutdownCommittedHostSlot.of(getBootstrapSessionHost()).committed = false
 }

@@ -8,27 +8,56 @@
  */
 
 import { dirname, join } from 'path'
+import {
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  HostSlot,
+  ofDefaultHost,
+} from '../utils/sessionHost.js'
+
+type AgentProxyPromptHostState = {
+  hasOverride: boolean
+  agentProxyNote: string | undefined
+}
 
 /** densable yBt / agentProxyNote — short line injected into <env>. */
-let agentProxyNote: string | undefined
+const agentProxyPromptHostSlot = new HostSlot<AgentProxyPromptHostState>(
+  () => ({
+    hasOverride: false,
+    agentProxyNote: undefined,
+  }),
+)
 
 /**
  * densable Ept — set session agent-proxy note (path to README or short text).
  */
 export function setAgentProxyNote(note: string | undefined): void {
-  agentProxyNote = note
+  const hostState = agentProxyPromptHostSlot.of(getBootstrapSessionHost())
+  hostState.hasOverride = hasActiveSessionAls()
+  hostState.agentProxyNote = note
 }
 
 /**
  * densable yBt — read session agent-proxy note for env context.
+ * Falls back to the process-default host's boot-time note when unset on an
+ * isolated host.
  */
 export function getAgentProxyNote(): string | undefined {
-  return agentProxyNote
+  const local = agentProxyPromptHostSlot.peek(getBootstrapSessionHost())
+  if (local?.hasOverride) {
+    return local.agentProxyNote
+  }
+  return (
+    local?.agentProxyNote ??
+    ofDefaultHost(agentProxyPromptHostSlot).agentProxyNote
+  )
 }
 
 /** Test helper. */
 export function resetAgentProxyNoteForTests(): void {
-  agentProxyNote = undefined
+  const hostState = agentProxyPromptHostSlot.of(getBootstrapSessionHost())
+  hostState.hasOverride = hasActiveSessionAls()
+  hostState.agentProxyNote = undefined
 }
 
 /**

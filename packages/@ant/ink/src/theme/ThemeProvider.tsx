@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle';
 import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { hasInkActiveSessionAls, InkHostSlot, inkSessionHost, runWithInkSessionHost } from '../core/instances.js';
 import useStdin from '../hooks/use-stdin.js';
 import { getSystemThemeName, subscribeSystemTheme, type SystemTheme } from './systemTheme.js';
 import {
@@ -13,31 +14,61 @@ import {
 
 // -- Config persistence injection --
 // Business layer provides these via setThemeConfigCallbacks().
-// Defaults read/write from a simple module-level store.
+// Boot-time wiring outside ALS sets the process default inherited by all hosts;
+// calls inside ALS isolate overrides per host.
 
-let _loadTheme: () => ThemeSetting = () => 'dark';
-let _saveTheme: (setting: ThemeSetting) => void = () => {};
-/** densable d$e / vKn — resolve custom:slug → base + overrides. */
-let _resolveCustomTheme: (setting: string) => {
+type CustomThemeResolver = (setting: string) => {
   base: ThemeName;
   overrides?: Record<string, unknown>;
-} = setting => ({
+};
+
+let moduleDefaultLoadTheme: () => ThemeSetting = () => 'dark';
+let moduleDefaultSaveTheme: (setting: ThemeSetting) => void = () => {};
+/** densable d$e / vKn — resolve custom:slug → base + overrides. */
+let moduleDefaultResolveCustomTheme: CustomThemeResolver = setting => ({
   base: setting === 'auto' ? 'dark' : isBuiltinThemeName(setting) ? setting : 'dark',
 });
+
+type ThemeCallbacksHostOverride = {
+  loadTheme?: () => ThemeSetting;
+  saveTheme?: (setting: ThemeSetting) => void;
+  resolveCustomTheme?: CustomThemeResolver;
+};
+
+const themeCallbacksHostSlot = new InkHostSlot<ThemeCallbacksHostOverride>(() => ({}));
+
+function getLoadThemeCallback(): () => ThemeSetting {
+  return themeCallbacksHostSlot.peek()?.loadTheme ?? moduleDefaultLoadTheme;
+}
+
+function getSaveThemeCallback(): (setting: ThemeSetting) => void {
+  return themeCallbacksHostSlot.peek()?.saveTheme ?? moduleDefaultSaveTheme;
+}
+
+function getResolveCustomThemeCallback(): CustomThemeResolver {
+  return themeCallbacksHostSlot.peek()?.resolveCustomTheme ?? moduleDefaultResolveCustomTheme;
+}
 
 /** Inject config persistence from the business layer. Call once at startup. */
 export function setThemeConfigCallbacks(opts: {
   loadTheme: () => ThemeSetting;
   saveTheme: (setting: ThemeSetting) => void;
-  resolveCustomTheme?: (setting: string) => {
-    base: ThemeName;
-    overrides?: Record<string, unknown>;
-  };
+  resolveCustomTheme?: CustomThemeResolver;
 }): void {
-  _loadTheme = opts.loadTheme;
-  _saveTheme = opts.saveTheme;
-  if (opts.resolveCustomTheme) {
-    _resolveCustomTheme = opts.resolveCustomTheme;
+  if (hasInkActiveSessionAls()) {
+    const slot = themeCallbacksHostSlot.of();
+    slot.loadTheme = opts.loadTheme;
+    slot.saveTheme = opts.saveTheme;
+    if (opts.resolveCustomTheme) {
+      slot.resolveCustomTheme = opts.resolveCustomTheme;
+    }
+  } else {
+    moduleDefaultLoadTheme = opts.loadTheme;
+    moduleDefaultSaveTheme = opts.saveTheme;
+    if (opts.resolveCustomTheme) {
+      moduleDefaultResolveCustomTheme = opts.resolveCustomTheme;
+    }
+    themeCallbacksHostSlot.delete();
   }
 }
 
@@ -83,14 +114,15 @@ type Props = {
 };
 
 function defaultInitialTheme(): ThemeSetting {
-  return _loadTheme();
+  return getLoadThemeCallback()();
 }
 
 function defaultSaveTheme(setting: ThemeSetting): void {
-  _saveTheme(setting);
+  getSaveThemeCallback()(setting);
 }
 
 export function ThemeProvider({ children, initialState, onThemeSave = defaultSaveTheme }: Props) {
+  const [mountedHost] = useState(() => inkSessionHost());
   const [themeSetting, setThemeSetting] = useState(initialState ?? defaultInitialTheme);
   const [previewTheme, setPreviewTheme] = useState<ThemeSetting | null>(null);
   const [previewOverrides, setPreviewOverrides] = useState<Record<string, unknown> | null>(null);
@@ -112,9 +144,11 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
   // densable C7t Re: if(m!=="auto") return; V(Zle()); return jat(()=>V(Zle())).
   useLayoutEffect(() => {
     if (activeSetting !== 'auto') return;
-    setSystemTheme(getSystemThemeName());
-    return subscribeSystemTheme(setSystemTheme);
-  }, [activeSetting]);
+    return runWithInkSessionHost(mountedHost, () => {
+      setSystemTheme(getSystemThemeName());
+      return subscribeSystemTheme(setSystemTheme);
+    });
+  }, [activeSetting, mountedHost]);
 
   // Watch for live terminal theme changes while 'auto' is active.
   // Positive feature() pattern so the watcher import is dead-code-eliminated
@@ -135,18 +169,19 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
     }
   }, [activeSetting, internal_querier]);
 
-  const resolvedCustom = useMemo(() => _resolveCustomTheme(activeSetting), [activeSetting]);
+  const resolveCustomTheme = runWithInkSessionHost(mountedHost, getResolveCustomThemeCallback);
+  const resolvedCustom = useMemo(() => resolveCustomTheme(activeSetting), [activeSetting, resolveCustomTheme]);
   const currentTheme: ThemeName = activeSetting === 'auto' ? systemTheme : resolvedCustom.base;
   const activeThemeOverrides = previewOverrides ?? resolvedCustom.overrides;
 
   // Official src writes overrides during render so preview is not a frame late.
-  setCustomThemeOverrides(activeThemeOverrides);
-  useEffect(() => () => setCustomThemeOverrides(undefined), []);
+  runWithInkSessionHost(mountedHost, () => setCustomThemeOverrides(activeThemeOverrides));
+  useEffect(() => () => runWithInkSessionHost(mountedHost, () => setCustomThemeOverrides(undefined)), [mountedHost]);
 
   const resolvedTheme = useMemo(
-    () => getTheme(currentTheme),
+    () => runWithInkSessionHost(mountedHost, () => getTheme(currentTheme)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentTheme, activeThemeOverrides],
+    [mountedHost, currentTheme, activeThemeOverrides],
   );
 
   const value = useMemo<ThemeContextValue>(
@@ -159,14 +194,14 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
         // first poll fires immediately. Seed from the cache so the OSC
         // round-trip doesn't flash the wrong palette.
         if (newSetting === 'auto') {
-          setSystemTheme(getSystemThemeName());
+          setSystemTheme(runWithInkSessionHost(mountedHost, getSystemThemeName));
         }
         onThemeSave?.(newSetting);
       },
       setPreviewTheme: (newSetting: ThemeSetting) => {
         setPreviewTheme(newSetting);
         if (newSetting === 'auto') {
-          setSystemTheme(getSystemThemeName());
+          setSystemTheme(runWithInkSessionHost(mountedHost, getSystemThemeName));
         }
       },
       savePreview: () => {
@@ -187,7 +222,7 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
       reloadCustomThemes: () => Promise.resolve(),
       setPreviewOverrides,
     }),
-    [themeSetting, previewTheme, currentTheme, resolvedTheme, activeThemeOverrides, onThemeSave],
+    [mountedHost, themeSetting, previewTheme, currentTheme, resolvedTheme, activeThemeOverrides, onThemeSave],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
