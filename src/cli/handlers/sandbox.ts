@@ -194,11 +194,64 @@ export function getSandboxStatusPayload(): SandboxStatusPayload {
     }
   } else {
     const deps = SandboxManager.checkDependencies()
+    const provider = getWindowsSandboxNativeProvider()
+    const effectiveHasMxcSdk = provider?.hasMxcSdk ?? hasWindowsMxcSdk()
+    const backendChoice = resolveWindowsBackendChoice({
+      hasMxcSdk: effectiveHasMxcSdk,
+    })
+    const startState = windowsSandboxStartStore.get()
+    const activeBackend =
+      startState.windowsBackendAtStart ?? backendChoice.backend
+    const backendUnset = isWindowsBackendUnset({
+      hasMxcSdk: effectiveHasMxcSdk,
+    })
+    const mxcLastStart = getWindowsMxcLastStart({
+      hasMxcSdk: effectiveHasMxcSdk,
+    })
+
+    // R3-P1-2: Do NOT equate deps.errors.length === 0 with installed: true on Windows.
+    // MXC needs no host install (unless refused); sandboxuser requires verified cached status.
+    let installed = false
+    const reasons = [...deps.errors]
+    if (deps.errors.length === 0) {
+      if (activeBackend === 'mxc' && !backendUnset) {
+        if (mxcLastStart?.state === 'refused') {
+          installed = false
+          reasons.push(mxcLastStart.reason)
+        } else {
+          installed = true
+        }
+      } else {
+        const cached = startState.lastKnownStatus
+        if (cached !== undefined) {
+          installed =
+            cached.user.provisioned &&
+            cached.user.credPresent &&
+            cached.wfp.state === 'installed'
+          if (!cached.user.provisioned) {
+            reasons.push('Windows sandbox user is not provisioned.')
+          } else if (!cached.user.credPresent) {
+            reasons.push('Windows sandbox user credentials are missing.')
+          }
+          if (cached.wfp.state !== 'installed') {
+            reasons.push(
+              `Windows Filtering Platform (WFP) rules state is "${cached.wfp.state}".`,
+            )
+          }
+        } else {
+          installed = false
+          reasons.push(
+            'Windows sandbox install status has not been checked yet; run `claude sandbox status` to query live status.',
+          )
+        }
+      }
+    }
+
     installState = {
       available: true,
-      installed: deps.errors.length === 0,
+      installed,
       policyLocked: SandboxManager.areSandboxSettingsLockedByPolicy(),
-      reasons: deps.errors,
+      reasons,
     }
   }
 
@@ -228,7 +281,7 @@ export function getSandboxStatusPayload(): SandboxStatusPayload {
       policy: isPolicySandboxKeySet('allowUnsandboxedCommands'),
       settings: strictMode,
     }),
-    filesystemPolicy: {},
+    filesystemPolicy: buildFilesystemPolicy(),
     autoAllowBashIfSandboxed: autoAllowBash,
     autoAllowBashIfSandboxedSource: !supported
       ? 'unsupported'
@@ -635,9 +688,12 @@ export async function runSandboxUninstallAsync(
     const userPresent = before.user.provisioned || before.user.credPresent
     const wfpPresent =
       before.wfp.state === 'installed' || before.wfp.state === 'partial'
-    const filtersChecked = before.wfp.state !== 'cannot-read'
+    // R3-P1-6: Treat 'cannot-read' as potentially installed so non-elevated uninstall
+    // proceeds to elevated removal instead of falsely short-circuiting to not_installed.
+    const wfpCannotRead = before.wfp.state === 'cannot-read'
+    const filtersChecked = !wfpCannotRead
 
-    if (!userPresent && !wfpPresent) {
+    if (!userPresent && !wfpPresent && !wfpCannotRead) {
       return {
         status: 'not_installed',
         message: 'No Windows sandbox installation found on this PC.',
@@ -676,13 +732,18 @@ export async function runSandboxUninstallAsync(
     }
     if (after.wfp.state === 'installed' || after.wfp.state === 'partial') {
       leftBehind.push('Windows Filtering Platform (WFP) network filters')
+    } else if (after.wfp.state === 'cannot-read') {
+      // R3-P1-6: Unverifiable WFP state after uninstall must report 'partial' rather than 'ok'.
+      leftBehind.push(
+        'Windows Filtering Platform (WFP) network filters (could not verify removal: cannot-read)',
+      )
     }
     const afterFiltersChecked = after.wfp.state !== 'cannot-read'
     if (leftBehind.length > 0) {
       return {
         status: 'partial',
         message:
-          'Windows sandbox uninstall completed partially; some artifacts remain.',
+          'Windows sandbox uninstall completed partially; some artifacts remain or could not be verified.',
         leftBehind,
         filtersChecked: afterFiltersChecked,
       }

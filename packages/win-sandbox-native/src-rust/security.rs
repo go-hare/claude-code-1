@@ -10,6 +10,7 @@ pub const EXIT_OK: i32 = 0;
 pub const EXIT_RUNTIME_ERROR: i32 = 1;
 pub const EXIT_USAGE: i32 = 2;
 pub const EXIT_VALIDATION: i32 = 3;
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const EXIT_UAC_CANCELLED: i32 = 10;
 pub const EXIT_WFP_ERROR: i32 = 19;
 
@@ -195,8 +196,9 @@ pub fn parse_proxy_port_range(spec: &str) -> Result<(u16, u16), String> {
 }
 
 /// Quotes a single argument according to Win32 `CommandLineToArgvW` / MSVCRT rules.
+/// Aligns whitespace detection with JS `/[\s"]/` (`char::is_whitespace() || '"'`).
 pub fn quote_windows_arg(arg: &str) -> String {
-    if !arg.is_empty() && !arg.bytes().any(|b| matches!(b, b' ' | b'\t' | b'"')) {
+    if !arg.is_empty() && !arg.chars().any(|c| c.is_whitespace() || c == '"') {
         return arg.to_string();
     }
 
@@ -229,10 +231,33 @@ pub fn quote_windows_arg(arg: &str) -> String {
     out
 }
 
+/// Checks if a path or program string contains a colon (`:`) outside a leading
+/// Windows drive prefix (`^[A-Za-z]:`), catching NTFS Alternate Data Streams
+/// (e.g., `payload.bat::$DATA`, `file.txt:stream`).
+pub fn has_colon_outside_drive_prefix(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let after_drive = if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        &s[2..]
+    } else {
+        s
+    };
+    after_drive.contains(':')
+}
+
 /// Rejects Windows batch script targets (`.bat` / `.cmd`, case-insensitive,
-/// after trimming trailing dots and whitespace per Win32 path normalization) to
-/// prevent BatBadBut implicit `cmd.exe` argument injection via `CreateProcessW`/`CreateProcessAsUserW`.
+/// after trimming trailing dots and whitespace per Win32 path normalization),
+/// CR/LF/NUL control characters, and NTFS ADS colons outside a drive prefix
+/// (e.g., `payload.bat::$DATA`) to prevent BatBadBut implicit `cmd.exe`
+/// argument injection via `CreateProcessW`/`CreateProcessAsUserW`.
 pub fn reject_batch_script_program(program: &str) -> Result<(), String> {
+    if program.contains('\0') || program.contains('\r') || program.contains('\n') {
+        return Err("Program path must not contain NUL, CR, or LF characters".to_string());
+    }
+    if has_colon_outside_drive_prefix(program) {
+        return Err(format!(
+            "Program path '{program}' contains disallowed colon outside drive prefix (possible NTFS ADS)"
+        ));
+    }
     let normalized = program.trim_end_matches(|c: char| c == '.' || c == ' ' || c == '\t');
     let lower = normalized.to_ascii_lowercase();
     if lower.ends_with(".bat") || lower.ends_with(".cmd") {
@@ -305,19 +330,24 @@ pub fn validate_proxy_url(raw: &str) -> Result<String, String> {
     Ok(raw.to_string())
 }
 
-/// Builds a Win32 command line from `program` and `args`, enforcing NUL safety
+/// Builds a Win32 command line from `program` and `args`, enforcing NUL/CR/LF/ADS safety
 /// and the `CreateProcessW` 32,767 UTF-16 code-unit limit (including the terminating NUL).
 pub fn build_windows_command_line(program: &str, args: &[String]) -> Result<String, String> {
     if program.is_empty() {
         return Err("Program path must not be empty".to_string());
     }
-    if program.contains('\0') {
-        return Err("Program path must not contain NUL bytes".to_string());
+    if program.contains('\0') || program.contains('\r') || program.contains('\n') {
+        return Err("Program path must not contain NUL, CR, or LF characters".to_string());
+    }
+    if has_colon_outside_drive_prefix(program) {
+        return Err(format!(
+            "Program path '{program}' contains disallowed colon outside drive prefix"
+        ));
     }
     let mut cmdline = quote_windows_arg(program);
     for arg in args {
-        if arg.contains('\0') {
-            return Err("Command argument must not contain NUL bytes".to_string());
+        if arg.contains('\0') || arg.contains('\r') || arg.contains('\n') {
+            return Err("Command argument must not contain NUL, CR, or LF characters".to_string());
         }
         cmdline.push(' ');
         cmdline.push_str(&quote_windows_arg(arg));
@@ -332,12 +362,15 @@ pub fn build_windows_command_line(program: &str, args: &[String]) -> Result<Stri
     Ok(cmdline)
 }
 
-/// Sanitizes a filesystem path:
+/// Sanitizes a Windows filesystem path for ACL and sandbox operations:
 /// - Rejects NUL bytes and ASCII control characters (`0x00..=0x1F`, `0x7F`).
 /// - Trims whitespace FIRST before prefix/character checks.
 /// - Rejects empty paths, Win32 device/extended prefixes (`\\?\`, `\\.\`, `\??\`),
 ///   UNC prefixes (`\\`, `//`), leading `/` (could be parsed as an `icacls` switch),
-///   wildcard characters (`*`, `?`), `..` path traversal segments, and ADS colons.
+///   leading `\` (drive-relative root like `\Windows\System32`), relative paths,
+///   drive-relative paths (`C:foo`), wildcard characters (`*`, `?`), `..` path
+///   traversal segments, and NTFS ADS colons.
+/// - Requires a canonical Windows absolute drive-rooted path (`^[A-Za-z]:\\` or `^[A-Za-z]:/`).
 pub fn sanitize_path(raw: &str) -> Result<String, String> {
     for ch in raw.chars() {
         if ch == '\0' {
@@ -378,6 +411,24 @@ pub fn sanitize_path(raw: &str) -> Result<String, String> {
         ));
     }
 
+    if trimmed.starts_with('\\') {
+        return Err(format!(
+            "Path '{trimmed}' must not start with '\\' (drive-relative root is disallowed)"
+        ));
+    }
+
+    // Require canonical Windows absolute drive-rooted path (`^[A-Za-z]:[\\/]`)
+    let bytes = trimmed.as_bytes();
+    if bytes.len() < 3
+        || !bytes[0].is_ascii_alphabetic()
+        || bytes[1] != b':'
+        || (bytes[2] != b'\\' && bytes[2] != b'/')
+    {
+        return Err(format!(
+            "Path '{trimmed}' must be an absolute Windows drive-rooted path (e.g. C:\\...)"
+        ));
+    }
+
     if trimmed.contains('*') || trimmed.contains('?') {
         return Err(format!(
             "Path '{trimmed}' contains disallowed wildcard character"
@@ -390,16 +441,7 @@ pub fn sanitize_path(raw: &str) -> Result<String, String> {
         ));
     }
 
-    // Reject Windows alternate data stream suffixes like `file.txt:stream` (allowing drive letter `C:\...`)
-    let after_drive = if trimmed.len() >= 2
-        && trimmed.as_bytes()[0].is_ascii_alphabetic()
-        && trimmed.as_bytes()[1] == b':'
-    {
-        &trimmed[2..]
-    } else {
-        trimmed
-    };
-    if after_drive.contains(':') {
+    if has_colon_outside_drive_prefix(trimmed) {
         return Err(format!(
             "Path '{trimmed}' contains disallowed colon outside drive prefix"
         ));
@@ -408,8 +450,67 @@ pub fn sanitize_path(raw: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-/// Canonicalizes an existing path on disk when possible, stripping the Windows `\\?\`
-/// verbatim prefix returned by `std::fs::canonicalize` on Windows hosts.
+/// Strips Windows `\\?\` verbatim prefix from a canonicalized path string, while
+/// explicitly rejecting `\\?\UNC\...` network paths instead of stripping them into `UNC\...`.
+pub fn strip_verbatim_prefix_checked(canon_str: &str) -> Result<PathBuf, String> {
+    if canon_str.len() >= 8 && canon_str[..8].eq_ignore_ascii_case(r"\\?\UNC\") {
+        return Err(format!(
+            "Canonicalized path '{canon_str}' resolves to a disallowed UNC network share"
+        ));
+    }
+    if let Some(stripped) = canon_str.strip_prefix(r"\\?\") {
+        Ok(PathBuf::from(stripped))
+    } else {
+        Ok(PathBuf::from(canon_str))
+    }
+}
+
+/// Walks `path` and every existing ancestor component using `symlink_metadata`,
+/// rejecting symlinks (and on Windows, all NTFS reparse points including junctions
+/// and volume mount points).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn reject_symlinks_and_reparse_points(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    use std::os::windows::fs::MetadataExt;
+    #[cfg(windows)]
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+
+    for ancestor in path.ancestors() {
+        if ancestor.as_os_str().is_empty() {
+            continue;
+        }
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    return Err(format!(
+                        "Refusing path '{}': component '{}' is a symbolic link",
+                        path.display(),
+                        ancestor.display()
+                    ));
+                }
+                #[cfg(windows)]
+                if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+                    return Err(format!(
+                        "Refusing path '{}': component '{}' is a Windows reparse point / junction",
+                        path.display(),
+                        ancestor.display()
+                    ));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // Non-existent leaf/intermediate component; continue checking existing parents.
+            }
+            Err(_) => {
+                // Unreadable root/drive metadata (e.g. drive root on some configs); continue.
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Canonicalizes an existing path on disk when possible, rejecting `\\?\UNC\`
+/// network shares and stripping the Windows `\\?\` verbatim prefix returned by
+/// `std::fs::canonicalize` on Windows hosts.
 pub fn canonicalize_path_best_effort(raw: &str) -> Result<PathBuf, String> {
     let sanitized = sanitize_path(raw)?;
     let path = Path::new(&sanitized);
@@ -417,11 +518,7 @@ pub fn canonicalize_path_best_effort(raw: &str) -> Result<PathBuf, String> {
         match std::fs::canonicalize(path) {
             Ok(canon) => {
                 let s = canon.to_string_lossy();
-                if let Some(stripped) = s.strip_prefix(r"\\?\") {
-                    Ok(PathBuf::from(stripped))
-                } else {
-                    Ok(canon)
-                }
+                strip_verbatim_prefix_checked(&s)
             }
             Err(_) => Ok(path.to_path_buf()),
         }
@@ -568,6 +665,14 @@ mod tests {
 
         assert!(build_windows_command_line("cmd\0.exe", &[]).is_err());
         assert!(build_windows_command_line("cmd", &["bad\0arg".to_string()]).is_err());
+        // R3-P1-4: CR/LF and ADS colon rejection + whitespace quoting alignment
+        assert!(build_windows_command_line("cmd\r.exe", &[]).is_err());
+        assert!(build_windows_command_line("cmd\n.exe", &[]).is_err());
+        assert!(build_windows_command_line("cmd.exe", &["bad\narg".to_string()]).is_err());
+        assert!(build_windows_command_line("cmd.exe", &["bad\rarg".to_string()]).is_err());
+        assert!(build_windows_command_line(r"C:\temp\run.exe::$DATA", &[]).is_err());
+        assert_eq!(quote_windows_arg("line1\nline2"), "\"line1\nline2\"");
+        assert_eq!(quote_windows_arg("a\u{00A0}b"), "\"a\u{00A0}b\"");
     }
 
     #[test]
@@ -577,7 +682,11 @@ mod tests {
             r"C:\Users\alice\project"
         );
         assert!(sanitize_path("C:/Users/alice/project/file..txt").is_ok());
-        assert!(sanitize_path("relative\\sub\\file.txt").is_ok());
+        // R3-P0-3: reject relative, drive-relative, and leading-backslash paths
+        assert!(sanitize_path("relative\\sub\\file.txt").is_err());
+        assert!(sanitize_path("C:foo\\bar").is_err());
+        assert!(sanitize_path("C:").is_err());
+        assert!(sanitize_path(r"\Windows\System32").is_err());
         assert!(sanitize_path("").is_err());
         assert!(sanitize_path("   ").is_err());
         assert!(sanitize_path("C:\\bad\0path").is_err());
@@ -602,6 +711,32 @@ mod tests {
         assert!(sanitize_path("C:/Users/alice/../bob").is_err());
         assert!(sanitize_path("..").is_err());
         assert!(sanitize_path(r"C:\Users\alice\secret.txt:ads").is_err());
+        // R3-P0-3: \\?\UNC\ must be rejected instead of stripped to UNC\
+        assert!(strip_verbatim_prefix_checked(r"\\?\UNC\evil\share\file").is_err());
+        assert!(strip_verbatim_prefix_checked(r"\\?\unc\evil\share\file").is_err());
+        assert_eq!(
+            strip_verbatim_prefix_checked(r"\\?\C:\Users\alice").unwrap(),
+            PathBuf::from(r"C:\Users\alice")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_on_target_and_ancestors() {
+        // Canonicalize temp_dir first (on macOS, /var -> /private/var is itself a symlink).
+        let canonical_tmp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let base = canonical_tmp.join(format!("srt-win-symlink-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real_dir = base.join("real");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        let link_dir = base.join("link");
+        std::os::unix::fs::symlink(&real_dir, &link_dir).unwrap();
+
+        assert!(reject_symlinks_and_reparse_points(&real_dir).is_ok());
+        assert!(reject_symlinks_and_reparse_points(&link_dir).is_err());
+        assert!(reject_symlinks_and_reparse_points(&link_dir.join("child")).is_err());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -637,5 +772,9 @@ mod tests {
         assert!(reject_batch_script_program(r"C:\scripts\run.cmd").is_err());
         assert!(reject_batch_script_program(r"C:\scripts\run.Cmd...  ").is_err());
         assert!(reject_batch_script_program("evil.bat . ").is_err());
+        // R3-P1-4: NTFS ADS and CR/LF rejection
+        assert!(reject_batch_script_program(r"C:\scripts\run.bat::$DATA").is_err());
+        assert!(reject_batch_script_program("evil.exe:stream").is_err());
+        assert!(reject_batch_script_program("cmd.exe\r\nevil").is_err());
     }
 }

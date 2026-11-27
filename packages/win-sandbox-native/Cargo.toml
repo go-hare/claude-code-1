@@ -9,6 +9,10 @@ publish = false
 name = "srt-win"
 path = "src-rust/main.rs"
 
+[features]
+default = []
+test-harness = []
+
 [dependencies]
 
 [profile.release]

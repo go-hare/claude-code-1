@@ -148,6 +148,7 @@ export type WindowsUninstallOptions = {
 export type WindowsSandboxNativeProvider = {
   kind: 'srt-win' | 'bun-ant' | 'custom'
   hasMxcSdk?: boolean
+  srtWinCommand?: { exe: string; prependArgs: string[] }
   checkStatus(opts?: { sublayerGuid?: string }): Promise<WindowsSandboxStatus>
   install(opts?: WindowsInstallOptions): Promise<{
     status: number
@@ -218,6 +219,7 @@ export type WindowsSandboxStartState = {
   selfExecGrantAttempt?: number
   profileReadWarnings: string[]
   mxcLocalConnectionsWarned?: boolean
+  lastKnownStatus?: WindowsSandboxStatus
 }
 
 export type WindowsMxcLastStart =
@@ -230,6 +232,8 @@ export type WindowsTlsTerminateCaSource =
   | { source: 'trustedPair'; caCertPath?: string; caKeyPath?: string }
   | { source: 'managed'; certPath: string; keyPath: string }
 
+export type WindowsIcaclsRunner = (icaclsPath: string, args: string[]) => void
+
 export type EnsurePersistentWindowsCaOptions = {
   dir?: string
   status?: WindowsSandboxStatus
@@ -237,6 +241,9 @@ export type EnsurePersistentWindowsCaOptions = {
   regenerateWithinDays?: number
   validityDays?: number
   nowMs?: number
+  /** Optional platform override / icacls runner for deterministic ACL hardening tests. */
+  platform?: NodeJS.Platform
+  icaclsRunner?: WindowsIcaclsRunner
 }
 
 export type EnsurePersistentWindowsCaResult = {
@@ -310,6 +317,7 @@ const providerSlotByHost = new HostSlot<ProviderHostEntry>(() => ({
 }))
 
 let processDefaultNativeProvider: WindowsSandboxNativeProvider | undefined
+let processAutoDiscoveryAttempted = false
 
 /**
  * Register a Windows sandbox native provider (e.g. `packages/win-sandbox-native`,
@@ -340,14 +348,23 @@ export function registerWindowsSandboxNativeProvider(
       entry.hasOverride = true
       entry.autoDiscoveryAttempted = true
     }
+    const startState = startStateSlotByHost.peek(host)
+    if (startState !== undefined) {
+      startState.lastKnownStatus = undefined
+    }
     return
   }
   processDefaultNativeProvider = provider ?? undefined
+  processAutoDiscoveryAttempted = false
   const entry = providerSlotByHost.peek(host)
   if (entry !== undefined) {
     entry.provider = undefined
     entry.hasOverride = false
     entry.autoDiscoveryAttempted = false
+  }
+  const startState = startStateSlotByHost.peek(host)
+  if (startState !== undefined) {
+    startState.lastKnownStatus = undefined
   }
 }
 
@@ -376,6 +393,7 @@ function mapSrtWinWfpState(
       return 'absent'
     case 'degraded':
       return 'partial'
+    case 'cannot-read':
     case 'unsupported':
       return 'cannot-read'
   }
@@ -474,9 +492,16 @@ export function adaptSrtWinNativeProvider(
   return {
     kind: 'srt-win',
     hasMxcSdk: opts?.hasMxcSdk ?? false,
+    srtWinCommand: srtProvider.srtWinCommand,
 
-    async checkStatus(): Promise<WindowsSandboxStatus> {
-      const status = await srtProvider.checkStatus()
+    async checkStatus(checkOpts?: {
+      sublayerGuid?: string
+    }): Promise<WindowsSandboxStatus> {
+      const status = await srtProvider.checkStatus(
+        checkOpts?.sublayerGuid !== undefined
+          ? { sublayerGuid: checkOpts.sublayerGuid }
+          : undefined,
+      )
       return mapSrtWinStatus(status)
     },
 
@@ -707,14 +732,22 @@ export function ensureDefaultWindowsSandboxNativeProvider(opts?: {
   if (existing !== undefined) {
     return existing
   }
-  if (opts === undefined && entry?.autoDiscoveryAttempted) {
+  if (
+    opts === undefined &&
+    (entry?.autoDiscoveryAttempted ||
+      (!hasActiveSessionAls() && processAutoDiscoveryAttempted))
+  ) {
     return undefined
   }
   const discovered = createDefaultWindowsSandboxNativeProvider(opts)
   if (discovered !== undefined) {
     registerWindowsSandboxNativeProvider(discovered)
-  } else if (opts === undefined && hasActiveSessionAls()) {
-    providerSlotByHost.of(host).autoDiscoveryAttempted = true
+  } else if (opts === undefined) {
+    if (hasActiveSessionAls()) {
+      providerSlotByHost.of(host).autoDiscoveryAttempted = true
+    } else {
+      processAutoDiscoveryAttempted = true
+    }
   }
   return discovered
 }
@@ -736,6 +769,7 @@ function createInitialStartState(): WindowsSandboxStartState {
     selfExecGrantAttempt: undefined,
     profileReadWarnings: [],
     mxcLocalConnectionsWarned: undefined,
+    lastKnownStatus: undefined,
   }
 }
 
@@ -1002,11 +1036,13 @@ export async function checkWindowsSandboxStatusAsync(opts?: {
       'status',
     )
   }
-  return provider.checkStatus(
+  const status = await provider.checkStatus(
     opts?.sublayerGuid !== undefined
       ? { sublayerGuid: opts.sublayerGuid }
       : undefined,
   )
+  windowsSandboxStartStore.get().lastKnownStatus = status
+  return status
 }
 
 export async function installWindowsSandboxAsync(
@@ -1034,6 +1070,7 @@ export async function installWindowsSandboxAsync(
       ? { sublayerGuid: opts.sublayerGuid }
       : undefined,
   )
+  windowsSandboxStartStore.get().lastKnownStatus = status
   return cancelled ? { ...status, cancelled: true } : status
 }
 
@@ -1056,6 +1093,9 @@ export async function uninstallWindowsSandbox(
       result.stdout.trim() ||
       `Windows sandbox uninstall failed with exit code ${result.status}`
     throw new WindowsSandboxError('uninstall_failed', detail, 'uninstall')
+  }
+  if (!cancelled) {
+    windowsSandboxStartStore.get().lastKnownStatus = undefined
   }
   return cancelled
     ? { cancelled: true, stdout: result.stdout, stderr: result.stderr }
@@ -1323,7 +1363,7 @@ function generateSelfSignedCaCertAndKey(opts: {
 
 function getDefaultWindowsCaDir(): string {
   const programData = process.env.ProgramData || 'C:\\ProgramData'
-  return join(programData, 'claude-sandbox-runtime', 'ca')
+  return join(programData, 'sandbox-runtime', 'ca')
 }
 
 function computeBufferSha256Hex(buf: Buffer | string): string {
@@ -1353,6 +1393,61 @@ function writeFileAtomically(
   }
 }
 
+function resolveWindowsRealUserSid(
+  candidateSid?: string,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  const trimmed = candidateSid?.trim()
+  if (trimmed && WINDOWS_USER_SID_RE.test(trimmed)) {
+    return trimmed
+  }
+  if (platform !== 'win32') {
+    return undefined
+  }
+  try {
+    const systemRoot = process.env.SystemRoot || 'C:\\Windows'
+    const whoamiPath = join(systemRoot, 'System32', 'whoami.exe')
+    const out = execFileSync(whoamiPath, ['/user', '/fo', 'csv', '/nh'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 5_000,
+    })
+    const match = out.match(/S-1-5-21-\d+-\d+-\d+-\d+/)
+    if (match && WINDOWS_USER_SID_RE.test(match[0])) {
+      return match[0]
+    }
+  } catch {
+    // Fall through if whoami.exe is unavailable
+  }
+  return undefined
+}
+
+function defaultWindowsIcaclsRunner(icaclsPath: string, args: string[]): void {
+  execFileSync(icaclsPath, args, {
+    stdio: 'ignore',
+    windowsHide: true,
+    timeout: 5_000,
+  })
+}
+
+export function buildWindowsCaDirIcaclsArgs(
+  dirPath: string,
+  realUserSid?: string,
+): string[] {
+  const args = [
+    dirPath,
+    '/inheritance:r',
+    '/grant:r',
+    '*S-1-5-18:(OI)(CI)F',
+    '/grant:r',
+    '*S-1-5-32-544:(OI)(CI)F',
+  ]
+  if (realUserSid && WINDOWS_USER_SID_RE.test(realUserSid)) {
+    args.push('/grant:r', `*${realUserSid}:(OI)(CI)F`)
+  }
+  return args
+}
+
 export function buildWindowsKeyFileIcaclsArgs(
   keyPath: string,
   realUserSid?: string,
@@ -1371,26 +1466,56 @@ export function buildWindowsKeyFileIcaclsArgs(
   return args
 }
 
-function hardenWindowsKeyFileAcl(keyPath: string, realUserSid?: string): void {
-  if (process.platform !== 'win32') {
+export function hardenWindowsCaDirAcl(
+  dirPath: string,
+  realUserSid?: string,
+  opts?: {
+    platform?: NodeJS.Platform
+    icaclsRunner?: WindowsIcaclsRunner
+  },
+): void {
+  const platform = opts?.platform ?? process.platform
+  if (platform !== 'win32') {
     return
   }
   const systemRoot = process.env.SystemRoot || 'C:\\Windows'
   const icaclsPath = join(systemRoot, 'System32', 'icacls.exe')
+  const runner = opts?.icaclsRunner ?? defaultWindowsIcaclsRunner
+  const resolvedSid = resolveWindowsRealUserSid(realUserSid, platform)
   try {
-    execFileSync(
-      icaclsPath,
-      buildWindowsKeyFileIcaclsArgs(keyPath, realUserSid),
-      {
-        stdio: 'ignore',
-        windowsHide: true,
-        timeout: 5_000,
-      },
-    )
+    runner(icaclsPath, buildWindowsCaDirIcaclsArgs(dirPath, resolvedSid))
   } catch (err) {
-    logForDebugging(
-      `[sandbox] Best-effort icacls.exe ACL tightening on Windows CA key failed: ${errorMessage(err)}`,
-      { level: 'warn' },
+    throw new WindowsSandboxError(
+      'ca_acl_failed',
+      `Failed to harden Windows CA directory ACL on '${dirPath}': ${errorMessage(err)}`,
+      'ca',
+    )
+  }
+}
+
+export function hardenWindowsKeyFileAcl(
+  keyPath: string,
+  realUserSid?: string,
+  opts?: {
+    platform?: NodeJS.Platform
+    icaclsRunner?: WindowsIcaclsRunner
+  },
+): void {
+  const platform = opts?.platform ?? process.platform
+  if (platform !== 'win32') {
+    return
+  }
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows'
+  const icaclsPath = join(systemRoot, 'System32', 'icacls.exe')
+  const runner = opts?.icaclsRunner ?? defaultWindowsIcaclsRunner
+  const resolvedSid = resolveWindowsRealUserSid(realUserSid, platform)
+  try {
+    runner(icaclsPath, buildWindowsKeyFileIcaclsArgs(keyPath, resolvedSid))
+  } catch (err) {
+    throw new WindowsSandboxError(
+      'ca_acl_failed',
+      `Failed to harden Windows CA key file ACL on '${keyPath}': ${errorMessage(err)}`,
+      'ca',
     )
   }
 }
@@ -1488,6 +1613,13 @@ export async function ensurePersistentWindowsCa(
   }
 
   mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const aclOpts =
+    opts?.platform !== undefined || opts?.icaclsRunner !== undefined
+      ? { platform: opts?.platform, icaclsRunner: opts?.icaclsRunner }
+      : undefined
+  // R3-P0-4: Harden ca/ directory ACL BEFORE writing any key.pem temp file on Windows.
+  hardenWindowsCaDirAcl(dir, status.user.realUserSid, aclOpts)
+
   const generated = generateSelfSignedCaCertAndKey({ nowMs, validityDays })
   const fingerprint = computeBufferSha256Hex(generated.certPem)
   const metadata: WindowsCaMetadata = {
@@ -1497,7 +1629,7 @@ export async function ensurePersistentWindowsCa(
   }
 
   writeFileAtomically(keyPath, generated.keyPem, 0o600, tmpPath => {
-    hardenWindowsKeyFileAcl(tmpPath, status.user.realUserSid)
+    hardenWindowsKeyFileAcl(tmpPath, status.user.realUserSid, aclOpts)
   })
   writeFileAtomically(certPath, generated.certPem, 0o644)
   writeFileAtomically(metaPath, `${JSON.stringify(metadata, null, 2)}\n`, 0o644)
@@ -1524,9 +1656,12 @@ export function resolveWindowsTlsTerminateCaSource(opts?: {
     return { source: 'unavailable' }
   }
   const tlsTerminate = readTrustedTlsTerminateSetting()
+  // R3-P2-3: Require BOTH caCertPath and caKeyPath to form a valid trustedPair.
   if (
-    tlsTerminate?.caCertPath !== undefined ||
-    tlsTerminate?.caKeyPath !== undefined
+    typeof tlsTerminate?.caCertPath === 'string' &&
+    tlsTerminate.caCertPath.trim().length > 0 &&
+    typeof tlsTerminate?.caKeyPath === 'string' &&
+    tlsTerminate.caKeyPath.trim().length > 0
   ) {
     return {
       source: 'trustedPair',
@@ -1848,7 +1983,9 @@ export function runWindowsSandboxInstallFlow(
   promise = (async (): Promise<WindowsSandboxInstallFlowResult> => {
     try {
       const provider =
-        opts?.provider ?? getWindowsSandboxNativeProvider(targetHost)
+        opts?.provider ??
+        getWindowsSandboxNativeProvider(targetHost) ??
+        ensureDefaultWindowsSandboxNativeProvider()
       const allowLoopback =
         opts?.allowLoopback ?? areWindowsLocalConnectionsOn()
       onProgress?.('Installing Windows sandbox account and WFP rules...')

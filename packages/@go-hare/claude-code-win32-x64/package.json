@@ -10,7 +10,8 @@
   ],
   "files": [
     "claude.exe",
-    "vendor/ripgrep/x64-win32/rg.exe"
+    "vendor/ripgrep/x64-win32/rg.exe",
+    "vendor/win-sandbox/srt-win.exe"
   ],
   "preferUnplugged": true,
   "license": "SEE LICENSE IN README.md",

@@ -96,23 +96,45 @@ const clipboardImageDir = join(outdir, 'vendor', 'clipboard-image')
 await cp('vendor/clipboard-image', clipboardImageDir, { recursive: true })
 console.log(`Copied vendor/clipboard-image/ → ${clipboardImageDir}/`)
 
-// Copy optional win-sandbox-native binary (`srt-win.exe` or `srt-win`) if built
-for (const binName of ['srt-win.exe', 'srt-win'] as const) {
-  const srcPath = join(
+// Copy optional win-sandbox-native Windows PE binary (`srt-win.exe`) ONLY — never
+// ship non-Windows macOS/Linux `srt-win` binaries into `dist/vendor/win-sandbox/`.
+const winSandboxDir = join(outdir, 'vendor', 'win-sandbox')
+const staleNonPeBin = join(winSandboxDir, 'srt-win')
+if (existsSync(staleNonPeBin)) {
+  rmSync(staleNonPeBin, { force: true })
+}
+const winSandboxCandidates = [
+  join(
     'packages',
     'win-sandbox-native',
     'target',
+    'x86_64-pc-windows-msvc',
     'release',
-    binName,
-  )
-  if (existsSync(srcPath)) {
-    const winSandboxDir = join(outdir, 'vendor', 'win-sandbox')
-    const destPath = join(winSandboxDir, binName)
+    'srt-win.exe',
+  ),
+  join(
+    'packages',
+    'win-sandbox-native',
+    'target',
+    'x86_64-pc-windows-gnu',
+    'release',
+    'srt-win.exe',
+  ),
+  join('packages', 'win-sandbox-native', 'target', 'release', 'srt-win.exe'),
+]
+const srcPath = winSandboxCandidates.find(candidate => existsSync(candidate))
+if (srcPath && existsSync(srcPath)) {
+  const header = await readFile(srcPath)
+  const hasPeMzMagic =
+    header.length >= 2 && header[0] === 0x4d && header[1] === 0x5a
+  if (!hasPeMzMagic) {
+    console.warn(
+      `Skipping invalid non-PE win-sandbox-native binary at ${srcPath} (missing MZ header)`,
+    )
+  } else {
+    const destPath = join(winSandboxDir, 'srt-win.exe')
     await mkdir(winSandboxDir, { recursive: true })
     await cp(srcPath, destPath)
-    if (!binName.endsWith('.exe')) {
-      chmodSync(destPath, 0o755)
-    }
     console.log(`Copied win-sandbox-native → ${destPath}`)
   }
 }

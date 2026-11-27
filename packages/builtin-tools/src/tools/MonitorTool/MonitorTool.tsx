@@ -81,10 +81,11 @@ const WILDCARD_RULE_CONTENT_RE = /^[\s*]+$/;
 export function isMonitorPlatformEnabled(
   platform: string = getPlatform(),
   gitBashPath: string | null = platform === 'windows' ? findGitBashPathOrNull() : '',
-  bashWithheldForMxc: boolean = SandboxManager.isBashToolWithheldForMxcBackend(),
+  bashWithheldForMxc?: boolean,
 ): boolean {
   if (platform !== 'windows') return true;
-  if (bashWithheldForMxc) return false;
+  const withheld = bashWithheldForMxc ?? SandboxManager.isBashToolWithheldForMxcBackend();
+  if (withheld) return false;
   return gitBashPath !== null;
 }
 

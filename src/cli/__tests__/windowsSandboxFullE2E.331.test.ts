@@ -43,11 +43,21 @@ import {
 } from '../handlers/sandbox.js'
 
 const REPO_ROOT = resolve(import.meta.dir, '../../..')
-const SRT_WIN_BIN_PATH = resolve(
+const SRT_WIN_BIN_NAME =
+  process.platform === 'win32' ? 'srt-win.exe' : 'srt-win'
+const SRT_WIN_DEBUG_BIN_PATH = resolve(
+  REPO_ROOT,
+  'packages/win-sandbox-native/target/debug',
+  SRT_WIN_BIN_NAME,
+)
+const SRT_WIN_RELEASE_BIN_PATH = resolve(
   REPO_ROOT,
   'packages/win-sandbox-native/target/release',
-  process.platform === 'win32' ? 'srt-win.exe' : 'srt-win',
+  SRT_WIN_BIN_NAME,
 )
+const SRT_WIN_BIN_PATH = existsSync(SRT_WIN_DEBUG_BIN_PATH)
+  ? SRT_WIN_DEBUG_BIN_PATH
+  : SRT_WIN_RELEASE_BIN_PATH
 
 const tempDirs: string[] = []
 
@@ -677,5 +687,158 @@ describe('Official 2.1.331 Windows Sandbox Full E2E (Real Rust srt-win + CLI + T
       )
       expect(output).not.toContain('only supported on macOS, Linux, and WSL2')
     })
+  })
+
+  test('8. R3-P1-2, R3-P1-3, R3-P1-6, R3-P2-3, R3-P1-1, R3-P0-6: sync status accuracy, MonitorTool non-Windows fast path, cannot-read uninstall handling, and PE packaging', async () => {
+    // R3-P1-3: isMonitorPlatformEnabled on non-Windows returns true WITHOUT calling isBashToolWithheldForMxcBackend
+    const origWithheld = SandboxManager.isBashToolWithheldForMxcBackend
+    let withheldCalls = 0
+    ;(
+      SandboxManager as {
+        isBashToolWithheldForMxcBackend: () => boolean
+      }
+    ).isBashToolWithheldForMxcBackend = () => {
+      withheldCalls++
+      return origWithheld()
+    }
+    try {
+      expect(isMonitorPlatformEnabled('macos')).toBe(true)
+      expect(isMonitorPlatformEnabled('linux')).toBe(true)
+      expect(withheldCalls).toBe(0)
+    } finally {
+      ;(
+        SandboxManager as {
+          isBashToolWithheldForMxcBackend: () => boolean
+        }
+      ).isBashToolWithheldForMxcBackend = origWithheld
+    }
+
+    // R3-P1-2 & R3-P2-3: sync getSandboxStatusPayload does NOT assume installed:true for sandboxuser before verification
+    await runWithNewHostSession({}, async () => {
+      getPlatform.cache.set(undefined, 'windows')
+      let provisioned = false
+      const mockProvider: WindowsSandboxNativeProvider = {
+        kind: 'custom',
+        hasMxcSdk: false,
+        checkStatus: async () => ({
+          user: {
+            provisioned,
+            credPresent: provisioned,
+            realUserSid: 'S-1-5-21-1-2-3-1001',
+            sandboxUser: provisioned ? 'claude_srt' : undefined,
+            seclogonState: 'running',
+          },
+          wfp: {
+            state: provisioned ? 'installed' : 'absent',
+            allowLoopback: provisioned,
+            sublayerGuid: undefined,
+            proxyPortRange: WINDOWS_SANDBOX_DEFAULT_PROXY_PORT_RANGE,
+          },
+        }),
+        install: async () => {
+          provisioned = true
+          return { status: 0, stdout: 'ok', stderr: '' }
+        },
+        uninstall: async () => ({ status: 0, stdout: 'ok', stderr: '' }),
+      }
+      registerWindowsSandboxNativeProvider(mockProvider)
+      seedHostSettings({
+        userSettings: {
+          sandbox: { enabled: true, windows: { backend: 'sandboxuser' } },
+        },
+        merged: {
+          sandbox: { enabled: true, windows: { backend: 'sandboxuser' } },
+        },
+      })
+
+      // Before any async check: installed MUST be false (never equated to deps.errors.length === 0!)
+      const syncBeforeCheck = getSandboxStatusPayload()
+      expect(syncBeforeCheck.available).toBe(true)
+      expect(syncBeforeCheck.installed).toBe(false)
+      expect(syncBeforeCheck.filesystemPolicy).toBeDefined()
+
+      // After install + async status check: cached status makes sync status report installed: true
+      provisioned = true
+      await getSandboxStatusPayloadAsync()
+      const syncAfterCheck = getSandboxStatusPayload()
+      expect(syncAfterCheck.installed).toBe(true)
+    })
+
+    // R3-P1-6: runSandboxUninstallAsync proceeds when before.wfp.state === 'cannot-read'
+    // and returns 'partial' when after.wfp.state === 'cannot-read'
+    await runWithNewHostSession({}, async () => {
+      getPlatform.cache.set(undefined, 'windows')
+      let uninstallInvoked = false
+      let afterWfpState: 'absent' | 'cannot-read' = 'cannot-read'
+      const cannotReadProvider: WindowsSandboxNativeProvider = {
+        kind: 'custom',
+        hasMxcSdk: false,
+        checkStatus: async () => ({
+          user: {
+            provisioned: false,
+            credPresent: false,
+            seclogonState: 'running',
+          },
+          wfp: {
+            state: uninstallInvoked ? afterWfpState : 'cannot-read',
+          },
+        }),
+        install: async () => ({ status: 0, stdout: '', stderr: '' }),
+        uninstall: async () => {
+          uninstallInvoked = true
+          return { status: 0, stdout: '', stderr: '' }
+        },
+      }
+      registerWindowsSandboxNativeProvider(cannotReadProvider)
+
+      const partialUninstall = await runSandboxUninstallAsync()
+      expect(uninstallInvoked).toBe(true)
+      expect(partialUninstall.status).toBe('partial')
+      expect(partialUninstall.filtersChecked).toBe(false)
+      expect(
+        partialUninstall.leftBehind.some(item => item.includes('cannot-read')),
+      ).toBe(true)
+
+      // When after.wfp.state === 'absent', uninstall completes cleanly with 'ok'
+      uninstallInvoked = false
+      afterWfpState = 'absent'
+      const cleanUninstall = await runSandboxUninstallAsync()
+      expect(uninstallInvoked).toBe(true)
+      expect(cleanUninstall.status).toBe('ok')
+      expect(cleanUninstall.leftBehind).toEqual([])
+      expect(cleanUninstall.filtersChecked).toBe(true)
+    })
+
+    // R3-P0-6 & R3-P1-1: win32 package.json manifests include srt-win.exe; build.ts checks MZ; publish.ts checks COFF Machine
+    const winX64Pkg = JSON.parse(
+      readFileSync(
+        join(REPO_ROOT, 'packages/@go-hare/claude-code-win32-x64/package.json'),
+        'utf8',
+      ),
+    ) as { files: string[] }
+    const winArm64Pkg = JSON.parse(
+      readFileSync(
+        join(
+          REPO_ROOT,
+          'packages/@go-hare/claude-code-win32-arm64/package.json',
+        ),
+        'utf8',
+      ),
+    ) as { files: string[] }
+    expect(winX64Pkg.files).toContain('vendor/win-sandbox/srt-win.exe')
+    expect(winArm64Pkg.files).toContain('vendor/win-sandbox/srt-win.exe')
+
+    const buildSrc = readFileSync(join(REPO_ROOT, 'build.ts'), 'utf8')
+    expect(buildSrc).toContain('0x4d')
+    expect(buildSrc).toContain('0x5a')
+
+    const publishSrc = readFileSync(
+      join(REPO_ROOT, 'scripts/publish.ts'),
+      'utf8',
+    )
+    expect(publishSrc).toContain('0x8664')
+    expect(publishSrc).toContain('0xaa64')
+    expect(publishSrc).toContain('x86_64-pc-windows-msvc')
+    expect(publishSrc).toContain('aarch64-pc-windows-msvc')
   })
 })

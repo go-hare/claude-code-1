@@ -1,6 +1,7 @@
 use crate::protocol::{
-    DeniesRequest, DeniesResponse, MxcProbeResponse, MxcProbes, MxcUiCapabilities,
-    ProfileForgetResponse, StatusResponse, UserStatus, WfpStatus, WfpVerifyResponse,
+    json_escape_string, parse_json, DeniesRequest, DeniesResponse, MxcProbeResponse, MxcProbes,
+    MxcUiCapabilities, ProfileForgetResponse, StatusResponse, UserStatus, WfpStatus,
+    WfpVerifyResponse,
 };
 use crate::security::{
     build_windows_command_line, reject_batch_script_program, sanitize_path, validate_guid,
@@ -9,6 +10,20 @@ use crate::security::{
     DEFAULT_PROXY_PORT_START, DEFAULT_SANDBOX_USERNAME, DEFAULT_WFP_SUBLAYER_GUID,
     EXIT_RUNTIME_ERROR, EXIT_UAC_CANCELLED, EXIT_VALIDATION, EXIT_WFP_ERROR,
 };
+use std::collections::BTreeMap;
+
+/// Canonical `%ProgramData%` subdirectory name aligned with `@anthropic-ai/sandbox-runtime`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const CANONICAL_STATE_DIR_NAME: &str = "sandbox-runtime";
+
+/// Comprehensive NTFS deny-write permission mask preventing modification, deletion,
+/// child deletion, rename, DACL tampering, and ownership takeover on protected targets.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const DENY_WRITE_PERM: &str = "(W,D,DC,WDAC,WO)";
+
+/// Winsock `WSAEACCES` (10013) — returned when a WFP ALE_AUTH_CONNECT block filter rejects connect().
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const WSAEACCES: i32 = 10013;
 
 #[derive(Debug, Clone)]
 pub struct BackendError {
@@ -31,6 +46,7 @@ impl BackendError {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn uac_cancelled(message: impl Into<String>) -> Self {
         Self {
             exit_code: EXIT_UAC_CANCELLED,
@@ -46,6 +62,11 @@ impl BackendError {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct StatusOptions {
+    pub sublayer_guid: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
     pub sandbox_user: String,
@@ -53,6 +74,7 @@ pub struct InstallOptions {
     pub sublayer_guid: String,
     pub proxy_port_range: [u16; 2],
     pub allow_loopback: bool,
+    pub uac_child: bool,
 }
 
 impl Default for InstallOptions {
@@ -63,6 +85,7 @@ impl Default for InstallOptions {
             sublayer_guid: DEFAULT_WFP_SUBLAYER_GUID.to_string(),
             proxy_port_range: [DEFAULT_PROXY_PORT_START, DEFAULT_PROXY_PORT_END],
             allow_loopback: true,
+            uac_child: false,
         }
     }
 }
@@ -71,6 +94,7 @@ impl Default for InstallOptions {
 pub struct UninstallOptions {
     pub sandbox_user: String,
     pub sublayer_guid: String,
+    pub uac_child: bool,
 }
 
 impl Default for UninstallOptions {
@@ -78,6 +102,7 @@ impl Default for UninstallOptions {
         Self {
             sandbox_user: DEFAULT_SANDBOX_USERNAME.to_string(),
             sublayer_guid: DEFAULT_WFP_SUBLAYER_GUID.to_string(),
+            uac_child: false,
         }
     }
 }
@@ -108,10 +133,20 @@ pub struct RunOptions {
     pub proxy_port: Option<u16>,
     pub http_proxy: Option<String>,
     pub https_proxy: Option<String>,
+    pub sublayer_guid: Option<String>,
+    pub no_net: bool,
+    pub extra_env: Vec<(String, String)>,
     pub allow_loopback: bool,
     pub block_clipboard_read: bool,
     pub block_clipboard_write: bool,
     pub block_input_injection: bool,
+}
+
+pub fn validate_status_options(opts: &StatusOptions) -> Result<(), BackendError> {
+    if let Some(ref guid) = opts.sublayer_guid {
+        validate_guid(guid).map_err(BackendError::validation)?;
+    }
+    Ok(())
 }
 
 pub fn validate_install_options(opts: &InstallOptions) -> Result<(), BackendError> {
@@ -166,12 +201,17 @@ pub struct ValidatedRunOptions {
     pub cwd: Option<String>,
     pub http_proxy: Option<String>,
     pub https_proxy: Option<String>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub sublayer_guid: Option<String>,
 }
 
 pub fn validate_run_options(opts: &RunOptions) -> Result<ValidatedRunOptions, BackendError> {
     reject_batch_script_program(&opts.program).map_err(BackendError::validation)?;
     if let Some(port) = opts.proxy_port {
         validate_proxy_port(port).map_err(BackendError::validation)?;
+    }
+    if let Some(ref guid) = opts.sublayer_guid {
+        validate_guid(guid).map_err(BackendError::validation)?;
     }
     let cwd = match opts.cwd.as_deref() {
         Some(raw_cwd) => Some(sanitize_path(raw_cwd).map_err(BackendError::validation)?),
@@ -185,6 +225,19 @@ pub fn validate_run_options(opts: &RunOptions) -> Result<ValidatedRunOptions, Ba
         Some(raw) => Some(validate_proxy_url(raw).map_err(BackendError::validation)?),
         None => None,
     };
+    for (k, v) in &opts.extra_env {
+        if k.is_empty()
+            || k.contains('=')
+            || k.contains('\0')
+            || k.contains('\r')
+            || k.contains('\n')
+            || v.contains('\0')
+        {
+            return Err(BackendError::validation(format!(
+                "Invalid environment override key '{k}'"
+            )));
+        }
+    }
     let default_url = opts
         .proxy_port
         .map(|port| format!("http://127.0.0.1:{port}"));
@@ -197,6 +250,7 @@ pub fn validate_run_options(opts: &RunOptions) -> Result<ValidatedRunOptions, Ba
         cwd,
         http_proxy,
         https_proxy,
+        sublayer_guid: opts.sublayer_guid.clone(),
     })
 }
 
@@ -234,6 +288,132 @@ pub fn icacls_perm_arg(sid_arg: &str, perm: &str, is_dir: bool) -> String {
     }
 }
 
+/// Builds `icacls.exe` arguments to harden the `ProgramData\sandbox-runtime` state
+/// directory so only `SYSTEM`, `Administrators`, and the validated real user SID
+/// have access (removing inherited `Users` write access).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn build_state_dir_icacls_args(dir: &str, real_user_sid: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        dir.to_string(),
+        "/inheritance:r".to_string(),
+        "/grant:r".to_string(),
+        "*S-1-5-18:(OI)(CI)F".to_string(),
+        "/grant:r".to_string(),
+        "*S-1-5-32-544:(OI)(CI)F".to_string(),
+    ];
+    if let Some(sid) = real_user_sid {
+        if validate_windows_sid(sid).is_ok() {
+            args.push("/grant:r".to_string());
+            args.push(format!("*{sid}:(OI)(CI)F"));
+        }
+    }
+    args
+}
+
+/// Normalizes a Windows path for case-insensitive key comparisons (`\` separators,
+/// ASCII-lowercased, trailing backslash trimmed except for drive roots like `c:\`).
+pub fn normalize_windows_path_key(path: &str) -> String {
+    let mut norm = path.replace('/', "\\").to_ascii_lowercase();
+    while norm.len() > 3 && norm.ends_with('\\') {
+        norm.pop();
+    }
+    norm
+}
+
+/// Builds a normalized tracked-ACL key (`R:<lower>`, `W:<lower>`, or `A:<lower>`).
+pub fn normalize_tracked_acl_key(prefix: char, path: &str) -> String {
+    format!("{prefix}:{}", normalize_windows_path_key(path))
+}
+
+/// Checks whether `target` is equal to or strictly inside any `allow_write` root
+/// using case-insensitive segment-boundary matching (so `C:\work2` is NOT under `C:\work`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn find_matching_allow_write_root<'a>(
+    target: &str,
+    allow_writes: &'a [String],
+) -> Option<&'a str> {
+    let target_norm = normalize_windows_path_key(target);
+    for root in allow_writes {
+        let root_norm = normalize_windows_path_key(root);
+        if target_norm == root_norm {
+            return Some(root.as_str());
+        }
+        let prefix_with_sep = if root_norm.ends_with('\\') {
+            root_norm
+        } else {
+            format!("{root_norm}\\")
+        };
+        if target_norm.starts_with(&prefix_with_sep) {
+            return Some(root.as_str());
+        }
+    }
+    None
+}
+
+/// Parses tracked ACL entries from `denies.json`, supporting both the current
+/// object format (`{ "R:c:\\...": "C:\\..." }`) and legacy array format (`["R:C:\\..."]`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn parse_tracked_acl_map(raw: &str) -> BTreeMap<String, String> {
+    let Ok(val) = parse_json(raw) else {
+        return BTreeMap::new();
+    };
+    let mut map = BTreeMap::new();
+    if let Some(obj) = val.as_object() {
+        for (k, v) in obj {
+            if let Some(orig) = v.as_str() {
+                if let Some((prefix, _)) = k.split_once(':') {
+                    if let Some(ch) = prefix.chars().next() {
+                        if prefix.len() == 1 && matches!(ch, 'R' | 'W' | 'A') {
+                            map.insert(normalize_tracked_acl_key(ch, orig), orig.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    } else if let Some(items) = val.as_array() {
+        for item in items {
+            if let Some(entry) = item.as_str() {
+                if let Some((prefix, orig)) = entry.split_once(':') {
+                    if let Some(ch) = prefix.chars().next() {
+                        if prefix.len() == 1 && matches!(ch, 'R' | 'W' | 'A') {
+                            map.insert(normalize_tracked_acl_key(ch, orig), orig.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
+/// Serializes tracked ACL map (`normalized_key -> original_path`) to JSON.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn serialize_tracked_acl_map(map: &BTreeMap<String, String>) -> String {
+    let mut out = String::from("{");
+    for (idx, (k, v)) in map.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        out.push_str(&json_escape_string(k));
+        out.push(':');
+        out.push_str(&json_escape_string(v));
+    }
+    out.push('}');
+    out
+}
+
+/// Classifies a `TcpStream::connect_timeout` OS error during `wfp verify`:
+/// `WSAEACCES (10013)` indicates active WFP block enforcement (`"blocked"`);
+/// timeouts or network-unreachable errors are inconclusive (`"not-run"`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn classify_wfp_connect_error(raw_os_error: Option<i32>) -> &'static str {
+    if raw_os_error == Some(WSAEACCES) {
+        "blocked"
+    } else {
+        "not-run"
+    }
+}
+
 /// Returns `true` if an environment variable name holds credentials or secrets
 /// that must never be forwarded into a sandboxed child process.
 pub fn is_sensitive_env_var(key: &str) -> bool {
@@ -268,8 +448,26 @@ pub fn is_sensitive_env_var(key: &str) -> bool {
         || upper.ends_with("_PRIVATE_KEY")
 }
 
+/// Safe CA trust-bundle and proxy variables that may be forwarded from the parent
+/// environment into the sandboxed child process.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn is_safe_ca_or_proxy_env_var(key: &str) -> bool {
+    const CA_AND_PROXY_ALLOWLIST: &[&str] = &[
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_FILE",
+        "CURL_CA_BUNDLE",
+        "REQUESTS_CA_BUNDLE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    ];
+    let upper = key.to_ascii_uppercase();
+    CA_AND_PROXY_ALLOWLIST.contains(&upper.as_str())
+}
+
 /// Filters environment variables to a minimal safe allowlist when `CreateEnvironmentBlock`
-/// is unavailable, ensuring host secrets are never inherited by sandboxed processes.
+/// is unavailable, ensuring host secrets and inaccessible host user `TEMP`/`TMP`
+/// paths are never inherited by sandboxed processes.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub fn filter_safe_fallback_env(vars: Vec<(String, String)>) -> Vec<(String, String)> {
     const SAFE_ALLOWLIST: &[&str] = &[
@@ -278,8 +476,6 @@ pub fn filter_safe_fallback_env(vars: Vec<(String, String)>) -> Vec<(String, Str
         "COMSPEC",
         "PATHEXT",
         "PATH",
-        "TEMP",
-        "TMP",
         "OS",
         "PROCESSOR_ARCHITECTURE",
         "NUMBER_OF_PROCESSORS",
@@ -288,6 +484,13 @@ pub fn filter_safe_fallback_env(vars: Vec<(String, String)>) -> Vec<(String, Str
         "PROGRAMFILES(X86)",
         "COMMONPROGRAMFILES",
         "PROGRAMDATA",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_FILE",
+        "CURL_CA_BUNDLE",
+        "REQUESTS_CA_BUNDLE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
     ];
     vars.into_iter()
         .filter(|(k, _)| {
@@ -304,9 +507,10 @@ pub fn filter_safe_fallback_env(vars: Vec<(String, String)>) -> Vec<(String, Str
 #[cfg(windows)]
 mod platform {
     use super::*;
-    use crate::protocol::{json_string_array, parse_json};
-    use crate::security::canonicalize_path_best_effort;
-    use std::collections::BTreeSet;
+    use crate::protocol::JsonValue;
+    use crate::security::{
+        canonicalize_path_best_effort, quote_windows_arg, reject_symlinks_and_reparse_points,
+    };
     use std::ffi::{c_void, OsStr};
     use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
     use std::os::windows::ffi::OsStrExt;
@@ -331,15 +535,34 @@ mod platform {
     const TOKEN_QUERY: Dword = 0x0008;
     const TOKEN_DUPLICATE: Dword = 0x0002;
     const TOKEN_USER_INFO_CLASS: Dword = 1;
+    const TOKEN_ELEVATION_INFO_CLASS: Dword = 20;
+    const TOKEN_INTEGRITY_LEVEL_INFO_CLASS: Dword = 25;
+    const SE_GROUP_INTEGRITY: Dword = 0x0000_0020;
 
     const DISABLE_MAX_PRIVILEGE: Dword = 0x1;
     const WRITE_RESTRICTED: Dword = 0x8;
 
     const LOGON32_LOGON_INTERACTIVE: Dword = 2;
     const LOGON32_PROVIDER_DEFAULT: Dword = 0;
+    const LOGON_WITH_PROFILE: Dword = 0x0000_0001;
 
     const CREATE_SUSPENDED: Dword = 0x0000_0004;
     const CREATE_UNICODE_ENVIRONMENT: Dword = 0x0000_0400;
+
+    const STARTF_USESTDHANDLES: Dword = 0x0000_0100;
+    const STD_INPUT_HANDLE: Dword = (-10i32) as Dword;
+    const STD_OUTPUT_HANDLE: Dword = (-11i32) as Dword;
+    const STD_ERROR_HANDLE: Dword = (-12i32) as Dword;
+    const HANDLE_FLAG_INHERIT: Dword = 0x0000_0001;
+    const INVALID_HANDLE_VALUE: Handle = (-1isize) as Handle;
+
+    const SEE_MASK_NOCLOSEPROCESS: Dword = 0x0000_0040;
+    const SEE_MASK_NO_CONSOLE: Dword = 0x0000_8000;
+    const SW_HIDE: i32 = 0;
+
+    const POLICY_CREATE_ACCOUNT: Dword = 0x0000_0010;
+    const POLICY_LOOKUP_NAMES: Dword = 0x0000_0800;
+    const STATUS_SUCCESS: i32 = 0;
 
     const JOB_OBJECT_BASIC_UI_RESTRICTIONS: Dword = 4;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: Dword = 9;
@@ -352,14 +575,17 @@ mod platform {
     const JOB_OBJECT_UILIMIT_DESKTOP: Dword = 0x0000_0040;
 
     const SC_MANAGER_CONNECT: Dword = 0x0001;
+    const SERVICE_QUERY_CONFIG: Dword = 0x0001;
     const SERVICE_QUERY_STATUS: Dword = 0x0004;
     const SERVICE_STOPPED: Dword = 1;
     const SERVICE_RUNNING: Dword = 4;
+    const SERVICE_DISABLED: Dword = 4;
 
     const CRED_TYPE_GENERIC: Dword = 1;
     const CRED_PERSIST_LOCAL_MACHINE: Dword = 2;
 
     const ERROR_ACCESS_DENIED: Dword = 5;
+    const ERROR_INSUFFICIENT_BUFFER: Dword = 122;
     const ERROR_NOT_FOUND: Dword = 1168;
     const ERROR_CANCELLED: Dword = 1223;
     const E_ACCESSDENIED: Dword = 0x8007_0005;
@@ -381,6 +607,8 @@ mod platform {
     const FWP_ACTRL_MATCH: Dword = 0x0000_0001;
 
     const RPC_C_AUTHN_WINNT: Dword = 10;
+    const FWPM_SUBLAYER_FLAG_PERSISTENT: u32 = 0x0000_0001;
+    const FWPM_FILTER_FLAG_PERSISTENT: u32 = 0x0000_0001;
     const FWP_E_FILTER_NOT_FOUND: Dword = 0x8032_0003;
     const FWP_E_SUBLAYER_NOT_FOUND: Dword = 0x8032_0007;
 
@@ -448,6 +676,66 @@ mod platform {
     #[repr(C)]
     struct TokenUser {
         user: SidAndAttributes,
+    }
+
+    #[repr(C)]
+    struct TokenElevation {
+        token_is_elevated: Dword,
+    }
+
+    #[repr(C)]
+    struct TokenMandatoryLabel {
+        label: SidAndAttributes,
+    }
+
+    #[repr(C)]
+    struct LsaUnicodeString {
+        length: u16,
+        maximum_length: u16,
+        buffer: Lpwstr,
+    }
+
+    #[repr(C)]
+    struct LsaObjectAttributes {
+        length: Dword,
+        root_directory: Handle,
+        object_name: *mut LsaUnicodeString,
+        attributes: Dword,
+        security_descriptor: *mut c_void,
+        security_quality_of_service: *mut c_void,
+    }
+
+    #[repr(C)]
+    #[allow(dead_code)]
+    struct QueryServiceConfigW {
+        dw_service_type: Dword,
+        dw_start_type: Dword,
+        dw_error_control: Dword,
+        lp_binary_path_name: Lpwstr,
+        lp_load_order_group: Lpwstr,
+        dw_tag_id: Dword,
+        lp_dependencies: Lpwstr,
+        lp_service_start_name: Lpwstr,
+        lp_display_name: Lpwstr,
+    }
+
+    #[repr(C)]
+    struct ShellExecuteInfoW {
+        cb_size: Dword,
+        f_mask: Dword,
+        hwnd: Handle,
+        lp_verb: Lpcwstr,
+        lp_file: Lpcwstr,
+        lp_parameters: Lpcwstr,
+        lp_directory: Lpcwstr,
+        n_show: i32,
+        h_inst_app: Handle,
+        lp_id_list: *mut c_void,
+        lp_class: Lpcwstr,
+        hkey_class: Handle,
+        dw_hot_key: Dword,
+        h_icon_or_monitor: Handle,
+        h_process: Handle,
     }
 
     #[repr(C)]
@@ -738,6 +1026,19 @@ mod platform {
             lp_startup_info: *const StartupInfoW,
             lp_process_information: *mut ProcessInformation,
         ) -> Bool;
+        fn CreateProcessWithLogonW(
+            lp_username: Lpcwstr,
+            lp_domain: Lpcwstr,
+            lp_password: Lpcwstr,
+            dw_logon_flags: Dword,
+            lp_application_name: Lpcwstr,
+            lp_command_line: Lpwstr,
+            dw_creation_flags: Dword,
+            lp_environment: *const c_void,
+            lp_current_directory: Lpcwstr,
+            lp_startup_info: *const StartupInfoW,
+            lp_process_information: *mut ProcessInformation,
+        ) -> Bool;
         fn GetTokenInformation(
             token_handle: Handle,
             token_information_class: Dword,
@@ -745,6 +1046,13 @@ mod platform {
             token_information_length: Dword,
             return_length: *mut Dword,
         ) -> Bool;
+        fn SetTokenInformation(
+            token_handle: Handle,
+            token_information_class: Dword,
+            token_information: *const c_void,
+            token_information_length: Dword,
+        ) -> Bool;
+        fn GetLengthSid(p_sid: *mut c_void) -> Dword;
         fn LookupAccountNameW(
             lp_system_name: Lpcwstr,
             lp_account_name: Lpcwstr,
@@ -755,6 +1063,20 @@ mod platform {
             pe_use: *mut Dword,
         ) -> Bool;
         fn ConvertSidToStringSidW(sid: *const c_void, string_sid: *mut Lpwstr) -> Bool;
+        fn ConvertStringSidToSidW(string_sid: Lpcwstr, sid: *mut *mut c_void) -> Bool;
+        fn LsaOpenPolicy(
+            system_name: *const LsaUnicodeString,
+            object_attributes: *const LsaObjectAttributes,
+            desired_access: Dword,
+            policy_handle: *mut Handle,
+        ) -> i32;
+        fn LsaAddAccountRights(
+            policy_handle: Handle,
+            account_sid: *mut c_void,
+            user_rights: *const LsaUnicodeString,
+            count_of_rights: Dword,
+        ) -> i32;
+        fn LsaClose(object_handle: Handle) -> i32;
         fn InitializeSecurityDescriptor(
             p_security_descriptor: *mut c_void,
             dw_revision: Dword,
@@ -798,6 +1120,12 @@ mod platform {
             dw_desired_access: Dword,
         ) -> Handle;
         fn QueryServiceStatus(h_service: Handle, lp_service_status: *mut ServiceStatus) -> Bool;
+        fn QueryServiceConfigW(
+            h_service: Handle,
+            lp_service_config: *mut QueryServiceConfigW,
+            cb_buf_size: Dword,
+            pcb_bytes_needed: *mut Dword,
+        ) -> Bool;
         fn CloseServiceHandle(h_sc_object: Handle) -> Bool;
         fn CredReadW(
             target_name: Lpcwstr,
@@ -810,9 +1138,16 @@ mod platform {
         fn CredFree(buffer: *mut c_void);
     }
 
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteExW(p_exec_info: *mut ShellExecuteInfoW) -> Bool;
+    }
+
     #[link(name = "kernel32")]
     extern "system" {
         fn GetCurrentProcess() -> Handle;
+        fn GetStdHandle(n_std_handle: Dword) -> Handle;
+        fn SetHandleInformation(h_object: Handle, dw_mask: Dword, dw_flags: Dword) -> Bool;
         fn CreateJobObjectW(lp_job_attributes: *const c_void, lp_name: Lpcwstr) -> Handle;
         fn SetInformationJobObject(
             h_job: Handle,
@@ -875,6 +1210,9 @@ mod platform {
             engine_handle: *mut Handle,
         ) -> Dword;
         fn FwpmEngineClose0(engine_handle: Handle) -> Dword;
+        fn FwpmTransactionBegin0(engine_handle: Handle, flags: Dword) -> Dword;
+        fn FwpmTransactionCommit0(engine_handle: Handle) -> Dword;
+        fn FwpmTransactionAbort0(engine_handle: Handle) -> Dword;
         fn FwpmSubLayerGetByKey0(
             engine_handle: Handle,
             key: *const Guid,
@@ -886,6 +1224,11 @@ mod platform {
             sd: *const c_void,
         ) -> Dword;
         fn FwpmSubLayerDeleteByKey0(engine_handle: Handle, key: *const Guid) -> Dword;
+        fn FwpmFilterGetByKey0(
+            engine_handle: Handle,
+            key: *const Guid,
+            filter: *mut *mut FwpmFilter0,
+        ) -> Dword;
         fn FwpmFilterAdd0(
             engine_handle: Handle,
             filter: *const FwpmFilter0,
@@ -1012,7 +1355,177 @@ mod platform {
             .or_else(|_| std::env::var("PROGRAMDATA"))
             .or_else(|_| std::env::var("LOCALAPPDATA"))
             .unwrap_or_else(|_| r"C:\ProgramData".to_string());
-        PathBuf::from(base).join("claude-sandbox-runtime")
+        PathBuf::from(base).join(CANONICAL_STATE_DIR_NAME)
+    }
+
+    fn harden_state_dir_acl(dir: &Path, real_user_sid: Option<&str>) -> Result<(), BackendError> {
+        std::fs::create_dir_all(dir).map_err(|e| {
+            BackendError::runtime(format!(
+                "Failed to create state directory '{}': {e}",
+                dir.display()
+            ))
+        })?;
+        let icacls = icacls_exe_path()?;
+        let dir_str = dir.to_string_lossy();
+        let args = build_state_dir_icacls_args(&dir_str, real_user_sid);
+        let status = Command::new(&icacls)
+            .args(&args)
+            .status()
+            .map_err(|e| {
+                BackendError::runtime(format!(
+                    "Failed to invoke icacls.exe to harden state dir '{}': {e}",
+                    dir.display()
+                ))
+            })?;
+        if !status.success() {
+            return Err(BackendError::runtime(format!(
+                "icacls.exe failed to harden state directory '{}' (exit {:?})",
+                dir.display(),
+                status.code()
+            )));
+        }
+        Ok(())
+    }
+
+    #[derive(Debug, Clone)]
+    struct WfpPersistedConfig {
+        sandbox_user: Option<String>,
+        sublayer_guid: Option<String>,
+        allow_loopback: bool,
+        proxy_port_range: Option<[u16; 2]>,
+    }
+
+    fn wfp_config_file() -> PathBuf {
+        state_dir().join("wfp-config.json")
+    }
+
+    fn save_wfp_config(opts: &InstallOptions) -> Result<(), BackendError> {
+        let dir = state_dir();
+        let real_sid = opts.real_user_sid.clone().or_else(current_user_sid);
+        harden_state_dir_acl(&dir, real_sid.as_deref())?;
+        let json = format!(
+            "{{\"sandboxUser\":{},\"sublayerGuid\":{},\"allowLoopback\":{},\"proxyPortRange\":[{},{}]}}",
+            json_escape_string(&opts.sandbox_user),
+            json_escape_string(&opts.sublayer_guid),
+            opts.allow_loopback,
+            opts.proxy_port_range[0],
+            opts.proxy_port_range[1],
+        );
+        std::fs::write(wfp_config_file(), json)
+            .map_err(|e| BackendError::runtime(format!("Failed to write wfp-config.json: {e}")))
+    }
+
+    fn load_wfp_config() -> Option<WfpPersistedConfig> {
+        let raw = std::fs::read_to_string(wfp_config_file()).ok()?;
+        let val = parse_json(&raw).ok()?;
+        let map = val.as_object()?;
+        let sandbox_user = map
+            .get("sandboxUser")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string);
+        let sublayer_guid = map
+            .get("sublayerGuid")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string);
+        let allow_loopback = map
+            .get("allowLoopback")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false);
+        let proxy_port_range = map
+            .get("proxyPortRange")
+            .and_then(JsonValue::as_array)
+            .and_then(|arr| {
+                if arr.len() == 2 {
+                    let s = arr[0].as_u64().and_then(|v| u16::try_from(v).ok())?;
+                    let e = arr[1].as_u64().and_then(|v| u16::try_from(v).ok())?;
+                    Some([s, e])
+                } else {
+                    None
+                }
+            });
+        Some(WfpPersistedConfig {
+            sandbox_user,
+            sublayer_guid,
+            allow_loopback,
+            proxy_port_range,
+        })
+    }
+
+    fn is_process_elevated() -> bool {
+        unsafe {
+            let mut token: Handle = ptr::null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == FALSE {
+                return false;
+            }
+            let _guard = OwnedHandle(token);
+            let mut elevation = TokenElevation {
+                token_is_elevated: 0,
+            };
+            let mut ret_len: Dword = 0;
+            if GetTokenInformation(
+                token,
+                TOKEN_ELEVATION_INFO_CLASS,
+                &mut elevation as *mut TokenElevation as *mut c_void,
+                std::mem::size_of::<TokenElevation>() as Dword,
+                &mut ret_len,
+            ) == FALSE
+            {
+                return false;
+            }
+            elevation.token_is_elevated != 0
+        }
+    }
+
+    fn self_elevate_with_uac(subcommand_args: &[String]) -> Result<i32, BackendError> {
+        let exe_path = std::env::current_exe().map_err(|e| {
+            BackendError::runtime(format!("Failed to resolve current executable for UAC: {e}"))
+        })?;
+        let exe_w = to_wide_null(&exe_path.to_string_lossy());
+        let verb_w = to_wide_null("runas");
+        let params_str = subcommand_args
+            .iter()
+            .map(|a| quote_windows_arg(a))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let params_w = to_wide_null(&params_str);
+
+        unsafe {
+            let mut sei: ShellExecuteInfoW = std::mem::zeroed();
+            sei.cb_size = std::mem::size_of::<ShellExecuteInfoW>() as Dword;
+            sei.f_mask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE;
+            sei.lp_verb = verb_w.as_ptr();
+            sei.lp_file = exe_w.as_ptr();
+            sei.lp_parameters = params_w.as_ptr();
+            sei.n_show = SW_HIDE;
+
+            if ShellExecuteExW(&mut sei) == FALSE {
+                let err = GetLastError();
+                if err == ERROR_CANCELLED {
+                    return Err(BackendError::uac_cancelled(
+                        "Administrator elevation (UAC) was cancelled by the user",
+                    ));
+                }
+                return Err(BackendError::runtime(format!(
+                    "ShellExecuteExW UAC elevation failed with error {err}"
+                )));
+            }
+
+            if sei.h_process.is_null() {
+                return Err(BackendError::runtime(
+                    "ShellExecuteExW succeeded without returning a child process handle",
+                ));
+            }
+            let _proc_guard = OwnedHandle(sei.h_process);
+            WaitForSingleObject(sei.h_process, INFINITE);
+            let mut exit_code: Dword = 1;
+            if GetExitCodeProcess(sei.h_process, &mut exit_code) == FALSE {
+                return Err(BackendError::runtime(format!(
+                    "GetExitCodeProcess on elevated helper failed with error {}",
+                    GetLastError()
+                )));
+            }
+            Ok(exit_code as i32)
+        }
     }
 
     fn icacls_exe_path() -> Result<PathBuf, BackendError> {
@@ -1169,11 +1682,43 @@ mod platform {
                 return "unknown".to_string();
             }
             let name = to_wide_null("seclogon");
-            let svc = OpenServiceW(scm, name.as_ptr(), SERVICE_QUERY_STATUS);
+            let mut svc = OpenServiceW(
+                scm,
+                name.as_ptr(),
+                SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
+            );
+            let can_query_config = !svc.is_null();
+            if svc.is_null() {
+                svc = OpenServiceW(scm, name.as_ptr(), SERVICE_QUERY_STATUS);
+            }
             if svc.is_null() {
                 CloseServiceHandle(scm);
                 return "unknown".to_string();
             }
+
+            if can_query_config {
+                let mut needed: Dword = 0;
+                let _ = QueryServiceConfigW(svc, ptr::null_mut(), 0, &mut needed);
+                if needed > 0 && GetLastError() == ERROR_INSUFFICIENT_BUFFER {
+                    let u64_len = (needed as usize).div_ceil(std::mem::size_of::<u64>());
+                    let mut cfg_buf = vec![0u64; u64_len];
+                    if QueryServiceConfigW(
+                        svc,
+                        cfg_buf.as_mut_ptr() as *mut QueryServiceConfigW,
+                        needed,
+                        &mut needed,
+                    ) != FALSE
+                    {
+                        let cfg = &*(cfg_buf.as_ptr() as *const QueryServiceConfigW);
+                        if cfg.dw_start_type == SERVICE_DISABLED {
+                            CloseServiceHandle(svc);
+                            CloseServiceHandle(scm);
+                            return "disabled".to_string();
+                        }
+                    }
+                }
+            }
+
             let mut status: ServiceStatus = std::mem::zeroed();
             let ok = QueryServiceStatus(svc, &mut status);
             CloseServiceHandle(svc);
@@ -1340,8 +1885,47 @@ mod platform {
         Ok(())
     }
 
+    fn grant_interactive_logon_right(sandbox_sid: &OwnedSid) -> Result<(), BackendError> {
+        unsafe {
+            let mut obj_attr: LsaObjectAttributes = std::mem::zeroed();
+            obj_attr.length = std::mem::size_of::<LsaObjectAttributes>() as Dword;
+            let mut policy: Handle = ptr::null_mut();
+            let open_status = LsaOpenPolicy(
+                ptr::null(),
+                &obj_attr,
+                POLICY_CREATE_ACCOUNT | POLICY_LOOKUP_NAMES,
+                &mut policy,
+            );
+            if open_status != STATUS_SUCCESS || policy.is_null() {
+                return Err(BackendError::runtime(format!(
+                    "LsaOpenPolicy failed with NTSTATUS 0x{:08x}",
+                    open_status as u32
+                )));
+            }
+
+            let mut right_w = to_wide_null("SeInteractiveLogonRight");
+            let char_count = right_w.len().saturating_sub(1);
+            let right_lsa = LsaUnicodeString {
+                length: (char_count * 2) as u16,
+                maximum_length: (right_w.len() * 2) as u16,
+                buffer: right_w.as_mut_ptr(),
+            };
+            let add_status = LsaAddAccountRights(policy, sandbox_sid.as_ptr(), &right_lsa, 1);
+            let _ = LsaClose(policy);
+            if add_status != STATUS_SUCCESS {
+                return Err(BackendError::runtime(format!(
+                    "LsaAddAccountRights(SeInteractiveLogonRight) failed with NTSTATUS 0x{:08x}",
+                    add_status as u32
+                )));
+            }
+            Ok(())
+        }
+    }
+
     fn provision_sandbox_user(username: &str) -> Result<(), BackendError> {
         if check_sandbox_user_exists(username) && check_sandbox_cred_present(username) {
+            let sid = lookup_account_sid(username)?;
+            grant_interactive_logon_right(&sid)?;
             return Ok(());
         }
 
@@ -1401,7 +1985,12 @@ mod platform {
 
         let cred_res = write_sandbox_credential(username, &pass_w);
         zeroize_u16(&mut pass_w);
-        cred_res
+        cred_res?;
+
+        // R3-P0-5: Grant SeInteractiveLogonRight so LogonUserW(LOGON32_LOGON_INTERACTIVE)
+        // succeeds without ERROR_LOGON_TYPE_NOT_GRANTED (1385).
+        let sid = lookup_account_sid(username)?;
+        grant_interactive_logon_right(&sid)
     }
 
     fn logon_sandbox_user(username: &str) -> Result<OwnedHandle, BackendError> {
@@ -1434,7 +2023,8 @@ mod platform {
     }
 
     /// Creates a restricted token from `base_token` without ever passing `WRITE_RESTRICTED`
-    /// with `restricted_sid_count == 0` (P0-3).
+    /// with `restricted_sid_count == 0` (P0-3), and lowers its Mandatory Integrity Level
+    /// to Low (`S-1-16-4096`) via `SetTokenInformation(TokenIntegrityLevel)` (R3-P0-5).
     unsafe fn create_sandbox_restricted_token(
         base_token: Handle,
     ) -> Result<OwnedHandle, BackendError> {
@@ -1475,12 +2065,56 @@ mod platform {
                 GetLastError()
             )));
         }
-        Ok(OwnedHandle(restricted_token))
+        let owned = OwnedHandle(restricted_token);
+
+        // Lower Mandatory Integrity Level to Low (S-1-16-4096)
+        let low_il_w = to_wide_null("S-1-16-4096");
+        let mut low_sid: *mut c_void = ptr::null_mut();
+        if ConvertStringSidToSidW(low_il_w.as_ptr(), &mut low_sid) == FALSE || low_sid.is_null() {
+            return Err(BackendError::runtime(format!(
+                "ConvertStringSidToSidW(S-1-16-4096) failed with error {}",
+                GetLastError()
+            )));
+        }
+        let tml = TokenMandatoryLabel {
+            label: SidAndAttributes {
+                sid: low_sid,
+                attributes: SE_GROUP_INTEGRITY,
+            },
+        };
+        let sid_len = GetLengthSid(low_sid) as usize;
+        let info_len = (std::mem::size_of::<TokenMandatoryLabel>() + sid_len) as Dword;
+        let set_ok = SetTokenInformation(
+            owned.0,
+            TOKEN_INTEGRITY_LEVEL_INFO_CLASS,
+            &tml as *const TokenMandatoryLabel as *const c_void,
+            info_len,
+        );
+        let set_err = if set_ok == FALSE { GetLastError() } else { 0 };
+        LocalFree(low_sid);
+        if set_ok == FALSE {
+            return Err(BackendError::runtime(format!(
+                "SetTokenInformation(TokenIntegrityLevel=Low) failed with error {set_err}"
+            )));
+        }
+
+        Ok(owned)
     }
 
-    /// Builds a self-relative `SECURITY_DESCRIPTOR` granting `FWP_ACTRL_MATCH` to `sandbox_sid`
-    /// for use with `FWPM_CONDITION_ALE_USER_ID`.
-    fn build_wfp_user_match_sd(sandbox_sid: &OwnedSid) -> Result<Vec<u8>, BackendError> {
+    struct OwnedSelfRelativeSd {
+        buf: Vec<u64>,
+        byte_len: Dword,
+    }
+
+    impl OwnedSelfRelativeSd {
+        fn as_mut_ptr(&mut self) -> *mut u8 {
+            self.buf.as_mut_ptr() as *mut u8
+        }
+    }
+
+    /// Builds an 8-byte-aligned self-relative `SECURITY_DESCRIPTOR` granting `FWP_ACTRL_MATCH`
+    /// to `sandbox_sid` for use with `FWPM_CONDITION_ALE_USER_ID`.
+    fn build_wfp_user_match_sd(sandbox_sid: &OwnedSid) -> Result<OwnedSelfRelativeSd, BackendError> {
         unsafe {
             let mut abs_sd = [0u64; 8];
             if InitializeSecurityDescriptor(
@@ -1568,7 +2202,9 @@ mod platform {
                     GetLastError()
                 )));
             }
-            let mut self_rel = vec![0u8; self_rel_len as usize];
+            // R3-P2-4: Allocate MakeSelfRelativeSD buffer as Vec<u64> for guaranteed 8-byte alignment.
+            let u64_len = (self_rel_len as usize).div_ceil(std::mem::size_of::<u64>());
+            let mut self_rel = vec![0u64; u64_len];
             if MakeSelfRelativeSD(
                 abs_sd.as_ptr() as *const c_void,
                 self_rel.as_mut_ptr() as *mut c_void,
@@ -1580,8 +2216,10 @@ mod platform {
                     GetLastError()
                 )));
             }
-            self_rel.truncate(self_rel_len as usize);
-            Ok(self_rel)
+            Ok(OwnedSelfRelativeSd {
+                buf: self_rel,
+                byte_len: self_rel_len,
+            })
         }
     }
 
@@ -1604,7 +2242,7 @@ mod platform {
                 name: name_w.as_mut_ptr(),
                 description: desc_w.as_mut_ptr(),
             },
-            flags: 0,
+            flags: FWPM_FILTER_FLAG_PERSISTENT,
             provider_key: ptr::null_mut(),
             provider_data: FwpByteBlob {
                 size: 0,
@@ -1652,10 +2290,10 @@ mod platform {
         proxy_port_range: [u16; 2],
         allow_loopback: bool,
     ) -> Result<(), BackendError> {
-        let mut sd_bytes = build_wfp_user_match_sd(sandbox_sid)?;
+        let mut sd_owned = build_wfp_user_match_sd(sandbox_sid)?;
         let mut sd_blob = FwpByteBlob {
-            size: sd_bytes.len() as u32,
-            data: sd_bytes.as_mut_ptr(),
+            size: sd_owned.byte_len,
+            data: sd_owned.as_mut_ptr(),
         };
         let user_cond = FwpmFilterCondition0 {
             field_key: FWPM_CONDITION_ALE_USER_ID,
@@ -1870,8 +2508,25 @@ mod platform {
 
     enum WfpCheckState {
         Installed,
+        Degraded,
         Absent,
         CannotRead,
+    }
+
+    unsafe fn check_wfp_filter_exists(engine: Handle, key: &Guid) -> Result<bool, Dword> {
+        let mut filter: *mut FwpmFilter0 = ptr::null_mut();
+        let rc = FwpmFilterGetByKey0(engine, key, &mut filter);
+        if !filter.is_null() {
+            let mut raw = filter as *mut c_void;
+            FwpmFreeMemory0(&mut raw);
+        }
+        if rc == 0 {
+            Ok(true)
+        } else if rc == FWP_E_FILTER_NOT_FOUND {
+            Ok(false)
+        } else {
+            Err(rc)
+        }
     }
 
     fn check_wfp_sublayer_state(sublayer_guid: &str) -> Result<WfpCheckState, BackendError> {
@@ -1897,11 +2552,29 @@ mod platform {
                 let mut raw = sublayer as *mut c_void;
                 FwpmFreeMemory0(&mut raw);
             }
+
+            if get_rc == ERROR_ACCESS_DENIED || get_rc == E_ACCESSDENIED {
+                FwpmEngineClose0(engine);
+                return Ok(WfpCheckState::CannotRead);
+            }
+
+            let sublayer_present = get_rc == 0;
+            let block_v4 = check_wfp_filter_exists(engine, &derived_filter_guid(&guid, 1));
+            let block_v6 = check_wfp_filter_exists(engine, &derived_filter_guid(&guid, 2));
             FwpmEngineClose0(engine);
-            if get_rc == 0 {
+
+            let (v4_ok, v6_ok) = match (block_v4, block_v6) {
+                (Ok(a), Ok(b)) => (a, b),
+                (Err(e), _) | (_, Err(e)) if e == ERROR_ACCESS_DENIED || e == E_ACCESSDENIED => {
+                    return Ok(WfpCheckState::CannotRead);
+                }
+                _ => (false, false),
+            };
+
+            if sublayer_present && v4_ok && v6_ok {
                 Ok(WfpCheckState::Installed)
-            } else if get_rc == ERROR_ACCESS_DENIED || get_rc == E_ACCESSDENIED {
-                Ok(WfpCheckState::CannotRead)
+            } else if sublayer_present || v4_ok || v6_ok {
+                Ok(WfpCheckState::Degraded)
             } else {
                 Ok(WfpCheckState::Absent)
             }
@@ -1931,8 +2604,10 @@ mod platform {
                 return false;
             }
             let _job_guard = OwnedHandle(job);
+            // R3-P0-5: Include JOB_OBJECT_UILIMIT_HANDLES so probe matches actual input-injection restriction.
             let ui = JobObjectBasicUiRestrictions {
-                ui_restrictions_class: JOB_OBJECT_UILIMIT_READCLIPBOARD
+                ui_restrictions_class: JOB_OBJECT_UILIMIT_HANDLES
+                    | JOB_OBJECT_UILIMIT_READCLIPBOARD
                     | JOB_OBJECT_UILIMIT_WRITECLIPBOARD
                     | JOB_OBJECT_UILIMIT_DESKTOP
                     | JOB_OBJECT_UILIMIT_GLOBALATOMS,
@@ -1973,8 +2648,9 @@ mod platform {
         opts: &RunOptions,
         validated: &ValidatedRunOptions,
     ) -> Result<Vec<u16>, BackendError> {
-        // P0-4: Build child env from CreateEnvironmentBlock (b_inherit = FALSE) for the sandbox
-        // token; if unavailable, fall back ONLY to a scrubbed minimal safe allowlist.
+        // P0-4 & R3-P1-4: Build child env from CreateEnvironmentBlock (b_inherit = FALSE) for the
+        // sandbox token; if unavailable, fall back ONLY to a scrubbed minimal safe allowlist
+        // (excluding host user TEMP/TMP).
         let mut vars: Vec<(String, String)> = unsafe {
             let mut env_ptr: *mut c_void = ptr::null_mut();
             if CreateEnvironmentBlock(&mut env_ptr, token, FALSE) != FALSE && !env_ptr.is_null() {
@@ -1986,10 +2662,33 @@ mod platform {
             }
         };
 
+        let mut set_var = |key: &str, val: String| {
+            if is_sensitive_env_var(key) {
+                return;
+            }
+            if let Some(existing) = vars.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(key)) {
+                existing.1 = val;
+            } else {
+                vars.push((key.to_string(), val));
+            }
+        };
+
+        // R3-P1-4: Forward allowlisted CA trust-bundle and proxy vars from parent env.
+        for (k, v) in std::env::vars() {
+            if is_safe_ca_or_proxy_env_var(&k) && !is_sensitive_env_var(&k) {
+                set_var(&k, v);
+            }
+        }
+
+        // R3-P1-4: Merge explicit --env KEY=VAL overrides (scrubbed via is_sensitive_env_var).
+        for (k, v) in &opts.extra_env {
+            set_var(k, v.clone());
+        }
+
         // Always scrub any sensitive credentials/tokens before injecting proxy settings.
         vars.retain(|(k, _)| !is_sensitive_env_var(k));
 
-        let mut set_var = |key: &str, val: String| {
+        let mut set_final_var = |key: &str, val: String| {
             if let Some(existing) = vars.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(key)) {
                 existing.1 = val;
             } else {
@@ -1997,17 +2696,17 @@ mod platform {
             }
         };
         if let Some(ref http) = validated.http_proxy {
-            set_var("HTTP_PROXY", http.clone());
-            set_var("http_proxy", http.clone());
+            set_final_var("HTTP_PROXY", http.clone());
+            set_final_var("http_proxy", http.clone());
         }
         if let Some(ref https) = validated.https_proxy {
-            set_var("HTTPS_PROXY", https.clone());
-            set_var("https_proxy", https.clone());
+            set_final_var("HTTPS_PROXY", https.clone());
+            set_final_var("https_proxy", https.clone());
         }
         if opts.allow_loopback {
-            set_var("NO_PROXY", "127.0.0.1,localhost".to_string());
+            set_final_var("NO_PROXY", "127.0.0.1,localhost".to_string());
         }
-        set_var("SRT_WIN_SANDBOXED", "1".to_string());
+        set_final_var("SRT_WIN_SANDBOXED", "1".to_string());
 
         vars.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()));
         let mut block: Vec<u16> = Vec::new();
@@ -2023,13 +2722,34 @@ mod platform {
     }
 
     fn query_status_for(username: &str, sublayer_guid: &str) -> Result<StatusResponse, BackendError> {
-        let provisioned = check_sandbox_user_exists(username);
-        let cred_present = check_sandbox_cred_present(username);
+        let persisted = load_wfp_config();
+        let effective_user = persisted
+            .as_ref()
+            .and_then(|c| c.sandbox_user.as_deref())
+            .filter(|u| validate_sandbox_username(u).is_ok())
+            .unwrap_or(username);
+        let provisioned = check_sandbox_user_exists(effective_user);
+        let cred_present = check_sandbox_cred_present(effective_user);
         let wfp_state_enum = check_wfp_sublayer_state(sublayer_guid)?;
-        let (wfp_state_str, wfp_installed) = match wfp_state_enum {
+        let (wfp_state_str, wfp_present) = match wfp_state_enum {
             WfpCheckState::Installed => ("installed".to_string(), true),
+            WfpCheckState::Degraded => ("degraded".to_string(), true),
             WfpCheckState::CannotRead => ("cannot-read".to_string(), false),
             WfpCheckState::Absent => ("absent".to_string(), false),
+        };
+
+        let allow_loopback = if wfp_present {
+            persisted.as_ref().map_or(false, |c| c.allow_loopback)
+        } else {
+            false
+        };
+        let proxy_port_range = if wfp_present {
+            persisted
+                .as_ref()
+                .and_then(|c| c.proxy_port_range)
+                .or(Some([DEFAULT_PROXY_PORT_START, DEFAULT_PROXY_PORT_END]))
+        } else {
+            None
         };
 
         Ok(StatusResponse {
@@ -2038,7 +2758,7 @@ mod platform {
                 cred_present,
                 real_user_sid: current_user_sid(),
                 sandbox_user: if provisioned {
-                    Some(username.to_string())
+                    Some(effective_user.to_string())
                 } else {
                     None
                 },
@@ -2046,30 +2766,66 @@ mod platform {
             },
             wfp: WfpStatus {
                 state: wfp_state_str,
-                allow_loopback: wfp_installed,
-                sublayer_guid: if wfp_installed {
+                allow_loopback,
+                sublayer_guid: if wfp_present {
                     Some(sublayer_guid.to_string())
                 } else {
                     None
                 },
-                proxy_port_range: if wfp_installed {
-                    Some([DEFAULT_PROXY_PORT_START, DEFAULT_PROXY_PORT_END])
-                } else {
-                    None
-                },
+                proxy_port_range,
             },
         })
     }
 
-    pub fn cmd_status() -> Result<StatusResponse, BackendError> {
+    pub fn cmd_status(opts: &StatusOptions) -> Result<StatusResponse, BackendError> {
+        validate_status_options(opts)?;
         let username =
             configured_sandbox_username().unwrap_or_else(|_| DEFAULT_SANDBOX_USERNAME.to_string());
-        query_status_for(&username, DEFAULT_WFP_SUBLAYER_GUID)
+        let persisted_guid = load_wfp_config().and_then(|c| c.sublayer_guid);
+        let guid = opts
+            .sublayer_guid
+            .as_deref()
+            .or(persisted_guid.as_deref())
+            .unwrap_or(DEFAULT_WFP_SUBLAYER_GUID);
+        query_status_for(&username, guid)
     }
 
     pub fn cmd_install(opts: &InstallOptions) -> Result<StatusResponse, BackendError> {
         validate_install_options(opts)?;
-        // P0-5: Provision local sandbox account + cryptographic random password in Credential Manager
+
+        // R3-P0-5: Self-elevate via UAC (`ShellExecuteExW` "runas") when invoked non-elevated.
+        if !opts.uac_child && !is_process_elevated() {
+            let mut child_args = vec![
+                "install".to_string(),
+                "--uac-child".to_string(),
+                "--user".to_string(),
+                opts.sandbox_user.clone(),
+                "--sublayer-guid".to_string(),
+                opts.sublayer_guid.clone(),
+                "--proxy-port-range".to_string(),
+                format!("{}-{}", opts.proxy_port_range[0], opts.proxy_port_range[1]),
+                if opts.allow_loopback {
+                    "--allow-loopback".to_string()
+                } else {
+                    "--no-allow-loopback".to_string()
+                },
+            ];
+            let effective_sid = opts.real_user_sid.clone().or_else(current_user_sid);
+            if let Some(sid) = effective_sid {
+                child_args.push("--sid".to_string());
+                child_args.push(sid);
+            }
+            let code = self_elevate_with_uac(&child_args)?;
+            if code != 0 {
+                return Err(BackendError {
+                    exit_code: code,
+                    message: format!("Elevated srt-win install failed with exit code {code}"),
+                });
+            }
+            return query_status_for(&opts.sandbox_user, &opts.sublayer_guid);
+        }
+
+        // P0-5 & R3-P0-5: Provision local sandbox account + cryptographic random password + SeInteractiveLogonRight
         provision_sandbox_user(&opts.sandbox_user)?;
         let sandbox_sid = lookup_account_sid(&opts.sandbox_user)?;
 
@@ -2097,46 +2853,71 @@ mod platform {
                 )));
             }
 
-            let mut existing: *mut FwpmSublayer0 = ptr::null_mut();
-            let get_rc = FwpmSubLayerGetByKey0(engine, &guid, &mut existing);
-            if !existing.is_null() {
-                let mut raw = existing as *mut c_void;
-                FwpmFreeMemory0(&mut raw);
-            }
-            if get_rc != 0 {
-                let sublayer = FwpmSublayer0 {
-                    sub_layer_key: guid,
-                    display_data: FwpmDisplayData0 {
-                        name: name_w.as_mut_ptr(),
-                        description: desc_w.as_mut_ptr(),
-                    },
-                    flags: 0,
-                    provider_key: ptr::null_mut(),
-                    provider_data: FwpByteBlob {
-                        size: 0,
-                        data: ptr::null_mut(),
-                    },
-                    weight: 0x7FFF,
-                };
-                let add_rc = FwpmSubLayerAdd0(engine, &sublayer, ptr::null());
-                if add_rc != 0 {
-                    FwpmEngineClose0(engine);
-                    return Err(BackendError::wfp(format!(
-                        "FwpmSubLayerAdd0 failed with code 0x{add_rc:08x}"
-                    )));
-                }
+            // R3-P0-1: Wrap WFP sublayer + filter mutations in an atomic transaction.
+            let tx_rc = FwpmTransactionBegin0(engine, 0);
+            if tx_rc != 0 {
+                FwpmEngineClose0(engine);
+                return Err(BackendError::wfp(format!(
+                    "FwpmTransactionBegin0 failed with code 0x{tx_rc:08x}"
+                )));
             }
 
-            let filter_res = install_wfp_filters(
-                engine,
-                &guid,
-                &sandbox_sid,
-                opts.proxy_port_range,
-                opts.allow_loopback,
-            );
+            let mut tx_result: Result<(), BackendError> = (|| {
+                let mut existing: *mut FwpmSublayer0 = ptr::null_mut();
+                let get_rc = FwpmSubLayerGetByKey0(engine, &guid, &mut existing);
+                if !existing.is_null() {
+                    let mut raw = existing as *mut c_void;
+                    FwpmFreeMemory0(&mut raw);
+                }
+                if get_rc != 0 {
+                    let sublayer = FwpmSublayer0 {
+                        sub_layer_key: guid,
+                        display_data: FwpmDisplayData0 {
+                            name: name_w.as_mut_ptr(),
+                            description: desc_w.as_mut_ptr(),
+                        },
+                        flags: FWPM_SUBLAYER_FLAG_PERSISTENT,
+                        provider_key: ptr::null_mut(),
+                        provider_data: FwpByteBlob {
+                            size: 0,
+                            data: ptr::null_mut(),
+                        },
+                        weight: 0x7FFF,
+                    };
+                    let add_rc = FwpmSubLayerAdd0(engine, &sublayer, ptr::null());
+                    if add_rc != 0 {
+                        return Err(BackendError::wfp(format!(
+                            "FwpmSubLayerAdd0 failed with code 0x{add_rc:08x}"
+                        )));
+                    }
+                }
+
+                install_wfp_filters(
+                    engine,
+                    &guid,
+                    &sandbox_sid,
+                    opts.proxy_port_range,
+                    opts.allow_loopback,
+                )
+            })();
+
+            if tx_result.is_ok() {
+                let commit_rc = FwpmTransactionCommit0(engine);
+                if commit_rc != 0 {
+                    let _ = FwpmTransactionAbort0(engine);
+                    tx_result = Err(BackendError::wfp(format!(
+                        "FwpmTransactionCommit0 failed with code 0x{commit_rc:08x}"
+                    )));
+                }
+            } else {
+                let _ = FwpmTransactionAbort0(engine);
+            }
             FwpmEngineClose0(engine);
-            filter_res?;
+            tx_result?;
         }
+
+        // Persist actual WFP config metadata + harden state_dir() ACLs (R3-P0-3 & R3-P2-1)
+        save_wfp_config(opts)?;
 
         Ok(StatusResponse {
             user: UserStatus {
@@ -2157,8 +2938,62 @@ mod platform {
 
     pub fn cmd_uninstall(opts: &UninstallOptions) -> Result<StatusResponse, BackendError> {
         validate_uninstall_options(opts)?;
+
+        // R3-P0-5: Self-elevate via UAC (`ShellExecuteExW` "runas") when invoked non-elevated.
+        if !opts.uac_child && !is_process_elevated() {
+            let child_args = vec![
+                "uninstall".to_string(),
+                "--uac-child".to_string(),
+                "--user".to_string(),
+                opts.sandbox_user.clone(),
+                "--sublayer-guid".to_string(),
+                opts.sublayer_guid.clone(),
+            ];
+            let code = self_elevate_with_uac(&child_args)?;
+            if code != 0 {
+                return Err(BackendError {
+                    exit_code: code,
+                    message: format!("Elevated srt-win uninstall failed with exit code {code}"),
+                });
+            }
+            return query_status_for(&opts.sandbox_user, &opts.sublayer_guid);
+        }
+
         let guid = parse_guid_struct(&opts.sublayer_guid)?;
         let mut errors: Vec<String> = Vec::new();
+
+        // R3-P1-5: Revoke all tracked allow_write grants (`A:`) and deny ACEs (`R:`/`W:`) before removing account.
+        let denies_file = state_dir().join("denies.json");
+        let tracked = load_tracked_denies(&denies_file);
+        if !tracked.is_empty() {
+            if let Ok(sandbox_sid) = resolve_sandbox_user_sid(&opts.sandbox_user) {
+                let current_sid = current_user_sid();
+                if ensure_not_current_user_sid(&sandbox_sid, current_sid.as_deref()).is_ok() {
+                    if let Ok(icacls) = icacls_exe_path() {
+                        let sid_arg = format!("*{sandbox_sid}");
+                        for (key, raw_path) in &tracked {
+                            let Ok(clean_path) = sanitize_path(raw_path) else {
+                                continue;
+                            };
+                            if key.starts_with("A:") {
+                                let _ = Command::new(&icacls)
+                                    .arg(&clean_path)
+                                    .arg("/remove:g")
+                                    .arg(&sid_arg)
+                                    .status();
+                            } else if key.starts_with("R:") || key.starts_with("W:") {
+                                let _ = Command::new(&icacls)
+                                    .arg(&clean_path)
+                                    .arg("/remove:d")
+                                    .arg(&sid_arg)
+                                    .status();
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(&denies_file);
+        }
 
         unsafe {
             let mut engine: Handle = ptr::null_mut();
@@ -2177,20 +3012,41 @@ mod platform {
             if rc != 0 {
                 errors.push(format!("FwpmEngineOpen0 failed with code 0x{rc:08x}"));
             } else {
-                for tag in 1..=6u8 {
-                    let fkey = derived_filter_guid(&guid, tag);
-                    let frc = FwpmFilterDeleteByKey0(engine, &fkey);
-                    if frc != 0 && frc != FWP_E_FILTER_NOT_FOUND {
-                        errors.push(format!(
-                            "FwpmFilterDeleteByKey0 (tag {tag}) failed with code 0x{frc:08x}"
+                // R3-P0-1: Wrap WFP uninstall deletions in a transaction.
+                let tx_rc = FwpmTransactionBegin0(engine, 0);
+                if tx_rc != 0 {
+                    errors.push(format!(
+                        "FwpmTransactionBegin0 failed with code 0x{tx_rc:08x}"
+                    ));
+                } else {
+                    let mut wfp_errs: Vec<String> = Vec::new();
+                    for tag in 1..=6u8 {
+                        let fkey = derived_filter_guid(&guid, tag);
+                        let frc = FwpmFilterDeleteByKey0(engine, &fkey);
+                        if frc != 0 && frc != FWP_E_FILTER_NOT_FOUND {
+                            wfp_errs.push(format!(
+                                "FwpmFilterDeleteByKey0 (tag {tag}) failed with code 0x{frc:08x}"
+                            ));
+                        }
+                    }
+                    let sl_rc = FwpmSubLayerDeleteByKey0(engine, &guid);
+                    if sl_rc != 0 && sl_rc != FWP_E_SUBLAYER_NOT_FOUND {
+                        wfp_errs.push(format!(
+                            "FwpmSubLayerDeleteByKey0 failed with code 0x{sl_rc:08x}"
                         ));
                     }
-                }
-                let sl_rc = FwpmSubLayerDeleteByKey0(engine, &guid);
-                if sl_rc != 0 && sl_rc != FWP_E_SUBLAYER_NOT_FOUND {
-                    errors.push(format!(
-                        "FwpmSubLayerDeleteByKey0 failed with code 0x{sl_rc:08x}"
-                    ));
+                    if wfp_errs.is_empty() {
+                        let commit_rc = FwpmTransactionCommit0(engine);
+                        if commit_rc != 0 {
+                            let _ = FwpmTransactionAbort0(engine);
+                            errors.push(format!(
+                                "FwpmTransactionCommit0 failed with code 0x{commit_rc:08x}"
+                            ));
+                        }
+                    } else {
+                        let _ = FwpmTransactionAbort0(engine);
+                        errors.extend(wfp_errs);
+                    }
                 }
                 FwpmEngineClose0(engine);
             }
@@ -2215,6 +3071,8 @@ mod platform {
                 ));
             }
         }
+
+        let _ = std::fs::remove_file(wfp_config_file());
 
         if !errors.is_empty() {
             return Err(BackendError::runtime(format!(
@@ -2244,24 +3102,25 @@ mod platform {
             }
             let _impersonation = ImpersonationGuard;
 
+            // R3-P2-2: Only WSAEACCES (10013) proves WFP blocked egress; timeout/unreachable is "not-run".
+            let probe_addr = |addr: SocketAddr| -> String {
+                match TcpStream::connect_timeout(&addr, Duration::from_millis(1200)) {
+                    Ok(_) => "allowed".to_string(),
+                    Err(e) => classify_wfp_connect_error(e.raw_os_error()).to_string(),
+                }
+            };
+
             match opts.target.to_socket_addrs() {
                 Ok(mut addrs) => {
                     if let Some(addr) = addrs.next() {
-                        let timeout = Duration::from_millis(1200);
-                        match TcpStream::connect_timeout(&addr, timeout) {
-                            Ok(_) => "allowed".to_string(),
-                            Err(_) => "blocked".to_string(),
-                        }
+                        probe_addr(addr)
                     } else {
                         "not-run".to_string()
                     }
                 }
                 Err(_) => {
                     if let Ok(addr) = opts.target.parse::<SocketAddr>() {
-                        match TcpStream::connect_timeout(&addr, Duration::from_millis(1200)) {
-                            Ok(_) => "allowed".to_string(),
-                            Err(_) => "blocked".to_string(),
-                        }
+                        probe_addr(addr)
                     } else {
                         "not-run".to_string()
                     }
@@ -2314,29 +3173,24 @@ mod platform {
         })
     }
 
-    fn load_tracked_denies(file: &Path) -> BTreeSet<String> {
+    fn load_tracked_denies(file: &Path) -> BTreeMap<String, String> {
         let Ok(raw) = std::fs::read_to_string(file) else {
-            return BTreeSet::new();
+            return BTreeMap::new();
         };
-        let Ok(val) = parse_json(&raw) else {
-            return BTreeSet::new();
-        };
-        val.as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default()
+        parse_tracked_acl_map(&raw)
     }
 
-    fn save_tracked_denies(file: &Path, items: &BTreeSet<String>) {
+    fn save_tracked_denies(
+        file: &Path,
+        items: &BTreeMap<String, String>,
+        real_user_sid: Option<&str>,
+    ) {
         if let Some(parent) = file.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            if !parent.exists() {
+                let _ = harden_state_dir_acl(parent, real_user_sid);
+            }
         }
-        let vec: Vec<String> = items.iter().cloned().collect();
-        let _ = std::fs::write(file, json_string_array(&vec));
+        let _ = std::fs::write(file, serialize_tracked_acl_map(items));
     }
 
     pub fn cmd_denies(req: &DeniesRequest) -> Result<DeniesResponse, BackendError> {
@@ -2352,12 +3206,24 @@ mod platform {
         let current_sid = current_user_sid();
         ensure_not_current_user_sid(&sid, current_sid.as_deref())?;
 
+        // R3-P0-3: Validate allow_write paths reject symlinks/junctions/reparse points and \\?\UNC\
+        let mut canon_allow_writes: Vec<String> = Vec::with_capacity(req.allow_write.len());
+        for raw_allow in &req.allow_write {
+            let sanitized = sanitize_path(raw_allow).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(Path::new(&sanitized))
+                .map_err(BackendError::validation)?;
+            let canon =
+                canonicalize_path_best_effort(&sanitized).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(&canon).map_err(BackendError::validation)?;
+            canon_allow_writes.push(canon.to_string_lossy().into_owned());
+        }
+
         let icacls = icacls_exe_path()?;
         let started = Instant::now();
         let deadline = req.deadline_ms.map(Duration::from_millis);
         let state_file = state_dir().join("denies.json");
         let previous = load_tracked_denies(&state_file);
-        let mut next_tracked = BTreeSet::new();
+        let mut next_tracked: BTreeMap<String, String> = BTreeMap::new();
 
         let mut in_place = 0u64;
         let mut planted = 0u64;
@@ -2366,24 +3232,34 @@ mod platform {
         let mut extras_skipped = 0u64;
         let mut stands = 0u64;
         let mut handed_back = 0u64;
+        let mut deadline_expired = false;
+        let mut unguarded_errors: Vec<String> = Vec::new();
 
         let sid_arg = format!("*{sid}");
 
         for raw_path in &req.deny_read {
             if deadline.is_some_and(|d| started.elapsed() >= d) {
+                deadline_expired = true;
                 extras_skipped += 1;
                 continue;
             }
             let path = canonicalize_path_best_effort(raw_path).map_err(BackendError::validation)?;
-            let key = format!("R:{}", path.to_string_lossy());
+            let path_str = path.to_string_lossy().into_owned();
+            let key = normalize_tracked_acl_key('R', &path_str);
             if !path.exists() {
+                // R3-P0-2: Do NOT silently skip non-existent deny_read targets inside allow_write.
+                if let Some(root) = find_matching_allow_write_root(&path_str, &canon_allow_writes) {
+                    unguarded_errors.push(format!(
+                        "Cannot guard non-existent denyRead target '{path_str}' inside allowWrite root '{root}'"
+                    ));
+                }
                 extras_skipped += 1;
                 continue;
             }
-            if previous.contains(&key) {
+            if previous.contains_key(&key) {
                 in_place += 1;
                 stands += 1;
-                next_tracked.insert(key);
+                next_tracked.insert(key, path_str);
                 continue;
             }
             let perm_arg = icacls_perm_arg(&sid_arg, "R", path.is_dir());
@@ -2397,7 +3273,7 @@ mod platform {
             if ok {
                 planted += 1;
                 guarded += 1;
-                next_tracked.insert(key);
+                next_tracked.insert(key, path_str);
             } else {
                 extras_skipped += 1;
             }
@@ -2405,22 +3281,31 @@ mod platform {
 
         for raw_path in &req.deny_write {
             if deadline.is_some_and(|d| started.elapsed() >= d) {
+                deadline_expired = true;
                 extras_skipped += 1;
                 continue;
             }
             let path = canonicalize_path_best_effort(raw_path).map_err(BackendError::validation)?;
-            let key = format!("W:{}", path.to_string_lossy());
+            let path_str = path.to_string_lossy().into_owned();
+            let key = normalize_tracked_acl_key('W', &path_str);
             if !path.exists() {
+                // R3-P0-2: Do NOT silently skip non-existent deny_write targets inside allow_write.
+                if let Some(root) = find_matching_allow_write_root(&path_str, &canon_allow_writes) {
+                    unguarded_errors.push(format!(
+                        "Cannot guard non-existent denyWrite target '{path_str}' inside allowWrite root '{root}'"
+                    ));
+                }
                 extras_skipped += 1;
                 continue;
             }
-            if previous.contains(&key) {
+            if previous.contains_key(&key) {
                 in_place += 1;
                 stands += 1;
-                next_tracked.insert(key);
+                next_tracked.insert(key, path_str);
                 continue;
             }
-            let perm_arg = icacls_perm_arg(&sid_arg, "W", path.is_dir());
+            // R3-P0-2: Deny (W,D,DC,WDAC,WO) so sandboxed process cannot delete/rename protected targets.
+            let perm_arg = icacls_perm_arg(&sid_arg, DENY_WRITE_PERM, path.is_dir());
             let ok = Command::new(&icacls)
                 .arg(&path)
                 .arg("/deny")
@@ -2431,25 +3316,39 @@ mod platform {
             if ok {
                 planted += 1;
                 guarded += 1;
-                next_tracked.insert(key);
+                next_tracked.insert(key, path_str);
             } else {
                 extras_skipped += 1;
             }
         }
 
-        for raw_path in &req.allow_write {
+        // Fail closed before granting allow_write if any non-existent deny target inside allow_write was unguarded.
+        if !unguarded_errors.is_empty() {
+            for (k, v) in &previous {
+                next_tracked.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+            save_tracked_denies(&state_file, &next_tracked, current_sid.as_deref());
+            return Err(BackendError::runtime(format!(
+                "Unguarded non-existent deny target(s) inside allowWrite: {}",
+                unguarded_errors.join("; ")
+            )));
+        }
+
+        for path_str in &canon_allow_writes {
             if deadline.is_some_and(|d| started.elapsed() >= d) {
+                deadline_expired = true;
                 extras_skipped += 1;
                 continue;
             }
-            let path = canonicalize_path_best_effort(raw_path).map_err(BackendError::validation)?;
+            let path = Path::new(path_str);
             if !path.exists() {
                 extras_skipped += 1;
                 continue;
             }
+            let key = normalize_tracked_acl_key('A', path_str);
             let perm_arg = icacls_perm_arg(&sid_arg, "M", path.is_dir());
             let ok = Command::new(&icacls)
-                .arg(&path)
+                .arg(path)
                 .arg("/grant")
                 .arg(&perm_arg)
                 .status()
@@ -2457,48 +3356,72 @@ mod platform {
                 .unwrap_or(false);
             if ok {
                 laid += 1;
+                next_tracked.insert(key, path_str.clone());
             } else {
                 extras_skipped += 1;
             }
         }
 
-        for old_key in &previous {
-            if !next_tracked.contains(old_key) {
-                let Some((prefix, raw_old_path)) = old_key.split_once(':') else {
-                    continue;
-                };
-                // P0-6: Sanitize every old_path loaded from denies.json before invoking icacls.exe
-                let Ok(old_path) = sanitize_path(raw_old_path) else {
-                    continue;
-                };
-                let _ = Command::new(&icacls)
-                    .arg(&old_path)
-                    .arg("/remove:d")
-                    .arg(&sid_arg)
-                    .status();
-                // P1-11: Scoped un-track — if the paired deny mode (R vs W) is still active
-                // for the same path, immediately re-apply it so `/remove:d` doesn't wipe it out.
-                let is_dir = Path::new(&old_path).is_dir();
-                if prefix == "W" && next_tracked.contains(&format!("R:{old_path}")) {
-                    let perm_arg = icacls_perm_arg(&sid_arg, "R", is_dir);
+        // R3-P0-3: If deadline expired mid-loop, preserve ALL remaining previous keys and SKIP
+        // the stale-entry removal loop so existing .ssh/.aws deny ACEs are NEVER stripped on timeout!
+        if deadline_expired {
+            for (old_key, old_path) in &previous {
+                next_tracked
+                    .entry(old_key.clone())
+                    .or_insert_with(|| old_path.clone());
+            }
+        } else {
+            for (old_key, raw_old_path) in &previous {
+                if !next_tracked.contains_key(old_key) {
+                    let Some((prefix, _)) = old_key.split_once(':') else {
+                        continue;
+                    };
+                    // P0-6: Sanitize every old_path loaded from denies.json before invoking icacls.exe
+                    let Ok(old_path) = sanitize_path(raw_old_path) else {
+                        continue;
+                    };
+                    if prefix == "A" {
+                        // R3-P1-5: Revoke stale allow_write grant
+                        let _ = Command::new(&icacls)
+                            .arg(&old_path)
+                            .arg("/remove:g")
+                            .arg(&sid_arg)
+                            .status();
+                        continue;
+                    }
                     let _ = Command::new(&icacls)
                         .arg(&old_path)
-                        .arg("/deny")
-                        .arg(&perm_arg)
+                        .arg("/remove:d")
+                        .arg(&sid_arg)
                         .status();
-                } else if prefix == "R" && next_tracked.contains(&format!("W:{old_path}")) {
-                    let perm_arg = icacls_perm_arg(&sid_arg, "W", is_dir);
-                    let _ = Command::new(&icacls)
-                        .arg(&old_path)
-                        .arg("/deny")
-                        .arg(&perm_arg)
-                        .status();
+                    // P1-11 & R3-P1-5: Scoped un-track using normalized lowercase keys — if the
+                    // paired deny mode (R vs W) is still active, immediately re-apply it.
+                    let is_dir = Path::new(&old_path).is_dir();
+                    if prefix == "W"
+                        && next_tracked.contains_key(&normalize_tracked_acl_key('R', &old_path))
+                    {
+                        let perm_arg = icacls_perm_arg(&sid_arg, "R", is_dir);
+                        let _ = Command::new(&icacls)
+                            .arg(&old_path)
+                            .arg("/deny")
+                            .arg(&perm_arg)
+                            .status();
+                    } else if prefix == "R"
+                        && next_tracked.contains_key(&normalize_tracked_acl_key('W', &old_path))
+                    {
+                        let perm_arg = icacls_perm_arg(&sid_arg, DENY_WRITE_PERM, is_dir);
+                        let _ = Command::new(&icacls)
+                            .arg(&old_path)
+                            .arg("/deny")
+                            .arg(&perm_arg)
+                            .status();
+                    }
+                    handed_back += 1;
                 }
-                handed_back += 1;
             }
         }
 
-        save_tracked_denies(&state_file, &next_tracked);
+        save_tracked_denies(&state_file, &next_tracked, current_sid.as_deref());
 
         Ok(DeniesResponse {
             in_place,
@@ -2518,6 +3441,31 @@ mod platform {
         let mut cmdline_w = to_wide_null(&validated.cmdline);
         // P2-5: Use trimmed & sanitized cwd from validate_run_options
         let cwd_w = validated.cwd.as_deref().map(to_wide_null);
+
+        // R3-P0-1: Verify WFP sublayer and block filters are present before spawning (fail closed).
+        if !opts.no_net {
+            let persisted = load_wfp_config();
+            let sublayer_guid = validated
+                .sublayer_guid
+                .as_deref()
+                .or_else(|| persisted.as_ref().and_then(|c| c.sublayer_guid.as_deref()))
+                .unwrap_or(DEFAULT_WFP_SUBLAYER_GUID);
+            match check_wfp_sublayer_state(sublayer_guid)? {
+                WfpCheckState::Installed => {}
+                WfpCheckState::CannotRead => {
+                    if persisted.is_none() {
+                        return Err(BackendError::wfp(
+                            "Unable to verify WFP sandbox sublayer/filters (cannot-read and no persisted install config); run 'claude sandbox install' as administrator",
+                        ));
+                    }
+                }
+                WfpCheckState::Absent | WfpCheckState::Degraded => {
+                    return Err(BackendError::wfp(
+                        "WFP sandbox sublayer or outbound block filters are missing/degraded; run 'claude sandbox install' as administrator",
+                    ));
+                }
+            }
+        }
 
         // P0-4: Retrieve sandbox user credential from Windows Credential Manager and fail closed
         // if missing or if LogonUserW fails (NEVER fall back to OpenProcessToken(GetCurrentProcess())).
@@ -2582,8 +3530,22 @@ mod platform {
 
             let env_block = build_windows_env_block(restricted_token.0, opts, &validated)?;
 
+            // R3-P0-5: Populate StartupInfoW with STARTF_USESTDHANDLES and inheritable stdio handles
+            let h_stdin = GetStdHandle(STD_INPUT_HANDLE);
+            let h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+            let h_stderr = GetStdHandle(STD_ERROR_HANDLE);
+            for h in [h_stdin, h_stdout, h_stderr] {
+                if !h.is_null() && h != INVALID_HANDLE_VALUE {
+                    let _ = SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+                }
+            }
+
             let mut si: StartupInfoW = std::mem::zeroed();
             si.cb = std::mem::size_of::<StartupInfoW>() as Dword;
+            si.dw_flags = STARTF_USESTDHANDLES;
+            si.h_std_input = h_stdin;
+            si.h_std_output = h_stdout;
+            si.h_std_error = h_stderr;
             let mut pi: ProcessInformation = std::mem::zeroed();
 
             let mut created = CreateProcessAsUserW(
@@ -2602,9 +3564,8 @@ mod platform {
             if created == FALSE {
                 let first_err = GetLastError();
                 if first_err == ERROR_PRIVILEGE_NOT_HELD {
-                    // Desktop sessions lack SE_ASSIGNPRIMARYTOKEN_NAME; fall back to
-                    // CreateProcessWithTokenW (routed via the Secondary Logon / seclogon service)
-                    // with the exact same restricted sandbox token and CREATE_SUSPENDED flag.
+                    // Desktop sessions lack SE_ASSIGNPRIMARYTOKEN_NAME; try CreateProcessWithTokenW
+                    // first (preserves the restricted Low-IL token when SE_IMPERSONATE_NAME is held).
                     created = CreateProcessWithTokenW(
                         restricted_token.0,
                         0,
@@ -2617,10 +3578,38 @@ mod platform {
                         &mut pi,
                     );
                     if created == FALSE {
-                        return Err(BackendError::runtime(format!(
-                            "CreateProcessWithTokenW fallback failed with error {} (after CreateProcessAsUserW ERROR_PRIVILEGE_NOT_HELD); ensure Secondary Logon (seclogon) is running",
-                            GetLastError()
-                        )));
+                        let second_err = GetLastError();
+                        if second_err == ERROR_PRIVILEGE_NOT_HELD {
+                            // R3-P0-5: Non-elevated desktop sessions also lack SE_IMPERSONATE_NAME;
+                            // fall back cleanly to CreateProcessWithLogonW (routed via seclogon).
+                            let mut pass_w = read_sandbox_password(&sandbox_user)?;
+                            let user_w = to_wide_null(&sandbox_user);
+                            let domain_w = to_wide_null(".");
+                            created = CreateProcessWithLogonW(
+                                user_w.as_ptr(),
+                                domain_w.as_ptr(),
+                                pass_w.as_ptr(),
+                                LOGON_WITH_PROFILE,
+                                ptr::null(),
+                                cmdline_w.as_mut_ptr(),
+                                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                                env_block.as_ptr() as *const c_void,
+                                cwd_w.as_ref().map_or(ptr::null(), |w| w.as_ptr()),
+                                &si,
+                                &mut pi,
+                            );
+                            let third_err = if created == FALSE { GetLastError() } else { 0 };
+                            zeroize_u16(&mut pass_w);
+                            if created == FALSE {
+                                return Err(BackendError::runtime(format!(
+                                    "CreateProcessWithLogonW fallback failed with error {third_err} (after CreateProcessWithTokenW ERROR_PRIVILEGE_NOT_HELD); ensure Secondary Logon (seclogon) is running"
+                                )));
+                            }
+                        } else {
+                            return Err(BackendError::runtime(format!(
+                                "CreateProcessWithTokenW fallback failed with error {second_err} (after CreateProcessAsUserW ERROR_PRIVILEGE_NOT_HELD); ensure Secondary Logon (seclogon) is running"
+                            )));
+                        }
                     }
                 } else {
                     return Err(BackendError::runtime(format!(
@@ -2839,10 +3828,17 @@ mod platform {
     }
 
     fn test_state_dir() -> Option<PathBuf> {
-        std::env::var("SRT_WIN_TEST_STATE_DIR")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .map(PathBuf::from)
+        #[cfg(any(test, debug_assertions, feature = "test-harness"))]
+        {
+            std::env::var("SRT_WIN_TEST_STATE_DIR")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(PathBuf::from)
+        }
+        #[cfg(not(any(test, debug_assertions, feature = "test-harness")))]
+        {
+            None
+        }
     }
 
     fn state_file_path(dir: &PathBuf) -> PathBuf {
@@ -2868,22 +3864,51 @@ mod platform {
     }
 
     fn check_test_fault_injection() -> Result<(), BackendError> {
-        if std::env::var("SRT_WIN_TEST_SIMULATE_UAC_CANCEL").as_deref() == Ok("1") {
-            return Err(BackendError::uac_cancelled(
-                "Simulated UAC elevation cancellation",
-            ));
-        }
-        if std::env::var("SRT_WIN_TEST_SIMULATE_WFP_ERROR").as_deref() == Ok("1") {
-            return Err(BackendError::wfp("Simulated WFP subsystem failure"));
+        #[cfg(any(test, debug_assertions, feature = "test-harness"))]
+        {
+            if std::env::var("SRT_WIN_TEST_SIMULATE_UAC_CANCEL").as_deref() == Ok("1") {
+                return Err(BackendError::uac_cancelled(
+                    "Simulated UAC elevation cancellation",
+                ));
+            }
+            if std::env::var("SRT_WIN_TEST_SIMULATE_WFP_ERROR").as_deref() == Ok("1") {
+                return Err(BackendError::wfp("Simulated WFP subsystem failure"));
+            }
         }
         Ok(())
     }
 
-    pub fn cmd_status() -> Result<StatusResponse, BackendError> {
+    fn should_defer_profile_forget_in_test() -> bool {
+        #[cfg(any(test, debug_assertions, feature = "test-harness"))]
+        {
+            std::env::var("SRT_WIN_TEST_DEFER_PROFILE_FORGET").as_deref() == Ok("1")
+        }
+        #[cfg(not(any(test, debug_assertions, feature = "test-harness")))]
+        {
+            false
+        }
+    }
+
+    pub fn cmd_status(opts: &StatusOptions) -> Result<StatusResponse, BackendError> {
+        validate_status_options(opts)?;
         let Some(dir) = test_state_dir() else {
             return Ok(StatusResponse::absent());
         };
-        Ok(load_state(&dir)?.to_status())
+        let mut status = load_state(&dir)?.to_status();
+        if let Some(ref requested_guid) = opts.sublayer_guid {
+            let matches = status
+                .wfp
+                .sublayer_guid
+                .as_deref()
+                .is_some_and(|g| g.eq_ignore_ascii_case(requested_guid));
+            if !matches {
+                status.wfp.state = "absent".to_string();
+                status.wfp.allow_loopback = false;
+                status.wfp.sublayer_guid = None;
+                status.wfp.proxy_port_range = None;
+            }
+        }
+        Ok(status)
     }
 
     pub fn cmd_install(opts: &InstallOptions) -> Result<StatusResponse, BackendError> {
@@ -2970,7 +3995,7 @@ mod platform {
         if let Some(ref sid) = opts.sid {
             ensure_not_current_user_sid(sid, state.real_user_sid.as_deref())?;
         }
-        if std::env::var("SRT_WIN_TEST_DEFER_PROFILE_FORGET").as_deref() == Ok("1") {
+        if should_defer_profile_forget_in_test() {
             return Ok(ProfileForgetResponse {
                 cleared: false,
                 deferred: true,
@@ -2993,6 +4018,7 @@ mod platform {
             ));
         };
         let started = Instant::now();
+        let deadline = req.deadline_ms.map(std::time::Duration::from_millis);
         let mut state = load_state(&dir)?;
         if !state.provisioned {
             return Err(BackendError::runtime(
@@ -3003,62 +4029,107 @@ mod platform {
             ensure_not_current_user_sid(sid, state.real_user_sid.as_deref())?;
         }
 
-        let normalize = |paths: &[String]| -> Result<BTreeSet<String>, BackendError> {
-            let mut set = BTreeSet::new();
-            for p in paths {
-                let canon = canonicalize_path_best_effort(p).map_err(BackendError::validation)?;
-                set.insert(canon.to_string_lossy().into_owned());
-            }
-            Ok(set)
-        };
-        let new_deny_read = normalize(&req.deny_read)?;
-        let new_deny_write = normalize(&req.deny_write)?;
-        let new_allow_write = normalize(&req.allow_write)?;
+        let prev_deny_read: BTreeSet<String> = state
+            .deny_read
+            .iter()
+            .map(|p| normalize_windows_path_key(p))
+            .collect();
+        let prev_deny_write: BTreeSet<String> = state
+            .deny_write
+            .iter()
+            .map(|p| normalize_windows_path_key(p))
+            .collect();
+
+        let mut new_deny_read = BTreeSet::new();
+        let mut new_deny_write = BTreeSet::new();
+        let mut new_allow_write = BTreeSet::new();
 
         let mut in_place = 0u64;
         let mut planted = 0u64;
         let mut laid = 0u64;
         let mut pushed_down = 0u64;
         let mut guarded = 0u64;
+        let mut extras_skipped = 0u64;
         let mut stands = 0u64;
         let mut handed_back = 0u64;
+        let mut deadline_expired = false;
 
-        for path in &new_deny_read {
-            if state.deny_read.contains(path) {
-                in_place += 1;
-                stands += 1;
-            } else {
-                planted += 1;
-                guarded += 1;
+        for raw in &req.deny_read {
+            if deadline.is_some_and(|d| started.elapsed() >= d) {
+                deadline_expired = true;
+                extras_skipped += 1;
+                continue;
+            }
+            let canon = canonicalize_path_best_effort(raw).map_err(BackendError::validation)?;
+            let norm = normalize_windows_path_key(&canon.to_string_lossy());
+            if new_deny_read.insert(norm.clone()) {
+                if prev_deny_read.contains(&norm) {
+                    in_place += 1;
+                    stands += 1;
+                } else {
+                    planted += 1;
+                    guarded += 1;
+                }
             }
         }
-        for path in &new_deny_write {
-            if state.deny_write.contains(path) {
-                in_place += 1;
-                stands += 1;
-            } else {
-                planted += 1;
-                guarded += 1;
+        for raw in &req.deny_write {
+            if deadline.is_some_and(|d| started.elapsed() >= d) {
+                deadline_expired = true;
+                extras_skipped += 1;
+                continue;
+            }
+            let canon = canonicalize_path_best_effort(raw).map_err(BackendError::validation)?;
+            let norm = normalize_windows_path_key(&canon.to_string_lossy());
+            if new_deny_write.insert(norm.clone()) {
+                if prev_deny_write.contains(&norm) {
+                    in_place += 1;
+                    stands += 1;
+                } else {
+                    planted += 1;
+                    guarded += 1;
+                }
             }
         }
-        for path in &new_allow_write {
-            laid += 1;
-            if new_deny_write
-                .iter()
-                .any(|dw| path.starts_with(dw.as_str()) && path.len() > dw.len())
-            {
-                pushed_down += 1;
+        for raw in &req.allow_write {
+            if deadline.is_some_and(|d| started.elapsed() >= d) {
+                deadline_expired = true;
+                extras_skipped += 1;
+                continue;
+            }
+            let canon = canonicalize_path_best_effort(raw).map_err(BackendError::validation)?;
+            let norm = normalize_windows_path_key(&canon.to_string_lossy());
+            if new_allow_write.insert(norm.clone()) {
+                laid += 1;
+                if new_deny_write
+                    .iter()
+                    .any(|dw| norm.starts_with(dw.as_str()) && norm.len() > dw.len())
+                {
+                    pushed_down += 1;
+                }
             }
         }
 
-        for old in &state.deny_read {
-            if !new_deny_read.contains(old) {
-                handed_back += 1;
+        // R3-P0-3: On deadline expiry, preserve ALL previous tracked denies and skip stale removal.
+        if deadline_expired {
+            for old in &prev_deny_read {
+                new_deny_read.insert(old.clone());
             }
-        }
-        for old in &state.deny_write {
-            if !new_deny_write.contains(old) {
-                handed_back += 1;
+            for old in &prev_deny_write {
+                new_deny_write.insert(old.clone());
+            }
+            for old in &state.allow_write {
+                new_allow_write.insert(normalize_windows_path_key(old));
+            }
+        } else {
+            for old in &prev_deny_read {
+                if !new_deny_read.contains(old) {
+                    handed_back += 1;
+                }
+            }
+            for old in &prev_deny_write {
+                if !new_deny_write.contains(old) {
+                    handed_back += 1;
+                }
             }
         }
 
@@ -3073,7 +4144,7 @@ mod platform {
             laid,
             pushed_down,
             guarded,
-            extras_skipped: 0,
+            extras_skipped,
             ms: started.elapsed().as_millis() as u64,
             stands,
             handed_back,
@@ -3093,6 +4164,13 @@ mod platform {
                 "Sandbox user is not provisioned; run 'install' first",
             ));
         }
+        // R3-P0-1: Verify WFP is installed before spawning (fail closed unless --no-net).
+        if !opts.no_net && state.wfp_state != "installed" {
+            return Err(BackendError::wfp(format!(
+                "WFP sandbox filters are not installed (state: '{}'); run 'install' first",
+                state.wfp_state
+            )));
+        }
 
         let mut cmd = Command::new(&opts.program);
         cmd.args(&opts.args);
@@ -3104,6 +4182,12 @@ mod platform {
         for (k, _) in std::env::vars() {
             if is_sensitive_env_var(&k) {
                 cmd.env_remove(&k);
+            }
+        }
+        // R3-P1-4: Merge explicit --env KEY=VAL overrides (scrubbed via is_sensitive_env_var)
+        for (k, v) in &opts.extra_env {
+            if !is_sensitive_env_var(k) {
+                cmd.env(k, v);
             }
         }
         if let Some(ref http) = validated.http_proxy {
@@ -3209,7 +4293,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("SRT_WIN_TEST_STATE_DIR");
 
-        let status = cmd_status().unwrap();
+        let status = cmd_status(&StatusOptions::default()).unwrap();
         assert!(!status.user.provisioned);
         assert_eq!(status.wfp.state, "absent");
 
@@ -3232,7 +4316,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::env::set_var("SRT_WIN_TEST_STATE_DIR", &tmp);
 
-        let initial = cmd_status().unwrap();
+        let initial = cmd_status(&StatusOptions::default()).unwrap();
         assert!(!initial.user.provisioned);
         assert_eq!(initial.wfp.state, "absent");
 
@@ -3241,6 +4325,13 @@ mod tests {
         assert!(installed.user.cred_present);
         assert_eq!(installed.wfp.state, "installed");
         assert_eq!(installed.wfp.proxy_port_range, Some([60080, 60089]));
+
+        // R3-P2-1: status with mismatched --sublayer-guid reports absent WFP
+        let mismatched = cmd_status(&StatusOptions {
+            sublayer_guid: Some("11111111-2222-3333-4444-555555555555".to_string()),
+        })
+        .unwrap();
+        assert_eq!(mismatched.wfp.state, "absent");
 
         let verified = cmd_wfp_verify(&WfpVerifyOptions::default()).unwrap();
         assert_eq!(verified.egress_probe, "blocked");
@@ -3280,8 +4371,21 @@ mod tests {
         assert_eq!(first_denies.pushed_down, 1);
         assert_eq!(first_denies.handed_back, 0);
 
+        // R3-P0-3: deadline_ms=0 expires mid-loop and must preserve ALL previous denies (handed_back == 0)
+        let expired_denies = cmd_denies(&DeniesRequest {
+            deny_read: vec![r"C:\new\path".to_string()],
+            deny_write: vec![],
+            allow_write: vec![],
+            sid: Some(sandbox_sid.clone()),
+            deadline_ms: Some(0),
+        })
+        .unwrap();
+        assert_eq!(expired_denies.handed_back, 0);
+        assert_eq!(expired_denies.extras_skipped, 1);
+
+        // R3-P1-5: case-insensitive path key match (uppercase C:\SECRET\SSH matches c:\secret\ssh)
         let second_denies = cmd_denies(&DeniesRequest {
-            deny_read: vec![r"C:\secret\ssh".to_string()],
+            deny_read: vec![r"C:\SECRET\SSH".to_string()],
             deny_write: vec![],
             allow_write: vec![],
             sid: Some(sandbox_sid.clone()),
@@ -3322,6 +4426,7 @@ mod tests {
             cred_target_name("claude_srt"),
             "ClaudeSandboxRuntime/claude_srt"
         );
+        assert_eq!(CANONICAL_STATE_DIR_NAME, "sandbox-runtime");
         assert_eq!(
             icacls_perm_arg("*S-1-5-21-1-2-3-1002", "R", true),
             "*S-1-5-21-1-2-3-1002:(OI)(CI)R"
@@ -3330,10 +4435,52 @@ mod tests {
             icacls_perm_arg("*S-1-5-21-1-2-3-1002", "R", false),
             "*S-1-5-21-1-2-3-1002:R"
         );
+        // R3-P0-2: deny_write blocks write, delete, delete-child, DACL, owner takeover
         assert_eq!(
-            icacls_perm_arg("*S-1-5-21-1-2-3-1002", "W", false),
-            "*S-1-5-21-1-2-3-1002:W"
+            icacls_perm_arg("*S-1-5-21-1-2-3-1002", DENY_WRITE_PERM, true),
+            "*S-1-5-21-1-2-3-1002:(OI)(CI)(W,D,DC,WDAC,WO)"
         );
+        assert_eq!(
+            icacls_perm_arg("*S-1-5-21-1-2-3-1002", DENY_WRITE_PERM, false),
+            "*S-1-5-21-1-2-3-1002:(W,D,DC,WDAC,WO)"
+        );
+
+        // R3-P0-2: allow_write containment matching (case-insensitive, segment-boundary aware)
+        let roots = vec![r"C:\Users\Alice\Work".to_string()];
+        assert_eq!(
+            find_matching_allow_write_root(r"c:\users\alice\work\.git\config", &roots),
+            Some(r"C:\Users\Alice\Work")
+        );
+        assert_eq!(
+            find_matching_allow_write_root(r"C:\Users\Alice\Work2\file.txt", &roots),
+            None
+        );
+
+        // R3-P0-3: state dir ACL hardening args
+        let acl_args =
+            build_state_dir_icacls_args(r"C:\ProgramData\sandbox-runtime", Some(user_sid));
+        assert!(acl_args.contains(&"/inheritance:r".to_string()));
+        assert!(acl_args.contains(&"*S-1-5-18:(OI)(CI)F".to_string()));
+        assert!(acl_args.contains(&"*S-1-5-32-544:(OI)(CI)F".to_string()));
+        assert!(acl_args.contains(&format!("*{user_sid}:(OI)(CI)F")));
+        let bad_acl_args =
+            build_state_dir_icacls_args(r"C:\ProgramData\sandbox-runtime", Some("S-1-5-18"));
+        assert_eq!(bad_acl_args.len(), 6);
+
+        // R3-P1-5: tracked ACL map object + legacy array migration + case normalization
+        let legacy = parse_tracked_acl_map(r#"["R:C:\\Users\\Alice\\.ssh","W:C:\\Work\\.env"]"#);
+        assert_eq!(
+            legacy.get(r"R:c:\users\alice\.ssh").map(String::as_str),
+            Some(r"C:\Users\Alice\.ssh")
+        );
+        let serialized = serialize_tracked_acl_map(&legacy);
+        let roundtrip = parse_tracked_acl_map(&serialized);
+        assert_eq!(roundtrip, legacy);
+
+        // R3-P2-2: WSAEACCES (10013) -> "blocked", timeout/unreachable -> "not-run"
+        assert_eq!(classify_wfp_connect_error(Some(WSAEACCES)), "blocked");
+        assert_eq!(classify_wfp_connect_error(Some(10060)), "not-run");
+        assert_eq!(classify_wfp_connect_error(None), "not-run");
 
         assert!(is_sensitive_env_var("ANTHROPIC_API_KEY"));
         assert!(is_sensitive_env_var("SRT_WIN_SANDBOX_PASSWORD"));
@@ -3342,14 +4489,24 @@ mod tests {
         assert!(!is_sensitive_env_var("PATH"));
         assert!(!is_sensitive_env_var("SYSTEMROOT"));
 
+        // R3-P1-4: fallback env drops TEMP/TMP and keeps CA/proxy allowlist
         let filtered = filter_safe_fallback_env(vec![
             ("PATH".to_string(), r"C:\Windows\System32".to_string()),
+            ("TEMP".to_string(), r"C:\Users\host\AppData\Local\Temp".to_string()),
+            ("TMP".to_string(), r"C:\Users\host\AppData\Local\Temp".to_string()),
+            ("NODE_EXTRA_CA_CERTS".to_string(), r"C:\ProgramData\sandbox-runtime\ca\cert.pem".to_string()),
             ("ANTHROPIC_API_KEY".to_string(), "sk-secret".to_string()),
             ("CUSTOM_UNSAFE".to_string(), "value".to_string()),
         ]);
         assert_eq!(
             filtered,
-            vec![("PATH".to_string(), r"C:\Windows\System32".to_string())]
+            vec![
+                ("PATH".to_string(), r"C:\Windows\System32".to_string()),
+                (
+                    "NODE_EXTRA_CA_CERTS".to_string(),
+                    r"C:\ProgramData\sandbox-runtime\ca\cert.pem".to_string()
+                ),
+            ]
         );
     }
 
@@ -3362,6 +4519,12 @@ mod tests {
             proxy_port: Some(60080),
             http_proxy: None,
             https_proxy: None,
+            sublayer_guid: None,
+            no_net: false,
+            extra_env: vec![(
+                "NODE_EXTRA_CA_CERTS".to_string(),
+                r"C:\ProgramData\sandbox-runtime\ca\cert.pem".to_string(),
+            )],
             allow_loopback: true,
             block_clipboard_read: true,
             block_clipboard_write: true,
@@ -3379,6 +4542,18 @@ mod tests {
             ..base.clone()
         };
         assert!(validate_run_options(&bat_opts).is_err());
+
+        let ads_opts = RunOptions {
+            program: r"C:\temp\payload.bat::$DATA".to_string(),
+            ..base.clone()
+        };
+        assert!(validate_run_options(&ads_opts).is_err());
+
+        let crlf_opts = RunOptions {
+            program: "cmd.exe\r\nevil".to_string(),
+            ..base.clone()
+        };
+        assert!(validate_run_options(&crlf_opts).is_err());
 
         let cmd_opts = RunOptions {
             program: r"C:\temp\payload.CMD.. ".to_string(),

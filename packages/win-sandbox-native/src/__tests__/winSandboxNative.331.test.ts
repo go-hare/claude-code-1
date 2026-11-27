@@ -3,6 +3,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -406,6 +407,7 @@ describe('win-sandbox-native (srt-win 2.1.331)', () => {
     })
     expect(Buffer.byteLength(capped.stdout, 'utf8')).toBeLessThanOrEqual(1024)
     expect(capped.exitCode).not.toBe(0)
+    expect(capped.outputLimitExceeded).toBe(true)
 
     // 2. Output cap on checked command throws SrtWinExecutionError
     const chattyProvider = createSrtWinNativeProvider({
@@ -508,5 +510,201 @@ describe('win-sandbox-native (srt-win 2.1.331)', () => {
       expect(execErr.exitCode).toBe(SRT_WIN_EXIT_CODES.WFP_ERROR)
       expect(execErr.isWfpError).toBe(true)
     }
+  })
+
+  test('R3 hardening: WFP fail-closed in run, deadline preserves denies, relative/ADS/CRLF path rejection, safe --env overrides, case-insensitive denies, --sublayer-guid & cannot-read status, and compiled execPath resolution', async () => {
+    const binPath = resolveSrtWinBinaryPath()
+    expect(binPath).not.toBeNull()
+
+    const provider = createSrtWinNativeProvider({
+      srtWin: { exe: binPath!, prependArgs: [] },
+      env: { SRT_WIN_TEST_STATE_DIR: stateDir },
+    })
+
+    const customGuid = 'b2c3d4e5-f6a7-4890-bcde-1234567890ab'
+    await provider.install({ sublayerGuid: customGuid })
+
+    // R3-P2-1: checkStatus forwards --sublayer-guid
+    const matchingStatus = await provider.checkStatus({
+      sublayerGuid: customGuid,
+    })
+    expect(matchingStatus.wfp.state).toBe('installed')
+    expect(matchingStatus.wfp.sublayerGuid).toBe(customGuid)
+
+    const mismatchedStatus = await provider.checkStatus({
+      sublayerGuid: '11111111-2222-3333-4444-555555555555',
+    })
+    expect(mismatchedStatus.wfp.state).toBe('absent')
+
+    // R3-P2-1: parseWfpState preserves 'cannot-read'
+    const cannotReadScript = join(stateDir, 'cannot-read-status.sh')
+    writeFileSync(
+      cannotReadScript,
+      '#!/bin/sh\nprintf \'{"user":{"provisioned":true,"credPresent":true,"realUserSid":null,"sandboxUser":"claude_srt","seclogonState":"disabled"},"wfp":{"state":"cannot-read","allowLoopback":false,"sublayerGuid":null,"proxyPortRange":null}}\'\n',
+    )
+    chmodSync(cannotReadScript, 0o755)
+    const cannotReadProvider = createSrtWinNativeProvider({
+      srtWin: { exe: cannotReadScript, prependArgs: [] },
+    })
+    const crStatus = await cannotReadProvider.checkStatus()
+    expect(crStatus.wfp.state).toBe('cannot-read')
+    expect(crStatus.user.seclogonState).toBe('disabled')
+
+    // R3-P0-3: reject relative, drive-relative, and leading-backslash paths
+    const expectValidationErr = async (fn: () => Promise<unknown>) => {
+      try {
+        await fn()
+        throw new Error('Expected validation error')
+      } catch (err) {
+        expect(err).toBeInstanceOf(SrtWinExecutionError)
+        expect((err as SrtWinExecutionError).exitCode).toBe(
+          SRT_WIN_EXIT_CODES.VALIDATION,
+        )
+      }
+    }
+    await expectValidationErr(() =>
+      provider.applyDenies({
+        denyRead: ['relative\\secret.txt'],
+        denyWrite: [],
+        allowWrite: [],
+      }),
+    )
+    await expectValidationErr(() =>
+      provider.applyDenies({
+        denyRead: ['C:relative.txt'],
+        denyWrite: [],
+        allowWrite: [],
+      }),
+    )
+    await expectValidationErr(() =>
+      provider.applyDenies({
+        denyRead: ['\\Windows\\System32'],
+        denyWrite: [],
+        allowWrite: [],
+      }),
+    )
+
+    // R3-P0-3 & R3-P1-5: deadline expiry preserves previous denies & keys are case-insensitive
+    const sandboxSid = 'S-1-5-21-1000000001-2000000002-3000000003-2002'
+    const planted = await provider.applyDenies({
+      denyRead: ['C:\\Users\\Alice\\.ssh', 'C:\\Users\\Alice\\.aws'],
+      denyWrite: [],
+      allowWrite: [],
+      sid: sandboxSid,
+    })
+    expect(planted.planted).toBe(2)
+
+    const timedOutDenies = await provider.applyDenies({
+      denyRead: ['C:\\Users\\Alice\\.gnupg'],
+      denyWrite: [],
+      allowWrite: [],
+      sid: sandboxSid,
+      deadlineMs: 0,
+    })
+    expect(timedOutDenies.handedBack).toBe(0)
+    expect(timedOutDenies.extrasSkipped).toBe(1)
+
+    // Case-insensitive match proves .ssh and .aws survived the timed-out denies call
+    const afterTimeout = await provider.applyDenies({
+      denyRead: ['c:\\users\\alice\\.ssh', 'C:\\USERS\\ALICE\\.AWS'],
+      denyWrite: [],
+      allowWrite: [],
+      sid: sandboxSid,
+    })
+    expect(afterTimeout.inPlace).toBe(2)
+    expect(afterTimeout.planted).toBe(0)
+    expect(afterTimeout.handedBack).toBe(0)
+
+    // R3-P1-4: safe --env overrides forwarded while sensitive secrets scrubbed; ADS & CR/LF rejected
+    const envRun = await provider.spawnSandboxed({
+      command: '/bin/sh',
+      args: [
+        '-c',
+        'printf "%s|%s|%s" "$NODE_EXTRA_CA_CERTS" "$CUSTOM_SAFE_VAR" "${AWS_SECRET_ACCESS_KEY:-scrubbed}"',
+      ],
+      env: {
+        NODE_EXTRA_CA_CERTS: 'C:\\ProgramData\\sandbox-runtime\\ca\\cert.pem',
+        CUSTOM_SAFE_VAR: 'ok-val',
+        AWS_SECRET_ACCESS_KEY: 'super-secret',
+      },
+    })
+    expect(envRun.exitCode).toBe(0)
+    expect(envRun.outputLimitExceeded).toBe(false)
+    expect(envRun.stdout).toBe(
+      'C:\\ProgramData\\sandbox-runtime\\ca\\cert.pem|ok-val|scrubbed',
+    )
+
+    const adsRun = await provider.spawnSandboxed({
+      command: 'C:\\temp\\payload.bat::$DATA',
+    })
+    expect(adsRun.exitCode).toBe(SRT_WIN_EXIT_CODES.VALIDATION)
+
+    const crlfRun = await provider.spawnSandboxed({
+      command: 'cmd.exe\r\nevil',
+    })
+    expect(crlfRun.exitCode).toBe(SRT_WIN_EXIT_CODES.VALIDATION)
+
+    // R3-P0-1: cmd_run fails closed with exit 19 (WFP_ERROR) when WFP state != installed unless --no-net
+    const stateFile = join(stateDir, 'state.json')
+    const rawState = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<
+      string,
+      unknown
+    >
+    rawState.wfpState = 'absent'
+    writeFileSync(stateFile, JSON.stringify(rawState))
+
+    const wfpFailRun = await provider.spawnSandboxed({
+      command: '/bin/sh',
+      args: ['-c', 'echo should-not-run'],
+    })
+    expect(wfpFailRun.exitCode).toBe(SRT_WIN_EXIT_CODES.WFP_ERROR)
+
+    const noNetRun = await provider.spawnSandboxed({
+      command: '/bin/sh',
+      args: ['-c', 'printf ok'],
+      noNet: true,
+    })
+    expect(noNetRun.exitCode).toBe(0)
+    expect(noNetRun.stdout).toBe('ok')
+
+    // R3-P0-6: resolveSrtWinBinaryPath finds vendor/win-sandbox/srt-win.exe next to compiled execPath
+    const fakeBundleRoot = join(stateDir, 'compiled-pkg')
+    const fakeExecBin = join(fakeBundleRoot, 'bin', 'claude.exe')
+    const fakeVendorNextToExec = join(
+      fakeBundleRoot,
+      'bin',
+      'vendor',
+      'win-sandbox',
+      'srt-win.exe',
+    )
+    const fakeVendorAtPkgRoot = join(
+      fakeBundleRoot,
+      'vendor',
+      'win-sandbox',
+      'srt-win.exe',
+    )
+    mkdirSync(join(fakeBundleRoot, 'vendor', 'win-sandbox'), {
+      recursive: true,
+    })
+    writeFileSync(fakeVendorAtPkgRoot, 'MZ')
+    expect(
+      resolveSrtWinBinaryPath({
+        platform: 'win32',
+        env: {},
+        execPath: fakeExecBin,
+      }),
+    ).toBe(fakeVendorAtPkgRoot)
+
+    mkdirSync(join(fakeBundleRoot, 'bin', 'vendor', 'win-sandbox'), {
+      recursive: true,
+    })
+    writeFileSync(fakeVendorNextToExec, 'MZ')
+    expect(
+      resolveSrtWinBinaryPath({
+        platform: 'win32',
+        env: {},
+        execPath: fakeExecBin,
+      }),
+    ).toBe(fakeVendorNextToExec)
   })
 })

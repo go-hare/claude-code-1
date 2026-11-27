@@ -9,7 +9,8 @@
     "arm64"
   ],
   "files": [
-    "claude.exe"
+    "claude.exe",
+    "vendor/win-sandbox/srt-win.exe"
   ],
   "preferUnplugged": true,
   "license": "SEE LICENSE IN README.md",

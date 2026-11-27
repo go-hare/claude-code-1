@@ -55,7 +55,9 @@ import {
 } from '../sandbox-adapter.js'
 import {
   adaptSrtWinNativeProvider,
+  buildWindowsCaDirIcaclsArgs,
   buildWindowsKeyFileIcaclsArgs,
+  ensureDefaultWindowsSandboxNativeProvider,
 } from '../windowsSandbox.js'
 
 const tempDirs: string[] = []
@@ -1027,6 +1029,7 @@ describe('Windows sandbox security hardening regressions (P0-2, P1-1, P1-4, P1-8
           stdout: '',
           stderr: '',
           timedOut: false,
+          outputLimitExceeded: false,
           signal: null,
         }
       },
@@ -1282,13 +1285,13 @@ describe('Windows sandbox security hardening regressions (P0-2, P1-1, P1-4, P1-8
     })
   })
 
-  test('Round-2 P1-4: buildWindowsKeyFileIcaclsArgs grants realUserSid while rejecting malformed SIDs', () => {
+  test('Round-2 P1-4 & R3-P2-4: buildWindowsKeyFileIcaclsArgs and buildWindowsCaDirIcaclsArgs use sandbox-runtime and validate realUserSid', () => {
     const withRealUser = buildWindowsKeyFileIcaclsArgs(
-      'C:\\ProgramData\\claude-sandbox-runtime\\ca\\key.pem',
+      'C:\\ProgramData\\sandbox-runtime\\ca\\key.pem',
       'S-1-5-21-100-200-300-1001',
     )
     expect(withRealUser).toEqual([
-      'C:\\ProgramData\\claude-sandbox-runtime\\ca\\key.pem',
+      'C:\\ProgramData\\sandbox-runtime\\ca\\key.pem',
       '/inheritance:r',
       '/grant:r',
       '*S-1-5-18:F',
@@ -1299,16 +1302,228 @@ describe('Windows sandbox security hardening regressions (P0-2, P1-1, P1-4, P1-8
     ])
 
     const withBadSid = buildWindowsKeyFileIcaclsArgs(
-      'C:\\ProgramData\\claude-sandbox-runtime\\ca\\key.pem',
+      'C:\\ProgramData\\sandbox-runtime\\ca\\key.pem',
       'Everyone:F /grant *S-1-1-0',
     )
     expect(withBadSid).toEqual([
-      'C:\\ProgramData\\claude-sandbox-runtime\\ca\\key.pem',
+      'C:\\ProgramData\\sandbox-runtime\\ca\\key.pem',
       '/inheritance:r',
       '/grant:r',
       '*S-1-5-18:F',
       '/grant:r',
       '*S-1-5-32-544:F',
     ])
+
+    const dirArgs = buildWindowsCaDirIcaclsArgs(
+      'C:\\ProgramData\\sandbox-runtime\\ca',
+      'S-1-5-21-100-200-300-1001',
+    )
+    expect(dirArgs).toEqual([
+      'C:\\ProgramData\\sandbox-runtime\\ca',
+      '/inheritance:r',
+      '/grant:r',
+      '*S-1-5-18:(OI)(CI)F',
+      '/grant:r',
+      '*S-1-5-32-544:(OI)(CI)F',
+      '/grant:r',
+      '*S-1-5-21-100-200-300-1001:(OI)(CI)F',
+    ])
+  })
+
+  test('R3-P0-4: ensurePersistentWindowsCa hardens ca/ dir BEFORE writing key.pem temp file and fails closed with temp cleanup on icacls error', async () => {
+    const dir = join(makeTempDir('win-ca-r3-p0-4-'), 'ca')
+    const status = makeProvisionedStatus()
+    const icaclsCalls: Array<{ path: string; args: string[] }> = []
+
+    // 1. Happy path: directory ACL hardening executes BEFORE any temp key.pem file exists
+    const created = await ensurePersistentWindowsCa({
+      dir,
+      status,
+      platform: 'win32',
+      icaclsRunner: (_exe, args) => {
+        const target = args[0]!
+        if (target === dir) {
+          // Directory must be empty (no key.pem or .tmp file written yet!)
+          expect(readdirSync(dir)).toEqual([])
+        }
+        icaclsCalls.push({ path: target, args })
+      },
+    })
+    expect(created.regenerated).toBe(true)
+    expect(icaclsCalls.length).toBe(2)
+    expect(icaclsCalls[0]!.path).toBe(dir)
+    expect(icaclsCalls[0]!.args).toContain('*S-1-5-18:(OI)(CI)F')
+    expect(icaclsCalls[1]!.path).toContain('key.pem.tmp.')
+    expect(icaclsCalls[1]!.args).toContain('*S-1-5-18:F')
+
+    // 2. Fail closed when icacls fails on key.pem temp file: throws ca_acl_failed and unlinks temp file
+    const failDir = join(makeTempDir('win-ca-r3-p0-4-fail-'), 'ca')
+    await expect(
+      ensurePersistentWindowsCa({
+        dir: failDir,
+        status,
+        platform: 'win32',
+        icaclsRunner: (_exe, args) => {
+          if (args[0]!.includes('key.pem.tmp.')) {
+            throw new Error('icacls access denied')
+          }
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: 'WindowsSandboxError',
+      code: 'ca_acl_failed',
+    })
+    expect(existsSync(join(failDir, 'key.pem'))).toBe(false)
+    expect(readdirSync(failDir).some(f => f.includes('.tmp.'))).toBe(false)
+  })
+
+  test('R3-P0-6: wrapWithSandbox & wrapWithSandboxArgv work cleanly on Windows without throwing BaseSandboxManager error', async () => {
+    await runWithNewHostSession({}, async () => {
+      getPlatform.cache.set(undefined, 'windows')
+      registerWindowsSandboxNativeProvider(
+        makeMockProvider({
+          kind: 'srt-win',
+          srtWinCommand: {
+            exe: 'C:\\Program Files\\Claude\\vendor\\win-sandbox\\srt-win.exe',
+            prependArgs: [],
+          },
+        }),
+      )
+      seedHostSettings({
+        userSettings: {
+          sandbox: {
+            enabled: true,
+            windows: { backend: 'sandboxuser' },
+          },
+        },
+        merged: {
+          sandbox: {
+            enabled: true,
+            windows: { backend: 'sandboxuser' },
+          },
+        },
+      })
+
+      const argvRes = await SandboxManager.wrapWithSandboxArgv(
+        'echo hello world',
+        'powershell.exe',
+      )
+      expect(argvRes.argv[0]).toBe(
+        'C:\\Program Files\\Claude\\vendor\\win-sandbox\\srt-win.exe',
+      )
+      expect(argvRes.argv).toContain('run')
+      expect(argvRes.argv).toContain('powershell.exe')
+      expect(argvRes.argv).toContain('echo hello world')
+
+      const wrappedStr = await SandboxManager.wrapWithSandbox(
+        'echo "hello world"',
+        'cmd.exe',
+      )
+      expect(wrappedStr).toContain(
+        '"C:\\Program Files\\Claude\\vendor\\win-sandbox\\srt-win.exe"',
+      )
+      expect(wrappedStr).toContain('cmd.exe')
+    })
+  })
+
+  test('R3-P2-1 & R3-P2-3: adaptSrtWinNativeProvider forwards sublayerGuid & cannot-read; trustedPair requires both caCertPath & caKeyPath; installFlow auto-discovers provider', async () => {
+    const receivedGuids: Array<string | undefined> = []
+    const fakeSrt: SrtWinNativeProvider = {
+      srtWinCommand: { exe: 'srt-win', prependArgs: [] },
+      async checkStatus(opts) {
+        receivedGuids.push(opts?.sublayerGuid)
+        return {
+          user: {
+            provisioned: true,
+            credPresent: true,
+            realUserSid: 'S-1-5-21-1-2-3-1001',
+            sandboxUser: 'claude_srt',
+            seclogonState: 'running',
+          },
+          wfp: {
+            state: 'cannot-read',
+            allowLoopback: false,
+            sublayerGuid: null,
+            proxyPortRange: null,
+          },
+        }
+      },
+      async install() {
+        throw new Error('unused')
+      },
+      async uninstall() {
+        throw new Error('unused')
+      },
+      async verifyWfp() {
+        return {
+          egress_probe: 'blocked',
+          target: '1.1.1.1:443',
+          write_restricted_token: true,
+        }
+      },
+      async forgetProfileRead() {
+        return { cleared: true, deferred: false }
+      },
+      async applyDenies() {
+        return {
+          inPlace: 0,
+          planted: 0,
+          laid: 0,
+          pushedDown: 0,
+          guarded: 0,
+          extrasSkipped: 0,
+          ms: 1,
+          stands: 0,
+          handedBack: 0,
+        }
+      },
+      async probeMxc() {
+        throw new Error('unused')
+      },
+      async spawnSandboxed() {
+        return {
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          timedOut: false,
+          outputLimitExceeded: false,
+          signal: null,
+        }
+      },
+    }
+
+    const adapted = adaptSrtWinNativeProvider(fakeSrt)
+    const st = await adapted.checkStatus({
+      sublayerGuid: 'c8d1f2a4-5e7b-4a9c-8d12-3f6a9b0c1e2f',
+    })
+    expect(receivedGuids).toEqual(['c8d1f2a4-5e7b-4a9c-8d12-3f6a9b0c1e2f'])
+    expect(st.wfp.state).toBe('cannot-read')
+
+    // R3-P2-3: trustedPair requires BOTH caCertPath AND caKeyPath
+    runWithNewHostSession({}, () => {
+      getPlatform.cache.set(undefined, 'windows')
+      registerWindowsSandboxNativeProvider(makeMockProvider())
+      seedHostSettings({
+        userSettings: {
+          sandbox: {
+            windows: { backend: 'sandboxuser' },
+            network: {
+              tlsTerminate: { caCertPath: 'C:\\only-cert.pem' },
+            },
+          },
+        },
+      })
+      const caDir = makeTempDir('win-ca-pair-check-')
+      // Missing caKeyPath -> must NOT return trustedPair, falls back to managed
+      expect(resolveWindowsTlsTerminateCaSource({ caDir })).toEqual({
+        source: 'managed',
+        certPath: join(caDir, 'cert.pem'),
+        keyPath: join(caDir, 'key.pem'),
+      })
+
+      // Ensure process-level negative discovery helper returns undefined cleanly when disabled
+      registerWindowsSandboxNativeProvider(null)
+      expect(ensureDefaultWindowsSandboxNativeProvider()).toBeUndefined()
+    })
   })
 })

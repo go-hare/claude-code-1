@@ -4618,6 +4618,138 @@ export async function ensureInitializedForWrap(options?: {
   }
 }
 
+function quoteWindowsCommandArg(arg: string): string {
+  if (arg.length === 0) {
+    return '""'
+  }
+  if (!/[\s"]/.test(arg)) {
+    return arg
+  }
+  let out = '"'
+  let pendingBackslashes = 0
+  for (let i = 0; i < arg.length; i++) {
+    const ch = arg[i]
+    if (ch === '\\') {
+      pendingBackslashes++
+    } else if (ch === '"') {
+      out += '\\'.repeat(pendingBackslashes * 2 + 1) + '"'
+      pendingBackslashes = 0
+    } else {
+      if (pendingBackslashes > 0) {
+        out += '\\'.repeat(pendingBackslashes)
+        pendingBackslashes = 0
+      }
+      out += ch
+    }
+  }
+  if (pendingBackslashes > 0) {
+    out += '\\'.repeat(pendingBackslashes * 2)
+  }
+  out += '"'
+  return out
+}
+
+function buildWindowsNativeWrapArgv(
+  command: string,
+  binShell?: string,
+  cwd?: string,
+): { argv: string[]; env: NodeJS.ProcessEnv } {
+  const provider =
+    getWindowsSandboxNativeProvider() ??
+    ensureDefaultWindowsSandboxNativeProvider()
+  if (!provider) {
+    throw new WindowsSandboxError(
+      'wrap_unsupported',
+      'Windows sandbox wrapping requires a registered Windows native provider (srt-win.exe); use SandboxManager.wrapWithSandboxArgv() or SandboxManager.spawnSandboxedOnWindows().',
+      'run',
+    )
+  }
+  const spec = provider.srtWinCommand ?? {
+    exe: 'srt-win.exe',
+    prependArgs: [],
+  }
+  const args: string[] = [...spec.prependArgs, 'run']
+  if (cwd) {
+    args.push('--cwd', cwd)
+  }
+  const proxyPort = BaseSandboxManager.getProxyPort?.()
+  if (typeof proxyPort === 'number' && proxyPort >= 1024) {
+    args.push('--proxy-port', String(proxyPort))
+  }
+  if (!areWindowsLocalConnectionsOn()) {
+    args.push('--no-allow-loopback')
+  }
+  const shellExe = binShell ?? 'cmd.exe'
+  const lowerShell = shellExe.toLowerCase()
+  const shellArgs =
+    lowerShell.endsWith('cmd.exe') || lowerShell === 'cmd'
+      ? ['/d', '/s', '/c', command]
+      : lowerShell.includes('pwsh') || lowerShell.includes('powershell')
+        ? ['-NoProfile', '-NonInteractive', '-Command', command]
+        : ['-c', command]
+  args.push('--', shellExe, ...shellArgs)
+  if (isWindowsCommandLineTooLong(spec.exe, args)) {
+    throw windowsArgvTooLongError()
+  }
+  return {
+    argv: [spec.exe, ...args],
+    env: { ...process.env },
+  }
+}
+
+async function wrapWithSandboxArgv(
+  command: string,
+  binShell?: string,
+  customConfig?: Partial<SandboxRuntimeConfig>,
+  abortSignal?: AbortSignal,
+  cwd?: string,
+  wrapOptions?: { keepsSandboxOn?: boolean },
+): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
+  const plat = getPlatform()
+  if (plat === 'windows') {
+    if (isWindowsBackendUnset()) {
+      throw new WindowsSandboxError(
+        'backend_unset',
+        WINDOWS_BACKEND_UNSET_MESSAGE,
+        'run',
+      )
+    }
+    const effectiveCwd = cwd ?? getCwd()
+    const effectiveCustomConfig =
+      customConfig ??
+      (hasMultipleStartedSandboxHosts()
+        ? convertToSandboxRuntimeConfig(getSettings_DEPRECATED())
+        : undefined)
+    if (
+      process.platform === 'win32' &&
+      typeof BaseSandboxManager.wrapWithSandboxArgv === 'function'
+    ) {
+      if (isSandboxingEnabled()) {
+        await ensureInitializedForWrap(wrapOptions)
+      }
+      return BaseSandboxManager.wrapWithSandboxArgv(
+        command,
+        binShell,
+        effectiveCustomConfig,
+        abortSignal,
+        effectiveCwd,
+      )
+    }
+    return buildWindowsNativeWrapArgv(command, binShell, effectiveCwd)
+  }
+  const wrapped = await wrapWithSandbox(
+    command,
+    binShell,
+    customConfig,
+    abortSignal,
+    wrapOptions,
+  )
+  return {
+    argv: [binShell ?? '/bin/sh', '-c', wrapped],
+    env: { ...process.env },
+  }
+}
+
 /**
  * Wrap command with sandbox, optionally specifying the shell to use
  */
@@ -4628,6 +4760,22 @@ async function wrapWithSandbox(
   abortSignal?: AbortSignal,
   wrapOptions?: { keepsSandboxOn?: boolean },
 ): Promise<string> {
+  const plat = getPlatform()
+  // R3-P0-6: BaseSandboxManager.wrapWithSandbox() throws on Windows because
+  // Windows wraps to an argv array rather than a POSIX shell string. Route
+  // Windows cleanly through wrapWithSandboxArgv() and CRT-quote the argv.
+  if (plat === 'windows') {
+    const { argv } = await wrapWithSandboxArgv(
+      command,
+      binShell,
+      customConfig,
+      abortSignal,
+      getCwd(),
+      wrapOptions,
+    )
+    return argv.map(quoteWindowsCommandArg).join(' ')
+  }
+
   let hostScopedConfig: SandboxRuntimeConfig | undefined
   // If sandboxing is enabled, ensure initialization is complete
   if (isSandboxingEnabled()) {
@@ -4695,7 +4843,6 @@ async function wrapWithSandbox(
     effectiveCustomConfig,
     abortSignal,
   )
-  const plat = getPlatform()
   // 2.1.323 #2207: Harden macOS Seatbelt profile so `lsof` and similar tools
   // cannot inspect processes outside the sandbox.
   if (plat === 'macos') {
@@ -4760,6 +4907,15 @@ async function initialize(
         if (hostState.worktreeMainRepoPath === undefined) {
           hostState.worktreeMainRepoPath = detectWorktreeMainRepoPath(
             getCwdState(),
+          )
+        }
+        if (getPlatform() === 'windows') {
+          windowsSandboxStartStore.markStarted(
+            resolveWindowsBackendChoice().backend,
+            {
+              tlsTerminate: willSandboxTlsTerminate(),
+              localConnections: areWindowsLocalConnectionsOn(),
+            },
           )
         }
         refreshConfig()
@@ -4921,6 +5077,9 @@ async function initialize(
       setSandboxInitializationPromise(undefined)
       failSandboxInitializeAllowlist()
       hostState.initFailureReason = errorMessage(error)
+      if (getPlatform() === 'windows') {
+        windowsSandboxStartStore.markInitFailed(hostState.initFailureReason)
+      }
 
       // Log error but don't throw - let sandboxing fail gracefully
       logForDebugging(
@@ -5125,6 +5284,14 @@ export interface ISandboxManager {
     abortSignal?: AbortSignal,
     wrapOptions?: { keepsSandboxOn?: boolean },
   ): Promise<string>
+  wrapWithSandboxArgv(
+    command: string,
+    binShell?: string,
+    customConfig?: Partial<SandboxRuntimeConfig>,
+    abortSignal?: AbortSignal,
+    cwd?: string,
+    wrapOptions?: { keepsSandboxOn?: boolean },
+  ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }>
   cleanupAfterCommand(): void
   getSandboxViolationStore(): SandboxViolationStore
   annotateStderrWithSandboxFailures(command: string, stderr: string): string
@@ -5411,6 +5578,7 @@ export const SandboxManager: ISandboxManager = {
   getExcludedCommands,
   ensureInitializedForWrap,
   wrapWithSandbox,
+  wrapWithSandboxArgv,
   refreshConfig,
   addSessionAllowedHost,
   getWindowsSandboxBackend,

@@ -218,6 +218,31 @@ function copyClipboardImageToPlatformPkg(platformKey: string): void {
   console.log(`Copied clipboard-image to ${dest}`)
 }
 
+const PE_MACHINE_X64 = 0x8664
+const PE_MACHINE_ARM64 = 0xaa64
+
+function readPeMachine(filePath: string): number | null {
+  try {
+    const buf = readFileSync(filePath)
+    if (buf.length < 0x40 || buf[0] !== 0x4d || buf[1] !== 0x5a) {
+      return null
+    }
+    const peOffset = buf.readUInt32LE(0x3c)
+    if (
+      peOffset + 6 > buf.length ||
+      buf[peOffset] !== 0x50 ||
+      buf[peOffset + 1] !== 0x45 ||
+      buf[peOffset + 2] !== 0x00 ||
+      buf[peOffset + 3] !== 0x00
+    ) {
+      return null
+    }
+    return buf.readUInt16LE(peOffset + 4)
+  } catch {
+    return null
+  }
+}
+
 function copyWinSandboxToPlatformPkg(platformKey: string): void {
   if (!platformKey.startsWith('win32')) return
 
@@ -227,15 +252,24 @@ function copyWinSandboxToPlatformPkg(platformKey: string): void {
   const binaryName = 'srt-win.exe'
   const destDir = join(ROOT, info.pkgDir, 'vendor', 'win-sandbox')
   const dest = join(destDir, binaryName)
+  const targetDir = join(ROOT, 'packages', 'win-sandbox-native', 'target')
+  const expectedMachine =
+    platformKey === 'win32-arm64' ? PE_MACHINE_ARM64 : PE_MACHINE_X64
+
+  const archCandidates =
+    platformKey === 'win32-arm64'
+      ? [
+          join(targetDir, 'aarch64-pc-windows-msvc', 'release', binaryName),
+          join(targetDir, 'aarch64-pc-windows-gnullvm', 'release', binaryName),
+        ]
+      : [
+          join(targetDir, 'x86_64-pc-windows-msvc', 'release', binaryName),
+          join(targetDir, 'x86_64-pc-windows-gnu', 'release', binaryName),
+        ]
+
   const sourceCandidates = [
-    join(
-      ROOT,
-      'packages',
-      'win-sandbox-native',
-      'target',
-      'release',
-      binaryName,
-    ),
+    ...archCandidates,
+    join(targetDir, 'release', binaryName),
     join(ROOT, 'dist', 'vendor', 'win-sandbox', binaryName),
     dest,
   ]
@@ -245,6 +279,14 @@ function copyWinSandboxToPlatformPkg(platformKey: string): void {
       `Vendored win-sandbox-native (${binaryName}) not found for ${platformKey}, skipping.`,
     )
     return
+  }
+
+  const actualMachine = readPeMachine(src)
+  if (actualMachine !== expectedMachine) {
+    console.error(
+      `PE architecture mismatch for ${platformKey} at ${src}: expected COFF Machine 0x${expectedMachine.toString(16)}, got ${actualMachine === null ? 'non-PE/invalid' : `0x${actualMachine.toString(16)}`}`,
+    )
+    process.exit(1)
   }
 
   if (resolve(src) === resolve(dest)) {

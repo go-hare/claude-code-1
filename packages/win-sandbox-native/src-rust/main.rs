@@ -11,7 +11,7 @@ use security::{
 };
 use win32_backend::{
     cmd_denies, cmd_install, cmd_probe_mxc, cmd_profile_forget, cmd_run, cmd_status, cmd_uninstall,
-    cmd_wfp_verify, BackendError, InstallOptions, ProfileForgetOptions, RunOptions,
+    cmd_wfp_verify, BackendError, InstallOptions, ProfileForgetOptions, RunOptions, StatusOptions,
     UninstallOptions, WfpVerifyOptions,
 };
 
@@ -24,14 +24,14 @@ fn print_usage() {
          \n\
          USAGE:\n\
            srt-win --version\n\
-           srt-win status [--json]\n\
+           srt-win status [--sublayer-guid <guid>] [--json]\n\
            srt-win install [--user <name>] [--sid <sid>] [--sublayer-guid <guid>] [--proxy-port-range <start>-<end>] [--allow-loopback|--no-allow-loopback]\n\
            srt-win uninstall [--user <name>] [--sublayer-guid <guid>]\n\
            srt-win wfp verify [--target <host:port>]\n\
            srt-win profile forget [--sid <sid>]\n\
            srt-win denies [--sid <sid>] [--deadline-ms <ms>]\n\
            srt-win probe-mxc\n\
-           srt-win run [--cwd <dir>] [--proxy-port <port>] [--http-proxy <url>] [--https-proxy <url>] [--allow-loopback] [--block-clipboard-read] [--block-clipboard-write] [--block-input-injection] -- <program> [args...]"
+           srt-win run [--cwd <dir>] [--proxy-port <port>] [--http-proxy <url>] [--https-proxy <url>] [--env KEY=VAL]... [--sublayer-guid <guid>] [--no-net] [--allow-loopback] [--block-clipboard-read] [--block-clipboard-write] [--block-input-injection] -- <program> [args...]"
     );
 }
 
@@ -46,15 +46,24 @@ fn require_flag_value(args: &[String], idx: &mut usize, flag: &str) -> Result<St
 }
 
 fn handle_status(args: &[String]) -> Result<i32, BackendError> {
-    for arg in args {
-        if arg != "--json" {
-            return Err(BackendError {
-                exit_code: EXIT_USAGE,
-                message: format!("Unknown flag '{arg}' for 'status'"),
-            });
+    let mut opts = StatusOptions::default();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--sublayer-guid" => {
+                opts.sublayer_guid = Some(require_flag_value(args, &mut i, "--sublayer-guid")?);
+            }
+            "--json" => {}
+            other => {
+                return Err(BackendError {
+                    exit_code: EXIT_USAGE,
+                    message: format!("Unknown flag '{other}' for 'status'"),
+                });
+            }
         }
+        i += 1;
     }
-    let resp = cmd_status()?;
+    let resp = cmd_status(&opts)?;
     println!("{}", resp.to_json());
     Ok(EXIT_OK)
 }
@@ -85,6 +94,9 @@ fn handle_install(args: &[String]) -> Result<i32, BackendError> {
             "--no-allow-loopback" => {
                 opts.allow_loopback = false;
             }
+            "--uac-child" => {
+                opts.uac_child = true;
+            }
             "--json" => {}
             other => {
                 return Err(BackendError {
@@ -112,6 +124,9 @@ fn handle_uninstall(args: &[String]) -> Result<i32, BackendError> {
             }
             "--sublayer-guid" => {
                 opts.sublayer_guid = require_flag_value(args, &mut i, "--sublayer-guid")?;
+            }
+            "--uac-child" => {
+                opts.uac_child = true;
             }
             "--json" => {}
             other => {
@@ -284,6 +299,9 @@ fn handle_run(args: &[String]) -> Result<i32, BackendError> {
     let mut proxy_port: Option<u16> = None;
     let mut http_proxy: Option<String> = None;
     let mut https_proxy: Option<String> = None;
+    let mut sublayer_guid: Option<String> = None;
+    let mut no_net = false;
+    let mut extra_env: Vec<(String, String)> = Vec::new();
     let mut allow_loopback = true;
     let mut block_clipboard_read = true;
     let mut block_clipboard_write = true;
@@ -313,6 +331,31 @@ fn handle_run(args: &[String]) -> Result<i32, BackendError> {
             }
             "--https-proxy" => {
                 https_proxy = Some(require_flag_value(args, &mut i, "--https-proxy")?);
+            }
+            "--sublayer-guid" => {
+                sublayer_guid = Some(require_flag_value(args, &mut i, "--sublayer-guid")?);
+            }
+            "--no-net" => {
+                no_net = true;
+            }
+            "--env" => {
+                let raw = require_flag_value(args, &mut i, "--env")?;
+                let Some((k, v)) = raw.split_once('=') else {
+                    return Err(BackendError::validation(format!(
+                        "Invalid --env entry '{raw}': expected KEY=VAL"
+                    )));
+                };
+                if k.is_empty()
+                    || k.contains('\0')
+                    || k.contains('\r')
+                    || k.contains('\n')
+                    || v.contains('\0')
+                {
+                    return Err(BackendError::validation(format!(
+                        "Invalid --env entry '{raw}': malformed key or NUL/newline byte"
+                    )));
+                }
+                extra_env.push((k.to_string(), v.to_string()));
             }
             "--allow-loopback" => {
                 allow_loopback = true;
@@ -371,6 +414,9 @@ fn handle_run(args: &[String]) -> Result<i32, BackendError> {
         proxy_port,
         http_proxy,
         https_proxy,
+        sublayer_guid,
+        no_net,
+        extra_env,
         allow_loopback,
         block_clipboard_read,
         block_clipboard_write,

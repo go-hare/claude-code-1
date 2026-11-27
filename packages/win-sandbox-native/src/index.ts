@@ -35,6 +35,7 @@ export type WindowsWfpState =
   | 'installed'
   | 'absent'
   | 'degraded'
+  | 'cannot-read'
   | 'unsupported'
 
 export interface WindowsSandboxWfpStatus {
@@ -142,6 +143,8 @@ export interface WindowsSandboxRunOptions {
   proxyPort?: number
   httpProxyUrl?: string
   httpsProxyUrl?: string
+  sublayerGuid?: string
+  noNet?: boolean
   allowLoopback?: boolean
   blockClipboardRead?: boolean
   blockClipboardWrite?: boolean
@@ -156,12 +159,16 @@ export interface WindowsSandboxRunResult {
   stdout: string
   stderr: string
   timedOut: boolean
+  outputLimitExceeded: boolean
   signal: NodeJS.Signals | null
 }
 
 export interface WindowsSandboxNativeProvider {
   readonly srtWinCommand: SrtWinCommandSpec
-  checkStatus(options?: { timeoutMs?: number }): Promise<WindowsSandboxStatus>
+  checkStatus(options?: {
+    sublayerGuid?: string
+    timeoutMs?: number
+  }): Promise<WindowsSandboxStatus>
   install(options?: WindowsSandboxInstallOptions): Promise<WindowsSandboxStatus>
   uninstall(
     options?: WindowsSandboxUninstallOptions,
@@ -183,6 +190,8 @@ export interface WindowsSandboxNativeProvider {
 export interface ResolveSrtWinBinaryOptions {
   env?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
+  execPath?: string
+  arch?: string
   /** @deprecated Ignored for security; CWD-based binary resolution is disabled. */
   cwd?: string
 }
@@ -278,14 +287,17 @@ export function findDistRootFromModuleDir(moduleDir: string): string | null {
  * Resolves the compiled `srt-win` native binary path strictly from trusted locations
  * (never from `cwd` or `PATH`):
  * 1. Explicit `CLAUDE_CODE_SRT_WIN_PATH` (absolute regular file path)
- * 2. `moduleDir`-relative bundled `dist/vendor/win-sandbox/srt-win(.exe)`
- * 3. `moduleDir`-relative dev `target/release/srt-win(.exe)` and `target/debug/srt-win(.exe)`
+ * 2. Compiled executable adjacent `dirname(execPath)/vendor/win-sandbox/srt-win(.exe)`
+ *    and `packageRoot/vendor/win-sandbox/srt-win(.exe)` (matching `ripgrep.ts` for `bun build --compile`)
+ * 3. `moduleDir`-relative bundled `dist/vendor/win-sandbox/srt-win(.exe)`
+ * 4. `moduleDir`-relative dev `target/release/srt-win(.exe)` and `target/debug/srt-win(.exe)`
  */
 export function resolveSrtWinBinaryPath(
   opts?: ResolveSrtWinBinaryOptions,
 ): string | null {
   const env = opts?.env ?? process.env
   const platform = opts?.platform ?? process.platform
+  const arch = opts?.arch ?? process.arch
   const binName = platform === 'win32' ? 'srt-win.exe' : 'srt-win'
 
   const envOverride = env.CLAUDE_CODE_SRT_WIN_PATH?.trim()
@@ -293,40 +305,74 @@ export function resolveSrtWinBinaryPath(
     return envOverride
   }
 
-  const moduleDir = getModuleDir()
-  if (!moduleDir) {
-    return null
-  }
-
-  const pkgRoot = resolve(moduleDir, '..')
-  const repoRootFromPkg = resolve(pkgRoot, '..', '..')
-  const distRoot = findDistRootFromModuleDir(moduleDir)
-
   const candidates: string[] = []
-  if (distRoot) {
-    candidates.push(join(distRoot, 'vendor', 'win-sandbox', binName))
+
+  // R3-P0-6: Support `bun build --compile` single-file executables (matching ripgrep.ts)
+  const execPath = opts?.execPath ?? process.execPath
+  if (execPath) {
+    const execDir = dirname(execPath)
+    const execPkgRoot = dirname(execDir)
+    const execPkgParent = dirname(execPkgRoot)
+    candidates.push(
+      join(execDir, 'vendor', 'win-sandbox', binName),
+      join(execPkgRoot, 'vendor', 'win-sandbox', binName),
+    )
+    if (platform === 'win32') {
+      const platformPkg = `claude-code-win32-${arch}`
+      candidates.push(
+        join(
+          execPkgRoot,
+          'node_modules',
+          '@go-hare',
+          platformPkg,
+          'vendor',
+          'win-sandbox',
+          binName,
+        ),
+        join(execPkgParent, platformPkg, 'vendor', 'win-sandbox', binName),
+        join(
+          execPkgParent,
+          '@go-hare',
+          platformPkg,
+          'vendor',
+          'win-sandbox',
+          binName,
+        ),
+      )
+    }
   }
-  candidates.push(
-    join(repoRootFromPkg, 'dist', 'vendor', 'win-sandbox', binName),
-    join(pkgRoot, 'target', 'release', binName),
-    join(
-      repoRootFromPkg,
-      'packages',
-      'win-sandbox-native',
-      'target',
-      'release',
-      binName,
-    ),
-    join(pkgRoot, 'target', 'debug', binName),
-    join(
-      repoRootFromPkg,
-      'packages',
-      'win-sandbox-native',
-      'target',
-      'debug',
-      binName,
-    ),
-  )
+
+  const moduleDir = getModuleDir()
+  if (moduleDir) {
+    const pkgRoot = resolve(moduleDir, '..')
+    const repoRootFromPkg = resolve(pkgRoot, '..', '..')
+    const distRoot = findDistRootFromModuleDir(moduleDir)
+
+    if (distRoot) {
+      candidates.push(join(distRoot, 'vendor', 'win-sandbox', binName))
+    }
+    candidates.push(
+      join(repoRootFromPkg, 'dist', 'vendor', 'win-sandbox', binName),
+      join(pkgRoot, 'target', 'release', binName),
+      join(
+        repoRootFromPkg,
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'release',
+        binName,
+      ),
+      join(pkgRoot, 'target', 'debug', binName),
+      join(
+        repoRootFromPkg,
+        'packages',
+        'win-sandbox-native',
+        'target',
+        'debug',
+        binName,
+      ),
+    )
+  }
 
   const seen = new Set<string>()
   for (const candidate of candidates) {
@@ -412,6 +458,7 @@ function parseWfpState(raw: string): WindowsWfpState {
     raw === 'installed' ||
     raw === 'absent' ||
     raw === 'degraded' ||
+    raw === 'cannot-read' ||
     raw === 'unsupported'
   ) {
     return raw
@@ -826,6 +873,26 @@ async function execSrtWinChecked(params: {
   return result.stdout.trim()
 }
 
+const SENSITIVE_ENV_KEY_RE =
+  /^(?:SRT_WIN_SANDBOX_PASSWORD|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|GITHUB_TOKEN|GH_TOKEN|NPM_TOKEN|AZURE_CLIENT_SECRET|GCP_SERVICE_ACCOUNT_KEY)$|_(?:API_KEY|SECRET_KEY|ACCESS_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY)$/i
+
+function isSafeExplicitEnvOverride(key: string, value: string): boolean {
+  if (
+    !key ||
+    key.includes('=') ||
+    key.includes('\0') ||
+    key.includes('\r') ||
+    key.includes('\n') ||
+    value.includes('\0')
+  ) {
+    return false
+  }
+  if (key.toUpperCase().startsWith('SRT_WIN_TEST_')) {
+    return false
+  }
+  return !SENSITIVE_ENV_KEY_RE.test(key)
+}
+
 export function createSrtWinNativeProvider(
   options?: CreateSrtWinProviderOptions,
 ): WindowsSandboxNativeProvider {
@@ -867,9 +934,13 @@ export function createSrtWinNativeProvider(
     srtWinCommand,
 
     async checkStatus(opts) {
+      const args = ['status']
+      if (opts?.sublayerGuid !== undefined) {
+        args.push('--sublayer-guid', opts.sublayerGuid)
+      }
       const stdout = await execSrtWinChecked({
         spec: srtWinCommand,
-        args: ['status'],
+        args,
         env: baseEnv,
         timeoutMs: opts?.timeoutMs ?? defaultTimeoutMs,
         maxOutputBytes: defaultMaxOutputBytes,
@@ -1003,6 +1074,19 @@ export function createSrtWinNativeProvider(
       if (opts.httpsProxyUrl !== undefined) {
         args.push('--https-proxy', opts.httpsProxyUrl)
       }
+      if (opts.sublayerGuid !== undefined) {
+        args.push('--sublayer-guid', opts.sublayerGuid)
+      }
+      if (opts.noNet === true) {
+        args.push('--no-net')
+      }
+      if (opts.env !== undefined) {
+        for (const [k, v] of Object.entries(opts.env)) {
+          if (isSafeExplicitEnvOverride(k, v)) {
+            args.push('--env', `${k}=${v}`)
+          }
+        }
+      }
       if (opts.allowLoopback === false) {
         args.push('--no-allow-loopback')
       } else if (opts.allowLoopback === true) {
@@ -1046,6 +1130,7 @@ export function createSrtWinNativeProvider(
         stdout: result.stdout,
         stderr: result.stderr,
         timedOut: result.timedOut,
+        outputLimitExceeded: result.outputLimitExceeded,
         signal: result.signal,
       }
     },
