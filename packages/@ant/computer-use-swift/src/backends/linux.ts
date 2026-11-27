@@ -7,6 +7,8 @@
  * Requires: xrandr, scrot, xdotool, wmctrl (optional)
  */
 
+import { spawn, spawnSync } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import type {
   AppInfo,
   AppsAPI,
@@ -26,28 +28,43 @@ import type {
 // ---------------------------------------------------------------------------
 
 function run(cmd: string[]): string {
-  const result = Bun.spawnSync({
-    cmd,
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const [bin, ...args] = cmd
+  if (!bin) return ''
+  const result = spawnSync(bin, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
-  return new TextDecoder().decode(result.stdout).trim()
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 async function runAsync(cmd: string[]): Promise<string> {
-  const proc = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' })
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  return out.trim()
+  const [bin, ...args] = cmd
+  if (!bin) return ''
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    const chunks: Buffer[] = []
+    proc.stdout?.on('data', (chunk: Buffer | string) => {
+      chunks.push(
+        typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
+      )
+    })
+    proc.stderr?.resume()
+    proc.on('error', reject)
+    proc.on('close', () => {
+      resolve(Buffer.concat(chunks).toString('utf8').trim())
+    })
+  })
 }
 
 function commandExists(name: string): boolean {
-  const result = Bun.spawnSync({
-    cmd: ['which', name],
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const result = spawnSync('which', [name], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
-  return result.exitCode === 0
+  return !result.error && result.status === 0
 }
 
 // ---------------------------------------------------------------------------
@@ -310,9 +327,8 @@ export const screenshot: ScreenshotAPI = {
       await runAsync(['scrot', '-o', SCREENSHOT_PATH])
 
       // Read the file as base64
-      const file = Bun.file(SCREENSHOT_PATH)
-      const buffer = await file.arrayBuffer()
-      const base64 = Buffer.from(buffer).toString('base64')
+      const buffer = await readFile(SCREENSHOT_PATH)
+      const base64 = buffer.toString('base64')
 
       // Get dimensions from display info
       const size = display.getSize(_displayId)
@@ -343,9 +359,8 @@ export const screenshot: ScreenshotAPI = {
         SCREENSHOT_PATH,
       ])
 
-      const file = Bun.file(SCREENSHOT_PATH)
-      const buffer = await file.arrayBuffer()
-      const base64 = Buffer.from(buffer).toString('base64')
+      const buffer = await readFile(SCREENSHOT_PATH)
+      const base64 = buffer.toString('base64')
 
       return { base64, width: w, height: h }
     } catch {

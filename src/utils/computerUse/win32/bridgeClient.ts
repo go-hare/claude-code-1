@@ -8,8 +8,8 @@
  * Performance: ~1-5ms per call vs ~200-500ms per PowerShell spawn.
  */
 
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import * as path from 'path'
-import type { Writable } from 'stream'
 import { registerCleanup } from '../../cleanupRegistry.js'
 import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 
@@ -25,10 +25,8 @@ interface BridgeResponse {
   error?: string
 }
 
-type FlushableWritable = Writable & { flush?: () => void }
-
 type BridgeClientHostState = {
-  bridgeProc: ReturnType<typeof Bun.spawn> | null
+  bridgeProc: ChildProcess | null
   requestId: number
   pendingRequests: Map<
     number,
@@ -66,13 +64,7 @@ function stopBridgeState(state: BridgeClientHostState): void {
   unregister?.()
   if (proc) {
     try {
-      const stdin = proc.stdin
-      if (stdin) {
-        const writable = stdin as unknown as Writable
-        if (typeof writable.end === 'function') {
-          writable.end()
-        }
-      }
+      proc.stdin?.end()
       proc.kill()
     } catch {}
   }
@@ -88,10 +80,8 @@ export function ensureBridge(): boolean {
   if (state.bridgeProc) return true
   try {
     const scriptPath = path.join(__dirname, 'bridge.py')
-    const proc = Bun.spawn(['python', '-u', scriptPath], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'ignore',
+    const proc = spawn('python', ['-u', scriptPath], {
+      stdio: ['pipe', 'pipe', 'ignore'],
       env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
       // LOCAL: keep the Python bridge from flashing a console window on Windows.
       windowsHide: true,
@@ -102,54 +92,47 @@ export function ensureBridge(): boolean {
     state.unregisterCleanup = registerCleanup(() => {
       stopBridgeState(state)
     })
-    if (proc.exited && typeof proc.exited.then === 'function') {
-      void proc.exited.then(
-        () => {
-          if (state.bridgeProc === proc) {
-            stopBridgeState(state)
-          }
-        },
-        () => {
-          if (state.bridgeProc === proc) {
-            stopBridgeState(state)
-          }
-        },
-      )
-    }
+    proc.stdin?.on('error', () => {})
+    proc.on('error', () => {
+      if (state.bridgeProc === proc) {
+        stopBridgeState(state)
+      }
+    })
+    proc.on('exit', () => {
+      if (state.bridgeProc === proc) {
+        stopBridgeState(state)
+      }
+    })
 
     // Read stdout lines asynchronously
-    const reader = (
-      state.bridgeProc.stdout as ReadableStream<Uint8Array>
-    ).getReader()
-    const readLoop = async () => {
+    const decoder = new TextDecoder()
+    proc.stdout?.on('data', (chunk: Buffer | string) => {
       try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          state.outputBuffer += new TextDecoder().decode(value)
-          // Process complete lines
-          let newlineIdx: number
-          while ((newlineIdx = state.outputBuffer.indexOf('\n')) !== -1) {
-            const line = state.outputBuffer.slice(0, newlineIdx).trim()
-            state.outputBuffer = state.outputBuffer.slice(newlineIdx + 1)
-            if (!line) continue
-            try {
-              const resp: BridgeResponse = JSON.parse(line)
-              const pending = state.pendingRequests.get(resp.id)
-              if (pending) {
-                state.pendingRequests.delete(resp.id)
-                if (resp.error) {
-                  pending.reject(new Error(resp.error))
-                } else {
-                  pending.resolve(resp.result)
-                }
+        state.outputBuffer +=
+          typeof chunk === 'string'
+            ? chunk
+            : decoder.decode(chunk, { stream: true })
+        // Process complete lines
+        let newlineIdx: number
+        while ((newlineIdx = state.outputBuffer.indexOf('\n')) !== -1) {
+          const line = state.outputBuffer.slice(0, newlineIdx).trim()
+          state.outputBuffer = state.outputBuffer.slice(newlineIdx + 1)
+          if (!line) continue
+          try {
+            const resp: BridgeResponse = JSON.parse(line)
+            const pending = state.pendingRequests.get(resp.id)
+            if (pending) {
+              state.pendingRequests.delete(resp.id)
+              if (resp.error) {
+                pending.reject(new Error(resp.error))
+              } else {
+                pending.resolve(resp.result)
               }
-            } catch {}
-          }
+            }
+          } catch {}
         }
       } catch {}
-    }
-    readLoop()
+    })
 
     return true
   } catch {
@@ -201,13 +184,9 @@ export async function call<T = unknown>(
     })
 
     try {
-      const stdin = state.bridgeProc!.stdin
+      const stdin = state.bridgeProc?.stdin
       if (stdin) {
-        const writable = stdin as unknown as FlushableWritable
-        writable.write(JSON.stringify(req) + '\n')
-        if (typeof writable.flush === 'function') {
-          writable.flush()
-        }
+        stdin.write(JSON.stringify(req) + '\n')
       }
     } catch (err) {
       clearTimeout(timer)
@@ -231,15 +210,14 @@ export function callSync<T = unknown>(
   try {
     const scriptPath = path.join(__dirname, 'bridge.py')
     const req = JSON.stringify({ id: 1, method, params })
-    const result = Bun.spawnSync({
-      cmd: ['python', '-u', scriptPath],
-      stdin: Buffer.from(req + '\n'),
-      stdout: 'pipe',
-      stderr: 'pipe',
+    const result = spawnSync('python', ['-u', scriptPath], {
+      input: req + '\n',
+      stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
       timeout: timeoutMs,
+      windowsHide: true,
     })
-    const out = new TextDecoder().decode(result.stdout).trim()
+    const out = result.stdout ? result.stdout.toString('utf8').trim() : ''
     if (!out) return null
     const resp: BridgeResponse = JSON.parse(out)
     if (resp.error) throw new Error(resp.error)

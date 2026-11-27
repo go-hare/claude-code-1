@@ -13,6 +13,7 @@
  * - Disappears when the window is unbound
  */
 
+import { type ChildProcess, spawn } from 'node:child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { registerCleanup } from '../../cleanupRegistry.js'
@@ -26,7 +27,7 @@ const CURSOR_COLOR_B = 50
 const CURSOR_OPACITY = 0.9
 
 type VirtualCursorHostState = {
-  cursorProc: ReturnType<typeof Bun.spawn> | null
+  cursorProc: ChildProcess | null
   cursorStopFile: string | null
   cursorScriptFile: string | null
   unregisterCleanup: (() => void) | null
@@ -272,16 +273,10 @@ export function showVirtualCursor(hwnd: string): boolean {
     const script = buildCursorScript(hwnd, stopFile)
     fs.writeFileSync(scriptFile, script, 'utf-8')
 
-    const proc = Bun.spawn(
-      [
-        'powershell',
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        scriptFile,
-      ],
-      { stdout: 'ignore', stderr: 'ignore' },
+    const proc = spawn(
+      'powershell',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile],
+      { stdio: 'ignore', windowsHide: true },
     )
     state.cursorProc = proc
     state.cursorStopFile = stopFile
@@ -291,20 +286,16 @@ export function showVirtualCursor(hwnd: string): boolean {
     state.unregisterCleanup = registerCleanup(() => {
       hideVirtualCursorState(state, true)
     })
-    if (proc.exited && typeof proc.exited.then === 'function') {
-      void proc.exited.then(
-        () => {
-          if (state.cursorProc === proc) {
-            hideVirtualCursorState(state, true)
-          }
-        },
-        () => {
-          if (state.cursorProc === proc) {
-            hideVirtualCursorState(state, true)
-          }
-        },
-      )
-    }
+    proc.on('error', () => {
+      if (state.cursorProc === proc) {
+        hideVirtualCursorState(state, true)
+      }
+    })
+    proc.on('exit', () => {
+      if (state.cursorProc === proc) {
+        hideVirtualCursorState(state, true)
+      }
+    })
     return true
   } catch {
     hideVirtualCursorState(state, true)

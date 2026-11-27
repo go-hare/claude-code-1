@@ -16,6 +16,17 @@ export const EX_UNAVAILABLE = 77
 export const EX_POLICY = 78
 export const TUNNEL_HOLD_DEADLINE_MS = 8_000
 export const TUNNEL_LIVENESS_DEADLINE_MS = 600_000
+export const TUNNEL_HOLD_MAX_FRAMES = 64
+export const TUNNEL_HOLD_MAX_BYTES = 33_554_432
+export const TUNNEL_HOLD_CLOSE_CODE = 1013
+export const TOOL_SERVER_STARTING_BODY = JSON.stringify({
+  type: 'error',
+  error: {
+    type: 'not_forwarded',
+    reason: 'tool_server_starting',
+    message: 'the tool server is still starting, so this request did not run',
+  },
+})
 
 const SESSION_TUNNEL_STDIN_MAX_BYTES = 1_048_576
 
@@ -382,6 +393,8 @@ export type TunnelServerHandle = {
 
 export type SessionTunnelState = 'connecting' | 'open' | 'closed'
 
+export type EarlySessionTunnelDialState = 'holding' | 'adopted' | 'gone'
+
 export type SessionTunnelHandle = {
   updateToken(token: string): void
   expectTokens(expect: boolean): void
@@ -390,10 +403,21 @@ export type SessionTunnelHandle = {
   readonly state: SessionTunnelState
 }
 
+export type EarlySessionTunnelDialHandle = {
+  adopt(
+    serverHandle: TunnelServerHandle,
+  ): Promise<SessionTunnelHandle | undefined>
+  stop(): void
+  readonly state: EarlySessionTunnelDialState
+}
+
 export type StartSessionTunnelOptions = {
   relayUrlOverride?: string
   holdDeadlineMs?: number
   livenessDeadlineMs?: number
+  maxFrames?: number
+  maxBytes?: number
+  bufferDuringHold?: boolean
   onExit?: (code: number, reason: string) => void
   WebSocketImpl?: typeof globalThis.WebSocket
 }
@@ -537,16 +561,28 @@ async function dispatchToServer(
   }
 }
 
-/**
- * Dial the hosted WebSocket relay for `--session-tunnel` and bridge incoming
- * HTTP-over-tunnel / JSON-RPC request frames into `serverHandle.answer`
- * (`answerInProcess`, zero loopback hop) or loopback HTTP fallback.
- */
-export function startSessionTunnel(
-  serverHandle: TunnelServerHandle,
+type BufferedTunnelFrame = {
+  rawText: string
+  frame: Record<string, unknown>
+  byteLength: number
+}
+
+function isRequestFrame(frame: Record<string, unknown>): boolean {
+  return (
+    frame.type === 'http_request' ||
+    frame.type === 'rpc_request' ||
+    (frame.jsonrpc === '2.0' && typeof frame.method === 'string')
+  )
+}
+
+function createSessionTunnelCore(
+  initialServerHandle: TunnelServerHandle | null,
   envelope: SessionTunnelEnvelope,
   opts: StartSessionTunnelOptions = {},
-): SessionTunnelHandle {
+): {
+  tunnelHandle: SessionTunnelHandle
+  earlyHandle: EarlySessionTunnelDialHandle
+} {
   const WS = opts.WebSocketImpl ?? globalThis.WebSocket
   if (typeof WS !== 'function') {
     throw new Error('WebSocket implementation is unavailable in this runtime')
@@ -556,8 +592,14 @@ export function startSessionTunnel(
   const holdDeadlineMs = opts.holdDeadlineMs ?? TUNNEL_HOLD_DEADLINE_MS
   const livenessDeadlineMs =
     opts.livenessDeadlineMs ?? TUNNEL_LIVENESS_DEADLINE_MS
+  const maxFrames = opts.maxFrames ?? TUNNEL_HOLD_MAX_FRAMES
+  const maxBytes = opts.maxBytes ?? TUNNEL_HOLD_MAX_BYTES
+  const bufferDuringHold = opts.bufferDuringHold === true
 
   let currentState: SessionTunnelState = 'connecting'
+  let earlyState: EarlySessionTunnelDialState =
+    initialServerHandle === null ? 'holding' : 'adopted'
+  let attachedServer: TunnelServerHandle | null = initialServerHandle
   let currentToken = envelope.session_token
   let tokenExpiresAt = envelope.session_token_expires_at
   let expectingTokens = false
@@ -565,7 +607,15 @@ export function startSessionTunnel(
   let ws: WebSocket | null = null
   let detachSocketListeners: (() => void) | null = null
   let livenessTimer: ReturnType<typeof setTimeout> | null = null
+  let holdTimer: ReturnType<typeof setTimeout> | null = null
   let holdResolvers: Array<(result: 'active' | 'gone') => void> = []
+  let holdFrameCount = 0
+  let holdByteCount = 0
+  let bufferedByteCount = 0
+  let flushingBuffered = false
+  const bufferedFrames: BufferedTunnelFrame[] = []
+
+  const isClosed = (): boolean => currentState === 'closed'
 
   const resolveHolds = (outcome: 'active' | 'gone'): void => {
     const pending = holdResolvers
@@ -575,10 +625,17 @@ export function startSessionTunnel(
     }
   }
 
-  const clearTimers = (): void => {
+  const clearLivenessTimer = (): void => {
     if (livenessTimer !== null) {
       clearTimeout(livenessTimer)
       livenessTimer = null
+    }
+  }
+
+  const clearHoldTimer = (): void => {
+    if (holdTimer !== null) {
+      clearTimeout(holdTimer)
+      holdTimer = null
     }
   }
 
@@ -588,7 +645,18 @@ export function startSessionTunnel(
     opts.onExit?.(code, reason)
   }
 
-  const closeInternal = (exitCode?: number, exitReason?: string): void => {
+  const closeInternal = (
+    exitCode?: number,
+    exitReason?: string,
+    wsCloseCode?: number,
+  ): void => {
+    clearHoldTimer()
+    if (earlyState === 'holding') {
+      earlyState = 'gone'
+    }
+    bufferedFrames.length = 0
+    bufferedByteCount = 0
+
     if (currentState === 'closed') {
       if (exitCode !== undefined && exitReason !== undefined) {
         notifyExit(exitCode, exitReason)
@@ -596,7 +664,7 @@ export function startSessionTunnel(
       return
     }
     currentState = 'closed'
-    clearTimers()
+    clearLivenessTimer()
     resolveHolds('gone')
 
     const detach = detachSocketListeners
@@ -617,7 +685,15 @@ export function startSessionTunnel(
           socket.readyState === WS.CONNECTING ||
           socket.readyState === WS.OPEN
         ) {
-          socket.close()
+          if (wsCloseCode !== undefined) {
+            try {
+              socket.close(wsCloseCode, exitReason ?? '')
+            } catch {
+              socket.close()
+            }
+          } else {
+            socket.close()
+          }
         }
       } catch {
         // ignore socket close error
@@ -630,7 +706,7 @@ export function startSessionTunnel(
   }
 
   const bumpLivenessTimer = (): void => {
-    clearTimers()
+    clearLivenessTimer()
     if (currentState === 'closed') return
     livenessTimer = setTimeout(() => {
       closeInternal(EX_UNAVAILABLE, 'liveness_timeout')
@@ -650,15 +726,183 @@ export function startSessionTunnel(
     }
   }
 
+  const respondToolServerStarting = (frame: Record<string, unknown>): void => {
+    if (frame.type === 'http_request') {
+      sendJson({
+        type: 'http_response',
+        id: frame.id,
+        status: 503,
+        headers: { 'content-type': 'application/json' },
+        body: TOOL_SERVER_STARTING_BODY,
+      })
+      return
+    }
+    if (frame.type === 'rpc_request') {
+      sendJson({
+        type: 'rpc_response',
+        id: frame.id,
+        status: 503,
+        body: TOOL_SERVER_STARTING_BODY,
+      })
+      return
+    }
+    if (frame.jsonrpc === '2.0' && typeof frame.method === 'string') {
+      sendJson({
+        jsonrpc: '2.0',
+        id:
+          typeof frame.id === 'string' || typeof frame.id === 'number'
+            ? frame.id
+            : null,
+        error: {
+          code: -32000,
+          message:
+            'the tool server is still starting, so this request did not run',
+          data: JSON.parse(TOOL_SERVER_STARTING_BODY),
+        },
+      })
+    }
+  }
+
+  const dispatchRequestFrame = async (
+    serverHandle: TunnelServerHandle,
+    rawText: string,
+    frame: Record<string, unknown>,
+  ): Promise<void> => {
+    if (currentState === 'closed') return
+
+    // HTTP-over-tunnel request frame
+    if (frame.type === 'http_request') {
+      const id = frame.id
+      const method = typeof frame.method === 'string' ? frame.method : 'POST'
+      const path = typeof frame.path === 'string' ? frame.path : '/mcp'
+      const headers = normalizeStringRecord(frame.headers)
+      const body =
+        typeof frame.body === 'string'
+          ? frame.body
+          : frame.body !== undefined
+            ? JSON.stringify(frame.body)
+            : undefined
+
+      try {
+        const response = await dispatchToServer(serverHandle, {
+          method,
+          path,
+          headers,
+          body,
+        })
+        sendJson({
+          type: 'http_response',
+          id,
+          status: response.status,
+          headers: response.headers,
+          body: response.body,
+        })
+      } catch (error) {
+        sendJson({
+          type: 'http_response',
+          id,
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ error: errorMessage(error) }),
+        })
+      }
+      return
+    }
+
+    // Wrapped JSON-RPC request frame
+    if (frame.type === 'rpc_request') {
+      const id = frame.id
+      const body =
+        typeof frame.payload === 'string'
+          ? frame.payload
+          : JSON.stringify(frame.payload ?? {})
+      try {
+        const response = await dispatchToServer(serverHandle, {
+          method: 'POST',
+          path: '/mcp',
+          body,
+        })
+        sendJson({
+          type: 'rpc_response',
+          id,
+          status: response.status,
+          body: response.body,
+        })
+      } catch (error) {
+        sendJson({
+          type: 'rpc_response',
+          id,
+          status: 500,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32603, message: errorMessage(error) },
+          }),
+        })
+      }
+      return
+    }
+
+    // Raw JSON-RPC 2.0 request frame
+    if (frame.jsonrpc === '2.0' && typeof frame.method === 'string') {
+      try {
+        const response = await dispatchToServer(serverHandle, {
+          method: 'POST',
+          path: '/mcp',
+          body: rawText,
+        })
+        if (response.body.trim() !== '' && ws && ws.readyState === WS.OPEN) {
+          ws.send(response.body)
+        }
+      } catch (error) {
+        sendJson({
+          jsonrpc: '2.0',
+          id:
+            typeof frame.id === 'string' || typeof frame.id === 'number'
+              ? frame.id
+              : null,
+          error: { code: -32603, message: errorMessage(error) },
+        })
+      }
+    }
+  }
+
   if (isTokenExpired(tokenExpiresAt, Date.now())) {
     currentState = 'closed'
+    if (earlyState === 'holding') {
+      earlyState = 'gone'
+    }
     queueMicrotask(() => {
       notifyExit(EX_UNAVAILABLE, 'session_token_expired')
     })
   } else {
-    bumpLivenessTimer()
-    const socket = new WS(relayUrl)
+    let socket: WebSocket
+    try {
+      socket = new WS(relayUrl)
+    } catch (err) {
+      clearHoldTimer()
+      clearLivenessTimer()
+      currentState = 'closed'
+      if (earlyState === 'holding') {
+        earlyState = 'gone'
+      }
+      throw err
+    }
     ws = socket
+
+    bumpLivenessTimer()
+    if (earlyState === 'holding') {
+      holdTimer = setTimeout(() => {
+        if (earlyState === 'holding') {
+          closeInternal(
+            EX_UNAVAILABLE,
+            'hold_deadline_exceeded',
+            TUNNEL_HOLD_CLOSE_CODE,
+          )
+        }
+      }, holdDeadlineMs)
+      holdTimer.unref?.()
+    }
 
     const onOpen = () => {
       if (currentState === 'closed') {
@@ -691,6 +935,7 @@ export function startSessionTunnel(
         }
 
         const rawText = await decodeWsPayload(event.data)
+        if (isClosed()) return
         if (rawText === null) return
 
         let frame: unknown
@@ -701,7 +946,7 @@ export function startSessionTunnel(
         }
         if (!isRecord(frame)) return
 
-        // Control frames
+        // Control frames are always handled immediately (even while holding)
         if (frame.type === 'ping') {
           sendJson({
             type: 'pong',
@@ -723,106 +968,50 @@ export function startSessionTunnel(
           return
         }
 
-        // HTTP-over-tunnel request frame
-        if (frame.type === 'http_request') {
-          const id = frame.id
-          const method =
-            typeof frame.method === 'string' ? frame.method : 'POST'
-          const path = typeof frame.path === 'string' ? frame.path : '/mcp'
-          const headers = normalizeStringRecord(frame.headers)
-          const body =
-            typeof frame.body === 'string'
-              ? frame.body
-              : frame.body !== undefined
-                ? JSON.stringify(frame.body)
-                : undefined
+        if (!isRequestFrame(frame)) return
 
-          try {
-            const response = await dispatchToServer(serverHandle, {
-              method,
-              path,
-              headers,
-              body,
-            })
-            sendJson({
-              type: 'http_response',
-              id,
-              status: response.status,
-              headers: response.headers,
-              body: response.body,
-            })
-          } catch (error) {
-            sendJson({
-              type: 'http_response',
-              id,
-              status: 500,
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ error: errorMessage(error) }),
-            })
-          }
-          return
-        }
-
-        // Wrapped JSON-RPC request frame
-        if (frame.type === 'rpc_request') {
-          const id = frame.id
-          const body =
-            typeof frame.payload === 'string'
-              ? frame.payload
-              : JSON.stringify(frame.payload ?? {})
-          try {
-            const response = await dispatchToServer(serverHandle, {
-              method: 'POST',
-              path: '/mcp',
-              body,
-            })
-            sendJson({
-              type: 'rpc_response',
-              id,
-              status: response.status,
-              body: response.body,
-            })
-          } catch (error) {
-            sendJson({
-              type: 'rpc_response',
-              id,
-              status: 500,
-              body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: null,
-                error: { code: -32603, message: errorMessage(error) },
-              }),
-            })
-          }
-          return
-        }
-
-        // Raw JSON-RPC 2.0 request frame
-        if (frame.jsonrpc === '2.0' && typeof frame.method === 'string') {
-          try {
-            const response = await dispatchToServer(serverHandle, {
-              method: 'POST',
-              path: '/mcp',
-              body: rawText,
-            })
+        if (attachedServer !== null) {
+          if (flushingBuffered) {
+            const byteLength = Buffer.byteLength(rawText, 'utf8')
             if (
-              response.body.trim() !== '' &&
-              ws &&
-              ws.readyState === WS.OPEN
+              bufferedFrames.length + 1 > maxFrames ||
+              bufferedByteCount + byteLength > maxBytes
             ) {
-              ws.send(response.body)
+              closeInternal(
+                EX_UNAVAILABLE,
+                'hold_buffer_overflow',
+                TUNNEL_HOLD_CLOSE_CODE,
+              )
+              return
             }
-          } catch (error) {
-            sendJson({
-              jsonrpc: '2.0',
-              id:
-                typeof frame.id === 'string' || typeof frame.id === 'number'
-                  ? frame.id
-                  : null,
-              error: { code: -32603, message: errorMessage(error) },
-            })
+            bufferedByteCount += byteLength
+            bufferedFrames.push({ rawText, frame, byteLength })
+            return
           }
+          await dispatchRequestFrame(attachedServer, rawText, frame)
+          return
         }
+
+        // Still in early-dial hold state before adopt(serverHandle)
+        const byteLength = Buffer.byteLength(rawText, 'utf8')
+        holdFrameCount += 1
+        holdByteCount += byteLength
+        if (holdFrameCount > maxFrames || holdByteCount > maxBytes) {
+          closeInternal(
+            EX_UNAVAILABLE,
+            'hold_buffer_overflow',
+            TUNNEL_HOLD_CLOSE_CODE,
+          )
+          return
+        }
+
+        if (bufferDuringHold) {
+          bufferedByteCount += byteLength
+          bufferedFrames.push({ rawText, frame, byteLength })
+          return
+        }
+
+        respondToolServerStarting(frame)
       })()
     }
 
@@ -851,7 +1040,7 @@ export function startSessionTunnel(
     }
   }
 
-  return {
+  const tunnelHandle: SessionTunnelHandle = {
     get state(): SessionTunnelState {
       return currentState
     },
@@ -894,6 +1083,84 @@ export function startSessionTunnel(
       closeInternal()
     },
   }
+
+  const earlyHandle: EarlySessionTunnelDialHandle = {
+    get state(): EarlySessionTunnelDialState {
+      return earlyState
+    },
+    async adopt(
+      serverHandle: TunnelServerHandle,
+    ): Promise<SessionTunnelHandle | undefined> {
+      if (earlyState === 'gone' || currentState === 'closed') {
+        return undefined
+      }
+      if (earlyState === 'adopted') {
+        return tunnelHandle
+      }
+      clearHoldTimer()
+      attachedServer = serverHandle
+      earlyState = 'adopted'
+
+      if (bufferedFrames.length > 0) {
+        flushingBuffered = true
+        try {
+          while (bufferedFrames.length > 0 && tunnelHandle.state !== 'closed') {
+            const next = bufferedFrames.shift()!
+            bufferedByteCount = Math.max(0, bufferedByteCount - next.byteLength)
+            await dispatchRequestFrame(serverHandle, next.rawText, next.frame)
+          }
+        } finally {
+          flushingBuffered = false
+        }
+      }
+
+      return tunnelHandle
+    },
+    stop(): void {
+      closeInternal()
+    },
+  }
+
+  return { tunnelHandle, earlyHandle }
+}
+
+/**
+ * Dial the hosted WebSocket relay for `--session-tunnel` and bridge incoming
+ * HTTP-over-tunnel / JSON-RPC request frames into `serverHandle.answer`
+ * (`answerInProcess`, zero loopback hop) or loopback HTTP fallback.
+ */
+export function startSessionTunnel(
+  serverHandle: TunnelServerHandle,
+  envelope: SessionTunnelEnvelope,
+  opts: StartSessionTunnelOptions = {},
+): SessionTunnelHandle {
+  return createSessionTunnelCore(serverHandle, envelope, opts).tunnelHandle
+}
+
+/**
+ * Official 2.1.331 chunk `#1647`: immediately start dialing the WebSocket relay
+ * BEFORE the local HTTP MCP server finishes initializing/binding. While holding,
+ * incoming request frames receive `503 tool_server_starting` (or are buffered up
+ * to `maxFrames`/`maxBytes` when `bufferDuringHold: true`), and if `holdDeadlineMs`
+ * expires before `adopt(serverHandle)`, the socket closes with code `1013` and
+ * transitions to `'gone'`.
+ */
+export function startEarlySessionTunnelDial(
+  envelope: SessionTunnelEnvelope,
+  opts: StartSessionTunnelOptions = {},
+): EarlySessionTunnelDialHandle {
+  return createSessionTunnelCore(null, envelope, opts).earlyHandle
+}
+
+/**
+ * Official `zei` helper: adopt an active early-dial tunnel handle onto the
+ * bound local HTTP MCP server handle. Returns `undefined` if already `'gone'`.
+ */
+export async function adoptEarlyDial(
+  earlyDial: EarlySessionTunnelDialHandle,
+  serverHandle: TunnelServerHandle,
+): Promise<SessionTunnelHandle | undefined> {
+  return await earlyDial.adopt(serverHandle)
 }
 
 type PipeStdinLike =

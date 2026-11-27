@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, spyOn, test } from 'bun:test'
+import * as childProcess from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 import {
   existsSync,
   mkdirSync,
@@ -854,36 +857,42 @@ describe('2.1.331 Wave 7 — BuiltinPlugins, ChangeDetector, Workflow, UpstreamP
   })
 
   test('P1-10 computerUse win32: per-host registerCleanup tears down Host A procs while process-wide stopAll/hideAll cleans up Host B procs & temp scripts', async () => {
-    const origSpawn = Bun.spawn
     const spawned: Array<{
       cmd: string[]
       killed: boolean
-      resolveExit: (code: number) => void
     }> = []
 
-    const fakeSpawn = ((cmd: string[]) => {
-      let resolveExit!: (code: number) => void
-      const exited = new Promise<number>(resolve => {
-        resolveExit = resolve
-      })
-      const entry = { cmd: [...cmd], killed: false, resolveExit }
+    const spawnSpy = spyOn(childProcess, 'spawn').mockImplementation(((
+      command: string,
+      args?: readonly string[],
+    ) => {
+      const entry = {
+        cmd: [command, ...(args ?? [])],
+        killed: false,
+      }
       spawned.push(entry)
-      return {
-        stdin: { write() {}, end() {}, flush() {} },
-        stdout: new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.close()
-          },
-        }),
-        exited,
+      const proc = new EventEmitter() as childProcess.ChildProcess
+      const stdin = new PassThrough()
+      const stdout = new PassThrough()
+      const stderr = new PassThrough()
+      stdout.end()
+      stderr.end()
+      Object.assign(proc, {
+        stdin,
+        stdout,
+        stderr,
+        pid: 10000 + spawned.length,
+        killed: false,
         kill() {
           entry.killed = true
-          resolveExit(0)
+          ;(proc as { killed: boolean }).killed = true
+          proc.emit('exit', 0, null)
+          return true
         },
-      }
-    }) as unknown as typeof Bun.spawn
+      })
+      return proc
+    }) as typeof childProcess.spawn)
 
-    Bun.spawn = fakeSpawn
     try {
       await runWithNewHostSession({ id: 'w7-win32-a' }, async () => {
         expect(ensureBridge()).toBe(true)
@@ -916,7 +925,7 @@ describe('2.1.331 Wave 7 — BuiltinPlugins, ChangeDetector, Workflow, UpstreamP
       stopAllBridges()
       hideAllIndicators()
       hideAllVirtualCursors()
-      Bun.spawn = origSpawn
+      spawnSpy.mockRestore()
     }
   })
 

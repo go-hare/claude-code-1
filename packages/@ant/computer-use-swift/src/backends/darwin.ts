@@ -5,6 +5,7 @@
  * and screenshots.
  */
 
+import { spawn, spawnSync } from 'node:child_process'
 import { readFileSync, unlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -37,41 +38,54 @@ export type {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function jxaSync(script: string): string {
-  const result = Bun.spawnSync({
-    cmd: ['osascript', '-l', 'JavaScript', '-e', script],
-    stdout: 'pipe',
-    stderr: 'pipe',
+function spawnCollectStdout(bin: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    const chunks: Buffer[] = []
+    proc.stdout?.on('data', (chunk: Buffer | string) => {
+      chunks.push(
+        typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
+      )
+    })
+    proc.stderr?.resume()
+    proc.on('error', reject)
+    proc.on('close', () => {
+      resolve(Buffer.concat(chunks).toString('utf8'))
+    })
   })
-  return new TextDecoder().decode(result.stdout).trim()
+}
+
+function jxaSync(script: string): string {
+  const result = spawnSync('osascript', ['-l', 'JavaScript', '-e', script], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  })
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 function osascriptSync(script: string): string {
-  const result = Bun.spawnSync({
-    cmd: ['osascript', '-e', script],
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const result = spawnSync('osascript', ['-e', script], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
-  return new TextDecoder().decode(result.stdout).trim()
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 async function osascript(script: string): Promise<string> {
-  const proc = Bun.spawn(['osascript', '-e', script], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  const text = await new Response(proc.stdout).text()
-  await proc.exited
+  const text = await spawnCollectStdout('osascript', ['-e', script])
   return text.trim()
 }
 
 async function jxa(script: string): Promise<string> {
-  const proc = Bun.spawn(['osascript', '-l', 'JavaScript', '-e', script], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  const text = await new Response(proc.stdout).text()
-  await proc.exited
+  const text = await spawnCollectStdout('osascript', [
+    '-l',
+    'JavaScript',
+    '-e',
+    script,
+  ])
   return text.trim()
 }
 
@@ -196,16 +210,10 @@ export const apps: AppsAPI = {
         const expanded = dir.startsWith('~')
           ? join(process.env.HOME ?? '~', dir.slice(1))
           : dir
-        const proc = Bun.spawn(
-          [
-            'bash',
-            '-c',
-            `for f in "${expanded}"/*.app; do [ -d "$f" ] || continue; bid=$(mdls -name kMDItemCFBundleIdentifier "$f" 2>/dev/null | sed 's/.*= "//;s/"//'); name=$(basename "$f" .app); echo "$f|$name|$bid"; done`,
-          ],
-          { stdout: 'pipe', stderr: 'pipe' },
-        )
-        const text = await new Response(proc.stdout).text()
-        await proc.exited
+        const text = await spawnCollectStdout('bash', [
+          '-c',
+          `for f in "${expanded}"/*.app; do [ -d "$f" ] || continue; bid=$(mdls -name kMDItemCFBundleIdentifier "$f" 2>/dev/null | sed 's/.*= "//;s/"//'); name=$(basename "$f" .app); echo "$f|$name|$bid"; done`,
+        ])
         for (const line of text.split('\n').filter(Boolean)) {
           const [path, displayName, bundleId] = line.split('|', 3)
           if (path && displayName && bundleId && bundleId !== '(null)') {
@@ -271,11 +279,7 @@ async function captureScreenToBase64(
   args: string[],
 ): Promise<{ base64: string; width: number; height: number }> {
   const tmpFile = join(tmpdir(), `cu-screenshot-${Date.now()}.png`)
-  const proc = Bun.spawn(['screencapture', ...args, tmpFile], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  await proc.exited
+  await spawnCollectStdout('screencapture', [...args, tmpFile])
   try {
     const buf = readFileSync(tmpFile)
     const base64 = buf.toString('base64')

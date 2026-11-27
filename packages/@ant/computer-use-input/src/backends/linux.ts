@@ -5,6 +5,7 @@
  * Requires: xdotool (apt install xdotool)
  */
 
+import { spawn, spawnSync } from 'node:child_process'
 import type { FrontmostAppInfo, InputBackend } from '../types.js'
 
 // ---------------------------------------------------------------------------
@@ -12,19 +13,35 @@ import type { FrontmostAppInfo, InputBackend } from '../types.js'
 // ---------------------------------------------------------------------------
 
 function run(cmd: string[]): string {
-  const result = Bun.spawnSync({
-    cmd,
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const [bin, ...args] = cmd
+  if (!bin) return ''
+  const result = spawnSync(bin, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
-  return new TextDecoder().decode(result.stdout).trim()
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 async function runAsync(cmd: string[]): Promise<string> {
-  const proc = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' })
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  return out.trim()
+  const [bin, ...args] = cmd
+  if (!bin) return ''
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    const chunks: Buffer[] = []
+    proc.stdout?.on('data', (chunk: Buffer | string) => {
+      chunks.push(
+        typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
+      )
+    })
+    proc.stderr?.resume()
+    proc.on('error', reject)
+    proc.on('close', () => {
+      resolve(Buffer.concat(chunks).toString('utf8').trim())
+    })
+  })
 }
 
 // ---------------------------------------------------------------------------

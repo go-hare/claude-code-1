@@ -218,6 +218,45 @@ function copyClipboardImageToPlatformPkg(platformKey: string): void {
   console.log(`Copied clipboard-image to ${dest}`)
 }
 
+function copyWinSandboxToPlatformPkg(platformKey: string): void {
+  if (!platformKey.startsWith('win32')) return
+
+  const info = PLATFORMS[platformKey]
+  if (!info) return
+
+  const binaryName = 'srt-win.exe'
+  const destDir = join(ROOT, info.pkgDir, 'vendor', 'win-sandbox')
+  const dest = join(destDir, binaryName)
+  const sourceCandidates = [
+    join(
+      ROOT,
+      'packages',
+      'win-sandbox-native',
+      'target',
+      'release',
+      binaryName,
+    ),
+    join(ROOT, 'dist', 'vendor', 'win-sandbox', binaryName),
+    dest,
+  ]
+  const src = sourceCandidates.find(candidate => existsSync(candidate))
+  if (!src) {
+    console.warn(
+      `Vendored win-sandbox-native (${binaryName}) not found for ${platformKey}, skipping.`,
+    )
+    return
+  }
+
+  if (resolve(src) === resolve(dest)) {
+    console.log(`Vendored win-sandbox-native already present at ${dest}`)
+    return
+  }
+
+  mkdirSync(destDir, { recursive: true })
+  copyFileSync(src, dest)
+  console.log(`Copied win-sandbox-native to ${dest}`)
+}
+
 /**
  * Fields that belong only to the monorepo workspace root.
  * Shipping them on the npm tarball confuses arborist (workspace/link
@@ -397,6 +436,7 @@ function main() {
     copyToPlatformPkg(binaryPath, targetPlatform)
     copyRipgrepToPlatformPkg(targetPlatform)
     copyClipboardImageToPlatformPkg(targetPlatform)
+    copyWinSandboxToPlatformPkg(targetPlatform)
     console.log(`\nBuild complete for ${targetPlatform}.`)
   }
 

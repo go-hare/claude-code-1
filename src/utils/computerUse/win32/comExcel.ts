@@ -4,6 +4,8 @@
  * Each operation opens and closes Excel to avoid orphaned processes.
  */
 
+import { spawnSync } from 'node:child_process'
+
 export interface CellInfo {
   row: number
   col: number
@@ -23,16 +25,22 @@ export interface ExcelInfo {
 }
 
 function ps(script: string): string {
-  const result = Bun.spawnSync({
-    cmd: ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  const stderr = new TextDecoder().decode(result.stderr).trim()
-  if (result.exitCode !== 0 && stderr) {
+  const result = spawnSync(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    },
+  )
+  const stderr = result.stderr ? result.stderr.toString('utf8').trim() : ''
+  if (result.error) {
+    throw result.error
+  }
+  if (result.status !== 0 && stderr) {
     throw new Error(`PowerShell error: ${stderr}`)
   }
-  return new TextDecoder().decode(result.stdout).trim()
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 function escPath(p: string): string {
@@ -106,10 +114,18 @@ try {
 `
   const raw = ps(script)
   if (!raw) throw new Error('No output from openExcel')
-  const parsed = JSON.parse(raw)
+  type RawSheetInfo = {
+    name: string
+    usedRange: { rows: number; cols: number }
+    cells?: CellInfo | CellInfo[] | null
+  }
+  const parsed = JSON.parse(raw) as {
+    sheets: RawSheetInfo | RawSheetInfo[]
+    sheetNames: string | string[]
+  }
 
   // Normalize: PowerShell single-element arrays become objects
-  const sheets: SheetInfo[] = Array.isArray(parsed.sheets)
+  const sheets: RawSheetInfo[] = Array.isArray(parsed.sheets)
     ? parsed.sheets
     : [parsed.sheets]
   const sheetNames: string[] = Array.isArray(parsed.sheetNames)
@@ -117,7 +133,7 @@ try {
     : [parsed.sheetNames]
 
   return {
-    sheets: sheets.map((s: any) => ({
+    sheets: sheets.map(s => ({
       name: s.name,
       usedRange: s.usedRange,
       cells: Array.isArray(s.cells) ? s.cells : s.cells ? [s.cells] : [],
@@ -183,12 +199,13 @@ try {
 `
   const raw = ps(script)
   if (!raw) return []
-  const parsed = JSON.parse(raw)
+  type RawCellValue = string | number | null
+  const parsed = JSON.parse(raw) as RawCellValue[] | RawCellValue[][]
   // Normalize single-row case
-  const rows: any[] = Array.isArray(parsed[0]) ? parsed : [parsed]
-  return rows.map((row: any[]) =>
-    row.map((v: any) => (v === '__NULL__' ? null : v)),
-  )
+  const rows: RawCellValue[][] = Array.isArray(parsed[0])
+    ? (parsed as RawCellValue[][])
+    : [parsed as RawCellValue[]]
+  return rows.map(row => row.map(v => (v === '__NULL__' ? null : v)))
 }
 
 /**

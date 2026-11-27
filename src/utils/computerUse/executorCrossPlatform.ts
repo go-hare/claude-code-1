@@ -24,6 +24,7 @@
  *     so WM_LBUTTONDOWN receives client-relative coords
  */
 
+import { spawn, spawnSync } from 'node:child_process'
 import type {
   ComputerExecutor,
   DisplayGeometry,
@@ -78,9 +79,9 @@ function getNonClientOffset(): { dx: number; dy: number } {
 
     validateHwnd(hwnd)
 
-    const result = Bun.spawnSync({
-      cmd: [
-        'powershell',
+    const result = spawnSync(
+      'powershell',
+      [
         '-NoProfile',
         '-NonInteractive',
         '-Command',
@@ -107,10 +108,12 @@ $pt.X = 0; $pt.Y = 0
 "$($pt.X - $wr.L),$($pt.Y - $wr.T)"
 `,
       ],
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    const out = new TextDecoder().decode(result.stdout).trim()
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    )
+    const out = result.stdout ? result.stdout.toString('utf8').trim() : ''
     const [dxStr, dyStr] = out.split(',')
     const dx = Number(dxStr) || 0
     const dy = Number(dyStr) || 0
@@ -377,40 +380,48 @@ export function createCrossPlatformExecutor(opts: {
 
     async readClipboard(): Promise<string> {
       if (process.platform === 'win32') {
-        const result = Bun.spawnSync({
-          cmd: ['powershell', '-NoProfile', '-Command', 'Get-Clipboard'],
-          stdout: 'pipe',
-        })
-        return new TextDecoder().decode(result.stdout).trim()
+        const result = spawnSync(
+          'powershell',
+          ['-NoProfile', '-Command', 'Get-Clipboard'],
+          {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+          },
+        )
+        return result.stdout ? result.stdout.toString('utf8').trim() : ''
       }
       // Linux
-      const result = Bun.spawnSync({
-        cmd: ['xclip', '-selection', 'clipboard', '-o'],
-        stdout: 'pipe',
+      const result = spawnSync('xclip', ['-selection', 'clipboard', '-o'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       })
-      return new TextDecoder().decode(result.stdout).trim()
+      return result.stdout ? result.stdout.toString('utf8').trim() : ''
     },
 
     async writeClipboard(text: string): Promise<void> {
       if (process.platform === 'win32') {
         const escaped = text.replace(/'/g, "''")
-        Bun.spawnSync({
-          cmd: [
-            'powershell',
-            '-NoProfile',
-            '-Command',
-            `Set-Clipboard -Value '${escaped}'`,
-          ],
-        })
+        spawnSync(
+          'powershell',
+          ['-NoProfile', '-Command', `Set-Clipboard -Value '${escaped}'`],
+          {
+            stdio: 'ignore',
+            windowsHide: true,
+          },
+        )
         return
       }
       // Linux
-      const proc = Bun.spawn(['xclip', '-selection', 'clipboard'], {
-        stdin: 'pipe',
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('xclip', ['-selection', 'clipboard'], {
+          stdio: ['pipe', 'ignore', 'ignore'],
+          windowsHide: true,
+        })
+        proc.on('error', reject)
+        proc.on('close', () => resolve())
+        proc.stdin?.on('error', () => {})
+        proc.stdin?.end(text)
       })
-      proc.stdin.write(text)
-      proc.stdin.end()
-      await proc.exited
     },
 
     // ── Mouse ────────────────────────────────────────────────────────────
@@ -492,9 +503,9 @@ export function createCrossPlatformExecutor(opts: {
       }
       // Unbound: SendInput with MOUSEEVENTF_LEFTDOWN
       if (process.platform === 'win32') {
-        Bun.spawnSync({
-          cmd: [
-            'powershell',
+        spawnSync(
+          'powershell',
+          [
             '-NoProfile',
             '-NonInteractive',
             '-Command',
@@ -506,7 +517,11 @@ public class MDown { [StructLayout(LayoutKind.Sequential)] public struct MOUSEIN
 '@
 $i = New-Object MDown+INPUT; $i.type=0; $i.mi.dwFlags=0x0002; [MDown]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null`,
           ],
-        })
+          {
+            stdio: 'ignore',
+            windowsHide: true,
+          },
+        )
         return
       }
     },
@@ -526,9 +541,9 @@ $i = New-Object MDown+INPUT; $i.type=0; $i.mi.dwFlags=0x0002; [MDown]::SendInput
       }
       // Unbound: SendInput with MOUSEEVENTF_LEFTUP
       if (process.platform === 'win32') {
-        Bun.spawnSync({
-          cmd: [
-            'powershell',
+        spawnSync(
+          'powershell',
+          [
             '-NoProfile',
             '-NonInteractive',
             '-Command',
@@ -540,7 +555,11 @@ public class MUp { [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPU
 '@
 $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null`,
           ],
-        })
+          {
+            stdio: 'ignore',
+            windowsHide: true,
+          },
+        )
         return
       }
     },
@@ -695,15 +714,17 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
         const escapedCwd = cwd.replace(/'/g, "''")
 
         // Start-Process powershell opens a NEW visible PowerShell window
-        Bun.spawnSync({
-          cmd: [
-            'powershell',
+        spawnSync(
+          'powershell',
+          [
             '-Command',
             `Start-Process powershell -ArgumentList '-NoExit','-Command','cd ''${escapedCwd}''; ${cmd}'`,
           ],
-          stdout: 'ignore',
-          stderr: 'ignore',
-        })
+          {
+            stdio: 'ignore',
+            windowsHide: true,
+          },
+        )
 
         // Poll for new terminal window (up to 5s)
         let newHwnd: string | null = null

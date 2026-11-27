@@ -2463,12 +2463,21 @@ export async function storageAppendRecords(
 
 /** densable leftover `S` @207282858. */
 function hashContentVersion(value: string | Uint8Array): string {
-  const hash = (
-    Bun.hash as typeof Bun.hash & {
-      xxHash64: (input: string | Uint8Array) => bigint
+  if (typeof Bun !== 'undefined') {
+    const bunHash = Bun.hash as
+      | (typeof Bun.hash & {
+          xxHash64?: (input: string | Uint8Array) => bigint
+        })
+      | undefined
+    if (typeof bunHash?.xxHash64 === 'function') {
+      return bunHash.xxHash64(value).toString(16).padStart(16, '0')
     }
-  ).xxHash64(value)
-  return hash.toString(16).padStart(16, '0')
+  }
+  return createHash('sha256')
+    .update(value)
+    .digest()
+    .subarray(0, 8)
+    .toString('hex')
 }
 
 /** densable leftover `Fr` @207287802. */

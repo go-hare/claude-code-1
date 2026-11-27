@@ -1,5 +1,7 @@
-import { existsSync } from 'fs'
-import { resolve } from 'path'
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { logForDebugging } from 'src/utils/debug.js'
 
 const SSH_TIMEOUT_MS = 60_000
@@ -15,32 +17,60 @@ export interface DeployOptions {
   onProgress?: (msg: string) => void
 }
 
+function runCommandCapture(
+  command: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return new Promise((resolvePromise, reject) => {
+    const proc = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    const stdoutChunks: Buffer[] = []
+    const stderrChunks: Buffer[] = []
+    proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk))
+    proc.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
+
+    const timer = setTimeout(() => {
+      try {
+        proc.kill()
+      } catch {
+        // already exited
+      }
+    }, timeoutMs)
+
+    proc.once('error', err => {
+      clearTimeout(timer)
+      reject(err)
+    })
+
+    proc.once('close', code => {
+      clearTimeout(timer)
+      resolvePromise({
+        stdout: Buffer.concat(stdoutChunks).toString('utf8').trim(),
+        stderr: Buffer.concat(stderrChunks).toString('utf8').trim(),
+        exitCode: code ?? 1,
+      })
+    })
+  })
+}
+
 async function runSshCommand(
   host: string,
   command: string,
   timeoutMs = SSH_TIMEOUT_MS,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(['ssh', '-o', 'ConnectTimeout=10', host, command], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
-
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const exitCode = await proc.exited
-    return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode }
-  } finally {
-    clearTimeout(timer)
-  }
+  return runCommandCapture(
+    'ssh',
+    ['-o', 'ConnectTimeout=10', host, command],
+    timeoutMs,
+  )
 }
 
 function findLocalBinary(): string {
-  const projectRoot = resolve(import.meta.dir, '../..')
+  const currentDir = dirname(fileURLToPath(import.meta.url))
+  const projectRoot = resolve(currentDir, '../..')
   const distPath = resolve(projectRoot, 'dist/cli.js')
   if (existsSync(distPath)) return distPath
 
@@ -76,17 +106,16 @@ export async function deployBinary(options: DeployOptions): Promise<string> {
 
   onProgress?.('Uploading binary...')
   const remotePath = `${REMOTE_BIN_DIR}/${REMOTE_CLI_FILE}`
-  const scpProc = Bun.spawn(
-    ['scp', '-o', 'ConnectTimeout=10', localBinary, `${host}:${remotePath}`],
-    { stdout: 'pipe', stderr: 'pipe' },
+  const scpResult = await runCommandCapture(
+    'scp',
+    ['-o', 'ConnectTimeout=10', localBinary, `${host}:${remotePath}`],
+    SSH_TIMEOUT_MS,
   )
-  const scpTimer = setTimeout(() => scpProc.kill(), SSH_TIMEOUT_MS)
-  const scpStderr = await new Response(scpProc.stderr).text()
-  const scpExit = await scpProc.exited
-  clearTimeout(scpTimer)
 
-  if (scpExit !== 0) {
-    throw new Error(`SCP upload failed (exit ${scpExit}): ${scpStderr.trim()}`)
+  if (scpResult.exitCode !== 0) {
+    throw new Error(
+      `SCP upload failed (exit ${scpResult.exitCode}): ${scpResult.stderr}`,
+    )
   }
 
   onProgress?.('Installing wrapper script...')

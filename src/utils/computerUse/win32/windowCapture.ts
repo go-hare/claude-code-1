@@ -3,6 +3,8 @@
  * Captures windows even when occluded or minimized.
  */
 
+import { spawnSync } from 'node:child_process'
+
 interface CaptureResult {
   base64: string
   width: number
@@ -100,12 +102,15 @@ function parseCaptureOutput(raw: string): CaptureResult | null {
 }
 
 function runPs(script: string): string {
-  const result = Bun.spawnSync({
-    cmd: ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  return new TextDecoder().decode(result.stdout).trim()
+  const result = spawnSync(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    },
+  )
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 /**

@@ -3,6 +3,8 @@
  * Returns visible windows with their HWND, PID, and title.
  */
 
+import { spawnSync } from 'node:child_process'
+
 export interface WindowInfo {
   hwnd: string
   pid: number
@@ -58,18 +60,15 @@ public class WinEnum {
  * Returns HWND, PID, and window title for each.
  */
 export function listWindows(): WindowInfo[] {
-  const result = Bun.spawnSync({
-    cmd: [
-      'powershell',
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      ENUM_WINDOWS_PS,
-    ],
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  const raw = new TextDecoder().decode(result.stdout).trim()
+  const result = spawnSync(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-Command', ENUM_WINDOWS_PS],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    },
+  )
+  const raw = result.stdout ? result.stdout.toString('utf8').trim() : ''
   if (!raw) return []
 
   return raw

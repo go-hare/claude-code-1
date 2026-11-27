@@ -16,6 +16,7 @@
  *     6. Bidirectional: supervisor writes data/ctrl frames, host broadcasts output
  */
 
+import { spawn as nodeSpawn } from 'node:child_process'
 import { randomBytes, timingSafeEqual } from 'crypto'
 import { createServer, Socket, type Server } from 'net'
 import { tryProcessCwd } from '../utils/cachePaths.js'
@@ -1022,31 +1023,114 @@ export async function runPtyHost(args: string[]): Promise<void> {
   let hostServer: PtyHostServerHandle | undefined
   const earlyChunks: Buffer[] = []
 
-  // Spawn target process inside PTY
-  let terminal: InstanceType<typeof Bun.Terminal>
-  let child: ReturnType<typeof Bun.spawn>
+  // Spawn target process inside PTY (Bun.Terminal when available, Node pipe fallback otherwise)
+  interface PtyChildHandle {
+    pid: number
+    exited: Promise<number>
+    readonly signalCode: string | null
+    kill(sig?: NodeJS.Signals | number): void
+    write(payload: Buffer): void
+    resize(cols: number, rows: number): void
+    close(): void
+  }
+
+  const handleOutput = (buf: Buffer): void => {
+    hadOutput = true
+    if (hostServer) {
+      hostServer.pushOutput(buf)
+    } else {
+      earlyChunks.push(buf)
+    }
+  }
+
+  let child: PtyChildHandle
   try {
-    terminal = new Bun.Terminal({
-      cols,
-      rows,
-      data(_term: unknown, output: Uint8Array) {
-        hadOutput = true
-        const buf = Buffer.from(output)
-        if (hostServer) {
-          hostServer.pushOutput(buf)
-        } else {
-          earlyChunks.push(buf)
-        }
-      },
-    })
-    child = Bun.spawn([cliFile, ...cliArgs], {
-      cwd: tryProcessCwd(),
-      env: { ...process.env, TERM: 'xterm-256color' },
-      terminal,
-      windowsHide: true,
-      detached: false,
-      ...(isSpare ? { argv0: 'claude bg-spare' } : {}),
-    })
+    if (
+      typeof Bun !== 'undefined' &&
+      typeof Bun.Terminal === 'function' &&
+      typeof Bun.spawn === 'function'
+    ) {
+      const terminal = new Bun.Terminal({
+        cols,
+        rows,
+        data(_term: unknown, output: Uint8Array) {
+          handleOutput(Buffer.from(output))
+        },
+      })
+      const bunChild = Bun.spawn([cliFile, ...cliArgs], {
+        cwd: tryProcessCwd(),
+        env: { ...process.env, TERM: 'xterm-256color' },
+        terminal,
+        windowsHide: true,
+        detached: false,
+        ...(isSpare ? { argv0: 'claude bg-spare' } : {}),
+      })
+      child = {
+        pid: bunChild.pid,
+        exited: bunChild.exited,
+        get signalCode() {
+          return bunChild.signalCode ?? null
+        },
+        kill(sig) {
+          bunChild.kill(sig)
+        },
+        write(payload) {
+          terminal.write(payload)
+        },
+        resize(c, r) {
+          terminal.resize(c, r)
+        },
+        close() {
+          terminal.close()
+        },
+      }
+    } else {
+      const nodeChild = nodeSpawn(cliFile, cliArgs, {
+        cwd: tryProcessCwd(),
+        env: { ...process.env, TERM: 'xterm-256color' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        detached: false,
+        ...(isSpare ? { argv0: 'claude bg-spare' } : {}),
+      })
+      let signalCode: string | null = null
+      const exitedPromise = new Promise<number>(resolve => {
+        nodeChild.once('error', () => resolve(1))
+        nodeChild.once('exit', (code, signal) => {
+          signalCode = signal ?? null
+          resolve(code ?? (signal ? 1 : 0))
+        })
+      })
+      if (nodeChild.pid == null) {
+        throw new Error('spawned pty host child has no pid')
+      }
+      nodeChild.stdin?.on('error', () => {})
+      nodeChild.stdout?.on('data', (chunk: Buffer) => handleOutput(chunk))
+      nodeChild.stderr?.on('data', (chunk: Buffer) => handleOutput(chunk))
+      child = {
+        pid: nodeChild.pid,
+        exited: exitedPromise,
+        get signalCode() {
+          return signalCode
+        },
+        kill(sig) {
+          nodeChild.kill(sig)
+        },
+        write(payload) {
+          if (nodeChild.stdin && !nodeChild.stdin.destroyed) {
+            nodeChild.stdin.write(payload)
+          }
+        },
+        resize() {
+          // Node pipe fallback has no native PTY ioctl; SIGWINCH is still delivered below.
+        },
+        close() {
+          try {
+            nodeChild.stdin?.end()
+          } catch {}
+        },
+      }
+    }
   } catch (err) {
     writeError(sockPath, `spawn failed: ${String(err)}`)
     return
@@ -1081,7 +1165,7 @@ export async function runPtyHost(args: string[]): Promise<void> {
       exitFile,
       onWrite: payload => {
         if (exited) return
-        terminal.write(payload)
+        child.write(payload)
         // In exec mode: detect SIGINT/SIGQUIT bytes and forward to process group
         if (isExecMode && process.platform !== 'win32') {
           const sig = payload.includes(3)
@@ -1101,7 +1185,7 @@ export async function runPtyHost(args: string[]): Promise<void> {
         }
       },
       onResize: (c, r) => {
-        terminal.resize(c, r)
+        child.resize(c, r)
         if (process.platform !== 'win32') {
           try {
             process.kill(-process.pid, 'SIGWINCH')
@@ -1166,7 +1250,7 @@ export async function runPtyHost(args: string[]): Promise<void> {
 
   const exitSignal = child.signalCode ?? undefined
   exited = true
-  terminal.close()
+  child.close()
 
   // In exec mode: SIGHUP the process group
   if (isExecMode && process.platform !== 'win32') {

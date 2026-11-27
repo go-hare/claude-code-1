@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import type {
   ComputerUseHostAdapter,
   Logger,
@@ -36,16 +37,18 @@ class DebugLogger implements Logger {
 /** Probe accessibility by asking System Events for a process list. */
 function checkAccessibilityJXA(): boolean {
   try {
-    const result = Bun.spawnSync({
-      cmd: [
-        'osascript',
+    const result = spawnSync(
+      'osascript',
+      [
         '-e',
         'tell application "System Events" to get name of every process whose background only is false',
       ],
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    return result.exitCode === 0
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    )
+    return !result.error && result.status === 0
   } catch {
     return false
   }
@@ -54,12 +57,15 @@ function checkAccessibilityJXA(): boolean {
 /** Probe screen recording by attempting a 1x1 screencapture. */
 function checkScreenRecordingJXA(): boolean {
   try {
-    const result = Bun.spawnSync({
-      cmd: ['screencapture', '-x', '-R', '0,0,1,1', '/dev/null'],
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    return result.exitCode === 0
+    const result = spawnSync(
+      'screencapture',
+      ['-x', '-R', '0,0,1,1', '/dev/null'],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    )
+    return !result.error && result.status === 0
   } catch {
     return false
   }

@@ -17,7 +17,9 @@
 import { Socket } from 'net'
 import { join, resolve, dirname } from 'path'
 import {
+  closeSync,
   mkdirSync,
+  openSync,
   readFileSync,
   writeFileSync,
   accessSync,
@@ -1505,13 +1507,6 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
         detached: true,
         windowsHide: true,
       })
-      child.unref()
-
-      if (child.pid == null) {
-        throw new Error(
-          `spawned bg pty host has no pid on Windows (WMI: ${wmi.reason})`,
-        )
-      }
 
       // Adapter for connectToPtyHost's Bun-ish { exited, signalCode }.
       // Must be a live bag: plain `{ signalCode }` would freeze the initial null.
@@ -1527,6 +1522,13 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
           resolve(code ?? 0)
         })
       }).catch(() => -1)
+      child.unref()
+
+      if (child.pid == null) {
+        throw new Error(
+          `spawned bg pty host has no pid on Windows (WMI: ${wmi.reason})`,
+        )
+      }
 
       return connectToPtyHost(
         opts.ptySock,
@@ -1538,32 +1540,55 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
     }
 
     // densable nqq: stderr breadcrumb file when possible, else ignore.
-    let child: ReturnType<typeof Bun.spawn>
+    let errFd: number | undefined
+    let child: ReturnType<typeof nodeSpawn>
     const spawnOptsBase = {
       cwd: opts.cwd,
-      env: opts.env,
-      detached: true as const,
-      windowsHide: true as const,
+      env: opts.env as NodeJS.ProcessEnv,
+      detached: true,
+      windowsHide: true,
     }
     try {
       const errPath = getPtyErrPath(opts.ptySock)
-      child = Bun.spawn(spawnArgs, {
+      errFd = openSync(errPath, 'a')
+      child = nodeSpawn(spawnArgs[0]!, spawnArgs.slice(1), {
         ...spawnOptsBase,
-        stdio: ['ignore', 'ignore', Bun.file(errPath)],
+        stdio: ['ignore', 'ignore', errFd],
       })
     } catch {
-      child = Bun.spawn(spawnArgs, {
+      child = nodeSpawn(spawnArgs[0]!, spawnArgs.slice(1), {
         ...spawnOptsBase,
         stdio: ['ignore', 'ignore', 'ignore'],
       })
+    } finally {
+      if (errFd !== undefined) {
+        try {
+          closeSync(errFd)
+        } catch {}
+      }
     }
+    const handle = {
+      exited: Promise.resolve(-1) as Promise<number>,
+      signalCode: null as string | null,
+    }
+    handle.exited = new Promise<number>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('exit', (code, signal) => {
+        child.removeListener('error', reject)
+        handle.signalCode = signal ?? null
+        resolve(code ?? 0)
+      })
+    }).catch(() => -1)
     child.unref()
+    if (child.pid == null) {
+      throw new Error('spawned bg pty host has no pid')
+    }
     return connectToPtyHost(
       opts.ptySock,
       child.pid,
       undefined,
       opts.short,
-      child,
+      handle,
     )
   }
 }

@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { logForDebugging } from 'src/utils/debug.js'
 
 const PROBE_TIMEOUT_MS = 15_000
@@ -24,39 +25,66 @@ export async function probeRemote(
 ): Promise<ProbeResult> {
   onProgress?.('Probing remote host…')
 
-  const proc = Bun.spawn(
-    [
+  const { stdout, stderr, exitCode } = await new Promise<{
+    stdout: string
+    stderr: string
+    exitCode: number
+  }>((resolvePromise, reject) => {
+    const proc = spawn(
       'ssh',
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=10',
-      host,
-      'CLAUDE_BIN=$(test -x "$HOME/.local/bin/claude" && echo "$HOME/.local/bin/claude" || command -v claude 2>/dev/null); echo "$CLAUDE_BIN"; $CLAUDE_BIN --version 2>/dev/null; uname -sm; pwd',
-    ],
-    { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
-  )
+      [
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'ConnectTimeout=10',
+        host,
+        'CLAUDE_BIN=$(test -x "$HOME/.local/bin/claude" && echo "$HOME/.local/bin/claude" || command -v claude 2>/dev/null); echo "$CLAUDE_BIN"; $CLAUDE_BIN --version 2>/dev/null; uname -sm; pwd',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    )
 
-  const result = await Promise.race([
-    proc.exited,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new SSHProbeError(
-              `SSH probe timed out after ${PROBE_TIMEOUT_MS / 1000}s`,
-            ),
-          ),
-        PROBE_TIMEOUT_MS,
-      ),
-    ),
-  ])
+    const stdoutChunks: Buffer[] = []
+    const stderrChunks: Buffer[] = []
+    proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk))
+    proc.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
 
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      try {
+        proc.kill()
+      } catch {
+        // already exited
+      }
+      reject(
+        new SSHProbeError(
+          `SSH probe timed out after ${PROBE_TIMEOUT_MS / 1000}s`,
+        ),
+      )
+    }, PROBE_TIMEOUT_MS)
 
-  if (result !== 0) {
-    const detail = stderr.trim() || `exit code ${result}`
+    proc.once('error', err => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(new SSHProbeError(`SSH probe failed: ${err.message}`))
+    })
+
+    proc.once('close', code => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePromise({
+        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+        stderr: Buffer.concat(stderrChunks).toString('utf8'),
+        exitCode: code ?? 1,
+      })
+    })
+  })
+
+  if (exitCode !== 0) {
+    const detail = stderr.trim() || `exit code ${exitCode}`
     throw new SSHProbeError(`SSH probe failed: ${detail}`)
   }
 

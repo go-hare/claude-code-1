@@ -12,6 +12,7 @@
  * Control op `ensure-spare` remains empty ack (official too).
  */
 
+import { spawn as nodeSpawn } from 'node:child_process'
 import { randomBytes, timingSafeEqual } from 'crypto'
 import { mkdir, readdir, unlink, writeFile } from 'fs/promises'
 import { createConnection, createServer, type Server } from 'net'
@@ -636,17 +637,27 @@ export async function spawnSpare(opts: {
     claimSock,
   ]
 
-  const child = Bun.spawn(spawnArgv, {
+  const child = nodeSpawn(spawnArgv[0]!, spawnArgv.slice(1), {
     cwd: spareDir,
-    env: buildSpareHostEnv({ claimNonce }),
+    env: buildSpareHostEnv({ claimNonce }) as NodeJS.ProcessEnv,
     stdio: ['ignore', 'ignore', 'ignore'],
     detached: true,
     windowsHide: true,
   })
+  const exited = new Promise<void>(resolve => {
+    child.once('error', () => resolve())
+    child.once('exit', () => resolve())
+  })
   child.unref()
 
+  if (child.pid == null) {
+    throw new Error('bg spare spawned host has no pid')
+  }
+
+  const hostPid = child.pid
+
   const held: HeldSpare = {
-    hostPid: child.pid,
+    hostPid,
     ptySock,
     claimSock,
     startedAt: Date.now(),
@@ -661,14 +672,14 @@ export async function spawnSpare(opts: {
     },
   }
 
-  void child.exited.then(() => {
+  void exited.then(() => {
     void unlink(ptySock).catch(() => {})
     void unlink(claimSock).catch(() => {})
     void unlink(getPtyErrPath(ptySock)).catch(() => {})
     opts.onExit()
   })
 
-  opts.log(`bg spare spawned host pid=${child.pid}`)
+  opts.log(`bg spare spawned host pid=${hostPid}`)
   return held
 }
 

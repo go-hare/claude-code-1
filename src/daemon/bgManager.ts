@@ -15,7 +15,7 @@
 
 import { spawn as nodeSpawn } from 'child_process'
 import { mkdir, unlink, readdir, rm, lstat } from 'fs/promises'
-import { mkdirSync } from 'fs'
+import { closeSync, mkdirSync, openSync } from 'fs'
 import { join } from 'path'
 import { isInBundledMode } from '../utils/bundledMode.js'
 import {
@@ -554,12 +554,6 @@ export function createAuthenticatedDefaultSpawnPty(
         detached: true,
         windowsHide: true,
       })
-      child.unref()
-      if (child.pid == null) {
-        throw new Error(
-          `spawned bg pty host has no pid on Windows (WMI: ${wmi.reason})`,
-        )
-      }
       const handle = {
         exited: Promise.resolve(-1) as Promise<number>,
         signalCode: null as string | null,
@@ -572,6 +566,12 @@ export function createAuthenticatedDefaultSpawnPty(
           resolve(code ?? 0)
         })
       }).catch(() => -1)
+      child.unref()
+      if (child.pid == null) {
+        throw new Error(
+          `spawned bg pty host has no pid on Windows (WMI: ${wmi.reason})`,
+        )
+      }
       return connectAuthenticatedPtyHost(
         opts.ptySock,
         child.pid,
@@ -580,27 +580,50 @@ export function createAuthenticatedDefaultSpawnPty(
       )
     }
 
-    let child: ReturnType<typeof Bun.spawn>
+    let errFd: number | undefined
+    let child: ReturnType<typeof nodeSpawn>
     const spawnOptsBase = {
       cwd: opts.cwd,
-      env: authEnv,
-      detached: true as const,
-      windowsHide: true as const,
+      env: authEnv as NodeJS.ProcessEnv,
+      detached: true,
+      windowsHide: true,
     }
     try {
       const errPath = getPtyErrPath(opts.ptySock)
-      child = Bun.spawn(spawnArgs, {
+      errFd = openSync(errPath, 'a')
+      child = nodeSpawn(spawnArgs[0]!, spawnArgs.slice(1), {
         ...spawnOptsBase,
-        stdio: ['ignore', 'ignore', Bun.file(errPath)],
+        stdio: ['ignore', 'ignore', errFd],
       })
     } catch {
-      child = Bun.spawn(spawnArgs, {
+      child = nodeSpawn(spawnArgs[0]!, spawnArgs.slice(1), {
         ...spawnOptsBase,
         stdio: ['ignore', 'ignore', 'ignore'],
       })
+    } finally {
+      if (errFd !== undefined) {
+        try {
+          closeSync(errFd)
+        } catch {}
+      }
     }
+    const handle = {
+      exited: Promise.resolve(-1) as Promise<number>,
+      signalCode: null as string | null,
+    }
+    handle.exited = new Promise<number>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('exit', (code, signal) => {
+        child.removeListener('error', reject)
+        handle.signalCode = signal ?? null
+        resolve(code ?? 0)
+      })
+    }).catch(() => -1)
     child.unref()
-    return connectAuthenticatedPtyHost(opts.ptySock, child.pid, ptyAuth, child)
+    if (child.pid == null) {
+      throw new Error('spawned bg pty host has no pid')
+    }
+    return connectAuthenticatedPtyHost(opts.ptySock, child.pid, ptyAuth, handle)
   }
 }
 

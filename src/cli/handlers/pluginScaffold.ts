@@ -109,12 +109,20 @@ function renderHooksJson(): string {
   )}\n`
 }
 
-function renderHookHandlerTs(): string {
+export function renderHookHandlerTs(): string {
   return `#!/usr/bin/env bun
 // SessionStart hook handler. Reads the event from stdin, writes a JSON result
 // to stdout. Swap "bun" for "node" or "python3" in hooks/hooks.json if your
 // users' environment lacks bun.
-const input = await new Response(Bun.stdin.stream()).text()
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+const input = await readStdin()
 const event = JSON.parse(input)
 process.stdout.write(JSON.stringify({}))
 `

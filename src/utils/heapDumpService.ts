@@ -294,10 +294,28 @@ async function writeHeapSnapshot(filepath: string): Promise<void> {
     /* eslint-enable custom-rules/no-sync-fs */
 
     // Force GC to try to free that heap snapshot sooner.
-    Bun.gc(true)
+    triggerGcIfAvailable()
     return
   }
   const writeStream = createWriteStream(filepath, { mode: 0o600 })
   const heapSnapshotStream = getHeapSnapshot()
   await pipeline(heapSnapshotStream, writeStream)
+  triggerGcIfAvailable()
+}
+
+/**
+ * Trigger garbage collection if exposed by the runtime.
+ * Prefers `Bun.gc(true)` on Bun, falls back to `globalThis.gc()` (e.g. Node `--expose-gc`).
+ */
+export function triggerGcIfAvailable(): boolean {
+  if (typeof Bun !== 'undefined' && typeof Bun.gc === 'function') {
+    Bun.gc(true)
+    return true
+  }
+  const nodeGc = (globalThis as { gc?: unknown }).gc
+  if (typeof nodeGc === 'function') {
+    ;(nodeGc as () => void)()
+    return true
+  }
+  return false
 }

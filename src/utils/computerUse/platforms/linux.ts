@@ -11,6 +11,8 @@
  * so we pipe through ImageMagick `convert` to produce JPEG.
  */
 
+import { spawn, spawnSync } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import type { Platform } from './index.js'
 import type {
   InputPlatform,
@@ -29,24 +31,43 @@ import type {
 // ---------------------------------------------------------------------------
 
 function run(cmd: string[]): string {
-  const result = Bun.spawnSync({ cmd, stdout: 'pipe', stderr: 'pipe' })
-  return new TextDecoder().decode(result.stdout).trim()
+  const [bin, ...args] = cmd
+  if (!bin) return ''
+  const result = spawnSync(bin, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  })
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 async function runAsync(cmd: string[]): Promise<string> {
-  const proc = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' })
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  return out.trim()
+  const [bin, ...args] = cmd
+  if (!bin) return ''
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    const chunks: Buffer[] = []
+    proc.stdout?.on('data', (chunk: Buffer | string) => {
+      chunks.push(
+        typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
+      )
+    })
+    proc.stderr?.resume()
+    proc.on('error', reject)
+    proc.on('close', () => {
+      resolve(Buffer.concat(chunks).toString('utf8').trim())
+    })
+  })
 }
 
 function commandExists(name: string): boolean {
-  const result = Bun.spawnSync({
-    cmd: ['which', name],
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const result = spawnSync('which', [name], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
-  return result.exitCode === 0
+  return !result.error && result.status === 0
 }
 
 // ---------------------------------------------------------------------------
@@ -231,23 +252,20 @@ async function pngToJpegBase64(
   // Try ImageMagick convert first
   if (commandExists('convert')) {
     await runAsync(['convert', pngPath, '-quality', '75', SCREENSHOT_JPG])
-    const file = Bun.file(SCREENSHOT_JPG)
-    const buffer = await file.arrayBuffer()
-    return { base64: Buffer.from(buffer).toString('base64'), width, height }
+    const buffer = await readFile(SCREENSHOT_JPG)
+    return { base64: buffer.toString('base64'), width, height }
   }
 
   // Fallback: ffmpeg
   if (commandExists('ffmpeg')) {
     await runAsync(['ffmpeg', '-y', '-i', pngPath, '-q:v', '5', SCREENSHOT_JPG])
-    const file = Bun.file(SCREENSHOT_JPG)
-    const buffer = await file.arrayBuffer()
-    return { base64: Buffer.from(buffer).toString('base64'), width, height }
+    const buffer = await readFile(SCREENSHOT_JPG)
+    return { base64: buffer.toString('base64'), width, height }
   }
 
   // Last resort: return PNG base64 (caller should be aware)
-  const file = Bun.file(pngPath)
-  const buffer = await file.arrayBuffer()
-  return { base64: Buffer.from(buffer).toString('base64'), width, height }
+  const buffer = await readFile(pngPath)
+  return { base64: buffer.toString('base64'), width, height }
 }
 
 const screenshot: ScreenshotPlatform = {
@@ -290,9 +308,8 @@ const screenshot: ScreenshotPlatform = {
         const width = wMatch ? Number(wMatch[1]) : 0
         const height = hMatch ? Number(hMatch[1]) : 0
 
-        const file = Bun.file(jpgPath)
-        const buffer = await file.arrayBuffer()
-        return { base64: Buffer.from(buffer).toString('base64'), width, height }
+        const buffer = await readFile(jpgPath)
+        return { base64: buffer.toString('base64'), width, height }
       }
       return null
     } catch {

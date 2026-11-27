@@ -265,6 +265,7 @@ export async function mcpServeHandler({
         parseSessionTunnelEnvelope,
         readSessionTunnelLineFromStdin,
         setToolServerDaemonMode,
+        startEarlySessionTunnelDial,
         startSessionTunnel,
         validateSessionTunnelLaunch,
       } = await import('../../services/mcp/sessionTunnel.js');
@@ -326,12 +327,32 @@ export async function mcpServeHandler({
       // Latch daemon mode only after validation passes.
       setToolServerDaemonMode(true);
 
-      const { setup } = await import('../../setup.js');
-      await setup(providedCwd, 'default', false, false, undefined, false);
+      let activeServerHandle:
+        | Awaited<ReturnType<typeof import('../../entrypoints/mcpHttpServer.js').startMCPServerHttp>>
+        | undefined;
+      const onTunnelExit = (code: number, reason: string) => {
+        if (reason === 'hold_deadline_exceeded' && activeServerHandle === undefined) {
+          return;
+        }
+        const closePromise = activeServerHandle ? activeServerHandle.close() : Promise.resolve();
+        void closePromise.finally(() => {
+          process.exit(code);
+        });
+      };
 
-      const { startMCPServerHttp } = await import('../../entrypoints/mcpHttpServer.js');
-      let serverHandle: Awaited<ReturnType<typeof startMCPServerHttp>>;
+      // Official 2.1.331 chunk #1647: start dialing the session tunnel immediately
+      // after validating the stdin envelope, overlapping with setup() + HTTP bind.
+      const earlyDial =
+        sessionTunnel && tunnelEnvelope
+          ? startEarlySessionTunnelDial(tunnelEnvelope, { onExit: onTunnelExit })
+          : undefined;
+
+      let serverHandle: Awaited<ReturnType<typeof import('../../entrypoints/mcpHttpServer.js').startMCPServerHttp>>;
       try {
+        const { setup } = await import('../../setup.js');
+        await setup(providedCwd, 'default', false, false, undefined, false);
+
+        const { startMCPServerHttp } = await import('../../entrypoints/mcpHttpServer.js');
         serverHandle = await startMCPServerHttp(providedCwd, {
           port: validated.port,
           debug: debug ?? false,
@@ -339,8 +360,14 @@ export async function mcpServeHandler({
           storageV5: 'raw',
           resultFormat: validated.resultFormat,
           announceOnStdout: !sessionTunnel,
+          earlyDial,
+          onBound: handle => {
+            activeServerHandle = handle;
+          },
         });
+        activeServerHandle = serverHandle;
       } catch (err) {
+        earlyDial?.stop();
         if (err instanceof ToolServerPortTakenError) {
           setToolServerDaemonMode(false);
           return exitWithCode(EX_UNAVAILABLE, formatCliError(err.message, 'Error: '));
@@ -349,15 +376,12 @@ export async function mcpServeHandler({
       }
 
       const tunnelHandle =
-        sessionTunnel && tunnelEnvelope
+        serverHandle.tunnelHandle ??
+        (sessionTunnel && tunnelEnvelope
           ? startSessionTunnel(serverHandle, tunnelEnvelope, {
-              onExit: code => {
-                void serverHandle.close().finally(() => {
-                  process.exit(code);
-                });
-              },
+              onExit: onTunnelExit,
             })
-          : undefined;
+          : undefined);
 
       const shutdown = () => {
         tunnelHandle?.stop();

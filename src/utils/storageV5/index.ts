@@ -23,6 +23,7 @@ import {
   HostSlot,
   ofDefaultHost,
 } from '../sessionHost.js'
+import { createHoverRestBackend } from './createHoverRestBackend.js'
 import {
   createLocalFsBackend,
   type CreateLocalFsBackendOptions,
@@ -35,6 +36,10 @@ import {
   type HoverRestPinResult,
 } from './hoverRestPin.js'
 
+export {
+  createHoverRestBackend,
+  type HoverRestBackendOptions,
+} from './createHoverRestBackend.js'
 export {
   createLocalFsBackend,
   type CreateLocalFsBackendOptions,
@@ -130,12 +135,31 @@ function getEffectiveExternalStorageV5Factory():
 
 /**
  * densable qb / tryCreateV5Backend. Uses registered external factory if present;
- * otherwise returns undefined after `isHoverRestOn()` check.
+ * else auto-instantiates `createHoverRestBackend` when `CLAUDE_CODE_HOVER_REST_URL`
+ * is set; otherwise returns undefined after `isHoverRestOn()` check.
  */
 export function tryCreateV5Backend(): StorageV5 | undefined {
   if (!isHoverRestOn()) return
   const factory = getEffectiveExternalStorageV5Factory()
-  return factory ? factory() : undefined
+  if (factory) {
+    return factory()
+  }
+  const hoverRestUrl = process.env.CLAUDE_CODE_HOVER_REST_URL?.trim()
+  if (hoverRestUrl) {
+    try {
+      return createHoverRestBackend({
+        baseUrl: hoverRestUrl,
+        authToken: process.env.CLAUDE_CODE_HOVER_REST_TOKEN,
+      })
+    } catch (error) {
+      logForDebugging(
+        `tryCreateV5Backend: failed to construct hover REST backend: ${String(error)}`,
+        { level: 'warn' },
+      )
+      return undefined
+    }
+  }
+  return undefined
 }
 
 export type TryCreateLocalV5BackendOptions = {

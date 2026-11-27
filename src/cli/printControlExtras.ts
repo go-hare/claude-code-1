@@ -24,7 +24,14 @@ import {
 } from 'src/services/tools/remoteToolHost.js'
 import type { ToolStateSlots } from 'src/utils/toolState.js'
 import { checkGate_CACHED_OR_BLOCKING } from 'src/services/analytics/growthbook.js'
-import { isSharedBackend } from 'src/utils/sessionHost.js'
+import { isDesktopUiControlSubtype } from 'src/entrypoints/sdk/controlSchemas.js'
+import { HostSlot, RootSessionSlot } from 'src/utils/hostSlot.js'
+import { isSharedBackend, type SessionHost } from 'src/utils/sessionHost.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  type Session,
+} from 'src/utils/sessionRoot.js'
 import {
   buildTurnHandoffCapability,
   evaluateTurnHandoffAdmission,
@@ -1622,6 +1629,9 @@ export const PRINT_CONTROL_EXTRA_SUBTYPES = [
   'upload_device_hook_template',
   'remote_tools_announce',
   'turn_handoff',
+  'worker_shutting_down',
+  'comparison_fork',
+  'upgrade_relay_marker',
 ] as const
 
 export type PrintControlExtraSubtype =
@@ -1631,6 +1641,138 @@ export function isPrintControlExtraSubtype(
   subtype: string,
 ): subtype is PrintControlExtraSubtype {
   return (PRINT_CONTROL_EXTRA_SUBTYPES as readonly string[]).includes(subtype)
+}
+
+/**
+ * Official 2.1.331 per-SessionHost control extension handler (comparison_fork, etc.).
+ * Isolated per `SessionHost` via `HostSlot` so concurrent tenants never collide.
+ */
+export type PrintControlExtensionHandler = (
+  subtype: string,
+  request: Record<string, unknown>,
+) => Record<string, unknown> | Promise<Record<string, unknown>> | undefined
+
+const printControlExtensionHandlerSlot = new HostSlot<{
+  handler: PrintControlExtensionHandler | undefined
+}>(() => ({ handler: undefined }))
+
+export function registerPrintControlExtensionHandler(
+  fn: PrintControlExtensionHandler | undefined,
+  host: SessionHost = getBootstrapSessionHost(),
+): () => void {
+  const slot = printControlExtensionHandlerSlot.of(host)
+  slot.handler = fn
+  return () => {
+    if (slot.handler === fn) {
+      slot.handler = undefined
+    }
+  }
+}
+
+export function getPrintControlExtensionHandler(
+  host: SessionHost = getBootstrapSessionHost(),
+): PrintControlExtensionHandler | undefined {
+  return printControlExtensionHandlerSlot.peek(host)?.handler
+}
+
+/**
+ * Official 2.1.331 per-SessionHost Desktop `ui_*` control handler.
+ * Isolated per `SessionHost` via `HostSlot` so concurrent tenants never leak UI callbacks.
+ */
+export type DesktopUiControlHandler = (
+  subtype: string,
+  request: Record<string, unknown>,
+) => Record<string, unknown> | Promise<Record<string, unknown>> | undefined
+
+const desktopUiControlHandlerSlot = new HostSlot<{
+  handler: DesktopUiControlHandler | undefined
+}>(() => ({ handler: undefined }))
+
+export function registerDesktopUiControlHandler(
+  fn: DesktopUiControlHandler | undefined,
+  host: SessionHost = getBootstrapSessionHost(),
+): () => void {
+  const slot = desktopUiControlHandlerSlot.of(host)
+  slot.handler = fn
+  return () => {
+    if (slot.handler === fn) {
+      slot.handler = undefined
+    }
+  }
+}
+
+export function getDesktopUiControlHandler(
+  host: SessionHost = getBootstrapSessionHost(),
+): DesktopUiControlHandler | undefined {
+  return desktopUiControlHandlerSlot.peek(host)?.handler
+}
+
+/**
+ * Official 2.1.331 per-root-session upgraded relay marker slot.
+ * Forks share the root session's relay marker via `RootSessionSlot`.
+ */
+const upgradedRelayMarkerSlot = new RootSessionSlot<{
+  marker: string | undefined
+  epoch: number | undefined
+}>(() => ({ marker: undefined, epoch: undefined }))
+
+export function getUpgradedRelayMarker(
+  session: Session = getBootstrapSession(),
+): string | undefined {
+  return upgradedRelayMarkerSlot.peek(session)?.marker
+}
+
+export function resetUpgradedRelayMarker(
+  session: Session = getBootstrapSession(),
+): void {
+  upgradedRelayMarkerSlot.drop(session)
+}
+
+function isPromiseLikeRecord(
+  value: unknown,
+): value is Promise<Record<string, unknown> | undefined> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'then' in value &&
+    typeof (value as { then?: unknown }).then === 'function'
+  )
+}
+
+function collectRuleStrings(source: unknown): string[] {
+  if (Array.isArray(source)) {
+    return source.filter((item): item is string => typeof item === 'string')
+  }
+  if (source !== null && typeof source === 'object') {
+    const out: string[] = []
+    for (const value of Object.values(source as Record<string, unknown>)) {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === 'string') {
+            out.push(item)
+          }
+        }
+      }
+    }
+    return out
+  }
+  return []
+}
+
+function extractActivePermissionRules(context: unknown): {
+  allow: string[]
+  deny: string[]
+  ask: string[]
+} {
+  if (context === null || typeof context !== 'object') {
+    return { allow: [], deny: [], ask: [] }
+  }
+  const bag = context as Record<string, unknown>
+  return {
+    allow: collectRuleStrings(bag.alwaysAllowRules),
+    deny: collectRuleStrings(bag.alwaysDenyRules),
+    ask: collectRuleStrings(bag.alwaysAskRules),
+  }
 }
 
 export type ParsedMessageRated =
@@ -2204,13 +2346,44 @@ export function dispatchPrintControlExtra(
   request: Record<string, unknown>,
   deps: PrintControlExtraDeps,
 ): boolean {
-  if (!isPrintControlExtraSubtype(subtype)) return false
+  const isDesktopUi = isDesktopUiControlSubtype(subtype)
+  if (!isDesktopUi && !isPrintControlExtraSubtype(subtype)) return false
 
   const trustLevel = resolveControlConnectionTrustLevel({
     explicitTrustLevel: deps.controlConnectionTrustLevel,
     isRemoteTransport: deps.isRemoteTransport,
     isCloudHosted: deps.isCloudHosted?.(),
   })
+
+  if (isDesktopUi) {
+    if (trustLevel !== 'full') {
+      deps.sendError(NOT_AVAILABLE_ON_CONNECTION(subtype))
+      return true
+    }
+    const uiHandler = getDesktopUiControlHandler()
+    if (!uiHandler) {
+      deps.sendSuccess({ handled: false, subtype })
+      return true
+    }
+    try {
+      const rawResult = uiHandler(subtype, request)
+      if (isPromiseLikeRecord(rawResult)) {
+        deps.defer(async () => {
+          try {
+            const resolved = await rawResult
+            deps.sendSuccess(resolved ?? { handled: true, subtype })
+          } catch (err) {
+            deps.sendError(deps.errorMessage(err))
+          }
+        })
+      } else {
+        deps.sendSuccess(rawResult ?? { handled: true, subtype })
+      }
+    } catch (err) {
+      deps.sendError(deps.errorMessage(err))
+    }
+    return true
+  }
 
   if (subtype === 'get_status') {
     // Official 2.1.325 #2375: refuse `get_status` over cloud or self-hosted
@@ -2219,23 +2392,34 @@ export function dispatchPrintControlExtra(
       deps.sendError('get_status is not available on this connection')
       return true
     }
+    const session = getBootstrapSession()
+    const manager = getTurnHandoffManager(session)
+    const liveStatus = {
+      session_id: session.id,
+      worker_epoch: manager.workerEpoch,
+      multi_tenant_worker_shutdown: manager.multiTenantShutdownAborted,
+      shared_backend: isSharedBackend(),
+    }
     deps.defer(async () => {
       try {
-        const { buildAccountProperties, buildSandboxProperties } = await import(
-          'src/utils/status.js'
-        )
-        const rows = [
-          ...buildAccountProperties(),
-          ...buildSandboxProperties(),
-        ].map(row => ({
-          label: row.label,
-          value: Array.isArray(row.value)
-            ? row.value.join('\n')
-            : typeof row.value === 'string'
-              ? row.value
-              : undefined,
-        }))
-        deps.sendSuccess({ sections: rows })
+        let rows: Array<{ label: string; value: string | undefined }> = []
+        try {
+          const { buildAccountProperties, buildSandboxProperties } =
+            await import('src/utils/status.js')
+          rows = [...buildAccountProperties(), ...buildSandboxProperties()].map(
+            row => ({
+              label: row.label ?? '',
+              value: Array.isArray(row.value)
+                ? row.value.join('\n')
+                : typeof row.value === 'string'
+                  ? row.value
+                  : undefined,
+            }),
+          )
+        } catch {
+          rows = []
+        }
+        deps.sendSuccess({ sections: rows, ...liveStatus })
       } catch (err) {
         deps.sendError(deps.errorMessage(err))
       }
@@ -2899,16 +3083,20 @@ export function dispatchPrintControlExtra(
       return true
     }
     const context = deps.getPermissionContext()
+    const scope = typeof request.scope === 'string' ? request.scope : undefined
     if (trustLevel === 'redacted') {
       deps.sendSuccess({
         state: redactPermissionRulesStateForRemote(
           context as Record<string, unknown> | null | undefined,
         ),
+        ...(scope !== undefined && { scope }),
       })
       return true
     }
     deps.sendSuccess({
       state: { context: context ?? null },
+      rules: extractActivePermissionRules(context),
+      ...(scope !== undefined && { scope }),
     })
     return true
   }
@@ -3786,6 +3974,92 @@ export function dispatchPrintControlExtra(
       },
     })
     deps.sendSuccess({ status: 'accepted', tool_use_ids: toolUseIDs })
+    return true
+  }
+
+  if (subtype === 'worker_shutting_down') {
+    if (trustLevel === 'refused') {
+      deps.sendError(NOT_AVAILABLE_ON_CONNECTION(subtype))
+      return true
+    }
+    const manager = getTurnHandoffManager()
+    manager.markMultiTenantWorkerShutdown()
+    const workerEpoch =
+      typeof request.worker_epoch === 'number' &&
+      Number.isInteger(request.worker_epoch) &&
+      request.worker_epoch >= 0
+        ? request.worker_epoch
+        : manager.workerEpoch
+    deps.sendSuccess({
+      status: 'acknowledged',
+      multi_tenant_worker_shutdown: true,
+      worker_epoch: workerEpoch,
+    })
+    return true
+  }
+
+  if (subtype === 'comparison_fork') {
+    if (trustLevel === 'refused') {
+      deps.sendError(NOT_AVAILABLE_ON_CONNECTION(subtype))
+      return true
+    }
+    const fallbackResponse = {
+      status: 'acknowledged',
+      subtype: 'comparison_fork',
+      ...(typeof request.turn_id === 'string' && { turn_id: request.turn_id }),
+      ...(typeof request.model === 'string' && { model: request.model }),
+      ...(typeof request.prompt === 'string' && { prompt: request.prompt }),
+    }
+    const extHandler = getPrintControlExtensionHandler()
+    if (!extHandler) {
+      deps.sendSuccess(fallbackResponse)
+      return true
+    }
+    try {
+      const rawResult = extHandler(subtype, request)
+      if (isPromiseLikeRecord(rawResult)) {
+        deps.defer(async () => {
+          try {
+            const resolved = await rawResult
+            deps.sendSuccess(resolved ?? fallbackResponse)
+          } catch (err) {
+            deps.sendError(deps.errorMessage(err))
+          }
+        })
+      } else {
+        deps.sendSuccess(rawResult ?? fallbackResponse)
+      }
+    } catch (err) {
+      deps.sendError(deps.errorMessage(err))
+    }
+    return true
+  }
+
+  if (subtype === 'upgrade_relay_marker') {
+    if (trustLevel === 'refused') {
+      deps.sendError(NOT_AVAILABLE_ON_CONNECTION(subtype))
+      return true
+    }
+    const marker =
+      typeof request.marker === 'string' ? request.marker.trim() : ''
+    if (!marker) {
+      deps.sendError('upgrade_relay_marker: marker must be a non-empty string')
+      return true
+    }
+    const epoch =
+      typeof request.epoch === 'number' &&
+      Number.isInteger(request.epoch) &&
+      request.epoch >= 0
+        ? request.epoch
+        : undefined
+    const slot = upgradedRelayMarkerSlot.of(getBootstrapSession())
+    slot.marker = marker
+    slot.epoch = epoch
+    deps.sendSuccess({
+      status: 'upgraded',
+      marker,
+      ...(epoch !== undefined && { epoch }),
+    })
     return true
   }
 

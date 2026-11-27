@@ -2635,3 +2635,567 @@ export const FastModeStateSchema = lazySchema(() =>
       'Fast mode state: off, in cooldown after rate limit, or actively enabled.',
     ),
 )
+
+// ============================================================================
+// Official 2.1.331 Extended SDK System Event Schemas
+// ============================================================================
+
+export const SDKTurnHandoffAvailableMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('turn_handoff_available'),
+    worker_epoch: z.number().int().nonnegative().optional(),
+    tools: z.array(z.string()).optional(),
+    shared_message_id: z.string().optional(),
+    relay_marker: z.boolean().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKTurnPreemptedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('turn_preempted'),
+    reason: z.string().optional(),
+    preempted_by: z.string().optional(),
+    turn_id: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKAwaySummaryMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('away_summary'),
+    summary: z.string(),
+    elapsed_ms: z.number().nonnegative().optional(),
+    unread_count: z.number().int().nonnegative().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKMemoryRecallMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('memory_recall'),
+    memory_paths: z.array(z.string()).optional(),
+    count: z.number().int().nonnegative().optional(),
+    summary: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKMemorySavedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('memory_saved'),
+    memory_path: z.string().optional(),
+    memory_type: z.string().optional(),
+    summary: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKModelConsentFallbackMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('model_consent_fallback'),
+    original_model: z.string(),
+    fallback_model: z.string(),
+    reason: z.string().optional(),
+    content: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKModelRefusalFallbackMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('model_refusal_fallback'),
+    original_model: z.string(),
+    fallback_model: z.string(),
+    reason: z.string().optional(),
+    content: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKModelRefusalNoFallbackMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('model_refusal_no_fallback'),
+    model: z.string(),
+    reason: z.string().optional(),
+    content: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKInstructionSizeWarningMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('instruction_size_warning'),
+    path: z.string().optional(),
+    char_count: z.number().int().nonnegative().optional(),
+    threshold: z.number().int().nonnegative().optional(),
+    message: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKLateAllowNotRunMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('late_allow_not_run'),
+    tool_name: z.string(),
+    tool_use_id: z.string().optional(),
+    reason: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKPermissionCheckStatusMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('permission_check_status'),
+    status: z.enum(['pending', 'checking', 'allowed', 'denied', 'ask']),
+    tool_name: z.string().optional(),
+    tool_use_id: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKPermissionDeniedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('permission_denied'),
+    tool_name: z.string(),
+    tool_use_id: z.string().optional(),
+    reason: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKPermissionRetryMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('permission_retry'),
+    tool_name: z.string(),
+    tool_use_id: z.string().optional(),
+    attempt: z.number().int().positive().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKPerTurnEffortChangedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('per_turn_effort_changed'),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).nullable(),
+    previous_effort: z
+      .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+      .nullable()
+      .optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKSessionMetadataMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('session_metadata'),
+    metadata: z.record(z.string(), z.unknown()),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKSessionTitleChangedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('session_title_changed'),
+    title: z.string(),
+    source: z.enum(['user', 'ai', 'remote', 'host']).optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKSessionWritesLostMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('session_writes_lost'),
+    reason: z.string().optional(),
+    lost_count: z.number().int().nonnegative().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKVcsStateChangedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('vcs_state_changed'),
+    branch: z.string().nullable().optional(),
+    head_sha: z.string().nullable().optional(),
+    dirty: z.boolean().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKShellCwdMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('shell_cwd'),
+    cwd: z.string(),
+    previous_cwd: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKCodeChangePublishedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('code_change_published'),
+    commit_sha: z.string().optional(),
+    branch: z.string().optional(),
+    files_changed: z.array(z.string()).optional(),
+    pr_url: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKCloudSessionDeltaMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('cloud_session_delta'),
+    cloud_session_id: z.string(),
+    delta: z.record(z.string(), z.unknown()),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKFileAttachmentsMissingMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('file_attachments_missing'),
+    missing_files: z.array(z.string()),
+    message: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKFileSnapshotMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('file_snapshot'),
+    message_id: z.string().optional(),
+    files: z
+      .array(
+        z.object({
+          path: z.string(),
+          hash: z.string().optional(),
+        }),
+      )
+      .optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKScheduledTaskFireMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('scheduled_task_fire'),
+    task_id: z.string(),
+    schedule: z.string().optional(),
+    prompt: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKPeerMessageHoldMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('peer_message_hold'),
+    peer_id: z.string().optional(),
+    held: z.boolean(),
+    reason: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKInheritedAsksSettledMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('inherited_asks_settled'),
+    settled_count: z.number().int().nonnegative(),
+    approved_count: z.number().int().nonnegative().optional(),
+    denied_count: z.number().int().nonnegative().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKFeedbackDraftQueuedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('feedback_draft_queued'),
+    draft_id: z.string(),
+    category: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKPromptDraftActivityMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('prompt_draft_activity'),
+    active: z.boolean(),
+    length: z.number().int().nonnegative().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKMessageRatedEventSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('message_rated'),
+    message_uuid: z.string(),
+    sentiment: z.enum(['positive', 'negative']),
+    surface: z.enum(['tool_use', 'assistant_text']).optional(),
+    cleared: z.boolean().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKMirrorErrorMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('mirror_error'),
+    error: z.string(),
+    file_path: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKInformationalMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('informational'),
+    content: z.string(),
+    level: z.enum(['info', 'warning', 'error']).optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKAgentsKilledMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('agents_killed'),
+    agent_ids: z.array(z.string()),
+    reason: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKAPIErrorMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('api_error'),
+    error: SDKAssistantMessageErrorSchema(),
+    error_status: z.number().nullable().optional(),
+    message: z.string().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKTaskListStatusesMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('task_list_statuses'),
+    tasks: z.array(
+      z.object({
+        task_id: z.string(),
+        status: z.string(),
+        description: z.string().optional(),
+      }),
+    ),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDKTurnDurationMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('turn_duration'),
+    duration_ms: z.number().nonnegative(),
+    api_duration_ms: z.number().nonnegative().optional(),
+    turn_index: z.number().int().nonnegative().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+export const SDK_EXTENDED_SYSTEM_SUBTYPES = [
+  'turn_handoff_available',
+  'turn_preempted',
+  'post_turn_summary',
+  'away_summary',
+  'memory_recall',
+  'memory_saved',
+  'model_fallback',
+  'model_consent_fallback',
+  'model_refusal_fallback',
+  'model_refusal_no_fallback',
+  'instruction_size_warning',
+  'late_allow_not_run',
+  'permission_check_status',
+  'permission_denied',
+  'permission_retry',
+  'per_turn_effort_changed',
+  'background_tasks_changed',
+  'commands_changed',
+  'session_metadata',
+  'session_state_changed',
+  'session_title_changed',
+  'session_writes_lost',
+  'vcs_state_changed',
+  'shell_cwd',
+  'code_change_published',
+  'cloud_session_delta',
+  'file_attachments_missing',
+  'file_snapshot',
+  'files_persisted',
+  'scheduled_task_fire',
+  'peer_message_hold',
+  'inherited_asks_settled',
+  'feedback_draft_queued',
+  'prompt_draft_activity',
+  'message_rated',
+  'mirror_error',
+  'informational',
+  'agents_killed',
+  'api_error',
+  'api_retry',
+  'task_list_statuses',
+  'task_summary',
+  'thinking_tokens',
+  'turn_duration',
+] as const
+
+export type SDKExtendedSystemSubtype =
+  (typeof SDK_EXTENDED_SYSTEM_SUBTYPES)[number]
+
+export const SDKExtendedSystemEventSchema = lazySchema(() =>
+  z.discriminatedUnion('subtype', [
+    SDKTurnHandoffAvailableMessageSchema(),
+    SDKTurnPreemptedMessageSchema(),
+    SDKPostTurnSummaryMessageSchema(),
+    SDKAwaySummaryMessageSchema(),
+    SDKMemoryRecallMessageSchema(),
+    SDKMemorySavedMessageSchema(),
+    SDKModelFallbackMessageSchema(),
+    SDKModelConsentFallbackMessageSchema(),
+    SDKModelRefusalFallbackMessageSchema(),
+    SDKModelRefusalNoFallbackMessageSchema(),
+    SDKInstructionSizeWarningMessageSchema(),
+    SDKLateAllowNotRunMessageSchema(),
+    SDKPermissionCheckStatusMessageSchema(),
+    SDKPermissionDeniedMessageSchema(),
+    SDKPermissionRetryMessageSchema(),
+    SDKPerTurnEffortChangedMessageSchema(),
+    SDKBackgroundTasksChangedMessageSchema(),
+    SDKCommandsChangedMessageSchema(),
+    SDKSessionMetadataMessageSchema(),
+    SDKSessionStateChangedMessageSchema(),
+    SDKSessionTitleChangedMessageSchema(),
+    SDKSessionWritesLostMessageSchema(),
+    SDKVcsStateChangedMessageSchema(),
+    SDKShellCwdMessageSchema(),
+    SDKCodeChangePublishedMessageSchema(),
+    SDKCloudSessionDeltaMessageSchema(),
+    SDKFileAttachmentsMissingMessageSchema(),
+    SDKFileSnapshotMessageSchema(),
+    SDKFilesPersistedEventSchema(),
+    SDKScheduledTaskFireMessageSchema(),
+    SDKPeerMessageHoldMessageSchema(),
+    SDKInheritedAsksSettledMessageSchema(),
+    SDKFeedbackDraftQueuedMessageSchema(),
+    SDKPromptDraftActivityMessageSchema(),
+    SDKMessageRatedEventSchema(),
+    SDKMirrorErrorMessageSchema(),
+    SDKInformationalMessageSchema(),
+    SDKAgentsKilledMessageSchema(),
+    SDKAPIErrorMessageSchema(),
+    SDKAPIRetryMessageSchema(),
+    SDKTaskListStatusesMessageSchema(),
+    SDKTaskSummaryMessageSchema(),
+    SDKThinkingTokensMessageSchema(),
+    SDKTurnDurationMessageSchema(),
+  ]),
+)

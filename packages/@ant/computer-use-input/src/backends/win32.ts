@@ -7,6 +7,7 @@
  * All P/Invoke types are compiled once at module load and reused across calls.
  */
 
+import { spawn, spawnSync } from 'node:child_process'
 import type { FrontmostAppInfo, InputBackend } from '../types.js'
 
 // ---------------------------------------------------------------------------
@@ -14,22 +15,39 @@ import type { FrontmostAppInfo, InputBackend } from '../types.js'
 // ---------------------------------------------------------------------------
 
 function ps(script: string): string {
-  const result = Bun.spawnSync({
-    cmd: ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  return new TextDecoder().decode(result.stdout).trim()
+  const result = spawnSync(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    },
+  )
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 async function psAsync(script: string): Promise<string> {
-  const proc = Bun.spawn(
-    ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-    { stdout: 'pipe', stderr: 'pipe' },
-  )
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  return out.trim()
+  return new Promise((resolve, reject) => {
+    const proc = spawn(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    )
+    const chunks: Buffer[] = []
+    proc.stdout?.on('data', (chunk: Buffer | string) => {
+      chunks.push(
+        typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
+      )
+    })
+    proc.stderr?.resume()
+    proc.on('error', reject)
+    proc.on('close', () => {
+      resolve(Buffer.concat(chunks).toString('utf8').trim())
+    })
+  })
 }
 
 // ---------------------------------------------------------------------------

@@ -13,8 +13,10 @@ import {
 import type { AgentDefinitionsResult } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { Tools } from '../Tool.js'
 import {
+  type EarlySessionTunnelDialHandle,
   type InProcessHttpRequest,
   type InProcessHttpResponse,
+  type SessionTunnelHandle,
   ToolServerPortTakenError,
 } from '../services/mcp/sessionTunnel.js'
 import {
@@ -43,6 +45,8 @@ export type StartMCPServerHttpOptions = {
   announceOnStdout?: boolean
   authAnnounceMode?: 'stdout-reader' | 'silent'
   progressHeartbeatIntervalMs?: number
+  earlyDial?: EarlySessionTunnelDialHandle
+  onBound?: (handle: McpHttpServerHandle) => void
   getToolsOverride?: () => Tools
   loadAgentDefinitions?: (cwd: string) => Promise<AgentDefinitionsResult>
 }
@@ -53,6 +57,7 @@ export type McpHttpServerHandle = {
   authToken: string
   answer: (req: InProcessHttpRequest) => Promise<InProcessHttpResponse>
   close: () => Promise<void>
+  tunnelHandle?: SessionTunnelHandle
 }
 
 const UNSAFE_HOST_RE = /[\s@/?#\\]/
@@ -604,10 +609,12 @@ export async function startMCPServerHttp(
     )
   }
 
+  let adoptedTunnel: SessionTunnelHandle | undefined
   let closed = false
   const close = async (): Promise<void> => {
     if (closed) return
     closed = true
+    adoptedTunnel?.stop()
     dispatcher.dispose()
     sessions.clear()
     terminatedSessions.clear()
@@ -616,11 +623,33 @@ export async function startMCPServerHttp(
     })
   }
 
-  return {
+  const handle: McpHttpServerHandle = {
     url,
     boundPort,
     authToken,
     answer,
     close,
   }
+  options.onBound?.(handle)
+
+  if (options.earlyDial) {
+    try {
+      adoptedTunnel = await options.earlyDial.adopt({
+        url,
+        authToken,
+        answer,
+      })
+    } catch (err) {
+      await close()
+      throw err
+    }
+    if (adoptedTunnel !== undefined) {
+      handle.tunnelHandle = adoptedTunnel
+      if (closed) {
+        adoptedTunnel.stop()
+      }
+    }
+  }
+
+  return handle
 }

@@ -13,6 +13,7 @@
  * Click-through, TOPMOST, no taskbar icon.
  */
 
+import { type ChildProcess, spawn } from 'node:child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { registerCleanup } from '../../cleanupRegistry.js'
@@ -26,7 +27,7 @@ const BG_COLOR = '30, 30, 30' // dark background
 const TEXT_COLOR = '220, 220, 220' // light text
 
 type InputIndicatorHostState = {
-  indicatorProc: ReturnType<typeof Bun.spawn> | null
+  indicatorProc: ChildProcess | null
   stopFile: string | null
   scriptFile: string | null
   msgFile: string | null
@@ -239,16 +240,10 @@ export function showIndicator(hwnd: string): boolean {
     scriptFile = path.join(tmpDir, `cu_indicator_${ts}.ps1`)
     const msgFile = stopFile + '.msg'
     fs.writeFileSync(scriptFile, buildIndicatorScript(hwnd, stopFile), 'utf-8')
-    const proc = Bun.spawn(
-      [
-        'powershell',
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        scriptFile,
-      ],
-      { stdout: 'ignore', stderr: 'ignore' },
+    const proc = spawn(
+      'powershell',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile],
+      { stdio: 'ignore', windowsHide: true },
     )
     state.stopFile = stopFile
     state.scriptFile = scriptFile
@@ -259,20 +254,16 @@ export function showIndicator(hwnd: string): boolean {
     state.unregisterCleanup = registerCleanup(() => {
       hideIndicatorState(state, true)
     })
-    if (proc.exited && typeof proc.exited.then === 'function') {
-      void proc.exited.then(
-        () => {
-          if (state.indicatorProc === proc) {
-            hideIndicatorState(state, true)
-          }
-        },
-        () => {
-          if (state.indicatorProc === proc) {
-            hideIndicatorState(state, true)
-          }
-        },
-      )
-    }
+    proc.on('error', () => {
+      if (state.indicatorProc === proc) {
+        hideIndicatorState(state, true)
+      }
+    })
+    proc.on('exit', () => {
+      if (state.indicatorProc === proc) {
+        hideIndicatorState(state, true)
+      }
+    })
     return true
   } catch {
     hideIndicatorState(state, true)

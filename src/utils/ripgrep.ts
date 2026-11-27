@@ -1129,25 +1129,25 @@ const testRipgrepOnFirstUse = memoizePerHost(async (): Promise<void> => {
   try {
     let test: { code: number; stdout: string }
 
-    // For embedded ripgrep, use Bun.spawn with argv0
+    // For embedded ripgrep, use node:child_process spawn with argv0
     if (config.argv0) {
-      // Only Bun embeds ripgrep.
-      // eslint-disable-next-line custom-rules/require-bun-typeof-guard
-      const proc = Bun.spawn([config.command, '--version'], {
-        argv0: config.argv0,
-        stderr: 'ignore',
-        stdout: 'pipe',
-      })
-
-      // Bun's ReadableStream has .text() at runtime, but TS types don't reflect it
-      const [stdout, code] = await Promise.all([
-        (proc.stdout as unknown as Blob).text(),
-        proc.exited,
-      ])
-      test = {
-        code,
-        stdout,
-      }
+      test = await new Promise<{ code: number; stdout: string }>(
+        (resolve, reject) => {
+          const proc = spawn(config.command, ['--version'], {
+            argv0: config.argv0,
+            stdio: ['ignore', 'pipe', 'ignore'],
+          })
+          const stdoutChunks: Buffer[] = []
+          proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk))
+          proc.once('error', reject)
+          proc.once('close', code => {
+            resolve({
+              code: code ?? 1,
+              stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+            })
+          })
+        },
+      )
     } else {
       test = await execFileNoThrow(
         config.command,

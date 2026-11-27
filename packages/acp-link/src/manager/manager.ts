@@ -1,3 +1,5 @@
+import { type ChildProcess, spawn } from 'node:child_process'
+import type { Readable } from 'node:stream'
 import type { AcpInstance, InstanceSummary, LogEntry } from './types.js'
 
 function log(tag: string, msg: string) {
@@ -8,10 +10,14 @@ function log(tag: string, msg: string) {
 const MAX_LOG_LINES = 2000
 const SHUTDOWN_TIMEOUT_MS = 5000
 
+interface ManagedProcess {
+  child: ChildProcess
+  exited: Promise<number>
+}
+
 export class ProcessManager {
   private instances = new Map<string, AcpInstance>()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private processes = new Map<string, any>()
+  private processes = new Map<string, ManagedProcess>()
 
   create(group: string, command: string): AcpInstance {
     const id = crypto.randomUUID()
@@ -30,24 +36,28 @@ export class ProcessManager {
     const args = this.parseCommand(command)
     const fullArgs = ['--group', group, ...args]
 
-    const proc = Bun.spawn(['acp-link', ...fullArgs], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...Bun.env, ACP_CHILD: '1' },
+    const child = spawn('acp-link', fullArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ACP_CHILD: '1' },
     })
 
-    instance.pid = proc.pid
+    const exited = new Promise<number>(resolve => {
+      child.once('error', () => resolve(1))
+      child.once('close', code => resolve(code ?? 1))
+    })
+
+    instance.pid = child.pid
     this.instances.set(id, instance)
-    this.processes.set(id, proc)
+    this.processes.set(id, { child, exited })
     log(
       'manager',
-      `created instance ${id.slice(0, 8)} group=${group} pid=${proc.pid} cmd="acp-link ${fullArgs.join(' ')}"`,
+      `created instance ${id.slice(0, 8)} group=${group} pid=${child.pid} cmd="acp-link ${fullArgs.join(' ')}"`,
     )
 
-    this.pipeStream(proc.stdout, id, 'stdout')
-    this.pipeStream(proc.stderr, id, 'stderr')
+    this.pipeStream(child.stdout, id, 'stdout')
+    this.pipeStream(child.stderr, id, 'stderr')
 
-    proc.exited.then(code => {
+    void exited.then(code => {
       instance.status = code === 0 ? 'stopped' : 'failed'
       instance.exitCode = code
       instance.pid = undefined
@@ -63,11 +73,14 @@ export class ProcessManager {
   }
 
   stop(id: string): boolean {
-    const proc = this.processes.get(id)
-    if (!proc) return false
+    const managed = this.processes.get(id)
+    if (!managed) return false
     const inst = this.instances.get(id)
-    log('manager', `stopping instance ${id.slice(0, 8)} pid=${proc.pid}`)
-    proc.kill('SIGTERM')
+    log(
+      'manager',
+      `stopping instance ${id.slice(0, 8)} pid=${managed.child.pid}`,
+    )
+    managed.child.kill('SIGTERM')
     // Immediately mark as stopped to prevent stale state
     if (inst) {
       inst.status = 'stopped'
@@ -105,10 +118,13 @@ export class ProcessManager {
     if (running.length === 0) return
 
     log('manager', `shutting down ${running.length} running instance(s)...`)
-    for (const [id, proc] of running) {
+    for (const [id, managed] of running) {
       try {
-        proc.kill('SIGTERM')
-        log('manager', `sent SIGTERM to ${id.slice(0, 8)} pid=${proc.pid}`)
+        managed.child.kill('SIGTERM')
+        log(
+          'manager',
+          `sent SIGTERM to ${id.slice(0, 8)} pid=${managed.child.pid}`,
+        )
       } catch {
         // already dead
       }
@@ -118,13 +134,13 @@ export class ProcessManager {
       setTimeout(resolve, SHUTDOWN_TIMEOUT_MS),
     )
     await Promise.race([
-      Promise.all(running.map(([, proc]) => proc.exited.catch(() => {}))),
+      Promise.all(running.map(([, managed]) => managed.exited.catch(() => {}))),
       timeout,
     ])
 
-    for (const [id, proc] of running) {
+    for (const [id, managed] of running) {
       try {
-        proc.kill('SIGKILL')
+        managed.child.kill('SIGKILL')
         log('manager', `sent SIGKILL to ${id.slice(0, 8)}`)
       } catch {
         // already dead
@@ -161,35 +177,29 @@ export class ProcessManager {
   }
 
   private pipeStream(
-    readable: ReadableStream<Uint8Array>,
+    readable: Readable | null,
     instanceId: string,
     stream: 'stdout' | 'stderr',
   ) {
-    const reader = readable.getReader()
+    if (!readable) return
     const decoder = new TextDecoder()
     let buffer = ''
 
-    const processChunk = () => {
-      reader
-        .read()
-        .then(({ done, value }) => {
-          if (done) {
-            if (buffer) this.appendLog(instanceId, buffer, stream)
-            return
-          }
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() ?? ''
-          for (const line of lines) {
-            if (line) this.appendLog(instanceId, line, stream)
-          }
-          processChunk()
-        })
-        .catch(() => {
-          // stream ended or error
-        })
-    }
-    processChunk()
+    readable.on('data', (chunk: Buffer | Uint8Array) => {
+      buffer += decoder.decode(chunk, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (line) this.appendLog(instanceId, line, stream)
+      }
+    })
+    readable.on('end', () => {
+      const tail = buffer + decoder.decode()
+      if (tail) this.appendLog(instanceId, tail, stream)
+    })
+    readable.on('error', () => {
+      // stream ended or error
+    })
   }
 
   private appendLog(

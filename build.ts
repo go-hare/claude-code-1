@@ -1,4 +1,5 @@
-import { readdir, readFile, writeFile, cp } from 'fs/promises'
+import { chmodSync, existsSync, rmSync } from 'fs'
+import { cp, mkdir, readdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getMacroDefines } from './scripts/defines.ts'
 import { DEFAULT_BUILD_FEATURES } from './scripts/defines.ts'
@@ -6,7 +7,6 @@ import { DEFAULT_BUILD_FEATURES } from './scripts/defines.ts'
 const outdir = 'dist'
 
 // Step 1: Clean output directory
-const { rmSync } = await import('fs')
 rmSync(outdir, { recursive: true, force: true })
 
 // Collect FEATURE_* env vars → Bun.build features
@@ -96,6 +96,27 @@ const clipboardImageDir = join(outdir, 'vendor', 'clipboard-image')
 await cp('vendor/clipboard-image', clipboardImageDir, { recursive: true })
 console.log(`Copied vendor/clipboard-image/ → ${clipboardImageDir}/`)
 
+// Copy optional win-sandbox-native binary (`srt-win.exe` or `srt-win`) if built
+for (const binName of ['srt-win.exe', 'srt-win'] as const) {
+  const srcPath = join(
+    'packages',
+    'win-sandbox-native',
+    'target',
+    'release',
+    binName,
+  )
+  if (existsSync(srcPath)) {
+    const winSandboxDir = join(outdir, 'vendor', 'win-sandbox')
+    const destPath = join(winSandboxDir, binName)
+    await mkdir(winSandboxDir, { recursive: true })
+    await cp(srcPath, destPath)
+    if (!binName.endsWith('.exe')) {
+      chmodSync(destPath, 0o755)
+    }
+    console.log(`Copied win-sandbox-native → ${destPath}`)
+  }
+}
+
 // Step 5: Generate cli-bun and cli-node executable entry points
 const cliBun = join(outdir, 'cli-bun.js')
 const cliNode = join(outdir, 'cli-node.js')
@@ -105,7 +126,6 @@ await writeFile(cliBun, '#!/usr/bin/env bun\nimport "./cli.js"\n')
 await writeFile(cliNode, '#!/usr/bin/env node\nimport "./cli.js"\n')
 
 // Make both executable
-const { chmodSync } = await import('fs')
 chmodSync(cliBun, 0o755)
 chmodSync(cliNode, 0o755)
 

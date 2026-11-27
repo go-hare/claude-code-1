@@ -3,6 +3,8 @@
  * Single source of truth — no more duplication across files.
  */
 
+import { spawn, spawnSync } from 'node:child_process'
+
 /** Validate HWND is a pure numeric string — prevents PowerShell/Python injection. */
 export function validateHwnd(hwnd: string): string {
   if (!/^\d+$/.test(hwnd)) {
@@ -13,28 +15,32 @@ export function validateHwnd(hwnd: string): string {
 
 /** Run a PowerShell script synchronously, return stdout trimmed. */
 export function ps(script: string): string {
-  const result = Bun.spawnSync({
-    cmd: ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-    stdout: 'pipe',
-    stderr: 'pipe',
-    // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
-    windowsHide: true,
-  })
-  return new TextDecoder().decode(result.stdout).trim()
+  const result = spawnSync(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
+      windowsHide: true,
+    },
+  )
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
 }
 
 /** Run a PowerShell script synchronously, return null on failure. */
 export function runPs(script: string): string | null {
   try {
-    const result = Bun.spawnSync({
-      cmd: ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-      stdout: 'pipe',
-      stderr: 'pipe',
-      // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
-      windowsHide: true,
-    })
-    if (result.exitCode !== 0) return null
-    return new TextDecoder().decode(result.stdout).trim()
+    const result = spawnSync(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
+        windowsHide: true,
+      },
+    )
+    if (result.error || result.status !== 0) return null
+    return result.stdout ? result.stdout.toString('utf8').trim() : ''
   } catch {
     return null
   }
@@ -42,18 +48,28 @@ export function runPs(script: string): string | null {
 
 /** Run a PowerShell script asynchronously. */
 export async function psAsync(script: string): Promise<string> {
-  const proc = Bun.spawn(
-    ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-    {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
-      windowsHide: true,
-    },
-  )
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  return out.trim()
+  return new Promise((resolve, reject) => {
+    const proc = spawn(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
+        windowsHide: true,
+      },
+    )
+    const chunks: Buffer[] = []
+    proc.stdout?.on('data', (chunk: Buffer | string) => {
+      chunks.push(
+        typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
+      )
+    })
+    proc.stderr?.resume()
+    proc.on('error', reject)
+    proc.on('close', () => {
+      resolve(Buffer.concat(chunks).toString('utf8').trim())
+    })
+  })
 }
 
 /** Get the system temp directory. */

@@ -1,4 +1,7 @@
 import type { Subprocess } from 'bun'
+import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { Readable } from 'node:stream'
 import { SSHSessionManagerImpl } from './SSHSessionManager.js'
 import type {
   SSHSessionManager,
@@ -12,10 +15,86 @@ import { deployBinary } from './SSHDeploy.js'
 import { buildCliLaunch } from '../utils/cliLaunch.js'
 import { logForDebugging } from '../utils/debug.js'
 import { jsonParse } from '../utils/slowOperations.js'
-import { randomUUID } from 'crypto'
 
 const INIT_TIMEOUT_MS = 30_000
 const STDERR_TAIL_LINES = 20
+
+function spawnSubprocess(
+  command: string,
+  args: string[],
+  options: {
+    env?: NodeJS.ProcessEnv
+    stdin?: 'pipe' | 'ignore'
+    stdout?: 'pipe' | 'ignore'
+    stderr?: 'pipe' | 'ignore'
+  },
+): Subprocess {
+  const child: ChildProcess = nodeSpawn(command, args, {
+    stdio: [
+      options.stdin ?? 'ignore',
+      options.stdout ?? 'pipe',
+      options.stderr ?? 'pipe',
+    ],
+    env: options.env,
+  })
+
+  child.stdin?.on('error', () => {
+    // Ignore EPIPE when child exits before stdin write finishes
+  })
+
+  let resolvedExitCode: number | null = null
+  let resolvedSignalCode: NodeJS.Signals | null = null
+  const exited = new Promise<number>(resolve => {
+    child.once('error', () => {
+      if (resolvedExitCode === null) resolvedExitCode = 1
+      resolve(resolvedExitCode)
+    })
+    child.once('exit', (code, signal) => {
+      resolvedSignalCode = signal
+      resolvedExitCode = code ?? (signal ? 1 : 0)
+      resolve(resolvedExitCode)
+    })
+  })
+
+  const stdoutStream =
+    child.stdout != null
+      ? (Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>)
+      : undefined
+  const stderrStream =
+    child.stderr != null
+      ? (Readable.toWeb(child.stderr) as unknown as ReadableStream<Uint8Array>)
+      : undefined
+
+  const adapter = {
+    get pid() {
+      return child.pid ?? 0
+    },
+    get exitCode() {
+      return resolvedExitCode
+    },
+    get signalCode() {
+      return resolvedSignalCode
+    },
+    get killed() {
+      return child.killed
+    },
+    exited,
+    stdin: child.stdin ?? undefined,
+    stdout: stdoutStream,
+    stderr: stderrStream,
+    kill(signal?: NodeJS.Signals | number) {
+      child.kill(signal)
+    },
+    ref() {
+      child.ref()
+    },
+    unref() {
+      child.unref()
+    },
+  }
+
+  return adapter as unknown as Subprocess
+}
 
 export interface SSHSession {
   remoteCwd: string
@@ -58,8 +137,9 @@ export async function createSSHSession(
     logForDebugging(`[SSH] custom remoteBin: ${remoteBin}`)
     // Quick SSH to get remote home directory for default CWD
     try {
-      const pwdProc = Bun.spawn(
-        ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, 'pwd'],
+      const pwdProc = spawnSubprocess(
+        'ssh',
+        ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, 'pwd'],
         {
           stdin: 'ignore',
           stdout: 'pipe',
@@ -67,7 +147,13 @@ export async function createSSHSession(
         },
       )
       await pwdProc.exited
-      const pwd = (await new Response(pwdProc.stdout).text()).trim()
+      const pwd = pwdProc.stdout
+        ? (
+            await new Response(
+              pwdProc.stdout as ReadableStream<Uint8Array>,
+            ).text()
+          ).trim()
+        : ''
       if (pwd.startsWith('/')) defaultCwd = pwd
     } catch {
       /* use fallback */
@@ -158,7 +244,7 @@ export async function createSSHSession(
 
   let proc: Subprocess
   try {
-    proc = Bun.spawn(sshArgs, {
+    proc = spawnSubprocess(sshArgs[0]!, sshArgs.slice(1), {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -217,7 +303,7 @@ export async function createSSHSession(
       )
     }
 
-    const newProc = Bun.spawn(reconnectArgs, {
+    const newProc = spawnSubprocess(reconnectArgs[0]!, reconnectArgs.slice(1), {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -280,7 +366,7 @@ export async function createLocalSSHSession(config: {
 
   let proc: Subprocess
   try {
-    proc = Bun.spawn([spec.execPath, ...spec.args], {
+    proc = spawnSubprocess(spec.execPath, spec.args, {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -319,12 +405,16 @@ export async function createLocalSSHSession(config: {
     }
 
     const reconnectSpec = buildCliLaunch(reconnectCliArgs)
-    const newProc = Bun.spawn([reconnectSpec.execPath, ...reconnectSpec.args], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...reconnectSpec.env, ...authEnv },
-    })
+    const newProc = spawnSubprocess(
+      reconnectSpec.execPath,
+      reconnectSpec.args,
+      {
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...reconnectSpec.env, ...authEnv },
+      },
+    )
 
     const newStderrChunks: string[] = []
     collectStderr(newProc, newStderrChunks)
