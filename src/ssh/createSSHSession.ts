@@ -10,7 +10,7 @@ import type {
 import { createAuthProxy } from './SSHAuthProxy.js'
 export type { SSHAuthProxy } from './SSHAuthProxy.js'
 import type { SSHAuthProxy } from './SSHAuthProxy.js'
-import { probeRemote } from './SSHProbe.js'
+import { probeRemote, validateSshHost } from './SSHProbe.js'
 import { deployBinary } from './SSHDeploy.js'
 import { buildCliLaunch } from '../utils/cliLaunch.js'
 import { logForDebugging } from '../utils/debug.js'
@@ -126,6 +126,57 @@ export class SSHSessionError extends Error {
   }
 }
 
+/**
+ * POSIX single-quote a string (`'...'`, escaping embedded `'` as `'\''`).
+ */
+export function posixSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`
+}
+
+const VALID_ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * Format an SSH remote CLI invocation so every env assignment value and every
+ * command/flag/value argument is POSIX single-quoted (preventing shell
+ * metacharacter injection over SSH remote commands). Preserves safe `$HOME`
+ * expansion for leading `~/` on the remote binary path.
+ */
+export function formatPosixRemoteCli(
+  remoteCli: readonly string[],
+  envCount: number,
+): string {
+  const parts: string[] = []
+  for (let i = 0; i < remoteCli.length; i++) {
+    const token = remoteCli[i]!
+    if (i < envCount) {
+      const eqIdx = token.indexOf('=')
+      if (eqIdx > 0) {
+        const key = token.slice(0, eqIdx)
+        const val = token.slice(eqIdx + 1)
+        if (!VALID_ENV_NAME_RE.test(key)) {
+          throw new SSHSessionError(
+            `Invalid SSH remote env variable name: ${key}`,
+          )
+        }
+        parts.push(`${key}=${posixSingleQuote(val)}`)
+        continue
+      }
+    }
+    if (i === envCount) {
+      if (token === '~') {
+        parts.push('"$HOME"')
+        continue
+      }
+      if (token.startsWith('~/')) {
+        parts.push(`"$HOME"/${posixSingleQuote(token.slice(2))}`)
+        continue
+      }
+    }
+    parts.push(posixSingleQuote(token))
+  }
+  return parts.join(' ')
+}
+
 export async function createSSHSession(
   config: {
     host: string
@@ -140,7 +191,13 @@ export async function createSSHSession(
     onProgress?: (msg: string) => void
   },
 ): Promise<SSHSession> {
-  const { host, localVersion, extraCliArgs, remoteBin } = config
+  const { localVersion, extraCliArgs, remoteBin } = config
+  let host: string
+  try {
+    host = validateSshHost(config.host)
+  } catch (err) {
+    throw new SSHSessionError(err instanceof Error ? err.message : String(err))
+  }
   const onProgress = callbacks?.onProgress
 
   let remoteBinaryPath: string
@@ -154,7 +211,7 @@ export async function createSSHSession(
     try {
       const pwdProc = spawnSubprocess(
         'ssh',
-        ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, 'pwd'],
+        ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '--', host, 'pwd'],
         {
           stdin: 'ignore',
           stdout: 'pipe',
@@ -225,7 +282,9 @@ export async function createSSHSession(
   const isWindows = process.platform === 'win32'
 
   const remoteCli: string[] = []
-  for (const [k, v] of Object.entries(authEnv)) {
+  const envEntries = Object.entries(authEnv)
+  const envCount = envEntries.length
+  for (const [k, v] of envEntries) {
     remoteCli.push(`${k}=${v}`)
   }
   remoteCli.push(
@@ -271,7 +330,7 @@ export async function createSSHSession(
     }
   }
 
-  sshArgs.push(host, remoteCli.join(' '))
+  sshArgs.push('--', host, formatPosixRemoteCli(remoteCli, envCount))
 
   onProgress?.('Starting remote session…')
   logForDebugging(`[SSH] spawning: ${sshArgs.join(' ')}`)
@@ -328,15 +387,20 @@ export async function createSSHSession(
 
   const reconnect = async (): Promise<Subprocess> => {
     logForDebugging('[SSH] reconnect: re-spawning SSH process with --continue')
-    const reconnectArgs = [...sshArgs]
-    const cmdIdx = reconnectArgs.length - 1
-    const existingCmd = reconnectArgs[cmdIdx]!
-    if (!existingCmd.includes('--continue')) {
-      reconnectArgs[cmdIdx] = existingCmd.replace(
-        / -p(?:\s|$)/,
-        ' -p --continue ',
-      )
+    const reconnectRemoteCli = [...remoteCli]
+    if (!reconnectRemoteCli.slice(envCount).includes('--continue')) {
+      const pIdx = reconnectRemoteCli.indexOf('-p', envCount)
+      if (pIdx !== -1) {
+        reconnectRemoteCli.splice(pIdx + 1, 0, '--continue')
+      } else {
+        reconnectRemoteCli.push('--continue')
+      }
     }
+    const reconnectArgs = [...sshArgs]
+    reconnectArgs[reconnectArgs.length - 1] = formatPosixRemoteCli(
+      reconnectRemoteCli,
+      envCount,
+    )
 
     const newProc = spawnSubprocess(reconnectArgs[0]!, reconnectArgs.slice(1), {
       stdin: 'pipe',
@@ -347,7 +411,16 @@ export async function createSSHSession(
     const newStderrChunks: string[] = []
     collectStderr(newProc, newStderrChunks)
 
-    await waitForInit(newProc, remoteCwd)
+    try {
+      await waitForInit(newProc, remoteCwd)
+    } catch (err) {
+      try {
+        newProc.kill()
+      } catch {
+        // already exited
+      }
+      throw err
+    }
     currentProc = newProc
     stderrChunks.length = 0
     stderrChunks.push(...newStderrChunks)

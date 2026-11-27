@@ -2,7 +2,7 @@
  * densable 2.1.232 #16 — y0 / Obf / IiS / oMf / k5a timeout surface.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   classifyMcpAutoProbeFallback,
@@ -320,8 +320,19 @@ describe('densable 2.1.232 #16 MCP connect timeout helpers', () => {
 })
 
 describe('densable Es handshake abort on connect deadline', () => {
+  const readMcpClientSrc = () => {
+    const clientDir = join(import.meta.dir, '../client')
+    return [
+      readFileSync(join(import.meta.dir, '../client.ts'), 'utf8'),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
+  }
+
   test('gold Re timeout close()s transport; no handshakeAborts Map', () => {
-    const src = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+    const src = readMcpClientSrc()
     expect(src).not.toContain('handshakeAborts')
     expect(src).not.toContain('withHandshakeSignal')
     expect(src).toContain('t.close().catch')
@@ -329,7 +340,7 @@ describe('densable Es handshake abort on connect deadline', () => {
   })
 
   test('per-call timeout does not abandon the shared handshake memo', () => {
-    const src = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+    const src = readMcpClientSrc()
     expect(src).toContain('deadline reached before the request could be sent')
     expect(src).toContain('do not abandon the shared handshake')
     expect(src).not.toContain('connectToServerMemo.cache.delete')

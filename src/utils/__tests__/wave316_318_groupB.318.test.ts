@@ -193,7 +193,22 @@ describe('Wave 316-318 Group B: utils', () => {
     expect(dir).toContain('custom-cloud-session-id')
     const file = await getHookEnvFilePath('Setup', 0, 'custom-cloud-session-id')
     expect(file).toContain('setup-hook-0.sh')
-    const hooksSrc = readFileSync(join(srcRoot, 'utils/hooks.ts'), 'utf8')
+    const hooksSrc = [
+      'utils/hooks.ts',
+      'utils/hooks/hookCore.ts',
+      'utils/hooks/hookShellRunner.ts',
+      'utils/hooks/hookOutputProcessor.ts',
+      'utils/hooks/hookConfigRegistry.ts',
+      'utils/hooks/hookModelSlotPool.ts',
+      'utils/hooks/hookEngine.ts',
+      'utils/hooks/hookEntryExecutor.ts',
+      'utils/hooks/hookOutsideReplEngine.ts',
+      'utils/hooks/hookToolEvents.ts',
+      'utils/hooks/hookSessionAndPromptEvents.ts',
+      'utils/hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(srcRoot, rel), 'utf8'))
+      .join('\n')
     expect(hooksSrc).toContain('invalidateSessionEnvCache()')
   })
 

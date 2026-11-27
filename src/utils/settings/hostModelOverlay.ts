@@ -14,6 +14,7 @@
  */
 
 import { isEnvTruthy } from '../envUtils.js'
+import * as pluginPolicyModule from '../plugins/pluginPolicy.js'
 import type { SettingsJson } from './types.js'
 
 /**
@@ -321,9 +322,7 @@ export function applyHostPolicyOverlay(
     const {
       buildHostOverlayManagedSettings,
       mergeManagedSettingsWithHostOverlay,
-    } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../plugins/pluginPolicy.js') as typeof import('../plugins/pluginPolicy.js')
+    } = pluginPolicyModule
     const hostOverlay = buildHostOverlayManagedSettings(
       parentManaged as Record<string, unknown>,
     )

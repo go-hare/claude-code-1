@@ -3,10 +3,15 @@ import fs from 'fs'
 import path from 'path'
 
 describe('2.1.299 REPL alignment', () => {
-  const replSrc = fs.readFileSync(
-    path.resolve(__dirname, '../REPL.tsx'),
-    'utf8',
-  )
+  const replDir = path.resolve(__dirname, '../repl')
+  const replSrc = [
+    fs.readFileSync(path.resolve(__dirname, '../REPL.tsx'), 'utf8'),
+    ...fs
+      .readdirSync(replDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => fs.readFileSync(path.join(replDir, f), 'utf8')),
+  ].join('\n')
 
   test('#575 plan-mode-bypass-notice fires one-time 800ms notice in plan mode when bypass permissions is available', () => {
     expect(replSrc).toContain('planModeBypassNoticeShownRef')

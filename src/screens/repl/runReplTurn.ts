@@ -2205,134 +2205,146 @@ export async function runReplTurn(
       throw error
     }
   } finally {
-    if (queryGuard.end(thisGeneration)) {
-      const turnEndMs = Date.now()
-      // Official 2.1.328 (`chunk@319736883.js @1666560`): keep mainLoopBusy true
-      // while main-thread queued commands remain to avoid spinner/busy flicker.
-      setMainLoopBusy(getMainThreadQueueLength() > 0)
-      setLastQueryCompletionTime(turnEndMs)
-      resetLoadingState()
-      const idleRunner = getIdleCompactionRunner()
-      idleRunner.recordTurnEnd(
-        abortController.signal.aborted ? 'aborted' : 'completed',
-      )
-      idleRunner.arm(
-        turnEndMs,
-        () => (messagesRef.current.length > 0 ? messagesRef.current : null),
-        {
-          isInteractive: true,
-          getContextTokens: () => tokenCountWithEstimation(messagesRef.current),
-        },
-      )
+    if (queryGuard.isRunning && queryGuard.generation === thisGeneration) {
+      let turnMessages = messagesRef.current
+      try {
+        const turnEndMs = Date.now()
+        // Official 2.1.328 (`chunk@319736883.js @1666560`): keep mainLoopBusy true
+        // while main-thread queued commands remain to avoid spinner/busy flicker.
+        setMainLoopBusy(getMainThreadQueueLength() > 0)
+        setLastQueryCompletionTime(turnEndMs)
+        resetLoadingState()
+        const idleRunner = getIdleCompactionRunner()
+        idleRunner.recordTurnEnd(
+          abortController.signal.aborted ? 'aborted' : 'completed',
+        )
+        idleRunner.arm(
+          turnEndMs,
+          () => (messagesRef.current.length > 0 ? messagesRef.current : null),
+          {
+            isInteractive: true,
+            getContextTokens: () =>
+              tokenCountWithEstimation(messagesRef.current),
+          },
+        )
+        turnMessages = messagesRef.current
 
-      await mrOnTurnComplete(
-        messagesRef.current,
-        abortController.signal.aborted,
-      )
+        if (feature('UDS_INBOX') && !pipeReturnHadErrorRef.current) {
+          relayPipeMessage({
+            type: 'done',
+            data: '',
+          })
+        }
 
-      if (feature('UDS_INBOX') && !pipeReturnHadErrorRef.current) {
-        relayPipeMessage({
-          type: 'done',
-          data: '',
-        })
-      }
+        sendBridgeResultRef.current()
 
-      sendBridgeResultRef.current()
-
-      if (process.env.USER_TYPE === 'ant' && !abortController.signal.aborted) {
-        setAppState(prev => {
-          if (prev.tungstenActiveSession === undefined) return prev
-          if (prev.tungstenPanelAutoHidden === true) return prev
-          return { ...prev, tungstenPanelAutoHidden: true }
-        })
-      }
-
-      let budgetInfo:
-        | { tokens: number; limit: number; nudges: number }
-        | undefined
-      if (feature('TOKEN_BUDGET')) {
         if (
-          getCurrentTurnTokenBudget() !== null &&
-          getCurrentTurnTokenBudget()! > 0 &&
+          process.env.USER_TYPE === 'ant' &&
           !abortController.signal.aborted
         ) {
-          budgetInfo = {
-            tokens: getTurnOutputTokens(),
-            limit: getCurrentTurnTokenBudget()!,
-            nudges: getBudgetContinuationCount(),
+          setAppState(prev => {
+            if (prev.tungstenActiveSession === undefined) return prev
+            if (prev.tungstenPanelAutoHidden === true) return prev
+            return { ...prev, tungstenPanelAutoHidden: true }
+          })
+        }
+
+        let budgetInfo:
+          | { tokens: number; limit: number; nudges: number }
+          | undefined
+        if (feature('TOKEN_BUDGET')) {
+          if (
+            getCurrentTurnTokenBudget() !== null &&
+            getCurrentTurnTokenBudget()! > 0 &&
+            !abortController.signal.aborted
+          ) {
+            budgetInfo = {
+              tokens: getTurnOutputTokens(),
+              limit: getCurrentTurnTokenBudget()!,
+              nudges: getBudgetContinuationCount(),
+            }
+          }
+          snapshotOutputTokensForTurn(null)
+        }
+
+        const turnDurationMs =
+          performance.now() -
+          loadingStartTimeRef.current -
+          totalPausedMsRef.current
+        const terminalReason =
+          typeof engineResult?.terminal_reason === 'string'
+            ? engineResult.terminal_reason
+            : undefined
+        if (
+          !abortController.signal.aborted &&
+          !proactiveActive &&
+          engineResult?.is_error !== true &&
+          !isUserAbortTerminalReason(terminalReason) &&
+          !isErrorClassTerminalReason(terminalReason)
+        ) {
+          const hasRunningSwarmAgents = getAllInProcessTeammateTasks(
+            store.getState().tasks,
+          ).some(t => t.status === 'running')
+          if (hasRunningSwarmAgents) {
+            if (swarmStartTimeRef.current === null) {
+              swarmStartTimeRef.current = loadingStartTimeRef.current
+            }
+            if (budgetInfo) {
+              swarmBudgetInfoRef.current = budgetInfo
+            }
+          } else {
+            const now = performance.now()
+            const resolvedDuration = resolveTurnDurationWithBackgroundWait({
+              tasks: store.getState().tasks,
+              queuedCommands: getCommandQueue(),
+              turnDurationMs,
+              turnStartTime: loadingStartTimeRef.current,
+              now,
+              backgroundWaitStartTime: backgroundWaitStartTimeRef.current,
+            })
+            backgroundWaitStartTimeRef.current =
+              resolvedDuration.backgroundWaitStartTime
+            setMessages(prev => {
+              const turnDurationMsg = createTurnDurationMessage(
+                resolvedDuration.durationMs,
+                budgetInfo,
+                count(prev, isLoggableMessage),
+                resolvedDuration.pendingBackgroundAgentCount,
+                resolvedDuration.pendingWorkflowCount,
+              )
+              // Official 2.1.326 #159: suppress the "done" (`turn_duration`) line
+              // when the turn ended in an API error or permission refusal /
+              // interruption and no background wait is pending.
+              if (
+                resolvedDuration.backgroundWaitStartTime === null &&
+                shouldSuppressTurnDurationForFailedOrRefusedTurn(
+                  [...prev, turnDurationMsg],
+                  prev.length,
+                )
+              ) {
+                return prev
+              }
+              return [...prev, turnDurationMsg]
+            })
           }
         }
-        snapshotOutputTokensForTurn(null)
+      } finally {
+        setAbortController(null)
+        queryGuard.end(thisGeneration)
       }
 
-      const turnDurationMs =
-        performance.now() -
-        loadingStartTimeRef.current -
-        totalPausedMsRef.current
-      const terminalReason =
-        typeof engineResult?.terminal_reason === 'string'
-          ? engineResult.terminal_reason
-          : undefined
-      if (
-        !abortController.signal.aborted &&
-        !proactiveActive &&
-        engineResult?.is_error !== true &&
-        !isUserAbortTerminalReason(terminalReason) &&
-        !isErrorClassTerminalReason(terminalReason)
-      ) {
-        const hasRunningSwarmAgents = getAllInProcessTeammateTasks(
-          store.getState().tasks,
-        ).some(t => t.status === 'running')
-        if (hasRunningSwarmAgents) {
-          if (swarmStartTimeRef.current === null) {
-            swarmStartTimeRef.current = loadingStartTimeRef.current
-          }
-          if (budgetInfo) {
-            swarmBudgetInfoRef.current = budgetInfo
-          }
-        } else {
-          const now = performance.now()
-          const resolvedDuration = resolveTurnDurationWithBackgroundWait({
-            tasks: store.getState().tasks,
-            queuedCommands: getCommandQueue(),
-            turnDurationMs,
-            turnStartTime: loadingStartTimeRef.current,
-            now,
-            backgroundWaitStartTime: backgroundWaitStartTimeRef.current,
-          })
-          backgroundWaitStartTimeRef.current =
-            resolvedDuration.backgroundWaitStartTime
-          setMessages(prev => {
-            const turnDurationMsg = createTurnDurationMessage(
-              resolvedDuration.durationMs,
-              budgetInfo,
-              count(prev, isLoggableMessage),
-              resolvedDuration.pendingBackgroundAgentCount,
-              resolvedDuration.pendingWorkflowCount,
-            )
-            // Official 2.1.326 #159: suppress the "done" (`turn_duration`) line
-            // when the turn ended in an API error or permission refusal /
-            // interruption and no background wait is pending.
-            if (
-              resolvedDuration.backgroundWaitStartTime === null &&
-              shouldSuppressTurnDurationForFailedOrRefusedTurn(
-                [...prev, turnDurationMsg],
-                prev.length,
-              )
-            ) {
-              return prev
-            }
-            return [...prev, turnDurationMsg]
-          })
-        }
+      try {
+        await mrOnTurnComplete(turnMessages, abortController.signal.aborted)
+      } catch (error) {
+        logError(error)
       }
-      setAbortController(null)
     }
 
     const abortReason = getAbortReasonMessage(abortController.signal.reason)
     if (
       (abortReason === 'user-cancel' ||
         abortReason === 'refusal-fallback-edit') &&
+      queryGuard.generation === thisGeneration &&
       !queryGuard.isActive &&
       inputValueRef.current === '' &&
       !hasEditableCommandsInQueue() &&

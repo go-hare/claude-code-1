@@ -325,7 +325,22 @@ describe('densable 2.1.247 leftover callee 接', () => {
       join(import.meta.dir, '../../hooks/persistHookOutput.ts'),
       'utf8',
     )
-    const hooks = readFileSync(join(import.meta.dir, '../../hooks.ts'), 'utf8')
+    const hooks = [
+      '../../hooks.ts',
+      '../../hooks/hookCore.ts',
+      '../../hooks/hookShellRunner.ts',
+      '../../hooks/hookOutputProcessor.ts',
+      '../../hooks/hookConfigRegistry.ts',
+      '../../hooks/hookModelSlotPool.ts',
+      '../../hooks/hookEngine.ts',
+      '../../hooks/hookEntryExecutor.ts',
+      '../../hooks/hookOutsideReplEngine.ts',
+      '../../hooks/hookToolEvents.ts',
+      '../../hooks/hookSessionAndPromptEvents.ts',
+      '../../hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(import.meta.dir, rel), 'utf8'))
+      .join('\n')
     const userInput = readFileSync(
       join(import.meta.dir, '../../processUserInput/processUserInput.ts'),
       'utf8',

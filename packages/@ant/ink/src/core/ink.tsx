@@ -326,14 +326,27 @@ function collectPopoverBounds(root: dom.DOMElement, top: number): { top: number;
 }
 
 const HYPERLINK_POOL_LIMIT = 4096; // jg
+const CHAR_POOL_LIMIT = 16_384;
 const MAX_INLINE_LEAVE_CELLS = 134_217_728; // Jm
 const INPUT_RECOVERY_HOLD_MS = 150; // q2n
 const RESTORE_CURSOR = '\x1b8'; // fm
 
 /** Official 2.1.328 `uS` — decide whether periodic pool reset/compaction should run. */
-function shouldResetPools(elapsedMs: number, stylePool: StylePool, lastStyleLiveSize: number): boolean {
+function shouldResetPools(
+  elapsedMs: number,
+  stylePool: StylePool,
+  lastStyleLiveSize: number,
+  charPoolSize = 0,
+  hyperlinkPoolSize = 0,
+): boolean {
   const minInterval = stylePool.isNearCapacity ? 1000 : 30_000;
-  return elapsedMs > minInterval && (elapsedMs > 300_000 || stylePool.needsCompaction(lastStyleLiveSize));
+  return (
+    elapsedMs > minInterval &&
+    (elapsedMs > 300_000 ||
+      stylePool.needsCompaction(lastStyleLiveSize) ||
+      charPoolSize > CHAR_POOL_LIMIT ||
+      hyperlinkPoolSize > HYPERLINK_POOL_LIMIT)
+  );
 }
 
 /** Official 2.1.328 `ES` — alt-screen cursor positioning callback for iTerm2 inline images. */
@@ -2429,7 +2442,7 @@ export default class Ink {
    * Official 2.1.328 `uncover()` (@419600) — reveal rows hidden behind a
    * covering popover before alt-screen entry, cursor parking, or unmount.
    */
-  private uncover(): string {
+  private uncover(targetCursor?: RenderTargetFrame['cursor']): string {
     if (!this.renderers || this.altScreenActive || this.unwritten?.beingWritten !== undefined) {
       return '';
     }
@@ -2440,8 +2453,20 @@ export default class Ink {
       covering.frameBegins();
       try {
         encoder.isCursorVisible = this.nativeCursorVisible;
-        const bytes = covering.uncover(this.shownOnMainScreen(), caps);
+        const bytes = covering.uncover(this.shownOnMainScreen(), caps, targetCursor);
         this.nativeCursorVisible = encoder.isCursorVisible;
+        if (bytes !== '' && inline.lastCursor) {
+          const post = inline.lastCursor;
+          if (post.x === this.frontFrame.cursor.x && post.y === this.frontFrame.cursor.y) {
+            this.displayCursor = null;
+          } else {
+            this.displayCursor = {
+              x: post.x,
+              y: post.y,
+              emittedRows: this.displayCursor?.emittedRows ?? this.frontFrame.viewport.height,
+            };
+          }
+        }
         return bytes;
       } catch (err) {
         inline.frameWasLost();
@@ -3323,9 +3348,10 @@ export default class Ink {
    * the declared caret position down to content bottom before Ctrl+Z / exit.
    */
   moveCursorBelowFrame = (): string => {
+    const canMove = !this.altScreenActive && this.options.stdout.isTTY;
+    const uncovered = this.isHandedOff ? '' : this.uncover(canMove ? this.frontFrame.cursor : undefined);
     const prev = this.displayCursor;
-    const uncovered = this.isHandedOff ? '' : this.uncover();
-    if (prev === null || this.altScreenActive || !this.options.stdout.isTTY) {
+    if (prev === null || !canMove) {
       return uncovered;
     }
     this.displayCursor = null;
@@ -3345,7 +3371,17 @@ export default class Ink {
 
   detachForShutdown(): void {
     const wasMouseTracking = this.altScreenMouseTracking !== 'off';
-    this.nonBlockingStdout?.flush();
+    try {
+      this.nonBlockingStdout?.flush();
+    } catch (flushErr) {
+      this.logger.debug(`detachForShutdown nonBlockingStdout.flush failed: ${flushErr}`, { level: 'error' });
+    }
+    try {
+      this.nonBlockingStdout?.restore();
+    } catch (restoreErr) {
+      this.logger.debug(`detachForShutdown nonBlockingStdout.restore failed: ${restoreErr}`, { level: 'error' });
+    }
+    this.nonBlockingStdout = null;
     if (!this.isUnmounted) {
       const moveSeq = this.moveCursorBelowFrame();
       if (moveSeq !== '') {
@@ -3358,6 +3394,7 @@ export default class Ink {
     // Cancel any pending paced frame so it doesn't fire between
     // cleanupTerminalModes() and process.exit() and write to main screen.
     this.scheduleRender.cancel?.();
+    this.scheduler.cancelAll();
     this.unsubscribeTTYHandlers?.();
     const stdin = this.options.stdin as NodeJS.ReadStream & {
       isRaw?: boolean;
@@ -4189,87 +4226,125 @@ export default class Ink {
       this.srAnnouncementHoldTimer = null;
     }
 
-    this.finishWrites();
-    this.writeKeptForNextFrame();
     try {
-      this.onRender();
-    } catch (renderErr) {
-      if (!this.unwritten) throw renderErr;
-      this.logger.error(renderErr);
-    }
-    this.unsubscribeExit();
-    this.restoreConsolePatches();
-    this.unsubscribeTTYHandlers?.();
-    this.cancelFinePointerSettle?.();
-    this.cancelFinePointerSettle = undefined;
-
-    // densable: if(this.renderCalled&&!this.isHandedOff) dyr(..., skipSync, stdoutSize().rows)
-    if (this.renderCalled && !this.isHandedOff) {
-      const diff = this.log.renderPreviousOutput_DEPRECATED(this.frontFrame);
-      const uncovered = this.uncover();
-      if (uncovered !== '') {
-        diff.unshift({ type: 'stdout', content: uncovered });
-      }
-      writeDiffToTerminal(this.terminal, optimize(diff), this.skipSyncMarkers(), this.stdoutSize().rows);
-    }
-
-    this.nonBlockingStdout?.flush();
-    if (this.options.stdout.isTTY) {
-      const wasMouseTracking = this.altScreenMouseTracking !== 'off';
       try {
-        if (!this.isHandedOff) {
-          const moveSeq = this.moveCursorBelowFrame();
-          if (moveSeq !== '') {
-            this.writeBeforeExit(moveSeq);
+        this.finishWrites();
+        this.writeKeptForNextFrame();
+      } catch (finishErr) {
+        this.logger.error(finishErr);
+      }
+      try {
+        this.onRender();
+      } catch (renderErr) {
+        this.logger.error(renderErr);
+      }
+
+      // densable: if(this.renderCalled&&!this.isHandedOff) dyr(..., skipSync, stdoutSize().rows)
+      if (this.renderCalled && !this.isHandedOff) {
+        try {
+          const diff = this.log.renderPreviousOutput_DEPRECATED(this.frontFrame);
+          const uncovered = this.uncover();
+          if (uncovered !== '') {
+            diff.unshift({ type: 'stdout', content: uncovered });
           }
+          writeDiffToTerminal(this.terminal, optimize(diff), this.skipSyncMarkers(), this.stdoutSize().rows);
+        } catch (diffErr) {
+          this.logger.error(diffErr);
         }
-        if (wasMouseTracking) {
-          const mouseOff = this.modes.reset('mousePixels') + this.modes.reset('mouse');
-          if (mouseOff !== '') {
-            this.writeBeforeExit(mouseOff);
+      }
+    } finally {
+      this.unsubscribeExit();
+      this.restoreConsolePatches();
+      this.unsubscribeTTYHandlers?.();
+      this.cancelFinePointerSettle?.();
+      this.cancelFinePointerSettle = undefined;
+
+      try {
+        this.nonBlockingStdout?.flush();
+      } catch (flushErr) {
+        this.logger.debug(`unmount nonBlockingStdout.flush failed: ${flushErr}`, { level: 'error' });
+      }
+      try {
+        this.nonBlockingStdout?.restore();
+      } catch (restoreErr) {
+        this.logger.debug(`unmount nonBlockingStdout.restore failed: ${restoreErr}`, { level: 'error' });
+      }
+      this.nonBlockingStdout = null;
+      if (this.options.stdout.isTTY) {
+        const wasMouseTracking = this.altScreenMouseTracking !== 'off';
+        try {
+          if (!this.isHandedOff) {
+            const moveSeq = this.moveCursorBelowFrame();
+            if (moveSeq !== '') {
+              this.writeBeforeExit(moveSeq);
+            }
           }
-        }
-        restoreTerminalModes(this.modes, this.writeBeforeExit);
-        this.altScreenActive = false;
-        this.altScreenMouseTracking = 'off';
-        this.drainStdin(wasMouseTracking ? MOUSE_EXIT_DRAIN_MS : 0);
-      } catch (err) {
-        if (err && typeof err === 'object' && 'code' in err) {
+          if (wasMouseTracking) {
+            const mouseOff = this.modes.reset('mousePixels') + this.modes.reset('mouse');
+            if (mouseOff !== '') {
+              this.writeBeforeExit(mouseOff);
+            }
+          }
+          restoreTerminalModes(this.modes, this.writeBeforeExit);
+          this.drainStdin(wasMouseTracking ? MOUSE_EXIT_DRAIN_MS : 0);
+        } catch (err) {
           this.logger.debug(`unmount terminal cleanup writeSync failed: ${err}`, { level: 'error' });
-        } else {
-          throw err;
+        } finally {
+          this.altScreenActive = false;
+          this.altScreenMouseTracking = 'off';
         }
       }
-    }
 
-    this.isUnmounted = true;
-    this.cancelFinePointerSettle = undefined;
-
-    // Cancel any pending paced frames to prevent accessing freed Yoga nodes
-    this.scheduleRender.cancel?.();
-    this.scheduler.cancelAll();
-
-    reconciler.updateContainerSync(null, this.container, null, noop);
-    reconciler.flushSyncWork();
-    if (this.ownTree) {
-      for (const child of this.rootNode.childNodes.slice()) {
-        removeChildAndCleanup(this.rootNode, child);
+      if (!this._handoffRawMode) {
+        const stdin = this.options.stdin as NodeJS.ReadStream & {
+          isRaw?: boolean;
+          setRawMode?: (raw: boolean) => void;
+        };
+        if (stdin.isTTY && (stdin.isRaw !== false || this.holdsRawMode)) {
+          try {
+            safeSetRawMode(stdin, false, this.logger);
+          } catch (rawErr) {
+            this.logger.error(rawErr);
+          }
+        }
       }
-    }
-    const registry = Ns();
-    if (registry.treeRoots.get(this.options.stdout) === this) {
-      registry.treeRoots.delete(this.options.stdout);
-    }
-    if (registry.get(this.options.stdout) === this) {
-      registry.delete(this.options.stdout);
-      registry.treeRoots.get(this.options.stdout)?.takeBackTerminal();
-    }
 
-    // Free the root yoga node, then clear its reference. Children are already
-    // freed by the reconciler's removeChildFromContainer; using .free() (not
-    // .freeRecursive()) avoids double-freeing them.
-    this.rootNode.yogaNode?.free();
-    this.rootNode.yogaNode = undefined;
+      this.isUnmounted = true;
+      this.cancelFinePointerSettle = undefined;
+      this.rootNode.onRender = undefined;
+      this.rootNode.onImmediateRender = undefined;
+
+      // Cancel any pending paced frames to prevent accessing freed Yoga nodes
+      this.scheduleRender.cancel?.();
+      this.scheduler.cancelAll();
+
+      try {
+        reconciler.updateContainerSync(null, this.container, null, noop);
+        reconciler.flushSyncWork();
+      } catch (reconcilerErr) {
+        this.logger.error(reconcilerErr);
+      }
+      this.scheduler.cancelAll();
+      if (this.ownTree) {
+        for (const child of this.rootNode.childNodes.slice()) {
+          removeChildAndCleanup(this.rootNode, child);
+        }
+      }
+      const registry = Ns();
+      if (registry.treeRoots.get(this.options.stdout) === this) {
+        registry.treeRoots.delete(this.options.stdout);
+      }
+      if (registry.get(this.options.stdout) === this) {
+        registry.delete(this.options.stdout);
+        registry.treeRoots.get(this.options.stdout)?.takeBackTerminal();
+      }
+
+      // Free the root yoga node, then clear its reference. Children are already
+      // freed by the reconciler's removeChildFromContainer; using .free() (not
+      // .freeRecursive()) avoids double-freeing them.
+      this.rootNode.yogaNode?.free();
+      this.rootNode.yogaNode = undefined;
+    }
   }
 
   async waitUntilExit(): Promise<void> {
@@ -4309,7 +4384,9 @@ export default class Ink {
    */
   maybeResetPools(renderStart: number): void {
     const elapsed = renderStart - this.lastPoolResetTime;
-    if (!shouldResetPools(elapsed, this.stylePool, this.lastStyleLiveSize)) {
+    if (
+      !shouldResetPools(elapsed, this.stylePool, this.lastStyleLiveSize, this.charPool.size, this.hyperlinkPool.size)
+    ) {
       return;
     }
     this.lastPoolResetTime = renderStart;
@@ -4317,16 +4394,20 @@ export default class Ink {
   }
 
   /**
-   * Official 2.1.328 `Ts.resetPools()` (@444781) — keeps `charPool` intact,
-   * replaces `hyperlinkPool` only when `size > HYPERLINK_POOL_LIMIT`, and
-   * compacts `stylePool` only when `needsCompaction(lastStyleLiveSize)`.
+   * Official 2.1.328 `Ts.resetPools()` (@444781) — preserves `charPool` while
+   * `size <= CHAR_POOL_LIMIT`, recycles `charPool` / `hyperlinkPool` on cap,
+   * and compacts `stylePool` only when `needsCompaction(lastStyleLiveSize)`.
    */
   resetPools(): void {
     const resetLinks = this.hyperlinkPool.size > HYPERLINK_POOL_LIMIT;
+    const resetChars = this.charPool.size > CHAR_POOL_LIMIT;
     const compactStyles = this.stylePool.needsCompaction(this.lastStyleLiveSize);
-    if (!resetLinks && !compactStyles) return;
+    if (!resetLinks && !resetChars && !compactStyles) return;
     if (resetLinks) {
       this.hyperlinkPool = new HyperlinkPool();
+    }
+    if (resetChars) {
+      this.charPool = new CharPool();
     }
     migrateScreenPools(
       this.frontFrame.screen,
@@ -4337,6 +4418,7 @@ export default class Ink {
     if (compactStyles) {
       this.lastStyleLiveSize = this.stylePool.size;
     }
+    this.backFrame.screen.charPool = this.charPool;
     this.backFrame.screen.hyperlinkPool = this.hyperlinkPool;
     this.fullRepaintSentinelScreen = undefined;
   }

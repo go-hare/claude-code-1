@@ -500,8 +500,15 @@ pub fn reject_symlinks_and_reparse_points(path: &Path) -> Result<(), String> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // Non-existent leaf/intermediate component; continue checking existing parents.
             }
-            Err(_) => {
-                // Unreadable root/drive metadata (e.g. drive root on some configs); continue.
+            Err(_) if ancestor.parent().is_none() => {
+                // Unreadable drive/filesystem root metadata (e.g. C:\ on restricted configs); continue.
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Refusing path '{}': cannot inspect metadata of component '{}' ({e})",
+                    path.display(),
+                    ancestor.display()
+                ));
             }
         }
     }
@@ -735,6 +742,21 @@ mod tests {
         assert!(reject_symlinks_and_reparse_points(&real_dir).is_ok());
         assert!(reject_symlinks_and_reparse_points(&link_dir).is_err());
         assert!(reject_symlinks_and_reparse_points(&link_dir.join("child")).is_err());
+
+        // E5-P2-2: Non-NotFound metadata error (PermissionDenied) on a non-root ancestor must fail closed
+        let locked_dir = base.join("locked");
+        std::fs::create_dir_all(&locked_dir).unwrap();
+        let locked_child = locked_dir.join("secret");
+        std::fs::write(&locked_child, b"x").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Verify symlink_metadata actually returns PermissionDenied (skipped only if running as root)
+        if let Err(e) = std::fs::symlink_metadata(&locked_child) {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                assert!(reject_symlinks_and_reparse_points(&locked_child).is_err());
+            }
+        }
+        let _ = std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755));
 
         let _ = std::fs::remove_dir_all(&base);
     }

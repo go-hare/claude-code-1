@@ -64,6 +64,7 @@ describe('densable 2.1.289 dyr keptPrefix 5th arg', () => {
     expect(src).toContain('querier.resync({ probe: false })')
     expect(src).toContain('this.appRef.current?.querier?.resync({ probe })')
     expect(src).toContain('countDa1Replies')
-    expect(src).toContain('Bun.sleepSync(2)')
+    expect(src).toContain('sleepSync(2)')
+    expect(src).toContain('Bun.sleepSync(ms)')
   })
 })

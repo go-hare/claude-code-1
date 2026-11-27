@@ -1,6 +1,12 @@
 import { Hono } from 'hono'
 import { validateApiKey } from '../../auth/api-key'
-import { extractBearerToken, getUuidFromRequest } from '../../auth/middleware'
+import {
+  extractBearerToken,
+  getUuidFromRequest,
+  isUnauthenticatedUuidAllowed,
+  requireJsonContentType,
+} from '../../auth/middleware'
+import { resolveToken } from '../../auth/token'
 import {
   storeBindSession,
   storeGetSession,
@@ -13,13 +19,36 @@ import {
 
 const app = new Hono()
 
-/** POST /web/bind — Bind an unowned/owned session (or with API key) to a UUID */
-app.post('/bind', async c => {
+/** POST /web/bind — Bind an unowned/owned session to an authenticated client */
+app.post('/bind', requireJsonContentType, async c => {
+  const bearer = extractBearerToken(c)
+  const tokenUsername = resolveToken(bearer)
+  const hasApiKey = !!bearer && validateApiKey(bearer)
+  const allowLoopbackUuid = isUnauthenticatedUuidAllowed()
+
+  if (!tokenUsername && !hasApiKey && !allowLoopbackUuid) {
+    return c.json(
+      {
+        error: {
+          type: 'unauthorized',
+          message: 'Valid API key or session token required',
+        },
+      },
+      401,
+    )
+  }
+
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
   const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
-  // UUID can come from X-UUID header, ?uuid= query param, or request body
-  const uuid =
+  // Server-issued tokens pin uuid to the verified username so a token holder
+  // cannot spoof another client's UUID. API key & loopback opt-in allow explicit UUID.
+  const requestedUuid =
     getUuidFromRequest(c) || (typeof body.uuid === 'string' ? body.uuid : '')
+  const uuid = hasApiKey
+    ? requestedUuid
+    : tokenUsername
+      ? tokenUsername
+      : requestedUuid
 
   if (!sessionId || !uuid) {
     return c.json(
@@ -41,8 +70,6 @@ app.post('/bind', async c => {
     )
   }
 
-  const bearer = extractBearerToken(c)
-  const hasApiKey = !!bearer && validateApiKey(bearer)
   const owners = storeGetSessionOwners(resolvedSessionId)
   const session = storeGetSession(resolvedSessionId)
   const isUnowned = !owners || owners.size === 0

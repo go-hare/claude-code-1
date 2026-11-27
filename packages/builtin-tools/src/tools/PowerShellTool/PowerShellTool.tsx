@@ -334,6 +334,26 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>;
 export type Out = z.infer<OutputSchema>;
 
+/**
+ * Official 2.1.331 cross-process wire output schema for PowerShellTool
+ * (mirroring BashTool's `I9i`): strips host-only paths and background/privilege
+ * flags so an untrusted remote worker cannot forge `persistedOutputPath`,
+ * `persistedOutputSize`, `backgroundTaskId`, `backgroundedByUser`,
+ * `assistantAutoBackgrounded`, or `backgroundEndsWithFinalResponse`.
+ */
+const outputSchemaAcrossProcesses = lazySchema(() =>
+  outputSchema()
+    .pick({
+      stdout: true,
+      stderr: true,
+      interrupted: true,
+      isImage: true,
+      timedOutAfterMs: true,
+    })
+    .strip(),
+);
+type OutputSchemaAcrossProcesses = ReturnType<typeof outputSchemaAcrossProcesses>;
+
 import type { PowerShellProgress } from 'src/types/tools.js';
 
 export type { PowerShellProgress } from 'src/types/tools.js';
@@ -448,6 +468,14 @@ export const PowerShellTool = buildTool({
 
   get outputSchema(): OutputSchema {
     return outputSchema();
+  },
+
+  get outputSchemaAcrossProcesses(): OutputSchemaAcrossProcesses {
+    return outputSchemaAcrossProcesses();
+  },
+
+  fromAnotherProcess(data: Out) {
+    return { data };
   },
 
   userFacingName(): string {

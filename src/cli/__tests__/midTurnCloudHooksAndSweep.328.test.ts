@@ -143,7 +143,10 @@ describe('Round 3 Fix 4: BH3-P1-5 Mid-Turn Cloud UserPromptSubmit Hooks', () => 
   })
 
   test('print.ts marks non-blocking mid-turn cloud prompts skipSubmissionHooks: true, emits cancelled lifecycle on abort, and drains SDK events after sweeps and before output.done()', () => {
-    const src = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const src = readFileSync(
+      join(import.meta.dir, '../print/controlLoop.ts'),
+      'utf8',
+    )
     expect(src).toContain('skipSubmissionHooks: true')
     expect(src).toContain('midTurnHookRunner.schedule')
     expect(src).toContain('midTurnHookRunner.abortAll()')
@@ -154,7 +157,7 @@ describe('Round 3 Fix 4: BH3-P1-5 Mid-Turn Cloud UserPromptSubmit Hooks', () => 
     // Verify drainPrintSdkEvents() runs before output.done() in the !running branch (and both shutdown paths)
     const shutdownIdx = src.lastIndexOf('unregisterHookHeartbeatSink?.()')
     expect(shutdownIdx).toBeGreaterThan(-1)
-    const shutdownSnippet = src.slice(shutdownIdx, shutdownIdx + 120)
+    const shutdownSnippet = src.slice(shutdownIdx, shutdownIdx + 160)
     expect(shutdownSnippet).toContain('drainPrintSdkEvents()')
     expect(shutdownSnippet.indexOf('drainPrintSdkEvents()')).toBeLessThan(
       shutdownSnippet.indexOf('output.done()'),
@@ -164,7 +167,7 @@ describe('Round 3 Fix 4: BH3-P1-5 Mid-Turn Cloud UserPromptSubmit Hooks', () => 
     expect(sweepMatches.length).toBeGreaterThanOrEqual(2)
     for (const m of sweepMatches) {
       const idx = m.index ?? -1
-      const snippet = src.slice(idx, idx + 220)
+      const snippet = src.slice(idx, idx + 320)
       expect(snippet).toContain('drainPrintSdkEvents()')
     }
   })

@@ -3,6 +3,7 @@
  * These are separate from the main sessionMemory.ts to avoid importing runAgent.
  */
 
+import { isDisklessActive } from '../../utils/disklessGuards.js'
 import { isFsInaccessible } from '../../utils/errors.js'
 import { getFsImplementation } from '../../utils/fsOperations.js'
 import { getSessionMemoryPath } from '../../utils/permissions/filesystem.js'
@@ -117,6 +118,9 @@ export async function waitForSessionMemoryExtraction(): Promise<void> {
  * Get the current session memory content
  */
 export async function getSessionMemoryContent(): Promise<string | null> {
+  if (isDisklessActive()) {
+    return null
+  }
   const fs = getFsImplementation()
   const memoryPath = getSessionMemoryPath()
 

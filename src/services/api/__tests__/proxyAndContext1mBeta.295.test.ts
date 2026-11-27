@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const ROOT = join(import.meta.dir, '../../../..')
@@ -20,7 +20,14 @@ describe('v2.1.292 #207 NO_PROXY url wiring in client.ts and anthropicOidc.ts', 
 
 describe('v2.1.295 #358 context-1m beta retry wiring in claude.ts', () => {
   test('claude.ts wires decideContext1mBetaRetry and tengu_beta_400_healed on success', () => {
-    const src = readFileSync(join(ROOT, 'src/services/api/claude.ts'), 'utf8')
+    const claudeDir = join(ROOT, 'src/services/api/claude')
+    const src = [
+      readFileSync(join(ROOT, 'src/services/api/claude.ts'), 'utf8'),
+      ...readdirSync(claudeDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(claudeDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('decideContext1mBetaRetry({')
     expect(src).toContain("return 'retry:context-1m-beta'")
     expect(src).toContain('context1mBetaRetryPhase')

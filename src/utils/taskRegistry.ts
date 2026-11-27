@@ -35,6 +35,15 @@ export const EMPTY_TASK_TRANSCRIPT: TaskTranscript = {
   inProgressToolUseIDs: EMPTY_IN_PROGRESS,
 }
 
+/** Cap per-task transcript history to prevent unbounded O(N²) memory blowup in long-running subagents. */
+export const MAX_TASK_TRANSCRIPT_MESSAGES = 2000
+
+function capTranscriptMessages(messages: Message[]): Message[] {
+  return messages.length > MAX_TASK_TRANSCRIPT_MESSAGES
+    ? messages.slice(messages.length - MAX_TASK_TRANSCRIPT_MESSAGES)
+    : messages
+}
+
 /**
  * Official 2.1.331 `$s` + `Dfr` (@324430533, @321743485):
  * - When a `queued_command` attachment arrives carrying `source_uuid` matching
@@ -58,15 +67,18 @@ export function appendTranscriptMessage(
       if (idx !== -1) {
         const next = messages.slice()
         next[idx] = { ...messages[idx]!, uuid: message.uuid }
-        return next
+        return capTranscriptMessages(next)
       }
     }
   }
   const existingIdx = messages.findLastIndex(m => m.uuid === message.uuid)
   if (existingIdx === -1) {
-    return [...messages, message]
+    return capTranscriptMessages([...messages, message])
   }
-  return [...messages.filter(m => m.uuid !== message.uuid), message]
+  return capTranscriptMessages([
+    ...messages.filter(m => m.uuid !== message.uuid),
+    message,
+  ])
 }
 
 /**
@@ -141,8 +153,9 @@ export function mergeDiskAndLiveTranscriptMessages(
   disk: readonly Message[],
   live: readonly Message[],
 ): Message[] {
-  if (disk.length === 0) return live.length === 0 ? [] : [...live]
-  if (live.length === 0) return [...disk]
+  if (disk.length === 0)
+    return live.length === 0 ? [] : capTranscriptMessages([...live])
+  if (live.length === 0) return capTranscriptMessages([...disk])
   const liveByUuid = new Map<string, Message>()
   for (const m of live) {
     liveByUuid.set(m.uuid, m)
@@ -158,7 +171,7 @@ export function mergeDiskAndLiveTranscriptMessages(
       merged.push(m)
     }
   }
-  return merged
+  return capTranscriptMessages(merged)
 }
 
 /**
@@ -362,8 +375,17 @@ export function createTaskRegistry(
     updateTranscript(id, updater) {
       setAppState(prev => {
         const current = prev.transcripts?.[id] ?? EMPTY_TASK_TRANSCRIPT
-        const next = updater(current)
-        if (next === current) return prev
+        const rawNext = updater(current)
+        if (rawNext === current) return prev
+        const next =
+          rawNext.messages.length > MAX_TASK_TRANSCRIPT_MESSAGES
+            ? {
+                ...rawNext,
+                messages: rawNext.messages.slice(
+                  rawNext.messages.length - MAX_TASK_TRANSCRIPT_MESSAGES,
+                ),
+              }
+            : rawNext
         return {
           ...prev,
           transcripts: { ...prev.transcripts, [id]: next },

@@ -3,10 +3,22 @@
  * remaining-tool mid-turn paths (not only one of them).
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const querySrc = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+const queryDir = join(import.meta.dir, '..')
+const querySrc = [
+  readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8'),
+  ...readdirSync(queryDir)
+    .filter(
+      f =>
+        f.endsWith('.ts') &&
+        !f.endsWith('.test.ts') &&
+        f !== 'accumulateToolResultForMidTurn.ts',
+    )
+    .sort()
+    .map(f => readFileSync(join(queryDir, f), 'utf8')),
+].join('\n')
 
 describe('densable 2.1.228 #11 query.ts St wiring', () => {
   test('imports accumulateToolResultForMidTurn', () => {

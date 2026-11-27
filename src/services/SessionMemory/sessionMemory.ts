@@ -19,6 +19,10 @@ import {
 import type { Message } from '../../types/message.js'
 import { count } from '../../utils/array.js'
 import {
+  isDisklessActive,
+  logDisklessWriteSkipped,
+} from '../../utils/disklessGuards.js'
+import {
   createCacheSafeParams,
   createSubagentContext,
   runForkedAgent,
@@ -205,6 +209,13 @@ export function shouldExtractMemory(messages: Message[]): boolean {
 async function setupSessionMemoryFile(
   toolUseContext: ToolUseContext,
 ): Promise<{ memoryPath: string; currentMemory: string }> {
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped(
+      'sessionMemory.setupSessionMemoryFile',
+      'session-memory',
+    )
+    return { memoryPath: '', currentMemory: '' }
+  }
   const fs = getFsImplementation()
 
   // Set up directory and file
@@ -297,6 +308,9 @@ function initSessionMemoryConfigIfNeeded(): void {
 async function extractSessionMemoryImpl(
   context: REPLHookContext,
 ): Promise<void> {
+  if (isDisklessActive()) {
+    return
+  }
   const { messages, toolUseContext, querySource } = context
 
   // Only run session memory on main REPL thread
@@ -325,54 +339,56 @@ async function extractSessionMemoryImpl(
 
   markExtractionStarted()
 
-  // Create isolated context for setup to avoid polluting parent's cache
-  const setupContext = createSubagentContext(toolUseContext)
+  try {
+    // Create isolated context for setup to avoid polluting parent's cache
+    const setupContext = createSubagentContext(toolUseContext)
 
-  // Set up file system and read current state with isolated context
-  const { memoryPath, currentMemory } =
-    await setupSessionMemoryFile(setupContext)
+    // Set up file system and read current state with isolated context
+    const { memoryPath, currentMemory } =
+      await setupSessionMemoryFile(setupContext)
 
-  // Create extraction message
-  const userPrompt = await buildSessionMemoryUpdatePrompt(
-    currentMemory,
-    memoryPath,
-  )
+    // Create extraction message
+    const userPrompt = await buildSessionMemoryUpdatePrompt(
+      currentMemory,
+      memoryPath,
+    )
 
-  // Run session memory extraction using runForkedAgent for prompt caching
-  // runForkedAgent creates an isolated context to prevent mutation of parent state
-  // Pass setupContext.readFileState so the forked agent can edit the memory file
-  await runForkedAgent({
-    promptMessages: [createUserMessage({ content: userPrompt })],
-    cacheSafeParams: createCacheSafeParams(context),
-    canUseTool: createMemoryFileCanUseTool(memoryPath),
-    querySource: 'session_memory',
-    forkLabel: 'session_memory',
-    overrides: { readFileState: setupContext.readFileState },
-  })
+    // Run session memory extraction using runForkedAgent for prompt caching
+    // runForkedAgent creates an isolated context to prevent mutation of parent state
+    // Pass setupContext.readFileState so the forked agent can edit the memory file
+    await runForkedAgent({
+      promptMessages: [createUserMessage({ content: userPrompt })],
+      cacheSafeParams: createCacheSafeParams(context),
+      canUseTool: createMemoryFileCanUseTool(memoryPath),
+      querySource: 'session_memory',
+      forkLabel: 'session_memory',
+      overrides: { readFileState: setupContext.readFileState },
+    })
 
-  // Log extraction event for tracking frequency
-  // Use the token usage from the last message in the conversation
-  const lastMessage = messages[messages.length - 1]
-  const usage = lastMessage ? getTokenUsage(lastMessage) : undefined
-  const config = getSessionMemoryConfig()
-  logEvent('tengu_session_memory_extraction', {
-    input_tokens: usage?.input_tokens,
-    output_tokens: usage?.output_tokens,
-    cache_read_input_tokens: usage?.cache_read_input_tokens ?? undefined,
-    cache_creation_input_tokens:
-      usage?.cache_creation_input_tokens ?? undefined,
-    config_min_message_tokens_to_init: config.minimumMessageTokensToInit,
-    config_min_tokens_between_update: config.minimumTokensBetweenUpdate,
-    config_tool_calls_between_updates: config.toolCallsBetweenUpdates,
-  })
+    // Log extraction event for tracking frequency
+    // Use the token usage from the last message in the conversation
+    const lastMessage = messages[messages.length - 1]
+    const usage = lastMessage ? getTokenUsage(lastMessage) : undefined
+    const config = getSessionMemoryConfig()
+    logEvent('tengu_session_memory_extraction', {
+      input_tokens: usage?.input_tokens,
+      output_tokens: usage?.output_tokens,
+      cache_read_input_tokens: usage?.cache_read_input_tokens ?? undefined,
+      cache_creation_input_tokens:
+        usage?.cache_creation_input_tokens ?? undefined,
+      config_min_message_tokens_to_init: config.minimumMessageTokensToInit,
+      config_min_tokens_between_update: config.minimumTokensBetweenUpdate,
+      config_tool_calls_between_updates: config.toolCallsBetweenUpdates,
+    })
 
-  // Record the context size at extraction for tracking minimumTokensBetweenUpdate
-  recordExtractionTokenCount(tokenCountWithEstimation(messages))
+    // Record the context size at extraction for tracking minimumTokensBetweenUpdate
+    recordExtractionTokenCount(tokenCountWithEstimation(messages))
 
-  // Update lastSummarizedMessageId after successful completion
-  updateLastSummarizedMessageIdIfSafe(messages)
-
-  markExtractionCompleted()
+    // Update lastSummarizedMessageId after successful completion
+    updateLastSummarizedMessageIdIfSafe(messages)
+  } finally {
+    markExtractionCompleted()
+  }
 }
 
 const extractSessionMemory = (context: REPLHookContext): Promise<void> =>
@@ -384,7 +400,7 @@ const extractSessionMemory = (context: REPLHookContext): Promise<void> =>
  * The gate check and config loading happen lazily when the hook runs.
  */
 export function initSessionMemory(): void {
-  if (getIsRemoteMode()) return
+  if (isDisklessActive() || getIsRemoteMode()) return
   // Session memory is used for compaction, so respect auto-compact settings
   const autoCompactEnabled = isAutoCompactEnabled()
 
@@ -417,6 +433,12 @@ export async function manuallyExtractSessionMemory(
   messages: Message[],
   toolUseContext: ToolUseContext,
 ): Promise<ManualExtractionResult> {
+  if (isDisklessActive()) {
+    return {
+      success: false,
+      error: 'Session memory is unavailable in diskless mode',
+    }
+  }
   if (messages.length === 0) {
     return { success: false, error: 'No messages to summarize' }
   }

@@ -20,7 +20,13 @@ import {
   validateUpdateSettingsRequest,
 } from '../printControlHosts.js'
 
-const PRINT = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+const PRINT = [
+  readFileSync(join(import.meta.dir, '../print/controlLoop.ts'), 'utf8'),
+  readFileSync(
+    join(import.meta.dir, '../print/mcpAndWorkspaceControlHandlers.ts'),
+    'utf8',
+  ),
+].join('\n')
 
 describe('densable 2.1.289 print control hosts', () => {
   test('print.ts hosts unique English subtypes', () => {

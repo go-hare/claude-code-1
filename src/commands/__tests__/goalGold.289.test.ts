@@ -380,7 +380,24 @@ describe('gold Stop eval (source)', () => {
   })
 
   test('executeHooks yields timedOut for prompt Stop when parent did not abort', async () => {
-    const src = await Bun.file(join(ROOT, 'src/utils/hooks.ts')).text()
+    const src = (
+      await Promise.all(
+        [
+          'src/utils/hooks.ts',
+          'src/utils/hooks/hookCore.ts',
+          'src/utils/hooks/hookShellRunner.ts',
+          'src/utils/hooks/hookOutputProcessor.ts',
+          'src/utils/hooks/hookConfigRegistry.ts',
+          'src/utils/hooks/hookModelSlotPool.ts',
+          'src/utils/hooks/hookEngine.ts',
+          'src/utils/hooks/hookEntryExecutor.ts',
+          'src/utils/hooks/hookOutsideReplEngine.ts',
+          'src/utils/hooks/hookToolEvents.ts',
+          'src/utils/hooks/hookSessionAndPromptEvents.ts',
+          'src/utils/hooks/hookLifecycleEvents.ts',
+        ].map(rel => Bun.file(join(ROOT, rel)).text()),
+      )
+    ).join('\n')
     expect(src).toContain(
       "promptResult.outcome === 'cancelled' && !signal?.aborted",
     )

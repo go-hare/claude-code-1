@@ -100,7 +100,13 @@ describe('Wave 2D print.ts & ccrClient.ts alignment (P1-#44, P2-#13, #1492, #164
   })
 
   test('P2-#13: shouldFlushHeldBackResultOnAbort is wired into print.ts abort shutdown path', () => {
-    const src = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const src = [
+      readFileSync(
+        join(import.meta.dir, '../print/outputFormatting.ts'),
+        'utf8',
+      ),
+      readFileSync(join(import.meta.dir, '../print/turnRunner.ts'), 'utf8'),
+    ].join('\n')
     const occurrences = src.match(/shouldFlushHeldBackResultOnAbort\(/g) ?? []
     expect(occurrences.length).toBeGreaterThanOrEqual(2)
   })

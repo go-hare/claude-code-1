@@ -63,12 +63,17 @@ const listAgentsCursorCacheSlot = new RootSessionSlot<Map<string, Set<string>>>(
   () => new Map(),
 )
 
-function getListAgentsCursorCache(): Map<string, Set<string>> {
-  return listAgentsCursorCacheSlot.of(getBootstrapSession())
+function getListAgentsCursorCache(session?: {
+  readonly root: object
+}): Map<string, Set<string>> {
+  return listAgentsCursorCacheSlot.of(session ?? getBootstrapSession())
 }
 
-export function issueListAgentsCursor(shownKeys: Set<string>): string {
-  const listAgentsCursorCache = getListAgentsCursorCache()
+export function issueListAgentsCursor(
+  shownKeys: Set<string>,
+  session?: { readonly root: object },
+): string {
+  const listAgentsCursorCache = getListAgentsCursorCache(session)
   const token = randomBytes(6).toString('hex')
   listAgentsCursorCache.set(token, new Set(shownKeys))
   while (listAgentsCursorCache.size > LIST_AGENTS_CURSOR_CACHE_MAX) {
@@ -79,8 +84,11 @@ export function issueListAgentsCursor(shownKeys: Set<string>): string {
   return token
 }
 
-export function lookupListAgentsCursor(cursor: string): Set<string> | null {
-  const listAgentsCursorCache = getListAgentsCursorCache()
+export function lookupListAgentsCursor(
+  cursor: string,
+  session?: { readonly root: object },
+): Set<string> | null {
+  const listAgentsCursorCache = getListAgentsCursorCache(session)
   const entry = listAgentsCursorCache.get(cursor)
   if (!entry) return null
   // Refresh LRU order
@@ -89,8 +97,10 @@ export function lookupListAgentsCursor(cursor: string): Set<string> | null {
   return entry
 }
 
-export function clearListAgentsCursorCacheForTests(): void {
-  getListAgentsCursorCache().clear()
+export function clearListAgentsCursorCacheForTests(session?: {
+  readonly root: object
+}): void {
+  getListAgentsCursorCache(session).clear()
 }
 
 /**
@@ -131,6 +141,7 @@ export function paginatePeerListingRows(
     cursor?: string
     budgetChars?: number
     canSendMessages?: boolean
+    session?: { readonly root: object }
   },
 ):
   | { kind: 'invalid-cursor'; message: string }
@@ -145,7 +156,7 @@ export function paginatePeerListingRows(
   const budget = opts?.budgetChars ?? LIST_AGENTS_MAX_RESULT_CHARS
   let alreadyShown: Set<string> | null = null
   if (opts?.cursor !== undefined && opts.cursor.trim() !== '') {
-    alreadyShown = lookupListAgentsCursor(opts.cursor.trim())
+    alreadyShown = lookupListAgentsCursor(opts.cursor.trim(), opts.session)
     if (!alreadyShown) {
       return {
         kind: 'invalid-cursor',
@@ -183,7 +194,7 @@ export function paginatePeerListingRows(
 
   const remaining = unseen.length - includedCount
   if (remaining > 0) {
-    const nextCursor = issueListAgentsCursor(nextShown)
+    const nextCursor = issueListAgentsCursor(nextShown, opts?.session)
     const sendHint =
       opts?.canSendMessages === false
         ? ''
@@ -357,6 +368,7 @@ function formatPeersListing(
     subagentsSection?: string | null
     candidates?: Map<string, ListingCandidate>
     now?: number
+    session?: { readonly root: object }
   },
 ): string {
   const notes = listAgentsIncompleteNotes({
@@ -382,6 +394,7 @@ function formatPeersListing(
         cursor: opts.cursor,
         budgetChars: opts.pageBudgetChars,
         canSendMessages: opts.canSendMessages,
+        session: opts.session,
       })
       if (check.kind !== 'page') {
         return check.message
@@ -417,6 +430,7 @@ function formatPeersListing(
       cursor: opts?.cursor,
       budgetChars: effectiveBudget,
       canSendMessages: opts?.canSendMessages,
+      session: opts?.session,
     })
     if (paged.kind !== 'page') {
       return paged.message
@@ -455,7 +469,10 @@ const listAgentsRuntime = {
     // Official 2.1.328 (#440): validate input.cursor BEFORE doing any peer
     // lookups so callers immediately know no agents were looked up.
     const cursorToken = input.cursor?.trim() || undefined
-    if (cursorToken !== undefined && !lookupListAgentsCursor(cursorToken)) {
+    if (
+      cursorToken !== undefined &&
+      !lookupListAgentsCursor(cursorToken, deps.session)
+    ) {
       return {
         data: {
           listing: LIST_AGENTS_INVALID_CURSOR_MESSAGE,
@@ -703,6 +720,7 @@ const listAgentsRuntime = {
           teammatesSection,
           subagentsSection,
           candidates,
+          session: deps.session,
         }),
       },
     }

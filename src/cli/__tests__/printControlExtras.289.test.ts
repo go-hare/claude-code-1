@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { asAgentId } from '../../types/ids.js'
 import {
@@ -90,6 +90,16 @@ import {
   parseMessageRatedControlRequest,
   parsePollEventControlRequest,
 } from '../printControlExtras.js'
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 function lastAssistantHistory() {
   return { uuid: 'a-hist', type: 'assistant' as const }
@@ -272,19 +282,25 @@ describe('densable 2.1.289 print extras unique English', () => {
     )
     expect(extras).not.toContain('export class Rl')
     expect(extras).not.toContain('export type pollEmptyDispatch')
-    const print = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(import.meta.dir, '../print.ts'),
+      join(import.meta.dir, '../print'),
+    )
     expect(print).toContain('POLL_EMPTY_DISPATCH_STALLED')
     expect(print).toContain('isReservedPollEventKind')
-    const query = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+    const query = readModuleTree(
+      join(import.meta.dir, '../../query.ts'),
+      join(import.meta.dir, '../../query'),
+    )
     expect(query).toContain('QUERY_TURN_START_POLL_EVENTS_ABORTED')
     const compact = readFileSync(
       join(import.meta.dir, '../../services/compact/compact.ts'),
       'utf8',
     )
     expect(compact).toContain('remintPollEventsAttachmentEnvelopes')
-    const messages = readFileSync(
+    const messages = readModuleTree(
       join(import.meta.dir, '../../utils/messages.ts'),
-      'utf8',
+      join(import.meta.dir, '../../utils/messages'),
     )
     expect(messages).toContain("case 'poll_events'")
     expect(messages).toContain('attachment.kinds')
@@ -292,16 +308,19 @@ describe('densable 2.1.289 print extras unique English', () => {
     expect(messages).toContain('attachment.envelopes.length')
     expect(messages).not.toContain('attachment.media.flat()')
     expect(messages).not.toContain("bag.authority === 'human-principal'")
-    const printSrc = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const printSrc = readModuleTree(
+      join(import.meta.dir, '../print.ts'),
+      join(import.meta.dir, '../print'),
+    )
     expect(printSrc).toContain('skipSubmissionHooks: true')
     expect(printSrc).toContain('pollEmptyDispatch: true')
     expect(printSrc).toContain('pollDispatchTarget')
     expect(printSrc).toContain(
       'logError(new Error(POLL_EMPTY_DISPATCH_STALLED))',
     )
-    const querySrc = readFileSync(
+    const querySrc = readModuleTree(
       join(import.meta.dir, '../../query.ts'),
-      'utf8',
+      join(import.meta.dir, '../../query'),
     )
     expect(querySrc).toContain('turn-start t1e fold')
   })
@@ -511,7 +530,10 @@ describe('densable 2.1.289 print extras unique English', () => {
       join(import.meta.dir, '../printControlExtras.ts'),
       'utf8',
     )
-    const printSrc = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const printSrc = readModuleTree(
+      join(import.meta.dir, '../print.ts'),
+      join(import.meta.dir, '../print'),
+    )
     expect(extrasSrc).toContain('authentic event nonces for this delivery:')
     expect(extrasSrc).toContain('poll-event command without pollEvent payload')
     expect(extrasSrc).toContain(
@@ -568,7 +590,10 @@ describe('densable 2.1.289 print extras unique English', () => {
   })
 
   test('odo peeks handedOffTurn orphan before dequeue so prompt stays queued', () => {
-    const print = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(import.meta.dir, '../print.ts'),
+      join(import.meta.dir, '../print'),
+    )
     expect(print).toContain('handedOffOrphan')
     expect(print).toContain('cmd === handedOffOrphan')
     expect(print).toContain('holdsBackHandoff')
@@ -2140,7 +2165,10 @@ describe('densable 2.1.289 print extras unique English', () => {
     expect(invalidHandoffToolUseHasNoResult('tu-x')).toBe(
       'invalid_handoff: tool_use tu-x has no result',
     )
-    const print = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(import.meta.dir, '../print.ts'),
+      join(import.meta.dir, '../print'),
+    )
     expect(print).toContain('pollEventDeliveryGuard: true')
     expect(print).toContain('peekHandoff')
     expect(print).toContain('convertHandoff')
@@ -2203,7 +2231,10 @@ describe('densable 2.1.289 print extras unique English', () => {
   })
 
   test('print.ts hosts extras dispatcher and skips overlay footer', () => {
-    const print = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(import.meta.dir, '../print.ts'),
+      join(import.meta.dir, '../print'),
+    )
     expect(print).toContain('dispatchPrintControlExtra')
     expect(print).not.toContain('overlay footer')
     expect(print).not.toContain('function Fco')
@@ -2396,7 +2427,10 @@ describe('densable 2.1.289 print extras unique English', () => {
   })
 
   test('print.ts VLe analog falls back to print locals when snapshot is missing', () => {
-    const print = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(import.meta.dir, '../print.ts'),
+      join(import.meta.dir, '../print'),
+    )
     expect(print).toContain('getLastCacheSafeParams()?.toolUseContext')
     expect(print).toContain('buildAllTools(getAppState())')
     expect(print).toContain(

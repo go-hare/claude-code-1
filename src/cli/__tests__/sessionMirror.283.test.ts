@@ -11,7 +11,7 @@ import {
   Command as CommanderCommand,
   Option,
 } from '@commander-js/extra-typings'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import { analyticsMock } from '../../../tests/mocks/analytics.js'
@@ -34,7 +34,22 @@ const { StdoutMessageSchema } = await import(
 )
 
 const root = join(import.meta.dir, '../../..')
-const src = (rel: string) => readFileSync(join(root, rel), 'utf8')
+const SPLIT_DIRS: Record<string, string> = {
+  'src/cli/print.ts': 'src/cli/print',
+}
+const src = (rel: string) => {
+  const entry = readFileSync(join(root, rel), 'utf8')
+  const subRel = SPLIT_DIRS[rel]
+  if (!subRel) return entry
+  const subDir = join(root, subRel)
+  return [
+    entry,
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 describe('densable 2.1.283 session-mirror', () => {
   const temps: string[] = []

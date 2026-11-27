@@ -3,6 +3,7 @@
  * #5, #326, #10, #98, #99, #123, #329, #330.
  */
 import { describe, expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'fs'
 import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -202,9 +203,17 @@ describe('2.1.326 #10 — mod Box overflowX="scroll", Text maxLines & wrap="clip
       }),
     ).toContain('Text prop "maxLines" must be a whole number')
 
-    const panesSrc = await Bun.file(
-      new URL('../../../components/PluginRasterPanes.tsx', import.meta.url),
-    ).text()
+    const panesDir = join(import.meta.dir, '../../../components/pluginRaster')
+    const panesSrc = [
+      readFileSync(
+        join(import.meta.dir, '../../../components/PluginRasterPanes.tsx'),
+        'utf8',
+      ),
+      ...readdirSync(panesDir)
+        .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+        .sort()
+        .map(f => readFileSync(join(panesDir, f), 'utf8')),
+    ].join('\n')
     expect(panesSrc).toContain('normalizeModScrollXTree(rawNode)')
     expect(panesSrc).toContain('normalizeModTextWrapAndMaxLines(')
   })

@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const PANES = readFileSync(
-  join(import.meta.dir, '../PluginRasterPanes.tsx'),
-  'utf8',
-)
+const PANES_DIR = join(import.meta.dir, '../pluginRaster')
+const PANES = [
+  readFileSync(join(import.meta.dir, '../PluginRasterPanes.tsx'), 'utf8'),
+  ...readdirSync(PANES_DIR)
+    .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+    .sort()
+    .map(f => readFileSync(join(PANES_DIR, f), 'utf8')),
+].join('\n')
 
 /**
  * densable 2.1.289 t7t: the UserMessage site box takes `ref:u` (stable).

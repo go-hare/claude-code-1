@@ -7,7 +7,7 @@
  * must surface relocatedCwd to that restore path.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { extractTypedJsonlField } from '../sessionStoragePortable.js'
 import { parseSessionInfoFromLite } from '../listSessionsImpl.js'
@@ -94,10 +94,14 @@ describe('densable 2.1.223 #8 resume entry hydrate wire', () => {
   })
 
   test('loadFullLog no-leaf path hydrates relocated stamp', () => {
-    const storage = readFileSync(
-      join(import.meta.dir, '../sessionStorage.ts'),
-      'utf8',
-    )
+    const ssDir = join(import.meta.dir, '../sessionStorage')
+    const storage = [
+      readFileSync(join(import.meta.dir, '../sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(ssDir, f), 'utf8')),
+    ].join('\n')
     // Both empty-messages and no-leaf early returns must pin relocatedCwd.
     const noLeafBlocks = storage.split('if (!mostRecentLeaf)')
     expect(noLeafBlocks.length).toBeGreaterThan(1)

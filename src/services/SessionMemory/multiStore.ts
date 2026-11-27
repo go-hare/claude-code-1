@@ -23,6 +23,10 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import {
+  isDisklessActive,
+  logDisklessWriteSkipped,
+} from '../../utils/disklessGuards.js'
 import { validateKey } from '../../utils/localValidate.js'
 import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 
@@ -126,6 +130,7 @@ function validateStoreName(store: string): void {
 
 /** List all active (non-archived) stores. */
 export function listStores(): string[] {
+  if (isDisklessActive()) return []
   const baseDir = getBaseDir()
   if (!existsSync(baseDir)) return []
   return readdirSync(baseDir, { withFileTypes: true })
@@ -136,6 +141,7 @@ export function listStores(): string[] {
 
 /** List all stores (active + archived). */
 export function listAllStores(): string[] {
+  if (isDisklessActive()) return []
   const baseDir = getBaseDir()
   if (!existsSync(baseDir)) return []
   return readdirSync(baseDir, { withFileTypes: true })
@@ -147,6 +153,10 @@ export function listAllStores(): string[] {
 /** Create a new store directory. */
 export function createStore(store: string): void {
   validateStoreName(store)
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped('multiStore.createStore', store)
+    return
+  }
   const storeDir = getStoreDir(store)
   if (existsSync(storeDir)) {
     throw new Error(`Store "${store}" already exists`)
@@ -157,6 +167,10 @@ export function createStore(store: string): void {
 /** Archive a store by renaming it to <store>.archived */
 export function archiveStore(store: string): void {
   validateStoreName(store)
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped('multiStore.archiveStore', store)
+    return
+  }
   const storeDir = getStoreDir(store)
   if (!existsSync(storeDir)) {
     throw new Error(`Store "${store}" does not exist`)
@@ -178,6 +192,11 @@ export function setEntry(store: string, key: string, value: string): void {
       `Entry value too large: ${byteLength} bytes exceeds the 1 MB limit. ` +
         'Use external storage for large data.',
     )
+  }
+
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped('multiStore.setEntry', `${store}/${key}`)
+    return
   }
 
   const storeDir = getStoreDir(store)
@@ -208,6 +227,7 @@ export function setEntry(store: string, key: string, value: string): void {
 export function getEntry(store: string, key: string): string | null {
   validateStoreName(store)
   validateKey(key)
+  if (isDisklessActive()) return null
   const entryPath = getEntryPath(store, key)
   if (!existsSync(entryPath)) return null
   return readFileSync(entryPath, 'utf8')
@@ -231,6 +251,7 @@ export function getEntryBounded(
 ): { value: string; truncated: boolean } | null {
   validateStoreName(store)
   validateKey(key)
+  if (isDisklessActive()) return null
   const entryPath = getEntryPath(store, key)
   if (!existsSync(entryPath)) return null
   const stat = statSync(entryPath)
@@ -269,6 +290,10 @@ export function getEntryBounded(
 export function deleteEntry(store: string, key: string): boolean {
   validateStoreName(store)
   validateKey(key)
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped('multiStore.deleteEntry', `${store}/${key}`)
+    return false
+  }
   const entryPath = getEntryPath(store, key)
   if (!existsSync(entryPath)) return false
   rmSync(entryPath)
@@ -278,6 +303,7 @@ export function deleteEntry(store: string, key: string): boolean {
 /** List all entry keys in a store (without .md extension). */
 export function listEntries(store: string): string[] {
   validateStoreName(store)
+  if (isDisklessActive()) return []
   const storeDir = getStoreDir(store)
   if (!existsSync(storeDir)) return []
   return readdirSync(storeDir)
@@ -310,6 +336,7 @@ export function listEntriesBounded(
   maxEntries: number,
 ): { entries: string[]; truncated: boolean } {
   validateStoreName(store)
+  if (isDisklessActive()) return { entries: [], truncated: false }
   const storeDir = getStoreDir(store)
   if (!existsSync(storeDir)) return { entries: [], truncated: false }
   // Bounded top-K accumulator. We keep `top` sorted ascending and never

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   SdkErrorCode,
@@ -217,7 +217,14 @@ describe('densable W dialSignal HTTP→SSE fallback helpers', () => {
   })
 
   test('client.ts wires W factory and initialize POST reject rescue', () => {
-    const src = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+    const clientDir = join(import.meta.dir, '../client')
+    const src = [
+      readFileSync(join(import.meta.dir, '../client.ts'), 'utf8'),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('createLegacyHttpSseFallbackFetches')
     expect(src).toContain('tengu_mcp_legacy_sse_fallback')
     expect(src).toContain('trying legacy HTTP+SSE')

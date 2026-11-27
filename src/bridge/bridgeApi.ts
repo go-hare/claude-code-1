@@ -540,6 +540,7 @@ export async function markEnvironmentOffline(opts: {
     ...buildBridgeProxyAxiosOptions(url),
     headers,
     timeout: 5_000,
+    maxRedirects: 0,
     validateStatus: s => s < 500,
   })
   handleErrorStatus(response.status, response.data, 'MarkOffline')
@@ -771,6 +772,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
             ...proxyOpts(url),
             headers: await getHeaders(token, deviceToken),
             timeout: 15_000,
+            maxRedirects: 0,
             ...(deps.baseUrl.startsWith('https:') && {
               transport: createTlsHandshakeTimeoutTransport(15_000),
             }),
@@ -844,6 +846,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
         headers: await getHeaders(environmentSecret),
         params: Object.keys(params).length > 0 ? params : undefined,
         timeout: 10_000,
+        maxRedirects: 0,
         signal,
         validateStatus: status => status < 500,
       })
@@ -902,6 +905,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
           ...proxyOpts(url),
           headers: await getHeaders(sessionToken),
           timeout: 10_000,
+          maxRedirects: 0,
           validateStatus: s => s < 500,
         },
       )
@@ -930,6 +934,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
               ...proxyOpts(url),
               headers: await getHeaders(token, deviceToken),
               timeout: 10_000,
+              maxRedirects: 0,
               validateStatus: s => s < 500,
             },
           ),
@@ -952,6 +957,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
             ...proxyOpts(url),
             headers: await getHeaders(token, deviceToken),
             timeout: 10_000,
+            maxRedirects: 0,
             validateStatus: s => s < 500,
           }),
         'Deregister',
@@ -1002,7 +1008,8 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
                 ...proxyOpts(url),
                 headers: await getHeaders(token, deviceToken),
                 timeout: 10_000,
-                validateStatus: s => s < 500,
+                maxRedirects: 0,
+                validateStatus: s => s < 500 || s === 501,
               },
             ),
           'ArchiveSession',
@@ -1066,6 +1073,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
               ...proxyOpts(url),
               headers: await getHeaders(token, deviceToken),
               timeout: 10_000,
+              maxRedirects: 0,
               validateStatus: s => s < 500,
               signal,
             },
@@ -1101,6 +1109,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
           ...proxyOpts(url),
           headers: await getHeaders(sessionToken),
           timeout: 10_000,
+          maxRedirects: 0,
           validateStatus: s => s < 500,
         },
       )
@@ -1131,6 +1140,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClientV2 {
           ...proxyOpts(url),
           headers: await getHeaders(sessionToken),
           timeout: 10_000,
+          maxRedirects: 0,
           validateStatus: s => s < 500,
         },
       )

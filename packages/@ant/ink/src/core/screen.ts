@@ -848,44 +848,57 @@ export function setCellAt(
   cell: Cell,
 ): void {
   if (x < 0 || y < 0 || x >= screen.width || y >= screen.height) return
-  const ci = (y * screen.width + x) << 1
+  const rowBase = y * screen.width
+  const ci = (rowBase + x) << 1
   const cells = screen.cells
+  const emptyWord1 = packWord1(screen.emptyStyleId, 0, CellWidth.Narrow)
 
-  // When a Wide char is overwritten by a Narrow char, its SpacerTail remains
-  // as a ghost cell that the diff/render pipeline skips, causing stale content
-  // to leak through from previous frames.
-  const prevWidth = cells[ci + 1]! & WIDTH_MASK
-  if (prevWidth === CellWidth.Wide && cell.width !== CellWidth.Wide) {
-    const spacerX = x + 1
-    if (spacerX < screen.width) {
-      const spacerCI = ci + 2
-      if ((cells[spacerCI + 1]! & WIDTH_MASK) === CellWidth.SpacerTail) {
-        cells[spacerCI] = EMPTY_CHAR_INDEX
-        cells[spacerCI + 1] = packWord1(
-          screen.emptyStyleId,
-          0,
-          CellWidth.Narrow,
-        )
-      }
+  let minX = x
+  let maxX = x
+
+  const clearTrailingTails = (startX: number): void => {
+    let tx = startX
+    while (tx < screen.width) {
+      const tCI = (rowBase + tx) << 1
+      if ((cells[tCI + 1]! & WIDTH_MASK) !== CellWidth.SpacerTail) break
+      cells[tCI] = EMPTY_CHAR_INDEX
+      cells[tCI + 1] = emptyWord1
+      if (tx > maxX) maxX = tx
+      tx++
     }
   }
-  // Track cleared Wide position for damage expansion below
-  let clearedWideX = -1
-  if (
+
+  // When a Wide char is overwritten (including by a narrower Wide char over a
+  // w >= 3 calibrated grapheme), clear ALL contiguous trailing SpacerTails so
+  // no ghost cells leak through from previous frames.
+  const prevWidth = cells[ci + 1]! & WIDTH_MASK
+  if (prevWidth === CellWidth.Wide) {
+    clearTrailingTails(x + 1)
+  } else if (
     prevWidth === CellWidth.SpacerTail &&
     cell.width !== CellWidth.SpacerTail
   ) {
-    // Overwriting a SpacerTail: clear the orphaned Wide char at (x-1).
-    // Keeping the wide character with Narrow width would cause the terminal
-    // to still render it with width 2, desyncing the cursor model.
-    if (x > 0) {
-      const wideCI = ci - 2
-      if ((cells[wideCI + 1]! & WIDTH_MASK) === CellWidth.Wide) {
-        cells[wideCI] = EMPTY_CHAR_INDEX
-        cells[wideCI + 1] = packWord1(screen.emptyStyleId, 0, CellWidth.Narrow)
-        clearedWideX = x - 1
+    // Overwriting a SpacerTail: walk left through any preceding SpacerTails to
+    // clear the owning Wide head, and walk right to clear remaining SpacerTails.
+    let lx = x - 1
+    while (lx >= 0) {
+      const lCI = (rowBase + lx) << 1
+      const lw = cells[lCI + 1]! & WIDTH_MASK
+      if (lw === CellWidth.SpacerTail) {
+        cells[lCI] = EMPTY_CHAR_INDEX
+        cells[lCI + 1] = emptyWord1
+        if (lx < minX) minX = lx
+        lx--
+        continue
       }
+      if (lw === CellWidth.Wide) {
+        cells[lCI] = EMPTY_CHAR_INDEX
+        cells[lCI + 1] = emptyWord1
+        if (lx < minX) minX = lx
+      }
+      break
     }
+    clearTrailingTails(x + 1)
   }
 
   // Pack cell data into cells array
@@ -902,18 +915,41 @@ export function setCellAt(
     trackAtlasKey(cells[ci]!, cell.styleId)
   }
 
+  // If this is a wide character, create a spacer in the next column
+  if (cell.width === CellWidth.Wide) {
+    const spacerX = x + 1
+    if (spacerX < screen.width) {
+      const spacerCI = ci + 2
+      const prevSpacerWidth = cells[spacerCI + 1]! & WIDTH_MASK
+      // If the cell we're overwriting with our SpacerTail is itself Wide (or a
+      // SpacerTail of a wider span), clear ALL its contiguous trailing tails.
+      if (
+        prevSpacerWidth === CellWidth.Wide ||
+        prevSpacerWidth === CellWidth.SpacerTail
+      ) {
+        clearTrailingTails(spacerX + 1)
+      }
+      cells[spacerCI] = SPACER_CHAR_INDEX
+      cells[spacerCI + 1] = packWord1(
+        screen.emptyStyleId,
+        0,
+        CellWidth.SpacerTail,
+      )
+      if (spacerX > maxX) maxX = spacerX
+    }
+  }
+
   // Track damage - expand bounds in place instead of allocating new objects
-  // Include the main cell position and any cleared orphan cells
-  const minX = clearedWideX >= 0 ? Math.min(x, clearedWideX) : x
+  // Include the main cell position, new SpacerTail, and any cleared orphan cells
   const damage = screen.damage
   if (damage) {
-    const right = damage.x + damage.width
     const bottom = damage.y + damage.height
     if (minX < damage.x) {
       damage.width += damage.x - minX
       damage.x = minX
-    } else if (x >= right) {
-      damage.width = x - damage.x + 1
+    }
+    if (maxX >= damage.x + damage.width) {
+      damage.width = maxX - damage.x + 1
     }
     if (y < damage.y) {
       damage.height += damage.y - y
@@ -922,47 +958,7 @@ export function setCellAt(
       damage.height = y - damage.y + 1
     }
   } else {
-    screen.damage = { x: minX, y, width: x - minX + 1, height: 1 }
-  }
-
-  // If this is a wide character, create a spacer in the next column
-  if (cell.width === CellWidth.Wide) {
-    const spacerX = x + 1
-    if (spacerX < screen.width) {
-      const spacerCI = ci + 2
-      // If the cell we're overwriting with our SpacerTail is itself Wide,
-      // clear ITS SpacerTail at x+2 too. Otherwise the orphan SpacerTail
-      // makes diffEach report it as `added` and log-update's skip-spacer
-      // rule prevents clearing whatever prev content was at that column.
-      // Scenario: [a, 💻, spacer] → [本, spacer, ORPHAN spacer] when
-      // yoga squishes a💻 to height 0 and 本 renders at the same y.
-      if ((cells[spacerCI + 1]! & WIDTH_MASK) === CellWidth.Wide) {
-        const orphanCI = spacerCI + 2
-        if (
-          spacerX + 1 < screen.width &&
-          (cells[orphanCI + 1]! & WIDTH_MASK) === CellWidth.SpacerTail
-        ) {
-          cells[orphanCI] = EMPTY_CHAR_INDEX
-          cells[orphanCI + 1] = packWord1(
-            screen.emptyStyleId,
-            0,
-            CellWidth.Narrow,
-          )
-        }
-      }
-      cells[spacerCI] = SPACER_CHAR_INDEX
-      cells[spacerCI + 1] = packWord1(
-        screen.emptyStyleId,
-        0,
-        CellWidth.SpacerTail,
-      )
-
-      // Expand damage to include SpacerTail so diff() scans it
-      const d = screen.damage
-      if (d && spacerX >= d.x + d.width) {
-        d.width = spacerX - d.x + 1
-      }
-    }
+    screen.damage = { x: minX, y, width: maxX - minX + 1, height: 1 }
   }
 }
 
@@ -1133,6 +1129,8 @@ export function blitRegion(
   dst.softWrap.set(src.softWrap.subarray(regionY, maxY), regionY)
 
   // Gold `_d`: TypedArray.set copies the packed region, including empty cells.
+  let damageMinX = regionX
+  let damageMaxX = maxX
   if (regionX === 0 && maxX === src.width && src.width === dst.width) {
     const srcStart = regionY * srcStride
     const totalBytes = (maxY - regionY) * srcStride
@@ -1144,13 +1142,130 @@ export function blitRegion(
     const nsLen = (maxY - regionY) * src.width
     dstNoSel.set(srcNoSel.subarray(nsStart, nsStart + nsLen), nsStart)
   } else {
+    const checkLeft = regionX > 0
+    const checkRight = maxX < dst.width
+    const emptyWord1 = packWord1(dst.emptyStyleId, 0, CellWidth.Narrow)
+    const spacerTailWord1 = packWord1(dst.emptyStyleId, 0, CellWidth.SpacerTail)
+
+    const clearTrailingDstTails = (rowBase: number, startCol: number): void => {
+      let tx = startCol
+      while (tx < dst.width) {
+        const tCI = (rowBase + tx) << 1
+        if ((dstCells[tCI + 1]! & WIDTH_MASK) !== CellWidth.SpacerTail) break
+        dstCells[tCI] = EMPTY_CHAR_INDEX
+        dstCells[tCI + 1] = emptyWord1
+        tx++
+      }
+      if (tx > damageMaxX) damageMaxX = tx
+    }
+
+    const clearLeftDstWideSpan = (rowBase: number, startCol: number): void => {
+      let lx = startCol
+      while (lx >= 0) {
+        const lCI = (rowBase + lx) << 1
+        const lw = dstCells[lCI + 1]! & WIDTH_MASK
+        if (lw === CellWidth.SpacerTail) {
+          dstCells[lCI] = EMPTY_CHAR_INDEX
+          dstCells[lCI + 1] = emptyWord1
+          if (lx < damageMinX) damageMinX = lx
+          lx--
+          continue
+        }
+        if (lw === CellWidth.Wide) {
+          dstCells[lCI] = EMPTY_CHAR_INDEX
+          dstCells[lCI + 1] = emptyWord1
+          if (lx < damageMinX) damageMinX = lx
+        }
+        break
+      }
+    }
+
+    let srcRowBase = regionY * src.width
+    let dstRowBase = regionY * dst.width
     let srcRowCI = regionY * srcStride + (regionX << 1)
     let dstRowCI = regionY * dstStride + (regionX << 1)
-    let srcRowNS = regionY * src.width + regionX
-    let dstRowNS = regionY * dst.width + regionX
+    let srcRowNS = srcRowBase + regionX
+    let dstRowNS = dstRowBase + regionX
     for (let y = regionY; y < maxY; y++) {
+      const prevDstAtLeft = checkLeft
+        ? dstCells[((dstRowBase + regionX) << 1) + 1]! & WIDTH_MASK
+        : CellWidth.Narrow
+      const srcAtLeft = checkLeft
+        ? srcCells[((srcRowBase + regionX) << 1) + 1]! & WIDTH_MASK
+        : CellWidth.Narrow
+
+      // Pre-copy left boundary: if dst had a wide grapheme (w >= 2, including
+      // w >= 3 calibrated spans) straddling regionX and src does not continue
+      // it with a SpacerTail, clear all preceding SpacerTails and owning Wide.
+      if (
+        checkLeft &&
+        prevDstAtLeft === CellWidth.SpacerTail &&
+        srcAtLeft !== CellWidth.SpacerTail
+      ) {
+        clearLeftDstWideSpan(dstRowBase, regionX - 1)
+      }
+
       dstCells.set(srcCells.subarray(srcRowCI, srcRowCI + rowBytes), dstRowCI)
       dstNoSel.set(srcNoSel.subarray(srcRowNS, srcRowNS + rowLen), dstRowNS)
+
+      if (checkLeft) {
+        const leftOutsideW =
+          dstCells[((dstRowBase + regionX - 1) << 1) + 1]! & WIDTH_MASK
+        const firstInW =
+          dstCells[((dstRowBase + regionX) << 1) + 1]! & WIDTH_MASK
+        if (leftOutsideW === CellWidth.Wide) {
+          if (firstInW !== CellWidth.SpacerTail) {
+            const leftCI = (dstRowBase + regionX - 1) << 1
+            dstCells[leftCI] = EMPTY_CHAR_INDEX
+            dstCells[leftCI + 1] = emptyWord1
+            if (regionX - 1 < damageMinX) damageMinX = regionX - 1
+          }
+        } else if (
+          firstInW === CellWidth.SpacerTail &&
+          prevDstAtLeft !== CellWidth.SpacerTail
+        ) {
+          // Blitted region starts with orphaned SpacerTail(s) whose head was
+          // left of regionX in src; clear all contiguous leading SpacerTails.
+          clearTrailingDstTails(dstRowBase, regionX)
+        }
+      }
+
+      if (checkRight) {
+        const lastInW =
+          dstCells[((dstRowBase + maxX - 1) << 1) + 1]! & WIDTH_MASK
+        let neededTails = 0
+        if (lastInW === CellWidth.Wide || lastInW === CellWidth.SpacerTail) {
+          let sx = maxX
+          while (sx < src.width && sx < dst.width) {
+            if (
+              (srcCells[((srcRowBase + sx) << 1) + 1]! & WIDTH_MASK) !==
+              CellWidth.SpacerTail
+            ) {
+              break
+            }
+            neededTails++
+            sx++
+          }
+          if (lastInW === CellWidth.Wide && neededTails === 0) {
+            neededTails = 1
+          }
+        }
+        if (neededTails > 0) {
+          const tailEnd = Math.min(maxX + neededTails, dst.width)
+          for (let tx = maxX; tx < tailEnd; tx++) {
+            const tCI = (dstRowBase + tx) << 1
+            dstCells[tCI] = SPACER_CHAR_INDEX
+            dstCells[tCI + 1] = spacerTailWord1
+          }
+          if (tailEnd > damageMaxX) damageMaxX = tailEnd
+          clearTrailingDstTails(dstRowBase, tailEnd)
+        } else {
+          clearTrailingDstTails(dstRowBase, maxX)
+        }
+      }
+
+      srcRowBase += src.width
+      dstRowBase += dst.width
       srcRowCI += srcStride
       dstRowCI += dstStride
       srcRowNS += src.width
@@ -1158,80 +1273,6 @@ export function blitRegion(
     }
   }
 
-  const checkLeft = regionX > 0
-  const checkRight = maxX < dst.width
-  let expandedLeft = false
-  let expandedRight = 0
-  if (checkLeft || checkRight) {
-    let leftCI = (regionY * dst.width + regionX - 1) << 1
-    let rightCI = (regionY * dst.width + maxX - 1) << 1
-    for (let y = regionY; y < maxY; y++) {
-      if (checkLeft) {
-        const firstInRegionWidth = dstCells[leftCI + 3]! & WIDTH_MASK
-        if ((dstCells[leftCI + 1]! & WIDTH_MASK) === CellWidth.Wide) {
-          if (firstInRegionWidth !== CellWidth.SpacerTail) {
-            dstCells[leftCI] = EMPTY_CHAR_INDEX
-            dstCells[leftCI + 1] = packWord1(
-              dst.emptyStyleId,
-              0,
-              CellWidth.Narrow,
-            )
-            expandedLeft = true
-          }
-        } else if (firstInRegionWidth === CellWidth.SpacerTail) {
-          dstCells[leftCI + 2] = EMPTY_CHAR_INDEX
-          dstCells[leftCI + 3] = packWord1(
-            dst.emptyStyleId,
-            0,
-            CellWidth.Narrow,
-          )
-        }
-      }
-      if (checkRight) {
-        if ((dstCells[rightCI + 1]! & WIDTH_MASK) === CellWidth.Wide) {
-          if (
-            maxX + 1 < dst.width &&
-            (dstCells[rightCI + 3]! & WIDTH_MASK) === CellWidth.Wide &&
-            (dstCells[rightCI + 5]! & WIDTH_MASK) === CellWidth.SpacerTail
-          ) {
-            dstCells[rightCI + 4] = EMPTY_CHAR_INDEX
-            dstCells[rightCI + 5] = packWord1(
-              dst.emptyStyleId,
-              0,
-              CellWidth.Narrow,
-            )
-            expandedRight = 2
-          } else if (expandedRight < 1) {
-            expandedRight = 1
-          }
-          dstCells[rightCI + 2] = SPACER_CHAR_INDEX
-          dstCells[rightCI + 3] = packWord1(
-            dst.emptyStyleId,
-            0,
-            CellWidth.SpacerTail,
-          )
-        } else if (
-          (dstCells[rightCI + 3]! & WIDTH_MASK) ===
-          CellWidth.SpacerTail
-        ) {
-          dstCells[rightCI + 2] = EMPTY_CHAR_INDEX
-          dstCells[rightCI + 3] = packWord1(
-            dst.emptyStyleId,
-            0,
-            CellWidth.Narrow,
-          )
-          if (expandedRight < 1) {
-            expandedRight = 1
-          }
-        }
-      }
-      leftCI += dstStride
-      rightCI += dstStride
-    }
-  }
-
-  const damageMinX = expandedLeft ? regionX - 1 : regionX
-  const damageMaxX = maxX + expandedRight
   const regionRect = {
     x: damageMinX,
     y: regionY,
@@ -1281,48 +1322,56 @@ export function clearRegion(
     )
   } else {
     // Partial-width: single loop handles boundary cleanup and fill per row.
-    const stride = screenWidth << 1 // 2 Int32s per cell
     const rowLen = maxX - startX
     const checkLeft = startX > 0
     const checkRight = maxX < screenWidth
-    let leftEdge = (rowBase + startX) << 1
-    let rightEdge = (rowBase + maxX - 1) << 1
+    const emptyWord1 = packWord1(screen.emptyStyleId, 0, CellWidth.Narrow)
+    let rowOffset = rowBase
     let fillStart = rowBase + startX
 
     for (let y = startY; y < maxY; y++) {
-      // Left boundary: if cell at startX is a SpacerTail, the Wide char
-      // at startX-1 (outside the region) will be orphaned. Clear it.
+      // Left boundary: if cell at startX is a SpacerTail, walk left across ALL
+      // contiguous SpacerTails and clear the owning Wide head (handles w >= 3).
       if (checkLeft) {
-        // leftEdge points to word0 of cell at startX; +1 is its word1
-        if ((cells[leftEdge + 1]! & WIDTH_MASK) === CellWidth.SpacerTail) {
-          // word1 of cell at startX-1 is leftEdge-1; word0 is leftEdge-2
-          const prevW1 = leftEdge - 1
-          if ((cells[prevW1]! & WIDTH_MASK) === CellWidth.Wide) {
-            cells[prevW1 - 1] = EMPTY_CHAR_INDEX
-            cells[prevW1] = packWord1(screen.emptyStyleId, 0, CellWidth.Narrow)
-            damageMinX = startX - 1
+        const leftEdgeW = cells[((rowOffset + startX) << 1) + 1]! & WIDTH_MASK
+        if (leftEdgeW === CellWidth.SpacerTail) {
+          let lx = startX - 1
+          while (lx >= 0) {
+            const lCI = (rowOffset + lx) << 1
+            const lw = cells[lCI + 1]! & WIDTH_MASK
+            if (lw === CellWidth.SpacerTail) {
+              cells[lCI] = EMPTY_CHAR_INDEX
+              cells[lCI + 1] = emptyWord1
+              if (lx < damageMinX) damageMinX = lx
+              lx--
+              continue
+            }
+            if (lw === CellWidth.Wide) {
+              cells[lCI] = EMPTY_CHAR_INDEX
+              cells[lCI + 1] = emptyWord1
+              if (lx < damageMinX) damageMinX = lx
+            }
+            break
           }
         }
       }
 
-      // Right boundary: if cell at maxX-1 is Wide, its SpacerTail at maxX
-      // (outside the region) will be orphaned. Clear it.
+      // Right boundary: any contiguous SpacerTail(s) starting at maxX belonged
+      // to a Wide head at <= maxX-1 that is now cleared; clear all of them.
       if (checkRight) {
-        // rightEdge points to word0 of cell at maxX-1; +1 is its word1
-        if ((cells[rightEdge + 1]! & WIDTH_MASK) === CellWidth.Wide) {
-          // word1 of cell at maxX is rightEdge+3 (+2 to next word0, +1 to word1)
-          const nextW1 = rightEdge + 3
-          if ((cells[nextW1]! & WIDTH_MASK) === CellWidth.SpacerTail) {
-            cells[nextW1 - 1] = EMPTY_CHAR_INDEX
-            cells[nextW1] = packWord1(screen.emptyStyleId, 0, CellWidth.Narrow)
-            damageMaxX = maxX + 1
-          }
+        let tx = maxX
+        while (tx < screenWidth) {
+          const tCI = (rowOffset + tx) << 1
+          if ((cells[tCI + 1]! & WIDTH_MASK) !== CellWidth.SpacerTail) break
+          cells[tCI] = EMPTY_CHAR_INDEX
+          cells[tCI + 1] = emptyWord1
+          tx++
         }
+        if (tx > damageMaxX) damageMaxX = tx
       }
 
       cells64.fill(EMPTY_CELL_VALUE, fillStart, fillStart + rowLen)
-      leftEdge += stride
-      rightEdge += stride
+      rowOffset += screenWidth
       fillStart += screenWidth
     }
   }

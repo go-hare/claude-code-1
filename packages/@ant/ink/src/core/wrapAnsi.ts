@@ -2,7 +2,6 @@ import stripAnsi from 'strip-ansi'
 import { stringWidth } from './stringWidth.js'
 import { tokenizeForOutput } from './termio/tokenize.js'
 import { getGraphemeSegmenter } from './utils/grapheme.js'
-import sliceAnsiFallback from './utils/sliceAnsi.js'
 
 type WrapAnsiOptions = {
   hard?: boolean
@@ -170,9 +169,308 @@ function scanIgnorableRun(
   return count
 }
 
+type WrapPiece =
+  | { kind: 'seq'; text: string; width: 0 }
+  | { kind: 'grapheme'; text: string; width: number; isSpace: boolean }
+
+type WrapChunk =
+  | { kind: 'space'; piece: WrapPiece & { kind: 'grapheme' } }
+  | { kind: 'word'; pieces: WrapPiece[]; width: number }
+  | { kind: 'seq'; piece: WrapPiece & { kind: 'seq' } }
+
+type ActiveOsc8 = { open: string; close: string }
+
+function buildSgrBookends(state: string[]): { close: string; reopen: string } {
+  let close = ''
+  let reopen = ''
+  let lastReset = 0
+  for (let slot = 0; slot < state.length; slot++) {
+    if (state[slot] === '') continue
+    reopen += `\x1b[${state[slot]}m`
+    const reset = SGR_RESET_CODES[slot]!
+    if (reset !== lastReset) {
+      lastReset = reset
+      close = `\x1b[${reset}m${close}`
+    }
+  }
+  return { close, reopen }
+}
+
+function parseOsc8Sequence(seq: string): ActiveOsc8 | null | undefined {
+  if (!seq.startsWith('\x1b]8;')) return undefined
+  const term = seq.endsWith('\x1b\\') ? '\x1b\\' : '\x07'
+  const secondSemi = seq.indexOf(';', 4)
+  if (secondSemi === -1) return null
+  const uri = seq.slice(secondSemi + 1, seq.length - term.length)
+  return uri.length > 0 ? { open: seq, close: `\x1b]8;;${term}` } : null
+}
+
+function trimRowTrailingSpaces(row: WrapPiece[]): WrapPiece[] {
+  let lastVisible = -1
+  for (let i = row.length - 1; i >= 0; i--) {
+    const p = row[i]!
+    if (p.kind === 'grapheme' && !p.isSpace) {
+      lastVisible = i
+      break
+    }
+  }
+  const out: WrapPiece[] = []
+  for (let i = 0; i < row.length; i++) {
+    const p = row[i]!
+    if (i > lastVisible && p.kind === 'grapheme' && p.isSpace) {
+      continue
+    }
+    out.push(p)
+  }
+  return out
+}
+
 /**
- * Official `Z` uses `Bun.wrapAnsi`. Node `dist/cli.js` has no Bun; hard-wrap
- * with sliceAnsi so the first wrap does not throw ReferenceError.
+ * Pure-JS ANSI- & grapheme-aware word-wrap fallback for runtimes without
+ * `Bun.wrapAnsi` (e.g. Node `dist/cli.js`).
+ */
+export function wrapAnsiFallback(
+  input: string,
+  columns: number,
+  options?: WrapAnsiOptions,
+): string {
+  if (!(columns > 0)) return input
+  const trim = options?.trim !== false
+  const hard = options?.hard === true
+  const wordWrap = options?.wordWrap !== false
+  const segmenter = getGraphemeSegmenter()
+  const logicalLines = input.split(LINE_BREAK_RE)
+  const allRows: WrapPiece[][] = []
+
+  for (const line of logicalLines) {
+    const pieces: WrapPiece[] = []
+    for (const token of tokenizeForOutput(line)) {
+      if (token.type === 'sequence') {
+        pieces.push({ kind: 'seq', text: token.value, width: 0 })
+      } else {
+        for (const { segment } of segmenter.segment(token.value)) {
+          pieces.push({
+            kind: 'grapheme',
+            text: segment,
+            width: stringWidth(segment),
+            isSpace: segment === ' ',
+          })
+        }
+      }
+    }
+
+    if (pieces.length === 0) {
+      allRows.push([])
+      continue
+    }
+
+    const lineRows: WrapPiece[][] = []
+    let curRow: WrapPiece[] = []
+    let curWidth = 0
+    lineRows.push(curRow)
+
+    const startNewRow = (): void => {
+      curRow = []
+      lineRows.push(curRow)
+      curWidth = 0
+    }
+
+    if (!wordWrap) {
+      let curHasContent = false
+      for (let i = 0; i < pieces.length; i++) {
+        const piece = pieces[i]!
+        if (piece.kind === 'seq') {
+          curRow.push(piece)
+          continue
+        }
+        if (trim && !curHasContent && piece.isSpace) {
+          continue
+        }
+        if (
+          curWidth > 0 &&
+          piece.width > 0 &&
+          curWidth + piece.width > columns
+        ) {
+          startNewRow()
+          curHasContent = false
+          if (trim && piece.isSpace) {
+            continue
+          }
+        }
+        // Forward-progress guard: always accept at least one grapheme on an
+        // empty row even when piece.width > columns.
+        curRow.push(piece)
+        curWidth += piece.width
+        if (!piece.isSpace) curHasContent = true
+      }
+    } else {
+      const chunks: WrapChunk[] = []
+      let pendingSeqs: Array<WrapPiece & { kind: 'seq' }> = []
+      let idx = 0
+      while (idx < pieces.length) {
+        const p = pieces[idx]!
+        if (p.kind === 'seq') {
+          pendingSeqs.push(p)
+          idx++
+          continue
+        }
+        if (p.isSpace) {
+          for (const seq of pendingSeqs) {
+            chunks.push({ kind: 'seq', piece: seq })
+          }
+          pendingSeqs = []
+          chunks.push({ kind: 'space', piece: p })
+          idx++
+          continue
+        }
+        const wordPieces: WrapPiece[] =
+          pendingSeqs.length > 0 ? [...pendingSeqs] : []
+        pendingSeqs = []
+        let wordWidth = 0
+        while (idx < pieces.length) {
+          const wp = pieces[idx]!
+          if (wp.kind === 'grapheme' && wp.isSpace) break
+          wordPieces.push(wp)
+          if (wp.kind === 'grapheme') wordWidth += wp.width
+          idx++
+        }
+        chunks.push({ kind: 'word', pieces: wordPieces, width: wordWidth })
+      }
+      for (const seq of pendingSeqs) {
+        chunks.push({ kind: 'seq', piece: seq })
+      }
+
+      let pendingWrap = false
+      for (const chunk of chunks) {
+        if (chunk.kind === 'seq') {
+          curRow.push(chunk.piece)
+          continue
+        }
+        if (chunk.kind === 'space') {
+          if (trim) {
+            if (curWidth === 0 || pendingWrap) continue
+            if (curWidth + chunk.piece.width > columns) {
+              pendingWrap = true
+              continue
+            }
+            curRow.push(chunk.piece)
+            curWidth += chunk.piece.width
+          } else {
+            if (
+              curWidth > 0 &&
+              chunk.piece.width > 0 &&
+              curWidth + chunk.piece.width > columns
+            ) {
+              startNewRow()
+            }
+            curRow.push(chunk.piece)
+            curWidth += chunk.piece.width
+          }
+          continue
+        }
+
+        if (pendingWrap) {
+          startNewRow()
+          pendingWrap = false
+        }
+
+        if (chunk.width <= columns) {
+          if (curWidth > 0 && curWidth + chunk.width > columns) {
+            startNewRow()
+          }
+          for (const wp of chunk.pieces) {
+            curRow.push(wp)
+          }
+          curWidth += chunk.width
+          continue
+        }
+
+        if (!hard) {
+          if (curWidth > 0) {
+            startNewRow()
+          }
+          for (const wp of chunk.pieces) {
+            curRow.push(wp)
+          }
+          curWidth += chunk.width
+          continue
+        }
+
+        // hard === true and word wider than columns: match Bun.wrapAnsi /
+        // wrap-ansi line-count rule — break starting from the current row's
+        // remaining space unless starting on a new row produces fewer breaks.
+        if (curWidth > 0) {
+          const remaining = columns - curWidth
+          const breaksStartingThisLine =
+            1 + Math.floor((chunk.width - remaining - 1) / columns)
+          const breaksStartingNextLine = Math.floor((chunk.width - 1) / columns)
+          if (breaksStartingNextLine < breaksStartingThisLine) {
+            startNewRow()
+          }
+        }
+        let wi = 0
+        while (wi < chunk.pieces.length) {
+          const wp = chunk.pieces[wi]!
+          if (wp.kind === 'seq') {
+            curRow.push(wp)
+            wi++
+            continue
+          }
+          if (curWidth > 0 && wp.width > 0 && curWidth + wp.width > columns) {
+            startNewRow()
+          }
+          // Explicit forward-progress guard: always advance wi and place at
+          // least one grapheme on an empty row even when wp.width > columns.
+          curRow.push(wp)
+          curWidth += wp.width
+          wi++
+        }
+      }
+    }
+
+    for (const row of lineRows) {
+      allRows.push(trim ? trimRowTrailingSpaces(row) : row)
+    }
+  }
+
+  const sgrState = createSgrState()
+  let activeOsc8: ActiveOsc8 | null = null
+  const outLines: string[] = []
+  for (let rowIdx = 0; rowIdx < allRows.length; rowIdx++) {
+    const row = allRows[rowIdx]!
+    const hasGrapheme = row.some(p => p.kind === 'grapheme')
+    let buf = ''
+    if (rowIdx > 0 && hasGrapheme) {
+      const { reopen } = buildSgrBookends(sgrState)
+      if (reopen !== '') buf += reopen
+      if (activeOsc8 !== null) buf += activeOsc8.open
+    }
+    for (const p of row) {
+      buf += p.text
+      if (p.kind === 'seq') {
+        if (p.text.startsWith('\x1b[') && p.text.endsWith('m')) {
+          updateSgrState(p.text, sgrState)
+        } else {
+          const osc8 = parseOsc8Sequence(p.text)
+          if (osc8 !== undefined) {
+            activeOsc8 = osc8
+          }
+        }
+      }
+    }
+    if (rowIdx < allRows.length - 1 && (hasGrapheme || buf.length > 0)) {
+      const { close } = buildSgrBookends(sgrState)
+      if (activeOsc8 !== null) buf += activeOsc8.close
+      if (close !== '') buf += close
+    }
+    outLines.push(buf)
+  }
+  return outLines.join('\n')
+}
+
+/**
+ * Official `Z` uses `Bun.wrapAnsi`. Node `dist/cli.js` has no Bun; fall back to
+ * the pure-JS ANSI- & grapheme-aware word wrapper so wrapping stays faithful.
  */
 function wrapAnsiEngine(
   input: string,
@@ -184,32 +482,7 @@ function wrapAnsiEngine(
       ? Bun.wrapAnsi
       : undefined
   if (bunWrap) return bunWrap(input, columns, options)
-  const trim = options?.trim !== false
-  const hard = options?.hard === true
-  const lines = input.split('\n')
-  const out: string[] = []
-  for (const line of lines) {
-    const raw = trim ? line.trimEnd() : line
-    if (raw === '') {
-      out.push('')
-      continue
-    }
-    if (stringWidth(raw) <= columns) {
-      out.push(raw)
-      continue
-    }
-    if (!hard) {
-      out.push(raw)
-      continue
-    }
-    let rest = raw
-    while (stringWidth(rest) > columns) {
-      out.push(sliceAnsiFallback(rest, 0, columns))
-      rest = sliceAnsiFallback(rest, columns)
-    }
-    if (rest !== '') out.push(rest)
-  }
-  return out.join('\n')
+  return wrapAnsiFallback(input, columns, options)
 }
 
 type ProtectionBag = {

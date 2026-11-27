@@ -3,7 +3,7 @@
  * A thrown SDK server is the only one marked failed (Rd).
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { JSONRPCMessage } from '../../services/mcp/types.js'
 import { AbortError, ControlStreamClosedError } from '../../utils/errors.js'
@@ -140,10 +140,17 @@ describe('densable 2.1.251 #29 SDK MCP handshake timeout', () => {
   })
 
   test('setupSdkMcpClients marks only the thrown server failed', () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../../services/mcp/client.ts'),
-      'utf8',
-    )
+    const clientDir = join(import.meta.dir, '../../services/mcp/client')
+    const src = [
+      readFileSync(
+        join(import.meta.dir, '../../services/mcp/client.ts'),
+        'utf8',
+      ),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     const start = src.indexOf('export async function setupSdkMcpClients')
     expect(start).toBeGreaterThan(0)
     const body = src.slice(start, start + 4500)

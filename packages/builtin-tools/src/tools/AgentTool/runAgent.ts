@@ -73,6 +73,11 @@ import { isClaudeInChromeMCPServer } from 'src/utils/claudeInChrome/common.js'
 import { isComputerUseMCPServer } from 'src/utils/computerUse/common.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import {
+  assertHostNotSsrfBlocked,
+  isBlockedHostnameOrIp,
+  type SsrfDnsLookupFn,
+} from 'src/utils/hooks/ssrfGuard.js'
+import {
   dedupeToolsByName,
   toolMatchesName,
   type Tool,
@@ -309,141 +314,7 @@ const RESERVED_AGENT_MCP_EXACT_NAMES = new Set<string>([
   'webagent',
 ])
 
-const BLOCKED_SSRF_HOSTNAMES = new Set<string>([
-  'localhost',
-  'metadata.google.internal',
-  'metadata.goog',
-  'instance-data',
-  'metadata.azure.internal',
-])
-
-function isBlockedIpv4Octets(
-  a: number,
-  b: number,
-  c: number,
-  d: number,
-): boolean {
-  if (
-    a < 0 ||
-    a > 255 ||
-    b < 0 ||
-    b > 255 ||
-    c < 0 ||
-    c > 255 ||
-    d < 0 ||
-    d > 255
-  ) {
-    return true
-  }
-  if (a === 0) return true // 0.0.0.0/8 unspecified
-  if (a === 10) return true // 10.0.0.0/8 RFC 1918
-  if (a === 100 && b >= 64 && b <= 127) return true // 100.64.0.0/10 CGNAT
-  if (a === 127) return true // 127.0.0.0/8 loopback
-  if (a === 169 && b === 254) return true // 169.254.0.0/16 link-local / cloud IMDS
-  if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12 RFC 1918
-  if (a === 192 && b === 0 && c === 0) return true // 192.0.0.0/24 IETF protocol
-  if (a === 192 && b === 168) return true // 192.168.0.0/16 RFC 1918
-  if (a === 198 && (b === 18 || b === 19)) return true // 198.18.0.0/15 benchmarking
-  if (a >= 224) return true // multicast / reserved / broadcast
-  return false
-}
-
-function parseIpv4Dotted(
-  host: string,
-): [number, number, number, number] | null {
-  const parts = host.split('.')
-  if (parts.length !== 4) return null
-  const nums: number[] = []
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null
-    const value = Number(part)
-    if (value < 0 || value > 255) return null
-    nums.push(value)
-  }
-  return [nums[0]!, nums[1]!, nums[2]!, nums[3]!]
-}
-
-function parseIpv6Groups(rawHost: string): number[] | null {
-  const unwrapped =
-    rawHost.startsWith('[') && rawHost.endsWith(']')
-      ? rawHost.slice(1, -1)
-      : rawHost
-  const withoutZone = unwrapped.split('%')[0]!.toLowerCase()
-  if (!withoutZone.includes(':')) return null
-
-  // Convert trailing embedded IPv4 (e.g. ::ffff:127.0.0.1) into two 16-bit hex groups.
-  let normalized = withoutZone
-  const lastColon = normalized.lastIndexOf(':')
-  const tail = normalized.slice(lastColon + 1)
-  if (tail.includes('.')) {
-    const ipv4 = parseIpv4Dotted(tail)
-    if (!ipv4) return null
-    const hi = ((ipv4[0] << 8) | ipv4[1]).toString(16)
-    const lo = ((ipv4[2] << 8) | ipv4[3]).toString(16)
-    normalized = `${normalized.slice(0, lastColon + 1)}${hi}:${lo}`
-  }
-
-  const halves = normalized.split('::')
-  if (halves.length > 2) return null
-  const parseSide = (side: string): number[] | null => {
-    if (side === '') return []
-    const tokens = side.split(':')
-    const out: number[] = []
-    for (const token of tokens) {
-      if (!/^[0-9a-f]{1,4}$/.test(token)) return null
-      out.push(Number.parseInt(token, 16))
-    }
-    return out
-  }
-  const left = parseSide(halves[0]!)
-  const right = halves.length === 2 ? parseSide(halves[1]!) : []
-  if (!left || !right) return null
-  if (halves.length === 1) {
-    return left.length === 8 ? left : null
-  }
-  const missing = 8 - (left.length + right.length)
-  if (missing < 1) return null
-  return [...left, ...new Array<number>(missing).fill(0), ...right]
-}
-
-function isBlockedIpv6Groups(groups: readonly number[]): boolean {
-  if (groups.length !== 8) return true
-  const g0 = groups[0]!
-  const g1 = groups[1]!
-  const g2 = groups[2]!
-  const g3 = groups[3]!
-  const g4 = groups[4]!
-  const g5 = groups[5]!
-  const g6 = groups[6]!
-  const g7 = groups[7]!
-  const allZeroPrefix6 =
-    g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0
-  if (allZeroPrefix6 && g6 === 0 && (g7 === 0 || g7 === 1)) {
-    return true // :: unspecified or ::1 loopback
-  }
-  // IPv4-mapped (::ffff:0:0/96) or IPv4-compatible (::/96) or NAT64 (64:ff9b::/96)
-  const isIpv4Mapped =
-    g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff
-  const isNat64 =
-    g0 === 0x0064 &&
-    g1 === 0xff9b &&
-    g2 === 0 &&
-    g3 === 0 &&
-    g4 === 0 &&
-    g5 === 0
-  if (isIpv4Mapped || allZeroPrefix6 || isNat64) {
-    return isBlockedIpv4Octets(
-      (g6 >> 8) & 0xff,
-      g6 & 0xff,
-      (g7 >> 8) & 0xff,
-      g7 & 0xff,
-    )
-  }
-  if ((g0 & 0xfe00) === 0xfc00) return true // fc00::/7 ULA (incl. fd00:ec2::254)
-  if ((g0 & 0xffc0) === 0xfe80) return true // fe80::/10 link-local
-  if ((g0 & 0xff00) === 0xff00) return true // ff00::/8 multicast
-  return false
-}
+const AGENT_INLINE_MCP_SSRF_POLICY = { allowLoopback: false } as const
 
 /**
  * Official 2.1.328 (`LOe(e)` @chunk@288385318.js): whether personal user
@@ -552,35 +423,58 @@ export function checkAgentInlineMcpUrlSsrf(
     return { allowed: true }
   }
 
-  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
-  if (
-    hostname === '' ||
-    BLOCKED_SSRF_HOSTNAMES.has(hostname) ||
-    hostname.endsWith('.localhost')
-  ) {
+  const hostname = parsed.hostname
+  if (isBlockedHostnameOrIp(hostname, AGENT_INLINE_MCP_SSRF_POLICY)) {
     return {
       allowed: false,
-      message: `blocked loopback/metadata host '${hostname}' in inline MCP server URL`,
-    }
-  }
-
-  const ipv4 = parseIpv4Dotted(hostname)
-  if (ipv4 && isBlockedIpv4Octets(ipv4[0], ipv4[1], ipv4[2], ipv4[3])) {
-    return {
-      allowed: false,
-      message: `blocked private/loopback/link-local IPv4 address '${hostname}' in inline MCP server URL`,
-    }
-  }
-
-  const ipv6 = parseIpv6Groups(hostname)
-  if (ipv6 && isBlockedIpv6Groups(ipv6)) {
-    return {
-      allowed: false,
-      message: `blocked private/loopback/link-local IPv6 address '${hostname}' in inline MCP server URL`,
+      message: `blocked private/loopback/link-local/metadata host '${hostname}' in inline MCP server URL`,
     }
   }
 
   return { allowed: true }
+}
+
+/**
+ * E5-P1-4 async DNS-aware SSRF check for inline agent MCP server URLs.
+ * Enforces `checkAgentInlineMcpUrlSsrf` synchronously AND resolves DNS via
+ * `ssrfGuard.ts` (`assertHostNotSsrfBlocked`) so domains resolving to private,
+ * loopback, link-local, or cloud-metadata IPs (e.g. `169.254.169.254.nip.io`)
+ * are blocked before connecting.
+ */
+export async function checkAgentInlineMcpUrlSsrfAsync(
+  serverConfig: McpServerConfig | ScopedMcpServerConfig,
+  options?: {
+    allowPrivateAddresses?: boolean
+    lookup?: SsrfDnsLookupFn
+  },
+): Promise<{ allowed: true } | { allowed: false; message: string }> {
+  const syncCheck = checkAgentInlineMcpUrlSsrf(serverConfig, options)
+  if (!syncCheck.allowed) {
+    return syncCheck
+  }
+  if (!('url' in serverConfig) || typeof serverConfig.url !== 'string') {
+    return { allowed: true }
+  }
+  const allowPrivate =
+    options?.allowPrivateAddresses === true ||
+    isEnvTruthy(process.env.CLAUDE_CODE_ALLOW_PRIVATE_INLINE_MCP)
+  if (allowPrivate) {
+    return { allowed: true }
+  }
+  const parsed = new URL(serverConfig.url)
+  try {
+    await assertHostNotSsrfBlocked(
+      parsed.hostname,
+      AGENT_INLINE_MCP_SSRF_POLICY,
+      options?.lookup,
+    )
+    return { allowed: true }
+  } catch (error) {
+    return {
+      allowed: false,
+      message: `blocked DNS SSRF target '${parsed.hostname}' in inline MCP server URL: ${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
 }
 
 /**
@@ -845,6 +739,17 @@ export async function initializeAgentMcpServers(
         { level: 'warn' },
       )
       continue
+    }
+
+    if (isNewlyCreated) {
+      const dnsSsrf = await checkAgentInlineMcpUrlSsrfAsync(config)
+      if (!dnsSsrf.allowed) {
+        logForDebugging(
+          `[Agent: ${agentDefinition.agentType}] MCP server '${name}' skipped (ssrf-blocked): ${dnsSsrf.message}`,
+          { level: 'warn' },
+        )
+        continue
+      }
     }
 
     // Connect to the server with bounded dial timeout (official boundDial)

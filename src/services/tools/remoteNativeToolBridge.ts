@@ -8,9 +8,12 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import type {
+  PermissionBehavior,
   PermissionDecision,
   PermissionDecisionReason,
   PermissionResult,
+  PermissionRule,
+  PermissionRuleSource,
 } from '../../types/permissions.js'
 import { isAbortError } from '../../utils/errors.js'
 import {
@@ -22,6 +25,7 @@ import {
   type RemoteNativeToolRunner,
   type RemoteNativeToolSession,
   registerRemoteNativeToolRunner,
+  runEvaluatingLocalPermissionFloor,
   sanitizeRemoteWireText,
 } from '../../utils/toolCreateRuntime.js'
 
@@ -218,10 +222,66 @@ function extractMcpTextContent(content: unknown): string {
   return parts.join('\n')
 }
 
+const VALID_REMOTE_RULE_SOURCES: ReadonlySet<PermissionRuleSource> = new Set([
+  'userSettings',
+  'projectSettings',
+  'localSettings',
+  'flagSettings',
+  'policySettings',
+  'cliArg',
+  'command',
+  'session',
+  'mcpServerPolicy',
+  'toolsNarrowing',
+  'hostCredential',
+])
+
+const VALID_REMOTE_RULE_BEHAVIORS: ReadonlySet<PermissionBehavior> = new Set([
+  'allow',
+  'deny',
+  'ask',
+])
+
+function parseRemotePermissionRule(raw: unknown): PermissionRule | undefined {
+  if (!isPlainRecord(raw)) {
+    return undefined
+  }
+  if (
+    typeof raw.source !== 'string' ||
+    !VALID_REMOTE_RULE_SOURCES.has(raw.source as PermissionRuleSource) ||
+    typeof raw.ruleBehavior !== 'string' ||
+    !VALID_REMOTE_RULE_BEHAVIORS.has(raw.ruleBehavior as PermissionBehavior) ||
+    !isPlainRecord(raw.ruleValue) ||
+    typeof raw.ruleValue.toolName !== 'string'
+  ) {
+    return undefined
+  }
+  return {
+    source: raw.source as PermissionRuleSource,
+    ruleBehavior: raw.ruleBehavior as PermissionBehavior,
+    ruleValue: {
+      toolName: sanitizeRemoteWireText(raw.ruleValue.toolName),
+      ...(typeof raw.ruleValue.ruleContent === 'string'
+        ? { ruleContent: sanitizeRemoteWireText(raw.ruleValue.ruleContent) }
+        : {}),
+    },
+  }
+}
+
 function parseDecisionReason(
   raw: unknown,
 ): PermissionDecisionReason | undefined {
   if (!isPlainRecord(raw) || typeof raw.type !== 'string') {
+    return undefined
+  }
+  if (raw.type === 'rule') {
+    const rule = parseRemotePermissionRule(raw.rule)
+    if (rule !== undefined) {
+      return {
+        type: 'rule',
+        rule,
+      }
+    }
     return undefined
   }
   if (raw.type === 'other' && typeof raw.reason === 'string') {
@@ -377,6 +437,7 @@ function validateRemotePermissionResult(
         ? raw.message
         : `${toolName} requires permission on remote worker.`,
     )
+    const parsedMatchedAskRule = parseRemotePermissionRule(raw.matchedAskRule)
     return {
       behavior: 'ask',
       message,
@@ -386,6 +447,10 @@ function validateRemotePermissionResult(
       ...(parsedReason !== undefined ? { decisionReason: parsedReason } : {}),
       ...(typeof raw.blockedPath === 'string'
         ? { blockedPath: sanitizeRemoteWireText(raw.blockedPath) }
+        : {}),
+      ...(raw.personOnly === true ? { personOnly: true as const } : {}),
+      ...(parsedMatchedAskRule !== undefined
+        ? { matchedAskRule: parsedMatchedAskRule }
         : {}),
     }
   }
@@ -879,15 +944,7 @@ export function createHttpRemoteNativeToolBridge(
 
     let remoteCheck: RemoteNativeToolCheck | undefined
     if (enableRemotePermissionCheck) {
-      const inFlightRemoteResults = new Map<string, PermissionResult>()
-
       runner.checkPermissions = async (tool, input, context) => {
-        if (
-          context.toolUseId !== undefined &&
-          inFlightRemoteResults.has(context.toolUseId)
-        ) {
-          return inFlightRemoteResults.get(context.toolUseId)
-        }
         const recordInput = isPlainRecord(input) ? input : {}
         const result = await checkPermissions(tool.name, recordInput, {
           signal: context.abortController?.signal,
@@ -920,19 +977,29 @@ export function createHttpRemoteNativeToolBridge(
         }
         // Mandatory local host policy floor (deny > ask > allow): a remote
         // allow/ask must never bypass local alwaysDenyRules, alwaysAskRules,
-        // or enterprise managed policies.
-        inFlightRemoteResults.set(toolUseID, result)
-        let localDecision: PermissionDecision
-        try {
-          localDecision = await evaluateHere()
-        } finally {
-          inFlightRemoteResults.delete(toolUseID)
-        }
+        // or enterprise managed policies — and must be evaluated against the
+        // post-rewrite `updatedInput` locally (never delegating back to the
+        // remote runner).
+        const effectiveInput =
+          result.updatedInput !== undefined ? result.updatedInput : input
+        const localDecision: PermissionDecision =
+          await runEvaluatingLocalPermissionFloor(() =>
+            evaluateHere(effectiveInput),
+          )
         if (localDecision.behavior === 'deny') {
           return localDecision
         }
         if (localDecision.behavior === 'ask') {
-          return result.behavior === 'ask' ? result : localDecision
+          const localHasStrongAsk =
+            localDecision.decisionReason?.type === 'rule' ||
+            localDecision.decisionReason?.type === 'safetyCheck' ||
+            (localDecision as { personOnly?: boolean }).personOnly === true
+          if (result.behavior !== 'ask' || localHasStrongAsk) {
+            return result.updatedInput !== undefined
+              ? { ...localDecision, updatedInput: result.updatedInput }
+              : localDecision
+          }
+          return result
         }
         return result
       }

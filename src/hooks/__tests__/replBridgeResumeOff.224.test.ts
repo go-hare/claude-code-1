@@ -3,13 +3,18 @@
  * turned it off (clearBridgeSession tombstone vs force-on gate).
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const sessionStorage = readFileSync(
-  join(import.meta.dir, '../../utils/sessionStorage.ts'),
-  'utf8',
-)
+const utilsDir = join(import.meta.dir, '../../utils')
+const sessionStorageSubDir = join(utilsDir, 'sessionStorage')
+const sessionStorage = [
+  readFileSync(join(utilsDir, 'sessionStorage.ts'), 'utf8'),
+  ...readdirSync(sessionStorageSubDir)
+    .filter(f => f.endsWith('.ts'))
+    .sort()
+    .map(f => readFileSync(join(sessionStorageSubDir, f), 'utf8')),
+].join('\n')
 const hook = readFileSync(join(import.meta.dir, '../useReplBridge.tsx'), 'utf8')
 const sessionRestore = readFileSync(
   join(import.meta.dir, '../../utils/sessionRestore.ts'),

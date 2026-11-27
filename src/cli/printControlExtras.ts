@@ -3381,7 +3381,9 @@ export function dispatchPrintControlExtra(
       return true
     }
     if (
-      (request.payload !== undefined || request.action === 'export') &&
+      (request.payload !== undefined ||
+        request.action === 'export' ||
+        request.action === 'hydrate') &&
       request.messages === undefined
     ) {
       const result = getTurnHandoffManager().handleControlRequest({
@@ -4001,7 +4003,7 @@ export function dispatchPrintControlExtra(
           process.env.CLAUDE_CODE_DISABLE_TURN_HANDOFF === 'true',
         sharedBackend: isSharedBackend(),
       })
-    if (!admission.admitted && !isSharedBackend()) {
+    if (!admission.admitted && admission.reason !== 'shared_backend') {
       deps.sendError(`${TURN_HANDOFF_DISABLED_PREFIX}${admission.reason}`)
       return true
     }

@@ -820,7 +820,8 @@ function isIntegrityFallbackError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error)
   return (
     msg.includes('Checksum mismatch') ||
-    msg.includes('exceeds the manifest size')
+    msg.includes('exceeds the manifest size') ||
+    msg.includes('exceeds the signed size')
   )
 }
 
@@ -1475,12 +1476,16 @@ export async function downloadVersionFromBinaryRepo(
       | undefined
     if (compressedOpts) {
       try {
+        // E5-P2-3: Bound compressed .zst wire bytes to prevent unbounded
+        // zstd skippable-frame wire DoS.
+        const maxZstWireSize = compressedOpts.decompressedSize + 64 * 1024
         downloadOutcome = await downloadAndVerifyBinary(
           activeDownloadUrl,
           expectedChecksum,
           binaryPath,
           authConfig || {},
           compressedOpts,
+          maxZstWireSize,
         )
       } catch (zstErr) {
         if (

@@ -32,6 +32,10 @@ import {
 } from '../../utils/browser.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { errorMessage, getErrnoCode } from '../../utils/errors.js'
+import {
+  isBlockedHostnameOrIp,
+  type ssrfGuardedLookup,
+} from '../../utils/hooks/ssrfGuard.js'
 import * as lockfile from '../../utils/lockfile.js'
 import { logMCPDebug } from '../../utils/log.js'
 import { getPlatform } from '../../utils/platform.js'
@@ -306,10 +310,12 @@ import {
   acquireIdpIdToken,
   clearIdpIdToken,
   discoverOidc,
+  executeSsrfBoundFetchHop,
   getCachedIdpIdToken,
   getIdpClientSecret,
   getXaaIdpSettings,
   isXaaEnabled,
+  stripCrossOriginCredentialHeaders,
 } from './xaaIdpLogin.js'
 
 /**
@@ -462,9 +468,12 @@ function formatGuardOrigin(url: URL | null): string {
 }
 
 /**
- * Official 325 `mcp_oauth_redirect_guard` (#1847) — prevent OAuth requests
- * that carry secrets (refresh tokens, client secrets, authorization codes)
- * from silently following cross-origin redirects to another host.
+ * Official 325 `mcp_oauth_redirect_guard` (#1847) + E5-P1-4 / P1-E3 hardening —
+ * prevent OAuth requests carrying secrets (refresh tokens, client secrets, auth
+ * codes) from following cross-origin redirects, forbid `https:// -> http://`
+ * protocol downgrades or SSRF redirects on all methods (including GET/HEAD),
+ * and strip `authorization`/`cookie`/`proxy-authorization` on any cross-origin
+ * redirect.
  */
 export function wrapFetchWithOAuthRedirectGuard(
   baseFetch: FetchLike,
@@ -472,18 +481,14 @@ export function wrapFetchWithOAuthRedirectGuard(
 ): FetchLike {
   const maxRedirects = options?.maxRedirects ?? MAX_AUTH_HEADER_REDIRECTS
   return async (input: string | URL, init?: RequestInit) => {
-    const method = (init?.method ?? 'GET').toUpperCase()
-    if (
-      init === undefined ||
-      method === 'GET' ||
-      method === 'HEAD' ||
-      (init.redirect ?? 'follow') !== 'follow'
-    ) {
+    if ((init?.redirect ?? 'follow') !== 'follow') {
       return baseFetch(input, init)
     }
     let currentUrl = new URL(String(input))
-    let currentInit: RequestInit = { ...init, redirect: 'manual' }
+    let currentInit: RequestInit = { ...(init ?? {}), redirect: 'manual' }
+    let currentMethod = (currentInit.method ?? 'GET').toUpperCase()
     for (let hop = 0; ; hop++) {
+      const isReadOnly = currentMethod === 'GET' || currentMethod === 'HEAD'
       const response = await baseFetch(currentUrl, currentInit)
       const location = OAUTH_REDIRECT_STATUSES.has(response.status)
         ? response.headers.get('location')
@@ -498,13 +503,43 @@ export function wrapFetchWithOAuthRedirectGuard(
       } catch {
         nextUrl = null
       }
-      if (nextUrl === null || !isSameOriginUrl(nextUrl.href, currentUrl.href)) {
+      if (
+        nextUrl === null ||
+        (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:')
+      ) {
         logEvent('tengu_feature_bad', {
           feature_name:
             'mcp_oauth_redirect_guard' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          error_code: (nextUrl === null
-            ? 'unreadable_location'
-            : 'not_same_origin') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code:
+            'unreadable_location' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        throw new Error(
+          `Stopped an OAuth request, which can hold secrets: ${formatGuardOrigin(currentUrl)} redirected it to ${formatGuardOrigin(nextUrl)}. Ask the owner of ${formatGuardOrigin(currentUrl)} to remove that redirect.`,
+        )
+      }
+      // Forbid https:// -> http:// protocol downgrade on EVERY method
+      if (currentUrl.protocol === 'https:' && nextUrl.protocol === 'http:') {
+        logEvent('tengu_feature_bad', {
+          feature_name:
+            'mcp_oauth_redirect_guard' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code:
+            'protocol_downgrade' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        throw new Error(
+          `Stopped an OAuth request: refusing HTTPS to HTTP redirect downgrade from ${formatGuardOrigin(currentUrl)} to ${formatGuardOrigin(nextUrl)}.`,
+        )
+      }
+      if (isBlockedHostnameOrIp(nextUrl.hostname, { allowLoopback: true })) {
+        throw new Error(
+          `Stopped an OAuth request: refusing redirect to blocked SSRF target ${formatGuardOrigin(nextUrl)}.`,
+        )
+      }
+      if (!isReadOnly && !isSameOriginUrl(nextUrl.href, currentUrl.href)) {
+        logEvent('tengu_feature_bad', {
+          feature_name:
+            'mcp_oauth_redirect_guard' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code:
+            'not_same_origin' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
         throw new Error(
           `Stopped an OAuth request, which can hold secrets: ${formatGuardOrigin(currentUrl)} redirected it to ${formatGuardOrigin(nextUrl)}. Ask the owner of ${formatGuardOrigin(currentUrl)} to remove that redirect.`,
@@ -521,23 +556,34 @@ export function wrapFetchWithOAuthRedirectGuard(
           `Stopped an OAuth request: ${formatGuardOrigin(currentUrl)} redirected it more than ${maxRedirects} times. Ask the owner of ${formatGuardOrigin(currentUrl)} to fix those redirects.`,
         )
       }
+      let nextInit: RequestInit = currentInit
+      // P1-E3: Strip credential headers on any cross-origin redirect.
+      if (nextUrl.origin !== currentUrl.origin) {
+        nextInit = {
+          ...nextInit,
+          headers: stripCrossOriginCredentialHeaders(nextInit.headers),
+        }
+      }
       if (
-        response.status === 303 ||
-        (response.status < 303 && method === 'POST')
+        !isReadOnly &&
+        (response.status === 303 ||
+          (response.status < 303 && currentMethod === 'POST'))
       ) {
         // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-        const headers = new Headers(init.headers)
+        const headers = new Headers(nextInit.headers)
         for (const h of OAUTH_POST_TO_GET_STRIP_HEADERS) {
           headers.delete(h)
         }
-        currentInit = {
-          ...init,
+        currentMethod = 'GET'
+        nextInit = {
+          ...nextInit,
           redirect: 'manual',
           method: 'GET',
           body: undefined,
           headers,
         }
       }
+      currentInit = nextInit
       currentUrl = nextUrl
     }
   }
@@ -657,17 +703,18 @@ export function wrapAuthFetchWithHeaders(
   return async (url: string | URL, init?: RequestInit) => {
     const isGet = (init?.method ?? 'GET').toUpperCase() === 'GET'
     let currentUrl: string | URL = url
+    let currentInit: RequestInit | undefined = init
     for (let hop = 0; ; hop++) {
       if (!isSameOriginForAuthHeaders(serverConfig, currentUrl)) {
-        return baseFetch(currentUrl, init)
+        return baseFetch(currentUrl, currentInit)
       }
       headersPromise ??= getAuthRequestHeaders(serverName, serverConfig)
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
       const merged = new Headers(await headersPromise)
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      new Headers(init?.headers).forEach((v, k) => merged.set(k, v))
+      new Headers(currentInit?.headers).forEach((v, k) => merged.set(k, v))
       const response = await baseFetch(currentUrl, {
-        ...init,
+        ...currentInit,
         headers: merged,
         redirect: 'manual',
       })
@@ -679,13 +726,31 @@ export function wrapAuthFetchWithHeaders(
       ) {
         return response
       }
-      const nextUrl = new URL(location, String(currentUrl))
+      const currentParsed = new URL(String(currentUrl))
+      const nextUrl = new URL(location, currentParsed)
+      if (currentParsed.protocol === 'https:' && nextUrl.protocol === 'http:') {
+        throw new Error(
+          `Stopped an OAuth request: refusing HTTPS to HTTP redirect downgrade from ${formatGuardOrigin(currentParsed)} to ${formatGuardOrigin(nextUrl)}.`,
+        )
+      }
+      if (isBlockedHostnameOrIp(nextUrl.hostname, { allowLoopback: true })) {
+        throw new Error(
+          `Stopped an OAuth request: refusing redirect to blocked SSRF target ${formatGuardOrigin(nextUrl)}.`,
+        )
+      }
       const canFollow = isGet
-        ? nextUrl.protocol === 'https:' || nextUrl.protocol === 'http:'
+        ? nextUrl.protocol === 'https:' ||
+          (currentParsed.protocol === 'http:' && nextUrl.protocol === 'http:')
         : (response.status === 307 || response.status === 308) &&
           isSameOriginForAuthHeaders(serverConfig, nextUrl)
       if (!canFollow) {
         return response
+      }
+      if (nextUrl.origin !== currentParsed.origin) {
+        currentInit = {
+          ...(currentInit ?? {}),
+          headers: stripCrossOriginCredentialHeaders(currentInit?.headers),
+        }
       }
       currentUrl = nextUrl
     }
@@ -693,19 +758,33 @@ export function wrapAuthFetchWithHeaders(
 }
 
 /**
- * Creates a fetch function with a fresh 30-second timeout for each OAuth request.
- * Used by ClaudeAuthProvider for metadata discovery and token refresh.
- * Prevents stale timeout signals from affecting auth operations.
+ * Creates a fetch function with a fresh 30-second timeout, connector-bound SSRF
+ * DNS lookup guard (`ssrfGuardedLookup` bound to undici `Agent` / Node `http(s)`
+ * lookup, eliminating DNS-rebinding TOCTOU), and redirect / HTTPS-downgrade /
+ * cross-origin credential-stripping guard for each OAuth request.
  */
-function createAuthFetch(): FetchLike {
+export function createAuthFetch(options?: {
+  fetchFn?: FetchLike
+  lookup?: typeof ssrfGuardedLookup
+}): FetchLike {
+  const customFetchFn = options?.fetchFn
+  const customLookup = options?.lookup
   const rawFetch: FetchLike = async (url: string | URL, init?: RequestInit) => {
+    const parsedUrl = new URL(String(url))
     const timeoutSignal = AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS)
     const isPost = init?.method?.toUpperCase() === 'POST'
 
     // No existing signal - just use timeout
     if (!init?.signal) {
-      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      const response = await fetch(url, { ...init, signal: timeoutSignal })
+      const response = await executeSsrfBoundFetchHop(
+        parsedUrl,
+        { ...init, signal: timeoutSignal },
+        {
+          fetchFn: customFetchFn,
+          lookup: customLookup,
+          errorPrefix: 'Stopped an OAuth request',
+        },
+      )
       return isPost ? normalizeOAuthErrorBody(response) : response
     }
 
@@ -727,8 +806,15 @@ function createAuthFetch(): FetchLike {
     }
 
     try {
-      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      const response = await fetch(url, { ...init, signal: controller.signal })
+      const response = await executeSsrfBoundFetchHop(
+        parsedUrl,
+        { ...init, signal: controller.signal },
+        {
+          fetchFn: customFetchFn,
+          lookup: customLookup,
+          errorPrefix: 'Stopped an OAuth request',
+        },
+      )
       cleanup()
       return isPost ? normalizeOAuthErrorBody(response) : response
     } catch (error) {

@@ -14,10 +14,16 @@ import type { FrontmostAppInfo, InputBackend } from '../types.js'
 // PowerShell helper — run a script and return trimmed stdout
 // ---------------------------------------------------------------------------
 
+function escapePowerShellSingleQuoted(value: string): string {
+  return value.replace(/['\u2018\u2019\u201a\u201b]/g, '$&$&')
+}
+
 function ps(script: string): string {
+  // P1-E6(c): Use UTF-16LE -EncodedCommand to preserve Unicode quotes and prevent breakout.
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
   const result = spawnSync(
     'powershell',
-    ['-NoProfile', '-NonInteractive', '-Command', script],
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -44,22 +50,27 @@ public class CuWin32 {
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
 
     // --- SendInput ---
+    // P2-14(b): Outer Sequential INPUT wraps Explicit INPUTUNION so the union
+    // aligns properly on both x64 (offset 8, sizeof=40) and x86 (offset 4, sizeof=28).
     [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT {
         public int dx; public int dy; public int mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo;
-    }
-    [StructLayout(LayoutKind.Explicit)] public struct INPUT {
-        [FieldOffset(0)] public uint type;
-        [FieldOffset(4)] public MOUSEINPUT mi;
     }
     [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT {
         public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo;
     }
-    [StructLayout(LayoutKind.Explicit)] public struct KINPUT {
-        [FieldOffset(0)] public uint type;
-        [FieldOffset(4)] public KEYBDINPUT ki;
+    [StructLayout(LayoutKind.Sequential)] public struct HARDWAREINPUT {
+        public uint uMsg; public ushort wParamL; public ushort wParamH;
+    }
+    [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+    [StructLayout(LayoutKind.Sequential)] public struct INPUT {
+        public uint type;
+        public INPUTUNION u;
     }
     [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint n, INPUT[] i, int cb);
-    [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint n, KINPUT[] i, int cb);
 
     // --- Keyboard ---
     [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
@@ -197,18 +208,18 @@ export const mouseButton: InputBackend['mouseButton'] = async (
     const n = count ?? 1
     let clicks = ''
     for (let i = 0; i < n; i++) {
-      clicks += `$i.mi.dwFlags=[CuWin32]::${downFlag}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null; $i.mi.dwFlags=[CuWin32]::${upFlag}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null; `
+      clicks += `$i.u.mi.dwFlags=[CuWin32]::${downFlag}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null; $i.u.mi.dwFlags=[CuWin32]::${upFlag}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null; `
     }
     ps(
       `${WIN32_TYPES}; $i = New-Object CuWin32+INPUT; $i.type=[CuWin32]::INPUT_MOUSE; ${clicks}`,
     )
   } else if (action === 'press') {
     ps(
-      `${WIN32_TYPES}; $i = New-Object CuWin32+INPUT; $i.type=[CuWin32]::INPUT_MOUSE; $i.mi.dwFlags=[CuWin32]::${downFlag}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null`,
+      `${WIN32_TYPES}; $i = New-Object CuWin32+INPUT; $i.type=[CuWin32]::INPUT_MOUSE; $i.u.mi.dwFlags=[CuWin32]::${downFlag}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null`,
     )
   } else {
     ps(
-      `${WIN32_TYPES}; $i = New-Object CuWin32+INPUT; $i.type=[CuWin32]::INPUT_MOUSE; $i.mi.dwFlags=[CuWin32]::${upFlag}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null`,
+      `${WIN32_TYPES}; $i = New-Object CuWin32+INPUT; $i.type=[CuWin32]::INPUT_MOUSE; $i.u.mi.dwFlags=[CuWin32]::${upFlag}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null`,
     )
   }
 }
@@ -220,7 +231,7 @@ export const mouseScroll: InputBackend['mouseScroll'] = async (
   const flag =
     direction === 'vertical' ? 'MOUSEEVENTF_WHEEL' : 'MOUSEEVENTF_HWHEEL'
   ps(
-    `${WIN32_TYPES}; $i = New-Object CuWin32+INPUT; $i.type=[CuWin32]::INPUT_MOUSE; $i.mi.dwFlags=[CuWin32]::${flag}; $i.mi.mouseData=${amount * 120}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null`,
+    `${WIN32_TYPES}; $i = New-Object CuWin32+INPUT; $i.type=[CuWin32]::INPUT_MOUSE; $i.u.mi.dwFlags=[CuWin32]::${flag}; $i.u.mi.mouseData=${amount * 120}; [CuWin32]::SendInput(1, @($i), [Runtime.InteropServices.Marshal]::SizeOf($i)) | Out-Null`,
   )
 }
 
@@ -276,7 +287,7 @@ export const keys: InputBackend['keys'] = async parts => {
 }
 
 export const typeText: InputBackend['typeText'] = async text => {
-  const escaped = text.replace(/'/g, "''")
+  const escaped = escapePowerShellSingleQuoted(text)
   ps(
     `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`,
   )

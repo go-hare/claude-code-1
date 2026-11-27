@@ -6,7 +6,7 @@
  * Q6 @212352459
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { AbortError } from '../../../utils/errors.js'
 import {
@@ -14,7 +14,14 @@ import {
   throwIfMcpToolCallInterrupted,
 } from '../client.js'
 
-const clientSrc = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+const clientDir = join(import.meta.dir, '../client')
+const clientSrc = [
+  readFileSync(join(import.meta.dir, '../client.ts'), 'utf8'),
+  ...readdirSync(clientDir)
+    .filter(f => f.endsWith('.ts'))
+    .sort()
+    .map(f => readFileSync(join(clientDir, f), 'utf8')),
+].join('\n')
 
 describe('densable 2.1.246 #10 MCP interrupt is not empty output', () => {
   test('Q6 interrupt sentence is the official string', () => {

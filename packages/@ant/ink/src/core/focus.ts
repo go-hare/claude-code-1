@@ -44,6 +44,7 @@ export class FocusManager {
   focus(node: DOMElement): void {
     if (node === this.activeElement) return
     if (!this.enabled) return
+    if (isHiddenSubtree(node)) return
 
     const previous = this.activeElement
     if (previous) {
@@ -91,23 +92,60 @@ export class FocusManager {
     const removed = this.activeElement
     this.activeElement = null
     this.dispatchFocusEvent(removed, new FocusEvent('blur', null))
+    this.restoreFocusFromStacks(root, removed)
+  }
 
-    // Restore focus to the most recent still-mounted element
+  /**
+   * Called when a subtree transitions to hidden (`display: 'none'` or
+   * `isHidden = true`). If activeElement is inside the hidden subtree (or
+   * otherwise hidden), blurs it and restores focus to the most recent
+   * mounted & visible node from `focusStack` or `autoFocusStack`.
+   */
+  handleNodeHidden(node: DOMElement, root: DOMElement): void {
+    if (!this.activeElement) return
+    if (
+      !isInTree(this.activeElement, node) &&
+      !isHiddenSubtree(this.activeElement)
+    ) {
+      return
+    }
+
+    const hidden = this.activeElement
+    this.activeElement = null
+    this.dispatchFocusEvent(hidden, new FocusEvent('blur', null))
+    this.restoreFocusFromStacks(root, hidden, node)
+  }
+
+  private restoreFocusFromStacks(
+    root: DOMElement,
+    previous: DOMElement,
+    hiddenSubtree?: DOMElement,
+  ): void {
+    const isEligible = (candidate: DOMElement): boolean =>
+      isInTree(candidate, root) &&
+      !isHiddenSubtree(candidate) &&
+      (hiddenSubtree === undefined || !isInTree(candidate, hiddenSubtree))
+
+    // Restore focus to the most recent still-mounted, visible element
     while (this.focusStack.length > 0) {
       const candidate = this.focusStack.pop()!
-      if (isInTree(candidate, root)) {
+      if (isEligible(candidate)) {
         this.activeElement = candidate
-        this.dispatchFocusEvent(candidate, new FocusEvent('focus', removed))
+        this.dispatchFocusEvent(candidate, new FocusEvent('focus', previous))
         this.notify()
         return
       }
     }
 
-    // Official densable: fall back to last autoFocus node
-    const auto = this.autoFocusStack.at(-1)
-    if (auto && isInTree(auto, root)) {
-      this.activeElement = auto
-      this.dispatchFocusEvent(auto, new FocusEvent('focus', removed))
+    // Reverse-scan autoFocusStack for the top still-mounted, visible node
+    for (let i = this.autoFocusStack.length - 1; i >= 0; i--) {
+      const auto = this.autoFocusStack[i]!
+      if (isEligible(auto)) {
+        this.activeElement = auto
+        this.dispatchFocusEvent(auto, new FocusEvent('focus', previous))
+        this.notify()
+        return
+      }
     }
     this.notify()
   }
@@ -209,7 +247,21 @@ function collectTabbable(root: DOMElement): DOMElement[] {
   return result
 }
 
+function isHiddenSubtree(node: DOMElement): boolean {
+  let current: DOMElement | undefined = node
+  while (current) {
+    if (current.style?.display === 'none' || current.isHidden === true) {
+      return true
+    }
+    current = current.parentNode
+  }
+  return false
+}
+
 function walkTree(node: DOMElement, result: DOMElement[]): void {
+  if (node.style?.display === 'none' || node.isHidden === true) {
+    return
+  }
   const tabIndex = node.attributes['tabIndex']
   if (typeof tabIndex === 'number' && tabIndex >= 0) {
     result.push(node)

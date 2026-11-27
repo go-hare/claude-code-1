@@ -21,6 +21,7 @@ export class FrameScheduler {
   private frameTimer: ReturnType<typeof setTimeout> | null = null
   private frameTimerDueAt = 0
   private frameMicrotaskQueued = false
+  private microtaskGen = 0
   private inputPriorityUntil = 0
   private frameHeldForBacklog = false
 
@@ -88,7 +89,9 @@ export class FrameScheduler {
     this.frameMicrotaskQueued = true
     this.inputPriorityUntil = 0
     this.lastPacedFrameAt = this.pacerNow()
+    const gen = this.microtaskGen
     queueMicrotask(() => {
+      if (gen !== this.microtaskGen) return
       this.frameMicrotaskQueued = false
       this.onRender()
     })
@@ -134,6 +137,8 @@ export class FrameScheduler {
   }
 
   cancelAll(): void {
+    this.microtaskGen++
+    this.frameMicrotaskQueued = false
     this.cancelScheduledFrame()
     this.cancelExtraFrame()
     this.frameHeldForBacklog = false

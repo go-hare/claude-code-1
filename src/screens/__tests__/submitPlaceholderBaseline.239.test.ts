@@ -7,10 +7,17 @@
  * bridge uses deferred!==capped (length stays capped at 500).
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
-const replSrc = readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8')
+const replDir = join(import.meta.dir, '../repl')
+const replSrc = [
+  readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8'),
+  ...readdirSync(replDir)
+    .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+    .sort()
+    .map(f => readFileSync(join(replDir, f), 'utf8')),
+].join('\n')
 const messagesSrc = readFileSync(
   join(import.meta.dir, '../../components/Messages.tsx'),
   'utf8',

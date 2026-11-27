@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { APIError } from '@anthropic-ai/sdk'
 import {
@@ -104,10 +104,14 @@ describe('v2.1.302-2.1.309 API & OAuth alignment', () => {
     expect(groveSrc).toContain('getGroveNoticeConfig.cache.clear?.()')
     expect(groveSrc).toContain('groveChoiceSeenAt')
 
-    const claudeSrc = readFileSync(
-      join(process.cwd(), 'src/services/api/claude.ts'),
-      'utf8',
-    )
+    const claudeDir = join(process.cwd(), 'src/services/api/claude')
+    const claudeSrc = [
+      readFileSync(join(process.cwd(), 'src/services/api/claude.ts'), 'utf8'),
+      ...readdirSync(claudeDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(claudeDir, f), 'utf8')),
+    ].join('\n')
     expect(claudeSrc).not.toContain(
       'recordServerClassifierRequest(\n        serverClassifierRequest.key,\n        slimClassifierContextForHistory(classifierContext)',
     )

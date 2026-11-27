@@ -242,6 +242,14 @@ export {
   isDualInkCurrentPresent,
   ensureDualInkCurrent,
 } from './core/instances.js'
+export {
+  registerInkHostAdapter,
+  getInkHostAdapter,
+  resetInkHostAdapterForTests,
+  type InkHostAdapter,
+  type InkSessionObject,
+  type InkSessionRootAdapter,
+} from './core/hostAdapter.js'
 export { bindNonBlockingStdoutRemoteFlag } from './core/nonBlockingStdout.js'
 export {
   default as renderBorder,

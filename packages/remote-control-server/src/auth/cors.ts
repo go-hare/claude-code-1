@@ -26,6 +26,18 @@ export function resolveWebCorsOrigin(origin: string): string | undefined {
   return getAllowedWebCorsOrigins().includes(origin) ? origin : undefined
 }
 
+/**
+ * Validates the `Origin` header on WebSocket upgrades to prevent Cross-Site
+ * WebSocket Hijacking (CSWSH). Non-browser clients omitting `Origin` are
+ * allowed; whenever `Origin` is present, it must match `resolveWebCorsOrigin`.
+ */
+export function isWebSocketOriginAllowed(origin: string | undefined): boolean {
+  if (origin === undefined || origin === '') {
+    return true
+  }
+  return resolveWebCorsOrigin(origin) !== undefined
+}
+
 export const webCorsOptions = {
   origin: resolveWebCorsOrigin,
   allowHeaders: ['Authorization', 'Content-Type', 'X-UUID'],

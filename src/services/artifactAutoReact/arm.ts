@@ -429,9 +429,21 @@ export async function armLiveSubscribe(input: WtArmInput): Promise<ArmOutcome> {
         // Do not oF: that latches stop. Roll back task + supervisor only.
         Dso([r])
         input.setAppState(prev => {
-          if (!(taskId in prev.tasks)) return prev
-          const { [taskId]: _dropped, ...rest } = prev.tasks
-          return { ...prev, tasks: rest }
+          const hasTask = taskId in prev.tasks
+          const hasTranscript =
+            prev.transcripts !== undefined && taskId in prev.transcripts
+          if (!hasTask && !hasTranscript) return prev
+          const { [taskId]: _dropped, ...restTasks } = prev.tasks
+          if (hasTranscript && prev.transcripts) {
+            const { [taskId]: _droppedTranscript, ...restTranscripts } =
+              prev.transcripts
+            return {
+              ...prev,
+              tasks: restTasks,
+              transcripts: restTranscripts,
+            }
+          }
+          return { ...prev, tasks: restTasks }
         })
         return { outcome: 'skipped', reason: 'ws_open_error' }
       }

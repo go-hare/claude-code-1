@@ -15,7 +15,22 @@ const GOLD_PARSE_SUFFIX =
 const GOLD_SEVERAL =
   'Hook output is several JSON documents, treating as plain text'
 
-const hooksSrc = readFileSync(join(import.meta.dir, '../hooks.ts'), 'utf8')
+const hooksSrc = [
+  '../hooks.ts',
+  '../hooks/hookCore.ts',
+  '../hooks/hookShellRunner.ts',
+  '../hooks/hookOutputProcessor.ts',
+  '../hooks/hookConfigRegistry.ts',
+  '../hooks/hookModelSlotPool.ts',
+  '../hooks/hookEngine.ts',
+  '../hooks/hookEntryExecutor.ts',
+  '../hooks/hookOutsideReplEngine.ts',
+  '../hooks/hookToolEvents.ts',
+  '../hooks/hookSessionAndPromptEvents.ts',
+  '../hooks/hookLifecycleEvents.ts',
+]
+  .map(rel => readFileSync(join(import.meta.dir, rel), 'utf8'))
+  .join('\n')
 
 function jsonParseMessage(text: string): string {
   try {

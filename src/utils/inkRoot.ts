@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import {
   createRoot as createInkRoot,
+  registerInkHostAdapter,
   type RenderOptions,
   type Root,
 } from '@anthropic/ink'
@@ -10,7 +11,31 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growt
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { isTmuxControlMode } from './fullscreen.js'
 import { getPlatform, type Platform } from './platform.js'
+import { isScreenReaderModeEnabled } from './screenReaderGate.js'
+import {
+  getActiveSessionFromAls,
+  getBootstrapSession,
+  hasActiveSessionAls,
+  runWithSession,
+  type Session,
+} from './sessionRoot.js'
 import { getPinnedStorageV5 } from './storageV5/index.js'
+
+export function registerDefaultInkHostAdapter(): void {
+  registerInkHostAdapter({
+    sessionRoot: {
+      getBootstrapSession,
+      hasActiveSessionAls,
+      getActiveSessionFromAls,
+      runWithSession: (session, fn) => runWithSession(session as Session, fn),
+    },
+    getFeatureFlag: getFeatureValue_CACHED_MAY_BE_STALE,
+    isScreenReaderModeEnabled: () => isScreenReaderModeEnabled(),
+    isTmuxControlMode,
+  })
+}
+
+registerDefaultInkHostAdapter()
 
 /**
  * Official 2.1.328 (`l1` @chunk@306863829.js): enables Ink's early-key

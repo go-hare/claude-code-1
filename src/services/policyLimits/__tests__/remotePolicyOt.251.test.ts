@@ -4,7 +4,7 @@
  * fail-open.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const src = readFileSync(join(import.meta.dir, '../index.ts'), 'utf8')
@@ -34,7 +34,22 @@ describe('densable QD/Ot remote policy fail-closed', () => {
       '../../../../packages/builtin-tools/src/tools/RemoteTriggerTool/RemoteTriggerTool.ts',
     ]
     for (const rel of files) {
-      const body = readFileSync(join(import.meta.dir, rel), 'utf8')
+      const entry = readFileSync(join(import.meta.dir, rel), 'utf8')
+      const body =
+        rel === '../../../cli/print.ts'
+          ? [
+              entry,
+              ...readdirSync(join(import.meta.dir, '../../../cli/print'))
+                .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+                .sort()
+                .map(f =>
+                  readFileSync(
+                    join(import.meta.dir, '../../../cli/print', f),
+                    'utf8',
+                  ),
+                ),
+            ].join('\n')
+          : entry
       expect(body).toContain('isRemotePolicyAllowed')
       expect(body).not.toContain("isPolicyAllowed('allow_remote")
     }

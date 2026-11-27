@@ -4,7 +4,7 @@
  * DAt @184815660; display:"updates" @184957981.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { growthbookMock } from '../../../tests/mocks/growthbook'
 import * as realSettings from 'src/utils/settings/settings.js'
@@ -47,7 +47,22 @@ import {
 } from '../thinking.js'
 
 const root = join(import.meta.dir, '../../..')
-const src = (rel: string) => readFileSync(join(root, rel), 'utf8')
+const SPLIT_DIRS: Record<string, string> = {
+  'src/services/api/claude.ts': 'src/services/api/claude',
+}
+const src = (rel: string) => {
+  const entry = readFileSync(join(root, rel), 'utf8')
+  const subRel = SPLIT_DIRS[rel]
+  if (!subRel) return entry
+  const subDir = join(root, subRel)
+  return [
+    entry,
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 afterEach(() => {
   showThinkingSummaries = undefined

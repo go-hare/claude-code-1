@@ -197,7 +197,7 @@ describe('densable 2.1.225 #10 CCR tip delta rehydrate', () => {
   })
 
   test('source wiring: remoteIO tip batch + after_event_id', async () => {
-    const { readFileSync } = await import('node:fs')
+    const { readdirSync, readFileSync } = await import('node:fs')
     const { join: pathJoin } = await import('node:path')
     const remoteIo = readFileSync(
       pathJoin(import.meta.dir, '../../cli/remoteIO.ts'),
@@ -215,10 +215,14 @@ describe('densable 2.1.225 #10 CCR tip delta rehydrate', () => {
     // Important #1: early-exit is opt-in via callback return, not callback presence
     expect(ccr).toContain("errorAction === 'early-exit'")
     expect(ccr).toContain("return 'early-exit'")
-    const storage = readFileSync(
-      pathJoin(import.meta.dir, '../sessionStorage.ts'),
-      'utf8',
-    )
+    const ssDir = pathJoin(import.meta.dir, '../sessionStorage')
+    const storage = [
+      readFileSync(pathJoin(import.meta.dir, '../sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(pathJoin(ssDir, f), 'utf8')),
+    ].join('\n')
     expect(storage).toContain('tip-not-in-tail')
     expect(storage).toContain('client-gated')
     expect(storage).toContain('no-sidecar')

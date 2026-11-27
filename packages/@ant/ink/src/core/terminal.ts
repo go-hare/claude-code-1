@@ -12,6 +12,10 @@ import {
   eraseLines,
 } from './termio/csi.js'
 import { BSU, ESU, HIDE_CURSOR, SHOW_CURSOR } from './termio/dec.js'
+import {
+  getInkHostAdapter,
+  getInkHostAdapterGeneration,
+} from './hostAdapter.js'
 import { inkSession } from './instances.js'
 import { isJediTermEnv } from './jediTermInput.js'
 import { attacherCaps, link, printsUnknownSequences } from './termio/osc.js'
@@ -22,38 +26,29 @@ function isEnvTruthyLike(value: string | undefined): boolean {
 }
 
 /**
- * densable `sg()` — `r().isEnabled()`. Call-time require of the AX gate
- * (flag / CLAUDE_AX_SCREEN_READER / settings / GB). Standalone Ink tests
- * fall back to env.
+ * densable `sg()` — `r().isEnabled()`. Queries the registered host adapter's
+ * screen-reader gate (flag / CLAUDE_AX_SCREEN_READER / settings / GB).
+ * Standalone Ink tests fall back to env.
  */
 function isScreenReaderEnvEnabled(): boolean {
   try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { isScreenReaderModeEnabled } =
-      require('../../../../../src/utils/screenReaderGate.js') as typeof import('../../../../../src/utils/screenReaderGate.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    return isScreenReaderModeEnabled()
+    const check = getInkHostAdapter().isScreenReaderModeEnabled
+    if (check) return check()
   } catch {
-    return (
-      isEnvTruthyLike(process.env.CLAUDE_AX_SCREEN_READER) ||
-      isEnvTruthyLike(process.env.INK_SCREEN_READER)
-    )
+    // fall back to env
   }
+  return (
+    isEnvTruthyLike(process.env.CLAUDE_AX_SCREEN_READER) ||
+    isEnvTruthyLike(process.env.INK_SCREEN_READER)
+  )
 }
 
 /** densable `k("tengu_native_cursor", !1)===!0`. */
 function kNativeCursor(): boolean {
   try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { getFeatureValue_CACHED_MAY_BE_STALE } =
-      require('../../../../../src/services/analytics/growthbook.js') as typeof import('../../../../../src/services/analytics/growthbook.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    return (
-      getFeatureValue_CACHED_MAY_BE_STALE<boolean>(
-        'tengu_native_cursor',
-        false,
-      ) === true
-    )
+    const getFeatureFlag = getInkHostAdapter().getFeatureFlag
+    if (!getFeatureFlag) return false
+    return getFeatureFlag<boolean>('tengu_native_cursor', false) === true
   } catch {
     return false
   }
@@ -62,16 +57,9 @@ function kNativeCursor(): boolean {
 /** densable `k("tengu_marlin_porch", !1)===!0`. */
 function kMarlinPorch(): boolean {
   try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { getFeatureValue_CACHED_MAY_BE_STALE } =
-      require('../../../../../src/services/analytics/growthbook.js') as typeof import('../../../../../src/services/analytics/growthbook.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    return (
-      getFeatureValue_CACHED_MAY_BE_STALE<boolean>(
-        'tengu_marlin_porch',
-        false,
-      ) === true
-    )
+    const getFeatureFlag = getInkHostAdapter().getFeatureFlag
+    if (!getFeatureFlag) return false
+    return getFeatureFlag<boolean>('tengu_marlin_porch', false) === true
   } catch {
     return false
   }
@@ -95,9 +83,11 @@ function isDecstbmAllowlisted(sync: boolean): boolean {
 
 type SessionFeaturePins = {
   decstbmRendererEnabled: boolean | undefined
+  decstbmAdapterGen: number
 }
 
 const sessionFeaturePins = new WeakMap<object, SessionFeaturePins>()
+const nativeCursorAdapterGen = new WeakMap<object, number>()
 
 /**
  * densable `Oo()` — `r.of(U())`. Not `Jk()` (`h.of(U().host)`).
@@ -106,7 +96,10 @@ function Oo(): SessionFeaturePins {
   const session = inkSession()
   const existing = sessionFeaturePins.get(session)
   if (existing) return existing
-  const created: SessionFeaturePins = { decstbmRendererEnabled: undefined }
+  const created: SessionFeaturePins = {
+    decstbmRendererEnabled: undefined,
+    decstbmAdapterGen: -1,
+  }
   sessionFeaturePins.set(session, created)
   return created
 }
@@ -116,11 +109,8 @@ function Oo(): SessionFeaturePins {
  */
 function isTmuxControlModeGold(): boolean {
   try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { isTmuxControlMode } =
-      require('../../../../../src/utils/fullscreen.js') as typeof import('../../../../../src/utils/fullscreen.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    return isTmuxControlMode()
+    const check = getInkHostAdapter().isTmuxControlMode
+    return check ? check() : false
   } catch {
     return false
   }
@@ -131,34 +121,35 @@ function isTmuxControlModeGold(): boolean {
  * Gold `vc()` is `YWe()?ge("policySettings")` — Team/Enterprise slot
  * `slotAdminOrParentComposed` is product-removed here, so `vc()` is always
  * null (do not invent a file-policy stand-in).
+ * Tracks `getInkHostAdapterGeneration()` so late host-adapter registration
+ * immediately invalidates any pre-registration fallback pin.
  */
 export function isDecstbmRendererEnabled(): boolean {
   const pins = Oo()
-  if (pins.decstbmRendererEnabled !== undefined) {
+  const adapterGen = getInkHostAdapterGeneration()
+  if (
+    pins.decstbmRendererEnabled !== undefined &&
+    pins.decstbmAdapterGen === adapterGen
+  ) {
     return pins.decstbmRendererEnabled
   }
+  let enabled: boolean
   if (!process.stdout.isTTY) {
-    pins.decstbmRendererEnabled = false
-    return false
+    enabled = false
+  } else if (isTmuxControlModeGold()) {
+    enabled = false
+  } else if (!isDecstbmAllowlisted(isSynchronizedOutputSupported(true))) {
+    enabled = false
+  } else if (isScreenReaderEnvEnabled()) {
+    enabled = false
+  } else if (isEnvTruthyLike(process.env.CLAUDE_CODE_DECSTBM)) {
+    enabled = true
+  } else {
+    enabled = kMarlinPorch()
   }
-  if (isTmuxControlModeGold()) {
-    pins.decstbmRendererEnabled = false
-    return false
-  }
-  if (!isDecstbmAllowlisted(isSynchronizedOutputSupported(true))) {
-    pins.decstbmRendererEnabled = false
-    return false
-  }
-  if (isScreenReaderEnvEnabled()) {
-    pins.decstbmRendererEnabled = false
-    return false
-  }
-  if (isEnvTruthyLike(process.env.CLAUDE_CODE_DECSTBM)) {
-    pins.decstbmRendererEnabled = true
-    return true
-  }
-  pins.decstbmRendererEnabled = kMarlinPorch()
-  return pins.decstbmRendererEnabled
+  pins.decstbmRendererEnabled = enabled
+  pins.decstbmAdapterGen = adapterGen
+  return enabled
 }
 
 export type Progress = {
@@ -267,7 +258,10 @@ export function resetTerminalProbeForTests(): void {
   host.osc11Responsive = undefined
   host.probeEventLogged = false
   host.nativeCursorEnabled = undefined
-  Oo().decstbmRendererEnabled = undefined
+  nativeCursorAdapterGen.delete(host)
+  const pins = Oo()
+  pins.decstbmRendererEnabled = undefined
+  pins.decstbmAdapterGen = -1
 }
 
 /** densable `Jk().osc11Responsive`. */
@@ -357,22 +351,29 @@ function nativeCursorSyr(): boolean {
 }
 
 /**
- * densable `eD` — pin `Jk().nativeCursorEnabled` once.
- * Gold: accessibility / sg() → true; else `!x6() && syr()`.
+ * densable `eD` — pin `Jk().nativeCursorEnabled` once per host-adapter
+ * generation. Gold: accessibility / sg() → true; else `!x6() && syr()`.
  */
 export function isNativeCursorEnabled(): boolean {
   const host = Jk()
-  if (host.nativeCursorEnabled !== undefined) return host.nativeCursorEnabled
+  const adapterGen = getInkHostAdapterGeneration()
+  if (
+    host.nativeCursorEnabled !== undefined &&
+    nativeCursorAdapterGen.get(host) === adapterGen
+  ) {
+    return host.nativeCursorEnabled
+  }
+  let enabled: boolean
   if (isEnvTruthyLike(process.env.CLAUDE_CODE_ACCESSIBILITY)) {
-    host.nativeCursorEnabled = true
-    return true
+    enabled = true
+  } else if (isScreenReaderEnvEnabled()) {
+    enabled = true
+  } else {
+    enabled = !isDecstbmRendererEnabled() && nativeCursorSyr()
   }
-  if (isScreenReaderEnvEnabled()) {
-    host.nativeCursorEnabled = true
-    return true
-  }
-  host.nativeCursorEnabled = !isDecstbmRendererEnabled() && nativeCursorSyr()
-  return host.nativeCursorEnabled
+  host.nativeCursorEnabled = enabled
+  nativeCursorAdapterGen.set(host, adapterGen)
+  return enabled
 }
 
 /** densable `Shr` / `ME` — XTVERSION ghostty (SSH-safe; honors attacherCaps().isGhosttyXtv). */

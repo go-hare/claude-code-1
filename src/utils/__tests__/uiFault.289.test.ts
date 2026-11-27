@@ -2,7 +2,7 @@
  * densable 2.1.289 — Client fail → owning plugin `ui.fault` (terminal).
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CLIENT_FAULT_EMPTY_REASON,
@@ -12,6 +12,17 @@ import {
 
 const CLIENT = join(import.meta.dir, '../plugins/functionHooksClient.ts')
 const MODULES = join(import.meta.dir, '../plugins/functionHooksModules.ts')
+const MODULES_DIR = join(import.meta.dir, '../plugins/functionHooks')
+
+function readModulesSource(): string {
+  return [
+    readFileSync(MODULES, 'utf8'),
+    ...readdirSync(MODULES_DIR)
+      .filter(f => f.endsWith('.ts'))
+      .sort()
+      .map(f => readFileSync(join(MODULES_DIR, f), 'utf8')),
+  ].join('\n')
+}
 
 afterEach(() => {
   setClientFaultReporter(undefined)
@@ -40,7 +51,7 @@ describe('densable 2.1.289 ui.fault Client isolation', () => {
 
   test('client failRecord reports phase-tagged ui.fault; modules wire reporter', () => {
     const client = readFileSync(CLIENT, 'utf8')
-    const modules = readFileSync(MODULES, 'utf8')
+    const modules = readModulesSource()
     expect(client).toContain('setClientFaultReporter')
     expect(client).toContain("failRecord(record, errorMessage(err), 'render')")
     expect(client).toContain("failRecord(record, errorMessage(err), 'load')")
@@ -121,7 +132,7 @@ describe('densable 2.1.289 ui.fault Client isolation', () => {
 
 describe('densable 2.1.289 Amt/Zc fault-render debounce', () => {
   test('notifyDrawingReadersOfKeys is $C (Zc) not immediate E1t', () => {
-    const modules = readFileSync(MODULES, 'utf8')
+    const modules = readModulesSource()
     expect(modules).toContain('function notifyDrawingReadersOfKeys')
     expect(modules).toContain('function bumpHdPlugin')
     expect(modules).toContain('FAULT_RENDER_LIVE_MS = 34')
@@ -144,7 +155,7 @@ describe('densable 2.1.289 Amt/Zc fault-render debounce', () => {
 
 describe('densable 2.1.289 jis/jP/U2 plugin render cooldown', () => {
   test('ui.invalidate ui.render still bumps Fv and schedules jis', () => {
-    const modules = readFileSync(MODULES, 'utf8')
+    const modules = readModulesSource()
     expect(modules).toContain('PLUGIN_RENDER_COOLDOWN_MS = 1000')
     expect(modules).toContain('function invalidatePluginRender')
     expect(modules).toContain('function pluginVisibleLive')
@@ -199,10 +210,17 @@ describe('densable 2.1.289 jis/jP/U2 plugin render cooldown', () => {
 
 describe('densable 2.1.289 PluginClient no()/eo wrap', () => {
   test('PluginRasterPanes measures yoga and maps eo buttons', () => {
-    const panes = readFileSync(
-      join(import.meta.dir, '../../components/PluginRasterPanes.tsx'),
-      'utf8',
-    )
+    const panesDir = join(import.meta.dir, '../../components/pluginRaster')
+    const panes = [
+      readFileSync(
+        join(import.meta.dir, '../../components/PluginRasterPanes.tsx'),
+        'utf8',
+      ),
+      ...readdirSync(panesDir)
+        .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+        .sort()
+        .map(f => readFileSync(join(panesDir, f), 'utf8')),
+    ].join('\n')
     expect(panes).toContain('measureElement(node)')
     expect(panes).toContain(
       'instanceRef.current.resize(measuredWidth, measuredHeight)',

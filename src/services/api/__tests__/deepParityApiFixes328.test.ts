@@ -210,10 +210,13 @@ describe('Deep Parity Fix 3 (2.1.328) — API / Attribution Billing / Retry & Au
     })
 
     test('claude.ts wires retryContext.maxTokensOverride into resolveOutputTokenLimitForContinuation', () => {
-      const claudeSrc = readFileSync(
-        join(ROOT, 'src/services/api/claude.ts'),
-        'utf8',
-      )
+      const claudeSrc = [
+        readFileSync(join(ROOT, 'src/services/api/claude.ts'), 'utf8'),
+        readFileSync(
+          join(ROOT, 'src/services/api/claude/requestParamsBuilder.ts'),
+          'utf8',
+        ),
+      ].join('\n')
       expect(claudeSrc).toContain(
         'retryMaxTokensOverride: retryContext?.maxTokensOverride',
       )
@@ -805,10 +808,13 @@ describe('Deep Parity Fix 3 (2.1.328) — API / Attribution Billing / Retry & Au
     })
 
     test('claude.ts wires deferMaxTokensCeilingConfirmation and confirms inside message_start', () => {
-      const claudeSrc = readFileSync(
-        join(ROOT, 'src/services/api/claude.ts'),
-        'utf8',
-      )
+      const claudeSrc = [
+        readFileSync(join(ROOT, 'src/services/api/claude.ts'), 'utf8'),
+        readFileSync(
+          join(ROOT, 'src/services/api/claude/streamEventProcessor.ts'),
+          'utf8',
+        ),
+      ].join('\n')
       expect(claudeSrc).toContain('deferMaxTokensCeilingConfirmation: true')
       expect(claudeSrc).toContain(
         'confirmPendingMaxTokensCeiling = pending.confirm',

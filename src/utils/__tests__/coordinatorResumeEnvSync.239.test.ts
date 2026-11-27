@@ -2,7 +2,7 @@
  * densable coordinator resume — env sync when lazy module is incomplete.
  * Locks print/sessionRestore fallback to syncCoordinatorModeEnvFromSession.
  */
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, test } from 'bun:test'
 import { syncCoordinatorModeEnvFromSession } from '../residualFinalEnvGates.js'
@@ -25,10 +25,14 @@ describe('coordinator resume env sync when module null', () => {
   })
 
   test('print.ts falls back to syncCoordinatorModeEnvFromSession', () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../../cli/print.ts'),
-      'utf8',
-    )
+    const printDir = join(import.meta.dir, '../../cli/print')
+    const src = [
+      readFileSync(join(import.meta.dir, '../../cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('syncCoordinatorModeEnvFromSession')
     expect(src).toMatch(
       /coordinatorMod\s*\?\s*coordinatorMod\.matchSessionMode[\s\S]*?:\s*syncCoordinatorModeEnvFromSession/,

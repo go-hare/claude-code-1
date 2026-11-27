@@ -7,10 +7,16 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'bun:test'
 
-const CLAUDE_SRC = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '../claude.ts'),
-  'utf8',
-)
+const CLAUDE_SRC = [
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../claude/requestPrep.ts'),
+    'utf8',
+  ),
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../claude.ts'),
+    'utf8',
+  ),
+].join('\n')
 
 describe('qWT midConvFallback gate (238)', () => {
   test('effort beta OR is in the midConvFallback predicate', () => {

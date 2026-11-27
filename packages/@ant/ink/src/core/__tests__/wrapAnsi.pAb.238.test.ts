@@ -55,7 +55,7 @@ describe('densable 2.1.238 #14 wrapAnsi DH/pAb', () => {
     expect(src).toContain('Bun.wrapAnsi')
     expect(src).not.toContain("from 'wrap-ansi'")
     expect(src).not.toContain('wrapAnsiNpm')
-    expect(src).toContain("from './utils/sliceAnsi.js'")
+    expect(src).toContain('export function wrapAnsiFallback')
     // densable Z restore: `n[l++]??c` keeps the PUA if the stand-in was unmatched
     expect(src).toContain('saved[i++] ?? c')
     expect(src).not.toContain("saved[i++] ?? ''")

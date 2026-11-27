@@ -2,7 +2,7 @@
  * densable 2.1.246 #58 — SEA m9o=3 / GWe / b9o / d9n idle check-in cap.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppState } from '../../../state/AppStateStore.js'
 import {
@@ -160,10 +160,14 @@ describe('goalIdleCheckin densable 2.1.246 (#58)', () => {
   })
 
   test('query mid-turn absorb calls d9n on main-thread human prompts', () => {
-    const querySrc = readFileSync(
-      join(import.meta.dir, '../../../query.ts'),
-      'utf8',
-    )
+    const queryDir = join(import.meta.dir, '../../../query')
+    const querySrc = [
+      readFileSync(join(import.meta.dir, '../../../query.ts'), 'utf8'),
+      ...readdirSync(queryDir)
+        .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+        .sort()
+        .map(f => readFileSync(join(queryDir, f), 'utf8')),
+    ].join('\n')
     expect(querySrc).toContain('clearGoalIdleCheckinCount')
     expect(querySrc).toContain('isHumanLikeOrigin')
   })

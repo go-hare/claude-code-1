@@ -318,7 +318,7 @@ describe('Node.js compatibility for ComputerUse (Bun.* elimination)', () => {
     }
   })
 
-  test('R4-P0-2: openTerminal avoids nested PowerShell quote interpolation using direct spawn + -EncodedCommand', () => {
+  test('R4-P0-2 & Item 9: openTerminal avoids nested PowerShell quote interpolation and honors opts.terminal (wt | cmd | powershell)', () => {
     const src = readFileSync(
       resolve(REPO_ROOT, 'src/utils/computerUse/executorCrossPlatform.ts'),
       'utf8',
@@ -327,6 +327,12 @@ describe('Node.js compatibility for ComputerUse (Bun.* elimination)', () => {
     expect(src).toContain("'-NoExit', '-EncodedCommand', encodedCmd")
     expect(src).toContain("Buffer.from(cmd, 'utf16le').toString('base64')")
     expect(src).toContain('windowsHide: false')
+    expect(src).toContain("const terminalKind = opts.terminal ?? 'powershell'")
+    expect(src).toContain("if (terminalKind === 'wt')")
+    expect(src).toContain("spawnProgram = 'wt'")
+    expect(src).toContain("else if (terminalKind === 'cmd')")
+    expect(src).toContain("spawnProgram = 'cmd.exe'")
+    expect(src).toContain('/[\\r\\n]/.test(cmd)')
   })
 
   test('R4-P0-3: darwin and win32 computer-use-swift backends avoid shell and script interpolation', async () => {

@@ -454,8 +454,8 @@ export class RowDrawer {
         this.written.push(nextRow, contentEnd, cols)
         break
       }
-      // Step back if we landed on a wide-char SpacerTail
-      if (
+      // Step back if we landed on a wide-char SpacerTail (may span 2+ tails for w >= 3 graphemes)
+      while (
         x > 0 &&
         nextInBounds &&
         cellAt(next, x, nextRow)?.width === CellWidth.SpacerTail
@@ -507,7 +507,19 @@ export class RowDrawer {
           : 0
         this.encoder.setLink(linkId, next.hyperlinkPool)
         this.encoder.setStyle(cell.styleId)
-        const advance = cell.width === CellWidth.Wide ? 2 : 1
+        let advance = 1
+        if (cell.width === CellWidth.Wide) {
+          let tailCount = 0
+          while (
+            x + 1 + tailCount < cols &&
+            x + 1 + tailCount < next.width &&
+            cellAt(next, x + 1 + tailCount, nextRow)?.width ===
+              CellWidth.SpacerTail
+          ) {
+            tailCount++
+          }
+          advance = Math.max(2, 1 + tailCount)
+        }
         this.encoder.write(
           cell.width === CellWidth.SpacerHead ? ' ' : cell.char,
           x + advance,
@@ -732,6 +744,7 @@ export class InlineRenderer {
   scrolledOutRows = 0
   mustRedraw = false
   isCursorRowErased = false
+  lastCursor: { readonly x: number; readonly y: number } | undefined = undefined
   private front: Screen | undefined
   private beforeFrame = {
     scrolledOutRows: 0,
@@ -957,6 +970,7 @@ export class InlineRenderer {
       encoder.bytes += cursorMove(0, targetY - prevCursorRow)
       encoder.placeCursor(targetX, encoder.y)
     }
+    this.lastCursor = { x: targetX, y: nextOffset + targetY }
 
     const wantVisible =
       next.cursor.visible ||
@@ -995,7 +1009,13 @@ export class InlineRenderer {
     ) {
       return 'resize'
     }
-    if (mustRedraw) return 'clear'
+    if (
+      mustRedraw ||
+      prev.screen.charPool !== next.screen.charPool ||
+      prev.screen.hyperlinkPool !== next.screen.hyperlinkPool
+    ) {
+      return 'clear'
+    }
     return frameFillsViewport(prev) &&
       frameTotalRows(next) < frameTotalRows(prev) &&
       frameTotalRows(next) <= prevVp.height
@@ -1047,6 +1067,8 @@ export class InlineRenderer {
       refScreen.charPool,
       refScreen.hyperlinkPool,
     )
+    this.front.charPool = refScreen.charPool
+    this.front.hyperlinkPool = refScreen.hyperlinkPool
     resetScreen(this.front, refScreen.width, rows)
     return this.front
   }
@@ -1099,11 +1121,17 @@ export class CoveringRenderer {
     return Math.max(0, start - 2 * this.countIn(prevFrame))
   }
 
-  uncover(prev: RenderTargetFrame, caps: TerminalRenderCapabilities): string {
+  uncover(
+    prev: RenderTargetFrame,
+    caps: TerminalRenderCapabilities,
+    targetCursor: RenderTargetFrame['cursor'] = prev.cursor,
+  ): string {
     if (this.countIn(prev) === 0) return ''
     const shown = this.asShown(prev)
     this.covered = undefined
-    return this.inline.render(shown, prev, caps).bytes
+    const next =
+      targetCursor === prev.cursor ? prev : { ...prev, cursor: targetCursor }
+    return this.inline.render(shown, next, caps).bytes
   }
 
   render(
@@ -1343,6 +1371,7 @@ export class FullscreenRenderer {
     const poolsChanged =
       this.front !== undefined &&
       (this.styleGeneration !== this.stylePool.generation ||
+        this.front.charPool !== nextScreen.charPool ||
         this.front.hyperlinkPool !== nextScreen.hyperlinkPool)
     this.styleGeneration = this.stylePool.generation
     if (poolsChanged) {

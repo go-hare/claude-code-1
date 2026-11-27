@@ -297,12 +297,7 @@ const SessionTunnelEnvelopeSchema = z.object({
   }),
   session_token: z.string().min(1),
   api_base_url: z.string().transform(validateOrigin),
-  session_token_expires_at: z
-    .number()
-    .int()
-    .min(1e9)
-    .optional()
-    .catch(undefined),
+  session_token_expires_at: z.number().int().min(1e9).optional(),
   file_upload_path: z
     .string()
     .regex(/^\/(?!\/)/)

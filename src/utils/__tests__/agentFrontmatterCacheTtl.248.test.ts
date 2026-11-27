@@ -3,7 +3,7 @@
  * Schema is only cacheTtl: "5m" | "1h". "1h" is ignored in subscription overage.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 import * as realSettings from '../settings/settings.js'
@@ -57,7 +57,14 @@ const pluginSrc = readFileSync(
   join(import.meta.dir, '../plugins/loadPluginAgents.ts'),
   'utf8',
 )
-const querySrc = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+const queryDir = join(import.meta.dir, '../../query')
+const querySrc = [
+  readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8'),
+  ...readdirSync(queryDir)
+    .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+    .sort()
+    .map(f => readFileSync(join(queryDir, f), 'utf8')),
+].join('\n')
 const runAgentSrc = readFileSync(
   join(
     import.meta.dir,

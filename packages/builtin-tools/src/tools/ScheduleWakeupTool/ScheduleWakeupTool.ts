@@ -77,7 +77,18 @@ const fallbackWakeupSession: { readonly root: object } = {
   },
 }
 
-function getActiveWakeupSession(): { readonly root: object } {
+function getActiveWakeupSession(explicitSession?: { readonly root: object }): {
+  readonly root: object
+} {
+  if (
+    explicitSession !== undefined &&
+    explicitSession !== null &&
+    typeof explicitSession === 'object' &&
+    explicitSession.root !== null &&
+    typeof explicitSession.root === 'object'
+  ) {
+    return explicitSession
+  }
   try {
     const session = getBootstrapSession()
     if (
@@ -99,8 +110,10 @@ const scheduleWakeupSessionSlot =
     lastArmedWakeupMeta: undefined,
   }))
 
-function getScheduleWakeupSessionState(): ScheduleWakeupSessionState {
-  return scheduleWakeupSessionSlot.of(getActiveWakeupSession())
+function getScheduleWakeupSessionState(session?: {
+  readonly root: object
+}): ScheduleWakeupSessionState {
+  return scheduleWakeupSessionSlot.of(getActiveWakeupSession(session))
 }
 
 function resolveWakeupToolUseId(
@@ -369,7 +382,7 @@ const builtScheduleWakeupTool = buildTool({
           }
           throw new ScheduleWakeupInputError(refusal)
         }
-        const wakeupState = getScheduleWakeupSessionState()
+        const wakeupState = getScheduleWakeupSessionState(deps.session)
         // densable stop path → QKu
         if (stop === true) {
           const cancelledWakeups = stopDynamicLoop()

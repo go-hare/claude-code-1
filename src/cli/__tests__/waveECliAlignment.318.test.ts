@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { warnOAuthExpiryBeforePrint } from '../print.js'
@@ -89,7 +96,14 @@ describe('Wave 316-318 Group E CLI & daemon alignment', () => {
   })
 
   test('#1544/#1552/#1634: print.ts has non-aborting titleSignal, ENOSPC/EDQUOT exit(1), and non-blocking set_model', () => {
-    const src = readFileSync(join(import.meta.dir, '..', 'print.ts'), 'utf8')
+    const printDir = join(import.meta.dir, '..', 'print')
+    const src = [
+      readFileSync(join(import.meta.dir, '..', 'print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('const titleSignal = createAbortController().signal')
     expect(src).toContain(
       "degraded.code === 'ENOSPC' || degraded.code === 'EDQUOT'",

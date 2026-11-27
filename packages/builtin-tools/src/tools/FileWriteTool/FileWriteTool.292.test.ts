@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { coerceWriteInputRaw, FileWriteTool } from './FileWriteTool.js'
 import {
@@ -66,10 +66,17 @@ describe('#256 FileWriteTool and WebFetchTool input coercion', () => {
 
 describe('#250 toolExecution coerces input unconditionally before tool.call plugin hooks', () => {
   test('toolExecution.ts does not gate tool.coerceInput behind coerceInputBeforePluginHooks', () => {
-    const src = readFileSync(
-      join(process.cwd(), 'src/services/tools/toolExecution.ts'),
-      'utf8',
-    )
+    const execDir = join(process.cwd(), 'src/services/tools/execution')
+    const src = [
+      readFileSync(
+        join(process.cwd(), 'src/services/tools/toolExecution.ts'),
+        'utf8',
+      ),
+      ...readdirSync(execDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(execDir, f), 'utf8')),
+    ].join('\n')
     expect(src).not.toContain('coerceInputBeforePluginHooks')
     expect(src).toContain('const rawCoerced = tool.coerceInput')
   })

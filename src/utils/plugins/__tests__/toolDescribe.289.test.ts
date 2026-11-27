@@ -3,7 +3,7 @@
  * User plugins cannot rewrite org-managed MCP sign-in tool descriptions.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { Tool } from '../../../Tool.js'
 import { toolToAPISchema } from '../../api.js'
@@ -43,10 +43,14 @@ const HOP = readFileSync(
   join(import.meta.dir, '../functionHooksHop.ts'),
   'utf8',
 )
-const CHAIN = readFileSync(
-  join(import.meta.dir, '../functionHooksModules.ts'),
-  'utf8',
-)
+const FH_DIR = join(import.meta.dir, '../functionHooks')
+const CHAIN = [
+  readFileSync(join(import.meta.dir, '../functionHooksModules.ts'), 'utf8'),
+  ...readdirSync(FH_DIR)
+    .filter(f => f.endsWith('.ts'))
+    .sort()
+    .map(f => readFileSync(join(FH_DIR, f), 'utf8')),
+].join('\n')
 const API = readFileSync(join(import.meta.dir, '../../api.ts'), 'utf8')
 const HOOKS = readFileSync(
   join(import.meta.dir, '../loadPluginHooks.ts'),
@@ -59,10 +63,17 @@ const AUTH = readFileSync(
   ),
   'utf8',
 )
-const CLIENT = readFileSync(
-  join(import.meta.dir, '../../../services/mcp/client.ts'),
-  'utf8',
-)
+const CLIENT_DIR = join(import.meta.dir, '../../../services/mcp/client')
+const CLIENT = [
+  readFileSync(
+    join(import.meta.dir, '../../../services/mcp/client.ts'),
+    'utf8',
+  ),
+  ...readdirSync(CLIENT_DIR)
+    .filter(f => f.endsWith('.ts'))
+    .sort()
+    .map(f => readFileSync(join(CLIENT_DIR, f), 'utf8')),
+].join('\n')
 
 function rewrite(to: string): FunctionHookHandler {
   return async (_api, event, next) => next({ ...event, description: to })

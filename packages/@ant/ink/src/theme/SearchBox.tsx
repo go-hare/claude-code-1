@@ -8,7 +8,7 @@ import type { PasteEvent } from '../core/events/paste-event.js';
 import { getFocusManager } from '../core/focus.js';
 import { stringWidth } from '../core/stringWidth.js';
 import { isNativeCursorEnabled } from '../core/terminal.js';
-import { firstGrapheme } from '../core/utils/grapheme.js';
+import { firstGrapheme, getGraphemeSegmenter } from '../core/utils/grapheme.js';
 import { wrapAnsi } from '../core/wrapAnsi.js';
 import { useIsFocused } from '../hooks/use-is-focused.js';
 import { useDeclaredCursor } from '../hooks/use-declared-cursor.js';
@@ -107,15 +107,15 @@ function widthUpToOffset(lineText: string, offset: number): number {
   return stringWidth(lineText.slice(0, offset));
 }
 
-function offsetAtColumn(lineText: string, targetCol: number): number {
+export function offsetAtColumn(lineText: string, targetCol: number): number {
   if (targetCol <= 0 || lineText.length === 0) return 0;
   let usedCols = 0;
   let offset = 0;
-  for (const ch of lineText) {
-    const chWidth = stringWidth(ch);
-    if (usedCols + chWidth > targetCol) break;
-    usedCols += chWidth;
-    offset += ch.length;
+  for (const { segment } of getGraphemeSegmenter().segment(lineText)) {
+    const segWidth = stringWidth(segment);
+    if (usedCols + segWidth > targetCol) break;
+    usedCols += segWidth;
+    offset += segment.length;
   }
   return offset;
 }

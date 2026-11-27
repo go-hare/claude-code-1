@@ -105,15 +105,13 @@ describe('Auth Middleware', () => {
       expect(body.username).toBe('bob')
     })
 
-    test('accepts valid session token', async () => {
+    test('rejects Web UI rct_* session token (P1-E5: API key required on /v1/*)', async () => {
       storeCreateUser('charlie')
       const { token } = issueToken('charlie')
       const res = await app.request('/api-key-test', {
         headers: { Authorization: `Bearer ${token}` },
       })
-      expect(res.status).toBe(200)
-      const body = await resJson(res)
-      expect(body.username).toBe('charlie')
+      expect(res.status).toBe(401)
     })
 
     test('rejects invalid token', async () => {
@@ -212,23 +210,86 @@ describe('Auth Middleware', () => {
   })
 
   describe('uuidAuth', () => {
-    test('accepts UUID from query param', async () => {
-      const res = await app.request('/uuid-test?uuid=test-uuid-1')
-      expect(res.status).toBe(200)
-      const body = await resJson(res)
-      expect(body.uuid).toBe('test-uuid-1')
+    const origAllowUnauth = process.env.RCS_ALLOW_UNAUTHENTICATED_UUID
+
+    afterAll(() => {
+      mockConfig.host = '0.0.0.0'
+      if (origAllowUnauth === undefined) {
+        delete process.env.RCS_ALLOW_UNAUTHENTICATED_UUID
+      } else {
+        process.env.RCS_ALLOW_UNAUTHENTICATED_UUID = origAllowUnauth
+      }
     })
 
-    test('accepts UUID from header', async () => {
-      const res = await app.request('/uuid-test', {
+    test('rejects unauthenticated UUID from query param or header by default', async () => {
+      mockConfig.host = '0.0.0.0'
+      delete process.env.RCS_ALLOW_UNAUTHENTICATED_UUID
+      const qRes = await app.request('/uuid-test?uuid=test-uuid-1')
+      expect(qRes.status).toBe(401)
+      const hRes = await app.request('/uuid-test', {
         headers: { 'X-UUID': 'test-uuid-2' },
       })
-      expect(res.status).toBe(200)
-      const body = await resJson(res)
-      expect(body.uuid).toBe('test-uuid-2')
+      expect(hRes.status).toBe(401)
     })
 
-    test('rejects missing UUID', async () => {
+    test('rejects unauthenticated UUID on non-loopback even when RCS_ALLOW_UNAUTHENTICATED_UUID=1', async () => {
+      mockConfig.host = '0.0.0.0'
+      process.env.RCS_ALLOW_UNAUTHENTICATED_UUID = '1'
+      try {
+        const res = await app.request('/uuid-test?uuid=test-uuid-1')
+        expect(res.status).toBe(401)
+      } finally {
+        delete process.env.RCS_ALLOW_UNAUTHENTICATED_UUID
+      }
+    })
+
+    test('accepts unauthenticated UUID ONLY on loopback with explicit RCS_ALLOW_UNAUTHENTICATED_UUID=1 opt-in', async () => {
+      mockConfig.host = '127.0.0.1'
+      process.env.RCS_ALLOW_UNAUTHENTICATED_UUID = '1'
+      try {
+        const qRes = await app.request('/uuid-test?uuid=test-uuid-1')
+        expect(qRes.status).toBe(200)
+        expect((await resJson(qRes)).uuid).toBe('test-uuid-1')
+
+        const hRes = await app.request('/uuid-test', {
+          headers: { 'X-UUID': 'test-uuid-2' },
+        })
+        expect(hRes.status).toBe(200)
+        expect((await resJson(hRes)).uuid).toBe('test-uuid-2')
+
+        const missingRes = await app.request('/uuid-test')
+        expect(missingRes.status).toBe(401)
+      } finally {
+        mockConfig.host = '0.0.0.0'
+        delete process.env.RCS_ALLOW_UNAUTHENTICATED_UUID
+      }
+    })
+
+    test('accepts server-issued session token and pins uuid to verified username', async () => {
+      storeCreateUser('alice')
+      const { token } = issueToken('alice')
+      const res = await app.request('/uuid-test', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-UUID': 'spoofed-bob',
+        },
+      })
+      expect(res.status).toBe(200)
+      expect((await resJson(res)).uuid).toBe('alice')
+    })
+
+    test('accepts valid API key with optional X-UUID scoping', async () => {
+      const res = await app.request('/uuid-test', {
+        headers: {
+          Authorization: 'Bearer test-api-key',
+          'X-UUID': 'scoped-client',
+        },
+      })
+      expect(res.status).toBe(200)
+      expect((await resJson(res)).uuid).toBe('scoped-client')
+    })
+
+    test('rejects missing auth', async () => {
       const res = await app.request('/uuid-test')
       expect(res.status).toBe(401)
     })

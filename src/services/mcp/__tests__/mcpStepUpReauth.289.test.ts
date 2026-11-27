@@ -2,7 +2,7 @@
  * densable 2.1.289 `_r` / Ua / fr — MCP step-up re-auth.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { McpAuthError } from '../client.js'
 import {
@@ -74,10 +74,14 @@ describe('densable 2.1.289 mcp_step_up_reauth', () => {
     expect(wiring).toContain('registerConnections')
     expect(wiring).toContain('acquireConnections')
 
-    const client = readFileSync(
-      join(root, 'src/services/mcp/client.ts'),
-      'utf8',
-    )
+    const clientDir = join(root, 'src/services/mcp/client')
+    const client = [
+      readFileSync(join(root, 'src/services/mcp/client.ts'), 'utf8'),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     expect(client).toContain('requestedScope')
     expect(client).toContain('insufficient_scope')
     expect(client).toContain('requestMcpStepUpReauth')

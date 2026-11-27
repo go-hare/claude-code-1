@@ -30,7 +30,9 @@ import { isAutoDreamEnabled } from './config.js'
 import {
   getActiveSessionFromAls,
   getBootstrapSession,
-  hasActiveSessionAls,
+  getBootstrapSessionHost,
+  HostSlot,
+  ofDefaultHost,
   RootSessionSlot,
   runWithSession,
 } from '../../utils/sessionHost.js'
@@ -342,12 +344,27 @@ type SessionAutoDreamSlot = {
   runner: AutoDreamRunner
 }
 
-let globalAutoDreamInitialized = false
-let defaultAutoDreamDeps: AutoDreamDeps | undefined
+type AutoDreamHostState = {
+  initialized: boolean
+  deps: AutoDreamDeps | undefined
+}
+
+const autoDreamHostSlot = new HostSlot<AutoDreamHostState>(() => ({
+  initialized: false,
+  deps: undefined,
+}))
+
+function getEffectiveAutoDreamHostConfig(): AutoDreamHostState {
+  const own = autoDreamHostSlot.peek(getBootstrapSessionHost())
+  if (own?.initialized) {
+    return own
+  }
+  return ofDefaultHost(autoDreamHostSlot)
+}
 
 const autoDreamBySession = new RootSessionSlot<SessionAutoDreamSlot>(() => ({
   initialized: false,
-  runner: createAutoDreamRunner(defaultAutoDreamDeps),
+  runner: createAutoDreamRunner(getEffectiveAutoDreamHostConfig().deps),
 }))
 
 /**
@@ -355,15 +372,12 @@ const autoDreamBySession = new RootSessionSlot<SessionAutoDreamSlot>(() => ({
  * initExtractMemories), or per-test in beforeEach for a fresh closure.
  */
 export function initAutoDream(deps?: AutoDreamDeps): void {
-  if (!hasActiveSessionAls()) {
-    defaultAutoDreamDeps = deps
-  }
+  const hostSlot = autoDreamHostSlot.of(getBootstrapSessionHost())
+  hostSlot.initialized = true
+  hostSlot.deps = deps
   const slot = autoDreamBySession.of(getBootstrapSession())
   slot.initialized = true
-  slot.runner = createAutoDreamRunner(deps ?? defaultAutoDreamDeps)
-  if (!hasActiveSessionAls()) {
-    globalAutoDreamInitialized = true
-  }
+  slot.runner = createAutoDreamRunner(deps)
 }
 
 export function getAutoDreamStateForTesting(): AutoDreamStateSnapshot {
@@ -378,10 +392,7 @@ export function getAutoDreamStateForTesting(): AutoDreamStateSnapshot {
 }
 
 export function resetAutoDreamForTests(): void {
-  if (!hasActiveSessionAls()) {
-    globalAutoDreamInitialized = false
-    defaultAutoDreamDeps = undefined
-  }
+  autoDreamHostSlot.drop(getBootstrapSessionHost())
   autoDreamBySession.drop(getBootstrapSession())
 }
 
@@ -435,9 +446,10 @@ export async function executeAutoDream(
   appendSystemMessage?: AppendSystemMessageFn,
 ): Promise<void> {
   const session = getBootstrapSession()
+  const effectiveHost = getEffectiveAutoDreamHostConfig()
   const existing = autoDreamBySession.peek(session)
-  if (!existing && !globalAutoDreamInitialized) return
+  if (!existing && !effectiveHost.initialized) return
   const slot = existing ?? autoDreamBySession.of(session)
-  if (!slot.initialized && !globalAutoDreamInitialized) return
+  if (!slot.initialized && !effectiveHost.initialized) return
   await slot.runner.execute(context, appendSystemMessage)
 }

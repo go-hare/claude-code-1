@@ -5,6 +5,7 @@
  * path strings that densable SEA lists next to `.config/gh`.
  */
 import { describe, expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
@@ -34,9 +35,14 @@ describe('densable 2.1.232 #6 glab credential paths', () => {
 // Static source guard: adapter lists both paths (avoids heavy sandbox mock).
 describe('sandbox-adapter.ts glab denyWrite (source)', () => {
   test('contains glab-cli next to gh', async () => {
-    const src = await Bun.file(
-      new URL('../sandbox-adapter.ts', import.meta.url),
-    ).text()
+    const adapterDir = join(import.meta.dir, '../adapter')
+    const src = [
+      await Bun.file(new URL('../sandbox-adapter.ts', import.meta.url)).text(),
+      ...readdirSync(adapterDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(adapterDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain("join(home, '.config', 'gh')")
     expect(src).toContain("join(home, '.config', 'glab-cli')")
     expect(src).toContain("join(projectGitDir, 'glab-cli')")

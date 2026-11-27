@@ -69,7 +69,13 @@ import type { HookDeferredToolAttachment } from './utils/attachments.js'
 import { transformCompletedAssistantMessage } from './utils/messageDisplayTransform.js'
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
-import { getCwd } from './utils/cwd.js'
+import {
+  exitScopedCwd,
+  getCwd,
+  getCwdOverride,
+  hasScopedCwd,
+  runWithCwd,
+} from './utils/cwd.js'
 import { isEnvTruthy } from './utils/envUtils.js'
 
 /**
@@ -1344,76 +1350,139 @@ export type QueryEngineConfig = {
   ) => { messages: Message[]; executed: boolean } | undefined
 }
 
+type CapturedCwdScope = { kind: 'scoped'; cwd: string } | { kind: 'exit' }
+
+function runWithCapturedCwdScope<T>(
+  cwdScope: CapturedCwdScope | undefined,
+  fn: () => T,
+): T {
+  if (cwdScope === undefined) {
+    return fn()
+  }
+  if (cwdScope.kind === 'exit') {
+    return hasScopedCwd() ? exitScopedCwd(fn) : fn()
+  }
+  return runWithCwd(cwdScope.cwd, () => {
+    const syncFromAls = (): void => {
+      const updated = getCwdOverride()
+      if (updated !== undefined) {
+        cwdScope.cwd = updated
+      }
+    }
+    try {
+      const result = fn()
+      if (
+        result !== null &&
+        (typeof result === 'object' || typeof result === 'function') &&
+        'then' in result &&
+        typeof (result as PromiseLike<unknown>).then === 'function'
+      ) {
+        return Promise.resolve(result).finally(syncFromAls) as unknown as T
+      }
+      syncFromAls()
+      return result
+    } catch (err) {
+      syncFromAls()
+      throw err
+    }
+  })
+}
+
 function runInCapturedSessionContext<T>(
   session: Session | undefined,
   subconversation: SubconversationAlsContext | undefined,
+  cwdScope: CapturedCwdScope | undefined,
   fn: () => T,
 ): T {
+  const runBody = (): T => runWithCapturedCwdScope(cwdScope, fn)
   if (session === undefined) {
     if (subconversation === undefined) {
-      return fn()
+      return runBody()
     }
     if (
       getActiveSessionFromAls() === undefined &&
       getActiveSubconversationFromAls() === subconversation
     ) {
-      return fn()
+      return runBody()
     }
     return exitSessionContext(() =>
-      runWithSubconversationContext(subconversation, fn),
+      runWithSubconversationContext(subconversation, runBody),
     )
   }
   if (
     getActiveSessionFromAls() === session &&
     getActiveSubconversationFromAls() === subconversation
   ) {
-    return fn()
+    return runBody()
   }
   return runWithSession(session, () =>
     subconversation !== undefined
-      ? runWithSubconversationContext(subconversation, fn)
-      : fn(),
+      ? runWithSubconversationContext(subconversation, runBody)
+      : runBody(),
   )
 }
 
 /**
  * Bind an `AsyncGenerator` to a captured `Session` / `SubconversationAlsContext`
- * so every `.next()`, `.return()`, `.throw()`, and `[Symbol.asyncDispose]()`
- * resumption runs inside the engine's ALS store — even when an external caller
- * iterates `for await (const msg of engine.submitMessage(...))` outside
- * `runWithSession(...)` (fixing the JS/V8/JSC caller-ALS generator resumption trap).
+ * / `cwdAls` scope so every `.next()`, `.return()`, `.throw()`, and
+ * `[Symbol.asyncDispose]()` resumption runs inside the engine's ALS stores —
+ * even when an external caller iterates `for await (const msg of engine.submitMessage(...))`
+ * outside `runWithSession(...)` or inside another tenant's `runWithCwd(...)`
+ * (fixing the JS/V8/JSC caller-ALS generator resumption trap).
  */
 function bindGeneratorToSessionContext<T, TNext = unknown>(
   createGen: () => AsyncGenerator<T, void, TNext>,
   session: Session | undefined,
   subconversation?: SubconversationAlsContext,
+  cwdScope?: CapturedCwdScope,
 ): AsyncGenerator<T, void, TNext> {
-  if (session === undefined && subconversation === undefined) {
+  if (
+    session === undefined &&
+    subconversation === undefined &&
+    cwdScope === undefined
+  ) {
     return createGen()
   }
-  const inner = runInCapturedSessionContext(session, subconversation, createGen)
+  const inner = runInCapturedSessionContext(
+    session,
+    subconversation,
+    cwdScope,
+    createGen,
+  )
   const bound: AsyncGenerator<T, void, TNext> = {
     next(...args: [] | [TNext]) {
-      return runInCapturedSessionContext(session, subconversation, () =>
-        inner.next(...args),
+      return runInCapturedSessionContext(
+        session,
+        subconversation,
+        cwdScope,
+        () => inner.next(...args),
       )
     },
     return(value: void | PromiseLike<void>) {
-      return runInCapturedSessionContext(session, subconversation, () =>
-        inner.return(value),
+      return runInCapturedSessionContext(
+        session,
+        subconversation,
+        cwdScope,
+        () => inner.return(value),
       )
     },
     throw(e: unknown) {
-      return runInCapturedSessionContext(session, subconversation, () =>
-        inner.throw(e),
+      return runInCapturedSessionContext(
+        session,
+        subconversation,
+        cwdScope,
+        () => inner.throw(e),
       )
     },
     [Symbol.asyncIterator]() {
       return bound
     },
     async [Symbol.asyncDispose]() {
-      await runInCapturedSessionContext(session, subconversation, () =>
-        inner.return(undefined),
+      await runInCapturedSessionContext(
+        session,
+        subconversation,
+        cwdScope,
+        () => inner.return(undefined),
       )
     },
   }
@@ -1487,6 +1556,7 @@ export class QueryEngine {
   private config: QueryEngineConfig
   private readonly boundSession: Session | undefined
   private readonly boundSubconversation: SubconversationAlsContext | undefined
+  private readonly boundCwd: CapturedCwdScope | undefined
   private mutableMessages: Message[]
   private abortController: AbortController
   private permissionDenials: SDKPermissionDenial[]
@@ -1513,6 +1583,17 @@ export class QueryEngine {
       config.session !== undefined
         ? undefined
         : getActiveSubconversationFromAls()
+    const inheritedScopedCwd =
+      config.session !== undefined &&
+      getActiveSessionFromAls() !== config.session
+        ? undefined
+        : getCwdOverride()
+    this.boundCwd =
+      inheritedScopedCwd !== undefined
+        ? { kind: 'scoped', cwd: inheritedScopedCwd }
+        : this.boundSession !== undefined
+          ? { kind: 'exit' }
+          : undefined
     this.sessionToolState = config.toolState ?? new ToolStateSlots()
     this.taskRegistry =
       config.taskRegistry ??
@@ -1543,6 +1624,7 @@ export class QueryEngine {
     return runInCapturedSessionContext(
       this.boundSession,
       this.boundSubconversation,
+      this.boundCwd,
       fn,
     )
   }
@@ -1560,10 +1642,19 @@ export class QueryEngine {
       this.boundSession !== undefined
         ? this.boundSubconversation
         : (this.boundSubconversation ?? getActiveSubconversationFromAls())
+    const activeScopedCwd = getCwdOverride()
+    const cwdScope: CapturedCwdScope | undefined =
+      this.boundCwd ??
+      (activeScopedCwd !== undefined
+        ? { kind: 'scoped', cwd: activeScopedCwd }
+        : session !== undefined
+          ? { kind: 'exit' }
+          : undefined)
     return bindGeneratorToSessionContext(
       () => this.submitMessageInner(prompt, options),
       session,
       subconversation,
+      cwdScope,
     )
   }
 

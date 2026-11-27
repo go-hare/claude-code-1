@@ -20,6 +20,7 @@ import { logForDebugging } from '../debug.js'
 import { logError } from '../log.js'
 import {
   getBootstrapSessionHost,
+  hasActiveSessionAls,
   HostSlot,
   ofDefaultHost,
 } from '../sessionHost.js'
@@ -129,6 +130,9 @@ function getEffectiveExternalStorageV5Factory():
   const own = externalStorageV5FactoryHostSlot.peek(getBootstrapSessionHost())
   if (own?.hasOverride) {
     return own.factory
+  }
+  if (hasActiveSessionAls()) {
+    return undefined
   }
   return ofDefaultHost(externalStorageV5FactoryHostSlot).factory
 }
@@ -306,6 +310,9 @@ export function getPinnedStorageV5(): StorageV5 | undefined {
   const own = pinnedStorageV5HostSlot.peek(getBootstrapSessionHost())
   if (own?.hasOverride) {
     return own.lastPinned
+  }
+  if (hasActiveSessionAls()) {
+    return undefined
   }
   return ofDefaultHost(pinnedStorageV5HostSlot).lastPinned
 }

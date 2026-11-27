@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { attachHeadlessRemoteMcpReconnect } from '../headlessMcpReconnect.js'
@@ -501,10 +501,14 @@ describe('Wave 325 Group 3 — MCP & Code Mode', () => {
   })
 
   test('#2308: pollToCompletion normal setTimeout callback removes abort listener on pollSignal', () => {
-    const clientSrc = readFileSync(
-      join(import.meta.dir, '../client.ts'),
-      'utf8',
-    )
+    const clientDir = join(import.meta.dir, '../client')
+    const clientSrc = [
+      readFileSync(join(import.meta.dir, '../client.ts'), 'utf8'),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     const idx = clientSrc.indexOf('timer = setTimeout(() => {')
     expect(idx).toBeGreaterThan(-1)
     const snippet = clientSrc.slice(idx, idx + 250)

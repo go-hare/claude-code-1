@@ -107,7 +107,7 @@ describe('densable 2.1.225 #7 compact-pair withhold', () => {
   })
 
   test('remoteBridgeCore exposes noHistoryBackfill from skipInitialHistoryFlush', async () => {
-    const { readFileSync } = await import('node:fs')
+    const { readdirSync, readFileSync } = await import('node:fs')
     const { join: pathJoin } = await import('node:path')
     const core = readFileSync(
       pathJoin(import.meta.dir, '../../bridge/remoteBridgeCore.ts'),
@@ -116,10 +116,14 @@ describe('densable 2.1.225 #7 compact-pair withhold', () => {
     expect(core).toContain('noHistoryBackfill: skipInitialHistoryFlush')
     expect(core).toContain('noHistoryBackfill: true')
     // withhold helpers exported from sessionStorage
-    const storage = readFileSync(
-      pathJoin(import.meta.dir, '../sessionStorage.ts'),
-      'utf8',
-    )
+    const ssDir = pathJoin(import.meta.dir, '../sessionStorage')
+    const storage = [
+      readFileSync(pathJoin(import.meta.dir, '../sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(pathJoin(ssDir, f), 'utf8')),
+    ].join('\n')
     expect(storage).toContain(
       'Skipping compact-pair upload: session carries history-backfill suppression',
     )

@@ -50,8 +50,10 @@ const recentPushByKeySlot = new RootSessionSlot<Map<string, number>>(
   () => new Map(),
 )
 
-function getRecentPushByKey(): Map<string, number> {
-  return recentPushByKeySlot.of(getBootstrapSession())
+function getRecentPushByKey(session?: {
+  readonly root: object
+}): Map<string, number> {
+  return recentPushByKeySlot.of(session ?? getBootstrapSession())
 }
 
 const PUSH_SECRET_PATTERNS: ReadonlyArray<RegExp> = [
@@ -273,7 +275,7 @@ Requires Remote Control to be configured. Respects user notification settings (t
         const effectiveStatus = input.status ?? 'normal'
         const dedupKey = `${input.title}\0${input.body}\0${effectiveStatus}`
         const now = Date.now()
-        const recentPushByKey = getRecentPushByKey()
+        const recentPushByKey = getRecentPushByKey(deps.session)
         const lastSentAt = recentPushByKey.get(dedupKey)
         if (
           lastSentAt !== undefined &&

@@ -187,12 +187,16 @@ describe('densable reason string gold (2.1.216 #29)', () => {
 
 describe('wiring smoke (2.1.216 #29)', () => {
   test('print.ts abort path uses canUseToolAbortedDenyReason', async () => {
-    const { readFileSync } = await import('fs')
+    const { readdirSync, readFileSync } = await import('fs')
     const { join } = await import('path')
-    const src = readFileSync(
-      join(import.meta.dir, '../../../cli/print.ts'),
-      'utf8',
-    )
+    const printDir = join(import.meta.dir, '../../../cli/print')
+    const src = [
+      readFileSync(join(import.meta.dir, '../../../cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('canUseToolAbortedDenyReason')
     expect(src).toContain('canUseToolInvalidResultDenyReason')
     // Must not reintroduce permissionPromptTool reason on abort

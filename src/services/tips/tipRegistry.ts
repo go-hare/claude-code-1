@@ -49,6 +49,7 @@ import {
   isFirstPartyAnthropicBaseUrl,
 } from '../../utils/model/providers.js'
 import { getPlatform } from '../../utils/platform.js'
+import { getBootstrapSessionHost, HostSlot } from '../../utils/sessionHost.js'
 import { isPluginInstalled } from '../../utils/plugins/installedPluginsManager.js'
 import { loadKnownMarketplacesConfigSafe } from '../../utils/plugins/marketplaceManager.js'
 import { OFFICIAL_MARKETPLACE_NAME } from '../../utils/plugins/officialMarketplace.js'
@@ -157,14 +158,21 @@ export function recordPushNotifIdleUpsellShown(): void {
   )
 }
 
-let _isOfficialMarketplaceInstalledCache: boolean | undefined
-async function isOfficialMarketplaceInstalled(): Promise<boolean> {
-  if (_isOfficialMarketplaceInstalledCache !== undefined) {
-    return _isOfficialMarketplaceInstalledCache
+const officialMarketplaceInstalledByHost = new HostSlot<{
+  installed: boolean | undefined
+}>(() => ({ installed: undefined }))
+
+async function isOfficialMarketplaceInstalled(
+  context?: TipContext,
+): Promise<boolean> {
+  const host = context?.session?.host ?? getBootstrapSessionHost()
+  const cache = officialMarketplaceInstalledByHost.of(host)
+  if (cache.installed !== undefined) {
+    return cache.installed
   }
-  const config = await loadKnownMarketplacesConfigSafe()
-  _isOfficialMarketplaceInstalledCache = OFFICIAL_MARKETPLACE_NAME in config
-  return _isOfficialMarketplaceInstalledCache
+  const config = await loadKnownMarketplacesConfigSafe(context?.storageV5)
+  cache.installed = OFFICIAL_MARKETPLACE_NAME in config
+  return cache.installed
 }
 
 async function isMarketplacePluginRelevant(
@@ -174,7 +182,7 @@ async function isMarketplacePluginRelevant(
 ): Promise<boolean> {
   // Built-in first-party tips (frontend-design, vercel) are always eligible;
   // official pluginSuggestionMarketplaces only gates marketplace-declared tips.
-  if (!(await isOfficialMarketplaceInstalled())) {
+  if (!(await isOfficialMarketplaceInstalled(context))) {
     return false
   }
   if (isPluginInstalled(`${pluginName}@${OFFICIAL_MARKETPLACE_NAME}`)) {

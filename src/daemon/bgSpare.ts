@@ -28,7 +28,7 @@ import {
   getPtyErrPath,
   getSpareDir,
 } from './bgWorker.js'
-import { encodeCtrlFrame } from './ptyHost.js'
+import { encodeCtrlFrame, mintPtyAuthToken } from './ptyHost.js'
 import {
   applyHostManagedSpareEnv,
   applySpareProviderStrips,
@@ -529,6 +529,8 @@ export type HeldSpare = {
   cliVersion: string
   /** Local product: nonce embedded in spare host env + claim frame. */
   claimNonce: string
+  /** Per-spare PTY auth token passed via CLAUDE_BG_PTY_AUTH to ptyHost. */
+  ptyAuthToken?: string
   dispose(): void
 }
 
@@ -562,6 +564,7 @@ export function isBgLowMem(): boolean {
 /** Official _mO — env for spare host process. */
 export function buildSpareHostEnv(opts?: {
   claimNonce?: string
+  ptyAuthToken?: string
 }): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env }
   // densable os() We/pe/Ge, then RO (BASE_URL still visible), then wt.
@@ -586,6 +589,10 @@ export function buildSpareHostEnv(opts?: {
   // Local product: bind claim sock to supervisor-issued nonce.
   if (opts?.claimNonce) {
     env[SPARE_CLAIM_NONCE_ENV] = opts.claimNonce
+  }
+  // Authenticate the spare PTY host socket with a per-spare token.
+  if (opts?.ptyAuthToken) {
+    env.CLAUDE_BG_PTY_AUTH = opts.ptyAuthToken
   }
   return env
 }
@@ -615,6 +622,7 @@ export async function spawnSpare(opts: {
 
   const id = randomBytes(4).toString('hex')
   const claimNonce = randomBytes(16).toString('hex')
+  const ptyAuthToken = mintPtyAuthToken()
   const ptySock = getSparePtySockPath(id)
   const claimSock = getSpareClaimSockPath(id)
   const spareDir = getSpareDir()
@@ -639,7 +647,7 @@ export async function spawnSpare(opts: {
 
   const child = nodeSpawn(spawnArgv[0]!, spawnArgv.slice(1), {
     cwd: spareDir,
-    env: buildSpareHostEnv({ claimNonce }) as NodeJS.ProcessEnv,
+    env: buildSpareHostEnv({ claimNonce, ptyAuthToken }) as NodeJS.ProcessEnv,
     stdio: ['ignore', 'ignore', 'ignore'],
     detached: true,
     windowsHide: true,
@@ -663,6 +671,7 @@ export async function spawnSpare(opts: {
     startedAt: Date.now(),
     cliVersion: MACRO.VERSION,
     claimNonce,
+    ptyAuthToken,
     dispose() {
       try {
         child.kill('SIGTERM')
@@ -773,10 +782,13 @@ export async function sendClaim(
   }
 }
 
-function killSparePty(ptySock: string): void {
+function killSparePty(ptySock: string, ptyAuthToken?: string): void {
   const sock = createConnection(ptySock)
   sock.on('error', () => {})
   sock.once('connect', () => {
+    if (ptyAuthToken) {
+      sock.write(encodeCtrlFrame({ t: 'auth', token: ptyAuthToken }))
+    }
     sock.write(encodeCtrlFrame({ t: 'kill', sig: 'SIGTERM' }))
     sock.end()
   })
@@ -833,13 +845,14 @@ export async function claimSpare(
     console.warn(
       `[bg-spare] send-claim failed: short=${dispatch.short} errno=${errnoCode(err) ?? ''} ${msg.slice(0, 100)}`,
     )
-    killSparePty(spare.ptySock)
+    killSparePty(spare.ptySock, spare.ptyAuthToken)
     throw err
   }
 
   return BgWorker.claim(dispatch, {
     pid: spare.hostPid,
     ptySockPath: spare.ptySock,
+    ptyAuthToken: spare.ptyAuthToken,
     spawnPty,
     getAuthSnapshot,
   })
@@ -862,6 +875,11 @@ export async function reapOrphanSpares(
    * pty/claim paths are treated as known and never reaped.
    */
   extraKnownPtySocks?: Iterable<string>,
+  /**
+   * Optional per-socket PTY auth token map (persisted across supervisor restarts)
+   * used to authenticate `{ t: 'kill' }` frames sent to orphan spare PTY hosts.
+   */
+  ptyAuthBySock?: Map<string, string>,
 ): Promise<void> {
   if (process.platform === 'win32') return
 
@@ -888,12 +906,19 @@ export async function reapOrphanSpares(
     const sockPath = join(spareDir, file)
     if (knownSocks.has(sockPath)) continue
     reaped++
+    // Capture auth token synchronously before async connect so post-reap pruning
+    // cannot race with the connect callback.
+    const authToken = ptyAuthBySock?.get(sockPath)
     const sock = createConnection(sockPath)
     sock.on('error', () => {
+      ptyAuthBySock?.delete(sockPath)
       void unlink(sockPath).catch(() => {})
     })
     sock.once('connect', () => {
       sock.resume()
+      if (authToken) {
+        sock.write(encodeCtrlFrame({ t: 'auth', token: authToken }))
+      }
       sock.write(encodeCtrlFrame({ t: 'kill', sig: 'SIGTERM' }))
       sock.end()
       setTimeout((s: typeof sock) => s.destroy(), 2000, sock).unref()

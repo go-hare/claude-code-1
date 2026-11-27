@@ -1,10 +1,23 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 describe('main.tsx & cli/print.ts 2.1.311–2.1.314 alignment (#1281, #1359, #1385, #1413)', () => {
   const mainSrc = readFileSync(join(import.meta.dir, '../../main.tsx'), 'utf8')
-  const printSrc = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+  const printSrc = readModuleTree(
+    join(import.meta.dir, '../print.ts'),
+    join(import.meta.dir, '../print'),
+  )
 
   test('#1281: main.tsx skips subcommand registration when mayDispatchSubcommand returns false', () => {
     expect(mainSrc).toContain('mayDispatchSubcommand(rawArgs)')

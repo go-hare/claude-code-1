@@ -407,7 +407,16 @@ describe('Wave 326 Group 2 — API / Compact / Models / Quota / Usage / Cert', (
   })
 
   test('#47 targeted media block strip in claude.ts runs BEFORE ToolSearchRefusalError catch-all', async () => {
-    const src = await Bun.file(new URL('../claude.ts', import.meta.url)).text()
+    const { readdirSync, readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const claudeDir = join(import.meta.dir, '../claude')
+    const src = [
+      readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8'),
+      ...readdirSync(claudeDir)
+        .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+        .sort()
+        .map(f => readFileSync(join(claudeDir, f), 'utf8')),
+    ].join('\n')
     const mediaLimitIdx = src.indexOf('if (isUnprocessableMediaError(error)')
     const targetedStripIdx = src.indexOf(
       'const mediaLoc = parseMediaErrorLocation(error.message)',

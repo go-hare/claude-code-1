@@ -2,7 +2,7 @@
  * densable 2.1.251 #23 — qge on /mcp reconnect and the RC mcp_reconnect result.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   mcpServersDisabledElsewhereRemedy,
@@ -86,7 +86,14 @@ describe('densable 2.1.251 #23 MCP reconnect remedy', () => {
       join(root, 'src/components/mcp/MCPReconnect.tsx'),
       'utf8',
     )
-    const print = readFileSync(join(root, 'src/cli/print.ts'), 'utf8')
+    const printDir = join(root, 'src/cli/print')
+    const print = [
+      readFileSync(join(root, 'src/cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(slash).toContain('reconnectDisabledElsewhereResult')
     expect(slash).toContain('onComplete(driftedRemedy)')
     const rc = print.indexOf("subtype === 'mcp_reconnect'")

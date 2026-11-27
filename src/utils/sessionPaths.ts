@@ -29,6 +29,7 @@ import { type AgentId, asAgentId } from '../types/ids.js'
 import type { Entry, TranscriptMessage } from '../types/logs.js'
 import type { Message } from '../types/message.js'
 import { logForDebugging } from './debug.js'
+import { isDisklessActive, logDisklessWriteSkipped } from './disklessGuards.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { isFsInaccessible } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -279,10 +280,31 @@ export const AGENT_METADATA_PRESERVE_KEYS = [
  * densable H4d: when the write omits `$Ns` observer keys, merge prior
  * values from disk so spawn rewrites cannot drop observer pairing state.
  */
+function safeDisklessTargetPath(
+  computePath: () => string,
+  fallback: string,
+): string {
+  try {
+    return computePath()
+  } catch {
+    return fallback
+  }
+}
+
 export async function writeAgentMetadata(
   agentId: AgentId,
   metadata: AgentMetadata,
 ): Promise<void> {
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped(
+      'sessionPaths:writeAgentMetadata',
+      safeDisklessTargetPath(
+        () => getAgentMetadataPath(agentId),
+        `agent-${agentId}.meta.json`,
+      ),
+    )
+    return
+  }
   const path = getAgentMetadataPath(agentId)
   let toWrite: AgentMetadata = metadata
   if (AGENT_METADATA_PRESERVE_KEYS.some(key => metadata[key] === undefined)) {
@@ -308,6 +330,7 @@ export async function writeAgentMetadata(
 export async function readAgentMetadata(
   agentId: AgentId,
 ): Promise<AgentMetadata | null> {
+  if (isDisklessActive()) return null
   const path = getAgentMetadataPath(agentId)
   try {
     const raw = await readFile(path, 'utf-8')
@@ -369,6 +392,7 @@ export async function readLatestObserverRef(input?: {
   agentId?: string
   timestamp?: string
 } | null> {
+  if (isDisklessActive()) return null
   const sessionId = input?.sessionId ?? getSessionId()
   const path = getTranscriptPathForSession(sessionId)
   try {
@@ -435,6 +459,7 @@ export async function readLatestObserverRef(input?: {
 export async function isObserverSidecarReattachable(
   observerTaskId: string,
 ): Promise<boolean> {
+  if (isDisklessActive()) return false
   try {
     const path = getAgentTranscriptPath(asAgentId(observerTaskId))
     await stat(path)
@@ -460,6 +485,16 @@ export async function writeMainSessionObserverPointer(
   pointer: MainSessionObserverPointer,
   sessionId?: string,
 ): Promise<void> {
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped(
+      'sessionPaths:writeMainSessionObserverPointer',
+      safeDisklessTargetPath(
+        () => getMainSessionObserverPointerPath(sessionId),
+        `${sessionId ?? 'session'}.observer.meta.json`,
+      ),
+    )
+    return
+  }
   const path = getMainSessionObserverPointerPath(sessionId)
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, JSON.stringify(pointer))
@@ -468,6 +503,7 @@ export async function writeMainSessionObserverPointer(
 export async function readMainSessionObserverPointer(
   sessionId?: string,
 ): Promise<MainSessionObserverPointer | null> {
+  if (isDisklessActive()) return null
   const path = getMainSessionObserverPointerPath(sessionId)
   try {
     const raw = await readFile(path, 'utf-8')
@@ -562,6 +598,16 @@ export async function writeRemoteAgentMetadata(
   taskId: string,
   metadata: RemoteAgentMetadata,
 ): Promise<void> {
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped(
+      'sessionPaths:writeRemoteAgentMetadata',
+      safeDisklessTargetPath(
+        () => getRemoteAgentMetadataPath(taskId),
+        `remote-agent-${taskId}.meta.json`,
+      ),
+    )
+    return
+  }
   const path = getRemoteAgentMetadataPath(taskId)
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, JSON.stringify(metadata))
@@ -570,6 +616,7 @@ export async function writeRemoteAgentMetadata(
 export async function readRemoteAgentMetadata(
   taskId: string,
 ): Promise<RemoteAgentMetadata | null> {
+  if (isDisklessActive()) return null
   const path = getRemoteAgentMetadataPath(taskId)
   try {
     const raw = await readFile(path, 'utf-8')
@@ -581,6 +628,16 @@ export async function readRemoteAgentMetadata(
 }
 
 export async function deleteRemoteAgentMetadata(taskId: string): Promise<void> {
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped(
+      'sessionPaths:deleteRemoteAgentMetadata',
+      safeDisklessTargetPath(
+        () => getRemoteAgentMetadataPath(taskId),
+        `remote-agent-${taskId}.meta.json`,
+      ),
+    )
+    return
+  }
   const path = getRemoteAgentMetadataPath(taskId)
   try {
     await unlink(path)
@@ -597,6 +654,7 @@ export async function deleteRemoteAgentMetadata(taskId: string): Promise<void> {
 export async function listRemoteAgentMetadata(): Promise<
   RemoteAgentMetadata[]
 > {
+  if (isDisklessActive()) return []
   const dir = getRemoteAgentsDir()
   let entries: Dirent[]
   try {

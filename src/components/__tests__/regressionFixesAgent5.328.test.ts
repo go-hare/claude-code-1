@@ -1,11 +1,21 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   unwrapPastedContentForDisplay,
   wrapPastedContentBlock,
 } from '../../history.js'
 import { dispatchReplStreamEvent } from '../../screens/repl/runReplTurn.js'
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 describe('Regression Fix Agent 5 — UI / REPL / History', () => {
   test('P1-6: unwrapPastedContentForDisplay unwraps pasted_content blocks and unescapes nested tags', () => {
@@ -94,9 +104,9 @@ describe('Regression Fix Agent 5 — UI / REPL / History', () => {
   })
 
   test('P0-1..P0-5: no React hooks appear after early returns in REPL, PromptInput, PromptInputQueuedCommands, CollapsedReadSearchContent', () => {
-    const repl = readFileSync(
+    const repl = readModuleTree(
       join(import.meta.dir, '../../screens/REPL.tsx'),
-      'utf8',
+      join(import.meta.dir, '../../screens/repl'),
     )
     const transcriptBranch = repl.indexOf("\n  if (screen === 'transcript') {")
     const dialogOverPanelRef = repl.indexOf(
@@ -166,9 +176,9 @@ describe('Regression Fix Agent 5 — UI / REPL / History', () => {
     expect(msgs).not.toContain('TerminalWriteProvider as unknown')
     expect(msgs).toContain('return i >= lastContentIndex ? m.uuid : null;')
 
-    const prp = readFileSync(
+    const prp = readModuleTree(
       join(import.meta.dir, '../PluginRasterPanes.tsx'),
-      'utf8',
+      join(import.meta.dir, '../pluginRaster'),
     )
     expect(prp).toContain(
       "new Set(['end', 'truncate', 'truncate-end', 'clip'])",

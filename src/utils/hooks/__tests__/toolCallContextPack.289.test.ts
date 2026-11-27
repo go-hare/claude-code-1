@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   bootstrapSessionEffort,
   pdSessionEffort,
@@ -162,10 +164,19 @@ describe('densable ck(h, Pd, Ly) hook stdin', () => {
   })
 
   test('listOfContextTexts is the Iyo rL host in toolExecution', () => {
-    const src = readFileSync(
-      new URL('../../../services/tools/toolExecution.ts', import.meta.url),
-      'utf8',
+    const execDir = fileURLToPath(
+      new URL('../../../services/tools/execution', import.meta.url),
     )
+    const src = [
+      readFileSync(
+        new URL('../../../services/tools/toolExecution.ts', import.meta.url),
+        'utf8',
+      ),
+      ...readdirSync(execDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(execDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('listOfContextTexts(out.context)')
     expect(src).toContain('managedRan')
     expect(src).not.toContain("typeof entry === 'string' && entry !== ''")

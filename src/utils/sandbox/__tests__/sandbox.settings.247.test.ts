@@ -8,6 +8,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -241,11 +242,28 @@ describe('densable 2.1.247 #11 LZ settings-symlink scrub', () => {
     expect(denyWrite).toContain(file)
   })
 
-  test('wrapWithSandbox calls fN, pN, VZ, FZ after init', () => {
-    const wrapSrc = readFileSync(
-      fileURLToPath(new URL('../sandbox-adapter.ts', import.meta.url)),
-      'utf8',
+  const readSandboxAdapterCombined = (): string => {
+    const adapterDir = fileURLToPath(new URL('../adapter', import.meta.url))
+    const allFiles = readdirSync(adapterDir)
+      .filter(f => f.endsWith('.ts'))
+      .sort()
+    // Keep wrapCommands.ts immediately before lifecycle.ts so the
+    // `wrapWithSandbox` -> `initialize` slice bounds remain intact.
+    const rest = allFiles.filter(
+      f => f !== 'wrapCommands.ts' && f !== 'lifecycle.ts',
     )
+    const files = [...rest, 'wrapCommands.ts', 'lifecycle.ts']
+    return [
+      readFileSync(
+        fileURLToPath(new URL('../sandbox-adapter.ts', import.meta.url)),
+        'utf8',
+      ),
+      ...files.map(f => readFileSync(join(adapterDir, f), 'utf8')),
+    ].join('\n')
+  }
+
+  test('wrapWithSandbox calls fN, pN, VZ, FZ after init', () => {
+    const wrapSrc = readSandboxAdapterCombined()
     const start = wrapSrc.indexOf('async function wrapWithSandbox')
     const end = wrapSrc.indexOf('async function initialize')
     const wrap = wrapSrc.slice(start, end)
@@ -260,10 +278,7 @@ describe('densable 2.1.247 #11 LZ settings-symlink scrub', () => {
   })
 
   test('windows init calls pN then fN; convert Nu is false', () => {
-    const adapterSrc = readFileSync(
-      fileURLToPath(new URL('../sandbox-adapter.ts', import.meta.url)),
-      'utf8',
-    )
+    const adapterSrc = readSandboxAdapterCombined()
     const init = adapterSrc.slice(
       adapterSrc.indexOf('async function initialize'),
     )
@@ -347,10 +362,7 @@ describe('densable 2.1.247 #11 LZ settings-symlink scrub', () => {
       fileURLToPath(new URL('../../git/gitignore.ts', import.meta.url)),
       'utf8',
     )
-    const wz = readFileSync(
-      fileURLToPath(new URL('../sandbox-adapter.ts', import.meta.url)),
-      'utf8',
-    )
+    const wz = readSandboxAdapterCombined()
     const pN = wrap.slice(
       wrap.indexOf('export function ensureAtomicWriteStagingDirs'),
     )

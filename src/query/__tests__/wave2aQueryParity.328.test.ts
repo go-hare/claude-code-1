@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BriefTool } from '../../../packages/builtin-tools/src/tools/BriefTool/BriefTool.js'
 import {
@@ -23,7 +23,14 @@ import {
   isRequestEligibleForEmptyCompletionResend,
 } from '../queryHelpers.js'
 
-const querySrc = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+const queryDir = join(import.meta.dir, '..')
+const querySrc = [
+  readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8'),
+  ...readdirSync(queryDir)
+    .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+    .sort()
+    .map(f => readFileSync(join(queryDir, f), 'utf8')),
+].join('\n')
 
 afterEach(() => {
   resetCommandQueue()
@@ -62,8 +69,8 @@ describe('Wave 2A [P1-#1]: Mid-turn human prompts fold-in-flight & side effects'
     expect(querySrc).toContain('unregisterFoldInFlight(foldInFlightCommands)')
     expect(querySrc).toContain('isMidTurnFoldSuspended()')
     expect(querySrc).toContain('applyAbsorbedMidTurnEffects(consumedCommands)')
-    expect(querySrc).toContain(
-      'applyAbsorbedMidTurnEffects(\n              claimedConsumedCommands,',
+    expect(querySrc).toMatch(
+      /applyAbsorbedMidTurnEffects\(\s*claimedConsumedCommands,?\s*\)/,
     )
     expect(querySrc).toContain(
       'addToHistory(cmd.historyEntry, { armUndo: false })',
@@ -166,7 +173,8 @@ describe('Wave 2A [P1-#8] & [P1-#27]: Single autocompact path & live tengu_amber
   test('query.ts has no duplicate post-setup predictive autocompact block', () => {
     expect(querySrc).not.toContain('predictiveThreshold')
     expect(querySrc).not.toContain('estimateMaxTurnGrowth')
-    const autocompactCalls = querySrc.match(/deps\.autocompact\(/g) ?? []
+    const autocompactCalls =
+      querySrc.match(/(?:deps|queryDeps)\.autocompact\(/g) ?? []
     expect(autocompactCalls).toHaveLength(1)
   })
 

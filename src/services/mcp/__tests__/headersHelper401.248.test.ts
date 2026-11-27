@@ -5,7 +5,7 @@
  * Do not invent skip on a truthy headersHelper string (`!!helper`).
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { classifyAuthReconnectKind } from '../authReconnect.js'
 import { HIDDEN_MCP_ERROR_CODES } from '../mcpConnectionIssue.js'
@@ -20,7 +20,14 @@ import {
   shouldSkipOAuthAuthProvider,
 } from '../connectAuthClassify.js'
 
-const clientSrc = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+const clientDir = join(import.meta.dir, '../client')
+const clientSrc = [
+  readFileSync(join(import.meta.dir, '../client.ts'), 'utf8'),
+  ...readdirSync(clientDir)
+    .filter(f => f.endsWith('.ts'))
+    .sort()
+    .map(f => readFileSync(join(clientDir, f), 'utf8')),
+].join('\n')
 const connectionHelpersSrc = readFileSync(
   join(import.meta.dir, '../connectionHelpers.ts'),
   'utf8',

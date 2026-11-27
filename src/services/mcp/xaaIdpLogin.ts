@@ -9,6 +9,7 @@
 import {
   exchangeAuthorization,
   startAuthorization,
+  type FetchLike,
   type OAuthClientInformation,
   type OpenIdProviderDiscoveryMetadata,
 } from '@modelcontextprotocol/client'
@@ -27,12 +28,18 @@ function parseOpenIdProviderDiscoveryMetadata(
   return value as OpenIdProviderDiscoveryMetadata
 }
 import { randomBytes } from 'crypto'
-import { createServer, type Server } from 'http'
+import { createServer, request as httpRequest, type Server } from 'http'
+import { request as httpsRequest } from 'https'
+import type * as undici from 'undici'
 import { parse } from 'url'
 import xss from 'xss'
 import { openBrowser } from '../../utils/browser.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { toError } from '../../utils/errors.js'
+import {
+  isBlockedHostnameOrIp,
+  ssrfGuardedLookup,
+} from '../../utils/hooks/ssrfGuard.js'
 import { logMCPDebug } from '../../utils/log.js'
 import { getPlatform } from '../../utils/platform.js'
 import { getSecureStorage } from '../../utils/secureStorage/index.js'
@@ -193,15 +200,13 @@ export function saveIdpIdTokenFromJwt(
     )
   }
 
-  if (payload.iss !== undefined) {
-    if (
-      typeof payload.iss !== 'string' ||
-      issuerKey(payload.iss) !== issuerKey(idpIssuer)
-    ) {
-      throw new Error(
-        `XAA IdP: id_token issuer "${String(payload.iss)}" does not match configured issuer "${idpIssuer}"`,
-      )
-    }
+  if (typeof payload.iss !== 'string' || payload.iss.trim() === '') {
+    throw new Error('XAA IdP: invalid id_token: missing required iss claim')
+  }
+  if (issuerKey(payload.iss) !== issuerKey(idpIssuer)) {
+    throw new Error(
+      `XAA IdP: id_token issuer "${payload.iss}" does not match configured issuer "${idpIssuer}"`,
+    )
   }
 
   let expiresAt: number
@@ -274,6 +279,438 @@ export function clearIdpClientSecret(idpIssuer: string): void {
   storage.update(existing)
 }
 
+const MAX_OIDC_REDIRECTS = 5
+const OIDC_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304])
+
+export const CROSS_ORIGIN_SENSITIVE_HEADERS = [
+  'authorization',
+  'cookie',
+  'proxy-authorization',
+] as const
+
+export const REDIRECT_POST_TO_GET_STRIP_HEADERS = [
+  'content-type',
+  'content-length',
+  'content-encoding',
+  'content-language',
+  'content-location',
+] as const
+
+/**
+ * Clone request headers and strip credential-bearing headers before following
+ * a cross-origin redirect (`P1-E3`).
+ */
+export function stripCrossOriginCredentialHeaders(
+  headersInit: RequestInit['headers'],
+): Headers {
+  // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+  const headers = new Headers(headersInit)
+  for (const name of CROSS_ORIGIN_SENSITIVE_HEADERS) {
+    headers.delete(name)
+  }
+  return headers
+}
+
+type RequestInitWithDispatcher = RequestInit & {
+  dispatcher?: undici.Dispatcher
+}
+
+const ssrfDispatcherCache = new WeakMap<
+  typeof ssrfGuardedLookup,
+  undici.Dispatcher
+>()
+
+/**
+ * Build (and cache per lookup fn) an undici `Agent` with `connect.lookup`
+ * bound directly to `ssrfGuardedLookup` so DNS resolution and TCP connect
+ * share a single lookup (eliminating DNS-rebinding TOCTOU on Node.js).
+ */
+export function createSsrfGuardedUndiciDispatcher(
+  lookup: typeof ssrfGuardedLookup = ssrfGuardedLookup,
+): undici.Dispatcher | undefined {
+  const cached = ssrfDispatcherCache.get(lookup)
+  if (cached) return cached
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const undiciMod = require('undici') as typeof undici
+    if (typeof undiciMod.Agent !== 'function') return undefined
+    const agent = new undiciMod.Agent({
+      connect: {
+        lookup: (hostname, options, callback) => {
+          lookup(hostname, options, (err, address, family) => {
+            if (Array.isArray(address)) {
+              const normalized = address.map(entry =>
+                typeof entry === 'string'
+                  ? { address: entry, family: entry.includes(':') ? 6 : 4 }
+                  : {
+                      address: entry.address,
+                      family:
+                        entry.family ?? (entry.address.includes(':') ? 6 : 4),
+                    },
+              )
+              callback(err, normalized)
+            } else if (typeof address === 'string') {
+              callback(err, address, family)
+            } else {
+              callback(err, address.address, address.family)
+            }
+          })
+        },
+      },
+    })
+    ssrfDispatcherCache.set(lookup, agent)
+    return agent
+  } catch {
+    return undefined
+  }
+}
+
+function isRunningOnBun(): boolean {
+  return typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined'
+}
+
+async function serializeRequestBody(
+  body: RequestInit['body'],
+): Promise<Buffer | undefined> {
+  if (body === undefined || body === null) return undefined
+  if (typeof body === 'string') return Buffer.from(body, 'utf8')
+  if (body instanceof URLSearchParams) {
+    return Buffer.from(body.toString(), 'utf8')
+  }
+  if (body instanceof ArrayBuffer) return Buffer.from(body)
+  if (ArrayBuffer.isView(body)) {
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength)
+  }
+  if (typeof Blob !== 'undefined' && body instanceof Blob) {
+    return Buffer.from(await body.arrayBuffer())
+  }
+  // ReadableStream or other BodyInit supported by Response
+  // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+  const buf = await new Response(body).arrayBuffer()
+  return Buffer.from(buf)
+}
+
+/**
+ * Node `http`/`https` fetch adapter that binds `lookup` directly to the socket
+ * connect call (used on Bun where built-in `fetch` ignores undici `dispatcher`
+ * and as fallback when undici is unavailable). Eliminates DNS-rebinding TOCTOU.
+ */
+async function nodeHttpFetchWithLookup(
+  targetUrl: URL,
+  init: RequestInit | undefined,
+  lookup: typeof ssrfGuardedLookup,
+): Promise<Response> {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+  const reqHeaders = new Headers(init?.headers)
+  const bodyBuf = await serializeRequestBody(init?.body)
+  if (bodyBuf && !reqHeaders.has('content-length')) {
+    reqHeaders.set('content-length', String(bodyBuf.byteLength))
+  }
+  const plainHeaders: Record<string, string> = {}
+  reqHeaders.forEach((value, key) => {
+    plainHeaders[key] = value
+  })
+
+  const signal = init?.signal ?? undefined
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new Error('The operation was aborted')
+  }
+
+  return await new Promise<Response>((resolve, reject) => {
+    const requestFn =
+      targetUrl.protocol === 'https:' ? httpsRequest : httpRequest
+    let settled = false
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener('abort', onAbort)
+      fn()
+    }
+
+    const req = requestFn(
+      {
+        protocol: targetUrl.protocol,
+        hostname: targetUrl.hostname.replace(/^\[|\]$/g, ''),
+        port: targetUrl.port || undefined,
+        path: `${targetUrl.pathname}${targetUrl.search}`,
+        method,
+        headers: plainHeaders,
+        lookup: (hostname, options, callback) => {
+          lookup(hostname, options, (err, address, family) => {
+            if (Array.isArray(address)) {
+              const normalized = address.map(entry =>
+                typeof entry === 'string'
+                  ? { address: entry, family: entry.includes(':') ? 6 : 4 }
+                  : {
+                      address: entry.address,
+                      family:
+                        entry.family ?? (entry.address.includes(':') ? 6 : 4),
+                    },
+              )
+              callback(err, normalized)
+            } else if (typeof address === 'string') {
+              callback(err, address, family)
+            } else {
+              callback(err, address.address, address.family)
+            }
+          })
+        },
+      },
+      res => {
+        const chunks: Buffer[] = []
+        res.on('data', (chunk: Buffer | string) => {
+          chunks.push(
+            typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
+          )
+        })
+        res.on('error', err => {
+          finish(() => reject(err))
+        })
+        res.on('end', () => {
+          finish(() => {
+            const status = res.statusCode ?? 200
+            // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+            const responseHeaders = new Headers()
+            for (let i = 0; i + 1 < res.rawHeaders.length; i += 2) {
+              const name = res.rawHeaders[i]
+              const val = res.rawHeaders[i + 1]
+              if (name !== undefined && val !== undefined) {
+                responseHeaders.append(name, val)
+              }
+            }
+            const hasNullBody =
+              method === 'HEAD' || NULL_BODY_STATUSES.has(status)
+            const bodyPayload = hasNullBody
+              ? null
+              : new Uint8Array(Buffer.concat(chunks))
+            // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+            resolve(
+              new Response(bodyPayload, {
+                status,
+                statusText: res.statusMessage ?? '',
+                headers: responseHeaders,
+              }),
+            )
+          })
+        })
+      },
+    )
+
+    const onAbort = () => {
+      const reason =
+        signal?.reason instanceof Error
+          ? signal.reason
+          : new Error('The operation was aborted')
+      req.destroy(reason)
+      finish(() => reject(reason))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    req.on('error', err => {
+      finish(() => reject(err))
+    })
+
+    if (bodyBuf && bodyBuf.byteLength > 0) {
+      req.end(bodyBuf)
+    } else {
+      req.end()
+    }
+  })
+}
+
+function isProxyActiveForOidcUrl(href: string): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getProxyUrl, shouldBypassProxy } =
+      require('../../utils/proxy.js') as typeof import('../../utils/proxy.js')
+    return Boolean(getProxyUrl()) && !shouldBypassProxy(href)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Execute a single HTTP/HTTPS hop with SSRF DNS enforcement bound directly
+ * into the transport connector (eliminating DNS-rebinding TOCTOU):
+ * - On Node.js: binds `ssrfGuardedLookup` to an undici `Agent({ connect: { lookup } })`
+ *   dispatcher passed directly to `fetch()`.
+ * - On Bun: binds `ssrfGuardedLookup` directly to `node:http` / `node:https`
+ *   `request({ lookup })` (since Bun's built-in `fetch` ignores undici dispatchers).
+ * - When a custom `fetchFn` is injected (e.g. unit tests), performs the lookup
+ *   check and attaches the undici dispatcher on `init`.
+ */
+export async function executeSsrfBoundFetchHop(
+  targetUrl: URL,
+  init: RequestInit | undefined,
+  options?: {
+    fetchFn?: FetchLike
+    lookup?: typeof ssrfGuardedLookup
+    errorPrefix?: string
+  },
+): Promise<Response> {
+  const prefix = options?.errorPrefix ?? 'XAA IdP'
+  if (targetUrl.protocol !== 'https:' && targetUrl.protocol !== 'http:') {
+    throw new Error(
+      `${prefix}: disallowed URL scheme ${targetUrl.protocol} for ${targetUrl.href}`,
+    )
+  }
+  if (isBlockedHostnameOrIp(targetUrl.hostname, { allowLoopback: true })) {
+    throw new Error(`${prefix}: blocked SSRF target ${targetUrl.origin}`)
+  }
+
+  const customLookup = options?.lookup
+  const useProxy =
+    customLookup === undefined && isProxyActiveForOidcUrl(targetUrl.href)
+  const effectiveLookup = customLookup ?? ssrfGuardedLookup
+
+  if (options?.fetchFn) {
+    if (!useProxy) {
+      await new Promise<void>((resolve, reject) => {
+        effectiveLookup(targetUrl.hostname, { all: true }, err => {
+          if (err) {
+            reject(err)
+          } else {
+            resolve()
+          }
+        })
+      })
+    }
+    const reqInit: RequestInitWithDispatcher = { ...(init ?? {}) }
+    if (!useProxy && reqInit.dispatcher === undefined) {
+      const dispatcher = createSsrfGuardedUndiciDispatcher(effectiveLookup)
+      if (dispatcher) {
+        reqInit.dispatcher = dispatcher
+      }
+    }
+    return options.fetchFn(targetUrl, reqInit)
+  }
+
+  if (useProxy) {
+    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+    return fetch(targetUrl, init)
+  }
+
+  // Real network path: bind lookup directly to the socket connector so there is
+  // only ONE DNS lookup per connection (zero DNS-rebinding TOCTOU).
+  if (!isRunningOnBun()) {
+    const dispatcher = createSsrfGuardedUndiciDispatcher(effectiveLookup)
+    if (dispatcher) {
+      const reqInit: RequestInitWithDispatcher = {
+        ...(init ?? {}),
+        dispatcher,
+      }
+      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+      return fetch(targetUrl, reqInit)
+    }
+  }
+
+  return nodeHttpFetchWithLookup(targetUrl, init, effectiveLookup)
+}
+
+/**
+ * Fetch helper for XAA OIDC discovery & token exchange that binds
+ * `ssrfGuardedLookup` directly into the socket connector on every hop,
+ * forbids `https:// -> http://` protocol downgrade redirects, strips
+ * `authorization`/`cookie`/`proxy-authorization` across origins, and
+ * converts 301/302/303 non-GET/HEAD requests to GET without body (P1-E3).
+ */
+export async function ssrfGuardedOidcFetch(
+  input: string | URL,
+  init: RequestInit | undefined,
+  options?: {
+    fetchFn?: FetchLike
+    lookup?: typeof ssrfGuardedLookup
+    forbidCrossOriginRedirects?: boolean
+  },
+): Promise<Response> {
+  let currentUrl = new URL(String(input))
+  let currentInit: RequestInit = { ...(init ?? {}), redirect: 'manual' }
+  let currentMethod = (currentInit.method ?? 'GET').toUpperCase()
+
+  for (let hop = 0; ; hop++) {
+    const res = await executeSsrfBoundFetchHop(currentUrl, currentInit, {
+      fetchFn: options?.fetchFn,
+      lookup: options?.lookup,
+      errorPrefix: 'XAA IdP',
+    })
+    const location = OIDC_REDIRECT_STATUSES.has(res.status)
+      ? res.headers.get('location')
+      : null
+    if (!location) {
+      return res
+    }
+    void res.body?.cancel().catch(() => {})
+    let nextUrl: URL
+    try {
+      nextUrl = new URL(location, currentUrl)
+    } catch {
+      throw new Error(
+        `XAA IdP: invalid redirect location "${location}" from ${currentUrl.origin}`,
+      )
+    }
+    if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') {
+      throw new Error(
+        `XAA IdP: refusing redirect to disallowed scheme ${nextUrl.protocol}`,
+      )
+    }
+    if (currentUrl.protocol === 'https:' && nextUrl.protocol === 'http:') {
+      throw new Error(
+        `XAA IdP: refusing HTTPS to HTTP redirect downgrade from ${currentUrl.origin} to ${nextUrl.origin}`,
+      )
+    }
+    if (
+      options?.forbidCrossOriginRedirects &&
+      nextUrl.origin !== currentUrl.origin
+    ) {
+      throw new Error(
+        `XAA IdP: refusing cross-origin redirect from ${currentUrl.origin} to ${nextUrl.origin}`,
+      )
+    }
+    if (hop >= MAX_OIDC_REDIRECTS) {
+      throw new Error(
+        `XAA IdP: too many redirects (>${MAX_OIDC_REDIRECTS}) at ${currentUrl.origin}`,
+      )
+    }
+
+    let nextInit: RequestInit = currentInit
+    // P1-E3: Strip credential headers whenever redirecting across origins.
+    if (nextUrl.origin !== currentUrl.origin) {
+      nextInit = {
+        ...nextInit,
+        headers: stripCrossOriginCredentialHeaders(nextInit.headers),
+      }
+    }
+    // P1-E3: On 301/302/303 from non-GET/HEAD (e.g. POST), switch method to GET
+    // and drop body + content-length/content-type headers.
+    const isReadOnly = currentMethod === 'GET' || currentMethod === 'HEAD'
+    if (
+      !isReadOnly &&
+      (res.status === 301 || res.status === 302 || res.status === 303)
+    ) {
+      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+      const headers = new Headers(nextInit.headers)
+      for (const h of REDIRECT_POST_TO_GET_STRIP_HEADERS) {
+        headers.delete(h)
+      }
+      currentMethod = 'GET'
+      nextInit = {
+        ...nextInit,
+        redirect: 'manual',
+        method: 'GET',
+        body: undefined,
+        headers,
+      }
+    }
+
+    currentInit = nextInit
+    currentUrl = nextUrl
+  }
+}
+
 // OIDC Discovery §4.1 says `{issuer}/.well-known/openid-configuration` — path
 // APPEND, not replace. `new URL('/.well-known/...', issuer)` with a leading
 // slash is a WHATWG absolute-path reference and drops the issuer's pathname,
@@ -282,8 +719,16 @@ export function clearIdpClientSecret(idpIssuer: string): void {
 // the fix. Exported because auth.ts needs the same discovery.
 export async function discoverOidc(
   idpIssuer: string,
+  options?: {
+    fetchFn?: FetchLike
+    lookup?: typeof ssrfGuardedLookup
+  },
 ): Promise<OpenIdProviderDiscoveryMetadata> {
   const base = idpIssuer.endsWith('/') ? idpIssuer : idpIssuer + '/'
+  const issuerUrl = new URL(base)
+  if (issuerUrl.protocol !== 'https:' && !isLoopbackHttpUrl(issuerUrl)) {
+    throw new Error(`XAA IdP: refusing non-HTTPS issuer URL: ${idpIssuer}`)
+  }
   const url = new URL('.well-known/openid-configuration', base)
   if (
     process.env.CLAUDE_GATEWAY_IDP_CONNECT_BY_HOSTNAME &&
@@ -298,11 +743,14 @@ export async function discoverOidc(
       assertSafeIdpProxyTarget(url, { connectByHostname: true })
     }
   }
-  // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(IDP_REQUEST_TIMEOUT_MS),
-  })
+  const res = await ssrfGuardedOidcFetch(
+    url,
+    {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(IDP_REQUEST_TIMEOUT_MS),
+    },
+    options,
+  )
   if (!res.ok) {
     throw new Error(
       `XAA IdP: OIDC discovery failed: HTTP ${res.status} at ${url}`,
@@ -319,8 +767,50 @@ export async function discoverOidc(
     )
   }
   const parsed = parseOpenIdProviderDiscoveryMetadata(body)
-  const issuerUrl = new URL(base)
-  const tokenEndpointUrl = new URL(parsed.token_endpoint)
+
+  // RFC 8414 §3.3 / OIDC Discovery §4.3: metadata `issuer` MUST match requested issuer
+  if (typeof parsed.issuer !== 'string' || parsed.issuer.length === 0) {
+    throw new Error('XAA IdP: invalid OIDC metadata: missing issuer')
+  }
+  if (issuerKey(parsed.issuer) !== issuerKey(idpIssuer)) {
+    throw new Error(
+      `XAA IdP: OIDC metadata issuer "${parsed.issuer}" does not match configured issuer "${idpIssuer}" (RFC 8414 §3.3)`,
+    )
+  }
+
+  // Validate authorization_endpoint is https: (or loopback http: for a loopback issuer)
+  if (
+    typeof parsed.authorization_endpoint !== 'string' ||
+    parsed.authorization_endpoint.length === 0
+  ) {
+    throw new Error(
+      'XAA IdP: invalid OIDC metadata: missing authorization_endpoint',
+    )
+  }
+  let authEndpointUrl: URL
+  try {
+    authEndpointUrl = new URL(parsed.authorization_endpoint)
+  } catch {
+    throw new Error(
+      `XAA IdP: invalid authorization endpoint URL: ${parsed.authorization_endpoint}`,
+    )
+  }
+  const allowLoopbackAuthEndpoint =
+    isLoopbackHttpUrl(issuerUrl) && isLoopbackHttpUrl(authEndpointUrl)
+  if (authEndpointUrl.protocol !== 'https:' && !allowLoopbackAuthEndpoint) {
+    throw new Error(
+      `XAA IdP: refusing non-HTTPS authorization endpoint: ${parsed.authorization_endpoint}`,
+    )
+  }
+
+  let tokenEndpointUrl: URL
+  try {
+    tokenEndpointUrl = new URL(parsed.token_endpoint)
+  } catch {
+    throw new Error(
+      `XAA IdP: invalid token endpoint URL: ${parsed.token_endpoint}`,
+    )
+  }
   const allowLoopbackTokenEndpoint =
     isLoopbackHttpUrl(issuerUrl) && isLoopbackHttpUrl(tokenEndpointUrl)
   if (tokenEndpointUrl.protocol !== 'https:' && !allowLoopbackTokenEndpoint) {
@@ -552,11 +1042,14 @@ export async function acquireIdpIdToken(
     codeVerifier,
     redirectUri,
     fetchFn: (url, init) =>
-      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      fetch(url, {
-        ...init,
-        signal: AbortSignal.timeout(IDP_REQUEST_TIMEOUT_MS),
-      }),
+      ssrfGuardedOidcFetch(
+        url,
+        {
+          ...init,
+          signal: AbortSignal.timeout(IDP_REQUEST_TIMEOUT_MS),
+        },
+        { forbidCrossOriginRedirects: true },
+      ),
   })
   if (!tokens.id_token) {
     throw new Error(

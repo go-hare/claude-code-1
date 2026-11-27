@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -661,13 +662,21 @@ describe('2.1.331 Wave 7 Core Disk Locks, History, Boot DI, Wave 5 Agent 6 ALS F
 
     // Reviewer A P0-2: functionHooksModules uses Ns() instead of boot-pinned instances
     const repoRoot = join(import.meta.dir, '..', '..', '..')
-    const fhmSource = readFileSync(
-      join(repoRoot, 'src/utils/plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const fhDir = join(repoRoot, 'src/utils/plugins/functionHooks')
+    const fhmSource = [
+      readFileSync(
+        join(repoRoot, 'src/utils/plugins/functionHooksModules.ts'),
+        'utf8',
+      ),
+      ...readdirSync(fhDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(fhDir, f), 'utf8')),
+    ].join('\n')
     expect(fhmSource).toContain(
-      "import { getClipboardPath, Ns, stringWidth } from '@anthropic/ink'",
+      "import { Ns, getClipboardPath } from '@anthropic/ink'",
     )
+    expect(fhmSource).toContain("import { stringWidth } from '@anthropic/ink'")
     expect(fhmSource).toContain('const ink = Ns().get(process.stdout)')
     expect(fhmSource).not.toContain('const ink = instances.get(process.stdout)')
 

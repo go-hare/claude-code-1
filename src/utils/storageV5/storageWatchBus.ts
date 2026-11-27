@@ -16,8 +16,60 @@ import { dirname, resolve } from 'path'
 import { logForDebugging } from '../debug.js'
 import { isENOENT } from '../errors.js'
 import { getPlatform } from '../platform.js'
-import { getActiveSessionFromAls, runWithSession } from '../sessionHost.js'
+import {
+  getSessionAlsStore,
+  sessionContextAls,
+  type SessionAlsContext,
+} from '../sessionContextAls.js'
 import { getReadSymlinkClass, isStreamNamespaceKey } from './writeValidate.js'
+
+function createWeakAlsInvocationRunner(
+  onDead: () => void,
+): ((fn: () => void) => void) | undefined {
+  const capturedStore = getSessionAlsStore()
+  if (capturedStore === undefined) return undefined
+  const capturedSession = capturedStore.session
+  const capturedSubconversation =
+    capturedSession !== undefined
+      ? capturedStore.subconversation
+      : capturedStore
+  if (capturedSession !== undefined) {
+    const sessionRef = new WeakRef(capturedSession)
+    return fn => {
+      const liveSession = sessionRef.deref()
+      if (liveSession === undefined) {
+        onDead()
+        return
+      }
+      const currentStore = getSessionAlsStore()
+      const currentSub =
+        currentStore === undefined
+          ? undefined
+          : currentStore.session !== undefined
+            ? currentStore.subconversation
+            : currentStore
+      if (
+        currentStore?.session === liveSession &&
+        currentSub === capturedSubconversation
+      ) {
+        fn()
+        return
+      }
+      const nextStore: SessionAlsContext =
+        capturedSubconversation !== undefined
+          ? { session: liveSession, subconversation: capturedSubconversation }
+          : { session: liveSession }
+      sessionContextAls.run(nextStore, fn)
+    }
+  }
+  return fn => {
+    if (getSessionAlsStore() === capturedSubconversation) {
+      fn()
+      return
+    }
+    sessionContextAls.run(capturedSubconversation!, fn)
+  }
+}
 
 /** densable leftover `Ti` @207367379. */
 export const UNANNOUNCED_GRACE_MS = 250
@@ -291,27 +343,29 @@ class StorageDirectoryWatches {
         callbacksSinceCheck: 0,
         checkedShape: undefined,
       } satisfies WatchRecord)
-    const captured = getActiveSessionFromAls()
+    let released = false
+    let releaseWatch = (): void => {}
+    const runInAls = createWeakAlsInvocationRunner(() => {
+      releaseWatch()
+    })
     const wrappedListener =
-      captured === undefined
+      runInAls === undefined
         ? listener
         : (filename: string | null) => {
-            if (getActiveSessionFromAls() !== captured) {
-              runWithSession(captured, () => listener(filename))
-            } else {
-              listener(filename)
-            }
+            runInAls(() => listener(filename))
           }
     const wrappedHealth =
-      captured === undefined
+      runInAls === undefined
         ? health
         : () => {
-            if (getActiveSessionFromAls() !== captured) {
-              runWithSession(captured, health)
-            } else {
-              health()
-            }
+            runInAls(health)
           }
+    releaseWatch = () => {
+      if (!released) {
+        released = true
+        void this.unwatch(id, record, wrappedListener, wrappedHealth)
+      }
+    }
     record.listeners.add(wrappedListener)
     record.healthListeners.add(wrappedHealth)
     record.references += 1
@@ -319,10 +373,12 @@ class StorageDirectoryWatches {
     try {
       await this.rearm(id, record)
     } catch (error) {
-      await this.unwatch(id, record, wrappedListener, wrappedHealth)
+      if (!released) {
+        released = true
+        await this.unwatch(id, record, wrappedListener, wrappedHealth)
+      }
       throw error
     }
-    let released = false
     return {
       rearm: (maxAgeMs?: number) => this.rearm(id, record, maxAgeMs),
       promotable: () => this.promotable(record),
@@ -548,21 +604,21 @@ export class StorageWatchBus {
   addListener(
     listener: (change: unknown, sourceInstanceId: string) => void,
   ): () => void {
-    const captured = getActiveSessionFromAls()
+    let removeSelf = (): void => {}
+    const runInAls = createWeakAlsInvocationRunner(() => {
+      removeSelf()
+    })
     const wrapped =
-      captured === undefined
+      runInAls === undefined
         ? listener
         : (change: unknown, sourceInstanceId: string) => {
-            if (getActiveSessionFromAls() !== captured) {
-              runWithSession(captured, () => listener(change, sourceInstanceId))
-            } else {
-              listener(change, sourceInstanceId)
-            }
+            runInAls(() => listener(change, sourceInstanceId))
           }
-    this.listeners.add(wrapped)
-    return () => {
+    removeSelf = () => {
       this.listeners.delete(wrapped)
     }
+    this.listeners.add(wrapped)
+    return removeSelf
   }
 
   /**

@@ -43,13 +43,15 @@ export type TurnHandoffAdmission =
     }
   | {
       admitted: false
-      reason: 'not_managed_cloud_worker' | 'disabled'
+      reason: 'not_managed_cloud_worker' | 'disabled' | 'shared_backend'
     }
 
 export type TurnHandoffAdmissionInput = {
+  sdkUrl?: string | null
   remoteSessionId?: string | null
   environmentKind?: string
   disabled?: boolean
+  sharedBackend?: boolean
   tools?: readonly string[]
   hydratesCarriedLines?: boolean
   answersComparisonFork?: boolean
@@ -58,11 +60,18 @@ export type TurnHandoffAdmissionInput = {
 export function evaluateTurnHandoffAdmission(
   input: TurnHandoffAdmissionInput,
 ): TurnHandoffAdmission {
+  if (
+    !input.sdkUrl ||
+    !input.remoteSessionId ||
+    input.environmentKind !== undefined
+  ) {
+    return { admitted: false, reason: 'not_managed_cloud_worker' }
+  }
   if (input.disabled) {
     return { admitted: false, reason: 'disabled' }
   }
-  if (!input.remoteSessionId && input.environmentKind === undefined) {
-    return { admitted: false, reason: 'not_managed_cloud_worker' }
+  if (input.sharedBackend === true) {
+    return { admitted: false, reason: 'shared_backend' }
   }
   return {
     admitted: true,
@@ -611,7 +620,27 @@ export class TurnHandoffManager {
   handleControlRequest(
     req: TurnHandoffControlRequest,
   ): TurnHandoffControlResponse {
-    if (req.payload !== undefined || req.action === 'hydrate') {
+    if (req.action === 'export') {
+      if (req.payload !== undefined) {
+        return {
+          ok: false,
+          ...(req.request_id !== undefined
+            ? { request_id: req.request_id }
+            : {}),
+          error:
+            'turn_handoff: action "export" cannot be combined with a hydrate payload',
+        }
+      }
+    } else if (req.action === 'hydrate' || req.payload !== undefined) {
+      if (req.payload === undefined) {
+        return {
+          ok: false,
+          ...(req.request_id !== undefined
+            ? { request_id: req.request_id }
+            : {}),
+          error: 'turn_handoff: action "hydrate" requires a payload',
+        }
+      }
       const hydrated = this.hydrateFromHandoffSnapshot(req.payload)
       if (!hydrated.ok) {
         return {

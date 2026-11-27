@@ -2,7 +2,7 @@
  * densable 2.1.283 smo / GSt — StructuredOutput endsTurn + MCP claude/endTurn.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createSyntheticOutputTool } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import {
@@ -92,7 +92,14 @@ describe('densable 2.1.283 smo / toolRequestedEndTurn', () => {
   })
 
   test('query.ts wraps gold Ud before recurse (tengu_mcp_tool_result_ended_turn)', () => {
-    const src = readFileSync(join(ROOT, 'src/query.ts'), 'utf8')
+    const queryDir = join(ROOT, 'src/query')
+    const src = [
+      readFileSync(join(ROOT, 'src/query.ts'), 'utf8'),
+      ...readdirSync(queryDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(queryDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain("logEvent('tengu_mcp_tool_result_ended_turn'")
     expect(src).toContain('if (toolRequestedEndTurn)')
     expect(src).toContain('endTurnSourceFromToolResult')
@@ -100,7 +107,14 @@ describe('densable 2.1.283 smo / toolRequestedEndTurn', () => {
   })
 
   test('Gsn write skip does not invent cleanupPeriodDays===0', () => {
-    const src = readFileSync(join(ROOT, 'src/utils/sessionStorage.ts'), 'utf8')
+    const ssDir = join(ROOT, 'src/utils/sessionStorage')
+    const src = [
+      readFileSync(join(ROOT, 'src/utils/sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(ssDir, f), 'utf8')),
+    ].join('\n')
     expect(src).not.toContain('cleanupPeriodDays === 0')
     expect(src).toContain('getPersistenceSuppressCause() !== null')
   })

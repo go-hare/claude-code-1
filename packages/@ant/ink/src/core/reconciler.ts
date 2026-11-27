@@ -461,6 +461,8 @@ const reconciler = createReconciler<
     node.isHidden = true
     node.yogaNode?.setDisplay(LayoutDisplay.None)
     markDirty(node)
+    const root = findRootNode(node)
+    root.focusManager?.handleNodeHidden(node, root)
   },
   unhideInstance(node) {
     node.isHidden = false
@@ -587,6 +589,13 @@ const reconciler = createReconciler<
         style,
         (newProps['style'] as Styles | undefined) ?? {},
       )
+    }
+
+    const prevDisplay = (oldProps['style'] as Styles | undefined)?.display
+    const nextDisplay = (newProps['style'] as Styles | undefined)?.display
+    if (prevDisplay !== 'none' && nextDisplay === 'none') {
+      const root = findRootNode(node)
+      root.focusManager?.handleNodeHidden(node, root)
     }
   },
   commitTextUpdate(node: TextNode, _oldText: string, newText: string): void {

@@ -16,7 +16,16 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const src = readFileSync(join(import.meta.dir, '../messages.ts'), 'utf8')
+const src = [
+  '../messages.ts',
+  '../messages/apiNormalizer.ts',
+  '../messages/batchToolUses.ts',
+  '../messages/apiSanitizer.ts',
+  '../messages/thinkingFilter.ts',
+  '../messages/messageMerging.ts',
+]
+  .map(rel => readFileSync(join(import.meta.dir, rel), 'utf8'))
+  .join('\n')
 
 describe('#38 W5s → $5s → tHr + ZWr (2.1.246)', () => {
   test('source-locks official is_error strip + W5s-before-$5s + tHr + ZWr', () => {

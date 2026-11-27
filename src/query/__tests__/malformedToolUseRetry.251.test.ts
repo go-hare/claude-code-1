@@ -16,7 +16,10 @@ import {
   malformedToolUseRetryAction,
 } from '../../query.js'
 
-const querySrc = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+const querySrc = [
+  readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8'),
+  readFileSync(join(import.meta.dir, '../turnHelpers.ts'), 'utf8'),
+].join('\n')
 
 const NEIGHBOR =
   'Your tool call was malformed and could not be parsed. Please retry.'

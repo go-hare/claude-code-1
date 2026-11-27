@@ -108,6 +108,7 @@ import {
   extractConnectionErrorDetails,
   isCertSignatureFailureError,
 } from './errorUtils.js'
+import { isRedirectRefusedError } from './modelRedirectGuard.js'
 import { STREAM_NO_RESPONSE_RETRY_CAP } from '../../utils/firstByteWatchdog.js'
 
 const abortError = () => new APIUserAbortError()
@@ -2650,10 +2651,9 @@ export function shouldRetry(error: APIError): boolean {
   // or first-party 503 (unless overage-disabled-reason is fetch_error) even
   // when persistent retry / CLAUDE_CODE_RETRY_WATCHDOG is enabled.
   if (
-    isTransientCapacityError(error) &&
     error.headers?.get('x-should-retry') === 'false' &&
     (error.status === 429 ||
-      error.status === 529 ||
+      is529Error(error) ||
       (error.status === 503 &&
         getAPIProvider() === 'firstParty' &&
         isFirstPartyAnthropicBaseUrl())) &&
@@ -2768,6 +2768,10 @@ export function shouldRetry(error: APIError): boolean {
 
   if (error instanceof APIConnectionError) {
     const connCode = extractConnectionErrorDetails(error)?.code
+    // Official 2.1.331: refused model-API redirects never succeed on retry — fail fast.
+    if (connCode === 'RedirectRefused' || isRedirectRefusedError(error.cause)) {
+      return false
+    }
     // densable 2.1.239 Cew: BedrockUnexpectedContentType is not retried
     // (retrying would issue a second Bedrock request / double bill).
     if (connCode === 'BedrockUnexpectedContentType') {

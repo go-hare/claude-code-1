@@ -10,6 +10,7 @@ import * as platformPath from 'path'
 import { getIsRemoteMode, getOriginalCwd } from '../../bootstrap/state.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
+import { isDisklessActive } from '../disklessGuards.js'
 import { errorMessage, getErrnoCode } from '../errors.js'
 import {
   type ConfigChangeSource,
@@ -34,7 +35,7 @@ import {
 } from './fsWatchProbe.js'
 import {
   clearInternalWrites,
-  consumeInternalWrite,
+  consumeProcessInternalWrite,
   type FirstReadStatSnapshot,
   forgetFirstReads,
   getFirstReadStat,
@@ -55,7 +56,10 @@ import {
   getSettingsWithErrors,
 } from './settings.js'
 import type { ValidationError } from './validation.js'
-import { resetAllLiveHostSettingsCaches } from './settingsCache.js'
+import {
+  resetAllLiveHostSettingsCaches,
+  resetSettingsCache,
+} from './settingsCache.js'
 
 const FILE_STABILITY_THRESHOLD_MS = 1000
 const FILE_STABILITY_POLL_INTERVAL_MS = 500
@@ -85,7 +89,8 @@ const appearedDirs = new Set<string>()
 const creationWatchers = new Map<string, { close(): void }>()
 let directoryCheckTimer: ReturnType<typeof setInterval> | undefined
 let realpathToCanonical = new Map<string, string>()
-const watchedProjectCwds = new Set<string>()
+const watchedProjectCwdCounts = new Map<string, number>()
+let initialWatchedCwd: string | null = null
 const sourceByPath = new Map<string, SettingSource>()
 let activeSettingsFiles = new Set<string>()
 let activeWatchedDirs = new Set<string>()
@@ -95,12 +100,121 @@ let firstReadsChecked = false
 const firstReadHandledStats = new Map<string, Stats>()
 const lastWatchStats = new Map<string, Stats>()
 
+type HostWatchedProjectCwdsState = {
+  cwds: Set<string>
+  unregisterCleanup: (() => void) | undefined
+}
+
+const hostWatchedProjectCwdsSlot = new HostSlot<HostWatchedProjectCwdsState>(
+  () => ({
+    cwds: new Set(),
+    unregisterCleanup: undefined,
+  }),
+)
+const activeHostWatchedStates = new Set<WeakRef<HostWatchedProjectCwdsState>>()
+
 export type SettingsChangeExtra = {
   prevCwd?: string
   trustFlip?: boolean
 }
-const settingsChanged =
-  createSignal<[source: SettingSource, extra?: SettingsChangeExtra]>()
+
+type SettingsChangedListener = (
+  source: SettingSource,
+  extra?: SettingsChangeExtra,
+) => void
+
+type SettingsChangedSubscriber = {
+  listener: SettingsChangedListener
+  sessionRef: WeakRef<Session> | undefined
+  rootSessionRef: WeakRef<Session> | undefined
+  hostRef: WeakRef<SessionHost>
+}
+
+const settingsChangedSubscribers = new Set<SettingsChangedSubscriber>()
+
+function resolveSubscriberSession(
+  sub: SettingsChangedSubscriber,
+): Session | undefined {
+  return sub.sessionRef?.deref() ?? sub.rootSessionRef?.deref()
+}
+
+function pruneDeadSettingsChangedSubscribers(): void {
+  for (const sub of settingsChangedSubscribers) {
+    if (sub.hostRef.deref() === undefined) {
+      settingsChangedSubscribers.delete(sub)
+      continue
+    }
+    if (
+      sub.sessionRef !== undefined &&
+      resolveSubscriberSession(sub) === undefined
+    ) {
+      settingsChangedSubscribers.delete(sub)
+    }
+  }
+}
+
+function collectLiveIsolatedSubscribedSessions(): Map<SessionHost, Session> {
+  const byHost = new Map<SessionHost, Session>()
+  for (const sub of settingsChangedSubscribers) {
+    if (sub.sessionRef === undefined) continue
+    const session = resolveSubscriberSession(sub)
+    if (session === undefined) {
+      settingsChangedSubscribers.delete(sub)
+      continue
+    }
+    if (!byHost.has(session.host)) {
+      byHost.set(session.host, session)
+    }
+  }
+  for (const rootSession of collectSubscribedIsolatedRootSessions()) {
+    if (!byHost.has(rootSession.host)) {
+      byHost.set(rootSession.host, rootSession)
+    }
+  }
+  return byHost
+}
+
+function invokeSettingsChangedSubscriber(
+  sub: SettingsChangedSubscriber,
+  source: SettingSource,
+  extra?: SettingsChangeExtra,
+): void {
+  try {
+    if (sub.sessionRef !== undefined) {
+      const session = resolveSubscriberSession(sub)
+      if (session === undefined) {
+        settingsChangedSubscribers.delete(sub)
+        return
+      }
+      runWithSession(session, () => {
+        sub.listener(source, extra)
+      })
+    } else {
+      sub.listener(source, extra)
+    }
+  } catch (err) {
+    logForDebugging(`[settings] subscriber failed: ${errorMessage(err)}`, {
+      level: 'warn',
+    })
+  }
+}
+
+function doesSessionMatchPath(
+  session: Session,
+  source: SettingSource,
+  normalizedPath: string,
+): boolean {
+  try {
+    return runWithSession(session, () => {
+      if (isDisklessActive()) return false
+      if (source === 'policySettings') return true
+      const p = getSettingsFilePathForSource(source)
+      return p !== undefined && platformPath.normalize(p) === normalizedPath
+    })
+  } catch {
+    return false
+  }
+}
 
 /**
  * Official 2.1.326 (#20) `jin`: mid-session settings file error notice emitted
@@ -386,109 +500,111 @@ function closeCreationWatchers(): void {
 /** Official dVr.si — retarget, preserve directories discovered during rehome,
  * and backfill edits made before the replacement watcher's ready event. */
 function attachWatchTargets(targets: WatchTargets, generation: number): void {
-  if (disposed || generation !== watchGeneration) return
-  const lifecycle = lifecycleGeneration
-  const { dirs, settingsFiles, dropInDir } = targets
-  realpathToCanonical = targets.realpathToCanonical
-  sourceByPath.clear()
-  for (const [path, source] of targets.sourceByPath) {
-    sourceByPath.set(path, source)
-  }
-  activeSettingsFiles = new Set(settingsFiles)
-  activeWatchedDirs = new Set(dirs)
-  for (const dir of pendingDirs) {
-    if (!targets.pendingDirs.has(dir)) appearedDirs.add(dir)
-  }
-  pendingDirs = targets.pendingDirs
-  watchStartedAt ??= Date.now()
-  const previous = watcher
-  watcher = null
-  if (previous) closeWatcher(previous)
-  resolveReady?.()
-  resolveReady = undefined
-  closeCreationWatchers()
-  for (const dir of pendingDirs) watchForDirectory(dir)
-  if (dirs.length === 0) {
-    void catchUp(settingsFiles, Promise.resolve(), generation, lifecycle)
-    if (!polling && pendingDirs.size > 0) probeNativeWatcher(lifecycle)
-    return
-  }
-  const usesPolling = polling
-  logForDebugging(
-    `Watching for changes in setting files ${[...settingsFiles].join(', ')}...${dropInDir ? ` and drop-in directory ${dropInDir}` : ''}${usesPolling ? ` (polling every ${watchPollInterval()}ms)` : ''}`,
-  )
-  const current = chokidar.watch(dirs, {
-    persistent: true,
-    ignoreInitial: true,
-    depth: 0,
-    awaitWriteFinish: {
-      stabilityThreshold: stabilityThreshold(),
-      pollInterval:
-        testOverrides?.pollInterval ?? FILE_STABILITY_POLL_INTERVAL_MS,
-    },
-    ignored: (path, stats) => {
-      if (stats && !stats.isFile() && !stats.isDirectory()) return true
-      if (path.split(/[/\\]/).some(dir => dir === '.git')) return true
-      if (!stats || stats.isDirectory()) return false
-      const normalized = platformPath.normalize(path)
-      if (activeSettingsFiles.has(normalized)) return false
-      if (
-        dropInDir &&
-        platformPath.dirname(normalized) === dropInDir &&
-        normalized.endsWith('.json')
-      )
-        return false
-      return true
-    },
-    ignorePermissionErrors: true,
-    ...(usesPolling
-      ? {
-          usePolling: true,
-          interval: watchPollInterval(),
-          binaryInterval: watchPollInterval(),
-        }
-      : { usePolling: false }),
-    atomic: true,
-  })
-  watcher = current
-  const ready = new Promise<void>(resolve => {
-    resolveReady = resolve
-    current.once('ready', resolve)
-  })
-  const isCurrent = () => !disposed && generation === watchGeneration
-  const wrapWatchReport =
-    (handler: (path: string) => void) =>
-    (path: string, fileStats?: Stats): void => {
-      if (!isCurrent()) return
-      const canonical = canonicalPath(path)
-      if (fileStats) lastWatchStats.set(canonical, fileStats)
-      const handled = firstReadHandledStats.get(canonical)
-      firstReadHandledStats.delete(canonical)
-      if (handled && fileStats && sameFileStat(fileStats, handled)) {
-        logForDebugging(
-          `Ignored a watch report of ${canonical}: the first-read check already dealt with this version`,
-        )
-        return
-      }
-      handler(path)
+  exitSessionContext(() => {
+    if (disposed || generation !== watchGeneration) return
+    const lifecycle = lifecycleGeneration
+    const { dirs, settingsFiles, dropInDir } = targets
+    realpathToCanonical = targets.realpathToCanonical
+    sourceByPath.clear()
+    for (const [path, source] of targets.sourceByPath) {
+      sourceByPath.set(path, source)
     }
-  current.on('change', wrapWatchReport(handleChange))
-  current.on('unlink', path => {
-    if (!isCurrent()) return
-    // FSEvents may stop observing the old inode after unlink/atomic save.
-    if (process.platform === 'darwin') current.add(platformPath.dirname(path))
-    handleDelete(path)
-  })
-  current.on('add', wrapWatchReport(handleAdd))
-  current.on('error', (err: unknown) => {
-    if (!isCurrent()) return
-    logForDebugging(`[settings] watcher error: ${errorMessage(err)}`, {
-      level: 'warn',
+    activeSettingsFiles = new Set(settingsFiles)
+    activeWatchedDirs = new Set(dirs)
+    for (const dir of pendingDirs) {
+      if (!targets.pendingDirs.has(dir)) appearedDirs.add(dir)
+    }
+    pendingDirs = targets.pendingDirs
+    watchStartedAt ??= Date.now()
+    const previous = watcher
+    watcher = null
+    if (previous) closeWatcher(previous)
+    resolveReady?.()
+    resolveReady = undefined
+    closeCreationWatchers()
+    for (const dir of pendingDirs) watchForDirectory(dir)
+    if (dirs.length === 0) {
+      void catchUp(settingsFiles, Promise.resolve(), generation, lifecycle)
+      if (!polling && pendingDirs.size > 0) probeNativeWatcher(lifecycle)
+      return
+    }
+    const usesPolling = polling
+    logForDebugging(
+      `Watching for changes in setting files ${[...settingsFiles].join(', ')}...${dropInDir ? ` and drop-in directory ${dropInDir}` : ''}${usesPolling ? ` (polling every ${watchPollInterval()}ms)` : ''}`,
+    )
+    const current = chokidar.watch(dirs, {
+      persistent: true,
+      ignoreInitial: true,
+      depth: 0,
+      awaitWriteFinish: {
+        stabilityThreshold: stabilityThreshold(),
+        pollInterval:
+          testOverrides?.pollInterval ?? FILE_STABILITY_POLL_INTERVAL_MS,
+      },
+      ignored: (path, stats) => {
+        if (stats && !stats.isFile() && !stats.isDirectory()) return true
+        if (path.split(/[/\\]/).some(dir => dir === '.git')) return true
+        if (!stats || stats.isDirectory()) return false
+        const normalized = platformPath.normalize(path)
+        if (activeSettingsFiles.has(normalized)) return false
+        if (
+          dropInDir &&
+          platformPath.dirname(normalized) === dropInDir &&
+          normalized.endsWith('.json')
+        )
+          return false
+        return true
+      },
+      ignorePermissionErrors: true,
+      ...(usesPolling
+        ? {
+            usePolling: true,
+            interval: watchPollInterval(),
+            binaryInterval: watchPollInterval(),
+          }
+        : { usePolling: false }),
+      atomic: true,
     })
-    if (!usesPolling) handleNativeWatchError(err)
+    watcher = current
+    const ready = new Promise<void>(resolve => {
+      resolveReady = resolve
+      current.once('ready', resolve)
+    })
+    const isCurrent = () => !disposed && generation === watchGeneration
+    const wrapWatchReport =
+      (handler: (path: string) => void) =>
+      (path: string, fileStats?: Stats): void => {
+        if (!isCurrent()) return
+        const canonical = canonicalPath(path)
+        if (fileStats) lastWatchStats.set(canonical, fileStats)
+        const handled = firstReadHandledStats.get(canonical)
+        firstReadHandledStats.delete(canonical)
+        if (handled && fileStats && sameFileStat(fileStats, handled)) {
+          logForDebugging(
+            `Ignored a watch report of ${canonical}: the first-read check already dealt with this version`,
+          )
+          return
+        }
+        handler(path)
+      }
+    current.on('change', wrapWatchReport(handleChange))
+    current.on('unlink', path => {
+      if (!isCurrent()) return
+      // FSEvents may stop observing the old inode after unlink/atomic save.
+      if (process.platform === 'darwin') current.add(platformPath.dirname(path))
+      handleDelete(path)
+    })
+    current.on('add', wrapWatchReport(handleAdd))
+    current.on('error', (err: unknown) => {
+      if (!isCurrent()) return
+      logForDebugging(`[settings] watcher error: ${errorMessage(err)}`, {
+        level: 'warn',
+      })
+      if (!usesPolling) handleNativeWatchError(err)
+    })
+    void catchUp(settingsFiles, ready, generation, lifecycle)
+    if (!usesPolling) probeNativeWatcher(lifecycle)
   })
-  void catchUp(settingsFiles, ready, generation, lifecycle)
-  if (!usesPolling) probeNativeWatcher(lifecycle)
 }
 
 /** Official tc/ii/Nr: a silent or refused native watcher must fall back. */
@@ -686,48 +802,50 @@ async function catchUp(
 }
 
 function watchForDirectory(dir: string): void {
-  // The private-file probe cannot attest delivery on every watched parent.
-  // If a creation event is missed after the immediate absence check, native
-  // mode otherwise has no way to discover this directory for the whole session.
-  // Keep one unref'd recovery timer only while directories are pending.
-  if (!directoryCheckTimer) {
-    directoryCheckTimer = setInterval(() => {
-      for (const pending of pendingDirs) void checkDirectory(pending)
-    }, watchPollInterval())
-    directoryCheckTimer.unref()
-  }
-  if (!polling) {
-    const parent = platformPath.dirname(dir)
-    if (!creationWatchers.has(parent)) {
-      try {
-        const w: DirectoryWatcher = watchDirectory(parent, (_event, name) => {
-          for (const pending of pendingDirs) {
-            if (
-              platformPath.dirname(pending) === parent &&
-              (name === null || name === platformPath.basename(pending))
-            ) {
-              void checkDirectory(pending)
+  exitSessionContext(() => {
+    // The private-file probe cannot attest delivery on every watched parent.
+    // If a creation event is missed after the immediate absence check, native
+    // mode otherwise has no way to discover this directory for the whole session.
+    // Keep one unref'd recovery timer only while directories are pending.
+    if (!directoryCheckTimer) {
+      directoryCheckTimer = setInterval(() => {
+        for (const pending of pendingDirs) void checkDirectory(pending)
+      }, watchPollInterval())
+      directoryCheckTimer.unref()
+    }
+    if (!polling) {
+      const parent = platformPath.dirname(dir)
+      if (!creationWatchers.has(parent)) {
+        try {
+          const w: DirectoryWatcher = watchDirectory(parent, (_event, name) => {
+            for (const pending of pendingDirs) {
+              if (
+                platformPath.dirname(pending) === parent &&
+                (name === null || name === platformPath.basename(pending))
+              ) {
+                void checkDirectory(pending)
+              }
             }
-          }
-        })
-        w.on('error', err => {
+          })
+          w.on('error', err => {
+            logForDebugging(
+              `[settings] creation watcher error: ${errorMessage(err)}`,
+              { level: 'warn' },
+            )
+            handleNativeWatchError(err)
+          })
+          creationWatchers.set(parent, w)
+        } catch (err) {
           logForDebugging(
-            `[settings] creation watcher error: ${errorMessage(err)}`,
+            `[settings] cannot watch ${parent}: ${errorMessage(err)}`,
             { level: 'warn' },
           )
           handleNativeWatchError(err)
-        })
-        creationWatchers.set(parent, w)
-      } catch (err) {
-        logForDebugging(
-          `[settings] cannot watch ${parent}: ${errorMessage(err)}`,
-          { level: 'warn' },
-        )
-        handleNativeWatchError(err)
+        }
       }
     }
-  }
-  void checkDirectory(dir)
+    void checkDirectory(dir)
+  })
 }
 async function checkDirectory(dir: string): Promise<void> {
   const lifecycle = lifecycleGeneration
@@ -743,9 +861,11 @@ async function checkDirectory(dir: string): Promise<void> {
   await rebuildWatchTargets()
 }
 async function rebuildWatchTargets(): Promise<void> {
-  const generation = ++watchGeneration
-  const targets = await getWatchTargets()
-  attachWatchTargets(targets, generation)
+  return exitSessionContext(async () => {
+    const generation = ++watchGeneration
+    const targets = await getWatchTargets()
+    attachWatchTargets(targets, generation)
+  })
 }
 
 function getProjectSettingsFilesForCwd(
@@ -795,11 +915,89 @@ async function resolveSettingsFileAlias(
   }
 }
 
+function isDirStillReferenced(dir: string): boolean {
+  const normalizedDropIn = platformPath.normalize(getManagedSettingsDropInDir())
+  if (dir === normalizedDropIn) return true
+  for (const file of activeSettingsFiles) {
+    if (platformPath.dirname(file) === dir) return true
+  }
+  for (const file of sourceByPath.keys()) {
+    if (platformPath.dirname(file) === dir) return true
+  }
+  return false
+}
+
+function decrementWatchedProjectCwd(cwd: string): void {
+  const prev = watchedProjectCwdCounts.get(cwd)
+  if (prev === undefined) return
+  if (prev > 1) {
+    watchedProjectCwdCounts.set(cwd, prev - 1)
+    return
+  }
+  watchedProjectCwdCounts.delete(cwd)
+  const entries = getProjectSettingsFilesForCwd(cwd)
+  const dirsToCheck = new Set<string>()
+  for (const { path } of entries) {
+    activeSettingsFiles.delete(path)
+    sourceByPath.delete(path)
+    dirsToCheck.add(platformPath.dirname(path))
+    for (const [alias, target] of [...realpathToCanonical.entries()]) {
+      if (target === path) {
+        realpathToCanonical.delete(alias)
+        activeSettingsFiles.delete(alias)
+        dirsToCheck.add(platformPath.dirname(alias))
+      }
+    }
+  }
+  for (const dir of dirsToCheck) {
+    if (isDirStillReferenced(dir)) continue
+    pendingDirs.delete(dir)
+    appearedDirs.delete(dir)
+    if (activeWatchedDirs.delete(dir) && watcher) {
+      exitSessionContext(() => {
+        void watcher?.unwatch(dir)
+      })
+    }
+  }
+}
+
+function releaseWatchedProjectCwdsForHost(
+  hostState: HostWatchedProjectCwdsState,
+): void {
+  hostState.unregisterCleanup = undefined
+  if (hostState.cwds.size === 0) return
+  const cwds = [...hostState.cwds]
+  hostState.cwds.clear()
+  for (const cwd of cwds) {
+    decrementWatchedProjectCwd(cwd)
+  }
+}
+
+export function getWatchedProjectCwdRefCountForTests(cwd: string): number {
+  return watchedProjectCwdCounts.get(platformPath.resolve(cwd)) ?? 0
+}
+
 export async function ensureProjectWatchedForCurrentHost(): Promise<void> {
-  if (getIsRemoteMode() || !initialized || disposed) return
+  if (isDisklessActive() || getIsRemoteMode() || !initialized || disposed)
+    return
   const cwd = platformPath.resolve(getOriginalCwd())
-  if (watchedProjectCwds.has(cwd)) return
-  watchedProjectCwds.add(cwd)
+  const hostState = hostWatchedProjectCwdsSlot.of(getBootstrapSessionHost())
+  if (hostState.cwds.has(cwd)) return
+  hostState.cwds.add(cwd)
+  const prevCount = watchedProjectCwdCounts.get(cwd) ?? 0
+  watchedProjectCwdCounts.set(cwd, prevCount + 1)
+  if (!hostState.unregisterCleanup) {
+    if (activeHostWatchedStates.size > 64) {
+      for (const ref of activeHostWatchedStates) {
+        if (ref.deref() === undefined) activeHostWatchedStates.delete(ref)
+      }
+    }
+    activeHostWatchedStates.add(new WeakRef(hostState))
+    hostState.unregisterCleanup = registerCleanup(() => {
+      releaseWatchedProjectCwdsForHost(hostState)
+    })
+  }
+  if (prevCount > 0) return
 
   const lifecycle = lifecycleGeneration
   const entries = getProjectSettingsFilesForCwd(cwd)
@@ -855,7 +1053,9 @@ export async function ensureProjectWatchedForCurrentHost(): Promise<void> {
   if (dirsToAdd.length === 0) return
 
   if (watcher) {
-    watcher.add(dirsToAdd)
+    exitSessionContext(() => {
+      watcher?.add(dirsToAdd)
+    })
     logForDebugging(
       `Added project settings watch paths for ${cwd}: ${newlyAddedFiles.join(', ')}`,
     )
@@ -865,23 +1065,58 @@ export async function ensureProjectWatchedForCurrentHost(): Promise<void> {
 }
 
 export async function initialize(): Promise<void> {
-  if (getIsRemoteMode() || disposed) return
+  if (isDisklessActive() || getIsRemoteMode() || disposed) return
   if (initialized) {
     await ensureProjectWatchedForCurrentHost()
     return
   }
   initialized = true
   lifecycleGeneration++
+  const calledInsideAls = hasActiveSessionAls()
+  if (!calledInsideAls) {
+    initialWatchedCwd = platformPath.resolve(getOriginalCwd())
+    watchedProjectCwdCounts.set(
+      initialWatchedCwd,
+      (watchedProjectCwdCounts.get(initialWatchedCwd) ?? 0) + 1,
+    )
+  }
   // Attach process-wide settings watcher disposal to the process-default host's
   // cleanup bag so tearing down an isolated ALS host never kills watching for
   // surviving hosts.
   unregisterCleanup = exitSessionContext(() => registerCleanup(dispose))
   startMdmPolling()
-  await rebuildWatchTargets()
+  if (calledInsideAls) {
+    // Track the isolated caller's cwd via ref-counted per-host cleanup instead
+    // of permanently pinning it to `initialWatchedCwd`, while ensuring the
+    // process-wide watcher starts outside ALS.
+    const initialWatchGeneration = watchGeneration
+    await ensureProjectWatchedForCurrentHost()
+    if (watchGeneration === initialWatchGeneration && !disposed) {
+      await rebuildWatchTargets()
+    }
+  } else {
+    await rebuildWatchTargets()
+  }
 }
 
 export async function rehome(): Promise<void> {
-  if (!initialized || disposed || getIsRemoteMode()) return
+  if (isDisklessActive() || !initialized || disposed || getIsRemoteMode())
+    return
+  if (hasActiveSessionAls()) {
+    await ensureProjectWatchedForCurrentHost()
+    return
+  }
+  const nextInitialCwd = platformPath.resolve(getOriginalCwd())
+  if (initialWatchedCwd !== nextInitialCwd) {
+    if (initialWatchedCwd !== null) {
+      decrementWatchedProjectCwd(initialWatchedCwd)
+    }
+    initialWatchedCwd = nextInitialCwd
+    watchedProjectCwdCounts.set(
+      nextInitialCwd,
+      (watchedProjectCwdCounts.get(nextInitialCwd) ?? 0) + 1,
+    )
+  }
   for (const [path, timer] of pendingDeletions) {
     if (getSourceForPath(path) === undefined) {
       clearTimeout(timer)
@@ -906,7 +1141,17 @@ export async function dispose(): Promise<void> {
   pendingDirs.clear()
   appearedDirs.clear()
   realpathToCanonical.clear()
-  watchedProjectCwds.clear()
+  initialWatchedCwd = null
+  watchedProjectCwdCounts.clear()
+  for (const ref of activeHostWatchedStates) {
+    const hostState = ref.deref()
+    if (hostState) {
+      hostState.unregisterCleanup?.()
+      hostState.unregisterCleanup = undefined
+      hostState.cwds.clear()
+    }
+  }
+  activeHostWatchedStates.clear()
   sourceByPath.clear()
   activeSettingsFiles.clear()
   activeWatchedDirs.clear()
@@ -916,14 +1161,39 @@ export async function dispose(): Promise<void> {
   resolveReady?.()
   resolveReady = undefined
   clearInternalWrites()
-  settingsChanged.clear()
+  settingsChangedSubscribers.clear()
   const previous = watcher
   watcher = null
   if (previous) closeWatcher(previous)
   await Promise.all(closingWatchers)
 }
 
-export const subscribe = settingsChanged.subscribe
+export function subscribe(listener: SettingsChangedListener): () => void {
+  if (settingsChangedSubscribers.size > 64) {
+    pruneDeadSettingsChangedSubscribers()
+  }
+  const hostRef = new WeakRef(getBootstrapSessionHost())
+  let sessionRef: WeakRef<Session> | undefined
+  let rootSessionRef: WeakRef<Session> | undefined
+  if (hasActiveSessionAls()) {
+    const session = getBootstrapSession()
+    sessionRef = new WeakRef(session)
+    rootSessionRef = new WeakRef(session.root)
+  }
+  const entry: SettingsChangedSubscriber = {
+    listener,
+    sessionRef,
+    rootSessionRef,
+    hostRef,
+  }
+  settingsChangedSubscribers.add(entry)
+  let unsubscribed = false
+  return () => {
+    if (unsubscribed) return
+    unsubscribed = true
+    settingsChangedSubscribers.delete(entry)
+  }
+}
 
 /** Official Zi: watch existing directories even when their settings are absent;
  * watch a missing directory's parent until it appears. */
@@ -945,13 +1215,17 @@ async function getWatchTargets(): Promise<WatchTargets> {
       files.push(normalized)
     }
   }
-  watchedProjectCwds.add(platformPath.resolve(getOriginalCwd()))
+  if (watchedProjectCwdCounts.size === 0) {
+    const fallbackCwd = platformPath.resolve(getOriginalCwd())
+    initialWatchedCwd = fallbackCwd
+    watchedProjectCwdCounts.set(fallbackCwd, 1)
+  }
   for (const source of SETTING_SOURCES) {
     if (source === 'flagSettings') continue
     const path = getSettingsFilePathForSource(source)
     if (path) addTrackedFile(path, source)
   }
-  for (const cwd of watchedProjectCwds) {
+  for (const cwd of watchedProjectCwdCounts.keys()) {
     for (const entry of getProjectSettingsFilesForCwd(cwd)) {
       addTrackedFile(entry.path, entry.source)
     }
@@ -1148,7 +1422,10 @@ function handleChange(path: string): void {
       `Cancelled pending deletion of ${canonical} — file was recreated`,
     )
   }
-  const expectedHash = consumeInternalWrite(canonical, INTERNAL_WRITE_WINDOW_MS)
+  const expectedHash = consumeProcessInternalWrite(
+    canonical,
+    INTERNAL_WRITE_WINDOW_MS,
+  )
   if (expectedHash === undefined) {
     logForDebugging(`Detected change to ${canonical}`)
     applyExternalChange(source, canonical)
@@ -1189,14 +1466,102 @@ function handleDelete(path: string): void {
 }
 function applyExternalChange(source: SettingSource, path: string): void {
   const lifecycle = lifecycleGeneration
-  void executeConfigChangeHooks(settingSourceToConfigChangeSource(source), path)
+  const normalizedPath = platformPath.normalize(path)
+  const configChangeSource = settingSourceToConfigChangeSource(source)
+
+  if (source === 'projectSettings' || source === 'localSettings') {
+    const isolatedSessions = collectLiveIsolatedSubscribedSessions()
+    for (const [host, session] of isolatedSessions) {
+      if (!doesSessionMatchPath(session, source, normalizedPath)) continue
+      void runWithSession(session, () =>
+        executeConfigChangeHooks(configChangeSource, path),
+      )
+        .then(results => {
+          if (disposed || lifecycle !== lifecycleGeneration) return
+          if (hasBlockingResult(results)) {
+            logForDebugging(`ConfigChange hook blocked change to ${path}`)
+            return
+          }
+          runWithSession(session, () => {
+            resetSettingsCache()
+            try {
+              checkMidSessionSettingsFileErrorsForCurrentHost(source)
+            } catch (err) {
+              logForDebugging(
+                `[settings] mid-session error check failed: ${errorMessage(err)}`,
+                { level: 'warn' },
+              )
+            }
+          })
+          for (const sub of [...settingsChangedSubscribers]) {
+            if (sub.sessionRef !== undefined && sub.hostRef.deref() === host) {
+              invokeSettingsChangedSubscriber(sub, source)
+            }
+          }
+        })
+        .catch(err => {
+          logForDebugging(
+            `[settings] ConfigChange failed: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        })
+    }
+
+    const defaultMatches = exitSessionContext(() => {
+      if (isDisklessActive()) return false
+      const p = getSettingsFilePathForSource(source)
+      return p !== undefined && platformPath.normalize(p) === normalizedPath
+    })
+    const hasGlobalSubscribers = [...settingsChangedSubscribers].some(
+      sub => sub.sessionRef === undefined,
+    )
+    if (defaultMatches || hasGlobalSubscribers) {
+      void exitSessionContext(() =>
+        executeConfigChangeHooks(configChangeSource, path),
+      )
+        .then(results => {
+          if (disposed || lifecycle !== lifecycleGeneration) return
+          if (hasBlockingResult(results)) {
+            logForDebugging(`ConfigChange hook blocked change to ${path}`)
+            return
+          }
+          if (defaultMatches) {
+            exitSessionContext(() => {
+              resetSettingsCache()
+              try {
+                checkMidSessionSettingsFileErrorsForCurrentHost(source)
+              } catch (err) {
+                logForDebugging(
+                  `[settings] mid-session error check failed: ${errorMessage(err)}`,
+                  { level: 'warn' },
+                )
+              }
+            })
+          }
+          for (const sub of [...settingsChangedSubscribers]) {
+            if (sub.sessionRef === undefined) {
+              invokeSettingsChangedSubscriber(sub, source)
+            }
+          }
+        })
+        .catch(err => {
+          logForDebugging(
+            `[settings] ConfigChange failed: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        })
+    }
+    return
+  }
+
+  void executeConfigChangeHooks(configChangeSource, path)
     .then(results => {
       if (disposed || lifecycle !== lifecycleGeneration) return
       if (hasBlockingResult(results)) {
         logForDebugging(`ConfigChange hook blocked change to ${path}`)
         return
       }
-      fanOut(source)
+      fanOut(source, undefined, normalizedPath)
     })
     .catch(err => {
       logForDebugging(`[settings] ConfigChange failed: ${errorMessage(err)}`, {
@@ -1222,36 +1587,179 @@ function getSourceForPath(path: string): SettingSource | undefined {
 /** Official fc: refresh both OS policy caches before invalidating merged state.
  * Remote org policy remains deliberately outside this local watcher. */
 function startMdmPolling(): void {
-  mdmSnapshot = JSON.stringify({
-    mdm: getMdmSettings(),
-    hkcu: getHkcuSettings(),
+  exitSessionContext(() => {
+    mdmSnapshot = JSON.stringify({
+      mdm: getMdmSettings(),
+      hkcu: getHkcuSettings(),
+    })
+    const lifecycle = lifecycleGeneration
+    mdmTimer = setInterval(() => {
+      if (disposed || mdmRefreshing) return
+      mdmRefreshing = true
+      void refreshMdmSettings()
+        .then(({ mdm, hkcu }) => {
+          if (disposed || lifecycle !== lifecycleGeneration) return
+          setMdmSettingsCache(mdm, hkcu)
+          const snapshot = JSON.stringify({ mdm, hkcu })
+          if (snapshot !== mdmSnapshot) {
+            mdmSnapshot = snapshot
+            logForDebugging('Detected MDM settings change via poll')
+            fanOut('policySettings')
+          }
+        })
+        .catch(err => {
+          logForDebugging(`MDM poll error: ${errorMessage(err)}`)
+        })
+        .finally(() => {
+          if (lifecycle === lifecycleGeneration) mdmRefreshing = false
+        })
+    }, testOverrides?.mdmPollInterval ?? MDM_POLL_INTERVAL_MS)
+    mdmTimer.unref()
   })
-  const lifecycle = lifecycleGeneration
-  mdmTimer = setInterval(() => {
-    if (disposed || mdmRefreshing) return
-    mdmRefreshing = true
-    void refreshMdmSettings()
-      .then(({ mdm, hkcu }) => {
-        if (disposed || lifecycle !== lifecycleGeneration) return
-        setMdmSettingsCache(mdm, hkcu)
-        const snapshot = JSON.stringify({ mdm, hkcu })
-        if (snapshot !== mdmSnapshot) {
-          mdmSnapshot = snapshot
-          logForDebugging('Detected MDM settings change via poll')
-          fanOut('policySettings')
-        }
-      })
-      .catch(err => {
-        logForDebugging(`MDM poll error: ${errorMessage(err)}`)
-      })
-      .finally(() => {
-        if (lifecycle === lifecycleGeneration) mdmRefreshing = false
-      })
-  }, testOverrides?.mdmPollInterval ?? MDM_POLL_INTERVAL_MS)
-  mdmTimer.unref()
 }
 
-function fanOut(source: SettingSource, extra?: SettingsChangeExtra): void {
+function fanOut(
+  source: SettingSource,
+  extra?: SettingsChangeExtra,
+  changedPath?: string,
+): void {
+  if (hasActiveSessionAls()) {
+    const callerHost = getBootstrapSessionHost()
+    const callerSession = getBootstrapSession()
+    const callerDiskless = isDisklessActive()
+    const matchingHosts = new Set<SessionHost>([callerHost])
+    const matchingSessions = new Map<SessionHost, Session>([
+      [callerHost, callerSession],
+    ])
+
+    let normCallerPath: string | undefined
+    if (
+      !callerDiskless &&
+      (source === 'projectSettings' ||
+        source === 'localSettings' ||
+        source === 'userSettings')
+    ) {
+      const p = changedPath ?? getSettingsFilePathForSource(source)
+      if (p !== undefined) {
+        normCallerPath = platformPath.normalize(p)
+        for (const [host, session] of collectLiveIsolatedSubscribedSessions()) {
+          if (host === callerHost) continue
+          if (doesSessionMatchPath(session, source, normCallerPath)) {
+            matchingHosts.add(host)
+            matchingSessions.set(host, session)
+          }
+        }
+      }
+    }
+
+    const defaultHostMatches =
+      normCallerPath !== undefined &&
+      exitSessionContext(() => {
+        if (isDisklessActive()) return false
+        const p = getSettingsFilePathForSource(source)
+        return p !== undefined && platformPath.normalize(p) === normCallerPath
+      })
+
+    for (const [, session] of matchingSessions) {
+      runWithSession(session, () => {
+        resetSettingsCache()
+        if (source === 'policySettings') {
+          notifyStrictPluginOnlyPolicyIfChanged()
+        }
+        try {
+          checkMidSessionSettingsFileErrorsForCurrentHost(source)
+        } catch (err) {
+          logForDebugging(
+            `[settings] mid-session error check failed: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        }
+      })
+    }
+    if (defaultHostMatches) {
+      exitSessionContext(() => {
+        resetSettingsCache()
+        try {
+          checkMidSessionSettingsFileErrorsForCurrentHost(source)
+        } catch (err) {
+          logForDebugging(
+            `[settings] mid-session error check failed: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        }
+      })
+    }
+
+    for (const sub of [...settingsChangedSubscribers]) {
+      if (sub.sessionRef !== undefined) {
+        const host = sub.hostRef.deref()
+        if (host === undefined) {
+          settingsChangedSubscribers.delete(sub)
+          continue
+        }
+        if (matchingHosts.has(host)) {
+          invokeSettingsChangedSubscriber(sub, source, extra)
+        }
+      } else if (defaultHostMatches) {
+        invokeSettingsChangedSubscriber(sub, source, extra)
+      }
+    }
+    return
+  }
+
+  // Outside ALS (chokidar / MDM poll / process-level programmatic notifyChange)
+  if (changedPath !== undefined && source !== 'policySettings') {
+    const normalizedPath = platformPath.normalize(changedPath)
+    const matchingHosts = new Set<SessionHost>()
+    for (const [host, session] of collectLiveIsolatedSubscribedSessions()) {
+      if (!doesSessionMatchPath(session, source, normalizedPath)) continue
+      matchingHosts.add(host)
+      runWithSession(session, () => {
+        resetSettingsCache()
+        try {
+          checkMidSessionSettingsFileErrorsForCurrentHost(source)
+        } catch (err) {
+          logForDebugging(
+            `[settings] mid-session error check failed: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        }
+      })
+    }
+    const defaultMatches =
+      !isDisklessActive() &&
+      (() => {
+        const p = getSettingsFilePathForSource(source)
+        return p !== undefined && platformPath.normalize(p) === normalizedPath
+      })()
+    if (defaultMatches) {
+      resetSettingsCache()
+      try {
+        checkMidSessionSettingsFileErrorsForCurrentHost(source)
+      } catch (err) {
+        logForDebugging(
+          `[settings] mid-session error check failed: ${errorMessage(err)}`,
+          { level: 'warn' },
+        )
+      }
+    }
+    for (const sub of [...settingsChangedSubscribers]) {
+      if (sub.sessionRef !== undefined) {
+        const host = sub.hostRef.deref()
+        if (host === undefined) {
+          settingsChangedSubscribers.delete(sub)
+          continue
+        }
+        if (matchingHosts.has(host)) {
+          invokeSettingsChangedSubscriber(sub, source, extra)
+        }
+      } else {
+        invokeSettingsChangedSubscriber(sub, source, extra)
+      }
+    }
+    return
+  }
+
   resetAllLiveHostSettingsCaches()
   // Official 2.1.325 #2332: clear cached skills/agents when managed
   // strictPluginOnlyCustomization changes in a running session.
@@ -1266,12 +1774,23 @@ function fanOut(source: SettingSource, extra?: SettingsChangeExtra): void {
       { level: 'warn' },
     )
   }
-  try {
-    settingsChanged.emit(source, extra)
-  } catch (err) {
-    logForDebugging(`[settings] subscriber failed: ${errorMessage(err)}`, {
-      level: 'warn',
-    })
+  for (const sub of [...settingsChangedSubscribers]) {
+    if (sub.sessionRef !== undefined) {
+      const session = resolveSubscriberSession(sub)
+      if (session === undefined) {
+        settingsChangedSubscribers.delete(sub)
+        continue
+      }
+      if (
+        changedPath !== undefined &&
+        runWithSession(session, () => isDisklessActive())
+      ) {
+        continue
+      }
+      invokeSettingsChangedSubscriber(sub, source, extra)
+    } else {
+      invokeSettingsChangedSubscriber(sub, source, extra)
+    }
   }
 }
 export function notifyChange(

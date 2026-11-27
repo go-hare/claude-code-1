@@ -115,7 +115,10 @@ describe('print & foregroundToolCalls 2.1.292-2.1.296 alignment', () => {
   })
 
   test('#494 applyPluginMcpDiff filters disabled MCP servers via isMcpServerDisabled', () => {
-    const src = readFileSync(join(import.meta.dir, '..', 'print.ts'), 'utf8')
+    const src = readFileSync(
+      join(import.meta.dir, '..', 'print', 'mcpAndPlugins.ts'),
+      'utf8',
+    )
     const idx = src.indexOf('async function applyPluginMcpDiff()')
     expect(idx).toBeGreaterThan(-1)
     const slice = src.slice(idx, idx + 450)

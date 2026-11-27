@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   mkdirSync,
@@ -706,5 +707,63 @@ describe('win-sandbox-native (srt-win 2.1.331)', () => {
         execPath: fakeExecBin,
       }),
     ).toBe(fakeVendorNextToExec)
+  })
+
+  test('E5-P0-2 & E5-P1-3: --apply-restricted-token self-reexec mode and fail-closed denies on deadline skip inside allowWrite', async () => {
+    const binPath = resolveSrtWinBinaryPath()
+    expect(binPath).not.toBeNull()
+
+    // 1. --apply-restricted-token executes target with restricted-token marker in test state mode
+    const reexecOk = spawnSync(
+      binPath!,
+      [
+        '--apply-restricted-token',
+        '--',
+        '/bin/sh',
+        '-c',
+        'printf "%s" "$SRT_WIN_RESTRICTED_TOKEN_APPLIED"',
+      ],
+      {
+        env: { ...process.env, SRT_WIN_TEST_STATE_DIR: stateDir },
+        encoding: 'utf8',
+      },
+    )
+    expect(reexecOk.status).toBe(0)
+    expect(reexecOk.stdout).toBe('1')
+
+    // 2. --apply-restricted-token rejects BatBadBut .bat scripts with validation exit code
+    const reexecBat = spawnSync(
+      binPath!,
+      ['--apply-restricted-token', '--', 'C:\\temp\\payload.bat'],
+      {
+        env: { ...process.env, SRT_WIN_TEST_STATE_DIR: stateDir },
+        encoding: 'utf8',
+      },
+    )
+    expect(reexecBat.status).toBe(SRT_WIN_EXIT_CODES.VALIDATION)
+
+    // 3. --apply-restricted-token rejects missing command with usage exit code
+    const reexecMissing = spawnSync(binPath!, ['--apply-restricted-token'], {
+      env: { ...process.env, SRT_WIN_TEST_STATE_DIR: stateDir },
+      encoding: 'utf8',
+    })
+    expect(reexecMissing.status).toBe(SRT_WIN_EXIT_CODES.USAGE)
+
+    // 4. E5-P1-3: denies fails closed when deadline_ms=0 skips a deny target inside allowWrite
+    const provider = createSrtWinNativeProvider({
+      srtWin: { exe: binPath!, prependArgs: [] },
+      env: { SRT_WIN_TEST_STATE_DIR: stateDir },
+    })
+    await provider.install()
+    const sandboxSid = 'S-1-5-21-1000000001-2000000002-3000000003-2002'
+    await expect(
+      provider.applyDenies({
+        denyRead: [],
+        denyWrite: ['C:\\Users\\alice\\work\\.git\\config'],
+        allowWrite: ['C:\\Users\\alice\\work'],
+        sid: sandboxSid,
+        deadlineMs: 0,
+      }),
+    ).rejects.toThrow(/Deadline expired|Unguarded deny target/)
   })
 })

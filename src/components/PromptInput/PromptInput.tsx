@@ -714,7 +714,8 @@ function PromptInput({
   // external input changes (e.g. speech-to-text injection) and move cursor to end.
   // densable: NORMAL remount/external path applies Oyr (not RgE) on NFC text.
   const lastInternalInputRef = React.useRef(input);
-  if (input !== lastInternalInputRef.current) {
+  const isExternalInputChange = input !== lastInternalInputRef.current;
+  if (isExternalInputChange) {
     const nextOffset =
       vimEnabled && vimMode === 'NORMAL'
         ? clampNormalModeCursorOffset(input.normalize('NFC'), input.length)
@@ -732,7 +733,9 @@ function PromptInput({
   const prevPropInputRef = React.useRef(input);
   const pendingExternalChangeRef = React.useRef<{ before: string; after: string } | null>(null);
   if (input !== prevPropInputRef.current) {
-    pendingExternalChangeRef.current = { before: prevPropInputRef.current, after: input };
+    if (isExternalInputChange) {
+      pendingExternalChangeRef.current = { before: prevPropInputRef.current, after: input };
+    }
     prevPropInputRef.current = input;
     liveInputRef.current = input;
   }
@@ -749,15 +752,17 @@ function PromptInput({
       cursor: cursorOffsetRef.current,
     }));
   }
-  if (pendingExternalChangeRef.current !== null) {
+  useLayoutEffect(() => {
     const ext = pendingExternalChangeRef.current;
-    pendingExternalChangeRef.current = null;
-    promptChangeCoordinatorRef.current.changed({
-      before: ext.before,
-      after: ext.after,
-      origin: { kind: 'landing' },
-    });
-  }
+    if (ext !== null) {
+      pendingExternalChangeRef.current = null;
+      promptChangeCoordinatorRef.current?.changed({
+        before: ext.before,
+        after: ext.after,
+        origin: { kind: 'landing' },
+      });
+    }
+  }, [input]);
   if (promptEditComposerRef.current === null) {
     promptEditComposerRef.current = createPromptEditComposer({
       read: () => ({
@@ -1021,12 +1026,11 @@ function PromptInput({
     advanceNextPasteIdAbove(pastedContents);
   }, [pastedContents, advanceNextPasteIdAbove]);
   const allocatePasteId = useCallback((): number => {
-    advanceNextPasteIdAbove(pastedContents);
     advanceNextPasteIdAbove(pastedContentsRef.current);
     const id = nextPasteIdRef.current++;
     seedPasteIdCounter(nextPasteIdRef.current);
     return id;
-  }, [pastedContents, advanceNextPasteIdAbove]);
+  }, [advanceNextPasteIdAbove]);
   // Armed by onImagePaste; if the very next keystroke is a non-space
   // printable, inputFilter prepends a space before it. Any other input
   // (arrow, escape, backspace, paste, space) disarms without inserting.
@@ -1869,14 +1873,18 @@ function PromptInput({
   ]);
 
   // #147 (2.1.326): stash orphaned pastedContents so deleting `[Image #N]` and
-  // yanking it back with Ctrl+Y restores the image attachment.
+  // yanking it back with Ctrl+Y restores the image attachment. Capped at an
+  // LRU of 10 entries so deleted base64 images cannot accumulate unboundedly.
+  const MAX_REMOVED_PASTED_CONTENTS = 10;
   const removedPastedContentsRef = useRef<Record<number, PastedContent>>({});
+  const removedPastedContentsOrderRef = useRef<number[]>([]);
   // Reset stashed pastes when conversation is cleared (e.g. `/clear`) so deleted
   // base64 image blobs are not retained in memory across sessions.
   const prevMessagesLengthRef = useRef(messages.length);
   useEffect(() => {
     if (prevMessagesLengthRef.current > 0 && messages.length === 0) {
       removedPastedContentsRef.current = {};
+      removedPastedContentsOrderRef.current = [];
     }
     prevMessagesLengthRef.current = messages.length;
   }, [messages.length]);
@@ -2052,6 +2060,7 @@ function PromptInput({
           logOutcomeAtSubmission(suggestionText, { skipReset: true });
           recordPromptSubmitTime();
           removedPastedContentsRef.current = {};
+          removedPastedContentsOrderRef.current = [];
 
           void onSubmitProp(
             suggestionText,
@@ -2098,6 +2107,7 @@ function PromptInput({
             trackAndSetInput('', undefined, { kind: 'clear' });
             setCursorOffset(0);
             removedPastedContentsRef.current = {};
+            removedPastedContentsOrderRef.current = [];
             clearBuffer();
             resetHistory();
             return;
@@ -2159,6 +2169,7 @@ function PromptInput({
       removeNotification('stash-hint');
       // #147 (2.1.326): release stashed deleted pastes (including base64 images) on submit.
       removedPastedContentsRef.current = {};
+      removedPastedContentsOrderRef.current = [];
       clearExpandPasteHint();
 
       // Route input to viewed agent (in-process teammate or named local_agent).
@@ -2425,83 +2436,129 @@ function PromptInput({
   // holding Esc over typed text clears text without immediately opening Rewind.
   const lastNonEmptyEscAtRef = useRef(0);
 
-  function onImagePaste(
-    image: string,
-    mediaType?: string,
-    filename?: string,
-    dimensions?: ImageDimensions,
-    sourcePath?: string,
-  ) {
-    logEvent('tengu_paste_image', {});
-    clearExpandPasteHint();
-    onModeChange('prompt');
+  const vimModeRef = useRef(vimMode);
+  vimModeRef.current = vimMode;
+  const onModeChangeRef = useRef(onModeChange);
+  onModeChangeRef.current = onModeChange;
 
-    const pasteId = allocatePasteId();
+  const insertTextAtCursor = useCallback(
+    (text: string) => {
+      // densable 2.1.211 N1: Kt(Ct.current, ze.current, ht.current); splice via
+      // live refs so multi-image paste / same-tick insert sees dual-written map
+      // and prior pill text, not the render-time closure snapshot.
+      const currentInput = liveInputRef.current;
+      const currentOffset = cursorOffsetRef.current;
+      pushToBuffer(currentInput, currentOffset, pastedContentsRef.current);
 
-    const newContent: PastedContent = {
-      id: pasteId,
-      type: 'image',
-      content: image,
-      mediaType: mediaType || 'image/png', // default to PNG if not provided
-      filename: filename || 'Pasted image',
-      dimensions,
-      sourcePath,
-    };
+      const { newInput, newOffset } = computeNfcInsertResult(currentInput, currentOffset, text);
+      // Official 2.1.328 (`OX.insertText` @583150..583550): mark keepsFullText
+      // synchronously BEFORE useMaybeTruncateInput runs when cursor insert >10k.
+      noteUserEditForTruncation(newInput, keepsFullTextRef);
+      // Paste / N1 does not go through onChange, so footerSelection (e.g. "2 shells"
+      // tasks pill) would stay set: TextInput focus=false and Enter maps to
+      // footer:openSelected → bashes dialog, pill left in the box ("吞"). Clear
+      // footer so Chat context + chat:submit own the next Enter.
+      setAppState(prev =>
+        prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
+      );
+      trackAndSetInput(newInput);
+      // densable UG on typed insert: stamp slashNameOnly gaps when slash/ultraplan.
+      const modeStr = vimModeRef.current as string;
+      const visual = modeStr === 'VISUAL' || modeStr === 'VISUAL LINE';
+      const stamped = stampSlashNameOnlyPastedGaps(pastedContentsRef.current, newInput, visual);
+      if (stamped !== pastedContentsRef.current) {
+        setPastedContents(stamped);
+        pastedContentsRef.current = stamped;
+      }
+      cursorOffsetRef.current = newOffset;
+      setCursorOffset(newOffset);
+    },
+    [pushToBuffer, setAppState, trackAndSetInput, setPastedContents, setCursorOffset],
+  );
 
-    // densable 2.1.211 qie: k(setState) AND ht.current={...ht.current,[id]:U1}
-    // Dual-write + insert BEFORE cacheImagePath: setAppState can re-render with
-    // still-empty parent pastedContents; liveInputRef must already hold the pill
-    // so the dual-write merge keeps the entry (stillReferenced).
-    setPastedContents(prev => ({ ...prev, [pasteId]: newContent }));
-    pastedContentsRef.current = {
-      ...pastedContentsRef.current,
-      [pasteId]: newContent,
-    };
+  const onImagePaste = useCallback(
+    (image: string, mediaType?: string, filename?: string, dimensions?: ImageDimensions, sourcePath?: string) => {
+      logEvent('tengu_paste_image', {});
+      clearExpandPasteHint();
+      onModeChangeRef.current('prompt');
 
-    // #147 (2.1.326, official Bje): if user typed while async image read ran,
-    // insert `[Image #N]` at the saved anchor (before the typed word) instead of
-    // splitting the middle of the word being typed.
-    const anchor = imagePasteAnchorRef.current;
-    imagePasteAnchorRef.current = null;
-    const liveVal = liveInputRef.current;
-    const refText = formatImageRef(pasteId);
-    if (
-      anchor &&
-      liveVal.length > anchor.before.length + anchor.after.length &&
-      liveVal.startsWith(anchor.before) &&
-      liveVal.endsWith(anchor.after)
-    ) {
-      const typedDuringRead = liveVal.slice(anchor.before.length, liveVal.length - anchor.after.length);
-      const prefix = anchor.followsPill ? ' ' : '';
-      const suffix = typedDuringRead.length > 0 && !/^\s/.test(typedDuringRead) ? ' ' : '';
-      const insertion = prefix + refText + suffix;
-      const nextValue = anchor.before + insertion + typedDuringRead + anchor.after;
-      const nextCursor = cursorOffsetRef.current + insertion.length;
-      pushToBuffer(liveVal, cursorOffsetRef.current, pastedContentsRef.current);
-      trackAndSetInput(nextValue, undefined, { kind: 'composer' });
-      liveInputRef.current = nextValue;
-      cursorOffsetRef.current = nextCursor;
-      setCursorOffset(nextCursor);
-      pendingSpaceAfterPillRef.current = false;
-    } else {
-      // Multi-image paste calls onImagePaste in a loop. If the ref is already
-      // armed, the previous pill's lazy space fires now (before this pill)
-      // rather than being lost. densable: pK=Cs.current?" ":""; N1(pK+Tmo(id))
-      const prefix = pendingSpaceAfterPillRef.current ? ' ' : '';
-      insertTextAtCursor(prefix + refText);
-      pendingSpaceAfterPillRef.current = true;
-    }
+      const pasteId = allocatePasteId();
 
-    // densable Cct/wct: stamp AppState.storedImagePaths so [Image #N] is clickable
-    cacheImagePath(newContent, setAppState);
+      const newContent: PastedContent = {
+        id: pasteId,
+        type: 'image',
+        content: image,
+        mediaType: mediaType || 'image/png', // default to PNG if not provided
+        filename: filename || 'Pasted image',
+        dimensions,
+        sourcePath,
+      };
 
-    // Store image to disk in background (re-stamps path after write)
-    void storeImage(newContent, setAppState);
-  }
+      // densable 2.1.211 qie: k(setState) AND ht.current={...ht.current,[id]:U1}
+      // Dual-write + insert BEFORE cacheImagePath: setAppState can re-render with
+      // still-empty parent pastedContents; liveInputRef must already hold the pill
+      // so the dual-write merge keeps the entry (stillReferenced).
+      setPastedContents(prev => ({ ...prev, [pasteId]: newContent }));
+      pastedContentsRef.current = {
+        ...pastedContentsRef.current,
+        [pasteId]: newContent,
+      };
+
+      // #147 (2.1.326, official Bje): if user typed while async image read ran,
+      // insert `[Image #N]` at the saved anchor (before the typed word) instead of
+      // splitting the middle of the word being typed.
+      const anchor = imagePasteAnchorRef.current;
+      imagePasteAnchorRef.current = null;
+      const liveVal = liveInputRef.current;
+      const refText = formatImageRef(pasteId);
+      if (
+        anchor &&
+        liveVal.length > anchor.before.length + anchor.after.length &&
+        liveVal.startsWith(anchor.before) &&
+        liveVal.endsWith(anchor.after)
+      ) {
+        const typedDuringRead = liveVal.slice(anchor.before.length, liveVal.length - anchor.after.length);
+        const prefix = anchor.followsPill ? ' ' : '';
+        const suffix = typedDuringRead.length > 0 && !/^\s/.test(typedDuringRead) ? ' ' : '';
+        const insertion = prefix + refText + suffix;
+        const nextValue = anchor.before + insertion + typedDuringRead + anchor.after;
+        const nextCursor = cursorOffsetRef.current + insertion.length;
+        pushToBuffer(liveVal, cursorOffsetRef.current, pastedContentsRef.current);
+        trackAndSetInput(nextValue, undefined, { kind: 'composer' });
+        liveInputRef.current = nextValue;
+        cursorOffsetRef.current = nextCursor;
+        setCursorOffset(nextCursor);
+        pendingSpaceAfterPillRef.current = false;
+      } else {
+        // Multi-image paste calls onImagePaste in a loop. If the ref is already
+        // armed, the previous pill's lazy space fires now (before this pill)
+        // rather than being lost. densable: pK=Cs.current?" ":""; N1(pK+Tmo(id))
+        const prefix = pendingSpaceAfterPillRef.current ? ' ' : '';
+        insertTextAtCursor(prefix + refText);
+        pendingSpaceAfterPillRef.current = true;
+      }
+
+      // densable Cct/wct: stamp AppState.storedImagePaths so [Image #N] is clickable
+      cacheImagePath(newContent, setAppState);
+
+      // Store image to disk in background (re-stamps path after write)
+      void storeImage(newContent, setAppState);
+    },
+    [
+      clearExpandPasteHint,
+      allocatePasteId,
+      setPastedContents,
+      pushToBuffer,
+      trackAndSetInput,
+      setCursorOffset,
+      insertTextAtCursor,
+      setAppState,
+    ],
+  );
 
   // densable 2.1.211 OSe + #147 (2.1.326): prune orphaned pastes (stashing them
-  // in removedPastedContentsRef) and restore any stashed paste whose pill was
-  // yanked back into the buffer (e.g. Ctrl+Y after Ctrl+U/Ctrl+W).
+  // in removedPastedContentsRef with an LRU cap) and restore any stashed paste
+  // whose pill was yanked back into the buffer (e.g. Ctrl+Y after Ctrl+U/Ctrl+W).
   const hasTrackablePaste = useMemo(() => Object.values(pastedContents).some(isTrackablePaste), [pastedContents]);
   useEffect(() => {
     const liveText = liveInputRef.current;
@@ -2514,6 +2571,10 @@ function PromptInput({
       if (!pastedContentsRef.current[id] && removedPastedContentsRef.current[id]) {
         restoredEntries[id] = removedPastedContentsRef.current[id]!;
         delete removedPastedContentsRef.current[id];
+        const orderIdx = removedPastedContentsOrderRef.current.indexOf(id);
+        if (orderIdx !== -1) {
+          removedPastedContentsOrderRef.current.splice(orderIdx, 1);
+        }
         hasRestored = true;
       }
     }
@@ -2524,22 +2585,48 @@ function PromptInput({
     }
 
     if (!hasTrackablePaste) return;
-    setPastedContents(prev => {
-      const orphaned = Object.values(prev).filter(c => {
-        if (c.type === 'text' && c.inline) {
-          const variants = inlinePasteVariants(c.content);
-          const stillPresent =
-            variants.some(v => liveText.includes(v)) || variants.some(v => matchesWithCombiningMarks(liveText, v));
-          return !stillPresent;
+    const stashOrphaned = (item: PastedContent): void => {
+      const order = removedPastedContentsOrderRef.current;
+      const existingIdx = order.indexOf(item.id);
+      if (existingIdx !== -1) {
+        order.splice(existingIdx, 1);
+      }
+      removedPastedContentsRef.current[item.id] = item;
+      order.push(item.id);
+      while (order.length > MAX_REMOVED_PASTED_CONTENTS) {
+        const oldestId = order.shift();
+        if (oldestId !== undefined) {
+          delete removedPastedContentsRef.current[oldestId];
         }
-        return isTrackablePaste(c) && !referencedIds.has(c.id);
-      });
+      }
+    };
+    const isOrphaned = (c: PastedContent): boolean => {
+      if (c.type === 'text' && c.inline) {
+        const variants = inlinePasteVariants(c.content);
+        const stillPresent =
+          variants.some(v => liveText.includes(v)) || variants.some(v => matchesWithCombiningMarks(liveText, v));
+        return !stillPresent;
+      }
+      return isTrackablePaste(c) && !referencedIds.has(c.id);
+    };
+    const syncOrphaned = Object.values(pastedContentsRef.current).filter(isOrphaned);
+    if (syncOrphaned.length > 0) {
+      const nextRef = { ...pastedContentsRef.current };
+      for (const item of syncOrphaned) {
+        stashOrphaned(item);
+        delete nextRef[item.id];
+      }
+      pastedContentsRef.current = nextRef;
+    }
+    setPastedContents(prev => {
+      const orphaned = Object.values(prev).filter(isOrphaned);
       if (orphaned.length === 0) return prev;
       const next = { ...prev };
       for (const item of orphaned) {
-        removedPastedContentsRef.current[item.id] = item;
+        stashOrphaned(item);
         delete next[item.id];
       }
+      pastedContentsRef.current = next;
       return next;
     });
   }, [input, hasTrackablePaste, setPastedContents]);
@@ -2668,38 +2755,6 @@ function PromptInput({
     },
     [vimEnabled, vimMode, setHelpOpen],
   );
-
-  function insertTextAtCursor(text: string) {
-    // densable 2.1.211 N1: Kt(Ct.current, ze.current, ht.current); splice via
-    // live refs so multi-image paste / same-tick insert sees dual-written map
-    // and prior pill text, not the render-time closure snapshot.
-    const currentInput = liveInputRef.current;
-    const currentOffset = cursorOffsetRef.current;
-    pushToBuffer(currentInput, currentOffset, pastedContentsRef.current);
-
-    const { newInput, newOffset } = computeNfcInsertResult(currentInput, currentOffset, text);
-    // Official 2.1.328 (`OX.insertText` @583150..583550): mark keepsFullText
-    // synchronously BEFORE useMaybeTruncateInput runs when cursor insert >10k.
-    noteUserEditForTruncation(newInput, keepsFullTextRef);
-    // Paste / N1 does not go through onChange, so footerSelection (e.g. "2 shells"
-    // tasks pill) would stay set: TextInput focus=false and Enter maps to
-    // footer:openSelected → bashes dialog, pill left in the box ("吞"). Clear
-    // footer so Chat context + chat:submit own the next Enter.
-    setAppState(prev =>
-      prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
-    );
-    trackAndSetInput(newInput);
-    // densable UG on typed insert: stamp slashNameOnly gaps when slash/ultraplan.
-    const modeStr = vimMode as string;
-    const visual = modeStr === 'VISUAL' || modeStr === 'VISUAL LINE';
-    const stamped = stampSlashNameOnlyPastedGaps(pastedContentsRef.current, newInput, visual);
-    if (stamped !== pastedContentsRef.current) {
-      setPastedContents(stamped);
-      pastedContentsRef.current = stamped;
-    }
-    cursorOffsetRef.current = newOffset;
-    setCursorOffset(newOffset);
-  }
 
   const doublePressEscFromEmpty = useDoublePress(
     () => {},
@@ -3005,7 +3060,7 @@ function PromptInput({
         });
       }
     });
-  }, [addNotification, onImagePaste]);
+  }, [mode, captureImagePasteAnchor, addNotification, onImagePaste]);
 
   // Register chat:submit handler directly in the handler registry (not via
   // useKeybindings) so that only the ChordInterceptor can invoke it for chord

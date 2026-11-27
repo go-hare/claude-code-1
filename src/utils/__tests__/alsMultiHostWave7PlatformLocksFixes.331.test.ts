@@ -240,17 +240,18 @@ describe('Wave 7 Fixer 3: Platform, OS-resource, Disk-lock, and Boot-pin ALS Fix
         )
         pinCredentialsStore(bootCreds)
 
-        // Isolated Host A (unset) inherits all three boot pins from default host
+        // E4-P0-4: Isolated Host A (unset) MUST NOT inherit default host's pinned
+        // storageV5 or credentialsStore (prevents cross-tenant credential/storage leakage)
         const hostA = runWithNewHostSession({ id: 'w7-sv5-a' }, () => ({
           hoverRestOn: isHoverRestOn(),
           storageV5: getPinnedStorageV5(),
           creds: getPinnedCredentials(),
         }))
         expect(hostA.hoverRestOn).toBe(true)
-        expect(hostA.storageV5).toBe(bootBackend)
-        expect(hostA.creds).toBe(bootCreds)
+        expect(hostA.storageV5).toBeUndefined()
+        expect(hostA.creds).toBeUndefined()
 
-        // Isolated Host B explicitly overrides each pin without polluting default host or Host A
+        // Isolated Host B explicitly sets & resets its own pins without polluting default host or Host A
         const hostB = runWithNewHostSession({ id: 'w7-sv5-b' }, () => {
           expect(pinHoverRest(false)).toBe('pinned')
           const overriddenOff = isHoverRestOn()
@@ -259,7 +260,7 @@ describe('Wave 7 Fixer 3: Platform, OS-resource, Disk-lock, and Boot-pin ALS Fix
           pinCredentialsStore(undefined)
           const credsExplicitUndef = getPinnedCredentials()
 
-          // Resetting Host B's hoverRest override lets it re-pin or fall back
+          // Resetting Host B's hoverRest override lets it re-pin cleanly
           resetHoverRestPinForTests()
           expect(pinHoverRest(true)).toBe('pinned')
           expect(pinStorageV5({ backend: hostBBackend, configHome })).toBe(
@@ -284,8 +285,8 @@ describe('Wave 7 Fixer 3: Platform, OS-resource, Disk-lock, and Boot-pin ALS Fix
         expect(hostB.credsOverride).toBe(hostBCreds)
         expect(hostB.credsExplicitUndef).toBeUndefined()
         expect(hostB.storageOverride).toBe(hostBBackend)
-        expect(hostB.afterResetStorage).toBe(bootBackend)
-        expect(hostB.afterResetCreds).toBe(bootCreds)
+        expect(hostB.afterResetStorage).toBeUndefined()
+        expect(hostB.afterResetCreds).toBeUndefined()
 
         // Default host remains completely untouched
         expect(isHoverRestOn()).toBe(true)

@@ -1992,10 +1992,13 @@ describe('Group 6 [P1-9 + P1-14]: SSE event assembly, pause_turn stream resumpti
   })
 
   test('claude.ts does not hardcode switchModelsOnFlag: false, uses getSwitchModelsOnFlag(), and yields fallback_request cleanly when caller-handled', async () => {
-    const claudeSrc = readFileSync(
-      join(import.meta.dir, '../claude.ts'),
-      'utf8',
-    )
+    const claudeSrc = [
+      readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8'),
+      readFileSync(
+        join(import.meta.dir, '../claude/streamEventProcessor.ts'),
+        'utf8',
+      ),
+    ].join('\n')
     expect(claudeSrc).not.toContain('switchModelsOnFlag: false')
     expect(claudeSrc).toContain('switchModelsOnFlag: getSwitchModelsOnFlag()')
 

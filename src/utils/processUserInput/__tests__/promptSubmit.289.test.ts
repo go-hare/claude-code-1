@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { Command } from '../../../types/command.js'
@@ -138,15 +138,33 @@ describe('densable 2.1.289 Unn CLt/vLt/Ios/RNe', () => {
     expect(queueUi).toContain('send now')
     expect(queueUi).toContain('formatQueuedIdeSelection')
     expect(queueUi).toContain('shouldHideQueuedIdeSelectionPreview')
-    const messages = readFileSync(join(ROOT, 'src/utils/messages.ts'), 'utf8')
+    const readModuleTree = (entryPath: string, subDir: string): string =>
+      [
+        readFileSync(entryPath, 'utf8'),
+        ...readdirSync(subDir)
+          .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+          .sort()
+          .map(f => readFileSync(join(subDir, f), 'utf8')),
+      ].join('\n')
+    const messages = readModuleTree(
+      join(ROOT, 'src/utils/messages.ts'),
+      join(ROOT, 'src/utils/messages'),
+    )
     expect(messages).toContain("case 'plugin':")
     expect(messages).toContain('originObj.asUser === true')
     expect(messages).toContain('wrapPluginOriginText')
     expect(messages).toContain('{ midTurn: true }')
-    const hooks = readFileSync(
-      join(ROOT, 'src/utils/plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const fhDir = join(ROOT, 'src/utils/plugins/functionHooks')
+    const hooks = [
+      readFileSync(
+        join(ROOT, 'src/utils/plugins/functionHooksModules.ts'),
+        'utf8',
+      ),
+      ...readdirSync(fhDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(fhDir, f), 'utf8')),
+    ].join('\n')
     expect(hooks).toContain('input.asUser === true')
     expect(hooks).toContain('asUser: true')
     const unn = readFileSync(
@@ -177,10 +195,7 @@ describe('densable 2.1.289 Unn CLt/vLt/Ios/RNe', () => {
       'utf8',
     )
     expect(assistant).toContain('evaluateUiRender')
-    const fillHost = readFileSync(
-      join(ROOT, 'src/utils/plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const fillHost = hooks
     expect(fillHost).toContain('return runPromptFill(rec ?? {}, plugin)')
     expect(fillHost).toContain('createHeldPressStore')
     expect(fillHost).toContain('heldPressCount')
@@ -225,7 +240,10 @@ describe('densable 2.1.289 Unn CLt/vLt/Ios/RNe', () => {
     expect(init).toContain('leftoverQrrInstallClientData')
     expect(handle).toContain('getMainThreadTurn')
     expect(handle).toContain('batchPromptSubmitWaitGuard')
-    const query = readFileSync(join(ROOT, 'src/query.ts'), 'utf8')
+    const query = readModuleTree(
+      join(ROOT, 'src/query.ts'),
+      join(ROOT, 'src/query'),
+    )
     expect(query).toContain('bindMainThreadTurn')
     expect(query).toContain('releaseMainThreadTurn')
     expect(query).toContain('consumeFromQueue')

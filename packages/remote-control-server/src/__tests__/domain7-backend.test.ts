@@ -3,11 +3,13 @@ import { Hono } from 'hono'
 import type { WSContext } from 'hono/ws'
 import {
   storeReset,
+  storeCreateUser,
   storeCreateSession,
   storeBindSession,
   storeIsSessionOwner,
   storeUpsertSessionWorker,
 } from '../store'
+import { issueToken } from '../auth/token'
 import { getAllEventBuses, removeEventBus } from '../transport/event-bus'
 import { normalizePayload, publishSessionEvent } from '../services/transport'
 import { toClientPayload } from '../transport/client-payload'
@@ -72,6 +74,12 @@ function getValidApiKey(): string {
   return config.apiKeys[0]!
 }
 
+function makeUserTokenHeader(userId: string): { Authorization: string } {
+  storeCreateUser(userId)
+  const { token } = issueToken(userId)
+  return { Authorization: `Bearer ${token}` }
+}
+
 describe('Domain 7 Backend Regressions', () => {
   let app: Hono
 
@@ -86,15 +94,27 @@ describe('Domain 7 Backend Regressions', () => {
   })
 
   describe('P0-D7-2 & P1-D7-14: POST /web/bind ownership & error shape', () => {
-    test('rejects cross-owner session hijacking with 403 structured error', async () => {
+    test('rejects unauthenticated POST /web/bind with 401 and cross-owner session hijacking with 403 structured error', async () => {
       const session = storeCreateSession({ title: 'Victim Session' })
       storeBindSession(session.id, 'owner-uuid-1')
 
-      const res = await app.request('/web/bind', {
+      // Unauthenticated request (UUID header only, no token/API key) -> 401
+      const unauthRes = await app.request('/web/bind', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-UUID': 'attacker-uuid-2',
+        },
+        body: JSON.stringify({ sessionId: session.id }),
+      })
+      expect(unauthRes.status).toBe(401)
+
+      // Authenticated non-owner token trying to hijack owned session -> 403
+      const res = await app.request('/web/bind', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...makeUserTokenHeader('attacker-uuid-2'),
         },
         body: JSON.stringify({ sessionId: session.id }),
       })
@@ -107,14 +127,15 @@ describe('Domain 7 Backend Regressions', () => {
       expect(body.error?.message).toContain('already owned')
     })
 
-    test('allows binding unowned session via X-UUID header and idempotent re-bind by same owner', async () => {
+    test('allows binding unowned session via authenticated token and idempotent re-bind by same owner', async () => {
       const session = storeCreateSession({ title: 'Orphan Session' })
+      const ownerAuth = makeUserTokenHeader('owner-uuid-1')
 
       const first = await app.request('/web/bind', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-UUID': 'owner-uuid-1',
+          ...ownerAuth,
         },
         body: JSON.stringify({ sessionId: session.id }),
       })
@@ -124,7 +145,7 @@ describe('Domain 7 Backend Regressions', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-UUID': 'owner-uuid-1',
+          ...ownerAuth,
         },
         body: JSON.stringify({ sessionId: session.id }),
       })
@@ -149,9 +170,10 @@ describe('Domain 7 Backend Regressions', () => {
     })
 
     test('returns standardized { error: { type, message } } for 400 and 404', async () => {
+      const ownerAuth = makeUserTokenHeader('owner-1')
       const bad = await app.request('/web/bind', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...ownerAuth },
         body: JSON.stringify({}),
       })
       expect(bad.status).toBe(400)
@@ -165,7 +187,7 @@ describe('Domain 7 Backend Regressions', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-UUID': 'owner-1',
+          ...ownerAuth,
         },
         body: JSON.stringify({ sessionId: 'session_missing' }),
       })
@@ -203,9 +225,12 @@ describe('Domain 7 Backend Regressions', () => {
       )
 
       const res = await app.request(
-        `/web/sessions/${session.id}/events?uuid=sse-user&from_sequence_num=2`,
+        `/web/sessions/${session.id}/events?from_sequence_num=2`,
         {
-          headers: { 'Last-Event-ID': '1' },
+          headers: {
+            'Last-Event-ID': '1',
+            ...makeUserTokenHeader('sse-user'),
+          },
         },
       )
       expect(res.status).toBe(200)
@@ -408,8 +433,11 @@ describe('Domain 7 Backend Regressions', () => {
       }
       expect(regBody.session_id).toBeTruthy()
 
+      const webAuth1 = makeUserTokenHeader('web-browser-uuid-1')
+      const webAuth2 = makeUserTokenHeader('web-browser-uuid-2')
+
       const allRes = await app.request('/web/sessions/all', {
-        headers: { 'X-UUID': 'web-browser-uuid-1' },
+        headers: webAuth1,
       })
       expect(allRes.status).toBe(200)
       const summaries = (await allRes.json()) as Array<Record<string, unknown>>
@@ -419,11 +447,11 @@ describe('Domain 7 Backend Regressions', () => {
       expect(summaries[0]!.environment_id).toBe(regBody.environment_id)
       expect(typeof summaries[0]!.created_at).toBe('number')
 
-      // Another browser UUID can also open the ACP session detail (no 403!)
+      // Another authenticated browser user can also open the ACP session detail (no 403!)
       const detailRes = await app.request(
         `/web/sessions/${regBody.session_id}`,
         {
-          headers: { 'X-UUID': 'web-browser-uuid-2' },
+          headers: webAuth2,
         },
       )
       expect(detailRes.status).toBe(200)
@@ -433,7 +461,7 @@ describe('Domain 7 Backend Regressions', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-UUID': 'web-browser-uuid-1',
+          ...webAuth1,
         },
         body: JSON.stringify({
           title: 'Invalid Web Session',
@@ -526,9 +554,10 @@ describe('Domain 7 Backend Regressions', () => {
         },
       })
 
-      const unauthHeaders = {
+      // Non-API-key authenticated user token: cannot mutate/read sensitive endpoints (403)
+      const nonAdminHeaders = {
         'Content-Type': 'application/json',
-        'X-UUID': 'random-attacker-uuid',
+        ...makeUserTokenHeader('random-attacker-uuid'),
       }
 
       // Mutating endpoints MUST reject with 403
@@ -536,7 +565,7 @@ describe('Domain 7 Backend Regressions', () => {
         (
           await app.request(`/web/sessions/${acpSessionId}/interrupt`, {
             method: 'POST',
-            headers: unauthHeaders,
+            headers: nonAdminHeaders,
           })
         ).status,
       ).toBe(403)
@@ -545,7 +574,7 @@ describe('Domain 7 Backend Regressions', () => {
         (
           await app.request(`/web/sessions/${acpSessionId}/events`, {
             method: 'POST',
-            headers: unauthHeaders,
+            headers: nonAdminHeaders,
             body: JSON.stringify({ type: 'user', content: 'hijack' }),
           })
         ).status,
@@ -555,7 +584,7 @@ describe('Domain 7 Backend Regressions', () => {
         (
           await app.request(`/web/sessions/${acpSessionId}/control`, {
             method: 'POST',
-            headers: unauthHeaders,
+            headers: nonAdminHeaders,
             body: JSON.stringify({
               type: 'permission_response',
               approved: true,
@@ -568,7 +597,7 @@ describe('Domain 7 Backend Regressions', () => {
       expect(
         (
           await app.request(`/web/sessions/${acpSessionId}/history`, {
-            headers: unauthHeaders,
+            headers: nonAdminHeaders,
           })
         ).status,
       ).toBe(403)
@@ -576,7 +605,7 @@ describe('Domain 7 Backend Regressions', () => {
       expect(
         (
           await app.request(`/web/sessions/${acpSessionId}/events`, {
-            headers: unauthHeaders,
+            headers: nonAdminHeaders,
           })
         ).status,
       ).toBe(403)
@@ -585,7 +614,7 @@ describe('Domain 7 Backend Regressions', () => {
         (
           await app.request('/web/bind', {
             method: 'POST',
-            headers: unauthHeaders,
+            headers: nonAdminHeaders,
             body: JSON.stringify({ sessionId: acpSessionId }),
           })
         ).status,
@@ -593,7 +622,7 @@ describe('Domain 7 Backend Regressions', () => {
 
       // Read-only detail discovery still returns 200 without sensitive automation_state
       const detailRes = await app.request(`/web/sessions/${acpSessionId}`, {
-        headers: unauthHeaders,
+        headers: nonAdminHeaders,
       })
       expect(detailRes.status).toBe(200)
       const detailBody = (await detailRes.json()) as Record<string, unknown>
@@ -631,15 +660,18 @@ describe('Domain 7 Backend Regressions', () => {
         source: 'cli',
       })
 
+      const pollerAuth = makeUserTokenHeader('dashboard-poller-uuid')
+      const cliUserAuth = makeUserTokenHeader('real-cli-user-uuid')
+
       // Passive Dashboard browser polls both list endpoints
       const allRes = await app.request('/web/sessions/all', {
-        headers: { 'X-UUID': 'dashboard-poller-uuid' },
+        headers: pollerAuth,
       })
       expect(allRes.status).toBe(200)
       expect(await allRes.json()).toEqual([])
 
       const listRes = await app.request('/web/sessions', {
-        headers: { 'X-UUID': 'dashboard-poller-uuid' },
+        headers: pollerAuth,
       })
       expect(listRes.status).toBe(200)
       expect(await listRes.json()).toEqual([])
@@ -654,7 +686,7 @@ describe('Domain 7 Backend Regressions', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-UUID': 'real-cli-user-uuid',
+          ...cliUserAuth,
         },
         body: JSON.stringify({ sessionId: cliSession.id }),
       })
@@ -668,7 +700,7 @@ describe('Domain 7 Backend Regressions', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-UUID': 'dashboard-poller-uuid',
+          ...pollerAuth,
         },
         body: JSON.stringify({ sessionId: cliSession.id }),
       })

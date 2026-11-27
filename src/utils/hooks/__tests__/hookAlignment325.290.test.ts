@@ -77,7 +77,22 @@ describe('#343 onFailure: block — stoppedAfterItsTimeout & shouldBlockOnFailur
   })
 
   test('executeHooks and executeHooksOutsideREPL wire shouldBlockOnFailureForEvent and stoppedAfterItsTimeout', () => {
-    const hooksSrc = readFileSync(join(SRC_ROOT, 'utils/hooks.ts'), 'utf8')
+    const hooksSrc = [
+      'utils/hooks.ts',
+      'utils/hooks/hookCore.ts',
+      'utils/hooks/hookShellRunner.ts',
+      'utils/hooks/hookOutputProcessor.ts',
+      'utils/hooks/hookConfigRegistry.ts',
+      'utils/hooks/hookModelSlotPool.ts',
+      'utils/hooks/hookEngine.ts',
+      'utils/hooks/hookEntryExecutor.ts',
+      'utils/hooks/hookOutsideReplEngine.ts',
+      'utils/hooks/hookToolEvents.ts',
+      'utils/hooks/hookSessionAndPromptEvents.ts',
+      'utils/hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(SRC_ROOT, rel), 'utf8'))
+      .join('\n')
     expect(hooksSrc).toContain(
       'forceSyncExecution || shouldBlockOnFailureForEvent(hook, hookEvent)',
     )
@@ -160,7 +175,22 @@ describe('#436 pluginDirectoryExists & storageV5 wiring', () => {
     expect(sessionStartSrc).toContain('storageV5?: unknown')
     expect(sessionStartSrc).toContain('storageV5,')
 
-    const hooksSrc = readFileSync(join(SRC_ROOT, 'utils/hooks.ts'), 'utf8')
+    const hooksSrc = [
+      'utils/hooks.ts',
+      'utils/hooks/hookCore.ts',
+      'utils/hooks/hookShellRunner.ts',
+      'utils/hooks/hookOutputProcessor.ts',
+      'utils/hooks/hookConfigRegistry.ts',
+      'utils/hooks/hookModelSlotPool.ts',
+      'utils/hooks/hookEngine.ts',
+      'utils/hooks/hookEntryExecutor.ts',
+      'utils/hooks/hookOutsideReplEngine.ts',
+      'utils/hooks/hookToolEvents.ts',
+      'utils/hooks/hookSessionAndPromptEvents.ts',
+      'utils/hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(SRC_ROOT, rel), 'utf8'))
+      .join('\n')
     expect(hooksSrc).toContain('getPinnedStorageV5()')
     for (const fn of [
       'executeNotificationHooks',
@@ -191,7 +221,22 @@ describe('#436 pluginDirectoryExists & storageV5 wiring', () => {
 
 describe('#520 orphaned AbortSignal on /clear & clears counter', () => {
   test('wiring across hooks.ts, sessionStart.ts, clear/conversation.ts, conversationRecovery.ts, and print.ts', () => {
-    const hooksSrc = readFileSync(join(SRC_ROOT, 'utils/hooks.ts'), 'utf8')
+    const hooksSrc = [
+      'utils/hooks.ts',
+      'utils/hooks/hookCore.ts',
+      'utils/hooks/hookShellRunner.ts',
+      'utils/hooks/hookOutputProcessor.ts',
+      'utils/hooks/hookConfigRegistry.ts',
+      'utils/hooks/hookModelSlotPool.ts',
+      'utils/hooks/hookEngine.ts',
+      'utils/hooks/hookEntryExecutor.ts',
+      'utils/hooks/hookOutsideReplEngine.ts',
+      'utils/hooks/hookToolEvents.ts',
+      'utils/hooks/hookSessionAndPromptEvents.ts',
+      'utils/hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(SRC_ROOT, rel), 'utf8'))
+      .join('\n')
     expect(hooksSrc).toContain(
       'function armLaterLoadedSessionStart(\n  payload: SessionStartLateLoadPayload,\n  signal?: AbortSignal,\n  orphaned?: AbortSignal,',
     )

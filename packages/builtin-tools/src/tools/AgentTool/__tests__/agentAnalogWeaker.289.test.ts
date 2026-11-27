@@ -190,10 +190,22 @@ describe('densable 2.1.289 remaining analog-weaker wrap', () => {
         .slice(successOt, successOt + 350)
         .includes('runTurnEndReactions'),
     ).toBe(true)
-    const hooksSrc = readFileSync(
-      join(repoRoot, 'src', 'utils', 'hooks.ts'),
-      'utf-8',
-    )
+    const hooksSrc = [
+      'hooks.ts',
+      'hooks/hookCore.ts',
+      'hooks/hookShellRunner.ts',
+      'hooks/hookOutputProcessor.ts',
+      'hooks/hookConfigRegistry.ts',
+      'hooks/hookModelSlotPool.ts',
+      'hooks/hookEngine.ts',
+      'hooks/hookEntryExecutor.ts',
+      'hooks/hookOutsideReplEngine.ts',
+      'hooks/hookToolEvents.ts',
+      'hooks/hookSessionAndPromptEvents.ts',
+      'hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(repoRoot, 'src', 'utils', rel), 'utf-8'))
+      .join('\n')
     expect(hooksSrc).toContain(
       "skipSessionFunctionHooks: stopPass !== 'turn_end_reactions'",
     )

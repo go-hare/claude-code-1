@@ -531,6 +531,7 @@ describe('Public Multi-Tenant Embedded SDK & Live Cross-Process E2E (2.1.331)', 
 
   test('Worker 1 -> Worker 2 turn_handoff snapshot export & hydration inside EmbeddedSession', () => {
     const admission = evaluateTurnHandoffAdmission({
+      sdkUrl: 'https://api.example/v1/sessions/remote-sess-331',
       remoteSessionId: 'remote-sess-331',
       hydratesCarriedLines: true,
     })

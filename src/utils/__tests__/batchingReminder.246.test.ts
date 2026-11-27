@@ -4,7 +4,7 @@
  * Stay leftover. Do not invent default reminder copy.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import type { AttachmentMessage, Message } from '../../types/message.js'
@@ -61,15 +61,26 @@ describe('#38 batching_reminder producer + C latch (2.1.246)', () => {
   })
 
   test('source-locks official producer + C latch + query host', () => {
+    const readModuleTree = (entryPath: string, subDir: string): string =>
+      [
+        readFileSync(entryPath, 'utf8'),
+        ...readdirSync(subDir)
+          .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+          .sort()
+          .map(f => readFileSync(join(subDir, f), 'utf8')),
+      ].join('\n')
     const producer = readFileSync(
       join(import.meta.dir, '../batchingReminder.ts'),
       'utf8',
     )
-    const messages = readFileSync(
+    const messages = readModuleTree(
       join(import.meta.dir, '../messages.ts'),
-      'utf8',
+      join(import.meta.dir, '../messages'),
     )
-    const query = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+    const query = readModuleTree(
+      join(import.meta.dir, '../../query.ts'),
+      join(import.meta.dir, '../../query'),
+    )
 
     expect(producer).toContain('tengu_toasty_thimble')
     expect(producer).toContain('CLAUDE_CODE_TOASTY_THIMBLE')

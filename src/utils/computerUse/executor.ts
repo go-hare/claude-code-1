@@ -106,14 +106,18 @@ async function readClipboardViaPbpaste(): Promise<string> {
 
 async function writeClipboardViaPbcopy(text: string): Promise<void> {
   if (process.platform === 'win32') {
+    // P1-E6(b): Pass clipboard payload via stdin instead of interpolating
+    // into PowerShell `-Command`.
     const { code } = await execFileNoThrow(
       'powershell',
       [
         '-NoProfile',
+        '-NonInteractive',
         '-Command',
-        `Set-Clipboard -Value '${text.replace(/'/g, "''")}'`,
+        '[Console]::In.ReadToEnd() | Set-Clipboard',
       ],
       {
+        input: text,
         useCwd: false,
       },
     )

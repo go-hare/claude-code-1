@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { UUID } from 'node:crypto'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -771,10 +777,14 @@ describe('Wave 327-328 Peers / SendMessage / ListAgents / TeammateMailbox', () =
     )
     expect(chain.map(m => m.uuid)).toEqual([u1, uAfterDrop, uAhead, uPutBackTr])
 
-    const ssSrc = readFileSync(
-      join(import.meta.dir, '../sessionStorage.ts'),
-      'utf8',
-    )
+    const ssDir = join(import.meta.dir, '../sessionStorage')
+    const ssSrc = [
+      readFileSync(join(import.meta.dir, '../sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(ssDir, f), 'utf8')),
+    ].join('\n')
     expect(ssSrc).toContain('this.findPrev(orphanIdx - 1)')
     expect(ssSrc).not.toContain('void this.findPrev')
   })

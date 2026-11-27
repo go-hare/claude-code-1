@@ -4,7 +4,7 @@
  * links (terminal skips OBr). Off-terminal bad hrefs become Text.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   encodePluginLinkHref,
@@ -15,14 +15,25 @@ import {
   rewriteDrawnLinksToPlainText,
 } from '../pluginLinkHref.js'
 
-const PANES = readFileSync(
-  join(import.meta.dir, '../../../components/PluginRasterPanes.tsx'),
-  'utf8',
-)
-const EVAL = readFileSync(
-  join(import.meta.dir, '../functionHooksModules.ts'),
-  'utf8',
-)
+const PANES_DIR = join(import.meta.dir, '../../../components/pluginRaster')
+const PANES = [
+  readFileSync(
+    join(import.meta.dir, '../../../components/PluginRasterPanes.tsx'),
+    'utf8',
+  ),
+  ...readdirSync(PANES_DIR)
+    .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+    .sort()
+    .map(f => readFileSync(join(PANES_DIR, f), 'utf8')),
+].join('\n')
+const FH_DIR = join(import.meta.dir, '../functionHooks')
+const EVAL = [
+  readFileSync(join(import.meta.dir, '../functionHooksModules.ts'), 'utf8'),
+  ...readdirSync(FH_DIR)
+    .filter(f => f.endsWith('.ts'))
+    .sort()
+    .map(f => readFileSync(join(FH_DIR, f), 'utf8')),
+].join('\n')
 
 describe('densable 2.1.289 plugin Link href', () => {
   test('pane draw uses HYe url and PYe label', () => {

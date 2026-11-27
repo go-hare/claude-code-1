@@ -2,7 +2,7 @@
  * densable 2.1.289 Acn / YH / UK — PostToolBatch hook executor.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { HOOK_EVENTS as sdkEvents } from '../../../entrypoints/agentSdkTypes.js'
 import {
@@ -63,13 +63,35 @@ describe('densable 2.1.289 PostToolBatch registry', () => {
   })
 
   test('Acn executor + query fire sites are wired 1:1', () => {
-    const hooks = readFileSync(join(root, 'utils/hooks.ts'), 'utf8')
+    const hooks = [
+      'utils/hooks.ts',
+      'utils/hooks/hookCore.ts',
+      'utils/hooks/hookShellRunner.ts',
+      'utils/hooks/hookOutputProcessor.ts',
+      'utils/hooks/hookConfigRegistry.ts',
+      'utils/hooks/hookModelSlotPool.ts',
+      'utils/hooks/hookEngine.ts',
+      'utils/hooks/hookEntryExecutor.ts',
+      'utils/hooks/hookOutsideReplEngine.ts',
+      'utils/hooks/hookToolEvents.ts',
+      'utils/hooks/hookSessionAndPromptEvents.ts',
+      'utils/hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(root, rel), 'utf8'))
+      .join('\n')
     expect(hooks).toContain("hook_event_name: 'PostToolBatch'")
     expect(hooks).toContain('executePostToolBatchHooks')
     expect(hooks).toContain("case 'PostToolBatch':")
     expect(hooks).toContain("'for PostToolBatch':")
 
-    const query = readFileSync(join(root, 'query.ts'), 'utf8')
+    const queryDir = join(root, 'query')
+    const query = [
+      readFileSync(join(root, 'query.ts'), 'utf8'),
+      ...readdirSync(queryDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(queryDir, f), 'utf8')),
+    ].join('\n')
     expect(query).toContain('executePostToolBatchHooks')
     expect(query).toContain(
       'PostToolBatch hooks cancelled (control stream closed)',

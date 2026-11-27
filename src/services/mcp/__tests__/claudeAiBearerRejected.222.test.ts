@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'fs'
+import { join } from 'path'
 
 // reconnectHelpers is pure — no process-global mock.module (avoids polluting
 // sibling files that import full debug/analytics exports).
@@ -35,7 +37,14 @@ describe('densable 2.1.222 #10 ClaudeAiProxyBearerRejectedError + ati', () => {
   })
 
   test('source exports ClaudeAiProxyBearerRejectedError + throw path', async () => {
-    const clientText = await Bun.file('src/services/mcp/client.ts').text()
+    const clientDir = join(import.meta.dir, '../client')
+    const clientText = [
+      readFileSync(join(import.meta.dir, '../client.ts'), 'utf8'),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     const helpersText = await Bun.file(
       'src/services/mcp/connectionHelpers.ts',
     ).text()

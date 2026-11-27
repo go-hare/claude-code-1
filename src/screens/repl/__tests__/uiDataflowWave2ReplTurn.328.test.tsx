@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getMainThreadAgentId } from '../../../bootstrap/state.js';
 import { hostParkToSuppressReason } from '../../../dialog/hostPark.js';
@@ -22,6 +22,16 @@ import { TranscriptProjection } from '../TranscriptProjection.js';
 import { TurnController } from '../TurnController.js';
 
 const ROOT = join(import.meta.dir, '../../../..');
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n');
+}
 
 function makeSubmitDeps(
   store: ReturnType<typeof createStore<ReturnType<typeof getDefaultAppState>>>,
@@ -847,7 +857,7 @@ describe('UI Data-Flow Wave 2 — REPL / Turn Engine / SubmitController regressi
   });
 
   test('P0-D3-2, P0-D4-1, P1-D1-4, P1-D1-8, P1-D2-2, P1-D3-3, P1-D3-7, P1-D4-7, P2-D1-17: REPL wiring invariants', () => {
-    const replSrc = readFileSync(join(ROOT, 'src/screens/REPL.tsx'), 'utf8');
+    const replSrc = readModuleTree(join(ROOT, 'src/screens/REPL.tsx'), join(ROOT, 'src/screens/repl'));
 
     // P0-D3-2: legacy repinScroll(true, 'overlay') removed, dead condition fixed
     expect(replSrc).not.toContain("repinScroll(true, 'overlay')");

@@ -2,7 +2,7 @@
  * densable 2.1.289 workshop authoringProgress b/P/x.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   deriveAuthoringProgress,
@@ -88,7 +88,14 @@ describe('densable 2.1.289 authoringProgress', () => {
     expect(dualInk).toContain('slotsByBlockIndex: new Map()')
     expect(dualInk).toContain('failureReported: false')
     expect(dualInk).toContain('artifactPolicyFetchAnswer: null')
-    const messages = readFileSync(MESSAGES, 'utf8')
+    const messagesDir = join(import.meta.dir, '../../../utils/messages')
+    const messages = [
+      readFileSync(MESSAGES, 'utf8'),
+      ...readdirSync(messagesDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(messagesDir, f), 'utf8')),
+    ].join('\n')
     expect(messages).toContain('authoringProgressSurface')
     expect(messages).toContain('onToolUseStart')
     expect(messages).toContain('onInputJsonDelta')

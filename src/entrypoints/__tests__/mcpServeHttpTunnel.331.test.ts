@@ -763,6 +763,21 @@ describe('2.1.331 --session-tunnel envelope, validation, stdin & live WebSocket 
       ),
     ).toBeUndefined()
 
+    // Item 6 regression: malformed session_token_expires_at must fail parsing (never silently become "never expires")
+    for (const badExpiry of [0, -1, 'not-a-number', null, true]) {
+      expect(
+        parseSessionTunnelEnvelope(
+          JSON.stringify({
+            v: 1,
+            session_id: 's',
+            session_token: 't',
+            api_base_url: 'https://api.anthropic.com',
+            session_token_expires_at: badExpiry,
+          }),
+        ),
+      ).toBeUndefined()
+    }
+
     // validateSessionTunnelLaunch checks
     expect(
       validateSessionTunnelLaunch({

@@ -2,7 +2,7 @@
  * densable 2.1.289 J / go / wfr / Ho / bOn — plugin_dev_mods ask.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { DEV_MODS_PLACEHOLDER } from '../pluginDevMods.js'
 
@@ -115,10 +115,14 @@ describe('densable 2.1.289 plugin_dev_mods', () => {
     expect(mods).toContain('nobody could be asked')
     expect(mods).not.toContain('Mods under ')
 
-    const storage = readFileSync(
-      join(root, 'src/utils/sessionStorage.ts'),
-      'utf8',
-    )
+    const ssDir = join(root, 'src/utils/sessionStorage')
+    const storage = [
+      readFileSync(join(root, 'src/utils/sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(ssDir, f), 'utf8')),
+    ].join('\n')
     expect(storage).toContain('function leftoverDevModsFolderMatches')
     expect(storage).toContain('resolve(folder) === resolve(expected)')
     expect(storage).toContain(

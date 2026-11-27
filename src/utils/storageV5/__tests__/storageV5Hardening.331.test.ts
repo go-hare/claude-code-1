@@ -6,6 +6,15 @@ import { join } from 'node:path'
 import { createHoverRestBackend } from '../createHoverRestBackend.js'
 import { createLocalFsBackend } from '../createLocalFsBackend.js'
 import { createMemoryStorageV5Backend } from '../createMemoryBackend.js'
+import { runSerializedByPath, withStorageLock } from '../storageLock.js'
+import { StorageWatchBus } from '../storageWatchBus.js'
+import {
+  exitSessionContext,
+  getActiveSubconversationFromAls,
+  getBootstrapSession,
+  runWithNewHostSession,
+} from '../../sessionHost.js'
+import { runWithSubconversationContext } from '../../sessionContextAls.js'
 
 const tempDirs: string[] = []
 
@@ -548,6 +557,24 @@ describe('StorageV5 Hardening Pass (R1 P0/P1/P2)', () => {
             unknown
           >
           sentBodies.push({ url: String(url), body: parsed })
+          if (String(url).endsWith('/v5/leases/acquire')) {
+            return new Response(
+              JSON.stringify({
+                leaseId: 'lease-1',
+                holder: String(
+                  (parsed.opts as { holder?: string } | undefined)?.holder ??
+                    'h1',
+                ),
+                expiresAtMs: Date.now() + 10_000,
+              }),
+              { status: 200 },
+            )
+          }
+          if (String(url).endsWith('/v5/leases/release')) {
+            return new Response(JSON.stringify({ released: true }), {
+              status: 200,
+            })
+          }
           if (String(url).endsWith('/v5/keys/read')) {
             return new Response(
               JSON.stringify({
@@ -585,14 +612,14 @@ describe('StorageV5 Hardening Pass (R1 P0/P1/P2)', () => {
         expect(badDecision.error.argument).toBe('edit')
       }
 
-      // found without version -> precondition MUST be { type: 'exists' }, NEVER ifAbsent
+      // plain key + found without version -> omit precondition (NEVER non-spec { type: 'exists' } or ifAbsent)
       const okUpd = await hover.update(key, () => ({ write: 'updated' }))
       expect(okUpd.ok).toBe(true)
       const writeCall = sentBodies.find(c => c.url.endsWith('/v5/keys/write'))
       expect(writeCall).toBeDefined()
       expect(
         (writeCall?.body.opts as { precondition?: unknown })?.precondition,
-      ).toEqual({ type: 'exists' })
+      ).toBeUndefined()
     })
 
     test('writeFromStream validates maxBytes & catches iterator error, listRecursive decodes includeValue, hostFiles honors servesHostFiles', async () => {
@@ -687,6 +714,316 @@ describe('StorageV5 Hardening Pass (R1 P0/P1/P2)', () => {
       } finally {
         await backend.close()
       }
+    })
+  })
+
+  describe('E4-P0-2: StorageV5 path traversal & validateStorageKey across LocalFs and Memory', () => {
+    test('rejects traversal in settings projectKey/consentRootKey, globalConfig kind/stamp, and invalid keys across stat/statMeta/touch/setMode/digest/readValue', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'storagev5-e4-p02-'))
+      tempDirs.push(root)
+      const localFs = createLocalFsBackend({
+        configHome: root,
+        globalConfigFile: join(root, '.claude.json'),
+      })
+      const mem = createMemoryStorageV5Backend({ configHome: '/mem-e4-p02' })
+      try {
+        const badKeys: unknown[] = [
+          {
+            namespace: 'settings',
+            layer: 'project',
+            projectKey: '../../etc',
+          },
+          {
+            namespace: 'settings',
+            layer: 'consent',
+            consentRootKey: '../escape',
+          },
+          {
+            namespace: 'globalConfig',
+            kind: '../pwn',
+            stamp: '2026',
+          },
+          {
+            namespace: 'globalConfig',
+            kind: 'corrupted',
+            stamp: '../../evil',
+          },
+          {
+            namespace: 'sidecar',
+            projectKey: 'proj-a',
+            sessionId: 'sess-1',
+            relPath: ['bad.jsonl'],
+          },
+          {
+            namespace: 'plan',
+            name: '../escape-plan',
+          },
+        ]
+
+        for (const backend of [localFs, mem]) {
+          for (const badKey of badKeys) {
+            const w = await backend.write(badKey, 'nope')
+            expect(w.ok).toBe(false)
+            if (!w.ok) expect(w.error.code).toBe('InvalidArgument')
+
+            const st = await backend.stat(badKey)
+            expect(st.ok).toBe(false)
+            if (!st.ok) expect(st.error.code).toBe('InvalidArgument')
+
+            const sm = await backend.statMeta(badKey)
+            expect(sm.ok).toBe(false)
+            if (!sm.ok) expect(sm.error.code).toBe('InvalidArgument')
+
+            const tc = await backend.touch(badKey)
+            expect(tc.ok).toBe(false)
+            if (!tc.ok) expect(tc.error.code).toBe('InvalidArgument')
+
+            const md = await backend.setMode(badKey, 0o600)
+            expect(md.ok).toBe(false)
+            if (!md.ok) expect(md.error.code).toBe('InvalidArgument')
+
+            const dg = await backend.digest(badKey)
+            expect(dg.ok).toBe(false)
+            if (!dg.ok) expect(dg.error.code).toBe('InvalidArgument')
+
+            const rv = await backend.readValue(badKey)
+            expect(rv).toBeUndefined()
+          }
+        }
+      } finally {
+        await localFs.close()
+        await mem.close()
+      }
+    })
+  })
+
+  describe('E4-P1-6: LocalFs forward pagination fix & cross-backend parity', () => {
+    test('LocalFs readRecords forward pagination with limit/maxBytes advances monotonically without looping', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'storagev5-e4-page-'))
+      tempDirs.push(root)
+      const localFs = createLocalFsBackend({
+        configHome: root,
+        globalConfigFile: join(root, '.claude.json'),
+      })
+      try {
+        const key = {
+          namespace: 'transcript',
+          projectKey: 'proj-page',
+          sessionId: 'sess-page',
+        }
+        const app = await localFs.append(key, [
+          { data: '{"i":1}\n' },
+          { data: '{"i":2}\n' },
+          { data: '{"i":3}\n' },
+          { data: '{"i":4}\n' },
+          { data: '{"i":5}\n' },
+        ])
+        expect(app.ok).toBe(true)
+
+        const collected: string[] = []
+        let cursor: number | undefined
+        let pages = 0
+        while (pages < 10) {
+          pages++
+          const res = await localFs.readRecords(key, {
+            order: 'forward',
+            fromSeq: cursor,
+            limit: 2,
+          })
+          expect(res.ok).toBe(true)
+          if (!res.ok) throw new Error('readRecords failed')
+          for (const item of res.value.items) {
+            collected.push(new TextDecoder().decode(item.data).trim())
+          }
+          if (res.value.nextSeq === undefined) break
+          if (cursor !== undefined) {
+            expect(res.value.nextSeq).toBeGreaterThan(cursor)
+          }
+          cursor = res.value.nextSeq
+        }
+        expect(pages).toBeLessThanOrEqual(4)
+        expect(collected).toEqual([
+          '{"i":1}',
+          '{"i":2}',
+          '{"i":3}',
+          '{"i":4}',
+          '{"i":5}',
+        ])
+      } finally {
+        await localFs.close()
+      }
+    })
+
+    test('Memory touch missing -> NotFound, update sync throw & thenable -> Failed/edit, replaceRecords keepBefore/preserveFrom, deleteScope fences', async () => {
+      const mem = createMemoryStorageV5Backend({ configHome: '/mem-parity' })
+      try {
+        // 1. touch on missing key -> NotFound
+        const tMissing = await mem.touch({ namespace: 'plan', name: 'absent' })
+        expect(tMissing.ok).toBe(false)
+        if (!tMissing.ok) expect(tMissing.error.code).toBe('NotFound')
+
+        // 2. update catching sync throw and rejecting thenable
+        const updKey = { namespace: 'plan', name: 'upd-err' }
+        const syncThrow = await mem.update(updKey, () => {
+          throw new Error('sync edit boom')
+        })
+        expect(syncThrow.ok).toBe(false)
+        if (!syncThrow.ok) {
+          expect(syncThrow.error.code).toBe('Failed')
+          expect(syncThrow.error.argument).toBe('edit')
+        }
+
+        const thenableEdit = await mem.update(updKey, (() =>
+          Promise.resolve({ write: 'async' })) as unknown as () => {
+          write: string
+        })
+        expect(thenableEdit.ok).toBe(false)
+        if (!thenableEdit.ok) {
+          expect(thenableEdit.error.code).toBe('Failed')
+          expect(thenableEdit.error.argument).toBe('edit')
+        }
+
+        // 3. replaceRecords honoring keepBefore & preserveFrom
+        const streamKey = {
+          namespace: 'transcript',
+          projectKey: 'p-rep',
+          sessionId: 's-rep',
+        }
+        await mem.append(streamKey, [
+          { data: '{"i":1}' },
+          { data: '{"i":2}' },
+          { data: '{"i":3}' },
+          { data: '{"i":4}' },
+          { data: '{"i":5}' },
+        ])
+        const replaced = await mem.replaceRecords(
+          streamKey,
+          [{ data: '{"mid":"X"}' }],
+          { keepBefore: 2, preserveFrom: 5 },
+        )
+        expect(replaced.ok).toBe(true)
+        const afterReplace = await mem.readRecords(streamKey)
+        expect(afterReplace.ok).toBe(true)
+        if (afterReplace.ok) {
+          expect(
+            afterReplace.value.items.map(it =>
+              new TextDecoder().decode(it.data),
+            ),
+          ).toEqual(['{"i":1}', '{"mid":"X"}', '{"i":5}'])
+          expect(afterReplace.value.items.map(it => it.seq)).toEqual([1, 2, 3])
+        }
+
+        // 4. deleteScope honors DELETE_SCOPE_FENCED_SY fences
+        for (const fenced of [
+          { namespace: 'globalConfig' },
+          { namespace: 'credentials' },
+          { namespace: 'bridgeSpawn' },
+          { namespace: 'pluginCache', marketplace: 'mp', plugin: 'pl' },
+        ]) {
+          const del = await mem.deleteScope(fenced)
+          expect(del.ok).toBe(false)
+          if (!del.ok) expect(del.error.code).toBe('InvalidArgument')
+        }
+      } finally {
+        await mem.close()
+      }
+    })
+
+    test('HoverRest extractErrorDetails preserves holder, expiresAtMs, and meta on HTTP 409 lease conflict', async () => {
+      const expiresAtMs = Date.now() + 30_000
+      const hover = createHoverRestBackend({
+        baseUrl: 'http://127.0.0.1:8080',
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: 'AlreadyHeld',
+                message: 'lease already held',
+                holder: 'other-worker-7',
+                expiresAtMs,
+                meta: { pid: 4242 },
+              },
+            }),
+            { status: 409 },
+          ),
+      })
+      const res = await hover.acquireLease({ lock: 'shared-lock' }, 10_000)
+      expect(res.ok).toBe(false)
+      if (!res.ok) {
+        expect(res.error.code).toBe('AlreadyHeld')
+        expect(res.error.holder).toBe('other-worker-7')
+        expect(res.error.expiresAtMs).toBe(expiresAtMs)
+        expect(res.error.meta).toEqual({ pid: 4242 })
+      }
+    })
+  })
+
+  describe('E4-P1-7 & E4-P2-13: storageLock & storageWatchBus preserve subconversation ALS overlay', () => {
+    test('withStorageLock, runSerializedByPath, and StorageWatchBus preserve full session + subconversation ALS', async () => {
+      const lockDir = mkdtempSync(join(tmpdir(), 'storagev5-als-lock-'))
+      tempDirs.push(lockDir)
+      const lockFile = join(lockDir, 'target.json')
+
+      await runWithNewHostSession(
+        { id: 'als-lock-sess', cwd: lockDir, originalCwd: lockDir },
+        async rootSession => {
+          const subOverlay = { sessionId: 'sub-overlay-123' }
+          await runWithSubconversationContext(subOverlay, async () => {
+            const seenInSerialized = await runSerializedByPath(
+              lockFile,
+              async () => {
+                await new Promise(resolve => setTimeout(resolve, 5))
+                return {
+                  session: getBootstrapSession(),
+                  sub: getActiveSubconversationFromAls(),
+                }
+              },
+            )
+            expect(seenInSerialized.session).toBe(rootSession)
+            expect(seenInSerialized.sub).toBe(subOverlay)
+
+            const seenInLock = await withStorageLock(
+              lockFile,
+              async () => {
+                await new Promise(resolve => setTimeout(resolve, 5))
+                return {
+                  ok: true as const,
+                  value: {
+                    session: getBootstrapSession(),
+                    sub: getActiveSubconversationFromAls(),
+                  },
+                }
+              },
+              {
+                ifReentrant: () => ({ ok: false, error: { code: 'Busy' } }),
+                ifContended: () => ({ ok: false, error: { code: 'Busy' } }),
+              },
+            )
+            expect(seenInLock.ok).toBe(true)
+            if (seenInLock.ok) {
+              expect(seenInLock.value.session).toBe(rootSession)
+              expect(seenInLock.value.sub).toBe(subOverlay)
+            }
+
+            // StorageWatchBus preserves subconversation overlay when event fires outside ALS
+            const bus = new StorageWatchBus({ configHome: lockDir })
+            const observed: Array<{ session: unknown; sub: unknown }> = []
+            const unsub = bus.addListener(() => {
+              observed.push({
+                session: getBootstrapSession(),
+                sub: getActiveSubconversationFromAls(),
+              })
+            })
+            exitSessionContext(() => {
+              bus.emit({ kind: 'updated' }, 'external-instance')
+            })
+            expect(observed).toHaveLength(1)
+            expect(observed[0]?.session).toBe(rootSession)
+            expect(observed[0]?.sub).toBe(subOverlay)
+            unsub()
+          })
+        },
+      )
     })
   })
 })

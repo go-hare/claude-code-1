@@ -12,6 +12,13 @@ export const config = {
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean),
+  /** Explicit opt-in for legacy unauthenticated UUID mode on loopback only. */
+  allowUnauthenticatedUuid:
+    process.env.RCS_ALLOW_UNAUTHENTICATED_UUID === '1' ||
+    process.argv.includes('--insecure-no-auth'),
+  /** Explicit opt-in to allow privileged permission_modes (bypassPermissions / dontAsk) via API key. */
+  allowDangerousPermissionModes:
+    process.env.RCS_ALLOW_DANGEROUS_PERMISSION_MODES === '1',
   /** Bun WebSocket idle timeout (seconds). Bun sends protocol-level pings after
    *  this many seconds of no received data. Must be shorter than any reverse
    *  proxy's idle timeout (nginx default 60s, Cloudflare 100s). Default 30s. */

@@ -663,6 +663,33 @@ export function rewriteOversizedPromptsForApi(
         }
         result[i] = rewritten
         changed = true
+      } else if (
+        msg.type === 'attachment' &&
+        msg.attachment?.type === 'queued_command'
+      ) {
+        const attMsg = msg as AttachmentMessage<
+          Extract<Attachment, { type: 'queued_command' }>
+        >
+        const origPrompt = attMsg.attachment.prompt ?? ''
+        const nonTextBlocks =
+          typeof origPrompt === 'string'
+            ? []
+            : origPrompt.filter(b => b.type !== 'text')
+        const rewritten: MessageWithOriginal = {
+          ...attMsg,
+          [ORIGINAL_PROMPT_SYMBOL]: originals[i],
+          attachment: {
+            ...attMsg.attachment,
+            prompt: [
+              ...leadingSystemReminderBlocks(origPrompt),
+              { type: 'text', text: wrapInSystemReminder(reminderText) },
+              { type: 'text', text: excerptText },
+              ...nonTextBlocks,
+            ],
+          },
+        }
+        result[i] = rewritten
+        changed = true
       }
 
       if (options?.recordTelemetry && refusedReason !== undefined && !saved) {

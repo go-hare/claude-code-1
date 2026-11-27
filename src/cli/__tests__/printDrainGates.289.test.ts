@@ -91,7 +91,15 @@ describe('print.ts wires arming (not read-only stubs)', () => {
   test('drain calls parkBatch/markAhead/captureFollowersFrom/dropParkedBatch/interruptBeforeArm', async () => {
     const { readFileSync } = await import('node:fs')
     const { join } = await import('node:path')
-    const src = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const src = [
+      readFileSync(join(import.meta.dir, '../print/turnDrain.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../print/turnRunner.ts'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../print/controlLoop.ts'), 'utf8'),
+      readFileSync(
+        join(import.meta.dir, '../print/streamingSession.ts'),
+        'utf8',
+      ),
+    ].join('\n')
     expect(src).toContain('startGate.markAhead()')
     expect(src).toContain('startGate.captureFollowersFrom(')
     expect(src).toContain('startGate.clearAhead()')

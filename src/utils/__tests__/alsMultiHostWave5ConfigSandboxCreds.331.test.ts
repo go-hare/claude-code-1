@@ -746,37 +746,60 @@ describe('2.1.331 Wave 5 — Config, Permissions, Sandbox, ChangeDetector & Cred
         { id: 'cd-host-a', cwd: wsA, originalCwd: wsA },
         async () => {
           await settingsChangeDetector.initialize()
-          // Host A tears down -> MUST NOT dispose the process-wide settings watcher!
+
+          // Host B joins while Host A is still alive -> both workspaces are watched simultaneously
+          await runWithNewHostSession(
+            { id: 'cd-host-b', cwd: wsB, originalCwd: wsB },
+            async () => {
+              await ensureProjectWatchedForCurrentHost()
+              await new Promise(resolve => setTimeout(resolve, 150))
+
+              receivedSources.length = 0
+              writeFileSync(
+                settingsB,
+                JSON.stringify({ model: 'host-b-updated' }),
+              )
+              const sawB = await waitUntil(
+                () => receivedSources.includes('projectSettings'),
+                4000,
+              )
+              expect(sawB).toBe(true)
+
+              receivedSources.length = 0
+              writeFileSync(
+                settingsA,
+                JSON.stringify({ model: 'host-a-updated' }),
+              )
+              const sawA = await waitUntil(
+                () => receivedSources.includes('projectSettings'),
+                4000,
+              )
+              expect(sawA).toBe(true)
+            },
+          )
+
+          // Host A tears down -> MUST NOT dispose the process-wide watcher, and MUST unwatch wsA cleanly
           await runCleanupFunctions()
         },
       )
 
-      // Host B joins and registers its own project settings path alongside Host A
+      // Host B joins after Host A tore down -> process-wide watcher is STILL alive and watches Host B!
       await runWithNewHostSession(
-        { id: 'cd-host-b', cwd: wsB, originalCwd: wsB },
+        { id: 'cd-host-b-after', cwd: wsB, originalCwd: wsB },
         async () => {
           await ensureProjectWatchedForCurrentHost()
-
-          // Give chokidar a moment to finish wiring both directories
           await new Promise(resolve => setTimeout(resolve, 150))
 
-          // Edit Host B's project settings -> watcher MUST fire 'projectSettings'
           receivedSources.length = 0
-          writeFileSync(settingsB, JSON.stringify({ model: 'host-b-updated' }))
-          const sawB = await waitUntil(
+          writeFileSync(
+            settingsB,
+            JSON.stringify({ model: 'host-b-after-teardown' }),
+          )
+          const sawBAfter = await waitUntil(
             () => receivedSources.includes('projectSettings'),
             4000,
           )
-          expect(sawB).toBe(true)
-
-          // Edit Host A's project settings -> Host A's path MUST STILL be watched!
-          receivedSources.length = 0
-          writeFileSync(settingsA, JSON.stringify({ model: 'host-a-updated' }))
-          const sawA = await waitUntil(
-            () => receivedSources.includes('projectSettings'),
-            4000,
-          )
-          expect(sawA).toBe(true)
+          expect(sawBAfter).toBe(true)
         },
       )
     } finally {

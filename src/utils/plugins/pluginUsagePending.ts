@@ -10,7 +10,14 @@
 
 import { type GlobalConfig, saveGlobalConfig } from '../config.js'
 import { registerCleanup, registerPreExitFlush } from '../cleanupRegistry.js'
-import { getBootstrapSessionHost } from '../sessionHost.js'
+import {
+  exitSessionContext,
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+  runWithSession,
+} from '../sessionHost.js'
+import type { Session } from '../sessionRoot.js'
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 
 const Xwo = 60_000
@@ -21,7 +28,7 @@ type PendingUsageEntry = {
 }
 
 type PendingUsageFlushers = {
-  flush: () => void
+  flush: (state?: PendingUsageHostState) => void
   flushAtExit: () => void
 }
 
@@ -31,6 +38,9 @@ class PendingUsageHostState {
   flushTimer: ReturnType<typeof setTimeout> | null = null
   exitFlushesInFlight: Array<Array<[string, PendingUsageEntry]>> = []
   flushStorageV5: unknown = undefined
+  unregisterCleanup: (() => void) | undefined = undefined
+  unregisterPreExitFlush: (() => void) | undefined = undefined
+  sessionRef: WeakRef<Session> | undefined = undefined
 }
 
 /** densable `lln` / `r3`. */
@@ -39,8 +49,18 @@ class PendingUsageFlushRegistry {
   exitFlushRegistered = false
 }
 
+const livePendingUsageStates = new Set<WeakRef<PendingUsageHostState>>()
+
+function pruneDeadPendingUsageStates(): void {
+  for (const ref of livePendingUsageStates) {
+    if (ref.deref() === undefined) {
+      livePendingUsageStates.delete(ref)
+    }
+  }
+}
+
 /** leftover-wired `fn` — same `.of(host)` shape as tipRegistry WeakOwnerCache. */
-class WeakOwnerCache<T> {
+class WeakOwnerCache<T extends object> {
   #e = new WeakMap<object, T>()
   constructor(private readonly factory: () => T) {}
   of(owner: object): T {
@@ -52,12 +72,66 @@ class WeakOwnerCache<T> {
   }
 }
 
-const pendingUsageOwners = new WeakOwnerCache(() => new PendingUsageHostState())
+const pendingUsageOwners = new WeakOwnerCache(() => {
+  const state = new PendingUsageHostState()
+  if (livePendingUsageStates.size > 64) {
+    pruneDeadPendingUsageStates()
+  }
+  livePendingUsageStates.add(new WeakRef(state))
+  return state
+})
 const r3 = new PendingUsageFlushRegistry()
 
 /** densable `HP()` — `aln.of(bn().host)` leftover-wired to `k.host`. */
 function HP(): PendingUsageHostState {
-  return pendingUsageOwners.of(getBootstrapSessionHost())
+  const state = pendingUsageOwners.of(getBootstrapSessionHost())
+  if (hasActiveSessionAls()) {
+    try {
+      const rootSession = getBootstrapSession().root
+      if (state.sessionRef?.deref() !== rootSession) {
+        state.sessionRef = new WeakRef(rootSession)
+      }
+    } catch {
+      // sessionHost may be partially mocked in isolated unit tests
+    }
+  }
+  return state
+}
+
+function drainHostPendingUsage(
+  state: PendingUsageHostState,
+): Array<[string, PendingUsageEntry]> | null {
+  if (state.flushTimer) {
+    clearTimeout(state.flushTimer)
+    state.flushTimer = null
+  }
+  if (state.pendingUsage.size === 0) return null
+  const entries = [...state.pendingUsage.entries()]
+  state.pendingUsage.clear()
+  return entries
+}
+
+function drainHostExitFlushesInFlight(
+  state: PendingUsageHostState,
+): Array<[string, PendingUsageEntry]> | null {
+  const entries = state.exitFlushesInFlight.flat()
+  state.exitFlushesInFlight = []
+  return entries.length > 0 ? entries : null
+}
+
+function runWithHostStateSession(
+  state: PendingUsageHostState,
+  fn: () => void,
+): void {
+  if (state.sessionRef !== undefined) {
+    const liveSession = state.sessionRef.deref()
+    if (liveSession === undefined) {
+      return
+    }
+    runWithSession(liveSession, fn)
+    return
+  }
+  fn()
 }
 
 /** densable `gln`. */
@@ -82,27 +156,11 @@ function fln(e: Array<[string, PendingUsageEntry]>): void {
   if (n !== -1) t.splice(n, 1)
 }
 
-/** densable `mln`. */
-function mln(): Array<[string, PendingUsageEntry]> | null {
-  const e = HP()
-  const t = e.exitFlushesInFlight.flat()
-  e.exitFlushesInFlight = []
-  return t.length > 0 ? t : null
-}
-
 /** densable `sPe`. */
 export function drainPendingPluginUsage(): Array<
   [string, PendingUsageEntry]
 > | null {
-  const e = HP()
-  if (e.flushTimer) {
-    clearTimeout(e.flushTimer)
-    e.flushTimer = null
-  }
-  if (e.pendingUsage.size === 0) return null
-  const t = [...e.pendingUsage.entries()]
-  e.pendingUsage.clear()
-  return t
+  return drainHostPendingUsage(HP())
 }
 
 /** densable `uvi`. */
@@ -141,7 +199,14 @@ function dln(e: PendingUsageHostState, t: PendingUsageFlushers): void {
     process.on('exit', t.flushAtExit)
   }
   if (!e.flushTimer) {
-    e.flushTimer = setTimeout(t.flush, Xwo)
+    const stateRef = new WeakRef(e)
+    e.flushTimer = exitSessionContext(() =>
+      setTimeout(() => {
+        const liveState = stateRef.deref()
+        if (!liveState) return
+        t.flush(liveState)
+      }, Xwo),
+    )
     e.flushTimer.unref?.()
   }
 }
@@ -154,10 +219,13 @@ function uln(e: PendingUsageFlushers): void {
 }
 
 /** densable `oko`. */
-function oko(): void {
-  const e = drainPendingPluginUsage()
+function oko(state?: PendingUsageHostState): void {
+  const target = state ?? HP()
+  const e = drainHostPendingUsage(target)
   if (!e) return
-  saveGlobalConfig(xit(e), hln())
+  runWithHostStateSession(target, () => {
+    saveGlobalConfig(xit(e), state ? target.flushStorageV5 : hln())
+  })
 }
 
 /** densable `Aln`. `ca`/`i3` UNKNOWN — not invented-scheduled from `xvi`. */
@@ -173,9 +241,34 @@ export async function flushPendingPluginUsageToStorageV5(
 
 /** densable `sko`. `Pln` UNKNOWN — leftover-wired to `saveGlobalConfig`. */
 function sko(): void {
-  const e = [...(mln() ?? []), ...(drainPendingPluginUsage() ?? [])]
-  if (e.length === 0) return
-  saveGlobalConfig(xit(e))
+  const states = new Set<PendingUsageHostState>()
+  for (const ref of livePendingUsageStates) {
+    const live = ref.deref()
+    if (!live) {
+      livePendingUsageStates.delete(ref)
+      continue
+    }
+    states.add(live)
+  }
+  try {
+    states.add(HP())
+  } catch {
+    // Ignore if sessionHost is unavailable during teardown
+  }
+  for (const state of states) {
+    const e = [
+      ...(drainHostExitFlushesInFlight(state) ?? []),
+      ...(drainHostPendingUsage(state) ?? []),
+    ]
+    if (e.length === 0) continue
+    try {
+      runWithHostStateSession(state, () => {
+        saveGlobalConfig(xit(e), state.flushStorageV5)
+      })
+    } catch {
+      // Best-effort exit flush across hosts
+    }
+  }
 }
 
 /** densable `dm` / `Y$` / `qe`. */
@@ -197,10 +290,22 @@ export function incrementPluginUsage(e: string): void {
  * `if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))`.
  */
 export function registerPluginUsageStorageV5(e: unknown): void {
-  if (isHoverRestOn() && e !== undefined) {
+  const state = HP()
+  state.unregisterCleanup?.()
+  state.unregisterCleanup = undefined
+  state.unregisterPreExitFlush?.()
+  state.unregisterPreExitFlush = undefined
+  if (e === undefined) {
+    gln(undefined)
+    return
+  }
+  const viaHoverRest = isHoverRestOn() && e !== undefined
+  if (viaHoverRest || e !== undefined) {
     gln(e)
-    registerCleanup(() => flushPendingPluginUsageToStorageV5(e))
-    registerPreExitFlush(() => flushPendingPluginUsageToStorageV5(e))
+    const c = registerCleanup(() => flushPendingPluginUsageToStorageV5(e))
+    const f = registerPreExitFlush(() => flushPendingPluginUsageToStorageV5(e))
+    state.unregisterCleanup = c
+    state.unregisterPreExitFlush = f
   }
 }
 
@@ -213,6 +318,10 @@ export function resetPendingPluginUsageForTests(): void {
     clearTimeout(e.flushTimer)
     e.flushTimer = null
   }
+  e.unregisterCleanup?.()
+  e.unregisterCleanup = undefined
+  e.unregisterPreExitFlush?.()
+  e.unregisterPreExitFlush = undefined
   e.pendingUsage.clear()
   e.exitFlushesInFlight = []
   e.flushStorageV5 = undefined

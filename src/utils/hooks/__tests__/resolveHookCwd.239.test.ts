@@ -87,7 +87,24 @@ describe('densable 2.1.239 #37 ies hook cwd fallback', () => {
   })
 
   test('execCommandHook spawn site calls ies', async () => {
-    const src = await Bun.file(join(import.meta.dir, '../../hooks.ts')).text()
+    const src = (
+      await Promise.all(
+        [
+          '../../hooks.ts',
+          '../hookCore.ts',
+          '../hookShellRunner.ts',
+          '../hookOutputProcessor.ts',
+          '../hookConfigRegistry.ts',
+          '../hookModelSlotPool.ts',
+          '../hookEngine.ts',
+          '../hookEntryExecutor.ts',
+          '../hookOutsideReplEngine.ts',
+          '../hookToolEvents.ts',
+          '../hookSessionAndPromptEvents.ts',
+          '../hookLifecycleEvents.ts',
+        ].map(rel => Bun.file(join(import.meta.dir, rel)).text()),
+      )
+    ).join('\n')
     expect(src).toContain('await resolveHookCwd(hookCwd, {')
     expect(src).toContain('originalCwd: getOriginalCwd()')
     expect(src).toContain('projectRoot: getProjectRoot()')

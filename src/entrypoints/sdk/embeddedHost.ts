@@ -56,6 +56,7 @@ import {
 import { createRootSession, type Session } from '../../utils/sessionRoot.js'
 import {
   createMemoryStorageV5Backend,
+  pinCredentialsStore,
   pinInjectedStorageV5,
   type StorageV5,
 } from '../../utils/storageV5/index.js'
@@ -367,6 +368,7 @@ export function createEmbeddedHost(
   // Initialize HostSlot-backed state exclusively on this SessionHost inside ALS.
   runWithSession(hostRootSession, () => {
     pinInjectedStorageV5(storageV5)
+    pinCredentialsStore(undefined)
     if (options.hostOtelState !== undefined) {
       setHostOtelState(options.hostOtelState)
     }
@@ -463,6 +465,7 @@ export function createEmbeddedHost(
         const forked = session.withProject({
           cwd: normalizedDir,
           projectRoot: normalizedDir,
+          originalCwd: normalizedDir,
         })
         const child = wrapSession(
           forked,
@@ -819,6 +822,7 @@ export function createEmbeddedHost(
         try {
           runWithSession(hostRootSession, () => {
             pinInjectedStorageV5(undefined)
+            pinCredentialsStore(undefined)
             setTenantMcpClientsAccessor(undefined)
             setGatewayRequiredByHostPolicyReader(undefined)
             for (const hostName of strictGatewayHosts) {

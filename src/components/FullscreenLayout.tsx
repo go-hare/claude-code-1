@@ -2088,6 +2088,7 @@ export function FullscreenLayout({
                           maxRows={maxModalRows}
                           modalKey={modal.key}
                           onClaim={setModalClaimedHeight}
+                          visible={modalVisible}
                         >
                           {modal.content}
                         </ModalScroller>

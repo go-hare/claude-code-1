@@ -5,6 +5,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { escapePowerShellSingleQuoted } from './uiAutomation.js'
 
 export interface CellInfo {
   row: number
@@ -27,9 +28,11 @@ export interface ExcelInfo {
 const COM_EXCEL_MAX_BUFFER = 32 * 1024 * 1024
 
 function ps(script: string): string {
+  // P1-E6(c): Pass UTF-16LE -EncodedCommand so Unicode quotes/paths cannot break parsing.
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
   const result = spawnSync(
     'powershell',
-    ['-NoProfile', '-NonInteractive', '-Command', script],
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: COM_EXCEL_MAX_BUFFER,
@@ -51,14 +54,14 @@ function ps(script: string): string {
 }
 
 function escPath(p: string): string {
-  return p.replace(/'/g, "''")
+  return escapePowerShellSingleQuoted(p)
 }
 
 function resolveSheet(varName: string, sheet: string | number): string {
   if (typeof sheet === 'number') {
     return `$${varName} = $wb.Sheets.Item(${sheet})`
   }
-  return `$${varName} = $wb.Sheets.Item('${sheet.replace(/'/g, "''")}')`
+  return `$${varName} = $wb.Sheets.Item('${escapePowerShellSingleQuoted(sheet)}')`
 }
 
 const EXCEL_INIT = `
@@ -231,7 +234,7 @@ ${EXCEL_INIT}
 try {
     $wb = $excel.Workbooks.Open('${escPath(filePath)}')
     ${resolveSheet('sheet', sheet)}
-    $sheet.Cells.Item(${row}, ${col}).Value2 = (ConvertFrom-Json '${jsonVal.replace(/'/g, "''")}')
+    $sheet.Cells.Item(${row}, ${col}).Value2 = (ConvertFrom-Json '${escapePowerShellSingleQuoted(jsonVal)}')
     $wb.Save()
     Write-Output 'true'
 } finally {
@@ -251,7 +254,7 @@ export function writeRange(
   startCol: number,
   data: (string | number | null)[][],
 ): boolean {
-  const jsonData = JSON.stringify(data).replace(/'/g, "''")
+  const jsonData = escapePowerShellSingleQuoted(JSON.stringify(data))
   const script = `
 ${EXCEL_INIT}
 try {
@@ -295,7 +298,7 @@ ${EXCEL_INIT}
 try {
     $wb = $excel.Workbooks.Open('${escPath(filePath)}')
     ${resolveSheet('sheet', sheet)}
-    $sheet.Cells.Item(${row}, ${col}).Formula = '${formula.replace(/'/g, "''")}'
+    $sheet.Cells.Item(${row}, ${col}).Formula = '${escapePowerShellSingleQuoted(formula)}'
     $wb.Save()
     Write-Output 'true'
 } finally {

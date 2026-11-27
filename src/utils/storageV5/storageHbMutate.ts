@@ -28,9 +28,12 @@ import { resolveScopeListDirectories } from './listEntriesZa.js'
 import {
   publishValidatedStorageFile,
   readValueWholeSe,
+  resolveValuePublishLockPath,
   type DigestHost,
 } from './digestLog.js'
+import { withValuePublishLock } from './storageLock.js'
 import {
+  getKeyWriteDiscipline,
   getReadSymlinkClass,
   getScopeFieldSpecs,
   getStreamFraming,
@@ -1045,49 +1048,87 @@ export async function updateDs<T>(
   if (!path) return fail({ code: 'InvalidArgument' })
   const parent = await ensureParentOe(path, t?.parent !== 'mustExist')
   if (parent !== undefined && !parent.ok) return parent
-  const current = await readValueWholeSe(path, getReadSymlinkClass(key)).catch(
-    () => ({ ok: false as const, error: { kind: 'absent' } }),
-  )
-  const body = current.ok
-    ? current.value
-    : current.error.kind === 'absent'
-      ? undefined
-      : undefined
-  if (!current.ok && current.error.kind !== 'absent') {
-    return { ok: false, error: { code: 'Failed' } }
-  }
-  const edited = applyEditSm(n, body, i)
-  if (!edited.ok) {
-    return edited.threw
-      ? {
-          ok: false,
-          error: { code: 'Failed', telemetryCode: 'EditThrew' },
-        }
-      : fail(edited.error)
-  }
-  if (!('write' in edited.value)) {
-    return {
-      ok: true,
-      value: { written: false, found: body !== undefined },
-    }
-  }
-  const written = await publishValidatedStorageFile(
-    host.roots,
-    key,
-    path,
-    edited.value.write,
-    t,
+  const lockPath = resolveValuePublishLockPath(host.roots, key, path)
+  return withValuePublishLock<{
+    written: boolean
+    found: boolean
+    version?: string
+  }>(
     host.digestHost,
-  )
-  if (!written.ok) return written
-  return {
-    ok: true,
-    value: {
-      written: true,
-      found: body !== undefined,
-      version: written.value.version,
+    key,
+    lockPath,
+    path,
+    async suspect => {
+      const current = await readValueWholeSe(
+        path,
+        getReadSymlinkClass(key),
+      ).catch(() => ({ ok: false as const, error: { kind: 'absent' } }))
+      const body = current.ok ? current.value : undefined
+      if (!current.ok && current.error.kind !== 'absent') {
+        return { ok: false, error: { code: 'Failed' } }
+      }
+      const edited = applyEditSm(n, body, i)
+      if (!edited.ok) {
+        return edited.threw
+          ? {
+              ok: false,
+              error: { code: 'Failed', telemetryCode: 'EditThrew' },
+            }
+          : fail(edited.error)
+      }
+      if (!('write' in edited.value)) {
+        return {
+          ok: true,
+          value: { written: false, found: body !== undefined },
+        }
+      }
+      if (suspect()) {
+        return {
+          ok: false,
+          error: { code: 'unknown', telemetryCode: 'LockSuspect' },
+        }
+      }
+      const discipline = getKeyWriteDiscipline(key)
+      const precondition =
+        discipline === 'versioned'
+          ? t?.publishDiscipline === 'followAtomic'
+            ? { type: 'none' as const }
+            : body !== undefined
+              ? { type: 'ifMatch' as const, version: body.version }
+              : { type: 'ifAbsent' as const }
+          : undefined
+      const publishOpts =
+        precondition !== undefined ? { ...t, precondition } : t
+      // Already holding `withValuePublishLock` for this key — disable nested
+      // unconditional re-locking in `publishFileSerialized` to avoid
+      // non-reentrant `withStorageLock` failures when
+      // `lockUnconditionalPublishes` is enabled (e.g. on Windows).
+      const unlockedDigestHost: DigestHost = {
+        ...host.digestHost,
+        lockUnconditionalPublishes: false,
+      }
+      const written = await publishValidatedStorageFile(
+        host.roots,
+        key,
+        path,
+        edited.value.write,
+        publishOpts,
+        unlockedDigestHost,
+      )
+      if (!written.ok) return written
+      return {
+        ok: true,
+        value: {
+          written: true,
+          found: body !== undefined,
+          version: written.value.version,
+        },
+      }
     },
-  }
+    t?.acquireTimeoutMs !== undefined
+      ? { acquireTimeoutMs: t.acquireTimeoutMs }
+      : undefined,
+  )
 }
 
 function isAsyncIterable(e: unknown): e is AsyncIterable<unknown> {

@@ -6,7 +6,13 @@
  * Does not invent q$t-on-CLI / fKn(undefined) / extra PKo members.
  * No process-global log/debug mock (same-dir api.test pollution).
  */
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -355,10 +361,17 @@ describe('t1f extras (238)', () => {
     expect(SRC).toContain('perBlockHashes')
     expect(SRC).toContain('messageHashes')
     expect(SRC).not.toContain('vd(')
-    const claudeSrc = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), '../claude.ts'),
-      'utf8',
-    )
+    const claudeDir = join(dirname(fileURLToPath(import.meta.url)), '../claude')
+    const claudeSrc = [
+      readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '../claude.ts'),
+        'utf8',
+      ),
+      ...readdirSync(claudeDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(claudeDir, f), 'utf8')),
+    ].join('\n')
     const promptCachingSrc = readFileSync(
       join(
         dirname(fileURLToPath(import.meta.url)),

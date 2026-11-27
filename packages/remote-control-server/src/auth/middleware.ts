@@ -1,5 +1,7 @@
 import type { Context, Next } from 'hono'
+import { config } from '../config'
 import { validateApiKey } from './api-key'
+import { isWebSocketOriginAllowed } from './cors'
 import { verifyWorkerJwt } from './jwt'
 import { resolveToken } from './token'
 
@@ -56,23 +58,16 @@ export function extractWebSocketAuthToken(c: Context): string | undefined {
 }
 
 /**
- * Unified authentication middleware — supports two modes:
+ * API-key-only authentication middleware for `/v1/*` CLI/bridge/worker routes (`P1-E5`).
  *
- * 1. **Token mode** (Web UI): Bearer token resolved via server-side lookup → username injected
- * 2. **API Key mode** (CLI bridge): Valid API key + X-Username header → username injected
+ * Accepts ONLY a valid server API key (`validateApiKey(token)`). Regular Web UI
+ * `rct_*` session tokens are explicitly rejected so web clients cannot escalate
+ * into privileged `/v1/environments/*`, `/v1/code/sessions/*`, or `/v1/sessions/*`
+ * control planes (web clients must use `/web/*` routes guarded by `uuidAuth`).
  */
 export async function apiKeyAuth(c: Context, next: Next) {
   const token = extractBearerToken(c)
 
-  // Try token authentication (Web UI)
-  const tokenUsername = resolveToken(token)
-  if (tokenUsername) {
-    c.set('username', tokenUsername)
-    await next()
-    return
-  }
-
-  // Try API Key authentication (CLI bridge)
   if (validateApiKey(token)) {
     // Extract username from X-Username header or ?username= query param
     const username = c.req.header('X-Username') || c.req.query('username')
@@ -85,7 +80,7 @@ export async function apiKeyAuth(c: Context, next: Next) {
 
   return c.json(
     {
-      error: { type: 'unauthorized', message: 'Invalid or missing auth token' },
+      error: { type: 'unauthorized', message: 'Valid API key required' },
     },
     401,
   )
@@ -152,29 +147,135 @@ export function getUuidFromRequest(c: Context): string | undefined {
   return c.req.query('uuid') || c.req.header('X-UUID')
 }
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+
+export function isLoopbackHost(host: string | undefined): boolean {
+  if (!host) {
+    return false
+  }
+  return LOOPBACK_HOSTS.has(host.trim().toLowerCase())
+}
+
 /**
- * UUID-based auth for Web UI routes (no-login mode).
- * Accepts UUID in query param/header, OR a valid API key via Authorization header.
+ * Unauthenticated UUID mode is ONLY permitted when BOTH:
+ * 1. Explicitly opted in via `--insecure-no-auth`, `RCS_ALLOW_UNAUTHENTICATED_UUID=1`,
+ *    or `config.allowUnauthenticatedUuid === true`, AND
+ * 2. The server is bound to a loopback interface (`127.0.0.1`, `localhost`, `::1`).
+ */
+export function isUnauthenticatedUuidAllowed(): boolean {
+  if (!isLoopbackHost(config.host)) {
+    return false
+  }
+  const cfgFlag = (config as { allowUnauthenticatedUuid?: boolean })
+    .allowUnauthenticatedUuid
+  return (
+    cfgFlag === true ||
+    process.env.RCS_ALLOW_UNAUTHENTICATED_UUID === '1' ||
+    process.argv.includes('--insecure-no-auth')
+  )
+}
+
+/**
+ * Require `Content-Type: application/json` on mutating requests (POST/PUT/PATCH/DELETE)
+ * to prevent `text/plain` / `application/x-www-form-urlencoded` simple-request CSRF.
+ */
+export async function requireJsonContentType(c: Context, next: Next) {
+  const method = c.req.method.toUpperCase()
+  if (
+    method === 'POST' ||
+    method === 'PUT' ||
+    method === 'PATCH' ||
+    method === 'DELETE'
+  ) {
+    const raw = c.req.header('Content-Type') ?? ''
+    const mediaType = raw.split(';')[0]?.trim().toLowerCase()
+    if (mediaType !== 'application/json') {
+      return c.json(
+        {
+          error: {
+            type: 'unsupported_media_type',
+            message: 'Content-Type must be application/json',
+          },
+        },
+        415,
+      )
+    }
+  }
+  await next()
+}
+
+/**
+ * Enforce `resolveWebCorsOrigin(origin)` when `Origin` header is present on
+ * WebSocket upgrade routes.
+ */
+export async function requireWebSocketOrigin(c: Context, next: Next) {
+  const origin = c.req.header('Origin')
+  if (!isWebSocketOriginAllowed(origin)) {
+    return c.json(
+      {
+        error: {
+          type: 'forbidden',
+          message: 'Disallowed WebSocket Origin',
+        },
+      },
+      403,
+    )
+  }
+  await next()
+}
+
+/**
+ * Hardened authentication middleware for `/web/*` routes (E5-P0-3).
+ *
+ * Requires either:
+ * 1. A valid server-issued session token (`resolveToken(bearer)`) — pins `uuid` to
+ *    the verified username so token holders cannot spoof another user's UUID, OR
+ * 2. A valid API key (`validateApiKey(bearer)`) — allows optional `X-UUID`/`?uuid=`
+ *    scoping for CLI/bridge/admin callers, OR
+ * 3. ONLY when explicitly opted in on loopback (`--insecure-no-auth` /
+ *    `RCS_ALLOW_UNAUTHENTICATED_UUID=1`), a client-supplied UUID.
  */
 export async function uuidAuth(c: Context, next: Next) {
-  // Try API key auth via Authorization header
   const bearer = extractBearerToken(c)
+
+  // 1. Server-issued session token
+  const tokenUsername = resolveToken(bearer)
+  if (tokenUsername) {
+    c.set('username', tokenUsername)
+    c.set('uuid', tokenUsername)
+    await next()
+    return
+  }
+
+  // 2. Valid API key
   if (bearer && validateApiKey(bearer)) {
-    // Valid API key — generate a stable UUID from the key for downstream use
     const uuid = getUuidFromRequest(c)
     c.set('uuid', uuid || bearer)
     await next()
     return
   }
 
-  // Fall back to UUID auth
-  const uuid = getUuidFromRequest(c)
-  if (!uuid) {
-    return c.json(
-      { error: { type: 'unauthorized', message: 'Missing UUID' } },
-      401,
-    )
+  // 3. Explicit loopback-only unauthenticated UUID opt-in
+  if (isUnauthenticatedUuidAllowed()) {
+    const uuid = getUuidFromRequest(c)
+    if (!uuid) {
+      return c.json(
+        { error: { type: 'unauthorized', message: 'Missing UUID' } },
+        401,
+      )
+    }
+    c.set('uuid', uuid)
+    await next()
+    return
   }
-  c.set('uuid', uuid)
-  await next()
+
+  return c.json(
+    {
+      error: {
+        type: 'unauthorized',
+        message: 'Valid API key or session token required',
+      },
+    },
+    401,
+  )
 }

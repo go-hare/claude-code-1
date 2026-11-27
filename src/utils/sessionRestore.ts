@@ -18,6 +18,8 @@ import {
   extractResumedArtifactFrameSeed,
   isArtifactResumeSeedEligible,
 } from '../services/artifactAutoReact/resumeFrameExtract.js'
+import * as contextCollapsePersistModule from '../services/contextCollapse/persist.js'
+import * as restoreGoalModule from '../services/goal/restoreGoalFromTranscript.js'
 import type { AppState } from '../state/AppState.js'
 import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js'
 import {
@@ -62,6 +64,7 @@ import type { FileHistorySnapshot } from './fileHistory.js'
 import { fileHistoryRestoreStateFromLog } from './fileHistory.js'
 import { createSystemMessage } from './messages.js'
 import { parseUserSpecifiedModel } from './model/model.js'
+import * as planModeResumeModule from './permissions/planModeResume.js'
 import { getPlansDirectory } from './plans.js'
 import {
   resolveResumeRefusalFallbackModel,
@@ -109,9 +112,20 @@ function extractTodosFromTranscript(messages: Message[]): TodoList {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg?.type !== 'assistant') continue
-    const toolUse = (msg.message!.content as any[]).find(
-      block => block.type === 'tool_use' && block.name === TODO_WRITE_TOOL_NAME,
-    )
+    const content = msg.message?.content
+    if (!Array.isArray(content)) continue
+    let toolUse: { type: 'tool_use'; name: string; input?: unknown } | undefined
+    for (const block of content) {
+      if (
+        block !== null &&
+        typeof block === 'object' &&
+        (block as { type?: unknown }).type === 'tool_use' &&
+        (block as { name?: unknown }).name === TODO_WRITE_TOOL_NAME
+      ) {
+        toolUse = block as { type: 'tool_use'; name: string; input?: unknown }
+        break
+      }
+    }
     if (!toolUse || toolUse.type !== 'tool_use') continue
     const input = toolUse.input
     if (input === null || typeof input !== 'object') return []
@@ -160,13 +174,7 @@ function hydrateResumedTranscriptState(
 
   // densable 2.1.239 OMo: restoreGoalFromTranscript.
   // Official always calls (undefined messages → clear leftover activeGoal).
-  {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    ;(
-      require('../services/goal/restoreGoalFromTranscript.js') as typeof import('../services/goal/restoreGoalFromTranscript.js')
-    ).restoreGoalFromTranscript(result.messages, setAppState)
-    /* eslint-enable @typescript-eslint/no-require-imports */
-  }
+  restoreGoalModule.restoreGoalFromTranscript(result.messages, setAppState)
 
   // Restore session model choice (from /model command), guarding refusal fallback on fork (#1392)
   const sessionModel = result.sessionModel
@@ -288,14 +296,10 @@ export function restoreSessionStateFromLog(
   // first — without that, an in-session /resume into a session with no
   // commits would leave the prior session's stale commit log intact.
   if (feature('CONTEXT_COLLAPSE')) {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    ;(
-      require('../services/contextCollapse/persist.js') as typeof import('../services/contextCollapse/persist.js')
-    ).restoreFromEntries(
+    contextCollapsePersistModule.restoreFromEntries(
       result.contextCollapseCommits ?? [],
       result.contextCollapseSnapshot,
     )
-    /* eslint-enable @typescript-eslint/no-require-imports */
   }
 
   // Restore TodoWrite state from transcript (SDK/non-interactive only).
@@ -322,9 +326,7 @@ export function restoreSessionStateFromLog(
     const {
       hydratePlanModeFromRestoredWorker,
       setSkipPlanModeResumeBecauseContinue,
-    } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./permissions/planModeResume.js') as typeof import('./permissions/planModeResume.js')
+    } = planModeResumeModule
     // Mid-session /resume after --continue: lift the Jqy continue skip.
     setSkipPlanModeResumeBecauseContinue(false)
     const restored =
@@ -851,14 +853,10 @@ export async function processResumedConversation(
   // --continue/--resume goes through here instead. Called unconditionally
   // — see the restoreSessionStateFromLog callsite above for why.
   if (feature('CONTEXT_COLLAPSE')) {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    ;(
-      require('../services/contextCollapse/persist.js') as typeof import('../services/contextCollapse/persist.js')
-    ).restoreFromEntries(
+    contextCollapsePersistModule.restoreFromEntries(
       result.contextCollapseCommits ?? [],
       result.contextCollapseSnapshot,
     )
-    /* eslint-enable @typescript-eslint/no-require-imports */
   }
 
   // Restore agent setting from resumed session
@@ -924,9 +922,7 @@ export async function processResumedConversation(
     const {
       applyStashedPlanModeResumeForLaunch,
       preparePlanModeRestoreOnInteractiveResume,
-    } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./permissions/planModeResume.js') as typeof import('./permissions/planModeResume.js')
+    } = planModeResumeModule
     planHydratedState = applyStashedPlanModeResumeForLaunch<AppState>(
       planHydratedState,
       {

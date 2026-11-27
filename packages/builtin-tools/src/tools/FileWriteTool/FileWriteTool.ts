@@ -406,10 +406,17 @@ export const FileWriteTool = buildTool({
   create(deps: ToolDeps) {
     return {
       async checkPermissions(input, callCtx): Promise<PermissionDecision> {
-        noteApprovedFileToolPath(input.file_path, callCtx.toolUseId)
+        const resolvedFilePath = deps.cwd
+          ? expandPath(input.file_path, deps.cwd())
+          : input.file_path
+        noteApprovedFileToolPath(resolvedFilePath, callCtx.toolUseId)
+        const resolvedInput =
+          resolvedFilePath !== input.file_path
+            ? { ...input, file_path: resolvedFilePath }
+            : input
         return checkWritePermissionForTool(
           FileWriteTool,
-          input,
+          resolvedInput,
           deps.permissions(),
         )
       },
@@ -424,7 +431,7 @@ export const FileWriteTool = buildTool({
           FILE_WRITE_TOOL_NAME,
         )
         if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
-        const fullFilePath = expandPath(file_path)
+        const fullFilePath = expandPath(file_path, deps.cwd?.())
 
         // Official 2.1.326 #307 / #309: refuse writes to Claude sign-in files or
         // blocked device/process files even before permission prompts.
@@ -625,9 +632,9 @@ export const FileWriteTool = buildTool({
           dynamicSkillDirTriggers,
         } = deps
         const { userModified, parentMessage, toolUseId } = callCtx
-        const fullFilePath = expandPath(file_path)
+        const fullFilePath = expandPath(file_path, deps.cwd?.())
 
-        // Official 2.1.326 #307 / #309: defense-in-depth at call() time too.
+        // Official 2.1.326 #307 / #309 & bg isolation: defense-in-depth at call() time too.
         if (isClaudeSignInFilePath(fullFilePath)) {
           throw new Error(
             `Cannot write to Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
@@ -637,6 +644,13 @@ export const FileWriteTool = buildTool({
           throw new Error(
             `Cannot write to device or process file ${fullFilePath}.`,
           )
+        }
+        const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {
+          agentId: deps.agentId,
+          agentWorktree: deps.agentWorktree,
+        })
+        if (isolationBlock) {
+          throw new Error(isolationBlock)
         }
 
         const toolPermissionContext = deps.permissions()

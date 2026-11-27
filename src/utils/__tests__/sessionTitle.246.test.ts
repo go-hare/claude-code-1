@@ -3,7 +3,13 @@
  * Do not mock src/services/api/claude.js (process-global last-write-wins).
  */
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 
@@ -46,6 +52,16 @@ import { startsWithRegisteredSlashCommand } from '../slashCommandParsing.js'
 const utilsRoot = join(import.meta.dir, '..')
 const srcRoot = join(import.meta.dir, '../..')
 
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
+
 describe('densable 2.1.246 generateSessionTitle fe/B', () => {
   test('source-locks official W prompt, J=10, B session wrap, and REPL gate', () => {
     const src = readFileSync(join(utilsRoot, 'sessionTitle.ts'), 'utf8')
@@ -80,7 +96,10 @@ describe('densable 2.1.246 generateSessionTitle fe/B', () => {
       'OAuth refresh token is no longer valid; run /login to re-authenticate',
     )
     expect(hold).toContain("this.name = 'OAuthRefreshDeadError'")
-    const claude = readFileSync(join(srcRoot, 'services/api/claude.ts'), 'utf8')
+    const claude = readModuleTree(
+      join(srcRoot, 'services/api/claude.ts'),
+      join(srcRoot, 'services/api/claude'),
+    )
     expect(claude).toContain('credentials: options.credentials')
     expect(claude).toContain('credentials?: unknown')
     expect(claude).toContain('storageV5: options.storageV5')
@@ -240,7 +259,14 @@ describe('densable 2.1.246 generateSessionTitle fe/B', () => {
 
 describe('resume hydrates ai-title into the tab (not Claude Code default)', () => {
   test('loadTranscriptFile keeps aiTitle distinct from customTitle', () => {
-    const storage = readFileSync(join(utilsRoot, 'sessionStorage.ts'), 'utf8')
+    const ssDir = join(utilsRoot, 'sessionStorage')
+    const storage = [
+      readFileSync(join(utilsRoot, 'sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(ssDir, f), 'utf8')),
+    ].join('\n')
     expect(storage).toContain('"type":"ai-title"')
     expect(storage).toContain('aiTitles: Map<UUID, string>')
     expect(storage).toContain('aiTitles.set(entry.sessionId, entry.aiTitle)')
@@ -318,7 +344,10 @@ describe('resume hydrates ai-title into the tab (not Claude Code default)', () =
   })
 
   test('REPL resume restores session metadata then skips Haiku re-title', () => {
-    const repl = readFileSync(join(srcRoot, 'screens/REPL.tsx'), 'utf8')
+    const repl = readModuleTree(
+      join(srcRoot, 'screens/REPL.tsx'),
+      join(srcRoot, 'screens/repl'),
+    )
     expect(repl).toContain('restoreSessionMetadata(log)')
     expect(repl).toContain('haikuTitleAttemptedRef.current = true')
     expect(repl).toContain(
@@ -811,7 +840,14 @@ test('Wt leftover: reverse Qt, skip seen, compact then taint-only, reverse out',
 })
 
 test('h4t leftover: Be+uE → xeo; else pto', async () => {
-  const src = readFileSync(join(utilsRoot, 'sessionStorage.ts'), 'utf8')
+  const ssDir = join(utilsRoot, 'sessionStorage')
+  const src = [
+    readFileSync(join(utilsRoot, 'sessionStorage.ts'), 'utf8'),
+    ...readdirSync(ssDir)
+      .filter(f => f.endsWith('.ts'))
+      .sort()
+      .map(f => readFileSync(join(ssDir, f), 'utf8')),
+  ].join('\n')
   expect(src).toContain('export function bindMainSessionTranscriptPersistence')
   expect(src).toContain('isHoverRestOn() && storageV5 !== undefined')
   expect(src).toContain('iterateTranscriptRecordPages(')

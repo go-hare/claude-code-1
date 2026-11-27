@@ -5,38 +5,51 @@ import { join } from 'path'
 const ROOT = join(import.meta.dir, '..', '..', '..')
 
 describe('v2.1.304–2.1.307 print.ts alignment', () => {
-  const printSrc = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+  const mcpAndPluginsSrc = readFileSync(
+    join(ROOT, 'src/cli/print/mcpAndPlugins.ts'),
+    'utf8',
+  )
+  const controlLoopSrc = readFileSync(
+    join(ROOT, 'src/cli/print/controlLoop.ts'),
+    'utf8',
+  )
+  const turnRunnerSrc = readFileSync(
+    join(ROOT, 'src/cli/print/turnRunner.ts'),
+    'utf8',
+  )
 
   test('#978: get_context_usage runs non-blockingly via pendingContextUsagePromise and is awaited at cleanup', () => {
-    const cleanupIdx = printSrc.indexOf(
-      'await pendingContextUsagePromise.catch(() => {})',
+    const cleanupIdx = mcpAndPluginsSrc.indexOf(
+      'pendingContextUsagePromise.catch(() => {})',
     )
     expect(cleanupIdx).toBeGreaterThan(-1)
 
-    const handlerIdx = printSrc.indexOf(
+    const handlerIdx = controlLoopSrc.indexOf(
       "else if (msg.request.subtype === 'get_context_usage')",
     )
     expect(handlerIdx).toBeGreaterThan(-1)
-    const nextBranchIdx = printSrc.indexOf(
+    const nextBranchIdx = controlLoopSrc.indexOf(
       "else if (msg.request.subtype === 'mcp_message')",
       handlerIdx,
     )
-    const handlerBlock = printSrc.slice(handlerIdx, nextBranchIdx)
+    const handlerBlock = controlLoopSrc.slice(handlerIdx, nextBranchIdx)
     expect(handlerBlock).toContain('const runContextUsage = async')
     expect(handlerBlock).toContain(
-      'pendingContextUsagePromise = pendingContextUsagePromise.then(',
+      'pendingContextUsagePromise =\n              streamCtx.pendingContextUsagePromise.then(',
     )
   })
 
   test('#1101: run() races updateSdkMcp against getMcpConnectTimeoutMs when options.sdkUrl is set', () => {
-    const runIdx = printSrc.indexOf("headlessProfilerCheckpoint('run_entry')")
-    const afterIdx = printSrc.indexOf(
+    const runIdx = turnRunnerSrc.indexOf(
+      "headlessProfilerCheckpoint('run_entry')",
+    )
+    const afterIdx = turnRunnerSrc.indexOf(
       "headlessProfilerCheckpoint('after_updateSdkMcp')",
     )
     expect(runIdx).toBeGreaterThan(-1)
     expect(afterIdx).toBeGreaterThan(runIdx)
-    const block = printSrc.slice(runIdx, afterIdx)
-    expect(block).toContain('if (options.sdkUrl)')
+    const block = turnRunnerSrc.slice(runIdx, afterIdx)
+    expect(block).toContain('if (streamCtx.options.sdkUrl)')
     expect(block).toContain('getMcpConnectTimeoutMs()')
     expect(block).toContain('raceWithTimeoutMs(sdkMcpUpdatePromise, budgetMs)')
     expect(block).toContain("logEvent('tengu_sdk_mcp_update_wait_timeout'")

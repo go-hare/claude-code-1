@@ -8,7 +8,17 @@ import {
 
 describe('2.1.328 REPL transcript mode UI & shortcuts (A-P0-1, A-P1-6, A-P2-8)', () => {
   test('A-P0-1: REPL.tsx does not swallow q in local transcript useInput', () => {
-    const src = readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8')
+    const src = [
+      readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8'),
+      readFileSync(
+        join(import.meta.dir, '../repl/TranscriptComponents.tsx'),
+        'utf8',
+      ),
+      readFileSync(
+        join(import.meta.dir, '../repl/useReplTranscriptMode.ts'),
+        'utf8',
+      ),
+    ].join('\n')
     expect(src).not.toContain("if (input === 'q')")
   })
 
@@ -54,7 +64,17 @@ describe('2.1.328 REPL transcript mode UI & shortcuts (A-P0-1, A-P1-6, A-P2-8)',
   })
 
   test('A-P1-6 + A-P2-8: TranscriptModeFooter copy, badges, and ? toggle wired in REPL.tsx', () => {
-    const src = readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8')
+    const src = [
+      readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8'),
+      readFileSync(
+        join(import.meta.dir, '../repl/TranscriptComponents.tsx'),
+        'utf8',
+      ),
+      readFileSync(
+        join(import.meta.dir, '../repl/useReplTranscriptMode.ts'),
+        'utf8',
+      ),
+    ].join('\n')
     expect(src).toContain(
       '${figures.arrowUp}/${figures.arrowDown} to scroll · v to ${openInLabel} · ? for shortcuts',
     )

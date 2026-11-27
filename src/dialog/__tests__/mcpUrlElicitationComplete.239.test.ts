@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 import {
@@ -86,10 +86,17 @@ describe('Gbt complete / opener source lock', () => {
   })
 
   test('MCP -32042 opens requestDialog(Gbt), not AppState queue', () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../../services/mcp/client.ts'),
-      'utf8',
-    )
+    const clientDir = join(import.meta.dir, '../../services/mcp/client')
+    const src = [
+      readFileSync(
+        join(import.meta.dir, '../../services/mcp/client.ts'),
+        'utf8',
+      ),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('mcpUrlElicitationSpec')
     expect(src).toContain('requestDialog(')
     const retry = src.slice(src.indexOf('callMCPToolWithUrlElicitationRetry'))

@@ -1,6 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
+
+function readClaudeBundle(): string {
+  const dir = join(import.meta.dir, '../claude')
+  return [
+    readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8'),
+    ...readdirSync(dir)
+      .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+      .sort()
+      .map(f => readFileSync(join(dir, f), 'utf8')),
+  ].join('\n')
+}
 import { APIError } from '@anthropic-ai/sdk'
 import {
   findRejectedBetaHeaders,
@@ -63,7 +74,7 @@ describe('v2.1.290 #12 multi-beta and non-400 beta-header healing', () => {
   })
 
   test('claude.ts wires findRejectedBetaHeaders and tengu_beta_400_healed', () => {
-    const src = readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8')
+    const src = readClaudeBundle()
     expect(src).toContain('findRejectedBetaHeaders')
     expect(src).toContain('tengu_beta_400_healed')
     expect(src).toContain('retry:beta-rejected:')
@@ -147,7 +158,7 @@ describe('v2.1.290 #14 outputFiltered streaming retry', () => {
   })
 
   test('claude.ts wires tengu_streaming_output_filter_retry and OutputFilteredStreamRetryError', () => {
-    const src = readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8')
+    const src = readClaudeBundle()
     expect(src).toContain('tengu_streaming_output_filter_retry')
     expect(src).toContain('OutputFilteredStreamRetryError')
     expect(src).toContain('output_content_filtered')
@@ -189,7 +200,7 @@ describe('v2.1.290 #36 carriedEffort resolution in claude.ts', () => {
 
 describe('v2.1.290 #121 partial-messages abandoned_blocks message_stop', () => {
   test('claude.ts tracks envelope, apiMessageId, and abandonedBlocks on closeAbandonedStreamEnvelope', () => {
-    const src = readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8')
+    const src = readClaudeBundle()
     expect(src).toContain('closeAbandonedStreamEnvelope')
     expect(src).toContain('abandonedBlocks')
     expect(src).toContain('fromBlockIndex')
@@ -230,7 +241,7 @@ describe('Wave 3D: takeCarriedEffortEnd telemetry wiring in claude.ts', () => {
   })
 
   test('claude.ts forwards carriedEffortEnded into logAPISuccessAndDuration', () => {
-    const src = readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8')
+    const src = readClaudeBundle()
     expect(src).toContain('takeCarriedEffortEndForMainQuery')
     expect(src).toContain('carriedEffortEnded')
   })

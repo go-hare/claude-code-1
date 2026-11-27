@@ -2,7 +2,7 @@
  * densable 2.1.289 Art/yn remaining print-drain stamps.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   assignQueuedIdentityStamps,
@@ -196,7 +196,14 @@ describe('densable 2.1.289 art stamps helpers', () => {
 
 describe('densable 2.1.289 art stamp plumbing', () => {
   test('print drain ask bag stamps remaining Art fields', () => {
-    const print = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+    const printDir = join(ROOT, 'src/cli/print')
+    const print = [
+      readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(print).toContain('pollEventDelivery:')
     expect(print).toContain('pollEventProvenance:')
     expect(print).toContain('pollEventDeclared:')

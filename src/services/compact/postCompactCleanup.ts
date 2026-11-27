@@ -25,15 +25,19 @@ import { resetMicrocompactState } from './microCompact.js'
  * Official 2.1.331: scoped per root `Session` via `RootSessionSlot`.
  */
 const compactCleanupCallbacksBySession = new RootSessionSlot(
-  () => [] as Array<() => void>,
+  () => new Set<() => void>(),
 )
 
-export function registerCompactCleanup(callback: () => void): void {
-  compactCleanupCallbacksBySession.of(getBootstrapSession()).push(callback)
+export function registerCompactCleanup(callback: () => void): () => void {
+  const callbacks = compactCleanupCallbacksBySession.of(getBootstrapSession())
+  callbacks.add(callback)
+  return () => {
+    callbacks.delete(callback)
+  }
 }
 
 export function clearCompactCleanupCallbacksForTesting(): void {
-  compactCleanupCallbacksBySession.of(getBootstrapSession()).length = 0
+  compactCleanupCallbacksBySession.of(getBootstrapSession()).clear()
 }
 
 /**
@@ -103,7 +107,9 @@ export function runPostCompactCleanup(querySource?: QuerySource): void {
   resetSentSkillNames()
   clearBetaTracingState()
   clearSessionMessagesCache()
-  for (const cb of compactCleanupCallbacksBySession.of(getBootstrapSession())) {
+  for (const cb of [
+    ...compactCleanupCallbacksBySession.of(getBootstrapSession()),
+  ]) {
     try {
       cb()
     } catch (error) {

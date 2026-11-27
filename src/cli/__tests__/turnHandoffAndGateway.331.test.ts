@@ -86,9 +86,10 @@ async function startMockHttpServer(
 }
 
 describe('Official 2.1.331 turn_handoff admission, relay marker, and capabilities', () => {
-  test('evaluateTurnHandoffAdmission enforces disabled and managed-cloud-worker gates', () => {
+  test('evaluateTurnHandoffAdmission enforces disabled, shared_backend, and managed-cloud-worker gates', () => {
     expect(
       evaluateTurnHandoffAdmission({
+        sdkUrl: 'https://sdk.example.test',
         remoteSessionId: 'sess-1',
         disabled: true,
       }),
@@ -99,8 +100,41 @@ describe('Official 2.1.331 turn_handoff admission, relay marker, and capabilitie
       reason: 'not_managed_cloud_worker',
     })
 
+    // Missing sdkUrl or non-undefined environmentKind is rejected even with remoteSessionId
     expect(
       evaluateTurnHandoffAdmission({
+        remoteSessionId: 'sess-no-sdk',
+      }),
+    ).toEqual({
+      admitted: false,
+      reason: 'not_managed_cloud_worker',
+    })
+
+    expect(
+      evaluateTurnHandoffAdmission({
+        sdkUrl: 'https://sdk.example.test',
+        remoteSessionId: 'sess-byoc',
+        environmentKind: 'byoc',
+      }),
+    ).toEqual({
+      admitted: false,
+      reason: 'not_managed_cloud_worker',
+    })
+
+    expect(
+      evaluateTurnHandoffAdmission({
+        sdkUrl: 'https://sdk.example.test',
+        remoteSessionId: 'sess-shared',
+        sharedBackend: true,
+      }),
+    ).toEqual({
+      admitted: false,
+      reason: 'shared_backend',
+    })
+
+    expect(
+      evaluateTurnHandoffAdmission({
+        sdkUrl: 'https://sdk.example.test',
         remoteSessionId: 'sess-remote-1',
       }),
     ).toEqual({
@@ -111,7 +145,8 @@ describe('Official 2.1.331 turn_handoff admission, relay marker, and capabilitie
 
     expect(
       evaluateTurnHandoffAdmission({
-        environmentKind: 'cloud',
+        sdkUrl: 'https://sdk.example.test',
+        remoteSessionId: 'sess-remote-2',
         tools: ['Read', 'Bash'],
         hydratesCarriedLines: true,
         answersComparisonFork: true,
@@ -126,6 +161,7 @@ describe('Official 2.1.331 turn_handoff admission, relay marker, and capabilitie
 
   test('shouldAdvertiseTurnHandoffRelayMarker matches official g5r predicate', () => {
     const admitted = evaluateTurnHandoffAdmission({
+      sdkUrl: 'https://sdk.example.test',
       remoteSessionId: 'sess-1',
     })
     const denied = evaluateTurnHandoffAdmission({})
@@ -183,6 +219,7 @@ describe('Official 2.1.331 turn_handoff admission, relay marker, and capabilitie
     ).toBeUndefined()
 
     const disabled = evaluateTurnHandoffAdmission({
+      sdkUrl: 'https://sdk.example.test',
       remoteSessionId: 'sess-1',
       disabled: true,
     })
@@ -191,6 +228,7 @@ describe('Official 2.1.331 turn_handoff admission, relay marker, and capabilitie
     })
 
     const admittedMinimal = evaluateTurnHandoffAdmission({
+      sdkUrl: 'https://sdk.example.test',
       remoteSessionId: 'sess-1',
     })
     expect(
@@ -211,6 +249,7 @@ describe('Official 2.1.331 turn_handoff admission, relay marker, and capabilitie
     })
 
     const admittedFull = evaluateTurnHandoffAdmission({
+      sdkUrl: 'https://sdk.example.test',
       remoteSessionId: 'sess-2',
       tools: ['Read', 'Write'],
       hydratesCarriedLines: true,
@@ -491,6 +530,70 @@ describe('Official 2.1.331 TurnHandoffManager multi-tenant state machine & secur
         session_id: 'sess-ctrl',
       },
     })
+
+    // Item 2 regression: action === 'export' with a payload must reject and NEVER hydrate
+    const mgrBeforeConflict = getTurnHandoffManager()
+    const epochBeforeConflict = mgrBeforeConflict.workerEpoch
+    const conflictSuccesses: Array<Record<string, unknown> | undefined> = []
+    const conflictErrors: string[] = []
+    dispatchPrintControlExtra(
+      'turn_handoff',
+      {
+        request_id: 'ctrl-conflict-1',
+        action: 'export',
+        session_id: 'sess-ctrl',
+        payload: {
+          v: 1,
+          worker_epoch: 99,
+          session_id: 'sess-poison',
+          staged_files: [{ path: 'poison.ts', content: 'bad' }],
+        },
+      },
+      {
+        getMcpClients: () => [],
+        getPermissionContext: () => ({}),
+        setPromptSuggestionEnabled: () => {},
+        sendSuccess: r => conflictSuccesses.push(r),
+        sendError: e => conflictErrors.push(e),
+        defer: fn => {
+          void fn()
+        },
+        errorMessage: err => String(err),
+        turnHandoffAdmission: { admitted: true },
+      },
+    )
+    expect(conflictSuccesses).toEqual([])
+    expect(conflictErrors).toHaveLength(1)
+    expect(conflictErrors[0]).toContain('export')
+    expect(mgrBeforeConflict.workerEpoch).toBe(epochBeforeConflict)
+    expect(mgrBeforeConflict.stagedFiles.has('poison.ts')).toBe(false)
+
+    // Explicit action === 'hydrate' without payload must fail as hydrate, never export
+    const missingHydrateSuccesses: Array<Record<string, unknown> | undefined> =
+      []
+    const missingHydrateErrors: string[] = []
+    dispatchPrintControlExtra(
+      'turn_handoff',
+      {
+        request_id: 'ctrl-hydrate-missing',
+        action: 'hydrate',
+      },
+      {
+        getMcpClients: () => [],
+        getPermissionContext: () => ({}),
+        setPromptSuggestionEnabled: () => {},
+        sendSuccess: r => missingHydrateSuccesses.push(r),
+        sendError: e => missingHydrateErrors.push(e),
+        defer: fn => {
+          void fn()
+        },
+        errorMessage: err => String(err),
+        turnHandoffAdmission: { admitted: true },
+      },
+    )
+    expect(missingHydrateSuccesses).toEqual([])
+    expect(missingHydrateErrors).toHaveLength(1)
+    expect(missingHydrateErrors[0]).toContain('payload')
     resetTurnHandoffManager()
   })
 
@@ -1206,7 +1309,7 @@ upstreams:
       error: { type: 'request_too_large' },
     })
 
-    // 4. Mid-stream upstream error after headers sent closes cleanly without throwing ERR_HTTP_HEADERS_SENT
+    // 4. Mid-stream upstream error after headers sent destroys socket instead of emitting clean chunked EOF
     const streamFailGw = await startGatewayServer(
       parseGatewayConfig(`
 listen:
@@ -1220,11 +1323,12 @@ upstreams:
         fetchImpl: async () => {
           let pulls = 0
           const stream = new ReadableStream<Uint8Array>({
-            pull(controller) {
+            async pull(controller) {
               pulls += 1
               if (pulls === 1) {
                 controller.enqueue(new TextEncoder().encode('partial'))
               } else {
+                await new Promise(resolve => setTimeout(resolve, 15))
                 controller.error(new Error('upstream stream exploded'))
               }
             },
@@ -1238,12 +1342,22 @@ upstreams:
     )
     handlesToClose.push(streamFailGw.close)
 
-    const partialRes = await fetch(`${streamFailGw.url}/v1/messages`, {
-      method: 'POST',
-      body: '{}',
-    })
-    expect(partialRes.status).toBe(200)
-    expect(await partialRes.text()).toBe('partial')
+    let streamRejected = false
+    try {
+      const partialRes = await fetch(`${streamFailGw.url}/v1/messages`, {
+        method: 'POST',
+        body: '{}',
+      })
+      expect(partialRes.status).toBe(200)
+      await partialRes.text()
+    } catch {
+      streamRejected = true
+    }
+    expect(streamRejected).toBe(true)
+
+    // Gateway remains healthy after destroying the truncated response socket
+    const postErrorHealth = await fetch(`${streamFailGw.url}/healthz`)
+    expect(postErrorHealth.status).toBe(200)
 
     // 5. Client disconnect aborts upstream fetchImpl signal
     let upstreamAborted = false

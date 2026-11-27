@@ -64,7 +64,7 @@ describe('densable 2.1.248 Ma/kD DYe on global config freshness (watchFile host)
     _handleGlobalConfigFreshnessWatchEndedForTesting(new Error('eacces'))
     expect(_isGlobalConfigFreshnessWatcherStartedForTesting()).toBe(true)
     _handleGlobalConfigFreshnessWatchEndedForTesting(new Error('eacces again'))
-    expect(_isGlobalConfigFreshnessWatcherStartedForTesting()).toBe(true)
+    expect(_isGlobalConfigFreshnessWatcherStartedForTesting()).toBe(false)
   })
 
   test('DYe blocks Ma and kD resubscribe after cleanup drain', async () => {

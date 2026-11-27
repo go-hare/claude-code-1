@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import {
@@ -72,6 +72,16 @@ import {
 } from '../runReplTurn.js'
 import { TranscriptProjection } from '../TranscriptProjection.js'
 import { TurnController } from '../TurnController.js'
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 const ROOT = join(import.meta.dir, '../../../..')
 
@@ -427,7 +437,10 @@ describe('Conversation Flow Wave 2 (CF-6) — official 2.1.328 query & REPL alig
     }
 
     // Verify REPL.tsx gates forceEnd behind stop-wait timeout / non-local-running-turn
-    const replSrc = readFileSync(join(ROOT, 'src/screens/REPL.tsx'), 'utf8')
+    const replSrc = readModuleTree(
+      join(ROOT, 'src/screens/REPL.tsx'),
+      join(ROOT, 'src/screens/repl'),
+    )
     expect(replSrc).toContain('const hasLocalRunningTurn = Boolean(')
     expect(replSrc).toContain(
       '[onCancel] stop-wait timeout reached; forcing queryGuard end',
@@ -1115,7 +1128,10 @@ describe('Conversation Flow Wave 2 (CF-6) — official 2.1.328 query & REPL alig
     ).toBe(true)
 
     // 5. thinkingOnlyNudged resets to false on next_turn & two-pass reactiveCompactDeeperPass exists
-    const querySrc = readFileSync(join(ROOT, 'src/query.ts'), 'utf8')
+    const querySrc = readModuleTree(
+      join(ROOT, 'src/query.ts'),
+      join(ROOT, 'src/query'),
+    )
     const nextTurnIdx = querySrc.lastIndexOf(
       "transition: { reason: 'next_turn' }",
     )
@@ -1326,7 +1342,10 @@ describe('Conversation Flow Wave 2 (CF-6) — official 2.1.328 query & REPL alig
     expect(mcpRun.terminal.reason).toBe('completed')
 
     // PostToolBatch stop uses runTurnEndReactions instead of handleStopHooks
-    const querySrc = readFileSync(join(ROOT, 'src/query.ts'), 'utf8')
+    const querySrc = readModuleTree(
+      join(ROOT, 'src/query.ts'),
+      join(ROOT, 'src/query'),
+    )
     const ptbIdx = querySrc.indexOf('if (postBatchStopped) {')
     expect(ptbIdx).toBeGreaterThan(0)
     const ptbBlock = querySrc.slice(ptbIdx, ptbIdx + 700)
@@ -1392,7 +1411,10 @@ describe('Conversation Flow Wave 2 (CF-6) — official 2.1.328 query & REPL alig
       join(ROOT, 'src/screens/repl/runReplTurn.ts'),
       'utf8',
     )
-    const replSrc = readFileSync(join(ROOT, 'src/screens/REPL.tsx'), 'utf8')
+    const replSrc = readModuleTree(
+      join(ROOT, 'src/screens/REPL.tsx'),
+      join(ROOT, 'src/screens/repl'),
+    )
     expect(runReplSrc).toContain('if (getActiveTitleReq() !== reqEntry) return')
     expect(replSrc).toContain('titleRequestRef')
   })

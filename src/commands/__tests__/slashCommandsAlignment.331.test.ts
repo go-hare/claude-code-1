@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -206,10 +207,14 @@ describe('Official 2.1.331 slash commands registry & visibility alignment', () =
 
     // mcp__ is NOT a static builtin command; it is dynamically constructed per MCP server prompt
     expect(byName.has('mcp__')).toBe(false)
-    const mcpClientSrc = readFileSync(
-      join(ROOT, 'src/services/mcp/client.ts'),
-      'utf8',
-    )
+    const mcpClientDir = join(ROOT, 'src/services/mcp/client')
+    const mcpClientSrc = [
+      readFileSync(join(ROOT, 'src/services/mcp/client.ts'), 'utf8'),
+      ...readdirSync(mcpClientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(mcpClientDir, f), 'utf8')),
+    ].join('\n')
     expect(mcpClientSrc).toContain(
       "'mcp__' + normalizeNameForMCP(client.name) + '__' + prompt.name",
     )

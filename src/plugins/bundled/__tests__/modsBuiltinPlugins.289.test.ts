@@ -2,7 +2,7 @@
  * densable 2.1.289 yfe cc-plugin-plugin-authoring / mods-guide / you-should-know.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   PLUGIN_AUTHORING_PLUGIN_DESCRIPTION,
@@ -77,10 +77,17 @@ describe('densable 2.1.289 builtin mods plugins', () => {
       'vendor/claude-code-mods/mods/cc-plugin-mods-guide',
     )
 
-    const hooksHost = readFileSync(
-      join(root, 'src/utils/plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const fhDir = join(root, 'src/utils/plugins/functionHooks')
+    const hooksHost = [
+      readFileSync(
+        join(root, 'src/utils/plugins/functionHooksModules.ts'),
+        'utf8',
+      ),
+      ...readdirSync(fhDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(fhDir, f), 'utf8')),
+    ].join('\n')
     expect(hooksHost).toContain('export function leftoverFu')
     expect(hooksHost).toContain('export function leftoverUs')
     expect(hooksHost).toContain('function leftoverHt')

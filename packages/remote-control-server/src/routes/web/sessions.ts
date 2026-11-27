@@ -1,7 +1,12 @@
 import { log, error as logError } from '../../logger'
 import { Hono, type Context } from 'hono'
+import { config } from '../../config'
 import { validateApiKey } from '../../auth/api-key'
-import { extractBearerToken, uuidAuth } from '../../auth/middleware'
+import {
+  extractBearerToken,
+  requireJsonContentType,
+  uuidAuth,
+} from '../../auth/middleware'
 import { getAutomationStateSnapshot } from '../../services/automationState'
 import {
   createSession,
@@ -25,15 +30,73 @@ import { getEventBus } from '../../transport/event-bus'
 
 const app = new Hono()
 
+export const SAFE_WEB_PERMISSION_MODES = new Set([
+  'default',
+  'acceptEdits',
+  'plan',
+  'auto',
+])
+
+const PRIVILEGED_WEB_PERMISSION_MODES = new Set([
+  'bypassPermissions',
+  'dontAsk',
+])
+
+function isDangerousPermissionModeAuthorized(c: Context): boolean {
+  const cfgFlag = (config as { allowDangerousPermissionModes?: boolean })
+    .allowDangerousPermissionModes
+  const serverAllowed =
+    cfgFlag === true || process.env.RCS_ALLOW_DANGEROUS_PERMISSION_MODES === '1'
+  return serverAllowed && hasValidApiKey(c)
+}
+
 function hasValidApiKey(c: Context): boolean {
   const bearer = extractBearerToken(c)
   return !!bearer && validateApiKey(bearer)
 }
 
 /** POST /web/sessions — Create a session from web UI */
-app.post('/sessions', uuidAuth, async c => {
+app.post('/sessions', requireJsonContentType, uuidAuth, async c => {
   const uuid = c.get('uuid')!
   const body = await c.req.json()
+  const requestedMode =
+    body.permission_mode === undefined ? 'default' : body.permission_mode
+  if (typeof requestedMode !== 'string') {
+    return c.json(
+      {
+        error: {
+          type: 'invalid_request',
+          message: 'permission_mode must be a string',
+        },
+      },
+      400,
+    )
+  }
+  if (!SAFE_WEB_PERMISSION_MODES.has(requestedMode)) {
+    if (PRIVILEGED_WEB_PERMISSION_MODES.has(requestedMode)) {
+      if (!isDangerousPermissionModeAuthorized(c)) {
+        return c.json(
+          {
+            error: {
+              type: 'forbidden',
+              message: `permission_mode '${requestedMode}' is not allowed on web sessions without explicit API key and server authorization`,
+            },
+          },
+          403,
+        )
+      }
+    } else {
+      return c.json(
+        {
+          error: {
+            type: 'invalid_request',
+            message: `Invalid permission_mode '${requestedMode}'`,
+          },
+        },
+        400,
+      )
+    }
+  }
   if (body.environment_id) {
     const env = storeGetEnvironment(body.environment_id)
     if (env?.workerType === 'acp') {
@@ -53,7 +116,7 @@ app.post('/sessions', uuidAuth, async c => {
     environment_id: body.environment_id || null,
     title: body.title || 'New Session',
     source: 'web',
-    permission_mode: body.permission_mode || 'default',
+    permission_mode: requestedMode,
   })
 
   // Auto-bind to creator's UUID

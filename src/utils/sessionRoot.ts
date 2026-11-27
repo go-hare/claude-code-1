@@ -2,6 +2,7 @@
  * Official `yGt` / `en` / `un` / `n()` @178531733 / @178531824 / @178548313 / @178548576.
  * Leftover Session is official S. host is leftover SessionHost (official Ke).
  */
+import { registerInkHostAdapter } from '@anthropic/ink/host-adapter'
 import { createHash } from 'crypto'
 import { realpathSync } from 'fs'
 import { cwd } from 'process'
@@ -576,3 +577,12 @@ export function resetSessionHostForTests(): void {
 export function getReplDiffHost(): object {
   return getBootstrapSessionHost()
 }
+
+registerInkHostAdapter({
+  sessionRoot: {
+    getBootstrapSession,
+    hasActiveSessionAls,
+    getActiveSessionFromAls,
+    runWithSession: (session, fn) => runWithSession(session as Session, fn),
+  },
+})

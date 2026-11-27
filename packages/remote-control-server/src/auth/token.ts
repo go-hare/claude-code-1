@@ -1,4 +1,11 @@
-import { storeCreateToken, storeGetUserByToken } from '../store'
+import {
+  storeCreateToken,
+  storeDeleteToken,
+  storeGetUserByToken,
+} from '../store'
+
+export const TOKEN_TTL_SECONDS = 86400
+export const TOKEN_TTL_MS = TOKEN_TTL_SECONDS * 1000
 
 let tokenCounter = 0
 
@@ -15,13 +22,23 @@ export function issueToken(username: string): {
     .join('')
   const token = `rct_${tokenCounter++}_${hex}`
   storeCreateToken(username, token)
-  return { token, expires_in: 86400 }
+  return { token, expires_in: TOKEN_TTL_SECONDS }
 }
 
-/** Resolve a token to a username. Returns null if invalid. */
-export function resolveToken(token: string | undefined): string | null {
+/**
+ * Resolve a token to a username. Returns null if invalid or expired beyond
+ * `TOKEN_TTL_MS` (86400s), pruning expired tokens from the store (`P1-E5`).
+ */
+export function resolveToken(
+  token: string | undefined,
+  nowMs: number = Date.now(),
+): string | null {
   if (!token) return null
   const entry = storeGetUserByToken(token)
   if (!entry) return null
+  if (nowMs - entry.createdAt.getTime() >= TOKEN_TTL_MS) {
+    storeDeleteToken(token)
+    return null
+  }
   return entry.username
 }

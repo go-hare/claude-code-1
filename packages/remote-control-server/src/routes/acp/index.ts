@@ -10,7 +10,9 @@ import {
 import {
   extractBearerToken,
   extractWebSocketAuthToken,
+  requireWebSocketOrigin,
 } from '../../auth/middleware'
+import { isWebSocketOriginAllowed } from '../../auth/cors'
 import { validateApiKey } from '../../auth/api-key'
 import {
   handleAcpWsOpen,
@@ -147,7 +149,17 @@ app.get('/channel-groups/:id/events', async c => {
 /** WS /acp/ws — WebSocket endpoint for acp-link connections */
 app.get(
   '/ws',
+  requireWebSocketOrigin,
   upgradeWebSocket(async c => {
+    if (!isWebSocketOriginAllowed(c.req.header('Origin'))) {
+      log('[ACP-WS] Upgrade rejected: disallowed origin')
+      return {
+        onOpen(_evt: Event, ws: WSContext) {
+          ws.close(4003, 'forbidden origin')
+        },
+      }
+    }
+
     const token = extractWebSocketAuthToken(c)
 
     if (!token || !validateApiKey(token)) {
@@ -186,7 +198,17 @@ app.get(
 /** WS /acp/relay/:agentId — WebSocket relay for frontend to interact with an agent */
 app.get(
   '/relay/:agentId',
+  requireWebSocketOrigin,
   upgradeWebSocket(async c => {
+    if (!isWebSocketOriginAllowed(c.req.header('Origin'))) {
+      log('[ACP-Relay] Upgrade rejected: disallowed origin')
+      return {
+        onOpen(_evt: Event, ws: WSContext) {
+          ws.close(4003, 'forbidden origin')
+        },
+      }
+    }
+
     if (!hasAcpRelayAuth(c)) {
       log('[ACP-Relay] Upgrade rejected: unauthorized')
       return {

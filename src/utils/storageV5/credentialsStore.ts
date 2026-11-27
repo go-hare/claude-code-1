@@ -8,6 +8,7 @@ import { getSecureStorage } from '../secureStorage/index.js'
 import type { SecureStorage } from '../secureStorage/types.js'
 import {
   getBootstrapSessionHost,
+  hasActiveSessionAls,
   HostSlot,
   ofDefaultHost,
 } from '../sessionHost.js'
@@ -78,6 +79,9 @@ export function getPinnedCredentials(): CredentialsStoreHandle | undefined {
   const own = credentialsStoreByHost.peek(getBootstrapSessionHost())
   if (own?.hasOverride) {
     return own.lastCredentials
+  }
+  if (hasActiveSessionAls()) {
+    return undefined
   }
   return ofDefaultHost(credentialsStoreByHost).lastCredentials
 }

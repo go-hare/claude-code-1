@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { logForDebugging } from 'src/utils/debug.js'
+import { validateSshHost } from './SSHProbe.js'
 
 const SSH_TIMEOUT_MS = 60_000
 const KILL_GRACE_MS = 2_000
@@ -102,9 +103,10 @@ async function runSshCommand(
   command: string,
   timeoutMs = SSH_TIMEOUT_MS,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const safeHost = validateSshHost(host)
   return runCommandCapture(
     'ssh',
-    ['-o', 'ConnectTimeout=10', host, command],
+    ['-o', 'ConnectTimeout=10', '--', safeHost, command],
     timeoutMs,
   )
 }
@@ -124,7 +126,8 @@ function findLocalBinary(): string {
 }
 
 export async function deployBinary(options: DeployOptions): Promise<string> {
-  const { host, remotePlatform, remoteArch, localVersion, onProgress } = options
+  const { remotePlatform, remoteArch, localVersion, onProgress } = options
+  const host = validateSshHost(options.host)
 
   if (remotePlatform !== 'linux' && remotePlatform !== 'darwin') {
     throw new Error(
@@ -149,7 +152,7 @@ export async function deployBinary(options: DeployOptions): Promise<string> {
   const remotePath = `${REMOTE_BIN_DIR}/${REMOTE_CLI_FILE}`
   const scpResult = await runCommandCapture(
     'scp',
-    ['-o', 'ConnectTimeout=10', localBinary, `${host}:${remotePath}`],
+    ['-o', 'ConnectTimeout=10', '--', localBinary, `${host}:${remotePath}`],
     SSH_TIMEOUT_MS,
   )
 

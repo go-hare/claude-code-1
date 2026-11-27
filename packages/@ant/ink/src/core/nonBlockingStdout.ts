@@ -18,6 +18,7 @@ import {
 import { createRequire } from 'node:module'
 import { logForDebugging } from '../utils/debug.js'
 import { STDOUT_BACKLOG_BYTES } from './constants.js'
+import { getInkHostAdapter } from './hostAdapter.js'
 import {
   captureInkAlsSession,
   hasInkActiveSessionAls,
@@ -114,16 +115,9 @@ function kEventLoopStall(): boolean {
     : defaultEventLoopStallFlagOverride
   if (override) return override()
   try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { getFeatureValue_CACHED_MAY_BE_STALE } =
-      require('../../../../../src/services/analytics/growthbook.js') as typeof import('../../../../../src/services/analytics/growthbook.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    return (
-      getFeatureValue_CACHED_MAY_BE_STALE<boolean>(
-        'tengu_event_loop_stall',
-        false,
-      ) === true
-    )
+    const getFeatureFlag = getInkHostAdapter().getFeatureFlag
+    if (!getFeatureFlag) return false
+    return getFeatureFlag<boolean>('tengu_event_loop_stall', false) === true
   } catch {
     return false
   }

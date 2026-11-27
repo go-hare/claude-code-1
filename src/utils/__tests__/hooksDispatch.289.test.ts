@@ -16,7 +16,23 @@ import { formatHookProgressText } from '../hooks/hooksSettings.js'
 
 // Evaluate the real executor with inert boundaries: no settings, subprocesses,
 // API calls, or process-global mock.module registrations are involved.
-const source = readFileSync(new URL('../hooks.ts', import.meta.url), 'utf8')
+const readHookSubmodule = (rel: string) =>
+  readFileSync(new URL(rel, import.meta.url), 'utf8')
+const stripTopLevelExports = (code: string) =>
+  code.replace(
+    /^export\s+(?=(?:async\s+)?(?:function|const|let|class|interface|type)\b)/gm,
+    '',
+  )
+const coreSource = readHookSubmodule('../hooks/hookCore.ts')
+const outputProcessorSource = readHookSubmodule(
+  '../hooks/hookOutputProcessor.ts',
+)
+const configRegistrySource = readHookSubmodule('../hooks/hookConfigRegistry.ts')
+const modelSlotPoolSource = readHookSubmodule('../hooks/hookModelSlotPool.ts')
+const entryExecutorSource = readHookSubmodule('../hooks/hookEntryExecutor.ts')
+const engineSource = readHookSubmodule('../hooks/hookEngine.ts')
+const outsideReplSource = readHookSubmodule('../hooks/hookOutsideReplEngine.ts')
+const toolEventsSource = readHookSubmodule('../hooks/hookToolEvents.ts')
 const transpiler = new Bun.Transpiler({ loader: 'ts' })
 const hookSettingsSource = readFileSync(
   new URL('../hooks/hooksSettings.ts', import.meta.url),
@@ -28,14 +44,55 @@ const progressDisplayHelper = hookSettingsSource
     hookSettingsSource.indexOf('/** Get the display text for a hook */'),
   )
   .replace('export function', 'function')
-const helpers = source.slice(
-  source.indexOf('function classicResultFields('),
-  source.indexOf('function processHookJSONOutput('),
+const helpers =
+  stripTopLevelExports(
+    outputProcessorSource.slice(
+      outputProcessorSource.indexOf('export function classicResultFields('),
+      outputProcessorSource.indexOf('export function processHookJSONOutput('),
+    ),
+  ) +
+  '\n' +
+  stripTopLevelExports(
+    coreSource.slice(
+      coreSource.indexOf('export interface TypedSyncHookOutput'),
+      coreSource.indexOf('export type IfConditionMatcher'),
+    ),
+  )
+const processHookJSONOutputSource = stripTopLevelExports(
+  outputProcessorSource.slice(
+    outputProcessorSource.indexOf('export function processHookJSONOutput('),
+    outputProcessorSource.indexOf('const CLASSIC_HOOK_PINNED_FIELDS'),
+  ),
 )
-const executor = source.slice(
-  source.indexOf('const PERMISSION_DECISION_RANK'),
-  source.indexOf('function holdOutsideHookActivity('),
-)
+const executor =
+  stripTopLevelExports(
+    outputProcessorSource.slice(
+      outputProcessorSource.indexOf('const PERMISSION_DECISION_RANK'),
+      outputProcessorSource.indexOf(
+        'export async function executeFunctionHook(',
+      ),
+    ),
+  ) +
+  '\n' +
+  stripTopLevelExports(
+    modelSlotPoolSource.slice(
+      modelSlotPoolSource.indexOf(
+        'export const MAX_CONCURRENT_MODEL_HOOKS_PER_EVENT',
+      ),
+    ),
+  ) +
+  '\n' +
+  stripTopLevelExports(
+    entryExecutorSource.slice(
+      entryExecutorSource.indexOf('export type HookJsonInputResult'),
+    ),
+  ) +
+  '\n' +
+  stripTopLevelExports(
+    engineSource.slice(
+      engineSource.indexOf('export async function* executeHooks('),
+    ),
+  )
 
 function harness(
   options: {
@@ -172,15 +229,7 @@ function harness(
   }
   const execute = runInNewContext(
     transpiler.transformSync(
-      helpers +
-        source.slice(
-          source.indexOf('function processHookJSONOutput('),
-          source.indexOf(
-            '\n/**',
-            source.indexOf('function processHookJSONOutput('),
-          ),
-        ) +
-        executor,
+      helpers + '\n' + processHookJSONOutputSource + '\n' + executor,
     ) + '\nexecuteHooks',
     globals,
   )
@@ -211,9 +260,11 @@ function harness(
 
 describe('densable 289 hook dispatch', () => {
   test('outside remote activity hold respects event gates, timeout units and releases once', () => {
-    const body = source.slice(
-      source.indexOf('function holdOutsideHookActivity('),
-      source.indexOf('function getHookWorktreePath('),
+    const body = stripTopLevelExports(
+      outsideReplSource.slice(
+        outsideReplSource.indexOf('function holdOutsideHookActivity('),
+        outsideReplSource.indexOf('export function getHookWorktreePath('),
+      ),
     )
     let enabled = true
     let starts = 0
@@ -323,8 +374,7 @@ describe('densable 289 hook dispatch', () => {
   })
 
   test('JSON output preserves generic falsey values and marks legacy falsey rewrites suppressed', () => {
-    const start = source.indexOf('function processHookJSONOutput(')
-    const body = source.slice(start, source.indexOf('\n/**', start))
+    const body = processHookJSONOutputSource
     const parse = runInNewContext(
       transpiler.transformSync(body) + '\nprocessHookJSONOutput',
       {
@@ -401,9 +451,9 @@ describe('densable 289 hook dispatch', () => {
 
   test('policy disableAll filters configured sources while retaining SDK callbacks', () => {
     const sdk = { type: 'callback' }
-    const body = source.slice(
-      source.indexOf('function getHooksConfig('),
-      source.indexOf('/**\n * Lightweight existence check'),
+    const body = configRegistrySource.slice(
+      configRegistrySource.indexOf('function getHooksConfig('),
+      configRegistrySource.indexOf('/**\n * Lightweight existence check'),
     )
     const configure = runInNewContext(
       transpiler.transformSync(body) + '\ngetHooksConfig',
@@ -432,15 +482,9 @@ describe('densable 289 hook dispatch', () => {
   })
 
   test('five tool hook producers attach MCP metadata and post hooks carry duration', async () => {
-    const producers =
-      source.slice(
-        source.indexOf('function getToolHookMcpMetadata('),
-        source.indexOf('export async function executeNotificationHooks('),
-      ) +
-      source.slice(
-        source.indexOf('export async function* executePermissionRequestHooks'),
-        source.indexOf('export async function executeConfigChangeHooks'),
-      )
+    const producers = toolEventsSource.slice(
+      toolEventsSource.indexOf('function getToolHookMcpMetadata('),
+    )
     const captured: Array<Record<string, unknown>> = []
     const api = runInNewContext(
       transpiler.transformSync(producers).replaceAll('export ', '') +
@@ -530,9 +574,12 @@ describe('densable 289 hook dispatch', () => {
   })
 
   test('outside MCP invokes the raw helper without a tool context and retains no-context errors', async () => {
-    const body = source.slice(
-      source.indexOf('async function executeHooksOutsideREPL('),
-      source.indexOf('export async function* executePreToolHooks'),
+    const body = stripTopLevelExports(
+      outsideReplSource.slice(
+        outsideReplSource.indexOf(
+          'export async function executeHooksOutsideREPL(',
+        ),
+      ),
     )
     let args: unknown[] = []
     let raw: Record<string, unknown> = {
@@ -542,16 +589,21 @@ describe('densable 289 hook dispatch', () => {
     const outside = runInNewContext(
       transpiler.transformSync(
         progressDisplayHelper +
-          source.slice(
-            source.indexOf('function hookTelemetryFeatureName('),
-            source.indexOf(
-              '\n/**',
-              source.indexOf('function hookTelemetryFeatureName('),
+          stripTopLevelExports(
+            configRegistrySource.slice(
+              configRegistrySource.indexOf(
+                'export function hookTelemetryFeatureName(',
+              ),
+              configRegistrySource.indexOf(
+                'export function getHookDefinitionsForTelemetry(',
+              ),
             ),
           ) +
-          source.slice(
-            source.indexOf('function holdOutsideHookActivity('),
-            source.indexOf('export function hasBlockingResult'),
+          stripTopLevelExports(
+            outsideReplSource.slice(
+              outsideReplSource.indexOf('function holdOutsideHookActivity('),
+              outsideReplSource.indexOf('export function hasBlockingResult'),
+            ),
           ) +
           body,
       ) + '\nexecuteHooksOutsideREPL',
@@ -625,9 +677,12 @@ describe('densable 289 hook dispatch', () => {
   })
 
   test('outside classic next preserves commands and permits a middleware block', async () => {
-    const body = source.slice(
-      source.indexOf('async function executeHooksOutsideREPL('),
-      source.indexOf('export async function* executePreToolHooks'),
+    const body = stripTopLevelExports(
+      outsideReplSource.slice(
+        outsideReplSource.indexOf(
+          'export async function executeHooksOutsideREPL(',
+        ),
+      ),
     )
     // The tail is empty in this fixture; classic must still run for classic-only events.
     let calls = 0
@@ -640,20 +695,29 @@ describe('densable 289 hook dispatch', () => {
     const outside = runInNewContext(
       transpiler.transformSync(
         progressDisplayHelper +
-          source.slice(
-            source.indexOf('function hookTelemetryFeatureName('),
-            source.indexOf(
-              '\n/**',
-              source.indexOf('function hookTelemetryFeatureName('),
+          stripTopLevelExports(
+            configRegistrySource.slice(
+              configRegistrySource.indexOf(
+                'export function hookTelemetryFeatureName(',
+              ),
+              configRegistrySource.indexOf(
+                'export function getHookDefinitionsForTelemetry(',
+              ),
             ),
           ) +
-          source.slice(
-            source.indexOf('const PERMISSION_DECISION_RANK'),
-            source.indexOf('async function* executeHooks('),
+          stripTopLevelExports(
+            outputProcessorSource.slice(
+              outputProcessorSource.indexOf('const PERMISSION_DECISION_RANK'),
+              outputProcessorSource.indexOf(
+                'export async function executeFunctionHook(',
+              ),
+            ),
           ) +
-          source.slice(
-            source.indexOf('function holdOutsideHookActivity('),
-            source.indexOf('export function hasBlockingResult'),
+          stripTopLevelExports(
+            outsideReplSource.slice(
+              outsideReplSource.indexOf('function holdOutsideHookActivity('),
+              outsideReplSource.indexOf('export function hasBlockingResult'),
+            ),
           ) +
           body,
       ) + '\nexecuteHooksOutsideREPL',

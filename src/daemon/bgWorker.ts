@@ -17,10 +17,12 @@
 import { Socket } from 'net'
 import { join, resolve, dirname } from 'path'
 import {
+  chmodSync,
   closeSync,
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   writeFileSync,
   accessSync,
   unlinkSync,
@@ -50,6 +52,7 @@ import {
 import { restrictedSpawnEnv } from '../utils/restricted.js'
 import { isInBundledMode } from '../utils/bundledMode.js'
 import {
+  connectAuthenticatedPtyHost,
   encodeDataFrame,
   encodeCtrlFrame,
   createFrameParser,
@@ -717,6 +720,139 @@ export function getSpareDir(): string {
 /** Auth snapshot directory — official Zo8() */
 export function getAuthDir(): string {
   return join(getDaemonInstanceDir(), 'auth')
+}
+
+/**
+ * Mode-0600 persisted store mapping PTY socket paths to their `CLAUDE_BG_PTY_AUTH`
+ * bearer tokens so a restarted supervisor can re-authenticate adopted workers and
+ * orphan spare/PTY reap kill frames (P1-E7).
+ */
+export function getPtyAuthStorePath(): string {
+  return join(getAuthDir(), 'pty-auth-tokens.json')
+}
+
+export function loadPersistedPtyAuthTokens(
+  storePath: string = getPtyAuthStorePath(),
+): Map<string, string> {
+  const result = new Map<string, string>()
+  try {
+    const st = lstatSync(storePath)
+    if (!st.isFile() || st.isSymbolicLink()) return result
+    const raw = readFileSync(storePath, 'utf8')
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return result
+    }
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof k === 'string' && typeof v === 'string' && v.length > 0) {
+        result.set(k, v)
+      }
+    }
+  } catch {
+    // Missing or unreadable token store — start empty.
+  }
+  return result
+}
+
+export function savePersistedPtyAuthTokens(
+  tokens: ReadonlyMap<string, string>,
+  storePath: string = getPtyAuthStorePath(),
+): void {
+  try {
+    const dir = dirname(storePath)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    if (process.platform !== 'win32') {
+      try {
+        chmodSync(dir, 0o700)
+      } catch {
+        // best effort
+      }
+    }
+    const obj: Record<string, string> = {}
+    for (const [k, v] of tokens.entries()) {
+      if (typeof k === 'string' && typeof v === 'string' && v.length > 0) {
+        obj[k] = v
+      }
+    }
+    const tmpPath = `${storePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    writeFileSync(tmpPath, JSON.stringify(obj), { mode: 0o600 })
+    if (process.platform !== 'win32') {
+      try {
+        chmodSync(tmpPath, 0o600)
+      } catch {
+        // best effort
+      }
+    }
+    renameSync(tmpPath, storePath)
+  } catch {
+    // Best-effort persistence: never crash supervisor on transient fs failure.
+  }
+}
+
+/**
+ * `Map<string, string>` backed by a mode-`0600` JSON store inside the daemon's
+ * `0700` auth directory so PTY auth tokens survive supervisor restarts.
+ */
+export class PersistentPtyAuthMap extends Map<string, string> {
+  private readonly storePath: string
+
+  constructor(storePath?: string) {
+    super()
+    this.storePath = storePath ?? getPtyAuthStorePath()
+  }
+
+  getStorePath(): string {
+    return this.storePath
+  }
+
+  /** Reload persisted tokens from disk without clobbering newer in-memory entries. */
+  reload(): void {
+    const disk = loadPersistedPtyAuthTokens(this.storePath)
+    for (const [k, v] of disk.entries()) {
+      if (!super.has(k)) {
+        super.set(k, v)
+      }
+    }
+  }
+
+  private persist(): void {
+    savePersistedPtyAuthTokens(this, this.storePath)
+  }
+
+  override set(key: string, value: string): this {
+    super.set(key, value)
+    this.persist()
+    return this
+  }
+
+  override delete(key: string): boolean {
+    const removed = super.delete(key)
+    if (removed) {
+      this.persist()
+    }
+    return removed
+  }
+
+  override clear(): void {
+    if (this.size === 0) return
+    super.clear()
+    this.persist()
+  }
+
+  /** Drop entries not present in `liveSocks` and persist once if anything changed. */
+  pruneToLiveSockets(liveSocks: ReadonlySet<string>): number {
+    let pruned = 0
+    for (const key of [...this.keys()]) {
+      if (!liveSocks.has(key)) {
+        super.delete(key)
+        pruned++
+      }
+    }
+    if (pruned > 0) {
+      this.persist()
+    }
+    return pruned
+  }
 }
 
 /** Dispatch directory — official OCH() */
@@ -1949,6 +2085,7 @@ export class BgWorker {
       ptySockPath: string
       spawnPty: SpawnPtyFn
       getAuthSnapshot?: () => Promise<string | undefined>
+      ptyAuthToken?: string
     },
   ): BgWorker {
     const w = new BgWorker(
@@ -1966,8 +2103,15 @@ export class BgWorker {
     w.attempt = 1
     w.ptySockPath = spare.ptySockPath
     w.rvSockPath = getRendezvousSockPath(dispatch.short)
+    // P0-2: Connect with connectAuthenticatedPtyHost so claimed spares send
+    // `{ t: 'auth', token }`, reply `{ t: 'pong' }` to host heartbeats, and
+    // do not corrupt `procStart` (which broke worker.kill() on claimed spares).
     w.wirePty(
-      connectToPtyHost(spare.ptySockPath, spare.pid, undefined, dispatch.short),
+      connectAuthenticatedPtyHost(
+        spare.ptySockPath,
+        spare.pid,
+        spare.ptyAuthToken,
+      ),
     )
     w.resize(dispatch.cols ?? 200, dispatch.rows ?? 50)
     w.connectRv()
@@ -2011,6 +2155,7 @@ export class BgWorker {
     entry: RosterEntry,
     spawnPty: SpawnPtyFn,
     getAuthSnapshot?: () => Promise<string | undefined>,
+    ptyAuthToken?: string,
   ): Promise<BgWorker | null> {
     // Check if PID is alive
     try {
@@ -2060,13 +2205,17 @@ export class BgWorker {
     }
 
     if (entry.ptySock) {
+      // P1-E7: Re-authenticate adopted PTY hosts using persisted per-socket token
+      // when available; fall back to unauthenticated connectToPtyHost for legacy hosts.
       w.wirePty(
-        connectToPtyHost(
-          entry.ptySock,
-          entry.pid,
-          w.procStart,
-          entry.dispatch.short,
-        ),
+        ptyAuthToken
+          ? connectAuthenticatedPtyHost(entry.ptySock, entry.pid, ptyAuthToken)
+          : connectToPtyHost(
+              entry.ptySock,
+              entry.pid,
+              w.procStart,
+              entry.dispatch.short,
+            ),
       )
       w.ptyCols = 0
       w.seedFocus(false)

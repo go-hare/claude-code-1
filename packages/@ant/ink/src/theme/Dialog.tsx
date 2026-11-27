@@ -13,7 +13,7 @@ import { KeyboardShortcutHint } from './KeyboardShortcutHint.js';
 import { ModalContext } from './modalContext.js';
 import { Pane } from './Pane.js';
 
-function activeElementReachesBottom(el: DOMElement | null): boolean {
+export function activeElementReachesBottom(el: DOMElement | null): boolean {
   const parent = el?.parentNode;
   if (!parent) return true;
   let active: DOMElement = parent;
@@ -23,8 +23,11 @@ function activeElementReachesBottom(el: DOMElement | null): boolean {
     active = parent;
   }
   let bottom = active.yogaNode?.getComputedHeight() ?? 0;
-  for (let cur: DOMElement = active; cur !== parent; cur = cur.parentNode ?? parent) {
+  let cur: DOMElement | undefined = active;
+  while (cur !== parent) {
+    if (!cur.parentNode) return false;
     bottom += cur.yogaNode?.getComputedTop() ?? 0;
+    cur = cur.parentNode;
   }
   return bottom >= (parent.yogaNode?.getComputedHeight() ?? 0);
 }

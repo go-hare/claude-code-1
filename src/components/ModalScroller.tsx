@@ -52,6 +52,8 @@ type Props = {
   modalKey?: string | number | null;
   /** Official 2.1.328 `Xc` onClaim — notifies FullscreenLayout of child claimed height. */
   onClaim?: (height: number | null) => void;
+  /** Whether the modal pane is visible; skips focus reclaim & 50ms poll when false. */
+  visible?: boolean;
   children: ReactNode;
 };
 
@@ -89,7 +91,14 @@ function isSameModalIdentity(a: ModalContentIdentity, b: ModalContentIdentity): 
   );
 }
 
-export function ModalScroller({ scrollViewport, maxRows, modalKey, onClaim, children }: Props): React.ReactNode {
+export function ModalScroller({
+  scrollViewport,
+  maxRows,
+  modalKey,
+  onClaim,
+  visible = true,
+  children,
+}: Props): React.ReactNode {
   // Detect modal identity swaps synchronously during render and remount the
   // inner scroller via a monotonic key. React runs the unmounting scroller's
   // layout cleanups (releasing scrollViewport + onClaim(null)) strictly BEFORE
@@ -109,6 +118,7 @@ export function ModalScroller({ scrollViewport, maxRows, modalKey, onClaim, chil
       scrollViewport={scrollViewport}
       maxRows={maxRows}
       onClaim={onClaim}
+      visible={visible}
     >
       {children}
     </ModalScrollerInner>
@@ -117,7 +127,13 @@ export function ModalScroller({ scrollViewport, maxRows, modalKey, onClaim, chil
 
 type InnerProps = Omit<Props, 'modalKey'>;
 
-function ModalScrollerInner({ scrollViewport, maxRows, onClaim, children }: InnerProps): React.ReactNode {
+function ModalScrollerInner({
+  scrollViewport,
+  maxRows,
+  onClaim,
+  visible = true,
+  children,
+}: InnerProps): React.ReactNode {
   const zxc = useContext(ModalContext);
   const onClaimRef = useRef(onClaim);
   onClaimRef.current = onClaim;
@@ -171,6 +187,9 @@ function ModalScrollerInner({ scrollViewport, maxRows, onClaim, children }: Inne
   const { focusManager: vyn } = useApp();
 
   const reclaimFocus = useCallback(() => {
+    if (!visible) {
+      return;
+    }
     const Gxc = wrapRef.current;
     // Gold: if (!Gxc || !vyn) return
     if (!Gxc || !vyn) {
@@ -191,11 +210,29 @@ function ModalScrollerInner({ scrollViewport, maxRows, onClaim, children }: Inne
       }
     }
     vyn.focus(Gxc);
-  }, [vyn]);
+  }, [vyn, visible]);
 
   useEffect(() => {
     reclaimFocus();
   }, [reclaimFocus]);
+
+  const prevVisibleRef = useRef(visible);
+  useEffect(() => {
+    const wasVisible = prevVisibleRef.current;
+    prevVisibleRef.current = visible;
+    if (wasVisible && !visible) {
+      const Gxc = wrapRef.current;
+      if (Gxc && vyn) {
+        for (let Vxc: DOMElement | undefined | null = vyn.activeElement ?? undefined; Vxc; Vxc = Vxc.parentNode) {
+          if (Vxc === Gxc) {
+            savedFocusRef.current = vyn.activeElement;
+            vyn.blur();
+            return;
+          }
+        }
+      }
+    }
+  }, [visible, vyn]);
 
   useEffect(() => {
     measure();
@@ -231,7 +268,7 @@ function ModalScrollerInner({ scrollViewport, maxRows, onClaim, children }: Inne
     measure();
     reclaimFocus();
   }, [measure, reclaimFocus]);
-  useInterval(pollTick, 50);
+  useInterval(pollTick, visible ? 50 : null);
 
   // Release claimed height in layout-cleanup phase on unmount (or identity-swap
   // remount) so it always runs BEFORE a replacement modal's mount

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { randomUUID } from 'crypto'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { spliceBashTaskDelivery } from '../bashTaskDelivery.js'
 import {
@@ -126,9 +126,17 @@ describe('densable 2.1.289 As bashTaskDeliveryOutcomes', () => {
   })
 
   test('print and QE stamp taskDelivery onto ask / processUserInput', () => {
-    const print = readFileSync(
+    const readModuleTree = (entryPath: string, subDir: string): string =>
+      [
+        readFileSync(entryPath, 'utf8'),
+        ...readdirSync(subDir)
+          .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+          .sort()
+          .map(f => readFileSync(join(subDir, f), 'utf8')),
+      ].join('\n')
+    const print = readModuleTree(
       join(import.meta.dir, '../../cli/print.ts'),
-      'utf8',
+      join(import.meta.dir, '../../cli/print'),
     )
     const engine = readFileSync(
       join(import.meta.dir, '../../QueryEngine.ts'),
@@ -138,7 +146,10 @@ describe('densable 2.1.289 As bashTaskDeliveryOutcomes', () => {
       join(import.meta.dir, '../processUserInput/processUserInput.ts'),
       'utf8',
     )
-    const msgs = readFileSync(join(import.meta.dir, '../messages.ts'), 'utf8')
+    const msgs = readModuleTree(
+      join(import.meta.dir, '../messages.ts'),
+      join(import.meta.dir, '../messages'),
+    )
     expect(msgs).toContain('spliceBashTaskDelivery')
     expect(msgs).toContain('behindEarlierMessages: behindEarlierIds.has')
     expect(msgs).toContain('queuedCommandDeliveryBehindEarlierIds')
@@ -212,10 +223,20 @@ describe('densable 2.1.289 As bashTaskDeliveryOutcomes', () => {
     expect(getTask).toContain('host.transport')
     expect(getTask).toContain("op: 'outcome_of'")
     expect(getTask).toContain('discriminatedUnion')
-    const execRemote = readFileSync(
-      join(import.meta.dir, '../../services/tools/toolExecution.ts'),
-      'utf8',
+    const execRemoteDir = join(
+      import.meta.dir,
+      '../../services/tools/execution',
     )
+    const execRemote = [
+      readFileSync(
+        join(import.meta.dir, '../../services/tools/toolExecution.ts'),
+        'utf8',
+      ),
+      ...readdirSync(execRemoteDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(execRemoteDir, f), 'utf8')),
+    ].join('\n')
     expect(execRemote).toContain('rememberRemoteBackgroundShell')
     expect(execRemote).toContain('.started(')
     const persist = readFileSync(
@@ -301,9 +322,9 @@ describe('densable 2.1.289 As bashTaskDeliveryOutcomes', () => {
     expect(host).toContain('remaining <= 0')
     expect(host).toContain('isMcpSessionExpiredError')
     expect(host).toContain('claudeai-proxy')
-    const mcpClient = readFileSync(
+    const mcpClient = readModuleTree(
       join(import.meta.dir, '../../services/mcp/client.ts'),
-      'utf8',
+      join(import.meta.dir, '../../services/mcp/client'),
     )
     expect(mcpClient).toContain('timeoutMs')
     expect(mcpClient).toContain('connectToServerMemo')

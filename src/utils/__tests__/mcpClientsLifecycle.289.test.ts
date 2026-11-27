@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import {
   mergeClients,
@@ -10,14 +12,25 @@ import {
 import { McpSessionWiring } from '../sessionSlots.js'
 import { applyOnFailureBlockToAggregatedHookResult } from '../hooks.js'
 
+function readModuleTree(entryUrl: URL, subDirUrl: URL): string {
+  const subDir = fileURLToPath(subDirUrl)
+  return [
+    readFileSync(entryUrl, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
+
 const transpiler = new Bun.Transpiler({ loader: 'ts' })
-const replSource = readFileSync(
+const replSource = readModuleTree(
   new URL('../../screens/REPL.tsx', import.meta.url),
-  'utf8',
+  new URL('../../screens/repl', import.meta.url),
 )
-const printSource = readFileSync(
+const printSource = readModuleTree(
   new URL('../../cli/print.ts', import.meta.url),
-  'utf8',
+  new URL('../../cli/print', import.meta.url),
 )
 const helperSource = readFileSync(
   new URL('../hooks/execMcpToolHook.ts', import.meta.url),
@@ -304,11 +317,13 @@ describe('MCP default clients accessor lifecycle', () => {
   test('outside hooks use their own app state with the real helper when another session owns the accessor', async () => {
     const env = runtime()
     const unmount = mountRepl(env, [], () => [env.connected('other-session')])
-    const hooks = readFileSync(new URL('../hooks.ts', import.meta.url), 'utf8')
-    const body = hooks.slice(
-      hooks.indexOf('async function executeHooksOutsideREPL('),
-      hooks.indexOf('export async function* executePreToolHooks'),
+    const hooks = readFileSync(
+      new URL('../hooks/hookOutsideReplEngine.ts', import.meta.url),
+      'utf8',
     )
+    const body = hooks
+      .slice(hooks.indexOf('export async function executeHooksOutsideREPL('))
+      .replace(/^export /, '')
     const outside = runInNewContext(
       transpiler.transformSync(body) + '\nexecuteHooksOutsideREPL',
       {

@@ -9,10 +9,22 @@ import {
 } from '../../../utils/telemetry/sessionTracing.js'
 import type { Message } from '../../../types/message.js'
 
-const HOOKS = readFileSync(
-  join(import.meta.dir, '../../../utils/hooks.ts'),
-  'utf8',
-)
+const HOOKS = [
+  '../../../utils/hooks.ts',
+  '../../../utils/hooks/hookCore.ts',
+  '../../../utils/hooks/hookShellRunner.ts',
+  '../../../utils/hooks/hookOutputProcessor.ts',
+  '../../../utils/hooks/hookConfigRegistry.ts',
+  '../../../utils/hooks/hookModelSlotPool.ts',
+  '../../../utils/hooks/hookEngine.ts',
+  '../../../utils/hooks/hookEntryExecutor.ts',
+  '../../../utils/hooks/hookOutsideReplEngine.ts',
+  '../../../utils/hooks/hookToolEvents.ts',
+  '../../../utils/hooks/hookSessionAndPromptEvents.ts',
+  '../../../utils/hooks/hookLifecycleEvents.ts',
+]
+  .map(rel => readFileSync(join(import.meta.dir, rel), 'utf8'))
+  .join('\n')
 const TOOL_HOOKS = readFileSync(
   join(import.meta.dir, '../toolHooks.ts'),
   'utf8',

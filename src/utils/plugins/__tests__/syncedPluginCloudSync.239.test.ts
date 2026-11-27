@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { mkdir, mkdtemp, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -483,10 +483,14 @@ describe('leftover 239 rVE / Qui / Los / MHa', () => {
     )
     expect(discardAt).toBeGreaterThan(-1)
     expect(remintAt).toBeGreaterThan(discardAt)
-    const print = readFileSync(
-      join(import.meta.dir, '../../../cli/print.ts'),
-      'utf8',
-    )
+    const printDir = join(import.meta.dir, '../../../cli/print')
+    const print = [
+      readFileSync(join(import.meta.dir, '../../../cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     const reload = print.slice(print.indexOf("subtype === 'reload_plugins'"))
     expect(reload).toContain('remintFirstSyncedPluginSync')
     expect(reload).toContain('isSyncedPluginSyncKickEnabled')

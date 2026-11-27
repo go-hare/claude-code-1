@@ -3,7 +3,7 @@
  * agents dirs watched; .md-only filter; idle-wake; fingerprint; commands_changed.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const detectorSrc = readFileSync(
@@ -14,10 +14,14 @@ const useSkillsSrc = readFileSync(
   join(import.meta.dir, '../../../hooks/useSkillsChange.ts'),
   'utf8',
 )
-const printSrc = readFileSync(
-  join(import.meta.dir, '../../../cli/print.ts'),
-  'utf8',
-)
+const printDir = join(import.meta.dir, '../../../cli/print')
+const printSrc = [
+  readFileSync(join(import.meta.dir, '../../../cli/print.ts'), 'utf8'),
+  ...readdirSync(printDir)
+    .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+    .sort()
+    .map(f => readFileSync(join(printDir, f), 'utf8')),
+].join('\n')
 const schemaSrc = readFileSync(
   join(import.meta.dir, '../../../entrypoints/sdk/coreSchemas.ts'),
   'utf8',

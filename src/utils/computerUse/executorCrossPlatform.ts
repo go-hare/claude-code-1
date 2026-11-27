@@ -215,6 +215,48 @@ function augmentScreenshot(
 // Executor
 // ---------------------------------------------------------------------------
 
+/**
+ * P1-E6(a): Build Windows terminal launch argv safely.
+ * - For Windows Terminal (`wt`): rejects CR/LF and `;` (wt command delimiter)
+ *   in `cwd`, and inserts `'--'` before `'powershell'`.
+ * - For `cmd`: rejects CR/LF injection in `cmd`.
+ * - For `powershell` / `wt`: encodes command via UTF-16LE `-EncodedCommand`.
+ */
+export function buildWindowsTerminalLaunchSpec(
+  terminalKind: 'wt' | 'cmd' | 'powershell',
+  cmd: string,
+  cwd: string,
+): { spawnProgram: string; spawnArgs: string[] } | null {
+  const encodedCmd = Buffer.from(cmd, 'utf16le').toString('base64')
+  let spawnProgram: string
+  let spawnArgs: string[]
+  if (terminalKind === 'wt') {
+    if (/[\r\n;]/.test(cwd)) {
+      return null
+    }
+    spawnProgram = 'wt'
+    spawnArgs = [
+      '-d',
+      cwd,
+      '--',
+      'powershell',
+      '-NoExit',
+      '-EncodedCommand',
+      encodedCmd,
+    ]
+  } else if (terminalKind === 'cmd') {
+    if (/[\r\n]/.test(cmd)) {
+      return null
+    }
+    spawnProgram = 'cmd.exe'
+    spawnArgs = ['/k', cmd]
+  } else {
+    spawnProgram = 'powershell'
+    spawnArgs = ['-NoExit', '-EncodedCommand', encodedCmd]
+  }
+  return { spawnProgram, spawnArgs }
+}
+
 export function createCrossPlatformExecutor(opts: {
   getMouseAnimationEnabled: () => boolean
   getHideBeforeActionEnabled: () => boolean
@@ -405,12 +447,19 @@ export function createCrossPlatformExecutor(opts: {
 
     async writeClipboard(text: string): Promise<void> {
       if (process.platform === 'win32') {
-        const escaped = text.replace(/'/g, "''")
+        // P1-E6(b): Pass clipboard payload via stdin instead of interpolating
+        // into PowerShell `-Command`.
         spawnSync(
           'powershell',
-          ['-NoProfile', '-Command', `Set-Clipboard -Value '${escaped}'`],
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            '[Console]::In.ReadToEnd() | Set-Clipboard',
+          ],
           {
-            stdio: 'ignore',
+            input: text,
+            stdio: ['pipe', 'ignore', 'ignore'],
             windowsHide: true,
           },
         )
@@ -717,20 +766,26 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
         const beforeHwnds = new Set(enumWindows().map(w => w.hwnd))
         const cwd = opts.workingDirectory ?? process.cwd()
 
-        // Launch a new visible PowerShell window directly via CreateProcess
-        // with cwd passed out-of-band and the command UTF-16LE base64-encoded
-        // via -EncodedCommand, avoiding nested PowerShell quote interpolation.
-        const encodedCmd = Buffer.from(cmd, 'utf16le').toString('base64')
-        const child = spawn(
-          'powershell',
-          ['-NoExit', '-EncodedCommand', encodedCmd],
-          {
-            cwd,
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: false,
-          },
+        // Launch the requested terminal window directly via CreateProcess with
+        // cwd passed out-of-band; PowerShell/wt use UTF-16LE -EncodedCommand
+        // to avoid nested quote interpolation, wt rejects CR/LF/`;` in cwd and
+        // terminates wt options with `--`, and cmd rejects CR/LF injection.
+        const terminalKind = opts.terminal ?? 'powershell'
+        const launchSpec = buildWindowsTerminalLaunchSpec(
+          terminalKind,
+          cmd,
+          cwd,
         )
+        if (!launchSpec) {
+          return null
+        }
+        const { spawnProgram, spawnArgs } = launchSpec
+        const child = spawn(spawnProgram, spawnArgs, {
+          cwd,
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: false,
+        })
         child.on('error', () => {})
         child.unref()
 
@@ -746,6 +801,7 @@ $i = New-Object MUp+INPUT; $i.type=0; $i.mi.dwFlags=0x0004; [MUp]::SendInput(1, 
                 t.includes('terminal') ||
                 t.includes('powershell') ||
                 t.includes('cmd') ||
+                t.includes('command prompt') ||
                 t.includes(cmd.toLowerCase())
               ) {
                 newHwnd = w.hwnd

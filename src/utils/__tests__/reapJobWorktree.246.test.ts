@@ -207,7 +207,22 @@ describe('#16 Slu / vjr / xMs / $jr / zr (2.1.246)', () => {
     expect(cleanupSrc).toContain('filesRetainedFresh')
     expect(cleanupSrc).toContain('filesPastCutoff')
     expect(cleanupSrc).toContain("'daemon.log'")
-    const hooksSrc = readFileSync(join(utils, 'hooks.ts'), 'utf8')
+    const hooksSrc = [
+      'hooks.ts',
+      'hooks/hookCore.ts',
+      'hooks/hookShellRunner.ts',
+      'hooks/hookOutputProcessor.ts',
+      'hooks/hookConfigRegistry.ts',
+      'hooks/hookModelSlotPool.ts',
+      'hooks/hookEngine.ts',
+      'hooks/hookEntryExecutor.ts',
+      'hooks/hookOutsideReplEngine.ts',
+      'hooks/hookToolEvents.ts',
+      'hooks/hookSessionAndPromptEvents.ts',
+      'hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(utils, rel), 'utf8'))
+      .join('\n')
     expect(hooksSrc).toContain('storageV5: persist.storageV5')
     expect(hooksSrc).toContain('credentials: persist.credentials')
     expect(hooksSrc).toContain('pluginDirectoryExists(storageV5, pluginRoot)')

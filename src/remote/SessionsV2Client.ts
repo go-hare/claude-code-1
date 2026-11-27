@@ -13,6 +13,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import { validateBridgeId } from '../bridge/bridgeApi.js'
 import {
   clearTrustedDeviceTokenCache,
   getTrustedDeviceTokenIfGateOn,
@@ -35,6 +36,11 @@ import { logForDebugging } from '../utils/debug.js'
 import { errorMessage, toError } from '../utils/errors.js'
 import { logError } from '../utils/log.js'
 import { getProxyFetchOptions } from '../utils/proxy.js'
+import {
+  getActiveSessionFromAls,
+  runWithSession,
+  type Session,
+} from '../utils/sessionRoot.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import { getAnthropicClientPlatform } from '../utils/teleport/api.js'
 import { getClaudeCodeUserAgent } from '../utils/userAgent.js'
@@ -51,6 +57,8 @@ export const SESSIONS_V2_MAX_RECONNECT_ATTEMPTS = 5
 export const SESSIONS_V2_MARK_DOWN_THRESHOLD_MS = 30_000
 export const SESSIONS_V2_REPLAY_WINDOW_MS = 2_000
 export const SESSIONS_V2_MAX_ISSUED_REQUEST_IDS = 500
+/** Maximum single SSE frame byte length (3 MiB) to bound memory on malformed/hostile streams. */
+export const SESSIONS_V2_MAX_FRAME_BYTES = 3_145_728
 const MAX_ERROR_BODY_BYTES = 4_096
 const REMOTE_TOOL_RESULT_TOO_LARGE = 'remote_tool_result_too_large'
 const TOOL_HOST_ENDED_EVENT_TYPE = 'tool_host_ended'
@@ -701,6 +709,7 @@ export class SessionsV2Client {
   private readonly driftCheckIntervalMs: number
   private readonly reconnectBaseMs: number
   private readonly reconnectCapMs: number
+  private readonly boundSession: Session | undefined
 
   constructor(
     private readonly sessionId: string,
@@ -711,6 +720,8 @@ export class SessionsV2Client {
     initialSequenceNum?: number,
     options: SessionsV2ClientOptions = {},
   ) {
+    validateBridgeId(sessionId, 'sessionId')
+    this.boundSession = getActiveSessionFromAls()
     if (initialSequenceNum !== undefined && initialSequenceNum > 0) {
       this.lastSequenceNum = initialSequenceNum
     }
@@ -735,9 +746,16 @@ export class SessionsV2Client {
     this.reconnectCapMs = options.reconnectCapMs ?? SESSIONS_V2_RECONNECT_CAP_MS
   }
 
+  private runInBoundSession<T>(fn: () => T): T {
+    return this.boundSession !== undefined &&
+      getActiveSessionFromAls() !== this.boundSession
+      ? runWithSession(this.boundSession, fn)
+      : fn()
+  }
+
   get keepRedialling(): boolean {
     try {
-      return this.servesSession()
+      return this.runInBoundSession(() => this.servesSession())
     } catch {
       return false
     }
@@ -790,47 +808,52 @@ export class SessionsV2Client {
   }
 
   private async doFetch(url: string, init: RequestInit): Promise<Response> {
+    const reqInit: RequestInit = { ...init, redirect: 'error' }
     if (this.fetchOverride) {
-      return this.fetchOverride(url, init)
+      return this.fetchOverride(url, reqInit)
     }
     const proxyOpts = getProxyFetchOptions({ url })
-    return globalThis.fetch(url, { ...init, ...proxyOpts } as RequestInit)
+    return globalThis.fetch(url, { ...proxyOpts, ...reqInit } as RequestInit)
   }
 
   private loadTrustedDeviceToken(): Promise<string> {
-    if (this.withholdTrustedDeviceToken) {
-      return Promise.resolve('')
-    }
-    let promiseRef: Promise<string> | undefined
-    const clearIfSame = (): void => {
-      if (this.trustedDeviceToken === promiseRef) {
-        this.trustedDeviceToken = undefined
+    return this.runInBoundSession(() => {
+      if (this.withholdTrustedDeviceToken) {
+        return Promise.resolve('')
       }
-    }
-    const promise = (async (): Promise<string> => {
-      try {
-        const token = this.getTrustedDeviceTokenOverride
-          ? ((await this.getTrustedDeviceTokenOverride()) ?? '')
-          : ((await getTrustedDeviceTokenIfGateOn()) ?? '')
-        if (!token) clearIfSame()
-        return token
-      } catch (err) {
-        clearIfSame()
-        logForDebugging(
-          `[SessionsV2Client] trusted-device token unavailable, sending no td-v1 header: ${errorMessage(err)}`,
-        )
-        return ''
+      let promiseRef: Promise<string> | undefined
+      const clearIfSame = (): void => {
+        if (this.trustedDeviceToken === promiseRef) {
+          this.trustedDeviceToken = undefined
+        }
       }
-    })()
-    promiseRef = promise
-    return promise
+      const promise = (async (): Promise<string> => {
+        try {
+          const token = this.getTrustedDeviceTokenOverride
+            ? ((await this.getTrustedDeviceTokenOverride()) ?? '')
+            : ((await getTrustedDeviceTokenIfGateOn()) ?? '')
+          if (!token) clearIfSame()
+          return token
+        } catch (err) {
+          clearIfSame()
+          logForDebugging(
+            `[SessionsV2Client] trusted-device token unavailable, sending no td-v1 header: ${errorMessage(err)}`,
+          )
+          return ''
+        }
+      })()
+      promiseRef = promise
+      return promise
+    })
   }
 
   private rereadTrustedDeviceToken(): void {
-    this.trustedDeviceToken = undefined
-    if (isTrustedDeviceGateEnabled()) {
-      clearTrustedDeviceTokenCache()
-    }
+    this.runInBoundSession(() => {
+      this.trustedDeviceToken = undefined
+      if (isTrustedDeviceGateEnabled()) {
+        clearTrustedDeviceTokenCache()
+      }
+    })
   }
 
   /**
@@ -842,36 +865,38 @@ export class SessionsV2Client {
     refusal: UntrustedDeviceRefusal,
     sentDeviceToken: string | undefined,
   ): Promise<boolean> {
-    try {
-      if (this.withholdTrustedDeviceToken) {
-        return false
-      }
-      if (!isRecoverableUntrustedRefusal(refusal)) {
+    return this.runInBoundSession(async () => {
+      try {
+        if (this.withholdTrustedDeviceToken) {
+          return false
+        }
+        if (!isRecoverableUntrustedRefusal(refusal)) {
+          logForDebugging(
+            `[SessionsV2Client] untrusted_device refusal not recoverable (${refusal.kind})`,
+            { level: 'warn' },
+          )
+          this.rereadTrustedDeviceToken()
+          return false
+        }
+        const nextToken = this.recoverTrustedDeviceTokenOverride
+          ? await this.recoverTrustedDeviceTokenOverride(
+              sentDeviceToken || undefined,
+            )
+          : await recoverTrustedDeviceTokenAfterUntrusted(
+              sentDeviceToken || undefined,
+            )
+        if (!nextToken) {
+          return false
+        }
+        this.trustedDeviceToken = Promise.resolve(nextToken)
+        return true
+      } catch (err) {
         logForDebugging(
-          `[SessionsV2Client] untrusted_device refusal not recoverable (${refusal.kind})`,
-          { level: 'warn' },
+          `[SessionsV2Client] trusted-device re-enrollment failed: ${errorMessage(err)}`,
         )
-        this.rereadTrustedDeviceToken()
         return false
       }
-      const nextToken = this.recoverTrustedDeviceTokenOverride
-        ? await this.recoverTrustedDeviceTokenOverride(
-            sentDeviceToken || undefined,
-          )
-        : await recoverTrustedDeviceTokenAfterUntrusted(
-            sentDeviceToken || undefined,
-          )
-      if (!nextToken) {
-        return false
-      }
-      this.trustedDeviceToken = Promise.resolve(nextToken)
-      return true
-    } catch (err) {
-      logForDebugging(
-        `[SessionsV2Client] trusted-device re-enrollment failed: ${errorMessage(err)}`,
-      )
-      return false
-    }
+    })
   }
 
   private safeUserAgent(): string {
@@ -889,7 +914,7 @@ export class SessionsV2Client {
   }> {
     this.trustedDeviceToken ??= this.loadTrustedDeviceToken()
     const deviceToken = await this.trustedDeviceToken
-    const rawToken = this.getAccessToken()
+    const rawToken = this.runInBoundSession(() => this.getAccessToken())
     const bearer = typeof rawToken === 'string' && rawToken ? rawToken : ''
     const withheld = bearer === ''
     return {
@@ -969,7 +994,9 @@ export class SessionsV2Client {
     logForDebugging(
       `[SessionsV2Client] Connecting to ${url.href} (from_sequence_num=${this.lastSequenceNum})`,
     )
-    void this.readStream(url, headers, controller, auth.bearer, auth.withheld)
+    void this.runInBoundSession(() =>
+      this.readStream(url, headers, controller, auth.bearer, auth.withheld),
+    )
   }
 
   private async readStream(
@@ -982,8 +1009,10 @@ export class SessionsV2Client {
     let response: Response
     let timedOut = false
     const connectTimer = setTimeout(() => {
-      timedOut = true
-      controller.abort()
+      this.runInBoundSession(() => {
+        timedOut = true
+        controller.abort()
+      })
     }, this.connectTimeoutMs)
     connectTimer.unref?.()
 
@@ -1009,7 +1038,9 @@ export class SessionsV2Client {
         `[SessionsV2Client] Connect error: ${errorMessage(err)}`,
         { level: 'error' },
       )
-      this.callbacks.onError?.(toError(err))
+      this.runInBoundSession(() => {
+        this.callbacks.onError?.(toError(err))
+      })
       if (this.abortController !== controller) return
       this.handleStreamEnd()
       return
@@ -1030,7 +1061,9 @@ export class SessionsV2Client {
 
       if (response.status === 401 && !withheld && this.onAuth401) {
         logForDebugging('[SessionsV2Client] 401 on SSE connect — refreshing')
-        const refreshed = await this.onAuth401(bearer).catch(() => false)
+        const refreshed = await this.runInBoundSession(() =>
+          this.onAuth401!(bearer),
+        ).catch(() => false)
         if (this.abortController !== controller) return
         if (
           !refreshed &&
@@ -1039,7 +1072,9 @@ export class SessionsV2Client {
         ) {
           this.state = 'closed'
           this.closedCause = 'exhausted'
-          this.callbacks.onClose?.()
+          this.runInBoundSession(() => {
+            this.callbacks.onClose?.()
+          })
           return
         }
         this.handleStreamEnd()
@@ -1079,7 +1114,9 @@ export class SessionsV2Client {
               : undefined
         this.state = 'closed'
         this.closedCause = 'permanentHttp'
-        this.callbacks.onClose?.(closeReason)
+        this.runInBoundSession(() => {
+          this.callbacks.onClose?.(closeReason)
+        })
         return
       }
 
@@ -1116,7 +1153,9 @@ export class SessionsV2Client {
     this.resetLivenessTimer()
     this.startDriftWatch()
     logForDebugging('[SessionsV2Client] Connected')
-    this.callbacks.onConnected?.(connectInfo)
+    this.runInBoundSession(() => {
+      this.callbacks.onConnected?.(connectInfo)
+    })
 
     const reader = response.body.getReader()
     let parserState: SseParserState | undefined
@@ -1125,10 +1164,21 @@ export class SessionsV2Client {
         const { done, value } = await reader.read()
         if (this.abortController !== controller) return
         if (done) break
-        const parsed = parseSseChunk(parserState, value)
+        const parsed = parseSseChunk(
+          parserState,
+          value,
+          SESSIONS_V2_MAX_FRAME_BYTES,
+        )
         parserState = parsed.state
         for (const ev of parsed.events) {
           if (this.abortController !== controller) return
+          if (ev.kind === 'tooLarge') {
+            logForDebugging(
+              `[SessionsV2Client] Dropping oversized SSE frame (> ${SESSIONS_V2_MAX_FRAME_BYTES} bytes)`,
+              { level: 'warn' },
+            )
+            continue
+          }
           if (ev.kind === 'event' && !ev.data) continue
           this.resetLivenessTimer()
           if (ev.kind === 'event' && ev.event && ev.data) {
@@ -1153,6 +1203,16 @@ export class SessionsV2Client {
   }
 
   handleFrame(eventType: string, id: string | undefined, data: string): void {
+    this.runInBoundSession(() => {
+      this.handleFrameInBoundSession(eventType, id, data)
+    })
+  }
+
+  private handleFrameInBoundSession(
+    eventType: string,
+    id: string | undefined,
+    data: string,
+  ): void {
     let parsed: unknown
     try {
       parsed = jsonParse(data)
@@ -1496,7 +1556,9 @@ export class SessionsV2Client {
     extras: Record<string, unknown>,
   ): void {
     try {
-      this.callbacks.onMessage(message, extras)
+      this.runInBoundSession(() => {
+        this.callbacks.onMessage(message, extras)
+      })
     } catch (err) {
       logError(
         new Error(
@@ -1521,7 +1583,9 @@ export class SessionsV2Client {
       )
       this.state = 'closed'
       this.closedCause = 'exhausted'
-      this.callbacks.onClose?.()
+      this.runInBoundSession(() => {
+        this.callbacks.onClose?.()
+      })
       return
     }
 
@@ -1539,36 +1603,42 @@ export class SessionsV2Client {
       `[SessionsV2Client] Reconnecting in ${Math.round(delayMs)}ms (attempt ${this.reconnectAttempts}/${this.keepRedialling ? '∞' : SESSIONS_V2_MAX_RECONNECT_ATTEMPTS}, from_sequence_num=${this.lastSequenceNum})`,
     )
     this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null
-      if (this.state === 'closed') return
-      void this.connect()
+      this.runInBoundSession(() => {
+        this.reconnectTimer = null
+        if (this.state === 'closed') return
+        void this.connect()
+      })
     }, delayMs)
     this.reconnectTimer.unref?.()
 
     if (!budgetExhausted) {
-      this.callbacks.onReconnecting?.()
+      this.runInBoundSession(() => {
+        this.callbacks.onReconnecting?.()
+      })
     }
   }
 
   private readonly onLivenessTimeout = (): void => {
-    this.livenessTimer = null
-    logForDebugging('[SessionsV2Client] Liveness timeout, reconnecting', {
-      level: 'warn',
-    })
-    try {
-      const now = Date.now()
-      this.callbacks.onStreamSilent?.({
-        suspended:
-          now - this.lastDriftCheck > this.driftCheckIntervalMs * 2 ||
-          now - (this.lastHealthyAt ?? now) >
-            this.livenessTimeoutMs + this.driftCheckIntervalMs * 2,
+    this.runInBoundSession(() => {
+      this.livenessTimer = null
+      logForDebugging('[SessionsV2Client] Liveness timeout, reconnecting', {
+        level: 'warn',
       })
-    } catch (err) {
-      logError(toError(err))
-    }
-    this.abortController?.abort()
-    this.abortController = null
-    this.handleStreamEnd()
+      try {
+        const now = Date.now()
+        this.callbacks.onStreamSilent?.({
+          suspended:
+            now - this.lastDriftCheck > this.driftCheckIntervalMs * 2 ||
+            now - (this.lastHealthyAt ?? now) >
+              this.livenessTimeoutMs + this.driftCheckIntervalMs * 2,
+        })
+      } catch (err) {
+        logError(toError(err))
+      }
+      this.abortController?.abort()
+      this.abortController = null
+      this.handleStreamEnd()
+    })
   }
 
   private markDown(): void {
@@ -1601,18 +1671,20 @@ export class SessionsV2Client {
     this.clearDriftWatch()
     this.lastDriftCheck = Date.now()
     this.driftTimer = setInterval(() => {
-      const now = Date.now()
-      const elapsed = now - this.lastDriftCheck
-      this.lastDriftCheck = now
-      if (
-        elapsed > this.driftCheckIntervalMs * 2 &&
-        this.state === 'connected'
-      ) {
-        logForDebugging(
-          `[SessionsV2Client] Wall-clock drift ${elapsed}ms — reconnecting after suspend`,
-        )
-        this.reconnectAfterSuspend()
-      }
+      this.runInBoundSession(() => {
+        const now = Date.now()
+        const elapsed = now - this.lastDriftCheck
+        this.lastDriftCheck = now
+        if (
+          elapsed > this.driftCheckIntervalMs * 2 &&
+          this.state === 'connected'
+        ) {
+          logForDebugging(
+            `[SessionsV2Client] Wall-clock drift ${elapsed}ms — reconnecting after suspend`,
+          )
+          this.reconnectAfterSuspend()
+        }
+      })
     }, this.driftCheckIntervalMs)
     this.driftTimer.unref?.()
   }
@@ -1720,7 +1792,9 @@ export class SessionsV2Client {
     try {
       const t0 = performance.now()
       const signed = this.eventSigner
-        ? await this.eventSigner(this.sessionId, event)
+        ? await this.runInBoundSession(() =>
+            this.eventSigner!(this.sessionId, event),
+          )
         : event
       const t1 = performance.now()
       const payload = { session_id: this.sessionId, events: [signed] }
@@ -1730,7 +1804,7 @@ export class SessionsV2Client {
 
       if (!result.ok && result.status === 401 && !withheld && this.onAuth401) {
         logForDebugging('[SessionsV2Client] 401 on POST — refreshing + retry')
-        if (await this.onAuth401(bearer)) {
+        if (await this.runInBoundSession(() => this.onAuth401!(bearer))) {
           const refreshedAuth = await this.authHeaders()
           result = await this.postEventsRaw(
             url,
@@ -1877,7 +1951,9 @@ export class SessionsV2Client {
           outcome.outcome === 'session_inactive' ||
           (outcome.outcome === 'failed' && outcome.cause === 'http')
         ) {
-          onPostFailed?.(requestId)
+          this.runInBoundSession(() => {
+            onPostFailed?.(requestId)
+          })
         }
         return outcome
       }),
@@ -1951,7 +2027,7 @@ export class SessionsV2Client {
     this.abortController?.abort()
     this.abortController = null
     this.state = 'idle'
-    void this.connect()
+    void this.runInBoundSession(() => this.connect())
   }
 
   reconnectAfterSuspend(): void {

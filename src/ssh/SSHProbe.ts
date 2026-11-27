@@ -19,10 +19,35 @@ export class SSHProbeError extends Error {
   }
 }
 
+function hasDisallowedSshHostChar(host: string): boolean {
+  for (let i = 0; i < host.length; i++) {
+    const code = host.charCodeAt(i)
+    if (code <= 0x20 || code === 0x7f || /\s/.test(host[i]!)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * P1-E4: Validate SSH host target before passing to `ssh` / `scp`.
+ * Rejects leading `'-'` (OpenSSH option injection such as `-oProxyCommand=...`)
+ * as well as empty strings, whitespace, NUL bytes, and ASCII control characters.
+ */
+export function validateSshHost(host: string): string {
+  if (!host || host.startsWith('-') || hasDisallowedSshHostChar(host)) {
+    throw new SSHProbeError(
+      `Invalid SSH host "${host}": host must be non-empty, must not start with '-', and must not contain whitespace or control characters`,
+    )
+  }
+  return host
+}
+
 export async function probeRemote(
   host: string,
   onProgress?: (msg: string) => void,
 ): Promise<ProbeResult> {
+  const safeHost = validateSshHost(host)
   onProgress?.('Probing remote host…')
 
   const { stdout, stderr, exitCode } = await new Promise<{
@@ -37,7 +62,8 @@ export async function probeRemote(
         'BatchMode=yes',
         '-o',
         'ConnectTimeout=10',
-        host,
+        '--',
+        safeHost,
         'CLAUDE_BIN=$(test -x "$HOME/.local/bin/claude" && echo "$HOME/.local/bin/claude" || command -v claude 2>/dev/null); echo "$CLAUDE_BIN"; $CLAUDE_BIN --version 2>/dev/null; uname -sm; pwd',
       ],
       { stdio: ['ignore', 'pipe', 'pipe'] },

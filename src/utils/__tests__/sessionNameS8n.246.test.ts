@@ -3,7 +3,7 @@
  * 09-16 promoted to HAVE.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 import {
@@ -166,10 +166,14 @@ describe('leftover Or / s8n (2.1.246 Pi Kr)', () => {
     expect(init).toContain("'scan_torn'")
     expect(init).toContain("'scan_budget_exhausted'")
     expect(init).toContain("'scan_read_error'")
-    const storage = readFileSync(
-      join(srcRoot, 'utils/sessionStorage.ts'),
-      'utf8',
-    )
+    const ssDir = join(srcRoot, 'utils/sessionStorage')
+    const storage = [
+      readFileSync(join(srcRoot, 'utils/sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(ssDir, f), 'utf8')),
+    ].join('\n')
     expect(storage).toContain('parseSessionSidecarKeyFromPath')
     expect(storage).toContain('writeCustomTitleSidecar')
     expect(storage).toContain(

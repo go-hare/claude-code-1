@@ -2,7 +2,7 @@
  * densable 2.1.289 Skt / bHo / Bhe — focus-fold holds streaming preview.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   isStreamingPreviewOnScreen,
@@ -14,6 +14,16 @@ import {
 } from '../streamingUiGate.js'
 
 const ROOT = join(import.meta.dir, '../../..')
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 function assistantToolUse(): {
   type: 'assistant'
@@ -205,7 +215,10 @@ describe('densable Skt resolveFocusFoldHoldsPreview', () => {
 
 describe('REPL wires Skt Ve + spinner yu', () => {
   test('source-locks focusFoldHoldsPreview on Messages + spinner', () => {
-    const repl = readFileSync(join(ROOT, 'src/screens/REPL.tsx'), 'utf8')
+    const repl = readModuleTree(
+      join(ROOT, 'src/screens/REPL.tsx'),
+      join(ROOT, 'src/screens/repl'),
+    )
     expect(repl).toContain('resolveFocusFoldHoldsPreview')
     expect(repl).toContain('focusFoldHoldsPreview')
     expect(repl).toContain(
@@ -296,9 +309,9 @@ describe('CLI analog hosts for Drop rows (not Desktop Fco / not ASe)', () => {
   })
 
   test('FEe usePaneToastHold drains processQueue (gold yo analog)', () => {
-    const panes = readFileSync(
+    const panes = readModuleTree(
       join(ROOT, 'src/components/PluginRasterPanes.tsx'),
-      'utf8',
+      join(ROOT, 'src/components/pluginRaster'),
     )
     expect(panes).toContain('const { processQueue } = useNotifications()')
     expect(panes).toContain('processQueue()')

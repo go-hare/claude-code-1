@@ -69,6 +69,7 @@ export class IncrementalPainter {
     const canReusePrevious =
       this.finished &&
       previous?.width === width &&
+      previous.charPool === screen.charPool &&
       previous.hyperlinkPool === screen.hyperlinkPool &&
       this.styleGeneration === this.stylePool.generation &&
       this.markedRightEdge === markRightEdge
@@ -136,6 +137,7 @@ export class IncrementalPainter {
     )
     resetScreen(this.previous, width, height)
     copyRows(this.previous, 0, screen, 0, height)
+    this.previous.charPool = charPool
     this.previous.hyperlinkPool = hyperlinkPool
     this.previousFirstRow = firstRow
     this.styleGeneration = this.stylePool.generation

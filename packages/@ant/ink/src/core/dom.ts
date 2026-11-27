@@ -513,10 +513,11 @@ export const setStyle = (node: DOMNode, style: Styles = {}): void => {
   if (stylesEqual(node.style, nextStyle)) {
     return
   }
+  const wasHiddenDisplay = node.style.display === 'none'
   const wasAbsolute = node.style.position === 'absolute'
   // Official 2.1.328 `nR`: transitioning out of display:none stamps firstFrame
   // so InputGate treats the newly revealed subtree as fresh on the next frame.
-  if (node.style.display === 'none') {
+  if (wasHiddenDisplay) {
     stampFirstFrame(node)
   }
   node.style = nextStyle
@@ -524,6 +525,17 @@ export const setStyle = (node: DOMNode, style: Styles = {}): void => {
     leftoverGsStampAbsoluteDescendant(node.parentNode)
   }
   markDirty(node)
+  if (
+    !wasHiddenDisplay &&
+    nextStyle.display === 'none' &&
+    node.nodeName !== '#text'
+  ) {
+    let root: DOMElement = node
+    while (root.parentNode) {
+      root = root.parentNode
+    }
+    root.focusManager?.handleNodeHidden(node, root)
+  }
 }
 
 export const setTextStyles = (

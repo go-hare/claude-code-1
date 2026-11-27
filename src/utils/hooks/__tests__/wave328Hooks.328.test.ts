@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import {
   isGoalOwnedStopHook,
   markGoalStopHook,
@@ -233,10 +233,20 @@ describe('Wave 327-328 Group 3 — Hooks / Goal / Mods (10 items)', () => {
   })
 
   test('#667: managed PostToolUse pass short-circuits when capture.deny is set (refused before running)', () => {
-    const src = readFileSync(
-      resolve(import.meta.dir, '../../../services/tools/toolExecution.ts'),
-      'utf8',
+    const execDir = resolve(
+      import.meta.dir,
+      '../../../services/tools/execution',
     )
+    const src = [
+      readFileSync(
+        resolve(import.meta.dir, '../../../services/tools/toolExecution.ts'),
+        'utf8',
+      ),
+      ...readdirSync(execDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(execDir, f), 'utf8')),
+    ].join('\n')
     const idx = src.indexOf('Official 2.1.328 (#667)')
     expect(idx).toBeGreaterThan(-1)
     const snippet = src.slice(idx, idx + 350)

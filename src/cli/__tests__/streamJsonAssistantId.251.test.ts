@@ -4,9 +4,19 @@
  * Does not reimplement aVn deserializeMessages. No settings mock.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { StructuredIO } from '../structuredIO.js'
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 async function* lineStream(lines: string[]): AsyncIterable<string> {
   for (const line of lines) {
@@ -70,7 +80,10 @@ describe('densable 2.1.251 #24 stream-json assistant message.id', () => {
   })
 
   test('print stamps before toInternalMessages; StructuredIO stamps assistant stdin', () => {
-    const printSrc = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const printSrc = readModuleTree(
+      join(import.meta.dir, '../print.ts'),
+      join(import.meta.dir, '../print'),
+    )
     const stamp = printSrc.indexOf('stampIdLessAssistantEntry(message)')
     const merge = printSrc.indexOf(
       'toInternalMessages([injected as SDKMessage])',

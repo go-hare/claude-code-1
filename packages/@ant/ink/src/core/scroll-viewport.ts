@@ -29,10 +29,18 @@ export class ScrollViewport {
     this._unsub()
     this._handle = next
     this._unsub = next ? next.subscribe(this.emit) : noop
+    this.emit()
   }
 
   attach = (handle: ScrollBoxHandle | null): (() => void) => {
-    this._stack = handle === null ? [] : [...this._stack, handle]
+    if (handle === null) {
+      if (this._stack.length > 0) {
+        this._stack = this._stack.slice(0, -1)
+        this.setActiveHandle(this._stack.at(-1) ?? null)
+      }
+      return noop
+    }
+    this._stack = [...this._stack, handle]
     this.setActiveHandle(handle)
     return () => {
       this._stack = this._stack.filter(entry => entry !== handle)

@@ -12,6 +12,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import acpRoutes from './routes/acp'
 import { webCorsOptions } from './auth/cors'
+import { requireJsonContentType } from './auth/middleware'
 
 // Routes
 import v1Environments from './routes/v1/environments'
@@ -46,29 +47,49 @@ app.use('*', async (c, next) => {
   await next()
 })
 app.use('/web/*', cors(webCorsOptions))
+app.use('/web/*', requireJsonContentType)
 
 // Health check
 app.get('/health', c => c.json({ status: 'ok', version: config.version }))
 
-// Static files — serve built web UI under /code path
-// Uses web/dist/ if it exists (production), otherwise falls back to web/ (dev/fallback)
+// Static files — serve ONLY built web UI from web/dist under /code path.
+// E5-P2-5: NEVER fall back to serving the raw web/ source tree when web/dist/index.html is absent.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const distDir = resolve(__dirname, '../web/dist')
-const webDir = existsSync(resolve(distDir, 'index.html'))
-  ? distDir
-  : resolve(__dirname, '../web')
+const hasBuiltWebDist = existsSync(resolve(distDir, 'index.html'))
 
 const stripCodePrefix = (p: string) => p.replace(/^\/code/, '')
 
-// Serve all static files under /code/* from web/ directory
-app.use(
-  '/code/*',
-  serveStatic({ root: webDir, rewriteRequestPath: stripCodePrefix }),
-)
-// /code, /code/, and /code/:sessionId — SPA fallback
-app.get('/code', serveStatic({ root: webDir, path: 'index.html' }))
-app.get('/code/', serveStatic({ root: webDir, path: 'index.html' }))
-app.get('/code/:sessionId', serveStatic({ root: webDir, path: 'index.html' }))
+if (hasBuiltWebDist) {
+  // Serve built static assets under /code/* from web/dist/ only
+  app.use(
+    '/code/*',
+    serveStatic({ root: distDir, rewriteRequestPath: stripCodePrefix }),
+  )
+  // /code, /code/, and /code/:sessionId — SPA fallback
+  app.get('/code', serveStatic({ root: distDir, path: 'index.html' }))
+  app.get('/code/', serveStatic({ root: distDir, path: 'index.html' }))
+  app.get(
+    '/code/:sessionId',
+    serveStatic({ root: distDir, path: 'index.html' }),
+  )
+} else {
+  const webDistUnavailable = (c: {
+    json: (body: unknown, status?: number) => Response
+  }) =>
+    c.json(
+      {
+        error: {
+          type: 'service_unavailable',
+          message:
+            'Web UI bundle (web/dist/index.html) is not built; raw source serving is disabled',
+        },
+      },
+      503,
+    )
+  app.get('/code', c => webDistUnavailable(c))
+  app.get('/code/*', c => webDistUnavailable(c))
+}
 
 // v1 Environment routes
 app.route('/v1/environments', v1Environments)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -233,10 +233,14 @@ describe('Wave 318 MCP Alignment', () => {
       expect(Object.keys(afterClear)).toHaveLength(0)
 
       // Verify client.ts calls loadRememberedLegacyStdioFromDisk before isRememberedLegacyStdio
-      const clientSrc = readFileSync(
-        join(process.cwd(), 'src/services/mcp/client.ts'),
-        'utf8',
-      )
+      const clientDir = join(process.cwd(), 'src/services/mcp/client')
+      const clientSrc = [
+        readFileSync(join(process.cwd(), 'src/services/mcp/client.ts'), 'utf8'),
+        ...readdirSync(clientDir)
+          .filter(f => f.endsWith('.ts'))
+          .sort()
+          .map(f => readFileSync(join(clientDir, f), 'utf8')),
+      ].join('\n')
       const loadIdx = clientSrc.indexOf(
         'await loadRememberedLegacyStdioFromDisk(undefined, { once: true })',
       )

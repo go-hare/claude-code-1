@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { AppState } from '../../../state/AppStateStore.js'
 import {
@@ -137,13 +137,21 @@ function fixture() {
 
 describe('headless account identity boundary 289', () => {
   test('production print host mounts identity boundary and both plugin hosts use the shared connect lifecycle', () => {
-    const print = readFileSync(
+    const readModuleTree = (entryPath: string, subDir: string): string =>
+      [
+        readFileSync(entryPath, 'utf8'),
+        ...readdirSync(subDir)
+          .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+          .sort()
+          .map(f => readFileSync(join(subDir, f), 'utf8')),
+      ].join('\n')
+    const print = readModuleTree(
       join(import.meta.dir, '../../../cli/print.ts'),
-      'utf8',
+      join(import.meta.dir, '../../../cli/print'),
     )
-    const repl = readFileSync(
+    const repl = readModuleTree(
       join(import.meta.dir, '../../../screens/REPL.tsx'),
-      'utf8',
+      join(import.meta.dir, '../../../screens/repl'),
     )
     expect(print).toContain('createHeadlessMcpIdentityBoundary({')
     expect(print).toContain('registerMcpIdentityChangeHandler(() =>')

@@ -167,10 +167,13 @@ describe('#1446 idleCompaction runner (d1r / hRn / f1r)', () => {
     )
     expect(ret?.contextTokens).toBe(150_000)
 
-    const replSrc = readFileSync(
-      join(import.meta.dir, '../../REPL.tsx'),
-      'utf8',
-    )
+    const replSrc = [
+      readFileSync(join(import.meta.dir, '../../REPL.tsx'), 'utf8'),
+      readFileSync(
+        join(import.meta.dir, '../useReplPluginAndCompactHost.tsx'),
+        'utf8',
+      ),
+    ].join('\n')
     expect(replSrc).toContain('getIdleCompactionRunner()')
     expect(replSrc).toContain('IDLE_COMPACT_COMPLETED_MESSAGE')
 

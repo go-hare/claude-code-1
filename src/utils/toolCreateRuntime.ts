@@ -25,9 +25,11 @@ import type {
   PermissionDecision,
   PermissionResult,
 } from '../types/permissions.js'
+import { getCwd } from './cwd.js'
 import { isAbortError } from './errors.js'
 import { FileStateCache } from './fileStateCache.js'
 import { RootSessionSlot } from './hostSlot.js'
+import { createSafeAsyncLocalStorage } from './sessionContextAls.js'
 import { isDisklessLaunch } from './sessionHost.js'
 import type { TaskRegistry } from './taskRegistry.js'
 import type { ThinkingConfig } from './thinking.js'
@@ -179,7 +181,25 @@ export type RemoteNativeToolCheckParams = {
   input: Record<string, unknown>
   context: ToolUseContext
   toolUseID: string
-  evaluateHere: () => Promise<PermissionDecision>
+  evaluateHere: (
+    effectiveInput?: Record<string, unknown>,
+  ) => Promise<PermissionDecision>
+}
+
+const localPermissionFloorAls = createSafeAsyncLocalStorage<boolean>()
+
+/**
+ * Execute `fn` in local-permission-floor mode so `tool.checkPermissions` runs
+ * the tool's own local rule/safety evaluator instead of re-invoking
+ * `runner.checkPermissions` (preventing remote allow decisions from bypassing
+ * local host deny/ask/safety floors).
+ */
+export function runEvaluatingLocalPermissionFloor<T>(fn: () => T): T {
+  return localPermissionFloorAls.run(true, fn)
+}
+
+export function isEvaluatingLocalPermissionFloor(): boolean {
+  return localPermissionFloorAls.getStore() === true
 }
 
 export type RemoteNativeToolCheck = (
@@ -778,6 +798,7 @@ export function createToolDeps(context?: ToolUseContext): ToolDeps {
     get toolDecisions() {
       return context.toolDecisions
     },
+    cwd: () => getCwd(),
   }
   rawContextByDeps.set(deps, context)
   return deps
@@ -952,7 +973,7 @@ export function createExplicitToolDeps(
     queryTracking: overrides.queryTracking,
     permissionLayers: overrides.permissionLayers,
     toolDecisions: overrides.toolDecisions,
-    cwd: overrides.cwd,
+    cwd: overrides.cwd ?? (() => getCwd()),
   }
 }
 
@@ -1480,8 +1501,11 @@ export function attachToolCreateAndRemoteRuntime<T extends object>(
   const createInstance = (
     deps: ToolDeps,
     session?: RemoteNativeToolSession,
+    skipLocalRunAssertion = false,
   ): ToolInstance<AnyObject, unknown, ToolProgressData> => {
-    assertNativeToolCanRunLocally(def.name, session ?? deps.session)
+    if (!skipLocalRunAssertion) {
+      assertNativeToolCanRunLocally(def.name, session ?? deps.session)
+    }
     if (nativeCreate !== undefined) {
       return nativeCreate.call(built, deps)
     }
@@ -1554,11 +1578,13 @@ export function attachToolCreateAndRemoteRuntime<T extends object>(
     parentMessage?: AssistantMessage,
     canUseTool?: CanUseToolFn,
     opts?: ToolCallExecutionOptions,
+    skipLocalRunAssertion = false,
   ) => {
     const deps = createToolDeps(context)
     const toolInstance = createInstance(
       deps,
       context?.session as RemoteNativeToolSession | undefined,
+      skipLocalRunAssertion,
     )
     const callCtx = createCallContextFromLegacy(
       built as unknown as Tool,
@@ -1585,22 +1611,23 @@ export function attachToolCreateAndRemoteRuntime<T extends object>(
     ): Promise<ToolResult<unknown>> {
       const session = context?.session as RemoteNativeToolSession | undefined
       const currentRunner = getRemoteNativeToolRunner(session, def.name)
-      const effectiveRunner =
-        opts?.runnerCheckedHere !== undefined &&
-        currentRunner !== undefined &&
-        hasRemoteNativeToolCheck(session, def.name)
-          ? opts.runnerCheckedHere
-          : currentRunner
 
       if (
         opts?.permissionCheckedFor !== undefined &&
-        (opts.permissionCheckedFor ?? undefined) !== effectiveRunner
+        (opts.permissionCheckedFor ?? undefined) !== currentRunner
       ) {
         throw new NativeToolElsewhereError(
           `${def.name} was not run: where it runs changed after its permission was checked. Send the call again.`,
           'NOT_RUN',
         )
       }
+
+      const effectiveRunner =
+        opts?.runnerCheckedHere !== undefined &&
+        currentRunner !== undefined &&
+        hasRemoteNativeToolCheck(session, def.name)
+          ? opts.runnerCheckedHere
+          : currentRunner
 
       if (effectiveRunner !== undefined) {
         const dispatchCtx =
@@ -1653,16 +1680,16 @@ export function attachToolCreateAndRemoteRuntime<T extends object>(
     ): Promise<PermissionResult> {
       const session = context?.session as RemoteNativeToolSession | undefined
       const runner = getRemoteNativeToolRunner(session, def.name)
-      if (runner !== undefined) {
+      const evaluatingLocalFloor = isEvaluatingLocalPermissionFloor()
+      if (
+        runner !== undefined &&
+        !evaluatingLocalFloor &&
+        runner.checkPermissions !== undefined &&
+        context?.toolUseId !== undefined
+      ) {
         const passthrough: PermissionResult = {
           behavior: 'passthrough',
           message: `${def.name} requires permission.`,
-        }
-        if (
-          runner.checkPermissions === undefined ||
-          context?.toolUseId === undefined
-        ) {
-          return passthrough
         }
         return (
           (await runner.checkPermissions(
@@ -1672,7 +1699,14 @@ export function attachToolCreateAndRemoteRuntime<T extends object>(
           )) ?? passthrough
         )
       }
-      const { toolInstance, callCtx } = instantiateFromLegacy(context)
+      const { toolInstance, callCtx } = instantiateFromLegacy(
+        context,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        runner !== undefined,
+      )
       return toolInstance.checkPermissions !== undefined
         ? toolInstance.checkPermissions(input, callCtx)
         : { behavior: 'allow', updatedInput: input }

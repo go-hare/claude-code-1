@@ -134,6 +134,18 @@ export const ShowOnboardingRolePickerTool = buildTool({
 
   create(_deps: ToolDeps) {
     return {
+      async validateInput(input: ShowOnboardingRolePickerInput) {
+        if (input.role !== undefined || input.dismissed !== undefined) {
+          return {
+            result: false as const,
+            message:
+              'ShowOnboardingRolePicker must be called with no arguments (`{}`); `role` and `dismissed` are populated only by the host UI.',
+            errorCode: 1,
+          }
+        }
+        return { result: true as const }
+      },
+
       async checkPermissions(_input: ShowOnboardingRolePickerInput) {
         return {
           behavior: 'ask' as const,

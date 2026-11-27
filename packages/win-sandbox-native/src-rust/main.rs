@@ -10,9 +10,10 @@ use security::{
     parse_proxy_port_range, EXIT_OK, EXIT_RUNTIME_ERROR, EXIT_USAGE, EXIT_VALIDATION,
 };
 use win32_backend::{
-    cmd_denies, cmd_install, cmd_probe_mxc, cmd_profile_forget, cmd_run, cmd_status, cmd_uninstall,
-    cmd_wfp_verify, BackendError, InstallOptions, ProfileForgetOptions, RunOptions, StatusOptions,
-    UninstallOptions, WfpVerifyOptions,
+    cmd_apply_restricted_token, cmd_denies, cmd_install, cmd_probe_mxc, cmd_profile_forget,
+    cmd_run, cmd_status, cmd_uninstall, cmd_wfp_verify, ApplyRestrictedTokenOptions, BackendError,
+    InstallOptions, ProfileForgetOptions, RunOptions, StatusOptions, UninstallOptions,
+    WfpVerifyOptions,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -426,6 +427,55 @@ fn handle_run(args: &[String]) -> Result<i32, BackendError> {
     cmd_run(&opts)
 }
 
+fn handle_apply_restricted_token(args: &[String]) -> Result<i32, BackendError> {
+    let mut cwd: Option<String> = None;
+    let mut i = 0;
+    let mut cmd_start: Option<usize> = None;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--" => {
+                cmd_start = Some(i + 1);
+                break;
+            }
+            "--cwd" => {
+                cwd = Some(require_flag_value(args, &mut i, "--cwd")?);
+            }
+            other if other.starts_with('-') => {
+                return Err(BackendError {
+                    exit_code: EXIT_USAGE,
+                    message: format!("Unknown flag '{other}' for '--apply-restricted-token'"),
+                });
+            }
+            _ => {
+                cmd_start = Some(i);
+                break;
+            }
+        }
+        i += 1;
+    }
+
+    let start = cmd_start.ok_or_else(|| BackendError {
+        exit_code: EXIT_USAGE,
+        message: "Missing command to execute for '--apply-restricted-token'".to_string(),
+    })?;
+    let cmd_slice = &args[start..];
+    let Some((program, program_args)) = cmd_slice.split_first() else {
+        return Err(BackendError {
+            exit_code: EXIT_USAGE,
+            message: "Missing command after '--' for '--apply-restricted-token'".to_string(),
+        });
+    };
+
+    let opts = ApplyRestrictedTokenOptions {
+        program: program.clone(),
+        args: program_args.to_vec(),
+        cwd,
+    };
+
+    cmd_apply_restricted_token(&opts)
+}
+
 fn dispatch(args: &[String]) -> Result<i32, BackendError> {
     let Some((cmd, rest)) = args.split_first() else {
         print_usage();
@@ -444,6 +494,7 @@ fn dispatch(args: &[String]) -> Result<i32, BackendError> {
             print_usage();
             Ok(EXIT_OK)
         }
+        "--apply-restricted-token" => handle_apply_restricted_token(rest),
         "status" => handle_status(rest),
         "install" => handle_install(rest),
         "uninstall" => handle_uninstall(rest),

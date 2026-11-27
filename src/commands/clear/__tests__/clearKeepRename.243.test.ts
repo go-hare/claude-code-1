@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, test } from 'bun:test'
 
@@ -17,10 +17,15 @@ describe('clear 243 keep /rename', () => {
   })
 
   test('clearSessionMetadata can keep the title', () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../../../utils/sessionStorage.ts'),
-      'utf8',
-    )
+    const utilsDir = join(import.meta.dir, '../../../utils')
+    const subDir = join(utilsDir, 'sessionStorage')
+    const src = [
+      readFileSync(join(utilsDir, 'sessionStorage.ts'), 'utf8'),
+      ...readdirSync(subDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(subDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('keepTitle?: boolean')
     expect(src).toContain('if (!options.keepTitle)')
   })

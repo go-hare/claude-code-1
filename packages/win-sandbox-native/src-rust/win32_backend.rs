@@ -17,9 +17,16 @@ use std::collections::BTreeMap;
 pub const CANONICAL_STATE_DIR_NAME: &str = "sandbox-runtime";
 
 /// Comprehensive NTFS deny-write permission mask preventing modification, deletion,
-/// child deletion, rename, DACL tampering, and ownership takeover on protected targets.
+/// child deletion, rename, DACL tampering, and ownership takeover on protected targets
+/// using granular write-only rights (without `(W)` which includes `SYNCHRONIZE` and blocks reads).
 #[cfg_attr(not(windows), allow(dead_code))]
-pub const DENY_WRITE_PERM: &str = "(W,D,DC,WDAC,WO)";
+pub const DENY_WRITE_PERM: &str = "(WD,AD,WEA,WA,DE,DC,WDAC,WO)";
+
+/// Schema version for persisted `denies.json`.
+/// Version 3 guarantees granular `DENY_WRITE_PERM = "(WD,AD,WEA,WA,DE,DC,WDAC,WO)"`
+/// (without `SYNCHRONIZE`) and Low integrity labels on `allow_write` roots have been applied;
+/// reading legacy v1/v2/array files forces re-application of all deny ACEs.
+pub const DENIES_SCHEMA_VERSION: u64 = 3;
 
 /// Winsock `WSAEACCES` (10013) — returned when a WFP ALE_AUTH_CONNECT block filter rejects connect().
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -140,6 +147,46 @@ pub struct RunOptions {
     pub block_clipboard_read: bool,
     pub block_clipboard_write: bool,
     pub block_input_injection: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApplyRestrictedTokenOptions {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+}
+
+pub fn validate_apply_restricted_token_options(
+    opts: &ApplyRestrictedTokenOptions,
+) -> Result<(String, Option<String>), BackendError> {
+    reject_batch_script_program(&opts.program).map_err(BackendError::validation)?;
+    let cwd = match opts.cwd.as_deref() {
+        Some(raw_cwd) => Some(sanitize_path(raw_cwd).map_err(BackendError::validation)?),
+        None => None,
+    };
+    let cmdline =
+        build_windows_command_line(&opts.program, &opts.args).map_err(BackendError::validation)?;
+    Ok((cmdline, cwd))
+}
+
+/// Builds argv for self-reexec under `CreateProcessWithLogonW` so the `sandbox_user`
+/// child applies `DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED` + Low IL (`S-1-16-4096`)
+/// to its own primary token before spawning the target program via `CreateProcessAsUserW`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn build_self_reexec_restricted_token_args(
+    program: &str,
+    args: &[String],
+    cwd: Option<&str>,
+) -> Vec<String> {
+    let mut out = vec!["--apply-restricted-token".to_string()];
+    if let Some(dir) = cwd {
+        out.push("--cwd".to_string());
+        out.push(dir.to_string());
+    }
+    out.push("--".to_string());
+    out.push(program.to_string());
+    out.extend(args.iter().cloned());
+    out
 }
 
 pub fn validate_status_options(opts: &StatusOptions) -> Result<(), BackendError> {
@@ -288,6 +335,18 @@ pub fn icacls_perm_arg(sid_arg: &str, perm: &str, is_dir: bool) -> String {
     }
 }
 
+/// Formats an `icacls /setintegritylevel` argument, applying `(OI)(CI)` inheritance
+/// flags for directories so Low-IL restricted tokens can write into `allow_write`
+/// roots without MIC `NO_WRITE_UP` denial and Medium IL is restored on revoke/uninstall.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn icacls_integrity_label_arg(level: &str, is_dir: bool) -> String {
+    if is_dir {
+        format!("(OI)(CI){level}")
+    } else {
+        level.to_string()
+    }
+}
+
 /// Builds `icacls.exe` arguments to harden the `ProgramData\sandbox-runtime` state
 /// directory so only `SYSTEM`, `Administrators`, and the validated real user SID
 /// have access (removing inherited `Users` write access).
@@ -350,15 +409,56 @@ pub fn find_matching_allow_write_root<'a>(
     None
 }
 
-/// Parses tracked ACL entries from `denies.json`, supporting both the current
-/// object format (`{ "R:c:\\...": "C:\\..." }`) and legacy array format (`["R:C:\\..."]`).
+/// Persisted `denies.json` payload with schema version tracking.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(not(windows), allow(dead_code))]
-pub fn parse_tracked_acl_map(raw: &str) -> BTreeMap<String, String> {
+pub struct TrackedDeniesFile {
+    pub schema_version: u64,
+    pub entries: BTreeMap<String, String>,
+}
+
+/// Parses tracked ACL entries and schema version from `denies.json`.
+/// Supports:
+/// - v2 versioned object: `{ "schema_version": 2, "entries": { "R:c:\\...": "C:\\..." } }`
+/// - legacy v1 flat object: `{ "R:c:\\...": "C:\\..." }` -> `schema_version = 1`
+/// - legacy array format: `["R:C:\\..."]` -> `schema_version = 1`
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn parse_tracked_denies_file(raw: &str) -> TrackedDeniesFile {
     let Ok(val) = parse_json(raw) else {
-        return BTreeMap::new();
+        return TrackedDeniesFile {
+            schema_version: DENIES_SCHEMA_VERSION,
+            entries: BTreeMap::new(),
+        };
     };
     let mut map = BTreeMap::new();
     if let Some(obj) = val.as_object() {
+        if let (Some(ver_val), Some(entries_val)) =
+            (obj.get("schema_version"), obj.get("entries"))
+        {
+            if let (Some(schema_version), Some(entries_obj)) =
+                (ver_val.as_u64(), entries_val.as_object())
+            {
+                for (k, v) in entries_obj {
+                    if let Some(orig) = v.as_str() {
+                        if let Some((prefix, _)) = k.split_once(':') {
+                            if let Some(ch) = prefix.chars().next() {
+                                if prefix.len() == 1 && matches!(ch, 'R' | 'W' | 'A') {
+                                    map.insert(
+                                        normalize_tracked_acl_key(ch, orig),
+                                        orig.to_string(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                return TrackedDeniesFile {
+                    schema_version,
+                    entries: map,
+                };
+            }
+        }
+        // Legacy flat object format (v1)
         for (k, v) in obj {
             if let Some(orig) = v.as_str() {
                 if let Some((prefix, _)) = k.split_once(':') {
@@ -370,6 +470,10 @@ pub fn parse_tracked_acl_map(raw: &str) -> BTreeMap<String, String> {
                 }
             }
         }
+        return TrackedDeniesFile {
+            schema_version: 1,
+            entries: map,
+        };
     } else if let Some(items) = val.as_array() {
         for item in items {
             if let Some(entry) = item.as_str() {
@@ -382,14 +486,36 @@ pub fn parse_tracked_acl_map(raw: &str) -> BTreeMap<String, String> {
                 }
             }
         }
+        return TrackedDeniesFile {
+            schema_version: 1,
+            entries: map,
+        };
     }
-    map
+    TrackedDeniesFile {
+        schema_version: DENIES_SCHEMA_VERSION,
+        entries: map,
+    }
 }
 
-/// Serializes tracked ACL map (`normalized_key -> original_path`) to JSON.
+/// Returns `true` if a deny ACE must be (re-)applied: either because `denies.json`
+/// was loaded from an older schema version (`< DENIES_SCHEMA_VERSION`) or because
+/// `key` is not present in `previous`.
 #[cfg_attr(not(windows), allow(dead_code))]
-pub fn serialize_tracked_acl_map(map: &BTreeMap<String, String>) -> String {
-    let mut out = String::from("{");
+pub fn should_reapply_tracked_deny(
+    loaded_schema_version: u64,
+    key: &str,
+    previous: &BTreeMap<String, String>,
+) -> bool {
+    loaded_schema_version < DENIES_SCHEMA_VERSION || !previous.contains_key(key)
+}
+
+/// Serializes tracked ACL map (`normalized_key -> original_path`) with explicit `schema_version`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn serialize_tracked_denies_file(
+    schema_version: u64,
+    map: &BTreeMap<String, String>,
+) -> String {
+    let mut out = format!(r#"{{"schema_version":{schema_version},"entries":{{"#);
     for (idx, (k, v)) in map.iter().enumerate() {
         if idx > 0 {
             out.push(',');
@@ -398,8 +524,21 @@ pub fn serialize_tracked_acl_map(map: &BTreeMap<String, String>) -> String {
         out.push(':');
         out.push_str(&json_escape_string(v));
     }
-    out.push('}');
+    out.push_str("}}");
     out
+}
+
+/// Parses tracked ACL entries from `denies.json`, supporting v2 versioned objects,
+/// legacy v1 flat objects (`{ "R:c:\\...": "C:\\..." }`), and legacy arrays (`["R:C:\\..."]`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn parse_tracked_acl_map(raw: &str) -> BTreeMap<String, String> {
+    parse_tracked_denies_file(raw).entries
+}
+
+/// Serializes tracked ACL map (`normalized_key -> original_path`) to schema v2 JSON.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn serialize_tracked_acl_map(map: &BTreeMap<String, String>) -> String {
+    serialize_tracked_denies_file(DENIES_SCHEMA_VERSION, map)
 }
 
 /// Classifies a `TcpStream::connect_timeout` OS error during `wfp verify`:
@@ -510,6 +649,7 @@ mod platform {
     use crate::protocol::JsonValue;
     use crate::security::{
         canonicalize_path_best_effort, quote_windows_arg, reject_symlinks_and_reparse_points,
+        strip_verbatim_prefix_checked,
     };
     use std::ffi::{c_void, OsStr};
     use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -532,8 +672,10 @@ mod platform {
     const TRUE: Bool = 1;
     const INFINITE: Dword = 0xFFFF_FFFF;
 
-    const TOKEN_QUERY: Dword = 0x0008;
+    const TOKEN_ASSIGN_PRIMARY: Dword = 0x0001;
     const TOKEN_DUPLICATE: Dword = 0x0002;
+    const TOKEN_QUERY: Dword = 0x0008;
+    const TOKEN_ADJUST_DEFAULT: Dword = 0x0080;
     const TOKEN_USER_INFO_CLASS: Dword = 1;
     const TOKEN_ELEVATION_INFO_CLASS: Dword = 20;
     const TOKEN_INTEGRITY_LEVEL_INFO_CLASS: Dword = 25;
@@ -2022,43 +2164,34 @@ mod platform {
         Ok(OwnedHandle(token))
     }
 
-    /// Creates a restricted token from `base_token` without ever passing `WRITE_RESTRICTED`
-    /// with `restricted_sid_count == 0` (P0-3), and lowers its Mandatory Integrity Level
-    /// to Low (`S-1-16-4096`) via `SetTokenInformation(TokenIntegrityLevel)` (R3-P0-5).
+    /// Creates a restricted token from `base_token` with `DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED`
+    /// (failing closed if `TOKEN_USER` cannot be queried), and lowers its Mandatory Integrity Level
+    /// to Low (`S-1-16-4096`) via `SetTokenInformation(TokenIntegrityLevel)` using an 8-byte-aligned
+    /// buffer holding `TokenMandatoryLabel` followed inline by the Low IL SID bytes (E5-P2-1).
     unsafe fn create_sandbox_restricted_token(
         base_token: Handle,
     ) -> Result<OwnedHandle, BackendError> {
-        let user_sid_opt = query_token_user_buf(base_token);
-        let mut restricted_token: Handle = ptr::null_mut();
-        let ok = if let Some((_buf, sid_ptr)) = &user_sid_opt {
-            let restrict_entry = SidAndAttributes {
-                sid: *sid_ptr,
-                attributes: 0,
-            };
-            CreateRestrictedToken(
-                base_token,
-                DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED,
-                0,
-                ptr::null(),
-                0,
-                ptr::null(),
-                1,
-                &restrict_entry as *const SidAndAttributes as *const c_void,
-                &mut restricted_token,
+        let (_user_buf, sid_ptr) = query_token_user_buf(base_token).ok_or_else(|| {
+            BackendError::runtime(
+                "GetTokenInformation(TokenUser) failed while creating WRITE_RESTRICTED sandbox token",
             )
-        } else {
-            CreateRestrictedToken(
-                base_token,
-                DISABLE_MAX_PRIVILEGE,
-                0,
-                ptr::null(),
-                0,
-                ptr::null(),
-                0,
-                ptr::null(),
-                &mut restricted_token,
-            )
+        })?;
+        let restrict_entry = SidAndAttributes {
+            sid: sid_ptr,
+            attributes: 0,
         };
+        let mut restricted_token: Handle = ptr::null_mut();
+        let ok = CreateRestrictedToken(
+            base_token,
+            DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED,
+            0,
+            ptr::null(),
+            0,
+            ptr::null(),
+            1,
+            &restrict_entry as *const SidAndAttributes as *const c_void,
+            &mut restricted_token,
+        );
         if ok == FALSE || restricted_token.is_null() {
             return Err(BackendError::runtime(format!(
                 "CreateRestrictedToken failed with error {}",
@@ -2067,7 +2200,9 @@ mod platform {
         }
         let owned = OwnedHandle(restricted_token);
 
-        // Lower Mandatory Integrity Level to Low (S-1-16-4096)
+        // Lower Mandatory Integrity Level to Low (S-1-16-4096).
+        // E5-P2-1: Allocate an 8-byte-aligned Vec<u64> holding TokenMandatoryLabel + inline SID
+        // bytes so SetTokenInformation never reads past a stack-allocated struct.
         let low_il_w = to_wide_null("S-1-16-4096");
         let mut low_sid: *mut c_void = ptr::null_mut();
         if ConvertStringSidToSidW(low_il_w.as_ptr(), &mut low_sid) == FALSE || low_sid.is_null() {
@@ -2076,22 +2211,38 @@ mod platform {
                 GetLastError()
             )));
         }
-        let tml = TokenMandatoryLabel {
-            label: SidAndAttributes {
-                sid: low_sid,
-                attributes: SE_GROUP_INTEGRITY,
-            },
-        };
         let sid_len = GetLengthSid(low_sid) as usize;
-        let info_len = (std::mem::size_of::<TokenMandatoryLabel>() + sid_len) as Dword;
+        if sid_len == 0 {
+            LocalFree(low_sid);
+            return Err(BackendError::runtime(
+                "GetLengthSid(S-1-16-4096) returned 0",
+            ));
+        }
+        let tml_size = std::mem::size_of::<TokenMandatoryLabel>();
+        let total_bytes = tml_size + sid_len;
+        let u64_len = total_bytes.div_ceil(std::mem::size_of::<u64>());
+        let mut tml_buf = vec![0u64; u64_len];
+        let base_ptr = tml_buf.as_mut_ptr() as *mut u8;
+        let inline_sid_ptr = base_ptr.add(tml_size);
+        ptr::copy_nonoverlapping(low_sid as *const u8, inline_sid_ptr, sid_len);
+        LocalFree(low_sid);
+
+        ptr::write(
+            base_ptr as *mut TokenMandatoryLabel,
+            TokenMandatoryLabel {
+                label: SidAndAttributes {
+                    sid: inline_sid_ptr as *mut c_void,
+                    attributes: SE_GROUP_INTEGRITY,
+                },
+            },
+        );
         let set_ok = SetTokenInformation(
             owned.0,
             TOKEN_INTEGRITY_LEVEL_INFO_CLASS,
-            &tml as *const TokenMandatoryLabel as *const c_void,
-            info_len,
+            tml_buf.as_ptr() as *const c_void,
+            total_bytes as Dword,
         );
         let set_err = if set_ok == FALSE { GetLastError() } else { 0 };
-        LocalFree(low_sid);
         if set_ok == FALSE {
             return Err(BackendError::runtime(format!(
                 "SetTokenInformation(TokenIntegrityLevel=Low) failed with error {set_err}"
@@ -2586,7 +2737,7 @@ mod platform {
             let mut token: Handle = ptr::null_mut();
             if OpenProcessToken(
                 GetCurrentProcess(),
-                TOKEN_DUPLICATE | TOKEN_QUERY,
+                TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT,
                 &mut token,
             ) == FALSE
             {
@@ -2962,9 +3113,11 @@ mod platform {
         let guid = parse_guid_struct(&opts.sublayer_guid)?;
         let mut errors: Vec<String> = Vec::new();
 
-        // R3-P1-5: Revoke all tracked allow_write grants (`A:`) and deny ACEs (`R:`/`W:`) before removing account.
+        // R3-P1-5 & P0-1 & P1-E1 & P1-E2: Revoke all tracked allow_write grants (`A:`)
+        // (restoring Medium integrity level) and deny ACEs (`R:`/`W:`) before removing account,
+        // skipping any symlink/reparse point targets.
         let denies_file = state_dir().join("denies.json");
-        let tracked = load_tracked_denies(&denies_file);
+        let tracked = load_tracked_denies(&denies_file).entries;
         if !tracked.is_empty() {
             if let Ok(sandbox_sid) = resolve_sandbox_user_sid(&opts.sandbox_user) {
                 let current_sid = current_user_sid();
@@ -2975,12 +3128,25 @@ mod platform {
                             let Ok(clean_path) = sanitize_path(raw_path) else {
                                 continue;
                             };
+                            let path_ref = Path::new(&clean_path);
+                            if reject_symlinks_and_reparse_points(path_ref).is_err() {
+                                continue;
+                            }
                             if key.starts_with("A:") {
                                 let _ = Command::new(&icacls)
                                     .arg(&clean_path)
                                     .arg("/remove:g")
                                     .arg(&sid_arg)
                                     .status();
+                                if path_ref.exists() {
+                                    let il_arg =
+                                        icacls_integrity_label_arg("Medium", path_ref.is_dir());
+                                    let _ = Command::new(&icacls)
+                                        .arg(&clean_path)
+                                        .arg("/setintegritylevel")
+                                        .arg(&il_arg)
+                                        .status();
+                                }
                             } else if key.starts_with("R:") || key.starts_with("W:") {
                                 let _ = Command::new(&icacls)
                                     .arg(&clean_path)
@@ -3173,15 +3339,19 @@ mod platform {
         })
     }
 
-    fn load_tracked_denies(file: &Path) -> BTreeMap<String, String> {
+    fn load_tracked_denies(file: &Path) -> TrackedDeniesFile {
         let Ok(raw) = std::fs::read_to_string(file) else {
-            return BTreeMap::new();
+            return TrackedDeniesFile {
+                schema_version: DENIES_SCHEMA_VERSION,
+                entries: BTreeMap::new(),
+            };
         };
-        parse_tracked_acl_map(&raw)
+        parse_tracked_denies_file(&raw)
     }
 
     fn save_tracked_denies(
         file: &Path,
+        schema_version: u64,
         items: &BTreeMap<String, String>,
         real_user_sid: Option<&str>,
     ) {
@@ -3190,7 +3360,7 @@ mod platform {
                 let _ = harden_state_dir_acl(parent, real_user_sid);
             }
         }
-        let _ = std::fs::write(file, serialize_tracked_acl_map(items));
+        let _ = std::fs::write(file, serialize_tracked_denies_file(schema_version, items));
     }
 
     pub fn cmd_denies(req: &DeniesRequest) -> Result<DeniesResponse, BackendError> {
@@ -3222,7 +3392,9 @@ mod platform {
         let started = Instant::now();
         let deadline = req.deadline_ms.map(Duration::from_millis);
         let state_file = state_dir().join("denies.json");
-        let previous = load_tracked_denies(&state_file);
+        let loaded = load_tracked_denies(&state_file);
+        let loaded_schema_version = loaded.schema_version;
+        let previous = loaded.entries;
         let mut next_tracked: BTreeMap<String, String> = BTreeMap::new();
 
         let mut in_place = 0u64;
@@ -3238,14 +3410,32 @@ mod platform {
         let sid_arg = format!("*{sid}");
 
         for raw_path in &req.deny_read {
+            let sanitized = sanitize_path(raw_path).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(Path::new(&sanitized))
+                .map_err(BackendError::validation)?;
+            let path =
+                canonicalize_path_best_effort(&sanitized).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(&path).map_err(BackendError::validation)?;
+            let path_str = path.to_string_lossy().into_owned();
+            let key = normalize_tracked_acl_key('R', &path_str);
             if deadline.is_some_and(|d| started.elapsed() >= d) {
                 deadline_expired = true;
                 extras_skipped += 1;
+                if path.exists()
+                    && should_reapply_tracked_deny(loaded_schema_version, &key, &previous)
+                {
+                    unguarded_errors.push(format!(
+                        "Deadline expired before guarding existing denyRead target '{path_str}'"
+                    ));
+                } else if let Some(root) =
+                    find_matching_allow_write_root(&path_str, &canon_allow_writes)
+                {
+                    unguarded_errors.push(format!(
+                        "Deadline expired before guarding denyRead target '{path_str}' inside allowWrite root '{root}'"
+                    ));
+                }
                 continue;
             }
-            let path = canonicalize_path_best_effort(raw_path).map_err(BackendError::validation)?;
-            let path_str = path.to_string_lossy().into_owned();
-            let key = normalize_tracked_acl_key('R', &path_str);
             if !path.exists() {
                 // R3-P0-2: Do NOT silently skip non-existent deny_read targets inside allow_write.
                 if let Some(root) = find_matching_allow_write_root(&path_str, &canon_allow_writes) {
@@ -3256,7 +3446,7 @@ mod platform {
                 extras_skipped += 1;
                 continue;
             }
-            if previous.contains_key(&key) {
+            if !should_reapply_tracked_deny(loaded_schema_version, &key, &previous) {
                 in_place += 1;
                 stands += 1;
                 next_tracked.insert(key, path_str);
@@ -3276,18 +3466,39 @@ mod platform {
                 next_tracked.insert(key, path_str);
             } else {
                 extras_skipped += 1;
+                unguarded_errors.push(format!(
+                    "icacls /deny failed for existing denyRead target '{path_str}'"
+                ));
             }
         }
 
         for raw_path in &req.deny_write {
+            let sanitized = sanitize_path(raw_path).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(Path::new(&sanitized))
+                .map_err(BackendError::validation)?;
+            let path =
+                canonicalize_path_best_effort(&sanitized).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(&path).map_err(BackendError::validation)?;
+            let path_str = path.to_string_lossy().into_owned();
+            let key = normalize_tracked_acl_key('W', &path_str);
             if deadline.is_some_and(|d| started.elapsed() >= d) {
                 deadline_expired = true;
                 extras_skipped += 1;
+                if path.exists()
+                    && should_reapply_tracked_deny(loaded_schema_version, &key, &previous)
+                {
+                    unguarded_errors.push(format!(
+                        "Deadline expired before guarding existing denyWrite target '{path_str}'"
+                    ));
+                } else if let Some(root) =
+                    find_matching_allow_write_root(&path_str, &canon_allow_writes)
+                {
+                    unguarded_errors.push(format!(
+                        "Deadline expired before guarding denyWrite target '{path_str}' inside allowWrite root '{root}'"
+                    ));
+                }
                 continue;
             }
-            let path = canonicalize_path_best_effort(raw_path).map_err(BackendError::validation)?;
-            let path_str = path.to_string_lossy().into_owned();
-            let key = normalize_tracked_acl_key('W', &path_str);
             if !path.exists() {
                 // R3-P0-2: Do NOT silently skip non-existent deny_write targets inside allow_write.
                 if let Some(root) = find_matching_allow_write_root(&path_str, &canon_allow_writes) {
@@ -3298,14 +3509,43 @@ mod platform {
                 extras_skipped += 1;
                 continue;
             }
-            if previous.contains_key(&key) {
+            if !should_reapply_tracked_deny(loaded_schema_version, &key, &previous) {
                 in_place += 1;
                 stands += 1;
                 next_tracked.insert(key, path_str);
                 continue;
             }
-            // R3-P0-2: Deny (W,D,DC,WDAC,WO) so sandboxed process cannot delete/rename protected targets.
-            let perm_arg = icacls_perm_arg(&sid_arg, DENY_WRITE_PERM, path.is_dir());
+            // P1-E1(b): When upgrading from legacy schema (< DENIES_SCHEMA_VERSION), strip old
+            // `(W,...)` deny ACE (which included SYNCHRONIZE and broke reads) before applying
+            // granular `DENY_WRITE_PERM`; if paired `R:` was already applied in this pass, restore it.
+            let is_dir = path.is_dir();
+            if loaded_schema_version < DENIES_SCHEMA_VERSION && previous.contains_key(&key) {
+                let _ = Command::new(&icacls)
+                    .arg(&path)
+                    .arg("/remove:d")
+                    .arg(&sid_arg)
+                    .status();
+                let paired_r_key = normalize_tracked_acl_key('R', &path_str);
+                if next_tracked.contains_key(&paired_r_key) {
+                    let r_perm_arg = icacls_perm_arg(&sid_arg, "R", is_dir);
+                    let r_ok = Command::new(&icacls)
+                        .arg(&path)
+                        .arg("/deny")
+                        .arg(&r_perm_arg)
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false);
+                    if !r_ok {
+                        next_tracked.remove(&paired_r_key);
+                        unguarded_errors.push(format!(
+                            "icacls /deny (R) re-apply failed during schema migration for '{path_str}'"
+                        ));
+                    }
+                }
+            }
+            // P1-E1(b): Deny granular write-only rights `(WD,AD,WEA,WA,DE,DC,WDAC,WO)` so
+            // sandboxed process cannot write/delete/rename without blocking SYNCHRONIZE reads.
+            let perm_arg = icacls_perm_arg(&sid_arg, DENY_WRITE_PERM, is_dir);
             let ok = Command::new(&icacls)
                 .arg(&path)
                 .arg("/deny")
@@ -3319,17 +3559,27 @@ mod platform {
                 next_tracked.insert(key, path_str);
             } else {
                 extras_skipped += 1;
+                unguarded_errors.push(format!(
+                    "icacls /deny failed for existing denyWrite target '{path_str}'"
+                ));
             }
         }
 
-        // Fail closed before granting allow_write if any non-existent deny target inside allow_write was unguarded.
+        // E5-P1-3 & P1-E2(c): Fail closed before granting allow_write if ANY deny target failed to
+        // be guarded (non-existent inside allow_write, icacls /deny failure on existing target, or
+        // deadline expiry before guarding any existing deny target).
         if !unguarded_errors.is_empty() {
             for (k, v) in &previous {
                 next_tracked.entry(k.clone()).or_insert_with(|| v.clone());
             }
-            save_tracked_denies(&state_file, &next_tracked, current_sid.as_deref());
+            save_tracked_denies(
+                &state_file,
+                loaded_schema_version.min(DENIES_SCHEMA_VERSION),
+                &next_tracked,
+                current_sid.as_deref(),
+            );
             return Err(BackendError::runtime(format!(
-                "Unguarded non-existent deny target(s) inside allowWrite: {}",
+                "Unguarded deny target(s) before allowWrite grant: {}",
                 unguarded_errors.join("; ")
             )));
         }
@@ -3346,17 +3596,38 @@ mod platform {
                 continue;
             }
             let key = normalize_tracked_acl_key('A', path_str);
-            let perm_arg = icacls_perm_arg(&sid_arg, "M", path.is_dir());
-            let ok = Command::new(&icacls)
+            let is_dir = path.is_dir();
+            let perm_arg = icacls_perm_arg(&sid_arg, "M", is_dir);
+            let grant_ok = Command::new(&icacls)
                 .arg(path)
                 .arg("/grant")
                 .arg(&perm_arg)
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false);
-            if ok {
-                laid += 1;
-                next_tracked.insert(key, path_str.clone());
+            if grant_ok {
+                // P1-E1(a): Apply Low integrity label to allow_write roots so Low-IL restricted
+                // tokens can write without MIC NO_WRITE_UP denial.
+                let il_arg = icacls_integrity_label_arg("Low", is_dir);
+                let il_ok = Command::new(&icacls)
+                    .arg(path)
+                    .arg("/setintegritylevel")
+                    .arg(&il_arg)
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if il_ok {
+                    laid += 1;
+                    next_tracked.insert(key, path_str.clone());
+                } else {
+                    // Roll back the /grant if lowering the integrity label failed.
+                    let _ = Command::new(&icacls)
+                        .arg(path)
+                        .arg("/remove:g")
+                        .arg(&sid_arg)
+                        .status();
+                    extras_skipped += 1;
+                }
             } else {
                 extras_skipped += 1;
             }
@@ -3380,13 +3651,27 @@ mod platform {
                     let Ok(old_path) = sanitize_path(raw_old_path) else {
                         continue;
                     };
+                    // P1-E2(a): Never invoke icacls /remove:g or /remove:d on a symlink/reparse point.
+                    let old_path_ref = Path::new(&old_path);
+                    if reject_symlinks_and_reparse_points(old_path_ref).is_err() {
+                        continue;
+                    }
                     if prefix == "A" {
-                        // R3-P1-5: Revoke stale allow_write grant
+                        // R3-P1-5 & P1-E1(a): Revoke stale allow_write grant and restore Medium IL.
                         let _ = Command::new(&icacls)
                             .arg(&old_path)
                             .arg("/remove:g")
                             .arg(&sid_arg)
                             .status();
+                        if old_path_ref.exists() {
+                            let il_arg =
+                                icacls_integrity_label_arg("Medium", old_path_ref.is_dir());
+                            let _ = Command::new(&icacls)
+                                .arg(&old_path)
+                                .arg("/setintegritylevel")
+                                .arg(&il_arg)
+                                .status();
+                        }
                         continue;
                     }
                     let _ = Command::new(&icacls)
@@ -3394,34 +3679,66 @@ mod platform {
                         .arg("/remove:d")
                         .arg(&sid_arg)
                         .status();
-                    // P1-11 & R3-P1-5: Scoped un-track using normalized lowercase keys — if the
-                    // paired deny mode (R vs W) is still active, immediately re-apply it.
-                    let is_dir = Path::new(&old_path).is_dir();
-                    if prefix == "W"
-                        && next_tracked.contains_key(&normalize_tracked_acl_key('R', &old_path))
-                    {
-                        let perm_arg = icacls_perm_arg(&sid_arg, "R", is_dir);
-                        let _ = Command::new(&icacls)
+                    // P1-11 & R3-P1-5 & P1-E2(b): Scoped un-track using normalized lowercase keys —
+                    // if the paired deny mode (R vs W) is still active, immediately re-apply it and
+                    // check exit status (removing from next_tracked and failing closed on error).
+                    let is_dir = old_path_ref.is_dir();
+                    let paired_reapply = if prefix == "W" {
+                        let r_key = normalize_tracked_acl_key('R', &old_path);
+                        if next_tracked.contains_key(&r_key) {
+                            Some((r_key, "R"))
+                        } else {
+                            None
+                        }
+                    } else if prefix == "R" {
+                        let w_key = normalize_tracked_acl_key('W', &old_path);
+                        if next_tracked.contains_key(&w_key) {
+                            Some((w_key, DENY_WRITE_PERM))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some((paired_key, perm)) = paired_reapply {
+                        let perm_arg = icacls_perm_arg(&sid_arg, perm, is_dir);
+                        let reapply_ok = Command::new(&icacls)
                             .arg(&old_path)
                             .arg("/deny")
                             .arg(&perm_arg)
-                            .status();
-                    } else if prefix == "R"
-                        && next_tracked.contains_key(&normalize_tracked_acl_key('W', &old_path))
-                    {
-                        let perm_arg = icacls_perm_arg(&sid_arg, DENY_WRITE_PERM, is_dir);
-                        let _ = Command::new(&icacls)
-                            .arg(&old_path)
-                            .arg("/deny")
-                            .arg(&perm_arg)
-                            .status();
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false);
+                        if !reapply_ok {
+                            next_tracked.remove(&paired_key);
+                            unguarded_errors.push(format!(
+                                "Failed to re-apply paired deny ACE ({perm}) for '{old_path}' after removing stale '{old_key}'"
+                            ));
+                        }
                     }
                     handed_back += 1;
                 }
             }
         }
 
-        save_tracked_denies(&state_file, &next_tracked, current_sid.as_deref());
+        let persisted_version = if deadline_expired || !unguarded_errors.is_empty() {
+            loaded_schema_version.min(DENIES_SCHEMA_VERSION)
+        } else {
+            DENIES_SCHEMA_VERSION
+        };
+        save_tracked_denies(
+            &state_file,
+            persisted_version,
+            &next_tracked,
+            current_sid.as_deref(),
+        );
+
+        if !unguarded_errors.is_empty() {
+            return Err(BackendError::runtime(format!(
+                "Unguarded deny target(s) after stale ACL cleanup: {}",
+                unguarded_errors.join("; ")
+            )));
+        }
 
         Ok(DeniesResponse {
             in_place,
@@ -3438,7 +3755,7 @@ mod platform {
 
     pub fn cmd_run(opts: &RunOptions) -> Result<i32, BackendError> {
         let validated = validate_run_options(opts)?;
-        let mut cmdline_w = to_wide_null(&validated.cmdline);
+        let cmdline_w = to_wide_null(&validated.cmdline);
         // P2-5: Use trimmed & sanitized cwd from validate_run_options
         let cwd_w = validated.cwd.as_deref().map(to_wide_null);
 
@@ -3548,10 +3865,11 @@ mod platform {
             si.h_std_error = h_stderr;
             let mut pi: ProcessInformation = std::mem::zeroed();
 
+            let mut cmdline_attempt1 = cmdline_w.clone();
             let mut created = CreateProcessAsUserW(
                 restricted_token.0,
                 ptr::null(),
-                cmdline_w.as_mut_ptr(),
+                cmdline_attempt1.as_mut_ptr(),
                 ptr::null(),
                 ptr::null(),
                 TRUE,
@@ -3566,11 +3884,12 @@ mod platform {
                 if first_err == ERROR_PRIVILEGE_NOT_HELD {
                     // Desktop sessions lack SE_ASSIGNPRIMARYTOKEN_NAME; try CreateProcessWithTokenW
                     // first (preserves the restricted Low-IL token when SE_IMPERSONATE_NAME is held).
+                    let mut cmdline_attempt2 = cmdline_w.clone();
                     created = CreateProcessWithTokenW(
                         restricted_token.0,
                         0,
                         ptr::null(),
-                        cmdline_w.as_mut_ptr(),
+                        cmdline_attempt2.as_mut_ptr(),
                         CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
                         env_block.as_ptr() as *const c_void,
                         cwd_w.as_ref().map_or(ptr::null(), |w| w.as_ptr()),
@@ -3580,8 +3899,32 @@ mod platform {
                     if created == FALSE {
                         let second_err = GetLastError();
                         if second_err == ERROR_PRIVILEGE_NOT_HELD {
-                            // R3-P0-5: Non-elevated desktop sessions also lack SE_IMPERSONATE_NAME;
-                            // fall back cleanly to CreateProcessWithLogonW (routed via seclogon).
+                            // E5-P0-2: Non-elevated desktop sessions also lack SE_IMPERSONATE_NAME.
+                            // CreateProcessWithLogonW spawns under sandbox_user WITHOUT WRITE_RESTRICTED
+                            // or Low IL, so we self-reexec `srt-win.exe --apply-restricted-token` as
+                            // sandbox_user; the child owns its token, applies WRITE_RESTRICTED + Low IL
+                            // (failing closed on error), and spawns the target via CreateProcessAsUserW.
+                            let self_exe = std::env::current_exe().map_err(|e| {
+                                BackendError::runtime(format!(
+                                    "Failed to resolve srt-win executable for --apply-restricted-token re-exec: {e}"
+                                ))
+                            })?;
+                            let self_exe_str =
+                                strip_verbatim_prefix_checked(&self_exe.to_string_lossy())
+                                    .map_err(BackendError::runtime)?
+                                    .to_string_lossy()
+                                    .into_owned();
+                            let reexec_args = build_self_reexec_restricted_token_args(
+                                &opts.program,
+                                &opts.args,
+                                validated.cwd.as_deref(),
+                            );
+                            let reexec_cmdline =
+                                build_windows_command_line(&self_exe_str, &reexec_args)
+                                    .map_err(BackendError::validation)?;
+                            let self_exe_w = to_wide_null(&self_exe_str);
+                            let mut reexec_cmdline_w = to_wide_null(&reexec_cmdline);
+
                             let mut pass_w = read_sandbox_password(&sandbox_user)?;
                             let user_w = to_wide_null(&sandbox_user);
                             let domain_w = to_wide_null(".");
@@ -3590,8 +3933,8 @@ mod platform {
                                 domain_w.as_ptr(),
                                 pass_w.as_ptr(),
                                 LOGON_WITH_PROFILE,
-                                ptr::null(),
-                                cmdline_w.as_mut_ptr(),
+                                self_exe_w.as_ptr(),
+                                reexec_cmdline_w.as_mut_ptr(),
                                 CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
                                 env_block.as_ptr() as *const c_void,
                                 cwd_w.as_ref().map_or(ptr::null(), |w| w.as_ptr()),
@@ -3602,7 +3945,7 @@ mod platform {
                             zeroize_u16(&mut pass_w);
                             if created == FALSE {
                                 return Err(BackendError::runtime(format!(
-                                    "CreateProcessWithLogonW fallback failed with error {third_err} (after CreateProcessWithTokenW ERROR_PRIVILEGE_NOT_HELD); ensure Secondary Logon (seclogon) is running"
+                                    "CreateProcessWithLogonW (--apply-restricted-token re-exec) failed with error {third_err} (after CreateProcessWithTokenW ERROR_PRIVILEGE_NOT_HELD); ensure Secondary Logon (seclogon) is running"
                                 )));
                             }
                         } else {
@@ -3638,6 +3981,82 @@ mod platform {
                 )));
             }
 
+            WaitForSingleObject(pi.h_process, INFINITE);
+            let mut exit_code: Dword = 1;
+            GetExitCodeProcess(pi.h_process, &mut exit_code);
+            Ok(exit_code as i32)
+        }
+    }
+
+    /// E5-P0-2: Self-reexec helper running as `sandbox_user`. Opens its own primary process
+    /// token, creates a `DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED` + Low IL (`S-1-16-4096`)
+    /// restricted token (failing closed if creation fails — NEVER runs unrestricted), and
+    /// spawns `<program> <args...>` via `CreateProcessAsUserW` (which requires no elevated
+    /// privilege when spawning with a restricted derivation of the caller's own token).
+    pub fn cmd_apply_restricted_token(
+        opts: &ApplyRestrictedTokenOptions,
+    ) -> Result<i32, BackendError> {
+        let (cmdline, cwd) = validate_apply_restricted_token_options(opts)?;
+        let cmdline_w = to_wide_null(&cmdline);
+        let cwd_w = cwd.as_deref().map(to_wide_null);
+
+        unsafe {
+            let mut proc_token: Handle = ptr::null_mut();
+            if OpenProcessToken(
+                GetCurrentProcess(),
+                TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT,
+                &mut proc_token,
+            ) == FALSE
+                || proc_token.is_null()
+            {
+                return Err(BackendError::runtime(format!(
+                    "OpenProcessToken(GetCurrentProcess) failed in --apply-restricted-token mode with error {}",
+                    GetLastError()
+                )));
+            }
+            let proc_token_guard = OwnedHandle(proc_token);
+            let restricted_token = create_sandbox_restricted_token(proc_token_guard.0)?;
+
+            let h_stdin = GetStdHandle(STD_INPUT_HANDLE);
+            let h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+            let h_stderr = GetStdHandle(STD_ERROR_HANDLE);
+            for h in [h_stdin, h_stdout, h_stderr] {
+                if !h.is_null() && h != INVALID_HANDLE_VALUE {
+                    let _ = SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+                }
+            }
+
+            let mut si: StartupInfoW = std::mem::zeroed();
+            si.cb = std::mem::size_of::<StartupInfoW>() as Dword;
+            si.dw_flags = STARTF_USESTDHANDLES;
+            si.h_std_input = h_stdin;
+            si.h_std_output = h_stdout;
+            si.h_std_error = h_stderr;
+            let mut pi: ProcessInformation = std::mem::zeroed();
+
+            let mut cmdline_attempt = cmdline_w.clone();
+            let created = CreateProcessAsUserW(
+                restricted_token.0,
+                ptr::null(),
+                cmdline_attempt.as_mut_ptr(),
+                ptr::null(),
+                ptr::null(),
+                TRUE,
+                0,
+                ptr::null(),
+                cwd_w.as_ref().map_or(ptr::null(), |w| w.as_ptr()),
+                &si,
+                &mut pi,
+            );
+            if created == FALSE {
+                return Err(BackendError::runtime(format!(
+                    "CreateProcessAsUserW failed in --apply-restricted-token mode with error {}",
+                    GetLastError()
+                )));
+            }
+
+            let _proc_guard = OwnedHandle(pi.h_process);
+            let _thread_guard = OwnedHandle(pi.h_thread);
             WaitForSingleObject(pi.h_process, INFINITE);
             let mut exit_code: Dword = 1;
             GetExitCodeProcess(pi.h_process, &mut exit_code);
@@ -3687,7 +4106,7 @@ mod platform {
     use crate::protocol::{
         json_escape_string, json_opt_string, json_string_array, parse_json, JsonValue,
     };
-    use crate::security::canonicalize_path_best_effort;
+    use crate::security::{canonicalize_path_best_effort, reject_symlinks_and_reparse_points};
     use std::collections::BTreeSet;
     use std::path::PathBuf;
     use std::process::Command;
@@ -4044,6 +4463,17 @@ mod platform {
         let mut new_deny_write = BTreeSet::new();
         let mut new_allow_write = BTreeSet::new();
 
+        let mut canon_allow_writes: Vec<String> = Vec::with_capacity(req.allow_write.len());
+        for raw_allow in &req.allow_write {
+            let sanitized = sanitize_path(raw_allow).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(std::path::Path::new(&sanitized))
+                .map_err(BackendError::validation)?;
+            let canon =
+                canonicalize_path_best_effort(&sanitized).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(&canon).map_err(BackendError::validation)?;
+            canon_allow_writes.push(canon.to_string_lossy().into_owned());
+        }
+
         let mut in_place = 0u64;
         let mut planted = 0u64;
         let mut laid = 0u64;
@@ -4053,15 +4483,33 @@ mod platform {
         let mut stands = 0u64;
         let mut handed_back = 0u64;
         let mut deadline_expired = false;
+        let mut unguarded_errors: Vec<String> = Vec::new();
 
         for raw in &req.deny_read {
+            let sanitized = sanitize_path(raw).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(std::path::Path::new(&sanitized))
+                .map_err(BackendError::validation)?;
+            let canon =
+                canonicalize_path_best_effort(&sanitized).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(&canon).map_err(BackendError::validation)?;
+            let canon_str = canon.to_string_lossy().into_owned();
+            let norm = normalize_windows_path_key(&canon_str);
             if deadline.is_some_and(|d| started.elapsed() >= d) {
                 deadline_expired = true;
                 extras_skipped += 1;
+                if canon.exists() && !prev_deny_read.contains(&norm) {
+                    unguarded_errors.push(format!(
+                        "Deadline expired before guarding existing denyRead target '{canon_str}'"
+                    ));
+                } else if let Some(root) =
+                    find_matching_allow_write_root(&canon_str, &canon_allow_writes)
+                {
+                    unguarded_errors.push(format!(
+                        "Deadline expired before guarding denyRead target '{canon_str}' inside allowWrite root '{root}'"
+                    ));
+                }
                 continue;
             }
-            let canon = canonicalize_path_best_effort(raw).map_err(BackendError::validation)?;
-            let norm = normalize_windows_path_key(&canon.to_string_lossy());
             if new_deny_read.insert(norm.clone()) {
                 if prev_deny_read.contains(&norm) {
                     in_place += 1;
@@ -4073,13 +4521,30 @@ mod platform {
             }
         }
         for raw in &req.deny_write {
+            let sanitized = sanitize_path(raw).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(std::path::Path::new(&sanitized))
+                .map_err(BackendError::validation)?;
+            let canon =
+                canonicalize_path_best_effort(&sanitized).map_err(BackendError::validation)?;
+            reject_symlinks_and_reparse_points(&canon).map_err(BackendError::validation)?;
+            let canon_str = canon.to_string_lossy().into_owned();
+            let norm = normalize_windows_path_key(&canon_str);
             if deadline.is_some_and(|d| started.elapsed() >= d) {
                 deadline_expired = true;
                 extras_skipped += 1;
+                if canon.exists() && !prev_deny_write.contains(&norm) {
+                    unguarded_errors.push(format!(
+                        "Deadline expired before guarding existing denyWrite target '{canon_str}'"
+                    ));
+                } else if let Some(root) =
+                    find_matching_allow_write_root(&canon_str, &canon_allow_writes)
+                {
+                    unguarded_errors.push(format!(
+                        "Deadline expired before guarding denyWrite target '{canon_str}' inside allowWrite root '{root}'"
+                    ));
+                }
                 continue;
             }
-            let canon = canonicalize_path_best_effort(raw).map_err(BackendError::validation)?;
-            let norm = normalize_windows_path_key(&canon.to_string_lossy());
             if new_deny_write.insert(norm.clone()) {
                 if prev_deny_write.contains(&norm) {
                     in_place += 1;
@@ -4090,14 +4555,19 @@ mod platform {
                 }
             }
         }
-        for raw in &req.allow_write {
+        if !unguarded_errors.is_empty() {
+            return Err(BackendError::runtime(format!(
+                "Unguarded deny target(s) before allowWrite grant: {}",
+                unguarded_errors.join("; ")
+            )));
+        }
+        for canon_str in &canon_allow_writes {
             if deadline.is_some_and(|d| started.elapsed() >= d) {
                 deadline_expired = true;
                 extras_skipped += 1;
                 continue;
             }
-            let canon = canonicalize_path_best_effort(raw).map_err(BackendError::validation)?;
-            let norm = normalize_windows_path_key(&canon.to_string_lossy());
+            let norm = normalize_windows_path_key(canon_str);
             if new_allow_write.insert(norm.clone()) {
                 laid += 1;
                 if new_deny_write
@@ -4221,6 +4691,27 @@ mod platform {
         Ok(status.code().unwrap_or(1))
     }
 
+    pub fn cmd_apply_restricted_token(
+        opts: &ApplyRestrictedTokenOptions,
+    ) -> Result<i32, BackendError> {
+        let (_cmdline, cwd) = validate_apply_restricted_token_options(opts)?;
+        let Some(_dir) = test_state_dir() else {
+            return Err(BackendError::runtime(
+                "Windows native sandbox --apply-restricted-token requires native Windows",
+            ));
+        };
+        let mut cmd = Command::new(&opts.program);
+        cmd.args(&opts.args);
+        if let Some(ref dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        cmd.env("SRT_WIN_RESTRICTED_TOKEN_APPLIED", "1");
+        let status = cmd.status().map_err(|e| {
+            BackendError::runtime(format!("Failed to spawn '{}': {e}", opts.program))
+        })?;
+        Ok(status.code().unwrap_or(1))
+    }
+
     pub fn cmd_probe_mxc() -> Result<MxcProbeResponse, BackendError> {
         let Some(dir) = test_state_dir() else {
             return Ok(MxcProbeResponse {
@@ -4277,8 +4768,8 @@ mod platform {
 }
 
 pub use platform::{
-    cmd_denies, cmd_install, cmd_probe_mxc, cmd_profile_forget, cmd_run, cmd_status, cmd_uninstall,
-    cmd_wfp_verify,
+    cmd_apply_restricted_token, cmd_denies, cmd_install, cmd_probe_mxc, cmd_profile_forget,
+    cmd_run, cmd_status, cmd_uninstall, cmd_wfp_verify,
 };
 
 #[cfg(all(test, not(windows)))]
@@ -4383,6 +4874,18 @@ mod tests {
         assert_eq!(expired_denies.handed_back, 0);
         assert_eq!(expired_denies.extras_skipped, 1);
 
+        // E5-P1-3: deadline_ms=0 skipping a deny target INSIDE allow_write must fail closed
+        let unguarded_deadline_err = cmd_denies(&DeniesRequest {
+            deny_read: vec![],
+            deny_write: vec![r"C:\work\.git\config".to_string()],
+            allow_write: vec![r"C:\work".to_string()],
+            sid: Some(sandbox_sid.clone()),
+            deadline_ms: Some(0),
+        })
+        .unwrap_err();
+        assert_eq!(unguarded_deadline_err.exit_code, EXIT_RUNTIME_ERROR);
+        assert!(unguarded_deadline_err.message.contains("Deadline expired"));
+
         // R3-P1-5: case-insensitive path key match (uppercase C:\SECRET\SSH matches c:\secret\ssh)
         let second_denies = cmd_denies(&DeniesRequest {
             deny_read: vec![r"C:\SECRET\SSH".to_string()],
@@ -4435,15 +4938,21 @@ mod tests {
             icacls_perm_arg("*S-1-5-21-1-2-3-1002", "R", false),
             "*S-1-5-21-1-2-3-1002:R"
         );
-        // R3-P0-2: deny_write blocks write, delete, delete-child, DACL, owner takeover
+        // P1-E1(b): deny_write uses granular write-only rights (without `(W)` / SYNCHRONIZE)
+        assert_eq!(DENY_WRITE_PERM, "(WD,AD,WEA,WA,DE,DC,WDAC,WO)");
         assert_eq!(
             icacls_perm_arg("*S-1-5-21-1-2-3-1002", DENY_WRITE_PERM, true),
-            "*S-1-5-21-1-2-3-1002:(OI)(CI)(W,D,DC,WDAC,WO)"
+            "*S-1-5-21-1-2-3-1002:(OI)(CI)(WD,AD,WEA,WA,DE,DC,WDAC,WO)"
         );
         assert_eq!(
             icacls_perm_arg("*S-1-5-21-1-2-3-1002", DENY_WRITE_PERM, false),
-            "*S-1-5-21-1-2-3-1002:(W,D,DC,WDAC,WO)"
+            "*S-1-5-21-1-2-3-1002:(WD,AD,WEA,WA,DE,DC,WDAC,WO)"
         );
+        // P1-E1(a): Low/Medium integrity level labels for allow_write directories & files
+        assert_eq!(icacls_integrity_label_arg("Low", true), "(OI)(CI)Low");
+        assert_eq!(icacls_integrity_label_arg("Low", false), "Low");
+        assert_eq!(icacls_integrity_label_arg("Medium", true), "(OI)(CI)Medium");
+        assert_eq!(icacls_integrity_label_arg("Medium", false), "Medium");
 
         // R3-P0-2: allow_write containment matching (case-insensitive, segment-boundary aware)
         let roots = vec![r"C:\Users\Alice\Work".to_string()];
@@ -4467,15 +4976,82 @@ mod tests {
             build_state_dir_icacls_args(r"C:\ProgramData\sandbox-runtime", Some("S-1-5-18"));
         assert_eq!(bad_acl_args.len(), 6);
 
-        // R3-P1-5: tracked ACL map object + legacy array migration + case normalization
+        // R3-P1-5 & E5-P1-3: tracked ACL map object + schema_version: 2 + legacy migration forces re-apply
+        let legacy_arr =
+            parse_tracked_denies_file(r#"["R:C:\\Users\\Alice\\.ssh","W:C:\\Work\\.env"]"#);
+        assert_eq!(legacy_arr.schema_version, 1);
+        assert!(should_reapply_tracked_deny(
+            legacy_arr.schema_version,
+            r"W:c:\work\.env",
+            &legacy_arr.entries
+        ));
+        let legacy_obj =
+            parse_tracked_denies_file(r#"{"W:c:\\work\\.env":"C:\\Work\\.env"}"#);
+        assert_eq!(legacy_obj.schema_version, 1);
+        assert!(should_reapply_tracked_deny(
+            legacy_obj.schema_version,
+            r"W:c:\work\.env",
+            &legacy_obj.entries
+        ));
+
         let legacy = parse_tracked_acl_map(r#"["R:C:\\Users\\Alice\\.ssh","W:C:\\Work\\.env"]"#);
         assert_eq!(
             legacy.get(r"R:c:\users\alice\.ssh").map(String::as_str),
             Some(r"C:\Users\Alice\.ssh")
         );
         let serialized = serialize_tracked_acl_map(&legacy);
-        let roundtrip = parse_tracked_acl_map(&serialized);
-        assert_eq!(roundtrip, legacy);
+        assert!(serialized.contains(r#""schema_version":3"#));
+        let parsed_v3 = parse_tracked_denies_file(&serialized);
+        assert_eq!(parsed_v3.schema_version, DENIES_SCHEMA_VERSION);
+        assert_eq!(parsed_v3.entries, legacy);
+        assert!(!should_reapply_tracked_deny(
+            parsed_v3.schema_version,
+            r"W:c:\work\.env",
+            &parsed_v3.entries
+        ));
+        // Upgrading from schema_version 2 forces re-application to strip legacy `(W)` SYNCHRONIZE ACE
+        assert!(should_reapply_tracked_deny(
+            2,
+            r"W:c:\work\.env",
+            &parsed_v3.entries
+        ));
+        assert!(should_reapply_tracked_deny(
+            parsed_v3.schema_version,
+            r"W:c:\work\other",
+            &parsed_v3.entries
+        ));
+
+        // E5-P0-2: self-reexec --apply-restricted-token argv & validation
+        let reexec = build_self_reexec_restricted_token_args(
+            "powershell.exe",
+            &["-NoProfile".to_string(), "-Command".to_string(), "echo ok".to_string()],
+            Some(r"C:\Users\Alice\Work"),
+        );
+        assert_eq!(
+            reexec,
+            vec![
+                "--apply-restricted-token",
+                "--cwd",
+                r"C:\Users\Alice\Work",
+                "--",
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                "echo ok",
+            ]
+        );
+        assert!(validate_apply_restricted_token_options(&ApplyRestrictedTokenOptions {
+            program: r"C:\temp\payload.bat".to_string(),
+            args: vec![],
+            cwd: None,
+        })
+        .is_err());
+        assert!(validate_apply_restricted_token_options(&ApplyRestrictedTokenOptions {
+            program: "powershell.exe".to_string(),
+            args: vec!["-Command".to_string(), "echo ok".to_string()],
+            cwd: Some(r"C:\Users\Alice\Work".to_string()),
+        })
+        .is_ok());
 
         // R3-P2-2: WSAEACCES (10013) -> "blocked", timeout/unreachable -> "not-run"
         assert_eq!(classify_wfp_connect_error(Some(WSAEACCES)), "blocked");
@@ -4572,5 +5148,34 @@ mod tests {
             ..base
         };
         assert!(validate_run_options(&bad_cwd).is_err());
+    }
+
+    #[test]
+    fn windows_backend_invariants_p0_1_p1_e1_p1_e2() {
+        let full_src = include_str!("win32_backend.rs");
+        let src = full_src
+            .split("#[cfg(all(test, not(windows)))]")
+            .next()
+            .unwrap();
+        // P0-1: cmd_uninstall must unwrap `.entries` from load_tracked_denies(&denies_file)
+        assert!(src.contains("let tracked = load_tracked_denies(&denies_file).entries;"));
+        assert!(!src.contains("let tracked = load_tracked_denies(&denies_file);"));
+        // P1-E1(a): Low IL applied to allow_write roots and Medium IL restored on revoke/uninstall
+        assert!(src.contains(r#"icacls_integrity_label_arg("Low", is_dir)"#));
+        assert!(src.contains(r#"icacls_integrity_label_arg("Medium", old_path_ref.is_dir())"#));
+        assert!(src.contains(r#"icacls_integrity_label_arg("Medium", path_ref.is_dir())"#));
+        // P1-E1(b): Granular write-only rights without SYNCHRONIZE
+        assert_eq!(DENY_WRITE_PERM, "(WD,AD,WEA,WA,DE,DC,WDAC,WO)");
+        // P1-E1(c): check_write_restricted_token_supported requests TOKEN_ADJUST_DEFAULT
+        assert!(src.contains("TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT"));
+        // P1-E2(a): reject_symlinks_and_reparse_points called before stale & uninstall icacls removals
+        assert!(src.contains("if reject_symlinks_and_reparse_points(path_ref).is_err()"));
+        assert!(src.contains("if reject_symlinks_and_reparse_points(old_path_ref).is_err()"));
+        // P1-E2(b): paired deny re-apply failure removes key from next_tracked and fails closed
+        assert!(src.contains("next_tracked.remove(&paired_key);"));
+        assert!(src.contains("Unguarded deny target(s) after stale ACL cleanup:"));
+        // P1-E2(c): deadline expiry fails closed on existing deny targets outside allow_write
+        assert!(src.contains("Deadline expired before guarding existing denyRead target"));
+        assert!(src.contains("Deadline expired before guarding existing denyWrite target"));
     }
 }

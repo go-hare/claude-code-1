@@ -31,7 +31,7 @@ import {
   getProjectTempDir,
 } from '../permissions/filesystem.js'
 import { getPlatform } from '../platform.js'
-import { getBootstrapSessionHost } from '../sessionHost.js'
+import { getBootstrapSession, RootSessionSlot } from '../sessionHost.js'
 import { isDisklessActive } from '../disklessGuards.js'
 import { sleep } from '../sleep.js'
 
@@ -106,24 +106,37 @@ type HostDiskOutputState = {
   inheritedLinkLines: Map<string, number>
 }
 
-const hostDiskOutputStates = new WeakMap<object, HostDiskOutputState>()
+const diskOutputStateSlot = new RootSessionSlot<HostDiskOutputState>(() => ({
+  taskOutputDir: undefined,
+  diskOutputs: new Map(),
+  outputPathBindings: new Map(),
+  pendingOutputOps: new Set(),
+  linkedOutputs: new Map(),
+  linksInheritedBefore: PROCESS_START_MS,
+  inheritedLinkLines: new Map(),
+}))
+
+const fallbackDiskOutputSession: { readonly root: object } = {
+  get root() {
+    return fallbackDiskOutputSession
+  },
+}
 
 function getHostDiskOutputState(): HostDiskOutputState {
-  const host = getBootstrapSessionHost()
-  let state = hostDiskOutputStates.get(host)
-  if (!state) {
-    state = {
-      taskOutputDir: undefined,
-      diskOutputs: new Map(),
-      outputPathBindings: new Map(),
-      pendingOutputOps: new Set(),
-      linkedOutputs: new Map(),
-      linksInheritedBefore: PROCESS_START_MS,
-      inheritedLinkLines: new Map(),
+  try {
+    const session = getBootstrapSession()
+    if (
+      session !== null &&
+      typeof session === 'object' &&
+      session.root !== null &&
+      typeof session.root === 'object'
+    ) {
+      return diskOutputStateSlot.of(session)
     }
-    hostDiskOutputStates.set(host, state)
+  } catch {
+    // Fall back when sessionHost is partially mocked in tests
   }
-  return state
+  return diskOutputStateSlot.of(fallbackDiskOutputSession)
 }
 
 function getTaskOutputDirForState(state: HostDiskOutputState): string {
@@ -1170,12 +1183,11 @@ async function openTaskOutputForAppendWithState(
     throw wrapSwapOpenError(e, canonical)
   }
 
-  if (depth > 0 && existing === null) {
-    const st = await fh.stat()
-    state.outputPathBindings.set(canonical, { dev: st.dev, ino: st.ino })
-  }
-
   try {
+    if (depth > 0 && existing === null) {
+      const st = await fh.stat()
+      state.outputPathBindings.set(canonical, { dev: st.dev, ino: st.ino })
+    }
     await vt(fh, existing, canonical, {
       registeredIdentity:
         depth > 0 ? getRecordedTargetIdentity(canonical, state) : undefined,

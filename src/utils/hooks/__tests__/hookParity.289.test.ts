@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { hookJSONOutputSchema } from '../../../types/hooks.js'
 import {
   parseAllowedTerminalSequence,
@@ -99,27 +101,87 @@ describe('densable hxe terminalSequence allowlist', () => {
 
 describe('listed-event producer defaults vs densable 2.1.289', () => {
   test('UserPromptSubmit uses HFe 30s timeout', () => {
-    const src = readFileSync(new URL('../../hooks.ts', import.meta.url), 'utf8')
+    const src = [
+      '../../hooks.ts',
+      '../hookCore.ts',
+      '../hookShellRunner.ts',
+      '../hookOutputProcessor.ts',
+      '../hookConfigRegistry.ts',
+      '../hookModelSlotPool.ts',
+      '../hookEngine.ts',
+      '../hookEntryExecutor.ts',
+      '../hookOutsideReplEngine.ts',
+      '../hookToolEvents.ts',
+      '../hookSessionAndPromptEvents.ts',
+      '../hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     expect(src).toContain('USER_PROMPT_SUBMIT_HOOK_TIMEOUT_MS = 30_000')
     expect(src).toContain('timeoutMs: USER_PROMPT_SUBMIT_HOOK_TIMEOUT_MS')
   })
 
   test('SessionEnd default timeout is _go not 10 minutes', () => {
-    const src = readFileSync(new URL('../../hooks.ts', import.meta.url), 'utf8')
+    const src = [
+      '../../hooks.ts',
+      '../hookCore.ts',
+      '../hookShellRunner.ts',
+      '../hookOutputProcessor.ts',
+      '../hookConfigRegistry.ts',
+      '../hookModelSlotPool.ts',
+      '../hookEngine.ts',
+      '../hookEntryExecutor.ts',
+      '../hookOutsideReplEngine.ts',
+      '../hookToolEvents.ts',
+      '../hookSessionAndPromptEvents.ts',
+      '../hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     expect(src).toMatch(
       /executeSessionEndHooks[\s\S]*timeoutMs = getSessionEndHookTimeoutMs\(\)/,
     )
   })
 
   test('StopFailure returns when settingsHooksOff', () => {
-    const src = readFileSync(new URL('../../hooks.ts', import.meta.url), 'utf8')
+    const src = [
+      '../../hooks.ts',
+      '../hookCore.ts',
+      '../hookShellRunner.ts',
+      '../hookOutputProcessor.ts',
+      '../hookConfigRegistry.ts',
+      '../hookModelSlotPool.ts',
+      '../hookEngine.ts',
+      '../hookEntryExecutor.ts',
+      '../hookOutsideReplEngine.ts',
+      '../hookToolEvents.ts',
+      '../hookSessionAndPromptEvents.ts',
+      '../hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     expect(src).toContain(
       'if (toolUseContext?.options.settingsHooksOff === true)',
     )
   })
 
   test('Nx skips EndConversation, bareFork, settingsHooksOff', () => {
-    const src = readFileSync(new URL('../../hooks.ts', import.meta.url), 'utf8')
+    const src = [
+      '../../hooks.ts',
+      '../hookCore.ts',
+      '../hookShellRunner.ts',
+      '../hookOutputProcessor.ts',
+      '../hookConfigRegistry.ts',
+      '../hookModelSlotPool.ts',
+      '../hookEngine.ts',
+      '../hookEntryExecutor.ts',
+      '../hookOutsideReplEngine.ts',
+      '../hookToolEvents.ts',
+      '../hookSessionAndPromptEvents.ts',
+      '../hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     expect(src).toContain('function shouldSkipJsonToolHooks(')
     expect(src).toContain('context.options.bareFork === true')
     expect(src).toContain('END_CONVERSATION_TOOL_NAME')
@@ -127,7 +189,22 @@ describe('listed-event producer defaults vs densable 2.1.289', () => {
   })
 
   test('PreToolUse JSON stdin does not include tool alias field', () => {
-    const src = readFileSync(new URL('../../hooks.ts', import.meta.url), 'utf8')
+    const src = [
+      '../../hooks.ts',
+      '../hookCore.ts',
+      '../hookShellRunner.ts',
+      '../hookOutputProcessor.ts',
+      '../hookConfigRegistry.ts',
+      '../hookModelSlotPool.ts',
+      '../hookEngine.ts',
+      '../hookEntryExecutor.ts',
+      '../hookOutsideReplEngine.ts',
+      '../hookToolEvents.ts',
+      '../hookSessionAndPromptEvents.ts',
+      '../hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     expect(src).toContain("hook_event_name: 'PreToolUse' as const")
     expect(src).not.toMatch(
       /hook_event_name: 'PreToolUse' as const,\s*tool_name: toolName,\s*\.\.\.getToolHookMcpMetadata\([^)]+\),\s*tool: toolName/,
@@ -224,7 +301,22 @@ describe('densable I$ / ylt', () => {
 
 describe('gold AVt / EVt / rd hosts', () => {
   test('VA skips function-hook chain when managedHooksOnly', () => {
-    const src = readFileSync(new URL('../../hooks.ts', import.meta.url), 'utf8')
+    const src = [
+      '../../hooks.ts',
+      '../hookCore.ts',
+      '../hookShellRunner.ts',
+      '../hookOutputProcessor.ts',
+      '../hookConfigRegistry.ts',
+      '../hookModelSlotPool.ts',
+      '../hookEngine.ts',
+      '../hookEntryExecutor.ts',
+      '../hookOutsideReplEngine.ts',
+      '../hookToolEvents.ts',
+      '../hookSessionAndPromptEvents.ts',
+      '../hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     expect(src).toMatch(
       /!classicChainMember &&\s*!managedHooksOnly &&\s*!shouldDisableAllHooksIncludingManaged\(\)/,
     )
@@ -234,10 +326,19 @@ describe('gold AVt / EVt / rd hosts', () => {
   })
 
   test('AVt wrap sits on dispatchCheckPermissionsAndCallTool', () => {
-    const src = readFileSync(
-      new URL('../../../services/tools/toolExecution.ts', import.meta.url),
-      'utf8',
+    const execDir = fileURLToPath(
+      new URL('../../../services/tools/execution', import.meta.url),
     )
+    const src = [
+      readFileSync(
+        new URL('../../../services/tools/toolExecution.ts', import.meta.url),
+        'utf8',
+      ),
+      ...readdirSync(execDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(execDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('drainManagedPreToolUse')
     expect(src).toContain('managedPass')
     expect(src).toContain('collectManagedOnlyPostToolUse')
@@ -255,7 +356,22 @@ describe('gold AVt / EVt / rd hosts', () => {
   })
 
   test('EVt catch rethrows after matchers load and uses tengu_feature_bad', () => {
-    const src = readFileSync(new URL('../../hooks.ts', import.meta.url), 'utf8')
+    const src = [
+      '../../hooks.ts',
+      '../hookCore.ts',
+      '../hookShellRunner.ts',
+      '../hookOutputProcessor.ts',
+      '../hookConfigRegistry.ts',
+      '../hookModelSlotPool.ts',
+      '../hookEngine.ts',
+      '../hookEntryExecutor.ts',
+      '../hookOutsideReplEngine.ts',
+      '../hookToolEvents.ts',
+      '../hookSessionAndPromptEvents.ts',
+      '../hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     expect(src).toContain('if (loadedMatcherCount > 0)')
     expect(src).toContain('error_code:')
     expect(src).toContain("'hook_match_failed'")
@@ -264,7 +380,22 @@ describe('gold AVt / EVt / rd hosts', () => {
   })
 
   test('rd scratchpad join failure omits the field', () => {
-    const src = readFileSync(new URL('../../hooks.ts', import.meta.url), 'utf8')
+    const src = [
+      '../../hooks.ts',
+      '../hookCore.ts',
+      '../hookShellRunner.ts',
+      '../hookOutputProcessor.ts',
+      '../hookConfigRegistry.ts',
+      '../hookModelSlotPool.ts',
+      '../hookEngine.ts',
+      '../hookEntryExecutor.ts',
+      '../hookOutsideReplEngine.ts',
+      '../hookToolEvents.ts',
+      '../hookSessionAndPromptEvents.ts',
+      '../hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     expect(src).toContain('function resolveScratchpadDirField')
     expect(src).toContain('catch {')
     expect(src).toContain('permissionLayers')

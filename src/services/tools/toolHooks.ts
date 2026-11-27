@@ -1204,6 +1204,7 @@ export async function resolveHookPermissionDecision(
 
     // Hook allow skips the interactive prompt, but deny/ask rules and plan-mode
     // write floor still apply.
+    let effectiveHookInput = hookInput
     const ruleCheck =
       (await checkRuleBasedPermissions(tool, hookInput, toolUseContext, {
         crashIsObjection: true,
@@ -1214,6 +1215,9 @@ export async function resolveHookPermissionDecision(
         hookInput,
         toolUseContext,
         toolUseID,
+        updated => {
+          effectiveHookInput = updated
+        },
       ))
     if (ruleCheck === null) {
       const effectiveMode = getEffectivePermissionMode(
@@ -1266,13 +1270,13 @@ export async function resolveHookPermissionDecision(
         return {
           decision: await runCanUseToolWithToolCheckFallback(
             tool,
-            hookInput,
+            effectiveHookInput,
             vouchedContext,
             canUseTool,
             assistantMessage,
             toolUseID,
           ),
-          input: hookInput,
+          input: effectiveHookInput,
         }
       }
       logForDebugging(
@@ -1280,9 +1284,13 @@ export async function resolveHookPermissionDecision(
           ? `Hook satisfied user interaction for ${tool.name} via updatedInput`
           : `Hook approved tool use for ${tool.name}, bypassing permission prompt`,
       )
-      return settleResolvedDecisionWithToolCheck(hookPermissionResult, {
+      const resolvedHookPermissionResult =
+        effectiveHookInput !== hookInput
+          ? { ...hookPermissionResult, updatedInput: effectiveHookInput }
+          : hookPermissionResult
+      return settleResolvedDecisionWithToolCheck(resolvedHookPermissionResult, {
         tool,
-        input: hookInput,
+        input: effectiveHookInput,
         toolUseContext,
         canUseTool,
         assistantMessage,
@@ -1340,6 +1348,7 @@ export async function resolveHookPermissionDecision(
       ? hookPermissionResult.updatedInput
       : input
   if (hookPermissionResult?.behavior === 'ask') {
+    let effectiveAskInput = askInput
     const ruleCheck =
       (await checkRuleBasedPermissions(tool, askInput, toolUseContext)) ??
       (await checkRemoteNativeToolPermissionOverride(
@@ -1347,6 +1356,9 @@ export async function resolveHookPermissionDecision(
         askInput,
         toolUseContext,
         toolUseID,
+        updated => {
+          effectiveAskInput = updated
+        },
       ))
     if (ruleCheck?.behavior === 'deny') {
       logForDebugging(
@@ -1354,7 +1366,7 @@ export async function resolveHookPermissionDecision(
       )
       return settleResolvedDecisionWithToolCheck(ruleCheck, {
         tool,
-        input: askInput,
+        input: effectiveAskInput,
         toolUseContext,
         canUseTool,
         assistantMessage,
@@ -1368,18 +1380,22 @@ export async function resolveHookPermissionDecision(
       return {
         decision: await runCanUseToolWithToolCheckFallback(
           tool,
-          askInput,
+          effectiveAskInput,
           { ...toolUseContext, hookAskFloor: true },
           canUseTool,
           assistantMessage,
           toolUseID,
         ),
-        input: askInput,
+        input: effectiveAskInput,
       }
     }
-    return settleResolvedDecisionWithToolCheck(hookPermissionResult, {
+    const resolvedAskHookResult =
+      effectiveAskInput !== askInput
+        ? { ...hookPermissionResult, updatedInput: effectiveAskInput }
+        : hookPermissionResult
+    return settleResolvedDecisionWithToolCheck(resolvedAskHookResult, {
       tool,
-      input: askInput,
+      input: effectiveAskInput,
       toolUseContext,
       canUseTool,
       assistantMessage,

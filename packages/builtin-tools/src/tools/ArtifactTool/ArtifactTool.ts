@@ -244,7 +244,18 @@ const fallbackArtifactDbRulesSession: { readonly root: object } = {
   },
 }
 
-function getActiveArtifactDbRulesSession(): { readonly root: object } {
+function getActiveArtifactDbRulesSession(explicitSession?: {
+  readonly root: object
+}): { readonly root: object } {
+  if (
+    explicitSession !== undefined &&
+    explicitSession !== null &&
+    typeof explicitSession === 'object' &&
+    explicitSession.root !== null &&
+    typeof explicitSession.root === 'object'
+  ) {
+    return explicitSession
+  }
   try {
     const session = getBootstrapSession()
     if (
@@ -265,15 +276,18 @@ const storedDbAccessRulesSlot = new RootSessionSlot<
   Map<string, ArtifactDbAccessRule[]>
 >(() => new Map())
 
-function getStoredDbAccessRules(): Map<string, ArtifactDbAccessRule[]> {
-  return storedDbAccessRulesSlot.of(getActiveArtifactDbRulesSession())
+function getStoredDbAccessRules(session?: {
+  readonly root: object
+}): Map<string, ArtifactDbAccessRule[]> {
+  return storedDbAccessRulesSlot.of(getActiveArtifactDbRulesSession(session))
 }
 
 export function recordStoredDbAccessRules(
   slug: string,
   rules: readonly ArtifactDbAccessRule[],
+  session?: { readonly root: object },
 ): void {
-  const storedDbAccessRules = getStoredDbAccessRules()
+  const storedDbAccessRules = getStoredDbAccessRules(session)
   if (rules.length === 0) {
     storedDbAccessRules.delete(slug)
   } else {
@@ -281,8 +295,10 @@ export function recordStoredDbAccessRules(
   }
 }
 
-export function _resetStoredDbAccessRulesForTesting(): void {
-  getStoredDbAccessRules().clear()
+export function _resetStoredDbAccessRulesForTesting(session?: {
+  readonly root: object
+}): void {
+  getStoredDbAccessRules(session).clear()
 }
 
 function formatArtifactOutputDbRulesNote(content: ArtifactOutput): string {
@@ -1425,6 +1441,7 @@ export const ArtifactTool = buildTool({
         const permResult = await checkArtifactActionPermissions(
           input as Record<string, unknown>,
           ctx,
+          deps.cwd?.(),
         )
         // #1546 + 2.1.325 #2331: In auto mode, exempt private/in-org cloud outputs
         // from interactive ask blocks, but NEVER bypass asks for artifacts visible
@@ -1463,7 +1480,11 @@ export const ArtifactTool = buildTool({
             actionName === 'db_str_replace' ||
             actionName === 'upload_asset')
         ) {
-          return { behavior: 'allow' as const, updatedInput: input }
+          return {
+            behavior: 'allow' as const,
+            updatedInput:
+              (permResult.updatedInput as ArtifactInput | undefined) ?? input,
+          }
         }
         return permResult
       },
@@ -1549,7 +1570,7 @@ export const ArtifactTool = buildTool({
             case 'list_assets':
               return callListAssets(input, signal, ctx)
             case 'upload_asset':
-              return callUploadAsset(input, signal, ctx)
+              return callUploadAsset(input, signal, ctx, deps.cwd?.())
             case 'delete_asset':
               return callDeleteAsset(input, signal)
             case 'list_files':
@@ -1643,7 +1664,7 @@ export const ArtifactTool = buildTool({
               }
           }
         }
-        return callUpload(input, ctx)
+        return callUpload(input, ctx, deps.cwd?.())
       },
     }
   },
@@ -2130,6 +2151,7 @@ export async function uploadAssetBatch(
   signal: AbortSignal | undefined,
   context: Partial<ToolUseContext> | undefined,
   pageUrl: string,
+  baseDir?: string,
 ): Promise<{ data: ArtifactOutput }> {
   const paths = input.file_paths ?? []
   const rows = uploadBatchPins(pin, paths.length)
@@ -2151,7 +2173,7 @@ export async function uploadAssetBatch(
   try {
     for (let index = 0; index < paths.length; index++) {
       const filePath = paths[index] ?? ''
-      const expanded = expandPath(filePath)
+      const expanded = expandPath(filePath, baseDir)
       const row = rows.kind === 'rows' ? rows.rows[index] : undefined
       const approved = await openApprovedUpload(expanded, row, context)
       if (approved.kind === 'error') {
@@ -2243,7 +2265,7 @@ export async function uploadAssetBatch(
         stored = true
         const uploaded = await uploadArtifactAsset({
           slug,
-          filePath: expandPath(filePath),
+          filePath: expandPath(filePath, baseDir),
           bytes: read.bytes,
           signal,
         })
@@ -2338,6 +2360,7 @@ async function callUploadAsset(
   input: ArtifactInput,
   signal?: AbortSignal,
   context?: Partial<ToolUseContext>,
+  baseDir?: string,
 ): Promise<{ data: ArtifactOutput }> {
   const parsed = parsedInputUrl(input.url)
   if (!parsed) {
@@ -2381,7 +2404,15 @@ async function callUploadAsset(
   )
   const pageUrl = artifactViewerUrlFor(parsed)
   if (input.file_paths !== undefined) {
-    return uploadAssetBatch(input, parsed.slug, pin, signal, context, pageUrl)
+    return uploadAssetBatch(
+      input,
+      parsed.slug,
+      pin,
+      signal,
+      context,
+      pageUrl,
+      baseDir,
+    )
   }
   if (input.file_path === undefined) {
     return emptyErr('file_path is required for action "upload_asset"')
@@ -2391,7 +2422,7 @@ async function callUploadAsset(
       'the call no longer names the files that were approved (one file where a list was approved) — retry so it is checked again',
     )
   }
-  const expanded = expandPath(input.file_path)
+  const expanded = expandPath(input.file_path, baseDir)
   const denied = await uploadReadDenied(expanded, context)
   if (denied !== null) {
     return emptyErr(
@@ -3575,6 +3606,7 @@ async function writePublishEditsBack(opts: {
 async function callUpload(
   input: ArtifactInput,
   context?: Partial<ToolUseContext>,
+  baseDir?: string,
 ): Promise<{ data: ArtifactOutput }> {
   const file_path = input.file_path
   if (typeof file_path !== 'string' || file_path === '') {
@@ -3653,7 +3685,7 @@ async function callUpload(
     }
   }
 
-  const expanded = expandPath(file_path)
+  const expanded = expandPath(file_path, baseDir)
   if (
     isDeviceOrNtNamespacePath(expanded) ||
     isDeviceOrNtNamespacePath(file_path)
@@ -3906,7 +3938,7 @@ async function callUpload(
     rawCaps !== null && typeof rawCaps === 'object' && !Array.isArray(rawCaps)
       ? (rawCaps as Record<string, unknown>).db
       : undefined
-  const storedDbAccessRules = getStoredDbAccessRules()
+  const storedDbAccessRules = getStoredDbAccessRules(context?.session)
   const storedRulesForSlug = targetSlugForDbRules
     ? storedDbAccessRules.get(targetSlugForDbRules)
     : undefined
@@ -3970,7 +4002,11 @@ async function callUpload(
         if (dropped.length > 0) {
           droppedDbAccessRules = dropped
         }
-        recordStoredDbAccessRules(publishedSlug, declaredDbRules)
+        recordStoredDbAccessRules(
+          publishedSlug,
+          declaredDbRules,
+          context?.session,
+        )
       }
     }
 

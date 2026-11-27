@@ -85,7 +85,7 @@ Schema 定义在 `src/utils/settings/types.ts:550`（`statusLine` Zod object）�
 
 ## Output 协议：脚本 → 主进程
 
-`executeStatusLineCommand`（`src/utils/hooks.ts:4752`）对脚本 stdout 做如下处理：
+`executeStatusLineCommand`（`src/utils/hooks/hookShellRunner.ts:841`）对脚本 stdout 做如下处理：
 
 1. `trim()` 首尾空白
 2. 按 `\n` 拆行，每行再 `trim()`
@@ -149,7 +149,7 @@ executeStatusLineCommand(..., controller.signal, ...)
 
 ## 安全网关
 
-`executeStatusLineCommand`（`src/utils/hooks.ts:4752`）在执行前有**三层拦截**：
+`executeStatusLineCommand`（`src/utils/hooks/hookShellRunner.ts:841`）在执行前有**三层拦截**：
 
 1. `shouldDisableAllHooksIncludingManaged()` → managed settings 全局禁用 hooks 时直接返回
 2. `shouldSkipHookDueToTrust()` → **工作区未接受信任对话框时跳过**，避免打开未知仓库时执行任意 shell 命令（RCE 防护）
@@ -267,7 +267,7 @@ useEffect(() => {
 | 文件 | 作用 |
 |------|------|
 | `src/components/StatusLine.tsx` | UI 组件、触发逻辑、buildStatusLineCommandInput |
-| `src/utils/hooks.ts:4752` | `executeStatusLineCommand`：shell 执行、输出处理、安全网关 |
+| `src/utils/hooks/hookShellRunner.ts:841` | `executeStatusLineCommand`：shell 执行、输出处理、安全网关 |
 | `src/utils/settings/types.ts:550` | `statusLine` Zod schema |
 | `src/types/statusLine.ts` | `StatusLineCommandInput` 类型（当前为 stub） |
 | `src/commands/statusline.tsx` | `/statusline` slash command 定义 |

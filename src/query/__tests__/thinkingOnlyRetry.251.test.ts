@@ -7,7 +7,10 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { THINKING_ONLY_RETRY_PROMPT } from '../../query.js'
 
-const querySrc = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+const querySrc = [
+  readFileSync(join(import.meta.dir, '../queryTypes.ts'), 'utf8'),
+  readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8'),
+].join('\n')
 
 describe('densable 2.1.251 #11 thinking-only nudge', () => {
   test('jlt text is the gold visible-output prompt', () => {

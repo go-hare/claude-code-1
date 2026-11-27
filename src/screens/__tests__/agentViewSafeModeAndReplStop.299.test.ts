@@ -23,7 +23,15 @@ describe('2.1.299-301 REPL / AgentView / Settings alignment', () => {
   })
 
   test('#871 REPL tracks lastTurnStopTime on onCancel and publishes to idleReturnTurnSourceRef', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '../REPL.tsx'), 'utf8')
+    const replDir = path.resolve(__dirname, '../repl')
+    const src = [
+      fs.readFileSync(path.resolve(__dirname, '../REPL.tsx'), 'utf8'),
+      ...fs
+        .readdirSync(replDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => fs.readFileSync(path.join(replDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain(
       'const [lastTurnStopTime, setLastTurnStopTime] = useState(0);',
     )

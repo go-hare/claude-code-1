@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -334,10 +335,14 @@ describe('Wave 3A Item 1: session metadata & unified resume hydration', () => {
 
 describe('Wave 3A Item 2: transcript storage alignment', () => {
   test('tengu_pebble_leaf_prune gate is removed and leaf pruning runs unconditionally', async () => {
-    const src = readFileSync(
-      join(REPO_ROOT, 'src/utils/sessionStorage.ts'),
-      'utf8',
-    )
+    const ssDir = join(REPO_ROOT, 'src/utils/sessionStorage')
+    const src = [
+      readFileSync(join(REPO_ROOT, 'src/utils/sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(ssDir, f), 'utf8')),
+    ].join('\n')
     expect(src).not.toContain('tengu_pebble_leaf_prune')
 
     const dir = makeTempDir('wave3a-leaf-')

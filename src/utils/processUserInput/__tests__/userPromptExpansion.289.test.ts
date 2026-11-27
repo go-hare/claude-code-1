@@ -2,7 +2,7 @@
  * densable 2.1.289 Ze / AMr / QH — UserPromptExpansion hook executor.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { HOOK_EVENTS as sdkEvents } from '../../../entrypoints/agentSdkTypes.js'
 import {
@@ -82,10 +82,23 @@ describe('densable 2.1.289 UserPromptExpansion registry', () => {
 
 describe('densable 2.1.289 Ze / AMr host', () => {
   test('hooks.ts implements AMr + Ze 1:1 with gold', () => {
-    const src =
-      readFileSync(join(root, 'utils/hooks.ts'), 'utf8') +
-      '\n' +
-      readFileSync(join(root, 'utils/hooks/hookInputHelpers.ts'), 'utf8')
+    const src = [
+      'utils/hooks.ts',
+      'utils/hooks/hookCore.ts',
+      'utils/hooks/hookShellRunner.ts',
+      'utils/hooks/hookOutputProcessor.ts',
+      'utils/hooks/hookConfigRegistry.ts',
+      'utils/hooks/hookModelSlotPool.ts',
+      'utils/hooks/hookEngine.ts',
+      'utils/hooks/hookEntryExecutor.ts',
+      'utils/hooks/hookOutsideReplEngine.ts',
+      'utils/hooks/hookToolEvents.ts',
+      'utils/hooks/hookSessionAndPromptEvents.ts',
+      'utils/hooks/hookLifecycleEvents.ts',
+      'utils/hooks/hookInputHelpers.ts',
+    ]
+      .map(rel => readFileSync(join(root, rel), 'utf8'))
+      .join('\n')
     expect(src).toContain("hook_event_name: 'UserPromptExpansion'")
     expect(src).toContain('expansion_type: expansionType')
     expect(src).toContain('executeUserPromptExpansionHooks')
@@ -120,7 +133,14 @@ describe('densable 2.1.289 Ze / AMr host', () => {
   })
 
   test('hook_success allowlist includes UserPromptExpansion', () => {
-    const src = readFileSync(join(root, 'utils/messages.ts'), 'utf8')
+    const msgDir = join(root, 'utils/messages')
+    const src = [
+      readFileSync(join(root, 'utils/messages.ts'), 'utf8'),
+      ...readdirSync(msgDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(msgDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain("attachment.hookEvent !== 'UserPromptExpansion'")
   })
 

@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { APIError } from '@anthropic-ai/sdk'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 import {
@@ -25,7 +25,22 @@ import {
 } from '../thinking.js'
 
 const root = join(import.meta.dir, '../../..')
-const src = (rel: string) => readFileSync(join(root, rel), 'utf8')
+const SPLIT_DIRS: Record<string, string> = {
+  'src/services/api/claude.ts': 'src/services/api/claude',
+}
+const src = (rel: string) => {
+  const entry = readFileSync(join(root, rel), 'utf8')
+  const subRel = SPLIT_DIRS[rel]
+  if (!subRel) return entry
+  const subDir = join(root, subRel)
+  return [
+    entry,
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 function api400(message: string): APIError {
   return new APIError(

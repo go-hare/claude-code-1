@@ -368,7 +368,7 @@ describe('headless MCP reconnect 243', () => {
 
   test('print.ts attaches mS, $d session-end, and identity seed', () => {
     const src = readFileSync(
-      join(import.meta.dir, '../../../cli/print.ts'),
+      join(import.meta.dir, '../../../cli/print/mcpAndPlugins.ts'),
       'utf8',
     )
     expect(src).toContain('attachHeadlessRemoteMcpReconnect')

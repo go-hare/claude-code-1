@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { formatDuration } from '../../../utils/format.js'
 import {
@@ -12,6 +12,16 @@ import {
   resolveSpinnerStatusKind,
   STALL_TELEMETRY_THRESHOLDS_MS,
 } from '../statusKind.js'
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+    readFileSync(entryPath, 'utf8'),
+  ].join('\n')
+}
 
 describe('densable 2.1.289 Je extras', () => {
   test('Un stall telemetry thresholds 10s/45s/5min', () => {
@@ -200,18 +210,18 @@ describe('densable 2.1.289 Je extras', () => {
   })
 
   test('REPL hosts fl bag: query announce, setMode clears off requesting', () => {
-    const repl = readFileSync(
+    const repl = readModuleTree(
       join(import.meta.dir, '../../../screens/REPL.tsx'),
-      'utf8',
+      join(import.meta.dir, '../../../screens/repl'),
     )
     expect(repl).toContain('outputLimitRecovery={outputLimitRecovery}')
     expect(repl).toContain('setOutputLimitRecovery')
     expect(repl).toContain(
       "if (mode !== 'requesting') setOutputLimitRecovery(null)",
     )
-    const query = readFileSync(
+    const query = readModuleTree(
       join(import.meta.dir, '../../../query.ts'),
-      'utf8',
+      join(import.meta.dir, '../../../query'),
     )
     const queryHelpers = readFileSync(
       join(import.meta.dir, '../../../query/queryHelpers.ts'),
@@ -225,9 +235,9 @@ describe('densable 2.1.289 Je extras', () => {
   })
 
   test('REPL does not mount analog BackgroundAgentSelector (gold MIe only)', () => {
-    const repl = readFileSync(
+    const repl = readModuleTree(
       join(import.meta.dir, '../../../screens/REPL.tsx'),
-      'utf8',
+      join(import.meta.dir, '../../../screens/repl'),
     )
     expect(repl).not.toContain('BackgroundAgentSelector')
     expect(repl).not.toContain('shift+↓ to manage background agents')
@@ -241,9 +251,9 @@ describe('densable 2.1.289 Je extras', () => {
   })
 
   test('REPL SpinnerWithVerb is gold bJ scrollable after flexGrow', () => {
-    const repl = readFileSync(
+    const repl = readModuleTree(
       join(import.meta.dir, '../../../screens/REPL.tsx'),
-      'utf8',
+      join(import.meta.dir, '../../../screens/repl'),
     )
     const spinner = repl.lastIndexOf('<SpinnerWithVerb')
     const scrollable = repl.lastIndexOf('scrollable={')

@@ -8,8 +8,12 @@ import {
   handleSizedWsPayload,
 } from '../../transport/ws-payload'
 import { validateApiKey } from '../../auth/api-key'
+import { isWebSocketOriginAllowed } from '../../auth/cors'
 import { verifyWorkerJwt } from '../../auth/jwt'
-import { extractWebSocketAuthToken } from '../../auth/middleware'
+import {
+  extractWebSocketAuthToken,
+  requireWebSocketOrigin,
+} from '../../auth/middleware'
 import {
   handleWebSocketOpen,
   handleWebSocketMessage,
@@ -95,7 +99,17 @@ app.post('/session/:sessionId/events', async c => {
 /** WS /v2/session_ingress/ws/:sessionId — WebSocket transport */
 app.get(
   '/ws/:sessionId',
+  requireWebSocketOrigin,
   upgradeWebSocket(async c => {
+    if (!isWebSocketOriginAllowed(c.req.header('Origin'))) {
+      log('[WS] Upgrade rejected: disallowed origin')
+      return {
+        onOpen(_evt: Event, ws: WSContext) {
+          ws.close(4003, 'forbidden origin')
+        },
+      }
+    }
+
     const requestedSessionId = c.req.param('sessionId')!
     const sessionId =
       resolveExistingSessionId(requestedSessionId) ?? requestedSessionId

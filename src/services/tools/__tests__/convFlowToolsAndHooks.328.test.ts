@@ -1057,10 +1057,22 @@ describe('[P2] Tool execution & hook edge-case fixes', () => {
   })
 
   test('executeStopHooks sets skipSessionFunctionHooks only when stopPass is neither turn_end nor turn_end_reactions', async () => {
-    const hooksSource = readFileSync(
-      new URL('../../../utils/hooks.ts', import.meta.url),
-      'utf8',
-    )
+    const hooksSource = [
+      '../../../utils/hooks.ts',
+      '../../../utils/hooks/hookCore.ts',
+      '../../../utils/hooks/hookShellRunner.ts',
+      '../../../utils/hooks/hookOutputProcessor.ts',
+      '../../../utils/hooks/hookConfigRegistry.ts',
+      '../../../utils/hooks/hookModelSlotPool.ts',
+      '../../../utils/hooks/hookEngine.ts',
+      '../../../utils/hooks/hookEntryExecutor.ts',
+      '../../../utils/hooks/hookOutsideReplEngine.ts',
+      '../../../utils/hooks/hookToolEvents.ts',
+      '../../../utils/hooks/hookSessionAndPromptEvents.ts',
+      '../../../utils/hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(new URL(rel, import.meta.url), 'utf8'))
+      .join('\n')
     const start = hooksSource.indexOf(
       'export async function* executeStopHooks(',
     )

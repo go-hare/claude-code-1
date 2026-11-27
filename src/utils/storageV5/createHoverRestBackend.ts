@@ -8,7 +8,7 @@
  * exact HTTP-to-`StorageV5Result` error mapping.
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type {
   StorageV5,
   StorageV5LeaseHandle,
@@ -28,6 +28,7 @@ import {
   stagingScopeBesidePf,
   stagingScopeWithinLf,
 } from './storageHbMutate.js'
+import { getKeyWriteDiscipline } from './writeValidate.js'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -56,13 +57,52 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function canonicalizeForJson(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeForJson)
+  }
+  const sorted: Record<string, unknown> = {}
+  for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+    const v = (value as Record<string, unknown>)[k]
+    if (v !== undefined) {
+      sorted[k] = canonicalizeForJson(v)
+    }
+  }
+  return sorted
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalizeForJson(value)) ?? 'null'
+}
+
+/**
+ * Deterministic named lease target for `createHoverRestBackend().update(key, ...)`.
+ * Uses the `{ lease }` named-lease shape so it passes `storageLease.ts` target
+ * validation, is excluded from key-scoped `listLeases()`, and cannot deadlock
+ * with caller-owned `acquireLease(key)` handles.
+ */
+export function hoverRestUpdateLeaseTarget(key: unknown): { lease: string } {
+  return {
+    lease: `update-${createHash('sha256').update(canonicalJson(key)).digest('hex')}`,
+  }
+}
+
 function ok<T>(value: T): StorageV5Result<T> {
   return { ok: true, value }
 }
 
 function fail(
   code: string,
-  extra?: { argument?: string; telemetryCode?: string },
+  extra?: {
+    argument?: string
+    telemetryCode?: string
+    holder?: string
+    expiresAtMs?: number
+    meta?: unknown
+  },
 ): StorageV5Result<never> {
   return {
     ok: false,
@@ -72,6 +112,11 @@ function fail(
       ...(extra?.telemetryCode !== undefined
         ? { telemetryCode: extra.telemetryCode }
         : {}),
+      ...(extra?.holder !== undefined ? { holder: extra.holder } : {}),
+      ...(extra?.expiresAtMs !== undefined
+        ? { expiresAtMs: extra.expiresAtMs }
+        : {}),
+      ...(extra?.meta !== undefined ? { meta: extra.meta } : {}),
     },
   }
 }
@@ -164,9 +209,30 @@ function extractErrorDetails(body: unknown): {
   code?: string
   argument?: string
   telemetryCode?: string
+  holder?: string
+  expiresAtMs?: number
+  meta?: unknown
 } {
   if (!isRecord(body)) return {}
   const nested = isRecord(body.error) ? body.error : body
+  const holder =
+    typeof nested.holder === 'string'
+      ? nested.holder
+      : typeof body.holder === 'string'
+        ? body.holder
+        : undefined
+  const expiresAtMs =
+    typeof nested.expiresAtMs === 'number'
+      ? nested.expiresAtMs
+      : typeof body.expiresAtMs === 'number'
+        ? body.expiresAtMs
+        : undefined
+  const meta =
+    'meta' in nested && nested.meta !== undefined
+      ? nested.meta
+      : 'meta' in body && body.meta !== undefined
+        ? body.meta
+        : undefined
   return {
     code: typeof nested.code === 'string' ? nested.code : undefined,
     argument: typeof nested.argument === 'string' ? nested.argument : undefined,
@@ -174,6 +240,9 @@ function extractErrorDetails(body: unknown): {
       typeof nested.telemetryCode === 'string'
         ? nested.telemetryCode
         : undefined,
+    ...(holder !== undefined ? { holder } : {}),
+    ...(expiresAtMs !== undefined ? { expiresAtMs } : {}),
+    ...(meta !== undefined ? { meta } : {}),
   }
 }
 
@@ -360,6 +429,9 @@ export function createHoverRestBackend(
       return fail(code, {
         argument: details.argument,
         telemetryCode: details.telemetryCode ?? `HTTP_${response.status}`,
+        holder: details.holder,
+        expiresAtMs: details.expiresAtMs,
+        meta: details.meta,
       })
     }
 
@@ -375,6 +447,9 @@ export function createHoverRestBackend(
       return fail(details.code ?? 'IoError', {
         argument: details.argument,
         telemetryCode: details.telemetryCode,
+        holder: details.holder,
+        expiresAtMs: details.expiresAtMs,
+        meta: details.meta,
       })
     }
 
@@ -1130,77 +1205,146 @@ export function createHoverRestBackend(
     ): Promise<
       StorageV5Result<{ written: boolean; found: boolean; version?: string }>
     > {
-      const readRes = await backend.read([key as StorageV5ReadReq])
-      if (!readRes.ok) return readRes
-      if (!isRecord(readRes.value) || !Array.isArray(readRes.value.items)) {
-        return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+      if (closed) return fail('Closed')
+      if (opts?.precondition !== undefined) {
+        return fail('InvalidArgument', { argument: 'opts.precondition' })
       }
-      const item = readRes.value.items[0]
-      const found = Boolean(item?.found && item.value !== undefined)
-      const current: StorageV5EditCurrent<Uint8Array> | undefined =
-        found && item?.value !== undefined
-          ? {
-              value: item.value,
-              version: item.version,
-              mtimeMs: item.mtimeMs,
-            }
-          : undefined
+      let acquiredLease: StorageV5LeaseHandle | undefined
+      if (
+        opts?.acquireTimeoutMs !== undefined &&
+        (typeof opts.acquireTimeoutMs !== 'number' ||
+          !Number.isFinite(opts.acquireTimeoutMs) ||
+          opts.acquireTimeoutMs < 0)
+      ) {
+        return fail('InvalidArgument', { argument: 'acquireTimeoutMs' })
+      }
+      const acquireTimeoutMs = opts?.acquireTimeoutMs ?? 5_000
+      const deadline = Date.now() + acquireTimeoutMs
+      const ttlMs = Math.max(30_000, Math.ceil(defaultTimeoutMs * 2))
+      const leaseTarget = hoverRestUpdateLeaseTarget(key)
+      const leaseHolder = `hover-rest-update-${randomUUID()}`
+      while (true) {
+        const leaseRes = await backend.acquireLease(leaseTarget, ttlMs, {
+          holder: leaseHolder,
+        })
+        if (leaseRes.ok) {
+          acquiredLease = leaseRes.value
+          break
+        }
+        const code = leaseRes.error.code
+        if (code === 'Unsupported' || code === 'NotImplemented') {
+          break
+        }
+        const isContended =
+          code === 'Held' || code === 'AlreadyHeld' || code === 'Busy'
+        if (!isContended || Date.now() >= deadline) {
+          return leaseRes
+        }
+        const remaining = deadline - Date.now()
+        if (remaining <= 0) {
+          return leaseRes
+        }
+        await new Promise<void>(resolve =>
+          setTimeout(resolve, Math.min(25, remaining)),
+        )
+      }
 
-      let decision: unknown
       try {
-        decision = edit(current)
-      } catch {
-        return fail('Failed', { argument: 'edit' })
-      }
-      if (!isRecord(decision)) {
-        return fail('InvalidArgument', { argument: 'edit' })
-      }
-      if ('then' in decision && typeof decision.then === 'function') {
-        Promise.resolve(decision).catch(() => {})
-        return fail('InvalidArgument', { argument: 'edit' })
-      }
-      const hasWrite = 'write' in decision
-      const hasSkip = 'skip' in decision
-      if (hasWrite === hasSkip) {
-        return fail('InvalidArgument', { argument: 'edit' })
-      }
-      if (hasSkip) {
-        if (decision.skip !== true) {
+        const readRes = await backend.read([key as StorageV5ReadReq])
+        if (!readRes.ok) return readRes
+        if (!isRecord(readRes.value) || !Array.isArray(readRes.value.items)) {
+          return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+        }
+        const item = readRes.value.items[0]
+        const found = Boolean(item?.found && item.value !== undefined)
+        const current: StorageV5EditCurrent<Uint8Array> | undefined =
+          found && item?.value !== undefined
+            ? {
+                value: item.value,
+                version: item.version,
+                mtimeMs: item.mtimeMs,
+              }
+            : undefined
+
+        let decision: unknown
+        try {
+          decision = edit(current)
+        } catch {
+          return fail('Failed', { argument: 'edit' })
+        }
+        if (!isRecord(decision)) {
           return fail('InvalidArgument', { argument: 'edit' })
         }
-        return ok({ written: false, found, version: item?.version })
-      }
-      if (
-        typeof decision.write !== 'string' &&
-        !(decision.write instanceof Uint8Array)
-      ) {
-        return fail('InvalidArgument', { argument: 'edit' })
-      }
+        if ('then' in decision && typeof decision.then === 'function') {
+          Promise.resolve(decision).catch(() => {})
+          return fail('InvalidArgument', { argument: 'edit' })
+        }
+        const hasWrite = 'write' in decision
+        const hasSkip = 'skip' in decision
+        if (hasWrite === hasSkip) {
+          return fail('InvalidArgument', { argument: 'edit' })
+        }
+        if (hasSkip) {
+          if (decision.skip !== true) {
+            return fail('InvalidArgument', { argument: 'edit' })
+          }
+          return ok({ written: false, found, version: item?.version })
+        }
+        if (
+          typeof decision.write !== 'string' &&
+          !(decision.write instanceof Uint8Array)
+        ) {
+          return fail('InvalidArgument', { argument: 'edit' })
+        }
 
-      const precondition =
-        opts?.precondition ??
-        (found
-          ? item?.version !== undefined
-            ? { type: 'ifMatch', version: item.version }
-            : { type: 'exists' }
-          : { type: 'ifAbsent' })
+        const discipline = isRecord(key)
+          ? getKeyWriteDiscipline(key)
+          : undefined
+        let precondition: { type?: string; version?: string } | undefined
+        if (
+          opts?.publishDiscipline === 'inPlace' ||
+          opts?.publishDiscipline === 'followAtomic'
+        ) {
+          precondition = undefined
+        } else if (discipline === 'versioned') {
+          precondition = found
+            ? item?.version !== undefined
+              ? { type: 'ifMatch', version: item.version }
+              : { type: 'none' }
+            : { type: 'ifAbsent' }
+        } else {
+          precondition = found ? undefined : { type: 'ifAbsent' }
+        }
 
-      const writeRes = await backend.write(key, decision.write, {
-        parent: opts?.parent,
-        publishDiscipline: opts?.publishDiscipline,
-        precondition,
-      })
-      if (!writeRes.ok) return writeRes
-      if (!isRecord(writeRes.value)) {
-        return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+        const writeOpts: {
+          parent?: string
+          publishDiscipline?: string
+          precondition?: { type?: string; version?: string }
+        } = {
+          ...(opts?.parent !== undefined ? { parent: opts.parent } : {}),
+          ...(opts?.publishDiscipline !== undefined
+            ? { publishDiscipline: opts.publishDiscipline }
+            : {}),
+          ...(precondition !== undefined ? { precondition } : {}),
+        }
+
+        const writeRes = await backend.write(key, decision.write, writeOpts)
+        if (!writeRes.ok) return writeRes
+        if (!isRecord(writeRes.value)) {
+          return fail('IoError', { telemetryCode: 'INVALID_RESPONSE' })
+        }
+        return ok({
+          written: true,
+          found,
+          ...(typeof writeRes.value.version === 'string'
+            ? { version: writeRes.value.version }
+            : {}),
+        })
+      } finally {
+        if (acquiredLease) {
+          await acquiredLease.release().catch(() => {})
+        }
       }
-      return ok({
-        written: true,
-        found,
-        ...(typeof writeRes.value.version === 'string'
-          ? { version: writeRes.value.version }
-          : {}),
-      })
     },
 
     async updateText(

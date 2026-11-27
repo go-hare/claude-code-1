@@ -44,7 +44,22 @@ describe('densable QLn confined hook allow strip', () => {
   })
 
   test('live hosts call QLn twin', () => {
-    const hooks = readFileSync(join(import.meta.dir, '../../hooks.ts'), 'utf8')
+    const hooks = [
+      '../../hooks.ts',
+      '../../hooks/hookCore.ts',
+      '../../hooks/hookShellRunner.ts',
+      '../../hooks/hookOutputProcessor.ts',
+      '../../hooks/hookConfigRegistry.ts',
+      '../../hooks/hookModelSlotPool.ts',
+      '../../hooks/hookEngine.ts',
+      '../../hooks/hookEntryExecutor.ts',
+      '../../hooks/hookOutsideReplEngine.ts',
+      '../../hooks/hookToolEvents.ts',
+      '../../hooks/hookSessionAndPromptEvents.ts',
+      '../../hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(import.meta.dir, rel), 'utf8'))
+      .join('\n')
     expect(hooks).toContain('stripEvalConfinedHookAllow')
     const toolHooks = readFileSync(
       join(import.meta.dir, '../../../services/tools/toolHooks.ts'),
@@ -59,7 +74,22 @@ describe('densable QLn confined hook allow strip', () => {
   })
 
   test('gold Rze: PreToolUse function-hooks enter executeHooks chain', () => {
-    const hooks = readFileSync(join(import.meta.dir, '../../hooks.ts'), 'utf8')
+    const hooks = [
+      '../../hooks.ts',
+      '../../hooks/hookCore.ts',
+      '../../hooks/hookShellRunner.ts',
+      '../../hooks/hookOutputProcessor.ts',
+      '../../hooks/hookConfigRegistry.ts',
+      '../../hooks/hookModelSlotPool.ts',
+      '../../hooks/hookEngine.ts',
+      '../../hooks/hookEntryExecutor.ts',
+      '../../hooks/hookOutsideReplEngine.ts',
+      '../../hooks/hookToolEvents.ts',
+      '../../hooks/hookSessionAndPromptEvents.ts',
+      '../../hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(import.meta.dir, rel), 'utf8'))
+      .join('\n')
     expect(hooks).toContain("hasMatchingFunctionHook('PreToolUse')")
     expect(hooks).toContain('!classicChainMember &&')
     expect(hooks).toContain('!sessionFunctionHooksOnly &&')

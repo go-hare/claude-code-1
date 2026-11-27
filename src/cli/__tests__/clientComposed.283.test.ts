@@ -3,7 +3,7 @@
  * Security: @path must not expand when the SDK stamps verbatim_prompts.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const ROOT = join(import.meta.dir, '../../..')
@@ -16,7 +16,14 @@ describe('densable 2.1.283 client_composed / verbatim', () => {
     )
     expect(schemas).toContain('client_composed')
     expect(schemas).toContain('seeded_summon')
-    const print = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+    const printDir = join(ROOT, 'src/cli/print')
+    const print = [
+      readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(print).toContain('userMsg.client_composed === true')
     expect(print).toContain('skipSlashCommands: true, skipAttachments: true')
     expect(print).toContain('cmd.skipAttachments === true')

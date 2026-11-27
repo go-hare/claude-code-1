@@ -3,7 +3,14 @@
  * Author toast is Ymn. Debug unattributed is the no-module fallback.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { registerBuiltinPlugin } from '../../../plugins/builtinPlugins.js'
@@ -33,10 +40,17 @@ import {
 } from '../pluginDrawError.js'
 
 const SRC = readFileSync(join(import.meta.dir, '../pluginDrawError.ts'), 'utf8')
-const PANES = readFileSync(
-  join(import.meta.dir, '../../../components/PluginRasterPanes.tsx'),
-  'utf8',
-)
+const PANES_DIR = join(import.meta.dir, '../../../components/pluginRaster')
+const PANES = [
+  readFileSync(
+    join(import.meta.dir, '../../../components/PluginRasterPanes.tsx'),
+    'utf8',
+  ),
+  ...readdirSync(PANES_DIR)
+    .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+    .sort()
+    .map(f => readFileSync(join(PANES_DIR, f), 'utf8')),
+].join('\n')
 
 afterEach(() => {
   resetDrawErrorNotes()

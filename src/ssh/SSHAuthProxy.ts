@@ -87,23 +87,43 @@ function toArrayBufferView(buf: Buffer): Uint8Array<ArrayBuffer> {
   return copy
 }
 
-function waitForDrainOrClose(res: ServerResponse): Promise<void> {
+export const DRAIN_TIMEOUT_MS = 30_000
+
+export function waitForDrainOrClose(
+  res: ServerResponse,
+  timeoutMs = DRAIN_TIMEOUT_MS,
+): Promise<boolean> {
   if (res.destroyed || res.writableEnded) {
-    return Promise.resolve()
+    return Promise.resolve(false)
   }
-  return new Promise<void>(resolve => {
+  return new Promise<boolean>(resolve => {
+    let settled = false
     const cleanup = () => {
-      res.off('drain', onDone)
-      res.off('close', onDone)
-      res.off('error', onDone)
+      clearTimeout(timer)
+      res.off('drain', onDrain)
+      res.off('close', onAbort)
+      res.off('error', onAbort)
     }
-    const onDone = () => {
+    const finish = (drained: boolean) => {
+      if (settled) return
+      settled = true
       cleanup()
-      resolve()
+      resolve(drained)
     }
-    res.once('drain', onDone)
-    res.once('close', onDone)
-    res.once('error', onDone)
+    const onDrain = () => finish(true)
+    const onAbort = () => finish(false)
+    const timer = setTimeout(() => {
+      if (settled) return
+      logForDebugging(
+        `[SSHAuthProxy] response drain timed out after ${timeoutMs}ms; destroying stalled stream`,
+      )
+      res.destroy(new Error('SSHAuthProxy response drain timeout'))
+      finish(false)
+    }, timeoutMs)
+    timer.unref?.()
+    res.once('drain', onDrain)
+    res.once('close', onAbort)
+    res.once('error', onAbort)
   })
 }
 
@@ -372,7 +392,12 @@ async function handleProxyRequest(
           break
         }
         if (!res.write(value)) {
-          await waitForDrainOrClose(res)
+          const drained = await waitForDrainOrClose(res)
+          if (!drained) {
+            abortController.abort()
+            await reader.cancel().catch(() => {})
+            break
+          }
         }
       }
     } finally {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   clearPendingHistoryEntries,
@@ -941,7 +941,14 @@ describe('Group 4: Headless print.ts, QueryEngine.ts & structuredIO.ts', () => {
     expect(wasPutBack(u1)).toBe(false)
 
     // Verify print.ts checks spare_background_tasks before sweeping background agents
-    const printSrc = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const printDir = join(import.meta.dir, '../print')
+    const printSrc = [
+      readFileSync(join(import.meta.dir, '../print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(printSrc).toContain('interruptReq.spare_background_tasks === true')
     expect(printSrc).toContain('if (!spareBackgroundTasks)')
   })
@@ -1149,7 +1156,14 @@ describe('Group 4: Headless print.ts, QueryEngine.ts & structuredIO.ts', () => {
     expect(block).toContain('fast_mode_disabled_reason')
     expect(block).toContain('origin: options.origin')
 
-    const printSrc = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const printDir = join(import.meta.dir, '../print')
+    const printSrc = [
+      readFileSync(join(import.meta.dir, '../print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(printSrc).toContain(
       'rapidFollowupPreempt.noteTurnStart({\n            command: cmd,\n            members: batch,\n          })',
     )

@@ -39,9 +39,24 @@ type FileValidationResult = {
 }
 
 /**
- * Validates a file path to prevent path traversal attacks
+ * Validates a file path to prevent path traversal, NUL-byte injection,
+ * Windows drive-relative paths, and NTFS Alternate Data Stream (ADS) attacks.
  */
 export function isPathSafe(filePath: string): boolean {
+  if (!filePath || filePath.includes('\0')) {
+    return false
+  }
+
+  // Reject Windows drive-relative/drive-absolute paths (e.g. `C:foo`, `C:\foo`)
+  // and NTFS Alternate Data Streams (`file.txt:stream`, `file.txt::$DATA`).
+  if (/^[A-Za-z]:/.test(filePath) || filePath.includes(':')) {
+    return false
+  }
+
+  if (filePath.startsWith('/') || filePath.startsWith('\\')) {
+    return false
+  }
+
   if (containsPathTraversal(filePath)) {
     return false
   }
@@ -93,7 +108,12 @@ export function validateZipFile(
   }
 
   // Check compression ratio for zip bomb detection
-  const currentRatio = state.totalUncompressedSize / state.compressedSize
+  const currentRatio =
+    state.compressedSize > 0
+      ? state.totalUncompressedSize / state.compressedSize
+      : state.totalUncompressedSize > 0
+        ? Number.POSITIVE_INFINITY
+        : 0
   if (currentRatio > LIMITS.MAX_COMPRESSION_RATIO) {
     error = `Suspicious compression ratio detected: ${currentRatio.toFixed(1)}:1 (max: ${LIMITS.MAX_COMPRESSION_RATIO}:1). This may be a zip bomb.`
   }
@@ -101,10 +121,130 @@ export function validateZipFile(
   return error ? { isValid: false, error } : { isValid: true }
 }
 
+const STREAM_PUSH_CHUNK_BYTES = 16 * 1024
+
+/**
+ * Pre-validate the ZIP Central Directory before streaming inflation:
+ * - Rejects non-ZIP / truncated buffers missing EOCD (`0x06054b50`).
+ * - Catches overlapping/shared-payload CD bombs (including spoofed `originalSize: 0`
+ *   STORED entries referencing the same local header offset).
+ * - Enforces `MAX_FILE_COUNT`, `isPathSafe`, `MAX_FILE_SIZE`, `MAX_TOTAL_SIZE`,
+ *   and `MAX_COMPRESSION_RATIO` against Central Directory metadata.
+ */
+function validateCentralDirectoryBeforeStream(zipData: Buffer): void {
+  if (zipData.length < 22) {
+    throw new Error('Invalid zip data: archive too small')
+  }
+  const minEocd = Math.max(0, zipData.length - 22 - 0xffff)
+  let eocd = -1
+  for (let i = zipData.length - 22; i >= minEocd; i--) {
+    if (zipData.readUInt32LE(i) === 0x06054b50) {
+      eocd = i
+      break
+    }
+  }
+  if (eocd === -1) {
+    throw new Error('Invalid zip data: missing End of Central Directory')
+  }
+
+  const totalEntries = zipData.readUInt16LE(eocd + 10)
+  const cdSize = zipData.readUInt32LE(eocd + 12)
+  const cdOffset = zipData.readUInt32LE(eocd + 16)
+  // ZIP64 sentinel values are validated during streaming decompression below.
+  if (
+    totalEntries === 0xffff ||
+    cdSize === 0xffffffff ||
+    cdOffset === 0xffffffff
+  ) {
+    return
+  }
+  if (cdOffset + cdSize > eocd) {
+    throw new Error('Invalid zip data: central directory out of bounds')
+  }
+
+  const compressedArchiveSize = zipData.length
+  const seenOffsets = new Set<number>()
+  let count = 0
+  let totalDeclaredSize = 0
+  let pos = cdOffset
+  const end = cdOffset + cdSize
+
+  while (pos + 46 <= end && count < totalEntries) {
+    if (zipData.readUInt32LE(pos) !== 0x02014b50) {
+      throw new Error('Invalid zip data: corrupt central directory header')
+    }
+    const method = zipData.readUInt16LE(pos + 10)
+    const entryCompressedSize = zipData.readUInt32LE(pos + 20)
+    const entryUncompressedSize = zipData.readUInt32LE(pos + 24)
+    const nameLen = zipData.readUInt16LE(pos + 28)
+    const extraLen = zipData.readUInt16LE(pos + 30)
+    const commentLen = zipData.readUInt16LE(pos + 32)
+    const localHeaderOffset = zipData.readUInt32LE(pos + 42)
+
+    if (pos + 46 + nameLen > end) {
+      throw new Error('Invalid zip data: truncated central directory entry')
+    }
+    const name = zipData.subarray(pos + 46, pos + 46 + nameLen).toString('utf8')
+    count++
+
+    if (count > LIMITS.MAX_FILE_COUNT) {
+      throw new Error(
+        `Archive contains too many files: ${count} (max: ${LIMITS.MAX_FILE_COUNT})`,
+      )
+    }
+    if (!isPathSafe(name)) {
+      throw new Error(
+        `Unsafe file path detected: "${name}". Path traversal or absolute paths are not allowed.`,
+      )
+    }
+
+    // For STORED entries (method === 0), actual extracted bytes equal compressedSize
+    // even when uncompressedSize is spoofed to 0.
+    const effectiveEntrySize =
+      method === 0
+        ? Math.max(entryUncompressedSize, entryCompressedSize)
+        : entryUncompressedSize
+
+    if (effectiveEntrySize > LIMITS.MAX_FILE_SIZE) {
+      throw new Error(
+        `File "${name}" is too large: ${Math.round(effectiveEntrySize / 1024 / 1024)}MB (max: ${Math.round(LIMITS.MAX_FILE_SIZE / 1024 / 1024)}MB)`,
+      )
+    }
+    totalDeclaredSize += effectiveEntrySize
+    if (totalDeclaredSize > LIMITS.MAX_TOTAL_SIZE) {
+      throw new Error(
+        `Archive total size is too large: ${Math.round(totalDeclaredSize / 1024 / 1024)}MB (max: ${Math.round(LIMITS.MAX_TOTAL_SIZE / 1024 / 1024)}MB)`,
+      )
+    }
+    const ratio =
+      compressedArchiveSize > 0
+        ? totalDeclaredSize / compressedArchiveSize
+        : totalDeclaredSize > 0
+          ? Number.POSITIVE_INFINITY
+          : 0
+    if (ratio > LIMITS.MAX_COMPRESSION_RATIO) {
+      throw new Error(
+        `Suspicious compression ratio detected: ${ratio.toFixed(1)}:1 (max: ${LIMITS.MAX_COMPRESSION_RATIO}:1). This may be a zip bomb.`,
+      )
+    }
+
+    // Reject overlapping/shared local-header offset zip bombs.
+    if (seenOffsets.has(localHeaderOffset)) {
+      throw new Error(
+        `Suspicious compression ratio detected: overlapping zip entries reference duplicate offset ${localHeaderOffset}. This may be a zip bomb.`,
+      )
+    }
+    seenOffsets.add(localHeaderOffset)
+
+    pos += 46 + nameLen + extraLen + commentLen
+  }
+}
+
 /**
  * Unzips data from a Buffer and returns its contents as a record of file paths to Uint8Array data.
- * Uses unzipSync to avoid fflate worker termination crashes in bun.
- * Accepts raw zip bytes so that the caller can read the file asynchronously.
+ * Uses streaming `fflate.Unzip` + `UnzipPassThrough` + `UnzipInflate` so zip bombs
+ * (including archives with spoofed `originalSize: 0` headers) are aborted incrementally
+ * inside `file.ondata` BEFORE memory is exhausted, while avoiding worker threads in Bun.
  *
  * fflate is lazy-imported to avoid its ~196KB of top-level lookup tables (revfd
  * Int32Array(32769), rev Uint16Array(32768), etc.) being allocated at startup
@@ -113,28 +253,173 @@ export function validateZipFile(
 export async function unzipFile(
   zipData: Buffer,
 ): Promise<Record<string, Uint8Array>> {
-  const { unzipSync } = await import('fflate')
+  validateCentralDirectoryBeforeStream(zipData)
+
+  const { Unzip, UnzipInflate, UnzipPassThrough } = await import('fflate')
   const compressedSize = zipData.length
 
-  const state: ZipValidationState = {
+  const headerState: ZipValidationState = {
     fileCount: 0,
     totalUncompressedSize: 0,
-    compressedSize: compressedSize,
+    compressedSize,
     errors: [],
   }
 
-  const result = unzipSync(new Uint8Array(zipData), {
-    filter: file => {
-      const validationResult = validateZipFile(file, state)
-      if (!validationResult.isValid) {
-        throw new Error(validationResult.error!)
+  const result: Record<string, Uint8Array> = {}
+  let actualFileCount = 0
+  let actualTotalSize = 0
+  let streamError: Error | undefined
+
+  const failStream = (err: Error, terminate?: () => void): void => {
+    if (!streamError) {
+      streamError = err
+    }
+    try {
+      terminate?.()
+    } catch {
+      // ignore termination error
+    }
+  }
+
+  const unzipper = new Unzip(file => {
+    if (streamError) return
+
+    // Validate header metadata & path safety BEFORE starting decompression.
+    const validationResult = validateZipFile(
+      { name: file.name, originalSize: file.originalSize },
+      headerState,
+    )
+    if (!validationResult.isValid) {
+      failStream(new Error(validationResult.error!))
+      return
+    }
+
+    if (file.compression !== 0 && file.compression !== 8) {
+      failStream(
+        new Error(
+          `Unsupported zip compression method ${file.compression} for "${file.name}"`,
+        ),
+      )
+      return
+    }
+
+    actualFileCount++
+    if (actualFileCount > LIMITS.MAX_FILE_COUNT) {
+      failStream(
+        new Error(
+          `Archive contains too many files: ${actualFileCount} (max: ${LIMITS.MAX_FILE_COUNT})`,
+        ),
+      )
+      return
+    }
+
+    const chunks: Uint8Array[] = []
+    let actualFileSize = 0
+
+    file.ondata = (err, data, final) => {
+      if (streamError) {
+        chunks.length = 0
+        return
       }
-      return true
-    },
+      if (err) {
+        chunks.length = 0
+        failStream(err instanceof Error ? err : new Error(String(err)), () =>
+          file.terminate(),
+        )
+        return
+      }
+
+      if (data && data.byteLength > 0) {
+        actualFileSize += data.byteLength
+        if (actualFileSize > LIMITS.MAX_FILE_SIZE) {
+          chunks.length = 0
+          failStream(
+            new Error(
+              `File "${file.name}" is too large: ${Math.round(actualFileSize / 1024 / 1024)}MB (max: ${Math.round(LIMITS.MAX_FILE_SIZE / 1024 / 1024)}MB)`,
+            ),
+            () => file.terminate(),
+          )
+          return
+        }
+
+        actualTotalSize += data.byteLength
+        if (actualTotalSize > LIMITS.MAX_TOTAL_SIZE) {
+          chunks.length = 0
+          failStream(
+            new Error(
+              `Archive total size is too large: ${Math.round(actualTotalSize / 1024 / 1024)}MB (max: ${Math.round(LIMITS.MAX_TOTAL_SIZE / 1024 / 1024)}MB)`,
+            ),
+            () => file.terminate(),
+          )
+          return
+        }
+
+        const actualRatio =
+          compressedSize > 0
+            ? actualTotalSize / compressedSize
+            : actualTotalSize > 0
+              ? Number.POSITIVE_INFINITY
+              : 0
+        if (actualRatio > LIMITS.MAX_COMPRESSION_RATIO) {
+          chunks.length = 0
+          failStream(
+            new Error(
+              `Suspicious compression ratio detected: ${actualRatio.toFixed(1)}:1 (max: ${LIMITS.MAX_COMPRESSION_RATIO}:1). This may be a zip bomb.`,
+            ),
+            () => file.terminate(),
+          )
+          return
+        }
+
+        chunks.push(data)
+      }
+
+      if (final) {
+        if (chunks.length === 0) {
+          result[file.name] = new Uint8Array(0)
+        } else if (chunks.length === 1) {
+          result[file.name] = chunks[0]!
+        } else {
+          const combined = new Uint8Array(actualFileSize)
+          let offset = 0
+          for (const chunk of chunks) {
+            combined.set(chunk, offset)
+            offset += chunk.byteLength
+          }
+          result[file.name] = combined
+        }
+        chunks.length = 0
+      }
+    }
+
+    file.start()
   })
 
+  unzipper.register(UnzipPassThrough)
+  unzipper.register(UnzipInflate)
+
+  const bytes = new Uint8Array(
+    zipData.buffer,
+    zipData.byteOffset,
+    zipData.byteLength,
+  )
+  for (
+    let offset = 0;
+    offset < bytes.byteLength;
+    offset += STREAM_PUSH_CHUNK_BYTES
+  ) {
+    if (streamError) break
+    const end = Math.min(offset + STREAM_PUSH_CHUNK_BYTES, bytes.byteLength)
+    const isFinal = end >= bytes.byteLength
+    unzipper.push(bytes.subarray(offset, end), isFinal)
+  }
+
+  if (streamError) {
+    throw streamError
+  }
+
   logForDebugging(
-    `Zip extraction completed: ${state.fileCount} files, ${Math.round(state.totalUncompressedSize / 1024)}KB uncompressed`,
+    `Zip extraction completed: ${actualFileCount} files, ${Math.round(actualTotalSize / 1024)}KB uncompressed`,
   )
 
   return result

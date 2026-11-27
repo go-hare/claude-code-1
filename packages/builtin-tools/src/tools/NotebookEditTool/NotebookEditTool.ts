@@ -337,7 +337,11 @@ export const NotebookEditTool = buildTool({
   create(deps: ToolDeps) {
     return {
       async checkPermissions(input, callCtx): Promise<PermissionDecision> {
-        noteApprovedFileToolPath(input.notebook_path, callCtx.toolUseId)
+        const approvedPath =
+          deps.cwd && !isAbsolute(input.notebook_path)
+            ? resolve(deps.cwd(), input.notebook_path)
+            : input.notebook_path
+        noteApprovedFileToolPath(approvedPath, callCtx.toolUseId)
         return checkWritePermissionForTool(
           NotebookEditTool,
           input,
@@ -352,7 +356,7 @@ export const NotebookEditTool = buildTool({
       }) {
         const fullPath = isAbsolute(notebook_path)
           ? notebook_path
-          : resolve(getCwd(), notebook_path)
+          : resolve(deps.cwd?.() ?? getCwd(), notebook_path)
 
         // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 12)
         // Official 2.1.331: deps.agentWorktree (projected from toolUseContext.agentWorktree)
@@ -501,7 +505,7 @@ export const NotebookEditTool = buildTool({
         const { parentMessage, toolUseId } = callCtx
         const fullPath = isAbsolute(notebook_path)
           ? notebook_path
-          : resolve(getCwd(), notebook_path)
+          : resolve(deps.cwd?.() ?? getCwd(), notebook_path)
         const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
           fullPath,
           deps.permissions(),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   attachRemoteUiSurface,
@@ -52,6 +52,16 @@ import {
 afterEach(() => {
   resetSurfaceViewportClientsForTests()
 })
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 describe('densable 2.1.289 empty Epn / surfaceViewportClients', () => {
   test('empty registry → placementFromAttachedSurfaces undefined', () => {
@@ -148,7 +158,10 @@ describe('densable 2.1.289 CLI Fco / ui_attach (not overlay footer)', () => {
   })
 
   test('print.ts hosts ui_attach via Fco analog, not overlay footer', () => {
-    const print = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(ROOT, 'src/cli/print.ts'),
+      join(ROOT, 'src/cli/print'),
+    )
     expect(print).toContain("req.subtype === 'ui_attach'")
     expect(print).toContain('attachRemoteUiSurface')
     expect(print).toContain('listDrawingSurfaces')
@@ -230,7 +243,10 @@ describe('densable 2.1.289 CLI ui_detach / ui_render (not overlay footer)', () =
   })
 
   test('print.ts hosts ui_detach and ui_render', () => {
-    const print = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(ROOT, 'src/cli/print.ts'),
+      join(ROOT, 'src/cli/print'),
+    )
     expect(print).toContain("req.subtype === 'ui_detach'")
     expect(print).toContain("req.subtype === 'ui_render'")
     expect(print).toContain('detachRemoteUiSurface')
@@ -463,7 +479,10 @@ describe('densable 2.1.289 CLI ui_press / ui_input / ui_prompt_edit / ui_select'
   })
 
   test('print.ts hosts the four subtypes with unique English fail copies', () => {
-    const print = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(ROOT, 'src/cli/print.ts'),
+      join(ROOT, 'src/cli/print'),
+    )
     expect(print).toContain("req.subtype === 'ui_press'")
     expect(print).toContain("req.subtype === 'ui_input'")
     expect(print).toContain("req.subtype === 'ui_prompt_edit'")
@@ -765,7 +784,10 @@ describe('densable 2.1.289 CLI ui_panes through ui_client_fault', () => {
   })
 
   test('print.ts hosts ui_panes through ui_client_fault (not overlay footer)', () => {
-    const print = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+    const print = readModuleTree(
+      join(ROOT, 'src/cli/print.ts'),
+      join(ROOT, 'src/cli/print'),
+    )
     expect(print).toContain("req.subtype === 'ui_panes'")
     expect(print).toContain("req.subtype === 'ui_pane_show'")
     expect(print).toContain("req.subtype === 'ui_pane_focus'")

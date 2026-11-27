@@ -12,7 +12,7 @@
  * completes without a recursive query turn so max_turns=1 does not fire.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   createSyntheticOutputTool,
@@ -23,6 +23,16 @@ import { getEmptyToolPermissionContext } from '../../Tool.js'
 import { filterToolsByDenyRules } from '../../tools.js'
 
 const ROOT = join(import.meta.dir, '../../..')
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 const SUM_SCHEMA = {
   type: 'object',
@@ -84,7 +94,10 @@ describe('densable 2.1.283 json-schema / StructuredOutput', () => {
   })
 
   test('print.ts always re-appends StructuredOutput for jsonSchema or init schema', () => {
-    const src = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+    const src = readModuleTree(
+      join(ROOT, 'src/cli/print.ts'),
+      join(ROOT, 'src/cli/print'),
+    )
     expect(src).toContain('options.jsonSchema ?? initJsonSchema')
     expect(src).toContain('toolMatchesName(tool, SYNTHETIC_OUTPUT_TOOL_NAME)')
     expect(src).not.toContain('if (initJsonSchema && !options.jsonSchema)')
@@ -119,7 +132,10 @@ describe('densable 2.1.283 json-schema / StructuredOutput', () => {
         endsTurn: true,
       }),
     )
-    const querySrc = readFileSync(join(ROOT, 'src/query.ts'), 'utf8')
+    const querySrc = readModuleTree(
+      join(ROOT, 'src/query.ts'),
+      join(ROOT, 'src/query'),
+    )
     expect(querySrc).toContain('tengu_mcp_tool_result_ended_turn')
     expect(querySrc).toContain('if (toolRequestedEndTurn)')
   })

@@ -2,7 +2,7 @@
  * densable 2.1.289 Ba / qa / Efn / U1e — refusal-fallback preference ask.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   REFUSAL_PREFERENCE_CATEGORY_COPY,
@@ -68,14 +68,26 @@ describe('densable 2.1.289 refusal_fallback_preference', () => {
     expect(refusal).toContain('shouldAskRefusalFallbackPreference')
     expect(refusal).toContain('askRefusalFallbackPreference')
 
-    const query = readFileSync(join(root, 'src/query.ts'), 'utf8')
+    const readModuleTree = (entryPath: string, subDir: string): string =>
+      [
+        readFileSync(entryPath, 'utf8'),
+        ...readdirSync(subDir)
+          .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+          .sort()
+          .map(f => readFileSync(join(subDir, f), 'utf8')),
+      ].join('\n')
+
+    const query = readModuleTree(
+      join(root, 'src/query.ts'),
+      join(root, 'src/query'),
+    )
     expect(query).toContain('refusalFallbackPreferencePending')
     expect(query).toContain('askRefusalFallbackPreference')
     expect(query).toContain('refusal-fallback-edit')
 
-    const claude = readFileSync(
+    const claude = readModuleTree(
       join(root, 'src/services/api/claude.ts'),
-      'utf8',
+      join(root, 'src/services/api/claude'),
     )
     expect(claude).toContain('refusalFallbackPreferencePending')
     expect(claude).toContain('skip FXl')

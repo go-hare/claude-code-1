@@ -1,12 +1,16 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 describe('functionHooksModules 290 alignment (#4, #144, #149)', () => {
-  const src = readFileSync(
-    join(import.meta.dir, '../functionHooksModules.ts'),
-    'utf8',
-  )
+  const fhDir = join(import.meta.dir, '../functionHooks')
+  const src = [
+    readFileSync(join(import.meta.dir, '../functionHooksModules.ts'), 'utf8'),
+    ...readdirSync(fhDir)
+      .filter(f => f.endsWith('.ts'))
+      .sort()
+      .map(f => readFileSync(join(fhDir, f), 'utf8')),
+  ].join('\n')
 
   test('#149 ui.render 256-char prop clip & 100k budget', () => {
     expect(src).toContain('const UI_RENDER_SHORT_STRING_MAX = 256')

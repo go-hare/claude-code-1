@@ -3,7 +3,7 @@
  * GOLD: gold-248-unk-wave9-14.txt
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import chalk from 'chalk'
 import { hasMarkdownSyntax } from '../../../components/Markdown.js'
@@ -35,10 +35,14 @@ const fastCmd = readFileSync(
   join(import.meta.dir, '../../../commands/fast/fast.tsx'),
   'utf8',
 )
-const messagesSrc = readFileSync(
-  join(import.meta.dir, '../../messages.ts'),
-  'utf8',
-)
+const messagesDir = join(import.meta.dir, '../../messages')
+const messagesSrc = [
+  readFileSync(join(import.meta.dir, '../../messages.ts'), 'utf8'),
+  ...readdirSync(messagesDir)
+    .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+    .sort()
+    .map(f => readFileSync(join(messagesDir, f), 'utf8')),
+].join('\n')
 const promptSrc = readFileSync(
   join(import.meta.dir, '../../../components/PromptInput/PromptInput.tsx'),
   'utf8',

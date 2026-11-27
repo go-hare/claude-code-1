@@ -11,7 +11,22 @@ import {
   wrapPowerShellHookWithNoBashAstGuard,
 } from '../hooks.js'
 
-const hooksSrc = readFileSync(join(__dirname, '..', 'hooks.ts'), 'utf8')
+const hooksSrc = [
+  'hooks.ts',
+  'hooks/hookCore.ts',
+  'hooks/hookShellRunner.ts',
+  'hooks/hookOutputProcessor.ts',
+  'hooks/hookConfigRegistry.ts',
+  'hooks/hookModelSlotPool.ts',
+  'hooks/hookEngine.ts',
+  'hooks/hookEntryExecutor.ts',
+  'hooks/hookOutsideReplEngine.ts',
+  'hooks/hookToolEvents.ts',
+  'hooks/hookSessionAndPromptEvents.ts',
+  'hooks/hookLifecycleEvents.ts',
+]
+  .map(rel => readFileSync(join(__dirname, '..', rel), 'utf8'))
+  .join('\n')
 
 describe('#1203 Windows PreToolUse/PermissionRequest quoted-strings PowerShell guard', () => {
   type GuardHookArg = Parameters<typeof wrapPowerShellHookWithNoBashAstGuard>[1]

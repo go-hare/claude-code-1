@@ -80,6 +80,7 @@ import {
 import { resetTurnHookQueuedPrompts } from './processUserInput/turnHookQueuedPrompts.js'
 import { recordQueueOperation } from './sessionStorage.js'
 import {
+  getActiveSessionFromAls,
   getBootstrapSession,
   getBootstrapSessionHost,
   runWithSession,
@@ -110,15 +111,28 @@ export function setQueueSessionReadyPromise(
   const hostState = getHostQueueState()
   if (promise === null) {
     hostState.queueSessionReadyPromise = null
+    hostState.attachedReadyPromise = null
+    for (const listener of [...hostState.readyChangeListeners]) {
+      listener(null)
+    }
     return
   }
   const clear = (): void => {
     if (hostState.queueSessionReadyPromise === promise) {
       hostState.queueSessionReadyPromise = null
     }
+    if (hostState.attachedReadyPromise === promise) {
+      hostState.attachedReadyPromise = null
+    }
   }
   hostState.queueSessionReadyPromise = promise
+  if (hostState.attachedReadyPromise !== promise) {
+    hostState.attachedReadyPromise = null
+  }
   promise.then(clear, clear)
+  for (const listener of [...hostState.readyChangeListeners]) {
+    listener(promise)
+  }
 }
 
 /** densable `Jvo.set` — override or clear the queue record hook runner. */
@@ -256,19 +270,83 @@ function registerQueueWriterCleanup(
   })
 }
 
+type QueuedRecordEntry = {
+  record: QueueOperationMessage
+  session: Session | undefined
+}
+
+function runWithCapturedRecordSession<T>(
+  session: Session | undefined,
+  fn: () => T,
+): T {
+  return session !== undefined && getActiveSessionFromAls() !== session
+    ? runWithSession(session, fn)
+    : fn()
+}
+
 function createHostQueueRecordWriter(
   writeRecord: (record: QueueOperationMessage) => void,
   timeoutMs: number,
   resolveHostState: () => HostQueueState,
 ): (record: QueueOperationMessage, hookOrigin?: unknown) => void {
-  const queue: QueueOperationMessage[] = []
-  const inFlight = new Map<
-    QueueOperationMessage,
-    ReturnType<typeof setTimeout>
-  >()
-  const waitingReady = new Map<QueueOperationMessage, () => boolean>()
+  const queue: QueuedRecordEntry[] = []
+  const inFlight = new Map<QueuedRecordEntry, ReturnType<typeof setTimeout>>()
+  const waitingReady = new Map<QueuedRecordEntry, () => boolean>()
+  let localAttachedReadyPromise: Promise<unknown> | null = null
+  let registeredReadyHost: HostQueueState | null = null
   let cleanupRegistered = false
   let isClosed = false
+
+  function detachReadyChangeListener(): void {
+    if (registeredReadyHost !== null) {
+      registeredReadyHost.readyChangeListeners.delete(onReadyPromiseChanged)
+      registeredReadyHost = null
+    }
+  }
+
+  function attachReadyPromise(
+    hostState: HostQueueState,
+    ready: Promise<unknown>,
+  ): void {
+    if (ready === localAttachedReadyPromise) {
+      hostState.attachedReadyPromise = ready
+      return
+    }
+    localAttachedReadyPromise = ready
+    hostState.attachedReadyPromise = ready
+    const onSettled = (): void => {
+      if (localAttachedReadyPromise === ready) {
+        localAttachedReadyPromise = null
+      }
+      if (hostState.attachedReadyPromise === ready) {
+        hostState.attachedReadyPromise = null
+      }
+      drainWaiting(hostState, ready)
+    }
+    ready.then(onSettled, onSettled)
+  }
+
+  function onReadyPromiseChanged(next: Promise<unknown> | null): void {
+    const hostState = registeredReadyHost
+    if (hostState === null || isClosed) return
+    if (waitingReady.size === 0) {
+      detachReadyChangeListener()
+      return
+    }
+    if (next === null) {
+      drainWaiting(hostState)
+      return
+    }
+    attachReadyPromise(hostState, next)
+  }
+
+  function ensureReadyChangeListener(hostState: HostQueueState): void {
+    if (registeredReadyHost !== hostState) {
+      detachReadyChangeListener()
+      registeredReadyHost = hostState
+      hostState.readyChangeListeners.add(onReadyPromiseChanged)
+    }
+  }
 
   function flushHead(): void {
     let head = queue[0]
@@ -279,7 +357,10 @@ function createHostQueueRecordWriter(
     ) {
       queue.shift()
       try {
-        writeRecord(head)
+        const entry = head
+        runWithCapturedRecordSession(entry.session, () =>
+          writeRecord(entry.record),
+        )
       } catch (err) {
         logQueueRecordError(err)
       }
@@ -293,36 +374,44 @@ function createHostQueueRecordWriter(
   ): void {
     const current = hostState.queueSessionReadyPromise
     const ready = current === null || current === settledPromise
-    for (const [rec, start] of ready ? waitingReady : []) {
-      waitingReady.delete(rec)
+    if (!ready) {
+      if (current !== null && waitingReady.size > 0) {
+        ensureReadyChangeListener(hostState)
+        attachReadyPromise(hostState, current)
+      }
+      return
+    }
+    for (const [entry, start] of waitingReady) {
+      waitingReady.delete(entry)
       try {
         if (start()) break
       } catch (err) {
         logQueueRecordError(err)
       }
     }
+    if (waitingReady.size === 0) {
+      detachReadyChangeListener()
+    }
     flushHead()
   }
 
   function settleRecord(
     hostState: HostQueueState,
-    orig: QueueOperationMessage,
+    entry: QueuedRecordEntry,
     updated: QueueOperationMessage,
   ): void {
-    const timer = inFlight.get(orig)
+    const timer = inFlight.get(entry)
     if (timer === undefined) return
     clearTimeout(timer)
-    inFlight.delete(orig)
-    const idx = queue.indexOf(orig)
-    if (idx !== -1) {
-      queue[idx] = updated
-    }
+    inFlight.delete(entry)
+    entry.record = updated
     drainWaiting(hostState)
   }
 
   const controller: QueueRecordWriterController = {
     close(discardWrites = false): void {
       isClosed = true
+      detachReadyChangeListener()
       for (const timer of inFlight.values()) {
         clearTimeout(timer)
       }
@@ -345,32 +434,43 @@ function createHostQueueRecordWriter(
 
   function startHook(
     hostState: HostQueueState,
-    record: QueueOperationMessage,
+    entry: QueuedRecordEntry,
     content: string,
     hookOrigin?: unknown,
   ): boolean {
     const runner =
       hostState.customQueueRecordHookRunner ?? defaultQueueRecordHookRunner
-    const result = runner(content, hookOrigin)
+    const result = runWithCapturedRecordSession(entry.session, () =>
+      runner(content, hookOrigin),
+    )
     if (result === undefined) return false
     ensureCleanup(hostState)
-    const timer = setTimeout(settleRecord, timeoutMs, hostState, record, record)
+    const timer = setTimeout(
+      settleRecord,
+      timeoutMs,
+      hostState,
+      entry,
+      entry.record,
+    )
     timer.unref?.()
-    inFlight.set(record, timer)
+    inFlight.set(entry, timer)
     Promise.resolve(result).then(
       rewritten => {
         if (typeof rewritten === 'string') {
-          settleRecord(hostState, record, { ...record, content: rewritten })
+          settleRecord(hostState, entry, {
+            ...entry.record,
+            content: rewritten,
+          })
           return
         }
         logQueueRecordError(
           new Error('A queue record came back from its hooks no text'),
         )
-        settleRecord(hostState, record, record)
+        settleRecord(hostState, entry, entry.record)
       },
       err => {
         logQueueRecordError(err)
-        settleRecord(hostState, record, record)
+        settleRecord(hostState, entry, entry.record)
       },
     )
     return true
@@ -380,37 +480,39 @@ function createHostQueueRecordWriter(
     // Keep controller reachable for the lifetime of this writer function.
     void controller
     const hostState = resolveHostState()
+    const entry: QueuedRecordEntry = {
+      record,
+      session: getActiveSessionFromAls(),
+    }
     const { content } = record
     const canHook = typeof content === 'string' && !isClosed
     const ready = hostState.queueSessionReadyPromise
     if (canHook && (ready !== null || waitingReady.size > 0)) {
-      queue.push(record)
-      waitingReady.set(record, () =>
-        startHook(hostState, record, content, hookOrigin),
+      queue.push(entry)
+      waitingReady.set(entry, () =>
+        startHook(hostState, entry, content, hookOrigin),
       )
       ensureCleanup(hostState)
-      if (ready !== null && waitingReady.size === 1) {
-        ready.then(
-          () => drainWaiting(hostState, ready),
-          () => drainWaiting(hostState, ready),
-        )
+      if (ready !== null) {
+        ensureReadyChangeListener(hostState)
+        attachReadyPromise(hostState, ready)
       }
       return
     }
     let started = false
     try {
-      started = canHook && startHook(hostState, record, content, hookOrigin)
+      started = canHook && startHook(hostState, entry, content, hookOrigin)
     } catch (err) {
       logQueueRecordError(err)
-      queue.push(record)
+      queue.push(entry)
       flushHead()
       return
     }
     if (!started && queue.length === 0) {
-      writeRecord(record)
+      runWithCapturedRecordSession(entry.session, () => writeRecord(record))
       return
     }
-    queue.push(record)
+    queue.push(entry)
   }
 }
 
@@ -658,8 +760,9 @@ export class MessageQueueInstance {
     }
 
     if (
+      !resurrected &&
       this.countQueuedPeerMessages() >=
-      getPeerAdmissionLimits().maxQueuedPeerMessages
+        getPeerAdmissionLimits().maxQueuedPeerMessages
     ) {
       reportPeerDrop({
         reason: 'queue-full',
@@ -1078,9 +1181,7 @@ export class MessageQueueInstance {
       deliveryId: _deliveryId,
       ...rest
     } = taken.cmd
-    this.putBackUuids.add(taken.uuid)
-    this.foldInFlight.delete(taken.uuid)
-    this.enqueueReportingAdmission(
+    const res = this.enqueueReportingAdmission(
       {
         ...rest,
         drainOnly: true,
@@ -1090,6 +1191,11 @@ export class MessageQueueInstance {
       },
       { ahead: true },
     )
+    if (!res.admitted) {
+      return undefined
+    }
+    this.putBackUuids.add(taken.uuid)
+    this.foldInFlight.delete(taken.uuid)
     return taken.cmd
   }
 
@@ -1272,10 +1378,7 @@ export class MessageQueueInstance {
     if (this.cancelPending.delete(uuid)) {
       this.cancelPending.add(uuid)
     } else {
-      if (
-        opts?.terminalEmitted !== true &&
-        this.cancelPending.size >= CANCEL_PENDING_CAP
-      ) {
+      while (this.cancelPending.size >= CANCEL_PENDING_CAP) {
         let evict: string | undefined
         for (const id of this.cancelPending) {
           if (!this.cancelPendingAcked.has(id)) {
@@ -1283,12 +1386,24 @@ export class MessageQueueInstance {
             break
           }
         }
-        if (evict !== undefined) this.cancelPending.delete(evict)
+        if (evict !== undefined) {
+          this.cancelPending.delete(evict)
+        } else {
+          const oldest = this.cancelPending.values().next().value
+          if (oldest === undefined) break
+          this.cancelPending.delete(oldest)
+          this.cancelPendingAcked.delete(oldest)
+        }
       }
       this.cancelPending.add(uuid)
     }
     if (opts?.terminalEmitted !== true) return false
     if (this.cancelPendingAcked.has(uuid)) return false
+    while (this.cancelPendingAcked.size >= CANCEL_PENDING_CAP) {
+      const oldestAcked = this.cancelPendingAcked.values().next().value
+      if (oldestAcked === undefined) break
+      this.cancelPendingAcked.delete(oldestAcked)
+    }
     this.cancelPendingAcked.add(uuid)
     return true
   }
@@ -1605,6 +1720,8 @@ export type HostQueueState = {
   readonly defaultQueue: MessageQueueInstance
   activeQueue: MessageQueueInstance
   queueSessionReadyPromise: Promise<unknown> | null
+  attachedReadyPromise: Promise<unknown> | null
+  readonly readyChangeListeners: Set<(next: Promise<unknown> | null) => void>
   customQueueRecordHookRunner: QueueRecordHookRunner | null
   readonly queueRecordWriter: (
     record: QueueOperationMessage,
@@ -1632,6 +1749,8 @@ export function getHostQueueState(
       defaultQueue: hostDefaultQueue,
       activeQueue: hostDefaultQueue,
       queueSessionReadyPromise: null,
+      attachedReadyPromise: null,
+      readyChangeListeners: new Set(),
       customQueueRecordHookRunner: null,
       queueRecordWriter,
     }

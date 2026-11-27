@@ -2,7 +2,7 @@
  * densable 2.1.239 #54 — `jrl` / `ENS` / `SNS` / `iDn` / `/clear` onlyIfEmpty.
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { growthbookMock } from '../../../../tests/mocks/growthbook.js'
 import { resetChromeInstallSessionState } from '../sessionState.js'
@@ -303,7 +303,14 @@ describe('official call sites', () => {
   })
 
   test('in-process Chrome MCP sets binding then ANS', () => {
-    const src = readFileSync(join(root, 'src/services/mcp/client.ts'), 'utf8')
+    const clientDir = join(root, 'src/services/mcp/client')
+    const src = [
+      readFileSync(join(root, 'src/services/mcp/client.ts'), 'utf8'),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('createChromeSocketClient')
     expect(src).toContain('setChromeBinding(context, socketClient)')
     expect(src).toContain('registerChromeTabGroupCleanup()')

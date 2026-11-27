@@ -7,7 +7,7 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { UUID } from 'crypto'
 import * as realAuth from '../../utils/auth.js'
@@ -631,18 +631,26 @@ describe('quotaAutoResume densable 2.1.234', () => {
   })
 
   test('REPL fork switchSession uses fork reason (RDl keep latch)', () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../../screens/REPL.tsx'),
-      'utf8',
-    )
+    const replDir = join(import.meta.dir, '../../screens/repl')
+    const src = [
+      readFileSync(join(import.meta.dir, '../../screens/REPL.tsx'), 'utf8'),
+      ...readdirSync(replDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(replDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain("entrypoint === 'fork' ? 'fork' : 'resume'")
   })
 
   test('print.ts has no quota auto-resume wait loop (gold kDl REPL-only)', () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../../cli/print.ts'),
-      'utf8',
-    )
+    const printDir = join(import.meta.dir, '../../cli/print')
+    const src = [
+      readFileSync(join(import.meta.dir, '../../cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(src).not.toContain('quotaAutoResume')
     expect(src).not.toContain('tickQuotaAutoResume')
     expect(src).not.toContain('tryAutoArmQuotaAutoResume')
@@ -752,10 +760,15 @@ describe('quotaAutoResume densable 2.1.234', () => {
   })
 
   test('remote_attach is passed on local hydrate / remote TUI create', () => {
-    const storage = readFileSync(
-      join(import.meta.dir, '../../utils/sessionStorage.ts'),
-      'utf8',
-    )
+    const utilsDir = join(import.meta.dir, '../../utils')
+    const subDir = join(utilsDir, 'sessionStorage')
+    const storage = [
+      readFileSync(join(utilsDir, 'sessionStorage.ts'), 'utf8'),
+      ...readdirSync(subDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(subDir, f), 'utf8')),
+    ].join('\n')
     const main = readFileSync(join(import.meta.dir, '../../main.tsx'), 'utf8')
     expect(storage).toContain(
       "switchSession(asSessionId(sessionId), null, 'remote_attach')",

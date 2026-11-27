@@ -2,15 +2,24 @@
  * densable 2.1.246 — Bkn owner persist + initReplBridge Fe/Fr/ze/Mr + qs kn().
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
+
+function readSessionStorageSource(): string {
+  const utilsDir = join(import.meta.dir, '../../utils')
+  const subDir = join(utilsDir, 'sessionStorage')
+  return [
+    readFileSync(join(utilsDir, 'sessionStorage.ts'), 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => f.endsWith('.ts'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 describe('densable 2.1.246 Bkn owner + occupancy owner-match', () => {
   test('saveBridgeSession stamps owner onto transcript and process cache', () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../../utils/sessionStorage.ts'),
-      'utf8',
-    )
+    const src = readSessionStorageSource()
     expect(src).toContain(
       'owner?.accountUuid ? { ownerAccountUuid: owner.accountUuid }',
     )
@@ -83,10 +92,7 @@ describe('densable 2.1.246 Bkn owner + occupancy owner-match', () => {
       'leftoverGt / hook pin must not refuse the mint this arm just promised',
     )
     expect(init).toContain("logEvent('rc_cross_account_suppression'")
-    const store = readFileSync(
-      join(import.meta.dir, '../../utils/sessionStorage.ts'),
-      'utf8',
-    )
+    const store = readSessionStorageSource()
     expect(store).toContain("type: 'history-suppression'")
     expect(store).toContain("cause: 'migration'")
     expect(store).toContain('knownTaintedSessionIds')

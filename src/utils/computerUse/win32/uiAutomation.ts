@@ -5,7 +5,37 @@
  * value setting, and hit-testing via PowerShell + System.Windows.Automation.
  */
 
-import { ps } from './shared.js'
+import { spawnSync } from 'node:child_process'
+
+const UIA_PS_MAX_BUFFER = 32 * 1024 * 1024
+
+/**
+ * P1-E6(c): Escape ASCII apostrophe AND Unicode single-quote variants recognized
+ * by PowerShell's parser (`'`, `\u2018`, `\u2019`, `\u201a`, `\u201b`) by doubling
+ * each quote character inside a single-quoted PowerShell literal.
+ */
+export function escapePowerShellSingleQuoted(value: string): string {
+  return value.replace(/['\u2018\u2019\u201a\u201b]/g, '$&$&')
+}
+
+/**
+ * Run a PowerShell script via UTF-16LE `-EncodedCommand` so Unicode single quotes
+ * and non-ASCII text cannot be mangled by Windows codepages or argv parsing.
+ */
+function runEncodedPs(script: string): string {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  const result = spawnSync(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: UIA_PS_MAX_BUFFER,
+      windowsHide: true,
+    },
+  )
+  if (result.error || result.status !== 0) return ''
+  return result.stdout ? result.stdout.toString('utf8').trim() : ''
+}
 
 export interface UIElement {
   name: string
@@ -107,7 +137,8 @@ if ($window -eq $null) {
  * Get the UI element tree of a window, up to `depth` levels deep (default 3).
  */
 export function getUITree(windowTitle: string, depth: number = 3): UIElement[] {
-  const escapedTitle = windowTitle.replace(/'/g, "''")
+  const escapedTitle = escapePowerShellSingleQuoted(windowTitle)
+  const safeDepth = Number.isFinite(depth) ? Math.max(0, Math.trunc(depth)) : 3
   const script = `
 ${UIA_ASSEMBLIES}
 $title = '${escapedTitle}'
@@ -148,14 +179,14 @@ function Get-UIChildren($parent, $currentDepth, $maxDepth) {
   return $result
 }
 
-$tree = Get-UIChildren $window 0 ${depth}
+$tree = Get-UIChildren $window 0 ${safeDepth}
 if ($tree -eq $null -or $tree.Count -eq 0) {
   Write-Output '[]'
 } else {
   $tree | ConvertTo-Json -Depth 20 -Compress
 }
 `
-  const raw = ps(script)
+  const raw = runEncodedPs(script)
   const parsed = parseJsonSafe<UIElement | UIElement[]>(raw, [])
   return Array.isArray(parsed) ? parsed : [parsed]
 }
@@ -167,12 +198,12 @@ export function findElement(
   windowTitle: string,
   query: { name?: string; controlType?: string; automationId?: string },
 ): UIElement | null {
-  const escapedTitle = windowTitle.replace(/'/g, "''")
+  const escapedTitle = escapePowerShellSingleQuoted(windowTitle)
 
   // Build conditions array
   const conditions: string[] = []
   if (query.name) {
-    const v = query.name.replace(/'/g, "''")
+    const v = escapePowerShellSingleQuoted(query.name)
     conditions.push(
       `[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, '${v}')`,
     )
@@ -181,13 +212,13 @@ export function findElement(
     if (!VALID_CONTROL_TYPES.has(query.controlType)) {
       return null // Invalid control type
     }
-    const v = query.controlType.replace(/'/g, "''")
+    const v = escapePowerShellSingleQuoted(query.controlType)
     conditions.push(
       `[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::${v})`,
     )
   }
   if (query.automationId) {
-    const v = query.automationId.replace(/'/g, "''")
+    const v = escapePowerShellSingleQuoted(query.automationId)
     conditions.push(
       `[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '${v}')`,
     )
@@ -235,7 +266,7 @@ try {
 } catch {}
 $obj | ConvertTo-Json -Compress
 `
-  const raw = ps(script)
+  const raw = runEncodedPs(script)
   return parseJsonSafe<UIElement | null>(raw, null)
 }
 
@@ -246,8 +277,8 @@ export function clickElement(
   windowTitle: string,
   automationId: string,
 ): boolean {
-  const escapedTitle = windowTitle.replace(/'/g, "''")
-  const escapedId = automationId.replace(/'/g, "''")
+  const escapedTitle = escapePowerShellSingleQuoted(windowTitle)
+  const escapedId = escapePowerShellSingleQuoted(automationId)
 
   const script = `
 ${UIA_ASSEMBLIES}
@@ -272,7 +303,7 @@ try {
   Write-Output 'false'
 }
 `
-  return ps(script) === 'true'
+  return runEncodedPs(script) === 'true'
 }
 
 /**
@@ -283,9 +314,9 @@ export function setValue(
   automationId: string,
   value: string,
 ): boolean {
-  const escapedTitle = windowTitle.replace(/'/g, "''")
-  const escapedId = automationId.replace(/'/g, "''")
-  const escapedValue = value.replace(/'/g, "''")
+  const escapedTitle = escapePowerShellSingleQuoted(windowTitle)
+  const escapedId = escapePowerShellSingleQuoted(automationId)
+  const escapedValue = escapePowerShellSingleQuoted(value)
 
   const script = `
 ${UIA_ASSEMBLIES}
@@ -310,17 +341,19 @@ try {
   Write-Output 'false'
 }
 `
-  return ps(script) === 'true'
+  return runEncodedPs(script) === 'true'
 }
 
 /**
  * Get the UI element at a specific screen coordinate.
  */
 export function elementAtPoint(x: number, y: number): UIElement | null {
+  const safeX = Number.isFinite(x) ? Math.trunc(x) : 0
+  const safeY = Number.isFinite(y) ? Math.trunc(y) : 0
   const script = `
 ${UIA_ASSEMBLIES}
 try {
-  $point = [System.Windows.Point]::new(${x}, ${y})
+  $point = [System.Windows.Point]::new(${safeX}, ${safeY})
   $el = [System.Windows.Automation.AutomationElement]::FromPoint($point)
   if ($el -eq $null) {
     Write-Output 'null'
@@ -348,6 +381,6 @@ try {
   Write-Output 'null'
 }
 `
-  const raw = ps(script)
+  const raw = runEncodedPs(script)
   return parseJsonSafe<UIElement | null>(raw, null)
 }

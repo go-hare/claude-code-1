@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import {
   existsSync,
   mkdtempSync,
@@ -8,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { createServer, type Server } from 'node:http'
+import { createServer, type Server, type ServerResponse } from 'node:http'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -17,10 +18,13 @@ import {
   buildPluginScaffoldFiles,
   renderHookHandlerTs,
 } from '../../cli/handlers/pluginScaffold.js'
+import { buildSpareHostEnv } from '../../daemon/bgSpare.js'
 import {
   createAuthProxy,
   createTcpAuthProxy,
+  DRAIN_TIMEOUT_MS,
   MAX_PROXY_REQUEST_BODY_BYTES,
+  waitForDrainOrClose,
 } from '../../ssh/SSHAuthProxy.js'
 import { runCommandCapture } from '../../ssh/SSHDeploy.js'
 import { triggerGcIfAvailable } from '../heapDumpService.js'
@@ -681,6 +685,56 @@ describe('Node.js runtime compatibility across all subsystems (#331)', () => {
         'Embedded ripgrep --version probe timed out after 5000ms',
       )
       expect(rgSrc).toContain('timer.unref?.()')
+    })
+
+    test('Item 8 regression: SSHAuthProxy waitForDrainOrClose times out and destroys stalled response instead of hanging forever', async () => {
+      expect(DRAIN_TIMEOUT_MS).toBeGreaterThan(0)
+
+      let destroyedErr: Error | undefined
+      const fakeRes = Object.assign(new EventEmitter(), {
+        destroyed: false,
+        writableEnded: false,
+        destroy(err?: Error) {
+          this.destroyed = true
+          destroyedErr = err
+          return this
+        },
+      }) as unknown as ServerResponse
+
+      const start = Date.now()
+      const drained = await waitForDrainOrClose(fakeRes, 40)
+      const elapsed = Date.now() - start
+
+      expect(drained).toBe(false)
+      expect(elapsed).toBeLessThan(1_000)
+      expect(destroyedErr?.message).toContain('drain timeout')
+    })
+
+    test('Item 10 regression: spare PTY host mints CLAUDE_BG_PTY_AUTH and claim/manager pass ptyAuthToken', () => {
+      const env = buildSpareHostEnv({
+        claimNonce: 'nonce-123',
+        ptyAuthToken: 'pty-token-xyz',
+      })
+      expect(env.CLAUDE_BG_PTY_AUTH).toBe('pty-token-xyz')
+
+      const spareSrc = readFileSync(
+        join(REPO_ROOT, 'src/daemon/bgSpare.ts'),
+        'utf8',
+      )
+      expect(spareSrc).toContain('const ptyAuthToken = mintPtyAuthToken()')
+      expect(spareSrc).toContain('ptyAuthToken,')
+
+      const workerSrc = readFileSync(
+        join(REPO_ROOT, 'src/daemon/bgWorker.ts'),
+        'utf8',
+      )
+      expect(workerSrc).toContain('spare.ptyAuthToken')
+
+      const managerSrc = readFileSync(
+        join(REPO_ROOT, 'src/daemon/bgManager.ts'),
+        'utf8',
+      )
+      expect(managerSrc).toContain('spare.ptyAuthToken')
     })
   })
 })

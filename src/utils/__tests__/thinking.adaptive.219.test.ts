@@ -2,7 +2,7 @@
  * densable 2.1.219 IQt / HQt / T5i — adaptive_thinking + rejects_disabled_thinking.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { growthbookMock } from '../../../tests/mocks/growthbook'
 import * as realSettings from 'src/utils/settings/settings.js'
@@ -205,10 +205,17 @@ describe('densable 2.1.283 p3n resolveAdaptiveThinkingType', () => {
   })
 
   test('claude.ts paramsFromContext calls p3n with resolvedModel', () => {
-    const claude = readFileSync(
-      join(import.meta.dir, '../../services/api/claude.ts'),
-      'utf8',
-    )
+    const claudeDir = join(import.meta.dir, '../../services/api/claude')
+    const claude = [
+      readFileSync(
+        join(import.meta.dir, '../../services/api/claude.ts'),
+        'utf8',
+      ),
+      ...readdirSync(claudeDir)
+        .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+        .sort()
+        .map(f => readFileSync(join(claudeDir, f), 'utf8')),
+    ].join('\n')
     expect(claude).toContain('resolveAdaptiveThinkingType')
     expect(claude).toContain('resolvedModel,')
     expect(claude).toContain('firstPartyNameToCanonical(resolvedModel)')

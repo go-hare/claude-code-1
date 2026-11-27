@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import React, { useMemo, useRef, useState } from 'react';
@@ -342,24 +342,28 @@ describe('UI 2.1.328 1:1 alignment fixes', () => {
     const detachA = viewport.attach(handleA);
     expect(viewport.handle).toBe(handleA);
     expect(listenersA.size).toBe(1);
+    expect(notifications).toBe(1);
 
     for (const fn of listenersA) fn();
-    expect(notifications).toBe(1);
+    expect(notifications).toBe(2);
 
     const detachB = viewport.attach(handleB);
     expect(viewport.handle).toBe(handleB);
     expect(listenersA.size).toBe(0);
     expect(listenersB.size).toBe(1);
+    expect(notifications).toBe(3);
 
     for (const fn of listenersB) fn();
-    expect(notifications).toBe(2);
+    expect(notifications).toBe(4);
 
     detachB();
     expect(viewport.handle).toBe(handleA);
     expect(listenersA.size).toBe(1);
+    expect(notifications).toBe(5);
 
     detachA();
     expect(viewport.handle).toBeNull();
+    expect(notifications).toBe(6);
     unsub();
   });
 
@@ -835,13 +839,25 @@ describe('UI 2.1.328 1:1 alignment fixes', () => {
   });
 
   test('all layout readers match official eo without a local retry limit', () => {
+    const readModuleTree = (entryPath: string, subDir: string): string =>
+      [
+        readFileSync(entryPath, 'utf8'),
+        ...readdirSync(subDir)
+          .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+          .sort()
+          .map(f => readFileSync(join(subDir, f), 'utf8')),
+      ].join('\n');
+
     for (const file of [
       '../FullscreenLayout.tsx',
       '../PluginRasterPanes.tsx',
       '../PromptInput/Notifications.tsx',
       '../../context/promptOverlayContext.tsx',
     ]) {
-      const src = readFileSync(join(import.meta.dir, file), 'utf8');
+      const src =
+        file === '../PluginRasterPanes.tsx'
+          ? readModuleTree(join(import.meta.dir, file), join(import.meta.dir, '../pluginRaster'))
+          : readFileSync(join(import.meta.dir, file), 'utf8');
       expect(src).toContain('useSyncExternalStore(subscribeLayout, read)');
       expect(src).toContain('if (!Object.is(read(), snapshot)) bump()');
       expect(src).not.toContain('consecutiveBumpsRef');
@@ -849,14 +865,26 @@ describe('UI 2.1.328 1:1 alignment fixes', () => {
   });
 
   test('REPL modal construction follows kje without a conditional dialog-scroll effect', () => {
-    const repl = readFileSync(join(import.meta.dir, '../../screens/REPL.tsx'), 'utf8');
+    const repl = [
+      readFileSync(join(import.meta.dir, '../../screens/REPL.tsx'), 'utf8'),
+      ...readdirSync(join(import.meta.dir, '../../screens/repl'))
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(import.meta.dir, '../../screens/repl', f), 'utf8')),
+    ].join('\n');
     expect(repl).not.toContain('prevOzsVisibleRef');
     expect(repl).not.toContain('scrollPin.showDialog(undefined, true)');
     expect(repl).not.toContain('scrollPin.onDialogLeft()');
   });
 
   test('sampling follows upstream without cache warning injection or a config toggle', () => {
-    const query = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8');
+    const query = [
+      readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8'),
+      ...readdirSync(join(import.meta.dir, '../../query'))
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(import.meta.dir, '../../query', f), 'utf8')),
+    ].join('\n');
     expect(query).not.toContain('createCacheWarningMessage');
     expect(query).not.toContain('shouldShowCacheWarning');
     expect(query).not.toContain('cacheWarning.js');

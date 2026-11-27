@@ -1,8 +1,19 @@
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'bun:test'
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '../../../..')
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 describe('gold thinking Ss paint', () => {
   test('AssistantThinkingMessage uses therefore glyph and collapsed italic', async () => {
@@ -87,7 +98,10 @@ describe('gold thinking Ss paint', () => {
   })
 
   test('thinking-block text_delta is gated off the live preview', async () => {
-    const src = await Bun.file(join(ROOT, 'src/utils/messages.ts')).text()
+    const src = readModuleTree(
+      join(ROOT, 'src/utils/messages.ts'),
+      join(ROOT, 'src/utils/messages'),
+    )
     expect(src).toContain('isOpenThinkingPreviewBlock')
     expect(src).toContain('setOpenStreamPreviewBlock')
     expect(src).toContain("t === 'thinking' || t === 'redacted_thinking'")
@@ -168,7 +182,10 @@ describe('gold thinking Ss paint', () => {
     expect(engine).toContain('setRetryStatus: leftoverIhrSdkRetry')
     expect(engine).toContain('setStreamMode: leftoverIhrSdkMode')
     expect(engine).toContain("type === 'spinner_mode'")
-    const query = await Bun.file(join(ROOT, 'src/query.ts')).text()
+    const query = readModuleTree(
+      join(ROOT, 'src/query.ts'),
+      join(ROOT, 'src/query'),
+    )
     expect(query).toContain("type: 'spinner_mode'")
     expect(query).toContain('leftoverIhrStampTurnEffort')
     expect(query).toContain('leftoverStampTurnEffort(sf.toModel)')
@@ -188,7 +205,10 @@ describe('gold thinking Ss paint', () => {
     expect(runner).not.toContain('toolUseContext.setStreamMode?.(mode)')
     expect(runner).toContain('agentId: asAgentId(taskId)')
     expect(absorb).toContain("mode: ''")
-    const repl = await Bun.file(join(ROOT, 'src/screens/REPL.tsx')).text()
+    const repl = readModuleTree(
+      join(ROOT, 'src/screens/REPL.tsx'),
+      join(ROOT, 'src/screens/repl'),
+    )
     expect(repl).toContain('leftoverIhrUxe.setSpinnerColors')
     expect(repl).toContain('leftoverIhr.main.setRetryStatus')
     expect(repl).toContain('leftoverIhr.main.setMode')

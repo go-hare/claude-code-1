@@ -1,15 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const prompt = readFileSync(
   join(import.meta.dir, '../UserPromptMessage.tsx'),
   'utf8',
 )
-const panes = readFileSync(
-  join(import.meta.dir, '../../PluginRasterPanes.tsx'),
-  'utf8',
-)
+const panesDir = join(import.meta.dir, '../../pluginRaster')
+const panes = [
+  readFileSync(join(import.meta.dir, '../../PluginRasterPanes.tsx'), 'utf8'),
+  ...readdirSync(panesDir)
+    .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+    .sort()
+    .map(f => readFileSync(join(panesDir, f), 'utf8')),
+].join('\n')
 const toolUse = readFileSync(
   join(import.meta.dir, '../AssistantToolUseMessage.tsx'),
   'utf8',

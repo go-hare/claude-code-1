@@ -13,7 +13,11 @@ import {
 import type { Message } from 'src/types/message.js'
 import { logForDebugging } from '../debug.js'
 import type { AggregatedHookResult } from '../hooks.js'
-import { getBootstrapSession, getBootstrapSessionHost } from '../sessionHost.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  hasActiveSessionAls,
+} from '../sessionHost.js'
 import type { HookCommand } from '../settings/types.js'
 import { isHookEqual } from './hooksSettings.js'
 
@@ -89,14 +93,35 @@ export type HookExecutionContext = {
 }
 
 const hookExecutionStorage = new AsyncLocalStorage<HookExecutionContext>()
-let hookExecutionEverEntered = false
 const hostHookExecutionEntrySlot = new WeakOwnerSlot(() => ({
   hasEntered: false,
 }))
+const enteredHookExecutionHosts = new Set<WeakRef<object>>()
 
-/** Official 2.1.331 `o7()` — whether any hook execution scope has been entered. */
+/**
+ * Official 2.1.331 `o7()` — inside an ALS host returns whether that host has
+ * entered hook execution; outside ALS returns whether the default host or any
+ * live host has entered hook execution.
+ */
 export function hasEnteredHookExecution(): boolean {
-  return hookExecutionEverEntered
+  const host = getBootstrapSessionHost()
+  if (hostHookExecutionEntrySlot.of(host).hasEntered) {
+    return true
+  }
+  if (hasActiveSessionAls()) {
+    return false
+  }
+  for (const ref of enteredHookExecutionHosts) {
+    const liveHost = ref.deref()
+    if (liveHost === undefined) {
+      enteredHookExecutionHosts.delete(ref)
+      continue
+    }
+    if (hostHookExecutionEntrySlot.of(liveHost).hasEntered) {
+      return true
+    }
+  }
+  return false
 }
 
 /** Official 2.1.331 `H` per-host slot — whether the active `SessionHost` has entered hook execution. */
@@ -118,8 +143,9 @@ export function runInsideHookExecution<T>(
   fn: () => T,
   context: HookExecutionContext = {},
 ): T {
-  hookExecutionEverEntered = true
-  hostHookExecutionEntrySlot.of(getBootstrapSessionHost()).hasEntered = true
+  const host = getBootstrapSessionHost()
+  hostHookExecutionEntrySlot.of(host).hasEntered = true
+  addWeakRef(enteredHookExecutionHosts, host)
   return hookExecutionStorage.run(context, fn)
 }
 
@@ -129,8 +155,17 @@ export function exitHookExecution<T>(fn: () => T): T {
 }
 
 export function _resetHookExecutionStateForTesting(): void {
-  hookExecutionEverEntered = false
-  hostHookExecutionEntrySlot.delete(getBootstrapSessionHost())
+  const host = getBootstrapSessionHost()
+  hostHookExecutionEntrySlot.delete(host)
+  if (!hasActiveSessionAls()) {
+    for (const ref of enteredHookExecutionHosts) {
+      const liveHost = ref.deref()
+      if (liveHost !== undefined) {
+        hostHookExecutionEntrySlot.delete(liveHost)
+      }
+    }
+    enteredHookExecutionHosts.clear()
+  }
 }
 
 export type HostHookRegistryOwner = {

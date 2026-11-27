@@ -30,10 +30,15 @@ import {
 // PowerShell helper
 // ---------------------------------------------------------------------------
 
+function escapePowerShellSingleQuoted(value: string): string {
+  return value.replace(/['\u2018\u2019\u201a\u201b]/g, '$&$&')
+}
+
 function ps(script: string): string {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
   const result = spawnSync(
     'powershell',
-    ['-NoProfile', '-NonInteractive', '-Command', script],
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -43,10 +48,11 @@ function ps(script: string): string {
 }
 
 async function psAsync(script: string): Promise<string> {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
   return new Promise((resolve, reject) => {
     const proc = spawn(
       'powershell',
-      ['-NoProfile', '-NonInteractive', '-Command', script],
+      ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
@@ -142,9 +148,9 @@ public class WinPt {
 $pt = New-Object WinPt+POINT
 $pt.X = ${_x}; $pt.Y = ${_y}
 $hwnd = [WinPt]::WindowFromPoint($pt)
-$pid = [uint32]0
-[WinPt]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
-$proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+$winPid = [uint32]0
+[WinPt]::GetWindowThreadProcessId($hwnd, [ref]$winPid) | Out-Null
+$proc = Get-Process -Id $winPid -ErrorAction SilentlyContinue
 "$($proc.MainModule.FileName)|$($proc.ProcessName)"
 `)
       if (!out || !out.includes('|')) return null
@@ -206,7 +212,7 @@ $apps | Select-Object -Unique | Select-Object -First 200
   async open(name) {
     // On Windows, name is the exe path (bundleId) or process name.
     // Try exe path first, fall back to process name lookup.
-    const escaped = name.replace(/'/g, "''")
+    const escaped = escapePowerShellSingleQuoted(name)
     await psAsync(`
 if (Test-Path '${escaped}') {
   Start-Process '${escaped}'
@@ -218,7 +224,7 @@ if (Test-Path '${escaped}') {
   async unhide(bundleIds) {
     // Windows: bring window to foreground
     for (const name of bundleIds) {
-      const escaped = name.replace(/'/g, "''")
+      const escaped = escapePowerShellSingleQuoted(name)
       await psAsync(`
 Add-Type @'
 using System;

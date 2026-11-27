@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   parseAmberMoleskinTable,
@@ -11,7 +11,14 @@ import {
   malformedToolUseRetryAction,
 } from '../queryHelpers.js'
 
-const QUERY_TS = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+const QUERY_DIR = join(import.meta.dir, '..')
+const QUERY_TS = [
+  readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8'),
+  ...readdirSync(QUERY_DIR)
+    .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+    .sort()
+    .map(f => readFileSync(join(QUERY_DIR, f), 'utf8')),
+].join('\n')
 
 describe('Wave 2 query.ts alignments (#897, #921, #984, #1082, #1097)', () => {
   test('#1097 isUnparsedToolInput matches SEA sX(__unparsedToolInput) sentinel', () => {
@@ -91,7 +98,7 @@ describe('Wave 2 query.ts alignments (#897, #921, #984, #1082, #1097)', () => {
   })
 
   test('#1082 rapidRefillBreakerTripped returns rapid_refill_breaker (not blocking_limit)', () => {
-    expect(QUERY_TS).toContain("return { reason: 'rapid_refill_breaker' }")
+    expect(QUERY_TS).toContain("{ reason: 'rapid_refill_breaker' }")
   })
 
   test('#984 !isWithheldMedia && abortController.signal.aborted returns aborted_streaming', () => {
@@ -106,8 +113,8 @@ describe('Wave 2 query.ts alignments (#897, #921, #984, #1082, #1097)', () => {
   })
 
   test('#897 query.ts returns aborted_streaming if aborted during autocompact before blocking_limit', () => {
-    expect(QUERY_TS).toContain(
-      '!compactionResult &&\n        !rapidRefillBreakerTripped &&\n        toolUseContext.abortController.signal.aborted',
+    expect(QUERY_TS).toMatch(
+      /!compactionResult\s*&&\s*!rapidRefillBreakerTripped\s*&&\s*toolUseContext\.abortController\.signal\.aborted/,
     )
   })
 })

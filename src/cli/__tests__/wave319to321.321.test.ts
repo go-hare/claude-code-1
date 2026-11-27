@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type { UUID } from 'crypto'
@@ -111,7 +111,14 @@ describe('Wave 319-321 CLI / Print / Headless / SessionStorage / Recovery alignm
   })
 
   test('#1726: print.ts serializes set_permission_mode behind pendingSetModelPromise', () => {
-    const src = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const printDir = join(import.meta.dir, '../print')
+    const src = [
+      readFileSync(join(import.meta.dir, '../print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     const idx = src.indexOf("msg.request.subtype === 'set_permission_mode'")
     expect(idx).toBeGreaterThan(-1)
     const slice = src.slice(idx, idx + 1600)
@@ -129,7 +136,14 @@ describe('Wave 319-321 CLI / Print / Headless / SessionStorage / Recovery alignm
     expect(qeSrc).toContain('keptDeferredToolNotice')
     expect(qeSrc).toContain('dropsUnavailableDeferredTool')
     expect(qeSrc).toContain("'tool_deferred_unavailable'")
-    const printSrc = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const printDir = join(import.meta.dir, '../print')
+    const printSrc = [
+      readFileSync(join(import.meta.dir, '../print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(printSrc).toContain('deferredCallRefusesTurns = true')
     expect(printSrc).toContain('if (deferredCallRefusesTurns)')
   })
@@ -502,10 +516,15 @@ describe('Wave 319-321 CLI / Print / Headless / SessionStorage / Recovery alignm
     const res = await getSessionMessages(sid)
     expect(res).toBeInstanceOf(Set)
     // Verify catch path cleans cache entry in source
-    const src = readFileSync(
-      join(import.meta.dir, '../../utils/sessionStorage.ts'),
-      'utf8',
-    )
+    const ssUtilsDir = join(import.meta.dir, '../../utils')
+    const ssSubDir = join(ssUtilsDir, 'sessionStorage')
+    const src = [
+      readFileSync(join(ssUtilsDir, 'sessionStorage.ts'), 'utf8'),
+      ...readdirSync(ssSubDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(ssSubDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain(
       'if (sessionMessagesCache.get(sessionId) === promise)',
     )
@@ -649,7 +668,14 @@ describe('Wave 319-321 CLI / Print / Headless / SessionStorage / Recovery alignm
     ).toBe(true)
     expect(isRemoteControlOriginForSetCwd({}, {})).toBe(false)
 
-    const src = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const printDir = join(import.meta.dir, '../print')
+    const src = [
+      readFileSync(join(import.meta.dir, '../print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain("reason: 'remote_origin'")
     expect(src).toContain('tengu_set_cwd_remote_refused')
   })

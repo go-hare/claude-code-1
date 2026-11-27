@@ -4,16 +4,22 @@
  * so a later side question sees the same bag.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
+import { join } from 'path'
+import { fileURLToPath } from 'url'
 
 const engine = readFileSync(
   new URL('../QueryEngine.ts', import.meta.url),
   'utf8',
 )
-const printSrc = readFileSync(
-  new URL('../cli/print.ts', import.meta.url),
-  'utf8',
-)
+const printDir = fileURLToPath(new URL('../cli/print', import.meta.url))
+const printSrc = [
+  readFileSync(new URL('../cli/print.ts', import.meta.url), 'utf8'),
+  ...readdirSync(printDir)
+    .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+    .sort()
+    .map(f => readFileSync(join(printDir, f), 'utf8')),
+].join('\n')
 
 describe('QueryEngine session bag', () => {
   test('both tool contexts keep the engine bag and pinned credentials', () => {

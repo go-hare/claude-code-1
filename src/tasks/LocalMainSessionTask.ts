@@ -125,8 +125,21 @@ export function registerMainSessionTask(
   const unregisterCleanup = registerCleanup(async () => {
     // Clean up on process exit
     setAppState(prev => {
-      const { [taskId]: removed, ...rest } = prev.tasks
-      return { ...prev, tasks: rest }
+      const hasTask = taskId in prev.tasks
+      const hasTranscript =
+        prev.transcripts !== undefined && taskId in prev.transcripts
+      if (!hasTask && !hasTranscript) return prev
+      const { [taskId]: _removed, ...restTasks } = prev.tasks
+      if (hasTranscript && prev.transcripts) {
+        const { [taskId]: _removedTranscript, ...restTranscripts } =
+          prev.transcripts
+        return {
+          ...prev,
+          tasks: restTasks,
+          transcripts: restTranscripts,
+        }
+      }
+      return { ...prev, tasks: restTasks }
     })
   })
 

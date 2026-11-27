@@ -2,7 +2,7 @@
  * densable 2.1.289 `pr` / `nr` / `sr` / `d8n` / `RZ`.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   G2E_COMPONENTS,
@@ -21,10 +21,17 @@ import {
 } from '../pluginSiteHold.js'
 
 const SRC = readFileSync(join(import.meta.dir, '../pluginSiteHold.ts'), 'utf8')
-const PANES = readFileSync(
-  join(import.meta.dir, '../../../components/PluginRasterPanes.tsx'),
-  'utf8',
-)
+const PANES_DIR = join(import.meta.dir, '../../../components/pluginRaster')
+const PANES = [
+  readFileSync(
+    join(import.meta.dir, '../../../components/PluginRasterPanes.tsx'),
+    'utf8',
+  ),
+  ...readdirSync(PANES_DIR)
+    .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+    .sort()
+    .map(f => readFileSync(join(PANES_DIR, f), 'utf8')),
+].join('\n')
 
 const empty: HeldSiteRows = {
   rows: undefined,

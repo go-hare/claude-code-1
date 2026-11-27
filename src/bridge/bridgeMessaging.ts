@@ -1166,7 +1166,7 @@ export function handleServerControlRequest(
         )
           .then(
             res =>
-              res.response !== null && res.synthetic !== false
+              res.response === null
                 ? { ...res, response: SIDE_QUESTION_FALLBACK, synthetic: true }
                 : res,
             err => {

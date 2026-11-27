@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -373,10 +379,17 @@ describe('Wave 319-322 cross-group wire Batch A', () => {
     expect(yoloSrc).toContain('isLocalAutoModeClassifierSwitchedOff')
     expect(yoloSrc).toContain("errorKind: 'classifier_switched_off'")
 
-    const execSrc = readFileSync(
-      join(REPO_ROOT, 'src/services/tools/toolExecution.ts'),
-      'utf-8',
-    )
+    const execDir = join(REPO_ROOT, 'src/services/tools/execution')
+    const execSrc = [
+      readFileSync(
+        join(REPO_ROOT, 'src/services/tools/toolExecution.ts'),
+        'utf-8',
+      ),
+      ...readdirSync(execDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(execDir, f), 'utf-8')),
+    ].join('\n')
     expect(execSrc).toContain('const toolContextLayers = result.contextLayers')
     expect(execSrc).toContain('layers: toolContextLayers')
 

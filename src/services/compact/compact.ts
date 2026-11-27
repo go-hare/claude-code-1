@@ -992,22 +992,61 @@ function stripToolUseResults(messages: Message[] | undefined): Message[] {
   })
 }
 
+function isPreservedSubsequenceContiguous(
+  sourceMessages: readonly Message[],
+  preserved: readonly Message[],
+): boolean {
+  if (preserved.length <= 1) return true
+  const indexByUuid = new Map<UUID, number>()
+  for (let i = 0; i < sourceMessages.length; i++) {
+    const uuid = sourceMessages[i]?.uuid
+    if (uuid) {
+      indexByUuid.set(uuid, i)
+    }
+  }
+  let prevIdx = indexByUuid.get(preserved[0]!.uuid)
+  if (prevIdx === undefined) return false
+  for (let i = 1; i < preserved.length; i++) {
+    const cur = preserved[i]!
+    const curIdx = indexByUuid.get(cur.uuid)
+    if (curIdx === undefined || curIdx !== prevIdx + 1) {
+      return false
+    }
+    const parentUuid = (cur as { parentUuid?: UUID | null }).parentUuid
+    if (parentUuid !== undefined && parentUuid !== preserved[i - 1]!.uuid) {
+      return false
+    }
+    prevIdx = curIdx
+  }
+  return true
+}
+
 /**
  * Annotate a compact boundary with relink metadata for messagesToKeep.
  * Preserved messages keep their original parentUuids on disk (dedup-skipped);
  * the loader uses this to patch head→anchor and anchor's-other-children→tail.
  *
+ * When `sourceMessages` is provided and `messagesToKeep` is non-contiguous in
+ * the original chain (e.g. filtered local commands or cherry-picked trailing
+ * task notifications), also populate `compactMetadata.preservedMessages` with
+ * the explicit ordered UUID list so resume relinking and transcript GC keep
+ * only the preserved messages without relying on an unbroken parentUuid walk.
+ *
  * `anchorUuid` = what sits immediately before keep[0] in the desired chain:
- *   - suffix-preserving (reactive/session-memory): last summary message
+ *   - suffix-preserving (reactive/session-memory/trailing unanswered): last summary message
  *   - prefix-preserving (partial compact): the boundary itself
  */
 export function annotateBoundaryWithPreservedSegment(
   boundary: SystemCompactBoundaryMessage,
   anchorUuid: UUID,
   messagesToKeep: readonly Message[] | undefined,
+  sourceMessages?: readonly Message[],
 ): SystemCompactBoundaryMessage {
   const keep = messagesToKeep ?? []
   if (keep.length === 0) return boundary
+  const nonContiguous =
+    sourceMessages !== undefined &&
+    !isPreservedSubsequenceContiguous(sourceMessages, keep)
   return {
     ...boundary,
     compactMetadata: {
@@ -1017,6 +1056,14 @@ export function annotateBoundaryWithPreservedSegment(
         anchorUuid,
         tailUuid: keep.at(-1)!.uuid,
       },
+      ...(nonContiguous
+        ? {
+            preservedMessages: {
+              anchorUuid,
+              uuids: keep.map(m => m.uuid),
+            },
+          }
+        : {}),
     },
   }
 }
@@ -1791,9 +1838,15 @@ export async function compactConversation(
     // so compaction never summarizes away a message Claude has not answered yet.
     const preservedTrailingMessages =
       extractUnansweredTrailingMessages(messages)
+    const annotatedBoundaryMarker = annotateBoundaryWithPreservedSegment(
+      boundaryMarker,
+      summaryMessages.at(-1)?.uuid ?? boundaryMarker.uuid,
+      preservedTrailingMessages,
+      messages,
+    )
 
     return {
-      boundaryMarker,
+      boundaryMarker: annotatedBoundaryMarker,
       summaryMessages,
       ...(preservedTrailingMessages.length > 0
         ? { messagesToKeep: preservedTrailingMessages }

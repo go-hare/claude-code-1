@@ -65,7 +65,22 @@ describe('densable 2.1.289 TVt ownTool remap', () => {
   })
 
   test('getMatchingHooks and executeHooks stringify call TVt', () => {
-    const hooks = readFileSync(join(root, 'utils/hooks.ts'), 'utf8')
+    const hooks = [
+      'utils/hooks.ts',
+      'utils/hooks/hookCore.ts',
+      'utils/hooks/hookShellRunner.ts',
+      'utils/hooks/hookOutputProcessor.ts',
+      'utils/hooks/hookConfigRegistry.ts',
+      'utils/hooks/hookModelSlotPool.ts',
+      'utils/hooks/hookEngine.ts',
+      'utils/hooks/hookEntryExecutor.ts',
+      'utils/hooks/hookOutsideReplEngine.ts',
+      'utils/hooks/hookToolEvents.ts',
+      'utils/hooks/hookSessionAndPromptEvents.ts',
+      'utils/hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(root, rel), 'utf8'))
+      .join('\n')
     expect(hooks).toContain('remapHookInputForOwnTool')
     expect(hooks).toContain('getPluginHookRunner')
     expect(hooks).toContain('asOwnTool')

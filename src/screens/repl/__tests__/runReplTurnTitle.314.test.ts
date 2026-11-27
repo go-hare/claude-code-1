@@ -58,10 +58,18 @@ describe('#1414 resolveTitleCandidate / advanceTitleFallback (nyr / ryr)', () =>
 })
 
 describe('#1257, #1411, #1416 REPL.tsx wiring', () => {
-  const replSrc = readFileSync(
-    join(import.meta.dir, '..', '..', 'REPL.tsx'),
-    'utf8',
-  )
+  const replSrc = [
+    readFileSync(join(import.meta.dir, '..', '..', 'REPL.tsx'), 'utf8'),
+    readFileSync(
+      join(import.meta.dir, '..', 'useReplRewindAndActions.ts'),
+      'utf8',
+    ),
+    readFileSync(
+      join(import.meta.dir, '..', 'useReplTerminalStatus.ts'),
+      'utf8',
+    ),
+  ].join('\n')
+  const normalizedReplSrc = replSrc.replace(/\s+/g, ' ')
 
   test('#1257 gates MessageSelector onSummarize on DISABLE_COMPACT', () => {
     expect(replSrc).toContain('isEnvTruthy(process.env.DISABLE_COMPACT)')
@@ -72,7 +80,7 @@ describe('#1257, #1411, #1416 REPL.tsx wiring', () => {
   })
 
   test('#1416 keeps terminalTitle from sessionTitle (/rename) even while waiting for approval', () => {
-    expect(replSrc).toContain(
+    expect(normalizedReplSrc).toContain(
       "const terminalTitle = sessionTitle ?? sessionAiTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code'",
     )
     expect(replSrc).toContain('title={terminalTitle}')

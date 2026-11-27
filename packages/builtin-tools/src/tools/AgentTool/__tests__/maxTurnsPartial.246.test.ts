@@ -2,7 +2,7 @@
  * densable 2.1.246 #54 — maxTurns stop is PARTIAL + SendMessage continue hint.
  * Abort edge locked: query still yields; runAgent skips event+yield when aborted.
  */
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { mock, describe, expect, test } from 'bun:test'
 import { debugMock } from '../../../../../../tests/mocks/debug'
@@ -175,10 +175,17 @@ describe('densable 2.1.246 #54 maxTurns partial', () => {
       join(import.meta.dir, '../runAgent.ts'),
       'utf8',
     )
-    const query = readFileSync(
-      join(import.meta.dir, '../../../../../../src/query.ts'),
-      'utf8',
-    )
+    const queryDir = join(import.meta.dir, '../../../../../../src/query')
+    const query = [
+      readFileSync(
+        join(import.meta.dir, '../../../../../../src/query.ts'),
+        'utf8',
+      ),
+      ...readdirSync(queryDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(queryDir, f), 'utf8')),
+    ].join('\n')
     expect(runAgent).toContain('densable 2.1.246 #54 runAgent @214524275')
     expect(runAgent).toContain('if (!agentAbortController.signal.aborted)')
     expect(runAgent).toContain("logEvent('tengu_agent_max_turns_reached'")

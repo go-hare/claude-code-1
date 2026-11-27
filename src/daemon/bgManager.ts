@@ -35,6 +35,7 @@ import type { Socket } from 'net'
 import { freemem } from 'os'
 import {
   BgWorker,
+  PersistentPtyAuthMap,
   type DispatchRequest,
   type AttacherEntry,
   type SpawnPtyFn,
@@ -406,14 +407,17 @@ async function reapOrphanPtyHosts(
     const sockPath = join(ptyDir, file)
     if (knownSocks.has(sockPath)) continue
     reaped++
+    // Capture auth token synchronously before async connect so post-reap pruning
+    // cannot race with the connect callback.
+    const authToken = ptyAuthBySock?.get(sockPath)
     // Try to kill the orphan PTY host
     const sock = (await import('net')).connect(sockPath)
     sock.on('error', () => {
+      ptyAuthBySock?.delete(sockPath)
       unlink(sockPath).catch(() => {})
     })
     sock.once('connect', () => {
       sock.resume()
-      const authToken = ptyAuthBySock?.get(sockPath)
       if (authToken) {
         sock.write(encodeCtrlFrame({ t: 'auth', token: authToken }))
       }
@@ -640,7 +644,9 @@ export async function startBgManager(opts?: {
 }): Promise<BgManagerInstance> {
   const log = opts?.onLog ?? (() => {})
   const handles = new Map<string, BgWorker>()
-  const ptyAuthBySock = new Map<string, string>()
+  // P1-E7: Persist per-socket PTY auth tokens to a mode-0600 store inside the
+  // daemon's 0700 auth directory so tokens survive supervisor restarts.
+  const ptyAuthBySock = new PersistentPtyAuthMap()
   const pendingSettleWrites = new Set<Promise<unknown>>()
   // Official: O = _.spawnPty ?? nqq(); j = _.spawnPty === void 0
   // Spare only uses the default node:child_process spawn path when caller did not inject spawnPty.
@@ -689,6 +695,7 @@ export async function startBgManager(opts?: {
       true
     ) {
       if (heldSpare) {
+        ptyAuthBySock.delete(heldSpare.ptySock)
         heldSpare.dispose()
         heldSpare = null
       }
@@ -697,6 +704,7 @@ export async function startBgManager(opts?: {
     const lowMemThreshold = getBgLowMemThresholdBytes()
     if (lowMemThreshold > 0 && freemem() < lowMemThreshold) {
       if (heldSpare) {
+        ptyAuthBySock.delete(heldSpare.ptySock)
         heldSpare.dispose()
         heldSpare = null
       }
@@ -727,6 +735,7 @@ export async function startBgManager(opts?: {
           return
         }
         if (heldSpare === spawned) {
+          ptyAuthBySock.delete(spawned.ptySock)
           heldSpare = null
           heldSpareAccountPromise = null
           // Official: only refill if spare lived ≥2s (avoid crash loops)
@@ -737,11 +746,15 @@ export async function startBgManager(opts?: {
       .then(spare => {
         spawned = spare
         if (!spare || closed || exitedBeforeAssign) {
+          if (spare) ptyAuthBySock.delete(spare.ptySock)
           spare?.dispose()
           return
         }
         heldSpare = spare
         heldSpareAccountPromise = accountAtSpawnPromise
+        if (spare.ptyAuthToken) {
+          ptyAuthBySock.set(spare.ptySock, spare.ptyAuthToken)
+        }
         logEvent('tengu_bg_spare_spawn', {})
       })
       .catch((err: unknown) => {
@@ -876,6 +889,7 @@ export async function startBgManager(opts?: {
       if (currentAccount === null || currentAccount !== spareAccount) {
         log("bg: the account may differ from the spare's, discarding the spare")
         if (heldSpare === spare) {
+          ptyAuthBySock.delete(spare.ptySock)
           spare.dispose()
           heldSpare = null
           heldSpareAccountPromise = null
@@ -976,10 +990,14 @@ export async function startBgManager(opts?: {
       // Occupy short before await sendClaim so concurrent dispatch + oAp
       // see "in flight" rather than empty (product vs densable fire-and-forget).
       claimingShorts.add(req.short)
+      if (spare.ptyAuthToken) {
+        ptyAuthBySock.set(spare.ptySock, spare.ptyAuthToken)
+      }
       void claimSpare(req, spare, spawnPty, opts?.getAuthSnapshot)
         .then(worker => {
           if (closed) {
             claimingShorts.delete(req.short)
+            ptyAuthBySock.delete(spare.ptySock)
             try {
               worker.kill('SIGTERM')
             } catch {
@@ -995,6 +1013,7 @@ export async function startBgManager(opts?: {
           // Race: cold path or prior handle may own short already
           if (handles.has(req.short)) {
             claimingShorts.delete(req.short)
+            ptyAuthBySock.delete(spare.ptySock)
             log(
               `bg claimed-spare ${req.short} dropped — handle already present`,
             )
@@ -1048,6 +1067,7 @@ export async function startBgManager(opts?: {
                   : 'unknown'
           logEvent('tengu_bg_spare_claim_fail', {})
           log(`bg-spare claim failed (${reason}): ${errorMessage(err)}`)
+          ptyAuthBySock.delete(spare.ptySock)
           try {
             spare.dispose()
           } catch {
@@ -1104,6 +1124,9 @@ export async function startBgManager(opts?: {
   // --- Ensure directories ---
   await ensureDaemonDirs()
 
+  // P1-E7: Reload persisted per-socket PTY auth tokens before adoption & orphan reap.
+  ptyAuthBySock.reload()
+
   // Create pty/ rv/ spare/ directories (official non-windows)
   if (process.platform !== 'win32') {
     await mkdir(getRvDir(), { recursive: true, mode: 0o700 }).catch(() => {})
@@ -1153,11 +1176,15 @@ export async function startBgManager(opts?: {
     Object.entries(roster.workers).map(async ([short, entry]) => {
       let worker: BgWorker | null = null
       try {
+        const persistedPtyAuth = entry.ptySock
+          ? ptyAuthBySock.get(entry.ptySock)
+          : undefined
         worker = await BgWorker.adopt(
           short,
           entry,
           spawnPty,
           opts?.getAuthSnapshot,
+          persistedPtyAuth,
         )
       } catch (e) {
         console.error('[bg] adopt error:', e)
@@ -1183,9 +1210,11 @@ export async function startBgManager(opts?: {
           onKeepAliveChange,
           pendingSettleWrites,
           log,
+          ptyAuthBySock,
         )
         adopted++
       } else if (entry.pendingRespawn === 'upgrade') {
+        if (entry.ptySock) ptyAuthBySock.delete(entry.ptySock)
         respawned++
         handleDispatch(entry.dispatch, 0, true)
       } else {
@@ -1202,6 +1231,7 @@ export async function startBgManager(opts?: {
         if (process.platform !== 'win32') {
           unlink(getRendezvousSockPath(short)).catch(() => {})
           if (entry.ptySock) {
+            ptyAuthBySock.delete(entry.ptySock)
             unlink(entry.ptySock).catch(() => {})
             unlink(getPtyErrPath(entry.ptySock)).catch(() => {})
           }
@@ -1222,7 +1252,14 @@ export async function startBgManager(opts?: {
   // Adoption finishes before refillSpare is eligible (needs adoptionComplete),
   // so heldSpare is always null here; spare socks are not yet held.
   if (!roster.parseFailed) {
-    await reapOrphanSpares(handles, log)
+    await reapOrphanSpares(handles, log, undefined, ptyAuthBySock)
+    // Prune dead/reaped socket entries from the persisted PTY auth store.
+    const liveSocks = new Set<string>()
+    for (const w of handles.values()) {
+      const entry = w.rosterEntry()
+      if (entry.ptySock) liveSocks.add(entry.ptySock)
+    }
+    ptyAuthBySock.pruneToLiveSockets(liveSocks)
   }
 
   // Write initial roster
@@ -1348,6 +1385,7 @@ export async function startBgManager(opts?: {
       watcher.close()
       // Official: dispose held spare on close
       if (heldSpare) {
+        ptyAuthBySock.delete(heldSpare.ptySock)
         heldSpare.dispose()
         heldSpare = null
       }

@@ -20,7 +20,7 @@ buildSystemPromptBlocks()  →  TextBlockParam[] （分块 + cache_control 标�
 
 1. **`getSystemPrompt()`**（`src/constants/prompts.ts:444`）—— 收集静态段 + 动态段，插入 `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` 分界标记
 2. **`buildEffectiveSystemPrompt()`**（`src/utils/systemPrompt.ts:41`）—— 按 Override > Coordinator > Agent > Custom > Default 优先级选择
-3. **`buildSystemPromptBlocks()`**（`src/services/api/claude.ts:3279`）—— 调用 `splitSysPromptPrefix()` 分块，为每个块附加 `cache_control`
+3. **`buildSystemPromptBlocks()`**（`src/services/api/claude/toolAndMediaHelpers.ts:116`）—— 调用 `splitSysPromptPrefix()` 分块，为每个块附加 `cache_control`
 
 ## SystemPrompt 品牌类型
 

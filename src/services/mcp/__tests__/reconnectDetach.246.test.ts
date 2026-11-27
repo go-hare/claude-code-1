@@ -3,12 +3,19 @@
  * Identity-move already does; discoveryAuthFailure + catch used to skip.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 describe('reconnect inert detach live memo', () => {
   test('discoveryAuthFailure and catch detach before returning inert', () => {
-    const src = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+    const clientDir = join(import.meta.dir, '../client')
+    const src = [
+      readFileSync(join(import.meta.dir, '../client.ts'), 'utf8'),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     const discovery = src.indexOf('if (client.discoveryAuthFailure)')
     const discoveryReturn = src.indexOf(
       "type: 'needs-auth' as const",

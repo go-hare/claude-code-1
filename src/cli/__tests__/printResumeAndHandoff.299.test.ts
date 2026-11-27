@@ -60,7 +60,7 @@ describe('2.1.299 #637/#664 print handoff & resume', () => {
 
   test('#664 CLAUDE_CODE_RESUME_INTERRUPTED_TURN preserves skipSlashCommands for client_composed messages', () => {
     const printSrc = readFileSync(
-      join(import.meta.dir, '..', 'print.ts'),
+      join(import.meta.dir, '..', 'print', 'streamingSession.ts'),
       'utf8',
     )
     expect(printSrc).toContain('interruptedMsg.client_composed === true')

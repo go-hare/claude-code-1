@@ -114,7 +114,14 @@ export type StorageV5Result<T> =
   | { ok: true; value: T }
   | {
       ok: false
-      error: { code: string; argument?: string; telemetryCode?: string }
+      error: {
+        code: string
+        argument?: string
+        telemetryCode?: string
+        holder?: string
+        expiresAtMs?: number
+        meta?: unknown
+      }
     }
 
 /**
@@ -542,7 +549,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /** densable leftover `Sy` @207441648 — `ic` fences. */
-const DELETE_SCOPE_FENCED_SY = new Set([
+export const DELETE_SCOPE_FENCED_SY = new Set([
   'session',
   'plan',
   'daemon',
@@ -741,19 +748,23 @@ function resolveSettingsFilePath(
   switch (key.layer) {
     case 'user':
       return join(configHome, 'settings.json')
-    case 'project':
-      return typeof key.projectKey === 'string'
-        ? join(configHome, 'project-settings', key.projectKey, 'settings.json')
+    case 'project': {
+      const projectKey = asSafePathSegment(key.projectKey)
+      return projectKey
+        ? join(configHome, 'project-settings', projectKey, 'settings.json')
         : null
-    case 'local':
-      return typeof key.consentRootKey === 'string'
+    }
+    case 'local': {
+      const consentRootKey = asSafePathSegment(key.consentRootKey)
+      return consentRootKey
         ? join(
             configHome,
             'local-settings',
-            key.consentRootKey,
+            consentRootKey,
             'settings.local.json',
           )
         : null
+    }
     default:
       return null
   }
@@ -970,10 +981,13 @@ export function resolveKeyFilesystemPath(
   if (rec.namespace === 'globalConfig') {
     // densable Ee @207254670: Ze = basename from path.
     if ('kind' in rec) {
+      const kind = asSafePathSegment(rec.kind)
+      const stamp = asSafePathSegment(rec.stamp)
+      if (!kind || !stamp) return null
       return join(
         roots.configHome,
         'backups',
-        `${basename(roots.globalConfigFile)}.${rec.kind}.${rec.stamp}`,
+        `${basename(roots.globalConfigFile)}.${kind}.${stamp}`,
       )
     }
     return roots.globalConfigFile
@@ -1530,7 +1544,7 @@ function parseLineDelimitedRecords(
     }
   })
   if (items.length === 0) return { items }
-  const edge = backward ? items[items.length - 1]! : items[0]!
+  const edge = items[items.length - 1]!
   const idx = entries.findIndex(e => e.seq === edge.seq)
   if (backward) {
     if (idx > 0) return { items, nextSeq: entries[idx - 1]!.seq }
@@ -1651,7 +1665,22 @@ export function createLocalFsBackend(
     },
     async stat(key) {
       if (closed) return refuse()
-      const path = resolveKeyFilesystemPath(roots, key)
+      const rec = asRecord(key)
+      const invalid = rec
+        ? validateStorageKey(rec)
+        : { code: 'InvalidArgument' }
+      if (!rec || invalid !== undefined) {
+        return {
+          ok: false,
+          error: {
+            code: invalid?.code ?? 'InvalidArgument',
+            ...(invalid && 'argument' in invalid && invalid.argument
+              ? { argument: invalid.argument }
+              : {}),
+          },
+        }
+      }
+      const path = resolveKeyFilesystemPath(roots, rec)
       if (!path) {
         return { ok: false, error: { code: 'InvalidArgument' } }
       }
@@ -1670,7 +1699,22 @@ export function createLocalFsBackend(
     },
     async statMeta(key) {
       if (closed) return refuse()
-      const path = resolveKeyFilesystemPath(roots, key)
+      const rec = asRecord(key)
+      const invalid = rec
+        ? validateStorageKey(rec)
+        : { code: 'InvalidArgument' }
+      if (!rec || invalid !== undefined) {
+        return {
+          ok: false,
+          error: {
+            code: invalid?.code ?? 'InvalidArgument',
+            ...(invalid && 'argument' in invalid && invalid.argument
+              ? { argument: invalid.argument }
+              : {}),
+          },
+        }
+      }
+      const path = resolveKeyFilesystemPath(roots, rec)
       if (!path) {
         return { ok: false, error: { code: 'InvalidArgument' } }
       }
@@ -1914,7 +1958,17 @@ export function createLocalFsBackend(
       if (closed) return refuse()
       const rec = asRecord(key)
       if (!rec) return { ok: false, error: { code: 'InvalidArgument' } }
-      const path = resolveKeyFilesystemPath(roots, key)
+      const invalid = validateStorageKey(rec)
+      if (invalid !== undefined) {
+        return {
+          ok: false,
+          error: {
+            code: invalid.code,
+            ...(invalid.argument && { argument: invalid.argument }),
+          },
+        }
+      }
+      const path = resolveKeyFilesystemPath(roots, rec)
       if (!path) return { ok: false, error: { code: 'InvalidArgument' } }
       try {
         const now = new Date()
@@ -1928,7 +1982,19 @@ export function createLocalFsBackend(
     },
     async setMode(key, mode, opts) {
       if (closed) return refuse()
-      const path = resolveKeyFilesystemPath(roots, key)
+      const rec = asRecord(key)
+      if (!rec) return { ok: false, error: { code: 'InvalidArgument' } }
+      const invalid = validateStorageKey(rec)
+      if (invalid !== undefined) {
+        return {
+          ok: false,
+          error: {
+            code: invalid.code,
+            ...(invalid.argument && { argument: invalid.argument }),
+          },
+        }
+      }
+      const path = resolveKeyFilesystemPath(roots, rec)
       if (!path) return { ok: false, error: { code: 'InvalidArgument' } }
       try {
         if (process.platform === 'win32') {
@@ -1951,7 +2017,19 @@ export function createLocalFsBackend(
     },
     async digest(key, opts) {
       if (closed) return refuse()
-      const path = resolveKeyFilesystemPath(roots, key)
+      const rec = asRecord(key)
+      if (!rec) return { ok: false, error: { code: 'InvalidArgument' } }
+      const invalid = validateStorageKey(rec)
+      if (invalid !== undefined) {
+        return {
+          ok: false,
+          error: {
+            code: invalid.code,
+            ...(invalid.argument && { argument: invalid.argument }),
+          },
+        }
+      }
+      const path = resolveKeyFilesystemPath(roots, rec)
       if (!path) return { ok: false, error: { code: 'InvalidArgument' } }
       try {
         const buf = await readFile(path)
@@ -2108,7 +2186,8 @@ export function createLocalFsBackend(
     async readValue(key) {
       if (closed) return undefined
       const rec = asRecord(key)
-      const path = resolveKeyFilesystemPath(roots, key)
+      if (!rec || validateStorageKey(rec) !== undefined) return undefined
+      const path = resolveKeyFilesystemPath(roots, rec)
       if (!path) return undefined
       if (rec && isFramedDigestStreamKey(rec)) {
         return readFramedStreamFu(digestHost, rec, path)

@@ -11,13 +11,17 @@ import {
   getUseCoworkPlugins,
 } from '../../bootstrap/state.js'
 import { uniq } from '../array.js'
-import { registerCleanup } from '../cleanupRegistry.js'
+import { registerCleanup, registerPreExitFlush } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
+import {
+  getRegisteredPinnedStorageV5,
+  isDisklessActive,
+  logDisklessWriteSkipped,
+} from '../disklessGuards.js'
 import { stripProjectScopeBlockedEnv } from '../managedEnvConstants.js'
 import { stripProjectScopedTracingSettings } from '../projectScopedTracingStrip.js'
 import { logForDiagnosticsNoPII } from '../diagLogs.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
-import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import { getErrnoCode, isENOENT } from '../errors.js'
 import { writeFileSyncAndFlush_DEPRECATED } from '../file.js'
 import { readFileSync } from '../fileRead.js'
@@ -147,14 +151,26 @@ function loadParentManagedAndHostOverlay(): {
  * plus Official 2.1.323 (#2120) `Vsi` off-switches from Agent SDK
  * `managedSettings` (disableRemoteControl, disableAgentView, disableWorkflows,
  * disableArtifact, enableWorkflows=false, enableArtifact=false).
+ *
+ * Keeps Windows HKCU separate from admin tiers so `parentManagedSettings`
+ * outranks user-writable `HKCU` (`remote > plist/hklm > file > parent > hkcu`).
  */
 function finishPolicySettingsForHost(
-  policySettings: SettingsJson | null,
+  adminPolicySettings: SettingsJson | null,
+  hkcuSettings: SettingsJson | null = null,
 ): SettingsJson | null {
   const { parentSettings, hostModelOverlay, hostManagedProvider } =
     loadParentManagedAndHostOverlay()
+  let base: SettingsJson | null = adminPolicySettings
+  if (!base) {
+    if (parentSettings && Object.keys(parentSettings).length > 0) {
+      base = mergeManagedEnvPerKey(parentSettings, [hkcuSettings])
+    } else {
+      base = hkcuSettings
+    }
+  }
   let resolved = applyHostManagedPolicyModelPrecedence(
-    policySettings,
+    base,
     hostModelOverlay,
     hostManagedProvider,
   )
@@ -254,6 +270,9 @@ export function collectMachineLocalManagedSettings(): {
   file: SettingsJson | null
   hkcu: SettingsJson | null
 } {
+  if (isDisklessActive()) {
+    return { mdm: null, file: null, hkcu: null }
+  }
   const mdmResult = getMdmSettings()
   const mdm =
     Object.keys(mdmResult.settings).length > 0 ? mdmResult.settings : null
@@ -265,16 +284,19 @@ export function collectMachineLocalManagedSettings(): {
 }
 
 /**
- * densable 2.1.223 #11 / #1512 — first-source-wins for policy fields
- * (remote > MDM > file > HKCU), env merges per-key.
+ * densable 2.1.223 #11 / #1512 — first-source-wins for admin policy fields
+ * (remote > MDM > file), keeping user-writable HKCU separate so
+ * `parentManagedSettings` outranks HKCU (`remote > plist/hklm > file > parent > hkcu`).
+ * Admin env merges per-key with lower tiers.
  */
 function resolvePolicySettingsWithEnvMerge(): {
   policySettings: SettingsJson | null
+  hkcuSettings: SettingsJson | null
   policyErrors: ValidationError[]
 } {
   const policyErrors: ValidationError[] = []
   let winner: SettingsJson | null = null
-  let winnerKind: 'remote' | 'mdm' | 'file' | 'hkcu' | null = null
+  let winnerKind: 'remote' | 'mdm' | 'file' | null = null
 
   const remote = getActiveRemoteSettings()
   const local = collectMachineLocalManagedSettings()
@@ -287,9 +309,6 @@ function resolvePolicySettingsWithEnvMerge(): {
   } else if (local.file) {
     winner = local.file
     winnerKind = 'file'
-  } else if (local.hkcu) {
-    winner = local.hkcu
-    winnerKind = 'hkcu'
   }
 
   if (winnerKind === 'remote') {
@@ -300,7 +319,11 @@ function resolvePolicySettingsWithEnvMerge(): {
     winner = mergeManagedEnvPerKey(winner, [local.hkcu])
   }
 
-  return { policySettings: winner, policyErrors }
+  return {
+    policySettings: winner,
+    hkcuSettings: local.hkcu,
+    policyErrors,
+  }
 }
 
 export type RemoteSettingsFetchResult =
@@ -538,6 +561,9 @@ export function loadManagedFileSettings(): {
   settings: SettingsJson | null
   errors: ValidationError[]
 } {
+  if (isDisklessActive()) {
+    return { settings: null, errors: [] }
+  }
   const errors: ValidationError[] = []
   let merged: SettingsJson = {}
   let found = false
@@ -846,6 +872,9 @@ function parseSettingsFileUncached(path: string): {
   settings: SettingsJson | null
   errors: ValidationError[]
 } {
+  if (isDisklessActive()) {
+    return { settings: null, errors: [] }
+  }
   try {
     const fs = getFsImplementation()
     const { resolvedPath } = safeResolvePath(fs, path)
@@ -1053,6 +1082,9 @@ export function checkProjectSettingsSymlinkEscape(
   source: 'projectSettings' | 'localSettings',
   filePath: string,
 ): ValidationError | null {
+  if (isDisklessActive()) {
+    return null
+  }
   if (source === 'projectSettings' && projectSettingsAliasesUserSettings()) {
     return null
   }
@@ -1168,8 +1200,8 @@ export function getSettingsForSourceUncached(
   // densable 2.1.223 #11: env merges per-key with machine-local under remote.
   // densable nfc: under hostManagedProvider, b6i strip + Gfg hostModelOverlay.
   if (source === 'policySettings') {
-    const { policySettings } = resolvePolicySettingsWithEnvMerge()
-    return finishPolicySettingsForHost(policySettings)
+    const { policySettings, hkcuSettings } = resolvePolicySettingsWithEnvMerge()
+    return finishPolicySettingsForHost(policySettings, hkcuSettings)
   }
 
   const settingsFilePath = getSettingsFilePathForSource(source)
@@ -1424,6 +1456,9 @@ function stripProjectScopedSettings(
  * Official also folds helper `s5(L())`; leftover has no helper loader.
  */
 export function getAdminManagedPolicyLoadErrors(): ValidationError[] {
+  if (isDisklessActive()) {
+    return []
+  }
   const owner = getSettingsOwner()
   const cached = owner.policy.adminLoadErrors
   if (cached !== undefined) {
@@ -1463,6 +1498,11 @@ export function hasAdminPolicySurvivor(): boolean {
   const cached = owner.policy.adminSurvivor
   if (cached !== undefined) {
     return cached as boolean
+  }
+  const remote = getActiveRemoteSettings()
+  if (adminSettingsSurvived(remote)) {
+    owner.policy.adminSurvivor = true
+    return true
   }
   const local = collectMachineLocalManagedSettings()
   const survivor =
@@ -1517,15 +1557,21 @@ export function getPolicySettingsOrigin():
   | 'parent'
   | null {
   // densable YZn: helper > remote > plist/hklm > file > parent > hkcu.
-  // Remote managed-settings cache is product-cut; MDM/file/hkcu remain.
-  const mdmResult = getMdmSettings()
-  if (Object.keys(mdmResult.settings).length > 0) {
-    return getPlatform() === 'macos' ? 'plist' : 'hklm'
+  const remote = getActiveRemoteSettings()
+  if (remote && Object.keys(remote).length > 0) {
+    return 'remote'
   }
 
-  const { settings: fileSettings } = loadManagedFileSettings()
-  if (fileSettings) {
-    return 'file'
+  if (!isDisklessActive()) {
+    const mdmResult = getMdmSettings()
+    if (Object.keys(mdmResult.settings).length > 0) {
+      return getPlatform() === 'macos' ? 'plist' : 'hklm'
+    }
+
+    const { settings: fileSettings } = loadManagedFileSettings()
+    if (fileSettings) {
+      return 'file'
+    }
   }
 
   // densable: parentSlice || hostModelOverlay → "parent" (before hkcu)
@@ -1537,9 +1583,11 @@ export function getPolicySettingsOrigin():
     return 'parent'
   }
 
-  const hkcu = getHkcuSettings()
-  if (Object.keys(hkcu.settings).length > 0) {
-    return 'hkcu'
+  if (!isDisklessActive()) {
+    const hkcu = getHkcuSettings()
+    if (Object.keys(hkcu.settings).length > 0) {
+      return 'hkcu'
+    }
   }
 
   return null
@@ -1552,12 +1600,23 @@ export function getPolicySettingsOrigin():
  * set it to `undefined` — do NOT use `delete`. mergeWith only detects deletion when
  * the key is present with an explicit `undefined` value.
  */
+type SettingsStorageV5ReadTextItem =
+  | { found: boolean; value?: string | null }
+  | { ok: true; value?: string | null }
+  | { ok: false; code?: string; error?: unknown }
+
 type SettingsStorageV5 = {
   write: (
     key: unknown,
     value: string,
     opts?: { publishDiscipline?: string },
   ) => Promise<{ ok: true } | { ok: false; error: unknown }>
+  readText?: (
+    keys: readonly unknown[],
+  ) => Promise<
+    | { ok: true; value: { items: readonly SettingsStorageV5ReadTextItem[] } }
+    | { ok: false; error: unknown }
+  >
 }
 
 /** densable leftover `q.userSettings()`. */
@@ -1588,6 +1647,116 @@ function settingsStorageV5Write(
     return storageV5.write.bind(storageV5) as SettingsStorageV5['write']
   }
   return undefined
+}
+
+function settingsStorageV5ReadText(
+  storageV5: unknown,
+): SettingsStorageV5['readText'] | undefined {
+  if (
+    storageV5 !== null &&
+    typeof storageV5 === 'object' &&
+    'readText' in storageV5 &&
+    typeof storageV5.readText === 'function'
+  ) {
+    return storageV5.readText.bind(storageV5) as SettingsStorageV5['readText']
+  }
+  return undefined
+}
+
+function parseExistingSettingsContentForWrite(
+  content: string,
+  filePath: string,
+): { error: Error } | { settings: SettingsJson | null; existed: boolean } {
+  // densable 2.1.252 `di` empty-file skip
+  if (content.trim() === '') {
+    return { settings: null, existed: true }
+  }
+
+  const parsed = parseSettingsFileContent(content, filePath)
+  if (parsed.settings !== null) {
+    return { settings: parsed.settings, existed: true }
+  }
+
+  const rawData = safeParseJSON(content, false)
+  if (rawData === null) {
+    const loc = findJsonSyntaxErrorLocation(content)
+    const locSuffix = loc ? ` (line ${loc.line}, column ${loc.column})` : ''
+    return {
+      error: new Error(
+        `Invalid JSON syntax in settings file at ${filePath}${locSuffix}`,
+      ),
+    }
+  }
+  if (rawData && typeof rawData === 'object' && !Array.isArray(rawData)) {
+    logForDebugging(
+      `Using raw settings from ${filePath} due to validation failure`,
+    )
+    return { settings: rawData as SettingsJson, existed: true }
+  }
+  return {
+    error: new Error(`Invalid JSON syntax in settings file at ${filePath}`),
+  }
+}
+
+async function loadExistingUserSettingsFromStorageV5(
+  storageV5: unknown,
+  filePath: string,
+): Promise<
+  { error: Error } | { settings: SettingsJson | null; existed: boolean }
+> {
+  const readText = settingsStorageV5ReadText(storageV5)
+  if (!readText) {
+    const cached = getCachedParsedFile(filePath)?.settings ?? null
+    if (isDisklessActive() || cached !== null) {
+      return {
+        settings: cached ? clone(cached) : null,
+        existed: cached !== null,
+      }
+    }
+    return { settings: null, existed: false }
+  }
+  const res = await readText([userSettingsStorageV5Key()])
+  if (!res.ok) {
+    const code =
+      res.error !== null && typeof res.error === 'object' && 'code' in res.error
+        ? String(res.error.code)
+        : String(res.error)
+    if (code === 'NotFound') {
+      return { settings: null, existed: false }
+    }
+    return {
+      error: new Error(`settings storageV5 read failed: ${code}`),
+    }
+  }
+  const item = res.value.items[0]
+  if (!item) {
+    return { settings: null, existed: false }
+  }
+  if ('found' in item) {
+    if (!item.found || item.value === null || item.value === undefined) {
+      return { settings: null, existed: false }
+    }
+    return parseExistingSettingsContentForWrite(item.value, filePath)
+  }
+  if (!item.ok) {
+    const code =
+      item.code ??
+      (item.error !== null &&
+      typeof item.error === 'object' &&
+      'code' in item.error
+        ? String(item.error.code)
+        : 'Failed')
+    if (code === 'NotFound') {
+      return { settings: null, existed: false }
+    }
+    return {
+      error: new Error(`settings storageV5 read failed: ${code}`),
+    }
+  }
+  if (item.value === null || item.value === undefined) {
+    return { settings: null, existed: false }
+  }
+  return parseExistingSettingsContentForWrite(item.value, filePath)
 }
 
 function mergeSettingsForSource(
@@ -1704,16 +1873,16 @@ function writeSettingsFile(
 
 /**
  * densable `Rs` / `ay` — value-merge persist. 4th is storageV5 (`Is` 5th).
- * Official `oi.run`/`Pr()` queue is UNKNOWN — this path stays unqueued.
+ * Official `oi.run`/`Pr()` queue is UNKNOWN — this path stays unqueued unless
+ * routed through `StorageV5` (via `persistSettingsForSource`).
  */
 export function updateSettingsForSource(
   source: EditableSettingSource,
   settings: SettingsJson,
   _unused?: unknown,
-  _storageV5?: unknown,
+  storageV5?: unknown,
 ): { error: Error | null } {
   void _unused
-  void _storageV5
   if (
     (source as unknown) === 'policySettings' ||
     (source as unknown) === 'flagSettings'
@@ -1723,6 +1892,34 @@ export function updateSettingsForSource(
 
   const filePath = getSettingsFilePathForSource(source)
   if (!filePath) {
+    return { error: null }
+  }
+
+  const effectiveStorageV5 = storageV5 ?? getRegisteredPinnedStorageV5()
+  const write = settingsStorageV5Write(effectiveStorageV5)
+  if (write !== undefined && isDefaultUserSettingsPath(source, filePath)) {
+    const cachedExisting = getCachedParsedFile(filePath)?.settings ?? null
+    const mergedOptimistic = mergeSettingsForSource(
+      cachedExisting ? clone(cachedExisting) : null,
+      settings,
+    )
+    const serialized = jsonStringify(mergedOptimistic, null, 2) + '\n'
+    resetSettingsCache()
+    setCachedParsedFile(
+      filePath,
+      parseSettingsFileContent(serialized, filePath),
+    )
+    void persistSettingsForSource(
+      source,
+      settings,
+      undefined,
+      effectiveStorageV5,
+    )
+    return { error: null }
+  }
+
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped(`settings:${source}`, filePath)
     return { error: null }
   }
 
@@ -1762,7 +1959,29 @@ export function updateSettingsForSource(
   return { error: null }
 }
 
-const settingsWriteQueues = new Map<string, Promise<unknown>>()
+type SettingsWriteQueuesHostState = {
+  queues: Map<string, Promise<unknown>>
+  cleanupRegistered: boolean
+}
+
+const settingsWriteQueuesHostSlot = new HostSlot<SettingsWriteQueuesHostState>(
+  () => ({
+    queues: new Map<string, Promise<unknown>>(),
+    cleanupRegistered: false,
+  }),
+)
+
+function getSettingsWriteQueuesHostState(): SettingsWriteQueuesHostState {
+  return settingsWriteQueuesHostSlot.of(getBootstrapSessionHost())
+}
+
+async function drainSettingsWriteQueuesState(
+  state: SettingsWriteQueuesHostState,
+): Promise<void> {
+  while (state.queues.size > 0) {
+    await Promise.all([...state.queues.values()])
+  }
+}
 
 /**
  * densable `FRt` — serialize async settings writes per key (file path) so
@@ -1772,32 +1991,53 @@ export function runInSettingsWriteQueue<T>(
   key: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const prev = settingsWriteQueues.get(key) ?? Promise.resolve()
+  const state = getSettingsWriteQueuesHostState()
+  if (!state.cleanupRegistered) {
+    state.cleanupRegistered = true
+    const stateRef = new WeakRef(state)
+    if (typeof registerPreExitFlush === 'function') {
+      registerPreExitFlush(async () => {
+        const liveState = stateRef.deref()
+        if (!liveState) return
+        await drainSettingsWriteQueuesState(liveState)
+      })
+    }
+    if (typeof registerCleanup === 'function') {
+      registerCleanup(async () => {
+        const liveState = stateRef.deref()
+        if (!liveState) return
+        try {
+          await drainSettingsWriteQueuesState(liveState)
+        } finally {
+          liveState.cleanupRegistered = false
+        }
+      })
+    }
+  }
+  const prev = state.queues.get(key) ?? Promise.resolve()
   const next = prev.then(fn, fn)
   const tracked = next.then(
     () => {
-      if (settingsWriteQueues.get(key) === tracked) {
-        settingsWriteQueues.delete(key)
+      if (state.queues.get(key) === tracked) {
+        state.queues.delete(key)
       }
     },
     () => {
-      if (settingsWriteQueues.get(key) === tracked) {
-        settingsWriteQueues.delete(key)
+      if (state.queues.get(key) === tracked) {
+        state.queues.delete(key)
       }
     },
   )
-  settingsWriteQueues.set(key, tracked)
+  state.queues.set(key, tracked)
   return next
 }
 
 /** densable `Qlt` — wait for all queued settings writes to settle before exit. */
 export async function drainSettingsWrites(): Promise<void> {
-  while (settingsWriteQueues.size > 0) {
-    await Promise.all([...settingsWriteQueues.values()])
-  }
+  const state = settingsWriteQueuesHostSlot.peek(getBootstrapSessionHost())
+  if (!state) return
+  await drainSettingsWriteQueuesState(state)
 }
-
-registerCleanup(drainSettingsWrites)
 
 /**
  * densable `Is` userSettings V5 arm: `A()&&i&&ke` →
@@ -1823,29 +2063,38 @@ export async function persistSettingsForSource(
     return { error: null }
   }
 
-  // Official 2.1.323 (#2029/#1983): block project/local settings writes through
-  // symlinks that escape the checked project root.
-  if (source === 'projectSettings' || source === 'localSettings') {
-    const escapeError = checkProjectSettingsSymlinkEscape(source, filePath)
-    if (escapeError) {
-      return { error: new Error(escapeError.message) }
-    }
-  }
-
-  const write = settingsStorageV5Write(storageV5)
+  const effectiveStorageV5 = storageV5 ?? getRegisteredPinnedStorageV5()
+  const write = settingsStorageV5Write(effectiveStorageV5)
   const viaStorageV5 =
-    isHoverRestOn() &&
-    write !== undefined &&
-    isDefaultUserSettingsPath(source, filePath)
+    write !== undefined && isDefaultUserSettingsPath(source, filePath)
 
   if (!viaStorageV5) {
-    return updateSettingsForSource(source, settings, storageV5)
+    if (isDisklessActive()) {
+      logDisklessWriteSkipped(`settings:${source}`, filePath)
+      return { error: null }
+    }
+    // Official 2.1.323 (#2029/#1983): block project/local settings writes through
+    // symlinks that escape the checked project root.
+    if (source === 'projectSettings' || source === 'localSettings') {
+      const escapeError = checkProjectSettingsSymlinkEscape(source, filePath)
+      if (escapeError) {
+        return { error: new Error(escapeError.message) }
+      }
+    }
+    return updateSettingsForSource(
+      source,
+      settings,
+      undefined,
+      effectiveStorageV5,
+    )
   }
 
   return runInSettingsWriteQueue(filePath, async () => {
     try {
-      getFsImplementation().mkdirSync(dirname(filePath))
-      const loaded = loadExistingSettingsForWrite(source, filePath)
+      const loaded = await loadExistingUserSettingsFromStorageV5(
+        effectiveStorageV5,
+        filePath,
+      )
       if ('error' in loaded) {
         return { error: loaded.error }
       }
@@ -1864,6 +2113,12 @@ export async function persistSettingsForSource(
         throw new Error(`settings storageV5 write failed: ${code}`)
       }
       resetSettingsCache()
+      if (isDisklessActive()) {
+        setCachedParsedFile(
+          filePath,
+          parseSettingsFileContent(payload, filePath),
+        )
+      }
     } catch (e) {
       const error = new Error(
         `Failed to read raw settings from ${filePath}: ${e}`,
@@ -2101,17 +2356,22 @@ function loadSettingsFromDisk(): SettingsWithErrors {
       // env merges per-key so server-delivered does not wipe machine-local env.
       // Priority: remote > HKLM/plist > managed-settings.json > HKCU
       if (source === 'policySettings') {
-        const { policySettings: resolved, policyErrors } =
-          resolvePolicySettingsWithEnvMerge()
-        const mdmResult = getMdmSettings()
-        policyErrors.push(...mdmResult.errors)
-        const { errors: fileErrors } = loadManagedFileSettings()
-        policyErrors.push(...fileErrors)
-        policyErrors.push(...getHkcuSettings().errors)
+        const {
+          policySettings: resolved,
+          hkcuSettings,
+          policyErrors,
+        } = resolvePolicySettingsWithEnvMerge()
+        if (!isDisklessActive()) {
+          const mdmResult = getMdmSettings()
+          policyErrors.push(...mdmResult.errors)
+          const { errors: fileErrors } = loadManagedFileSettings()
+          policyErrors.push(...fileErrors)
+          policyErrors.push(...getHkcuSettings().errors)
+        }
 
         // densable nfc hostManagedProvider: b6i + hostModelOverlay (Gfg)
         // even when only overlay exists (no admin/hkcu).
-        let policySettings = finishPolicySettingsForHost(resolved)
+        let policySettings = finishPolicySettingsForHost(resolved, hkcuSettings)
 
         // Merge the winning policy source into the settings chain
         if (policySettings) {
@@ -2851,6 +3111,28 @@ export function getAutoModeConfig():
 }
 
 export function rawSettingsContainsKey(key: string): boolean {
+  if (isDisklessActive()) {
+    for (const source of getEnabledSettingSources()) {
+      if (source === 'policySettings') continue
+      if (source === 'flagSettings') {
+        const inlineSettings = getFlagSettingsInline()
+        if (
+          inlineSettings &&
+          typeof inlineSettings === 'object' &&
+          key in inlineSettings
+        ) {
+          return true
+        }
+      }
+      const filePath = getSettingsFilePathForSource(source)
+      if (!filePath) continue
+      const cached = getCachedParsedFile(filePath)?.settings
+      if (cached && typeof cached === 'object' && key in cached) {
+        return true
+      }
+    }
+    return false
+  }
   for (const source of getEnabledSettingSources()) {
     // Skip policySettings - we only care about user-configured settings
     if (source === 'policySettings') {
@@ -2947,6 +3229,9 @@ function loadManagedFileSettingsFresh(): {
   errors: ValidationError[]
   hadReadFailure: boolean
 } {
+  if (isDisklessActive()) {
+    return { settings: null, errors: [], hadReadFailure: false }
+  }
   const errors: ValidationError[] = []
   let merged: SettingsJson = {}
   let found = false
@@ -3012,6 +3297,9 @@ function loadManagedFileSettingsFresh(): {
 export async function rereadManagedSettingsIfNeeded(
   timeoutMs: number = MANAGED_REREAD_TIMEOUT_MS,
 ): Promise<boolean> {
+  if (isDisklessActive()) {
+    return false
+  }
   const pipelineState = getHostSettingsPipelineState()
   if (pipelineState.managedRereadInFlight !== undefined) {
     return pipelineState.managedRereadInFlight

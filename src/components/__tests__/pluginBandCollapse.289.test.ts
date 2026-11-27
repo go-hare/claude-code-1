@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   pluginInputFieldKey,
@@ -40,12 +40,23 @@ import {
 import { computeWheelStep, initWheelAccel } from '../ScrollKeybindingHandler.js'
 
 const PANES = join(import.meta.dir, '../PluginRasterPanes.tsx')
+const PANES_DIR = join(import.meta.dir, '../pluginRaster')
 const DEFAULTS = join(import.meta.dir, '../../keybindings/defaultBindings.ts')
 const SCHEMA = join(import.meta.dir, '../../keybindings/schema.ts')
 
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
+
 describe('densable 2.1.289 Mods band CollapseHandle slice', () => {
   test('exports gold band constants and CollapseHandle / CollapsedHint', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain('export const BAND_REQUEST_ID')
     expect(src).toContain('BAND_REQUEST_ID = ABOVE_PROMPT_REQUEST_ID')
     expect(src).toContain('export const MARK_EDGE_COLUMNS = 1')
@@ -61,7 +72,7 @@ describe('densable 2.1.289 Mods band CollapseHandle slice', () => {
   })
 
   test('PluginAbovePromptSite wires collapse handle and collapsed hint', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     const start = src.indexOf('export function PluginAbovePromptSite')
     expect(start).toBeGreaterThan(0)
     const body = src.slice(start)
@@ -129,7 +140,7 @@ describe('densable 2.1.289 Mods band OverflowCue / bandWindow / nextBandFocus', 
   })
 
   test('exports OverflowCue host and abovePrompt ring action names', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     const schema = readFileSync(SCHEMA, 'utf8')
     const defaults = readFileSync(DEFAULTS, 'utf8')
     expect(src).toContain('export function PluginBandOverflowCue')
@@ -177,7 +188,7 @@ describe('densable 2.1.289 AZ !hasCue remap', () => {
   })
 
   test('AbovePrompt Zt binds AZ bag while held, not only hasCue', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain('export function bandKeysWithScroll')
     expect(src).toContain('export function paneScrollHandlers')
     expect(src).toContain('bandKeysWithScroll(ring, scrollHandlers, hasCue)')
@@ -207,7 +218,7 @@ describe('densable 2.1.289 s$ / FMn / _Ee onWheel / Wm', () => {
   })
 
   test('PluginAbovePromptSite outer Box onWheel when hasCue && !dialogOpen', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     const site = src.slice(src.indexOf('export function PluginAbovePromptSite'))
     expect(site).toContain(
       'onWheel={hasCue && !bandBlocked ? bandWheel : undefined}',
@@ -235,7 +246,7 @@ describe('densable 2.1.289 s$ / FMn / _Ee onWheel / Wm', () => {
 
 describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
   test('useBandScrollPlace wires offset/marginTop (no deferred offset=0 stub)', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain('export function useBandScrollPlace')
     const place = src.slice(
       src.indexOf('export function useBandScrollPlace'),
@@ -351,9 +362,9 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
       src.indexOf('export function PluginAbovePromptSite'),
     )
     expect(pee).not.toContain('<PaneErrorBoundary')
-    const replInline = readFileSync(
+    const replInline = readModuleTree(
       join(import.meta.dir, '../../screens/REPL.tsx'),
-      'utf8',
+      join(import.meta.dir, '../../screens/repl'),
     )
     // densable KEEP: skip empty PluginPaneSite reservation when no pane.
     expect(replInline).toContain(
@@ -371,9 +382,9 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(site).toContain('focusIndex === null')
     expect(site).toContain('panes.focusedId === null')
     expect(site).toContain('panes.placements > 0')
-    const repl = readFileSync(
+    const repl = readModuleTree(
       join(import.meta.dir, '../../screens/REPL.tsx'),
-      'utf8',
+      join(import.meta.dir, '../../screens/repl'),
     )
     expect(repl).toContain('promptEmpty={promptEmpty}')
     expect(src).toContain("runFunctionHookChain('ui.scroll')")
@@ -408,7 +419,7 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
   })
 
   test('PluginSiteFields hosts m$/y$/g$; Chat abovePrompt:focus lands ring', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain('function PluginSiteFields')
     expect(src).toContain('InputFieldsContext')
     expect(src).toContain('SelectFieldsContext')
@@ -427,7 +438,7 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
   })
 
   test('PluginPaneSite XHo: live focusedId isHeldNow + act/moveByPerson ring', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     const start = src.indexOf('export function PluginPaneSite')
     expect(start).toBeGreaterThan(0)
     const body = src.slice(
@@ -510,9 +521,9 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     )
     expect(body).toContain('dockHostRef')
     expect(body).not.toContain('void paneHost')
-    const repl = readFileSync(
+    const repl = readModuleTree(
       join(import.meta.dir, '../../screens/REPL.tsx'),
-      'utf8',
+      join(import.meta.dir, '../../screens/repl'),
     )
     // densable Mee: PluginPaneDockHost measures yoga then QT rows=hostRows.
     expect(src).toContain('export function PluginPaneDockHost')
@@ -582,10 +593,17 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(prompt).toContain('createPromptEditComposer')
     expect(prompt).toContain('setHooked(promptEditHooked)')
     expect(prompt).toContain('promptEditComposerRef.current?.record')
-    const modules = readFileSync(
-      join(import.meta.dir, '../../utils/plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const fhDir = join(import.meta.dir, '../../utils/plugins/functionHooks')
+    const modules = [
+      readFileSync(
+        join(import.meta.dir, '../../utils/plugins/functionHooksModules.ts'),
+        'utf8',
+      ),
+      ...readdirSync(fhDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(fhDir, f), 'utf8')),
+    ].join('\n')
     expect(modules).toContain('export function createPromptEditComposer')
     expect(modules).toContain("the editor's edit stands")
     expect(modules).toContain(
@@ -1018,7 +1036,7 @@ describe('densable 2.1.289 soft remainder xze / l$ / d$ / m$', () => {
   })
 
   test('PluginAbovePromptSite wires xze/l$/d$/m$ and Chat abovePrompt:focus', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain('export function focusablesOfDrawing')
     expect(src).toContain('export function bandRingHandlers')
     expect(src).toContain('export function getSettledBudget')
@@ -1062,7 +1080,7 @@ describe('densable 2.1.289 soft remainder xze / l$ / d$ / m$', () => {
 
 describe('densable 2.1.289 y$ select highlight / selectKeys', () => {
   test('exports qZ selectHighlightHandlers and y$.intercept selectKeysIntercept', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain('export function selectHighlightHandlers')
     expect(src).toContain('export function selectKeysIntercept')
     expect(src).toContain('export function usePluginSelectSeat')
@@ -1170,7 +1188,7 @@ describe('densable 2.1.289 y$ select highlight / selectKeys', () => {
   })
 
   test('AbovePromptSelect registers highlight* + press via selectHighlightHandlers', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     const defaults = readFileSync(DEFAULTS, 'utf8')
     const schema = readFileSync(SCHEMA, 'utf8')
     expect(src).toContain("bandSelect.handlers['abovePrompt:highlightNext']")
@@ -1220,7 +1238,7 @@ describe('densable 2.1.289 y$ select highlight / selectKeys', () => {
 
 describe('densable 2.1.289 g$ key intercept on PluginAbovePromptSite', () => {
   test('exports pluginBandKeys / usePluginBandKeys / focusableAt and wires site bag', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain('export function pluginBandKeys')
     expect(src).toContain('export function usePluginBandKeys')
     expect(src).toContain('export function focusableAt')
@@ -1358,7 +1376,7 @@ describe('densable 2.1.289 Si panes semantic store (EMPTY_PANES-shaped)', () => 
   )
 
   test('abovePrompt:focus gold order: $Fr cycle → band step → open[0]; never a4n(true); keeps effortSlider', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     const defaults = readFileSync(DEFAULTS, 'utf8')
     const schema = readFileSync(SCHEMA, 'utf8')
     // a4n mount/auto-settle still present; key must not invent settle-first.
@@ -1390,7 +1408,14 @@ describe('densable 2.1.289 Si panes semantic store (EMPTY_PANES-shaped)', () => 
   })
 
   test('functionHooksModules exports EMPTY_PANES-shaped store + helpers (no Si/panesStore minify)', () => {
-    const fh = readFileSync(FH, 'utf8')
+    const fhDir = join(import.meta.dir, '../../utils/plugins/functionHooks')
+    const fh = [
+      readFileSync(FH, 'utf8'),
+      ...readdirSync(fhDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(fhDir, f), 'utf8')),
+    ].join('\n')
     expect(fh).toContain('export const EMPTY_PANES')
     expect(fh).toContain('export function getPanesState')
     expect(fh).toContain('export function getPanesStore')
@@ -1522,7 +1547,7 @@ describe('densable 2.1.289 PluginClient oo / ro', () => {
   })
 
   test('PluginClient wires gold oo pointer-down DQt and sb keys', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain("kind === 'down' && live.acceptsKeys()")
     expect(src).toContain('live.key(mapped)')
     expect(src).toContain('live.pointer({')
@@ -1558,7 +1583,7 @@ describe('densable 2.1.289 PluginClient oo / ro', () => {
 
 describe('densable 2.1.289 kL/yL/$l/g$ wrap', () => {
   test('PluginRasterPanes wires kL seats, yL prune, $l subscribeLayout, pee g$', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain(
       'export { pluginFieldSeatKey, pluginFieldSeatGeneration, bumpPluginFieldSeatGeneration }',
     )
@@ -1694,7 +1719,7 @@ describe('densable 2.1.289 AskUserQuestion rewrite + PromptHint tail + Markdown 
   })
 
   test('PluginRasterPanes hosts linkSchemes, hasSelection guard, onHoldsBandChange, and tail-only hint', () => {
-    const src = readFileSync(PANES, 'utf8')
+    const src = readModuleTree(PANES, PANES_DIR)
     expect(src).toContain("new Set(['https', 'http', 'file'])")
     expect(src).toContain('selection.hasSelection()')
     expect(src).toContain('onHoldsBandChange?: (holds: boolean) => void')

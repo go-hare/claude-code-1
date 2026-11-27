@@ -10,8 +10,10 @@
  * Both paths support full Unicode (Chinese, emoji, etc.) without IME involvement.
  */
 
+import { spawnSync } from 'node:child_process'
 import { getBootstrapSessionHost, HostSlot } from '../../sessionHost.js'
 import { validateHwnd, runPs, VK_MAP, MODIFIER_KEYS } from './shared.js'
+import { escapePowerShellSingleQuoted } from './uiAutomation.js'
 
 /** Cache findEditChild results per host — window structure doesn't change while bound */
 const editChildCacheByHost = new HostSlot(
@@ -536,12 +538,26 @@ export function consoleKey(
  */
 export function consoleText(hwnd: string, text: string): boolean {
   hwnd = validateHwnd(hwnd)
-  // Escape single quotes for PowerShell
-  const escaped = text.replace(/'/g, "''")
+  // P1-E6(c): Escape ASCII + Unicode single quotes and run via UTF-16LE -EncodedCommand
+  const escaped = escapePowerShellSingleQuoted(text)
   const script = `${CONSOLE_INPUT_TYPE}
 [ConsoleInput]::SendTextToConsole([IntPtr]::new([long]${hwnd}), '${escaped}')
 `
-  return runPs(script) !== null
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  try {
+    const result = spawnSync(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer: 32 * 1024 * 1024,
+        windowsHide: true,
+      },
+    )
+    return !result.error && result.status === 0
+  } catch {
+    return false
+  }
 }
 
 /**

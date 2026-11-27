@@ -13,7 +13,7 @@ import { isENOENT } from '../errors.js'
 import { logForDebugging } from '../debug.js'
 import { getPlatform } from '../platform.js'
 import * as lockfile from '../lockfile.js'
-import { getActiveSessionFromAls, runWithSession } from '../sessionHost.js'
+import { getSessionAlsStore, sessionContextAls } from '../sessionContextAls.js'
 import type { StorageV5Result } from './createLocalFsBackend.js'
 
 const DEFAULT_STALE_MS = 30000
@@ -138,11 +138,11 @@ export async function runSerializedByPath<T>(
   e: string,
   r: () => Promise<T>,
 ): Promise<T> {
-  const captured = getActiveSessionFromAls()
+  const capturedStore = getSessionAlsStore()
   await using n = await enterPathQueue(resolve(e))
   void n
-  if (captured !== undefined && getActiveSessionFromAls() !== captured) {
-    return await runWithSession(captured, r)
+  if (capturedStore !== undefined && getSessionAlsStore() !== capturedStore) {
+    return await sessionContextAls.run(capturedStore, r)
   }
   return await r()
 }
@@ -156,10 +156,10 @@ export async function withStorageLock<T>(
   r: (ctx: StorageLockCtx) => Promise<StorageV5Result<T>>,
   n: StorageLockOptions,
 ): Promise<StorageV5Result<T>> {
-  const captured = getActiveSessionFromAls()
+  const capturedStore = getSessionAlsStore()
   const runInCaptured = <R>(fn: () => R): R =>
-    captured !== undefined && getActiveSessionFromAls() !== captured
-      ? runWithSession(captured, fn)
+    capturedStore !== undefined && getSessionAlsStore() !== capturedStore
+      ? sessionContextAls.run(capturedStore, fn)
       : fn()
   const i = n.lockfilePath ?? e
   const t = resolve(i)

@@ -3,7 +3,7 @@
  * Gold SEA /tmp/official-283/package/claude.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { getCliCommandGraphNode } from '../cliCommandGraph.js'
@@ -173,7 +173,14 @@ describe('densable 2.1.283 B9 desktop/vscode/cowork commander', () => {
     const ide = src('src/utils/ide.ts')
     expect(ide).toContain('isDiffBuiltinPluginAvailable')
     expect(ide).toContain("getBuiltinPluginDefinition('diff')")
-    const sandbox = src('src/utils/sandbox/sandbox-adapter.ts')
+    const sandboxAdapterDir = join(ROOT, 'src/utils/sandbox/adapter')
+    const sandbox = [
+      src('src/utils/sandbox/sandbox-adapter.ts'),
+      ...readdirSync(sandboxAdapterDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(sandboxAdapterDir, f), 'utf8')),
+    ].join('\n')
     expect(sandbox).toContain('isStrictSandboxModeConfigured')
     expect(sandbox).toContain("source: 'localSettings' | 'userSettings'")
     const edit = src('src/cli/handlers/sandboxSettingsEdit.ts')

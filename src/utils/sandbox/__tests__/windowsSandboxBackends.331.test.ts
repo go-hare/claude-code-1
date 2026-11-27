@@ -1423,6 +1423,115 @@ describe('Windows sandbox security hardening regressions (P0-2, P1-1, P1-4, P1-8
         '"C:\\Program Files\\Claude\\vendor\\win-sandbox\\srt-win.exe"',
       )
       expect(wrappedStr).toContain('cmd.exe')
+      await SandboxManager.reset()
+    })
+  })
+
+  test('E5-P1-2: Windows wrapWithSandboxArgv runs preflight & applyDenies (fail-closed) and encodes multi-line PowerShell/bash commands without CR/LF', async () => {
+    const appliedDenies: Array<{
+      denyRead: string[]
+      denyWrite: string[]
+      allowWrite: string[]
+    }> = []
+    let shouldFailDenies = false
+
+    await runWithNewHostSession({}, async () => {
+      getPlatform.cache.set(undefined, 'windows')
+      registerWindowsSandboxNativeProvider(
+        makeMockProvider({
+          kind: 'srt-win',
+          srtWinCommand: {
+            exe: 'C:\\Program Files\\Claude\\vendor\\win-sandbox\\srt-win.exe',
+            prependArgs: [],
+          },
+          applyDenies: async req => {
+            appliedDenies.push({
+              denyRead: req.denyRead,
+              denyWrite: req.denyWrite,
+              allowWrite: req.allowWrite,
+            })
+            if (shouldFailDenies) {
+              throw new Error('Unguarded deny target inside allowWrite')
+            }
+            return {
+              inPlace: 0,
+              planted: req.denyRead.length + req.denyWrite.length,
+              laid: req.allowWrite.length,
+              pushedDown: 0,
+              guarded: req.denyRead.length + req.denyWrite.length,
+              extrasSkipped: 0,
+              ms: 1,
+              stands: [],
+              handedBack: [],
+            }
+          },
+        }),
+      )
+      seedHostSettings({
+        userSettings: {
+          sandbox: {
+            enabled: true,
+            windows: { backend: 'sandboxuser' },
+          },
+        },
+        merged: {
+          sandbox: {
+            enabled: true,
+            windows: { backend: 'sandboxuser' },
+          },
+        },
+      })
+
+      // 1. Multi-line PowerShell command encodes via -EncodedCommand (UTF-16LE base64), zero CR/LF
+      const psScript = 'Write-Output "line1"\r\nWrite-Output "line2"'
+      const psRes = await SandboxManager.wrapWithSandboxArgv(
+        psScript,
+        'powershell.exe',
+        {
+          filesystem: {
+            denyRead: ['C:\\Users\\alice\\.ssh'],
+            denyWrite: ['C:\\work\\.git\\config'],
+            allowWrite: ['C:\\work'],
+          },
+        },
+      )
+      expect(appliedDenies).toHaveLength(1)
+      expect(appliedDenies[0]!.denyRead).toContain('C:\\Users\\alice\\.ssh')
+      expect(appliedDenies[0]!.denyWrite).toContain('C:\\work\\.git\\config')
+      expect(appliedDenies[0]!.allowWrite).toContain('C:\\work')
+      expect(psRes.argv.every(a => !/[\r\n]/.test(a))).toBe(true)
+      const encIdx = psRes.argv.indexOf('-EncodedCommand')
+      expect(encIdx).toBeGreaterThan(-1)
+      const decodedPs = Buffer.from(psRes.argv[encIdx + 1]!, 'base64').toString(
+        'utf16le',
+      )
+      expect(decodedPs).toBe(psScript)
+
+      // 2. Multi-line bash command encodes via single-line base64 eval, zero CR/LF
+      const bashScript = 'echo line1\necho line2'
+      const bashRes = await SandboxManager.wrapWithSandboxArgv(
+        bashScript,
+        'C:\\Program Files\\Git\\bin\\bash.exe',
+      )
+      expect(bashRes.argv.every(a => !/[\r\n]/.test(a))).toBe(true)
+      const cIdx = bashRes.argv.indexOf('-c')
+      expect(cIdx).toBeGreaterThan(-1)
+      const evalCmd = bashRes.argv[cIdx + 1]!
+      const b64Match = /printf '%s' '([A-Za-z0-9+/=]+)' \| base64 -d/.exec(
+        evalCmd,
+      )
+      expect(b64Match?.[1]).toBeTruthy()
+      expect(Buffer.from(b64Match![1]!, 'base64').toString('utf8')).toBe(
+        bashScript,
+      )
+
+      // 3. Fail closed when provider.applyDenies rejects
+      shouldFailDenies = true
+      await expect(
+        SandboxManager.wrapWithSandboxArgv('echo should-fail', 'pwsh.exe'),
+      ).rejects.toThrow(/Unguarded deny target/)
+
+      await SandboxManager.reset()
     })
   })
 

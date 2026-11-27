@@ -83,6 +83,7 @@ import {
   setThemeConfigCallbacks,
 } from '@anthropic/ink'
 import { stopCapturingEarlyInput } from '../utils/earlyInput.js'
+import { registerDefaultInkHostAdapter } from '../utils/inkRoot.js'
 import { setCachedSystemTheme } from '../utils/systemTheme.js'
 import { getThemeSetting, saveThemeSetting } from '../utils/themeSetting.js'
 
@@ -92,6 +93,9 @@ import { getThemeSetting, saveThemeSetting } from '../utils/themeSetting.js'
 // Ink owns the OSC 11 cache. Mirror it into src across all hosts so
 // resolveThemeSetting('auto') sees the same value ThemeProvider paints.
 registerSystemThemeMirror(setCachedSystemTheme)
+// Eagerly register GrowthBook, screen-reader, and tmux control-mode host
+// callbacks so early Ink renders (before createRoot() runs) observe live gates.
+registerDefaultInkHostAdapter()
 
 // initialize1PEventLogging is dynamically imported to defer OpenTelemetry sdk-logs/resources
 

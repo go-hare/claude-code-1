@@ -2,7 +2,7 @@
  * densable 2.1.238 #7 s3T/pze — catalog `r.name` producer + renderer without
  * OUTPUT_STYLE_CONFIG lookup. Custom/plugin names still render; >gFn=256 suppress.
  */
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'bun:test'
@@ -77,7 +77,14 @@ describe('densable 2.1.238 #7 s3T/pze output_style', () => {
   })
 
   test('renderer source gold: no OUTPUT_STYLE_CONFIG lookup', () => {
-    const src = readFileSync(join(ROOT, 'src/utils/messages.ts'), 'utf8')
+    const msgDir = join(ROOT, 'src/utils/messages')
+    const src = [
+      readFileSync(join(ROOT, 'src/utils/messages.ts'), 'utf8'),
+      ...readdirSync(msgDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(msgDir, f), 'utf8')),
+    ].join('\n')
     const caseIdx = src.indexOf("case 'output_style'")
     expect(caseIdx).toBeGreaterThan(0)
     const nextCase = src.indexOf('case ', caseIdx + 10)

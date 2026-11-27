@@ -2,7 +2,7 @@
  * densable 2.1.289 zu / Tqe / Ase / QueryEngine skipAttachments ternary.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   getInFlightClientDataFetch,
@@ -94,7 +94,14 @@ describe('densable 2.1.289 SDK query() bag plumbing', () => {
   })
 
   test('QueryParams + queryLoop consume promptRenderEpoch / modelFacts', () => {
-    const src = readFileSync(join(ROOT, 'src/query.ts'), 'utf8')
+    const queryDir = join(ROOT, 'src/query')
+    const src = [
+      readFileSync(join(ROOT, 'src/query.ts'), 'utf8'),
+      ...readdirSync(queryDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(queryDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('promptRenderEpoch?: number')
     expect(src).toContain('modelFacts?:')
     expect(src).toContain('getPromptRenderEpoch()')

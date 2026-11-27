@@ -2,7 +2,13 @@
  * densable 2.1.239 #36 — G() + CXq `.git/config.worktree` denyWrite.
  */
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'fs'
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -11,9 +17,14 @@ import { ensureLinuxGitWorktreeConfigPlaceholder } from '../sandbox-adapter.js'
 
 describe('densable 2.1.239 #36 config.worktree', () => {
   test('adapter CXq lists config.worktree next to config', async () => {
-    const src = await Bun.file(
-      new URL('../sandbox-adapter.ts', import.meta.url),
-    ).text()
+    const adapterDir = join(import.meta.dir, '../adapter')
+    const src = [
+      await Bun.file(new URL('../sandbox-adapter.ts', import.meta.url)).text(),
+      ...readdirSync(adapterDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(adapterDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain("join(projectGitDir, 'config.lock')")
     expect(src).toContain("join(projectGitDir, 'config.worktree.lock')")
     expect(src).toContain("join(projectGitDir, 'commondir')")

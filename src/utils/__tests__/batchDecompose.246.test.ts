@@ -10,7 +10,7 @@
  * HAVE 246. Do not invent default tip, live r6, or Batch* wrappers.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { z } from 'zod/v4'
 import type { Tool } from '../../Tool.js'
@@ -29,7 +29,23 @@ const snippets = join(
   import.meta.dir,
   '../../../docs/upstream-extraction/v2.1.246/snippets',
 )
-const src = (rel: string) => readFileSync(join(import.meta.dir, rel), 'utf8')
+const SPLIT_DIRS: Record<string, string> = {
+  '../messages.ts': '../messages',
+  '../../services/api/claude.ts': '../../services/api/claude',
+}
+const src = (rel: string) => {
+  const entry = readFileSync(join(import.meta.dir, rel), 'utf8')
+  const subRel = SPLIT_DIRS[rel]
+  if (!subRel) return entry
+  const subDir = join(import.meta.dir, subRel)
+  return [
+    entry,
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 
 const v1 = { name: 'Read' } as Tool
 

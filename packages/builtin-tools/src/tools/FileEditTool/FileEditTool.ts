@@ -249,10 +249,17 @@ export const FileEditTool = buildTool({
   create(deps: ToolDeps) {
     return {
       async checkPermissions(input, callCtx): Promise<PermissionDecision> {
-        noteApprovedFileToolPath(input.file_path, callCtx.toolUseId)
+        const resolvedFilePath = deps.cwd
+          ? expandPath(input.file_path, deps.cwd())
+          : input.file_path
+        noteApprovedFileToolPath(resolvedFilePath, callCtx.toolUseId)
+        const resolvedInput =
+          resolvedFilePath !== input.file_path
+            ? { ...input, file_path: resolvedFilePath }
+            : input
         return checkWritePermissionForTool(
           FileEditTool,
-          input,
+          resolvedInput,
           deps.permissions(),
         )
       },
@@ -263,7 +270,7 @@ export const FileEditTool = buildTool({
         const { file_path, old_string, new_string, replace_all = false } = input
         // Use expandPath for consistent path normalization (especially on Windows
         // where "/" vs "\" can cause readFileState lookup mismatches)
-        const fullFilePath = expandPath(file_path)
+        const fullFilePath = expandPath(file_path, deps.cwd?.())
 
         // Official 2.1.326 #307 / #309: refuse edits to Claude sign-in files or
         // blocked device/process files even before permission prompts.
@@ -458,7 +465,7 @@ export const FileEditTool = buildTool({
           // Try to find a similar file with a different extension
           const similarFilename = await findSimilarFile(fullFilePath)
           const cwdSuggestion = await suggestPathUnderCwd(fullFilePath)
-          let message = `File does not exist. ${FILE_NOT_FOUND_CWD_NOTE} ${getCwd()}.`
+          let message = `File does not exist. ${FILE_NOT_FOUND_CWD_NOTE} ${deps.cwd?.() ?? getCwd()}.`
 
           if (cwdSuggestion) {
             message += ` Did you mean ${cwdSuggestion}?`
@@ -662,7 +669,26 @@ export const FileEditTool = buildTool({
         const { userModified, parentMessage, toolUseId } = callCtx
         const { file_path, old_string, new_string, replace_all = false } = input
 
-        const absoluteFilePath = expandPath(file_path)
+        const absoluteFilePath = expandPath(file_path, deps.cwd?.())
+
+        // Official 2.1.326 #307 / #309 & bg isolation: defense-in-depth at call() time too.
+        if (isClaudeSignInFilePath(absoluteFilePath)) {
+          throw new Error(
+            `Cannot edit Claude Code sign-in file ${absoluteFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
+          )
+        }
+        if (isBlockedDeviceOrProcessPath(absoluteFilePath)) {
+          throw new Error(
+            `Cannot edit device or process file ${absoluteFilePath}.`,
+          )
+        }
+        const isolationBlock = checkBgIsolationWriteBlock(absoluteFilePath, {
+          agentId: deps.agentId,
+          agentWorktree: deps.agentWorktree,
+        })
+        if (isolationBlock) {
+          throw new Error(isolationBlock)
+        }
 
         const toolPermissionContext = deps.permissions()
         const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(

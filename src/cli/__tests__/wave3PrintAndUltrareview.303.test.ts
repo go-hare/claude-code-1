@@ -1,12 +1,25 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = join(import.meta.dir, '../../..')
 
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
+
 describe('Wave 3 cross-file wiring (#969, #1170, #984, costMetadataPusher)', () => {
   test('src/cli/print.ts declares costMetadataPusher inside runHeadlessStreaming and wires #969', () => {
-    const src = readFileSync(join(ROOT, 'src/cli/print.ts'), 'utf8')
+    const src = readModuleTree(
+      join(ROOT, 'src/cli/print.ts'),
+      join(ROOT, 'src/cli/print'),
+    )
     const streamingIdx = src.indexOf('function runHeadlessStreaming')
     expect(streamingIdx).toBeGreaterThan(-1)
     const streamingBody = src.slice(streamingIdx)
@@ -20,7 +33,10 @@ describe('Wave 3 cross-file wiring (#969, #1170, #984, costMetadataPusher)', () 
   })
 
   test('src/query.ts #984 uses shouldSuppressInterruptionMessage instead of missing hasImmediateInterruptionMessage', () => {
-    const src = readFileSync(join(ROOT, 'src/query.ts'), 'utf8')
+    const src = readModuleTree(
+      join(ROOT, 'src/query.ts'),
+      join(ROOT, 'src/query'),
+    )
     expect(src).not.toContain('hasImmediateInterruptionMessage')
     expect(src).toContain('!shouldSuppressInterruptionMessage(')
   })

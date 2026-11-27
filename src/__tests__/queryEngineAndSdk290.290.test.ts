@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { SDKPartialAssistantMessageSchema } from '../entrypoints/sdk/coreSchemas.js'
 import {
@@ -116,10 +116,14 @@ describe('v2.1.290 #21 --json-schema retraction & print.ts error formatting', ()
   })
 
   test('print.ts uses result errors[0] for error_max_structured_output_retries', () => {
-    const printSrc = readFileSync(
-      join(import.meta.dir, '../cli/print.ts'),
-      'utf8',
-    )
+    const printDir = join(import.meta.dir, '../cli/print')
+    const printSrc = [
+      readFileSync(join(import.meta.dir, '../cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(printSrc).toContain(
       "errors?.[0] ?? 'Failed to provide valid structured output after maximum retries'",
     )

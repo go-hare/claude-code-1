@@ -10,7 +10,21 @@ import {
   TOOL_USE_ID_TAG,
 } from '../constants/xml.js'
 import { enqueuePendingNotification } from './messageQueueManager.js'
+import { runWithSession } from './sessionHost.js'
+import type { Session } from './sessionRoot.js'
 import { escapeXml } from './xml.js'
+
+function isRunnableSession(value: unknown): value is Session {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'host' in value &&
+    (value as { host?: unknown }).host !== null &&
+    typeof (value as { host?: unknown }).host === 'object' &&
+    'root' in value &&
+    typeof (value as { id?: unknown }).id === 'string'
+  )
+}
 
 /** densable `lOt` = `fwt - 2000` (notification cap 1e5). */
 export const DETACH_RESULT_CAP = 98_000
@@ -65,6 +79,7 @@ export function enqueueDetachedToolCallResult(opts: {
   text: string
   isOnScreen: boolean
   passive?: boolean
+  session?: { readonly root: object }
 }): 'delivered' | 'degraded' | 'dropped' {
   const onScreen =
     opts.status === 'completed'
@@ -80,29 +95,10 @@ export function enqueueDetachedToolCallResult(opts: {
       : `The ${opts.toolName} call ended without a result; what happened follows. ${onScreen}Carry on as if the tool had just returned it: do not announce a notification or a background task.`
   const xmlStatus = opts.status === 'completed' ? 'completed' : 'failed'
   const escapedBody = escapeDetachedResultBody(opts.text, DETACH_RESULT_CAP)
-  const agentId = getMainThreadAgentId()
-  try {
-    enqueuePendingNotification(
-      {
-        value: `<${TASK_NOTIFICATION_TAG}>
-<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>
-<${TASK_TYPE_TAG}>tool_call</${TASK_TYPE_TAG}>
-<${STATUS_TAG}>${xmlStatus}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
-<result>
-${escapedBody}
-</result>
-</${TASK_NOTIFICATION_TAG}>`,
-        mode: 'task-notification',
-        agentId,
-        skipAttachments: true,
-        priority: 'next',
-        ...(opts.passive === true ? { passive: true } : {}),
-      },
-      { turnAttribution: 'inherit' },
-    )
-    return 'delivered'
-  } catch {
+  const runScoped = <T>(fn: () => T): T =>
+    isRunnableSession(opts.session) ? runWithSession(opts.session, fn) : fn()
+  return runScoped(() => {
+    const agentId = getMainThreadAgentId()
     try {
       enqueuePendingNotification(
         {
@@ -110,7 +106,10 @@ ${escapedBody}
 <${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>
 <${TASK_TYPE_TAG}>tool_call</${TASK_TYPE_TAG}>
 <${STATUS_TAG}>${xmlStatus}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${escapeXml(`${summary} The result could not be rendered.`)}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+<result>
+${escapedBody}
+</result>
 </${TASK_NOTIFICATION_TAG}>`,
           mode: 'task-notification',
           agentId,
@@ -120,9 +119,29 @@ ${escapedBody}
         },
         { turnAttribution: 'inherit' },
       )
-      return 'degraded'
+      return 'delivered'
     } catch {
-      return 'dropped'
+      try {
+        enqueuePendingNotification(
+          {
+            value: `<${TASK_NOTIFICATION_TAG}>
+<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>
+<${TASK_TYPE_TAG}>tool_call</${TASK_TYPE_TAG}>
+<${STATUS_TAG}>${xmlStatus}</${STATUS_TAG}>
+<${SUMMARY_TAG}>${escapeXml(`${summary} The result could not be rendered.`)}</${SUMMARY_TAG}>
+</${TASK_NOTIFICATION_TAG}>`,
+            mode: 'task-notification',
+            agentId,
+            skipAttachments: true,
+            priority: 'next',
+            ...(opts.passive === true ? { passive: true } : {}),
+          },
+          { turnAttribution: 'inherit' },
+        )
+        return 'degraded'
+      } catch {
+        return 'dropped'
+      }
     }
-  }
+  })
 }

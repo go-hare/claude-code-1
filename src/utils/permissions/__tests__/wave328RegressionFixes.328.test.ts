@@ -3,6 +3,7 @@ import {
   linkSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -222,10 +223,17 @@ describe('Regression Fix Agent 1 (P0/P1/P2 fixes)', () => {
   })
 
   test('P0-3: ensureInitializedForWrap attempts initialize() regardless of keepsSandboxOn', () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../../sandbox/sandbox-adapter.ts'),
-      'utf-8',
-    )
+    const adapterDir = join(import.meta.dir, '../../sandbox/adapter')
+    const src = [
+      readFileSync(
+        join(import.meta.dir, '../../sandbox/sandbox-adapter.ts'),
+        'utf-8',
+      ),
+      ...readdirSync(adapterDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(adapterDir, f), 'utf-8')),
+    ].join('\n')
     const start = src.indexOf('export async function ensureInitializedForWrap')
     const end = src.indexOf('async function wrapWithSandbox', start)
     const body = src.slice(start, end)

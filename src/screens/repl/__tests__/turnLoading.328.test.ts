@@ -170,7 +170,7 @@ describe('2.1.328 iie loading publication (#185 queued Escape)', () => {
   })
 
   test('the actual background callback aborts a controller armed after its render', () => {
-    const path = join(import.meta.dir, '../../REPL.tsx')
+    const path = join(import.meta.dir, '../useReplTurnOrchestration.tsx')
     const source = ts.createSourceFile(
       path,
       readFileSync(path, 'utf8'),
@@ -573,7 +573,13 @@ describe('2.1.328 iie loading publication (#185 queued Escape)', () => {
   })
 
   test('REPL consumes the controller snapshot without a loading effect bridge', () => {
-    const source = readFileSync(join(import.meta.dir, '../../REPL.tsx'), 'utf8')
+    const source = [
+      readFileSync(join(import.meta.dir, '../../REPL.tsx'), 'utf8'),
+      readFileSync(
+        join(import.meta.dir, '../useReplTurnOrchestration.tsx'),
+        'utf8',
+      ),
+    ].join('\n')
     expect(source).toContain('const queryGuard = turnController.guard')
     expect(source).not.toContain('turnController.setLoading(')
     expect(source).not.toContain('setIsExternalLoadingRaw')

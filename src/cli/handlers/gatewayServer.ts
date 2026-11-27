@@ -861,14 +861,19 @@ async function writeFetchResponse(
   }
 
   const reader = upstreamRes.body.getReader()
+  let completed = false
   try {
     for (;;) {
       if (res.writableEnded || res.destroyed) {
+        completed = true
         await reader.cancel().catch(() => {})
         break
       }
       const { done, value } = await reader.read()
-      if (done) break
+      if (done) {
+        completed = true
+        break
+      }
       if (
         value &&
         value.byteLength > 0 &&
@@ -884,12 +889,19 @@ async function writeFetchResponse(
       }
     }
   } finally {
+    if (!completed) {
+      await reader.cancel().catch(() => {})
+    }
     reader.releaseLock()
     if (!res.writableEnded && !res.destroyed) {
       try {
-        res.end()
+        if (completed) {
+          res.end()
+        } else {
+          res.destroy()
+        }
       } catch {
-        // Ignore end errors on closed sockets
+        // Ignore end/destroy errors on closed sockets
       }
     }
   }
@@ -1147,7 +1159,7 @@ export async function startGatewayServer(
               })
             } else if (!res.writableEnded && !res.destroyed) {
               try {
-                res.end()
+                res.destroy()
               } catch {
                 // ignore closed socket
               }
@@ -1220,7 +1232,7 @@ export async function startGatewayServer(
               })
             } else if (!res.writableEnded && !res.destroyed) {
               try {
-                res.end()
+                res.destroy()
               } catch {
                 // ignore closed socket
               }
@@ -1254,7 +1266,7 @@ export async function startGatewayServer(
               isTooLarge ? { connection: 'close' } : undefined,
             )
           } else if (!res.writableEnded && !res.destroyed) {
-            res.end()
+            res.destroy()
           }
         } catch {
           // Never throw unhandledRejection from error handler writes

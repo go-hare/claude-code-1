@@ -38,6 +38,17 @@ export const STREAM_KEEPALIVE_MAX_PINGS = 30
 
 export type StreamPingEvent = { type: 'ping' }
 
+/** Mutable ref allowing stream resumption to swap the active response's chunkTimes. */
+export type BodyChunkTimesRef = { readonly current: BodyChunkTimes | undefined }
+
+const HEARTBEAT = Symbol('heartbeat')
+
+function resolveChunkTimes(
+  chunkTimes: BodyChunkTimes | BodyChunkTimesRef,
+): BodyChunkTimes | undefined {
+  return 'current' in chunkTimes ? chunkTimes.current : chunkTimes
+}
+
 /** densable _0r */
 export function isStreamPingEvent(event: unknown): event is StreamPingEvent {
   return (
@@ -56,7 +67,7 @@ export function isStreamPingEvent(event: unknown): event is StreamPingEvent {
  */
 export async function* withStreamKeepAlivePings<T>(
   source: AsyncIterable<T>,
-  chunkTimes: BodyChunkTimes | undefined,
+  chunkTimes: BodyChunkTimes | BodyChunkTimesRef | undefined,
   options?: {
     heartbeatMs?: number
     maxConsecutivePings?: number
@@ -80,10 +91,10 @@ export async function* withStreamKeepAlivePings<T>(
   try {
     while (true) {
       pendingNext ??= iterator.next()
-      const raced = await Promise.race([
-        pendingNext.then(result => ({ kind: 'next' as const, result })),
-        new Promise<{ kind: 'heartbeat' }>(resolve => {
-          timer = setTimeout(() => resolve({ kind: 'heartbeat' }), heartbeatMs)
+      const raced = await Promise.race<IteratorResult<T> | typeof HEARTBEAT>([
+        pendingNext,
+        new Promise<typeof HEARTBEAT>(resolve => {
+          timer = setTimeout(() => resolve(HEARTBEAT), heartbeatMs)
           timer.unref?.()
         }),
       ])
@@ -92,9 +103,14 @@ export async function* withStreamKeepAlivePings<T>(
         timer = undefined
       }
 
-      if (raced.kind === 'heartbeat') {
+      if (raced === HEARTBEAT) {
         // densable: if(t.lastAt>i && s<n) yield ping
-        if (chunkTimes.lastAt > anchorAt && consecutivePings < maxPings) {
+        const current = resolveChunkTimes(chunkTimes)
+        if (
+          current !== undefined &&
+          current.lastAt > anchorAt &&
+          consecutivePings < maxPings
+        ) {
           anchorAt = now()
           consecutivePings++
           yield { type: 'ping' }
@@ -103,14 +119,14 @@ export async function* withStreamKeepAlivePings<T>(
       }
 
       pendingNext = null
-      const { result } = raced
-      if (result.done) return
+      if (raced.done) return
       anchorAt = now()
       consecutivePings = 0
-      yield result.value
+      yield raced.value
     }
   } finally {
     if (timer !== undefined) clearTimeout(timer)
+    pendingNext?.catch(() => {})
     try {
       void Promise.resolve(iterator.return?.(undefined)).catch(() => {})
     } catch {

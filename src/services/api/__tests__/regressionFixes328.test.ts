@@ -1,7 +1,7 @@
 import { APIError } from '@anthropic-ai/sdk'
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import axios from 'axios'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   clearBetaHeaderLatches,
@@ -64,6 +64,15 @@ import {
 
 const ROOT = join(import.meta.dir, '../../../..')
 
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
 // MACRO.VERSION is only injected in dev/build.
 ;(
   globalThis as unknown as {
@@ -302,9 +311,9 @@ describe('Official 2.1.328 regression fixes (Agent 2)', () => {
   })
 
   test('P1 #8: context-1m beta retry uses direct-Anthropic-provider Rve guard, allows 3P healing, and downsizes refused [1m] context window to 200k', () => {
-    const claudeSrc = readFileSync(
+    const claudeSrc = readModuleTree(
       join(ROOT, 'src/services/api/claude.ts'),
-      'utf8',
+      join(ROOT, 'src/services/api/claude'),
     )
     expect(claudeSrc).toContain(
       "(provider === 'firstParty' && isFirstPartyAnthropicBaseUrl())",
@@ -388,9 +397,9 @@ describe('Official 2.1.328 regression fixes (Agent 2)', () => {
   })
 
   test('D-P0-1 + D-P1-3: s9o findRejectedBetaHeaders runs before d9o decideContext1mBetaRetry, excludes context-1m from generic stripping, and Bedrock extra body betas respect both refusal latch and strippedBedrockBetas', () => {
-    const claudeSrc = readFileSync(
+    const claudeSrc = readModuleTree(
       join(ROOT, 'src/services/api/claude.ts'),
-      'utf8',
+      join(ROOT, 'src/services/api/claude'),
     )
     const decideIdx = claudeSrc.indexOf('decideContext1mBetaRetry({')
     const rejectedIdx = claudeSrc.indexOf('findRejectedBetaHeaders(')

@@ -1534,7 +1534,27 @@ export const SDKControlLogHostEventsRequestSchema = lazySchema(() =>
     .describe('Forwards host telemetry events for logging.'),
 )
 
+export const SDKControlTurnHandoffRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('turn_handoff'),
+    request_id: z.string().optional(),
+    action: z.enum(['export', 'hydrate']).optional(),
+    session_id: z.string().optional(),
+    shared_message_id: z.string().optional(),
+    rewind_request_id: z.string().optional(),
+    payload: z.unknown().optional(),
+    tool_use_ids: z.array(z.string()).optional(),
+    messages: z.array(z.unknown()).optional(),
+    stopped: z.boolean().optional(),
+    continues: z.boolean().optional(),
+    relay_marker: z.unknown().optional(),
+    file_names: z.unknown().optional(),
+    memory_context: z.unknown().optional(),
+  }),
+)
+
 export const SDK_EXTENDED_CONTROL_SUBTYPES = [
+  'turn_handoff',
   'comparison_fork',
   'worker_shutting_down',
   'upgrade_relay_marker',
@@ -1576,6 +1596,7 @@ export type SDKExtendedControlSubtype =
 
 export const SDKExtendedControlRequestSchema = lazySchema(() =>
   z.discriminatedUnion('subtype', [
+    SDKControlTurnHandoffRequestSchema(),
     SDKControlComparisonForkRequestSchema(),
     SDKControlWorkerShuttingDownRequestSchema(),
     SDKControlUpgradeRelayMarkerRequestSchema(),

@@ -28,6 +28,7 @@ mock.module('../config', () => ({
 import { Hono } from 'hono'
 import {
   storeReset,
+  storeCreateUser,
   storeCreateSession,
   storeCreateEnvironment,
   storeBindSession,
@@ -86,6 +87,12 @@ function createApp() {
 const AUTH_HEADERS = {
   Authorization: 'Bearer test-api-key',
   'X-Username': 'testuser',
+}
+
+function webUserAuth(userId: string): { Authorization: string } {
+  storeCreateUser(userId)
+  const { token } = issueToken(userId)
+  return { Authorization: `Bearer ${token}` }
 }
 
 function toWebSessionId(sessionId: string): string {
@@ -554,8 +561,7 @@ describe('Web Auth Routes', () => {
     app = createApp()
   })
 
-  test('POST /web/bind — binds session to UUID', async () => {
-    // Create session first
+  test('POST /web/bind — rejects unauthenticated UUID-only requests with 401', async () => {
     const sessRes = await app.request('/v1/sessions', {
       method: 'POST',
       headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
@@ -568,12 +574,42 @@ describe('Web Auth Routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: id }),
     })
+    expect(bindRes.status).toBe(401)
+  })
+
+  test('POST /web/bind — rejects non-JSON Content-Type (CSRF guard) with 415', async () => {
+    const auth = webUserAuth('test-uuid')
+    const bindRes = await app.request('/web/bind', {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ sessionId: 'session_123' }),
+    })
+    expect(bindRes.status).toBe(415)
+  })
+
+  test('POST /web/bind — binds session to authenticated user token', async () => {
+    // Create session first
+    const sessRes = await app.request('/v1/sessions', {
+      method: 'POST',
+      headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const { id } = await resJson(sessRes)
+
+    const bindRes = await app.request('/web/bind', {
+      method: 'POST',
+      headers: {
+        ...webUserAuth('test-uuid'),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sessionId: id }),
+    })
     expect(bindRes.status).toBe(200)
     const body = await resJson(bindRes)
     expect(body.ok).toBe(true)
   })
 
-  test('POST /web/bind — binds compat code session ID to UUID', async () => {
+  test('POST /web/bind — binds compat code session ID to authenticated user token', async () => {
     const sessRes = await app.request('/v1/code/sessions', {
       method: 'POST',
       headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
@@ -582,9 +618,12 @@ describe('Web Auth Routes', () => {
     const body = await resJson(sessRes)
     const compatId = toWebSessionId(body.session.id)
 
-    const bindRes = await app.request('/web/bind?uuid=test-uuid', {
+    const bindRes = await app.request('/web/bind', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        ...webUserAuth('test-uuid'),
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ sessionId: compatId }),
     })
     expect(bindRes.status).toBe(200)
@@ -594,9 +633,12 @@ describe('Web Auth Routes', () => {
   })
 
   test('POST /web/bind — 404 for unknown session', async () => {
-    const res = await app.request('/web/bind?uuid=test-uuid', {
+    const res = await app.request('/web/bind', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        ...webUserAuth('test-uuid'),
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ sessionId: 'nope' }),
     })
     expect(res.status).toBe(404)
@@ -605,7 +647,10 @@ describe('Web Auth Routes', () => {
   test('POST /web/bind — 400 when missing params', async () => {
     const res = await app.request('/web/bind', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        ...webUserAuth('test-uuid'),
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({}),
     })
     expect(res.status).toBe(400)
@@ -614,6 +659,8 @@ describe('Web Auth Routes', () => {
 
 describe('Web Session Routes', () => {
   let app: Hono
+  let user1Auth: { Authorization: string }
+  let user2Auth: { Authorization: string }
 
   beforeEach(() => {
     storeReset()
@@ -621,12 +668,14 @@ describe('Web Session Routes', () => {
       removeEventBus(key)
     }
     app = createApp()
+    user1Auth = webUserAuth('user-1')
+    user2Auth = webUserAuth('user-2')
   })
 
   test('POST /web/sessions — creates and auto-binds session', async () => {
-    const res = await app.request('/web/sessions?uuid=user-1', {
+    const res = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'Web Session' }),
     })
     expect(res.status).toBe(200)
@@ -635,16 +684,61 @@ describe('Web Session Routes', () => {
     expect(body.source).toBe('web')
   })
 
-  test('GET /web/sessions — returns sessions owned by UUID', async () => {
-    // Create and bind
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+  test('POST /web/sessions — enforces permission_mode allowlist and rejects text/plain CSRF', async () => {
+    // Allowed modes
+    for (const mode of ['default', 'acceptEdits', 'plan', 'auto']) {
+      const okRes = await app.request('/web/sessions', {
+        method: 'POST',
+        headers: { ...user1Auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: `Mode ${mode}`, permission_mode: mode }),
+      })
+      expect(okRes.status).toBe(200)
+    }
+
+    // Privileged modes rejected with 403 unless authorized via API key + server config
+    for (const dangerous of ['bypassPermissions', 'dontAsk']) {
+      const tokenRes = await app.request('/web/sessions', {
+        method: 'POST',
+        headers: { ...user1Auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permission_mode: dangerous }),
+      })
+      expect(tokenRes.status).toBe(403)
+
+      const keyWithoutCfgRes = await app.request('/web/sessions', {
+        method: 'POST',
+        headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permission_mode: dangerous }),
+      })
+      expect(keyWithoutCfgRes.status).toBe(403)
+    }
+
+    // Unknown mode rejected with 400
+    const unknownRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permission_mode: 'arbitraryMode' }),
+    })
+    expect(unknownRes.status).toBe(400)
+
+    // text/plain CSRF rejected with 415
+    const csrfRes = await app.request('/web/sessions', {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ title: 'CSRF' }),
+    })
+    expect(csrfRes.status).toBe(415)
+  })
+
+  test('GET /web/sessions — returns sessions owned by authenticated user', async () => {
+    // Create and bind
+    const createRes = await app.request('/web/sessions', {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
 
-    const listRes = await app.request('/web/sessions?uuid=user-1')
+    const listRes = await app.request('/web/sessions', { headers: user1Auth })
     expect(listRes.status).toBe(200)
     const sessions = await resJson(listRes)
     expect(sessions).toHaveLength(1)
@@ -656,38 +750,44 @@ describe('Web Session Routes', () => {
     storeBindSession(codeSession.id, 'user-1')
     const compatId = toWebSessionId(codeSession.id)
 
-    const listRes = await app.request('/web/sessions?uuid=user-1')
+    const listRes = await app.request('/web/sessions', { headers: user1Auth })
     expect(listRes.status).toBe(200)
     const sessions = await resJson(listRes)
     expect(sessions).toHaveLength(1)
     expect(sessions[0].id).toBe(compatId)
 
-    const allRes = await app.request('/web/sessions/all?uuid=user-1')
+    const allRes = await app.request('/web/sessions/all', {
+      headers: user1Auth,
+    })
     expect(allRes.status).toBe(200)
     const summaries = await resJson(allRes)
     expect(summaries).toHaveLength(1)
     expect(summaries[0].id).toBe(compatId)
   })
 
-  test('GET /web/sessions — requires UUID', async () => {
+  test('GET /web/sessions — requires auth', async () => {
     const res = await app.request('/web/sessions')
     expect(res.status).toBe(401)
+    const uuidOnlyRes = await app.request('/web/sessions?uuid=user-1')
+    expect(uuidOnlyRes.status).toBe(401)
   })
 
-  test('GET /web/sessions/all — lists only sessions owned by requesting UUID', async () => {
+  test('GET /web/sessions/all — lists only sessions owned by requesting user', async () => {
     // Create 2 sessions via different users
-    await app.request('/web/sessions?uuid=user-1', {
+    await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
-    await app.request('/web/sessions?uuid=user-2', {
+    await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user2Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
 
-    const allRes = await app.request('/web/sessions/all?uuid=user-1')
+    const allRes = await app.request('/web/sessions/all', {
+      headers: user1Auth,
+    })
     expect(allRes.status).toBe(200)
     const sessions = await resJson(allRes)
     expect(sessions).toHaveLength(1) // only user-1's session, not user-2's
@@ -709,14 +809,16 @@ describe('Web Session Routes', () => {
     const { storeUpdateSession } = await import('../store')
     storeUpdateSession(inactive.id, { status: 'inactive' })
 
-    const listRes = await app.request('/web/sessions?uuid=user-1')
+    const listRes = await app.request('/web/sessions', { headers: user1Auth })
     expect(listRes.status).toBe(200)
     const sessions = await resJson(listRes)
     expect(sessions.map((session: { id: string }) => session.id)).toEqual([
       open.id,
     ])
 
-    const allRes = await app.request('/web/sessions/all?uuid=user-1')
+    const allRes = await app.request('/web/sessions/all', {
+      headers: user1Auth,
+    })
     expect(allRes.status).toBe(200)
     const summaries = await resJson(allRes)
     expect(summaries.map((session: { id: string }) => session.id)).toEqual([
@@ -725,14 +827,16 @@ describe('Web Session Routes', () => {
   })
 
   test('GET /web/sessions/:id — returns owned session', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
 
-    const getRes = await app.request(`/web/sessions/${id}?uuid=user-1`)
+    const getRes = await app.request(`/web/sessions/${id}`, {
+      headers: user1Auth,
+    })
     expect(getRes.status).toBe(200)
   })
 
@@ -763,9 +867,9 @@ describe('Web Session Routes', () => {
       }),
     })
 
-    const getRes = await app.request(
-      `/web/sessions/${toWebSessionId(id)}?uuid=user-1`,
-    )
+    const getRes = await app.request(`/web/sessions/${toWebSessionId(id)}`, {
+      headers: user1Auth,
+    })
     expect(getRes.status).toBe(200)
     const body = await resJson(getRes)
     expect(body.automation_state).toEqual({
@@ -777,35 +881,39 @@ describe('Web Session Routes', () => {
   })
 
   test('GET /web/sessions/:id — 403 for non-owner', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
 
-    const getRes = await app.request(`/web/sessions/${id}?uuid=user-2`)
+    const getRes = await app.request(`/web/sessions/${id}`, {
+      headers: user2Auth,
+    })
     expect(getRes.status).toBe(403)
   })
 
   test('GET /web/sessions/:id/history — returns events', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
 
-    const histRes = await app.request(`/web/sessions/${id}/history?uuid=user-1`)
+    const histRes = await app.request(`/web/sessions/${id}/history`, {
+      headers: user1Auth,
+    })
     expect(histRes.status).toBe(200)
     const body = await resJson(histRes)
     expect(body.events).toEqual([])
   })
 
   test('GET /web/sessions/:id/history — returns task_state snapshots', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
@@ -820,7 +928,9 @@ describe('Web Session Routes', () => {
       'inbound',
     )
 
-    const histRes = await app.request(`/web/sessions/${id}/history?uuid=user-1`)
+    const histRes = await app.request(`/web/sessions/${id}/history`, {
+      headers: user1Auth,
+    })
     expect(histRes.status).toBe(200)
     const body = await resJson(histRes)
     expect(body.events).toHaveLength(1)
@@ -836,35 +946,39 @@ describe('Web Session Routes', () => {
     storeBindSession(codeSession.id, 'user-1')
     const compatId = toWebSessionId(codeSession.id)
 
-    const getRes = await app.request(`/web/sessions/${compatId}?uuid=user-1`)
+    const getRes = await app.request(`/web/sessions/${compatId}`, {
+      headers: user1Auth,
+    })
     expect(getRes.status).toBe(200)
     const session = await resJson(getRes)
     expect(session.id).toBe(compatId)
 
-    const histRes = await app.request(
-      `/web/sessions/${compatId}/history?uuid=user-1`,
-    )
+    const histRes = await app.request(`/web/sessions/${compatId}/history`, {
+      headers: user1Auth,
+    })
     expect(histRes.status).toBe(200)
     const history = await resJson(histRes)
     expect(history.events).toEqual([])
   })
 
   test('GET /web/sessions/:id/history — 403 for non-owner', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
 
-    const histRes = await app.request(`/web/sessions/${id}/history?uuid=user-2`)
+    const histRes = await app.request(`/web/sessions/${id}/history`, {
+      headers: user2Auth,
+    })
     expect(histRes.status).toBe(403)
   })
 
   test('GET /web/sessions/:id — 404 after session deleted', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
@@ -876,17 +990,17 @@ describe('Web Session Routes', () => {
     })
 
     // Session still exists (archived), so we can still get it
-    const getRes = await app.request(`/web/sessions/${id}?uuid=user-1`)
+    const getRes = await app.request(`/web/sessions/${id}`, {
+      headers: user1Auth,
+    })
     // After archive, session status is "archived" but still exists
     expect(getRes.status).toBe(200)
   })
 
   test('GET /web/sessions/:id/history — 404 for non-existent session', async () => {
-    // Bind to a non-existent session won't work, but if ownership was set
-    // and session deleted, we need to test the 404 path
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
@@ -895,14 +1009,16 @@ describe('Web Session Routes', () => {
     const { storeDeleteSession } = await import('../store')
     storeDeleteSession(id)
 
-    const histRes = await app.request(`/web/sessions/${id}/history?uuid=user-1`)
+    const histRes = await app.request(`/web/sessions/${id}/history`, {
+      headers: user1Auth,
+    })
     expect(histRes.status).toBe(404)
   })
 
   test('POST /web/sessions with invalid environment_id — handles work item error', async () => {
-    const res = await app.request('/web/sessions?uuid=user-1', {
+    const res = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({ environment_id: 'env_nonexistent' }),
     })
     // Session is still created even if work item fails
@@ -912,16 +1028,16 @@ describe('Web Session Routes', () => {
   })
 
   test('GET /web/sessions/:id/events — returns SSE stream', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
 
-    const eventsRes = await app.request(
-      `/web/sessions/${id}/events?uuid=user-1`,
-    )
+    const eventsRes = await app.request(`/web/sessions/${id}/events`, {
+      headers: user1Auth,
+    })
     expect(eventsRes.status).toBe(200)
     expect(eventsRes.headers.get('Content-Type')).toBe('text/event-stream')
 
@@ -940,9 +1056,9 @@ describe('Web Session Routes', () => {
     storeBindSession(codeSession.id, 'user-1')
     const compatId = toWebSessionId(codeSession.id)
 
-    const eventsRes = await app.request(
-      `/web/sessions/${compatId}/events?uuid=user-1`,
-    )
+    const eventsRes = await app.request(`/web/sessions/${compatId}/events`, {
+      headers: user1Auth,
+    })
     expect(eventsRes.status).toBe(200)
     expect(eventsRes.headers.get('Content-Type')).toBe('text/event-stream')
 
@@ -956,23 +1072,23 @@ describe('Web Session Routes', () => {
   })
 
   test('GET /web/sessions/:id/events — 403 for non-owner', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
 
-    const eventsRes = await app.request(
-      `/web/sessions/${id}/events?uuid=user-2`,
-    )
+    const eventsRes = await app.request(`/web/sessions/${id}/events`, {
+      headers: user2Auth,
+    })
     expect(eventsRes.status).toBe(403)
   })
 
   test('GET /web/sessions/:id/events — 409 for archived session', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
@@ -982,7 +1098,9 @@ describe('Web Session Routes', () => {
       headers: AUTH_HEADERS,
     })
 
-    const res = await app.request(`/web/sessions/${id}/events?uuid=user-1`)
+    const res = await app.request(`/web/sessions/${id}/events`, {
+      headers: user1Auth,
+    })
     expect(res.status).toBe(409)
     const body = await resJson(res)
     expect(body.error.type).toBe('session_closed')
@@ -992,6 +1110,8 @@ describe('Web Session Routes', () => {
 describe('Web Control Routes', () => {
   let app: Hono
   let sessionId: string
+  let user1Auth: { Authorization: string }
+  let user2Auth: { Authorization: string }
 
   beforeEach(async () => {
     storeReset()
@@ -999,25 +1119,24 @@ describe('Web Control Routes', () => {
       removeEventBus(key)
     }
     app = createApp()
+    user1Auth = webUserAuth('user-1')
+    user2Auth = webUserAuth('user-2')
 
     // Create and bind session
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     sessionId = (await resJson(createRes)).id
   })
 
   test('POST /web/sessions/:id/events — sends user message', async () => {
-    const res = await app.request(
-      `/web/sessions/${sessionId}/events?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'user', content: 'hello' }),
-      },
-    )
+    const res = await app.request(`/web/sessions/${sessionId}/events`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'user', content: 'hello' }),
+    })
     expect(res.status).toBe(200)
     const body = await resJson(res)
     expect(body.status).toBe('ok')
@@ -1029,111 +1148,87 @@ describe('Web Control Routes', () => {
     storeBindSession(rawSessionId, 'user-1')
     const compatId = toWebSessionId(rawSessionId)
 
-    const eventsRes = await app.request(
-      `/web/sessions/${compatId}/events?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'user', content: 'hello' }),
-      },
-    )
+    const eventsRes = await app.request(`/web/sessions/${compatId}/events`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'user', content: 'hello' }),
+    })
     expect(eventsRes.status).toBe(200)
 
-    const controlRes = await app.request(
-      `/web/sessions/${compatId}/control?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'permission_response',
-          approved: true,
-          request_id: 'r1',
-        }),
-      },
-    )
+    const controlRes = await app.request(`/web/sessions/${compatId}/control`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'permission_response',
+        approved: true,
+        request_id: 'r1',
+      }),
+    })
     expect(controlRes.status).toBe(200)
 
     const interruptRes = await app.request(
-      `/web/sessions/${compatId}/interrupt?uuid=user-1`,
+      `/web/sessions/${compatId}/interrupt`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...user1Auth, 'Content-Type': 'application/json' },
       },
     )
     expect(interruptRes.status).toBe(200)
   })
 
   test('POST /web/sessions/:id/events — 403 for non-owner', async () => {
-    const res = await app.request(
-      `/web/sessions/${sessionId}/events?uuid=user-2`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'user', content: 'hello' }),
-      },
-    )
+    const res = await app.request(`/web/sessions/${sessionId}/events`, {
+      method: 'POST',
+      headers: { ...user2Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'user', content: 'hello' }),
+    })
     expect(res.status).toBe(403)
   })
 
   test('POST /web/sessions/:id/control — sends control request', async () => {
-    const res = await app.request(
-      `/web/sessions/${sessionId}/control?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'permission_response',
-          approved: true,
-          request_id: 'r1',
-        }),
-      },
-    )
+    const res = await app.request(`/web/sessions/${sessionId}/control`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'permission_response',
+        approved: true,
+        request_id: 'r1',
+      }),
+    })
     expect(res.status).toBe(200)
   })
 
   test('POST /web/sessions/:id/interrupt — interrupts session', async () => {
-    const res = await app.request(
-      `/web/sessions/${sessionId}/interrupt?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      },
-    )
+    const res = await app.request(`/web/sessions/${sessionId}/interrupt`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+    })
     expect(res.status).toBe(200)
   })
 
   test('POST /web/sessions/:id/interrupt — 403 for non-owner', async () => {
-    const res = await app.request(
-      `/web/sessions/${sessionId}/interrupt?uuid=user-2`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      },
-    )
+    const res = await app.request(`/web/sessions/${sessionId}/interrupt`, {
+      method: 'POST',
+      headers: { ...user2Auth, 'Content-Type': 'application/json' },
+    })
     expect(res.status).toBe(403)
   })
 
   test('POST /web/sessions/:id/control — 403 for non-owner', async () => {
-    const res = await app.request(
-      `/web/sessions/${sessionId}/control?uuid=user-2`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'permission_response', approved: true }),
-      },
-    )
+    const res = await app.request(`/web/sessions/${sessionId}/control`, {
+      method: 'POST',
+      headers: { ...user2Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'permission_response', approved: true }),
+    })
     expect(res.status).toBe(403)
   })
 
   test('POST /web/sessions/:id/events — 403 for non-existent session with no ownership', async () => {
-    const res = await app.request(
-      '/web/sessions/nonexistent/events?uuid=user-1',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'user', content: 'hello' }),
-      },
-    )
+    const res = await app.request('/web/sessions/nonexistent/events', {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'user', content: 'hello' }),
+    })
     expect(res.status).toBe(403)
   })
 
@@ -1143,35 +1238,29 @@ describe('Web Control Routes', () => {
       headers: AUTH_HEADERS,
     })
 
-    const eventsRes = await app.request(
-      `/web/sessions/${sessionId}/events?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'user', content: 'hello' }),
-      },
-    )
+    const eventsRes = await app.request(`/web/sessions/${sessionId}/events`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'user', content: 'hello' }),
+    })
     expect(eventsRes.status).toBe(409)
 
-    const controlRes = await app.request(
-      `/web/sessions/${sessionId}/control?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'permission_response',
-          approved: true,
-          request_id: 'r1',
-        }),
-      },
-    )
+    const controlRes = await app.request(`/web/sessions/${sessionId}/control`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'permission_response',
+        approved: true,
+        request_id: 'r1',
+      }),
+    })
     expect(controlRes.status).toBe(409)
 
     const interruptRes = await app.request(
-      `/web/sessions/${sessionId}/interrupt?uuid=user-1`,
+      `/web/sessions/${sessionId}/interrupt`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...user1Auth, 'Content-Type': 'application/json' },
       },
     )
     expect(interruptRes.status).toBe(409)
@@ -1186,7 +1275,7 @@ describe('Web Environment Routes', () => {
     app = createApp()
   })
 
-  test('GET /web/environments — lists active environments', async () => {
+  test('GET /web/environments — lists active environments for authenticated user', async () => {
     // Register an env via v1
     await app.request('/v1/environments/bridge', {
       method: 'POST',
@@ -1194,16 +1283,20 @@ describe('Web Environment Routes', () => {
       body: JSON.stringify({ machine_name: 'mac1' }),
     })
 
-    const res = await app.request('/web/environments?uuid=user-1')
+    const res = await app.request('/web/environments', {
+      headers: webUserAuth('user-1'),
+    })
     expect(res.status).toBe(200)
     const envs = await resJson(res)
     expect(envs).toHaveLength(1)
     expect(envs[0].machine_name).toBe('mac1')
   })
 
-  test('GET /web/environments — requires UUID', async () => {
+  test('GET /web/environments — rejects missing auth and UUID-only auth', async () => {
     const res = await app.request('/web/environments')
     expect(res.status).toBe(401)
+    const uuidOnly = await app.request('/web/environments?uuid=user-1')
+    expect(uuidOnly.status).toBe(401)
   })
 })
 
@@ -2016,9 +2109,10 @@ describe('V2 Worker Events Routes', () => {
   })
 
   test('GET /v1/code/sessions/:id/worker/events/stream — normalizes web permission approvals to control_response', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const user1Auth = webUserAuth('user-1')
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
@@ -2037,18 +2131,15 @@ describe('V2 Worker Events Routes', () => {
 
     await reader.read() // initial keepalive
 
-    const controlRes = await app.request(
-      `/web/sessions/${id}/control?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'permission_response',
-          approved: true,
-          request_id: 'req-1',
-        }),
-      },
-    )
+    const controlRes = await app.request(`/web/sessions/${id}/control`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'permission_response',
+        approved: true,
+        request_id: 'req-1',
+      }),
+    })
     expect(controlRes.status).toBe(200)
 
     const chunk = await reader.read()
@@ -2062,9 +2153,10 @@ describe('V2 Worker Events Routes', () => {
   })
 
   test('GET /v1/code/sessions/:id/worker/events/stream — normalizes web plan rejection feedback to deny control_response', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const user1Auth = webUserAuth('user-1')
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
@@ -2083,19 +2175,16 @@ describe('V2 Worker Events Routes', () => {
 
     await reader.read() // initial keepalive
 
-    const controlRes = await app.request(
-      `/web/sessions/${id}/control?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'permission_response',
-          approved: false,
-          request_id: 'req-2',
-          message: 'Need more detail',
-        }),
-      },
-    )
+    const controlRes = await app.request(`/web/sessions/${id}/control`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'permission_response',
+        approved: false,
+        request_id: 'req-2',
+        message: 'Need more detail',
+      }),
+    })
     expect(controlRes.status).toBe(200)
 
     const chunk = await reader.read()
@@ -2111,9 +2200,10 @@ describe('V2 Worker Events Routes', () => {
   })
 
   test('GET /v1/code/sessions/:id/worker/events/stream — normalizes web interrupts to control_request', async () => {
-    const createRes = await app.request('/web/sessions?uuid=user-1', {
+    const user1Auth = webUserAuth('user-1')
+    const createRes = await app.request('/web/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const { id } = await resJson(createRes)
@@ -2132,13 +2222,10 @@ describe('V2 Worker Events Routes', () => {
 
     await reader.read() // initial keepalive
 
-    const interruptRes = await app.request(
-      `/web/sessions/${id}/interrupt?uuid=user-1`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      },
-    )
+    const interruptRes = await app.request(`/web/sessions/${id}/interrupt`, {
+      method: 'POST',
+      headers: { ...user1Auth, 'Content-Type': 'application/json' },
+    })
     expect(interruptRes.status).toBe(200)
 
     const chunk = await reader.read()
@@ -2226,5 +2313,70 @@ describe('V2 Worker Events Routes', () => {
       },
     )
     expect(res.status).toBe(200)
+  })
+
+  test('P1-E5: rejects Web UI rct_* tokens on /v1/environments/*, /v1/code/sessions/*, and /v1/sessions/*', async () => {
+    const webHeaders = {
+      ...webUserAuth('web-only-user'),
+      'Content-Type': 'application/json',
+    }
+
+    // Create a session via API key first so we have a real session ID to target
+    const created = await app.request('/v1/code/sessions', {
+      method: 'POST',
+      headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Owned by CLI' }),
+    })
+    expect(created.status).toBe(200)
+    const {
+      session: { id: codeSessionId },
+    } = await resJson(created)
+
+    // Web UI rct_* token must be rejected on all /v1/* privileged routes
+    const envRes = await app.request('/v1/environments/bridge', {
+      method: 'POST',
+      headers: webHeaders,
+      body: JSON.stringify({ machine_name: 'hijack' }),
+    })
+    expect(envRes.status).toBe(401)
+
+    const codeCreateRes = await app.request('/v1/code/sessions', {
+      method: 'POST',
+      headers: webHeaders,
+      body: JSON.stringify({ title: 'hijack' }),
+    })
+    expect(codeCreateRes.status).toBe(401)
+
+    const bridgeJwtRes = await app.request(
+      `/v1/code/sessions/${codeSessionId}/bridge`,
+      {
+        method: 'POST',
+        headers: webHeaders,
+      },
+    )
+    expect(bridgeJwtRes.status).toBe(401)
+
+    const v1CreateRes = await app.request('/v1/sessions', {
+      method: 'POST',
+      headers: webHeaders,
+      body: JSON.stringify({
+        title: 'Bypass attempt',
+        permission_mode: 'bypassPermissions',
+      }),
+    })
+    expect(v1CreateRes.status).toBe(401)
+
+    const v1GetRes = await app.request(`/v1/sessions/${codeSessionId}`, {
+      headers: webHeaders,
+    })
+    expect(v1GetRes.status).toBe(401)
+
+    // Meanwhile the same Web UI token still works on /web/sessions
+    const webCreateRes = await app.request('/web/sessions', {
+      method: 'POST',
+      headers: webHeaders,
+      body: JSON.stringify({ title: 'Normal Web Session' }),
+    })
+    expect(webCreateRes.status).toBe(200)
   })
 })

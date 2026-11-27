@@ -8,28 +8,15 @@
 // createRoot/wrappedRender wait out a managed-settings standalone consent dialog
 // before claiming stdout. everMounted mirrors densable Zjn/Yhp process flag.
 
+import {
+  getInkHostAdapter,
+  type InkSessionObject,
+  type InkSessionRootAdapter,
+} from './hostAdapter.js'
 import type Ink from './ink.js'
 
-type SessionRootModule =
-  typeof import('../../../../../src/utils/sessionRoot.js')
-type InkSessionObject = { host: object; root?: object }
-
-let cachedSessionRootModule: SessionRootModule | null | undefined
-
-function getSessionRootModule(): SessionRootModule | undefined {
-  if (cachedSessionRootModule !== undefined) {
-    return cachedSessionRootModule ?? undefined
-  }
-  try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    cachedSessionRootModule =
-      require('../../../../../src/utils/sessionRoot.js') as SessionRootModule
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    return cachedSessionRootModule
-  } catch {
-    cachedSessionRootModule = null
-    return undefined
-  }
+function getSessionRootAdapter(): InkSessionRootAdapter | undefined {
+  return getInkHostAdapter().sessionRoot
 }
 
 /**
@@ -59,7 +46,7 @@ function U(): InkSessionObject {
     overrideSessions.set(host, session)
     return session
   }
-  const mod = getSessionRootModule()
+  const mod = getSessionRootAdapter()
   if (mod) {
     return unwrapSessionRoot(mod.getBootstrapSession())
   }
@@ -72,7 +59,7 @@ function U(): InkSessionObject {
  */
 export function hasInkActiveSessionAls(): boolean {
   if (getInkSessionHostOverride !== undefined) return true
-  return getSessionRootModule()?.hasActiveSessionAls() ?? false
+  return getSessionRootAdapter()?.hasActiveSessionAls() ?? false
 }
 
 /**
@@ -81,7 +68,7 @@ export function hasInkActiveSessionAls(): boolean {
  * `hasActiveSessionAls() === false`.
  */
 export function captureInkAlsSession(): object | undefined {
-  return getSessionRootModule()?.getActiveSessionFromAls()
+  return getSessionRootAdapter()?.getActiveSessionFromAls()
 }
 
 /**
@@ -93,12 +80,9 @@ export function runWithCapturedInkAlsSession<T>(
   fn: () => T,
 ): T {
   if (captured === undefined) return fn()
-  const mod = getSessionRootModule()
+  const mod = getSessionRootAdapter()
   if (!mod || mod.getActiveSessionFromAls() === captured) return fn()
-  return mod.runWithSession(
-    captured as Parameters<SessionRootModule['runWithSession']>[0],
-    fn,
-  )
+  return mod.runWithSession(captured, fn)
 }
 
 /** Test helper — gold has no bind; tests pin `U().host`. */
@@ -192,6 +176,12 @@ class HostKeyedFactory<K extends object, V> {
     this.#map.set(key, created)
     return created
   }
+  has(key: K): boolean {
+    return this.#map.has(key)
+  }
+  seed(key: K, value: V): void {
+    this.#map.set(key, value)
+  }
 }
 
 /**
@@ -268,8 +258,23 @@ const Ht = new HostKeyedFactory<object, InkInstancesMap>(
   () => new InkInstancesMap(),
 )
 
+let defaultUnboundInstances: InkInstancesMap | undefined
+
 /** densable `Ns` — `return Ht.of(U().host)`. */
 export function Ns(): InkInstancesMap {
+  if (
+    defaultUnboundInstances !== undefined &&
+    getInkSessionHostOverride === undefined
+  ) {
+    const mod = getSessionRootAdapter()
+    if (mod && !mod.hasActiveSessionAls()) {
+      const host = unwrapSessionRoot(mod.getBootstrapSession()).host
+      if (!Ht.has(host)) {
+        Ht.seed(host, defaultUnboundInstances)
+      }
+      defaultUnboundInstances = undefined
+    }
+  }
   return Ht.of(U().host)
 }
 
@@ -344,6 +349,9 @@ export function ensureDualInkCurrent(): Record<string, unknown> {
 }
 
 const instances = Ns()
+if (getSessionRootAdapter() === undefined) {
+  defaultUnboundInstances = instances
+}
 export default instances
 
 /** Test helper — DualInk `a().current` back to void 0. */

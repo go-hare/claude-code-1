@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   RemoteToolHosts,
@@ -1019,10 +1019,14 @@ describe('QFn hostsForTable / syncSessionRemoteHosts', () => {
     expect(src).toContain('evictStaleFailedConnectMemoForServe')
     expect(src).toContain('invokeToolRaw')
     expect(src).toContain("kind === 'connect_failed'")
-    const clientSrc = readFileSync(
-      join(import.meta.dir, '../../mcp/client.ts'),
-      'utf8',
-    )
+    const clientDir = join(import.meta.dir, '../../mcp/client')
+    const clientSrc = [
+      readFileSync(join(import.meta.dir, '../../mcp/client.ts'), 'utf8'),
+      ...readdirSync(clientDir)
+        .filter(f => f.endsWith('.ts'))
+        .sort()
+        .map(f => readFileSync(join(clientDir, f), 'utf8')),
+    ].join('\n')
     expect(clientSrc).toContain(
       'export async function evictStaleFailedConnectMemoForServe',
     )

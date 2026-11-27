@@ -2,7 +2,7 @@
  * densable 2.1.216 #40 — Szu max-age suppress for interrupted turn resume.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { isResumeInterruptedTurnStale } from '../conversationRecovery.js'
 
@@ -132,7 +132,14 @@ describe('deserialize Szu + BJr source contracts', () => {
   })
 
   test('print.ts logs tengu_resume_interrupted_turn on auto-resume', () => {
-    const src = readFileSync(join(ROOT, 'cli/print.ts'), 'utf8')
+    const printDir = join(ROOT, 'cli/print')
+    const src = [
+      readFileSync(join(ROOT, 'cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     expect(src).toContain('tengu_resume_interrupted_turn')
     expect(src).toContain('synthetic_continue')
     expect(src).toContain('resubmit')

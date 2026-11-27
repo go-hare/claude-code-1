@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { APIError } from '@anthropic-ai/sdk'
 import { shouldTriggerToolSearchRefusal } from '../claude.js'
@@ -39,11 +39,30 @@ afterEach(() => {
   }
 })
 
-const claudeSrc = readFileSync(join(import.meta.dir, '../claude.ts'), 'utf8')
-const querySrc = readFileSync(
-  join(import.meta.dir, '../../../query.ts'),
+const claudeMainSrc = readFileSync(
+  join(import.meta.dir, '../claude.ts'),
   'utf8',
 )
+const claudeFallbackSrc = readFileSync(
+  join(import.meta.dir, '../claude/nonStreamingFallback.ts'),
+  'utf8',
+)
+const claudeDir = join(import.meta.dir, '../claude')
+const claudeSrc = [
+  claudeMainSrc,
+  ...readdirSync(claudeDir)
+    .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+    .sort()
+    .map(f => readFileSync(join(claudeDir, f), 'utf8')),
+].join('\n')
+const queryDir = join(import.meta.dir, '../../../query')
+const querySrc = [
+  readFileSync(join(import.meta.dir, '../../../query.ts'), 'utf8'),
+  ...readdirSync(queryDir)
+    .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+    .sort()
+    .map(f => readFileSync(join(queryDir, f), 'utf8')),
+].join('\n')
 
 describe('Wave 2A [P0-3]: FallbackTriggeredError propagation & query.ts handling', () => {
   test('FallbackTriggeredError supports refusal and availability reasons', () => {
@@ -65,23 +84,44 @@ describe('Wave 2A [P0-3]: FallbackTriggeredError propagation & query.ts handling
   })
 
   test('claude.ts immediately re-throws FallbackTriggeredError in streaming and retry catches without recursive retry', () => {
-    const streamCatchIdx = claudeSrc.indexOf('} catch (rawStreamingError) {')
+    const streamCatchIdx = claudeMainSrc.indexOf(
+      '} catch (rawStreamingError) {',
+    )
     expect(streamCatchIdx).toBeGreaterThan(0)
-    const streamCatchHead = claudeSrc.slice(
-      streamCatchIdx,
-      streamCatchIdx + 600,
+    expect(claudeMainSrc.slice(streamCatchIdx, streamCatchIdx + 200)).toContain(
+      'handleStreamingError',
+    )
+
+    const handleStreamIdx = claudeFallbackSrc.indexOf(
+      'export async function* handleStreamingError(',
+    )
+    expect(handleStreamIdx).toBeGreaterThan(0)
+    const streamCatchHead = claudeFallbackSrc.slice(
+      handleStreamIdx,
+      handleStreamIdx + 2000,
     )
     expect(streamCatchHead).toContain(
       'if (rawStreamingError instanceof FallbackTriggeredError)',
     )
     expect(streamCatchHead).toContain('throw rawStreamingError')
 
-    const retryCatchIdx = claudeSrc.indexOf(
+    const retryCatchIdx = claudeMainSrc.indexOf(
       '} catch (errorFromRetry) {',
       streamCatchIdx,
     )
     expect(retryCatchIdx).toBeGreaterThan(streamCatchIdx)
-    const retryCatchHead = claudeSrc.slice(retryCatchIdx, retryCatchIdx + 700)
+    expect(claudeMainSrc.slice(retryCatchIdx, retryCatchIdx + 200)).toContain(
+      'handleRetryError',
+    )
+
+    const handleRetryIdx = claudeFallbackSrc.indexOf(
+      'export async function* handleRetryError(',
+    )
+    expect(handleRetryIdx).toBeGreaterThan(handleStreamIdx)
+    const retryCatchHead = claudeFallbackSrc.slice(
+      handleRetryIdx,
+      handleRetryIdx + 1800,
+    )
     expect(retryCatchHead).toContain(
       'if (errorFromRetry instanceof FallbackTriggeredError)',
     )
@@ -433,18 +473,36 @@ describe('Wave 2A [P1-#5]: Retry watchdog env semantics (zHe / ME / Y1e / Hs)', 
 
 describe('Wave 2A [P2-#3]: claude.ts uses break instead of return for partial/complete stream exits', () => {
   test('alreadyComplete and partial-finalized exits break out of stream loop so post-stream bookkeeping runs', () => {
-    const completeIdx = claudeSrc.indexOf('if (closePlan.alreadyComplete) {')
+    // handleStreamingError returns void back to claude.ts's catch block (never
+    // returning early from queryModelWithStreaming), which falls through to
+    // `break` out of the streamAttempt loop so post-stream bookkeeping runs.
+    const completeIdx = claudeFallbackSrc.indexOf(
+      'if (closePlan.alreadyComplete) {',
+    )
     expect(completeIdx).toBeGreaterThan(0)
-    const completeSlice = claudeSrc.slice(completeIdx, completeIdx + 1200)
-    expect(completeSlice).toContain('break')
-    expect(completeSlice).not.toContain('\n                return\n')
+    const completeSlice = claudeFallbackSrc.slice(
+      completeIdx,
+      completeIdx + 1200,
+    )
+    expect(completeSlice).toContain('return')
+    expect(completeSlice).not.toContain('throw')
 
-    const partialIdx = claudeSrc.indexOf(
-      '// densable `break e` — exit streaming successfully with partial kept',
+    const partialIdx = claudeFallbackSrc.indexOf(
+      'truncatedAfterOutput: hasOutput && !hasToolUse ? true : undefined,',
     )
     expect(partialIdx).toBeGreaterThan(completeIdx)
-    const partialSlice = claudeSrc.slice(partialIdx, partialIdx + 150)
-    expect(partialSlice).toContain('break')
-    expect(partialSlice).not.toContain('return')
+    const partialSlice = claudeFallbackSrc.slice(partialIdx, partialIdx + 120)
+    expect(partialSlice).toContain('return')
+
+    const streamCatchIdx = claudeMainSrc.indexOf(
+      '} catch (rawStreamingError) {',
+    )
+    const streamLoopEndIdx = claudeMainSrc.indexOf('} // streamAttempt')
+    expect(streamLoopEndIdx).toBeGreaterThan(streamCatchIdx)
+    const afterCatch = claudeMainSrc.slice(streamCatchIdx, streamLoopEndIdx)
+    expect(afterCatch).toContain('\n      break\n')
+    expect(
+      claudeMainSrc.slice(streamCatchIdx, streamCatchIdx + 600),
+    ).not.toContain('return')
   })
 })

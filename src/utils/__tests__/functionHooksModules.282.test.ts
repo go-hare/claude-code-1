@@ -1,5 +1,12 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type { AppState } from '../../state/AppStateStore.js'
@@ -82,6 +89,20 @@ import { getIsInteractive, setIsInteractive } from '../../bootstrap/state.js'
 import { getCommandQueue, resetCommandQueue } from '../messageQueueManager.js'
 import { takeCommandRunWait } from '../processUserInput/commandRunWaits.js'
 import { takePromptSubmitWait } from '../processUserInput/promptSubmitWaits.js'
+
+function readFunctionHooksModulesSource(): string {
+  const fhDir = join(import.meta.dir, '../plugins/functionHooks')
+  return [
+    readFileSync(
+      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
+      'utf8',
+    ),
+    ...readdirSync(fhDir)
+      .filter(f => f.endsWith('.ts'))
+      .sort()
+      .map(f => readFileSync(join(fhDir, f), 'utf8')),
+  ].join('\n')
+}
 
 const hookStoreHome = mkdtempSync(join(tmpdir(), 'fh-store-'))
 const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
@@ -1702,10 +1723,7 @@ describe('function-hooks classic pattern', () => {
       isCopied: false,
       reason: 'no-surface',
     })
-    const copySrc = readFileSync(
-      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const copySrc = readFunctionHooksModulesSource()
     expect(copySrc).toContain('function stampUiCopy')
     expect(copySrc).toContain('input.surface ?? attachedCopySurfaces()[0]')
     expect(copySrc).toContain(
@@ -2581,10 +2599,7 @@ describe('function-hooks classic pattern', () => {
   })
 
   test('densable leftover unique English: refuse / Buttons / AskUserQuestion rewrite', async () => {
-    const src = readFileSync(
-      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const src = readFunctionHooksModulesSource()
     expect(src).toContain('refused: ${problem}; the engine drew its own')
     expect(src).toContain('drew Buttons but is not loaded; nothing to release')
     expect(src).toContain(
@@ -3135,10 +3150,7 @@ describe('function-hooks classic pattern', () => {
     })
     expect(denied).toEqual({ deny: 'no such site' })
 
-    const src = readFileSync(
-      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const src = readFunctionHooksModulesSource()
     expect(src).toContain('export function logUiScrollSettled')
     expect(src).toContain('export function commitPluginScrollSite')
     expect(src).toContain('export function dispatchPersonUiScroll')
@@ -3565,10 +3577,7 @@ describe('densable 2.1.289 ui.toast show + worker environments', () => {
       join(import.meta.dir, '../plugins/functionHooksWorker.ts'),
       'utf8',
     )
-    const modules = readFileSync(
-      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
-      'utf8',
-    )
+    const modules = readFunctionHooksModulesSource()
     expect(worker).toContain('message.environments')
     expect(modules).toContain(
       'environments !== undefined && !environments.includes(mod.name)',

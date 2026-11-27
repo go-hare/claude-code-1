@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
-import { resolve } from 'path'
+import { readdirSync, readFileSync } from 'fs'
+import { join, resolve } from 'path'
 
-const SRC = readFileSync(
-  new URL('../toolExecution.ts', import.meta.url),
-  'utf8',
-)
+const EXEC_DIR = join(import.meta.dir, '../execution')
+const SRC = [
+  readFileSync(new URL('../toolExecution.ts', import.meta.url), 'utf8'),
+  ...readdirSync(EXEC_DIR)
+    .filter(f => f.endsWith('.ts'))
+    .sort()
+    .map(f => readFileSync(join(EXEC_DIR, f), 'utf8')),
+].join('\n')
 
 test('real runner waits and asks to reannounce in its own session after another session expires', async () => {
   const root = resolve(import.meta.dir, '../../../..')

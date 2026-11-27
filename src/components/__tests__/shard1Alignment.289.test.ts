@@ -1,9 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { enginePropsFromTree } from '../hooks/useUiRenderHost.js'
 
 const read = (rel: string) => readFileSync(join(import.meta.dir, rel), 'utf8')
+const readPluginRaster = () => {
+  const dir = join(import.meta.dir, '../pluginRaster')
+  return [
+    read('../PluginRasterPanes.tsx'),
+    ...readdirSync(dir)
+      .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+      .sort()
+      .map(f => readFileSync(join(dir, f), 'utf8')),
+  ].join('\n')
+}
 
 describe('Shard 1 2.1.289 alignment locks', () => {
   test('Config reclaims focus when header blurs and respects !headerFocused autoFocus', () => {
@@ -15,7 +25,7 @@ describe('Shard 1 2.1.289 alignment locks', () => {
   })
 
   test('PluginRasterPanes firePressAnswer falls back to heldByKeyOf, PromptHint tracks wasStoodIn + onTail, and UserMessage skips rewrittenText when no hook ran', () => {
-    const src = read('../PluginRasterPanes.tsx')
+    const src = readPluginRaster()
     expect(src).toContain('heldByKeyOf(keyLookup)')
     expect(src).toContain(
       'const standsIn = isCurrentReading ? currentStandsIn : wasStoodIn',

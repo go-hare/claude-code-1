@@ -19,7 +19,22 @@ import {
 } from '../bgNeedsInputBridge.js'
 import { Eve, parseHookOutput, Uct, wwt } from '../hooks.js'
 
-const hooksSrc = readFileSync(join(import.meta.dir, '../hooks.ts'), 'utf8')
+const hooksSrc = [
+  '../hooks.ts',
+  '../hooks/hookCore.ts',
+  '../hooks/hookShellRunner.ts',
+  '../hooks/hookOutputProcessor.ts',
+  '../hooks/hookConfigRegistry.ts',
+  '../hooks/hookModelSlotPool.ts',
+  '../hooks/hookEngine.ts',
+  '../hooks/hookEntryExecutor.ts',
+  '../hooks/hookOutsideReplEngine.ts',
+  '../hooks/hookToolEvents.ts',
+  '../hooks/hookSessionAndPromptEvents.ts',
+  '../hooks/hookLifecycleEvents.ts',
+]
+  .map(rel => readFileSync(join(import.meta.dir, rel), 'utf8'))
+  .join('\n')
 const hookValidationSrc = readFileSync(
   join(import.meta.dir, '../hooks/hookOutputValidation.ts'),
   'utf8',

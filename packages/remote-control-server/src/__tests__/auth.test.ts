@@ -30,8 +30,13 @@ mock.module('../config', () => ({
 
 import { validateApiKey, hashApiKey } from '../auth/api-key'
 import { generateWorkerJwt, verifyWorkerJwt } from '../auth/jwt'
-import { issueToken, resolveToken } from '../auth/token'
-import { storeReset, storeCreateUser } from '../store'
+import {
+  TOKEN_TTL_MS,
+  TOKEN_TTL_SECONDS,
+  issueToken,
+  resolveToken,
+} from '../auth/token'
+import { storeReset, storeCreateUser, storeGetUserByToken } from '../store'
 
 // ---------- api-key ----------
 
@@ -173,5 +178,27 @@ describe('issueToken / resolveToken', () => {
     const t1 = issueToken('alice').token
     const t2 = issueToken('alice').token
     expect(t1).not.toBe(t2)
+  })
+
+  test('P1-E5: enforces 86400s TTL and prunes expired tokens on resolveToken', () => {
+    storeCreateUser('alice')
+    const { token, expires_in } = issueToken('alice')
+    expect(expires_in).toBe(TOKEN_TTL_SECONDS)
+    expect(TOKEN_TTL_MS).toBe(86_400_000)
+
+    const entry = storeGetUserByToken(token)
+    expect(entry).toBeDefined()
+    const createdAtMs = entry!.createdAt.getTime()
+
+    // Still valid 1ms before TTL expiry
+    expect(resolveToken(token, createdAtMs + TOKEN_TTL_MS - 1)).toBe('alice')
+    expect(storeGetUserByToken(token)).toBeDefined()
+
+    // Rejected and pruned at/after TTL expiry
+    expect(resolveToken(token, createdAtMs + TOKEN_TTL_MS)).toBeNull()
+    expect(storeGetUserByToken(token)).toBeUndefined()
+
+    // Subsequent lookup with earlier timestamp also returns null (already pruned)
+    expect(resolveToken(token, createdAtMs)).toBeNull()
   })
 })

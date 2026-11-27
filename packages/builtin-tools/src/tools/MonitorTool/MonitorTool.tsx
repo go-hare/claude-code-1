@@ -47,6 +47,7 @@ import {
   clampMonitorSpawn,
   createMonitorStreamPump,
   isMonitorTimeoutBounded,
+  MONITOR_STREAM_BUFFER_MAX,
   monitorBoundedTimeoutCap,
   monitorExpiredEvent,
   notifyMonitorStreamEvent,
@@ -72,6 +73,77 @@ const MONITOR_TOOL_NAME = 'Monitor';
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const WILDCARD_RULE_CONTENT_RE = /^[\s*]+$/;
+export const MONITOR_EARLY_STDOUT_MAX_CHUNKS = 256;
+
+/**
+ * Security (P2-10): Bounded early-stdout accumulator used before `spawnShellTask`
+ * assigns `taskRef.id`. Enforces both chunk-count and `MONITOR_STREAM_BUFFER_MAX`
+ * char limits so a flooding child process cannot OOM the host during startup.
+ */
+export function createEarlyMonitorStdoutBuffer(opts: {
+  getTaskId: () => string | undefined;
+  onLiveChunk: (chunk: string) => void;
+  onOverflow: () => void;
+  maxChars?: number;
+  maxChunks?: number;
+}): {
+  onChunk: (chunk: string) => void;
+  flushToLive: () => void;
+  clear: () => void;
+  isOverflowed: () => boolean;
+  getPipedChars: () => number;
+  getBufferedCount: () => number;
+} {
+  const maxChars = opts.maxChars ?? MONITOR_STREAM_BUFFER_MAX;
+  const maxChunks = opts.maxChunks ?? MONITOR_EARLY_STDOUT_MAX_CHUNKS;
+  let pipedChars = 0;
+  let bufferedChars = 0;
+  let overflowed = false;
+  const chunks: string[] = [];
+
+  return {
+    onChunk(chunk: string): void {
+      pipedChars += chunk.length;
+      if (opts.getTaskId() === undefined) {
+        if (overflowed) {
+          return;
+        }
+        if (chunks.length >= maxChunks || bufferedChars + chunk.length > maxChars) {
+          overflowed = true;
+          chunks.length = 0;
+          bufferedChars = 0;
+          opts.onOverflow();
+          return;
+        }
+        chunks.push(chunk);
+        bufferedChars += chunk.length;
+      } else {
+        opts.onLiveChunk(chunk);
+      }
+    },
+    flushToLive(): void {
+      if (overflowed || chunks.length === 0) return;
+      const buffered = chunks.splice(0);
+      bufferedChars = 0;
+      for (const chunk of buffered) {
+        opts.onLiveChunk(chunk);
+      }
+    },
+    clear(): void {
+      chunks.length = 0;
+      bufferedChars = 0;
+    },
+    isOverflowed(): boolean {
+      return overflowed;
+    },
+    getPipedChars(): number {
+      return pipedChars;
+    },
+    getBufferedCount(): number {
+      return chunks.length;
+    },
+  };
+}
 
 /**
  * Official 2.1.331 `sc()` (@312918900) / `Je.isEnabled()` (@326869100):
@@ -671,6 +743,7 @@ export const MonitorTool = buildTool({
 
         // densable xe / w1n: pipe stdout into the stream pump (j6 Monitor event).
         const taskRef: { id?: string } = {};
+        let shellCommandRef: { kill: () => void } | undefined;
         let pump: MonitorStreamPump | undefined;
         if (feature('MONITOR_TOOL')) {
           pump = createMonitorStreamPump({
@@ -679,33 +752,65 @@ export const MonitorTool = buildTool({
             taskRef,
             killTask: () => {
               const id = taskRef.id;
-              if (!id) return false;
-              killTask(id, registry);
-              return true;
+              if (id) {
+                killTask(id, registry);
+                return true;
+              }
+              if (shellCommandRef) {
+                shellCommandRef.kill();
+                return true;
+              }
+              return false;
             },
           });
         }
 
         // Official 2.1.331 (`Zoe.#g` / `Fe`): track piped stdout in UTF-16 code units
         // (same unit as TaskOutput.totalBytes) so CJK/UTF-8 output never skews stderr detection.
-        let pipedStdoutChars = 0;
-        const onMonitorStdout = feature('MONITOR_TOOL')
-          ? (chunk: string) => {
-              pipedStdoutChars += chunk.length;
-              pump?.onData(chunk);
-            }
-          : undefined;
-
-        const shellCommand = await exec(command, callCtx.signal, 'bash', {
-          onStdout: onMonitorStdout,
-          preventCwdChanges: true,
-          shouldUseSandbox: effectiveUseSandbox,
-          agentWorktree: deps.agentWorktree,
-          useToolMemoryCgroup: true,
+        // Buffer early stdout emitted before `taskRef.id` is assigned so pump events
+        // always carry a valid taskId and flood-kills can terminate the process.
+        // Security (P2-10): bound `earlyStdoutChunks` by both chunk count and
+        // `MONITOR_STREAM_BUFFER_MAX` chars so a noisy process cannot OOM the
+        // host before `spawnShellTask` finishes.
+        const earlyStdoutBuffer = createEarlyMonitorStdoutBuffer({
+          getTaskId: () => taskRef.id,
+          onLiveChunk: chunk => {
+            pump?.onData(chunk);
+          },
+          onOverflow: () => {
+            shellCommandRef?.kill();
+          },
         });
+        const onMonitorStdout = feature('MONITOR_TOOL') ? earlyStdoutBuffer.onChunk : undefined;
+
+        let shellCommand: Awaited<ReturnType<typeof exec>>;
+        try {
+          shellCommand = await exec(command, callCtx.signal, 'bash', {
+            onStdout: onMonitorStdout,
+            preventCwdChanges: true,
+            shouldUseSandbox: effectiveUseSandbox,
+            agentWorktree: deps.agentWorktree,
+            useToolMemoryCgroup: true,
+          });
+        } catch (err) {
+          earlyStdoutBuffer.clear();
+          pump?.dropAndClose();
+          throw err;
+        }
+        shellCommandRef = shellCommand;
+        if (earlyStdoutBuffer.isOverflowed()) {
+          earlyStdoutBuffer.clear();
+          shellCommand.kill();
+          shellCommand.cleanup();
+          pump?.dropAndClose();
+          throw new Error(
+            'Monitor stopped during startup — output rate too high before monitor initialized. Restart with a more selective filter.',
+          );
+        }
         if (shellCommand.status === 'completed') {
           const completed = await shellCommand.result;
           if (completed.preSpawnError) {
+            earlyStdoutBuffer.clear();
             shellCommand.cleanup();
             pump?.dropAndClose();
             throw new Error(completed.preSpawnError);
@@ -713,6 +818,7 @@ export const MonitorTool = buildTool({
         }
         if (shellCommand.status === 'killed') {
           await shellCommand.result;
+          earlyStdoutBuffer.clear();
           shellCommand.cleanup();
           pump?.dropAndClose();
           if (effectiveAgentId !== undefined && isAgentStopPending(effectiveAgentId)) {
@@ -721,6 +827,7 @@ export const MonitorTool = buildTool({
           throw new Error('This call was interrupted before the monitor started; nothing is running.');
         }
         if (effectiveAgentId !== undefined && isAgentStopPending(effectiveAgentId)) {
+          earlyStdoutBuffer.clear();
           shellCommand.kill();
           shellCommand.cleanup();
           pump?.dropAndClose();
@@ -728,23 +835,45 @@ export const MonitorTool = buildTool({
         }
 
         // Spawn as a background task with kind: 'monitor'
-        const handle = await spawnShellTask(
-          {
-            command,
-            description,
-            shellCommand,
-            toolUseId: toolUseId,
-            agentId: effectiveAgentId,
-            innerCall: callCtx.innerCall ?? deps.innerCall,
-            kind: 'monitor',
-          },
-          {
-            abortController,
-            getAppState: deps.getAppState,
-            setAppState,
-          },
-        );
+        let handle: Awaited<ReturnType<typeof spawnShellTask>>;
+        try {
+          handle = await spawnShellTask(
+            {
+              command,
+              description,
+              shellCommand,
+              toolUseId: toolUseId,
+              agentId: effectiveAgentId,
+              innerCall: callCtx.innerCall ?? deps.innerCall,
+              kind: 'monitor',
+            },
+            {
+              abortController,
+              getAppState: deps.getAppState,
+              setAppState,
+            },
+          );
+        } catch (err) {
+          earlyStdoutBuffer.clear();
+          shellCommand.kill();
+          shellCommand.cleanup();
+          pump?.dropAndClose();
+          throw err;
+        }
+        if (earlyStdoutBuffer.isOverflowed()) {
+          earlyStdoutBuffer.clear();
+          killTask(handle.taskId, registry);
+          pump?.dropAndClose();
+          throw new Error(
+            'Monitor stopped during startup — output rate too high before monitor initialized. Restart with a more selective filter.',
+          );
+        }
         taskRef.id = handle.taskId;
+        if (feature('MONITOR_TOOL')) {
+          if (pump) {
+            earlyStdoutBuffer.flushToLive();
+          }
+        }
 
         if (feature('MONITOR_TOOL')) {
           if (pump) {
@@ -764,7 +893,10 @@ export const MonitorTool = buildTool({
                   if (stream.isClosed()) return;
                   // Official 2.1.331 (`Fe` @326865200): compare totalBytes against
                   // pipedStdoutBytes in matching units to detect stderr reliably.
-                  const stderrOutputFile = hasMonitorStderrOutput(shellCommand.taskOutput, pipedStdoutChars)
+                  const stderrOutputFile = hasMonitorStderrOutput(
+                    shellCommand.taskOutput,
+                    earlyStdoutBuffer.getPipedChars(),
+                  )
                     ? shellCommand.taskOutput.path
                     : undefined;
                   notifyMonitorStreamEvent(
@@ -779,18 +911,25 @@ export const MonitorTool = buildTool({
                   killTask(handle.taskId, registry);
                 }, S.timeout_ms);
             timeoutId?.unref?.();
-            void shellCommand.result.then(async () => {
-              if (timeoutId) clearTimeout(timeoutId);
-              try {
-                await stream.reportExit(handle);
-              } catch {
-                // best-effort
-              } finally {
+            void shellCommand.result
+              .then(
+                async () => {
+                  try {
+                    await stream.reportExit(handle);
+                  } catch {
+                    // best-effort
+                  }
+                },
+                () => {
+                  stream.dropAndClose();
+                },
+              )
+              .finally(() => {
+                if (timeoutId) clearTimeout(timeoutId);
                 if (effectiveAgentId) {
                   removeKeepaliveReason(effectiveAgentId, keepaliveReason, registry);
                 }
-              }
-            });
+              });
           }
         }
 

@@ -9,6 +9,7 @@
 import { createHash, randomUUID } from 'crypto'
 import { dirname, posix } from 'path'
 import {
+  DELETE_SCOPE_FENCED_SY,
   resolveKeyFilesystemPath,
   type StorageV5,
   type StorageV5LeaseHandle,
@@ -29,7 +30,7 @@ import {
   stagingScopeBesidePf,
   stagingScopeWithinLf,
 } from './storageHbMutate.js'
-import { validateStorageScope } from './writeValidate.js'
+import { validateStorageKey, validateStorageScope } from './writeValidate.js'
 
 const TEXT_ENCODER = new TextEncoder()
 const TEXT_DECODER = new TextDecoder()
@@ -69,6 +70,7 @@ type MemoryLeaseEntry = {
   target: unknown
   holder: string
   expiresAtMs: number
+  meta?: unknown
 }
 
 type MemorySubscription = {
@@ -245,10 +247,22 @@ function ok<T>(value: T): StorageV5Result<T> {
   return { ok: true, value }
 }
 
-function fail(code: string, argument?: string): StorageV5Result<never> {
+function fail(
+  code: string,
+  argument?: string,
+  extra?: { holder?: string; expiresAtMs?: number; meta?: unknown },
+): StorageV5Result<never> {
   return {
     ok: false,
-    error: argument === undefined ? { code } : { code, argument },
+    error: {
+      code,
+      ...(argument !== undefined ? { argument } : {}),
+      ...(extra?.holder !== undefined ? { holder: extra.holder } : {}),
+      ...(extra?.expiresAtMs !== undefined
+        ? { expiresAtMs: extra.expiresAtMs }
+        : {}),
+      ...(extra?.meta !== undefined ? { meta: extra.meta } : {}),
+    },
   }
 }
 
@@ -410,6 +424,7 @@ export function createMemoryStorageV5Backend(
   function resolveKeyPath(key: unknown): string | null {
     const rec = asRecord(key)
     if (!rec || typeof rec.namespace !== 'string') return null
+    if (validateStorageKey(rec) !== undefined) return null
     const resolved = resolveKeyFilesystemPath(roots, rec)
     if (resolved !== null) {
       return normalizeVirtualPath(resolved)
@@ -829,13 +844,20 @@ export function createMemoryStorageV5Backend(
         existing.expiresAtMs > now &&
         existing.holder !== holder
       ) {
-        return fail('AlreadyHeld')
+        return fail('AlreadyHeld', undefined, {
+          holder: existing.holder,
+          expiresAtMs: existing.expiresAtMs,
+          ...(existing.meta !== undefined
+            ? { meta: safeDeepClone(existing.meta) }
+            : {}),
+        })
       }
       const entry: MemoryLeaseEntry = {
         targetKey,
         target: safeDeepClone(target),
         holder,
         expiresAtMs: now + ttlMs,
+        ...(opts?.meta !== undefined ? { meta: safeDeepClone(opts.meta) } : {}),
       }
       leases.set(targetKey, entry)
       const handle: StorageV5LeaseHandle = {
@@ -1112,12 +1134,16 @@ export function createMemoryStorageV5Backend(
       if (!dirs) return fail('InvalidArgument', 'scope')
 
       const items: StorageV5ListEntry[] = []
+      const seenPaths = new Set<string>()
       const cap = opts?.limit ?? opts?.maxLeaves
       for (const dir of dirs) {
+        if (cap !== undefined && items.length >= cap) break
         const matching = Array.from(files.entries())
           .filter(([filePath]) => isUnderDir(filePath, dir))
           .sort(([a], [b]) => a.localeCompare(b))
         for (const [filePath, entry] of matching) {
+          if (seenPaths.has(filePath)) continue
+          seenPaths.add(filePath)
           if (cap !== undefined && items.length >= cap) break
           items.push({
             kind: 'key',
@@ -1348,9 +1374,44 @@ export function createMemoryStorageV5Backend(
       const path = resolveKeyPath(key)
       if (!path) return fail('InvalidArgument', 'key')
       if (!Array.isArray(entries)) return fail('InvalidArgument', 'entries')
+      if (
+        opts?.keepBefore !== undefined &&
+        (!Number.isSafeInteger(opts.keepBefore) || opts.keepBefore < 0)
+      ) {
+        return fail('InvalidArgument', 'opts.keepBefore')
+      }
+      if (
+        opts?.preserveFrom !== undefined &&
+        (!Number.isSafeInteger(opts.preserveFrom) || opts.preserveFrom < 0)
+      ) {
+        return fail('InvalidArgument', 'opts.preserveFrom')
+      }
+      if (
+        opts?.keepBefore !== undefined &&
+        opts?.preserveFrom !== undefined &&
+        opts.preserveFrom < opts.keepBefore
+      ) {
+        return fail('InvalidArgument', 'opts.preserveFrom')
+      }
       const preErr = checkPrecondition(files.get(path), opts?.precondition)
       if (preErr) return preErr
-      const nextRecords: MemoryRecordEntry[] = entries.map((item, idx) => {
+      const existingStream =
+        opts?.keepBefore !== undefined || opts?.preserveFrom !== undefined
+          ? getOrInitStream(path)
+          : []
+      const prefix =
+        opts?.keepBefore !== undefined
+          ? existingStream
+              .filter(rec => rec.seq < opts.keepBefore!)
+              .map(rec => ({ ...rec, data: rec.data.slice() }))
+          : []
+      const suffix =
+        opts?.preserveFrom !== undefined
+          ? existingStream
+              .filter(rec => rec.seq >= opts.preserveFrom!)
+              .map(rec => ({ ...rec, data: rec.data.slice() }))
+          : []
+      const middle: MemoryRecordEntry[] = entries.map(item => {
         const rec = asRecord(item)
         const rawData =
           rec && 'data' in rec
@@ -1361,13 +1422,22 @@ export function createMemoryStorageV5Backend(
         const recordId =
           rec && typeof rec.recordId === 'string' ? rec.recordId : randomUUID()
         return {
-          seq: idx + 1,
-          endSeq: idx + 1,
+          seq: 0,
+          endSeq: 0,
           recordId,
           data: toBytes(rawData),
           tombstoned: false,
         }
       })
+      const nextRecords: MemoryRecordEntry[] = [
+        ...prefix,
+        ...middle,
+        ...suffix,
+      ].map((rec, idx) => ({
+        ...rec,
+        seq: idx + 1,
+        endSeq: idx + 1,
+      }))
       streams.set(path, nextRecords)
       const joined = joinRecordLines(nextRecords)
       const entry = putFile(path, joined, { key: asRecord(key) ?? undefined })
@@ -1482,11 +1552,7 @@ export function createMemoryStorageV5Backend(
       if (!path) return fail('InvalidArgument', 'key')
       const existing = files.get(path)
       if (!existing) {
-        const created = putFile(path, new Uint8Array(0), {
-          key: asRecord(key) ?? undefined,
-        })
-        notifyChange('write', path, created.version)
-        return ok({ mtimeMs: created.mtimeMs })
+        return fail('NotFound')
       }
       existing.mtimeMs = clock()
       notifyChange('touch', path, existing.version)
@@ -1561,19 +1627,50 @@ export function createMemoryStorageV5Backend(
       const preErr = checkPrecondition(existing, opts?.precondition)
       if (preErr) return preErr
       const found = existing !== undefined
-      const decision = edit(
-        existing
-          ? {
-              value: existing.bytes.slice(),
-              version: existing.version,
-              mtimeMs: existing.mtimeMs,
-            }
-          : undefined,
-      )
-      if ('skip' in decision) {
+      let decision: unknown
+      try {
+        decision = edit(
+          existing
+            ? {
+                value: existing.bytes.slice(),
+                version: existing.version,
+                mtimeMs: existing.mtimeMs,
+              }
+            : undefined,
+        )
+      } catch {
+        return fail('Failed', 'edit')
+      }
+      if (
+        decision === null ||
+        typeof decision !== 'object' ||
+        Array.isArray(decision)
+      ) {
+        return fail('Failed', 'edit')
+      }
+      const decisionRec = decision as Record<string, unknown>
+      if ('then' in decisionRec && typeof decisionRec.then === 'function') {
+        Promise.resolve(decisionRec).catch(() => {})
+        return fail('Failed', 'edit')
+      }
+      const hasWrite = 'write' in decisionRec
+      const hasSkip = 'skip' in decisionRec
+      if (hasWrite === hasSkip) {
+        return fail('InvalidArgument', 'edit')
+      }
+      if (hasSkip) {
+        if (decisionRec.skip !== true) {
+          return fail('InvalidArgument', 'edit')
+        }
         return ok({ written: false, found, version: existing?.version })
       }
-      const entry = putFile(path, toBytes(decision.write), {
+      if (
+        typeof decisionRec.write !== 'string' &&
+        !(decisionRec.write instanceof Uint8Array)
+      ) {
+        return fail('InvalidArgument', 'edit')
+      }
+      const entry = putFile(path, toBytes(decisionRec.write), {
         key: asRecord(key) ?? undefined,
       })
       streams.delete(path)
@@ -1637,15 +1734,32 @@ export function createMemoryStorageV5Backend(
     > {
       const closedErr = checkClosed()
       if (closedErr) return closedErr
+      const rec = asRecord(scope)
+      if (!rec) return fail('InvalidArgument', 'scope')
+      if (DELETE_SCOPE_FENCED_SY.has(String(rec.namespace))) {
+        return fail('InvalidArgument', 'scope')
+      }
+      if (
+        rec.namespace === 'bridgeSpawn' &&
+        rec.dir === undefined &&
+        opts?.olderThanMs === undefined
+      ) {
+        return fail('InvalidArgument', 'scope.dir')
+      }
+      if (rec.namespace === 'pluginCache' && rec.version === undefined) {
+        return fail('InvalidArgument', 'scope.version')
+      }
       const dirs = resolveScopeDirs(scope)
       if (!dirs) return fail('InvalidArgument', 'scope')
       const cutoff =
         opts?.olderThanMs !== undefined ? clock() - opts.olderThanMs : undefined
       let deleted = 0
       let skipped = 0
+      const seenPaths = new Set<string>()
       for (const dir of dirs) {
         for (const [filePath, entry] of Array.from(files.entries())) {
-          if (!isUnderDir(filePath, dir)) continue
+          if (!isUnderDir(filePath, dir) || seenPaths.has(filePath)) continue
+          seenPaths.add(filePath)
           if (cutoff !== undefined && entry.mtimeMs >= cutoff) {
             skipped += 1
             continue

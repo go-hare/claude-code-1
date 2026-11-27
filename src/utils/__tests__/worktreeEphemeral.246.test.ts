@@ -52,7 +52,22 @@ describe('worktree ephemeral slugs (2.1.246 FMs)', () => {
     expect(src).toContain('isWorktreePathRemovable(')
     expect(src).toContain('findWorktreePathSymlinkComponent(')
     expect(src).toContain('executeWorktreeRemoveHook(')
-    const hooksSrc = readFileSync(join(import.meta.dir, '../hooks.ts'), 'utf8')
+    const hooksSrc = [
+      '../hooks.ts',
+      '../hooks/hookCore.ts',
+      '../hooks/hookShellRunner.ts',
+      '../hooks/hookOutputProcessor.ts',
+      '../hooks/hookConfigRegistry.ts',
+      '../hooks/hookModelSlotPool.ts',
+      '../hooks/hookEngine.ts',
+      '../hooks/hookEntryExecutor.ts',
+      '../hooks/hookOutsideReplEngine.ts',
+      '../hooks/hookToolEvents.ts',
+      '../hooks/hookSessionAndPromptEvents.ts',
+      '../hooks/hookLifecycleEvents.ts',
+    ]
+      .map(rel => readFileSync(join(import.meta.dir, rel), 'utf8'))
+      .join('\n')
     expect(hooksSrc).toContain('hasWorktreeRemoveHook()')
     expect(src).toContain('async function deleteWorktreeBranch(')
     expect(src).toContain('teardownFailedWorktreeCreate(')

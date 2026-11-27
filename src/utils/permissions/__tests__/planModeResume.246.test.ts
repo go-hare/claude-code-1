@@ -4,7 +4,7 @@
  * Print `--continue` hydrates from an open transcript plan segment.
  * Interactive `--continue` still skips `y_u` (239 gold).
  */
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 
@@ -345,10 +345,14 @@ describe('densable 2.1.246 #40 resume mu-then-pu', () => {
 
 describe('densable 2.1.246 #40 print/main wiring', () => {
   test('print --continue calls my; resume success passes transcript to pu', () => {
-    const print = readFileSync(
-      join(import.meta.dir, '../../../cli/print.ts'),
-      'utf8',
-    )
+    const printDir = join(import.meta.dir, '../../../cli/print')
+    const print = [
+      readFileSync(join(import.meta.dir, '../../../cli/print.ts'), 'utf8'),
+      ...readdirSync(printDir)
+        .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+        .sort()
+        .map(f => readFileSync(join(printDir, f), 'utf8')),
+    ].join('\n')
     const main = readFileSync(
       join(import.meta.dir, '../../../main.tsx'),
       'utf8',

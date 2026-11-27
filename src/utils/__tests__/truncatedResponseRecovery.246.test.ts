@@ -14,7 +14,7 @@
  * 09-16 promoted to HAVE.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   isCompanionOrToolUserMessage,
@@ -22,14 +22,31 @@ import {
 } from '../messages.js'
 
 const srcRoot = join(import.meta.dir, '../..')
-const query = readFileSync(join(srcRoot, 'query.ts'), 'utf8')
+
+function readModuleTree(entryPath: string, subDir: string): string {
+  return [
+    readFileSync(entryPath, 'utf8'),
+    ...readdirSync(subDir)
+      .filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('.test.'))
+      .sort()
+      .map(f => readFileSync(join(subDir, f), 'utf8')),
+  ].join('\n')
+}
+
+const query = readModuleTree(join(srcRoot, 'query.ts'), join(srcRoot, 'query'))
 const queryHelpers = readFileSync(
   join(srcRoot, 'query/queryHelpers.ts'),
   'utf8',
 )
 const transitions = readFileSync(join(srcRoot, 'query/transitions.ts'), 'utf8')
-const messages = readFileSync(join(srcRoot, 'utils/messages.ts'), 'utf8')
-const claude = readFileSync(join(srcRoot, 'services/api/claude.ts'), 'utf8')
+const messages = readModuleTree(
+  join(srcRoot, 'utils/messages.ts'),
+  join(srcRoot, 'utils/messages'),
+)
+const claude = readModuleTree(
+  join(srcRoot, 'services/api/claude.ts'),
+  join(srcRoot, 'services/api/claude'),
+)
 
 describe('#55 GJn truncated recovery (2.1.246)', () => {
   test('GJn host + producer field are landed 1:1', () => {

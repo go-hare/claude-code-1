@@ -24,6 +24,7 @@ import { getCwd } from '../utils/cwd.js'
 import {
   cleanupDrainStarted,
   registerCleanup,
+  registerPreExitFlush,
   type CleanupUnregister,
 } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
@@ -50,20 +51,14 @@ import { logError } from './log.js'
 import type { MemoryType } from './memory/types.js'
 import { normalizePathForConfigKey } from './path.js'
 import { getEssentialTrafficOnlyReason } from './privacyLevel.js'
+import { getEnabledSettingSources } from './settings/constants.js'
 import { getManagedFilePath } from './settings/managedPath.js'
+import * as settingsModule from './settings/settings.js'
 import type { ThemeSetting } from './theme.js'
 import type { StorageV5 } from './storageV5/createLocalFsBackend.js'
 import { isHoverRestOn } from './storageV5/hoverRestPin.js'
-
-/* eslint-disable @typescript-eslint/no-require-imports */
-const teamMemPaths = feature('TEAMMEM')
-  ? (require('../memdir/teamMemPaths.js') as typeof import('../memdir/teamMemPaths.js'))
-  : null
-const ccrAutoConnect = feature('CCR_AUTO_CONNECT')
-  ? (require('../bridge/bridgeEnabled.js') as typeof import('../bridge/bridgeEnabled.js'))
-  : null
-
-/* eslint-enable @typescript-eslint/no-require-imports */
+import * as ccrAutoConnectModule from '../bridge/bridgeEnabled.js'
+import * as teamMemPathsModule from '../memdir/teamMemPaths.js'
 import type { ImageDimensions } from './imageResizer.js'
 import type { ModelOption } from './model/modelOptions.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
@@ -105,6 +100,7 @@ type ConfigHostState = {
     | undefined
   configReadingAllowed: boolean
   disklessWriteChain: Promise<void>
+  disklessWritePreExitFlushRegistered: boolean
 }
 
 const configStateByHost = new HostSlot<ConfigHostState>(() => ({
@@ -132,6 +128,7 @@ const configStateByHost = new HostSlot<ConfigHostState>(() => ({
   freshnessWatcherListener: undefined,
   configReadingAllowed: defaultConfigReadingAllowed,
   disklessWriteChain: Promise.resolve(),
+  disklessWritePreExitFlushRegistered: false,
 }))
 
 function getConfigHostState(): ConfigHostState {
@@ -1188,21 +1185,28 @@ function getActiveConfigHost(): object {
   return fallbackConfigHost
 }
 
-const trustAcceptedByHost = new HostSlot<{ accepted: boolean }>(() => ({
-  accepted: false,
-}))
+const trustAcceptedByHost = new HostSlot<Set<string>>(() => new Set())
 
 export function resetTrustDialogAcceptedCacheForTesting(): void {
-  trustAcceptedByHost.of(getActiveConfigHost()).accepted = false
+  trustAcceptedByHost.of(getActiveConfigHost()).clear()
 }
 
 export function checkHasTrustDialogAccepted(): boolean {
   // Trust only transitions false→true during a session (never the reverse),
-  // so once true we can latch it per SessionHost. false is not cached — it gets
-  // re-checked on every call so that trust dialog acceptance is picked up mid-session.
-  // (lodash memoize doesn't fit here because it would also cache false.)
-  const slot = trustAcceptedByHost.of(getActiveConfigHost())
-  return (slot.accepted ||= computeTrustDialogAccepted())
+  // so once true we can latch it per (SessionHost, normalized originalCwd).
+  // Keying by originalCwd ensures trusting `/trusted` in Session 1 never
+  // auto-trusts Session 2 in `/untrusted` or `forkProject('/untrusted')` on
+  // the same EmbeddedHost. false is not cached so acceptance is picked up live.
+  const acceptedDirs = trustAcceptedByHost.of(getActiveConfigHost())
+  const cwdKey = normalizePathForConfigKey(resolve(getOriginalCwd()))
+  if (acceptedDirs.has(cwdKey)) {
+    return true
+  }
+  if (computeTrustDialogAccepted()) {
+    acceptedDirs.add(cwdKey)
+    return true
+  }
+  return false
 }
 
 /**
@@ -1566,6 +1570,19 @@ export function saveGlobalConfig(
           jsonStringify(defaults[key as keyof GlobalConfig]),
       )
       const payload = jsonStringify(filtered, null, 2)
+      if (!hostState.disklessWritePreExitFlushRegistered) {
+        hostState.disklessWritePreExitFlushRegistered = true
+        const stateRef = new WeakRef(hostState)
+        registerPreExitFlush(async () => {
+          const liveState = stateRef.deref()
+          if (!liveState) return
+          let prev: Promise<void> | undefined
+          while (prev !== liveState.disklessWriteChain) {
+            prev = liveState.disklessWriteChain
+            await prev.catch(() => {})
+          }
+        })
+      }
       hostState.disklessWriteChain = hostState.disklessWriteChain
         .catch(() => {})
         .then(() =>
@@ -1926,16 +1943,19 @@ function applyGlobalConfigFreshnessStat(
         mtime: curr.mtimeMs,
       }
       state.lastReadFileStats = { mtime: curr.mtimeMs, size: curr.size }
+      state.globalConfigFreshnessResubscribed = false
     })
     .catch(error => {
       if (getErrnoCode(error) === 'ENOENT') return
-      handleGlobalConfigFreshnessWatchEnded(error)
+      handleGlobalConfigFreshnessWatchEnded(error, state)
     })
 }
 
 /** Official Ma — watchFile host (CD(); no storage wa). */
 function ensureGlobalConfigFreshnessMa(options?: {
   allowInTest?: boolean
+  isResubscribe?: boolean
+  state?: ConfigHostState
 }): void {
   if (cleanupDrainStarted()) return
   startGlobalConfigFreshnessWatchCd(options)
@@ -1944,13 +1964,18 @@ function ensureGlobalConfigFreshnessMa(options?: {
 /** Official CD — fs.watchFile fallback freshness (Nr off / no storage backend). */
 function startGlobalConfigFreshnessWatchCd(options?: {
   allowInTest?: boolean
+  isResubscribe?: boolean
+  state?: ConfigHostState
 }): void {
-  const hostState = getConfigHostState()
+  if (isDisklessActive()) return
+  const hostState = options?.state ?? getConfigHostState()
   if (hostState.freshnessWatcherStarted) return
   if (!options?.allowInTest && process.env.NODE_ENV === 'test') return
   if (cleanupDrainStarted()) return
   hostState.freshnessWatcherStarted = true
-  hostState.globalConfigFreshnessResubscribed = false
+  if (!options?.isResubscribe) {
+    hostState.globalConfigFreshnessResubscribed = false
+  }
   const file = getGlobalClaudeFile()
   const listener = (curr: { mtimeMs: number; size: number }) => {
     // Our own writes fire this too — the write-through's Date.now()
@@ -1985,10 +2010,13 @@ function startGlobalConfigFreshnessWatchCd(options?: {
   )
 }
 
-/** Official kD (!e.ok) — resubscribe on watch/read failure; gated by DYe. */
-function handleGlobalConfigFreshnessWatchEnded(error: unknown): void {
+/** Official kD (!e.ok) — resubscribe once on watch/read failure; gated by DYe. */
+function handleGlobalConfigFreshnessWatchEnded(
+  error: unknown,
+  state: ConfigHostState = getConfigHostState(),
+): void {
   if (cleanupDrainStarted()) return
-  const hostState = getConfigHostState()
+  const hostState = state
   logForDebugging(
     `Watching ~/.claude.json through the storage interface ended: ${formatGlobalConfigFreshnessWatchError(error)}`,
     { level: 'warn' },
@@ -2005,9 +2033,16 @@ function handleGlobalConfigFreshnessWatchEnded(error: unknown): void {
   const allowInTest =
     process.env.NODE_ENV === 'test' ? { allowInTest: true } : {}
   if (claimGlobalConfigFreshnessResubscribe(hostState)) {
-    ensureGlobalConfigFreshnessMa(allowInTest)
+    ensureGlobalConfigFreshnessMa({
+      ...allowInTest,
+      isResubscribe: true,
+      state: hostState,
+    })
   } else {
-    ensureGlobalConfigFreshnessMa(allowInTest)
+    logForDebugging(
+      'Watching ~/.claude.json already resubscribed once; stopping freshness watcher to avoid retry loop',
+      { level: 'warn' },
+    )
   }
 }
 
@@ -2042,10 +2077,7 @@ export function resolveAutoScrollEnabled(
 export function getAutoScrollEnabled(): boolean {
   let fromSettings: boolean | undefined
   try {
-    const { getInitialSettings } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./settings/settings.js') as typeof import('./settings/settings.js')
-    fromSettings = getInitialSettings().autoScrollEnabled
+    fromSettings = settingsModule.getInitialSettings().autoScrollEnabled
   } catch {
     // settings unavailable (startup / cycle) — fall through to global
   }
@@ -2086,13 +2118,15 @@ function triggerOwedReloadThroughPinnedStorage(): void {
     return
   }
   try {
-    const { getPinnedStorageV5 } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./storageV5/index.js') as typeof import('./storageV5/index.js')
-    const pinned = getPinnedStorageV5()
-    if (pinned !== undefined) {
+    const pinned = getRegisteredPinnedStorageV5()
+    if (
+      pinned !== undefined &&
+      pinned !== null &&
+      typeof pinned === 'object' &&
+      'readText' in pinned
+    ) {
       void reloadThroughStorageOnce(() =>
-        refreshGlobalConfigFromStorage(pinned),
+        refreshGlobalConfigFromStorage(pinned as StorageV5),
       )
     }
   } catch {
@@ -2245,13 +2279,8 @@ export function resolveUserIntentSetting<K extends UserIntentSettingKey, D>(
   source: UserIntentSettingSource
 } {
   try {
-    // Lazy require avoids settings ↔ config module init cycles.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getEnabledSettingSources } =
-      require('./settings/constants.js') as typeof import('./settings/constants.js')
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getSettingsForSource, projectSettingsAliasesUserSettings } =
-      require('./settings/settings.js') as typeof import('./settings/settings.js')
+      settingsModule
     const sources = getEnabledSettingSources()
     const hasUserSettings = sources.includes('userSettings')
     for (let i = sources.length - 1; i >= 0; i--) {
@@ -2290,22 +2319,37 @@ export function resolveUserIntentSetting<K extends UserIntentSettingKey, D>(
 
 /**
  * Official 2.1.331 `cue(key, value, storageV5)` (@309341251):
- * Persist a user-intent setting to `userSettings` (`~/.claude/settings.json`).
+ * Persist a user-intent setting to `userSettings` (`~/.claude/settings.json`),
+ * routing through `storageV5` when injected/pinned or diskless. On explicit
+ * reset (`value === undefined`), also clear/reset any legacy `~/.claude.json`
+ * key so `resolveUserIntentSetting` does not resurrect the old legacy value.
  */
 export function saveUserIntentSetting<K extends UserIntentSettingKey>(
   key: K,
   value: import('./settings/types.js').SettingsJson[K],
   storageV5?: unknown,
 ): { error: Error | null } {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { updateSettingsForSource } =
-    require('./settings/settings.js') as typeof import('./settings/settings.js')
-  return updateSettingsForSource(
+  const effectiveStorageV5 = storageV5 ?? getRegisteredPinnedStorageV5()
+  const result = settingsModule.updateSettingsForSource(
     'userSettings',
     { [key]: value } as import('./settings/types.js').SettingsJson,
     undefined,
-    storageV5,
+    effectiveStorageV5,
   )
+  if (value === undefined && result.error === null) {
+    const currentLegacy = getGlobalConfig()[key]
+    if (
+      currentLegacy !== undefined &&
+      currentLegacy !== DEFAULT_GLOBAL_CONFIG[key]
+    ) {
+      saveGlobalConfig(current => {
+        const next: GlobalConfig = { ...current }
+        ;(next as Record<string, unknown>)[key] = DEFAULT_GLOBAL_CONFIG[key]
+        return next
+      }, effectiveStorageV5)
+    }
+  }
+  return result
 }
 
 /**
@@ -2316,13 +2360,11 @@ export function saveUserIntentSetting<K extends UserIntentSettingKey>(
 export function getEffectiveRemoteControlAtStartupSetting():
   | boolean
   | undefined {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const {
     getSettingsForSource,
     getSecuritySensitiveSetting,
     projectSettingsAliasesUserSettings,
-  } =
-    require('./settings/settings.js') as typeof import('./settings/settings.js')
+  } = settingsModule
 
   const project = projectSettingsAliasesUserSettings()
     ? undefined
@@ -2412,14 +2454,11 @@ export function getEffectiveGlobalConfig(): GlobalConfig {
  *   5. undefined → rMe falls through to CCR auto-connect default, else false
  */
 export function getRemoteControlAtStartup(): boolean {
-  // Lazy import avoids settings↔config cycles at module init.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const {
     getSettingsForSource,
     getSecuritySensitiveSetting,
     projectSettingsAliasesUserSettings,
-  } =
-    require('./settings/settings.js') as typeof import('./settings/settings.js')
+  } = settingsModule
 
   // densable: t = projectSettingsAliasesUserSettings() ? void 0 : project?.remoteControlAtStartup
   const project = projectSettingsAliasesUserSettings()
@@ -2451,7 +2490,7 @@ export function getRemoteControlAtStartup(): boolean {
 
   // densable rMe: X_t undefined → CCR auto-connect default
   if (feature('CCR_AUTO_CONNECT')) {
-    if (ccrAutoConnect?.getCcrAutoConnectDefault()) return true
+    if (ccrAutoConnectModule.getCcrAutoConnectDefault()) return true
   }
   return false
 }
@@ -3817,13 +3856,7 @@ function findSkipReasonUnderHostPin(
   configEnv: Record<string, string> | undefined,
 ): string | null {
   try {
-    // Lazy require avoids settings ↔ config circular init
-    const { getEnabledSettingSources } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./settings/constants.js') as typeof import('./settings/constants.js')
-    const { getSettingsForSource, getSettingsWithErrors } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const { getSettingsForSource, getSettingsWithErrors } = settingsModule
     const sources = getEnabledSettingSources()
     if (!sources.includes('userSettings')) {
       return 'user settings not read'
@@ -3972,7 +4005,7 @@ export function getMemoryPath(memoryType: MemoryType): string {
   }
   // TeamMem is only a valid MemoryType when feature('TEAMMEM') is true
   if (feature('TEAMMEM')) {
-    return teamMemPaths!.getTeamMemEntrypoint()
+    return teamMemPathsModule.getTeamMemEntrypoint()
   }
   return '' // unreachable in external builds where TeamMem is not in MemoryType
 }

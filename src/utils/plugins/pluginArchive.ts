@@ -11,12 +11,15 @@
 import axios from 'axios'
 import { createHash } from 'crypto'
 import { readdir, rename, rm, writeFile } from 'fs/promises'
-import { isIP } from 'net'
 import { basename, dirname, join } from 'path'
 import { logForDebugging } from '../debug.js'
 import { isPathSafe, unzipFile } from '../dxt/zip.js'
 import { errorMessage } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
+import {
+  createSsrfGuardedLookup,
+  isBlockedHostnameOrIp,
+} from '../hooks/ssrfGuard.js'
 import {
   classifyFetchError,
   getPluginDownloadProxyOptions,
@@ -36,46 +39,16 @@ export const PLUGIN_ARCHIVE_TIMEOUT_MS = 120_000
 /** densable YDs */
 export const PLUGIN_ARCHIVE_USER_AGENT = 'Claude-Code-Plugin-Manager'
 
+const ARCHIVE_SSRF_POLICY = { allowLoopback: false } as const
+const archiveSsrfLookup = createSsrfGuardedLookup(ARCHIVE_SSRF_POLICY)
+
 /**
- * densable $Xr — hostname is loopback, link-local, or known cloud-metadata.
- * (Stricter than HTTP-hook ssrfGuard: loopback is REJECTED here.)
+ * densable $Xr — hostname is loopback, private (RFC 1918 / ULA / CGNAT),
+ * link-local, unspecified, NAT64, multicast, or known cloud-metadata.
+ * Delegates to the canonical SSRF guard (`ssrfGuard.ts`) with `allowLoopback: false`.
  */
 export function isArchiveBlockedHostname(hostname: string): boolean {
-  let t = hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (t.endsWith('.')) t = t.slice(0, -1)
-  if (t === '' || t === 'localhost' || t.endsWith('.localhost')) return true
-
-  if (isIP(t) === 4) {
-    const [i = 0, s = 0, a = 0, l = 0] = t.split('.').map(Number)
-    // 127.0.0.0/8, 169.254.0.0/16, 0.0.0.0/8, Alibaba metadata 100.100.100.200
-    return (
-      i === 127 ||
-      (i === 169 && s === 254) ||
-      i === 0 ||
-      (i === 100 && s === 100 && a === 100 && l === 200)
-    )
-  }
-
-  if (isIP(t) !== 6) return false
-
-  const mappedDotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(t)
-  if (mappedDotted?.[1]) return isArchiveBlockedHostname(mappedDotted[1])
-
-  const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(t)
-  if (mappedHex?.[1] !== undefined && mappedHex[2] !== undefined) {
-    const hi = parseInt(mappedHex[1], 16)
-    const lo = parseInt(mappedHex[2], 16)
-    return isArchiveBlockedHostname(
-      `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`,
-    )
-  }
-
-  // ::1, ::, AWS IMDS IPv6 fd00:ec2::254
-  if (t === '::1' || t === '::' || t === 'fd00:ec2::254') return true
-
-  // fe80::/10 link-local — first hextet 0xfe80..0xfebf (65152..65215)
-  const first = parseInt(/^([0-9a-f]{1,4}):/.exec(t)?.[1] ?? '0', 16)
-  return first >= 65152 && first <= 65215
+  return isBlockedHostnameOrIp(hostname, ARCHIVE_SSRF_POLICY)
 }
 
 /** densable Lio */
@@ -326,7 +299,9 @@ export async function downloadPluginArchive(
             httpAgent: proxyOpts.httpAgent,
             proxy: proxyOpts.proxy,
           }
-        : {}),
+        : {
+            lookup: archiveSsrfLookup,
+          }),
       beforeRedirect: createArchiveBeforeRedirect(url, inheritedNames),
     })
     logPluginFetch(

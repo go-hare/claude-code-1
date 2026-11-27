@@ -34,6 +34,7 @@ import {
   type Tokens,
   type TokensList,
 } from 'marked'
+import { isDisklessActive } from './disklessGuards.js'
 import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
 import { settingsHaveBlockReadsOutsideWorkingDirectories } from './permissions/outsideReads.js'
 import {
@@ -949,6 +950,9 @@ async function safelyReadMemoryFileAsync(
   includeBasePath?: string,
   permissionReader?: MemoryFilePermissionReader,
 ): Promise<{ info: MemoryFileInfo | null; includePaths: string[] }> {
+  if (isDisklessActive()) {
+    return { info: null, includePaths: [] }
+  }
   try {
     if (permissionReader) {
       const rawContent = await permissionReader(filePath, MAX_MEMORY_FILE_BYTES)
@@ -1497,6 +1501,9 @@ function getMemoryPermissionHoldSignature(): string {
 
 export const getMemoryFiles = memoizePerRootSession(
   async (forceIncludeExternal: boolean = false): Promise<MemoryFileInfo[]> => {
+    if (isDisklessActive()) {
+      return []
+    }
     const startTime = Date.now()
     logForDiagnosticsNoPII('info', 'memory_files_started')
 
@@ -2048,6 +2055,9 @@ export async function getMemoryFilesForNestedDirectory(
   processedPaths: Set<string>,
   permissionReader?: MemoryFilePermissionReader,
 ): Promise<MemoryFileInfo[]> {
+  if (isDisklessActive()) {
+    return []
+  }
   const result: MemoryFileInfo[] = []
   const effectivePermissionReader =
     permissionReader ?? getDefaultPermissionReaderForMemoryType('Project')

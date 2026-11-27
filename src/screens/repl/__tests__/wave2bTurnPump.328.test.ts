@@ -488,10 +488,28 @@ describe('Wave 2B SubmitController synchronous loading & single history write (2
 
 describe('Wave 2B REPL.tsx engine & CodeMode wiring (2.1.328)', () => {
   test('REPL.tsx preserves abort reasons, back-propagates refusal-fallback-edit, cleans listeners, delegates result envelope to hostEngine, and wires CodeMode resume + linger', () => {
-    const replSrc = readFileSync(
-      join(import.meta.dir, '../../REPL.tsx'),
-      'utf8',
-    )
+    const replSrc = [
+      readFileSync(join(import.meta.dir, '../../REPL.tsx'), 'utf8'),
+      readFileSync(join(import.meta.dir, '../replHostEngine.ts'), 'utf8'),
+      readFileSync(
+        join(import.meta.dir, '../useReplTurnOrchestration.tsx'),
+        'utf8',
+      ),
+      readFileSync(
+        join(import.meta.dir, '../useReplCancelAndQueue.ts'),
+        'utf8',
+      ),
+      readFileSync(
+        join(import.meta.dir, '../useReplSessionLifecycle.tsx'),
+        'utf8',
+      ),
+      readFileSync(
+        join(import.meta.dir, '../useReplStreamingAndSpinner.ts'),
+        'utf8',
+      ),
+    ]
+      .join('\n')
+      .replace(/\s+/g, ' ')
     // P0-1: abort reason preservation + refusal-fallback-edit back-propagation + cleanup
     expect(replSrc).toContain(
       "getAbortReasonMessage(abortController.signal.reason) === 'refusal-fallback-edit'",

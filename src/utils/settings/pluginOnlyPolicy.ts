@@ -1,4 +1,5 @@
 import {
+  exitSessionContext,
   getBootstrapSession,
   getBootstrapSessionHost,
   HostSlot,
@@ -79,14 +80,10 @@ type StrictPluginOnlyChangeCallback = (
   nextPolicy: StrictPluginOnlyPolicyValue,
 ) => void
 
-type StrictPluginOnlyCallbackEntry = {
-  callback: StrictPluginOnlyChangeCallback
-  persistent: boolean
-}
-
 type PluginOnlyPolicyHostState = {
   lastStrictPluginOnlySnapshot: string | undefined
   liveEntry: LivePluginOnlyPolicyHostEntry | null
+  hostCallbacks: Set<StrictPluginOnlyChangeCallback>
 }
 
 type LivePluginOnlyPolicyHostEntry = {
@@ -94,12 +91,14 @@ type LivePluginOnlyPolicyHostEntry = {
   state: PluginOnlyPolicyHostState
 }
 
-const strictPluginOnlyChangeCallbacks = new Set<StrictPluginOnlyCallbackEntry>()
+const persistentStrictPluginOnlyChangeCallbacks =
+  new Set<StrictPluginOnlyChangeCallback>()
 
 const pluginOnlyPolicyHostSlot = new HostSlot<PluginOnlyPolicyHostState>(
   () => ({
     lastStrictPluginOnlySnapshot: undefined,
     liveEntry: null,
+    hostCallbacks: new Set(),
   }),
 )
 
@@ -166,9 +165,28 @@ function evaluateAndNotifyForHost(
   if (!hadPrevious && nextSnapshot === 'undefined') {
     return false
   }
-  for (const entry of strictPluginOnlyChangeCallbacks) {
+  for (const callback of persistentStrictPluginOnlyChangeCallbacks) {
     try {
-      entry.callback(nextPolicy)
+      callback(nextPolicy)
+    } catch {
+      // Isolate individual cache-clear callback failures
+    }
+  }
+  const defaultHostState = exitSessionContext(() =>
+    pluginOnlyPolicyHostSlot.peek(getBootstrapSessionHost()),
+  )
+  if (defaultHostState !== undefined && defaultHostState !== state) {
+    for (const callback of defaultHostState.hostCallbacks) {
+      try {
+        callback(nextPolicy)
+      } catch {
+        // Isolate individual cache-clear callback failures
+      }
+    }
+  }
+  for (const callback of state.hostCallbacks) {
+    try {
+      callback(nextPolicy)
     } catch {
       // Isolate individual cache-clear callback failures
     }
@@ -185,13 +203,16 @@ export function registerStrictPluginOnlyChangeCallback(
   callback: StrictPluginOnlyChangeCallback,
   opts?: { persistent?: boolean },
 ): () => void {
-  const entry: StrictPluginOnlyCallbackEntry = {
-    callback,
-    persistent: opts?.persistent === true,
+  if (opts?.persistent === true) {
+    persistentStrictPluginOnlyChangeCallbacks.add(callback)
+    return () => {
+      persistentStrictPluginOnlyChangeCallbacks.delete(callback)
+    }
   }
-  strictPluginOnlyChangeCallbacks.add(entry)
+  const state = trackCurrentPluginOnlyPolicyHost()
+  state.hostCallbacks.add(callback)
   return () => {
-    strictPluginOnlyChangeCallbacks.delete(entry)
+    state.hostCallbacks.delete(callback)
   }
 }
 
@@ -239,10 +260,7 @@ export function notifyStrictPluginOnlyPolicyIfChanged(
 }
 
 export function resetStrictPluginOnlyChangeStateForTests(): void {
-  for (const entry of strictPluginOnlyChangeCallbacks) {
-    if (!entry.persistent) {
-      strictPluginOnlyChangeCallbacks.delete(entry)
-    }
-  }
-  getPluginOnlyPolicyHostState().lastStrictPluginOnlySnapshot = undefined
+  const state = getPluginOnlyPolicyHostState()
+  state.hostCallbacks.clear()
+  state.lastStrictPluginOnlySnapshot = undefined
 }

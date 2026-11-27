@@ -55,7 +55,10 @@ import {
 import {
   getActiveSessionFromAls,
   getBootstrapSession,
+  getBootstrapSessionHost,
   hasActiveSessionAls,
+  HostSlot,
+  ofDefaultHost,
   RootSessionSlot,
   runWithSession,
 } from '../../utils/sessionHost.js'
@@ -785,13 +788,30 @@ type SessionMemoryExtractorSlot = {
   extractor: MemoryExtractor
 }
 
-let globalExtractMemoriesInitialized = false
-let defaultExtractorDeps: MemoryExtractorDeps | undefined
+type ExtractMemoriesHostState = {
+  initialized: boolean
+  deps: MemoryExtractorDeps | undefined
+}
+
+const extractMemoriesHostSlot = new HostSlot<ExtractMemoriesHostState>(() => ({
+  initialized: false,
+  deps: undefined,
+}))
+
+function getEffectiveExtractMemoriesHostConfig(): ExtractMemoriesHostState {
+  const own = extractMemoriesHostSlot.peek(getBootstrapSessionHost())
+  if (own?.initialized) {
+    return own
+  }
+  return ofDefaultHost(extractMemoriesHostSlot)
+}
 
 const memoryExtractorBySession =
   new RootSessionSlot<SessionMemoryExtractorSlot>(() => ({
     initialized: false,
-    extractor: createMemoryExtractor(defaultExtractorDeps),
+    extractor: createMemoryExtractor(
+      getEffectiveExtractMemoriesHostConfig().deps,
+    ),
   }))
 
 /**
@@ -801,15 +821,12 @@ const memoryExtractorBySession =
  * initConfidenceRating/initPromptCoaching, or per-test in beforeEach.
  */
 export function initExtractMemories(deps?: MemoryExtractorDeps): void {
-  if (!hasActiveSessionAls()) {
-    defaultExtractorDeps = deps
-  }
+  const hostSlot = extractMemoriesHostSlot.of(getBootstrapSessionHost())
+  hostSlot.initialized = true
+  hostSlot.deps = deps
   const slot = memoryExtractorBySession.of(getBootstrapSession())
   slot.initialized = true
-  slot.extractor = createMemoryExtractor(deps ?? defaultExtractorDeps)
-  if (!hasActiveSessionAls()) {
-    globalExtractMemoriesInitialized = true
-  }
+  slot.extractor = createMemoryExtractor(deps)
 }
 
 export function getMemoryExtractorStateForTesting(): MemoryExtractorStateSnapshot {
@@ -827,10 +844,7 @@ export function getMemoryExtractorStateForTesting(): MemoryExtractorStateSnapsho
 }
 
 export function resetExtractMemoriesForTests(): void {
-  if (!hasActiveSessionAls()) {
-    globalExtractMemoriesInitialized = false
-    defaultExtractorDeps = undefined
-  }
+  extractMemoriesHostSlot.drop(getBootstrapSessionHost())
   memoryExtractorBySession.drop(getBootstrapSession())
 }
 
@@ -848,10 +862,11 @@ export async function executeExtractMemories(
   appendSystemMessage?: AppendSystemMessageFn,
 ): Promise<void> {
   const session = getBootstrapSession()
+  const effectiveHost = getEffectiveExtractMemoriesHostConfig()
   const existing = memoryExtractorBySession.peek(session)
-  if (!existing && !globalExtractMemoriesInitialized) return
+  if (!existing && !effectiveHost.initialized) return
   const slot = existing ?? memoryExtractorBySession.of(session)
-  if (!slot.initialized && !globalExtractMemoriesInitialized) return
+  if (!slot.initialized && !effectiveHost.initialized) return
   await slot.extractor.execute(context, appendSystemMessage)
 }
 
@@ -864,11 +879,12 @@ export async function executeExtractMemories(
 export async function drainPendingExtraction(
   timeoutMs?: number,
 ): Promise<void> {
+  const effectiveHost = getEffectiveExtractMemoriesHostConfig()
   if (hasActiveSessionAls()) {
     const session = getBootstrapSession()
     const existing = memoryExtractorBySession.peek(session)
     if (!existing) return
-    if (!existing.initialized && !globalExtractMemoriesInitialized) return
+    if (!existing.initialized && !effectiveHost.initialized) return
     await existing.extractor.drain(timeoutMs)
     return
   }
@@ -889,7 +905,7 @@ export async function drainPendingExtraction(
   const defaultExisting = memoryExtractorBySession.peek(getBootstrapSession())
   if (
     defaultExisting &&
-    (defaultExisting.initialized || globalExtractMemoriesInitialized)
+    (defaultExisting.initialized || effectiveHost.initialized)
   ) {
     extractorsToDrain.add(defaultExisting.extractor)
   }

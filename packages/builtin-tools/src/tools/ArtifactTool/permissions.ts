@@ -317,6 +317,7 @@ async function probeThenOtherOrgDeny(
 export async function checkArtifactActionPermissions(
   input: ArtifactActionInput,
   context: ToolUseContext,
+  baseDir?: string,
 ): Promise<PermissionResult> {
   const action = input.action
   beginArtifactConsentCheck(context)
@@ -1493,7 +1494,7 @@ export async function checkArtifactActionPermissions(
       gate: Exclude<ReturnType<typeof Gqe>, { refused: PermissionResult }>
     }> = []
     const readDenied = (written: string): PermissionResult | null => {
-      const spelled = expandPath(written)
+      const spelled = expandPath(written, baseDir)
       const source = resolveUploadSource(spelled)
       if (source.kind === 'network') {
         return {
@@ -1582,7 +1583,7 @@ export async function checkArtifactActionPermissions(
             [gNe]: {
               slug: parsed.slug,
               ...(uploadPins[0] ?? {
-                real: expandPath(input.file_path ?? ''),
+                real: expandPath(input.file_path ?? '', baseDir),
                 identity: null,
               }),
               ...(seq !== undefined ? { otherCommentSeq: seq } : {}),
@@ -1692,7 +1693,9 @@ export async function checkArtifactActionPermissions(
           } into the asset store of ${label}: ${listed} — everyone who can open the artifact can load them`
         : `Claude wants to upload the local file "${
             uploadPins[0]?.real ??
-            (input.file_path !== undefined ? expandPath(input.file_path) : '')
+            (input.file_path !== undefined
+              ? expandPath(input.file_path, baseDir)
+              : '')
           }" into the asset store of ${label} — everyone who can open the artifact can load it`
     const untilComments =
       hasOtherCommentSightings(parsed.slug) &&
@@ -1820,6 +1823,7 @@ export async function checkArtifactActionPermissions(
       await captureApprovedPublishSourcePin(
         context.toolUseId ?? input.file_path,
         input.file_path,
+        baseDir,
       )
     }
     const orgRequiresApproval = isOrgNewArtifactApprovalRequired(appState)
@@ -2006,12 +2010,13 @@ export function consumeApprovedPublishSourcePin(
 async function captureApprovedPublishSourcePin(
   key: string,
   filePath: string,
+  baseDir?: string,
 ): Promise<void> {
   try {
     const { expandPath } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('src/utils/path.js') as typeof import('src/utils/path.js')
-    const expanded = expandPath(filePath)
+    const expanded = expandPath(filePath, baseDir)
     const [lst, st] = await Promise.all([
       lstat(expanded, { bigint: true }),
       stat(expanded, { bigint: true }),

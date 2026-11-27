@@ -193,6 +193,16 @@ describe('Official 2.1.331 extended control_request schemas', () => {
       subtype: 'log_host_events',
       events: [{ name: 'host_ping', ts: 123 }],
     },
+    {
+      subtype: 'turn_handoff',
+      action: 'export',
+      session_id: 'sess-handoff-1',
+      stopped: false,
+      continues: true,
+      relay_marker: { uuid: 'rm-1', content: 'relay-content' },
+      file_names: [{ fileUuid: 'f-1', name: 'a.ts' }],
+      memory_context: { uuid: 'mc-1', version: 'v1', content: 'notes' },
+    },
   ]
 
   test('covers and parses every single SDK_EXTENDED_CONTROL_SUBTYPES entry', () => {
@@ -248,6 +258,9 @@ describe('Official 2.1.331 extended control_request schemas', () => {
       { subtype: 'dictate', action: '' },
       { subtype: 'dev_intent', intent: '' },
       { subtype: 'log_host_events', events: 'not-array' },
+      { subtype: 'turn_handoff', action: 'invalid_action' },
+      { subtype: 'turn_handoff', stopped: 'yes' },
+      { subtype: 'turn_handoff', continues: 1 },
     ]
 
     for (const payload of invalidPayloads) {
@@ -1105,10 +1118,12 @@ describe('dispatchPrintControlExtra 2.1.331 handlers & multi-tenant isolation', 
       expect(hUnadmitted.errors[0]).toContain('turn_handoff_disabled:')
       expect(manager.multiTenantShutdownAborted).toBe(false)
 
-      // 3. worker_shutting_down succeeds when sharedBackend is active
+      // 3. worker_shutting_down succeeds when sharedBackend is active on a managed cloud worker
       setSharedBackendMode(true)
       try {
-        const hShared = createHarness()
+        const hShared = createHarness({
+          turnHandoffAdmission: { admitted: false, reason: 'shared_backend' },
+        })
         expect(
           dispatchPrintControlExtra(
             'worker_shutting_down',

@@ -1,7 +1,11 @@
 import { log, error as logError } from '../../logger'
 import { Hono, type Context } from 'hono'
 import { validateApiKey } from '../../auth/api-key'
-import { extractBearerToken, uuidAuth } from '../../auth/middleware'
+import {
+  extractBearerToken,
+  requireJsonContentType,
+  uuidAuth,
+} from '../../auth/middleware'
 import {
   getSession,
   isSessionClosedStatus,
@@ -47,7 +51,7 @@ function closedSessionResponse(message: string) {
 }
 
 /** POST /web/sessions/:id/events — Send user message to session */
-app.post('/sessions/:id/events', uuidAuth, async c => {
+app.post('/sessions/:id/events', requireJsonContentType, uuidAuth, async c => {
   const requestedSessionId = c.req.param('id')!
   const ownership = checkOwnership(c, requestedSessionId)
   if (ownership.error) {
@@ -76,7 +80,7 @@ app.post('/sessions/:id/events', uuidAuth, async c => {
 })
 
 /** POST /web/sessions/:id/control — Send control request (permission approval etc) */
-app.post('/sessions/:id/control', uuidAuth, async c => {
+app.post('/sessions/:id/control', requireJsonContentType, uuidAuth, async c => {
   const requestedSessionId = c.req.param('id')!
   const ownership = checkOwnership(c, requestedSessionId)
   if (ownership.error) {
@@ -103,30 +107,35 @@ app.post('/sessions/:id/control', uuidAuth, async c => {
 })
 
 /** POST /web/sessions/:id/interrupt — Interrupt session */
-app.post('/sessions/:id/interrupt', uuidAuth, async c => {
-  const requestedSessionId = c.req.param('id')!
-  const ownership = checkOwnership(c, requestedSessionId)
-  if (ownership.error) {
-    const message =
-      'reason' in ownership ? ownership.reason : 'Not your session'
-    const status = 'reason' in ownership ? 409 : 403
-    return c.json(
-      'reason' in ownership
-        ? closedSessionResponse(message)
-        : { error: { type: 'forbidden', message } },
-      status,
-    )
-  }
-  const { sessionId } = ownership
+app.post(
+  '/sessions/:id/interrupt',
+  requireJsonContentType,
+  uuidAuth,
+  async c => {
+    const requestedSessionId = c.req.param('id')!
+    const ownership = checkOwnership(c, requestedSessionId)
+    if (ownership.error) {
+      const message =
+        'reason' in ownership ? ownership.reason : 'Not your session'
+      const status = 'reason' in ownership ? 409 : 403
+      return c.json(
+        'reason' in ownership
+          ? closedSessionResponse(message)
+          : { error: { type: 'forbidden', message } },
+        status,
+      )
+    }
+    const { sessionId } = ownership
 
-  publishSessionEvent(
-    sessionId,
-    'interrupt',
-    { action: 'interrupt' },
-    'outbound',
-  )
-  updateSessionStatus(sessionId, 'idle')
-  return c.json({ status: 'ok' }, 200)
-})
+    publishSessionEvent(
+      sessionId,
+      'interrupt',
+      { action: 'interrupt' },
+      'outbound',
+    )
+    updateSessionStatus(sessionId, 'idle')
+    return c.json({ status: 'ok' }, 200)
+  },
+)
 
 export default app

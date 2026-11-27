@@ -13,14 +13,28 @@ export const STDOUT_GUARD_MARKER = '[stdout-guard]'
  *
  * `process.stdout.write` is a single process-wide fd; wrapping it per-host
  * creates a nested wrapper chain that crashes on out-of-order teardown. We
- * instead track active host handles in a process-global map, wrap
- * `process.stdout.write` ONCE on `0 -> 1`, and restore the original write
- * function ONLY on `1 -> 0`.
+ * instead track active hosts via a `WeakMap<object, GuardLeaseEntry>` paired
+ * with a `Set<symbol>` of active lease tokens and a `FinalizationRegistry` so
+ * we NEVER hold a strong root to `SessionHost`, wrap `process.stdout.write`
+ * ONCE on `0 -> 1`, and restore the original write function ONLY on `1 -> 0`.
  */
-const activeGuardHosts = new Map<object, CleanupUnregister | null>()
+type GuardLeaseEntry = {
+  token: symbol
+  unregister: CleanupUnregister | null
+}
+
+const activeGuardHosts = new WeakMap<object, GuardLeaseEntry>()
+const activeGuardTokens = new Set<symbol>()
 let rawOriginalWrite: typeof process.stdout.write | null = null
 let boundOriginalWrite: typeof process.stdout.write | null = null
 let lineBuffer = ''
+
+const hostGuardFinalizer =
+  typeof FinalizationRegistry === 'function'
+    ? new FinalizationRegistry<symbol>(token => {
+        releaseGuardToken(token, false)
+      })
+    : null
 
 function isJsonLine(line: string): boolean {
   // Empty lines are tolerated in NDJSON streams — treat them as valid so a
@@ -36,17 +50,14 @@ function isJsonLine(line: string): boolean {
   }
 }
 
-function uninstallGuardForHost(host: object, flushPartial: boolean): void {
-  if (!activeGuardHosts.has(host)) {
+function releaseGuardToken(token: symbol, flushPartial: boolean): void {
+  if (!activeGuardTokens.delete(token)) {
     return
   }
-  const unregister = activeGuardHosts.get(host) ?? null
-  activeGuardHosts.delete(host)
-  unregister?.()
 
   // Keep the single process-global wrapper alive while any other host still
   // requires stream-json stdout protection.
-  if (activeGuardHosts.size > 0) {
+  if (activeGuardTokens.size > 0) {
     return
   }
 
@@ -66,6 +77,17 @@ function uninstallGuardForHost(host: object, flushPartial: boolean): void {
     rawOriginalWrite = null
   }
   boundOriginalWrite = null
+}
+
+function uninstallGuardForHost(host: object, flushPartial: boolean): void {
+  const entry = activeGuardHosts.get(host)
+  if (!entry) {
+    return
+  }
+  activeGuardHosts.delete(host)
+  hostGuardFinalizer?.unregister(entry.token)
+  entry.unregister?.()
+  releaseGuardToken(entry.token, flushPartial)
 }
 
 /**
@@ -97,7 +119,7 @@ export function installStreamJsonStdoutGuard(): void {
     return
   }
 
-  if (activeGuardHosts.size === 0) {
+  if (activeGuardTokens.size === 0) {
     const savedRaw = process.stdout.write
     const savedBound = savedRaw.bind(
       process.stdout,
@@ -112,7 +134,7 @@ export function installStreamJsonStdoutGuard(): void {
     ): boolean {
       // If an external wrapper captured our guarded function and invokes it
       // after refcount reached 0, forward cleanly without crashing or diverting.
-      if (activeGuardHosts.size === 0) {
+      if (activeGuardTokens.size === 0) {
         if (typeof encodingOrCb === 'function') {
           return savedBound(chunk, encodingOrCb)
         }
@@ -152,12 +174,23 @@ export function installStreamJsonStdoutGuard(): void {
     } as typeof process.stdout.write
   }
 
-  activeGuardHosts.set(host, null)
+  const token = Symbol('stream-json-stdout-guard-host')
+  const entry: GuardLeaseEntry = { token, unregister: null }
+  activeGuardHosts.set(host, entry)
+  activeGuardTokens.add(token)
+  hostGuardFinalizer?.register(host, token, token)
+
+  const hostRef = new WeakRef(host)
   const unregister = registerCleanup(async () => {
-    uninstallGuardForHost(host, true)
+    const liveHost = hostRef.deref()
+    if (liveHost !== undefined) {
+      uninstallGuardForHost(liveHost, true)
+    } else {
+      releaseGuardToken(token, true)
+    }
   })
-  if (activeGuardHosts.has(host)) {
-    activeGuardHosts.set(host, unregister)
+  if (activeGuardHosts.get(host) === entry) {
+    entry.unregister = unregister
   } else {
     unregister()
   }

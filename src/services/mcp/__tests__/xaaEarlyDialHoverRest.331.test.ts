@@ -22,6 +22,7 @@ import {
   type McpHttpServerHandle,
   startMCPServerHttp,
 } from '../../../entrypoints/mcpHttpServer.js'
+import { hoverRestUpdateLeaseTarget } from '../../../utils/storageV5/createHoverRestBackend.js'
 import {
   createHoverRestBackend,
   createMemoryStorageV5Backend,
@@ -583,6 +584,34 @@ describe('2.1.331 claude mcp xaa CLI (chunk #2465)', () => {
         }),
       ),
     ).toThrow(/does not match/)
+    // Item 4 regression: missing, empty, or non-string iss must be rejected
+    expect(() =>
+      saveIdpIdTokenFromJwt(
+        'https://idp.example',
+        makeJwtWithClaims({
+          sub: 'user-no-iss',
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        }),
+      ),
+    ).toThrow(/missing required iss/)
+    expect(() =>
+      saveIdpIdTokenFromJwt(
+        'https://idp.example',
+        makeJwtWithClaims({
+          iss: '   ',
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        }),
+      ),
+    ).toThrow(/missing required iss/)
+    expect(() =>
+      saveIdpIdTokenFromJwt(
+        'https://idp.example',
+        makeJwtWithClaims({
+          iss: 12345,
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        }),
+      ),
+    ).toThrow(/missing required iss/)
 
     // 7. discoverOidc allows loopback http:// token_endpoint when issuer is loopback http://
     const oidcSrv = createHttpServer((req, res) => {
@@ -1481,5 +1510,114 @@ describe('StorageV5 HTTP Hover REST Backend', () => {
     expect(ctKeys).toEqual(['content-type'])
     expect(headers['content-type']).toBe('application/json')
     expect(headers['x-custom-header']).toBe('custom-val')
+  })
+
+  test('Item 7 regression: update() acquires and releases a per-call lease, retries until acquireTimeoutMs, validates negative timeout, and falls back on Unsupported', async () => {
+    const srv = await startMockHoverRestServer('hover-lease-token')
+    const v5 = createHoverRestBackend({
+      baseUrl: srv.baseUrl,
+      authToken: 'hover-lease-token',
+    })
+
+    const key = { namespace: 'state', id: 'leased-counter' }
+
+    // 1. Negative / NaN acquireTimeoutMs fails with InvalidArgument
+    const badTimeout = await v5.update(key, () => ({ write: '1' }), {
+      acquireTimeoutMs: -5,
+    })
+    expect(badTimeout.ok).toBe(false)
+    if (!badTimeout.ok) {
+      expect(badTimeout.error.code).toBe('InvalidArgument')
+    }
+
+    // 2. Normal update succeeds, acquires lease with unique holder, and releases it in finally
+    const first = await v5.update(key, () => ({ write: 'v1' }), {
+      acquireTimeoutMs: 200,
+    })
+    expect(first.ok).toBe(true)
+
+    // Lease was released, so another holder can acquire immediately
+    const externalLease = await v5.acquireLease(
+      hoverRestUpdateLeaseTarget(key),
+      5_000,
+      {
+        holder: 'contending-worker',
+      },
+    )
+    expect(externalLease.ok).toBe(true)
+    if (!externalLease.ok) throw new Error('expected external lease')
+
+    // 3. While externalLease is held, update() retries and times out with AlreadyHeld (never overwrites!)
+    const blocked = await v5.update(key, () => ({ write: 'v2-blocked' }), {
+      acquireTimeoutMs: 40,
+    })
+    expect(blocked.ok).toBe(false)
+    if (!blocked.ok) {
+      expect(blocked.error.code).toBe('AlreadyHeld')
+    }
+
+    // Verify stored value was not overwritten
+    const check = await v5.readText([key])
+    expect(check.ok).toBe(true)
+    if (check.ok) {
+      expect(check.value.items[0]?.value).toBe('v1')
+    }
+
+    // Release external lease -> update() now succeeds cleanly
+    await externalLease.value.release()
+    const second = await v5.updateText(
+      key,
+      cur => ({ write: `${cur?.value ?? ''}+v2` }),
+      { acquireTimeoutMs: 200 },
+    )
+    expect(second.ok).toBe(true)
+    const after = await v5.readText([key])
+    expect(after.ok).toBe(true)
+    if (after.ok) {
+      expect(after.value.items[0]?.value).toBe('v1+v2')
+    }
+
+    // 4. Server returning 501 Unsupported on /v5/leases/acquire falls back to optimistic ifMatch CAS
+    const calls: string[] = []
+    const fallbackV5 = createHoverRestBackend({
+      baseUrl: 'http://127.0.0.1:9999',
+      fetchImpl: async url => {
+        const pathname = new URL(String(url)).pathname
+        calls.push(pathname)
+        if (pathname === '/v5/leases/acquire') {
+          return new Response(
+            JSON.stringify({ error: { code: 'Unsupported' } }),
+            { status: 501 },
+          )
+        }
+        if (pathname === '/v5/keys/read') {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  found: true,
+                  value: 'old',
+                  encoding: 'utf8',
+                  version: 'ver-1',
+                },
+              ],
+            }),
+            { status: 200 },
+          )
+        }
+        return new Response(JSON.stringify({ version: 'ver-2' }), {
+          status: 200,
+        })
+      },
+    })
+    const fbRes = await fallbackV5.update(key, () => ({ write: 'new' }), {
+      acquireTimeoutMs: 50,
+    })
+    expect(fbRes.ok).toBe(true)
+    expect(calls).toEqual([
+      '/v5/leases/acquire',
+      '/v5/keys/read',
+      '/v5/keys/write',
+    ])
   })
 })
