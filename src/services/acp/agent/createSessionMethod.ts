@@ -36,12 +36,11 @@ import { createAcpCanUseTool } from '../permissions.js'
 import { computeSessionFingerprint } from '../utils.js'
 import { getMainLoopModel } from '../../../utils/model/model.js'
 import { getModelOptions } from '../../../utils/model/modelOptions.js'
+import { acquireSharedBackendMode } from '../../../utils/sessionContextAls.js'
 import { createSessionHost } from '../../../utils/sessionHost.js'
 import {
   createRootSession,
-  isSharedBackend,
   runWithSession,
-  setSharedBackendMode,
   type Session,
 } from '../../../utils/sessionRoot.js'
 import { getSettings_DEPRECATED } from '../../../utils/settings/settings.js'
@@ -70,29 +69,26 @@ function readSettingsPermissionMode(
 const inFlightCreateSessionCount = new WeakMap<AcpAgent, number>()
 const acpSessionEnvRollback = new WeakMap<AcpSession, () => void>()
 const activeSoleSessionRollback = new WeakMap<AcpAgent, () => void>()
-const multiSessionAcpAgents = new Set<AcpAgent>()
-let acpEnabledSharedBackend = false
+const acpAgentSharedBackendLeases = new Map<AcpAgent, () => void>()
 
 /**
  * Synchronize process-wide `isSharedBackend()` (`o7()`) with concurrent
- * multi-session ACP activity: enters shared-backend mode as soon as an
- * `AcpAgent` serves 2+ concurrent sessions (active or in-flight) and restores
- * single-tenant mode once all ACP agents drop back to <= 1 session.
+ * multi-session ACP activity using ref-counted leases: acquires a lease for an
+ * `AcpAgent` as soon as it serves 2+ concurrent sessions (active or in-flight)
+ * and releases only that agent's lease once it drops back to <= 1 session.
  */
 export function syncAcpSharedBackendMode(agent: AcpAgent): void {
   const totalSessions =
     agent.sessions.size + (inFlightCreateSessionCount.get(agent) ?? 0)
   if (totalSessions >= 2) {
-    multiSessionAcpAgents.add(agent)
-    if (!isSharedBackend()) {
-      setSharedBackendMode(true)
-      acpEnabledSharedBackend = true
+    if (!acpAgentSharedBackendLeases.has(agent)) {
+      acpAgentSharedBackendLeases.set(agent, acquireSharedBackendMode())
     }
   } else {
-    multiSessionAcpAgents.delete(agent)
-    if (multiSessionAcpAgents.size === 0 && acpEnabledSharedBackend) {
-      acpEnabledSharedBackend = false
-      setSharedBackendMode(false)
+    const release = acpAgentSharedBackendLeases.get(agent)
+    if (release !== undefined) {
+      acpAgentSharedBackendLeases.delete(agent)
+      release()
     }
   }
 }

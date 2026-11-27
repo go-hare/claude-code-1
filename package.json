@@ -32,6 +32,29 @@
   "bin": {
     "claude": "bin/claude.exe"
   },
+  "exports": {
+    ".": {
+      "types": "./src/entrypoints/sdk/index.ts",
+      "bun": "./src/entrypoints/sdk/index.ts",
+      "default": "./src/entrypoints/sdk/index.ts"
+    },
+    "./sdk": {
+      "types": "./src/entrypoints/sdk/index.ts",
+      "bun": "./src/entrypoints/sdk/index.ts",
+      "default": "./src/entrypoints/sdk/index.ts"
+    },
+    "./sdk/embedded": {
+      "types": "./src/entrypoints/sdk/embeddedHost.ts",
+      "bun": "./src/entrypoints/sdk/embeddedHost.ts",
+      "default": "./src/entrypoints/sdk/embeddedHost.ts"
+    },
+    "./sdk/types": {
+      "types": "./src/entrypoints/sdk/coreTypes.ts",
+      "bun": "./src/entrypoints/sdk/coreTypes.ts",
+      "default": "./src/entrypoints/sdk/coreTypes.ts"
+    },
+    "./package.json": "./package.json"
+  },
   "workspaces": [
     "packages/*",
     "packages/@ant/*",

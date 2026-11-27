@@ -1,12 +1,18 @@
 /**
  * Official 2.1.331 `claude gateway --config <path>` CLI subcommand handler.
  *
- * Validates the gateway YAML config path and surfaces actionable diagnostics
- * matching official `startGatewayOrExit` (`chunk-95k6wzg5.js`).
+ * Validates and parses the gateway YAML/JSON config, starts the cross-process
+ * HTTP auth & OTLP telemetry proxy server (`startGatewayServer`), and installs
+ * graceful `SIGINT`/`SIGTERM` draining.
  */
 import type { Command as CommanderCommand } from '@commander-js/extra-typings'
 import { readFile, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import {
+  type GatewayServerHandle,
+  parseGatewayConfig,
+  startGatewayServer,
+} from './gatewayServer.js'
 
 export type GatewayConfigValidationResult =
   | { ok: true; resolvedPath: string; content: string }
@@ -44,16 +50,13 @@ export async function validateGatewayConfigPath(
   }
 }
 
-export async function startGatewayOrExit(configPath: string): Promise<never> {
-  if (typeof Bun === 'undefined') {
-    process.stderr.write(
-      'claude gateway: claude gateway requires the native binary. Install via https://claude.ai/install.sh instead of npm.\n',
-    )
-    // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(1)
-    return undefined as never
-  }
-
+export async function startGatewayOrExit(
+  configPath: string,
+  opts?: {
+    signal?: AbortSignal
+    onListening?: (handle: GatewayServerHandle) => void
+  },
+): Promise<GatewayServerHandle> {
   const validated = await validateGatewayConfigPath(configPath)
   if (!validated.ok) {
     process.stderr.write(`claude gateway: ${validated.error}\n`)
@@ -62,12 +65,60 @@ export async function startGatewayOrExit(configPath: string): Promise<never> {
     return undefined as never
   }
 
-  process.stderr.write(
-    `claude gateway: enterprise auth/telemetry gateway server runtime is not bundled in this build (config loaded from ${validated.resolvedPath}).\n`,
+  let config: ReturnType<typeof parseGatewayConfig>
+  try {
+    config = parseGatewayConfig(validated.content)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    process.stderr.write(
+      `claude gateway: invalid config in ${validated.resolvedPath}: ${message}\n`,
+    )
+    // eslint-disable-next-line custom-rules/no-process-exit
+    process.exit(1)
+    return undefined as never
+  }
+
+  let handle: GatewayServerHandle
+  try {
+    handle = await startGatewayServer(config)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    process.stderr.write(`claude gateway: failed to start server: ${message}\n`)
+    // eslint-disable-next-line custom-rules/no-process-exit
+    process.exit(1)
+    return undefined as never
+  }
+
+  process.stdout.write(
+    `claude gateway: listening on ${handle.url} (config: ${validated.resolvedPath})\n`,
   )
-  // eslint-disable-next-line custom-rules/no-process-exit
-  process.exit(1)
-  return undefined as never
+  opts?.onListening?.(handle)
+
+  await new Promise<void>(resolveDrain => {
+    let draining = false
+    const drain = (): void => {
+      if (draining) return
+      draining = true
+      process.off('SIGINT', drain)
+      process.off('SIGTERM', drain)
+      opts?.signal?.removeEventListener('abort', drain)
+      void handle.close().finally(() => {
+        resolveDrain()
+      })
+    }
+
+    process.on('SIGINT', drain)
+    process.on('SIGTERM', drain)
+    if (opts?.signal) {
+      if (opts.signal.aborted) {
+        drain()
+      } else {
+        opts.signal.addEventListener('abort', drain, { once: true })
+      }
+    }
+  })
+
+  return handle
 }
 
 export function registerGatewayCommand(

@@ -11,6 +11,7 @@ import {
 } from 'path'
 import stripAnsi from 'strip-ansi'
 import { stat as statPath } from 'node:fs/promises'
+import { isToolServerDaemonMode } from '../services/mcp/sessionTunnel.js'
 import { getAgentContext, isDelegatedObservation } from './agentContext.js'
 import { incrementPluginUsage } from './plugins/pluginUsagePending.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
@@ -2970,6 +2971,16 @@ function getHooksConfig(
   const policyMatchers =
     getSettingsForSource('policySettings')?.hooks?.[hookEvent] ?? []
   const registeredHooks = getRegisteredHooks()?.[hookEvent]
+  // Official 2.1.331 chunks #764 & #775: suppress settings/plugin hooks under
+  // `claude mcp serve --transport http`.
+  if (isToolServerDaemonMode()) {
+    logForDebugging(
+      `Skipping settings/plugin hooks for ${hookEvent}: claude mcp serve --transport http never runs them (intended)`,
+    )
+    return registeredHooks
+      ? registeredHooks.filter(matcher => !('pluginRoot' in matcher))
+      : []
+  }
   if (tiers?.managedHooksOnly) {
     if (disableAllIncludingManaged) {
       return []
@@ -3103,6 +3114,10 @@ export function hasHookForEvent(
   appState: AppState | undefined,
   sessionId: string,
 ): boolean {
+  if (isToolServerDaemonMode()) {
+    const reg = getRegisteredHooks()?.[hookEvent]
+    return Boolean(reg?.some(matcher => !('pluginRoot' in matcher)))
+  }
   const snap = getHooksConfigFromSnapshot()?.[hookEvent]
   if (snap && snap.length > 0) return true
   const reg = getRegisteredHooks()?.[hookEvent]

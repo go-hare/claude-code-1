@@ -10,6 +10,7 @@
  * `root.host`; this is not a Map-by-sessionId stand-in.
  */
 
+import { registerDisklessProvider } from './disklessGuards.js'
 import { HostSlot, RootSessionSlot } from './hostSlot.js'
 import {
   AccountCreditLatches,
@@ -30,6 +31,12 @@ export type LaunchForkReplayConfig = {
   agent?: string
   agents?: string
   systemPromptSnapshot?: boolean
+}
+
+/** Official 2.1.331 `toolsMachine` metadata on `LaunchOptions`. */
+export type ToolsMachineInfo = {
+  directory?: { path?: string }
+  [key: string]: unknown
 }
 
 /**
@@ -75,6 +82,11 @@ export class LaunchOptions {
   #warmSpareClaimed = false
   /** densable `Ie.diskless` — default false; no local diskless-true host. */
   #diskless = false
+  /** Official 2.1.331 CCS / multi-tenant launch options (#51 / #1517). */
+  #desktopAppHostsTenant = false
+  #toolsMayBeOnHost = false
+  #toolsConfirmedOnHost = false
+  #toolsMachine: ToolsMachineInfo | undefined = undefined
 
   isInteractive(): boolean {
     return this.#e
@@ -283,6 +295,30 @@ export class LaunchOptions {
   replaceDiskless(e: boolean): void {
     this.#diskless = e
   }
+  desktopAppHostsTenant(): boolean {
+    return this.#desktopAppHostsTenant
+  }
+  replaceDesktopAppHostsTenant(e: boolean): void {
+    this.#desktopAppHostsTenant = e
+  }
+  toolsMayBeOnHost(): boolean {
+    return this.#toolsMayBeOnHost
+  }
+  replaceToolsMayBeOnHost(e: boolean): void {
+    this.#toolsMayBeOnHost = e
+  }
+  toolsConfirmedOnHost(): boolean {
+    return this.#toolsConfirmedOnHost
+  }
+  replaceToolsConfirmedOnHost(e: boolean): void {
+    this.#toolsConfirmedOnHost = e
+  }
+  toolsMachine(): ToolsMachineInfo | undefined {
+    return this.#toolsMachine
+  }
+  replaceToolsMachine(e: ToolsMachineInfo | undefined): void {
+    this.#toolsMachine = e
+  }
   reset(): void {
     this.#e = false
     this.#t = null
@@ -318,6 +354,10 @@ export class LaunchOptions {
     this.#spareParkedAtMs = undefined
     this.#warmSpareClaimed = false
     this.#diskless = false
+    this.#desktopAppHostsTenant = false
+    this.#toolsMayBeOnHost = false
+    this.#toolsConfirmedOnHost = false
+    this.#toolsMachine = undefined
   }
 }
 
@@ -350,6 +390,8 @@ export class SettingsSource {
   #i = false
   #a = defaultAllowedSettingSources()
   #s = false
+  /** Official 2.1.331 `#u` — host policy verdict latched by `replaceParentManagedSettings`. */
+  #hostPolicyVerdict = false
 
   flagSettingsPath(): string | undefined {
     return this.#e
@@ -378,8 +420,20 @@ export class SettingsSource {
   parentManagedSettings(): Record<string, unknown> | null {
     return this.#r
   }
-  replaceParentManagedSettings(e: Record<string, unknown> | null): void {
+  replaceParentManagedSettings(
+    e: Record<string, unknown> | null,
+    _meta: unknown = null,
+    hostPolicyVerdict = false,
+  ): void {
+    void _meta
     this.#r = e
+    this.#hostPolicyVerdict = hostPolicyVerdict
+  }
+  hostPolicyVerdict(): boolean {
+    return this.#hostPolicyVerdict
+  }
+  replaceHostPolicyVerdict(e: boolean): void {
+    this.#hostPolicyVerdict = e
   }
   parentManagedSettingsInvalid(): boolean {
     return this.#i
@@ -408,6 +462,7 @@ export class SettingsSource {
     this.#i = false
     this.#a = defaultAllowedSettingSources()
     this.#s = false
+    this.#hostPolicyVerdict = false
   }
 }
 
@@ -728,7 +783,11 @@ export function createSessionHost(opts?: { clock?: HostClock }): SessionHost {
   })
 }
 
-import { getBootstrapSessionHost } from './sessionRoot.js'
+import {
+  getBootstrapSession,
+  getBootstrapSessionHost,
+  ofDefaultHost,
+} from './sessionRoot.js'
 
 export {
   EngineStore,
@@ -787,6 +846,236 @@ export function wasWarmSpareClaimed(): boolean {
 export function isDisklessLaunch(): boolean {
   return bootstrapHost().launchOptions.diskless()
 }
+
+export function setDisklessLaunch(v: boolean): void {
+  bootstrapHost().launchOptions.replaceDiskless(v)
+}
+
+const defaultHostAccessor = {
+  of(host: SessionHost): SessionHost {
+    return host
+  },
+}
+
+/**
+ * Resolves the process-root/default `SessionHost` (ignoring ALS tenant overrides).
+ */
+export function getDefaultSessionHost(): SessionHost {
+  return ofDefaultHost(defaultHostAccessor)
+}
+
+/**
+ * Official 2.1.331 #1: `isCcsTenant()` — true when the active host is a diskless CCS tenant.
+ */
+export function isCcsTenant(): boolean {
+  return bootstrapHost().launchOptions.diskless()
+}
+
+/**
+ * Official 2.1.331 #2: `isDisklessProcess()` — checks the root/default process host,
+ * NOT the active ALS tenant override.
+ */
+export function isDisklessProcess(): boolean {
+  return getDefaultSessionHost().launchOptions.diskless()
+}
+
+/** Official 2.1.331 #3: `desktopAppHostsTenant` on LaunchOptions. */
+export function getDesktopAppHostsTenant(): boolean {
+  return bootstrapHost().launchOptions.desktopAppHostsTenant()
+}
+
+export function setDesktopAppHostsTenant(v: boolean): void {
+  bootstrapHost().launchOptions.replaceDesktopAppHostsTenant(v)
+}
+
+/** Official 2.1.331 #4: `toolsMayBeOnHost` / `toolsConfirmedOnHost` / `toolsMachine` on LaunchOptions. */
+export function getToolsMayBeOnHost(): boolean {
+  return bootstrapHost().launchOptions.toolsMayBeOnHost()
+}
+
+export function setToolsMayBeOnHost(v: boolean): void {
+  bootstrapHost().launchOptions.replaceToolsMayBeOnHost(v)
+}
+
+export function getToolsConfirmedOnHost(): boolean {
+  return bootstrapHost().launchOptions.toolsConfirmedOnHost()
+}
+
+export function setToolsConfirmedOnHost(v: boolean): void {
+  bootstrapHost().launchOptions.replaceToolsConfirmedOnHost(v)
+}
+
+export function getToolsMachine(): ToolsMachineInfo | undefined {
+  return bootstrapHost().launchOptions.toolsMachine()
+}
+
+export function setToolsMachine(v: ToolsMachineInfo | undefined): void {
+  bootstrapHost().launchOptions.replaceToolsMachine(v)
+}
+
+/** Official 2.1.331 #5: per-host tenant MCP clients accessor fallback. */
+const tenantMcpClientsAccessorByHost = new HostSlot<{
+  accessor: (() => unknown) | undefined
+}>(() => ({ accessor: undefined }))
+
+export function setTenantMcpClientsAccessor(
+  fn: (() => unknown) | undefined,
+): void {
+  tenantMcpClientsAccessorByHost.of(bootstrapHost()).accessor = fn
+}
+
+export function getMcpClientsFromAccessorOrTenant(): unknown {
+  const fromSession =
+    getBootstrapSession().mcpSessionWiring.clientsFromAccessor()
+  if (fromSession !== undefined) {
+    return fromSession
+  }
+  return tenantMcpClientsAccessorByHost.peek(bootstrapHost())?.accessor?.()
+}
+
+/** Official 2.1.331 #6: `hostPolicyVerdict` on SettingsSource. */
+export function getHostPolicyVerdict(): boolean {
+  return bootstrapHost().settingsSource.hostPolicyVerdict()
+}
+
+export function setHostPolicyVerdict(v: boolean): void {
+  bootstrapHost().settingsSource.replaceHostPolicyVerdict(v)
+}
+
+/** Official 2.1.331 #7: `hostOtelState` per-host override / telemetryHandles.hostOtel(). */
+const hostOtelStateOverrideByHost = new HostSlot<{
+  hasOverride: boolean
+  value: unknown
+}>(() => ({ hasOverride: false, value: undefined }))
+
+export function getHostOtelState(): unknown {
+  const host = bootstrapHost()
+  const slot = hostOtelStateOverrideByHost.peek(host)
+  if (slot?.hasOverride) {
+    return slot.value
+  }
+  return host.telemetryHandles.hostOtel()
+}
+
+export function setHostOtelState(state: unknown): void {
+  const slot = hostOtelStateOverrideByHost.of(bootstrapHost())
+  slot.hasOverride = true
+  slot.value = state
+}
+
+/** Official 2.1.331 #8: `sdkDialogCapabilitySource` & `declareSdkDialogKinds`. */
+export function declareSdkDialogKinds(
+  kinds: string[] | undefined,
+  source?: string,
+): void {
+  getBootstrapSession().surfaceCapabilities.declareDialogKinds(kinds, source)
+}
+
+export function getSdkDialogCapabilitySource(): string {
+  const sc = getBootstrapSession().surfaceCapabilities
+  if (sc.sdkSupportedDialogKinds() === undefined) {
+    return 'none'
+  }
+  return sc.sdkSupportedDialogKindsSource() ?? 'none'
+}
+
+/** Official 2.1.331 #9: `sdkPerTaskStopAffordance` on SurfaceCapabilities. */
+export function getSdkPerTaskStopAffordance(): boolean {
+  return Boolean(
+    getBootstrapSession().surfaceCapabilities.sdkPerTaskStopAffordance(),
+  )
+}
+
+export function setSdkPerTaskStopAffordance(v: boolean): void {
+  getBootstrapSession().surfaceCapabilities.declarePerTaskStopAffordance(v)
+}
+
+/** Official 2.1.331 #10: `hostRendersChromeSetupOffer` per-host capability. */
+const hostRendersChromeSetupOfferByHost = new HostSlot<{ value: boolean }>(
+  () => ({ value: false }),
+)
+
+export function getHostRendersChromeSetupOffer(): boolean {
+  return hostRendersChromeSetupOfferByHost.peek(bootstrapHost())?.value ?? false
+}
+
+export function setHostRendersChromeSetupOffer(v: boolean): void {
+  hostRendersChromeSetupOfferByHost.of(bootstrapHost()).value = v
+}
+
+/** Official 2.1.331 #11: `sdkHostLeftCallUnanswered` per-root-session flag. */
+const sdkHostLeftCallUnansweredBySession = new RootSessionSlot<{
+  value: boolean
+}>(() => ({ value: false }))
+
+export function hasSdkHostLeftCallUnanswered(): boolean {
+  return (
+    sdkHostLeftCallUnansweredBySession.peek(getBootstrapSession())?.value ??
+    false
+  )
+}
+
+export function markSdkHostLeftCallUnanswered(v = true): void {
+  sdkHostLeftCallUnansweredBySession.of(getBootstrapSession()).value = v
+}
+
+/** Official 2.1.331 #12: `gatewayHostHeldStrict` per-host Set (trailing `.` stripped). */
+const gatewayHostHeldStrictByHost = new HostSlot<Set<string>>(() => new Set())
+
+function normalizeGatewayHostName(host: string): string {
+  return host.trim().toLowerCase().replace(/\.+$/, '')
+}
+
+export function isGatewayHostHeldStrict(host: string): boolean {
+  const set = gatewayHostHeldStrictByHost.peek(bootstrapHost())
+  if (!set) return false
+  return set.has(normalizeGatewayHostName(host))
+}
+
+export function holdGatewayHostStrict(host: string): void {
+  const normalized = normalizeGatewayHostName(host)
+  if (!normalized) return
+  gatewayHostHeldStrictByHost.of(bootstrapHost()).add(normalized)
+}
+
+export function releaseGatewayHost(host: string): void {
+  const set = gatewayHostHeldStrictByHost.peek(bootstrapHost())
+  if (!set) return
+  set.delete(normalizeGatewayHostName(host))
+}
+
+/** Official 2.1.331 #13: `gatewayRequiredByHostPolicy` per-host reader callback. */
+const gatewayRequiredByHostPolicyByHost = new HostSlot<{
+  reader: ((host: string) => boolean) | undefined
+}>(() => ({ reader: undefined }))
+
+export function setGatewayRequiredByHostPolicyReader(
+  reader: ((host: string) => boolean) | undefined,
+): void {
+  gatewayRequiredByHostPolicyByHost.of(bootstrapHost()).reader = reader
+}
+
+export function isGatewayRequiredByHostPolicy(host: string): boolean {
+  const reader = gatewayRequiredByHostPolicyByHost.peek(bootstrapHost())?.reader
+  return reader ? Boolean(reader(host)) : false
+}
+
+/** Official 2.1.331 #14: derive whether a print session is single-shot. */
+export function deriveSingleShotPrintSession({
+  hasStreamingInput,
+  sdkUrl,
+}: {
+  hasStreamingInput?: boolean
+  sdkUrl?: string | null
+}): boolean {
+  return !hasStreamingInput && !sdkUrl
+}
+
+/** Official 2.1.331 #15: wire diskless provider at module init. */
+registerDisklessProvider({
+  isDiskless: isDisklessLaunch,
+  isDisklessProcess,
+})
 
 /**
  * Official `Kr().teleportedSessionIds` @181213749 — host-keyed `HostSlot<Set<string>>`

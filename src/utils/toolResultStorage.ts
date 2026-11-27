@@ -26,6 +26,7 @@ import { sanitizeToolNameForAnalytics } from '../services/analytics/metadata.js'
 import type { Message } from '../types/message.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
+import { isDisklessActive, logDisklessWriteSkipped } from './disklessGuards.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getErrnoCode, toError } from './errors.js'
 import { formatFileSize } from './format.js'
@@ -253,6 +254,10 @@ export function getToolResultPath(id: string, isJson: boolean): string {
  * Ensure the session-specific tool results directory exists
  */
 export async function ensureToolResultsDir(): Promise<void> {
+  if (isDisklessActive()) {
+    logForDebugging('tool-results folder not made: diskless session')
+    return
+  }
   try {
     const dir = getToolResultsDir()
     if (isEphemeralToolResultsMode()) {
@@ -277,6 +282,13 @@ export async function persistToolResult(
   content: NonNullable<ToolResultBlockParam['content']>,
   toolUseId: string,
 ): Promise<PersistedToolResult | PersistToolResultError> {
+  if (isDisklessActive()) {
+    logForDebugging('tool-results folder not made: diskless session')
+    logDisklessWriteSkipped('toolResultStorage', 'tool-results')
+    return {
+      error: 'Tool results are not persisted to disk in a diskless session',
+    }
+  }
   const isJson = Array.isArray(content)
 
   // Check for non-text content - we can only persist text blocks

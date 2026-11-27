@@ -42,6 +42,7 @@ import type { AnyObject, Tool, ToolPermissionContext } from '../../Tool.js'
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { GLOB_TOOL_NAME } from '@claude-code/builtin-tools/tools/GlobTool/prompt.js'
 import { getCwd } from '../cwd.js'
+import { assertTempDirAllowedInDiskless } from '../disklessGuards.js'
 import { getBootstrapSessionHost, HostSlot } from '../sessionHost.js'
 import {
   getActiveAnthropicProfileName,
@@ -1073,9 +1074,9 @@ function createHostMemoized<Args extends unknown[], Result, Key = Args[0]>(
 // Memoized per-host: called per-tool from permission checks (yoloClassifier, sandbox-adapter)
 // and per-turn from BashTool prompt. Inputs (CLAUDE_CODE_TMPDIR env + platform) are
 // fixed at startup, and the realpath of the system tmp dir does not change mid-session.
-export const getClaudeTempDir = createHostMemoized<[], string, undefined>(
+const getClaudeTempDirMemoized = createHostMemoized<[], string, undefined>(
   () => getFilesystemHostState().claudeTempDirCache,
-  function getClaudeTempDir(): string {
+  function getClaudeTempDirImpl(): string {
     // tmpdir() honors $TMPDIR so non-/tmp environments (Termux/Android, containers)
     // work out of the box; CLAUDE_CODE_TMPDIR still wins if explicitly set.
     const baseTmpDir = process.env.CLAUDE_CODE_TMPDIR || tmpdir()
@@ -1093,6 +1094,21 @@ export const getClaudeTempDir = createHostMemoized<[], string, undefined>(
     return join(resolvedBaseTmpDir, getClaudeTempDirName()) + sep
   },
 )
+
+export const getClaudeTempDir: typeof getClaudeTempDirMemoized =
+  Object.defineProperty(
+    function getClaudeTempDir(): string {
+      assertTempDirAllowedInDiskless()
+      return getClaudeTempDirMemoized()
+    },
+    'cache',
+    {
+      enumerable: true,
+      get(): Map<undefined, string> {
+        return getClaudeTempDirMemoized.cache
+      },
+    },
+  ) as typeof getClaudeTempDirMemoized
 
 /**
  * Root for bundled-skill file extraction (see bundledSkills.ts).

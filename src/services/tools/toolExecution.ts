@@ -1,4 +1,8 @@
 import { feature } from 'bun:bundle'
+import {
+  carrySubagentFrameResult,
+  withSubagentFrameResult,
+} from '../mcp/editResultMeta.js'
 import { validateBrowserToolInput } from '../../utils/claudeInChrome/chromeCallPermission.js'
 import { remapPostToolOutput } from './postToolOutput.js'
 import {
@@ -6095,10 +6099,36 @@ async function checkPermissionsAndCallTool(
             tool.maxResultSizeChars,
           )
         : await processToolResultBlock(tool, toolUseResult, toolUseID)
-      const toolResultBlock = appendCoerceResultNoteToToolResultBlock(
+      const baseToolResultBlock = appendCoerceResultNoteToToolResultBlock(
         rawToolResultBlock,
         coerceMeta?.resultNote,
       )
+
+      // Official 2.1.331 chunk #775 (`mle`/`yxe`/`YQt`): honor `subagentFrameResultHolds?.()`
+      // freshness predicate and carry `SUBAGENT_FRAME_RESULT_SYMBOL` onto the result block
+      // and message metadata.
+      let resolvedSubagentFrameResult = result.subagentFrameResult
+      if (
+        resolvedSubagentFrameResult !== undefined &&
+        result.subagentFrameResultHolds !== undefined
+      ) {
+        try {
+          const holds = await result.subagentFrameResultHolds()
+          if (!holds) {
+            resolvedSubagentFrameResult = undefined
+          }
+        } catch (err) {
+          logError(err)
+          resolvedSubagentFrameResult = undefined
+        }
+      }
+      const toolResultBlock: ToolResultBlockParam =
+        resolvedSubagentFrameResult !== undefined
+          ? {
+              ...baseToolResultBlock,
+              ...withSubagentFrameResult(resolvedSubagentFrameResult),
+            }
+          : baseToolResultBlock
 
       // Build content blocks - tool result first, then optional feedback
       const contentBlocks: ContentBlockParam[] = [toolResultBlock]
@@ -6155,6 +6185,9 @@ async function checkPermissionsAndCallTool(
         toolEndsTurn: endsTurn,
         sourceToolAssistantUUID: assistantMessage.uuid,
       })
+      if (resolvedSubagentFrameResult !== undefined) {
+        Object.assign(resultMessage, carrySubagentFrameResult(toolResultBlock))
+      }
       if (innerDenialHeldPersonsWords) {
         resultMessage.holdsPersonsWords = true
       }

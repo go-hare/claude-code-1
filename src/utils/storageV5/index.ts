@@ -14,6 +14,7 @@ import {
   logEvent,
 } from '../../services/analytics/index.js'
 import { getGlobalClaudeFile, seedGlobalClaudeFile } from '../env.js'
+import { registerPinnedStorageV5Reader } from '../disklessGuards.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
 import { logForDebugging } from '../debug.js'
 import { logError } from '../log.js'
@@ -41,6 +42,11 @@ export {
   type StorageV5Result,
   type StorageV5ScopeKind,
 } from './createLocalFsBackend.js'
+export {
+  createMemoryStorageV5Backend,
+  type CreateMemoryStorageV5BackendOptions,
+  type MemoryStorageV5,
+} from './createMemoryBackend.js'
 export {
   isHoverRestOn,
   resetHoverRestPinForTests,
@@ -91,12 +97,45 @@ export function recordHoverRestDecision(value: unknown): HoverRestPinResult {
   return result
 }
 
+const externalStorageV5FactoryHostSlot = new HostSlot<{
+  hasOverride: boolean
+  factory: (() => StorageV5 | undefined) | undefined
+}>(() => ({
+  hasOverride: false,
+  factory: undefined,
+}))
+
 /**
- * densable qb / tryCreateV5Backend. Official body is empty after Po().
+ * Register a pluggable external `StorageV5` factory on the active `SessionHost`
+ * (used by `tryCreateV5Backend()` when hover-rest is enabled, with fallback to
+ * the default host's factory). Pass `undefined` to clear the host override.
+ */
+export function registerExternalStorageV5Factory(
+  factory: (() => StorageV5 | undefined) | undefined,
+): void {
+  const slot = externalStorageV5FactoryHostSlot.of(getBootstrapSessionHost())
+  slot.hasOverride = true
+  slot.factory = factory
+}
+
+function getEffectiveExternalStorageV5Factory():
+  | (() => StorageV5 | undefined)
+  | undefined {
+  const own = externalStorageV5FactoryHostSlot.peek(getBootstrapSessionHost())
+  if (own?.hasOverride) {
+    return own.factory
+  }
+  return ofDefaultHost(externalStorageV5FactoryHostSlot).factory
+}
+
+/**
+ * densable qb / tryCreateV5Backend. Uses registered external factory if present;
+ * otherwise returns undefined after `isHoverRestOn()` check.
  */
 export function tryCreateV5Backend(): StorageV5 | undefined {
   if (!isHoverRestOn()) return
-  return
+  const factory = getEffectiveExternalStorageV5Factory()
+  return factory ? factory() : undefined
 }
 
 export type TryCreateLocalV5BackendOptions = {
@@ -224,6 +263,21 @@ export function pinStorageV5(
   return result
 }
 
+/**
+ * Directly attach a host-provided `StorageV5` backend (e.g., `createMemoryStorageV5Backend()`
+ * or a remote REST/DB adapter) to the active `SessionHost` without mutating
+ * `CLAUDE_CODE_HOVER_REST`.
+ */
+export function pinInjectedStorageV5(
+  backend: StorageV5 | undefined,
+): StorageV5 | undefined {
+  const state = getPinnedStorageV5State()
+  state.hasOverride = true
+  state.lastPinned = backend
+  registerPluginUsageStorageV5(backend)
+  return backend
+}
+
 export function getPinnedStorageV5(): StorageV5 | undefined {
   const own = pinnedStorageV5HostSlot.peek(getBootstrapSessionHost())
   if (own?.hasOverride) {
@@ -232,10 +286,18 @@ export function getPinnedStorageV5(): StorageV5 | undefined {
   return ofDefaultHost(pinnedStorageV5HostSlot).lastPinned
 }
 
+registerPinnedStorageV5Reader(getPinnedStorageV5)
+
 export function resetPinnedStorageV5ForTests(): void {
-  const slot = pinnedStorageV5HostSlot.peek(getBootstrapSessionHost())
+  const host = getBootstrapSessionHost()
+  const slot = pinnedStorageV5HostSlot.peek(host)
   if (slot) {
     slot.hasOverride = false
     slot.lastPinned = undefined
+  }
+  const factorySlot = externalStorageV5FactoryHostSlot.peek(host)
+  if (factorySlot) {
+    factorySlot.hasOverride = false
+    factorySlot.factory = undefined
   }
 }

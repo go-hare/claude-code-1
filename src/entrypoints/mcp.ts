@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Server } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import {
@@ -5,6 +6,10 @@ import {
   getActiveAgentsFromList,
   getAgentDefinitionsWithOverrides,
 } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+import {
+  attachSubagentFrameResultMeta,
+  isEditResultMetaRequested,
+} from 'src/services/mcp/editResultMeta.js'
 import { listToolsResult } from 'src/services/mcp/listToolsResult.js'
 import type { CallToolResult } from 'src/services/mcp/types.js'
 import { disableForkSubagent } from 'src/utils/sessionBackgroundGates.js'
@@ -15,6 +20,8 @@ import type { Command } from '../commands.js'
 import {
   findToolByName,
   getEmptyToolPermissionContext,
+  type Tool,
+  type ToolResult,
   type Tools,
   type ToolUseContext,
 } from '../Tool.js'
@@ -59,6 +66,8 @@ type McpToolOutputSchema = {
   [key: string]: unknown
 }
 
+export type McpServeResultFormat = 'raw' | 'rendered'
+
 const MCP_COMMANDS: Command[] = [review]
 
 /**
@@ -84,30 +93,128 @@ export function mcpServeToolStorage(storageV5: unknown): {
 export function formatMcpServeToolResult(
   finalResult: string | { data: unknown },
 ): CallToolResult {
-  const resultText =
-    typeof finalResult === 'string'
-      ? finalResult
-      : jsonStringify(
-          typeof finalResult.data === 'object' &&
-            finalResult.data !== null &&
-            'backgroundTaskId' in finalResult.data &&
-            typeof finalResult.data.backgroundTaskId === 'string'
-            ? {
-                ...finalResult.data,
-                backgroundOutputPath: getTaskOutputPath(
-                  finalResult.data.backgroundTaskId,
-                ),
-              }
-            : finalResult.data,
-        )
+  if (typeof finalResult === 'string') {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: finalResult,
+        },
+      ],
+    }
+  }
+
+  let payload: unknown = finalResult.data
+  if (
+    typeof finalResult.data === 'object' &&
+    finalResult.data !== null &&
+    'backgroundTaskId' in finalResult.data &&
+    typeof finalResult.data.backgroundTaskId === 'string'
+  ) {
+    try {
+      payload = {
+        ...finalResult.data,
+        backgroundOutputPath: getTaskOutputPath(
+          finalResult.data.backgroundTaskId,
+        ),
+      }
+    } catch {
+      payload = finalResult.data
+    }
+  }
+
   return {
     content: [
       {
         type: 'text' as const,
-        text: resultText,
+        text: jsonStringify(payload),
       },
     ],
   }
+}
+
+type McpCallToolContentItem = CallToolResult['content'][number]
+
+/**
+ * Official 2.1.331 `--result-format rendered`: convert a tool's
+ * `mapToolResultToToolResultBlockParam(data, toolUseId)` output to MCP
+ * `CallToolResult['content']` (supporting text and base64 image blocks),
+ * falling back to `formatMcpServeToolResult` when no renderer is present.
+ */
+export function formatMcpServeRenderedToolResult(
+  tool: Pick<Tool, 'mapToolResultToToolResultBlockParam'>,
+  finalResult: string | ToolResult<unknown>,
+  toolUseId: string,
+): CallToolResult {
+  if (
+    typeof finalResult === 'string' ||
+    typeof tool.mapToolResultToToolResultBlockParam !== 'function'
+  ) {
+    return formatMcpServeToolResult(finalResult)
+  }
+
+  const mapped = tool.mapToolResultToToolResultBlockParam(
+    finalResult.data,
+    toolUseId,
+  )
+  const content: McpCallToolContentItem[] = []
+
+  if (typeof mapped.content === 'string') {
+    content.push({ type: 'text', text: mapped.content })
+  } else if (Array.isArray(mapped.content)) {
+    for (const block of mapped.content) {
+      if (block.type === 'text') {
+        content.push({ type: 'text', text: block.text })
+      } else if (block.type === 'image' && block.source.type === 'base64') {
+        content.push({
+          type: 'image',
+          data: block.source.data,
+          mimeType: block.source.media_type,
+        })
+      } else {
+        content.push({ type: 'text', text: jsonStringify(block) })
+      }
+    }
+  }
+
+  if (content.length === 0) {
+    content.push({ type: 'text', text: '' })
+  }
+
+  return {
+    content,
+    ...(mapped.is_error === true ? { isError: true } : {}),
+  }
+}
+
+async function finalizeMcpCallToolResult(
+  tool: Tool,
+  finalResult: string | ToolResult<unknown>,
+  resultFormat: McpServeResultFormat,
+  toolUseId: string,
+  requestMeta: unknown,
+): Promise<CallToolResult> {
+  const baseResult =
+    resultFormat === 'rendered'
+      ? formatMcpServeRenderedToolResult(tool, finalResult, toolUseId)
+      : formatMcpServeToolResult(finalResult)
+
+  if (
+    typeof finalResult === 'string' ||
+    !isEditResultMetaRequested(tool.name, requestMeta)
+  ) {
+    return baseResult
+  }
+
+  const editResultPayload = finalResult.subagentFrameResult ?? finalResult.data
+  if (editResultPayload === undefined) {
+    return baseResult
+  }
+
+  return await attachSubagentFrameResultMeta(baseResult, {
+    subagentFrameResult: editResultPayload,
+    subagentFrameResultHolds: finalResult.subagentFrameResultHolds,
+  })
 }
 
 /**
@@ -218,20 +325,131 @@ export type CreateMCPServerOptions = {
   progressHeartbeatIntervalMs?: number
   getToolsOverride?: () => Tools
   loadAgentDefinitions?: (cwd: string) => Promise<AgentDefinitionsResult>
+  resultFormat?: McpServeResultFormat
 }
 
-export function createMCPServer(
-  cwd: string,
-  debug: boolean,
-  verbose: boolean,
-  // densable Ee `s`. mcp serve passes the literal "raw".
-  storageV5: unknown,
-  options?: CreateMCPServerOptions,
-): {
-  server: Server
-  ready: Promise<void>
+export type JsonRpcRequest = {
+  jsonrpc: '2.0'
+  id?: string | number | null
+  method: string
+  params?: Record<string, unknown>
+}
+
+export type JsonRpcResponse = {
+  jsonrpc: '2.0'
+  id: string | number | null
+  result?: unknown
+  error?: {
+    code: number
+    message: string
+    data?: unknown
+  }
+}
+
+export type CreateMcpServeDispatcherOptions = {
+  cwd: string
+  debug?: boolean
+  verbose?: boolean
+  storageV5?: unknown
+  resultFormat?: McpServeResultFormat
+  progressHeartbeatIntervalMs?: number
+  getToolsOverride?: () => Tools
+  loadAgentDefinitions?: (cwd: string) => Promise<AgentDefinitionsResult>
+}
+
+export type McpServeToolDispatcher = {
+  readonly ready: Promise<void>
+  readonly resultFormat: McpServeResultFormat
+  readonly resolveServedTools: () => Tools
+  readonly abortController: AbortController
+  listTools: () => Promise<ReturnType<typeof listToolsResult>>
+  callTool: (
+    params: {
+      name?: string
+      arguments?: Record<string, unknown>
+      _meta?: Record<string, unknown>
+    },
+    options?: {
+      signal?: AbortSignal
+      sendNotification?: (
+        notification: McpProgressNotification,
+      ) => Promise<void>
+    },
+  ) => Promise<CallToolResult>
+  checkPermissions: (params: {
+    name?: string
+    arguments?: Record<string, unknown>
+    toolUseId?: string
+  }) => Promise<Record<string, unknown>>
+  handleJsonRpc: (
+    request: JsonRpcRequest,
+    options?: {
+      signal?: AbortSignal
+      sendNotification?: (
+        notification: McpProgressNotification,
+      ) => Promise<void>
+    },
+  ) => Promise<JsonRpcResponse | null>
   dispose: () => void
-} {
+}
+
+const MAX_TOOL_USE_ID_LENGTH = 256
+
+class JsonRpcInvalidParamsError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'JsonRpcInvalidParamsError'
+  }
+}
+
+function extractProgressToken(meta: unknown): string | number | undefined {
+  if (typeof meta !== 'object' || meta === null || !('progressToken' in meta)) {
+    return undefined
+  }
+  const token = (meta as { progressToken?: unknown }).progressToken
+  return typeof token === 'string' || typeof token === 'number'
+    ? token
+    : undefined
+}
+
+function extractToolUseId(meta: unknown): string | undefined {
+  if (
+    typeof meta !== 'object' ||
+    meta === null ||
+    !('claudecode/toolUseId' in meta)
+  ) {
+    return undefined
+  }
+  const raw = (meta as { 'claudecode/toolUseId'?: unknown })[
+    'claudecode/toolUseId'
+  ]
+  if (
+    typeof raw === 'string' &&
+    raw.trim().length > 0 &&
+    raw.length <= MAX_TOOL_USE_ID_LENGTH
+  ) {
+    return raw
+  }
+  return undefined
+}
+
+/**
+ * Reusable MCP tool dispatcher shared by `claude mcp serve` (stdio),
+ * `claude mcp serve --transport http`, and `--session-tunnel` (`answerInProcess`).
+ * Handles `initialize`, `ping`, `tools/list`, `tools/call` (with `raw` or
+ * `rendered` result format + `claudecode/editResult` `_meta`), and
+ * `claudecode/checkPermissions` for cross-process `remoteCheck`.
+ */
+export function createMcpServeDispatcher(
+  opts: CreateMcpServeDispatcherOptions,
+): McpServeToolDispatcher {
+  const {
+    cwd,
+    debug = false,
+    verbose = false,
+    storageV5 = 'raw',
+    resultFormat = 'raw',
+  } = opts
   const persist = mcpServeToolStorage(storageV5)
   // Use size-limited LRU cache for readFileState to prevent unbounded memory growth
   // 100 files and 25MB limit should be sufficient for MCP server operations
@@ -253,7 +471,7 @@ export function createMCPServer(
     allAgents: [],
   }
   const loadAgentsFn =
-    options?.loadAgentDefinitions ?? getAgentDefinitionsWithOverrides
+    opts.loadAgentDefinitions ?? getAgentDefinitionsWithOverrides
   const agentDefinitionsReady = loadAgentsFn(cwd)
     .then(loaded => {
       const trustedAll = loaded.allAgents.filter(agent => {
@@ -273,6 +491,428 @@ export function createMCPServer(
       logError(err)
     })
 
+  const serverAbortController = createAbortController()
+  const resolveServedTools = (): Tools =>
+    opts.getToolsOverride
+      ? opts.getToolsOverride()
+      : getTools(getEmptyToolPermissionContext())
+
+  const buildToolUseContext = (
+    tools: Tools,
+    abortController: AbortController,
+    extra?: { toolUseId?: string; forRemoteExecution?: boolean },
+  ): ToolUseContext => ({
+    abortController,
+    options: {
+      commands: MCP_COMMANDS,
+      tools,
+      mainLoopModel: getMainLoopModel(),
+      // densable Vm: MCP tools/call host thinkingConfig {type:"disabled",mechanical:!0}
+      thinkingConfig: { type: 'disabled', mechanical: true },
+      mcpClients: [],
+      mcpResources: {},
+      isNonInteractiveSession: true,
+      debug,
+      verbose,
+      agentDefinitions,
+    },
+    getAppState: () => getDefaultAppState(),
+    setAppState: () => {},
+    // densable y8r no-ops for MCP-exported tool path (no session UI)
+    setToolPermissionContext: () => {},
+    setSessionToolPermissionContext: () => {},
+    messages: [],
+    readFileState: readFileStateCache,
+    toolState,
+    setInProgressToolUseIDs: () => {},
+    setResponseLength: () => {},
+    updateFileHistoryState: () => {},
+    storageV5: persist.storageV5,
+    credentials: persist.credentials,
+    ...(extra?.toolUseId !== undefined ? { toolUseId: extra.toolUseId } : {}),
+    ...(extra?.forRemoteExecution !== undefined
+      ? { forRemoteExecution: extra.forRemoteExecution }
+      : {}),
+  })
+
+  const listTools: McpServeToolDispatcher['listTools'] = async () => {
+    await agentDefinitionsReady
+    // TODO: Also re-expose any MCP tools
+    const toolPermissionContext = getEmptyToolPermissionContext()
+    const tools = resolveServedTools()
+    const listed = await Promise.all(
+      tools.map(async tool => {
+        let outputSchema: McpToolOutputSchema | undefined
+        if (tool.outputSchema) {
+          const convertedSchema = zodToJsonSchema(tool.outputSchema)
+          // MCP SDK requires outputSchema to have type: "object" at root level
+          // Skip schemas with anyOf/oneOf at root (from z.union, z.discriminatedUnion, etc.)
+          // See: https://github.com/anthropics/claude-code/issues/8014
+          if (
+            typeof convertedSchema === 'object' &&
+            convertedSchema !== null &&
+            'type' in convertedSchema &&
+            convertedSchema.type === 'object'
+          ) {
+            outputSchema = convertedSchema as McpToolOutputSchema
+          }
+        }
+        const inputSchema = zodToJsonSchema(
+          tool.inputSchema,
+        ) as McpToolInputSchema
+        // densable/v2 wire: root must be object (zodToJsonSchema may widen)
+        inputSchema.type = 'object'
+        return {
+          name: tool.name,
+          description: await tool.prompt({
+            getToolPermissionContext: async () => toolPermissionContext,
+            tools,
+            agents: agentDefinitions.activeAgents,
+          }),
+          inputSchema,
+          ...(outputSchema ? { outputSchema } : {}),
+        }
+      }),
+    )
+    // Nested property schemas stay structural; boundary via listToolsResult.
+    return listToolsResult(listed)
+  }
+
+  const callTool: McpServeToolDispatcher['callTool'] = async (
+    params,
+    callOpts,
+  ): Promise<CallToolResult> => {
+    await agentDefinitionsReady
+    const name = params.name ?? ''
+    const args = params.arguments
+    const tools = resolveServedTools()
+    const tool = findToolByName(tools, name)
+    if (!tool) {
+      throw new JsonRpcInvalidParamsError(`Tool ${name} not found`)
+    }
+
+    const progressToken = extractProgressToken(params._meta)
+    const { abortController, detach } = createLinkedMcpCallAbortController(
+      serverAbortController,
+      callOpts?.signal,
+    )
+    const toolUseId = extractToolUseId(params._meta) ?? randomUUID()
+    const toolUseContext = buildToolUseContext(tools, abortController, {
+      toolUseId,
+    })
+
+    let heartbeat: McpProgressHeartbeat | undefined
+    // densable main loop (toolExecution): coerceInput → safeParse → validateInput → call.
+    // Same path for MCP-exported built-ins — no invent gateway, no args as never.
+    try {
+      if (!tool.isEnabled()) {
+        throw new Error(`Tool ${name} is not enabled`)
+      }
+      let parseTarget: unknown = args ?? {}
+      if (tool.coerceInput) {
+        const coerced = tool.coerceInput(parseTarget)
+        if (coerced !== null) {
+          parseTarget = coerced.input
+        }
+      }
+      const parsedInput = tool.inputSchema.safeParse(parseTarget)
+      if (!parsedInput.success) {
+        throw new Error(
+          `Tool ${name} input is invalid: ${formatZodValidationError(name, parsedInput.error)}`,
+        )
+      }
+      const validationResult = await tool.validateInput?.(
+        parsedInput.data,
+        toolUseContext,
+      )
+      if (validationResult && !validationResult.result) {
+        throw new Error(
+          `Tool ${name} input is invalid: ${'message' in validationResult ? validationResult.message : String(validationResult)}`,
+        )
+      }
+
+      if (callOpts?.sendNotification) {
+        heartbeat = startMcpProgressHeartbeat(
+          progressToken,
+          callOpts.sendNotification,
+          opts.progressHeartbeatIntervalMs ??
+            MCP_PROGRESS_HEARTBEAT_INTERVAL_MS,
+        )
+      }
+
+      const finalResult = await tool.call(
+        parsedInput.data,
+        toolUseContext,
+        hasPermissionsToUseTool,
+        createAssistantMessage({
+          content: [],
+        }),
+      )
+
+      return await finalizeMcpCallToolResult(
+        tool,
+        finalResult,
+        resultFormat,
+        toolUseId,
+        params._meta,
+      )
+    } catch (error) {
+      logError(error)
+
+      const parts =
+        error instanceof Error ? getErrorParts(error) : [String(error)]
+      const errorText = parts.filter(Boolean).join('\n').trim() || 'Error'
+
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: errorText,
+          },
+        ],
+      }
+    } finally {
+      heartbeat?.stop()
+      detach()
+    }
+  }
+
+  const checkPermissions: McpServeToolDispatcher['checkPermissions'] =
+    async params => {
+      await agentDefinitionsReady
+      const name = params.name ?? ''
+      const tools = resolveServedTools()
+      const tool = findToolByName(tools, name)
+      if (!tool) {
+        throw new JsonRpcInvalidParamsError(`Tool ${name} not found`)
+      }
+      const toolUseId = params.toolUseId ?? randomUUID()
+      const childAbort = createChildAbortController(serverAbortController)
+      const toolUseContext = buildToolUseContext(tools, childAbort, {
+        toolUseId,
+        forRemoteExecution: true,
+      })
+
+      if (!tool.isEnabled()) {
+        return {
+          behavior: 'deny',
+          message: `Tool ${name} is not enabled`,
+        }
+      }
+
+      let parseTarget: unknown = params.arguments ?? {}
+      if (tool.coerceInput) {
+        const coerced = tool.coerceInput(parseTarget)
+        if (coerced !== null) {
+          parseTarget = coerced.input
+        }
+      }
+      const parsedInput = tool.inputSchema.safeParse(parseTarget)
+      if (!parsedInput.success) {
+        return {
+          behavior: 'deny',
+          message: `Tool ${name} input is invalid: ${formatZodValidationError(name, parsedInput.error)}`,
+        }
+      }
+
+      const decision = await hasPermissionsToUseTool(
+        tool,
+        parsedInput.data,
+        toolUseContext,
+        createAssistantMessage({ content: [] }),
+        toolUseId,
+      )
+      return decision as unknown as Record<string, unknown>
+    }
+
+  const handleJsonRpc: McpServeToolDispatcher['handleJsonRpc'] = async (
+    request,
+    callOpts,
+  ) => {
+    const isNotification =
+      request.id === undefined ||
+      request.method === 'notifications/initialized' ||
+      request.method.startsWith('notifications/')
+    const id = request.id ?? null
+
+    if (isNotification && request.id === undefined) {
+      return null
+    }
+
+    try {
+      switch (request.method) {
+        case 'initialize': {
+          const protocolVersion =
+            typeof request.params?.protocolVersion === 'string'
+              ? request.params.protocolVersion
+              : '2025-03-26'
+          return {
+            jsonrpc: '2.0',
+            id,
+            result: {
+              protocolVersion,
+              capabilities: {
+                tools: {
+                  listChanged: true,
+                },
+              },
+              serverInfo: {
+                name: 'claude/tengu',
+                version: getMcpServeVersion(),
+              },
+            },
+          }
+        }
+        case 'notifications/initialized':
+          return null
+        case 'ping':
+          return {
+            jsonrpc: '2.0',
+            id,
+            result: {},
+          }
+        case 'tools/list': {
+          const result = await listTools()
+          return {
+            jsonrpc: '2.0',
+            id,
+            result,
+          }
+        }
+        case 'tools/call': {
+          if (
+            request.params !== undefined &&
+            (typeof request.params !== 'object' ||
+              request.params === null ||
+              Array.isArray(request.params))
+          ) {
+            throw new JsonRpcInvalidParamsError('Invalid params for tools/call')
+          }
+          const params = request.params ?? {}
+          const result = await callTool(
+            {
+              name: typeof params.name === 'string' ? params.name : undefined,
+              arguments:
+                typeof params.arguments === 'object' &&
+                params.arguments !== null &&
+                !Array.isArray(params.arguments)
+                  ? (params.arguments as Record<string, unknown>)
+                  : undefined,
+              _meta:
+                typeof params._meta === 'object' &&
+                params._meta !== null &&
+                !Array.isArray(params._meta)
+                  ? (params._meta as Record<string, unknown>)
+                  : undefined,
+            },
+            callOpts,
+          )
+          return {
+            jsonrpc: '2.0',
+            id,
+            result,
+          }
+        }
+        case 'claudecode/checkPermissions': {
+          if (
+            request.params !== undefined &&
+            (typeof request.params !== 'object' ||
+              request.params === null ||
+              Array.isArray(request.params))
+          ) {
+            throw new JsonRpcInvalidParamsError(
+              'Invalid params for claudecode/checkPermissions',
+            )
+          }
+          const params = request.params ?? {}
+          const result = await checkPermissions({
+            name: typeof params.name === 'string' ? params.name : undefined,
+            arguments:
+              typeof params.arguments === 'object' &&
+              params.arguments !== null &&
+              !Array.isArray(params.arguments)
+                ? (params.arguments as Record<string, unknown>)
+                : undefined,
+            toolUseId:
+              typeof params.toolUseId === 'string'
+                ? params.toolUseId
+                : undefined,
+          })
+          return {
+            jsonrpc: '2.0',
+            id,
+            result,
+          }
+        }
+        default:
+          return {
+            jsonrpc: '2.0',
+            id,
+            error: {
+              code: -32601,
+              message: `Method not found: ${request.method}`,
+            },
+          }
+      }
+    } catch (error) {
+      const isInvalidParams =
+        error instanceof JsonRpcInvalidParamsError ||
+        (error instanceof Error && error.name === 'ZodError')
+      return {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: isInvalidParams ? -32602 : -32603,
+          message: errorMessage(error),
+        },
+      }
+    }
+  }
+
+  let disposed = false
+  const dispose = (): void => {
+    if (disposed) return
+    disposed = true
+    serverAbortController.abort(createAbortErrorReason('shutdown'))
+  }
+
+  return {
+    ready: agentDefinitionsReady,
+    resultFormat,
+    resolveServedTools,
+    abortController: serverAbortController,
+    listTools,
+    callTool,
+    checkPermissions,
+    handleJsonRpc,
+    dispose,
+  }
+}
+
+export function createMCPServer(
+  cwd: string,
+  debug: boolean,
+  verbose: boolean,
+  // densable Ee `s`. mcp serve passes the literal "raw".
+  storageV5: unknown,
+  options?: CreateMCPServerOptions,
+): {
+  server: Server
+  ready: Promise<void>
+  dispose: () => void
+} {
+  const dispatcher = createMcpServeDispatcher({
+    cwd,
+    debug,
+    verbose,
+    storageV5,
+    resultFormat: options?.resultFormat ?? 'raw',
+    progressHeartbeatIntervalMs: options?.progressHeartbeatIntervalMs,
+    getToolsOverride: options?.getToolsOverride,
+    loadAgentDefinitions: options?.loadAgentDefinitions,
+  })
+
   // Official 2.1.328 (`chunk@344402012.js`): declare tools.listChanged: true
   const server = new Server(
     {
@@ -287,12 +927,6 @@ export function createMCPServer(
       },
     },
   )
-
-  const serverAbortController = createAbortController()
-  const resolveServedTools = (): Tools =>
-    options?.getToolsOverride
-      ? options.getToolsOverride()
-      : getTools(getEmptyToolPermissionContext())
 
   // Official 2.1.328 (`Y`/`Ue`/`Fe`/`E6i` @chunk@344402012.js): track listed
   // tool names and emit `notifications/tools/list_changed` when settings or
@@ -313,7 +947,8 @@ export function createMCPServer(
       }
       return
     }
-    const nextToolNames = resolveServedTools()
+    const nextToolNames = dispatcher
+      .resolveServedTools()
       .map(t => t.name)
       .join('\n')
     if (!forceOnInitialized && nextToolNames === lastListedToolNames) {
@@ -364,7 +999,7 @@ export function createMCPServer(
     isClosed = true
     unsubscribeSettings()
     unsubscribeRemotePolicy()
-    serverAbortController.abort(createAbortErrorReason('shutdown'))
+    dispatcher.dispose()
   }
 
   server.oninitialized = () => {
@@ -375,72 +1010,25 @@ export function createMCPServer(
   }
 
   // densable: setRequestHandler("tools/list", ...)
-  // Cast return: nested JSON Schema property types widen vs v2 literal unions.
   server.setRequestHandler('tools/list', async () => {
-    await agentDefinitionsReady
-    // TODO: Also re-expose any MCP tools
-    const toolPermissionContext = getEmptyToolPermissionContext()
-    const tools = resolveServedTools()
-    const listed = await Promise.all(
-      tools.map(async tool => {
-        let outputSchema: McpToolOutputSchema | undefined
-        if (tool.outputSchema) {
-          const convertedSchema = zodToJsonSchema(tool.outputSchema)
-          // MCP SDK requires outputSchema to have type: "object" at root level
-          // Skip schemas with anyOf/oneOf at root (from z.union, z.discriminatedUnion, etc.)
-          // See: https://github.com/anthropics/claude-code/issues/8014
-          if (
-            typeof convertedSchema === 'object' &&
-            convertedSchema !== null &&
-            'type' in convertedSchema &&
-            convertedSchema.type === 'object'
-          ) {
-            outputSchema = convertedSchema as McpToolOutputSchema
-          }
-        }
-        const inputSchema = zodToJsonSchema(
-          tool.inputSchema,
-        ) as McpToolInputSchema
-        // densable/v2 wire: root must be object (zodToJsonSchema may widen)
-        inputSchema.type = 'object'
-        return {
-          name: tool.name,
-          description: await tool.prompt({
-            getToolPermissionContext: async () => toolPermissionContext,
-            tools,
-            agents: agentDefinitions.activeAgents,
-          }),
-          inputSchema,
-          ...(outputSchema ? { outputSchema } : {}),
-        }
-      }),
-    )
-    lastListedToolNames = listed.map(item => item.name).join('\n')
-    // Nested property schemas stay structural; boundary via listToolsResult.
-    return listToolsResult(listed)
+    const result = await dispatcher.listTools()
+    lastListedToolNames = result.tools.map(item => item.name).join('\n')
+    return result
   })
 
   // densable: setRequestHandler("tools/call", ...)
   server.setRequestHandler(
     'tools/call',
     async (request, ctx): Promise<CallToolResult> => {
-      await agentDefinitionsReady
       const params = (
         request as {
           params?: {
             name?: string
             arguments?: Record<string, unknown>
-            _meta?: { progressToken?: string | number }
+            _meta?: Record<string, unknown>
           }
         }
       ).params
-      const name = params?.name ?? ''
-      const args = params?.arguments
-      const tools = resolveServedTools()
-      const tool = findToolByName(tools, name)
-      if (!tool) {
-        throw new Error(`Tool ${name} not found`)
-      }
 
       // Extract incoming cancellation signal and progress notification channel
       // from MCP SDK v2 ServerContext (`ctx.mcpReq`) with legacy `extra` fallback.
@@ -448,7 +1036,7 @@ export function createMCPServer(
         | {
             mcpReq?: {
               signal?: AbortSignal
-              _meta?: { progressToken?: string | number }
+              _meta?: Record<string, unknown>
               notify?: (notification: McpProgressNotification) => Promise<void>
             }
             signal?: AbortSignal
@@ -458,121 +1046,31 @@ export function createMCPServer(
           }
         | undefined
       const requestSignal = extraLike?.mcpReq?.signal ?? extraLike?.signal
-      const progressToken =
-        extraLike?.mcpReq?._meta?.progressToken ?? params?._meta?.progressToken
       const sendNotification =
         extraLike?.mcpReq?.notify ?? extraLike?.sendNotification
+      const mergedMeta: Record<string, unknown> | undefined =
+        extraLike?.mcpReq?._meta || params?._meta
+          ? {
+              ...params?._meta,
+              ...extraLike?.mcpReq?._meta,
+            }
+          : undefined
 
-      const { abortController, detach } = createLinkedMcpCallAbortController(
-        serverAbortController,
-        requestSignal,
-      )
-
-      // Assume MCP servers do not read messages separately from the tool
-      // call arguments.
-      const toolUseContext: ToolUseContext = {
-        abortController,
-        options: {
-          commands: MCP_COMMANDS,
-          tools,
-          mainLoopModel: getMainLoopModel(),
-          // densable Vm: MCP tools/call host thinkingConfig {type:"disabled",mechanical:!0}
-          thinkingConfig: { type: 'disabled', mechanical: true },
-          mcpClients: [],
-          mcpResources: {},
-          isNonInteractiveSession: true,
-          debug,
-          verbose,
-          agentDefinitions,
+      return await dispatcher.callTool(
+        {
+          name: params?.name,
+          arguments: params?.arguments,
+          _meta: mergedMeta,
         },
-        getAppState: () => getDefaultAppState(),
-        setAppState: () => {},
-        // densable y8r no-ops for MCP-exported tool path (no session UI)
-        setToolPermissionContext: () => {},
-        setSessionToolPermissionContext: () => {},
-        messages: [],
-        readFileState: readFileStateCache,
-        toolState,
-        setInProgressToolUseIDs: () => {},
-        setResponseLength: () => {},
-        updateFileHistoryState: () => {},
-        storageV5: persist.storageV5,
-        credentials: persist.credentials,
-      }
-
-      let heartbeat: McpProgressHeartbeat | undefined
-      // densable main loop (toolExecution): coerceInput → safeParse → validateInput → call.
-      // Same path for MCP-exported built-ins — no invent gateway, no args as never.
-      try {
-        if (!tool.isEnabled()) {
-          throw new Error(`Tool ${name} is not enabled`)
-        }
-        let parseTarget: unknown = args ?? {}
-        if (tool.coerceInput) {
-          const coerced = tool.coerceInput(parseTarget)
-          if (coerced !== null) {
-            parseTarget = coerced.input
-          }
-        }
-        const parsedInput = tool.inputSchema.safeParse(parseTarget)
-        if (!parsedInput.success) {
-          throw new Error(
-            `Tool ${name} input is invalid: ${formatZodValidationError(name, parsedInput.error)}`,
-          )
-        }
-        const validationResult = await tool.validateInput?.(
-          parsedInput.data,
-          toolUseContext,
-        )
-        if (validationResult && !validationResult.result) {
-          throw new Error(
-            `Tool ${name} input is invalid: ${'message' in validationResult ? validationResult.message : String(validationResult)}`,
-          )
-        }
-
-        if (sendNotification) {
-          heartbeat = startMcpProgressHeartbeat(
-            progressToken,
-            sendNotification,
-            options?.progressHeartbeatIntervalMs ??
-              MCP_PROGRESS_HEARTBEAT_INTERVAL_MS,
-          )
-        }
-
-        const finalResult = await tool.call(
-          parsedInput.data,
-          toolUseContext,
-          hasPermissionsToUseTool,
-          createAssistantMessage({
-            content: [],
-          }),
-        )
-
-        return formatMcpServeToolResult(finalResult)
-      } catch (error) {
-        logError(error)
-
-        const parts =
-          error instanceof Error ? getErrorParts(error) : [String(error)]
-        const errorText = parts.filter(Boolean).join('\n').trim() || 'Error'
-
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: errorText,
-            },
-          ],
-        }
-      } finally {
-        heartbeat?.stop()
-        detach()
-      }
+        {
+          signal: requestSignal,
+          sendNotification,
+        },
+      )
     },
   )
 
-  return { server, ready: agentDefinitionsReady, dispose }
+  return { server, ready: dispatcher.ready, dispose }
 }
 
 export async function startMCPServer(
@@ -581,8 +1079,9 @@ export async function startMCPServer(
   verbose: boolean,
   // densable Ee `s`. mcp serve passes the literal "raw".
   storageV5: unknown,
+  options?: CreateMCPServerOptions,
 ): Promise<void> {
-  const { server } = createMCPServer(cwd, debug, verbose, storageV5)
+  const { server } = createMCPServer(cwd, debug, verbose, storageV5, options)
   const transport = new StdioServerTransport()
   await server.connect(transport)
 }

@@ -2025,9 +2025,13 @@ export function getParentManagedSettings(): Record<string, unknown> | null {
  */
 export function setParentManagedSettings(
   settings: Record<string, unknown> | null,
+  meta: unknown = null,
+  hostPolicyVerdict = false,
 ): void {
   getBootstrapSessionHost().settingsSource.replaceParentManagedSettings(
     settings,
+    meta,
+    hostPolicyVerdict,
   )
   resetSettingsCache()
 }
@@ -3494,3 +3498,41 @@ export function setFlagMcpConfigFilePaths(paths: readonly string[]): void {
   flagMcpConfigFilePathsByHost.of(getBootstrapSessionHost()).paths =
     Object.freeze([...paths])
 }
+
+// Official 2.1.331 CCS / Multi-Tenant Host Hooks (#51 / #1517)
+export {
+  declareSdkDialogKinds,
+  deriveSingleShotPrintSession,
+  getDefaultSessionHost,
+  getDesktopAppHostsTenant,
+  getHostOtelState,
+  getHostPolicyVerdict,
+  getHostRendersChromeSetupOffer,
+  getMcpClientsFromAccessorOrTenant,
+  getSdkDialogCapabilitySource,
+  getSdkPerTaskStopAffordance,
+  getToolsConfirmedOnHost,
+  getToolsMachine,
+  getToolsMayBeOnHost,
+  hasSdkHostLeftCallUnanswered,
+  holdGatewayHostStrict,
+  isCcsTenant,
+  isDisklessLaunch,
+  isDisklessProcess,
+  isGatewayHostHeldStrict,
+  isGatewayRequiredByHostPolicy,
+  markSdkHostLeftCallUnanswered,
+  releaseGatewayHost,
+  setDesktopAppHostsTenant,
+  setDisklessLaunch,
+  setGatewayRequiredByHostPolicyReader,
+  setHostOtelState,
+  setHostPolicyVerdict,
+  setHostRendersChromeSetupOffer,
+  setSdkPerTaskStopAffordance,
+  setTenantMcpClientsAccessor,
+  setToolsConfirmedOnHost,
+  setToolsMachine,
+  setToolsMayBeOnHost,
+  type ToolsMachineInfo,
+} from 'src/utils/sessionHost.js'

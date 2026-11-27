@@ -25,6 +25,57 @@ import {
 import type { ToolStateSlots } from 'src/utils/toolState.js'
 import { checkGate_CACHED_OR_BLOCKING } from 'src/services/analytics/growthbook.js'
 import { isSharedBackend } from 'src/utils/sessionHost.js'
+import {
+  buildTurnHandoffCapability,
+  evaluateTurnHandoffAdmission,
+  getTurnHandoffManager,
+  isSafeRelativePath,
+  resetTurnHandoffManager,
+  safeRelativePathSchema,
+  shouldAdvertiseTurnHandoffRelayMarker,
+  TURN_HANDOFF_DEFAULT_TOOLS,
+  TURN_HANDOFF_MAX_ITEMS,
+  TURN_HANDOFF_MAX_PAYLOAD_BYTES,
+  TURN_HANDOFF_VERSION,
+  type TurnHandoffAdmission,
+  type TurnHandoffAdmissionInput,
+  type TurnHandoffAdvertisedCapability,
+  type TurnHandoffCarriedWrite,
+  type TurnHandoffControlRequest,
+  type TurnHandoffControlResponse,
+  type TurnHandoffHomeFile,
+  type TurnHandoffHydrateResult,
+  TurnHandoffManager,
+  type TurnHandoffSnapshot,
+  TurnHandoffSnapshotSchema,
+  type TurnHandoffStagedFile,
+} from './turnHandoffStateMachine.js'
+
+export {
+  buildTurnHandoffCapability,
+  evaluateTurnHandoffAdmission,
+  getTurnHandoffManager,
+  isSafeRelativePath,
+  resetTurnHandoffManager,
+  safeRelativePathSchema,
+  shouldAdvertiseTurnHandoffRelayMarker,
+  TURN_HANDOFF_DEFAULT_TOOLS,
+  TURN_HANDOFF_MAX_ITEMS,
+  TURN_HANDOFF_MAX_PAYLOAD_BYTES,
+  TURN_HANDOFF_VERSION,
+  TurnHandoffManager,
+  TurnHandoffSnapshotSchema,
+  type TurnHandoffAdmission,
+  type TurnHandoffAdmissionInput,
+  type TurnHandoffAdvertisedCapability,
+  type TurnHandoffCarriedWrite,
+  type TurnHandoffControlRequest,
+  type TurnHandoffControlResponse,
+  type TurnHandoffHomeFile,
+  type TurnHandoffHydrateResult,
+  type TurnHandoffSnapshot,
+  type TurnHandoffStagedFile,
+}
 
 export const NOT_AVAILABLE_ON_CONNECTION = (subtype: string): string =>
   `${subtype} is not available on this connection`
@@ -3131,6 +3182,53 @@ export function dispatchPrintControlExtra(
       })
     if (!admission.admitted) {
       deps.sendError(`${TURN_HANDOFF_DISABLED_PREFIX}${admission.reason}`)
+      return true
+    }
+    if (
+      (request.payload !== undefined || request.action === 'export') &&
+      request.messages === undefined
+    ) {
+      const result = getTurnHandoffManager().handleControlRequest({
+        subtype: 'turn_handoff',
+        request_id:
+          typeof request.request_id === 'string'
+            ? request.request_id
+            : undefined,
+        action:
+          request.action === 'export' || request.action === 'hydrate'
+            ? request.action
+            : undefined,
+        session_id:
+          typeof request.session_id === 'string'
+            ? request.session_id
+            : undefined,
+        shared_message_id:
+          typeof request.shared_message_id === 'string'
+            ? request.shared_message_id
+            : undefined,
+        rewind_request_id:
+          typeof request.rewind_request_id === 'string'
+            ? request.rewind_request_id
+            : undefined,
+        payload: request.payload,
+      })
+      if (!result.ok) {
+        deps.sendError(result.error)
+      } else if (result.action === 'hydrate') {
+        deps.sendSuccess({
+          status: 'hydrated',
+          applied_epoch: result.appliedEpoch,
+          staged_count: result.stagedCount,
+          carried_write_count: result.carriedWriteCount,
+          home_file_count: result.homeFileCount,
+          dropped_messages: result.droppedMessages,
+        })
+      } else {
+        deps.sendSuccess({
+          status: 'exported',
+          snapshot: result.snapshot,
+        })
+      }
       return true
     }
     const requestIds = Array.isArray(request.tool_use_ids)

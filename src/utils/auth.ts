@@ -93,6 +93,7 @@ import {
   saveGlobalConfig,
 } from './config.js'
 import { logAntError, logForDebugging } from './debug.js'
+import { isDisklessActive, logDisklessWriteSkipped } from './disklessGuards.js'
 import {
   getClaudeConfigHomeDir,
   isBareMode,
@@ -2287,6 +2288,9 @@ export function clearOAuthTokenCache(): void {
 // then revokes terminal 1 server-side, and terminal 1's memoize never
 // re-reads — infinite /login regress (CC-1096, GH#24317).
 async function invalidateOAuthCacheIfDiskChanged(): Promise<void> {
+  if (isDisklessActive()) {
+    return
+  }
   try {
     const { mtimeMs } = await stat(
       join(getClaudeConfigHomeDir(), '.credentials.json'),
@@ -3136,6 +3140,15 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
   }
 
   if (isOAuthRefreshTokenOnHold(freshTokens.refreshToken)) {
+    return false
+  }
+
+  // Official 2.1.331: skip disk OAuth refresh lock/write in diskless sessions.
+  if (isDisklessActive()) {
+    logForDebugging(
+      'oauth_refresh_diskless: skipping disk OAuth refresh lock/write in diskless session',
+    )
+    logDisklessWriteSkipped('oauth_refresh_diskless', 'oauth-refresh.lock')
     return false
   }
 

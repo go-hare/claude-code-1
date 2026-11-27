@@ -32,6 +32,10 @@ import {
   uniqueLiveRoots,
 } from 'src/utils/isolationWorktreePin.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import {
+  DisklessRefusalError,
+  isDisklessActive,
+} from 'src/utils/disklessGuards.js'
 import { extractTextContent } from 'src/utils/messages.js'
 import { truncateCodeUnitsSafe } from 'src/utils/stringUtils.js'
 import {
@@ -417,6 +421,11 @@ export async function resumeAgentBackground({
   /** Official 2.1.327 (#510): session permission mode used instead of a sibling's mode layer. */
   sessionPermissionMode?: InternalPermissionMode
 }): Promise<ResumeAgentResult> {
+  if (isDisklessActive()) {
+    throw new DisklessRefusalError(
+      'teammate resume refused in a session with no disk',
+    )
+  }
   const startTime = Date.now()
   const appState = toolUseContext.getAppState()
   // In-process teammates get a no-op setAppState; setAppStateForTasks

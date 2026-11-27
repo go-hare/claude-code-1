@@ -768,6 +768,12 @@ export type ToolResult<T> = {
    */
   subagentFrameResult?: unknown
   /**
+   * Official 2.1.331 freshness predicate for `subagentFrameResult`. When
+   * provided and it resolves to `false` (or throws), the frame result is
+   * considered stale and omitted from tool results / MCP `_meta`.
+   */
+  subagentFrameResultHolds?: () => boolean | Promise<boolean>
+  /**
    * Official 2.1.331 structured output payload emitted by SyntheticOutputTool.
    */
   structured_output?: unknown

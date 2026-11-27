@@ -1,6 +1,7 @@
 import { mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { assertTempDirAllowedInDiskless } from './disklessGuards.js'
 import { getErrnoCode } from './errors.js'
 import { getClaudeTempDirName } from './permissions/filesystem.js'
 
@@ -41,6 +42,7 @@ export function ensureClaudeTempDir(
     hasGetuid?: boolean
   } = {},
 ): string {
+  assertTempDirAllowedInDiskless()
   const env = deps.env ?? process.env
   const mkdir = deps.mkdirSyncFn ?? mkdirSync
   const hasGetuid = deps.hasGetuid ?? typeof process.getuid === 'function'

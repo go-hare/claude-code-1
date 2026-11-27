@@ -10,6 +10,10 @@ import type { ToolUseContext } from 'src/Tool.js'
 import { formatAgentId } from 'src/utils/agentId.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import {
+  DisklessRefusalError,
+  isDisklessActive,
+} from 'src/utils/disklessGuards.js'
 import type { EffortValue } from 'src/utils/effort.js'
 import { errorMessage } from 'src/utils/errors.js'
 import { getTeammateExecutor } from 'src/utils/swarm/backends/registry.js'
@@ -339,6 +343,12 @@ async function handleSpawn(
   input: SpawnInput,
   context: ToolUseContext,
 ): Promise<{ data: SpawnOutput }> {
+  if (isDisklessActive()) {
+    throw new DisklessRefusalError(
+      'teammate spawn refused in a session with no disk',
+    )
+  }
+
   if (!input.name || !input.prompt) {
     throw new Error('name and prompt are required for spawn operation')
   }

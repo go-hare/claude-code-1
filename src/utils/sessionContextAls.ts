@@ -245,16 +245,34 @@ export function hasActiveSessionAls(): boolean {
 
 /**
  * Official 2.1.331 `o7()` — true when running in multi-host shared-backend mode
- * (default `false` in plain CLI; toggled to `true` by shared-backend hosts or tests).
+ * (default `false` in plain CLI; enabled via ref-counted leases from hosts/ACP
+ * or toggled explicitly by tests via `setSharedBackendMode`).
  */
-let sharedBackendMode = false
+let sharedBackendLeaseCount = 0
+let explicitSharedBackendOverride: boolean | undefined
 
 export function isSharedBackend(): boolean {
-  return sharedBackendMode
+  return explicitSharedBackendOverride === true || sharedBackendLeaseCount > 0
 }
 
 export function setSharedBackendMode(enabled: boolean): void {
-  sharedBackendMode = Boolean(enabled)
+  explicitSharedBackendOverride = enabled ? true : undefined
+}
+
+/**
+ * Acquire a ref-counted lease enabling shared-backend mode (`isSharedBackend() === true`).
+ * Returns an idempotent release function that decrements only this caller's lease
+ * so concurrent subsystems (e.g., `EmbeddedHost` and multi-session `AcpAgent`)
+ * never clobber one another's shared-backend state.
+ */
+export function acquireSharedBackendMode(): () => void {
+  sharedBackendLeaseCount += 1
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    sharedBackendLeaseCount = Math.max(0, sharedBackendLeaseCount - 1)
+  }
 }
 
 // Automatically wire `registerSessionContextReader` (`Ayd`) on import so

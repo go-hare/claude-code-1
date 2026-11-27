@@ -29,6 +29,7 @@ import {
   substituteArguments,
 } from '../utils/argumentSubstitution.js'
 import { logForDebugging } from '../utils/debug.js'
+import { isDisklessActive } from '../utils/disklessGuards.js'
 import { hashContent } from '../utils/hash.js'
 import {
   awaitPendingSkillDownload,
@@ -766,6 +767,13 @@ async function loadSkillsFromSkillsDir(
   loadedFrom: 'skills' | 'syncedSkills' = 'skills',
   hostCatalogSkills?: ReadonlySet<string>,
 ): Promise<SkillWithPath[]> {
+  if (isDisklessActive()) {
+    logForDebugging(
+      `Not scanning ${basePath}: the session is diskless, so no skills load from it`,
+    )
+    return []
+  }
+
   if (await isConnectorDownloadsPath(basePath)) {
     logForDebugging(
       `[skills] Skipped skills dir in or beneath a connector-downloads folder: ${basePath}`,
@@ -984,6 +992,13 @@ function getCommandName(file: MarkdownFile): string {
 async function loadSkillsFromCommandsDir(
   cwd: string,
 ): Promise<SkillWithPath[]> {
+  if (isDisklessActive()) {
+    logForDebugging(
+      `Not scanning ${cwd}: the session is diskless, so no skills load from it`,
+    )
+    return []
+  }
+
   try {
     const markdownFiles = await loadMarkdownFilesForSubdir('commands', cwd)
     const processedFiles = transformSkillFiles(markdownFiles)

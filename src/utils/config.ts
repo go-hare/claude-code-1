@@ -28,6 +28,11 @@ import {
 } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
+import {
+  getRegisteredPinnedStorageV5,
+  isDisklessActive,
+  logDisklessWriteSkipped,
+} from './disklessGuards.js'
 import { getGlobalClaudeFile } from './env.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { ConfigParseError, getErrnoCode } from './errors.js'
@@ -1534,6 +1539,48 @@ export function saveGlobalConfig(
    */
   _storageV5?: unknown,
 ): boolean {
+  if (isDisklessActive()) {
+    const hostState = getConfigHostState()
+    const current =
+      hostState.globalConfigCache.config ?? createDefaultGlobalConfig()
+    const next = updater(current)
+    if (next !== current) {
+      writeThroughGlobalConfigCache(next)
+    }
+    const rawStorage = _storageV5 ?? getRegisteredPinnedStorageV5()
+    const storage =
+      rawStorage !== null &&
+      typeof rawStorage === 'object' &&
+      typeof (rawStorage as { write?: unknown }).write === 'function'
+        ? (rawStorage as StorageV5)
+        : undefined
+    if (storage) {
+      const defaults = createDefaultGlobalConfig()
+      const filtered = pickBy(
+        next,
+        (value, key) =>
+          jsonStringify(value) !==
+          jsonStringify(defaults[key as keyof GlobalConfig]),
+      )
+      void storage
+        .write(
+          { namespace: 'globalConfig' },
+          jsonStringify(filtered, null, 2),
+          {
+            precondition: { type: 'none' },
+          },
+        )
+        .catch(() => {})
+      return true
+    }
+    logForDebugging(
+      'saveGlobalConfig: diskless session has no storage backend; keeping config update in memory only',
+      { level: 'warn' },
+    )
+    logDisklessWriteSkipped('saveGlobalConfig', 'globalConfig')
+    return false
+  }
+
   void _storageV5
   if (process.env.NODE_ENV === 'test') {
     const config = updater(TEST_GLOBAL_CONFIG_FOR_TESTING)
@@ -2046,6 +2093,19 @@ function triggerOwedReloadThroughPinnedStorage(): void {
 }
 
 export function getGlobalConfig(): GlobalConfig {
+  if (isDisklessActive()) {
+    const hostState = getConfigHostState()
+    let config = hostState.globalConfigCache.config
+    if (!config) {
+      config = createDefaultGlobalConfig()
+      hostState.globalConfigCache = {
+        config,
+        mtime: Date.now(),
+      }
+    }
+    return config
+  }
+
   if (process.env.NODE_ENV === 'test') {
     return TEST_GLOBAL_CONFIG_FOR_TESTING
   }
@@ -2580,6 +2640,10 @@ function saveConfig<A extends object>(
   defaultConfig: A,
   opts?: { createOnly?: boolean },
 ): void {
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped('saveConfig', file)
+    return
+  }
   // Ensure the directory exists before writing the config file
   const dir = dirname(file)
   const fs = getFsImplementation()
@@ -2625,6 +2689,10 @@ function saveConfigWithLock<A extends object>(
   mergeFn: (current: A) => A,
   opts?: { onCompromised?: (err: unknown) => void },
 ): boolean {
+  if (isDisklessActive()) {
+    logDisklessWriteSkipped('saveConfigWithLock', file)
+    return false
+  }
   const defaultConfig = createDefault()
   const dir = dirname(file)
   const fs = getFsImplementation()

@@ -50,6 +50,7 @@ import {
 import { AppStateProvider } from '../../state/AppState.js';
 import { openBrowser } from '../../utils/browser.js';
 import { getCurrentProjectConfig, getGlobalConfig, saveCurrentProjectConfig } from '../../utils/config.js';
+import { isEnvTruthy } from '../../utils/envUtils.js';
 import { errorMessage, isFsInaccessible } from '../../utils/errors.js';
 import { gracefulShutdown } from '../../utils/gracefulShutdown.js';
 import { safeParseJSON } from '../../utils/json.js';
@@ -207,6 +208,12 @@ export function validateMcpServeOptions(
   return { ok: true, transport, port, resultFormat };
 }
 
+function exitWithCode(code: number, msg: string): never {
+  console.error(msg);
+  process.exit(code);
+  return undefined as never;
+}
+
 // mcp serve (lines 4512–4532)
 export async function mcpServeHandler({
   debug,
@@ -225,6 +232,10 @@ export async function mcpServeHandler({
     sessionTunnel,
   });
   if (!validated.ok) {
+    if (sessionTunnel) {
+      const { EX_CONFIG } = await import('../../services/mcp/sessionTunnel.js');
+      return exitWithCode(EX_CONFIG, validated.error);
+    }
     return cliError(validated.error);
   }
 
@@ -232,12 +243,6 @@ export async function mcpServeHandler({
   logEvent('tengu_mcp_start', {
     transport: validated.transport as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   });
-
-  if (sessionTunnel) {
-    return cliError(
-      'Error: --session-tunnel requires a hosted session tunnel envelope on stdin with --transport http --port 28471',
-    );
-  }
 
   try {
     await stat(providedCwd);
@@ -249,10 +254,132 @@ export async function mcpServeHandler({
   }
 
   try {
+    if (validated.transport === 'http') {
+      const {
+        EX_CONFIG,
+        EX_POLICY,
+        EX_UNAVAILABLE,
+        SESSION_TUNNEL_PORT,
+        ToolServerPortTakenError,
+        guardRelayTokenDescriptor,
+        parseSessionTunnelEnvelope,
+        readSessionTunnelLineFromStdin,
+        setToolServerDaemonMode,
+        startSessionTunnel,
+        validateSessionTunnelLaunch,
+      } = await import('../../services/mcp/sessionTunnel.js');
+
+      let tunnelEnvelope: ReturnType<typeof parseSessionTunnelEnvelope>;
+      if (sessionTunnel) {
+        const nonessentialTrafficDisabled = isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC);
+        const isAnthropicProvider =
+          !isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) &&
+          !isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) &&
+          !isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY);
+
+        // Validate port and policy preconditions before touching stdin or latching daemon mode.
+        if (validated.port !== SESSION_TUNNEL_PORT) {
+          const portRefusal = validateSessionTunnelLaunch({
+            transport: validated.transport,
+            port: validated.port,
+            envelope: undefined,
+            nonessentialTrafficDisabled,
+            isAnthropicProvider,
+          });
+          return exitWithCode(
+            EX_CONFIG,
+            portRefusal ?? `Error: --session-tunnel requires --transport http --port ${SESSION_TUNNEL_PORT}`,
+          );
+        }
+        if (nonessentialTrafficDisabled || !isAnthropicProvider) {
+          const policyRefusal = validateSessionTunnelLaunch({
+            transport: validated.transport,
+            port: validated.port,
+            envelope: undefined,
+            nonessentialTrafficDisabled,
+            isAnthropicProvider,
+          });
+          return exitWithCode(EX_POLICY, policyRefusal ?? 'Error: --session-tunnel is disabled by policy');
+        }
+
+        guardRelayTokenDescriptor();
+        let line: string;
+        try {
+          line = await readSessionTunnelLineFromStdin();
+        } catch (err) {
+          return exitWithCode(EX_CONFIG, errorMessage(err));
+        }
+        tunnelEnvelope = parseSessionTunnelEnvelope(line);
+        const refusal = validateSessionTunnelLaunch({
+          transport: validated.transport,
+          port: validated.port,
+          envelope: tunnelEnvelope,
+          nonessentialTrafficDisabled,
+          isAnthropicProvider,
+        });
+        if (refusal !== undefined) {
+          const code = nonessentialTrafficDisabled || !isAnthropicProvider ? EX_POLICY : EX_CONFIG;
+          return exitWithCode(code, refusal);
+        }
+      }
+
+      // Latch daemon mode only after validation passes.
+      setToolServerDaemonMode(true);
+
+      const { setup } = await import('../../setup.js');
+      await setup(providedCwd, 'default', false, false, undefined, false);
+
+      const { startMCPServerHttp } = await import('../../entrypoints/mcpHttpServer.js');
+      let serverHandle: Awaited<ReturnType<typeof startMCPServerHttp>>;
+      try {
+        serverHandle = await startMCPServerHttp(providedCwd, {
+          port: validated.port,
+          debug: debug ?? false,
+          verbose: verbose ?? false,
+          storageV5: 'raw',
+          resultFormat: validated.resultFormat,
+          announceOnStdout: !sessionTunnel,
+        });
+      } catch (err) {
+        if (err instanceof ToolServerPortTakenError) {
+          setToolServerDaemonMode(false);
+          return exitWithCode(EX_UNAVAILABLE, formatCliError(err.message, 'Error: '));
+        }
+        throw err;
+      }
+
+      const tunnelHandle =
+        sessionTunnel && tunnelEnvelope
+          ? startSessionTunnel(serverHandle, tunnelEnvelope, {
+              onExit: code => {
+                void serverHandle.close().finally(() => {
+                  process.exit(code);
+                });
+              },
+            })
+          : undefined;
+
+      const shutdown = () => {
+        tunnelHandle?.stop();
+        void serverHandle.close().finally(() => {
+          process.exit(0);
+        });
+      };
+      process.once('SIGINT', shutdown);
+      process.once('SIGTERM', shutdown);
+      return;
+    }
+
     const { setup } = await import('../../setup.js');
     await setup(providedCwd, 'default', false, false, undefined, false);
     const { startMCPServer } = await import('../../entrypoints/mcp.js');
-    await startMCPServer(providedCwd, debug ?? false, verbose ?? false, validated.resultFormat);
+    if (validated.resultFormat === 'rendered') {
+      await startMCPServer(providedCwd, debug ?? false, verbose ?? false, 'raw', {
+        resultFormat: 'rendered',
+      });
+    } else {
+      await startMCPServer(providedCwd, debug ?? false, verbose ?? false, 'raw');
+    }
   } catch (error) {
     cliError(formatCliError(`Failed to start MCP server: ${error}`, 'Error: '));
   }

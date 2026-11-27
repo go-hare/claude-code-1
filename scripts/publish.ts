@@ -223,9 +223,13 @@ function copyClipboardImageToPlatformPkg(platformKey: string): void {
  * Shipping them on the npm tarball confuses arborist (workspace/link
  * resolution) and can crash installs with:
  *   TypeError: Cannot read properties of null (reading 'edgesOut')
+ * `'exports'` is also stripped because the published main tarball only ships
+ * CLI wrapper files (`bin/claude.exe`, `install.cjs`, `cli-wrapper.cjs`) and
+ * does not include `./src/...` TypeScript entrypoints.
  */
 const MAIN_PKG_STRIP_FIELDS = [
   'workspaces',
+  'exports',
   'devDependencies',
   'peerDependencies',
   'peerDependenciesMeta',
@@ -307,9 +311,9 @@ function publishMainPackage(): void {
       'README.md',
     ]
 
-    if (pkg.workspaces) {
+    if (pkg.workspaces || pkg.exports) {
       console.error(
-        'Internal error: staged main package.json still has workspaces',
+        'Internal error: staged main package.json still has workspaces or exports',
       )
       process.exit(1)
     }

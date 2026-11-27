@@ -23,6 +23,12 @@ import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../analytics/index.js'
+import {
+  canForwardToAttachedMachines,
+  isDesktopAppHostingTenant,
+  isDesktopAppTakenAway,
+  takesMachinesMcpToolsAlone,
+} from './remoteToolsTransport.js'
 
 export const REMOTE_TOOL_HOST_FIELD = '_host'
 
@@ -35,7 +41,7 @@ const HOST_FIELD_DESCRIPTION =
   "Optional. Name of an attached machine to run this tool call on; omit it to run in this session's own environment (the default). Use only a name this session listed as attached; the result says where it ran. Choose per call by which machine the command or file path concerns; the attached-machines note says what lives where and which are reachable now."
 
 export function isRemoteToolsForwardEnabled(): boolean {
-  return isEnvTruthy(process.env.CLAUDE_CODE_REMOTE_TOOLS_FORWARD)
+  return canForwardToAttachedMachines()
 }
 
 /** densable `tE` — reserved names are this session, not a machine. */
@@ -82,7 +88,9 @@ export function displayRemoteHostName(name: string): string {
 export function remoteHostSchemaProperty():
   | { _host: { type: 'string'; description: string } }
   | undefined {
-  if (!isRemoteToolsForwardEnabled()) return undefined
+  if (!canForwardToAttachedMachines()) return undefined
+  if (isDesktopAppHostingTenant() || isDesktopAppTakenAway()) return undefined
+  if (takesMachinesMcpToolsAlone()) return undefined
   // densable `bwt` strips `_host` when `yPe` (`KJ`, violin wood) is on.
   if (isViolinWoodEnabledSync()) return undefined
   return {

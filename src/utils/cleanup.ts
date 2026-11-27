@@ -17,6 +17,7 @@ import {
 import { logEvent } from '../services/analytics/index.js'
 import { CACHE_PATHS } from './cachePaths.js'
 import { logForDebugging } from './debug.js'
+import { isDisklessActive } from './disklessGuards.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { type FsOperations, getFsImplementation } from './fsOperations.js'
 import { cleanupOldImageCaches } from './imageStore.js'
@@ -1796,13 +1797,14 @@ export async function waitForSettingsReadHooksForRetentionSweep(
 }
 
 export type RetentionCleanupSkipReason =
+  | 'diskless'
   | 'user_source_disabled'
   | 'settings_invalid_key_set'
 
 /**
  * Official `qSr` (#1554): check whether retention cleanup should be skipped
- * due to `--setting-sources` disabling `userSettings` without an enabled
- * `cleanupPeriodDays`, or settings validation errors on retention keys.
+ * due to diskless session, `--setting-sources` disabling `userSettings` without
+ * an enabled `cleanupPeriodDays`, or settings validation errors on retention keys.
  */
 export function getRetentionCleanupSkipReason(opts?: {
   userSettingsEnabled?: boolean
@@ -1810,6 +1812,10 @@ export function getRetentionCleanupSkipReason(opts?: {
   hasSettingsErrors?: boolean
   hasExplicitRetentionKey?: boolean
 }): RetentionCleanupSkipReason | null {
+  if (isDisklessActive()) {
+    logForDebugging('Skipping retention cleanup: diskless session.')
+    return 'diskless'
+  }
   const userSettingsEnabled =
     opts?.userSettingsEnabled ?? isSettingSourceEnabled('userSettings')
   const cleanupPeriodDays =
@@ -1840,6 +1846,11 @@ export function getRetentionCleanupSkipReason(opts?: {
 }
 
 export async function cleanupOldMessageFilesInBackground(): Promise<void> {
+  if (isDisklessActive()) {
+    logForDebugging('Skipping background retention cleanup: diskless session.')
+    return
+  }
+
   await waitForSettingsReadHooksForRetentionSweep()
 
   // Official qSr (#1554) + Jrt / $te: skip when userSettings is disabled by

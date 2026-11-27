@@ -32,6 +32,7 @@ import {
 } from '../permissions/filesystem.js'
 import { getPlatform } from '../platform.js'
 import { getBootstrapSessionHost } from '../sessionHost.js'
+import { isDisklessActive } from '../disklessGuards.js'
 import { sleep } from '../sleep.js'
 
 // SECURITY: O_NOFOLLOW prevents following symlinks when opening task output files.
@@ -777,6 +778,9 @@ export async function pinWriteTarget(dir: string): Promise<void> {
 async function ensureOutputDir(
   state: HostDiskOutputState = getHostDiskOutputState(),
 ): Promise<void> {
+  if (isDisklessActive()) {
+    throw new Error('Task output is not written to disk in a diskless session')
+  }
   const dir = getTaskOutputDirForState(state)
   await mkdir(dir, { recursive: true })
   await pinWriteTarget(dir)
@@ -793,6 +797,9 @@ function getTaskOutputPathForState(
  * Get the output file path for a task
  */
 export function getTaskOutputPath(taskId: string): string {
+  if (isDisklessActive()) {
+    throw new Error('Task output is not written to disk in a diskless session')
+  }
   return getTaskOutputPathForState(taskId, getHostDiskOutputState())
 }
 

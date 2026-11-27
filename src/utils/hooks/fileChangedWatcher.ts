@@ -4,6 +4,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js'
+import { isToolServerDaemonMode } from '../../services/mcp/sessionTunnel.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
@@ -314,6 +315,7 @@ function createHostFileChangedWatcher(): HostFileChangedWatcher {
   }
 
   function updateWatchPaths(paths: string[]): void {
+    if (isToolServerDaemonMode()) return
     if (!initialized) return
     // densable: store pre-filter dynamic list; resolveWatchPaths re-filters
     const sorted = paths.slice().sort()
@@ -362,6 +364,12 @@ function createHostFileChangedWatcher(): HostFileChangedWatcher {
       notifyCallback = cb
     },
     initializeFileChangedWatcher(cwd: string) {
+      if (isToolServerDaemonMode()) {
+        logForDebugging(
+          'FileChanged: skipping watcher because claude mcp serve --transport http never runs them (intended)',
+        )
+        return
+      }
       if (initialized) return
       initialized = true
       currentCwd = cwd
@@ -382,6 +390,12 @@ function createHostFileChangedWatcher(): HostFileChangedWatcher {
     },
     updateWatchPaths,
     async onCwdChangedForHooks(oldCwd: string, newCwd: string): Promise<void> {
+      if (isToolServerDaemonMode()) {
+        logForDebugging(
+          'CwdChanged: skipping hooks because claude mcp serve --transport http never runs them (intended)',
+        )
+        return
+      }
       if (normalizeWatchCwdPath(oldCwd) === normalizeWatchCwdPath(newCwd)) {
         return
       }
