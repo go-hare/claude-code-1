@@ -25,7 +25,6 @@ import { SEARCH_EXTRA_TOOLS_TOOL_NAME } from '@claude-code/builtin-tools/tools/S
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import { SLEEP_TOOL_NAME } from '@claude-code/builtin-tools/tools/SleepTool/prompt.js'
 import { LSP_TOOL_NAME } from '@claude-code/builtin-tools/tools/LSPTool/prompt.js'
-import { VERIFY_PLAN_EXECUTION_TOOL_NAME } from '@claude-code/builtin-tools/tools/VerifyPlanExecutionTool/constants.js'
 import { EXECUTE_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExecuteTool/constants.js'
 import { ENTER_WORKTREE_TOOL_NAME } from '@claude-code/builtin-tools/tools/EnterWorktreeTool/constants.js'
 import { EXIT_WORKTREE_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/constants.js'
@@ -35,7 +34,6 @@ import {
   CRON_DELETE_TOOL_NAME,
   CRON_LIST_TOOL_NAME,
 } from '@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js'
-import { LOCAL_MEMORY_RECALL_TOOL_NAME } from '@claude-code/builtin-tools/tools/LocalMemoryRecallTool/constants.js'
 import { OBSERVER_REPORT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ObserverReportTool/constants.js'
 import { SUBAGENT_HANDBACK_TOOL_NAME } from '@claude-code/builtin-tools/tools/SubagentHandbackTool/constants.js'
 import { ARTIFACT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
@@ -57,11 +55,6 @@ export const ALL_AGENT_DISALLOWED_TOOLS = new Set([
   TASK_STOP_TOOL_NAME,
   // Prevent recursive workflow execution inside subagents.
   ...(feature('WORKFLOW_SCRIPTS') ? [WORKFLOW_TOOL_NAME] : []),
-  // LOCAL-WIRING PR-1: keep local-memory recall on the main thread only.
-  // Cross-session user notes shouldn't be siphoned by spawned subagents.
-  // Layer 2 of the gate (fork path useExactTools) is enforced separately
-  // by filterParentToolsForFork in src/utils/agentToolFilter.ts.
-  LOCAL_MEMORY_RECALL_TOOL_NAME,
 ])
 
 export const CUSTOM_AGENT_DISALLOWED_TOOLS = new Set([
@@ -173,7 +166,6 @@ export const CORE_TOOLS = new Set([
   // Planning
   ENTER_PLAN_MODE_TOOL_NAME, // 'EnterPlanMode'
   EXIT_PLAN_MODE_V2_TOOL_NAME, // 'ExitPlanMode'
-  VERIFY_PLAN_EXECUTION_TOOL_NAME, // 'VerifyPlanExecution'
   // Web
   WEB_FETCH_TOOL_NAME, // 'WebFetch'
   WEB_SEARCH_TOOL_NAME, // 'WebSearch'

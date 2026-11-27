@@ -140,7 +140,7 @@ bun run docs:dev
   - **文件操作**: FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool
   - **Shell/执行**: BashTool, PowerShellTool, REPLTool
   - **Agent 系统**: AgentTool, TaskCreateTool, TaskUpdateTool, TaskListTool, TaskGetTool
-  - **规划**: EnterPlanModeTool, ExitPlanModeV2Tool, VerifyPlanExecutionTool
+  - **规划**: EnterPlanModeTool, ExitPlanModeV2Tool
   - **Web/MCP**: WebFetchTool, WebSearchTool, MCPTool, McpAuthTool
   - **调度**: CronCreateTool, CronDeleteTool, CronListTool
   - **工具发现**: ToolSearch（`SearchExtraToolsTool`，wire 名 `ToolSearch`）、ExecuteExtraTool（compat core）、SyntheticOutput

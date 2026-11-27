@@ -121,26 +121,20 @@ import { EnterPlanModeTool } from '@claude-code/builtin-tools/tools/EnterPlanMod
 import { EnterWorktreeTool } from '@claude-code/builtin-tools/tools/EnterWorktreeTool/EnterWorktreeTool.js'
 import { ExitWorktreeTool } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/ExitWorktreeTool.js'
 import { SendFeedbackTool } from '@claude-code/builtin-tools/tools/SendFeedbackTool/SendFeedbackTool.js'
+import { OfferChromeSetupTool } from '@claude-code/builtin-tools/tools/OfferChromeSetupTool/OfferChromeSetupTool.js'
+import { ShowOnboardingRolePickerTool } from '@claude-code/builtin-tools/tools/ShowOnboardingRolePickerTool/ShowOnboardingRolePickerTool.js'
+import { ProjectsTool } from '@claude-code/builtin-tools/tools/ProjectsTool/ProjectsTool.js'
 import { ShareOnboardingGuideTool } from './commands/team-onboarding/shareOnboardingGuide.js'
 // densable ikw — always in the base pool; isEnabled() gates via GB + session + Ktr
 const ProposeGoalTool =
   require('@claude-code/builtin-tools/tools/ProposeGoalTool/ProposeGoalTool.js')
     .ProposeGoalTool as typeof import('@claude-code/builtin-tools/tools/ProposeGoalTool/ProposeGoalTool.js').ProposeGoalTool
-import { LocalMemoryRecallTool } from '@claude-code/builtin-tools/tools/LocalMemoryRecallTool/LocalMemoryRecallTool.js'
 import { TaskCreateTool } from '@claude-code/builtin-tools/tools/TaskCreateTool/TaskCreateTool.js'
 import { TaskGetTool } from '@claude-code/builtin-tools/tools/TaskGetTool/TaskGetTool.js'
 import { TaskUpdateTool } from '@claude-code/builtin-tools/tools/TaskUpdateTool/TaskUpdateTool.js'
 import { TaskListTool } from '@claude-code/builtin-tools/tools/TaskListTool/TaskListTool.js'
 import { isSearchExtraToolsEnabledOptimistic } from './utils/searchExtraTools.js'
 import { isTodoV2Enabled } from './utils/tasks.js'
-// Dead code elimination: conditional import for CLAUDE_CODE_VERIFY_PLAN
-/* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-const VerifyPlanExecutionTool =
-  process.env.CLAUDE_CODE_VERIFY_PLAN === 'true'
-    ? require('@claude-code/builtin-tools/tools/VerifyPlanExecutionTool/VerifyPlanExecutionTool.js')
-        .VerifyPlanExecutionTool
-    : null
-/* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { ReportFindingsTool } from '@claude-code/builtin-tools/tools/ReportFindingsTool/ReportFindingsTool.js'
 import { ObserverReportTool } from '@claude-code/builtin-tools/tools/ObserverReportTool/ObserverReportTool.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
@@ -156,14 +150,6 @@ import { feature } from 'bun:bundle'
 const OverflowTestTool = feature('OVERFLOW_TEST_TOOL')
   ? require('@claude-code/builtin-tools/tools/OverflowTestTool/OverflowTestTool.js')
       .OverflowTestTool
-  : null
-const CtxInspectTool = feature('CONTEXT_COLLAPSE')
-  ? require('@claude-code/builtin-tools/tools/CtxInspectTool/CtxInspectTool.js')
-      .CtxInspectTool
-  : null
-const TerminalCaptureTool = feature('TERMINAL_PANEL')
-  ? require('@claude-code/builtin-tools/tools/TerminalCaptureTool/TerminalCaptureTool.js')
-      .TerminalCaptureTool
   : null
 const WebBrowserTool = feature('WEB_BROWSER_TOOL')
   ? require('@claude-code/builtin-tools/tools/WebBrowserTool/WebBrowserTool.js')
@@ -296,9 +282,12 @@ export function getAllBaseTools(): Tools {
     AskUserQuestionTool,
     SkillTool,
     EnterPlanModeTool,
-    LocalMemoryRecallTool,
     // densable leftover IE() — SendFeedback is always in the base pool; aLt/Ufs gate isEnabled()
     SendFeedbackTool,
+    // Official 2.1.331 host/session-gated tools (hidden in normal CLI unless enabled)
+    OfferChromeSetupTool,
+    ShowOnboardingRolePickerTool,
+    ProjectsTool,
     ShareOnboardingGuideTool,
     ProposeGoalTool,
     ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),
@@ -307,13 +296,10 @@ export function getAllBaseTools(): Tools {
       ? [TaskCreateTool, TaskGetTool, TaskUpdateTool, TaskListTool]
       : []),
     ...(OverflowTestTool ? [OverflowTestTool] : []),
-    ...(CtxInspectTool ? [CtxInspectTool] : []),
-    ...(TerminalCaptureTool ? [TerminalCaptureTool] : []),
     ...(isEnvTruthy(process.env.ENABLE_LSP_TOOL) ? [LSPTool] : []),
     ...(isWorktreeModeEnabled() ? [EnterWorktreeTool, ExitWorktreeTool] : []),
     getSendMessageTool(),
     ...(ListPeersTool ? [ListPeersTool] : []),
-    ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
     ReportFindingsTool,
     ObserverReportTool,
     ...(process.env.USER_TYPE === 'ant' ||

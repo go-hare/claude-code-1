@@ -20,7 +20,6 @@ import { ExecuteTool } from '../ExecuteTool/ExecuteTool.js'
 import { MonitorTool } from '../MonitorTool/MonitorTool.js'
 import { PowerShellTool } from '../PowerShellTool/PowerShellTool.js'
 import { REPLTool } from '../REPLTool/REPLTool.js'
-import { TerminalCaptureTool } from '../TerminalCaptureTool/TerminalCaptureTool.js'
 
 function createDisklessSession(): RemoteNativeToolSession {
   return {
@@ -38,7 +37,7 @@ describe('2.1.331 Tool.create(deps) Bucket 2 — Shell, Execution, REPL & Monito
     getBootstrapSessionHost().launchOptions.replaceDiskless(false)
   })
 
-  test('proxy-probe safety: all 6 tools return instance methods without eagerly reading deps', () => {
+  test('proxy-probe safety: all 5 tools return instance methods without eagerly reading deps', () => {
     const probeDeps = new Proxy({} as ToolDeps, {
       get: () => undefined,
     })
@@ -49,7 +48,6 @@ describe('2.1.331 Tool.create(deps) Bucket 2 — Shell, Execution, REPL & Monito
       REPLTool,
       ExecuteTool,
       MonitorTool,
-      TerminalCaptureTool,
     ]) {
       const instance = tool.create(probeDeps)
       expect(typeof instance.call).toBe('function')
@@ -547,17 +545,6 @@ describe('2.1.331 Tool.create(deps) Bucket 2 — Shell, Execution, REPL & Monito
         result: null,
       })
       expect(missingRes.newMessages?.length).toBeGreaterThan(0)
-    })
-  })
-
-  describe('TerminalCaptureTool', () => {
-    test('direct TerminalCaptureTool.create(deps).call works without ALS / ToolUseContext', async () => {
-      const instance = TerminalCaptureTool.create(createExplicitToolDeps())
-      const res = await instance.call({ lines: 20 }, createToolCallContext())
-      expect(res.data).toEqual({
-        content: '',
-        line_count: 0,
-      })
     })
   })
 })

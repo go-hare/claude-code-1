@@ -28,8 +28,10 @@ export { ProposeSkillsTool } from './tools/ProposeSkillsTool/ProposeSkillsTool.j
 export { GrepTool } from './tools/GrepTool/GrepTool.js'
 export { LSPTool } from './tools/LSPTool/LSPTool.js'
 export { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
-export { LocalMemoryRecallTool } from './tools/LocalMemoryRecallTool/LocalMemoryRecallTool.js'
 export { McpTaskResumePollingTool } from './tools/McpTaskResumePollingTool/McpTaskResumePollingTool.js'
+export { OfferChromeSetupTool } from './tools/OfferChromeSetupTool/OfferChromeSetupTool.js'
+export { ProjectsTool } from './tools/ProjectsTool/ProjectsTool.js'
+export { ShowOnboardingRolePickerTool } from './tools/ShowOnboardingRolePickerTool/ShowOnboardingRolePickerTool.js'
 export { ReadMcpResourceDirTool } from './tools/ReadMcpResourceDirTool/ReadMcpResourceDirTool.js'
 export { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 export { ReadNotificationsTool } from './tools/ReadNotificationsTool/ReadNotificationsTool.js'
@@ -47,7 +49,6 @@ export { TestingPermissionTool } from './tools/testing/TestingPermissionTool.js'
 
 // Feature-gated tools
 export { OVERFLOW_TEST_TOOL_NAME } from './tools/OverflowTestTool/OverflowTestTool.js'
-export { CtxInspectTool } from './tools/CtxInspectTool/CtxInspectTool.js'
 // densable 2.1.224 #7: primary export ListAgentsTool; ListPeersTool kept as alias.
 export {
   ListAgentsTool,
@@ -82,8 +83,6 @@ export { EndConversationTool } from './tools/EndConversationTool/EndConversation
 export { SnipTool } from './tools/SnipTool/SnipTool.js'
 export { SubscribePRTool } from './tools/SubscribePRTool/SubscribePRTool.js'
 export { SuggestBackgroundPRTool } from './tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js'
-export { TerminalCaptureTool } from './tools/TerminalCaptureTool/TerminalCaptureTool.js'
-export { VerifyPlanExecutionTool } from './tools/VerifyPlanExecutionTool/VerifyPlanExecutionTool.js'
 export { WebBrowserTool } from './tools/WebBrowserTool/WebBrowserTool.js'
 // WorkflowTool 实现已迁移到 @claude-code/workflow-engine（独立包，端口适配）。
 // 注意：本 commit 移除了 builtin-tools 的 WorkflowTool 值导出和 getWorkflowCommands。

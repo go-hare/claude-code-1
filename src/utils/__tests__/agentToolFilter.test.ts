@@ -20,9 +20,9 @@ describe('filterParentToolsForFork', () => {
     expect(result.map(t => t.name)).toEqual(['AllowedTool'])
   })
 
-  test('strips LocalMemoryRecall (registered as disallowed in PR-1)', () => {
+  test('strips ExitPlanMode (registered as disallowed)', () => {
     const parent: Tool[] = [
-      fakeTool('LocalMemoryRecall'),
+      fakeTool('ExitPlanMode'),
       fakeTool('Bash'),
       fakeTool('FileRead'),
     ]
@@ -47,7 +47,7 @@ describe('filterParentToolsForFork', () => {
   test('preserves order of allowed tools', () => {
     const parent: Tool[] = [
       fakeTool('A'),
-      fakeTool('LocalMemoryRecall'),
+      fakeTool('ExitPlanMode'),
       fakeTool('B'),
       fakeTool('C'),
     ]
@@ -69,9 +69,10 @@ describe('filterParentToolsForFork', () => {
   })
 })
 
-describe('AC11a: ALL_AGENT_DISALLOWED_TOOLS contains LocalMemoryRecall', () => {
-  test('layer 1 gate registration is in place', () => {
-    expect(ALL_AGENT_DISALLOWED_TOOLS.has('LocalMemoryRecall')).toBe(true)
+describe('ALL_AGENT_DISALLOWED_TOOLS gate registration', () => {
+  test('layer 1 gate registration excludes plan/ask/stop tools', () => {
+    expect(ALL_AGENT_DISALLOWED_TOOLS.has('ExitPlanMode')).toBe(true)
+    expect(ALL_AGENT_DISALLOWED_TOOLS.has('AskUserQuestion')).toBe(true)
   })
 })
 

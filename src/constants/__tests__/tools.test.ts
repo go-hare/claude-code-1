@@ -123,7 +123,6 @@ describe('CORE_TOOLS', () => {
       'TodoWrite',
       'EnterPlanMode',
       'ExitPlanMode',
-      'VerifyPlanExecution',
       'NotebookEdit',
       'StructuredOutput',
     ]

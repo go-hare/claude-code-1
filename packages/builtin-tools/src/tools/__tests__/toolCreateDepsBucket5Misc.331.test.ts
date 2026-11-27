@@ -24,7 +24,6 @@ import { ArtifactTool } from '../ArtifactTool/ArtifactTool.js'
 import { AskUserQuestionTool } from '../AskUserQuestionTool/AskUserQuestionTool.js'
 import { BriefTool } from '../BriefTool/BriefTool.js'
 import { ClaudeDesignTool } from '../ClaudeDesignTool/ClaudeDesignTool.js'
-import { CtxInspectTool } from '../CtxInspectTool/CtxInspectTool.js'
 import { DesignSyncTool } from '../DesignSyncTool/DesignSyncTool.js'
 import { EndConversationTool } from '../EndConversationTool/EndConversationTool.js'
 import {
@@ -32,7 +31,6 @@ import {
   END_CONVERSATION_TOOL_RESULT,
   getEndConversationReflectionPrompt,
 } from '../EndConversationTool/prompt.js'
-import { LocalMemoryRecallTool } from '../LocalMemoryRecallTool/LocalMemoryRecallTool.js'
 import { ObserverReportTool } from '../ObserverReportTool/ObserverReportTool.js'
 import { NO_PENDING_EVENTS } from '../PollTool/constants.js'
 import { PollTool } from '../PollTool/PollTool.js'
@@ -56,7 +54,6 @@ import {
   SyntheticOutputTool,
 } from '../SyntheticOutputTool/SyntheticOutputTool.js'
 import { TestingPermissionTool } from '../testing/TestingPermissionTool.js'
-import { VerifyPlanExecutionTool } from '../VerifyPlanExecutionTool/VerifyPlanExecutionTool.js'
 
 const ALL_BUCKET_5_TOOLS: ReadonlyArray<{ name: string; tool: Tool }> = [
   { name: 'ArtifactTool', tool: ArtifactTool as unknown as Tool },
@@ -84,11 +81,6 @@ const ALL_BUCKET_5_TOOLS: ReadonlyArray<{ name: string; tool: Tool }> = [
   },
   { name: 'ProposeSkillsTool', tool: ProposeSkillsTool as unknown as Tool },
   {
-    name: 'LocalMemoryRecallTool',
-    tool: LocalMemoryRecallTool as unknown as Tool,
-  },
-  { name: 'CtxInspectTool', tool: CtxInspectTool as unknown as Tool },
-  {
     name: 'EndConversationTool',
     tool: EndConversationTool as unknown as Tool,
   },
@@ -105,10 +97,6 @@ const ALL_BUCKET_5_TOOLS: ReadonlyArray<{ name: string; tool: Tool }> = [
   {
     name: 'SyntheticOutputTool',
     tool: SyntheticOutputTool as unknown as Tool,
-  },
-  {
-    name: 'VerifyPlanExecutionTool',
-    tool: VerifyPlanExecutionTool as unknown as Tool,
   },
   {
     name: 'TestingPermissionTool',
@@ -166,8 +154,8 @@ describe('Official 2.1.331 Bucket 5 Tools — Tool.create(deps) Migration', () =
     }
   })
 
-  test('all 25 Bucket 5 tools expose create(deps) and survive undefined-returning Proxy probe without eager deps calls', () => {
-    expect(ALL_BUCKET_5_TOOLS).toHaveLength(25)
+  test('all 22 Bucket 5 tools expose create(deps) and survive undefined-returning Proxy probe without eager deps calls', () => {
+    expect(ALL_BUCKET_5_TOOLS).toHaveLength(22)
 
     for (const { name, tool } of ALL_BUCKET_5_TOOLS) {
       expect(typeof tool.create).toBe('function')
@@ -704,25 +692,6 @@ describe('Official 2.1.331 Bucket 5 Tools — Tool.create(deps) Migration', () =
     )
     expect(snipRes.data).toEqual({ snipped_count: 2, summary: 'free space' })
 
-    // VerifyPlanExecutionTool
-    const verifyRes = await VerifyPlanExecutionTool.create(deps).call(
-      { plan_summary: 'Migrated 25 tools', all_steps_completed: true },
-      callCtx,
-    )
-    expect(verifyRes.data).toEqual({
-      verified: true,
-      summary: 'Migrated 25 tools',
-    })
-
-    // CtxInspectTool
-    const ctxRes = await CtxInspectTool.create(deps).call(
-      { query: 'budget' },
-      callCtx,
-    )
-    expect(ctxRes.data.context_window_model).toBe('claude-opus-4-6')
-    expect(ctxRes.data.message_count).toBe(0)
-    expect(ctxRes.data.summary).toContain('Focus: budget')
-
     // ReviewArtifactTool
     const reviewRes = await ReviewArtifactTool.create(deps).call(
       {
@@ -815,62 +784,6 @@ describe('Official 2.1.331 Bucket 5 Tools — Tool.create(deps) Migration', () =
       callCtx,
     )
     expect(proposeRes.data).toEqual({ proposalCount: 1 })
-
-    // LocalMemoryRecallTool (permission ACL via explicit deps.permissions())
-    const memDeps = createExplicitToolDeps({
-      permissions: () => ({
-        mode: 'default',
-        additionalWorkingDirectories: new Map(),
-        alwaysAllowRules: {
-          session: ['LocalMemoryRecall(fetch:notes/allowed_key)'],
-        },
-        alwaysDenyRules: {
-          session: ['LocalMemoryRecall(fetch:notes/denied_key)'],
-        },
-        alwaysAskRules: {},
-        isBypassPermissionsModeAvailable: false,
-      }),
-    })
-    const memInst = LocalMemoryRecallTool.create(memDeps)
-    expect(
-      (
-        await memInst.checkPermissions?.(
-          {
-            action: 'fetch',
-            store: 'notes',
-            key: 'allowed_key',
-            preview_only: false,
-          },
-          callCtx,
-        )
-      )?.behavior,
-    ).toBe('allow')
-    expect(
-      (
-        await memInst.checkPermissions?.(
-          {
-            action: 'fetch',
-            store: 'notes',
-            key: 'denied_key',
-            preview_only: false,
-          },
-          callCtx,
-        )
-      )?.behavior,
-    ).toBe('deny')
-    expect(
-      (
-        await memInst.checkPermissions?.(
-          {
-            action: 'fetch',
-            store: 'notes',
-            key: 'other_key',
-            preview_only: false,
-          },
-          callCtx,
-        )
-      )?.behavior,
-    ).toBe('ask')
 
     // PushNotificationTool
     const prevDisablePresence =

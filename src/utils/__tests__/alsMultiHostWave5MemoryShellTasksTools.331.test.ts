@@ -14,10 +14,6 @@ import {
   registerFileReadListener,
 } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import {
-  _resetFetchBudgetForTest,
-  LocalMemoryRecallTool,
-} from '@claude-code/builtin-tools/tools/LocalMemoryRecallTool/LocalMemoryRecallTool.js'
-import {
   clearWebFetchCache,
   getURLMarkdownContent,
   getWebFetchCacheTtlMs,
@@ -41,7 +37,6 @@ import {
   compactWarningStore,
   suppressCompactWarning,
 } from 'src/services/compact/compactWarningState.js'
-import { setEntry } from 'src/services/SessionMemory/multiStore.js'
 import {
   resetLastMemoryMessageUuid,
   shouldExtractMemory,
@@ -718,103 +713,6 @@ describe('2.1.331 Wave 5 ALS multi-host isolation: Memory, ShellSnapshot, Tasks,
 
     expect(callsA.length).toBe(1)
     expect(callsB.length).toBe(1)
-  })
-
-  test('LocalMemoryRecallTool: FETCH_BUDGET_USED isolates per root session for identical turnKey', async () => {
-    const prevConfigDir = process.env.CLAUDE_CONFIG_DIR
-    const configDir = makeTempDir('wave5-memrecall-')
-    process.env.CLAUDE_CONFIG_DIR = configDir
-
-    try {
-      // 50KB payload with preview_only: false consumes 50KB per fetch.
-      // 2 fetches fill the 100KB PER_TURN_FETCH_BUDGET_BYTES; the 3rd fetch
-      // in the same session + turnKey must be refused with budget_exceeded.
-      const bigPayload = 'A'.repeat(50 * 1024)
-      setEntry('notes', 'big', bigPayload)
-
-      const sharedTurnContext = {
-        messages: [{ type: 'assistant', uuid: 'shared-turn-uuid' }],
-      } as unknown as ToolUseContext
-
-      let hostADone!: () => void
-      const waitHostADone = new Promise<void>(resolve => {
-        hostADone = resolve
-      })
-
-      type RecallOutput = {
-        value?: string
-        budget_exceeded?: boolean
-        error?: string
-      }
-
-      const [resA, resB] = await Promise.all([
-        runWithNewHostSession({ id: 'lmr-host-a' }, async () => {
-          _resetFetchBudgetForTest()
-          const first = await LocalMemoryRecallTool.call(
-            {
-              action: 'fetch',
-              store: 'notes',
-              key: 'big',
-              preview_only: false,
-            },
-            sharedTurnContext,
-          )
-          const second = await LocalMemoryRecallTool.call(
-            {
-              action: 'fetch',
-              store: 'notes',
-              key: 'big',
-              preview_only: false,
-            },
-            sharedTurnContext,
-          )
-          const third = await LocalMemoryRecallTool.call(
-            {
-              action: 'fetch',
-              store: 'notes',
-              key: 'big',
-              preview_only: false,
-            },
-            sharedTurnContext,
-          )
-          hostADone()
-          return {
-            firstData: first.data as RecallOutput,
-            secondData: second.data as RecallOutput,
-            thirdData: third.data as RecallOutput,
-          }
-        }),
-        runWithNewHostSession({ id: 'lmr-host-b' }, async () => {
-          _resetFetchBudgetForTest()
-          await waitHostADone
-          // Same turnKey as Host A, but Host B has its own fresh 100KB budget.
-          const firstInB = await LocalMemoryRecallTool.call(
-            {
-              action: 'fetch',
-              store: 'notes',
-              key: 'big',
-              preview_only: false,
-            },
-            sharedTurnContext,
-          )
-          return {
-            firstDataInB: firstInB.data as RecallOutput,
-          }
-        }),
-      ])
-
-      expect(resA.firstData.value).toContain('AAAA')
-      expect(resA.secondData.value).toContain('AAAA')
-      expect(resA.thirdData.budget_exceeded).toBe(true)
-      expect(resB.firstDataInB.value).toContain('AAAA')
-      expect(resB.firstDataInB.budget_exceeded).toBeUndefined()
-    } finally {
-      if (prevConfigDir === undefined) {
-        delete process.env.CLAUDE_CONFIG_DIR
-      } else {
-        process.env.CLAUDE_CONFIG_DIR = prevConfigDir
-      }
-    }
   })
 
   test('WebFetchTool: cachedWebFetchTtlMs and URL_CACHE isolate per host', async () => {
