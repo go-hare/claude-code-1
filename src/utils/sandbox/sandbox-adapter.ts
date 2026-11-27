@@ -158,6 +158,55 @@ import {
   recheckReadDenyAndCredentialMasksBeforeWrap,
   recordReadDenyRecheckBaseline,
 } from './readDenyRecheck.js'
+import {
+  areWindowsLocalConnectionsOn,
+  checkWindowsSandboxStatusAsync,
+  classifyWindowsSandboxLaunchExit,
+  type EnsurePersistentWindowsCaOptions,
+  type EnsurePersistentWindowsCaResult,
+  ensureDefaultWindowsSandboxNativeProvider,
+  ensurePersistentWindowsCa,
+  estimateWindowsCommandLineUtf16Length,
+  forgetWindowsProfileReadAsync,
+  getWindowsMxcLastStart,
+  getWindowsMxcSetAside,
+  getWindowsSandboxNativeProvider,
+  hasWindowsMxcSdk,
+  hasWindowsSandboxSupport,
+  installWindowsSandboxAsync,
+  isInstalledWindowsTlsCaCurrent,
+  isWindowsBackendUnset,
+  isWindowsCommandLineTooLong,
+  registerWindowsSandboxNativeProvider,
+  resolveWindowsBackendChoice,
+  resolveWindowsTlsTerminateCaSource,
+  runWindowsSandboxInstallFlow,
+  uninstallWindowsSandbox,
+  validateMxcBaseContainerProbe,
+  WINDOWS_ARGV_MAX_LENGTH,
+  WINDOWS_BACKEND_UNSET_MESSAGE,
+  WINDOWS_MXC_BASH_REFUSAL_MESSAGE,
+  WINDOWS_MXC_NOTHING_TO_INSTALL_MESSAGE,
+  WINDOWS_SANDBOX_DEFAULT_PROXY_PORT_RANGE,
+  type WindowsBackendChoice,
+  type WindowsInstallOptions,
+  type WindowsMxcLastStart,
+  type WindowsMxcProbeResult,
+  type WindowsSandboxBackend,
+  WindowsSandboxError,
+  type WindowsSandboxInstallFlowOptions,
+  type WindowsSandboxInstallFlowResult,
+  type WindowsSandboxNativeProvider,
+  type WindowsSandboxStartState,
+  type WindowsSandboxStatus,
+  type WindowsSandboxUserStatus,
+  type WindowsSandboxWfpStatus,
+  type WindowsTlsTerminateCaSource,
+  type WindowsUninstallOptions,
+  willSandboxTlsTerminate,
+  windowsArgvTooLongError,
+  windowsSandboxStartStore,
+} from './windowsSandbox.js'
 
 // ============================================================================
 // Credential Protection Constants (from official sandbox.credentials)
@@ -3778,7 +3827,7 @@ export function detectLinuxAppArmorUsernsRestriction(
   }
 }
 
-const checkDependencies = memoize((): SandboxDependencyCheck => {
+const baseCheckDependencies = memoize((): SandboxDependencyCheck => {
   const { rgPath, rgArgs } = ripgrepCommand()
   const base = withStrippedSandboxHelperEnvSync(() =>
     BaseSandboxManager.checkDependencies({
@@ -3799,6 +3848,25 @@ const checkDependencies = memoize((): SandboxDependencyCheck => {
   }
   return base
 })
+
+function checkDependencies(): SandboxDependencyCheck {
+  if (getPlatform() === 'windows') {
+    if (!hasWindowsSandboxSupport()) {
+      return {
+        warnings: [],
+        errors: ['Windows sandbox runtime is not available on this build'],
+      }
+    }
+    if (isWindowsBackendUnset()) {
+      return {
+        warnings: [],
+        errors: [WINDOWS_BACKEND_UNSET_MESSAGE],
+      }
+    }
+    return { warnings: [], errors: [] }
+  }
+  return baseCheckDependencies()
+}
 
 // Official 2.1.323 #2017 (`Da` / `cV`) + 2.1.325 #2374 + 2.1.328 #676 + 2.1.331:
 // Per-host sandbox state lives in `sandboxStateByHost` (`HostSlot` on
@@ -4055,11 +4123,19 @@ function isSandboxRequired(): boolean {
 
 /**
  * Check if the current platform is supported for sandboxing (memoized)
- * Supports: macOS, Linux, and WSL2+ (WSL1 is not supported)
+ * Supports: macOS, Linux, WSL2+ (WSL1 is not supported), and Windows (when
+ * a Windows sandbox native provider or MXC SDK is present).
  */
-const isSupportedPlatform = memoize((): boolean => {
+const baseIsSupportedPlatform = memoize((): boolean => {
   return BaseSandboxManager.isSupportedPlatform()
 })
+
+function isSupportedPlatform(): boolean {
+  if (getPlatform() === 'windows') {
+    return hasWindowsSandboxSupport()
+  }
+  return baseIsSupportedPlatform()
+}
 
 /**
  * Check if the current platform is in the enabledPlatforms list.
@@ -4146,11 +4222,18 @@ function getSandboxUnavailableReason(): string | undefined {
     if (platform === 'wsl') {
       return 'sandbox.enabled is set but WSL1 is not supported (requires WSL2)'
     }
+    if (platform === 'windows') {
+      return 'sandbox.enabled is set but the Windows sandbox is not enabled on this build (install srt-win.exe or use WSL2)'
+    }
     return `sandbox.enabled is set but ${platform} is not supported (requires macOS, Linux, or WSL2)`
   }
 
   if (!isPlatformInEnabledList()) {
     return `sandbox.enabled is set but ${getPlatform()} is not in sandbox.enabledPlatforms`
+  }
+
+  if (getPlatform() === 'windows' && isWindowsBackendUnset()) {
+    return WINDOWS_BACKEND_UNSET_MESSAGE
   }
 
   const deps = checkDependencies()
@@ -4159,7 +4242,9 @@ function getSandboxUnavailableReason(): string | undefined {
     const hint =
       platform === 'macos'
         ? 'run /sandbox or /doctor for details'
-        : 'install missing tools (e.g. apt install bubblewrap socat) or run /sandbox for details'
+        : platform === 'windows'
+          ? 'run /sandbox install or claude sandbox status for details'
+          : 'install missing tools (e.g. apt install bubblewrap socat) or run /sandbox for details'
     return `sandbox.enabled is set but dependencies are missing: ${deps.errors.join(', ')} · ${hint}`
   }
 
@@ -4756,6 +4841,15 @@ async function initialize(
       )
       hostState.sandboxWasEnabled = true
       hostState.sandboxStartedOnce = true
+      if (platForInit === 'windows') {
+        windowsSandboxStartStore.markStarted(
+          resolveWindowsBackendChoice().backend,
+          {
+            tlsTerminate: willSandboxTlsTerminate(),
+            localConnections: areWindowsLocalConnectionsOn(),
+          },
+        )
+      }
       finishSandboxInitializeAllowlist(runtimeConfig)
       // densable FZ — record wrap write roots after init (yN)
       recordWrapWriteRoots(runtimeConfig)
@@ -4870,6 +4964,7 @@ async function reset(): Promise<void> {
   hostState.sandboxDisabledThisSession = false
   hostState.initFailureReason = undefined
   hostState.lastSandboxAskCallback = undefined
+  windowsSandboxStartStore.reset()
   setSandboxCommandNetworkListsOffered(false)
 
   if (hasActiveSessionAls()) {
@@ -4894,8 +4989,8 @@ async function reset(): Promise<void> {
   settingsSubscriptionCleanup = undefined
 
   // Clear memoized caches
-  checkDependencies.cache.clear?.()
-  isSupportedPlatform.cache.clear?.()
+  baseCheckDependencies.cache.clear?.()
+  baseIsSupportedPlatform.cache.clear?.()
   initializationPromise = undefined
   proxyOwnerHostStateRef = undefined
 
@@ -5045,6 +5140,23 @@ export interface ISandboxManager {
   refreshConfig(): void
   /** densable zvb — session-scoped host allow → allowedDomains via refreshConfig */
   addSessionAllowedHost(host: string): void
+  /** Official 2.1.331 `hl` — active Windows sandbox backend (`sandboxuser` | `mxc`) */
+  getWindowsSandboxBackend(): WindowsSandboxBackend
+  /** Official 2.1.331 `b1` — true when Windows MXC backend refuses Bash commands */
+  isBashRefusedByMxcBackend(): boolean
+  /** Official 2.1.331 `oH` — latched session-start Bash withholding under MXC */
+  isBashToolWithheldForMxcBackend(): boolean
+  /** Official 2.1.331 — spawn a sandboxed command via the Windows native provider */
+  spawnSandboxedOnWindows(
+    command: string,
+    opts?: Record<string, unknown>,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }>
+  /** Official 2.1.331 — true when TLS termination setting changed since start */
+  needsRestartForTlsTerminate(): boolean
+  /** Official 2.1.331 — true when Windows local connections setting changed since start */
+  needsRestartForLocalConnections(): boolean
+  /** Official 2.1.331 — profile-read security warnings captured for this host */
+  getProfileReadSecurityWarnings(): string[]
   reset(): Promise<void>
 }
 
@@ -5197,6 +5309,86 @@ export function getEnforcementFsWriteConfig(): FsWriteRestrictionConfig {
   return BaseSandboxManager.getFsWriteConfig()
 }
 
+function getWindowsSandboxBackend(): WindowsSandboxBackend {
+  return (
+    windowsSandboxStartStore.get().windowsBackendAtStart ??
+    resolveWindowsBackendChoice().backend
+  )
+}
+
+function isBashRefusedByMxcBackend(): boolean {
+  return (
+    getPlatform() === 'windows' &&
+    getSandboxEnabledSetting() &&
+    isPlatformInEnabledList() &&
+    hasWindowsSandboxSupport() &&
+    getWindowsSandboxBackend() === 'mxc' &&
+    !isWindowsBackendUnset()
+  )
+}
+
+function isBashToolWithheldForMxcBackend(): boolean {
+  const state = windowsSandboxStartStore.get()
+  if (state.bashRefusedByMxcAtStart === undefined) {
+    if (
+      getPlatform() === 'windows' &&
+      getWindowsSandboxNativeProvider() === undefined
+    ) {
+      ensureDefaultWindowsSandboxNativeProvider()
+    }
+    state.bashRefusedByMxcAtStart = isBashRefusedByMxcBackend()
+  }
+  return state.bashRefusedByMxcAtStart
+}
+
+async function spawnSandboxedOnWindows(
+  command: string,
+  opts?: Record<string, unknown>,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  if (isWindowsBackendUnset()) {
+    throw new WindowsSandboxError(
+      'backend_unset',
+      WINDOWS_BACKEND_UNSET_MESSAGE,
+      'spawn',
+    )
+  }
+  const rawArgs = Array.isArray(opts?.args) ? opts.args : undefined
+  if (isWindowsCommandLineTooLong(command, rawArgs)) {
+    throw windowsArgvTooLongError({
+      hasAddedDenies: Boolean(opts?.hasAddedDenies),
+    })
+  }
+  const provider = getWindowsSandboxNativeProvider()
+  if (!provider?.spawnSandboxed) {
+    throw new WindowsSandboxError(
+      'spawn_unavailable',
+      'Windows sandbox native provider does not support spawnSandboxed',
+      'spawn',
+    )
+  }
+  return provider.spawnSandboxed(command, opts)
+}
+
+function needsRestartForTlsTerminate(): boolean {
+  const state = windowsSandboxStartStore.get()
+  if (state.tlsTerminateAtStart === undefined) {
+    return false
+  }
+  return willSandboxTlsTerminate() !== state.tlsTerminateAtStart
+}
+
+function needsRestartForLocalConnections(): boolean {
+  const state = windowsSandboxStartStore.get()
+  if (state.localConnectionsAtStart === undefined) {
+    return false
+  }
+  return areWindowsLocalConnectionsOn() !== state.localConnectionsAtStart
+}
+
+function getProfileReadSecurityWarnings(): string[] {
+  return [...windowsSandboxStartStore.get().profileReadWarnings]
+}
+
 /**
  * Claude CLI sandbox manager - wraps sandbox-runtime with Claude-specific features
  */
@@ -5221,6 +5413,13 @@ export const SandboxManager: ISandboxManager = {
   wrapWithSandbox,
   refreshConfig,
   addSessionAllowedHost,
+  getWindowsSandboxBackend,
+  isBashRefusedByMxcBackend,
+  isBashToolWithheldForMxcBackend,
+  spawnSandboxedOnWindows,
+  needsRestartForTlsTerminate,
+  needsRestartForLocalConnections,
+  getProfileReadSecurityWarnings,
   reset,
   checkDependencies,
 
@@ -5280,4 +5479,57 @@ export type {
   IgnoreViolationsConfig,
 }
 
-export { SandboxViolationStore, SandboxRuntimeConfigSchema }
+export {
+  SandboxViolationStore,
+  SandboxRuntimeConfigSchema,
+  // Official 2.1.331 Windows sandbox exports (15 + registry/helpers/constants)
+  WindowsSandboxError,
+  windowsSandboxStartStore,
+  isWindowsBackendUnset,
+  getWindowsMxcSetAside,
+  getWindowsMxcLastStart,
+  checkWindowsSandboxStatusAsync,
+  installWindowsSandboxAsync,
+  uninstallWindowsSandbox,
+  ensurePersistentWindowsCa,
+  resolveWindowsTlsTerminateCaSource,
+  isInstalledWindowsTlsCaCurrent,
+  forgetWindowsProfileReadAsync,
+  estimateWindowsCommandLineUtf16Length,
+  isWindowsCommandLineTooLong,
+  windowsArgvTooLongError,
+  classifyWindowsSandboxLaunchExit,
+  areWindowsLocalConnectionsOn,
+  registerWindowsSandboxNativeProvider,
+  getWindowsSandboxNativeProvider,
+  hasWindowsMxcSdk,
+  hasWindowsSandboxSupport,
+  resolveWindowsBackendChoice,
+  validateMxcBaseContainerProbe,
+  runWindowsSandboxInstallFlow,
+  willSandboxTlsTerminate,
+  WINDOWS_ARGV_MAX_LENGTH,
+  WINDOWS_SANDBOX_DEFAULT_PROXY_PORT_RANGE,
+  WINDOWS_BACKEND_UNSET_MESSAGE,
+  WINDOWS_MXC_NOTHING_TO_INSTALL_MESSAGE,
+  WINDOWS_MXC_BASH_REFUSAL_MESSAGE,
+}
+
+export type {
+  EnsurePersistentWindowsCaOptions,
+  EnsurePersistentWindowsCaResult,
+  WindowsBackendChoice,
+  WindowsInstallOptions,
+  WindowsMxcLastStart,
+  WindowsMxcProbeResult,
+  WindowsSandboxBackend,
+  WindowsSandboxInstallFlowOptions,
+  WindowsSandboxInstallFlowResult,
+  WindowsSandboxNativeProvider,
+  WindowsSandboxStartState,
+  WindowsSandboxStatus,
+  WindowsSandboxUserStatus,
+  WindowsSandboxWfpStatus,
+  WindowsTlsTerminateCaSource,
+  WindowsUninstallOptions,
+}

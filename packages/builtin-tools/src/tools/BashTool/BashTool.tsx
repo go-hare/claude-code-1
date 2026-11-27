@@ -111,9 +111,15 @@ import { expandPath } from 'src/utils/path.js';
 import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
 import { maybeRecordPluginHint } from 'src/utils/plugins/hintRecommendation.js';
+import { getPlatform } from 'src/utils/platform.js';
 import { exec, startBashSnapshotHeadStart } from 'src/utils/Shell.js';
 import type { ExecResult } from 'src/utils/ShellCommand.js';
-import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js';
+import {
+  isWindowsBackendUnset,
+  SandboxManager,
+  WINDOWS_BACKEND_UNSET_MESSAGE,
+  WINDOWS_MXC_BASH_REFUSAL_MESSAGE,
+} from 'src/utils/sandbox/sandbox-adapter.js';
 import { semanticBoolean } from 'src/utils/semanticBoolean.js';
 import { semanticNumber } from 'src/utils/semanticNumber.js';
 import { EndTruncatingAccumulator } from 'src/utils/stringUtils.js';
@@ -186,6 +192,28 @@ import {
 } from './utils.js';
 
 const EOL = '\n';
+
+/**
+ * Official 2.1.331 Windows sandbox refusal checks for BashTool:
+ * - Refuses Bash under the Windows MXC backend (PowerShell only).
+ * - Refuses Bash when Windows sandbox is enabled in strict mode
+ *   (`!areUnsandboxedCommandsAllowed()`) and `sandbox.windows.backend` is unset.
+ */
+export function getWindowsBashSandboxRefusal(): string | null {
+  if (SandboxManager.isBashRefusedByMxcBackend()) {
+    return WINDOWS_MXC_BASH_REFUSAL_MESSAGE;
+  }
+  if (
+    getPlatform() === 'windows' &&
+    SandboxManager.isSandboxEnabledInSettings() &&
+    SandboxManager.isPlatformInEnabledList() &&
+    isWindowsBackendUnset() &&
+    !SandboxManager.areUnsandboxedCommandsAllowed()
+  ) {
+    return WINDOWS_BACKEND_UNSET_MESSAGE;
+  }
+  return null;
+}
 
 // Progress display constants
 const PROGRESS_THRESHOLD_MS = 2000; // Show progress after 2 seconds
@@ -1492,6 +1520,10 @@ export const BashTool = Object.assign(
           // densable BT() && dK(n).requested — named host is not forwarded (errorCode 11)
           const hostRefusal = remoteHostForwardRefusal(input, BASH_TOOL_NAME);
           if (hostRefusal) return { ...hostRefusal, errorCode: 11 };
+          const windowsRefusal = getWindowsBashSandboxRefusal();
+          if (windowsRefusal !== null) {
+            return { result: false, message: windowsRefusal, errorCode: 14 };
+          }
           const policyRefusal = getSandboxPolicyRefusal(shouldUseSandbox(input), input.command, false, 'bash');
           if (policyRefusal !== null) {
             return { result: false, message: policyRefusal, errorCode: 14 };
@@ -1590,6 +1622,10 @@ export const BashTool = Object.assign(
             keepInSandboxSinceCheck && effectiveUseSandbox && !shouldUseSandbox(input) && innerCall !== true
               ? KEPT_IN_SANDBOX_SINCE_CHECK_NOTE
               : undefined;
+          const windowsRefusal = getWindowsBashSandboxRefusal();
+          if (windowsRefusal !== null) {
+            throw new SandboxPolicyRefusalError(windowsRefusal);
+          }
           const policyRefusal = getSandboxPolicyRefusal(effectiveUseSandbox, input.command, false, 'bash');
           if (policyRefusal !== null) {
             throw new SandboxPolicyRefusalError(policyRefusal);

@@ -1,0 +1,18 @@
+[package]
+name = "win-sandbox-native"
+version = "1.0.0"
+edition = "2021"
+description = "Native Win32 sandbox helper (srt-win) for Claude Code"
+publish = false
+
+[[bin]]
+name = "srt-win"
+path = "src-rust/main.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"

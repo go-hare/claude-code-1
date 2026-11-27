@@ -1,0 +1,12 @@
+{
+  "name": "win-sandbox-native",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build:rust": "cargo build --release --manifest-path Cargo.toml",
+    "test:rust": "cargo test --manifest-path Cargo.toml"
+  }
+}

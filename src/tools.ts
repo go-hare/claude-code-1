@@ -208,6 +208,7 @@ import {
 } from './utils/restricted.js'
 import { hasEmbeddedSearchTools } from './utils/embeddedTools.js'
 import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
+import { SandboxManager } from './utils/sandbox/sandbox-adapter.js'
 import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
 import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
 import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.js'
@@ -275,7 +276,7 @@ export function getToolsForDefaultPreset(): string[] {
 export function getAllBaseTools(): Tools {
   return [
     AgentTool,
-    BashTool,
+    ...(SandboxManager.isBashToolWithheldForMxcBackend() ? [] : [BashTool]),
     // Ant-native builds have bfs/ugrep embedded in the bun binary (same ARGV0
     // trick as ripgrep). When available, find/grep in Claude's shell are aliased
     // to these fast tools, so the dedicated Glob/Grep tools are unnecessary.
@@ -493,7 +494,11 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
       }
       return filterToolsByDenyRules(replSimple, permissionContext)
     }
-    const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
+    const simpleTools: Tool[] = [
+      ...(SandboxManager.isBashToolWithheldForMxcBackend() ? [] : [BashTool]),
+      FileReadTool,
+      FileEditTool,
+    ]
     // When coordinator mode is also active, include AgentTool and TaskStopTool
     // so the coordinator gets Task+TaskStop (via useMergedTools filtering) and
     // workers get Bash/Read/Edit (via filterToolsForAgent filtering).

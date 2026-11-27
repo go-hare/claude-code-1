@@ -60,20 +60,18 @@ import {
 } from 'src/utils/monitorWsSpawn.js';
 import { leftoverPolicyLimitsDp } from 'src/cli/leftoverTulip.js';
 import { getPlatform } from 'src/utils/platform.js';
-import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js';
+import {
+  isWindowsBackendUnset,
+  SandboxManager,
+  WINDOWS_BACKEND_UNSET_MESSAGE,
+  WINDOWS_MXC_BASH_REFUSAL_MESSAGE,
+} from 'src/utils/sandbox/sandbox-adapter.js';
 import { findGitBashPathOrNull } from 'src/utils/windowsPaths.js';
 
 const MONITOR_TOOL_NAME = 'Monitor';
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const WILDCARD_RULE_CONTENT_RE = /^[\s*]+$/;
-const MXC_BASH_REFUSAL_MESSAGE =
-  'Bash commands cannot run under the current Windows MXC sandbox backend. Use PowerShell instead.';
-
-type OptionalMxcSandboxManager = typeof SandboxManager & {
-  isBashToolWithheldForMxcBackend?: () => boolean;
-  isBashRefusedByMxcBackend?: () => boolean;
-};
 
 /**
  * Official 2.1.331 `sc()` (@312918900) / `Je.isEnabled()` (@326869100):
@@ -83,17 +81,25 @@ type OptionalMxcSandboxManager = typeof SandboxManager & {
 export function isMonitorPlatformEnabled(
   platform: string = getPlatform(),
   gitBashPath: string | null = platform === 'windows' ? findGitBashPathOrNull() : '',
-  bashWithheldForMxc: boolean = (SandboxManager as OptionalMxcSandboxManager).isBashToolWithheldForMxcBackend?.() ===
-    true,
+  bashWithheldForMxc: boolean = SandboxManager.isBashToolWithheldForMxcBackend(),
 ): boolean {
   if (platform !== 'windows') return true;
   if (bashWithheldForMxc) return false;
   return gitBashPath !== null;
 }
 
-function getMonitorCommandSandboxRefusal(useSandbox: boolean, command: string): string | null {
-  if ((SandboxManager as OptionalMxcSandboxManager).isBashRefusedByMxcBackend?.() === true) {
-    return MXC_BASH_REFUSAL_MESSAGE;
+export function getMonitorCommandSandboxRefusal(useSandbox: boolean, command: string): string | null {
+  if (SandboxManager.isBashRefusedByMxcBackend()) {
+    return WINDOWS_MXC_BASH_REFUSAL_MESSAGE;
+  }
+  if (
+    getPlatform() === 'windows' &&
+    SandboxManager.isSandboxEnabledInSettings() &&
+    SandboxManager.isPlatformInEnabledList() &&
+    isWindowsBackendUnset() &&
+    !SandboxManager.areUnsandboxedCommandsAllowed()
+  ) {
+    return WINDOWS_BACKEND_UNSET_MESSAGE;
   }
   return getSandboxPolicyRefusal(useSandbox, command, false, 'bash');
 }
